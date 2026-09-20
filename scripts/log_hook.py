@@ -5,9 +5,9 @@ Reads JSON from stdin, normalizes to common format, appends to .ai-log/session.j
 """
 import json
 import os
-import sys
 import subprocess
-from datetime import datetime, timezone, timedelta
+import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 VN_TZ = timezone(timedelta(hours=7))
@@ -145,11 +145,11 @@ def normalize(data: dict, tool: str) -> dict | None:
     # this only checked `prompt`, which dropped Claude Bash/Edit events (their
     # tool_input has `command` / `file_path`, not `prompt` or `content`) and
     # any Gemini/Cursor/Copilot turn that carried context but no plain prompt.
-    _PAYLOAD_KEYS = ("prompt", "tool_input", "response_summary",
-                     "tool_response", "tool_args", "files_context")
-    _LIFECYCLE_EVENTS = ("Stop", "stop", "SessionEnd", "sessionEnd", "AfterModel")
-    has_payload = any(base.get(k) for k in _PAYLOAD_KEYS)
-    if not has_payload and event not in _LIFECYCLE_EVENTS:
+    payload_keys = ("prompt", "tool_input", "response_summary",
+                    "tool_response", "tool_args", "files_context")
+    lifecycle_events = ("Stop", "stop", "SessionEnd", "sessionEnd", "AfterModel")
+    has_payload = any(base.get(k) for k in payload_keys)
+    if not has_payload and event not in lifecycle_events:
         return None
 
     return base
@@ -180,8 +180,12 @@ def main():
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    # Output valid JSON (required by some tools like Gemini)
-    print(json.dumps({"status": "logged"}))
+    # Codex kiểm tra stdout theo schema riêng của từng hook. JSON tùy ý như
+    # {"status": "logged"} tuy hợp lệ về cú pháp nhưng sẽ làm hook bị đánh
+    # dấu lỗi. Exit 0 và không có output là contract thành công của Codex.
+    # Các tool khác vẫn nhận JSON xác nhận để giữ tương thích hiện tại.
+    if tool != "codex":
+        print(json.dumps({"status": "logged"}))
 
 
 if __name__ == "__main__":
