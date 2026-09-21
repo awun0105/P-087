@@ -29,6 +29,13 @@ from pathlib import Path
 
 VN_TZ = timezone(timedelta(hours=7))
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 
 def git(cmd):
     try:
