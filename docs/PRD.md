@@ -7,16 +7,26 @@
 | Mã dự án | RAV-01 |
 | Tên sản phẩm | Real2Sim Studio |
 | Phạm vi bản phát hành | Warehouse MVP |
-| Phiên bản tài liệu | v1.6 |
+| Phiên bản tài liệu | v1.9 |
 | Trạng thái | Bản nháp để rà soát và phê duyệt (Draft for Review) |
-| Ngày cập nhật | 20/09/2026 |
+| Ngày cập nhật | 22/09/2026 |
 | Thời gian thực hiện dự kiến | 4 tuần |
 | Người dùng chính | Kỹ sư mô phỏng (Simulation Engineer) |
 | Miền ứng dụng | Kho trong nhà, robot di động tự hành (Indoor Warehouse AMR) |
 | Trình mô phỏng mục tiêu | NVIDIA Isaac Sim |
-| Tài liệu tiền nhiệm | `PRD.md` — phiên bản cũ, chỉ dùng để tham chiếu |
+| Tài liệu tiền nhiệm | PRD v1.8 |
 
-### 0.1 Chủ sở hữu và người phê duyệt (Owners and Approvers)
+### 0.1 Lịch sử thay đổi (Change Log)
+
+| Phiên bản | Ngày | Thay đổi chính |
+|---|---|---|
+| v1.4 | Trước 21/09/2026 | Bản mô tả đầy đủ các luồng RGB, LiDAR, chỉnh sửa scene và Isaac Sim |
+| v1.5 | 21/09/2026 | Chuẩn hóa thành PRD; bổ sung goals, acceptance, NFR, risk và traceability |
+| v1.7 | 21/09/2026 | Clarify reconstructed SceneObject deletion; separate deletion from background completion; align candidate lifecycle |
+| v1.8 | 22/09/2026 | Clarify P0 Minimal Correction, Candidate checksum lifecycle, Privacy Gate, LiDAR scope, evaluation/runtime boundary và advanced queue scope |
+| v1.9 | 22/09/2026 | Clarify reusable LiDAR branch, P0 LiDAR Contribution Evidence qua RGB + Registered LiDAR integration và P1 LiDAR-only product configuration |
+
+### 0.2 Chủ sở hữu và người phê duyệt (Owners and Approvers)
 
 Các tên cụ thể phải được nhóm điền trước khi chuyển tài liệu sang trạng thái `APPROVED`.
 
@@ -27,14 +37,6 @@ Các tên cụ thể phải được nhóm điền trước khi chuyển tài li
 | Chủ trì kiểm thử (QA/Validation Lead) | Chốt bộ dữ liệu đánh giá và bằng chứng nghiệm thu | Chưa chỉ định |
 | Người phê duyệt phát hành (Release Approver) | Duyệt scene và bản phát hành MVP | Chưa chỉ định |
 
-### 0.2 Lịch sử thay đổi (Change Log)
-
-| Phiên bản | Ngày | Thay đổi chính |
-|---|---|---|
-| v1.4 | Trước 20/09/2026 | Bản mô tả đầy đủ các luồng RGB, LiDAR, chỉnh sửa scene và Isaac Sim |
-| v1.5 | 20/09/2026 | Chuẩn hóa thành PRD: thu gọn phạm vi, bổ sung mục tiêu đo được, hành trình người dùng, tiêu chí nghiệm thu, yêu cầu phi chức năng, rủi ro và bảng truy vết |
-| v1.6 | 20/09/2026 | Sửa vòng validation–approval, bổ sung Web Studio và User Stories, siết privacy, chuẩn hóa threshold và phân tầng metric đánh giá |
-
 ### 0.3 Quy ước mức độ yêu cầu (Requirement Language)
 
 - **Bắt buộc (MUST):** điều kiện chặn phát hành (release blocker). Thiếu điều kiện này thì MVP không được coi là hoàn thành.
@@ -43,6 +45,31 @@ Các tên cụ thể phải được nhóm điền trước khi chuyển tài li
 - **Ngoài phạm vi (OUT):** không được dùng để đánh giá hoàn thành MVP này.
 
 Các thuật ngữ tiếng Anh được đặt trong ngoặc ở lần xuất hiện đầu tiên. Tên lớp, tên trạng thái, định dạng tệp và thuật ngữ đã trở thành chuẩn kỹ thuật có thể được giữ nguyên bằng tiếng Anh.
+
+### 0.4 Document Role and Cross-document Coordination
+
+Bộ tài liệu của project có thể được mở rộng theo thời gian.
+Mỗi tài liệu phải khai báo rõ phạm vi mà nó chịu trách nhiệm và các contract upstream mà nó phải tuân thủ.
+
+Phân công hiện tại:
+
+- PRD:
+  định nghĩa product scope, P0/P1/P2, MUST/SHOULD/MAY, user-visible behavior và acceptance criteria.
+- DATASET_PLAYBOOK:
+  định nghĩa dataset preparation, dataset-specific preprocessing, leakage control và evaluation methodology.
+- INTEGRATION_PLAYBOOK:
+  định nghĩa technical baseline, stage implementation, artifact boundary và lựa chọn công cụ/repository.
+- BRIEF:
+  giải thích problem, persona, value proposition và high-level product flow.
+
+Quy tắc xử lý khác biệt:
+
+1. Một tài liệu không được thay đổi contract nằm ngoài phạm vi mà nó sở hữu.
+2. Technical implementation không được hạ hoặc mở rộng product requirement mà không cập nhật PRD.
+3. Dataset/evaluation protocol không được âm thầm thay đổi Product Input Contract.
+4. High-level shorthand trong BRIEF không được dùng để suy ra thêm P0 requirement khi PRD đã quy định cụ thể hơn.
+5. Nếu hai tài liệu có nội dung thực sự mâu thuẫn, phải sửa tài liệu; coding agent không được tự chọn một bên và tiếp tục implementation.
+6. Document mới trong tương lai phải khai báo tối thiểu: Document Role, Scope, Upstream Constraints, Status và Related Documents.
 
 ---
 
@@ -73,7 +100,9 @@ Nút thắt chính không chỉ là tạo ra một scene nhìn giống môi trư
 
 ### 1.2 Tuyên bố sản phẩm (Product Statement)
 
-Real2Sim Studio là Web App có người tham gia kiểm duyệt (Human-in-the-Loop), giúp kỹ sư chuyển dữ liệu RGB và/hoặc LiDAR của một kho trong nhà thành scene có thể xem và chỉnh sửa trên browser, có collider và có thể kiểm tra trong NVIDIA Isaac Sim.
+Real2Sim Studio là Web App có người tham gia kiểm duyệt (Human-in-the-Loop), giúp kỹ sư chuyển dữ liệu quan sát của một kho trong nhà thành scene có thể xem và chỉnh sửa trên browser, có collider và có thể kiểm tra trong NVIDIA Isaac Sim.
+
+Trong P0, full product/release workflow được chứng minh bằng moving-camera RGB. Registered/fused LiDAR có thể tham gia như geometry input trong RGB + Registered LiDAR Contribution Evidence. Full standalone LiDAR-only product configuration thuộc P1.
 
 Hệ thống duy trì ba lớp biểu diễn có liên kết với nhau:
 
@@ -159,7 +188,7 @@ MVP không nhằm:
 
 **Công việc chính:**
 
-- tạo job từ video RGB hoặc dữ liệu LiDAR hợp lệ;
+- trong P0, tạo Primary RGB Job và bổ sung registered/fused LiDAR cho contribution evidence trên cùng scene/traversal; standalone LiDAR-only job thuộc P1;
 - xem trạng thái reconstruction;
 - xác nhận tỉ lệ mét;
 - đặt tên, gộp, bỏ qua hoặc sửa candidate object;
@@ -208,7 +237,7 @@ Nếu Reviewer chỉnh sửa scene, thay đổi đó phải tạo một revision
 Là một Kỹ sư mô phỏng, tôi muốn tải lên video RGB quay bằng camera di chuyển để có thể tái dựng một môi trường kho hiện có.
 
 **US-02 — Đề xuất đối tượng ứng viên**
-Là một Kỹ sư mô phỏng, tôi muốn hệ thống đề xuất các `SceneObject` ứng viên để không phải phân đoạn thủ công mọi vật thể.
+Là một Kỹ sư mô phỏng, tôi muốn hệ thống đề xuất các Candidate Object Identities để không phải phân đoạn thủ công mọi vật thể.
 
 **US-03 — Chỉnh sửa đồng bộ**
 Là một Kỹ sư mô phỏng, tôi muốn di chuyển một object trong khi Visual, Geometry và Collider giữ cùng transform để có thể tạo một kịch bản mô phỏng đã thay đổi.
@@ -249,19 +278,26 @@ Video RGB từ camera di chuyển
 
 Đây là luồng P0 và là cổng phát hành chính.
 
-### 4.2 Bằng chứng LiDAR bắt buộc nhưng có giới hạn (Scoped LiDAR Proof)
+### 4.2 Bằng chứng đóng góp của LiDAR (LiDAR Contribution Evidence)
 
-MVP phải chứng minh được quy trình sau trên ít nhất một scene hoặc một khu vực con của scene:
+MVP phải chứng minh trên ít nhất một scene RGB + Registered LiDAR, hoặc một khu vực con của scene, rằng point cloud LiDAR đã đăng ký hoặc hợp nhất được hệ thống sử dụng thực sự trong pipeline.
 
 ```text
-Point cloud LiDAR đã đăng ký
-    → Kiểm tra format và đơn vị
-    → Tạo hoặc cập nhật Geometry Representation
-    → Dùng geometry đó trong scene có collider hoặc validation
-    → Ghi nguồn LiDAR trong manifest
+Registered/Fused LiDAR
+    → Kiểm tra format, đơn vị và hệ tọa độ
+    → Tạo LiDARGeometryArtifact có nguồn gốc LiDAR
+    → Căn chỉnh với RGB artifacts của cùng scene/traversal
+    → Đưa vào canonical/unified scene
+    → Dùng geometry đó trong ít nhất một collider,
+      scene geometry hoặc simulator validation
+    → Ghi artifact, checksum, transform và downstream consumer trong manifest
 ```
 
-Luồng này không bắt buộc đạt đầy đủ tính năng chỉnh sửa và hình ảnh như luồng RGB. Căn chỉnh RGB–LiDAR tự động không thuộc MVP.
+RGB Visual, camera pose hoặc RGB-derived Geometry dùng cho evidence run có thể được reuse từ Primary RGB Product Path mà không cần chạy lại toàn bộ RGB reconstruction. Các artifact được reuse bắt buộc phải thuộc cùng scene/traversal với LiDAR, đã immutable/checksummed và truy vết được qua manifest; không được ghép RGB artifact của một scene với LiDAR của scene khác.
+
+Yêu cầu này chứng minh LiDAR là một geometry source thực sự, không phải chỉ được upload rồi bỏ qua. Evidence run không bắt buộc đạt full object correction, editing, review hoặc release parity với Primary RGB Product Path và không tạo ra một P0 LiDAR-only product path riêng. Căn chỉnh RGB–LiDAR tự động không thuộc MVP.
+
+Full LiDAR-only product configuration thuộc P1.
 
 ### 4.3 Mức ưu tiên (Priorities)
 
@@ -275,21 +311,29 @@ Luồng này không bắt buộc đạt đầy đủ tính năng chỉnh sửa v
 - SceneObject giữ đồng bộ Visual, Geometry và Physics;
 - collider có thể xem và chỉnh;
 - versioning và cổng duyệt của con người;
+- thêm primitive/asset cơ bản;
+- xóa user-added object;
+- xóa/vô hiệu hóa confirmed reconstructed SceneObject;
+- Geometry + Collider của object bị xóa không còn tham gia active scene/simulation;
+- Visual segment bị hide/remove khi đã tách được;
 - xuất candidate OpenUSD, tải và validation thành công trong Isaac Sim trước khi review;
 - chỉ đóng dấu bản phát hành chính thức sau khi validation đạt và Reviewer approve;
 - kiểm tra collision và Start–Goal path feasibility;
-- bằng chứng LiDAR có giới hạn tại mục 4.2;
+- bằng chứng đóng góp của LiDAR thông qua RGB + Registered LiDAR integration theo mục 4.2;
 - manifest và báo cáo validation của bản phát hành.
 
 #### P1 — Nên có (Important Enhancements)
 
-- luồng LiDAR-only hoàn chỉnh;
-- gộp/tách candidate thuận tiện hơn;
-- hỗ trợ căn chỉnh RGB–LiDAR bán tự động;
-- nhiều loại collider hơn;
-- trực quan hóa chất lượng reconstruction;
-- tác tử giải thích kết quả audit (Scene Audit Agent);
-- nhiều quy tắc riêng cho warehouse hơn.
+- background recovery từ các multiview observation khác;
+- simple plane/surface completion;
+- optional visual inpainting sau Delete;
+- cảnh báo che khuất vật lý/hình học;
+- multi-job batch submission;
+- advanced queue scheduling;
+- configurable worker concurrency;
+- priority scheduling;
+- full LiDAR-only geometry-first product configuration từ registered/fused LiDAR, bao gồm scene workflow, collider, editing và OpenUSD/Isaac integration phù hợp với use case LiDAR-only;
+- tích hợp pipeline tự động (API trigger).
 
 #### P2 — Tương lai (Future Work)
 
@@ -339,16 +383,26 @@ Hệ thống nhận:
 
 Hai nguồn phải mô tả cùng một môi trường và có đủ vùng không gian chồng lặp. MVP có thể yêu cầu dữ liệu đã được căn chỉnh trước. Nếu chưa căn chỉnh, hệ thống phải từ chối hoặc đánh dấu scene chưa đủ điều kiện fusion; không được âm thầm ghép hai nguồn sai hệ tọa độ.
 
-### 5.3 Luồng chỉ có LiDAR (LiDAR-only Path)
+### 5.3 Registered LiDAR Input và LiDAR-only Product Configuration
 
-MVP bắt buộc ingest được ít nhất một point cloud LiDAR định dạng PLY hoặc PCD để thực hiện bằng chứng tại mục 4.2.
+Registered/fused LiDAR là một geometry input của hệ thống. Về kiến trúc, input này được xử lý bởi một Registered LiDAR Branch dùng chung; contract kỹ thuật được quy định trong `INTEGRATION_PLAYBOOK.md`.
 
-Luồng LiDAR-only đầy đủ chỉ là P1 và không bắt buộc có:
+Trong P0, branch này được kiểm chứng thông qua LiDAR Contribution Evidence tại mục 4.2 trong một RGB + Registered LiDAR integration run. P0 không yêu cầu một execution riêng với RGB vắng mặt.
+
+Khi RGB và LiDAR được dùng cùng nhau:
+
+- RGB cung cấp Visual Representation và evidence dựa trên ảnh;
+- LiDAR cung cấp `LiDARGeometryArtifact` và thông tin metric;
+- hai modality phải thuộc cùng scene/traversal và được căn chỉnh về cùng canonical scene space trước khi được composition và sử dụng downstream.
+
+Full LiDAR-only product configuration thuộc P1. Configuration đó có thể dùng registered/fused LiDAR làm geometry source mà không có RGB Visual Representation và không bắt buộc có:
 
 - hình ảnh photorealistic;
 - metric đánh giá RGB;
 - segmentation dựa trên ảnh;
-- tính năng tương đương hoàn toàn với luồng RGB.
+- feature parity với RGB-based visual reconstruction.
+
+Raw LiDAR scan sequences, LiDAR odometry và LiDAR SLAM vẫn nằm ngoài Input Contract của MVP.
 
 ### 5.4 Dữ liệu không được hỗ trợ trong MVP (Unsupported Inputs)
 
@@ -371,16 +425,19 @@ Luồng LiDAR-only đầy đủ chỉ là P1 và không bắt buộc có:
 4. Nếu input hợp lệ, hệ thống tạo job bất đồng bộ và hiển thị tiến độ.
 5. Hệ thống tạo Visual, Geometry và báo cáo sức khỏe reconstruction.
 6. Editor xác nhận metric scale bằng dữ liệu cảm biến hợp lệ hoặc bằng khoảng cách tham chiếu.
-7. Hệ thống tạo candidate object trước khi Editor bắt đầu sửa thủ công.
-8. Editor đặt tên, xác nhận, gộp, bỏ qua hoặc tạo vùng sửa cho candidate.
-9. Hệ thống tạo collider; Editor xem và điều chỉnh khi cần.
-10. Editor chọn robot footprint và các cặp Start–Goal cần kiểm tra.
-11. Hệ thống tạo candidate OpenUSD và manifest ứng viên từ revision hiện tại.
-12. Hệ thống tải candidate vào Isaac Sim và chạy deterministic validation.
-13. Candidate đạt các validation bắt buộc được chuyển sang `READY_FOR_REVIEW`.
-14. Reviewer xem input, metric, geometry, collider, cảnh báo, candidate package và kết quả validation.
-15. Reviewer duyệt scene hoặc từ chối kèm lý do.
-16. Khi được duyệt, hệ thống đóng dấu chính candidate đã kiểm tra thành bản phát hành bất biến, lưu checksum, manifest và báo cáo validation.
+7. Hệ thống tạo candidate object identities trước khi Editor bắt đầu sửa thủ công.
+8. Human Object Confirmation: Editor đặt tên, xác nhận, gộp, bỏ qua cho candidate.
+9. Scene Decomposition: Hệ thống phân rã thành Environment và Independent SceneObjects.
+10. Hệ thống tạo collider; Editor xem và điều chỉnh khi cần.
+11. Editor Add / Move / Rotate / Delete SceneObject để tạo layout revision cần kiểm thử.
+12. Hệ thống cập nhật Scene IR cho revision hiện tại.
+13. Editor chọn robot footprint và các cặp Start–Goal cần kiểm tra.
+14. Hệ thống tạo candidate OpenUSD và manifest ứng viên từ revision hiện tại.
+15. Hệ thống tải candidate vào Isaac Sim và chạy deterministic validation.
+16. Candidate đạt các validation bắt buộc được chuyển sang `READY_FOR_REVIEW`.
+17. Reviewer xem input, metric, geometry, collider, cảnh báo, candidate package và kết quả validation.
+18. Reviewer duyệt scene hoặc từ chối kèm lý do.
+19. Khi được duyệt, hệ thống đóng dấu chính candidate đã kiểm tra thành bản phát hành bất biến, lưu checksum, manifest và báo cáo validation.
 
 ### 6.2 Luồng từ chối và sửa lại (Rejection and Revision Flow)
 
@@ -459,6 +516,17 @@ Hệ thống phải:
 - cho phép thử lại theo chính sách đã cấu hình;
 - không báo `SUCCEEDED` khi artifact bắt buộc của stage bị thiếu.
 
+Trong P0, yêu cầu trên chỉ bao gồm basic asynchronous job execution: mỗi heavy job được đưa qua worker/queue, có trạng thái, progress, failure recording và retry theo policy.
+
+P0 không yêu cầu:
+
+- multi-job batch submission;
+- priority scheduling;
+- advanced concurrency control;
+- multi-tenant queue scheduling.
+
+Các khả năng trên thuộc P1.
+
 ### FR-04 — Ước lượng camera và tái dựng RGB (Camera Estimation and RGB Reconstruction)
 
 Với video RGB hợp lệ, hệ thống bắt buộc:
@@ -482,6 +550,8 @@ Với point cloud hợp lệ, hệ thống bắt buộc:
 - sử dụng artifact LiDAR trong ít nhất một collider, scene geometry hoặc phép validation của bằng chứng MVP.
 
 Việc chỉ nhận tệp rồi không dùng vào scene không được tính là hoàn thành FR-05.
+
+Trong P0, FR-05 được nghiệm thu bằng RGB + Registered LiDAR integration run tại mục 4.2. Requirement này không yêu cầu một execution riêng với RGB vắng mặt và cũng không yêu cầu mixed configuration đi qua toàn bộ Object/Edit/Review/Release workflow của Primary RGB Product Path.
 
 ### FR-06 — Tỉ lệ mét và căn chỉnh (Metric Scale and Alignment)
 
@@ -518,6 +588,26 @@ Người dùng bắt buộc có thể:
 - gộp candidate;
 - tạo correction tối thiểu cho object bị thiếu hoặc grouping sai.
 
+Trong P0, Minimal Correction được giới hạn ở:
+
+1. Merge:
+   gộp hai hoặc nhiều candidate thành một object identity.
+
+2. Create Missing Object:
+   người dùng có thể tạo thủ công một candidate/object identity bị hệ thống bỏ sót.
+
+3. Reassign:
+   người dùng có thể gán lại một mask, geometry selection hoặc region đã chọn
+   từ candidate/object này sang candidate/object khác.
+
+P0 không bắt buộc:
+- arbitrary instance split;
+- full interactive re-segmentation;
+- semantic re-classification tự động;
+- general 3D re-segmentation.
+
+Các khả năng trên thuộc P1/P2.
+
 Tách nâng cao (advanced split) và semantic naming tự động là P1/P2.
 
 ### FR-08 — SceneObject và chỉnh sửa đồng bộ (SceneObject and Synchronized Editing)
@@ -540,9 +630,21 @@ MVP bắt buộc hỗ trợ:
 - ẩn/hiện;
 - xem và chỉnh collider;
 - thêm object cơ bản từ asset hoặc primitive đã hỗ trợ;
-- xóa object do người dùng thêm.
+- xóa object do người dùng thêm;
+- xóa hoặc vô hiệu hóa một reconstructed `SceneObject` đã được xác nhận khỏi revision hiện tại.
 
-Khi transform thay đổi, `Visual`, `Geometry` và `Physics/Collider` phải tham chiếu cùng canonical transform của `SceneObject`. Kiểm thử so sánh translation và rotation theo epsilon số học được khóa trong cấu hình test; đây là invariant của kiến trúc, không phải sai số dự đoán được phép chấp nhận. Xóa hoàn hảo một object đã nằm trong reconstruction và phục hồi vùng nền bị che không thuộc MVP.
+Khi một reconstructed `SceneObject` bị xóa:
+- object không còn tồn tại trong Scene IR của revision hiện tại;
+- Geometry Representation tương ứng phải bị loại hoặc vô hiệu hóa khỏi scene;
+- Physics Representation / Collider tương ứng phải bị loại bỏ;
+- object không còn tham gia collision hoặc path validation;
+- Visual Representation tương ứng phải được ẩn hoặc loại bỏ khi visual segment của object đã được tách riêng.
+
+MVP không bắt buộc tái tạo photorealistic hoàn hảo phần background từng bị object che khuất. 
+
+Một `SceneObject` đã xác nhận phải có representation đủ tách biệt để có thể được transform hoặc loại khỏi active scene mà không yêu cầu chạy lại toàn bộ reconstruction từ đầu. General photorealistic background restoration và generative 3D completion cho vùng chưa từng được quan sát không thuộc P0. PRD không quy định việc tách này được thực hiện bằng Gaussian grouping, mesh labels hay một backend cụ thể.
+
+Khi transform thay đổi, `Visual`, `Geometry` và `Physics/Collider` phải tham chiếu cùng canonical transform của `SceneObject`. Kiểm thử so sánh translation và rotation theo epsilon số học được khóa trong cấu hình test; đây là invariant của kiến trúc, không phải sai số dự đoán được phép chấp nhận. 
 
 ### FR-09 — Tạo và kiểm tra collider (Collider Generation and Inspection)
 
@@ -598,7 +700,35 @@ Candidate package phải bảo toàn:
 - geometry;
 - collider;
 - asset reference;
-- manifest và báo cáo validation.
+- candidate manifest;
+- checksum của toàn bộ candidate package.
+
+Validation Report không nằm bên trong immutable Candidate Package trước validation.
+Validation Report phải tham chiếu tới checksum của Candidate Package đã được kiểm tra.
+
+Lifecycle bắt buộc:
+
+```text
+CandidatePackage + CandidateChecksum
+    ↓
+Deterministic Validation
+    ↓
+ValidationReport(candidate_checksum)
+    ↓
+READY_FOR_REVIEW
+    ↓
+Human Review
+    ↓
+APPROVED
+    ↓
+ReleaseManifest(
+    candidate_checksum,
+    validation_report_checksum,
+    approval_record
+)
+    ↓
+RELEASED
+```
 
 Hệ thống bắt buộc thực hiện:
 
@@ -746,9 +876,21 @@ Với point cloud PLY/PCD đã đăng ký:
 - manifest chỉ ra rõ artifact và bước sử dụng;
 - không chấp nhận trường hợp chỉ tải tệp rồi bỏ qua.
 
+AC-04 được chứng minh bằng RGB + Registered LiDAR integration run. RGB artifacts được reuse phải thuộc cùng scene/traversal, đã immutable/checksummed và truy vết được. Manifest phải chứng minh `LiDARGeometryArtifact` đã đi qua alignment/composition và được một downstream consumer thực sự sử dụng.
+
+AC-04 không yêu cầu một LiDAR-only execution độc lập, không yêu cầu chạy lại toàn bộ RGB reconstruction và không yêu cầu mixed configuration đạt feature parity với Primary RGB Product Path.
+
 ### AC-05 — Candidate object và correction
 
 Trên scene RGB đã khóa, candidate được tạo trước thao tác segmentation thủ công. Reviewer có thể xác định object nào được tạo tự động, object nào được sửa, object nào bị bỏ qua. Độ phủ được báo cáo theo SM-05.
+
+Trên bộ test phải có ít nhất một case:
+
+- candidate bị thiếu; hoặc
+- candidate bị grouping sai.
+
+Editor phải sửa được case đó bằng P0 Minimal Correction mà không cần
+chạy lại toàn bộ reconstruction pipeline.
 
 ### AC-06 — Đồng bộ chỉnh sửa
 
@@ -782,6 +924,7 @@ Khi chủ động tạo một lỗi đã biết ở một stage thử nghiệm, 
 
 Từ một bản phát hành đã duyệt, thành viên không trực tiếp tạo scene phải dùng manifest để xác định đúng input, cấu hình, phần mềm, scene version, artifact và kết quả validation.
 
+
 ### AC-11 — Browser 3D Viewer
 
 Trên một browser desktop được hỗ trợ, Editor phải có thể:
@@ -794,6 +937,24 @@ Trên một browser desktop được hỗ trợ, Editor phải có thể:
 - hoàn thành các thao tác trên mà không cần mở Blender hoặc Isaac Sim GUI.
 
 ---
+
+### AC-12 — Thêm, chỉnh sửa và xóa SceneObject
+
+Trên scene demo đã khóa:
+
+1. Editor thêm một obstacle cơ bản vào vùng đi lại.
+2. Obstacle có Geometry và Collider hợp lệ.
+3. Editor có thể move/rotate obstacle.
+4. Path validation phải phản ánh layout mới.
+5. Editor có thể xóa object vừa thêm.
+
+Với ít nhất một reconstructed SceneObject đã được tách thành object độc lập:
+
+1. Editor chọn Delete.
+2. Object bị loại khỏi Scene IR của revision mới.
+3. Geometry và Collider của object không còn tham gia simulation.
+4. Path/collision validation sử dụng scene sau deletion.
+5. Nếu Visual background chưa thể phục hồi hoàn chỉnh, UI phải thể hiện rõ giới hạn này; việc đó không làm deletion logic thất bại.
 
 ## 10. Kế hoạch đánh giá (Evaluation Plan)
 
@@ -875,12 +1036,11 @@ Ngoài bốn tầng trên, registered-frame ratio, per-stage runtime, GPU-hours,
 
 1. Ai là Product Owner, Technical Lead, QA Lead và Release Approver?
 2. Phiên bản Isaac Sim, CUDA, driver và cấu hình GPU nào được khóa?
-3. Bộ dữ liệu demo chính là scene nào và có quyền công bố hay không?
+3. TorWIC-SLAM đã được chọn làm public warehouse dataset family. Cần chốt Scenario/Traversal cụ thể nào làm bring-up, demo và locked benchmark.
 4. Candidate coverage có baseline bao nhiêu và target nào sẽ được khóa sau tuần 1?
 5. Metric scale reference nào được dùng và dung sai chấp nhận là bao nhiêu?
 6. Thời gian lưu input/artifact và chính sách xóa là gì?
-7. Object correction tối thiểu dùng công cụ nào và giới hạn tới đâu?
-8. Gói OpenUSD cuối cùng bao gồm chính xác những tệp nào?
+7. Gói OpenUSD cuối cùng bao gồm chính xác những tệp nào?
 
 ---
 
@@ -889,12 +1049,29 @@ Ngoài bốn tầng trên, registered-frame ratio, per-stage runtime, GPU-hours,
 | Mục tiêu | Yêu cầu liên quan | Tiêu chí nghiệm thu | Bằng chứng bắt buộc |
 |---|---|---|---|
 | G-01 | FR-01, FR-02, FR-03, FR-04, FR-06, FR-11 | AC-01, AC-02, AC-03, AC-08 | Job log, artifact, video hoặc ảnh Isaac Sim, report |
-| G-02 | FR-07, FR-08, FR-09 | AC-05, AC-06 | Candidate report, thao tác chỉnh sửa, task timer |
+| G-02 | FR-07, FR-08, FR-09 | AC-05 + AC-06 + AC-12 | Candidate report, thao tác chỉnh sửa, task timer |
 | G-03 | FR-06, FR-08, FR-09 | AC-03, AC-06 | Transform comparison trước/sau lưu |
-| G-04 | FR-01, FR-02, FR-05, FR-06 | AC-04 | LiDAR artifact và manifest provenance |
+| G-04 | FR-01, FR-02, FR-05, FR-06 | AC-04 | `LiDARGeometryArtifact`, same-scene RGB/LiDAR checksums, alignment/composition và downstream-consumption provenance |
 | G-05 | FR-10, FR-12 | AC-07 | Review log, approval/rejection history |
 | G-06 | FR-03, FR-10, FR-13 | AC-09, AC-10 | Release manifest, checksums, version record |
 | G-07 | FR-00, FR-08 | AC-11 | Browser interaction test, ảnh hoặc video thao tác viewer |
+
+### 12.1 Cross-document Implementation Traceability
+
+| Requirement | Pipeline ID | Dataset/Preparation Dependency | Main Artifact | Acceptance Evidence |
+|---|---|---|---|---|
+| FR-01/02 | ST-INPUT-VALIDATE, ST-PRIVACY-GATE | DP-DATASET-INTAKE khi dùng TorWIC | InputManifest + preflight report | AC-02 |
+| FR-03 | INF-JOB-ORCHESTRATION | — | JobManifest + job logs | AC-09 |
+| FR-04 | ST-CAMERA-POSE, ST-VISUAL-RECON, ST-RGB-GEOMETRY | DP-BENCHMARK-SPLIT | poses + visual + geometry | AC-01 |
+| FR-05 | ST-LIDAR-INGEST → ST-RGB-LIDAR-ALIGN → ST-METRIC-CANONICALIZE → downstream consumer | DP-LIDAR-PREFUSION + same-scene immutable RGB artifacts | `LiDARGeometryArtifact` + unified Scene IR | AC-04 |
+| FR-06 | ST-RGB-LIDAR-ALIGN → ST-METRIC-CANONICALIZE khi có cả RGB và LiDAR; ST-METRIC-CANONICALIZE cho RGB-only | calibration / locked anchor | metric Scene IR | AC-03, AC-04 |
+| FR-07 | ST-OBJECT-EXTRACT, ST-OBJECT-ASSOC, ST-OBJECT-CONFIRM | DP-MANUAL-ANNOTATION only for evaluator | candidate/confirmed objects | AC-05 |
+| FR-08 | ST-SCENE-DECOMPOSE, ST-EDIT | — | Scene IR revision | AC-06, AC-12 |
+| FR-09 | ST-COLLIDER | — | collider artifacts | AC-06, AC-08 |
+| FR-10 | ST-REVIEW, ST-RELEASE | — | review/approval records | AC-07 |
+| FR-11 | ST-CANDIDATE-BUILD, ST-ISAAC-VALIDATE | — | CandidatePackage + ValidationReport | AC-01, AC-08 |
+| FR-12 | ST-PREFLIGHT | — | preflight_report.json | AC-07/08 |
+| FR-13 | INF-ARTIFACT-CONTRACT, ST-RELEASE | DatasetManifest optional | ReleaseManifest | AC-10 |
 
 ---
 
@@ -926,12 +1103,12 @@ Nếu RGB-derived Geometry chưa dùng được cho collider, nhóm phải ghi q
 ### Tuần 2 — Geometry và metric scene
 
 - tạo RGB-derived Geometry;
-- ingest LiDAR và tạo bằng chứng geometry;
+- ingest LiDAR, tạo `LiDARGeometryArtifact` và hoàn thành LiDAR Contribution Evidence trên cùng scene/traversal với RGB artifacts đã checksummed;
 - hoàn thành metric scale;
 - hình thành SceneObject representation tối thiểu;
 - lưu artifact và provenance.
 
-**Exit gate:** có một scene thực chứa Visual, Geometry và scale đã xác nhận; artifact LiDAR được dùng và truy vết được.
+**Exit gate:** có một scene thực chứa Visual, Geometry và scale đã xác nhận; `LiDARGeometryArtifact` được alignment/composition, downstream sử dụng và truy vết được theo AC-04. Exit gate này không yêu cầu mixed configuration hoàn thành full Object/Edit/Review/Release parity.
 
 ### Tuần 3 — Object, editing và collider
 
@@ -989,8 +1166,8 @@ MVP chỉ được coi là hoàn thành khi:
 | Registered LiDAR | Point cloud từ một hoặc nhiều scan đã được đưa vào cùng hệ tọa độ |
 | Physics-ready | Có scale, collider và kiểm tra cần thiết để chạy phép thử vật lý đã định nghĩa; không đồng nghĩa production-ready |
 | Simulation-ready | Có thể tải vào phiên bản simulator mục tiêu và hoàn thành validation đã định nghĩa |
-| Candidate package | Gói OpenUSD và manifest tạm thời được tạo từ một revision để chạy validation trước khi con người duyệt |
-| Approved release | Candidate package đã vượt qua validation, được Reviewer approve và được đóng dấu bất biến bằng checksum; chỉ approved release mới được công bố chính thức |
+| Candidate package | Gói OpenUSD + candidate manifest bất biến được sinh từ một revision trước validation. Package được định danh bằng checksum. |
+| Approved release | Candidate package đã vượt qua validation, được Reviewer approve, sau đó được seal cùng Validation Report và Approval Record mà không regenerate candidate. |
 | Manifest | Tệp mô tả input, cấu hình, phiên bản, artifact, checksum và kết quả của một release |
 | Release blocker | Yêu cầu bắt buộc; không đạt thì không được tuyên bố MVP hoàn thành |
 

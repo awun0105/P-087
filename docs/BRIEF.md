@@ -4,12 +4,16 @@
 **Team:** P-087 — VinUni AI20K Build Phase (Cohort 4)
 **Thời gian MVP:** 4 tuần
 **Trạng thái:** Draft
+**Document Role:** Product rationale / high-level communication.
+**Upstream Constraint:** Không định nghĩa lại P0/P1 hoặc acceptance nếu PRD đã quy định.
 
 ------
 
 ## 1. Project này là gì?
 
-**Real2Sim Studio** là một nền tảng hỗ trợ kỹ sư chuyển dữ liệu quan sát từ môi trường thật — chủ yếu là **video RGB quay bằng camera di chuyển và/hoặc point cloud LiDAR đã được đăng ký hoặc hợp nhất** — thành scene 3D có thể xem, chỉnh sửa, kiểm định và đưa vào môi trường mô phỏng.
+**Real2Sim Studio** là một nền tảng hỗ trợ kỹ sư chuyển dữ liệu quan sát từ môi trường thật thành scene 3D có thể xem, chỉnh sửa, kiểm định và đưa vào môi trường mô phỏng.
+
+Trong MVP P0, moving-camera RGB là input của full product/release vertical slice. Registered/fused LiDAR được hỗ trợ như một optional geometry input cho RGB + Registered LiDAR Contribution Evidence. Full standalone LiDAR-only product configuration thuộc P1.
 
 Sản phẩm được thiết kế theo hướng **Universal Real2Sim Core**, tức phần xử lý cốt lõi không bị khóa vào riêng một loại môi trường hay simulator. Trong MVP 4 tuần, nhóm triển khai một lát cắt hoàn chỉnh từ **Warehouse/Indoor AMR đến NVIDIA Isaac Sim**. Các ranh giới chính được tổ chức bằng `DomainAdapter` và `SimulatorAdapter` để kiến trúc không bị khóa vào riêng lát cắt này.
 
@@ -103,35 +107,55 @@ Pain point chính là thiếu một nơi tập trung để đối chiếu recons
 
 ## 4. Giải pháp tổng quát là gì?
 
-Real2Sim Studio tự động hóa và gom các bước rời rạc thành một workflow thống nhất:
+Real2Sim Studio tự động hóa và gom các bước rời rạc thành một workflow thống nhất. Hệ thống không triển khai ba pipeline độc lập theo từng tổ hợp input; thay vào đó, các modality branch tạo artifact để được composition theo configuration:
 
 ```text
-Video RGB quay bằng camera di chuyển / LiDAR đã đăng ký
-        ↓
-Tái tạo scene 3D
-        ↓
-Biểu diễn hình ảnh + hình học
-        ↓
-Hiệu chỉnh tỷ lệ mét / Căn chỉnh hệ tọa độ
-        ↓
-Tự động trích xuất các đối tượng ứng viên
-        ↓
-Con người định danh / xác nhận
-        ↓
-Biểu diễn hình ảnh + hình học + collider vật lý
-        ↓
-Scene có thể chỉnh sửa
-        ↓
-Đánh giá chất lượng
-        ↓
-Con người kiểm duyệt
-        ↓
-Xuất sang simulator
+REUSABLE MODALITY BRANCHES
+
+RGB Branch
+├── Camera Pose
+├── 3DGS Visual
+└── RGB-derived Geometry
+
+Registered LiDAR Branch
+└── Registered/Fused LiDAR
+    → LiDARGeometryArtifact
+
+                 ↓
+
+          Scene Composition
+
+PRODUCT / EVIDENCE CONFIGURATIONS
+
+Primary RGB Product Path — P0 full release vertical slice
+RGB Branch
+    → Metric Scale
+    → Candidate Objects
+    → Human Confirmation
+    → Scene Decomposition
+    → Collider + Editing
+    → Candidate OpenUSD
+    → Isaac Validation
+    → Human Review
+    → Release
+
+RGB + Registered LiDAR Integration Configuration — P0 LiDAR Contribution Evidence
+RGB artifacts của cùng scene
+    +
+LiDARGeometryArtifact
+    → Alignment / Unified Metric Scene
+    → actual downstream consumption + provenance evidence
+
+Full LiDAR-only Product Configuration — P1
+LiDARGeometryArtifact
+    → geometry-first product workflow
 ```
+
+Primary RGB Product Path là P0 end-to-end release path duy nhất. P0 còn yêu cầu một RGB + Registered LiDAR integration run có giới hạn để chứng minh LiDAR-derived geometry thực sự được alignment/composition và sử dụng downstream; run này không phải một full P0 vertical slice thứ hai. Full LiDAR-only product configuration thuộc P1.
 
 Hệ thống sử dụng **3D Gaussian Splatting (3DGS)** để tái tạo lớp hình ảnh của môi trường.
 
-Trong nhánh chỉ có RGB, geometry phục vụ collider được tạo từ quá trình tái tạo đa góc nhìn, sau đó được hiệu chỉnh tỷ lệ theo đơn vị mét bằng một khoảng cách tham chiếu đã biết. Khi có point cloud LiDAR đã đăng ký, hệ thống ưu tiên geometry đo trực tiếp từ LiDAR và dùng LiDAR làm tham chiếu cho tỷ lệ mét. Với đầu vào kết hợp, RGB và LiDAR phải được căn chỉnh về cùng một hệ tọa độ.
+Trong configuration chỉ có RGB, geometry phục vụ collider được tạo từ quá trình tái tạo đa góc nhìn, sau đó được hiệu chỉnh tỷ lệ theo đơn vị mét bằng một khoảng cách tham chiếu đã biết. Khi có point cloud LiDAR đã đăng ký, Registered LiDAR Branch tạo `LiDARGeometryArtifact` dùng làm nguồn geometry đo trực tiếp và tham chiếu tỷ lệ mét. Với đầu vào kết hợp, RGB artifacts và LiDAR phải thuộc cùng scene/traversal, được kiểm tra bằng checksum và căn chỉnh về cùng một hệ tọa độ.
 
 SAM2 hỗ trợ trích xuất và lan truyền mask để tạo các đối tượng ứng viên. Máy chỉ tạo các định danh trung tính như `Object_001`, `Object_002`; con người xác định, đổi tên hoặc xác nhận object trước khi đưa vào scene chính thức. Tự động nhận diện và gán tên ngữ nghĩa không phải yêu cầu bắt buộc của MVP.
 
@@ -181,20 +205,33 @@ MVP chỉ implement sâu **một reference domain: Warehouse/Indoor AMR**.
 
 ### Input
 
-Hỗ trợ chính:
+**P0 Primary Input**
 
-- **Video RGB quay bằng camera di chuyển** là đầu vào chính. Hệ thống có thể nhận chuỗi ảnh tương đương ở mức pipeline/backend khi cần;
-- **point cloud LiDAR đã được đăng ký hoặc hợp nhất** ở định dạng `.ply` hoặc `.pcd`, nằm trong một hệ tọa độ bản đồ thống nhất;
-- hoặc kết hợp video RGB với point cloud LiDAR đã được đăng ký hoặc hợp nhất.
+- **Video RGB quay bằng camera di chuyển** là input của full product/release vertical slice. Hệ thống có thể nhận chuỗi ảnh tương đương ở mức pipeline/backend khi cần.
+
+**P0 Optional Geometry Input**
+
+- **Point cloud LiDAR đã được đăng ký hoặc hợp nhất** ở định dạng `.ply` hoặc `.pcd`, nằm trong một hệ tọa độ bản đồ thống nhất, có thể được dùng cùng RGB trong RGB + Registered LiDAR Integration Configuration để tạo LiDAR Contribution Evidence.
+
+**P1 Product Configuration**
+
+- standalone registered/fused LiDAR không có RGB Visual Representation thuộc Full LiDAR-only Product Configuration.
+
+Trong MVP P0, registered/fused LiDAR được hỗ trợ như một geometry input branch. Ít nhất một RGB + Registered LiDAR integration run phải tạo `LiDARGeometryArtifact`, đưa artifact đó vào canonical/unified scene và chứng minh geometry có nguồn LiDAR thực sự được dùng trong scene geometry, collider hoặc simulator validation.
+
+RGB artifacts được reuse cho evidence run phải thuộc cùng scene/traversal, đã immutable/checksummed và truy vết được. Evidence run không yêu cầu chạy lại toàn bộ RGB reconstruction hoặc đạt full object correction, editing, review và release parity với Primary RGB Product Path.
+
+MVP P0 không yêu cầu một LiDAR-only product execution riêng. Full LiDAR-only product configuration thuộc P1. Raw LiDAR scan sequence registration/SLAM vẫn nằm ngoài phạm vi này.
 
 Chuỗi scan LiDAR thô liên tiếp không thuộc hợp đồng đầu vào của MVP. Hệ thống không thực hiện LiDAR odometry, SLAM, đăng ký scan, loop closure hoặc tối ưu bản đồ. RGB-D và depth map cũng không phải một nhánh đầu vào của MVP. Với nhánh chỉ có RGB, dữ liệu phải đủ điều kiện cho tái tạo đa góc nhìn và có khoảng cách tham chiếu đã biết để hiệu chỉnh tỷ lệ theo đơn vị mét.
 
 ### Reconstruction
 
 - 3D Gaussian Splatting để tái tạo lớp hình ảnh từ RGB;
-- geometry từ quá trình tái tạo RGB đa góc nhìn trong nhánh chỉ có RGB;
-- trong nhánh chỉ có LiDAR và nhánh kết hợp RGB–LiDAR, geometry đo trực tiếp cùng tham chiếu tỷ lệ mét được lấy từ point cloud LiDAR đã đăng ký;
-- căn chỉnh RGB–LiDAR khi sử dụng đầu vào kết hợp;
+- geometry từ quá trình tái tạo RGB đa góc nhìn cho Primary RGB Product Path;
+- khi có registered/fused LiDAR, Registered LiDAR Branch tạo LiDAR-derived metric geometry qua một artifact contract dùng chung;
+- với RGB + LiDAR, hai modality cùng scene/traversal được căn chỉnh về canonical coordinate system trước khi composition;
+- full LiDAR-only geometry-first product configuration thuộc P1;
 - đánh giá chất lượng tái tạo trên các góc nhìn được giữ lại để kiểm thử.
 
 ### Scene Editing
@@ -207,20 +244,35 @@ Web App cho phép:
 - chọn object;
 - xem và kiểm tra các đối tượng ứng viên được tạo tự động;
 - xác nhận, đổi tên, bỏ qua hoặc gộp các đối tượng ứng viên;
-- khi khả thi, sửa cách nhóm hoặc chạy lại bước phân tách; chức năng tách hoặc phân đoạn lại không phải điều kiện bắt buộc để phát hành MVP;
+- khi khả thi, sửa cách nhóm hoặc chạy lại bước phân tách; chức năng tách hoặc phân đoạn lại không phải điều kiện bắt buộc để phát hành MVP. P0 correction không phụ thuộc vào advanced split/re-segmentation. Correction tối thiểu được thực hiện bằng Merge, Create Missing Object và Reassign selected evidence/geometry;
+- thêm một vật cản hoặc asset cơ bản;
 - translate / rotate object;
-- đồng bộ transform giữa visual object, geometry và collision proxy.
+- xóa object khỏi scene hiện tại;
+- đồng bộ thay đổi giữa Visual, Geometry và Physics/Collider.
+
+Đối với reconstructed object, thao tác Delete có nghĩa object được loại khỏi cấu trúc scene và không còn tham gia geometry/collision của revision hiện tại. MVP không cam kết tự động phục hồi photorealistic hoàn hảo phần background chưa từng được quan sát phía sau object. Với video đa góc nhìn, nếu vùng phía sau object đã xuất hiện trong những frame khác, hệ thống có thể tận dụng evidence đã quan sát đó trước khi cần tới inpainting. Background completion nâng cao là enhancement, không phải điều kiện để thao tác Delete thành công.
 
 ### Human-in-the-loop
 
 Scene có workflow:
 
 ```text
-Draft
- ↓
-Ready for Review
- ↓
-Approve / Reject
+DRAFT
+  ↓
+PROCESSING
+  ↓
+CANDIDATE_READY
+  ↓
+VALIDATING
+  ↓
+READY_FOR_REVIEW
+  ├── APPROVED
+  │      ↓
+  │   RELEASED
+  │
+  └── REJECTED
+         ↓
+      New DRAFT revision
 ```
 
 Scene chỉ trở thành approved release sau khi Reviewer kiểm tra.
@@ -239,7 +291,22 @@ IsaacSimAdapter
 
 ------
 
-## 7. Không làm gì trong phase này?
+## 7. Giá trị cốt lõi
+
+Real2Sim Studio giảm phần công việc lặp lại trong quá trình biến dữ liệu môi trường thật thành scene mô phỏng có cấu trúc, có thể chỉnh sửa và kiểm chứng được.
+
+Giá trị của sản phẩm không chỉ nằm ở việc dựng một mô hình 3D đẹp, mà ở khả năng tạo ra một scene:
+
+- có metric scale;
+- có object structure;
+- có Visual, Geometry và Physics nhất quán;
+- có thể chỉnh sửa layout (Scene có cấu trúc giúp kỹ sư thay đổi layout bằng thao tác trên object thay vì phải tái dựng toàn bộ scene khi một pallet, box hoặc obstacle thay đổi);
+- có thể validation trong simulator trước khi phát hành;
+- vẫn giữ kỹ sư trong vòng quyết định cuối cùng.
+
+Trong Warehouse/Indoor AMR MVP, giá trị này được thể hiện trực tiếp bằng việc kỹ sư có thể tái dựng môi trường, thêm hoặc di chuyển vật cản, kiểm tra collision/path feasibility và đánh giá tác động của layout mới trước khi thay đổi môi trường thật.
+
+## 8. Không làm gì trong phase này?
 
 MVP 4 tuần không đặt mục tiêu:
 
@@ -249,7 +316,7 @@ MVP 4 tuần không đặt mục tiêu:
 - nhận chuỗi scan LiDAR thô liên tiếp và tự thực hiện LiDAR SLAM hoặc đăng ký scan;
 - hỗ trợ RGB-D hoặc depth maps như một input branch riêng;
 - reconstruct hoàn hảo các scene có nhiều object động;
-- xóa mọi object khỏi 3DGS rồi tự động inpaint hoàn hảo vùng bị che;
+- không cam kết photorealistic background inpainting hoặc general 3D scene completion hoàn hảo cho mọi reconstructed object sau khi xóa;
 - thay đổi weather hoặc lighting một cách photorealistic;
 - tự động nhận diện và gán tên ngữ nghĩa mà không có người xác nhận;
 - tự động ước lượng đầy đủ các thuộc tính vật lý như khối lượng, ma sát, độ nảy, mật độ hoặc đặc tính động lực học;
@@ -259,7 +326,7 @@ MVP 4 tuần không đặt mục tiêu:
 
 ------
 
-## 8. Thành công được đo bằng gì?
+## 9. Thành công được đo bằng gì?
 
 ### Chất lượng tái tạo hình ảnh
 
@@ -273,7 +340,7 @@ Hệ thống phải đo được:
 
 Hệ thống theo dõi:
 
-- **Chamfer Distance:** đo sai lệch hình học giữa geometry được tái tạo và ground truth hoặc point cloud LiDAR đã đăng ký;
+- **Chamfer Distance:** đo sai lệch hình học với **independent reference geometry** (Hình học tham chiếu độc lập). Nghiêm cấm lấy chính LiDAR đã tạo ra Scene để làm Ground Truth chấm điểm Chamfer (Self-validation leakage).
 - **Geometry Precision / Recall / F1 tại một ngưỡng khoảng cách:** đo cả phần geometry đúng, phần geometry bị thiếu và phần geometry được tạo sai;
 - **Scale Error (%):** đo sai lệch tỷ lệ so với kích thước thực;
 - **Distance RMSE:** đo sai số của các khoảng cách kiểm tra trong scene;
@@ -289,7 +356,11 @@ Hệ thống theo dõi:
 - **Unsafe Path Rate:** đo tỷ lệ đường được hệ thống xem là đi được nhưng thực tế đi xuyên hoặc va vào vật cản;
 - **Isaac Load Success:** đo tỷ lệ scene package được nạp thành công vào NVIDIA Isaac Sim.
 
-Các threshold cụ thể chỉ được khóa trong `EVALUATION_PLAN.md` sau khi dataset, scene difficulty, benchmark protocol và baseline run đã được xác định. Brief này không đặt threshold trước khi có bằng chứng thực nghiệm.
+Các threshold cụ thể được khóa theo cơ chế metric-status tại PRD §2.2 và Locked Evaluation Set tại PRD §10.
+
+Protocol kỹ thuật cho TorWIC-SLAM, leakage control, held-out split và từng nhóm benchmark được mô tả trong DATASET_PLAYBOOK §§14–20.
+
+Nếu sau này project tách riêng một EVALUATION_PLAN.md, tài liệu đó phải cụ thể hóa các quyết định evaluation đã được phê duyệt và không được tự thay đổi product scope hoặc metric semantics của PRD.
 
 ### Hiệu năng
 
@@ -309,8 +380,11 @@ Theo dõi:
 
 MVP phải chạy end-to-end được:
 
+Functional end-to-end success dưới đây áp dụng cho Primary RGB Product Path.
+Registered LiDAR có thể tham gia như geometry source trong RGB + Registered LiDAR Integration Configuration. P0 LiDAR Contribution Evidence được nghiệm thu theo artifact provenance và downstream consumption; mixed configuration không bắt buộc đi qua toàn bộ Object/Edit/Release workflow dưới đây.
+
 ```text
-Video RGB / LiDAR đã đăng ký
+Moving-camera RGB [+ optional Registered/Fused LiDAR geometry]
       ↓
 Tái tạo scene 3D
       ↓
@@ -318,21 +392,27 @@ Hình ảnh + Geometry
       ↓
 Hiệu chỉnh tỷ lệ mét / Căn chỉnh hệ tọa độ
       ↓
-Đối tượng ứng viên + Con người xác nhận
+Candidate Object Identities
       ↓
-Hình ảnh + Geometry + Collider
+Human Object Confirmation
       ↓
-Scene có thể chỉnh sửa
+Scene Decomposition
+(Environment + Independent SceneObjects)
       ↓
-Các chỉ số đánh giá
+Visual + Geometry + Physics/Collider
       ↓
-Con người kiểm duyệt
+Editable Scene
       ↓
-Scene được phê duyệt
+Build Candidate OpenUSD
+Isaac Sim Validation
       ↓
-Isaac Sim
+Validation Report
       ↓
-Kiểm định mô phỏng
+Human Review
+      ↓
+Approve / Reject
+      ↓
+Seal Approved Release
 ```
 
 Scene chỉ được xem là thành công về mặt chức năng khi có thể đi xuyên suốt pipeline trên mà không cần kỹ sư phải tự dựng lại scene từ đầu bằng công cụ bên ngoài.
