@@ -3,9 +3,11 @@
 **Ngày tạo:** 19/09/2026
 **Team:** P-087 — VinUni AI20K Build Phase (Cohort 4)
 **Thời gian MVP:** 4 tuần
-**Trạng thái:** Draft
+**Status:** Draft for Review.
 **Document Role:** Product rationale / high-level communication.
+**Scope:** Problem, persona, value proposition và high-level product flow của RAV-01 MVP.
 **Upstream Constraint:** Không định nghĩa lại P0/P1 hoặc acceptance nếu PRD đã quy định.
+**Related Documents:** [PRD](./PRD.md), [DATASET_PLAYBOOK](./DATASET_PLAYBOOK.md), [WIREFRAME](./WIREFRAME_AND_UI_FLOW.md), [Execution Contract](./execution/TEAM_EXECUTION_CONTRACT.md), [Integration Playbook](./execution/INTEGRATION_PLAYBOOK.md).
 
 ------
 

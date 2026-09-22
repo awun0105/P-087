@@ -4,7 +4,13 @@
 >
 > **Document Role:** Dataset preparation, leakage control và evaluation methodology.
 >
+> **Scope:** TorWIC-SLAM preparation, dataset-specific preprocessing, data organization, leakage boundary và evaluation protocol cho RAV-01.
+>
 > **Upstream Constraint:** Không thay đổi Product Input Contract hoặc P0/P1/P2 của PRD.
+>
+> **Status:** Draft for Review.
+>
+> **Related Documents:** [PRD](./PRD.md), [BRIEF](./BRIEF.md), [WIREFRAME](./WIREFRAME_AND_UI_FLOW.md), [Execution Contract](./execution/TEAM_EXECUTION_CONTRACT.md), [Integration Playbook](./execution/INTEGRATION_PLAYBOOK.md).
 >
 > **Project context:** RAV-01 — Real2Sim Studio  
 > **MVP domain:** Warehouse / Indoor AMR  

@@ -15,6 +15,7 @@
 | Miền ứng dụng | Kho trong nhà, robot di động tự hành (Indoor Warehouse AMR) |
 | Trình mô phỏng mục tiêu | NVIDIA Isaac Sim |
 | Tài liệu tiền nhiệm | PRD v1.8 |
+| Tài liệu liên quan | [BRIEF](./BRIEF.md), [DATASET_PLAYBOOK](./DATASET_PLAYBOOK.md), [WIREFRAME](./WIREFRAME_AND_UI_FLOW.md), [Execution Contract](./execution/TEAM_EXECUTION_CONTRACT.md), [Execution Plan](./execution/TEAM_EXECUTION_PLAN.md), [Track Guide](./execution/TRACK_IMPLEMENTATION_GUIDE.md), [Integration Playbook](./execution/INTEGRATION_PLAYBOOK.md) |
 
 ### 0.1 Lịch sử thay đổi (Change Log)
 
@@ -53,13 +54,13 @@ Mỗi tài liệu phải khai báo rõ phạm vi mà nó chịu trách nhiệm v
 
 Phân công hiện tại:
 
-- PRD:
+- [PRD](./PRD.md):
   định nghĩa product scope, P0/P1/P2, MUST/SHOULD/MAY, user-visible behavior và acceptance criteria.
-- DATASET_PLAYBOOK:
+- [DATASET_PLAYBOOK](./DATASET_PLAYBOOK.md):
   định nghĩa dataset preparation, dataset-specific preprocessing, leakage control và evaluation methodology.
-- INTEGRATION_PLAYBOOK:
+- [INTEGRATION_PLAYBOOK](./execution/INTEGRATION_PLAYBOOK.md):
   định nghĩa technical baseline, stage implementation, artifact boundary và lựa chọn công cụ/repository.
-- BRIEF:
+- [BRIEF](./BRIEF.md):
   giải thích problem, persona, value proposition và high-level product flow.
 
 Quy tắc xử lý khác biệt:
@@ -385,7 +386,7 @@ Hai nguồn phải mô tả cùng một môi trường và có đủ vùng khôn
 
 ### 5.3 Registered LiDAR Input và LiDAR-only Product Configuration
 
-Registered/fused LiDAR là một geometry input của hệ thống. Về kiến trúc, input này được xử lý bởi một Registered LiDAR Branch dùng chung; contract kỹ thuật được quy định trong `INTEGRATION_PLAYBOOK.md`.
+Registered/fused LiDAR là một geometry input của hệ thống. Về kiến trúc, input này được xử lý bởi một Registered LiDAR Branch dùng chung; contract kỹ thuật được quy định trong [`execution/INTEGRATION_PLAYBOOK.md`](./execution/INTEGRATION_PLAYBOOK.md).
 
 Trong P0, branch này được kiểm chứng thông qua LiDAR Contribution Evidence tại mục 4.2 trong một RGB + Registered LiDAR integration run. P0 không yêu cầu một execution riêng với RGB vắng mặt.
 

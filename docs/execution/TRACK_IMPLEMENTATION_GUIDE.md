@@ -1,0 +1,1158 @@
+# TRACK IMPLEMENTATION GUIDE
+
+## Real2Sim Studio — Detailed Work Guide for 4 Execution Tracks
+
+**Document Role:** Per-track implementation task guide.
+**Scope:** Thứ tự thực hiện, tool strategy, task ID, test và Definition of Done cho `EX-REC`, `EX-SCENE`, `EX-SIM`, `EX-PRODUCT`.
+**Upstream Constraints:** Tuân [PRD](../PRD.md), [DATASET_PLAYBOOK](../DATASET_PLAYBOOK.md) và normative [TEAM_EXECUTION_CONTRACT](./TEAM_EXECUTION_CONTRACT.md).
+**Status:** Draft for Review.
+**Related Documents:** [BRIEF](../BRIEF.md), [WIREFRAME](../WIREFRAME_AND_UI_FLOW.md), [INTEGRATION_PLAYBOOK](./INTEGRATION_PLAYBOOK.md), [TEAM_EXECUTION_PLAN](./TEAM_EXECUTION_PLAN.md).
+
+---
+
+# Chương 1. Cách sử dụng tài liệu
+
+File này chỉ trả lời:
+
+> **Mỗi track phải làm cụ thể những gì và làm theo thứ tự nào?**
+
+Timeline xem [`TEAM_EXECUTION_PLAN.md`](./TEAM_EXECUTION_PLAN.md).
+Shared architecture/schema/testing rules xem [`TEAM_EXECUTION_CONTRACT.md`](./TEAM_EXECUTION_CONTRACT.md).
+
+**Traceability:** Mỗi task ID trong tài liệu này phải xuất hiện trong crosswalk tại [`TEAM_EXECUTION_CONTRACT.md` Chương 13](./TEAM_EXECUTION_CONTRACT.md). Implementation steps, tests và Definition of Done kế thừa traceability của task ID; thêm hoặc đổi tên task phải cập nhật crosswalk trong cùng change.
+
+Mỗi track đều theo cùng workflow:
+
+```text
+Read required docs
+→ Validate input fixture
+→ Implement thin path
+→ Local test
+→ Heavy/GPU smoke test nếu cần
+→ Contract test
+→ Produce real artifact
+→ Handoff test
+→ Save evidence
+```
+
+---
+
+## 1.1 Implementation strategy taxonomy
+
+Mỗi stage phải được gắn một strategy chính trước khi code:
+
+| Strategy | Nghĩa |
+|---|---|
+| `REUSE` | Dùng tool/model gần như nguyên bản qua CLI/API/library; không viết lại thuật toán lõi |
+| `ADAPT` | Lấy một phần logic/script/pattern rồi chỉnh để phù hợp contract nội bộ; phải kiểm tra license |
+| `SELF-CODE` | Team tự viết phần domain, glue, orchestration và product logic của Real2Sim Studio |
+| `REFERENCE` | Chỉ đọc kiến trúc/ý tưởng; không tạo runtime dependency |
+
+Nguyên tắc chung:
+
+> Không tự viết lại thuật toán lõi mà một Core repo đã giải quyết tốt. Team chủ yếu sở hữu adapter, artifact normalization, Scene IR, orchestration, HITL, validation và product workflow.
+
+## 1.2 Project-wide Implementation Source Map
+
+| Component | Strategy | Primary source | Dùng phần nào | Team tự viết |
+|---|---|---|---|---|
+| Video/frame | `REUSE` | FFmpeg | decode/encode CLI | adapter, validation, manifest |
+| Camera pose/SfM | `REUSE` | `colmap/colmap` | feature extraction, matching, mapper/SfM | `ColmapAdapter`, input prep, pose/output normalization |
+| 3DGS Visual | `REUSE` | `ArthurBrussee/brush` | reconstruction/training CLI, Gaussian output | `BrushAdapter`, COLMAP bridge, config, provenance |
+| RGB geometry | `REUSE` | `cdcseacave/openMVS` | COLMAP import, densification, mesh reconstruction | `OpenMVSAdapter`, normalized geometry artifact |
+| LiDAR processing | `SELF-CODE` + library | `isl-org/Open3D` | IO, transform, filtering, voxel utilities | prefusion/ingest/alignment workflow + provenance |
+| Object masks | `REUSE` | `facebookresearch/sam2` | predictor, video mask propagation | `SAM2Adapter`, mask artifact/metadata |
+| Multi-view association | `SELF-CODE` + `REFERENCE` | Gaussian Grouping, ObjectGS, SegAnyGaussians, R2G | identity/grouping ideas | masks + poses + geometry association baseline |
+| Scene decomposition | `SELF-CODE` + `REFERENCE` | R2G, `gs-real2sim`, DISCOVERSE | object/environment decomposition patterns | `SceneDecomposer`, Environment/SceneObject mapping |
+| Scene IR | `SELF-CODE` | project contract | — | schema, refs, transforms, revisions |
+| Collider | `SELF-CODE` + library | Trimesh, Open3D | OBB/AABB/convex/simplification utilities | collider policy + generator |
+| OpenUSD export | `SELF-CODE` + library | OpenUSD | USD APIs | SceneIR→USD adapter, package/checksum |
+| Isaac validation | `SELF-CODE` + platform | Isaac Sim, IsaacLab | simulator/runtime APIs | load/spawn/collision/path validator + report |
+| Simulator patterns | `REFERENCE` | Re3Sim, VR-Robo, DISCOVERSE, OpenReal2Sim | reconstruction→simulator patterns | không tạo dependency nếu không cần |
+| Evaluation | `SELF-CODE` | [DATASET_PLAYBOOK](../DATASET_PLAYBOOK.md) | protocol/metric definitions | evaluator orchestration + reports |
+| API/jobs | `SELF-CODE` | FastAPI + basic worker/queue | framework primitives | job/artifact/orchestration lifecycle |
+| Web Studio | `SELF-CODE` + library | Next.js, Three.js | web/3D primitives | viewer, editing, validation/review UX |
+| Review/release | `SELF-CODE` | PRD lifecycle | — | approval gate, revision invalidation, release sealing |
+
+Nếu muốn đổi backend hoặc strategy, output contract phải giữ nguyên và phải tuân [`TEAM_EXECUTION_CONTRACT.md`](./TEAM_EXECUTION_CONTRACT.md).
+
+---
+
+# Chương 2. EX-REC — Dataset & Reconstruction
+
+## 2.1 Mission
+
+Biến RGB/Registered LiDAR thành reconstruction artifacts chuẩn để `EX-SCENE` consume.
+
+```text
+RGB
+→ Pose
+→ Visual
+→ RGB Geometry
+→ Metric/Canonical
+→ ReconstructionBundle
+
+Registered LiDAR
+→ LiDARGeometryArtifact
+```
+
+## 2.2 Input / Output
+
+**Input**
+- moving-camera RGB video hoặc normalized image sequence;
+- registered/fused LiDAR cho product LiDAR path;
+- TorWIC raw LiDAR chỉ dùng trong offline prefusion.
+
+**Output**
+- `ReconstructionBundle`;
+- `LiDARGeometryArtifact`;
+- alignment/metric provenance khi mixed.
+
+## 2.3 Tools / repositories
+
+Primary:
+
+- FFmpeg
+- COLMAP
+- Brush
+- OpenMVS
+- Open3D
+
+Run-first/reference theo Integration Playbook:
+
+- OpenReal2Sim
+- Re3Sim
+- VR-Robo
+- R2G
+- video-3d-reconstruction-gsplat
+
+Mục tiêu audit repo là quyết định nhanh:
+
+```text
+REUSE / ADAPT / REFERENCE / REJECT
+```
+
+Không nghiên cứu vô hạn.
+
+## 2.4 Implementation Source Map
+
+| Stage | Strategy | Source | Lấy từ repo/tool | Team tự code |
+|---|---|---|---|---|
+| `REC-01` TorWIC preparation | `SELF-CODE` | Dataset Playbook + Open3D/FFmpeg | IO/transform/encode primitives | normalizer, split/preparation scripts, manifests |
+| `REC-02` RGB validation | `SELF-CODE` | FFmpeg + PRD rules | decode/probe | preflight rules, errors, report |
+| `REC-03` Camera pose | `REUSE` | `colmap/colmap` | feature extraction, matching, mapper/SfM | `ColmapAdapter`, model selection, pose normalization |
+| `REC-04` Visual reconstruction | `REUSE` | `ArthurBrussee/brush` | 3DGS reconstruction/training, Gaussian output | `BrushAdapter`, config, COLMAP bridge, provenance |
+| `REC-05` RGB geometry | `REUSE` | `cdcseacave/openMVS` | COLMAP import, densify, mesh | `OpenMVSAdapter`, output normalization |
+| `REC-06` Metric scale | `SELF-CODE` | PRD | — | anchor workflow, scale propagation, confirmation record |
+| `REC-07` LiDAR prefusion | `SELF-CODE` + library | Open3D | transform/filter/voxel primitives | TorWIC prefusion + GT-dependency provenance |
+| `REC-08` LiDAR ingest | `SELF-CODE` + library | Open3D | point-cloud validation/filtering | `LiDARGeometryArtifact` producer |
+| `REC-09` RGB–LiDAR alignment | `SELF-CODE` + library | Open3D + calibration/known transform | transform/registration primitives | alignment flow + transform provenance |
+| `REC-10` Publish bundle | `SELF-CODE` | shared contract | — | `ReconstructionBundle` builder/validator |
+| `REC-11` Worker entrypoint | `SELF-CODE` | project runtime | — | CLI/worker wrapper, logging, exit status |
+
+**Không tự viết lại trong P0:** SfM/bundle adjustment, 3DGS trainer, dense MVS/mesh reconstruction hoặc generic point-cloud primitives.
+
+System repos như OpenReal2Sim, Re3Sim, VR-Robo, R2G và `video-3d-reconstruction-gsplat` được audit để học/reuse/adapt phần nhỏ phù hợp; chúng không mặc định trở thành production dependency.
+
+## 2.5 Implementation steps
+
+### REC-01 — TorWIC preparation
+
+- chọn locked bring-up traversal;
+- giữ `raw/` immutable;
+- tạo `normalized/`;
+- tạo benchmark split;
+- tạo calibration/timestamp metadata.
+
+### REC-02 — RGB validation
+
+Kiểm tra:
+
+- decode/read;
+- corrupt frame;
+- usable frame count;
+- motion/registration feasibility;
+- chạy `ST-PRIVACY-GATE` và phát hành `PrivacyValidationReport`;
+- chỉ cho pipeline tiếp tục khi trạng thái là `VERIFIED_ANONYMIZED`; `PRELIMINARY_SCREENED` không đủ cho public/demo và `QUARANTINED` phải dừng pipeline.
+
+`EX-PRODUCT` thu source-rights attestation; `EX-REC` sở hữu privacy check/report; QA/Validation Lead chấp nhận `VERIFIED_ANONYMIZED` trước public/demo use.
+
+### REC-03 — Camera pose
+
+```text
+RGB
+→ COLMAP
+→ intrinsics + poses + sparse model
+```
+
+Normalize output thành internal artifact.
+
+### REC-04 — Visual reconstruction
+
+```text
+COLMAP
+→ Brush
+→ 3DGS visual artifact
+```
+
+Visual không được dùng như collider.
+
+### REC-05 — RGB geometry
+
+```text
+COLMAP
+→ OpenMVS
+→ mesh / dense geometry
+```
+
+Geometry phải đủ cho downstream scale/object/collider.
+
+### REC-06 — RGB metric scale
+
+Dùng locked real-world anchor theo PRD.
+
+### REC-07 — TorWIC LiDAR prefusion
+
+Offline only:
+
+```text
+lidar/*.pcd
++ declared poses
+→ merge/filter/downsample
+→ registered_lidar.ply
+```
+
+Nếu dùng `traj_gt`, ghi provenance.
+
+### REC-08 — LiDAR ingest
+
+```text
+registered_lidar
+→ validate unit/frame
+→ LiDARGeometryArtifact
+```
+
+### REC-09 — Mixed alignment
+
+```text
+same-scene RGB artifacts
++
+LiDARGeometryArtifact
+→ confirmed alignment
+```
+
+Không mutate checksummed LiDAR artifact.
+
+### REC-10 — Publish bundle
+
+Tạo `ReconstructionBundle` đúng shared contract.
+
+### REC-11 — Worker entrypoint
+
+Có stable CLI/worker command; không yêu cầu sửa path bằng tay.
+
+## 2.6 Local vs GPU
+
+**Local**
+- parsers;
+- manifests;
+- calibration/timestamp;
+- command builders;
+- checksum;
+- coordinate/scale utilities;
+- contract tests.
+
+**GPU/heavy**
+- Brush;
+- heavy reconstruction;
+- large OpenMVS;
+- system-reference smoke runs.
+
+## 2.7 Tests
+
+**Unit**
+- parser;
+- frame selection;
+- scale;
+- checksum;
+- coordinate metadata.
+
+**Smoke**
+- small RGB → COLMAP;
+- small COLMAP scene → Brush;
+- small COLMAP scene → OpenMVS;
+- small registered LiDAR → LiDAR artifact.
+
+**Contract**
+- `ReconstructionBundle` validates;
+- refs resolve;
+- coordinate/metric metadata present.
+
+## 2.8 TorWIC rules
+
+Product prediction không được đọc evaluation GT.
+
+Bring-up: 1 traversal.
+Development: 2–3 nếu đủ compute.
+Final benchmark: 3–5 locked nếu đủ compute.
+
+## 2.9 Definition of Done
+
+- real RGB reconstruction chạy;
+- visual + geometry artifacts tồn tại;
+- metric path tồn tại;
+- LiDAR artifact tồn tại;
+- mixed LiDAR evidence path tồn tại;
+- bundle validate;
+- `EX-SCENE` đọc real bundle không sửa tay.
+
+## 2.10 Evidence
+
+Lưu:
+
+- traversal ID;
+- screenshots visual/geometry;
+- pose stats;
+- runtime/GPU;
+- LiDAR evidence;
+- manifest/checksum;
+- representative failure.
+
+---
+
+# Chương 3. EX-SCENE — Object Intelligence & Scene Core
+
+## 3.1 Mission
+
+Biến reconstruction toàn cục thành scene có cấu trúc và object có thể chỉnh sửa.
+
+```text
+ReconstructionBundle
+→ Masks
+→ Multi-view Association
+→ Candidate Objects
+→ Human Confirmation
+→ Scene Decomposition
+→ SceneIR
+```
+
+## 3.2 Input / Output
+
+**Input**
+- `ReconstructionBundle`;
+- RGB frame refs;
+- camera poses;
+- canonical geometry.
+
+**Output**
+- `SceneIR`.
+
+`collider` có thể chưa đầy đủ ở handoff đầu sang `EX-SIM`.
+
+## 3.3 Tools / repositories
+
+Primary:
+
+- SAM2
+- Open3D
+
+Reference:
+
+- Gaussian Grouping
+- ObjectGS
+- SegAnyGaussians
+- R2G
+- gs-real2sim
+
+Chỉ reuse concept/module cần thiết.
+
+## 3.4 Implementation Source Map
+
+| Stage | Strategy | Source | Lấy từ repo/tool | Team tự code |
+|---|---|---|---|---|
+| `SCENE-01` Bundle consumer | `SELF-CODE` | shared contract | — | loader/validator |
+| `SCENE-02` Object extraction | `REUSE` | `facebookresearch/sam2` | predictor + mask/video propagation | `SAM2Adapter`, mask artifact/metadata |
+| `SCENE-03` Multi-view association | `SELF-CODE` + `REFERENCE` | Gaussian Grouping, ObjectGS, SegAnyGaussians, R2G | identity/grouping/2D↔3D ideas | baseline masks + poses + geometry association |
+| `SCENE-04` Candidate model | `SELF-CODE` | PRD | — | ID/state/provenance model |
+| `SCENE-05` Human Confirmation | `SELF-CODE` | PRD | — | confirm/ignore/merge/create/reassign domain operations |
+| `SCENE-06` Scene decomposition | `SELF-CODE` + `REFERENCE` | R2G, `gs-real2sim`, DISCOVERSE | decomposition patterns | `SceneDecomposer`, object↔geometry binding |
+| `SCENE-07` SceneObject model | `SELF-CODE` | Scene IR contract | — | transform/ref/state model |
+| `SCENE-08` Edit semantics | `SELF-CODE` | PRD | — | move/rotate/hide/delete behavior |
+| `SCENE-08A` Add primitive/asset | `SELF-CODE` | PRD | — | user-added object + primitive dimensions/asset parameters |
+| `SCENE-09` Publish SceneIR | `SELF-CODE` | shared contract | — | schema builder, revisions, serializer/validator |
+| `SCENE-10` Worker entrypoint | `SELF-CODE` | project runtime | — | CLI/worker wrapper |
+
+**Không tự viết lại:** segmentation foundation model hoặc SAM-like propagation. Phần team cần sở hữu là association, HITL semantics, decomposition và Scene IR.
+
+## 3.5 Implementation steps
+
+### SCENE-01 — Fixture-first consumer
+
+Đọc golden/fixture `ReconstructionBundle` trước khi real reconstruction xong.
+
+### SCENE-02 — Object extraction
+
+```text
+RGB frames
+→ SAM2
+→ mask artifacts
+```
+
+Mask phải có metadata, không chỉ file ảnh rời.
+
+### SCENE-03 — Multi-view association
+
+Kết hợp:
+
+```text
+masks + camera poses + canonical geometry
+→ candidate identities
+```
+
+Baseline đơn giản nhưng deterministic được ưu tiên hơn research phức tạp không ổn định.
+
+### SCENE-04 — Candidate model
+
+States:
+
+```text
+UNREVIEWED
+CONFIRMED
+IGNORED
+NEEDS_CORRECTION
+```
+
+### SCENE-05 — Human Confirmation operations
+
+Support domain operations:
+
+- rename;
+- confirm;
+- ignore;
+- merge;
+- create missing object;
+- reassign.
+
+UI do `EX-PRODUCT`.
+
+### SCENE-06 — Scene decomposition
+
+```text
+confirmed candidates
+→ Environment + SceneObjects
+```
+
+### SCENE-07 — SceneObject model
+
+Mỗi object có:
+
+```text
+id
+state
+origin: reconstructed | user_added
+active
+transform
+visual_ref?
+geometry_ref
+asset_ref?
+collider: ColliderSpec?
+```
+
+Chỉ một canonical transform.
+
+### SCENE-08 — Edit semantics
+
+Support domain behavior:
+
+- move;
+- rotate;
+- hide/show;
+- rename;
+- delete/disable.
+
+Delete phải loại geometry/physics khỏi active scene; photorealistic background restoration không bắt buộc P0.
+
+### SCENE-08A — Add primitive/asset
+
+Tạo `SceneObject(origin = user_added)` với primitive geometry có `dimensions` rõ ràng hoặc `asset_ref` có size parameters theo asset. Không expose generic scale cho tới khi propagation sang Visual/Geometry/Collider được định nghĩa và kiểm thử.
+
+### SCENE-09 — Publish SceneIR
+
+Serialize/deserialize/version/validate.
+
+### SCENE-10 — Worker entrypoint
+
+Stable CLI/worker:
+
+```text
+ReconstructionBundle
+→ SceneIR
+```
+
+## 3.6 Local vs GPU
+
+**Local**
+- SceneIR;
+- association trên fixture;
+- transforms;
+- state transitions;
+- decomposition;
+- edit semantics.
+
+**GPU**
+- SAM2 inference;
+- optional research-reference tests.
+
+## 3.7 Tests
+
+**Unit**
+- candidate states;
+- merge/reassign/create;
+- transform;
+- SceneIR roundtrip;
+- delete semantics;
+- user-added primitive/asset dimensions và provenance.
+
+**Smoke**
+- few RGB frames → masks;
+- fixture masks/poses/geometry → candidate;
+- candidate → SceneIR.
+
+**Contract**
+- consume `ReconstructionBundle`;
+- produce valid `SceneIR`;
+- object IDs unique;
+- refs resolve.
+
+## 3.8 TorWIC rules
+
+Được dùng:
+
+- RGB frames;
+- poses;
+- reconstruction geometry.
+
+Không dùng manual evaluation annotations để tạo prediction.
+
+TorWIC segmentation masks chỉ là debug/reference khi methodology cho phép, không phải perfect GT.
+
+## 3.9 Definition of Done
+
+- automatic candidate được tạo;
+- ít nhất một correction case xử lý được;
+- Environment + SceneObjects tồn tại;
+- SceneIR validate;
+- transform consistency đúng;
+- real `ReconstructionBundle` consume được;
+- `EX-SIM` đọc SceneIR trực tiếp.
+
+## 3.10 Evidence
+
+Lưu:
+
+- masks;
+- candidate grouping;
+- correction before/after;
+- scene decomposition;
+- SceneIR sample;
+- transform edit evidence.
+
+---
+
+# Chương 4. EX-SIM — Physics, Isaac & Evaluation
+
+## 4.1 Mission
+
+Biến SceneIR thành physics-ready candidate, chạy Isaac validation và tạo report/metrics.
+
+```text
+SceneIR
+→ Collider
+→ Preflight
+→ Candidate OpenUSD
+→ Isaac
+→ ValidationReport
++
+EvaluationReport? (theo run type)
+```
+
+## 4.2 Input / Output
+
+**Input**
+- `SceneIR`;
+- evaluation-only references chỉ trong evaluator.
+
+**Output**
+- physics-enriched `SceneIR`;
+- `CandidatePackage`;
+- `ValidationReport`;
+- `EvaluationReport` khi locked acceptance/benchmark protocol yêu cầu.
+
+## 4.3 Tools / repositories
+
+Primary:
+
+- Open3D
+- Trimesh
+- OpenUSD
+- Isaac Sim
+- IsaacLab
+
+Reference:
+
+- Re3Sim
+- VR-Robo
+- DISCOVERSE
+- OpenReal2Sim
+
+## 4.4 Implementation Source Map
+
+| Stage | Strategy | Source | Lấy từ repo/tool | Team tự code |
+|---|---|---|---|---|
+| `SIM-01` Isaac smoke | `REUSE` platform + `SELF-CODE` | OpenUSD, Isaac Sim, IsaacLab | USD/simulator APIs | minimal USD builder + smoke script |
+| `SIM-02` Collider | `SELF-CODE` + library | Trimesh, Open3D | OBB/AABB/convex/simplification utilities | collider policy + `ColliderGenerator` |
+| `SIM-02A` Collider edit validation | `SELF-CODE` | `ColliderSpec` contract | — | validate type/dimensions/local transform after edit |
+| `SIM-03` Physics enrichment | `SELF-CODE` | Scene IR contract | — | `ColliderSpec`/physics metadata on same SceneIR schema |
+| `SIM-04` Preflight | `SELF-CODE` | PRD/Integration Playbook | — | deterministic rules + report |
+| `SIM-05` Candidate build | `SELF-CODE` + library | OpenUSD | USD scene APIs | SceneIR→USD translation, packaging, checksum |
+| `SIM-06` Isaac validation | `SELF-CODE` + platform | Isaac Sim, IsaacLab | load/physics/runtime APIs | spawn/collision/path validation worker |
+| `SIM-07` ValidationReport | `SELF-CODE` | shared contract | — | candidate-bound structured report |
+| `SIM-08` Evaluation | `SELF-CODE` | Dataset Playbook | protocols/metric definitions | evaluator orchestration + reports |
+| `SIM-09` Worker entrypoints | `SELF-CODE` | project runtime | — | simulation/evaluation CLI wrappers |
+
+Re3Sim, VR-Robo, DISCOVERSE và OpenReal2Sim là **architecture references** cho simulator boundary/transform/USD patterns. Không clone cả system để thay project architecture.
+
+**Không tự viết lại:** USD core, physics engine, Isaac runtime, generic geometry primitives.
+
+## 4.5 Implementation steps
+
+### SIM-01 — Minimal Isaac smoke
+
+Làm trước scene thật:
+
+```text
+floor + wall + box + robot
+→ USD
+→ Isaac load
+```
+
+### SIM-02 — Collider generation
+
+Baseline:
+
+- floor/wall → plane hoặc simplified static mesh;
+- pallet/box → box/OBB;
+- complex static object → convex/simplified mesh.
+
+Không mặc định dùng raw high-poly mesh làm collider.
+
+### SIM-02A — Collider edit/resize validation
+
+Mọi thay đổi collider type, `dimensions`, `local_transform` hoặc parameters phải validate theo `ColliderSpec`, tạo SceneIR revision mới và invalidates candidate/validation cũ.
+
+### SIM-03 — Physics enrichment
+
+Gắn `ColliderSpec` vào **SceneIR revision cùng schema**.
+
+Không tạo `PhysicsScene.json` cạnh tranh với SceneIR.
+
+### SIM-04 — Preflight
+
+Check tối thiểu:
+
+- metric scale;
+- coordinate sanity;
+- required geometry;
+- collider presence;
+- spawn/floor;
+- object bounds.
+
+Output là `PreflightReport` conform normative schema trong [`TEAM_EXECUTION_CONTRACT.md`](./TEAM_EXECUTION_CONTRACT.md); không build candidate khi `blocking_result` khác `PASS`.
+
+Implement đúng các rule IDs: `METRIC_SCALE_MISSING`, `COLLIDER_MISSING`, `TRANSFORM_INVALID`, `OBJECT_OUT_OF_BOUNDS`, `REQUIRED_ARTIFACT_MISSING`, `CANDIDATE_UNREVIEWED`. Các rule Isaac `ROBOT_SPAWN_INVALID`, `PATH_BLOCKED_UNEXPECTED`, `PATH_VALIDATION_ERROR`, `ISAAC_LOAD_ERROR` phải được ghi vào validation evidence; không đổi `ERROR` thành pass.
+
+### SIM-05 — Candidate build
+
+```text
+physics SceneIR
+→ OpenUSD
+→ CandidatePackage + checksum
+```
+
+### SIM-06 — Isaac validation
+
+**Smoke:**
+
+- tối thiểu 1 `CLEAR` và 1 `BLOCKED` case.
+
+**Acceptance:**
+
+- load;
+- robot spawn;
+- floor/object collision;
+- penetration;
+- chạy đúng 5 locked Start–Goal pairs bằng robot footprint đã khóa;
+- trả kết quả cho 5/5 pairs;
+- expected `CLEAR/BLOCKED` labels phải khớp 5/5;
+- `ERROR` không được tính là `CLEAR`, `BLOCKED` hoặc pass.
+
+### SIM-07 — ValidationReport
+
+Report phải bind đúng `candidate_checksum`.
+
+### SIM-08 — Evaluation
+
+Tách khỏi runtime validation.
+
+**Visual**
+- held-out RGB → PSNR/SSIM/LPIPS.
+
+**Pose**
+- estimated poses vs `traj_gt` → ATE/RPE.
+
+**Geometry**
+- prediction vs `groundtruth_map.ply` → Chamfer/P/R/F1.
+
+**Object**
+- locked manual subset → Recall/IoU/AP nếu protocol đủ.
+
+**Path**
+- locked start-goal reference → agreement/F1/unsafe false-clear.
+
+### SIM-09 — Worker entrypoints
+
+Tách:
+
+```text
+simulation-worker validate <scene-ir>
+evaluation-runner run <prediction> <protocol>
+```
+
+## 4.6 Local vs GPU
+
+**Local**
+- collider math;
+- preflight;
+- report schemas;
+- evaluation math;
+- small USD tests khi possible.
+
+**GPU/heavy**
+- Isaac;
+- real scene validation;
+- E2E/acceptance.
+
+## 4.7 Tests
+
+**Unit**
+- collider;
+- collider edit/resize validation;
+- transform;
+- missing metric/collider preflight;
+- object out-of-bounds preflight;
+- candidate/report checksum;
+- path logic;
+- `test_locked_start_goal_results_5_of_5`;
+- `test_path_validation_error_is_not_pass`.
+
+**Smoke**
+- Minimal USD → Isaac;
+- CLEAR case;
+- BLOCKED case;
+- report generation.
+
+**Contract**
+- consume SceneIR;
+- luôn produce valid Candidate/Validation report cho release flow;
+- produce valid `EvaluationReport` cho locked acceptance/benchmark; ordinary user-upload release có thể không có report nếu không có independent ground truth.
+
+## 4.8 TorWIC rules
+
+Evaluator được đọc:
+
+- held-out RGB;
+- `traj_gt.txt`;
+- `groundtruth_map.ply`;
+- manual annotations;
+- locked path references.
+
+Các reference này không được feed ngược vào product prediction.
+
+## 4.9 Definition of Done
+
+- real SceneIR consume được;
+- collider tạo được;
+- candidate USD build được;
+- Isaac load/validation chạy;
+- 5/5 locked Start–Goal pairs có kết quả và khớp expected labels;
+- locked acceptance/benchmark chạy evaluation protocol và tạo `EvaluationReport` hợp lệ;
+- ordinary user-upload release không bị block nếu không có independent ground truth;
+- report bind đúng `subject_type`, `subject_id` và `subject_checksum` của protocol;
+- `EX-PRODUCT` đọc report trực tiếp.
+
+## 4.10 Evidence
+
+Lưu:
+
+- collider overlay;
+- candidate USD;
+- Isaac video/screenshots;
+- CLEAR/BLOCKED;
+- ValidationReport;
+- metric tables;
+- failure case.
+
+---
+
+# Chương 5. EX-PRODUCT — Product Platform & Orchestration
+
+## 5.1 Mission
+
+Ghép các workers thành một Web product Human-in-the-Loop.
+
+```text
+User
+→ Web/API
+→ Job orchestration
+→ EX-REC
+→ EX-SCENE
+→ EX-SIM
+→ Review
+→ Release
+```
+
+## 5.2 Input / Output
+
+**Input**
+- user actions và source-rights attestation;
+- manifests/artifact refs;
+- SceneIR;
+- `ValidationReport` và `EvaluationReport?` theo run type.
+
+**Output**
+- project/job lifecycle;
+- scene revisions;
+- review history và `ApprovalRecord`;
+- `ReleaseManifest`;
+- final demo workflow.
+
+## 5.3 Stack
+
+Baseline:
+
+- FastAPI
+- basic worker/queue
+- SSE/WebSocket/polling cho status
+- Next.js
+- Three.js
+
+Không cần advanced scheduler/multi-tenant infra trong P0.
+
+## 5.4 Implementation Source Map
+
+| Stage | Strategy | Source | Lấy từ framework/library | Team tự code |
+|---|---|---|---|---|
+| `PRODUCT-01` API | `SELF-CODE` + framework | FastAPI | routing/dependency primitives | project/job/artifact APIs |
+| `PRODUCT-02` Job states | `SELF-CODE` | PRD | — | job state machine/persistence |
+| `PRODUCT-03` Worker abstraction | `SELF-CODE` | worker contract | — | dispatch interface + queue/CLI integration |
+| `PRODUCT-04` Artifact access | `SELF-CODE` | shared contract | — | registry/resolver |
+| `PRODUCT-05` Web shell | `SELF-CODE` + framework | Next.js | framework primitives | product screens/workflow |
+| `PRODUCT-06` 3D Viewer | `SELF-CODE` + library | Three.js | camera/render/scene primitives | SceneIR loader, select, layer toggles, transform tools |
+| `PRODUCT-07` Object actions | `SELF-CODE` | Scene Core operations | — | UI/application commands |
+| `PRODUCT-07A` Added asset/collider UI | `SELF-CODE` | SceneIR/ColliderSpec contracts | Three.js controls | add/delete obstacle, dimensions, collider adjustment |
+| `PRODUCT-08` Orchestration | `SELF-CODE` | shared worker contracts | — | REC→SCENE→SIM control flow |
+| `PRODUCT-09` Progress/error/retry | `SELF-CODE` | PRD | — | monitoring + user-facing errors |
+| `PRODUCT-10` Review lifecycle | `SELF-CODE` | PRD | — | review state machine + approval gate + `ApprovalRecord` |
+| `PRODUCT-11` Release | `SELF-CODE` | release contract | — | exact-candidate sealing + `ReleaseManifest` |
+| `PRODUCT-12` Demo route | `SELF-CODE` | locked demo scenario | — | stable presentation path |
+
+Track này chủ yếu phải tự code vì đây là **product shell và workflow riêng của Real2Sim Studio**. FastAPI/Next.js/Three.js chỉ cung cấp primitives, không thay product architecture.
+
+## 5.5 Implementation steps
+
+### PRODUCT-01 — Mock-first API
+
+Tạo project/job/artifact endpoints bằng fixtures. Input API phải thu source-rights attestation, expose privacy state và không dispatch downstream khi `PrivacyValidationReport` là `QUARANTINED` hoặc chưa đạt trạng thái cần thiết cho public/demo.
+
+### PRODUCT-02 — Job states
+
+```text
+QUEUED
+RUNNING
+SUCCEEDED
+FAILED
+CANCELLED
+```
+
+### PRODUCT-03 — Worker abstraction
+
+Ban đầu mock worker; sau thay real `EX-REC/SCENE/SIM`.
+
+### PRODUCT-04 — Artifact access
+
+API dùng artifact refs/checksums, không local path cá nhân.
+
+### PRODUCT-05 — Web shell
+
+Tối thiểu:
+
+- project;
+- job;
+- scene viewer;
+- validation;
+- review.
+
+### PRODUCT-06 — Viewer
+
+Load fixture SceneIR.
+
+Hỗ trợ:
+
+- orbit/pan/zoom;
+- select;
+- hide/show;
+- Visual/Geometry/Collider toggles;
+- transform editing.
+
+Nếu Web 3DGS renderer khó, dùng mesh/point cloud preview.
+
+### PRODUCT-07 — Object actions
+
+Expose UI cho operations P0 do Scene Core cung cấp.
+
+### PRODUCT-07A — Added asset và collider controls
+
+UI phải hỗ trợ add/delete obstacle, primitive dimensions hoặc asset-specific size parameters, collider type/dimensions/local transform và hiển thị validation error. Mọi edit persist qua backend SceneIR revision, không chỉ giữ trong React state.
+
+### PRODUCT-08 — Real worker orchestration
+
+```text
+REC success
+→ SCENE
+
+SCENE success
+→ SIM
+```
+
+Không chạy downstream nếu required artifact thiếu.
+
+### PRODUCT-09 — Progress/error/retry
+
+Hiển thị stage/status/error rõ ràng.
+
+Không fake percentage nếu backend không có progress thật.
+
+### PRODUCT-10 — Review lifecycle
+
+```text
+DRAFT
+→ PROCESSING
+→ CANDIDATE_READY
+→ VALIDATING
+→ READY_FOR_REVIEW
+├── APPROVED → RELEASED
+└── REJECTED → new DRAFT revision
+```
+
+Reject phải lưu reason. `REJECTED` không được release trực tiếp; mọi edit sau validation tạo revision `DRAFT` mới và invalidates Candidate/Validation/Evaluation reports cũ.
+
+### PRODUCT-11 — Release
+
+Approve chỉ seal **exact CandidatePackage đã validation**.
+
+Release chỉ được tạo từ `ApprovalRecord` hợp lệ, bind đúng `candidate_checksum` và `validation_report_checksum`; output phải conform `ReleaseManifest` normative schema.
+
+Edit sau validation → new DRAFT revision.
+
+### PRODUCT-12 — Demo route
+
+Chuẩn bị một route ngắn, ổn định cho pitching.
+
+## 5.6 Local vs GPU
+
+Hầu hết track này chạy local.
+
+GPU chỉ được dùng gián tiếp qua workers.
+
+## 5.7 Tests
+
+**Unit/API**
+- job transitions;
+- failed stage ≠ success;
+- retry;
+- edit invalidates validation;
+- approval requires validation;
+- release candidate checksum;
+- `test_editor_cannot_approve`;
+- `test_review_decision_binds_candidate_checksum`;
+- `test_reviewer_edit_invalidates_validation`;
+- `test_rejected_revision_cannot_release`;
+- `test_rejection_requires_reason`;
+- `test_rejected_revision_returns_to_new_draft`.
+
+**Viewer smoke**
+- load fixture;
+- select;
+- toggle;
+- transform edit;
+- add/delete obstacle;
+- edit collider dimensions/local transform.
+
+**Contract**
+- consume SceneIR/ValidationReport và `EvaluationReport?` theo run type;
+- produce lifecycle/release records.
+
+## 5.8 TorWIC rules
+
+Web product chỉ dùng:
+
+- derived demo input;
+- product artifacts;
+- reports.
+
+Không trực tiếp đọc evaluation GT để tạo scene.
+
+## 5.9 Definition of Done
+
+- project/job chạy;
+- real workers được orchestrate;
+- status/error/retry có;
+- viewer đạt minimum controls;
+- edit persist;
+- validation hiển thị;
+- approve/reject/release đúng lifecycle;
+- full demo route chạy được.
+
+## 5.10 Evidence
+
+Lưu:
+
+- job screens;
+- viewer interactions;
+- edit before/after;
+- validation UI;
+- review/approve/reject;
+- release;
+- error/retry;
+- final E2E screen recording.
+
+---
+
+# Chương 6. Handoff cuối cùng giữa 4 tracks
+
+Luồng chuẩn duy nhất:
+
+```text
+InputManifest
+    ↓
+EX-REC
+    ↓
+ReconstructionBundle
+    ↓
+EX-SCENE
+    ↓
+SceneIR
+    ↓
+EX-SIM
+    ↓
+Physics-enriched SceneIR
+CandidatePackage
+ValidationReport
+EvaluationReport? (required cho locked acceptance/benchmark)
+    ↓
+EX-PRODUCT
+    ↓
+Human Review
+    ↓
+ApprovalRecord
+    ↓
+Approved Release
+```
+
+Một track chỉ được coi hoàn thành handoff khi:
+
+- output validate contract;
+- artifact được publish;
+- checksum/provenance có;
+- consumer đọc trực tiếp;
+- không cần sửa file bằng tay.
+
+---
+
+# Chương 7. Quy tắc khi gặp blocker
+
+Nếu muốn đổi từ `REUSE` sang `SELF-CODE`, đổi backend, hoặc đưa một repo `REFERENCE` thành runtime dependency:
+
+1. phải chứng minh backend hiện tại là blocker P0;
+2. kiểm tra license/runtime;
+3. giữ nguyên output contract;
+4. thông báo downstream consumer;
+5. không đổi chỉ vì repo mới “có vẻ tốt hơn”.
+
+
+## 7.1 Reconstruction geometry yếu
+
+Ưu tiên:
+
+1. fix input/pose;
+2. simplified geometry;
+3. fallback backend đã cho phép;
+4. dùng LiDAR geometry trong scoped evidence khi phù hợp.
+
+## 7.2 SAM2/object association chưa tốt
+
+Giữ:
+
+```text
+automatic candidate
++
+Human Correction
+```
+
+Không research perfect segmentation.
+
+## 7.3 3DGS trong Isaac quá khó
+
+Dùng:
+
+```text
+Web → visual preview
+Isaac → mesh + collider
+```
+
+## 7.4 GPU thiếu
+
+Tiếp tục local code/tests/fixtures; chỉ xếp hàng heavy smoke/E2E lên GPU.
+
+## 7.5 Trễ tiến độ
+
+Cắt theo thứ tự:
+
+```text
+P2
+→ P1
+→ polish
+→ documented fallback
+```
+
+Không âm thầm bỏ P0.
+
+---
+
+# Chương 8. Track completion checklist
+
+Một track chỉ được coi “done” khi có đủ:
+
+```text
+implementation
++
+tests
++
+valid output artifact
++
+downstream handoff
++
+evidence
+```
+
+“Code xong trên máy tôi” không được tính là hoàn thành.
