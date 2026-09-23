@@ -13,8 +13,14 @@ echo "Python version OK"
 python3.12 -m venv .venv
 source .venv/bin/activate
 
-# Install dependencies
-pip install -r requirements.lock.txt -r requirements-dev.lock.txt
+# Install build/environment tools (not added to core requirements)
+pip install uv==0.9.4
+
+# Sync dependencies using uv
+uv pip sync requirements.lock.txt requirements-dev.lock.txt
+
+# Run integrity check
+uv pip check
 
 # Create .env if not exists
 if [ ! -f .env ]; then

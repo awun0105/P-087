@@ -21,18 +21,23 @@ def check_python_version() -> bool:
         return False
 
 
-def check_pip_integrity() -> bool:
-    print("--- Dependency Integrity Check ---")
+def check_uv_integrity() -> bool:
+    print("--- Dependency Integrity Check (uv) ---")
     try:
-        result = subprocess.run([sys.executable, "-m", "pip", "check"], capture_output=True, text=True)
+        # Check uv version
+        uv_version = subprocess.run(["uv", "--version"], capture_output=True, text=True, check=True).stdout.strip()
+        print(f"[INFO] Using {uv_version}")
+
+        # Check integrity
+        result = subprocess.run(["uv", "pip", "check"], capture_output=True, text=True)
         if result.returncode == 0:
-            print("[PASS] pip check passed.")
+            print("[PASS] uv pip check passed.")
             return True
         else:
-            print(f"[FAIL] pip check failed:\n{result.stdout}")
+            print(f"[FAIL] uv pip check failed:\n{result.stdout}")
             return False
     except Exception as e:
-        print(f"[FAIL] Could not run pip check: {e}")
+        print(f"[FAIL] Could not run uv pip check: {e}")
         return False
 
 
@@ -74,7 +79,7 @@ def main():
     success = True
     success &= check_python_version()
     success &= check_critical_imports()
-    success &= check_pip_integrity()
+    success &= check_uv_integrity()
     success &= check_lock_fingerprint()
 
     if success:

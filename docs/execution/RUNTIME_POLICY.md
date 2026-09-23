@@ -12,9 +12,11 @@ Dependencies are grouped into logical, isolated environments. We do NOT use one 
 
 ### Core Dependencies
 - Managed centrally for the Core Foundation.
+- Resolver & Lock Tool: `uv` (version 0.9.4). `uv` is environment tooling and not a core runtime dependency.
 - Sources: `requirements.in` (runtime) and `requirements-dev.in` (tooling).
 - Environment: `.venv` in the repository root.
 - Lockfiles: `requirements.lock.txt` and `requirements-dev.lock.txt`.
+- Workflow: Lock with `uv pip compile --generate-hashes --python-version 3.12.14`, sync with `uv pip sync`.
 
 ### External Provider Dependencies (e.g. 3DGS, Isaac, SAM2)
 - Must be isolated from the Core.
