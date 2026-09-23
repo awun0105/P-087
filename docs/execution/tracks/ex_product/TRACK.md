@@ -32,10 +32,12 @@ Outputs: project/job lifecycle, scene revisions, review history,
 
 - FastAPI, basic worker/queue, SSE/WebSocket/polling.
 - Next.js + TypeScript + Three.js trong root `frontend/`.
-- P0 viewer dùng Three.js/WebGL/WebGL2 để render geometry mesh, point cloud, collider và SceneObject transforms.
-- Direct browser Gaussian-splat/WebGPU rendering là stretch/non-blocking; nếu triển khai phải load real producer output và không claim fixture là Brush proof.
+- P0 viewer dùng Three.js/WebGL/WebGL2 baseline để render real 3DGS `VisualArtifact` của Primary RGB Scene và chuyển giữa các view Geometry mesh, Point Cloud, Collider/SceneObject transforms. Các view kỹ thuật không phải fallback của 3DGS.
+- Gaussian renderer phải qualification bằng output Brush thực, đúng format/checksum/coordinate và browser capability; WebGPU là optional backend, không phải P0 requirement. Fixture không phải Brush proof.
+- Generic Web shell được adapt có chọn lọc từ [`Kiranism/next-shadcn-dashboard-starter`](https://github.com/Kiranism/next-shadcn-dashboard-starter); [`arhamkhnz/next-shadcn-admin-dashboard`](https://github.com/arhamkhnz/next-shadcn-admin-dashboard) và [`shadcndashboard/next-shadcn-dashboard`](https://github.com/shadcndashboard/next-shadcn-dashboard) là UI references, không phải codebase thứ hai.
+- Viewer dùng [Three.js docs/examples](https://threejs.org/docs/); [React Three Fiber](https://github.com/pmndrs/react-three-fiber) là candidate library. [Spark](https://github.com/sparkjsdev/spark) là P0 renderer candidate, [Spark + Next.js example](https://github.com/sparkjsdev/spark-react-nextjs) là integration reference, [Potree](https://github.com/potree/potree) chỉ là point-cloud LOD reference.
 - P0 không yêu cầu advanced scheduler hoặc multi-tenant infrastructure.
-- Product shell và lifecycle là project-owned; framework chỉ cung cấp primitives.
+- Product workflow/lifecycle là project-owned; starter chỉ cung cấp generic UI patterns, không mang Clerk/organization/billing hoặc Next.js business backend vào hệ thống.
 
 ## Authority Gates
 
@@ -68,7 +70,7 @@ Outputs: project/job lifecycle, scene revisions, review history,
 - Project/job API và real workers chạy qua artifact contracts.
 - Status/error/retry có observable evidence.
 - Viewer minimum controls và persisted edits hoạt động.
-- P0 geometry/point-cloud/collider artifacts render trong browser và bind đúng checksum.
+- P0 real Brush 3DGS Visual và các view Geometry/Point Cloud/Collider render/chuyển được trong browser, bind đúng artifact checksums; missing/incompatible Visual không được báo pass AC-11.
 - Validation/review/approve/reject/release đúng authorization và checksum lineage.
 - Product E2E chạy trên cùng candidate lineage và có backup evidence.
 

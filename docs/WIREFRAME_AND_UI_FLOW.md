@@ -106,11 +106,12 @@ Job card phải hiển thị Job ID, stage, progress, lần cập nhật gần n
   +------------------------------------------+-----------------------------------------------------+
   | SCENE GRAPH / CANDIDATES                 | BROWSER 3D VIEWER                                   |
   |------------------------------------------|-----------------------------------------------------|
-  | [All / Unreviewed / Confirmed / Ignored] | [Layers: ✓ Visual  ✓ Geometry  ✓ Collider]           |
+  | [All / Unreviewed / Confirmed / Ignored] | [View: 3DGS | Mesh | Point Cloud | Collider]          |
+  |                                          | [Layers: ✓ Visual  ✓ Geometry  ✓ Collider]           |
   |                                          | [Camera: Orbit | Pan | Zoom]                         |
   | ▼ Environment                            |                                                     |
-  |   ├─ Floor (CONFIRMED, Static)           |        Visual appearance                            |
-  |   └─ Wall_North (CONFIRMED, Static)      |        + geometry surface                           |
+  |   ├─ Floor (CONFIRMED, Static)           |        Real 3DGS VisualArtifact                     |
+  |   └─ Wall_North (CONFIRMED, Static)      |        + selectable mesh/point-cloud geometry      |
   | ▼ Candidate Objects                      |        + collider overlay                            |
   |   ├─ Object_001 [UNREVIEWED]             |                 ▲                                   |
   |   ├─ Pallet_001 [CONFIRMED]              |            ◄────┼────► Transform Gizmo               |
@@ -134,6 +135,12 @@ Job card phải hiển thị Job ID, stage, progress, lần cập nhật gần n
   ```
 
 Candidate tự động dùng ID trung tính cho đến khi con người xác nhận. P0 Minimal Correction phải có ba thao tác rõ ràng: `Merge`, `Create Missing Object` và `Reassign` mask/geometry selection/region; không dùng một nút `Tạo correction` chung mà không mô tả hành vi.
+
+3DGS Visual, mesh Geometry, Point Cloud và Collider là các view kỹ thuật được
+chọn/bật lớp trên cùng SceneIR revision; mesh/point cloud không phải fallback
+của 3DGS. UI phải báo rõ khi `VisualArtifact` chưa có, checksum sai hoặc format/
+renderer chưa tương thích. Những trạng thái đó vẫn cho phép inspection các view
+khác nhưng không được báo AC-11 đã pass.
 
 Nút xóa áp dụng cho object do người dùng thêm và reconstructed `SceneObject` đã được xác nhận. Khi xóa reconstructed object, revision mới phải loại object khỏi Scene IR, Geometry và Collider không còn tham gia collision/path validation, còn Visual segment được hide/remove khi đã tách riêng. UI phải cảnh báo rằng background phía sau có thể không được phục hồi photorealistic hoàn chỉnh; giới hạn này không làm thao tác Delete thất bại.
 

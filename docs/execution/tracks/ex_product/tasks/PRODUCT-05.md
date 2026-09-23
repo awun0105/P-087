@@ -54,7 +54,20 @@ Không sửa track internals. Shared contract change cần producer + consumer r
 
 ## 8. Tool / Repository Strategy
 
-`SELF-CODE` on Next.js primitives; do not create alternate backend state in frontend.
+`SELF-CODE` Real2Sim workflow + selective `ADAPT` generic Web UI từ
+[`Kiranism/next-shadcn-dashboard-starter`](https://github.com/Kiranism/next-shadcn-dashboard-starter)
+(MIT): inspect shell/sidebar, navigation, table/list/detail, React Query/URL
+state, forms và loading/error states. Chỉ mang component/pattern thực sự cần
+cho project/job/artifact screens vào `frontend/`; không clone toàn repo làm
+source of truth. [`arhamkhnz/next-shadcn-admin-dashboard`](https://github.com/arhamkhnz/next-shadcn-admin-dashboard)
+là layout reference; [`shadcndashboard/next-shadcn-dashboard`](https://github.com/shadcndashboard/next-shadcn-dashboard)
+là form/table/file-dropzone UI reference, không phải upload validation backend.
+
+Không mang Clerk, SaaS organizations/billing, demo domain, Next.js business API
+routes hoặc starter authorization/persistence vào Real2Sim. FastAPI và shared
+contracts vẫn sở hữu business state, quyền và artifact validation. Trước khi
+copy code, kiểm tra license/notice của exact revision và dependency versions;
+không thêm dependency chỉ vì starter có sẵn.
 
 P0 không tự mở rộng sang advanced scheduler, multi-tenant platform hoặc public deployment hardening.
 

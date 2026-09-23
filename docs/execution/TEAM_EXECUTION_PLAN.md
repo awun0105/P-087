@@ -324,8 +324,8 @@ Hoàn thiện:
 - worker invocation abstraction;
 - artifact access;
 - real SceneIR viewer;
-- geometry/point-cloud/collider Three.js viewer;
-- direct browser Gaussian rendering chỉ là stretch/non-blocking;
+- browser renderer cho real 3DGS `VisualArtifact` của Primary RGB Scene;
+- Geometry mesh, Point Cloud và Collider là các view kỹ thuật có thể chuyển/bật lớp, không phải fallback của 3DGS;
 - layer toggle;
 - transform editing;
 - review shell.
@@ -398,11 +398,13 @@ M3 — 09/10:
 - real CandidatePackage;
 - real Isaac validation;
 - Web mở đúng scene đó;
-- Web render đúng geometry/point-cloud/collider artifacts và canonical transforms;
+- Web render real Brush 3DGS `VisualArtifact` cùng các view Geometry mesh/Point Cloud/Collider và canonical transforms; kỹ sư chuyển view được trong browser;
 - review và release dùng đúng candidate lineage của job upload qua Web/API.
 
-Direct browser Gaussian rendering là stretch/non-blocking và không nằm trong M3
-gate. EX-REC vẫn phải publish real VisualArtifact metadata/provenance.
+M3 browser proof phải dùng output thực tế từ EX-REC, có format/producer/version,
+checksum và coordinate metadata của `VisualArtifact`. Synthetic fixture hoặc
+point-cloud/mesh không thay proof 3DGS; nếu renderer chưa tương thích output
+Brush, ghi blocker AC-11 và qualification gap, không đổi acceptance âm thầm.
 
 ## 7.2 10–12/10 — Acceptance & Stabilization
 

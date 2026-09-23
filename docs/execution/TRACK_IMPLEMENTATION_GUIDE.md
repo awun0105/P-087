@@ -71,7 +71,7 @@ Nguyên tắc chung:
 | Simulator patterns | `REFERENCE` | Re3Sim, VR-Robo, DISCOVERSE, OpenReal2Sim | reconstruction→simulator patterns | không tạo dependency nếu không cần |
 | Evaluation | `SELF-CODE` | [DATASET_PLAYBOOK](../DATASET_PLAYBOOK.md) | protocol/metric definitions | evaluator orchestration + reports |
 | API/jobs | `SELF-CODE` | FastAPI + basic worker/queue | framework primitives | job/artifact/orchestration lifecycle |
-| Web Studio | `SELF-CODE` | Next.js, Three.js, WebGL/WebGL2 | web/3D primitives | mesh/point-cloud/collider viewer, SceneIR editing, validation/review UX; direct Gaussian rendering là stretch |
+| Web Studio | `SELF-CODE` domain + selective `ADAPT` UI | Next.js, Three.js, WebGL/WebGL2; Kiranism dashboard starter; Spark qualification candidate | generic shell/table/form patterns, 3D primitives and browser Gaussian renderer | real 3DGS Visual/Geometry/Point Cloud/Collider views, SceneIR mapping/editing, validation/review UX |
 | Review/release | `SELF-CODE` | PRD lifecycle | — | approval gate, revision invalidation, release sealing |
 
 Nếu muốn đổi backend hoặc strategy, output contract phải giữ nguyên và phải tuân [`TEAM_EXECUTION_CONTRACT.md`](./TEAM_EXECUTION_CONTRACT.md).
@@ -884,8 +884,8 @@ Không cần advanced scheduler/multi-tenant infra trong P0.
 | `PRODUCT-02` Job states | `SELF-CODE` | PRD | — | job state machine/persistence |
 | `PRODUCT-03` Worker abstraction | `SELF-CODE` | worker contract | — | dispatch interface + queue/CLI integration |
 | `PRODUCT-04` Artifact access | `SELF-CODE` | shared contract | — | registry/resolver |
-| `PRODUCT-05` Web shell | `SELF-CODE` + framework | Next.js | framework primitives | product screens/workflow |
-| `PRODUCT-06` 3D Viewer | `SELF-CODE` | Three.js + WebGL/WebGL2 | camera/scene/rendering primitives | geometry/point-cloud/collider SceneIR composition, select, layer toggles, transform tools; Gaussian loader stretch |
+| `PRODUCT-05` Web shell | `SELF-CODE` domain + selective `ADAPT` UI | Next.js + Kiranism dashboard starter; arhamkhnz/shadcndashboard as secondary references | sidebar, layout, table, form, loading/error, upload UI patterns | typed FastAPI client, project/job/artifact workflow and state ownership |
+| `PRODUCT-06` 3D Viewer | `SELF-CODE` + library | Three.js + official examples; React Three Fiber candidate; Spark P0 qualification candidate | camera/scene/rendering/interaction primitives | real Brush 3DGS Visual + geometry/point-cloud/collider SceneIR views, selection, layer toggles and transform tools |
 | `PRODUCT-07` Object actions | `SELF-CODE` | Scene Core operations | — | UI/application commands |
 | `PRODUCT-07A` Added asset/collider UI | `SELF-CODE` | SceneIR/ColliderSpec contracts | Three.js controls | add/delete obstacle, dimensions, collider adjustment |
 | `PRODUCT-08` Orchestration | `SELF-CODE` | shared worker contracts | — | REC→SCENE→SIM control flow |
@@ -894,7 +894,11 @@ Không cần advanced scheduler/multi-tenant infra trong P0.
 | `PRODUCT-11` Release | `SELF-CODE` | release contract | — | exact-candidate sealing + `ReleaseManifest` |
 | `PRODUCT-12` Demo route | `SELF-CODE` | locked demo scenario | — | stable presentation path |
 
-Track này chủ yếu phải tự code vì đây là **product shell và workflow riêng của Real2Sim Studio**. FastAPI/Next.js/Three.js chỉ cung cấp primitives, không thay product architecture.
+Track này tự code **domain workflow riêng của Real2Sim Studio**, nhưng có thể
+adapt generic Web UI để không viết lại sidebar, tables hoặc forms. Source links,
+take/do-not-take boundaries và license checks nằm trong
+[`INTEGRATION_PLAYBOOK.md` §7.1](./INTEGRATION_PLAYBOOK.md). Starter không được
+thay product architecture, FastAPI backend hoặc shared contracts.
 
 ## 5.5 Implementation steps
 
@@ -927,6 +931,13 @@ EX-PRODUCT sở hữu full-stack web: FastAPI/orchestration nằm tại `src/api
 `frontend/`. Viewer feature canonical placement là
 `frontend/src/features/viewer/`.
 
+Tham khảo [`Kiranism/next-shadcn-dashboard-starter`](https://github.com/Kiranism/next-shadcn-dashboard-starter)
+để adapt có chọn lọc shell, navigation, table/form và loading/error states;
+[`arhamkhnz/next-shadcn-admin-dashboard`](https://github.com/arhamkhnz/next-shadcn-admin-dashboard)
+và [`shadcndashboard/next-shadcn-dashboard`](https://github.com/shadcndashboard/next-shadcn-dashboard)
+chỉ là nguồn pattern phụ (đặc biệt file-dropzone UI). Không kéo Clerk,
+organization/billing, SaaS domain hoặc Next.js business API vào Real2Sim.
+
 Tối thiểu:
 
 - project;
@@ -939,20 +950,33 @@ Tối thiểu:
 
 Load fixture SceneIR.
 
+Dùng [Three.js docs/examples](https://threejs.org/docs/) cho controls, picking,
+loaders và layers. [React Three Fiber](https://github.com/pmndrs/react-three-fiber)
+là library candidate sau khi kiểm tra version/scaffold, không bắt buộc.
+[Spark](https://github.com/sparkjsdev/spark) là P0 qualification candidate cho
+Gaussian view; [Spark + Next.js example](https://github.com/sparkjsdev/spark-react-nextjs)
+chỉ là reference về client-only setup. [Potree](https://github.com/potree/potree)
+chỉ là reference cho point-cloud LOD khi cần. Chưa repo nào được coi là đã
+chứng minh tương thích với output Brush thực tế.
+
 Hỗ trợ:
 
+- render real 3DGS từ Brush `VisualArtifact` trên Primary RGB Scene; mock hoặc PLY point cloud không thay thế;
 - render geometry mesh, point cloud, collider và canonical SceneObject transforms;
+- click chuyển giữa 3DGS Visual, Geometry mesh, Point Cloud và Collider trên cùng SceneIR revision;
 - orbit/pan/zoom;
 - select;
 - hide/show;
 - Visual/Geometry/Collider toggles;
 - transform editing.
 
-P0 dùng Next.js + Three.js + WebGL/WebGL2. Direct browser Gaussian splat rendering
-là stretch/non-blocking cho Foundation/MVP gate hiện tại. Nếu triển khai sau,
-renderer phải load real producer output, capability-detect WebGPU khi relevant,
-quản lý GPU lifecycle và không trình bày mesh/point-cloud fixture như Brush
-compatibility proof.
+P0 dùng Next.js + Three.js + WebGL/WebGL2 baseline. Chọn Gaussian renderer sau
+qualification bằng output Brush thực, kiểm tra artifact checksum, format,
+coordinate conversion và browser capability; nếu renderer dùng WebGPU mới cần
+WebGPU capability check. Nếu Visual không có/không tương thích, hiển thị lỗi và
+cho phép inspect các view khác nhưng không claim AC-11 pass. Cleanup GPU
+resources/listeners/workers khi đổi view hoặc unmount. Mesh/point-cloud fixture
+không phải Brush compatibility proof.
 
 ### PRODUCT-07 — Object actions
 
@@ -1156,7 +1180,7 @@ Không research perfect segmentation.
 Dùng:
 
 ```text
-Web → visual preview
+Web → real 3DGS VisualArtifact + các view kỹ thuật
 Isaac → mesh + collider
 ```
 

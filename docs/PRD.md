@@ -7,14 +7,14 @@
 | Mã dự án | RAV-01 |
 | Tên sản phẩm | Real2Sim Studio |
 | Phạm vi bản phát hành | Warehouse MVP |
-| Phiên bản tài liệu | v1.11 |
+| Phiên bản tài liệu | v1.12 |
 | Trạng thái | Foundation Baseline; benchmark/runtime acceptance inputs pending |
 | Ngày cập nhật | 23/09/2026 |
 | Thời gian thực hiện dự kiến | 4 tuần |
 | Người dùng chính | Kỹ sư mô phỏng (Simulation Engineer) |
 | Miền ứng dụng | Kho trong nhà, robot di động tự hành (Indoor Warehouse AMR) |
 | Trình mô phỏng mục tiêu | NVIDIA Isaac Sim |
-| Tài liệu tiền nhiệm | PRD v1.10 |
+| Tài liệu tiền nhiệm | PRD v1.11 |
 | Tài liệu liên quan | [BRIEF](./BRIEF.md), [DATASET_PLAYBOOK](./DATASET_PLAYBOOK.md), [WIREFRAME](./WIREFRAME_AND_UI_FLOW.md), [Execution Contract](./execution/TEAM_EXECUTION_CONTRACT.md), [Execution Plan](./execution/TEAM_EXECUTION_PLAN.md), [Track Guide](./execution/TRACK_IMPLEMENTATION_GUIDE.md), [Integration Playbook](./execution/INTEGRATION_PLAYBOOK.md) |
 
 ### 0.1 Lịch sử thay đổi (Change Log)
@@ -28,6 +28,7 @@
 | v1.9 | 22/09/2026 | Clarify reusable LiDAR branch, P0 LiDAR Contribution Evidence qua RGB + Registered LiDAR integration và P1 LiDAR-only product configuration |
 | v1.10 | 23/09/2026 | Khóa direct browser rendering của real 3DGS VisualArtifact là P0; renderer backend có thể dùng WebGL/WebGL2 hoặc WebGPU, còn mesh/point-cloud preview chỉ là development/recovery fallback |
 | v1.11 | 23/09/2026 | Foundation override: P0 viewer dùng Next.js + Three.js + WebGL/WebGL2 cho geometry/point-cloud/collider/transforms; direct Gaussian browser rendering chuyển thành stretch/non-blocking; khóa owners và TorWIC bring-up archive |
+| v1.12 | 23/09/2026 | Product decision: khôi phục direct browser rendering của real 3DGS `VisualArtifact` thành yêu cầu P0; mesh, point cloud và collider là các view kỹ thuật ngang hàng, không phải fallback. Giữ Next.js + Three.js/WebGL2 baseline; renderer cụ thể phải qualification bằng output producer thật. |
 
 ### 0.2 Chủ sở hữu và người phê duyệt (Owners and Approvers)
 
@@ -140,7 +141,7 @@ Về dài hạn, Real2Sim Studio có thể phát triển theo hướng **Univers
 | G-04 | Chứng minh LiDAR đã đăng ký có thể thực sự đóng góp vào geometry của ít nhất một scene, thay vì chỉ được tải lên rồi bỏ qua. |
 | G-05 | Bảo đảm con người là người quyết định cuối cùng trước khi scene được phát hành. |
 | G-06 | Lưu đủ dữ liệu và cấu hình để tái tạo lại một bản phát hành đã được duyệt. |
-| G-07 | Cung cấp Web App có Three.js 3D Viewer để xem/chỉnh Geometry, Point Cloud, Collider và SceneObject transforms mà không cần công cụ dựng 3D desktop; direct Gaussian rendering là stretch. |
+| G-07 | Cung cấp Web App có 3DGS Visual view từ `VisualArtifact` thật và các view Geometry mesh, point cloud, Collider có thể chuyển/bật lớp; xem/chỉnh SceneObject transforms mà không cần công cụ dựng 3D desktop. |
 
 ### 2.2 Chỉ số thành công (Success Metrics)
 
@@ -467,7 +468,9 @@ Hệ thống bắt buộc cung cấp Web App chạy trên browser desktop đư�
 
 3D Viewer P0 tối thiểu phải cho phép Editor:
 
+- render Gaussian splats thật từ `VisualArtifact` do EX-REC publish trên Primary RGB Scene; không thay bằng point cloud hoặc mesh rồi gọi là 3DGS;
 - tải và render geometry mesh, point cloud, collider và SceneObject transforms từ artifact refs;
+- chuyển rõ giữa 3DGS Visual, Geometry mesh, Point Cloud và Collider; các view kỹ thuật là công cụ inspection ngang hàng, không phải fallback của 3DGS;
 - orbit, pan và zoom scene;
 - chọn một object;
 - bật/tắt object;
@@ -475,10 +478,14 @@ Hệ thống bắt buộc cung cấp Web App chạy trên browser desktop đư�
 - kiểm tra và chỉnh transform của `SceneObject`;
 - thực hiện các thao tác trên mà không cần mở Blender hoặc Isaac Sim GUI.
 
-P0 dùng Next.js + Three.js + WebGL/WebGL2. Direct browser rendering của Gaussian
-splats/WebGPU là stretch/non-blocking. `VisualArtifact` vẫn là EX-REC output
-abstraction; khi Brush chạy thật phải record format/producer/version/checksum và
-coordinate metadata. Synthetic visual fixture không phải production Brush proof.
+P0 dùng Next.js + Three.js với WebGL/WebGL2 baseline; WebGPU không phải điều kiện
+bắt buộc. Gaussian renderer cụ thể phải được chọn sau khi chứng minh đọc và
+render đúng output thực tế của Brush. `VisualArtifact` giữ format/producer/version,
+checksum và coordinate metadata do EX-REC publish; viewer resolve bằng artifact
+contract và convert coordinate ở boundary. Nếu Visual artifact thiếu, sai checksum,
+không tương thích hoặc browser không render được, UI phải báo trạng thái/lý do rõ
+ràng; mesh/point-cloud vẫn xem được để chẩn đoán nhưng không làm AC-11 đạt.
+Synthetic fixture không phải production Brush/browser compatibility proof.
 
 ### FR-01 — Tạo dự án và tiếp nhận dữ liệu (Project and Data Ingestion)
 
@@ -937,16 +944,20 @@ Từ một bản phát hành đã duyệt, thành viên không trực tiếp t�
 Trên một browser desktop được hỗ trợ, Editor phải có thể:
 
 - mở một reconstructed scene;
+- xem 3D Gaussian splats thực từ `VisualArtifact` của Primary RGB Scene trong browser;
 - xem geometry mesh/point cloud/collider của scene và truy vết được về artifact checksums;
+- click chuyển giữa 3DGS Visual, Geometry mesh, Point Cloud và Collider mà không phải tải một scene state độc lập khác;
 - orbit, pan và zoom scene;
 - chọn một object;
 - bật/tắt object hoặc từng lớp Visual, Geometry và Collider;
 - xem và chỉnh transform của `SceneObject`;
 - hoàn thành các thao tác trên mà không cần mở Blender hoặc Isaac Sim GUI.
 
-Acceptance evidence phải ghi browser, Three.js/WebGL runtime/version và artifact
-checksums. Direct Gaussian renderer nếu có được báo cáo như stretch evidence,
-không phải điều kiện pass AC-11 P0.
+Acceptance evidence phải ghi browser, renderer/Three.js/WebGL runtime và version,
+`VisualArtifact` format/producer/version/checksum cùng checksums của các view
+kỹ thuật, thao tác chuyển view và trạng thái lỗi. AC-11 P0 chỉ pass khi browser
+thực sự render output 3DGS do Brush tạo; mock, synthetic splats hoặc mesh/point
+cloud không thay thế proof này. Browser WebGPU không phải yêu cầu P0.
 
 ---
 

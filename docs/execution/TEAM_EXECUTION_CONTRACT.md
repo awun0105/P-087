@@ -1127,7 +1127,7 @@ Bảng này là crosswalk bắt buộc giữa requirement, pipeline ID, task tri
 | `FR-04` | `ST-FRAME-EXTRACT`, `ST-CAMERA-POSE`, `ST-VISUAL-RECON`, `ST-RGB-GEOMETRY`, `ST-METRIC-CANONICALIZE` | `REC-02A/03/04/05/06/10` | `ReconstructionBundle` | `AC-01` |
 | `FR-05/06` | `ST-LIDAR-INGEST`, `ST-RGB-LIDAR-ALIGN`, `ST-METRIC-CANONICALIZE` | `REC-07/08/09/10` | `LiDARGeometryArtifact`, `AlignmentRecord`, mixed `ReconstructionBundle` | `AC-03/04` |
 | `FR-07` | `ST-OBJECT-EXTRACT`, `ST-OBJECT-ASSOC`, `ST-OBJECT-CONFIRM` | `SCENE-01/02/03/04/05` | candidate objects + provenance | `AC-05` |
-| `FR-08` | `ST-SCENE-DECOMPOSE`, `ST-EDIT` | `SCENE-06/07/08/08A/09`, `PRODUCT-05/06/07/07A` | `SceneIR` revision | `AC-06/11/12` |
+| `FR-00/08` | `ST-SCENE-DECOMPOSE`, `ST-EDIT` | `SCENE-06/07/08/08A/09`, `PRODUCT-05/06/07/07A` | `SceneIR` revision + real `VisualArtifact` + Geometry/Collider refs | `AC-06/11/12` |
 | `FR-09` | `ST-COLLIDER` | `SIM-02/02A/03`, `PRODUCT-07A` | `ColliderSpec`, physics-enriched `SceneIR` | `AC-06/08/12` |
 | `FR-10` | `ST-REVIEW`, `ST-RELEASE` | `PRODUCT-10/11` | `ApprovalRecord`, `ReleaseManifest` | `AC-07` |
 | `FR-11/12` | `ST-PREFLIGHT`, `ST-CANDIDATE-BUILD`, `ST-ISAAC-VALIDATE` | `SIM-01/04/05/06/07` | `PreflightReport`, `CandidatePackage`, `ValidationReport` | `AC-08`, `SM-02/04` |

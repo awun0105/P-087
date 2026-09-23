@@ -93,6 +93,9 @@ Out of scope:
   modeled separately and edit invalidation clears downstream lineage.
 - 2026-09-23: Direct browser Gaussian rendering is stretch/non-blocking; synthetic
   fixture declares a deterministic mock visual format only.
+- 2026-09-23: Viewer priority above is superseded by `docs/PRD.md` v1.12:
+  real Brush 3DGS browser rendering is P0. Foundation's synthetic fixture remains
+  a contract/integration fixture, not browser compatibility evidence.
 - 2026-09-23: Artifact byte verification is performed through external
   `ArtifactRef`; manifest-internal identity fields are not treated as
   self-referential byte checksums.

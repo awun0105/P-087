@@ -715,9 +715,9 @@ Chương này tập trung vào khía cạnh Software Engineering: Cách con ngư
 
 ## 5.1 Giao diện Web Studio và Tương tác Người dùng
 
-- **Trách nhiệm của Web UI:** Web Studio (Next.js, Three.js, FastAPI) là nơi user upload video, xem tiến độ, render geometry mesh/point cloud/collider/SceneObject transforms và thao tác với scene. Direct browser Gaussian-splat rendering là stretch/non-blocking.
+- **Trách nhiệm của Web UI:** Web Studio (Next.js, Three.js, FastAPI) là nơi user upload video, xem tiến độ, render real 3DGS `VisualArtifact` của Primary RGB Scene và chuyển sang các view Geometry mesh, Point Cloud, Collider/SceneObject transforms để inspect và chỉnh scene. Các view kỹ thuật này không phải fallback của 3DGS.
 - **Canonical placement:** EX-PRODUCT sở hữu cả backend và frontend. FastAPI routes nằm ở `src/api/`, job/artifact/review/release logic nằm ở `src/services/orchestration/`, còn toàn bộ Next.js/TypeScript Web Studio nằm ở root `frontend/` theo [`ARCHITECTURE.md`](../../ARCHITECTURE.md). Frontend chỉ gọi backend qua typed API contract; không tạo business-state source of truth cạnh tranh trong Next.js hoặc local React state.
-- **Renderer scope:** P0 dùng Three.js + WebGL/WebGL2 cho mesh, point cloud, object, collider, transform gizmo và layer toggles. Nếu Gaussian renderer/WebGPU được làm ở stretch, nó phải load real producer output, audit license/capability và không được trình bày synthetic visual fixture như Brush compatibility proof.
+- **Renderer scope:** P0 dùng Three.js + WebGL/WebGL2 baseline cho các view kỹ thuật và phải qualification một Gaussian renderer để render output Brush thực. WebGPU có thể là backend thay thế, không phải requirement P0. Viewer phải resolve checksum/coordinate metadata từ `VisualArtifact`, hiển thị lỗi rõ khi thiếu/không tương thích và cleanup GPU resources. Synthetic fixture hoặc PLY point cloud load bằng `PLYLoader` không chứng minh browser đã render 3DGS.
 ### Human Object Confirmation
 Human Object Confirmation — P0
 
@@ -1218,6 +1218,19 @@ Tuyệt đối không nhồi nhét tất cả các repo vào chung một dự á
 | `discoverse-dev/gs-real2sim` | Clean-background + independent-object decomposition | Architecture reference | Reference architecture only; không coi là P0 drop-in backend |
 | `PointsCoder/OpenReal2Sim` | Background pixel/point/mesh completion + simulator-oriented Real2Sim | Research / architecture reference | Audit background completion và reconstruction→simulation patterns |
 | `InternRobotics/Re3Sim` | Real2Sim + OpenMVS + Isaac reference | **Tier-0 system reference** | Reconstruction→Isaac implementation audit |
+| [`Kiranism/next-shadcn-dashboard-starter`](https://github.com/Kiranism/next-shadcn-dashboard-starter) | EX-PRODUCT Web shell, table/form/query-state patterns | P0 selective `ADAPT` reference | Adapt sidebar/layout, list/detail, loading/error and form patterns into `frontend/`; do not import Clerk, organizations, billing, Next.js business API routes or starter state model |
+| [`arhamkhnz/next-shadcn-admin-dashboard`](https://github.com/arhamkhnz/next-shadcn-admin-dashboard) | Alternative dashboard layout/UX | `REFERENCE` | Inspect responsive navigation, layouts and theme patterns; not a second app base |
+| [`shadcndashboard/next-shadcn-dashboard`](https://github.com/shadcndashboard/next-shadcn-dashboard) | Form/table/file-dropzone examples | `REFERENCE` | Inspect upload UI patterns only; validate files and rights via Real2Sim/FastAPI contracts |
+| [`three.js`](https://threejs.org/docs/) + [official examples](https://threejs.org/examples/) | EX-PRODUCT browser scene primitives | P0 library/reference | Camera controls, picking, loaders, layers, transform controls; SceneIR mapping stays project-owned |
+| [`pmndrs/react-three-fiber`](https://github.com/pmndrs/react-three-fiber) | Optional React/Three.js integration | Candidate library | Consider only after frontend scaffold/version compatibility check; not a separate scene truth |
+| [`sparkjsdev/spark`](https://github.com/sparkjsdev/spark) | Browser Gaussian-splat renderer candidate | P0 qualification candidate | Inspect Three.js/WebGL2 integration; adopt only after real Brush output compatibility, coordinate, checksum and browser proof |
+| [`sparkjsdev/spark-react-nextjs`](https://github.com/sparkjsdev/spark-react-nextjs) | Spark + Next.js/React Three Fiber example | `REFERENCE` | Inspect client-only module setup and renderer lifecycle; do not clone as Real2Sim product |
+| [`potree/potree`](https://github.com/potree/potree) | Large point-cloud LOD/streaming patterns | `REFERENCE` | Consult if point-cloud scale requires LOD; not P0 dependency or 3DGS renderer |
+
+EX-PRODUCT không clone nguyên dashboard starter vào repository. Các repo Web ở trên
+chỉ cung cấp generic UI/graphics patterns; FastAPI, SceneIR, artifact lineage,
+authorization, review và release vẫn theo Real2Sim contracts. Khi copy/adapt
+code phải kiểm tra license của đúng revision và giữ attribution/notice cần thiết.
 
 
 ## 7.2 Quy tắc Tích hợp cho Lập trình viên / AI Agent (Integration Rules)

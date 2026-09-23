@@ -19,7 +19,8 @@ ADD minimal Real2Sim modules
 
 Không rename, move, delete hoặc archive file/thư mục do ban tổ chức cung cấp. Module scaffold hiện có nhưng chưa được Real2Sim sử dụng vẫn được giữ nguyên. `Dockerfile`, `docker-compose.yml`, `src/api/`, `src/agents/`, `src/llm/`, `src/models/schemas.py`, top-level `eval/` và `eval/results/report.md` là các path ổn định.
 
-Canonical Real2Sim module structure:
+Canonical Real2Sim module structure (placement mục tiêu, không khẳng định mọi
+thư mục đã được implement ở checkout hiện tại):
 
 ```text
 src/
@@ -31,6 +32,7 @@ src/
 │   └── contracts/                    # Shared artifact contracts
 │       ├── artifacts.py
 │       ├── coordinates.py
+│       ├── identity.py               # Canonical content/package checksums
 │       ├── manifests.py
 │       ├── reconstruction.py
 │       ├── scene.py
@@ -89,6 +91,7 @@ fixtures/                             # Shared contract-shaped development fixtu
 
 tests/                                # Existing tests remain; track suites are additive
 ├── test_contracts/
+├── test_api/                          # Organizer API/scaffold tests
 ├── test_reconstruction/
 ├── test_scene/
 ├── test_simulation/
@@ -148,11 +151,13 @@ bao gồm Web Studio, Three.js viewer, job/progress UI, SceneObject editing,
 validation, review và release UI.
 
 P0 browser viewer dùng `Three.js` + WebGL/WebGL2 tại
-`frontend/src/features/viewer/` cho geometry mesh, point cloud, SceneObject,
-collider proxy, transform controls và layer toggles. Direct browser Gaussian
-splat/WebGPU rendering là stretch/non-blocking. Nếu được triển khai sau, renderer
-phải load real producer output, audit license/runtime và không trình bày synthetic
-visual fixture như Brush compatibility proof.
+`frontend/src/features/viewer/` cho real 3DGS `VisualArtifact`, geometry mesh,
+point cloud, SceneObject, collider proxy, transform controls và view/layer
+toggles. Các view dùng chung canonical SceneIR/SceneObject transforms; không có
+scene truth riêng trong browser. Gaussian renderer P0 phải load output Brush thực
+qua artifact refs/checksums và được qualification về format, license, browser
+capability và GPU lifecycle. WebGPU là optional backend, không phải P0 requirement;
+synthetic fixture hoặc mesh/point cloud không phải Brush compatibility proof.
 
 Frontend giao tiếp với backend qua FastAPI tại `src/api/` và typed API contracts.
 Không import Python implementation, không gọi trực tiếp worker internals và không
@@ -187,100 +192,257 @@ trong contracts. Publication phải atomic, immutable và SHA-256-verifiable.
 
 ## Architecture Diagram
 
+Sơ đồ dưới đây được chuẩn hóa từ [bản trình bày mentor](docs/mentor-duty-report/buoi-2/script/script-buoi-2.md)
+thành **logical pipeline**; các tool ghi trong ngoặc là P0
+implementation của track, không phải field hoặc dependency bắt buộc của shared
+contracts. `EX-PRODUCT` điều phối và hiển thị xuyên suốt, không chỉ xuất hiện ở
+bước cuối. RGB-only, RGB-D và RGB+LiDAR là các configuration khác nhau;
+alignment chỉ bắt buộc khi bundle mixed RGB+LiDAR.
+
 ```mermaid
-graph TB
-    UI[Next.js + Three.js Web Studio] --> API[FastAPI + Orchestration]
-    API --> REC[EX-REC Worker]
-    REC -->|ReconstructionBundle| SCENE[EX-SCENE Worker]
-    SCENE -->|SceneIR| SIM[EX-SIM Worker]
-    SIM -->|Candidate + ValidationReport| API
-    API --> REVIEW[Human Review / Release]
-    STORE[(FilesystemArtifactStore)]
-    REC --> STORE
+flowchart TB
+    HUMAN["Editor / Reviewer"] <--> WEB["EX-PRODUCT: Web Studio / viewer"]
+    WEB <--> API["EX-PRODUCT: FastAPI / orchestration"]
+    API --> INPUT["InputManifest + product-safe artifact refs"]
+
+    subgraph REC["EX-REC: Dataset + Reconstruction"]
+        INPUT --> RGB["RGB video/frames: validate + privacy; extract frames if needed"]
+        INPUT --> DEPTH["Optional sensor depth + scale metadata"]
+        INPUT --> LIDAR["Optional registered LiDAR / adapter-prefused scans"]
+        RGB --> POSE["Camera poses / SfM (COLMAP P0)"]
+        POSE --> VIS["VisualArtifact: real 3DGS (Brush P0)"]
+        POSE --> GEO["RGB geometry (OpenMVS P0)"]
+        LIDAR --> LG["LiDARGeometryArtifact"]
+        LG --> ALIGN["AlignmentRecord if mixed RGB + LiDAR"]
+        VIS --> COMPOSE["Metric/canonicalize + SceneComposer"]
+        GEO --> COMPOSE
+        DEPTH --> COMPOSE
+        ALIGN --> COMPOSE
+        COMPOSE --> BUNDLE["ReconstructionBundle"]
+    end
+
+    subgraph SCENE["EX-SCENE: Object Intelligence + Scene Core"]
+        BUNDLE --> EXTRACT["Object extraction + mask propagation (SAM2 P0)"]
+        EXTRACT --> ASSOC["Multi-view association / 3D regions"]
+        ASSOC --> CONFIRM["Human Object Confirmation"]
+        CONFIRM --> DECOMP["Environment + SceneObjects"]
+        DECOMP --> IR["Canonical SceneIR revision"]
+    end
+
+    subgraph SIM["EX-SIM: Physics + Validation"]
+        IR --> COLL["Collider enrichment: new SceneIR revision"]
+        COLL --> PREFLIGHT["Static preflight"]
+        PREFLIGHT --> CAND["OpenUSD export + immutable CandidatePackage"]
+        CAND --> ISAAC["Isaac: load, robot spawn, collision, floor, path checks"]
+        ISAAC --> REPORT["ValidationReport: observed CLEAR / BLOCKED / ERROR"]
+    end
+
+    WEB -->|confirmation commands| CONFIRM
+    BUNDLE -->|visual/artifact refs| WEB
+    IR -->|scene view| WEB
+    CAND -->|candidate evidence| WEB
+    REPORT -->|validation evidence| WEB
+    WEB -->|edit command| EDIT["Scene edit: new DRAFT revision"]
+    EDIT --> IR
+    REPORT --> GATE["READY_FOR_REVIEW only if blocking checks pass"]
+    GATE --> REVIEW["EX-PRODUCT: Reviewer decision"]
+    REVIEW -->|approve| APPROVAL["ApprovalRecord"]
+    APPROVAL --> RELEASE["ReleaseManifest: exact validated candidate"]
+    REVIEW -->|reject with reason| EDIT
+
+    REPORT --> EVAL["EvaluationRunner: benchmark / locked acceptance only"]
+    GT["Locked GT + expected labels; evaluation-only"] --> EVAL
+```
+
+Mọi mũi tên qua ranh giới track là typed contract + published artifact
+URI/checksum, không phải import nội bộ hoặc cùng một process. Sơ đồ không hàm ý
+`traj_gt.txt` hay `groundtruth_map.ply` là product input: raw GT thuộc evaluation;
+GT-assisted offline preprocessing, nếu được khai báo, phải giữ dependency trong
+provenance và không được claim trajectory/geometry độc lập với GT. Evaluation chỉ
+so sánh với locked reference **sau khi prediction đã cố định**; Isaac chỉ report
+observation. Một edit sau validation luôn tạo `DRAFT` revision mới và invalidates
+candidate/report/approval cũ. `SceneIR` vẫn là source of truth; OpenUSD là export
+để validate, không phải scene state cạnh tranh. Browser P0 phải xem được real
+3DGS `VisualArtifact` cùng các technical views, không chỉ mesh/point cloud.
+
+### Pipeline glossary
+
+- **SfM (Structure from Motion):** ước lượng camera poses và cấu trúc thưa từ
+  nhiều ảnh; output backend được adapter chuẩn hóa trước khi publish.
+- **RGB–LiDAR alignment:** xác nhận transform giữa RGB geometry và registered
+  LiDAR geometry cho mixed bundle, lưu `AlignmentRecord`; declared transform
+  chưa phải confirmed alignment.
+- **Canonicalize:** chuyển unit/axes/frame/transform về meter, Z-up,
+  right-handed, `parent_from_local`; metric scale phải có evidence phù hợp.
+- **SceneComposer:** tổng hợp các representation/ref đã chuẩn hóa thành
+  `ReconstructionBundle` theo modality rules; Visual, Geometry và Physics vẫn
+  tách biệt.
+- **Object extraction/segmentation:** xác định vùng ảnh thuộc candidate object;
+  SAM2 là P0 implementation, không phải field của `SceneIR`.
+- **Mask propagation:** theo dõi/lan truyền mask qua các frame để hỗ trợ
+  association, không tự động xác nhận object identity.
+- **Multi-view association:** nối các quan sát ở nhiều view vào cùng candidate
+  object/3D region; human confirmation vẫn là gate trước decomposition.
+- **AABB / OBB / convex hull / simplified mesh:** các lựa chọn collider theo
+  độ chính xác/chi phí khác nhau; collider là representation physics gắn với
+  logical object, không lấy visual 3DGS làm collider.
+- **Static preflight:** kiểm metric, transform, bounds, artifact/collider,
+  object confirmation và cấu hình cần thiết **trước candidate build**. Việc USD
+  load và robot spawn thuộc bước Isaac validation sau export.
+- **Robot spawn / floor / collision checks:** kiểm candidate có load và khởi
+  tạo robot hợp lệ, mặt sàn/collider có dùng được, không có penetration không
+  hợp lệ; lỗi runtime được report là `ERROR`, không suy thành `PASS`.
+- **Start–Goal path validation:** quan sát `CLEAR`, `BLOCKED` hoặc `ERROR`
+  cho từng cặp; hidden expected label chỉ được `EvaluationRunner` đọc, còn
+  required route trong product config dùng rule riêng.
+- **Artifact handoff:** bàn giao typed artifact bằng logical URI, SHA-256 và
+  provenance qua các track; fixture proof không phải real GPU/Isaac acceptance.
+- **Seal exact validated candidate:** `ApprovalRecord` và `ReleaseManifest`
+  phải bind đúng checksum của candidate đã được validate; không rebuild sau
+  approval rồi coi là cùng release.
+
+## Organizer Template Appendix (Non-Normative)
+
+Các mục của organizer scaffold được giữ nhưng diễn giải theo Real2Sim. Appendix
+này mô tả **kiến trúc mục tiêu** và **trạng thái triển khai quan sát được**, không
+thay thế PRD, shared Contract hoặc quyết định runtime chưa được khóa. Ở checkout
+hiện tại, typed contracts, synthetic fixtures và filesystem artifact store đã có;
+`frontend/` chưa được tạo, FastAPI vẫn là chat-agent scaffold, và
+`docker-compose.yml` mới khai báo backend. Fixture/integration proof không phải
+real Brush, browser hoặc Isaac acceptance.
+
+### Components
+
+### 1. Frontend (React/Next.js)
+
+- **Purpose:** Web Studio cho Editor/Reviewer; `EX-PRODUCT` tạo tại root
+  `frontend/`, với viewer ở `frontend/src/features/viewer/`.
+- **Key Features (P0 target):** project/job/upload/progress, SceneIR inspection
+  và editing, chuyển/bật 3DGS Visual, Geometry mesh, point cloud và Collider
+  views, xem validation evidence, review và release. Real 3DGS phải được
+  qualification bằng `VisualArtifact` do Brush tạo; mesh/point cloud không thay
+  thế proof này.
+- **State Management:** UI chỉ giữ camera, selection, visible layers và thao tác
+  tạm thời. Job, artifact, SceneIR revision, validation, review và release được
+  lưu ở backend/artifact store; edit gửi command qua typed FastAPI boundary rồi
+  render lại canonical state. Chưa khóa thư viện quản lý client state.
+
+### 2. Backend (FastAPI)
+
+- **Purpose:** `EX-PRODUCT` sở hữu project/job API, orchestration, artifact
+  lifecycle, scene edit commands, validation presentation, review và release.
+  Worker chuyên môn xử lý trong boundary của track tương ứng; API không import
+  internals của các track.
+- **API Design:** typed request/response qua `src/api/` và shared contracts;
+  published artifacts được tham chiếu bằng logical URI/checksum, không bằng
+  local filesystem path. Endpoint product cụ thể thuộc `PRODUCT-*` tasks, chưa
+  được coi là đã implement chỉ vì API scaffold tồn tại.
+- **Authentication/authorization:** PRD/Contract yêu cầu tách quyền Editor và
+  Reviewer, audit review decision và chỉ release candidate đã validate/approve.
+  Cơ chế đăng nhập/token/session cụ thể chưa được khóa; không mặc định JWT hoặc
+  bỏ auth. `src/api/routes.py` hiện chỉ có chat/status scaffold.
+
+### 3. AI Agent (LangGraph)
+
+`src/agents/` và `src/llm/` là organizer scaffold được giữ nguyên. Agent chat
+LangGraph hiện có không phải orchestration engine hay một handoff của Real2Sim
+P0. Không đưa LLM/agent vào đường bắt buộc
+`ReconstructionBundle → SceneIR → CandidatePackage → ValidationReport`.
+
+- **Agent Type:** chưa chọn agent type cho Real2Sim P0.
+- **State/Nodes/Tools:** `src/agents/state.py`, `graph.py` và example modules
+  thuộc scaffold chat hiện tại; không định nghĩa SceneIR, job lifecycle hay
+  review policy. Nếu có agent task sau này, scope và I/O phải được khóa riêng.
+- **Flow:** product pipeline dùng typed stage/artifact contracts ở phần Data Flow
+  dưới, không đi qua chat LLM.
+
+### 4. Database
+
+- **Type:** product database chưa được chọn ở Foundation; không bắt buộc
+  PostgreSQL. `src/config.py` còn default SQLite của organizer scaffold, không
+  phải quyết định persistence cho job/review/release.
+- **Tables:** chưa khóa product tables; contract artifacts và fixture job không
+  đồng nghĩa đã có production schema.
+- **Migrations:** chưa chọn migration tool cho product data. Không coi Alembic là
+  requirement đã được chấp nhận.
+- **P0 durable boundary hiện có:** logical artifact URI qua
+  `ArtifactResolver`/`FilesystemArtifactStore`; exact storage/runtime wiring của
+  product workflow thuộc EX-PRODUCT tasks.
+
+### 5. Vector Store
+
+Không có vector store hoặc embedding model bắt buộc cho Real2Sim P0 handoff.
+`chroma_persist_dir` trong `src/config.py` là organizer scaffold, không phải
+quyết định chọn ChromaDB cho scene understanding, retrieval hay product API.
+Chỉ bổ sung vector store khi một approved task có consumer và acceptance rõ.
+
+## Data Flow
+
+1. Editor gửi input/config qua Web Studio → FastAPI; API tạo job và tham chiếu
+   `InputManifest`/published input artifacts. Input/GT được phân loại theo typed
+   data class, không suy từ tên file hoặc URI.
+2. `EX-REC` chuẩn hóa sensor inputs và publish `ReconstructionBundle`;
+   `EX-SCENE` đọc contract đó để publish canonical, editable `SceneIR`.
+3. `EX-SIM` làm collider/preflight, xuất candidate OpenUSD **từ SceneIR** rồi
+   chạy Isaac validation để publish `CandidatePackage` và `ValidationReport`.
+   OpenUSD không trở thành nguồn sự thật cạnh tranh với SceneIR.
+4. `EX-PRODUCT` hiển thị scene/views và validation evidence cho Reviewer. Khi
+   edit, tạo SceneIR revision mới và invalidate validation/approval cũ.
+5. Reviewer approve/reject; release chỉ tham chiếu **exact validated candidate**
+   cùng approval/report identity, không rebuild rồi gọi là cùng candidate.
+   `EvaluationReport`/GT thuộc evaluation boundary riêng, không feed vào runtime
+   prediction/validation.
+
+Durable cross-stage/worker handoff đi qua contract + immutable artifact URI/SHA-256.
+Tính toán nội bộ một worker có thể dùng memory; không yêu cầu ghi file giữa mỗi
+function. `VisualArtifact` (3DGS), geometry và physics/collider là các
+representation tách biệt nhưng dùng cùng `SceneObject.transform`.
+
+## Deployment Architecture
+
+Logical target, không phải mô tả `docker-compose.yml` hiện tại:
+
+```mermaid
+graph LR
+    B[Browser / Next.js Web Studio] --> API[FastAPI / EX-PRODUCT]
+    API --> REC[EX-REC runtime]
+    API --> SCENE[EX-SCENE runtime]
+    API --> SIM[EX-SIM / Isaac runtime]
+    REC --> STORE[(ArtifactResolver + persistent store)]
     SCENE --> STORE
     SIM --> STORE
     API --> STORE
 ```
 
-## Organizer Template Appendix (Non-Normative)
-
-Phần template bên dưới được giữ để không xóa organizer scaffold, nhưng không mô
-tả Real2Sim Foundation và không tạo authority về LangGraph, database, vector
-store, authentication hoặc deployment. Các quyết định chưa được khóa vẫn là
-placeholder; PostgreSQL/production database nằm ngoài Foundation scope.
-
-### Components
-
-### 1. Frontend (React/Next.js)
-- **Purpose:** [mô tả]
-- **Key Features:** [danh sách]
-- **State Management:** [approach]
-
-### 2. Backend (FastAPI)
-- **Purpose:** [mô tả]
-- **API Design:** RESTful
-- **Authentication:** [JWT/None]
-
-### 3. AI Agent (LangGraph)
-- **Agent Type:** [ReAct / Plan-and-Execute / Custom]
-- **State:** [mô tả state schema]
-- **Nodes:** [danh sách nodes]
-- **Tools:** [danh sách tools]
-- **Flow:**
-
-```mermaid
-graph LR
-    START --> A[Node A]
-    A --> B{Decision}
-    B -->|Yes| C[Node C]
-    B -->|No| D[Node D]
-    C --> E[END]
-    D --> E
-```
-
-### 4. Database
-- **Type:** [PostgreSQL / SQLite]
-- **Tables:** [danh sách]
-- **Migrations:** Alembic
-
-### 5. Vector Store
-- **Type:** [ChromaDB / FAISS / Pinecone]
-- **Embeddings:** [model]
-- **Purpose:** [RAG / similarity search]
-
-## Data Flow
-
-1. User gửi request từ Frontend
-2. API route nhận và validate input
-3. Agent xử lý qua LangGraph pipeline
-4. LLM generate response
-5. Tools thực thi actions (nếu cần)
-6. Response trả về Frontend
-
-## Deployment Architecture
-
-```mermaid
-graph LR
-    subgraph Docker
-        FE[Frontend Container]
-        BE[Backend Container]
-        DB_C[Database Container]
-    end
-    FE --> BE --> DB_C
-```
+Reconstruction, scene-intelligence, simulation và platform có thể cần runtime
+riêng; invocation/status và artifact contracts là interface, không phải Python
+cross-import. Target deployment là cloud NVIDIA GPU + Isaac Sim. GPU model,
+driver/CUDA, Isaac/OpenUSD và tool versions phải ghi vào runtime manifest sau
+provisioning; hiện vẫn `UNVERIFIED/TBD`. Không suy ra đã có frontend/worker
+containers từ sơ đồ.
 
 ## Security
 
-- API keys stored in `.env` (never commit)
-- Input validation via Pydantic
-- Rate limiting on API endpoints
-- CORS configured for frontend domain
+- Secret qua environment/`Settings`, không commit `.env` hay log credential.
+- FastAPI I/O và shared artifacts được validate bằng typed Pydantic contracts;
+  artifact resolution kiểm URI, existence, immutable publication và SHA-256.
+- Product-facing boundary từ chối raw GT/evaluation-only data bằng typed
+  classification; GT-assisted derived artifact giữ provenance cho evaluation.
+- Editor/Reviewer actions và exact candidate approval/release cần authorization
+  cùng audit evidence. Cơ chế identity/login cụ thể chưa được chốt.
+- `src/main.py` hiện cấu hình CORS từ `Settings.cors_origins`; allowed origins
+  của Web Studio phải được cấu hình khi deploy. Rate limiting và production
+  perimeter chưa được khóa/kiểm chứng, không claim đã triển khai.
 
 ## Design Decisions
 
 | Decision | Choice | Reason |
 |----------|--------|--------|
-| Framework | FastAPI | Async, auto-docs, type-safe |
-| Agent | LangGraph | Flexible state management |
-| Database | [choice] | [reason] |
-| Frontend | Next.js | [reason] |
+| Backend boundary | FastAPI tại `src/api/` | Product API và typed worker/artifact orchestration |
+| Frontend boundary | Next.js/TypeScript tại root `frontend/` | Web Studio và client-side 3D viewer; chưa scaffold |
+| Viewer P0 | Three.js/WebGL/WebGL2 + qualified Gaussian renderer | Real 3DGS Visual và kỹ thuật Geometry/Point Cloud/Collider trên cùng SceneIR |
+| Shared state | `SceneIR` + immutable artifact contracts | Một canonical scene/object transform; không dùng USD/browser state làm truth |
+| Artifact storage P0 | Resolver + filesystem store | Logical URI/SHA-256, atomic immutable handoff; có synthetic Foundation proof |
+| Worker boundary | Isolated runtimes + published artifacts | Tránh import internals/coupling GPU dependencies giữa tracks |
+| Agent / vector store | Không thuộc required P0 pipeline | Organizer scaffold được giữ; chưa có consumer được khóa |
+| Product database/auth mechanism | Chưa khóa | Không suy từ SQLite/JWT/Alembic template thành product decision |

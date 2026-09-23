@@ -233,9 +233,10 @@ Chi tiết: `docs/guide/code-style/python.md` và
 - Three.js/Gaussian resources, listeners, animation frames, workers và GPU allocations
   phải có lifecycle cleanup để tránh leak khi unmount/reload.
 - Renderer path thực sự được triển khai phải có capability/error/degraded state rõ
-  ràng. P0 dùng WebGL/WebGL2; chỉ áp dụng WebGPU lifecycle/capability checks khi task
-  stretch thực sự thêm Gaussian/WebGPU renderer. Mesh/point-cloud mock không được báo
-  cáo như real 3DGS acceptance.
+  ràng. P0 phải render real 3DGS `VisualArtifact` trong browser cùng các view
+  mesh/point-cloud/collider; WebGL/WebGL2 là baseline, WebGPU chỉ cần check khi
+  backend được chọn thực sự dùng WebGPU. Mesh/point-cloud mock không được báo
+  cáo như real Brush/3DGS acceptance; mọi GPU resource phải được cleanup.
 - Dùng scripts/linter/test runner thật trong `frontend/package.json` khi scaffold tồn
   tại; không invent command hoặc claim frontend checks trước khi project được tạo.
 
