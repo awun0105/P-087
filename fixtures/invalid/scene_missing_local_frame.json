@@ -1,0 +1,30 @@
+{
+  "artifact_type": "SceneIR",
+  "schema_version": "1.0",
+  "scene_id": "invalid-scene",
+  "scene_revision": "rev-001",
+  "coordinate_system": {"unit": "meter", "up_axis": "Z", "handedness": "right", "world_frame": "world"},
+  "metric_scale": {"status": "CONFIRMED", "meters_per_unit": 1.0},
+  "environment": {"geometry_ref": {
+    "artifact_type": "EnvironmentGeometry", "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-fixture-001/scene/environment_geometry.ply",
+    "artifact_checksum": "sha256:2cb521d29b503e80a7c21a57877e30fafb12e9d81c21b3b381f08b6c3af7920d",
+    "data_class": "derived",
+    "producer_stage": "ST-SCENE-DECOMPOSE", "job_id": "job-fixture-001"
+  }},
+  "objects": [{
+    "id": "object-001", "name": "Missing frame", "state": "CONFIRMED",
+    "origin": "reconstructed", "active": true,
+    "transform": {"parent_frame": "world", "local_frame": "object-001", "translation_xyz": [0,0,0], "rotation_quaternion_xyzw": [0,0,0,1]},
+    "geometry_ref": {
+      "artifact_type": "ObjectGeometry", "schema_version": "1.0",
+      "artifact_uri": "artifact://jobs/job-fixture-001/scene/object_pallet_geometry.ply",
+      "artifact_checksum": "sha256:a3349fcaf5efe381a6a43483b38f1c6390aea0ed8a35b9b35d55c600b521b3a8",
+      "data_class": "derived",
+      "producer_stage": "ST-SCENE-DECOMPOSE", "job_id": "job-fixture-001"
+    },
+    "provenance": {"fixture": true}
+  }],
+  "provenance": {"fixture": true},
+  "scene_ir_checksum": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+}

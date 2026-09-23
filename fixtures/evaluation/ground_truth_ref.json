@@ -1,0 +1,10 @@
+{
+  "artifact_type": "GroundTruthMap",
+  "schema_version": "1.0",
+  "artifact_uri": "artifact://jobs/job-fixture-001/evaluation_only/groundtruth_map.mock",
+  "artifact_checksum": "sha256:42999dc9647957e4219c7243c9336b9c6b5c5b0f4d6a7c6fef0e19ea351609f3",
+  "data_class": "ground_truth",
+  "producer_stage": "EVAL-PREP",
+  "job_id": "job-fixture-001",
+  "source_provenance": {"fixture": true, "evaluation_only": true}
+}

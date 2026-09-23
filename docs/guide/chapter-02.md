@@ -110,7 +110,7 @@ Một câu nói kinh điển trong ngành phần mềm là "It works on my machi
 
 Trước khi bắt đầu, hãy xác nhận máy bạn đáp ứng các yêu cầu sau:
 
-- **Python 3.11 hoặc mới hơn.** Python 3.11 mang đến cải thiện tốc độ đáng kể (nhanh hơn 3.11 khoảng 10-25% so với 3.10) và hỗ trợ better error messages. Python 3.12+ cũng hoạt động tốt, nhưng một số thư viện có thể chưa tương thích hoàn toàn. Khuyến nghị: dùng Python 3.11.x.
+- **Python 3.12 hoặc mới hơn.** Python 3.12 mang đến cải thiện tốc độ đáng kể (nhanh hơn 3.12 khoảng 10-25% so với 3.10) và hỗ trợ better error messages. Python 3.12+ cũng hoạt động tốt, nhưng một số thư viện có thể chưa tương thích hoàn toàn. Khuyến nghị: dùng Python 3.12.x.
 
 - **pip phiên bản mới nhất.** Chạy `pip install --upgrade pip` để cập nhật.
 
@@ -122,10 +122,10 @@ Kiểm tra phiên bản Python:
 
 ```bash
 $ python3 --version
-# Output mong đợi: Python 3.11.x hoặc cao hơn
+# Output mong đợi: Python 3.12.x hoặc cao hơn
 
 # Nếu bạn có nhiều phiên bản Python, kiểm tra chính xác:
-$ python3.11 --version
+$ python3.12 --version
 ```
 
 ### Tạo virtual environment
@@ -134,7 +134,7 @@ Virtual environment (venv) là một môi trường Python cô lập, tách bi�
 
 ```bash
 # Từ thư mục gốc của dự án
-$ python3.11 -m venv .venv
+$ python3.12 -m venv .venv
 
 # Kích hoạt venv trên macOS/Linux
 $ source .venv/bin/activate
@@ -512,7 +512,7 @@ Agent tự động phân tích sentiment của bài đăng mạng xã hội và 
 
 ## Quick Start
 ```bash
-python3.11 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env  # Điền API key
@@ -638,7 +638,7 @@ Copy từ `.env.example` sang `.env` và điền `AI_LOG_API_KEY` do instructor 
 
 ## Tóm tắt
 
-Chương này hướng dẫn bạn khởi tạo dự án từ template — bước đầu tiên và quan trọng nhất. Chúng ta đã đi qua việc clone repository, hiểu cấu trúc thư mục (src/, tests/, docs/, eval/, presentation/), thiết lập môi trường ảo với Python 3.11+, cài đặt dependencies, và chạy server lần đầu tiên.
+Chương này hướng dẫn bạn khởi tạo dự án từ template — bước đầu tiên và quan trọng nhất. Chúng ta đã đi qua việc clone repository, hiểu cấu trúc thư mục (src/, tests/, docs/, eval/, presentation/), thiết lập môi trường ảo với Python 3.12+, cài đặt dependencies, và chạy server lần đầu tiên.
 
 Bạn cũng đã học cách quản lý biến môi trường với pydantic-settings, thiết lập Git workflow với branching strategy và commit message convention, và hiểu được những gì cần tùy chỉnh so với những gì cần giữ nguyên từ template.
 

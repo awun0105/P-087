@@ -76,7 +76,7 @@ Dưới đây là `Dockerfile` hoàn chỉnh cho ứng dụng LangGraph + FastAP
 # ============================================
 # Stage 1: Builder — cài đặt dependencies
 # ============================================
-FROM python:3.11-slim AS builder
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
@@ -96,7 +96,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # ============================================
 # Stage 2: Production — image cuối cùng
 # ============================================
-FROM python:3.11-slim AS production
+FROM python:3.12-slim AS production
 
 # Thiết lập biến môi trường
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -353,7 +353,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install Ruff
         run: pip install ruff
@@ -378,7 +378,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Cache pip dependencies
         uses: actions/cache@v4

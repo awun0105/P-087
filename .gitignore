@@ -58,3 +58,7 @@ out/
 # AI logs — tracked structure, ignored content
 .ai-log/*.jsonl
 .ai-log/archive/
+
+# Harness core maintenance binary
+scripts/bin/harness
+scripts/bin/harness.exe

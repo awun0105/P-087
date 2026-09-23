@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "candidate_checksum": "sha256:7cc30d42394e6df440c2c0533c64aad0923997961baffef07ec1388fc1876bdb",
+  "validator_version": "fixture-validator-1.0",
+  "environment_versions": {"isaac_sim": "UNVERIFIED", "gpu": "UNVERIFIED"},
+  "checks": [{
+    "check_id": "ROBOT_SPAWN",
+    "result": "FAIL",
+    "evidence_refs": [{
+      "artifact_type": "ValidationEvidence", "schema_version": "1.0",
+      "artifact_uri": "artifact://jobs/job-fixture-001/simulation/validation_evidence.json",
+      "artifact_checksum": "sha256:683e787b9d71f0b44afd9f22dc484b07b29d62bbeb40f7deb27b118ab4cd047e",
+      "data_class": "derived", "producer_stage": "ST-ISAAC-VALIDATE", "job_id": "job-fixture-001"
+    }],
+    "message": "Synthetic fixture failure; robot was not spawned in Isaac."
+  }],
+  "path_results": [{
+    "pair_id": "fixture-pair-001",
+    "result": "ERROR",
+    "evidence_refs": [],
+    "message": "Synthetic fixture error; no path result was observed."
+  }],
+  "overall_result": "FAIL",
+  "report_checksum": "sha256:668e064fb5a049bbdeadd869091ab4ef870c60f649e39584c749ae251a821af5"
+}

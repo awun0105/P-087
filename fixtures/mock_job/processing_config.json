@@ -1,0 +1,6 @@
+{
+  "schema_version": "1.0",
+  "profile": "synthetic_contract_integration",
+  "seed": 7,
+  "real_worker_proof": false
+}

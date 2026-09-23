@@ -1,0 +1,5 @@
+#usda 1.0
+(
+    documentation = "Synthetic fixture only; not Isaac acceptance evidence"
+)
+def Xform "World" {}

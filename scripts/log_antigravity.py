@@ -48,13 +48,14 @@ Env overrides:
   ANTIGRAVITY_BRAIN_DIR  point at a different brain/ directory
   AI_LOG_DIR             where session.jsonl is written (default: .ai-log)
 """
+
 import argparse
 import json
 import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Fix Windows console encoding so VN diacritics in prompts print cleanly.
@@ -70,6 +71,7 @@ GEMINI_HOME = Path.home() / ".gemini"
 
 # Antigravity has shipped under two folder names; prefer the newer IDE one.
 BRAIN_CANDIDATES = (
+    GEMINI_HOME / "antigravity-cli" / "brain",
     GEMINI_HOME / "antigravity-ide" / "brain",
     GEMINI_HOME / "antigravity" / "brain",
 )
@@ -86,7 +88,10 @@ AUX_BLOCK_RE = re.compile(
 def git(cmd: str, cwd: Path | None = None) -> str:
     try:
         return subprocess.check_output(
-            cmd.split(), shell=False, text=True, stderr=subprocess.DEVNULL,
+            cmd.split(),
+            shell=False,
+            text=True,
+            stderr=subprocess.DEVNULL,
             cwd=cwd,
         ).strip()
     except Exception:
@@ -107,14 +112,14 @@ def repo_context(cwd: Path | None = None) -> tuple[str, str, str, str]:
         repo or root.name,
         git("git rev-parse --abbrev-ref HEAD", cwd),
         git("git rev-parse --short HEAD", cwd),
-        git("git config user.email", cwd)
-        or os.environ.get("USERNAME", os.environ.get("USER", "unknown")),
+        git("git config user.email", cwd) or os.environ.get("USERNAME", os.environ.get("USER", "unknown")),
     )
 
 
 # ---------------------------------------------------------------------------
 # Locating brain/
 # ---------------------------------------------------------------------------
+
 
 def get_brain_dirs() -> list[Path]:
     """Brain directories to scan, newest layout first."""
@@ -128,6 +133,7 @@ def get_brain_dirs() -> list[Path]:
 # ---------------------------------------------------------------------------
 # Path normalization + repo gating
 # ---------------------------------------------------------------------------
+
 
 def _normalize(p: str) -> str:
     """Lower-case + backslash form, no trailing separator."""
@@ -162,7 +168,7 @@ def _conv_cwds(transcript: Path) -> set[str]:
                     entry = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                for tc in (entry.get("tool_calls") or []):
+                for tc in entry.get("tool_calls") or []:
                     args = tc.get("args") or {}
                     cwd = args.get("Cwd") or args.get("cwd")
                     cwd = _unquote_arg(cwd)
@@ -193,6 +199,7 @@ def _conv_matches_repo(cwds: set[str], repo_root_n: str) -> bool:
 # Prompt extraction
 # ---------------------------------------------------------------------------
 
+
 def extract_user_prompt(content: str) -> str:
     """Pull the text between <USER_REQUEST>...</USER_REQUEST>. Fall back to
     stripping known auxiliary blocks if no wrapper is present."""
@@ -209,22 +216,40 @@ def extract_user_prompt(content: str) -> str:
 # Reading existing log to avoid duplicates
 # ---------------------------------------------------------------------------
 
+
 def get_logged_entry_ids(log_file: Path) -> set[str]:
     logged: set[str] = set()
-    if not log_file.exists():
-        return logged
-    with open(log_file, encoding="utf-8-sig") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            eid = entry.get("entry_id", "")
-            if eid:
-                logged.add(eid)
+
+    # Read from live log file
+    if log_file.exists():
+        with open(log_file, encoding="utf-8-sig") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    if eid := entry.get("entry_id"):
+                        logged.add(eid)
+                except json.JSONDecodeError:
+                    continue
+
+    # Read from archives to avoid re-submitting already submitted logs
+    archive_dir = log_file.parent / "archive"
+    if archive_dir.exists():
+        for arch_file in archive_dir.glob("*.jsonl"):
+            with open(arch_file, encoding="utf-8-sig") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        if eid := entry.get("entry_id"):
+                            logged.add(eid)
+                    except json.JSONDecodeError:
+                        continue
+
     return logged
 
 
@@ -232,8 +257,8 @@ def get_logged_entry_ids(log_file: Path) -> set[str]:
 # Iterating user inputs
 # ---------------------------------------------------------------------------
 
-def iter_transcript_inputs(transcript: Path, conv_id: str,
-                           cutoff: datetime | None):
+
+def iter_transcript_inputs(transcript: Path, conv_id: str, cutoff: datetime | None):
     """Yield the user-typed prompts recorded in one transcript.jsonl."""
     with open(transcript, encoding="utf-8") as f:
         for line in f:
@@ -244,8 +269,7 @@ def iter_transcript_inputs(transcript: Path, conv_id: str,
                 entry = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if (entry.get("type") != "USER_INPUT"
-                    or entry.get("source") != "USER_EXPLICIT"):
+            if entry.get("type") != "USER_INPUT" or entry.get("source") != "USER_EXPLICIT":
                 continue
 
             ts = entry.get("created_at") or ""
@@ -269,8 +293,7 @@ def iter_transcript_inputs(transcript: Path, conv_id: str,
             }
 
 
-def iter_user_inputs(brain_dirs: list[Path], cutoff: datetime | None,
-                     only_conv: str | None, repo_root_n: str):
+def iter_user_inputs(brain_dirs: list[Path], cutoff: datetime | None, only_conv: str | None, repo_root_n: str):
     """Yield user-input dicts from every matching conversation transcript."""
     for brain in brain_dirs:
         for conv_dir in sorted(brain.iterdir()):
@@ -278,9 +301,7 @@ def iter_user_inputs(brain_dirs: list[Path], cutoff: datetime | None,
                 continue
             if only_conv and conv_dir.name != only_conv:
                 continue
-            transcript = (
-                conv_dir / ".system_generated" / "logs" / "transcript.jsonl"
-            )
+            transcript = conv_dir / ".system_generated" / "logs" / "transcript.jsonl"
             if not transcript.exists() or transcript.stat().st_size == 0:
                 continue
 
@@ -289,24 +310,19 @@ def iter_user_inputs(brain_dirs: list[Path], cutoff: datetime | None,
             if repo_root_n and not _conv_matches_repo(cwds, repo_root_n):
                 continue
 
-            yield from iter_transcript_inputs(transcript, conv_dir.name,
-                                              cutoff)
+            yield from iter_transcript_inputs(transcript, conv_dir.name, cutoff)
 
 
 # ---------------------------------------------------------------------------
 # Emitting entries
 # ---------------------------------------------------------------------------
 
-def build_entry(msg: dict, repo: str, branch: str, commit: str,
-                student: str, model: str = "gemini") -> dict:
+
+def build_entry(msg: dict, repo: str, branch: str, commit: str, student: str, model: str = "gemini") -> dict:
     ts = msg["timestamp"]
     if ts.endswith("Z"):
         try:
-            ts = (
-                datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                .astimezone(VN_TZ)
-                .isoformat()
-            )
+            ts = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(VN_TZ).isoformat()
         except ValueError:
             pass
 
@@ -330,6 +346,7 @@ def build_entry(msg: dict, repo: str, branch: str, commit: str,
 # Antigravity 2.0 hook mode
 # ---------------------------------------------------------------------------
 
+
 def transcript_from_payload(data: dict) -> Path | None:
     """The transcript this hook invocation is about.
 
@@ -342,8 +359,7 @@ def transcript_from_payload(data: dict) -> Path | None:
     conv = data.get("conversationId") or ""
     if conv:
         for brain in get_brain_dirs():
-            cand = (brain / conv / ".system_generated" / "logs"
-                    / "transcript.jsonl")
+            cand = brain / conv / ".system_generated" / "logs" / "transcript.jsonl"
             if cand.is_file():
                 return cand
     return None
@@ -373,7 +389,8 @@ def log_from_hook(transcript: Path, data: dict) -> int:
     model = data.get("modelName") or "gemini"
 
     new_entries = [
-        e for e in (
+        e
+        for e in (
             build_entry(msg, repo, branch, commit, student, model)
             for msg in iter_transcript_inputs(transcript, conv_id, None)
         )
@@ -405,8 +422,7 @@ def hook_mode() -> None:
         if transcript:
             n = log_from_hook(transcript, data)
             if n:
-                print(f"[antigravity-log] Logged {n} prompt(s).",
-                      file=sys.stderr)
+                print(f"[antigravity-log] Logged {n} prompt(s).", file=sys.stderr)
     except Exception:
         pass
     print("{}")
@@ -414,24 +430,17 @@ def hook_mode() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Extract user prompts from Antigravity IDE transcripts"
-                    " into .ai-log/session.jsonl."
+        description="Extract user prompts from Antigravity IDE transcripts into .ai-log/session.jsonl."
     )
-    parser.add_argument("--hook", action="store_true",
-                        help="Antigravity 2.0 hook: read the PreInvocation"
-                             " payload from stdin.")
-    parser.add_argument("--auto", action="store_true",
-                        help="Default mode: scan recent conversations.")
-    parser.add_argument("--hours", type=int, default=24,
-                        help="Window in hours when scanning (default: 24).")
-    parser.add_argument("--all", action="store_true",
-                        help="Ignore the time window; scan everything.")
-    parser.add_argument("--conv-id",
-                        help="Limit to a single conversation id.")
-    parser.add_argument("--no-repo-filter", action="store_true",
-                        help="Don't filter conversations by current repo.")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Show what would be logged, don't write.")
+    parser.add_argument(
+        "--hook", action="store_true", help="Antigravity 2.0 hook: read the PreInvocation payload from stdin."
+    )
+    parser.add_argument("--auto", action="store_true", help="Default mode: scan recent conversations.")
+    parser.add_argument("--hours", type=int, default=24, help="Window in hours when scanning (default: 24).")
+    parser.add_argument("--all", action="store_true", help="Ignore the time window; scan everything.")
+    parser.add_argument("--conv-id", help="Limit to a single conversation id.")
+    parser.add_argument("--no-repo-filter", action="store_true", help="Don't filter conversations by current repo.")
+    parser.add_argument("--dry-run", action="store_true", help="Show what would be logged, don't write.")
     # Legacy positional args from old log_manual.py callers.
     parser.add_argument("summary", nargs="?", help=argparse.SUPPRESS)
     parser.add_argument("model", nargs="?", help=argparse.SUPPRESS)
@@ -448,9 +457,11 @@ def main() -> None:
 
     brain_dirs = get_brain_dirs()
     if not brain_dirs:
-        print("[antigravity-log] No Antigravity brain/ directory found "
-              f"(checked {', '.join(str(p) for p in BRAIN_CANDIDATES)}).",
-              file=sys.stderr)
+        print(
+            "[antigravity-log] No Antigravity brain/ directory found "
+            f"(checked {', '.join(str(p) for p in BRAIN_CANDIDATES)}).",
+            file=sys.stderr,
+        )
         sys.exit(0)
 
     log_dir = Path(os.environ.get("AI_LOG_DIR", ".ai-log"))
@@ -477,13 +488,11 @@ def main() -> None:
     if not new_entries:
         scope = "all" if args.all else f"{args.hours}h"
         repo_note = "any repo" if args.no_repo_filter else f"repo={repo_root_n or '(unknown)'}"
-        print(f"[antigravity-log] No new prompts ({repo_note}, window={scope}).",
-              file=sys.stderr)
+        print(f"[antigravity-log] No new prompts ({repo_note}, window={scope}).", file=sys.stderr)
         sys.exit(0)
 
     if args.dry_run:
-        print(f"\n[antigravity-log] DRY RUN — would log "
-              f"{len(new_entries)} entries:\n")
+        print(f"\n[antigravity-log] DRY RUN — would log {len(new_entries)} entries:\n")
         for e in new_entries:
             preview = e["prompt"].replace("\n", " ")[:120]
             print(f"  [{e['ts'][:19]}] {preview}")
@@ -493,14 +502,14 @@ def main() -> None:
         for e in new_entries:
             f.write(json.dumps(e, ensure_ascii=False) + "\n")
 
-    print(f"[antigravity-log] Logged {len(new_entries)} prompt(s) from "
-          f"Antigravity IDE.", file=sys.stderr)
+    print(f"[antigravity-log] Logged {len(new_entries)} prompt(s) from Antigravity IDE.", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
 # Legacy manual mode (kept for back-compat with log_manual.py callers and the
 # old .agents/rules instructions). New rules tell the AI not to call this.
 # ---------------------------------------------------------------------------
+
 
 def _legacy_log(summary: str, model: str) -> None:
     ts = datetime.now(VN_TZ).isoformat()
@@ -513,8 +522,7 @@ def _legacy_log(summary: str, model: str) -> None:
         "repo": git("git remote get-url origin").split("/")[-1].replace(".git", ""),
         "branch": git("git rev-parse --abbrev-ref HEAD"),
         "commit": git("git rev-parse --short HEAD"),
-        "student": git("git config user.email") or os.environ.get(
-            "USERNAME", os.environ.get("USER", "unknown")),
+        "student": git("git config user.email") or os.environ.get("USERNAME", os.environ.get("USER", "unknown")),
         "prompt": summary[:1000],
         "response_summary": f"[Antigravity] {summary[:500]}",
     }

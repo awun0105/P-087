@@ -1,0 +1,22 @@
+{
+  "artifact_type": "ReconstructionBundle",
+  "schema_version": "1.0",
+  "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/invalid_mixed_bundle.json",
+  "artifact_checksum": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "producer_stage": "ST-METRIC-CANONICALIZE",
+  "job_id": "job-fixture-001",
+  "source_input_checksum": "sha256:afe1bbad09183a1e732c4deb9b4f22b37753852c9275acbfb683f78c5ad65622",
+  "input_configuration": {"rgb_present": true, "registered_lidar_present": true, "declared_same_scene": true},
+  "coordinate_system": {"unit": "meter", "up_axis": "Z", "handedness": "right", "world_frame": "world"},
+  "metric_scale": {"status": "CONFIRMED", "meters_per_unit": 1.0},
+  "rgb_frame_refs": [],
+  "camera_pose_refs": [],
+  "canonical_geometry_ref": {
+    "artifact_type": "CanonicalGeometry", "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/canonical_geometry.ply",
+    "artifact_checksum": "sha256:109ee1d8e84367fae728c26c3b1353fc9507d93071f9a3db05194ef63d7415de",
+    "data_class": "derived",
+    "producer_stage": "ST-METRIC-CANONICALIZE", "job_id": "job-fixture-001"
+  },
+  "provenance": {"fixture": true}
+}

@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "candidate_checksum": "sha256:7cc30d42394e6df440c2c0533c64aad0923997961baffef07ec1388fc1876bdb",
+  "validation_report_checksum": "sha256:92b29d678517e4342343542e434dcb2efe303979333baadddd9d489ea84d10ac",
+  "reviewer_id": "fixture-reviewer",
+  "decision": "APPROVE",
+  "decided_at": "2026-09-22T00:00:02Z",
+  "accepted_warning_ids": [],
+  "record_checksum": "sha256:0c9b2301ead8b1112d4a092ade2a3c0fc65967128fa27baaf225c6e778890531"
+}

@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 jobs:
   lint-and-test:
@@ -16,17 +16,25 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12.14"
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install uv==0.9.4
+          uv pip sync requirements.lock.txt requirements-dev.lock.txt --system
 
       - name: Lint with ruff
-        run: ruff check src/ tests/
+        run: ruff check src/ tests/ scripts/check_foundation.py
+
+      - name: Check formatting with ruff
+        run: ruff format --check src/ tests/ scripts/check_foundation.py
 
       - name: Run tests
         run: pytest tests/ -v --tb=short
         env:
           APP_ENV: test
           OPENAI_API_KEY: test-key
+
+      - name: Check Integration Foundation readiness
+        run: python -m scripts.check_foundation

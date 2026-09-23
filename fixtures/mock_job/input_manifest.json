@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "source_type": "dataset",
+  "received_at": "2026-09-22T00:00:00Z",
+  "files": [
+    {
+      "original_name": "fixture_video.mock",
+      "media_type": "application/vnd.real2sim.synthetic-rgb",
+      "size_bytes": 58,
+      "checksum": "sha256:9b7e47c42da64b3656713a2b8dc3d92379bb69a3c7a94e36e3abc955b34d8c58",
+      "artifact_uri": "artifact://jobs/job-fixture-001/input/fixture_video.mock",
+      "data_class": "product_input"
+    }
+  ],
+  "input_configuration": {
+    "rgb_present": true,
+    "registered_lidar_present": false
+  },
+  "source_rights_attestation": {
+    "attested": true,
+    "fixture": true
+  },
+  "preparation_provenance": {
+    "fixture": true,
+    "pipeline": "DP-DATASET-INTAKE"
+  },
+  "input_manifest_checksum": "sha256:afe1bbad09183a1e732c4deb9b4f22b37753852c9275acbfb683f78c5ad65622"
+}

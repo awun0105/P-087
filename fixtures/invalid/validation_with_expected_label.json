@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "candidate_checksum": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "validator_version": "fixture-validator-1.0",
+  "environment_versions": {"isaac_sim": "UNVERIFIED"},
+  "checks": [{"check_id": "ISAAC_LOAD", "result": "PASS", "evidence_refs": []}],
+  "path_results": [{"pair_id": "fixture-pair-001", "result": "CLEAR", "expected_result": "CLEAR", "evidence_refs": []}],
+  "overall_result": "PASS",
+  "report_checksum": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+}
