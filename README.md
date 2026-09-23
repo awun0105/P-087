@@ -34,7 +34,7 @@ Real2Sim Studio tổ chức một workflow thống nhất:
 | Layer | Technology | Trạng thái |
 |---|---|---|
 | Contracts | Pydantic 2 | Foundation scaffold |
-| Backend | FastAPI, Python 3.11 | Organizer scaffold |
+| Backend | FastAPI, Python 3.12 | Organizer scaffold |
 | Agent scaffold | LangGraph, LangChain, multi-provider LLM | Có sẵn, chưa phải Real2Sim pipeline |
 | Reconstruction | FFmpeg, COLMAP, Brush, OpenMVS, Open3D | Planned integration |
 | Scene/Object | SAM2, Open3D, NumPy | Planned integration |
@@ -49,8 +49,8 @@ Real2Sim Studio tổ chức một workflow thống nhất:
 git clone https://github.com/AI20K-Build-Phase-Cohort-4/P-087.git
 cd P-087
 
-# 2. Tạo môi trường Python 3.11
-python3.11 -m venv .venv
+# 2. Tạo môi trường Python 3.12
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 

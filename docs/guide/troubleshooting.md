@@ -32,25 +32,25 @@ pip install -r requirements.txt
 ```bash
 # Xóa venv cũ và tạo lại
 rm -rf .venv
-python3.11 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### `python3.11: command not found`
+### `python3.12: command not found`
 
-**Nguyên nhân:** Chưa cài Python 3.11 hoặc không có trong PATH.
+**Nguyên nhân:** Chưa cài Python 3.12 hoặc không có trong PATH.
 
 **Cách sửa (macOS):**
 ```bash
-brew install python@3.11
+brew install python@3.12
 ```
 
 **Cách sửa (Ubuntu/WSL):**
 ```bash
 sudo add-apt-repository ppa:deadsnakes/ppa
 sudo apt update
-sudo apt install python3.11 python3.11-venv python3.11-dev
+sudo apt install python3.12 python3.12-venv python3.12-dev
 ```
 
 ### `pip install` chậm hoặc timeout
@@ -73,7 +73,7 @@ xcode-select --install
 
 **Cách sửa (Ubuntu/WSL):**
 ```bash
-sudo apt install build-essential python3.11-dev
+sudo apt install build-essential python3.12-dev
 ```
 
 ---
@@ -279,7 +279,7 @@ Nếu CI không chạy sau khi push:
 **Cách sửa:**
 1. Kiểm tra build log chi tiết trên Render Dashboard
 2. Đảm bảo `Dockerfile` hoặc `requirements.txt` có trong repo
-3. Thêm `runtime.txt` với nội dung `3.11.x` nếu Render chọn sai Python version
+3. Thêm `runtime.txt` với nội dung `3.12.x` nếu Render chọn sai Python version
 
 ### Render free tier "sleeping" — response chậm
 
@@ -313,4 +313,4 @@ app.add_middleware(
 2. **Google lỗi** — Copy paste error message vào Google, thường có giải pháp trên StackOverflow
 3. **Check `.env`** — 80% lỗi production do biến môi trường thiếu hoặc sai
 4. **Chạy `make check`** — Lint + format + typecheck + test trong một lệnh
-5. **Xóa và tạo lại** — `rm -rf .venv && python3.11 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
+5. **Xóa và tạo lại** — `rm -rf .venv && python3.12 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
