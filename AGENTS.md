@@ -48,6 +48,9 @@ Authority được xác định theo **loại quyết định**, không phải t
 Code/test hiện tại chứng minh implementation đang làm gì; chúng không được override
 product policy hoặc contract đã được chấp nhận. Task/track files là projection và
 execution record; chúng không được âm thầm sửa source of truth cấp cao hơn.
+`CONTEXT.md` và root `README.md` là onboarding/overview, không phải authority cho
+P0 acceptance, schema, task scope hay folder placement; nếu chúng khác bảng trên,
+kiểm tra source of truth tương ứng và báo drift, không làm theo hướng dẫn cũ.
 
 Trước khi thay đổi Real2Sim module, agent phải đọc ít nhất:
 

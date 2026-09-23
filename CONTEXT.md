@@ -2,7 +2,15 @@
 
 Bạn đang làm việc trên project **Real2Sim Studio — Warehouse / Indoor AMR MVP**.
 
-Mục tiêu của context này là giúp bạn hiểu toàn bộ cách project được tổ chức trước khi nhận các coding task cụ thể.
+Mục tiêu của context này là giúp bạn định hướng project trước khi nhận coding task.
+Đây là **onboarding overview, không phải source of truth**: bắt đầu từ
+[`AGENTS.md`](./AGENTS.md) và [`docs/WORKFLOW.md`](./docs/WORKFLOW.md); lấy P0
+scope/acceptance từ [`docs/PRD.md`](./docs/PRD.md), shared schemas từ
+[`TEAM_EXECUTION_CONTRACT.md`](./docs/execution/TEAM_EXECUTION_CONTRACT.md),
+placement từ [`ARCHITECTURE.md`](./ARCHITECTURE.md), task ID/scope từ
+[`TRACK_IMPLEMENTATION_GUIDE.md`](./docs/execution/TRACK_IMPLEMENTATION_GUIDE.md).
+Nếu summary này khác authority, dùng authority và báo drift; không lấy ngày sửa
+file hoặc ví dụ ở đây làm lý do đổi contract.
 
 Không tự ý implement feature chỉ dựa trên context này. Với mỗi task sau đó, phải tuân thủ scope cụ thể của task và các tài liệu trong repository.
 
@@ -100,7 +108,8 @@ Triết lý implementation:
 
 > Tận dụng tối đa open-source repositories/tools đã tồn tại. Không tự viết lại các thuật toán lõi như SfM, 3DGS, segmentation, dense reconstruction hoặc physics simulator nếu đã có implementation phù hợp.
 
-Ước lượng cách làm:
+Ước lượng định hướng ban đầu (chưa đo từ implementation, không phải KPI hay tỷ lệ
+bắt buộc cho từng track):
 
 ```text
 60–70% reuse/integrate existing OSS
@@ -159,30 +168,15 @@ Project contract mới là source of truth.
 
 ---
 
-# 5. System reference baseline
+# 5. System/research reference strategy
 
-Repo nên được audit/run đầu tiên ở cấp toàn hệ thống:
-
-```text
-PointsCoder/OpenReal2Sim
-```
-
-Vai trò:
-
-```text
-SYSTEM REFERENCE BASELINE
-```
-
-Không copy/fork nguyên repo này thành product.
-
-Mục tiêu của việc chạy OpenReal2Sim:
-
-* hiểu một hệ thống Real2Sim end-to-end hiện tại hoạt động ra sao;
-* xem cách preprocessing/reconstruction/object/simulation được nối;
-* audit reconstruction→simulation boundary;
-* reuse/adapt những phần thực sự phù hợp.
-
-Sau đó từng track mới audit thêm các repo chuyên biệt.
+Repo map và mức ưu tiên hiện hành nằm ở
+[`INTEGRATION_PLAYBOOK.md` §7.1](./docs/execution/INTEGRATION_PLAYBOOK.md).
+`VR-Robo`, `R2G` và `Re3Sim` là Tier-0 system references; `OpenReal2Sim`
+là research/architecture reference cho background completion và
+reconstruction→simulation patterns, **không** phải repo bắt buộc phải chạy đầu
+tiên. Audit phần liên quan đến task, không copy/fork nguyên một system thành
+product hoặc biến reference thành production dependency.
 
 Các system/research references quan trọng:
 
@@ -363,7 +357,7 @@ Three.js
 
 ```text
 Three.js
-WebGL2        ← P0 baseline
+WebGL/WebGL2  ← P0 baseline
 WebGPU        ← optional/advanced path
 OrbitControls
 TransformControls
@@ -374,6 +368,8 @@ Scene graph / layer controls
 P0 Web Studio cần ít nhất:
 
 ```text
+real Brush 3DGS VisualArtifact trong browser
+chuyển/bật các view Geometry mesh, Point Cloud, Collider
 orbit
 pan
 zoom
@@ -392,20 +388,15 @@ Three.js là P0 core.
 
 WebGPU không được trở thành P0 blocker.
 
-Nếu browser 3DGS rendering khó:
-
-```text
-P0 Web Studio
-→ mesh / point cloud preview bằng Three.js
-```
-
-Sau đó mới xem xét:
-
-```text
-3DGS
-→ browser renderer
-→ WebGPU/WebGL
-```
+Theo PRD v1.12/AC-11, direct browser rendering của **real Brush 3DGS** là
+P0. Geometry mesh, point cloud và collider là các view kỹ thuật ngang hàng,
+không phải fallback thay điều kiện 3DGS. Nếu `VisualArtifact` thiếu hoặc renderer
+không tương thích, UI vẫn có thể cho inspect các view khác nhưng phải báo lỗi và
+không claim AC-11 pass. WebGL/WebGL2 là baseline; WebGPU chỉ là backend tùy chọn.
+EX-PRODUCT có source map cụ thể trong Integration Playbook: Three.js examples,
+dashboard starter để adapt chọn lọc, React Three Fiber là library candidate,
+Spark là Gaussian renderer candidate cần qualification bằng output Brush thật.
+Không coi PLY point cloud hoặc synthetic fixture là browser 3DGS proof.
 
 ---
 
@@ -431,13 +422,13 @@ Real-world input
 Luồng RGB:
 
 ```text
-Video
-→ FFmpeg
-→ COLMAP
-→ Camera Poses
-→ Brush Visual
-→ OpenMVS Geometry
-→ Metric / Coordinate normalization
+RGB video/frames
+→ validate + privacy gate
+→ frame extraction bằng FFmpeg nếu là video
+→ COLMAP camera poses / SfM
+       ├→ Brush VisualArtifact (3DGS)
+       └→ OpenMVS RGB geometry
+→ metric / coordinate normalization
 → ReconstructionBundle
 ```
 
@@ -649,7 +640,7 @@ Frontend:
 Next.js
 TypeScript
 Three.js
-WebGL2
+WebGL/WebGL2
 optional WebGPU
 ```
 
@@ -733,10 +724,14 @@ schema_version
 artifact_uri
 artifact_checksum
 producer_stage
+data_class: product_input | derived | ground_truth | evaluation_only
 job/source provenance
 ```
 
-Không hard-code local paths làm identity.
+`data_class` là typed metadata, không suy từ URI/path. Product-facing refs từ
+chối raw GT/evaluation-only; GT-assisted derived artifact giữ lineage. Dùng
+`artifact://jobs/<job_id>/<artifact-path>` và SHA-256 exact payload bytes, không
+hard-code local paths làm identity.
 
 ---
 
@@ -745,11 +740,14 @@ Không hard-code local paths làm identity.
 SceneIR là project-owned contract.
 
 Không outsource nó cho research repo.
+Review/approval state thuộc workflow/revision record, **không** nằm trong
+canonical SceneIR; APPROVED/REJECTED không tự thay SceneIR content checksum.
 
 Concept:
 
 ```text
 Scene
+├── schema_version, scene_id, scene_revision
 ├── coordinate_system
 ├── metric_scale
 │
@@ -763,39 +761,46 @@ Scene
 │       ├── id
 │       ├── name
 │       ├── state
+│       ├── origin, active
 │       ├── local_frame
 │       ├── transform
 │       ├── visual_ref?
 │       ├── geometry_ref
-│       ├── collider_ref?
+│       ├── asset_ref?
+│       ├── collider?  # ColliderSpec; local_transform chỉ là local offset
 │       └── provenance
 │
-└── review_state
+├── provenance
+└── scene_ir_checksum
 ```
 
 SceneIR tồn tại theo revision.
 
 Không coi SceneIR là thứ chỉ được tạo sau collider.
 
-Luồng đúng nên là:
+Một luồng hợp lệ; edit có thể tạo revision trước hoặc sau collider enrichment:
 
 ```text
 Scene Decomposition
         ↓
 Draft SceneIR
         ↓
-Collider
+Edit nếu cần → new SceneIR revision
+        ↓
+Collider enrichment
         ↓
 Physics-enriched SceneIR
         ↓
-Edit
-        ↓
-new SceneIR revision
+Edit nếu cần → new SceneIR revision
         ↓
 Preflight
         ↓
-CANDIDATE_READY SceneIR
+SceneRevisionRecord chuyển sang CANDIDATE_READY khi preflight pass
 ```
+
+`CANDIDATE_READY` là workflow state gắn với revision, không phải field của
+`SceneIR`. Mọi edit sau validation tạo DRAFT revision mới và invalidate
+candidate/report/approval cũ.
 
 ---
 
@@ -807,7 +812,10 @@ Dataset chính của MVP:
 TorWIC-SLAM
 ```
 
-Foundation Phase phải chuẩn bị dataset trước khi các track bắt đầu.
+P0 bring-up traversal đã chọn là `Aisle_CW`; `Aisle_CCW` là bổ sung/backup.
+TorWIC là dataset adapter/evaluation source, không phải universal shared schema.
+Foundation M0 chỉ cần sensor semantics đã kiểm, contract và synthetic fixtures;
+không chờ tải/extract toàn bộ TorWIC để bốn track bắt đầu phát triển.
 
 Không để mỗi track tự chọn traversal/data riêng.
 
@@ -840,28 +848,27 @@ evaluation_only
 
 ---
 
-# 15. Dataset preparation phải xảy ra trước khi chia track
+# 15. Dataset preparation và milestone gate
 
-Foundation Phase phải khóa:
+M0 đã khóa traversal, quyền sở hữu, raw/derived/GT boundary và contract/provenance.
+Các mục còn lại được chuẩn bị sau M0 và phải khóa trước gate tương ứng, đặc biệt
+Locked Evaluation Set trước Exit gate M1 (xem Execution Plan/Contract):
 
 ```text
-TorWIC scenario/traversal
-bring-up traversal
-development traversal(s)
-benchmark traversal(s)
-primary demo traversal
+extracted structure inspection
+primary demo frame range
 RGB reconstruction/held-out split
-registered_lidar.ply
-calibration
-timestamps
-evaluation-only references
+registered LiDAR từ real preparation
+independent evaluation references
 manual annotation schema
-start-goal references
+metric anchor + robot footprint
+5 Start–Goal pairs và locked expected labels
+GPU/Isaac runtime versions sau provisioning
 ```
 
-Không để EX-REC phải tự quyết định toàn bộ dataset strategy sau khi team đã chia.
-
-Sau Foundation Lock, maintenance của dataset preparation có thể thuộc EX-REC.
+EX-REC inspect exact extracted layout trước khi viết normalization/prefusion;
+không giả định cấu trúc ZIP. Human/QA owner phải cung cấp và khóa benchmark
+inputs; không tự bịa tọa độ, labels hoặc runtime versions để làm fixture pass.
 
 ---
 
@@ -881,19 +888,27 @@ offline prefusion
 registered_lidar.ply
 ```
 
-Product sees:
+Product runtime chỉ nhận registered LiDAR đã chuẩn hóa bằng logical artifact
+URI/checksum; `registered_lidar.ply` là tên output offline ví dụ, không phải
+identity trong shared contract:
 
 ```text
-registered_lidar.ply
+artifact://jobs/<job_id>/<artifact-path>
 ```
 
-Nếu `traj_gt` được dùng để prefuse LiDAR phải khai báo:
+Nếu TorWIC offline preparation dùng `traj_gt.txt`, TorWIC manifest phải khai báo:
 
 ```yaml
 trajectory_gt_used_for_lidar_prefusion: true
+assistance_class: GT-assisted
 ```
 
-Không được sau đó claim independent geometry benchmark chống lại reference nếu GT đã bị dùng trong prediction/preparation không đúng protocol.
+Adapter map thành shared generic dependency `role: pose`,
+`origin: ground_truth`, `source_checksum` và `ground_truth_assisted: true`.
+`trajectory_gt_used_for_lidar_prefusion` **không** phải required field của
+`LiDARGeometryArtifact`/`ReconstructionBundle`; LiDAR từ estimated/external poses
+vẫn hợp lệ. Raw GT mặc định thuộc evaluation-only boundary; GT-assisted derived
+artifact không được claim independent accuracy theo protocol yêu cầu GT độc lập.
 
 ---
 
@@ -1010,7 +1025,7 @@ SceneIR
 → CandidatePackage
 → Isaac Validation
 → ValidationReport
-→ READY_FOR_REVIEW
+→ READY_FOR_REVIEW chỉ khi blocking checks applicable đều PASS
 → Human Approve/Reject
 ```
 
@@ -1052,38 +1067,26 @@ EvaluationReport chỉ bắt buộc cho benchmark/acceptance run khi protocol y�
 
 # 23. Foundation Phase — bắt buộc trước khi 4 track bắt đầu
 
-Không chia track và bắt đầu coding ngay.
+M0 Foundation Baseline đã có typed contracts, canonical coordinates,
+`ArtifactResolver`/filesystem store, synthetic fixtures và positive/negative
+handoff tests. Đây là **fixture/integration proof**, không phải real
+reconstruction, Brush/browser compatibility, Isaac/GPU hoặc product E2E proof.
+Trước khi branch song song, team dùng cùng baseline commit/SHA và tuân
+producer/consumer review khi đổi shared contract.
 
-Làm trước:
-
-```text
-PHASE 0 — FOUNDATION
-
-1. Preserve organizer scaffold
-2. Add minimal module boundaries
-3. Shared contracts v0
-4. TorWIC dataset selection
-5. Dataset download/preparation
-6. Data directory structure
-7. Registered LiDAR preparation
-8. RGB benchmark split
-9. Evaluation-only separation
-10. Dataset/Input manifest
-11. Shared fixtures
-12. Canonical coordinate convention
-13. Runtime/tool version lock
-14. Minimal smoke tests
-15. Ownership / CODEOWNERS
-16. Documentation links
-```
-
-Sau đó:
+M0 tối thiểu:
 
 ```text
-FOUNDATION LOCK
+preserve organizer scaffold + ownership boundaries
+shared contracts, coordinate/transform rules, artifact store
+synthetic fixtures và handoff/negative tests
+TorWIC Aisle_CW selection + dataset-side sensor evidence
+evaluation-only/GT-assisted provenance rules
+runtime manifest với GPU/tool values UNVERIFIED/TBD
+documentation/task crosswalk
 ```
 
-rồi mới:
+Sau M0, bốn track có thể phát triển song song từ fixtures:
 
 ```text
 EX-REC
@@ -1092,22 +1095,27 @@ EX-SIM
 EX-PRODUCT
 ```
 
-chạy song song.
+Real dataset extraction, benchmark split/anchors/labels và exact GPU/Isaac
+versions thuộc các milestone sau, không được tự điền để tuyên bố M0 pass.
 
 ---
 
 # 24. Fixtures
 
-Fixtures là static sample artifacts dùng để downstream development không phải chờ upstream.
+Fixtures là synthetic artifacts nhỏ để downstream development không phải chờ upstream.
 
 Ví dụ:
 
 ```text
 fixtures/
+├── artifact_store/       # payload bytes + SHA-256 thật
 ├── reconstruction_bundle/
 ├── scene_ir/
 ├── validation_report/
-└── mock_job/
+├── candidate/
+├── evaluation/
+├── mock_job/
+└── invalid/
 ```
 
 Use:
@@ -1122,6 +1130,11 @@ fixture SceneIR
 fixture ValidationReport
 → EX-PRODUCT code ngay
 ```
+
+Bao gồm RGB-only/RGB-D/RGB+LiDAR bundles, edited SceneIR revision và failed
+ValidationReport. Fixture phải validate bằng shared Pydantic schema, resolve
+artifact refs và verify SHA-256; không dùng fixture để claim real producer,
+browser 3DGS hoặc Isaac acceptance.
 
 Khi upstream thật hoàn thành:
 
@@ -1194,9 +1207,11 @@ Không thay root Dockerfile chỉ vì muốn structure đẹp hơn.
 
 ---
 
-# 27. Proposed additive Real2Sim structure
+# 27. Additive Real2Sim placement (summary)
 
-Add:
+Summary để định hướng; [`ARCHITECTURE.md`](./ARCHITECTURE.md) là authority cho
+placement và ownership. Tree dưới đây là mục tiêu, không chứng minh từng module
+đã được implement:
 
 ```text
 src/
@@ -1204,6 +1219,8 @@ src/
 │   └── contracts/
 │       ├── __init__.py
 │       ├── artifacts.py
+│       ├── coordinates.py
+│       ├── identity.py
 │       ├── manifests.py
 │       ├── reconstruction.py
 │       ├── scene.py
@@ -1221,7 +1238,8 @@ src/
     │   ├── extraction/
     │   ├── association/
     │   ├── candidates/
-    │   └── decomposition/
+    │   ├── decomposition/
+    │   └── editing/
     │
     ├── simulation/
     │   ├── colliders/
@@ -1255,13 +1273,15 @@ Evaluation continues using:
 eval/
 ```
 
-Frontend may later be added as:
+EX-PRODUCT tạo Next.js/TypeScript Web Studio tại:
 
 ```text
 frontend/
+└── src/features/viewer/
 ```
 
-but do not create a full Next.js app unless a specific task asks for it.
+`PRODUCT-05` đã giao scaffold frontend; `PRODUCT-06` giao viewer. Checkout hiện
+chưa có `frontend/`, nhưng placement này đã khóa và không phải P1/stretch.
 
 ---
 
@@ -1311,7 +1331,9 @@ Repository already has:
 .github/CODEOWNERS
 ```
 
-Use it to map paths to real GitHub owners once team assignments are known.
+EX-REC/Integration Owner có GitHub handle `@awun0105`. Tên owner của ba track
+còn lại đã khóa (Đức, Đạt, Cường), nhưng GitHub handles chưa được cung cấp;
+giữ `TODO` trong CODEOWNERS, không tự đoán username.
 
 Purpose:
 
@@ -1351,7 +1373,7 @@ docs/PRD.md
 docs/DATASET_PLAYBOOK.md
 → dataset preparation, leakage, benchmark
 
-docs/INTEGRATION_PLAYBOOK.md
+docs/execution/INTEGRATION_PLAYBOOK.md
 → technical baseline, stages, tools, repos
 
 ARCHITECTURE.md
@@ -1367,7 +1389,10 @@ docs/execution/TRACK_IMPLEMENTATION_GUIDE.md
 → how each track implements its part
 
 AGENTS.md
-→ short agent instructions + links to source-of-truth docs
+→ agent harness + authority/conflict/proof rules
+
+CONTEXT.md / README.md
+→ onboarding overview, không override các source of truth trên
 ```
 
 Không duplicate full repository architecture vào nhiều docs.
@@ -1512,6 +1537,9 @@ Isaac Sim
 ```
 
 Use process/container/runtime boundaries when needed.
+GPU model/VRAM, driver/CUDA, Isaac/OpenUSD và provider versions vẫn
+`UNVERIFIED/TBD` đến khi provision machine thật; runtime manifest ghi exact
+versions sau đó. Không biến placeholder thành version lock đã kiểm chứng.
 
 For now preserve organizer:
 
