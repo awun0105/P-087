@@ -6,7 +6,7 @@
 **Document Role:** Normative shared artifact, runtime, review và handoff contract.
 **Scope:** Shared schema, producer/consumer boundary, coordinate, testing, review và change-control rules cho bốn execution tracks.
 **Upstream Constraints:** Tuân product scope/acceptance trong [PRD](../PRD.md) và dataset/evaluation methodology trong [DATASET_PLAYBOOK](../DATASET_PLAYBOOK.md).
-**Status:** Draft for Review.
+**Status:** Foundation Baseline v1.0 — approved 23/09/2026.
 **Related Documents:** [BRIEF](../BRIEF.md), [WIREFRAME](../WIREFRAME_AND_UI_FLOW.md), [INTEGRATION_PLAYBOOK](./INTEGRATION_PLAYBOOK.md), [TEAM_EXECUTION_PLAN](./TEAM_EXECUTION_PLAN.md), [TRACK_IMPLEMENTATION_GUIDE](./TRACK_IMPLEMENTATION_GUIDE.md).
 
 ---
@@ -45,6 +45,22 @@ Các invariant bắt buộc:
 9. **Heavy stage có process/container boundary.**
 10. **RGB-only, RGB+LiDAR và future LiDAR-only dùng reusable branches, không copy-paste ba pipeline.**
 
+Foundation ownership:
+
+| Role | Owner |
+|---|---|
+| `EX-REC` Owner | `@awun0105` |
+| `EX-SCENE` Owner | Đức |
+| `EX-SIM` Owner | Đạt |
+| `EX-PRODUCT` Owner | Cường |
+| Technical Lead / Integration Owner | `@awun0105` |
+| Product Owner | Cường |
+| QA / Validation Lead | Đạt |
+| Release Approver | Đức |
+
+GitHub handles của Đức, Đạt và Cường chưa được cung cấp; CODEOWNERS phải để
+`TODO`, không tự suy đoán handle.
+
 ---
 
 # Chương 2. Architecture và ownership
@@ -72,13 +88,15 @@ EX-PRODUCT
 
 | Module | Owner |
 |---|---|
-| Reconstruction + TorWIC product preparation | `EX-REC` |
-| Object/Scene Core/Scene IR | `EX-SCENE` |
-| Collider/OpenUSD/Isaac/Evaluation | `EX-SIM` |
-| FastAPI/Web/Jobs/Review/Release | `EX-PRODUCT` |
+| Reconstruction + TorWIC product preparation | `EX-REC` — `@awun0105` |
+| Object/Scene Core/Scene IR | `EX-SCENE` — Đức |
+| Collider/OpenUSD/Isaac/Evaluation | `EX-SIM` — Đạt |
+| FastAPI/Web/Jobs/Review/Release | `EX-PRODUCT` — Cường |
 | Shared contracts/fixtures | producer + consumer review |
 
 Cross-module change phải có owner review.
+
+Canonical folder placement và module ownership được khóa tại [`ARCHITECTURE.md`](../../ARCHITECTURE.md). Nếu chưa rõ một file thuộc boundary nào, không tự tạo top-level `utils/`, `pipelines/`, `workers/` hoặc folder tương đương; phải hỏi owner/Tech Lead trước. Contract định nghĩa data shape, còn xử lý nghiệp vụ nằm trong service boundary của track sở hữu.
 
 ---
 
@@ -94,10 +112,23 @@ schema_version
 artifact_uri
 artifact_checksum
 producer_stage
+data_class: product_input | derived | ground_truth | evaluation_only
 job_id / source provenance khi relevant
 ```
 
 Không dùng filename hoặc local path làm identity.
+
+`data_class` là metadata typed bắt buộc trên `ArtifactRef`, không suy ra từ tên
+URI/path. `ProductArtifactRef` và mọi URI-bearing product manifest/inventory chỉ
+nhận `product_input | derived`; thiếu class, `ground_truth` hoặc
+`evaluation_only` phải bị reject dù URI nằm dưới `input/`. `ArtifactRef` cấp
+thấp trong `EvaluationReport` vẫn biểu diễn được GT/evaluation-only. Tên folder
+`evaluation_only/` hữu ích cho vận hành nhưng **không phải policy boundary**.
+Class mô tả quyền sử dụng artifact; provenance mô tả lineage. Một artifact
+`derived` có thể có `ground_truth_assisted: true` để phục vụ debug/oracle
+experiment, nhưng không được claim independent GT accuracy. Producer phải
+khai báo class trung thực tại publication; chỉ đổi class trong ref không phải
+bằng chứng đã declassify một artifact.
 
 Không hard-code:
 
@@ -105,6 +136,44 @@ Không hard-code:
 /home/user/...
 C:\Users\...
 ```
+
+Artifact URI P0 bắt buộc dùng logical form:
+
+```text
+artifact://jobs/<job_id>/<artifact-path>
+```
+
+`ARTIFACT_ROOT` là deployment-configured filesystem root. Development có thể dùng
+`./data/artifacts/`; production/deployment phải cấu hình absolute path. Absolute
+local filesystem path không được serialize vào contract.
+
+### 3.1.1 Checksum identity protocol (Foundation v1.0)
+
+| Field/role | Identity được hash | Verification owner |
+|---|---|---|
+| `ArtifactRef.artifact_checksum`, `InputFile.checksum`, `StageArtifact.artifact_checksum`, release inventory checksum | SHA-256 của **exact bytes** tại URI; tương tự `VisualArtifact`, `LiDARGeometryArtifact`, `AlignmentRecord` khi field `artifact_uri` chỉ producer payload | `ArtifactResolver.require` / `sha256_file` |
+| `InputManifest.input_manifest_checksum`, `JobManifest.job_manifest_checksum`, `RuntimeManifest.runtime_manifest_checksum`, `ReconstructionBundle.artifact_checksum`, `SceneIR.scene_ir_checksum`, `*Report.report_checksum`, `ApprovalRecord.record_checksum`, `ReleaseManifest.release_manifest_checksum` | SHA-256 của canonical JSON **logical content**, loại trừ chính field checksum ở top level | `canonical_content_checksum` / `verify_content_checksum` |
+| `CandidatePackage.candidate_checksum` | SHA-256 canonical JSON của toàn `CandidatePackage` (manifest + ordered entrypoint/assets/geometry/colliders refs), loại trừ `candidate_checksum`; bytes của từng member bắt buộc verify riêng bằng ref | `verify_candidate_inventory`, `verify_content_checksum`, resolver |
+| `source_input_checksum`, `scene_ir_checksum`/`job_manifest_checksum` trong downstream manifest, `ValidationReport.candidate_checksum`, release candidate/report checksums | Copy **đúng identity upstream** tương ứng; không hash lại field này | producer/consumer lineage check |
+| `JobManifest.config_checksum`, `CandidateManifest.build_config_checksum` | SHA-256 exact processing-config bytes; hai field bind cùng config khi build candidate | `sha256_file` + lineage check |
+
+Canonical JSON dùng `model_dump(mode="json")`, giữ fields/defaults/`null`, sort
+keys, separators `,` và `:`, UTF-8 không ASCII-escape, không cho phép NaN/Inf;
+array order là một phần identity. Chỉ field self-checksum top-level bị loại trừ;
+không hash pretty-print, filesystem listing order hoặc Python `repr()`.
+`ReconstructionBundle.artifact_checksum` là **logical bundle content identity**,
+không phải SHA của bytes file JSON ở `artifact_uri`; nếu publish serialized bundle,
+publication envelope `ArtifactRef` riêng mang byte checksum của file đó. Tương tự
+`SceneIR`/report content checksum khác byte checksum của published JSON envelope.
+Không có self-referential hash.
+
+Candidate inventory list phải bằng đúng checksum sequence của
+`entrypoint_usd → assets[] → geometry[] → colliders[]`; `asset_refs[]` và
+`collider_refs[]` trong manifest phải khớp package lists. Thứ tự list là explicit,
+không lấy từ filesystem traversal. Sau validation, release-facing record phải
+giữ đúng `candidate_checksum` và `validation_report_checksum`; mismatch bị reject.
+Foundation chỉ chứng minh identity bằng synthetic fixture; release authorization
+và sealing runtime vẫn thuộc `PRODUCT-11`.
 
 ## 3.2 Contract matrix
 
@@ -115,6 +184,7 @@ C:\Users\...
 | Orchestrator | `JobManifest` | tất cả stage |
 | `EX-REC` | `ReconstructionBundle` | `EX-SCENE` |
 | `EX-REC` | `LiDARGeometryArtifact` | mixed composition/evidence |
+| `EX-REC` alignment stage | `AlignmentRecord` | `ReconstructionBundle`, QA/evidence |
 | `EX-SCENE` | `SceneIR` | `EX-SIM`, `EX-PRODUCT` |
 | `EX-SIM` | physics-enriched `SceneIR` | `EX-PRODUCT` |
 | `EX-SIM` preflight | `PreflightReport` | candidate builder, `EX-PRODUCT`, Reviewer |
@@ -138,8 +208,10 @@ files[]
     size_bytes
     checksum
     artifact_uri
+    data_class: product_input | derived
 input_configuration
     rgb_present
+    depth_present?  # optional RGB+sensor-depth extension; không đổi P0 input scope
     registered_lidar_present
     declared_same_scene?
 lidar_metadata?
@@ -151,6 +223,13 @@ dataset_manifest_checksum?
 preparation_provenance?
 input_manifest_checksum
 ```
+
+`lidar_metadata` chỉ optional khi không có Registered LiDAR. Nếu
+`input_configuration.registered_lidar_present: true`, ba metadata field trên
+phải hiện diện và không rỗng; khi modality vắng mặt thì không khai báo
+`lidar_metadata`. `depth_present` chỉ khai báo modality ở input boundary;
+sensor-depth dtype/format/scale thuộc `ReconstructionBundle.depth_frame_set`,
+không phát minh thêm input metadata contract trong Foundation.
 
 ## 3.3.1 `PrivacyValidationReport`
 
@@ -197,6 +276,7 @@ stage_artifacts[]
     artifact_type
     artifact_uri
     artifact_checksum
+    data_class: product_input | derived  # required whenever artifact_uri is present
     started_at
     completed_at?
     error_ref?
@@ -210,17 +290,69 @@ Mỗi stage chỉ được đánh dấu `SUCCEEDED` khi toàn bộ artifact bắ
 Tối thiểu:
 
 ```text
-source/input identity
-coordinate metadata
-RGB frame refs
-camera pose refs
-visual artifact ref
-RGB geometry ref
-metric/scale status
+artifact_type = ReconstructionBundle
+schema_version
+artifact_uri + artifact_checksum
+producer_stage = ST-METRIC-CANONICALIZE
+job_id + source_input_checksum
+input_configuration
+coordinate_system
+metric_scale
+rgb_frame_refs[]?
+depth_frame_set?  # producer-declared dtype/format/positive scale_to_meter; sensor depth
+camera_pose_refs[]?
+visual_artifact_ref?
+rgb_geometry_ref?
+lidar_geometry_ref?
+alignment_record?
+canonical_geometry_ref
 provenance
 ```
 
+Modality invariants:
+
+```text
+RGB P0
+→ frames + poses + visual + RGB geometry + canonical geometry
+
+RGB + Registered LiDAR
+→ RGB artifacts + LiDAR artifact + CONFIRMED AlignmentRecord
+→ alignment source/target checksums bind đúng hai geometry refs
+→ LiDAR reference khai báo typed preprocessing dependencies và
+  `ground_truth_assisted` nhất quán với mọi dependency có origin `ground_truth`;
+  khi true, bundle provenance cũng ghi `ground_truth_assisted: true`
+
+RGB + Depth (contract-capable; chưa là P0 input profile riêng)
+→ RGB artifacts + DepthFrameSet với frame refs, storage dtype/format và
+  `scale_to_meter` dương, hữu hạn; metric depth lưu trực tiếp dùng scale `1.0`
+→ depth không được mặc định xem là ground truth
+
+future LiDAR-only
+→ visual/RGB geometry có thể absent
+→ LiDAR + canonical geometry vẫn bắt buộc
+```
+
+`DepthFrameSet` dùng `storage_dtype`, `storage_format` do producer khai báo và
+`scale_to_meter` dương/hữu hạn. TorWIC `uint16` PNG với scale `0.001` là giá trị
+adapter/fixture của dataset hiện tại, **không** phải shared schema invariant.
+
 `EX-SCENE` không được đọc private COLMAP/Brush/OpenMVS temp folders.
+
+Transform trong shared contract được nhận diện bằng `parent_frame` và
+`local_frame`: `T_<parent>_from_<local>` áp dụng
+`p_parent = T_parent_from_local * p_local`. Raw TorWIC label `T_cam1_os` được
+giữ khi parse source, nhưng khi normalize phải gọi tương đương
+`T_os_from_cam`; chiều LiDAR→camera là
+`T_cam_from_os = inverse(T_os_from_cam)`. `os_sensor` là source-frame hypothesis
+từ REC-01B, chưa được SLAM backend xác nhận tuyệt đối. Canonical meter/Z-up/
+right-handed/world là quyết định Real2Sim, không phải claim đầy đủ về native
+TorWIC axes.
+
+`VisualArtifact` là abstraction bắt buộc. Fixture Foundation dùng declared format
+`real2sim.synthetic.visual.v1` để test contract; đó không phải Brush compatibility
+proof. Khi Brush chạy thật, output thực tế của Brush là producer output và metadata
+phải ghi `format`, `producer`, `producer_version`, checksum và coordinate system;
+không tạo proprietary Gaussian binary format.
 
 ## 3.5 `LiDARGeometryArtifact`
 
@@ -232,12 +364,24 @@ artifact_checksum
 source_modality = registered_lidar
 source_input_checksum
 geometry_format
-unit
-coordinate_frame
+coordinate_system
+source_frame
+declared_transform_to_canonical?
 preprocessing_provenance
 ```
 
-Alignment result/transform phải được lưu riêng; không mutate artifact đã checksum.
+Declared transform không đồng nghĩa confirmed alignment. Alignment result phải là
+immutable `AlignmentRecord` riêng, bind `source_lidar_checksum`,
+`target_rgb_geometry_checksum`, `transform_target_from_source`, status, method,
+evidence và provenance; không mutate LiDAR artifact đã checksum.
+`preprocessing_provenance` là typed record gồm `dependencies[]`,
+`ground_truth_assisted` và `details`. Mỗi dependency ghi `role` (ví dụ `pose`),
+`origin` (`sensor_input | estimated | external | ground_truth`) và
+`source_checksum` của dependency. Direct registered
+input có thể có danh sách dependencies rỗng. Flag `ground_truth_assisted` phải
+khớp với việc có dependency `ground_truth`; source provenance của LiDAR reference
+trong bundle dùng cùng shape. Không bắt buộc bất kỳ dataset nào có trajectory GT.
+GT-assisted output không chứng minh trajectory estimation độc lập.
 
 ## 3.6 `SceneIR`
 
@@ -245,19 +389,29 @@ Logical structure:
 
 ```text
 Scene
+├── schema_version
+├── scene_id
+├── scene_revision
 ├── coordinate_system
 ├── metric_scale
 ├── environment
+│   ├── visual_ref?
+│   ├── geometry_ref
+│   └── collider_ref?
 └── objects[]
     └── SceneObject
         ├── id
+        ├── name
         ├── state
         ├── origin: reconstructed | user_added
         ├── active
+        ├── local_frame
         ├── transform
         ├── visual_ref?
         ├── geometry_ref
         ├── asset_ref?
+        ├── primitive_dimensions_xyz_m?
+        ├── provenance
         └── collider?
             └── ColliderSpec
                 ├── collider_id
@@ -270,10 +424,24 @@ Scene
 ```
 
 Một `SceneObject` chỉ có **một canonical transform**.
+`SceneObject.id` là duy nhất trong một SceneIR revision; duplicate IDs phải
+fail validation. `collider.local_transform`, nếu có, chỉ là local offset với
+`parent_frame = SceneObject.local_frame`, không tạo world transform truth thứ hai.
+`SceneIR` là editable source of truth. Collider generation tạo SceneIR revision
+cùng schema; OpenUSD/CandidatePackage là projection xuất từ revision đó để
+Isaac validate và không được dùng làm source of truth cạnh tranh.
+
+`SceneIR.agents[]` không thuộc P0 core. `review_state` không thuộc canonical
+`SceneIR`; nó nằm trong workflow/revision record. Vì vậy APPROVED/REJECTED không
+được làm đổi `scene_ir_checksum` nếu SceneIR content không đổi.
 
 UI và simulator không được tạo transform truth riêng.
 
-`user_added` object phải có `asset_ref` hoặc primitive geometry có kích thước rõ ràng. P0 không expose generic scale nếu chưa định nghĩa propagation sang Visual/Geometry/Collider; dùng primitive dimensions hoặc asset-specific size parameters.
+`user_added` object phải có `asset_ref` hoặc primitive geometry với
+`primitive_dimensions_xyz_m` dương/hữu hạn. P0 không expose generic scale nếu
+chưa định nghĩa propagation sang Visual/Geometry/Collider; asset-specific size
+parameters do asset/SCENE-08A quản lý, không dùng collider dimensions thay cho
+geometry dimensions.
 
 ## 3.7 Physics enrichment
 
@@ -312,13 +480,18 @@ Rule matrix tối thiểu:
 | `TRANSFORM_INVALID` | Preflight | Có |
 | `OBJECT_OUT_OF_BOUNDS` | Preflight | Có |
 | `REQUIRED_ARTIFACT_MISSING` | Preflight | Có |
-| `CANDIDATE_UNREVIEWED` | Preflight | Có |
+| `OBJECT_CONFIRMATION_INCOMPLETE` | Preflight | Có |
 | `ROBOT_SPAWN_INVALID` | Isaac | Có |
-| `PATH_BLOCKED_UNEXPECTED` | Isaac | Có |
 | `PATH_VALIDATION_ERROR` | Isaac | Có |
 | `ISAAC_LOAD_ERROR` | Isaac | Có |
+| `REQUIRED_ROUTE_BLOCKED` | Isaac/Product config | Có khi ordinary product config đánh dấu route required |
 
 Chỉ được chuyển sang `READY_FOR_REVIEW` khi tất cả blocking rules applicable cho run đều `PASS`. `ERROR` không được quy đổi thành `PASS` hoặc kết quả `CLEAR/BLOCKED`.
+
+`IsaacValidationWorker` chỉ quan sát `CLEAR | BLOCKED | ERROR` và không đọc hidden
+expected benchmark labels. `EvaluationRunner` mới so sánh observed result với
+locked expected result. `REQUIRED_ROUTE_BLOCKED` chỉ dựa trên ordinary product
+configuration, không dựa trên hidden evaluation label.
 
 ## 3.8 `CandidatePackage`
 
@@ -339,9 +512,9 @@ candidate_manifest.json
 ├── schema_version
 ├── candidate_id
 ├── scene_revision
+├── scene_ir_checksum
 ├── job_manifest_checksum
-├── unit
-├── up_axis
+├── coordinate_system  # canonical meter, Z-up, right-handed, world
 ├── object_transforms[]
 ├── asset_refs[]
 ├── collider_refs[]
@@ -349,22 +522,42 @@ candidate_manifest.json
 └── build_config_checksum
 ```
 
-`candidate_checksum` là checksum của toàn bộ `CandidatePackage`, không chỉ của file USD entrypoint. `entrypoint_usd` là vai trò artifact; tên file vật lý không phải contract cho tới khi package naming được khóa.
+`CandidateManifest.coordinate_system` dùng cùng `CoordinateSystem` contract với
+`SceneIR`; SIM exporter convert sang native OpenUSD/Isaac convention ở adapter
+boundary. Không lưu `unit`/`up_axis` string độc lập trong canonical manifest.
 
-Checksum được tính từ canonical package inventory/content sau khi package hoàn tất và được lưu ở artifact registry hoặc envelope bên ngoài payload được hash; không tạo checksum tự tham chiếu bên trong chính byte range dùng để tính hash.
+`candidate_checksum` là checksum của toàn bộ `CandidatePackage` theo mục 3.1.1,
+không chỉ của file USD entrypoint. `entrypoint_usd` là vai trò artifact; tên file
+vật lý không phải contract cho tới khi package naming được khóa.
+
+Checksum được tính từ canonical package inventory/content sau khi package hoàn
+tất, loại trừ chính field `candidate_checksum`; không tạo checksum tự tham chiếu.
+ArtifactRef riêng của package JSON (nếu publish) vẫn mang SHA của exact bytes.
 
 ## 3.9 `ValidationReport`
 
 Tối thiểu:
 
 ```text
+schema_version
 candidate_checksum
 validator_version
-result
+environment_versions
+checks[]
+    check_id
+    result: PASS | FAIL | ERROR
+    evidence_refs[]
+    message?
+path_results[]
+    pair_id
+    result: CLEAR | BLOCKED | ERROR
+    evidence_refs[]
+    message?
+overall_result
 report_checksum
 ```
 
-Report phải gắn đúng candidate đã test.
+Report phải gắn đúng candidate đã test. `path_results[]` không chứa expected label.
 
 ## 3.10 `EvaluationReport`
 
@@ -379,6 +572,11 @@ split_manifest_checksum?
 references_used[]
 preprocessing_dependencies[]
 metrics[]
+path_comparisons[]
+    pair_id
+    observed_result
+    expected_result
+    agreement
 report_checksum
 ```
 
@@ -421,6 +619,7 @@ Tối thiểu:
 
 ```text
 schema_version
+run_type: ORDINARY | LOCKED_MVP_ACCEPTANCE | BENCHMARK
 project_id
 scene_version
 input_manifest_checksum
@@ -435,6 +634,7 @@ artifact_inventory[]
     artifact_type
     artifact_uri
     artifact_checksum
+    data_class: product_input | derived
 review_state: APPROVED
 approval_record
     reviewer_id
@@ -447,22 +647,43 @@ release_manifest_checksum
 
 `candidate_checksum` tiếp tục mang nghĩa checksum của toàn bộ Candidate Package. `ReleaseManifest` chỉ được phát hành khi ApprovalRecord bind cùng candidate/validation checksum và mọi accepted warning đều truy được về evidence cụ thể.
 
+`evaluation_report_checksum` chỉ optional cho `ORDINARY`. Field này bắt buộc khi
+`run_type` là `LOCKED_MVP_ACCEPTANCE` hoặc `BENCHMARK`.
+
 ---
 
 # Chương 4. Coordinate, metric và revision rules
 
-## 4.1 Canonical coordinate
+## 4.1 Canonical coordinate và transform
 
-Trước implementation chính thức phải khóa:
+```yaml
+coordinate_system:
+  unit: meter
+  up_axis: Z
+  handedness: right
+  world_frame: world
 
-```text
-CANONICAL_UNIT
-CANONICAL_UP_AXIS
-CANONICAL_HANDEDNESS
-CANONICAL_WORLD_FRAME
+transform:
+  semantics: parent_from_local
+  quaternion_order: xyzw
+  angle_unit: radian
 ```
 
-Mọi conversion nằm ở adapter/boundary rõ ràng.
+Semantic chính thức:
+
+```text
+p_parent = T_parent_from_local * p_local
+```
+
+Nếu object trực tiếp dưới world:
+
+```text
+parent = world
+T_parent_from_local = T_world_from_object
+```
+
+COLMAP, Three.js, OpenUSD và Isaac phải convert convention tại adapter boundary;
+external convention không được leak vào SceneIR.
 
 ## 4.2 RGB metric scale
 
@@ -517,7 +738,23 @@ lidar/*.pcd
 → registered_lidar.ply
 ```
 
-Nếu dùng `traj_gt.txt`, provenance phải ghi rõ.
+Direct product/runtime prediction không được đọc `traj_gt.txt`. Offline
+`DP-LIDAR-PREFUSION` có thể dùng file này khi explicitly declared. Khi dùng,
+TorWIC preparation manifest phải ghi chính xác dependency dataset-specific:
+
+```text
+trajectory_gt_used_for_lidar_prefusion: true
+assistance_class: GT-assisted
+```
+
+Khi publish shared LiDAR artifact/bundle, TorWIC adapter map dependency đó thành
+`role: pose`, `origin: ground_truth`, `source_checksum` của trajectory,
+`ground_truth_assisted: true`; bundle provenance giữ flag này. Tên
+`traj_gt.txt`/`trajectory_gt_used_for_lidar_prefusion` không phải required field
+của `LiDARGeometryArtifact` hay `ReconstructionBundle`.
+
+Artifact đó không được claim alignment/geometry độc lập với trajectory GT trong
+evaluation yêu cầu independent evidence.
 
 ## 5.3 Product/runtime được đọc
 
@@ -619,12 +856,20 @@ Owner của worker chịu trách nhiệm runtime/container của worker đó.
 
 ## 7.4 Artifact store
 
-MVP có thể dùng shared persistent filesystem.
+P0 dùng `FilesystemArtifactStore` sau `ArtifactResolver` với:
+
+```text
+ARTIFACT_ROOT=<deployment-configured-absolute-path>
+artifact://jobs/<job_id>/<artifact-path>
+```
 
 Bắt buộc:
 
+- resolve logical URI mà không path traversal;
+- validate existence và schema version;
 - producer chỉ publish artifact sau khi hoàn tất;
-- checksum sau khi finalize;
+- SHA-256 sau khi finalize và verify ở consumer;
+- atomic publication và immutable destination;
 - consumer chỉ dùng published artifact refs;
 - critical artifact không chỉ tồn tại trên laptop cá nhân.
 
@@ -675,6 +920,24 @@ SUCCEEDED
 FAILED
 CANCELLED
 ```
+
+Stage status dùng cùng enum trên ở cấp stage. Stage ID registry P0:
+
+```text
+ST-INPUT-VALIDATE       ST-PRIVACY-GATE
+ST-FRAME-EXTRACT        ST-CAMERA-POSE
+ST-VISUAL-RECON         ST-RGB-GEOMETRY
+ST-LIDAR-INGEST         ST-RGB-LIDAR-ALIGN
+ST-METRIC-CANONICALIZE  ST-OBJECT-EXTRACT
+ST-OBJECT-ASSOC         ST-OBJECT-CONFIRM
+ST-SCENE-DECOMPOSE      ST-COLLIDER
+ST-EDIT                 ST-PREFLIGHT
+ST-CANDIDATE-BUILD      ST-ISAAC-VALIDATE
+ST-REVIEW               ST-RELEASE
+```
+
+Stage failure dùng typed `ExecutionError(error_code, stage_id, human_message,
+retryable, details?)`. Track không được tạo status hoặc stage ID cạnh tranh.
 
 ## 9.2 Scene review states
 
@@ -803,37 +1066,29 @@ Nếu deterministic conversion cần thiết, nó phải thành adapter/stage ve
 Trước khi 4 track tách ra:
 
 **People**
-- [ ] 4 track owners
-- [ ] Technical Lead
-- [ ] Product Owner
-- [ ] Release Approver
+- [x] 4 track owners
+- [x] Technical Lead / Integration Owner
+- [x] Product Owner
+- [x] QA / Validation Lead
+- [x] Release Approver
 
 **Contracts**
-- [ ] `InputManifest`
-- [ ] `PrivacyValidationReport`
-- [ ] `JobManifest`
-- [ ] `ReconstructionBundle`
-- [ ] `LiDARGeometryArtifact`
-- [ ] `SceneIR`
-- [ ] `PreflightReport`
-- [ ] `CandidatePackage`
-- [ ] `ValidationReport`
-- [ ] `EvaluationReport`
-- [ ] `ApprovalRecord`
-- [ ] `ReleaseManifest`
+- [x] `InputManifest`, `PrivacyValidationReport`, `JobManifest`, `RuntimeManifest`
+- [x] `ReconstructionBundle`, `VisualArtifact`, `LiDARGeometryArtifact`, `AlignmentRecord`
+- [x] `SceneIR`, `PreflightReport`, `CandidatePackage`
+- [x] `ValidationReport`, `EvaluationReport`
+- [x] `ApprovalRecord`, `ReleaseManifest`, `SceneRevisionRecord`
 
 **Coordinate**
-- [ ] unit
-- [ ] up axis
-- [ ] handedness
-- [ ] world frame
+- [x] meter, Z-up, right-handed, world frame `world`
+- [x] `parent_from_local`, quaternion `xyzw`, angle `radian`
 
-**TorWIC**
-- [ ] bring-up traversal
-- [ ] data folders
-- [ ] benchmark split
-- [ ] LiDAR prefusion rule
-- [ ] metric anchor rule
+**TorWIC / evaluation inputs**
+- [x] P0 traversal: `Aisle_CW`; `Aisle_CCW` bổ sung/backup
+- [x] data folders và evaluation-only boundary defined
+- [x] LiDAR prefusion provenance rule defined
+- [ ] extracted structure inspection, Primary Demo frame range và benchmark split — later milestone
+- [ ] metric anchor / independent benchmark inputs — human-provided later milestone
 
 **Locked Evaluation Set — phải hoàn tất trước Exit gate M1**
 - [ ] input/traversal IDs + checksums
@@ -849,16 +1104,15 @@ Trước khi 4 track tách ra:
 - [ ] metric status: `MEASURE` / `BASELINE` / `PROPOSED_TARGET` / `LOCKED_ACCEPTANCE_THRESHOLD`
 
 **Runtime**
-- [ ] GPU machine
-- [ ] CUDA/driver
-- [ ] Isaac version
-- [ ] artifact root
+- [x] runtime manifest hỗ trợ `UNVERIFIED/TBD`
+- [x] logical URI + configured artifact root
+- [ ] GPU/VRAM, CUDA/driver, Isaac/OpenUSD/tool versions — record sau provisioning
 
 **Testing**
-- [ ] fixtures
-- [ ] contract test command
-- [ ] GPU smoke path
-- [ ] E2E evidence location
+- [x] synthetic positive/negative fixtures
+- [x] contract/integration/readiness commands
+- [ ] real GPU smoke path — later milestone
+- [ ] real E2E evidence — later milestone
 
 ---
 
@@ -870,8 +1124,8 @@ Bảng này là crosswalk bắt buộc giữa requirement, pipeline ID, task tri
 |---|---|---|---|---|
 | `FR-01/02` | `ST-INPUT-VALIDATE`, `ST-PRIVACY-GATE` | `REC-01/02`, `PRODUCT-01` | `InputManifest`, `PrivacyValidationReport` | `AC-02` |
 | `FR-03` | `INF-JOB-ORCHESTRATION` | `REC-10/11`, `SCENE-10`, `SIM-09`, `PRODUCT-02/03/08/09` | `JobManifest`, stage artifacts/errors | `AC-09` |
-| `FR-04` | `ST-FRAME-EXTRACT`, `ST-CAMERA-POSE`, `ST-VISUAL-RECON`, `ST-RGB-GEOMETRY`, `ST-METRIC-CANONICALIZE` | `REC-03/04/05/06/07` | `ReconstructionBundle` | `AC-01` |
-| `FR-05/06` | `ST-LIDAR-INGEST`, `ST-RGB-LIDAR-ALIGN`, `ST-METRIC-CANONICALIZE` | `REC-08/09` | `LiDARGeometryArtifact`, alignment/provenance evidence | `AC-03/04` |
+| `FR-04` | `ST-FRAME-EXTRACT`, `ST-CAMERA-POSE`, `ST-VISUAL-RECON`, `ST-RGB-GEOMETRY`, `ST-METRIC-CANONICALIZE` | `REC-02A/03/04/05/06/10` | `ReconstructionBundle` | `AC-01` |
+| `FR-05/06` | `ST-LIDAR-INGEST`, `ST-RGB-LIDAR-ALIGN`, `ST-METRIC-CANONICALIZE` | `REC-07/08/09/10` | `LiDARGeometryArtifact`, `AlignmentRecord`, mixed `ReconstructionBundle` | `AC-03/04` |
 | `FR-07` | `ST-OBJECT-EXTRACT`, `ST-OBJECT-ASSOC`, `ST-OBJECT-CONFIRM` | `SCENE-01/02/03/04/05` | candidate objects + provenance | `AC-05` |
 | `FR-08` | `ST-SCENE-DECOMPOSE`, `ST-EDIT` | `SCENE-06/07/08/08A/09`, `PRODUCT-05/06/07/07A` | `SceneIR` revision | `AC-06/11/12` |
 | `FR-09` | `ST-COLLIDER` | `SIM-02/02A/03`, `PRODUCT-07A` | `ColliderSpec`, physics-enriched `SceneIR` | `AC-06/08/12` |

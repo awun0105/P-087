@@ -1,195 +1,230 @@
-# AI20K Agent Template
+# Real2Sim Studio — Warehouse / Indoor AMR MVP
 
-Template chính thức cho học viên VinUni AI20K Build Phase: cấu trúc dự án, code
-mẫu và hướng dẫn kỹ thuật để xây dựng một AI Agent hoàn chỉnh — từ kiến trúc,
-code, test cho đến deploy và nộp bài Demo Day.
+> Chuyển dữ liệu RGB/LiDAR của kho trong nhà thành scene 3D có thể chỉnh sửa, kiểm định trong NVIDIA Isaac Sim và phát hành có truy vết.
 
-Technical Guidebook: <https://phoenix.note.transformerlabs.ai/technical-book>
+**Team:** P-087 — VinUni AI20K Build Phase, Cohort 4
 
-## Template có sẵn những gì
+**Trạng thái:** Foundation Scaffold — đang phát triển MVP P0
 
-- **Cấu trúc thư mục tách lớp** — `agents/`, `api/`, `services/`, `models/` đã
-  chia sẵn, không phải bàn lại từ đầu.
-- **Code mẫu chạy được** — LangGraph agent (state, node, tool), FastAPI routes,
-  Pydantic settings, schema.
-- **Docker và CI** — Dockerfile multi-stage, `docker-compose.yml`, workflow
-  GitHub Actions chạy `ruff` + `pytest` khi push lên `main`/`develop` và khi mở
-  pull request vào `main`.
-- **Technical Guidebook 10 chương** trong `docs/guide/`, đồng thời đọc được
-  online.
-- **Checklist 10 deliverables** của Demo Day.
-- **AI usage logging** — hook cài sẵn cho 6 công cụ AI, log tự động gửi lên
-  grading server mỗi lần `git push`.
+**Phạm vi P0:** Warehouse / Indoor AMR, primary RGB workflow, NVIDIA Isaac Sim
 
-## Yêu cầu
+## Vấn đề (Problem)
 
-- Python 3.11 (phiên bản CI đang dùng)
-- Git
-- Docker — tuỳ chọn, chỉ cần nếu chạy `docker compose`
+Kỹ sư mô phỏng thường nhận video hoặc dữ liệu LiDAR của nhà kho, nhưng không thể đưa thẳng chúng vào Isaac Sim. Họ phải dùng nhiều công cụ để dựng mô hình 3D, chỉnh đúng kích thước, tách vật thể và tạo vùng va chạm. Công việc này tốn nhiều thời gian và dễ phát sinh lỗi.
 
-## Bắt đầu
+Một mô hình 3D nhìn giống cảnh thật chưa chắc robot sử dụng được: kích thước có thể chưa theo đơn vị mét, vật thể chưa tách riêng hoặc chưa có vùng va chạm. Real2Sim Studio hướng tới giảm các bước thủ công này. Trong tuần đầu, nhóm sẽ đo thời gian của quy trình hiện tại làm mốc so sánh, sau đó mới đặt mục tiêu cải thiện cụ thể.
 
-### 1. Clone repo của đội
+## Giải pháp (Solution)
 
-Khi đội được chốt, hệ thống tự sinh repo cho đội từ template này, nằm trong org
-GitHub của khoá bạn đang học và đặt tên theo mã đội. Copy URL ở trang đội trên
-Phoenix rồi clone về:
+Real2Sim Studio tổ chức một workflow thống nhất:
 
-```bash
-git clone https://github.com/<ORG-CỦA-KHOÁ>/<MÃ-ĐỘI>.git
-cd <MÃ-ĐỘI>
-```
+- Tái tạo Visual và Geometry từ moving-camera RGB; Registered LiDAR là geometry input tùy chọn.
+- Tạo candidate object, cho phép con người xác nhận và tạo `SceneIR` có thể chỉnh sửa.
+- Sinh collider/OpenUSD, chạy validation trong Isaac Sim, sau đó Reviewer approve hoặc reject.
+- Lưu artifact, checksum và provenance để phát hành đúng candidate đã được kiểm tra.
 
-Không cần `rm -rf .git`, `git init` hay `git remote add`: repo sinh từ template
-đã bắt đầu bằng lịch sử riêng của đội và remote trỏ sẵn đúng chỗ. Chưa thấy repo
-của đội thì báo BTC — repo tự tạo nằm ngoài org sẽ không được chấm.
 
-### 2. Cài môi trường
+## Target User
+
+- **Primary:** Simulation / Real2Sim Engineer chuẩn bị scene cho robot và simulator.
+- **Secondary:** AMR Integration Engineer và Reviewer/Tech Lead kiểm tra collision, path và release.
+
+## Tech Stack
+
+| Layer | Technology | Trạng thái |
+|---|---|---|
+| Contracts | Pydantic 2 | Foundation scaffold |
+| Backend | FastAPI, Python 3.11 | Organizer scaffold |
+| Agent scaffold | LangGraph, LangChain, multi-provider LLM | Có sẵn, chưa phải Real2Sim pipeline |
+| Reconstruction | FFmpeg, COLMAP, Brush, OpenMVS, Open3D | Planned integration |
+| Scene/Object | SAM2, Open3D, NumPy | Planned integration |
+| Simulation | OpenUSD, NVIDIA Isaac Sim, IsaacLab | Planned integration |
+| Frontend | Next.js, React, TypeScript, Three.js | Planned; chưa scaffold |
+| DevOps | Docker, Docker Compose, GitHub Actions | Có sẵn |
+
+## Quick Start
 
 ```bash
+# 1. Clone repository
+git clone https://github.com/AI20K-Build-Phase-Cohort-4/P-087.git
+cd P-087
+
+# 2. Tạo môi trường Python 3.11
 python3.11 -m venv .venv
-source .venv/bin/activate      # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
-```
 
-### 3. Cấu hình biến môi trường
-
-```bash
+# 3. Tạo file cấu hình local
 cp .env.example .env
+# Chọn LLM_PROVIDER và điền API key tương ứng trong .env
+
+# 4. Chạy backend hiện tại
+make run
 ```
 
-Mở `.env`, chọn `LLM_PROVIDER`, rồi điền API key tương ứng của provider đó.
-Riêng `AI_LOG_API_KEY`, mỗi thành viên tự tạo key riêng tại
-[dashboard Phoenix](https://phoenix.note.transformerlabs.ai/api-keys) rồi thay
-vào chỗ `<get-your-api-key-from-dashboard-phoenix>` — giá trị trong
-`.env.example` chỉ là placeholder, để nguyên thì log không vào được hệ thống chấm.
+Swagger UI: <http://localhost:8000/docs>
 
-### 4. Cài hook ghi log AI
+Chạy kiểm tra:
 
 ```bash
-bash scripts/setup_hooks.sh                                      # Linux / macOS / Git Bash
-powershell -ExecutionPolicy Bypass -File scripts\setup_hooks.ps1 # Windows PowerShell
+make lint
+make test
 ```
 
-Chạy một lần sau khi clone. Hook ghi lại prompt khi bạn dùng Claude Code, Cursor,
-Codex CLI, Gemini CLI, Antigravity hoặc GitHub Copilot, và cài pre-push hook để
-đẩy log lên server.
-
-### 5. Chạy server
+Chạy bằng Docker:
 
 ```bash
-uvicorn src.main:app --reload --port 8000
+docker compose up --build
 ```
 
-Swagger UI ở <http://localhost:8000/docs>. Hoặc dùng `make run`, `make test`,
-`make lint` — xem `Makefile`.
+## Environment Variables
 
-## Cấu trúc thư mục
+Không commit `.env`. Các biến chính:
 
-```
-src/
-  agents/            LangGraph agent
-    graph.py         State graph (nodes + edges)
-    state.py         State schema (TypedDict)
-    nodes/           Node functions
-    tools/           Agent tools (@tool)
-  api/routes.py      FastAPI endpoints
-  models/schemas.py  Pydantic schemas
-  services/llm.py    LLM client
-  config.py          Pydantic Settings
-  main.py            App entry point
-tests/               pytest suite
-scripts/             Hook ghi log AI + installer
-docs/
-  guide/             Technical Guidebook (nguồn của bản online)
-  architecture_diagram.md
-eval/                Kết quả evaluation
-presentation/        Slide và video Demo Day
-.claude/ .codex/ .cursor/ .gemini/ .agents/ .github/hooks/
-                     Config hook cho từng công cụ
-.github/workflows/   CI
-Dockerfile           Multi-stage build
-docker-compose.yml   Chạy backend bằng Docker
-README_boilerplate.md  Khung README cho dự án của đội
-```
-
-## Technical Guidebook
-
-| Chương | Nội dung | Thời gian |
-|---|---|---|
-| 1 | Lời mở đầu — mục tiêu, cách sử dụng | 15 phút |
-| 2 | Khởi tạo dự án — clone, setup, git workflow | 4 giờ |
-| 3 | Thiết kế kiến trúc — 3-tier, diagram, ADR | 6 giờ |
-| 4 | LangGraph Agent — state, node, edge, tool, RAG | 8 giờ |
-| 5 | FastAPI — routes, validation, error handling, streaming | 6 giờ |
-| 6 | Giao diện — Next.js và Streamlit | 6 giờ |
-| 7 | DevOps — Docker, CI/CD, deploy, logging | 6 giờ |
-| 8 | Kiểm thử — unit test, integration test, RAGAS | 4 giờ |
-| 9 | Demo Day — 10 deliverables, checklist | 2 giờ |
-| 10 | Tài nguyên — khoá học, tài liệu, BMAD method | tham khảo |
-
-Đọc online tại <https://phoenix.note.transformerlabs.ai/technical-book>: đăng
-nhập bằng GitHub (đúng account đã được BTC mời vào org của khoá), chọn tab
-**Technical Book** ở sidebar trái. Bản offline nằm trong `docs/guide/`, mở được
-bằng bất kỳ markdown viewer nào.
-
-## 10 deliverables cho Demo Day
-
-| # | Deliverable | Vị trí | Template lo tới đâu |
-|---|---|---|---|
-| 1 | Source code | `src/` | Khung sẵn |
-| 2 | README | copy `README_boilerplate.md` thành `README.md` | Khung sẵn |
-| 3 | Architecture diagram | `docs/architecture_diagram.md` | Khung sẵn |
-| 4 | AI logs | LangSmith (3 biến môi trường) + auto AI usage logging | Cấu hình sẵn |
-| 5 | Live URL | deploy lên Render/Vercel | CI/CD sẵn |
-| 6 | Video demo | `presentation/` | Đội tự làm |
-| 7 | Pitch deck | `presentation/` | Đội tự làm |
-| 8 | Development journal | `JOURNAL.md` | Khung sẵn |
-| 9 | Worklog | `WORKLOG.md` | Khung sẵn |
-| 10 | Evaluation evidence | `eval/` | Đội tự làm |
-
-## Tech stack
-
-| Lớp | Công nghệ |
+| Nhóm | Biến |
 |---|---|
-| Agent | LangGraph + LangChain 0.3 |
-| Backend | FastAPI 0.115 + Uvicorn |
-| LLM | OpenAI, mặc định `gpt-4o-mini` (đổi trong `src/config.py`) |
-| Giao diện | Next.js hoặc Streamlit (đội tự chọn, hướng dẫn ở chương 6) |
-| Lint / test | ruff + pytest 8 |
-| DevOps | Docker + GitHub Actions |
+| LLM | `LLM_PROVIDER`, API key và model của provider được chọn |
+| App | `APP_ENV`, `APP_HOST`, `APP_PORT`, `CORS_ORIGINS`, `LOG_LEVEL` |
+| Storage | `DATABASE_URL`, `CHROMA_PERSIST_DIR` |
+| AI logs | `AI_LOG_SERVER`, `AI_LOG_API_KEY`, `AI_LOG_DIR` |
 
-## AI usage logging
+Chỉ API key của `LLM_PROVIDER` đang chọn là bắt buộc để chạy backend scaffold.
 
-Mọi prompt được ghi vào `.ai-log/session.jsonl` và tự động gửi lên grading server
-ở bước pre-push.
+## Project Structure
 
-| Công cụ | Cấu hình | Thời điểm ghi |
-|---|---|---|
-| Claude Code | `.claude/settings.json` | mỗi prompt (`UserPromptSubmit`) |
-| Cursor | `.cursor/hooks.json` | mỗi prompt và khi dừng |
-| OpenAI Codex CLI | `.codex/hooks.json` | mỗi prompt và khi dừng |
-| Gemini CLI | `.gemini/settings.json` | mỗi lượt agent chạy |
-| GitHub Copilot | `.github/hooks/hooks.json` | mỗi prompt và cuối session |
-| Antigravity IDE | `.agents/hooks.json` | mỗi prompt, kèm lần quét lại lúc `git push` |
+```text
+src/
+├── api/                              # Organizer scaffold; EX-PRODUCT
+├── agents/                           # Organizer scaffold; giữ nguyên
+├── llm/                              # Organizer scaffold; giữ nguyên
+├── models/
+│   ├── schemas.py                    # Organizer scaffold; giữ nguyên
+│   └── contracts/                    # Shared artifact contracts
+│       ├── artifacts.py
+│       ├── manifests.py
+│       ├── reconstruction.py
+│       ├── scene.py
+│       ├── validation.py
+│       └── release.py
+└── services/
+    ├── reconstruction/               # EX-REC
+    │   ├── adapters/
+    │   ├── rgb/
+    │   ├── lidar/
+    │   └── alignment/
+    ├── scene/                        # EX-SCENE
+    │   ├── extraction/
+    │   ├── association/
+    │   ├── candidates/
+    │   ├── decomposition/
+    │   └── editing/
+    ├── simulation/                   # EX-SIM
+    │   ├── colliders/
+    │   ├── preflight/
+    │   ├── usd/
+    │   ├── isaac/
+    │   └── validation/
+    └── orchestration/                # EX-PRODUCT
+        ├── jobs/
+        ├── artifacts/
+        ├── review/
+        └── release/
 
-Dùng ChatGPT hay công cụ web khác thì log thủ công:
+scripts/torwic/                       # EX-REC; offline dataset preparation only
+fixtures/                             # Shared contract-shaped development fixtures
+├── reconstruction_bundle/
+├── scene_ir/
+├── validation_report/
+└── mock_job/
 
-```bash
-bash scripts/_pyrun.sh scripts/log_manual.py --tool chatgpt --prompt "What you asked"
+tests/                                # Existing tests remain; track suites are additive
+├── test_contracts/
+├── test_reconstruction/
+├── test_scene/
+├── test_simulation/
+├── test_orchestration/
+├── integration/
+└── e2e/
+
+eval/                                 # Top-level name is stable
+├── visual/
+├── geometry/
+├── pose/
+├── object/
+├── path/
+├── protocols/
+└── results/report.md                 # Existing acceptance report; giữ nguyên
 ```
 
-## Đóng góp
+Xem cấu trúc và ownership đầy đủ tại [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
-Repo này là open source. Đọc [CONTRIBUTING.md](CONTRIBUTING.md) trước khi mở PR.
+## API Endpoints
 
-Nội dung trong `docs/guide/` là nguồn của Technical Book và được đồng bộ lên bản
-online, nên mọi thay đổi ở đó cần review của
-[@AI20K-Build-Phase/book-maintainers](https://github.com/orgs/AI20K-Build-Phase/teams/book-maintainers)
-— xem [.github/CODEOWNERS](.github/CODEOWNERS).
+Các endpoint dưới đây thuộc organizer scaffold hiện tại; Real2Sim APIs sẽ được bổ sung theo execution contract.
 
-Báo lỗ hổng bảo mật theo [SECURITY.md](SECURITY.md), đừng mở public issue.
+| Method | Path | Mô tả |
+|---|---|---|
+| `GET` | `/health` | Kiểm tra backend và environment |
+| `GET` | `/api/v1/status` | Kiểm tra LangGraph agent scaffold |
+| `POST` | `/api/v1/chat` | Gửi message tới agent scaffold |
+
+Request mẫu:
+
+```json
+{
+  "message": "Kiểm tra trạng thái dự án"
+}
+```
+
+Response mẫu:
+
+```json
+{
+  "response": "...",
+  "analysis": "..."
+}
+```
+
+## Tài liệu chính
+
+- [Product Brief](./docs/BRIEF.md)
+- [PRD](./docs/PRD.md)
+- [Dataset Playbook](./docs/DATASET_PLAYBOOK.md)
+- [Architecture](./ARCHITECTURE.md)
+- [Integration Playbook](./docs/execution/INTEGRATION_PLAYBOOK.md)
+- [Team Execution Contract](./docs/execution/TEAM_EXECUTION_CONTRACT.md)
+- [Track Implementation Guide](./docs/execution/TRACK_IMPLEMENTATION_GUIDE.md)
+
+## Demo và triển khai
+
+- **Screenshot/GIF:** chưa có vì frontend chưa được scaffold.
+- **Live URL:** chưa triển khai.
+- **Video demo:** chưa thực hiện.
+
+## Deliverables Checklist
+
+- [x] Repository và Foundation Scaffold
+- [x] README.md
+- [ ] Architecture Diagram đồng bộ với Real2Sim
+- [x] AI Logs (auto-collected)
+- [ ] Live URL / Deploy
+- [ ] Video Demo
+- [ ] Pitch Deck (`presentation/`)
+- [ ] Weekly Journal (`JOURNAL.md` đang là template)
+- [ ] Worklog (`WORKLOG.md` đang là template)
+- [ ] Evaluation Evidence (`eval/results/`)
+
+## Team
+
+| Thành viên | Track | Student ID |
+|---|---|---|
+| Lâm Quang Anh Quân | `EX-REC` — Reconstruction | 2A202602467 |
+| Chưa cập nhật | `EX-SCENE` — Scene/Object | Chưa cập n |
+| Chưa cập nhật | `EX-SIM` — Simulation/Evaluation | Chưa cập nhật |
+| Chưa cập nhật | `EX-PRODUCT` — Product/Orchestration | Chưa cập nhật |
+
+Tên và Student ID sẽ được cập nhật sau khi team khóa ownership; không suy đoán từ Git author.
 
 ## License
 
-[MIT](LICENSE) — dùng tự do cho mục đích giáo dục.
+MIT

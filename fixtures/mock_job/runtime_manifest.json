@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "components": {
+    "gpu_model": {"status": "UNVERIFIED", "notes": "TBD after cloud provisioning"},
+    "vram": {"status": "UNVERIFIED", "notes": "TBD after cloud provisioning"},
+    "nvidia_driver": {"status": "UNVERIFIED", "notes": "TBD after cloud provisioning"},
+    "cuda_runtime": {"status": "UNVERIFIED", "notes": "TBD after cloud provisioning"},
+    "isaac_sim": {"status": "UNVERIFIED", "notes": "TBD after cloud provisioning"},
+    "isaac_lab": {"status": "UNVERIFIED", "notes": "TBD after cloud provisioning"},
+    "openusd": {"status": "UNVERIFIED", "notes": "TBD after cloud provisioning"},
+    "colmap": {"status": "UNVERIFIED", "notes": "TBD after worker provisioning"},
+    "brush": {"status": "UNVERIFIED", "notes": "TBD after worker provisioning"},
+    "openmvs": {"status": "UNVERIFIED", "notes": "TBD after worker provisioning"},
+    "sam2": {"status": "UNVERIFIED", "notes": "TBD after worker provisioning"}
+  },
+  "runtime_manifest_checksum": "sha256:73562ba0ddf59881a00b72242ce9409137b30f7b3220627aeba2c9e6da02b520"
+}

@@ -1,5 +1,57 @@
 # Ghi chú Dataset — TorWIC-SLAM cho Real2Sim Studio
 
+## M0 sensor evidence — `Aisle_CW` (REC-01B)
+
+P0 traversal đã khóa là `Aisle_CW`; `Aisle_CCW` chỉ là traversal bổ sung/backup.
+Các số liệu dưới đây đến từ báo cáo REC-01B do owner cung cấp ngày 23/09/2026
+và phép kiểm với `verify.py`/preview nằm ngoài repository. Đây là evidence cho
+sensor semantics trên sequence đã kiểm, không phải claim mọi traversal đều giống
+nhau hoặc real reconstruction đã hoàn thành. REC-01A chưa có report riêng trong
+repository; không suy diễn checksums hay normalized output của REC-01A.
+`REC-01A/REC-01B` ở đây là tên evidence/subcheck được owner cung cấp; task
+registry hiện vẫn chỉ có `REC-01` và không được tự tạo task ID mới từ tên này.
+
+| Nhóm | Observed trên `Aisle_CW` | Phạm vi kết luận |
+| --- | --- | --- |
+| Trajectory | TUM, 1092 records, quaternion `xyzw`, translation meter | H1 map sharp hơn H2 khi gộp khoảng 20 LiDAR frames: `T_world_from_sensor` |
+| Đồng bộ | 1092/1092 frame IDs và timestamps khớp RGB/depth/LiDAR/pose 1-to-1; ID `000500` ứng với dòng 501 | Check sequence này; không chọn demo frame range |
+| Camera trái | 1280×720, pinhole, OpenCV distortion | Observed calibration/image metadata |
+| LiDAR | `.pcd`, fields `x,y,z` | Raw sensor input cho offline preparation |
+| Camera extrinsic | Raw label `T_cam1_os` chiếu đúng khi dùng nghịch đảo ở frame `000500` | Normalize thành `T_os_from_cam`; `T_cam_from_os = inverse(T_os_from_cam)` |
+| Depth trái | `uint16` PNG, sensor scale `0.001` meter/raw unit | Median residual LiDAR/depth khoảng `0.147 m` trong phép kiểm này; không phải sensor error model hay GT depth |
+
+`source_frame = os_sensor` của `traj_gt.txt` là **hypothesis mạnh từ projection/map**,
+chưa được SLAM backend xác nhận trực tiếp. Dataset adapter phải lưu source label,
+evidence/status và không biến giả thuyết này thành hard fact. Canonical Real2Sim
+convention là meter, Z-up, right-handed, world `world`, transform
+`parent_from_local`, quaternion `xyzw`, angle `radian`:
+
+```text
+p_parent = T_parent_from_local * p_local
+T_world_from_sensor, T_os_from_cam, T_cam_from_os
+```
+
+Convention canonical này là quyết định của **project**, không phải xác nhận toàn
+bộ native TorWIC coordinate convention. Adapter phải convert ở boundary.
+
+Phân loại tài nguyên cho traversal:
+
+| Class | Ví dụ | Quy tắc |
+| --- | --- | --- |
+| Raw/product input | RGB, sensor depth, raw LiDAR, calibration, frame_times, IMU nếu cần | Dataset preparation đọc theo modality đã khai báo; runtime P0 chỉ nhận profile trong PRD |
+| Derived | registered LiDAR, estimated poses, geometry/mesh, point cloud, 3DGS, alignment | Publish artifact với checksum và provenance; không dùng output derived làm GT độc lập |
+| Evaluation/GT | `traj_gt.txt`, `groundtruth_map.ply`, semantic GT nếu dùng | Evaluator-only mặc định; không feed map vào prediction |
+
+Nếu offline prefusion dùng `traj_gt.txt`, TorWIC preparation manifest phải ghi
+`trajectory_gt_used_for_lidar_prefusion: true` và
+`assistance_class: GT-assisted`; không claim trajectory-estimation accuracy độc
+lập bằng output đó. `traj_gt.txt` không được đọc trực tiếp bởi product runtime.
+Đây là TorWIC preparation provenance; khi publish shared LiDAR artifact, adapter
+map thành dependency `role: pose`, `origin: ground_truth`, trajectory checksum và
+`ground_truth_assisted: true`, không đưa tên field TorWIC vào universal schema.
+Depth là **sensor depth**, không tự động là ground-truth depth. RGB+Depth có thể
+biểu diễn trong Foundation contract nhưng chưa là P0 product input profile riêng.
+
 > **Mục đích tài liệu:** Ghi chú kỹ thuật để cả team hiểu TorWIC-SLAM là gì, dataset gồm những gì, và quan trọng nhất là **nó phù hợp tới đâu với sản phẩm Real2Sim Studio mà team thực sự sẽ xây**, cần tải bao nhiêu, cần tổ chức lại dữ liệu như thế nào, preprocessing những gì, và từng file/modality sẽ được sử dụng ở stage nào của pipeline cho development, demo, validation và benchmarking.
 >
 > **Document Role:** Dataset preparation, leakage control và evaluation methodology.

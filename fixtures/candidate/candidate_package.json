@@ -1,0 +1,51 @@
+{
+  "candidate_manifest": {
+    "schema_version": "1.0",
+    "candidate_id": "candidate-fixture-001",
+    "scene_revision": "rev-001",
+    "scene_ir_checksum": "sha256:3be4de672133c6627ef35f50bd86f302c008beda5d45a5d4b5da010d5c61f039",
+    "job_manifest_checksum": "sha256:5cbda9ad91d774683bf565ef2e116578396e96a7ea0ffd00e8315c8d58f5bad2",
+    "coordinate_system": {"unit": "meter", "up_axis": "Z", "handedness": "right", "world_frame": "world"},
+    "object_transforms": [{
+      "object_id": "object-pallet-001",
+      "transform": {
+        "parent_frame": "world", "local_frame": "object-pallet-001",
+        "translation_xyz": [1.0, 2.0, 0.0],
+        "rotation_quaternion_xyzw": [0.0, 0.0, 0.0, 1.0]
+      }
+    }],
+    "asset_refs": [],
+    "collider_refs": [{
+      "artifact_type": "ColliderGeometry", "schema_version": "1.0",
+      "artifact_uri": "artifact://jobs/job-fixture-001/scene/pallet_collider.json",
+      "artifact_checksum": "sha256:7111a788391d958bdd5e5128797a1e80da1d433a278b556c67718ad84ecae22f",
+      "data_class": "derived", "producer_stage": "ST-COLLIDER", "job_id": "job-fixture-001"
+    }],
+    "artifact_checksums": [
+      "sha256:acd5666bcb1754997b8ec3536a694102e413fb6ea9453731c4998116abbb2829",
+      "sha256:a3349fcaf5efe381a6a43483b38f1c6390aea0ed8a35b9b35d55c600b521b3a8",
+      "sha256:7111a788391d958bdd5e5128797a1e80da1d433a278b556c67718ad84ecae22f"
+    ],
+    "build_config_checksum": "sha256:f449812abbe1d33eadc1b983d61a0a81a625c8f1c1149ae4199b115eaf864fe7"
+  },
+  "entrypoint_usd": {
+    "artifact_type": "OpenUSDEntrypoint", "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-fixture-001/simulation/candidate.usda",
+    "artifact_checksum": "sha256:acd5666bcb1754997b8ec3536a694102e413fb6ea9453731c4998116abbb2829",
+    "data_class": "derived", "producer_stage": "ST-CANDIDATE-BUILD", "job_id": "job-fixture-001"
+  },
+  "assets": [],
+  "geometry": [{
+    "artifact_type": "ObjectGeometry", "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-fixture-001/scene/object_pallet_geometry.ply",
+    "artifact_checksum": "sha256:a3349fcaf5efe381a6a43483b38f1c6390aea0ed8a35b9b35d55c600b521b3a8",
+    "data_class": "derived", "producer_stage": "ST-SCENE-DECOMPOSE", "job_id": "job-fixture-001"
+  }],
+  "colliders": [{
+    "artifact_type": "ColliderGeometry", "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-fixture-001/scene/pallet_collider.json",
+    "artifact_checksum": "sha256:7111a788391d958bdd5e5128797a1e80da1d433a278b556c67718ad84ecae22f",
+    "data_class": "derived", "producer_stage": "ST-COLLIDER", "job_id": "job-fixture-001"
+  }],
+  "candidate_checksum": "sha256:7cc30d42394e6df440c2c0533c64aad0923997961baffef07ec1388fc1876bdb"
+}

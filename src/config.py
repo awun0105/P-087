@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
@@ -23,9 +24,7 @@ class Settings(BaseSettings):
         return value
 
     # Cấu hình LLM dùng chung
-    llm_provider: Literal[
-        "openai", "anthropic", "google", "openrouter", "nvidia_nim", "mistral"
-    ] = "openai"
+    llm_provider: Literal["openai", "anthropic", "google", "openrouter", "nvidia_nim", "mistral"] = "openai"
     llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     llm_max_tokens: int = Field(default=2048, ge=1)
 
@@ -54,6 +53,9 @@ class Settings(BaseSettings):
     # Kho vector
     chroma_persist_dir: str = "./data/chroma"
 
+    # Artifact root được resolve thành absolute path tại runtime; contracts chỉ giữ URI.
+    artifact_root: Path = Path("./data/artifacts")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -76,6 +78,8 @@ class Settings(BaseSettings):
         api_key = required_keys[self.llm_provider]
         if not api_key or not api_key.strip():
             raise ValueError(f"Missing API key for LLM provider: {self.llm_provider}")
+        if self.app_env in {"staging", "production"} and not self.artifact_root.is_absolute():
+            raise ValueError("ARTIFACT_ROOT must be absolute outside development/test")
         return self
 
 

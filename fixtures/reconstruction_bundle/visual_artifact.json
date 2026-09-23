@@ -1,0 +1,14 @@
+{
+  "artifact_type": "VisualArtifact",
+  "schema_version": "1.0",
+  "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/mock_visual.json",
+  "artifact_checksum": "sha256:2aa87e90bbc2d516c244428ed931e357a1e56edf0c1c8b1f10e38ebc27dedaa0",
+  "producer_stage": "ST-VISUAL-RECON",
+  "job_id": "job-fixture-001",
+  "format": "real2sim.synthetic.visual.v1",
+  "producer": "foundation-fixture-generator",
+  "producer_version": "1.0",
+  "coordinate_system": {"unit": "meter", "up_axis": "Z", "handedness": "right", "world_frame": "world"},
+  "source_input_checksum": "sha256:afe1bbad09183a1e732c4deb9b4f22b37753852c9275acbfb683f78c5ad65622",
+  "provenance": {"fixture": true, "brush_compatibility_proof": false}
+}

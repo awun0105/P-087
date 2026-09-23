@@ -7,14 +7,14 @@
 | Mã dự án | RAV-01 |
 | Tên sản phẩm | Real2Sim Studio |
 | Phạm vi bản phát hành | Warehouse MVP |
-| Phiên bản tài liệu | v1.9 |
-| Trạng thái | Bản nháp để rà soát và phê duyệt (Draft for Review) |
-| Ngày cập nhật | 22/09/2026 |
+| Phiên bản tài liệu | v1.11 |
+| Trạng thái | Foundation Baseline; benchmark/runtime acceptance inputs pending |
+| Ngày cập nhật | 23/09/2026 |
 | Thời gian thực hiện dự kiến | 4 tuần |
 | Người dùng chính | Kỹ sư mô phỏng (Simulation Engineer) |
 | Miền ứng dụng | Kho trong nhà, robot di động tự hành (Indoor Warehouse AMR) |
 | Trình mô phỏng mục tiêu | NVIDIA Isaac Sim |
-| Tài liệu tiền nhiệm | PRD v1.8 |
+| Tài liệu tiền nhiệm | PRD v1.10 |
 | Tài liệu liên quan | [BRIEF](./BRIEF.md), [DATASET_PLAYBOOK](./DATASET_PLAYBOOK.md), [WIREFRAME](./WIREFRAME_AND_UI_FLOW.md), [Execution Contract](./execution/TEAM_EXECUTION_CONTRACT.md), [Execution Plan](./execution/TEAM_EXECUTION_PLAN.md), [Track Guide](./execution/TRACK_IMPLEMENTATION_GUIDE.md), [Integration Playbook](./execution/INTEGRATION_PLAYBOOK.md) |
 
 ### 0.1 Lịch sử thay đổi (Change Log)
@@ -26,17 +26,17 @@
 | v1.7 | 21/09/2026 | Clarify reconstructed SceneObject deletion; separate deletion from background completion; align candidate lifecycle |
 | v1.8 | 22/09/2026 | Clarify P0 Minimal Correction, Candidate checksum lifecycle, Privacy Gate, LiDAR scope, evaluation/runtime boundary và advanced queue scope |
 | v1.9 | 22/09/2026 | Clarify reusable LiDAR branch, P0 LiDAR Contribution Evidence qua RGB + Registered LiDAR integration và P1 LiDAR-only product configuration |
+| v1.10 | 23/09/2026 | Khóa direct browser rendering của real 3DGS VisualArtifact là P0; renderer backend có thể dùng WebGL/WebGL2 hoặc WebGPU, còn mesh/point-cloud preview chỉ là development/recovery fallback |
+| v1.11 | 23/09/2026 | Foundation override: P0 viewer dùng Next.js + Three.js + WebGL/WebGL2 cho geometry/point-cloud/collider/transforms; direct Gaussian browser rendering chuyển thành stretch/non-blocking; khóa owners và TorWIC bring-up archive |
 
 ### 0.2 Chủ sở hữu và người phê duyệt (Owners and Approvers)
 
-Các tên cụ thể phải được nhóm điền trước khi chuyển tài liệu sang trạng thái `APPROVED`.
-
 | Vai trò | Trách nhiệm | Người phụ trách |
 |---|---|---|
-| Chủ sở hữu sản phẩm (Product Owner) | Chốt phạm vi, mức ưu tiên và tiêu chí thành công | Chưa chỉ định |
-| Chủ trì kỹ thuật (Technical Lead) | Xác nhận tính khả thi và các phụ thuộc kỹ thuật | Chưa chỉ định |
-| Chủ trì kiểm thử (QA/Validation Lead) | Chốt bộ dữ liệu đánh giá và bằng chứng nghiệm thu | Chưa chỉ định |
-| Người phê duyệt phát hành (Release Approver) | Duyệt scene và bản phát hành MVP | Chưa chỉ định |
+| Chủ sở hữu sản phẩm (Product Owner) | Chốt phạm vi, mức ưu tiên và tiêu chí thành công | Cường |
+| Chủ trì kỹ thuật / Integration Owner | Xác nhận tính khả thi và các phụ thuộc kỹ thuật | `@awun0105` |
+| Chủ trì kiểm thử (QA/Validation Lead) | Chốt bộ dữ liệu đánh giá và bằng chứng nghiệm thu | Đạt |
+| Người phê duyệt phát hành (Release Approver) | Duyệt scene và bản phát hành MVP | Đức |
 
 ### 0.3 Quy ước mức độ yêu cầu (Requirement Language)
 
@@ -140,7 +140,7 @@ Về dài hạn, Real2Sim Studio có thể phát triển theo hướng **Univers
 | G-04 | Chứng minh LiDAR đã đăng ký có thể thực sự đóng góp vào geometry của ít nhất một scene, thay vì chỉ được tải lên rồi bỏ qua. |
 | G-05 | Bảo đảm con người là người quyết định cuối cùng trước khi scene được phát hành. |
 | G-06 | Lưu đủ dữ liệu và cấu hình để tái tạo lại một bản phát hành đã được duyệt. |
-| G-07 | Cung cấp Web App có 3D Viewer trên trình duyệt để người dùng xem và chỉnh sửa scene mà không cần công cụ dựng 3D trên desktop. |
+| G-07 | Cung cấp Web App có Three.js 3D Viewer để xem/chỉnh Geometry, Point Cloud, Collider và SceneObject transforms mà không cần công cụ dựng 3D desktop; direct Gaussian rendering là stretch. |
 
 ### 2.2 Chỉ số thành công (Success Metrics)
 
@@ -304,7 +304,7 @@ Full LiDAR-only product configuration thuộc P1.
 
 #### P0 — Bắt buộc để phát hành (Release Blockers)
 
-- Web App có browser 3D Viewer hỗ trợ orbit, pan, zoom, chọn object và bật/tắt các lớp biểu diễn;
+- Web App có Three.js/WebGL browser viewer cho geometry mesh, point cloud, collider và SceneObject transforms, hỗ trợ orbit, pan, zoom, chọn object và bật/tắt lớp;
 - luồng RGB đầu-cuối tại mục 4.1;
 - xác nhận metric scale;
 - candidate object được tạo tự động trước khi người dùng sửa;
@@ -465,14 +465,20 @@ Raw LiDAR scan sequences, LiDAR odometry và LiDAR SLAM vẫn nằm ngoài Input
 
 Hệ thống bắt buộc cung cấp Web App chạy trên browser desktop được hỗ trợ.
 
-3D Viewer tối thiểu phải cho phép Editor:
+3D Viewer P0 tối thiểu phải cho phép Editor:
 
+- tải và render geometry mesh, point cloud, collider và SceneObject transforms từ artifact refs;
 - orbit, pan và zoom scene;
 - chọn một object;
 - bật/tắt object;
 - bật/tắt riêng Visual Representation, Geometry Representation và Collider;
 - kiểm tra và chỉnh transform của `SceneObject`;
 - thực hiện các thao tác trên mà không cần mở Blender hoặc Isaac Sim GUI.
+
+P0 dùng Next.js + Three.js + WebGL/WebGL2. Direct browser rendering của Gaussian
+splats/WebGPU là stretch/non-blocking. `VisualArtifact` vẫn là EX-REC output
+abstraction; khi Brush chạy thật phải record format/producer/version/checksum và
+coordinate metadata. Synthetic visual fixture không phải production Brush proof.
 
 ### FR-01 — Tạo dự án và tiếp nhận dữ liệu (Project and Data Ingestion)
 
@@ -931,11 +937,16 @@ Từ một bản phát hành đã duyệt, thành viên không trực tiếp t�
 Trên một browser desktop được hỗ trợ, Editor phải có thể:
 
 - mở một reconstructed scene;
+- xem geometry mesh/point cloud/collider của scene và truy vết được về artifact checksums;
 - orbit, pan và zoom scene;
 - chọn một object;
 - bật/tắt object hoặc từng lớp Visual, Geometry và Collider;
 - xem và chỉnh transform của `SceneObject`;
 - hoàn thành các thao tác trên mà không cần mở Blender hoặc Isaac Sim GUI.
+
+Acceptance evidence phải ghi browser, Three.js/WebGL runtime/version và artifact
+checksums. Direct Gaussian renderer nếu có được báo cáo như stretch evidence,
+không phải điều kiện pass AC-11 P0.
 
 ---
 
@@ -1035,13 +1046,12 @@ Ngoài bốn tầng trên, registered-frame ratio, per-stage runtime, GPU-hours,
 
 ### 11.4 Câu hỏi phải chốt trước khi đổi trạng thái sang Approved (Open Questions)
 
-1. Ai là Product Owner, Technical Lead, QA Lead và Release Approver?
-2. Phiên bản Isaac Sim, CUDA, driver và cấu hình GPU nào được khóa?
-3. TorWIC-SLAM đã được chọn làm public warehouse dataset family. Cần chốt Scenario/Traversal cụ thể nào làm bring-up, demo và locked benchmark.
-4. Candidate coverage có baseline bao nhiêu và target nào sẽ được khóa sau tuần 1?
-5. Metric scale reference nào được dùng và dung sai chấp nhận là bao nhiêu?
-6. Thời gian lưu input/artifact và chính sách xóa là gì?
-7. Gói OpenUSD cuối cùng bao gồm chính xác những tệp nào?
+1. GPU model/VRAM, NVIDIA driver, CUDA runtime, IsaacLab/OpenUSD và external tool versions nào được ghi sau provisioning? Hiện `UNVERIFIED/TBD`.
+2. TorWIC P0 traversal đã chọn `Aisle_CW`; `Aisle_CCW` là traversal bổ sung/backup. Primary Demo frame range vẫn `TBD` và không được suy ra từ Foundation sensor checks.
+3. Candidate coverage có baseline bao nhiêu và target nào sẽ được khóa sau tuần 1?
+4. Metric scale reference nào được dùng và dung sai chấp nhận là bao nhiêu?
+5. Thời gian lưu input/artifact và chính sách xóa là gì?
+6. Gói OpenUSD cuối cùng bao gồm chính xác những tệp nào?
 
 ---
 

@@ -5,7 +5,7 @@
 **Document Role:** Timeline, ownership, milestones và acceptance execution plan.
 **Scope:** Phân công bốn track, integration gates, feature freeze, acceptance day và pitch readiness trong cửa sổ MVP.
 **Upstream Constraints:** Tuân [PRD](../PRD.md), [DATASET_PLAYBOOK](../DATASET_PLAYBOOK.md) và normative [TEAM_EXECUTION_CONTRACT](./TEAM_EXECUTION_CONTRACT.md); không định nghĩa schema cạnh tranh.
-**Status:** Draft for Review.
+**Status:** Foundation Baseline v1.0 — ownership and M0 gate approved.
 **Related Documents:** [BRIEF](../BRIEF.md), [WIREFRAME](../WIREFRAME_AND_UI_FLOW.md), [INTEGRATION_PLAYBOOK](./INTEGRATION_PLAYBOOK.md), [TRACK_IMPLEMENTATION_GUIDE](./TRACK_IMPLEMENTATION_GUIDE.md).
 
 **Project window:** 22/09/2026 → 19/10/2026
@@ -64,10 +64,14 @@ Scope sản phẩm vẫn lấy từ:
 
 | Track | Owner | Trách nhiệm chính |
 |---|---|---|
-| `EX-REC` | Member 1 | TorWIC preparation, RGB/LiDAR reconstruction |
-| `EX-SCENE` | Member 2 | Object extraction, association, SceneObject, Scene IR |
-| `EX-SIM` | Member 3 | Collider, OpenUSD, Isaac Sim, evaluation |
-| `EX-PRODUCT` | Member 4 | FastAPI, job orchestration, Web Studio, review/release |
+| `EX-REC` | `@awun0105` | TorWIC preparation, RGB/LiDAR reconstruction |
+| `EX-SCENE` | Đức | Object extraction, association, SceneObject, Scene IR |
+| `EX-SIM` | Đạt | Collider, OpenUSD, Isaac Sim, evaluation |
+| `EX-PRODUCT` | Cường | FastAPI, job orchestration, Web Studio, review/release |
+
+Cross-project roles: Technical Lead / Integration Owner `@awun0105`; Product
+Owner Cường; QA / Validation Lead Đạt; Release Approver Đức. GitHub handles của
+Đức, Đạt và Cường còn `TBD`, không tự đoán trong CODEOWNERS.
 
 Không dùng tên Track A/B/C/D vì [`DATASET_PLAYBOOK.md`](../DATASET_PLAYBOOK.md) đã dùng các tên đó cho protocol đánh giá.
 
@@ -107,10 +111,9 @@ Hai ngày này cả team làm chung trước khi tách track.
 - repository structure;
 - shared artifact contracts v0;
 - fixture/mock artifacts;
-- một TorWIC traversal cho bring-up;
+- TorWIC P0 traversal: `Aisle_CW`; `Aisle_CCW` bổ sung/backup;
 - TorWIC `raw / normalized / derived / evaluation_only`;
-- GPU provider/machine;
-- CUDA/driver/Isaac Sim version;
+- runtime manifest cho GPU/tool versions `UNVERIFIED/TBD` tới khi provision;
 - artifact storage;
 - branch/integration strategy.
 
@@ -141,7 +144,7 @@ Foundation Lock xác định owner và nơi lưu các mục trên. Danh sách ph
 - tạo fixture `ReconstructionBundle`.
 
 **EX-SIM**
-- khóa Isaac environment;
+- tạo runtime manifest với Isaac/GPU fields `UNVERIFIED/TBD`;
 - tạo fixture `SceneIR`;
 - chuẩn bị Minimal USD smoke test.
 
@@ -156,8 +159,12 @@ Chỉ chuyển sang coding độc lập khi:
 - mọi người biết input/output của mình;
 - fixture đã tồn tại;
 - TorWIC bring-up scene đã chốt;
-- GPU environment đã chốt;
+- canonical coordinate/transform và artifact store contract đã chốt;
+- GPU environment có runtime-manifest placeholders, không block synthetic Foundation;
 - không còn câu hỏi “track sau lấy dữ liệu của track trước bằng cách nào?”.
+
+M0 dùng synthetic fixture/integration proof. Gate này không đồng nghĩa real
+reconstruction, Brush compatibility, Isaac/GPU acceptance hoặc full E2E pass.
 
 ---
 
@@ -317,6 +324,8 @@ Hoàn thiện:
 - worker invocation abstraction;
 - artifact access;
 - real SceneIR viewer;
+- geometry/point-cloud/collider Three.js viewer;
+- direct browser Gaussian rendering chỉ là stretch/non-blocking;
 - layer toggle;
 - transform editing;
 - review shell.
@@ -389,7 +398,11 @@ M3 — 09/10:
 - real CandidatePackage;
 - real Isaac validation;
 - Web mở đúng scene đó;
+- Web render đúng geometry/point-cloud/collider artifacts và canonical transforms;
 - review và release dùng đúng candidate lineage của job upload qua Web/API.
+
+Direct browser Gaussian rendering là stretch/non-blocking và không nằm trong M3
+gate. EX-REC vẫn phải publish real VisualArtifact metadata/provenance.
 
 ## 7.2 10–12/10 — Acceptance & Stabilization
 

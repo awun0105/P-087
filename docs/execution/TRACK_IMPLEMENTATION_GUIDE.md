@@ -5,7 +5,7 @@
 **Document Role:** Per-track implementation task guide.
 **Scope:** Thứ tự thực hiện, tool strategy, task ID, test và Definition of Done cho `EX-REC`, `EX-SCENE`, `EX-SIM`, `EX-PRODUCT`.
 **Upstream Constraints:** Tuân [PRD](../PRD.md), [DATASET_PLAYBOOK](../DATASET_PLAYBOOK.md) và normative [TEAM_EXECUTION_CONTRACT](./TEAM_EXECUTION_CONTRACT.md).
-**Status:** Draft for Review.
+**Status:** Foundation Baseline v1.0 — task IDs/scopes locked.
 **Related Documents:** [BRIEF](../BRIEF.md), [WIREFRAME](../WIREFRAME_AND_UI_FLOW.md), [INTEGRATION_PLAYBOOK](./INTEGRATION_PLAYBOOK.md), [TEAM_EXECUTION_PLAN](./TEAM_EXECUTION_PLAN.md).
 
 ---
@@ -71,7 +71,7 @@ Nguyên tắc chung:
 | Simulator patterns | `REFERENCE` | Re3Sim, VR-Robo, DISCOVERSE, OpenReal2Sim | reconstruction→simulator patterns | không tạo dependency nếu không cần |
 | Evaluation | `SELF-CODE` | [DATASET_PLAYBOOK](../DATASET_PLAYBOOK.md) | protocol/metric definitions | evaluator orchestration + reports |
 | API/jobs | `SELF-CODE` | FastAPI + basic worker/queue | framework primitives | job/artifact/orchestration lifecycle |
-| Web Studio | `SELF-CODE` + library | Next.js, Three.js | web/3D primitives | viewer, editing, validation/review UX |
+| Web Studio | `SELF-CODE` | Next.js, Three.js, WebGL/WebGL2 | web/3D primitives | mesh/point-cloud/collider viewer, SceneIR editing, validation/review UX; direct Gaussian rendering là stretch |
 | Review/release | `SELF-CODE` | PRD lifecycle | — | approval gate, revision invalidation, release sealing |
 
 Nếu muốn đổi backend hoặc strategy, output contract phải giữ nguyên và phải tuân [`TEAM_EXECUTION_CONTRACT.md`](./TEAM_EXECUTION_CONTRACT.md).
@@ -139,7 +139,8 @@ Không nghiên cứu vô hạn.
 | Stage | Strategy | Source | Lấy từ repo/tool | Team tự code |
 |---|---|---|---|---|
 | `REC-01` TorWIC preparation | `SELF-CODE` | Dataset Playbook + Open3D/FFmpeg | IO/transform/encode primitives | normalizer, split/preparation scripts, manifests |
-| `REC-02` RGB validation | `SELF-CODE` | FFmpeg + PRD rules | decode/probe | preflight rules, errors, report |
+| `REC-02` Input validation + privacy gate | `SELF-CODE` | FFmpeg + PRD rules | decode/probe | input rules, privacy gate, errors, report |
+| `REC-02A` Frame extraction | `REUSE` + adapter | FFmpeg | deterministic frame decode/extraction | command builder, normalized frame artifact, provenance |
 | `REC-03` Camera pose | `REUSE` | `colmap/colmap` | feature extraction, matching, mapper/SfM | `ColmapAdapter`, model selection, pose normalization |
 | `REC-04` Visual reconstruction | `REUSE` | `ArthurBrussee/brush` | 3DGS reconstruction/training, Gaussian output | `BrushAdapter`, config, COLMAP bridge, provenance |
 | `REC-05` RGB geometry | `REUSE` | `cdcseacave/openMVS` | COLMAP import, densify, mesh | `OpenMVSAdapter`, output normalization |
@@ -176,6 +177,18 @@ Kiểm tra:
 - chỉ cho pipeline tiếp tục khi trạng thái là `VERIFIED_ANONYMIZED`; `PRELIMINARY_SCREENED` không đủ cho public/demo và `QUARANTINED` phải dừng pipeline.
 
 `EX-PRODUCT` thu source-rights attestation; `EX-REC` sở hữu privacy check/report; QA/Validation Lead chấp nhận `VERIFIED_ANONYMIZED` trước public/demo use.
+
+### REC-02A — Frame extraction
+
+```text
+validated + privacy-cleared RGB input
+→ ST-FRAME-EXTRACT
+→ normalized immutable frame set + timestamps + provenance
+```
+
+Frame extraction không nằm trong `REC-07`; `REC-07` chỉ là TorWIC LiDAR
+prefusion. Output phải dùng artifact URI/checksum và là input trực tiếp cho
+`REC-03`.
 
 ### REC-03 — Camera pose
 
@@ -222,7 +235,14 @@ lidar/*.pcd
 → registered_lidar.ply
 ```
 
-Nếu dùng `traj_gt`, ghi provenance.
+Direct runtime không đọc `traj_gt`. Nếu offline prefusion explicitly dùng file
+này, ghi `trajectory_gt_used_for_lidar_prefusion: true`, `assistance_class: GT-assisted` và không claim resulting
+alignment độc lập với trajectory GT.
+Đây là field của TorWIC preparation manifest, không phải required field trong
+shared `LiDARGeometryArtifact`/`ReconstructionBundle`. REC-08 map nó thành
+preprocessing dependency `role: pose`, `origin: ground_truth`, trajectory
+checksum và `ground_truth_assisted: true`; estimated/external poses dùng origin
+phù hợp thay vì giả làm GT.
 
 ### REC-08 — LiDAR ingest
 
@@ -459,6 +479,8 @@ collider: ColliderSpec?
 ```
 
 Chỉ một canonical transform.
+Object IDs phải unique theo SceneIR revision; collider local offset (nếu có)
+được parent vào `SceneObject.local_frame`.
 
 ### SCENE-08 — Edit semantics
 
@@ -474,7 +496,10 @@ Delete phải loại geometry/physics khỏi active scene; photorealistic backgr
 
 ### SCENE-08A — Add primitive/asset
 
-Tạo `SceneObject(origin = user_added)` với primitive geometry có `dimensions` rõ ràng hoặc `asset_ref` có size parameters theo asset. Không expose generic scale cho tới khi propagation sang Visual/Geometry/Collider được định nghĩa và kiểm thử.
+Tạo `SceneObject(origin = user_added)` với primitive geometry có
+`primitive_dimensions_xyz_m` dương/hữu hạn hoặc `asset_ref` có size parameters
+theo asset. Không expose generic scale cho tới khi propagation sang
+Visual/Geometry/Collider được định nghĩa và kiểm thử.
 
 ### SCENE-09 — Publish SceneIR
 
@@ -669,7 +694,7 @@ Check tối thiểu:
 
 Output là `PreflightReport` conform normative schema trong [`TEAM_EXECUTION_CONTRACT.md`](./TEAM_EXECUTION_CONTRACT.md); không build candidate khi `blocking_result` khác `PASS`.
 
-Implement đúng các rule IDs: `METRIC_SCALE_MISSING`, `COLLIDER_MISSING`, `TRANSFORM_INVALID`, `OBJECT_OUT_OF_BOUNDS`, `REQUIRED_ARTIFACT_MISSING`, `CANDIDATE_UNREVIEWED`. Các rule Isaac `ROBOT_SPAWN_INVALID`, `PATH_BLOCKED_UNEXPECTED`, `PATH_VALIDATION_ERROR`, `ISAAC_LOAD_ERROR` phải được ghi vào validation evidence; không đổi `ERROR` thành pass.
+Implement đúng các rule IDs: `METRIC_SCALE_MISSING`, `COLLIDER_MISSING`, `TRANSFORM_INVALID`, `OBJECT_OUT_OF_BOUNDS`, `REQUIRED_ARTIFACT_MISSING`, `OBJECT_CONFIRMATION_INCOMPLETE`. Các rule Isaac `ROBOT_SPAWN_INVALID`, `PATH_VALIDATION_ERROR`, `ISAAC_LOAD_ERROR` phải được ghi vào validation evidence; `REQUIRED_ROUTE_BLOCKED` chỉ dùng cho route được ordinary product config đánh dấu required. Không đổi `ERROR` thành pass.
 
 ### SIM-05 — Candidate build
 
@@ -693,7 +718,7 @@ physics SceneIR
 - penetration;
 - chạy đúng 5 locked Start–Goal pairs bằng robot footprint đã khóa;
 - trả kết quả cho 5/5 pairs;
-- expected `CLEAR/BLOCKED` labels phải khớp 5/5;
+- chỉ emit observed `CLEAR | BLOCKED | ERROR`, không đọc expected labels;
 - `ERROR` không được tính là `CLEAR`, `BLOCKED` hoặc pass.
 
 ### SIM-07 — ValidationReport
@@ -718,6 +743,8 @@ Tách khỏi runtime validation.
 
 **Path**
 - locked start-goal reference → agreement/F1/unsafe false-clear.
+- `EvaluationRunner` so sánh observed result từ `ValidationReport` với locked
+  expected label sau khi prediction đã cố định.
 
 ### SIM-09 — Worker entrypoints
 
@@ -845,6 +872,7 @@ Baseline:
 - SSE/WebSocket/polling cho status
 - Next.js
 - Three.js
+- WebGL/WebGL2 qua Three.js cho P0 geometry/point-cloud/collider/transforms
 
 Không cần advanced scheduler/multi-tenant infra trong P0.
 
@@ -857,7 +885,7 @@ Không cần advanced scheduler/multi-tenant infra trong P0.
 | `PRODUCT-03` Worker abstraction | `SELF-CODE` | worker contract | — | dispatch interface + queue/CLI integration |
 | `PRODUCT-04` Artifact access | `SELF-CODE` | shared contract | — | registry/resolver |
 | `PRODUCT-05` Web shell | `SELF-CODE` + framework | Next.js | framework primitives | product screens/workflow |
-| `PRODUCT-06` 3D Viewer | `SELF-CODE` + library | Three.js | camera/render/scene primitives | SceneIR loader, select, layer toggles, transform tools |
+| `PRODUCT-06` 3D Viewer | `SELF-CODE` | Three.js + WebGL/WebGL2 | camera/scene/rendering primitives | geometry/point-cloud/collider SceneIR composition, select, layer toggles, transform tools; Gaussian loader stretch |
 | `PRODUCT-07` Object actions | `SELF-CODE` | Scene Core operations | — | UI/application commands |
 | `PRODUCT-07A` Added asset/collider UI | `SELF-CODE` | SceneIR/ColliderSpec contracts | Three.js controls | add/delete obstacle, dimensions, collider adjustment |
 | `PRODUCT-08` Orchestration | `SELF-CODE` | shared worker contracts | — | REC→SCENE→SIM control flow |
@@ -894,6 +922,11 @@ API dùng artifact refs/checksums, không local path cá nhân.
 
 ### PRODUCT-05 — Web shell
 
+EX-PRODUCT sở hữu full-stack web: FastAPI/orchestration nằm tại `src/api/` và
+`src/services/orchestration/`; Next.js/TypeScript frontend nằm tại root
+`frontend/`. Viewer feature canonical placement là
+`frontend/src/features/viewer/`.
+
 Tối thiểu:
 
 - project;
@@ -908,13 +941,18 @@ Load fixture SceneIR.
 
 Hỗ trợ:
 
+- render geometry mesh, point cloud, collider và canonical SceneObject transforms;
 - orbit/pan/zoom;
 - select;
 - hide/show;
 - Visual/Geometry/Collider toggles;
 - transform editing.
 
-Nếu Web 3DGS renderer khó, dùng mesh/point cloud preview.
+P0 dùng Next.js + Three.js + WebGL/WebGL2. Direct browser Gaussian splat rendering
+là stretch/non-blocking cho Foundation/MVP gate hiện tại. Nếu triển khai sau,
+renderer phải load real producer output, capability-detect WebGPU khi relevant,
+quản lý GPU lifecycle và không trình bày mesh/point-cloud fixture như Brush
+compatibility proof.
 
 ### PRODUCT-07 — Object actions
 
@@ -992,6 +1030,7 @@ GPU chỉ được dùng gián tiếp qua workers.
 
 **Viewer smoke**
 - load fixture;
+- load geometry/point-cloud/collider fixture;
 - select;
 - toggle;
 - transform edit;
@@ -1018,6 +1057,7 @@ Không trực tiếp đọc evaluation GT để tạo scene.
 - real workers được orchestrate;
 - status/error/retry có;
 - viewer đạt minimum controls;
+- browser render được P0 geometry/point-cloud/collider refs và bind đúng checksum;
 - edit persist;
 - validation hiển thị;
 - approve/reject/release đúng lifecycle;

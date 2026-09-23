@@ -8,7 +8,7 @@
 **Document Role:** Technical implementation baseline.
 **Scope:** Stage workflow, adapter/tool baseline, artifact boundary và repository-integration strategy cho P0.
 **Upstream Constraints:** Tool/repository choices phải thực hiện product contract; không được dùng implementation convenience để thay đổi PRD scope/acceptance.
-**Status:** Draft for Review.
+**Status:** Foundation Baseline v1.0 — synced with normative Contract.
 **Related Documents:** [PRD](../PRD.md), [BRIEF](../BRIEF.md), [DATASET_PLAYBOOK](../DATASET_PLAYBOOK.md), [WIREFRAME](../WIREFRAME_AND_UI_FLOW.md), [TEAM_EXECUTION_CONTRACT](./TEAM_EXECUTION_CONTRACT.md), [TEAM_EXECUTION_PLAN](./TEAM_EXECUTION_PLAN.md), [TRACK_IMPLEMENTATION_GUIDE](./TRACK_IMPLEMENTATION_GUIDE.md).
 **Artifact Contract Authority:** [`TEAM_EXECUTION_CONTRACT.md`](./TEAM_EXECUTION_CONTRACT.md) là normative source cho schema, required/optional fields, version và producer/consumer. Các schema trong tài liệu này chỉ là projection minh họa và không được tạo contract cạnh tranh.
 **Mục đích:** Baseline kỹ thuật để xây dựng workflow tổng hợp, khép kín, có thể chạy end-to-end của Real2Sim Studio
@@ -17,6 +17,11 @@
 **LiDAR trong P0:** registered/fused LiDAR là reusable geometry branch cho RGB + Registered LiDAR Contribution Evidence; mixed run không phải full release vertical slice thứ hai.
 **P1:** Full standalone LiDAR-only product configuration.
 **Hướng kiến trúc dài hạn:** Universal Real2Sim Core với DomainAdapter và SimulatorAdapter; MVP hiện tại chỉ khóa Warehouse / Indoor AMR + Isaac Sim.
+
+**Foundation runtime status:** target là cloud NVIDIA GPU + Isaac Sim. GPU model,
+VRAM, NVIDIA driver, CUDA runtime, IsaacLab, OpenUSD, COLMAP, Brush, OpenMVS và
+SAM2 versions đều `UNVERIFIED/TBD` cho tới khi machine thật được provision; exact
+values phải được ghi vào `RuntimeManifest`, không được suy đoán.
 
 ---
 
@@ -490,12 +495,22 @@ LiDARGeometryArtifact
 ├── source_modality: registered_lidar
 ├── source_input_checksum
 ├── geometry_format
-├── unit
-├── coordinate_frame
+├── coordinate_system
+├── source_frame
 ├── declared_transform_to_canonical?   # optional input metadata only
 ├── preprocessing_provenance
+│   ├── dependencies[]  # role, origin, source_checksum; generic provider lineage
+│   ├── ground_truth_assisted
+│   └── details
 └── producer_stage: ST-LIDAR-INGEST
 ```
+
+TorWIC-specific `traj_gt.txt` chỉ được map ở offline adapter: khi dùng GT poses,
+dependency canonical có `role: pose`, `origin: ground_truth`, source checksum và
+`ground_truth_assisted: true`. Registered LiDAR từ estimated/external poses hoặc
+đầu vào đã registered không phải khai báo trajectory GT. Sensor-depth metadata
+`uint16` PNG/`0.001` của TorWIC cũng chỉ là adapter value; shared `DepthFrameSet`
+nhận producer-declared dtype/format và scale dương.
 
 Consumer của artifact phụ thuộc configuration:
 
@@ -552,6 +567,14 @@ Dự án MVP hiện tại đưa ra ranh giới rất rõ để tránh bị phìn
 - **Đối với LiDAR:** Hệ thống chỉ nhận các cụm mây điểm (Point Cloud) dạng `.ply` hoặc `.pcd` **đã được gộp sẵn (Registered/Fused)** và nằm chung một hệ tọa độ.
 - **Những thứ KHÔNG nằm trong scope MVP:** Không bắt hệ thống tự chạy LiDAR SLAM từ đầu, không tự làm đồng bộ cảm biến tự động, không xử lý IMU/GPS fusion.
 
+Foundation P0 traversal là TorWIC-SLAM `Aisle_CW`; `Aisle_CCW` là traversal
+bổ sung/backup. REC-01B đã báo cáo kiểm tra sensor geometry/timestamps trên
+`Aisle_CW` (xem `DATASET_PLAYBOOK.md`), nhưng Primary Demo frame range vẫn `TBD`.
+EX-REC phải kiểm exact extracted structure trong REC-01 trước khi viết
+normalization/prefusion; không suy từ layout mẫu. `groundtruth_map.ply` chỉ nằm
+trong evaluation-only boundary. Synthetic Foundation fixtures không chứng minh
+real reconstruction, Brush hay Isaac acceptance.
+
 - **Privacy Gate:** Bắt buộc kiểm tra khuôn mặt người hoặc biển số xe theo PRD và phát hành `PrivacyValidationReport`. `PRELIMINARY_SCREENED` chỉ là sàng lọc mẫu, không đủ cho lưu trữ lâu dài, public hoặc demo. Chỉ `VERIFIED_ANONYMIZED` — toàn bộ selected frames đã được kiểm tra hoặc input là approved anonymized copy — mới được đi tiếp vào các luồng đó. Nếu còn PII chưa xử lý, đặt `QUARANTINED` và dừng pipeline. P0 không bắt buộc AI model tự động làm mờ; input flag/simple detector chỉ hỗ trợ screening, không tự tạo trạng thái verified.
 
 `EX-PRODUCT` thu source-rights attestation và hiển thị privacy state; `EX-REC` chạy `ST-PRIVACY-GATE`; QA/Validation Lead chấp nhận `VERIFIED_ANONYMIZED` trước public/demo use.
@@ -566,6 +589,8 @@ Dự án MVP hiện tại đưa ra ranh giới rất rõ để tránh bị phìn
 - **Vấn đề:** Các thuật toán 3D cần ảnh rời (Multi-view images), không nhận trực tiếp luồng video nén. Việc trích xuất phải đều đặn (không quá thưa, không quá dày).
 - **Giải pháp:** Dùng `FFmpeg` để cắt frame (Ví dụ: `video.mp4 -> frame_001.png`).
 - **Repository tham khảo:** Đọc file `video_to_gsplat.sh` trong kho lưu trữ `Nannigalaxy/video-3d-reconstruction-gsplat` để xem cách họ viết script gọi FFmpeg và dọn dẹp frame cũ. *Tuyệt đối không cần bê nguyên repo này vào, chỉ cần chuyển (port) logic của họ sang script Python `VideoPreprocessor` của hệ thống.*
+- **Task ownership:** `REC-02` dừng ở input validation/privacy; `REC-02A` sở hữu
+  `ST-FRAME-EXTRACT` và publish normalized frame artifact cho `REC-03`.
 
 ## 2.3 Registered LiDAR Ingestion và Conditional Alignment
 
@@ -646,13 +671,16 @@ Trong Primary RGB Product Path, mỗi vật thể (Candidate Object) sau khi n�
 **Sơ đồ cấu trúc Scene IR minh họa (Dùng Pydantic/FastAPI):** Normative schema và required/optional fields nằm tại [`TEAM_EXECUTION_CONTRACT.md`](./TEAM_EXECUTION_CONTRACT.md) mục 3.6.
 ```text
 Scene
+├── schema_version
+├── scene_id
+├── scene_revision
 ├── coordinate_system
 ├── metric_scale
 │
 ├── environment
 │   ├── visual_ref?                  # optional cho geometry-first configuration
 │   ├── geometry_ref
-│   └── collider?                    # optional trước ST-COLLIDER
+│   └── collider_ref?                # optional trước ST-COLLIDER
 │
 ├── objects[]
 │   └── SceneObject
@@ -666,13 +694,18 @@ Scene
 │       ├── visual_ref?              # optional; không mở rộng P0 product scope
 │       ├── geometry_ref
 │       ├── asset_ref?
+│       ├── primitive_dimensions_xyz_m?
 │       ├── collider?: ColliderSpec  # optional trước ST-COLLIDER
 │       └── provenance
-│
-├── agents[]
-└── review_state
+└── provenance
 ```
 Trong geometry-first configuration, `geometry_ref` là bắt buộc dù `visual_ref` có thể vắng mặt.
+Object IDs unique trong mỗi revision; collider transform chỉ là offset local
+parented vào `SceneObject.local_frame`. `user_added` cần asset ref hoặc primitive
+dimensions dương/hữu hạn, không dùng collider dimensions thay thế.
+
+`agents[]` không thuộc P0 core. `review_state` nằm trong workflow/revision record,
+không nằm trong canonical SceneIR và không được làm thay đổi SceneIR checksum.
 
 *Lưu ý: Đây chính là tài sản trí tuệ (Core Intellectual Contribution) lớn nhất của dự án, tuyệt đối không outsource cấu trúc này cho bất kỳ research repo nào.*
 
@@ -682,7 +715,9 @@ Chương này tập trung vào khía cạnh Software Engineering: Cách con ngư
 
 ## 5.1 Giao diện Web Studio và Tương tác Người dùng
 
-- **Trách nhiệm của Web UI:** Web Studio (Sử dụng Next.js, Three.js, FastAPI) là nơi user upload video, xem tiến độ chạy AI, và thao tác với không gian 3D. *(Lưu ý: Chưa cần cố gắng render 3DGS trực tiếp bằng WebGPU trong tuần đầu tiên nếu gặp khó, có thể dùng Point Cloud hoặc Mesh tạm thời để gỡ nút thắt).*
+- **Trách nhiệm của Web UI:** Web Studio (Next.js, Three.js, FastAPI) là nơi user upload video, xem tiến độ, render geometry mesh/point cloud/collider/SceneObject transforms và thao tác với scene. Direct browser Gaussian-splat rendering là stretch/non-blocking.
+- **Canonical placement:** EX-PRODUCT sở hữu cả backend và frontend. FastAPI routes nằm ở `src/api/`, job/artifact/review/release logic nằm ở `src/services/orchestration/`, còn toàn bộ Next.js/TypeScript Web Studio nằm ở root `frontend/` theo [`ARCHITECTURE.md`](../../ARCHITECTURE.md). Frontend chỉ gọi backend qua typed API contract; không tạo business-state source of truth cạnh tranh trong Next.js hoặc local React state.
+- **Renderer scope:** P0 dùng Three.js + WebGL/WebGL2 cho mesh, point cloud, object, collider, transform gizmo và layer toggles. Nếu Gaussian renderer/WebGPU được làm ở stretch, nó phải load real producer output, audit license/capability và không được trình bày synthetic visual fixture như Brush compatibility proof.
 ### Human Object Confirmation
 Human Object Confirmation — P0
 
@@ -718,14 +753,30 @@ P0 không dùng generic `Scale` cho Added Asset cho tới khi propagation sang V
 ## 5.2 Đồng bộ Tọa độ khi Chỉnh sửa (Transform Synchronization — `ST-EDIT`)
 
 - **Vấn đề:** Khi user xoay cái `Pallet A` trên giao diện, vật thể đó thực chất có 3 bản sao: Mây điểm (Visual), Lưới (Geometry), Hộp va chạm (Collider). Nếu lưu tọa độ rời rạc, chúng sẽ bị lệch nhau khi chạy giả lập.
-- **Nguyên tắc cốt lõi (Rule):** Chỉ lưu một ma trận duy nhất là `SceneObject.transform` (Ma trận 4x4 biến đổi từ local ra world). Khi Web (Three.js) thao tác transform, frontend không được coi local state là source of truth. Thay vào đó: gửi edit command/API → backend cập nhật SceneIR revision → `SceneObject.transform` là source of truth → frontend render lại từ canonical state. Các bộ render và giả lập Isaac sẽ lấy ma trận này nhân với tọa độ local. (Frontend có thể có state tạm để drag mượt, nhưng state persist phải nằm trên SceneIR).
+- **Nguyên tắc cốt lõi (Rule):** Chỉ lưu `SceneObject.transform` với semantics `parent_from_local`, quaternion `xyzw`, angle `radian`: `p_parent = T_parent_from_local * p_local`. Object trực tiếp dưới world dùng `T_world_from_object`. Khi Web thao tác transform, frontend gửi edit command/API → backend cập nhật SceneIR revision → frontend render lại canonical state. COLMAP, Three.js, OpenUSD và Isaac convert convention tại adapter boundary; UI/Isaac không có transform truth riêng.
 
 ## 5.3 Luân chuyển Tác vụ và Artifact Contract
 (`INF-JOB-ORCHESTRATION`, `INF-ARTIFACT-CONTRACT`)
 
 - **Vấn đề:** Các thuật toán AI chạy mất hàng giờ đồng hồ, không thể gói gọn trong một HTTP Request.
 - **Giải pháp:** Dùng FastAPI kết hợp với Worker/Queue. Phát trạng thái (Progress) về client qua WebSocket hoặc SSE.
-- **Artifact Contract ở cấp thư mục:** Mỗi Job khi chạy qua một Stage không truyền data qua RAM, mà phải lưu file vật lý ra thư mục chuẩn để dễ debug.
+- **Artifact Contract ở cấp stage:** durable cross-stage, cross-worker và cross-track handoff phải publish artifact có logical URI/checksum. Internal computation trong cùng process có thể dùng RAM bình thường; không bắt buộc ghi đĩa giữa mọi function.
+
+P0 mapping:
+
+```text
+ARTIFACT_ROOT=<deployment-configured-absolute-path>
+artifact://jobs/<job_id>/<artifact-path>
+```
+
+Development có thể dùng `./data/artifacts/`. Contract không lưu absolute local
+path. `ArtifactResolver` + `FilesystemArtifactStore` chịu trách nhiệm safe resolve,
+existence/schema validation, SHA-256, atomic publish và immutable destination.
+Quy tắc byte checksum, canonical content checksum và package checksum là
+normative ở `TEAM_EXECUTION_CONTRACT.md` mục 3.1.1; không suy luận từ tên field
+hoặc hash pretty-printed JSON fixture. SIM/PRODUCT phải so cùng exact candidate
+identity trước review/release.
+
 *(Ví dụ cấu trúc thư mục gốc của một Scene)*
 ```text
 scene_001/
@@ -803,6 +854,7 @@ InputManifest
 │   └── artifact_uri
 ├── input_configuration
 │   ├── rgb_present
+│   ├── depth_present?
 │   ├── registered_lidar_present
 │   └── declared_same_scene?
 ├── lidar_metadata?
@@ -814,15 +866,18 @@ InputManifest
 ├── preparation_provenance?          # optional
 └── input_manifest_checksum
 
+# lidar_metadata iff registered_lidar_present; depth encoding metadata belongs
+# to ReconstructionBundle.depth_frame_set, not InputManifest.
+
 JobManifest
 ├── schema_version
 ├── job_id
 ├── project_id
 ├── scene_revision
+├── status
 ├── input_manifest_checksum
 ├── config_checksum
-├── software_versions
-├── environment_versions
+├── runtime_manifest_checksum
 ├── seed?                            # nếu backend hỗ trợ
 ├── started_at
 ├── completed_at?
@@ -835,7 +890,11 @@ JobManifest
     ├── artifact_checksum
     ├── started_at
     ├── completed_at?
-    └── error_ref?
+    └── error?
+        ├── error_code
+        ├── stage_id
+        ├── human_message
+        └── retryable
 └── job_manifest_checksum
 
 PreflightReport
@@ -857,9 +916,9 @@ CandidateManifest
 ├── schema_version
 ├── candidate_id
 ├── scene_revision
+├── scene_ir_checksum
 ├── job_manifest_checksum
-├── unit
-├── up_axis
+├── coordinate_system  # shared canonical CoordinateSystem
 ├── object_transforms[]
 ├── asset_refs[]
 ├── collider_refs[]
@@ -867,12 +926,25 @@ CandidateManifest
 └── build_config_checksum
 
 ValidationReport
+├── schema_version
 ├── candidate_checksum
 ├── validator_version
-├── result
+├── environment_versions
+├── checks[]
+│   ├── check_id
+│   ├── result: PASS | FAIL | ERROR
+│   ├── evidence_refs[]
+│   └── message?
+├── path_results[]
+│   ├── pair_id
+│   ├── result: CLEAR | BLOCKED | ERROR
+│   ├── evidence_refs[]
+│   └── message?
+├── overall_result
 └── report_checksum
 
 EvaluationReport
+├── schema_version
 ├── subject_type: reconstruction | scene_revision | candidate_package
 ├── subject_id
 ├── subject_checksum
@@ -881,6 +953,7 @@ EvaluationReport
 ├── references_used[]
 ├── preprocessing_dependencies[]
 ├── metrics[]
+├── path_comparisons[]               # evaluator-only expected comparison
 └── report_checksum
 
 ApprovalRecord
@@ -896,6 +969,7 @@ ApprovalRecord
 
 ReleaseManifest
 ├── schema_version
+├── run_type: ORDINARY | LOCKED_MVP_ACCEPTANCE | BENCHMARK
 ├── project_id
 ├── scene_version
 ├── input_manifest_checksum
@@ -903,7 +977,7 @@ ReleaseManifest
 ├── candidate_checksum
 ├── preflight_report_checksum
 ├── validation_report_checksum
-├── evaluation_report_checksum?   # optional
+├── evaluation_report_checksum?   # required for locked acceptance/benchmark
 ├── processing_config_checksum
 ├── software_versions
 ├── artifact_inventory[]
@@ -1086,6 +1160,7 @@ Sau khi nhấn Approve, hệ thống phải tạo `ApprovalRecord`, rồi sinh b
 ```text
 release_manifest.json
 ├── schema_version
+├── run_type: ORDINARY | LOCKED_MVP_ACCEPTANCE | BENCHMARK
 ├── project_id
 ├── scene_version
 ├── input_manifest_checksum
@@ -1093,7 +1168,7 @@ release_manifest.json
 ├── candidate_checksum
 ├── preflight_report_checksum
 ├── validation_report_checksum
-├── evaluation_report_checksum?   # optional
+├── evaluation_report_checksum?   # required for locked acceptance/benchmark
 ├── processing_config_checksum
 ├── software_versions
 ├── artifact_inventory[]
@@ -1109,7 +1184,8 @@ release_manifest.json
 
 **Quy tắc bắt buộc:**
 - `ValidationReport` = mandatory cho mọi release.
-- `EvaluationReport` = mandatory cho locked benchmark / acceptance run, nhưng optional cho ordinary user-upload release nếu không có Ground Truth.
+- `EvaluationReport` = mandatory khi `run_type` là `LOCKED_MVP_ACCEPTANCE` hoặc
+  `BENCHMARK`; optional cho `ORDINARY` user-upload release nếu không có Ground Truth.
 
 # Chương 7: Phân loại Kho lưu trữ, Quy tắc Tích hợp và Roadmap Triển khai
 

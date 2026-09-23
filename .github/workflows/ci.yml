@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 jobs:
   lint-and-test:
@@ -23,10 +23,16 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Lint with ruff
-        run: ruff check src/ tests/
+        run: ruff check src/ tests/ scripts/check_foundation.py
+
+      - name: Check formatting with ruff
+        run: ruff format --check src/ tests/ scripts/check_foundation.py
 
       - name: Run tests
         run: pytest tests/ -v --tb=short
         env:
           APP_ENV: test
           OPENAI_API_KEY: test-key
+
+      - name: Check Integration Foundation readiness
+        run: python -m scripts.check_foundation
