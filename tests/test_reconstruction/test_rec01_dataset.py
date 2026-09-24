@@ -51,6 +51,107 @@ def _setup_mock_dataset(root: Path) -> Path:
     return root
 
 
+def _setup_canonical_dataset(root: Path) -> Path:
+    """Dựng layout raw/global + raw/traversals giống data/torwic_slam."""
+    _setup_mock_dataset(root)
+    global_dir = root / "raw" / "global"
+    traversal_dir = root / "raw" / "traversals"
+    global_dir.mkdir(parents=True)
+    traversal_dir.mkdir(parents=True)
+    (root / "calibrations.txt").rename(global_dir / "calibrations.txt")
+    (root / "Aisle_CW").rename(traversal_dir / "aisle_cw")
+    return root
+
+
+def test_prepare_canonical_layout_and_validate(tmp_path: Path) -> None:
+    root = _setup_canonical_dataset(tmp_path / "dataset")
+    out = root
+    before = [compute_sha256(path) for path in sorted((root / "raw").rglob("*")) if path.is_file()]
+    cfg = PrepConfig(ds_root=root, out_root=out, trav_id="Aisle_CW", train_ids=[0, 1, 2], held_ids=[3])
+    run_safely(cfg)
+    manifest = validate_manifest_offline(out / "derived/aisle_cw/preparation_manifest.json", root, out)
+    refs = {entry.relative_path for entry in manifest.source_files}
+    assert "raw/global/calibrations.txt" in refs
+    assert "raw/traversals/aisle_cw/frame_times.txt" in refs
+    assert "raw/traversals/aisle_cw/image_left/000000.png" in refs
+    assert len(list((root / "normalized/aisle_cw/rgb_frames").glob("*.png"))) == 4
+    assert not list((root / "evaluation_only").rglob("*.png"))
+    assert (root / "dataset_manifest.yaml").is_file()
+    assert {f.data_class.value for f in manifest.generated_files if f.frame_id is not None} == {"product_input"}
+    split = json.loads((root / "derived/aisle_cw/benchmark_split.json").read_text())
+    assert split["train_frame_ids"] == [0, 1, 2]
+    assert split["held_out_frame_ids"] == [3]
+    assert (root / "normalized/aisle_cw/rgb_frames/000003.png").exists()
+    assert before == [compute_sha256(path) for path in sorted((root / "raw").rglob("*")) if path.is_file()]
+
+
+def test_canonical_layout_missing_calibration_fails_closed(tmp_path: Path) -> None:
+    root = _setup_canonical_dataset(tmp_path / "dataset")
+    (root / "raw" / "global" / "calibrations.txt").unlink()
+    cfg = PrepConfig(ds_root=root, out_root=root, trav_id="Aisle_CW", train_ids=[0, 1, 2], held_ids=[3])
+    with pytest.raises(FileNotFoundError):
+        run_safely(cfg)
+
+
+def test_canonical_layout_rejects_second_output_root(tmp_path: Path) -> None:
+    root = _setup_canonical_dataset(tmp_path / "dataset")
+    out = tmp_path / "duplicate"
+    cfg = PrepConfig(ds_root=root, out_root=out, trav_id="Aisle_CW", train_ids=[0, 1, 2], held_ids=[3])
+    with pytest.raises(ValueError, match="dataset root"):
+        run_safely(cfg)
+    assert not out.exists()
+
+
+def test_canonical_run_is_idempotent(tmp_path: Path) -> None:
+    root = _setup_canonical_dataset(tmp_path / "dataset")
+    cfg = PrepConfig(ds_root=root, out_root=root, trav_id="Aisle_CW", train_ids=[0, 1, 2], held_ids=[3])
+    run_safely(cfg)
+    manifest_path = root / "derived/aisle_cw/preparation_manifest.json"
+    before = compute_sha256(manifest_path)
+    run_safely(cfg)
+    assert compute_sha256(manifest_path) == before
+    assert len(list((root / "normalized/aisle_cw/rgb_frames").glob("*.png"))) == 4
+
+
+def test_canonical_existing_rgb_difference_is_rejected(tmp_path: Path) -> None:
+    root = _setup_canonical_dataset(tmp_path / "dataset")
+    cfg = PrepConfig(ds_root=root, out_root=root, trav_id="Aisle_CW", train_ids=[0, 1, 2], held_ids=[3])
+    run_safely(cfg)
+    image = root / "normalized/aisle_cw/rgb_frames/000000.png"
+    image.write_bytes(_png_rgba(99))
+    before = compute_sha256(image)
+    with pytest.raises(ValueError, match="Canonical output differs"):
+        run_safely(cfg)
+    assert compute_sha256(image) == before
+
+
+def test_canonical_rejects_forged_heldout_frame_path(tmp_path: Path) -> None:
+    root = _setup_canonical_dataset(tmp_path / "dataset")
+    cfg = PrepConfig(ds_root=root, out_root=root, trav_id="Aisle_CW", train_ids=[0, 1, 2], held_ids=[3])
+    run_safely(cfg)
+    manifest_path = root / "derived/aisle_cw/preparation_manifest.json"
+    data = json.loads(manifest_path.read_text())
+    data["generated_files"][3]["relative_path"] = "evaluation_only/aisle_cw/rgb_frames/000003.png"
+    from src.models.contracts.identity import canonical_content_checksum
+
+    data["manifest_checksum"] = canonical_content_checksum(TorwicPreparationManifest(**data), "manifest_checksum")
+    manifest_path.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="Canonical frame path mismatch"):
+        validate_manifest_offline(manifest_path, root, root)
+
+
+def test_canonical_rejects_modified_dataset_index(tmp_path: Path) -> None:
+    root = _setup_canonical_dataset(tmp_path / "dataset")
+    cfg = PrepConfig(ds_root=root, out_root=root, trav_id="Aisle_CW", train_ids=[0, 1, 2], held_ids=[3])
+    run_safely(cfg)
+    dataset_file = root / "dataset_manifest.yaml"
+    index = json.loads(dataset_file.read_text())
+    index["traversals"][0]["usable_frame_count"] = 3
+    dataset_file.write_text(json.dumps(index))
+    with pytest.raises(ValueError, match="Dataset manifest"):
+        validate_manifest_offline(root / "derived/aisle_cw/preparation_manifest.json", root, root)
+
+
 def test_prepare_dataset_synthetic_and_validate(tmp_path: Path) -> None:
     root = _setup_mock_dataset(tmp_path / "dataset")
     out = tmp_path / "out"

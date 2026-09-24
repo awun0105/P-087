@@ -64,6 +64,42 @@ class PrepConfig:
     sample: bool = False
 
 
+@dataclass(frozen=True)
+class TorwicSourceLayout:
+    """Ánh xạ layout nguồn vào relative refs, không đưa path máy vào artifact."""
+
+    root: Path
+    calibration_ref: str
+    traversal_ref: str
+
+    @property
+    def calibration_file(self) -> Path:
+        """File calibration nguồn."""
+        return self.root / self.calibration_ref
+
+    @property
+    def timestamps_file(self) -> Path:
+        """File timestamp của traversal."""
+        return self.root / self.traversal_ref / "frame_times.txt"
+
+    @property
+    def image_dir(self) -> Path:
+        """Thư mục ảnh nguồn của traversal."""
+        return self.root / self.traversal_ref / "image_left"
+
+
+def resolve_source_layout(root: Path, traversal_id: str) -> TorwicSourceLayout:
+    """Chọn layout đã sắp trong data/ hoặc bản download phẳng."""
+    check_safe_path(traversal_id)
+    canonical = root / "raw" / "global" / "calibrations.txt"
+    flat = root / "calibrations.txt"
+    if canonical.exists() and flat.exists():
+        raise ValueError("Ambiguous TorWIC source layout")
+    if canonical.exists() or (root / "raw").exists():
+        return TorwicSourceLayout(root, "raw/global/calibrations.txt", f"raw/traversals/{traversal_id.lower()}")
+    return TorwicSourceLayout(root, "calibrations.txt", traversal_id)
+
+
 @dataclass
 class PrepContext:
     """Metadata nguồn đã qua preflight cấu trúc."""
@@ -84,6 +120,7 @@ class ValCtx:
     h_set: set[int]
     times: list[str]
     calib: dict[str, float | str | list[float]]
+    source: TorwicSourceLayout
 
 
 def compute_sha256(filepath: Path) -> Checksum:
@@ -346,13 +383,14 @@ def setup_images(
     cfg: PrepConfig, ctx: PrepContext, tmp: Path
 ) -> tuple[list[ManifestFileEntry], list[ManifestFileEntry]]:
     """Tách train vào normalized và held-out vào evaluation-only."""
-    sc1, gc1 = copy_images((cfg.ds_root / cfg.trav_id / "image_left", tmp / "normalized"), cfg.train_ids)
+    source = resolve_source_layout(cfg.ds_root, cfg.trav_id)
+    sc1, gc1 = copy_images((source.image_dir, tmp / "normalized"), cfg.train_ids)
     s1, g1 = build_img_entries(
-        cfg.train_ids, (sc1, gc1), (ArtifactDataClass.PRODUCT_INPUT, cfg.trav_id, ctx.timestamps)
+        cfg.train_ids, (sc1, gc1), (ArtifactDataClass.PRODUCT_INPUT, source.traversal_ref, ctx.timestamps)
     )
-    sc2, gc2 = copy_images((cfg.ds_root / cfg.trav_id / "image_left", tmp / "evaluation_only"), cfg.held_ids)
+    sc2, gc2 = copy_images((source.image_dir, tmp / "evaluation_only"), cfg.held_ids)
     s2, g2 = build_img_entries(
-        cfg.held_ids, (sc2, gc2), (ArtifactDataClass.EVALUATION_ONLY, cfg.trav_id, ctx.timestamps)
+        cfg.held_ids, (sc2, gc2), (ArtifactDataClass.EVALUATION_ONLY, source.traversal_ref, ctx.timestamps)
     )
     return s1 + s2, g1 + g2
 
@@ -435,7 +473,7 @@ def _check_required_metadata(ctx: ValCtx) -> None:
     s_paths = [f.relative_path for f in ctx.m.source_files if f.frame_id is None]
     if len(s_paths) != len(set(s_paths)):
         raise ValueError("Duplicate source metadata paths")
-    if set(s_paths) != {"calibrations.txt", f"{ctx.m.traversal_id}/frame_times.txt"}:
+    if set(s_paths) != {ctx.source.calibration_ref, f"{ctx.source.traversal_ref}/frame_times.txt"}:
         raise ValueError("Invalid source metadata refs")
 
     g_paths = [f.relative_path for f in ctx.m.generated_files if f.frame_id is None]
@@ -476,7 +514,7 @@ def _check_source_classes_and_ids(ctx: ValCtx) -> None:
         if f.frame_id is not None:
             src_fids.append(f.frame_id)
             src_chks[f.frame_id] = f.artifact_checksum
-            exp_src = f"{ctx.m.traversal_id}/image_left/{f.frame_id:06d}.png"
+            exp_src = f"{ctx.source.traversal_ref}/image_left/{f.frame_id:06d}.png"
             if f.relative_path != exp_src:
                 raise ValueError(f"Source path mapping mismatch for frame {f.frame_id}")
             if f.frame_id in ctx.h_set and f.data_class != ArtifactDataClass.EVALUATION_ONLY:
@@ -528,13 +566,13 @@ def _check_split_and_times(ctx: ValCtx) -> None:
             raise ValueError(f"Timestamp mismatch for frame {f.frame_id}")
 
 
-def _check_semantic_and_provenance(ctx: ValCtx, out_root: Path, ds_root: Path) -> None:
+def _check_semantic_and_provenance(ctx: ValCtx, out_root: Path) -> None:
     p = ctx.m.provenance
     if p.get("train_ids") != sorted(ctx.t_set) or p.get("held_ids") != sorted(ctx.h_set):
         raise ValueError("Provenance split mismatch")
 
     w, h = int(ctx.calib["Camera1.width"]), int(ctx.calib["Camera1.height"])
-    excl = preflight_images(ds_root / ctx.m.traversal_id / "image_left", len(ctx.times), (w, h))
+    excl = preflight_images(ctx.source.image_dir, len(ctx.times), (w, h))
     if p.get("excluded_frames", {}) != excl:
         raise ValueError("Provenance excluded_frames mismatch")
     if set(ctx.t_set | ctx.h_set).intersection(int(x) for x in excl.keys()):
@@ -563,7 +601,16 @@ def _verify_all_checksums(m: TorwicPreparationManifest, ds_root: Path, out_root:
 
 
 def validate_manifest_offline(manifest_path: Path, ds_root: Path, out_root: Path) -> TorwicPreparationManifest:
-    """Xác minh checksum, phân lớp và đối chiếu output với nguồn TorWIC."""
+    """Chọn validator theo layout source đã được xác định."""
+    if (ds_root / "raw").exists():
+        from scripts.torwic.canonical_dataset import validate_canonical_manifest
+
+        return validate_canonical_manifest(manifest_path, ds_root, out_root)
+    return _validate_flat_manifest(manifest_path, ds_root, out_root)
+
+
+def _validate_flat_manifest(manifest_path: Path, ds_root: Path, out_root: Path) -> TorwicPreparationManifest:
+    """Xác minh flat download output cũ với source và manifest bytes."""
     m = TorwicPreparationManifest(**json.loads(manifest_path.read_text()))
     check_safe_path(m.traversal_id)
     verify_content_checksum(m, "manifest_checksum")
@@ -575,9 +622,10 @@ def validate_manifest_offline(manifest_path: Path, ds_root: Path, out_root: Path
         raise ValueError("Splits contain duplicates or empty")
     if tl != sorted(tl) or hl != sorted(hl):
         raise ValueError("Splits must be sorted")
-    times = read_timestamps(ds_root / m.traversal_id / "frame_times.txt")
-    calib = parse_calibrations(ds_root / "calibrations.txt")
-    ctx = ValCtx(m, set(tl), set(hl), times, calib)
+    source = resolve_source_layout(ds_root, m.traversal_id)
+    times = read_timestamps(source.timestamps_file)
+    calib = parse_calibrations(source.calibration_file)
+    ctx = ValCtx(m, set(tl), set(hl), times, calib, source)
 
     for fn in (
         _check_split_and_times,
@@ -588,18 +636,18 @@ def validate_manifest_offline(manifest_path: Path, ds_root: Path, out_root: Path
         fn(ctx)
     _check_csv_exact(out_root / "normalized" / "timestamps.csv", ctx.t_set, times)
     _check_csv_exact(out_root / "evaluation_only" / "timestamps.csv", ctx.h_set, times)
-    _check_semantic_and_provenance(ctx, out_root, ds_root)
+    _check_semantic_and_provenance(ctx, out_root)
     _verify_all_checksums(m, ds_root, out_root)
     return m
 
 
 def _read_and_validate_inputs(cfg: PrepConfig) -> PrepContext:
-    calib = parse_calibrations(cfg.ds_root / "calibrations.txt")
+    source = resolve_source_layout(cfg.ds_root, cfg.trav_id)
+    calib = parse_calibrations(source.calibration_file)
     validate_intrinsics(calib)
-    times_file = cfg.ds_root / cfg.trav_id / "frame_times.txt"
-    timestamps = read_timestamps(times_file)
+    timestamps = read_timestamps(source.timestamps_file)
     w, h = int(calib["Camera1.width"]), int(calib["Camera1.height"])
-    excl = preflight_images(cfg.ds_root / cfg.trav_id / "image_left", len(timestamps), (w, h))
+    excl = preflight_images(source.image_dir, len(timestamps), (w, h))
 
     selected = cfg.train_ids + cfg.held_ids
     if any(x < 0 or x >= len(timestamps) for x in selected):
@@ -620,20 +668,23 @@ def _read_and_validate_inputs(cfg: PrepConfig) -> PrepContext:
 
 def _do_prepare(cfg: PrepConfig, tmp_dir: Path) -> None:
     check_safe_path(cfg.trav_id)
+    source = resolve_source_layout(cfg.ds_root, cfg.trav_id)
     ctx = _read_and_validate_inputs(cfg)
     s_list, g_list = setup_images(cfg, ctx, tmp_dir)
     g_list.extend(process_metadata(cfg, ctx, tmp_dir))
 
-    calib_chk = compute_sha256(cfg.ds_root / "calibrations.txt")
+    calib_chk = compute_sha256(source.calibration_file)
     s_list.append(
         ManifestFileEntry(
-            relative_path="calibrations.txt", artifact_checksum=calib_chk, data_class=ArtifactDataClass.PRODUCT_INPUT
+            relative_path=source.calibration_ref,
+            artifact_checksum=calib_chk,
+            data_class=ArtifactDataClass.PRODUCT_INPUT,
         )
     )
-    times_chk = compute_sha256(cfg.ds_root / cfg.trav_id / "frame_times.txt")
+    times_chk = compute_sha256(source.timestamps_file)
     s_list.append(
         ManifestFileEntry(
-            relative_path=f"{cfg.trav_id}/frame_times.txt",
+            relative_path=f"{source.traversal_ref}/frame_times.txt",
             artifact_checksum=times_chk,
             data_class=ArtifactDataClass.PRODUCT_INPUT,
         )
@@ -647,6 +698,11 @@ def _do_prepare(cfg: PrepConfig, tmp_dir: Path) -> None:
 
 def run_safely(cfg: PrepConfig) -> None:
     """Publish nguyên tử; lỗi sẽ xóa vùng tạm và giữ nguyên nguồn."""
+    if (cfg.ds_root / "raw").exists():
+        from scripts.torwic.canonical_dataset import CanonicalDatasetPreparer
+
+        CanonicalDatasetPreparer(cfg).run()
+        return
     if cfg.out_root.exists():
         raise ValueError("Output already exists")
     if cfg.out_root.resolve().is_relative_to(cfg.ds_root.resolve()):
@@ -666,14 +722,14 @@ def parse_args() -> PrepConfig:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-root", required=True)
     parser.add_argument("--traversal-id", required=True)
-    parser.add_argument("--output-root", required=True)
+    parser.add_argument("--output-root", help="Mặc định là dataset root đã sắp xếp")
     parser.add_argument("--frame-ids", required=True)
     parser.add_argument("--held-out-ids", required=True)
     parser.add_argument("--sample", action="store_true")
     opts = parser.parse_args()
     return PrepConfig(
         ds_root=Path(opts.dataset_root),
-        out_root=Path(opts.output_root),
+        out_root=Path(opts.output_root or opts.dataset_root),
         trav_id=opts.traversal_id,
         train_ids=parse_id_list(opts.frame_ids),
         held_ids=parse_id_list(opts.held_out_ids),

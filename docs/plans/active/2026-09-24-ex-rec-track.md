@@ -4,7 +4,7 @@ Date: 2026-09-24
 
 ## Status
 
-Active — onboarding/source audit complete; Codex directly implementing REC-01.
+Active — REC-01 canonical publication complete; REC-02 next.
 
 ## Outcome
 
@@ -77,11 +77,10 @@ of RGB-only publication. REC-10 and REC-11 still require their own task gates.
 
 ## External source audit queue
 
-Audit only the source needed immediately before each task. Antigravity reports
+Audit only the source needed immediately before each task. Codex records
 upstream URL, exact local commit/tag, license, runtime requirements, exact
-source file/function I/O, REUSE/ADAPT/REFERENCE/REJECT proposal, adapter
-boundary, and risks. Codex then reads the cited source and locks the task
-strategy before any implementation delegation.
+source file/function I/O, REUSE/ADAPT/REFERENCE/REJECT decision, adapter
+boundary, and risks before implementation. Owner canceled Antigravity.
 
 1. REC-01: TorWIC source structure and local `TorWICDataset` utilities;
    FFmpeg/Open3D only for primitives actually needed by preparation. No full
@@ -252,7 +251,21 @@ and after. Script SHA, manifest/split canonical and byte checksums are in
 passed; Ruff check/format and `git diff --check` passed. REC-01 task marked
 DONE; next task is REC-02 authority/task audit and FFmpeg source/runtime audit.
 
-REC-01 complete; REC-02 through REC-11 and the cross-track closure audit
-remain. Do not report `EX-REC COMPLETE` until the closure audit observes real
-artifacts, checksums/provenance, consumer handoff, and all applicable task-level
-evidence.
+The earlier REC-01 result above is historical proof for the flat external
+download and was reopened after owner corrected canonical storage policy.
+Canonical source/output are both `data/torwic_slam/`; 1,092 normalized RGB
+files live once under `normalized/aisle_cw/rgb_frames/`. Frozen split at
+`derived/aisle_cw/benchmark_split.json` gives 983 reconstruction and 109
+held-out IDs. Dataset-level YAML and traversal preparation JSON are distinct,
+checksum-bound records. Codex added an in-place publisher that refuses a
+second output root and migrated the existing stale manifest after verifying
+source inventory. Full real validator passed 1,094 source + 1,096 generated
+refs; raw SHA-256 list before/after unchanged. Focused tests 41 pass,
+contract/integration 96 pass, Ruff check/format pass. Details and hashes are
+in `tasks/REC-01.md`. The evaluation-only GT symlink was corrected; the
+untracked migration scripts were left untouched. REC-02A/REC-03 must enforce
+the reconstruction IDs at runtime; evaluator use of held-out IDs is separate.
+
+REC-02 through REC-11 and the cross-track closure audit remain. Do not report
+`EX-REC COMPLETE` until real artifacts, checksums/provenance, consumer handoff,
+and all applicable task-level evidence are observed.
