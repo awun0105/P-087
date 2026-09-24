@@ -54,11 +54,25 @@ Không sửa scene/product/reconstruction internals. Shared contract change cầ
 
 `SELF-CODE` adapter using OpenUSD APIs; do not mutate package after checksum.
 
-Research systems chỉ là references trừ khi change control chấp nhận runtime dependency.
+**Code Donor Reference (Audit #1):**
+- Candidate code donor: [`PointsCoder/OpenReal2Sim`](https://github.com/PointsCoder/OpenReal2Sim) (xem chi tiết tại [`docs/execution/audits/01_openreal2sim.md`](../../../audits/01_openreal2sim.md)).
+- File tham khảo: `openreal2sim/simulation/isaaclab/sim_preprocess/usd_conversion.py` (**`ADAPT-HIGH`**).
+- Code/patterns đáng port sang `IsaacUsdAdapter` / `CandidateBuilder`:
+  - `convert_obj_to_usd()` sử dụng IsaacLab `MeshConverter`
+  - Cấu hình PhysX: `UsdPhysics`, `PhysxSchema`, `RigidBody`, `CollisionAPI`
+  - Thiết lập properties: `MassPropertiesCfg`, `RigidBodyPropertiesCfg`, `CollisionPropertiesCfg`
+  - Convex decomposition, CCD configuration và USD stage post-processing
+- **Guardrails / Anti-patterns bắt buộc:**
+  - ❌ **Headless Enforcement**: Script gốc ép `args_isaaclab.headless = False`. Phải xóa bỏ và enforce headless mode cho worker/container.
+  - ❌ **No `scene.pkl`**: Tuyệt đối không nhận state model bằng pickle/dictionary; nguồn dữ liệu duy nhất là canonical `SceneIR` JSON.
+  - ❌ **No uncalibrated PhysX defaults**: Các thông số PhysX (contact offset, voxel resolution, số hull) phải được calibrate cho warehouse scene, không lấy nguyên mặc định của OpenReal2Sim.
 
 ## 9. Implementation Plan
 
-Assignee điền files, runtime command, failure handling và proof sau inspect. Không tự khóa policy còn mở.
+1. Khảo sát `usd_conversion.py` từ OpenReal2Sim, bóc tách logic cấu hình PhysX và `MeshConverter`.
+2. Xây dựng `IsaacUsdAdapter` dịch từ `SceneIR` sang USD stage (headless).
+3. Đóng gói CandidatePackage kèm inventory và `candidate_checksum`.
+4. Assignee điền files, runtime command, failure handling và proof sau inspect. Không tự khóa policy còn mở.
 
 ## 10. Tests
 

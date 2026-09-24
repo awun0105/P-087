@@ -51,11 +51,20 @@ Không sửa scene/product/reconstruction internals. Shared contract change cầ
 
 `SELF-CODE` policy using Trimesh/Open3D AABB/OBB/convex/simplification utilities.
 
-Research systems chỉ là references trừ khi change control chấp nhận runtime dependency.
+**Code Donor Reference (Audit #1):**
+- Candidate reference: [`PointsCoder/OpenReal2Sim`](https://github.com/PointsCoder/OpenReal2Sim) (xem chi tiết tại [`docs/execution/audits/01_openreal2sim.md`](../../../audits/01_openreal2sim.md)).
+- File tham khảo:
+  - `reconstruction/modules/scenario_collision_optimization.py` (**`ADAPT-MEDIUM`**): SDF query, ground clearance, thuật toán phát hiện/đẩy vật thể chống penetration với sàn/nền.
+  - `reconstruction/modules/scenario_construction.py` (**`ADAPT-MEDIUM`**): Trimesh/Open3D AABB extraction, mesh simplification trước khi tính toán collider.
+- **Guardrails:**
+  - ❌ **Không thay thế Preflight**: Logic remediation chỉ là tiện ích dọn dẹp trước Candidate Build; Preflight (`SIM-04`) và Isaac validation (`SIM-06`) mới là thẩm quyền quyết định PASS/FAIL cuối cùng.
 
 ## 9. Implementation Plan
 
-Assignee điền files, runtime command, failure handling và proof sau inspect. Không tự khóa policy còn mở.
+1. Thiết lập các utility tạo AABB/OBB/convex hull từ mesh/geometry refs (dựa trên Trimesh/Open3D).
+2. Tích hợp optional clearance/SDF remediation utility từ `scenario_collision_optimization.py` nếu cần xử lý penetration sàn/vật thể.
+3. Sinh và xác thực `ColliderSpec` cho floor, wall và obstacles.
+4. Assignee điền files, runtime command, failure handling và proof sau inspect. Không tự khóa policy còn mở.
 
 ## 10. Tests
 

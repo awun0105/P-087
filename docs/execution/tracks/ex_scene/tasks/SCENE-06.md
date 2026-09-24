@@ -51,11 +51,21 @@ Không sửa reconstruction, simulation hoặc product implementation. Shared co
 
 `SELF-CODE` with R2G/gs-real2sim/DISCOVERSE as `REFERENCE`; do not make full research systems runtime dependencies.
 
-Giữ research repos ở mức reference/adapter đã được phê duyệt; không thay project architecture.
+**Code Donor Reference (Audit #1):**
+- Candidate reference: [`PointsCoder/OpenReal2Sim`](https://github.com/PointsCoder/OpenReal2Sim) (xem chi tiết tại [`docs/execution/audits/01_openreal2sim.md`](../../../audits/01_openreal2sim.md)).
+- File tham khảo:
+  - `reconstruction/modules/scenario_construction.py` (**`ADAPT-MEDIUM`**): Trích xuất các tiện ích hình học (Open3D + Trimesh) cho mesh ↔ point cloud registration, centroid alignment, ICP, ground alignment.
+  - `background_pixel_inpainting.py` + `background_mesh_generation.py` (**`ADAPT P1`**): Ghi nhận reference cho `BackgroundCompletionBackend` ở giai đoạn P1 (không kéo vào P0 core).
+- **Guardrails:**
+  - ❌ **Không thay Canonical Coordinate Contract**: Mọi transform phải tuân thủ nghiêm ngặt `parent_from_local` và quy ước hệ trục của Real2Sim Studio.
+  - ❌ **Không kéo submodules nặng**: Không đưa Hunyuan3D-2 hay Mega-SAM vào P0 runtime dependencies.
 
 ## 9. Implementation Plan
 
-Assignee điền files/sequence/failure handling sau khi inspect repository. Không đổi task scope hoặc authority gate.
+1. Thiết lập cấu trúc phân rã SceneIR: tách Environment và Object bindings độc lập.
+2. Tận dụng các utility alignment từ `scenario_construction.py` để chuẩn hóa bounding box và vị trí đối tượng.
+3. Liên kết visual và geometry artifact refs cho từng object đã confirm.
+4. Assignee điền files/sequence/failure handling sau khi inspect repository. Không đổi task scope hoặc authority gate.
 
 ## 10. Tests
 
