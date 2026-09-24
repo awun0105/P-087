@@ -995,6 +995,27 @@ ReleaseManifest
 
 `DatasetManifest` không được bắt buộc cho user-upload jobs. `InputManifest` mới là entry point chung cho mọi job.
 
+### 5.3.2 Phân định Ranh giới Lưu trữ & Versioning (Database vs Artifact Store vs DVC vs MLflow)
+
+Một lỗi kiến trúc nguy hiểm là lạm dụng DVC để lưu trữ mọi chỉnh sửa nhỏ của người dùng, hoặc cố ép MLflow làm cơ sở dữ liệu trạng thái nghiệp vụ. Real2Sim Studio phân định 5 lớp trách nhiệm rõ ràng:
+
+1. **PostgreSQL Database (Application State & Business Domain):**
+   - Quản lý users, projects, job states, workflow lifecycle (`QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`).
+   - Quản lý `SceneRevision` metadata, audit logs, commands history, `ApprovalRecord`, danh mục candidate manifests.
+2. **Artifact Store (Large Binaries via URI `artifact://`):**
+   - Lưu trữ các tệp nhị phân kích thước lớn: point clouds (`.ply`), surface meshes (`.mvs`, `.obj`), simulation stages (`.usd`), video replays (`.mp4`), depth maps (`.npy`/`.png`).
+   - Tuyệt đối không lưu blob nhị phân lớn trực tiếp vào PostgreSQL.
+3. **Manifest + Checksum (Immutable Lineage & Provenance):**
+   - Khóa chặt liên kết nguồn gốc bằng mã băm SHA-256 (`scene_ir_checksum`, `candidate_checksum`, `validation_report_checksum`).
+   - Mọi thay đổi về geometry/transform sinh ra revision mới và checksum mới, đảm bảo tính tái lập (reproducibility).
+4. **DVC (Data Version Control — Locked Benchmarks & Datasets):**
+   - Chỉ dùng để quản lý phiên bản dataset tĩnh (`TorWIC`), golden fixtures dùng cho kiểm thử, và curated benchmark snapshots.
+   - ❌ **CẤM dùng DVC cho SceneRevision nghiệp vụ:** Khi người dùng dịch chuyển pallet 20cm trên Web Studio, hệ thống tạo SceneRevision mới trong PostgreSQL và ghi JSON vào Artifact Store; KHÔNG kích hoạt DVC commit/push.
+5. **MLflow (Experiment Tracking & Evaluation History):**
+   - Chỉ dùng để ghi nhận lịch sử thử nghiệm kỹ thuật của các đợt chạy reconstruction và evaluation (`EV-VISUAL`, `EV-GEOMETRY`, `EV-POSE`, `EV-PATH`).
+   - Ghi nhận: hyperparameters (COLMAP matching mode, Brush iterations/densification parameters), metrics (PSNR, SSIM, LPIPS, Chamfer Distance, ATE RMSE), runtime, VRAM, và artifact URIs.
+   - ❌ **CẤM dùng MLflow làm cơ sở dữ liệu nghiệp vụ:** MLflow không quản lý lifecycle của Job, Scene hay quyền phê duyệt Release.
+
 ## 5.4 Object Removal & Background Completion
 
 ### Level 1 — P0: Logical / Simulation deletion
@@ -1264,40 +1285,105 @@ Tuyệt đối không nhồi nhét tất cả các repo vào chung một dự á
 
 | Repository | Vai trò | Mức ưu tiên | Cách sử dụng |
 |---|---|---|---|
-| `colmap/colmap` | SfM / Camera Pose | Core | CLI / executable backend |
-| `Nannigalaxy/video-3d-reconstruction-gsplat` | Video → FFmpeg → COLMAP orchestration | Core reference | Adapt logic/scripts |
-| `ArthurBrussee/brush` | 3DGS visual reconstruction | Core | CLI/container backend |
-| `cdcseacave/openMVS` | RGB dense geometry + mesh | Core | Executable/container backend |
-| `facebookresearch/sam2` | Automatic masks + video propagation | Core | Python model worker |
-| `isl-org/Open3D` | LiDAR, alignment, geometry utilities | Core | Python/C++ library |
-| `mikedh/trimesh` | Mesh/collider utilities | Core utility | Python library |
-| `PixarAnimationStudios/OpenUSD` | USD scene model | Core simulator layer | Python/C++ API |
-| `isaac-sim/IsaacLab` | Isaac integration/physics | Core | Simulator worker |
-| `lkeab/gaussian-grouping` | Object-aware Gaussian grouping + post-hoc removal + optional visual inpainting | Research reference | Audit identity encoding, Gaussian subset decomposition, post-hoc removal |
-| `RuijieZhu94/ObjectGS` | Object-aware GS + object mesh | Research candidate | Alternative backend |
-| `Jumpat/SegAnyGAussians` | SAM→3D Gaussian segmentation | Research candidate | Read/adapt concepts |
-| `Anttwo/SuGaR` | 3DGS→mesh hybrid representation | Alternative geometry | Reference/experimental |
-| `nerfstudio-project/nerfstudio` | Splatfacto visual pipeline | Alternative visual | Fallback backend |
-| `nerfstudio-project/gsplat` | Low-level Gaussian rasterization | Future/custom | Library/backend |
-| `zst1406217/VR-Robo` | 3DGS visual ↔ Isaac Lab system bridge | **Tier-0 system reference** | Audit renderer/simulator boundary before rebuilding |
-| `BigCiLeng/R2G` | Object-centric Real2Sim artifact pipeline | **Tier-0 system reference** | Audit per-object Gaussian/point-cloud/mesh/label contracts |
-| `discoverse-dev/DISCOVERSE` + `DISCOVERSE-Real2Sim` | System-level visual/physical composition + transform patterns | System reference | Audit scene composition, transform propagation và simulator-boundary patterns |
-| `discoverse-dev/gs-real2sim` | Clean-background + independent-object decomposition | Architecture reference | Reference architecture only; không coi là P0 drop-in backend |
-| `PointsCoder/OpenReal2Sim` | Background pixel/point/mesh completion + simulator-oriented Real2Sim | Research / architecture reference | Audit background completion và reconstruction→simulation patterns |
-| `InternRobotics/Re3Sim` | Real2Sim + OpenMVS + Isaac reference | **Tier-0 system reference** | Reconstruction→Isaac implementation audit |
-| [`Kiranism/next-shadcn-dashboard-starter`](https://github.com/Kiranism/next-shadcn-dashboard-starter) | EX-PRODUCT Web shell, table/form/query-state patterns | P0 selective `ADAPT` reference | Adapt sidebar/layout, list/detail, loading/error and form patterns into `frontend/`; do not import Clerk, organizations, billing, Next.js business API routes or starter state model |
-| [`arhamkhnz/next-shadcn-admin-dashboard`](https://github.com/arhamkhnz/next-shadcn-admin-dashboard) | Alternative dashboard layout/UX | `REFERENCE` | Inspect responsive navigation, layouts and theme patterns; not a second app base |
-| [`shadcndashboard/next-shadcn-dashboard`](https://github.com/shadcndashboard/next-shadcn-dashboard) | Form/table/file-dropzone examples | `REFERENCE` | Inspect upload UI patterns only; validate files and rights via Real2Sim/FastAPI contracts |
-| [`three.js`](https://threejs.org/docs/) + [official examples](https://threejs.org/examples/) | EX-PRODUCT browser scene primitives | P0 library/reference | Camera controls, picking, loaders, layers, transform controls; SceneIR mapping stays project-owned |
-| [`pmndrs/react-three-fiber`](https://github.com/pmndrs/react-three-fiber) | Optional React/Three.js integration | Candidate library | Consider only after frontend scaffold/version compatibility check; not a separate scene truth |
-| [`sparkjsdev/spark`](https://github.com/sparkjsdev/spark) | Browser Gaussian-splat renderer candidate | P0 qualification candidate | Inspect Three.js/WebGL2 integration; adopt only after real Brush output compatibility, coordinate, checksum and browser proof |
-| [`sparkjsdev/spark-react-nextjs`](https://github.com/sparkjsdev/spark-react-nextjs) | Spark + Next.js/React Three Fiber example | `REFERENCE` | Inspect client-only module setup and renderer lifecycle; do not clone as Real2Sim product |
-| [`potree/potree`](https://github.com/potree/potree) | Large point-cloud LOD/streaming patterns | `REFERENCE` | Consult if point-cloud scale requires LOD; not P0 dependency or 3DGS renderer |
+| `colmap/colmap` | SfM / Camera Pose | Core Backend | CLI / executable backend qua PyCOLMAP |
+| `ArthurBrussee/brush` | 3DGS visual reconstruction | Core Backend | CLI/container backend (`REC-04`) |
+| `cdcseacave/openMVS` | RGB dense geometry + mesh | Core Backend | Executable/container backend (`REC-05`) |
+| `facebookresearch/sam2` | Automatic masks + video propagation | Core Backend | Python model worker (`SCENE-02`) |
+| `isl-org/Open3D` | LiDAR, alignment, geometry utilities | Core Library | Python/C++ library (`REC-06`, `SCENE-06`, `SIM-02`) |
+| `mikedh/trimesh` | Mesh/collider utilities | Core Utility | Python library (`SIM-02`) |
+| `PixarAnimationStudios/OpenUSD` | USD scene model | Core Simulator Layer | Python/C++ API (`SIM-05`) |
+| `isaac-sim/IsaacLab` | Isaac integration/physics | Core Simulator | Simulator worker (`SIM-01`, `SIM-06`) |
+| [`PointsCoder/OpenReal2Sim`](https://github.com/PointsCoder/OpenReal2Sim) | USD conversion, PhysX configs, collision optimization | **Tier-0 Code Donor cho EX-SIM** | Adapt `usd_conversion.py` (`SIM-05`), `scenario_collision_optimization.py` (`SIM-02`), Docker runtime isolation (`SIM-06`). Xem [Audit #1](./audits/01_openreal2sim.md) |
+| [`BigCiLeng/R2G`](https://github.com/BigCiLeng/R2G) | Multi-view mask association, OBB extraction | **Tier-0 Algorithm Donor cho EX-SCENE** | Adapt SAMPro3D (`perform_3dsegmentation`, DBSCAN, prompt consolidation) cho `SCENE-03`; `get_aabb.py` OBB cho `SCENE-06`. Xem [Audit #2](./audits/02_r2g.md) |
+| [`zst1406217/VR-Robo`](https://github.com/zst1406217/VR-Robo) | IsaacLab scene/robot runtime, video replay, visual/physics separation | **Tier-0 Integration Donor cho EX-SIM** | Adapt `vrrobo_isaaclab` scene/robot runtime (`SIM-01`, `SIM-06`), Gym `RecordVideo` fallback, process isolation (`SIM-09`). Xem [Audit #3](./audits/03_vr_robo.md) |
+| [`playcanvas/supersplat`](https://github.com/playcanvas/supersplat) | WebGPU 3DGS Visual Editor, multi-layer Splats, transform gizmos | **Tier-0 Code Donor cho EX-PRODUCT** | Adapt WebGPU projected splats, camera navigation, layer visibility toggles (`PRODUCT-06`), transform gizmos, selection tools, Undo/Redo (`PRODUCT-07`). Xem [Audit #4](./audits/04_supersplat.md) |
+| [`playcanvas/splat-transform`](https://github.com/playcanvas/splat-transform) | PLY semantic validation, overdraw metrics, Morton reorder, SOG streaming, voxel collision | **Tier-0 Core Utility Candidate** | Trích xuất `readFileInfo()`, `fillRatio`, Morton reorder (`REC-04`), SOG streaming (`PRODUCT-06`), fallback voxel collision mesh (`SIM-02`). Xem [Audit #4a](./audits/04a_splat_transform.md) |
+| [`discoverse-dev/DISCOVERSE`](https://github.com/discoverse-dev/DISCOVERSE) | Visual ↔ Physics sync (`gs_model_dict`), CoACD collider decomposition, remote NVENC H.264 stream | **Tier-0 Integration Reference & P1 Code Donor** | Tham chiếu `gs_model_dict` binding (`SIM-06`), CoACD convex decomposition (`SIM-02`), ZeroMQ + NVENC H.264 video stream cho P1 live viewport. Xem [Audit #5](./audits/05_discoverse.md) |
+| [`discoverse-dev/DISCOVERSE-Real2Sim`](https://github.com/discoverse-dev/DISCOVERSE-Real2Sim) | Mesh → multiview rendering → Mesh-seeded 3DGS, DiffusionLight relighting | **P1 Asset Generation Reference** | Tham chiếu workflow tạo asset người dùng thêm mới (P1). Xem [Audit #5](./audits/05_discoverse.md) |
+| [`lkeab/gaussian-grouping`](https://github.com/lkeab/gaussian-grouping) | Per-Gaussian Identity Encoding, 3D spatial consistency loss | **Tier-0 Algorithm Reference & Tier-1 Qualification Candidate** | Khái niệm vector identity per-Gaussian, regularization loss không gian 3D kNN cho spike `SCENE-QUAL-GG-01`. Xem [Audit #6](./audits/06_gaussian_grouping.md) |
+| [`InternRobotics/Re3Sim`](https://github.com/InternRobotics/Re3Sim) | End-to-end Real RGB → COLMAP → 3DGS Visual + OpenMVS Mesh → common metric frame → USD/PhysX → Isaac | **Tier-0 System Architecture Reference** | Xác thực độc lập architecture; PyCOLMAP & OpenMVS orchestration (`REC-03`, `REC-05`), FrameTools & similarity transform (`REC-06`), IsaacLab MeshConverter (`SIM-05`). Xem [Audit #7](./audits/07_re3sim.md) |
+| [`Kiranism/next-shadcn-dashboard-starter`](https://github.com/Kiranism/next-shadcn-dashboard-starter) | EX-PRODUCT Web shell, table/form/query-state patterns | P0 selective `ADAPT` reference | Adapt sidebar/layout, list/detail, loading/error and form patterns into `frontend/` (`PRODUCT-01`, `PRODUCT-04`). |
+| [`three.js`](https://threejs.org/docs/) | Browser scene primitives | P0 library/reference | Fallback visual/geometry rendering, collider preview controls. |
+| `Anttwo/SuGaR` | 3DGS→mesh hybrid representation | Alternative geometry | Reference/experimental only; P0 giữ OpenMVS độc lập với Brush. |
+| `RuijieZhu94/ObjectGS` | Object-aware GS + object mesh | Research candidate | Reference chỉ khi SAMPro3D/R2G gặp hạn chế. |
 
 EX-PRODUCT không clone nguyên dashboard starter vào repository. Các repo Web ở trên
 chỉ cung cấp generic UI/graphics patterns; FastAPI, SceneIR, artifact lineage,
 authorization, review và release vẫn theo Real2Sim contracts. Khi copy/adapt
 code phải kiểm tra license của đúng revision và giữ attribution/notice cần thiết.
+
+### 7.1.0 Phân tầng Repository Chuẩn hóa (Repo Tiers A–E)
+
+Sau toàn bộ chuỗi Deep Audit, toàn bộ hệ sinh thái repository liên quan được chuẩn hóa vào 5 tầng rõ ràng:
+- **Tier A (P0 Core Runtime):** FFmpeg, COLMAP, Brush, OpenMVS, SAM2, Open3D, Trimesh, OpenUSD, Isaac Sim / IsaacLab, FastAPI, Next.js, Three.js.
+- **Tier B (P0 Code Donor / High-Value Adapt):** R2G, Re3Sim, SuperSplat, splat-transform, OpenReal2Sim.
+- **Tier C (P0 Qualification / Reference):** Gaussian Grouping (spike `SCENE-QUAL-GG-01`), VR-Robo (process separation, Gym `RecordVideo` fallback).
+- **Tier D (P1 Candidates):** DISCOVERSE (live NVENC stream), DISCOVERSE-Real2Sim (Mesh-seeded GS), Gaussian Grouping inpainting, OpenReal2Sim background completion, VR-Robo live GS sync.
+- **Tier E (Fallback / Experimental):** SuGaR, Nerfstudio, gsplat custom backend, ObjectGS, SegAnyGaussians.
+
+### 7.1.1 Nhật ký Deep Audit & Phân loại Code Donors (Đã hoàn tất 7/7)
+
+Dự án đã hoàn tất toàn bộ quy trình Deep Audit chi tiết cho 7 repositories chủ chốt và 1 utility cốt lõi (xem thư mục lưu trữ tại [`docs/execution/audits/`](./audits/) và tài liệu tổng hợp toàn diện tại [**`docs/execution/audits/00_cross_repo_reuse_matrix.md`**](./audits/00_cross_repo_reuse_matrix.md)).
+
+Tóm tắt kết quả theo thứ tự audit:
+
+1. [**Audit #1 — `PointsCoder/OpenReal2Sim`**](./audits/01_openreal2sim.md) ✅:
+   - **Định vị mới**: **Tier-0 Code Donor cho `EX-SIM`**.
+   - **Module trích xuất chính**: `usd_conversion.py` (`MeshConverter`, `UsdPhysics`, `RigidBodyPropertiesCfg`, CCD, convex decomposition) cho `SIM-05`; `scenario_collision_optimization.py` cho `SIM-02`; Docker IsaacLab runtime isolation cho `SIM-06`.
+   - **Guardrails**: Bắt buộc enforce headless mode (gốc ép `headless=False`), cấm nhận `scene.pkl` làm data contract, phải calibrate lại PhysX params cho kho bãi.
+2. [**Audit #2 — `BigCiLeng/R2G`**](./audits/02_r2g.md) ✅:
+   - **Định vị mới**: **Tier-0 Algorithm Donor cho `EX-SCENE`**.
+   - **Module trích xuất chính**: SAMPro3D (`perform_3dsegmentation`, 3D→2D projection, multi-view score voting, DBSCAN spatial cleanup, `prompt_consolidation`) cho `SCENE-03`; per-object point cloud export và OBB extraction (`get_aabb.py`) cho `SCENE-06`; Assist-GS là P1 fallback visual backend.
+   - **Guardrails**: Bắt buộc chuẩn hóa theo `CoordinateSystem` của Real2Sim Studio (không lấy hardcode `R_edit`, depth shift), không dùng R2G directory layout làm SceneIR, cấm dùng script GPT-4 upload ảnh `sm.ms` hoặc tự gán physics.
+3. [**Audit #3 — `zst1406217/VR-Robo`**](./audits/03_vr_robo.md) ✅:
+   - **Định vị mới**: **Tier-0 Integration Donor cho `EX-SIM`**.
+   - **Module trích xuất chính**: `vrrobo_isaaclab` scene loading (`UsdFileCfg`), robot runtime & stepping loop cho `SIM-01`/`SIM-06`; Gym `RecordVideo` fallback cho `SIM-06 replay`; tách biệt process giữa visual renderer và physics simulator.
+   - **Guardrails**: Cấm dùng RPyC + pickle raw TCP IPC (lỗ hổng bảo mật); cấm copy code renderer Inria (non-commercial license); không lấy RL/PPO training stack; phải map camera/transforms qua canonical `CoordinateSystem`.
+4. [**Audit #4 — `playcanvas/supersplat`**](./audits/04_supersplat.md) & [**Audit #4a — `playcanvas/splat-transform`**](./audits/04a_splat_transform.md) ✅:
+   - **Định vị mới**:
+     - `playcanvas/supersplat`: **Tier-0 Code Donor cho `EX-PRODUCT` Visual Editor & 3D Viewer (`PRODUCT-06`)** và Interaction Machinery (`PRODUCT-07`).
+     - `playcanvas/splat-transform`: **Tier-0 Core Utility Candidate** xuyên suốt `EX-REC` (Brush PLY validation `readFileInfo()`, stats `fillRatio`, Morton reorder), `EX-PRODUCT` (SOG / Streamed LOD) và `EX-SIM` (fallback voxel collision mesh `SIM-02`).
+   - **Module trích xuất chính**: WebGPU projected splat renderer (tương thích Brush metadata), multi-layer Splats (map 1:1 sang SceneObjects), transform gizmos (Move, Rotate), camera orbit/fly, selection tools (brush, lasso, volume), Undo/Redo (`EditHistory`), streaming LOD, voxelization + Marching Cubes.
+   - **Guardrails**: Cần chạy qualification spike `PRODUCT-06Q` về WebGPU trước khi đổi baseline; chuẩn hóa hệ trục PLY 180° tại adapter boundary; Master PLY là canonical immutable artifact, SOG chỉ là delivery derivative; collision từ 3DGS chỉ là fallback đối chứng, không thay OpenMVS.
+5. [**Audit #5 — `discoverse-dev/DISCOVERSE` & `discoverse-dev/DISCOVERSE-Real2Sim`**](./audits/05_discoverse.md) ✅:
+   - **Định vị mới**:
+     - `DISCOVERSE`: **Tier-0 Integration Reference** cho Visual ↔ Physics synchronization; **Secondary Utility Donor** cho CoACD collider preprocessing (`SIM-02`); **Tier-0 P1 Code Donor** cho remote GS rendering & hardware NVENC H.264 video streaming.
+     - `DISCOVERSE-Real2Sim`: **P1 Asset Generation Reference** (Mesh → synthetic views → Mesh-seeded 3DGS, Lighting alignment qua DiffusionLight). Không phải primary warehouse reconstruction.
+   - **Module trích xuất chính**:
+     - `envs/simulator.py` & `gs_model_dict` pattern: binding giữa physical body name và visual 3DGS asset, update GS transforms từ physics step.
+     - `scripts/mesh2mjcf.py` CoACD portion (`coacd` + `trimesh`): convex decomposition pipeline (`CoACDColliderBackend`) cho `SIM-02`.
+     - `gaussian_web_renderer/` (`client.py`, `server.py`, `encoder_gpu.py` PyNvCodec/NVENC, `encoder_cpu.py` PyAV): transport layer ZeroMQ + H.264 video stream cho P1 live viewport.
+     - `DiffusionLight/` (MIT): HDR illumination estimation cho P1 added assets.
+   - **Guardrails**:
+     - ❌ **Không lấy MJCF generation hay physics defaults**: MuJoCo XML không dùng trong Isaac; cấm lấy default `mass = 0.001 kg` của script gốc.
+     - ❌ **Remote video stream chỉ là P1 preview**: Luồng H.264 lược bỏ depth, tuyệt đối không dùng làm validation truth thay cho Isaac `ValidationReport`.
+     - ❌ **License restrictions**: Root repo `DISCOVERSE-Real2Sim` thiếu license file; submodule `LitMesh2GS` mang Inria non-commercial license cấm dùng thương mại; cấm copy trực tiếp vào core commercializable codebase.
+6. [**Audit #6 — `lkeab/gaussian-grouping`**](./audits/06_gaussian_grouping.md) ✅:
+   - **Định vị mới**:
+     - **Tier-0 Algorithm Reference**: Khái niệm Per-Gaussian Identity Encoding (16D) + 3D spatial consistency regularization (`loss_cls_3d()`).
+     - **Tier-1 Qualification Candidate**: Spike `SCENE-QUAL-GG-01` để đo lường xem việc học identity per-Gaussian có cải thiện cross-view object association so với baseline `SAM2 + R2G` trên `TorWIC Aisle_CW` hay không.
+     - **P1 Reference**: Non-destructive object removal/hide preview và 2D-guided visual background inpainting (LaMa).
+   - **Module trích xuất chính**:
+     - Ý tưởng vector identity per-Gaussian kết hợp loss không gian 3D kNN (KL divergence ép các Gaussian lân cận có cùng nhãn).
+     - Khái niệm `GaussianObjectMembership`: ánh xạ splats thuộc về đối tượng mà không phá hủy hay mutate file PLY gốc của Brush.
+   - **Guardrails**:
+     - ❌ **Không thay thế SAM2 + R2G trong P0**: P0 giữ nguyên pipeline hiện tại; Gaussian Grouping chỉ là qualification candidate.
+     - ❌ **Không train lại toàn bộ scene**: Freeze `GlobalVisualArtifact` của Brush, không tái huấn luyện đồng thời appearance + geometry.
+     - ❌ **Cấm kéo DEVA và custom CUDA rasterizer**: DEVA mang bản quyền `CC BY-NC-SA 4.0`, submodule rasterizer mang Inria non-commercial terms.
+     - ❌ **Cấm dùng Convex-Hull Expansion làm Collider**: Heuristic bao lồi Gaussian không phản ánh đúng hình học surface và dễ gây over-removal; collider bắt buộc từ OpenMVS/LiDAR/primitives.
+     - ❌ **Visual Inpainting không phải Physics Truth**: Mọi kết quả inpaint chỉ phục vụ viewport thị giác, không dùng cho va chạm vật lý.
+7. [**Audit #7 — `InternRobotics/Re3Sim`**](./audits/07_re3sim.md) ✅:
+   - **Định vị mới**: **Tier-0 System Architecture Reference** (xác thực độc lập kiến trúc hai nhánh Visual/Geometry tách biệt từ chung SfM poses, neo vào chung một hệ tọa độ chuẩn canonical frame).
+   - **Module trích xuất chính**:
+     - `re3sim/scripts/reconstruct.py`: PyCOLMAP sequential matching orchestration (`REC-03`) và chuỗi lệnh OpenMVS (`InterfaceCOLMAP` $\rightarrow$ `DensifyPointCloud` $\rightarrow$ `ReconstructMesh` $\rightarrow$ `RefineMesh`) cho `REC-05`.
+     - `re3sim/utils/frame_tools.py` & `compute_transform_to_marker_aruco.py`: Kiến trúc frame graph và thuật toán giải similarity transform giữa trajectories cho `REC-06` (Spike `REC-QUAL-FRAME-01`).
+     - `re3sim/utils/usd/obj_to_usd.py`: Cấu hình IsaacLab `MeshConverterCfg`, stage units (`metersPerUnit=1.0`, `Z-up`), chế độ va chạm (`convexDecomposition`, `convexHull`, `meshSimplification`) cho `SIM-02` / `SIM-05` (Spike `SIM-QUAL-RE3-01`).
+     - Tách đôi asset song song (USD cho physics + GS cho visual) đồng bộ qua frame graph.
+     - P1 Hybrid Rendering: GS Environment + Isaac dynamic robot/objects composited qua semantic mask.
+   - **Guardrails**:
+     - ❌ **Cấm vendor toàn bộ repository**: Root mang license `CC BY-NC 4.0`, submodule `gaussian_splatting` dính Inria non-commercial license. Chỉ ADAPT / REIMPLEMENT các pattern điều phối và frame tools dưới dạng clean-room code.
+     - ❌ **Khắc phục lỗi tiềm ẩn từ code gốc**: Bắt buộc thêm `check=True` cho subprocess (code gốc bỏ qua exit code), sửa lỗi sai flag CLI (`--collision-approximation` vs `--collision_approximation`), không hardcode `sparse/0`.
+     - ❌ **Không phụ thuộc ChArUco marker**: TorWIC dùng LiDAR/calibration metric ground-truth thay vì marker vật lý trong kho.
 
 
 ## 7.2 Quy tắc Tích hợp cho Lập trình viên / AI Agent (Integration Rules)
@@ -1308,6 +1394,17 @@ code phải kiểm tra license của đúng revision và giữ attribution/notic
 2. **Quy tắc sao chép code (Code Reuse):**
    - Chỉ được copy code thuật toán nhỏ (math, utils) nếu License cho phép (MIT, Apache).
    - Nếu file to và dính bản quyền lây nhiễm (GPL/AGPL), buộc phải dùng cơ chế Subprocess.
+3. **Danh mục 10 Điều Cấm trong P0 (P0 Anti-patterns & Guardrails):**
+   - ❌ **Không thay Brush bằng Nerfstudio hay vanilla 3DGS:** Brush là core engine duy nhất đảm bảo tương thích format, tốc độ và độ sắc nét cho MVP.
+   - ❌ **Không dùng SuGaR làm primary geometry path:** Giữ OpenMVS độc lập hoàn toàn với Brush để bảo toàn nguyên tắc `Visual ≠ Geometry`.
+   - ❌ **Không retrain toàn bộ global scene bằng Gaussian Grouping:** Giữ nguyên file PLY đóng băng từ Brush; chỉ trích xuất identity membership nếu spike `SCENE-QUAL-GG-01` đạt yêu cầu.
+   - ❌ **Không thêm DEVA vào pipeline khi SAM2 đã xử lý video propagation:** DEVA dính bản quyền hạn chế `CC BY-NC-SA 4.0` và trùng lặp năng lực với SAM2.
+   - ❌ **Không dùng Gaussian point cloud làm physics collider truth:** Gaussian splats là hạt thị giác có độ dày ảo; collider bắt buộc từ OpenMVS/LiDAR/primitives.
+   - ❌ **Không clone nguyên repository OpenReal2Sim, R2G hay Re3Sim vào codebase:** Chỉ trích xuất các hàm/module thuật toán sạch theo clean-room pattern và tuân thủ bản quyền.
+   - ❌ **Không làm live Isaac interactive viewport trên Web trong P0:** Mô phỏng chạy headless trong container; Web chỉ xem video replay MP4 sau khi hoàn thành.
+   - ❌ **Không đưa DISCOVERSE remote GS streaming (NVENC) vào P0 scope:** Đây là tính năng tương tác thời gian thực thuộc P1.
+   - ❌ **Không làm pipeline Mesh → 3DGS AddedAsset trong P0:** Vật thể thêm mới trong P0 dùng CAD/primitive box/cylinder; Mesh-seeded GS thuộc P1.
+   - ❌ **Không bắt DVC/MLflow quản lý business SceneRevision; KHÔNG tạo scene model cạnh tranh SceneIR:** SceneRevision thuộc PostgreSQL và Artifact Store; SceneIR là single source of truth cho scene.
 
 ## 7.3 Roadmap Triển khai (Implementation Order)
 

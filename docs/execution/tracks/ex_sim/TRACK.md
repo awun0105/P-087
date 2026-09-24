@@ -39,7 +39,10 @@ Outputs:
 - Open3D/Trimesh cho collider utilities.
 - OpenUSD cho package translation.
 - Isaac Sim/IsaacLab cho simulator runtime.
-- Re3Sim, VR-Robo, DISCOVERSE và OpenReal2Sim là architecture references.
+- `PointsCoder/OpenReal2Sim`: Tier-0 Code Donor cho USD conversion, PhysX properties (`SIM-05`), collision optimization (`SIM-02`) và Docker runtime isolation (`SIM-06`) theo [Audit #1](../../audits/01_openreal2sim.md).
+- `zst1406217/VR-Robo`: Tier-0 Integration Donor cho IsaacLab scene/robot runtime (`SIM-01`, `SIM-06`), video replay fallback và visual/physics synchronization theo [Audit #3](../../audits/03_vr_robo.md).
+- `discoverse-dev/DISCOVERSE`: Tier-0 Integration Reference cho Visual ↔ Physics synchronization (`gs_model_dict`), Secondary Utility Donor cho CoACD collider decomposition (`SIM-02`), và Tier-0 P1 Code Donor cho remote GS rendering & hardware NVENC H.264 streaming theo [Audit #5](../../audits/05_discoverse.md).
+- `InternRobotics/Re3Sim`: Tier-0 System Architecture Reference & Code Donor cho IsaacLab `MeshConverterCfg`, stage units normalization (`metersPerUnit=1.0`), collision approximation selection (`SIM-02`, `SIM-05`) theo [Audit #7](../../audits/07_re3sim.md).
 - Không tự viết lại USD core, physics engine hoặc Isaac runtime.
 
 ## Authority Gates

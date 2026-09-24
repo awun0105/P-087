@@ -53,7 +53,13 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
 
 `REUSE` `colmap/colmap`; team viết adapter, command builder, best-model selection và normalization, không viết lại SfM.
 
-Giữ tool/research repo ở process/adapter boundary; không kéo toàn bộ research dependency graph vào application.
+**Code Donor Reference (Audit #7):**
+- [`InternRobotics/Re3Sim`](https://github.com/InternRobotics/Re3Sim) (chi tiết: [`docs/execution/audits/07_re3sim.md`](../../../audits/07_re3sim.md)):
+  - Tham khảo `re3sim/scripts/reconstruct.py` (`extract_features`, `feature_matching`, `run_colmap`): PyCOLMAP sequential matching orchestration và quy tắc chọn vocabulary tree tự động theo kích thước ảnh (<1K: 32K vocab, <10K: 256K vocab, >=10K: 1M vocab).
+- **Guardrails / Anti-patterns bắt buộc:**
+  - ❌ **Không bỏ qua exit code**: Script gốc của Re3Sim gọi subprocess không có `check=True` và ghi progress giả định; Real2Sim Studio bắt buộc phải kiểm tra return code, timeout và verify output artifacts.
+  - ❌ **Không hardcode `sparse/0`**: Khi scene phân mảnh, COLMAP có thể tạo nhiều sub-models; adapter phải chọn cụm tái tạo lớn nhất đạt tiêu chuẩn hoặc fail-fast rõ ràng.
+  - ❌ **Vocab downloader**: Tải vocab-tree phải có timeout, kiểm tra mã HTTP `raise_for_status()` và verify checksum.
 
 ## 9. Implementation Plan
 

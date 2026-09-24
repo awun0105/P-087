@@ -50,13 +50,32 @@ Không sửa reconstruction, simulation hoặc product implementation. Shared co
 
 ## 8. Tool / Repository Strategy
 
-`SELF-CODE` deterministic baseline; Gaussian Grouping/ObjectGS/SegAnyGaussians/R2G are `REFERENCE`, not runtime dependencies by default.
+`SELF-CODE` deterministic baseline; `BigCiLeng/R2G` (SAMPro3D) là primary algorithm donor; `lkeab/gaussian-grouping` là Tier-0 algorithm reference và Tier-1 qualification candidate.
 
-Giữ research repos ở mức reference/adapter đã được phê duyệt; không thay project architecture.
+**Code Donor Reference (Audit #2 & #6):**
+- Candidate algorithm donor: [`BigCiLeng/R2G`](https://github.com/BigCiLeng/R2G) / `sampro3d` submodule (xem chi tiết tại [`docs/execution/audits/02_r2g.md`](../../../audits/02_r2g.md)).
+- Core code/logic đáng adapt (**`ADAPT-HIGH`**):
+  - SAMPro3D: `perform_3dsegmentation()`, `compute_mapping()`, `prompt_filter()`, `prompt_consolidation()`.
+  - Thuật toán: Chiếu 3D điểm sang camera views (fx/fy/cx/cy), visibility/occlusion test, tích lũy điểm membership từ 2D SAM2 masks, lọc nhiễu không gian bằng DBSCAN, và hợp nhất các candidate instances trùng lặp (`prompt_consolidation`) gợi ý cho HITL merge.
+- [`lkeab/gaussian-grouping`](https://github.com/lkeab/gaussian-grouping) (chi tiết: [`docs/execution/audits/06_gaussian_grouping.md`](../../../audits/06_gaussian_grouping.md)):
+  - **Tier-0 Algorithm Reference & Tier-1 Qualification Candidate (`SCENE-QUAL-GG-01`)**:
+    - Khái niệm Per-Gaussian Identity Encoding (16D) + 3D spatial consistency regularization (`loss_cls_3d()`) để liên kết các Gaussian lân cận thành nhóm thực thể nhất quán.
+    - Kiến trúc trừu tượng `ObjectAssociationBackend`: hỗ trợ `R2GAssociationBackend` (primary baseline) và `GaussianGroupingBackend` (qualification spike đối chứng).
+- **Guardrails / Anti-patterns bắt buộc:**
+  - ❌ **Không copy nguyên `compute_mapping()`**: R2G hardcode `depth_shift = 1000`, `R_edit = diag(1, -1, -1)` và `.tif` depth. Mọi transform và camera projection phải tuân theo canonical `CoordinateSystem` của Real2Sim Studio.
+  - ❌ **Data Adapter cho Depth**: SAMPro3D cần depth. Khi primary path chỉ có OpenMVS mesh, phải render depth từ viewpoint; chỉ dùng trực tiếp khi có `DepthFrameSet` artifact hợp lệ.
+  - ❌ **Không kéo Cutie/DEVA vào P0**: Đã khóa SAM2 cho video mask propagation; Cutie và DEVA (CC BY-NC-SA 4.0) bị loại khỏi P0.
+  - ❌ **Không train lại toàn bộ 3DGS scene**: Không huấn luyện song song appearance + identity từ đầu; geometry và appearance của Brush (`GlobalVisualArtifact`) được freeze, chỉ tối ưu identity feature / membership.
+  - ❌ **Không vendor custom CUDA rasterizer**: Submodule CUDA rasterizer của Gaussian Grouping dính Inria non-commercial license; cấm kéo trực tiếp vào core commercializable codebase.
+  - ❌ **Không hardcode parameters vào schema**: Không leak `NUM_OBJECTS 16` hay `num_classes = 200` thành schema/contract cố định.
+  - ❌ **Machine Group ID ≠ Canonical SceneObject ID**: Group ID do Gaussian Grouping sinh ra chỉ là machine candidate identity; ID chính thức bắt buộc phải qua Human Confirmation (#1).
 
 ## 9. Implementation Plan
 
-Assignee điền files/sequence/failure handling sau khi inspect repository. Không đổi task scope hoặc authority gate.
+1. Xây dựng `MultiViewProjectionService` chuyển đổi điểm 3D/mesh vertices sang camera coordinate theo canonical contract.
+2. Adapt logic voting và tích lũy score từ SAMPro3D kết hợp với SAM2 mask artifacts.
+3. Tích hợp DBSCAN spatial cleanup và `prompt_consolidation` để tạo candidate groups và merge suggestions cho Human Confirmation.
+4. Assignee điền files/sequence/failure handling sau khi inspect repository. Không đổi task scope hoặc authority gate.
 
 ## 10. Tests
 

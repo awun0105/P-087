@@ -57,22 +57,22 @@ Nguyên tắc chung:
 | Component | Strategy | Primary source | Dùng phần nào | Team tự viết |
 |---|---|---|---|---|
 | Video/frame | `REUSE` | FFmpeg | decode/encode CLI | adapter, validation, manifest |
-| Camera pose/SfM | `REUSE` | `colmap/colmap` | feature extraction, matching, mapper/SfM | `ColmapAdapter`, input prep, pose/output normalization |
-| 3DGS Visual | `REUSE` | `ArthurBrussee/brush` | reconstruction/training CLI, Gaussian output | `BrushAdapter`, COLMAP bridge, config, provenance |
-| RGB geometry | `REUSE` | `cdcseacave/openMVS` | COLMAP import, densification, mesh reconstruction | `OpenMVSAdapter`, normalized geometry artifact |
+| Camera pose/SfM | `REUSE` + `ADAPT` | `colmap/colmap` + `InternRobotics/Re3Sim` | feature extraction, matching, mapper/SfM, sequential vocab tree | `ColmapAdapter`, input prep, pose/output normalization |
+| 3DGS Visual | `REUSE` + utility | `ArthurBrussee/brush` + `playcanvas/splat-transform` | reconstruction/training CLI, artifact validation, SOG packaging | `BrushAdapter`, COLMAP bridge, config, provenance |
+| RGB geometry | `REUSE` + `ADAPT` | `cdcseacave/openMVS` + `InternRobotics/Re3Sim` | COLMAP import, densification, mesh reconstruction, command orchestration | `OpenMVSAdapter`, normalized geometry artifact, timeout/checksum |
 | LiDAR processing | `SELF-CODE` + library | `isl-org/Open3D` | IO, transform, filtering, voxel utilities | prefusion/ingest/alignment workflow + provenance |
 | Object masks | `REUSE` | `facebookresearch/sam2` | predictor, video mask propagation | `SAM2Adapter`, mask artifact/metadata |
-| Multi-view association | `SELF-CODE` + `REFERENCE` | Gaussian Grouping, ObjectGS, SegAnyGaussians, R2G | identity/grouping ideas | masks + poses + geometry association baseline |
-| Scene decomposition | `SELF-CODE` + `REFERENCE` | R2G, `gs-real2sim`, DISCOVERSE | object/environment decomposition patterns | `SceneDecomposer`, Environment/SceneObject mapping |
+| Multi-view association | `ADAPT` + `QUALIFICATION` | `BigCiLeng/R2G` (SAMPro3D) + `lkeab/gaussian-grouping` | 3D projection, multi-view score voting, DBSCAN, prompt consolidation, identity lifting spike (`SCENE-QUAL-GG-01`) | projection adapter + association service theo canonical coordinate |
+| Scene decomposition | `ADAPT` | `BigCiLeng/R2G` + `PointsCoder/OpenReal2Sim` + `lkeab/gaussian-grouping` | per-object point cloud, OBB extraction, alignment patterns, `GaussianObjectMembership` | `SceneDecomposer`, Environment/SceneObject mapping, non-destructive hide |
 | Scene IR | `SELF-CODE` | project contract | — | schema, refs, transforms, revisions |
-| Collider | `SELF-CODE` + library | Trimesh, Open3D | OBB/AABB/convex/simplification utilities | collider policy + generator |
-| OpenUSD export | `SELF-CODE` + library | OpenUSD | USD APIs | SceneIR→USD adapter, package/checksum |
-| Isaac validation | `SELF-CODE` + platform | Isaac Sim, IsaacLab | simulator/runtime APIs | load/spawn/collision/path validator + report |
-| Simulator patterns | `REFERENCE` | Re3Sim, VR-Robo, DISCOVERSE, OpenReal2Sim | reconstruction→simulator patterns | không tạo dependency nếu không cần |
+| Collider | `ADAPT` + library | `PointsCoder/OpenReal2Sim` + `discoverse-dev/DISCOVERSE` (CoACD) + `InternRobotics/Re3Sim` + `playcanvas/splat-transform` (fallback) | ground clearance, CoACD convex decomposition, MeshConverterCfg, voxel collision fallback | collider policy + `ColliderGenerator` |
+| OpenUSD export | `ADAPT` + library | `OpenUSD` + `PointsCoder/OpenReal2Sim` + `InternRobotics/Re3Sim` | USD physics stage build, MeshConverter, PhysX schemas, stage units | SceneIR→USD translation, packaging, checksum |
+| Isaac validation | `ADAPT` + platform | `isaac-sim/IsaacLab` + `zst1406217/VR-Robo` + `InternRobotics/Re3Sim` | headless loading, robot stepping, collision checks, Gym `RecordVideo` fallback, process isolation | validator worker, Start-Goal execution, structured report |
+| Simulator patterns | `REFERENCE` | Re3Sim, VR-Robo, DISCOVERSE, OpenReal2Sim | reconstruction→simulator patterns, process isolation | không tạo dependency nếu không cần |
 | Evaluation | `SELF-CODE` | [DATASET_PLAYBOOK](../DATASET_PLAYBOOK.md) | protocol/metric definitions | evaluator orchestration + reports |
 | API/jobs | `SELF-CODE` | FastAPI + basic worker/queue | framework primitives | job/artifact/orchestration lifecycle |
-| Web Studio | `SELF-CODE` domain + selective `ADAPT` UI | Next.js, Three.js, WebGL/WebGL2; Kiranism dashboard starter; Spark qualification candidate | generic shell/table/form patterns, 3D primitives and browser Gaussian renderer | real 3DGS Visual/Geometry/Point Cloud/Collider views, SceneIR mapping/editing, validation/review UX |
-| Review/release | `SELF-CODE` | PRD lifecycle | — | approval gate, revision invalidation, release sealing |
+| Web Studio | `ADAPT` + `SELF-CODE` domain | `playcanvas/supersplat` + `playcanvas/splat-transform` + Next.js + Three.js; Kiranism dashboard starter | WebGPU projected splats, multi-layer Splats, transform gizmos, SOG streaming, generic shell | real 3DGS Visual/Geometry/Point Cloud/Collider views, SceneIR mapping/editing, HITL workflows |
+| Review/release | `SELF-CODE` | PRD lifecycle | — | approval gate (HITL #2), revision invalidation, release sealing |
 
 Nếu muốn đổi backend hoặc strategy, output contract phải giữ nguyên và phải tuân [`TEAM_EXECUTION_CONTRACT.md`](./TEAM_EXECUTION_CONTRACT.md).
 
@@ -117,11 +117,12 @@ Primary:
 - Brush
 - OpenMVS
 - Open3D
+- `playcanvas/splat-transform`: Core utility cho 3DGS artifact validation (`readFileInfo`), stats (`fillRatio`), Morton reorder và SOG packaging. Xem [`docs/execution/audits/04a_splat_transform.md`](./audits/04a_splat_transform.md).
+- `InternRobotics/Re3Sim`: **Tier-0 System Architecture Reference & Code Donor** cho PyCOLMAP orchestration (`REC-03`), OpenMVS command pipeline (`REC-05`) và FrameTools / similarity transform (`REC-06`). Xem [`docs/execution/audits/07_re3sim.md`](./audits/07_re3sim.md).
 
 Run-first/reference theo Integration Playbook:
 
 - OpenReal2Sim
-- Re3Sim
 - VR-Robo
 - R2G
 - video-3d-reconstruction-gsplat
@@ -141,10 +142,10 @@ Không nghiên cứu vô hạn.
 | `REC-01` TorWIC preparation | `SELF-CODE` | Dataset Playbook + Open3D/FFmpeg | IO/transform/encode primitives | normalizer, split/preparation scripts, manifests |
 | `REC-02` Input validation + privacy gate | `SELF-CODE` | FFmpeg + PRD rules | decode/probe | input rules, privacy gate, errors, report |
 | `REC-02A` Frame extraction | `REUSE` + adapter | FFmpeg | deterministic frame decode/extraction | command builder, normalized frame artifact, provenance |
-| `REC-03` Camera pose | `REUSE` | `colmap/colmap` | feature extraction, matching, mapper/SfM | `ColmapAdapter`, model selection, pose normalization |
-| `REC-04` Visual reconstruction | `REUSE` | `ArthurBrussee/brush` | 3DGS reconstruction/training, Gaussian output | `BrushAdapter`, config, COLMAP bridge, provenance |
-| `REC-05` RGB geometry | `REUSE` | `cdcseacave/openMVS` | COLMAP import, densify, mesh | `OpenMVSAdapter`, output normalization |
-| `REC-06` Metric scale | `SELF-CODE` | PRD | — | anchor workflow, scale propagation, confirmation record |
+| `REC-03` Camera pose | `REUSE` + `ADAPT` | `colmap/colmap` + `Re3Sim` | feature extraction, matching, mapper/SfM, sequential vocab tree | `ColmapAdapter`, model selection, pose normalization |
+| `REC-04` Visual reconstruction | `REUSE` + utility | `ArthurBrussee/brush` + `playcanvas/splat-transform` | 3DGS reconstruction/training, artifact validation, SOG packaging | `BrushAdapter`, `SplatArtifactProcessor`, config, provenance |
+| `REC-05` RGB geometry | `REUSE` + `ADAPT` | `cdcseacave/openMVS` + `Re3Sim` | COLMAP import, densify, mesh, refine command orchestration | `OpenMVSAdapter`, output normalization, timeout/checksum |
+| `REC-06` Metric scale | `SELF-CODE` + `ADAPT` | PRD + `Re3Sim` FrameTools concept | frame graph, similarity transform estimation | anchor workflow, scale propagation, confirmation record |
 | `REC-07` LiDAR prefusion | `SELF-CODE` + library | Open3D | transform/filter/voxel primitives | TorWIC prefusion + GT-dependency provenance |
 | `REC-08` LiDAR ingest | `SELF-CODE` + library | Open3D | point-cloud validation/filtering | `LiDARGeometryArtifact` producer |
 | `REC-09` RGB–LiDAR alignment | `SELF-CODE` + library | Open3D + calibration/known transform | transform/registration primitives | alignment flow + transform provenance |
@@ -376,15 +377,14 @@ Primary:
 - SAM2
 - Open3D
 
-Reference:
+Reference / Code Donors (Deep Audit):
 
-- Gaussian Grouping
-- ObjectGS
-- SegAnyGaussians
-- R2G
-- gs-real2sim
+- `BigCiLeng/R2G` (SAMPro3D): **Tier-0 Algorithm Donor** cho `SCENE-03` (multi-view voting, DBSCAN cleanup, prompt consolidation) và `SCENE-06` (per-object point cloud & OBB extraction). Xem [`docs/execution/audits/02_r2g.md`](./audits/02_r2g.md).
+- `PointsCoder/OpenReal2Sim`: **Code Donor** cho alignment utilities (`scenario_construction.py`) và P1 `BackgroundCompletionBackend`. Xem [`docs/execution/audits/01_openreal2sim.md`](./audits/01_openreal2sim.md).
+- `lkeab/gaussian-grouping`: **Tier-0 Algorithm Reference** (per-Gaussian persistent identity learning, 3D spatial consistency) & **Tier-1 Qualification Candidate** (`SCENE-QUAL-GG-01`). Xem [`docs/execution/audits/06_gaussian_grouping.md`](./audits/06_gaussian_grouping.md).
+- ObjectGS, SegAnyGaussians, gs-real2sim, DISCOVERSE.
 
-Chỉ reuse concept/module cần thiết.
+Chỉ reuse concept/module cần thiết; không kéo toàn bộ research dependency graph vào core.
 
 ## 3.4 Implementation Source Map
 
@@ -392,10 +392,10 @@ Chỉ reuse concept/module cần thiết.
 |---|---|---|---|---|
 | `SCENE-01` Bundle consumer | `SELF-CODE` | shared contract | — | loader/validator |
 | `SCENE-02` Object extraction | `REUSE` | `facebookresearch/sam2` | predictor + mask/video propagation | `SAM2Adapter`, mask artifact/metadata |
-| `SCENE-03` Multi-view association | `SELF-CODE` + `REFERENCE` | Gaussian Grouping, ObjectGS, SegAnyGaussians, R2G | identity/grouping/2D↔3D ideas | baseline masks + poses + geometry association |
+| `SCENE-03` Multi-view association | `SELF-CODE` + `ADAPT` | `BigCiLeng/R2G` (SAMPro3D) + `lkeab/gaussian-grouping` (qualification) | 3D projection, multi-view score voting, DBSCAN, prompt consolidation, identity lifting spike | projection adapter + association service theo canonical coordinate |
 | `SCENE-04` Candidate model | `SELF-CODE` | PRD | — | ID/state/provenance model |
 | `SCENE-05` Human Confirmation | `SELF-CODE` | PRD | — | confirm/ignore/merge/create/reassign domain operations |
-| `SCENE-06` Scene decomposition | `SELF-CODE` + `REFERENCE` | R2G, `gs-real2sim`, DISCOVERSE | decomposition patterns | `SceneDecomposer`, object↔geometry binding |
+| `SCENE-06` Scene decomposition | `SELF-CODE` + `ADAPT` | R2G, OpenReal2Sim, `gaussian-grouping`, `gs-real2sim`, DISCOVERSE | per-object point cloud, OBB extraction, GaussianObjectMembership alignment patterns | `SceneDecomposer`, object↔geometry binding |
 | `SCENE-07` SceneObject model | `SELF-CODE` | Scene IR contract | — | transform/ref/state model |
 | `SCENE-08` Edit semantics | `SELF-CODE` | PRD | — | move/rotate/hide/delete behavior |
 | `SCENE-08A` Add primitive/asset | `SELF-CODE` | PRD | — | user-added object + primitive dimensions/asset parameters |
@@ -623,29 +623,29 @@ Primary:
 - Isaac Sim
 - IsaacLab
 
-Reference:
+Reference / Code Donors (Deep Audit):
 
-- Re3Sim
-- VR-Robo
-- DISCOVERSE
-- OpenReal2Sim
+- `PointsCoder/OpenReal2Sim`: **Tier-0 Code Donor** cho `SIM-05` (USD conversion, MeshConverter, PhysX/RigidBody/Collision properties), `SIM-02` (collision remediation) và `SIM-06` (Docker IsaacLab isolation). Xem [`docs/execution/audits/01_openreal2sim.md`](./audits/01_openreal2sim.md).
+- `zst1406217/VR-Robo`: **Tier-0 Integration Donor** cho `SIM-01` (IsaacLab startup, USD loading), `SIM-06` (robot runtime, stepping loop, video replay fallback) và `SIM-09` (worker process isolation); Architecture reference cho Visual/Physics separation. Xem [`docs/execution/audits/03_vr_robo.md`](./audits/03_vr_robo.md).
+- `discoverse-dev/DISCOVERSE`: **Tier-0 Integration Reference** cho Visual ↔ Physics synchronization (`gs_model_dict`), **Secondary Utility Donor** cho CoACD convex decomposition (`SIM-02`), và **Tier-0 P1 Code Donor** cho remote GS rendering & hardware NVENC H.264 streaming. Xem [`docs/execution/audits/05_discoverse.md`](./audits/05_discoverse.md).
+- `InternRobotics/Re3Sim`: **Tier-0 System Architecture Reference & Code Donor** cho IsaacLab `MeshConverterCfg`, stage units normalization (`metersPerUnit=1.0`), collision approximation selection (`SIM-02`, `SIM-05`), và P1 hybrid rendering. Xem [`docs/execution/audits/07_re3sim.md`](./audits/07_re3sim.md).
 
 ## 4.4 Implementation Source Map
 
 | Stage | Strategy | Source | Lấy từ repo/tool | Team tự code |
 |---|---|---|---|---|
-| `SIM-01` Isaac smoke | `REUSE` platform + `SELF-CODE` | OpenUSD, Isaac Sim, IsaacLab | USD/simulator APIs | minimal USD builder + smoke script |
-| `SIM-02` Collider | `SELF-CODE` + library | Trimesh, Open3D | OBB/AABB/convex/simplification utilities | collider policy + `ColliderGenerator` |
+| `SIM-01` Isaac smoke | `REUSE` platform + `ADAPT` | OpenUSD, Isaac Sim, IsaacLab + VR-Robo | USD/simulator APIs, `UsdFileCfg` scene load, environment setup | minimal USD builder + smoke script |
+| `SIM-02` Collider | `SELF-CODE` + `ADAPT` | Trimesh, Open3D + OpenReal2Sim + DISCOVERSE (CoACD) + Re3Sim + `splat-transform` (fallback) | OBB/AABB/convex utilities, CoACD decomposition, MeshConverterCfg, ground clearance, voxel collision fallback | collider policy + `ColliderGenerator` |
 | `SIM-02A` Collider edit validation | `SELF-CODE` | `ColliderSpec` contract | — | validate type/dimensions/local transform after edit |
 | `SIM-03` Physics enrichment | `SELF-CODE` | Scene IR contract | — | `ColliderSpec`/physics metadata on same SceneIR schema |
 | `SIM-04` Preflight | `SELF-CODE` | PRD/Integration Playbook | — | deterministic rules + report |
-| `SIM-05` Candidate build | `SELF-CODE` + library | OpenUSD | USD scene APIs | SceneIR→USD translation, packaging, checksum |
-| `SIM-06` Isaac validation | `SELF-CODE` + platform | Isaac Sim, IsaacLab | load/physics/runtime APIs | spawn/collision/path validation worker |
+| `SIM-05` Candidate build | `SELF-CODE` + `ADAPT` | OpenUSD + OpenReal2Sim `usd_conversion.py` + Re3Sim `obj_to_usd.py` | USD scene APIs, MeshConverter, PhysX configs, stage units | SceneIR→USD translation, packaging, checksum |
+| `SIM-06` Isaac validation | `SELF-CODE` + `ADAPT` | Isaac Sim, IsaacLab + OpenReal2Sim + VR-Robo | load/physics/runtime APIs, robot stepping, `RecordVideo` fallback | spawn/collision/path validation worker |
 | `SIM-07` ValidationReport | `SELF-CODE` | shared contract | — | candidate-bound structured report |
 | `SIM-08` Evaluation | `SELF-CODE` | Dataset Playbook | protocols/metric definitions | evaluator orchestration + reports |
-| `SIM-09` Worker entrypoints | `SELF-CODE` | project runtime | — | simulation/evaluation CLI wrappers |
+| `SIM-09` Worker entrypoints | `SELF-CODE` + `ADAPT` | project runtime + VR-Robo patterns | worker/process boundary, separate containers | simulation/evaluation CLI wrappers |
 
-Re3Sim, VR-Robo, DISCOVERSE và OpenReal2Sim là **architecture references** cho simulator boundary/transform/USD patterns. Không clone cả system để thay project architecture.
+Re3Sim, VR-Robo, DISCOVERSE và OpenReal2Sim là **architecture references & code donors** cho simulator boundary/transform/USD patterns. Không clone cả system để thay project architecture.
 
 **Không tự viết lại:** USD core, physics engine, Isaac runtime, generic geometry primitives.
 
@@ -885,8 +885,9 @@ Baseline:
 - basic worker/queue
 - SSE/WebSocket/polling cho status
 - Next.js
-- Three.js
-- WebGL/WebGL2 qua Three.js cho P0 geometry/point-cloud/collider/transforms
+- `playcanvas/supersplat` (WebGPU): **Tier-0 Code Donor Candidate** cho 3DGS Visual Editor (chờ qualification spike `PRODUCT-06Q`). Xem [`docs/execution/audits/04_supersplat.md`](./audits/04_supersplat.md).
+- Three.js / WebGL/WebGL2: technical views (geometry/point-cloud/collider/transforms) và baseline rendering.
+- `playcanvas/splat-transform`: Core utility cho Gaussian artifact validation, SOG conversion và LOD streaming.
 
 Không cần advanced scheduler/multi-tenant infra trong P0.
 
@@ -899,8 +900,8 @@ Không cần advanced scheduler/multi-tenant infra trong P0.
 | `PRODUCT-03` Worker abstraction | `SELF-CODE` | worker contract | — | dispatch interface + queue/CLI integration |
 | `PRODUCT-04` Artifact access | `SELF-CODE` | shared contract | — | registry/resolver |
 | `PRODUCT-05` Web shell | `SELF-CODE` domain + selective `ADAPT` UI | Next.js + Kiranism dashboard starter; arhamkhnz/shadcndashboard as secondary references | sidebar, layout, table, form, loading/error, upload UI patterns | typed FastAPI client, project/job/artifact workflow and state ownership |
-| `PRODUCT-06` 3D Viewer | `SELF-CODE` + library | Three.js + official examples; React Three Fiber candidate; Spark P0 qualification candidate | camera/scene/rendering/interaction primitives | real Brush 3DGS Visual + geometry/point-cloud/collider SceneIR views, selection, layer toggles and transform tools |
-| `PRODUCT-07` Object actions | `SELF-CODE` | Scene Core operations | — | UI/application commands |
+| `PRODUCT-06` 3D Viewer | `SELF-CODE` + `ADAPT` | `playcanvas/supersplat` (Visual 3DGS editor donor) + Three.js/Spark (technical views) | WebGPU splat renderer, camera orbit/fly, selection, layer transform gizmos | SceneIR bridge, Geometry/Collider technical views, artifact resolver |
+| `PRODUCT-07` Object actions | `SELF-CODE` + `ADAPT` | `playcanvas/supersplat` interaction machinery + Scene Core | `EntityTransformHandler`, Move/Rotate gizmos, selection, `EditHistory` | domain commands, backend revision persistence, authorization |
 | `PRODUCT-07A` Added asset/collider UI | `SELF-CODE` | SceneIR/ColliderSpec contracts | Three.js controls | add/delete obstacle, dimensions, collider adjustment |
 | `PRODUCT-08` Orchestration | `SELF-CODE` | shared worker contracts | — | REC→SCENE→SIM control flow |
 | `PRODUCT-09` Progress/error/retry | `SELF-CODE` | PRD | — | monitoring + user-facing errors |

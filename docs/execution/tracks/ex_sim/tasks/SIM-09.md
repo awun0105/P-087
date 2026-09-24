@@ -54,11 +54,15 @@ Không sửa scene/product/reconstruction internals. Shared contract change cầ
 
 `SELF-CODE` wrappers preserving process/data boundary and distinct permissions.
 
-Research systems chỉ là references trừ khi change control chấp nhận runtime dependency.
+**Architecture Reference (Audit #3):**
+- Candidate reference: [`zst1406217/VR-Robo`](https://github.com/zst1406217/VR-Robo) (xem chi tiết tại [`docs/execution/audits/03_vr_robo.md`](../../../audits/03_vr_robo.md)).
+- Pattern tham khảo (**`ADAPT`**): Tách biệt môi trường thực thi (process isolation) giữa IsaacLab simulation worker và Gaussian renderer worker, chạy trên các container độc lập để tránh dependency/driver conflicts.
 
 ## 9. Implementation Plan
 
-Assignee điền files, runtime command, failure handling và proof sau inspect. Không tự khóa policy còn mở.
+1. Thiết kế CLI wrapper riêng biệt cho `simulation-worker` (validation) và `evaluation-runner` (benchmark).
+2. Áp dụng quy tắc ranh giới tiến trình (process boundary), đảm bảo worker thực thi độc lập và giao tiếp qua file artifacts/status JSON.
+3. Assignee điền files, runtime command, failure handling và proof sau inspect. Không tự khóa policy còn mở.
 
 ## 10. Tests
 
