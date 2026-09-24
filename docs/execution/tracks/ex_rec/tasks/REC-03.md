@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-REC` |
 | Priority | `P0` |
-| Status | `TODO` |
+| Status | `PLANNED` |
 | Owner | `@awun0105` |
 | Target milestone | `M1/M2` |
 
@@ -57,7 +57,31 @@ Giữ tool/research repo ở process/adapter boundary; không kéo toàn bộ re
 
 ## 9. Implementation Plan
 
-Assignee điền sau khi inspect code/test hiện tại: files cụ thể, sequence, failure handling và proof. Không đổi goal, I/O hoặc authority gate của task.
+2026-09-24 source/contract audit: COLMAP checkout
+`8f23d8ec4ca2f71c7fe42f42d63dde9536793d91` from
+`https://github.com/colmap/colmap.git`, BSD-3-Clause; executable is not on
+host `PATH`. The official Docker image pull was interrupted before runtime
+qualification; no COLMAP smoke has run. Exact relevant upstream
+files are `src/colmap/exe/feature.cc` (`RunFeatureExtractor`),
+`src/colmap/exe/sfm.cc` (`RunMapper`), `src/colmap/exe/model.cc`
+(`RunModelConverter`) and `src/colmap/scene/reconstruction_io_text.cc`
+(`WriteImagesText`, `WriteCamerasText`). Their CLI/input/output are the intended
+REUSE boundary; no upstream source is copied. The Nannigalaxy MIT script
+`colmap_undistorted_sfm_export.sh` at
+`9fae0190345a7080f680d20d1a0c2f45b1354a16` is REFERENCE only: it uses
+`sparse/0` and older GPU flag names, neither is accepted as the project
+implementation.
+
+Plan: add an EX-REC `ColmapAdapter` that materializes the published REC-02A
+frame set through `FrameSetResolver` into an isolated workspace, runs explicit
+feature extraction, sequential matching, mapper and model conversion commands,
+selects the sparse model by registered-frame count with deterministic tie
+break, converts COLMAP `cam_from_world` to a typed `world_from_camera` pose
+record, and publishes immutable checksummed pose/sparse refs. Keep COLMAP's
+arbitrary SfM scale and world orientation explicit; REC-06 owns metric and
+canonical-world confirmation. Add positive/negative parser/selection/command
+tests and a real small-scene CLI smoke. Record actual container digest/version,
+GPU/CPU mode and registered-image ratio before claiming DONE.
 
 ## 10. Tests
 
