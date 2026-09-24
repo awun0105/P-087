@@ -1,0 +1,258 @@
+# Execution Plan: EX-REC track
+
+Date: 2026-09-24
+
+## Status
+
+Active — onboarding/source audit complete; Codex directly implementing REC-01.
+
+## Outcome
+
+Complete the locked EX-REC tasks one at a time, with independent source review,
+task-level proof, and a real `InputManifest` → `ReconstructionBundle` → EX-SCENE
+handoff that requires no manual artifact conversion.
+
+## Context and authority
+
+- Current checkout: `feat/ex-rec`; `git status --short` empty at onboarding.
+- `AGENTS.md` and `docs/WORKFLOW.md` are the current harness entrypoints.
+  `docs/harness/FEATURE_INTAKE.md`, `docs/harness/CONTEXT_RULES.md`, and a
+  harness query matrix do not exist in this checkout; user chose the current
+  harness on 2026-09-24. Do not invent those missing sources.
+- Scope/acceptance: `docs/PRD.md`; dataset/split/leakage:
+  `docs/DATASET_PLAYBOOK.md`; shared artifacts/runtime:
+  `docs/execution/TEAM_EXECUTION_CONTRACT.md`; placement: `ARCHITECTURE.md`;
+  tools/strategy: `docs/execution/INTEGRATION_PLAYBOOK.md`; task IDs/scope:
+  `docs/execution/TRACK_IMPLEMENTATION_GUIDE.md`; milestone/owner:
+  `docs/execution/TEAM_EXECUTION_PLAN.md`; track/task execution records:
+  `docs/execution/tracks/ex_rec/TRACK.md` and its `tasks/REC-*.md`.
+- Existing `2026-09-23-integration-foundation.md` is a separate Foundation
+  record. Synthetic fixture proof there is not real EX-REC acceptance.
+- Baseline: contracts and artifact-store fixtures exist; `src/services/reconstruction/`
+  and `tests/test_reconstruction/` have no task implementation, while
+  `scripts/torwic/` contains entrypoint placeholders. All 12 REC task files
+  currently say `TODO`.
+
+## Input, output, and invariants
+
+- RGB input: moving-camera video or validated frame set via `InputManifest`,
+  source-rights attestation, and `PrivacyValidationReport`.
+- LiDAR input: registered/fused PLY/PCD. Raw TorWIC scans are limited to offline
+  prefusion; product runtime must not read evaluation-only GT.
+- Outputs: normalized frames, poses, real Brush visual, OpenMVS RGB geometry,
+  metric/canonical records, optional LiDAR/alignment, and a versioned published
+  `ReconstructionBundle` that EX-SCENE resolves directly.
+- Canonical: meter, Z-up, right-handed, `world`, `parent_from_local`, quaternion
+  `xyzw`, radian. Convert external conventions at adapter boundaries.
+- Product artifacts use logical `artifact://jobs/...` URIs, typed data classes,
+  atomic immutable publication, SHA-256 byte refs, and canonical-content
+  checksums for logical manifests/bundles. GT-assisted LiDAR provenance must
+  survive into mixed composition; alignment is a separate confirmed record.
+- Do not copy whole research repositories, mix their dependency graphs, change
+  shared contracts for convenience, import another track's internals, or claim
+  fixture/GPU/real acceptance from a different proof layer.
+
+## Dependency and acceptance map
+
+| Task | Dependency | Minimum task gate from task file |
+| --- | --- | --- |
+| REC-01 | locked `Aisle_CW` source | Reproducible immutable raw → normalized data, split/calibration/timestamps/checksums and real small preparation smoke. |
+| REC-02 | REC-01 for TorWIC; uploads may enter directly | Reject bad/static RGB, publish checksum-bound privacy report, enforce public/demo gate. |
+| REC-02A | REC-02 | Deterministic FFmpeg frame artifact with IDs/timestamps/SHA-256; REC-03 consumes it without manual conversion. |
+| REC-03 | REC-02A | Real COLMAP small-scene smoke, deterministic model selection, normalized pose/intrinsics with refs and provenance. |
+| REC-04 | REC-03 + Brush runtime | Real Brush GPU smoke and resolvable checksummed 3DGS visual artifact; never use it as collider. |
+| REC-05 | REC-03 + OpenMVS runtime | Real OpenMVS small-scene smoke, normalized geometry consumed via published ref. |
+| REC-06 | REC-03/04/05 + locked anchor | Confirm scale only after anchor workflow; propagate same scale to pose/visual/geometry; verify independent distance. |
+| REC-07 | REC-01 + declared poses | Offline reproducible registered LiDAR PLY; preserve GT-assistance and checksums if `traj_gt` is used. |
+| REC-08 | registered LiDAR or REC-07 | Validate unit/frame/nonempty cloud; immutable resolvable LiDAR artifact and typed dependency provenance. |
+| REC-09 | REC-06/08 + confirmed transform | Verify same-scene/checksum binding; separate confirmed alignment; reject unconfirmed/different-scene inputs. |
+| REC-10 | REC-02A/03/04/05/06; REC-08/09 when mixed | Publish schema-valid bundle for RGB, optional depth, and mixed configurations; EX-SCENE consumes refs directly. |
+| REC-11 | REC-10 + job lifecycle | Stable worker command, structured failures/retry lineage, no false SUCCEEDED or manual path patch. |
+
+One valid serial order is REC-01 → REC-02 → REC-02A → REC-03 → REC-04 →
+REC-05 → REC-06 → REC-07 → REC-08 → REC-09 → REC-10 → REC-11. REC-07/08 are
+otherwise independent of the RGB branch after REC-01, and REC-04/05 can run
+in either order after REC-03. Mixed alignment is conditional, not a dependency
+of RGB-only publication. REC-10 and REC-11 still require their own task gates.
+
+## External source audit queue
+
+Audit only the source needed immediately before each task. Antigravity reports
+upstream URL, exact local commit/tag, license, runtime requirements, exact
+source file/function I/O, REUSE/ADAPT/REFERENCE/REJECT proposal, adapter
+boundary, and risks. Codex then reads the cited source and locks the task
+strategy before any implementation delegation.
+
+1. REC-01: TorWIC source structure and local `TorWICDataset` utilities;
+   FFmpeg/Open3D only for primitives actually needed by preparation. No full
+   research-repo audit for unrelated reconstruction stages.
+2. REC-02/02A: installed FFmpeg/ffprobe command behavior and the relevant
+   `video_to_gsplat.sh` reference, then project-owned probe/extraction adapters.
+3. REC-03: pinned `colmap/colmap` CLI, model format, and the relevant
+   `colmap_undistorted_sfm_export.sh` reference. Prefer external process reuse.
+4. REC-04: pinned Brush training/export entrypoint, COLMAP input support,
+   visual payload/format, license, GPU limits. Prefer external process reuse.
+5. REC-05: pinned OpenMVS COLMAP import, densify, mesh executables and their
+   output formats. Prefer external process reuse.
+6. REC-07/08/09: pinned Open3D PCD/PLY I/O, transforms, filtering and
+   registration primitives only; project owns provenance/validation/alignment.
+7. REC-06/10/11: project contracts, artifact store, and worker conventions;
+   no external source by default unless the task proves a need.
+
+System references such as Re3Sim or `video-3d-reconstruction-gsplat` do not
+become runtime dependencies by default. SAM2/object extraction, OpenUSD and
+Isaac internals belong to other tracks and are not EX-REC source-audit targets.
+
+## Delegation and validation loop
+
+For each task: audit the generated task against PRD, Integration Playbook,
+Track Implementation Guide, Team Execution Contract, Team Execution Plan and
+the applicable dataset/track authority; amend task-local detail when those
+sources expose a gap, without changing higher-level contracts → bootstrap its
+Task Capsule and status/Implementation Plan → Codex directly audits relevant
+external source and chooses adapter strategy → implement only task-owned paths
+→ inspect diff/code, run focused static/unit/contract/integration and real
+small smoke as applicable → correct failures before advancing → update task
+Result/Evidence and status → create a task-scoped commit after checking diff,
+ignored secrets and Git state. Owner stopped Antigravity delegation on
+2026-09-24; do not invoke it again for this track.
+
+## Open decisions and risks
+
+- Owner selected all 1,092 `Aisle_CW` frames as the REC-01 source sequence on
+  2026-09-24. Owner then selected deterministic temporal block split of about
+  10% after timestamp ordering and fixed-rule invalid frame exclusion, with
+  blocks across the beginning/middle/end and the frozen split at
+  `derived/Aisle_CW/benchmark_split.json`. Proposed exact valid-sequence
+  intervals are `118-153`, `528-564`, `937-972` (109 frames), selected by
+  12.5%/50%/87.5% centers. No metric has been inspected. Full source integrity
+  check and split publication remain pending. The split artifact must remain
+  evaluation-only by data class even in `derived/`.
+  `docs/PRD.md` still says Primary Demo range TBD; sync this owner decision
+  through the appropriate document-owner review, not a task-local PRD rewrite.
+- RGB metric anchor and independent test distances are not supplied. REC-06
+  cannot claim confirmed scale or complete its DoD without them.
+- Source checkout does not establish executable availability. Current COLMAP,
+  Brush, OpenMVS and Open3D runtime/build compatibility must be verified per
+  task; GPU smoke must name the actual machine and versions.
+- Existing Foundation plan still lacks observed repository-wide Python 3.11 CI
+  proof; do not import its claimed readiness into task completion.
+
+## Progress and recovery
+
+- [x] Read current harness, authority sections, track, and all 12 task files.
+- [x] Inspect current contracts/scaffold and local external checkout inventory.
+- [x] Build dependency/acceptance map and staged audit queue.
+- [x] Delegate REC-01 read-only source audit; inspect cited source and approve strategy.
+- [x] Execute and validate REC-01 with full frozen artifact; continue remaining tasks one at a time.
+- [ ] Run real REC → SCENE handoff and closure audit before track completion.
+
+At every handoff, record changed files, exact commands/results, blockers,
+decisions, and the next executable step here and in the active task file.
+
+## Validation
+
+Onboarding only: repository status, source documents, task files, contracts,
+and external checkout presence inspected. No implementation tests or runtime
+smoke have been run for EX-REC in this plan.
+
+REC-01 source audit: Antigravity inspected `TorWICDataset` at
+`5e1839f8db73dee784737c53103a4fb06a3fed1d`, then revised two inaccurate
+reports after Codex checked actual source. Codex verified `utils/data_loader.py`
+lines 18-25 use the Mapping `Scenario_<id>` layout; `utils/laser.py` lines 31-38
+produce a 2D ROS `LaserScan`; `utils/pose.py` lines 20-22 use split seconds and
+nanoseconds; `utils/calibration.py` lines 10-18 and 71-74 hardcode the old
+camera transform/intrinsics. Dataset terms are CC BY-NC 4.0 plus additional
+terms in `License/ReadMe.md`. Local SLAM calibration exists and uses both `=`
+and `:` separators; Codex caught this while checking the real file after the
+helper's final audit. Treat its "key=value" description as corrected here.
+No external source module is approved for direct reuse or adaptation in REC-01;
+the upstream README/layout is reference only. Project-owned offline file I/O
+and parsers are approved. No ROS, Open3D, or upstream utility code is approved
+as a new REC-01 dependency. Runtime FFmpeg is conditional on a demo-video step.
+
+REC-01 task audit on 2026-09-24: matched it to PRD §11, Integration Playbook
+§2.1, Track Implementation Guide §2.5, Team Execution Contract Ch.5/§3.3,
+Team Execution Plan §4.1.1 and Dataset Playbook §12–14. The generated task did
+not specify the observed flat SLAM source layout, distinct evaluation-only
+output path, resolvable offline relative refs, or the REC-01/REC-02 validation
+boundary. Those details are now explicit in the task file. First Antigravity
+implementation review failed due invented source layout and incomplete
+checksums/selection isolation; second review found source layout fixed but
+still incomplete structure checks, non-resolvable file keys, temp-dir reuse,
+and missing negative evidence. A third implementation check ran
+`.venv/bin/ruff check scripts/torwic tests/test_reconstruction` (pass),
+`.venv/bin/ruff format --check scripts/torwic tests/test_reconstruction`
+(fail: `prepare_dataset.py:376`), and focused pytest (7 pass). The real small
+manifest had valid canonical checksums but marked `benchmark_split.json` as
+`product_input`; source code also defaulted missing transform components to
+zero. Codex returned these to Antigravity; REC-01 remains IN_PROGRESS, not
+accepted. User selected all 1,092 source frames; held-out partition awaits
+answer. Next: wait for revision, inspect every changed function/test, rerun
+checks and real smoke, then lock full split and complete task gate.
+
+Later REC-01 audit checkpoint: Codex ran fresh real 4-frame smoke under
+`/tmp/ex-rec01-codex-smoke-a` and `validate_manifest_offline` succeeded; script
+SHA matched the current code. A subprocess probe with absolute dataset root
+confirmed an error-path private-root leak, then the next Antigravity revision
+removed it (same probe: `private_path_leaked=False`). The revision also made
+source timestamps exact strings and separated the source-axis hypothesis from
+the canonical target. Codex reran focused pytest (11 passed) and format (pass),
+but Ruff check failed on an unused import. AST inspection found two functions
+over the 30-line limit; the manifest validator also did not enforce
+evaluation-only class for metadata entries. Antigravity is fixing these now.
+Do not use helper-reported `/tmp/real_smoke_rec01_v2` as new evidence: its
+manifest was from a prior revision and lacked the reported script hash.
+
+REC-01 audit continuation: Codex reran Ruff check/format (pass), focused pytest
+(17 pass), AST 30-line/3-parameter check (pass), and independently validated
+the real 4-frame `/tmp/real_smoke_rec01_v6` manifest with matching script hash.
+Adversarial copies with recomputed file and canonical manifest checksums now
+reject duplicate frame entries, altered timestamps and missing mandatory
+metadata references. A further adversarial copy proved that altering
+`normalized/calibration.json` while rebinding its checksum still passed
+validation; another proved that swapping two generated `frame_id`/timestamp
+labels while preserving file paths still passed. Antigravity is correcting
+source-to-normalized semantic calibration and split provenance now; the
+frame-to-path relation remained an open validation defect at that checkpoint.
+No full 1,092-frame split has been published yet.
+
+REC-01 continuation: Antigravity revision v9 passed Codex-run Ruff check,
+format, 23 focused tests, AST 30-line/3-parameter check, and real 4-frame
+manifest validation with a matching current script hash. Codex independently
+confirmed adversarial copies now reject wrong CSV timestamp, missing or
+duplicate metadata, duplicate split ID, swapped frame labels and modified
+generated image bytes with recomputed checksums. The first two actual raw RGB
+files have identical SHA-256, so the image-byte negative proof uses frames 0
+and 2, whose bytes differ. REC-01 remains open for owner-selected full split,
+structural invalid-frame rule, requested derived split placement and broader
+contract checks.
+
+## Result
+
+Owner stopped Antigravity and requested direct Codex implementation for the
+entire EX-REC track. The last helper session was interrupted after editing
+REC-01 files. Codex verified current worktree contains only REC-01 script/test
+and task/plan records, 24 focused tests pass, Ruff check/format pass, and AST
+30-line/3-parameter check passes. This is a recovery checkpoint only; source
+audit, full 1,092-frame output and task gate are still pending. Continue by
+inspecting all current REC-01 code and tests, then run the real full split.
+
+REC-01 final gate (2026-09-24): Codex removed two silent `pass` bypasses for
+incomplete selection, introduced explicit `complete`/`sample` modes, restored
+strict range parsing/extra-frame checks, and added valid PNG, raw immutability,
+atomic refusal, private-path and adversarial tests. Direct source audit of
+`TorWICDataset` confirmed no upstream module reuse for the SLAM layout. Full
+1,092-frame preparation produced 983 normalized train images and 109 held-out
+images in three frozen temporal blocks; no structural invalid frames. Durable
+prepared output on the Elements volume was validated after copy and marked
+read-only. The source-file SHA-256 list of 1,094 files was identical before
+and after. Script SHA, manifest/split canonical and byte checksums are in
+`tasks/REC-01.md`. Focused pytest 34 passed; contract/integration pytest 96
+passed; Ruff check/format and `git diff --check` passed. REC-01 task marked
+DONE; next task is REC-02 authority/task audit and FFmpeg source/runtime audit.
+
+REC-01 complete; REC-02 through REC-11 and the cross-track closure audit
+remain. Do not report `EX-REC COMPLETE` until the closure audit observes real
+artifacts, checksums/provenance, consumer handoff, and all applicable task-level
+evidence.
