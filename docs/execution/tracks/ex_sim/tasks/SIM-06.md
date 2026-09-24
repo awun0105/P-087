@@ -60,16 +60,19 @@ Native Omniverse MP4 capture là đường chính. Frame capture → FFmpeg ch�
 fallback khi native không chạy trong locked Isaac runtime; ghi rõ lý do đổi
 đường capture và version của extension/encoder liên quan.
 
-**Code Donor Reference (Audit #3):**
+**Code Donor Reference (Audit #3 & #5):**
 - Candidate integration donor: [`zst1406217/VR-Robo`](https://github.com/zst1406217/VR-Robo) (xem chi tiết tại [`docs/execution/audits/03_vr_robo.md`](../../../audits/03_vr_robo.md)).
+- Candidate visual/physics sync reference: [`discoverse-dev/DISCOVERSE`](https://github.com/discoverse-dev/DISCOVERSE) (xem chi tiết tại [`docs/execution/audits/05_discoverse.md`](../../../audits/05_discoverse.md)).
 - Core patterns đáng adapt (**`ADAPT-HIGH`**):
   - **Runtime Execution**: Load Candidate USD (`UsdFileCfg`), spawn robot, sensor attachment, simulation stepping loop từ `vrrobo_isaaclab`.
   - **Replay Video Fallback**: Tận dụng pattern `gym.wrappers.RecordVideo` khi môi trường headless gặp vấn đề với native viewport capture.
-  - **Visual ↔ Physics Separation**: Phân tách rõ ràng process giữa physics simulation (IsaacLab) và visual preview (3DGS), đồng bộ qua camera/object world pose mà không cần ép 3DGS vào USD stage.
+  - **Visual ↔ Physics Separation & Binding**: Phân tách rõ ràng process giữa physics simulation (IsaacLab) và visual preview (3DGS). Tham chiếu mô hình `gs_model_dict` của DISCOVERSE: ánh xạ khóa ổn định `SceneObject.object_id` giữa visual asset (`visual_ref`) và physics body (`body_id`).
+  - **Remote Streaming Transport (P1 Candidate)**: Phân hệ `gaussian_web_renderer` (`ZeroMQ` + binary numpy-like payload + hardware `NVENC` H.264 stream) từ DISCOVERSE sạch hơn và an toàn hơn hẳn giao thức TCP pickle của VR-Robo.
 - **Guardrails / Anti-patterns bắt buộc:**
   - ❌ **Không dùng RPyC + pickle network**: VR-Robo dùng RPC port 18861 và pickle serialization qua raw TCP. Đây là lỗ hổng bảo mật nghiêm trọng; dự án bắt buộc dùng process-local IPC hoặc artifact-based exchange.
   - ❌ **Không copy nguyên renderer Inria**: Code renderer dính Inria non-commercial license.
   - ❌ **Không hard-code camera/axes convention**: Toàn bộ camera pose synchronization phải đi qua `CoordinateSystem` canonical contract.
+  - ❌ **Remote visual stream không thay thế ValidationReport**: Luồng stream H.264 (DISCOVERSE) chỉ chứa RGB và lược bỏ Depth; do đó nó chỉ đóng vai trò visual evidence/preview (P1), tuyệt đối không dùng để suy luận physics truth hay thay thế structured validation từ Isaac.
 
 ## 9. Implementation Plan
 

@@ -41,7 +41,8 @@ Outputs:
 - Isaac Sim/IsaacLab cho simulator runtime.
 - `PointsCoder/OpenReal2Sim`: Tier-0 Code Donor cho USD conversion, PhysX properties (`SIM-05`), collision optimization (`SIM-02`) và Docker runtime isolation (`SIM-06`) theo [Audit #1](../../audits/01_openreal2sim.md).
 - `zst1406217/VR-Robo`: Tier-0 Integration Donor cho IsaacLab scene/robot runtime (`SIM-01`, `SIM-06`), video replay fallback và visual/physics synchronization theo [Audit #3](../../audits/03_vr_robo.md).
-- Re3Sim, DISCOVERSE là architecture references.
+- `discoverse-dev/DISCOVERSE`: Tier-0 Integration Reference cho Visual ↔ Physics synchronization (`gs_model_dict`), Secondary Utility Donor cho CoACD collider decomposition (`SIM-02`), và Tier-0 P1 Code Donor cho remote GS rendering & hardware NVENC H.264 streaming theo [Audit #5](../../audits/05_discoverse.md).
+- Re3Sim là architecture reference.
 - Không tự viết lại USD core, physics engine hoặc Isaac runtime.
 
 ## Authority Gates

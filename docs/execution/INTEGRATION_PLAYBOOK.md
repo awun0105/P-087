@@ -1323,8 +1323,20 @@ Bảng phân loại chính thức tại §7.1 sẽ được cập nhật toàn d
      - `playcanvas/splat-transform`: **Tier-0 Core Utility Candidate** xuyên suốt `EX-REC` (Brush PLY validation `readFileInfo()`, stats `fillRatio`, Morton reorder), `EX-PRODUCT` (SOG / Streamed LOD) và `EX-SIM` (fallback voxel collision mesh `SIM-02`).
    - **Module trích xuất chính**: WebGPU projected splat renderer (tương thích Brush metadata), multi-layer Splats (map 1:1 sang SceneObjects), transform gizmos (Move, Rotate), camera orbit/fly, selection tools (brush, lasso, volume), Undo/Redo (`EditHistory`), streaming LOD, voxelization + Marching Cubes.
    - **Guardrails**: Cần chạy qualification spike `PRODUCT-06Q` về WebGPU trước khi đổi baseline; chuẩn hóa hệ trục PLY 180° tại adapter boundary; Master PLY là canonical immutable artifact, SOG chỉ là delivery derivative; collision từ 3DGS chỉ là fallback đối chứng, không thay OpenMVS.
-5. **Audit #5 — `DISCOVERSE` + `DISCOVERSE-Real2Sim`**: ⏳ (Kế hoạch).
-6. **Audit #6 — `lkeab/gaussian-grouping`**: ⏳ (Kế hoạch).
+5. [**Audit #5 — `discoverse-dev/DISCOVERSE` & `discoverse-dev/DISCOVERSE-Real2Sim`**](./audits/05_discoverse.md) ✅:
+   - **Định vị mới**:
+     - `DISCOVERSE`: **Tier-0 Integration Reference** cho Visual ↔ Physics synchronization; **Secondary Utility Donor** cho CoACD collider preprocessing (`SIM-02`); **Tier-0 P1 Code Donor** cho remote GS rendering & hardware NVENC H.264 video streaming.
+     - `DISCOVERSE-Real2Sim`: **P1 Asset Generation Reference** (Mesh → synthetic views → Mesh-seeded 3DGS, Lighting alignment qua DiffusionLight). Không phải primary warehouse reconstruction.
+   - **Module trích xuất chính**:
+     - `envs/simulator.py` & `gs_model_dict` pattern: binding giữa physical body name và visual 3DGS asset, update GS transforms từ physics step.
+     - `scripts/mesh2mjcf.py` CoACD portion (`coacd` + `trimesh`): convex decomposition pipeline (`CoACDColliderBackend`) cho `SIM-02`.
+     - `gaussian_web_renderer/` (`client.py`, `server.py`, `encoder_gpu.py` PyNvCodec/NVENC, `encoder_cpu.py` PyAV): transport layer ZeroMQ + H.264 video stream cho P1 live viewport.
+     - `DiffusionLight/` (MIT): HDR illumination estimation cho P1 added assets.
+   - **Guardrails**:
+     - ❌ **Không lấy MJCF generation hay physics defaults**: MuJoCo XML không dùng trong Isaac; cấm lấy default `mass = 0.001 kg` của script gốc.
+     - ❌ **Remote video stream chỉ là P1 preview**: Luồng H.264 lược bỏ depth, tuyệt đối không dùng làm validation truth thay cho Isaac `ValidationReport`.
+     - ❌ **License restrictions**: Root repo `DISCOVERSE-Real2Sim` thiếu license file; submodule `LitMesh2GS` mang Inria non-commercial license cấm dùng thương mại; cấm copy trực tiếp vào core commercializable codebase.
+6. **Audit #6 — `lkeab/gaussian-grouping`**: ⏳ (Kế hoạch — NEXT).
 7. **Audit #7 — `InternRobotics/Re3Sim`**: ⏳ (Kế hoạch).
 
 

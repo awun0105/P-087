@@ -51,15 +51,20 @@ Không sửa scene/product/reconstruction internals. Shared contract change cầ
 
 `SELF-CODE` policy using Trimesh/Open3D AABB/OBB/convex/simplification utilities.
 
-**Code Donor Reference (Audit #1 & #4a):**
+**Code Donor Reference (Audit #1, #4a & #5):**
 - [`PointsCoder/OpenReal2Sim`](https://github.com/PointsCoder/OpenReal2Sim) (chi tiết: [`docs/execution/audits/01_openreal2sim.md`](../../../audits/01_openreal2sim.md)):
   - `scenario_collision_optimization.py` (**`ADAPT-MEDIUM`**): SDF query, ground clearance, thuật toán chống lún/xuyên sàn.
   - `scenario_construction.py` (**`ADAPT-MEDIUM`**): Trimesh/Open3D AABB extraction, mesh simplification.
 - [`playcanvas/splat-transform`](https://github.com/playcanvas/splat-transform) (chi tiết: [`docs/execution/audits/04a_splat_transform.md`](../../../audits/04a_splat_transform.md)):
   - Voxelization + Marching Cubes / watertight voxel faces tạo `collision.glb` (**`ADAPT-HIGH` làm fallback**).
   - Tiện ích kho bãi: `--voxel-carve` (capsule carve khoảng không di chuyển) và `--voxel-floor-fill` (vá lỗ hổng mặt sàn).
+- [`discoverse-dev/DISCOVERSE`](https://github.com/discoverse-dev/DISCOVERSE) (chi tiết: [`docs/execution/audits/05_discoverse.md`](../../../audits/05_discoverse.md)):
+  - `scripts/mesh2mjcf.py` portion using `trimesh` + `coacd` (**`ADAPT-HIGH selective`**): CoACD convex decomposition pipeline (`CoACDColliderBackend` candidate) để xử lý các vật thể phức tạp như giá kệ kho bãi thành tập hợp convex parts.
+  - Mã hóa rõ ràng nguyên tắc: `Visual mesh` ≠ `Collision mesh` (mesh gốc dùng cho visual, các convex parts từ CoACD dùng cho collision).
 - **Guardrails:**
   - ❌ **Không thay thế OpenMVS**: Collision mesh từ 3DGS chỉ là fallback backend (`SplatVoxelColliderBackend`) hoặc baseline đối chứng khi OpenMVS mesh gặp sự cố.
+  - ❌ **Không copy default physics của DISCOVERSE**: Script gốc hardcode `mass = 0.001 kg`, `diaginertia = 2e-5`; tuyệt đối không mang default tùy tiện này vào Real2Sim. Mọi thông số vật lý phải explicit, policy-generated hoặc human-confirmed.
+  - ❌ **Không dùng MJCF generation**: DISCOVERSE tạo file XML MuJoCo; dự án chỉ lấy phần phân rã CoACD và xuất ra OpenUSD/PhysX.
   - ❌ **Không thay thế Preflight**: Mọi collider phải qua Preflight (`SIM-04`) và Isaac validation (`SIM-06`) mới được coi là hợp lệ.
 
 ## 9. Implementation Plan

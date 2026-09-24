@@ -626,14 +626,15 @@ Reference / Code Donors (Deep Audit):
 
 - `PointsCoder/OpenReal2Sim`: **Tier-0 Code Donor** cho `SIM-05` (USD conversion, MeshConverter, PhysX/RigidBody/Collision properties), `SIM-02` (collision remediation) và `SIM-06` (Docker IsaacLab isolation). Xem [`docs/execution/audits/01_openreal2sim.md`](./audits/01_openreal2sim.md).
 - `zst1406217/VR-Robo`: **Tier-0 Integration Donor** cho `SIM-01` (IsaacLab startup, USD loading), `SIM-06` (robot runtime, stepping loop, video replay fallback) và `SIM-09` (worker process isolation); Architecture reference cho Visual/Physics separation. Xem [`docs/execution/audits/03_vr_robo.md`](./audits/03_vr_robo.md).
-- Re3Sim, DISCOVERSE.
+- `discoverse-dev/DISCOVERSE`: **Tier-0 Integration Reference** cho Visual ↔ Physics synchronization (`gs_model_dict`), **Secondary Utility Donor** cho CoACD convex decomposition (`SIM-02`), và **Tier-0 P1 Code Donor** cho remote GS rendering & hardware NVENC H.264 streaming. Xem [`docs/execution/audits/05_discoverse.md`](./audits/05_discoverse.md).
+- Re3Sim.
 
 ## 4.4 Implementation Source Map
 
 | Stage | Strategy | Source | Lấy từ repo/tool | Team tự code |
 |---|---|---|---|---|
 | `SIM-01` Isaac smoke | `REUSE` platform + `ADAPT` | OpenUSD, Isaac Sim, IsaacLab + VR-Robo | USD/simulator APIs, `UsdFileCfg` scene load, environment setup | minimal USD builder + smoke script |
-| `SIM-02` Collider | `SELF-CODE` + `ADAPT` | Trimesh, Open3D + OpenReal2Sim + `playcanvas/splat-transform` (fallback) | OBB/AABB/convex utilities, ground clearance, voxel collision fallback | collider policy + `ColliderGenerator` |
+| `SIM-02` Collider | `SELF-CODE` + `ADAPT` | Trimesh, Open3D + OpenReal2Sim + DISCOVERSE (CoACD) + `playcanvas/splat-transform` (fallback) | OBB/AABB/convex utilities, CoACD decomposition, ground clearance, voxel collision fallback | collider policy + `ColliderGenerator` |
 | `SIM-02A` Collider edit validation | `SELF-CODE` | `ColliderSpec` contract | — | validate type/dimensions/local transform after edit |
 | `SIM-03` Physics enrichment | `SELF-CODE` | Scene IR contract | — | `ColliderSpec`/physics metadata on same SceneIR schema |
 | `SIM-04` Preflight | `SELF-CODE` | PRD/Integration Playbook | — | deterministic rules + report |
