@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+/*
+ * Web Studio dùng nền tối cố định: đây là công cụ xem scene 3D, và nền sáng
+ * làm sai cảm nhận về độ tương phản của point cloud/collider.
+ */
+@theme inline {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html {
+  color-scheme: dark;
+}
