@@ -170,7 +170,7 @@ Response mẫu:
 | Lâm Quang Anh Quân | `EX-REC` — Reconstruction | 2A202602467 |
 | Đức (tên đầy đủ TBD) | `EX-SCENE` — Scene/Object | Chưa cung cấp |
 | Đạt (tên đầy đủ TBD) | `EX-SIM` — Simulation/Evaluation | Chưa cung cấp |
-| Cường (tên đầy đủ TBD) | `EX-PRODUCT` — Product/Orchestration | Chưa cung cấp |
+| Lê Mạnh Cường | `EX-PRODUCT` — Product/Orchestration |2A202602604 |
 
 Track owners đã khóa tại Execution Plan; tên đầy đủ, Student ID và GitHub handles
 còn thiếu của ba thành viên sẽ được cập nhật khi họ cung cấp, không suy đoán từ
