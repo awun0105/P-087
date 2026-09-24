@@ -54,7 +54,14 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
 
 `SELF-CODE` anchor workflow và scale propagation; không dùng evaluation geometry/trajectory làm hidden product input.
 
-Giữ tool/research repo ở process/adapter boundary; không kéo toàn bộ research dependency graph vào application.
+**Code Donor Reference (Audit #7):**
+- [`InternRobotics/Re3Sim`](https://github.com/InternRobotics/Re3Sim) (chi tiết: [`docs/execution/audits/07_re3sim.md`](../../../audits/07_re3sim.md)):
+  - Tham khảo `re3sim/utils/frame_tools.py`: Kiến trúc `FrameTools` quản lý frame graph, tách bạch scale (tính từ ma trận determinant), rotation và translation để chuyển đổi giữa các hệ tọa độ.
+  - Thuật toán `get_transform_between_two_frames()` (`compute_transform_to_marker_aruco.py`): Ước tính similarity transform $p_B = s R p_A + t$ giữa hai tập trajectories.
+  - Đóng góp cho `MetricCanonicalizer` và qualification spike **`REC-QUAL-FRAME-01`**: Chứng minh Brush Visual, OpenMVS Geometry và Registered LiDAR sau chuẩn hóa đều có chung gốc tọa độ, hệ trục canonical và tỷ lệ mét ($1.0 = 1\text{m}$).
+- **Guardrails / Anti-patterns bắt buộc:**
+  - ❌ **Không phụ thuộc ChArUco marker**: Re3Sim dùng marker vật lý để lấy metric ground-truth. Real2Sim Studio tại kho bãi TorWIC dựa trên LiDAR và calibration camera/sensor có sẵn.
+  - ❌ **Scale phải là $1.0 = 1\text{m}$**: Mọi metric transform phải được kiểm định sai số $< 2\text{cm}$ trước khi công bố `ReconstructionBundle`.
 
 ## 9. Implementation Plan
 

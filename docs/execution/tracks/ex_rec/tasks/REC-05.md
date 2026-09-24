@@ -53,7 +53,17 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
 
 `REUSE` OpenMVS import/densify/mesh; team viết adapter và output normalization, không viết lại MVS.
 
-Giữ tool/research repo ở process/adapter boundary; không kéo toàn bộ research dependency graph vào application.
+**Code Donor Reference (Audit #7):**
+- [`InternRobotics/Re3Sim`](https://github.com/InternRobotics/Re3Sim) (chi tiết: [`docs/execution/audits/07_re3sim.md`](../../../audits/07_re3sim.md)):
+  - Tham khảo `re3sim/scripts/reconstruct.py` chuỗi lệnh điều phối OpenMVS chuẩn:
+    1. `InterfaceCOLMAP` (import SfM scene)
+    2. `DensifyPointCloud` (tạo mây điểm dày đặc)
+    3. `ReconstructMesh scene_dense.mvs -p scene_dense.ply` (dựng lưới đa giác)
+    4. `RefineMesh scene_dense.mvs -m scene_dense_mesh.ply -o scene_dense_mesh_refine.mvs --scales 1 --max-face-area 16` (tối ưu hóa surface)
+    5. `TextureMesh` (tùy chọn sinh textured mesh cho visualization/debug)
+- **Guardrails / Anti-patterns bắt buộc:**
+  - ❌ **Không nuốt lỗi subprocess**: Bắt buộc kiểm tra `check=True`, bắt return code và log chi tiết từng công đoạn OpenMVS.
+  - ❌ **Timeout & Checksum**: Mọi artifact mesh trung gian và mesh cuối phải được bọc trong typed config, timeout và hash SHA-256.
 
 ## 9. Implementation Plan
 

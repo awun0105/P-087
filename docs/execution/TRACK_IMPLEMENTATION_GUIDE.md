@@ -118,11 +118,11 @@ Primary:
 - OpenMVS
 - Open3D
 - `playcanvas/splat-transform`: Core utility cho 3DGS artifact validation (`readFileInfo`), stats (`fillRatio`), Morton reorder và SOG packaging. Xem [`docs/execution/audits/04a_splat_transform.md`](./audits/04a_splat_transform.md).
+- `InternRobotics/Re3Sim`: **Tier-0 System Architecture Reference & Code Donor** cho PyCOLMAP orchestration (`REC-03`), OpenMVS command pipeline (`REC-05`) và FrameTools / similarity transform (`REC-06`). Xem [`docs/execution/audits/07_re3sim.md`](./audits/07_re3sim.md).
 
 Run-first/reference theo Integration Playbook:
 
 - OpenReal2Sim
-- Re3Sim
 - VR-Robo
 - R2G
 - video-3d-reconstruction-gsplat
@@ -142,10 +142,10 @@ Không nghiên cứu vô hạn.
 | `REC-01` TorWIC preparation | `SELF-CODE` | Dataset Playbook + Open3D/FFmpeg | IO/transform/encode primitives | normalizer, split/preparation scripts, manifests |
 | `REC-02` Input validation + privacy gate | `SELF-CODE` | FFmpeg + PRD rules | decode/probe | input rules, privacy gate, errors, report |
 | `REC-02A` Frame extraction | `REUSE` + adapter | FFmpeg | deterministic frame decode/extraction | command builder, normalized frame artifact, provenance |
-| `REC-03` Camera pose | `REUSE` | `colmap/colmap` | feature extraction, matching, mapper/SfM | `ColmapAdapter`, model selection, pose normalization |
+| `REC-03` Camera pose | `REUSE` + `ADAPT` | `colmap/colmap` + `Re3Sim` | feature extraction, matching, mapper/SfM, sequential vocab tree | `ColmapAdapter`, model selection, pose normalization |
 | `REC-04` Visual reconstruction | `REUSE` + utility | `ArthurBrussee/brush` + `playcanvas/splat-transform` | 3DGS reconstruction/training, artifact validation, SOG packaging | `BrushAdapter`, `SplatArtifactProcessor`, config, provenance |
-| `REC-05` RGB geometry | `REUSE` | `cdcseacave/openMVS` | COLMAP import, densify, mesh | `OpenMVSAdapter`, output normalization |
-| `REC-06` Metric scale | `SELF-CODE` | PRD | — | anchor workflow, scale propagation, confirmation record |
+| `REC-05` RGB geometry | `REUSE` + `ADAPT` | `cdcseacave/openMVS` + `Re3Sim` | COLMAP import, densify, mesh, refine command orchestration | `OpenMVSAdapter`, output normalization, timeout/checksum |
+| `REC-06` Metric scale | `SELF-CODE` + `ADAPT` | PRD + `Re3Sim` FrameTools concept | frame graph, similarity transform estimation | anchor workflow, scale propagation, confirmation record |
 | `REC-07` LiDAR prefusion | `SELF-CODE` + library | Open3D | transform/filter/voxel primitives | TorWIC prefusion + GT-dependency provenance |
 | `REC-08` LiDAR ingest | `SELF-CODE` + library | Open3D | point-cloud validation/filtering | `LiDARGeometryArtifact` producer |
 | `REC-09` RGB–LiDAR alignment | `SELF-CODE` + library | Open3D + calibration/known transform | transform/registration primitives | alignment flow + transform provenance |
@@ -628,18 +628,18 @@ Reference / Code Donors (Deep Audit):
 - `PointsCoder/OpenReal2Sim`: **Tier-0 Code Donor** cho `SIM-05` (USD conversion, MeshConverter, PhysX/RigidBody/Collision properties), `SIM-02` (collision remediation) và `SIM-06` (Docker IsaacLab isolation). Xem [`docs/execution/audits/01_openreal2sim.md`](./audits/01_openreal2sim.md).
 - `zst1406217/VR-Robo`: **Tier-0 Integration Donor** cho `SIM-01` (IsaacLab startup, USD loading), `SIM-06` (robot runtime, stepping loop, video replay fallback) và `SIM-09` (worker process isolation); Architecture reference cho Visual/Physics separation. Xem [`docs/execution/audits/03_vr_robo.md`](./audits/03_vr_robo.md).
 - `discoverse-dev/DISCOVERSE`: **Tier-0 Integration Reference** cho Visual ↔ Physics synchronization (`gs_model_dict`), **Secondary Utility Donor** cho CoACD convex decomposition (`SIM-02`), và **Tier-0 P1 Code Donor** cho remote GS rendering & hardware NVENC H.264 streaming. Xem [`docs/execution/audits/05_discoverse.md`](./audits/05_discoverse.md).
-- Re3Sim.
+- `InternRobotics/Re3Sim`: **Tier-0 System Architecture Reference & Code Donor** cho IsaacLab `MeshConverterCfg`, stage units normalization (`metersPerUnit=1.0`), collision approximation selection (`SIM-02`, `SIM-05`), và P1 hybrid rendering. Xem [`docs/execution/audits/07_re3sim.md`](./audits/07_re3sim.md).
 
 ## 4.4 Implementation Source Map
 
 | Stage | Strategy | Source | Lấy từ repo/tool | Team tự code |
 |---|---|---|---|---|
 | `SIM-01` Isaac smoke | `REUSE` platform + `ADAPT` | OpenUSD, Isaac Sim, IsaacLab + VR-Robo | USD/simulator APIs, `UsdFileCfg` scene load, environment setup | minimal USD builder + smoke script |
-| `SIM-02` Collider | `SELF-CODE` + `ADAPT` | Trimesh, Open3D + OpenReal2Sim + DISCOVERSE (CoACD) + `playcanvas/splat-transform` (fallback) | OBB/AABB/convex utilities, CoACD decomposition, ground clearance, voxel collision fallback | collider policy + `ColliderGenerator` |
+| `SIM-02` Collider | `SELF-CODE` + `ADAPT` | Trimesh, Open3D + OpenReal2Sim + DISCOVERSE (CoACD) + Re3Sim + `splat-transform` (fallback) | OBB/AABB/convex utilities, CoACD decomposition, MeshConverterCfg, ground clearance, voxel collision fallback | collider policy + `ColliderGenerator` |
 | `SIM-02A` Collider edit validation | `SELF-CODE` | `ColliderSpec` contract | — | validate type/dimensions/local transform after edit |
 | `SIM-03` Physics enrichment | `SELF-CODE` | Scene IR contract | — | `ColliderSpec`/physics metadata on same SceneIR schema |
 | `SIM-04` Preflight | `SELF-CODE` | PRD/Integration Playbook | — | deterministic rules + report |
-| `SIM-05` Candidate build | `SELF-CODE` + `ADAPT` | OpenUSD + OpenReal2Sim `usd_conversion.py` | USD scene APIs, MeshConverter, PhysX configs | SceneIR→USD translation, packaging, checksum |
+| `SIM-05` Candidate build | `SELF-CODE` + `ADAPT` | OpenUSD + OpenReal2Sim `usd_conversion.py` + Re3Sim `obj_to_usd.py` | USD scene APIs, MeshConverter, PhysX configs, stage units | SceneIR→USD translation, packaging, checksum |
 | `SIM-06` Isaac validation | `SELF-CODE` + `ADAPT` | Isaac Sim, IsaacLab + OpenReal2Sim + VR-Robo | load/physics/runtime APIs, robot stepping, `RecordVideo` fallback | spawn/collision/path validation worker |
 | `SIM-07` ValidationReport | `SELF-CODE` | shared contract | — | candidate-bound structured report |
 | `SIM-08` Evaluation | `SELF-CODE` | Dataset Playbook | protocols/metric definitions | evaluator orchestration + reports |

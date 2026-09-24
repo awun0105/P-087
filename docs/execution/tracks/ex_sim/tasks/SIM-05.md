@@ -54,7 +54,7 @@ Không sửa scene/product/reconstruction internals. Shared contract change cầ
 
 `SELF-CODE` adapter using OpenUSD APIs; do not mutate package after checksum.
 
-**Code Donor Reference (Audit #1):**
+**Code Donor Reference (Audit #1 & #7):**
 - Candidate code donor: [`PointsCoder/OpenReal2Sim`](https://github.com/PointsCoder/OpenReal2Sim) (xem chi tiết tại [`docs/execution/audits/01_openreal2sim.md`](../../../audits/01_openreal2sim.md)).
 - File tham khảo: `openreal2sim/simulation/isaaclab/sim_preprocess/usd_conversion.py` (**`ADAPT-HIGH`**).
 - Code/patterns đáng port sang `IsaacUsdAdapter` / `CandidateBuilder`:
@@ -62,10 +62,15 @@ Không sửa scene/product/reconstruction internals. Shared contract change cầ
   - Cấu hình PhysX: `UsdPhysics`, `PhysxSchema`, `RigidBody`, `CollisionAPI`
   - Thiết lập properties: `MassPropertiesCfg`, `RigidBodyPropertiesCfg`, `CollisionPropertiesCfg`
   - Convex decomposition, CCD configuration và USD stage post-processing
+- Candidate architecture donor: [`InternRobotics/Re3Sim`](https://github.com/InternRobotics/Re3Sim) (xem chi tiết tại [`docs/execution/audits/07_re3sim.md`](../../../audits/07_re3sim.md)):
+  - File tham khảo: `re3sim/utils/usd/obj_to_usd.py` (**`ADAPT-HIGH`**).
+  - Chuẩn hóa stage units: `metersPerUnit = 1.0`, `kilogramsPerUnit = 1.0`, `Z-up`.
+  - Cấu hình `CollisionPropertiesCfg(collision_enabled=True)`.
 - **Guardrails / Anti-patterns bắt buộc:**
   - ❌ **Headless Enforcement**: Script gốc ép `args_isaaclab.headless = False`. Phải xóa bỏ và enforce headless mode cho worker/container.
   - ❌ **No `scene.pkl`**: Tuyệt đối không nhận state model bằng pickle/dictionary; nguồn dữ liệu duy nhất là canonical `SceneIR` JSON.
   - ❌ **No uncalibrated PhysX defaults**: Các thông số PhysX (contact offset, voxel resolution, số hull) phải được calibrate cho warehouse scene, không lấy nguyên mặc định của OpenReal2Sim.
+  - ❌ **Sửa lỗi CLI flag của Re3Sim**: Chú ý script gốc của Re3Sim dùng sai flag `--collision_approximation` (gạch dưới) thay vì `--collision-approximation` (gạch ngang).
 
 ## 9. Implementation Plan
 

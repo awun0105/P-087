@@ -42,6 +42,7 @@ Outputs:
 
 - FFmpeg, COLMAP, Brush, OpenMVS, Open3D, NumPy.
 - `playcanvas/splat-transform`: Core utility cho 3DGS artifact validation (`readFileInfo`), stats (`fillRatio`), Morton reorder và SOG packaging theo [Audit #4a](../../audits/04a_splat_transform.md).
+- `InternRobotics/Re3Sim`: Tier-0 System Architecture Reference & Code Donor cho PyCOLMAP orchestration (`REC-03`), OpenMVS command pipeline (`REC-05`) và FrameTools / similarity transform (`REC-06`) theo [Audit #7](../../audits/07_re3sim.md).
 - Reuse core reconstruction tools qua adapter/process boundary.
 - Team sở hữu validation, normalization, artifact publication, metric/alignment và provenance.
 - Không tự viết lại SfM, 3DGS trainer, dense MVS hoặc generic point-cloud primitives.
