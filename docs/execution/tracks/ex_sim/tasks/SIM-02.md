@@ -51,13 +51,16 @@ Không sửa scene/product/reconstruction internals. Shared contract change cầ
 
 `SELF-CODE` policy using Trimesh/Open3D AABB/OBB/convex/simplification utilities.
 
-**Code Donor Reference (Audit #1):**
-- Candidate reference: [`PointsCoder/OpenReal2Sim`](https://github.com/PointsCoder/OpenReal2Sim) (xem chi tiết tại [`docs/execution/audits/01_openreal2sim.md`](../../../audits/01_openreal2sim.md)).
-- File tham khảo:
-  - `reconstruction/modules/scenario_collision_optimization.py` (**`ADAPT-MEDIUM`**): SDF query, ground clearance, thuật toán phát hiện/đẩy vật thể chống penetration với sàn/nền.
-  - `reconstruction/modules/scenario_construction.py` (**`ADAPT-MEDIUM`**): Trimesh/Open3D AABB extraction, mesh simplification trước khi tính toán collider.
+**Code Donor Reference (Audit #1 & #4a):**
+- [`PointsCoder/OpenReal2Sim`](https://github.com/PointsCoder/OpenReal2Sim) (chi tiết: [`docs/execution/audits/01_openreal2sim.md`](../../../audits/01_openreal2sim.md)):
+  - `scenario_collision_optimization.py` (**`ADAPT-MEDIUM`**): SDF query, ground clearance, thuật toán chống lún/xuyên sàn.
+  - `scenario_construction.py` (**`ADAPT-MEDIUM`**): Trimesh/Open3D AABB extraction, mesh simplification.
+- [`playcanvas/splat-transform`](https://github.com/playcanvas/splat-transform) (chi tiết: [`docs/execution/audits/04a_splat_transform.md`](../../../audits/04a_splat_transform.md)):
+  - Voxelization + Marching Cubes / watertight voxel faces tạo `collision.glb` (**`ADAPT-HIGH` làm fallback**).
+  - Tiện ích kho bãi: `--voxel-carve` (capsule carve khoảng không di chuyển) và `--voxel-floor-fill` (vá lỗ hổng mặt sàn).
 - **Guardrails:**
-  - ❌ **Không thay thế Preflight**: Logic remediation chỉ là tiện ích dọn dẹp trước Candidate Build; Preflight (`SIM-04`) và Isaac validation (`SIM-06`) mới là thẩm quyền quyết định PASS/FAIL cuối cùng.
+  - ❌ **Không thay thế OpenMVS**: Collision mesh từ 3DGS chỉ là fallback backend (`SplatVoxelColliderBackend`) hoặc baseline đối chứng khi OpenMVS mesh gặp sự cố.
+  - ❌ **Không thay thế Preflight**: Mọi collider phải qua Preflight (`SIM-04`) và Isaac validation (`SIM-06`) mới được coi là hợp lệ.
 
 ## 9. Implementation Plan
 

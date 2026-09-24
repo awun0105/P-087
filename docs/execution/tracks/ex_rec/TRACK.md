@@ -41,6 +41,7 @@ Outputs:
 ## Technology And Strategy
 
 - FFmpeg, COLMAP, Brush, OpenMVS, Open3D, NumPy.
+- `playcanvas/splat-transform`: Core utility cho 3DGS artifact validation (`readFileInfo`), stats (`fillRatio`), Morton reorder và SOG packaging theo [Audit #4a](../../audits/04a_splat_transform.md).
 - Reuse core reconstruction tools qua adapter/process boundary.
 - Team sở hữu validation, normalization, artifact publication, metric/alignment và provenance.
 - Không tự viết lại SfM, 3DGS trainer, dense MVS hoặc generic point-cloud primitives.

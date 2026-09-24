@@ -117,6 +117,7 @@ Primary:
 - Brush
 - OpenMVS
 - Open3D
+- `playcanvas/splat-transform`: Core utility cho 3DGS artifact validation (`readFileInfo`), stats (`fillRatio`), Morton reorder và SOG packaging. Xem [`docs/execution/audits/04a_splat_transform.md`](./audits/04a_splat_transform.md).
 
 Run-first/reference theo Integration Playbook:
 
@@ -142,7 +143,7 @@ Không nghiên cứu vô hạn.
 | `REC-02` Input validation + privacy gate | `SELF-CODE` | FFmpeg + PRD rules | decode/probe | input rules, privacy gate, errors, report |
 | `REC-02A` Frame extraction | `REUSE` + adapter | FFmpeg | deterministic frame decode/extraction | command builder, normalized frame artifact, provenance |
 | `REC-03` Camera pose | `REUSE` | `colmap/colmap` | feature extraction, matching, mapper/SfM | `ColmapAdapter`, model selection, pose normalization |
-| `REC-04` Visual reconstruction | `REUSE` | `ArthurBrussee/brush` | 3DGS reconstruction/training, Gaussian output | `BrushAdapter`, config, COLMAP bridge, provenance |
+| `REC-04` Visual reconstruction | `REUSE` + utility | `ArthurBrussee/brush` + `playcanvas/splat-transform` | 3DGS reconstruction/training, artifact validation, SOG packaging | `BrushAdapter`, `SplatArtifactProcessor`, config, provenance |
 | `REC-05` RGB geometry | `REUSE` | `cdcseacave/openMVS` | COLMAP import, densify, mesh | `OpenMVSAdapter`, output normalization |
 | `REC-06` Metric scale | `SELF-CODE` | PRD | — | anchor workflow, scale propagation, confirmation record |
 | `REC-07` LiDAR prefusion | `SELF-CODE` + library | Open3D | transform/filter/voxel primitives | TorWIC prefusion + GT-dependency provenance |
@@ -632,7 +633,7 @@ Reference / Code Donors (Deep Audit):
 | Stage | Strategy | Source | Lấy từ repo/tool | Team tự code |
 |---|---|---|---|---|
 | `SIM-01` Isaac smoke | `REUSE` platform + `ADAPT` | OpenUSD, Isaac Sim, IsaacLab + VR-Robo | USD/simulator APIs, `UsdFileCfg` scene load, environment setup | minimal USD builder + smoke script |
-| `SIM-02` Collider | `SELF-CODE` + `ADAPT` | Trimesh, Open3D + OpenReal2Sim `scenario_collision_optimization` | OBB/AABB/convex utilities, ground clearance | collider policy + `ColliderGenerator` |
+| `SIM-02` Collider | `SELF-CODE` + `ADAPT` | Trimesh, Open3D + OpenReal2Sim + `playcanvas/splat-transform` (fallback) | OBB/AABB/convex utilities, ground clearance, voxel collision fallback | collider policy + `ColliderGenerator` |
 | `SIM-02A` Collider edit validation | `SELF-CODE` | `ColliderSpec` contract | — | validate type/dimensions/local transform after edit |
 | `SIM-03` Physics enrichment | `SELF-CODE` | Scene IR contract | — | `ColliderSpec`/physics metadata on same SceneIR schema |
 | `SIM-04` Preflight | `SELF-CODE` | PRD/Integration Playbook | — | deterministic rules + report |
