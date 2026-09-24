@@ -1068,6 +1068,20 @@ stateDiagram-v2
     APPROVED --> RELEASED
     RELEASED --> [*]
 ```
+- **HITL #1 — Scene correction:** Editor dùng Web Studio để
+  confirm/ignore/merge/create/reassign candidate object trước Scene Decomposition;
+  sau khi EX-SCENE tạo Draft SceneIR, Editor chỉnh transform, thêm hoặc xóa
+  obstacle, kiểm tra Geometry/Collider. `Save Draft` persist revision qua backend;
+  `Submit for Validation` ghi nhận revision được gửi, kích hoạt collider/physics
+  enrichment thành SceneIR revision cùng schema và preflight. Candidate manifest
+  bind chính xác `scene_revision` và `scene_ir_checksum` của physics-enriched
+  revision được build.
+- **HITL #2 — Final review:** chỉ sau khi EX-SIM đã build candidate, Isaac Sim
+  validation và các blocking checks applicable `PASS`, Product mới đặt
+  `READY_FOR_REVIEW`. Reviewer xem scene, report, replay, screenshots, logs và
+  warnings (kể cả capture failure) rồi `APPROVE` hoặc `REJECT` kèm lý do.
+  Không dùng `CANDIDATE` như một review state mới; state chính thức là
+  `CANDIDATE_READY`.
 - **Invariant sống còn:** File giả lập (Candidate OpenUSD) phải được sinh ra và chạy test *trước* khi Human Review. Nếu con người duyệt (APPROVED), hệ thống chỉ việc "đóng mộc" (Seal) đúng cái file USD + Checksum đó thành bản RELEASED. **Tuyệt đối không được chạy lại script sinh file USD sau khi đã duyệt.**
 - Nhánh `REJECTED` bắt buộc lưu rejection reason, không được chuyển thẳng sang `RELEASED`, và chỉ quay lại `DRAFT` qua một revision mới.
 - Nếu bản RELEASED bị user lôi ra edit lại, hệ thống phải tự động tạo version mới (`v1.1`) và quay về trạng thái `DRAFT`.
@@ -1121,6 +1135,46 @@ isaac_validation_report.json
 └── candidate_checksum: <exact tested candidate>
 ```
 
+Worker publish report và review media/logs như các artifact của validation run,
+không thêm chúng vào immutable CandidatePackage sau khi tính checksum. Các
+`checks[]`/`path_results[]` trong report trỏ tới replay, screenshots hoặc logs
+liên quan bằng `evidence_refs[]`; artifact resolver kiểm tra refs/checksums trước
+khi Web App hiển thị. `ValidationReport` là nguồn kết quả machine-readable;
+replay/screenshot giúp reviewer quan sát, còn logs giúp truy lỗi. Không dùng
+video hoặc screenshot để thay PASS/FAIL hay `CLEAR | BLOCKED | ERROR` trong report.
+
+Đường capture chính là API native của Omniverse Kit
+[`omni.kit.capture.viewport`](https://docs.omniverse.nvidia.com/kit/docs/omni.kit.capture.viewport/1.8.3/USAGE_PYTHON.html)
+với output `.mp4`; tài liệu NVIDIA yêu cầu extension `omni.videoencoding` cho
+MP4. Đây là capability tham khảo, **chưa phải bằng chứng** extension/camera/
+encoder hoạt động trong phiên bản Isaac, GPU và headless configuration mà team
+khóa. SIM-01 smoke vài giây trên minimal USD, xác nhận MP4 đọc được và ghi
+extension/runtime versions. SIM-06 dùng native capture cho real candidate.
+Chỉ khi native capture không hoạt động trong runtime đó mới thử Isaac frame
+capture → FFmpeg → MP4. Không mặc định thêm FFmpeg vào runtime/dependency graph.
+
+Capture hoặc publish replay lỗi không được sửa observed checks/path results hay
+`ValidationReport.overall_result`; báo riêng tình trạng evidence ở worker/artifact
+publication và Web review, không phát minh field mới trong report. Run ordinary
+vẫn theo blocking validation/review rules applicable; Primary Demo phải có replay
+và screenshots resolvable trước khi claim acceptance end-to-end. Chỉ coi media
+capture là blocker P0 khi cả native và fallback đều không khả thi trong locked
+runtime; fixture/local implementation vẫn được tiếp tục độc lập.
+
+```text
+CandidatePackage (immutable)
+├── candidate_manifest.json  # scene_revision + scene_ir_checksum
+├── entrypoint_usd           # tên file vật lý do package khai báo
+├── assets/ geometry/ colliders/
+└── candidate_checksum
+
+Validation run artifacts (separate published refs)
+├── ValidationReport          # candidate_checksum + checks/path evidence_refs[]
+├── replay MP4                 # tên file vật lý không phải identity của artifact
+├── screenshots
+└── logs
+```
+
 ## 6.4 Reconstruction & Geometry Evaluation
 (`EV-VISUAL`, `EV-GEOMETRY`, `EV-POSE`, `EV-OBJECT`, `EV-PATH`)
 
@@ -1153,8 +1207,21 @@ Review Evidence Bundle
 ├── Candidate Package
 ├── Isaac Validation Report
 ├── Preflight Report
+├── Simulation replay + screenshots + logs  # validation-run evidence refs
 └── Evaluation Report?       # optional / benchmark-dependent
 ```
+
+Web review view phải resolve đúng candidate/report checksum rồi hiển thị scene
+3D, validation summary, replay, screenshots, logs và cảnh báo khi evidence thiếu.
+PRODUCT-04 nên smoke sớm với MP4 fixture qua `artifact://` → resolver → FastAPI
+(`video/mp4`) → browser playback; Range request có thể bổ sung khi playback thực
+cần, không phải điều kiện để bắt đầu smoke. Nếu reviewer reject, giữ
+candidate/report cũ bất biến; Editor tạo SceneIR revision mới, build
+candidate mới và validation lại. Nếu approve, `ApprovalRecord` bind đúng
+`candidate_checksum` + `validation_report_checksum` theo contract mục 3.10.1;
+release seal cùng candidate đó, không rebuild. `EvaluationReport` chỉ bắt buộc
+cho locked acceptance/benchmark theo contract; ordinary release không cần
+independent ground truth.
 
 Sau khi nhấn Approve, hệ thống phải tạo `ApprovalRecord`, rồi sinh bản ghi niêm phong theo normative schema tại [`TEAM_EXECUTION_CONTRACT.md`](./TEAM_EXECUTION_CONTRACT.md) mục 3.10.1–3.11:
 ```text

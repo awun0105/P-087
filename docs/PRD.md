@@ -7,14 +7,14 @@
 | Mã dự án | RAV-01 |
 | Tên sản phẩm | Real2Sim Studio |
 | Phạm vi bản phát hành | Warehouse MVP |
-| Phiên bản tài liệu | v1.12 |
+| Phiên bản tài liệu | v1.13 |
 | Trạng thái | Foundation Baseline; benchmark/runtime acceptance inputs pending |
-| Ngày cập nhật | 23/09/2026 |
+| Ngày cập nhật | 24/09/2026 |
 | Thời gian thực hiện dự kiến | 4 tuần |
 | Người dùng chính | Kỹ sư mô phỏng (Simulation Engineer) |
 | Miền ứng dụng | Kho trong nhà, robot di động tự hành (Indoor Warehouse AMR) |
 | Trình mô phỏng mục tiêu | NVIDIA Isaac Sim |
-| Tài liệu tiền nhiệm | PRD v1.11 |
+| Tài liệu tiền nhiệm | PRD v1.12 |
 | Tài liệu liên quan | [BRIEF](./BRIEF.md), [DATASET_PLAYBOOK](./DATASET_PLAYBOOK.md), [WIREFRAME](./WIREFRAME_AND_UI_FLOW.md), [Execution Contract](./execution/TEAM_EXECUTION_CONTRACT.md), [Execution Plan](./execution/TEAM_EXECUTION_PLAN.md), [Track Guide](./execution/TRACK_IMPLEMENTATION_GUIDE.md), [Integration Playbook](./execution/INTEGRATION_PLAYBOOK.md) |
 
 ### 0.1 Lịch sử thay đổi (Change Log)
@@ -29,6 +29,7 @@
 | v1.10 | 23/09/2026 | Khóa direct browser rendering của real 3DGS VisualArtifact là P0; renderer backend có thể dùng WebGL/WebGL2 hoặc WebGPU, còn mesh/point-cloud preview chỉ là development/recovery fallback |
 | v1.11 | 23/09/2026 | Foundation override: P0 viewer dùng Next.js + Three.js + WebGL/WebGL2 cho geometry/point-cloud/collider/transforms; direct Gaussian browser rendering chuyển thành stretch/non-blocking; khóa owners và TorWIC bring-up archive |
 | v1.12 | 23/09/2026 | Product decision: khôi phục direct browser rendering của real 3DGS `VisualArtifact` thành yêu cầu P0; mesh, point cloud và collider là các view kỹ thuật ngang hàng, không phải fallback. Giữ Next.js + Three.js/WebGL2 baseline; renderer cụ thể phải qualification bằng output producer thật. |
+| v1.13 | 24/09/2026 | Làm rõ hai điểm HITL, Save Draft/Submit for Validation, candidate bất biến và validation evidence (report, replay, screenshots, logs) trước final review. Lỗi capture replay không đổi kết quả validation; Primary Demo vẫn phải có replay để đạt acceptance. |
 
 ### 0.2 Chủ sở hữu và người phê duyệt (Owners and Approvers)
 
@@ -421,6 +422,17 @@ Raw LiDAR scan sequences, LiDAR odometry và LiDAR SLAM vẫn nằm ngoài Input
 
 ### 6.1 Luồng thành công chính (Primary Happy Path)
 
+Luồng P0 có **hai điểm Human-in-the-Loop**. HITL #1 là Editor xác nhận và sửa
+scene; `Submit for Validation` chỉ xác nhận revision sẵn sàng để kiểm tra, không
+phải approval phát hành. HITL #2 là Reviewer quyết định cuối cùng trên đúng
+candidate đã được validation. Primary release path bắt đầu bằng moving-camera
+RGB; registered/fused LiDAR trên cùng scene/traversal là nhánh contribution
+evidence theo mục 4.2.
+
+HITL #1 bắt đầu bằng xác nhận candidate object trước Scene Decomposition, rồi
+tiếp tục chỉnh Draft SceneIR sau khi phân rã; đó là một lượt chuẩn bị scene,
+không phải hai approval gates.
+
 1. Editor tạo một dự án scene mới.
 2. Editor tải video RGB lên và chọn cấu hình xử lý.
 3. Hệ thống chạy kiểm tra trước xử lý (pre-flight validation).
@@ -432,14 +444,51 @@ Raw LiDAR scan sequences, LiDAR odometry và LiDAR SLAM vẫn nằm ngoài Input
 9. Scene Decomposition: Hệ thống phân rã thành Environment và Independent SceneObjects.
 10. Hệ thống tạo collider; Editor xem và điều chỉnh khi cần.
 11. Editor Add / Move / Rotate / Delete SceneObject để tạo layout revision cần kiểm thử.
-12. Hệ thống cập nhật Scene IR cho revision hiện tại.
+12. Hệ thống cập nhật SceneIR revision hiện tại. `Save Draft` lưu revision để tiếp
+    tục sửa; nó không tạo candidate hoặc khởi chạy Isaac Sim.
 13. Editor chọn robot footprint và các cặp Start–Goal cần kiểm tra.
-14. Hệ thống tạo candidate OpenUSD và manifest ứng viên từ revision hiện tại.
-15. Hệ thống tải candidate vào Isaac Sim và chạy deterministic validation.
+14. Editor chọn `Submit for Validation`. Hệ thống ghi nhận revision/checksum đã
+    gửi, hoàn tất collider/physics thành SceneIR revision cùng schema, rồi chạy
+    static preflight. Chỉ khi preflight đạt mới build candidate OpenUSD bất biến;
+    manifest bind revision/checksum của SceneIR được build thực tế.
+15. EX-SIM tự động tải đúng candidate đó vào Isaac Sim và chạy deterministic
+    validation; phát hành `ValidationReport` có cấu trúc, đồng thời tạo replay
+    MP4, screenshots và logs của đúng validation run. Nếu capture lỗi, ghi rõ
+    evidence unavailable mà không sửa kết quả validation đã quan sát.
 16. Candidate đạt các validation bắt buộc được chuyển sang `READY_FOR_REVIEW`.
-17. Reviewer xem input, metric, geometry, collider, cảnh báo, candidate package và kết quả validation.
+17. Reviewer xem input, metric, geometry, collider, cảnh báo, candidate package,
+    `ValidationReport`, replay MP4, screenshots và logs trên Web App; evidence
+    thiếu được hiển thị thành warning/error riêng.
 18. Reviewer duyệt scene hoặc từ chối kèm lý do.
 19. Khi được duyệt, hệ thống đóng dấu chính candidate đã kiểm tra thành bản phát hành bất biến, lưu checksum, manifest và báo cáo validation.
+
+```mermaid
+flowchart TD
+    RGB[Moving-camera RGB] --> REC[EX-REC: ReconstructionBundle]
+    REC --> OBJECTS[EX-SCENE: candidate object identities]
+    OBJECTS --> CONFIRM[HITL #1: Editor xác nhận object]
+    CONFIRM --> SCENE[EX-SCENE: Draft SceneIR]
+    SCENE --> EDIT[HITL #1: Editor sửa scene / kiểm tra collider]
+    EDIT -->|Save Draft| EDIT
+    EDIT -->|Submit for Validation| REV[SceneIR revision được gửi]
+    REV --> PREF[EX-SIM: physics-enriched SceneIR + preflight]
+    PREF -->|PASS| CAND[Immutable CandidatePackage: OpenUSD + checksum]
+    CAND --> ISAAC[Isaac Sim validation]
+    ISAAC --> REPORT[ValidationReport: kết quả quan sát]
+    ISAAC --> MEDIA[Replay MP4 + screenshots + logs hoặc cảnh báo capture]
+    REPORT -->|Blocking checks PASS| REVIEW[READY_FOR_REVIEW: HITL #2 Reviewer]
+    MEDIA --> REVIEW
+    REVIEW -->|APPROVE| APPROVED[APPROVED + ApprovalRecord]
+    APPROVED --> RELEASE[ReleaseManifest + RELEASED]
+    REVIEW -->|REJECT + reason| REJECTED[REJECTED]
+    REJECTED --> NEW[Revision DRAFT mới]
+    NEW --> EDIT
+```
+
+`CandidatePackage` là artifact bất biến, không phải state `CANDIDATE` mới.
+`ValidationReport` và media/logs là artifact của validation run, ở ngoài
+CandidatePackage; các check/path evidence refs thuộc report đã bind checksum candidate.
+`READY_FOR_REVIEW` chỉ được đặt khi các blocking checks applicable đều `PASS`.
 
 ### 6.2 Luồng từ chối và sửa lại (Rejection and Revision Flow)
 
@@ -448,6 +497,10 @@ Raw LiDAR scan sequences, LiDAR odometry và LiDAR SLAM vẫn nằm ngoài Input
 3. Editor tạo version mới và thực hiện sửa đổi.
 4. Mọi approval cũ không còn hiệu lực với version mới.
 5. Version mới phải tạo lại candidate package và chạy lại các phép validation bị ảnh hưởng trước khi quay về `READY_FOR_REVIEW`.
+
+Candidate đã test hoặc bị reject vẫn bất biến trong lịch sử. Sửa scene tạo
+SceneIR revision mới, candidate mới và `ValidationReport` mới; approval cũ không
+được áp cho candidate mới.
 
 ### 6.3 Luồng lỗi và phục hồi (Failure and Recovery Flow)
 
@@ -701,6 +754,9 @@ Hệ thống phải:
 - cho phép lưu nội bộ draft, artifact trung gian và candidate package trước approval;
 - chỉ cho phép scene `APPROVED` được đóng dấu và công bố thành bản phát hành `RELEASED`;
 - đưa revision đã bị chỉnh sửa sau validation trở lại `DRAFT` và làm mất hiệu lực kết quả validation cũ.
+- tách rõ `Save Draft` (lưu revision làm việc) với `Submit for Validation`
+  (bind revision/checksum, chạy preflight, build candidate và tự động điều phối
+  Isaac Sim); hai hành động này không tạo `ApprovalRecord`.
 
 ### FR-11 — Xuất OpenUSD và kiểm tra Isaac Sim (OpenUSD Export and Isaac Sim Validation)
 
@@ -719,6 +775,13 @@ Candidate package phải bảo toàn:
 
 Validation Report không nằm bên trong immutable Candidate Package trước validation.
 Validation Report phải tham chiếu tới checksum của Candidate Package đã được kiểm tra.
+Replay MP4, screenshots và logs được lưu như validation-run evidence riêng; các
+`checks[]`/`path_results[]` trong report tham chiếu evidence đã publish bằng
+`evidence_refs[]` theo shared contract. Capture failure phải được báo riêng ở
+artifact/worker và Web review boundary; không thêm field trạng thái replay vào
+`ValidationReport` hoặc đổi `overall_result` từ `PASS` thành `FAIL` chỉ vì
+capture lỗi. Web App phải cho Reviewer truy cập report, evidence hiện có và
+cảnh báo evidence thiếu của đúng candidate trước khi quyết định.
 
 Lifecycle bắt buộc:
 
@@ -752,6 +815,9 @@ Hệ thống bắt buộc thực hiện:
 - kiểm tra object bắt buộc không thiếu collider;
 - kiểm tra các cặp Start–Goal bằng robot footprint đã cho;
 - trả về `CLEAR`, `BLOCKED` hoặc `ERROR` kèm lý do.
+- cố gắng tạo và publish replay MP4, screenshots và logs của validation run để
+  Reviewer xem cùng `ValidationReport`; không coi media là nguồn kết luận thay
+  report. Primary Demo phải có replay/screenshots thật để đạt acceptance.
 
 Nếu candidate vượt qua các validation bắt buộc, hệ thống chuyển revision sang `READY_FOR_REVIEW`. Khi Reviewer approve, hệ thống phải đóng dấu đúng candidate đã được kiểm tra thành bản phát hành `RELEASED`, lưu checksum và không thay đổi nội dung của package. Mọi thay đổi đối với transform, collider, geometry hoặc object sau đó phải tạo version mới và chạy lại validation/review.
 
@@ -914,6 +980,9 @@ Với các `SceneObject` trong bộ test đã khóa, khi Editor dịch chuyển 
 
 - Editor không thể tự tạo trạng thái `APPROVED` nếu không có quyền Reviewer.
 - Reviewer phải xem được cảnh báo và kết quả validation trước khi quyết định.
+- Reviewer phải mở được evidence đã publish của đúng validation run trên Web App
+  và thấy cảnh báo rõ nếu replay/screenshots thiếu. Primary Demo bắt buộc có
+  replay và screenshots mở được trước khi claim review flow đạt acceptance.
 - Sau khi scene đã duyệt bị chỉnh sửa, version mới không còn trạng thái approved.
 - Lý do từ chối được lưu và hiển thị cho Editor.
 - Approval chỉ đóng dấu đúng candidate package đã được validation; thay đổi package làm approval và validation cũ mất hiệu lực.
@@ -929,6 +998,8 @@ Candidate của scene demo chính phải:
 - trả kết quả cho 5/5 cặp Start–Goal;
 - đạt điều kiện SM-04;
 - lưu log và báo cáo làm bằng chứng.
+- publish replay MP4 và screenshots của đúng validation run, có checksum/ref hợp
+  lệ và mở được trên Web cho lượt review cuối cùng.
 
 ### AC-09 — Lỗi job và thử lại
 

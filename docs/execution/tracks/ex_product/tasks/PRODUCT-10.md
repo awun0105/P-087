@@ -29,6 +29,8 @@ Source anchors: [Track Guide](../../../TRACK_IMPLEMENTATION_GUIDE.md), [Contract
 ## 5. Input Contract
 
 - READY_FOR_REVIEW revision, exact candidate/reports and authenticated actor.
+- Published replay/screenshots/log refs của validation run khi có; nếu thiếu,
+  nhận diagnostic riêng, không đổi kết quả `ValidationReport`.
 
 Frontend/API không được bypass privacy, artifact, revision hoặc authorization boundaries.
 
@@ -66,6 +68,8 @@ Assignee điền files, API/UI flow, state ownership, failure handling và proof
 - State/permission/checksum/warning/rejection unit/API tests.
 - Editor approve, mismatch, missing reason and rejected-release negative tests.
 - Review UI evidence-bundle integration.
+- Media fixture và real-run review: scene + report + replay + screenshots +
+  warning/error cùng candidate; thiếu/sai checksum media phải hiện rõ.
 
 Tách fixture/mock/API/browser proof khỏi real-worker Product E2E acceptance.
 
@@ -74,6 +78,11 @@ Tách fixture/mock/API/browser proof khỏi real-worker Product E2E acceptance.
 - [ ] Only Reviewer can approve/reject after required evidence.
 - [ ] Decision binds candidate and validation checksums; warnings reference evidence IDs.
 - [ ] Any post-validation edit creates DRAFT revision and invalidates old decision.
+- [ ] Reviewer mở được replay/screenshots/logs đã publish của đúng candidate,
+  hoặc thấy media-unavailable warning mà không bị báo validation FAIL giả.
+- [ ] Fixture UI proof và ít nhất một real candidate report/media handoff được
+  phân biệt rõ; Primary Demo E2E acceptance thuộc PRODUCT-12, không dùng để
+  block implementation độc lập của review UI.
 - [ ] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
 
 ## 12. Result / Evidence
@@ -85,3 +94,5 @@ Expected evidence:
 - Approval/rejection/audit records.
 - Authorization negative tests.
 - Review UI recording.
+- Real candidate/report/media lineage; fixture playback được ghi riêng với
+  Isaac runtime acceptance.

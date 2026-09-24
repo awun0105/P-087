@@ -37,6 +37,8 @@ Frontend/API không được bypass privacy, artifact, revision hoặc authoriza
 
 - Registry records, resolver responses and checksum verification.
 - Artifact access API used by workers/Web/release.
+- MP4 artifact fixture được serve qua FastAPI với `video/mp4` cho browser
+  playback; URI/checksum vẫn là identity, không dùng worker-local path.
 
 Persisted state phải nằm ở backend/shared artifacts; UI-local state không phải source of truth.
 
@@ -69,6 +71,10 @@ Assignee điền files, API/UI flow, state ownership, failure handling và proof
 - Raw GT/evaluation-only dù đổi URI vẫn bị product boundary reject; derived
   GT-assisted giữ provenance và không bị nhầm với raw GT.
 - Producer publish→consumer resolve integration test.
+- Media smoke sớm: `artifact://.../simulation.mp4` → resolver → FastAPI
+  `video/mp4` → browser playback bằng trang/harness tối thiểu, không đợi
+  PRODUCT-10; missing/corrupt checksum negative cases.
+  HTTP Range chỉ bổ sung nếu playback thực tế cần, không là điều kiện smoke đầu.
 
 Tách fixture/mock/API/browser proof khỏi real-worker Product E2E acceptance.
 
@@ -78,6 +84,8 @@ Tách fixture/mock/API/browser proof khỏi real-worker Product E2E acceptance.
 - [ ] Resolver verifies checksum and access boundary.
 - [ ] Publication is atomic and cannot overwrite an existing URI.
 - [ ] All track fixtures/real artifacts can be handed off without manual copy/rename.
+- [ ] Browser phát được MP4 fixture qua artifact API; access/missing/checksum
+  errors được báo đúng mà không leak local filesystem path.
 - [ ] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
 
 ## 12. Result / Evidence
@@ -89,3 +97,4 @@ Expected evidence:
 - Registry entries/URIs.
 - Checksum negative proof.
 - Cross-track resolution test.
+- Media response/playback smoke và negative checksum/access evidence.

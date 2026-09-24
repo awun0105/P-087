@@ -3,7 +3,7 @@
 **Mã đề tài:** RAV-01 (Robot & Xe Tự Hành — VinFast)  
 **Tài liệu liên quan:** [`BRIEF.md`](./BRIEF.md), [`PRD.md`](./PRD.md)
 
-**Phiên bản PRD đối chiếu:** v1.9
+**Phiên bản PRD đối chiếu:** v1.13
 
 **Document Role:** Mô tả hành vi UI và luồng tương tác; không định nghĩa lại product scope hoặc acceptance.
 
@@ -41,16 +41,20 @@ flowchart TD
         MoveObj --> SyncCol[Đồng bộ Visual + Geometry + Collider bằng cùng Transform]
     end
 
-    Studio -->|Tạo Candidate Package| CandidateReady[CANDIDATE_READY: Export Candidate OpenUSD]
+    Studio -->|HITL #1: Save Draft| Studio
+    Studio -->|HITL #1: Submit for Validation| Preflight[Bind revision / collider / preflight]
+    Preflight -->|PASS| CandidateReady[CANDIDATE_READY: Immutable CandidatePackage]
+    Preflight -->|FAIL: sửa revision| Studio
     CandidateReady --> Validate[VALIDATING]
     Validate --> SimRunner[Screen 3: Isaac Sim Deterministic Validation]
+    SimRunner --> Evidence[ValidationReport + replay + screenshots + logs]
 
     SimRunner -->|ERROR / Validation Failed| AuditPanel[Screen 4: Deterministic Audit Results]
     AuditPanel -->|Mở object cần sửa| Studio
     AuditPanel -.->|P1: Giải thích tùy chọn| AgentDrawer[Scene Audit Agent - Read-only Explanation]
 
-    SimRunner -->|Validation bắt buộc ĐẠT| ReadyReview[READY_FOR_REVIEW]
-    ReadyReview --> ReviewModal[Screen 5: Reviewer HITL Release Gate]
+    Evidence -->|Validation bắt buộc ĐẠT| ReadyReview[READY_FOR_REVIEW]
+    ReadyReview --> ReviewModal[Screen 5: HITL #2 Reviewer Final Review]
 
     ReviewModal -->|APPROVE: tạo Approval Record| Approved[APPROVED]
     Approved -->|Seal đúng Candidate đã kiểm tra| ReleaseUSD[RELEASED: Candidate Package + Manifest + Checksums]
@@ -102,7 +106,8 @@ Job card phải hiển thị Job ID, stage, progress, lần cập nhật gần n
 * **Bố cục Wireframe:**
   ```text
   +------------------------------------------------------------------------------------------------+
-  | [← Dashboard] Scene: Zone A - Corner 01 [v1.1 DRAFT] [Audit: 1 Issue] [Tạo Candidate & Validate]|
+  | [← Dashboard] Scene: Zone A - Corner 01 [v1.1 DRAFT] [Audit: 1 Issue]                  |
+  |                                              [Save Draft] [Submit for Validation]         |
   +------------------------------------------+-----------------------------------------------------+
   | SCENE GRAPH / CANDIDATES                 | BROWSER 3D VIEWER                                   |
   |------------------------------------------|-----------------------------------------------------|
@@ -146,6 +151,14 @@ Nút xóa áp dụng cho object do người dùng thêm và reconstructed `Scene
 
 Trước khi tạo candidate package, người dùng phải chọn robot footprint và các cặp Start–Goal. UI phải phân biệt evaluation set đã khóa với cặp thử nghiệm ad hoc và lưu chúng vào revision/validation configuration.
 
+Đây là HITL #1: Editor xác nhận candidate object trước Scene Decomposition,
+sau đó chỉnh Draft SceneIR và kiểm tra collider. `Save Draft` chỉ persist SceneIR
+revision ở backend. `Submit for Validation` ghi nhận revision được gửi rồi điều
+phối preflight, candidate build và Isaac Sim; nếu preflight fail, UI hiển thị lỗi
+để sửa trước khi tạo candidate.
+Mọi thay đổi sau validation tạo revision `DRAFT` mới; validation của candidate
+cũ không áp dụng cho revision mới.
+
 ---
 
 ### Screen 3 & 4: Candidate Validation & Bảng Kết Quả Deterministic Audit
@@ -165,6 +178,7 @@ Trước khi tạo candidate package, người dùng phải chọn robot footpri
   | • Floor collider: PASS / FAIL                       |                                          |
   | • Spawn check: PASS / FAIL                          | [PASS/FAIL] Required artifacts present  |
   | • Logs/report reference: <artifact>                 | ISSUE DETAIL                             |
+  | • Replay: [▶ simulation]                            | Evidence: screenshots / logs            |
   |                                                     | Object: Pallet_001                       |
   | START–GOAL PATH RESULTS                             | Rule: PATH_BLOCKED                       |
   | Footprint/config checksum: <sha256>                 | Severity / remediation: <detail>         |
@@ -177,6 +191,15 @@ Trước khi tạo candidate package, người dùng phải chọn robot footpri
   ```
 
 MVP không claim triển khai đầy đủ ROS2/Nav2. Mọi threshold hiển thị trong screen này phải lấy từ validation/evaluation configuration đã khóa; wireframe không ghi cứng số liệu minh họa thành acceptance requirement. Audit rule phải lưu Rule ID, config version, affected object, evidence, severity và remediation.
+
+Replay, screenshots và logs là validation-run artifacts nằm ngoài immutable
+CandidatePackage. UI resolve `ValidationReport.checks[].evidence_refs[]` và
+`path_results[].evidence_refs[]` qua artifact resolver; nếu artifact thiếu hoặc
+sai checksum phải hiển thị lỗi, không dựng nội dung minh họa như bằng chứng Isaac
+đã chạy.
+Capture/replay lỗi hiển thị thành warning/error riêng; không đổi kết quả
+`ValidationReport` đã quan sát. Primary Demo chưa đạt review acceptance nếu
+replay/screenshots không mở được.
 
 Product validation và quantitative evaluation là hai report khác nhau:
 
@@ -193,7 +216,7 @@ Product validation và quantitative evaluation là hai report khác nhau:
 * **Bố cục Wireframe:**
   ```text
   +------------------------------------------------------------------------------------------------+
-  | READY_FOR_REVIEW — HUMAN-IN-THE-LOOP RELEASE GATE                                      |
+  | READY_FOR_REVIEW — HITL #2: FINAL REVIEW                                                |
   +------------------------------------------------------------------------------------------------+
   | Scene: Zone A - Corner 01 | Revision: v1.1 | Editor: <id> | Reviewer: <id>             |
   | Candidate Package: <artifact list> | SHA-256: <candidate package checksum>               |
@@ -206,6 +229,7 @@ Product validation và quantitative evaluation là hai report khác nhau:
   | 2. PRODUCT VALIDATION — RELEASE GATES                                                   |
   |    Metric scale: PASS/FAIL | Isaac load: PASS/FAIL | Collision: PASS/FAIL                |
   |    Start–Goal paths: CLEAR/BLOCKED/ERROR | E2E: PASS/FAIL                               |
+  |    [▶ Simulation replay] [Screenshots] [Logs] [ValidationReport checks/evidence]       |
   |                                                                                                |
   | 3. EVALUATION REPORT — LOCKED SET ONLY                                                  |
   |    PSNR/SSIM/LPIPS: <value/status/held-out split or N/A>                                |
@@ -223,6 +247,13 @@ Product validation và quantitative evaluation là hai report khác nhau:
   ```
 
 Nút Approve chỉ được bật cho role Reviewer khi Candidate Package checksum khớp Validation Report và mọi validation bắt buộc đã đạt. Approval tạo `ApprovalRecord` và trạng thái `APPROVED`; sau đó hệ thống mới seal đúng Candidate Package đó thành `RELEASED`, không regenerate hoặc thay đổi package.
+
+Review UI hiển thị cùng lúc scene 3D, validation summary, replay, screenshots,
+logs và warning/error của đúng candidate; media thiếu phải hiện rõ và không
+được giả làm validation FAIL. `ApprovalRecord` bind
+`candidate_checksum`, `validation_report_checksum`, reviewer, thời điểm quyết
+định và warning IDs được chấp nhận. Năm cặp Start–Goal cần có 5/5 observed
+results; `BLOCKED` không tự động là lỗi nếu route không được khai báo required.
 
 Nếu Reviewer chỉnh scene, thay đổi phải tạo revision mới ở trạng thái `DRAFT`; Candidate Package checksum và validation cũ mất hiệu lực. Strict four-eyes authorization không phải yêu cầu MVP, nhưng mọi hành động edit/review phải được ghi riêng trong audit log. Reviewer phải mở được exact input/checksum, Visual, Geometry, Collider, candidate provenance, manifest, cảnh báo và validation evidence trước khi quyết định.
 
