@@ -51,13 +51,19 @@ Không sửa reconstruction, simulation hoặc product implementation. Shared co
 
 `SELF-CODE` with R2G/gs-real2sim/DISCOVERSE as `REFERENCE`; do not make full research systems runtime dependencies.
 
-**Code Donor Reference (Audit #1):**
-- Candidate reference: [`PointsCoder/OpenReal2Sim`](https://github.com/PointsCoder/OpenReal2Sim) (xem chi tiết tại [`docs/execution/audits/01_openreal2sim.md`](../../../audits/01_openreal2sim.md)).
-- File tham khảo:
-  - `reconstruction/modules/scenario_construction.py` (**`ADAPT-MEDIUM`**): Trích xuất các tiện ích hình học (Open3D + Trimesh) cho mesh ↔ point cloud registration, centroid alignment, ICP, ground alignment.
-  - `background_pixel_inpainting.py` + `background_mesh_generation.py` (**`ADAPT P1`**): Ghi nhận reference cho `BackgroundCompletionBackend` ở giai đoạn P1 (không kéo vào P0 core).
+**Code Donor Reference (Audit #1 & #2):**
+- [`PointsCoder/OpenReal2Sim`](https://github.com/PointsCoder/OpenReal2Sim) (chi tiết: [`docs/execution/audits/01_openreal2sim.md`](../../../audits/01_openreal2sim.md)):
+  - `reconstruction/modules/scenario_construction.py` (**`ADAPT-MEDIUM`**): Tiện ích hình học Open3D + Trimesh (mesh ↔ point cloud registration, centroid alignment, ICP, ground alignment).
+  - `background_pixel_inpainting.py` + `background_mesh_generation.py` (**`ADAPT P1`**): Tham chiếu `BackgroundCompletionBackend` P1.
+- [`BigCiLeng/R2G`](https://github.com/BigCiLeng/R2G) (chi tiết: [`docs/execution/audits/02_r2g.md`](../../../audits/02_r2g.md)):
+  - Per-object point cloud export (`models/point_cloud/obj_*.ply`) (**`ADAPT-HIGH`**).
+  - Trích xuất OBB định hướng qua `get_aabb.py` (Open3D minimal OBB: center, dimensions, rotation) (**`ADAPT-HIGH`** cho candidate bounding box).
+  - Assist-GS: Phân rã Gaussian background và object models (`object_*.ply`) (**`ADAPT P1 / Fallback`** nếu việc trích xuất subset từ Brush Gaussian gặp khó khăn).
 - **Guardrails:**
   - ❌ **Không thay Canonical Coordinate Contract**: Mọi transform phải tuân thủ nghiêm ngặt `parent_from_local` và quy ước hệ trục của Real2Sim Studio.
+  - ❌ **Không đổi Brush sang Assist-GS trong P0**: P0 giữ Brush làm primary Visual backend; Assist-GS là fallback ở P1.
+  - ❌ **Không dùng R2G directory layout làm canonical**: Output từ R2G phải qua `SceneObjectAdapter` chuẩn hóa thành `SceneIR`.
+  - ❌ **Không dùng GPT-4 methods của R2G**: Tuyệt đối không upload ảnh lên `sm.ms` và không để LLM gán mass/collider làm physics truth.
   - ❌ **Không kéo submodules nặng**: Không đưa Hunyuan3D-2 hay Mega-SAM vào P0 runtime dependencies.
 
 ## 9. Implementation Plan
