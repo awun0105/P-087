@@ -2,10 +2,24 @@
 
 import hashlib
 from pathlib import Path
+from typing import TypeVar
 
+from pydantic import BaseModel
+
+from src.models.contracts.identity import canonical_content_checksum
 from src.services.orchestration.artifacts.errors import ArtifactChecksumError
 
 _READ_CHUNK_BYTES = 1024 * 1024
+ContractT = TypeVar("ContractT", bound=BaseModel)
+
+
+def with_canonical_checksum(model: ContractT, checksum_field: str) -> ContractT:
+    """Điền self-checksum canonical cho một model vừa dựng.
+
+    Dựng model với giá trị chỗ giữ chỗ rồi gọi hàm này. `canonical_content_checksum`
+    bỏ qua chính field checksum nên giá trị chỗ giữ chỗ không ảnh hưởng digest.
+    """
+    return model.model_copy(update={checksum_field: canonical_content_checksum(model, checksum_field)})
 
 
 def sha256_bytes(payload: bytes) -> str:

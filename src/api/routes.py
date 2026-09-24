@@ -1,9 +1,11 @@
 from fastapi import APIRouter, HTTPException
 
 from src.agents.graph import agent
+from src.api.routes_product import router as product_router
 from src.models.schemas import ChatRequest, ChatResponse
 
 router = APIRouter()
+router.include_router(product_router)
 
 
 @router.post("/chat", response_model=ChatResponse)
