@@ -4,9 +4,8 @@ Date: 2026-09-24
 
 ## Status
 
-Active — REC-01 canonical publication complete; REC-02 input-quality
-threshold proposal measured; owner partially approved Aisle_CW blur filter
-and motion diagnostics. REC-02 implementation active.
+Active — REC-01, REC-02 and REC-02A DONE. REC-03 source/runtime audit and
+COLMAP input consumer are underway.
 
 ## Outcome
 
@@ -174,6 +173,22 @@ REC-02 is DONE at its own boundary; REC-02A is next. Human inspection is
 user-attested and was not repeated by Codex; actual EX-PRODUCT public dispatch
 is a later gate. Raw, normalized RGB, held-out split and unrelated migration
 scripts were untouched.
+
+REC-02A checkpoint (2026-09-24): FFmpeg 6.1.1 and the pinned MIT
+`video_to_gsplat.sh` reference were audited; FFmpeg is reused through a
+project-owned process adapter, upstream shell code is not copied. Added
+`frame_extraction.py`, `frame_set.py`, a TorWIC-only source resolver and focused
+tests. Real REC-02 evidence produced a checksummed 954-frame inventory at
+`artifact://jobs/torwic-aisle-cw-rec02a/rec02a/frame_set.json`; all images
+resolve from the canonical normalized store, with zero held-out overlap.
+The quality report's REC-01 preparation checksum differs from the later
+rights-attested InputManifest checksum; the adapter accepts only the explicit
+preparation/split lineage plus exact per-frame bytes/timestamps. Focused 5,
+full suite 193, Ruff and format pass. REC-03 `ColmapInputAdapter` then consumed
+the published frame-set directly, automatically created 954 temporary workspace
+PNGs and verified copy inode independence from canonical source. REC-02A is
+DONE at the producer/consumer handoff. COLMAP execution belongs to REC-03.
+Unrelated `merge.py` and `merge_rec01.sh` remain untracked and untouched.
 
 - [x] Read current harness, authority sections, track, and all 12 task files.
 - [x] Inspect current contracts/scaffold and local external checkout inventory.
