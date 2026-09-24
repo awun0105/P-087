@@ -57,22 +57,22 @@ Nguyên tắc chung:
 | Component | Strategy | Primary source | Dùng phần nào | Team tự viết |
 |---|---|---|---|---|
 | Video/frame | `REUSE` | FFmpeg | decode/encode CLI | adapter, validation, manifest |
-| Camera pose/SfM | `REUSE` | `colmap/colmap` | feature extraction, matching, mapper/SfM | `ColmapAdapter`, input prep, pose/output normalization |
-| 3DGS Visual | `REUSE` | `ArthurBrussee/brush` | reconstruction/training CLI, Gaussian output | `BrushAdapter`, COLMAP bridge, config, provenance |
-| RGB geometry | `REUSE` | `cdcseacave/openMVS` | COLMAP import, densification, mesh reconstruction | `OpenMVSAdapter`, normalized geometry artifact |
+| Camera pose/SfM | `REUSE` + `ADAPT` | `colmap/colmap` + `InternRobotics/Re3Sim` | feature extraction, matching, mapper/SfM, sequential vocab tree | `ColmapAdapter`, input prep, pose/output normalization |
+| 3DGS Visual | `REUSE` + utility | `ArthurBrussee/brush` + `playcanvas/splat-transform` | reconstruction/training CLI, artifact validation, SOG packaging | `BrushAdapter`, COLMAP bridge, config, provenance |
+| RGB geometry | `REUSE` + `ADAPT` | `cdcseacave/openMVS` + `InternRobotics/Re3Sim` | COLMAP import, densification, mesh reconstruction, command orchestration | `OpenMVSAdapter`, normalized geometry artifact, timeout/checksum |
 | LiDAR processing | `SELF-CODE` + library | `isl-org/Open3D` | IO, transform, filtering, voxel utilities | prefusion/ingest/alignment workflow + provenance |
 | Object masks | `REUSE` | `facebookresearch/sam2` | predictor, video mask propagation | `SAM2Adapter`, mask artifact/metadata |
-| Multi-view association | `SELF-CODE` + `REFERENCE` | Gaussian Grouping, ObjectGS, SegAnyGaussians, R2G | identity/grouping ideas | masks + poses + geometry association baseline |
-| Scene decomposition | `SELF-CODE` + `REFERENCE` | R2G, `gs-real2sim`, DISCOVERSE | object/environment decomposition patterns | `SceneDecomposer`, Environment/SceneObject mapping |
+| Multi-view association | `ADAPT` + `QUALIFICATION` | `BigCiLeng/R2G` (SAMPro3D) + `lkeab/gaussian-grouping` | 3D projection, multi-view score voting, DBSCAN, prompt consolidation, identity lifting spike (`SCENE-QUAL-GG-01`) | projection adapter + association service theo canonical coordinate |
+| Scene decomposition | `ADAPT` | `BigCiLeng/R2G` + `PointsCoder/OpenReal2Sim` + `lkeab/gaussian-grouping` | per-object point cloud, OBB extraction, alignment patterns, `GaussianObjectMembership` | `SceneDecomposer`, Environment/SceneObject mapping, non-destructive hide |
 | Scene IR | `SELF-CODE` | project contract | — | schema, refs, transforms, revisions |
-| Collider | `SELF-CODE` + library | Trimesh, Open3D | OBB/AABB/convex/simplification utilities | collider policy + generator |
-| OpenUSD export | `SELF-CODE` + library | OpenUSD | USD APIs | SceneIR→USD adapter, package/checksum |
-| Isaac validation | `SELF-CODE` + platform | Isaac Sim, IsaacLab | simulator/runtime APIs | load/spawn/collision/path validator + report |
-| Simulator patterns | `REFERENCE` | Re3Sim, VR-Robo, DISCOVERSE, OpenReal2Sim | reconstruction→simulator patterns | không tạo dependency nếu không cần |
+| Collider | `ADAPT` + library | `PointsCoder/OpenReal2Sim` + `discoverse-dev/DISCOVERSE` (CoACD) + `InternRobotics/Re3Sim` + `playcanvas/splat-transform` (fallback) | ground clearance, CoACD convex decomposition, MeshConverterCfg, voxel collision fallback | collider policy + `ColliderGenerator` |
+| OpenUSD export | `ADAPT` + library | `OpenUSD` + `PointsCoder/OpenReal2Sim` + `InternRobotics/Re3Sim` | USD physics stage build, MeshConverter, PhysX schemas, stage units | SceneIR→USD translation, packaging, checksum |
+| Isaac validation | `ADAPT` + platform | `isaac-sim/IsaacLab` + `zst1406217/VR-Robo` + `InternRobotics/Re3Sim` | headless loading, robot stepping, collision checks, Gym `RecordVideo` fallback, process isolation | validator worker, Start-Goal execution, structured report |
+| Simulator patterns | `REFERENCE` | Re3Sim, VR-Robo, DISCOVERSE, OpenReal2Sim | reconstruction→simulator patterns, process isolation | không tạo dependency nếu không cần |
 | Evaluation | `SELF-CODE` | [DATASET_PLAYBOOK](../DATASET_PLAYBOOK.md) | protocol/metric definitions | evaluator orchestration + reports |
 | API/jobs | `SELF-CODE` | FastAPI + basic worker/queue | framework primitives | job/artifact/orchestration lifecycle |
-| Web Studio | `SELF-CODE` domain + selective `ADAPT` UI | Next.js, Three.js, WebGL/WebGL2; Kiranism dashboard starter; Spark qualification candidate | generic shell/table/form patterns, 3D primitives and browser Gaussian renderer | real 3DGS Visual/Geometry/Point Cloud/Collider views, SceneIR mapping/editing, validation/review UX |
-| Review/release | `SELF-CODE` | PRD lifecycle | — | approval gate, revision invalidation, release sealing |
+| Web Studio | `ADAPT` + `SELF-CODE` domain | `playcanvas/supersplat` + `playcanvas/splat-transform` + Next.js + Three.js; Kiranism dashboard starter | WebGPU projected splats, multi-layer Splats, transform gizmos, SOG streaming, generic shell | real 3DGS Visual/Geometry/Point Cloud/Collider views, SceneIR mapping/editing, HITL workflows |
+| Review/release | `SELF-CODE` | PRD lifecycle | — | approval gate (HITL #2), revision invalidation, release sealing |
 
 Nếu muốn đổi backend hoặc strategy, output contract phải giữ nguyên và phải tuân [`TEAM_EXECUTION_CONTRACT.md`](./TEAM_EXECUTION_CONTRACT.md).
 

@@ -223,7 +223,184 @@ Trước khi tiến hành khóa code cho các task trọng điểm, 4 qualificat
 
 ---
 
-## 7. Kết luận
+## 7. Phân tầng Repository Chuẩn hóa (Final Repository Tiers A–E)
+
+Sau toàn bộ chuỗi Deep Audit, toàn bộ hệ sinh thái repository liên quan được phân bổ vào 5 tầng kiến trúc rõ ràng, ngăn chặn việc over-engineering hoặc nhầm lẫn giữa công cụ cốt lõi và tài liệu tham khảo:
+
+```text
+TIER A — P0 CORE RUNTIME
+────────────────────────
+1. FFmpeg               : Decode video, trích xuất khung hình định danh (REC-01, REC-02A)
+2. COLMAP (PyCOLMAP)    : Ước tính Structure-from-Motion và Camera Poses (REC-03)
+3. Brush                : Tối ưu hóa 3DGS photorealistic visual representation (REC-04)
+4. OpenMVS              : Tái tạo dense point cloud và reconstructed surface mesh (REC-05)
+5. SAM2                 : Mô hình cắt segmentation mask và lan truyền video (SCENE-02)
+6. Open3D               : Xử lý điểm LiDAR, tính toán hình học, OBB/AABB, ICP (REC-06, SCENE-06)
+7. Trimesh              : Kiểm định và xử lý mesh hình học (SIM-02)
+8. OpenUSD (pxr)        : Kiến tạo USD physics stage và định nghĩa physics schema (SIM-05)
+9. Isaac Sim / IsaacLab : Trình mô phỏng vật lý headless và validation pipeline (SIM-01, SIM-06)
+10. FastAPI             : REST API, SSE streaming và backend orchestration service (PRODUCT-01)
+11. Next.js (App Router): Frontend shell, quản trị dự án, workflow và HITL (PRODUCT-01, PRODUCT-05)
+12. Three.js            : Rendering kỹ thuật cho mesh, point cloud, collider và gizmos (PRODUCT-06)
+
+TIER B — P0 CODE DONOR / HIGH-VALUE ADAPT
+──────────────────────────────────────────
+1. BigCiLeng/R2G        : Thuật toán SAMPro3D (3D projection, multi-view voting, DBSCAN) và OBB (SCENE-03, SCENE-06)
+2. InternRobotics/Re3Sim: PyCOLMAP & OpenMVS orchestration (REC-03, REC-05), FrameTools canonicalization (REC-06), IsaacLab MeshConverterCfg (SIM-05)
+3. playcanvas/supersplat: WebGPU projected splats, multi-layer Splats, transform gizmos, selection tools, Undo/Redo (PRODUCT-06, PRODUCT-07)
+4. playcanvas/splat-transform: PLY semantic validation, overdraw stats (fillRatio), Morton reorder, SOG streaming (REC-04, PRODUCT-06), fallback voxel collider (SIM-02)
+5. PointsCoder/OpenReal2Sim: IsaacLab USD conversion (usd_conversion.py), ground clearance optimization (scenario_collision_optimization.py), container isolation (SIM-02, SIM-05, SIM-06)
+
+TIER C — P0 QUALIFICATION / REFERENCE
+─────────────────────────────────────
+1. lkeab/gaussian-grouping: Khái niệm vector identity per-Gaussian, 3D kNN regularization cho qualification spike SCENE-QUAL-GG-01
+2. zst1406217/VR-Robo   : Mô hình phân tách tiến trình Physics ↔ Visual, Gym RecordVideo fallback cho MP4 replay (SIM-06, SIM-09)
+
+TIER D — P1 CANDIDATES
+───────────────────────
+1. discoverse-dev/DISCOVERSE: Live 3DGS rendering qua hardware NVENC H.264 streaming, ZeroMQ transport cho live visual viewport
+2. discoverse-dev/DISCOVERSE-Real2Sim: Quy trình Mesh → multi-view synthesis → Mesh-seeded 3DGS và DiffusionLight relighting cho user-added assets
+3. Gaussian Grouping Inpainting: Khôi phục vùng ảnh khuyết (LaMa-guided) khi xóa vật thể
+4. OpenReal2Sim Background Completion: Hoàn thiện sàn và tường bị che khuất
+5. VR-Robo Live GS Sync : Đồng bộ hóa chuyển động vật thể 3DGS thời gian thực theo simulator step
+
+TIER E — FALLBACK / EXPERIMENTAL
+────────────────────────────────
+1. Anttwo/SuGaR         : Geometry surface mesh trực tiếp từ 3DGS (chỉ dùng nếu OpenMVS hoàn toàn thất bại)
+2. Nerfstudio / gsplat  : Backend 3DGS thay thế (chỉ dùng nếu Brush gặp lỗi không thể khắc phục)
+3. RuijieZhu94/ObjectGS : Đối chứng segmentation nâng cao
+4. SegAnyGaussians      : Phương án 2D-to-3D segmentation đối chứng
+```
+
+---
+
+## 8. Ranh giới Lưu trữ & Versioning: Database vs Artifact Store vs DVC vs MLflow
+
+Một lỗi kiến trúc phổ biến trong các dự án Real2Sim là lạm dụng DVC hoặc Git để lưu trữ mọi trạng thái chỉnh sửa, hoặc cố biến MLflow thành cơ sở dữ liệu nghiệp vụ. Real2Sim Studio phân định ranh giới nghiêm ngặt giữa 5 lớp lưu trữ:
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    STORAGE & VERSIONING RESPONSIBILITY MATRIX               │
+├───────────────────┬──────────────────────────────────┬──────────────────────┤
+│ Lớp Lưu trữ       │ Bản chất Dữ liệu Quản lý         │ Ví dụ Cụ thể         │
+├───────────────────┼──────────────────────────────────┼──────────────────────┤
+│ 1. PostgreSQL DB  │ Application & Business State:    │ Users, Projects,     │
+│    (Application)  │ Metadata người dùng, project     │ Job statuses,        │
+│                   │ status, SceneRevision metadata,  │ ApprovalRecords,     │
+│                   │ audit logs, review decisions.    │ Candidate manifests. │
+├───────────────────┼──────────────────────────────────┼──────────────────────┤
+│ 2. Artifact Store │ Large Binary Files:              │ visual.ply,          │
+│    (Filesystem /  │ Dữ liệu 3D, mesh, video và gói   │ geometry.obj,        │
+│     Object Store) │ mô phỏng có dung lượng lớn.      │ scene.usd,           │
+│                   │ Truy cập qua URI artifact://.    │ validation.mp4.      │
+├───────────────────┼──────────────────────────────────┼──────────────────────┤
+│ 3. Manifest +     │ Immutable Lineage & Provenance:  │ SHA-256 checksums,   │
+│    Checksum       │ Khóa chặt tính bất biến và phả hệ│ candidate_checksum,  │
+│                   │ liên kết giữa các artifacts.     │ scene_ir_checksum.   │
+├───────────────────┼──────────────────────────────────┼──────────────────────┤
+│ 4. DVC            │ Dataset & Benchmarks Versioning: │ Dataset TorWIC,      │
+│    (Data Version) │ Quản lý phiên bản các tập dữ     │ Golden fixtures,     │
+│                   │ liệu tĩnh và curated benchmarks. │ Benchmark suites.    │
+│                   │ ❌ CẤM dùng DVC cho SceneRevision│                      │
+├───────────────────┼──────────────────────────────────┼──────────────────────┤
+│ 5. MLflow         │ Engineering Experiment History:  │ COLMAP/Brush configs,│
+│    (Tracking)     │ Lịch sử đo lường khoa học, chạy  │ PSNR, SSIM, LPIPS,   │
+│                   │ benchmark tái tạo và đánh giá.   │ Chamfer Distance,    │
+│                   │ ❌ CẤM dùng MLflow cho App State │ runtime, VRAM usage. │
+└───────────────────┴──────────────────────────────────┴──────────────────────┘
+```
+
+> **Quy tắc sống còn:** Khi người dùng dịch chuyển một chiếc Pallet đi 20cm trên Web Studio, hệ thống tạo ra một `SceneRevision` mới trong PostgreSQL và lưu `SceneIR` JSON mới vào Artifact Store kèm checksum. **Tuyệt đối KHÔNG gọi DVC commit** cho thao tác này. DVC chỉ dùng để quản lý dataset tĩnh của dự án.
+
+---
+
+## 9. Hai Cổng Xác nhận Con người (HITL #1 & HITL #2) & Bằng chứng Kiểm định
+
+Để đảm bảo an toàn tuyệt đối trước khi phát hành mô phỏng vào môi trường thực tế, hệ thống bắt buộc đi qua **2 Cổng Human-in-the-Loop độc lập**:
+
+```text
+[ReconstructionBundle]
+          │
+          ▼
+   SAM2 + R2G (Auto)
+          │
+          ▼ (Candidate Objects)
+┌───────────────────────────────────────┐
+│ CỔNG HITL #1: Scene Correction        │  Kỹ sư xem xét các candidate objects:
+│ (SCENE-05 / PRODUCT-05)               │  - Xác nhận (Confirm) / Bỏ qua (Ignore)
+└──────────────────┬────────────────────┘  - Hợp nhất (Merge) / Tách cụm (Split)
+                   │                       - Đổi tên / Gán lại nhãn (Reassign)
+                   ▼
+               [SceneIR] (Draft → Confirmed)
+                   │
+                   ▼ (Physics & USD Build)
+           [CandidatePackage] (USD + Colliders + Checksum)
+                   │
+                   ▼ (Headless IsaacLab Run)
+          [ValidationReport] + [Replay MP4]
+                   │
+┌───────────────────────────────────────┐
+│ CỔNG HITL #2: Release Approval Gate   │  Reviewer kiểm tra Bundle bằng chứng:
+│ (PRODUCT-10 / PRODUCT-11)             │  - Báo cáo tiền kiểm (PreflightReport)
+└──────────────────┬────────────────────┘  - Báo cáo mô phỏng (ValidationReport)
+                   │                       - Video Replay MP4 (Quỹ đạo 5/5 pairs)
+         [Approve / Reject]                - Bấm Approve: Niêm phong ReleaseManifest
+                   │                         (Đúng Candidate đã test, không rebuild)
+                   ▼
+            [ReleaseManifest] (SEALED)
+```
+
+### Video Replay MP4 — Bằng chứng Kiểm định Bắt buộc
+- Video replay không chỉ là hoạt họa giao diện, mà là **bằng chứng quan sát được (observable evidence)** chứng minh robot không va chạm, không lún sàn và vượt qua các cặp Start-Goal.
+- **Cơ chế sinh**: Ưu tiên Omniverse native offscreen capture (`SIM-06`). Nếu runtime không hỗ trợ native video encoding, kích hoạt Gym `RecordVideo` wrapper (học từ `VR-Robo`) làm fallback đã được kiểm chứng.
+- **Ràng buộc toàn vẹn**: Video MP4 được lưu trữ với mã băm SHA-256 và tham chiếu trực tiếp trong `ValidationReport.evidence_refs[]`.
+
+### Phân định Xóa Vật thể & Xử lý Vết rỗng Hậu cảnh
+- **P0 Level 1 (Logical Deletion)**: Loại bỏ vật thể khỏi `SceneIR.objects[]` và gỡ collider khỏi USD stage.
+- **P0 Level 2 (Decomposition Visibility)**: Ẩn cụm Gaussian tương ứng (`visibility = false` hoặc loại khỏi `GaussianObjectMembership`). Nếu xuất hiện lỗ hổng thị giác ở sàn/tường, chấp nhận vùng rỗng đó trong P0 vì physics mesh sàn của OpenMVS vẫn nguyên vẹn và kín khít.
+- **P1 Level 3 (Background Inpainting & Completion)**: Sử dụng mô hình LaMa/Diffusion inpainting hoặc OpenReal2Sim background completion để trám bề mặt thị giác. Tính năng này thuộc P1, tuyệt đối không làm trễ hạn P0.
+
+---
+
+## 10. Danh mục 10 Điều Cấm trong P0 (P0 Anti-patterns & Guardrails)
+
+Sau toàn bộ chuỗi Deep Audit, đội ngũ đã thống nhất danh sách 10 điều **tuyệt đối KHÔNG LÀM trong P0** để ngăn ngừa tình trạng lan man và rủi ro kiến trúc:
+
+```text
+ 1. ❌ KHÔNG thay Brush bằng Nerfstudio hay vanilla 3DGS.
+    (Brush là core engine duy nhất đảm bảo tương thích format, tốc độ và độ sắc nét cho MVP).
+
+ 2. ❌ KHÔNG dùng SuGaR làm primary geometry path.
+    (Giữ OpenMVS độc lập hoàn toàn với Brush để bảo toàn nguyên tắc Visual ≠ Geometry).
+
+ 3. ❌ KHÔNG retrain toàn bộ global scene bằng Gaussian Grouping.
+    (Giữ nguyên file PLY đóng băng từ Brush; chỉ trích xuất identity membership nếu spike đạt yêu cầu).
+
+ 4. ❌ KHÔNG thêm DEVA vào pipeline khi SAM2 đã xử lý video propagation.
+    (DEVA dính bản quyền hạn chế CC BY-NC-SA 4.0 và trùng lặp năng lực với SAM2).
+
+ 5. ❌ KHÔNG dùng Gaussian point cloud làm physics collider truth.
+    (Gaussian splats là hạt thị giác có độ dày ảo; collider bắt buộc từ OpenMVS/LiDAR/primitives).
+
+ 6. ❌ KHÔNG clone nguyên repository OpenReal2Sim, R2G hay Re3Sim vào codebase.
+    (Chỉ trích xuất các hàm/module thuật toán sạch theo clean-room pattern và tuân thủ bản quyền).
+
+ 7. ❌ KHÔNG làm live Isaac interactive viewport trên Web trong P0.
+    (Mô phỏng chạy headless trong container; Web chỉ xem video replay MP4 sau khi hoàn thành).
+
+ 8. ❌ KHÔNG đưa DISCOVERSE remote GS streaming (NVENC) vào P0 scope.
+    (Đây là tính năng tương tác thời gian thực thuộc P1).
+
+ 9. ❌ KHÔNG làm pipeline Mesh → 3DGS AddedAsset trong P0.
+    (Vật thể thêm mới trong P0 dùng CAD/primitive box/cylinder; Mesh-seeded GS thuộc P1).
+
+10. ❌ KHÔNG bắt DVC/MLflow quản lý business SceneRevision; KHÔNG tạo scene model cạnh tranh SceneIR.
+    (SceneRevision thuộc PostgreSQL và Artifact Store; SceneIR là single source of truth cho scene).
+```
+
+---
+
+## 11. Kết luận
 
 Sau 7 đợt audit chi tiết và 1 bài utility deep dive, **toàn bộ các khoảng trống kỹ thuật phức tạp nhất của Real2Sim Studio đã được giải quyết bằng các giải pháp mã nguồn mở hàng đầu**:
 - Tái tạo không gian đã có **COLMAP + Brush + OpenMVS + Re3Sim orchestration**.

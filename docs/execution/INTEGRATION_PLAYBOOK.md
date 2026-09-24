@@ -995,6 +995,27 @@ ReleaseManifest
 
 `DatasetManifest` không được bắt buộc cho user-upload jobs. `InputManifest` mới là entry point chung cho mọi job.
 
+### 5.3.2 Phân định Ranh giới Lưu trữ & Versioning (Database vs Artifact Store vs DVC vs MLflow)
+
+Một lỗi kiến trúc nguy hiểm là lạm dụng DVC để lưu trữ mọi chỉnh sửa nhỏ của người dùng, hoặc cố ép MLflow làm cơ sở dữ liệu trạng thái nghiệp vụ. Real2Sim Studio phân định 5 lớp trách nhiệm rõ ràng:
+
+1. **PostgreSQL Database (Application State & Business Domain):**
+   - Quản lý users, projects, job states, workflow lifecycle (`QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`).
+   - Quản lý `SceneRevision` metadata, audit logs, commands history, `ApprovalRecord`, danh mục candidate manifests.
+2. **Artifact Store (Large Binaries via URI `artifact://`):**
+   - Lưu trữ các tệp nhị phân kích thước lớn: point clouds (`.ply`), surface meshes (`.mvs`, `.obj`), simulation stages (`.usd`), video replays (`.mp4`), depth maps (`.npy`/`.png`).
+   - Tuyệt đối không lưu blob nhị phân lớn trực tiếp vào PostgreSQL.
+3. **Manifest + Checksum (Immutable Lineage & Provenance):**
+   - Khóa chặt liên kết nguồn gốc bằng mã băm SHA-256 (`scene_ir_checksum`, `candidate_checksum`, `validation_report_checksum`).
+   - Mọi thay đổi về geometry/transform sinh ra revision mới và checksum mới, đảm bảo tính tái lập (reproducibility).
+4. **DVC (Data Version Control — Locked Benchmarks & Datasets):**
+   - Chỉ dùng để quản lý phiên bản dataset tĩnh (`TorWIC`), golden fixtures dùng cho kiểm thử, và curated benchmark snapshots.
+   - ❌ **CẤM dùng DVC cho SceneRevision nghiệp vụ:** Khi người dùng dịch chuyển pallet 20cm trên Web Studio, hệ thống tạo SceneRevision mới trong PostgreSQL và ghi JSON vào Artifact Store; KHÔNG kích hoạt DVC commit/push.
+5. **MLflow (Experiment Tracking & Evaluation History):**
+   - Chỉ dùng để ghi nhận lịch sử thử nghiệm kỹ thuật của các đợt chạy reconstruction và evaluation (`EV-VISUAL`, `EV-GEOMETRY`, `EV-POSE`, `EV-PATH`).
+   - Ghi nhận: hyperparameters (COLMAP matching mode, Brush iterations/densification parameters), metrics (PSNR, SSIM, LPIPS, Chamfer Distance, ATE RMSE), runtime, VRAM, và artifact URIs.
+   - ❌ **CẤM dùng MLflow làm cơ sở dữ liệu nghiệp vụ:** MLflow không quản lý lifecycle của Job, Scene hay quyền phê duyệt Release.
+
 ## 5.4 Object Removal & Background Completion
 
 ### Level 1 — P0: Logical / Simulation deletion
@@ -1291,6 +1312,15 @@ chỉ cung cấp generic UI/graphics patterns; FastAPI, SceneIR, artifact lineag
 authorization, review và release vẫn theo Real2Sim contracts. Khi copy/adapt
 code phải kiểm tra license của đúng revision và giữ attribution/notice cần thiết.
 
+### 7.1.0 Phân tầng Repository Chuẩn hóa (Repo Tiers A–E)
+
+Sau toàn bộ chuỗi Deep Audit, toàn bộ hệ sinh thái repository liên quan được chuẩn hóa vào 5 tầng rõ ràng:
+- **Tier A (P0 Core Runtime):** FFmpeg, COLMAP, Brush, OpenMVS, SAM2, Open3D, Trimesh, OpenUSD, Isaac Sim / IsaacLab, FastAPI, Next.js, Three.js.
+- **Tier B (P0 Code Donor / High-Value Adapt):** R2G, Re3Sim, SuperSplat, splat-transform, OpenReal2Sim.
+- **Tier C (P0 Qualification / Reference):** Gaussian Grouping (spike `SCENE-QUAL-GG-01`), VR-Robo (process separation, Gym `RecordVideo` fallback).
+- **Tier D (P1 Candidates):** DISCOVERSE (live NVENC stream), DISCOVERSE-Real2Sim (Mesh-seeded GS), Gaussian Grouping inpainting, OpenReal2Sim background completion, VR-Robo live GS sync.
+- **Tier E (Fallback / Experimental):** SuGaR, Nerfstudio, gsplat custom backend, ObjectGS, SegAnyGaussians.
+
 ### 7.1.1 Nhật ký Deep Audit & Phân loại Code Donors (Đã hoàn tất 7/7)
 
 Dự án đã hoàn tất toàn bộ quy trình Deep Audit chi tiết cho 7 repositories chủ chốt và 1 utility cốt lõi (xem thư mục lưu trữ tại [`docs/execution/audits/`](./audits/) và tài liệu tổng hợp toàn diện tại [**`docs/execution/audits/00_cross_repo_reuse_matrix.md`**](./audits/00_cross_repo_reuse_matrix.md)).
@@ -1364,6 +1394,17 @@ Tóm tắt kết quả theo thứ tự audit:
 2. **Quy tắc sao chép code (Code Reuse):**
    - Chỉ được copy code thuật toán nhỏ (math, utils) nếu License cho phép (MIT, Apache).
    - Nếu file to và dính bản quyền lây nhiễm (GPL/AGPL), buộc phải dùng cơ chế Subprocess.
+3. **Danh mục 10 Điều Cấm trong P0 (P0 Anti-patterns & Guardrails):**
+   - ❌ **Không thay Brush bằng Nerfstudio hay vanilla 3DGS:** Brush là core engine duy nhất đảm bảo tương thích format, tốc độ và độ sắc nét cho MVP.
+   - ❌ **Không dùng SuGaR làm primary geometry path:** Giữ OpenMVS độc lập hoàn toàn với Brush để bảo toàn nguyên tắc `Visual ≠ Geometry`.
+   - ❌ **Không retrain toàn bộ global scene bằng Gaussian Grouping:** Giữ nguyên file PLY đóng băng từ Brush; chỉ trích xuất identity membership nếu spike `SCENE-QUAL-GG-01` đạt yêu cầu.
+   - ❌ **Không thêm DEVA vào pipeline khi SAM2 đã xử lý video propagation:** DEVA dính bản quyền hạn chế `CC BY-NC-SA 4.0` và trùng lặp năng lực với SAM2.
+   - ❌ **Không dùng Gaussian point cloud làm physics collider truth:** Gaussian splats là hạt thị giác có độ dày ảo; collider bắt buộc từ OpenMVS/LiDAR/primitives.
+   - ❌ **Không clone nguyên repository OpenReal2Sim, R2G hay Re3Sim vào codebase:** Chỉ trích xuất các hàm/module thuật toán sạch theo clean-room pattern và tuân thủ bản quyền.
+   - ❌ **Không làm live Isaac interactive viewport trên Web trong P0:** Mô phỏng chạy headless trong container; Web chỉ xem video replay MP4 sau khi hoàn thành.
+   - ❌ **Không đưa DISCOVERSE remote GS streaming (NVENC) vào P0 scope:** Đây là tính năng tương tác thời gian thực thuộc P1.
+   - ❌ **Không làm pipeline Mesh → 3DGS AddedAsset trong P0:** Vật thể thêm mới trong P0 dùng CAD/primitive box/cylinder; Mesh-seeded GS thuộc P1.
+   - ❌ **Không bắt DVC/MLflow quản lý business SceneRevision; KHÔNG tạo scene model cạnh tranh SceneIR:** SceneRevision thuộc PostgreSQL và Artifact Store; SceneIR là single source of truth cho scene.
 
 ## 7.3 Roadmap Triển khai (Implementation Order)
 
