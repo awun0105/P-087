@@ -36,6 +36,8 @@ Evaluation-only references chỉ được đọc trong evaluator theo protocol.
 
 - Minimal USD/smoke package.
 - Load result, environment manifest, logs/screenshots and failure diagnostics.
+- Native MP4 capture feasibility result for a short run: readable output or exact
+  extension/encoder/headless failure. Đây là probe, không phải replay pipeline.
 
 Artifacts/reports phải bind đúng subject/candidate checksum, version và evidence refs.
 
@@ -52,6 +54,8 @@ Không sửa scene/product/reconstruction internals. Shared contract change cầ
 ## 8. Tool / Repository Strategy
 
 `REUSE` OpenUSD/Isaac APIs plus project-owned smoke wrapper; do not build a physics engine.
+Ưu tiên native `omni.kit.capture.viewport` + `omni.videoencoding` trong runtime
+đã khóa; chỉ thử frame capture → FFmpeg nếu native MP4 không hoạt động.
 
 Research systems chỉ là references trừ khi change control chấp nhận runtime dependency.
 
@@ -64,6 +68,8 @@ Assignee điền files, runtime command, failure handling và proof sau inspect.
 - Minimal USD structure unit test where possible.
 - Missing asset/incompatible runtime negative test.
 - Real locked-environment Isaac load smoke.
+- Short native MP4 capture/readability smoke; record capture/videoencoding
+  extension versions and headless setting. Fallback feasibility chỉ thử khi cần.
 
 Ghi rõ local/mock proof khác real Isaac/GPU/locked-acceptance proof.
 
@@ -71,6 +77,8 @@ Ghi rõ local/mock proof khác real Isaac/GPU/locked-acceptance proof.
 
 - [ ] Minimal scene loads in the locked Isaac environment.
 - [ ] Command and environment are reproducible without GUI-only manual fixes.
+- [ ] Native MP4 capture feasibility (hoặc exact failure + fallback probe) được
+  ghi nhận; không claim replay system đã hoàn thiện từ smoke này.
 - [ ] Failure is actionable and blocks M1 rather than being hidden.
 - [ ] Focused tests, required real-runtime/handoff proof và evidence/limitations được ghi.
 
@@ -83,4 +91,4 @@ Expected evidence:
 - Environment/version manifest.
 - USD checksum and smoke command/log.
 - Screenshot/video or exact failure.
-
+- MP4 readability check hoặc native/fallback failure trace.

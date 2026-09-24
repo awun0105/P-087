@@ -63,6 +63,8 @@ Assignee điền files, API/UI flow, state ownership, failure handling và proof
 ## 10. Tests
 
 - Full Web/API E2E on one candidate lineage, gồm browser render real Brush 3DGS và chuyển sang Geometry mesh/Point Cloud/Collider.
+- Primary Demo mở được replay MP4 và screenshots từ đúng Isaac validation run
+  qua published artifact refs trong Final Review, cùng ValidationReport.
 - Failure/fallback rehearsal and authorization checks.
 - AC-08/AC-12/review/release evidence verification.
 
@@ -74,6 +76,9 @@ Tách fixture/mock/API/browser proof khỏi real-worker Product E2E acceptance.
 - [ ] Demo có real 3DGS Visual từ cùng Primary RGB job và kỹ sư click chuyển sang Geometry mesh/Point Cloud/Collider; edit/path response và review decision dùng cùng lineage.
 - [ ] Video/screenshot browser và artifact inventory chứng minh real Brush output, format/producer/version/checksum; không dùng fixture hoặc technical view thay AC-11.
 - [ ] Live, precomputed and backup paths are clearly labeled and evidence-backed.
+- [ ] Replay MP4 và screenshots của đúng Primary Demo candidate/run có checksum
+  hợp lệ, mở được trên Web Review; capture failure không bị biến thành physics/
+  path validation FAIL nhưng không được claim AC-07/08 E2E pass.
 - [ ] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
 
 ## 12. Result / Evidence

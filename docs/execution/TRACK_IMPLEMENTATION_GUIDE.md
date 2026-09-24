@@ -661,6 +661,11 @@ floor + wall + box + robot
 → Isaac load
 ```
 
+Trên minimal USD trong locked runtime, smoke ngắn native MP4 capture, kiểm tra
+file đọc được và ghi version của capture/videoencoding extension. Đây là
+feasibility probe, chưa phải hệ thống replay đầy đủ. Nếu native thất bại, ghi
+nguyên nhân và thử frame capture → FFmpeg chỉ như fallback được kiểm chứng.
+
 ### SIM-02 — Collider generation
 
 Baseline:
@@ -720,10 +725,19 @@ physics SceneIR
 - trả kết quả cho 5/5 pairs;
 - chỉ emit observed `CLEAR | BLOCKED | ERROR`, không đọc expected labels;
 - `ERROR` không được tính là `CLEAR`, `BLOCKED` hoặc pass.
+- ưu tiên native Omniverse MP4 capture trong locked runtime; chỉ dùng frame
+  capture → FFmpeg nếu native thất bại ở runtime đó;
+- publish replay MP4, screenshots và logs của đúng validation run như review
+  evidence riêng, tham chiếu bằng artifact refs/checksums; không sửa candidate
+  package sau khi checksum được chốt;
+- capture failure được báo riêng, không đổi observed validation PASS thành FAIL;
+  Primary Demo vẫn cần replay/screenshots thật để đạt E2E acceptance.
 
 ### SIM-07 — ValidationReport
 
-Report phải bind đúng `candidate_checksum`.
+Report phải bind đúng `candidate_checksum`; `checks[]` và `path_results[]`
+trỏ tới evidence liên quan qua `evidence_refs[]` theo shared contract. Report là
+kết quả máy đọc được; media/logs không thay kết quả check/path.
 
 ### SIM-08 — Evaluation
 
@@ -923,6 +937,9 @@ Ban đầu mock worker; sau thay real `EX-REC/SCENE/SIM`.
 ### PRODUCT-04 — Artifact access
 
 API dùng artifact refs/checksums, không local path cá nhân.
+Smoke sớm với MP4 fixture qua `artifact://` → resolver → FastAPI `video/mp4`
+→ browser playback. Kiểm tra missing/mismatched checksum; chỉ bổ sung HTTP
+Range khi playback thực tế cần.
 
 ### PRODUCT-05 — Web shell
 
@@ -981,6 +998,9 @@ không phải Brush compatibility proof.
 ### PRODUCT-07 — Object actions
 
 Expose UI cho operations P0 do Scene Core cung cấp.
+Đây là HITL #1 cùng các thao tác collider của PRODUCT-07A: `Save Draft` persist
+SceneIR revision ở backend, còn `Submit for Validation` gửi revision hiện tại
+để preflight, candidate build và Isaac validation. Hai hành động không approve.
 
 ### PRODUCT-07A — Added asset và collider controls
 
@@ -1017,6 +1037,11 @@ DRAFT
 ```
 
 Reject phải lưu reason. `REJECTED` không được release trực tiếp; mọi edit sau validation tạo revision `DRAFT` mới và invalidates Candidate/Validation/Evaluation reports cũ.
+Đây là HITL #2: chỉ mở final review tại `READY_FOR_REVIEW` khi blocking checks
+applicable đạt. Web hiển thị đúng scene/candidate, ValidationReport, replay,
+screenshots, logs và warnings (kể cả media unavailable) qua artifact refs;
+Reviewer approve/reject đúng candidate đã validation. `CANDIDATE` không phải
+review state mới. Primary Demo E2E evidence nằm tại PRODUCT-12.
 
 ### PRODUCT-11 — Release
 

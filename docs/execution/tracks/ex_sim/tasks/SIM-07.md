@@ -36,6 +36,9 @@ Evaluation-only references chỉ được đọc trong evaluator theo protocol.
 
 - Structured ValidationReport with checks, path_results, overall_result and report checksum.
 - Published report ref.
+- `checks[].evidence_refs[]` và `path_results[].evidence_refs[]` chỉ trỏ tới
+  media/log artifacts đã publish, bind đúng candidate; không thêm replay status
+  field vào normative report schema.
 
 Artifacts/reports phải bind đúng subject/candidate checksum, version và evidence refs.
 
@@ -64,6 +67,8 @@ Assignee điền files, runtime command, failure handling và proof sau inspect.
 - Report roundtrip/checksum/per-pair unit tests.
 - Wrong candidate, missing required check and ERROR-as-PASS negative tests.
 - PRODUCT direct-consumer contract test.
+- Missing/corrupt replay case giữ nguyên observed validation result, loại bỏ
+  invalid evidence ref và báo capture/publication issue qua boundary riêng.
 
 Ghi rõ local/mock proof khác real Isaac/GPU/locked-acceptance proof.
 
@@ -73,6 +78,8 @@ Ghi rõ local/mock proof khác real Isaac/GPU/locked-acceptance proof.
 - [ ] Required checks and every configured path are structured and evidenced.
 - [ ] No hidden expected label is read or serialized by ValidationReport.
 - [ ] PRODUCT reads report without manual conversion.
+- [ ] Available evidence refs resolve và checksum match; capture failure không
+  biến `overall_result = PASS` thành `FAIL` hoặc tạo ref trỏ file không tồn tại.
 - [ ] Focused tests, required real-runtime/handoff proof và evidence/limitations được ghi.
 
 ## 12. Result / Evidence
@@ -84,3 +91,4 @@ Expected evidence:
 - ValidationReport/checksum.
 - Contract/consumer test output.
 - Malformed/mismatched report rejection.
+- Same-candidate evidence ref resolution và missing-media diagnostic.
