@@ -57,11 +57,21 @@ Không sửa scene/product/reconstruction internals. Shared contract change cầ
 Ưu tiên native `omni.kit.capture.viewport` + `omni.videoencoding` trong runtime
 đã khóa; chỉ thử frame capture → FFmpeg nếu native MP4 không hoạt động.
 
-Research systems chỉ là references trừ khi change control chấp nhận runtime dependency.
+**Code Donor Reference (Audit #3):**
+- Candidate integration donor: [`zst1406217/VR-Robo`](https://github.com/zst1406217/VR-Robo) (xem chi tiết tại [`docs/execution/audits/03_vr_robo.md`](../../../audits/03_vr_robo.md)).
+- Pattern tham khảo (**`ADAPT-HIGH`**):
+  - `vrrobo_isaaclab/.../go2_env_cfg.py`: Cấu hình IsaacLab environment, load USD scene (`UsdFileCfg`), thiết lập properties và spawn robot.
+  - Video capture probe fallback: Gym wrapper `gym.wrappers.RecordVideo` trong `play_gs.py` / `train_gs.py` làm phương án fallback cho capture feasibility.
+- **Guardrails:**
+  - ❌ **Không lấy RL stack**: Bỏ qua toàn bộ stack RSL-RL / PPO / curriculum trong `exts/rsl_rl/`.
+  - ❌ **Không copy nguyên renderer**: Source renderer của VR-Robo dính Inria Non-Commercial license.
 
 ## 9. Implementation Plan
 
-Assignee điền files, runtime command, failure handling và proof sau inspect. Không tự khóa policy còn mở.
+1. Thiết lập script smoke khởi động IsaacLab headless dựa trên pattern từ `go2_env_cfg.py`.
+2. Tạo minimal USD scene với sàn, tường, hộp và nạp vào IsaacLab qua `UsdFileCfg`.
+3. Kiểm tra native viewport capture; thử fallback `RecordVideo` nếu native capture gặp sự cố.
+4. Assignee điền files, runtime command, failure handling và proof sau inspect. Không tự khóa policy còn mở.
 
 ## 10. Tests
 

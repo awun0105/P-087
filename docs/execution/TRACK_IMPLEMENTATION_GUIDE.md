@@ -624,22 +624,23 @@ Primary:
 Reference / Code Donors (Deep Audit):
 
 - `PointsCoder/OpenReal2Sim`: **Tier-0 Code Donor** cho `SIM-05` (USD conversion, MeshConverter, PhysX/RigidBody/Collision properties), `SIM-02` (collision remediation) và `SIM-06` (Docker IsaacLab isolation). Xem [`docs/execution/audits/01_openreal2sim.md`](./audits/01_openreal2sim.md).
-- Re3Sim, VR-Robo, DISCOVERSE.
+- `zst1406217/VR-Robo`: **Tier-0 Integration Donor** cho `SIM-01` (IsaacLab startup, USD loading), `SIM-06` (robot runtime, stepping loop, video replay fallback) và `SIM-09` (worker process isolation); Architecture reference cho Visual/Physics separation. Xem [`docs/execution/audits/03_vr_robo.md`](./audits/03_vr_robo.md).
+- Re3Sim, DISCOVERSE.
 
 ## 4.4 Implementation Source Map
 
 | Stage | Strategy | Source | Lấy từ repo/tool | Team tự code |
 |---|---|---|---|---|
-| `SIM-01` Isaac smoke | `REUSE` platform + `SELF-CODE` | OpenUSD, Isaac Sim, IsaacLab | USD/simulator APIs | minimal USD builder + smoke script |
+| `SIM-01` Isaac smoke | `REUSE` platform + `ADAPT` | OpenUSD, Isaac Sim, IsaacLab + VR-Robo | USD/simulator APIs, `UsdFileCfg` scene load, environment setup | minimal USD builder + smoke script |
 | `SIM-02` Collider | `SELF-CODE` + `ADAPT` | Trimesh, Open3D + OpenReal2Sim `scenario_collision_optimization` | OBB/AABB/convex utilities, ground clearance | collider policy + `ColliderGenerator` |
 | `SIM-02A` Collider edit validation | `SELF-CODE` | `ColliderSpec` contract | — | validate type/dimensions/local transform after edit |
 | `SIM-03` Physics enrichment | `SELF-CODE` | Scene IR contract | — | `ColliderSpec`/physics metadata on same SceneIR schema |
 | `SIM-04` Preflight | `SELF-CODE` | PRD/Integration Playbook | — | deterministic rules + report |
 | `SIM-05` Candidate build | `SELF-CODE` + `ADAPT` | OpenUSD + OpenReal2Sim `usd_conversion.py` | USD scene APIs, MeshConverter, PhysX configs | SceneIR→USD translation, packaging, checksum |
-| `SIM-06` Isaac validation | `SELF-CODE` + platform | Isaac Sim, IsaacLab + OpenReal2Sim Docker patterns | load/physics/runtime APIs, headless worker | spawn/collision/path validation worker |
+| `SIM-06` Isaac validation | `SELF-CODE` + `ADAPT` | Isaac Sim, IsaacLab + OpenReal2Sim + VR-Robo | load/physics/runtime APIs, robot stepping, `RecordVideo` fallback | spawn/collision/path validation worker |
 | `SIM-07` ValidationReport | `SELF-CODE` | shared contract | — | candidate-bound structured report |
 | `SIM-08` Evaluation | `SELF-CODE` | Dataset Playbook | protocols/metric definitions | evaluator orchestration + reports |
-| `SIM-09` Worker entrypoints | `SELF-CODE` | project runtime | — | simulation/evaluation CLI wrappers |
+| `SIM-09` Worker entrypoints | `SELF-CODE` + `ADAPT` | project runtime + VR-Robo patterns | worker/process boundary, separate containers | simulation/evaluation CLI wrappers |
 
 Re3Sim, VR-Robo, DISCOVERSE và OpenReal2Sim là **architecture references & code donors** cho simulator boundary/transform/USD patterns. Không clone cả system để thay project architecture.
 

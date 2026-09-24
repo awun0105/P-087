@@ -60,11 +60,24 @@ Native Omniverse MP4 capture là đường chính. Frame capture → FFmpeg ch�
 fallback khi native không chạy trong locked Isaac runtime; ghi rõ lý do đổi
 đường capture và version của extension/encoder liên quan.
 
-Research systems chỉ là references trừ khi change control chấp nhận runtime dependency.
+**Code Donor Reference (Audit #3):**
+- Candidate integration donor: [`zst1406217/VR-Robo`](https://github.com/zst1406217/VR-Robo) (xem chi tiết tại [`docs/execution/audits/03_vr_robo.md`](../../../audits/03_vr_robo.md)).
+- Core patterns đáng adapt (**`ADAPT-HIGH`**):
+  - **Runtime Execution**: Load Candidate USD (`UsdFileCfg`), spawn robot, sensor attachment, simulation stepping loop từ `vrrobo_isaaclab`.
+  - **Replay Video Fallback**: Tận dụng pattern `gym.wrappers.RecordVideo` khi môi trường headless gặp vấn đề với native viewport capture.
+  - **Visual ↔ Physics Separation**: Phân tách rõ ràng process giữa physics simulation (IsaacLab) và visual preview (3DGS), đồng bộ qua camera/object world pose mà không cần ép 3DGS vào USD stage.
+- **Guardrails / Anti-patterns bắt buộc:**
+  - ❌ **Không dùng RPyC + pickle network**: VR-Robo dùng RPC port 18861 và pickle serialization qua raw TCP. Đây là lỗ hổng bảo mật nghiêm trọng; dự án bắt buộc dùng process-local IPC hoặc artifact-based exchange.
+  - ❌ **Không copy nguyên renderer Inria**: Code renderer dính Inria non-commercial license.
+  - ❌ **Không hard-code camera/axes convention**: Toàn bộ camera pose synchronization phải đi qua `CoordinateSystem` canonical contract.
 
 ## 9. Implementation Plan
 
-Assignee điền files, runtime command, failure handling và proof sau inspect. Không tự khóa policy còn mở.
+1. Thiết lập worker load Candidate USD vào IsaacLab sử dụng `UsdFileCfg`.
+2. Khởi tạo robot footprint và sensor listeners (contact, collision, raycast).
+3. Thực thi validation run loop cho từng Start–Goal pair; ghi nhận trạng thái CLEAR/BLOCKED/ERROR.
+4. Ghi video replay bằng native capture (hoặc `RecordVideo` fallback) và publish artifact.
+5. Assignee điền files, runtime command, failure handling và proof sau inspect. Không tự khóa policy còn mở.
 
 ## 10. Tests
 

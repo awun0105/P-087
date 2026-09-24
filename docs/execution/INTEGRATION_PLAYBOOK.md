@@ -1313,8 +1313,11 @@ Bảng phân loại chính thức tại §7.1 sẽ được cập nhật toàn d
    - **Định vị mới**: **Tier-0 Algorithm Donor cho `EX-SCENE`** (SAMPro3D association).
    - **Module trích xuất chính**: SAMPro3D (`perform_3dsegmentation`, 3D→2D projection, multi-view score voting, DBSCAN spatial cleanup, `prompt_consolidation`) cho `SCENE-03`; per-object point cloud export và OBB extraction (`get_aabb.py`) cho `SCENE-06`; Assist-GS là P1 fallback visual backend.
    - **Guardrails**: Bắt buộc chuẩn hóa theo `CoordinateSystem` của Real2Sim Studio (không lấy hardcode `R_edit`, depth shift), không dùng R2G directory layout làm SceneIR, cấm dùng script GPT-4 upload ảnh `sm.ms` hoặc tự gán physics.
-3. **Audit #3 — `zst1406217/VR-Robo`**: ⏳ (Sắp tiến hành).
-4. **Audit #4 — SuperSplat**: ⏳ (Kế hoạch).
+3. [**Audit #3 — `zst1406217/VR-Robo`**](./audits/03_vr_robo.md) ✅:
+   - **Định vị mới**: **Tier-0 Integration Donor cho `EX-SIM`** (IsaacLab scene/robot runtime, simulation stepping loop, video replay fallback; Visual ↔ Physics process separation).
+   - **Module trích xuất chính**: `vrrobo_isaaclab` scene loading (`UsdFileCfg`), robot runtime & stepping loop cho `SIM-01`/`SIM-06`; Gym `RecordVideo` fallback cho `SIM-06 replay`; tách biệt process giữa visual renderer và physics simulator.
+   - **Guardrails**: Cấm dùng RPyC + pickle raw TCP IPC (lỗ hổng bảo mật); cấm copy code renderer Inria (non-commercial license); không lấy RL/PPO training stack; phải map camera/transforms qua canonical `CoordinateSystem`.
+4. **Audit #4 — SuperSplat**: ⏳ (Kế hoạch: EX-PRODUCT Web Studio & 3D Viewer).
 5. **Audit #5 — `DISCOVERSE` + `DISCOVERSE-Real2Sim`**: ⏳ (Kế hoạch).
 6. **Audit #6 — `lkeab/gaussian-grouping`**: ⏳ (Kế hoạch).
 7. **Audit #7 — `InternRobotics/Re3Sim`**: ⏳ (Kế hoạch).
