@@ -376,15 +376,13 @@ Primary:
 - SAM2
 - Open3D
 
-Reference:
+Reference / Code Donors (Deep Audit):
 
-- Gaussian Grouping
-- ObjectGS
-- SegAnyGaussians
-- R2G
-- gs-real2sim
+- `BigCiLeng/R2G` (SAMPro3D): **Tier-0 Algorithm Donor** cho `SCENE-03` (multi-view voting, DBSCAN cleanup, prompt consolidation) và `SCENE-06` (per-object point cloud & OBB extraction). Xem [`docs/execution/audits/02_r2g.md`](./audits/02_r2g.md).
+- `PointsCoder/OpenReal2Sim`: **Code Donor** cho alignment utilities (`scenario_construction.py`) và P1 `BackgroundCompletionBackend`. Xem [`docs/execution/audits/01_openreal2sim.md`](./audits/01_openreal2sim.md).
+- Gaussian Grouping, ObjectGS, SegAnyGaussians, gs-real2sim, DISCOVERSE.
 
-Chỉ reuse concept/module cần thiết.
+Chỉ reuse concept/module cần thiết; không kéo toàn bộ research dependency graph vào core.
 
 ## 3.4 Implementation Source Map
 
@@ -392,10 +390,10 @@ Chỉ reuse concept/module cần thiết.
 |---|---|---|---|---|
 | `SCENE-01` Bundle consumer | `SELF-CODE` | shared contract | — | loader/validator |
 | `SCENE-02` Object extraction | `REUSE` | `facebookresearch/sam2` | predictor + mask/video propagation | `SAM2Adapter`, mask artifact/metadata |
-| `SCENE-03` Multi-view association | `SELF-CODE` + `REFERENCE` | Gaussian Grouping, ObjectGS, SegAnyGaussians, R2G | identity/grouping/2D↔3D ideas | baseline masks + poses + geometry association |
+| `SCENE-03` Multi-view association | `SELF-CODE` + `ADAPT` | `BigCiLeng/R2G` (SAMPro3D) + references | 3D projection, multi-view score voting, DBSCAN, prompt consolidation | projection adapter + association service theo canonical coordinate |
 | `SCENE-04` Candidate model | `SELF-CODE` | PRD | — | ID/state/provenance model |
 | `SCENE-05` Human Confirmation | `SELF-CODE` | PRD | — | confirm/ignore/merge/create/reassign domain operations |
-| `SCENE-06` Scene decomposition | `SELF-CODE` + `REFERENCE` | R2G, `gs-real2sim`, DISCOVERSE | decomposition patterns | `SceneDecomposer`, object↔geometry binding |
+| `SCENE-06` Scene decomposition | `SELF-CODE` + `ADAPT` | R2G, OpenReal2Sim, `gs-real2sim`, DISCOVERSE | per-object point cloud, OBB extraction, alignment patterns | `SceneDecomposer`, object↔geometry binding |
 | `SCENE-07` SceneObject model | `SELF-CODE` | Scene IR contract | — | transform/ref/state model |
 | `SCENE-08` Edit semantics | `SELF-CODE` | PRD | — | move/rotate/hide/delete behavior |
 | `SCENE-08A` Add primitive/asset | `SELF-CODE` | PRD | — | user-added object + primitive dimensions/asset parameters |
@@ -623,29 +621,27 @@ Primary:
 - Isaac Sim
 - IsaacLab
 
-Reference:
+Reference / Code Donors (Deep Audit):
 
-- Re3Sim
-- VR-Robo
-- DISCOVERSE
-- OpenReal2Sim
+- `PointsCoder/OpenReal2Sim`: **Tier-0 Code Donor** cho `SIM-05` (USD conversion, MeshConverter, PhysX/RigidBody/Collision properties), `SIM-02` (collision remediation) và `SIM-06` (Docker IsaacLab isolation). Xem [`docs/execution/audits/01_openreal2sim.md`](./audits/01_openreal2sim.md).
+- Re3Sim, VR-Robo, DISCOVERSE.
 
 ## 4.4 Implementation Source Map
 
 | Stage | Strategy | Source | Lấy từ repo/tool | Team tự code |
 |---|---|---|---|---|
 | `SIM-01` Isaac smoke | `REUSE` platform + `SELF-CODE` | OpenUSD, Isaac Sim, IsaacLab | USD/simulator APIs | minimal USD builder + smoke script |
-| `SIM-02` Collider | `SELF-CODE` + library | Trimesh, Open3D | OBB/AABB/convex/simplification utilities | collider policy + `ColliderGenerator` |
+| `SIM-02` Collider | `SELF-CODE` + `ADAPT` | Trimesh, Open3D + OpenReal2Sim `scenario_collision_optimization` | OBB/AABB/convex utilities, ground clearance | collider policy + `ColliderGenerator` |
 | `SIM-02A` Collider edit validation | `SELF-CODE` | `ColliderSpec` contract | — | validate type/dimensions/local transform after edit |
 | `SIM-03` Physics enrichment | `SELF-CODE` | Scene IR contract | — | `ColliderSpec`/physics metadata on same SceneIR schema |
 | `SIM-04` Preflight | `SELF-CODE` | PRD/Integration Playbook | — | deterministic rules + report |
-| `SIM-05` Candidate build | `SELF-CODE` + library | OpenUSD | USD scene APIs | SceneIR→USD translation, packaging, checksum |
-| `SIM-06` Isaac validation | `SELF-CODE` + platform | Isaac Sim, IsaacLab | load/physics/runtime APIs | spawn/collision/path validation worker |
+| `SIM-05` Candidate build | `SELF-CODE` + `ADAPT` | OpenUSD + OpenReal2Sim `usd_conversion.py` | USD scene APIs, MeshConverter, PhysX configs | SceneIR→USD translation, packaging, checksum |
+| `SIM-06` Isaac validation | `SELF-CODE` + platform | Isaac Sim, IsaacLab + OpenReal2Sim Docker patterns | load/physics/runtime APIs, headless worker | spawn/collision/path validation worker |
 | `SIM-07` ValidationReport | `SELF-CODE` | shared contract | — | candidate-bound structured report |
 | `SIM-08` Evaluation | `SELF-CODE` | Dataset Playbook | protocols/metric definitions | evaluator orchestration + reports |
 | `SIM-09` Worker entrypoints | `SELF-CODE` | project runtime | — | simulation/evaluation CLI wrappers |
 
-Re3Sim, VR-Robo, DISCOVERSE và OpenReal2Sim là **architecture references** cho simulator boundary/transform/USD patterns. Không clone cả system để thay project architecture.
+Re3Sim, VR-Robo, DISCOVERSE và OpenReal2Sim là **architecture references & code donors** cho simulator boundary/transform/USD patterns. Không clone cả system để thay project architecture.
 
 **Không tự viết lại:** USD core, physics engine, Isaac runtime, generic geometry primitives.
 

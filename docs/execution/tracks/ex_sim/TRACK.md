@@ -39,7 +39,8 @@ Outputs:
 - Open3D/Trimesh cho collider utilities.
 - OpenUSD cho package translation.
 - Isaac Sim/IsaacLab cho simulator runtime.
-- Re3Sim, VR-Robo, DISCOVERSE và OpenReal2Sim là architecture references.
+- `PointsCoder/OpenReal2Sim`: Tier-0 Code Donor cho USD conversion, PhysX properties (`SIM-05`), collision optimization (`SIM-02`) và Docker runtime isolation (`SIM-06`) theo [Audit #1](../../audits/01_openreal2sim.md).
+- Re3Sim, VR-Robo, DISCOVERSE là architecture references.
 - Không tự viết lại USD core, physics engine hoặc Isaac runtime.
 
 ## Authority Gates
