@@ -4,7 +4,9 @@ Date: 2026-09-24
 
 ## Status
 
-Active — REC-01 canonical publication complete; REC-02 next.
+Active — REC-01 canonical publication complete; REC-02 input-quality
+threshold proposal measured; owner partially approved Aisle_CW blur filter
+and motion diagnostics. REC-02 implementation active.
 
 ## Outcome
 
@@ -138,6 +140,40 @@ ignored secrets and Git state. Owner stopped Antigravity delegation on
   proof; do not import its claimed readiness into task completion.
 
 ## Progress and recovery
+
+REC-02 checkpoint 2026-09-24: full 1,092-frame input-only probe in
+`eval/results/rec02_aisle_cw_quality_probe.json`; semantics/quantiles and
+owner decision in REC-02 §9. Owner approved only Aisle_CW blur exclusion
+`>8.5`, with 70%/60-frame motion values as warnings; generic 900-frame floor
+was rejected. REC-02 code and tests now cover FFmpeg frame/video probes,
+InputManifest frame/video adapters, immutable quality reports, privacy gate
+with injected QA verifier and artifact-store publication. Real offline
+`Aisle_CW` quality report selected 983, excluded 29, effective 954; no
+held-out frame was decoded by quality probe or selected for reconstruction.
+User selected public noncommercial demo scope. A concurrent REC-02 evidence
+generator created a purported `VERIFIED_ANONYMIZED` artifact under
+`data/torwic_slam/derived/aisle_cw/rec02_review_verified/`. Codex audit found
+that its CLI could issue verified state from arbitrary reference strings and
+fabricated `inspected=983` without checking an external QA record. The unsafe
+issuance path was removed; existing generated records were preserved for
+review, not accepted as clearance. A new candidate packet under
+`rec02_review_pending/` records 983 train IDs with no inferred attestation.
+User then explicitly authorized TorWIC public noncommercial demo use for the
+983 reconstruction frames. A checksummed rights record and new candidate
+under `rec02_review_rights_confirmed/` bind that scope to the frozen split;
+the packet still says `inspected=0`, QA pending and `NOT_ISSUED`. Focused
+REC-02 tests: 27 passed; full suite: 185 passed; Ruff check/format pass.
+User supplied the other agent's exact 983-frame QA attestation and then
+explicitly authorized report issuance/completion. Codex verified the record,
+manifest, inventory, split and 983 source PNG checksums; a separate addendum
+binds the authorization without changing the original record's false flags.
+The real `VERIFIED_ANONYMIZED` report was published/resolved with checksum;
+its receipt says `public_dispatch_authorized=false`. Local 983-ref handoff,
+focused tests (30), full suite (188), Ruff check/format and AST audit passed.
+REC-02 is DONE at its own boundary; REC-02A is next. Human inspection is
+user-attested and was not repeated by Codex; actual EX-PRODUCT public dispatch
+is a later gate. Raw, normalized RGB, held-out split and unrelated migration
+scripts were untouched.
 
 - [x] Read current harness, authority sections, track, and all 12 task files.
 - [x] Inspect current contracts/scaffold and local external checkout inventory.
