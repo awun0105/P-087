@@ -31,9 +31,11 @@ Outputs: project/job lifecycle, scene revisions, review history,
 ## Technology And Strategy
 
 - FastAPI, basic worker/queue, SSE/WebSocket/polling.
-- Next.js + TypeScript + Three.js trong root `frontend/`.
-- P0 viewer dùng Three.js/WebGL/WebGL2 baseline để render real 3DGS `VisualArtifact` của Primary RGB Scene và chuyển giữa các view Geometry mesh, Point Cloud, Collider/SceneObject transforms. Các view kỹ thuật không phải fallback của 3DGS.
-- Gaussian renderer phải qualification bằng output Brush thực, đúng format/checksum/coordinate và browser capability; WebGPU là optional backend, không phải P0 requirement. Fixture không phải Brush proof.
+- Next.js + TypeScript trong root `frontend/`.
+- `playcanvas/supersplat` (WebGPU): Tier-0 Code Donor Candidate cho 3DGS Visual Editor (`PRODUCT-06`) và interaction machinery (`PRODUCT-07`), chờ qualification spike `PRODUCT-06Q` theo [Audit #4](../../audits/04_supersplat.md).
+- `playcanvas/splat-transform`: Core utility cho Gaussian artifact validation, SOG conversion và LOD streaming.
+- Three.js / WebGL/WebGL2 baseline render technical views (Geometry mesh, Point Cloud, Collider wireframes). Các view kỹ thuật không phải fallback của 3DGS.
+- Gaussian renderer phải qualification bằng output Brush thực; fixture không phải Brush proof.
 - Generic Web shell được adapt có chọn lọc từ [`Kiranism/next-shadcn-dashboard-starter`](https://github.com/Kiranism/next-shadcn-dashboard-starter); [`arhamkhnz/next-shadcn-admin-dashboard`](https://github.com/arhamkhnz/next-shadcn-admin-dashboard) và [`shadcndashboard/next-shadcn-dashboard`](https://github.com/shadcndashboard/next-shadcn-dashboard) là UI references, không phải codebase thứ hai.
 - Viewer dùng [Three.js docs/examples](https://threejs.org/docs/); [React Three Fiber](https://github.com/pmndrs/react-three-fiber) là candidate library. [Spark](https://github.com/sparkjsdev/spark) là P0 renderer candidate, [Spark + Next.js example](https://github.com/sparkjsdev/spark-react-nextjs) là integration reference, [Potree](https://github.com/potree/potree) chỉ là point-cloud LOD reference.
 - P0 không yêu cầu advanced scheduler hoặc multi-tenant infrastructure.

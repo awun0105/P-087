@@ -53,11 +53,23 @@ Không sửa track internals. Shared contract change cần producer + consumer r
 
 `SELF-CODE` UI/application layer consuming Scene Core operations; no local-only mutation.
 
-P0 không tự mở rộng sang advanced scheduler, multi-tenant platform hoặc public deployment hardening.
+**UX / Interaction Donor (Audit #4):**
+- Candidate interaction machinery: [`playcanvas/supersplat`](https://github.com/playcanvas/supersplat) (xem chi tiết tại [`docs/execution/audits/04_supersplat.md`](../../../audits/04_supersplat.md)).
+- Core machinery đáng adapt (**`ADAPT-HIGH`**):
+  - `EntityTransformHandler` và các gizmo Move, Rotate trực quan trong viewport.
+  - Bộ công cụ selection phong phú (brush, lasso, polygon, volume) phục vụ Human Object Correction.
+  - Kiến trúc Undo/Redo (`EditHistory`, `EditOp`) cho trải nghiệm tương tác trên trình duyệt.
+- **Guardrails / Anti-patterns bắt buộc:**
+  - ❌ **Kiểm soát Scale**: SuperSplat hỗ trợ scale tự do, nhưng P0 của Real2Sim Studio không cho phép scale tùy tiện khi chưa đồng bộ được cả Visual, Geometry và Collider. Bắt buộc disable/restrict công cụ Scale theo contract.
+  - ❌ **Xóa Gaussian ≠ Xóa SceneObject**: Thao tác xóa cụm điểm trên editor (`RemoveInstancesOp`) không được tự tiện map thành xóa SceneObject. Xóa SceneObject phải xóa toàn diện cả visual, geometry, collider trong backend revision.
+  - ❌ **Backend là Source of Truth**: `EditHistory` của SuperSplat chỉ là cache trải nghiệm cục bộ; mọi hành động confirm/commit phải lưu thành `SceneIR` revision trên FastAPI backend.
 
 ## 9. Implementation Plan
 
-Assignee điền files, API/UI flow, state ownership, failure handling và proof sau inspect. Không đổi scope.
+1. Thiết lập các command handler trên frontend nhận event từ SuperSplat bridge (`transform-committed`, `selection-changed`).
+2. Gửi request tương ứng về `src/api/` scene endpoints (Move, Rotate, Hide, Show, Confirm, Ignore).
+3. Cập nhật SceneIR revision và reload trạng thái đồng bộ giữa backend và 3D viewport.
+4. Assignee điền files, API/UI flow, state ownership, failure handling và proof sau inspect. Không đổi scope.
 
 ## 10. Tests
 

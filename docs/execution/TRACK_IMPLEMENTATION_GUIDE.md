@@ -882,8 +882,9 @@ Baseline:
 - basic worker/queue
 - SSE/WebSocket/polling cho status
 - Next.js
-- Three.js
-- WebGL/WebGL2 qua Three.js cho P0 geometry/point-cloud/collider/transforms
+- `playcanvas/supersplat` (WebGPU): **Tier-0 Code Donor Candidate** cho 3DGS Visual Editor (chờ qualification spike `PRODUCT-06Q`). Xem [`docs/execution/audits/04_supersplat.md`](./audits/04_supersplat.md).
+- Three.js / WebGL/WebGL2: technical views (geometry/point-cloud/collider/transforms) và baseline rendering.
+- `playcanvas/splat-transform`: Core utility cho Gaussian artifact validation, SOG conversion và LOD streaming.
 
 Không cần advanced scheduler/multi-tenant infra trong P0.
 
@@ -896,8 +897,8 @@ Không cần advanced scheduler/multi-tenant infra trong P0.
 | `PRODUCT-03` Worker abstraction | `SELF-CODE` | worker contract | — | dispatch interface + queue/CLI integration |
 | `PRODUCT-04` Artifact access | `SELF-CODE` | shared contract | — | registry/resolver |
 | `PRODUCT-05` Web shell | `SELF-CODE` domain + selective `ADAPT` UI | Next.js + Kiranism dashboard starter; arhamkhnz/shadcndashboard as secondary references | sidebar, layout, table, form, loading/error, upload UI patterns | typed FastAPI client, project/job/artifact workflow and state ownership |
-| `PRODUCT-06` 3D Viewer | `SELF-CODE` + library | Three.js + official examples; React Three Fiber candidate; Spark P0 qualification candidate | camera/scene/rendering/interaction primitives | real Brush 3DGS Visual + geometry/point-cloud/collider SceneIR views, selection, layer toggles and transform tools |
-| `PRODUCT-07` Object actions | `SELF-CODE` | Scene Core operations | — | UI/application commands |
+| `PRODUCT-06` 3D Viewer | `SELF-CODE` + `ADAPT` | `playcanvas/supersplat` (Visual 3DGS editor donor) + Three.js/Spark (technical views) | WebGPU splat renderer, camera orbit/fly, selection, layer transform gizmos | SceneIR bridge, Geometry/Collider technical views, artifact resolver |
+| `PRODUCT-07` Object actions | `SELF-CODE` + `ADAPT` | `playcanvas/supersplat` interaction machinery + Scene Core | `EntityTransformHandler`, Move/Rotate gizmos, selection, `EditHistory` | domain commands, backend revision persistence, authorization |
 | `PRODUCT-07A` Added asset/collider UI | `SELF-CODE` | SceneIR/ColliderSpec contracts | Three.js controls | add/delete obstacle, dimensions, collider adjustment |
 | `PRODUCT-08` Orchestration | `SELF-CODE` | shared worker contracts | — | REC→SCENE→SIM control flow |
 | `PRODUCT-09` Progress/error/retry | `SELF-CODE` | PRD | — | monitoring + user-facing errors |

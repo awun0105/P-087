@@ -1317,7 +1317,10 @@ Bảng phân loại chính thức tại §7.1 sẽ được cập nhật toàn d
    - **Định vị mới**: **Tier-0 Integration Donor cho `EX-SIM`** (IsaacLab scene/robot runtime, simulation stepping loop, video replay fallback; Visual ↔ Physics process separation).
    - **Module trích xuất chính**: `vrrobo_isaaclab` scene loading (`UsdFileCfg`), robot runtime & stepping loop cho `SIM-01`/`SIM-06`; Gym `RecordVideo` fallback cho `SIM-06 replay`; tách biệt process giữa visual renderer và physics simulator.
    - **Guardrails**: Cấm dùng RPyC + pickle raw TCP IPC (lỗ hổng bảo mật); cấm copy code renderer Inria (non-commercial license); không lấy RL/PPO training stack; phải map camera/transforms qua canonical `CoordinateSystem`.
-4. **Audit #4 — SuperSplat**: ⏳ (Kế hoạch: EX-PRODUCT Web Studio & 3D Viewer).
+4. [**Audit #4 — `playcanvas/supersplat` & `splat-transform`**](./audits/04_supersplat.md) ✅:
+   - **Định vị mới**: **Tier-0 Code Donor cho `EX-PRODUCT` Visual Editor & 3D Viewer (`PRODUCT-06`)** và Interaction Machinery (`PRODUCT-07`); `playcanvas/splat-transform` là **Tier-0 Core Utility Candidate** (VisualArtifact optimization, LOD streaming, collision mesh fallback).
+   - **Module trích xuất chính**: WebGPU projected splat renderer (tương thích Brush metadata), multi-layer Splats (map 1:1 sang SceneObjects), transform gizmos (Move, Rotate), camera orbit/fly, selection tools (brush, lasso, volume), Undo/Redo (`EditHistory`).
+   - **Guardrails**: Cần chạy qualification spike `PRODUCT-06Q` về WebGPU trước khi đổi baseline; SuperSplat chỉ là interaction frontend, `SceneIR` backend revision là source of truth duy nhất (qua typed postMessage bridge); cấm dùng `.ssproj` hay PlayCanvas cloud publish; cấm scale tự do khi chưa đồng bộ cả Visual, Geometry và Collider.
 5. **Audit #5 — `DISCOVERSE` + `DISCOVERSE-Real2Sim`**: ⏳ (Kế hoạch).
 6. **Audit #6 — `lkeab/gaussian-grouping`**: ⏳ (Kế hoạch).
 7. **Audit #7 — `InternRobotics/Re3Sim`**: ⏳ (Kế hoạch).
