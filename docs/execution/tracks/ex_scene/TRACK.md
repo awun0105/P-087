@@ -32,7 +32,8 @@ Output: valid, versioned `SceneIR`; collider có thể chưa đầy đủ ở ha
 - SAM2 được reuse qua adapter cho mask prediction/propagation.
 - Open3D/NumPy cho geometry association utilities.
 - `BigCiLeng/R2G` (SAMPro3D): Tier-0 Algorithm Donor cho multi-view association (`SCENE-03`) và per-object decomposition (`SCENE-06`) theo [Audit #2](../../audits/02_r2g.md).
-- Gaussian Grouping, ObjectGS, SegAnyGaussians, OpenReal2Sim và gs-real2sim là references/donors cho các utilities chuyên biệt.
+- `lkeab/gaussian-grouping`: Tier-0 Algorithm Reference cho per-Gaussian persistent identity learning và Tier-1 Qualification Candidate (`SCENE-QUAL-GG-01`) theo [Audit #6](../../audits/06_gaussian_grouping.md).
+- ObjectGS, SegAnyGaussians, OpenReal2Sim và gs-real2sim là references/donors cho các utilities chuyên biệt.
 - Team sở hữu candidate lifecycle, deterministic association baseline, HITL operations, decomposition và SceneIR behavior.
 
 ## Authority Gates

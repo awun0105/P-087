@@ -1336,8 +1336,21 @@ Bảng phân loại chính thức tại §7.1 sẽ được cập nhật toàn d
      - ❌ **Không lấy MJCF generation hay physics defaults**: MuJoCo XML không dùng trong Isaac; cấm lấy default `mass = 0.001 kg` của script gốc.
      - ❌ **Remote video stream chỉ là P1 preview**: Luồng H.264 lược bỏ depth, tuyệt đối không dùng làm validation truth thay cho Isaac `ValidationReport`.
      - ❌ **License restrictions**: Root repo `DISCOVERSE-Real2Sim` thiếu license file; submodule `LitMesh2GS` mang Inria non-commercial license cấm dùng thương mại; cấm copy trực tiếp vào core commercializable codebase.
-6. **Audit #6 — `lkeab/gaussian-grouping`**: ⏳ (Kế hoạch — NEXT).
-7. **Audit #7 — `InternRobotics/Re3Sim`**: ⏳ (Kế hoạch).
+6. [**Audit #6 — `lkeab/gaussian-grouping`**](./audits/06_gaussian_grouping.md) ✅:
+   - **Định vị mới**:
+     - **Tier-0 Algorithm Reference**: Khái niệm Per-Gaussian Identity Encoding (16D) + 3D spatial consistency regularization (`loss_cls_3d()`).
+     - **Tier-1 Qualification Candidate**: Spike `SCENE-QUAL-GG-01` để đo lường xem việc học identity per-Gaussian có cải thiện cross-view object association so với baseline `SAM2 + R2G` trên `TorWIC Aisle_CW` hay không.
+     - **P1 Reference**: Non-destructive object removal/hide preview và 2D-guided visual background inpainting (LaMa).
+   - **Module trích xuất chính**:
+     - Ý tưởng vector identity per-Gaussian kết hợp loss không gian 3D kNN (KL divergence ép các Gaussian lân cận có cùng nhãn).
+     - Khái niệm `GaussianObjectMembership`: ánh xạ splats thuộc về đối tượng mà không phá hủy hay mutate file PLY gốc của Brush.
+   - **Guardrails**:
+     - ❌ **Không thay thế SAM2 + R2G trong P0**: P0 giữ nguyên pipeline hiện tại; Gaussian Grouping chỉ là qualification candidate.
+     - ❌ **Không train lại toàn bộ scene**: Freeze `GlobalVisualArtifact` của Brush, không tái huấn luyện đồng thời appearance + geometry.
+     - ❌ **Cấm kéo DEVA và custom CUDA rasterizer**: DEVA mang bản quyền `CC BY-NC-SA 4.0`, submodule rasterizer mang Inria non-commercial terms.
+     - ❌ **Cấm dùng Convex-Hull Expansion làm Collider**: Heuristic bao lồi Gaussian không phản ánh đúng hình học surface và dễ gây over-removal; collider bắt buộc từ OpenMVS/LiDAR/primitives.
+     - ❌ **Visual Inpainting không phải Physics Truth**: Mọi kết quả inpaint chỉ phục vụ viewport thị giác, không dùng cho va chạm vật lý.
+7. **Audit #7 — `InternRobotics/Re3Sim`**: ⏳ (Kế hoạch — NEXT / FINAL AUDIT).
 
 
 ## 7.2 Quy tắc Tích hợp cho Lập trình viên / AI Agent (Integration Rules)

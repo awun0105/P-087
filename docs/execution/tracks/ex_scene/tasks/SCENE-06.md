@@ -51,7 +51,7 @@ Không sửa reconstruction, simulation hoặc product implementation. Shared co
 
 `SELF-CODE` with R2G/gs-real2sim/DISCOVERSE as `REFERENCE`; do not make full research systems runtime dependencies.
 
-**Code Donor Reference (Audit #1 & #2):**
+**Code Donor Reference (Audit #1, #2 & #6):**
 - [`PointsCoder/OpenReal2Sim`](https://github.com/PointsCoder/OpenReal2Sim) (chi tiết: [`docs/execution/audits/01_openreal2sim.md`](../../../audits/01_openreal2sim.md)):
   - `reconstruction/modules/scenario_construction.py` (**`ADAPT-MEDIUM`**): Tiện ích hình học Open3D + Trimesh (mesh ↔ point cloud registration, centroid alignment, ICP, ground alignment).
   - `background_pixel_inpainting.py` + `background_mesh_generation.py` (**`ADAPT P1`**): Tham chiếu `BackgroundCompletionBackend` P1.
@@ -59,12 +59,18 @@ Không sửa reconstruction, simulation hoặc product implementation. Shared co
   - Per-object point cloud export (`models/point_cloud/obj_*.ply`) (**`ADAPT-HIGH`**).
   - Trích xuất OBB định hướng qua `get_aabb.py` (Open3D minimal OBB: center, dimensions, rotation) (**`ADAPT-HIGH`** cho candidate bounding box).
   - Assist-GS: Phân rã Gaussian background và object models (`object_*.ply`) (**`ADAPT P1 / Fallback`** nếu việc trích xuất subset từ Brush Gaussian gặp khó khăn).
+- [`lkeab/gaussian-grouping`](https://github.com/lkeab/gaussian-grouping) (chi tiết: [`docs/execution/audits/06_gaussian_grouping.md`](../../../audits/06_gaussian_grouping.md)):
+  - Khái niệm `GaussianObjectMembership`: Ánh xạ tập hợp Gaussian splats thuộc về từng object mà không mutate hay ghi đè lên file PLY gốc của Brush.
+  - Non-destructive Object Removal / Hide Preview: Khi người dùng ẩn/loại bỏ đối tượng, thao tác là `visibility = false` trên `SceneRevision` / Viewer thay vì xóa vĩnh viễn hàng Gaussian trong file PLY.
+  - P1 Background Visual Completion: Kỹ thuật inpaint 2D-guided (LaMa) cho các khoảng trống sau khi di dời/xóa vật thể.
 - **Guardrails:**
   - ❌ **Không thay Canonical Coordinate Contract**: Mọi transform phải tuân thủ nghiêm ngặt `parent_from_local` và quy ước hệ trục của Real2Sim Studio.
   - ❌ **Không đổi Brush sang Assist-GS trong P0**: P0 giữ Brush làm primary Visual backend; Assist-GS là fallback ở P1.
   - ❌ **Không dùng R2G directory layout làm canonical**: Output từ R2G phải qua `SceneObjectAdapter` chuẩn hóa thành `SceneIR`.
   - ❌ **Không dùng GPT-4 methods của R2G**: Tuyệt đối không upload ảnh lên `sm.ms` và không để LLM gán mass/collider làm physics truth.
   - ❌ **Không kéo submodules nặng**: Không đưa Hunyuan3D-2 hay Mega-SAM vào P0 runtime dependencies.
+  - ❌ **Cấm dùng Convex-Hull Expansion làm Collider**: Thuật toán mở rộng convex hull từ Gaussian points (Gaussian Grouping) chỉ là heuristic loại bỏ visual thô, dễ gây over-removal (bao trùm cả khoảng trống ở kệ hàng chữ U) và suy thoái hình học (`Qhull` failure). Tuyệt đối không dùng làm ground-truth geometry hay collider.
+  - ❌ **Visual Inpainting ≠ Physics Truth**: Kết quả vá lỗ hổng 3DGS (inpainted visual) chỉ phục vụ tính thẩm mỹ của viewport thị giác (P1), không có bằng chứng cảm biến và cấm dùng làm collision surface hay vật lý.
 
 ## 9. Implementation Plan
 

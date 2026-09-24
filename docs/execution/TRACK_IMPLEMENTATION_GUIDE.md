@@ -381,7 +381,8 @@ Reference / Code Donors (Deep Audit):
 
 - `BigCiLeng/R2G` (SAMPro3D): **Tier-0 Algorithm Donor** cho `SCENE-03` (multi-view voting, DBSCAN cleanup, prompt consolidation) và `SCENE-06` (per-object point cloud & OBB extraction). Xem [`docs/execution/audits/02_r2g.md`](./audits/02_r2g.md).
 - `PointsCoder/OpenReal2Sim`: **Code Donor** cho alignment utilities (`scenario_construction.py`) và P1 `BackgroundCompletionBackend`. Xem [`docs/execution/audits/01_openreal2sim.md`](./audits/01_openreal2sim.md).
-- Gaussian Grouping, ObjectGS, SegAnyGaussians, gs-real2sim, DISCOVERSE.
+- `lkeab/gaussian-grouping`: **Tier-0 Algorithm Reference** (per-Gaussian persistent identity learning, 3D spatial consistency) & **Tier-1 Qualification Candidate** (`SCENE-QUAL-GG-01`). Xem [`docs/execution/audits/06_gaussian_grouping.md`](./audits/06_gaussian_grouping.md).
+- ObjectGS, SegAnyGaussians, gs-real2sim, DISCOVERSE.
 
 Chỉ reuse concept/module cần thiết; không kéo toàn bộ research dependency graph vào core.
 
@@ -391,10 +392,10 @@ Chỉ reuse concept/module cần thiết; không kéo toàn bộ research depend
 |---|---|---|---|---|
 | `SCENE-01` Bundle consumer | `SELF-CODE` | shared contract | — | loader/validator |
 | `SCENE-02` Object extraction | `REUSE` | `facebookresearch/sam2` | predictor + mask/video propagation | `SAM2Adapter`, mask artifact/metadata |
-| `SCENE-03` Multi-view association | `SELF-CODE` + `ADAPT` | `BigCiLeng/R2G` (SAMPro3D) + references | 3D projection, multi-view score voting, DBSCAN, prompt consolidation | projection adapter + association service theo canonical coordinate |
+| `SCENE-03` Multi-view association | `SELF-CODE` + `ADAPT` | `BigCiLeng/R2G` (SAMPro3D) + `lkeab/gaussian-grouping` (qualification) | 3D projection, multi-view score voting, DBSCAN, prompt consolidation, identity lifting spike | projection adapter + association service theo canonical coordinate |
 | `SCENE-04` Candidate model | `SELF-CODE` | PRD | — | ID/state/provenance model |
 | `SCENE-05` Human Confirmation | `SELF-CODE` | PRD | — | confirm/ignore/merge/create/reassign domain operations |
-| `SCENE-06` Scene decomposition | `SELF-CODE` + `ADAPT` | R2G, OpenReal2Sim, `gs-real2sim`, DISCOVERSE | per-object point cloud, OBB extraction, alignment patterns | `SceneDecomposer`, object↔geometry binding |
+| `SCENE-06` Scene decomposition | `SELF-CODE` + `ADAPT` | R2G, OpenReal2Sim, `gaussian-grouping`, `gs-real2sim`, DISCOVERSE | per-object point cloud, OBB extraction, GaussianObjectMembership alignment patterns | `SceneDecomposer`, object↔geometry binding |
 | `SCENE-07` SceneObject model | `SELF-CODE` | Scene IR contract | — | transform/ref/state model |
 | `SCENE-08` Edit semantics | `SELF-CODE` | PRD | — | move/rotate/hide/delete behavior |
 | `SCENE-08A` Add primitive/asset | `SELF-CODE` | PRD | — | user-added object + primitive dimensions/asset parameters |
