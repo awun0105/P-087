@@ -682,7 +682,7 @@ parent = world
 T_parent_from_local = T_world_from_object
 ```
 
-COLMAP, Three.js, OpenUSD và Isaac phải convert convention tại adapter boundary;
+COLMAP, PlayCanvas, splat-transform, OpenUSD và Isaac phải convert convention tại adapter boundary;
 external convention không được leak vào SceneIR.
 
 ## 4.2 RGB metric scale

@@ -182,7 +182,7 @@ Transform có semantics `parent_from_local`, quaternion `xyzw`, angle `radian`:
 p_parent = T_parent_from_local * p_local
 ```
 
-COLMAP, Three.js, OpenUSD và Isaac convert convention ở adapter boundary.
+COLMAP, PlayCanvas, splat-transform, OpenUSD và Isaac convert convention ở adapter boundary.
 Artifact persistence do `src/services/orchestration/artifacts/` sở hữu:
 
 ```text
@@ -214,10 +214,18 @@ flowchart TB
         INPUT --> LIDAR["Optional registered LiDAR / adapter-prefused scans"]
         RGB --> POSE["Camera poses / SfM (COLMAP P0)"]
         POSE --> VIS["VisualArtifact: real 3DGS (Brush P0)"]
-        POSE --> GEO["Voxel geometry & collision (splat-transform P0, OpenMVS fallback)"]
+        POSE --> ANCHOR["REC-06: confirm locked anchor / metric transform"]
+        VIS --> ANCHOR
+        ANCHOR --> MVIS["Metric working derivative; master PLY immutable"]
+        VIS --> MVIS
+        MVIS --> GEO["REC-05: voxel geometry & collision (splat-transform P0)"]
+        POSE -.-> MVS["REC-05 fallback: OpenMVS surface reconstruction"]
+        ANCHOR --> GEO
         LIDAR --> LG["LiDARGeometryArtifact"]
         LG --> ALIGN["AlignmentRecord if mixed RGB + LiDAR"]
-        VIS --> COMPOSE["Metric/canonicalize + SceneComposer"]
+        VIS --> COMPOSE["REC-06: final metric verification + SceneComposer"]
+        ANCHOR --> COMPOSE
+        MVS --> COMPOSE
         GEO --> COMPOSE
         DEPTH --> COMPOSE
         ALIGN --> COMPOSE

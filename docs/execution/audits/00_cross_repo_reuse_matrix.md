@@ -30,7 +30,7 @@ Toàn bộ 9 repository và utility sau khi audit trực tiếp từ source code
 3. **Pipeline Tái tạo & Va chạm Tối ưu (De-risked Reconstruction & Collision):**
    - Visual: `COLMAP` $\rightarrow$ `Brush` $\rightarrow$ `splat-transform` (SOG delivery format).
    - Collision & Physics: `splat-transform` xuất `collision.glb` (kết hợp `--voxel-carve` capsule robot kho).
-   - **Hai Safeguards:** Mặt sàn dùng `USD Analytic Ground Plane` phẳng tuyệt đối (triệt tiêu rung nảy bánh xe), và các vật thể mỏng/chân kệ hỗ trợ Box Collider override. OpenMVS chuyển thành Fallback phụ trợ / P1.
+   - **Hai Safeguards:** Mặt sàn dùng `USD Analytic Ground Plane`, vật thể mỏng/chân kệ hỗ trợ Box Collider override. Phải kiểm chứng hành vi thực tế trong Isaac. OpenMVS giữ fallback P0 nếu spike geometry không đạt.
 4. **Phân tách Tiến trình (Process Isolation):**
    Môi trường mô phỏng vật lý (`IsaacLab`) và môi trường render thị giác (`3DGS`) chạy ở các tiến trình độc lập, đồng bộ thông qua camera pose và object transforms.
 
@@ -69,7 +69,7 @@ Toàn bộ 9 repository và utility sau khi audit trực tiếp từ source code
 | **REC-03** | COLMAP SfM & Camera Poses | `Re3Sim` | `colmap/colmap` | `ADAPT` | Trích xuất PyCOLMAP sequential matching, vocab-tree selection (`re3sim/scripts/reconstruct.py`). Bổ sung fail-fast subprocess và chọn largest valid cluster. |
 | **REC-04** | Brush 3DGS Visual Reconstruction | `ArthurBrussee/brush` | `splat-transform` | `REUSE` + `ADAPT` | Brush CLI làm primary backend; `splat-transform` (`readFileInfo`, `validate`, Morton reorder, `fillRatio`, SOG export) làm QA và chuẩn hóa web delivery. |
 | **REC-05** | Voxel Geometry & Collision Mesh | `playcanvas/splat-transform` | `cdcseacave/openMVS` (Fallback) | `ADAPT-CORE` | `splat-transform` GPU voxelization, `--filter-cluster`, `--voxel-carve`, Marching Cubes coplanar merge xuất `collision.glb`. OpenMVS chuyển thành Fallback secondary. Spike `Aisle_CW`. |
-| **REC-06** | Metric Canonicalization | `Re3Sim` | `Open3D` | `ADAPT-HIGH` + `REIMPLEMENT` | Trích xuất kiến trúc frame graph từ `re3sim/utils/frame_tools.py` và giải thuật similarity transform giữa trajectories (`compute_transform_to_marker_aruco.py`). Gắn với LiDAR metric ground-truth của TorWIC. Spike `REC-QUAL-FRAME-01`. |
+| **REC-06** | Metric Canonicalization | `Re3Sim` | `Open3D` | `ADAPT-HIGH` + `REIMPLEMENT` | Frame graph/similarity transform; locked product-safe real-world anchor trước REC-05 voxelization, final verification sau REC-05. Không dùng evaluation-only trajectory/geometry. Spike `REC-QUAL-FRAME-01`. |
 | **REC-07** | ReconstructionBundle Packaging | `SELF-CODE` | — | `SELF-CODE` | Đóng gói bundle bất biến, SHA-256 manifest, verification script. |
 
 ---
@@ -210,9 +210,9 @@ Toàn bộ 9 repository và utility sau khi audit trực tiếp từ source code
 
 Trước khi tiến hành khóa code cho các task trọng điểm, 4 qualification spikes sau đây phải được thực thi và có báo cáo kết quả cụ thể:
 
-1. **`PRODUCT-06Q` — SuperSplat WebGPU Browser Qualification**:
-   - **Mục tiêu**: Kiểm tra khả năng khởi tạo WebGPU context và hiệu năng render file Brush PLY 1–2 triệu điểm trên các trình duyệt mục tiêu (Chrome, Edge, Firefox).
-   - **Tiêu chí PASS**: Khởi tạo WebGPU ổn định, FPS $\ge 30$, bộ nhớ VRAM được giải phóng sạch khi unmount component. Nếu fail $\rightarrow$ kích hoạt fallback hybrid WebGL2 / Three.js.
+1. **`PRODUCT-06Q` — PlayCanvas Browser Qualification**:
+   - **Mục tiêu**: Render Brush PLY/SOG derivative thật bằng Engine 2.22.4 + viewer 1.35.2 trên browser mục tiêu; kiểm tra WebGL2 baseline và WebGPU khi khả dụng.
+   - **Tiêu chí**: Đúng checksum/coordinate, layer/selection/edit mapping, capability/error state và cleanup khi unmount. Đo FPS/VRAM theo config đã khóa; WebGPU fail thì kiểm chứng WebGL2 fallback trong cùng Engine. Không tạo renderer Three.js song song hoặc coi fixture là AC-11 proof. Threshold nghiệm thu theo PRD §2.2, không suy từ audit.
 2. **`SCENE-QUAL-GG-01` — Gaussian Grouping Identity-Lifting Qualification**:
    - **Mục tiêu**: Đo lường xem việc học vector identity per-Gaussian có cải thiện tính nhất quán đa góc nhìn (cross-view consistency) và giảm hiện tượng vỡ cụm (fragmentation) so với baseline `SAM2 + R2G` trên sequence `TorWIC Aisle_CW` hay không.
    - **Tiêu chí PASS**: Hoạt động được trên file Brush PLY đã đóng băng (không train lại toàn scene), giảm tỷ lệ vỡ cụm, runtime hợp lý. Nếu fail $\rightarrow$ giữ nguyên baseline SAM2 + R2G.
@@ -220,7 +220,7 @@ Trước khi tiến hành khóa code cho các task trọng điểm, 4 qualificat
    - **Mục tiêu**: Thử nghiệm chuyển đổi mesh thực tế từ TorWIC OpenMVS sang OpenUSD qua IsaacLab `MeshConverter`. So sánh 3 chế độ: `meshSimplification`, `convexDecomposition` (CoACD), `convexHull`.
    - **Tiêu chí PASS**: Thời gian chuyển đổi $< 60\text{s}$, không bị xuyên sàn, AMR di chuyển ổn định không bị kẹt va chạm giả.
 4. **`REC-QUAL-FRAME-01` — Canonical Transform & FrameTools Qualification**:
-   - **Mục tiêu**: Áp dụng kiến trúc frame graph từ Re3Sim `FrameTools` để chứng minh: Brush 3DGS, OpenMVS Mesh và Registered LiDAR sau chuẩn hóa đều có chung gốc tọa độ, hệ trục canonical và tỷ lệ mét ($1.0 = 1\text{m}$).
+   - **Mục tiêu**: Áp dụng frame graph từ Re3Sim `FrameTools` để chứng minh Brush 3DGS, REC-05 voxel geometry (hoặc OpenMVS fallback) và Registered LiDAR khi có cùng frame canonical/meter. Anchor confirmation đi trước voxelization; final verification đi sau geometry.
    - **Tiêu chí PASS**: Sai số đăng ký giữa các đại diện $< 2\text{cm}$ trên dữ liệu kiểm định TorWIC.
 
 ---
@@ -235,7 +235,7 @@ TIER A — P0 CORE RUNTIME
 1. FFmpeg               : Decode video, trích xuất khung hình định danh (REC-01, REC-02A)
 2. COLMAP (PyCOLMAP)    : Ước tính Structure-from-Motion và Camera Poses (REC-03)
 3. Brush                : Tối ưu hóa 3DGS photorealistic visual representation (REC-04)
-4. OpenMVS              : Tái tạo dense point cloud và reconstructed surface mesh (REC-05)
+4. splat-transform      : Validation/SOG delivery (REC-04), metric voxel geometry (REC-05)
 5. SAM2                 : Mô hình cắt segmentation mask và lan truyền video (SCENE-02)
 6. Open3D               : Xử lý điểm LiDAR, tính toán hình học, OBB/AABB, ICP (REC-06, SCENE-06)
 7. Trimesh              : Kiểm định và xử lý mesh hình học (SIM-02)
@@ -243,20 +243,21 @@ TIER A — P0 CORE RUNTIME
 9. Isaac Sim / IsaacLab : Trình mô phỏng vật lý headless và validation pipeline (SIM-01, SIM-06)
 10. FastAPI             : REST API, SSE streaming và backend orchestration service (PRODUCT-01)
 11. Next.js (App Router): Frontend shell, quản trị dự án, workflow và HITL (PRODUCT-01, PRODUCT-05)
-12. Three.js            : Rendering kỹ thuật cho mesh, point cloud, collider và gizmos (PRODUCT-06)
+12. PlayCanvas Engine + supersplat-viewer: 3DGS, mesh, point cloud, collider và gizmos (PRODUCT-06)
 
 TIER B — P0 CODE DONOR / HIGH-VALUE ADAPT
 ──────────────────────────────────────────
 1. BigCiLeng/R2G        : Thuật toán SAMPro3D (3D projection, multi-view voting, DBSCAN) và OBB (SCENE-03, SCENE-06)
 2. InternRobotics/Re3Sim: PyCOLMAP & OpenMVS orchestration (REC-03, REC-05), FrameTools canonicalization (REC-06), IsaacLab MeshConverterCfg (SIM-05)
 3. playcanvas/supersplat: WebGPU projected splats, multi-layer Splats, transform gizmos, selection tools, Undo/Redo (PRODUCT-06, PRODUCT-07)
-4. playcanvas/splat-transform: PLY semantic validation, overdraw stats (fillRatio), Morton reorder, SOG streaming (REC-04, PRODUCT-06), fallback voxel collider (SIM-02)
+4. playcanvas/splat-transform: Tool runtime ở Tier A; adapt artifact/provenance và coordinate boundary trong EX-REC
 5. PointsCoder/OpenReal2Sim: IsaacLab USD conversion (usd_conversion.py), ground clearance optimization (scenario_collision_optimization.py), container isolation (SIM-02, SIM-05, SIM-06)
 
-TIER C — P0 QUALIFICATION / REFERENCE
+TIER C — P0 SECONDARY / QUALIFICATION / REFERENCE
 ─────────────────────────────────────
 1. lkeab/gaussian-grouping: Khái niệm vector identity per-Gaussian, 3D kNN regularization cho qualification spike SCENE-QUAL-GG-01
 2. zst1406217/VR-Robo   : Mô hình phân tách tiến trình Physics ↔ Visual, Gym RecordVideo fallback cho MP4 replay (SIM-06, SIM-09)
+3. cdcseacave/openMVS  : Surface reconstruction fallback cho REC-05 khi voxel spike không đạt
 
 TIER D — P1 CANDIDATES
 ───────────────────────
@@ -359,7 +360,7 @@ Một lỗi kiến trúc phổ biến trong các dự án Real2Sim là lạm d�
 
 ### Phân định Xóa Vật thể & Xử lý Vết rỗng Hậu cảnh
 - **P0 Level 1 (Logical Deletion)**: Loại bỏ vật thể khỏi `SceneIR.objects[]` và gỡ collider khỏi USD stage.
-- **P0 Level 2 (Decomposition Visibility)**: Ẩn cụm Gaussian tương ứng (`visibility = false` hoặc loại khỏi `GaussianObjectMembership`). Nếu xuất hiện lỗ hổng thị giác ở sàn/tường, chấp nhận vùng rỗng đó trong P0 vì physics mesh sàn của OpenMVS vẫn nguyên vẹn và kín khít.
+- **P0 Level 2 (Decomposition Visibility)**: Ẩn cụm Gaussian tương ứng (`visibility = false` hoặc loại khỏi `GaussianObjectMembership`). Vùng rỗng thị giác có thể chấp nhận trong P0; physics dùng geometry/collider đã kiểm chứng và analytic ground plane. Sau edit phải invalidation/revalidation theo contract, không suy rằng geometry luôn kín khít.
 - **P1 Level 3 (Background Inpainting & Completion)**: Sử dụng mô hình LaMa/Diffusion inpainting hoặc OpenReal2Sim background completion để trám bề mặt thị giác. Tính năng này thuộc P1, tuyệt đối không làm trễ hạn P0.
 
 ---
@@ -373,7 +374,7 @@ Sau toàn bộ chuỗi Deep Audit, đội ngũ đã thống nhất danh sách 10
     (Brush là core engine duy nhất đảm bảo tương thích format, tốc độ và độ sắc nét cho MVP).
 
  2. ❌ KHÔNG dùng SuGaR làm primary geometry path.
-    (Giữ OpenMVS độc lập hoàn toàn với Brush để bảo toàn nguyên tắc Visual ≠ Geometry).
+    (REC-05 voxel geometry primary có qualification; OpenMVS là fallback, geometry derivative tách khỏi visual master).
 
  3. ❌ KHÔNG retrain toàn bộ global scene bằng Gaussian Grouping.
     (Giữ nguyên file PLY đóng băng từ Brush; chỉ trích xuất identity membership nếu spike đạt yêu cầu).
@@ -382,7 +383,7 @@ Sau toàn bộ chuỗi Deep Audit, đội ngũ đã thống nhất danh sách 10
     (DEVA dính bản quyền hạn chế CC BY-NC-SA 4.0 và trùng lặp năng lực với SAM2).
 
  5. ❌ KHÔNG dùng Gaussian point cloud làm physics collider truth.
-    (Gaussian splats là hạt thị giác có độ dày ảo; collider bắt buộc từ OpenMVS/LiDAR/primitives).
+    (EX-SIM kiểm chứng REC-05 voxel geometry, OpenMVS fallback, LiDAR hoặc primitives; không dùng Gaussian centers trực tiếp).
 
  6. ❌ KHÔNG clone nguyên repository OpenReal2Sim, R2G hay Re3Sim vào codebase.
     (Chỉ trích xuất các hàm/module thuật toán sạch theo clean-room pattern và tuân thủ bản quyền).
@@ -405,7 +406,7 @@ Sau toàn bộ chuỗi Deep Audit, đội ngũ đã thống nhất danh sách 10
 ## 11. Kết luận
 
 Sau 7 đợt audit chi tiết và 1 bài utility deep dive, **toàn bộ các khoảng trống kỹ thuật phức tạp nhất của Real2Sim Studio đã được giải quyết bằng các giải pháp mã nguồn mở hàng đầu**:
-- Tái tạo không gian đã có **COLMAP + Brush + OpenMVS + Re3Sim orchestration**.
+- Tái tạo không gian dùng **COLMAP + Brush + splat-transform**, OpenMVS fallback; adapt orchestration/frame tools từ Re3Sim.
 - Chuẩn hóa mây điểm Gaussian đã có **splat-transform**.
 - Phân rã đối tượng đã có **SAM2 + R2G (SAMPro3D)**.
 - Mô phỏng vật lý và OpenUSD đã có **OpenReal2Sim + Re3Sim + VR-Robo + DISCOVERSE (CoACD)**.

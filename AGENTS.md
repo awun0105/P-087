@@ -226,19 +226,20 @@ artifacts. React/Next.js local state không được trở thành competing sour
 Chi tiết: `docs/guide/code-style/python.md` và
 `docs/guide/anti-patterns/common-mistakes.md`.
 
-### TypeScript / React / Three.js
+### TypeScript / React / PlayCanvas
 
 - Frontend mới dùng TypeScript. Không dùng `any` để né contract; validate/parse dữ
   liệu tại API/artifact boundary và giữ typed domain models.
 - Components có một responsibility; tách render state, API state và domain commands.
 - Persisted job/artifact/scene/review/release state thuộc backend; browser state chỉ
   giữ interaction/view state tạm thời.
-- Three.js/Gaussian resources, listeners, animation frames, workers và GPU allocations
+- PlayCanvas/Gaussian resources, listeners, animation frames, workers và GPU allocations
   phải có lifecycle cleanup để tránh leak khi unmount/reload.
 - Renderer path thực sự được triển khai phải có capability/error/degraded state rõ
   ràng. P0 phải render real 3DGS `VisualArtifact` trong browser cùng các view
-  mesh/point-cloud/collider; WebGL/WebGL2 là baseline, WebGPU chỉ cần check khi
-  backend được chọn thực sự dùng WebGPU. Mesh/point-cloud mock không được báo
+  mesh/point-cloud/collider qua PlayCanvas Engine và supersplat-viewer; WebGL2 là
+  baseline, WebGPU được ưu tiên khi khả dụng và phải có capability/fallback proof.
+  Mesh/point-cloud mock không được báo
   cáo như real Brush/3DGS acceptance; mọi GPU resource phải được cleanup.
 - Dùng scripts/linter/test runner thật trong `frontend/package.json` khi scaffold tồn
   tại; không invent command hoặc claim frontend checks trước khi project được tạo.

@@ -36,10 +36,10 @@ Real2Sim Studio tổ chức một workflow thống nhất:
 | Contracts | Pydantic 2 | Foundation baseline với synthetic fixture/integration proof |
 | Backend | FastAPI, Python 3.12 | Organizer scaffold |
 | Agent scaffold | LangGraph, LangChain, multi-provider LLM | Có sẵn, chưa phải Real2Sim pipeline |
-| Reconstruction | FFmpeg, COLMAP, Brush, OpenMVS, Open3D | Planned integration |
+| Reconstruction | FFmpeg, COLMAP, Brush, splat-transform, Open3D; OpenMVS fallback | Planned integration |
 | Scene/Object | SAM2, Open3D, NumPy | Planned integration |
 | Simulation | OpenUSD, NVIDIA Isaac Sim, IsaacLab | Planned integration |
-| Frontend | Next.js, React, TypeScript, Three.js | Planned; chưa scaffold |
+| Frontend | Next.js, React, TypeScript, PlayCanvas Engine + supersplat-viewer | Planned; chưa scaffold |
 | DevOps | Docker, Docker Compose, GitHub Actions | Scaffold backend và CI config; chưa chứng minh full product deployment |
 
 ## Quick Start
