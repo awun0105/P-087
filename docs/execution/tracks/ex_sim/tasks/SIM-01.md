@@ -65,11 +65,12 @@ Không sửa scene/product/reconstruction internals. Shared contract change cầ
 - **Guardrails:**
   - ❌ **Không lấy RL stack**: Bỏ qua toàn bộ stack RSL-RL / PPO / curriculum trong `exts/rsl_rl/`.
   - ❌ **Không copy nguyên renderer**: Source renderer của VR-Robo dính Inria Non-Commercial license.
+  - ❌ **Mặt sàn bắt buộc phẳng tuyệt đối (Safeguard 1)**: Mặt sàn trong USD Stage bắt buộc khởi tạo bằng `UsdGeom.Plane` (hoặc large flat box) phẳng tuyệt đối với hệ số ma sát cố định, tuyệt đối không dùng raw mesh mấp mô làm mặt sàn để triệt tiêu lỗi rung nảy bánh xe robot.
 
 ## 9. Implementation Plan
 
 1. Thiết lập script smoke khởi động IsaacLab headless dựa trên pattern từ `go2_env_cfg.py`.
-2. Tạo minimal USD scene với sàn, tường, hộp và nạp vào IsaacLab qua `UsdFileCfg`.
+2. Tạo minimal USD scene với sàn phẳng toán học (`USD Analytic Ground Plane`), tường, hộp và nạp vào IsaacLab qua `UsdFileCfg`.
 3. Kiểm tra native viewport capture; thử fallback `RecordVideo` nếu native capture gặp sự cố.
 4. Assignee điền files, runtime command, failure handling và proof sau inspect. Không tự khóa policy còn mở.
 

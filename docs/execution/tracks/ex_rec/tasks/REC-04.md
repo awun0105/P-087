@@ -59,17 +59,17 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
   - Hỗ trợ trực tiếp metadata của Brush (`SplatRenderMode: default/mip/2dgs`).
   - `readFileInfo()`: Kiểm tra cấu trúc ngữ nghĩa (Gaussian validity, splat count, LOD counts, SH bands) trước khi công bố artifact.
   - Streaming statistics: min, max, NaN/Inf check và chỉ số `fillRatio` (phát hiện overdraw pathological scenes).
-  - Tối ưu hóa phân phối Web: Morton spatial sorting, nén SOG / Streamed SOG LOD cho SuperSplat.
+  - Tối ưu hóa phân phối Web: Morton spatial sorting, nén SOG / Streamed SOG LOD cho `@playcanvas/supersplat-viewer`.
   - Optional cleanup: `--filter-nan`, GPU-based `filterFloaters()` loại bỏ hạt trôi nổi/nhiễu.
 - **Guardrails / Anti-patterns bắt buộc:**
   - ❌ **Coordinate Convention**: `splat-transform` sử dụng quy ước chuyển đổi riêng (`Transform.PLY` xoay 180° quanh trục Z). Bắt buộc chuyển đổi tại adapter boundary, không để convention này làm thay đổi canonical `CoordinateSystem` của Real2Sim Studio.
-  - ❌ **Master PLY là Canonical Artifact**: Master `visual.ply` sinh ra từ Brush là bất biến (immutable); file `scene.sog` chỉ là delivery derivative phục vụ Web preview.
-  - ❌ **Không dùng làm Primary Collider**: Mesh voxel hóa từ 3DGS chỉ là fallback/baseline đối chứng, không thay thế OpenMVS geometry.
+  - ❌ **Master PLY là Canonical Artifact**: Master `visual.ply` sinh ra từ Brush là bất biến (immutable); file `scene.sog` là delivery derivative phục vụ Web preview trong PlayCanvas Viewport.
+  - ❌ **Ranh giới Collider**: Voxel collision mesh từ 3DGS do `REC-05` và `EX-SIM` phụ trách; `REC-04` chỉ tập trung vào Visual representation (`master.ply` và `scene.sog`).
 
 ## 9. Implementation Plan
 
 1. Xây dựng Brush adapter kích hoạt huấn luyện 3DGS qua CLI/process boundary.
-2. Tích hợp `SplatArtifactProcessor` (dựa trên `splat-transform`) chạy validate `readFileInfo()`, tính stats và xuất SOG delivery derivative.
+2. Tích hợp `SplatArtifactProcessor` (dựa trên `splat-transform`) chạy validate `readFileInfo()`, tính stats và xuất `scene.sog` delivery derivative cho `@playcanvas/supersplat-viewer`.
 3. Xuất bản `VisualArtifact` kèm checksum và provenance liên kết với COLMAP camera poses.
 4. Assignee điền sau khi inspect code/test hiện tại: files cụ thể, sequence, failure handling và proof. Không đổi goal, I/O hoặc authority gate của task.
 

@@ -129,7 +129,7 @@ Ownership:
 | Collider, physics, OpenUSD, Isaac, preflight và runtime validation | `src/services/simulation/` |
 | Jobs, artifact lifecycle/storage, review, release và pipeline orchestration | `src/services/orchestration/` |
 | HTTP routes | `src/api/` |
-| Next.js Web Studio, Three.js viewer và frontend tests | `frontend/` |
+| Next.js Web Studio, PlayCanvas viewer và frontend tests | `frontend/` |
 | TorWIC offline preparation | `scripts/torwic/` |
 | Benchmark metrics và evaluation protocols | `eval/` |
 | Shared development/test artifacts | `fixtures/` |
@@ -147,17 +147,20 @@ Các track không import implementation nội bộ của nhau. Giao tiếp cross
 
 `frontend/` tại repository root là canonical frontend boundary và do `EX-PRODUCT`
 sở hữu. `EX-PRODUCT` được phép tạo scaffold Next.js/TypeScript trong thư mục này,
-bao gồm Web Studio, Three.js viewer, job/progress UI, SceneObject editing,
+bao gồm Web Studio, PlayCanvas 3D viewer, job/progress UI, SceneObject editing,
 validation, review và release UI.
 
-P0 browser viewer dùng `Three.js` + WebGL/WebGL2 tại
-`frontend/src/features/viewer/` cho real 3DGS `VisualArtifact`, geometry mesh,
-point cloud, SceneObject, collider proxy, transform controls và view/layer
-toggles. Các view dùng chung canonical SceneIR/SceneObject transforms; không có
-scene truth riêng trong browser. Gaussian renderer P0 phải load output Brush thực
-qua artifact refs/checksums và được qualification về format, license, browser
-capability và GPU lifecycle. WebGPU là optional backend, không phải P0 requirement;
-synthetic fixture hoặc mesh/point cloud không phải Brush compatibility proof.
+P0 browser viewer dùng `PlayCanvas Engine` (v2.22.4) kết hợp `@playcanvas/supersplat-viewer`
+(v1.35.2) với WebGL2/WebGPU fallback tại `frontend/src/features/viewer/` cho real 3DGS
+`VisualArtifact` (định dạng SOG và compressed PLY), geometry mesh, point cloud,
+SceneObject, collider proxy, transform controls (Translate/Rotate Gizmos) và view/layer
+toggles. Các view dùng chung một Single Scene Graph (`pc.Entity`), chia sẻ chung GPU
+Render Pass và Depth Buffer, gắn chặt với canonical SceneIR/SceneObject transforms;
+không có scene truth riêng trong browser. Gaussian renderer P0 nạp output SOG từ
+`splat-transform` (sinh từ Brush PLY) qua artifact refs/checksums và được qualification
+về format, license, browser capability và GPU lifecycle. WebGPU được ưu tiên khi khả dụng
+và tự động fallback WebGL2; synthetic fixture hoặc mesh/point cloud không phải Brush
+compatibility proof.
 
 Frontend giao tiếp với backend qua FastAPI tại `src/api/` và typed API contracts.
 Không import Python implementation, không gọi trực tiếp worker internals và không
@@ -211,7 +214,7 @@ flowchart TB
         INPUT --> LIDAR["Optional registered LiDAR / adapter-prefused scans"]
         RGB --> POSE["Camera poses / SfM (COLMAP P0)"]
         POSE --> VIS["VisualArtifact: real 3DGS (Brush P0)"]
-        POSE --> GEO["RGB geometry (OpenMVS P0)"]
+        POSE --> GEO["Voxel geometry & collision (splat-transform P0, OpenMVS fallback)"]
         LIDAR --> LG["LiDARGeometryArtifact"]
         LG --> ALIGN["AlignmentRecord if mixed RGB + LiDAR"]
         VIS --> COMPOSE["Metric/canonicalize + SceneComposer"]
@@ -440,7 +443,7 @@ containers từ sơ đồ.
 |----------|--------|--------|
 | Backend boundary | FastAPI tại `src/api/` | Product API và typed worker/artifact orchestration |
 | Frontend boundary | Next.js/TypeScript tại root `frontend/` | Web Studio và client-side 3D viewer; chưa scaffold |
-| Viewer P0 | Three.js/WebGL/WebGL2 + qualified Gaussian renderer | Real 3DGS Visual và kỹ thuật Geometry/Point Cloud/Collider trên cùng SceneIR |
+| Viewer P0 | PlayCanvas Engine + @playcanvas/supersplat-viewer (WebGL2/WebGPU) | Real 3DGS Visual (SOG) và kỹ thuật Geometry/Point Cloud/Collider trên cùng SceneIR |
 | Shared state | `SceneIR` + immutable artifact contracts | Một canonical scene/object transform; không dùng USD/browser state làm truth |
 | Artifact storage P0 | Resolver + filesystem store | Logical URI/SHA-256, atomic immutable handoff; có synthetic Foundation proof |
 | Worker boundary | Isolated runtimes + published artifacts | Tránh import internals/coupling GPU dependencies giữa tracks |

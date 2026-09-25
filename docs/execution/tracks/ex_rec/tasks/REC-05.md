@@ -1,4 +1,4 @@
-# REC-05 — RGB Geometry With OpenMVS
+# REC-05 — Coarse Voxel Geometry & Collision Mesh via splat-transform (OpenMVS as Fallback)
 
 ## 1. Metadata
 
@@ -12,30 +12,33 @@
 
 ## 2. Goal
 
-Tạo dense/mesh RGB geometry artifact đủ cho metric scaling, object association và collider downstream.
+Tạo coarse voxel geometry & collision mesh artifact (`collision.glb`) từ Brush 3DGS thông qua `splat-transform` GPU voxelization và robot capsule carving, phục vụ trực tiếp cho collider downstream trong MVP. OpenMVS giữ vai trò Secondary Fallback.
 
 ## 3. Why This Task Exists
 
-Visual reconstruction không thay thế geometry/physics representation.
+Cung cấp hình học va chạm tĩnh và phân tách không gian lưu thông cho robot mà không cần gánh nặng build native C++/CUDA và rủi ro bản quyền AGPLv3 của OpenMVS. Vẫn bảo toàn nguyên tắc bất biến `Visual ≠ Geometry ≠ Physics`.
 
-Source anchors: [Track Guide](../../../TRACK_IMPLEMENTATION_GUIDE.md), [Contract](../../../TEAM_EXECUTION_CONTRACT.md), [PRD](../../../../PRD.md), [Dataset Playbook](../../../../DATASET_PLAYBOOK.md), [Architecture](../../../../../ARCHITECTURE.md).
+Source anchors: [Track Guide](../../../TRACK_IMPLEMENTATION_GUIDE.md), [Contract](../../../TEAM_EXECUTION_CONTRACT.md), [PRD](../../../../PRD.md), [Dataset Playbook](../../../../DATASET_PLAYBOOK.md), [Architecture](../../../../../ARCHITECTURE.md), [Audit #4a](../../../audits/04a_splat_transform.md).
 
 ## 4. Dependencies
 
-- REC-03 camera poses và COLMAP model.
-- Locked OpenMVS/runtime environment.
+- REC-04 output (Brush `visual.ply` hoặc COLMAP model).
+- `splat-transform` (v3.6.6) Node.js/GPU environment.
+- Locked OpenMVS Docker environment (làm fallback nếu spike không đạt).
 
 ## 5. Input Contract
 
-- REC-03 COLMAP model và normalized camera metadata.
-- Versioned OpenMVS config.
+- REC-04 Brush `visual.ply` (đã qua structural validation).
+- Robot footprint config: capsule height, capsule radius cho indoor carving.
+- Voxel resolution config: mặc định `0.05m` (5cm).
 
 Không đọc evaluation-only data hoặc private temp folder ngoài contract đã nêu.
 
 ## 6. Output Contract
 
-- Normalized RGB geometry artifact ref.
-- Geometry/runtime/config provenance.
+- `GeometryArtifact` trỏ tới `collision.glb`.
+- Voxel metadata: resolution, bounding box, flood fill seed position.
+- Geometry/runtime/config provenance và SHA-256 checksum.
 
 Output quan trọng phải có schema/version phù hợp, checksum, provenance và resolvable artifact refs.
 
@@ -51,46 +54,47 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
 
 ## 8. Tool / Repository Strategy
 
-`REUSE` OpenMVS import/densify/mesh; team viết adapter và output normalization, không viết lại MVS.
+**Primary P0 Strategy (`playcanvas/splat-transform` v3.6.6):**
+- Trích xuất GPU Voxelization từ Gaussian density field:
+  - `--filter-cluster` & `--seed-pos`: Loại bỏ các cụm voxel trôi nổi (floaters), chỉ giữ cụm liên thông.
+  - `--voxel-carve`: Dùng capsule robot kho khoét khoảng không di chuyển (`navigable cavity`).
+  - `--collision-mesh smooth`: Marching Cubes kết hợp coplanar face merge tạo `collision.glb` watertight.
+- **Hai Safeguards bắt buộc:**
+  - ❌ **Không dùng mesh làm sàn robot:** Mặt sàn sẽ do `SIM-01` tạo bằng `USD Analytic Ground Plane` phẳng tuyệt đối.
+  - ❌ **Chân kệ / vật thể mỏng:** Hỗ trợ cơ chế thay thế bằng Box Collider (`SIM-02` / Studio HITL).
 
-**Code Donor Reference (Audit #7):**
-- [`InternRobotics/Re3Sim`](https://github.com/InternRobotics/Re3Sim) (chi tiết: [`docs/execution/audits/07_re3sim.md`](../../../audits/07_re3sim.md)):
-  - Tham khảo `re3sim/scripts/reconstruct.py` chuỗi lệnh điều phối OpenMVS chuẩn:
-    1. `InterfaceCOLMAP` (import SfM scene)
-    2. `DensifyPointCloud` (tạo mây điểm dày đặc)
-    3. `ReconstructMesh scene_dense.mvs -p scene_dense.ply` (dựng lưới đa giác)
-    4. `RefineMesh scene_dense.mvs -m scene_dense_mesh.ply -o scene_dense_mesh_refine.mvs --scales 1 --max-face-area 16` (tối ưu hóa surface)
-    5. `TextureMesh` (tùy chọn sinh textured mesh cho visualization/debug)
-- **Guardrails / Anti-patterns bắt buộc:**
-  - ❌ **Không nuốt lỗi subprocess**: Bắt buộc kiểm tra `check=True`, bắt return code và log chi tiết từng công đoạn OpenMVS.
-  - ❌ **Timeout & Checksum**: Mọi artifact mesh trung gian và mesh cuối phải được bọc trong typed config, timeout và hash SHA-256.
+**Secondary Fallback Strategy (`cdcseacave/openMVS`):**
+- Nếu bài test Spike trên `Aisle_CW` không thỏa mãn điều kiện di chuyển của robot, kích hoạt fallback containerized OpenMVS (`InterfaceCOLMAP` $\rightarrow$ `DensifyPointCloud` $\rightarrow$ `ReconstructMesh`).
 
-## 9. Implementation Plan
+## 9. Qualification Spike trên `Aisle_CW`
 
-Assignee điền sau khi inspect code/test hiện tại: files cụ thể, sequence, failure handling và proof. Không đổi goal, I/O hoặc authority gate của task.
+Trước khi đóng băng việc loại bỏ hoàn toàn OpenMVS:
+1. Chạy 3 cấu hình voxel resolution trên file Brush PLY của `Aisle_CW`:
+   - Config A: `0.10m`
+   - Config B: `0.05m` (Baseline)
+   - Config C: `0.025m`
+2. Kiểm tra 4 tiêu chí cốt lõi:
+   - Aisle không bị ghost-block.
+   - Chiều rộng lối đi không bị phình/hẹp quá sai số an toàn robot ($10-20\text{cm}$).
+   - Kệ hàng và pallet chính tồn tại đúng vị trí.
+   - Chạy test động trong Isaac Sim với sàn USD Plane: kiểm tra các path `CLEAR / BLOCKED`.
+3. Nghiệm thu: Hành vi va chạm đúng trong Isaac Sim ➔ **PASS**.
 
 ## 10. Tests
 
-- Command/config builder unit tests.
-- Missing/invalid geometry negative tests.
-- Small COLMAP scene to OpenMVS smoke và downstream-readable artifact test.
-
-Phân biệt local/mock proof với real tool/GPU smoke trong Result.
+- Command/config builder unit tests cho `splat-transform`.
+- Missing/invalid PLY negative tests.
+- Synthetic/small PLY to `collision.glb` smoke test và topology verification.
+- Fallback OpenMVS adapter smoke test.
 
 ## 11. Definition of Done
 
-- [ ] Geometry artifact được tạo bằng stable adapter.
-- [ ] Format/coordinate metadata/checksum/provenance đầy đủ.
-- [ ] Artifact đủ để REC-06 và EX-SCENE consume qua published ref.
-- [ ] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+- [ ] Geometry/Collision artifact `collision.glb` được tạo bằng `splat-transform` adapter.
+- [ ] Format/coordinate metadata/checksum/provenance đầy đủ theo `GeometryArtifact`.
+- [ ] Spike trên `Aisle_CW` được thực hiện và ghi nhận kết quả rõ ràng.
+- [ ] Artifact đủ để EX-SIM (`SIM-02`) consume làm primary environment collider.
+- [ ] Focused tests pass; evidence/limitations được ghi đầy đủ.
 
 ## 12. Result / Evidence
 
 Pending implementation.
-
-Expected evidence:
-
-- Geometry screenshot/stats.
-- OpenMVS version/log/runtime.
-- Artifact manifest/checksum.
-
