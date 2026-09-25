@@ -32,12 +32,12 @@ Outputs: project/job lifecycle, scene revisions, review history,
 
 - FastAPI, basic worker/queue, SSE/WebSocket/polling.
 - Next.js + TypeScript trong root `frontend/`.
-- `playcanvas/supersplat` (WebGPU): Tier-0 Code Donor Candidate cho 3DGS Visual Editor (`PRODUCT-06`) và interaction machinery (`PRODUCT-07`), chờ qualification spike `PRODUCT-06Q` theo [Audit #4](../../audits/04_supersplat.md).
-- `playcanvas/splat-transform`: Core utility cho Gaussian artifact validation, SOG conversion và LOD streaming.
-- Three.js / WebGL/WebGL2 baseline render technical views (Geometry mesh, Point Cloud, Collider wireframes). Các view kỹ thuật không phải fallback của 3DGS.
-- Gaussian renderer phải qualification bằng output Brush thực; fixture không phải Brush proof.
+- `playcanvas/engine` (v2.22.4): **Tier A — Web 3D Runtime Core**, Single Scene Graph (`pc.Entity`), Depth-synced GSplat & Mesh, Transform Gizmos (`TranslateGizmo`, `RotateGizmo`). Xem [Audit #8](../../audits/08_playcanvas_engine.md).
+- `@playcanvas/supersplat-viewer` (v1.35.2): **Tier A — Embedded 3DGS Viewport Core**, nạp SOG/Streamed SOG LOD và collision GLB, API `createViewer({ ui: false })` với WebGPU/WebGL2 fallback tự động. Xem [Audit #9](../../audits/09_supersplat_viewer.md).
+- `playcanvas/splat-transform` (v3.6.6): Core utility cho Gaussian artifact validation, SOG conversion và voxel collision mesh generation. Xem [Audit #4a](../../audits/04a_splat_transform.md).
+- `playcanvas/supersplat`: Code donor cho logic `EntityTransformHandler`, `EditHistory` (Undo/Redo) và shaders selection (`PRODUCT-07`).
+- Single Scene Graph: Toàn bộ các lớp (Visual SOG, Mesh GLB, Collider GLB) đều nằm chung một Scene Graph trên PlayCanvas Engine, chia sẻ chung GPU Render Pass và Depth buffer, gắn chặt với canonical `SceneIR` transforms; không có scene truth riêng trong browser.
 - Generic Web shell được adapt có chọn lọc từ [`Kiranism/next-shadcn-dashboard-starter`](https://github.com/Kiranism/next-shadcn-dashboard-starter); [`arhamkhnz/next-shadcn-admin-dashboard`](https://github.com/arhamkhnz/next-shadcn-admin-dashboard) và [`shadcndashboard/next-shadcn-dashboard`](https://github.com/shadcndashboard/next-shadcn-dashboard) là UI references, không phải codebase thứ hai.
-- Viewer dùng [Three.js docs/examples](https://threejs.org/docs/); [React Three Fiber](https://github.com/pmndrs/react-three-fiber) là candidate library. [Spark](https://github.com/sparkjsdev/spark) là P0 renderer candidate, [Spark + Next.js example](https://github.com/sparkjsdev/spark-react-nextjs) là integration reference, [Potree](https://github.com/potree/potree) chỉ là point-cloud LOD reference.
 - P0 không yêu cầu advanced scheduler hoặc multi-tenant infrastructure.
 - Product workflow/lifecycle là project-owned; starter chỉ cung cấp generic UI patterns, không mang Clerk/organization/billing hoặc Next.js business backend vào hệ thống.
 
