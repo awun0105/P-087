@@ -56,16 +56,16 @@ Không sửa scene/product/reconstruction internals. Shared contract change cầ
   - `scenario_collision_optimization.py` (**`ADAPT-MEDIUM`**): SDF query, ground clearance, thuật toán chống lún/xuyên sàn.
   - `scenario_construction.py` (**`ADAPT-MEDIUM`**): Trimesh/Open3D AABB extraction, mesh simplification.
 - [`playcanvas/splat-transform`](https://github.com/playcanvas/splat-transform) (chi tiết: [`docs/execution/audits/04a_splat_transform.md`](../../../audits/04a_splat_transform.md)):
-  - Voxelization + Marching Cubes / watertight voxel faces tạo `collision.glb` (**`ADAPT-HIGH` làm fallback**).
-  - Tiện ích kho bãi: `--voxel-carve` (capsule carve khoảng không di chuyển) và `--voxel-floor-fill` (vá lỗ hổng mặt sàn).
+  - Voxelization + Marching Cubes tạo `collision.glb` (**`ADAPT-CORE` làm Primary Environment Collider**).
+  - Tiện ích kho bãi: `--voxel-carve` (capsule carve khoảng không di chuyển cho robot) và `--filter-cluster` (xóa floater).
 - [`discoverse-dev/DISCOVERSE`](https://github.com/discoverse-dev/DISCOVERSE) (chi tiết: [`docs/execution/audits/05_discoverse.md`](../../../audits/05_discoverse.md)):
-  - `scripts/mesh2mjcf.py` portion using `trimesh` + `coacd` (**`ADAPT-HIGH selective`**): CoACD convex decomposition pipeline (`CoACDColliderBackend` candidate) để xử lý các vật thể phức tạp như giá kệ kho bãi thành tập hợp convex parts.
+  - `scripts/mesh2mjcf.py` portion using `trimesh` + `coacd` (**`ADAPT-HIGH selective`**): CoACD convex decomposition pipeline (`CoACDColliderBackend` candidate) để xử lý các vật thể phức tạp rời rạc thành tập hợp convex parts (chỉ dùng khi không thể dùng Box Collider).
   - Mã hóa rõ ràng nguyên tắc: `Visual mesh` ≠ `Collision mesh` (mesh gốc dùng cho visual, các convex parts từ CoACD dùng cho collision).
 - [`InternRobotics/Re3Sim`](https://github.com/InternRobotics/Re3Sim) (chi tiết: [`docs/execution/audits/07_re3sim.md`](../../../audits/07_re3sim.md)):
   - `re3sim/utils/usd/obj_to_usd.py` (**`ADAPT-HIGH`**): Cấu hình IsaacLab `MeshConverterCfg` với các chế độ va chạm (`convexDecomposition`, `convexHull`, `meshSimplification`).
-  - Qualification Spike **`SIM-QUAL-RE3-01`**: Đánh giá chuyển đổi OpenMVS mesh sang Isaac USD, so sánh thời gian convert, độ ổn định va chạm và hiện tượng cản trở di chuyển của AMR.
 - **Guardrails:**
-  - ❌ **Không thay thế OpenMVS**: Collision mesh từ 3DGS chỉ là fallback backend (`SplatVoxelColliderBackend`) hoặc baseline đối chứng khi OpenMVS mesh gặp sự cố.
+  - ❌ **Sàn nhà dùng USD Plane (Safeguard 1)**: Mặt sàn tĩnh luôn dùng `USD Analytic Ground Plane` phẳng tuyệt đối từ `SIM-01`, không dùng raw mesh floor từ bất kỳ nguồn tái tạo nào.
+  - ❌ **Vật thể độc lập ưu tiên Box (Safeguard 2)**: Các SceneObject (kệ, pallet, hộp) ưu tiên sinh Box / OBB collider theo kích thước `primitive_dimensions_xyz_m` hoặc khi người dùng kích hoạt "Replace Collider with Box" trên Web Studio.
   - ❌ **Không copy default physics của DISCOVERSE**: Script gốc hardcode `mass = 0.001 kg`, `diaginertia = 2e-5`; tuyệt đối không mang default tùy tiện này vào Real2Sim. Mọi thông số vật lý phải explicit, policy-generated hoặc human-confirmed.
   - ❌ **Không dùng MJCF generation**: DISCOVERSE tạo file XML MuJoCo; dự án chỉ lấy phần phân rã CoACD và xuất ra OpenUSD/PhysX.
   - ❌ **Sửa lỗi CLI trong script Re3Sim**: Chú ý script gốc của Re3Sim có lỗi sai flag CLI (`--collision-approximation` vs `--collision_approximation`); code adapter phải validate CLI arguments cẩn thận.

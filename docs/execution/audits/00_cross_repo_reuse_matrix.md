@@ -1,7 +1,7 @@
 # Kế hoạch Tái sử dụng Mã nguồn Tổng thể (Cross-Repo Reuse Plan & Final Matrix)
 
 > **Tài liệu tham chiếu:** Báo cáo Tổng hợp Deep Audit cho Toàn bộ Real2Sim Studio (AI20K RAV-01)  
-> **Trạng thái:** Hoàn tất toàn bộ quy trình Audit (7/7 Repositories + 1 Core Utility)  
+> **Trạng thái:** Hoàn tất toàn bộ quy trình Audit (9 Repositories / Core Utilities)  
 > **Các tài liệu audit thành phần:**  
 > 1. [`01_openreal2sim.md`](./01_openreal2sim.md) — `PointsCoder/OpenReal2Sim` (Tier-0 Code Donor cho `EX-SIM`)  
 > 2. [`02_r2g.md`](./02_r2g.md) — `BigCiLeng/R2G` (Tier-0 Algorithm Donor cho `EX-SCENE`)  
@@ -10,28 +10,29 @@
 > 4a. [`04a_splat_transform.md`](./04a_splat_transform.md) — `playcanvas/splat-transform` (Tier-0 Core Utility xuyên suốt `REC/PRODUCT/SIM`)  
 > 5. [`05_discoverse.md`](./05_discoverse.md) — `discoverse-dev/DISCOVERSE` & `DISCOVERSE-Real2Sim` (Tier-0 Integration Reference & P1 Donor)  
 > 6. [`06_gaussian_grouping.md`](./06_gaussian_grouping.md) — `lkeab/gaussian-grouping` (Tier-0 Algorithm Reference & Tier-1 Qualification Candidate)  
-> 7. [`07_re3sim.md`](./07_re3sim.md) — `InternRobotics/Re3Sim` (Tier-0 System Architecture Reference)
+> 7. [`07_re3sim.md`](./07_re3sim.md) — `InternRobotics/Re3Sim` (Tier-0 System Architecture Reference)  
+> 8. [`08_playcanvas_engine.md`](./08_playcanvas_engine.md) — `playcanvas/engine` (Tier-0 Web 3D Runtime Core)  
+> 9. [`09_supersplat_viewer.md`](./09_supersplat_viewer.md) — `@playcanvas/supersplat-viewer` (Tier-0 Embedded 3DGS Viewport Core)  
 
 ---
 
 ## 1. Kết luận Cấp cao & Xác thực Kiến trúc
 
-Toàn bộ 7 repository và 1 utility sau khi audit trực tiếp từ source code (không chỉ đọc README/Paper) đã **xác nhận độc lập tính đúng đắn của Architecture mà Real2Sim Studio đã khóa**:
+Toàn bộ 9 repository và utility sau khi audit trực tiếp từ source code đã xác lập kiến trúc tối ưu nhất cho Real2Sim Studio:
 
 1. **Bảo toàn Invariant Cốt lõi:**
    ```text
    Visual ≠ Geometry ≠ Physics
    ```
-   Các hệ thống thực tế thành công (`Re3Sim`, `OpenReal2Sim`, `VR-Robo`, `DISCOVERSE`) đều **tách bạch representation thị giác (3DGS) khỏi biểu diễn hình học/vật lý (OpenMVS Mesh / OpenUSD / PhysX)**, tuyệt đối không cố ép 3DGS làm physics truth.
-2. **Hai nhánh độc lập từ chung SfM Poses:**
-   `COLMAP` cung cấp hệ camera poses duy nhất; từ đó rẽ thành 2 nhánh:
-   - Nhánh Thị giác: `Brush` (tối ưu hóa 3DGS photorealistic).
-   - Nhánh Hình học: `OpenMVS` (tạo dense point cloud $\rightarrow$ reconstructed mesh).
-   Mô hình này trùng khớp hoàn toàn với pipeline của `Re3Sim`.
-3. **Phân tách Tiến trình (Process Isolation):**
-   Môi trường mô phỏng vật lý (`IsaacLab`) và môi trường render thị giác (`3DGS`) chạy ở các tiến trình độc lập, đồng bộ thông qua camera pose và object transforms (`VR-Robo`, `DISCOVERSE`, `Re3Sim`).
-4. **Trực quan hóa & Thao tác trên Web:**
-   Sử dụng WebGPU projected splats, multi-layer Splats và transform gizmos (`SuperSplat`), kết hợp tối ưu hóa streaming LOD / SOG (`splat-transform`).
+   Tách bạch representation thị giác (3DGS SOG) khỏi biểu diễn hình học/vật lý (Voxel Collider / OpenUSD / PhysX), không ép 3DGS làm physics truth.
+2. **Cấu trúc Web 3D Viewport Thống nhất (Single Scene Graph):**
+   Thay thế Three.js + custom Gaussian renderer bằng **PlayCanvas Engine 2.22.4** và **`@playcanvas/supersplat-viewer` 1.35.2**. Mọi layer (Visual SOG, Mesh GLB, Collider GLB) đều nằm chung một Scene Graph (`pc.Entity`), chia sẻ chung WebGL2/WebGPU Depth Buffer và chung Transform `position/rotation/scale`.
+3. **Pipeline Tái tạo & Va chạm Tối ưu (De-risked Reconstruction & Collision):**
+   - Visual: `COLMAP` $\rightarrow$ `Brush` $\rightarrow$ `splat-transform` (SOG delivery format).
+   - Collision & Physics: `splat-transform` xuất `collision.glb` (kết hợp `--voxel-carve` capsule robot kho).
+   - **Hai Safeguards:** Mặt sàn dùng `USD Analytic Ground Plane` phẳng tuyệt đối (triệt tiêu rung nảy bánh xe), và các vật thể mỏng/chân kệ hỗ trợ Box Collider override. OpenMVS chuyển thành Fallback phụ trợ / P1.
+4. **Phân tách Tiến trình (Process Isolation):**
+   Môi trường mô phỏng vật lý (`IsaacLab`) và môi trường render thị giác (`3DGS`) chạy ở các tiến trình độc lập, đồng bộ thông qua camera pose và object transforms.
 
 ---
 
@@ -39,18 +40,19 @@ Toàn bộ 7 repository và 1 utility sau khi audit trực tiếp từ source co
 
 Đánh giá mức độ đóng góp thực tế của từng repository đối với các năng lực trong Real2Sim Studio:
 
-| Năng lực / Phân hệ | OpenReal2Sim | R2G | VR-Robo | SuperSplat | splat-transform | DISCOVERSE | Gaussian Grouping | Re3Sim |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Global Reconstruction (SfM/Pose)** | Med | Med | Low | — | — | Low | Low | **Very High** |
-| **3DGS Artifact Tooling & LOD** | Low | Med | Med | High | **Very High** | Med | Low | Med |
-| **Multi-view Mask Association** | Low | **Very High** | Low | — | Low | Low | High (qual) | Low |
-| **Object-level 3DGS Visual** | Med | **High** | High | High | Med | **High** | **Very High** | Low |
-| **Web 3D Viewer & Editor** | — | — | — | **Very High** | Utility | — | — | — |
-| **Collider Generation / Convex Dec.** | **Very High** | Low | Low | — | Med (fallback) | **High (CoACD)** | Low (heuristic) | **High** |
-| **OpenUSD Physics Stage Build** | **Very High** | — | Low | — | — | — | — | **High** |
-| **Isaac Sim / IsaacLab Runtime** | High | — | **Very High** | — | — | — | — | **Very High** |
-| **Visual ↔ Physics State Sync** | Med | — | **Very High** | — | — | **Very High** | — | **Very High** |
-| **Remote GS Streaming (P1)** | — | — | Med | — | — | **Very High** | — | — |
+| Năng lực / Phân hệ | OpenReal2Sim | R2G | VR-Robo | PlayCanvas Engine | supersplat-viewer | splat-transform | SuperSplat | DISCOVERSE | Re3Sim |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Global Reconstruction (SfM/Pose)** | Med | Med | Low | — | — | — | — | Low | **Very High** |
+| **3DGS Artifact Tooling & LOD** | Low | Med | Med | High | High | **Very High** | High | Med | Med |
+| **Multi-view Mask Association** | Low | **Very High** | Low | — | — | Low | — | Low | Low |
+| **Object-level 3DGS Visual** | Med | **High** | High | High | High | Med | High | **High** | Low |
+| **Web 3D Viewport Core** | — | — | — | **Very High** | **Very High** | Utility | High | — | — |
+| **Collider Generation / Voxel Mesh** | **Very High** | Low | Low | Med | — | **Very High** | — | **High** | **High** |
+| **OpenUSD Physics Stage Build** | **Very High** | — | Low | — | — | — | — | — | **High** |
+| **Isaac Sim / IsaacLab Runtime** | High | — | **Very High** | — | — | — | — | — | **Very High** |
+| **Visual ↔ Physics State Sync** | Med | — | **Very High** | — | — | — | — | **Very High** | **Very High** |
+| **Remote GS Streaming (P1)** | — | — | Med | Med | Med | — | — | **Very High** | — |
+
 | **Mesh-seeded GS / Asset Gen (P1)** | Med | — | — | — | — | **Very High** | — | — |
 | **Real-robot Calibration (P1/P2)** | Low | — | — | — | — | — | — | **Very High** |
 
@@ -65,8 +67,8 @@ Toàn bộ 7 repository và 1 utility sau khi audit trực tiếp từ source co
 | **REC-01** | Raw Ingestion & Validation | `SELF-CODE` | — | `SELF-CODE` | FFmpeg video inspection, frame drop check, metric timestamp verification. |
 | **REC-02** | Sensor Calibration & Extrinsics | `SELF-CODE` | Re3Sim | `SELF-CODE` + `REFERENCE` | Đọc `TorWIC` calibration matrix; tham chiếu Tsai hand-eye calibration của Re3Sim (`real-deployment/calibration/`). |
 | **REC-03** | COLMAP SfM & Camera Poses | `Re3Sim` | `colmap/colmap` | `ADAPT` | Trích xuất PyCOLMAP sequential matching, vocab-tree selection (`re3sim/scripts/reconstruct.py`). Bổ sung fail-fast subprocess và chọn largest valid cluster. |
-| **REC-04** | Brush 3DGS Visual Reconstruction | `ArthurBrussee/brush` | `splat-transform` | `REUSE` + `ADAPT` | Brush CLI làm primary backend; `splat-transform` (`readFileInfo`, `validate`, Morton reorder, `fillRatio`) làm QA và chuẩn hóa delivery. |
-| **REC-05** | OpenMVS Dense Geometry & Mesh | `Re3Sim` | `cdcseacave/openMVS` | `ADAPT-HIGH` | Trích xuất chuỗi lệnh orchestration: `InterfaceCOLMAP` $\rightarrow$ `DensifyPointCloud` $\rightarrow$ `ReconstructMesh` $\rightarrow$ `RefineMesh` (từ `reconstruct.py`). Bổ sung timeout và checksum. |
+| **REC-04** | Brush 3DGS Visual Reconstruction | `ArthurBrussee/brush` | `splat-transform` | `REUSE` + `ADAPT` | Brush CLI làm primary backend; `splat-transform` (`readFileInfo`, `validate`, Morton reorder, `fillRatio`, SOG export) làm QA và chuẩn hóa web delivery. |
+| **REC-05** | Voxel Geometry & Collision Mesh | `playcanvas/splat-transform` | `cdcseacave/openMVS` (Fallback) | `ADAPT-CORE` | `splat-transform` GPU voxelization, `--filter-cluster`, `--voxel-carve`, Marching Cubes coplanar merge xuất `collision.glb`. OpenMVS chuyển thành Fallback secondary. Spike `Aisle_CW`. |
 | **REC-06** | Metric Canonicalization | `Re3Sim` | `Open3D` | `ADAPT-HIGH` + `REIMPLEMENT` | Trích xuất kiến trúc frame graph từ `re3sim/utils/frame_tools.py` và giải thuật similarity transform giữa trajectories (`compute_transform_to_marker_aruco.py`). Gắn với LiDAR metric ground-truth của TorWIC. Spike `REC-QUAL-FRAME-01`. |
 | **REC-07** | ReconstructionBundle Packaging | `SELF-CODE` | — | `SELF-CODE` | Đóng gói bundle bất biến, SHA-256 manifest, verification script. |
 
@@ -94,9 +96,9 @@ Toàn bộ 7 repository và 1 utility sau khi audit trực tiếp từ source co
 
 | Task ID | Tên Task | Primary Donor | Secondary Donor | Chiến lược | Module / File trích xuất cụ thể |
 |---|---|---|---|:---:|---|
-| **SIM-01** | Minimal Isaac Smoke | `VR-Robo` | `Re3Sim` | `ADAPT` | Khởi tạo IsaacLab headless, nạp stage cơ bản qua `UsdFileCfg`, spawn robot và sensor attachments. |
-| **SIM-02** | Collider Generation | `OpenReal2Sim` | `DISCOVERSE` (CoACD) + `Re3Sim` + `splat-transform` | `ADAPT-HIGH` | Ground clearance và chống lún sàn (`scenario_collision_optimization.py` - OpenReal2Sim); CoACD convex decomposition (`mesh2mjcf.py` - DISCOVERSE); cấu hình `MeshConverterCfg` (`obj_to_usd.py` - Re3Sim); fallback voxel collision (`splat-transform`). Spike `SIM-QUAL-RE3-01`. |
-| **SIM-02A**| Collider Edit Validation | `SELF-CODE` | — | `SELF-CODE` | Kiểm định tính hợp lệ sau khi người dùng chỉnh sửa collider trên Web. |
+| **SIM-01** | Minimal Isaac Smoke | `VR-Robo` | `Re3Sim` | `ADAPT` | Khởi tạo IsaacLab headless, nạp stage cơ bản qua `UsdFileCfg`, spawn robot và sensor attachments. Tích hợp USD Analytic Ground Plane (`UsdGeomPlane` / Flat Box) làm mặt sàn chuẩn phẳng tuyệt đối. |
+| **SIM-02** | Collider Generation | `playcanvas/splat-transform` | `OpenReal2Sim` + `DISCOVERSE` (CoACD) | `ADAPT-HIGH` | Nạp `collision.glb` từ `splat-transform` cho environment; gắn USD Analytic Plane cho sàn; trích xuất Box/OBB collider override cho SceneObjects. CoACD chỉ dùng khi vật thể rời rạc phức tạp. |
+| **SIM-02A**| Collider Edit Validation | `SELF-CODE` | — | `SELF-CODE` | Kiểm định tính hợp lệ sau khi người dùng chỉnh sửa collider trên Web (Box override / transform change). |
 | **SIM-03** | Physics Enrichment | `SELF-CODE` | `Re3Sim` | `SELF-CODE` + `ADAPT` | Gán vật lý vào SceneIR; tham chiếu thiết lập stage units (`metersPerUnit = 1.0`, `kilogramsPerUnit = 1.0`, `Z-up`) từ `obj_to_usd.py` của Re3Sim. |
 | **SIM-04** | Preflight Static Check | `SELF-CODE` | — | `SELF-CODE` | Kiểm tra tĩnh: tính kín của mặt sàn, không va chạm tĩnh giữa các vật thể, tọa độ hợp lệ. |
 | **SIM-05** | Candidate OpenUSD Build | `OpenReal2Sim` | `Re3Sim` | `ADAPT-HIGH` | Dịch SceneIR sang Candidate USD: bóc tách logic `MeshConverter`, `UsdPhysics`, `RigidBodyPropertiesCfg`, CCD từ `usd_conversion.py` (OpenReal2Sim) và `obj_to_usd.py` (Re3Sim). Đóng gói CandidatePackage bất biến kèm SHA-256. |
@@ -116,8 +118,8 @@ Toàn bộ 7 repository và 1 utility sau khi audit trực tiếp từ source co
 | **PRODUCT-03**| Pipeline Orchestration | `SELF-CODE` | — | `SELF-CODE` | Celery / Redis worker task queue, artifact storage manager. |
 | **PRODUCT-04**| Project & Job Management UI | `Kiranism/next-shadcn...` | — | `ADAPT` | Bảng danh sách job, thanh tiến trình các giai đoạn pipeline, form tạo dự án. |
 | **PRODUCT-05**| Human Confirmation HITL UI | `SELF-CODE` | — | `SELF-CODE` | Giao diện duyệt candidate objects: gán nhãn, đổi tên, merge, split, ignore. |
-| **PRODUCT-06**| 3D Scene Viewer Shell | `SuperSplat` | `splat-transform` | `ADAPT-HIGH` | WebGPU projected splat renderer, camera orbit/fly, layer visibility toggles, multi-splats management. Spike `PRODUCT-06Q`. Tối ưu streaming qua SOG format (`splat-transform`). |
-| **PRODUCT-07**| 3D Object Editing & Actions | `SuperSplat` | `Three.js` | `ADAPT-HIGH` | Transform gizmos (Translate, Rotate), selection tools (brush, lasso, box), Undo/Redo (`EditHistory`). Đồng bộ trạng thái về backend `SceneRevision`. |
+| **PRODUCT-06**| 3D Scene Viewer Shell | `@playcanvas/supersplat-viewer` | `playcanvas/engine` | **REUSE-CORE** | Lõi `@playcanvas/supersplat-viewer` nhúng với `ui: false`, nạp SOG/Streamed SOG, WebGPU/WebGL2 fallback, single scene graph binding với `pc.Entity`. |
+| **PRODUCT-07**| 3D Object Editing & Actions | `playcanvas/engine` | `SuperSplat` | **REUSE-CORE** + `ADAPT` | `TranslateGizmo`, `RotateGizmo` của Engine; `EntityTransformHandler`, `EditHistory` từ SuperSplat; HITL action "Replace Collider with Box" đồng bộ về backend `SceneRevision`. |
 | **PRODUCT-08**| Validation & Release Gate | `SELF-CODE` | — | `SELF-CODE` | Xem video replay simulation MP4, duyệt `ValidationReport`, Human Sign-off, phát hành `ReleaseManifest`. |
 
 ---

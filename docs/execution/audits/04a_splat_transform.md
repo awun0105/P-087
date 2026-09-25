@@ -153,29 +153,41 @@ Thực thi thông qua tiến trình Node.js độc lập (`real2sim-splat-worker
 
 ---
 
-## 11. Code Reuse Matrix cho `splat-transform`
+## 11. Phân biệt Bản chất: Occupancy Extraction vs. Surface Reconstruction
 
-| Tính năng                            | Track ứng dụng               | Quyết định                                   |
-| ------------------------------------ | ---------------------------- | -------------------------------------------- |
-| Đọc Brush PLY & preserves metadata   | `EX-REC` (`REC-04`)          | **REUSE-HIGH**                               |
-| `readFileInfo()` cấu trúc            | `EX-REC` (`REC-04`) QA       | **REUSE-HIGH**                               |
-| Thống kê & `fillRatio`               | `EX-REC` / QA Quality Gate   | **ADAPT-HIGH**                               |
-| Lọc NaN/Inf                          | `EX-REC` Post-processing     | **REUSE-HIGH**                               |
-| `filterFloaters` & `filterCluster`   | `EX-REC` Cleanup             | **QUALIFY + ADAPT** (sau khi đo PSNR)        |
-| Sắp xếp Morton & Decimation          | `EX-PRODUCT` Tối ưu hóa      | **REUSE-HIGH**                               |
-| SOG / Streamed SOG LOD               | `EX-PRODUCT` Web Delivery    | **REUSE-HIGH**                               |
-| Voxelization + Marching Cubes        | `EX-SIM` (`SIM-02`) Fallback | **ADAPT-HIGH** (chỉ làm fallback collider)   |
-| Indoor navigation carve & floor fill | `EX-SIM` Pre-simulation test | **ADAPT-MEDIUM**                             |
-| Headless WebP rasterizer             | QA / Walkthrough video       | **ADAPT**                                    |
-| Thay thế OpenMVS mesh                | `EX-REC` / `EX-SIM`          | **DO NOT USE** (vi phạm ranh giới invariant) |
+Audit source-level của `splat-transform` (GPU voxelizer, `filterAndFillBlocks`, `voxel-carve`, Marching Cubes) khẳng định:
+1. **`splat-transform` không làm Surface Reconstruction:** Thuật toán tính Mahalanobis distance từ Gaussian ellipsoids tới từng voxel, tích lũy mật độ $\text{finalOpacity} = 1 - \exp(-\Sigma \text{density})$, rồi gán SOLID nếu $\ge \text{threshold}$ (mặc định 0.1, voxel 0.05m). Đây là **Occupancy Extraction từ Gaussian Density**, không phải stereo matching quang học.
+2. **`--voxel-carve` tối ưu cho Robot kho:** Nhận chiều cao/bán kính capsule của robot, khoét khoảng không lưu thông (`navigable cavity`), trả lời chính xác câu hỏi: *"Với kích thước robot này, đâu là free space và đâu là vùng bị chặn?"*.
+3. **Hai Safeguards cốt tử giải quyết triệt để rủi ro hình học:**
+   - **Safeguard 1 (Mặt sàn):** Không bao giờ dùng mesh 3DGS làm mặt sàn robot! Tách sàn thành **`USD Analytic Ground Plane`** (hoặc flat box phẳng tuyệt đối). Triệt tiêu 100% rủi ro nảy bánh xe hay ma sát bất thường trong Isaac Sim.
+   - **Safeguard 2 (Vật thể mỏng / Chân kệ):** Nếu voxel 5cm làm biến dạng chân kệ hoặc pallet, kỹ sư sử dụng tính năng Studio **"Replace Collider with Box/OBB"** (Human-in-the-Loop).
 
 ---
 
-## 12. Kế hoạch Qualification Spike
+## 12. Code Reuse Matrix cho `splat-transform`
 
-Trước khi nâng hạng từ Candidate → Core, thực hiện spike kiểm chứng trên file Brush PLY thực:
-1. `readFileInfo` nhận diện đúng cấu trúc và model metadata của Brush.
-2. Kiểm tra `stats` không bị NaN/Inf; đo `fillRatio`.
-3. Round-trip PLY → PLY không bị sai lệch hệ trục (flip X/Y/Z).
-4. Xuất SOG và nạp hiển thị trên SuperSplat.
-5. Voxel hóa xuất `collision.glb` và nạp thử vào Trimesh/Open3D/Isaac Sim.
+| Tính năng | Track ứng dụng | Quyết định | Ghi chú tích hợp |
+| :--- | :--- | :--- | :--- |
+| Đọc Brush PLY & preserves metadata | `EX-REC` (`REC-04`) | **REUSE-HIGH** | Input cho toàn bộ post-processing |
+| `readFileInfo()` cấu trúc | `EX-REC` (`REC-04`) QA | **REUSE-HIGH** | Structural validation trước publication |
+| Thống kê & `fillRatio` | `EX-REC` / QA Quality Gate | **ADAPT-HIGH** | Đo overdraw, chặn cảnh bất thường |
+| Lọc NaN/Inf | `EX-REC` Post-processing | **REUSE-HIGH** | Clean artifacts tự động |
+| Sắp xếp Morton & Decimation | `EX-PRODUCT` Tối ưu hóa | **REUSE-HIGH** | Chuẩn bị dữ liệu web |
+| SOG / Streamed SOG LOD | `EX-PRODUCT` Web Delivery | **REUSE-HIGH** | Derivative format chính cho Viewer |
+| Voxelization + Marching Cubes | `EX-SIM` (`SIM-02`) Primary P0 | **ADAPT-CORE** | Tạo environment `collision.glb` (kết hợp USD Plane sàn) |
+| Indoor capsule carve & floor fill | `EX-SIM` Navigation space | **REUSE-CORE** | Khoét không gian di chuyển cho AGV/AMR |
+| Headless WebP rasterizer | QA / Walkthrough video | **ADAPT** | Hỗ trợ smoke test không cần UI |
+| Thay thế OpenMVS mesh trong MVP | `EX-REC` / `EX-SIM` | **QUALIFY-ADOPT** | Thay thế thành công nếu Spike Aisle_CW pass |
+
+---
+
+## 13. Kế hoạch Qualification Spike trên `Aisle_CW`
+
+Thực hiện bài test 1-2 tiếng với file Brush PLY thực tế của cảnh `Aisle_CW` trên 3 cấu hình voxel (`0.10m`, `0.05m`, `0.025m`):
+1. **Ghost blocker check:** Lối đi (aisle) có bị mảng voxel ma nào chặn đứng không?
+2. **Clearance check:** Chiều rộng lối đi có bị phình/hẹp vượt quá sai số an toàn ($10-20\text{cm}$) của robot không?
+3. **Obstacle existence:** Các dãy kệ và pallet chính có tồn tại và cản được va chạm không?
+4. **Isaac Sim dynamic test:** Khi nạp sàn USD Plane riêng biệt, xe AMR chạy các path thử nghiệm có báo `CLEAR / BLOCKED` chính xác không?
+
+> **Tiêu chuẩn nghiệm thu:** *"Visual của mesh va chạm không cần đẹp; miễn là hành vi va chạm (collision behavior) trong Isaac Sim đúng ➔ PASS và chính thức loại OpenMVS khỏi P0."*
+

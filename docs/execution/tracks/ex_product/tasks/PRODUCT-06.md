@@ -42,7 +42,7 @@ Frontend/API không được bypass privacy, artifact, revision hoặc authoriza
 ## 6. Output Contract
 
 - 3D viewer state derived from SceneIR, có mode chuyển 3DGS Visual/Geometry mesh/Point Cloud/Collider.
-- P0 real Gaussian rendering và Three.js technical views bind đúng artifact checksums/canonical transform.
+- P0 real Gaussian rendering và PlayCanvas Engine technical views (Mesh, Collider) bind đúng artifact checksums/canonical transform trên cùng một Scene Graph.
 - Backend edit commands and refreshed canonical revision.
 
 Persisted state phải nằm ở backend/shared artifacts; UI-local state không phải source of truth.
@@ -61,28 +61,26 @@ Không sửa track internals. Shared contract change cần producer + consumer r
 
 ## 8. Tool / Repository Strategy
 
-`SELF-CODE` typed SceneIR composition kết hợp với renderer/editor adapter đã kiểm chứng.
-
-**Code Donor Reference (Audit #4):**
-- Candidate Visual Editor Donor: [`playcanvas/supersplat`](https://github.com/playcanvas/supersplat) kết hợp [`playcanvas/splat-transform`](https://github.com/playcanvas/splat-transform) (xem chi tiết tại [`docs/execution/audits/04_supersplat.md`](../../../audits/04_supersplat.md)).
-- Core components đáng adapt (**`ADAPT-HIGH`**):
-  - WebGPU Gaussian splat renderer hỗ trợ Brush PLY metadata (`SplatRenderMode`).
-  - Hệ thống Camera hoàn chỉnh (Orbit, Fly, Orthographic, axis alignment, reset).
-  - Multi-layer Splats: ánh xạ 1:1 sang các `SceneObject` visual representations.
-  - Transform gizmos (Move, Rotate), bounding-box selection, lasso, brush, eyedropper.
-  - Tối ưu hóa scene lớn: LOD streaming, Morton ordering, định dạng SOG từ `splat-transform`.
-- Three.js / R3F / Spark giữ vai trò technical view baseline cho Geometry mesh, Point Cloud và Collider wireframes.
+**Primary Web 3D Core (`@playcanvas/supersplat-viewer` v1.35.2 + `playcanvas/engine` v2.22.4):**
+- Tái sử dụng trọn vẹn package NPM `@playcanvas/supersplat-viewer` (xem chi tiết tại [`docs/execution/audits/09_supersplat_viewer.md`](../../../audits/09_supersplat_viewer.md)).
+- Nhúng trực tiếp vào Next.js component với cấu hình không UI: `createViewer({ container, contentUrl, ui: false })`.
+- Tự động hỗ trợ WebGPU khi khả dụng và tự động fallback sang WebGL2, đảm bảo 100% yêu cầu P0.
+- Nạp trực tiếp file `.sog` / Streamed SOG LOD (từ `splat-transform`), `.ply` và `collision = .glb`.
+- **Single Scene Graph Architecture (Audit #8):**
+  - Mọi lớp (Visual SOG, Mesh GLB, Collider GLB) đều được gắn trên cùng một `pc.Entity` trong PlayCanvas Engine.
+  - Cùng chia sẻ GPU Render Pass và Depth Buffer (không bị z-fighting).
+  - Cùng chia sẻ Transform `position/rotation/scale`, đồng bộ trực tiếp với `SceneObject` trong `SceneIR`.
 - **Guardrails / Anti-patterns bắt buộc:**
-  - ⚠️ **WebGPU Qualification Spike (`PRODUCT-06Q`)**: SuperSplat thuần WebGPU (không có WebGL fallback). Cần chạy spike kiểm chứng trên browser/GPU mục tiêu trước khi chuyển baseline.
-  - ❌ **SceneIR là Source of Truth**: SuperSplat chỉ là editor frontend; mọi transform/edit phải emit event qua postMessage bridge về Next.js shell → FastAPI → cập nhật `SceneIR` revision. Cấm dùng `.ssproj` hay local state làm canonical scene.
-  - ❌ **Không dùng Cloud Publish**: Bỏ hoàn toàn module upload lên PlayCanvas cloud (`publish.ts`).
-  - ❌ **Geometry/Collider Extension**: SuperSplat không có sẵn viewer cho GLB mesh và collider specs; cần mở rộng bằng engine PlayCanvas hoặc giữ Three.js song song cho technical views.
+  - ❌ **SceneIR là Source of Truth**: Viewer chỉ là viewport hiển thị; mọi transform/edit phải gửi command về backend FastAPI để cập nhật `SceneIR` revision. Local state không bao giờ là canonical scene.
+  - ❌ **SSR Bypass**: Component viewer trong Next.js bắt buộc dùng `next/dynamic(..., { ssr: false })` để tránh lỗi truy cập `window`/WebGL trên Node server.
+  - ❌ **GPU Lifecycle**: Bắt buộc gọi `viewer.destroy()` khi unmount component để giải phóng WebGL/WebGPU context, tránh tràn VRAM trình duyệt.
 
 ## 9. Implementation Plan
 
-1. **Qualification Spike (`PRODUCT-06Q`)**:
-   - Thử nghiệm load file `VisualArtifact.ply` từ Brush qua HTTP URL vào SuperSplat.
-   - Kiểm chứng WebGPU rendering, multi-layer loading (environment + 2 SceneObjects), move/rotate emit event và GPU resource cleanup.
+1. Tạo React component wrapper cho `@playcanvas/supersplat-viewer` với `ui: false` và `ssr: false`.
+2. Tích hợp Single Scene Graph PlayCanvas: nạp Visual SOG (từ `REC-04`) và `collision.glb` (từ `REC-05`/`SIM-02`) trên cùng Entity.
+3. Kích hoạt camera modes (Orbit, Fly, Walk) và surface picking từ viewer API.
+4. Kết nối Transform Gizmo và gửi event cập nhật vị trí về backend SceneIR API.
 2. Xây dựng `Real2SimEditorBridge` (typed postMessage) liên kết Next.js shell với SuperSplat-derived editor.
 3. Tích hợp các view Geometry mesh và Collider wireframes trên PlayCanvas/Three.js.
 4. Tận dụng `splat-transform` cho khâu tối ưu hóa, sinh LOD và SOG streaming.

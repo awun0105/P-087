@@ -71,7 +71,7 @@ Nguyên tắc chung:
 | Simulator patterns | `REFERENCE` | Re3Sim, VR-Robo, DISCOVERSE, OpenReal2Sim | reconstruction→simulator patterns, process isolation | không tạo dependency nếu không cần |
 | Evaluation | `SELF-CODE` | [DATASET_PLAYBOOK](../DATASET_PLAYBOOK.md) | protocol/metric definitions | evaluator orchestration + reports |
 | API/jobs | `SELF-CODE` | FastAPI + basic worker/queue | framework primitives | job/artifact/orchestration lifecycle |
-| Web Studio | `ADAPT` + `SELF-CODE` domain | `playcanvas/supersplat` + `playcanvas/splat-transform` + Next.js + Three.js; Kiranism dashboard starter | WebGPU projected splats, multi-layer Splats, transform gizmos, SOG streaming, generic shell | real 3DGS Visual/Geometry/Point Cloud/Collider views, SceneIR mapping/editing, HITL workflows |
+| Web Studio | `REUSE` + `ADAPT` | `playcanvas/engine` + `@playcanvas/supersplat-viewer` + `playcanvas/splat-transform` + Next.js; Kiranism dashboard starter | SOG streaming, single scene graph, depth-synced layers, transform gizmos, generic shell | real 3DGS Visual/Geometry/Point Cloud/Collider views, SceneIR mapping/editing, HITL workflows |
 | Review/release | `SELF-CODE` | PRD lifecycle | — | approval gate (HITL #2), revision invalidation, release sealing |
 
 Nếu muốn đổi backend hoặc strategy, output contract phải giữ nguyên và phải tuân [`TEAM_EXECUTION_CONTRACT.md`](./TEAM_EXECUTION_CONTRACT.md).
@@ -144,7 +144,7 @@ Không nghiên cứu vô hạn.
 | `REC-02A` Frame extraction | `REUSE` + adapter | FFmpeg | deterministic frame decode/extraction | command builder, normalized frame artifact, provenance |
 | `REC-03` Camera pose | `REUSE` + `ADAPT` | `colmap/colmap` + `Re3Sim` | feature extraction, matching, mapper/SfM, sequential vocab tree | `ColmapAdapter`, model selection, pose normalization |
 | `REC-04` Visual reconstruction | `REUSE` + utility | `ArthurBrussee/brush` + `playcanvas/splat-transform` | 3DGS reconstruction/training, artifact validation, SOG packaging | `BrushAdapter`, `SplatArtifactProcessor`, config, provenance |
-| `REC-05` RGB geometry | `REUSE` + `ADAPT` | `cdcseacave/openMVS` + `Re3Sim` | COLMAP import, densify, mesh, refine command orchestration | `OpenMVSAdapter`, output normalization, timeout/checksum |
+| `REC-05` Voxel geometry & collision | `ADAPT-CORE` | `playcanvas/splat-transform` + `cdcseacave/openMVS` (fallback) | GPU voxelization, filter-cluster, capsule carve, collision GLB | `SplatTransformAdapter`, collision normalization, OpenMVS fallback |
 | `REC-06` Metric scale | `SELF-CODE` + `ADAPT` | PRD + `Re3Sim` FrameTools concept | frame graph, similarity transform estimation | anchor workflow, scale propagation, confirmation record |
 | `REC-07` LiDAR prefusion | `SELF-CODE` + library | Open3D | transform/filter/voxel primitives | TorWIC prefusion + GT-dependency provenance |
 | `REC-08` LiDAR ingest | `SELF-CODE` + library | Open3D | point-cloud validation/filtering | `LiDARGeometryArtifact` producer |
@@ -211,15 +211,15 @@ COLMAP
 
 Visual không được dùng như collider.
 
-### REC-05 — RGB geometry
+### REC-05 — Voxel geometry & collision
 
 ```text
-COLMAP
-→ OpenMVS
-→ mesh / dense geometry
+Brush 3DGS
+→ splat-transform (GPU voxelization + capsule carve)
+→ collision.glb (OpenMVS fallback)
 ```
 
-Geometry phải đủ cho downstream scale/object/collider.
+Geometry/Collider phải đủ cho downstream navigation/object/collider.
 
 ### REC-06 — RGB metric scale
 
@@ -634,8 +634,8 @@ Reference / Code Donors (Deep Audit):
 
 | Stage | Strategy | Source | Lấy từ repo/tool | Team tự code |
 |---|---|---|---|---|
-| `SIM-01` Isaac smoke | `REUSE` platform + `ADAPT` | OpenUSD, Isaac Sim, IsaacLab + VR-Robo | USD/simulator APIs, `UsdFileCfg` scene load, environment setup | minimal USD builder + smoke script |
-| `SIM-02` Collider | `SELF-CODE` + `ADAPT` | Trimesh, Open3D + OpenReal2Sim + DISCOVERSE (CoACD) + Re3Sim + `splat-transform` (fallback) | OBB/AABB/convex utilities, CoACD decomposition, MeshConverterCfg, ground clearance, voxel collision fallback | collider policy + `ColliderGenerator` |
+| `SIM-01` Isaac smoke | `REUSE` platform + `ADAPT` | OpenUSD, Isaac Sim, IsaacLab + VR-Robo | USD/simulator APIs, `UsdFileCfg` scene load, environment setup | minimal USD builder + USD Analytic Ground Plane + smoke script |
+| `SIM-02` Collider | `ADAPT-CORE` | `playcanvas/splat-transform` (primary) + OpenReal2Sim + CoACD + USD Plane | Voxel collision GLB, analytic ground plane, primitive box override, CoACD decomposition | collider policy + `ColliderGenerator` |
 | `SIM-02A` Collider edit validation | `SELF-CODE` | `ColliderSpec` contract | — | validate type/dimensions/local transform after edit |
 | `SIM-03` Physics enrichment | `SELF-CODE` | Scene IR contract | — | `ColliderSpec`/physics metadata on same SceneIR schema |
 | `SIM-04` Preflight | `SELF-CODE` | PRD/Integration Playbook | — | deterministic rules + report |
@@ -884,10 +884,9 @@ Baseline:
 - FastAPI
 - basic worker/queue
 - SSE/WebSocket/polling cho status
-- Next.js
-- `playcanvas/supersplat` (WebGPU): **Tier-0 Code Donor Candidate** cho 3DGS Visual Editor (chờ qualification spike `PRODUCT-06Q`). Xem [`docs/execution/audits/04_supersplat.md`](./audits/04_supersplat.md).
-- Three.js / WebGL/WebGL2: technical views (geometry/point-cloud/collider/transforms) và baseline rendering.
-- `playcanvas/splat-transform`: Core utility cho Gaussian artifact validation, SOG conversion và LOD streaming.
+- `playcanvas/engine` (v2.22.4): **Tier A — Web 3D Runtime Core**, unified scene graph (`pc.Entity`), depth-synced layers, transform gizmos. Xem [`docs/execution/audits/08_playcanvas_engine.md`](./audits/08_playcanvas_engine.md).
+- `@playcanvas/supersplat-viewer` (v1.35.2): **Tier A — Embedded 3DGS Viewport Core**, SOG/LOD streaming, WebGPU/WebGL2 fallback. Xem [`docs/execution/audits/09_supersplat_viewer.md`](./audits/09_supersplat_viewer.md).
+- `playcanvas/splat-transform` (v3.6.6): Core utility cho Gaussian artifact validation, SOG conversion và voxel collision mesh generation.
 
 Không cần advanced scheduler/multi-tenant infra trong P0.
 
@@ -900,9 +899,9 @@ Không cần advanced scheduler/multi-tenant infra trong P0.
 | `PRODUCT-03` Worker abstraction | `SELF-CODE` | worker contract | — | dispatch interface + queue/CLI integration |
 | `PRODUCT-04` Artifact access | `SELF-CODE` | shared contract | — | registry/resolver |
 | `PRODUCT-05` Web shell | `SELF-CODE` domain + selective `ADAPT` UI | Next.js + Kiranism dashboard starter; arhamkhnz/shadcndashboard as secondary references | sidebar, layout, table, form, loading/error, upload UI patterns | typed FastAPI client, project/job/artifact workflow and state ownership |
-| `PRODUCT-06` 3D Viewer | `SELF-CODE` + `ADAPT` | `playcanvas/supersplat` (Visual 3DGS editor donor) + Three.js/Spark (technical views) | WebGPU splat renderer, camera orbit/fly, selection, layer transform gizmos | SceneIR bridge, Geometry/Collider technical views, artifact resolver |
-| `PRODUCT-07` Object actions | `SELF-CODE` + `ADAPT` | `playcanvas/supersplat` interaction machinery + Scene Core | `EntityTransformHandler`, Move/Rotate gizmos, selection, `EditHistory` | domain commands, backend revision persistence, authorization |
-| `PRODUCT-07A` Added asset/collider UI | `SELF-CODE` | SceneIR/ColliderSpec contracts | Three.js controls | add/delete obstacle, dimensions, collider adjustment |
+| `PRODUCT-06` 3D Viewer | `REUSE` + `ADAPT` | `@playcanvas/supersplat-viewer` + `playcanvas/engine` | SOG/LOD loader, WebGPU/WebGL2 fallback, single scene graph, depth-synced layers | Next.js dynamic wrapper, SceneIR bridge, artifact resolver |
+| `PRODUCT-07` Object actions | `REUSE` + `ADAPT` | `playcanvas/engine` + `SuperSplat` interaction machinery | Translate/Rotate gizmos, selection, `EditHistory`, Replace Collider with Box | domain commands, backend revision persistence, authorization |
+| `PRODUCT-07A` Added asset/collider UI | `SELF-CODE` | SceneIR/ColliderSpec contracts | PlayCanvas controls | add/delete obstacle, dimensions, collider adjustment |
 | `PRODUCT-08` Orchestration | `SELF-CODE` | shared worker contracts | — | REC→SCENE→SIM control flow |
 | `PRODUCT-09` Progress/error/retry | `SELF-CODE` | PRD | — | monitoring + user-facing errors |
 | `PRODUCT-10` Review lifecycle | `SELF-CODE` | PRD | — | review state machine + approval gate + `ApprovalRecord` |

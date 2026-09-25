@@ -715,9 +715,9 @@ Chương này tập trung vào khía cạnh Software Engineering: Cách con ngư
 
 ## 5.1 Giao diện Web Studio và Tương tác Người dùng
 
-- **Trách nhiệm của Web UI:** Web Studio (Next.js, Three.js, FastAPI) là nơi user upload video, xem tiến độ, render real 3DGS `VisualArtifact` của Primary RGB Scene và chuyển sang các view Geometry mesh, Point Cloud, Collider/SceneObject transforms để inspect và chỉnh scene. Các view kỹ thuật này không phải fallback của 3DGS.
+- **Trách nhiệm của Web UI:** Web Studio (Next.js, PlayCanvas Engine, FastAPI) là nơi user upload video, xem tiến độ, render real 3DGS `VisualArtifact` (định dạng SOG/compressed PLY) của Primary RGB Scene và chuyển sang các view Geometry mesh, Point Cloud, Collider/SceneObject transforms để inspect và chỉnh scene trên cùng một Viewport.
 - **Canonical placement:** EX-PRODUCT sở hữu cả backend và frontend. FastAPI routes nằm ở `src/api/`, job/artifact/review/release logic nằm ở `src/services/orchestration/`, còn toàn bộ Next.js/TypeScript Web Studio nằm ở root `frontend/` theo [`ARCHITECTURE.md`](../../ARCHITECTURE.md). Frontend chỉ gọi backend qua typed API contract; không tạo business-state source of truth cạnh tranh trong Next.js hoặc local React state.
-- **Renderer scope:** P0 dùng Three.js + WebGL/WebGL2 baseline cho các view kỹ thuật và phải qualification một Gaussian renderer để render output Brush thực. WebGPU có thể là backend thay thế, không phải requirement P0. Viewer phải resolve checksum/coordinate metadata từ `VisualArtifact`, hiển thị lỗi rõ khi thiếu/không tương thích và cleanup GPU resources. Synthetic fixture hoặc PLY point cloud load bằng `PLYLoader` không chứng minh browser đã render 3DGS.
+- **Renderer scope:** P0 sử dụng `PlayCanvas Engine` (v2.22.4) và `@playcanvas/supersplat-viewer` (v1.35.2) với cơ chế Single Scene Graph (`pc.Entity`). WebGPU được ưu tiên khi khả dụng và tự động fallback WebGL2 cho mọi client. Toàn bộ các lớp (Visual SOG, Mesh GLB, Collider GLB) đều chia sẻ chung một Depth Buffer và chung Transform `position/rotation/scale`. Viewer resolve checksum/coordinate metadata từ `VisualArtifact`, hiển thị lỗi rõ khi thiếu/không tương thích và tự động dọn dẹp GPU resources (`destroy()`) khi unmount. Synthetic fixture hoặc PLY point cloud load bằng `PLYLoader` không chứng minh browser đã render 3DGS.
 ### Human Object Confirmation
 Human Object Confirmation — P0
 
@@ -1287,24 +1287,26 @@ Tuyệt đối không nhồi nhét tất cả các repo vào chung một dự á
 |---|---|---|---|
 | `colmap/colmap` | SfM / Camera Pose | Core Backend | CLI / executable backend qua PyCOLMAP |
 | `ArthurBrussee/brush` | 3DGS visual reconstruction | Core Backend | CLI/container backend (`REC-04`) |
-| `cdcseacave/openMVS` | RGB dense geometry + mesh | Core Backend | Executable/container backend (`REC-05`) |
+| [`playcanvas/splat-transform`](https://github.com/playcanvas/splat-transform) | PLY semantic validation, SOG packaging, GPU voxelization, capsule carving, collision GLB | **Tier A — Core Utility & Collision Provider** | Validation & SOG export (`REC-04`), Voxel & Collision GLB generation (`REC-05`, `SIM-02`). Xem [Audit #4a](./audits/04a_splat_transform.md) |
+| `cdcseacave/openMVS` | RGB dense geometry + mesh fallback | Secondary / Fallback | Executable/container fallback backend (`REC-05` fallback) |
 | `facebookresearch/sam2` | Automatic masks + video propagation | Core Backend | Python model worker (`SCENE-02`) |
 | `isl-org/Open3D` | LiDAR, alignment, geometry utilities | Core Library | Python/C++ library (`REC-06`, `SCENE-06`, `SIM-02`) |
 | `mikedh/trimesh` | Mesh/collider utilities | Core Utility | Python library (`SIM-02`) |
-| `PixarAnimationStudios/OpenUSD` | USD scene model | Core Simulator Layer | Python/C++ API (`SIM-05`) |
+| `PixarAnimationStudios/OpenUSD` | USD scene model & Analytic Plane | Core Simulator Layer | Python/C++ API (`SIM-01`, `SIM-05`) |
 | `isaac-sim/IsaacLab` | Isaac integration/physics | Core Simulator | Simulator worker (`SIM-01`, `SIM-06`) |
+| [`playcanvas/engine`](https://github.com/playcanvas/engine) | Unified Web 3D Runtime, Scene Graph, Gizmo, Depth-synced GSplat & Mesh | **Tier A — Web 3D Runtime Core** | Viewport runtime, single scene graph binding (`pc.Entity`), gizmos (`PRODUCT-06`, `PRODUCT-07`). Xem [Audit #8](./audits/08_playcanvas_engine.md) |
+| [`@playcanvas/supersplat-viewer`](https://github.com/playcanvas/supersplat-viewer) | Embedded 3DGS viewer package, SOG/LOD streaming, WebGPU/WebGL2 fallback | **Tier A — Embedded 3DGS Viewport Core** | Viewport integration qua `createViewer({ ui: false })` (`PRODUCT-06`). Xem [Audit #9](./audits/09_supersplat_viewer.md) |
 | [`PointsCoder/OpenReal2Sim`](https://github.com/PointsCoder/OpenReal2Sim) | USD conversion, PhysX configs, collision optimization | **Tier-0 Code Donor cho EX-SIM** | Adapt `usd_conversion.py` (`SIM-05`), `scenario_collision_optimization.py` (`SIM-02`), Docker runtime isolation (`SIM-06`). Xem [Audit #1](./audits/01_openreal2sim.md) |
 | [`BigCiLeng/R2G`](https://github.com/BigCiLeng/R2G) | Multi-view mask association, OBB extraction | **Tier-0 Algorithm Donor cho EX-SCENE** | Adapt SAMPro3D (`perform_3dsegmentation`, DBSCAN, prompt consolidation) cho `SCENE-03`; `get_aabb.py` OBB cho `SCENE-06`. Xem [Audit #2](./audits/02_r2g.md) |
 | [`zst1406217/VR-Robo`](https://github.com/zst1406217/VR-Robo) | IsaacLab scene/robot runtime, video replay, visual/physics separation | **Tier-0 Integration Donor cho EX-SIM** | Adapt `vrrobo_isaaclab` scene/robot runtime (`SIM-01`, `SIM-06`), Gym `RecordVideo` fallback, process isolation (`SIM-09`). Xem [Audit #3](./audits/03_vr_robo.md) |
-| [`playcanvas/supersplat`](https://github.com/playcanvas/supersplat) | WebGPU 3DGS Visual Editor, multi-layer Splats, transform gizmos | **Tier-0 Code Donor cho EX-PRODUCT** | Adapt WebGPU projected splats, camera navigation, layer visibility toggles (`PRODUCT-06`), transform gizmos, selection tools, Undo/Redo (`PRODUCT-07`). Xem [Audit #4](./audits/04_supersplat.md) |
-| [`playcanvas/splat-transform`](https://github.com/playcanvas/splat-transform) | PLY semantic validation, overdraw metrics, Morton reorder, SOG streaming, voxel collision | **Tier-0 Core Utility Candidate** | Trích xuất `readFileInfo()`, `fillRatio`, Morton reorder (`REC-04`), SOG streaming (`PRODUCT-06`), fallback voxel collision mesh (`SIM-02`). Xem [Audit #4a](./audits/04a_splat_transform.md) |
+| [`playcanvas/supersplat`](https://github.com/playcanvas/supersplat) | Transform handling, selection masks, EditHistory undo/redo | **Tier-0 Code Donor cho EX-PRODUCT** | Logic trích xuất: `EntityTransformHandler`, `EditHistory`, Gaussian selection shaders (`PRODUCT-07`). Xem [Audit #4](./audits/04_supersplat.md) |
 | [`discoverse-dev/DISCOVERSE`](https://github.com/discoverse-dev/DISCOVERSE) | Visual ↔ Physics sync (`gs_model_dict`), CoACD collider decomposition, remote NVENC H.264 stream | **Tier-0 Integration Reference & P1 Code Donor** | Tham chiếu `gs_model_dict` binding (`SIM-06`), CoACD convex decomposition (`SIM-02`), ZeroMQ + NVENC H.264 video stream cho P1 live viewport. Xem [Audit #5](./audits/05_discoverse.md) |
 | [`discoverse-dev/DISCOVERSE-Real2Sim`](https://github.com/discoverse-dev/DISCOVERSE-Real2Sim) | Mesh → multiview rendering → Mesh-seeded 3DGS, DiffusionLight relighting | **P1 Asset Generation Reference** | Tham chiếu workflow tạo asset người dùng thêm mới (P1). Xem [Audit #5](./audits/05_discoverse.md) |
 | [`lkeab/gaussian-grouping`](https://github.com/lkeab/gaussian-grouping) | Per-Gaussian Identity Encoding, 3D spatial consistency loss | **Tier-0 Algorithm Reference & Tier-1 Qualification Candidate** | Khái niệm vector identity per-Gaussian, regularization loss không gian 3D kNN cho spike `SCENE-QUAL-GG-01`. Xem [Audit #6](./audits/06_gaussian_grouping.md) |
-| [`InternRobotics/Re3Sim`](https://github.com/InternRobotics/Re3Sim) | End-to-end Real RGB → COLMAP → 3DGS Visual + OpenMVS Mesh → common metric frame → USD/PhysX → Isaac | **Tier-0 System Architecture Reference** | Xác thực độc lập architecture; PyCOLMAP & OpenMVS orchestration (`REC-03`, `REC-05`), FrameTools & similarity transform (`REC-06`), IsaacLab MeshConverter (`SIM-05`). Xem [Audit #7](./audits/07_re3sim.md) |
+| [`InternRobotics/Re3Sim`](https://github.com/InternRobotics/Re3Sim) | End-to-end Real RGB → COLMAP → 3DGS Visual + OpenMVS Mesh → common metric frame → USD/PhysX → Isaac | **Tier-0 System Architecture Reference** | Xác thực độc lập architecture; PyCOLMAP orchestration (`REC-03`), FrameTools & similarity transform (`REC-06`), IsaacLab MeshConverter (`SIM-05`). Xem [Audit #7](./audits/07_re3sim.md) |
 | [`Kiranism/next-shadcn-dashboard-starter`](https://github.com/Kiranism/next-shadcn-dashboard-starter) | EX-PRODUCT Web shell, table/form/query-state patterns | P0 selective `ADAPT` reference | Adapt sidebar/layout, list/detail, loading/error and form patterns into `frontend/` (`PRODUCT-01`, `PRODUCT-04`). |
-| [`three.js`](https://threejs.org/docs/) | Browser scene primitives | P0 library/reference | Fallback visual/geometry rendering, collider preview controls. |
-| `Anttwo/SuGaR` | 3DGS→mesh hybrid representation | Alternative geometry | Reference/experimental only; P0 giữ OpenMVS độc lập với Brush. |
+| [`three.js`](https://threejs.org/docs/) | Browser scene primitives | Fallback / Reference | Thay thế bởi PlayCanvas Engine; chỉ giữ tham chiếu. |
+| `Anttwo/SuGaR` | 3DGS→mesh hybrid representation | Alternative geometry | Reference/experimental only; P0 giữ pipeline độc lập với Brush. |
 | `RuijieZhu94/ObjectGS` | Object-aware GS + object mesh | Research candidate | Reference chỉ khi SAMPro3D/R2G gặp hạn chế. |
 
 EX-PRODUCT không clone nguyên dashboard starter vào repository. Các repo Web ở trên
@@ -1315,9 +1317,9 @@ code phải kiểm tra license của đúng revision và giữ attribution/notic
 ### 7.1.0 Phân tầng Repository Chuẩn hóa (Repo Tiers A–E)
 
 Sau toàn bộ chuỗi Deep Audit, toàn bộ hệ sinh thái repository liên quan được chuẩn hóa vào 5 tầng rõ ràng:
-- **Tier A (P0 Core Runtime):** FFmpeg, COLMAP, Brush, OpenMVS, SAM2, Open3D, Trimesh, OpenUSD, Isaac Sim / IsaacLab, FastAPI, Next.js, Three.js.
-- **Tier B (P0 Code Donor / High-Value Adapt):** R2G, Re3Sim, SuperSplat, splat-transform, OpenReal2Sim.
-- **Tier C (P0 Qualification / Reference):** Gaussian Grouping (spike `SCENE-QUAL-GG-01`), VR-Robo (process separation, Gym `RecordVideo` fallback).
+- **Tier A (P0 Core Runtime):** FFmpeg, COLMAP, Brush, `splat-transform`, SAM2, Open3D, Trimesh, OpenUSD, Isaac Sim / IsaacLab, FastAPI, Next.js, `playcanvas/engine`, `@playcanvas/supersplat-viewer`.
+- **Tier B (P0 Code Donor / High-Value Adapt):** R2G, Re3Sim, SuperSplat, OpenReal2Sim.
+- **Tier C (P0 Secondary / Fallback):** OpenMVS (geometry fallback cho `REC-05`), Gaussian Grouping (spike `SCENE-QUAL-GG-01`), VR-Robo (process separation, Gym `RecordVideo` fallback).
 - **Tier D (P1 Candidates):** DISCOVERSE (live NVENC stream), DISCOVERSE-Real2Sim (Mesh-seeded GS), Gaussian Grouping inpainting, OpenReal2Sim background completion, VR-Robo live GS sync.
 - **Tier E (Fallback / Experimental):** SuGaR, Nerfstudio, gsplat custom backend, ObjectGS, SegAnyGaussians.
 
