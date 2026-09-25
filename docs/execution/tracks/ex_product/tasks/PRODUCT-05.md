@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-PRODUCT` |
 | Priority | `P0` |
-| Status | `IN_PROGRESS` |
+| Status | `DONE` |
 | Owner | Cường |
 | Target milestone | `M1/M2` |
 
@@ -150,7 +150,7 @@ Tách fixture/mock/API/browser proof khỏi real-worker Product E2E acceptance.
 
 ## 12. Result / Evidence
 
-**Ngày:** 2026-09-24 · **Nhánh:** `feat/product`
+**Ngày:** 2026-09-24 (build/test) và 2026-09-25 (browser smoke) · **Nhánh:** `feat/product`
 
 **Build — `npm run build` (exit 0):**
 
@@ -201,19 +201,61 @@ expect(result.error.status).toBe(409);
 expect(result.error.detail).toBe("không thể tạo job: privacy gate chặn");
 ```
 
+**Browser smoke thật — ngày 2026-09-25, Chrome headless trỏ vào backend đang chạy:**
+
+Đây là phần §12 trước đó ghi là "chưa làm". Đã chạy được, nên `Status` chuyển
+`IN_PROGRESS` → `DONE`.
+
+Môi trường: backend `uvicorn src.main:app --host 127.0.0.1 --port 8000`, frontend
+`npm run dev` (Next.js 16.3.6 Turbopack, `http://localhost:3000`), trình duyệt
+`chrome.exe --headless --dump-dom` / `--screenshot`.
+
+**1. Proxy `rewrites` chạy thật — không phải CORS, không phải mock:**
+
+```
+GET http://localhost:3000/api/v1/projects   →  200
+{"projects":[{"project_id":"project-fixture-001","name":"Fixture warehouse project",
+ "source_type":"dataset", ... "privacy_report":{"result":"VERIFIED_ANONYMIZED", ...}}]}
+```
+
+Request đi qua Next rồi tới FastAPI thật; backend log ghi nhận đúng từng lượt gọi
+từ trình duyệt (`GET /api/v1/jobs/job-fixture-001/scene HTTP/1.1" 200` ×8, v.v.).
+
+**2. Cả 6 route dựng được và trả 200 trong trình duyệt thật:**
+
+| Route | `data-testid` quan sát được trong DOM |
+|---|---|
+| `/projects` | `privacy-badge` (giá trị `VERIFIED_ANONYMIZED · cho phép dispatch`) |
+| `/projects/[projectId]` | `privacy-badge`, `job-status` |
+| `/jobs/[jobId]` | `job-status`, `job-tabs`, `lifecycle` |
+| `/jobs/[jobId]/viewer` | `scene-canvas`, `scene-revision` (`rev-001`), `brush-proof-absent`, `job-tabs` |
+| `/jobs/[jobId]/validation` | `no-runtime-proof`, `job-tabs` |
+| `/jobs/[jobId]/review` | `synthetic-authorization`, `job-tabs` |
+
+Dữ liệu trong DOM là dữ liệu fixture thật (`Fixture warehouse project`,
+`sha256:afe1bbad091…`), không phải chữ hardcode trong JSX.
+
+**3. Trạng thái lỗi/thiếu bằng chứng hiện đúng trên trình duyệt, không bị "trang
+trí" thành thành công:** `brush-proof-absent` (viewer), `no-runtime-proof` +
+`UNVERIFIED` (validation), `synthetic-authorization` + "không phải uỷ quyền của
+Reviewer thật (PRODUCT-10)" (review). Đây chính là các nhãn mà §11 đòi để một
+fixture không bị đọc nhầm thành acceptance.
+
+**4. Ảnh chụp** (`.smoke/shots/`, 6 file `01-projects.png` … `06-review.png`):
+`04-viewer.png` (375 KB) là ảnh render 3D thật — sàn và rack của warehouse hiện
+lên trong canvas, panel layer có dữ liệu, banner thiếu bằng chứng Brush hiện rõ.
+
 **Limitations**
 
-- **Chưa chạy browser smoke.** Đây là khoảng trống lớn nhất: §10 yêu cầu "browser
-  shell smoke through fixture API" và M1 yêu cầu demo được trên browser, nhưng
-  trong phiên này chỉ chạy được `vitest` (jsdom) + `next build`. Chưa có lần nào
-  mở trình duyệt thật, trỏ vào backend đang chạy, đi hết
-  `project → job → viewer → review`. Vì vậy `Status` để `IN_PROGRESS`, **không**
-  phải `DONE`.
-- Điều *được* chứng minh: shell build được, mọi route dựng được, contract biên dịch
-  khớp backend, và các trạng thái lỗi/rỗng render ra chữ. Điều *chưa* được chứng
-  minh: luồng điều hướng thật trong browser và proxy `rewrites` sang backend thật.
+- Browser smoke chạy trên **Chrome headless**, không phải Chrome có giao diện và
+  không phải một bộ E2E test tự động (`playwright` không có trong repo). Đã kiểm
+  DOM thật, ảnh chụp thật và request thật tới backend, nhưng **chưa** kiểm
+  tương tác người dùng (click, orbit, gõ phím) bằng test tự động. Việc đó thuộc
+  PRODUCT-07/07A.
 - Chưa có test cho các trang `projects/[projectId]`, `jobs/[jobId]`,
-  `validation`, `review` ở tầng component — chúng mới chỉ được `next build` kiểm
-  tra kiểu, chưa được render trong test.
+  `validation`, `review` ở tầng component — chúng được `next build` kiểm tra kiểu
+  và được browser smoke render thật, nhưng chưa có test tự động trong `vitest`.
 - React state chỉ giữ view preference là **ràng buộc trong thiết kế**, kiểm bằng
   review code chứ chưa bằng test tự động.
+- `.smoke/` là thư mục tạm của lần smoke, không nằm trong git; evidence được dẫn
+  lại bằng chữ ở đây chứ không commit ảnh vào repo.

@@ -139,14 +139,24 @@ test_unknown_target_status_422                  PASS  status ngoài enum bị ch
 test_attempt_response_has_no_filesystem_paths   PASS  response không lộ path
 ```
 
-**Chuỗi fail → retry:**
+**Chuỗi fail → retry** (chạy lại thật qua proxy Next ngày 25/09, backend log xác nhận
+từng request; `attempts` khớp đúng bảng dưới):
 
 ```jsonc
 // POST /api/v1/jobs/<id>/transitions  {"target_status": "FAILED"}
-{ "status": "FAILED", "attempts": [{ "attempt": 1, "status": "FAILED", ... }] }
+{ "status": "FAILED", ... }        // JobManifest KHÔNG chứa attempts[]
 
-// POST /api/v1/jobs/<id>/retry   →  attempt 2 được nối vào, attempt 1 giữ nguyên
-{ "status": "QUEUED", "attempts": [{ "attempt": 1, ... }, { "attempt": 2, ... }] }
+// POST /api/v1/jobs/<id>/retry   →  200, status về QUEUED, attempt mới được nối
+{ "status": "QUEUED", ... }
+
+// GET /api/v1/jobs/<id>/attempts  →  lịch sử nằm ở endpoint riêng
+{ "job_id": "<id>",
+  "attempts": [
+    { "attempt": 1, "status": "QUEUED",  "job_manifest_uri": ".../job_manifest.001.json" },
+    { "attempt": 1, "status": "RUNNING", "job_manifest_uri": ".../job_manifest.002.json" },
+    { "attempt": 1, "status": "FAILED",  "job_manifest_uri": ".../job_manifest.003.json" },
+    { "attempt": 2, "status": "QUEUED",  "job_manifest_uri": ".../job_manifest.004.json" }
+  ] }
 
 // POST /api/v1/jobs/<id>/retry trên job đang QUEUED  →  422
 // Thông điệp do chính bảng chuyển sinh ra: QUEUED không có cạnh nào tới QUEUED.
@@ -155,6 +165,10 @@ test_attempt_response_has_no_filesystem_paths   PASS  response không lộ path
 // POST /api/v1/jobs/<id>/transitions  {"target_status": "SUCCEEDED"} khi chưa có artifact → 409
 { "detail": "job <id> chưa có artifact nào được publish; không thể ghi SUCCEEDED" }
 ```
+
+Mỗi lần chuyển trạng thái publish một `job_manifest.<NNN>.json` **riêng**, và
+`attempts[]` là lịch sử chỉ đọc ở endpoint riêng — không phải field của `JobManifest`.
+Đây là điểm tôi từng ghi sai trong bản evidence 24/09 và đã sửa sau khi chạy thật.
 
 **Bằng chứng revision bất biến** (`test_revision_paths_are_distinct_per_transition`,
 `test_started_at_is_never_overwritten`): mỗi lần chuyển ghi một

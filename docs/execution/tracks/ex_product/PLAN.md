@@ -1,7 +1,7 @@
 # EX-PRODUCT — Kế hoạch thực hiện theo milestone
 
 **Track Owner:** Cường.
-**Cập nhật lần cuối:** 24/09/2026.
+**Cập nhật lần cuối:** 25/09/2026.
 
 File này ghi thứ tự thực hiện và trạng thái từng task của `EX-PRODUCT` theo
 milestone. Nguồn milestone: [`TEAM_EXECUTION_PLAN.md`](../../TEAM_EXECUTION_PLAN.md)
@@ -12,14 +12,14 @@ File này **không thay thế** task file và không định nghĩa contract m�
 
 ---
 
-## 1. Trạng thái hiện tại — 24/09/2026
+## 1. Trạng thái hiện tại — 25/09/2026
 
 | Hạng mục | Trạng thái thực tế |
 |---|---|
 | `PRODUCT-01` | `IN_PROGRESS` — API mock-first + privacy gate xong; ô DoD "swap sang worker thật" chờ PRODUCT-03 |
 | `PRODUCT-02` | `DONE` — state machine + persistence + attempt history |
-| `PRODUCT-05` | `IN_PROGRESS` — shell xong, build xanh; **chưa chạy browser smoke** |
-| `PRODUCT-06` | `IN_PROGRESS` — viewer fixture + edit revision xong; AC-11 (3DGS thật) chờ `REC-04`, mốc M3 |
+| `PRODUCT-05` | **`DONE`** — shell xong, build xanh, **browser smoke thật đã chạy 25/09** |
+| `PRODUCT-06` | `IN_PROGRESS` — viewer fixture + edit revision + browser smoke xong; ô DoD "3DGS thật" cố ý để trống: AC-11 chờ `REC-04`, mốc M3 |
 | `PRODUCT-03`/`04`/`07`/`07A`/`08`/`09`/`10`/`11`/`12` | `TODO` |
 | [`src/api/routes.py`](../../../../src/api/routes.py) | Đã include `product_router` — 16 endpoint product dưới `/api/v1` |
 | `frontend/` | **Đã tồn tại** — Next.js 16 + React 19 + Tailwind 4, 8 route, 54 test |
@@ -31,19 +31,26 @@ File này **không thay thế** task file và không định nghĩa contract m�
 
 Nguồn Foundation đã khóa tại M0 (commit `49f2456`).
 
-**Trạng thái kiểm chứng (24/09):**
+**Trạng thái kiểm chứng (25/09):**
 
 ```
-pytest tests/            → 288 passed
-ruff check + format      → sạch
+pytest tests/            → 288 passed in 7.30s
+ruff check + format      → sạch (104 file đã format)
 npm test (frontend)      → 54 passed, 5 file
 npm run typecheck        → sạch (next typegen && tsc --noEmit)
 npm run lint             → sạch
 npm run build            → exit 0, 8 route
 ```
 
-Đây là **fixture/API/unit proof**. Chưa có bằng chứng browser, chưa có worker thật,
-chưa có 3DGS thật.
+**Browser smoke thật (25/09)** — Chrome headless trỏ vào backend + frontend đang
+chạy: proxy `rewrites` → 200, 6/6 route → 200, `<canvas data-engine="three.js
+r180">` (Three.js khởi tạo WebGL context thật, `webgl-unavailable` vắng mặt),
+trình duyệt tự tải PLY thật qua `/artifacts/content` → 200, sửa revision
+`rev-003 → rev-004` (201) và revision cũ → 409, 4 ca âm giữ đúng mã. Chi tiết ở
+[PRODUCT-05 §12](tasks/PRODUCT-05.md) và [PRODUCT-06 §12](tasks/PRODUCT-06.md).
+
+Đây là **fixture/API/unit proof + browser proof trên dữ liệu fixture**. Vẫn chưa
+có worker thật và **chưa có 3DGS thật** — AC-11 là mốc M3, chờ `REC-04`.
 
 ---
 
@@ -77,12 +84,12 @@ PRODUCT-01 (mock API + privacy gate)
 Điều kiện gate: 4 subsystem chạy độc lập. EX-PRODUCT phải demo
 `mock project → mock job → browser viewer → mock review`.
 
-| | Task | Trạng thái 24/09 |
+| | Task | Trạng thái 25/09 |
 |---|---|---|
 | [x] | **PRODUCT-01** — Mock-first project/job/artifact API + source-rights attestation + privacy gating | Xong ở mức fixture/API |
 | [x] | **PRODUCT-02** — Job state machine tối thiểu (`QUEUED/RUNNING/SUCCEEDED/FAILED/CANCELLED`) | Xong |
-| [ ] | **PRODUCT-05** — Web shell tối thiểu, có màn hình mock review | Code + build xong; **chưa chạy browser smoke** |
-| [ ] | **PRODUCT-06** — Viewer tối thiểu: orbit/pan/zoom, select, hide/show, transform edit cơ bản | Code xong; **chưa chạy browser smoke**; 3DGS thật là AC-11 mốc M3 |
+| [x] | **PRODUCT-05** — Web shell tối thiểu, có màn hình mock review | **`DONE`** — browser smoke thật đã chạy 25/09 |
+| [ ] | **PRODUCT-06** — Viewer tối thiểu: orbit/pan/zoom, select, hide/show, transform edit cơ bản | Browser smoke 25/09 xong (Three.js `r180` render thật); **ô DoD đầu cố ý để trống** vì 3DGS thật là AC-11, mốc M3 |
 | [ ] | Metric baseline tuần 1 ([`TEAM_EXECUTION_PLAN.md`](../../TEAM_EXECUTION_PLAN.md) §5.4.1): Human Active Time, Manual Step Count, Time to Simulation-ready Scene | Chưa làm |
 
 #### Kế hoạch từng ngày còn lại của M1
@@ -90,15 +97,29 @@ PRODUCT-01 (mock API + privacy gate)
 Kế hoạch nằm ở đây, **không** nằm trong `WORKLOG.md`: worklog chỉ ghi việc đã thực
 sự xảy ra kèm bằng chứng, nên không được điền trước ngày.
 
-| Ngày | Việc |
-|---|---|
-| 25/09 | Chạy browser smoke thật: `make run` + `npm run dev`, đi hết `project → job → viewer → review`, chụp màn hình. Sửa lỗi proxy `rewrites` nếu có. Đóng ô `PRODUCT-05`/`PRODUCT-06`. |
-| 26/09 | Metric baseline tuần 1 §5.4.1 — đo Human Active Time / Manual Step Count / Time to Simulation-ready Scene trên chính luồng vừa chạy; ghi phương pháp đo, không ước đoán. |
-| 27/09 | Đóng gói evidence M1: ảnh/recording, output test, request/response mẫu; rà lại `§11 DoD` từng task; chuẩn bị demo script cho gate. |
-| 28/09 | Gate M1 — demo `mock project → mock job → browser viewer → mock review`. |
+| Ngày | Việc | Trạng thái |
+|---|---|---|
+| 25/09 | Chạy browser smoke thật: backend + `npm run dev`, đi hết `project → job → viewer → review`, chụp màn hình. | ✅ Xong — [PRODUCT-05 §12](tasks/PRODUCT-05.md), [PRODUCT-06 §12](tasks/PRODUCT-06.md) |
+| 26/09 | Metric baseline tuần 1 §5.4.1 — đo Human Active Time / Manual Step Count / Time to Simulation-ready Scene trên chính luồng vừa chạy; ghi phương pháp đo, không ước đoán. | Chưa làm |
+| 27/09 | Đóng gói evidence M1: ảnh/recording, output test, request/response mẫu; rà lại `§11 DoD` từng task; chuẩn bị demo script cho gate. | Chưa làm |
+| 28/09 | Gate M1 — demo `mock project → mock job → browser viewer → mock review`. | Chưa làm |
 
-Việc còn nợ lại ngoài M1: browser smoke cho cả 5 màn hình, test component cho
-`projects/[projectId]`, `jobs/[jobId]`, `validation`, `review`.
+**Ghi chú 25/09 — kết quả rà repo mẫu.** File authority là
+[`INTEGRATION_PLAYBOOK.md`](../../INTEGRATION_PLAYBOOK.md) Ch.7 §7.1 (đối chiếu
+`PRODUCT-05 §8`, `PRODUCT-06 §8`, `TRACK.md`). Trạng thái tận dụng thật, kiểm từ
+`frontend/package.json`:
+
+| Repo mẫu | Vai trò | Đã dùng? |
+|---|---|---|
+| three.js (docs + examples) | P0 library | ✅ `three ^0.180.0` — `SceneCanvas` dùng thật |
+| pmndrs/react-three-fiber | candidate | ✅ `@react-three/fiber ^9.8` + `drei ^10.7` |
+| Kiranism/next-shadcn-dashboard-starter | P0 selective ADAPT | ❌ Không — shell viết tay; §8 cấm starter authorization/persistence |
+| sparkjsdev/spark | P0 renderer candidate | ❌ Chưa — chỉ adopt sau khi có real Brush output (`REC-04` còn `TODO`) |
+| potree/potree | REFERENCE (point-cloud LOD) | ❌ Không — không phải P0 dependency |
+| spark-react-nextjs, arhamkhnz, shadcndashboard | REFERENCE | ❌ Không — chỉ tham khảo |
+
+Việc còn nợ lại ngoài M1: test component cho `projects/[projectId]`,
+`jobs/[jobId]`, `validation`, `review`; E2E tương tác tự động (PRODUCT-07/07A).
 
 ### M2 — 05/10/2026
 

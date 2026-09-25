@@ -143,8 +143,9 @@ bằng tay.
 - [`frontend/tests/ply.test.ts`](../../../../../frontend/tests/ply.test.ts) — 10 test: đọc đúng PLY của fixture, giữ comment header, giữ thứ tự vertex, kết thúc dòng kiểu Windows, bỏ qua property thừa; **từ chối** PLY binary thay vì đoán layout, header thiếu `end_header`, số vertex ít hơn khai báo, toạ độ không phải số, thiếu property toạ độ.
 - [`frontend/tests/viewer-panel.test.tsx`](../../../../../frontend/tests/viewer-panel.test.tsx) — 10 test: cảnh báo thiếu bằng chứng Brush, không cảnh báo khi có cờ, trạng thái suy giảm khi không có WebGL, dựng canvas khi có WebGL, đổi view mode, ẩn/hiện layer không đổi revision, sửa transform, lỗi nhập sai định dạng.
 
-**Chưa làm:** renderer qualification với real Brush output (§10 dòng 2) và browser smoke
-thật (§10 dòng 5) — cả hai đều cần `REC-04` publish `VisualArtifact` thật.
+**Đã làm thêm ngày 25/09:** browser smoke thật trong Chrome — xem §12. **Chưa làm:**
+renderer qualification với real Brush output (§10 dòng 2) — cần `REC-04` publish
+`VisualArtifact` thật; đây là AC-11, mốc M3.
 
 Tách fixture/mock/API/browser proof khỏi real-worker Product E2E acceptance.
 
@@ -162,7 +163,7 @@ Tách fixture/mock/API/browser proof khỏi real-worker Product E2E acceptance.
 
 ## 12. Result / Evidence
 
-**Ngày:** 2026-09-24 · **Nhánh:** `feat/product`
+**Ngày:** 2026-09-24 (backend/frontend tests) và 2026-09-25 (browser smoke) · **Nhánh:** `feat/product`
 
 **Test backend:**
 
@@ -212,22 +213,85 @@ Cờ này đi trong payload (không chỉ trong tài liệu), và UI render
 `data-testid="brush-proof-absent"` khi cờ false — nên một visual tổng hợp không
 thể bị trình bày nhầm thành bằng chứng AC-11.
 
+**Browser smoke thật — ngày 2026-09-25 (Chrome headless + backend đang chạy):**
+
+**1. Three.js khởi tạo WebGL context thật trong trình duyệt.** Đây là phần trước
+đó ghi "chưa làm" (mọi test cũ chạy trong jsdom với `SceneCanvas` bị stub):
+
+```html
+<canvas data-engine="three.js r180" width="697" height="448"
+        style="display: block; width: 697px; height: 448px; touch-action: auto;">
+```
+
+`data-engine="three.js r180"` do chính Three.js gắn, không phải chữ trong JSX.
+`webgl-unavailable` **không xuất hiện** trong DOM (0 lần) — nghĩa là nhánh suy
+giảm không được kích hoạt, WebGL có thật. `data-testid="scene-revision"` hiện
+`rev-001`, khớp revision backend trả về.
+
+**2. Layer dựng từ SceneIR thật**, tên object lấy từ fixture chứ không hardcode:
+`Environment geometry`, `Environment point cloud`, `Environment collider`,
+`Fixture Pallet`, `Fixture Rack`, `Fixture Floor`.
+
+**3. Trình duyệt tự tải bytes PLY thật qua `GET /artifacts/content`** (backend log
+ghi nhận request do chính trang viewer phát ra, không phải tôi gọi bằng `curl`):
+
+```
+GET /api/v1/jobs/job-fixture-001/artifacts/content
+    ?artifact_uri=artifact://jobs/job-fixture-001/scene/environment_geometry.ply
+    &artifact_checksum=sha256:2cb521d29b503e80a7c21a57877e30fafb12e9d81c21b3b381f08b6c3af7920d
+→ 200
+```
+
+**4. Ảnh chụp `.smoke/shots/04-viewer.png`** (375 KB) cho thấy render thật: sàn và
+rack của warehouse trong canvas, panel layer có dữ liệu, banner thiếu bằng chứng
+Brush hiện rõ. Đây là **render Three.js thật của geometry/point-cloud fixture** —
+**không** phải 3DGS.
+
+**5. Sửa revision qua proxy Next** (`localhost:3000` → FastAPI), đúng luồng
+"transform edit → backend revision → re-render":
+
+```
+GET  /api/v1/jobs/job-fixture-001/scene            → 200  rev-003
+POST /api/v1/jobs/job-fixture-001/scene/edits
+     {"expected_scene_revision":"rev-003",
+      "edits":[{"object_id":"object-pallet-001","translation_xyz":[1.5,0.0,-0.25]}]}
+                                                    → 201  rev-003 → rev-004
+                                                           artifact://…/scene_ir.rev-004.json
+                                                           cả 3 object còn nguyên
+POST lại rev-003 (đã cũ)                            → 409
+     {"detail":"scene đã đổi: client đang giữ rev-003, revision hiện tại là rev-004"}
+```
+
+**6. Ranh giới artifact giữ nguyên khi đi qua trình duyệt** — 4 ca âm chạy qua
+proxy, đúng mã lỗi đã thiết kế:
+
+| Ca | Kết quả |
+|---|---|
+| `evaluation_only/groundtruth_map.mock` | `404` artifact không thuộc job |
+| artifact của job khác | `404` |
+| URI path traversal (`../../etc/passwd`) | `422` — chặn ở validator `ArtifactRef` |
+| checksum sai (64 hex hợp lệ) | `404` checksum mismatch |
+
 **Limitations**
 
-- **Chưa render 3DGS thật.** Đây là giới hạn cốt lõi: `REC-04` chưa publish real
-  Brush `VisualArtifact`. Ở M1, view `VISUAL` chỉ hiện `VisualUnavailable` nói rõ
-  lý do; ba view Geometry/Point Cloud/Collider là view kỹ thuật **ngang hàng**,
-  không phải fallback và không thay thế AC-11.
-- **Chưa chạy browser smoke.** Mọi test frontend chạy trong jsdom; `SceneCanvas`
-  bị thay bằng stub. Chưa có lần nào render Three.js thật, orbit/pan/zoom thật,
-  hay tải PLY thật qua `GET /artifacts/content` trong trình duyệt.
+- **Chưa render 3DGS thật — giới hạn cốt lõi, không đổi.** `REC-04` chưa publish
+  real Brush `VisualArtifact`. Browser smoke ngày 25/09 chứng minh **Three.js
+  render thật trong browser**, nhưng đó là geometry/point-cloud/collider fixture.
+  Ô DoD đầu vẫn **cố ý để trống**: AC-11 là mốc M3 (09/10). Cờ
+  `brush_compatibility_proof=false` đi kèm payload và UI render
+  `data-testid="brush-proof-absent"` — nên lần smoke này **không** bị đọc thành
+  bằng chứng AC-11.
+- Browser smoke dùng **Chrome headless** và `--dump-dom`/`--screenshot`, không
+  phải E2E test tự động: chưa kiểm orbit/pan/zoom bằng thao tác người dùng thật.
+  Chưa kiểm giải phóng GPU resource khi unmount canvas trong trình duyệt thật.
 - PLY chỉ hỗ trợ `format ascii 1.0`. PLY binary bị **từ chối thẳng** thay vì đoán
   layout — đoán sai layout binary sẽ cho ra hình dạng trông hợp lệ nhưng sai, đúng
   kiểu lỗi §11 cấm báo cáo thành bằng chứng render.
 - `SceneEditor` seed revision từ `fixtures/scene_ir/scene.json` ở lần đọc đầu tiên.
-  Đây là dữ liệu fixture, **không** phải output của EX-SCENE.
+  Đây là dữ liệu fixture, **không** phải output của EX-SCENE. Revision trong lần
+  smoke này (`rev-003`, `rev-004`) là state tích luỹ của tiến trình đang chạy, sẽ
+  reset khi restart backend.
 - Revision chỉ nằm trong bộ nhớ tiến trình + file dưới runtime root; chưa có khoá
   liên tiến trình cho hai client sửa cùng lúc (optimistic concurrency chỉ đúng
   trong một tiến trình).
-- Chưa có test benchmark hiệu năng render, và chưa kiểm việc giải phóng GPU
-  resource khi unmount canvas.
+- Chưa có test benchmark hiệu năng render.
