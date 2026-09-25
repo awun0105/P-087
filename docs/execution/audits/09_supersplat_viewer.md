@@ -3,6 +3,7 @@
 > **Tài liệu tham chiếu:** Repository Audit cho Real2Sim Studio (AI20K RAV-01)  
 > **Package:** [`@playcanvas/supersplat-viewer`](https://github.com/playcanvas/supersplat-viewer) (NPM Package)  
 > **Pinned Version:** 1.35.2  
+> **Source kiểm chứng:** `c52f5258df424635323f26aaeebe51361dc0f8e6` (`package.json`, `src/options.ts`, `src/types.ts`, `src/index.ts`)
 > **License:** MIT  
 > **Ngày audit:** 2026-09-25  
 > **Trạng thái:** Hoàn tất Audit #9 (Embedded 3DGS Viewer Deep Dive)
@@ -30,28 +31,42 @@ EX-REC          HIGH (Consumer of SOG & Compressed PLY artifacts)
 
 ## 1. Các API và Khả năng Thực tế
 
-Package cung cấp API lập trình gọn gàng, phù hợp hoàn hảo với Next.js / React component:
+Source xác nhận browser API sau. Đây là ví dụ tích hợp, chưa phải browser smoke
+của Real2Sim. Host cung cấp container, experience settings hợp lệ và URL HTTP/blob
+đã resolve từ artifact API sau kiểm tra checksum; không truyền `artifact://` trực
+tiếp vào browser fetch. SOG/LOD có relative resources cần URL base và các chunk refs
+được resolve tương ứng.
 
 ```typescript
-// Khởi tạo viewer không có UI mặc định (Real2Sim tự dựng UI bằng Next.js / Tailwind)
+import { createViewer } from '@playcanvas/supersplat-viewer/viewer';
+import '@playcanvas/supersplat-viewer/viewer.css';
+
+// Các biến do host cung cấp sau khi resolve artifact và experience settings.
 const viewer = await createViewer({
     container: htmlElement,
-    contentUrl: 'artifact://jobs/.../scene.sog',
+    contentUrl: resolvedContentUrl,
+    settings: experienceSettings,
     ui: false
 });
 
-// Điều khiển Camera
-viewer.frameScene();
-viewer.resetCamera();
-viewer.setCameraMode('orbit' | 'fly' | 'walk' | 'anim');
+// Capture đợi frame đầu tiên; frameScene/resetCamera yêu cầu state.loaded.
+const capture = await viewer.captureFrame();
+// capture có width, height và data (base64), không phải data URL đồng bộ.
+if (viewer.state.loaded) {
+    viewer.state.cameraMode = 'orbit';
+    viewer.frameScene();
+}
 
-// Tương tác & Trích xuất
-viewer.pickSurface(screenX, screenY);
-const dataUrl = viewer.captureFrame();
-
-// Quản lý vòng đời
+// Gọi trong lifecycle cleanup của host khi unmount.
 viewer.destroy();
 ```
+
+- Root package export phục vụ `renderViewerHtml`; browser embedding dùng subpath `/viewer`.
+- `settings` là required option. `captureFrame()` trả `Promise<CaptureResult>`.
+- Camera mode là writable `viewer.state.cameraMode`, không có `setCameraMode()`.
+- `ViewerHandle` không expose `pickSurface()`. Picker nội bộ không phải public API;
+  EX-PRODUCT phải adapt selection qua Engine/app và ánh xạ về SceneObject ID,
+  rồi kiểm chứng bằng integration test. Không import internals như stable API.
 
 ### Định dạng đầu vào được hỗ trợ tự nhiên:
 - `.ply` (chuẩn và compressed PLY).
@@ -60,7 +75,8 @@ viewer.destroy();
 
 ### WebGPU & WebGL2:
 - Tự động phát hiện WebGPU khi trình duyệt hỗ trợ.
-- Tự động fallback sang WebGL2 mà không cần cấu hình thêm, đáp ứng 100% yêu cầu P0 của dự án (WebGL2 baseline).
+- Source có WebGL fallback; PRODUCT-06 phải kiểm chứng WebGL2 và WebGPU khi khả dụng
+  trên browser mục tiêu. Nếu cả hai không dùng được, host hiển thị capability error.
 
 ---
 
@@ -86,7 +102,7 @@ Toàn bộ khối lượng công việc của `PRODUCT-06` chỉ còn tập trun
 | :--- | :--- | :--- | :--- |
 | `createViewer({ ui: false })` | `EX-PRODUCT` | **REUSE CORE** | Nhúng trực tiếp vào Studio UI |
 | SOG / LOD Streaming Loader | `EX-PRODUCT` | **REUSE CORE** | Nạp cảnh kho bãi lớn mượt mà |
-| WebGPU ➔ WebGL2 Fallback | `EX-PRODUCT` | **REUSE CORE** | Đảm bảo tương thích mọi client |
+| WebGPU ➔ WebGL2 Fallback | `EX-PRODUCT` | **REUSE + QUALIFY** | Kiểm chứng browser mục tiêu và error state |
 | Orbit / Fly / Walk Camera | `EX-PRODUCT` | **REUSE CORE** | Điều hướng góc nhìn kỹ sư |
-| Surface Picking | `EX-PRODUCT` | **REUSE CORE** | Bắt tọa độ click trên mô hình 3D |
+| Surface/Object Picking | `EX-PRODUCT` | **ADAPT + QUALIFY** | Không có `pickSurface` trên public handle; host sở hữu SceneObject mapping |
 | Snapshot / Frame Capture | `EX-PRODUCT` | **REUSE CORE** | Xuất thumbnail preview cho Job |

@@ -63,12 +63,13 @@ Không sửa track internals. Shared contract change cần producer + consumer r
 
 **Primary Web 3D Core (`@playcanvas/supersplat-viewer` v1.35.2 + `playcanvas/engine` v2.22.4):**
 - Tái sử dụng trọn vẹn package NPM `@playcanvas/supersplat-viewer` (xem chi tiết tại [`docs/execution/audits/09_supersplat_viewer.md`](../../../audits/09_supersplat_viewer.md)).
-- Nhúng trực tiếp vào Next.js component với cấu hình không UI: `createViewer({ container, contentUrl, ui: false })`.
-- Tự động hỗ trợ WebGPU khi khả dụng và tự động fallback sang WebGL2, đảm bảo 100% yêu cầu P0.
+- Nhúng vào client-only Next.js component: `createViewer({ container, contentUrl, settings, ui: false })`.
+- WebGPU khi khả dụng và WebGL2 fallback phải qualification trên browser mục tiêu;
+  host hiển thị capability error nếu không khởi tạo được backend.
 - Nạp trực tiếp file `.sog` / Streamed SOG LOD (từ `splat-transform`), `.ply` và `collision = .glb`.
 - **Single Scene Graph Architecture (Audit #8):**
   - Mọi lớp (Visual SOG, Mesh GLB, Collider GLB) đều được gắn trên cùng một `pc.Entity` trong PlayCanvas Engine.
-  - Cùng chia sẻ GPU Render Pass và Depth Buffer (không bị z-fighting).
+  - Cùng scene graph/depth pipeline; vẫn phải kiểm chứng occlusion và z-fighting thực tế.
   - Cùng chia sẻ Transform `position/rotation/scale`, đồng bộ trực tiếp với `SceneObject` trong `SceneIR`.
 - **Guardrails / Anti-patterns bắt buộc:**
   - ❌ **SceneIR là Source of Truth**: Viewer chỉ là viewport hiển thị; mọi transform/edit phải gửi command về backend FastAPI để cập nhật `SceneIR` revision. Local state không bao giờ là canonical scene.
@@ -77,9 +78,13 @@ Không sửa track internals. Shared contract change cần producer + consumer r
 
 ## 9. Implementation Plan
 
-1. Tạo React component wrapper cho `@playcanvas/supersplat-viewer` với `ui: false` và `ssr: false`.
+1. Tạo client-only wrapper dùng `@playcanvas/supersplat-viewer/viewer`, stylesheet,
+   `ui: false` và required `settings`. Resolve artifact refs thành HTTP/blob URLs;
+   không truyền trực tiếp `artifact://` vào browser fetch. API mẫu đã kiểm chứng ở Audit #09.
 2. Tích hợp Single Scene Graph PlayCanvas: nạp Visual SOG (từ `REC-04`) và `collision.glb` (từ `REC-05`/`SIM-02`) trên cùng Entity.
-3. Kích hoạt camera modes (Orbit, Fly, Walk) và surface picking từ viewer API.
+3. Camera dùng writable `viewer.state.cameraMode` và readiness/capability gates.
+   Public handle không có `pickSurface`; adapt picking qua Engine/app và kiểm
+   chứng SceneObject mapping. `captureFrame` là async, cleanup bằng `destroy()`.
 4. Tích hợp PlayCanvas `TranslateGizmo` / `RotateGizmo` và gửi event cập nhật vị trí về backend SceneIR API.
 5. Tận dụng `splat-transform` cho khâu tối ưu hóa, sinh LOD và SOG streaming.
 6. Assignee điền files, API/UI flow, state ownership, failure handling và proof sau inspect. Không đổi scope.

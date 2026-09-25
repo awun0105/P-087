@@ -104,16 +104,25 @@ flowchart TD
     COLMAP --> COLMAP_Poses
 
     Visual[Visual Branch: Brush 3DGS]
-    Geo_RGB[RGB Geometry Branch: OpenMVS]
+    Geo_RGB[RGB Geometry: splat-transform voxelization]
+    Geo_Fallback[OpenMVS surface reconstruction fallback]
 
     COLMAP --> Visual
-    COLMAP --> Geo_RGB
+    COLMAP -.-> Geo_Fallback
 
     GS_PLY[3DGS PLY]
     RGB_Mesh[RGB Mesh]
 
     Visual --> GS_PLY
+    Anchor[REC-06: confirm locked anchor / metric transform]
+    COLMAP_Poses --> Anchor
+    GS_PLY --> Anchor
+    Metric_PLY[Metric working PLY derivative]
+    GS_PLY --> Metric_PLY
+    Anchor --> Metric_PLY
+    Metric_PLY --> Geo_RGB
     Geo_RGB --> RGB_Mesh
+    Geo_Fallback --> RGB_Mesh
 
     Align[ST-RGB-LIDAR-ALIGN<br>Conditional: RGB AND LiDAR]
     RGB_Mesh -->|RGB + LiDAR only| Align
@@ -121,8 +130,9 @@ flowchart TD
     COLMAP_Poses -->|RGB + LiDAR only| Align
     LiDAR_Artifact --> Align
 
-    Metric[ST-METRIC-CANONICALIZE]
-    RGB_Mesh -->|RGB-only scale calibration| Metric
+    Metric[ST-METRIC-CANONICALIZE<br>Final propagation / verification]
+    Anchor --> Metric
+    RGB_Mesh -->|RGB-only final metric verification| Metric
     Align -->|aligned mixed artifacts| Metric
 
     Composer[SceneComposer<br>configuration-aware]
@@ -634,11 +644,26 @@ real reconstruction, Brush hay Isaac acceptance.
 ## 3.3 Dựng Khung Hình học (Geometry Reconstruction — `ST-RGB-GEOMETRY`)
 
 - **Vấn đề:** Mây điểm Gaussian (3DGS) dù đẹp nhưng nó là các đám mây mờ ảo, không có bề mặt cứng. Simulator (Isaac) cần bề mặt cứng để rô-bốt không đi xuyên qua tường hay kệ hàng. Do đó tuyệt đối không được lấy tọa độ trung tâm (Gaussian centers) làm Collider.
-- **Công cụ chính (Primary Baseline):** **cdcseacave/openMVS**.
-  - **Lưu ý bản quyền (License):** Nó dùng giấy phép AGPL-3.0, nên chỉ được bọc trong container hoặc gọi qua file thực thi (executable) riêng, tuyệt đối không copy mã nguồn của nó vào core project.
-  - **Lợi ích:** OpenMVS và Brush hoạt động độc lập, không bị trói buộc (coupling) vào nhau. Cả hai cùng đọc chung data từ COLMAP.
-  - **Luồng dữ liệu:** `COLMAP -> DensifyPointCloud -> ReconstructMesh -> RefineMesh -> RGB Mesh`.
-- **Phương án dự phòng:** **Anttwo/SuGaR**. Repo này rất hay vì nó ép Gaussian bám chặt vào bề mặt (surface-aligned) để sinh ra Mesh. Tuy nhiên, nó bị trói vào Graphdeco 3DGS cũ và dính rào cản bản quyền thương mại (Non-commercial research) nên chỉ dùng để tham khảo kiến trúc.
+- **Công cụ chính (Primary Baseline):** **playcanvas/splat-transform 3.6.6**.
+  Luồng `Brush master PLY -> metric working derivative -> GPU voxelization /
+  capsule carve -> collision.glb` tạo `GeometryArtifact` riêng, có provenance và
+  checksum. Đây là occupancy extraction, chưa phải physics truth cho tới khi
+  qualification REC-05 và validation EX-SIM đạt yêu cầu.
+- **Metric prerequisite:** REC-06 xác nhận locked real-world anchor và similarity
+  transform từ SfM sang canonical meter trước khi REC-05 dùng voxel/capsule theo
+  mét. REC-05 chuyển một working derivative sang metric, giữ master PLY bất biến,
+  ghi transform/config checksum và không áp dụng scale lần hai lên output đã metric.
+  Anchor thiếu/chưa xác nhận phải chặn voxelization theo mét. Sau REC-05, REC-06
+  kiểm tra pose/visual/geometry cùng frame rồi mới handoff REC-10. Đây là hai pha
+  trong REC-06 hiện hữu, không phải task ID hay pipeline stage mới.
+- **Fallback P0:** **cdcseacave/openMVS**, nếu spike Aisle_CW không đạt.
+  Luồng `COLMAP -> InterfaceCOLMAP -> DensifyPointCloud -> ReconstructMesh ->
+  RefineMesh` vẫn độc lập với Brush; geometry được canonicalize bằng cùng transform.
+  Giữ process/container boundary và license/provenance của upstream, không copy
+  source OpenMVS vào core. **Anttwo/SuGaR** chỉ là reference/experimental.
+- **Physics boundary:** SIM-01 cung cấp analytic ground plane; SIM-02 sở hữu
+  collider policy và Box/OBB override cho vật thể mỏng. Giữ `Visual ≠ Geometry ≠
+  Physics`; Gaussian centers hoặc visual inpainting không được dùng trực tiếp làm collider.
 
 # Chương 4: Trích xuất Vật thể và Biểu diễn Không gian (Object Association & Scene IR)
 
@@ -717,7 +742,7 @@ Chương này tập trung vào khía cạnh Software Engineering: Cách con ngư
 
 - **Trách nhiệm của Web UI:** Web Studio (Next.js, PlayCanvas Engine, FastAPI) là nơi user upload video, xem tiến độ, render real 3DGS `VisualArtifact` (định dạng SOG/compressed PLY) của Primary RGB Scene và chuyển sang các view Geometry mesh, Point Cloud, Collider/SceneObject transforms để inspect và chỉnh scene trên cùng một Viewport.
 - **Canonical placement:** EX-PRODUCT sở hữu cả backend và frontend. FastAPI routes nằm ở `src/api/`, job/artifact/review/release logic nằm ở `src/services/orchestration/`, còn toàn bộ Next.js/TypeScript Web Studio nằm ở root `frontend/` theo [`ARCHITECTURE.md`](../../ARCHITECTURE.md). Frontend chỉ gọi backend qua typed API contract; không tạo business-state source of truth cạnh tranh trong Next.js hoặc local React state.
-- **Renderer scope:** P0 sử dụng `PlayCanvas Engine` (v2.22.4) và `@playcanvas/supersplat-viewer` (v1.35.2) với cơ chế Single Scene Graph (`pc.Entity`). WebGPU được ưu tiên khi khả dụng và tự động fallback WebGL2 cho mọi client. Toàn bộ các lớp (Visual SOG, Mesh GLB, Collider GLB) đều chia sẻ chung một Depth Buffer và chung Transform `position/rotation/scale`. Viewer resolve checksum/coordinate metadata từ `VisualArtifact`, hiển thị lỗi rõ khi thiếu/không tương thích và tự động dọn dẹp GPU resources (`destroy()`) khi unmount. Synthetic fixture hoặc PLY point cloud load bằng `PLYLoader` không chứng minh browser đã render 3DGS.
+- **Renderer scope:** P0 sử dụng `PlayCanvas Engine` (v2.22.4) và `@playcanvas/supersplat-viewer` (v1.35.2) với cơ chế Single Scene Graph (`pc.Entity`). WebGPU được ưu tiên khi khả dụng; WebGL2 fallback phải được qualification trên browser mục tiêu, báo lỗi khi cả hai backend không khả dụng. Toàn bộ các lớp (Visual SOG, Mesh GLB, Collider GLB) phải dùng chung scene graph/depth và canonical transform mapping. Viewer resolve checksum/coordinate metadata từ `VisualArtifact`, hiển thị lỗi rõ khi thiếu/không tương thích và dọn dẹp GPU resources (`destroy()`) khi unmount. Synthetic fixture hoặc PLY point cloud không chứng minh browser đã render 3DGS.
 ### Human Object Confirmation
 Human Object Confirmation — P0
 
@@ -753,7 +778,7 @@ P0 không dùng generic `Scale` cho Added Asset cho tới khi propagation sang V
 ## 5.2 Đồng bộ Tọa độ khi Chỉnh sửa (Transform Synchronization — `ST-EDIT`)
 
 - **Vấn đề:** Khi user xoay cái `Pallet A` trên giao diện, vật thể đó thực chất có 3 bản sao: Mây điểm (Visual), Lưới (Geometry), Hộp va chạm (Collider). Nếu lưu tọa độ rời rạc, chúng sẽ bị lệch nhau khi chạy giả lập.
-- **Nguyên tắc cốt lõi (Rule):** Chỉ lưu `SceneObject.transform` với semantics `parent_from_local`, quaternion `xyzw`, angle `radian`: `p_parent = T_parent_from_local * p_local`. Object trực tiếp dưới world dùng `T_world_from_object`. Khi Web thao tác transform, frontend gửi edit command/API → backend cập nhật SceneIR revision → frontend render lại canonical state. COLMAP, Three.js, OpenUSD và Isaac convert convention tại adapter boundary; UI/Isaac không có transform truth riêng.
+- **Nguyên tắc cốt lõi (Rule):** Chỉ lưu `SceneObject.transform` với semantics `parent_from_local`, quaternion `xyzw`, angle `radian`: `p_parent = T_parent_from_local * p_local`. Object trực tiếp dưới world dùng `T_world_from_object`. Khi Web thao tác transform, frontend gửi edit command/API → backend cập nhật SceneIR revision → frontend render lại canonical state. COLMAP, PlayCanvas, splat-transform, OpenUSD và Isaac convert convention tại adapter boundary; UI/Isaac không có transform truth riêng.
 
 ## 5.3 Luân chuyển Tác vụ và Artifact Contract
 (`INF-JOB-ORCHESTRATION`, `INF-ARTIFACT-CONTRACT`)
@@ -1344,9 +1369,9 @@ Tóm tắt kết quả theo thứ tự audit:
 4. [**Audit #4 — `playcanvas/supersplat`**](./audits/04_supersplat.md) & [**Audit #4a — `playcanvas/splat-transform`**](./audits/04a_splat_transform.md) ✅:
    - **Định vị mới**:
      - `playcanvas/supersplat`: **Tier-0 Code Donor cho `EX-PRODUCT` Visual Editor & 3D Viewer (`PRODUCT-06`)** và Interaction Machinery (`PRODUCT-07`).
-     - `playcanvas/splat-transform`: **Tier-0 Core Utility Candidate** xuyên suốt `EX-REC` (Brush PLY validation `readFileInfo()`, stats `fillRatio`, Morton reorder), `EX-PRODUCT` (SOG / Streamed LOD) và `EX-SIM` (fallback voxel collision mesh `SIM-02`).
+     - `playcanvas/splat-transform`: **Tier A — Core Utility & Collision Provider** cho `EX-REC` (Brush PLY validation, SOG packaging, REC-05 voxel geometry) và `EX-SIM` (consume geometry qua SIM-02).
    - **Module trích xuất chính**: WebGPU projected splat renderer (tương thích Brush metadata), multi-layer Splats (map 1:1 sang SceneObjects), transform gizmos (Move, Rotate), camera orbit/fly, selection tools (brush, lasso, volume), Undo/Redo (`EditHistory`), streaming LOD, voxelization + Marching Cubes.
-   - **Guardrails**: Cần chạy qualification spike `PRODUCT-06Q` về WebGPU trước khi đổi baseline; chuẩn hóa hệ trục PLY 180° tại adapter boundary; Master PLY là canonical immutable artifact, SOG chỉ là delivery derivative; collision từ 3DGS chỉ là fallback đối chứng, không thay OpenMVS.
+   - **Guardrails**: `PRODUCT-06Q` kiểm chứng viewer PlayCanvas/WebGL2 và WebGPU khi khả dụng bằng Brush output thật; chuẩn hóa hệ trục PLY tại adapter boundary; master PLY bất biến, SOG là delivery derivative. REC-05 voxel geometry phải qua metric prerequisite và spike Aisle_CW; OpenMVS giữ fallback P0 khi spike không đạt.
 5. [**Audit #5 — `discoverse-dev/DISCOVERSE` & `discoverse-dev/DISCOVERSE-Real2Sim`**](./audits/05_discoverse.md) ✅:
    - **Định vị mới**:
      - `DISCOVERSE`: **Tier-0 Integration Reference** cho Visual ↔ Physics synchronization; **Secondary Utility Donor** cho CoACD collider preprocessing (`SIM-02`); **Tier-0 P1 Code Donor** cho remote GS rendering & hardware NVENC H.264 video streaming.
@@ -1372,7 +1397,7 @@ Tóm tắt kết quả theo thứ tự audit:
      - ❌ **Không thay thế SAM2 + R2G trong P0**: P0 giữ nguyên pipeline hiện tại; Gaussian Grouping chỉ là qualification candidate.
      - ❌ **Không train lại toàn bộ scene**: Freeze `GlobalVisualArtifact` của Brush, không tái huấn luyện đồng thời appearance + geometry.
      - ❌ **Cấm kéo DEVA và custom CUDA rasterizer**: DEVA mang bản quyền `CC BY-NC-SA 4.0`, submodule rasterizer mang Inria non-commercial terms.
-     - ❌ **Cấm dùng Convex-Hull Expansion làm Collider**: Heuristic bao lồi Gaussian không phản ánh đúng hình học surface và dễ gây over-removal; collider bắt buộc từ OpenMVS/LiDAR/primitives.
+     - ❌ **Cấm dùng Convex-Hull Expansion làm Collider**: Không dùng heuristic bao lồi Gaussian trực tiếp. Collider phải được EX-SIM kiểm chứng từ REC-05 voxel geometry đã qualification, OpenMVS fallback, LiDAR hoặc primitives.
      - ❌ **Visual Inpainting không phải Physics Truth**: Mọi kết quả inpaint chỉ phục vụ viewport thị giác, không dùng cho va chạm vật lý.
 7. [**Audit #7 — `InternRobotics/Re3Sim`**](./audits/07_re3sim.md) ✅:
    - **Định vị mới**: **Tier-0 System Architecture Reference** (xác thực độc lập kiến trúc hai nhánh Visual/Geometry tách biệt từ chung SfM poses, neo vào chung một hệ tọa độ chuẩn canonical frame).
@@ -1385,23 +1410,23 @@ Tóm tắt kết quả theo thứ tự audit:
    - **Guardrails**:
      - ❌ **Cấm vendor toàn bộ repository**: Root mang license `CC BY-NC 4.0`, submodule `gaussian_splatting` dính Inria non-commercial license. Chỉ ADAPT / REIMPLEMENT các pattern điều phối và frame tools dưới dạng clean-room code.
      - ❌ **Khắc phục lỗi tiềm ẩn từ code gốc**: Bắt buộc thêm `check=True` cho subprocess (code gốc bỏ qua exit code), sửa lỗi sai flag CLI (`--collision-approximation` vs `--collision_approximation`), không hardcode `sparse/0`.
-     - ❌ **Không phụ thuộc ChArUco marker**: TorWIC dùng LiDAR/calibration metric ground-truth thay vì marker vật lý trong kho.
+     - ❌ **Không phụ thuộc ChArUco marker**: Dùng locked product-safe real-world anchor; LiDAR/calibration chỉ được dùng khi contract cho phép và có provenance, không lấy evaluation-only trajectory/geometry làm anchor.
 
 
 ## 7.2 Quy tắc Tích hợp cho Lập trình viên / AI Agent (Integration Rules)
 
 1. **Ranh giới Tiến trình (Process Boundary):**
-   - COLMAP, Brush, OpenMVS phải chạy ở các Process riêng biệt hoặc Docker riêng.
+   - COLMAP, Brush, splat-transform và OpenMVS fallback phải chạy ở các process riêng biệt hoặc Docker riêng.
    - Giao tiếp với Core Python Server thông qua hệ thống File trung gian (Artifacts) và Command-line Arguments.
 2. **Quy tắc sao chép code (Code Reuse):**
    - Chỉ được copy code thuật toán nhỏ (math, utils) nếu License cho phép (MIT, Apache).
    - Nếu file to và dính bản quyền lây nhiễm (GPL/AGPL), buộc phải dùng cơ chế Subprocess.
 3. **Danh mục 10 Điều Cấm trong P0 (P0 Anti-patterns & Guardrails):**
    - ❌ **Không thay Brush bằng Nerfstudio hay vanilla 3DGS:** Brush là core engine duy nhất đảm bảo tương thích format, tốc độ và độ sắc nét cho MVP.
-   - ❌ **Không dùng SuGaR làm primary geometry path:** Giữ OpenMVS độc lập hoàn toàn với Brush để bảo toàn nguyên tắc `Visual ≠ Geometry`.
+   - ❌ **Không dùng SuGaR làm primary geometry path:** REC-05 dùng splat-transform với qualification; OpenMVS là fallback. Geometry derivative và physics validation tách khỏi visual master.
    - ❌ **Không retrain toàn bộ global scene bằng Gaussian Grouping:** Giữ nguyên file PLY đóng băng từ Brush; chỉ trích xuất identity membership nếu spike `SCENE-QUAL-GG-01` đạt yêu cầu.
    - ❌ **Không thêm DEVA vào pipeline khi SAM2 đã xử lý video propagation:** DEVA dính bản quyền hạn chế `CC BY-NC-SA 4.0` và trùng lặp năng lực với SAM2.
-   - ❌ **Không dùng Gaussian point cloud làm physics collider truth:** Gaussian splats là hạt thị giác có độ dày ảo; collider bắt buộc từ OpenMVS/LiDAR/primitives.
+   - ❌ **Không dùng Gaussian point cloud trực tiếp làm physics collider truth:** Geometry derivative từ voxelization chỉ là đầu vào cho EX-SIM validation; các nguồn khác gồm OpenMVS fallback, LiDAR và primitives.
    - ❌ **Không clone nguyên repository OpenReal2Sim, R2G hay Re3Sim vào codebase:** Chỉ trích xuất các hàm/module thuật toán sạch theo clean-room pattern và tuân thủ bản quyền.
    - ❌ **Không làm live Isaac interactive viewport trên Web trong P0:** Mô phỏng chạy headless trong container; Web chỉ xem video replay MP4 sau khi hoàn thành.
    - ❌ **Không đưa DISCOVERSE remote GS streaming (NVENC) vào P0 scope:** Đây là tính năng tương tác thời gian thực thuộc P1.
@@ -1421,8 +1446,8 @@ Implementation Order dưới đây là **data dependency order cho real artifact
 Sau đó Integration #1 mới thay fixture bằng real artifact.
 
 - **Phase 0 (System Audit):** Đọc các hệ thống Tier-0 (VR-Robo, R2G...) để chốt giải pháp ghép nối cuối cùng.
-- **Phase A (Reconstruction):** Code luồng `Video -> COLMAP -> Brush -> OpenMVS` chạy mượt mà ra file.
-- **Phase B (Metric):** Chốt được hệ tọa độ và tỷ lệ mét (có hoặc không có LiDAR) để xuất ra `ReconstructionBundle`.
+- **Phase A (Reconstruction):** `Video -> COLMAP -> Brush -> REC-06 anchor confirmation -> metric derivative -> REC-05 splat-transform geometry`; OpenMVS fallback từ COLMAP khi cần.
+- **Phase B (Metric):** REC-06 kiểm tra/propagate cùng transform cho pose, visual và geometry (có alignment khi mixed LiDAR), tránh double scaling, rồi xuất `ReconstructionBundle`.
 - **Phase C (Object Identity & Scene Decomposition):** SAM2 → Multi-view association → Human confirmation → SceneDecomposer → Draft SceneIR.
 - **Phase D (Physics & Scene IR Revisions):** ST-COLLIDER → Physics-enriched SceneIR → ST-EDIT → Preflight.
 - **Phase E (Simulator):** Dịch `.json` sang `.usd`, chạy CandidatePackage và validation report trên Isaac Sim.

@@ -59,13 +59,13 @@ Nguyên tắc chung:
 | Video/frame | `REUSE` | FFmpeg | decode/encode CLI | adapter, validation, manifest |
 | Camera pose/SfM | `REUSE` + `ADAPT` | `colmap/colmap` + `InternRobotics/Re3Sim` | feature extraction, matching, mapper/SfM, sequential vocab tree | `ColmapAdapter`, input prep, pose/output normalization |
 | 3DGS Visual | `REUSE` + utility | `ArthurBrussee/brush` + `playcanvas/splat-transform` | reconstruction/training CLI, artifact validation, SOG packaging | `BrushAdapter`, COLMAP bridge, config, provenance |
-| RGB geometry | `REUSE` + `ADAPT` | `cdcseacave/openMVS` + `InternRobotics/Re3Sim` | COLMAP import, densification, mesh reconstruction, command orchestration | `OpenMVSAdapter`, normalized geometry artifact, timeout/checksum |
+| RGB geometry | `REUSE` + `ADAPT` | `playcanvas/splat-transform`; `cdcseacave/openMVS` fallback | metric Brush derivative → voxelization/capsule carve; COLMAP surface reconstruction fallback | `SplatTransformAdapter`, normalized geometry artifact, timeout/checksum, fallback adapter |
 | LiDAR processing | `SELF-CODE` + library | `isl-org/Open3D` | IO, transform, filtering, voxel utilities | prefusion/ingest/alignment workflow + provenance |
 | Object masks | `REUSE` | `facebookresearch/sam2` | predictor, video mask propagation | `SAM2Adapter`, mask artifact/metadata |
 | Multi-view association | `ADAPT` + `QUALIFICATION` | `BigCiLeng/R2G` (SAMPro3D) + `lkeab/gaussian-grouping` | 3D projection, multi-view score voting, DBSCAN, prompt consolidation, identity lifting spike (`SCENE-QUAL-GG-01`) | projection adapter + association service theo canonical coordinate |
 | Scene decomposition | `ADAPT` | `BigCiLeng/R2G` + `PointsCoder/OpenReal2Sim` + `lkeab/gaussian-grouping` | per-object point cloud, OBB extraction, alignment patterns, `GaussianObjectMembership` | `SceneDecomposer`, Environment/SceneObject mapping, non-destructive hide |
 | Scene IR | `SELF-CODE` | project contract | — | schema, refs, transforms, revisions |
-| Collider | `ADAPT` + library | `PointsCoder/OpenReal2Sim` + `discoverse-dev/DISCOVERSE` (CoACD) + `InternRobotics/Re3Sim` + `playcanvas/splat-transform` (fallback) | ground clearance, CoACD convex decomposition, MeshConverterCfg, voxel collision fallback | collider policy + `ColliderGenerator` |
+| Collider | `ADAPT` + library | REC-05 `splat-transform` geometry + OpenReal2Sim + DISCOVERSE (CoACD) + Re3Sim | qualified geometry, analytic ground plane, Box/OBB overrides, convex decomposition, MeshConverterCfg | collider policy + `ColliderGenerator` |
 | OpenUSD export | `ADAPT` + library | `OpenUSD` + `PointsCoder/OpenReal2Sim` + `InternRobotics/Re3Sim` | USD physics stage build, MeshConverter, PhysX schemas, stage units | SceneIR→USD translation, packaging, checksum |
 | Isaac validation | `ADAPT` + platform | `isaac-sim/IsaacLab` + `zst1406217/VR-Robo` + `InternRobotics/Re3Sim` | headless loading, robot stepping, collision checks, Gym `RecordVideo` fallback, process isolation | validator worker, Start-Goal execution, structured report |
 | Simulator patterns | `REFERENCE` | Re3Sim, VR-Robo, DISCOVERSE, OpenReal2Sim | reconstruction→simulator patterns, process isolation | không tạo dependency nếu không cần |
@@ -88,8 +88,9 @@ Biến RGB/Registered LiDAR thành reconstruction artifacts chuẩn để `EX-SC
 RGB
 → Pose
 → Visual
+→ Confirmed metric anchor / working derivative (REC-06 prerequisite)
 → RGB Geometry
-→ Metric/Canonical
+→ Final Metric/Canonical verification (REC-06 completion)
 → ReconstructionBundle
 
 Registered LiDAR
@@ -110,14 +111,14 @@ Registered LiDAR
 
 ## 2.3 Tools / repositories
 
-Primary:
+Runtime và fallback:
 
 - FFmpeg
 - COLMAP
 - Brush
-- OpenMVS
+- OpenMVS (fallback P0 cho REC-05; qualification riêng khi kích hoạt)
 - Open3D
-- `playcanvas/splat-transform`: Core utility cho 3DGS artifact validation (`readFileInfo`), stats (`fillRatio`), Morton reorder và SOG packaging. Xem [`docs/execution/audits/04a_splat_transform.md`](./audits/04a_splat_transform.md).
+- `playcanvas/splat-transform`: Core utility cho 3DGS validation, stats, SOG packaging (REC-04) và voxel geometry/collision (REC-05). Xem [`docs/execution/audits/04a_splat_transform.md`](./audits/04a_splat_transform.md).
 - `InternRobotics/Re3Sim`: **Tier-0 System Architecture Reference & Code Donor** cho PyCOLMAP orchestration (`REC-03`), OpenMVS command pipeline (`REC-05`) và FrameTools / similarity transform (`REC-06`). Xem [`docs/execution/audits/07_re3sim.md`](./audits/07_re3sim.md).
 
 Run-first/reference theo Integration Playbook:
@@ -215,15 +216,26 @@ Visual không được dùng như collider.
 
 ```text
 Brush 3DGS
+→ REC-06 confirmed anchor/transform → metric working derivative
 → splat-transform (GPU voxelization + capsule carve)
 → collision.glb (OpenMVS fallback)
 ```
 
-Geometry/Collider phải đủ cho downstream navigation/object/collider.
+REC-05 nhận REC-04 Visual và confirmation record của pha đầu REC-06; không đợi
+REC-06 hoàn tất toàn task. Voxel/capsule theo mét chỉ chạy sau confirmation,
+master PLY không bị mutate. Geometry là input cho EX-SIM validation, chưa tự
+chứng minh collision đúng. OpenMVS fallback nhận REC-03 COLMAP model và được
+chuẩn hóa bằng cùng transform.
 
 ### REC-06 — RGB metric scale
 
-Dùng locked real-world anchor theo PRD.
+Dùng locked real-world anchor theo PRD. REC-06 gồm hai pha trong cùng task:
+
+1. Từ REC-03/04 và anchor, xác nhận transform sang canonical meter trước REC-05.
+2. Khi REC-05 có geometry, kiểm tra/propagate transform tới mọi representation,
+   tránh double scaling và xác minh bằng khoảng cách độc lập trước REC-10.
+
+Không đổi stage ID, shared schema hoặc dùng evaluation-only trajectory làm anchor.
 
 ### REC-07 — TorWIC LiDAR prefusion
 
@@ -967,14 +979,13 @@ Tối thiểu:
 
 Load fixture SceneIR.
 
-Dùng [Three.js docs/examples](https://threejs.org/docs/) cho controls, picking,
-loaders và layers. [React Three Fiber](https://github.com/pmndrs/react-three-fiber)
-là library candidate sau khi kiểm tra version/scaffold, không bắt buộc.
-[Spark](https://github.com/sparkjsdev/spark) là P0 qualification candidate cho
-Gaussian view; [Spark + Next.js example](https://github.com/sparkjsdev/spark-react-nextjs)
-chỉ là reference về client-only setup. [Potree](https://github.com/potree/potree)
-chỉ là reference cho point-cloud LOD khi cần. Chưa repo nào được coi là đã
-chứng minh tương thích với output Brush thực tế.
+Dùng PlayCanvas Engine 2.22.4 và `@playcanvas/supersplat-viewer` 1.35.2 qua
+client-only component. Browser entrypoint là `@playcanvas/supersplat-viewer/viewer`;
+API và trách nhiệm adapter nằm tại [Audit #09](./audits/09_supersplat_viewer.md).
+Mesh/point-cloud/collider và gizmo dùng cùng PlayCanvas scene graph; mapping
+selection/edit tới SceneIR do EX-PRODUCT sở hữu. Three.js/Spark/Potree chỉ còn
+reference; không tạo renderer song song trong P0. Tương thích Brush phải có
+runtime proof, không suy từ khả năng đọc format trong upstream source.
 
 Hỗ trợ:
 
@@ -987,10 +998,10 @@ Hỗ trợ:
 - Visual/Geometry/Collider toggles;
 - transform editing.
 
-P0 dùng Next.js + Three.js + WebGL/WebGL2 baseline. Chọn Gaussian renderer sau
-qualification bằng output Brush thực, kiểm tra artifact checksum, format,
-coordinate conversion và browser capability; nếu renderer dùng WebGPU mới cần
-WebGPU capability check. Nếu Visual không có/không tương thích, hiển thị lỗi và
+P0 dùng Next.js + PlayCanvas với WebGL2 baseline; ưu tiên WebGPU khi khả dụng.
+Qualification phải dùng output Brush thật và SOG derivative, kiểm tra checksum,
+format, coordinate conversion, capability và WebGL2 fallback. Nếu Visual không
+có/không tương thích, hiển thị lỗi và
 cho phép inspect các view khác nhưng không claim AC-11 pass. Cleanup GPU
 resources/listeners/workers khi đổi view hoặc unmount. Mesh/point-cloud fixture
 không phải Brush compatibility proof.

@@ -40,8 +40,8 @@ Outputs:
 
 ## Technology And Strategy
 
-- FFmpeg, COLMAP, Brush, OpenMVS, Open3D, NumPy.
-- `playcanvas/splat-transform`: Core utility cho 3DGS artifact validation (`readFileInfo`), stats (`fillRatio`), Morton reorder và SOG packaging theo [Audit #4a](../../audits/04a_splat_transform.md).
+- FFmpeg, COLMAP, Brush, splat-transform, Open3D, NumPy; OpenMVS là fallback P0.
+- `playcanvas/splat-transform`: REC-04 validation/SOG packaging và REC-05 voxel geometry/collision theo [Audit #4a](../../audits/04a_splat_transform.md), có confirmed metric transform trước voxelization.
 - `InternRobotics/Re3Sim`: Tier-0 System Architecture Reference & Code Donor cho PyCOLMAP orchestration (`REC-03`), OpenMVS command pipeline (`REC-05`) và FrameTools / similarity transform (`REC-06`) theo [Audit #7](../../audits/07_re3sim.md).
 - Reuse core reconstruction tools qua adapter/process boundary.
 - Team sở hữu validation, normalization, artifact publication, metric/alignment và provenance.
@@ -65,8 +65,8 @@ Outputs:
 | [REC-02A](./tasks/REC-02A.md) | Frame extraction | REC-02 | normalized frame artifact |
 | [REC-03](./tasks/REC-03.md) | Camera pose / COLMAP | REC-02A | normalized camera poses |
 | [REC-04](./tasks/REC-04.md) | Visual reconstruction | REC-03 | visual artifact |
-| [REC-05](./tasks/REC-05.md) | RGB geometry | REC-03 | geometry artifact |
-| [REC-06](./tasks/REC-06.md) | RGB metric scale | REC-03/04/05 | confirmed metric reconstruction |
+| [REC-05](./tasks/REC-05.md) | Voxel geometry / OpenMVS fallback | REC-04 + REC-06 anchor confirmation; REC-03 cho fallback | geometry artifact |
+| [REC-06](./tasks/REC-06.md) | RGB metric scale | REC-03/04 cho anchor confirmation; REC-05 cho final verification | confirmed metric reconstruction |
 | [REC-07](./tasks/REC-07.md) | TorWIC LiDAR prefusion | REC-01 | `registered_lidar.ply` + provenance |
 | [REC-08](./tasks/REC-08.md) | Registered LiDAR ingest | registered LiDAR | `LiDARGeometryArtifact` |
 | [REC-09](./tasks/REC-09.md) | RGB–LiDAR alignment | REC-06/08 | confirmed alignment record |
@@ -74,6 +74,10 @@ Outputs:
 | [REC-11](./tasks/REC-11.md) | Worker entrypoint | REC-10 | stable worker/CLI |
 
 ## Track Definition Of Done
+
+REC-06 có pha xác nhận anchor trước REC-05 và pha kiểm tra toàn bộ artifacts
+sau REC-05; REC-05 không phụ thuộc trạng thái DONE của REC-06. Đây là ordering
+nội bộ EX-REC theo Integration §3.3, không thêm task/stage ID.
 
 - Real RGB path tạo visual, geometry và metric artifacts.
 - LiDAR ingest và mixed contribution evidence tồn tại.

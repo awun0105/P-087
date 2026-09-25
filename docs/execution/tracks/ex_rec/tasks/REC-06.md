@@ -22,12 +22,15 @@ Source anchors: [Track Guide](../../../TRACK_IMPLEMENTATION_GUIDE.md), [Contract
 
 ## 4. Dependencies
 
-- REC-03/04/05 artifacts.
+- Pha xác nhận anchor: REC-03/04 artifacts, thực hiện trước REC-05 metric voxelization.
+- Pha final verification: REC-05 geometry, thực hiện trước REC-10 publication.
 - Foundation Lock chốt canonical coordinate và real-world anchor; không dùng cùng anchor làm evaluation distance.
 
 ## 5. Input Contract
 
 - RGB poses, visual và geometry artifacts.
+- Geometry chưa bắt buộc ở pha xác nhận anchor, nhưng bắt buộc trước khi hoàn tất
+  task. Giữ cùng source identity/transform khi geometry được tạo sau đó.
 - Locked real-world anchor và canonical coordinate policy.
 
 Không đọc evaluation-only data hoặc private temp folder ngoài contract đã nêu.
@@ -58,19 +61,31 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
 - [`InternRobotics/Re3Sim`](https://github.com/InternRobotics/Re3Sim) (chi tiết: [`docs/execution/audits/07_re3sim.md`](../../../audits/07_re3sim.md)):
   - Tham khảo `re3sim/utils/frame_tools.py`: Kiến trúc `FrameTools` quản lý frame graph, tách bạch scale (tính từ ma trận determinant), rotation và translation để chuyển đổi giữa các hệ tọa độ.
   - Thuật toán `get_transform_between_two_frames()` (`compute_transform_to_marker_aruco.py`): Ước tính similarity transform $p_B = s R p_A + t$ giữa hai tập trajectories.
-  - Đóng góp cho `MetricCanonicalizer` và qualification spike **`REC-QUAL-FRAME-01`**: Chứng minh Brush Visual, OpenMVS Geometry và Registered LiDAR sau chuẩn hóa đều có chung gốc tọa độ, hệ trục canonical và tỷ lệ mét ($1.0 = 1\text{m}$).
+  - Đóng góp cho `MetricCanonicalizer` và qualification spike **`REC-QUAL-FRAME-01`**: Chứng minh Brush Visual, REC-05 voxel geometry (hoặc OpenMVS fallback) và Registered LiDAR khi có sau chuẩn hóa đều có chung gốc tọa độ, hệ trục canonical và tỷ lệ mét ($1.0 = 1\text{m}$).
 - **Guardrails / Anti-patterns bắt buộc:**
-  - ❌ **Không phụ thuộc ChArUco marker**: Re3Sim dùng marker vật lý để lấy metric ground-truth. Real2Sim Studio tại kho bãi TorWIC dựa trên LiDAR và calibration camera/sensor có sẵn.
+  - ❌ **Không phụ thuộc ChArUco marker**: Re3Sim chỉ là reference. Dùng locked
+    product-safe real-world anchor; LiDAR/calibration chỉ tham gia khi contract
+    cho phép và có provenance. Không lấy evaluation-only trajectory/geometry làm anchor.
   - ❌ **Scale phải là $1.0 = 1\text{m}$**: Mọi metric transform phải được kiểm định sai số $< 2\text{cm}$ trước khi công bố `ReconstructionBundle`.
 
 ## 9. Implementation Plan
 
 Assignee điền sau khi inspect code/test hiện tại: files cụ thể, sequence, failure handling và proof. Không đổi goal, I/O hoặc authority gate của task.
 
+Ordering đã khóa theo Integration §3.3:
+1. Xác nhận locked real-world anchor và similarity transform từ REC-03/04; xuất
+   confirmation record cho REC-05 tạo metric working derivative.
+2. REC-05 chạy voxel/capsule theo mét; giữ master PLY immutable và ghi transform
+   checksum trong provenance. Anchor chưa confirmed phải chặn bước này.
+3. Đọc geometry và applied-transform provenance; canonicalize pose/visual và
+   kiểm tra geometry cùng frame, không scale lần hai. Xác minh bằng khoảng cách
+   độc lập trước khi complete REC-06 và cho REC-10 publish.
+
 ## 10. Tests
 
 - Scale math/propagation unit tests.
 - Missing/unconfirmed anchor negative test.
+- REC-05 prerequisite handoff và geometry đã metric không bị scale lần hai.
 - Known-distance fixture and artifact metadata contract test.
 
 Phân biệt local/mock proof với real tool/GPU smoke trong Result.
@@ -91,4 +106,3 @@ Expected evidence:
 - Anchor/confirmation record.
 - Before/after distance evidence.
 - Config/checksum và scale error measurement.
-

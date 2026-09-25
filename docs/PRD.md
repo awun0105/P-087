@@ -7,14 +7,14 @@
 | Mã dự án | RAV-01 |
 | Tên sản phẩm | Real2Sim Studio |
 | Phạm vi bản phát hành | Warehouse MVP |
-| Phiên bản tài liệu | v1.13 |
+| Phiên bản tài liệu | v1.14 |
 | Trạng thái | Foundation Baseline; benchmark/runtime acceptance inputs pending |
-| Ngày cập nhật | 24/09/2026 |
+| Ngày cập nhật | 25/09/2026 |
 | Thời gian thực hiện dự kiến | 4 tuần |
 | Người dùng chính | Kỹ sư mô phỏng (Simulation Engineer) |
 | Miền ứng dụng | Kho trong nhà, robot di động tự hành (Indoor Warehouse AMR) |
 | Trình mô phỏng mục tiêu | NVIDIA Isaac Sim |
-| Tài liệu tiền nhiệm | PRD v1.12 |
+| Tài liệu tiền nhiệm | PRD v1.13 |
 | Tài liệu liên quan | [BRIEF](./BRIEF.md), [DATASET_PLAYBOOK](./DATASET_PLAYBOOK.md), [WIREFRAME](./WIREFRAME_AND_UI_FLOW.md), [Execution Contract](./execution/TEAM_EXECUTION_CONTRACT.md), [Execution Plan](./execution/TEAM_EXECUTION_PLAN.md), [Track Guide](./execution/TRACK_IMPLEMENTATION_GUIDE.md), [Integration Playbook](./execution/INTEGRATION_PLAYBOOK.md) |
 
 ### 0.1 Lịch sử thay đổi (Change Log)
@@ -30,6 +30,7 @@
 | v1.11 | 23/09/2026 | Foundation override: P0 viewer dùng Next.js + Three.js + WebGL/WebGL2 cho geometry/point-cloud/collider/transforms; direct Gaussian browser rendering chuyển thành stretch/non-blocking; khóa owners và TorWIC bring-up archive |
 | v1.12 | 23/09/2026 | Product decision: khôi phục direct browser rendering của real 3DGS `VisualArtifact` thành yêu cầu P0; mesh, point cloud và collider là các view kỹ thuật ngang hàng, không phải fallback. Giữ Next.js + Three.js/WebGL2 baseline; renderer cụ thể phải qualification bằng output producer thật. |
 | v1.13 | 24/09/2026 | Làm rõ hai điểm HITL, Save Draft/Submit for Validation, candidate bất biến và validation evidence (report, replay, screenshots, logs) trước final review. Lỗi capture replay không đổi kết quả validation; Primary Demo vẫn phải có replay để đạt acceptance. |
+| v1.14 | 25/09/2026 | Đồng bộ viewer P0 với PlayCanvas Engine 2.22.4 + supersplat-viewer 1.35.2; WebGL2 baseline, WebGPU ưu tiên khi khả dụng. Giữ nguyên real Brush/browser proof và AC-11; không coi thay đổi thư viện là runtime acceptance. |
 
 ### 0.2 Chủ sở hữu và người phê duyệt (Owners and Approvers)
 
@@ -306,7 +307,7 @@ Full LiDAR-only product configuration thuộc P1.
 
 #### P0 — Bắt buộc để phát hành (Release Blockers)
 
-- Web App có Three.js/WebGL browser viewer cho geometry mesh, point cloud, collider và SceneObject transforms, hỗ trợ orbit, pan, zoom, chọn object và bật/tắt lớp;
+- Web App có PlayCanvas browser viewer cho geometry mesh, point cloud, collider và SceneObject transforms, hỗ trợ orbit, pan, zoom, chọn object và bật/tắt lớp;
 - luồng RGB đầu-cuối tại mục 4.1;
 - xác nhận metric scale;
 - candidate object được tạo tự động trước khi người dùng sửa;
@@ -531,9 +532,11 @@ Hệ thống bắt buộc cung cấp Web App chạy trên browser desktop đư�
 - kiểm tra và chỉnh transform của `SceneObject`;
 - thực hiện các thao tác trên mà không cần mở Blender hoặc Isaac Sim GUI.
 
-P0 dùng Next.js + Three.js với WebGL/WebGL2 baseline; WebGPU không phải điều kiện
-bắt buộc. Gaussian renderer cụ thể phải được chọn sau khi chứng minh đọc và
-render đúng output thực tế của Brush. `VisualArtifact` giữ format/producer/version,
+P0 dùng Next.js + PlayCanvas Engine 2.22.4 và `@playcanvas/supersplat-viewer`
+1.35.2 với WebGL2 baseline; ưu tiên WebGPU khi khả dụng, fallback WebGL2 phải
+được kiểm chứng. WebGPU không phải điều kiện bắt buộc của client. Renderer phải
+chứng minh đọc và render đúng output thực tế của Brush cùng SOG delivery derivative.
+`VisualArtifact` giữ format/producer/version,
 checksum và coordinate metadata do EX-REC publish; viewer resolve bằng artifact
 contract và convert coordinate ở boundary. Nếu Visual artifact thiếu, sai checksum,
 không tương thích hoặc browser không render được, UI phải báo trạng thái/lý do rõ
@@ -1024,7 +1027,7 @@ Trên một browser desktop được hỗ trợ, Editor phải có thể:
 - xem và chỉnh transform của `SceneObject`;
 - hoàn thành các thao tác trên mà không cần mở Blender hoặc Isaac Sim GUI.
 
-Acceptance evidence phải ghi browser, renderer/Three.js/WebGL runtime và version,
+Acceptance evidence phải ghi browser, PlayCanvas/viewer, WebGL2 hoặc WebGPU runtime và version,
 `VisualArtifact` format/producer/version/checksum cùng checksums của các view
 kỹ thuật, thao tác chuyển view và trạng thái lỗi. AC-11 P0 chỉ pass khi browser
 thực sự render output 3DGS do Brush tạo; mock, synthetic splats hoặc mesh/point

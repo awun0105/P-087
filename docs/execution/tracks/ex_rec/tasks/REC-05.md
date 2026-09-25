@@ -22,13 +22,18 @@ Source anchors: [Track Guide](../../../TRACK_IMPLEMENTATION_GUIDE.md), [Contract
 
 ## 4. Dependencies
 
-- REC-04 output (Brush `visual.ply` hoặc COLMAP model).
+- REC-04 output: Brush `visual.ply`.
+- REC-06 pha xác nhận anchor/transform sang canonical meter đã hoàn tất; không
+  đợi final verification/DONE của REC-06 (xem Integration §3.3).
+- REC-03 COLMAP model cho OpenMVS fallback.
 - `splat-transform` (v3.6.6) Node.js/GPU environment.
 - Locked OpenMVS Docker environment (làm fallback nếu spike không đạt).
 
 ## 5. Input Contract
 
 - REC-04 Brush `visual.ply` (đã qua structural validation).
+- Confirmed metric transform/anchor record và checksummed source refs; tạo working
+  derivative theo mét, không sửa master PLY và không coi arbitrary SfM unit là mét.
 - Robot footprint config: capsule height, capsule radius cho indoor carving.
 - Voxel resolution config: mặc định `0.05m` (5cm).
 
@@ -38,6 +43,7 @@ Không đọc evaluation-only data hoặc private temp folder ngoài contract đ
 
 - `GeometryArtifact` trỏ tới `collision.glb`.
 - Voxel metadata: resolution, bounding box, flood fill seed position.
+- Provenance của metric derivative và transform đã áp dụng để REC-06 tránh double scaling.
 - Geometry/runtime/config provenance và SHA-256 checksum.
 
 Output quan trọng phải có schema/version phù hợp, checksum, provenance và resolvable artifact refs.
@@ -68,7 +74,7 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
 
 ## 9. Qualification Spike trên `Aisle_CW`
 
-Trước khi đóng băng việc loại bỏ hoàn toàn OpenMVS:
+Trước khi chấp nhận primary geometry; giữ OpenMVS fallback nếu spike không đạt:
 1. Chạy 3 cấu hình voxel resolution trên file Brush PLY của `Aisle_CW`:
    - Config A: `0.10m`
    - Config B: `0.05m` (Baseline)
@@ -84,6 +90,8 @@ Trước khi đóng băng việc loại bỏ hoàn toàn OpenMVS:
 
 - Command/config builder unit tests cho `splat-transform`.
 - Missing/invalid PLY negative tests.
+- Missing/unconfirmed anchor phải chặn metric voxelization; test scale propagation
+  và double-scaling với REC-06.
 - Synthetic/small PLY to `collision.glb` smoke test và topology verification.
 - Fallback OpenMVS adapter smoke test.
 

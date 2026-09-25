@@ -204,7 +204,7 @@ Không mặc định tất cả trở thành runtime dependencies.
 FFmpeg
 COLMAP
 Brush
-OpenMVS
+splat-transform (primary geometry có qualification; OpenMVS fallback)
 Open3D
 NumPy
 ```
@@ -221,8 +221,8 @@ Camera Pose / SfM
 3DGS Visual
         Brush
 
-RGB Dense Geometry / Mesh
-        OpenMVS
+RGB Voxel Geometry / Collision
+        splat-transform sau confirmed metric transform (OpenMVS surface fallback)
 
 LiDAR / Point Cloud Utilities
         Open3D
@@ -350,17 +350,17 @@ Frontend:
 Next.js
 React
 TypeScript
-Three.js
+PlayCanvas Engine + supersplat-viewer
 ```
 
 3D viewer:
 
 ```text
-Three.js
-WebGL/WebGL2  ← P0 baseline
-WebGPU        ← optional/advanced path
-OrbitControls
-TransformControls
+PlayCanvas Engine 2.22.4 + supersplat-viewer 1.35.2
+WebGL2        ← P0 baseline / fallback
+WebGPU        ← ưu tiên khi khả dụng
+Camera navigation
+TranslateGizmo / RotateGizmo
 Raycasting / Picking
 Scene graph / layer controls
 ```
@@ -384,18 +384,18 @@ approve/reject
 release
 ```
 
-Three.js là P0 core.
+PlayCanvas Engine và supersplat-viewer là P0 viewer core.
 
 WebGPU không được trở thành P0 blocker.
 
-Theo PRD v1.12/AC-11, direct browser rendering của **real Brush 3DGS** là
+Theo PRD v1.14/AC-11, direct browser rendering của **real Brush 3DGS** là
 P0. Geometry mesh, point cloud và collider là các view kỹ thuật ngang hàng,
 không phải fallback thay điều kiện 3DGS. Nếu `VisualArtifact` thiếu hoặc renderer
 không tương thích, UI vẫn có thể cho inspect các view khác nhưng phải báo lỗi và
-không claim AC-11 pass. WebGL/WebGL2 là baseline; WebGPU chỉ là backend tùy chọn.
-EX-PRODUCT có source map cụ thể trong Integration Playbook: Three.js examples,
-dashboard starter để adapt chọn lọc, React Three Fiber là library candidate,
-Spark là Gaussian renderer candidate cần qualification bằng output Brush thật.
+không claim AC-11 pass. WebGL2 là baseline; ưu tiên WebGPU khi khả dụng.
+EX-PRODUCT dùng PlayCanvas Engine + supersplat-viewer, adapt dashboard starter
+có chọn lọc. Viewer cần qualification bằng Brush output thật và SOG derivative;
+source/API audit không thay browser proof.
 Không coi PLY point cloud hoặc synthetic fixture là browser 3DGS proof.
 
 ---
@@ -426,9 +426,10 @@ RGB video/frames
 → validate + privacy gate
 → frame extraction bằng FFmpeg nếu là video
 → COLMAP camera poses / SfM
-       ├→ Brush VisualArtifact (3DGS)
-       └→ OpenMVS RGB geometry
-→ metric / coordinate normalization
+→ Brush VisualArtifact (3DGS)
+→ REC-06 xác nhận anchor/transform → metric working derivative
+→ REC-05 splat-transform geometry (OpenMVS fallback từ COLMAP)
+→ REC-06 final metric / coordinate verification
 → ReconstructionBundle
 ```
 
@@ -446,7 +447,8 @@ Track chủ yếu reuse:
 FFmpeg
 COLMAP
 Brush
-OpenMVS
+splat-transform
+OpenMVS (fallback)
 Open3D
 ```
 
@@ -456,7 +458,7 @@ Team tự viết:
 VideoPreprocessor
 ColmapAdapter
 BrushAdapter
-OpenMVSAdapter
+SplatTransformAdapter / OpenMVSAdapter fallback
 LiDAR ingest
 alignment workflow
 metric normalization
@@ -639,9 +641,9 @@ Frontend:
 ```text
 Next.js
 TypeScript
-Three.js
-WebGL/WebGL2
-optional WebGPU
+PlayCanvas Engine + supersplat-viewer
+WebGL2 baseline
+WebGPU ưu tiên khi khả dụng
 ```
 
 Người phù hợp:
