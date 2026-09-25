@@ -80,11 +80,9 @@ Không sửa track internals. Shared contract change cần producer + consumer r
 1. Tạo React component wrapper cho `@playcanvas/supersplat-viewer` với `ui: false` và `ssr: false`.
 2. Tích hợp Single Scene Graph PlayCanvas: nạp Visual SOG (từ `REC-04`) và `collision.glb` (từ `REC-05`/`SIM-02`) trên cùng Entity.
 3. Kích hoạt camera modes (Orbit, Fly, Walk) và surface picking từ viewer API.
-4. Kết nối Transform Gizmo và gửi event cập nhật vị trí về backend SceneIR API.
-2. Xây dựng `Real2SimEditorBridge` (typed postMessage) liên kết Next.js shell với SuperSplat-derived editor.
-3. Tích hợp các view Geometry mesh và Collider wireframes trên PlayCanvas/Three.js.
-4. Tận dụng `splat-transform` cho khâu tối ưu hóa, sinh LOD và SOG streaming.
-5. Assignee điền files, API/UI flow, state ownership, failure handling và proof sau inspect. Không đổi scope.
+4. Tích hợp PlayCanvas `TranslateGizmo` / `RotateGizmo` và gửi event cập nhật vị trí về backend SceneIR API.
+5. Tận dụng `splat-transform` cho khâu tối ưu hóa, sinh LOD và SOG streaming.
+6. Assignee điền files, API/UI flow, state ownership, failure handling và proof sau inspect. Không đổi scope.
 
 ## 10. Tests
 
@@ -101,7 +99,7 @@ Tách fixture/mock/API/browser proof khỏi real-worker Product E2E acceptance.
 
 - [ ] Viewer render real Brush 3DGS Visual trên Primary RGB Scene và chuyển được sang Geometry mesh/Point Cloud/Collider; fixture proof tách khỏi AC-11 real-browser proof.
 - [ ] Visual/Geometry/Point Cloud/Collider refs bind đúng checksums; missing/incompatible Visual báo lỗi và không pass AC-11.
-- [ ] Three.js layers dùng canonical coordinate/transform metadata.
+- [ ] PlayCanvas Engine layers dùng canonical coordinate/transform metadata.
 - [ ] Transform edits persist through backend revision then re-render.
 - [ ] Renderer capability/error state và cleanup rõ; synthetic visual hoặc mesh/point-cloud không bị báo cáo là Brush compatibility proof.
 - [ ] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
@@ -113,6 +111,6 @@ Pending implementation.
 Expected evidence:
 
 - Interaction recording/screenshots.
-- Real Brush `VisualArtifact` format/producer/version/checksum, các view artifact checksums, renderer/Three.js/WebGL runtime version và browser environment.
+- Real Brush `VisualArtifact` format/producer/version/checksum, các view artifact checksums, renderer/PlayCanvas/WebGL runtime version và browser environment.
 - Save/reload revision/checksum.
 - Render performance and error state.
