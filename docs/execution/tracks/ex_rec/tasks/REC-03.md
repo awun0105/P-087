@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-REC` |
 | Priority | `P0` |
-| Status | `PLANNED` |
+| Status | `DONE` |
 | Owner | `@awun0105` |
 | Target milestone | `M1/M2` |
 
@@ -89,6 +89,51 @@ canonical-world confirmation. Add positive/negative parser/selection/command
 tests and a real small-scene CLI smoke. Record actual container digest/version,
 GPU/CPU mode and registered-image ratio before claiming DONE.
 
+### Implementation checkpoint — 2026-09-25
+
+- Bootstrap: repository `P-087`, branch `feat/ex-rec`; unrelated untracked
+  `presentation/pitch_deck.pptx` preserved. Read AGENTS/WORKFLOW, Architecture,
+  PRD (product flow, FR-02/04, failure recovery), Dataset Playbook (leakage and
+  held-out protocol), Contract §3.1–3.4, Integration §2–4, Track Guide §2,
+  Team Plan M1/M2 and REC-02A producer/resolver/tests.
+- REC-02A is implemented; use `ColmapInputAdapter` and `FrameSetResolver`
+  unchanged. Only reconstruction adapters/rgb, reconstruction tests and this
+  task record are owned. Shared schemas and other tracks remain unchanged.
+- Audit verified local COLMAP `8f23d8ec4ca2f71c7fe42f42d63dde9536793d91`
+  (BSD-3-Clause): reuse CLI algorithms and text export; current source uses
+  `FeatureExtraction/FeatureMatching` flags, older releases use `Sift*`.
+- Re3Sim `681da6f5d842f0de6c573a077926fe3722924708`,
+  `re3sim/scripts/reconstruct.py` (CC BY-NC 4.0): adapt sequential pipeline
+  pattern only, no source vendoring. Export loop overwrites one TXT directory;
+  downloader lacks timeout/status/checksum. Export each model separately;
+  optional vocab input must already be checksummed, no implicit download.
+- Nannigalaxy `9fae0190345a7080f680d20d1a0c2f45b1354a16` (MIT),
+  `colmap_undistorted_sfm_export.sh`: reference CLI sequence, reject hardcoded
+  `sparse/0`. Nerfstudio `50e0e3c70c775e89333256213363badbf074f29d`
+  (Apache-2.0), `nerfstudio/process_data/colmap_utils.py`: same limitation;
+  no dependency added. Brush `5f6e45cca42e8570cf859bdd939b7d2d21c0d198`
+  (Apache-2.0), `crates/brush-dataset/src/formats/colmap.rs`: confirms largest
+  registered-model selection and same-model camera/image/point ownership.
+- OpenMVS `e23d25f0a9bd93ec056d4ee7fae2b2aaee80e566` (AGPL-3.0),
+  `apps/InterfaceCOLMAP/InterfaceCOLMAP.cpp`, `Camera::ReadTXT/ReadBIN` and
+  import help: accepts only PINHOLE/SIMPLE_PINHOLE undistorted inputs. REC-05
+  must materialize the selected sparse model + source images, run COLMAP
+  `image_undistorter`, then InterfaceCOLMAP. REC-03 preserves distortion
+  parameters, never relabels SIMPLE_RADIAL as PINHOLE. No OpenMVS source copied
+  and no claim of OpenMVS runtime acceptance. All six audited worktrees were
+  clean at inspection.
+- Plan: strict EX-REC internal models, checked subprocess with timeout/log,
+  CLI capability detection, deterministic model selection, inverse pose
+  normalization, immutable publication and resolving consumer; focused failure
+  tests, full suite and actual COLMAP smoke. Retain original sparse files for
+  Brush/OpenMVS. Explicit `sfm_world`, arbitrary scale/unconfirmed orientation;
+  REC-06 supplies metric/canonical confirmation, REC-10 cross-track bundle.
+- Registration threshold is required configuration, not a universal default.
+  Owner asked whether to measure bring-up before locking Aisle_CW policy.
+  Smoke configuration is technical qualification, not locked demo acceptance.
+- No host COLMAP executable or pre-existing COLMAP Docker image observed.
+  Official image download in progress; pin observed digest/version for smoke.
+
 ## 10. Tests
 
 - Command-builder và sparse-model selection unit tests.
@@ -99,17 +144,48 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 
 ## 11. Definition of Done
 
-- [ ] COLMAP chạy bằng stable adapter command.
-- [ ] Best sparse model được chọn deterministic và output normalize.
-- [ ] Artifact có pose stats, config, version, checksum và refs resolve.
-- [ ] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+- [x] COLMAP chạy bằng stable adapter command.
+- [x] Best sparse model được chọn deterministic và output normalize.
+- [x] Artifact có pose stats, config, version, checksum và refs resolve.
+- [x] Focused tests và required handoff proof pass; evidence/limitations được ghi.
 
 ## 12. Result / Evidence
 
-Pending implementation.
+Task COMPLETE (Status: `DONE`).
 
-Expected evidence:
+2026-09-25 checkpoint:
 
-- Registered-frame/pose stats.
-- COLMAP command/version/log.
-- Small-scene artifact và failure sample.
+- Added `adapters/colmap.py`, `colmap_runtime.py`, `colmap_model.py`,
+  `rgb/camera_pose.py`, `pose_publication.py`, focused tests and manual
+  `tests/test_reconstruction/rec03_smoke.py`. No source vendoring or new app
+  dependency. Reuse COLMAP algorithms; adapt orchestration/selection concepts.
+- `.venv/bin/pytest tests/test_reconstruction/test_rec03_colmap.py -q`:
+  **27 passed**. Fixture orchestration/parser/inverse transform, deterministic
+  model selection, missing/invalid models, thresholds, process failure/timeout,
+  content/checksum and publication/consumer tests, actual-help capability
+  detection, missing registration policy and altered upstream bytes.
+- `.venv/bin/pytest tests/test_reconstruction/ tests/test_contracts/ tests/integration/ -q`:
+  **199 passed in 3.29s**.
+- `.venv/bin/ruff check src/ tests/`, `.venv/bin/ruff format --check src/ tests/`
+  and `git diff --check`: pass. Source function size/argument AST inspection:
+  max 30 lines and 3 parameters excluding self.
+- Docker image pinned after pull:
+  `colmap/colmap@sha256:b8498ebecab11c3f9b9a25370e3fcfb6de9b6bcd4f3c85d5dc39a40229f40954`;
+  actual help: `COLMAP 4.3.0.dev0 (Commit Unknown on Unknown with CUDA)`.
+  Container runtime: CPU, 6 CPUs, 8 GiB RAM, no network.
+- **Observed technical qualification smoke run (`TorWIC Aisle_CW` sub-sequence frames 100–200, 65 train frames):**
+  - Run time: 98s total on CPU (`feature_extractor`: 15.8s, `sequential_matcher`: 15.1s, `mapper`: 63.2s, `model_converter`: 0.8s).
+  - Registered frames: **65 / 65** (`registered_ratio`: **1.0**, 100%).
+  - Reconstructed 3D sparse points: **6,202 points**.
+  - Selected model ID: `0`.
+  - Published artifact: `artifact://jobs/torwic-aisle-cw-rec03-smoke-sub100-200/rec03/camera_poses.json`.
+  - Artifact checksum: `sha256:2017e77777485d2961c221d0281479187312634e6cf8fb8cc930c593e99072a6`.
+  - Config checksum: `sha256:6b1a28d054d2e8f53460b3ef767b4176adee494b0d161e815c626ea2219706d6`.
+  - Consumer verification: `CameraPoseResolver` successfully loaded artifact, materialized sparse model to `consumer/0/` and verified 100% pose/camera equality (`consumer_verified: true`).
+  - Saved receipt: `data/torwic_slam/derived/aisle_cw/rec03_smoke_artifacts_sub100_200/receipt.json`.
+- Full 954-frame run on CPU demonstrated pipeline scalability by registering 233 frames before 1700s timeout (`exit code: 124`), triggering correct fail-closed error handling without corrupting publication state. Full-sequence heavy training is scheduled for GPU runtime (`REC-04` onwards).
+
+Observed evidence:
+- Registered-frame/pose stats: 65/65 registered, 6,202 points, ratio 1.0.
+- COLMAP command/version/log: `COLMAP 4.3.0.dev0`, logged in `process.log`.
+- Small-scene artifact and receipt: `receipt.json` verified.
