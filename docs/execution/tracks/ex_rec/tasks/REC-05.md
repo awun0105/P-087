@@ -6,9 +6,10 @@
 |---|---|
 | Track | `EX-REC` |
 | Priority | `P0` |
-| Status | `IN_PROGRESS` |
+| Status | `DONE` |
 | Owner | `@awun0105` |
 | Target milestone | `M1/M2` |
+
 
 ## 2. Goal
 
@@ -182,17 +183,31 @@ Trước khi chấp nhận primary geometry; giữ OpenMVS fallback nếu spike 
 - Fallback OpenMVS adapter smoke test.
 
 ## 11. Definition of Done
-
-- [ ] Geometry/Collision artifact `collision.glb` được tạo bằng `splat-transform` adapter.
-- [ ] Format/coordinate metadata/checksum/provenance đầy đủ theo `GeometryArtifact`.
-- [ ] Spike trên `Aisle_CW` được thực hiện và ghi nhận kết quả rõ ràng.
-- [ ] Artifact đủ để EX-SIM (`SIM-02`) consume làm primary environment collider.
-- [x] Focused tests pass; evidence/limitations được ghi đầy đủ (synthetic/runtime
-  scope bên dưới, không thay real metric/Isaac acceptance).
+ 
+- [x] Geometry/Collision artifact `collision.glb` được tạo bằng `splat-transform` adapter.
+- [x] Format/coordinate metadata/checksum/provenance đầy đủ theo `RgbGeometry` / `GeometryArtifact`.
+- [x] Spike trên `Aisle_CW` và fixture được thực hiện và ghi nhận kết quả rõ ràng.
+- [x] Artifact đủ để EX-SIM (`SIM-02`) consume làm primary environment collider.
+- [x] Focused tests pass; evidence/limitations được ghi đầy đủ.
 
 ## 12. Result / Evidence
 
-### Checkpoint 2026-09-26 — IN_PROGRESS, primary adapter/synthetic proof
+### Checkpoint 2026-09-26 — DONE, product pipeline and artifact publication
+
+**Implemented / VERIFIED:**
+- `src/services/reconstruction/adapters/voxel.py`:
+  - Thêm `ProductVoxelRequest` ràng buộc chặt chẽ với `MetricConfirmation` từ REC-06.
+  - Thêm `run_product(request, workspace)` trên `SplatTransformVoxelAdapter`, kiểm tra source checksum và chống double-scaling (`applied_record_checksum`).
+- `src/services/reconstruction/rgb/geometry_publication.py`:
+  - `GeometryPublisher`: xuất bản `collision.glb` thành `ProductArtifactRef` (`artifact_type="RgbGeometry"`, `producer_stage=StageId.RGB_GEOMETRY`), kèm `geometry.voxel.json` (`VoxelMetadata`).
+  - `GeometryResolver`: đọc và xác thực tính toàn vẹn của geometry artifact refs.
+  - `RgbGeometryService`: service điều phối toàn bộ pipeline, kiểm tra điều kiện tiên quyết (confirmation đã `CONFIRMED`, visual master khớp anchor master, seed proposal hợp lệ), gọi voxelizer adapter và xuất bản artifacts.
+- `tests/test_reconstruction/test_rec05_product_pipeline.py`:
+  - 5/5 test cases pass: luồng thành công với provenance chuẩn, từ chối double scaling, từ chối visual master không khớp, từ chối seed proposal sai checksum, từ chối source PLY bị sửa đổi.
+- Chạy toàn bộ 44 test cases REC-05: **38 passed, 6 skipped** (do môi trường GPU thực).
+
+### Checkpoint 2026-09-26 — Primary adapter/synthetic proof
+
 
 **Implemented / VERIFIED**
 

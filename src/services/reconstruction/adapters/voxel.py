@@ -15,6 +15,7 @@ from src.models.contracts.coordinates import CoordinateSystem
 from src.services.reconstruction.adapters.collision_glb import canonicalize_collision, topology
 from src.services.reconstruction.adapters.voxel_output import validate_voxel_output, write_evidence
 from src.services.reconstruction.adapters.voxel_runtime import GeometryError, VoxelProcess, require_carve
+from src.services.reconstruction.rgb.metric_models import MetricConfirmation
 from src.services.reconstruction.rgb.voxel import VoxelConfig, cluster_command, collision_command, native_from_world
 
 EVIDENCE_FILES = (
@@ -37,13 +38,13 @@ EVIDENCE_FILES = (
 )
 
 
-def _coordinate_evidence(config: VoxelConfig) -> dict:
+def _coordinate_evidence(config: VoxelConfig, scale_applied: float = 1.0) -> dict:
     return dict(
         coordinate_system=CoordinateSystem().model_dump(mode="json"),
         native_coordinate_system=dict(unit="meter", up_axis="Y", handedness="right"),
         native_from_world="R_x(-90deg)",
         world_from_native="R_x(+90deg)",
-        scale_applied=1.0,
+        scale_applied=scale_applied,
         native_navigation_seed=list(native_from_world(config.navigation_seed_world)),
         native_cluster_seed=list(native_from_world(config.cluster_seed_world)),
     )
@@ -73,6 +74,16 @@ class SyntheticVoxelRequest(ContractModel):
     config: VoxelConfig
 
 
+class ProductVoxelRequest(ContractModel):
+    """Product voxelization request ràng buộc chặt chẽ với confirmed metric record."""
+
+    confirmation: MetricConfirmation
+    source: Path
+    source_checksum: Checksum
+    config: VoxelConfig
+    applied_record_checksum: Checksum | None = None
+
+
 class SplatTransformVoxelAdapter:
     """Reuse upstream filtering/voxel/carve/mesher, giữ isolated immutable attempts."""
 
@@ -84,6 +95,20 @@ class SplatTransformVoxelAdapter:
         request = SyntheticVoxelRequest.model_validate(request.model_dump())
         if file_checksum(request.source) != request.source_checksum:
             raise GeometryError("Synthetic source checksum mismatch")
+        return self._execute(request, workspace)
+
+    def run_product(self, request: ProductVoxelRequest, workspace: Path) -> dict:
+        """Product metric voxelization ràng buộc chặt chẽ với REC-06 confirmation."""
+        request = ProductVoxelRequest.model_validate(request.model_dump())
+        if request.applied_record_checksum is not None:
+            raise ValueError("metric transform already applied; refusing double scaling")
+        if request.confirmation.status != "CONFIRMED":
+            raise ValueError("metric confirmation must be CONFIRMED")
+        if file_checksum(request.source) != request.source_checksum:
+            raise GeometryError("Product source checksum mismatch")
+        return self._execute(request, workspace)
+
+    def _execute(self, request: SyntheticVoxelRequest | ProductVoxelRequest, workspace: Path) -> dict:
         workspace.mkdir(parents=True, exist_ok=False)
         try:
             shutil.copyfile(request.source, workspace / "input.ply")
@@ -96,9 +121,7 @@ class SplatTransformVoxelAdapter:
             write_evidence(workspace / "qualification.json", report)
             return report
         except (OSError, ValueError) as error:
-            raise GeometryError(
-                "Synthetic voxel attempt failed; inspect private logs; no artifact published"
-            ) from error
+            raise GeometryError("Voxel attempt failed; inspect private logs; no artifact published") from error
 
     def _pipeline(self, config: VoxelConfig, workspace: Path) -> None:
         self.process.qualify(workspace)
@@ -114,19 +137,24 @@ class SplatTransformVoxelAdapter:
         output = self.process.cli(collision_command(config), (workspace, "collision"))
         require_carve(output)
 
-    def _report(self, request: SyntheticVoxelRequest, workspace: Path) -> dict:
+    def _report(self, request: SyntheticVoxelRequest | ProductVoxelRequest, workspace: Path) -> dict:
         metadata = validate_voxel_output(workspace, request.config)
         mesh = canonicalize_collision(workspace / "geometry.collision.glb", workspace / "collision.glb")
+        is_prod = isinstance(request, ProductVoxelRequest)
+        evidence_kind = request.confirmation.preview.request.evidence_kind if is_prod else request.evidence_kind
+        scale_applied = request.confirmation.preview.transform.scale_m_per_sfm_unit if is_prod else 1.0
+        applied_checksum = request.confirmation.record_checksum if is_prod else None
         return dict(
             schema_version="1.0",
-            evidence_kind=request.evidence_kind,
+            evidence_kind=evidence_kind,
             product_artifact_published=False,
+            applied_confirmation_checksum=applied_checksum,
             runtime="splat-transform v3.6.6 (afbc281)",
             source_checksum=request.source_checksum,
             config=request.config.model_dump(mode="json"),
             config_checksum=request.config.checksum(),
             gaussian_counts=_gaussian_counts(workspace),
-            **_coordinate_evidence(request.config),
+            **_coordinate_evidence(request.config, scale_applied),
             native_voxel_metadata=metadata.model_dump(mode="json", by_alias=True),
             topology=topology(mesh),
             canonical_bounds=dict(
