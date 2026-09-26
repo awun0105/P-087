@@ -6,11 +6,10 @@ from pathlib import Path
 import pytest
 
 from src.models.contracts.artifacts import Checksum, ProductArtifactRef
-from src.models.contracts.coordinates import CoordinateSystem
 from src.models.contracts.manifests import InputConfiguration, StageId
 from src.models.contracts.reconstruction import (
     AlignmentStatus,
-    LiDARGeometryArtifact,
+    DependencyOrigin,
     PreprocessingDependency,
     PreprocessingProvenance,
 )
@@ -21,6 +20,7 @@ from src.services.reconstruction.alignment import (
     normalize_torwic_extrinsics,
 )
 from src.services.reconstruction.bundle import BundleBuildRequest, ReconstructionBundleService
+from src.services.reconstruction.lidar import LiDARIngestRequest, LiDARIngestService
 from src.services.reconstruction.rgb.geometry_publication import GeometryExecutionRequest
 from src.services.scene.bundle_consumer import load_reconstruction_bundle
 from tests.test_reconstruction.test_rec05_adapter import config
@@ -43,54 +43,28 @@ def dummy_rgb_frame(writer: object, job_id: str) -> ProductArtifactRef:
     return ref
 
 
-def dummy_lidar_artifact(writer: object, job_id: str) -> ProductArtifactRef:
-    """Tạo LiDAR geometry artifact file thật cho bundle consumer."""
-    pcd_bytes = b"VERSION .7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nCOUNT 1 1 1\nWIDTH 1\nHEIGHT 1\nPOINTS 1\nDATA ascii\n0 0 0\n"
-    pcd_ref = ProductArtifactRef(
-        artifact_type="LiDARGeometryPayload",
-        schema_version="1.0",
-        artifact_uri=f"artifact://jobs/{job_id}/rec08/lidar.pcd",
-        artifact_checksum="sha256:" + hashlib.sha256(pcd_bytes).hexdigest(),
-        data_class="derived",
-        producer_stage=StageId.LIDAR_INGEST,
-        job_id=job_id,
+def create_lidar_artifact_via_rec08(writer: object, job_id: str, tmp_path: Path) -> ProductArtifactRef:
+    """Tạo LiDAR geometry artifact thật thông qua LiDARIngestService của REC-08."""
+    ply_path = tmp_path / "lidar_input.ply"
+    ply_bytes = (
+        b"ply\nformat ascii 1.0\nelement vertex 2\nproperty float x\n"
+        b"property float y\nproperty float z\nend_header\n0.0 0.0 0.0\n1.0 1.0 1.0\n"
     )
-    writer.publish(pcd_ref, pcd_bytes)
-    data = dict(
-        artifact_type="LiDARGeometryArtifact",
-        schema_version="1.0",
-        artifact_uri=pcd_ref.artifact_uri,
-        artifact_checksum=pcd_ref.artifact_checksum,
-        producer_stage=StageId.LIDAR_INGEST,
-        job_id=job_id,
-        source_modality="registered_lidar",
-        source_input_checksum=pcd_ref.artifact_checksum,
-        geometry_format="pcd",
-        coordinate_system=CoordinateSystem().model_dump(mode="json"),
-        source_frame="os_sensor",
-        preprocessing_provenance=PreprocessingProvenance(
-            dependencies=[
-                PreprocessingDependency(
-                    role="raw_pcd", origin="sensor_input", source_checksum=pcd_ref.artifact_checksum
-                )
-            ],
-            ground_truth_assisted=False,
-        ).model_dump(mode="json"),
+    ply_path.write_bytes(ply_bytes)
+    cs = "sha256:" + hashlib.sha256(ply_bytes).hexdigest()
+    prov = PreprocessingProvenance(
+        ground_truth_assisted=False,
+        dependencies=[PreprocessingDependency(role="scan", origin=DependencyOrigin.SENSOR_INPUT, source_checksum=cs)],
     )
-    artifact = LiDARGeometryArtifact.model_validate(data)
-    meta_payload = artifact.model_dump_json(indent=2).encode() + b"\n"
-    meta_ref = ProductArtifactRef(
-        artifact_type="LiDARGeometryArtifact",
-        schema_version="1.0",
-        artifact_uri=f"artifact://jobs/{job_id}/rec08/lidar_geometry.json",
-        artifact_checksum="sha256:" + hashlib.sha256(meta_payload).hexdigest(),
-        data_class="derived",
-        producer_stage=StageId.LIDAR_INGEST,
+    req = LiDARIngestRequest(
         job_id=job_id,
-        source_provenance=artifact.preprocessing_provenance.model_dump(mode="json"),
+        lidar_file=ply_path,
+        source_input_checksum=cs,
+        preprocessing_provenance=prov,
     )
-    writer.publish(meta_ref, meta_payload)
-    return meta_ref
+    service = LiDARIngestService(writer)
+    _, geom_ref = service.ingest(req)
+    return geom_ref
 
 
 def test_publish_rgb_only_bundle_and_consume_by_scene(tmp_path: Path) -> None:
@@ -160,7 +134,7 @@ def test_publish_mixed_rgb_lidar_bundle_and_consume_by_scene(tmp_path: Path) -> 
     job_id = "test-job-rec10-mixed"
     geom_service, canonicalizer, conf_ref, metric_req, record = setup_pipeline(tmp_path)
     frame_ref = dummy_rgb_frame(canonicalizer.deps.writer, job_id)
-    lidar_pcd_ref = dummy_lidar_artifact(canonicalizer.deps.writer, job_id)
+    lidar_pcd_ref = create_lidar_artifact_via_rec08(canonicalizer.deps.writer, job_id, tmp_path)
     geom_res = geom_service.execute(
         GeometryExecutionRequest(
             confirmation_ref=conf_ref,

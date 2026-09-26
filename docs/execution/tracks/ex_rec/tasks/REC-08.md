@@ -78,17 +78,19 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 
 ## 12. Result / Evidence
 
-### Evidence 2026-09-26 — REC-08 Hoàn thành (DONE)
+### Evidence 2026-09-26 — REC-08 Refactor Hoàn thành (DONE)
 
 1. **Service & Models:**
    - Files: `src/services/reconstruction/lidar/models.py`, `src/services/reconstruction/lidar/ingest.py`
-   - Header inspector siêu tốc: `inspect_point_cloud_header` đọc số lượng điểm trong <1ms từ header ASCII của PLY/PCD.
-   - Thẩm định toàn vẹn: Kiểm tra SHA-256 byte checksum, định dạng PLY/PCD, đơn vị bắt buộc `meter` (PRD FR-05/06), giới hạn điểm `[min_points, max_points]`.
-   - Xuất bản bất biến: `LiDARIngestService` xuất bản payload sang `artifact://jobs/{job_id}/rec08/lidar.{ext}` và manifest `lidar_geometry.json` mang kiểu chuẩn `LiDARGeometryArtifact` theo hợp đồng shared contract `src/models/contracts/reconstruction.py`.
+   - Header & Geometry Inspection: `inspect_point_cloud_header` đọc số lượng điểm trong <1ms từ header ASCII của PLY/PCD; `inspect_point_cloud` thẩm định tính hữu hạn của tọa độ (chặn NaN/Inf) và tính toán bounding box không gian 3D.
+   - Thẩm định toàn vẹn: Kiểm tra SHA-256 byte checksum (không strip gây lệch sha256), định dạng PLY/PCD, đơn vị bắt buộc `meter` (PRD FR-05/06), giới hạn điểm `[min_points, max_points]`.
+   - Xuất bản bất biến qua FilesystemArtifactStore thật: `LiDARIngestService` xuất bản payload sang `artifact://jobs/{job_id}/rec08/lidar.{ext}` và manifest `lidar_geometry.json` mang kiểu chuẩn `LiDARGeometryArtifact` theo hợp đồng shared contract `src/models/contracts/reconstruction.py`. `geometry_ref` trỏ trực tiếp tới PLY payload với `source_provenance` chứa `PreprocessingProvenance` (`ground_truth_assisted`, `dependencies`).
    - Kết nối tự động với REC-07: Hàm `build_request_from_rec07_manifest` đọc trực tiếp `preparation_manifest.json` và ánh xạ đầy đủ `PreprocessingProvenance` (`ground_truth_assisted`, `dependencies`).
+   - Tương thích 100% với EX-SCENE: Đã kiểm chứng trực tiếp với `load_reconstruction_bundle` của EX-SCENE qua `tests/test_reconstruction/test_rec10_bundle.py`.
 
 2. **Test Suite:**
-   - File: `tests/test_reconstruction/test_rec08_lidar_ingest.py`
-   - Command: `pytest tests/test_reconstruction/test_rec08_lidar_ingest.py -v`
-   - Kết quả: **4 passed in 0.19s** (100% pass).
-   - Kiểm thử: Header inspector (PLY/PCD/bad header), request validation (checksum mismatch, file missing, non-meter unit, out-of-budget points), service publication e2e, và integration đọc trực tiếp output thật của REC-07 (`data/torwic_slam/derived/aisle_cw/rec07_smoke_sub100_104/`).
+   - Files: `tests/test_reconstruction/test_rec08_lidar_ingest.py`, `tests/test_reconstruction/test_rec10_bundle.py`
+   - Commands:
+     - `pytest tests/test_reconstruction/test_rec08_lidar_ingest.py -v` (4 passed in 0.14s)
+     - `pytest tests/test_reconstruction/test_rec10_bundle.py -v` (3 passed in 1.05s)
+   - Kiểm thử: Header & cloud inspection (PLY/PCD/NaN/Inf), request validation (checksum mismatch, file missing, non-meter unit, out-of-budget points), service publication e2e qua `FilesystemArtifactStore` thật và `ArtifactResolver`, và integration đọc trực tiếp output thật của REC-07 (`data/torwic_slam/derived/aisle_cw/rec07_smoke_sub100_104/`). Phối hợp trực tiếp vào ReconstructionBundle cho consumer EX-SCENE.

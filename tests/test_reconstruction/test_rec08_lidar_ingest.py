@@ -1,4 +1,4 @@
-"""Tests cho REC-08 Registered LiDAR Ingest và xuất bản LiDARGeometryArtifact."""
+"""Tests cho REC-08 Registered LiDAR Ingest với FilesystemArtifactStore thật."""
 
 import json
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from src.models.contracts.artifacts import Checksum, ProductArtifactRef
+from src.models.contracts.artifacts import Checksum
 from src.models.contracts.coordinates import CoordinateSystem
 from src.models.contracts.manifests import StageId
 from src.models.contracts.reconstruction import (
@@ -15,26 +15,15 @@ from src.models.contracts.reconstruction import (
     PreprocessingDependency,
     PreprocessingProvenance,
 )
+from src.services.orchestration.artifacts.store import ArtifactResolver, FilesystemArtifactStore
 from src.services.reconstruction.lidar import (
     LiDARIngestRequest,
     LiDARIngestService,
     build_request_from_rec07_manifest,
     compute_file_checksum,
+    inspect_point_cloud,
     inspect_point_cloud_header,
 )
-
-
-class MemoryArtifactWriter:
-    """Mock storage phục vụ test publication."""
-
-    def __init__(self) -> None:
-        self.published: dict[str, bytes] = {}
-        self.refs: dict[str, ProductArtifactRef] = {}
-
-    def publish(self, reference: ProductArtifactRef, payload: bytes) -> ProductArtifactRef:
-        self.published[reference.artifact_uri] = payload
-        self.refs[reference.artifact_uri] = reference
-        return reference
 
 
 def _create_test_ply(path: Path, point_count: int = 10) -> Checksum:
@@ -44,39 +33,47 @@ def _create_test_ply(path: Path, point_count: int = 10) -> Checksum:
     return compute_file_checksum(path)
 
 
-def test_inspect_point_cloud_header(tmp_path: Path) -> None:
-    """Header inspector đọc đúng số điểm từ PLY và PCD."""
+def test_inspect_point_cloud_valid_and_nonfinite(tmp_path: Path) -> None:
+    """Header inspector và content validator phát hiện đúng số điểm và loại bỏ NaN/Inf."""
     ply_path = tmp_path / "cloud.ply"
     _create_test_ply(ply_path, 42)
+    stats = inspect_point_cloud(ply_path)
+    assert stats.point_count == 42
+    assert stats.geometry_format == "ply"
     assert inspect_point_cloud_header(ply_path) == 42
 
     pcd_path = tmp_path / "cloud.pcd"
-    pcd_path.write_text("# .PCD v0.7\nVERSION 0.7\nPOINTS 99\nDATA ascii\n")
-    assert inspect_point_cloud_header(pcd_path) == 99
+    pcd_path.write_text("# .PCD v0.7\nVERSION 0.7\nFIELDS x y z\nPOINTS 99\nDATA ascii\n" + "1.0 1.0 1.0\n" * 99)
+    assert inspect_point_cloud(pcd_path).point_count == 99
+
+    nan_path = tmp_path / "nan.ply"
+    nan_path.write_text(
+        "ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nend_header\nnan 0.0 0.0\n"
+    )
+    with pytest.raises(ValueError, match="non-finite points"):
+        inspect_point_cloud(nan_path)
 
     bad_path = tmp_path / "bad.txt"
     bad_path.write_text("random content without header")
     with pytest.raises(ValueError, match="unsupported point cloud format"):
-        inspect_point_cloud_header(bad_path)
+        inspect_point_cloud(bad_path)
 
 
 def test_lidar_ingest_request_validation(tmp_path: Path) -> None:
     """Kiểm tra các chốt chặn: checksum sai, thiếu file, số điểm vượt ngưỡng, đơn vị sai."""
     ply_path = tmp_path / "cloud.ply"
     chk = _create_test_ply(ply_path, 10)
-
     prov = PreprocessingProvenance(
         ground_truth_assisted=False,
         dependencies=[PreprocessingDependency(role="scan", origin=DependencyOrigin.SENSOR_INPUT, source_checksum=chk)],
     )
-
     req = LiDARIngestRequest(
         job_id="job-01",
         lidar_file=ply_path,
         source_input_checksum=chk,
         preprocessing_provenance=prov,
     )
-    assert req.validate_payload() == 10
+    assert req.validate_payload().point_count == 10
 
     # 1. Checksum mismatch
     bad_chk = LiDARIngestRequest(
@@ -120,68 +117,69 @@ def test_lidar_ingest_request_validation(tmp_path: Path) -> None:
         too_few.validate_payload()
 
 
-def test_lidar_ingest_service_success(tmp_path: Path) -> None:
-    """Service xuất bản đúng LiDARGeometryArtifact và manifest."""
+def test_lidar_ingest_service_filesystem_store_success(tmp_path: Path) -> None:
+    """Service xuất bản đúng LiDARGeometryArtifact vào FilesystemArtifactStore thật với checksum chuẩn."""
     ply_path = tmp_path / "cloud.ply"
     chk = _create_test_ply(ply_path, 25)
-
     prov = PreprocessingProvenance(
         ground_truth_assisted=True,
         dependencies=[
             PreprocessingDependency(role="trajectory", origin=DependencyOrigin.GROUND_TRUTH, source_checksum=chk)
         ],
     )
-
     request = LiDARIngestRequest(
         job_id="job-rec08-demo",
         lidar_file=ply_path,
         source_input_checksum=chk,
         preprocessing_provenance=prov,
     )
-
-    writer = MemoryArtifactWriter()
+    resolver = ArtifactResolver(tmp_path / "store")
+    writer = FilesystemArtifactStore(resolver)
     service = LiDARIngestService(writer)
 
-    artifact, manifest_ref = service.ingest(request)
+    artifact, geom_ref = service.ingest(request)
 
     assert isinstance(artifact, LiDARGeometryArtifact)
     assert artifact.producer_stage == StageId.LIDAR_INGEST
     assert artifact.job_id == "job-rec08-demo"
     assert artifact.source_modality == "registered_lidar"
     assert artifact.source_input_checksum == chk
-    assert artifact.preprocessing_provenance.ground_truth_assisted is True
 
-    # Kiểm tra payload đã publish
-    payload_uri = "artifact://jobs/job-rec08-demo/rec08/lidar.ply"
-    manifest_uri = "artifact://jobs/job-rec08-demo/rec08/lidar_geometry.json"
+    # geom_ref trỏ tới file PLY với artifact_type chuẩn
+    assert geom_ref.artifact_type == "LiDARGeometryArtifact"
+    assert geom_ref.artifact_uri == "artifact://jobs/job-rec08-demo/rec08/lidar.ply"
+    assert geom_ref.artifact_checksum == chk
+    assert resolver.require(geom_ref).is_file()
 
-    assert payload_uri in writer.published
-    assert manifest_uri in writer.published
+    # PreprocessingProvenance deserialize thành công từ provenance của reference
+    parsed_prov = PreprocessingProvenance.model_validate(geom_ref.source_provenance)
+    assert parsed_prov.ground_truth_assisted is True
 
-    published_manifest = json.loads(writer.published[manifest_uri].decode("utf-8"))
-    assert published_manifest["artifact_type"] == "LiDARGeometryArtifact"
-    assert published_manifest["job_id"] == "job-rec08-demo"
+    # Manifest metadata cũng được xuất bản và kiểm tra checksum byte thành công
+    meta_path = resolver.resolve("artifact://jobs/job-rec08-demo/rec08/lidar_geometry.json")
+    assert meta_path.is_file()
+    meta_doc = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta_doc["artifact_type"] == "LiDARGeometryArtifact"
 
 
-def test_ingest_real_rec07_output() -> None:
-    """Kiểm thử ingest file registered_lidar.ply thật sinh ra từ REC-07 smoke."""
+def test_ingest_real_rec07_output(tmp_path: Path) -> None:
+    """Kiểm thử ingest file registered_lidar.ply thật sinh ra từ REC-07 smoke với store thật."""
     smoke_dir = Path("data/torwic_slam/derived/aisle_cw/rec07_smoke_sub100_104")
     manifest_file = smoke_dir / "preparation_manifest.json"
     ply_file = smoke_dir / "registered_lidar.ply"
-
     if not manifest_file.is_file() or not ply_file.is_file():
         pytest.skip("Chưa có output smoke REC-07 trên đĩa")
 
     request = build_request_from_rec07_manifest(manifest_file, ply_file, "job-aisle-cw-01")
-
-    writer = MemoryArtifactWriter()
+    resolver = ArtifactResolver(tmp_path / "store")
+    writer = FilesystemArtifactStore(resolver)
     service = LiDARIngestService(writer)
 
-    artifact, manifest_ref = service.ingest(request)
-
+    artifact, geom_ref = service.ingest(request)
     assert artifact.artifact_type == "LiDARGeometryArtifact"
     assert artifact.job_id == "job-aisle-cw-01"
     assert artifact.geometry_format == "ply"
     assert artifact.coordinate_system.unit == "meter"
     assert artifact.preprocessing_provenance.ground_truth_assisted is True
-    assert artifact.artifact_uri == "artifact://jobs/job-aisle-cw-01/rec08/lidar.ply"
+    assert geom_ref.artifact_uri == "artifact://jobs/job-aisle-cw-01/rec08/lidar.ply"
+    assert resolver.require(geom_ref).is_file()
