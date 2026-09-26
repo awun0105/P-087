@@ -182,3 +182,20 @@ def test_non_floor_object_without_collider_triggers_failure(valid_scene: SceneIR
     rule = next(r for r in report.rules if r.rule_id == PreflightRuleId.COLLIDER_MISSING)
     assert rule.result == RuleResult.FAIL
     assert "obj-storage-99" in rule.affected_object_ids
+
+
+def test_generic_name_floor_object_recognized_via_tags_or_semantic_class(valid_scene: SceneIR) -> None:
+    """Đối tượng có tên chung chung (ví dụ: 'Object_01') nhưng có tags hoặc semantic_class là sàn vẫn PASS."""
+    scene = valid_scene.model_copy(deep=True)
+    floor_obj = next(o for o in scene.objects if "floor" in o.id)
+    floor_obj.id = "Object_01"
+    floor_obj.name = "Object_01"  # Hoàn toàn không chứa từ 'floor' hay 'ground' trong tên/ID
+    floor_obj.semantic_class = "floor"
+    floor_obj.tags = ["surface", "walkway"]
+    floor_obj.collider = None
+
+    artifact_root = FIXTURES / "artifact_store"
+    report = run_preflight(scene, artifact_store_root=artifact_root)
+    rule = next(r for r in report.rules if r.rule_id == PreflightRuleId.COLLIDER_MISSING)
+    assert rule.result == RuleResult.PASS
+    assert "Object_01" not in rule.affected_object_ids
