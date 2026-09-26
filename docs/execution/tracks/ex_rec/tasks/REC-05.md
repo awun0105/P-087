@@ -180,8 +180,115 @@ Trước khi chấp nhận primary geometry; giữ OpenMVS fallback nếu spike 
 - [ ] Format/coordinate metadata/checksum/provenance đầy đủ theo `GeometryArtifact`.
 - [ ] Spike trên `Aisle_CW` được thực hiện và ghi nhận kết quả rõ ràng.
 - [ ] Artifact đủ để EX-SIM (`SIM-02`) consume làm primary environment collider.
-- [ ] Focused tests pass; evidence/limitations được ghi đầy đủ.
+- [x] Focused tests pass; evidence/limitations được ghi đầy đủ (synthetic/runtime
+  scope bên dưới, không thay real metric/Isaac acceptance).
 
 ## 12. Result / Evidence
 
-Pending implementation.
+### Checkpoint 2026-09-26 — IN_PROGRESS, primary adapter/synthetic proof
+
+**Implemented / VERIFIED**
+
+- `rgb/voxel.py`: typed config, explicit capsule/seeds/GPU, deterministic config
+  checksum; hai invocation tách cluster seed khỏi navigation seed. Không dùng
+  floor-fill và không áp metric scale ngầm.
+- `adapters/voxel_runtime.py` + `voxel_inspect.mjs`: pin CLI/API 3.6.6 `afbc281`,
+  version/help/Node/GPU logs; subprocess timeout kill process group; Gaussian
+  validation qua upstream trước và sau filter. Reject skipped/empty carve dù exit 0.
+- `adapters/voxel.py`: isolated non-overwriting synthetic attempts, source/copy
+  checksum và immutability checks, filter-cluster → voxel/carve → collision,
+  checksummed private `qualification.json`. Không product publication, không
+  cấp metric confirmation, không chạy dữ liệu thật qua synthetic entrypoint.
+- `voxel_output.py` kiểm native metadata/resolution/binary byte length;
+  `collision_glb.py` kiểm pinned GLB shape, finite positions, indices, bounds,
+  buffer layout và degenerate triangles. Native Y-up output giữ riêng;
+  canonical Z-up derivative chỉ áp `R_x(+90°)`, không đổi scale.
+- Unit/fixture tests bao gồm config/footprint thiếu hoặc sai, checksum tamper,
+  non-synthetic mode, timeout/process failure, invalid GLB/voxel payload và
+  attempt immutability. Real codec tests reject plain point cloud, NaN,
+  invalid quaternion, truncated PLY; positive Gaussian input chạy đạt.
+- GPU negative test xác nhận seed `(100,100,100)` khiến upstream **exit 0 +
+  skipping carve**, nhưng adapter raise và không tạo canonical `collision.glb`
+  hoặc qualification receipt. Native partial outputs/logs giữ để diagnose.
+
+**Synthetic GPU proof — không phải Aisle_CW**
+
+- Runtime: Node `v24.11.1`, splat-transform `3.6.6 (afbc281)`, `--gpu 0`;
+  `gpus.log` xác nhận index 0 là Intel UHD Graphics 630, index 1 là llvmpipe.
+- Fixture Gaussian shell canonical `2 × 3 × 1.5m`, một detached floater;
+  `2,703 → 2,702` Gaussians ở cả ba runs. Capsule test height `0.4m`, radius
+  `0.1m`, navigation seed `(1,1.5,0.5)`. Không là locked robot config product.
+- Source SHA-256:
+  `3d9f10111534a227b78537375d9acbb758263c583b0fb3d125941d8cdec7a383`.
+- Evidence local/ignored: `data/rec05_smoke/synthetic-20260926-03/voxel-<resolution>/`.
+  Mỗi attempt có native voxel JSON/BIN/GLB, canonical `collision.glb`, inspection
+  trước/sau filter, config/source/output/log checksums và `qualification.json`.
+
+| Resolution (m) | Vertices | Triangles | Boundary edges | Non-manifold edges | Degenerate triangles |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 0.10 | 48 | 88 | 0 | 0 | 0 |
+| 0.05 | 51 | 94 | 0 | 0 | 0 |
+| 0.025 | 48 | 88 | 0 | 0 | 0 |
+
+Asymmetric bounds check bắt sai axis/scale và floater còn sót. Edge-incidence
+checks không chứng minh không self-intersection, clearance tolerance hoặc physics.
+Ví dụ baseline 0.05m canonical bounds x `[-0.025,1.975]`, y `[0.025,3.025]`,
+z `[-0.025,1.575]`: đây là measured fixture output, không metric Aisle_CW.
+
+**Commands / observed results**
+
+Từ repository root, dùng package đã provision; không auto-install:
+
+```bash
+export REC05_VOXEL_CLI="$PWD/data/rec04_runtime/node_modules/@playcanvas/splat-transform/bin/cli.mjs"
+export REC05_VOXEL_MODULE_PATH="$PWD/data/rec04_runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs"
+export REC05_TEST_SPLAT_MODULE="$REC05_VOXEL_MODULE_PATH"
+export REC04_TEST_SPLAT_MODULE="$REC05_VOXEL_MODULE_PATH"
+export REC05_TEST_GPU=1
+.venv/bin/python -m tests.test_reconstruction.rec05_smoke --output data/rec05_smoke/synthetic-20260926-03
+.venv/bin/pytest tests/test_reconstruction/test_rec05_*.py -q
+.venv/bin/pytest tests/ -q
+.venv/bin/ruff check src/ tests/
+.venv/bin/ruff format --check src/ tests/
+git diff --check
+```
+
+- Smoke command exit 0, cả ba resolutions đạt fixture assertions. Khi rerun phải
+  chọn output directory mới; adapter cố ý không overwrite attempt đã có.
+- Full suite với real codec + negative GPU enabled: **286 passed** (17.59s),
+  không skip. Focused REC-05 cuối: **39 passed** (6.24s); riêng 5 real codec +
+  negative GPU tests: 6 passed (6.05s).
+- Ruff check pass; format check 121 files unchanged. AST audit 10 Python files
+  mới: không function >30 lines, >3 non-self parameters hoặc thiếu return annotation.
+- Failed attempt `synthetic-20260926-01`: cấu hình nhầm `dist/cli.mjs` (module
+  export, exit 0 nhưng không chạy main). Version gate reject đúng; sửa runtime
+  setting sang package executable **`bin/cli.mjs`**, không nới version gate.
+- Attempt `-02` chạy thành công trước khi thêm cluster inspection/GPU inventory;
+  `-03` là evidence đầy đủ được dùng ở checkpoint này. Giữ history/logs, không xóa.
+
+**Remaining / next executable work**
+
+1. REC-05 tiếp tục `IN_PROGRESS`, **không BLOCKED toàn task**, không DONE.
+   Real Aisle_CW metric-aware spike đang chờ **REC-06 confirmed anchor/transform
+   record + locked robot capsule + valid walkable seed**. User đã xác nhận các
+   input này chưa có; không bịa scale hoặc lấy evaluation-only GT làm anchor.
+2. Sau prerequisite: integrate actual confirmed-record schema/resolver, immutable
+   metric derivative và applied-transform checksum; test source lineage,
+   missing/unconfirmed anchor, scale propagation/double-scaling với REC-06 thật.
+   Adapter hiện chỉ expose synthetic technical path, không shared `GeometryArtifact`.
+3. Chạy real Aisle_CW ba resolutions, clearance/ghost-block và EX-SIM Isaac
+   `CLEAR/BLOCKED` với analytic ground plane. Chưa claim consumer/physics acceptance,
+   browser visual QA, external CI hoặc validation toàn bộ binary octree pointers.
+   Upstream có thể relocate seed bị blocked; requested seed trong receipt không
+   được diễn giải thành verified walkable seed của scene thật.
+4. OpenMVS source/license/CLI đã inspect; container/runtime/smoke chưa qualified.
+   Giữ fallback có điều kiện khi primary real spike không đạt, không là prerequisite
+   bắt buộc cho synthetic SplatTransform development.
+
+**Commit history của phần implementation**
+
+`187f094` bootstrap/source audit → `248ebaa` typed config/commands → `96019a7`
+process/Gaussian guards → `f12ceae` collision GLB/axis boundary → `9a18410`
+pipeline/output validation → `dd1e71e` real codec tests → `5a7dbdc` synthetic GPU
+smoke → `cca15ea` dependency docs → `f350989` real skipped-carve negative test.
+User yêu cầu commits nhỏ; không push/merge/đổi branch hoặc sửa shared contracts.
