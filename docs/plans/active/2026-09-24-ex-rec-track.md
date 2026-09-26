@@ -4,8 +4,9 @@ Date: 2026-09-24
 
 ## Status
 
-Active — REC-01, REC-02 and REC-02A DONE. REC-03 source/runtime audit and
-COLMAP input consumer are underway.
+Active — REC-01/02/02A/03/04 task gates complete. REC-04 real Brush GPU smoke,
+SOG roundtrip and render sample verified 2026-09-26. REC-05 audit/implementation
+next; real metric spike requires REC-06 confirmed anchor and robot config.
 
 ## Outcome
 
@@ -40,7 +41,7 @@ handoff that requires no manual artifact conversion.
   source-rights attestation, and `PrivacyValidationReport`.
 - LiDAR input: registered/fused PLY/PCD. Raw TorWIC scans are limited to offline
   prefusion; product runtime must not read evaluation-only GT.
-- Outputs: normalized frames, poses, real Brush visual, OpenMVS RGB geometry,
+- Outputs: normalized frames, poses, real Brush visual, voxel RGB geometry (OpenMVS fallback),
   metric/canonical records, optional LiDAR/alignment, and a versioned published
   `ReconstructionBundle` that EX-SCENE resolves directly.
 - Canonical: meter, Z-up, right-handed, `world`, `parent_from_local`, quaternion
@@ -62,7 +63,7 @@ handoff that requires no manual artifact conversion.
 | REC-02A | REC-02 | Deterministic FFmpeg frame artifact with IDs/timestamps/SHA-256; REC-03 consumes it without manual conversion. |
 | REC-03 | REC-02A | Real COLMAP small-scene smoke, deterministic model selection, normalized pose/intrinsics with refs and provenance. |
 | REC-04 | REC-03 + Brush runtime | Real Brush GPU smoke and resolvable checksummed 3DGS visual artifact; never use it as collider. |
-| REC-05 | REC-03 + OpenMVS runtime | Real OpenMVS small-scene smoke, normalized geometry consumed via published ref. |
+| REC-05 | REC-04 + REC-06 anchor phase; REC-03 fallback | Metric voxel/capsule geometry and Aisle_CW resolution spike; OpenMVS fallback qualification. |
 | REC-06 | REC-03/04/05 + locked anchor | Confirm scale only after anchor workflow; propagate same scale to pose/visual/geometry; verify independent distance. |
 | REC-07 | REC-01 + declared poses | Offline reproducible registered LiDAR PLY; preserve GT-assistance and checksums if `traj_gt` is used. |
 | REC-08 | registered LiDAR or REC-07 | Validate unit/frame/nonempty cloud; immutable resolvable LiDAR artifact and typed dependency provenance. |
@@ -71,9 +72,9 @@ handoff that requires no manual artifact conversion.
 | REC-11 | REC-10 + job lifecycle | Stable worker command, structured failures/retry lineage, no false SUCCEEDED or manual path patch. |
 
 One valid serial order is REC-01 → REC-02 → REC-02A → REC-03 → REC-04 →
-REC-05 → REC-06 → REC-07 → REC-08 → REC-09 → REC-10 → REC-11. REC-07/08 are
-otherwise independent of the RGB branch after REC-01, and REC-04/05 can run
-in either order after REC-03. Mixed alignment is conditional, not a dependency
+REC-06 anchor phase → REC-05 → REC-06 final verification → REC-07 → REC-08 →
+REC-09 → REC-10 → REC-11. REC-07/08 are otherwise independent of the RGB branch
+after REC-01. Mixed alignment is conditional, not a dependency
 of RGB-only publication. REC-10 and REC-11 still require their own task gates.
 
 ## External source audit queue
@@ -92,8 +93,9 @@ boundary, and risks before implementation. Owner canceled Antigravity.
    `colmap_undistorted_sfm_export.sh` reference. Prefer external process reuse.
 4. REC-04: pinned Brush training/export entrypoint, COLMAP input support,
    visual payload/format, license, GPU limits. Prefer external process reuse.
-5. REC-05: pinned OpenMVS COLMAP import, densify, mesh executables and their
-   output formats. Prefer external process reuse.
+5. REC-05: splat-transform 3.6.6 GPU voxelization, capsule carving, collision GLB
+   and coordinate boundary; pinned OpenMVS import/densify/mesh fallback.
+   Prefer external process reuse.
 6. REC-07/08/09: pinned Open3D PCD/PLY I/O, transforms, filtering and
    registration primitives only; project owns provenance/validation/alignment.
 7. REC-06/10/11: project contracts, artifact store, and worker conventions;

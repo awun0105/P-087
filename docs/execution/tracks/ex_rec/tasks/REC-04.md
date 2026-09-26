@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-REC` |
 | Priority | `P0` |
-| Status | `TODO` |
+| Status | `DONE` |
 | Owner | `@awun0105` |
 | Target milestone | `M1/M2` |
 
@@ -71,7 +71,28 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
 1. Xây dựng Brush adapter kích hoạt huấn luyện 3DGS qua CLI/process boundary.
 2. Tích hợp `SplatArtifactProcessor` (dựa trên `splat-transform`) chạy validate `readFileInfo()`, tính stats và xuất `scene.sog` delivery derivative cho `@playcanvas/supersplat-viewer`.
 3. Xuất bản `VisualArtifact` kèm checksum và provenance liên kết với COLMAP camera poses.
-4. Assignee điền sau khi inspect code/test hiện tại: files cụ thể, sequence, failure handling và proof. Không đổi goal, I/O hoặc authority gate của task.
+4. Bootstrap 2026-09-25: `feat/ex-rec` tại `b1bd026`, worktree sạch; đọc harness,
+   task/track và các source anchors. REC-03 có published smoke 65 train frames;
+   full 954-frame run chưa thành công. Không dùng held-out/evaluation-only inputs.
+5. Owned paths: `adapters/brush*.py`, `adapters/splat*.py`/Node bridge,
+   `rgb/visual*.py`, focused tests và manual smoke runner trong `tests/test_reconstruction/`.
+   Không sửa shared schema, EX-PRODUCT/SCENE/SIM, runtime drivers hoặc upstream repos.
+6. Resolve CameraPoseArtifact và từng frame; materialize model được REC-03 chọn.
+   Undistort qua COLMAP khi cần để Brush nhận PINHOLE đúng ảnh; không relabel
+   SIMPLE_RADIAL thành PINHOLE. Chỉ đưa registered training frames vào workspace.
+7. Reuse Brush CLI, kiểm tra version/help, pin config/runtime; subprocess timeout,
+   exit, logs và output validation. Fresh attempt workspace, không implicit resume.
+8. Reuse splat-transform 3.6.6 qua process boundary: readFileInfo, streaming stats,
+   Gaussian/finite validation, SOG packaging. Giữ master PLY immutable; ghi rõ
+   conversion convention của delivery derivative, không claim metric alignment.
+9. Publish manifest cuối, verify toàn bộ refs/lineage ở consumer. REC-04 raw
+   visual manifest là nội bộ EX-REC với `sfm_world`/arbitrary scale; shared
+   `VisualArtifact.coordinate_system` chỉ nhận meter/Z-up/world, nên REC-06 mới
+   tạo shared canonical descriptor sau confirmation (Integration §3.3, Contract §4).
+10. Proof trước code: command/config/lineage, altered/missing input, process error/
+    timeout, malformed/non-Gaussian/nonfinite PLY, derivative checksum, publication
+    failure và consumer re-read. Real-tool smoke dùng upstream COLMAP artifact;
+    fixture proof không thay GPU/browser/Primary Demo acceptance.
 
 ## 10. Tests
 
@@ -83,18 +104,79 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 
 ## 11. Definition of Done
 
-- [ ] Adapter tạo visual artifact bằng reproducible config.
-- [ ] Output publish qua artifact ref/checksum, không private temp path.
-- [ ] Downstream có thể resolve visual artifact; collider path không consume nó.
-- [ ] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+- [x] Adapter tạo visual artifact bằng reproducible config.
+- [x] Output publish qua artifact ref/checksum, không private temp path.
+- [x] Downstream có thể resolve visual artifact; collider path không consume nó.
+- [x] Focused tests và required handoff proof pass; evidence/limitations được ghi.
 
 ## 12. Result / Evidence
 
-Pending implementation.
+### Verified 2026-09-26 — task-level completion
+
+- Implementation: `adapters/brush.py`, `brush_input.py`, `brush_runtime.py`,
+  `splat.py`, `splat_bridge.mjs`; internal manifest/resolver tại `rgb/visual.py`
+  và `visual_publication.py`. Reuse Brush trainer, COLMAP undistorter,
+  FFmpeg image probe và splat-transform parser/stats/filter/SOG codec. Không thêm
+  Python dependency, không copy upstream algorithms hoặc sửa shared contracts.
+- Native Brush **v0.3.0** archive SHA-256
+  `4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20`;
+  runtime probe xác nhận `brush-cli 0.3.0`, `--total-steps`. COLMAP bridge dùng
+  pinned image `b8498ebecab11c3f9b9a25370e3fcfb6de9b6bcd4f3c85d5dc39a40229f40954`;
+  SIMPLE_RADIAL được undistort thật, camera world poses giữ nguyên.
+- Published upstream REC-03 smoke: **65/65 registered training frames**, 6,202
+  sparse points. REC-02A subset manifest trước ở `/tmp` đã mất; khôi phục exact
+  bytes từ records của full producer inventory, chỉ ghi sau khi SHA-256 khớp ref
+  gốc `b20bb5c61c37d2079b767afccae3423a2a999e9def2cbb595ecdf8a9f3d0603e`.
+  Không đổi refs/checksums, không chọn lại split, không dùng held-out frames.
+- Real GPU smoke `10c`: **Intel UHD Graphics 630 (CFL GT2), IntegratedGpu,
+  Vulkan, Mesa 25.2.8-0ubuntu0.24.04.2** được xác nhận trong `brush-train.log`.
+  10 steps, max resolution 128, SH=0, seed=0, splat budget=10,000,
+  refine every=200, SOG iterations=1; elapsed **23.151s** end-to-end.
+  Output **6,202 Gaussian**, splat-transform **3.6.6 / afbc281**; master immutable,
+  finite stats, SOG roundtrip, source lineage và consumer re-read đều thành công.
+- Artifact root (ignored local evidence):
+  `data/torwic_slam/derived/aisle_cw/rec04_smoke_artifacts_10c/`.
+  `receipt.json` chứa full logical ref; manifest byte SHA-256
+  `023a044b139b116a6a3a7f1534635b6a27457474dfb18a0cdd6db35252d34612`.
+  Namespace `artifact://jobs/torwic-aisle-cw-rec04-smoke-10c/rec04/` chứa
+  `visual.json`, `visual.ply`, `scene.sog`, sanitized logs và `preview.webp`.
+- Render sample: upstream splat-transform GPU rasterizer đọc published SOG,
+  registered training view 100, 640×480; observed nonempty rendered scene.
+  Preview SHA-256 `2411ff5a6e6a41e88ee5f559d55f90498e73bb6ecc8ee5967bf9ca6e2ae0f75a`.
+  `preview_receipt.json` bind source visual và camera convention. Sample còn mờ
+  vì chỉ 10 steps; không claim visual quality, held-out evaluation hoặc browser QA.
+- Validation (exit 0): `.venv/bin/ruff check src/ tests/`,
+  `.venv/bin/ruff format --check src/ tests/` (111 files), `node --check` bridge;
+  `.venv/bin/pytest tests/test_reconstruction/test_rec04_brush.py -q` **27 passed**;
+  `.venv/bin/pytest tests/test_reconstruction tests/test_contracts tests/integration -q`
+  **226 passed**. Cả hai pytest commands truyền `REC04_TEST_SPLAT_MODULE` tới
+  installed pinned module để 5 real codec cases chạy, không skip.
+- Reproduction entrypoints: `python -m tests.test_reconstruction.rec04_smoke`
+  và `python -m tests.test_reconstruction.rec04_preview`; config qua Settings/
+  environment. Provisioned runtime + command script ở ignored `data/rec04_runtime/`.
+  NVIDIA unavailable; không thay driver. Attempt `10` thất bại do sandbox Docker
+  permission được giữ riêng; `10b` thành công nhưng `10c` thêm explicit GPU log.
+- Limits: shared canonical `VisualArtifact` và metric-ready geometry chờ REC-06;
+  EX-PRODUCT vẫn cần browser renderer acceptance. SOG là delivery derivative;
+  REC-05 chỉ được tạo geometry riêng sau confirmed metric prerequisite.
+
+Checkpoint 2026-09-25 — bootstrap/audit, implementation đang diễn ra:
+
+- Brush checkout `5f6e45cca42e8570cf859bdd939b7d2d21c0d198`, Apache-2.0,
+  workspace version 1.0.0; inspected headless CLI, train/process/load config,
+  COLMAP loader. Upstream release v0.3.0 ở commit
+  `3edecbb2fe79d3e2c87eeab85b15e0b1dd10d486` khác checkout; runtime phải
+  qualification riêng, không suy flags/distortion support từ HEAD.
+- splat-transform target 3.6.6, MIT, Node >=22; inspected published package
+  exports/readFileInfo/readFile/computeStats/writeSource types. Reuse algorithms
+  bằng runtime dependency, không vendor trainer, parser hay SOG codec.
+- Runtime: NVIDIA driver hiện unavailable; Intel UHD 630 Vulkan/Mesa có mặt.
+  Brush release và splat-transform đang provision riêng để thử smoke; chưa
+  claim GPU training hoặc visual quality pass.
+- Chưa sửa source implementation hoặc shared contracts tại checkpoint này.
 
 Expected evidence:
 
 - Visual screenshots/render sample.
 - Brush/runtime/GPU versions và duration.
 - Artifact manifest/checksum.
-
