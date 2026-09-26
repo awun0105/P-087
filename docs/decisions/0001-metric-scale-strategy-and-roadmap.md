@@ -26,7 +26,14 @@ Nhóm thống nhất chiến lược Metric Scale toàn diện như sau:
   - *Cách 1 (Nhanh cho REC-06 & REC-05):* Trích xuất khoảng cách laser thực tế giữa 2 cột kệ kho từ đám mây điểm LiDAR làm `DistanceAnchor` cho REC-06 để giải hệ số co giãn $s$.
   - *Cách 2 (Multimodal chuẩn):* Triển khai tiếp `REC-07` (Prefusion gộp 1.092 file `.pcd` bằng Open3D) $\rightarrow$ `REC-08` (`LiDARGeometryArtifact`) $\rightarrow$ `REC-09` (Alignment khớp RGB với LiDAR).
 - **Quy chuẩn hạt giống đục rỗng voxel (`navigation_seed_world` của REC-05):**
-  - Trích xuất tự động từ tọa độ Camera ở khung hình đầu tiên (Frame 0) trong quỹ đạo camera (trajectory) của COLMAP/dataset. Đây là vị trí chắc chắn nằm trong lối đi trống, đảm bảo thuật toán `--voxel-carve` chạy tự động và không bị skip.
+  - Theo owner clarification 2026-09-26: camera đầu tiên **đã registered** là nguồn
+    seed **đề xuất**, không nhất thiết là Frame 0. Chuyển camera center qua confirmed
+    metric/world transform trước khi đề xuất; giữ source pose ref/checksum và frame ID.
+  - Camera center không chứng minh capsule robot vừa trong không gian đó. Bắt buộc
+    kiểm bounds và capsule clearance trên geometry/occupancy tương ứng; không tự
+    suy camera-to-ground offset hoặc coi seed là walkable chỉ vì camera từng ở đó.
+  - Nếu seed không hợp lệ, từ chối attempt hoặc yêu cầu chọn lại. Không bỏ validation,
+    auto-pass hoặc coi upstream relocate/skip carve là chứng nhận seed ban đầu hợp lệ.
 
 ### 2. Giải pháp Sản phẩm Thực tế (Khi người dùng tải lên Video Monocular RGB bất kỳ)
 
@@ -63,4 +70,5 @@ Tradeoffs:
 ## Follow-Up
 
 - Bổ sung kịch bản trích xuất anchor từ LiDAR cho testing `Aisle_CW` tại REC-06.
-- Kết nối Camera Frame 0 làm seed tự động cho REC-05.
+- Kết nối camera đầu registered làm seed đề xuất cho REC-05, với bounds/capsule
+  clearance validation bắt buộc trước khi coi seed hợp lệ.

@@ -164,7 +164,11 @@ Trước khi chấp nhận primary geometry; giữ OpenMVS fallback nếu spike 
    - Kệ hàng và pallet chính tồn tại đúng vị trí.
    - Chạy test động trong Isaac Sim với sàn USD Plane: kiểm tra các path `CLEAR / BLOCKED`.
 3. **Quy chuẩn thông số Voxel Carving (theo ADR 0001):**
-   - Tọa độ điểm hạt giống đục rỗng lối đi (`navigation_seed_world`): Được trích xuất tự động từ tọa độ Camera ở khung hình đầu tiên (Frame 0) trong quỹ đạo camera (trajectory), đảm bảo nằm chắc chắn trong lối đi trống mà không cần phỏng đoán.
+   - `navigation_seed_world`: đề xuất từ camera đầu **đã registered**, không bắt
+     buộc Frame 0, sau confirmed metric/world transform. Camera center chỉ là
+     candidate; phải giữ source ref/checksum/frame ID và kiểm bounds + capsule
+     clearance. Seed không hợp lệ phải reject hoặc yêu cầu chọn lại; không auto-pass,
+     tự suy camera-to-ground offset hoặc coi upstream relocate/skip là valid seed.
    - Hình trụ ảo đại diện cho robot AMR: Bán kính $r = 0.35\text{ m}$, chiều cao $h = 1.20\text{ m}$.
 4. Nghiệm thu: Hành vi va chạm đúng trong Isaac Sim ➔ **PASS**.
 
