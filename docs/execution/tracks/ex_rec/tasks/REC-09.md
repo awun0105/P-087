@@ -96,6 +96,23 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 
 ## 12. Result / Evidence
 
+### Audit correction 2026-09-27 — implementation, chưa real acceptance
+
+- VERIFIED: bốn regression tests đã fail trên code cũ (auto-CONFIRMED,
+  publish không resolver/authority, relabel extrinsic thành world, zero quaternion).
+  Đã sửa bằng default DECLARED, injected verifier/resolver bắt buộc, byte checks
+  cho sources/evidence và immutable record chứa full reviewed request.
+- Sensor calibration giữ `os_sensor`/`azure_left_camera`; world alignment cần
+  compose transform có connecting frames đúng. Reuse math của local metric module,
+  tham chiếu frame composition Re3Sim `frame_tools.py`, không copy dependency graph.
+- Added tamper/reload/provenance guards, nontrivial rotation/translation tests.
+  `pytest tests/test_reconstruction/test_rec09*.py tests/test_reconstruction/test_rec10_bundle.py -q`:
+  **22 passed**; `pytest tests/test_reconstruction/ -q`: **293 passed, 11 skipped**.
+  Ruff check/format toàn `src/ tests/ scripts/torwic` pass (177 files).
+- LIMIT: verifier positive là synthetic fixture rõ nhãn, không phải physical
+  same-scene/overlap proof cho Aisle_CW. Task vẫn IN_PROGRESS; các claim world
+  normalization/DONE trong historical checkpoint dưới đây đã bị audit bác bỏ.
+
 ### Checkpoint 2026-09-26 — DONE, RGB-LiDAR alignment service and models Refactor
 
 **Implemented / VERIFIED:**
@@ -112,4 +129,3 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
     - Nguồn RGB và LiDAR artifacts giữ nguyên bất biến, không bị sửa đổi.
 - `tests/test_reconstruction/test_rec09_alignment.py`:
   - 6/6 test cases pass: xác nhận thành công AlignmentRecord với LiDAR thật từ `LiDARIngestService`, nạp trực tiếp file `calibrations.txt` của TorWIC thật, từ chối khi khác scene (`same_scene_attestation=False`), từ chối khi lệch job_id, từ chối khi target frame sai, kiểm định roundtrip nghịch đảo transform.
-

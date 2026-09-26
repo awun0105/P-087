@@ -23,6 +23,7 @@ from src.services.reconstruction.bundle import BundleBuildRequest, Reconstructio
 from src.services.reconstruction.lidar import LiDARIngestRequest, LiDARIngestService
 from src.services.reconstruction.rgb.geometry_publication import GeometryExecutionRequest
 from src.services.scene.bundle_consumer import load_reconstruction_bundle
+from tests.test_reconstruction.rec09_fixtures import reviewed_fixture
 from tests.test_reconstruction.test_rec05_adapter import config
 from tests.test_reconstruction.test_rec05_product_pipeline import setup_pipeline
 
@@ -167,7 +168,7 @@ def test_publish_mixed_rgb_lidar_bundle_and_consume_by_scene(tmp_path: Path) -> 
         source_provenance=metric_req.source_visual.source_provenance,
     )
     canonicalizer.deps.writer.publish(visual_ref, visual_path.read_bytes())
-    tf = normalize_torwic_extrinsics((0.1, 0.2, 0.3), (0.0, 0.0, 0.0, 1.0))
+    tf = normalize_torwic_extrinsics((0.1, 0.2, 0.3), (0.0, 0.0, 0.0, 1.0), ("world", "registered_lidar"))
     align_service = RgbLidarAlignmentService(canonicalizer.deps.writer)
     align_req = AlignmentRequest(
         job_id=job_id,
@@ -177,6 +178,7 @@ def test_publish_mixed_rgb_lidar_bundle_and_consume_by_scene(tmp_path: Path) -> 
         status=AlignmentStatus.CONFIRMED,
         method="calibration_known_transform",
     )
+    align_service, align_req = reviewed_fixture(canonicalizer.deps.writer, align_req)
     alignment_record, _ = align_service.align(align_req)
     bundle_service = ReconstructionBundleService(canonicalizer.deps.writer)
     bundle_req = BundleBuildRequest(

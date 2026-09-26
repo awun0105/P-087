@@ -73,6 +73,12 @@ fixture checksum failures after shared-model defaults changed; see REC-06 eviden
 
 ## Outcome
 
+Audit checkpoint 2026-09-27: REC-09 fail-closed authority/byte validation và
+sensor-frame correction implemented; 4 red regressions reproduced trước sửa.
+Focused 22 passed; EX-REC 293 passed/11 skipped; Ruff 177 files pass.
+Synthetic verifier không thay real alignment acceptance. Next: REC-08 full-payload
+validation, REC-07 provenance bridge, rồi metric/voxel/bundle/worker gates.
+
 Owner mở rộng execution request 2026-09-26: implement toàn bộ EX-REC tasks còn
 lại, agent tự chọn dependency order và tận dụng core reference repos tương ứng.
 Commit tuần tự từng coherent implementation đã kiểm tra; không push/merge.
