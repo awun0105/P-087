@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-REC` |
 | Priority | `P0` |
-| Status | `TODO` |
+| Status | `IN_PROGRESS` |
 | Owner | `@awun0105` |
 | Target milestone | `M1/M2` |
 
@@ -73,6 +73,31 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
 - Nếu bài test Spike trên `Aisle_CW` không thỏa mãn điều kiện di chuyển của robot, kích hoạt fallback containerized OpenMVS (`InterfaceCOLMAP` $\rightarrow$ `DensifyPointCloud` $\rightarrow$ `ReconstructMesh`).
 
 ## 9. Qualification Spike trên `Aisle_CW`
+
+### Implementation Plan / Bootstrap 2026-09-26
+
+- Task capsule: REC-05 owns voxel/collision adapter and geometry provenance;
+  authority Integration §3.3, Contract §4, Track Guide REC-05/06, this task and
+  audits #4a/#7. Branch `feat/ex-rec`; REC-04 source/tests/task evidence are
+  existing intended work. No EX-SIM/SCENE/PRODUCT or shared schema edits.
+- REC-04 real GPU producer verified (65 frames, 6,202 splats). REC-06 remains
+  TODO; no confirmed real anchor/transform or robot capsule config found.
+  Contract lists anchor as human-provided later milestone. Do not infer meters
+  from arbitrary SfM or use evaluation-only trajectory/reference geometry.
+- Read actual splat-transform 3.6.6 source maps/types + OpenMVS app source and
+  licenses before code. Reuse GPU voxelizer, connected cluster, capsule carve,
+  Marching Cubes and GLB writer; keep OpenMVS process boundary fallback.
+- First independent work: explicit typed voxel config/command builder, source
+  checksum and metric-input guard, process/output validation and synthetic GPU
+  smoke. Record native Y-up versus canonical Z-up conversion explicitly.
+- Do not invent REC-06 confirmation artifact schema: integrate via producer
+  boundary once its confirmed record exists. Shared contracts currently have
+  `ProductArtifactRef` for RGB geometry, no standalone `GeometryArtifact` model.
+  Consumer-facing canonical publication waits for this metric producer boundary.
+- Proof: missing/unconfirmed/mismatched metric input rejected before process,
+  explicit capsule/seed/resolution, upstream CLI qualification, nonempty mesh
+  and topology on synthetic smoke; real three-resolution Aisle_CW and Isaac
+  CLEAR/BLOCKED remain separate required acceptance, not fixture claims.
 
 Trước khi chấp nhận primary geometry; giữ OpenMVS fallback nếu spike không đạt:
 1. Chạy 3 cấu hình voxel resolution trên file Brush PLY của `Aisle_CW`:
