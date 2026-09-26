@@ -67,13 +67,19 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
     product-safe real-world anchor; LiDAR/calibration chỉ tham gia khi contract
     cho phép và có provenance. Không lấy evaluation-only trajectory/geometry làm anchor.
   - ❌ **Scale phải là $1.0 = 1\text{m}$**: Mọi metric transform phải được kiểm định sai số $< 2\text{cm}$ trước khi công bố `ReconstructionBundle`.
+  - 📌 **Chiến lược Metric Scale chính thức (xem [ADR 0001](../../../../decisions/0001-metric-scale-strategy-and-roadmap.md)):**
+    - *MVP P0 (Thực thi ngay trên CPU/iGPU, không dùng AI nặng):*
+      1. **Nhánh Multimodal:** Tận dụng 3D LiDAR có sẵn của `Aisle_CW` (REC-07/08/09) qua quy trình alignment để lấy tỷ lệ mét native.
+      2. **Nhánh Monocular RGB (Phương án A - Trọng tâm HITL):** Người dùng chọn 2 điểm trực tiếp trên Visual 3DGS Viewport tại Web Studio (Screen 2: Scene Editor) ngay sau REC-04 và gõ khoảng cách thực tế (ví dụ: $2.40\text{ m}$ cho lối đi `Aisle_CW`) để cấp `MetricConfirmation` (`CONFIRMED`).
+      3. **Nhánh Monocular RGB (Phương án B - Tự động hình học nhẹ):** Tận dụng chiều cao camera gắn cố định trên robot OTTO 100 của `Aisle_CW` + thuật toán RANSAC fit mặt phẳng sàn từ đám mây điểm thưa COLMAP.
+    - *Backlog P1 (AI Auto-Scale Assist):* Tích hợp bộ ba `MoGe2Backend` + `ColmapSparseDepthProjector` (học từ DN-Splatter) + `RobustScaleAligner` (học từ MonoSplat, scale-only $z_{\text{metric}} \approx s \cdot z_{\text{colmap}}$) để tự động gợi ý thước đo (`ESTIMATED`) khi hệ thống có GPU CUDA.
 
 ## 9. Implementation Plan
 
 Assignee điền sau khi inspect code/test hiện tại: files cụ thể, sequence, failure handling và proof. Không đổi goal, I/O hoặc authority gate của task.
 
-Ordering đã khóa theo Integration §3.3:
-1. Xác nhận locked real-world anchor và similarity transform từ REC-03/04; xuất
+Ordering đã khóa theo Integration §3.3 và ADR 0001:
+1. Xác nhận locked real-world anchor và similarity transform từ REC-03/04 (thực hiện trên Visual 3DGS scene trước REC-05); xuất
    confirmation record cho REC-05 tạo metric working derivative.
 2. REC-05 chạy voxel/capsule theo mét; giữ master PLY immutable và ghi transform
    checksum trong provenance. Anchor chưa confirmed phải chặn bước này.
