@@ -78,9 +78,11 @@ Tổng kết ngày: Chốt thứ tự thực hiện EX-PRODUCT theo milestone v�
 
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| [Thành viên] | [Nhóm công việc lớn] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Lâm Quang Anh Quân | REC-01, REC-02 & REC-02A — Chuẩn hóa dataset TorWIC, kiểm định chất lượng RGB, privacy gate và trích xuất khung hình tự động qua FFmpeg. | ✅ Done | [Canonical dataset](scripts/torwic/canonical_dataset.py), [RGB quality & privacy](src/services/reconstruction/rgb/privacy.py), [Frame extraction](src/services/reconstruction/rgb/frame_extraction.py), [tests](tests/test_reconstruction/test_rec02_quality.py); commits `adb3c81`, `65c2ad6`, `8a768bc`, `646c4e1`. | Chưa ghi nhận |
+| Lâm Quang Anh Quân | REC-03 — Triển khai adapter COLMAP SfM, trích xuất camera poses, model reconstruction và chạy kiểm định GPU/CPU smoke thực tế. | ✅ Done | [COLMAP adapter](src/services/reconstruction/adapters/colmap.py), [Camera pose model](src/services/reconstruction/rgb/camera_pose.py), [Smoke runner](tests/test_reconstruction/rec03_smoke.py), [Task doc](docs/execution/tracks/ex_rec/tasks/REC-03.md); commits `72a0ae4`, `e11f653`. Evidence: 65/65 frames registered, 6.202 điểm thưa, 199/199 tests pass. | Chưa ghi nhận |
+| Lâm Quang Anh Quân | Đồng bộ toàn diện kiến trúc Web 3D (PlayCanvas Engine + supersplat-viewer), 10 tài liệu audit tái sử dụng và thứ tự xác nhận metric scale lên develop. | ✅ Done | 10 tài liệu trong [audits](docs/execution/audits/), [PRD](docs/PRD.md), [ARCHITECTURE](ARCHITECTURE.md), [INTEGRATION_PLAYBOOK](docs/execution/INTEGRATION_PLAYBOOK.md), [Pitch deck](presentation/pitch_deck.pptx); commits `dc2b8c1`, `dffcde7`, `e9874ba`, `1002305`. | Chưa ghi nhận |
 
-**Tổng kết ngày:** [Kết quả chính / blocker nếu có]
+**Tổng kết ngày:** Hoàn thành toàn bộ luồng tiền xử lý dữ liệu và SfM camera poses (REC-01 đến REC-03), kiểm chứng smoke chạy thật trên 65 frame của TorWIC Aisle_CW (6.202 điểm, ratio 1.0). Đồng thời củng cố toàn bộ kiến trúc PlayCanvas và bộ audit 9 repositories lên develop, giải quyết triệt để rủi ro xung đột scale và viewer.
 
 ---
 
@@ -88,9 +90,10 @@ Tổng kết ngày: Chốt thứ tự thực hiện EX-PRODUCT theo milestone v�
 
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| [Thành viên] | [Nhóm công việc lớn] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Lâm Quang Anh Quân | REC-04 — Triển khai Brush 3DGS adapter, tích hợp splat-transform SOG packaging, GPU smoke thực tế và render preview kiểm chứng. | ✅ Done | [Brush adapters](src/services/reconstruction/adapters/brush.py), [Splat bridge](src/services/reconstruction/adapters/splat_bridge.mjs), [Visual publication](src/services/reconstruction/rgb/visual_publication.py), [Tests](tests/test_reconstruction/test_rec04_brush.py), [Smoke & Preview runners](tests/test_reconstruction/rec04_smoke.py), [Task doc](docs/execution/tracks/ex_rec/tasks/REC-04.md); commits `d0dc89a`, `2c19b57`, `77c7e4d`. Evidence: GPU smoke Intel UHD 630 (Vulkan) tạo 6.202 Gaussians + SOG trong 23.15s, xuất `preview.webp`, 27/27 tests REC-04 pass, 226/226 toàn bộ suite pass, ruff clean. | Chưa ghi nhận |
+| Lâm Quang Anh Quân | REC-05 — Khởi động task Voxel Geometry & Collision Mesh, lập kế hoạch bootstrap 10 bước và khóa điều kiện tiên quyết metric scale. | 🔄 WIP | [Task doc](docs/execution/tracks/ex_rec/tasks/REC-05.md), [Track plan](docs/plans/active/2026-09-24-ex-rec-track.md); commit `2889af8`. Kế hoạch tái sử dụng GPU voxelization của `splat-transform` và OpenMVS fallback; xác định rõ dependency cần anchor mét từ REC-06 trước khi chạy spike thực tế trên Aisle_CW. | Chưa ghi nhận |
 
-**Tổng kết ngày:** [Kết quả chính / blocker nếu có]
+**Tổng kết ngày:** Hoàn thành xuất sắc cổng task REC-04 (Visual Reconstruction), có đầy đủ bằng chứng chạy thật trên GPU (Brush 3DGS $\rightarrow$ nén SOG $\rightarrow$ render preview). Kích hoạt REC-05 sang trạng thái IN_PROGRESS với kế hoạch thực thi chi tiết, sẵn sàng viết code voxel collision adapter.
 
 ---
 
