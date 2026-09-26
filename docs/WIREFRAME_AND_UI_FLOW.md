@@ -147,6 +147,8 @@ của 3DGS. UI phải báo rõ khi `VisualArtifact` chưa có, checksum sai ho�
 renderer chưa tương thích. Những trạng thái đó vẫn cho phép inspection các view
 khác nhưng không được báo AC-11 đã pass.
 
+Thao tác xác nhận Metric Scale cho RGB-only (HITL) diễn ra trực tiếp tại 3D Viewport trên lớp hiển thị Visual 3DGS Scene hoặc Sparse Point Cloud (ngay sau REC-04 và trước khi tạo Voxel Geometry REC-05): Người dùng click chuột trực tiếp vào 2 điểm trên bề mặt hình học 3D (cơ chế raycast lấy 2 tọa độ 3 chiều $A(X_1, Y_1, Z_1)$ và $B(X_2, Y_2, Z_2)$, không phải chọn trên ảnh 2D phẳng), nhập khoảng cách thực tế tính bằng mét và bấm [Xác nhận] (chi tiết quy chuẩn tại [ADR 0001](decisions/0001-metric-scale-strategy-and-roadmap.md)). Hệ thống tính hệ số co giãn toàn cục $s$, hiển thị preview khoảng cách và xuất bản `MetricConfirmation` (`CONFIRMED`).
+
 Nút xóa áp dụng cho object do người dùng thêm và reconstructed `SceneObject` đã được xác nhận. Khi xóa reconstructed object, revision mới phải loại object khỏi Scene IR, Geometry và Collider không còn tham gia collision/path validation, còn Visual segment được hide/remove khi đã tách riêng. UI phải cảnh báo rằng background phía sau có thể không được phục hồi photorealistic hoàn chỉnh; giới hạn này không làm thao tác Delete thất bại.
 
 Trước khi tạo candidate package, người dùng phải chọn robot footprint và các cặp Start–Goal. UI phải phân biệt evaluation set đã khóa với cặp thử nghiệm ad hoc và lưu chúng vào revision/validation configuration.
