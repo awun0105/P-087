@@ -68,11 +68,9 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
     cho phép và có provenance. Không lấy evaluation-only trajectory/geometry làm anchor.
   - ❌ **Scale phải là $1.0 = 1\text{m}$**: Mọi metric transform phải được kiểm định sai số $< 2\text{cm}$ trước khi công bố `ReconstructionBundle`.
   - 📌 **Chiến lược Metric Scale chính thức (xem [ADR 0001](../../../../decisions/0001-metric-scale-strategy-and-roadmap.md)):**
-    - *MVP P0 (Thực thi ngay trên CPU/iGPU, không dùng AI nặng):*
-      1. **Nhánh Multimodal:** Tận dụng 3D LiDAR có sẵn của `Aisle_CW` (REC-07/08/09) qua quy trình alignment để lấy tỷ lệ mét native.
-      2. **Nhánh Monocular RGB (Phương án A - Trọng tâm HITL):** Người dùng chọn 2 điểm trực tiếp trên Visual 3DGS Viewport tại Web Studio (Screen 2: Scene Editor) ngay sau REC-04 và gõ khoảng cách thực tế (ví dụ: $2.40\text{ m}$ cho lối đi `Aisle_CW`) để cấp `MetricConfirmation` (`CONFIRMED`).
-      3. **Nhánh Monocular RGB (Phương án B - Tự động hình học nhẹ):** Tận dụng chiều cao camera gắn cố định trên robot OTTO 100 của `Aisle_CW` + thuật toán RANSAC fit mặt phẳng sàn từ đám mây điểm thưa COLMAP.
-    - *Backlog P1 (AI Auto-Scale Assist):* Tích hợp bộ ba `MoGe2Backend` + `ColmapSparseDepthProjector` (học từ DN-Splatter) + `RobustScaleAligner` (học từ MonoSplat, scale-only $z_{\text{metric}} \approx s \cdot z_{\text{colmap}}$) để tự động gợi ý thước đo (`ESTIMATED`) khi hệ thống có GPU CUDA.
+    - *Testing Pipeline & Demo mang tính chất đưa lên hệ thống (`Aisle_CW`):* Tận dụng dữ liệu 3D LiDAR (Ouster OS1-128) có sẵn đã có đơn vị mét chuẩn ($1.0 = 1\text{m}$) để trích xuất khoảng cách vật lý chuẩn xác (calibration anchor) hoặc thông qua quy trình alignment RGB-LiDAR (REC-07/08/09), tuyệt đối không phỏng đoán số liệu.
+    - *Ứng dụng thực tế (Khi người dùng gửi video RGB thật của họ):* Bắt buộc hỗ trợ đầy đủ các phương án xử lý, trong đó cốt lõi P0 là luồng **Human-In-The-Loop Known Distance Anchor** (chọn 2 điểm trực tiếp trên 3D Viewport tại Web Studio sau REC-04 và nhập khoảng cách thật để chuyển thành `CONFIRMED`).
+    - *Backlog P1 (AI Auto-Scale Assist):* Tích hợp bộ ba `MoGe2Backend` + `ColmapSparseDepthProjector` (từ DN-Splatter) + `RobustScaleAligner` (từ MonoSplat, scale-only $z_{\text{metric}} \approx s \cdot z_{\text{colmap}}$) để tự động điền gợi ý kích thước (`ESTIMATED`) khi hệ thống có GPU CUDA.
 
 ## 9. Implementation Plan
 

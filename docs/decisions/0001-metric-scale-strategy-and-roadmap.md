@@ -11,55 +11,56 @@ Accepted
 1. **Bản chất bài toán:** Tái tạo 3D từ chuỗi ảnh/video monocular RGB qua COLMAP Structure-from-Motion (SfM) và Brush 3D Gaussian Splatting (3DGS) chỉ xác định được hình học và quỹ đạo camera lên tới một tỷ lệ vô hướng tùy ý (*scale ambiguity*). Hệ thống không thể tự biết 1 đơn vị trong máy tính là 1m, 0.1m hay 10m nếu không có dữ liệu đối chiếu bên ngoài.
 2. **Yêu cầu sản phẩm:** Theo `docs/PRD.md` (FR-06, AC-03) và `docs/execution/TEAM_EXECUTION_CONTRACT.md`, scene xuất khẩu sang Isaac Sim bắt buộc phải đạt chuẩn `Physics-ready` với tỷ lệ mét thật đã được xác nhận (`CONFIRMED`). Nếu chưa có metric scale, scene bị chặn không cho phép duyệt phát hành (`APPROVED`).
 3. **Ràng buộc phần cứng và môi trường:** Môi trường máy trạm hiện tại không có GPU CUDA rời (`CUDA available: False`, chạy CPU Intel Core i7-9850H và Intel UHD 630 iGPU). Việc tích hợp các Foundation Model AI về độ sâu mét (như MoGe-2, Apple Depth Pro, MapAnything) vào worker pipeline của MVP P0 sẽ gây nghẽn hiệu năng CPU nghiêm trọng, tốn RAM và gây rủi ro tiến độ milestone.
+4. **Phân định phạm vi Demo/Testing vs Sản phẩm thực tế:** Cần phân tách rõ giải pháp dùng tạm thời để kiểm thử pipeline với dataset `Aisle_CW` và giải pháp toàn diện khi người dùng tải lên video monocular RGB bất kỳ trong ứng dụng thực tế.
 
 ## Decision
 
-Nhóm thống nhất phân tách giải pháp Metric Scale thành 2 tầng rõ rệt:
+Nhóm thống nhất chiến lược Metric Scale toàn diện như sau:
 
-### 1. Phạm vi MVP P0 (Thực thi ngay, không phụ thuộc AI nặng, đảm bảo chuẩn Physics-ready)
+### 1. Giải pháp Testing Pipeline & Demo với Dataset `Aisle_CW` (Tận dụng LiDAR)
 
-Tận dụng tối đa bộ dữ liệu `Aisle_CW` (TorWIC-SLAM) và hạ tầng code hiện có để đóng gói demo:
+Để kiểm thử thông suốt pipeline tái tạo và mô phỏng mà không cần con người phải phỏng đoán hay tự bịa số mét:
 
-- **Nhánh Đa phương thức (Multimodal RGB + LiDAR):**
-  - Dataset `Aisle_CW` có sẵn 3D LiDAR (Ouster OS1-128) mang đơn vị mét native.
-  - Phối hợp: Sau khi hoàn thành RGB reconstruction (REC-03/04), kết hợp với `LiDARGeometryArtifact` (REC-07/08) qua quy trình Alignment (REC-09) để có scene chuẩn xác cho demo.
-- **Nhánh Monocular RGB (Khi chỉ có video RGB):**
-  - **Phương án A (Trọng tâm sản phẩm — Human-In-The-Loop Known Distance Anchor):**
-    - Người dùng quan sát mô hình 3D hoàn chỉnh trên **3D Viewport của Web Studio (Screen 2: Scene Editor)** ngay sau khi hoàn thành Visual 3DGS (REC-04) và trước khi tạo lưới va chạm Voxel (REC-05).
-    - Thao tác: Dùng chuột click chọn trực tiếp 2 điểm trong không gian 3D trên mô hình (ví dụ 2 chân kệ kho, 2 góc pallet) và gõ khoảng cách thực tế (ví dụ: `2.40 m`).
-    - Backend REC-06 (`DistanceAnchor`, `SimilarityTransform`, `MetricCanonicalizer`) giải hệ số co giãn toàn cục $s$ và xuất bản `MetricConfirmation` trạng thái `CONFIRMED`.
-  - **Phương án B (Tự động hình học nhẹ không dùng AI — Camera Height + Ground Plane RANSAC):**
-    - Tận dụng đặc thù dataset `Aisle_CW` được quay từ camera gắn cố định trên robot tự hành **OTTO 100**.
-    - Sử dụng thuật toán RANSAC fit mặt phẳng sàn từ đám mây điểm thưa COLMAP (chạy vài mili-giây trên CPU), đo khoảng cách camera đến sàn ($d_{\text{colmap}}$) và chia cho chiều cao camera vật lý đã biết ($h_{\text{camera}}$) để giải tỷ lệ mét tự động.
+- **Sử dụng 3D LiDAR (Ouster OS1-128) có sẵn của `Aisle_CW`:**
+  - File quét LiDAR trong `data/torwic_slam/raw/traversals/aisle_cw/lidar/` đã mang sẵn đơn vị mét vật lý chuẩn xác ($1.0 = 1\text{m}$).
+  - *Cách 1 (Nhanh cho REC-06 & REC-05):* Trích xuất khoảng cách laser thực tế giữa 2 cột kệ kho từ đám mây điểm LiDAR làm `DistanceAnchor` cho REC-06 để giải hệ số co giãn $s$.
+  - *Cách 2 (Multimodal chuẩn):* Triển khai tiếp `REC-07` (Prefusion gộp 1.092 file `.pcd` bằng Open3D) $\rightarrow$ `REC-08` (`LiDARGeometryArtifact`) $\rightarrow$ `REC-09` (Alignment khớp RGB với LiDAR).
+- **Quy chuẩn hạt giống đục rỗng voxel (`navigation_seed_world` của REC-05):**
+  - Trích xuất tự động từ tọa độ Camera ở khung hình đầu tiên (Frame 0) trong quỹ đạo camera (trajectory) của COLMAP/dataset. Đây là vị trí chắc chắn nằm trong lối đi trống, đảm bảo thuật toán `--voxel-carve` chạy tự động và không bị skip.
 
-### 2. Phạm vi P1 / Backlog Mở rộng (AI Auto-Scale Assist)
+### 2. Giải pháp Sản phẩm Thực tế (Khi người dùng tải lên Video Monocular RGB bất kỳ)
 
-Lưu vết kiến trúc cho giai đoạn sau khi hệ thống có hạ tầng GPU CUDA để hỗ trợ tính năng tự động gợi ý thước đo cho người dùng:
+Khi ứng dụng chính thức vận hành và người dùng gửi video thực tế của họ (không có cảm biến LiDAR đi kèm), hệ thống **bắt buộc hỗ trợ đầy đủ các phương án xử lý**:
 
-- **Bộ ba chức năng AI Metric Alignment:**
-  1. *MoGe2Backend (hoặc Tiny Model như DepthART):* Nhận ảnh RGB dự đoán bản đồ độ sâu mét $z_{\text{metric}}$.
-  2. *ColmapSparseDepthProjector (học từ DN-Splatter):* Chiếu điểm 3D sparse của COLMAP lên ảnh 2D để bắt cặp điểm tương ứng $(z_{\text{colmap}}, z_{\text{metric}})$.
-  3. *RobustScaleAligner (học từ MonoSplat):* Giải toán co giãn thuần túy (*scale-only* $z_{\text{metric}} \approx s \cdot z_{\text{colmap}}$ qua median/least-squares), triệt tiêu hoàn toàn hệ số dịch chuyển $b$ ($b=0$) để bảo toàn tâm quang học và cấu trúc hình học 3D.
-- **Quy tắc phân định trạng thái:** Kết quả từ mô hình AI chỉ được mang nhãn `ESTIMATED`, phục vụ xem trước (preview) hoặc gợi ý sẵn cho người dùng trên Web Studio, người dùng vẫn bấm xác nhận để chuyển thành `CONFIRMED` trước khi sang mô phỏng vật lý.
+- **Phương án Cốt lõi P0 (Human-In-The-Loop Known Distance Anchor):**
+  - Người dùng quan sát mô hình 3D hoàn chỉnh trên **3D Viewport của Web Studio (Screen 2: Scene Editor)** ngay sau khi hoàn thành Visual 3DGS (REC-04) và trước khi tạo lưới va chạm Voxel (REC-05).
+  - Thao tác: Dùng chuột click chọn trực tiếp 2 điểm trong không gian 3D trên mô hình (cơ chế raycast bắt điểm bề mặt 3 chiều lấy $A(x_1, y_1, z_1)$ và $B(x_2, y_2, z_2)$, không chọn trên ảnh 2D phẳng) và nhập khoảng cách thực tế (ví dụ: `2.40 m`).
+  - Backend REC-06 (`DistanceAnchor`, `SimilarityTransform`, `MetricCanonicalizer`) giải hệ số co giãn toàn cục $s$ và xuất bản `MetricConfirmation` trạng thái `CONFIRMED`.
+- **Lộ trình Mở rộng P1 (AI Auto-Scale Assist):**
+  - Tích hợp bộ ba chức năng khi hệ thống có hạ tầng GPU CUDA:
+    1. *MoGe2Backend (hoặc Tiny Model như DepthART):* Dự đoán bản đồ độ sâu mét $z_{\text{metric}}$.
+    2. *ColmapSparseDepthProjector (học từ DN-Splatter):* Chiếu điểm 3D sparse của COLMAP lên ảnh 2D để bắt cặp $(z_{\text{colmap}}, z_{\text{metric}})$.
+    3. *RobustScaleAligner (học từ MonoSplat):* Giải toán co giãn thuần túy (*scale-only* $z_{\text{metric}} \approx s \cdot z_{\text{colmap}}$ qua median/least-squares), triệt tiêu hoàn toàn hệ số dịch chuyển $b$ ($b=0$) để bảo toàn tâm quang học và cấu trúc 3D.
+  - Kết quả mang nhãn `ESTIMATED`, tự động điền gợi ý kích thước trên Web Studio để người dùng chỉ cần duyệt (`[Accept]`) hoặc hiệu chỉnh.
 
 ## Alternatives Considered
 
-1. **Tích hợp ngay MoGe-2 / Depth Pro vào MVP P0:** Bị từ chối vì thiếu GPU CUDA, suy luận CPU quá chậm, kéo theo nhiều dependency nặng và làm trễ hạn bàn giao lưới va chạm REC-05 sang team Simulation.
-2. **Dùng phương pháp ArUco / AprilTag Marker:** Bị từ chối vì không phù hợp với luồng thu thập dữ liệu tự nhiên của kho hàng và không có marker trong dataset `Aisle_CW`.
+1. **Phương án Chiều cao Camera Robot OTTO 100:** Bị loại bỏ vì khảo sát thực tế file `calibrations.txt` cho thấy dataset chỉ cung cấp extrinsics `T_cam1_os`, hoàn toàn không có thông số chiều cao từ camera xuống mặt đất. Loại bỏ để tuân thủ quy tắc không tự bịa số liệu.
+2. **Phương án ArUco / AprilTag Marker:** Bị loại bỏ vì không phù hợp với luồng quay video kho bãi tự nhiên và dataset `Aisle_CW` không có marker.
 3. **Dùng thuật toán Affine Shift ($s \cdot z + b$) của DN-Splatter:** Bị từ chối vì hệ số dịch $b$ phá vỡ tính nhất quán của phép biến đổi đồng dạng toàn cục $p' = s R p + t$.
 
 ## Consequences
 
 Positive:
-- Pipeline P0 chạy hoàn toàn mượt mà trên CPU/iGPU hiện có, không phụ thuộc tài nguyên máy chủ đắt đỏ.
-- Tháo gỡ nút thắt dữ liệu thật cho `Aisle_CW` tại REC-06, mở đường cho REC-05 chạy 3 mức phân giải Voxel Collision ngay lập tức.
-- Giữ vững hợp đồng chất lượng và an toàn vật lý của PRD (không tự ý gán scale giả định, provenance truy vết đầy đủ, chống double-scaling).
-- Có tài liệu thiết kế sẵn sàng cho việc nâng cấp AI ở P1.
+- Phân định rõ ràng: LiDAR giải quyết nhanh chóng bài toán testing pipeline/demo cho `Aisle_CW` mà không cần đoán số liệu.
+- Sản phẩm thực tế có thiết kế hoàn chỉnh: Luồng HITL 2 điểm trên 3DGS đảm bảo xử lý được mọi video monocular RGB của người dùng.
+- Pipeline P0 chạy hoàn toàn mượt mà trên CPU/iGPU hiện có, không phụ thuộc GPU rời đắt đỏ.
+- Tháo gỡ hoàn toàn điểm nghẽn cho REC-05/06, mở đường cho REC-05 chạy 3 mức phân giải Voxel Collision.
 
 Tradeoffs:
-- Ở P0, với video tải lên tùy ý ngoài `Aisle_CW`, người dùng cần thao tác click 2 điểm trên 3D viewer thay vì hệ thống tự động hoàn toàn.
+- Với video tải lên tùy ý của người dùng ở bản P0, người dùng cần thao tác click 2 điểm trên 3D viewer thay vì hệ thống tự động hoàn toàn.
 
 ## Follow-Up
 
-- Bổ sung mốc khoảng cách thực tế $2.40\text{ m}$ của `Aisle_CW` vào kịch bản nghiệm thu thật của REC-06.
-- Cập nhật hướng dẫn giao diện chọn 2 điểm trên 3D Viewport vào `docs/WIREFRAME_AND_UI_FLOW.md`.
+- Bổ sung kịch bản trích xuất anchor từ LiDAR cho testing `Aisle_CW` tại REC-06.
+- Kết nối Camera Frame 0 làm seed tự động cho REC-05.

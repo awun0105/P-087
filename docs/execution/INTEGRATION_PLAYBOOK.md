@@ -1446,7 +1446,7 @@ Implementation Order dưới đây là **data dependency order cho real artifact
 Sau đó Integration #1 mới thay fixture bằng real artifact.
 
 - **Phase 0 (System Audit):** Đọc các hệ thống Tier-0 (VR-Robo, R2G...) để chốt giải pháp ghép nối cuối cùng.
-- **Phase A (Reconstruction):** `Video -> COLMAP -> Brush -> REC-06 anchor confirmation (trên Visual 3DGS scene hoặc Camera Height + Ground Plane RANSAC; xem [ADR 0001](../decisions/0001-metric-scale-strategy-and-roadmap.md)) -> metric derivative -> REC-05 splat-transform geometry`; OpenMVS fallback từ COLMAP khi cần.
+- **Phase A (Reconstruction):** `Video -> COLMAP -> Brush -> REC-06 anchor confirmation (trên Visual 3DGS scene bằng HITL Anchor, hoặc dùng LiDAR ground-truth cho Aisle_CW testing/demo; xem [ADR 0001](../decisions/0001-metric-scale-strategy-and-roadmap.md)) -> metric derivative -> REC-05 splat-transform geometry`; OpenMVS fallback từ COLMAP khi cần.
 - **Phase B (Metric):** REC-06 kiểm tra/propagate cùng transform cho pose, visual và geometry (có alignment khi mixed LiDAR), tránh double scaling, rồi xuất `ReconstructionBundle`.
 - **Phase C (Object Identity & Scene Decomposition):** SAM2 → Multi-view association → Human confirmation → SceneDecomposer → Draft SceneIR.
 - **Phase D (Physics & Scene IR Revisions):** ST-COLLIDER → Physics-enriched SceneIR → ST-EDIT → Preflight.
