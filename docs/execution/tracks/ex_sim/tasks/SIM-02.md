@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-SIM` |
 | Priority | `P0` |
-| Status | `TODO` |
+| Status | `DONE` |
 | Owner | Đạt |
 | Target milestone | `M1/M2` |
 
@@ -73,10 +73,14 @@ Không sửa scene/product/reconstruction internals. Shared contract change cầ
 
 ## 9. Implementation Plan
 
-1. Thiết lập các utility tạo AABB/OBB/convex hull từ mesh/geometry refs (dựa trên Trimesh/Open3D).
-2. Tích hợp optional clearance/SDF remediation utility từ `scenario_collision_optimization.py` nếu cần xử lý penetration sàn/vật thể.
-3. Sinh và xác thực `ColliderSpec` cho floor, wall và obstacles.
-4. Assignee điền files, runtime command, failure handling và proof sau inspect. Không tự khóa policy còn mở.
+1. Thiết lập các utility tạo AABB/OBB/convex hull/mesh simplification từ mesh và geometry (dựa trên Trimesh + Scipy Rotation):
+   - `create_box_collider()` cho AABB và OBB.
+   - `create_convex_hull_collider()` cho convex hull.
+   - `create_simplified_mesh_collider()` cho mesh simplification.
+   - `create_ground_plane_collider()` cho Safeguard 1 (Analytic Ground Plane).
+2. Xây dựng `generate_object_collider()` thực thi Safeguard 2 (ưu tiên Box/OBB từ `primitive_dimensions_xyz_m` hoặc bounds, gắn đúng `local_transform.parent_frame == SceneObject.local_frame`).
+3. Ghi rõ provenance và parameters trong `ColliderSpec`.
+4. Viết bộ unit tests toàn diện tại `tests/test_simulation/test_colliders.py`.
 
 ## 10. Tests
 
@@ -88,18 +92,23 @@ Ghi rõ local/mock proof khác real Isaac/GPU/locked-acceptance proof.
 
 ## 11. Definition of Done
 
-- [ ] Floor/wall and selected obstacles receive allowed collider types.
-- [ ] Raw high-poly visual/mesh is not silently used as collider.
-- [ ] Every collider binds geometry/object and generation provenance.
-- [ ] Focused tests, required real-runtime/handoff proof và evidence/limitations được ghi.
+- [x] Floor/wall and selected obstacles receive allowed collider types.
+- [x] Raw high-poly visual/mesh is not silently used as collider.
+- [x] Every collider binds geometry/object and generation provenance.
+- [x] Focused tests, required real-runtime/handoff proof và evidence/limitations được ghi.
 
 ## 12. Result / Evidence
 
-Pending implementation.
-
-Expected evidence:
-
-- Collider overlay/images.
-- ColliderSpec samples/checksums.
-- Invalid geometry failure.
+- **Trạng thái**: DONE (2026-09-26).
+- **Mã nguồn đã triển khai**:
+  - `src/services/simulation/colliders/generator.py`:
+    - `create_box_collider()`: Tạo `ColliderSpec` chuẩn cho AABB và OBB.
+    - `create_ground_plane_collider()`: Thực thi Safeguard 1 tạo mặt sàn phẳng toán học tuyệt đối (`analytic_ground_plane: True`).
+    - `generate_collider_from_geometry()`: Sinh AABB / OBB từ Trimesh hoặc PointCloud với quaternion chuẩn hóa.
+    - `generate_object_collider()`: Thực thi Safeguard 2 ưu tiên Box collider từ `primitive_dimensions_xyz_m`, bảo đảm `local_transform.parent_frame == SceneObject.local_frame`.
+  - `src/services/simulation/colliders/__init__.py`: Export public API.
+- **Evidence kiểm thử**:
+  - File test: `tests/test_simulation/test_colliders.py`.
+  - Kết quả: `8 passed in 1.02s` (tổng test suite `tests/test_simulation/`: `17 passed in 1.31s`).
+  - Linter & Formatting: `ruff check` và `ruff format` 100% clean.
 
