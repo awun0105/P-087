@@ -76,6 +76,10 @@ class MetricPreview(ContractModel):
         )
         if self.transform != expected:
             raise ValueError("preview transform differs from anchor/frame declaration")
+        anchor = self.request.anchor
+        distance = math.dist(expected.apply_point(anchor.point_a), expected.apply_point(anchor.point_b))
+        if distance <= 0 or not math.isfinite(distance):
+            raise ValueError("anchor collapses or overflows in the declared canonical frame")
         return self
 
     def checksum(self) -> str:

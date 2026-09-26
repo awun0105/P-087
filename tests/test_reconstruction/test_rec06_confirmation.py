@@ -91,7 +91,9 @@ def test_changed_preview_requires_new_acceptance(context: tuple) -> None:
     assert service.load(new_ref).preview.transform.scale_m_per_sfm_unit == 4
 
 
-@pytest.mark.parametrize("failure", ["different_source", "missing_frame", "eval_only", "nan", "coincident"])
+@pytest.mark.parametrize(
+    "failure", ["different_source", "missing_frame", "eval_only", "nan", "coincident", "collapse", "overflow"]
+)
 def test_preview_input_rejections(context: tuple, failure: str) -> None:
     """Không suy frame mặc định hoặc dùng evaluation-only evidence trong product input."""
     service, request, _, _ = context
@@ -104,8 +106,12 @@ def test_preview_input_rejections(context: tuple, failure: str) -> None:
         data["anchor"]["measurement_ref"]["data_class"] = "evaluation_only"
     elif failure == "nan":
         data["anchor"]["distance_m"] = float("nan")
-    else:
+    elif failure == "coincident":
         data["anchor"]["point_b"] = data["anchor"]["point_a"]
+    elif failure == "collapse":
+        data["frame"]["translation_m"] = (1e308, 1e308, 1e308)
+    else:
+        data["anchor"].update(point_a=(0, 0, 1e308), point_b=(0.5, 0, 1e308))
     with pytest.raises(ValueError):
         service.preview(MetricRequest.model_validate(data))
 
@@ -167,3 +173,45 @@ def test_independent_distance_not_calibration_anchor(context: tuple) -> None:
     )
     with pytest.raises(ValueError, match="calibration anchor"):
         independent_distance_error(record, reversed_anchor)
+
+
+@pytest.mark.parametrize("failure", ["bytes", "provenance", "type", "stage"])
+def test_published_reference_tampering(context: tuple, failure: str) -> None:
+    """Consumer không tin envelope type/provenance hoặc mutable storage bytes."""
+    service, _, preview, acceptance = context
+    reference = service.publish(service.confirm(preview, acceptance), "rec06-fixture")
+    if failure == "bytes":
+        service.deps.visuals.require(reference).write_bytes(b"tampered confirmation")
+    elif failure == "provenance":
+        reference = reference.model_copy(update={"source_provenance": {"evidence_kind": "real_measurement"}})
+    elif failure == "type":
+        reference = reference.model_copy(update={"artifact_type": "ReconstructionBundle"})
+    else:
+        reference = reference.model_copy(update={"producer_stage": "ST-VISUAL-RECON"})
+    with pytest.raises((ValueError, ArtifactChecksumError)):
+        service.load(reference)
+
+
+def test_rebound_pose_lineage_rejected(context: tuple) -> None:
+    """Rehashed preview/decision không được đổi source pose khỏi raw visual lineage."""
+    service, request, preview, _ = context
+    changed = preview.model_copy(update={"source_camera_poses": request.source_visual})
+    acceptance = acceptance_for(service, changed)
+    with pytest.raises(ValueError, match="lineage"):
+        service.confirm(changed, acceptance)
+
+
+def test_writer_failure_is_not_success(context: tuple) -> None:
+    """Storage error phải propagate, không trả reference hoặc stage success."""
+    service, _, preview, acceptance = context
+    record = service.confirm(preview, acceptance)
+
+    class BrokenWriter:
+        """Inject lỗi I/O, không sửa store thật."""
+
+        def publish(self, reference: object, payload: bytes) -> object:
+            raise OSError("fixture storage unavailable")
+
+    broken = MetricCanonicalizer(replace(service.deps, writer=BrokenWriter()))
+    with pytest.raises(OSError, match="storage unavailable"):
+        broken.publish(record, "rec06-fixture")
