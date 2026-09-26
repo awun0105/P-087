@@ -1,6 +1,5 @@
 # Worklog — Team P-087 (Real2Sim Studio)
 
-> Ghi theo ngày và nhóm công việc lớn. Chỉ ghi phần việc của Quân có dấu vết trong lịch sử trao đổi/repository; không quy việc của thành viên khác cho Quân. Thời lượng chưa được ghi nhận thì không ước đoán.
 
 ---
 
@@ -11,6 +10,17 @@
 | Lâm Quang Anh Quân | Nâng cấp backend scaffold sang cấu hình LLM đa provider, tách factory và bổ sung kiểm thử cấu hình. | ✅ Done | [Cấu hình](src/config.py), [LLM factory](src/llm/factory.py), [tests](tests/test_llm_factory.py); commit `18418c5`. Đây là scaffold, chưa phải pipeline Real2Sim. | Chưa ghi nhận |
 
 **Tổng kết ngày:** Hoàn thiện phần nền backend hiện có mà không nhận là đã triển khai workflow Real2Sim.
+
+---
+
+## 2026-09-19
+
+| Member | Task | Status | Output | Time |
+|--------|------|--------|--------|------|
+| Nguyễn Thọ Đạt | Xây dựng tài liệu thiết kế giao diện Wireframe & UI Flow toàn cục cho 5 màn hình chính của RAV-01; khởi tạo bộ tài liệu nghiên cứu sâu và nâng cấp hỗ trợ UTF-8 cho script log. | ✅ Done | [WIREFRAME_AND_UI_FLOW.md](docs/WIREFRAME_AND_UI_FLOW.md), [Deep Dive Report](docs/RAV01_Real2Sim_Problem_Deep_Dive_Report.md), [PRD](docs/PRD.md), [BRIEF](docs/BRIEF.md), [log_manual.py](scripts/log_manual.py); commit `dce97b0`. | Chưa ghi nhận |
+| Nguyễn Thọ Đạt | Sửa PowerShell hook script để sinh Git pre-push hook với encoding chuẩn UTF-8 without BOM và LF line endings cho Windows/Linux. | ✅ Done | [setup_hooks.ps1](scripts/setup_hooks.ps1); commit `63fc867`. | Chưa ghi nhận |
+
+**Tổng kết ngày:** Xác lập bản thiết kế giao diện và luồng người dùng (UI flow) đầu tiên cho Real2Sim Studio; chuẩn hóa công cụ git hooks môi trường Windows.
 
 ---
 
@@ -78,9 +88,9 @@ Tổng kết ngày: Chốt thứ tự thực hiện EX-PRODUCT theo milestone v�
 
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| [Thành viên] | [Nhóm công việc lớn] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | Nghiên cứu kiến trúc EX-SIM sau audit, làm rõ các invariant va chạm (Safeguard 1 mặt sàn USD Analytic Plane, Safeguard 2 ưu tiên Box collider), lập kế hoạch phân tách Local vs GPU Simulation. | ✅ Done | [TRACK EX-SIM](docs/execution/tracks/ex_sim/TRACK.md), các task SIM-01..09, tài liệu audit donors ([DISCOVERSE](docs/execution/audits/05_discoverse.md), [Re3Sim](docs/execution/audits/07_re3sim.md)). Cài đặt môi trường `trimesh`, `scipy`. | Chưa ghi nhận |
 
-**Tổng kết ngày:** [Kết quả chính / blocker nếu có]
+**Tổng kết ngày:** Thống nhất ranh giới kỹ thuật cho EX-SIM: mặt sàn phẳng tuyệt đối triệt tiêu rung bánh AMR, ưu tiên Box collider cho SceneObjects; chuẩn bị môi trường phát triển local độc lập trước khi chạy GPU.
 
 ---
 
@@ -88,9 +98,11 @@ Tổng kết ngày: Chốt thứ tự thực hiện EX-PRODUCT theo milestone v�
 
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| [Thành viên] | [Nhóm công việc lớn] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | SIM-04 — Deterministic Preflight: cài đặt đầy đủ 6 quy tắc thẩm định tĩnh P0 (`METRIC_SCALE_MISSING`, `COLLIDER_MISSING`, `TRANSFORM_INVALID`, `OBJECT_OUT_OF_BOUNDS`, `REQUIRED_ARTIFACT_MISSING`, `OBJECT_CONFIRMATION_INCOMPLETE`), engine điều phối `run_preflight()` và niêm phong SHA-256 `report_checksum`. | ✅ Done | [rules.py](src/services/simulation/preflight/rules.py), [engine.py](src/services/simulation/preflight/engine.py), [test_preflight.py](tests/test_simulation/test_preflight.py); commit `49e9660`. Test: 9 passed in 0.13s. Task SIM-04 chuyển trạng thái DONE. | Chưa ghi nhận |
+| Nguyễn Thọ Đạt | SIM-02 — Collider Generation: xây dựng bộ sinh proxy collider (AABB, OBB, Convex Hull, Simplified Mesh) từ mesh/point cloud với Trimesh + Scipy Rotation; cài đặt Safeguard 1 (`create_ground_plane_collider`) và Safeguard 2 (`generate_object_collider` ưu tiên box từ `primitive_dimensions_xyz_m`). | ✅ Done | [generator.py](src/services/simulation/colliders/generator.py), [test_colliders.py](tests/test_simulation/test_colliders.py); commit `bdf5f4d`. Test: 8 passed in 1.02s. Task SIM-02 chuyển trạng thái DONE. | Chưa ghi nhận |
+| Nguyễn Thọ Đạt | Chuẩn hóa test harness và dọn sạch linter repository: cấu hình fallback test key trong `conftest.py`, đồng bộ `LLM_PROVIDER=google` trong `.env`, sửa 5 lỗi `UP022` của `ruff check .` và định dạng code sạch sẽ. | ✅ Done | [conftest.py](tests/conftest.py), [.env](.env), sửa `validate_evidence_capsule.py`, `emit_evidence_bundle.py`, `render_patch.py`; commit `7e8e453`. Kết quả: `pytest tests/test_simulation/` đạt 17 passed in 2.81s, `ruff check .` đạt All checks passed! | Chưa ghi nhận |
 
-**Tổng kết ngày:** [Kết quả chính / blocker nếu có]
+**Tổng kết ngày:** Hoàn thành 2 task nền tảng quan trọng của EX-SIM (SIM-04 và SIM-02) chuyển trạng thái `DONE` với 100% bằng chứng kiểm thử tự động (17 passed). Hệ thống test và linting của repo đã xanh hoàn toàn.
 
 ---
 
