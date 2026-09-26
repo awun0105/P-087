@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-REC` |
 | Priority | `P0` |
-| Status | `DONE` |
+| Status | `IN_PROGRESS` |
 | Owner | `@awun0105` |
 | Target milestone | `M2` |
 

@@ -4,6 +4,49 @@ Date: 2026-09-24
 
 ## Status
 
+### Audit/rework 2026-09-27 — feat/ex-rec-pipeline
+
+User yêu cầu audit/sửa implementation Antigravity REC-07–11 cùng các phần REC-05/06
+liên quan, đối chiếu core repos local, giữ shared contracts và cross-track handoff.
+Bootstrap: current branch `feat/ex-rec-pipeline`, HEAD `0629a6e`, worktree clean;
+`11b7a4f` đã lưu REC-07 starter. Không có WIP cần stash/reset hoặc branch switch.
+Không tự merge/push hoặc gọi Antigravity/delegate thêm.
+
+Task Capsule:
+- Outcome: sửa behavior-level defects trước khi nghiệm thu, không dựa nhãn DONE.
+- Authority: AGENTS/Workflow; Architecture ownership; PRD FR-05/06, AC-03/04;
+  Dataset §13.4/15 và demo clarification ADR 0001; Contract §3.3.2–3.5, §4,
+  §9; Integration/Track Guide REC-05–11; từng task file.
+- Inputs/outputs: immutable product refs, declared offline raw inputs, explicit
+  metric/alignment evidence → verified canonical artifacts/bundle/worker result.
+- Owned: EX-REC source, `scripts/torwic`, EX-REC tests/tasks và plan này.
+  Không sửa shared schemas, EX-SCENE/SIM/PRODUCT internals, raw data hoặc reference
+  repo source. Consumer contract tests được chạy read-only ở boundary.
+- Baseline observed: Ruff check/format pass (173 files); EX-REC pytest **280
+  passed, 11 skipped** (57.83s). Đây không chứng minh correctness của happy-path
+  assumptions; cần targeted negative/runtime tests.
+- Source audit: Re3Sim `681da6f...` frame_tools dùng matrix composition/inverse
+  và tách similarity scale khỏi rigid rotation; chỉ REFERENCE concept, không kéo
+  Torch/Isaac hoặc vendored Gaussian license vào product. TorWICDataset
+  `5e1839f...` pose wrapper là old split sec/nsec ROS layout, **không** dùng thay
+  parser TUM SLAM hiện tại. Open3D local HEAD `b6c5e19` là v0.20.0; audited
+  runtime vẫn 0.19.0, inspect đúng source bằng `git show v0.19.0:...`, không đổi
+  reference checkout. Không assume latest checkout bằng runtime version.
+- Verified source defects: REC-08 hardcoded binary bounds và ASCII sample 1000
+  points; unchecked REC-07 manifest/UNVERIFIED frame được gắn canonical defaults;
+  REC-09 default CONFIRMED/true attestation, không resolve inputs/evidence,
+  sensor extrinsic bị relabel thành world; REC-05 chỉ scale, bỏ R/t và silent
+  unsupported-PLY copy; REC-06 kiểm provenance thay payload và independent sample
+  optional; REC-10 default confirmed metric, không resolve dependencies;
+  REC-11 CLI thiếu module main guard, empty request exit 0, không xác minh
+  bundle payload/lineage trước SUCCEEDED. Historical DONE reports phải được
+  đọc cùng audit này, không phải current acceptance.
+- Proof/order: targeted red regressions → alignment/frame guard → LiDAR native
+  payload/provenance → Gaussian full transform/seed → metric/bundle/worker
+  publication and consumer checks → broader tests/real available smoke. Mỗi
+  coherent fix commit riêng. Thiếu real confirmation/seed là pending acceptance,
+  không fake approval và không block toàn track implementation.
+
 Owner clarification 2026-09-26 supersedes ưu tiên shortcut anchor: phải chuẩn bị
 cả ba dataset demo modes (RGB+LiDAR fusion; RGB LiDAR-assisted scale; RGB chọn
 hai điểm có LiDAR gợi ý khoảng cách). "Ẩn" chỉ ở thao tác/layer, không ẩn provenance

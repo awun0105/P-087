@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-REC` |
 | Priority | `P0` |
-| Status | `DONE` |
+| Status | `IN_PROGRESS` |
 | Owner | `@awun0105` |
 | Target milestone | `M1/M2` |
 
@@ -97,4 +97,3 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
     - RGB-only bundle xuất bản và được EX-SCENE consumer (`load_reconstruction_bundle` từ `src.services.scene.bundle_consumer`) đọc và deserialize trực tiếp, giải quyết toàn bộ canonical geometry, frames, poses.
     - Mixed RGB+LiDAR bundle có confirmed alignment được xuất bản và EX-SCENE consumer deserialize thành công cả canonical geometry và lidar geometry.
     - Fail-closed khi cấu hình mixed RGB+LiDAR nhưng thiếu alignment.
-

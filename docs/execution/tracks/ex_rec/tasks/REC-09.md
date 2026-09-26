@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-REC` |
 | Priority | `P0` |
-| Status | `DONE` |
+| Status | `IN_PROGRESS` |
 | Owner | `@awun0105` |
 | Target milestone | `M2/M4` |
 
@@ -63,6 +63,14 @@ Giữ tool/research repo ở process/adapter boundary; không kéo toàn bộ re
 
 ## 9. Implementation Plan
 
+Audit/rework 2026-09-27: `0629a6e` defaults CONFIRMED và chỉ kiểm caller booleans,
+không resolve source/evidence. Sensor extrinsic không cung cấp world alignment.
+Theo Contract §3.5/§4 và Re3Sim frame composition: giữ sensor frame labels đúng,
+chỉ compose khi connecting frames khớp; injected confirmation verifier + byte
+resolver bắt buộc, default DECLARED, evidence bind vào immutable record payload.
+Thêm negative tests trước khi sửa, rồi focused/broader tests; old DONE summary
+bên dưới là lịch sử chưa qua audit, không phải nghiệm thu hiện tại.
+
 Ordering clarification 2026-09-26: cùng REC-07/08 chuẩn bị LiDAR/correspondence
 cho ba demo modes của ADR 0001 trước real REC-05. Measurement/alignment preparation
 không phải final shared AlignmentRecord. Record cuối vẫn bind hai geometry refs
@@ -104,5 +112,4 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
     - Nguồn RGB và LiDAR artifacts giữ nguyên bất biến, không bị sửa đổi.
 - `tests/test_reconstruction/test_rec09_alignment.py`:
   - 6/6 test cases pass: xác nhận thành công AlignmentRecord với LiDAR thật từ `LiDARIngestService`, nạp trực tiếp file `calibrations.txt` của TorWIC thật, từ chối khi khác scene (`same_scene_attestation=False`), từ chối khi lệch job_id, từ chối khi target frame sai, kiểm định roundtrip nghịch đảo transform.
-
 

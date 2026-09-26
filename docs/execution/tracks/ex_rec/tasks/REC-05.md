@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-REC` |
 | Priority | `P0` |
-| Status | `DONE` |
+| Status | `IN_PROGRESS` |
 | Owner | `@awun0105` |
 | Target milestone | `M1/M2` |
 
@@ -326,4 +326,3 @@ User yêu cầu commits nhỏ; không push/merge/đổi branch hoặc sửa shar
 3. **Kiểm thử:**
    - Files: `tests/test_reconstruction/test_rec05_scale.py`, `tests/test_reconstruction/test_rec05_real_codec.py`
    - Kết quả: `pytest tests/test_reconstruction/test_rec05*.py -v` đạt 41 passed; real splat-transform inspection 5 passed.
-

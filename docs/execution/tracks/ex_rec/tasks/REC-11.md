@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-REC` |
 | Priority | `P0` |
-| Status | `DONE` |
+| Status | `IN_PROGRESS` |
 | Owner | `@awun0105` |
 | Target milestone | `M2` |
 
@@ -96,5 +96,4 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
   - Max args: 3 parameters.
   - Type annotations đầy đủ.
   - Ruff check & format: pass 100%.
-
 
