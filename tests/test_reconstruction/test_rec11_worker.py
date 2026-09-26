@@ -7,7 +7,13 @@ from src.models.contracts.manifests import InputConfiguration, JobStatus, StageI
 from src.services.orchestration.artifacts import ArtifactResolver
 from src.services.reconstruction.bundle import BundleBuildRequest
 from src.services.reconstruction.rgb.geometry_publication import GeometryExecutionRequest
-from src.services.reconstruction.worker import ReconstructionWorker, WorkerConfig, create_cli_parser, main
+from src.services.reconstruction.worker import (
+    ReconstructionWorker,
+    WorkerConfig,
+    WorkerExecutionResult,
+    create_cli_parser,
+    main,
+)
 from tests.test_reconstruction.test_rec05_adapter import config
 from tests.test_reconstruction.test_rec05_product_pipeline import setup_pipeline
 from tests.test_reconstruction.test_rec10_bundle import dummy_rgb_frame
@@ -99,3 +105,56 @@ def test_worker_cli_parser_and_main(tmp_path: Path) -> None:
         ["--job-id", "job-123", "--store-root", str(tmp_path / "store"), "--workspace", str(tmp_path / "ws")]
     )
     assert exit_code == 0
+
+
+def test_worker_cli_full_execution(tmp_path: Path) -> None:
+    """Kiểm tra thực thi trọn vẹn CLI với --request và --output sinh WorkerExecutionResult hợp lệ."""
+    job_id = "test-job-rec11-cli-exec"
+    geom_service, canonicalizer, conf_ref, metric_req, record = setup_pipeline(tmp_path)
+    store = canonicalizer.deps.writer
+    store_root = store.resolver.artifact_root
+    workspace_dir = tmp_path / "workspace_cli"
+
+    frame_ref = dummy_rgb_frame(store, job_id)
+    geom_res = geom_service.execute(
+        GeometryExecutionRequest(
+            confirmation_ref=conf_ref,
+            source_visual=metric_req.source_visual,
+            config=config(),
+            job_id=job_id,
+        ),
+        tmp_path / "workspace_geom_cli",
+    )
+    bundle_req = BundleBuildRequest(
+        job_id=job_id,
+        source_input_checksum=Checksum("sha256:" + "0" * 64),
+        input_configuration=InputConfiguration(rgb_present=True, registered_lidar_present=False),
+        rgb_frame_refs=[frame_ref],
+        camera_pose_refs=[record.preview.source_camera_poses],
+        visual_artifact_ref=metric_req.source_visual,
+        rgb_geometry_ref=geom_res.geometry_ref,
+    )
+    req_file = tmp_path / "bundle_request.json"
+    req_file.write_text(bundle_req.model_dump_json(indent=2))
+    out_file = tmp_path / "worker_output.json"
+
+    exit_code = main(
+        [
+            "--job-id",
+            job_id,
+            "--store-root",
+            str(store_root),
+            "--workspace",
+            str(workspace_dir),
+            "--request",
+            str(req_file),
+            "--output",
+            str(out_file),
+        ]
+    )
+    assert exit_code == 0
+    assert out_file.is_file()
+    result = WorkerExecutionResult.model_validate_json(out_file.read_text())
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.job_id == job_id
+    assert result.bundle_ref is not None

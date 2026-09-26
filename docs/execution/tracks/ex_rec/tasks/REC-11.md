@@ -80,17 +80,21 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 - [x] Retry/attempt không overwrite provenance trước; PRODUCT gọi qua abstraction.
 - [x] Focused tests và required handoff proof pass; evidence/limitations được ghi.
 
-## 12. Result / Evidence
+### Result / Evidence 2026-09-26 — Refactor REC-11 Hoàn thành (DONE)
 
 - Module: `src/services/reconstruction/worker.py`
   - `WorkerConfig`, `WorkerExecutionResult`, `ReconstructionWorker`, `create_cli_parser`, `main`.
-- Tests: `tests/test_reconstruction/test_rec11_worker.py` (3/3 passed).
+  - Hỗ trợ tham số `--request` nạp file cấu hình JSON (`WorkerConfig` hoặc `BundleBuildRequest`) và `--output` ghi `WorkerExecutionResult` có cấu trúc.
+  - Tích hợp trực tiếp với `FilesystemArtifactStore` và `ArtifactResolver` thật, trả về exit code 0 khi `SUCCEEDED` và 1 khi `FAILED`.
+- Tests: `tests/test_reconstruction/test_rec11_worker.py` (4/4 passed).
   - `test_worker_run_success`: xác nhận worker hoàn thành stage `METRIC_CANONICALIZE`, xuất bản `StageArtifact` hợp lệ với bundle checksum.
   - `test_worker_run_failure_captures_error`: xác nhận worker bắt lỗi, chuyển job status thành `FAILED`, ghi nhận `ExecutionError` và không xuất bản bundle ref.
-  - `test_worker_cli_parser_and_main`: kiểm tra parser command line và returncode 0.
+  - `test_worker_cli_parser_and_main`: kiểm tra parser command line và returncode 0 khi khởi tạo.
+  - `test_worker_cli_full_execution`: kiểm tra thực thi trọn vẹn CLI với `--request` và `--output` sinh `WorkerExecutionResult` hợp lệ trên `FilesystemArtifactStore` thật.
 - Tuân thủ AST and Ruff:
   - Max function length: 22 lines (ngưỡng <= 30).
   - Max args: 3 parameters.
   - Type annotations đầy đủ.
   - Ruff check & format: pass 100%.
+
 

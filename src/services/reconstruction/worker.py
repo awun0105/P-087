@@ -14,7 +14,7 @@ from src.models.contracts.manifests import (
     StageStatus,
 )
 from src.models.contracts.reconstruction import ReconstructionBundle
-from src.services.orchestration.artifacts import ArtifactResolver
+from src.services.orchestration.artifacts import ArtifactResolver, FilesystemArtifactStore
 from src.services.reconstruction.bundle import BundleBuildRequest, ReconstructionBundleService
 from src.services.reconstruction.rgb.publication import ArtifactWriter
 
@@ -120,7 +120,37 @@ def create_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument("--job-id", type=str, required=True, help="Job identifier")
     parser.add_argument("--store-root", type=Path, required=True, help="Artifact store root path")
     parser.add_argument("--workspace", type=Path, required=True, help="Workspace directory")
+    parser.add_argument("--request", type=Path, default=None, help="Path to request JSON")
+    parser.add_argument("--output", type=Path, default=None, help="Path to write execution result JSON")
     return parser
+
+
+def _load_worker_config(args: argparse.Namespace) -> WorkerConfig:
+    """Đọc cấu hình WorkerConfig từ file JSON yêu cầu."""
+    text = args.request.read_text()
+    try:
+        return WorkerConfig.model_validate_json(text)
+    except Exception:
+        req = BundleBuildRequest.model_validate_json(text)
+        return WorkerConfig(
+            job_id=args.job_id,
+            store_root=args.store_root,
+            workspace_dir=args.workspace,
+            bundle_request=req,
+        )
+
+
+def _run_worker_cli(args: argparse.Namespace) -> int:
+    """Khởi chạy worker với FilesystemArtifactStore và ghi kết quả."""
+    resolver = ArtifactResolver(args.store_root)
+    store = FilesystemArtifactStore(resolver)
+    config = _load_worker_config(args)
+    worker = ReconstructionWorker(config, store, resolver)
+    result = worker.run()
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(result.model_dump_json(indent=2))
+    return 0 if result.status == JobStatus.SUCCEEDED else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -129,4 +159,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     logger.info("Worker CLI initialized for job %s", args.job_id)
+    if args.request is not None:
+        return _run_worker_cli(args)
     return 0
