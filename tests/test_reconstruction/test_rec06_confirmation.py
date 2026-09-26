@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,6 +10,7 @@ from src.models.contracts.identity import canonical_content_checksum
 from src.services.orchestration.artifacts.errors import ArtifactAlreadyExistsError, ArtifactChecksumError
 from src.services.reconstruction.rgb.metric import MetricCanonicalizer
 from src.services.reconstruction.rgb.metric_models import MetricConfirmation, MetricRequest, independent_distance_error
+from src.services.reconstruction.rgb.metric_seed import CameraSeedProposal
 from tests.test_reconstruction.rec06_fixtures import acceptance_for, metric_fixture
 
 
@@ -215,3 +217,34 @@ def test_writer_failure_is_not_success(context: tuple) -> None:
     broken = MetricCanonicalizer(replace(service.deps, writer=BrokenWriter()))
     with pytest.raises(OSError, match="storage unavailable"):
         broken.publish(record, "rec06-fixture")
+
+
+def test_camera_seed_proposal_not_walkability(context: tuple) -> None:
+    """Real resolver + fixture poses; canonical center không được coi là capsule clearance."""
+    service, _, preview, acceptance = context
+    record = service.confirm(preview, acceptance)
+    reference = service.publish(record, "rec06-fixture")
+    first = service.deps.visuals.poses.load(preview.source_camera_poses).poses[0]
+    proposal = service.propose_navigation_seed(reference)
+    assert proposal.frame_id == first.frame_id
+    assert proposal.position_world == record.preview.transform.apply_point(first.translation)
+    assert proposal.evidence_kind == "synthetic_fixture"
+    assert proposal.validation_status == "UNVALIDATED"
+    assert proposal.capsule_clearance_verified is False
+    with pytest.raises(ValueError):
+        CameraSeedProposal.model_validate(proposal.model_dump() | {"capsule_clearance_verified": True})
+
+
+def test_seed_selection_without_registered_frame_zero(context: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Selection-only unit test với pose resolver stub; không claim producer integration."""
+    service, _, preview, acceptance = context
+    record = service.confirm(preview, acceptance)
+    reference = service.publish(record, "rec06-fixture")
+    raw = service.deps.visuals.poses.load(preview.source_camera_poses).poses[0]
+    first = raw.model_copy(update={"frame_id": 7, "image_name": "000007.png", "translation": (1, 2, 3)})
+    monkeypatch.setattr(service, "load", lambda ref: record)
+    monkeypatch.setattr(service.deps.visuals.poses, "load", lambda ref: SimpleNamespace(poses=[first]))
+    proposal = service.propose_navigation_seed(reference)
+    assert proposal.frame_id == 7
+    assert proposal.position_world == pytest.approx((6, 22, 36))
+    assert proposal.capsule_clearance_verified is False

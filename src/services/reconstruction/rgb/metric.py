@@ -19,6 +19,7 @@ from src.services.reconstruction.rgb.metric_models import (
     MetricRequest,
     confirmation_record,
 )
+from src.services.reconstruction.rgb.metric_seed import CameraSeedProposal
 from src.services.reconstruction.rgb.publication import ArtifactWriter
 from src.services.reconstruction.rgb.visual_publication import VisualResolver
 
@@ -123,6 +124,21 @@ class MetricCanonicalizer:
             confirmation_checksum=record.record_checksum,
             input_ref=source,
             transform=record.preview.transform,
+            evidence_kind=record.preview.request.evidence_kind,
+        )
+
+    def propose_navigation_seed(self, reference: ProductArtifactRef) -> CameraSeedProposal:
+        """Candidate ở camera đầu registered, không hardcode Frame 0 hoặc auto-pass."""
+        record = self.load(reference)
+        poses = self.deps.visuals.poses.load(record.preview.source_camera_poses)
+        # CameraPoseArtifact đã enforce inventory ordered, registered và nonempty.
+        first = poses.poses[0]
+        return CameraSeedProposal(
+            confirmation_ref=reference,
+            confirmation_checksum=record.record_checksum,
+            source_camera_poses=record.preview.source_camera_poses,
+            frame_id=first.frame_id,
+            position_world=record.preview.transform.apply_point(first.translation),
             evidence_kind=record.preview.request.evidence_kind,
         )
 
