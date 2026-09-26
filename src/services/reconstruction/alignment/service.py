@@ -43,6 +43,10 @@ class RgbLidarAlignmentService:
             raise ValueError("rgb_geometry_ref must be of type RgbGeometry")
         if request.lidar_geometry_ref.artifact_type != "LiDARGeometryArtifact":
             raise ValueError("lidar_geometry_ref must be of type LiDARGeometryArtifact")
+        if request.rgb_geometry_ref.job_id != request.job_id:
+            raise ValueError("RGB geometry job_id does not match alignment request job_id")
+        if request.lidar_geometry_ref.job_id != request.job_id:
+            raise ValueError("LiDAR geometry job_id does not match alignment request job_id")
         tf = request.transform_target_from_source
         if tf.parent_frame != "world":
             raise ValueError("alignment target frame must be canonical 'world'")

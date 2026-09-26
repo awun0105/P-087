@@ -1,6 +1,7 @@
 """Data models và transform helpers cho REC-09 RGB-LiDAR Alignment."""
 
 import math
+from pathlib import Path
 
 from pydantic import Field
 
@@ -43,6 +44,34 @@ def normalize_torwic_extrinsics(
         translation_xyz=translation_xyz,
         rotation_quaternion_xyzw=rotation_xyzw,
     )
+
+
+def parse_torwic_calibrations(calibration_path: Path) -> dict[str, float]:
+    """Đọc file calibrations.txt của TorWIC và trích xuất các tham số extrinsic dạng float."""
+    values: dict[str, float] = {}
+    for line in calibration_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        key, val = line.split(":", 1)
+        try:
+            values[key.strip()] = float(val.strip())
+        except ValueError:
+            continue
+    return values
+
+
+def load_torwic_cam_to_lidar_transform(calibration_path: Path, camera_prefix: str = "T_cam1_os") -> Transform:
+    """Tạo Transform chuẩn hóa từ calibration thật của TorWIC giữa camera và OS128 LiDAR."""
+    vals = parse_torwic_calibrations(calibration_path)
+    t = (vals[f"{camera_prefix}.px"], vals[f"{camera_prefix}.py"], vals[f"{camera_prefix}.pz"])
+    q = (
+        vals[f"{camera_prefix}.qx"],
+        vals[f"{camera_prefix}.qy"],
+        vals[f"{camera_prefix}.qz"],
+        vals[f"{camera_prefix}.qw"],
+    )
+    return normalize_torwic_extrinsics(t, q)
 
 
 class AlignmentRequest(ContractModel):

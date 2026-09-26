@@ -1,63 +1,50 @@
+"""Unit và integration tests cho REC-09 RGB-LiDAR Alignment."""
+
 import hashlib
 from pathlib import Path
 
 import pytest
 
 from src.models.contracts.artifacts import Checksum, ProductArtifactRef
-from src.models.contracts.coordinates import CoordinateSystem, Transform
+from src.models.contracts.coordinates import Transform
 from src.models.contracts.manifests import StageId
 from src.models.contracts.reconstruction import (
     AlignmentStatus,
-    LiDARGeometryArtifact,
-    PreprocessingDependency,
     PreprocessingProvenance,
 )
 from src.services.reconstruction.alignment import (
     AlignmentRequest,
     RgbLidarAlignmentService,
     invert_transform,
+    load_torwic_cam_to_lidar_transform,
     normalize_torwic_extrinsics,
+    parse_torwic_calibrations,
 )
+from src.services.reconstruction.lidar import LiDARIngestRequest, LiDARIngestService
 from src.services.reconstruction.rgb.geometry_publication import GeometryExecutionRequest
 from tests.test_reconstruction.test_rec05_adapter import config
 from tests.test_reconstruction.test_rec05_product_pipeline import setup_pipeline
 
 
-def dummy_lidar_ref(writer: object, job_id: str) -> tuple[LiDARGeometryArtifact, ProductArtifactRef]:
-    """Tạo mock published LiDARGeometryArtifact theo đúng contract REC-08."""
-    dummy_cs = Checksum("sha256:" + "a" * 64)
-    data = dict(
-        artifact_type="LiDARGeometryArtifact",
-        schema_version="1.0",
-        artifact_uri=f"artifact://jobs/{job_id}/rec08/lidar.pcd",
-        artifact_checksum=dummy_cs,
-        producer_stage=StageId.LIDAR_INGEST,
-        job_id=job_id,
-        source_modality="registered_lidar",
-        source_input_checksum=dummy_cs,
-        geometry_format="pcd",
-        coordinate_system=CoordinateSystem().model_dump(mode="json"),
-        source_frame="os_sensor",
-        preprocessing_provenance=PreprocessingProvenance(
-            dependencies=[PreprocessingDependency(role="raw_pcd", origin="sensor_input", source_checksum=dummy_cs)],
-            ground_truth_assisted=False,
-        ).model_dump(mode="json"),
+def create_real_lidar_ref(writer: object, job_id: str, tmp_path: Path) -> ProductArtifactRef:
+    """Tạo published LiDARGeometryArtifact thông qua LiDARIngestService chuẩn của REC-08."""
+    ply_path = tmp_path / f"lidar_input_{job_id}.ply"
+    ply_bytes = (
+        b"ply\nformat ascii 1.0\nelement vertex 2\nproperty float x\n"
+        b"property float y\nproperty float z\nend_header\n0.0 0.0 0.0\n1.0 1.0 1.0\n"
     )
-    artifact = LiDARGeometryArtifact.model_validate(data)
-    payload = artifact.model_dump_json(indent=2).encode() + b"\n"
-    payload_cs = Checksum("sha256:" + hashlib.sha256(payload).hexdigest())
-    ref = ProductArtifactRef(
-        artifact_type="LiDARGeometryArtifact",
-        schema_version="1.0",
-        artifact_uri=f"artifact://jobs/{job_id}/rec08/lidar_geometry.json",
-        artifact_checksum=payload_cs,
-        data_class="derived",
-        producer_stage=StageId.LIDAR_INGEST,
+    ply_path.write_bytes(ply_bytes)
+    cs = "sha256:" + hashlib.sha256(ply_bytes).hexdigest()
+    prov = PreprocessingProvenance(ground_truth_assisted=False, dependencies=[])
+    req = LiDARIngestRequest(
         job_id=job_id,
-        source_provenance=artifact.preprocessing_provenance.model_dump(mode="json"),
+        lidar_file=ply_path,
+        source_input_checksum=cs,
+        preprocessing_provenance=prov,
     )
-    writer.publish(ref, payload)
-    return artifact, ref
+    service = LiDARIngestService(writer)
+    _, pub_ref = service.ingest(req)
+    return pub_ref
 
 
 def test_alignment_success(tmp_path: Path) -> None:
@@ -72,7 +59,7 @@ def test_alignment_success(tmp_path: Path) -> None:
         ),
         tmp_path / "workspace_geom",
     )
-    _, lidar_ref = dummy_lidar_ref(canonicalizer.deps.writer, "test-job-rec09")
+    lidar_ref = create_real_lidar_ref(canonicalizer.deps.writer, "test-job-rec09", tmp_path)
     tf = normalize_torwic_extrinsics((0.1, 0.2, 0.3), (0.0, 0.0, 0.0, 1.0))
     align_service = RgbLidarAlignmentService(canonicalizer.deps.writer)
     req = AlignmentRequest(
@@ -92,6 +79,43 @@ def test_alignment_success(tmp_path: Path) -> None:
     assert pub_ref.producer_stage == StageId.RGB_LIDAR_ALIGN
 
 
+def test_alignment_with_real_torwic_calibrations(tmp_path: Path) -> None:
+    """Đọc trực tiếp calibrations.txt thật của dataset TorWIC và tạo AlignmentRecord chuẩn."""
+    calib_file = Path("data/torwic_slam/raw/global/calibrations.txt")
+    if not calib_file.is_file():
+        pytest.skip("calibrations.txt không khả dụng trong môi trường kiểm thử")
+    geom_service, canonicalizer, conf_ref, metric_req, _ = setup_pipeline(tmp_path)
+    geom_res = geom_service.execute(
+        GeometryExecutionRequest(
+            confirmation_ref=conf_ref,
+            source_visual=metric_req.source_visual,
+            config=config(),
+            job_id="test-job-rec09-calib",
+        ),
+        tmp_path / "workspace_geom_calib",
+    )
+    lidar_ref = create_real_lidar_ref(canonicalizer.deps.writer, "test-job-rec09-calib", tmp_path)
+    raw_vals = parse_torwic_calibrations(calib_file)
+    assert raw_vals["T_cam1_os.px"] == pytest.approx(0.12944592)
+    tf = load_torwic_cam_to_lidar_transform(calib_file, "T_cam1_os")
+    assert tf.parent_frame == "world"
+    assert tf.local_frame == "registered_lidar"
+    assert tf.translation_xyz == pytest.approx((0.12944592, 0.04299934, -0.1137434))
+
+    align_service = RgbLidarAlignmentService(canonicalizer.deps.writer)
+    req = AlignmentRequest(
+        job_id="test-job-rec09-calib",
+        rgb_geometry_ref=geom_res.geometry_ref,
+        lidar_geometry_ref=lidar_ref,
+        transform_target_from_source=tf,
+        status=AlignmentStatus.CONFIRMED,
+        method="torwic_calibration_file",
+    )
+    record, pub_ref = align_service.align(req)
+    assert record.method == "torwic_calibration_file"
+    assert pub_ref.job_id == "test-job-rec09-calib"
+
+
 def test_alignment_rejects_different_scene(tmp_path: Path) -> None:
     """Từ chối khi không khai báo same_scene_attestation."""
     geom_service, canonicalizer, conf_ref, metric_req, _ = setup_pipeline(tmp_path)
@@ -104,7 +128,7 @@ def test_alignment_rejects_different_scene(tmp_path: Path) -> None:
         ),
         tmp_path / "workspace_geom",
     )
-    _, lidar_ref = dummy_lidar_ref(canonicalizer.deps.writer, "test-job-rec09")
+    lidar_ref = create_real_lidar_ref(canonicalizer.deps.writer, "test-job-rec09", tmp_path)
     tf = normalize_torwic_extrinsics((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
     align_service = RgbLidarAlignmentService(canonicalizer.deps.writer)
     req = AlignmentRequest(
@@ -115,6 +139,31 @@ def test_alignment_rejects_different_scene(tmp_path: Path) -> None:
         same_scene_attestation=False,
     )
     with pytest.raises(ValueError, match="same scene"):
+        align_service.align(req)
+
+
+def test_alignment_rejects_mismatched_job_id(tmp_path: Path) -> None:
+    """Từ chối khi artifact thuộc về một job_id khác."""
+    geom_service, canonicalizer, conf_ref, metric_req, _ = setup_pipeline(tmp_path)
+    geom_res = geom_service.execute(
+        GeometryExecutionRequest(
+            confirmation_ref=conf_ref,
+            source_visual=metric_req.source_visual,
+            config=config(),
+            job_id="job-A",
+        ),
+        tmp_path / "workspace_job_a",
+    )
+    lidar_ref = create_real_lidar_ref(canonicalizer.deps.writer, "job-A", tmp_path)
+    tf = normalize_torwic_extrinsics((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+    align_service = RgbLidarAlignmentService(canonicalizer.deps.writer)
+    req = AlignmentRequest(
+        job_id="job-B",
+        rgb_geometry_ref=geom_res.geometry_ref,
+        lidar_geometry_ref=lidar_ref,
+        transform_target_from_source=tf,
+    )
+    with pytest.raises(ValueError, match="job_id does not match"):
         align_service.align(req)
 
 
@@ -130,7 +179,7 @@ def test_alignment_rejects_invalid_parent_frame(tmp_path: Path) -> None:
         ),
         tmp_path / "workspace_geom",
     )
-    _, lidar_ref = dummy_lidar_ref(canonicalizer.deps.writer, "test-job-rec09")
+    lidar_ref = create_real_lidar_ref(canonicalizer.deps.writer, "test-job-rec09", tmp_path)
     bad_tf = Transform(
         parent_frame="custom_frame",
         local_frame="registered_lidar",

@@ -88,18 +88,21 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 
 ## 12. Result / Evidence
 
-### Checkpoint 2026-09-26 — DONE, RGB-LiDAR alignment service and models
+### Checkpoint 2026-09-26 — DONE, RGB-LiDAR alignment service and models Refactor
 
 **Implemented / VERIFIED:**
 - `src/services/reconstruction/alignment/models.py`:
   - `AlignmentRequest`: ràng buộc `rgb_geometry_ref`, `lidar_geometry_ref`, `transform_target_from_source`, `same_scene_attestation` và provenance.
   - `normalize_torwic_extrinsics`: chuẩn hóa extrinsic TorWIC chuyển `T_os_from_cam` thành `T_world_from_lidar` theo hệ trục canonical Z-up.
   - `invert_transform`: nghịch đảo rigid transform bảo toàn $R^T$ và $-R^T t$.
+  - `parse_torwic_calibrations` & `load_torwic_cam_to_lidar_transform`: trích xuất tự động ma trận extrinsic từ file `data/torwic_slam/raw/global/calibrations.txt` của dataset TorWIC thật, chuẩn hóa quaternion và đưa về canonical `world` frame.
 - `src/services/reconstruction/alignment/service.py`:
   - `RgbLidarAlignmentService`:
     - Thẩm định tiền điều kiện: kiểm tra cùng scene, đúng kiểu `RgbGeometry` và `LiDARGeometryArtifact`, transform target frame là canonical `world`.
+    - Kiểm tra tính nhất quán boundary: kiểm tra `job_id` của các artifact đầu vào phải khớp với `job_id` của AlignmentRequest, ngăn ngừa ô nhiễm dữ liệu giữa các jobs.
     - Tính toán canonical content checksum và xuất bản `AlignmentRecord` (`status=CONFIRMED`, `producer_stage=StageId.RGB_LIDAR_ALIGN`).
     - Nguồn RGB và LiDAR artifacts giữ nguyên bất biến, không bị sửa đổi.
 - `tests/test_reconstruction/test_rec09_alignment.py`:
-  - 4/4 test cases pass: xác nhận thành công AlignmentRecord, từ chối khi khác scene (`same_scene_attestation=False`), từ chối khi target frame sai, kiểm định roundtrip nghịch đảo transform.
+  - 6/6 test cases pass: xác nhận thành công AlignmentRecord với LiDAR thật từ `LiDARIngestService`, nạp trực tiếp file `calibrations.txt` của TorWIC thật, từ chối khi khác scene (`same_scene_attestation=False`), từ chối khi lệch job_id, từ chối khi target frame sai, kiểm định roundtrip nghịch đảo transform.
+
 
