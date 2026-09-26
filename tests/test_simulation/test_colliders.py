@@ -1,5 +1,7 @@
 """Unit tests cho SIM-02 Collider Generation utilities."""
 
+from pathlib import Path
+
 import pytest
 import trimesh
 
@@ -196,3 +198,55 @@ def test_create_box_collider_rejects_nan_or_inf() -> None:
     )
     with pytest.raises(ValueError, match="dimensions_xyz_m phải dương và hữu hạn"):
         create_box_collider(req_nan)
+
+
+def test_malformed_mesh_bounds_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Khi mesh.bounds bị None hoặc malformed, collider generation không crash mà fallback an toàn."""
+    mesh = trimesh.creation.box(extents=(1.0, 1.0, 1.0))
+    monkeypatch.setattr(trimesh.Trimesh, "bounds", property(lambda self: None))
+    monkeypatch.setattr(trimesh.Trimesh, "bounding_box_oriented", property(lambda self: None))
+
+    spec = generate_collider_from_geometry(
+        geometry=mesh,
+        collider_type=ColliderType.OBB,
+        parent_frame="obj-malformed",
+        collider_id="col-malformed",
+    )
+    assert spec is not None
+    assert all(d >= 0.01 for d in spec.dimensions_xyz_m)
+
+
+def test_corrupt_geometry_file_fallback(tmp_path: Path) -> None:
+    """Khi file geometry bị hỏng/rác, generate_object_collider tự động fallback sang default box 1m3."""
+    bad_file = tmp_path / "corrupt.ply"
+    bad_file.write_text("CORRUPT HEADER NOT A VALID PLY OR MESH", encoding="utf-8")
+
+    obj = SceneObject(
+        id="object-corrupt-001",
+        name="Corrupted Mesh Object",
+        state=SceneObjectState.CONFIRMED,
+        origin=SceneObjectOrigin.RECONSTRUCTED,
+        active=True,
+        local_frame="object-corrupt-001",
+        transform=Transform(
+            parent_frame="world",
+            local_frame="object-corrupt-001",
+            translation_xyz=(0.0, 0.0, 0.0),
+            rotation_quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
+        ),
+        geometry_ref={
+            "artifact_type": "ObjectGeometry",
+            "schema_version": "1.0",
+            "artifact_uri": "artifact://jobs/job-1/scene/corrupt.ply",
+            "artifact_checksum": "sha256:" + "0" * 64,
+            "data_class": "derived",
+            "producer_stage": "ST-SCENE-DECOMPOSE",
+            "job_id": "job-1",
+        },
+        provenance={"test": True},
+    )
+
+    spec = generate_object_collider(obj, geometry_file_path=bad_file)
+    assert spec is not None
+    assert spec.dimensions_xyz_m == (1.0, 1.0, 1.0)
+    assert spec.parameters.get("source") == "default_box_fallback"

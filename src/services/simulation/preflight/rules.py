@@ -4,10 +4,34 @@ import math
 from pathlib import Path
 
 from src.models.contracts.artifacts import Identifier, ProductArtifactRef
-from src.models.contracts.scene import SceneIR, SceneObjectState
+from src.models.contracts.scene import SceneIR, SceneObject, SceneObjectState
 from src.models.contracts.validation import PreflightRule, PreflightRuleId, RuleResult
 
 SEVERITY_BLOCKING: Identifier = "blocking"
+
+FLOOR_SEMANTIC_CLASSES: frozenset[str] = frozenset(
+    {
+        "floor",
+        "ground",
+        "ground_plane",
+        "floor_plane",
+        "surface",
+        "deck",
+        "walkway",
+        "terrain",
+        "mat_san",
+        "san",
+    }
+)
+
+
+def _matches_floor_semantics(val: str) -> bool:
+    """Kiểm tra một chuỗi ngữ nghĩa có khớp với định danh sàn hay không."""
+    clean = val.strip().lower()
+    if clean in FLOOR_SEMANTIC_CLASSES:
+        return True
+    words = set(clean.replace("-", " ").replace("_", " ").split())
+    return any(kw in words for kw in FLOOR_SEMANTIC_CLASSES)
 
 
 def check_metric_scale(scene: SceneIR) -> PreflightRule:
@@ -31,10 +55,38 @@ def check_metric_scale(scene: SceneIR) -> PreflightRule:
     )
 
 
-def _is_floor_object(name_or_id: str) -> bool:
-    """Kiểm tra vật thể có phải là sàn (đã được bao phủ bởi environment ground plane)."""
-    lower = name_or_id.lower()
-    return "floor" in lower or "ground" in lower
+def _is_floor_object(obj: SceneObject) -> bool:
+    """Kiểm tra đối tượng có thuộc ngữ nghĩa mặt sàn hay không.
+
+    Ưu tiên thuộc tính ngữ nghĩa cấu trúc (semantic_class, tags, provenance)
+    thay vì chỉ so sánh chuỗi tên/id để chống false negatives và false positives.
+    """
+    # 1. Nếu có semantic_class tường minh: đây là source of truth cao nhất
+    if obj.semantic_class is not None and obj.semantic_class.strip():
+        return _matches_floor_semantics(obj.semantic_class)
+
+    # 2. Kiểm tra danh sách tags tường minh
+    if obj.tags:
+        for tag in obj.tags:
+            if _matches_floor_semantics(tag):
+                return True
+
+    # 3. Kiểm tra provenance metadata (ví dụ từ SAM2 hoặc scene decomposition)
+    prov = obj.provenance or {}
+    for key in ("semantic_class", "category", "role", "label", "class_name"):
+        val = prov.get(key)
+        if isinstance(val, str) and val.strip():
+            if _matches_floor_semantics(val):
+                return True
+    if prov.get("is_floor") is True or prov.get("is_ground") is True:
+        return True
+
+    # 4. Fallback chỉ khi hoàn toàn không có metadata ngữ nghĩa: kiểm tra từ khóa trong name/id
+    for token in (obj.name, obj.id):
+        if _matches_floor_semantics(token):
+            return True
+
+    return False
 
 
 def check_collider_presence(scene: SceneIR) -> PreflightRule:
@@ -49,7 +101,7 @@ def check_collider_presence(scene: SceneIR) -> PreflightRule:
             continue
         if obj.collider is None:
             # Nếu là vật thể sàn và environment đã có floor collider thì hợp lệ
-            if has_env_floor_collider and _is_floor_object(obj.id + " " + obj.name):
+            if has_env_floor_collider and _is_floor_object(obj):
                 continue
             missing_ids.append(obj.id)
 

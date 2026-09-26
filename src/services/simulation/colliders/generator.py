@@ -86,6 +86,44 @@ def _matrix_to_quaternion(matrix: np.ndarray) -> tuple[float, float, float, floa
     return float(q[0]), float(q[1]), float(q[2]), float(q[3])
 
 
+def _safe_compute_bounds(
+    geometry: trimesh.Trimesh | trimesh.PointCloud,
+    min_dimension_m: float = MIN_COLLIDER_EXTENT_M,
+) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    """Tính toán bounds và tâm an toàn, chống crash khi mesh suy biến hoặc bounds malformed."""
+    try:
+        raw_bounds = getattr(geometry, "bounds", None)
+        if raw_bounds is not None and len(raw_bounds) == 2:
+            min_pt, max_pt = np.asarray(raw_bounds[0]), np.asarray(raw_bounds[1])
+            if np.all(np.isfinite(min_pt)) and np.all(np.isfinite(max_pt)):
+                diff = max_pt - min_pt
+                dims = tuple(max(float(diff[i]), min_dimension_m) for i in range(3))
+                center = tuple(float((min_pt[i] + max_pt[i]) / 2.0) for i in range(3))
+                return dims, center
+    except Exception:
+        pass
+
+    # Thử tính trực tiếp từ vertices nếu raw_bounds bị lỗi
+    try:
+        raw_verts = getattr(geometry, "vertices", None)
+        if raw_verts is not None and len(raw_verts) > 0:
+            verts = np.asarray(raw_verts)
+            finite_mask = np.all(np.isfinite(verts), axis=1)
+            valid_verts = verts[finite_mask]
+            if len(valid_verts) > 0:
+                min_pt = np.min(valid_verts, axis=0)
+                max_pt = np.max(valid_verts, axis=0)
+                diff = max_pt - min_pt
+                dims = tuple(max(float(diff[i]), min_dimension_m) for i in range(3))
+                center = tuple(float((min_pt[i] + max_pt[i]) / 2.0) for i in range(3))
+                return dims, center
+    except Exception:
+        pass
+
+    # Fallback an toàn tuyệt đối khi toàn bộ đỉnh đều không hợp lệ
+    return (min_dimension_m, min_dimension_m, min_dimension_m), (0.0, 0.0, 0.0)
+
+
 def _extract_obb_params(
     mesh: trimesh.Trimesh,
     min_dimension_m: float = MIN_COLLIDER_EXTENT_M,
@@ -94,20 +132,21 @@ def _extract_obb_params(
     try:
         obb = mesh.bounding_box_oriented
         raw_extents = getattr(obb, "extents", None)
-        if raw_extents is None or len(raw_extents) != 3:
-            raise ValueError("Không thể trích xuất extents từ bounding box oriented.")
-        extents = tuple(max(float(x), min_dimension_m) for x in raw_extents)
-        tf = obb.transform
-        trans = (float(tf[0, 3]), float(tf[1, 3]), float(tf[2, 3]))
-        rot_q = _matrix_to_quaternion(tf[:3, :3])
-        return extents, trans, rot_q
+        if raw_extents is not None and len(raw_extents) == 3:
+            extents_arr = np.asarray(raw_extents)
+            if np.all(np.isfinite(extents_arr)):
+                extents = tuple(max(float(x), min_dimension_m) for x in extents_arr)
+                tf = getattr(obb, "transform", None)
+                if tf is not None and getattr(tf, "shape", None) == (4, 4) and np.all(np.isfinite(tf)):
+                    trans = (float(tf[0, 3]), float(tf[1, 3]), float(tf[2, 3]))
+                    rot_q = _matrix_to_quaternion(tf[:3, :3])
+                    return extents, trans, rot_q
     except Exception:
-        bounds = mesh.bounds
-        if bounds is None or len(bounds) != 2:
-            raise ValueError("Mesh bounds không hợp lệ để tính OBB fallback.")
-        dims = tuple(max(float(bounds[1][i] - bounds[0][i]), min_dimension_m) for i in range(3))
-        center = tuple(float((bounds[0][i] + bounds[1][i]) / 2.0) for i in range(3))
-        return dims, center, (0.0, 0.0, 0.0, 1.0)
+        pass
+
+    # Fallback an toàn sang bounds AABB nếu OBB thất bại hoặc bounds malformed
+    dims, center = _safe_compute_bounds(mesh, min_dimension_m=min_dimension_m)
+    return dims, center, (0.0, 0.0, 0.0, 1.0)
 
 
 def generate_collider_from_geometry(
@@ -118,7 +157,8 @@ def generate_collider_from_geometry(
     min_dimension_m: float = MIN_COLLIDER_EXTENT_M,
 ) -> ColliderSpec:
     """Sinh ColliderSpec từ đối tượng hình học (Trimesh hoặc PointCloud)."""
-    if len(geometry.vertices) == 0:
+    raw_verts = getattr(geometry, "vertices", None)
+    if raw_verts is None or len(raw_verts) == 0:
         raise ValueError("Geometry không chứa đỉnh nào để sinh collider.")
 
     if collider_type == ColliderType.OBB and isinstance(geometry, trimesh.Trimesh):
@@ -134,16 +174,10 @@ def generate_collider_from_geometry(
             )
             return create_box_collider(req)
         except Exception:
-            # Fallback sang AABB nếu OBB thất bại (ví dụ: lỗi Qhull)
             pass
 
-    # AABB hoặc fallback cho PointCloud
-    bounds = geometry.bounds
-    if bounds is None or len(bounds) != 2:
-        raise ValueError("Geometry bounds không hợp lệ.")
-    dims = tuple(max(float(bounds[1][i] - bounds[0][i]), min_dimension_m) for i in range(3))
-    center = tuple(float((bounds[0][i] + bounds[1][i]) / 2.0) for i in range(3))
-
+    # AABB hoặc fallback an toàn
+    dims, center = _safe_compute_bounds(geometry, min_dimension_m=min_dimension_m)
     req = BoxSpecRequest(
         dimensions_xyz_m=dims,
         parent_frame=parent_frame,
@@ -174,17 +208,20 @@ def generate_object_collider(
         )
         return create_box_collider(req)
 
-    # Đọc file mesh nếu được cung cấp
+    # Đọc file mesh nếu được cung cấp (bọc trong try-except để phòng ngừa crash khi mesh hỏng)
     if geometry_file_path is not None and geometry_file_path.is_file():
-        loaded = trimesh.load(str(geometry_file_path))
-        if isinstance(loaded, (trimesh.Trimesh, trimesh.PointCloud)):
-            return generate_collider_from_geometry(
-                geometry=loaded,
-                collider_type=preferred_type,
-                parent_frame=obj.local_frame,
-                collider_id=collider_id,
-                min_dimension_m=min_dimension_m,
-            )
+        try:
+            loaded = trimesh.load(str(geometry_file_path))
+            if isinstance(loaded, (trimesh.Trimesh, trimesh.PointCloud)):
+                return generate_collider_from_geometry(
+                    geometry=loaded,
+                    collider_type=preferred_type,
+                    parent_frame=obj.local_frame,
+                    collider_id=collider_id,
+                    min_dimension_m=min_dimension_m,
+                )
+        except Exception:
+            pass
 
     # Fallback mặc định an toàn cho box collider kích thước 1m x 1m x 1m
     req = BoxSpecRequest(
