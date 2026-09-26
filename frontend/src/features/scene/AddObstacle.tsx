@@ -249,8 +249,9 @@ export function AddObstacleForm({
       </Button>
 
       <p className="text-[10px] text-slate-600">
-        Endpoint <span className="font-mono">/scene/objects POST</span> là fake stub — sẽ trả 404
-        cho đến khi SCENE-08A implement. Revision và payload vẫn được gửi đúng.
+        Endpoint <span className="font-mono">/scene/objects POST</span> là fake stub — trả 201
+        nhưng object mới chưa được thêm vào SceneIR thật. Revision và payload vẫn được gửi đúng
+        contract; backend SCENE-08A cần được implement để persist thật.
       </p>
     </form>
   );

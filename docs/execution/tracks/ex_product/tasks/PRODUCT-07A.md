@@ -87,11 +87,11 @@ Tách fixture/mock/API/browser proof khỏi real-worker Product E2E acceptance.
 ## 11. Definition of Done
 
 - [x] Added object has valid explicit size and collider controls.
-- [x] All changes persist as new backend revision and invalidate stale reports.
-- [x] Path/collision flow observes current revision.
-- [x] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
+- [ ] All changes persist as new backend revision and invalidate stale reports.
+- [ ] Path/collision flow observes current revision.
+- [ ] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
 
-> Ghi chú: backend là fake stub; SCENE-08A/SIM-02A sẽ cung cấp domain add-object/collider-edit thật.
+> Ghi chú: backend là fake stub; SCENE-08A/SIM-02A sẽ cung cấp domain add-object/collider-edit thật. DoD #2 và #3 chưa đạt vì object mới chưa được thêm vào SceneIR và chưa kiểm tra path/collision.
 
 ## 12. Result / Evidence
 

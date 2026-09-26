@@ -86,9 +86,11 @@ Tách fixture/mock/API/browser proof khỏi real-worker Product E2E acceptance.
 ## 11. Definition of Done
 
 - [x] Exact failed stage/human message/retryability are visible.
-- [x] Retry preserves input and prior attempt/release.
+- [ ] Retry preserves input and prior attempt/release.
 - [x] No fabricated percentage is shown as measured progress.
-- [x] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
+- [ ] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
+
+> Ghi chú: StageTimeline hiển thị trạng thái từ JobManifest nhưng retry/preservation thật cần PRODUCT-08 worker events. DoD #2 và #4 chưa đạt.
 
 ## 12. Result / Evidence
 

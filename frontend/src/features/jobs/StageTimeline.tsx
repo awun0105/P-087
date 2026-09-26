@@ -64,7 +64,7 @@ export function StageTimeline({
         Pipeline REC → SCENE → SIM
       </h2>
       <ol className="relative ml-2 border-l border-slate-800">
-        {STAGE_ORDER.map((stageId, idx) => {
+        {STAGE_ORDER.map((stageId) => {
           const artifact = stageMap.get(stageId);
           const status = artifact?.status ?? (stageId === currentStage ? "RUNNING" : "PENDING");
           const meta = STATUS_DOT[status] ?? STATUS_DOT.PENDING!;

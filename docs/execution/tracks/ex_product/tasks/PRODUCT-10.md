@@ -89,12 +89,12 @@ Tách fixture/mock/API/browser proof khỏi real-worker Product E2E acceptance.
 
 ## 11. Definition of Done
 
-- [x] Only Reviewer can approve/reject after required evidence.
+- [ ] Only Reviewer can approve/reject after required evidence.
 - [x] Decision binds candidate and validation checksums; warnings reference evidence IDs.
-- [x] Any post-validation edit creates DRAFT revision and invalidates old decision.
-- [x] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
+- [ ] Any post-validation edit creates DRAFT revision and invalidates old decision.
+- [ ] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
 
-> Ghi chú: authorization là mock (`reviewer-mock-001`); real reviewer identity/permission sẽ được thay bằng PRODUCT-10 backend authority.
+> Ghi chú: authorization là mock (`reviewer-mock-001`); real reviewer identity/permission sẽ được thay bằng PRODUCT-10 backend authority. DoD #1 và #3 chưa đạt vì authorization chưa có và backend chưa persist lifecycle hay auto-invalidate decision. Chưa có backend/API tests cho review endpoint.
 
 ## 12. Result / Evidence
 

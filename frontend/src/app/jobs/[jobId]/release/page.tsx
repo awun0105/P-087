@@ -100,9 +100,9 @@ export default async function ReleasePage({ params }: PageProps<"/jobs/[jobId]/r
             <div className="p-4">
               <PanelHeader title="Fake stub note" />
               <p className="text-[10px] text-slate-600">
-                Endpoint <span className="font-mono">/release POST</span> là fake — trả 404 cho đến
-                khi PRODUCT-11 backend implement. ReleaseManifest schema đã được định sẵn trong
-                contract.
+                Endpoint <span className="font-mono">/release POST</span> là fake stub — trả 201
+                nhưng không thực sự seal ReleaseManifest vào artifact store. Payload đúng contract;
+                backend PRODUCT-11 cần được implement để seal thật.
               </p>
             </div>
           </Panel>

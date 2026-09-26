@@ -94,9 +94,11 @@ Tách fixture/mock/API/browser proof khỏi real-worker Product E2E acceptance.
 - [x] Release binds exact candidate and ApprovalRecord checksums.
 - [ ] Locked acceptance requires EvaluationReport; ordinary no-GT release follows accepted conditional rule.
 - [x] No package content changes between validation, approval and release.
-- [x] Release candidate/report identities khớp exact package và report đã verify;
+- [ ] Release candidate/report identities khớp exact package và report đã verify;
   serialized release có canonical content checksum riêng, không dùng lại byte hash.
-- [x] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
+- [ ] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
+
+> Ghi chú: endpoint backend là fake stub — trả 201 nhưng không seal ReleaseManifest vào artifact store. `release_checksum` hiện tính từ payload để tránh hardcode toàn 0, nhưng chưa phải checksum của ReleaseManifest serialize thật. DoD #4 và #5 chưa đạt; cần backend `src/services/orchestration/release/` implement thật.
 
 ## 12. Result / Evidence
 

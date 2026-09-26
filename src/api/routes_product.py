@@ -7,6 +7,7 @@ nên không chặn event loop.
 """
 
 from datetime import UTC, datetime
+from hashlib import sha256
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from pydantic import ValidationError
@@ -465,8 +466,15 @@ def release_candidate(
             detail="validation report checksum không khớp approval record",
         )
 
+    # Stub checksum: tính từ payload để không hardcode toàn 0, nhưng vẫn ghi rõ là stub.
+    canonical = (
+        f"release|{job_id}|{approval.record_checksum}|"
+        f"{approval.candidate_checksum}|{approval.validation_report_checksum}"
+    ).encode()
+    release_checksum = f"sha256:{sha256(canonical).hexdigest()}"
+
     return schemas.ReleaseResponse(
         release_id=f"rel-{job_id}",
-        release_checksum=f"sha256:{'0' * 64}",
+        release_checksum=release_checksum,
         released_at=datetime.now(UTC).isoformat(),
     )

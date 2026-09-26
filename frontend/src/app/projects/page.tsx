@@ -2,7 +2,6 @@ import Link from "next/link";
 
 import { PageHeader } from "@/components/shell";
 import { Checksum, EmptyState, ErrorState, PrivacyBadge } from "@/components/states";
-import { Badge } from "@/components/ui/badge";
 import { Panel } from "@/components/ui/panel";
 import { listProjects } from "@/lib/api/endpoints";
 

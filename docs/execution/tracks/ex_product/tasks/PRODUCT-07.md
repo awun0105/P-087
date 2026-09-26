@@ -91,12 +91,12 @@ Tách fixture/mock/API/browser proof khỏi real-worker Product E2E acceptance.
 
 ## 11. Definition of Done
 
-- [x] All P0 actions invoke backend domain operations.
+- [ ] All P0 actions invoke backend domain operations.
 - [x] Stale/conflicting edits return actionable errors.
-- [x] UI reload shows canonical revision/audit result.
-- [x] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
+- [ ] UI reload shows canonical revision/audit result.
+- [ ] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
 
-> Ghi chú: đây là fake domain stub — payload, optimistic concurrency, error shape đúng contract; domain logic thực sẽ được SCENE-05/08 cung cấp.
+> Ghi chú: đây là fake domain stub — payload, optimistic concurrency, error shape đúng contract; domain logic thực sẽ được SCENE-05/08 cung cấp. DoD #1 và #3 chưa đạt vì backend không thực sự gọi domain operation hay publish canonical revision.
 
 ## 12. Result / Evidence
 

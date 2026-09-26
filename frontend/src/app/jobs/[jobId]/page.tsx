@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 import { getJob, listJobArtifacts, listJobAttempts } from "@/lib/api/endpoints";
-import type { ArtifactDataClass, JobAttempt, StageArtifact } from "@/lib/contracts/api";
+import type { ArtifactDataClass, JobAttempt } from "@/lib/contracts/api";
 import { StageTimeline } from "@/features/jobs/StageTimeline";
 
 export default async function JobDetailPage({ params }: PageProps<"/jobs/[jobId]">) {

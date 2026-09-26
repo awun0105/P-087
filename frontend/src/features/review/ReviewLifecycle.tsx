@@ -171,8 +171,8 @@ export function ReviewLifecyclePanel({
 
             <p className="mt-2 text-[10px] text-slate-600">
               Endpoint <span className="font-mono">/review/approve</span> và{" "}
-              <span className="font-mono">/review/reject</span> là fake stub — trả 404 cho đến khi
-              PRODUCT-10 backend implement. Payload được gửi đúng contract.
+              <span className="font-mono">/review/reject</span> là fake stub — trả 200 nhưng không
+              persist vào backend. Decision sẽ reset khi refresh. Payload được gửi đúng contract.
             </p>
           </div>
         </Panel>

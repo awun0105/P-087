@@ -46,7 +46,7 @@ describe("ReleasePanel", () => {
       ok: true,
       json: async () => ({
         release_id: "rel-job-fixture-001",
-        release_checksum: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        release_checksum: "sha256:stub",
         released_at: "2026-09-26T20:00:00Z",
       }),
     } as Response);

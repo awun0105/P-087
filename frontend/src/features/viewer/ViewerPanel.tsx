@@ -23,7 +23,7 @@ import { useRouter } from "next/navigation";
 
 import { ApiError } from "@/lib/api/client";
 import { editScene, jobArtifactContentUrl } from "@/lib/api/endpoints";
-import type { SceneObject, SceneResponse } from "@/lib/contracts/api";
+import type { SceneResponse } from "@/lib/contracts/api";
 import {
   buildSceneLayers,
   layerKey,
@@ -42,7 +42,6 @@ import { SceneGraph } from "@/features/scene/SceneGraph";
 import { MetricScalePanel } from "@/features/scene/MetricScalePanel";
 import { MockReadonlyPanel } from "@/features/scene/MockReadonlyPanel";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 
 export interface ViewerPanelProps {
@@ -139,9 +138,11 @@ export function ViewerPanel({ scene }: ViewerPanelProps) {
     };
   }, [layers, mode, scene.job_id, clouds, plyErrors]);
 
-  const selectedLayer = shown.find((layer) => layerKey(layer) === selected) ?? null;
+  // Resolve selection từ toàn bộ layers (không chỉ shown) để Scene Graph có thể chọn
+  // object ngay cả khi mode hiện tại không render layer đó.
+  const selectedLayer = layers.all.find((layer) => layerKey(layer) === selected) ?? null;
   const selectedObject = selectedLayer?.object_id
-    ? scene.scene.objects.find((item) => item.id === selectedLayer.object_id)
+    ? scene.scene.objects.find((item) => item.id === selectedLayer.object_id) ?? null
     : null;
 
   function toggle(key: string) {
@@ -175,27 +176,21 @@ export function ViewerPanel({ scene }: ViewerPanelProps) {
   }
 
   function selectObject(objectId: string | null) {
-    const object = objectId ? scene.scene.objects.find((o) => o.id === objectId) : null;
-    if (!object || !object.collider) {
+    if (!objectId) {
       setSelected(null);
       return;
     }
-    const key = layerKey(
-      layers.colliders.find((l) => l.object_id === object.id) ?? {
-        kind: "collider",
-        owner: "object",
-        object_id: object.id,
-        label: `${object.name} — ${object.collider.collider_type}`,
-        collider_id: object.collider.collider_id,
-        collider_type: object.collider.collider_type,
-        reference: object.collider.geometry_ref,
-        checksum: object.collider.geometry_ref?.artifact_checksum ?? null,
-        transform: object.collider.local_transform,
-        dimensions_xyz_m: object.collider.dimensions_xyz_m ?? [0.1, 0.1, 0.1],
-        canonical_active: object.active,
-      },
-    );
-    setSelected(key);
+    // Ưu tiên collider, fallback geometry/point-cloud để object không collider vẫn chọn được.
+    const candidates = layers.all.filter((l) => l.object_id === objectId);
+    const layer =
+      candidates.find((l) => l.kind === "collider") ??
+      candidates.find((l) => l.kind === "geometry") ??
+      candidates[0];
+    if (!layer) {
+      setSelected(null);
+      return;
+    }
+    setSelected(layerKey(layer));
     setSidePanel("transform");
   }
 

@@ -14,8 +14,6 @@
 import { useState } from "react";
 import { ApiError } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Banner } from "@/components/ui/banner";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 import type { ApprovalRecord, JobStatus } from "@/lib/contracts/api";
 
