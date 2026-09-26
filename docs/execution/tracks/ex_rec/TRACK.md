@@ -6,7 +6,9 @@ Biến moving-camera RGB và Registered LiDAR thành reconstruction artifacts ch
 để EX-SCENE consume trực tiếp.
 
 ```text
-RGB → poses → visual + RGB geometry → metric/canonical → ReconstructionBundle
+RGB → poses → visual → REC-06 confirmed metric transform
+    → metric working derivative → REC-05 voxel/collision
+    → REC-06 final cross-artifact verification → ReconstructionBundle
 Registered LiDAR → LiDARGeometryArtifact → conditional alignment/composition
 ```
 
@@ -75,8 +77,12 @@ Outputs:
 
 ## Track Definition Of Done
 
-REC-06 có pha xác nhận anchor trước REC-05 và pha kiểm tra toàn bộ artifacts
-sau REC-05; REC-05 không phụ thuộc trạng thái DONE của REC-06. Đây là ordering
+REC-06 có pha xác nhận anchor/transform trước REC-05 metric-aware generation và
+pha kiểm tra toàn bộ artifacts sau REC-05; REC-05 không phụ thuộc trạng thái DONE
+của REC-06. Adapter/unit tests/synthetic GPU qualification của REC-05 vẫn làm
+độc lập bằng fixture có kích thước biết trước. Chỉ real Aisle_CW metric-aware
+spike chờ confirmation record, locked robot capsule và valid walkable seed;
+không đánh dấu cả REC-05 BLOCKED chỉ vì prerequisite này chưa có. Đây là ordering
 nội bộ EX-REC theo Integration §3.3, không thêm task/stage ID.
 
 - Real RGB path tạo visual, geometry và metric artifacts.

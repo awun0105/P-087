@@ -25,9 +25,21 @@ Source anchors: [Track Guide](../../../TRACK_IMPLEMENTATION_GUIDE.md), [Contract
 - REC-04 output: Brush `visual.ply`.
 - REC-06 pha xác nhận anchor/transform sang canonical meter đã hoàn tất; không
   đợi final verification/DONE của REC-06 (xem Integration §3.3).
-- REC-03 COLMAP model cho OpenMVS fallback.
+- REC-03 COLMAP model chỉ cho OpenMVS fallback, không là direct input của primary voxel pipeline.
 - `splat-transform` (v3.6.6) Node.js/GPU environment.
-- Locked OpenMVS Docker environment (làm fallback nếu spike không đạt).
+- Locked OpenMVS Docker environment chỉ khi kích hoạt fallback nếu spike không đạt;
+  không chặn implementation/qualification của primary SplatTransform adapter.
+
+Tách dependency theo work package, không theo thứ tự số task:
+
+- **Adapter/unit/synthetic GPU:** fixture có kích thước biết trước + pinned runtime;
+  thực hiện được ngay, không cần giả lập confirmation record của REC-06.
+- **Real metric-aware Aisle_CW spike:** REC-04 source + REC-06 confirmed canonical
+  metric transform/anchor + derivative áp transform đúng một lần + locked robot
+  capsule + valid walkable seed. Phần này đang chờ prerequisites.
+- **Final publication:** geometry được REC-06 cross-check cùng pose/visual trước
+  REC-10. Không giữ ordering cũ `REC-05 arbitrary-unit mesh → REC-06 lần đầu scale`
+  cho primary voxel/capsule tính theo mét; không tạo dependency vòng đòi REC-06 DONE.
 
 ## 5. Input Contract
 
@@ -126,6 +138,20 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
   Synthetic scene có kích thước biết trước dùng để qualification GPU và topology;
   không cấp confirmation giả cho Aisle_CW. Publication/REC-06 record schema và
   consumer acceptance chờ producer thật. Mỗi nhóm thay đổi được validate rồi commit.
+
+### User clarification / implementation boundary 2026-09-26
+
+- REC-06 chưa có record chính thức; user xác nhận không tự bịa scale. Giữ toàn
+  task `IN_PROGRESS`, chỉ real spike ghi trạng thái chờ dependency.
+- Hoàn thiện tool pipeline bằng `run_synthetic(SyntheticVoxelRequest, workspace)`:
+  entrypoint explicit synthetic, không nhận `metric_confirmed` mode, không có
+  product publication hoặc tự tạo confirmation schema. Đây là refinement của
+  ý định injected metric verifier ở bootstrap: chưa triển khai verifier giả khi
+  producer/record REC-06 chưa tồn tại.
+- Sau REC-06: implement checksum-bound confirmed-record resolver, tạo metric
+  derivative từ immutable master và kiểm applied-transform provenance/double
+  scaling rồi mới expose product entrypoint. Synthetic rotation/unit preservation
+  tests hiện tại không thay cho handoff test REC-06 thật.
 
 Trước khi chấp nhận primary geometry; giữ OpenMVS fallback nếu spike không đạt:
 1. Chạy 3 cấu hình voxel resolution trên file Brush PLY của `Aisle_CW`:

@@ -5,8 +5,10 @@ Date: 2026-09-24
 ## Status
 
 Active — REC-01/02/02A/03/04 task gates complete. REC-04 real Brush GPU smoke,
-SOG roundtrip and render sample verified 2026-09-26. REC-05 audit/implementation
-next; real metric spike requires REC-06 confirmed anchor and robot config.
+SOG roundtrip and render sample verified 2026-09-26. REC-05 IN_PROGRESS:
+SplatTransform adapter/unit tests and synthetic GPU smoke implemented; real
+metric-aware spike alone awaits REC-06 confirmation, locked capsule and walkable
+seed. Current implementation/evidence is recorded in the REC-05 task file.
 
 ## Outcome
 
@@ -64,7 +66,7 @@ handoff that requires no manual artifact conversion.
 | REC-03 | REC-02A | Real COLMAP small-scene smoke, deterministic model selection, normalized pose/intrinsics with refs and provenance. |
 | REC-04 | REC-03 + Brush runtime | Real Brush GPU smoke and resolvable checksummed 3DGS visual artifact; never use it as collider. |
 | REC-05 | REC-04 + REC-06 anchor phase; REC-03 fallback | Metric voxel/capsule geometry and Aisle_CW resolution spike; OpenMVS fallback qualification. |
-| REC-06 | REC-03/04/05 + locked anchor | Confirm scale only after anchor workflow; propagate same scale to pose/visual/geometry; verify independent distance. |
+| REC-06 | REC-03/04 + locked anchor for confirmation; REC-05 only for final verification | Confirm metric transform before real voxel/capsule generation; then propagate/verify all artifacts without double scaling. |
 | REC-07 | REC-01 + declared poses | Offline reproducible registered LiDAR PLY; preserve GT-assistance and checksums if `traj_gt` is used. |
 | REC-08 | registered LiDAR or REC-07 | Validate unit/frame/nonempty cloud; immutable resolvable LiDAR artifact and typed dependency provenance. |
 | REC-09 | REC-06/08 + confirmed transform | Verify same-scene/checksum binding; separate confirmed alignment; reject unconfirmed/different-scene inputs. |

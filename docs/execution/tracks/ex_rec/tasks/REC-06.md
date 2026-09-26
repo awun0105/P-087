@@ -26,6 +26,12 @@ Source anchors: [Track Guide](../../../TRACK_IMPLEMENTATION_GUIDE.md), [Contract
 - Pha final verification: REC-05 geometry, thực hiện trước REC-10 publication.
 - Foundation Lock chốt canonical coordinate và real-world anchor; không dùng cùng anchor làm evaluation distance.
 
+Không giữ dependency toàn-task `REC-06 phải đợi REC-05` của arbitrary-unit
+OpenMVS flow cũ: pha xác nhận metric/canonical transform là prerequisite cho
+primary SplatTransform voxel/capsule theo mét. Chỉ final verification chờ geometry.
+Adapter/unit/synthetic qualification REC-05 có thể phát triển song song; không
+dùng synthetic fixture để xác nhận scale scene thật.
+
 ## 5. Input Contract
 
 - RGB poses, visual và geometry artifacts.

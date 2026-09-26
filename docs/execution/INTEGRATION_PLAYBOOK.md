@@ -656,6 +656,10 @@ real reconstruction, Brush hay Isaac acceptance.
   Anchor thiếu/chưa xác nhận phải chặn voxelization theo mét. Sau REC-05, REC-06
   kiểm tra pose/visual/geometry cùng frame rồi mới handoff REC-10. Đây là hai pha
   trong REC-06 hiện hữu, không phải task ID hay pipeline stage mới.
+  Dependency này áp cho **real metric-aware generation**, không chặn phát triển
+  adapter/unit tests/synthetic GPU qualification bằng fixture biết trước kích thước.
+  Real Aisle_CW spike còn cần locked robot capsule và valid walkable seed;
+  synthetic proof không xác nhận metric scale hoặc physics acceptance của scene thật.
 - **Fallback P0:** **cdcseacave/openMVS**, nếu spike Aisle_CW không đạt.
   Luồng `COLMAP -> InterfaceCOLMAP -> DensifyPointCloud -> ReconstructMesh ->
   RefineMesh` vẫn độc lập với Brush; geometry được canonicalize bằng cùng transform.
