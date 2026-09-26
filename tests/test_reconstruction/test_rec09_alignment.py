@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from src.models.contracts.artifacts import Checksum, ProductArtifactRef
+from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.coordinates import Transform
 from src.models.contracts.manifests import StageId
 from src.models.contracts.reconstruction import (
