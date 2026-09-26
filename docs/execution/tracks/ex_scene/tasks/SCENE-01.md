@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-SCENE` |
 | Priority | `P0` |
-| Status | `TODO` |
+| Status | `VALIDATING` |
 | Owner | Đức |
 | Target milestone | `M0/M1` |
 
@@ -59,7 +59,10 @@ Giữ research repos ở mức reference/adapter đã được phê duyệt; kh�
 
 ## 9. Implementation Plan
 
-Assignee điền files/sequence/failure handling sau khi inspect repository. Không đổi task scope hoặc authority gate.
+Đọc published bundle qua `ArtifactResolver`, xác thực byte checksum của envelope,
+schema v1.0 và logical content checksum. Resolve/verify toàn bộ product refs trước
+khi trả `ValidatedBundleView`; reject ref thuộc job khác. Không đọc temp folder EX-REC
+hoặc evaluation-only data. Giữ real REC handoff là gate riêng khi producer publish.
 
 ## 10. Tests
 
@@ -78,7 +81,13 @@ Tách mock/fixture proof khỏi real model/artifact handoff proof.
 
 ## 12. Result / Evidence
 
-Pending implementation.
+Đã thêm `src/services/scene/bundle_consumer.py` và
+`tests/test_scene/test_bundle_consumer.py`. Chạy
+`uv run --no-project --with pytest pytest --noconftest tests/test_scene/test_bundle_consumer.py -q`:
+6 passed (fixture RGB, mixed, RGB+sensor depth và ba failure paths).
+Chạy Ruff check hai file: pass. Fixture trong ZIP có CRLF làm lệch byte checksum;
+test staged fixture chuẩn hóa về LF để tái hiện byte identity đã ghi trong refs,
+không sửa fixture gốc. Chưa có real REC bundle, nên chưa đạt DoD cuối.
 
 Expected evidence:
 

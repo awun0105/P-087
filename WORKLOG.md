@@ -163,8 +163,7 @@
 ### 3. Đức (`EX-SCENE` — Scene/Object)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đức | Kế hoạch tiếp nhận dữ liệu SfM và phân đoạn vật thể SAM2 | 🔄 Planned | Rà soát `docs/execution/tracks/ex_scene/`; chuẩn bị môi trường chạy SAM2 và thuật toán liên kết điểm ảnh 2D với không gian 3D. Chờ upstream REC-03 bàn giao camera poses và sparse point cloud. | Chưa ghi nhận |
-
+| Đức | Tìm hiểu boundary EX-SCENE: input `ReconstructionBundle`, output `SceneIR`, trách nhiệm candidate/HITL và handoff với EX-REC, EX-SIM. | 📝 Chuẩn bị | Ghi nhận từ trao đổi về scope EX-SCENE; chưa có code hoặc runtime evidence để nhận hoàn thành task. | Chưa ghi nhận |
 ### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
@@ -191,7 +190,7 @@
 ### 3. Đức (`EX-SCENE` — Scene/Object)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đức | Tiếp nhận 65 camera poses và 6.202 điểm thưa từ REC-03; thiết kế cấu trúc SceneIR cho candidate object | 🔄 In Progress | Phân tích camera trajectory và sparse point cloud `Aisle_CW` từ REC-03; chuẩn bị spike kết nối mask 2D từ SAM2 với đám mây điểm 3D. | Chưa ghi nhận |
+| Đức | Xem cách bắt đầu song song từ fixture và schema, xác định SCENE-01 trước SCENE-02/SAM2. | 📝 Chuẩn bị | Trao đổi về dataset, contract, dữ liệu mẫu và thứ tự triển khai; chưa có bằng chứng chạy SAM2 hay publish SceneIR. | Chưa ghi nhận |
 
 ### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
@@ -218,8 +217,7 @@
 ### 3. Đức (`EX-SCENE` — Scene/Object)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đức | Tiếp nhận mô hình gốc `visual.ply` từ REC-04; thử nghiệm trích xuất candidate object với SAM2 | 🔄 In Progress | Khảo sát mô hình 3DGS `visual.ply` từ REC-04; kiểm tra khả năng gán nhãn ngữ nghĩa (semantics) và bounding box sơ bộ cho các kệ hàng trong `Aisle_CW`. | Chưa ghi nhận |
-
+| Đức | Triển khai SCENE-01: đọc bundle qua artifact ref, xác minh schema, logical/byte checksums và các refs trước scene processing. | 🔄 Validating | [Bundle consumer](src/services/scene/bundle_consumer.py), [focused tests](tests/test_scene/test_bundle_consumer.py), [SCENE-01 evidence](docs/execution/tracks/ex_scene/tasks/SCENE-01.md); 6 focused tests pass, Ruff check pass. Đây là fixture proof, chưa phải bundle từ EX-REC thật. | Chưa ghi nhận |
 ### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
