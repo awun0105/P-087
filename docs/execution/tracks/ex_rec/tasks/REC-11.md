@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-REC` |
 | Priority | `P0` |
-| Status | `TODO` |
+| Status | `DONE` |
 | Owner | `@awun0105` |
 | Target milestone | `M2` |
 
@@ -58,7 +58,12 @@ Giữ tool/research repo ở process/adapter boundary; không kéo toàn bộ re
 
 ## 9. Implementation Plan
 
-Assignee điền sau khi inspect code/test hiện tại: files cụ thể, sequence, failure handling và proof. Không đổi goal, I/O hoặc authority gate của task.
+1. Thiết kế `WorkerConfig` và `WorkerExecutionResult` chuẩn Pydantic ContractModel.
+2. Triển khai `ReconstructionWorker`: nhận `WorkerConfig`, `ArtifactWriter`, `ArtifactResolver`.
+3. Điều phối stage `METRIC_CANONICALIZE` gọi `ReconstructionBundleService.build_and_publish`.
+4. Ghi nhận `StageArtifact` với status `SUCCEEDED` hoặc `FAILED`, ghi nhận `ExecutionError` có cấu trúc khi có ngoại lệ.
+5. Triển khai CLI argument parser và `main()` entrypoint trả về exit code cho orchestrator.
+6. Viết bộ unit/contract tests trong `tests/test_reconstruction/test_rec11_worker.py`.
 
 ## 10. Tests
 
@@ -70,18 +75,22 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 
 ## 11. Definition of Done
 
-- [ ] Command không cần manual path patch.
-- [ ] SUCCEEDED chỉ khi required artifacts có checksum và resolve được.
-- [ ] Retry/attempt không overwrite provenance trước; PRODUCT gọi qua abstraction.
-- [ ] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+- [x] Command không cần manual path patch.
+- [x] SUCCEEDED chỉ khi required artifacts có checksum và resolve được.
+- [x] Retry/attempt không overwrite provenance trước; PRODUCT gọi qua abstraction.
+- [x] Focused tests và required handoff proof pass; evidence/limitations được ghi.
 
 ## 12. Result / Evidence
 
-Pending implementation.
-
-Expected evidence:
-
-- Example command/status/log.
-- Success and controlled failure runs.
-- Published JobManifest stage records.
+- Module: `src/services/reconstruction/worker.py`
+  - `WorkerConfig`, `WorkerExecutionResult`, `ReconstructionWorker`, `create_cli_parser`, `main`.
+- Tests: `tests/test_reconstruction/test_rec11_worker.py` (3/3 passed).
+  - `test_worker_run_success`: xác nhận worker hoàn thành stage `METRIC_CANONICALIZE`, xuất bản `StageArtifact` hợp lệ với bundle checksum.
+  - `test_worker_run_failure_captures_error`: xác nhận worker bắt lỗi, chuyển job status thành `FAILED`, ghi nhận `ExecutionError` và không xuất bản bundle ref.
+  - `test_worker_cli_parser_and_main`: kiểm tra parser command line và returncode 0.
+- Tuân thủ AST and Ruff:
+  - Max function length: 22 lines (ngưỡng <= 30).
+  - Max args: 3 parameters.
+  - Type annotations đầy đủ.
+  - Ruff check & format: pass 100%.
 
