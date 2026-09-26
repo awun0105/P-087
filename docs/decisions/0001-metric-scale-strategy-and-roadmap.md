@@ -24,6 +24,12 @@ Nhóm thống nhất chiến lược Metric Scale toàn diện như sau:
 - **Sử dụng 3D LiDAR (Ouster OS1-128) có sẵn của `Aisle_CW`:**
   - File quét LiDAR trong `data/torwic_slam/raw/traversals/aisle_cw/lidar/` đã mang sẵn đơn vị mét vật lý chuẩn xác ($1.0 = 1\text{m}$).
   - *Cách 1 (Nhanh cho REC-06 & REC-05):* Trích xuất khoảng cách laser thực tế giữa 2 cột kệ kho từ đám mây điểm LiDAR làm `DistanceAnchor` cho REC-06 để giải hệ số co giãn $s$.
+    LiDAR được dùng như thước đo trong bước chuẩn bị bài thử **ngoại tuyến**:
+    xác định cùng hai vị trí vật lý trên reconstruction RGB và LiDAR, lưu nguồn
+    scan/checksum, điểm đo, khoảng cách và bằng chứng đối chiếu, rồi xác nhận anchor.
+    RGB runtime chỉ nhận locked anchor/evidence; không tự đọc raw LiDAR hoặc GT.
+    Đơn vị mét của cảm biến không chứng minh điểm chọn đúng hoặc phép đo không có
+    sai số. Không dùng lại anchor này làm independent evaluation distance.
   - *Cách 2 (Multimodal chuẩn):* Triển khai tiếp `REC-07` (Prefusion gộp 1.092 file `.pcd` bằng Open3D) $\rightarrow$ `REC-08` (`LiDARGeometryArtifact`) $\rightarrow$ `REC-09` (Alignment khớp RGB với LiDAR).
 - **Quy chuẩn hạt giống đục rỗng voxel (`navigation_seed_world` của REC-05):**
   - Theo owner clarification 2026-09-26: camera đầu tiên **đã registered** là nguồn
