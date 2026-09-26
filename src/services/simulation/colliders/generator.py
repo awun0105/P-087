@@ -1,5 +1,6 @@
 """Tạo và quản lý các loại ColliderSpec (AABB, OBB, Convex Hull, Simplified Mesh)."""
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,8 @@ from scipy.spatial.transform import Rotation
 from src.models.contracts.artifacts import Identifier, ProductArtifactRef
 from src.models.contracts.coordinates import Transform
 from src.models.contracts.scene import ColliderSpec, ColliderType, SceneObject
+
+logger = logging.getLogger(__name__)
 
 MIN_COLLIDER_EXTENT_M: float = 0.01
 DEFAULT_GROUND_PLANE_THICKNESS_M: float = 0.05
@@ -86,41 +89,51 @@ def _matrix_to_quaternion(matrix: np.ndarray) -> tuple[float, float, float, floa
     return float(q[0]), float(q[1]), float(q[2]), float(q[3])
 
 
+def _dims_and_center_from_extrema(
+    min_pt: np.ndarray,
+    max_pt: np.ndarray,
+    min_dim: float,
+) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    """Tính kích thước và tọa độ tâm từ 2 điểm cực trị min/max."""
+    diff = max_pt - min_pt
+    dims = tuple(max(float(diff[i]), min_dim) for i in range(3))
+    center = tuple(float((min_pt[i] + max_pt[i]) / 2.0) for i in range(3))
+    return dims, center
+
+
 def _safe_compute_bounds(
     geometry: trimesh.Trimesh | trimesh.PointCloud,
     min_dimension_m: float = MIN_COLLIDER_EXTENT_M,
 ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
-    """Tính toán bounds và tâm an toàn, chống crash khi mesh suy biến hoặc bounds malformed."""
+    """Tính toán bounds và tâm an toàn, ghi log cảnh báo khi dữ liệu lỗi hoặc suy biến."""
     try:
         raw_bounds = getattr(geometry, "bounds", None)
         if raw_bounds is not None and len(raw_bounds) == 2:
             min_pt, max_pt = np.asarray(raw_bounds[0]), np.asarray(raw_bounds[1])
             if np.all(np.isfinite(min_pt)) and np.all(np.isfinite(max_pt)):
-                diff = max_pt - min_pt
-                dims = tuple(max(float(diff[i]), min_dimension_m) for i in range(3))
-                center = tuple(float((min_pt[i] + max_pt[i]) / 2.0) for i in range(3))
-                return dims, center
-    except Exception:
-        pass
+                return _dims_and_center_from_extrema(min_pt, max_pt, min_dimension_m)
+    except Exception as exc:
+        logger.warning("Không thể đọc bounds từ geometry: %s", exc)
 
-    # Thử tính trực tiếp từ vertices nếu raw_bounds bị lỗi
     try:
         raw_verts = getattr(geometry, "vertices", None)
         if raw_verts is not None and len(raw_verts) > 0:
             verts = np.asarray(raw_verts)
-            finite_mask = np.all(np.isfinite(verts), axis=1)
-            valid_verts = verts[finite_mask]
+            valid_verts = verts[np.all(np.isfinite(verts), axis=1)]
             if len(valid_verts) > 0:
-                min_pt = np.min(valid_verts, axis=0)
-                max_pt = np.max(valid_verts, axis=0)
-                diff = max_pt - min_pt
-                dims = tuple(max(float(diff[i]), min_dimension_m) for i in range(3))
-                center = tuple(float((min_pt[i] + max_pt[i]) / 2.0) for i in range(3))
-                return dims, center
-    except Exception:
-        pass
+                return _dims_and_center_from_extrema(
+                    np.min(valid_verts, axis=0),
+                    np.max(valid_verts, axis=0),
+                    min_dimension_m,
+                )
+            logger.warning("Geometry không chứa đỉnh hữu hạn (finite) nào.")
+    except Exception as exc:
+        logger.warning("Không thể tính bounds từ vertices: %s", exc)
 
-    # Fallback an toàn tuyệt đối khi toàn bộ đỉnh đều không hợp lệ
+    logger.warning(
+        "Kích hoạt fallback an toàn (%sm) cho collider bounds do không tính được từ geometry.",
+        min_dimension_m,
+    )
     return (min_dimension_m, min_dimension_m, min_dimension_m), (0.0, 0.0, 0.0)
 
 
@@ -141,10 +154,9 @@ def _extract_obb_params(
                     trans = (float(tf[0, 3]), float(tf[1, 3]), float(tf[2, 3]))
                     rot_q = _matrix_to_quaternion(tf[:3, :3])
                     return extents, trans, rot_q
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Không thể tính OBB từ mesh: %s. Fallback sang AABB bounds.", exc)
 
-    # Fallback an toàn sang bounds AABB nếu OBB thất bại hoặc bounds malformed
     dims, center = _safe_compute_bounds(mesh, min_dimension_m=min_dimension_m)
     return dims, center, (0.0, 0.0, 0.0, 1.0)
 
@@ -159,9 +171,8 @@ def generate_collider_from_geometry(
 ) -> ColliderSpec:
     """Sinh ColliderSpec từ đối tượng hình học (Trimesh hoặc PointCloud)."""
     raw_verts = getattr(geometry, "vertices", None)
-    if raw_verts is None or len(raw_verts) == 0:
-        if not fallback_on_empty:
-            raise ValueError("Geometry không chứa đỉnh nào để sinh collider.")
+    if (raw_verts is None or len(raw_verts) == 0) and not fallback_on_empty:
+        raise ValueError("Geometry không chứa đỉnh nào để sinh collider.")
 
     if collider_type == ColliderType.OBB and isinstance(geometry, trimesh.Trimesh):
         try:
@@ -175,10 +186,9 @@ def generate_collider_from_geometry(
                 rotation_xyzw=rot_q,
             )
             return create_box_collider(req)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Lỗi khi tạo OBB collider: %s. Fallback sang AABB.", exc)
 
-    # AABB hoặc fallback an toàn
     dims, center = _safe_compute_bounds(geometry, min_dimension_m=min_dimension_m)
     req = BoxSpecRequest(
         dimensions_xyz_m=dims,
@@ -223,8 +233,8 @@ def generate_object_collider(
                     min_dimension_m=min_dimension_m,
                     fallback_on_empty=True,
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Không thể load/tạo collider từ file '%s': %s", geometry_file_path, exc)
 
     # Fallback mặc định an toàn cho box collider kích thước 1m x 1m x 1m
     req = BoxSpecRequest(

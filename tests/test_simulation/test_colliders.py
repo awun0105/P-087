@@ -246,8 +246,8 @@ def test_malformed_mesh_bounds_fallback(monkeypatch: pytest.MonkeyPatch) -> None
     assert all(d >= 0.01 for d in spec.dimensions_xyz_m)
 
 
-def test_corrupt_geometry_file_fallback(tmp_path: Path) -> None:
-    """Khi file geometry bị hỏng/rác, generate_object_collider tự động fallback sang default box 1m3."""
+def test_corrupt_geometry_file_fallback(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Khi file geometry bị hỏng/rác, generate_object_collider tự động fallback sang default box 1m3 và log cảnh báo."""
     bad_file = tmp_path / "corrupt.ply"
     bad_file.write_text("CORRUPT HEADER NOT A VALID PLY OR MESH", encoding="utf-8")
 
@@ -276,7 +276,27 @@ def test_corrupt_geometry_file_fallback(tmp_path: Path) -> None:
         provenance={"test": True},
     )
 
-    spec = generate_object_collider(obj, geometry_file_path=bad_file)
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        spec = generate_object_collider(obj, geometry_file_path=bad_file)
     assert spec is not None
     assert spec.dimensions_xyz_m == (1.0, 1.0, 1.0)
     assert spec.parameters.get("source") == "default_box_fallback"
+    assert any("Không thể load/tạo collider" in record.message for record in caplog.records)
+
+
+def test_safe_compute_bounds_logs_warning_on_fallback(caplog: pytest.LogCaptureFixture) -> None:
+    """Kiểm tra _safe_compute_bounds ghi log cảnh báo khi kích hoạt fallback."""
+    import logging
+
+    nan_pc = trimesh.points.PointCloud(vertices=[[float("nan"), float("nan"), float("nan")]])
+    with caplog.at_level(logging.WARNING):
+        spec = generate_collider_from_geometry(
+            geometry=nan_pc,
+            collider_type=ColliderType.AABB,
+            parent_frame="world",
+            collider_id="col-nan-log",
+        )
+    assert spec is not None
+    assert any("Kích hoạt fallback an toàn" in record.message for record in caplog.records)
