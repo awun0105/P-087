@@ -155,11 +155,13 @@ def generate_collider_from_geometry(
     parent_frame: Identifier,
     collider_id: Identifier,
     min_dimension_m: float = MIN_COLLIDER_EXTENT_M,
+    fallback_on_empty: bool = False,
 ) -> ColliderSpec:
     """Sinh ColliderSpec từ đối tượng hình học (Trimesh hoặc PointCloud)."""
     raw_verts = getattr(geometry, "vertices", None)
     if raw_verts is None or len(raw_verts) == 0:
-        raise ValueError("Geometry không chứa đỉnh nào để sinh collider.")
+        if not fallback_on_empty:
+            raise ValueError("Geometry không chứa đỉnh nào để sinh collider.")
 
     if collider_type == ColliderType.OBB and isinstance(geometry, trimesh.Trimesh):
         try:
@@ -219,6 +221,7 @@ def generate_object_collider(
                     parent_frame=obj.local_frame,
                     collider_id=collider_id,
                     min_dimension_m=min_dimension_m,
+                    fallback_on_empty=True,
                 )
         except Exception:
             pass

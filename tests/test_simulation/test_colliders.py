@@ -149,7 +149,7 @@ def test_generate_object_collider_safeguard2_priority() -> None:
 
 
 def test_generate_collider_rejects_empty_geometry() -> None:
-    """Geometry rỗng không có đỉnh phải báo lỗi."""
+    """Geometry rỗng không có đỉnh phải báo lỗi khi fallback_on_empty=False (mặc định)."""
     empty_pc = trimesh.points.PointCloud(vertices=[])
     with pytest.raises(ValueError, match="không chứa đỉnh nào"):
         generate_collider_from_geometry(
@@ -157,7 +157,37 @@ def test_generate_collider_rejects_empty_geometry() -> None:
             collider_type=ColliderType.AABB,
             parent_frame="world",
             collider_id="col-empty",
+            fallback_on_empty=False,
         )
+
+
+def test_generate_collider_fallback_on_empty() -> None:
+    """Khi fallback_on_empty=True, geometry rỗng không crash mà sử dụng deep fallback an toàn."""
+    empty_pc = trimesh.points.PointCloud(vertices=[])
+    spec = generate_collider_from_geometry(
+        geometry=empty_pc,
+        collider_type=ColliderType.AABB,
+        parent_frame="world",
+        collider_id="col-empty-fallback",
+        fallback_on_empty=True,
+    )
+    assert spec is not None
+    assert spec.dimensions_xyz_m == (0.01, 0.01, 0.01)
+    assert spec.local_transform.translation_xyz == (0.0, 0.0, 0.0)
+
+
+def test_generate_collider_all_nan_vertices_fallback() -> None:
+    """Geometry chứa toàn bộ đỉnh NaN/Inf kích hoạt deep fallback trong _safe_compute_bounds mà không crash."""
+    nan_pc = trimesh.points.PointCloud(vertices=[[float("nan"), float("nan"), float("nan")]])
+    spec = generate_collider_from_geometry(
+        geometry=nan_pc,
+        collider_type=ColliderType.AABB,
+        parent_frame="world",
+        collider_id="col-nan-fallback",
+    )
+    assert spec is not None
+    assert spec.dimensions_xyz_m == (0.01, 0.01, 0.01)
+    assert spec.local_transform.translation_xyz == (0.0, 0.0, 0.0)
 
 
 @pytest.mark.filterwarnings("ignore:invalid value encountered in divide")
