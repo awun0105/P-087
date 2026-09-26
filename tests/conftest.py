@@ -1,8 +1,12 @@
+import os
 from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+
+# Thiết lập dummy API key để Settings không báo lỗi khi chạy unit tests
+os.environ.setdefault("OPENAI_API_KEY", "sk-mock-testing-key")
 
 from src.main import app
 

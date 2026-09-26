@@ -52,18 +52,25 @@
 - **Bài học:**
   - Tách bạch giữa hình học vật thể và thuộc tính ngữ nghĩa giúp linh hoạt trong việc chỉnh sửa cảnh.
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 - **Mục tiêu tuần này:**
   - [x] Onboarding tài liệu kỹ thuật và ranh giới track EX-SIM.
   - [x] Khảo sát pipeline OpenUSD và môi trường NVIDIA Isaac Sim / IsaacLab.
+  - [x] Xây dựng bản thiết kế Wireframe & UI Flow cho toàn bộ hệ thống và chuẩn hóa tooling hook.
+  - [x] Tích hợp bộ công cụ RunPod GPU serverless và HTML Prototype.
 - **Đã hoàn thành:**
   - Nghiên cứu hợp đồng `src/models/contracts/simulation.py` và quy chuẩn kiểm thử mô phỏng.
+  - Xây dựng tài liệu thiết kế giao diện `docs/WIREFRAME_AND_UI_FLOW.md` cho 5 màn hình chính của RAV-01 và báo cáo phân tích sâu `docs/RAV01_Real2Sim_Problem_Deep_Dive_Report.md` (commit `dce97b0`).
+  - Sửa script PowerShell `scripts/setup_hooks.ps1` tạo pre-push hook UTF-8 no BOM chuẩn hóa môi trường Windows/Linux (commit `63fc867`).
+  - Tích hợp kỹ năng RunPod GPU serverless (`.agents/skills/runpod*`, `skills-lock.json`), tài liệu `docs/TODO.md` và bản mẫu giao diện tương tác `docs/prototype/index.html` (commit `bcbc517`).
 - **Khó khăn & Giải pháp:**
   | Khó khăn | Giải pháp | Kết quả |
   |----------|-----------|---------|
-  | Cần môi trường phần cứng đủ mạnh để cài đặt và chạy Isaac Sim. | Chuẩn bị trước các script nạp mô hình và kịch bản thử nghiệm dạng headless. | Tối ưu hóa việc sử dụng tài nguyên máy tính khi mô phỏng. |
+  | Cần môi trường phần cứng đủ mạnh để cài đặt và chạy Isaac Sim. | Chuẩn bị trước các script nạp mô hình và kịch bản thử nghiệm dạng headless; tích hợp bộ công cụ RunPod để sẵn sàng scale lên GPU cloud. | Tối ưu hóa việc sử dụng tài nguyên máy tính khi mô phỏng, sẵn sàng cho hạ tầng đám mây. |
+  | Git pre-push hook trên Windows bị lỗi encoding BOM gây crash bash script. | Cấu hình PowerShell hook tạo file encoding UTF-8 without BOM với LF line endings. | Git hook chạy mượt mà trên cả Windows PowerShell và Linux Bash. |
 - **Bài học:**
   - Mô phỏng robotics đòi hỏi mô hình va chạm phải có cấu trúc hình học chuẩn xác (watertight mesh), không thể chỉ dùng đám mây điểm.
+  - Tách bạch sớm giao diện người dùng và luồng dữ liệu (UI Flow) giúp các track hiểu rõ điểm xuất phát và đích đến của artifact.
 
 ### Kế hoạch tuần sau (Toàn team)
 - [ ] Bốn track branch từ cùng baseline SHA sau khi hoàn tất review/CI; giữ shared contract change dưới producer–consumer review.
@@ -128,19 +135,24 @@
 - **Bài học:**
   - Handoff contract và fixture giúp các track độc lập tiến độ ngay cả khi dữ liệu thực tế đang trong quá trình xử lý.
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 - **Mục tiêu tuần này:**
-  - [ ] Cài đặt và kiểm thử môi trường mô phỏng Isaac Sim 4.0 / IsaacLab.
-  - [ ] Xây dựng kịch bản nạp robot AMR và kiểm tra va chạm từ lưới vật lý.
+  - [x] Hoàn thành task SIM-04: Deterministic Preflight (6 quy tắc P0, preflight engine, checksum validation).
+  - [x] Hoàn thành task SIM-02: Collider Generation Utilities (AABB, OBB, Convex Hull, Simplified Mesh, Safeguard 1 & 2).
+  - [x] Chuẩn hóa test harness, sửa cấu hình LLM/conftest và dọn sạch linter repository.
+  - [ ] Tiếp tục nghiên cứu OpenUSD generator (SIM-01) và kịch bản nạp robot AMR vào Isaac Sim.
 - **Đã hoàn thành:**
-  - Thẩm định tài liệu DISCOVERSE và VR-Robo audit để định hình pipeline xuất OpenUSD.
-  - Tiếp nhận thông số kỹ thuật và yêu cầu lưới va chạm `collision.glb` từ kế hoạch REC-05.
+  - `SIM-04` (commit `49e9660`): Cài đặt engine thẩm định tĩnh độc lập với 6 quy tắc P0 (`METRIC_SCALE_MISSING`, `COLLIDER_MISSING`, `TRANSFORM_INVALID`, `OBJECT_OUT_OF_BOUNDS`, `REQUIRED_ARTIFACT_MISSING`, `OBJECT_CONFIRMATION_INCOMPLETE`), niêm phong SHA-256 `report_checksum`, 9/9 unit tests pass.
+  - `SIM-02` (commit `bdf5f4d`): Cài đặt bộ sinh collider proxy với Trimesh + Scipy, Safeguard 1 mặt sàn `create_ground_plane_collider`, Safeguard 2 ưu tiên Box `generate_object_collider`, 8/8 unit tests pass.
+  - Chuẩn hóa test harness (commit `7e8e453`): Cấu hình mock key mặc định trong `conftest.py`, sửa 5 cảnh báo `UP022` ruff bằng `capture_output=True`. Nguyễn Thọ Đạt17/17 tests pass cho `EX-SIM`, `ruff check .` sạch 100%.
 - **Khó khăn & Giải pháp:**
   | Khó khăn | Giải pháp | Kết quả |
   |----------|-----------|---------|
-  | Mô hình 3DGS thông thường không có thuộc tính va chạm cho robot. | Phối hợp với EX-REC để yêu cầu xuất lưới mesh kín nước (watertight collision mesh). | Xác lập rõ ràng tiêu chí nghiệm thu cho task REC-05 trước khi code. |
+  | Điểm đám mây hoặc mesh suy biến (planar/coplanar point cloud) làm thuật toán Quickhull của Trimesh bị lỗi phân giải (simplex crash). | Cài đặt cơ chế an toàn Safeguard 2 trong `generator.py`: bắt lỗi QhullError và tự động fallback về Box/AABB dựa trên `primitive_dimensions_xyz_m`. | Sinh proxy collider ổn định 100%, không bị crash dù dữ liệu điểm thô có nhiễu hoặc phẳng. |
+  | `conftest.py` yêu cầu `GEMINI_API_KEY` khiến test chạy ở môi trường CI/local thiếu key bị gián đoạn. | Thêm giá trị mock fallback `"mock-api-key-for-testing-only"` vào `conftest.py`. | Chạy `pytest` cục bộ hoàn toàn độc lập, không phụ thuộc vào API key bên ngoài. |
 - **Bài học:**
-  - Cần thống nhất chặt chẽ hệ tọa độ và tỉ lệ mét thật (Metric Scale) giữa khâu dựng hình và mô phỏng trước khi đưa robot vào môi trường ảo.
+  - Phân tách triệt để logic hình học/thẩm định tĩnh thuần Python (Local) khỏi engine mô phỏng nặng (GPU Isaac Sim) giúp phát triển nhanh, kiểm thử tự động đạt độ tin cậy cao và không bị nghẽn phần cứng.
+  - Luôn có phương án fallback hình học (AABB/Box) khi xử lý dữ liệu point cloud thực nghiệm.
 
 ### Kế hoạch tuần sau (Toàn team)
 - [ ] Hoàn thành task REC-05 (Voxel Collision Mesh) và REC-06 (Metric Scale Anchor) để bàn giao lưới va chạm thật cho EX-SIM.
@@ -191,7 +203,7 @@
 - **Bài học:**
   - [Bài học từ công việc thực tế]
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 - **Mục tiêu tuần này:**
   - [ ] Nạp `collision.glb` vào môi trường NVIDIA Isaac Sim 4.0 qua OpenUSD.
   - [ ] Chạy mô phỏng di chuyển cơ bản của robot AMR trong lối đi kho hàng.
@@ -247,7 +259,7 @@
 - **Bài học:**
   - [Bài học từ công việc thực tế]
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 - **Mục tiêu tuần này:**
   - [ ] [Mục tiêu tuần 3 của EX-SIM]
 - **Đã hoàn thành:**
@@ -302,7 +314,7 @@
 - **Bài học:**
   - [Bài học từ công việc thực tế]
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 - **Mục tiêu tuần này:**
   - [ ] [Mục tiêu sprint pitch của EX-SIM]
 - **Đã hoàn thành:**
@@ -339,7 +351,7 @@
 - **Khó khăn & Giải pháp:** [Vấn đề & cách giải quyết]
 - **Bài học:** [Bài học rút ra]
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 - **Mục tiêu:** [Mục tiêu cá nhân]
 - **Đã hoàn thành:** [Chỉ điền kết quả đã có bằng chứng]
 - **Khó khăn & Giải pháp:** [Vấn đề & cách giải quyết]
