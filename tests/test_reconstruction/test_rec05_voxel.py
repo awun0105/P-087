@@ -1,7 +1,16 @@
 """REC-05 config/adapter proof; synthetic geometry không xác nhận scale Aisle_CW."""
 
+import sys
+from pathlib import Path
+
 import pytest
 
+from src.services.reconstruction.adapters.voxel_runtime import (
+    GeometryError,
+    VoxelProcess,
+    VoxelRuntimeSettings,
+    require_carve,
+)
 from src.services.reconstruction.rgb.voxel import (
     VoxelConfig,
     cluster_command,
@@ -66,3 +75,41 @@ def test_missing_robot_configuration_rejected(field: str) -> None:
     del values[field]
     with pytest.raises(ValueError):
         VoxelConfig.model_validate(values)
+
+
+@pytest.mark.parametrize("failure", ["exit", "timeout", "missing"])
+def test_process_failures(tmp_path: Path, failure: str) -> None:
+    """Chạy subprocess thật để kiểm exit/timeout và missing executable."""
+    command = ("/missing/rec05-node",) if failure == "missing" else (sys.executable,)
+    settings = VoxelRuntimeSettings(
+        cli=Path("unused"),
+        module_path=Path("unused"),
+        node_command=command,
+        timeout_seconds=0.1,
+    )
+    code = "import time; time.sleep(20)" if failure == "timeout" else "raise SystemExit(7)"
+    with pytest.raises(GeometryError):
+        VoxelProcess(settings).run(("-c", code), (tmp_path, "failure"))
+    assert (tmp_path / "failure.log").exists()
+
+
+def test_exit_zero_does_not_clear_skipped_carve() -> None:
+    """Output hợp lệ nhưng thiếu carve vẫn là attempt không đạt yêu cầu."""
+    require_carve("carve completed")
+    for message in ("seed outside grid, skipping carve", "navCapsule requires navSeed, skipping nav carving"):
+        with pytest.raises(GeometryError, match="skipped"):
+            require_carve(message)
+
+
+def test_runtime_pin_and_capabilities(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Không tin source checkout nếu CLI pin hoặc required flag khác."""
+    process = VoxelProcess(VoxelRuntimeSettings(cli=Path("unused"), module_path=Path("unused")))
+    output = "splat-transform v3.6.6 (afbc281)\n" + " ".join(cluster_command(config()) + collision_command(config()))
+    monkeypatch.setattr(process, "cli", lambda args, target: output)
+    assert "3.6.6" in process.qualify(tmp_path)
+    output = output.replace("--voxel-carve", "missing")
+    with pytest.raises(GeometryError, match="controls"):
+        process.qualify(tmp_path)
+    output = "splat-transform v3.6.4 (old)"
+    with pytest.raises(GeometryError, match="qualified"):
+        process.qualify(tmp_path)
