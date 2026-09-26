@@ -99,6 +99,34 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
   and topology on synthetic smoke; real three-resolution Aisle_CW and Isaac
   CLEAR/BLOCKED remain separate required acceptance, not fixture claims.
 
+### Resume / source audit 2026-09-26
+
+- VERIFIED: bootstrap tại `feat/ex-rec`, HEAD `f73665d`, working tree sạch.
+  User yêu cầu tiếp tục REC-05 và commit từng thay đổi nhỏ có ý nghĩa.
+- Installed `@playcanvas/splat-transform` 3.6.6 (`afbc281`), MIT, Node >=22;
+  actual CLI help và `--list-gpus` xác nhận Intel UHD 630 (index 0). Audit
+  source maps của package pin: `writers/write-voxel.ts`, `collision-glb.ts`,
+  `voxel/carve.ts`, `filter-cluster.ts`, `data-table/transform.ts`.
+  CLI phải xuất `.voxel.json`; `.collision.glb` là output đi kèm. Ghi thẳng
+  `.glb` không gọi pipeline voxel collision. Upstream carve có thể warning rồi
+  skip khi seed nằm ngoài grid hoặc không tìm được free cell: adapter phải reject
+  trường hợp này dù process exit 0.
+- OpenMVS source `e23d25f0a9bd93ec056d4ee7fae2b2aaee80e566`, AGPL-3.0;
+  inspect CLI tại `apps/{InterfaceCOLMAP,DensifyPointCloud,ReconstructMesh}`.
+  InterfaceCOLMAP cần undistorted camera/images. Re3Sim audit §4/19 là reference
+  orchestration; không copy upstream source. Fallback runtime chưa qualified.
+- Plan cụ thể: typed config và command builder; subprocess có timeout/log;
+  strict input checksum + injected metric verifier (chưa triển khai producer
+  REC-06); isolated workspace; Gaussian validation bằng pinned upstream;
+  kiểm metadata/binary/GLB topology và source immutability. Native voxel/GLB là
+  Y-up: record rõ phép đổi từ canonical Z-up và ngược lại, không tự gọi output
+  native là shared canonical geometry.
+- Thêm tests positive/negative cho config, missing/unconfirmed metric gate,
+  tampered input, process failure/timeout, skipped carve và malformed output.
+  Synthetic scene có kích thước biết trước dùng để qualification GPU và topology;
+  không cấp confirmation giả cho Aisle_CW. Publication/REC-06 record schema và
+  consumer acceptance chờ producer thật. Mỗi nhóm thay đổi được validate rồi commit.
+
 Trước khi chấp nhận primary geometry; giữ OpenMVS fallback nếu spike không đạt:
 1. Chạy 3 cấu hình voxel resolution trên file Brush PLY của `Aisle_CW`:
    - Config A: `0.10m`
