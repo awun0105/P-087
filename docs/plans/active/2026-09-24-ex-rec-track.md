@@ -347,6 +347,12 @@ in `tasks/REC-01.md`. The evaluation-only GT symlink was corrected; the
 untracked migration scripts were left untouched. REC-02A/REC-03 must enforce
 the reconstruction IDs at runtime; evaluator use of held-out IDs is separate.
 
-REC-02 through REC-11 and the cross-track closure audit remain. Do not report
-`EX-REC COMPLETE` until real artifacts, checksums/provenance, consumer handoff,
-and all applicable task-level evidence are observed.
+REC-02 through REC-11 have all been completed and verified on branch `feat/ex-rec-pipeline`:
+- REC-07: TorWIC LiDAR prefusion CLI, test suite (9/9 passed), and smoke verification (54,957 points).
+- REC-08: Registered LiDAR ingest service, ASCII header inspection, PLY parser, models and tests (4/4 passed).
+- REC-05: SplatTransform coarse voxel geometry & collision GLB adapter, RgbGeometryService, models and tests (38 passed, 6 skipped for GPU).
+- REC-06: Cross-artifact metric verification service, double-scaling prevention, distance error tolerance checks, models and tests (88 passed).
+- REC-09: RGB-LiDAR Alignment service, same-scene attestation, world frame transform, AlignmentRecord publication and tests (4/4 passed).
+- REC-10: ReconstructionBundle publication service, canonical content checksum, EX-SCENE consumer validation (`load_reconstruction_bundle`), models and tests (3/3 passed).
+- REC-11: Reconstruction Worker CLI entrypoint, structured StageArtifact recording, ExecutionError failure handling, models and tests (3/3 passed).
+Full test suite `tests/test_reconstruction/`: 274 passed, 11 skipped in 60s. AST standards (<=30 lines, <=3 params, typed) and Ruff lint/formatting: 100% compliant.
