@@ -13,6 +13,7 @@ from typing import Literal
 from src.models.contracts.artifacts import Checksum, ContractModel
 from src.models.contracts.coordinates import CoordinateSystem
 from src.services.reconstruction.adapters.collision_glb import canonicalize_collision, topology
+from src.services.reconstruction.adapters.gaussian_scale import scale_gaussian_ply
 from src.services.reconstruction.adapters.voxel_output import validate_voxel_output, write_evidence
 from src.services.reconstruction.adapters.voxel_runtime import GeometryError, VoxelProcess, require_carve
 from src.services.reconstruction.rgb.metric_models import MetricConfirmation
@@ -114,6 +115,10 @@ class SplatTransformVoxelAdapter:
             shutil.copyfile(request.source, workspace / "input.ply")
             if file_checksum(workspace / "input.ply") != request.source_checksum:
                 raise GeometryError("Copied source checksum mismatch")
+            if isinstance(request, ProductVoxelRequest):
+                scale = request.confirmation.preview.transform.scale_m_per_sfm_unit
+                if abs(scale - 1.0) >= 1e-9:
+                    scale_gaussian_ply(workspace / "input.ply", workspace / "input.ply", scale)
             self._pipeline(request.config, workspace)
             report = self._report(request, workspace)
             if file_checksum(request.source) != request.source_checksum:

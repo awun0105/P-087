@@ -1,8 +1,12 @@
 /** REC-05: upstream Gaussian validation; không tự viết parser PLY. */
-import { openSync, closeSync, fstatSync, readSync, writeFileSync } from 'node:fs';
+import { openSync, closeSync, fstatSync, readSync, writeFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const api = await import(pathToFileURL(process.argv[2]).href);
+const moduleTarget = statSync(process.argv[2]).isDirectory()
+    ? join(process.argv[2], 'dist', 'index.mjs')
+    : process.argv[2];
+const api = await import(pathToFileURL(moduleTarget).href);
 if (api.version !== '3.6.6' || api.revision !== 'afbc281') throw new Error('Unqualified splat runtime');
 
 class FileStream extends api.ReadStream {

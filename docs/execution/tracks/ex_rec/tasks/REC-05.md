@@ -314,3 +314,16 @@ process/Gaussian guards → `f12ceae` collision GLB/axis boundary → `9a18410`
 pipeline/output validation → `dd1e71e` real codec tests → `5a7dbdc` synthetic GPU
 smoke → `cca15ea` dependency docs → `f350989` real skipped-carve negative test.
 User yêu cầu commits nhỏ; không push/merge/đổi branch hoặc sửa shared contracts.
+
+### Checkpoint 2026-09-26 — Tích hợp Re3Sim Gaussian Scaling & Fix ESM Loader
+1. **Gaussian Scale Adapter (Re3Sim):**
+   - File: `src/services/reconstruction/adapters/gaussian_scale.py`
+   - Phép biến đổi đồng dạng cho 3DGS PLY: Tọa độ xyz được nhân với hệ số co giãn $s$; các thuộc tính log-scale covariance `scale_0, scale_1, scale_2` được cộng thêm $\ln(s)$ theo chuẩn toán học 3DGS ($\sigma_i = \exp(scale\_i)$).
+   - Tích hợp vào `SplatTransformVoxelAdapter._execute`: Tự động co giãn `input.ply` thành working derivative hệ mét chuẩn khi xử lý `ProductVoxelRequest` mà không làm biến đổi source master gốc trong artifact store.
+2. **ESM Entrypoint Resolution:**
+   - File: `src/services/reconstruction/adapters/voxel_inspect.mjs`
+   - Khắc phục lỗi `ERR_UNSUPPORTED_DIR_IMPORT` trên Node.js v24 bằng cách phân giải directory path sang entrypoint chuẩn `dist/index.mjs`.
+3. **Kiểm thử:**
+   - Files: `tests/test_reconstruction/test_rec05_scale.py`, `tests/test_reconstruction/test_rec05_real_codec.py`
+   - Kết quả: `pytest tests/test_reconstruction/test_rec05*.py -v` đạt 41 passed; real splat-transform inspection 5 passed.
+
