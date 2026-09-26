@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 import trimesh
 
@@ -300,3 +301,59 @@ def test_safe_compute_bounds_logs_warning_on_fallback(caplog: pytest.LogCaptureF
         )
     assert spec is not None
     assert any("Kích hoạt fallback an toàn" in record.message for record in caplog.records)
+
+
+def test_generate_collider_supports_points_attribute() -> None:
+    """Hỗ trợ các đối tượng hình học dùng thuộc tính .points thay vì .vertices."""
+
+    class MockPointCloudWithPoints:
+        def __init__(self, points: list[list[float]]) -> None:
+            self.points = np.array(points, dtype=float)
+
+    custom_geo = MockPointCloudWithPoints([[1.0, 2.0, 3.0], [3.0, 4.0, 5.0]])
+    spec = generate_collider_from_geometry(
+        geometry=custom_geo,  # type: ignore[arg-type]
+        collider_type=ColliderType.AABB,
+        parent_frame="world",
+        collider_id="col-points-attr",
+    )
+    assert spec is not None
+    assert spec.dimensions_xyz_m == (2.0, 2.0, 2.0)
+    assert spec.local_transform.translation_xyz == (2.0, 3.0, 4.0)
+
+
+def test_fallback_center_preserves_object_position_far_from_origin() -> None:
+    """Khi bounds lỗi, fallback box giữ đúng vị trí centroid của đối tượng ở xa gốc toạ độ thay vì nhảy về (0,0,0)."""
+
+    class MockMalformedMeshWithCentroid:
+        def __init__(self, centroid: tuple[float, float, float]) -> None:
+            self.centroid = np.array(centroid)
+            self.bounds = None
+            self.vertices = np.array([[float("nan"), float("nan"), float("nan")]])
+
+    geo_far = MockMalformedMeshWithCentroid(centroid=(25.0, 50.0, 10.0))
+    spec = generate_collider_from_geometry(
+        geometry=geo_far,  # type: ignore[arg-type]
+        collider_type=ColliderType.AABB,
+        parent_frame="world",
+        collider_id="col-far-fallback",
+    )
+    assert spec is not None
+    assert spec.dimensions_xyz_m == (0.01, 0.01, 0.01)
+    assert spec.local_transform.translation_xyz == (25.0, 50.0, 10.0)
+
+
+def test_explicit_user_fallback_center() -> None:
+    """Caller có thể chỉ định explicit fallback_center khi geometry rỗng/lỗi."""
+    empty_pc = trimesh.points.PointCloud(vertices=[])
+    spec = generate_collider_from_geometry(
+        geometry=empty_pc,
+        collider_type=ColliderType.AABB,
+        parent_frame="world",
+        collider_id="col-explicit-center",
+        fallback_on_empty=True,
+        fallback_center=(100.0, -50.0, 2.0),
+    )
+    assert spec is not None
+    assert spec.dimensions_xyz_m == (0.01, 0.01, 0.01)
+    assert spec.local_transform.translation_xyz == (100.0, -50.0, 2.0)

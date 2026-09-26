@@ -101,9 +101,47 @@ def _dims_and_center_from_extrema(
     return dims, center
 
 
+def _resolve_fallback_center(
+    geometry: Any,
+    user_fallback_center: tuple[float, float, float] | None = None,
+) -> tuple[float, float, float]:
+    """Xác định vị trí tâm an toàn cho fallback box, tránh đặt tùy tiện tại gốc (0,0,0)."""
+    if user_fallback_center is not None and all(np.isfinite(user_fallback_center)):
+        return user_fallback_center
+
+    raw = getattr(geometry, "vertices", getattr(geometry, "points", None))
+    # 1. Thử tính nanmedian từ raw vertices/points nếu có
+    if raw is not None:
+        try:
+            arr = np.asarray(raw, dtype=float)
+            if arr.ndim == 2 and arr.shape[1] == 3 and arr.size > 0 and np.any(np.isfinite(arr)):
+                with np.errstate(all="ignore"):
+                    med = np.nanmedian(arr, axis=0)
+                if np.all(np.isfinite(med)):
+                    return (float(med[0]), float(med[1]), float(med[2]))
+        except Exception:
+            pass
+
+    # 2. Thử lấy từ centroid hoặc center_mass (bỏ qua nếu raw tồn tại nhưng rỗng để tránh warning)
+    if raw is None or len(raw) > 0:
+        for attr in ("centroid", "center_mass"):
+            try:
+                with np.errstate(all="ignore"):
+                    val = getattr(geometry, attr, None)
+                if val is not None:
+                    arr = np.asarray(val, dtype=float).flatten()
+                    if len(arr) == 3 and np.all(np.isfinite(arr)):
+                        return (float(arr[0]), float(arr[1]), float(arr[2]))
+            except Exception:
+                pass
+
+    return (0.0, 0.0, 0.0)
+
+
 def _safe_compute_bounds(
     geometry: trimesh.Trimesh | trimesh.PointCloud,
     min_dimension_m: float = MIN_COLLIDER_EXTENT_M,
+    fallback_center: tuple[float, float, float] | None = None,
 ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
     """Tính toán bounds và tâm an toàn, ghi log cảnh báo khi dữ liệu lỗi hoặc suy biến."""
     try:
@@ -116,7 +154,7 @@ def _safe_compute_bounds(
         logger.warning("Không thể đọc bounds từ geometry: %s", exc)
 
     try:
-        raw_verts = getattr(geometry, "vertices", None)
+        raw_verts = getattr(geometry, "vertices", getattr(geometry, "points", None))
         if raw_verts is not None and len(raw_verts) > 0:
             verts = np.asarray(raw_verts)
             valid_verts = verts[np.all(np.isfinite(verts), axis=1)]
@@ -130,16 +168,19 @@ def _safe_compute_bounds(
     except Exception as exc:
         logger.warning("Không thể tính bounds từ vertices: %s", exc)
 
+    resolved_center = _resolve_fallback_center(geometry, fallback_center)
     logger.warning(
-        "Kích hoạt fallback an toàn (%sm) cho collider bounds do không tính được từ geometry.",
+        "Kích hoạt fallback an toàn (%sm) tại tâm %s do không tính được bounds từ geometry.",
         min_dimension_m,
+        resolved_center,
     )
-    return (min_dimension_m, min_dimension_m, min_dimension_m), (0.0, 0.0, 0.0)
+    return (min_dimension_m, min_dimension_m, min_dimension_m), resolved_center
 
 
 def _extract_obb_params(
     mesh: trimesh.Trimesh,
     min_dimension_m: float = MIN_COLLIDER_EXTENT_M,
+    fallback_center: tuple[float, float, float] | None = None,
 ) -> tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float, float]]:
     """Tính kích thước, vị trí offset và góc quay quaternion của OBB."""
     try:
@@ -157,7 +198,11 @@ def _extract_obb_params(
     except Exception as exc:
         logger.warning("Không thể tính OBB từ mesh: %s. Fallback sang AABB bounds.", exc)
 
-    dims, center = _safe_compute_bounds(mesh, min_dimension_m=min_dimension_m)
+    dims, center = _safe_compute_bounds(
+        mesh,
+        min_dimension_m=min_dimension_m,
+        fallback_center=fallback_center,
+    )
     return dims, center, (0.0, 0.0, 0.0, 1.0)
 
 
@@ -168,15 +213,20 @@ def generate_collider_from_geometry(
     collider_id: Identifier,
     min_dimension_m: float = MIN_COLLIDER_EXTENT_M,
     fallback_on_empty: bool = False,
+    fallback_center: tuple[float, float, float] | None = None,
 ) -> ColliderSpec:
     """Sinh ColliderSpec từ đối tượng hình học (Trimesh hoặc PointCloud)."""
-    raw_verts = getattr(geometry, "vertices", None)
+    raw_verts = getattr(geometry, "vertices", getattr(geometry, "points", None))
     if (raw_verts is None or len(raw_verts) == 0) and not fallback_on_empty:
         raise ValueError("Geometry không chứa đỉnh nào để sinh collider.")
 
     if collider_type == ColliderType.OBB and isinstance(geometry, trimesh.Trimesh):
         try:
-            extents, trans, rot_q = _extract_obb_params(geometry, min_dimension_m=min_dimension_m)
+            extents, trans, rot_q = _extract_obb_params(
+                geometry,
+                min_dimension_m=min_dimension_m,
+                fallback_center=fallback_center,
+            )
             req = BoxSpecRequest(
                 dimensions_xyz_m=extents,
                 parent_frame=parent_frame,
@@ -189,7 +239,11 @@ def generate_collider_from_geometry(
         except Exception as exc:
             logger.warning("Lỗi khi tạo OBB collider: %s. Fallback sang AABB.", exc)
 
-    dims, center = _safe_compute_bounds(geometry, min_dimension_m=min_dimension_m)
+    dims, center = _safe_compute_bounds(
+        geometry,
+        min_dimension_m=min_dimension_m,
+        fallback_center=fallback_center,
+    )
     req = BoxSpecRequest(
         dimensions_xyz_m=dims,
         parent_frame=parent_frame,
