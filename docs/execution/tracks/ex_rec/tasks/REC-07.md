@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-REC` |
 | Priority | `P0` |
-| Status | `TODO` |
+| Status | `IN_PROGRESS` |
 | Owner | `@awun0105` |
 | Target milestone | `M1/M2` |
 
@@ -62,7 +62,39 @@ Giữ tool/research repo ở process/adapter boundary; không kéo toàn bộ re
 
 ## 9. Implementation Plan
 
-Assignee điền sau khi inspect code/test hiện tại: files cụ thể, sequence, failure handling và proof. Không đổi goal, I/O hoặc authority gate của task.
+### Task Capsule / bootstrap 2026-09-26
+
+- Outcome: reproducible offline scan→registered PLY, bằng Open3D primitives,
+  không claim đã canonical/confirmed RGB alignment.
+- Authority: PRD FR-05/06; Dataset Playbook §13.4, §15 (controlled prefusion);
+  Contract §3.5; Track Guide REC-07; Architecture `scripts/torwic/` ownership.
+- Baseline: branch `feat/ex-rec`, HEAD `c98df2a`, clean; entrypoint hiện chỉ là
+  placeholder. REC-01 source/normalized metadata tồn tại. Raw trajectory là TUM
+  timestamp + xyz + xyzw; source-frame hypothesis `os_sensor`, axes UNVERIFIED.
+- Inputs: explicit checksum-bound scans/poses/timestamps/calibration và config;
+  output: new attempt directory có PLY, manifest, point stats, source/runtime/code
+  checksums. Giữ raw input bất biến và không xuất absolute private paths.
+- Owned: `scripts/torwic/`, EX-REC tests, task/active plan. Không sửa raw/GT,
+  shared schemas, app dependency locks, other tracks hoặc source-frame evidence.
+- Reuse audit: Open3D **0.19.0**, MIT, `isl-org/Open3D` v0.19.0;
+  [license](https://raw.githubusercontent.com/isl-org/Open3D/v0.19.0/LICENSE),
+  [read_point_cloud](https://www.open3d.org/docs/0.19.0/python_api/open3d.io.read_point_cloud.html),
+  [PointCloud](https://www.open3d.org/docs/0.19.0/python_api/open3d.geometry.PointCloud.html).
+  REUSE PCD/PLY IO, transform and voxel downsample; NumPy arrays/sort. SELF-CODE
+  orchestration, timestamp/identity checks, manifest/immutable publication. Không
+  copy research modules, tự viết odometry hoặc đưa toàn dependency vào app env.
+- Runtime riêng `data/rec07_runtime`; app `.venv` không có Open3D/NumPy. Disk
+  còn khoảng 7.8 GiB ở bootstrap: bắt đầu small smoke, bound point budget,
+  không chạy full sequence trước khi biết memory/output size.
+- Sequence: typed request/path/pose validation → Open3D bounded workflow → CLI
+  và immutable manifest → tests synthetic + real small-sequence reproducibility.
+- Proof: missing/stale source, path escape, undeclared GT, timestamp/frame
+  mismatch, bad quaternion/nonfinite/empty cloud đều reject; known transform
+  đúng chiều, sorted output deterministic, rerun cùng input hash bằng nhau;
+  existing attempt không overwrite. Real GT-assisted output ghi nhãn đúng.
+- Unknown: full canonical axes và RGB correspondence chưa confirmed; không chặn
+  offline prefusion trong explicitly declared native frame, nhưng không được
+  nâng output đó thành unified metric scene.
 
 ## 10. Tests
 
