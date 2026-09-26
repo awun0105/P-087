@@ -58,6 +58,13 @@ Giữ tool/research repo ở process/adapter boundary; không kéo toàn bộ re
 
 ## 9. Implementation Plan
 
+Audit 2026-09-27: trước full JobManifest wiring, sửa false-success boundary:
+module main guard, request required, strict CLI/config binding, injected REC-10
+validation ports thay import storage implementation vào worker. Stage success
+chỉ sau publish + resolver verification; structured redacted error không lộ
+private paths, output create-only. Không gọi wrapper publish-bundle là full
+reconstruction pipeline; InputManifest/JobManifest dispatch còn cần integration.
+
 1. Thiết kế `WorkerConfig` và `WorkerExecutionResult` chuẩn Pydantic ContractModel.
 2. Triển khai `ReconstructionWorker`: nhận `WorkerConfig`, `ArtifactWriter`, `ArtifactResolver`.
 3. Điều phối stage `METRIC_CANONICALIZE` gọi `ReconstructionBundleService.build_and_publish`.
@@ -82,6 +89,26 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 
 ### Result / Evidence 2026-09-26 — Refactor REC-11 Hoàn thành (DONE)
 
+**Audit 2026-09-27 supersedes historical DONE:** CLI module từng no-op exit 0
+do thiếu main guard; request rỗng được xem success. Hai subprocess red tests
+đã tái hiện và sửa. Request bắt buộc, config/CLI job/store/workspace phải khớp,
+không fallback broad exception; atomic create-only result, redacted structured
+failure, core worker nhận `BundleDependencies` thay storage implementation.
+CLI composition root chỉ gọi public storage facade.
+
+Current scope explicit `verified_bundle_publication` trong config/result;
+không claim full reconstruction dispatch. SUCCEEDED chỉ sau REC-10 validation,
+publication và byte resolver check. CLI không có qualified production verifier
+cho REC-06 nên fail closed kể cả caller tự ghi CONFIRMED. Không bật fixture
+verifier bằng CLI flag. Injected synthetic fixture worker success là unit/contract
+proof, không real product approval. InputManifest/JobManifest dispatch/lifecycle
+và retry orchestration vẫn pending; không sửa shared contract để né dependency.
+
+Validation: REC-10/11 **31 passed**, EX-REC **338 passed/11 skipped**, current
+SCENE bundle consumer + artifact store **10 passed**, Ruff **185 files pass**.
+Contract/integration hai SceneIR fixture checksum failures và full suite thiếu
+NumPy ở SIM vẫn hiện diện ngoài ownership (xem REC-10 audit evidence).
+
 - Module: `src/services/reconstruction/worker.py`
   - `WorkerConfig`, `WorkerExecutionResult`, `ReconstructionWorker`, `create_cli_parser`, `main`.
   - Hỗ trợ tham số `--request` nạp file cấu hình JSON (`WorkerConfig` hoặc `BundleBuildRequest`) và `--output` ghi `WorkerExecutionResult` có cấu trúc.
@@ -96,4 +123,3 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
   - Max args: 3 parameters.
   - Type annotations đầy đủ.
   - Ruff check & format: pass 100%.
-

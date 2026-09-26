@@ -86,6 +86,18 @@ match; REC-07 exact replay same PLY checksum under `rec07_audit_20260927`.
 Native preparation stays UNVERIFIED/GT-assisted. Auto-promotion disabled;
 reviewed coordinate conversion remains pending, not whole-track blocker.
 
+REC-10/11 checkpoint: fail-closed bundle readiness ports, exact dependency bytes,
+explicit metric/canonical selection, immutable proof refs/alignment reload;
+CLI now executable/request-required/config-bound/redacted/create-only. Scope
+`verified_bundle_publication` only; CLI production metric verifier not yet wired.
+Focused 31 pass; EX-REC 338 pass/11 skipped; consumer/store 10 pass; Ruff185 pass.
+Broader contracts/integration94 pass/2 existing SceneIR fixture failures; full
+suite cannot collect SIM without NumPy. No other-track files changed.
+Next executable step: replace REC-05 scalar-only PLY copier with full similarity
+transform via pinned SplatTransform; then REC-06 actual canonical derivatives,
+independent-distance proof and real verifier wiring. Capsule/seed validation and
+native LiDAR coordinate review remain explicit pending work, not fake acceptance.
+
 Owner mở rộng execution request 2026-09-26: implement toàn bộ EX-REC tasks còn
 lại, agent tự chọn dependency order và tận dụng core reference repos tương ứng.
 Commit tuần tự từng coherent implementation đã kiểm tra; không push/merge.
