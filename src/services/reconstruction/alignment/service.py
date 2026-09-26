@@ -1,9 +1,9 @@
 """Service xác nhận và xuất bản AlignmentRecord giữa RGB và LiDAR (REC-09)."""
 
 import hashlib
+import json
 
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
-from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.manifests import StageId
 from src.models.contracts.reconstruction import AlignmentRecord
 from src.services.reconstruction.alignment.models import AlignmentRequest
@@ -20,8 +20,19 @@ class RgbLidarAlignmentService:
         """Thẩm định tiền điều kiện, tính toán canonical checksum và xuất bản AlignmentRecord."""
         request = AlignmentRequest.model_validate(request.model_dump())
         self._validate_request(request)
-        record = self._build_record(request)
-        payload = record.model_dump_json(indent=2).encode() + b"\n"
+        evidence_data = dict(
+            schema_version="1.0",
+            method=request.method,
+            status=request.status.value,
+            job_id=request.job_id,
+            source_lidar_checksum=request.lidar_geometry_ref.artifact_checksum,
+            target_rgb_geometry_checksum=request.rgb_geometry_ref.artifact_checksum,
+            transform_target_from_source=request.transform_target_from_source.model_dump(mode="json"),
+            provenance=request.provenance,
+        )
+        payload = json.dumps(evidence_data, sort_keys=True, indent=2).encode() + b"\n"
+        file_checksum = "sha256:" + hashlib.sha256(payload).hexdigest()
+        record = self._build_record(request, file_checksum)
         ref = self._publish_record(request.job_id, record, payload)
         return record, ref
 
@@ -36,13 +47,13 @@ class RgbLidarAlignmentService:
         if tf.parent_frame != "world":
             raise ValueError("alignment target frame must be canonical 'world'")
 
-    def _build_record(self, request: AlignmentRequest) -> AlignmentRecord:
-        uri = f"artifact://jobs/{request.job_id}/rec09/alignment_record.json"
+    def _build_record(self, request: AlignmentRequest, checksum: str) -> AlignmentRecord:
+        uri = f"artifact://jobs/{request.job_id}/rec09/alignment_evidence.json"
         data = dict(
             artifact_type="AlignmentRecord",
             schema_version="1.0",
             artifact_uri=uri,
-            artifact_checksum="sha256:" + "0" * 64,
+            artifact_checksum=checksum,
             producer_stage=StageId.RGB_LIDAR_ALIGN,
             job_id=request.job_id,
             source_lidar_checksum=request.lidar_geometry_ref.artifact_checksum,
@@ -53,7 +64,6 @@ class RgbLidarAlignmentService:
             evidence_refs=[r.model_dump(mode="json") for r in request.evidence_refs],
             provenance=request.provenance,
         )
-        data["artifact_checksum"] = canonical_content_checksum(data, "artifact_checksum")
         return AlignmentRecord.model_validate(data)
 
     def _publish_record(self, job_id: str, record: AlignmentRecord, payload: bytes) -> ProductArtifactRef:

@@ -44,6 +44,10 @@ class GeometryPublisher:
         self.writer = writer
         self.job_id = job_id
 
+    def for_job(self, job_id: str) -> "GeometryPublisher":
+        """Tạo instance publisher trỏ tới job_id mục tiêu."""
+        return GeometryPublisher(self.writer, job_id)
+
     def publish_mesh(self, name: str, payload: bytes, provenance: dict) -> ProductArtifactRef:
         """Xuất bản collision mesh glb với provenance đầy đủ."""
         ref = ProductArtifactRef(
@@ -155,6 +159,7 @@ class RgbGeometryService:
             voxel_resolution_m=request.config.resolution_m,
             coordinate_system=CoordinateSystem().model_dump(mode="json"),
         )
-        mesh_ref = self.deps.publisher.publish_mesh("collision.glb", mesh_bytes, provenance)
-        meta_ref = self.deps.publisher.publish_metadata("geometry.voxel.json", meta_bytes, provenance)
+        pub = self.deps.publisher.for_job(request.job_id)
+        mesh_ref = pub.publish_mesh("collision.glb", mesh_bytes, provenance)
+        meta_ref = pub.publish_metadata("geometry.voxel.json", meta_bytes, provenance)
         return GeometryExecutionResult(geometry_ref=mesh_ref, metadata_ref=meta_ref, report=report)

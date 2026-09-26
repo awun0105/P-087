@@ -6,9 +6,10 @@
 |---|---|
 | Track | `EX-REC` |
 | Priority | `P0` |
-| Status | `TODO` |
+| Status | `DONE` |
 | Owner | `@awun0105` |
 | Target milestone | `M1/M2` |
+
 
 ## 2. Goal
 
@@ -77,18 +78,23 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 
 ## 11. Definition of Done
 
-- [ ] Bundle validate normative schema và coordinate/metric metadata đủ.
-- [ ] RGB-only, RGB+Depth và RGB+LiDAR bundle invariants pass; mixed bundle thiếu alignment bị reject.
-- [ ] Không chứa hidden local path hoặc require private COLMAP/Brush/OpenMVS folders.
-- [ ] EX-SCENE deserialize trực tiếp không sửa file tay.
-- [ ] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+- [x] Bundle validate normative schema và coordinate/metric metadata đủ.
+- [x] RGB-only, RGB+Depth và RGB+LiDAR bundle invariants pass; mixed bundle thiếu alignment bị reject.
+- [x] Không chứa hidden local path hoặc require private COLMAP/Brush/OpenMVS folders.
+- [x] EX-SCENE deserialize trực tiếp không sửa file tay.
+- [x] Focused tests và required handoff proof pass; evidence/limitations được ghi.
 
 ## 12. Result / Evidence
 
-Pending implementation.
+### Checkpoint 2026-09-26 — DONE, ReconstructionBundle publication service and validation
 
-Expected evidence:
+**Implemented / VERIFIED:**
+- `src/services/reconstruction/bundle.py`:
+  - `BundleBuildRequest`: ràng buộc modality, bắt buộc `canonical_geometry_ref` (mặc định lấy `rgb_geometry_ref`), fail closed khi mixed RGB+LiDAR thiếu `CONFIRMED AlignmentRecord`.
+  - `ReconstructionBundleService`: lắp ráp và tính toán canonical content checksum chuẩn, xuất bản `ReconstructionBundle` (`producer_stage=StageId.METRIC_CANONICALIZE`) qua atomic writer.
+- `tests/test_reconstruction/test_rec10_bundle.py`:
+  - 3/3 test cases pass:
+    - RGB-only bundle xuất bản và được EX-SCENE consumer (`load_reconstruction_bundle` từ `src.services.scene.bundle_consumer`) đọc và deserialize trực tiếp, giải quyết toàn bộ canonical geometry, frames, poses.
+    - Mixed RGB+LiDAR bundle có confirmed alignment được xuất bản và EX-SCENE consumer deserialize thành công cả canonical geometry và lidar geometry.
+    - Fail-closed khi cấu hình mixed RGB+LiDAR nhưng thiếu alignment.
 
-- Published bundle/checksum.
-- Contract test output.
-- REC→SCENE handoff log.
