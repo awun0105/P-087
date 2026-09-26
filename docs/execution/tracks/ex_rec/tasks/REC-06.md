@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-REC` |
 | Priority | `P0` |
-| Status | `TODO` |
+| Status | `IN_PROGRESS` |
 | Owner | `@awun0105` |
 | Target milestone | `M2` |
 
@@ -76,7 +76,43 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
 
 ## 9. Implementation Plan
 
-Assignee điền sau khi inspect code/test hiện tại: files cụ thể, sequence, failure handling và proof. Không đổi goal, I/O hoặc authority gate của task.
+### Bootstrap / Task Capsule 2026-09-26
+
+- Outcome: pha đầu REC-06 bằng fixture — similarity math, scale preview, explicit
+  confirmation/provenance và checksum-bound internal handoff. Không xác nhận scale
+  Aisle_CW khi chưa có locked anchor và canonical frame evidence.
+- Bootstrap: branch `feat/ex-rec`, HEAD `33718fe`, worktree sạch. User đồng ý
+  triển khai và tiếp tục commits nhỏ; không push/merge hoặc cập nhật branch từ remote.
+- Authority: PRD FR-06 (chọn A/B → khoảng cách thật → preview → user confirm),
+  AC-03; Contract §3.1/§4; Dataset Playbook Track A2 (anchor khác evaluation
+  distance); Integration §3.3/§4.1; Track Guide REC-06; Architecture EX-REC paths.
+- Inputs: published REC-03/04 refs + anchor/frame declarations + acceptance proof.
+  Outputs: internal EX-REC preview/confirmation record và deterministic conversion
+  provenance. Không sửa shared `MetricScale`, `Transform` hoặc `ReconstructionBundle`.
+- Dependencies: REC-03/04 resolvers và injected ArtifactWriter đã có; REC-05 có
+  synthetic pipeline. Real anchor/frame/robot inputs, Editor authorization backend
+  và final independent-distance protocol chưa có. Fixtures phải gắn nhãn synthetic.
+- Owned: `src/services/reconstruction/rgb/`, `tests/test_reconstruction/`, task này
+  và checkpoint plan đang có. Do-not-modify: shared contracts, other tracks,
+  master PLY, evaluation-only data và task scope/DoD đã khóa.
+- Source audit: Re3Sim `681da6f5d842f0de6c573a077926fe3722924708`, root CC BY-NC 4.0;
+  `frame_tools.py` chỉ REFERENCE concept `s R p + t`, frame direction, xyzw/wxyz
+  boundary. Không copy source hoặc thêm NumPy/SciPy/Torch chỉ để mang frame graph
+  vào task. Locked runtime hiện dùng Pydantic 2.13.5; stdlib đủ cho bounded math.
+- Một anchor distance chỉ xác định scale, không suy rotation/origin. Canonical
+  frame phải explicit và được xác nhận cùng preview. Không auto-align bằng GT.
+- Proof trước code: finite positive scale/unit quaternion, nontrivial rotation +
+  translation, inverse/pose propagation; missing verifier/acceptance rejected;
+  stale preview/source/decision checksum rejected; immutable published record
+  resolve được; synthetic record không được consumer nhận như real confirmation;
+  applied-transform provenance chặn scale lần hai.
+- Sequence: typed math + unit tests → internal record models/validators →
+  preview/confirmation/resolver qua existing storage seam → fixture handoff và
+  negative tests → full suite/lint/diff review → task evidence, granular commits.
+- Boundary: phase này không áp transform lên real Gaussian payload, không expose
+  product UI/auth, không final bundle/publication hoặc claim REC-06 DONE.
+  Tolerance final theo locked protocol; không tự hardcode ghi chú `<2cm` ở §8
+  thành product gate khi PRD §2.2/AC-03 yêu cầu threshold được khóa trước evaluation.
 
 Ordering đã khóa theo Integration §3.3:
 1. Xác nhận locked real-world anchor và similarity transform từ REC-03/04; xuất
