@@ -38,7 +38,7 @@ Real2Sim Studio tổ chức một workflow thống nhất:
 | Agent scaffold | LangGraph, LangChain, multi-provider LLM | Có sẵn, chưa phải Real2Sim pipeline |
 | Reconstruction | FFmpeg, COLMAP, Brush, splat-transform, Open3D; OpenMVS fallback | Planned integration |
 | Scene/Object | SAM2, Open3D, NumPy | Planned integration |
-| Simulation | OpenUSD, NVIDIA Isaac Sim, IsaacLab | Planned integration |
+| Simulation | Trimesh, Scipy, OpenUSD, NVIDIA Isaac Sim, IsaacLab | Preflight rules & Collider generator (SIM-02/04) đã hoàn thành; Isaac Sim runtime đang phát triển |
 | Frontend | Next.js, React, TypeScript, PlayCanvas Engine + supersplat-viewer | Planned; chưa scaffold |
 | DevOps | Docker, Docker Compose, GitHub Actions | Scaffold backend và CI config; chưa chứng minh full product deployment |
 
@@ -67,6 +67,8 @@ Chạy kiểm tra:
 ```bash
 make lint
 make test
+# Chạy bộ unit tests của EX-SIM (preflight & colliders):
+pytest tests/test_simulation/ -v
 ```
 
 Chạy bằng Docker:
@@ -159,8 +161,8 @@ Response mẫu:
 - [ ] Live URL / Deploy
 - [ ] Video Demo
 - [ ] Pitch Deck (`presentation/`)
-- [ ] Weekly Journal (`JOURNAL.md` đang là template)
-- [ ] Worklog (`WORKLOG.md` đang là template)
+- [ ] Weekly Journal (`JOURNAL.md` đang cập nhật theo tuần)
+- [x] Worklog ([`WORKLOG.md`](WORKLOG.md) — cập nhật thường xuyên theo lịch sử commit của team)
 - [ ] Evaluation Evidence (`eval/results/`)
 
 ## Team
@@ -169,7 +171,7 @@ Response mẫu:
 |---|---|---|
 | Lâm Quang Anh Quân | `EX-REC` — Reconstruction | 2A202602467 |
 | Đức (tên đầy đủ TBD) | `EX-SCENE` — Scene/Object | Chưa cung cấp |
-| Đạt (tên đầy đủ TBD) | `EX-SIM` — Simulation/Evaluation | Chưa cung cấp |
+| Nguyễn Thọ Đạt | `EX-SIM` — Simulation/Evaluation | 2A202602484 |
 | Lê Mạnh Cường | `EX-PRODUCT` — Product/Orchestration | 2A202602604 |
 
 Track owners đã khóa tại Execution Plan; tên đầy đủ, Student ID và GitHub handles
