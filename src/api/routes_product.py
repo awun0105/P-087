@@ -208,11 +208,17 @@ def edit_job_scene(job_id: str, command: SceneEditCommand) -> schemas.SceneEditR
 
     `expected_scene_revision` là khoá optimistic: client sửa trên revision đã cũ
     sẽ bị 409 chứ không ghi đè thay đổi của người khác.
+
+    `ArtifactStoreError` map sang 409 theo đúng precedent của `/validation` và
+    `/review`: nó nổi lên khi bytes của một revision đã niêm phong không còn khớp
+    ref, tức là xung đột bất biến artifact — không phải lỗi command của client.
     """
     _job_or_404(job_id)
     try:
         return schemas.scene_edit_response(_registry().scene.apply(job_id, command))
     except SceneRevisionConflictError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    except ArtifactStoreError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except SceneError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error

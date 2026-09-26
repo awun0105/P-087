@@ -155,6 +155,60 @@ async def test_edit_on_missing_job_404(client) -> None:
     assert r.status_code == 404
 
 
+# ── restart: revision state must outlive the process ─────────────────────────
+
+
+def _restart_registry(tmp_path, monkeypatch):
+    """Registry mới trên cùng runtime root — mô phỏng backend khởi động lại."""
+    from src.api import routes_product
+    from src.services.orchestration.projects.registry import ProjectRegistry
+
+    registry = ProjectRegistry(runtime_root=tmp_path / "artifacts")
+    registry.seed_from_fixtures()
+    monkeypatch.setattr(routes_product, "get_project_registry", lambda: registry)
+    return registry
+
+
+@pytest.mark.asyncio
+async def test_edit_after_restart_does_not_500(client, tmp_path, monkeypatch) -> None:
+    """Regression: edit đầu tiên sau restart từng trả 500 thay vì revision mới."""
+    first = await client.post(
+        f"{_JOB}/scene/edits",
+        json={
+            "expected_scene_revision": "rev-001",
+            "edits": [{"object_id": "object-pallet-001", "translation_xyz": [3.0, 2.0, 0.0]}],
+        },
+    )
+    assert first.status_code == 201
+    assert first.json()["scene_revision"] == "rev-002"
+
+    _restart_registry(tmp_path, monkeypatch)
+
+    second = await client.post(
+        f"{_JOB}/scene/edits",
+        json={
+            "expected_scene_revision": "rev-002",
+            "edits": [{"object_id": "object-rack-001", "translation_xyz": [7.0, 7.0, 0.0]}],
+        },
+    )
+    assert second.status_code == 201, second.text
+    assert second.json()["scene_revision"] == "rev-003"
+
+
+@pytest.mark.asyncio
+async def test_scene_read_after_restart_reports_persisted_revision(client, tmp_path, monkeypatch) -> None:
+    """Sau restart, `GET /scene` phải trả revision đã persist, không phải `rev-001`."""
+    await client.post(
+        f"{_JOB}/scene/edits",
+        json={
+            "expected_scene_revision": "rev-001",
+            "edits": [{"object_id": "object-pallet-001", "translation_xyz": [3.0, 2.0, 0.0]}],
+        },
+    )
+    _restart_registry(tmp_path, monkeypatch)
+    assert (await _scene(client))["scene_revision"] == "rev-002"
+
+
 # ── artifact content: allow-list, not free-form paths ────────────────────────
 
 

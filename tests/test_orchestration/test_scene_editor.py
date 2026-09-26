@@ -7,6 +7,7 @@ Covers the properties the viewer depends on:
 - Quaternions entering canonical SceneIR are validated, not trusted.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -73,6 +74,81 @@ def test_fixture_checksum_matches_canonical_content(editor: SceneEditor) -> None
     scene = editor.current(_JOB_ID).scene
     assert scene.scene_ir_checksum.startswith("sha256:")
     assert SceneIR.model_validate(scene.model_dump()).scene_ir_checksum == scene.scene_ir_checksum
+
+
+# ── restart recovery ─────────────────────────────────────────────────────────
+
+
+def _restart(tmp_path) -> SceneEditor:
+    """Editor mới trên cùng artifact root — mô phỏng tiến trình khởi động lại."""
+    return SceneEditor(_FIXTURE_ROOT, ArtifactResolver(tmp_path / "artifacts"))
+
+
+def _move_rack(from_revision: str, x: float) -> SceneEditCommand:
+    return SceneEditCommand(
+        expected_scene_revision=from_revision,
+        edits=[TransformEdit(object_id="object-rack-001", translation_xyz=(x, x, 0.0))],
+    )
+
+
+def test_restart_recovers_latest_published_revision(tmp_path, move_pallet: SceneEditCommand) -> None:
+    """Revision không được sống chỉ trong bộ nhớ: tiến trình mới phải thấy bản mới nhất."""
+    first = _restart(tmp_path)
+    first.apply(_JOB_ID, move_pallet)
+    first.apply(_JOB_ID, _move_rack("rev-002", 5.0))
+    assert _restart(tmp_path).current(_JOB_ID).scene.scene_revision == "rev-003"
+
+
+def test_restart_then_edit_does_not_collide(tmp_path, move_pallet: SceneEditCommand) -> None:
+    """Regression: sửa sau restart từng đụng `ArtifactAlreadyExistsError`.
+
+    Tiến trình mới seed `rev-001`, tính ra `rev-002`, nhưng `rev-002` đã có trên đĩa
+    với bytes khác — `_publish_once` re-raise và route trả 500.
+    """
+    _restart(tmp_path).apply(_JOB_ID, move_pallet)
+    result = _restart(tmp_path).apply(_JOB_ID, _move_rack("rev-002", 7.0))
+    assert result.revision.scene.scene_revision == "rev-003"
+
+
+def test_restart_reports_same_reference_as_live_process(tmp_path, move_pallet: SceneEditCommand) -> None:
+    """Hai đường (ghi mới / phục hồi) phải dựng ra ref giống hệt nhau."""
+    live = _restart(tmp_path).apply(_JOB_ID, move_pallet).revision
+    recovered = _restart(tmp_path).current(_JOB_ID)
+    assert recovered.scene_reference == live.scene_reference
+    assert recovered.scene.scene_ir_checksum == live.scene.scene_ir_checksum
+
+
+def test_restart_recovers_supersedes_revision(tmp_path, move_pallet: SceneEditCommand) -> None:
+    """`supersedes_revision` phục hồi từ `provenance["edited_from"]`."""
+    _restart(tmp_path).apply(_JOB_ID, move_pallet)
+    assert _restart(tmp_path).current(_JOB_ID).supersedes_revision == "rev-001"
+
+
+def test_restart_falls_back_to_fixture_when_nothing_published(tmp_path) -> None:
+    """Root sạch thì hành vi cũ giữ nguyên: seed `rev-001`."""
+    revision = _restart(tmp_path).current(_JOB_ID)
+    assert revision.scene.scene_revision == "rev-001"
+    assert revision.supersedes_revision is None
+
+
+def test_restart_rejects_inconsistent_revision(tmp_path, editor: SceneEditor) -> None:
+    """Artifact bị sửa tay phải fail closed, không được phục vụ rồi lan cái sai đi."""
+    path = editor.resolver.require(editor.current(_JOB_ID).scene_reference)
+    tampered = json.loads(path.read_text(encoding="utf-8"))
+    tampered["objects"][0]["transform"]["translation_xyz"] = [99.0, 99.0, 99.0]
+    path.write_text(json.dumps(tampered, indent=2) + "\n", encoding="utf-8")
+
+    with pytest.raises(SceneEditRejectedError, match="canonical content"):
+        _restart(tmp_path).current(_JOB_ID)
+
+
+def test_restart_rejects_revision_with_wrong_name(tmp_path, editor: SceneEditor) -> None:
+    """File `rev-002` chứa document khai `rev-001` là artifact hỏng, không phải rev-002."""
+    source = editor.resolver.require(editor.current(_JOB_ID).scene_reference)
+    editor.resolver.resolve(scene_artifact_uri(_JOB_ID, "rev-002")).write_bytes(source.read_bytes())
+
+    with pytest.raises(SceneEditRejectedError, match="scene_revision"):
+        _restart(tmp_path).current(_JOB_ID)
 
 
 # ── edits produce a new revision ─────────────────────────────────────────────

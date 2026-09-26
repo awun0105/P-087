@@ -20,6 +20,7 @@ from src.services.orchestration.artifacts import (
     ArtifactResolver,
     FilesystemArtifactStore,
     sha256_bytes,
+    sha256_file,
     with_canonical_checksum,
 )
 from src.services.orchestration.scene.errors import (
@@ -37,6 +38,8 @@ from src.services.orchestration.scene.models import (
 
 _REVISION_PATTERN = re.compile(r"^(?P<prefix>.*?)(?P<number>\d+)$")
 _SCHEMA_VERSION = "1.0"
+#: Chặn trên cho vòng dò revision lúc phục hồi; revision tăng 1 mỗi lần sửa.
+_MAX_RECOVERY_STEPS = 1000
 
 
 class SceneEditor:
@@ -52,9 +55,16 @@ class SceneEditor:
     # --- reading ----------------------------------------------------------
 
     def current(self, job_id: str) -> SceneRevision:
-        """Revision hiện tại của một job, seed từ fixture ở lần đọc đầu tiên."""
+        """Revision hiện tại của một job.
+
+        Đọc lần đầu thì phục hồi revision cao nhất đã publish trên đĩa; job chưa có
+        gì mới seed từ fixture. Không có bước này thì revision chỉ sống trong bộ nhớ
+        tiến trình, và sau khi restart editor sẽ phục vụ revision cũ rồi đụng
+        `ArtifactAlreadyExistsError` ở lần sửa kế tiếp.
+        """
         if job_id not in self._revisions:
-            self._revisions[job_id] = self._publish(job_id, self._fixture_scene(), supersedes=None)
+            recovered = self._recover(job_id)
+            self._revisions[job_id] = recovered or self._publish(job_id, self._fixture_scene(), supersedes=None)
         return self._revisions[job_id]
 
     def visual_binding(self) -> VisualBinding:
@@ -179,6 +189,55 @@ class SceneEditor:
             if edit.object_id not in known:
                 raise SceneObjectNotFoundError(f"không tìm thấy scene object: {edit.object_id}")
 
+    # --- recovery ---------------------------------------------------------
+
+    def _recover(self, job_id: str) -> SceneRevision | None:
+        """Revision cao nhất đã publish trên đĩa; None nếu job chưa có gì.
+
+        `ArtifactResolver` cố ý không có API liệt kê thư mục, nên dò tăng dần từ
+        revision của fixture. Chuỗi revision liền mạch theo cấu trúc vì
+        `_next_scene_revision` luôn cộng một, nên dừng ở revision đầu tiên chưa có
+        là đúng; job mới chỉ tốn một lần kiểm tra tồn tại.
+        """
+        revision = self._fixture_scene().scene_revision
+        latest: SceneRevision | None = None
+        for _ in range(_MAX_RECOVERY_STEPS):
+            recovered = self._load_revision(job_id, revision)
+            if recovered is None:
+                return latest
+            latest = recovered
+            revision = _next_scene_revision(revision)
+        raise SceneEditRejectedError(f"chuỗi revision của {job_id} vượt {_MAX_RECOVERY_STEPS} bước")
+
+    def _load_revision(self, job_id: str, revision: str) -> SceneRevision | None:
+        """Đọc một revision đã publish; None nếu chưa có. Hỏng thì raise, không đoán."""
+        path = self.resolver.resolve(scene_artifact_uri(job_id, revision))
+        if not path.is_file():
+            return None
+        reference = self._reference_for(job_id, revision, sha256_file(path))
+        scene = SceneIR.model_validate_json(path.read_text(encoding="utf-8"))
+        self._require_consistent(scene, revision)
+        return SceneRevision(
+            job_id=job_id,
+            scene=scene,
+            scene_reference=reference,
+            supersedes_revision=_edited_from(scene),
+        )
+
+    @staticmethod
+    def _require_consistent(scene: SceneIR, revision: str) -> None:
+        """Artifact đã publish phải tự khớp: đúng tên revision, đúng canonical checksum.
+
+        Checksum ở đây không so với ref (ref được suy ra từ chính file nên phép so
+        đó rỗng nghĩa); nó kiểm nội dung document có khớp `scene_ir_checksum` mà
+        document tự khai hay không. Lệch nghĩa là artifact đã bị sửa tay hoặc ghi
+        hỏng, và phục vụ nó sẽ lan cái sai vào revision kế tiếp.
+        """
+        if scene.scene_revision != revision:
+            raise SceneEditRejectedError(f"artifact {revision} chứa scene_revision {scene.scene_revision}")
+        if scene.scene_ir_checksum != with_canonical_checksum(scene, "scene_ir_checksum").scene_ir_checksum:
+            raise SceneEditRejectedError(f"SceneIR {revision} có checksum không khớp canonical content")
+
     # --- publication ------------------------------------------------------
 
     def _fixture_scene(self) -> SceneIR:
@@ -197,21 +256,31 @@ class SceneEditor:
         tải về, không phải để suy ra nội dung canonical.
         """
         payload = scene.model_dump_json(indent=2).encode("utf-8") + b"\n"
-        reference = ArtifactRef(
-            artifact_type="SceneIR",
-            schema_version=_SCHEMA_VERSION,
-            artifact_uri=scene_artifact_uri(job_id, scene.scene_revision),
-            artifact_checksum=sha256_bytes(payload),
-            data_class=ArtifactDataClass.DERIVED,
-            producer_stage=StageId.EDIT,
-            job_id=job_id,
-        )
+        reference = self._reference_for(job_id, scene.scene_revision, sha256_bytes(payload))
         self._publish_once(reference, payload)
         return SceneRevision(
             job_id=job_id,
             scene=scene,
             scene_reference=reference,
             supersedes_revision=supersedes,
+        )
+
+    @staticmethod
+    def _reference_for(job_id: str, scene_revision: str, checksum: str) -> ArtifactRef:
+        """Ref của một revision đã publish.
+
+        Đường ghi mới và đường phục hồi phải dựng ra ref **bằng nhau từng field**,
+        nếu không thì cùng một revision lại có hai ref khác nhau tuỳ theo tiến trình
+        nào đọc nó — client bind checksum sẽ so sai.
+        """
+        return ArtifactRef(
+            artifact_type="SceneIR",
+            schema_version=_SCHEMA_VERSION,
+            artifact_uri=scene_artifact_uri(job_id, scene_revision),
+            artifact_checksum=checksum,
+            data_class=ArtifactDataClass.DERIVED,
+            producer_stage=StageId.EDIT,
+            job_id=job_id,
         )
 
     def _publish_once(self, reference: ArtifactRef, payload: bytes) -> None:
@@ -239,3 +308,13 @@ def _next_scene_revision(current: str) -> str:
         raise SceneEditRejectedError(f"không suy ra được revision kế tiếp từ: {current}")
     number = int(match.group("number"))
     return f"{match.group('prefix')}{number + 1:0{len(match.group('number'))}d}"
+
+
+def _edited_from(scene: SceneIR) -> str | None:
+    """Revision trước đó, lấy từ provenance do `_build_revision` ghi.
+
+    `supersedes_revision` không nằm trong artifact đã publish, nhưng `edited_from`
+    thì có — nên phục hồi đọc lại được chuỗi revision thay vì trả `None` giả.
+    """
+    previous = scene.provenance.get("edited_from")
+    return previous if isinstance(previous, str) else None
