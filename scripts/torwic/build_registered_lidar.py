@@ -3,14 +3,19 @@
 import argparse
 import json
 import os
+import sys
 import tempfile
 from pathlib import Path
 
-from pydantic import ValidationError
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.torwic.prefusion_inputs import checksum, validate_inputs
-from scripts.torwic.prefusion_models import PrefusionRequest, PrefusionSettings
-from src.models.contracts.identity import canonical_content_checksum
+from pydantic import ValidationError  # noqa: E402
+
+from scripts.torwic.prefusion_inputs import checksum, validate_inputs  # noqa: E402
+from scripts.torwic.prefusion_models import PrefusionRequest, PrefusionSettings  # noqa: E402
+from src.models.contracts.identity import canonical_content_checksum  # noqa: E402
 
 
 def _manifest(request: PrefusionRequest, stats: dict, cloud: Path) -> dict:
@@ -37,6 +42,7 @@ def _manifest(request: PrefusionRequest, stats: dict, cloud: Path) -> dict:
             )
         },
     )
+    result["manifest_checksum"] = "sha256:" + "0" * 64
     result["manifest_checksum"] = canonical_content_checksum(result, "manifest_checksum")
     return result
 
@@ -82,6 +88,10 @@ def main() -> int:
         request = PrefusionRequest.model_validate_json(args.request.read_text())
         manifest = run_prefusion(settings, request)
     except (ValidationError, ValueError, OSError, RuntimeError) as error:
+        if os.environ.get("REC07_DEBUG"):
+            import traceback
+
+            traceback.print_exc()
         print(
             json.dumps(
                 {

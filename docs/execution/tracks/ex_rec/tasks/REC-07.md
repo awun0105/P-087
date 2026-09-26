@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-REC` |
 | Priority | `P0` |
-| Status | `IN_PROGRESS` |
+| Status | `DONE` |
 | Owner | `@awun0105` |
 | Target milestone | `M1/M2` |
 
@@ -106,17 +106,31 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 
 ## 11. Definition of Done
 
-- [ ] Output tái tạo được từ immutable raw input.
-- [ ] Mọi use của `traj_gt` được khai báo rõ.
-- [ ] Artifact không được claim là independent LiDAR mapping benchmark khi methodology không cho phép.
-- [ ] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+- [x] Output tái tạo được từ immutable raw input.
+- [x] Mọi use của `traj_gt` được khai báo rõ.
+- [x] Artifact không được claim là independent LiDAR mapping benchmark khi methodology không cho phép.
+- [x] Focused tests và required handoff proof pass; evidence/limitations được ghi.
 
 ## 12. Result / Evidence
 
-Pending implementation.
+### Evidence 2026-09-26 — REC-07 Hoàn thành (DONE)
 
-Expected evidence:
+1. **Unit & Contract Tests:**
+   - File test: `tests/test_reconstruction/test_rec07_prefusion.py`
+   - Command: `pytest tests/test_reconstruction/test_rec07_prefusion.py -v`
+   - Kết quả: **9 passed in 18.04s** (100% pass).
+   - Kiểm thử: path traversal rejection, frame ID mismatch rejection, GT declaration requirements, output directory boundary (`derived/`), checksum tamper detection, unnormalized quaternion rejection, desynchronized timestamp detection, CLI invocation, và tính đơn định (deterministic SHA-256 byte-for-byte reproducibility).
 
-- Input/output checksums.
-- Prefusion manifest và command/log.
-- Point-cloud stats/preview.
+2. **Real-Tool Smoke Execution trên Aisle_CW:**
+   - Script: `tests/test_reconstruction/rec07_smoke.py`
+   - Command: `data/rec07_runtime/bin/python -m tests.test_reconstruction.rec07_smoke`
+   - Input: Scans 100 đến 104 (`raw/traversals/aisle_cw/lidar/00010[0-4].pcd`, 262.144 points/scan từ cảm biến Ouster OS1-128).
+   - Output directory: `data/torwic_slam/derived/aisle_cw/rec07_smoke_sub100_104/`
+   - Output files:
+     - `registered_lidar.ply` (1.3 MB, checksum: `sha256:9e6893eee58da41142fe82e3279a862bb6e8a5badf6a3e8688efda2500a1df2b`)
+     - `preparation_manifest.json` (checksum: `sha256:f002903e21078da945da81f3ac88241b293dfae8287c7751896292ee3a5fcfd5`)
+   - Thống kê mây điểm:
+     - Tổng điểm hợp nhất (sau voxel filter $0.05\text{m}$): **54.957 điểm**.
+     - Bounds min: `[-11.1444, -17.7897, -0.5411]` mét.
+     - Bounds max: `[14.2995, 32.1617, 6.1304]` mét.
+     - Minh bạch provenance: `assistance_class: "GT-assisted"`, `trajectory_gt_used_for_lidar_prefusion: true`.
