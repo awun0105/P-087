@@ -133,3 +133,52 @@ def test_error_and_fail_cannot_become_pass(valid_scene: SceneIR) -> None:
     report = run_preflight(corrupt)
     assert report.blocking_result != RuleResult.PASS
     assert report.blocking_result == RuleResult.FAIL
+
+
+def test_floor_detected_by_semantic_class(valid_scene: SceneIR) -> None:
+    """Đối tượng có semantic_class='surface' hoặc 'floor' được nhận diện là sàn, không gây false negative."""
+    scene = valid_scene.model_copy(deep=True)
+    # Tìm đối tượng floor trong fixture và đổi id/name sang định danh không chứa chữ 'floor'/'ground'
+    floor_obj = next(o for o in scene.objects if "floor" in o.id)
+    floor_obj.id = "obj-alpha-001"
+    floor_obj.name = "Custom Warehouse Surface Area"
+    floor_obj.semantic_class = "surface"
+    floor_obj.collider = None
+
+    artifact_root = FIXTURES / "artifact_store"
+    report = run_preflight(scene, artifact_store_root=artifact_root)
+    rule = next(r for r in report.rules if r.rule_id == PreflightRuleId.COLLIDER_MISSING)
+    assert rule.result == RuleResult.PASS
+    assert "obj-alpha-001" not in rule.affected_object_ids
+
+
+def test_floor_detected_by_tags_or_provenance(valid_scene: SceneIR) -> None:
+    """Đối tượng có tag trong tags hoặc thuộc tính trong provenance được nhận diện là sàn."""
+    scene = valid_scene.model_copy(deep=True)
+    floor_obj = next(o for o in scene.objects if "floor" in o.id)
+    floor_obj.id = "obj-deck-42"
+    floor_obj.name = "Loading Bay Deck"
+    floor_obj.tags = ["deck", "walkway"]
+    floor_obj.provenance = {"category": "mat_san", "is_floor": True}
+    floor_obj.collider = None
+
+    artifact_root = FIXTURES / "artifact_store"
+    report = run_preflight(scene, artifact_store_root=artifact_root)
+    rule = next(r for r in report.rules if r.rule_id == PreflightRuleId.COLLIDER_MISSING)
+    assert rule.result == RuleResult.PASS
+    assert "obj-deck-42" not in rule.affected_object_ids
+
+
+def test_non_floor_object_without_collider_triggers_failure(valid_scene: SceneIR) -> None:
+    """Vật thể không phải sàn (ví dụ: rack, pallet) thiếu collider vẫn bị bắt lỗi COLLIDER_MISSING chính xác."""
+    scene = valid_scene.model_copy(deep=True)
+    pallet = next(o for o in scene.objects if "pallet" in o.id)
+    pallet.id = "obj-storage-99"
+    pallet.name = "Storage Unit Surface Structure"  # Chứa từ surface nhưng semantic_class là pallet
+    pallet.semantic_class = "pallet"
+    pallet.collider = None
+
+    report = run_preflight(scene)
+    rule = next(r for r in report.rules if r.rule_id == PreflightRuleId.COLLIDER_MISSING)
+    assert rule.result == RuleResult.FAIL
+    assert "obj-storage-99" in rule.affected_object_ids

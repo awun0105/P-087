@@ -156,3 +156,43 @@ def test_generate_collider_rejects_empty_geometry() -> None:
             parent_frame="world",
             collider_id="col-empty",
         )
+
+
+@pytest.mark.filterwarnings("ignore:invalid value encountered in divide")
+def test_degenerate_coplanar_geometry_safe_fallback() -> None:
+    """Hình học phẳng (z=0) không gây lỗi Qhull hay chia cho 0, extents được clamp an toàn."""
+    # 4 đỉnh trên mặt phẳng 2D (chiều dày z = 0)
+    flat_mesh = trimesh.Trimesh(
+        vertices=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
+        faces=[[0, 1, 2], [0, 2, 3]],
+    )
+    spec = generate_collider_from_geometry(
+        geometry=flat_mesh,
+        collider_type=ColliderType.OBB,
+        parent_frame="obj-flat",
+        collider_id="col-flat",
+    )
+    assert spec.collider_type in (ColliderType.OBB, ColliderType.AABB)
+    assert all(d > 0.0 for d in spec.dimensions_xyz_m)
+    # Chiều z bị phẳng phải được clamp tối thiểu 0.01m (1cm)
+    assert min(spec.dimensions_xyz_m) >= 0.01
+
+
+def test_ground_plane_thickness_meets_physics_standard() -> None:
+    """Safeguard 1: Độ dày sàn 0.05m (5cm) đáp ứng tiêu chuẩn PhysX chống tunneling."""
+    plane = create_ground_plane_collider(parent_frame="world")
+    assert plane.dimensions_xyz_m[2] == 0.05
+    # Mặt trên sàn phải nằm chính xác tại z = 0.0 (offset_z = -0.025)
+    offset_z = plane.local_transform.translation_xyz[2]
+    assert pytest.approx(offset_z + plane.dimensions_xyz_m[2] / 2.0) == 0.0
+
+
+def test_create_box_collider_rejects_nan_or_inf() -> None:
+    """Dimensions chứa NaN hoặc Inf phải bị từ chối rõ ràng."""
+    req_nan = BoxSpecRequest(
+        dimensions_xyz_m=(1.0, float("nan"), 1.0),
+        parent_frame="obj-1",
+        collider_id="col-1",
+    )
+    with pytest.raises(ValueError, match="dimensions_xyz_m phải dương và hữu hạn"):
+        create_box_collider(req_nan)

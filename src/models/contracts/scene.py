@@ -68,6 +68,8 @@ class SceneObject(ContractModel):
     asset_ref: ProductArtifactRef | None = None
     primitive_dimensions_xyz_m: tuple[PositiveDimension, PositiveDimension, PositiveDimension] | None = None
     collider: ColliderSpec | None = None
+    semantic_class: str | None = None
+    tags: list[str] = Field(default_factory=list)
     provenance: JsonObject
 
     @model_validator(mode="after")
