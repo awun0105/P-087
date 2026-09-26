@@ -145,10 +145,127 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 
 ## 12. Result / Evidence
 
-Pending implementation.
+### Checkpoint 2026-09-26 — pha đầu triển khai, IN_PROGRESS
 
-Expected evidence:
+**VERIFIED implementation**
 
-- Anchor/confirmation record.
-- Before/after distance evidence.
-- Config/checksum và scale error measurement.
+- `rgb/metric_math.py`: finite positive scale từ distance anchor, explicit
+  `p_world = s R p_sfm + t_m`, unit quaternion xyzw, inverse và canonical camera
+  pose derivative. Camera center được scale; orientation được compose đúng thứ tự,
+  không scale quaternion/intrinsics hoặc mutate raw pose.
+- `rgb/metric_models.py`: internal EX-REC `MetricRequest`, `MetricPreview`,
+  `MetricAcceptance`, `MetricConfirmation`, `MetricConversionPlan`. Preview luôn
+  `UNCONFIRMED`; record scope chỉ `anchor_and_frame_only`. Không sửa shared schema
+  hoặc tự cho whole scene/bundle `CONFIRMED`/physics-ready.
+- `rgb/metric.py`: consume published REC-03/04 refs qua existing `VisualResolver`;
+  verify master/measurement/frame/decision bytes và lineage. Confirm/publish/load
+  đều cần injected acceptance verifier; default không có verifier nên fail closed.
+  Content-addressed record path và existing atomic ArtifactWriter giữ revisions
+  bất biến. Typed `CONFIRMED` hoặc checksum tự nó không phải Editor authorization.
+- Synthetic records có nhãn trong payload và ref provenance; `require_real()`
+  reject fixture confirmation. `conversion_plan()` chỉ trả plan có
+  `payload_converted: false`, source refs, confirmation checksum, transform và
+  shared canonical CoordinateSystem. Input ngoài raw dependency hoặc đã có
+  applied-record checksum đều bị reject để tránh double scaling.
+- `rgb/metric_seed.py` + `propose_navigation_seed()`: lấy camera đầu **registered**,
+  áp confirmed transform, trả source pose/frame/checksum và point trong world.
+  Luôn `UNVALIDATED`, `capsule_clearance_verified: false`. Test riêng cho trường
+  hợp frame đầu registered là 7; không giả định Frame 0 luôn tồn tại. Chưa tự nối
+  candidate này vào carving trước validation bounds/capsule.
+- Local independent-distance helper reject dùng lại calibration anchor kể cả
+  đảo A/B và đổi ID; không đặt acceptance threshold. Actual independent evidence
+  và locked protocol vẫn cần để nghiệm thu task.
+
+**Proof và reproducibility**
+
+```bash
+.venv/bin/pytest tests/test_reconstruction/test_rec06_*.py -q
+.venv/bin/python -m tests.test_reconstruction.rec06_smoke --output data/rec06_smoke/fixture-20260926-02
+.venv/bin/ruff check src/ tests/
+.venv/bin/ruff format --check src/ tests/
+git diff --check
+```
+
+- Focused REC-06: **49 passed** (20.20s), gồm numeric/unit, actual immutable store
+  round-trip, missing/denied/stale acceptance, missing frame, eval-only input,
+  source/decision/record tamper, mismatched pose lineage, double scaling, numeric
+  collapse/overflow và storage failure. Reconstruction/authority trong các tests
+  là fixture; resolver/store và domain logic là implementation thật.
+- Fixture smoke exit 0, local ignored evidence tại
+  `data/rec06_smoke/fixture-20260926-02/evidence.json`, `conversion-plan.json`
+  và `seed-proposal.json`; attempt `-01` giữ lịch sử trước khi thêm seed proposal.
+  confirmation bytes được published trong fixture artifact store bằng logical URI.
+  Script cần output directory mới nếu rerun, không overwrite attempt cũ.
+- Known fixture: scale `2`, rotation `Rz(90°)`, translation `(10,20,30)m`;
+  sample `(1,2,3) → (~6,22,36)`. Independent fixture segment dự đoán `0.50m`,
+  khai báo measured `0.51m`, absolute error `0.01m`. Đây là test cố ý có sai số,
+  không là measurement hay accuracy claim của Aisle_CW.
+- Record logical checksum:
+  `sha256:616670d81c902147e14eafa8c1707e723f32750b806ae60bd61599348c1f8506`.
+  Serialized record byte checksum:
+  `sha256:2d4df4597602ad2216bb39f282a0c349294bea1f667b1715678b8a597611e1b6`.
+- Full suite trước concurrent merges: **333 passed** (31.72s), với
+  `REC04_TEST_SPLAT_MODULE` và `REC05_TEST_SPLAT_MODULE` cùng trỏ tới installed
+  `data/rec04_runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs`,
+  `REC05_TEST_GPU=1`, `REC05_VOXEL_CLI` trỏ tới package `bin/cli.mjs` và
+  `REC05_VOXEL_MODULE_PATH` trỏ tới `dist/index.mjs`. Không auto-install runtime.
+- **Sau merge `5c0f20d`: full suite không pass.** Cùng command/env
+  `.venv/bin/pytest tests/ -q` dừng collection (exit 2):
+  `tests/test_simulation/test_colliders.py` import NumPy nhưng `.venv` thiếu `numpy`.
+  Không tự cài dependency hoặc sửa code EX-SIM ngoài scope.
+- Rerun `.venv/bin/pytest tests/test_reconstruction/ tests/test_contracts/ -q`
+  cùng env: **295 passed, 2 failed** (42.54s). Hai lỗi tại
+  `tests/test_contracts/test_identity.py` là scene/edited_scene content checksums.
+  Diff merge thêm `SceneObject.semantic_class=None`, `tags=[]` vào shared model;
+  serialized defaults đổi content hash. Read-only counterfactual bỏ hai field này
+  khỏi in-memory dumps của hai fixtures cho checksum khớp lại. Không sửa expected
+  checksum hoặc shared schema chỉ để test xanh; cần owner xử lý migration/fixtures.
+- Ruff check pass; format check 136 files unchanged trên merged checkout.
+- Toàn bộ EX-REC sau merge và sau seed proposal, với real REC-04/05 codec + GPU
+  env như trên: `.venv/bin/pytest tests/test_reconstruction/ -q` → **218 passed**
+  (43.95s). Đây là track result, không thay kết quả full-suite bị lỗi nêu trên.
+
+**Concurrent updates / authority audit**
+
+- Trong execution, branch được cập nhật ngoài lượt implementation này bằng
+  `bbf3bf5`, `3c96276`, `cc385cc`, `5c0f20d`: ADR 0001, task/documentation và
+  SCENE/SIM changes. Re-read ADR/task/diff tại `5c0f20d`; không reset/revert/pull
+  hoặc ghi đè các thay đổi đó. EX-REC source/tests của checkpoint này không bị đổi.
+- ADR 0001 §Decision 1 cho phép hướng LiDAR-assisted **testing/demo**;
+  Dataset Playbook Track A2 vẫn cấm reconstruction runtime đọc raw LiDAR/GT.
+  Đọc hai nguồn này như hai bước khác nhau: đo anchor ngoại tuyến có provenance,
+  rồi RGB runtime nhận locked anchor. Không tự dùng cả map để dự đoán hoặc claim
+  RGB-only independent result. User đã được giải thích bằng ví dụ “LiDAR như
+  thước đo cùng hai chân cột” và đồng ý; ADR/Integration đã làm rõ boundary này.
+- ADR 0001 §Decision 1 và REC-05 §9 nói camera Frame 0 bảo đảm free/walkable và
+  không skip carve. Source `splat-transform` 3.6.6 `voxel/carve.ts` thực tế kiểm
+  capsule-dilated occupancy, có relocate hoặc skip khi blocked/outside. Camera
+  center không chứng minh clearance của cả capsule; Frame 0 còn có thể unregistered.
+  Owner đã đồng ý sửa rule: camera đầu registered, convert metric/world làm
+  **candidate**, kiểm bounds/capsule bắt buộc, invalid thì reject hoặc chọn lại.
+  ADR/REC-05 đã cập nhật theo quyết định đó; code mới chỉ tạo proposal, không auto-pass.
+- REC-05 §9 nay có demo capsule `radius=0.35m`, `height=1.20m`. Đây là config
+  trong task; không tự claim đó là kích thước thật đã đo của OTTO 100. Isaac Sim
+  `4.0` và số `205 tests` trong phân tích ngoài không là verified runtime evidence.
+
+**Limits / next executable step**
+
+1. Giữ REC-06 `IN_PROGRESS`, chưa DONE. Không tạo Aisle_CW real confirmation;
+   chưa có cặp landmark correspondence RGB–LiDAR đã review, đo anchor, canonical
+   frame evidence hoặc independent-distance protocol thật.
+2. Authenticated Editor decision backend/UI thuộc EX-PRODUCT chưa được nối;
+   fixture verifier không dùng cho product. `preview()` không tự cấp confirmation.
+3. Tiếp theo ở phần không phụ thuộc seed: adapter áp confirmed transform lên
+   immutable Gaussian working derivative, giữ orientation/scale/SH đúng upstream,
+   bind applied-transform provenance rồi nối REC-05. Conversion plan hiện không
+   phải artifact đã convert; chưa có real producer→consumer payload handoff này.
+4. Seed candidate đã implement theo owner clarification; actual capsule clearance
+   validation và consumer binding còn pending. Chưa import raw LiDAR vào product
+   runtime, chưa mở REC-07 hoặc triển khai
+   P1 AI auto-scale. REC-07 độc lập theo dependency của task, không bắt buộc đợi
+   toàn REC-06 DONE chỉ vì số thứ tự.
+
+Commits: `fc5093e` bootstrap → `590a5a8` math/poses → `b07c322` confirmation/
+provenance → `5c7c732` guards → `b80c3d9` fixture smoke → `f823f99` seed rule
+clarification → `b1ed5d8` typed camera seed proposal → `9643125` seed smoke evidence
+→ `7f15874` LiDAR anchor boundary. Không push từ lượt này.

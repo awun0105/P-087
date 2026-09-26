@@ -8,7 +8,14 @@ Active — REC-01/02/02A/03/04 task gates complete. REC-04 real Brush GPU smoke,
 SOG roundtrip and render sample verified 2026-09-26. REC-05 IN_PROGRESS:
 SplatTransform adapter/unit tests and synthetic GPU smoke implemented; real
 metric-aware spike alone awaits REC-06 confirmation, locked capsule and walkable
-seed. Current implementation/evidence is recorded in the REC-05 task file.
+seed. REC-06 IN_PROGRESS: similarity/pose math, preview/authority gate, immutable
+internal confirmation records and fixture handoff implemented; real Aisle_CW
+confirmation and Gaussian metric derivative remain pending. Current evidence is
+recorded in REC-05/REC-06 task files. ADR 0001 was merged during implementation;
+owner clarified camera seed as a candidate requiring bounds/capsule validation.
+Typed proposal exists, actual clearance validation/binding remains pending.
+Post-merge full suite is not green: missing NumPy in EX-SIM tests and two SceneIR
+fixture checksum failures after shared-model defaults changed; see REC-06 evidence.
 
 ## Outcome
 
