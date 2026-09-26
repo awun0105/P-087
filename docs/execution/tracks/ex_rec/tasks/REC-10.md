@@ -66,6 +66,14 @@ Giữ tool/research repo ở process/adapter boundary; không kéo toàn bộ re
 
 ## 9. Implementation Plan
 
+Audit 2026-09-27: default metric UNCONFIRMED, không suy canonical geometry từ
+RGB ref. Inject resolver + metric/alignment verifier ports; resolve/hash mọi
+dependency, job/type/stage binding và confirmed-record reload trước publication.
+Không import SCENE consumer vào producer. Proof ref phải immutable và được giữ
+trong bundle provenance. Fixture verifier explicit chỉ chứng minh handoff shape,
+không thay real REC-06 cross-artifact proof còn phải sửa. Content-addressed
+publication, missing/tampered refs phải fail trước bundle write.
+
 Assignee điền sau khi inspect code/test hiện tại: files cụ thể, sequence, failure handling và proof. Không đổi goal, I/O hoặc authority gate của task.
 
 ## 10. Tests
@@ -85,6 +93,28 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 - [x] Focused tests và required handoff proof pass; evidence/limitations được ghi.
 
 ## 12. Result / Evidence
+
+### Audit correction 2026-09-27 — verified publication boundary
+
+- VERIFIED: 3 red regression tests trước sửa: default CONFIRMED scale, implicit
+  canonical geometry, publish missing payload. Nay default UNCONFIRMED,
+  canonical geometry explicit, `BundleDependencies` inject resolver + metric
+  verifier + immutable alignment loader. No default authority.
+- Resolve/hash/job/type/stage checks trước publication; exact reviewed request
+  và proof ref bind source checksum, derivatives, scale và canonical selection.
+  Mixed record phải reload qua REC-09 verifier, không tin embedded flags.
+  Bundle giữ proof ref trong provenance và content-addressed publication URI.
+- Test fixtures ghi `evidence_kind=synthetic_fixture`; positive verifier chỉ
+  kiểm checksum-bound fixture inventory. Đây là consumer/publication proof,
+  KHÔNG chứng minh raw Brush visual hoặc poses đã thành metric derivatives.
+- `pytest tests/test_reconstruction/test_rec10*.py tests/test_reconstruction/test_rec11*.py -q`:
+  **31 passed**; EX-REC **338 passed, 11 skipped** (63.15s); Ruff check/format
+  **185 files pass**. Current consumer/storage tests **10 passed**.
+- Cross-track checks: contracts/integration **94 passed, 2 failed** ở historical
+  SceneIR checksum fixtures (`test_identity.py`); full suite collection vẫn
+  thiếu NumPy ở `test_simulation/test_colliders.py`. Không sửa ngoài ownership.
+- Pending: real REC-06 canonical derivative/independent-distance verifier;
+  real InputManifest → bundle handoff và RGB+depth proof. Chưa DONE.
 
 ### Checkpoint 2026-09-26 — DONE, ReconstructionBundle publication service and validation
 

@@ -25,6 +25,7 @@ from src.services.reconstruction.lidar import LiDARIngestRequest, LiDARIngestSer
 from src.services.reconstruction.rgb.geometry_publication import GeometryExecutionRequest
 from src.services.scene.bundle_consumer import load_reconstruction_bundle
 from tests.test_reconstruction.rec09_fixtures import reviewed_fixture
+from tests.test_reconstruction.rec10_fixtures import reviewed_bundle_fixture
 from tests.test_reconstruction.test_rec05_adapter import config
 from tests.test_reconstruction.test_rec05_product_pipeline import setup_pipeline
 
@@ -33,7 +34,7 @@ def dummy_rgb_frame(writer: object, job_id: str) -> ProductArtifactRef:
     """Tạo frame artifact để bundle consumer có thể resolve file thật."""
     payload = b"dummy frame image data"
     ref = ProductArtifactRef(
-        artifact_type="RgbFrameSet",
+        artifact_type="RGBFrame",
         schema_version="1.0",
         artifact_uri=f"artifact://jobs/{job_id}/rec02/frames/frame_0000.png",
         artifact_checksum="sha256:" + hashlib.sha256(payload).hexdigest(),
@@ -111,7 +112,6 @@ def test_publish_rgb_only_bundle_and_consume_by_scene(tmp_path: Path) -> None:
         source_provenance=metric_req.source_visual.source_provenance,
     )
     canonicalizer.deps.writer.publish(visual_ref, visual_path.read_bytes())
-    bundle_service = ReconstructionBundleService(canonicalizer.deps.writer)
     bundle_req = BundleBuildRequest(
         job_id=job_id,
         source_input_checksum=Checksum("sha256:" + "1" * 64),
@@ -121,7 +121,10 @@ def test_publish_rgb_only_bundle_and_consume_by_scene(tmp_path: Path) -> None:
         visual_artifact_ref=visual_ref,
         rgb_geometry_ref=geom_res.geometry_ref,
     )
+    deps, bundle_req = reviewed_bundle_fixture(canonicalizer.deps.writer, bundle_req)
+    bundle_service = ReconstructionBundleService(canonicalizer.deps.writer, deps)
     bundle, bundle_ref = bundle_service.build_and_publish(bundle_req)
+    assert bundle.provenance["evidence_kind"] == "synthetic_fixture"
     assert bundle.artifact_type == "ReconstructionBundle"
     assert bundle.producer_stage == StageId.METRIC_CANONICALIZE
     # EX-SCENE consumer direct validation:
@@ -183,7 +186,6 @@ def test_publish_mixed_rgb_lidar_bundle_and_consume_by_scene(tmp_path: Path) -> 
     )
     align_service, align_req = reviewed_fixture(canonicalizer.deps.writer, align_req)
     alignment_record, _ = align_service.align(align_req)
-    bundle_service = ReconstructionBundleService(canonicalizer.deps.writer)
     bundle_req = BundleBuildRequest(
         job_id=job_id,
         source_input_checksum=Checksum("sha256:" + "2" * 64),
@@ -197,7 +199,10 @@ def test_publish_mixed_rgb_lidar_bundle_and_consume_by_scene(tmp_path: Path) -> 
         lidar_geometry_ref=lidar_pcd_ref,
         alignment_record=alignment_record,
     )
+    deps, bundle_req = reviewed_bundle_fixture(canonicalizer.deps.writer, bundle_req, align_service.load)
+    bundle_service = ReconstructionBundleService(canonicalizer.deps.writer, deps)
     bundle, bundle_ref = bundle_service.build_and_publish(bundle_req)
+    assert bundle.provenance["evidence_kind"] == "synthetic_fixture"
     assert bundle.alignment_record is not None
     assert bundle.alignment_record.status == AlignmentStatus.CONFIRMED
     # EX-SCENE consumer validation:
