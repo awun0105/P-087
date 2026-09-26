@@ -32,15 +32,17 @@ def invert_transform(transform: Transform) -> Transform:
 
 
 def normalize_torwic_extrinsics(
-    translation_xyz: tuple[float, float, float], rotation_xyzw: tuple[float, float, float, float]
+    translation_xyz: tuple[float, float, float],
+    rotation_xyzw: tuple[float, float, float, float],
+    frames: tuple[str, str] = ("world", "registered_lidar"),
 ) -> Transform:
-    """Chuẩn hóa extrinsic TorWIC: chuyển T_os_from_cam thành T_world_from_lidar."""
+    """Chuẩn hóa quaternion và gán frame rõ ràng cho extrinsic TorWIC."""
     norm = math.sqrt(sum(c * c for c in rotation_xyzw))
     if not math.isclose(norm, 1.0, rel_tol=1e-5):
         rotation_xyzw = tuple(c / norm for c in rotation_xyzw)
     return Transform(
-        parent_frame="world",
-        local_frame="registered_lidar",
+        parent_frame=frames[0],
+        local_frame=frames[1],
         translation_xyz=translation_xyz,
         rotation_quaternion_xyzw=rotation_xyzw,
     )
@@ -62,7 +64,7 @@ def parse_torwic_calibrations(calibration_path: Path) -> dict[str, float]:
 
 
 def load_torwic_cam_to_lidar_transform(calibration_path: Path, camera_prefix: str = "T_cam1_os") -> Transform:
-    """Tạo Transform chuẩn hóa từ calibration thật của TorWIC giữa camera và OS128 LiDAR."""
+    """Nghịch đảo T_os_from_cam thành T_cam_from_os và đưa về canonical world frame."""
     vals = parse_torwic_calibrations(calibration_path)
     t = (vals[f"{camera_prefix}.px"], vals[f"{camera_prefix}.py"], vals[f"{camera_prefix}.pz"])
     q = (
@@ -71,7 +73,14 @@ def load_torwic_cam_to_lidar_transform(calibration_path: Path, camera_prefix: st
         vals[f"{camera_prefix}.qz"],
         vals[f"{camera_prefix}.qw"],
     )
-    return normalize_torwic_extrinsics(t, q)
+    t_os_from_cam = normalize_torwic_extrinsics(t, q, ("registered_lidar", "camera_1"))
+    t_cam_from_os = invert_transform(t_os_from_cam)
+    return Transform(
+        parent_frame="world",
+        local_frame="registered_lidar",
+        translation_xyz=t_cam_from_os.translation_xyz,
+        rotation_quaternion_xyzw=t_cam_from_os.rotation_quaternion_xyzw,
+    )
 
 
 class AlignmentRequest(ContractModel):

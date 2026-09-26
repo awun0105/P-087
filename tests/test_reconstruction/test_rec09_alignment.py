@@ -100,7 +100,13 @@ def test_alignment_with_real_torwic_calibrations(tmp_path: Path) -> None:
     tf = load_torwic_cam_to_lidar_transform(calib_file, "T_cam1_os")
     assert tf.parent_frame == "world"
     assert tf.local_frame == "registered_lidar"
-    assert tf.translation_xyz == pytest.approx((0.12944592, 0.04299934, -0.1137434))
+    # Kiểm tra vector t và quaternion q sau khi nghịch đảo T_os_from_cam thành T_cam_from_os
+    assert tf.translation_xyz == pytest.approx((-0.0206607, -0.1053642, -0.1414717), abs=1e-5)
+    assert tf.rotation_quaternion_xyzw == pytest.approx((0.6116725, -0.39292797, 0.3567415, 0.58668551), abs=1e-5)
+
+    # Roundtrip nghịch đảo lại phải trả về đúng giá trị thô ban đầu
+    inv_tf = invert_transform(tf)
+    assert inv_tf.translation_xyz == pytest.approx((0.12944592, 0.04299934, -0.1137434), abs=1e-5)
 
     align_service = RgbLidarAlignmentService(canonicalizer.deps.writer)
     req = AlignmentRequest(
