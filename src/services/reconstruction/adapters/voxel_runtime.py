@@ -92,10 +92,13 @@ class VoxelProcess:
         )
         if any(flag not in help_text for flag in required):
             raise GeometryError("Geometry CLI lacks required voxel/carve controls")
+        self.run(("--version",), (workspace, "node"))
+        self.cli(("--list-gpus",), (workspace, "gpus"))
         return version
 
 
 def require_carve(log: str) -> None:
     """Upstream exit 0 có thể bỏ carve; không coi đó là successful geometry."""
-    if "skipping carve" in log.lower() or "skipping nav carving" in log.lower():
+    rejected = ("skipping carve", "skipping nav carving", "no navigable cells remain")
+    if any(message in log.lower() for message in rejected):
         raise GeometryError("Capsule carve was skipped; correct navigation seed or capsule config")

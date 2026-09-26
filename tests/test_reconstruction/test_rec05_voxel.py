@@ -96,7 +96,11 @@ def test_process_failures(tmp_path: Path, failure: str) -> None:
 def test_exit_zero_does_not_clear_skipped_carve() -> None:
     """Output hợp lệ nhưng thiếu carve vẫn là attempt không đạt yêu cầu."""
     require_carve("carve completed")
-    for message in ("seed outside grid, skipping carve", "navCapsule requires navSeed, skipping nav carving"):
+    for message in (
+        "seed outside grid, skipping carve",
+        "navCapsule requires navSeed, skipping nav carving",
+        "no navigable cells remain",
+    ):
         with pytest.raises(GeometryError, match="skipped"):
             require_carve(message)
 
@@ -106,6 +110,7 @@ def test_runtime_pin_and_capabilities(tmp_path: Path, monkeypatch: pytest.Monkey
     process = VoxelProcess(VoxelRuntimeSettings(cli=Path("unused"), module_path=Path("unused")))
     output = "splat-transform v3.6.6 (afbc281)\n" + " ".join(cluster_command(config()) + collision_command(config()))
     monkeypatch.setattr(process, "cli", lambda args, target: output)
+    monkeypatch.setattr(process, "run", lambda args, target: "v24")
     assert "3.6.6" in process.qualify(tmp_path)
     output = output.replace("--voxel-carve", "missing")
     with pytest.raises(GeometryError, match="controls"):

@@ -31,7 +31,7 @@ const fileSystem = {
         };
     }
 };
-const options = { filename: 'input.ply', inputFormat: 'ply', fileSystem };
+const options = { filename: process.argv[3] ?? 'input.ply', inputFormat: 'ply', fileSystem };
 const info = await api.readFileInfo(options);
 if (!info.gaussian || info.numGaussians < 1 || info.numLods !== 1) throw new Error('Invalid Gaussian PLY');
 const sources = await api.readFile(options);
@@ -44,7 +44,7 @@ try {
     if (bad || !Number.isFinite(lod.fillRatio)) throw new Error('Nonfinite Gaussian data');
     const checked = await api.processSource(source, [{ kind: 'filterNaN' }], api.createChunkDataPool());
     if (checked.meta.numGaussians !== info.numGaussians) throw new Error('Invalid Gaussian parameters');
-    writeFileSync('inspection.json', JSON.stringify({ version: api.version, revision: api.revision, info, stats }));
+    writeFileSync(process.argv[4] ?? 'inspection.json', JSON.stringify({ version: api.version, revision: api.revision, info, stats }), { flag: 'wx' });
 } finally {
     for (const source of sources) source.close();
 }
