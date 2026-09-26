@@ -170,6 +170,37 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 
 ## 12. Result / Evidence
 
+### Checkpoint demo adapter — 2026-09-26
+
+- User khóa ba system paths giữ nguyên: RGB + measured anchor, RGB + LiDAR,
+  RGB + future auto-estimator. LiDAR hỗ trợ chỉ thuộc dataset demo adapter.
+- Added `rgb/demo_metric_models.py`, `rgb/demo_metric.py`: bắt buộc explicit
+  `prepared_dataset_demo`, ba modes `rgb_lidar_fusion`, `rgb_auto_scale_proxy`,
+  `rgb_two_point`. Prepared measurement chứa RGB/LiDAR pair và exact refs;
+  injected verifier xác minh physical correspondence/scene/frame/unit, không có
+  default verifier. Preview không tự cấp CONFIRMED. Two-point selection chưa
+  được map thì reject; không dùng nearest point tùy ý hoặc measurement cũ.
+- Chỉ fusion trả geometry input để compose; đó chưa là fused output. Hai modes
+  RGB giữ RGB geometry và assisted provenance. Core `metric.py`, shared contracts
+  và frontend không đổi. Actual source/correspondence solver và demo UI chưa có.
+- `tests/test_reconstruction/rec06_demo_fixtures.py` và
+  `test_rec06_demo_metric.py`: 35 new fixture cases, store/resolver thật,
+  synthetic correspondence/authority. Có GT-lineage, immutable publish,
+  wrong scene/selection, source-byte tamper, missing verifier và normal-upload
+  rejection. Không chứng minh real dataset accuracy, fusion hoặc auto-estimator.
+- `.venv/bin/pytest tests/test_reconstruction/test_rec06_*.py -q` → **84 passed**
+  (42.12s). `.venv/bin/pytest tests/test_reconstruction/ -q` → **242 passed,
+  11 skipped** (53.30s), không bật optional real codec/GPU env ở checkpoint này.
+- `.venv/bin/ruff check src/ tests/` pass;
+  `.venv/bin/ruff format --check src/ tests/` pass, 140 files unchanged;
+  `git diff --check` pass. AST check bốn file mới: functions <=30 lines,
+  <=3 non-self parameters và typed args/returns.
+- `.venv/bin/pytest tests/ -q` → **collection error**, EX-SIM
+  `test_colliders.py` thiếu NumPy trong `.venv`. Không claim full repo green.
+- Next: REC-07/08 prepared LiDAR + REC-09 correspondence producer; actual
+  geometry/alignment/metric payload handoff và EX-PRODUCT integration còn pending.
+  REC-06 giữ IN_PROGRESS. `ff875ba` lưu quyết định demo/system và dependency.
+
 ### Checkpoint 2026-09-26 — pha đầu triển khai, IN_PROGRESS
 
 **VERIFIED implementation**
