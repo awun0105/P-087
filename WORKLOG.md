@@ -21,10 +21,10 @@
 |--------|------|--------|--------|------|
 | Đức | Chưa tham gia (giai đoạn Foundation M0 khởi tạo scaffold bởi Quân) | ⏸️ Idle | Chưa ghi nhận | - |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | Chưa tham gia (giai đoạn Foundation M0 khởi tạo scaffold bởi Quân) | ⏸️ Idle | Chưa ghi nhận | - |
+| Nguyễn Thọ Đạt | Chưa tham gia (giai đoạn Foundation M0 khởi tạo scaffold bởi Quân) | ⏸️ Idle | Chưa ghi nhận | - |
 
 **Tổng kết ngày:** Hoàn thiện phần nền backend hiện có mà không nhận là đã triển khai workflow Real2Sim.
 
@@ -48,10 +48,11 @@
 |--------|------|--------|--------|------|
 | Đức | Chưa tham gia (giai đoạn Foundation M0 khởi tạo tài liệu sản phẩm) | ⏸️ Idle | Chưa ghi nhận | - |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | Chưa tham gia (giai đoạn Foundation M0 khởi tạo tài liệu sản phẩm) | ⏸️ Idle | Chưa ghi nhận | - |
+| Nguyễn Thọ Đạt | Xây dựng tài liệu thiết kế giao diện Wireframe & UI Flow toàn cục cho 5 màn hình chính của RAV-01; khởi tạo bộ tài liệu nghiên cứu sâu và nâng cấp hỗ trợ UTF-8 cho script log (thực hiện từ 19/09, đồng bộ baseline 20/09). | ✅ Done | [WIREFRAME_AND_UI_FLOW.md](docs/WIREFRAME_AND_UI_FLOW.md), [Deep Dive Report](docs/RAV01_Real2Sim_Problem_Deep_Dive_Report.md), [PRD](docs/PRD.md), [BRIEF](docs/BRIEF.md), [log_manual.py](scripts/log_manual.py); commit `dce97b0`. | 4h |
+| Nguyễn Thọ Đạt | Sửa PowerShell hook script để sinh Git pre-push hook với encoding chuẩn UTF-8 without BOM và LF line endings cho Windows/Linux. | ✅ Done | [setup_hooks.ps1](scripts/setup_hooks.ps1); commit `63fc867`. | 2h |
 
 **Tổng kết ngày:** Có baseline tài liệu sản phẩm và cải thiện khả năng lưu vết hoạt động của coding agent.
 
@@ -74,10 +75,10 @@
 |--------|------|--------|--------|------|
 | Đức | Chưa tham gia (giai đoạn khảo sát TorWIC-SLAM dataset) | ⏸️ Idle | Chưa ghi nhận | - |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | Chưa tham gia (giai đoạn khảo sát TorWIC-SLAM dataset) | ⏸️ Idle | Chưa ghi nhận | - |
+| Nguyễn Thọ Đạt | Chưa tham gia (giai đoạn khảo sát TorWIC-SLAM dataset) | ⏸️ Idle | Chưa ghi nhận | - |
 
 **Tổng kết ngày:** Tạo cơ sở dữ liệu cho quyết định traversal và quy trình chuẩn bị/evaluation; chưa phải kết quả reconstruction.
 
@@ -101,10 +102,10 @@
 |--------|------|--------|--------|------|
 | Đức | Tiếp nhận tài liệu execution plan và rà soát ranh giới track EX-SCENE | 🔄 Planned | Chưa ghi nhận | - |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | Tiếp nhận tài liệu execution plan và rà soát ranh giới track EX-SIM | 🔄 Planned | Chưa ghi nhận | - |
+| Nguyễn Thọ Đạt | Tiếp nhận tài liệu execution plan và rà soát ranh giới track EX-SIM | 🔄 Planned | Rà soát `docs/execution/tracks/ex_sim/TRACK.md` và `docs/execution/TEAM_EXECUTION_PLAN.md` | 2h |
 
 **Tổng kết ngày:** Các tài liệu quy định scope, ownership và dữ liệu trao đổi giữa track được đưa về cùng hệ thống tham chiếu; implementation thật vẫn thuộc các milestone sau.
 
@@ -130,10 +131,11 @@
 |--------|------|--------|--------|------|
 | Đức | Chuẩn bị môi trường nghiên cứu SAM2 và rà soát handoff contract `SceneIR` | 🔄 Planned | Rà soát `src/models/contracts/scene.py` và `docs/execution/tracks/ex_scene/` | Chưa ghi nhận |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | Chuẩn bị môi trường Isaac Sim / IsaacLab và rà soát contract mô phỏng | 🔄 Planned | Rà soát `src/models/contracts/simulation.py` và `docs/execution/tracks/ex_sim/` | Chưa ghi nhận |
+| Nguyễn Thọ Đạt | Chuẩn bị môi trường Isaac Sim / IsaacLab và rà soát contract mô phỏng. | 🔄 Planned | Rà soát `src/models/contracts/simulation.py` và `docs/execution/tracks/ex_sim/` | 2h |
+| Nguyễn Thọ Đạt | Tích hợp bộ kỹ năng RunPod GPU serverless phục vụ huấn luyện và mô phỏng trên cloud; lập checklist TODO và xây dựng bản mẫu giao diện tương tác HTML Prototype. | ✅ Done | `.agents/skills/runpod*`, [skills-lock.json](skills-lock.json), [TODO.md](docs/TODO.md), [prototype/index.html](docs/prototype/index.html); commit `bcbc517`. | 4h |
 
 **Tổng kết ngày:** Foundation có contract/fixture proof cho phát triển song song. Chưa có bằng chứng chạy thật reconstruction, browser 3DGS hay Isaac; nhóm onboarding còn chờ commit/review.
 
@@ -163,10 +165,10 @@
 |--------|------|--------|--------|------|
 | Đức | Kế hoạch tiếp nhận dữ liệu SfM và phân đoạn vật thể SAM2 | 🔄 Planned | Rà soát `docs/execution/tracks/ex_scene/`; chuẩn bị môi trường chạy SAM2 và thuật toán liên kết điểm ảnh 2D với không gian 3D. Chờ upstream REC-03 bàn giao camera poses và sparse point cloud. | Chưa ghi nhận |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | Kế hoạch thiết lập môi trường mô phỏng Isaac Sim 4.0 và kịch bản robot AMR | 🔄 Planned | Rà soát `docs/execution/tracks/ex_sim/`; kiểm tra cấu hình Isaac Sim / IsaacLab và mô hình robot AMR mẫu. Chờ upstream hoàn thiện lưới va chạm `collision.glb`. | Chưa ghi nhận |
+| Nguyễn Thọ Đạt | Kế hoạch thiết lập môi trường mô phỏng Isaac Sim 4.0 và kịch bản robot AMR; nghiên cứu mã nguồn mở mô phỏng robotics (DISCOVERSE, VR-Robo). | 🔄 Planned | Rà soát `docs/execution/tracks/ex_sim/`, [DISCOVERSE audit](docs/execution/audits/05_discoverse.md); kiểm tra mô hình robot AMR mẫu và chuẩn bị harness đo lường va chạm. Chờ upstream hoàn thiện lưới va chạm `collision.glb`. | 3h |
 
 **Tổng kết ngày:** Khóa kiến trúc tái sử dụng mã nguồn cho cả 4 track (10 tài liệu audit + Cross-repo matrix), chuẩn hóa tập dữ liệu TorWIC-SLAM cho Warehouse AMR. Đồng thời đưa track EX-PRODUCT từ 13/13 task TODO lên 2 task Done (PRODUCT-01, PRODUCT-02) và 2 task In Progress (PRODUCT-05, PRODUCT-06). Kiểm chứng trong ngày: pytest tests/ → 288 passed, ruff sạch, npm test → 54 passed, npm run build → exit 0.
 
@@ -191,10 +193,10 @@
 |--------|------|--------|--------|------|
 | Đức | Tiếp nhận 65 camera poses và 6.202 điểm thưa từ REC-03; thiết kế cấu trúc SceneIR cho candidate object | 🔄 In Progress | Phân tích camera trajectory và sparse point cloud `Aisle_CW` từ REC-03; chuẩn bị spike kết nối mask 2D từ SAM2 với đám mây điểm 3D. | Chưa ghi nhận |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | Khởi động kiểm thử môi trường Isaac Sim 4.0; rà soát chuẩn định dạng OpenUSD | 🔄 In Progress | Cấu hình Isaac Sim 4.0, kiểm tra nạp USD assets tĩnh; chuẩn bị harness đo lường va chạm cho robot AMR. | Chưa ghi nhận |
+| Nguyễn Thọ Đạt | Nghiên cứu kiến trúc EX-SIM sau audit, làm rõ các invariant va chạm (Safeguard 1 mặt sàn USD Analytic Plane, Safeguard 2 ưu tiên Box collider), lập kế hoạch phân tách Local vs GPU Simulation; cài đặt thư viện hình học. | ✅ Done | [TRACK EX-SIM](docs/execution/tracks/ex_sim/TRACK.md), các task SIM-01..09, tài liệu audit donors ([DISCOVERSE](docs/execution/audits/05_discoverse.md), [Re3Sim](docs/execution/audits/07_re3sim.md)). Cài đặt môi trường `trimesh`, `scipy`. | 4h |
 
 **Tổng kết ngày:** Hoàn thành toàn bộ luồng tiền xử lý dữ liệu và SfM camera poses (REC-01 đến REC-03), kiểm chứng smoke chạy thật trên 65 frame của TorWIC Aisle_CW (6.202 điểm, ratio 1.0). Đồng thời củng cố toàn bộ kiến trúc PlayCanvas và bộ audit 9 repositories lên develop, giải quyết triệt để rủi ro xung đột scale và viewer.
 
@@ -218,10 +220,12 @@
 |--------|------|--------|--------|------|
 | Đức | Tiếp nhận mô hình gốc `visual.ply` từ REC-04; thử nghiệm trích xuất candidate object với SAM2 | 🔄 In Progress | Khảo sát mô hình 3DGS `visual.ply` từ REC-04; kiểm tra khả năng gán nhãn ngữ nghĩa (semantics) và bounding box sơ bộ cho các kệ hàng trong `Aisle_CW`. | Chưa ghi nhận |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | Thẩm định yêu cầu kỹ thuật lưới va chạm `collision.glb` từ kế hoạch REC-05; chuẩn bị kịch bản kiểm tra va chạm robot | 🔄 In Progress | Đánh giá tài liệu REC-05; chuẩn bị kịch bản kiểm tra va chạm của bánh xe AMR với mặt sàn và thân robot với vật cản tĩnh trong Isaac Sim. | Chưa ghi nhận |
+| Nguyễn Thọ Đạt | SIM-04 — Deterministic Preflight: cài đặt đầy đủ 6 quy tắc thẩm định tĩnh P0 (`METRIC_SCALE_MISSING`, `COLLIDER_MISSING`, `TRANSFORM_INVALID`, `OBJECT_OUT_OF_BOUNDS`, `REQUIRED_ARTIFACT_MISSING`, `OBJECT_CONFIRMATION_INCOMPLETE`), engine điều phối `run_preflight()` và niêm phong SHA-256 `report_checksum`. | ✅ Done | [rules.py](src/services/simulation/preflight/rules.py), [engine.py](src/services/simulation/preflight/engine.py), [test_preflight.py](tests/test_simulation/test_preflight.py); commit `49e9660`. Test: 9 passed in 0.13s. Task SIM-04 chuyển trạng thái DONE. | 5h |
+| Nguyễn Thọ Đạt | SIM-02 — Collider Generation: xây dựng bộ sinh proxy collider (AABB, OBB, Convex Hull, Simplified Mesh) từ mesh/point cloud với Trimesh + Scipy Rotation; cài đặt Safeguard 1 (`create_ground_plane_collider`) và Safeguard 2 (`generate_object_collider` ưu tiên box từ `primitive_dimensions_xyz_m`). | ✅ Done | [generator.py](src/services/simulation/colliders/generator.py), [test_colliders.py](tests/test_simulation/test_colliders.py); commit `bdf5f4d`. Test: 8 passed in 1.02s. Task SIM-02 chuyển trạng thái DONE. | 5h |
+| Nguyễn Thọ Đạt | Chuẩn hóa test harness và dọn sạch linter repository: cấu hình fallback test key trong `conftest.py`, đồng bộ `LLM_PROVIDER=google` trong `.env`, sửa 5 lỗi `UP022` của `ruff check .` và định dạng code sạch sẽ. | ✅ Done | [conftest.py](tests/conftest.py), [.env](.env), sửa `validate_evidence_capsule.py`, `emit_evidence_bundle.py`, `render_patch.py`; commit `7e8e453`. Kết quả: `pytest tests/test_simulation/` đạt 17 passed in 2.81s, `ruff check .` đạt All checks passed! | 2h |
 
 **Tổng kết ngày:** Hoàn thành xuất sắc cổng task REC-04 (Visual Reconstruction), có đầy đủ bằng chứng chạy thật trên GPU (Brush 3DGS $\rightarrow$ nén SOG $\rightarrow$ render preview). Kích hoạt REC-05 sang trạng thái IN_PROGRESS với kế hoạch thực thi chi tiết, sẵn sàng viết code voxel collision adapter.
 
@@ -244,10 +248,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -270,10 +274,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -296,10 +300,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -322,10 +326,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -348,10 +352,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -374,10 +378,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -400,10 +404,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -426,10 +430,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -452,10 +456,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -478,10 +482,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -504,10 +508,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -530,10 +534,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -556,10 +560,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -582,10 +586,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -608,10 +612,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -634,10 +638,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -660,10 +664,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -686,10 +690,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -712,10 +716,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -738,10 +742,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -764,10 +768,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -790,10 +794,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -816,10 +820,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 
@@ -842,10 +846,10 @@
 |--------|------|--------|--------|------|
 | Đức | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
-### 4. Đạt (`EX-SIM` — Simulation/Evaluation)
+### 4. Nguyễn Thọ Đạt (`EX-SIM` — Simulation/Evaluation)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Nguyễn Thọ Đạt | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
 
 **Tổng kết ngày:** [Kết quả chính / blocker nếu có]
 

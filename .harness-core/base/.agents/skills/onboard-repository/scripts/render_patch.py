@@ -12,7 +12,6 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
-
 ID_RE = re.compile(r"^[A-Z][A-Z0-9_-]*$")
 REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -66,8 +65,7 @@ def pinned_blob(repository: Path, revision: str, destination: str) -> bytes:
     result = subprocess.run(
         ["git", "-C", str(repository), "show", f"{revision}:{destination}"],
         check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
     require(
         result.returncode == 0,

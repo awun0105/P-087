@@ -19,7 +19,6 @@ import sys
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-
 SCHEMA_V1 = "onboarding-evidence-capsule/v1"
 SCHEMA_V2 = "onboarding-evidence-capsule/v2"
 CAPSULE_MARKERS = {
@@ -142,8 +141,7 @@ def git_blob(repository: Path, revision: str, path: str, context: str) -> bytes:
     result = subprocess.run(
         ["git", "-C", str(repository), "show", f"{revision}:{path}"],
         check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
     require(
         result.returncode == 0,
@@ -273,8 +271,7 @@ def validate_capsule(
         root_result = subprocess.run(
             ["git", "-C", str(repository), "rev-parse", "--show-toplevel"],
             check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
         )
         require(root_result.returncode == 0, "tested repository is not a Git worktree")

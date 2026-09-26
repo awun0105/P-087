@@ -8,11 +8,11 @@ import json
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable
+from typing import Any
 
 from render_patch import RenderError, render_patch, sha256_bytes
-
 
 SCHEMA = "onboarding-evidence-capsule/v2"
 BUNDLE_END = "<!-- ONBOARDING_EVIDENCE_BUNDLE_V2:END -->"
@@ -63,8 +63,7 @@ def git_blob_reader(repository: Path) -> Callable[[str, str], bytes]:
         result = subprocess.run(
             ["git", "-C", str(repository), "show", f"{revision}:{path}"],
             check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
         )
         require(
             result.returncode == 0,
@@ -365,8 +364,7 @@ def main() -> int:
         root_result = subprocess.run(
             ["git", "-C", str(repository), "rev-parse", "--show-toplevel"],
             check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
         )
         require(root_result.returncode == 0, "repository is not a Git worktree")
