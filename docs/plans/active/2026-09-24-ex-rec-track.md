@@ -79,6 +79,13 @@ Focused 22 passed; EX-REC 293 passed/11 skipped; Ruff 177 files pass.
 Synthetic verifier không thay real alignment acceptance. Next: REC-08 full-payload
 validation, REC-07 provenance bridge, rồi metric/voxel/bundle/worker gates.
 
+REC-08 audit checkpoint: six red payload regressions fixed, strict full-cloud
+inspection + explicit declarations + immutable metadata refs; EX-REC now
+314 passed/11 skipped, Ruff 181 files pass. Open3D 0.19 real 54,957-point bounds
+match; REC-07 exact replay same PLY checksum under `rec07_audit_20260927`.
+Native preparation stays UNVERIFIED/GT-assisted. Auto-promotion disabled;
+reviewed coordinate conversion remains pending, not whole-track blocker.
+
 Owner mở rộng execution request 2026-09-26: implement toàn bộ EX-REC tasks còn
 lại, agent tự chọn dependency order và tận dụng core reference repos tương ứng.
 Commit tuần tự từng coherent implementation đã kiểm tra; không push/merge.

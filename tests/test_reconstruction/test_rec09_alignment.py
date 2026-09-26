@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from src.models.contracts.artifacts import ProductArtifactRef
-from src.models.contracts.coordinates import Transform
+from src.models.contracts.coordinates import CoordinateSystem, Transform
 from src.models.contracts.manifests import StageId
 from src.models.contracts.reconstruction import (
     AlignmentStatus,
@@ -42,6 +42,8 @@ def create_real_lidar_ref(writer: object, job_id: str, tmp_path: Path) -> Produc
         job_id=job_id,
         lidar_file=ply_path,
         source_input_checksum=cs,
+        coordinate_system=CoordinateSystem(),
+        source_frame="registered_lidar",
         preprocessing_provenance=prov,
     )
     service = LiDARIngestService(writer)

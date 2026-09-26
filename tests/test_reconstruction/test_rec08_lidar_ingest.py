@@ -23,6 +23,7 @@ from src.services.reconstruction.lidar import (
     compute_file_checksum,
     inspect_point_cloud,
     inspect_point_cloud_header,
+    inspect_rec07_preparation,
 )
 
 
@@ -43,7 +44,10 @@ def test_inspect_point_cloud_valid_and_nonfinite(tmp_path: Path) -> None:
     assert inspect_point_cloud_header(ply_path) == 42
 
     pcd_path = tmp_path / "cloud.pcd"
-    pcd_path.write_text("# .PCD v0.7\nVERSION 0.7\nFIELDS x y z\nPOINTS 99\nDATA ascii\n" + "1.0 1.0 1.0\n" * 99)
+    pcd_path.write_text(
+        "# .PCD v0.7\nVERSION 0.7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nWIDTH 99\nHEIGHT 1\nPOINTS 99\nDATA ascii\n"
+        + "1.0 1.0 1.0\n" * 99
+    )
     assert inspect_point_cloud(pcd_path).point_count == 99
 
     nan_path = tmp_path / "nan.ply"
@@ -71,6 +75,8 @@ def test_lidar_ingest_request_validation(tmp_path: Path) -> None:
         job_id="job-01",
         lidar_file=ply_path,
         source_input_checksum=chk,
+        coordinate_system=CoordinateSystem(),
+        source_frame="registered_lidar",
         preprocessing_provenance=prov,
     )
     assert req.validate_payload().point_count == 10
@@ -80,6 +86,8 @@ def test_lidar_ingest_request_validation(tmp_path: Path) -> None:
         job_id="job-01",
         lidar_file=ply_path,
         source_input_checksum="sha256:" + "0" * 64,
+        coordinate_system=CoordinateSystem(),
+        source_frame="registered_lidar",
         preprocessing_provenance=prov,
     )
     with pytest.raises(ValueError, match="checksum mismatch"):
@@ -90,6 +98,8 @@ def test_lidar_ingest_request_validation(tmp_path: Path) -> None:
         job_id="job-01",
         lidar_file=tmp_path / "nonexistent.ply",
         source_input_checksum=chk,
+        coordinate_system=CoordinateSystem(),
+        source_frame="registered_lidar",
         preprocessing_provenance=prov,
     )
     with pytest.raises(ValueError, match="LiDAR file missing"):
@@ -102,6 +112,7 @@ def test_lidar_ingest_request_validation(tmp_path: Path) -> None:
             lidar_file=ply_path,
             source_input_checksum=chk,
             coordinate_system=CoordinateSystem(unit="millimeter"),  # type: ignore[arg-type]
+            source_frame="registered_lidar",
             preprocessing_provenance=prov,
         )
 
@@ -111,6 +122,8 @@ def test_lidar_ingest_request_validation(tmp_path: Path) -> None:
         lidar_file=ply_path,
         source_input_checksum=chk,
         min_points=100,
+        coordinate_system=CoordinateSystem(),
+        source_frame="registered_lidar",
         preprocessing_provenance=prov,
     )
     with pytest.raises(ValueError, match="too few points"):
@@ -131,13 +144,16 @@ def test_lidar_ingest_service_filesystem_store_success(tmp_path: Path) -> None:
         job_id="job-rec08-demo",
         lidar_file=ply_path,
         source_input_checksum=chk,
+        coordinate_system=CoordinateSystem(),
+        source_frame="registered_lidar",
         preprocessing_provenance=prov,
     )
     resolver = ArtifactResolver(tmp_path / "store")
     writer = FilesystemArtifactStore(resolver)
     service = LiDARIngestService(writer)
 
-    artifact, geom_ref = service.ingest(request)
+    result = service.ingest_with_metadata(request)
+    artifact, geom_ref = result.artifact, result.geometry_ref
 
     assert isinstance(artifact, LiDARGeometryArtifact)
     assert artifact.producer_stage == StageId.LIDAR_INGEST
@@ -147,7 +163,7 @@ def test_lidar_ingest_service_filesystem_store_success(tmp_path: Path) -> None:
 
     # geom_ref trỏ tới file PLY với artifact_type chuẩn
     assert geom_ref.artifact_type == "LiDARGeometryArtifact"
-    assert geom_ref.artifact_uri == "artifact://jobs/job-rec08-demo/rec08/lidar.ply"
+    assert geom_ref.artifact_uri.startswith("artifact://jobs/job-rec08-demo/rec08/")
     assert geom_ref.artifact_checksum == chk
     assert resolver.require(geom_ref).is_file()
 
@@ -156,7 +172,7 @@ def test_lidar_ingest_service_filesystem_store_success(tmp_path: Path) -> None:
     assert parsed_prov.ground_truth_assisted is True
 
     # Manifest metadata cũng được xuất bản và kiểm tra checksum byte thành công
-    meta_path = resolver.resolve("artifact://jobs/job-rec08-demo/rec08/lidar_geometry.json")
+    meta_path = resolver.require(result.metadata_ref)
     assert meta_path.is_file()
     meta_doc = json.loads(meta_path.read_text(encoding="utf-8"))
     assert meta_doc["artifact_type"] == "LiDARGeometryArtifact"
@@ -170,16 +186,11 @@ def test_ingest_real_rec07_output(tmp_path: Path) -> None:
     if not manifest_file.is_file() or not ply_file.is_file():
         pytest.skip("Chưa có output smoke REC-07 trên đĩa")
 
-    request = build_request_from_rec07_manifest(manifest_file, ply_file, "job-aisle-cw-01")
-    resolver = ArtifactResolver(tmp_path / "store")
-    writer = FilesystemArtifactStore(resolver)
-    service = LiDARIngestService(writer)
-
-    artifact, geom_ref = service.ingest(request)
-    assert artifact.artifact_type == "LiDARGeometryArtifact"
-    assert artifact.job_id == "job-aisle-cw-01"
-    assert artifact.geometry_format == "ply"
-    assert artifact.coordinate_system.unit == "meter"
-    assert artifact.preprocessing_provenance.ground_truth_assisted is True
-    assert geom_ref.artifact_uri == "artifact://jobs/job-aisle-cw-01/rec08/lidar.ply"
-    assert resolver.require(geom_ref).is_file()
+    prepared = inspect_rec07_preparation(manifest_file, ply_file)
+    assert prepared.coordinate_status == "UNVERIFIED"
+    assert prepared.preprocessing_provenance.ground_truth_assisted is True
+    assert prepared.preprocessing_provenance.dependencies[0].role == "pose"
+    manifest = json.loads(manifest_file.read_text())
+    assert prepared.source_frame == manifest["request"]["target_frame"]
+    with pytest.raises(ValueError, match="UNVERIFIED"):
+        build_request_from_rec07_manifest(manifest_file, ply_file, "job-aisle-cw-01")

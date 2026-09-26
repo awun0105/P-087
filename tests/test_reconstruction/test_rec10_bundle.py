@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from src.models.contracts.artifacts import Checksum, ProductArtifactRef
+from src.models.contracts.coordinates import CoordinateSystem
 from src.models.contracts.manifests import InputConfiguration, StageId
 from src.models.contracts.reconstruction import (
     AlignmentStatus,
@@ -61,6 +62,8 @@ def create_lidar_artifact_via_rec08(writer: object, job_id: str, tmp_path: Path)
         job_id=job_id,
         lidar_file=ply_path,
         source_input_checksum=cs,
+        coordinate_system=CoordinateSystem(),
+        source_frame="registered_lidar",
         preprocessing_provenance=prov,
     )
     service = LiDARIngestService(writer)

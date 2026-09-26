@@ -59,6 +59,16 @@ Giữ tool/research repo ở process/adapter boundary; không kéo toàn bộ re
 
 ## 9. Implementation Plan
 
+Audit 2026-09-27: tách strict streaming payload inspector (PLY scalar vertices,
+PCD ASCII/binary) khỏi typed request; kiểm toàn bộ records, đúng field order,
+finite bounds và exact payload count/size, budget trước decode. Compressed/list
+encoding chưa qualify phải reject rõ, không trả bounds giả. Open3D v0.19.0 native
+reader preallocates trước decode và Python wrapper không expose bool success,
+nên không coi nonempty native cloud là structural integrity proof. Dùng Open3D
+roundtrip làm independent runtime proof. REC-07 manifest phải verify canonical
+checksum, giữ native frame/GT provenance; UNVERIFIED không tự thành canonical.
+Publication content-addressed, bind metadata qua ref, không đổi shared schema.
+
 Assignee điền sau khi inspect code/test hiện tại: files cụ thể, sequence, failure handling và proof. Không đổi goal, I/O hoặc authority gate của task.
 
 ## 10. Tests
@@ -77,6 +87,31 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 - [x] Focused tests và required handoff proof pass; evidence/limitations được ghi.
 
 ## 12. Result / Evidence
+
+### Audit correction 2026-09-27 — không kế thừa historical DONE
+
+- VERIFIED: 6 red regressions tái hiện binary fake bounds/truncation và ASCII
+  ngoài 1.000 points/EOF; sửa thành full streaming validation. Hỗ trợ scalar
+  vertex-only PLY ASCII/little-/big-endian; PCD ASCII/binary đúng declared fields,
+  sizes, counts. Compressed PCD/list-element PLY reject rõ, chưa qualify.
+- Ingest yêu cầu explicit coordinate/source-frame declarations, check format
+  khớp bytes, finite transform/frame binding và rehash bytes trước publish.
+  Content-addressed publication giữ metadata riêng, `ingest_with_metadata`
+  trả đủ refs. Create-only store tiếp tục reject duplicate, không overwrite.
+- REC-07 preparation reader verify canonical manifest checksum/output hash/count,
+  giữ `role=pose` và đúng estimated/external/GT origin, toàn inventory dependencies,
+  output target frame. Legacy auto-ingest reject UNVERIFIED thay vì đổi nhãn world.
+- REAL RUNTIME: Open3D **0.19.0** trong `data/rec07_runtime` đọc REC-07 smoke:
+  **54.957 points**, min/max bounds khớp chính xác strict inspector. SHA-256 PLY
+  `9e6893eee58da41142fe82e3279a862bb6e8a5badf6a3e8688efda2500a1df2b`.
+  Đây là GT-assisted native output, chưa canonical/world acceptance.
+- LIMIT: coordinate evidence/conversion bridge cho real prefusion vẫn cần làm;
+  không dựng CONFIRMED producer giả. Point-cloud cleaning tiếp tục reuse Open3D
+  REC-07; REC-08 hiện validate/publish, không tự crop/filter không có config.
+- Validation: `pytest tests/test_reconstruction/ -q` **314 passed, 11 skipped**
+  (57.92s); `ruff check src/ tests/ scripts/torwic` và `ruff format --check`
+  **181 files pass**; AST <=30 lines/<=3 parameters cho lidar source pass;
+  `git diff --check` pass. No full-product/Isaac acceptance claim.
 
 ### Evidence 2026-09-26 — REC-08 Refactor Hoàn thành (DONE)
 

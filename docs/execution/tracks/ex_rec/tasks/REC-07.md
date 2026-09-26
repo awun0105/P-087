@@ -62,6 +62,14 @@ Giữ tool/research repo ở process/adapter boundary; không kéo toàn bộ re
 
 ## 9. Implementation Plan
 
+Audit reproduction 2026-09-27: chạy lại `run_prefusion` với exact request từ
+smoke manifest, Open3D 0.19.0 isolated runtime, output mới
+`derived/aisle_cw/rec07_audit_20260927`. VERIFIED **54.957 points**, PLY checksum
+khớp exact original `sha256:9e6893eee58da41142fe82e3279a862bb6e8a5badf6a3e8688efda2500a1df2b`.
+Native coordinate vẫn UNVERIFIED/GT-assisted, không phải RGB alignment proof.
+Remaining audit: strict raw scan integrity trước native allocation và canonical
+coordinate evidence bridge; không đổi status DONE chỉ từ successful replay.
+
 ### Task Capsule / bootstrap 2026-09-26
 
 - Outcome: reproducible offline scan→registered PLY, bằng Open3D primitives,
