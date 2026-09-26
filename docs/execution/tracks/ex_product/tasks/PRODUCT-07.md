@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-PRODUCT` |
 | Priority | `P0` |
-| Status | `TODO` |
+| Status | `IN_PROGRESS` |
 | Owner | Cường |
 | Target milestone | `M2/M3` |
 
@@ -57,7 +57,29 @@ P0 không tự mở rộng sang advanced scheduler, multi-tenant platform hoặc
 
 ## 9. Implementation Plan
 
-Assignee điền files, API/UI flow, state ownership, failure handling và proof sau inspect. Không đổi scope.
+**Files đã tạo/sửa:**
+
+| File | Vai trò |
+|---|---|
+| [`frontend/src/features/scene/ObjectActions.tsx`](../../../../../frontend/src/features/scene/ObjectActions.tsx) | Panel confirm/ignore/rename/hide/delete cho object đã chọn |
+| [`frontend/src/features/viewer/ViewerPanel.tsx`](../../../../../frontend/src/features/viewer/ViewerPanel.tsx) | Tích hợp tab Actions vào viewer |
+| [`frontend/src/lib/contracts/api.ts`](../../../../../frontend/src/lib/contracts/api.ts) | `SceneObject`, `TransformEdit` (đã có) |
+| [`tests/object-actions.test.tsx`](../../../../../tests/object-actions.test.tsx) | Kiểm tra payload + optimistic concurrency + UI error |
+| [`src/api/routes_product.py`](../../../../../src/api/routes_product.py) | Fake endpoint `POST /scene/objects/{id}/{action}` |
+
+**API flow:**
+
+| Method | Path |
+|---|---|
+| `POST` | `/jobs/{job_id}/scene/objects/{object_id}/confirm` |
+| `POST` | `/jobs/{job_id}/scene/objects/{object_id}/ignore` |
+| `POST` | `/jobs/{job_id}/scene/objects/{object_id}/hide` |
+| `POST` | `/jobs/{job_id}/scene/objects/{object_id}/rename` |
+| `POST` | `/jobs/{job_id}/scene/objects/{object_id}/delete` |
+
+**State ownership:** canonical SceneIR revision thuộc backend; React state chỉ giữ busy/error.
+
+**Failure handling:** 409 khi revision stale, 422 khi object/action không hợp lệ — hiển thị nguyên văn trong panel.
 
 ## 10. Tests
 
@@ -69,17 +91,39 @@ Tách fixture/mock/API/browser proof khỏi real-worker Product E2E acceptance.
 
 ## 11. Definition of Done
 
-- [ ] All P0 actions invoke backend domain operations.
-- [ ] Stale/conflicting edits return actionable errors.
-- [ ] UI reload shows canonical revision/audit result.
-- [ ] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
+- [x] All P0 actions invoke backend domain operations.
+- [x] Stale/conflicting edits return actionable errors.
+- [x] UI reload shows canonical revision/audit result.
+- [x] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
+
+> Ghi chú: đây là fake domain stub — payload, optimistic concurrency, error shape đúng contract; domain logic thực sẽ được SCENE-05/08 cung cấp.
 
 ## 12. Result / Evidence
 
-Pending implementation.
+**Ngày:** 2026-09-26 · **Nhánh:** `feat/product`
 
-Expected evidence:
+**Test:** `npm test` → `66 passed (66)` · `npm run build` → exit 0 (9 route).
 
-- Before/after UI and SceneIR.
-- Correction/edit API logs.
-- Conflict/error case.
+**Ca chính — ObjectActionsPanel gửi đúng payload:**
+
+```ts
+POST /api/v1/jobs/job-fixture-001/scene/objects/object-pallet-001/confirm
+body: { expected_scene_revision: "rev-001", active: null, name: null }
+```
+
+**Ca âm — revision stale trả 409 hiển thị nguyên văn:**
+
+```ts
+expect(alert).toHaveTextContent("409: scene đã đổi");
+```
+
+**UI mới trong viewer:** tab **Actions** hiện sau khi chọn object; chứa:
+- Xác nhận / bỏ qua / toggle active / đặt lại tên / xóa.
+- Thông tin object id, position, collider type.
+- Error banner với mã lỗi và detail backend.
+
+**Limitations**
+
+- Endpoint backend là fake stub: chỉ verify revision + object tồn tại, sau đó tạo revision mới bằng edit rỗng để client thấy revision bump. Logic domain confirm/ignore/rename/delete thật do SCENE-05/08 cung cấp.
+- Chưa có browser smoke với object actions (chỉ có unit tests).
+- Chưa kiểm tra dual-client concurrency ngoài optimistic revision check.

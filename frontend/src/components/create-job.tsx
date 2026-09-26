@@ -12,6 +12,7 @@ import { useState } from "react";
 
 import { ApiError } from "@/lib/api/client";
 import { createJob } from "@/lib/api/endpoints";
+import { Button } from "@/components/ui/button";
 
 export function CreateJobButton({ projectId }: { projectId: string }) {
   const router = useRouter();
@@ -38,14 +39,9 @@ export function CreateJobButton({ projectId }: { projectId: string }) {
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={submit}
-        disabled={busy}
-        className="rounded bg-sky-600 px-3 py-1 text-sm text-white hover:bg-sky-500 disabled:opacity-50"
-      >
-        {busy ? "Đang tạo…" : "Tạo job mới"}
-      </button>
+      <Button onClick={submit} busy={busy} size="sm">
+        Tạo job mới
+      </Button>
       {error && (
         <p
           role="alert"

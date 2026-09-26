@@ -8,6 +8,7 @@
 
 import type { ReactNode } from "react";
 
+import { CopyButton } from "@/components/ui/copy-button";
 import type { JobStatus, PrivacyResult } from "@/lib/contracts/api";
 
 export function ErrorState({ title, detail }: { title: string; detail: string }) {
@@ -85,9 +86,10 @@ export function Checksum({ value, label }: { value: string | null; label?: strin
     return <span className="text-slate-500">—</span>;
   }
   return (
-    <span className="font-mono text-xs text-slate-400" title={value}>
+    <span className="inline-flex items-center gap-1 font-mono text-xs text-slate-400" title={value}>
       {label ? `${label}: ` : ""}
       {value.slice(0, 18)}…
+      <CopyButton value={value} />
     </span>
   );
 }

@@ -1,13 +1,16 @@
 import { JobTabs, PageHeader } from "@/components/shell";
 import { Checksum, ErrorState } from "@/components/states";
+import { Banner } from "@/components/ui/banner";
+import { Panel, PanelHeader } from "@/components/ui/panel";
 import { getReview, getValidation } from "@/lib/api/endpoints";
+import { ReviewLifecyclePanel } from "@/features/review/ReviewLifecycle";
 
 /**
- * Màn hình mock review — bước cuối của luồng demo M1.
+ * Màn hình review — PRODUCT-10.
  *
- * Màn hình này cố ý **không** hiện chữ "APPROVED" trần. Approval ở M1 đến từ
- * fixture, nên cờ `synthetic_authorization` phải nằm cạnh quyết định; nếu không
- * thì mock review bị đọc thành authorization thật (PRODUCT-10 chưa làm).
+ * Hiển thị state machine, quyết định, ràng buộc checksum và action buttons.
+ * Cờ `synthetic_authorization` phải nằm cạnh quyết định để không đọc nhầm thành
+ * authorization thật.
  */
 export default async function ReviewPage({ params }: PageProps<"/jobs/[jobId]/review">) {
   const { jobId } = await params;
@@ -28,64 +31,75 @@ export default async function ReviewPage({ params }: PageProps<"/jobs/[jobId]/re
 
   return (
     <>
-      <PageHeader title="Review" subtitle={`reviewer ${approval.reviewer_id}`} />
+      <PageHeader
+        title="Review"
+        subtitle={`reviewer: ${approval.reviewer_id} · ${approval.decided_at}`}
+      />
       <JobTabs jobId={jobId} active="Review" />
 
-      {review.data.synthetic_authorization && (
-        <p
-          data-testid="synthetic-authorization"
-          className="mb-4 rounded-lg border border-amber-800 bg-amber-950/40 p-3 text-xs text-amber-200"
-        >
-          <strong>Đây là mock review, không phải authorization.</strong> {review.data.note}
-        </p>
-      )}
+      <div className="grid gap-4 lg:grid-cols-[1fr_22rem]">
+        {/* Left: review lifecycle panel */}
+        <ReviewLifecyclePanel jobId={jobId} review={review.data} />
 
-      <section className="grid gap-3 md:grid-cols-2">
-        <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 text-sm">
-          <h2 className="mb-2 text-xs tracking-wide text-slate-400 uppercase">Quyết định</h2>
-          <p className="text-lg font-semibold text-slate-100">{approval.decision}</p>
-          <p className="mt-1 text-xs text-slate-400">lúc {approval.decided_at}</p>
-          {approval.reason && <p className="mt-2 text-xs text-slate-300">{approval.reason}</p>}
-          <p className="mt-2 text-xs text-slate-500">
-            accepted warnings: {approval.accepted_warning_ids.length === 0 ? "không có" : approval.accepted_warning_ids.join(", ")}
-          </p>
-        </div>
+        {/* Right: checksum cross-reference */}
+        <aside className="flex flex-col gap-4">
+          <Panel>
+            <div className="p-4">
+              <PanelHeader title="Ràng buộc approval" />
+              <ul className="mt-2 flex flex-col gap-2 text-xs">
+                <li>
+                  <Checksum value={approval.candidate_checksum} label="candidate" />
+                </li>
+                <li>
+                  <Checksum value={approval.validation_report_checksum} label="validation report" />
+                </li>
+                <li>
+                  <Checksum value={reportChecksum} label="validation thực tế của job" />
+                </li>
+                <li>
+                  <Checksum value={approval.record_checksum} label="approval record" />
+                </li>
+              </ul>
+              {reportChecksum && reportChecksum !== approval.validation_report_checksum && (
+                <div className="mt-3">
+                  <Banner tone="danger" title="Checksum mismatch" testId="checksum-mismatch">
+                    Approval trỏ tới validation report khác với report hiện có. Quyết định này không
+                    áp dụng cho revision đang xem.
+                  </Banner>
+                </div>
+              )}
+            </div>
+          </Panel>
 
-        <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 text-sm">
-          <h2 className="mb-2 text-xs tracking-wide text-slate-400 uppercase">Ràng buộc</h2>
-          <ul className="flex flex-col gap-1">
-            <li>
-              <Checksum value={approval.candidate_checksum} label="candidate" />
-            </li>
-            <li>
-              <Checksum value={approval.validation_report_checksum} label="validation report" />
-            </li>
-            <li>
-              <Checksum value={reportChecksum} label="validation thực tế của job" />
-            </li>
-            <li>
-              <Checksum value={approval.record_checksum} label="record" />
-            </li>
-          </ul>
-          {reportChecksum && reportChecksum !== approval.validation_report_checksum && (
-            <p data-testid="checksum-mismatch" className="mt-2 rounded bg-rose-950/60 p-2 text-xs text-rose-300">
-              Approval trỏ tới một validation report khác với report hiện có của job. Quyết định này không
-              áp dụng cho revision đang xem.
-            </p>
-          )}
-        </div>
-      </section>
+          <Panel>
+            <div className="p-4">
+              <PanelHeader title="Warnings đã chấp nhận" />
+              {approval.accepted_warning_ids.length === 0 ? (
+                <p className="text-xs text-slate-600">Không có.</p>
+              ) : (
+                <ul className="list-inside list-disc space-y-0.5 text-xs text-slate-400">
+                  {approval.accepted_warning_ids.map((id) => (
+                    <li key={id} className="font-mono">
+                      {id}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </Panel>
 
-      <section className="mt-6 rounded-lg border border-slate-800 bg-slate-900/60 p-4 text-sm">
-        <h2 className="mb-2 text-xs tracking-wide text-slate-400 uppercase">Chưa làm ở M1</h2>
-        <ul className="list-inside list-disc text-xs text-slate-400">
-          <li>PRODUCT-10 — review lifecycle và authorization: chỉ Reviewer được approve/reject.</li>
-          <li>PRODUCT-11 — seal exact candidate, không rebuild sau approval.</li>
-        </ul>
-        <p className="mt-2 text-xs text-slate-500">
-          Nút approve/reject không được dựng ở đây: một nút như vậy ở thời điểm này sẽ là authorization giả.
-        </p>
-      </section>
+          <Panel>
+            <div className="p-4">
+              <PanelHeader title="Bước tiếp theo" />
+              <p className="text-xs text-slate-500">
+                Sau khi Approve → qua tab{" "}
+                <span className="text-sky-400">Release</span> để seal exact candidate thành
+                ReleaseManifest (PRODUCT-11).
+              </p>
+            </div>
+          </Panel>
+        </aside>
+      </div>
     </>
   );
 }

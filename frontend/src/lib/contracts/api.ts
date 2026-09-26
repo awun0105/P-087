@@ -247,12 +247,14 @@ export interface ValidationState {
   isaac_runtime_proof: boolean;
 }
 
+export type ReviewDecision = "PENDING" | "APPROVE" | "REJECT";
+
 export interface ApprovalRecord {
   schema_version: string;
   candidate_checksum: string;
   validation_report_checksum: string;
   reviewer_id: string;
-  decision: "APPROVE" | "REJECT";
+  decision: ReviewDecision;
   reason: string | null;
   decided_at: string;
   accepted_warning_ids: string[];

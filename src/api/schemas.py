@@ -175,6 +175,51 @@ class ApiErrorResponse(ApiModel):
     detail: str
 
 
+class ObjectActionRequest(ApiModel):
+    """Body cho các object action: confirm/ignore/hide/delete/rename (PRODUCT-07)."""
+
+    expected_scene_revision: Identifier
+    active: bool | None = None
+    name: str | None = None
+
+
+class AddObjectRequest(ApiModel):
+    """Body thêm user-added obstacle (PRODUCT-07A)."""
+
+    expected_scene_revision: Identifier
+    name: str
+    origin: str = "user_added"
+    dimensions_xyz_m: tuple[float, float, float]
+    collider_type: str = "AABB"
+    position_xyz: tuple[float, float, float]
+
+
+class ReviewActionRequest(ApiModel):
+    """Body submit/approve/reject review (PRODUCT-10)."""
+
+    reviewer_id: Identifier
+    reason: str | None = None
+    candidate_checksum: Checksum
+    validation_report_checksum: Checksum
+    accepted_warning_ids: list[str] = []
+
+
+class ReleaseRequest(ApiModel):
+    """Body seal exact candidate → ReleaseManifest (PRODUCT-11)."""
+
+    approval_record_checksum: Checksum
+    candidate_checksum: Checksum
+    validation_report_checksum: Checksum
+
+
+class ReleaseResponse(ApiModel):
+    """Kết quả release fake stub."""
+
+    release_id: Identifier
+    release_checksum: Checksum
+    released_at: str
+
+
 def privacy_state(report: PrivacyValidationReport) -> PrivacyStateResponse:
     """Chiếu PrivacyValidationReport thành state mà UI tiêu thụ."""
     return PrivacyStateResponse(

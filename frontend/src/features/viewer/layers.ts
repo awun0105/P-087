@@ -69,6 +69,8 @@ export interface SceneLayers {
   scene_checksum: string;
   geometry: GeometryLayer[];
   colliders: ColliderLayer[];
+  /** Tất cả layer theo thứ tự: geometry trước, colliders sau. */
+  all: ViewerLayer[];
 }
 
 /** AABB mặc định cho collider thiếu `dimensions_xyz_m` — hiện rõ là thiếu dữ liệu. */
@@ -237,6 +239,7 @@ export function buildSceneLayers(scene: SceneIR, sceneChecksum: string): SceneLa
     scene_checksum: sceneChecksum,
     geometry,
     colliders,
+    all: [...geometry, ...colliders],
   };
 }
 

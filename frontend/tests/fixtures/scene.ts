@@ -28,7 +28,7 @@ export function sceneIR(): SceneIR {
     scene_id: "scene-fixture-001",
     scene_revision: "rev-001",
     coordinate_system: { unit: "meter", up_axis: "Z", handedness: "right", world_frame: "world" },
-    metric_scale: { status: "CONFIRMED", meters_per_unit: 1 },
+    metric_scale: { status: "UNCONFIRMED", meters_per_unit: null },
     environment: {
       geometry_ref: ref(`artifact://jobs/${JOB_ID}/scene/environment_geometry.ply`, "sha256:env0000"),
       collider_ref: ref(`artifact://jobs/${JOB_ID}/scene/floor_collider.json`, "sha256:floor000"),

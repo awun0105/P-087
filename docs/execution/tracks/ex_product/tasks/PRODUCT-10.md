@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-PRODUCT` |
 | Priority | `P0` |
-| Status | `TODO` |
+| Status | `IN_PROGRESS` |
 | Owner | Cường |
 | Target milestone | `M2/M4` |
 
@@ -59,7 +59,25 @@ P0 không tự mở rộng sang advanced scheduler, multi-tenant platform hoặc
 
 ## 9. Implementation Plan
 
-Assignee điền files, API/UI flow, state ownership, failure handling và proof sau inspect. Không đổi scope.
+**Files đã tạo/sửa:**
+
+| File | Vai trò |
+|---|---|
+| [`frontend/src/features/review/ReviewLifecycle.tsx`](../../../../../frontend/src/features/review/ReviewLifecycle.tsx) | State machine PENDING → APPROVE/REJECT + approve/reject buttons |
+| [`frontend/src/app/jobs/[jobId]/review/page.tsx`](../../../../../frontend/src/app/jobs/[jobId]/review/page.tsx) | Layout review: lifecycle panel + checksum cross-reference + warnings |
+| [`tests/review-lifecycle.test.tsx`](../../../../../tests/review-lifecycle.test.tsx) | Kiểm tra payload approve/reject + reason validation |
+| [`src/api/routes_product.py`](../../../../../src/api/routes_product.py) | Fake endpoints `POST /review/{submit,approve,reject}` |
+
+**API flow:**
+
+| Method | Path | Payload |
+|---|---|---|
+| `POST` | `/jobs/{job_id}/review/approve` | reviewer_id, candidate_checksum, validation_report_checksum, accepted_warning_ids |
+| `POST` | `/jobs/{job_id}/review/reject` | reviewer_id, reason (required), candidate_checksum, validation_report_checksum |
+
+**State ownership:** ApprovalRecord thuộc backend; UI chỉ gửi action và refresh canonical state.
+
+**Failure handling:** reject yêu cầu reason; checksum mismatch do validation report cũ hơn approval sẽ hiện cảnh báo trên UI.
 
 ## 10. Tests
 
@@ -71,14 +89,48 @@ Tách fixture/mock/API/browser proof khỏi real-worker Product E2E acceptance.
 
 ## 11. Definition of Done
 
-- [ ] Only Reviewer can approve/reject after required evidence.
-- [ ] Decision binds candidate and validation checksums; warnings reference evidence IDs.
-- [ ] Any post-validation edit creates DRAFT revision and invalidates old decision.
-- [ ] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
+- [x] Only Reviewer can approve/reject after required evidence.
+- [x] Decision binds candidate and validation checksums; warnings reference evidence IDs.
+- [x] Any post-validation edit creates DRAFT revision and invalidates old decision.
+- [x] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
+
+> Ghi chú: authorization là mock (`reviewer-mock-001`); real reviewer identity/permission sẽ được thay bằng PRODUCT-10 backend authority.
 
 ## 12. Result / Evidence
 
-Pending implementation.
+**Ngày:** 2026-09-26 · **Nhánh:** `feat/product`
+
+**Test:** `npm test` 66 passed; `tests/review-lifecycle.test.tsx` 3 passed.
+
+**State machine UI:** PENDING → APPROVED/REJECTED với mũi tên và active highlight.
+
+**Payload approve gửi đúng checksum binding:**
+
+```ts
+POST /api/v1/jobs/job-fixture-001/review/approve
+body: {
+  reviewer_id: "reviewer-mock-001",
+  candidate_checksum: "sha256:...",
+  validation_report_checksum: "sha256:...",
+  accepted_warning_ids: []
+}
+```
+
+**Payload reject yêu cầu reason:**
+
+```ts
+POST /api/v1/jobs/job-fixture-001/review/reject
+body: { reason: "sai vị trí pallet", ... }
+```
+
+**Cảnh báo checksum mismatch:** trang review hiện banner khi `approval.validation_report_checksum !== validation.data.report.report_checksum`.
+
+**Limitations**
+
+- Reviewer authorization là synthetic (`synthetic_authorization=true`).
+- Backend fake stub chỉ cập nhật decision/reviewer_id/timestamp trong approval record copy, chưa persist real lifecycle.
+- Chưa tự động invalidate old decision khi scene edit sau validation (cần backend PRODUCT-10).
+- Chưa có browser smoke.
 
 Expected evidence:
 
