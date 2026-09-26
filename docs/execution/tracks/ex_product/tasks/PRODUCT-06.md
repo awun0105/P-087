@@ -288,10 +288,17 @@ proxy, đúng mã lỗi đã thiết kế:
   layout — đoán sai layout binary sẽ cho ra hình dạng trông hợp lệ nhưng sai, đúng
   kiểu lỗi §11 cấm báo cáo thành bằng chứng render.
 - `SceneEditor` seed revision từ `fixtures/scene_ir/scene.json` ở lần đọc đầu tiên.
-  Đây là dữ liệu fixture, **không** phải output của EX-SCENE. Revision trong lần
-  smoke này (`rev-003`, `rev-004`) là state tích luỹ của tiến trình đang chạy, sẽ
-  reset khi restart backend.
-- Revision chỉ nằm trong bộ nhớ tiến trình + file dưới runtime root; chưa có khoá
-  liên tiến trình cho hai client sửa cùng lúc (optimistic concurrency chỉ đúng
-  trong một tiến trình).
+  Đây là dữ liệu fixture, **không** phải output của EX-SCENE.
+- ~~Revision là state tích luỹ của tiến trình đang chạy, sẽ reset khi restart
+  backend.~~ **Đã sửa ngày 26/09.** Trước đó `SceneEditor._revisions` chỉ nằm trong
+  bộ nhớ, nên sau restart `GET /scene` trả revision cũ và lần `POST /scene/edits`
+  kế tiếp trả **500** (`ArtifactAlreadyExistsError` không được bắt). Nay `current()`
+  phục hồi revision cao nhất đã publish trên đĩa, fail closed nếu artifact không tự
+  nhất quán, và route map `ArtifactStoreError` → 409. Kiểm trên server thật:
+  `GET /scene` → `rev-004` (khớp đĩa), `POST` edit → **201** `rev-005`, revision cũ
+  → **409**, object lạ → **422**. 9 test mới, 8 trong đó fail trên code chưa sửa.
+- Vẫn **chưa có khoá liên tiến trình** cho hai client sửa cùng lúc: optimistic
+  concurrency chỉ đúng trong một tiến trình. Hai backend cùng trỏ vào một runtime
+  root vẫn có thể đụng nhau; nay lỗi đó ra **409** thay vì 500, nhưng chưa có
+  arbitration thật.
 - Chưa có test benchmark hiệu năng render.

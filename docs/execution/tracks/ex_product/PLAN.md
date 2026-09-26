@@ -1,7 +1,7 @@
 # EX-PRODUCT — Kế hoạch thực hiện theo milestone
 
 **Track Owner:** Cường.
-**Cập nhật lần cuối:** 25/09/2026.
+**Cập nhật lần cuối:** 26/09/2026.
 
 File này ghi thứ tự thực hiện và trạng thái từng task của `EX-PRODUCT` theo
 milestone. Nguồn milestone: [`TEAM_EXECUTION_PLAN.md`](../../TEAM_EXECUTION_PLAN.md)
@@ -12,7 +12,7 @@ File này **không thay thế** task file và không định nghĩa contract m�
 
 ---
 
-## 1. Trạng thái hiện tại — 25/09/2026
+## 1. Trạng thái hiện tại — 26/09/2026
 
 | Hạng mục | Trạng thái thực tế |
 |---|---|
@@ -25,22 +25,29 @@ File này **không thay thế** task file và không định nghĩa contract m�
 | `frontend/` | **Đã tồn tại** — Next.js 16 + React 19 + Tailwind 4, 8 route, 54 test |
 | [`src/services/orchestration/artifacts/`](../../../../src/services/orchestration/artifacts/) | Đã có `ArtifactResolver`, `FilesystemArtifactStore`, SHA-256, atomic publish |
 | [`src/services/orchestration/jobs/`](../../../../src/services/orchestration/jobs/) | Đã có `JobLifecycle`, `JobArtifactStore`, bảng chuyển trạng thái |
-| [`src/services/orchestration/scene/`](../../../../src/services/orchestration/scene/) | Đã có `SceneEditor` — seed fixture, edit, publish revision |
+| [`src/services/orchestration/scene/`](../../../../src/services/orchestration/scene/) | Đã có `SceneEditor` — **phục hồi revision từ đĩa sau restart (26/09)**, edit, publish revision |
 | `src/services/orchestration/release/` | Package rỗng, chưa có code |
 | [`fixtures/`](../../../../fixtures/) | Đã có đủ: `mock_job/`, `artifact_store/jobs/job-fixture-001/`, `candidate/`, `validation_report/`, `scene_ir/`, `invalid/` |
 
 Nguồn Foundation đã khóa tại M0 (commit `49f2456`).
 
-**Trạng thái kiểm chứng (25/09):**
+**Trạng thái kiểm chứng (26/09):**
 
 ```
-pytest tests/            → 288 passed in 7.30s
+pytest tests/            → 297 passed in 3.41s
 ruff check + format      → sạch (104 file đã format)
-npm test (frontend)      → 54 passed, 5 file
-npm run typecheck        → sạch (next typegen && tsc --noEmit)
-npm run lint             → sạch
-npm run build            → exit 0, 8 route
+npm test (frontend)      → 54 passed, 5 file   (25/09)
+npm run typecheck        → sạch                (25/09)
+npm run lint             → sạch                (25/09)
+npm run build            → exit 0, 8 route     (25/09)
 ```
+
+**Sửa lỗi restart `SceneEditor` (26/09).** Sau khi backend restart,
+`GET /scene` từng trả revision cũ và `POST /scene/edits` trả **500**. Đã sửa:
+`current()` phục hồi revision cao nhất đã publish trên đĩa, và route map
+`ArtifactStoreError` → 409. Kiểm trên server thật: `GET /scene` → `rev-004`
+(khớp đĩa), `POST` edit → **201** `rev-005`, revision cũ vẫn **409**, object lạ vẫn
+**422**. 9 test mới; 8 trong đó fail trên code chưa sửa.
 
 **Browser smoke thật (25/09)** — Chrome headless trỏ vào backend + frontend đang
 chạy: proxy `rewrites` → 200, 6/6 route → 200, `<canvas data-engine="three.js
@@ -84,13 +91,13 @@ PRODUCT-01 (mock API + privacy gate)
 Điều kiện gate: 4 subsystem chạy độc lập. EX-PRODUCT phải demo
 `mock project → mock job → browser viewer → mock review`.
 
-| | Task | Trạng thái 25/09 |
+| | Task | Trạng thái 26/09 |
 |---|---|---|
 | [x] | **PRODUCT-01** — Mock-first project/job/artifact API + source-rights attestation + privacy gating | Xong ở mức fixture/API |
 | [x] | **PRODUCT-02** — Job state machine tối thiểu (`QUEUED/RUNNING/SUCCEEDED/FAILED/CANCELLED`) | Xong |
 | [x] | **PRODUCT-05** — Web shell tối thiểu, có màn hình mock review | **`DONE`** — browser smoke thật đã chạy 25/09 |
 | [ ] | **PRODUCT-06** — Viewer tối thiểu: orbit/pan/zoom, select, hide/show, transform edit cơ bản | Browser smoke 25/09 xong (Three.js `r180` render thật); **ô DoD đầu cố ý để trống** vì 3DGS thật là AC-11, mốc M3 |
-| [ ] | Metric baseline tuần 1 ([`TEAM_EXECUTION_PLAN.md`](../../TEAM_EXECUTION_PLAN.md) §5.4.1): Human Active Time, Manual Step Count, Time to Simulation-ready Scene | Chưa làm |
+| [~] | Metric baseline tuần 1 ([`TEAM_EXECUTION_PLAN.md`](../../TEAM_EXECUTION_PLAN.md) §5.4.1): Human Active Time, Manual Step Count, Time to Simulation-ready Scene | **26/09** — protocol + baseline phía tool-assisted xong ([`METRIC_BASELINE.md`](./METRIC_BASELINE.md)); 3 ô cần người/simulator **để trống có chủ đích** |
 
 #### Kế hoạch từng ngày còn lại của M1
 
@@ -100,7 +107,7 @@ sự xảy ra kèm bằng chứng, nên không được điền trước ngày.
 | Ngày | Việc | Trạng thái |
 |---|---|---|
 | 25/09 | Chạy browser smoke thật: backend + `npm run dev`, đi hết `project → job → viewer → review`, chụp màn hình. | ✅ Xong — [PRODUCT-05 §12](tasks/PRODUCT-05.md), [PRODUCT-06 §12](tasks/PRODUCT-06.md) |
-| 26/09 | Metric baseline tuần 1 §5.4.1 — đo Human Active Time / Manual Step Count / Time to Simulation-ready Scene trên chính luồng vừa chạy; ghi phương pháp đo, không ước đoán. | Chưa làm |
+| 26/09 | Metric baseline tuần 1 §5.4.1 — đo Human Active Time / Manual Step Count / Time to Simulation-ready Scene trên chính luồng vừa chạy; ghi phương pháp đo, không ước đoán. | ✅ Xong phần máy đo được — [`METRIC_BASELINE.md`](./METRIC_BASELINE.md). 3 ô cần người/simulator để trống có chủ đích. Kèm sửa lỗi restart `SceneEditor` (lộ ra khi chuẩn bị đo) |
 | 27/09 | Đóng gói evidence M1: ảnh/recording, output test, request/response mẫu; rà lại `§11 DoD` từng task; chuẩn bị demo script cho gate. | Chưa làm |
 | 28/09 | Gate M1 — demo `mock project → mock job → browser viewer → mock review`. | Chưa làm |
 
