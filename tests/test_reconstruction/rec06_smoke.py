@@ -26,13 +26,10 @@ def write_json(path: Path, payload: dict) -> None:
         stream.write(json.dumps(payload, sort_keys=True, indent=2, allow_nan=False) + "\n")
 
 
-def main() -> None:
+def run(output: Path) -> None:
     """Lưu immutable confirmation + conversion plan và measured fixture evidence."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
-    args.output.mkdir(parents=True, exist_ok=False)
-    service, request = metric_fixture(args.output)
+    output.mkdir(parents=True, exist_ok=False)
+    service, request = metric_fixture(output)
     preview = service.preview(request)
     record = service.confirm(preview, acceptance_for(service, preview))
     reference = service.publish(record, "rec06-fixture")
@@ -53,9 +50,19 @@ def main() -> None:
         point_after=list(plan.transform.apply_point((1, 2, 3))),
         payload_converted=plan.payload_converted,
     )
-    write_json(args.output / "conversion-plan.json", plan.model_dump(mode="json"))
-    write_json(args.output / "evidence.json", report)
+    proposal = service.propose_navigation_seed(reference)
+    write_json(output / "seed-proposal.json", proposal.model_dump(mode="json"))
+    write_json(output / "conversion-plan.json", plan.model_dump(mode="json"))
+    write_json(output / "evidence.json", report)
     print(json.dumps(report, sort_keys=True))
+
+
+def main() -> None:
+    """CLI bắt buộc chọn attempt directory mới; không hardcode dataset/product input."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    run(args.output)
 
 
 if __name__ == "__main__":
