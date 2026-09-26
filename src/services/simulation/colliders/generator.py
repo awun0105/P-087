@@ -4,9 +4,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import trimesh
 from pydantic import BaseModel, Field
 from scipy.spatial.transform import Rotation
-import trimesh
 
 from src.models.contracts.artifacts import Identifier, ProductArtifactRef
 from src.models.contracts.coordinates import Transform
@@ -164,4 +164,3 @@ def generate_object_collider(
         parameters={"source": "default_box_fallback"},
     )
     return create_box_collider(req)
-

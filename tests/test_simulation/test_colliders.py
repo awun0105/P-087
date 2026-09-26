@@ -5,7 +5,6 @@ import trimesh
 
 from src.models.contracts.coordinates import Transform
 from src.models.contracts.scene import (
-    ColliderSpec,
     ColliderType,
     SceneObject,
     SceneObjectOrigin,
@@ -97,9 +96,7 @@ def test_generate_obb_from_rotated_mesh() -> None:
 
 def test_generate_collider_from_pointcloud() -> None:
     """Sinh AABB hợp lệ từ PointCloud."""
-    points = trimesh.points.PointCloud(
-        vertices=[[0.0, 0.0, 0.0], [1.0, 2.0, 0.5], [0.5, 1.0, 0.2]]
-    )
+    points = trimesh.points.PointCloud(vertices=[[0.0, 0.0, 0.0], [1.0, 2.0, 0.5], [0.5, 1.0, 0.2]])
     spec = generate_collider_from_geometry(
         geometry=points,
         collider_type=ColliderType.AABB,
@@ -159,4 +156,3 @@ def test_generate_collider_rejects_empty_geometry() -> None:
             parent_frame="world",
             collider_id="col-empty",
         )
-

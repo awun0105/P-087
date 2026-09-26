@@ -18,4 +18,3 @@ __all__ = [
     "generate_collider_from_geometry",
     "generate_object_collider",
 ]
-
