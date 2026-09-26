@@ -80,6 +80,31 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
 
 ## 9. Implementation Plan
 
+### Owner clarification: ba chế độ demo, 2026-09-26
+
+Triển khai backend chung cho RGB+LiDAR fusion, RGB LiDAR-assisted scale và
+RGB chọn hai điểm nhận khoảng cách hỗ trợ từ LiDAR theo ADR 0001. Đây không
+phải thay goal RGB-only ngoài đời hoặc acceptance bằng assisted demo.
+Ba hướng hệ thống thật vẫn là RGB + measured anchor, RGB + LiDAR, RGB + auto
+estimator (future). Adapter này chỉ thay nguồn measurement/scale khi dùng thử
+dataset; không thêm LiDAR dependency hoặc automatic demo fallback vào core.
+
+1. Sửa ADR/Integration/Dataset và plan để cả ba mode dùng chung preparation;
+   không buộc demo đi theo một shortcut anchor duy nhất.
+2. Thêm internal typed measurement record và demo adapter tại
+   `src/services/reconstruction/rgb/`: bind source visual/master, registered
+   LiDAR ref, scene/traversal, selection/correspondence và preprocessing lineage.
+3. Tính khoảng cách từ hai điểm LiDAR đã đối chiếu; injected verifier phải
+   xác minh evidence trước preview. Mode chọn điểm không nhận measurement của
+   selection khác. Thiếu evidence/verifier thì fail closed, không fake distance.
+4. Dùng lại MetricCanonicalizer.preview và acceptance gate; ghi rõ assisted
+   provenance ở measurement ref. Chỉ mode fusion trả LiDAR geometry để compose;
+   hai mode còn lại không ngầm thay RGB geometry bằng LiDAR geometry.
+5. Positive/negative tests cả ba mode qua real fixture store/resolver; giữ
+   synthetic label. Không claim real correspondence, Web UI hoặc fusion đã chạy.
+6. Tiếp theo chuẩn bị REC-07/08 và REC-09 evidence thật. Không sửa shared
+   AlignmentRecord/Transform hoặc implementation EX-PRODUCT trong bước này.
+
 ### Bootstrap / Task Capsule 2026-09-26
 
 - Outcome: pha đầu REC-06 bằng fixture — similarity math, scale preview, explicit
@@ -226,6 +251,11 @@ git diff --check
   (43.95s). Đây là track result, không thay kết quả full-suite bị lỗi nêu trên.
 
 **Concurrent updates / authority audit**
+
+Lưu ý recovery: diễn giải ở checkpoint dưới về một shortcut LiDAR anchor duy
+nhất đã được owner làm rõ lại. Xem §9 và ADR 0001 hiện hành: ba system paths giữ
+nguyên, chỉ demo dataset dùng LiDAR hỗ trợ anchor/estimator proxy. Không dùng
+đoạn lịch sử này để bỏ fusion hoặc thay real RGB-only bằng LiDAR-assisted.
 
 - Trong execution, branch được cập nhật ngoài lượt implementation này bằng
   `bbf3bf5`, `3c96276`, `cc385cc`, `5c0f20d`: ADR 0001, task/documentation và

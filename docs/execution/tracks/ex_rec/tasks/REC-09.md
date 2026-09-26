@@ -22,7 +22,9 @@ Source anchors: [Track Guide](../../../TRACK_IMPLEMENTATION_GUIDE.md), [Contract
 
 ## 4. Dependencies
 
-- REC-06 same-scene RGB artifacts.
+- REC-03/04 same-scene RGB artifacts cho preparation/đối chiếu metric trước REC-05.
+- REC-06 metric derivative và REC-05 RGB geometry cho final shared AlignmentRecord
+  bind `target_rgb_geometry_checksum`; không yêu cầu REC-06 DONE để bắt đầu preparation.
 - REC-08 LiDARGeometryArtifact.
 - Authority/config xác định known or user-confirmed transform; automatic sensor alignment không phải P0.
 
@@ -59,6 +61,12 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
 Giữ tool/research repo ở process/adapter boundary; không kéo toàn bộ research dependency graph vào application.
 
 ## 9. Implementation Plan
+
+Ordering clarification 2026-09-26: cùng REC-07/08 chuẩn bị LiDAR/correspondence
+cho ba demo modes của ADR 0001 trước real REC-05. Measurement/alignment preparation
+không phải final shared AlignmentRecord. Record cuối vẫn bind hai geometry refs
+đúng Contract §3.5; không encode similarity scale vào shared rigid Transform.
+Task vẫn TODO cho implementation; thay dependency không là evidence đã alignment.
 
 Assignee điền sau khi inspect code/test hiện tại: files cụ thể, sequence, failure handling và proof. Không đổi goal, I/O hoặc authority gate của task.
 

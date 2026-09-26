@@ -649,11 +649,13 @@ real reconstruction, Brush hay Isaac acceptance.
   capsule carve -> collision.glb` tạo `GeometryArtifact` riêng, có provenance và
   checksum. Đây là occupancy extraction, chưa phải physics truth cho tới khi
   qualification REC-05 và validation EX-SIM đạt yêu cầu.
-- **Metric prerequisite:** REC-06 xác nhận locked real-world anchor và similarity
+- **Metric prerequisite:** REC-06 xác nhận metric source và similarity
   transform từ SfM sang canonical meter trước khi REC-05 dùng voxel/capsule theo
   mét. REC-05 chuyển một working derivative sang metric, giữ master PLY bất biến,
   ghi transform/config checksum và không áp dụng scale lần hai lên output đã metric.
-  Anchor thiếu/chưa xác nhận phải chặn voxelization theo mét. Sau REC-05, REC-06
+  Metric source là known-distance anchor hoặc prepared LiDAR metric evidence theo
+  ADR 0001; không bắt demo mixed phải nhập khoảng cách đo ngoài đời.
+  Transform thiếu/chưa xác nhận phải chặn voxelization theo mét. Sau REC-05, REC-06
   kiểm tra pose/visual/geometry cùng frame rồi mới handoff REC-10. Đây là hai pha
   trong REC-06 hiện hữu, không phải task ID hay pipeline stage mới.
   Dependency này áp cho **real metric-aware generation**, không chặn phát triển
@@ -1450,7 +1452,7 @@ Implementation Order dưới đây là **data dependency order cho real artifact
 Sau đó Integration #1 mới thay fixture bằng real artifact.
 
 - **Phase 0 (System Audit):** Đọc các hệ thống Tier-0 (VR-Robo, R2G...) để chốt giải pháp ghép nối cuối cùng.
-- **Phase A (Reconstruction):** `Video -> COLMAP -> Brush -> REC-06 anchor confirmation (HITL trên Visual 3DGS; Aisle_CW testing/demo có thể nhận locked anchor đo ngoại tuyến từ LiDAR cảm biến, không cho RGB runtime đọc raw LiDAR/GT; xem [ADR 0001](../decisions/0001-metric-scale-strategy-and-roadmap.md)) -> metric derivative -> REC-05 splat-transform geometry`; OpenMVS fallback từ COLMAP khi cần.
+- **Phase A (Reconstruction):** `Video -> COLMAP -> Brush -> REC-06 metric confirmation -> metric derivative -> REC-05 splat-transform geometry`; OpenMVS fallback từ COLMAP khi cần. Upload RGB thật dùng known-distance HITL. Dataset demo có ba chế độ: RGB + LiDAR fusion, RGB được LiDAR hỗ trợ scale, RGB chọn hai điểm được LiDAR gợi ý khoảng cách; cả ba dùng prepared same-scene LiDAR evidence, không giả lập AI auto-scale và không cho RGB runtime đọc raw LiDAR/GT. Xem [ADR 0001](../decisions/0001-metric-scale-strategy-and-roadmap.md).
 - **Phase B (Metric):** REC-06 kiểm tra/propagate cùng transform cho pose, visual và geometry (có alignment khi mixed LiDAR), tránh double scaling, rồi xuất `ReconstructionBundle`.
 - **Phase C (Object Identity & Scene Decomposition):** SAM2 → Multi-view association → Human confirmation → SceneDecomposer → Draft SceneIR.
 - **Phase D (Physics & Scene IR Revisions):** ST-COLLIDER → Physics-enriched SceneIR → ST-EDIT → Preflight.

@@ -1278,6 +1278,24 @@ Nếu metric scale calibration dùng một khoảng cách lấy từ reference m
 
 # 16. Track B — RGB + LiDAR integration test
 
+## Ba chế độ dùng thử trên dataset có sẵn
+
+Owner clarification 2026-09-26 (ADR 0001): demo có RGB + LiDAR fusion, RGB được
+LiDAR hỗ trợ scale phía sau, và RGB chọn hai điểm được LiDAR gợi ý khoảng cách.
+Hai chế độ sau mô phỏng trải nghiệm RGB nhưng là **LiDAR-assisted demo**, không
+phải Track A RGB-only independent prediction hoặc bằng chứng AI auto-scale.
+Hệ thống thật vẫn tách RGB + số đo anchor của người dùng, RGB + LiDAR fusion,
+và RGB + estimator (phát triển sau). Không áp adapter demo như fallback ngầm cho
+upload RGB thường; estimator chưa có thì báo chưa khả dụng ngoài demo.
+Chúng dùng registered LiDAR/correspondence đã chuẩn bị, cùng scene/traversal và
+checksum-bound; không đưa raw scans hoặc evaluation map vào RGB runtime. Giữ
+GT-assisted provenance nếu quá trình prefusion đã dùng trajectory GT. Hai điểm
+được gợi ý khoảng cách cần đối chiếu đúng vị trí vật lý; không đủ correspondence
+thì reject/reselect. Không tái dùng phép đo calibration để chấm chính nó.
+Quyết định demo này không thay P0 acceptance hay frozen evaluation split.
+
+## Mục đích và phạm vi evidence
+
 Mục đích chính:
 
 > Chứng minh Real2Sim có thể sử dụng RGB + registered LiDAR để tạo unified metric scene.

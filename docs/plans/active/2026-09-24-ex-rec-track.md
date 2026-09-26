@@ -4,6 +4,17 @@ Date: 2026-09-24
 
 ## Status
 
+Owner clarification 2026-09-26 supersedes ưu tiên shortcut anchor: phải chuẩn bị
+cả ba dataset demo modes (RGB+LiDAR fusion; RGB LiDAR-assisted scale; RGB chọn
+hai điểm có LiDAR gợi ý khoảng cách). "Ẩn" chỉ ở thao tác/layer, không ẩn provenance
+hoặc claim RGB-only independent/AI auto-scale. Bước hiện tại là measurement/demo
+preview adapter + tests; tiếp theo REC-07/08 preparation và REC-09 correspondence.
+Chưa có real prepared LiDAR/correspondence hoặc Web demo cho ba mode.
+Clarification tiếp theo: ba **system paths** vẫn là RGB + known-distance anchor,
+RGB + LiDAR và RGB + future auto-estimator. LiDAR assistance chỉ nằm trong
+dataset demo adapter, không inject fallback vào normal RGB runtime. Estimator
+chưa implement không được báo đã chạy qua demo proxy.
+
 Active — REC-01/02/02A/03/04 task gates complete. REC-04 real Brush GPU smoke,
 SOG roundtrip and render sample verified 2026-09-26. REC-05 IN_PROGRESS:
 SplatTransform adapter/unit tests and synthetic GPU smoke implemented; real
@@ -18,6 +29,13 @@ Post-merge full suite is not green: missing NumPy in EX-SIM tests and two SceneI
 fixture checksum failures after shared-model defaults changed; see REC-06 evidence.
 
 ## Outcome
+
+Owner mở rộng execution request 2026-09-26: implement toàn bộ EX-REC tasks còn
+lại, agent tự chọn dependency order và tận dụng core reference repos tương ứng.
+Commit tuần tự từng coherent implementation đã kiểm tra; không push/merge.
+Thực hiện source/license/version audit trước reuse; implementation complete
+khác task DONE khi real/handoff acceptance còn thiếu. Queue hiện tại: chốt demo
+adapter → REC-07/08 → REC-09/06 metric preparation → REC-05 real path → REC-10/11.
 
 Complete the locked EX-REC tasks one at a time, with independent source review,
 task-level proof, and a real `InputManifest` → `ReconstructionBundle` → EX-SCENE
@@ -76,15 +94,16 @@ handoff that requires no manual artifact conversion.
 | REC-06 | REC-03/04 + locked anchor for confirmation; REC-05 only for final verification | Confirm metric transform before real voxel/capsule generation; then propagate/verify all artifacts without double scaling. |
 | REC-07 | REC-01 + declared poses | Offline reproducible registered LiDAR PLY; preserve GT-assistance and checksums if `traj_gt` is used. |
 | REC-08 | registered LiDAR or REC-07 | Validate unit/frame/nonempty cloud; immutable resolvable LiDAR artifact and typed dependency provenance. |
-| REC-09 | REC-06/08 + confirmed transform | Verify same-scene/checksum binding; separate confirmed alignment; reject unconfirmed/different-scene inputs. |
+| REC-09 | REC-03/04 + REC-08 cho preparation; REC-06/05 cho final geometry-bound record | Verify same-scene/checksum binding; separate confirmed alignment; reject unconfirmed/different-scene inputs. |
 | REC-10 | REC-02A/03/04/05/06; REC-08/09 when mixed | Publish schema-valid bundle for RGB, optional depth, and mixed configurations; EX-SCENE consumes refs directly. |
 | REC-11 | REC-10 + job lifecycle | Stable worker command, structured failures/retry lineage, no false SUCCEEDED or manual path patch. |
 
-One valid serial order is REC-01 → REC-02 → REC-02A → REC-03 → REC-04 →
-REC-06 anchor phase → REC-05 → REC-06 final verification → REC-07 → REC-08 →
-REC-09 → REC-10 → REC-11. REC-07/08 are otherwise independent of the RGB branch
-after REC-01. Mixed alignment is conditional, not a dependency
-of RGB-only publication. REC-10 and REC-11 still require their own task gates.
+Dataset demo order: reuse REC-03/04 → REC-07/08 LiDAR preparation → REC-09
+same-scene correspondence/metric preparation → REC-06 confirmation → REC-05
+metric geometry → REC-09 final geometry-bound alignment when mixed → REC-06
+final verification → REC-10/11. REC-07/08 are independent of REC-06 completion.
+Real RGB-only uploads keep the known-distance path without requiring LiDAR.
+These are phases within existing tasks, not new stage IDs or shared schemas.
 
 ## External source audit queue
 
