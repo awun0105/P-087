@@ -6,9 +6,10 @@
 |---|---|
 | Track | `EX-REC` |
 | Priority | `P0` |
-| Status | `IN_PROGRESS` |
+| Status | `DONE` |
 | Owner | `@awun0105` |
 | Target milestone | `M2` |
+
 
 ## 2. Goal
 
@@ -163,14 +164,30 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 
 ## 11. Definition of Done
 
-- [ ] Scale status chỉ CONFIRMED khi anchor workflow hoàn tất.
-- [ ] Pose/visual/geometry dùng cùng scale và canonical metadata.
-- [ ] Independent test distance chứng minh tolerance theo locked protocol.
-- [ ] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+- [x] Scale status chỉ CONFIRMED khi anchor workflow hoàn tất.
+- [x] Pose/visual/geometry dùng cùng scale và canonical metadata.
+- [x] Independent test distance chứng minh tolerance theo locked protocol.
+- [x] Focused tests và required handoff proof pass; evidence/limitations được ghi.
 
 ## 12. Result / Evidence
 
+### Checkpoint 2026-09-26 — DONE, final cross-artifact verification
+
+**Implemented / VERIFIED:**
+- `src/services/reconstruction/rgb/metric_verification.py`:
+  - `CrossArtifactVerificationRequest`: yêu cầu kiểm định chéo metric scale giữa `RGBMetricConfirmation`, `VisualArtifact`, `RgbGeometry` và `CameraPoseArtifact`.
+  - `MetricVerificationService`:
+    - Thẩm định `RgbGeometry` mang đúng `applied_confirmation_checksum` và `scale_applied`, loại bỏ rủi ro double-scaling.
+    - Thẩm định `VisualArtifact` mang đúng master PLY ràng buộc với distance anchor.
+    - Chuyển đổi và chuẩn hóa camera poses sang canonical world Z-up mà không double scaling.
+    - Kiểm định mẫu khoảng cách độc lập (`independent_sample`) qua `independent_distance_error`, đảm bảo sai số nằm trong dung sai khóa (`tolerance_m`).
+  - `CrossArtifactVerificationReport`: xuất báo cáo nghiệm thu khẳng định metric scale đã `CONFIRMED` với $1.0 = 1\text{m}$.
+- `tests/test_reconstruction/test_rec06_final_verification.py`:
+  - 4/4 test cases pass: nghiệm thu thành công, đối chiếu khoảng cách độc lập đạt dung sai, từ chối khi sai số vượt ngưỡng dung sai, từ chối geometry artifact không khớp confirmation provenance.
+- Bộ test suite REC-06 tổng thể: **88 passed** (38.15s).
+
 ### Checkpoint demo adapter — 2026-09-26
+
 
 - User khóa ba system paths giữ nguyên: RGB + measured anchor, RGB + LiDAR,
   RGB + future auto-estimator. LiDAR hỗ trợ chỉ thuộc dataset demo adapter.
