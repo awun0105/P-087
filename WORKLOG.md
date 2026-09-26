@@ -1,6 +1,6 @@
 # Worklog — Team P-087 (Real2Sim Studio)
 
-> Ghi theo ngày và nhóm công việc lớn. Chỉ ghi phần việc của Quân có dấu vết trong lịch sử trao đổi/repository; không quy việc của thành viên khác cho Quân. Thời lượng chưa được ghi nhận thì không ước đoán.
+> Ghi lại tất cả công việc đã làm theo ngày. Ai làm gì, kết quả gì.
 
 ---
 
