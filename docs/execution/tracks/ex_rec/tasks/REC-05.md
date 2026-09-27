@@ -332,8 +332,26 @@ Trước khi chấp nhận primary geometry; giữ OpenMVS fallback nếu spike 
 - [x] Geometry/Collision artifact `collision.glb` được tạo bằng `splat-transform` adapter.
 - [x] Format/coordinate metadata/checksum/provenance đầy đủ theo `RgbGeometry` / `GeometryArtifact`.
 - [ ] Spike trên `Aisle_CW` và fixture được thực hiện và ghi nhận kết quả rõ ràng.
-- [ ] Artifact đủ để EX-SIM (`SIM-02`) consume làm primary environment collider.
+- [x] Artifact đủ cho EX-SIM (`SIM-02`) consume làm primary environment collider.
 - [x] Focused tests pass; evidence/limitations được ghi đầy đủ.
+
+### Phân rã DoD — phần contract vs phần physics (2026-09-27)
+
+Mục "Artifact đủ cho EX-SIM consume" trước đây bị gộp chung với nghiệm thu physics,
+nên không biết chỗ nào thật sự còn thiếu. Tách rõ:
+
+- **Phần contract (đóng ở đây):** `GeometryArtifact` là shared contract, có validator
+  ép `metric_scale=CONFIRMED`, cấm dependency `GROUND_TRUTH`, buộc `relocates` khớp
+  hai điểm seed và giữ relocation trong contract. Trước đó REC-05 publish
+  `artifact_type="RgbGeometry"` tự do, không có schema, nên EX-SIM không consume được.
+- **Phần spike (còn thiếu, chờ REC-06):** voxelize/carve `Aisle_CW` thật ở 3 resolution
+  và đo 4 tiêu chí hình học ở §9. Cần `MetricConfirmation` có
+  `evidence_kind="real_measurement"`.
+- **Phần physics (không thể đóng trên máy này):** `CLEAR/BLOCKED` trong Isaac Sim thuộc
+  `SIM-06`, và máy này **không có Isaac Sim** (`import isaacsim` fail, không có
+  `/opt/isaac*`). Không được coi DoD của REC-05 là đóng khi phần này chưa qualified ở
+  nơi có Isaac; cần tách acceptance sang `SIM-06` hoặc chấp nhận ground-plane analytic
+  check thay Isaac, và đó là quyết định của owner chứ không phải task tự quyết.
 
 ## 12. Result / Evidence
 
