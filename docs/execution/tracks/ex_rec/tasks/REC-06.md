@@ -194,6 +194,21 @@ Tiếp tục sau 99f2399 — canonical visual publication:
   published SOG resolve/roundtrip, tamper/lineage/product-fixture negatives.
   Chưa triển khai Editor authorization UI hoặc final distance approval ở bước này.
 
+Tiếp tục sau 427ab83 — final RGB bundle verification port:
+- Bind exact bundle candidate, canonical visual manifest, confirmation, canonical
+  poses/geometry, independent sample và explicit tolerance vào checksum review.
+- Reuse diagnostic geometry/distance checks + canonical visual/pose consumer
+  loaders; kiểm source InputManifest/frame inventory, cùng transform/lineage.
+- Publish immutable verification record chỉ sau injected review authority; load
+  phải recheck payload và authority. Không default accept, không bật fixture bằng
+  product CLI; PRODUCT sở hữu authenticated decision adapter.
+- Hỗ trợ canonical RGB geometry selection ở bước này; không ngầm promote native
+  LiDAR frame, depth hoặc alternate geometry thành canonical. Mixed alignment
+  vẫn phải qua REC-09 loader ở REC-10, không thay bằng final RGB proof.
+- Proof: fixture producer→canonical artifacts→verified bundle→SCENE consumer,
+  missing/revoked review, source/transform/derivative/tolerance tamper negatives.
+  Synthetic authority/codec không thay real measurement/GPU/browser acceptance.
+
 ### Owner clarification: ba chế độ demo, 2026-09-26
 
 Triển khai backend chung cho RGB+LiDAR fusion, RGB LiDAR-assisted scale và
@@ -369,6 +384,31 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
   anchor `≈0,67 m/sfm-unit` hay số `0.05` làm authority.
 - REC-06 giữ `IN_PROGRESS`. Full worker dispatch (`InputManifest`/`JobManifest`) + retry và
   real alignment REC-09 chưa đụng.
+
+### Final RGB metric bridge sau 427ab83 — implementation/fixture proof
+
+- `bundle_metric_models.py` + `bundle_metric.py`: canonical RGB bundle candidate
+  bind exact refs/config/provenance với independent sample/tolerance; injected
+  reviewer phải xác minh authenticated decision + measurement protocol. Không
+  có mặc định accept hoặc default tolerance. Review bị thu hồi, payload hỏng hoặc
+  caller tráo artifact sau review đều không publish được bundle.
+- Native canonical visual/pose loaders và diagnostic geometry/distance verifier
+  được reuse. Proof record có status VERIFIED và scope `canonical_rgb_bundle_metric`,
+  không phải physics/Isaac proof; product deployment từ chối fixture scope.
+- `BundleDependencies.verify_metric=verifier.verify_bundle` là composition seam
+  cho REC-10. CLI cũ chưa được cấp PRODUCT authority adapter nên vẫn fail closed;
+  không thêm CLI flag fake approval. Mixed alignment vẫn do REC-09 loader kiểm riêng.
+- Fixture chain producer→canonical visual/poses→geometry→final proof→bundle→SCENE
+  consumer chạy không remap output refs hoặc sửa artifact bằng tay. Đây là fixture
+  orchestration/payload contract proof, không real measurement/GPU qualification.
+- `.venv/bin/pytest tests/test_reconstruction/test_rec06_bundle_metric.py -q`:
+  **19 passed (76.72s)**. Sau refactor helpers, regression REC-06 bridge + preview
+  + REC-10 + REC-11 với `REC04_TEST_SPLAT_MODULE` trỏ pinned dist/index.mjs:
+  **64 passed (137.11s)**. Ruff check/format EX-REC source/tests: **104 files pass**;
+  AST changed modules/tests ≤30 lines, ≤3 non-self params, typed args/returns pass.
+- Scope hiện tại chỉ canonical RGB geometry selection, chưa sensor depth hoặc
+  alternate LiDAR canonical geometry. Real measurement/frame confirmation,
+  tolerance, seed/collision qualification và full dispatch vẫn pending.
 
 ### Checkpoint 2026-09-26 — DONE, final cross-artifact verification
 

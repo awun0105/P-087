@@ -1,5 +1,6 @@
 """Prepared preview fixture integration: real producer/consumer/store, không claim GPU training."""
 
+import hashlib
 import json
 import os
 import subprocess
@@ -9,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.manifests import StageId
 from src.services.orchestration.artifacts import ArtifactResolver, FilesystemArtifactStore
 from src.services.orchestration.artifacts.errors import ArtifactAlreadyExistsError
@@ -26,19 +28,31 @@ from tests.test_reconstruction.test_rec04_brush import FixtureBrush, FixtureProc
 from tests.test_reconstruction.test_rec04_brush import config as brush_config
 
 
+def publish_frames(root: Path, writer: FilesystemArtifactStore) -> tuple:
+    """Tạo fixture job-bound trước producer execution, không remap output để né lineage."""
+    frames, ref = png_frames(root / "source")
+    inventory = frames.load(ref)
+    for frame in inventory.frames:
+        frame.image = frame.image.model_copy(update={"job_id": "input"})
+        writer.publish(frame.image, frames._resolve(frame.image).read_bytes())
+    inventory.frame_set_checksum = canonical_content_checksum(inventory, "frame_set_checksum")
+    payload = inventory.model_dump_json().encode()
+    ref = ref.model_copy(
+        update={"job_id": "input", "artifact_checksum": "sha256:" + hashlib.sha256(payload).hexdigest()}
+    )
+    writer.publish(ref, payload)
+    return inventory, ref
+
+
 def preview(root: Path) -> tuple[PreparedPreviewWorker, PreparedPreviewRequest, ArtifactResolver]:
     """Frames fixture được publish qua cùng public artifact store như producer thật."""
-    frames, ref = png_frames(root / "source")
     resolver = ArtifactResolver(root / "store")
     writer = FilesystemArtifactStore(resolver)
-    for frame in frames.load(ref).frames:
-        writer.publish(frame.image, frames._resolve(frame.image).read_bytes())
-    ref = ref.model_copy(update={"job_id": "input"})
-    writer.publish(ref, frames._resolve(ref).read_bytes())
+    inventory, ref = publish_frames(root, writer)
     request = PreparedPreviewRequest(
         job_id="input",
         attempt_id="first",
-        source_input_checksum=frames.load(ref).input_manifest_checksum,
+        source_input_checksum=inventory.input_manifest_checksum,
         frame_set_ref=ref,
         colmap=colmap_config(),
         brush=brush_config(),
@@ -189,8 +203,6 @@ def test_consumer_rejects_changed_dependency(tmp_path: Path, target: str) -> Non
 
 
 def test_consumer_rejects_forged_stage_even_with_new_checksum(tmp_path: Path) -> None:
-    import hashlib
-
     worker, request, resolver = preview(tmp_path)
     result, ref = worker.run(request, tmp_path / "run")
     result.stage_artifacts[0].artifact_checksum = "sha256:" + "c" * 64

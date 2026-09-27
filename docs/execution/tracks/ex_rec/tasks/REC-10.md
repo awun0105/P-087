@@ -66,6 +66,14 @@ Giữ tool/research repo ở process/adapter boundary; không kéo toàn bộ re
 
 ## 9. Implementation Plan
 
+Resume sau 427ab83: nối `BundleDependencies.verify_metric` với REC-06 immutable
+final RGB verification record; exact bundle request (trừ proof ref để tránh cycle)
+phải match reviewed candidate. Kiểm canonical VisualArtifact SOG thực + poses +
+geometry + frame inventory/source checksum, giữ scope product/fixture tách biệt.
+Canonical selection khác RGB geometry hoặc sensor depth cần verifier tương ứng,
+không default approval. Producer→consumer fixture handoff là proof cho bridge,
+không đóng real dataset DoD hoặc tự triển khai PRODUCT decision authority.
+
 Audit 2026-09-27: default metric UNCONFIRMED, không suy canonical geometry từ
 RGB ref. Inject resolver + metric/alignment verifier ports; resolve/hash mọi
 dependency, job/type/stage binding và confirmed-record reload trước publication.
@@ -97,6 +105,23 @@ derivative verifier chưa nối, nên chưa publish được real qualified bund
 chưa đủ required handoff proof để DONE.
 
 ## 12. Result / Evidence
+
+### Canonical RGB verification bridge — 2026-09-27 sau 427ab83
+
+REC-06 `BundleMetricVerifier.verify_bundle` nay là concrete verifier port cho
+`BundleDependencies`, không chỉ test lambda approve. Recheck canonical payloads,
+source InputManifest/frame inventory, geometry transform, measurement protocol
+review và exact candidate; proof ref immutable được giữ trong bundle provenance.
+Fixture chain đi từ published frame producer qua REC-03/04/06/05 đến REC-10 và
+`load_reconstruction_bundle` của EX-SCENE, không sửa bundle/manual conversion.
+
+Focused final metric bridge **19 passed**; combined REC-06 bridge/REC-11 preview/
+REC-10/worker **64 passed (137.11s)**, native SOG test enabled. Ruff EX-REC 104
+files pass. Đây là fixture proof cho wiring; heavy engines/review authority là
+stubs ở fixture chain, không real dataset acceptance. Default deployed verifier
+không nhận fixture scope, authenticated reviewer PRODUCT chưa nối. Native LiDAR
+canonical selection, sensor depth và real mixed alignment qualification vẫn cần
+hoàn thiện; REC-10 chưa DONE.
 
 ### Audit correction 2026-09-27 — verified publication boundary
 
