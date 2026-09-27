@@ -69,6 +69,26 @@ có sẵn, không chọn một shortcut thay cho hai chế độ còn lại:
     suy camera-to-ground offset hoặc coi seed là walkable chỉ vì camera từng ở đó.
   - Nếu seed không hợp lệ, từ chối attempt hoặc yêu cầu chọn lại. Không bỏ validation,
     auto-pass hoặc coi upstream relocate/skip carve là chứng nhận seed ban đầu hợp lệ.
+  - **Owner amendment 2026-09-27 — seed relocation có kiểm soát:** bổ sung lựa chọn
+    thứ ba bên cạnh *từ chối* và *yêu cầu chọn lại*: **tự tìm seed hợp lệ trong
+    không gian liên thông rồi ghi cả hai điểm vào evidence.** Điều kiện bắt buộc:
+    1. Tìm kiếm phải **có kiểm tra liên thông (connectivity)** trên vùng không khí
+       tự do, không được dùng quét vỏ cube/Chebyshev như `findNearestFreeCell` của
+       upstream `splat-transform` 3.6.6. Ô trống bên kia bức tường không phải ứng viên.
+    2. **Có giới hạn khoảng cách** tính bằng mét. Vượt ngưỡng thì từ chối, không nới.
+    3. **Ghi rõ relocation** trong clearance evidence: `requested_seed_world`,
+       `accepted_seed_world`, khoảng cách dịch chuyển, phương pháp tìm kiếm, và
+       occupancy checksum đã dùng làm căn cứ. Không được ghi đè seed đã yêu cầu.
+    4. `capsule_clearance_verified` trong `CameraSeedProposal` **vẫn là `False`**;
+       việc xác thực thuộc adapter/occupancy, không thuộc proposal của camera.
+    5. Consumer phải **tự kiểm lại** từ bytes occupancy đã publish, không được tin
+       trường `status` do producer ghi.
+    6. Lựa chọn này **không** thay thế `CLEAR/BLOCKED` của EX-SIM: capsule vừa và cùng
+       vùng liên thông không chứng minh robot đi tới được. Nếu không tìm được ứng viên
+       trong ngưỡng thì quay về hành vi từ chối như trước.
+  - Việc chọn lại seed thủ công trên **3D viewport** vẫn thuộc `PRODUCT-06`
+    (`EX-PRODUCT`) và chưa có đặc tả UX; relocation ở trên là đường không phụ thuộc
+    EX-PRODUCT, không phải sự thay thế cho UX đó.
 
 ### 2. Giải pháp Sản phẩm Thực tế (Khi người dùng tải lên Video Monocular RGB bất kỳ)
 
