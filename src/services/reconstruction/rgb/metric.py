@@ -94,6 +94,7 @@ class MetricCanonicalizer:
             or reference.producer_stage != StageId.METRIC_CANONICALIZE
         ):
             raise ValueError("not a REC-06 anchor/frame confirmation")
+        _require_job_identity(reference)
         payload = self.deps.visuals.require(reference).read_bytes()
         record = MetricConfirmation.model_validate_json(payload)
         if reference.source_provenance != _provenance(record):
@@ -141,6 +142,17 @@ class MetricCanonicalizer:
             position_world=record.preview.transform.apply_point(first.translation),
             evidence_kind=record.preview.request.evidence_kind,
         )
+
+
+def _require_job_identity(reference: ProductArtifactRef) -> None:
+    """Ref phải tự nhất quán về job vì derivative REC-06 lấy namespace từ job đó.
+
+    Thiếu job_id, hoặc URI trỏ sang job khác, đều cho phép ghi confirmation
+    derivative vào namespace của job khác nên phải chặn trước khi resolve bytes.
+    """
+    job_id = reference.job_id
+    if job_id is None or not reference.artifact_uri.startswith(f"artifact://jobs/{job_id}/"):
+        raise ValueError("confirmation job identity is required to namespace REC-06 derivatives")
 
 
 def _provenance(record: MetricConfirmation) -> dict[str, str]:

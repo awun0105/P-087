@@ -51,6 +51,15 @@ def test_reject_raw_pose_as_canonical(tmp_path: Path) -> None:
         service.load(record.preview.source_camera_poses)
 
 
+@pytest.mark.parametrize("job_id", [None, "another-job"])
+def test_confirmation_job_identity_is_required(tmp_path: Path, job_id: str | None) -> None:
+    """Không tạo derivative namespace từ confirmation ref thiếu/sai job binding."""
+    service, reference, _ = pose_service(tmp_path)
+    forged = reference.model_copy(update={"job_id": job_id})
+    with pytest.raises(ValueError, match="confirmation job identity"):
+        service.build(forged)
+
+
 def test_reject_corrupted_published_bytes(tmp_path: Path) -> None:
     """Không tin resolver chỉ trả path hay metadata không đổi."""
     service, confirmation_ref, _ = pose_service(tmp_path)

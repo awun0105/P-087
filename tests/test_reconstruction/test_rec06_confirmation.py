@@ -194,6 +194,15 @@ def test_published_reference_tampering(context: tuple, failure: str) -> None:
         service.load(reference)
 
 
+@pytest.mark.parametrize("job_id", [None, "other-job"])
+def test_confirmation_ref_requires_consistent_job_identity(context: tuple, job_id: str | None) -> None:
+    """Ref thiếu job hoặc trỏ job khác vẫn không được namespace derivative REC-06."""
+    service, _, preview, acceptance = context
+    reference = service.publish(service.confirm(preview, acceptance), "rec06-fixture")
+    with pytest.raises(ValueError, match="confirmation job identity"):
+        service.load(reference.model_copy(update={"job_id": job_id}))
+
+
 def test_rebound_pose_lineage_rejected(context: tuple) -> None:
     """Rehashed preview/decision không được đổi source pose khỏi raw visual lineage."""
     service, request, preview, _ = context
