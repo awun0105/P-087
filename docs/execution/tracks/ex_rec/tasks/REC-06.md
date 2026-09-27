@@ -39,6 +39,63 @@ dùng. Số hardcode hiện tại `tolerance_m = 0.05` tại
 `src/services/reconstruction/rgb/metric_verification.py:24` **chưa được chốt là
 authority** và sẽ bị thay khi có số đo. PRD §11.4 câu 4 vẫn `TBD` cho tới lúc đó.
 
+### 2026-09-27 — thử tự suy A/B từ dữ liệu: KHÔNG ĐẠT, cần người chọn
+
+Owner cho phép thử tự dựng ứng viên cặp A/B. Đã làm đủ chuỗi và **kết luận
+không dùng được**. Ghi lại cả thành công lẫn thất bại để không ai lặp lại.
+
+**Đã xác minh được thêm (quan trọng cho REC-06):**
+`visual.ply` của Brush và `points3D.bin` của COLMAP nằm **cùng một frame** —
+median nearest-neighbour = **0,000665 sfm-unit**, 100% trong dung sai, range XYZ
+trùng khớp. Comment `"Vertical axis: y"` trong Brush PLY chỉ là **nhãn**, dữ liệu
+không bị hoán đổi. Nên `DistanceAnchor.point_a/point_b` có thể lấy thẳng tọa độ
+COLMAP, không cần bước chuyển frame.
+
+**Cách đã thử:** chiếu raw scan qua chuỗi camera **đã verify** (inverse(T_os_from_cam),
+optical, không distortion) thành z-buffer theo pixel → chiếu `points3D` quan sát
+được ở frame 110 ra pixel → ghép hai bảng tại cùng pixel.
+
+**Kết quả — scale KHÔNG nhất quán:**
+
+| max depth | số cặp | median scale (m/sfm-unit) | p95/p50 | trong ±5% |
+| --- | --- | --- | --- | --- |
+| 3 m | 102 | 0,5876 | 1,268 | 51,0% |
+| 4 m | 597 | 0,6585 | 1,274 | 22,4% |
+| 5 m | 2.191 | 0,6698 | 1,975 | 23,8% |
+| 6 m | 3.035 | 0,6700 | 2,067 | 23,2% |
+| 8 m | 3.190 | 0,6692 | 2,042 | 22,7% |
+| 25 m | 3.834 | 0,6749 | 1,983 | 25,1% |
+
+Median **ổn định ~0,67 m/sfm-unit** qua mọi lát cắt độ sâu — đó là ước lượng
+trung tâm đáng tin. Nhưng **độ rộng cực lớn**: p95/p50 ≈ 2,0 và chỉ ~23% cặp trong
+±5%. RANSAC + Umeyama trên 831 tương ứng chỉ giữ được 22 inlier, residual median
+2,36 m — **hỏng**. Một cặp 2 điểm đơn lẻ có sai số cỡ **±30%**, không dùng làm
+bằng chứng nghiệm thu được.
+
+**Vì sao hỏng — và vì sao đây là kết quả ĐÚNG, không phải thất bại:**
+ADR 0001 §"Chọn A/B" đã cấm rõ: *"không đo khoảng cách pixel, **dùng điểm gần bất
+kỳ** hoặc tự điền số giả"*. Cách của agent đúng là "dùng điểm LiDAR gần nhất tại
+pixel" — bị cấm. Nguyên nhân vật lý: sàn nhìn xiên ở tầm xa định vị kém (2 ứng viên
+tự chọn đều rơi vào `y≈358-364`, tức **đúng đường chân trời**, tầm xa nhất), và
+tại điểm nhảy độ sâu thể tích LiDAR ở pixel đó không cùng bề mặt với điểm ảnh.
+
+**Kết luận và nội dung còn lại cho REC-06:**
+1. **A/B phải do người chọn**, nhúng thẳng vào design sản phẩm: user click 2 điểm
+   trên 3D viewport, hệ thống đo khoảng cách tương ứng trên LiDAR đã căn chỉnh,
+   người dùng xác nhận. Người chọn phải thấy được vật thể cụ thể (ví dụ chân cột,
+   góc vạch sàn vàng, đế kệ) — **không** chọn pixel sàn trước đống kệ.
+2. `scale ≈ 0,67 m/sfm-unit` (median 831+ cặp) là **sanity anchor** để kiểm tra kết
+   quả sau khi có cặp do người chọn, không phải giá trị để khóa.
+3. **Hệ quả trực tiếp cho `tolerance_m`:** sai số quan sát được lớn hơn nhiều so
+   với 0,05m. Tolerance phải suy từ phép đo trên **đúng cặp người chọn**, không từ
+   tương ứng tự động ở trên.
+4. Cần thêm 1 chỗ nữa mới đạt được `CONFIRMED` thật: **canonical visual
+   publication** — adapter similarity REC-05 đã có, nhưng chưa có bản visual
+   canonical đã áp transform, và chưa có independent-distance verifier production.
+
+**Evidence:** `data/rec07_axis_evidence_20260927/ab_candidates.png`
+(`5fff470e…`) và `scale_depth.py` (script tái lập bảng trên).
+
 
 ## 2. Goal
 
