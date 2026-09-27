@@ -43,6 +43,129 @@
 
 ## 0. Trạng thái repo lúc bàn giao
 
+### Addendum 3 — phát hiện REC-04 chưa train thật + việc còn lại (2026-09-27 ~16:30)
+
+> **Bối cảnh:** owner yêu cầu chạy demo `upload video → frame → 3DGS → UI`. Khi
+> truy ngược chuỗi để tìm tỉ lệ metric (REC-06) mới phát hiện ra vấn đề gốc ở
+> REC-04. Addendum này ghi lại phát hiện đó **và danh sách việc còn lại**.
+
+#### PHÁT HIỆN GỐC: `visual.ply` hiện tại KHÔNG phải 3DGS
+
+Đọc `visual.json` + `brush-train.log` của attempt `rec04_smoke_artifacts_10c`:
+
+```json
+"total_train_iters": 10,     ← chỉ 10 bước
+"max_resolution": 128,       ← ảnh nhỏ xuống 128px
+"sh_degree": 0,
+"refine_every": 200          ← refine mỗi 200 bước
+```
+
+| | |
+| --- | --- |
+| COLMAP `points3D` | 6.202 điểm |
+| Brush `num_gaussians` | **6.202 — y hệt** |
+| `fill_ratio` | 1,0265 (chỉ +2,7%) |
+| `sh_bands` | 0 |
+| Thời gian chạy | **2 giây** (01:40:18 → 01:40:20) |
+
+Vì `refine_every: 200` mà chỉ chạy 10 bước → **densification chưa bao giờ chạy**.
+Brush mặc định `--total-steps 30000`; giá trị 10 là số của smoke test.
+
+**Hệ quả đo được:** reconstruction chỉ là COLMAP sparse cloud được tô màu, không
+có cấu trúc bề mặt. Điều này giải thích mọi thất bại của bước thí nghiệm metric:
+
+- COLMAP đặt điểm 3D trên **kệ**, không phủ sàn → không ghép được điểm sàn
+- Scale phụ thuộc chiều dài baseline (Pearson **+0,528**, 4.528 cặp thử ở frame 110)
+- Demo 3DGS trên UI sẽ trông như point cloud thưa
+
+**Lưu ý:** `tasks/REC-04.md` đang ghi `Status: DONE` và `visual.json` ghi
+`qualification: "real Brush technical smoke; not Primary Demo or metric geometry
+acceptance"`. Mức smoke là đúng, nhưng **không được dùng làm 3DGS cho demo/AC-11**.
+
+#### Đã đo được để chạy Brush thật
+
+| Phép đo | Kết quả |
+| --- | --- |
+| 200 bước @ 1280px | 166,4 s — `num_gaussians` **vẫn 6.202** (refine 200 chưa tới) |
+| 1.000 bước @ 1280px | 689,8 s — `num_gaussians` **7.903** → **densification hoạt động** |
+| Tốc độ | 0,69 s/bước (chưa tính splat tăng) |
+
+Ước lượng 30.000 bước: @1280px 5,7–11,5 giờ · **@960px 3,2–6,5 giờ** · @640px 1,4–2,9 giờ.
+Đã tạo `data/rec04_runtime/train-config.json` (30.000 bước, 960px, sh_degree 3,
+max_splats 400k, refine_every 200).
+
+**CHƯA CHẠY XONG — owner báo máy nóng, đã dừng.** Lý do kỹ thuật chưa rõ:
+chạy nền báo `brush-train failed (exit -6)` = SIGABRT, không có stderr Brush trong
+log wrapper. Chạy foreground 240 s thì vẫn tiến (`Refine iter 201, 6555 splats`
+→ `Refine iter 401, 6938 splats`) nên **không phải crash sớm** — nghi do SIGABRT khi
+tiến trình bị `pkill`/session kết thúc, hoặc OOM khi splat dày lên. Cần chạy lại
+và theo dõi `Refine iter` + `num_gaussians` để xác nhận.
+
+#### Ràng buộc môi trường phát hiện được
+
+| | |
+| --- | --- |
+| **Có Quadro T2000 trong máy** (`01:00.0 NVIDIA TU117GLM`) nhưng **driver không chạy** — `nvidia-smi` fail, Vulkan không thấy | Không dùng được |
+| Vulkan chỉ thấy Intel UHD 630 + llvmpipe | Brush chạy trên iGPU |
+| Ổ đĩa từng chỉ còn 5,1 G (98%) | Phải dọn trước khi chạy dài |
+| RAM 30 G | |
+
+→ **Thuê GPU host là hướng hợp lý**, nhưng rẻ hơn nhiều nếu cài driver cho
+Quadro T2000 sẵn có. Đây là quyết định của owner, agent không tự cài driver hệ thống.
+
+#### VIỆC CÒN LẠI — theo thứ tự nên làm
+
+Demo mục tiêu: `upload video → tách frame → 3DGS → hiển thị UI, xoay tương tác`.
+
+| # | Việc | Chặn cái gì | Cần owner? |
+| --- | --- | --- | --- |
+| **1** | **Train Brush thật** (30.000 bước @960px) | Không có 3DGS thật; và đo metric cũng cần | Quyết GPU: máy hay thuê |
+| **2** | **REC-11 worker dispatch** | UI không chạy được pipeline | Không |
+| **3** | **PRODUCT-08** nối `transition_job` vào worker thật | Hiện là mock-worker | Không |
+| **4** | **PRODUCT-06 splat renderer** | UI chỉ parse PLY **ASCII**; artifact thật là `binary_little_endian` và `scene.sog` | Không |
+| **5** | Mở 3 chỗ chặn `coordinate_status` | REC-08 ingest fail-closed | Đã có quyết định, cần code |
+| **6** | A/B points + `tolerance_m` | REC-06 `CONFIRMED` | **Có** — sau #1 |
+| **7** | Canonical visual publication (WIP của Codex) | REC-06 final verify | Không |
+
+Chi tiết #2–#4:
+
+- **#2** `src/services/reconstruction/worker.py` hiện chỉ có
+  `execution_scope: Literal["verified_bundle_publication"]` và một stage
+  `_execute_metric_canonicalize`. Không đọc `InputManifest`/`JobManifest`, không
+  chạy chuỗi REC-01→11, không retry.
+- **#3** `src/api/routes_product.py:143` trên `feat/product` tự ghi
+  *"affordance **mock-worker**: trong P0 chưa có worker thật nên client đóng vai
+  người báo tiến độ"*.
+- **#4** `frontend/src/features/viewer/ply.ts` trên `feat/product` tự ghi
+  *"Chỉ hỗ trợ `format ascii 1.0`. PLY binary cố ý **không** được parse"*, và
+  `package.json` không có PlayCanvas/splat-transform. REC-04 đã xuất
+  `scene.sog` (WebP nén, đúng format cho browser) — thiếu mỗi renderer.
+  Theo `AGENTS.md` §8: mesh/point-cloud mock **không được** báo làm
+  Brush/3DGS acceptance.
+
+#### Ước lượng
+
+| Việc | Công |
+| --- | --- |
+| #2 + #3 (worker + nối API) | 1–2 ngày |
+| #4 (splat renderer) | 1–2 ngày |
+| #1 (train) | 3–6,5 giờ máy, hoặc ~30–60 phút trên GPU thuê |
+
+#### Trạng thái test lúc ghi addendum này
+
+`pytest tests/test_reconstruction/ -q` → **380 passed, 21 skipped** (111,36s).
+`ruff check src/ tests/ scripts/torwic` → pass, 186 files.
+WIP của agent khác (`canonical_visual.py`, `REC-06.md`,
+`test_rec06_canonical_poses.py`) **để nguyên unstaged**, không đụng vào.
+
+#### Evidence gitignored
+
+```
+data/rec06_scale_experiment_20260927/   ảnh + result.json thí nghiệm metric
+data/rec07_axis_evidence_20260927/      ảnh up-axis, camera chain, dataset figure
+data/rec07_prefusion_sub100_119/        prefusion 20 scan (133.039 điểm)
+```
+
 ### Resume addendum 2 — opencode audit WIP sau 99f2399 (2026-09-27 ~13:00)
 
 **Không sửa gì.** Chỉ đọc và đo để báo cáo trạng thái. Worktree lúc audit này **KHÔNG
@@ -107,6 +230,38 @@ trước, đúng thứ tự.
    verifier production, nên worker CLI vẫn fail-closed.
 4. **Full worker dispatch** (`InputManifest`/`JobManifest`) + retry.
 5. **Real alignment** (REC-09 same-scene thật) + native LiDAR coordinate promotion.
+
+### Resume addendum 3 — job identity guard + xác minh lại addendum 2 (2026-09-27 ~13:40)
+
+**Sửa một claim sai của addendum 2:** `canonical_visual.py::_publish_blob` **không** có
+4 tham số. AST check cho `self, context, spec, payload` → **3 non-self params**, đúng
+giới hạn ≤3 của `AGENTS.md` §8. Không có vi phạm cần gộp typed model. Addendum 2 đếm
+nhầm.
+
+**Đã làm:** guard `_require_job_identity` trong `rgb/metric.py::load` — confirmation ref
+phải có `job_id` và URI trỏ đúng job đó. Đóng 2 test đỏ TDD mà addendum 2 nêu
+(`test_confirmation_job_identity_is_required[None|another-job]`), vì `CanonicalPoseService.build`
+từng lấy thẳng `confirmation_ref.job_id` dựng URI. Guard đặt ở loader để
+canonical poses, canonical visual và metric verification cùng hưởng, theo convention
+đã có ở `metric_verification.py:89-92`. Thêm negative test ở `test_rec06_confirmation.py`.
+
+**Trạng thái đo được lượt này:**
+
+```
+pytest tests/test_reconstruction/ -q                 →  380 passed, 21 skipped (89.10s)
+pytest tests/test_reconstruction/ -q (codec+GPU)     →  401 passed, 0 skipped (112.44s)
+ruff check / ruff format --check (191 files)         →  pass
+AST 7 file (≤30 dòng, ≤3 non-self params)            →  0 vi phạm
+```
+
+Codec thật dùng cho lượt này: `splat-transform` **3.6.6** tại
+`data/rec04_runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs`
+(+ `bin/cli.mjs` cho voxel). `test_native_metric_ply_and_sog_publication` chạy thật, đọc
+SOG bytes thật (`PK`) — vẫn **không** phải browser QA.
+
+**Còn thiếu (không đổi so với addendum 2):** A/B points do người chọn, `tolerance_m`,
+production metric verifier, full worker dispatch + retry, real alignment REC-09. REC-06
+giữ `IN_PROGRESS`. `.venv` vẫn thiếu `numpy` nên full `pytest tests/` vẫn vướng EX-SIM.
 
 ### Resume addendum — Codex sau 41ca8eb (không sửa snapshot lịch sử bên dưới)
 
