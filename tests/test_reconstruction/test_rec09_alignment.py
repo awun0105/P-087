@@ -56,6 +56,7 @@ def test_alignment_success(tmp_path: Path) -> None:
     geom_service, canonicalizer, conf_ref, metric_req, _ = setup_pipeline(tmp_path)
     geom_res = geom_service.execute(
         GeometryExecutionRequest(
+            execution_scope="synthetic_fixture",
             confirmation_ref=conf_ref,
             source_visual=metric_req.source_visual,
             config=config(),
@@ -110,6 +111,7 @@ def test_alignment_rejects_different_scene(tmp_path: Path) -> None:
     geom_service, canonicalizer, conf_ref, metric_req, _ = setup_pipeline(tmp_path)
     geom_res = geom_service.execute(
         GeometryExecutionRequest(
+            execution_scope="synthetic_fixture",
             confirmation_ref=conf_ref,
             source_visual=metric_req.source_visual,
             config=config(),
@@ -136,6 +138,7 @@ def test_alignment_rejects_mismatched_job_id(tmp_path: Path) -> None:
     geom_service, canonicalizer, conf_ref, metric_req, _ = setup_pipeline(tmp_path)
     geom_res = geom_service.execute(
         GeometryExecutionRequest(
+            execution_scope="synthetic_fixture",
             confirmation_ref=conf_ref,
             source_visual=metric_req.source_visual,
             config=config(),
@@ -161,6 +164,7 @@ def test_alignment_rejects_invalid_parent_frame(tmp_path: Path) -> None:
     geom_service, canonicalizer, conf_ref, metric_req, _ = setup_pipeline(tmp_path)
     geom_res = geom_service.execute(
         GeometryExecutionRequest(
+            execution_scope="synthetic_fixture",
             confirmation_ref=conf_ref,
             source_visual=metric_req.source_visual,
             config=config(),

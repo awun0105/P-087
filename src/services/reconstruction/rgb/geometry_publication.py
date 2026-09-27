@@ -5,6 +5,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from src.models.contracts.artifacts import ArtifactDataClass, Checksum, ContractModel, ProductArtifactRef
 from src.models.contracts.coordinates import CoordinateSystem
@@ -21,6 +22,7 @@ from src.services.reconstruction.rgb.voxel import VoxelConfig
 class GeometryExecutionRequest(ContractModel):
     """Yêu cầu tạo coarse voxel collision mesh từ visual artifact và metric confirmation."""
 
+    execution_scope: Literal["product", "synthetic_fixture"] = "product"
     confirmation_ref: ProductArtifactRef
     source_visual: ProductArtifactRef
     config: VoxelConfig
@@ -109,6 +111,7 @@ class GeometryDependencies:
     visuals: VisualResolver
     adapter: SplatTransformVoxelAdapter
     publisher: GeometryPublisher
+    verify_seed: Callable[[GeometryExecutionRequest], bool] | None = None
 
 
 class RgbGeometryService:
@@ -134,7 +137,20 @@ class RgbGeometryService:
     def _validate_preconditions(self, request: GeometryExecutionRequest) -> tuple:
         if request.applied_record_checksum is not None:
             raise ValueError("metric transform already applied; refusing double scaling")
-        confirmation = self.deps.canonicalizer.load(request.confirmation_ref)
+        confirmation = (
+            self.deps.canonicalizer.require_real(request.confirmation_ref)
+            if request.execution_scope == "product"
+            else self.deps.canonicalizer.load(request.confirmation_ref)
+        )
+        if (
+            request.execution_scope == "synthetic_fixture"
+            and confirmation.preview.request.evidence_kind != "synthetic_fixture"
+        ):
+            raise ValueError("fixture execution cannot bypass real scene seed validation")
+        if request.execution_scope == "product" and (
+            self.deps.verify_seed is None or self.deps.verify_seed(request) is not True
+        ):
+            raise ValueError("product capsule/seed clearance verifier is not configured or rejected input")
         if confirmation.status != "CONFIRMED":
             raise ValueError("metric confirmation must be CONFIRMED")
         visual = self.deps.visuals.load(request.source_visual)
@@ -156,6 +172,11 @@ class RgbGeometryService:
             producer_version="rec05-v1",
             applied_confirmation_checksum=report["applied_confirmation_checksum"],
             scale_applied=report["scale_applied"],
+            applied_transform=report["applied_transform"],
+            evidence_kind=report["evidence_kind"],
+            source_checksum=report["source_checksum"],
+            metric_derivative_checksum=report["files"]["input.ply"],
+            metric_confirmation_ref=request.confirmation_ref.model_dump(mode="json"),
             voxel_resolution_m=request.config.resolution_m,
             coordinate_system=CoordinateSystem().model_dump(mode="json"),
         )

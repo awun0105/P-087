@@ -98,6 +98,19 @@ transform via pinned SplatTransform; then REC-06 actual canonical derivatives,
 independent-distance proof and real verifier wiring. Capsule/seed validation and
 native LiDAR coordinate review remain explicit pending work, not fake acceptance.
 
+Latest checkpoint 2026-09-27: REC-05 full similarity replacement completed and
+wired into voxel working derivative. Pin splat3.6.6 afbc281 MIT; reuse public
+ChunkSource/Transform/writer (xyz/quaternion/log-scale/SH), no homemade PLY patch.
+Native CPU9 pass; transformed-room GPU1 pass on UHD630, 2703→2702splats,
+48vertices/88triangles with zero topology defects. Evidence snapshot ignored at
+`data/rec05_similarity_audit_20260927/`. Full EX-REC with REC05 native/GPU flags:
+353 passed/5 skipped (82.71s); Ruff186 + Node syntax/AST/diff pass.
+Product default rejects synthetic metric and needs injected seed/capsule verifier;
+fixture publication explicitly labelled. Remaining immediate work: REC-06 actual
+canonical pose/visual publication + independent-distance proof and production
+REC-10/11 verifier wiring. Native LiDAR coordinate evidence, real capsule/seed,
+full InputManifest/JobManifest dispatch and real consumer/Isaac proof still open.
+
 Owner mở rộng execution request 2026-09-26: implement toàn bộ EX-REC tasks còn
 lại, agent tự chọn dependency order và tận dụng core reference repos tương ứng.
 Commit tuần tự từng coherent implementation đã kiểm tra; không push/merge.

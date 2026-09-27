@@ -20,6 +20,7 @@ def test_cross_artifact_verification_success(tmp_path: Path) -> None:
     service, canonicalizer, conf_ref, metric_req, record = setup_pipeline(tmp_path)
     geom_res = service.execute(
         GeometryExecutionRequest(
+            execution_scope="synthetic_fixture",
             confirmation_ref=conf_ref,
             source_visual=metric_req.source_visual,
             config=config(),
@@ -52,6 +53,7 @@ def test_cross_artifact_verification_with_independent_sample(tmp_path: Path) -> 
     service, canonicalizer, conf_ref, metric_req, record = setup_pipeline(tmp_path)
     geom_res = service.execute(
         GeometryExecutionRequest(
+            execution_scope="synthetic_fixture",
             confirmation_ref=conf_ref,
             source_visual=metric_req.source_visual,
             config=config(),
@@ -91,6 +93,7 @@ def test_cross_artifact_verification_rejects_exceeded_tolerance(tmp_path: Path) 
     service, canonicalizer, conf_ref, metric_req, record = setup_pipeline(tmp_path)
     geom_res = service.execute(
         GeometryExecutionRequest(
+            execution_scope="synthetic_fixture",
             confirmation_ref=conf_ref,
             source_visual=metric_req.source_visual,
             config=config(),
@@ -129,6 +132,7 @@ def test_cross_artifact_verification_rejects_unmatched_geometry(tmp_path: Path) 
     service, canonicalizer, conf_ref, metric_req, record = setup_pipeline(tmp_path)
     geom_res = service.execute(
         GeometryExecutionRequest(
+            execution_scope="synthetic_fixture",
             confirmation_ref=conf_ref,
             source_visual=metric_req.source_visual,
             config=config(),

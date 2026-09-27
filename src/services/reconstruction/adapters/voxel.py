@@ -1,7 +1,7 @@
-"""SplatTransform collision pipeline; entrypoint hiện chỉ dành cho synthetic proof.
+"""SplatTransform voxel/collision process; authority thuộc RgbGeometryService.
 
-REC-06 chưa có confirmed-record producer. Không expose product metric entrypoint,
-không gán CONFIRMED và không publish GeometryArtifact từ fixture qualification.
+Synthetic proof tách product record-bound derivative; adapter không tự cấp
+confirmation, không tự publish shared artifact hay nghiệm thu capsule an toàn.
 """
 
 import hashlib
@@ -13,7 +13,10 @@ from typing import Literal
 from src.models.contracts.artifacts import Checksum, ContractModel
 from src.models.contracts.coordinates import CoordinateSystem
 from src.services.reconstruction.adapters.collision_glb import canonicalize_collision, topology
-from src.services.reconstruction.adapters.gaussian_scale import scale_gaussian_ply
+from src.services.reconstruction.adapters.gaussian_scale import (
+    GaussianTransformRequest,
+    SplatTransformSimilarityAdapter,
+)
 from src.services.reconstruction.adapters.voxel_output import validate_voxel_output, write_evidence
 from src.services.reconstruction.adapters.voxel_runtime import GeometryError, VoxelProcess, require_carve
 from src.services.reconstruction.rgb.metric_models import MetricConfirmation
@@ -105,6 +108,8 @@ class SplatTransformVoxelAdapter:
             raise ValueError("metric transform already applied; refusing double scaling")
         if request.confirmation.status != "CONFIRMED":
             raise ValueError("metric confirmation must be CONFIRMED")
+        if request.source_checksum != request.confirmation.preview.request.anchor.source_master.artifact_checksum:
+            raise ValueError("voxel source is not the master bound to metric confirmation")
         if file_checksum(request.source) != request.source_checksum:
             raise GeometryError("Product source checksum mismatch")
         return self._execute(request, workspace)
@@ -112,13 +117,7 @@ class SplatTransformVoxelAdapter:
     def _execute(self, request: SyntheticVoxelRequest | ProductVoxelRequest, workspace: Path) -> dict:
         workspace.mkdir(parents=True, exist_ok=False)
         try:
-            shutil.copyfile(request.source, workspace / "input.ply")
-            if file_checksum(workspace / "input.ply") != request.source_checksum:
-                raise GeometryError("Copied source checksum mismatch")
-            if isinstance(request, ProductVoxelRequest):
-                scale = request.confirmation.preview.transform.scale_m_per_sfm_unit
-                if abs(scale - 1.0) >= 1e-9:
-                    scale_gaussian_ply(workspace / "input.ply", workspace / "input.ply", scale)
+            self._prepare_input(request, workspace)
             self._pipeline(request.config, workspace)
             report = self._report(request, workspace)
             if file_checksum(request.source) != request.source_checksum:
@@ -127,6 +126,20 @@ class SplatTransformVoxelAdapter:
             return report
         except (OSError, ValueError) as error:
             raise GeometryError("Voxel attempt failed; inspect private logs; no artifact published") from error
+
+    def _prepare_input(self, request: SyntheticVoxelRequest | ProductVoxelRequest, workspace: Path) -> None:
+        if isinstance(request, ProductVoxelRequest):
+            transform = GaussianTransformRequest(
+                source=request.source,
+                source_checksum=request.source_checksum,
+                transform=request.confirmation.preview.transform,
+            )
+            SplatTransformSimilarityAdapter(self.process).transform(transform, workspace / "metric")
+            shutil.copyfile(workspace / "metric/input.ply", workspace / "input.ply")
+        else:
+            shutil.copyfile(request.source, workspace / "input.ply")
+            if file_checksum(workspace / "input.ply") != request.source_checksum:
+                raise GeometryError("Copied source checksum mismatch")
 
     def _pipeline(self, config: VoxelConfig, workspace: Path) -> None:
         self.process.qualify(workspace)
@@ -154,6 +167,7 @@ class SplatTransformVoxelAdapter:
             evidence_kind=evidence_kind,
             product_artifact_published=False,
             applied_confirmation_checksum=applied_checksum,
+            applied_transform=request.confirmation.preview.transform.model_dump(mode="json") if is_prod else None,
             runtime="splat-transform v3.6.6 (afbc281)",
             source_checksum=request.source_checksum,
             config=request.config.model_dump(mode="json"),
@@ -166,5 +180,17 @@ class SplatTransformVoxelAdapter:
                 min=[min(p[i] for p in mesh.positions) for i in range(3)],
                 max=[max(p[i] for p in mesh.positions) for i in range(3)],
             ),
-            files={name: file_checksum(workspace / name) for name in EVIDENCE_FILES},
+            files={name: file_checksum(workspace / name) for name in _evidence_files(is_prod)},
         )
+
+
+def _evidence_files(is_product: bool) -> tuple[str, ...]:
+    metric_files = (
+        "source.ply",
+        "input.ply",
+        "metric-transform.json",
+        "metric-transform-receipt.json",
+        "metric-derivative.json",
+        "metric-transform.log",
+    )
+    return EVIDENCE_FILES + tuple("metric/" + name for name in metric_files) if is_product else EVIDENCE_FILES

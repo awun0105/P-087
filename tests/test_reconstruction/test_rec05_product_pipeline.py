@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from src.models.contracts.manifests import StageId
-from src.services.reconstruction.adapters.voxel import SplatTransformVoxelAdapter
+from src.services.reconstruction.adapters.voxel import ProductVoxelRequest, SplatTransformVoxelAdapter, file_checksum
 from src.services.reconstruction.adapters.voxel_runtime import VoxelRuntimeSettings
 from src.services.reconstruction.rgb.geometry_publication import (
     GeometryDependencies,
@@ -45,6 +45,7 @@ def test_product_pipeline_success(tmp_path: Path) -> None:
     proposal = canonicalizer.propose_navigation_seed(conf_ref)
     cfg = config()
     req = GeometryExecutionRequest(
+        execution_scope="synthetic_fixture",
         confirmation_ref=conf_ref,
         source_visual=metric_req.source_visual,
         config=cfg,
@@ -57,6 +58,10 @@ def test_product_pipeline_success(tmp_path: Path) -> None:
     assert result.geometry_ref.producer_stage == StageId.RGB_GEOMETRY
     assert result.geometry_ref.source_provenance["applied_confirmation_checksum"] == record.record_checksum
     assert result.geometry_ref.source_provenance["scale_applied"] == record.preview.transform.scale_m_per_sfm_unit
+    assert result.geometry_ref.source_provenance["applied_transform"] == record.preview.transform.model_dump(
+        mode="json"
+    )
+    assert result.geometry_ref.source_provenance["evidence_kind"] == "synthetic_fixture"
     assert result.metadata_ref.artifact_type == "VoxelMetadata"
     assert result.metadata_ref.producer_stage == StageId.RGB_GEOMETRY
     resolver = GeometryResolver(canonicalizer.deps.visuals.resolve)
@@ -65,10 +70,41 @@ def test_product_pipeline_success(tmp_path: Path) -> None:
     assert meta["version"] == "1.1"
 
 
+def test_product_default_rejects_synthetic_confirmation(tmp_path: Path) -> None:
+    """Không cho fixture authority đi qua product default dù typed status CONFIRMED."""
+    service, _, conf_ref, metric_req, _ = setup_pipeline(tmp_path)
+    request = GeometryExecutionRequest(
+        confirmation_ref=conf_ref,
+        source_visual=metric_req.source_visual,
+        config=config(),
+        job_id="test-job-rec05",
+    )
+    with pytest.raises(ValueError, match="synthetic confirmation"):
+        service.execute(request, tmp_path / "real-attempt")
+    assert not (tmp_path / "real-attempt").exists()
+
+
+def test_adapter_rejects_different_confirmed_master(tmp_path: Path) -> None:
+    """Dù hợp lệ theo hash riêng, input khác master của confirmation vẫn bị chặn."""
+    service, _, _, _, confirmation = setup_pipeline(tmp_path)
+    source = tmp_path / "other.ply"
+    source.write_bytes(b"different but checksummed source")
+    request = ProductVoxelRequest(
+        confirmation=confirmation,
+        source=source,
+        source_checksum=file_checksum(source),
+        config=config(),
+    )
+    with pytest.raises(ValueError, match="not the master"):
+        service.deps.adapter.run_product(request, tmp_path / "attempt")
+    assert not (tmp_path / "attempt").exists()
+
+
 def test_product_pipeline_rejects_double_scaling(tmp_path: Path) -> None:
     """Chặn thực thi khi applied_record_checksum đã được áp dụng trước đó."""
     service, _, conf_ref, metric_req, record = setup_pipeline(tmp_path)
     req = GeometryExecutionRequest(
+        execution_scope="synthetic_fixture",
         confirmation_ref=conf_ref,
         source_visual=metric_req.source_visual,
         config=config(),
@@ -84,6 +120,7 @@ def test_product_pipeline_rejects_mismatched_visual_master(tmp_path: Path) -> No
     service, _, conf_ref, metric_req, _ = setup_pipeline(tmp_path)
     tampered_visual = metric_req.source_visual.model_copy(update={"artifact_checksum": "sha256:" + "0" * 64})
     req = GeometryExecutionRequest(
+        execution_scope="synthetic_fixture",
         confirmation_ref=conf_ref,
         source_visual=tampered_visual,
         config=config(),
@@ -99,6 +136,7 @@ def test_product_pipeline_rejects_mismatched_seed_proposal(tmp_path: Path) -> No
     proposal = canonicalizer.propose_navigation_seed(conf_ref)
     tampered_proposal = proposal.model_copy(update={"confirmation_checksum": "sha256:" + "9" * 64})
     req = GeometryExecutionRequest(
+        execution_scope="synthetic_fixture",
         confirmation_ref=conf_ref,
         source_visual=metric_req.source_visual,
         config=config(),
@@ -116,6 +154,7 @@ def test_product_pipeline_rejects_tampered_source(tmp_path: Path) -> None:
     master_path = canonicalizer.deps.visuals.require(visual.master)
     master_path.write_bytes(b"tampered content")
     req = GeometryExecutionRequest(
+        execution_scope="synthetic_fixture",
         confirmation_ref=conf_ref,
         source_visual=metric_req.source_visual,
         config=config(),

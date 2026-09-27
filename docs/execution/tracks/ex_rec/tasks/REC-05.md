@@ -89,6 +89,51 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
 
 ### Implementation Plan / Bootstrap 2026-09-26
 
+Audit/rework 2026-09-27: replace `gaussian_scale.py` scalar buffer patch/silent
+copy bằng pinned SplatTransform 3.6.6 afbc281 (MIT) streaming reader/writer và
+`Transform`/`bakeTransform` semantics. Đã đọc installed `chunk/source.d.ts`,
+`ops/bake-transform.d.ts`, `process-source.d.ts` và bundled Transform/mul source.
+Full similarity áp xyz + quaternion + log-scales + SH; PLY storage transform
+`Rz(180°)` phải conjugate/compose đúng, không thêm flip vào canonical world.
+Giữ immutable master, separate derivative/receipt/hash, refuse malformed input
+và source/confirmation mismatch. Proof CPU native codec với nonidentity R/t,
+unit-scale R/t, SH rotation, invalid input; fixture process không là math proof.
+
+### Audit evidence 2026-09-27 — full similarity + real synthetic GPU
+
+- Implemented `SplatTransformSimilarityAdapter` và Node public `ChunkSource`
+  wrapper. Writer delta `PLY^-1 * PLY * metric` áp đúng `sRp+t` trên raw storage;
+  upstream xử lý quaternion, covariance log-scales và SH, không tự viết codec.
+  Separate derivative/receipt/source/output SHA-256; input master giữ nguyên.
+  Voxel product path dùng toàn transform kể cả scale=1, kiểm master checksum bind
+  confirmation, report và geometry provenance giữ full transform/evidence kind.
+- `GeometryExecutionRequest` default product gọi `require_real` và injected
+  seed/capsule verifier. Synthetic fixture phải chọn scope riêng; không dùng flag
+  fixture để bypass real scene gate. Actual clearance implementation còn pending.
+- CPU native: `REC05_TEST_SPLAT_MODULE=data/rec04_runtime/node_modules/@playcanvas/splat-transform
+  .venv/bin/pytest tests/test_reconstruction/test_rec05_scale.py -q`:
+  **9 passed** (6.39s), gồm scale 1/2/0.5 với Rx90 + translation, all256 points,
+  log-scales/quaternions, SH l=1 basis rotation, malformed/plain/nonfinite/truncated
+  input rejects; immutable source hash verified.
+- GPU native: `REC05_TEST_GPU=1` cùng `REC05_VOXEL_CLI` và
+  `REC05_VOXEL_MODULE_PATH` trỏ pinned runtime; chạy
+  `pytest tests/test_reconstruction/test_rec05_similarity_gpu.py -q`:
+  **1 passed** (4.45s), Intel UHD630 index0, Node24.11.1, splat3.6.6 afbc281.
+  Fixture `s=0.5, Rz90, t=(4,2,1)` → voxel/carve .05m: 2703→2702 splats,
+  48vertices/88triangles, boundary/nonmanifold/degenerate counts đều0.
+  Collision checksum `sha256:bd47727983e6df9ca1917c5191ba1d293dd099e0d6d872a63e997b5c28cef1a4`.
+  Local generated evidence snapshot: `data/rec05_similarity_audit_20260927/` (ignored).
+- All quantities/capsule settings trên chỉ cho synthetic fixture; chưa có real
+  Aisle_CW metric confirmation, canonical visual publication/independent-distance
+  acceptance hay Isaac qualification. Không đổi toàn REC-05 thành DONE/BLOCKED.
+- Final regression run: bật cả `REC05_TEST_GPU=1`, `REC05_TEST_SPLAT_MODULE`
+  và pinned `REC05_VOXEL_*` rồi `pytest tests/test_reconstruction/ -q`:
+  **353 passed, 5 skipped** (82.71s). Five skips là opt-in ngoài REC-05 đang chạy,
+  không claim đã thực hiện. Ruff check/format **186 files pass**; Node `--check`
+  hai bridge mới pass; AST <=30 lines/<=3 args và `git diff --check` pass.
+
+### Historical bootstrap 2026-09-26 — không phải current audit status
+
 - Task capsule: REC-05 owns voxel/collision adapter and geometry provenance;
   authority Integration §3.3, Contract §4, Track Guide REC-05/06, this task and
   audits #4a/#7. Branch `feat/ex-rec`; REC-04 source/tests/task evidence are

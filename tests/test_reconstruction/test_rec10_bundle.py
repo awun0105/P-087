@@ -80,6 +80,7 @@ def test_publish_rgb_only_bundle_and_consume_by_scene(tmp_path: Path) -> None:
     frame_ref = dummy_rgb_frame(canonicalizer.deps.writer, job_id)
     geom_res = geom_service.execute(
         GeometryExecutionRequest(
+            execution_scope="synthetic_fixture",
             confirmation_ref=conf_ref,
             source_visual=metric_req.source_visual,
             config=config(),
@@ -144,6 +145,7 @@ def test_publish_mixed_rgb_lidar_bundle_and_consume_by_scene(tmp_path: Path) -> 
     lidar_pcd_ref = create_lidar_artifact_via_rec08(canonicalizer.deps.writer, job_id, tmp_path)
     geom_res = geom_service.execute(
         GeometryExecutionRequest(
+            execution_scope="synthetic_fixture",
             confirmation_ref=conf_ref,
             source_visual=metric_req.source_visual,
             config=config(),

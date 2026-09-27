@@ -51,7 +51,23 @@ class FixtureProcess(VoxelProcess):
         elif name == "collision":
             voxel_fixture(workspace)
             write_fixture(workspace / "geometry.collision.glb", collision_fixture())
+        elif name == "metric-transform":
+            _fixture_metric_transform(workspace)
         return text
+
+
+def _fixture_metric_transform(workspace: Path) -> None:
+    """Mock process plumbing ONLY, không chứng minh Gaussian transform đúng."""
+    (workspace / "input.ply").write_bytes((workspace / "source.ply").read_bytes())
+    receipt = dict(
+        version="3.6.6",
+        revision="afbc281",
+        transform=json.loads((workspace / "metric-transform.json").read_text()),
+        num_gaussians=256,
+        sh_bands=0,
+        storage_mapping="PLY_inverse_times_PLY_times_metric",
+    )
+    (workspace / "metric-transform-receipt.json").write_text(json.dumps(receipt))
 
 
 def adapter() -> SplatTransformVoxelAdapter:
