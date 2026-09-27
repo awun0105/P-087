@@ -285,6 +285,27 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 - Next: verifier dùng artifact đã publish này, bỏ false final CONFIRMED; canonical
   visual publication và production distance/approval adapter vẫn chưa hoàn thành.
 
+### Resume 2026-09-27 — verifier không cấp false final confirmation
+
+- `MetricVerificationService` nhận published canonical pose manifest thay raw
+  poses rồi convert/discard trong memory. Bắt buộc independent sample và explicit
+  finite positive tolerance; không còn implicit 0.05m.
+- Check exact raw visual ref; resolve và parse collision GLB, kiểm producer/job,
+  full s/R/t, source master, confirmation ref, coordinate/evidence provenance.
+  Measurement payload cũng phải resolve đúng checksum. Việc đo có authority và
+  tolerance đã được owner khóa hay chưa **không** được suy từ opaque bytes.
+- Internal request/report version **1.1**, report luôn
+  `PENDING_FINAL_VERIFICATION`, scope `canonical_poses_geometry_lineage_distance_math`;
+  bỏ trường metric_scale CONFIRMED sai. Đây không phải shared schema change;
+  source search cho thấy consumer hiện tại chỉ nằm trong EX-REC tests. Không
+  wire report này làm REC-10 `verify_metric` hoặc worker authorization.
+- `.venv/bin/pytest tests/test_reconstruction/test_rec06_final_verification.py -q`:
+  **23 passed** (10.64s). Positive scoped report + negatives cho missing sample,
+  tolerance, corrupt/malformed geometry, lineage, raw/other-confirmation poses,
+  reused calibration pair. Ruff và AST checks changed files pass.
+- Canonical visual publication/verification và real independent evidence vẫn là
+  next implementation, không tuyên bố REC-06 DONE.
+
 ### Checkpoint 2026-09-26 — DONE, final cross-artifact verification
 
 Historical claim, **superseded by 2026-09-27 audit**: status CONFIRMED của report
