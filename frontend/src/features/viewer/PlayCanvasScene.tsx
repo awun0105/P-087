@@ -3,40 +3,41 @@
 /**
  * Visual 3DGS của viewer, render bằng `@playcanvas/supersplat-viewer`.
  *
- * Theo `INTEGRATION_PLAYBOOK:745`, mọi lớp phải ở chung một scene graph. Ở đây
- * `createViewer()` sở hữu `pc.AppBase` và ta lấy `viewer.app.root` để thêm lớp
- * kỹ thuật (mesh/collider) vào **cùng** app đó — không phải hai engine song song.
+ * Căn cứ: `INTEGRATION_PLAYBOOK:745` và `PRODUCT-06.md` §13.1. Ba điều phải nói
+ * rõ vì chúng quyết định hành vi thật:
  *
- * Vì sao vẫn còn Three.js: máy hiện tại không có WebGPU, mà supersplat ưu tiên
- * WebGPU. `SceneCanvas` giữ làm fallback cho tới khi PlayCanvas được qualification
- * với real Brush `VisualArtifact`. Xem `PRODUCT-06.md` §13.1.
+ * 1. **Renderer là `webgl` tường minh.** Upstream mặc định `webgpu` và tự fallback,
+ *    còn `AGENTS.md:240` khóa WebGL2 là P0 baseline nên không được phụ thuộc hành đó.
+ * 2. **Collider đi qua `collisionUrl` của chính viewer**, nên collider GLB nằm trong
+ *    cùng `pc.AppBase` với SOG — đây là phần Single Scene Graph mà
+ *    `TRACK.md:39` yêu cầu, và là lý do không tự dựng mesh trong engine thứ hai.
+ *    Lớp kỹ thuật còn lại vẫn do `SceneCanvas` lo; xem `PRODUCT-06.md` §13.1.
+ * 3. **Trạng thái load/camera đọc từ `viewer.state`**, không tự bịa thanh tiến trình:
+ *    `state.progress` là 0..100 và `state.loaded` chỉ true sau frame đầu.
  *
- * Transform không lấy từ state của PlayCanvas mà từ `layers.ts`, để cả hai renderer
- * cùng đọc một nguồn canonical của SceneIR.
+ * Transform không lấy từ state của PlayCanvas mà từ `layers.ts`, để renderer nào
+ * cũng đọc cùng một nguồn canonical của SceneIR.
  */
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ViewMode } from "@/features/viewer/layers";
+
+import "@playcanvas/supersplat-viewer/viewer.css";
 
 /** Runtime capability của browser, đo trước khi gọi createViewer để tránh throw. */
 export type PlayCanvasCapability = "unknown" | "ready" | "unavailable" | "failed";
 
-export interface PlayCanvasSceneProps {
-  /** URL của SOG đã resolve qua artifact endpoint; null nghĩa là chưa có Visual. */
-  contentUrl: string | null;
-  mode: ViewMode;
-  /** Đo một lần ở host, để degraded state của cả viewer chỉ có một nguồn sự thật. */
-  capability: PlayCanvasCapability;
-  onFailed: () => void;
+/** Trạng thái runtime lấy từ `ViewerHandle.state` của thư viện, không phải tự đếm. */
+export interface PlayCanvasRuntime {
+  loaded: boolean;
+  progress: number;
+  hasCollision: boolean;
+  walkAllowed: boolean;
 }
 
-/**
- * `webgl` yêu cầu cứng: WebGPU là tuỳ chọn. Upstream mặc định `webgpu` và tự
- * fallback, nhưng AGENTS.md khóa WebGL2 là P0 baseline nên phải yêu cầu tường minh
- * để không phụ thuộc hành vi fallback của thư viện.
- */
 const RENDERER = "webgl";
+export const INITIAL_RUNTIME: PlayCanvasRuntime = { loaded: false, progress: 0, hasCollision: false, walkAllowed: false };
 
 export function detectPlayCanvasCapability(): PlayCanvasCapability {
   if (typeof document === "undefined") {
@@ -46,21 +47,52 @@ export function detectPlayCanvasCapability(): PlayCanvasCapability {
   return canvas.getContext("webgl2") || canvas.getContext("webgl") ? "ready" : "unavailable";
 }
 
-export function PlayCanvasScene({ contentUrl, mode, capability, onFailed }: PlayCanvasSceneProps) {
+export interface PlayCanvasSceneProps {
+  /** URL của SOG đã resolve qua artifact endpoint; null nghĩa là chưa có Visual. */
+  contentUrl: string | null;
+  /** Collider GLB của cùng scene, để viewer nạp trong cùng app. */
+  collisionUrl?: string | null;
+  mode: ViewMode;
+  /** Đo một lần ở host, để degraded state của cả viewer chỉ có một nguồn sự thật. */
+  capability: PlayCanvasCapability;
+  onFailed: () => void;
+  onRuntime?: (runtime: PlayCanvasRuntime) => void;
+}
+
+export function PlayCanvasScene({
+  contentUrl,
+  collisionUrl,
+  mode,
+  capability,
+  onFailed,
+  onRuntime,
+}: PlayCanvasSceneProps) {
   const container = useRef<HTMLDivElement | null>(null);
+  const [runtime, setRuntime] = useState<PlayCanvasRuntime>(INITIAL_RUNTIME);
+
+  /** Đẩy trạng thái lên host; giữ identity ổn định vì nằm trong deps của effect khác. */
+  const publish = useCallback(
+    (next: PlayCanvasRuntime) => {
+      setRuntime(next);
+      onRuntime?.(next);
+    },
+    [onRuntime],
+  );
 
   useEffect(() => {
     if (capability !== "ready" || !contentUrl || mode !== "VISUAL" || !container.current) {
       return;
     }
     let disposed = false;
-    let handle: { destroy(): void } | null = null;
+    let handle: ViewerHandleLike | null = null;
+    let subscription: { off(): void } | null = null;
 
     void import("@playcanvas/supersplat-viewer/viewer")
       .then(async (module) => {
         const viewer = await module.createViewer({
           container: container.current as HTMLElement,
           contentUrl,
+          collisionUrl: collisionUrl ?? undefined,
           // Bắt buộc theo `CreateViewerOptions`. `{}` đi qua `migrateV1` nên viewer tự
           // điền default. Chưa verify bằng browser thật — xem `PRODUCT-06.md` §13.1.
           settings: {},
@@ -72,21 +104,26 @@ export function PlayCanvasScene({ contentUrl, mode, capability, onFailed }: Play
           return;
         }
         handle = viewer;
-        viewer.frameScene();
+        // EventHandler của PlayCanvas bắn `<key>:changed`; `on` trả EventHandle
+        // để huỷ. Không tự poll `state` vì đó là nguồn thật của thư viện.
+        subscription = viewer.events.on("progress:changed", () => publish(readRuntime(viewer)));
+        publish(readRuntime(viewer));
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!disposed) {
           onFailed();
+          console.error("supersplat-viewer init failed", error);
         }
       });
 
     return () => {
       disposed = true;
+      subscription?.off();
       // Không destroy thì engine giữ GPU resource sau khi rời trang.
       handle?.destroy();
       handle = null;
     };
-  }, [capability, contentUrl, mode, onFailed]);
+  }, [capability, collisionUrl, contentUrl, mode, onFailed, publish]);
 
   return (
     <div
@@ -94,8 +131,29 @@ export function PlayCanvasScene({ contentUrl, mode, capability, onFailed }: Play
       data-testid="playcanvas-scene"
       data-mode={mode}
       data-capability={capability}
+      data-loaded={runtime.loaded}
+      data-progress={Math.round(runtime.progress)}
       className="h-full w-full"
       data-engine={capability === "ready" ? "playcanvas" : undefined}
     />
   );
+}
+
+/** Chỉ những field host thật sự dùng, để không phụ thuộc shape đầy đủ của thư viện. */
+interface ViewerHandleLike {
+  readonly state: { loaded: boolean; progress: number; hasCollision: boolean; walkAllowed: boolean };
+  readonly events: { on(key: string, handler: () => void): { off(): void } };
+  frameScene(): void;
+  resetCamera(): void;
+  toggleWalk(): void;
+  destroy(): void;
+}
+
+function readRuntime(viewer: ViewerHandleLike): PlayCanvasRuntime {
+  return {
+    loaded: viewer.state.loaded,
+    progress: viewer.state.progress,
+    hasCollision: viewer.state.hasCollision,
+    walkAllowed: viewer.state.walkAllowed,
+  };
 }
