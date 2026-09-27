@@ -1,19 +1,23 @@
-# ---- Stage 1: Build ----
-FROM python:3.12.14-slim-bookworm AS builder
+# ---- Stage 1: Dependencies ----
+# Dùng đúng lock mà CI và scripts/setup.sh dùng, nên image không thể lệch với test.
+FROM python:3.12.14-slim-bookworm AS deps
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir uv==0.9.4
+COPY requirements.in requirements.lock.txt ./
+RUN uv pip sync --system requirements.lock.txt \
+    && uv pip check
 
 # ---- Stage 2: Production ----
 FROM python:3.12.14-slim-bookworm
 
 WORKDIR /app
 
-# Copy installed packages from builder
-COPY --from=builder /root/.local /root/.local
-ENV PATH=/root/.local/bin:$PATH
+# `uv pip sync --system` cài vào /usr/local của base image nên không cần copy site-packages.
+COPY --from=deps /usr/local /usr/local
+
+ENV PATH=/usr/local/bin:$PATH
 
 # Security: run as non-root user
 RUN useradd -m appuser
