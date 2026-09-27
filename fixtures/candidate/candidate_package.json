@@ -3,7 +3,7 @@
     "schema_version": "1.0",
     "candidate_id": "candidate-fixture-001",
     "scene_revision": "rev-001",
-    "scene_ir_checksum": "sha256:3be4de672133c6627ef35f50bd86f302c008beda5d45a5d4b5da010d5c61f039",
+    "scene_ir_checksum": "sha256:0b07855c2bea38320d2f24b0a788191db63e98231d28049237998576d4d874e8",
     "job_manifest_checksum": "sha256:5cbda9ad91d774683bf565ef2e116578396e96a7ea0ffd00e8315c8d58f5bad2",
     "coordinate_system": {"unit": "meter", "up_axis": "Z", "handedness": "right", "world_frame": "world"},
     "object_transforms": [{
@@ -47,5 +47,5 @@
     "artifact_checksum": "sha256:7111a788391d958bdd5e5128797a1e80da1d433a278b556c67718ad84ecae22f",
     "data_class": "derived", "producer_stage": "ST-COLLIDER", "job_id": "job-fixture-001"
   }],
-  "candidate_checksum": "sha256:7cc30d42394e6df440c2c0533c64aad0923997961baffef07ec1388fc1876bdb"
+  "candidate_checksum": "sha256:4d3a1a0aefcd3261fa98de4f4231c02501d64113980060d8232296784068dbae"
 }

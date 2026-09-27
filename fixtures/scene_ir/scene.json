@@ -110,5 +110,5 @@
     "provenance": {"fixture": true}
   }],
   "provenance": {"fixture": true, "reconstruction_bundle_checksum": "sha256:ad34de360ce120e3c422af74620ba53e5fd0aa7ec5dd51b58e617339ece02a3f"},
-  "scene_ir_checksum": "sha256:3be4de672133c6627ef35f50bd86f302c008beda5d45a5d4b5da010d5c61f039"
+  "scene_ir_checksum": "sha256:0b07855c2bea38320d2f24b0a788191db63e98231d28049237998576d4d874e8"
 }

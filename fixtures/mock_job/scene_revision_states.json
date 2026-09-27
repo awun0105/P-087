@@ -2,37 +2,37 @@
   {
     "schema_version": "1.0", "scene_id": "scene-fixture-001",
     "scene_revision": "rev-001",
-    "scene_ir_checksum": "sha256:3be4de672133c6627ef35f50bd86f302c008beda5d45a5d4b5da010d5c61f039",
+    "scene_ir_checksum": "sha256:0b07855c2bea38320d2f24b0a788191db63e98231d28049237998576d4d874e8",
     "status": "DRAFT"
   },
   {
     "schema_version": "1.0", "scene_id": "scene-fixture-001",
     "scene_revision": "rev-001",
-    "scene_ir_checksum": "sha256:3be4de672133c6627ef35f50bd86f302c008beda5d45a5d4b5da010d5c61f039",
+    "scene_ir_checksum": "sha256:0b07855c2bea38320d2f24b0a788191db63e98231d28049237998576d4d874e8",
     "status": "CANDIDATE_READY",
-    "candidate_checksum": "sha256:7cc30d42394e6df440c2c0533c64aad0923997961baffef07ec1388fc1876bdb"
+    "candidate_checksum": "sha256:4d3a1a0aefcd3261fa98de4f4231c02501d64113980060d8232296784068dbae"
   },
   {
     "schema_version": "1.0", "scene_id": "scene-fixture-001",
     "scene_revision": "rev-001",
-    "scene_ir_checksum": "sha256:3be4de672133c6627ef35f50bd86f302c008beda5d45a5d4b5da010d5c61f039",
+    "scene_ir_checksum": "sha256:0b07855c2bea38320d2f24b0a788191db63e98231d28049237998576d4d874e8",
     "status": "READY_FOR_REVIEW",
-    "candidate_checksum": "sha256:7cc30d42394e6df440c2c0533c64aad0923997961baffef07ec1388fc1876bdb",
-    "validation_report_checksum": "sha256:92b29d678517e4342343542e434dcb2efe303979333baadddd9d489ea84d10ac"
+    "candidate_checksum": "sha256:4d3a1a0aefcd3261fa98de4f4231c02501d64113980060d8232296784068dbae",
+    "validation_report_checksum": "sha256:fadf97c29411f5fabb8294437e562d6e886a23bfd4a46083b613d3c704f3b807"
   },
   {
     "schema_version": "1.0", "scene_id": "scene-fixture-001",
     "scene_revision": "rev-001",
-    "scene_ir_checksum": "sha256:3be4de672133c6627ef35f50bd86f302c008beda5d45a5d4b5da010d5c61f039",
+    "scene_ir_checksum": "sha256:0b07855c2bea38320d2f24b0a788191db63e98231d28049237998576d4d874e8",
     "status": "APPROVED",
-    "candidate_checksum": "sha256:7cc30d42394e6df440c2c0533c64aad0923997961baffef07ec1388fc1876bdb",
-    "validation_report_checksum": "sha256:92b29d678517e4342343542e434dcb2efe303979333baadddd9d489ea84d10ac",
-    "approval_record_checksum": "sha256:0c9b2301ead8b1112d4a092ade2a3c0fc65967128fa27baaf225c6e778890531"
+    "candidate_checksum": "sha256:4d3a1a0aefcd3261fa98de4f4231c02501d64113980060d8232296784068dbae",
+    "validation_report_checksum": "sha256:fadf97c29411f5fabb8294437e562d6e886a23bfd4a46083b613d3c704f3b807",
+    "approval_record_checksum": "sha256:15722980059c67d8bbb07835642a1edd81f731b4d3b9a8f511689e408f764a48"
   },
   {
     "schema_version": "1.0", "scene_id": "scene-fixture-001",
     "scene_revision": "rev-002",
-    "scene_ir_checksum": "sha256:224bcbb8a5a0e0e2eab7de8a1a8317512f3704bd29a85b60c044499d58c2093c",
+    "scene_ir_checksum": "sha256:97d3e9226a0a616fd14628f51f4e30a6b39509c458426b73a1a1acff0c0717f4",
     "status": "DRAFT"
   }
 ]
