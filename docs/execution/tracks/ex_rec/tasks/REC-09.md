@@ -148,14 +148,77 @@ tệ hơn, nên chưa loại trừ hoàn toàn); Ouster OS1-128 có origin offse
 handedness cho tới khi camera chain verify.** Vì vậy REC-07 chỉ chốt được
 up-axis/unit, còn handedness vẫn để mở. REC-09 vẫn `IN_PROGRESS`.
 
-**Việc cần làm tiếp (chưa làm, cần owner/source authority):** đối chiếu
-convention camera frame của TorWIC từ tài liệu dataset hoặc owner; xác nhận ảnh
-`image_left` đã undistorted hay chưa; xác nhận origin offset của Ouster OS1-128.
-Không tự chọn giả thuyết để làm xanh số đo.
-
 **Evidence:** `data/rec07_axis_evidence_20260927/scan110_hypotheses.png`
 SHA-256 `bb0085a058fbdeb7b42a58266c53485db6ecdd98f24fcb58eacf64b2780678e5`
 (5 giả thuyết chồn lên ảnh + ảnh gốc).
+
+### ĐÃ GIẢI 2026-09-27 — nguyên nhân là ảnh đã undistorted sẵn
+
+Owner cung cấp dataset repo local (`private/TorWICDataset`, commit `5e1839f`) để
+tra tài liệu. **Giả thuyết "ảnh đã undistorted sẵn" là đúng**, và nó là nguyên
+nhân duy nhất của sai lệch 57,8 px ở trên.
+
+**Bằng chứng định lượng — residual chân trời trên 11 frame rải khắp traversal:**
+
+| frame | n điểm sàn | residual CÓ distortion | residual KHÔNG distortion |
+| --- | --- | --- | --- |
+| 100 | 9.845 | 53,2 px | **5,0 px** |
+| 105 | 9.631 | 49,8 px | **5,0 px** |
+| 110 | 10.672 | 56,7 px | **5,3 px** |
+| 115 | 11.000 | 59,6 px | **5,7 px** |
+| 119 | 8.321 | 61,2 px | **5,6 px** |
+| 300 | 8.941 | 58,5 px | **7,1 px** |
+| 450 | 7.367 | 65,7 px | **7,0 px** |
+| 500 | 12.078 | 53,5 px | **5,3 px** |
+| 700 | 9.905 | 53,8 px | **5,7 px** |
+| 900 | 13.169 | 61,1 px | **6,6 px** |
+| 1050 | 8.151 | 62,6 px | **6,6 px** |
+| **TB** | | **57,8 px** | **5,9 px** |
+
+Cải thiện **10×**, nhất quán trên cả 11 frame. Với residual 5,9 px, nghiêng suy
+ra từ sàn là `+2,93°`, khớp `3,27°` mà extrinsic khai báo.
+
+**Kết luận chuỗi camera (đã verify):**
+`T_cam_from_os = inverse(T_os_from_cam)` → frame camera theo **OpenCV optical**
+(x phải, y xuống, z trước) → **KHÔNG** áp `D`. Cụ thể:
+
+> **`image_left/*.png` đã là ảnh undistorted. Hệ số `Camera1.D` trong
+> `calibrations.txt` KHÔNG được áp lên các ảnh này.**
+
+Đây là kết luận có tác động thật: bất kỳ code nào chiếu/align LiDAR↔RGB mà áp
+`D` sẽ lệch hàng chục pixel. Cần có regression test khoá hành vi này.
+
+**Quy ước camera frame — có nguồn chính thức:** Figure
+`Figures/slam_sensor_frames.png` của dataset vẽ mũi tên trục RGB. Đọc được:
+Azure Kinect **xanh = phải, lục = xuống, đỏ = trước** ⇒ đúng optical/OpenCV
+convention. Ouster OS1-128 **xanh = lên** ⇒ khớp Z-up đã đo. Figure này được
+copy vào `data/rec07_axis_evidence_20260927/dataset_official_sensor_frames.png`
+(`7e803b2e…`) để review.
+
+**Tin tức dataset liên quan tới gốc `world`:** README dòng 235 — *"The poses (of
+the mounted Ouster OS1-128 LiDAR) were obtained by **aligning the 3D scans
+against the ground-truth 3D map**"*. Đây chính là nguồn gốc của giả thuyết
+`os_sensor` mà DATASET_PLAYBOOK ghi là "hypothesis mạnh từ projection/map": pose
+đến từ scan-to-map alignment, không phải từ SLAM backend xác nhận trực tiếp.
+README dòng 219 — *"The robot always starts at the origin of our map frame"*;
+đo được LiDAR ở `z = +0,218 m` và sàn ở `z ≈ -0,24 m`, nên **z=0 của map frame
+không phải mặt sàn** mà cao hơn sàn ~0,24 m. Việc này giải thích độ lệch đo được
+và cho owner một căn cứ để chốt quy tắc gốc.
+
+**Cảnh báo về `utils/calibration.py` trong dataset repo:** file đó là cho
+**scenario localization khác** — `base_link`, RealSense D435i, Hokoyo UAM501,
+640×360, `D = [0,0,0,0,0]`, intrinsics `fx=461,10` / `cx=325,48`. **KHÔNG** phải
+bộ calibration của dữ liệu SLAM mà ta có (`os_sensor` / `azure_left_camera`,
+1280×720, `fx=621,40` / `cx=649,64`, `D≠0`). Tuyệt đối không lấy nhầm.
+
+**Còn mở:** handedness thuần/ngược tay của native frame vẫn chưa chốt (lý do và
+các nguồn chưa có ở mục REC-07); đây là quy ước ghi nhãn, không chứng minh được
+từ dữ liệu nội tại.
+
+**Evidence:** `data/rec07_axis_evidence_20260927/camera_chain_final.png`
+SHA-256 `97dcbf2e242cc5b64434fa36789470183a26e94c1c666e808c163369a123664c`
+(raw scan `000110` chồn ảnh thật: chuỗi đúng dừng đúng ở vạch sàn vàng; các biến
+thể sai rõ ràng).
 
 ### Checkpoint 2026-09-26 — DONE, RGB-LiDAR alignment service and models Refactor
 

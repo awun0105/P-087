@@ -141,6 +141,40 @@ Sáu panel: 3 góc nhìn trực giao XY/XZ/YZ, lát cắn đậm nhất theo tr�
 cắn sàn, và cao độ cảm biến theo thời gian. Người review tự kiểm bằng mắt:
 trục Z cho một mặt phẳng nằm ngang sắc ở một giá trị không đổi, X/Y thì không.
 
+**Đối chiếu bằng nguồn độc lập thứ ba — `raw/global/groundtruth_map.ply`:**
+Đây là scan thật của cửa hàng (1.065.059 điểm, `VCGLIB`), **không** do REC-07
+sinh ra. Đo sàn trong map này cho mặt phẳng đậm ở `z ≈ -0,25 m` — khớp hai phép
+đo ở trên trong 1–2 cm. Ba nguồn độc lập (merged cloud của REC-07, raw scan
+`000110`, GT map của dataset) đều đặt sàn cùng một cao độ.
+
+**Khoảng cách tới `groundtruth_map.ply` (độc lập, 40.000 điểm thuộc scan
+`000110`, frame 110, giới hạn dưới 2,5 m):**
+
+| Biến thể | median | p90 | <0,10 m | <0,25 m |
+| --- | --- | --- | --- | --- |
+| **H0 khai báo, không đảo** | **0,0592 m** | 0,6003 m | **76,6%** | **82,7%** |
+| H1 mirror x | 0,0692 m | 0,8608 m | 68,9% | 76,1% |
+| H2 mirror y | 0,0814 m | 0,7516 m | 60,7% | 76,2% |
+| H3 mirror z | 0,8410 m | 0,9484 m | 5,7% | 14,7% |
+| H4 180° quanh y | 0,8360 m | 0,9430 m | 3,7% | 12,4% |
+
+Chuỗi khai báo khớp GT map tốt nhất, kém hơn biến thể mirror-z/180° tới **14×**.
+Đây là test **có phân biệt được** (khác với test chân trời, mù với handedness),
+và nó xác nhận chuỗi đọc PCD + áp quaternion + frame là tự nhất quán.
+
+**Handedness — trạng thái thật, không nói quá:** `+Z là lên` là **sự thật vật lý**
+(trọng lực: sàn âm, trần dương, cảm biến nghiêng ≤2,17° suốt 81 m). Nhưng
+"native frame thuận hay ngược tay" là **quy ước ghi nhãn**, không thể chứng minh
+từ dữ liệu nội tại: phản chiếu toàn cục cả pose lẫn map là vô hình với mọi phép
+kiểm trên dữ liệu. Nguồn chưa chốt được:
+- Ouster OS1-128 hardware convention (x forward, y left, z up) — **chưa tra được**,
+  các URL datasheet thử đều 404 và không đoán URL.
+- README/PDF của dataset **không** nêu handedness.
+- Figure chính thức `Figures/slam_sensor_frames.png` cho **blue = lên** (khớp
+  Z-up) nhưng ảnh phối cảnh không phân định được thuận/ngược tay.
+
+→ **Cần owner chốt hoặc cung cấp datasheet Ouster.** Không tự chọn.
+
 **LIMIT — evidence này KHÔNG đổi trạng thái task:**
 - `coordinate_status` vẫn `UNVERIFIED`, `assistance_class` vẫn `GT-assisted`,
   `confirmed_rgb_alignment` vẫn `false`. Không tự nâng trạng thái.

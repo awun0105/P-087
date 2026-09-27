@@ -73,7 +73,45 @@ fixture checksum failures after shared-model defaults changed; see REC-06 eviden
 
 ## Outcome
 
-Checkpoint 2026-09-27 (mới nhất) — up-axis/handedness cho canonical coordinate:
+Checkpoint 2026-09-27 (mới nhất) — **đã giải được camera chain**, up-axis chốt,
+còn 1 câu hỏi handedness cho owner:
+
+**Phát hiện có tác động thật:** `image_left/*.png` **đã là ảnh undistorted**. Hệ số
+`Camera1.D` trong `calibrations.txt` **không được áp** lên các ảnh này. Chuỗi đúng
+là `T_cam_from_os = inverse(T_os_from_cam)` + OpenCV optical + **không distortion**.
+Bằng chứng: residual chân trời trên 11 frame rải khắp traversal giảm từ **57,8 px
+→ 5,9 px** (10×), nghiêng suy ra `+2,93°` khớp `3,27°` của extrinsic khai báo. Bất
+kỳ code chiếu/align LiDAR↔RGB nào áp `D` sẽ lệch hàng chục pixel; cần regression
+test khoá hành vi này.
+
+**Nguồn chính thức đã tra** (dataset repo local `private/TorWICDataset` @ `5e1839f`):
+- Figure `slam_sensor_frames.png`: Azure Kinect **xanh=phải, lục=xuống, đỏ=trước**
+  ⇒ optical/OpenCV; Ouster **xanh=lên** ⇒ Z-up. Copy vào
+  `data/rec07_axis_evidence_20260927/dataset_official_sensor_frames.png`.
+- README:235 — pose đến từ *"aligning the 3D scans against the ground-truth 3D map"*,
+  đây là nguồn gốc giả thuyết `os_sensor` mà DATASET_PLAYBOOK ghi.
+- README:219 — robot bắt đầu tại gốc map; đo được sàn ở `z ≈ -0,24 m` nên **z=0
+  của map không phải sàn**. Căn cứ để owner chốt quy tắc gốc.
+- `utils/calibration.py` là cho scenario **khác** (base_link + RealSense D435i +
+  Hokoyo, 640×360, `D=[0,0,0,0,0]`) — **không** phải bộ calibration của ta.
+
+**Up-axis chốt:** up = **+Z**, đơn vị = **mét**, bằng **ba nguồn độc lập**: lát cắn
+sàn của merged cloud (`-0,218 m`, 27,9%), của raw scan `000110` (`-0,468 m` sensor
+frame, 44,9%), và của `raw/global/groundtruth_map.ply` (1.065.059 điểm, `z ≈ -0,25 m`).
+Không cần xoay/đảo trục.
+
+**Khoảng cách tới GT map** (40.000 điểm scan `000110`, độc lập): chuỗi khai báo
+khớp nhất — median **0,0592 m**, **76,6%** điểm trong 10 cm; kém hơn mirror-z /
+180°-quanh-y tới **14×**. Test này có phân biệt được, xác nhận chuỗi đọc PCD +
+áp quaternion + frame là tự nhất quán.
+
+**Còn mở, cần owner:** handedness thuần/ngược tay của native frame. Đây là **quy ước
+ghi nhãn, không chứng minh được từ dữ liệu nội tại** (phản chiếu toàn cục pose+map
+là vô hình với mọi phép kiểm). Ouster datasheet chưa tra được (URL 404, không đoán
+URL); README/PDF không nêu; figure phối cảnh không phân định được. REC-07 giữ
+`VALIDATING`, REC-09 giữ `IN_PROGRESS`, `coordinate_status` vẫn `UNVERIFIED`.
+
+Checkpoint 2026-09-27 — up-axis/handedness cho canonical coordinate:
 
 **Đã chốt:** up-axis = **Z**, đơn vị = **mét**. Bằng hai phép đo độc lập: lát cắn
 z đậm nhất của merged cloud (`-0,218 m`, 27,9% cloud) và của raw scan `000110.pcd`
