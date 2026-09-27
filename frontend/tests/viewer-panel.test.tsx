@@ -22,11 +22,25 @@ vi.mock("@/features/viewer/SceneCanvas", () => ({
 
 // Engine thật không dựng được trong jsdom; chỉ cần biết createViewer có được gọi
 // và có destroy khi unmount. Phần render 3D thật kiểm bằng browser smoke riêng.
-type ViewerOptions = { renderer?: string; ui?: boolean; contentUrl?: string };
-const createViewer = vi.fn(async (_options?: ViewerOptions) => ({
+type ViewerOptions = {
+  renderer?: string;
+  ui?: boolean;
+  contentUrl?: string;
+  collisionUrl?: string;
+};
+type ViewerState = {
+  loaded: boolean;
+  progress: number;
+  hasCollision: boolean;
+  walkAllowed: boolean;
+};
+const runtime = {
+  state: { loaded: true, progress: 100, hasCollision: true, walkAllowed: true } as ViewerState,
+  events: { on: vi.fn(() => ({ off: vi.fn() })) },
   destroy: vi.fn(),
   frameScene: vi.fn(),
-}));
+};
+const createViewer = vi.fn(async (_options?: ViewerOptions) => runtime);
 vi.mock("@playcanvas/supersplat-viewer/viewer", () => ({
   createViewer: (options?: ViewerOptions) => createViewer(options),
 }));
@@ -118,6 +132,7 @@ describe("ViewerPanel", () => {
 describe("ranh giới renderer", () => {
   beforeEach(() => {
     createViewer.mockClear();
+    runtime.state = { loaded: true, progress: 100, hasCollision: true, walkAllowed: true };
   });
 
   it("Visual dùng PlayCanvas khi có WebGL, với renderer webgl tường minh", async () => {
@@ -152,5 +167,67 @@ describe("ranh giới renderer", () => {
     render(<ViewerPanel scene={buildFixtureScene()} />);
     fireEvent.click(screen.getByRole("button", { name: "3DGS Visual" }));
     expect(screen.getByTestId("brush-proof-absent")).toBeInTheDocument();
+  });
+});
+
+/**
+ * Regression: `onFailed` nằm trong deps của effect tạo viewer. Nếu identity đổi
+ * mỗi lần render thì mọi thao tác UI đều tạo lại viewer, tức tải lại toàn bộ SOG.
+ * Bug này đã tồn tại và chỉ lộ ra khi có test render lại sau mount.
+ */
+it("re-render không được tạo lại PlayCanvas viewer", async () => {
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as never);
+  const scene = buildFixtureScene();
+  const { rerender } = render(<ViewerPanel scene={scene} />);
+  fireEvent.click(screen.getByRole("button", { name: "3DGS Visual" }));
+  await screen.findByTestId("playcanvas-scene");
+  await vi.waitFor(() => expect(createViewer).toHaveBeenCalledTimes(1));
+
+  // Gõ vào ô filter: đây là thao tác nhẹ nhất nhưng vẫn re-render ViewerPanel.
+  fireEvent.change(screen.getByPlaceholderText("lọc layer…"), { target: { value: "Pallet" } });
+  rerender(<ViewerPanel scene={scene} />);
+
+  expect(createViewer).toHaveBeenCalledTimes(1);
+});
+
+/**
+ * Tiến trình và collider phải đến từ `ViewerHandle.state` / `collisionUrl` của thư viện,
+ * không tự bịa. Nếu `collisionUrl` không được truyền thì Single Scene Graph chưa có
+ * gì thật, dù URL có tồn tại.
+ */
+describe("tiến trình và collider từ thư viện", () => {
+  beforeEach(() => {
+    createViewer.mockClear();
+    runtime.state = { loaded: false, progress: 42, hasCollision: false, walkAllowed: false };
+  });
+
+  it("truyền collisionUrl của environment để collider nằm trong cùng app với SOG", async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as never);
+    render(<ViewerPanel scene={buildFixtureScene()} />);
+    fireEvent.click(screen.getByRole("button", { name: "3DGS Visual" }));
+    await screen.findByTestId("playcanvas-scene");
+    await vi.waitFor(() => expect(createViewer).toHaveBeenCalledTimes(1));
+    const options = createViewer.mock.calls[0][0];
+    expect(options?.collisionUrl).toContain("/artifacts/content");
+    expect(options?.collisionUrl).toContain(encodeURIComponent(buildFixtureScene().scene.environment.collider_ref!.artifact_uri));
+  });
+
+  it("hiện phần trăm lấy từ state.progress, không phải số tự tính", async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as never);
+    render(<ViewerPanel scene={buildFixtureScene()} />);
+    fireEvent.click(screen.getByRole("button", { name: "3DGS Visual" }));
+    await screen.findByTestId("playcanvas-scene");
+    const progress = await screen.findByTestId("viewer-progress");
+    expect(progress).toHaveTextContent("42%");
+    const bar = progress.querySelector<HTMLElement>("[style]");
+    expect(bar?.style.width).toBe("42%");
+  });
+
+  it("báo đã tải xong khi state.loaded, kèm trạng thái collider", async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as never);
+    runtime.state = { loaded: true, progress: 100, hasCollision: true, walkAllowed: true };
+    render(<ViewerPanel scene={buildFixtureScene()} />);
+    fireEvent.click(screen.getByRole("button", { name: "3DGS Visual" }));
+    expect(await screen.findByTestId("viewer-loaded")).toHaveTextContent("collider trong scene graph");
   });
 });
