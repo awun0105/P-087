@@ -70,6 +70,65 @@ Native coordinate vẫn UNVERIFIED/GT-assisted, không phải RGB alignment proo
 Remaining audit: strict raw scan integrity trước native allocation và canonical
 coordinate evidence bridge; không đổi status DONE chỉ từ successful replay.
 
+### Coordinate evidence 2026-09-27 — prefusion 20 frame, axis/unit đo thật
+
+Bổ sung evidence cho canonical coordinate bridge, **không** phải acceptance.
+Owner cho phép mở rộng lát cắt smoke từ 5 lên 20 scan. Không sửa code: chạy
+`tests/test_reconstruction/rec07_smoke.py` với env `REC07_SMOKE_*` sẵn có, nên
+regression 5-frame cũ giữ nguyên.
+
+**Vì sao chọn frame 100–119:** REC-03/04 đã dựng COLMAP/Brush trên frames
+100–200 (`derived/aisle_cw/rec03_smoke_workspace_sub100_200/images/`), nên lát cắt
+LiDAR phải nằm trong cùng dải để REC-09 same-scene correspondence có thể dùng.
+DATASET_PLAYBOOK §row "Trajectory" khuyến nghị "gộp khoảng 20 LiDAR frames";
+20 frame ở đây phủ 1,6m đường đi (toàn traversal 81,1m), nên đây là lát cắt
+sắc nét theo playbook, **không** phải bản đồ toàn cửa hàng.
+
+**VERIFIED — chạy thật, Open3D 0.19.0 / NumPy 2.5.3:**
+- Command: `REC07_SMOKE_START_FRAME=100 REC07_SMOKE_FRAME_COUNT=20
+  REC07_SMOKE_OUTPUT_RELATIVE=derived/aisle_cw/rec07_prefusion_sub100_119
+  data/rec07_runtime/bin/python -m tests.test_reconstruction.rec07_smoke`
+- Output: `derived/aisle_cw/rec07_prefusion_sub100_119/`, 20 scan, voxel 0,05 m.
+- Point count **133.039** (bản 5-frame: 54.957; gấp 2,42×).
+- PLY SHA-256 `4d7cce292587d0d22cf0925ad28c57085c9c10f5007bd1b7dad202d66e6ded4c`
+  (3,2 MB). Manifest SHA-256 `f920d2459e1910ff06804e2cbd6f9c9a3d9989a8237fca3ed23fca699146ed83`,
+  content checksum `sha256:d9a14b8b3716187f4e36a73183f0a45d9b6566b85418b452beccfda702d57987`.
+- Bounds min `[-11.315, -28.173, -0.849]`, max `[15.585, 32.229, 6.139]`;
+  mở rộng rõ ở `-y` (bản 5-frame chỉ tới `-17.79`).
+- **Determinism:** replay vào `rec07_replay_sub100_119` cho PLY và manifest
+  **cùng checksum byte-for-byte**; thư mục replay đã xoá sau khi so, giữ một
+  attempt duy nhất.
+
+**VERIFIED — up-axis và unit, đo từ point cloud (nguồn cho coordinate bridge):**
+- Trục Z là up: mặt sàn là một mặt phẳng phẳng chứa **38.434 điểm = 28,9%**
+  tổng số điểm, tại `z = -0,218 m`, bề dày < 6 cm. Dominant slab theo Z mỏng
+  **1,75 cm / 11,8%** điểm, trong khi X là 6,7 cm / 6,9% và Y là 15,1 cm / 4,1%.
+  Trục X/Y không có mặt phẳng chiếm ưu thế tương tự.
+- Đơn vị mét: quãng cấu hình 50 m, trục Y dài 60,4 m; footprint sàn
+  21,7 m × 20,9 m, trần cách sàn ~6,36 m.
+- Cross-check quỹ đạo: 1092 pose của `traj_gt.txt` có độ nghiêng khỏi mặt ngang
+  **max 2,17° / mean 1,12° / p99 1,86°**; cao độ cảm biến z = 0,171–0,248 m.
+  Heading quét 359,6° là yaw bình thường, không phải nghiêng.
+- Sàn đọc ra `z ≈ -0,22 m` trong khi world origin z=0 → còn lệch gốc nhỏ cần owner
+  chốt quy tắc gốc `world`; **handedness chưa kiểm**, đề xuất test bằng cách chiếu
+  điểm 3D qua extrinsic/intrinsics xuống ảnh frame 500.
+
+**LIMIT — evidence này KHÔNG đổi trạng thái task:**
+- `coordinate_status` vẫn `UNVERIFIED`, `assistance_class` vẫn `GT-assisted`,
+  `confirmed_rgb_alignment` vẫn `false`. Không tự nâng trạng thái.
+- DATASET_PLAYBOOK §"Observed Aisle_CW" ghi `source_frame = os_sensor` là
+  *"hypothesis mạnh từ projection/map, chưa được SLAM backend xác nhận trực tiếp"*
+  và yêu cầu không biến thành hard fact. Đo trục Z/unit là bằng chứng thực nghiệm
+  mạnh nhưng vẫn cần owner review trước khi khóa.
+- Code vẫn chặn ở 3 chỗ, chưa đụng: `scripts/torwic/build_registered_lidar.py:31`
+  (`coordinate_status="UNVERIFIED"` cứng),
+  `src/services/reconstruction/lidar/models.py:31` (`Literal["UNVERIFIED"]`),
+  `src/services/reconstruction/lidar/ingest.py:136` (`build_request_from_rec07_manifest`
+  raise vô điều kiện). REC-07 giữ `VALIDATING`.
+- Validation: `pytest tests/test_reconstruction/ -q` **338 passed, 20 skipped**
+  (130,60s); `ruff check src/ tests/ scripts/torwic` pass; `ruff format --check`
+  **186 files**. Worktree không có thay đổi code nào.
+
 ### Task Capsule / bootstrap 2026-09-26
 
 - Outcome: reproducible offline scan→registered PLY, bằng Open3D primitives,

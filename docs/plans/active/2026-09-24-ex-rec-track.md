@@ -73,6 +73,29 @@ fixture checksum failures after shared-model defaults changed; see REC-06 eviden
 
 ## Outcome
 
+Checkpoint 2026-09-27 (mới nhất) — REC-07 mở rộng lát cắt 5 → 20 scan:
+
+Owner cho phép chạy prefusion nhiều frame hơn để có dữ liệu làm canonical
+coordinate bridge. **Không sửa code** — chạy `rec07_smoke.py` với env
+`REC07_SMOKE_*` sẵn có, nên regression 5-frame cũ nguyên vẹn. Chọn frames
+100–119 vì REC-03/04 đã dựng COLMAP/Brush trên 100–200, cùng dải để REC-09
+same-scene dùng được; số lượng 20 theo khuyến nghị DATASET_PLAYBOOK.
+
+VERIFIED: **133.039 điểm** (gấp 2,42× bản 5-frame), PLY SHA-256
+`4d7cce29…6ded4c`, replay byte-identical cả PLY lẫn manifest. Đo thực nghiệm
+trên cloud mới: **trục Z là up** (mặt sàn 38.434 điểm = 28,9% tại z = −0,218 m,
+bề dày < 6 cm; dominant slab Z mỏng 1,75 cm so với X 6,7 cm / Y 15,1 cm) và
+**đơn vị mét**; cross-check 1092 pose nghiêng max 2,17°, cao độ cảm biến
+0,171–0,248 m. Chi tiết, command và checksum đầy đủ trong `tasks/REC-07.md`.
+
+Còn thiếu cho bridge: **handedness chưa kiểm** (đề xuất chiếu điểm 3D qua
+extrinsic/intrinsics xuống ảnh frame 500) và **quy tắc gốc `world`** chưa chốt
+(sàn đọc `z ≈ −0,22 m` ≠ 0). Code vẫn chặn ở `build_registered_lidar.py:31`,
+`lidar/models.py:31` (`Literal["UNVERIFIED"]`) và `lidar/ingest.py:136` — chưa
+đụng, REC-07 giữ `VALIDATING`, không tự nâng status. Validation: EX-REC **338
+passed / 20 skipped** (130,60s), Ruff check/format **186 files pass**, worktree
+sạch ngoài docs.
+
 Audit checkpoint 2026-09-27: REC-09 fail-closed authority/byte validation và
 sensor-frame correction implemented; 4 red regressions reproduced trước sửa.
 Focused 22 passed; EX-REC 293 passed/11 skipped; Ruff 177 files pass.
