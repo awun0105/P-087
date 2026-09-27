@@ -87,6 +87,106 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
 
 ## 9. Qualification Spike trên `Aisle_CW`
 
+### Implementation Plan — strict occupancy guard / portable publication
+
+- Bootstrap: `feat/ex-rec-pipeline`, clean worktree tại `1cc26db`; ownership chỉ
+  EX-REC adapters/rgb/tests và execution records. Authority: ADR 0001 seed đề
+  xuất + bắt buộc bounds/clearance; Integration §3.3, Contract và task I/O.
+- ADAPT minimal octree reader từ supersplat-viewer
+  `c52f5258df424635323f26aaeebe51361dc0f8e6`, MIT; giữ attribution/license.
+  Pinned SplatTransform 3.6.6/afbc281 `carve` dùng separable box dilation,
+  `ceil(radius/res)` và `ceil(height/(2*res))`, tự relocate blocked seed.
+- Trước carve, xuất occupancy không carve từ cùng immutable cluster/config,
+  validate binary/tree, kiểm toàn bộ rounded kernel và bounds. Reject invalid
+  seed trước collision process, không công nhận relocation là seed validation.
+- Hoàn thiện attempt namespace, publish cả voxel JSON/binary và kiểm refs/checksum
+  tại consumer. Không sửa shared schema hoặc code của track khác.
+- Proof: valid/blocked/out-of-bounds/corrupt-tree unit tests, adapter/publication
+  regression, native synthetic GPU khi runtime khả dụng. Real Aisle_CW vẫn cần
+  confirmed correspondence + independent measurement/tolerance; không bịa scale.
+
+### Implementation Plan — controlled seed relocation / verifiable clearance
+
+Owner-approved 2026-09-27, supersedes "reject là hành vi duy nhất" của đợt trước.
+
+- Authority: ADR 0001 §"quy chuẩn hạt giống" amendment (seed relocation có kiểm
+  soát). Task file này không tự thêm lựa chọn thứ ba ngoài ADR đã duyệt.
+- Bổ sung `VoxelConfig.max_seed_relocation_m` (mặc định 1.0m) vào checksum
+  config, không sửa shared schema trong `src/models/contracts/`.
+- `adapters/voxel_seed_search.py`: seed bị chặn được tìm lại bằng **BFS 6 hướng
+  trên tập ô tự do** thay vì quét vỏ cube của `findNearestFreeCell`. Ràng buộc:
+  ngưỡng mét, ngưỡng số bước thoát vật cản, tie-break tất định, và reject khi
+  không có ứng viên.
+- `adapters/voxel_octree.py`: thêm `solid_mask()` để trích occupancy thành
+  mảng dense một lần thay vì gọi box query hàng nghìn lần. Layout fixture
+  phải theo đúng `flattenDenseLevels` (BFS theo level), không phải DFS.
+- Clearance evidence ghi **cả hai** điểm: `requested_seed_world`,
+  `accepted_seed_world`, khoảng cách, số bước thoát, ngưỡng đã áp dụng và
+  checksum occupancy đã dùng làm căn cứ.
+- Publication: `occupancy.voxel.json`, `occupancy.voxel.bin`, `seed-clearance.json`
+  được publish qua `GeometryPublisher`; `GeometryResolver.load_seed_clearance()`
+  dựng lại kernel từ bytes đã publish và **tự kiểm lại**, không đọc `status`
+  của producer.
+- `verify_seed` giữ nguyên fail-loud ở product scope. Đợt trước đã đổi thành
+  optional veto; đã revert vì callback biểu diễn policy (frame nguồn, capsule
+  đã khóa, vùng làm việc) mà adapter không thể biết.
+- Không build lại splat-transform từ source. Voxel internals không nằm trong
+  public export nên chỉ CLI gọi được; phạm vi audit export chưa dùng nằm ở
+  follow-up bên dưới, chưa cấp task ID.
+
+### Evidence — controlled seed relocation + verifiable clearance (2026-09-27)
+
+- `pytest tests/test_reconstruction/ -q`: **443 passed, 22 skipped** (skip là
+  GPU opt-in). Trong đó `test_rec05_clearance.py` **22 passed**:
+  exact mixed-leaf bits, solid sentinel, 8 chế độ corrupt tree, relocation ghi
+  đủ hai điểm, xác định, từ chối khi vượt ngưỡng, từ chối khi vùi trong tường
+  dày, confinement theo vùng liên thông, ba seed ngoài bounds, và dừng trước
+  carve ở tầng adapter.
+- Publication/consumption: `test_rec05_product_pipeline.py` thêm
+  `test_published_clearance_is_independently_reverifiable` cùng bốn negative
+  case (swap binary, swap metadata, sai artifact type, kernel mâu thuẫn với
+  occupancy) và `test_product_scope_still_fails_loud_without_seed_policy`.
+- Native GPU, cùng pinned runtime `splat-transform 3.6.6 afbc281`, Quadro T2000:
+  `REC05_TEST_GPU=1` + `VK_ICD_FILENAMES=.../nvidia_icd.json` trên
+  `test_rec05_similarity_gpu.py` + `test_rec05_real_codec.py`: **7 passed,
+  43.55s**. Seed cũ `(3.25,2.5,1.25)` từng làm test fail nay **relocate thành
+  công** trên occupancy GPU thật: `relocates=true`, distance trong ngưỡng, và
+  receipt giữ cả seed đã yêu cầu lẫn seed được chấp nhận.
+- Sửa 2 lỗi thật phát hiện khi làm việc này, đều có proof hồi quy:
+  `_overlaps` trong octree reader dùng sai upper bound nên `solid_mask` trả
+  rỗng với cây lớn; và `_window_any` bỏ sót ô khi một trục có extent 0.
+  Cả hai được kiểm bằng so sánh với box oracle trên nhiều kích thước.
+- **Sửa lỗi thông tin trong evidence cũ:** dòng "Callback `verify_seed` chỉ là
+  optional policy veto" ở block trên **không còn đúng** sau khi revert.
+- Giới hạn: đây vẫn là synthetic technical proof. "Capsule vừa" + "cùng vùng
+  liên thông" **không** chứng minh robot đi tới được; `CLEAR/BLOCKED` là của
+  `SIM-02`. Real `Aisle_CW` spike và EX-SIM acceptance vẫn chưa đạt.
+
+
+
+- Adapter bắt buộc pre-carve occupancy từ cùng cluster/resolution/opacity; strict
+  little-endian octree reader kiểm graph/pointers/counts/depth trước box query.
+  Không dùng Euclidean radius thay native separable dilation. ~~Callback `verify_seed`
+  chỉ là optional policy veto~~ — đã lỗi thời, xem block Evidence kế tiếp.
+- `pytest test_rec05_clearance.py test_rec05_adapter.py test_rec05_product_pipeline.py`
+  trong `tests/test_reconstruction/`: **32 passed**. Có corruption ngoài query,
+  solid sentinel, low/high mixed masks, capsule corner, bounds và callback bypass.
+- Native GPU command: `env -u DISPLAY -u WAYLAND_DISPLAY
+  VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json REC05_TEST_GPU=1`
+  cùng pinned `REC05_TEST_SPLAT_MODULE` / `REC05_VOXEL_CLI` /
+  `REC05_VOXEL_MODULE_PATH` ở `data/rec04_runtime/node_modules/@playcanvas/splat-transform`,
+  `.venv/bin/pytest tests/test_reconstruction/test_rec05_similarity_gpu.py
+  tests/test_reconstruction/test_rec05_real_codec.py -q`: **7 passed, 63.47s**.
+  CLI `--list-gpus`: `[0] Quadro T2000`, splat3.6.6 afbc281.
+- First run **1 failed / 6 passed**: old synthetic transformed seed `(3.25,2.5,1.25)`
+  intersects native floor voxel y=1.1 after rounding. Kept as negative assertion;
+  positive uses known synthetic room center `(3.25,2.5,1.375)` with measured free
+  kernel. No product robot/seed/threshold changed to make test green.
+- Two passes intentionally reuse upstream voxelizer, no patched npm bundle.
+  Extra voxelization cost and runtime-pin dependency remain; this is synthetic
+  technical proof, not real Aisle_CW or physics acceptance.
+
+
 ### Implementation Plan / Bootstrap 2026-09-26
 
 Audit/rework 2026-09-27: replace `gaussian_scale.py` scalar buffer patch/silent
@@ -236,6 +336,32 @@ Trước khi chấp nhận primary geometry; giữ OpenMVS fallback nếu spike 
 - [x] Focused tests pass; evidence/limitations được ghi đầy đủ.
 
 ## 12. Result / Evidence
+
+### Follow-up chưa cấp task ID — audit splat-transform public export chưa dùng (2026-09-27)
+
+Đây là **proposal**, chưa phải authority. Không tự cấp task ID theo quy tắc harness;
+cần track owner cấp ID và xếp milestone.
+
+Sau khi kiểm `dist/index.mjs` của pinned `@playcanvas/splat-transform` 3.6.6, package
+chỉ export **61 named export**. Toàn bộ voxel/collision internals — `carve`,
+`twoLevelBFS`, `SparseVoxelGrid`, `gpuDilate3` — **không** nằm trong danh sách đó;
+`dist/lib/voxel/` chỉ còn `.d.ts` không có implementation `.mjs`, và `exports` map
+chỉ mở `.`, `./worker`, `./viewer-settings`, `./lib/*`. Kết luận: muốn gọi trực tiếp
+`carve()` thì phải clone repo GitHub và build từ `src/` (MIT cho phép) — chưa đáng
+để làm vì CLI đã chạy carve thật và test pass.
+
+Phần **đáng** làm là các public export chưa dùng, cần khảo sát theo từng track:
+
+| Export | Có thể thay gì | Track sở hữu |
+|---|---|---|
+| `loadCameraTrack` | đọc camera pose COLMAP thay code tự viết | `REC-06` |
+| `decimateSourceAdaptive`, `selectLod`, `stackLods`, `sortMortonColumns` | LOD/decimation | `REC-04` |
+| `writeSog`, `writeLodSource`, `writeSpz` | đóng gói SOG (P0 web format) | `REC-04` |
+| `writeVoxel` | voxel writer, có thể bỏ phụ thuộc output của CLI | `REC-05` |
+| `createViewer` | **chưa xác minh** có phải viewer core của supersplat-viewer không; nếu đúng thì liên quan trực tiếp `PRODUCT-06` | `EX-PRODUCT` |
+
+Điều kiện: mỗi mục phải có qualification proof trước khi thay code đang chạy, và
+`createViewer` phải verify trước khi đưa vào bất kỳ baseline EX-PRODUCT nào.
 
 ### Checkpoint 2026-09-26 — DONE, product pipeline and artifact publication
 
