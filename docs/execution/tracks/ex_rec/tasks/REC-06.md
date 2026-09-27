@@ -179,6 +179,21 @@ Status vẫn IN_PROGRESS. Sửa false final verification theo audit ở active p
 4. Positive/negative fixture tests rồi full track/static checks. Real Aisle_CW
    acceptance và phép đo tolerance vẫn pending, không lấy fixture threshold thay thế.
 
+Tiếp tục sau 99f2399 — canonical visual publication:
+- Reuse `SplatTransformSimilarityAdapter` pinned 3.6.6/afbc281 và
+  `SplatArtifactProcessor` SOG encode/roundtrip, không viết Gaussian codec mới.
+- Inputs: exact confirmation, published canonical poses, explicit product/fixture
+  scope. Outputs: immutable metric Gaussian PLY, real SOG bytes, shared
+  VisualArtifact metadata và internal checksum-bound publication manifest.
+- Giữ shared VisualArtifact producer stage ST-VISUAL-RECON theo contract; record
+  conversion/manifest thuộc ST-METRIC-CANONICALIZE. Không tự đổi shared schema.
+- Bind source InputManifest checksum từ normalized frame lineage, raw master,
+  canonical pose và full transform vào provenance. Không upgrade fixture/demo
+  assistance thành real metric/Brush/browser acceptance.
+- Proof: native codec trên Gaussian fixture với s/R/t, PLY source bất biến,
+  published SOG resolve/roundtrip, tamper/lineage/product-fixture negatives.
+  Chưa triển khai Editor authorization UI hoặc final distance approval ở bước này.
+
 ### Owner clarification: ba chế độ demo, 2026-09-26
 
 Triển khai backend chung cho RGB+LiDAR fusion, RGB LiDAR-assisted scale và
@@ -305,6 +320,55 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
   reused calibration pair. Ruff và AST checks changed files pass.
 - Canonical visual publication/verification và real independent evidence vẫn là
   next implementation, không tuyên bố REC-06 DONE.
+
+### Resume 2026-09-27 — chặn derivative namespace sai job + native visual proof
+
+- `metric.py::load` nay gọi `_require_job_identity`: confirmation ref phải có `job_id`
+  và `artifact_uri` phải trỏ đúng job đó. Trước đó `CanonicalPoseService.build` lấy thẳng
+  `job_id` để dựng URI, nên `job_id=None` ra `artifact://jobs/None/...` còn job khác vẫn ghi
+  derivative sang namespace của job khác. Guard đặt ở loader vì mọi consumer REC-06
+  (canonical poses, canonical visual, metric verification) đều đi qua đây, theo đúng
+  convention đã có ở `metric_verification.py:89-92` và `bundle_validation.py:32`.
+- Negative proof: `test_confirmation_job_identity_is_required[None|another-job]` ở
+  `test_rec06_canonical_poses.py` (test đã viết trước, 2 case đỏ trước khi có guard) và
+  `test_confirmation_ref_requires_consistent_job_identity` ở `test_rec06_confirmation.py`
+  khoá invariant ngay tại layer owner. Không sửa test để xanh, không nới guard.
+- Canonical visual publication WIP đã verify với **codec thật**:
+  `test_native_metric_ply_and_sog_publication` chạy `splat-transform` 3.6.6 thật, áp
+  s=2/Rz90/t=(10,20,30) lên 256 Gaussian, đọc lại SOG bytes thật (`PK`), raw master PLY
+  không đổi. Đây là codec proof, **không** phải browser QA hay Brush acceptance.
+
+**Validation do agent bàn giao ghi nhận trước Codex resume từ 56f987b**
+
+- `.venv/bin/pytest tests/test_reconstruction/ -q` → **380 passed, 21 skipped** (89,10s),
+  0 failed. Trước đó: 2 failed, 376 passed, 21 skipped.
+- Cùng suite với real codec + GPU opt-in
+  (`REC04_TEST_SPLAT_MODULE`/`REC05_TEST_SPLAT_MODULE` →
+  `data/rec04_runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs`,
+  `REC05_TEST_GPU=1`, `REC05_VOXEL_CLI` → `bin/cli.mjs`, `REC05_VOXEL_MODULE_PATH` →
+  `dist/index.mjs`) → **401 passed, 0 skipped** (112,44s).
+- `.venv/bin/ruff check src/ tests/ scripts/torwic` pass; `ruff format --check` 191 files
+  unchanged; `git diff --check` pass; AST check 7 file (≤30 dòng/≤3 non-self params/
+  typed args+return) → 0 vi phạm.
+- `.venv` vẫn thiếu `numpy` → `pytest tests/` vẫn dừng collection ở EX-SIM
+  `tests/test_simulation/test_colliders.py`. Lỗi môi trường, ngoài ownership EX-REC.
+
+**Limits / next**
+
+- Codex rerun sau resume (không dựa vào kết quả agent khác): full EX-REC với
+  `REC04_TEST_SPLAT_MODULE=.../dist/index.mjs`, `REC05_TEST_SPLAT_MODULE` và
+  `REC05_VOXEL_MODULE_PATH` trỏ package root, `REC05_VOXEL_CLI=.../bin/cli.mjs`,
+  `REC05_TEST_GPU=0`: **399 passed, 2 skipped (449.19s)**. Package được dùng là
+  `data/rec04_runtime/node_modules/@playcanvas/splat-transform`. Hai GPU cases
+  được tắt chủ động; native CPU codec vẫn chạy. Canonical visual producer đã
+  hoàn tất ở boundary derivative, không còn chỉ là plan; final verification
+  và real dataset acceptance vẫn pending.
+- Canonical visual publication vẫn là **metric derivative**, không phải final
+  `CONFIRMED`; chưa có Editor authorization UI, chưa có production metric verifier.
+- A/B points và `tolerance_m` vẫn chờ người chọn như `41ca8eb` ghi; không lấy sanity
+  anchor `≈0,67 m/sfm-unit` hay số `0.05` làm authority.
+- REC-06 giữ `IN_PROGRESS`. Full worker dispatch (`InputManifest`/`JobManifest`) + retry và
+  real alignment REC-09 chưa đụng.
 
 ### Checkpoint 2026-09-26 — DONE, final cross-artifact verification
 
