@@ -10,10 +10,12 @@ from typing import Literal
 from src.models.contracts.artifacts import ArtifactDataClass, Checksum, ContractModel, ProductArtifactRef
 from src.models.contracts.coordinates import CoordinateSystem
 from src.models.contracts.manifests import StageId
+from src.models.contracts.reconstruction import GeometryArtifact
 from src.services.reconstruction.adapters.voxel import ProductVoxelRequest, SplatTransformVoxelAdapter
 from src.services.reconstruction.adapters.voxel_octree import CellBox, VoxelOctree
 from src.services.reconstruction.adapters.voxel_output import VoxelMetadata
 from src.services.reconstruction.rgb.frame_set import _sha256
+from src.services.reconstruction.rgb.geometry_artifact import GeometryArtifactInput, build_geometry_artifact
 from src.services.reconstruction.rgb.metric import MetricCanonicalizer
 from src.services.reconstruction.rgb.metric_seed import CameraSeedProposal
 from src.services.reconstruction.rgb.publication import ArtifactWriter
@@ -51,6 +53,7 @@ class GeometryExecutionResult(ContractModel):
     geometry_ref: ProductArtifactRef
     metadata_ref: ProductArtifactRef
     clearance: SeedClearanceArtifacts
+    geometry: GeometryArtifact
     report: dict
 
 
@@ -211,12 +214,35 @@ class RgbGeometryService:
         metadata_ref = pub.publish_metadata(
             "geometry.voxel.json", (workspace / "geometry.voxel.json").read_bytes(), provenance
         )
+        clearance = _publish_clearance(pub, workspace, provenance)
         return GeometryExecutionResult(
             geometry_ref=geometry_ref,
             metadata_ref=metadata_ref,
-            clearance=_publish_clearance(pub, workspace, provenance),
+            clearance=clearance,
+            geometry=_build_geometry_artifact(request, report, geometry_ref, clearance, workspace),
             report=report,
         )
+
+
+def _build_geometry_artifact(
+    request: GeometryExecutionRequest,
+    report: dict,
+    geometry_ref: ProductArtifactRef,
+    clearance: SeedClearanceArtifacts,
+    workspace: Path,
+) -> GeometryArtifact:
+    """Shared contract cho EX-SIM; validator chặn metric chưa CONFIRMED và seed không khớp relocation."""
+    return build_geometry_artifact(
+        GeometryArtifactInput(
+            job_id=request.job_id,
+            artifact_uri=geometry_ref.artifact_uri,
+            artifact_checksum=geometry_ref.artifact_checksum,
+            clearance_checksum=clearance.seed_clearance.artifact_checksum,
+            source_master_checksum=report["source_checksum"],
+            report=report,
+            clearance_receipt=json.loads((workspace / "seed-clearance.json").read_text()),
+        )
+    )
 
 
 def _decision_kernel(decision: dict) -> CellBox:
