@@ -43,6 +43,71 @@
 
 ## 0. Trạng thái repo lúc bàn giao
 
+### Resume addendum 2 — opencode audit WIP sau 99f2399 (2026-09-27 ~13:00)
+
+**Không sửa gì.** Chỉ đọc và đo để báo cáo trạng thái. Worktree lúc audit này **KHÔNG
+sạch** — có WIP của agent khác, giữ nguyên.
+
+**Codex đã commit 3 việc sau `41ca8eb`:**
+
+| Commit | Nội dung |
+| --- | --- |
+| `84d93c5` | `src/services/reconstruction/rgb/canonical_poses.py` (119 dòng) + `test_rec06_canonical_poses.py` (102) — publish/resolve canonical camera poses với exact lineage |
+| `d6883b4` | `metric_verification.py` (sửa ~100 dòng) + `test_rec06_final_verification.py` — verifier chỉ báo `PENDING_FINAL_VERIFICATION`, không false `CONFIRMED` |
+| `99f2399` | docs only — cập nhật readiness và **bỏ các nghiệm thu chưa có proof** (dọn claim sai) |
+
+Hai việc này **đúng vào 2 khoảng trống tôi đã nêu** ở snapshot: canonical pose
+publication và chặn false final verification.
+
+**WIP chưa commit — canonical visual publication (đúng khoảng trống thứ 3):**
+
+| File | Dòng | Ghi chú |
+| --- | --- | --- |
+| `src/services/reconstruction/rgb/canonical_visual.py` | 223 | service `CanonicalVisualService`: `execute/_context/_convert/_check_codec/_publish/load` |
+| `src/services/reconstruction/rgb/canonical_visual_models.py` | 52 | `CanonicalVisualRequest`, `CanonicalVisualManifest` (checksum-bound, `delivery_ref()` trỏ thẳng SOG bytes) |
+| `tests/test_reconstruction/test_rec06_canonical_visual.py` | 160 | **10 passed, 1 skipped** |
+| `docs/.../REC-06.md` | +15 | mô tả kế hoạch bước này |
+
+Thiết kế đáng chú ý: reuse `SplatTransformSimilarityAdapter` pinned + `SplatArtifactProcessor`
+SOG encode, **không** viết Gaussian codec mới; giữ shared `VisualArtifact` ở stage
+`ST-VISUAL-RECON` theo contract, chỉ record conversion ở `ST-METRIC-CANONICALIZE`.
+
+**Trạng thái test đo được lúc audit (không opt-in GPU/native):**
+
+```
+pytest tests/test_reconstruction/ -q  →  2 failed, 376 passed, 21 skipped (98.12s)
+ruff check src/ tests/ scripts/torwic →  All checks passed!
+```
+
+**2 test ĐỎ — đây là TDD red hợp lệ, chưa phải regression:**
+
+`tests/test_reconstruction/test_rec06_canonical_poses.py` vừa thêm
+`test_confirmation_job_identity_is_required` (parametrize `job_id=None` /
+`"another-job"`), kỳ vọng `ValueError` khớp `"confirmation job identity"` → **DID NOT RAISE**.
+
+Xác minh nguyên nhân: `canonical_poses.py:51-62` (`build`) không validate
+`confirmation_ref.job_id`, và dòng 102 dùng thẳng
+`job_id = artifact.confirmation_ref.job_id` để dựng URI. Nếu `job_id` là `None` thì
+URI thành `artifact://jobs/None/rec06/...`. Guard **chưa được implement** — test viết
+trước, đúng thứ tự.
+
+**Một vi phạm chuẩn code phát hiện được:**
+
+`canonical_visual.py` — hàm `_publish_blob(context, spec, payload, ...)` có
+**4 tham số**, vượt giới hạn ≤3 trong `AGENTS.md` §8 Python. Nên gộp `spec` +
+`payload` thành một typed model. Không sửa hộ, chỉ báo.
+
+**Còn thiếu, chưa ai động tới:**
+1. **A/B points** — vẫn phải do người chọn (xem `tasks/REC-06.md` mục "2026-09-27 —
+   thử tự suy A/B"; `data/rec07_axis_evidence_20260927/ab_candidates.png` để bạn
+   chọn 2 vị trí nhận dạng được).
+2. **`tolerance_m`** — vẫn chờ đo trên đúng cặp người chọn; `0.05` ở
+   `metric_verification.py` chưa phải authority.
+3. **Production metric verifier** — `d6883b4` đã chặn false CONFIRMED nhưng chưa có
+   verifier production, nên worker CLI vẫn fail-closed.
+4. **Full worker dispatch** (`InputManifest`/`JobManifest`) + retry.
+5. **Real alignment** (REC-09 same-scene thật) + native LiDAR coordinate promotion.
+
 ### Resume addendum — Codex sau 41ca8eb (không sửa snapshot lịch sử bên dưới)
 
 - Đã đọc 7 commits sau 45db57e: docs/evidence only. Kiểm lại byte SHA-256 của
