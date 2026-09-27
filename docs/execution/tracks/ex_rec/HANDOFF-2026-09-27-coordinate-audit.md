@@ -43,6 +43,27 @@
 
 ## 0. Trạng thái repo lúc bàn giao
 
+### Resume addendum — Codex sau 41ca8eb (không sửa snapshot lịch sử bên dưới)
+
+- Đã đọc 7 commits sau 45db57e: docs/evidence only. Kiểm lại byte SHA-256 của
+  prefusion 20 scan và manifest tại
+  `data/torwic_slam/derived/aisle_cw/rec07_prefusion_sub100_119/`: khớp checkpoint.
+- Owner origin/capsule decisions ở 01305c9 và failed automatic A/B ở 41ca8eb
+  xảy ra **sau** snapshot này; không dùng danh sách unknown cũ thay task hiện tại.
+- §9 dưới đây **không phải readiness assessment hiện hành**: cached
+  `origin/feat/product` 012f349 có UI/backend. Routes job còn mock-worker,
+  MetricScalePanel chỉ hiển thị. EX-PRODUCT có thể tích hợp song song qua contracts;
+  không cần đợi thứ tự tuyến tính REC → SCENE → SIM → PRODUCT.
+- Việc P0 không bắt buộc CUDA không có nghĩa GPU host không hữu ích cho Brush/
+  voxel hoặc EX-REC đã ready chạy cloud E2E. Chưa qualification trên cloud; phần
+  thiếu hiện tại gồm canonical visual, final metric proof, strict seed/clearance,
+  real alignment và full worker dispatch — thêm GPU không tự hoàn thành chúng.
+- `84d93c5`: publish/resolve actual canonical camera poses với exact lineage.
+  `d6883b4`: verifier chỉ báo PENDING_FINAL_VERIFICATION, không false CONFIRMED.
+- Test lại: EX-REC **381 passed/5 skipped** với GPU/native opt-ins; contract /
+  integration **94 passed/2 existing SceneIR checksum failures**; full collection
+  vướng NumPy ở EX-SIM. Chi tiết và next step nằm trong active plan/REC-06.
+
 - Worktree **sạch**. **Không sửa một dòng code nào** trong phiên này.
 - Baseline chạy lại lúc bàn giao:
   - `pytest tests/test_reconstruction/ -q` → **338 passed, 20 skipped** (119,85s)

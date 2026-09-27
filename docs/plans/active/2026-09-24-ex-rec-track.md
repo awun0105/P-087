@@ -6,6 +6,28 @@ Date: 2026-09-24
 
 ### Resume audit 2026-09-27 — HEAD 41ca8eb
 
+Current executable checkpoint after `84d93c5` + `d6883b4`:
+- Canonical camera derivative publication/reload implemented; metric diagnostic
+  report không còn false CONFIRMED. Required independent sample/tolerance và
+  full geometry payload/lineage checks có regression proof.
+- Full EX-REC with REC05 native/GPU opt-ins: **381 passed, 5 skipped**, 92.40s.
+  Command: `REC05_TEST_GPU=1 REC05_TEST_SPLAT_MODULE=data/rec04_runtime/node_modules/@playcanvas/splat-transform
+  REC05_VOXEL_CLI=data/rec04_runtime/node_modules/@playcanvas/splat-transform/bin/cli.mjs
+  REC05_VOXEL_MODULE_PATH=data/rec04_runtime/node_modules/@playcanvas/splat-transform
+  .venv/bin/pytest tests/test_reconstruction/ -q`.
+- `.venv/bin/ruff check src/services/reconstruction/ tests/test_reconstruction/`
+  and matching `ruff format --check`: pass, 91 files. Changed-code AST limits pass.
+- `.venv/bin/pytest tests/test_contracts/ tests/integration/ -q`: **94 passed,
+  2 failed** (existing SceneIR identity fixtures). `tests/ --collect-only -q`:
+  **522 collected, 1 error**, EX-SIM `ModuleNotFoundError: numpy`.
+- Do not mark whole repository green. Cached product branch lacks SceneObject
+  semantic_class/tags present here; shared-default/checksum compatibility needs
+  producer/consumer review at merge, not automatic golden replacement.
+- Next independent implementation: canonical visual derivative publication via
+  pinned SplatTransform codec, preserve raw master and publish actual payload/ref;
+  then production distance/derivative verifier and worker dispatch integration.
+  Reuse existing REC-06 scope, no new stage/shared schema or task ID.
+
 Task Capsule / implementation plan trước edit:
 - Outcome: audit handoff mới và sửa REC-06 false final confirmation; xuất bản
   canonical camera poses thật qua artifact store, không chỉ tính trong memory.
@@ -30,7 +52,8 @@ Task Capsule / implementation plan trước edit:
   backend thật, nhưng routes_product ghi mock-worker; MetricScalePanel chỉ đọc
   SceneIR. Không suy dự án thiếu UI từ việc branch EX-REC chưa có frontend.
   Chưa merge, chưa chạy UI branch, chưa xác minh live remote/CI.
-- Upstream SplatTransform 3.6.6 carve dùng radius XY và half-height trên Y nội bộ
+- Upstream SplatTransform 3.6.6 carve dùng radius trên XZ native (XY canonical)
+  và half-height trên Y nội bộ
   (`ceil(height/(2*resolution))`), không enforce height >= 2*radius. Không áp quy
   tắc capsule hình học của engine khác vào owner dimensions. Seed ngoài bounds
   bị skip, seed blocked có thể được upstream dời: vẫn cần strict clearance gate.
@@ -559,7 +582,12 @@ in `tasks/REC-01.md`. The evaluation-only GT symlink was corrected; the
 untracked migration scripts were left untouched. REC-02A/REC-03 must enforce
 the reconstruction IDs at runtime; evaluator use of held-out IDs is separate.
 
-REC-02 through REC-11 have all been completed and verified on branch `feat/ex-rec-pipeline`:
+Historical Antigravity snapshot — **superseded by audit 2026-09-27**. Các counts
+dưới đây chỉ ghi lại báo cáo cũ, không phải current status hoặc real acceptance.
+Claim cũ “REC-02 through REC-11 have all been completed and verified” đã bị audit
+bác bỏ; xem Status/Result của từng task và resume checkpoint đầu plan.
+
+Historical reported results on branch `feat/ex-rec-pipeline`:
 - REC-07: TorWIC LiDAR prefusion CLI, test suite (9/9 passed), and smoke verification (54,957 points).
 - REC-08: Registered LiDAR ingest service, ASCII header inspection, PLY parser, models and tests (4/4 passed).
 - REC-05: SplatTransform coarse voxel geometry & collision GLB adapter, RgbGeometryService, models and tests (38 passed, 6 skipped for GPU).

@@ -90,7 +90,11 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 - [x] RGB-only, RGB+Depth và RGB+LiDAR bundle invariants pass; mixed bundle thiếu alignment bị reject.
 - [x] Không chứa hidden local path hoặc require private COLMAP/Brush/OpenMVS folders.
 - [x] EX-SCENE deserialize trực tiếp không sửa file tay.
-- [x] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+- [ ] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+
+Audit 2026-09-27: checked items là typed/fixture consumer proof. Real metric
+derivative verifier chưa nối, nên chưa publish được real qualified bundle và
+chưa đủ required handoff proof để DONE.
 
 ## 12. Result / Evidence
 

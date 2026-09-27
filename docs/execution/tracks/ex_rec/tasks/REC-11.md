@@ -84,8 +84,12 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 
 - [x] Command không cần manual path patch.
 - [x] SUCCEEDED chỉ khi required artifacts có checksum và resolve được.
-- [x] Retry/attempt không overwrite provenance trước; PRODUCT gọi qua abstraction.
-- [x] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+- [ ] Retry/attempt không overwrite provenance trước; PRODUCT gọi qua abstraction.
+- [ ] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+
+Audit 2026-09-27: CLI chạy thật nhưng scope chỉ verified_bundle_publication;
+không là full InputManifest → reconstruction dispatcher. EX-PRODUCT branch có
+UI/backend, chưa có real worker wiring vào abstraction này. Không claim DONE.
 
 ### Result / Evidence 2026-09-26 — Refactor REC-11 Hoàn thành (DONE)
 

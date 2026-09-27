@@ -83,8 +83,11 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 
 - [x] Artifact immutable sau checksum và resolver đọc được.
 - [x] Declared transform chỉ là metadata, không bị coi là confirmed alignment.
-- [x] Downstream REC-09/composer consume qua published ref.
-- [x] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+- [ ] Downstream REC-09/composer consume qua published ref.
+- [ ] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+
+Audit 2026-09-27: checked items là implementation/fixture proof; real REC-07
+coordinate-review bridge và mixed consumer handoff còn pending, không DONE.
 
 ## 12. Result / Evidence
 

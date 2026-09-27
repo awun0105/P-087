@@ -250,7 +250,10 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 - [x] Output tái tạo được từ immutable raw input.
 - [x] Mọi use của `traj_gt` được khai báo rõ.
 - [x] Artifact không được claim là independent LiDAR mapping benchmark khi methodology không cho phép.
-- [x] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+- [ ] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+
+Audit 2026-09-27: focused/offline subset proof có, nhưng source coordinate review
+→ REC-08 canonical ingest handoff chưa hoàn tất. Status giữ VALIDATING.
 
 ## 12. Result / Evidence
 

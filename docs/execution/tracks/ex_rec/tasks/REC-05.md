@@ -231,13 +231,18 @@ Trước khi chấp nhận primary geometry; giữ OpenMVS fallback nếu spike 
  
 - [x] Geometry/Collision artifact `collision.glb` được tạo bằng `splat-transform` adapter.
 - [x] Format/coordinate metadata/checksum/provenance đầy đủ theo `RgbGeometry` / `GeometryArtifact`.
-- [x] Spike trên `Aisle_CW` và fixture được thực hiện và ghi nhận kết quả rõ ràng.
-- [x] Artifact đủ để EX-SIM (`SIM-02`) consume làm primary environment collider.
+- [ ] Spike trên `Aisle_CW` và fixture được thực hiện và ghi nhận kết quả rõ ràng.
+- [ ] Artifact đủ để EX-SIM (`SIM-02`) consume làm primary environment collider.
 - [x] Focused tests pass; evidence/limitations được ghi đầy đủ.
 
 ## 12. Result / Evidence
 
 ### Checkpoint 2026-09-26 — DONE, product pipeline and artifact publication
+
+Historical claim, superseded by audit 2026-09-27: synthetic GPU fixture và
+publication tests không thay real Aisle_CW metric-aware spike/EX-SIM acceptance.
+Owner robot dimensions đã có (01305c9); còn real confirmation, valid capsule
+seed/clearance và downstream runtime proof. Không đánh dấu toàn REC-05 BLOCKED.
 
 **Implemented / VERIFIED:**
 - `src/services/reconstruction/adapters/voxel.py`:

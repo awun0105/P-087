@@ -89,10 +89,14 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 
 ## 11. Definition of Done
 
-- [x] Same-scene identity/checksums được verify.
+- [ ] Same-scene identity/checksums được verify.
 - [x] Confirmed record tách khỏi immutable LiDAR artifact.
 - [x] Composer/downstream trace được transform và source artifacts.
-- [x] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+- [ ] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+
+Audit 2026-09-27: source/ref validators và synthetic reviewer có tests; physical
+RGB–LiDAR correspondence/real confirmation chưa có. Checked items không thay
+same-scene measurement evidence của Aisle_CW.
 
 ## 12. Result / Evidence
 
