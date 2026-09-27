@@ -38,7 +38,9 @@ import { parseAsciiPly, type PlyCloud } from "@/features/viewer/ply";
 import {
   PlayCanvasScene,
   detectPlayCanvasCapability,
+  INITIAL_RUNTIME,
   type PlayCanvasCapability,
+  type PlayCanvasRuntime,
 } from "@/features/viewer/PlayCanvasScene";
 import { SceneCanvas } from "@/features/viewer/SceneCanvas";
 import { ObjectActionsPanel } from "@/features/scene/ObjectActions";
@@ -93,6 +95,20 @@ export function ViewerPanel({ scene }: ViewerPanelProps) {
   // Một nguồn capability duy nhất cho cả Visual và các view kỹ thuật, để nhánh
   // suy giảm không thể lệch nhau.
   const [playcanvas, setPlaycanvas] = useState<PlayCanvasCapability>(detectPlayCanvasCapability);
+  const [playcanvasRuntime, setPlaycanvasRuntime] = useState<PlayCanvasRuntime>(INITIAL_RUNTIME);
+
+  // `onFailed` đi vào deps của effect tạo viewer nên phải có identity ổn định: arrow
+  // function inline sẽ khiến mỗi lần re-render đều destroy rồi tạo lại viewer, tức tải
+  // lại toàn bộ SOG. Gõ một ký tự vào ô filter cũng đủ để chạy lại.
+  const markPlayCanvasFailed = useCallback(() => setPlaycanvas("failed"), []);
+  const publishPlayCanvasRuntime = useCallback((next: PlayCanvasRuntime) => setPlaycanvasRuntime(next), []);
+
+  // Collider GLB của environment: `createViewer({ collisionUrl })` nạp nó vào cùng
+  // `pc.AppBase` với SOG, nên đây là phần Single Scene Graph đã có thể làm ngay.
+  const colliderUrl = useMemo(() => {
+    const reference = scene.scene.environment.collider_ref;
+    return reference ? jobArtifactContentUrl(scene.job_id, reference) : null;
+  }, [scene.job_id, scene.scene.environment.collider_ref]);
 
   // SOG của lớp Visual, resolve qua allow-list của job nên không tự dựng URL.
   const sogUrl = useMemo(() => {
@@ -375,12 +391,19 @@ export function ViewerPanel({ scene }: ViewerPanelProps) {
 
           <div className="h-[30rem]">
             {mode === "VISUAL" && playcanvas === "ready" && sogUrl ? (
-              <PlayCanvasScene
-                contentUrl={sogUrl}
-                mode={mode}
-                capability={playcanvas}
-                onFailed={() => setPlaycanvas("failed")}
-              />
+              <>
+                <ViewerProgress runtime={playcanvasRuntime} hasCollision={Boolean(colliderUrl)} />
+                <div className="h-[28rem]">
+                  <PlayCanvasScene
+                    contentUrl={sogUrl}
+                    collisionUrl={colliderUrl}
+                    mode={mode}
+                    capability={playcanvas}
+                    onFailed={markPlayCanvasFailed}
+                    onRuntime={publishPlayCanvasRuntime}
+                  />
+                </div>
+              </>
             ) : webgl === "unavailable" || playcanvas === "unavailable" ? (
               <DegradedState />
             ) : webgl === "checking" ? (
@@ -797,6 +820,33 @@ function VisualBanner({ scene }: { scene: SceneResponse }) {
       <span className="font-mono"> brush_compatibility_proof=false</span>). Các view Geometry/Point
       Cloud/Collider là view kỹ thuật ngang hàng, không phải fallback và không thay thế AC-11.
     </p>
+  );
+}
+
+/**
+ * Tiến trình nạp SOG đọc thẳng `ViewerHandle.state.progress` của thư viện, không tự
+ * đếm byte hay bịa phần trăm. `hasCollision` phản ánh việc `collisionUrl` có được
+ * viewer chấp nhận không — đây là cách biết collider GLB có thật sự nằm trong scene
+ * graph hay chỉ là lời hứa của URL.
+ */
+function ViewerProgress({ runtime, hasCollision }: { runtime: PlayCanvasRuntime; hasCollision: boolean }) {
+  if (runtime.loaded) {
+    return (
+      <p className="px-4 pt-2 text-xs text-emerald-300" data-testid="viewer-loaded">
+        Scene đã tải xong{hasCollision ? " · collider trong scene graph" : ""}.
+      </p>
+    );
+  }
+  return (
+    <div className="px-4 pt-2" data-testid="viewer-progress">
+      <div className="h-1 w-full rounded bg-slate-700">
+        <div
+          className="h-1 rounded bg-sky-400 transition-[width]"
+          style={{ width: `${Math.max(0, Math.min(100, runtime.progress))}%` }}
+        />
+      </div>
+      <p className="mt-1 text-xs text-slate-400">Đang tải SOG… {Math.round(runtime.progress)}%</p>
+    </div>
   );
 }
 
