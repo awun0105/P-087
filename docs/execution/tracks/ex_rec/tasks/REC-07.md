@@ -113,6 +113,34 @@ sắc nét theo playbook, **không** phải bản đồ toàn cửa hàng.
   chốt quy tắc gốc `world`; **handedness chưa kiểm**, đề xuất test bằng cách chiếu
   điểm 3D qua extrinsic/intrinsics xuống ảnh frame 500.
 
+#### Handedness/up-axis — VERIFIED bằng hai phép đo độc lập 2026-09-27
+
+Owner cho phép kiểm tra up-axis/handedness. Dùng **hai nguồn độc lập**, không
+dùng camera extrinsic (xem REC-09 vì sao camera chain chưa verify được):
+
+1. **Merged cloud, world frame:** lát cắn z đậm nhất `z = -0,218 m`, bề dày
+   2,15 cm, chứa 37.154 điểm = 27,9% cloud.
+2. **Single raw scan `000110.pcd`, os_sensor frame:** lát cắn z đậm nhất
+   `z = -0,468 m`, bề dày 2,15 cm, chứa 37.274 điểm = 44,9% scan.
+
+Cộng cao độ cảm biến `z_world ≈ +0,23 m` (traj, 1092 pose) → sàn ở world
+`0,23 − 0,468 = -0,238 m`. Hai phép đo từ hai frame khác nhau **khớp nhau trong
+2 cm**. Đây là bằng chứng mạnh rằng phép compose `T_world_from_os_sensor` trong
+REC-07 giữ đúng trục Z là trục lên và giữ đúng đơn vị mét — nếu sai trục hoặc
+sai dấu, hai lát cắn này không thể trùng nhau.
+
+Chốt được: **up-axis = Z, đơn vị = mét, không cần xoay/đảo trục**. Còn lại:
+- **handedness (thuận/ngược tay)** chưa chốt. Thử chiếu LiDAR xuống ảnh thì
+  phụ thuộc camera chain chưa verify (REC-09), nên chưa dùng được làm chứng cứ.
+- **quy tắc gốc `world`**: sàn nằm ở `z ≈ -0,238 m`, không phải 0.
+
+**Evidence trực quan** (gitignored, theo quy ước REC-05):
+`data/rec07_axis_evidence_20260927/up_axis_proof.png`
+SHA-256 `05c77d10b9726147d014f5b0b335f078c282cdbf46da15cbe05a86d6c03e7d0b`.
+Sáu panel: 3 góc nhìn trực giao XY/XZ/YZ, lát cắn đậm nhất theo trục, zoom lát
+cắn sàn, và cao độ cảm biến theo thời gian. Người review tự kiểm bằng mắt:
+trục Z cho một mặt phẳng nằm ngang sắc ở một giá trị không đổi, X/Y thì không.
+
 **LIMIT — evidence này KHÔNG đổi trạng thái task:**
 - `coordinate_status` vẫn `UNVERIFIED`, `assistance_class` vẫn `GT-assisted`,
   `confirmed_rgb_alignment` vẫn `false`. Không tự nâng trạng thái.

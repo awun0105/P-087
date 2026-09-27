@@ -113,6 +113,50 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
   same-scene/overlap proof cho Aisle_CW. Task vẫn IN_PROGRESS; các claim world
   normalization/DONE trong historical checkpoint dưới đây đã bị audit bác bỏ.
 
+### Phát hiện 2026-09-27 — camera chain KHÔNG verify được bằng ground truth sàn
+
+Owner cho phép kiểm tra handedness/up-axis. **Up-axis đã chốt được** (xem REC-07:
+Z là trục lên, đơn vị mét, hai phép đo độc lập khớp trong 2 cm). Nhưng cách kiểm
+tra bằng cách chiếu LiDAR xuống ảnh RGB **đã lộ ra một vấn đề riêng**, ghi lại
+đây vì nó thuộc scope REC-09 chứ không phải REC-07.
+
+**Cách kiểm:** chiếu raw scan `000110.pcd` (đúng frame, ở `os_sensor` frame, không
+cần pose/gộp) vào ảnh `000110.png` bằng chuỗi khai báo
+`T_cam_from_os = inverse(T_os_from_cam)` + intrinsics + distortion OpenCV
+`[k1,k2,p1,p2,k3]`. Ảnh đúng 1280×720 khớp calibration, nên không phải lỗi resize.
+
+**Kết quả — không khớp:**
+- Extrinsic khai báo: trục quang học camera trong sensor frame là
+  `(-0.0246, -0.9981, -0.0571)`, tức nhìn gần như dọc **−Y** của sensor, nghiêng
+  **3,27°**.
+- Mặt sàn trong ảnh phải hội tụ về một đường chân trời ngang. Fit `v = v_h + a/d`
+  trên 13.110 điểm sàn cho `v_h = 470,6 px` → nghiêng ngầm **−9,48°**, residual
+  **60,7 px**. Không khớp 3,27°, và residual 60 px là lớn.
+- Giả thuyết không inverse (`T_os_from_cam` thẳng) tệ hơn: `v_h = 454,7`,
+  residual **164,2 px**.
+- Chấm điểm khớp cấu trúc ảnh (mean image-gradient tại điểm chiếu / baseline):
+  khai báo **0,803** (dưới baseline 1,0), không-inverse 1,183, mirror-y 1,373.
+  Chỉ số này yếu vì cảnh kho gần đối xứng, nên lấy số residual chân trời làm
+  tiêu chí chính.
+
+**Điều này KHÔNG chứng minh calibration sai.** Các giả thuyết còn sống, chưa loại:
+ảnh `image_left` có thể đã undistorted sẵn (thử "bỏ distortion" → ratio 0,781,
+tệ hơn, nên chưa loại trừ hoàn toàn); Ouster OS1-128 có origin offset riêng cần
+đặt đúng; hoặc khung camera thật sự không phải OpenCV z-forward.
+
+**Hệ quả trực tiếp:** **không dùng được đường chiếu LiDAR→ảnh làm bằng chứng
+handedness cho tới khi camera chain verify.** Vì vậy REC-07 chỉ chốt được
+up-axis/unit, còn handedness vẫn để mở. REC-09 vẫn `IN_PROGRESS`.
+
+**Việc cần làm tiếp (chưa làm, cần owner/source authority):** đối chiếu
+convention camera frame của TorWIC từ tài liệu dataset hoặc owner; xác nhận ảnh
+`image_left` đã undistorted hay chưa; xác nhận origin offset của Ouster OS1-128.
+Không tự chọn giả thuyết để làm xanh số đo.
+
+**Evidence:** `data/rec07_axis_evidence_20260927/scan110_hypotheses.png`
+SHA-256 `bb0085a058fbdeb7b42a58266c53485db6ecdd98f24fcb58eacf64b2780678e5`
+(5 giả thuyết chồn lên ảnh + ảnh gốc).
+
 ### Checkpoint 2026-09-26 — DONE, RGB-LiDAR alignment service and models Refactor
 
 **Implemented / VERIFIED:**

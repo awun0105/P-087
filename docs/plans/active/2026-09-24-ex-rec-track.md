@@ -73,7 +73,31 @@ fixture checksum failures after shared-model defaults changed; see REC-06 eviden
 
 ## Outcome
 
-Checkpoint 2026-09-27 (mới nhất) — REC-07 mở rộng lát cắt 5 → 20 scan:
+Checkpoint 2026-09-27 (mới nhất) — up-axis/handedness cho canonical coordinate:
+
+**Đã chốt:** up-axis = **Z**, đơn vị = **mét**. Bằng hai phép đo độc lập: lát cắn
+z đậm nhất của merged cloud (`-0,218 m`, 27,9% cloud) và của raw scan `000110.pcd`
+(`-0,468 m` trong sensor frame, 44,9% scan); cộng cao độ cảm biến `+0,23 m` cho
+sàn world `≈ -0,238 m` — hai frame khác nhau khớp trong 2 cm. Không cần xoay/đảo
+trục. Evidence: `data/rec07_axis_evidence_20260927/up_axis_proof.png`
+(`05c77d10…`).
+
+**Phát hiện mới, thuộc REC-09:** đường chiếu LiDAR→ảnh **không verify được**.
+Chiếu raw scan `000110` vào ảnh `000110` bằng `inverse(T_os_from_cam)` + distortion:
+mặt sàn phải hội tụ về chân trời ngang, nhưng fit cho `v_h = 470,6 px` (nghiêng
+ngầm −9,48°) trong khi extrinsic khai báo −3,27°, residual **60,7 px**; không-inverse
+tệ hơn (residual 164,2 px). Ảnh đúng 1280×720 nên không phải lỗi resize. **Không
+kết luận calibration sai** — còn sống các giả thuyết: ảnh đã undistorted sẵn,
+origin offset Ouster OS1-128, hoặc camera frame không phải OpenCV z-forward. Cần
+owner/source authority mới loại được. Evidence:
+`data/rec07_axis_evidence_20260927/scan110_hypotheses.png` (`bb0085a0…`).
+
+**Hệ quả:** handedness **chưa chốt** được, vì cách kiểm duy nhất định lập lại phụ
+thuộc camera chain chưa verify. REC-07 giữ `VALIDATING`, REC-09 giữ
+`IN_PROGRESS`; `coordinate_status` vẫn `UNVERIFIED`. Còn lại cho bridge: quy tắc
+gốc `world` (sàn ở `z ≈ -0,238 m`, không phải 0) và các câu hỏi camera ở trên.
+
+Checkpoint 2026-09-27 — REC-07 mở rộng lát cắt 5 → 20 scan:
 
 Owner cho phép chạy prefusion nhiều frame hơn để có dữ liệu làm canonical
 coordinate bridge. **Không sửa code** — chạy `rec07_smoke.py` với env
