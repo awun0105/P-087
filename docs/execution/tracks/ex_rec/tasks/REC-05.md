@@ -349,8 +349,36 @@ git diff --check
    Upstream có thể relocate seed bị blocked; requested seed trong receipt không
    được diễn giải thành verified walkable seed của scene thật.
 4. OpenMVS source/license/CLI đã inspect; container/runtime/smoke chưa qualified.
-   Giữ fallback có điều kiện khi primary real spike không đạt, không là prerequisite
+   Giữ fallback có điều kiện khi primary real spike không đạt, không phải prerequisite
    bắt buộc cho synthetic SplatTransform development.
+
+### Owner chốt capsule robot 2026-09-27 — thay số demo
+
+Số demo cũ `radius=0.35 m` / `height=1.20 m` **không còn dùng**. Owner cung cấp
+spec **OTTO 100D**: kích thước tổng thể **740 × 550 × 308 mm**
+(L × W × H), lối đi tối thiểu 1,099 mm, tải 150 kg, khối lượng 107 kg.
+
+`VoxelConfig` yêu cầu capsule trục tròn (`capsule_radius_m`, `capsule_height_m`)
+nên phải ánh xạ hộp chữ nhật → trục:
+
+| Chọn | Công thức | Bán kính | Khi nào dùng |
+| --- | --- | --- | --- |
+| **Ngoại tiếp** | `hypot(0.370, 0.275)` | **0,4610 m** | **Carve free space** — bảo đảm robot vừa mọi hướng |
+| Nội tiếp | `min(0.370, 0.275)` | 0,2750 m | Kiểm tra "chắc chắn vừa" — không đảm bảo an toàn khi quay |
+
+**Owner chốt dùng ngoại tiếp: `capsule_radius_m = 0.4610`, `capsule_height_m = 0.308`.**
+Lý do: `--voxel-carve` tạo khoảng không di chuyển; dùng bán kính nhỏ hơn robot thật
+sẽ để lọt va chạm. Số này là **cấu hình theo robot đang mô phỏng**, không nhúng
+vào `src/` — `VoxelConfig` bắt buộc truyền vào, không có default.
+
+**Cross-check từ point cloud (chỉ sanity, KHÔNG phải nguồn số):** raw scan có cấu
+trúc tĩnh gần cảm biến, giống hệt ở mọi frame, phủ **0,96 × 0,88 m** trong band
+0,30–0,55 m. Lớn hơn spec 0,740 × 0,550 vì band gần đo **khung giá đỡ cảm biến +
+thân robot**, không chỉ thân. Band gần cũng là vùng Ouster có artifact
+dual-return/min-range nên **không dùng làm số**. Cùng cỡ → hợp lý.
+
+Lưu ý phạm vi: capsule chỉ liên quan khi mục tiêu là mô phỏng AMR. Video kho của
+người dùng upload không có robot thì không cần capsule.
 
 **Commit history của phần implementation**
 

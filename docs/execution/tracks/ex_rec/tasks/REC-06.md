@@ -10,6 +10,35 @@
 | Owner | `@awun0105` |
 | Target milestone | `M2` |
 
+### Owner chốt quy tắc gốc `world` 2026-09-27
+
+**Quyết định: dịch mặt sàn về `z = 0`.**
+
+Căn cứ đo được (không phải giả định):
+- Sàn đo từ raw scan `000110.pcd` (đã lọc zero-return Ouster) → `z_world = -0,2345 m`
+- Cộng ba nguồn độc lập: merged cloud `-0,2213 m`, `groundtruth_map.ply` `≈ -0,25 m`
+- Cảm biến ở `+0,2330 m`; camera Azure trái ở `+0,1199 m` (cao `35,4 cm` trên sàn)
+
+Lý do chọn dịch, không phải giữ nguyên:
+`src/services/simulation/colliders/generator.py:62-80` đặt **analytic ground plane
+cứng ở `z = 0`** (`offset_xyz = (0,0,-thickness/2)` → mặt trên ở `z=0`), và
+`tasks/REC-05.md:82` cấm dùng mesh làm sàn — Isaac phải tạo plane. Nếu giữ frame
+gốc thì sàn của Isaac lệch **23,45 cm** so với sàn thật.
+
+Áp dụng trong `CanonicalFrameDeclaration.translation_m` của REC-06
+(`src/services/reconstruction/rgb/metric_models.py:36`) — **thuộc ownership
+EX-REC**, không cần sửa EX-SIM.
+
+Ghi chú phạm vi: đây là lựa chọn cho **demo Aisle_CW**. Với video người dùng upload,
+`translation_m` suy ra từ anchor của họ; số `0,2345` không được nhúng vào `src/`.
+
+### Tolerance — chờ số đo trên baseline thật
+
+Owner chọn **không chốt số tròn**, yêu cầu tính từ đúng baseline của cặp A/B sẽ
+dùng. Số hardcode hiện tại `tolerance_m = 0.05` tại
+`src/services/reconstruction/rgb/metric_verification.py:24` **chưa được chốt là
+authority** và sẽ bị thay khi có số đo. PRD §11.4 câu 4 vẫn `TBD` cho tới lúc đó.
+
 
 ## 2. Goal
 
