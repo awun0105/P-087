@@ -8,6 +8,7 @@ import pytest
 from src.services.reconstruction.adapters.voxel import SplatTransformVoxelAdapter, SyntheticVoxelRequest, file_checksum
 from src.services.reconstruction.adapters.voxel_output import validate_voxel_output
 from src.services.reconstruction.adapters.voxel_runtime import GeometryError, VoxelProcess, VoxelRuntimeSettings
+from tests.test_reconstruction.rec05_occupancy_fixture import occupancy_fixture
 from tests.test_reconstruction.test_rec05_collision import collision_fixture, write_fixture
 from tests.test_reconstruction.test_rec05_voxel import config
 
@@ -51,6 +52,8 @@ class FixtureProcess(VoxelProcess):
         elif name == "collision":
             voxel_fixture(workspace)
             write_fixture(workspace / "geometry.collision.glb", collision_fixture())
+        elif name == "occupancy":
+            occupancy_fixture(workspace)
         elif name == "metric-transform":
             _fixture_metric_transform(workspace)
         return text
