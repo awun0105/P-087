@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+/*
+ * Web Studio dùng nền tối cố định: đây là công cụ xem scene 3D, và nền sáng
+ * làm sai cảm nhận về độ tương phản của point cloud/collider.
+ *
+ * Theme token tập trung ở đây để mọi component dùng chung, tránh hardcode
+ * `slate-800`/`bg-slate-900/50` rải rác khó bảo trì.
+ */
+@theme inline {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Surfaces */
+  --color-surface-0: #020617;
+  --color-surface-1: #0f172a;
+  --color-surface-2: #1e293b;
+  --color-surface-3: #334155;
+
+  /* Borders */
+  --color-border-subtle: #1e293b;
+  --color-border-default: #334155;
+  --color-border-strong: #475569;
+
+  /* Accents */
+  --color-accent: #0ea5e9;
+  --color-accent-hover: #38bdf8;
+  --color-accent-muted: #0c4a6e;
+
+  /* Semantics */
+  --color-ok: #10b981;
+  --color-ok-muted: #064e3b;
+  --color-warn: #f59e0b;
+  --color-warn-muted: #451a03;
+  --color-danger: #f43f5e;
+  --color-danger-muted: #4c0519;
+  --color-info: #38bdf8;
+  --color-info-muted: #0c4a6e;
+
+  /* Text */
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #cbd5e1;
+  --color-text-tertiary: #94a3b8;
+  --color-text-muted: #64748b;
+  --color-text-disabled: #475569;
+
+  /* Radius / shadow */
+  --radius-panel: 0.75rem;
+  --shadow-panel: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+}
+
+html {
+  color-scheme: dark;
+}
+
+/* Utility nhỏ cho bảng dày thông tin */
+.th-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}

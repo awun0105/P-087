@@ -119,3 +119,68 @@ Expected evidence:
 - Real Brush `VisualArtifact` format/producer/version/checksum, các view artifact checksums, renderer/PlayCanvas/WebGL runtime version và browser environment.
 - Save/reload revision/checksum.
 - Render performance and error state.
+
+## 13. Evidence nhánh `feat/product` — Three.js technical view (2026-09-24/25)
+
+Nhánh `feat/product` fork từ `c007c26` (23/09) và dừng lại không nhận `develop`. Baseline
+PlayCanvas bị khóa ở `dffcde7` ngày 25/09, **sau** khi nhánh đó bắt đầu viết viewer.
+Vì vậy các mục dưới đây là bằng chứng về **technical view trên Three.js**, không phải
+bằng chứng 3DGS. Không có gì ở đây thay thế mục DoD "render real Brush 3DGS" ở §11.
+
+**Test backend:** `test_scene_editor.py` 23 passed · `test_scene_routes.py` 17 passed ·
+`ruff check src/ tests/` sạch.
+
+**Test frontend:** `npm test` → 54 passed (5 file) · `npm run build` exit 0.
+
+**Ca âm quan trọng — `evaluation_only` không ra được product boundary:**
+`GET /jobs/{id}/artifacts/content?artifact_uri=.../evaluation_only/...` → **404**;
+artifact của job khác → 404; `..` trong URI → **422**.
+
+**Revision persist rồi đọc lại:** edit publish `scene_ir.rev-002.json`; `rev-001` giữ
+nguyên bytes cũ. Đã sửa lỗi `SceneEditor` chỉ giữ revision trong RAM: sau restart
+`POST /scene/edits` trả 500; nay phục hồi revision cao nhất trên đĩa, fail closed, và
+map `ArtifactStoreError` → 409.
+
+**Guard chống bằng chứng 3DGS giả — phần này nên giữ lại bất kể renderer nào:**
+
+```jsonc
+// GET /jobs/{id}/scene
+{ "visual": { "format": "real2sim.synthetic.visual.v1",
+              "brush_compatibility_proof": false }}   // ← cờ đi kèm payload
+// GET /jobs/{id}/validation
+{ "isaac_runtime_proof": false }
+```
+
+UI render `data-testid="brush-proof-absent"` khi cờ false, nên visual tổng hợp **không
+thể** bị trình bày nhầm là bằng chứng AC-11. Đây là điều `AGENTS.md` §8 yêu cầu và
+không được mất khi đổi renderer.
+
+**Browser smoke 25/09 (Chrome headless):** Three.js khởi tạo WebGL thật
+(`<canvas data-engine="three.js r180">` do chính Three.js gắn), nhánh suy giảm
+`webgl-unavailable` không xuất hiện, layer dựng từ SceneIR thật, và trình duyệt tự
+tải bytes PLY qua `GET /artifacts/content`.
+
+### 13.1 Ranh giới renderer — Three.js là fallback có điều kiện
+
+- **Mặc định theo `INTEGRATION_PLAYBOOK:745`:** PlayCanvas Engine + `@playcanvas/supersplat-viewer`
+  cho **toàn bộ** lớp (Visual SOG, Mesh GLB, Collider GLB) trong **một** scene graph
+  `pc.Entity`. Không chia renderer theo view mode.
+- **Three.js giữ lại làm fallback** trong lúc PlayCanvas chưa được qualification, vì
+  máy hiện tại là Quadro T2000 — **không có WebGPU**, còn supersplat ưu tiên WebGPU.
+- **`layers.ts` là nguồn transform duy nhất** cho cả hai renderer. Nếu hai renderer cùng
+  tự quản lý transform thì sẽ vi phạm invariant canonical transform của SceneIR.
+- **Điều kiện bỏ Three.js:** PlayCanvas đã render được **real Brush `VisualArtifact`**
+  (SOG) trên browser mục tiêu và chứng minh được WebGL2 fallback. Trước thời điểm đó,
+  code Three.js **không được xoá** nhưng **không được tính là bằng chứng 3DGS**.
+
+### 13.2 Giới hạn của evidence trên
+
+- AC-11 là mốc M3; mục DoD "render real Brush 3DGS" vẫn **để trống**, và phải để
+  trống cho tới khi có PlayCanvas render SOG thật.
+- Browser smoke dùng Chrome headless + `--dump-dom`, **không** phải E2E tự động; chưa
+  kiểm orbit/pan/zoom bằng thao tác thật, chưa kiểm giải phóng GPU resource khi unmount.
+- Chưa có khoá liên tiến trình cho hai client sửa cùng lúc; lỗi nay ra **409** thay vì
+  500, nhưng chưa có arbitration thật.
+- PLY chỉ hỗ trợ `format ascii 1.0`; PLY binary bị **từ chối thẳng** thay vì đoán layout.
+- `SceneEditor` seed từ `fixtures/scene_ir/scene.json` — dữ liệu fixture, **không**
+  phải output của EX-SCENE.

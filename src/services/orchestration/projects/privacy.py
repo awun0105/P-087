@@ -1,0 +1,37 @@
+"""Privacy gate rules for product dispatch.
+
+EX-PRODUCT thu source-rights attestation và hiển thị privacy state. Ở P0 chưa có
+`ST-PRIVACY-GATE` thật (do EX-REC sở hữu), nên module này chỉ mã hoá luật đã được
+chốt: chỉ `VERIFIED_ANONYMIZED` mới cho phép dispatch.
+"""
+
+from src.models.contracts.manifests import PrivacyResult
+from src.services.orchestration.projects.errors import PrivacyGateBlockedError
+
+#: Trạng thái duy nhất cho phép đưa input vào pipeline. QA/Validation Lead chấp
+#: nhận `VERIFIED_ANONYMIZED` trước public/demo use — automation không tự nâng cấp.
+DISPATCH_CLEARED: frozenset[PrivacyResult] = frozenset({PrivacyResult.VERIFIED_ANONYMIZED})
+
+_HUMAN_REASON: dict[PrivacyResult, str] = {
+    PrivacyResult.QUARANTINED: "input bị quarantine: còn thông tin nhận dạng chưa xử lý",
+    PrivacyResult.PRELIMINARY_SCREENED: "input mới ở mức sàng lọc sơ bộ, chưa được QA xác nhận ẩn danh",
+}
+
+
+def dispatch_allowed(result: PrivacyResult) -> bool:
+    """True only when the privacy state clears the input for pipeline dispatch."""
+    return result in DISPATCH_CLEARED
+
+
+def block_reason(result: PrivacyResult) -> str | None:
+    """Human-readable Vietnamese reason, or None when dispatch is allowed."""
+    if dispatch_allowed(result):
+        return None
+    return _HUMAN_REASON.get(result, f"privacy state {result} không cho phép dispatch")
+
+
+def require_dispatch_allowed(result: PrivacyResult) -> None:
+    """Raise PrivacyGateBlockedError unless the input may enter the pipeline."""
+    reason = block_reason(result)
+    if reason is not None:
+        raise PrivacyGateBlockedError(f"không thể tạo job: {reason}")

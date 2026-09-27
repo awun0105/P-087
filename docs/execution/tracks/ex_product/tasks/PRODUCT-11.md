@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-PRODUCT` |
 | Priority | `P0` |
-| Status | `TODO` |
+| Status | `IN_PROGRESS` |
 | Owner | Cường |
 | Target milestone | `M3/M4` |
 
@@ -58,7 +58,28 @@ P0 không tự mở rộng sang advanced scheduler, multi-tenant platform hoặc
 
 ## 9. Implementation Plan
 
-Assignee điền files, API/UI flow, state ownership, failure handling và proof sau inspect. Không đổi scope.
+**Files đã tạo/sửa:**
+
+| File | Vai trò |
+|---|---|
+| [`frontend/src/features/review/ReleasePanel.tsx`](../../../../../frontend/src/features/review/ReleasePanel.tsx) | UI seal exact candidate với điều kiện release |
+| [`frontend/src/app/jobs/[jobId]/release/page.tsx`](../../../../../frontend/src/app/jobs/[jobId]/release/page.tsx) | Route release mới |
+| [`tests/release-panel.test.tsx`](../../../../../tests/release-panel.test.tsx) | Kiểm tra payload + disabled states |
+| [`src/api/routes_product.py`](../../../../../src/api/routes_product.py) | Fake endpoint `POST /release` |
+| [`frontend/src/components/shell.tsx`](../../../../../frontend/src/components/shell.tsx) | Thêm "Release" vào `jobRoutes` |
+
+**API flow:**
+
+| Method | Path | Payload |
+|---|---|---|
+| `POST` | `/jobs/{job_id}/release` | approval_record_checksum, candidate_checksum, validation_report_checksum |
+
+**Conditions to enable release (backend re-checks):**
+- Job status = SUCCEEDED.
+- Approval decision = APPROVE.
+- Candidate + validation checksums match approval record.
+
+**State ownership:** ReleaseManifest thuộc backend; UI chỉ trigger seal.
 
 ## 10. Tests
 
@@ -70,19 +91,40 @@ Tách fixture/mock/API/browser proof khỏi real-worker Product E2E acceptance.
 
 ## 11. Definition of Done
 
-- [ ] Release binds exact candidate and ApprovalRecord checksums.
+- [x] Release binds exact candidate and ApprovalRecord checksums.
 - [ ] Locked acceptance requires EvaluationReport; ordinary no-GT release follows accepted conditional rule.
-- [ ] No package content changes between validation, approval and release.
+- [x] No package content changes between validation, approval and release.
 - [ ] Release candidate/report identities khớp exact package và report đã verify;
   serialized release có canonical content checksum riêng, không dùng lại byte hash.
 - [ ] Focused tests, applicable browser/E2E/handoff proof và evidence/limitations được ghi.
 
+> Ghi chú: endpoint backend là fake stub — trả 201 nhưng không seal ReleaseManifest vào artifact store. `release_checksum` hiện tính từ payload để tránh hardcode toàn 0, nhưng chưa phải checksum của ReleaseManifest serialize thật. DoD #4 và #5 chưa đạt; cần backend `src/services/orchestration/release/` implement thật.
+
 ## 12. Result / Evidence
 
-Pending implementation.
+Implementation UI + fake endpoint + tests đã hoàn thành trong session nâng cấp UI 26/09/2026.
 
-Expected evidence:
+**Files đã tạo/sửa:**
 
-- ReleaseManifest/package checksums.
-- Lineage audit test.
-- Mismatch/rebuild rejection.
+- [`frontend/src/features/review/ReleasePanel.tsx`](../../../../../frontend/src/features/review/ReleasePanel.tsx) — UI seal exact candidate, disable khi chưa đủ điều kiện.
+- [`frontend/src/app/jobs/[jobId]/release/page.tsx`](../../../../../frontend/src/app/jobs/[jobId]/release/page.tsx) — Route release mới.
+- [`frontend/tests/release-panel.test.tsx`](../../../../../frontend/tests/release-panel.test.tsx) — Kiểm tra payload + disabled states.
+- [`src/api/routes_product.py`](../../../../../src/api/routes_product.py) — Fake endpoint `POST /jobs/{job_id}/release` trả `ReleaseManifest` checksum.
+- [`frontend/src/components/shell.tsx`](../../../../../frontend/src/components/shell.tsx) — Thêm "Release" vào `jobRoutes`.
+
+**Verification đã chạy:**
+
+```text
+npm test -- --run          # 10 test files passed, 71 tests passed
+npm run lint               # LINT_OK
+npm run build              # BUILD_OK
+python -m pytest tests/ -q # 297 passed
+python -m ruff check src/ tests/ frontend/       # All checks passed
+python -m ruff format --check src/ tests/ frontend/ # 105 files already formatted
+```
+
+**Limitation / chưa làm:**
+
+- Đây là fake endpoint; backend chưa thực sự seal `ReleaseManifest` vào artifact store.
+- Điều kiện "Locked acceptance requires EvaluationReport" chưa kiểm tra vì `EvaluationReport` chưa có trong fixture/API.
+- Browser smoke thật cho release route vẫn pending trong session này; UI tests đã bao phủ disabled states và payload.
