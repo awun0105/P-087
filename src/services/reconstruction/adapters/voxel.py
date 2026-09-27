@@ -17,10 +17,17 @@ from src.services.reconstruction.adapters.gaussian_scale import (
     GaussianTransformRequest,
     SplatTransformSimilarityAdapter,
 )
+from src.services.reconstruction.adapters.voxel_clearance import validate_seed_clearance
 from src.services.reconstruction.adapters.voxel_output import validate_voxel_output, write_evidence
 from src.services.reconstruction.adapters.voxel_runtime import GeometryError, VoxelProcess, require_carve
 from src.services.reconstruction.rgb.metric_models import MetricConfirmation
-from src.services.reconstruction.rgb.voxel import VoxelConfig, cluster_command, collision_command, native_from_world
+from src.services.reconstruction.rgb.voxel import (
+    VoxelConfig,
+    cluster_command,
+    collision_command,
+    native_from_world,
+    occupancy_command,
+)
 
 EVIDENCE_FILES = (
     "input.ply",
@@ -39,6 +46,10 @@ EVIDENCE_FILES = (
     "gpus.log",
     "cluster.log",
     "collision.log",
+    "occupancy.log",
+    "occupancy.voxel.json",
+    "occupancy.voxel.bin",
+    "seed-clearance.json",
 )
 
 
@@ -152,8 +163,13 @@ class SplatTransformVoxelAdapter:
         self.process.run(
             (str(script), str(module), "cluster.ply", "cluster-inspection.json"), (workspace, "inspect-cluster")
         )
+        cluster_checksum = file_checksum(workspace / "cluster.ply")
+        self.process.cli(occupancy_command(config), (workspace, "occupancy"))
+        validate_seed_clearance(workspace, config)
         output = self.process.cli(collision_command(config), (workspace, "collision"))
         require_carve(output)
+        if file_checksum(workspace / "cluster.ply") != cluster_checksum:
+            raise GeometryError("Cluster changed during occupancy/carve attempt")
 
     def _report(self, request: SyntheticVoxelRequest | ProductVoxelRequest, workspace: Path) -> dict:
         metadata = validate_voxel_output(workspace, request.config)
