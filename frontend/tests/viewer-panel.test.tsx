@@ -20,6 +20,17 @@ vi.mock("@/features/viewer/SceneCanvas", () => ({
   SceneCanvas: ({ mode }: { mode: string }) => <div data-testid="canvas-stub">canvas:{mode}</div>,
 }));
 
+// Engine thật không dựng được trong jsdom; chỉ cần biết createViewer có được gọi
+// và có destroy khi unmount. Phần render 3D thật kiểm bằng browser smoke riêng.
+type ViewerOptions = { renderer?: string; ui?: boolean; contentUrl?: string };
+const createViewer = vi.fn(async (_options?: ViewerOptions) => ({
+  destroy: vi.fn(),
+  frameScene: vi.fn(),
+}));
+vi.mock("@playcanvas/supersplat-viewer/viewer", () => ({
+  createViewer: (options?: ViewerOptions) => createViewer(options),
+}));
+
 const { ViewerPanel } = await import("@/features/viewer/ViewerPanel");
 const { buildFixtureScene } = await import("./fixtures/scene");
 
@@ -96,5 +107,50 @@ describe("ViewerPanel", () => {
   it("chưa chọn object thì không hiện ô nhập toạ độ", () => {
     render(<ViewerPanel scene={buildFixtureScene()} />);
     expect(screen.queryByLabelText("translation xyz")).toBeNull();
+  });
+});
+
+/**
+ * Ranh giới renderer (PRODUCT-06 §13.1): Visual đi qua PlayCanvas theo
+ * `INTEGRATION_PLAYBOOK:745`, nhưng thiếu WebGL thì phải rơi về trạng thái suy
+ * giảm chứ không được để canvas trắng — cùng tiêu chuẩn các view kỹ thuật đang có.
+ */
+describe("ranh giới renderer", () => {
+  beforeEach(() => {
+    createViewer.mockClear();
+  });
+
+  it("Visual dùng PlayCanvas khi có WebGL, với renderer webgl tường minh", async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as never);
+    render(<ViewerPanel scene={buildFixtureScene()} />);
+    fireEvent.click(screen.getByRole("button", { name: "3DGS Visual" }));
+    expect(await screen.findByTestId("playcanvas-scene")).toHaveAttribute("data-engine", "playcanvas");
+    await vi.waitFor(() => expect(createViewer).toHaveBeenCalledTimes(1));
+    expect(createViewer.mock.calls[0][0]).toMatchObject({ renderer: "webgl", ui: false });
+  });
+
+  it("Visual không có WebGL thì báo suy giảm, không để canvas trắng", () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    render(<ViewerPanel scene={buildFixtureScene()} />);
+    fireEvent.click(screen.getByRole("button", { name: "3DGS Visual" }));
+    expect(screen.getByTestId("webgl-unavailable")).toBeInTheDocument();
+    expect(screen.queryByTestId("playcanvas-scene")).toBeNull();
+  });
+
+  it("PlayCanvas khởi tạo lỗi thì nói rõ, không âm thầm rơi về view khác", async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as never);
+    createViewer.mockRejectedValueOnce(new Error("device lost"));
+    render(<ViewerPanel scene={buildFixtureScene()} />);
+    fireEvent.click(screen.getByRole("button", { name: "3DGS Visual" }));
+    expect(await screen.findByTestId("playcanvas-unavailable")).toHaveTextContent(
+      "không phải bằng chứng thiếu 3DGS",
+    );
+  });
+
+  it("cảnh báo thiếu bằng chứng Brush vẫn hiện ở view Visual", () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    render(<ViewerPanel scene={buildFixtureScene()} />);
+    fireEvent.click(screen.getByRole("button", { name: "3DGS Visual" }));
+    expect(screen.getByTestId("brush-proof-absent")).toBeInTheDocument();
   });
 });
