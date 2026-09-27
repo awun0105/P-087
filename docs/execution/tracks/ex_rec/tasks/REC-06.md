@@ -167,6 +167,18 @@ Không sửa implementation của EX-SCENE/EX-SIM/EX-PRODUCT. Shared contract ch
 
 ## 9. Implementation Plan
 
+### Resume implementation 2026-09-27
+
+Status vẫn IN_PROGRESS. Sửa false final verification theo audit ở active plan:
+1. Publish/resolve canonical camera poses với exact confirmation/raw lineage,
+   full s/R/t và immutable checksums; không đổi shared schema.
+2. Verifier hiện tại chỉ kiểm dependencies/distance math, chưa có canonical visual
+   payload và production measurement authority. Không được trả final CONFIRMED.
+3. Bắt buộc independent sample và caller-provided tolerance; kiểm geometry bytes
+   và full transform provenance, published canonical poses thay vì discard kết quả.
+4. Positive/negative fixture tests rồi full track/static checks. Real Aisle_CW
+   acceptance và phép đo tolerance vẫn pending, không lấy fixture threshold thay thế.
+
 ### Owner clarification: ba chế độ demo, 2026-09-26
 
 Triển khai backend chung cho RGB+LiDAR fusion, RGB LiDAR-assisted scale và
@@ -251,13 +263,33 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 ## 11. Definition of Done
 
 - [x] Scale status chỉ CONFIRMED khi anchor workflow hoàn tất.
-- [x] Pose/visual/geometry dùng cùng scale và canonical metadata.
-- [x] Independent test distance chứng minh tolerance theo locked protocol.
-- [x] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+- [ ] Pose/visual/geometry dùng cùng scale và canonical metadata.
+- [ ] Independent test distance chứng minh tolerance theo locked protocol.
+- [ ] Focused tests và required handoff proof pass; evidence/limitations được ghi.
 
 ## 12. Result / Evidence
 
+### Resume 2026-09-27 — canonical camera pose publication
+
+- `rgb/canonical_poses.py`: immutable content-addressed derivative, giữ nguyên
+  intrinsics và inventory; áp full s/R/t lên camera centers/orientations. Không
+  sửa raw pose manifest. Resolver kiểm checksum, identity/provenance, confirmation
+  authority và recompute payload từ exact raw source; rehash payload sai vẫn bị chặn.
+- `.venv/bin/pytest tests/test_reconstruction/test_rec06_canonical_poses.py -q`:
+  **9 passed** (4.03s). Ruff check/format và AST ≤30 dòng/≤3 params/return types
+  cho hai file mới pass. Đây là fixture authority + real artifact store, không
+  phải real Aisle_CW confirmation hay full bundle acceptance.
+- Lần test đầu phát hiện assertion dùng sai exception type của store, rồi import
+  nhầm facade chưa export error; đã sửa test sang exact `ArtifactChecksumError`,
+  không swallow hoặc sửa behavior storage để làm test pass.
+- Next: verifier dùng artifact đã publish này, bỏ false final CONFIRMED; canonical
+  visual publication và production distance/approval adapter vẫn chưa hoàn thành.
+
 ### Checkpoint 2026-09-26 — DONE, final cross-artifact verification
+
+Historical claim, **superseded by 2026-09-27 audit**: status CONFIRMED của report
+cũ không chứng minh canonical visual/published poses hay independent measurement.
+Không dùng checkpoint này để đóng task hoặc cho phép real bundle publication.
 
 **Implemented / VERIFIED:**
 - `src/services/reconstruction/rgb/metric_verification.py`:

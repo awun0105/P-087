@@ -4,6 +4,37 @@ Date: 2026-09-24
 
 ## Status
 
+### Resume audit 2026-09-27 — HEAD 41ca8eb
+
+Task Capsule / implementation plan trước edit:
+- Outcome: audit handoff mới và sửa REC-06 false final confirmation; xuất bản
+  canonical camera poses thật qua artifact store, không chỉ tính trong memory.
+- Authority: PRD FR-06/AC-03; Contract §3.4/§4.1/§4.2; Integration §3.3/§4.1;
+  Track Guide REC-06; Architecture ownership; REC-06 §5/§6/§9.
+- Dependencies/current state: worktree sạch, branch `feat/ex-rec-pipeline`;
+  7 commits sau 45db57e chỉ sửa docs/evidence, không thêm pipeline code.
+  Raw pose/visual resolvers, similarity math và store có executable fixture proof.
+  Real anchor/frame correspondence, locked tolerance và canonical visual publication
+  chưa có. Không dùng estimate khoảng 0.67 từ thử nghiệm thất bại làm scale.
+- Inputs/outputs: exact confirmation + raw pose refs → immutable canonical pose
+  manifest; independent sample + explicit tolerance → scoped diagnostic report,
+  không phải final metric approval hay bundle authorization.
+- Owned: reconstruction/rgb, EX-REC tests, REC-06 và plan này. Do-not-modify:
+  shared contracts, EX-PRODUCT/SCENE/SIM code, reference repos, raw/GT data.
+- Proof: published pose roundtrip, nontrivial s/R/t, unchanged intrinsics/raw
+  bytes, checksum/lineage/semantic tamper negatives; missing independent sample,
+  tolerance, payload and incorrect transform rejection; full EX-REC regression.
+- Sequence: canonical pose producer/resolver → scoped verification hardening
+  → test/static checks → sequential commits and readiness handoff.
+- EX-PRODUCT read-only audit: cached `origin/feat/product` 012f349 có frontend và
+  backend thật, nhưng routes_product ghi mock-worker; MetricScalePanel chỉ đọc
+  SceneIR. Không suy dự án thiếu UI từ việc branch EX-REC chưa có frontend.
+  Chưa merge, chưa chạy UI branch, chưa xác minh live remote/CI.
+- Upstream SplatTransform 3.6.6 carve dùng radius XY và half-height trên Y nội bộ
+  (`ceil(height/(2*resolution))`), không enforce height >= 2*radius. Không áp quy
+  tắc capsule hình học của engine khác vào owner dimensions. Seed ngoài bounds
+  bị skip, seed blocked có thể được upstream dời: vẫn cần strict clearance gate.
+
 ### Audit/rework 2026-09-27 — feat/ex-rec-pipeline
 
 User yêu cầu audit/sửa implementation Antigravity REC-07–11 cùng các phần REC-05/06
