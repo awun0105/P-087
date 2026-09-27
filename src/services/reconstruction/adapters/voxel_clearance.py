@@ -51,7 +51,7 @@ def _receipt(
         search_method="connected_free_region_bfs6",
         config_checksum=config.checksum(),
         requested_seed_world=list(config.navigation_seed_world),
-        accepted_seed_world=list(plan.world(result.cell)),
+        accepted_seed_world=_accepted_seed(config, plan, result),
         relocates=result.relocates,
         relocation_steps_voxels=result.steps,
         relocation_distance_m=round(result.steps * plan.resolution, 6),
@@ -64,3 +64,15 @@ def _receipt(
         occupancy_metadata_checksum="sha256:" + hashlib.sha256(metadata_bytes).hexdigest(),
         occupancy_binary_checksum="sha256:" + hashlib.sha256(payload).hexdigest(),
     )
+
+
+def _accepted_seed(config: VoxelConfig, plan: SeedSearchPlan, result: SeedSearchResult) -> list:
+    """Không relocate thì giữ đúng seed đã yêu cầu, không dùng tâm ô đã làm tròn.
+
+    Tâm ô suy lại từ grid là mất thông tin: nó có thể lệch vài mm so với seed gốc, và
+    khiến `relocates=false` mà hai điểm vẫn khác nhau — vi phạm chính invariant mà
+    shared `SeedDecision` kiểm.
+    """
+    if not result.relocates:
+        return list(config.navigation_seed_world)
+    return list(plan.world(result.cell))
