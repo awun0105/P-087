@@ -31,8 +31,8 @@ def test_upstream_gaussian_inspection(tmp_path: Path, mode: str) -> None:
         assert not (tmp_path / "inspection.json").exists()
 
 
-def test_real_gpu_rejects_skipped_carve(tmp_path: Path) -> None:
-    """GPU exit zero khi seed ngoài grid vẫn phải bị adapter reject, không có receipt."""
+def test_real_gpu_rejects_before_skipped_carve(tmp_path: Path) -> None:
+    """Occupancy GPU thật reject seed ngoài grid trước khi gọi carve có thể skip."""
     if os.environ.get("REC05_TEST_GPU") != "1":
         pytest.skip("REC05_TEST_GPU=1 và runtime settings cần được cấu hình")
     source = tmp_path / "synthetic.ply"
@@ -47,9 +47,9 @@ def test_real_gpu_rejects_skipped_carve(tmp_path: Path) -> None:
     output = tmp_path / "negative"
     with pytest.raises(GeometryError) as failure:
         runner.run_synthetic(request, output)
-    assert "skipped" in str(failure.value.__cause__)
-    log = (output / "collision.log").read_text()
-    assert '"returncode": 0' in log and "skipping carve" in log
+    assert "outside occupancy bounds" in str(failure.value.__cause__)
+    assert not (output / "collision.log").exists()
+    assert (output / "occupancy.voxel.bin").is_file()
     assert not (output / "qualification.json").exists()
     assert not (output / "collision.glb").exists()
     assert voxel.file_checksum(source) == request.source_checksum
