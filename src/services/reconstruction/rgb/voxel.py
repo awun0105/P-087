@@ -24,6 +24,9 @@ class VoxelConfig(ContractModel):
     navigation_seed_world: Vector3
     capsule_height_m: FiniteFloat = Field(gt=0)
     capsule_radius_m: FiniteFloat = Field(gt=0)
+    # ADR 0001 amendment 2026-09-27: seed bị vật cản được tìm lại trong vùng không
+    # khí liên thông, nhưng chỉ trong ngưỡng này. Không có ứng viên thì từ chối.
+    max_seed_relocation_m: FiniteFloat = Field(default=1.0, gt=0)
     gpu_index: int = Field(ge=0, strict=True)
 
     def checksum(self) -> str:
@@ -83,4 +86,18 @@ def collision_command(config: VoxelConfig) -> tuple[str, ...]:
         "--collision-mesh",
         "smooth",
         "geometry.voxel.json",
+    )
+
+
+def occupancy_command(config: VoxelConfig) -> tuple[str, ...]:
+    """Cùng filtered occupancy của carve, không floor/exterior fill hoặc relocation."""
+    return (
+        "cluster.ply",
+        "--gpu",
+        str(config.gpu_index),
+        "--voxel-size",
+        str(config.resolution_m),
+        "--voxel-opacity",
+        str(config.opacity),
+        "occupancy.voxel.json",
     )
