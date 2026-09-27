@@ -30,12 +30,13 @@ class ColmapDependencies:
 
 @dataclass(frozen=True)
 class ColmapRequest:
-    """Workspace riêng của attempt; retry dùng job/artifact namespace mới."""
+    """Workspace riêng; retry giữ job nhưng dùng attempt namespace mới."""
 
     frame_set: ProductArtifactRef
     config: ColmapConfig
     workspace: Path
     job_id: str
+    attempt_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -84,7 +85,7 @@ class ColmapAdapter:
             raise ColmapError("COLMAP_REGISTRATION_LOW", "Best COLMAP model is below configured registration threshold")
         payload = self._payload(request, images, best)
         payload.update(colmap_version=version, models=[model.stats.model_dump() for model in models])
-        artifact, reference = PosePublisher(self.deps.writer, request.job_id).manifest(payload)
+        artifact, reference = PosePublisher(self.deps.writer, request.job_id, request.attempt_id).manifest(payload)
         CameraPoseResolver(self.deps.resolve, self.deps.frames).load(reference)
         stage = StageArtifact(
             stage_id=StageId.CAMERA_POSE,
@@ -130,7 +131,7 @@ class ColmapAdapter:
         return models
 
     def _payload(self, request: ColmapRequest, images: ColmapImageInput, best: ParsedSparseModel) -> dict:
-        publisher = PosePublisher(self.deps.writer, request.job_id)
+        publisher = PosePublisher(self.deps.writer, request.job_id, request.attempt_id)
         files = self._publish_sparse(publisher, best)
         raw_log = (request.workspace / "process.log").read_text()
         safe_log = raw_log.replace(str(request.workspace.resolve()), "<workspace>")

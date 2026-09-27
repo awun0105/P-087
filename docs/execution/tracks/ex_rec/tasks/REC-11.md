@@ -58,6 +58,29 @@ Giữ tool/research repo ở process/adapter boundary; không kéo toàn bộ re
 
 ## 9. Implementation Plan
 
+Owner clarification khi resume 2026-09-27: hoàn thiện EX-REC để nối UI/backend
+cho video → frames → camera poses → 3DGS preview và canonical pipeline; chưa nối
+EX-SCENE. Cloud GPU training sau integration chạy trên Vast.ai. Không chạy local
+30k hoặc thuê/provision cloud trong lượt này.
+
+Task Capsule cho preview dispatch:
+- Authority: PRD FR-03/04/06; Contract §3.3.2/§3.4, Architecture isolated workers;
+  REC-02A/03/04 published producer boundaries và REC-11 I/O.
+- Inputs: checksum-bound published frame set/InputManifest identity, explicit
+  COLMAP/Brush configs/runtime settings và immutable attempt/workspace.
+- Outputs: stage progress/errors và raw 3DGS preview (arbitrary SfM units,
+  metric UNCONFIRMED), không giả thành final ReconstructionBundle.
+- Dependencies: REC-02/02A đã có privacy-aware frame producer; confirmation UI
+  xảy ra sau visual preview. Không bỏ privacy hoặc lấy raw uploads chưa kiểm làm
+  bypass. API/QA authority wiring thuộc EX-PRODUCT, không implement thay ở worker.
+- Plan: audit request/config/source binding → compose REC-03→04 qua existing
+  adapters từ prepared frame artifact → immutable attempt result + CLI seam
+  → positive/negative fixture subprocess tests và native runtime qualification.
+  Video ingestion/frame preparation dùng REC-02/02A boundary hiện hữu trước đó;
+  chưa gọi partial preview worker là full video dispatcher hoặc entire track DONE.
+- Owned: EX-REC worker modules/tests/task/active plan. Không sửa PRODUCT APIs/UI,
+  shared stage/status registry hoặc import orchestration internals ngoài public store.
+
 Audit 2026-09-27: trước full JobManifest wiring, sửa false-success boundary:
 module main guard, request required, strict CLI/config binding, injected REC-10
 validation ports thay import storage implementation vào worker. Stage success
@@ -79,6 +102,35 @@ reconstruction pipeline; InputManifest/JobManifest dispatch còn cần integrati
 - Small fixture worker smoke và PRODUCT dispatch contract test.
 
 Phân biệt local/mock proof với real tool/GPU smoke trong Result.
+
+### Prepared preview implementation — 2026-09-27
+
+- `preview_cli.py` / `preview_worker.py`: compose REC-03→04 từ published
+  `NormalizedRGBFrameSet`. CLI nhận versioned `PreparedPreviewRequest` trong
+  `preview_models.py`: job/attempt, source InputManifest checksum, frame ref,
+  explicit COLMAP/Brush configs. Không có dataset-specific coordinates/default
+  scale hoặc hidden LiDAR input.
+- Runtime settings dùng các prefix hiện hữu `REC03_COLMAP_`, `REC04_BRUSH_`,
+  `REC04_SPLAT_`; command/module paths là deployment config, không serialize vào
+  request/result. Không tự cài tools, provision GPU hoặc chọn training quality.
+- Chạy: `.venv/bin/python -m src.services.reconstruction.preview_cli --request
+  <prepared-request.json> --store-root <artifact-root> --workspace <fresh-workspace>`.
+  Exit 0 = preview checkpoint ready, **job vẫn RUNNING và metric UNCONFIRMED**;
+  exit 1 = failed stage; exit 2 = request/setup/publication failure.
+- Artifacts tại `artifact://jobs/<job>/attempts/<attempt>/rec03|rec04|rec11/`;
+  request claim create-only trước tools, immutable stage events và result. Retry
+  cần attempt ID/workspace mới, không đổi job và không overwrite lần trước.
+  Caller cũ không truyền attempt giữ URI legacy.
+- `preview_validation.py` reload checkpoint qua resolver, kiểm request/source,
+  configs, poses→visual→delivery lineage, inventory và stage refs. Không đọc temp
+  COLMAP/Brush folders và không giả SOG preview thành canonical VisualArtifact.
+- Chỉ chạy sau REC-02/02A + privacy/QA dispatch; worker không nhận raw video và
+  không tự cấp quyền privacy. Backend queue/JobManifest reducer, metric HITL,
+  final pipeline dispatcher và UI viewer vẫn phải nối riêng.
+- Focused regression REC-03/04/11: **78 passed (73.28s)** với native SOG codec;
+  COLMAP/Brush engines trong integration fixture được stub, không là GPU training
+  hoặc real dataset acceptance. Preview suite cuối gồm consumer-tamper checks:
+  **16 passed (37.93s)**; Ruff check/format EX-REC source/tests: **100 files pass**.
 
 ## 11. Definition of Done
 

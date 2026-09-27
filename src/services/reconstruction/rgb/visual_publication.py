@@ -7,6 +7,7 @@ from pathlib import Path
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.manifests import StageId
+from src.services.reconstruction.attempt import PublicationNamespace
 from src.services.reconstruction.rgb.frame_set import _sha256
 from src.services.reconstruction.rgb.pose_publication import CameraPoseResolver
 from src.services.reconstruction.rgb.publication import ArtifactWriter
@@ -16,21 +17,23 @@ from src.services.reconstruction.rgb.visual import BrushVisualArtifact
 class VisualPublisher:
     """Không import storage implementation của EX-PRODUCT."""
 
-    def __init__(self, writer: ArtifactWriter, job_id: str) -> None:
+    def __init__(self, writer: ArtifactWriter, job_id: str, attempt_id: str | None = None) -> None:
         self.writer = writer
         self.job_id = job_id
+        self.namespace = PublicationNamespace(job_id=job_id, attempt_id=attempt_id)
 
     def publish(self, name: str, payload: bytes, kind: str = "VisualPayload") -> ProductArtifactRef:
         """Exact byte identity và immutable namespace của attempt."""
         ref = ProductArtifactRef(
             artifact_type=kind,
             schema_version="1.0",
-            artifact_uri=f"artifact://jobs/{self.job_id}/rec04/{name}",
+            artifact_uri=self.namespace.uri("rec04", name),
             artifact_checksum="sha256:" + hashlib.sha256(payload).hexdigest(),
             data_class="derived",
             producer_stage=StageId.VISUAL_RECON,
             job_id=self.job_id,
-            source_provenance={"producer_version": "rec04-v1", "scale_status": "arbitrary_sfm"},
+            source_provenance={"producer_version": "rec04-v1", "scale_status": "arbitrary_sfm"}
+            | self.namespace.provenance(),
         )
         if self.writer.publish(ref, payload) != ref:
             raise ValueError("artifact store changed visual publication identity")
