@@ -1,0 +1,7 @@
+# Offline dataset tooling cho scripts/torwic/ (REC-07/08/09).
+# Cố ý TÁCH khỏi requirements.in: open3d wheel ~400MB, chỉ cần cho
+# prefusion point cloud ngoài đời, không nằm trong product runtime.
+# ARCHITECTURE.md: scripts/torwic/ là offline dataset tooling, không phải runtime API.
+-c requirements.in
+
+open3d>=0.20.0
