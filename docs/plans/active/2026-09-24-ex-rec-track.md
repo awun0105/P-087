@@ -4,6 +4,49 @@ Date: 2026-09-24
 
 ## Status
 
+### Owner khóa thứ tự completion / integration — 2026-09-27
+
+1. Tiếp tục hoàn thiện và kiểm thử toàn pipeline EX-REC trên
+   `feat/ex-rec-pipeline`; chưa chuyển sang implementation UI/backend integration.
+2. Chỉ sau khi EX-REC hoàn thành theo applicable evidence, merge
+   `feat/ex-rec-pipeline` vào `feat/ex-rec`.
+3. Xác minh toàn bộ commits/thay đổi đã được giữ trong `feat/ex-rec`, rồi mới
+   xóa nhánh `feat/ex-rec-pipeline`; không force-delete nhánh chưa merge.
+4. Tạo nhánh integration **từ `feat/ex-rec`**, không từ nhánh pipeline hiện tại;
+   tại đó mới ghép EX-PRODUCT. Tên nhánh integration chốt khi bắt đầu giai đoạn.
+5. Integration REC+PRODUCT chạy local trước; nếu local không đáp ứng thì owner
+   thuê Vast.ai và dùng SSH cho heavy worker. EX-SCENE/EX-SIM integration để sau,
+   nhưng artifacts/interfaces phải đúng shared contracts ngay từ EX-REC.
+
+Đây là trình tự tương lai có điều kiện, không phải lệnh merge/delete ngay hoặc
+cho phép push/force-push. Chưa merge/switch/delete hoặc sửa UI/backend.
+
+### Checkpoint tiếp tục 2026-09-27 — canonical visual / prepared preview / bundle metric
+
+- `04bdf63`: confirmation job identity guard; `2b2da87`: canonical visual
+  producer + native Gaussian/SOG proof; `427ab83`: REC-11 prepared frames→COLMAP
+  →Brush preview worker, immutable attempts/events/result + consumer reload.
+- `a6e40c8`: final RGB metric bridge đã commit: exact reviewed bundle candidate,
+  canonical visual/poses/geometry, source/frame inventory, independent distance
+  và caller-locked tolerance. `verify_bundle` dành cho REC-10; no default approval,
+  scope fixture không đi qua deployed product verifier. Không đổi shared schema.
+- Verified trước nhóm metric bridge: full EX-REC native CPU codec **399 passed,
+  2 GPU skipped**; preview focused regression **78 passed**, preview consumer
+  negatives cuối **16 passed**. Final bridge focused **19 passed** trước rerun
+  fixture helper refactor; rerun combined bridge/preview/REC-10/11 **64 passed**
+  (137.11s). Full EX-REC native CPU rerun còn đang chạy, chưa ghi pass.
+- Chưa DONE: strict capsule occupancy check (upstream silent seed relocation),
+  geometry occupancy publication/attempt namespace, reviewed REC-07→08 coordinate
+  bridge, final mixed/depth verifier, full input→preview→HITL→bundle dispatch,
+  authenticated PRODUCT ports và real-data/GPU acceptance.
+- UI/backend PRODUCT branch chưa merge; cached audit renderer vẫn ASCII PLY /
+  Three-R3F, chưa baseline PlayCanvas/SOG. Owner đã chốt local integration smoke
+  trước heavy Vast.ai nếu cần, nhưng chỉ bắt đầu integration sau EX-REC completion.
+  Chưa chạy training/provision cloud.
+  Quadro T2000 4GiB / NVIDIA 580.178.04 được xác nhận ngoài sandbox.
+- Resume từ task files và HANDOFF-2026-09-27-coordinate-audit.md checkpoint đầu,
+  không làm lại canonical visual hoặc dùng các historical DONE bên dưới làm proof.
+
 ### Resume audit 2026-09-27 — HEAD 41ca8eb
 
 Current executable checkpoint after `84d93c5` + `d6883b4`:

@@ -43,6 +43,116 @@
 
 ## 0. Trạng thái repo lúc bàn giao
 
+### Owner instruction mới nhất — hoàn thành EX-REC trước integration
+
+- Tiếp tục EX-REC trên `feat/ex-rec-pipeline`; **chưa làm integration UI/backend**.
+- Khi EX-REC hoàn thành: merge nhánh pipeline vào `feat/ex-rec`, verify commits/
+  thay đổi đã được giữ, rồi xóa `feat/ex-rec-pipeline` (không force-delete unmerged).
+- Sau đó mới tạo nhánh integration **từ `feat/ex-rec`** và ghép EX-PRODUCT.
+  Không dùng đề xuất trước đó tạo integration trực tiếp từ pipeline branch.
+- Test REC+PRODUCT local trước; owner thuê Vast.ai/SSH nếu local không đáp ứng.
+  EX-SCENE/EX-SIM integration ở giai đoạn sau; shared artifact contracts vẫn phải
+  được giữ ngay từ bây giờ. Không tự push, thuê cloud hoặc claim DONE để mở merge.
+
+### Recovery checkpoint — canonical visual + preview + metric bundle bridge
+
+Branch vẫn `feat/ex-rec-pipeline`; không push/merge/switch. Commits đã tạo:
+`04bdf63` job identity guard → `2b2da87` canonical Gaussian PLY/SOG publication
+→ `427ab83` prepared preview worker + attempt namespace → `a6e40c8` final RGB
+metric bridge cùng REC-06/10 evidence. Combined bridge/preview/REC-10/11 regression
+**64 passed (137.11s)**; Ruff EX-REC source/tests **104 files pass**, AST limits pass.
+Full EX-REC native CPU rerun (REC05_TEST_GPU=0) còn chạy tại checkpoint này; chưa
+ghi kết quả cuối hoặc claim whole track green. Không có heavy training đang chạy.
+
+**Đã triển khai:**
+- Canonical visual consumer kiểm exact confirmation/pose/raw-master lineage,
+  full s/R/t, native codec inventory; SOG ref trỏ bytes thật, không trỏ manifest JSON.
+- Prepared preview CLI chạy REC-03→04 với pinned runtime qua env settings;
+  giữ cùng job, mỗi retry là attempt mới, request/events/result create-only.
+  Kết quả preview complete vẫn `job_status=RUNNING`, metric `UNCONFIRMED`.
+  Không có full video/InputManifest dispatcher hoặc PRODUCT queue wiring yet.
+- `BundleMetricVerifier` ghép canonical visual loader + canonical poses + geometry
+  GLB/provenance + independent measurement/tolerance với exact reviewed bundle.
+  Default deployment scope product, no default review authority; fixture mode
+  chỉ composition test chủ động. Record immutable và authority rechecked lúc load.
+  `verify_bundle` là port cho REC-10, không là physics/Isaac acceptance.
+  Chưa wire authenticated reviewer vào bundle CLI (thuộc PRODUCT integration).
+- Một fixture chain chạy producer→canonical artifacts→metric proof→REC-10 bundle
+  →EX-SCENE consumer, không remap output refs hoặc sửa bundle bằng tay. Stub
+  COLMAP/Brush/voxel/authority được ghi rõ; không gọi đó là real-data acceptance.
+
+**Next executable work, không lặp lại phần đã làm:**
+1. REC-05 strict seed/capsule occupancy validation. Đã đọc pinned native
+   `carve` 3.6.6/afbc281: blocked seed được `findNearestFreeCell` và **không có log
+   relocation thành công**, nên thêm regex vào `require_carve` không giải quyết.
+   Cần validate seed trên cùng pre-carve occupancy/rounded dilation kernel hoặc
+   controlled upstream adapter; không vendor/patch generated npm bundle.
+2. REC-05 publication/retry: `GeometryPublisher` vẫn fixed job/rec05 URI và mới
+   publish GLB + voxel JSON; binary occupancy `.voxel.bin` chưa published. Hoàn
+   thiện portable metadata+binary refs/consumer checks khi nối occupancy viewer.
+3. REC-07→08 reviewed coordinate bridge còn thiếu. Legacy
+   `build_request_from_rec07_manifest` cố ý fail closed. Dùng owner decisions
+   đã ghi (unit/axes/floor), nhưng không biến raw SfM origin thành LiDAR origin
+   chỉ bằng distance scale; preserve immutable preparation/provenance.
+4. Mixed canonical geometry/alignment verification và optional sensor-depth
+   path cần verifier riêng. Final RGB bridge hiện chỉ canonical RGB geometry,
+   không tự nhận native LiDAR/depth đã canonical; REC-09 gate vẫn bắt buộc ở REC-10.
+5. Worker full input/privacy/frame-prep → preview → HITL → canonical/collision
+   → alignment/bundle; PRODUCT owns authenticated decisions, queue/JobManifest,
+   API và PlayCanvas/SOG browser integration. Không merge PRODUCT khi chưa được yêu cầu.
+6. Real Aisle_CW metric correspondence/independent tolerance và GPU qualification
+   vẫn pending. Không dùng 0.67 sanity estimate, floor offset hoặc fixture threshold
+   làm scale/acceptance mặc định cho mọi video.
+
+**Local-first testing:** owner đã chốt local integration smoke trước, Vast.ai qua
+SSH nếu local không đáp ứng, nhưng integration chỉ bắt đầu sau EX-REC completion.
+Chưa khởi động training hay thuê GPU. Host `nvidia-smi` ngoài
+sandbox xác nhận T2000 / 580.178.04 / 4096 MiB; trong sandbox có thể báo driver
+unavailable nên không kết luận driver hỏng từ lỗi sandbox. GPU browser render
+vẫn nằm ở máy client dù worker training đặt trên cloud.
+
+### Recovery checkpoint — Codex resume từ 56f987b
+
+**Owner update:** sau integration sẽ chạy GPU trên **Vast.ai**, không khởi động
+training 30k trên local ở checkpoint này. Không tự thuê/provision máy.
+`nvidia-smi` local đã nhận Quadro T2000 / driver 580.178.04 / 4096 MiB. Vulkan
+inventory ngoài sandbox, explicit NVIDIA ICD, exit 0 và báo Quadro T2000 discrete.
+Ghi chú “driver không chạy” bên dưới đã outdated; đây mới là device enumeration,
+chưa qualification config training 30k/960px/SH3/max_splats400k trên 4 GiB.
+
+**Launcher:** `/tmp/opencode/hs/rec04_run.sh` không còn. Script hiện hữu
+`data/rec04_runtime/run-smoke.sh` vẫn dùng smoke-config.json và ép Intel ICD trong
+REC04_BRUSH_ENVIRONMENT, nên PRIME offload bên ngoài không override được. Khi
+deploy phải inject Brush/Splat/COLMAP settings + config/timeout + new workspace
+rõ ràng; không copy nguyên launcher cũ hoặc dùng lại attempt 10c.
+
+- Đã đọc addendum 2/3 và WIP agent bàn giao; giữ nguyên guard `_require_job_identity`
+  ở `metric.py` cùng tests. Không viết lại hoặc bỏ các quyết định owner về world
+  floor, handedness, capsule, seed validation hay demo LiDAR assistance.
+- Canonical visual producer WIP đã chạy native codec trên fixture và publish PLY/
+  SOG bytes; cần commit sau current validation. Đây không phải final metric verifier.
+- **Phân biệt smoke với demo:** inspected `rec04_smoke_artifacts_10c/visual.json`
+  thực tế ghi 10 iterations, 128px, refine_every=200, 6.202 Gaussian. Nó là
+  Gaussian technical smoke, không phải chất lượng demo đã nghiệm thu. Không có
+  densification không tự chứng minh “không phải 3DGS”; không suy mọi lỗi alignment
+  chỉ do sparse output. Record native inspection có `gaussian: true`.
+- **UI integration:** cached `origin/feat/product` 012f349 có backend/UI nhưng
+  routes job còn mock-worker; viewer chỉ parse ASCII PLY, package hiện dùng
+  Three/R3F, chưa có PlayCanvas/SOG runtime theo baseline. Không merge/sửa PRODUCT
+  trong lượt này. SceneObject defaults cũng lệch giữa branches (semantic_class/tags).
+- **Thứ tự có thể thực hiện:** REC-11 preview dispatch qua frame → poses → Brush,
+  nối PRODUCT worker + real SOG renderer, hiển thị visual với metric UNCONFIRMED.
+  Preview không phải physics-ready và không cần chờ REC-06 final/REC-05 collider;
+  chính preview phục vụ Editor chọn anchor. Sau đó mới nối canonical publication,
+  approved distance protocol, seed clearance, collision/alignment và final bundle.
+- Không tự chạy training dài/đổi driver/thuê GPU; owner đã dừng training vì nóng.
+  `train-config.json` tồn tại không chứng minh 30k run thành công. Estimate thời
+  gian/chi phí GPU ở addendum trước chưa phải cloud qualification đo được.
+- Quota recovery rule theo owner: khi có tín hiệu remaining quota ≤3%, chốt phần
+  dở ở boundary an toàn, lưu test result, commit intended changes và cập nhật file
+  này với exact HEAD/worktree/next commands. Agent không có quota API thì phải nói
+  rõ giới hạn đó, không giả định nhìn được phần trăm quota; checkpoint từng chunk.
+
 ### Addendum 3 — phát hiện REC-04 chưa train thật + việc còn lại (2026-09-27 ~16:30)
 
 > **Bối cảnh:** owner yêu cầu chạy demo `upload video → frame → 3DGS → UI`. Khi
