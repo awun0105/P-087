@@ -111,6 +111,21 @@ là vô hình với mọi phép kiểm). Ouster datasheet chưa tra được (UR
 URL); README/PDF không nêu; figure phối cảnh không phân định được. REC-07 giữ
 `VALIDATING`, REC-09 giữ `IN_PROGRESS`, `coordinate_status` vẫn `UNVERIFIED`.
 
+**Handedness — CHỐT (owner xác nhận 2026-09-27):** Ouster OS1-128 dùng
+`x` forward, `y` left, `z` up ⇒ **thuận tay**, trùng canonical convention của
+project. Không cần đảo trục nào khi chuyển native frame → canonical `world`; chỉ
+còn phép tịnh tiến để đặt gốc. **Mức độ tin cậy: owner attestation, KHÔNG phải
+agent verify** — agent thử nhiều URL datasheet đều 404 và không đoán URL; khi
+khóa `coordinate_status` phải ghi nguồn là owner decision, không ghi VERIFIED từ
+tài liệu.
+
+**Còn lại cho coordinate bridge — chỉ còn quy tắc gốc `world`:** sàn đo được ở
+`z ≈ -0,24 m` (ba nguồn độc lập khớp nhau), z=0 của map frame không phải sàn
+(README:219 robot bắt đầu tại gốc map). Owner cần chốt mốc đặt gốc, ví dụ
+đặt sàn = z 0, hoặc giữ nguyên và khai báo rõ. Sau đó mở được promote
+`UNVERIFIED → VERIFIED` ở `build_registered_lidar.py:31`, `lidar/models.py:31`,
+`lidar/ingest.py:136`.
+
 Checkpoint 2026-09-27 — up-axis/handedness cho canonical coordinate:
 
 **Đã chốt:** up-axis = **Z**, đơn vị = **mét**. Bằng hai phép đo độc lập: lát cắn

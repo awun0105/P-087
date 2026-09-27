@@ -175,6 +175,18 @@ kiểm trên dữ liệu. Nguồn chưa chốt được:
 
 → **Cần owner chốt hoặc cung cấp datasheet Ouster.** Không tự chọn.
 
+**Owner xác nhận 2026-09-27:** Ouster OS1-128 dùng convention `x` forward,
+`y` left, `z` up — tức **thuận tay**, trùng với canonical convention của project
+(meter, Z-up, right-handed). Hệ quả: **không cần đảo trục nào** khi chuyển native
+frame sang canonical `world`; chỉ còn phép tịnh tiến để đặt gốc.
+
+Lưu ý mức độ tin cậy: đây là **owner attestation**, **không phải** agent tự verify
+từ nguồn. Agent đã thử tra datasheet Ouster qua nhiền URL và đều 404, không đoán
+URL; README/PDF của dataset không nêu handedness; figure phính cảnh không phân
+định được. Vì vậy khi khóa `coordinate_status` cần ghi nguồn là owner decision,
+**không** ghi là VERIFIED từ tài liệu. Nếu sau này có datasheet hoặc raw ROS
+bag/tf_static của chính dataset thì đối chiếu lại và cập nhật nguồn.
+
 **LIMIT — evidence này KHÔNG đổi trạng thái task:**
 - `coordinate_status` vẫn `UNVERIFIED`, `assistance_class` vẫn `GT-assisted`,
   `confirmed_rgb_alignment` vẫn `false`. Không tự nâng trạng thái.
