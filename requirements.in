@@ -5,6 +5,12 @@ pydantic>=2.10.0
 pydantic-settings>=2.7.0
 python-dotenv>=1.0.0
 
+# Numerics/geometry: src/services/simulation/colliders import ở runtime, không chỉ test.
+# numpy BSD-3-Clause, scipy BSD-3-Clause, trimesh MIT.
+numpy>=1.26.0
+scipy>=1.11.0
+trimesh>=4.0.0
+
 # AI / LangChain
 langchain>=0.3.0
 langchain-anthropic>=1.0.0
