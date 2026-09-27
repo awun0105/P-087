@@ -35,6 +35,11 @@ import {
   type ViewMode,
 } from "@/features/viewer/layers";
 import { parseAsciiPly, type PlyCloud } from "@/features/viewer/ply";
+import {
+  PlayCanvasScene,
+  detectPlayCanvasCapability,
+  type PlayCanvasCapability,
+} from "@/features/viewer/PlayCanvasScene";
 import { SceneCanvas } from "@/features/viewer/SceneCanvas";
 import { ObjectActionsPanel } from "@/features/scene/ObjectActions";
 import { AddObstacleForm } from "@/features/scene/AddObstacle";
@@ -85,6 +90,17 @@ export function ViewerPanel({ scene }: ViewerPanelProps) {
   const [translation, setTranslation] = useState("");
   const [sidePanel, setSidePanel] = useState<SidePanel>("layers");
   const [layerQuery, setLayerQuery] = useState("");
+  // Một nguồn capability duy nhất cho cả Visual và các view kỹ thuật, để nhánh
+  // suy giảm không thể lệch nhau.
+  const [playcanvas, setPlaycanvas] = useState<PlayCanvasCapability>(detectPlayCanvasCapability);
+
+  // SOG của lớp Visual, resolve qua allow-list của job nên không tự dựng URL.
+  const sogUrl = useMemo(() => {
+    const reference = scene.visual.reference;
+    return scene.visual.available && reference
+      ? jobArtifactContentUrl(scene.job_id, reference)
+      : null;
+  }, [scene.job_id, scene.visual.available, scene.visual.reference]);
 
   const layers = useMemo(() => buildSceneLayers(scene.scene, scene.scene_checksum), [scene]);
   const shown = useMemo(
@@ -358,12 +374,22 @@ export function ViewerPanel({ scene }: ViewerPanelProps) {
           </header>
 
           <div className="h-[30rem]">
-            {webgl === "unavailable" ? (
+            {mode === "VISUAL" && playcanvas === "ready" && sogUrl ? (
+              <PlayCanvasScene
+                contentUrl={sogUrl}
+                mode={mode}
+                capability={playcanvas}
+                onFailed={() => setPlaycanvas("failed")}
+              />
+            ) : webgl === "unavailable" || playcanvas === "unavailable" ? (
               <DegradedState />
             ) : webgl === "checking" ? (
               <p className="p-4 text-sm text-slate-400">Đang kiểm tra WebGL…</p>
             ) : mode === "VISUAL" ? (
-              <VisualUnavailable scene={scene} />
+              <>
+                <VisualUnavailable scene={scene} />
+                <PlayCanvasUnavailable />
+              </>
             ) : shown.length === 0 ? (
               <p className="p-4 text-sm text-slate-400" data-testid="no-layers">
                 View này không có layer nào đang bật.
@@ -770,6 +796,22 @@ function VisualBanner({ scene }: { scene: SceneResponse }) {
       <span className="font-mono">{scene.visual.format ?? "không có"}</span>
       <span className="font-mono"> brush_compatibility_proof=false</span>). Các view Geometry/Point
       Cloud/Collider là view kỹ thuật ngang hàng, không phải fallback và không thay thế AC-11.
+    </p>
+  );
+}
+
+/**
+ * PlayCanvas không khởi tạo được. Phải nói rõ thay vì rơi về view khác, vì cả hai đều
+ * không phải 3DGS — im lặng rơi về sẽ biến lỗi renderer thành lỗi dữ liệu.
+ */
+function PlayCanvasUnavailable() {
+  return (
+    <p
+      className="m-3 rounded-xl border border-red-900 bg-red-950/40 p-3 text-xs text-red-200"
+      data-testid="playcanvas-unavailable"
+    >
+      <strong>PlayCanvas không khởi tạo được.</strong> Không có view 3D nào được dựng, và
+      đây <em>không phải</em> bằng chứng thiếu 3DGS. Xem <code>PRODUCT-06.md</code> §13.1.
     </p>
   );
 }
