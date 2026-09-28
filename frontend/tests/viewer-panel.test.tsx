@@ -237,9 +237,11 @@ describe("tiến trình và collider từ thư viện", () => {
  * Bản cũ để canvas trắng khi parse lỗi, người dùng tưởng viewer hỏng — phải nói
  * rõ là thiếu dữ liệu.
  */
-it("view Point Cloud nói rõ thiếu ref riêng, không để canvas trắng", () => {
+it("view Point Cloud báo ref không phải PLY, không giả JSON thành geometry", () => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as never);
-  render(<ViewerPanel scene={buildFixtureScene()} />);
+  const scene = buildFixtureScene();
+  scene.scene.environment.geometry_ref.artifact_uri = "artifact://jobs/job-fixture-001/scene/unsupported.json";
+  render(<ViewerPanel scene={scene} />);
   fireEvent.click(screen.getByRole("button", { name: "Point cloud" }));
   const notice = screen.getByTestId("point-cloud-provisional");
   expect(notice).toHaveTextContent("SceneIR");

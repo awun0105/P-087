@@ -89,7 +89,7 @@ export default async function JobDetailPage({ params }: PageProps<"/jobs/[jobId]
 
       {/* Stage timeline (PRODUCT-09) */}
       <div className="mb-4">
-        <StageTimeline stages={job.data.stage_artifacts} currentStage={job.data.current_stage ?? undefined} />
+        <StageTimeline stages={job.data.stage_artifacts} currentStage={job.data.current_stage ?? undefined} jobStatus={job.data.status} />
       </div>
 
       {/* Attempts */}

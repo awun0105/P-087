@@ -9,20 +9,20 @@
  */
 
 import { Canvas } from "@react-three/fiber";
-import { GizmoHelper, GizmoViewport, Grid, OrbitControls } from "@react-three/drei";
-import { useMemo } from "react";
+import { GizmoHelper, GizmoViewport, Grid, Html, OrbitControls } from "@react-three/drei";
+import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 
 import {
   layerKey,
-  toRendererPoint,
-  toRendererQuaternion,
   type LayerTransform,
   type ViewerLayer,
 } from "@/features/viewer/layers";
 import type { PlyCloud } from "@/features/viewer/ply";
+import { GlbArtifact } from "@/features/viewer/GlbArtifact";
 
 export interface SceneCanvasProps {
+  jobId: string;
   layers: ViewerLayer[];
   clouds: Record<string, PlyCloud>;
   selectedKey: string | null;
@@ -31,13 +31,11 @@ export interface SceneCanvasProps {
 }
 
 /**
- * Quaternion canonical Z-up (xyzw) → Euler của Three.js Y-up.
- *
- * Bản cũ dùng thẳng quaternion canonical, tức **bỏ qua việc đổi trục**, nên mọi
- * object bị xoay sai. Nay đổi trục trước rồi mới ra Euler.
+ * Local transform giữ canonical; group cha đổi basis một lần cho cả vertices,
+ * translation và rotation. Không conjugate rotation rồi bỏ quên vertex positions.
  */
 export function toEuler(quaternion: readonly [number, number, number, number]): [number, number, number] {
-  const [x, y, z, w] = toRendererQuaternion([...quaternion]);
+  const [x, y, z, w] = quaternion;
   return new THREE.Euler().setFromQuaternion(new THREE.Quaternion(x, y, z, w), "XYZ").toArray() as [
     number,
     number,
@@ -46,12 +44,17 @@ export function toEuler(quaternion: readonly [number, number, number, number]): 
 }
 
 function layerPosition(layer: LayerTransform): [number, number, number] {
-  return toRendererPoint([...layer.translation_xyz]);
+  return [...layer.translation_xyz];
 }
 
 function ColliderBox({ layer, selected }: { layer: ViewerLayer; selected: boolean }) {
   if (layer.kind !== "collider") {
     return null;
+  }
+  if (!layer.has_dimensions || !["AABB", "OBB", "BOX"].includes(layer.collider_type)) {
+    return <Html position={layerPosition(layer.transform)}><p className="text-xs text-amber-300">
+      {layer.label}: chưa có loader/kích thước để hiển thị collider này.
+    </p></Html>;
   }
   return (
     <mesh position={layerPosition(layer.transform)} rotation={toEuler(layer.transform.rotation_quaternion_xyzw)}>
@@ -73,11 +76,21 @@ function PointCloud({ layer, cloud }: { layer: ViewerLayer; cloud: PlyCloud | un
     }
     const built = new THREE.BufferGeometry();
     built.setAttribute("position", new THREE.BufferAttribute(cloud.positions, 3));
+    if (cloud.indices) {
+      built.setIndex(new THREE.BufferAttribute(cloud.indices, 1));
+      built.computeVertexNormals();
+    }
     return built;
   }, [cloud]);
+  useEffect(() => () => geometry?.dispose(), [geometry]);
 
   if (layer.kind === "collider" || !geometry) {
     return null;
+  }
+  if (layer.kind === "geometry" && cloud?.indices) {
+    return <mesh geometry={geometry} position={layerPosition(layer.transform)} rotation={toEuler(layer.transform.rotation_quaternion_xyzw)}>
+      <meshStandardMaterial color="#94a3b8" side={THREE.DoubleSide} />
+    </mesh>;
   }
   return (
     <points
@@ -90,12 +103,13 @@ function PointCloud({ layer, cloud }: { layer: ViewerLayer; cloud: PlyCloud | un
   );
 }
 
-export function SceneCanvas({ layers, clouds, selectedKey, onSelect, mode }: SceneCanvasProps) {
+export function SceneCanvas({ jobId, layers, clouds, selectedKey, onSelect, mode }: SceneCanvasProps) {
   return (
     <Canvas camera={{ position: [6, 6, 6], fov: 50 }} data-testid="scene-canvas" data-mode={mode}>
       <ambientLight intensity={0.7} />
       <directionalLight position={[5, 8, 5]} intensity={0.9} />
       <Grid args={[20, 20]} cellColor="#334155" sectionColor="#475569" infiniteGrid />
+      <group rotation={[-Math.PI / 2, 0, 0]}>
       {layers.map((layer) => {
         // Dùng chung `layerKey` với panel: tự dựng key ở đây thì khoá của canvas
         // và khoá của danh sách layer lệch nhau, chọn layer sẽ không ăn.
@@ -103,14 +117,17 @@ export function SceneCanvas({ layers, clouds, selectedKey, onSelect, mode }: Sce
         const selected = key === selectedKey;
         return (
           <group key={key} onClick={() => onSelect(selected ? null : key)}>
-            {layer.kind === "collider" ? (
+            {layer.reference?.artifact_uri.toLowerCase().endsWith(".glb") ? (
+              <GlbArtifact jobId={jobId} layer={layer} />
+            ) : layer.kind === "collider" ? (
               <ColliderBox layer={layer} selected={selected} />
             ) : (
-              <PointCloud layer={layer} cloud={clouds[key] ?? clouds[layer.checksum]} />
+              <PointCloud layer={layer} cloud={clouds[`${key}:${layer.checksum}`]} />
             )}
           </group>
         );
       })}
+      </group>
       <OrbitControls makeDefault enablePan enableZoom enableRotate />
       <GizmoHelper alignment="bottom-right" margin={[70, 70]}>
         <GizmoViewport axisColors={["#ef4444", "#22c55e", "#3b82f6"]} labelColor="#e2e8f0" />

@@ -1,6 +1,6 @@
 import { JobTabs, PageHeader } from "@/components/shell";
 import { ErrorState } from "@/components/states";
-import { ViewerPanel } from "@/features/viewer/ViewerPanel";
+import { ViewerWorkspace } from "@/features/viewer/ViewerWorkspace";
 import { getScene } from "@/lib/api/endpoints";
 
 /**
@@ -20,6 +20,7 @@ export default async function ViewerPage({ params }: PageProps<"/jobs/[jobId]/vi
         <PageHeader title="Scene viewer" subtitle={jobId} />
         <JobTabs jobId={jobId} active="Scene" />
         <ErrorState title="Không tải được SceneIR" detail={scene.error.detail} />
+        <ViewerWorkspace scene={null} />
       </>
     );
   }
@@ -31,7 +32,7 @@ export default async function ViewerPage({ params }: PageProps<"/jobs/[jobId]/vi
         subtitle={`${scene.data.scene_id} · ${scene.data.scene_revision} · ${scene.data.scene.objects.length} object`}
       />
       <JobTabs jobId={jobId} active="Scene" />
-      <ViewerPanel scene={scene.data} />
+      <ViewerWorkspace scene={scene.data} />
     </>
   );
 }

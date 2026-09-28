@@ -265,15 +265,15 @@ describe("quy đổi trục canonical → renderer", () => {
     expect(z).toBe(-5);
   });
 
-  it("quaternion xyzw giữ w và đảo dấu hai trục đã đổi chiều", () => {
+  it("quaternion xyzw conjugate cùng phép đổi basis x,z,-y", () => {
     // `toEqual` phân biệt -0 và +0, nên so bằng phép nhân chứ không so mảng thẳng.
     const identity = toRendererQuaternion([0, 0, 0, 1]);
     expect(identity.map((value) => value + 0)).toEqual([0, 0, 0, 1]);
     const [x, y, z, w] = toRendererQuaternion([0.1, 0.2, 0.3, 0.9]);
     expect(w).toBe(0.9);
     expect(x).toBe(0.1);
-    expect(y).toBe(-0.2);
-    expect(z).toBe(-0.3);
+    expect(y).toBe(0.3);
+    expect(z).toBe(-0.2);
   });
 
   it("point nằm trên trục Z cao phải ra trục Y cao", () => {

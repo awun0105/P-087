@@ -47,9 +47,11 @@ async function callReviewAction(
 export function ReviewLifecyclePanel({
   jobId,
   review,
+  enabled = false,
 }: {
   jobId: string;
   review: ReviewState;
+  enabled?: boolean;
 }) {
   const router = useRouter();
   const [reason, setReason] = useState("");
@@ -64,6 +66,7 @@ export function ReviewLifecyclePanel({
   const decision = review.approval?.decision;
 
   async function run(action: ReviewAction, extra?: Record<string, unknown>) {
+    if (!enabled) return;
     if (action === "reject" && !reason.trim()) {
       setError("Lý do từ chối không được để trống.");
       return;
@@ -93,6 +96,7 @@ export function ReviewLifecyclePanel({
 
   return (
     <div className="flex flex-col gap-4">
+      {!enabled && <Banner tone="warn" title="Review chỉ đọc">Authorization và lưu quyết định review chưa được nối backend.</Banner>}
       {/* Mock warning */}
       {review.synthetic_authorization && (
         <Banner
@@ -162,7 +166,7 @@ export function ReviewLifecyclePanel({
                 variant="primary"
                 size="sm"
                 busy={busy === "approve"}
-                disabled={busy !== null}
+                disabled={!enabled || busy !== null}
                 onClick={() => void run("approve", { accepted_warning_ids: [] })}
                 className="flex-1"
               >
@@ -172,7 +176,7 @@ export function ReviewLifecyclePanel({
                 variant="danger"
                 size="sm"
                 busy={busy === "reject"}
-                disabled={busy !== null || !reason.trim()}
+                disabled={!enabled || busy !== null || !reason.trim()}
                 onClick={() => void run("reject")}
                 className="flex-1"
               >

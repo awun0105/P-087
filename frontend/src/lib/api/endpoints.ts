@@ -100,7 +100,8 @@ export function jobArtifactContentUrl(
   jobId: string,
   ref: { artifact_uri: string; artifact_checksum: string },
 ): string {
-  return apiUrl(`/api/v1/jobs/${encodeURIComponent(jobId)}/artifacts/content`, {
+  const filename = ref.artifact_uri.split("/").pop();
+  return apiUrl(`/api/v1/jobs/${encodeURIComponent(jobId)}/artifacts/content/${encodeURIComponent(filename ?? "artifact")}`, {
     artifact_uri: ref.artifact_uri,
     artifact_checksum: ref.artifact_checksum,
   });

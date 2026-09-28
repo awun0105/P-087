@@ -23,6 +23,12 @@ export interface NavItem {
 
 export const NAV_SECTIONS: NavItem[] = [
   {
+    label: "Mở 3DGS",
+    href: "/viewer",
+    description: "Preview file Gaussian PLY/SOG cục bộ, không cần backend",
+    icon: "◈",
+  },
+  {
     label: "Projects",
     href: "/projects",
     description: "Danh sách project và privacy state",
@@ -110,7 +116,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span className="hidden text-xs text-slate-600 sm:block">EX-PRODUCT · mock-first</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-emerald-500" title="Backend connected (fixture)" />
+          <span className="h-2 w-2 rounded-full bg-slate-500" title="Kết nối backend được kiểm tra tại màn hình gọi API" />
           <span className="hidden text-xs text-slate-500 sm:block">fixture mode</span>
         </div>
       </header>

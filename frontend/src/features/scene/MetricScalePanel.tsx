@@ -34,8 +34,8 @@ export function MetricScalePanel({ metricScale }: MetricScalePanelProps) {
           <span className="text-[10px] text-slate-500">meters / unit</span>
         </div>
         <Banner tone="mock" title="Alignment chưa có backend">
-          Chọn 2 điểm trên scene và nhập khoảng cách thật cần contract mở rộng (SCENE-09). Hiện
-          chỉ hiển thị giá trị metric_scale từ SceneIR.
+          REC-06 đã có xử lý metric, nhưng thao tác chọn anchor và xác nhận từ UI chưa được nối.
+          Hiện chỉ hiển thị giá trị metric_scale từ SceneIR; đây không phải form xác nhận metric.
         </Banner>
       </div>
     </Panel>

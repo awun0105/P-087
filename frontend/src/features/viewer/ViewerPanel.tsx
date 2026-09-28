@@ -35,7 +35,7 @@ import {
   type ViewerLayer,
   type ViewMode,
 } from "@/features/viewer/layers";
-import { parseAsciiPly, type PlyCloud } from "@/features/viewer/ply";
+import { parsePly, type PlyCloud } from "@/features/viewer/ply";
 import {
   PlayCanvasScene,
   detectPlayCanvasCapability,
@@ -44,8 +44,6 @@ import {
   type PlayCanvasRuntime,
 } from "@/features/viewer/PlayCanvasScene";
 import { SceneCanvas } from "@/features/viewer/SceneCanvas";
-import { ObjectActionsPanel } from "@/features/scene/ObjectActions";
-import { AddObstacleForm } from "@/features/scene/AddObstacle";
 import { SceneGraph } from "@/features/scene/SceneGraph";
 import { MetricScalePanel } from "@/features/scene/MetricScalePanel";
 import { MockReadonlyPanel } from "@/features/scene/MockReadonlyPanel";
@@ -66,7 +64,8 @@ function detectWebGL(): WebGLState {
   }
   try {
     const canvas = document.createElement("canvas");
-    const context = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
+    const context = canvas.getContext("webgl2");
+    context?.getExtension?.("WEBGL_lose_context")?.loseContext();
     return context ? "ok" : "unavailable";
   } catch {
     return "unavailable";
@@ -140,37 +139,35 @@ export function ViewerPanel({ scene }: ViewerPanelProps) {
     }
     const targets = visibleLayers(layers, mode);
     let cancelled = false;
-    for (const layer of targets) {
-      if (!layer.reference) {
-        continue;
+    const controller = new AbortController();
+    const requests = targets.filter((layer) => layer.reference?.artifact_uri.toLowerCase().endsWith(".ply"));
+    // Publish cả batch một lần: từng response không được đổi effect deps rồi
+    // abort các request còn lại. Key luôn chứa checksum của revision đang xem.
+    void Promise.all(requests.map(async (layer) => {
+      const key = `${layerKey(layer)}:${layer.checksum}`;
+      try {
+        const response = await fetch(jobArtifactContentUrl(scene.job_id, layer.reference!), { signal: controller.signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return { key, cloud: parsePly(await response.arrayBuffer()) };
+      } catch (cause: unknown) {
+        return { key, error: String(cause) };
       }
-      const key = layerKey(layer);
-      if (clouds[key] || plyErrors[key]) {
-        continue;
+    })).then((results) => {
+      if (cancelled) return;
+      const loaded: Record<string, PlyCloud> = {};
+      const errors: Record<string, string> = {};
+      for (const result of results) {
+        if (result.cloud) loaded[result.key] = result.cloud;
+        if (result.error) errors[result.key] = result.error;
       }
-      const url = jobArtifactContentUrl(scene.job_id, layer.reference);
-      fetch(url)
-        .then(async (response) => {
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-          }
-          return parseAsciiPly(await response.text());
-        })
-        .then((cloud) => {
-          if (!cancelled) {
-            setClouds((current) => ({ ...current, [key]: cloud }));
-          }
-        })
-        .catch((cause: unknown) => {
-          if (!cancelled) {
-            setPlyErrors((current) => ({ ...current, [key]: String(cause) }));
-          }
-        });
-    }
+      setClouds(loaded);
+      setPlyErrors(errors);
+    });
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [layers, mode, scene.job_id, clouds, plyErrors]);
+  }, [layers, mode, scene.job_id]);
 
   // Resolve selection từ toàn bộ layers (không chỉ shown) để Scene Graph có thể chọn
   // object ngay cả khi mode hiện tại không render layer đó.
@@ -394,7 +391,7 @@ export function ViewerPanel({ scene }: ViewerPanelProps) {
           <div className="h-[30rem]">
             {mode === "VISUAL" && playcanvas === "ready" && sogUrl ? (
               <>
-                <ViewerProgress runtime={playcanvasRuntime} hasCollision={Boolean(colliderUrl)} />
+                <ViewerProgress runtime={playcanvasRuntime} hasCollision={playcanvasRuntime.hasCollision} />
                 <div className="h-[28rem]">
                   <PlayCanvasScene
                     contentUrl={sogUrl}
@@ -425,6 +422,7 @@ export function ViewerPanel({ scene }: ViewerPanelProps) {
               </p>
             ) : (
               <SceneCanvas
+                jobId={scene.job_id}
                 layers={shown}
                 clouds={clouds}
                 selectedKey={selected}
@@ -505,31 +503,10 @@ export function ViewerPanel({ scene }: ViewerPanelProps) {
               />
             )}
 
-            {sidePanel === "actions" && selectedObject ? (
-              <ObjectActionsPanel
-                jobId={scene.job_id}
-                sceneRevision={scene.scene_revision}
-                object={selectedObject}
-                onDeselect={() => {
-                  setSelected(null);
-                  setSidePanel("layers");
-                }}
-              />
-            ) : sidePanel === "actions" ? (
-              <p className="py-2 text-xs text-slate-500">
-                Chọn một object trong Scene hoặc tab Layer trước.
-              </p>
-            ) : null}
+            {sidePanel === "actions" && <MockReadonlyPanel title="Object actions" reason="Chưa nối EX-SCENE. Bạn vẫn có thể ẩn/hiện layer cục bộ; confirm/delete/rename chưa được lưu vào scene." />}
 
             {sidePanel === "add" && (
-              <AddObstacleForm
-                jobId={scene.job_id}
-                sceneRevision={scene.scene_revision}
-                onDone={() => {
-                  router.refresh();
-                  setSidePanel("layers");
-                }}
-              />
+              <MockReadonlyPanel title="Thêm obstacle" reason="Chưa nối EX-SCENE; API không tạo object hoặc revision giả." />
             )}
 
             {sidePanel === "graph" && (

@@ -23,12 +23,15 @@ export function ReleasePanel({
   checksumMatch,
   approvalRecord,
   jobStatus,
+  enabled = false,
 }: {
   jobId: string;
   approved: boolean;
   checksumMatch: boolean;
   approvalRecord: ApprovalRecord | null;
   jobStatus: JobStatus;
+  /** Chỉ bật khi backend đã có sealing thật và authorization, không theo fixture approval. */
+  enabled?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,10 +41,10 @@ export function ReleasePanel({
     released_at: string;
   } | null>(null);
 
-  const canRelease = jobStatus === "SUCCEEDED" && approved && checksumMatch && !releaseResult;
+  const canRelease = enabled && jobStatus === "SUCCEEDED" && approved && checksumMatch && !releaseResult;
 
   async function doRelease() {
-    if (!approvalRecord) return;
+    if (!canRelease || !approvalRecord) return;
     setBusy(true);
     setError(null);
     try {
@@ -109,6 +112,7 @@ export function ReleasePanel({
     <Panel>
       <div className="p-6">
         <PanelHeader title="Seal & Release" />
+        {!enabled && <p className="mt-2 text-sm text-amber-300">Read-only: backend chưa triển khai release sealing thật.</p>}
         <p className="mt-2 text-xs leading-relaxed text-slate-400">
           Nút <span className="font-medium text-white">Release</span> sẽ gọi backend để seal exact
           candidate đã validate + approved thành{" "}

@@ -45,7 +45,7 @@ export function toRendererQuaternion(
   quaternion: [number, number, number, number],
 ): [number, number, number, number] {
   const [x, y, z, w] = quaternion;
-  return [x, -y, -z, w];
+  return [x, z, -y, w];
 }
 
 export interface LayerTransform {
@@ -67,10 +67,8 @@ export interface GeometryLayer {
   /** Canonical `active` của object; không phải lựa chọn ẩn/hiện của người xem. */
   canonical_active: boolean;
   /**
-   * `SceneIR` **không có** ref point cloud riêng, nên lớp `point_cloud` dùng
-   * `geometry_ref` — đây là suy đoán, không phải dữ liệu. Artifact thật có thể là
-   * GLB/JSON và `parseAsciiPly` sẽ từ chối. Cờ này để UI nói rõ thay vì để canvas
-   * trắng không giải thích.
+   * SceneIR chưa có ref point cloud riêng. View điểm chỉ đọc vertex của geometry
+   * PLY; ref không có loader tương ứng phải báo provisional, không vẽ dữ liệu giả.
    */
   provisional: boolean;
 }
@@ -86,6 +84,7 @@ export interface ColliderLayer {
   checksum: string | null;
   transform: LayerTransform;
   dimensions_xyz_m: [number, number, number];
+  has_dimensions: boolean;
   canonical_active: boolean;
 }
 
@@ -195,7 +194,7 @@ export function buildSceneLayers(scene: SceneIR, sceneChecksum: string): SceneLa
         rotation_quaternion_xyzw: [0, 0, 0, 1],
       },
       canonical_active: true,
-      provisional: true,
+      provisional: !/\.(ply|glb)$/i.test(scene.environment.geometry_ref.artifact_uri),
     },
     {
       kind: "point_cloud",
@@ -211,7 +210,7 @@ export function buildSceneLayers(scene: SceneIR, sceneChecksum: string): SceneLa
         rotation_quaternion_xyzw: [0, 0, 0, 1],
       },
       canonical_active: true,
-      provisional: true,
+      provisional: !/\.ply$/i.test(scene.environment.geometry_ref.artifact_uri),
     },
   ];
   const colliders: ColliderLayer[] = [];
@@ -226,7 +225,7 @@ export function buildSceneLayers(scene: SceneIR, sceneChecksum: string): SceneLa
       checksum: object.geometry_ref.artifact_checksum,
       transform: toLayerTransform(object.transform),
       canonical_active: object.active,
-      provisional: true,
+      provisional: !/\.(ply|glb)$/i.test(object.geometry_ref.artifact_uri),
     });
     geometry.push({
       kind: "point_cloud",
@@ -237,7 +236,7 @@ export function buildSceneLayers(scene: SceneIR, sceneChecksum: string): SceneLa
       checksum: object.geometry_ref.artifact_checksum,
       transform: toLayerTransform(object.transform),
       canonical_active: object.active,
-      provisional: true,
+      provisional: !/\.ply$/i.test(object.geometry_ref.artifact_uri),
     });
     if (object.collider) {
       colliders.push(buildColliderLayer(object, object.collider));
@@ -261,6 +260,7 @@ export function buildSceneLayers(scene: SceneIR, sceneChecksum: string): SceneLa
         rotation_quaternion_xyzw: [0, 0, 0, 1],
       },
       dimensions_xyz_m: MISSING_DIMENSIONS,
+      has_dimensions: false,
       canonical_active: true,
     });
   }
@@ -287,6 +287,7 @@ function buildColliderLayer(object: SceneObject, collider: ColliderSpec): Collid
     checksum: collider.geometry_ref?.artifact_checksum ?? null,
     transform: composeColliderTransform(object, collider),
     dimensions_xyz_m: collider.dimensions_xyz_m ?? MISSING_DIMENSIONS,
+    has_dimensions: collider.dimensions_xyz_m != null,
     canonical_active: object.active,
   };
 }

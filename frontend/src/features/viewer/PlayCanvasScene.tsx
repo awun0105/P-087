@@ -44,12 +44,24 @@ export function detectPlayCanvasCapability(): PlayCanvasCapability {
     return "unknown";
   }
   const canvas = document.createElement("canvas");
-  return canvas.getContext("webgl2") || canvas.getContext("webgl") ? "ready" : "unavailable";
+  try {
+    const gl = canvas.getContext("webgl2");
+    gl?.getExtension?.("WEBGL_lose_context")?.loseContext();
+    return gl ? "ready" : "unavailable";
+  } catch {
+    return "unavailable";
+  }
 }
 
 export interface PlayCanvasSceneProps {
   /** URL của SOG đã resolve qua artifact endpoint; null nghĩa là chưa có Visual. */
   contentUrl: string | null;
+  /** File preview cục bộ; object URL có cùng lifecycle với engine. */
+  contentFile?: File;
+  /** Bắt buộc với blob URL: parser chọn format theo tên gốc, không theo UUID. */
+  contentFilename?: string;
+  /** Preview file độc lập dùng controls upstream; job viewer dùng toolbar riêng. */
+  showControls?: boolean;
   /** Collider GLB của cùng scene, để viewer nạp trong cùng app. */
   collisionUrl?: string | null;
   mode: ViewMode;
@@ -61,6 +73,9 @@ export interface PlayCanvasSceneProps {
 
 export function PlayCanvasScene({
   contentUrl,
+  contentFile,
+  contentFilename,
+  showControls = false,
   collisionUrl,
   mode,
   capability,
@@ -80,24 +95,29 @@ export function PlayCanvasScene({
   );
 
   useEffect(() => {
-    if (capability !== "ready" || !contentUrl || mode !== "VISUAL" || !container.current) {
+    if (capability !== "ready" || (!contentUrl && !contentFile) || mode !== "VISUAL" || !container.current) {
       return;
     }
     let disposed = false;
     let handle: ViewerHandleLike | null = null;
-    let subscription: { off(): void } | null = null;
+    const subscriptions: { off(): void }[] = [];
+    const host = container.current;
+    const objectUrl = contentFile ? URL.createObjectURL(contentFile) : null;
+    const resolvedUrl = objectUrl ?? contentUrl!;
 
     void import("@playcanvas/supersplat-viewer/viewer")
       .then(async (module) => {
+        if (disposed) return;
         const viewer = await module.createViewer({
-          container: container.current as HTMLElement,
-          contentUrl,
+          container: host,
+          contentUrl: resolvedUrl,
+          contentFilename: contentFile?.name ?? contentFilename ?? new URL(resolvedUrl, window.location.href).pathname.split("/").pop(),
           collisionUrl: collisionUrl ?? undefined,
           // Bắt buộc theo `CreateViewerOptions`. `{}` đi qua `migrateV1` nên viewer tự
           // điền default. Chưa verify bằng browser thật — xem `PRODUCT-06.md` §13.1.
           settings: {},
           renderer: RENDERER,
-          ui: false,
+          ui: showControls,
         });
         if (disposed) {
           viewer.destroy();
@@ -106,7 +126,12 @@ export function PlayCanvasScene({
         handle = viewer;
         // EventHandler của PlayCanvas bắn `<key>:changed`; `on` trả EventHandle
         // để huỷ. Không tự poll `state` vì đó là nguồn thật của thư viện.
-        subscription = viewer.events.on("progress:changed", () => publish(readRuntime(viewer)));
+        for (const event of ["progress:changed", "loaded:changed", "hasCollision:changed", "walkAllowed:changed"]) {
+          subscriptions.push(viewer.events.on(event, () => { if (!disposed) publish(readRuntime(viewer)); }));
+        }
+        if (viewer.app?.assets) {
+          subscriptions.push(viewer.app.assets.on("error", () => { if (!disposed) onFailed(); }));
+        }
         publish(readRuntime(viewer));
       })
       .catch((error: unknown) => {
@@ -118,12 +143,13 @@ export function PlayCanvasScene({
 
     return () => {
       disposed = true;
-      subscription?.off();
+      subscriptions.forEach((subscription) => subscription.off());
       // Không destroy thì engine giữ GPU resource sau khi rời trang.
       handle?.destroy();
       handle = null;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [capability, collisionUrl, contentUrl, mode, onFailed, publish]);
+  }, [capability, collisionUrl, contentUrl, contentFile, contentFilename, showControls, mode, onFailed, publish]);
 
   return (
     <div
@@ -152,7 +178,7 @@ interface ViewerHandleLike {
 function readRuntime(viewer: ViewerHandleLike): PlayCanvasRuntime {
   return {
     loaded: viewer.state.loaded,
-    progress: viewer.state.progress,
+    progress: Number.isFinite(viewer.state.progress) ? Math.max(0, Math.min(100, viewer.state.progress)) : 0,
     hasCollision: viewer.state.hasCollision,
     walkAllowed: viewer.state.walkAllowed,
   };

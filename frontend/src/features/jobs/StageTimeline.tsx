@@ -9,15 +9,14 @@
  * Hậu quả: mọi stage thật rơi vào nhánh "PENDING", không dòng nào được đánh dấu là
  * đang chạy, và `ExecutionError` không bao giờ hiện dù code đã viết sẵn để hiện.
  *
- * Nay dùng `STAGE_IDS`/`STAGE_STATUSES` từ mirror contract, và `scripts/
- * check_contract_mirror.py` fail nếu enum lệch backend — nên danh sách này không
- * thể trôi khỏi backend mà không ai biết.
+ * Chỉ dựng các stage có trong execution records/current stage của job; enum
+ * contract xác định ID hợp lệ, không phải execution plan cho mọi nhánh input.
  */
 
 "use client";
 
-import type { StageArtifact, StageId, StageStatus } from "@/lib/contracts/api";
-import { STAGE_IDS, STAGE_STATUSES } from "@/lib/contracts/api";
+import type { JobStatus, StageArtifact, StageId, StageStatus } from "@/lib/contracts/api";
+import { STAGE_STATUSES } from "@/lib/contracts/api";
 
 /** Nhãn tiếng Việt cho từng stage thật; stage chưa có nhãn hiển thị luôn ID gốc. */
 const STAGE_LABEL: Partial<Record<StageId, string>> = {
@@ -62,25 +61,30 @@ const NOT_REPORTED = STATUS_DOT.QUEUED;
 export function StageTimeline({
   stages,
   currentStage,
+  jobStatus,
 }: {
   stages: StageArtifact[];
   currentStage?: StageId;
+  jobStatus?: JobStatus;
 }) {
   const byStage = new Map<StageId, StageArtifact>(stages.map((stage) => [stage.stage_id, stage]));
+  // Enum là tập ID hợp lệ, không phải execution plan của mọi nhánh RGB/LiDAR.
+  const orderedStages = [...byStage.keys()];
+  if (currentStage && !byStage.has(currentStage)) orderedStages.push(currentStage);
 
   return (
     <ol className="flex flex-col gap-2" data-testid="stage-timeline">
-      {STAGE_IDS.map((stageId) => {
+      {orderedStages.map((stageId) => {
         const artifact = byStage.get(stageId);
-        const status = artifact?.status ?? "QUEUED";
-        const dot = STATUS_DOT[status] ?? NOT_REPORTED;
-        const isCurrent = stageId === currentStage;
+        const status = artifact?.status;
+        const dot = status ? STATUS_DOT[status] : { ...NOT_REPORTED, label: "Chưa có stage report" };
+        const isCurrent = stageId === currentStage && status === "RUNNING" && (!jobStatus || jobStatus === "RUNNING");
         return (
           <li
             key={stageId}
             className="flex items-start gap-2 text-xs"
             data-stage-id={stageId}
-            data-status={status}
+            data-status={status ?? "UNREPORTED"}
             data-current={isCurrent}
           >
             <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${dot.bg} ${dot.color}`} />
