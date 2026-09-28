@@ -126,6 +126,13 @@ Phase 5 — Packaging GPU/SSH + demo run
 - [ ] Phase 2 — progress + delivery API
 - [ ] Phase 3 — demo import + replay
 - [ ] Phase 4 — Studio UI mới
+  - [x] Vendor SuperSplat 3.4.2 nguyên bản vào `frontend/vendor/supersplat/`
+    (`09ab2ee`), script `npm run build:editor` → `public/editor/` (`061a5cf`),
+    theme nâu ấm + cam, nền viewport #1f1b17, splat chọn màu cam (`f26c675`).
+    Build rollup pass; tsc pass; eslint 0 error. Chưa mở editor trong browser.
+  - [ ] Studio shell/pages, ẩn UI cũ bằng route group + `proxy.ts` sau flag.
+  - [ ] Nhúng editor: `/editor/?load=<artifact content url>&filename=scene.sog`,
+    xử lý `supersplat:navigate-home`; ẩn Publish (superspl.at) trong menu.
 - [ ] Phase 5 — GPU packaging + Aisle_CW run
 
 ## Decisions
@@ -137,6 +144,15 @@ Phase 5 — Packaging GPU/SSH + demo run
 - 2026-09-29 PROPOSAL: chỉnh sửa ở mức Gaussian bằng SuperSplat nhúng, export
   PLY/SOG; chưa có SceneObject/collider/Isaac. Cần Product Owner ghi vào
   `docs/decisions/` vì khác PRD P0.
+- 2026-09-29 (owner): adapt nguyên repo SuperSplat (không chỉ tham khảo) và dùng
+  skill ui-ux-pro-max + `private/UI-UX` (shadcn dashboards, MIT) làm reference UI.
+  Đây là chỉ định rõ của owner, vượt quy tắc chung "không copy cả reference repo";
+  provenance ở `frontend/vendor/supersplat/PROVENANCE.md`.
+- 2026-09-29 Design: skill đề xuất Minimalism & Swiss; palette navy/xanh của skill
+  bị thay bằng beige/cam theo owner (tham chiếu preset `tangerine` của
+  next-shadcn-admin-dashboard). Chrome sáng beige, viewport/editor nâu than ấm.
+  Font Inter; icon SVG (lucide), không emoji.
+- 2026-09-29 (owner): commit từng nhóm thay đổi nhỏ liên tục.
 - OPEN: privacy attestation cho video user upload (backend yêu cầu
   `VERIFIED_ANONYMIZED` + QA acceptance).
 
