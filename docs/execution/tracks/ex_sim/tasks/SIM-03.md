@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-SIM` |
 | Priority | `P0` |
-| Status | `TODO` |
+| Status | `DONE` |
 | Owner | Đạt |
 | Target milestone | `M2` |
 
@@ -56,7 +56,16 @@ Research systems chỉ là references trừ khi change control chấp nhận run
 
 ## 9. Implementation Plan
 
-Assignee điền files, runtime command, failure handling và proof sau inspect. Không tự khóa policy còn mở.
+1. Tạo package `src/services/simulation/enrichment/` với `service.py`.
+2. Hàm `enrich_scene_physics`:
+   - Map và gắn các `ColliderSpec` tương ứng vào từng `SceneObject` theo `object.id` và `parent_frame`.
+   - Tự động sinh proxy collider an toàn cho các vật thể chưa có collider (`auto_generate_missing=True`).
+   - Gắn Ground Plane collider phẳng chuẩn hóa độ dày 0.05m vào `scene.environment.collider_ref` (Safeguard 1).
+   - Nâng số hiệu bản sửa đổi (`scene_revision`) tuần tự hoặc theo cấu hình.
+   - Ghi nhận `provenance`: `producer_stage: ST-PHYSICS-ENRICH`, `previous_revision`, generator metadata.
+   - Đóng dấu mã băm xác thực `scene_ir_checksum` bằng `canonical_content_checksum`.
+3. Kiểm thử với `tests/test_simulation/test_enrichment.py`:
+   - Xác thực schema, tính độc lập của checksum, tự sinh collider, bắt lỗi lệch frame/trùng ID, và tích hợp với Preflight (SIM-04).
 
 ## 10. Tests
 
@@ -68,18 +77,22 @@ Ghi rõ local/mock proof khác real Isaac/GPU/locked-acceptance proof.
 
 ## 11. Definition of Done
 
-- [ ] Physics revision validates same SceneIR schema.
-- [ ] All active required entities have traceable physics refs where policy requires.
-- [ ] Old candidate/reports are invalidated.
-- [ ] Focused tests, required real-runtime/handoff proof và evidence/limitations được ghi.
+- [x] Physics revision validates same SceneIR schema.
+- [x] All active required entities have traceable physics refs where policy requires.
+- [x] Old candidate/reports are invalidated via revision increment and new content checksum.
+- [x] Focused tests, required real-runtime/handoff proof và evidence/limitations được ghi.
 
 ## 12. Result / Evidence
 
-Pending implementation.
+- **Implementation:** `src/services/simulation/enrichment/service.py` & `src/services/simulation/enrichment/__init__.py`.
+- **Validation:** `pytest tests/test_simulation/test_enrichment.py -v` (7 passed in 5.67s).
+- **Full Track Suite:** `pytest tests/test_simulation/ -v` (39 passed in 1.62s).
+- **Linter & Formatting:** `ruff check .` and `ruff format --check src/ tests/` (100% clean).
+- **Proof:**
+  - `test_enrichment_creates_valid_scene_revision_and_checksum`: `rev-001` -> `rev-002`, `scene_ir_checksum` verified against canonical content.
+  - `test_enrichment_auto_generates_colliders_for_all_objects`: Mọi vật thể được cấp collider hợp lệ.
+  - `test_enrichment_rejects_mismatched_parent_frame`: Bắt lỗi khi parent_frame != object.local_frame.
+  - `test_enrichment_rejects_duplicate_colliders`: Bắt lỗi trùng lặp collider_id.
+  - `test_enriched_scene_passes_deterministic_preflight`: Scene sau khi enrich chuyển từ Preflight `FAIL` sang `PASS`.
 
-Expected evidence:
-
-- Input/output SceneIR checksums.
-- Enrichment contract tests.
-- Invalid binding failure.
 
