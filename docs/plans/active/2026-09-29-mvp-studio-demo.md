@@ -4,7 +4,7 @@ Date: 2026-09-29
 
 ## Status
 
-Active — chờ owner chốt privacy attestation (xem Decisions/Open) trước Phase 2.
+Active.
 
 ## Outcome
 
@@ -107,7 +107,7 @@ Phase 5 — Packaging GPU/SSH + demo run
 
 - COLMAP fail trên video tự quay → error stage rõ ràng, demo không phụ thuộc live.
 - Train lâu / GPU cloud chưa sẵn → demo dùng smoke artifact tạm, thay khi có run.
-- Privacy gate chặn video user → cần quyết định owner, không tự bỏ gate.
+- Privacy gate: owner chốt chế độ MVP self-attestation (xem Decisions).
 - SuperSplat build/iframe cross-origin → self-host cùng origin; fallback là viewer
   PlayCanvas hiện có (chỉ xem + đo).
 - Rollback: mọi thay đổi additive; UI cũ và API cũ giữ nguyên.
@@ -153,8 +153,15 @@ Phase 5 — Packaging GPU/SSH + demo run
   next-shadcn-admin-dashboard). Chrome sáng beige, viewport/editor nâu than ấm.
   Font Inter; icon SVG (lucide), không emoji.
 - 2026-09-29 (owner): commit từng nhóm thay đổi nhỏ liên tục.
-- OPEN: privacy attestation cho video user upload (backend yêu cầu
-  `VERIFIED_ANONYMIZED` + QA acceptance).
+- 2026-09-29 (owner): MVP chỉ cần luồng chạy được để demo; privacy QA gate và
+  review/duyệt scene 2 kỹ sư là luồng nghiệp vụ, chưa implement và **không được
+  chặn** upload → xử lý → xem scene. Cách làm: setting chế độ MVP
+  (self-attestation của người upload đủ để dispatch), ghi nhãn "tự khai (MVP)"
+  trong dữ liệu/UI, không giả `VERIFIED_ANONYMIZED` do QA. Code gate giữ nguyên,
+  tắt setting để quay lại luồng nghiệp vụ.
+- 2026-09-29 Demo: dùng demo bundle (output thật từ GPU run, có manifest +
+  checksum) phục vụ qua API riêng; Studio dựng cùng màn hình từ job thật hoặc
+  bundle. Trước khi có GPU run đầy đủ, bundle tạm từ smoke `rec04_smoke_work_10b`.
 
 ## Validation
 
