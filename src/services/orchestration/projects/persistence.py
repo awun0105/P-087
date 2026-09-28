@@ -12,7 +12,7 @@ from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeSta
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.projects.errors import JobNotFoundError, ProjectNotFoundError
 from src.services.orchestration.projects.models import ProjectRecord
-from src.services.orchestration.projects.privacy import require_dispatch_allowed
+from src.services.orchestration.projects.privacy import require_project_dispatch
 
 
 class ProjectPersistence:
@@ -106,7 +106,7 @@ class ProjectPersistence:
             if manifest.input_manifest_checksum != project.input_manifest_checksum:
                 raise ValueError("Job không thuộc input của project")
             if manifest.status in {JobStatus.QUEUED, JobStatus.RUNNING}:
-                require_dispatch_allowed(project.privacy_report.result)
+                require_project_dispatch(project)
             row = tx.execute(
                 "SELECT version, manifest_ref FROM r2s_jobs WHERE job_id=?" + tx.lock_suffix(), (manifest.job_id,)
             ).fetchone()
@@ -148,7 +148,7 @@ class ProjectPersistence:
                 if expected is not None:
                     raise RuntimeStateConflictError("Job không còn tồn tại")
                 if not seed:
-                    require_dispatch_allowed(project.privacy_report.result)
+                    require_project_dispatch(project)
                 if event.attempt != 1:
                     raise ValueError("Job mới phải bắt đầu ở attempt 1")
                 version = 1

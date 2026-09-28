@@ -81,7 +81,7 @@ def get_project(project_id: str) -> schemas.ProjectResponse:
 @router.get("/projects/{project_id}/privacy", response_model=schemas.PrivacyStateResponse)
 def get_project_privacy(project_id: str) -> schemas.PrivacyStateResponse:
     """Privacy state riêng cho PRODUCT-02/PRODUCT-05."""
-    return schemas.privacy_state(_project_or_404(project_id).privacy_report)
+    return schemas.privacy_state(_project_or_404(project_id))
 
 
 @router.post(

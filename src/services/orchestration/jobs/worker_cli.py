@@ -17,7 +17,7 @@ from src.services.orchestration.jobs.dispatch import load_prepared_profile, prep
 from src.services.orchestration.jobs.models import TransitionRequest
 from src.services.orchestration.jobs.preview_cli import run_prepared_job
 from src.services.orchestration.projects.errors import PrivacyGateBlockedError
-from src.services.orchestration.projects.privacy import require_dispatch_allowed
+from src.services.orchestration.projects.privacy import require_project_dispatch
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ def dispatch_next(registry: ProjectRegistry, runner: PreparedRunner = run_prepar
             try:
                 candidate = registry.get_job(job_id)
                 require_profile(candidate, registry.execution_profile)
-                require_dispatch_allowed(registry.get_project(candidate.project_id).privacy_report.result)
+                require_project_dispatch(registry.get_project(candidate.project_id))
                 job = candidate
                 frames = prepared_frame_reference(job)
                 if frames is None:

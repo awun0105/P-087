@@ -4,11 +4,13 @@ Các model ở đây là **product-level**, không phải shared contract. Chún
 dữ liệu mà API nhận vào và trạng thái project mà API trả ra.
 """
 
+from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.models.contracts.artifacts import Checksum, Identifier, JsonObject
+from src.models.contracts.artifacts import Checksum, Identifier, JsonObject, ProductArtifactRef
 from src.models.contracts.manifests import PrivacyValidationReport, SourceType
 
 
@@ -73,6 +75,16 @@ class JobCreateInput(BaseModel):
     scene_revision: Identifier = "rev-001"
 
 
+class InputVideoSummary(BaseModel):
+    """Thông tin hiển thị của video đã upload; identity thật nằm ở InputManifest."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    original_name: str = Field(min_length=1, max_length=255)
+    media_type: Literal["video/mp4", "video/quicktime"]
+    size_bytes: int = Field(gt=0)
+
+
 class ProjectRecord(BaseModel):
     """Trạng thái project mà API trả ra. Không phải shared contract."""
 
@@ -84,3 +96,10 @@ class ProjectRecord(BaseModel):
     input_manifest_checksum: Checksum
     source_rights_attestation: JsonObject
     privacy_report: PrivacyValidationReport
+    #: `self_attested` chỉ gán cho project tạo từ upload khi deployment bật chế độ
+    #: MVP (Settings.product_privacy_mode); project cũ/fixture giữ cổng QA.
+    privacy_mode: Literal["qa_verified", "self_attested"] = "qa_verified"
+    #: InputManifest đã publish (bytes checksum) để worker chuẩn bị input video.
+    input_manifest_ref: ProductArtifactRef | None = None
+    input_video: InputVideoSummary | None = None
+    created_at: datetime | None = None

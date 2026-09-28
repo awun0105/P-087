@@ -58,7 +58,7 @@ from src.services.orchestration.projects.models import (
 )
 from src.services.orchestration.projects.persistence import ProjectPersistence
 from src.services.orchestration.projects.preview import load_job_preview
-from src.services.orchestration.projects.privacy import require_dispatch_allowed
+from src.services.orchestration.projects.privacy import require_project_dispatch
 from src.services.orchestration.scene.editor import SceneEditor
 
 ContractT = TypeVar("ContractT", bound=BaseModel)
@@ -293,7 +293,7 @@ class ProjectRegistry:
     def create_job(self, request: JobCreateInput) -> JobManifest:
         """Tạo job QUEUED cho một project, sau khi qua privacy gate."""
         project = self.get_project(request.project_id)
-        require_dispatch_allowed(project.privacy_report.result)
+        require_project_dispatch(project)
         job = self._build_queued_job(project, request.scene_revision)
         reference = (
             self.lifecycle.store.publish_manifest(job) if self.persistence else self.lifecycle.persist_initial(job)

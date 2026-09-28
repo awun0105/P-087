@@ -9,6 +9,9 @@ Request model nằm ở tầng service (`orchestration.projects.models`) vì đ�
 của domain, không phải của HTTP — route import thẳng từ đó, không re-export ở đây.
 """
 
+from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.models.contracts.artifacts import Checksum, Identifier, JsonObject, ProductArtifactRef
@@ -16,15 +19,14 @@ from src.models.contracts.manifests import (
     JobManifest,
     PrivacyInspectionScope,
     PrivacyResult,
-    PrivacyValidationReport,
     SourceType,
 )
 from src.models.contracts.release import ApprovalRecord
 from src.models.contracts.scene import SceneIR
 from src.models.contracts.validation import ValidationReport
 from src.services.orchestration.jobs.models import JobAttemptRecord
-from src.services.orchestration.projects.models import ProjectRecord
-from src.services.orchestration.projects.privacy import block_reason, dispatch_allowed
+from src.services.orchestration.projects.models import InputVideoSummary, ProjectRecord
+from src.services.orchestration.projects.privacy import project_block_reason
 from src.services.orchestration.scene.models import SceneEditResult, SceneRevision, VisualBinding
 
 __all__ = [
@@ -71,6 +73,8 @@ class PrivacyStateResponse(ApiModel):
     unresolved_finding_count: int = Field(ge=0)
     dispatch_allowed: bool
     block_reason: str | None = None
+    #: `self_attested`: MVP — người upload tự xác nhận, chưa có QA kiểm tra.
+    privacy_mode: Literal["qa_verified", "self_attested"] = "qa_verified"
 
 
 class ProjectResponse(ApiModel):
@@ -82,6 +86,8 @@ class ProjectResponse(ApiModel):
     input_manifest_checksum: Checksum
     source_rights_attestation: JsonObject
     privacy: PrivacyStateResponse
+    input_video: InputVideoSummary | None = None
+    created_at: datetime | None = None
 
 
 class ProjectListResponse(ApiModel):
@@ -220,15 +226,18 @@ class ReleaseResponse(ApiModel):
     released_at: str
 
 
-def privacy_state(report: PrivacyValidationReport) -> PrivacyStateResponse:
-    """Chiếu PrivacyValidationReport thành state mà UI tiêu thụ."""
+def privacy_state(record: ProjectRecord) -> PrivacyStateResponse:
+    """Chiếu privacy report + chế độ dispatch của project thành state mà UI tiêu thụ."""
+    report = record.privacy_report
+    reason = project_block_reason(record)
     return PrivacyStateResponse(
         result=report.result,
         input_manifest_checksum=report.input_manifest_checksum,
         inspection_scope=report.inspection_scope,
         unresolved_finding_count=len(report.unresolved_findings),
-        dispatch_allowed=dispatch_allowed(report.result),
-        block_reason=block_reason(report.result),
+        dispatch_allowed=reason is None,
+        block_reason=reason,
+        privacy_mode=record.privacy_mode,
     )
 
 
@@ -240,7 +249,9 @@ def project_response(record: ProjectRecord) -> ProjectResponse:
         source_type=record.source_type,
         input_manifest_checksum=record.input_manifest_checksum,
         source_rights_attestation=record.source_rights_attestation,
-        privacy=privacy_state(record.privacy_report),
+        privacy=privacy_state(record),
+        input_video=record.input_video,
+        created_at=record.created_at,
     )
 
 
