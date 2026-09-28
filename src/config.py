@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     product_seed: int | None = None
     product_worker_root: Path = Path("./data/product_workers")
     product_preview_timeout_seconds: float = Field(default=21600, gt=0, allow_inf_nan=False)
+    product_queue_poll_seconds: float = Field(default=3, ge=0.1, le=60, allow_inf_nan=False)
 
     # Kho vector
     chroma_persist_dir: str = "./data/chroma"
