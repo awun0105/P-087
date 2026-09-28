@@ -57,8 +57,11 @@ export function ReviewLifecyclePanel({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const decision = review.approval.decision;
-  const isFinal = decision === "APPROVE" || decision === "REJECT";
+  // Backend không có decision "PENDING": `approval` vắng mặt nghĩa là chưa có quyết
+  // định, và đó mới là lúc form Approve/Reject phải hiện. Bản cũ so sánh với "PENDING"
+  // nên với decision thật (APPROVE/REJECT) `isFinal` luôn true và form không bao giờ hiện.
+  const isFinal = review.approval !== undefined;
+  const decision = review.approval?.decision;
 
   async function run(action: ReviewAction, extra?: Record<string, unknown>) {
     if (action === "reject" && !reason.trim()) {
@@ -72,8 +75,8 @@ export function ReviewLifecyclePanel({
       await callReviewAction(jobId, action, {
         reviewer_id: "reviewer-mock-001",
         reason: reason.trim() || null,
-        candidate_checksum: review.approval.candidate_checksum,
-        validation_report_checksum: review.approval.validation_report_checksum,
+        candidate_checksum: review.approval?.candidate_checksum ?? null,
+        validation_report_checksum: review.approval?.validation_report_checksum ?? null,
         ...extra,
       });
       setSuccess(`Action "${action}" gửi thành công.`);
@@ -106,21 +109,29 @@ export function ReviewLifecyclePanel({
         <div className="p-4">
           <PanelHeader title="Trạng thái review" />
           <div className="mt-2">
-            <ReviewStateMachine current={decision} />
+            <ReviewStateMachine current={decision ?? null} />
           </div>
         </div>
       </Panel>
 
-      {/* Decision card */}
+      {/* Decision card — chỉ có nội dung khi đã có approval record. */}
       <Panel>
         <div className="p-4">
           <PanelHeader title="Quyết định" />
-          <div className="mt-2 flex items-center gap-3">
-            <DecisionBadge decision={decision} />
-            <span className="text-xs text-slate-500">{review.approval.decided_at}</span>
-          </div>
-          {review.approval.reason && (
-            <p className="mt-2 text-xs text-slate-300">{review.approval.reason}</p>
+          {review.approval ? (
+            <>
+              <div className="mt-2 flex items-center gap-3">
+                <DecisionBadge decision={decision ?? null} />
+                <span className="text-xs text-slate-500">{review.approval.decided_at}</span>
+              </div>
+              {review.approval.reason && (
+                <p className="mt-2 text-xs text-slate-300">{review.approval.reason}</p>
+              )}
+            </>
+          ) : (
+            <p className="mt-2 text-xs text-slate-500">
+              Chưa có quyết định. Backend chỉ phát hành approval khi đã APPROVE hoặc REJECT.
+            </p>
           )}
         </div>
       </Panel>
@@ -183,9 +194,9 @@ export function ReviewLifecyclePanel({
         <div className="p-4 text-xs">
           <PanelHeader title="Ràng buộc checksum" />
           <ul className="mt-2 space-y-1 font-mono text-[10px] text-slate-500">
-            <li>candidate: {review.approval.candidate_checksum.slice(0, 26)}…</li>
-            <li>validation: {review.approval.validation_report_checksum.slice(0, 26)}…</li>
-            <li>record: {review.approval.record_checksum.slice(0, 26)}…</li>
+            <li>candidate: {review.approval?.candidate_checksum.slice(0, 26)}…</li>
+            <li>validation: {review.approval?.validation_report_checksum.slice(0, 26) ?? "—"}…</li>
+            <li>record: {review.approval?.record_checksum.slice(0, 26)}…</li>
           </ul>
           <p className="mt-2 text-[10px] text-slate-700">
             Approve chỉ seal exact candidate đã validate. Edit sau validation → DRAFT mới.
@@ -206,12 +217,16 @@ export function ReviewLifecyclePanel({
   );
 }
 
-function DecisionBadge({ decision }: { decision: string }) {
+function DecisionBadge({ decision }: { decision: string | null }) {
   const tone = decision === "APPROVE" ? "ok" : decision === "REJECT" ? "danger" : "default";
-  return <Badge tone={tone}>{decision}</Badge>;
+  return <Badge tone={tone}>{decision ?? "CHƯA QUYẾT"}</Badge>;
 }
 
-function ReviewStateMachine({ current }: { current: string }) {
+/**
+ * `PENDING` ở đây là nhãn hiển thị cho "chưa có approval", **không** phải giá trị
+ * `ApprovalDecision` của backend — backend chỉ có APPROVE/REJECT.
+ */
+function ReviewStateMachine({ current }: { current: string | null }) {
   const states = [
     { id: "PENDING", label: "Chờ review" },
     { id: "APPROVE", label: "Approved" },
