@@ -198,6 +198,20 @@ class ProjectPersistence:
             ).fetchall()
         return [self._job(row[0]) for row in rows]
 
+    def job_ids_after(self, cursor: str = "", limit: int = 100) -> list[str]:
+        """Queue discovery theo trang; một manifest hỏng không chặn job khác.
+
+        Không giữ transaction khi chạy worker. Status vẫn đọc từ manifest đã
+        commit, không thêm cột queue có thể lệch khỏi lifecycle authority.
+        """
+        if not 1 <= limit <= 1000:
+            raise ValueError("Page size phải nằm trong 1..1000")
+        with self.database.transaction() as tx:
+            rows = tx.execute(
+                "SELECT job_id FROM r2s_jobs WHERE job_id>? ORDER BY job_id LIMIT ?", (cursor, limit)
+            ).fetchall()
+        return [row[0] for row in rows]
+
     def list_attempts(self, job_id: str) -> list[JobAttemptRecord]:
         """Event journal nối thêm; restart không đánh số attempt lại từ một."""
         self.get_job(job_id)

@@ -314,9 +314,13 @@ class ProjectRegistry:
             self._attempts[job.job_id] = [event]
         return job
 
-    def transition_job(self, job_id: str, request: TransitionRequest) -> JobManifest:
+    def transition_job(
+        self, job_id: str, request: TransitionRequest, *, expected_checksum: Checksum | None = None
+    ) -> JobManifest:
         """Chuyển trạng thái job theo bảng chuyển, rồi publish revision mới."""
         current = self.get_job(job_id)
+        if expected_checksum is not None and current.job_manifest_checksum != expected_checksum:
+            raise RuntimeStateConflictError("Job revision khác command đang thực hiện; đọc lại trước khi thử lại")
         if self.persistence is not None:
             # Đọc history trước publication; CAS loại command nếu process khác đã đổi job.
             history = self.persistence.list_attempts(job_id)
