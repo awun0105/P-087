@@ -165,8 +165,11 @@ class SplatTransformVoxelAdapter:
         )
         cluster_checksum = file_checksum(workspace / "cluster.ply")
         self.process.cli(occupancy_command(config), (workspace, "occupancy"))
-        validate_seed_clearance(workspace, config)
-        output = self.process.cli(collision_command(config), (workspace, "collision"))
+        clearance = validate_seed_clearance(workspace, config)
+        carve_config = VoxelConfig.model_validate(
+            config.model_dump() | {"navigation_seed_world": clearance["accepted_seed_world"]}
+        )
+        output = self.process.cli(collision_command(carve_config), (workspace, "collision"))
         require_carve(output)
         if file_checksum(workspace / "cluster.ply") != cluster_checksum:
             raise GeometryError("Cluster changed during occupancy/carve attempt")
@@ -178,6 +181,7 @@ class SplatTransformVoxelAdapter:
         evidence_kind = request.confirmation.preview.request.evidence_kind if is_prod else request.evidence_kind
         scale_applied = request.confirmation.preview.transform.scale_m_per_sfm_unit if is_prod else 1.0
         applied_checksum = request.confirmation.record_checksum if is_prod else None
+        accepted_seed = json.loads((workspace / "seed-clearance.json").read_text())["accepted_seed_world"]
         return dict(
             schema_version="1.0",
             evidence_kind=evidence_kind,
@@ -188,6 +192,8 @@ class SplatTransformVoxelAdapter:
             source_checksum=request.source_checksum,
             config=request.config.model_dump(mode="json"),
             config_checksum=request.config.checksum(),
+            accepted_navigation_seed=accepted_seed,
+            native_accepted_navigation_seed=list(native_from_world(accepted_seed)),
             gaussian_counts=_gaussian_counts(workspace),
             **_coordinate_evidence(request.config, scale_applied),
             native_voxel_metadata=metadata.model_dump(mode="json", by_alias=True),

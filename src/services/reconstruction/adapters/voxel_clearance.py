@@ -7,6 +7,7 @@ luôn ghi cả seed đã yêu cầu lẫn seed được chấp nhận; nếu see
 """
 
 import hashlib
+import math
 from pathlib import Path
 
 from src.services.reconstruction.adapters.voxel_octree import VoxelOctree
@@ -23,16 +24,22 @@ from src.services.reconstruction.rgb.voxel import VoxelConfig
 def validate_seed_clearance(workspace: Path, config: VoxelConfig) -> dict:
     """Kiểm đúng box dilation kernel native; không suy clearance từ camera center."""
     metadata_bytes = (workspace / "occupancy.voxel.json").read_bytes()
+    payload = (workspace / "occupancy.voxel.bin").read_bytes()
+    receipt = clearance_from_bytes(config, metadata_bytes, payload)
+    write_evidence(workspace / "seed-clearance.json", receipt)
+    return receipt
+
+
+def clearance_from_bytes(config: VoxelConfig, metadata_bytes: bytes, payload: bytes) -> dict:
+    """Pure replay chung cho producer/consumer, kiểm semantic chứ không chỉ SHA."""
     metadata = VoxelMetadata.model_validate_json(metadata_bytes)
     if metadata.asset != {"generator": "splat-transform v3.6.6"}:
         raise ValueError("unexpected occupancy producer")
     if metadata.voxel_resolution != config.resolution_m:
         raise ValueError("occupancy resolution differs from requested config")
-    payload = (workspace / "occupancy.voxel.bin").read_bytes()
     plan = search_plan(VoxelOctree(metadata, payload), config)
     result = find_connected_seed(plan)
     receipt = _receipt(config, plan, result, metadata_bytes, payload)
-    write_evidence(workspace / "seed-clearance.json", receipt)
     return receipt
 
 
@@ -45,16 +52,17 @@ def _receipt(
 ) -> dict:
     """Evidence phải đủ để consumer tự dựng lại kernel và tự kiểm lại quyết định."""
     return dict(
-        schema_version="1.0",
+        schema_version="1.1",
         status="VALID",
         method="splat_3.6.6_separable_box_dilation",
-        search_method="connected_free_region_bfs6",
+        search_method="raw_free_air_bfs6_euclidean",
+        config=config.model_dump(mode="json"),
         config_checksum=config.checksum(),
         requested_seed_world=list(config.navigation_seed_world),
         accepted_seed_world=_accepted_seed(config, plan, result),
         relocates=result.relocates,
         relocation_steps_voxels=result.steps,
-        relocation_distance_m=round(result.steps * plan.resolution, 6),
+        relocation_distance_m=math.dist(config.navigation_seed_world, _accepted_seed(config, plan, result)),
         escape_hops_voxels=result.escape_hops,
         reachable_cells=result.reachable_cells,
         relocation_bound_m=config.max_seed_relocation_m,

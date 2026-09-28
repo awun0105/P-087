@@ -74,8 +74,11 @@ def _seed_decision(receipt: dict, clearance_checksum: str) -> SeedDecision:
     )
 
 
-def _provenance(source_master: str, confirmation: str) -> PreprocessingProvenance:
+def _provenance(source_master: str, confirmation: str, report: dict) -> PreprocessingProvenance:
     """Visual là reconstruction ước lượng; metric anchor là ngoài, không dẫn xuất từ dữ liệu."""
+    inherited = report.get("preprocessing_provenance")
+    if inherited is not None:
+        return PreprocessingProvenance.model_validate(inherited)
     return PreprocessingProvenance(
         dependencies=[
             PreprocessingDependency(
@@ -92,11 +95,11 @@ def _provenance(source_master: str, confirmation: str) -> PreprocessingProvenanc
 def _capsule(report: dict) -> CapsuleFootprint:
     config = report["config"]
     height, radius = config["capsule_height_m"], config["capsule_radius_m"]
-    return CapsuleFootprint(height_m=height, radius_m=radius, length_m=max(0.0, height - 2 * radius))
+    return CapsuleFootprint(shape="clearance_cylinder", height_m=height, radius_m=radius, length_m=height)
 
 
 def _rigid_transform(applied: dict) -> Transform:
-    """Similarity đã scale thẳng vào geometry, nên contract chỉ giữ phần rigid + `MetricScale`.
+    """Geometry đã ở mét; scale đã áp dụng được giữ riêng, transform chỉ lưu phần rigid.
 
     Dùng `validated_transform` của repo để không tái lập quy tắc finite/normalise quaternion.
     """
@@ -117,7 +120,7 @@ def build_geometry_artifact(
     report = payload.report
     return GeometryArtifact(
         artifact_type="GeometryArtifact",
-        schema_version="1.0",
+        schema_version="1.1",
         artifact_uri=payload.artifact_uri,
         artifact_checksum=payload.artifact_checksum,
         producer_stage=StageId.RGB_GEOMETRY,
@@ -125,12 +128,13 @@ def build_geometry_artifact(
         source_modality="rgb_3dgs",
         geometry_format="glb",
         coordinate_system=report["coordinate_system"],
-        metric_scale=MetricScale(status=MetricScaleStatus.CONFIRMED, meters_per_unit=report["scale_applied"]),
+        metric_scale=MetricScale(status=MetricScaleStatus.CONFIRMED, meters_per_unit=1.0),
+        applied_scale_m_per_source_unit=report["scale_applied"],
         applied_confirmation_checksum=report["applied_confirmation_checksum"],
         applied_transform=_rigid_transform(report["applied_transform"]),
         source_master_checksum=payload.source_master_checksum,
         voxel=_voxel_summary(report["native_voxel_metadata"]),
         seed=_seed_decision(payload.clearance_receipt, payload.clearance_checksum),
         capsule=_capsule(report),
-        provenance=_provenance(payload.source_master_checksum, report["applied_confirmation_checksum"]),
+        provenance=_provenance(payload.source_master_checksum, report["applied_confirmation_checksum"], report),
     )

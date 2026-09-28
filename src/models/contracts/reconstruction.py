@@ -1,5 +1,6 @@
 """Reconstruction artifacts published by EX-REC."""
 
+import math
 from enum import StrEnum
 from typing import Literal, Self
 
@@ -126,22 +127,30 @@ class SeedDecision(ContractModel):
             raise ValueError("seed relocation exceeds the configured bound")
         if not self.relocates and self.relocation_distance_m:
             raise ValueError("a seed accepted in place cannot report a relocation distance")
+        actual = math.dist(self.requested_world_m, self.accepted_world_m)
+        if not math.isclose(actual, self.relocation_distance_m, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError("relocation distance differs from the two seed points")
         return self
 
 
 class CapsuleFootprint(ContractModel):
-    """Hình trụ đại diện robot; consumer phải tự kiểm seed theo đúng footprint này.
+    """Footprint clearance khác capsule physics; consumer phải đọc discriminator.
 
-    `length_m` là phần hình trụ, không phải tổng chiều cao, để physics engine dựng
-    đúng capsule mà không phải tự suy ra từ hai số còn lại.
+    Với `capsule`, length là chiều dài phần trụ, height = length + 2*radius.
+    Với `clearance_cylinder`, length bằng height; không dựng thành capsule physics.
     """
 
+    shape: Literal["capsule", "clearance_cylinder"] = "capsule"
     height_m: FiniteFloat = Field(gt=0)
     radius_m: FiniteFloat = Field(gt=0)
     length_m: FiniteFloat = Field(ge=0)
 
     @model_validator(mode="after")
     def _bind_length_to_cylinder(self) -> Self:
+        if self.shape == "clearance_cylinder":
+            if self.length_m != self.height_m:
+                raise ValueError("clearance cylinder length must equal its height")
+            return self
         if abs(self.height_m - (self.length_m + 2 * self.radius_m)) > 1e-9:
             raise ValueError("capsule length must be height minus two radii")
         return self
@@ -155,7 +164,7 @@ class GeometryArtifact(ContractModel):
     """
 
     artifact_type: Literal["GeometryArtifact"]
-    schema_version: SchemaVersion
+    schema_version: Literal["1.0", "1.1"]
     artifact_uri: ArtifactUri
     artifact_checksum: Checksum
     producer_stage: Literal[StageId.RGB_GEOMETRY]
@@ -164,6 +173,7 @@ class GeometryArtifact(ContractModel):
     geometry_format: Literal["glb"]
     coordinate_system: CoordinateSystem
     metric_scale: MetricScale
+    applied_scale_m_per_source_unit: FiniteFloat = Field(default=1.0, gt=0)
     applied_confirmation_checksum: Checksum
     applied_transform: Transform
     source_master_checksum: Checksum
@@ -176,6 +186,8 @@ class GeometryArtifact(ContractModel):
     def _require_confirmed_metric_scale(self) -> Self:
         if self.metric_scale.status != MetricScaleStatus.CONFIRMED:
             raise ValueError("collision geometry requires a CONFIRMED metric scale")
+        if self.metric_scale.meters_per_unit != 1.0:
+            raise ValueError("canonical collision geometry must use meters_per_unit=1")
         if any(item.origin == DependencyOrigin.GROUND_TRUTH for item in self.provenance.dependencies):
             raise ValueError("product collision geometry must not depend on evaluation ground truth")
         return self

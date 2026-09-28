@@ -68,7 +68,7 @@ def test_valid_seed_keeps_native_kernel_and_does_not_relocate(tmp_path: Path) ->
 
 def test_blocked_seed_relocates_and_records_both_points(tmp_path: Path) -> None:
     """Seed bị vùi trong vật cản được tìm lại; receipt giữ cả điểm đã yêu cầu lẫn điểm nhận."""
-    receipt, settings = clearance(tmp_path, CUBE, navigation_seed_world=world_of((32, 32, 32)))
+    receipt, settings = clearance(tmp_path, CUBE, navigation_seed_world=world_of((31, 32, 32)))
     assert receipt["relocates"] is True
     assert receipt["requested_seed_world"] == list(settings.navigation_seed_world)
     assert receipt["accepted_seed_world"] != receipt["requested_seed_world"]
@@ -80,8 +80,8 @@ def test_blocked_seed_relocates_and_records_both_points(tmp_path: Path) -> None:
 
 def test_relocation_is_deterministic(tmp_path: Path) -> None:
     """Cùng input phải cho cùng accepted seed; không có tie-break ngẫu nhiên."""
-    first, _ = clearance(tmp_path / "a", CUBE, navigation_seed_world=world_of((32, 32, 32)))
-    second, _ = clearance(tmp_path / "b", CUBE, navigation_seed_world=world_of((32, 32, 32)))
+    first, _ = clearance(tmp_path / "a", CUBE, navigation_seed_world=world_of((31, 32, 32)))
+    second, _ = clearance(tmp_path / "b", CUBE, navigation_seed_world=world_of((31, 32, 32)))
     assert first["accepted_seed_world"] == second["accepted_seed_world"]
     assert first["accepted_seed_cell"] == second["accepted_seed_cell"]
 
@@ -89,7 +89,7 @@ def test_relocation_is_deterministic(tmp_path: Path) -> None:
 def test_relocation_beyond_bound_is_rejected(tmp_path: Path) -> None:
     """Ô trống có thật nhưng ngoài ngưỡng mét thì từ chối, không nới ngưỡng để lấy."""
     with pytest.raises(ValueError, match="within the relocation bound"):
-        clearance(tmp_path, CUBE, navigation_seed_world=world_of((32, 32, 32)), max_seed_relocation_m=0.1)
+        clearance(tmp_path, CUBE, navigation_seed_world=world_of((31, 32, 32)), max_seed_relocation_m=0.09)
 
 
 def test_seed_buried_in_thick_wall_is_rejected(tmp_path: Path) -> None:
@@ -108,10 +108,10 @@ def test_seed_buried_in_thick_wall_is_rejected(tmp_path: Path) -> None:
 
 def test_relocation_stays_in_connected_region_of_the_seed(tmp_path: Path) -> None:
     """Seed nằm trong bức tường; ứng viên phải thuộc phòng chứa nó, không sang phòng bên kia."""
-    receipt, _ = clearance(tmp_path, wall(0, range(30, 32)), navigation_seed_world=world_of((30, 32, 32)))
+    receipt, _ = clearance(tmp_path, wall(0, range(30, 32)), navigation_seed_world=world_of((29, 32, 32)))
     accepted = tuple(receipt["accepted_seed_cell"])
     assert accepted[0] <= 28, "relocation must not cross to the far side of the wall"
-    assert receipt["escape_hops_voxels"] >= 1
+    assert receipt["escape_hops_voxels"] == 0
     assert tree(tmp_path).intersects(CellBox(receipt["kernel_low"], receipt["kernel_high"])) is False
 
 

@@ -8,29 +8,18 @@ import pytest
 from src.services.reconstruction.adapters.voxel import SplatTransformVoxelAdapter, SyntheticVoxelRequest, file_checksum
 from src.services.reconstruction.adapters.voxel_output import validate_voxel_output
 from src.services.reconstruction.adapters.voxel_runtime import GeometryError, VoxelProcess, VoxelRuntimeSettings
-from tests.test_reconstruction.rec05_occupancy_fixture import occupancy_fixture
+from tests.test_reconstruction.rec05_occupancy_fixture import occupancy_fixture, write_occupancy
 from tests.test_reconstruction.test_rec05_collision import collision_fixture, write_fixture
 from tests.test_reconstruction.test_rec05_voxel import config
 
 
 def voxel_fixture(workspace: Path) -> dict:
-    """Native metadata fixture chỉ chứng minh validator/layout, không octree occupancy."""
-    bounds = {"min": [-1, -1, -1], "max": [5, 5, 5]}
-    metadata = dict(
-        version="1.1",
-        asset={"generator": "splat-transform v3.6.6"},
-        gridBounds=bounds,
-        sceneBounds=bounds,
-        voxelResolution=0.1,
-        leafSize=4,
-        treeDepth=1,
-        numInteriorNodes=1,
-        numMixedLeaves=0,
-        nodeCount=8,
-        leafDataCount=0,
-    )
+    """Octree hợp lệ cho consumer reload; không chứng minh GPU carve hay quan hệ mesh/voxel."""
+    metadata = write_occupancy(workspace, {(63, 63, 63)}, name="geometry")
+    # Giữ extent 64 ô × 0.1m để pointers/depth nhất quán; bounds chứa mesh fixture.
+    metadata["gridBounds"] = {"min": [-1, -1, -1], "max": [5.4, 5.4, 5.4]}
+    metadata["sceneBounds"] = {"min": [-1, -1, -1], "max": [5.4, 5.4, 5.4]}
     (workspace / "geometry.voxel.json").write_text(json.dumps(metadata))
-    (workspace / "geometry.voxel.bin").write_bytes(b"\0" * 32)
     return metadata
 
 

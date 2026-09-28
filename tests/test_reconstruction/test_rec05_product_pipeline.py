@@ -253,6 +253,6 @@ def test_consumer_rejects_unverifiable_clearance_evidence(published_clearance, t
                 )
             }
         )
-        expected = "intersects published occupancy"
+        expected = "differs from occupancy/config replay"
     with pytest.raises(ValueError, match=expected):
         resolver.load_seed_clearance(clearance)

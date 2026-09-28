@@ -4,6 +4,7 @@ Contract này là hợp đồng giữa EX-REC (produce) và EX-SIM (consume), n�
 vào các invariant mà validator phải chặn được, không chỉ kiểm field tồn tại.
 """
 
+import math
 from pathlib import Path
 
 import pytest
@@ -44,7 +45,7 @@ def _seed(relocates: bool = False) -> SeedDecision:
         requested_world_m=(0.3, 0.0, 0.1),
         accepted_world_m=accepted,
         relocates=relocates,
-        relocation_distance_m=0.1 if relocates else 0.0,
+        relocation_distance_m=math.dist((0.3, 0.0, 0.1), accepted),
         relocation_bound_m=1.0,
         occupancy_checksum=OTHER_SHA,
         clearance_evidence_checksum=SHA,
@@ -78,7 +79,7 @@ def _artifact(**overrides) -> GeometryArtifact:
         source_modality="rgb_3dgs",
         geometry_format="glb",
         coordinate_system=CoordinateSystem(),
-        metric_scale=MetricScale(status=MetricScaleStatus.CONFIRMED, meters_per_unit=2.0),
+        metric_scale=MetricScale(status=MetricScaleStatus.CONFIRMED, meters_per_unit=1.0),
         applied_confirmation_checksum=OTHER_SHA,
         applied_transform=_transform(),
         source_master_checksum=OTHER_SHA,
@@ -94,7 +95,7 @@ def _artifact(**overrides) -> GeometryArtifact:
 def test_geometry_artifact_is_constructible_and_metric_bound() -> None:
     """Consumer thấy đủ: metric CONFIRMED, transform rigid đã áp, seed đã xác nhận."""
     artifact = _artifact()
-    assert artifact.metric_scale.meters_per_unit == 2.0
+    assert artifact.metric_scale.meters_per_unit == 1.0
     assert artifact.applied_transform.parent_frame == "world"
     assert artifact.voxel.resolution_m == 0.05
     assert artifact.seed.relocates is False
@@ -188,9 +189,11 @@ def test_builder_converts_native_bounds_and_similarity() -> None:
     # world_from_native(x, y, z) = (x, -z, y): native z=-4..0 thành world y=0..4.
     assert artifact.voxel.grid_bounds_min_xyz_m == (0.0, 0.0, 0.0)
     assert artifact.voxel.grid_bounds_max_xyz_m == (2.0, 4.0, 2.0)
-    assert artifact.metric_scale.meters_per_unit == 0.5
+    assert artifact.metric_scale.meters_per_unit == 1.0
+    assert artifact.applied_scale_m_per_source_unit == 0.5
     assert artifact.applied_transform.translation_xyz == (1.0, 2.0, 3.0)
-    assert artifact.capsule.length_m == pytest.approx(0.2)
+    assert artifact.capsule.shape == "clearance_cylinder"
+    assert artifact.capsule.length_m == pytest.approx(0.4)
 
 
 def test_builder_keeps_relocation_visible_in_the_contract(tmp_path: Path) -> None:
@@ -233,4 +236,4 @@ def test_builder_keeps_relocation_visible_in_the_contract(tmp_path: Path) -> Non
     assert artifact.seed.requested_world_m == (0.1, 0.0, 0.1)
     assert artifact.seed.accepted_world_m == (0.4, 0.0, 0.1)
     assert artifact.seed.relocation_distance_m == pytest.approx(0.3)
-    assert artifact.capsule.length_m == pytest.approx(0.5)
+    assert artifact.capsule.length_m == pytest.approx(1.2)

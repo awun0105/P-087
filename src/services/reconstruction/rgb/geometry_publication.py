@@ -6,17 +6,26 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+from uuid import uuid4
 
 from src.models.contracts.artifacts import ArtifactDataClass, Checksum, ContractModel, ProductArtifactRef
 from src.models.contracts.coordinates import CoordinateSystem
+from src.models.contracts.identity import canonical_json_bytes
 from src.models.contracts.manifests import StageId
-from src.models.contracts.reconstruction import GeometryArtifact
+from src.models.contracts.reconstruction import GeometryArtifact, PreprocessingProvenance
 from src.services.reconstruction.adapters.voxel import ProductVoxelRequest, SplatTransformVoxelAdapter
-from src.services.reconstruction.adapters.voxel_octree import CellBox, VoxelOctree
+from src.services.reconstruction.adapters.voxel_clearance import clearance_from_bytes
+from src.services.reconstruction.adapters.voxel_octree import VoxelOctree
 from src.services.reconstruction.adapters.voxel_output import VoxelMetadata
+from src.services.reconstruction.attempt import PathSegment
 from src.services.reconstruction.rgb.frame_set import _sha256
-from src.services.reconstruction.rgb.geometry_artifact import GeometryArtifactInput, build_geometry_artifact
+from src.services.reconstruction.rgb.geometry_artifact import (
+    GeometryArtifactInput,
+    _voxel_summary,
+    build_geometry_artifact,
+)
 from src.services.reconstruction.rgb.metric import MetricCanonicalizer
+from src.services.reconstruction.rgb.metric_models import MetricConfirmation
 from src.services.reconstruction.rgb.metric_seed import CameraSeedProposal
 from src.services.reconstruction.rgb.publication import ArtifactWriter
 from src.services.reconstruction.rgb.visual_publication import VisualResolver
@@ -27,6 +36,7 @@ class GeometryExecutionRequest(ContractModel):
     """Yêu cầu tạo coarse voxel collision mesh từ visual artifact và metric confirmation."""
 
     execution_scope: Literal["product", "synthetic_fixture"] = "product"
+    attempt_id: PathSegment | None = None
     confirmation_ref: ProductArtifactRef
     source_visual: ProductArtifactRef
     config: VoxelConfig
@@ -52,9 +62,21 @@ class GeometryExecutionResult(ContractModel):
 
     geometry_ref: ProductArtifactRef
     metadata_ref: ProductArtifactRef
+    voxel_binary_ref: ProductArtifactRef
+    manifest_ref: ProductArtifactRef
     clearance: SeedClearanceArtifacts
     geometry: GeometryArtifact
     report: dict
+
+
+class GeometryArtifactManifest(ContractModel):
+    """Inventory portable; manifest chỉ publish sau khi mọi member đã tồn tại."""
+
+    schema_version: Literal["1.1"] = "1.1"
+    geometry: GeometryArtifact
+    metadata_ref: ProductArtifactRef
+    voxel_binary_ref: ProductArtifactRef
+    clearance: SeedClearanceArtifacts
 
 
 class GeometryPublisher:
@@ -70,10 +92,11 @@ class GeometryPublisher:
 
     def _publish(self, artifact_type: str, name: str, payload: bytes, provenance: dict) -> ProductArtifactRef:
         """Mọi artifact REC-05 dùng chung identity shape; chỉ khác artifact_type."""
+        identity = provenance.get("publication_id") or hashlib.sha256(payload).hexdigest()
         ref = ProductArtifactRef(
             artifact_type=artifact_type,
             schema_version="1.0",
-            artifact_uri=f"artifact://jobs/{self.job_id}/rec05/{name}",
+            artifact_uri=f"artifact://jobs/{self.job_id}/rec05/{identity}/{name}",
             artifact_checksum="sha256:" + hashlib.sha256(payload).hexdigest(),
             data_class=ArtifactDataClass.DERIVED,
             producer_stage=StageId.RGB_GEOMETRY,
@@ -120,6 +143,58 @@ class GeometryResolver:
             raise ValueError("reference is not a VoxelMetadata artifact")
         return json.loads(self.require(reference).read_text())
 
+    def load(self, reference: ProductArtifactRef) -> GeometryArtifactManifest:
+        """Consumer không cần attempt workspace; bind kernel/config với geometry đã ký hash."""
+        manifest = GeometryArtifactManifest.model_validate_json(
+            self._require_type(reference, "GeometryArtifactManifest").read_bytes()
+        )
+        geometry = manifest.geometry
+        metadata = VoxelMetadata.model_validate_json(
+            self._require_type(manifest.metadata_ref, "VoxelMetadata").read_bytes()
+        )
+        VoxelOctree(metadata, self._require_type(manifest.voxel_binary_ref, "VoxelBinary").read_bytes())
+        if geometry.voxel != _voxel_summary(metadata.model_dump(mode="json", by_alias=True)):
+            raise ValueError("geometry voxel bounds differ from published metadata")
+        refs = (
+            manifest.metadata_ref,
+            manifest.voxel_binary_ref,
+            manifest.clearance.occupancy_metadata,
+            manifest.clearance.occupancy_binary,
+            manifest.clearance.seed_clearance,
+        )
+        prefix = reference.artifact_uri.rsplit("/", 1)[0] + "/"
+        for ref in refs:
+            if ref.job_id != reference.job_id or not ref.artifact_uri.startswith(prefix):
+                raise ValueError("geometry inventory differs from publication job/namespace")
+            self.require(ref)
+        if geometry.job_id != reference.job_id or not geometry.artifact_uri.startswith(prefix):
+            raise ValueError("geometry belongs to another publication")
+        self.require(
+            ProductArtifactRef(
+                artifact_type="RgbGeometry",
+                schema_version="1.0",
+                artifact_uri=geometry.artifact_uri,
+                artifact_checksum=geometry.artifact_checksum,
+                job_id=geometry.job_id,
+                data_class="derived",
+                producer_stage=StageId.RGB_GEOMETRY,
+            )
+        )
+        decision = self.load_seed_clearance(manifest.clearance)
+        config = VoxelConfig.model_validate(decision["config"])
+        if (
+            geometry.seed.requested_world_m != tuple(decision["requested_seed_world"])
+            or geometry.seed.accepted_world_m != tuple(decision["accepted_seed_world"])
+            or geometry.seed.clearance_evidence_checksum != manifest.clearance.seed_clearance.artifact_checksum
+            or geometry.seed.occupancy_checksum != manifest.clearance.occupancy_binary.artifact_checksum
+            or geometry.capsule.shape != "clearance_cylinder"
+            or geometry.capsule.height_m != config.capsule_height_m
+            or geometry.capsule.radius_m != config.capsule_radius_m
+            or geometry.voxel.resolution_m != config.resolution_m
+        ):
+            raise ValueError("geometry seed/footprint differs from verified clearance config")
+        return manifest
+
     def load_seed_clearance(self, clearance: SeedClearanceArtifacts) -> dict:
         """Re-verify clearance end-to-end từ bytes đã publish, không tin giá trị `status`.
 
@@ -133,8 +208,12 @@ class GeometryResolver:
             raise ValueError("published occupancy metadata differs from the seed clearance decision")
         if "sha256:" + hashlib.sha256(payload).hexdigest() != decision["occupancy_binary_checksum"]:
             raise ValueError("published occupancy binary differs from the seed clearance decision")
-        if VoxelOctree(VoxelMetadata.model_validate_json(meta_bytes), payload).intersects(_decision_kernel(decision)):
-            raise ValueError("published seed clearance kernel intersects published occupancy")
+        refs = (clearance.seed_clearance, clearance.occupancy_metadata, clearance.occupancy_binary)
+        if len({ref.job_id for ref in refs}) != 1:
+            raise ValueError("clearance artifacts belong to different jobs")
+        config = VoxelConfig.model_validate(decision.get("config", {}))
+        if decision != clearance_from_bytes(config, meta_bytes, payload):
+            raise ValueError("published seed clearance decision differs from occupancy/config replay")
         return decision
 
     def _require_type(self, reference: ProductArtifactRef, artifact_type: str) -> Path:
@@ -172,6 +251,7 @@ class RgbGeometryService:
             applied_record_checksum=request.applied_record_checksum,
         )
         report = self.deps.adapter.run_product(voxel_req, workspace)
+        report["preprocessing_provenance"] = _source_lineage(request, confirmation).model_dump(mode="json")
         return self._publish_artifacts(request, workspace, report)
 
     def _validate_preconditions(self, request: GeometryExecutionRequest) -> tuple:
@@ -208,20 +288,38 @@ class RgbGeometryService:
         self, request: GeometryExecutionRequest, workspace: Path, report: dict
     ) -> GeometryExecutionResult:
 
-        pub = self.deps.publisher.for_job(request.job_id)
+        # Validate toàn bộ graph trước lần ghi đầu; manifest là commit marker cuối.
+        batch = _PublicationBatch()
+        pub = GeometryPublisher(batch, request.job_id)
         provenance = _provenance(request, report)
         geometry_ref = pub.publish_mesh("collision.glb", (workspace / "collision.glb").read_bytes(), provenance)
         metadata_ref = pub.publish_metadata(
             "geometry.voxel.json", (workspace / "geometry.voxel.json").read_bytes(), provenance
         )
+        binary_ref = pub._publish(
+            "VoxelBinary", "geometry.voxel.bin", (workspace / "geometry.voxel.bin").read_bytes(), provenance
+        )
         clearance = _publish_clearance(pub, workspace, provenance)
-        return GeometryExecutionResult(
+        geometry = _build_geometry_artifact(request, report, geometry_ref, clearance, workspace)
+        inventory = GeometryArtifactManifest(
+            geometry=geometry, metadata_ref=metadata_ref, voxel_binary_ref=binary_ref, clearance=clearance
+        )
+        manifest_ref = pub._publish(
+            "GeometryArtifactManifest", "geometry.json", canonical_json_bytes(inventory), provenance
+        )
+        result = GeometryExecutionResult(
             geometry_ref=geometry_ref,
             metadata_ref=metadata_ref,
+            voxel_binary_ref=binary_ref,
+            manifest_ref=manifest_ref,
             clearance=clearance,
-            geometry=_build_geometry_artifact(request, report, geometry_ref, clearance, workspace),
+            geometry=geometry,
             report=report,
         )
+        for reference, payload in batch.items:
+            if self.deps.publisher.writer.publish(reference, payload) != reference:
+                raise ValueError("artifact writer changed geometry publication identity")
+        return result
 
 
 def _build_geometry_artifact(
@@ -245,14 +343,17 @@ def _build_geometry_artifact(
     )
 
 
-def _decision_kernel(decision: dict) -> CellBox:
-    """Dựng lại đúng box mà producer đã quyết định, từ bytes publish được."""
-    return CellBox(tuple(decision["kernel_low"]), tuple(decision["kernel_high"]))
-
-
 def _provenance(request: GeometryExecutionRequest, report: dict) -> dict:
     """Provenance chung cho mọi artifact REC-05; không ghi path hay secret."""
+    # Caller worker khóa attempt_id; caller legacy cũng không đè artifact của lần chạy trước.
+    attempt_id = request.attempt_id or uuid4().hex
     return dict(
+        attempt_id=attempt_id,
+        publication_id=hashlib.sha256(
+            canonical_json_bytes(
+                {"request": request.model_dump(mode="json"), "files": report["files"], "attempt_id": attempt_id}
+            )
+        ).hexdigest(),
         producer_version="rec05-v1",
         applied_confirmation_checksum=report["applied_confirmation_checksum"],
         scale_applied=report["scale_applied"],
@@ -264,6 +365,52 @@ def _provenance(request: GeometryExecutionRequest, report: dict) -> dict:
         voxel_resolution_m=request.config.resolution_m,
         voxel_config_checksum=request.config.checksum(),
         coordinate_system=CoordinateSystem().model_dump(mode="json"),
+        preprocessing_provenance=report["preprocessing_provenance"],
+    )
+
+
+class _PublicationBatch:
+    """Stage payloads trong RAM; invalid contract không tạo artifact dở dang."""
+
+    def __init__(self) -> None:
+        self.items: list[tuple[ProductArtifactRef, bytes]] = []
+
+    def publish(self, reference: ProductArtifactRef, payload: bytes) -> ProductArtifactRef:
+        self.items.append((reference, payload))
+        return reference
+
+
+def _source_lineage(request: GeometryExecutionRequest, confirmation: MetricConfirmation) -> PreprocessingProvenance:
+    """Giữ measurement/frame/decision provenance; không tự tẩy GT-assistance."""
+    metric = confirmation.preview.request
+    refs = {
+        "visual": request.source_visual,
+        "master": metric.anchor.source_master,
+        "measurement": metric.anchor.measurement_ref,
+        "frame": metric.frame.evidence_ref,
+        "decision": confirmation.acceptance.decision_ref,
+        "confirmation": request.confirmation_ref,
+    }
+    dependencies = []
+    for role, ref in refs.items():
+        provenance = ref.source_provenance or {}
+        inherited = provenance.get("preprocessing_provenance", provenance)
+        if "dependencies" in inherited:
+            dependencies.extend(PreprocessingProvenance.model_validate(inherited).dependencies)
+        dependencies.append(
+            dict(
+                role=role,
+                origin="ground_truth"
+                if inherited.get("ground_truth_assisted")
+                else ("estimated" if role in {"visual", "master"} else "external"),
+                source_checksum=ref.artifact_checksum,
+            )
+        )
+    raw = [item.model_dump(mode="json") if hasattr(item, "model_dump") else item for item in dependencies]
+    return PreprocessingProvenance(
+        dependencies=raw,
+        ground_truth_assisted=any(item["origin"] == "ground_truth" for item in raw),
+        details={role: ref.model_dump(mode="json") for role, ref in refs.items()},
     )
 
 

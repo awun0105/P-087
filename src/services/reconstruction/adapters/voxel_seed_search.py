@@ -5,17 +5,18 @@ với `findNearestFreeCell` của upstream 3.6.6 — quét vỏ cube, không con
 có thể nhảy xuyên tường — module này BFS trên tập ô tự do nên ứng viên luôn nằm
 trong cùng vùng không khí liên thông với seed đã yêu cầu.
 
-Ba ràng buộc bắt buộc, đều phải báo lại trong evidence: khoảng cách dịch chuyển có
-ngưỡng tính bằng mét, số bước thoát khỏi vật cản có ngưỡng, và mọi quyết định đều giữ
-cả seed đã yêu cầu lẫn seed được chấp nhận. Không tìm được ứng viên trong ngưỡng
-thì raise, tức quay về hành vi từ chối như trước khi có amendment.
+Khoảng cách Euclidean tính từ seed gốc phải trong ngưỡng mét; đường BFS chỉ qua
+raw free air; mọi quyết định giữ cả seed gốc lẫn seed được chấp nhận. Nếu tâm seed
+nằm trong ô rắn thì không đoán phía nào của tường: từ chối và yêu cầu chọn lại.
 """
 
 import math
 from collections import deque
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from src.services.reconstruction.adapters.voxel_octree import Cell, CellBox, VoxelOctree
+from src.services.reconstruction.adapters.voxel_output import VoxelMetadata
 from src.services.reconstruction.rgb.voxel import (
     Vector3,
     VoxelConfig,
@@ -37,6 +38,8 @@ class SeedSearchPlan:
     extents: Cell
     max_steps: int
     escape_hops: int
+    requested_world: Vector3
+    distance_limit_m: float
 
     @property
     def resolution(self) -> float:
@@ -56,7 +59,11 @@ class SeedSearchPlan:
         )
 
     def steps_from_seed(self, cell: Cell) -> int:
-        return max(abs(value - start) for value, start in zip(cell, self.cell))
+        return sum(abs(value - start) for value, start in zip(cell, self.cell))
+
+    def distance(self, cell: Cell) -> float:
+        """Đo từ điểm yêu cầu thật, không từ tâm voxel đã làm tròn."""
+        return math.dist(self.requested_world, self.world(cell))
 
     def fits_grid(self, cell: Cell) -> bool:
         """Kernel tràn ra ngoài grid thì không phải free space, mà là ngoài phạm vi."""
@@ -118,6 +125,8 @@ def search_plan(tree: VoxelOctree, config: VoxelConfig) -> SeedSearchPlan:
         extents=extents,
         max_steps=math.ceil(config.max_seed_relocation_m / tree.metadata.voxel_resolution),
         escape_hops=max(extents) + 1,
+        requested_world=config.navigation_seed_world,
+        distance_limit_m=config.max_seed_relocation_m,
     )
 
 
@@ -127,7 +136,7 @@ def kernel_extents(config: VoxelConfig) -> Cell:
     return radius, math.ceil(config.capsule_height_m / (2 * config.resolution_m)), radius
 
 
-def seed_cell(config: VoxelConfig, metadata) -> Cell:
+def seed_cell(config: VoxelConfig, metadata: VoxelMetadata) -> Cell:
     """Ô chứa seed native, tức đúng `floor((seed - gridMin) / resolution)`."""
     seed = native_from_world(config.navigation_seed_world)
     return tuple(
@@ -139,16 +148,23 @@ def find_connected_seed(plan: SeedSearchPlan) -> SeedSearchResult:
     """Ứng viên gần nhất trong vùng liên thông; raise khi vượt ngưỡng hoặc không có ứng viên."""
     if not plan.tree.intersects(plan.kernel(plan.cell)):
         return SeedSearchResult(plan.cell, False, 0, 0, 0)
+    # Tâm seed trong vật rắn không xác định được phía tự do nào là đúng. Không
+    # khởi tạo nhiều BFS ở hai bên tường để tạo ra connectivity giả.
+    if plan.tree.intersects(CellBox(plan.cell, plan.cell)):
+        raise ValueError("no unambiguous free air touching the requested seed; select another seed")
     region = _region(plan)
-    free = _free_cells(plan, region)
-    starts, escape_hops = _escape_starts(plan, region, free)
-    if not starts:
-        raise ValueError("no free capsule cell touching the requested seed; select another seed")
-    reached = _flood(region, free, starts)
-    best = _nearest(plan, region, reached)
+    solid = plan.tree.solid_mask(region.origin, region.size)
+    air = bytearray(
+        not hit and (flat == region.flat(plan.cell) or plan.distance(region.cell_of(flat)) <= plan.distance_limit_m)
+        for flat, hit in enumerate(solid)
+    )
+    reached = _flood(region, air, [region.flat(plan.cell)])
+    blocked = _box_any(solid, region.size, plan.extents)
+    candidates = [flat for flat in reached if not blocked[flat] and plan.fits_grid(region.cell_of(flat))]
+    best = _nearest(plan, region, candidates)
     if best is None:
         raise ValueError("no free capsule cell within the relocation bound; select another seed")
-    return SeedSearchResult(best, True, plan.steps_from_seed(best), escape_hops, len(reached))
+    return SeedSearchResult(best, True, plan.steps_from_seed(best), 0, len(reached))
 
 
 def _region(plan: SeedSearchPlan) -> _Region:
@@ -156,12 +172,6 @@ def _region(plan: SeedSearchPlan) -> _Region:
     low = tuple(max(0, value - reach) for value, reach in zip(plan.cell, span))
     high = tuple(min(limit, value + reach + 1) for value, reach, limit in zip(plan.cell, span, plan.tree.dimensions))
     return _Region(low, tuple(hi - lo for lo, hi in zip(low, high)))
-
-
-def _free_cells(plan: SeedSearchPlan, region: _Region) -> bytearray:
-    """Ô nào kernel capsule không chạm vật cản; ô tràn grid bị loại, không coi là trống."""
-    blocked = _box_any(plan.tree.solid_mask(region.origin, region.size), region.size, plan.extents)
-    return bytearray(not blocked[flat] and plan.fits_grid(region.cell_of(flat)) for flat in range(len(blocked)))
 
 
 def _box_any(mask: bytearray, size: Cell, extents: Cell) -> bytearray:
@@ -182,7 +192,7 @@ def _window_any(mask: bytearray, size: Cell, axis: int, extent: int) -> bytearra
     return out
 
 
-def _line_starts(size: Cell, axis: int):
+def _line_starts(size: Cell, axis: int) -> Iterator[int]:
     """Offset đầu mỗi đường song song `axis`, duyệt theo hai trục còn lại.
 
     Không suy ra từ `len(mask) // (line_len * stride)` vì khi một trục có extent 0
@@ -218,20 +228,6 @@ def _line_hits(values: list[int], extent: int) -> list[int]:
     return hits
 
 
-def _escape_starts(plan: SeedSearchPlan, region: _Region, free: bytearray) -> tuple[list[int], int]:
-    """Ô tự do gần seed nhất theo vỏ cube; số vỏ dùng chính là số bước thoát vật cản."""
-    hops = [
-        (max(abs(value - start) for value, start in zip(region.cell_of(flat), plan.cell)), flat)
-        for flat in range(len(free))
-        if free[flat]
-    ]
-    within = [item for item in hops if item[0] <= plan.escape_hops]
-    if not within:
-        return [], plan.escape_hops + 1
-    nearest_hop = min(hop for hop, _ in within)
-    return [flat for hop, flat in within if hop == nearest_hop], nearest_hop
-
-
 def _flood(region: _Region, free: bytearray, starts: list[int]) -> list[int]:
     """BFS 6 hướng trên ô tự do; đây là chỗ khác hẳn quét vỏ cube của upstream."""
     seen = bytearray(len(free))
@@ -255,7 +251,7 @@ def _flood(region: _Region, free: bytearray, starts: list[int]) -> list[int]:
 def _nearest(plan: SeedSearchPlan, region: _Region, reached: list[int]) -> Cell | None:
     """Ứng viên gần nhất trong ngưỡng; tie-break theo tọa độ để kết quả tất định."""
     cells = [region.cell_of(flat) for flat in reached]
-    inside = [cell for cell in cells if plan.steps_from_seed(cell) <= plan.max_steps]
+    inside = [cell for cell in cells if plan.distance(cell) <= plan.distance_limit_m]
     if not inside:
         return None
-    return min(inside, key=lambda cell: (plan.steps_from_seed(cell), cell))
+    return min(inside, key=lambda cell: (plan.distance(cell), cell))
