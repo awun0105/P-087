@@ -29,3 +29,9 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+## Vendored SuperSplat editor
+
+`vendor/supersplat/` là bản copy của `playcanvas/supersplat` v3.4.2 (commit
+`f76e676`) theo MIT License ở trên, được build thành `public/editor/` và nhúng
+vào Studio. Chi tiết nguồn gốc và chỉnh sửa: `vendor/supersplat/PROVENANCE.md`.
