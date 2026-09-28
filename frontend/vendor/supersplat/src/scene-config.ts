@@ -1,7 +1,9 @@
 type Color = { r: number, g: number, b: number, a: number };
 
-const DEFAULT_BG_CLR: Color = { r: 0, g: 0, b: 0, a: 1 };
-const DEFAULT_SELECTED_CLR: Color = { r: 1, g: 1, b: 0, a: 1 };
+// Real2Sim: nền viewport nâu than ấm (#1f1b17) thay cho đen tuyền.
+const DEFAULT_BG_CLR: Color = { r: 0.122, g: 0.106, b: 0.09, a: 1 };
+// Real2Sim: splat được chọn tô cam thương hiệu (#e8743b).
+const DEFAULT_SELECTED_CLR: Color = { r: 0.91, g: 0.455, b: 0.231, a: 1 };
 const DEFAULT_UNSELECTED_CLR: Color = { r: 0, g: 0, b: 1, a: 0.5 };
 const DEFAULT_LOCKED_CLR: Color = { r: 0, g: 0, b: 0, a: 0.05 };
 

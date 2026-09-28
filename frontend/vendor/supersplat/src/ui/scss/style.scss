@@ -1,4 +1,4 @@
-@use 'pcui-theme-grey.scss';
+@use 'pcui-theme-real2sim.scss';
 @use 'colors.scss' as *;
 @use 'tooltips.scss';
 @use 'panel.scss';
@@ -81,7 +81,7 @@ body {
 
 #coord-space-toggle.active {
     background-color: $bcg-dark !important;
-    color: #f60;
+    color: $clr-hilight;
 }
 
 #file-selector {
