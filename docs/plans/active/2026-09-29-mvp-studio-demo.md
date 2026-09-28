@@ -159,6 +159,26 @@ Phase 5 — Packaging GPU/SSH + demo run
   (self-attestation của người upload đủ để dispatch), ghi nhãn "tự khai (MVP)"
   trong dữ liệu/UI, không giả `VERIFIED_ANONYMIZED` do QA. Code gate giữ nguyên,
   tắt setting để quay lại luồng nghiệp vụ.
+- 2026-09-29 (owner): privacy MVP = cách 1 — người upload tick xác nhận video không
+  chứa mặt/biển số (hoặc đã làm mờ), hệ thống ghi nhận là tự khai rồi chạy. Chưa có
+  code auto detect/blur (PRD §2.3/NFR-05 không bắt buộc cho MVP).
+- 2026-09-29 Audit follow-up (sau MVP): xóa người/vật thể + inpainting, tham khảo
+  `private/spirula-studio` (commit d8e6a267). Kết quả audit:
+  - License **GPLv3** → không copy code vào repo MIT; chỉ tham khảo thuật toán hoặc
+    gọi binary qua subprocess (INTEGRATION_PLAYBOOK §7.2).
+  - Spirula **không có inpainting**. Nó xóa vật thể động (người, xe) *trước khi
+    train*: text prompt ("person") → SAM 2/3 hoặc lang-sam/BiRefNet sinh mask theo
+    frame → `masks/` cạnh ảnh → trainer bỏ qua loss ở pixel bị mask; nền được lấp
+    bằng các góc nhìn khác (`src/sam/README.md`, `docs/datasets.md` §Masks,
+    `docs/notes/mask-editor.md`).
+  - Brush source (`private/brush` 5f6e45cc) cũng đọc `masks/` cho COLMAP dataset
+    (`AlphaMode::Masked`); binary runtime đang dùng (build 2025-09-15) chưa kiểm
+    có hỗ trợ không — UNKNOWN.
+  - Hướng đề xuất: stage mask người/vật thể động sau `ST-FRAME-EXTRACT` bằng SAM2
+    (Apache-2.0, EX-SCENE đã dùng) + text detector → Brush train có mask. Vùng nền
+    chưa từng thấy vẫn bị thủng/floater; inpainting 3D thật là P1/P2 (BRIEF §6,
+    INTEGRATION_PLAYBOOK §5.4) và cần nguồn khác ngoài Spirula.
+  - MVP chỉ có xóa Gaussian thủ công trong editor SuperSplat, không inpainting.
 - OPEN — CONFLICT / AUTHORITY GAP (ghi 2026-09-29 sau khi đọc docs/execution):
   quyết định MVP self-attestation ở trên mâu thuẫn với
   `docs/execution/tracks/ex_product/TRACK.md` §Authority Gates ("source-rights/
