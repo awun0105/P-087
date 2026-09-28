@@ -5,7 +5,7 @@ from typing import Literal, Self
 from pydantic import model_validator
 
 from src.models.contracts.artifacts import Checksum, ContractModel, Identifier, ProductArtifactRef
-from src.models.contracts.manifests import ExecutionError, StageArtifact
+from src.models.contracts.manifests import ExecutionError, StageArtifact, StageId
 
 
 class ReconstructionPreview(ContractModel):
@@ -36,6 +36,13 @@ class ReconstructionPreview(ContractModel):
             raise ValueError("Preview delivery cần GaussianSOG đóng gói một file")
         if self.source_visual_ref.artifact_type != "BrushVisualArtifact":
             raise ValueError("Preview source phải là BrushVisualArtifact")
+        if (
+            self.camera_pose_ref.artifact_type != "CameraPoseArtifact"
+            or self.camera_pose_ref.producer_stage != StageId.CAMERA_POSE
+        ):
+            raise ValueError("Preview poses phải đến từ REC-03")
+        if any(ref.producer_stage != StageId.VISUAL_RECON for ref in (self.source_visual_ref, self.delivery_ref)):
+            raise ValueError("Preview visual/delivery phải đến từ REC-04")
         return self
 
 

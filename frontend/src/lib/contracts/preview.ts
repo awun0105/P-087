@@ -27,6 +27,7 @@ function record(value: unknown): value is Record<string, unknown> {
 export function parsePreview(value: unknown, jobId: string): ReconstructionPreview {
   if (!record(value) || value.schema_version !== "1.0" || value.artifact_type !== "ReconstructionPreview" ||
       value.job_id !== jobId || typeof value.attempt_id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value.attempt_id) ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(jobId) ||
       value.format !== "gaussian_sog" || value.producer !== "brush" || typeof value.producer_version !== "string" ||
       value.metric_status !== "UNCONFIRMED" || value.coordinate_frame !== "sfm_world" || value.unit !== "arbitrary" ||
       typeof value.source_input_checksum !== "string" || !checksum.test(value.source_input_checksum)) {
@@ -36,6 +37,7 @@ export function parsePreview(value: unknown, jobId: string): ReconstructionPrevi
   for (const field of ["source_visual_ref", "camera_pose_ref", "delivery_ref"] as const) {
     const ref = value[field];
     if (!record(ref) || ref.job_id !== jobId || typeof ref.artifact_uri !== "string" || !ref.artifact_uri.startsWith(prefix) ||
+        !ref.artifact_uri.slice("artifact://jobs/".length).split("/").every((part) => /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(part)) ||
         typeof ref.artifact_checksum !== "string" || !checksum.test(ref.artifact_checksum) ||
         !["derived", "product_input"].includes(String(ref.data_class)) || ref.schema_version !== "1.0" ||
         typeof ref.artifact_type !== "string" || typeof ref.producer_stage !== "string") {
@@ -43,7 +45,11 @@ export function parsePreview(value: unknown, jobId: string): ReconstructionPrevi
     }
   }
   const delivery = value.delivery_ref as ProductArtifactRef;
-  if (delivery.artifact_type !== "GaussianSOG" || !delivery.artifact_uri.endsWith(".sog")) {
+  const poses = value.camera_pose_ref as ProductArtifactRef;
+  const source = value.source_visual_ref as ProductArtifactRef;
+  if (delivery.artifact_type !== "GaussianSOG" || !delivery.artifact_uri.endsWith(".sog") ||
+      delivery.producer_stage !== "ST-VISUAL-RECON" || source.artifact_type !== "BrushVisualArtifact" ||
+      source.producer_stage !== "ST-VISUAL-RECON" || poses.artifact_type !== "CameraPoseArtifact" || poses.producer_stage !== "ST-CAMERA-POSE") {
     throw new Error("Preview cần SOG đóng gói một file");
   }
   return value as unknown as ReconstructionPreview;

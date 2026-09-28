@@ -58,6 +58,14 @@ Giữ tool/research repo ở process/adapter boundary; không kéo toàn bộ re
 
 ## 9. Implementation Plan
 
+Integration increment 2026-09-28: REC publish `ReconstructionPreview` shared
+contract trong prepared attempt và cung cấp public consumer port qua package
+facade. PRODUCT gọi CLI, kiểm result qua port rồi CAS manifest pointer; preview
+vẫn UNCONFIRMED/HITL pending. SIGTERM tại CLI được đổi thành interrupt để
+VisualProcess cleanup Brush/Node session riêng, tránh orphan trainer khi cancel.
+Tests mới chưa chạy theo yêu cầu owner; không nâng thành full video pipeline
+hoặc GPU acceptance. Historical evidence phía dưới không chứng minh patch mới.
+
 Owner clarification khi resume 2026-09-27: hoàn thiện EX-REC để nối UI/backend
 cho video → frames → camera poses → 3DGS preview và canonical pipeline; chưa nối
 EX-SCENE. Cloud GPU training sau integration chạy trên Vast.ai. Không chạy local

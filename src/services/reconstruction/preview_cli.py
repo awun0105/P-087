@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import signal
 from pathlib import Path
 
 from src.services.reconstruction.adapters.brush_runtime import BrushRuntimeSettings, VisualProcess
@@ -46,12 +47,24 @@ def main(argv: list[str] | None = None) -> int:
     """Exit 0 = preview ready/HITL pending; 1 = stage failure; 2 = invalid setup."""
     args = create_cli_parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO)
+    previous_handler = signal.getsignal(signal.SIGTERM)
+
+    def interrupt(signum: int, frame: object) -> None:
+        """Để runtime adapter cleanup trainer có process group riêng."""
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, interrupt)
     try:
         return _execute(args)
+    except KeyboardInterrupt:
+        print(json.dumps({"error_code": "PREVIEW_INTERRUPTED"}))
+        return 130
     except (ValueError, OSError, RuntimeError) as error:
         logging.getLogger(__name__).error("Preview setup/publication failed cause=%s", type(error).__name__)
         print(json.dumps({"error_code": "PREVIEW_SETUP_OR_PUBLICATION_FAILED", "error_type": type(error).__name__}))
         return 2
+    finally:
+        signal.signal(signal.SIGTERM, previous_handler)
 
 
 if __name__ == "__main__":

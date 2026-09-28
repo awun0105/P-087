@@ -96,12 +96,25 @@ class VisualProcess:
                 try:
                     return process.wait(timeout=self.settings.timeout_seconds)
                 except subprocess.TimeoutExpired as error:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait()
+                    self._kill_group(process)
                     log.write("\nVISUAL_TIMEOUT\n")
                     raise VisualError("VISUAL_TIMEOUT", "Visual tool exceeded configured timeout") from error
+                except BaseException:
+                    # Process boundary: SIGINT/SIGTERM được CLI chuyển thành interrupt.
+                    # Brush/Node có session riêng; hủy Python cha không tự dừng chúng.
+                    self._kill_group(process)
+                    raise
         except OSError as error:
             raise VisualError("VISUAL_RUNTIME_UNAVAILABLE", "Cannot start configured visual runtime") from error
+
+    @staticmethod
+    def _kill_group(process: subprocess.Popen) -> None:
+        """Kill/reap tool group, kể cả trainer con; race process vừa thoát là hợp lệ."""
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # Group đã thoát trước khi nhận tín hiệu; vẫn reap parent.
+        process.wait()
 
     def qualify(self, workspace: Path) -> str:
         """Inspect đúng binary, không lấy version/CLI của checkout làm runtime truth."""
