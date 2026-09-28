@@ -145,12 +145,16 @@ def list_job_artifacts(job_id: str) -> schemas.ArtifactListResponse:
 def transition_job(job_id: str, request: TransitionRequest) -> JobManifest:
     """Chuyển trạng thái job theo bảng chuyển hợp lệ (PRODUCT-02).
 
-    Đây là affordance **mock-worker**: trong P0 chưa có worker thật nên client
-    đóng vai người báo tiến độ. Worker thật (PRODUCT-08) sẽ gọi cùng đường này.
+    Runtime HTTP chỉ nhận cancel; progress do worker ghi qua durable registry.
+    Constructor registry không DB là test seam cũ, không phải runtime API mode.
     """
     try:
         registry = _registry()
-        if registry.persistence is not None and request.target_status != JobStatus.CANCELLED:
+        if registry.persistence is not None and (
+            request.target_status != JobStatus.CANCELLED
+            or request.current_stage is not None
+            or request.error is not None
+        ):
             raise HTTPException(
                 status_code=409, detail="Runtime progress do worker sở hữu; dùng cancel/retry, không tự báo SUCCESS"
             )
@@ -172,7 +176,7 @@ def retry_job(job_id: str) -> JobManifest:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except JobLifecycleError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
-    except RuntimeStateConflictError as error:
+    except (RuntimeStateConflictError, PrivacyGateBlockedError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 
 
