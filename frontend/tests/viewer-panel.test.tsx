@@ -141,7 +141,8 @@ describe("ranh giới renderer", () => {
     fireEvent.click(screen.getByRole("button", { name: "3DGS Visual" }));
     expect(await screen.findByTestId("playcanvas-scene")).toHaveAttribute("data-engine", "playcanvas");
     await vi.waitFor(() => expect(createViewer).toHaveBeenCalledTimes(1));
-    expect(createViewer.mock.calls[0][0]).toMatchObject({ renderer: "webgl", ui: false });
+    // Policy ưu tiên WebGPU; library chịu trách nhiệm fallback WebGL2, chưa là GPU proof.
+    expect(createViewer.mock.calls[0][0]).toMatchObject({ renderer: "webgpu", ui: false });
   });
 
   it("Visual không có WebGL thì báo suy giảm, không để canvas trắng", () => {

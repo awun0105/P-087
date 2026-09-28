@@ -43,6 +43,24 @@ Implementation plan / recovery checklist:
   Static Ruff, tsc noEmit và ESLint changed files pass; regression producer→consumer
   mới chưa chạy. API create job vẫn chưa tự queue raw input; metric confirmation UI,
   full input preparation và worker recovery sau hard kill chưa hoàn chỉnh.
+- `f011254`: prepared worker/public consumer/preview API+UI đã commit. Rà sâu
+  process tree phát hiện Brush mở session riêng; patch kế tiếp chuyển SIGTERM
+  của REC CLI thành interrupt và hủy/reap tool group tại VisualProcess boundary.
+- Inspection group: REUSE PlayCanvas Picker, ADAPT FIFO/history + two-point UX
+  từ SuperSplat f76e676, giữ MIT notice. A/B được inverse-transform về tọa độ
+  nguồn (viewer hiện xoay Z=180°); scale input chỉ là proposal, không tự rescale
+  hay ghi CONFIRMED. Undo/redo chỉ cho điểm inspection; chưa chọn/xóa từng Gaussian,
+  crop/brush/lasso/gizmo hoặc lưu edited Gaussian revision. WebGPU ưu tiên và có
+  ép WebGL2; UI báo graphics backend thực tế. Browser/GPU picking chưa nghiệm thu.
+- `cc07461`: cancel cleanup + producer/stage preview guards đã commit. Inspection
+  patch qua `frontend/node_modules/.bin/tsc --noEmit --incremental false` và ESLint
+  changed source/new tests (exit 0). Existing viewer-panel test có một unused
+  `_options` warning từ trước; không có lint error. SSR capability dùng snapshot
+  unknown đồng nhất rồi mới probe client. Tests/browser/GPU vẫn không chạy.
+- Còn phải làm trước full integration acceptance: source upload/input + privacy
+  authority wiring → frame preparation → automatic dispatch; durable worker
+  recovery/progress; metric confirmation API; Gaussian selection/edit publication
+  + invalidation. Chưa có brush/lasso/crop/delete persisted Gaussian implementation.
 - [ ] REC-05: connectivity từ raw free air, Euclidean distance, accepted seed
   đi vào carve, consumer replay từ config/occupancy.
 - [ ] Geometry contract: clearance cylinder khác physics capsule, canonical unit=1,

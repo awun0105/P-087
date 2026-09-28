@@ -38,9 +38,8 @@ import {
 import { parsePly, type PlyCloud } from "@/features/viewer/ply";
 import {
   PlayCanvasScene,
-  detectPlayCanvasCapability,
+  usePlayCanvasCapability,
   INITIAL_RUNTIME,
-  type PlayCanvasCapability,
   type PlayCanvasRuntime,
 } from "@/features/viewer/PlayCanvasScene";
 import { SceneCanvas } from "@/features/viewer/SceneCanvas";
@@ -95,13 +94,13 @@ export function ViewerPanel({ scene }: ViewerPanelProps) {
   const [layerQuery, setLayerQuery] = useState("");
   // Một nguồn capability duy nhất cho cả Visual và các view kỹ thuật, để nhánh
   // suy giảm không thể lệch nhau.
-  const [playcanvas, setPlaycanvas] = useState<PlayCanvasCapability>(detectPlayCanvasCapability);
+  const [playcanvas, setPlaycanvas] = usePlayCanvasCapability();
   const [playcanvasRuntime, setPlaycanvasRuntime] = useState<PlayCanvasRuntime>(INITIAL_RUNTIME);
 
   // `onFailed` đi vào deps của effect tạo viewer nên phải có identity ổn định: arrow
   // function inline sẽ khiến mỗi lần re-render đều destroy rồi tạo lại viewer, tức tải
   // lại toàn bộ SOG. Gõ một ký tự vào ô filter cũng đủ để chạy lại.
-  const markPlayCanvasFailed = useCallback(() => setPlaycanvas("failed"), []);
+  const markPlayCanvasFailed = useCallback(() => setPlaycanvas("failed"), [setPlaycanvas]);
   const publishPlayCanvasRuntime = useCallback((next: PlayCanvasRuntime) => setPlaycanvasRuntime(next), []);
 
   // Collider GLB của environment: `createViewer({ collisionUrl })` nạp nó vào cùng

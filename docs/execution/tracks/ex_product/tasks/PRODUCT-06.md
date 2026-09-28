@@ -84,6 +84,14 @@ pan/zoom/rotate dùng supersplat-viewer đã pin. Tiếp theo adapt công cụ i
 theo nhóm; không scale/delete canonical scene chỉ bằng browser-local mutation.
 Không chạy tests/browser theo yêu cầu owner; chưa có AC-11 acceptance.
 
+Inspection increment: engine Picker depth readback, source-space A/B, distance,
+metric-scale draft, FIFO undo/redo và camera fit/reset; chỉ bật trên raw preview/
+local-file viewport. Không áp scale vào scene và không gắn với approval. Library
+renderer ưu tiên WebGPU, fallback theo upstream và có tùy chọn ép WebGL2; actual
+deviceType đọc từ runtime. Tool-init lỗi không làm mất viewer; cleanup chờ GPU
+readback trước destroy. TypeScript/ESLint chỉ là static proof, không phải pixel/
+browser acceptance. MIT attribution trong frontend/THIRD_PARTY_NOTICES.md.
+
 1. Tạo client-only wrapper dùng `@playcanvas/supersplat-viewer/viewer`, stylesheet,
    `ui: false` và required `settings`. Resolve artifact refs thành HTTP/blob URLs;
    không truyền trực tiếp `artifact://` vào browser fetch. API mẫu đã kiểm chứng ở Audit #09.
