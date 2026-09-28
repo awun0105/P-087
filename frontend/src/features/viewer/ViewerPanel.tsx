@@ -32,6 +32,7 @@ import {
   visibleLayers,
   type GeometryLayer,
   type ColliderLayer,
+  type ViewerLayer,
   type ViewMode,
 } from "@/features/viewer/layers";
 import { parseAsciiPly, type PlyCloud } from "@/features/viewer/ply";
@@ -49,6 +50,7 @@ import { SceneGraph } from "@/features/scene/SceneGraph";
 import { MetricScalePanel } from "@/features/scene/MetricScalePanel";
 import { MockReadonlyPanel } from "@/features/scene/MockReadonlyPanel";
 import { Button } from "@/components/ui/button";
+import { Banner } from "@/components/ui/banner";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 
 export interface ViewerPanelProps {
@@ -412,6 +414,10 @@ export function ViewerPanel({ scene }: ViewerPanelProps) {
               <>
                 <VisualUnavailable scene={scene} />
                 <PlayCanvasUnavailable />
+              </>
+            ) : mode === "POINT_CLOUD" && shown.some((layer) => layer.kind === "point_cloud" && layer.provisional) ? (
+              <>
+                <PointCloudUnavailable layers={shown} errors={plyErrors} />
               </>
             ) : shown.length === 0 ? (
               <p className="p-4 text-sm text-slate-400" data-testid="no-layers">
@@ -820,6 +826,37 @@ function VisualBanner({ scene }: { scene: SceneResponse }) {
       <span className="font-mono"> brush_compatibility_proof=false</span>). Các view Geometry/Point
       Cloud/Collider là view kỹ thuật ngang hàng, không phải fallback và không thay thế AC-11.
     </p>
+  );
+}
+
+/**
+ * `SceneIR` không có ref point cloud riêng, nên lớp point cloud dùng `geometry_ref`.
+ * Khi artifact đó không phải PLY ASCII, `parseAsciiPly` từ chối — và bản cũ để
+ * canvas trắng không giải thích, người dùng tưởng viewer hỏng. Phải nói rõ đây là
+ * thiếu dữ liệu point cloud, không phải lỗi renderer.
+ */
+function PointCloudUnavailable({
+  layers,
+  errors,
+}: {
+  layers: ViewerLayer[];
+  errors: Record<string, string>;
+}) {
+  const provisional = layers.filter((layer) => layer.kind === "point_cloud" && layer.provisional);
+  return (
+    <div className="p-4" data-testid="point-cloud-unavailable">
+      <Banner tone="warn" title="Không có point cloud riêng" testId="point-cloud-provisional">
+        <code>SceneIR</code> không mang ref point cloud, nên view này đang đoán từ{" "}
+        <code>geometry_ref</code> ({provisional.length} lớp). Artifact đó thường là mesh
+        chứ không phải PLY, nên không dựng được. Đây là thiếu dữ liệu, không phải lỗi
+        renderer.
+      </Banner>
+      {Object.entries(errors).map(([key, message]) => (
+        <p key={key} className="mt-1 font-mono text-[10px] text-rose-300">
+          {key}: {message}
+        </p>
+      ))}
+    </div>
   );
 }
 

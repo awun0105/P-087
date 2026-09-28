@@ -231,3 +231,17 @@ describe("tiến trình và collider từ thư viện", () => {
     expect(await screen.findByTestId("viewer-loaded")).toHaveTextContent("collider trong scene graph");
   });
 });
+
+/**
+ * `SceneIR` không có ref point cloud riêng nên lớp point cloud dùng `geometry_ref`.
+ * Bản cũ để canvas trắng khi parse lỗi, người dùng tưởng viewer hỏng — phải nói
+ * rõ là thiếu dữ liệu.
+ */
+it("view Point Cloud nói rõ thiếu ref riêng, không để canvas trắng", () => {
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as never);
+  render(<ViewerPanel scene={buildFixtureScene()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Point cloud" }));
+  const notice = screen.getByTestId("point-cloud-provisional");
+  expect(notice).toHaveTextContent("SceneIR");
+  expect(notice).toHaveTextContent("không phải lỗi renderer");
+});
