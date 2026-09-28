@@ -118,7 +118,9 @@ sự xảy ra kèm bằng chứng, nên không được điền trước ngày.
 
 | Repo mẫu | Vai trò | Đã dùng? |
 |---|---|---|
-| three.js (docs + examples) | P0 library | ✅ `three ^0.180.0` — `SceneCanvas` dùng thật |
+| three.js (docs + examples) | P0 library | ✅ `three ^0.180.0` — `SceneCanvas` dùng thật cho 3 view kỹ thuật |
+| `playcanvas/supersplat-viewer` | **Tier A — Baseline đã khóa** | ✅ `createViewer({ collisionUrl, ui: false })` cho Visual + collider environment. WebGPU ưu tiên bị tắt tường minh (`renderer: "webgl"`) vì `AGENTS.md` khóa WebGL2 làm P0 baseline |
+| `playcanvas/engine` | Tier A | ⚠️ Khai báo trong `package.json` nhưng **chưa import ở đâu** — xem `TRACK.md` |
 | pmndrs/react-three-fiber | candidate | ✅ `@react-three/fiber ^9.8` + `drei ^10.7` |
 | Kiranism/next-shadcn-dashboard-starter | P0 selective ADAPT | ❌ Không — shell viết tay; §8 cấm starter authorization/persistence |
 | sparkjsdev/spark | P0 renderer candidate | ❌ Chưa — chỉ adopt sau khi có real Brush output (`REC-04` còn `TODO`) |

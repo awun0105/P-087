@@ -451,7 +451,7 @@ containers từ sơ đồ.
 |----------|--------|--------|
 | Backend boundary | FastAPI tại `src/api/` | Product API và typed worker/artifact orchestration |
 | Frontend boundary | Next.js/TypeScript tại root `frontend/` | Web Studio và client-side 3D viewer; chưa scaffold |
-| Viewer P0 | PlayCanvas Engine + @playcanvas/supersplat-viewer (WebGL2/WebGPU) | Real 3DGS Visual (SOG) và kỹ thuật Geometry/Point Cloud/Collider trên cùng SceneIR |
+| Viewer P0 | PlayCanvas Engine + @playcanvas/supersplat-viewer (WebGL2/WebGPU) | Real 3DGS Visual (SOG) và kỹ thuật Geometry/Point Cloud/Collider trên cùng SceneIR. **Hiện trạng 2026-09-27: Visual + collider environment ở cùng `pc.AppContext`; ba view kỹ thuật còn lại dựng bằng Three.js ở renderer riêng — xem `ex_product/TRACK.md` §Technology And Strategy** |
 | Shared state | `SceneIR` + immutable artifact contracts | Một canonical scene/object transform; không dùng USD/browser state làm truth |
 | Artifact storage P0 | Resolver + filesystem store | Logical URI/SHA-256, atomic immutable handoff; có synthetic Foundation proof |
 | Worker boundary | Isolated runtimes + published artifacts | Tránh import internals/coupling GPU dependencies giữa tracks |
