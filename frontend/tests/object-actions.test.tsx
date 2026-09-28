@@ -21,6 +21,11 @@ const FIXTURE_OBJECT: SceneObject = {
   state: "CANDIDATE",
   origin: "reconstructed",
   active: true,
+  visual_ref: null,
+  asset_ref: null,
+  primitive_dimensions_xyz_m: null,
+  semantic_class: null,
+  tags: [],
   local_frame: "pallet-frame",
   transform: {
     semantics: "parent_from_local",
@@ -28,6 +33,8 @@ const FIXTURE_OBJECT: SceneObject = {
     local_frame: "pallet-frame",
     translation_xyz: [1.0, 0.0, -0.5],
     rotation_quaternion_xyzw: [0.0, 0.0, 0.0, 1.0],
+    quaternion_order: "xyzw",
+    angle_unit: "radian",
   },
   geometry_ref: {
     artifact_type: "PLY",

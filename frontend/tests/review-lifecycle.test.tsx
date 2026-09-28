@@ -1,35 +1,47 @@
 /**
  * Test cho ReviewLifecyclePanel (PRODUCT-10).
  *
- * Mock fetch để kiểm tra approve/reject payload và validation client-side.
+ * Bản cŽ dùng `decision: "PENDING"` — một giá trị **backend không thể phát ra**
+ * (`ApprovalDecision` chỉ có APPROVE/REJECT). Vì vậy ba test "cover" Approve/Reject
+ * thật ra cover một trạng thái không tồn tại, và UI viết theo đó nên nút Approve/
+ * Reject **không bao giờ hiện** với response thật.
+ *
+ * Nay `approval` vắng mặt là "chưa có quyết định" và đó là lúc form phải hiện.
  */
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ReviewLifecyclePanel } from "@/features/review/ReviewLifecycle";
-import type { ReviewState } from "@/lib/contracts/api";
+import type { ApprovalRecord, ReviewState } from "@/lib/contracts/api";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
 }));
 
-const FIXTURE_REVIEW: ReviewState = {
+const APPROVAL: ApprovalRecord = {
+  schema_version: "1.0",
+  candidate_checksum: `sha256:${"a".repeat(63)}1`,
+  validation_report_checksum: `sha256:${"b".repeat(63)}2`,
+  reviewer_id: "reviewer-mock-001",
+  decision: "REJECT",
+  reason: "sai vị trí pallet",
+  decided_at: "2026-09-26T12:00:00Z",
+  accepted_warning_ids: [],
+  record_checksum: `sha256:${"c".repeat(63)}3`,
+};
+
+const PENDING_REVIEW: ReviewState = {
   job_id: "job-fixture-001",
-  approval: {
-    schema_version: "1.0",
-    candidate_checksum: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
-    validation_report_checksum: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2",
-    reviewer_id: "reviewer-mock-001",
-    decision: "PENDING",
-    reason: null,
-    decided_at: "2026-09-26T12:00:00Z",
-    accepted_warning_ids: [],
-    record_checksum: "sha256:ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc3",
-  },
   synthetic_authorization: true,
   note: "mock",
 };
+
+const DECIDED_REVIEW: ReviewState = { ...PENDING_REVIEW, approval: APPROVAL };
+
+function mockOk() {
+  vi.mocked(global.fetch).mockResolvedValueOnce({ ok: true, json: async () => ({}) } as Response);
+}
 
 describe("ReviewLifecyclePanel", () => {
   beforeEach(() => {
@@ -37,43 +49,51 @@ describe("ReviewLifecyclePanel", () => {
     global.fetch = vi.fn();
   });
 
-  it("disable reject khi chưa nhập lý do", () => {
-    render(<ReviewLifecyclePanel jobId="job-fixture-001" review={FIXTURE_REVIEW} />);
+  it("chưa có approval thì form Approve/Reject phải hiện", () => {
+    render(<ReviewLifecyclePanel jobId="job-fixture-001" review={PENDING_REVIEW} />);
+    expect(screen.getByRole("button", { name: /Approve/ })).toBeEnabled();
     expect(screen.getByRole("button", { name: /Reject/ })).toBeDisabled();
   });
 
-  it("gửi approve với candidate/validation checksum", async () => {
-    vi.mocked(global.fetch).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({}),
-    } as Response);
+  it("đã có approval thì không cho quyết lần hai", () => {
+    render(<ReviewLifecyclePanel jobId="job-fixture-001" review={DECIDED_REVIEW} />);
+    expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Reject/ })).toBeNull();
+    expect(screen.getByText("REJECT")).toBeInTheDocument();
+  });
 
-    render(<ReviewLifecyclePanel jobId="job-fixture-001" review={FIXTURE_REVIEW} />);
+  it("gửi approve với checksum từ candidate thật", async () => {
+    mockOk();
+    render(<ReviewLifecyclePanel jobId="job-fixture-001" review={PENDING_REVIEW} />);
     fireEvent.click(screen.getByRole("button", { name: /Approve/ }));
 
     await waitFor(() => {
       const [url, init] = vi.mocked(global.fetch).mock.calls[0]!;
       expect(url).toContain("/api/v1/jobs/job-fixture-001/review/approve");
       const body = JSON.parse((init as RequestInit).body as string);
-      expect(body.candidate_checksum).toBe(FIXTURE_REVIEW.approval.candidate_checksum);
-      expect(body.validation_report_checksum).toBe(FIXTURE_REVIEW.approval.validation_report_checksum);
+      // Chưa có approval thì không có checksum để gửi; payload phải null chứ không
+      // được bịa giá trị.
+      expect(body.candidate_checksum).toBeNull();
+      expect(body.validation_report_checksum).toBeNull();
     });
   });
 
-  it("gửi reject với lý do", async () => {
-    vi.mocked(global.fetch).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({}),
-    } as Response);
+  it("gửi reject kèm lý do, và chặn reject khi lý do trống", async () => {
+    mockOk();
+    render(<ReviewLifecyclePanel jobId="job-fixture-001" review={PENDING_REVIEW} />);
+    fireEvent.click(screen.getByRole("button", { name: /Reject/ }));
+    await waitFor(() => expect(vi.mocked(global.fetch)).not.toHaveBeenCalled());
 
-    render(<ReviewLifecyclePanel jobId="job-fixture-001" review={FIXTURE_REVIEW} />);
     fireEvent.change(screen.getByLabelText("Lý do review"), { target: { value: "sai vị trí pallet" } });
     fireEvent.click(screen.getByRole("button", { name: /Reject/ }));
-
     await waitFor(() => {
       const [, init] = vi.mocked(global.fetch).mock.calls[0]!;
-      const body = JSON.parse((init as RequestInit).body as string);
-      expect(body.reason).toBe("sai vị trí pallet");
+      expect(JSON.parse((init as RequestInit).body as string).reason).toBe("sai vị trí pallet");
     });
+  });
+
+  it("cờ synthetic_authorization phải hiện vì approval từ fixture không phải uỷ quyền thật", () => {
+    render(<ReviewLifecyclePanel jobId="job-fixture-001" review={DECIDED_REVIEW} />);
+    expect(screen.getByTestId("synthetic-authorization")).toBeInTheDocument();
   });
 });

@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SceneIR, SceneObject } from "@/lib/contracts/api";
+import { sha } from "./fixtures/scene";
 import {
   buildSceneLayers,
   composeColliderTransform,
@@ -39,6 +40,8 @@ function identityTransform(localFrame: string, translation: [number, number, num
     local_frame: localFrame,
     translation_xyz: translation,
     rotation_quaternion_xyzw: [0, 0, 0, 1] as [number, number, number, number],
+    quaternion_order: "xyzw" as const,
+    angle_unit: "radian" as const,
   };
 }
 
@@ -47,11 +50,18 @@ function object(overrides: Partial<SceneObject> = {}): SceneObject {
     id: "object-a",
     name: "Object A",
     state: "CONFIRMED",
+    // Năm field này có trong SceneObject v1.35.2; thiếu chúng thì test fixture không
+    // mô phỏng được object mà backend thật sự trả về.
+    visual_ref: null,
+    asset_ref: null,
+    primitive_dimensions_xyz_m: null,
+    semantic_class: null,
+    tags: [],
     origin: "reconstructed",
     active: true,
     local_frame: "object-a",
     transform: identityTransform("object-a", [1, 2, 0]),
-    geometry_ref: ref("artifact://jobs/job-1/scene/a.ply", "sha256:aaa"),
+    geometry_ref: ref("artifact://jobs/job-1/scene/a.ply", sha("aaa")),
     collider: null,
     provenance: {},
     ...overrides,
@@ -67,6 +77,8 @@ function colliderOf(ownerFrame: string) {
     dimensions_xyz_m: [1, 1, 1] as [number, number, number],
     geometry_ref: null,
     parameters: {},
+    // `provenance` là bắt buộc trong ColliderSpec.
+    provenance: { fixture: true },
   };
 }
 
@@ -79,41 +91,42 @@ function scene(objects: SceneObject[]): SceneIR {
     coordinate_system: { unit: "meter", up_axis: "Z", handedness: "right", world_frame: "world" },
     metric_scale: { status: "CONFIRMED", meters_per_unit: 1 },
     environment: {
-      geometry_ref: ref("artifact://jobs/job-1/scene/env.ply", "sha256:env"),
-      collider_ref: ref("artifact://jobs/job-1/scene/floor.json", "sha256:floor"),
+      visual_ref: null,
+      geometry_ref: ref("artifact://jobs/job-1/scene/env.ply", sha("env")),
+      collider_ref: ref("artifact://jobs/job-1/scene/floor.json", sha("floor")),
     },
     objects,
     provenance: {},
-    scene_ir_checksum: "sha256:scene",
+    scene_ir_checksum: sha("scene"),
   };
 }
 
 describe("buildSceneLayers", () => {
   it("gắn checksum của artifact vào từng layer", () => {
-    const layers = buildSceneLayers(scene([object()]), "sha256:scenebytes");
+    const layers = buildSceneLayers(scene([object()]), sha("scenebytes"));
     const objectMesh = layers.geometry.find((layer) => layer.object_id === "object-a" && layer.kind === "geometry");
-    expect(objectMesh?.checksum).toBe("sha256:aaa");
-    expect(layers.scene_checksum).toBe("sha256:scenebytes");
+    expect(objectMesh?.checksum).toBe(sha("aaa"));
+    expect(layers.scene_checksum).toBe(sha("scenebytes"));
   });
 
   it("giữ revision canonical trên kết quả", () => {
-    expect(buildSceneLayers(scene([]), "sha256:x").scene_revision).toBe("rev-001");
+    expect(buildSceneLayers(scene([]), sha("x")).scene_revision).toBe("rev-001");
   });
 
   it("tạo layer collider cho environment ngay cả khi scene rỗng object", () => {
-    const layers = buildSceneLayers(scene([]), "sha256:x");
+    const layers = buildSceneLayers(scene([]), sha("x"));
     const environmentCollider = layers.colliders.find((layer) => layer.collider_id === "environment");
-    expect(environmentCollider?.checksum).toBe("sha256:floor");
+    expect(environmentCollider?.checksum).toBe(sha("floor"));
   });
 
   it("dùng kích thước chỗ giữ chỗ khi collider thiếu dimensions", () => {
-    const layers = buildSceneLayers(scene([]), "sha256:x");
+    const layers = buildSceneLayers(scene([]), sha("x"));
     const environmentCollider = layers.colliders.find((layer) => layer.collider_id === "environment");
     expect(environmentCollider?.dimensions_xyz_m).toEqual(MISSING_DIMENSIONS);
   });
 
   it("giữ canonical active của object tắt", () => {
-    const layers = buildSceneLayers(scene([object({ active: false })]), "sha256:x");
+    const layers = buildSceneLayers(scene([object({ active: false })]), sha("x"));
     const mesh = layers.geometry.find((layer) => layer.object_id === "object-a");
     expect(mesh?.canonical_active).toBe(false);
   });
@@ -157,30 +170,30 @@ describe("composeColliderTransform", () => {
 
 describe("visibleLayers", () => {
   it("GEOMETRY chỉ trả mesh, không trả point cloud", () => {
-    const layers = buildSceneLayers(scene([object()]), "sha256:x");
+    const layers = buildSceneLayers(scene([object()]), sha("x"));
     const kinds = new Set(visibleLayers(layers, "GEOMETRY").map((layer) => layer.kind));
     expect(kinds).toEqual(new Set(["geometry"]));
   });
 
   it("POINT_CLOUD chỉ trả point cloud", () => {
-    const layers = buildSceneLayers(scene([object()]), "sha256:x");
+    const layers = buildSceneLayers(scene([object()]), sha("x"));
     const kinds = new Set(visibleLayers(layers, "POINT_CLOUD").map((layer) => layer.kind));
     expect(kinds).toEqual(new Set(["point_cloud"]));
   });
 
   it("COLLIDER chỉ trả collider", () => {
-    const layers = buildSceneLayers(scene([object()]), "sha256:x");
+    const layers = buildSceneLayers(scene([object()]), sha("x"));
     const kinds = new Set(visibleLayers(layers, "COLLIDER").map((layer) => layer.kind));
     expect(kinds).toEqual(new Set(["collider"]));
   });
 
   it("VISUAL không lấy gì từ SceneIR vì visual do VisualArtifact cấp", () => {
-    const layers = buildSceneLayers(scene([object()]), "sha256:x");
+    const layers = buildSceneLayers(scene([object()]), sha("x"));
     expect(visibleLayers(layers, "VISUAL")).toEqual([]);
   });
 
   it("loại object canonical active=false khỏi mọi view", () => {
-    const layers = buildSceneLayers(scene([object({ active: false })]), "sha256:x");
+    const layers = buildSceneLayers(scene([object({ active: false })]), sha("x"));
     for (const mode of VIEW_MODES) {
       expect(visibleLayers(layers, mode).some((layer) => layer.object_id === "object-a")).toBe(false);
     }
@@ -189,7 +202,7 @@ describe("visibleLayers", () => {
 
 describe("layerKey", () => {
   it("khác nhau giữa mesh và point cloud của cùng object", () => {
-    const layers = buildSceneLayers(scene([object()]), "sha256:x");
+    const layers = buildSceneLayers(scene([object()]), sha("x"));
     const [mesh] = layers.geometry.filter((layer) => layer.kind === "geometry" && layer.object_id === "object-a");
     const [cloud] = layers.geometry.filter((layer) => layer.kind === "point_cloud" && layer.object_id === "object-a");
     expect(layerKey(mesh!)).not.toBe(layerKey(cloud!));
@@ -198,14 +211,14 @@ describe("layerKey", () => {
   it("không đụng nhau giữa mọi layer của một scene", () => {
     // Canvas chọn layer bằng chính khoá này, nên khoá trùng nghĩa là bấm vào một
     // layer lại chọn nhầm layer khác.
-    const layers = buildSceneLayers(scene([object({ collider: colliderOf("object-a") })]), "sha256:x");
+    const layers = buildSceneLayers(scene([object({ collider: colliderOf("object-a") })]), sha("x"));
     const keys = [...layers.geometry, ...layers.colliders].map(layerKey);
     expect(new Set(keys).size).toBe(keys.length);
   });
 
   it("ổn định giữa hai lần dựng cùng scene", () => {
-    const first = buildSceneLayers(scene([object()]), "sha256:x");
-    const second = buildSceneLayers(scene([object()]), "sha256:x");
+    const first = buildSceneLayers(scene([object()]), sha("x"));
+    const second = buildSceneLayers(scene([object()]), sha("x"));
     expect(first.colliders.map(layerKey)).toEqual(second.colliders.map(layerKey));
   });
 });
