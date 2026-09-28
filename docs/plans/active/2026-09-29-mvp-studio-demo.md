@@ -159,6 +159,14 @@ Phase 5 — Packaging GPU/SSH + demo run
   (self-attestation của người upload đủ để dispatch), ghi nhãn "tự khai (MVP)"
   trong dữ liệu/UI, không giả `VERIFIED_ANONYMIZED` do QA. Code gate giữ nguyên,
   tắt setting để quay lại luồng nghiệp vụ.
+- OPEN — CONFLICT / AUTHORITY GAP (ghi 2026-09-29 sau khi đọc docs/execution):
+  quyết định MVP self-attestation ở trên mâu thuẫn với
+  `docs/execution/tracks/ex_product/TRACK.md` §Authority Gates ("source-rights/
+  privacy gates không được bypass cho demo") và Contract §3.3.1 (QA/Validation
+  Lead Đạt chấp nhận `VERIFIED_ANONYMIZED` trước public/demo use). Cần Product
+  Owner (Cường) + QA Lead (Đạt) xác nhận và ghi `docs/decisions/`. Phần an toàn:
+  demo TorWIC `Aisle_CW` đi theo đường chuẩn (privacy report cho dataset public do
+  QA chấp nhận); self-attestation cho upload tùy ý chỉ bật bằng setting, mặc định tắt.
 - 2026-09-29 Demo: dùng demo bundle (output thật từ GPU run, có manifest +
   checksum) phục vụ qua API riêng; Studio dựng cùng màn hình từ job thật hoặc
   bundle. Trước khi có GPU run đầy đủ, bundle tạm từ smoke `rec04_smoke_work_10b`.
