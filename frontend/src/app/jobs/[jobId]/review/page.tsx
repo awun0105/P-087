@@ -26,14 +26,20 @@ export default async function ReviewPage({ params }: PageProps<"/jobs/[jobId]/re
     );
   }
 
-  const { approval } = review.data;
+  // Backend chỉ có APPROVE/REJECT, không có "PENDING". Chưa có approval là khi
+  // `approval` vắng mặt — đó là lúc reviewer phải quyết, nên panel phải hiện form.
+  const approval = review.data.approval ?? null;
   const reportChecksum = validation.ok ? validation.data.report.report_checksum : null;
 
   return (
     <>
       <PageHeader
         title="Review"
-        subtitle={`reviewer: ${approval.reviewer_id} · ${approval.decided_at}`}
+        subtitle={
+          approval
+            ? `reviewer: ${approval.reviewer_id} · ${approval.decided_at}`
+            : "chưa có quyết định nào"
+        }
       />
       <JobTabs jobId={jobId} active="Review" />
 
@@ -46,27 +52,35 @@ export default async function ReviewPage({ params }: PageProps<"/jobs/[jobId]/re
           <Panel>
             <div className="p-4">
               <PanelHeader title="Ràng buộc approval" />
-              <ul className="mt-2 flex flex-col gap-2 text-xs">
-                <li>
-                  <Checksum value={approval.candidate_checksum} label="candidate" />
-                </li>
-                <li>
-                  <Checksum value={approval.validation_report_checksum} label="validation report" />
-                </li>
-                <li>
-                  <Checksum value={reportChecksum} label="validation thực tế của job" />
-                </li>
-                <li>
-                  <Checksum value={approval.record_checksum} label="approval record" />
-                </li>
-              </ul>
-              {reportChecksum && reportChecksum !== approval.validation_report_checksum && (
-                <div className="mt-3">
-                  <Banner tone="danger" title="Checksum mismatch" testId="checksum-mismatch">
-                    Approval trỏ tới validation report khác với report hiện có. Quyết định này không
-                    áp dụng cho revision đang xem.
-                  </Banner>
-                </div>
+              {approval ? (
+                <>
+                  <ul className="mt-2 flex flex-col gap-2 text-xs">
+                    <li>
+                      <Checksum value={approval.candidate_checksum} label="candidate" />
+                    </li>
+                    <li>
+                      <Checksum value={approval.validation_report_checksum} label="validation report" />
+                    </li>
+                    <li>
+                      <Checksum value={reportChecksum} label="validation thực tế của job" />
+                    </li>
+                    <li>
+                      <Checksum value={approval.record_checksum} label="approval record" />
+                    </li>
+                  </ul>
+                  {reportChecksum && reportChecksum !== approval.validation_report_checksum && (
+                    <div className="mt-3">
+                      <Banner tone="danger" title="Checksum mismatch" testId="checksum-mismatch">
+                        Approval trỏ tới validation report khác với report hiện có. Quyết định này
+                        không áp dụng cho revision đang xem.
+                      </Banner>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="mt-2 text-xs text-slate-500">
+                  Chưa có approval record. Checksum ràng buộc chỉ hiện sau khi có quyết định.
+                </p>
               )}
             </div>
           </Panel>
@@ -74,7 +88,7 @@ export default async function ReviewPage({ params }: PageProps<"/jobs/[jobId]/re
           <Panel>
             <div className="p-4">
               <PanelHeader title="Warnings đã chấp nhận" />
-              {approval.accepted_warning_ids.length === 0 ? (
+              {!approval || approval.accepted_warning_ids.length === 0 ? (
                 <p className="text-xs text-slate-600">Không có.</p>
               ) : (
                 <ul className="list-inside list-disc space-y-0.5 text-xs text-slate-400">

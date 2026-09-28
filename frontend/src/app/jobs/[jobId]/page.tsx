@@ -7,7 +7,12 @@ import { Badge } from "@/components/ui/badge";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 import { getJob, listJobArtifacts, listJobAttempts } from "@/lib/api/endpoints";
-import type { ArtifactDataClass, JobAttempt } from "@/lib/contracts/api";
+import type {
+  ArtifactDataClass,
+  ExecutionError,
+  JobAttempt,
+  StageArtifact,
+} from "@/lib/contracts/api";
 import { StageTimeline } from "@/features/jobs/StageTimeline";
 
 export default async function JobDetailPage({ params }: PageProps<"/jobs/[jobId]">) {
@@ -84,7 +89,7 @@ export default async function JobDetailPage({ params }: PageProps<"/jobs/[jobId]
 
       {/* Stage timeline (PRODUCT-09) */}
       <div className="mb-4">
-        <StageTimeline stages={job.data.stage_artifacts} currentStage={job.data.current_stage} />
+        <StageTimeline stages={job.data.stage_artifacts} currentStage={job.data.current_stage ?? undefined} />
       </div>
 
       {/* Attempts */}
@@ -117,7 +122,11 @@ export default async function JobDetailPage({ params }: PageProps<"/jobs/[jobId]
                 </thead>
                 <tbody>
                   {attempts.data.attempts.map((attempt, index) => (
-                    <AttemptRow key={`${attempt.attempt}-${index}`} attempt={attempt} />
+                    <AttemptRow
+                      key={`${attempt.attempt}-${index}`}
+                      attempt={attempt}
+                      error={attemptError(job.data.stage_artifacts)}
+                    />
                   ))}
                 </tbody>
               </table>
@@ -134,7 +143,15 @@ export default async function JobDetailPage({ params }: PageProps<"/jobs/[jobId]
   );
 }
 
-function AttemptRow({ attempt }: { attempt: JobAttempt }) {
+/**
+ * `JobAttemptRecord` không có field `error`; chi tiết lỗi của attempt nằm ở
+ * `ExecutionError` của stage artifact mà job đang dừng, nên truyền vào từ ngoài.
+ */
+function attemptError(stages: StageArtifact[]): ExecutionError | null {
+  return stages.find((stage) => stage.error !== null)?.error ?? null;
+}
+
+function AttemptRow({ attempt, error }: { attempt: JobAttempt; error: ExecutionError | null }) {
   return (
     <tr className="border-b border-slate-900 transition-colors hover:bg-slate-900/40">
       <td className="px-3 py-2 font-mono text-xs text-slate-400">{attempt.attempt}</td>
@@ -147,12 +164,12 @@ function AttemptRow({ attempt }: { attempt: JobAttempt }) {
         <Checksum value={attempt.job_manifest_checksum} />
       </td>
       <td className="px-3 py-2 text-xs">
-        {attempt.error ? (
+        {error ? (
           <details className="group">
             <summary className="cursor-pointer list-none">
               <span className="text-rose-400 hover:text-rose-300">
-                {attempt.error.error_code}
-                {attempt.error.retryable && (
+                {error.error_code}
+                {error.retryable && (
                   <Badge tone="warn" className="ml-1.5">
                     retryable
                   </Badge>
@@ -160,7 +177,7 @@ function AttemptRow({ attempt }: { attempt: JobAttempt }) {
               </span>
             </summary>
             <p className="mt-1 max-w-xs text-[10px] text-slate-400">
-              {attempt.error.human_message}
+              {error.human_message}
             </p>
           </details>
         ) : (

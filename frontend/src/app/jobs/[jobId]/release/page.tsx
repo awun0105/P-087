@@ -30,11 +30,12 @@ export default async function ReleasePage({ params }: PageProps<"/jobs/[jobId]/r
     );
   }
 
-  const approved = review.ok && review.data.approval.decision === "APPROVE";
-  const checksumMatch =
-    review.ok &&
-    validation.ok &&
-    review.data.approval.validation_report_checksum === validation.data.report.report_checksum;
+  // Chưa có approval thì không phải "đã duyệt" cũng không phải "sai checksum" — nó
+  // là chưa quyết, và panel sẽ hiện đúng như vậy.
+  const approval = review.ok ? review.data.approval : undefined;
+  const validationReportChecksum = validation.ok ? validation.data.report.report_checksum : null;
+  const approved = approval?.decision === "APPROVE";
+  const checksumMatch = approval ? approval.validation_report_checksum === validationReportChecksum : false;
 
   return (
     <>
@@ -46,8 +47,8 @@ export default async function ReleasePage({ params }: PageProps<"/jobs/[jobId]/r
         <ReleasePanel
           jobId={jobId}
           approved={approved}
-          checksumMatch={checksumMatch ?? false}
-          approvalRecord={review.ok ? review.data.approval : null}
+          checksumMatch={checksumMatch}
+          approvalRecord={approval ?? null}
           jobStatus={job.data.status}
         />
 
@@ -63,7 +64,7 @@ export default async function ReleasePage({ params }: PageProps<"/jobs/[jobId]/r
                 />
                 <Condition ok={approved} label="Approval decision = APPROVE" />
                 <Condition
-                  ok={checksumMatch ?? false}
+                  ok={checksumMatch}
                   label="Candidate checksum khớp validation report"
                 />
               </ul>
@@ -76,19 +77,19 @@ export default async function ReleasePage({ params }: PageProps<"/jobs/[jobId]/r
               <ul className="mt-2 space-y-1.5">
                 <li>
                   <Checksum
-                    value={review.ok ? review.data.approval.candidate_checksum : null}
+                    value={approval?.candidate_checksum ?? null}
                     label="candidate"
                   />
                 </li>
                 <li>
                   <Checksum
-                    value={review.ok ? review.data.approval.validation_report_checksum : null}
+                    value={approval?.validation_report_checksum ?? null}
                     label="validation"
                   />
                 </li>
                 <li>
                   <Checksum
-                    value={review.ok ? review.data.approval.record_checksum : null}
+                    value={approval?.record_checksum ?? null}
                     label="approval record"
                   />
                 </li>
