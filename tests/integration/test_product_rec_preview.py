@@ -1,5 +1,6 @@
 """Published REC checkpoint→PRODUCT→artifact bytes, fixture tools không phải GPU."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,7 @@ def test_published_preview_can_be_consumed_without_scene_ir(tmp_path: Path) -> N
                         artifact_uri=ref.artifact_uri,
                         artifact_checksum=ref.artifact_checksum,
                         data_class=ref.data_class,
+                        completed_at=datetime.now(UTC),
                     )
                 ],
             }
