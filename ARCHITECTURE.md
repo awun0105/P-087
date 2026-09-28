@@ -369,13 +369,15 @@ P0. Không đưa LLM/agent vào đường bắt buộc
 
 ### 4. Database
 
-- **Type:** product database chưa được chọn ở Foundation; không bắt buộc
-  PostgreSQL. `src/config.py` còn default SQLite của organizer scaffold, không
-  phải quyết định persistence cho job/review/release.
-- **Tables:** chưa khóa product tables; contract artifacts và fixture job không
-  đồng nghĩa đã có production schema.
-- **Migrations:** chưa chọn migration tool cho product data. Không coi Alembic là
-  requirement đã được chấp nhận.
+- **Type:** runtime PRODUCT dùng SQLite file cho local và adapter PostgreSQL
+  cho deployment qua `Settings.database_url`. PostgreSQL cần driver psycopg 3;
+  chưa có cloud/database acceptance chỉ từ việc adapter tồn tại.
+- **Tables:** schema v1 giữ projects, con trỏ immutable JobManifest và journal
+  events/attempts. Con trỏ + event commit cùng transaction; stale writers bị CAS
+  từ chối. Binary vẫn ở artifact store, không lưu trong DB.
+- **Migrations:** bootstrap chỉ tạo schema v1 còn thiếu; version lạ bị từ chối,
+  không tự drop/reset. Chưa chọn Alembic. Scene/review/release chưa được coi là
+  đã migrate chỉ vì project/job có persistence.
 - **P0 durable boundary hiện có:** logical artifact URI qua
   `ArtifactResolver`/`FilesystemArtifactStore`; exact storage/runtime wiring của
   product workflow thuộc EX-PRODUCT tasks.

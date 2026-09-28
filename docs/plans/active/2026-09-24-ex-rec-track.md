@@ -4,6 +4,56 @@ Date: 2026-09-24
 
 ## Status
 
+### Patch integration theo audit — 2026-09-28
+
+Status: IN_PROGRESS. Owner giao sửa toàn bộ findings trên `feat/product-rec`
+(base `4caa593`), cho phép chỉnh docs cũ/sai theo semantics sản phẩm. Các giới hạn
+integration/branch của checkpoint 2026-09-27 bên dưới là lịch sử, không còn là
+lệnh chặn integration. Không sửa thay đổi `AGENTS.md` đang có của owner.
+
+Task capsule:
+- Outcome: sửa correctness REC-05 và kết nối REC/PRODUCT thật, không fake fixture
+  success; preview trước EX-SCENE, artifact portable cho downstream sau này.
+- Authority: yêu cầu owner 2026-09-28; PRD FR-00..06; meter/Z-up/right-handed;
+  immutable refs và exact checksum; không bỏ privacy/metric/provenance gates.
+- Dependencies: core adapters có sẵn; API còn fixture; pinned SplatTransform 3.6.6,
+  supersplat-viewer 1.35.2, PlayCanvas 2.22.4. Browser/GPU proof chưa có cho patch.
+- Inputs/outputs: source/config/decision refs -> immutable attempt artifacts,
+  worker events/result -> API -> viewer; không đọc private workspace từ UI.
+- Owned: reconstruction, shared contracts liên quan, orchestration/API, frontend,
+  tests và docs tương ứng. Không đổi SCENE/SIM algorithms, raw data hoặc vendor.
+- Proof: audit counterexamples thành regression; unit/contract/API/frontend;
+  published producer-consumer fixture; native/browser proof ghi riêng.
+- Unknown: real metric evidence/correspondence, cloud credentials và GPU acceptance;
+  không tự xác nhận hoặc thuê máy để bỏ qua những đầu vào này.
+
+Implementation plan / recovery checklist:
+- Owner tiếp tục 2026-09-28: hoàn thiện backend→artifact→viewer trước, sau đó
+  ADAPT nhóm selection/edit/measure từ SuperSplat. Không hosted publishing/XR/
+  animation trong đợt này; không tests/handoff. Giữ plan hiện hữu duy nhất.
+- Nhóm đang triển khai: PRODUCT durable project/job/event state, explicit runtime
+  profile + fixture opt-in; tiếp theo preview không phụ thuộc SceneIR rồi tools.
+- Persistence patch: API factory dùng database; SQLite local không dependency mới,
+  PostgreSQL cần optional psycopg 3 (chưa install/qualify). Ruff check + format và
+  CRLF-aware diff check pass; regression restart/CAS/corruption/rollback **chưa chạy**.
+  Profile chỉ khóa identity, chưa tự dispatch hoặc chứng minh full input pipeline.
+- [ ] REC-05: connectivity từ raw free air, Euclidean distance, accepted seed
+  đi vào carve, consumer replay từ config/occupancy.
+- [ ] Geometry contract: clearance cylinder khác physics capsule, canonical unit=1,
+  provenance không tự xóa lineage; publication namespace/config/manifest/binary.
+- [ ] Viewer: filename/loader, coordinates, readiness/errors/lifecycle, real mesh/
+  pointcloud loading và cache invalidation; tests không chỉ mock createViewer.
+- [ ] PRODUCT: runtime artifact store, durable dispatch/job recovery, input/preview/
+  metric boundary; không return fixture scene cho reconstruction thật.
+- [ ] UI: execution-aware timeline, input/preview flow, hide/disable unsupported
+  scene/review/release actions; DTO semantics và checksum handling.
+- [ ] Integration proof. Owner yêu cầu không chạy lại tests và không ghi handoff;
+  chỉ static checks trong lượt patch hiện tại, không claim runtime acceptance.
+
+Baseline audit: 693 reconstruction/contracts/orchestration passed, 22 skipped;
+46 API passed ngoài sandbox; 17 integration fixture passed; 86 frontend passed.
+Đây là baseline trước patch, không phải proof patch hoặc real GPU/browser E2E.
+
 ### Owner khóa thứ tự completion / integration — 2026-09-27
 
 1. Tiếp tục hoàn thiện và kiểm thử toàn pipeline EX-REC trên

@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-PRODUCT` |
 | Priority | `P0` |
-| Status | `DONE` |
+| Status | `IN_PROGRESS` |
 | Owner | Cường |
 | Target milestone | `M1/M2` |
 
@@ -55,6 +55,13 @@ Không sửa track internals. Shared contract change cần producer + consumer r
 P0 không tự mở rộng sang advanced scheduler, multi-tenant platform hoặc public deployment hardening.
 
 ## 9. Implementation Plan
+
+Audit/implementation 2026-09-28: historical DONE chưa chứng minh recovery, vì
+registry vẫn giữ pointer/history trong RAM. Đang nối SQLite/PostgreSQL repository
+vào API factory, immutable UUID revisions + atomic pointer/event transaction,
+CAS stale writers, fixture opt-in và explicit execution profile. Không đổi shared
+JobManifest. Owner yêu cầu không chạy lại tests; regression đã thêm nhưng chưa
+thực thi, vì vậy chưa chốt DONE hoặc restart/cloud acceptance.
 
 **Files**
 

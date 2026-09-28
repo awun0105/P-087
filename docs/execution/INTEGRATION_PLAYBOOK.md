@@ -1031,6 +1031,8 @@ ReleaseManifest
 Một lỗi kiến trúc nguy hiểm là lạm dụng DVC để lưu trữ mọi chỉnh sửa nhỏ của người dùng, hoặc cố ép MLflow làm cơ sở dữ liệu trạng thái nghiệp vụ. Real2Sim Studio phân định 5 lớp trách nhiệm rõ ràng:
 
 1. **PostgreSQL Database (Application State & Business Domain):**
+   - Local integration dùng SQLite file qua cùng repository adapter; PostgreSQL
+     là đường deployment. Không dùng database in-memory cho API runtime.
    - Quản lý users, projects, job states, workflow lifecycle (`QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`).
    - Quản lý `SceneRevision` metadata, audit logs, commands history, `ApprovalRecord`, danh mục candidate manifests.
 2. **Artifact Store (Large Binaries via URI `artifact://`):**

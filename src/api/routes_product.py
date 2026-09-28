@@ -20,6 +20,7 @@ from src.services.orchestration.jobs import (
     JobNotResolvableError,
     TransitionRequest,
 )
+from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.projects import (
     JobCreateInput,
     JobNotFoundError,
@@ -98,7 +99,7 @@ def create_job(project_id: str, request: schemas.JobCreateRequest) -> JobManifes
         return registry.create_job(JobCreateInput(project_id=project_id, scene_revision=request.scene_revision))
     except ProjectNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    except PrivacyGateBlockedError as error:
+    except (PrivacyGateBlockedError, RuntimeStateConflictError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 
 
@@ -152,7 +153,7 @@ def transition_job(job_id: str, request: TransitionRequest) -> JobManifest:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except InvalidTransitionError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
-    except JobNotResolvableError as error:
+    except (JobNotResolvableError, RuntimeStateConflictError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 
 
@@ -165,6 +166,8 @@ def retry_job(job_id: str) -> JobManifest:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except JobLifecycleError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+    except RuntimeStateConflictError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 
 
 @router.get("/jobs/{job_id}/attempts", response_model=schemas.JobAttemptListResponse)

@@ -1,8 +1,7 @@
-"""Fixture-backed project and job registry for the mock-first product API.
+"""Registry project/job bền vững; synthetic fixtures là opt-in riêng cho demo.
 
-EX-PRODUCT chạy trước khi có worker thật (PRODUCT-01 §3), nên registry đọc
-`fixtures/mock_job/` và trả đúng response shape mà worker thật sẽ trả sau này.
-Đổi nguồn dữ liệu không được đổi shape.
+API dùng database + immutable manifest. Constructor không DB được giữ như seam
+unit/fixture cũ, không phải đường persistence của deployed API.
 """
 
 from datetime import UTC, datetime
@@ -43,7 +42,9 @@ from src.services.orchestration.artifacts import (
     sha256_file,
     with_canonical_checksum,
 )
+from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.models import JobAttemptRecord, TransitionRequest
+from src.services.orchestration.jobs.profile import ExecutionProfile
 from src.services.orchestration.jobs.service import JobLifecycle
 from src.services.orchestration.projects.errors import (
     JobNotFoundError,
@@ -54,6 +55,7 @@ from src.services.orchestration.projects.models import (
     ProjectCreateInput,
     ProjectRecord,
 )
+from src.services.orchestration.projects.persistence import ProjectPersistence
 from src.services.orchestration.projects.privacy import require_dispatch_allowed
 from src.services.orchestration.scene.editor import SceneEditor
 
@@ -78,12 +80,14 @@ _PLACEHOLDER_CHECKSUM = "sha256:" + "0" * 64
 
 
 class ProjectRegistry:
-    """In-memory project/job registry seeded from the shared handoff fixtures."""
+    """Registry runtime; dictionaries chỉ dùng cho seam fixture/unit không có DB."""
 
     def __init__(
         self,
         fixture_root: Path = DEFAULT_FIXTURE_ROOT,
         runtime_root: Path = DEFAULT_RUNTIME_ROOT,
+        database: RuntimeDatabase | None = None,
+        execution_profile: ExecutionProfile | None = None,
     ) -> None:
         self.fixture_root = fixture_root
         self.job_fixture_dir = fixture_root / "mock_job"
@@ -93,6 +97,8 @@ class ProjectRegistry:
         self.candidate_fixture_path = fixture_root / "candidate" / "candidate_package.json"
         self.resolver = ArtifactResolver(self.artifact_root)
         self.runtime_resolver = ArtifactResolver(runtime_root)
+        self.persistence = ProjectPersistence(database, self.runtime_resolver) if database else None
+        self.execution_profile = execution_profile
         self.store = FilesystemArtifactStore(self.resolver)
         self.lifecycle = JobLifecycle(self.runtime_resolver, self.resolver)
         self.scene = SceneEditor(fixture_root, self.runtime_resolver)
@@ -132,6 +138,23 @@ class ProjectRegistry:
                 recorded_at=job.completed_at or job.started_at,
             )
         ]
+        if self.persistence is not None:
+            self.persistence.save_project(self._projects[job.project_id], seed=True)
+            try:
+                self.persistence.get_job(job.job_id)
+            except JobNotFoundError:
+                reference = self.lifecycle.store.publish_manifest(job)
+                event = self._attempts[job.job_id][0].model_copy(
+                    update={
+                        "job_manifest_uri": reference.artifact_uri,
+                        "job_manifest_checksum": reference.artifact_checksum,
+                    }
+                )
+                self.persistence.save_job(job, reference, event, seed=True)
+            self._projects.clear()
+            self._jobs.clear()
+            self._project_jobs.clear()
+            self._attempts.clear()
 
     def _fixture_privacy_report(self, input_manifest_checksum: Checksum) -> PrivacyValidationReport:
         """Báo cáo privacy suy ra từ chính fixture, không phải một phê duyệt mới.
@@ -209,8 +232,11 @@ class ProjectRegistry:
             source_rights_attestation=attestation,
             privacy_report=self._preliminary_privacy_report(request.input_manifest_checksum),
         )
-        self._projects[project_id] = record
-        self._project_jobs[project_id] = []
+        if self.persistence is not None:
+            self.persistence.save_project(record)
+        else:
+            self._projects[project_id] = record
+            self._project_jobs[project_id] = []
         return record
 
     def _preliminary_privacy_report(self, input_manifest_checksum: Checksum) -> PrivacyValidationReport:
@@ -229,10 +255,14 @@ class ProjectRegistry:
 
     def list_projects(self) -> list[ProjectRecord]:
         """Toàn bộ project đang giữ, sắp theo project_id để kết quả ổn định."""
+        if self.persistence is not None:
+            return self.persistence.list_projects()
         return [self._projects[key] for key in sorted(self._projects)]
 
     def get_project(self, project_id: str) -> ProjectRecord:
         """Lấy một project, ném ProjectNotFoundError nếu không có."""
+        if self.persistence is not None:
+            return self.persistence.get_project(project_id)
         try:
             return self._projects[project_id]
         except KeyError as error:
@@ -247,8 +277,13 @@ class ProjectRegistry:
         current = self.get_project(project_id)
         if report.input_manifest_checksum != current.input_manifest_checksum:
             raise ValueError("privacy report phải gắn đúng input manifest của project")
+        if report.report_checksum != canonical_content_checksum(report, "report_checksum"):
+            raise ArtifactChecksumError("Privacy report canonical checksum không khớp")
         updated = current.model_copy(update={"privacy_report": report})
-        self._projects[project_id] = updated
+        if self.persistence is not None:
+            self.persistence.save_project(updated, expected=current)
+        else:
+            self._projects[project_id] = updated
         return updated
 
     # --- jobs -------------------------------------------------------------
@@ -258,24 +293,45 @@ class ProjectRegistry:
         project = self.get_project(request.project_id)
         require_dispatch_allowed(project.privacy_report.result)
         job = self._build_queued_job(project, request.scene_revision)
-        reference = self.lifecycle.persist_initial(job)
-        self._jobs[job.job_id] = job
-        self._project_jobs.setdefault(project.project_id, []).append(job.job_id)
-        self._attempts[job.job_id] = [
-            JobAttemptRecord(
-                attempt=1,
-                status=job.status,
-                current_stage=job.current_stage,
-                recorded_at=job.started_at,
-                job_manifest_uri=reference.artifact_uri,
-                job_manifest_checksum=reference.artifact_checksum,
-            )
-        ]
+        reference = (
+            self.lifecycle.store.publish_manifest(job) if self.persistence else self.lifecycle.persist_initial(job)
+        )
+        event = JobAttemptRecord(
+            attempt=1,
+            status=job.status,
+            current_stage=job.current_stage,
+            recorded_at=job.started_at,
+            job_manifest_uri=reference.artifact_uri,
+            job_manifest_checksum=reference.artifact_checksum,
+        )
+        if self.persistence is not None:
+            self.persistence.save_job(job, reference, event)
+        else:
+            self._jobs[job.job_id] = job
+            self._project_jobs.setdefault(project.project_id, []).append(job.job_id)
+            self._attempts[job.job_id] = [event]
         return job
 
     def transition_job(self, job_id: str, request: TransitionRequest) -> JobManifest:
         """Chuyển trạng thái job theo bảng chuyển, rồi publish revision mới."""
         current = self.get_job(job_id)
+        if self.persistence is not None:
+            # Đọc history trước publication; CAS loại command nếu process khác đã đổi job.
+            history = self.persistence.list_attempts(job_id)
+            updated = self.lifecycle.prepare(current, request)
+            reference = self.lifecycle.store.publish_manifest(updated)
+            previous = history[-1].attempt if history else 1
+            event = JobAttemptRecord(
+                attempt=previous + (1 if request.target_status == JobStatus.QUEUED else 0),
+                status=updated.status,
+                current_stage=updated.current_stage,
+                recorded_at=datetime.now(UTC),
+                job_manifest_uri=reference.artifact_uri,
+                job_manifest_checksum=reference.artifact_checksum,
+                error=request.error,
+            )
+            self.persistence.save_job(updated, reference, event, expected=current)
+            return updated
         sequence = len(self._attempts.get(job_id, [])) + 1
         updated, reference = self.lifecycle.apply(current, request, sequence)
         self._jobs[job_id] = updated
@@ -302,7 +358,7 @@ class ProjectRegistry:
                 attempt=(previous.attempt + 1) if is_retry and previous else (previous.attempt if previous else 1),
                 status=job.status,
                 current_stage=job.current_stage,
-                recorded_at=job.completed_at or job.started_at,
+                recorded_at=datetime.now(UTC),
                 job_manifest_uri=reference.artifact_uri,
                 job_manifest_checksum=reference.artifact_checksum,
                 error=request.error,
@@ -311,11 +367,24 @@ class ProjectRegistry:
 
     def list_job_attempts(self, job_id: str) -> list[JobAttemptRecord]:
         """Lịch sử attempt của một job, cũ nhất trước."""
+        if self.persistence is not None:
+            return self.persistence.list_attempts(job_id)
         self.get_job(job_id)
         return list(self._attempts.get(job_id, []))
 
     def _build_queued_job(self, project: ProjectRecord, scene_revision: str) -> JobManifest:
-        """Job mới chưa chạy stage nào, dùng đúng config/runtime đã khoá của fixture."""
+        """Runtime job không được mang config/versions synthetic của fixture."""
+        profile = self.execution_profile
+        if profile is None:
+            if self.persistence is not None and project.source_rights_attestation.get("fixture") is not True:
+                raise RuntimeStateConflictError(
+                    "Chưa cấu hình execution profile: cần PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST"
+                )
+            profile = ExecutionProfile(
+                config_checksum=self._fixture_config_checksum(),
+                runtime_manifest_checksum=self._fixture_runtime_checksum(),
+                seed=_FIXTURE_SEED,
+            )
         draft = JobManifest(
             schema_version=_SCHEMA_VERSION,
             job_id=f"job-{uuid4().hex[:12]}",
@@ -323,9 +392,9 @@ class ProjectRegistry:
             scene_revision=scene_revision,
             status=JobStatus.QUEUED,
             input_manifest_checksum=project.input_manifest_checksum,
-            config_checksum=self._fixture_config_checksum(),
-            runtime_manifest_checksum=self._fixture_runtime_checksum(),
-            seed=_FIXTURE_SEED,
+            config_checksum=profile.config_checksum,
+            runtime_manifest_checksum=profile.runtime_manifest_checksum,
+            seed=profile.seed,
             started_at=datetime.now(UTC),
             completed_at=None,
             current_stage=StageId.INPUT_VALIDATE,
@@ -336,11 +405,15 @@ class ProjectRegistry:
 
     def list_jobs(self, project_id: str) -> list[JobManifest]:
         """Job của một project, sắp theo job_id."""
+        if self.persistence is not None:
+            return self.persistence.list_jobs(project_id)
         self.get_project(project_id)
         return [self._jobs[key] for key in sorted(self._project_jobs.get(project_id, []))]
 
     def get_job(self, job_id: str) -> JobManifest:
         """Lấy một job, ném JobNotFoundError nếu không có."""
+        if self.persistence is not None:
+            return self.persistence.get_job(job_id)
         try:
             return self._jobs[job_id]
         except KeyError as error:
@@ -431,7 +504,18 @@ class ProjectRegistry:
 
 @lru_cache
 def get_project_registry() -> ProjectRegistry:
-    """Registry dùng chung, nạp fixture một lần (theo khuôn `get_settings`)."""
-    registry = ProjectRegistry(runtime_root=get_settings().artifact_root)
-    registry.seed_from_fixtures()
+    """API luôn dùng durable state; fixture phải được bật rõ trong Settings."""
+    settings = get_settings()
+    profile = (
+        ExecutionProfile.load(
+            settings.product_processing_config, settings.product_runtime_manifest, settings.product_seed
+        )
+        if settings.product_processing_config is not None and settings.product_runtime_manifest is not None
+        else None
+    )
+    registry = ProjectRegistry(
+        runtime_root=settings.artifact_root, database=RuntimeDatabase(settings.database_url), execution_profile=profile
+    )
+    if settings.product_fixture_mode:
+        registry.seed_from_fixtures()
     return registry

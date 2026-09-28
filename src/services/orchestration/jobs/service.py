@@ -47,11 +47,15 @@ class JobLifecycle:
 
     def apply(self, current: JobManifest, request: TransitionRequest, sequence: int) -> tuple[JobManifest, ArtifactRef]:
         """Trả về manifest mới và ref của revision vừa publish."""
+        updated = self.prepare(current, request)
+        return updated, self.store.publish_manifest(updated, sequence)
+
+    def prepare(self, current: JobManifest, request: TransitionRequest) -> JobManifest:
+        """Validate trước publication; persistence chịu trách nhiệm CAS con trỏ."""
         require_transition(current.status, request.target_status)
         if request.target_status == JobStatus.SUCCEEDED:
             self.require_artifacts_resolvable(current)
-        updated = self._build_revision(current, request)
-        return updated, self.store.publish_manifest(updated, sequence)
+        return self._build_revision(current, request)
 
     def require_artifacts_resolvable(self, manifest: JobManifest) -> None:
         """Chặn ghi SUCCEEDED khi job chưa có artifact đầu ra kiểm chứng được."""

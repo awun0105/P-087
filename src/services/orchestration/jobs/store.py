@@ -4,6 +4,8 @@ Mỗi lần chuyển trạng thái publish một revision mới ở URI riêng, 
 không thể bị ghi đè: `FilesystemArtifactStore.publish` từ chối path đã tồn tại.
 """
 
+from uuid import uuid4
+
 from src.models.contracts.artifacts import ArtifactDataClass, ArtifactRef
 from src.models.contracts.manifests import JobManifest
 from src.services.orchestration.artifacts import (
@@ -28,13 +30,17 @@ class JobArtifactStore:
         """URI revision thứ `sequence` (1-based) của một job."""
         return f"artifact://jobs/{job_id}/manifests/job_manifest.{sequence:03d}.json"
 
-    def publish_manifest(self, manifest: JobManifest, sequence: int) -> ArtifactRef:
-        """Ghi một revision bất biến và trả ref đã kiểm checksum."""
+    def publish_manifest(self, manifest: JobManifest, sequence: int | None = None) -> ArtifactRef:
+        """UUID tránh đụng artifact mồ côi khi transaction DB trước đó bị rollback."""
         payload = manifest.model_dump_json(indent=2).encode("utf-8") + b"\n"
         reference = ArtifactRef(
             artifact_type=_ARTIFACT_TYPE,
             schema_version=_SCHEMA_VERSION,
-            artifact_uri=self.manifest_uri(manifest.job_id, sequence),
+            artifact_uri=(
+                self.manifest_uri(manifest.job_id, sequence)
+                if sequence is not None
+                else f"artifact://jobs/{manifest.job_id}/manifests/{uuid4().hex}.json"
+            ),
             artifact_checksum=sha256_bytes(payload),
             data_class=ArtifactDataClass.DERIVED,
             producer_stage=manifest.current_stage,
