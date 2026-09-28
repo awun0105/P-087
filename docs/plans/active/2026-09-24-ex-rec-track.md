@@ -28,6 +28,11 @@ Task capsule:
   không tự xác nhận hoặc thuê máy để bỏ qua những đầu vào này.
 
 Implementation plan / recovery checklist:
+- Tiếp tục sau `89e7410`: PRODUCT-03/08/09 — queue consumer cho prepared jobs,
+  exact-revision claim/failure, UI polling có cleanup và lịch sử lỗi đúng attempt.
+  Tái sử dụng durable job table, không tạo scheduler/state machine cạnh tranh.
+  Chưa nối raw upload/privacy approval; không auto-recover trainer sau hard kill.
+  Thêm regression nhưng chỉ chạy static checks theo yêu cầu owner.
 - Owner tiếp tục 2026-09-28: hoàn thiện backend→artifact→viewer trước, sau đó
   ADAPT nhóm selection/edit/measure từ SuperSplat. Không hosted publishing/XR/
   animation trong đợt này; không tests/handoff. Giữ plan hiện hữu duy nhất.
