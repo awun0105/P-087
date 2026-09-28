@@ -173,6 +173,47 @@ tải bytes PLY qua `GET /artifacts/content`.
   (SOG) trên browser mục tiêu và chứng minh được WebGL2 fallback. Trước thời điểm đó,
   code Three.js **không được xoá** nhưng **không được tính là bằng chứng 3DGS**.
 
+### 13.3 Khoảng trống đã đo sau audit (2026-09-27)
+
+Audit 7 repo tham chiếu + code quality tìm ra các mục sau. Mục nào đã sửa thì ghi
+rõ; mục nào là **khoảng trống tính năng** thì ghi là khoảng trống, không tính là
+sửa xong.
+
+**Đã sửa:**
+
+- `onFailed` inline làm viewer bị destroy/tạo lại mỗi render (tải lại SOG) → `useCallback`
+  + test hồi quy.
+- Docstring mô tả `viewer.app.root` dù không có dòng nào chạm nó → viết lại đúng thực tế.
+- `viewer.css` chưa import; `next/dynamic({ ssr: false })` chưa dùng → `viewer.css` đã
+  import, còn `next/dynamic` ghi dưới đây.
+- `api.ts` lệch 16 field + 7 enum; `PrivacyResult` đoán sai hoàn toàn → đã sinh lại từ
+  Pydantic, thêm `scripts/check_contract_mirror.py` để lệch là fail.
+- `StageTimeline` vẽ 11 stage trong đó 9 không tồn tại, thiếu 18 stage thật, và
+  `ExecutionError` không bao giờ hiện → dựng từ `STAGE_IDS` thật.
+- Nút Approve/Reject không bao giờ hiện vì UI so `isFinal` với `"PENDING"` — giá trị
+  backend không thể phát ra → `isFinal` dựa trên `approval` có tồn tại.
+- Không có quy đổi Z-up→Y-up nên mọi object vẽ sai trục → dùng đúng `R_x(-90°)` của repo.
+- Fixture dùng checksum `sha256:env0000` — không khớp `^sha256:[0-9a-f]{64}$` → helper `sha()`.
+- Point cloud đoán từ `geometry_ref` rồi để canvas trắng → cờ `provisional` + banner.
+
+**Khoảng trống, chưa xử lý (không phải bug):**
+
+- **Single Scene Graph chưa trọn.** Đã có collider environment qua `collisionUrl`; ba
+  view kỹ thuật còn lại vẫn ở renderer Three.js riêng. Cần `playcanvas/engine` thật.
+- **Không có undo/redo.** `playcanvas/supersplat` chưa lấy `EditHistory`.
+- **`playcanvas/engine` 0 import.** Không `TranslateGizmo`/`RotateGizmo`; translate hiện là
+  nút số ±0.1/±0.5, rotate không sửa được.
+- **`createViewer` dùng 3/16 API.** Chưa dùng `resetCamera`, `toggleWalk`, `seek`,
+  `captureFrame`, `annotations`, `events` (ngoài `progress:changed`).
+- **PLY parser đoán thứ tự property.** `parseHeader` đếm số property nhưng không đọc
+  tên; đọc `parts[0..2]` là x/y/z. Một PLY có `intensity/confidence/x/y/z` sẽ ra sai
+  mà không báo lỗi — trái với chính docstring file nói là strict.
+- **`StageTimeline` chưa có test.** Đã sửa component nhưng chưa khoá bằng test.
+- **Không có `AbortController`** ở 5 đường fetch; `setTimeout` ở 3 chỗ không clear.
+- **409 không có đường thoát.** Edit scene trả 409 thì panel giữ revision cũ và mọi
+  edit sau lại cũng 409 tới khi reload tay.
+- **`PRODUCT-07` endpoint là fake stub** (tự thừa nhận ở `:144`).
+
 ### 13.2 Giới hạn của evidence trên
 
 - AC-11 là mốc M3; mục DoD "render real Brush 3DGS" vẫn **để trống**, và phải để
