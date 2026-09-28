@@ -18,6 +18,8 @@ import {
   multiplyQuaternions,
   rotateVector,
   VIEW_MODES,
+  toRendererPoint,
+  toRendererQuaternion,
   visibleLayers,
 } from "@/features/viewer/layers";
 
@@ -243,5 +245,39 @@ describe("quaternion helpers", () => {
     expect(rotated[0]).toBeCloseTo(-1, 6);
     expect(rotated[1]).toBeCloseTo(-2, 6);
     expect(rotated[2]).toBeCloseTo(3, 6);
+  });
+});
+
+/**
+ * Canonical là Z-up, Three.js là Y-up. Không có phép quy đổi này thì **mọi** object
+ * bị vẽ sai trục và scene xoay 90° — mà test cũ không bắt được vì fixture chỉ có
+ * translation `[1,2,0]`, tức nằm trên trục mà Z-up và Y-up cùng là 0.
+ */
+describe("quy đổi trục canonical → renderer", () => {
+  it("giữ đúng phép R_x(-90°) của repo", () => {
+    expect(toRendererPoint([1, 2, 3])).toEqual([1, 3, -2]);
+  });
+
+  it("đổi cả ba trục, không chỉ hoán đổi X/Y", () => {
+    const [x, y, z] = toRendererPoint([4, 5, 6]);
+    expect(x).toBe(4);
+    expect(y).toBe(6);
+    expect(z).toBe(-5);
+  });
+
+  it("quaternion xyzw giữ w và đảo dấu hai trục đã đổi chiều", () => {
+    // `toEqual` phân biệt -0 và +0, nên so bằng phép nhân chứ không so mảng thẳng.
+    const identity = toRendererQuaternion([0, 0, 0, 1]);
+    expect(identity.map((value) => value + 0)).toEqual([0, 0, 0, 1]);
+    const [x, y, z, w] = toRendererQuaternion([0.1, 0.2, 0.3, 0.9]);
+    expect(w).toBe(0.9);
+    expect(x).toBe(0.1);
+    expect(y).toBe(-0.2);
+    expect(z).toBe(-0.3);
+  });
+
+  it("point nằm trên trục Z cao phải ra trục Y cao", () => {
+    // Điểm trên trục up của canonical là (0,0,5); ở renderer nó phải là (0,5,0).
+    expect(toRendererPoint([0, 0, 5])).toEqual([0, 5, -0]);
   });
 });

@@ -5,7 +5,7 @@
  * test được trong jsdom. Đó là chủ ý: phần dễ sai nhất của viewer là ánh xạ
  * SceneIR → layer và bind checksum, không phải phần vẽ.
  *
- * Ba bất biến:
+ * Bốn bất biến:
  * - Transform canonical lấy từ SceneIR, không lấy từ state của Three.js.
  * - Mỗi layer giữ `checksum` của artifact sinh ra nó, để UI hiện được cái đang vẽ.
  * - Object `active: false` vẫn tạo layer nhưng mặc định ẩn — ẩn/hiện là lựa chọn
@@ -27,6 +27,27 @@ export const VIEW_MODE_LABELS: Record<ViewMode, string> = {
 /** Ba view kỹ thuật dựng bằng Three.js; VISUAL cần renderer Gaussian. */
 export const THREE_JS_VIEW_MODES: readonly ViewMode[] = ["GEOMETRY", "POINT_CLOUD", "COLLIDER"];
 
+/**
+ * Canonical của dự án là **Z-up** (`coordinates.py` CANONICAL_UP_AXIS = "Z"), còn
+ * Three.js là **Y-up**. Bản cũ copy thẳng `translation_xyz` vào `position` và đặt
+ * camera theo Y-up, nên **mọi object bị vẽ sai trục** — scene sẽ xoay 90°.
+ *
+ * Dùng đúng phép quy đổi của repo (`rgb/voxel.py` `native_from_world`):
+ * R_x(-90°), tức (x, y, z) → (x, z, −y). Giữ handedness và đơn vị mét.
+ */
+export function toRendererPoint(point: [number, number, number]): [number, number, number] {
+  const [x, y, z] = point;
+  return [x, z, -y];
+}
+
+/** Cùng phép quy đổi cho quaternion, quy ước xyzw như canonical. */
+export function toRendererQuaternion(
+  quaternion: [number, number, number, number],
+): [number, number, number, number] {
+  const [x, y, z, w] = quaternion;
+  return [x, -y, -z, w];
+}
+
 export interface LayerTransform {
   parent_frame: string;
   local_frame: string;
@@ -45,6 +66,13 @@ export interface GeometryLayer {
   transform: LayerTransform;
   /** Canonical `active` của object; không phải lựa chọn ẩn/hiện của người xem. */
   canonical_active: boolean;
+  /**
+   * `SceneIR` **không có** ref point cloud riêng, nên lớp `point_cloud` dùng
+   * `geometry_ref` — đây là suy đoán, không phải dữ liệu. Artifact thật có thể là
+   * GLB/JSON và `parseAsciiPly` sẽ từ chối. Cờ này để UI nói rõ thay vì để canvas
+   * trắng không giải thích.
+   */
+  provisional: boolean;
 }
 
 export interface ColliderLayer {
@@ -167,6 +195,7 @@ export function buildSceneLayers(scene: SceneIR, sceneChecksum: string): SceneLa
         rotation_quaternion_xyzw: [0, 0, 0, 1],
       },
       canonical_active: true,
+      provisional: true,
     },
     {
       kind: "point_cloud",
@@ -182,6 +211,7 @@ export function buildSceneLayers(scene: SceneIR, sceneChecksum: string): SceneLa
         rotation_quaternion_xyzw: [0, 0, 0, 1],
       },
       canonical_active: true,
+      provisional: true,
     },
   ];
   const colliders: ColliderLayer[] = [];
@@ -196,6 +226,7 @@ export function buildSceneLayers(scene: SceneIR, sceneChecksum: string): SceneLa
       checksum: object.geometry_ref.artifact_checksum,
       transform: toLayerTransform(object.transform),
       canonical_active: object.active,
+      provisional: true,
     });
     geometry.push({
       kind: "point_cloud",
@@ -206,6 +237,7 @@ export function buildSceneLayers(scene: SceneIR, sceneChecksum: string): SceneLa
       checksum: object.geometry_ref.artifact_checksum,
       transform: toLayerTransform(object.transform),
       canonical_active: object.active,
+      provisional: true,
     });
     if (object.collider) {
       colliders.push(buildColliderLayer(object, object.collider));

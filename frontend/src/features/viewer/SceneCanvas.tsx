@@ -13,7 +13,13 @@ import { GizmoHelper, GizmoViewport, Grid, OrbitControls } from "@react-three/dr
 import { useMemo } from "react";
 import * as THREE from "three";
 
-import { layerKey, type LayerTransform, type ViewerLayer } from "@/features/viewer/layers";
+import {
+  layerKey,
+  toRendererPoint,
+  toRendererQuaternion,
+  type LayerTransform,
+  type ViewerLayer,
+} from "@/features/viewer/layers";
 import type { PlyCloud } from "@/features/viewer/ply";
 
 export interface SceneCanvasProps {
@@ -24,9 +30,14 @@ export interface SceneCanvasProps {
   mode: string;
 }
 
-/** Quaternion canonical (xyzw) → Euler của Three.js, không tự đảo thứ tự. */
+/**
+ * Quaternion canonical Z-up (xyzw) → Euler của Three.js Y-up.
+ *
+ * Bản cũ dùng thẳng quaternion canonical, tức **bỏ qua việc đổi trục**, nên mọi
+ * object bị xoay sai. Nay đổi trục trước rồi mới ra Euler.
+ */
 export function toEuler(quaternion: readonly [number, number, number, number]): [number, number, number] {
-  const [x, y, z, w] = quaternion;
+  const [x, y, z, w] = toRendererQuaternion([...quaternion]);
   return new THREE.Euler().setFromQuaternion(new THREE.Quaternion(x, y, z, w), "XYZ").toArray() as [
     number,
     number,
@@ -35,7 +46,7 @@ export function toEuler(quaternion: readonly [number, number, number, number]): 
 }
 
 function layerPosition(layer: LayerTransform): [number, number, number] {
-  return [...layer.translation_xyz];
+  return toRendererPoint([...layer.translation_xyz]);
 }
 
 function ColliderBox({ layer, selected }: { layer: ViewerLayer; selected: boolean }) {
