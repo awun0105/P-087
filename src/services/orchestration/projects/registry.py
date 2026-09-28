@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
+from src.config import get_settings
 from src.models.contracts.artifacts import (
     ArtifactDataClass,
     ArtifactRef,
@@ -91,9 +92,11 @@ class ProjectRegistry:
         self.approval_fixture_path = fixture_root / "mock_job" / "approval_record.json"
         self.candidate_fixture_path = fixture_root / "candidate" / "candidate_package.json"
         self.resolver = ArtifactResolver(self.artifact_root)
+        self.runtime_resolver = ArtifactResolver(runtime_root)
         self.store = FilesystemArtifactStore(self.resolver)
-        self.lifecycle = JobLifecycle(ArtifactResolver(runtime_root), ArtifactResolver(self.artifact_root))
-        self.scene = SceneEditor(fixture_root, ArtifactResolver(runtime_root))
+        self.lifecycle = JobLifecycle(self.runtime_resolver, self.resolver)
+        self.scene = SceneEditor(fixture_root, self.runtime_resolver)
+        self._fixture_job_id: str | None = None
         self._projects: dict[str, ProjectRecord] = {}
         self._jobs: dict[str, JobManifest] = {}
         self._project_jobs: dict[str, list[str]] = {}
@@ -109,6 +112,7 @@ class ProjectRegistry:
         attestation do người dùng khai — fixture không phải sự đồng ý thật.
         """
         job = self._load_fixture_model("job_manifest.json", JobManifest)
+        self._fixture_job_id = job.job_id
         input_manifest = self._load_fixture_model("input_manifest.json", InputManifest)
         self._projects[job.project_id] = ProjectRecord(
             project_id=job.project_id,
@@ -153,6 +157,8 @@ class ProjectRegistry:
     def get_validation_report(self, job_id: str) -> ValidationReport:
         """Báo cáo validation của job, đọc từ fixture và verify self-checksum."""
         self.get_job(job_id)
+        if job_id != self._fixture_job_id:
+            raise ArtifactNotFoundError("Job chưa publish validation report")
         report = self._read_fixture_report(self.validation_fixture_path, ValidationReport, "report_checksum")
         if report.candidate_checksum != self._fixture_candidate_checksum():
             raise ArtifactChecksumError("validation report không gắn với candidate của fixture")
@@ -161,6 +167,8 @@ class ProjectRegistry:
     def get_approval_record(self, job_id: str) -> ApprovalRecord:
         """Approval record của job. Đây là bản **synthetic**, không phải uỷ quyền thật."""
         self.get_job(job_id)
+        if job_id != self._fixture_job_id:
+            raise ArtifactNotFoundError("Job chưa publish approval record")
         return self._read_fixture_report(self.approval_fixture_path, ApprovalRecord, "record_checksum")
 
     def _read_fixture_report(self, path: Path, model_type: type[ContractT], checksum_field: str) -> ContractT:
@@ -367,22 +375,45 @@ class ProjectRegistry:
         thư mục cũng không gọi tới được. Checksum trong `reference` vẫn được
         resolver verify trên bytes thật.
         """
-        if reference.artifact_uri not in self._product_visible_uris(job_id):
-            raise ArtifactNotFoundError(f"artifact không thuộc job {job_id}: {reference.artifact_uri}")
-        return self.resolver.require(reference).read_bytes()
+        return self.resolve_artifact(job_id, reference).read_bytes()
 
-    def _product_visible_uris(self, job_id: str) -> set[str]:
+    def resolve_artifact(self, job_id: str, reference: ArtifactRef) -> Path:
+        """Resolve ref canonical, không dùng checksum do client chọn làm authority."""
+        candidates = self._product_visible_references(job_id)
+        canonical = candidates.get(reference.artifact_uri)
+        if canonical is None:
+            raise ArtifactNotFoundError("Artifact không thuộc allow-list của job")
+        if canonical.artifact_checksum != reference.artifact_checksum:
+            raise ArtifactChecksumError("Artifact checksum không khớp reference đã publish")
+        try:
+            return self.runtime_resolver.require(canonical)
+        except ArtifactNotFoundError:
+            if job_id != self._fixture_job_id:
+                raise
+            return self.resolver.require(canonical)
+
+    def _product_visible_references(self, job_id: str) -> dict[str, ArtifactRef]:
         """URI được phép tải: artifact của job cộng ref hình học trong SceneIR.
 
         Ref của SceneIR là `ProductArtifactRef` nên contract chỉ cho `product_input`
         hoặc `derived` đi qua — thêm chúng vào allow-list không mở đường cho
         `ground_truth`/`evaluation_only`.
         """
-        uris = {item.artifact_uri for item in self.list_job_artifacts(job_id)[0]}
-        uris.update(
-            reference.artifact_uri for reference in self.scene.artifact_references(self.scene.current(job_id).scene)
-        )
-        return uris
+        references: list[ArtifactRef] = list(self.list_job_artifacts(job_id)[0])
+        references.extend(self.scene.artifact_references_for_job(job_id))
+        if job_id == self._fixture_job_id:
+            visual = self.scene.visual_binding(job_id)
+            if visual.reference is not None:
+                references.append(visual.reference)
+        indexed: dict[str, ArtifactRef] = {}
+        for ref in references:
+            if ref.data_class not in PRODUCT_VISIBLE_DATA_CLASSES:
+                continue
+            previous = indexed.get(ref.artifact_uri)
+            if previous and previous.artifact_checksum != ref.artifact_checksum:
+                raise ArtifactChecksumError("Một URI có nhiều checksum trong allow-list")
+            indexed[ref.artifact_uri] = ref
+        return indexed
 
     @staticmethod
     def _to_product_ref(job_id: str, stage: StageArtifact) -> ProductArtifactRef:
@@ -401,6 +432,6 @@ class ProjectRegistry:
 @lru_cache
 def get_project_registry() -> ProjectRegistry:
     """Registry dùng chung, nạp fixture một lần (theo khuôn `get_settings`)."""
-    registry = ProjectRegistry()
+    registry = ProjectRegistry(runtime_root=get_settings().artifact_root)
     registry.seed_from_fixtures()
     return registry

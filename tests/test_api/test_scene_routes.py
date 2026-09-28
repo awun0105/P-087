@@ -69,7 +69,9 @@ async def test_scene_response_has_no_filesystem_paths(client) -> None:
 async def test_scene_reports_visual_is_not_brush_proof(client) -> None:
     """Fixture visual phải tự khai nó không phải bằng chứng Brush."""
     body = await _scene(client)
-    assert body["visual"]["available"] is True
+    # JSON fixture có metadata nhưng không phải payload Gaussian cho native loader.
+    assert body["visual"]["available"] is False
+    assert body["visual"]["unavailable_reason"]
     assert body["visual"]["brush_compatibility_proof"] is False
 
 

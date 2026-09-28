@@ -297,7 +297,8 @@ def test_empty_command_is_rejected() -> None:
 def test_visual_binding_denies_brush_proof(editor: SceneEditor) -> None:
     """Visual fixture là tổng hợp: cờ Brush phải là false để không bị đọc thành AC-11."""
     binding = editor.visual_binding()
-    assert binding.available is True
+    assert binding.available is False
+    assert binding.unavailable_reason
     assert binding.format == "real2sim.synthetic.visual.v1"
     assert binding.brush_compatibility_proof is False
 

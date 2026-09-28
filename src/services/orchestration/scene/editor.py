@@ -25,6 +25,7 @@ from src.services.orchestration.artifacts import (
 )
 from src.services.orchestration.scene.errors import (
     SceneEditRejectedError,
+    SceneNotAvailableError,
     SceneObjectNotFoundError,
     SceneRevisionConflictError,
 )
@@ -64,22 +65,33 @@ class SceneEditor:
         """
         if job_id not in self._revisions:
             recovered = self._recover(job_id)
-            self._revisions[job_id] = recovered or self._publish(job_id, self._fixture_scene(), supersedes=None)
+            if recovered is None:
+                fixture = self._fixture_scene()
+                if fixture.environment.geometry_ref.job_id != job_id:
+                    raise SceneNotAvailableError(
+                        "Job chưa publish SceneIR; reconstruction preview không yêu cầu SceneIR"
+                    )
+                recovered = self._publish(job_id, fixture, supersedes=None)
+            self._revisions[job_id] = recovered
         return self._revisions[job_id]
 
-    def visual_binding(self) -> VisualBinding:
+    def visual_binding(self, job_id: str | None = None) -> VisualBinding:
         """Visual của scene, kèm cờ nói rõ đây chưa phải bằng chứng Brush.
 
         Fixture hiện chỉ có visual tổng hợp (`real2sim.synthetic.visual.v1` với
-        `brush_compatibility_proof: false`). Trả `available: true` để viewer vẫn
-        dựng được, nhưng cờ false ngăn nó bị đọc thành AC-11.
+        `brush_compatibility_proof: false`). JSON fixture vẫn có ref để inspect,
+        nhưng không được khai available cho Gaussian renderer.
         """
         if not self.fixture_visual_path.is_file():
             return VisualBinding(available=False, unavailable_reason="chưa có VisualArtifact nào được publish")
         payload = json.loads(self.fixture_visual_path.read_text(encoding="utf-8"))
+        if job_id is not None and payload["job_id"] != job_id:
+            return VisualBinding(available=False, unavailable_reason="Job chưa có visual binding đã publish")
         provenance = payload.get("provenance", {})
+        supported = payload["artifact_uri"].lower().endswith((".sog", ".ply"))
         return VisualBinding(
-            available=True,
+            available=supported,
+            unavailable_reason=None if supported else "Fixture visual JSON không phải Gaussian PLY/SOG có thể render",
             format=payload["format"],
             producer=payload["producer"],
             producer_version=payload["producer_version"],
@@ -98,6 +110,16 @@ class SceneEditor:
         )
 
     # --- writing ----------------------------------------------------------
+
+    def artifact_references_for_job(self, job_id: str) -> list[ArtifactRef]:
+        """Đọc allow-list không tạo revision; fixture chỉ thuộc đúng fixture job."""
+        revision = self._revisions.get(job_id) or self._recover(job_id)
+        if revision is not None:
+            return list(self.artifact_references(revision.scene))
+        fixture = self._fixture_scene()
+        if fixture.environment.geometry_ref.job_id != job_id:
+            return []
+        return list(self.artifact_references(fixture))
 
     @staticmethod
     def artifact_references(scene: SceneIR) -> list[ProductArtifactRef]:

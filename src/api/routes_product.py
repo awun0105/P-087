@@ -6,10 +6,8 @@ thuộc ownership của EX-PRODUCT. Mọi handler ở đây là `def` đồng b�
 nên không chặn event loop.
 """
 
-from datetime import UTC, datetime
-from hashlib import sha256
-
 from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
 from src.api import schemas
@@ -37,6 +35,7 @@ from src.services.orchestration.scene import (
     SceneError,
     SceneRevisionConflictError,
 )
+from src.services.orchestration.scene.errors import SceneNotAvailableError
 
 router = APIRouter(tags=["product"])
 
@@ -197,7 +196,12 @@ def get_job_scene(job_id: str) -> schemas.SceneResponse:
     """
     _job_or_404(job_id)
     editor = _registry().scene
-    return schemas.scene_response(editor.current(job_id), editor.visual_binding())
+    try:
+        return schemas.scene_response(editor.current(job_id), editor.visual_binding(job_id))
+    except SceneNotAvailableError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (ArtifactStoreError, SceneError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @router.post(
@@ -271,12 +275,33 @@ def get_artifact_content(
             producer_stage="ST-EDIT",
             job_id=job_id,
         )
-        payload = _registry().read_artifact_bytes(job_id, reference)
+        path = _registry().resolve_artifact(job_id, reference)
     except ValidationError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
     except ArtifactStoreError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    return Response(content=payload, media_type="application/octet-stream")
+    # FileResponse stream/range: không copy toàn bộ SOG/video lớn vào RAM của API.
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        headers={
+            "Cache-Control": "private, no-cache",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.get("/jobs/{job_id}/artifacts/content/{filename}")
+def get_named_artifact_content(
+    job_id: str,
+    filename: str,
+    artifact_uri: str = Query(..., min_length=1),
+    artifact_checksum: Checksum = Query(...),
+) -> Response:
+    """Tên file dùng chọn parser; quyền đọc vẫn bind URI/checksum canonical."""
+    if filename != artifact_uri.rsplit("/", 1)[-1]:
+        raise HTTPException(status_code=404, detail="artifact filename does not match its reference")
+    return get_artifact_content(job_id, artifact_uri, artifact_checksum)
 
 
 # ── PRODUCT-07: object actions (fake stub) ───────────────────────────────────
@@ -298,15 +323,13 @@ def object_action(
     action: str,
     request: schemas.ObjectActionRequest,
 ) -> schemas.SceneEditResponse:
-    """Fake stub cho các object action: confirm/ignore/hide/delete/rename.
-
-    Thực tế sẽ gọi SCENE Core operations (SCENE-05/08). Hiện tại trả về revision
-    mới bằng cách áp một transform edit rỗng để tạo revision mới — client thấy
-    UI cập nhật. Object id không tồn tại → 422.
-    """
+    """Chặn mutation chưa nối EX-SCENE, không dùng transform rỗng giả thành công."""
     _job_or_404(job_id)
     editor = _registry().scene
-    current = editor.current(job_id)
+    try:
+        current = editor.current(job_id)
+    except SceneNotAvailableError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
     if current.scene.scene_revision != request.expected_scene_revision:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -322,15 +345,7 @@ def object_action(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"action {action} không được hỗ trợ",
         )
-    try:
-        # Tạo revision mới bằng edit rỗng để client thấy revision bump.
-        return schemas.scene_edit_response(
-            editor.apply(job_id, SceneEditCommand(expected_scene_revision=request.expected_scene_revision, edits=[]))
-        )
-    except SceneRevisionConflictError as error:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    except SceneError as error:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+    raise HTTPException(status_code=501, detail="Object action chưa nối EX-SCENE; không tạo revision giả")
 
 
 @router.post(
@@ -347,27 +362,19 @@ def add_object(
     job_id: str,
     request: schemas.AddObjectRequest,
 ) -> schemas.SceneEditResponse:
-    """Fake stub cho add obstacle (PRODUCT-07A).
-
-    Khi SCENE-08A implement, endpoint này sẽ delegate xuống domain add-object.
-    Hiện tại tạo revision mới bằng edit rỗng để client thấy revision bump.
-    """
+    """Add obstacle chưa có domain producer; không publish revision giả."""
     _job_or_404(job_id)
     editor = _registry().scene
-    current = editor.current(job_id)
+    try:
+        current = editor.current(job_id)
+    except SceneNotAvailableError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
     if current.scene.scene_revision != request.expected_scene_revision:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"scene đã đổi: client đang giữ {request.expected_scene_revision}, revision hiện tại là {current.scene.scene_revision}",
         )
-    try:
-        return schemas.scene_edit_response(
-            editor.apply(job_id, SceneEditCommand(expected_scene_revision=request.expected_scene_revision, edits=[]))
-        )
-    except SceneRevisionConflictError as error:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    except SceneError as error:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+    raise HTTPException(status_code=501, detail="Add obstacle chưa nối EX-SCENE; không tạo revision giả")
 
 
 # ── PRODUCT-10/11: review & release (fake stub) ──────────────────────────────
@@ -387,11 +394,7 @@ def review_action(
     action: str,
     request: schemas.ReviewActionRequest,
 ) -> schemas.ReviewStateResponse:
-    """Fake stub cho submit/approve/reject review.
-
-    Khi PRODUCT-10 backend implement, endpoint này sẽ delegate xuống review
-    lifecycle service. Hiện tại trả về state fixture với decision tương ứng.
-    """
+    """Không dùng fixture approval làm authorization hoặc kết quả submit thật."""
     _job_or_404(job_id)
     if action not in {"submit", "approve", "reject"}:
         raise HTTPException(
@@ -403,21 +406,9 @@ def review_action(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="lý do từ chối không được để trống",
         )
-    try:
-        approval = _registry().get_approval_record(job_id)
-    except ArtifactStoreError as error:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-
-    decision = "APPROVE" if action in {"submit", "approve"} else "REJECT"
-    approval = approval.model_copy(
-        update={
-            "decision": decision,
-            "reason": request.reason,
-            "reviewer_id": request.reviewer_id,
-            "decided_at": datetime.now(UTC).isoformat(),
-        }
+    raise HTTPException(
+        status_code=501, detail="Review authorization/persistence chưa triển khai; không tạo approval giả"
     )
-    return schemas.review_state(job_id, approval)
 
 
 @router.post(
@@ -434,47 +425,8 @@ def release_candidate(
     job_id: str,
     request: schemas.ReleaseRequest,
 ) -> schemas.ReleaseResponse:
-    """Fake stub seal exact candidate → ReleaseManifest (PRODUCT-11).
-
-    Khi PRODUCT-11 backend implement, endpoint này sẽ verify approval record,
-    candidate checksum và validation report checksum rồi tạo ReleaseManifest.
-    """
+    """Fail closed tới khi có producer ReleaseManifest và authorization thật."""
     _job_or_404(job_id)
-    try:
-        approval = _registry().get_approval_record(job_id)
-    except ArtifactStoreError as error:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-
-    if approval.decision != "APPROVE":
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="chỉ được release khi review đã APPROVE",
-        )
-    if request.approval_record_checksum != approval.record_checksum:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="approval record checksum không khớp",
-        )
-    if request.candidate_checksum != approval.candidate_checksum:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="candidate checksum không khớp approval record",
-        )
-    if request.validation_report_checksum != approval.validation_report_checksum:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="validation report checksum không khớp approval record",
-        )
-
-    # Stub checksum: tính từ payload để không hardcode toàn 0, nhưng vẫn ghi rõ là stub.
-    canonical = (
-        f"release|{job_id}|{approval.record_checksum}|"
-        f"{approval.candidate_checksum}|{approval.validation_report_checksum}"
-    ).encode()
-    release_checksum = f"sha256:{sha256(canonical).hexdigest()}"
-
-    return schemas.ReleaseResponse(
-        release_id=f"rel-{job_id}",
-        release_checksum=release_checksum,
-        released_at=datetime.now(UTC).isoformat(),
+    raise HTTPException(
+        status_code=501, detail="Release sealing chưa triển khai; không phát hành manifest/checksum giả"
     )

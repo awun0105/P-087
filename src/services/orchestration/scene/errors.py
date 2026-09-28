@@ -5,6 +5,10 @@ class SceneError(RuntimeError):
     """Base scene-revision failure."""
 
 
+class SceneNotAvailableError(SceneError):
+    """Job chưa publish SceneIR; không được thay bằng scene fixture."""
+
+
 class SceneObjectNotFoundError(SceneError):
     """Raised when an edit targets an object id that is not in the revision."""
 
