@@ -13,7 +13,8 @@ from pydantic import ValidationError
 from src.api import schemas
 from src.models.contracts.artifacts import ArtifactRef, Checksum
 from src.models.contracts.manifests import JobManifest, JobStatus
-from src.services.orchestration.artifacts import ArtifactStoreError
+from src.models.contracts.preview import ReconstructionPreview
+from src.services.orchestration.artifacts import ArtifactNotFoundError, ArtifactStoreError
 from src.services.orchestration.jobs import (
     InvalidTransitionError,
     JobLifecycleError,
@@ -148,7 +149,12 @@ def transition_job(job_id: str, request: TransitionRequest) -> JobManifest:
     đóng vai người báo tiến độ. Worker thật (PRODUCT-08) sẽ gọi cùng đường này.
     """
     try:
-        return _registry().transition_job(job_id, request)
+        registry = _registry()
+        if registry.persistence is not None and request.target_status != JobStatus.CANCELLED:
+            raise HTTPException(
+                status_code=409, detail="Runtime progress do worker sở hữu; dùng cancel/retry, không tự báo SUCCESS"
+            )
+        return registry.transition_job(job_id, request)
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except InvalidTransitionError as error:
@@ -181,6 +187,17 @@ def list_job_attempts(job_id: str) -> schemas.JobAttemptListResponse:
 
 
 # ── PRODUCT-06: scene revision cho viewer ────────────────────────────────────
+
+
+@router.get("/jobs/{job_id}/preview", response_model=ReconstructionPreview)
+def get_job_preview(job_id: str) -> ReconstructionPreview:
+    """Không cần SceneIR; chỉ trả preview trong journal của đúng job."""
+    try:
+        return _registry().get_preview(job_id)
+    except (JobNotFoundError, ArtifactNotFoundError) as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (ArtifactStoreError, ValueError) as error:
+        raise HTTPException(status_code=409, detail="Preview identity/schema/checksum không hợp lệ") from error
 
 
 def _job_or_404(job_id: str) -> JobManifest:

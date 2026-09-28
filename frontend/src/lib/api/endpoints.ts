@@ -22,6 +22,8 @@ import type {
   ValidationState,
 } from "@/lib/contracts/api";
 import { apiFetch, apiUrl, fetchApi, type ApiResult } from "@/lib/api/client";
+import { ApiError } from "@/lib/api/client";
+import { parsePreview, type ReconstructionPreview } from "@/lib/contracts/preview";
 
 const PRODUCT = "/api/v1";
 
@@ -81,6 +83,16 @@ export function retryJob(jobId: string): Promise<JobManifest> {
 
 export function getScene(jobId: string): Promise<ApiResult<SceneResponse>> {
   return fetchApi<SceneResponse>(`${PRODUCT}/jobs/${encodeURIComponent(jobId)}/scene`);
+}
+
+export async function getPreview(jobId: string): Promise<ApiResult<ReconstructionPreview>> {
+  const result = await fetchApi<unknown>(`${PRODUCT}/jobs/${encodeURIComponent(jobId)}/preview`);
+  if (!result.ok) return result;
+  try {
+    return { ok: true, data: parsePreview(result.data, jobId) };
+  } catch {
+    return { ok: false, error: new ApiError(502, "Backend trả preview sai contract/job identity") };
+  }
 }
 
 export function editScene(jobId: string, command: SceneEditCommand): Promise<SceneEditResponse> {

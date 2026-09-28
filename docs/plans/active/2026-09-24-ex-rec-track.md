@@ -37,6 +37,12 @@ Implementation plan / recovery checklist:
   PostgreSQL cần optional psycopg 3 (chưa install/qualify). Ruff check + format và
   CRLF-aware diff check pass; regression restart/CAS/corruption/rollback **chưa chạy**.
   Profile chỉ khóa identity, chưa tự dispatch hoặc chứng minh full input pipeline.
+- `a77c8be`: persistence commit. Nhóm tiếp theo thêm shared ReconstructionPreview,
+  producer publication + public REC verifier, PRODUCT CLI runner (prepared frames
+  đã nằm trong JobManifest, không raw upload), API allow-list và viewer trước SceneIR.
+  Static Ruff, tsc noEmit và ESLint changed files pass; regression producer→consumer
+  mới chưa chạy. API create job vẫn chưa tự queue raw input; metric confirmation UI,
+  full input preparation và worker recovery sau hard kill chưa hoàn chỉnh.
 - [ ] REC-05: connectivity từ raw free air, Euclidean distance, accepted seed
   đi vào carve, consumer replay từ config/occupancy.
 - [ ] Geometry contract: clearance cylinder khác physics capsule, canonical unit=1,

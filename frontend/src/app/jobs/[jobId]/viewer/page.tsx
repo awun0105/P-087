@@ -1,7 +1,7 @@
 import { JobTabs, PageHeader } from "@/components/shell";
 import { ErrorState } from "@/components/states";
 import { ViewerWorkspace } from "@/features/viewer/ViewerWorkspace";
-import { getScene } from "@/lib/api/endpoints";
+import { getPreview, getScene } from "@/lib/api/endpoints";
 
 /**
  * Màn hình SceneIR viewer.
@@ -12,15 +12,16 @@ import { getScene } from "@/lib/api/endpoints";
  */
 export default async function ViewerPage({ params }: PageProps<"/jobs/[jobId]/viewer">) {
   const { jobId } = await params;
-  const scene = await getScene(jobId);
+  const [scene, preview] = await Promise.all([getScene(jobId), getPreview(jobId)]);
 
   if (!scene.ok) {
     return (
       <>
         <PageHeader title="Scene viewer" subtitle={jobId} />
         <JobTabs jobId={jobId} active="Scene" />
-        <ErrorState title="Không tải được SceneIR" detail={scene.error.detail} />
-        <ViewerWorkspace scene={null} />
+        {scene.error.status !== 404 && <ErrorState title="Không tải được SceneIR" detail={scene.error.detail} />}
+        {!preview.ok && preview.error.status !== 404 && <ErrorState title="Không tải được preview" detail={preview.error.detail} />}
+        <ViewerWorkspace scene={null} preview={preview.ok ? preview.data : null} />
       </>
     );
   }

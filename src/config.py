@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     product_processing_config: Path | None = None
     product_runtime_manifest: Path | None = None
     product_seed: int | None = None
+    product_worker_root: Path = Path("./data/product_workers")
+    product_preview_timeout_seconds: float = Field(default=21600, gt=0, allow_inf_nan=False)
 
     # Kho vector
     chroma_persist_dir: str = "./data/chroma"

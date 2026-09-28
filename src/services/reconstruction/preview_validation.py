@@ -1,27 +1,35 @@
 """Consumer checkpoint preview: kiểm lại exact bytes, request/config và lineage qua store."""
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
 
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.manifests import StageId
+from src.models.contracts.preview import ReconstructionPreview
 from src.services.reconstruction.attempt import PublicationNamespace
 from src.services.reconstruction.preview_models import PreparedPreviewRequest, PreparedPreviewResult
-from src.services.reconstruction.rgb.frame_set import _sha256
+from src.services.reconstruction.rgb.frame_set import FrameSetResolver, _sha256
 from src.services.reconstruction.rgb.pose_publication import CameraPoseResolver
 from src.services.reconstruction.rgb.visual_publication import VisualResolver
 
-if TYPE_CHECKING:
-    from src.services.reconstruction.preview_worker import PreviewDependencies
+
+@dataclass(frozen=True)
+class PreviewReadDependencies:
+    """Read-only consumer không cần khởi tạo tool runtime hay GPU."""
+
+    frames: FrameSetResolver
+    resolve: Callable[[ProductArtifactRef], Path]
 
 
-def _read(reference: ProductArtifactRef, deps: "PreviewDependencies") -> bytes:
+def _read(reference: ProductArtifactRef, deps: PreviewReadDependencies) -> bytes:
     path = deps.resolve(reference)
     if _sha256(path) != reference.artifact_checksum:
         raise ValueError("preview dependency byte checksum mismatch")
     return path.read_bytes()
 
 
-def load_preview(reference: ProductArtifactRef, deps: "PreviewDependencies") -> PreparedPreviewResult:
+def load_preview(reference: ProductArtifactRef, deps: PreviewReadDependencies) -> PreparedPreviewResult:
     """Success checkpoint chỉ hợp lệ khi source/output còn resolve và cùng attempt."""
     if reference.artifact_type != "PreparedPreviewResult":
         raise ValueError("not a prepared preview result")
@@ -49,7 +57,7 @@ def _record_identity(reference: ProductArtifactRef, namespace: PublicationNamesp
 
 
 def _validate_outputs(
-    request: PreparedPreviewRequest, result: PreparedPreviewResult, deps: "PreviewDependencies"
+    request: PreparedPreviewRequest, result: PreparedPreviewResult, deps: PreviewReadDependencies
 ) -> None:
     frames = deps.frames.load(request.frame_set_ref)
     if frames.input_manifest_checksum != request.source_input_checksum:
@@ -64,6 +72,25 @@ def _validate_outputs(
         raise ValueError("preview visual differs from requested poses/config")
     if visual.delivery != result.delivery_ref:
         raise ValueError("preview delivery differs from visual manifest")
+    if result.preview_ref is not None:
+        preview = ReconstructionPreview.model_validate_json(_read(result.preview_ref, deps))
+        if preview != ReconstructionPreview(
+            job_id=request.job_id,
+            attempt_id=request.attempt_id,
+            source_input_checksum=request.source_input_checksum,
+            source_visual_ref=result.raw_visual_ref,
+            camera_pose_ref=result.camera_pose_ref,
+            delivery_ref=result.delivery_ref,
+            producer_version=visual.brush_version,
+        ):
+            raise ValueError("product preview differs from verified reconstruction")
+        _record_identity(
+            result.preview_ref,
+            PublicationNamespace(job_id=request.job_id, attempt_id=request.attempt_id),
+            "preview.json",
+        )
+        if result.preview_ref.artifact_type != "ReconstructionPreview":
+            raise ValueError("product preview type mismatch")
     namespace = PublicationNamespace(job_id=request.job_id, attempt_id=request.attempt_id)
     for ref, stage in (
         (result.camera_pose_ref, "rec03"),

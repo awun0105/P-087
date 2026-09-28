@@ -354,6 +354,18 @@ proof. Khi Brush chạy thật, output thực tế của Brush là producer outp
 phải ghi `format`, `producer`, `producer_version`, checksum và coordinate system;
 không tạo proprietary Gaussian binary format.
 
+### Preview trước metric / SceneIR
+
+`ReconstructionPreview` v1.0 (`src/models/contracts/preview.py`) là contract cộng
+thêm cho REC→PRODUCT, không thay `VisualArtifact` canonical hoặc
+`ReconstructionBundle`. Nó bind job/attempt/InputManifest checksum, raw visual,
+camera poses và single-file SOG delivery bằng `ProductArtifactRef` exact bytes.
+`metric_status=UNCONFIRMED`, `coordinate_frame=sfm_world`, `unit=arbitrary` là
+bắt buộc. Producer REC consumer-verify checkpoint trước khi PRODUCT commit
+preview reference vào JobManifest. API chỉ phục vụ ref đã nằm trong journal;
+UI không cần SceneIR để inspect preview. Preview ready giữ job RUNNING tại
+metric HITL, không báo toàn pipeline SUCCEEDED và không dùng cho SIM.
+
 ## 3.5 `LiDARGeometryArtifact`
 
 Tối thiểu:

@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-PRODUCT` |
 | Priority | `P0` |
-| Status | `TODO` |
+| Status | `IN_PROGRESS` |
 | Owner | Cường |
 | Target milestone | `M1/M2` |
 
@@ -77,6 +77,12 @@ Không sửa track internals. Shared contract change cần producer + consumer r
   - ❌ **GPU Lifecycle**: Bắt buộc gọi `viewer.destroy()` khi unmount component để giải phóng WebGL/WebGPU context, tránh tràn VRAM trình duyệt.
 
 ## 9. Implementation Plan
+
+2026-09-28: preview raw 3DGS có API/contract riêng, không cần fixture SceneIR.
+UI hiển thị UNCONFIRMED/arbitrary, typed parser kiểm job/ref trước URL tải SOG;
+pan/zoom/rotate dùng supersplat-viewer đã pin. Tiếp theo adapt công cụ inspection
+theo nhóm; không scale/delete canonical scene chỉ bằng browser-local mutation.
+Không chạy tests/browser theo yêu cầu owner; chưa có AC-11 acceptance.
 
 1. Tạo client-only wrapper dùng `@playcanvas/supersplat-viewer/viewer`, stylesheet,
    `ui: false` và required `settings`. Resolve artifact refs thành HTTP/blob URLs;

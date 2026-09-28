@@ -105,6 +105,8 @@ class ProjectPersistence:
             project = self._project(project_row[0])
             if manifest.input_manifest_checksum != project.input_manifest_checksum:
                 raise ValueError("Job không thuộc input của project")
+            if manifest.status in {JobStatus.QUEUED, JobStatus.RUNNING}:
+                require_dispatch_allowed(project.privacy_report.result)
             row = tx.execute(
                 "SELECT version, manifest_ref FROM r2s_jobs WHERE job_id=?" + tx.lock_suffix(), (manifest.job_id,)
             ).fetchone()

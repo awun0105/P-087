@@ -32,6 +32,7 @@ from src.models.contracts.manifests import (
     StageArtifact,
     StageId,
 )
+from src.models.contracts.preview import PreviewWorkerReceipt, ReconstructionPreview
 from src.models.contracts.release import ApprovalRecord
 from src.models.contracts.validation import CandidatePackage, ValidationReport
 from src.services.orchestration.artifacts import (
@@ -56,6 +57,7 @@ from src.services.orchestration.projects.models import (
     ProjectRecord,
 )
 from src.services.orchestration.projects.persistence import ProjectPersistence
+from src.services.orchestration.projects.preview import load_job_preview
 from src.services.orchestration.projects.privacy import require_dispatch_allowed
 from src.services.orchestration.scene.editor import SceneEditor
 
@@ -372,6 +374,62 @@ class ProjectRegistry:
         self.get_job(job_id)
         return list(self._attempts.get(job_id, []))
 
+    def record_preview(self, expected: JobManifest, receipt: PreviewWorkerReceipt) -> JobManifest:
+        """Worker-only reducer; receipt phải đi qua public REC consumer verifier."""
+        if self.persistence is None:
+            raise RuntimeStateConflictError("Real worker cần durable registry")
+        if (
+            expected.status != JobStatus.RUNNING
+            or receipt.job_id != expected.job_id
+            or receipt.source_input_checksum != expected.input_manifest_checksum
+        ):
+            raise ValueError("Preview receipt khác job/input đang chạy")
+        if receipt.result_ref.job_id != expected.job_id:
+            raise ValueError("Preview result reference khác job")
+        self.runtime_resolver.require(receipt.result_ref)
+        stages = list(receipt.stage_artifacts)
+        if receipt.error is None:
+            if receipt.preview_ref is None:
+                raise ValueError("Worker thiếu preview publication")
+            self.runtime_resolver.require(receipt.preview_ref)
+            stages.append(
+                StageArtifact(
+                    stage_id=StageId.VISUAL_RECON,
+                    status="SUCCEEDED",
+                    completed_at=datetime.now(UTC),
+                    artifact_type="ReconstructionPreview",
+                    artifact_uri=receipt.preview_ref.artifact_uri,
+                    artifact_checksum=receipt.preview_ref.artifact_checksum,
+                    data_class=receipt.preview_ref.data_class,
+                )
+            )
+        updated = with_canonical_checksum(
+            expected.model_copy(
+                update={
+                    "stage_artifacts": [*expected.stage_artifacts, *stages],
+                    "status": JobStatus.FAILED if receipt.error else JobStatus.RUNNING,
+                    "current_stage": receipt.error.stage_id if receipt.error else StageId.METRIC_CANONICALIZE,
+                    "completed_at": datetime.now(UTC) if receipt.error else None,
+                }
+            ),
+            "job_manifest_checksum",
+        )
+        if receipt.error is None:
+            load_job_preview(updated, self.runtime_resolver)
+        reference = self.lifecycle.store.publish_manifest(updated)
+        history = self.persistence.list_attempts(expected.job_id)
+        event = JobAttemptRecord(
+            attempt=history[-1].attempt,
+            status=updated.status,
+            current_stage=updated.current_stage,
+            recorded_at=datetime.now(UTC),
+            error=receipt.error,
+            job_manifest_uri=reference.artifact_uri,
+            job_manifest_checksum=reference.artifact_checksum,
+        )
+        self.persistence.save_job(updated, reference, event, expected=expected)
+        return updated
+
     def _build_queued_job(self, project: ProjectRecord, scene_revision: str) -> JobManifest:
         """Runtime job không được mang config/versions synthetic của fixture."""
         profile = self.execution_profile
@@ -420,6 +478,10 @@ class ProjectRegistry:
             raise JobNotFoundError(f"không tìm thấy job: {job_id}") from error
 
     # --- artifacts --------------------------------------------------------
+
+    def get_preview(self, job_id: str) -> ReconstructionPreview:
+        """Raw 3DGS preview trước SceneIR; không ngụ ý metric đã confirmed."""
+        return load_job_preview(self.get_job(job_id), self.runtime_resolver)
 
     def list_job_artifacts(self, job_id: str) -> tuple[list[ProductArtifactRef], int]:
         """Ref artifact được phép hiện ra product, kèm số ref bị loại.
@@ -473,6 +535,9 @@ class ProjectRegistry:
         `ground_truth`/`evaluation_only`.
         """
         references: list[ArtifactRef] = list(self.list_job_artifacts(job_id)[0])
+        if any(reference.artifact_type == "ReconstructionPreview" for reference in references):
+            preview = self.get_preview(job_id)
+            references.extend((preview.source_visual_ref, preview.camera_pose_ref, preview.delivery_ref))
         references.extend(self.scene.artifact_references_for_job(job_id))
         if job_id == self._fixture_job_id:
             visual = self.scene.visual_binding(job_id)

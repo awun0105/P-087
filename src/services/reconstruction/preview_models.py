@@ -49,6 +49,7 @@ class PreparedPreviewResult(ContractModel):
     camera_pose_ref: ProductArtifactRef | None = None
     raw_visual_ref: ProductArtifactRef | None = None
     delivery_ref: ProductArtifactRef | None = None
+    preview_ref: ProductArtifactRef | None = None
     error: ExecutionError | None = None
 
     @model_validator(mode="after")

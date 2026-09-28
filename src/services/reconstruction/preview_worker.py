@@ -9,6 +9,7 @@ from pathlib import Path
 
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.manifests import ExecutionError, StageArtifact, StageId, StageStatus
+from src.models.contracts.preview import ReconstructionPreview
 from src.services.reconstruction.adapters.brush import BrushAdapter, BrushDependencies, BrushRequest
 from src.services.reconstruction.adapters.brush_input import BrushInputAdapter
 from src.services.reconstruction.adapters.brush_runtime import VisualProcess
@@ -57,9 +58,9 @@ class PreparedPreviewWorker:
 
     def load(self, reference: ProductArtifactRef) -> PreparedPreviewResult:
         """Consumer recheck checkpoint và payloads, không cần private workspace hoặc chạy tools."""
-        from src.services.reconstruction.preview_validation import load_preview
+        from src.services.reconstruction.preview_validation import PreviewReadDependencies, load_preview
 
-        return load_preview(reference, self.deps)
+        return load_preview(reference, PreviewReadDependencies(self.deps.frames, self.deps.resolve))
 
 
 class _AttemptPublication:
@@ -103,6 +104,7 @@ class _PreviewExecution:
         self.pose_ref: ProductArtifactRef | None = None
         self.visual_ref: ProductArtifactRef | None = None
         self.delivery_ref: ProductArtifactRef | None = None
+        self.preview_ref: ProductArtifactRef | None = None
 
     def run(self, workspace: Path, request_ref: ProductArtifactRef) -> PreparedPreviewResult:
         error = None
@@ -125,6 +127,7 @@ class _PreviewExecution:
             camera_pose_ref=self.pose_ref,
             raw_visual_ref=self.visual_ref,
             delivery_ref=self.delivery_ref,
+            preview_ref=self.preview_ref,
             error=error,
         )
 
@@ -170,6 +173,18 @@ class _PreviewExecution:
         result = BrushAdapter(deps).execute(BrushRequest(self.pose_ref, self.request.brush, workspace))
         self._complete(result.stage)
         self.visual_ref, self.delivery_ref = result.reference, result.artifact.delivery
+        preview = ReconstructionPreview(
+            job_id=self.request.job_id,
+            attempt_id=self.request.attempt_id,
+            source_input_checksum=self.request.source_input_checksum,
+            source_visual_ref=result.reference,
+            camera_pose_ref=self.pose_ref,
+            delivery_ref=result.artifact.delivery,
+            producer_version=result.artifact.brush_version,
+        )
+        self.preview_ref = self.publication.publish(
+            ("ReconstructionPreview", "preview.json"), preview.model_dump_json().encode()
+        )
 
     def _failure(self, cause: Exception) -> ExecutionError:
         error = ExecutionError(
