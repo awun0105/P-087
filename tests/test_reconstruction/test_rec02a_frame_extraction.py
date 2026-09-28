@@ -290,3 +290,50 @@ def test_real_ffmpeg_video_pts_and_resolver(tmp_path: Path) -> None:
     assert [row[2] for row in rows] == ["0.000000", "0.333333", "0.666667"]
     assert all(path.read_bytes().startswith(b"\x89PNG") for _, path, _ in rows)
     assert len(rows) == 3
+
+
+def _stride_config(stride: int | None, policy: str = "quality_accepted_stride") -> ExtractionConfig:
+    payload: dict[str, object] = dict(
+        schema_version="1.0",
+        mode="video_decode",
+        sampling_policy=policy,
+        timestamp_policy="source_pts",
+        config_checksum="sha256:" + "0" * 64,
+    )
+    if stride is not None:
+        payload["frame_stride"] = stride
+    payload["config_checksum"] = canonical_content_checksum(payload, "config_checksum")
+    return ExtractionConfig.model_validate(payload)
+
+
+def test_stride_config_binds_stride_and_keeps_legacy_checksum() -> None:
+    """Config cũ không có stride vẫn hợp lệ; stride phải đi cùng policy stride."""
+    assert _config("video_decode").frame_stride is None
+    assert _stride_config(3).frame_stride == 3
+    with pytest.raises(ValueError, match="frame_stride"):
+        _stride_config(None)
+    with pytest.raises(ValueError, match="frame_stride"):
+        _stride_config(2, policy="quality_accepted")
+    tampered = _stride_config(3).model_dump(mode="json")
+    tampered["frame_stride"] = 4
+    with pytest.raises(ValueError, match="checksum"):
+        ExtractionConfig.model_validate(tampered)
+
+
+def test_real_ffmpeg_video_stride_keeps_every_nth_accepted_frame(tmp_path: Path) -> None:
+    """Stride áp lên frame đã qua quality, không lên index thô của video."""
+    video = tmp_path / "clip.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi",
+            "-i", "testsrc2=duration=2:size=32x24:rate=3", "-c:v", "mpeg4", str(video),
+        ],
+        check=True,
+    )  # fmt: skip
+    manifest = _manifest((video,), "video/mp4")
+    quality = _quality(manifest, (0, 1, 2, 3, 4, 5), excluded=(3,))
+    gate, proof = _privacy(manifest, 6)
+    service, _ = _service(tmp_path, manifest, (video,), gate)
+    result = service.execute(FrameExtractionRequest(manifest, quality, proof, _stride_config(2), "rec02a-test"))
+    assert [frame.frame_id for frame in result.frame_set.frames] == [0, 2, 5]
+    assert result.frame_set.extraction_config_checksum == _stride_config(2).config_checksum

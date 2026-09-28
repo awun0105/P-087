@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from src.models.contracts.artifacts import ArtifactDataClass, Checksum, ContractModel, ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
@@ -22,24 +22,33 @@ from src.services.reconstruction.rgb.quality_models import RGBFrameQuality, RGBQ
 
 
 class ExtractionConfig(ContractModel):
-    """Policy explicit; `all_frames` không tự chèn/rớt frame theo FPS."""
+    """Policy explicit; `all_frames` không tự chèn/rớt frame theo FPS.
+
+    `quality_accepted_stride` chỉ dành cho video: giữ mỗi frame thứ `frame_stride`
+    trong các frame đã qua quality, để video 30fps không đổ hàng nghìn ảnh gần
+    trùng vào COLMAP. Stride nằm trong config nên được bind qua checksum.
+    """
 
     schema_version: Literal["1.0"] = "1.0"
     mode: Literal["image_refs", "video_decode"]
-    sampling_policy: Literal["quality_accepted"]
+    sampling_policy: Literal["quality_accepted", "quality_accepted_stride"]
     timestamp_policy: Literal["source_timestamp", "source_pts"]
+    frame_stride: int | None = Field(default=None, ge=2)
     config_checksum: Checksum
 
     @model_validator(mode="after")
     def _validate_policy(self) -> "ExtractionConfig":
-        expected = (
-            ("quality_accepted", "source_timestamp")
-            if self.mode == "image_refs"
-            else ("quality_accepted", "source_pts")
-        )
-        if (self.sampling_policy, self.timestamp_policy) != expected:
+        if self.mode == "image_refs":
+            allowed = {("quality_accepted", "source_timestamp")}
+        else:
+            allowed = {("quality_accepted", "source_pts"), ("quality_accepted_stride", "source_pts")}
+        if (self.sampling_policy, self.timestamp_policy) not in allowed:
             raise ValueError("extraction mode and sampling/timestamp policy mismatch")
-        if canonical_content_checksum(self, "config_checksum") != self.config_checksum:
+        if (self.sampling_policy == "quality_accepted_stride") != (self.frame_stride is not None):
+            raise ValueError("frame_stride is required exactly for quality_accepted_stride")
+        # Bỏ field None khỏi identity: config cũ (chưa có stride) giữ nguyên checksum.
+        identity = self.model_dump(mode="json", exclude_none=True)
+        if canonical_content_checksum(identity, "config_checksum") != self.config_checksum:
             raise ValueError("extraction config checksum mismatch")
         return self
 
@@ -375,9 +384,8 @@ class RGBFrameExtractor:
         self, request: FrameExtractionRequest, decoded: VideoDecodeResult
     ) -> list[NormalizedRGBFrame]:
         rows = []
-        for quality in request.quality.frames:
-            if quality.quality != "accepted":
-                continue
+        accepted = [quality for quality in request.quality.frames if quality.quality == "accepted"]
+        for quality in accepted[:: request.config.frame_stride or 1]:
             frame_id = quality.frame_id
             payload = decoded.images[frame_id].read_bytes()
             ref = self._reference(
