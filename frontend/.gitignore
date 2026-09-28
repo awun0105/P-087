@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# SuperSplat editor build output (npm run build:editor)
+/public/editor/

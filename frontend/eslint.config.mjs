@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // SuperSplat vendor có lint/build riêng (rollup), không theo rule Next.
+    "vendor/**",
+    "public/editor/**",
   ]),
 ]);
 
