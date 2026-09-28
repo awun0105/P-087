@@ -49,8 +49,41 @@
   --shadow-panel: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
 }
 
-html {
+/* UI cũ (route group `(legacy)`) giữ nền tối; Studio mới dùng nền beige sáng. */
+.legacy-root {
   color-scheme: dark;
+}
+
+/*
+ * Studio MVP — Minimalism/Swiss, beige + cam (quyết định owner 2026-09-29).
+ * Chrome sáng; viewport 3D nâu than ấm vì Gaussian khó đọc trên nền sáng.
+ * Tương phản chữ: ink/paper ~13:1, ink-muted/paper ~5.6:1, trắng/ember-strong ~4.6:1.
+ */
+@theme inline {
+  --font-studio: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  --color-paper: #f5efe6;
+  --color-paper-raised: #fbf8f3;
+  --color-paper-sunken: #ede4d6;
+  --color-line: #e2d6c3;
+  --color-line-strong: #cbbba3;
+
+  --color-ink: #2b2520;
+  --color-ink-muted: #6b5f52;
+  --color-ink-subtle: #8a7e70;
+
+  --color-ember: #e8743b;
+  --color-ember-strong: #c2551f;
+  --color-ember-soft: #fbe3d3;
+
+  --color-viewport: #1f1b17;
+
+  --color-sage: #5e8c61;
+  --color-sage-soft: #e3ede0;
+  --color-ochre: #b7862a;
+  --color-ochre-soft: #f6ead0;
+  --color-rust: #b8452f;
+  --color-rust-soft: #f6dcd5;
 }
 
 /* Utility nhỏ cho bảng dày thông tin */
