@@ -171,3 +171,80 @@ class RGBPrivacyGate:
             and acceptance.inspection_evidence_checksum == evidence.evidence_checksum
             and self.verify_qa_acceptance(acceptance)
         )
+
+
+#: Giá trị `acceptance_reference` đánh dấu proof tự khai, không phải QA acceptance.
+SELF_ATTESTED_REFERENCE = "self-attested:uploader"
+_SELF_ATTESTATION_FLAGS = ("attested", "rights_to_use_confirmed", "anonymization_confirmed")
+
+
+class SelfAttestedPrivacyGate(RGBPrivacyGate):
+    """Chế độ MVP: người upload tự khai video không chứa khuôn mặt/biển số.
+
+    Owner chốt 2026-09-29 (plan `2026-09-29-mvp-studio-demo.md`): MVP chạy luồng
+    upload → 3DGS mà không chờ QA. Report vẫn trung thực: `PRELIMINARY_SCREENED`,
+    0 frame được người kiểm tra; không bao giờ phát `VERIFIED_ANONYMIZED`. Gate
+    chỉ được bật ở composition root khi deployment chọn chế độ này.
+    """
+
+    def issue(self, manifest: InputManifest, selected_frame_count: int) -> PrivacyDispatchProof:
+        """Tạo proof tự khai gắn đúng InputManifest; fail-closed nếu thiếu lời khai."""
+        verify_content_checksum(manifest, "input_manifest_checksum")
+        self._require_attestation(manifest)
+        if selected_frame_count < 1:
+            raise RGBValidationError(
+                "PRIVACY_SCOPE_INVALID", "No RGB frames were selected", "Provide decodable RGB input"
+            )
+        blank = PrivacyInspectionEvidence(
+            PrivacyInspectionScope.SAMPLED, selected_frame_count, 0, (), "sha256:" + "0" * 64
+        )
+        evidence = PrivacyInspectionEvidence(
+            blank.scope,
+            blank.selected_frame_count,
+            0,
+            (),
+            canonical_content_checksum(asdict(blank), "evidence_checksum"),
+        )
+        payload = {
+            "schema_version": "1.0",
+            "input_manifest_checksum": manifest.input_manifest_checksum,
+            "inspection_scope": evidence.scope,
+            "selected_frame_count": selected_frame_count,
+            "inspected_frame_count": 0,
+            "unresolved_findings": [],
+            "result": PrivacyResult.PRELIMINARY_SCREENED,
+            "report_checksum": "sha256:" + "0" * 64,
+        }
+        payload["report_checksum"] = canonical_content_checksum(payload, "report_checksum")
+        report = PrivacyValidationReport.model_validate(payload)
+        acceptance = PrivacyQAAcceptance(
+            manifest.input_manifest_checksum, evidence.evidence_checksum, SELF_ATTESTED_REFERENCE
+        )
+        return PrivacyDispatchProof(report, evidence, acceptance)
+
+    def require_dispatch(self, manifest: InputManifest, proof: PrivacyDispatchProof) -> None:
+        """Chỉ nhận đúng proof do `issue` tạo cho manifest này; findings luôn chặn."""
+        verify_content_checksum(manifest, "input_manifest_checksum")
+        verify_content_checksum(proof.report, "report_checksum")
+        self._require_attestation(manifest)
+        expected = self.issue(manifest, proof.inspection.selected_frame_count)
+        if (
+            proof.report.report_checksum != expected.report.report_checksum
+            or proof.inspection != expected.inspection
+            or proof.acceptance != expected.acceptance
+        ):
+            raise RGBValidationError(
+                "PRIVACY_NOT_SELF_ATTESTED",
+                "Privacy proof is not the uploader self-attestation for this input",
+                "Re-upload the video with the privacy attestation checked",
+            )
+
+    @staticmethod
+    def _require_attestation(manifest: InputManifest) -> None:
+        attestation = manifest.source_rights_attestation
+        if any(attestation.get(flag) is not True for flag in _SELF_ATTESTATION_FLAGS):
+            raise RGBValidationError(
+                "PRIVACY_ATTESTATION_MISSING",
+                "Uploader did not confirm rights and absence of faces/license plates",
+                "Confirm the video has no faces/license plates (or they are blurred) before processing",
+            )
