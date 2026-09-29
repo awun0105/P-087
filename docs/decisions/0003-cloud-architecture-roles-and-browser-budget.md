@@ -28,7 +28,7 @@ thiết kế. Cần thông báo Product Owner (Cường, EX-PRODUCT) và QA/Vali
 | Khối | Dịch vụ | Trách nhiệm | Không làm |
 |---|---|---|---|
 | A. Web UI | Vercel (Hobby) | Giao diện Next.js | Không xử lý dữ liệu, không để file lớn đi qua |
-| B. Server điều khiển | Railway (Hobby): FastAPI + Postgres | Nguồn sự thật: API, đăng nhập, quyền, hàng đợi job, audit, cấp link file có hạn | Không chạy xử lý nặng |
+| B. Server điều khiển | Railway (Hobby): FastAPI; PostgreSQL trên **Supabase** (Amendment 3) | Nguồn sự thật: API, đăng nhập, quyền, hàng đợi job, audit, cấp link file có hạn | Không chạy xử lý nặng |
 | C. GPU worker | **Vast.ai** (chính), RunPod (dự phòng) — xem Amendment 1 | COLMAP, Brush, SOG, tạo bản nhẹ (LOD), ảnh bìa/video xoay, áp chỉnh sửa lên bản gốc | Không giữ dữ liệu lâu dài; tắt đi không mất gì |
 | D. Kho file | Cloudflare R2 (S3 API) | Video gốc, frame, 3DGS, export | — |
 
@@ -125,7 +125,7 @@ Positive:
 
 - Web và dữ liệu sống độc lập với máy GPU; GPU chỉ tốn tiền khi có job.
 - Trình duyệt tải bản nhẹ nên máy yếu vẫn dùng được; máy không render nổi có video.
-- Chi phí ước tính ~$10–20/tháng (INFERENCE: Railway $5–10, R2 ~$0 trong 10 GB,
+- Chi phí ước tính ~$10–20/tháng (INFERENCE: Railway $5–10, Supabase $0, R2 ~$0 trong 10 GB,
   GPU ~$0.1/job giả định 15–20 phút trên 4090 — chưa đo trên máy thuê).
 
 Tradeoffs / risks:
@@ -161,6 +161,24 @@ Vast lỗi, hoặc phương án khác).
 Thêm Sentry (gói Developer miễn phí) để ghi lỗi FastAPI/worker/frontend và UptimeRobot
 (gói miễn phí) để cảnh báo khi API/Web UI sập, theo tiêu chí DevOps trong
 `docs/guide/chapter-09.md`. Không thêm chi phí; không gửi PII hay nội dung video.
+
+## Amendment 3 — 2026-09-29: PostgreSQL trên Supabase
+
+Owner chọn **Supabase (gói Free)** làm PostgreSQL thay Postgres trên Railway, theo
+khuyến nghị sổ tay `docs/guide/free-accounts.md`. API FastAPI vẫn chạy trên Railway.
+
+- Chỉ dùng Supabase như PostgreSQL chuẩn qua `DATABASE_URL`; **không** dùng Supabase
+  Auth/Storage (đăng nhập tự làm theo §3, file ở R2) để đổi DB chỉ cần đổi URL.
+- Supabase Free tạm dừng dự án khi thiếu truy vấn database trong 7 ngày (tài liệu
+  chính thức: vài request/ngày là đủ; khôi phục được trong 1 năm). Giữ thức hai lớp:
+  (1) `/health` chạy truy vấn nhẹ (`SELECT 1`) và UptimeRobot gọi mỗi 5 phút;
+  (2) tác vụ nền trong API chạm database mỗi ngày. Không dùng cron GitHub Actions
+  (runner của ban tổ chức đang bị chặn billing).
+- Kết nối qua pooler Supavisor (IPv4), session mode để tránh lỗi prepared statement của
+  psycopg; kiểm lại khi triển khai phase 3.
+- Supabase và Railway đặt cùng vùng (vd Singapore).
+- Gói Free giới hạn 500 MB — đủ vì DB chỉ giữ metadata. Không dựa vào backup của gói
+  Free: tác vụ nền `pg_dump` hằng đêm lên R2, giữ 7 bản.
 
 ## Follow-Up
 
