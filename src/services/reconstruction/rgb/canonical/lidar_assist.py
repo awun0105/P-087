@@ -105,7 +105,7 @@ class LidarAssist:
         alignment = json.loads(self._read(support.alignment_ref))
         if alignment.get("artifact_type") != "SfmWorldTrajectoryAlignment" or alignment.get("target_frame") != "world":
             raise ValueError("căn chỉnh không phải SfM → world")
-        if alignment["inputs"]["camera_poses_artifact_checksum"] != support.camera_poses_checksum:
+        if alignment["inputs"]["camera_poses_checksum"] != support.camera_poses_checksum:
             raise ValueError("căn chỉnh dựng từ camera pose khác của job")
         metadata = LiDARGeometryArtifact.model_validate_json(self._read(support.lidar_metadata_ref))
         if metadata.artifact_checksum != support.lidar_geometry_ref.artifact_checksum:

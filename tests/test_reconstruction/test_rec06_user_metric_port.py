@@ -116,7 +116,9 @@ def test_short_segments_and_missing_lidar_are_rejected(tmp_path: Path) -> None:
         port.preview(JOB, visual.reference, data.model_copy(update={"distance_source": "lidar_demo"}))
 
 
-def _lidar_support(tmp_path: Path, visual, writer, points_world: list) -> ProductArtifactRef:  # noqa: ANN001
+def _lidar_support(  # noqa: ANN001
+    tmp_path: Path, visual, writer, points_world: list, poses_checksum: str | None = None
+) -> ProductArtifactRef:
     """Bản ghi hỗ trợ tổng hợp: căn chỉnh scale 4 (khớp scene fixture) + point cloud ở đúng các điểm."""
     import hashlib
     import json
@@ -156,12 +158,12 @@ def _lidar_support(tmp_path: Path, visual, writer, points_world: list) -> Produc
     lidar = LiDARIngestService(writer).ingest_with_metadata(request)
     source = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)]
     fit = fit_similarity(source, [tuple(4 * v for v in point) for point in source])  # SfM × 4 = world
-    poses = visual.artifact.source_camera_poses.artifact_checksum
+    poses = poses_checksum or visual.artifact.source_camera_poses.artifact_checksum
     alignment = {
         "artifact_type": "SfmWorldTrajectoryAlignment",
         "target_frame": "world",
         "fit": fit.model_dump(mode="json"),
-        "inputs": {"camera_poses_artifact_checksum": poses},
+        "inputs": {"camera_poses_checksum": poses},
     }
 
     def publish(uri: str, payload: bytes, kind: str) -> ProductArtifactRef:
@@ -211,3 +213,16 @@ def test_dataset_distances_come_from_lidar_and_are_rechecked(tmp_path: Path) -> 
     tampered = lidar_input.model_copy(update={"distance_m": 2.5})
     with pytest.raises(ValueError, match="không khớp"):
         port.preview(JOB, visual.reference, tampered, support)
+
+
+def test_lidar_support_must_bind_pose_file_checksum_not_inner_checksum(tmp_path: Path) -> None:
+    """Hồi quy 2026-09-30: gắn self-checksum bên trong JSON pose thì không bao giờ khớp ref."""
+    port, visual, data, _, writer = _world(tmp_path)
+    inner = port.poses.load(visual.artifact.source_camera_poses).artifact_checksum
+    assert inner != visual.artifact.source_camera_poses.artifact_checksum
+    world = [tuple(4 * v for v in point) for point in (data.point_a, data.point_b, data.check_a, data.check_b)]
+    support = _lidar_support(tmp_path, visual, writer, world, poses_checksum=inner)
+    with pytest.raises(ValueError, match="camera pose khác"):
+        port.lidar_measurements(
+            JOB, visual.reference, support, (data.point_a, data.point_b), (data.check_a, data.check_b)
+        )
