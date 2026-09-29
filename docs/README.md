@@ -20,6 +20,17 @@
 - [Execution Documentation](execution/README.md): contracts, integration,
   task catalog, milestones và track entrypoints.
 
+## Hiện trạng và quyết định mới nhất (2026-09-29)
+
+- Studio MVP (video → 3DGS → editor) đã có trên `develop`:
+  [plan MVP Studio](plans/active/2026-09-29-mvp-studio-demo.md),
+  [ADR 0002](decisions/0002-studio-mvp-video-to-3dgs.md) (*Proposed*).
+- Kiến trúc cloud, hai role và ngân sách trình duyệt đã chốt, chưa triển khai:
+  [ADR 0003](decisions/0003-cloud-architecture-roles-and-browser-budget.md),
+  [plan Cloud Studio](plans/active/2026-09-29-cloud-studio.md).
+- Metric scale ba hướng: [ADR 0001](decisions/0001-metric-scale-strategy-and-roadmap.md).
+- Bản đồ thư mục theo checkout thật: [`README.md`](../README.md) §Project Structure.
+
 ## Execution Entry Points
 
 - [EX-REC](execution/tracks/ex_rec/TRACK.md)

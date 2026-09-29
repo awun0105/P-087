@@ -13,6 +13,10 @@
 
 **Trạng thái prototype:** Chưa có artifact HTML được lưu trong repository; wireframe trong tài liệu này là nguồn mô tả UI hiện tại.
 
+**Cập nhật 2026-09-29:** UI đã triển khai là **Studio MVP** (xem §4) — một lát cắt
+của Screen 1–2. Năm màn hình dưới đây vẫn là đích P0; phần đã code của chúng nằm ở
+UI P0 ẩn sau `LEGACY_UI=1`.
+
 ---
 
 ## 1. Bản Đồ Luồng Giao Diện Tổng Thể (Global UI Flow)
@@ -271,3 +275,34 @@ Prototype cập nhật cần biểu diễn đủ 5 logical screens; Screen 3 và
 2. **3D Real2Sim Studio**: Browser Viewer, P0 Minimal Correction, Add/Hide/Delete, collider editing, metric/alignment, AMR test setup và Scene Graph.
 3. **Candidate Validation & Audit**: Build immutable Candidate Package, chạy deterministic Isaac Sim checks, xem audit/evidence và tách product validation khỏi evaluation report; Agent explanation chỉ là P1.
 4. **Reviewer Release Gate**: Đối soát exact candidate đã validation, xem đủ evidence, reject revision hoặc tạo Approval Record rồi seal release.
+
+---
+
+## 4. Studio MVP đã triển khai (2026-09-29)
+
+Nguồn: [ADR 0002](decisions/0002-studio-mvp-video-to-3dgs.md), [ADR 0003](decisions/0003-cloud-architecture-roles-and-browser-budget.md).
+Phong cách tối giản, nền beige, nhấn cam.
+
+```mermaid
+graph LR
+    Home[Scenes: video mẫu + scene của nhóm] --> New[Scene mới]
+    New -->|Tải video lên| Select[Chọn video + xác nhận dữ liệu + thông số xử lý]
+    New -->|Chọn video mẫu| SSelect[Video mẫu: thông số chỉ đọc]
+    Select --> Job[Trang scene: tiến trình từng stage, hủy/thử lại]
+    SSelect --> Replay[Phát lại tiến trình theo thời lượng thật]
+    Job --> Editor[Editor SuperSplat / viewer WebGL2]
+    Replay --> Editor
+```
+
+| Màn hình | Route | Nội dung |
+|---|---|---|
+| Scenes | `/` | Lưới "Thử với video mẫu" + danh sách scene với trạng thái |
+| Scene mới | `/new` (`?sample=<id>`) | Bước 1: ô tải video + lưới video mẫu. Bước 2: chọn video, xác nhận dữ liệu, bảng thông số (mặc định tối thiểu cho chất lượng tốt, cảnh báo đỏ khi vượt cấu hình máy; video mẫu chỉ đọc). Bước 3: tiến trình. Bước 4: mở scene |
+| Trang scene | `/scenes/<jobId>` | Timeline 5 stage, hủy/thử lại, khi xong mở editor |
+| Scene mẫu | `/samples/<id>/scene` | Editor trên file 3DGS của video mẫu |
+
+Theo ADR 0003 (chưa triển khai): khách không đăng nhập chỉ dùng video mẫu; upload
+cần tài khoản Editor; Reviewer thêm quyền duyệt/từ chối và quản lý tài khoản. Trình
+duyệt chỉ tải bản 3DGS nhẹ, tự hạ chất lượng khi FPS tụt; thiết bị không render
+được 3D xem video xoay quanh scene do server render sẵn.
+
