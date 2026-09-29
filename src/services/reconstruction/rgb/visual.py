@@ -39,6 +39,9 @@ class SplatInspection(ContractModel):
     ply_to_sog: Literal["identity_in_ply_storage_space"]
     info: JsonObject
     stats: JsonObject
+    #: Thiết bị thực tế đã nén SOG (`gpu:<adapter>` hoặc `cpu`) và thời gian nén.
+    sog_device: str | None = None
+    sog_compress_seconds: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
 class BrushVisualArtifact(ContractModel):

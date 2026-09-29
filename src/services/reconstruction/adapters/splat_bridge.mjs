@@ -1,5 +1,7 @@
 /** REC-04: thin Node I/O bridge, reuse reader/stats/SOG codec MIT upstream. */
-import { openSync, closeSync, fstatSync, readSync, writeSync, writeFileSync, mkdirSync } from 'node:fs';
+import { openSync, closeSync, fstatSync, readFileSync, readSync, writeSync, writeFileSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
 const api = await import(pathToFileURL(process.argv[2]).href);
@@ -76,20 +78,87 @@ async function inspect(filename, inputFormat) {
     }
 }
 
+// Adapt từ splat-transform 3.6.6 CLI `createDevice` (MIT): Dawn WebGPU trong Node +
+// PlayCanvas WebgpuGraphicsDevice. Resolve `webgpu`/`playcanvas` từ chính package
+// splat-transform để dùng cùng instance module với thư viện.
+async function gpuDeviceCreator(mode) {
+    if (mode === 'cpu') return { createDevice: undefined, release: () => {}, device: 'cpu' };
+    try {
+        const resolve = createRequire(process.argv[2]);
+        const { globals, create } = await import(pathToFileURL(resolve.resolve('webgpu')).href);
+        // `require.resolve` trả bản CJS; thư viện import bản ESM theo condition mặc định
+        // (`exports['.'].default.import`) → import đúng file đó để dùng chung instance.
+        let packageDir = dirname(resolve.resolve('playcanvas'));
+        const isPlaycanvas = (dir) => {
+            try {
+                return JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).name === 'playcanvas';
+            } catch {
+                return false;
+            }
+        };
+        while (!isPlaycanvas(packageDir)) {
+            const parent = dirname(packageDir);
+            if (parent === packageDir) throw new Error('playcanvas package not found');
+            packageDir = parent;
+        }
+        const manifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'));
+        const exported = manifest.exports?.['.'];
+        const entry = exported?.default?.import ?? exported?.import ?? manifest.module;
+        const pc = await import(pathToFileURL(join(packageDir, entry)).href);
+        Object.assign(globalThis, globals);
+        globalThis.window ??= { navigator: { userAgent: 'node.js' } };
+        globalThis.document ??= {
+            createElement: () => ({
+                getContext: () => null,
+                getBoundingClientRect: () => ({ left: 0, top: 0, width: 300, height: 150, right: 300, bottom: 150 }),
+                width: 300,
+                height: 150
+            })
+        };
+        globalThis.window.navigator.gpu = create([]);
+        const adapter = await globalThis.window.navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+        if (!adapter) throw new Error('no WebGPU adapter');
+        let device = null;
+        const createDevice = async () => {
+            if (device) return device;
+            const canvas = globalThis.document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 512;
+            device = new pc.WebgpuGraphicsDevice(canvas, { antialias: false, depth: false, stencil: false });
+            await device.createDevice();
+            // Lỗi GPU (OOM, device lost) đến bất đồng bộ: dừng hẳn thay vì ghi SOG hỏng.
+            device.wgpu?.addEventListener?.('uncapturederror', (event) => {
+                console.error(`WebGPU error: ${event?.error?.message ?? 'unknown'}`);
+                process.exit(3);
+            });
+            return device;
+        };
+        const release = () => device?.destroy?.();
+        return { createDevice, release, device: `gpu:${adapter.info?.description || adapter.info?.vendor || 'webgpu'}` };
+    } catch (error) {
+        console.error(`SOG GPU unavailable, using CPU: ${error?.message ?? error}`);
+        return { createDevice: undefined, release: () => {}, device: 'cpu' };
+    }
+}
+
 const master = 'output/visual.ply';
 const delivery = 'output/scene.sog';
 const { info, stats } = await inspect(master, 'ply');
+const gpu = await gpuDeviceCreator(process.argv[4] ?? 'gpu');
+const startedAt = Date.now();
 const sources = await api.readFile({ filename: master, inputFormat: 'ply', fileSystem: inputFs });
 try {
     // Reader/writer cùng PLY storage convention: không xoay Z thêm lần nữa.
-    // SOG writer tự Morton-sort và CPU SH compression khi không truyền GPU creator.
+    // SOG writer tự Morton-sort; SH compression chạy GPU khi có createDevice, không thì CPU.
     await api.writeSource({
         filename: delivery, outputFormat: 'sog-bundle', source: sources[0],
-        pool: api.createChunkDataPool(), options: { iterations: Number(process.argv[3]) }
+        pool: api.createChunkDataPool(), options: { iterations: Number(process.argv[3]) },
+        createDevice: gpu.createDevice
     }, outputFs);
 } finally {
     sources[0].close();
 }
+const compressSeconds = (Date.now() - startedAt) / 1000;
 const decoded = await inspect(delivery, 'sog');
 if (decoded.info.numGaussians !== info.numGaussians || decoded.info.shBands !== info.shBands) {
     throw new Error('SOG roundtrip changed Gaussian inventory');
@@ -98,5 +167,10 @@ writeFileSync('output/inspection.json', JSON.stringify({
     version: api.version, revision: api.revision, gaussian: true,
     num_gaussians: info.numGaussians, sh_bands: info.shBands,
     fill_ratio: stats.lods[0].fillRatio, nonfinite_count: 0,
-    ply_to_sog: 'identity_in_ply_storage_space', info, stats
+    ply_to_sog: 'identity_in_ply_storage_space', info, stats,
+    sog_device: gpu.device, sog_compress_seconds: compressSeconds
 }, null, 2));
+// Dawn giữ event loop sống sau khi dùng GPU: giải phóng device rồi thoát tường minh,
+// nếu không process treo tới khi bị timeout dù đã ghi xong output.
+gpu.release();
+process.exit(0);
