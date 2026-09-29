@@ -8,6 +8,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from threading import Lock
 from typing import Protocol, cast
 
 
@@ -97,6 +98,11 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
+#: DB đã kiểm/chạy migration trong tiến trình này. API tạo RuntimeDatabase mỗi request;
+#: chỉ lần đầu mới cần transaction bootstrap (tránh khóa ghi + vòng mạng mỗi request).
+_READY: set[str] = set()
+_READY_LOCK = Lock()
+
 
 class RuntimeDatabase:
     """Persistence vận hành v1; nâng schema phải có migration, không tự drop/reset."""
@@ -113,7 +119,10 @@ class RuntimeDatabase:
                 raise ValueError("Runtime database cần file SQLite bền vững, không dùng memory/URI options")
             self._sqlite_path = Path(value).expanduser().resolve()
             self._sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-        self._initialize()
+        with _READY_LOCK:
+            if url not in _READY:
+                self._initialize()
+                _READY.add(url)
 
     def _connect(self) -> SqlConnection:
         if self.postgres:

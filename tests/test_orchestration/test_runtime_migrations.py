@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from src.services.orchestration.artifacts import ArtifactResolver
+from src.services.orchestration.jobs import database as database_module
 from src.services.orchestration.jobs.database import (
     LATEST_SCHEMA_VERSION,
     RuntimeDatabase,
@@ -41,6 +42,7 @@ def test_newer_schema_is_refused(runtime_database_url: str) -> None:
     database = RuntimeDatabase(runtime_database_url)
     with database.transaction(write=True) as tx:
         tx.execute("UPDATE r2s_schema SET version=? WHERE id=1", (LATEST_SCHEMA_VERSION + 1,))
+    database_module._READY.clear()  # mô phỏng tiến trình mới khởi động
     with pytest.raises(RuntimeError, match="cập nhật code"):
         RuntimeDatabase(runtime_database_url)
 
