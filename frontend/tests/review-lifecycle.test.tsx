@@ -7,6 +7,9 @@
  * Reject **không bao giờ hiện** với response thật.
  *
  * Nay `approval` vắng mặt là "chưa có quyết định" và đó là lúc form phải hiện.
+ *
+ * Panel mặc định chỉ đọc (`enabled=false`) cho tới khi backend có authorization và
+ * lưu quyết định review thật; các ca thao tác bật `enabled` tường minh.
  */
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -49,8 +52,17 @@ describe("ReviewLifecyclePanel", () => {
     global.fetch = vi.fn();
   });
 
-  it("chưa có approval thì form Approve/Reject phải hiện", () => {
+  it("mặc định chỉ đọc: nút bị khóa và không gửi request", () => {
     render(<ReviewLifecyclePanel jobId="job-fixture-001" review={PENDING_REVIEW} />);
+    const approve = screen.getByRole("button", { name: /Approve/ });
+    expect(approve).toBeDisabled();
+    expect(screen.getByText("Review chỉ đọc")).toBeInTheDocument();
+    fireEvent.click(approve);
+    expect(vi.mocked(global.fetch)).not.toHaveBeenCalled();
+  });
+
+  it("chưa có approval thì form Approve/Reject phải hiện", () => {
+    render(<ReviewLifecyclePanel jobId="job-fixture-001" review={PENDING_REVIEW} enabled />);
     expect(screen.getByRole("button", { name: /Approve/ })).toBeEnabled();
     expect(screen.getByRole("button", { name: /Reject/ })).toBeDisabled();
   });
@@ -64,7 +76,7 @@ describe("ReviewLifecyclePanel", () => {
 
   it("gửi approve với checksum từ candidate thật", async () => {
     mockOk();
-    render(<ReviewLifecyclePanel jobId="job-fixture-001" review={PENDING_REVIEW} />);
+    render(<ReviewLifecyclePanel jobId="job-fixture-001" review={PENDING_REVIEW} enabled />);
     fireEvent.click(screen.getByRole("button", { name: /Approve/ }));
 
     await waitFor(() => {
@@ -80,7 +92,7 @@ describe("ReviewLifecyclePanel", () => {
 
   it("gửi reject kèm lý do, và chặn reject khi lý do trống", async () => {
     mockOk();
-    render(<ReviewLifecyclePanel jobId="job-fixture-001" review={PENDING_REVIEW} />);
+    render(<ReviewLifecyclePanel jobId="job-fixture-001" review={PENDING_REVIEW} enabled />);
     fireEvent.click(screen.getByRole("button", { name: /Reject/ }));
     await waitFor(() => expect(vi.mocked(global.fetch)).not.toHaveBeenCalled());
 

@@ -1,7 +1,8 @@
 /**
  * Test cho ReleasePanel (PRODUCT-11).
  *
- * Mock fetch để kiểm tra payload release và validation client-side.
+ * Mock fetch để kiểm tra payload release và validation client-side. Panel mặc định
+ * chỉ đọc (`enabled=false`) cho tới khi backend có release sealing thật.
  */
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -41,6 +42,23 @@ describe("ReleasePanel", () => {
     expect(screen.getByRole("button")).toBeDisabled();
   });
 
+  it("mặc định chỉ đọc dù đủ điều kiện: không gửi release", () => {
+    render(
+      <ReleasePanel
+        jobId="job-fixture-001"
+        approved
+        checksumMatch
+        approvalRecord={FIXTURE_APPROVAL}
+        jobStatus="SUCCEEDED"
+      />,
+    );
+    expect(screen.getByText(/Read-only: backend chưa triển khai release sealing thật/)).toBeInTheDocument();
+    const button = screen.getByRole("button");
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(vi.mocked(global.fetch)).not.toHaveBeenCalled();
+  });
+
   it("gửi release payload khi đủ điều kiện", async () => {
     vi.mocked(global.fetch).mockResolvedValueOnce({
       ok: true,
@@ -58,6 +76,7 @@ describe("ReleasePanel", () => {
         checksumMatch
         approvalRecord={FIXTURE_APPROVAL}
         jobStatus="SUCCEEDED"
+        enabled
       />,
     );
 
