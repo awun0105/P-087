@@ -73,18 +73,15 @@ async def test_browser_style_direct_upload(client: AsyncClient, cloud: Settings)
     assert state["part_count"] == 2 and "multipart_id" not in state
 
     urls = (await client.post(f"/api/v1/uploads/direct/{upload_id}/urls", json={"part_numbers": [1, 2]})).json()
-    parts = []
     with httpx.Client(timeout=30) as storage:
         # Chỉ đẩy phần 1 trước để kiểm tra nối lại (resume) thấy đúng phần đã lên.
         first = storage.put(urls["urls"]["1"], content=payload[:part_size])
         assert first.status_code == 200
-        parts.append({"part_number": 1, "etag": first.headers["ETag"]})
         resumed = (await client.get(f"/api/v1/uploads/direct/{upload_id}")).json()
         assert resumed["uploaded_parts"] == [1]
-        second = storage.put(urls["urls"]["2"], content=payload[part_size:])
-        parts.append({"part_number": 2, "etag": second.headers["ETag"]})
+        assert storage.put(urls["urls"]["2"], content=payload[part_size:]).status_code == 200
 
-    completed = await client.post(f"/api/v1/uploads/direct/{upload_id}/complete", json={"parts": parts})
+    completed = await client.post(f"/api/v1/uploads/direct/{upload_id}/complete")
     assert completed.status_code == 200, completed.text
 
     final = (await client.get(f"/api/v1/uploads/direct/{upload_id}")).json()
@@ -101,10 +98,8 @@ async def test_lying_about_size_is_rejected(client: AsyncClient, cloud: Settings
     upload_id = begun["upload_id"]
     url = (await client.post(f"/api/v1/uploads/direct/{upload_id}/urls", json={"part_numbers": [1]})).json()["urls"]
     with httpx.Client(timeout=30) as storage:
-        etag = storage.put(url["1"], content=b"short").headers["ETag"]
-    await client.post(
-        f"/api/v1/uploads/direct/{upload_id}/complete", json={"parts": [{"part_number": 1, "etag": etag}]}
-    )
+        storage.put(url["1"], content=b"short")
+    await client.post(f"/api/v1/uploads/direct/{upload_id}/complete")
     final = (await client.get(f"/api/v1/uploads/direct/{upload_id}")).json()
     assert final["status"] == "FAILED"
     assert (await client.get("/api/v1/uploads")).json()["uploads"] == []

@@ -55,10 +55,10 @@ def test_full_flow_records_server_checksum(store: MemoryObjectStore, service: Di
 
     urls = service.part_urls(session.upload_id, [2, 1, 1], 600)
     assert sorted(urls) == [1, 2]
-    parts = _upload_all(store, service, session.upload_id, payload)
+    _upload_all(store, service, session.upload_id, payload)
     assert service.uploaded_parts(service.get(session.upload_id)) == [1, 2]
 
-    assert service.complete(session.upload_id, parts).status == "VERIFYING"
+    assert service.complete(session.upload_id).status == "VERIFYING"
     ready = service.verify(session.upload_id)
     assert ready.status == "READY"
 
@@ -87,18 +87,20 @@ def test_part_urls_are_bounded(service: DirectUploadService) -> None:
 def test_complete_needs_every_part(store: MemoryObjectStore, service: DirectUploadService) -> None:
     payload = b"x" * (MIN_PART_BYTES + 1)
     session = service.begin("kho.mp4", len(payload))
-    parts = _upload_all(store, service, session.upload_id, payload)
+    multipart_id = service.get(session.upload_id).multipart_id
+    store.upload_part(multipart_id, 1, payload[:MIN_PART_BYTES])
     with pytest.raises(UploadError):
-        service.complete(session.upload_id, parts[:1])
-    service.complete(session.upload_id, parts)
+        service.complete(session.upload_id)
+    store.upload_part(multipart_id, 2, payload[MIN_PART_BYTES:])
+    service.complete(session.upload_id)
     with pytest.raises(RuntimeStateConflictError):
-        service.complete(session.upload_id, parts)
+        service.complete(session.upload_id)
 
 
 def test_size_mismatch_fails_and_deletes_object(store: MemoryObjectStore, service: DirectUploadService) -> None:
     session = service.begin("kho.mp4", 100)
-    etag = store.upload_part(service.get(session.upload_id).multipart_id, 1, b"only-40-bytes".ljust(40, b"."))
-    service.complete(session.upload_id, [(1, etag)])
+    store.upload_part(service.get(session.upload_id).multipart_id, 1, b"only-40-bytes".ljust(40, b"."))
+    service.complete(session.upload_id)
     failed = service.verify(session.upload_id)
     assert failed.status == "FAILED" and "khác khai báo" in (failed.error or "")
     assert store.objects == {}

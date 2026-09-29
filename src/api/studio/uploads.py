@@ -115,23 +115,6 @@ class PartUrlsResponse(BaseModel):
     expires_in: int
 
 
-class CompletedPart(BaseModel):
-    """Một phần đã PUT xong, kèm ETag kho file trả về."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    part_number: int = Field(ge=1)
-    etag: str = Field(min_length=1, max_length=200)
-
-
-class CompleteRequest(BaseModel):
-    """Danh sách đủ các phần để ghép."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    parts: list[CompletedPart] = Field(min_length=1, max_length=10_000)
-
-
 def _state(session: UploadSession, uploaded: list[int] | None = None) -> DirectUploadState:
     return DirectUploadState(
         upload_id=session.upload_id,
@@ -205,10 +188,10 @@ def _verify_in_background(upload_id: str) -> None:
 
 
 @router.post("/uploads/direct/{upload_id}/complete", response_model=DirectUploadState)
-def complete_direct_upload(upload_id: str, request: CompleteRequest, background: BackgroundTasks) -> DirectUploadState:
+def complete_direct_upload(upload_id: str, background: BackgroundTasks) -> DirectUploadState:
     """Ghép các phần; server tự tính checksum trong nền, client poll tới READY/FAILED."""
     try:
-        session = deps.direct_uploads().complete(upload_id, [(part.part_number, part.etag) for part in request.parts])
+        session = deps.direct_uploads().complete(upload_id)
     except (UploadError, UploadNotFoundError, RuntimeStateConflictError) as error:
         raise _upload_errors(error) from error
     background.add_task(_verify_in_background, upload_id)

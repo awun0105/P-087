@@ -101,14 +101,18 @@ class DirectUploadService:
             for number in sorted(set(part_numbers))
         }
 
-    def complete(self, upload_id: str, parts: list[tuple[int, str]]) -> UploadSession:
-        """Ghép đủ các phần rồi chuyển sang VERIFYING; kiểm tra chạy riêng (`verify`)."""
+    def complete(self, upload_id: str) -> UploadSession:
+        """Ghép đủ các phần rồi chuyển sang VERIFYING; kiểm tra chạy riêng (`verify`).
+
+        Danh sách phần + ETag lấy từ chính kho file (không tin client), nên trình duyệt
+        không cần đọc header ETag và nối lại sau khi tải lại trang vẫn ghép được.
+        """
         session = self._require_status(upload_id, "UPLOADING")
-        numbers = sorted(number for number, _ in parts)
-        if numbers != list(range(1, session.part_count + 1)):
-            raise UploadError("Thiếu hoặc thừa phần; upload lại các phần còn thiếu")
         key = self.resolver.relative_key(session.artifact_uri)
-        self.remote.complete_upload(key, session.multipart_id, sorted(parts))
+        parts = self.remote.uploaded_parts(key, session.multipart_id)
+        if sorted(part.part_number for part in parts) != list(range(1, session.part_count + 1)):
+            raise UploadError("Thiếu phần; upload tiếp các phần còn thiếu rồi hoàn tất")
+        self.remote.complete_upload(key, session.multipart_id, [(part.part_number, part.etag) for part in parts])
         return self._update(session, status="VERIFYING")
 
     def verify(self, upload_id: str) -> UploadSession:
