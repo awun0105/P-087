@@ -110,7 +110,21 @@ class _LoginLimiter:
             hits.append(now)
 
 
-login_limiter = _LoginLimiter()
+#: Theo email: chống dò mật khẩu một tài khoản. Theo client: chống spam, ngưỡng rộng hơn
+#: vì nhiều người có thể chung IP (proxy/NAT). Không khóa cả nhóm khi một người nhập sai.
+login_limiter = _LoginLimiter(attempts=10, window_seconds=300)
+client_limiter = _LoginLimiter(attempts=100, window_seconds=300)
+
+
+def _client_key(request: Request) -> str:
+    """IP client thật: phần tử đầu `X-Forwarded-For` (Vercel/Railway gắn), không thì IP kết nối.
+
+    Header có thể bị giả; chỉ dùng cho giới hạn mềm theo client — giới hạn theo email mới
+    là lớp bảo vệ tài khoản.
+    """
+    forwarded = request.headers.get("x-forwarded-for", "")
+    first = forwarded.split(",")[0].strip()
+    return first or (request.client.host if request.client else "unknown")
 
 
 class MeResponse(BaseModel):
@@ -206,7 +220,8 @@ def me(request: Request) -> MeResponse:
 @router.post("/login", response_model=PublicUser)
 def login(request: LoginRequest, raw: Request, response: Response) -> PublicUser:
     """Đăng nhập; đặt cookie phiên httpOnly."""
-    login_limiter.check(raw.client.host if raw.client else "unknown")
+    client_limiter.check(_client_key(raw))
+    login_limiter.check(request.email.strip().lower())
     try:
         token, user = auth_service().login(request.email, request.password)
     except AuthError as error:
@@ -225,7 +240,7 @@ def logout(request: Request, response: Response) -> None:
 @router.post("/register", response_model=PublicUser, status_code=status.HTTP_201_CREATED)
 def register(request: RegisterRequest, raw: Request, response: Response) -> PublicUser:
     """Tạo tài khoản bằng mã mời rồi đăng nhập luôn."""
-    login_limiter.check(raw.client.host if raw.client else "unknown")
+    client_limiter.check(_client_key(raw))
     service = auth_service()
     try:
         user = service.register(request.invite_code, request.email, request.display_name, request.password)

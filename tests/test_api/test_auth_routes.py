@@ -39,7 +39,8 @@ def secured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AuthService:
     monkeypatch.setattr(
         deps, "get_project_registry", lambda: ProjectRegistry(runtime_root=tmp_path / "artifacts", database=database)
     )
-    monkeypatch.setattr(auth, "login_limiter", auth._LoginLimiter())
+    monkeypatch.setattr(auth, "login_limiter", auth._LoginLimiter(attempts=10))
+    monkeypatch.setattr(auth, "client_limiter", auth._LoginLimiter(attempts=100))
     return AuthService(database)
 
 
@@ -143,3 +144,12 @@ async def test_retry_counts_against_gpu_quota(client: AsyncClient, secured: Auth
     await _login(client, "e@example.com")
     response = await client.post("/api/v1/jobs/job-x/retry")
     assert response.status_code == 429 and "xử lý GPU" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_one_person_failing_does_not_lock_out_the_team(client: AsyncClient, secured: AuthService) -> None:
+    """Mọi request đi qua cùng proxy: nhập sai nhiều ở một email không chặn email khác."""
+    secured.create_user("lead@example.com", "Lead", PASSWORD, "reviewer")
+    for _ in range(12):
+        await client.post("/api/v1/auth/login", json={"email": "attacker@example.com", "password": "sai"})
+    await _login(client, "lead@example.com")
