@@ -18,7 +18,7 @@ from src.services.orchestration.auth.models import (
     UserRecord,
 )
 from src.services.orchestration.auth.passwords import hash_password, token_digest, verify_password
-from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
+from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError, RuntimeTransaction
 
 
 class AuthError(PermissionError):
@@ -54,9 +54,10 @@ class AuthService:
 
     # --- tài khoản ---------------------------------------------------------
 
-    def create_user(self, email: str, display_name: str, password: str, role: Role) -> UserRecord:
-        """Tạo tài khoản; email trùng → RuntimeStateConflictError."""
-        user = UserRecord(
+    @staticmethod
+    def _new_user(email: str, display_name: str, password: str, role: Role) -> UserRecord:
+        """Dựng record (kiểm email/mật khẩu) trước khi mở transaction."""
+        return UserRecord(
             user_id=f"user-{uuid4().hex[:12]}",
             email=email,
             display_name=display_name.strip(),
@@ -64,13 +65,21 @@ class AuthService:
             password_hash=hash_password(password),
             created_at=datetime.now(UTC),
         )
+
+    @staticmethod
+    def _insert_user(tx: RuntimeTransaction, user: UserRecord) -> None:
+        if tx.execute("SELECT 1 FROM r2s_users WHERE email=?", (user.email,)).fetchone():
+            raise RuntimeStateConflictError("Email đã có tài khoản")
+        tx.execute(
+            "INSERT INTO r2s_users(user_id, email, payload) VALUES (?, ?, ?)",
+            (user.user_id, user.email, user.model_dump_json()),
+        )
+
+    def create_user(self, email: str, display_name: str, password: str, role: Role) -> UserRecord:
+        """Tạo tài khoản; email trùng → RuntimeStateConflictError."""
+        user = self._new_user(email, display_name, password, role)
         with self.database.transaction(write=True) as tx:
-            if tx.execute("SELECT 1 FROM r2s_users WHERE email=?", (user.email,)).fetchone():
-                raise RuntimeStateConflictError("Email đã có tài khoản")
-            tx.execute(
-                "INSERT INTO r2s_users(user_id, email, payload) VALUES (?, ?, ?)",
-                (user.user_id, user.email, user.model_dump_json()),
-            )
+            self._insert_user(tx, user)
         self.audit(user.user_id, "user.create", user.user_id, {"role": role})
         return user
 
@@ -187,6 +196,8 @@ class AuthService:
     def register(self, code: str, email: str, display_name: str, password: str) -> UserRecord:
         """Dùng mã mời tạo tài khoản với đúng role của mã; mã chỉ dùng được một lần."""
         digest = token_digest(code.strip())
+        # Kiểm email/mật khẩu trước; role thật lấy từ mã mời bên trong transaction.
+        candidate = self._new_user(email, display_name, password, "editor")
         with self.database.transaction(write=True) as tx:
             row = tx.execute(
                 "SELECT payload FROM r2s_invites WHERE code_hash=?" + tx.lock_suffix(), (digest,)
@@ -194,18 +205,13 @@ class AuthService:
             invite = InviteRecord.model_validate_json(row[0]) if row else None
             if invite is None or invite.used_by is not None or invite.expires_at <= datetime.now(UTC):
                 raise AuthError("Mã mời không hợp lệ, đã dùng hoặc đã hết hạn")
-            # Giữ chỗ mã trong cùng transaction để hai request không cùng dùng một mã.
-            reserved = invite.model_copy(update={"used_by": "pending"})
-            tx.execute("UPDATE r2s_invites SET payload=? WHERE code_hash=?", (reserved.model_dump_json(), digest))
-        try:
-            user = self.create_user(email, display_name, password, invite.role)
-        except BaseException:
-            with self.database.transaction(write=True) as tx:
-                tx.execute("UPDATE r2s_invites SET payload=? WHERE code_hash=?", (invite.model_dump_json(), digest))
-            raise
-        with self.database.transaction(write=True) as tx:
+            # Tạo tài khoản và đánh dấu mã đã dùng trong CÙNG transaction: lỗi giữa chừng
+            # rollback cả hai, mã không bị kẹt và hai request không cùng dùng một mã.
+            user = candidate.model_copy(update={"role": invite.role})
+            self._insert_user(tx, user)
             used = invite.model_copy(update={"used_by": user.user_id})
             tx.execute("UPDATE r2s_invites SET payload=? WHERE code_hash=?", (used.model_dump_json(), digest))
+        self.audit(user.user_id, "user.create", user.user_id, {"role": user.role, "via": "invite"})
         return user
 
     # --- nhật ký & hạn mức ------------------------------------------------------
