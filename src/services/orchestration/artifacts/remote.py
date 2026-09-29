@@ -11,6 +11,7 @@ Bất biến giữ nguyên như filesystem store:
 - checksum SHA-256 lưu trong metadata object và được kiểm khi tải về.
 """
 
+import hashlib
 import logging
 import os
 import tempfile
@@ -42,6 +43,16 @@ class RemoteObject(BaseModel):
     checksum: str | None = None
 
 
+class UploadedPart(BaseModel):
+    """Một phần của multipart upload đã lên kho file."""
+
+    model_config = ConfigDict(frozen=True)
+
+    part_number: int
+    etag: str
+    size_bytes: int
+
+
 class ObjectStore(Protocol):
     """Phần API object store hệ thống cần; test dùng bản in-memory cùng giao diện."""
 
@@ -63,6 +74,34 @@ class ObjectStore(Protocol):
 
     def presign_get(self, key: str, expires_seconds: int) -> str:
         """Link tải có hạn cho trình duyệt; không lưu vào contract."""
+        ...
+
+    def create_multipart(self, key: str, content_type: str) -> str:
+        """Mở multipart upload cho trình duyệt; trả upload id của kho file."""
+        ...
+
+    def presign_part(self, key: str, multipart_id: str, part_number: int, expires_seconds: int) -> str:
+        """Link PUT có hạn cho một phần."""
+        ...
+
+    def list_parts(self, key: str, multipart_id: str) -> list[UploadedPart]:
+        """Các phần đã lên (để nối lại upload khi rớt mạng)."""
+        ...
+
+    def complete_multipart(self, key: str, multipart_id: str, parts: list[tuple[int, str]]) -> None:
+        """Ghép các phần theo (part_number, etag) thành object."""
+        ...
+
+    def abort_multipart(self, key: str, multipart_id: str) -> None:
+        """Hủy multipart, xóa các phần đã lên."""
+        ...
+
+    def digest(self, key: str) -> tuple[str, int]:
+        """SHA-256 (`sha256:`) và kích thước tính theo stream, không giữ cả file trong RAM."""
+        ...
+
+    def delete(self, key: str) -> None:
+        """Xóa object (chỉ dùng cho upload bị từ chối khi kiểm tra)."""
         ...
 
 
@@ -158,6 +197,38 @@ class ArtifactRemote:
         """Link tải có hạn cho trình duyệt."""
         return self.store.presign_get(self.key(relative), expires_seconds)
 
+    # --- upload thẳng từ trình duyệt (multipart) ---------------------------
+
+    def begin_upload(self, relative: str, content_type: str) -> str:
+        """Mở multipart cho một artifact chưa tồn tại; key đã có thì từ chối (bất biến)."""
+        if self.store.head(self.key(relative)) is not None:
+            raise ArtifactAlreadyExistsError(f"artifact already exists: {relative}")
+        return self.store.create_multipart(self.key(relative), content_type)
+
+    def part_url(self, relative: str, multipart_id: str, part_number: int, expires_seconds: int) -> str:
+        """Link PUT có hạn cho một phần."""
+        return self.store.presign_part(self.key(relative), multipart_id, part_number, expires_seconds)
+
+    def uploaded_parts(self, relative: str, multipart_id: str) -> list[UploadedPart]:
+        """Các phần đã lên kho file."""
+        return self.store.list_parts(self.key(relative), multipart_id)
+
+    def complete_upload(self, relative: str, multipart_id: str, parts: list[tuple[int, str]]) -> None:
+        """Ghép multipart thành object."""
+        self.store.complete_multipart(self.key(relative), multipart_id, parts)
+
+    def abort_upload(self, relative: str, multipart_id: str) -> None:
+        """Hủy multipart dở."""
+        self.store.abort_multipart(self.key(relative), multipart_id)
+
+    def digest(self, relative: str) -> tuple[str, int]:
+        """Checksum + kích thước object do server tự tính (không tin client)."""
+        return self.store.digest(self.key(relative))
+
+    def delete(self, relative: str) -> None:
+        """Xóa object bị từ chối sau kiểm tra."""
+        self.store.delete(self.key(relative))
+
 
 class S3ObjectStore:
     """Object store qua boto3 cho Cloudflare R2, MinIO hoặc S3."""
@@ -220,3 +291,54 @@ class S3ObjectStore:
         return self.client.generate_presigned_url(
             "get_object", Params={"Bucket": self.bucket, "Key": key}, ExpiresIn=expires_seconds
         )
+
+    def create_multipart(self, key: str, content_type: str) -> str:
+        """CreateMultipartUpload."""
+        response = self.client.create_multipart_upload(Bucket=self.bucket, Key=key, ContentType=content_type)
+        return response["UploadId"]
+
+    def presign_part(self, key: str, multipart_id: str, part_number: int, expires_seconds: int) -> str:
+        """Presigned UploadPart (PUT)."""
+        return self.client.generate_presigned_url(
+            "upload_part",
+            Params={"Bucket": self.bucket, "Key": key, "UploadId": multipart_id, "PartNumber": part_number},
+            ExpiresIn=expires_seconds,
+        )
+
+    def list_parts(self, key: str, multipart_id: str) -> list[UploadedPart]:
+        """ListParts theo trang."""
+        paginator = self.client.get_paginator("list_parts")
+        parts: list[UploadedPart] = []
+        for page in paginator.paginate(Bucket=self.bucket, Key=key, UploadId=multipart_id):
+            for entry in page.get("Parts", []):
+                parts.append(
+                    UploadedPart(part_number=entry["PartNumber"], etag=entry["ETag"], size_bytes=entry["Size"])
+                )
+        return parts
+
+    def complete_multipart(self, key: str, multipart_id: str, parts: list[tuple[int, str]]) -> None:
+        """CompleteMultipartUpload."""
+        self.client.complete_multipart_upload(
+            Bucket=self.bucket,
+            Key=key,
+            UploadId=multipart_id,
+            MultipartUpload={"Parts": [{"PartNumber": number, "ETag": etag} for number, etag in parts]},
+        )
+
+    def abort_multipart(self, key: str, multipart_id: str) -> None:
+        """AbortMultipartUpload."""
+        self.client.abort_multipart_upload(Bucket=self.bucket, Key=key, UploadId=multipart_id)
+
+    def digest(self, key: str) -> tuple[str, int]:
+        """Đọc object theo chunk để tính SHA-256."""
+        body = self.client.get_object(Bucket=self.bucket, Key=key)["Body"]
+        hasher = hashlib.sha256()
+        size = 0
+        for chunk in body.iter_chunks(chunk_size=8 * 1024 * 1024):
+            hasher.update(chunk)
+            size += len(chunk)
+        return f"sha256:{hasher.hexdigest()}", size
+
+    def delete(self, key: str) -> None:
+        """DeleteObject."""
+        self.client.delete_object(Bucket=self.bucket, Key=key)
