@@ -11,6 +11,7 @@ import {
   parseJobProgress,
   parseLidarMeasurements,
   parseMetricPreview,
+  parseStageViews,
   type DemoManifest,
   type DemoSelection,
   type JobProgress,
@@ -25,8 +26,15 @@ import {
   type SceneFromUpload,
   type SceneSummary,
   type SourceRightsAttestation,
+  type StageView,
   type UploadRecord,
 } from "@/lib/contracts/studio";
+
+/** Kết quả xem được của từng bước (frame, camera, 3DGS, collision mesh). */
+export async function getStageViews(jobId: string, signal?: AbortSignal): Promise<StageView[]> {
+  const data = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/stage-views`, { signal });
+  return parseStageViews(data);
+}
 
 const API = "/api/v1";
 

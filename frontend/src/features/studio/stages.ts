@@ -1,7 +1,7 @@
 /**
  * Mô tả hiển thị các stage. `MVP_STAGES` = 5 stage tới preview 3DGS (khớp `MVP_PIPELINE`,
- * dùng cho video mẫu); `STUDIO_STAGES` thêm bước xác nhận tỉ lệ mét (khớp
- * `STUDIO_PIPELINE`, dùng cho job thật). Chỉ là copy UI; trạng thái thật lấy từ API.
+ * dùng cho video mẫu); `STUDIO_STAGES` thêm bước xác nhận tỉ lệ mét và hình học/collision
+ * (khớp `STUDIO_PIPELINE`, dùng cho job thật). Chỉ là copy UI; trạng thái thật lấy từ API.
  */
 
 import type { StageId } from "@/lib/contracts/api";
@@ -52,10 +52,19 @@ export const METRIC_STAGE: StageMeta = {
   title: "Xác nhận tỉ lệ mét",
   short: "Tỉ lệ mét",
   description:
-    "Chọn hai điểm A, B trên scene (vd hai mép lối đi) và nhập khoảng cách thật; hệ thống quy đổi cả scene sang mét để dùng cho mô phỏng.",
+    "Chọn A, B trên một vật biết kích thước, C, D trên vật khác để kiểm, và 3 điểm sàn; hệ thống quy đổi cả scene sang mét, sàn thành z = 0.",
 };
 
-export const STUDIO_STAGES: readonly StageMeta[] = [...MVP_STAGES, METRIC_STAGE];
+/** REC-06 canonical + REC-05 + REC-10: chạy tự động sau khi xác nhận tỉ lệ. */
+export const GEOMETRY_STAGE: StageMeta = {
+  id: "ST-RGB-GEOMETRY",
+  title: "Hình học & collision",
+  short: "Collision",
+  description:
+    "Quy đổi 3DGS và camera sang mét, dựng collision mesh bằng voxel và khoét không gian cho robot, kiểm lại tỉ lệ bằng đoạn C–D rồi đóng gói bundle cho mô phỏng.",
+};
+
+export const STUDIO_STAGES: readonly StageMeta[] = [...MVP_STAGES, METRIC_STAGE, GEOMETRY_STAGE];
 
 export function stageMeta(id: StageId): StageMeta | undefined {
   return STUDIO_STAGES.find((stage) => stage.id === id);

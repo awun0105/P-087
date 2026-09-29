@@ -334,3 +334,30 @@ export function parseDemoSelection(value: unknown): DemoSelection {
   parseLidarMeasurements(value.measurements);
   return value as unknown as DemoSelection;
 }
+
+/** Lớp xem được của một bước (ADR 0005). Khớp `StageView` backend. */
+export interface StageView {
+  stage_id: string;
+  kind: "frames" | "cameras" | "gaussian" | "mesh";
+  title: string;
+  note: string;
+  unit: "meter" | "arbitrary";
+  refs: { artifact_uri: string; artifact_checksum: string; artifact_type: string }[];
+  cameras: { frame_id: number; center: [number, number, number]; rotation_xyzw: [number, number, number, number] }[];
+}
+
+const VIEW_KINDS: readonly StageView["kind"][] = ["frames", "cameras", "gaussian", "mesh"];
+
+/** Danh sách lớp xem: kind phải biết, ref phải có URI/checksum, camera phải hữu hạn. */
+export function parseStageViews(value: unknown): StageView[] {
+  if (!isRecord(value) || !Array.isArray(value.views)) throw new Error("Danh sách kết quả từng bước không hợp lệ");
+  for (const view of value.views) {
+    if (!isRecord(view) || !VIEW_KINDS.includes(view.kind as StageView["kind"]) || typeof view.title !== "string" ||
+        !Array.isArray(view.refs) || !Array.isArray(view.cameras) ||
+        !view.refs.every((ref) => isRecord(ref) && typeof ref.artifact_uri === "string" && typeof ref.artifact_checksum === "string") ||
+        !view.cameras.every((camera) => isRecord(camera) && Array.isArray(camera.center) && camera.center.every(isFiniteNumber))) {
+      throw new Error("Một lớp xem không hợp lệ");
+    }
+  }
+  return value.views as unknown as StageView[];
+}
