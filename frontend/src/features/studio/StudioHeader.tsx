@@ -1,18 +1,15 @@
 "use client";
 
-import { Box, Plus, Sparkles } from "lucide-react";
+import { Box, Plus } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { buttonVariants } from "@/components/studio/primitives";
 import { cn } from "@/lib/cn";
 
-const NAV = [
-  { href: "/", label: "Scenes" },
-  { href: "/demo", label: "Kịch bản demo" },
-] as const;
+const NAV = [{ href: "/", label: "Scenes" }] as const;
 
-/** Thanh trên cùng tối giản: logo, 2 mục điều hướng, một nút hành động chính. */
+/** Thanh trên cùng tối giản: logo, điều hướng, một nút hành động chính. */
 export function StudioHeader() {
   const pathname = usePathname();
   return (
@@ -37,16 +34,12 @@ export function StudioHeader() {
                   active ? "bg-paper-sunken font-medium text-ink" : "text-ink-muted hover:text-ink",
                 )}
               >
-                {item.href === "/demo" && <Sparkles className="mr-1.5 inline size-3.5 text-ember-strong" aria-hidden />}
                 {item.label}
               </Link>
             );
           })}
         </nav>
         <div className="ml-auto flex items-center gap-2">
-          <Link href="/demo" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "sm:hidden")}>
-            Demo
-          </Link>
           <Link href="/new" className={buttonVariants({ variant: "secondary", size: "sm" })}>
             <Plus aria-hidden />
             Scene mới

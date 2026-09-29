@@ -7,27 +7,27 @@ import { useCallback, useState } from "react";
 import { Badge, Card, EmptyState, Notice, buttonVariants, formatBytes } from "@/components/studio/primitives";
 import { sceneStatus } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
-import { demoFileUrl, getDemo, listScenes } from "@/lib/api/studio";
+import { listSamples, listScenes, sampleFileUrl } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
-import type { DemoManifest, SceneSummary } from "@/lib/contracts/studio";
+import type { SampleSummary, SceneSummary } from "@/lib/contracts/studio";
 
 const DATE = new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeStyle: "short" });
 
-/** Màn hình Scenes: kịch bản demo + danh sách scene của người dùng (dữ liệu từ backend). */
+/** Màn hình Scenes: video mẫu + danh sách scene của người dùng (dữ liệu từ backend). */
 export function ScenesHome() {
   const [scenes, setScenes] = useState<SceneSummary[] | null>(null);
-  const [demo, setDemo] = useState<DemoManifest | null>(null);
+  const [samples, setSamples] = useState<SampleSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [sceneResult, demoResult] = await Promise.all([listScenes(), getDemo()]);
+    const [sceneResult, sampleResult] = await Promise.all([listScenes(), listSamples()]);
     if (sceneResult.ok) {
       setScenes(sceneResult.data.scenes);
       setError(null);
     } else {
       setError(sceneResult.error.detail);
     }
-    setDemo(demoResult.ok ? demoResult.data : null);
+    setSamples(sampleResult.ok ? sampleResult.data.samples : []);
   }, []);
 
   const anyActive = scenes?.some((scene) => sceneStatus(scene.latest_job, scene.preview_ready).active) ?? true;
@@ -48,7 +48,7 @@ export function ScenesHome() {
         </Link>
       </div>
 
-      {demo && <DemoHero demo={demo} />}
+      {samples.length > 0 && <SamplesHero samples={samples} />}
 
       <section aria-labelledby="scenes-heading" className="mt-12">
         <div className="mb-4 flex items-center justify-between">
@@ -76,7 +76,7 @@ export function ScenesHome() {
               </Link>
             }
           >
-            Quay video bằng camera di chuyển chậm quanh khu vực cần dựng, rồi tải lên. Có thể xem thử kịch bản demo trước.
+            Quay video bằng camera di chuyển chậm quanh khu vực cần dựng, rồi tải lên. Có thể thử trước với video mẫu.
           </EmptyState>
         )}
         {scenes && scenes.length > 0 && (
@@ -93,44 +93,47 @@ export function ScenesHome() {
   );
 }
 
-function DemoHero({ demo }: { demo: DemoManifest }) {
-  const cover = demo.frames[Math.floor(demo.frames.length / 2)];
+/** Lối vào video mẫu: mở thẳng bước video mẫu trong trang Scene mới. */
+function SamplesHero({ samples }: { samples: SampleSummary[] }) {
   return (
-    <Card className="mt-10 overflow-hidden">
-      <div className="grid md:grid-cols-[1.15fr_1fr]">
-        <div className="relative min-h-56 bg-viewport">
-          {cover && (
-            // eslint-disable-next-line @next/next/no-img-element -- ảnh từ API demo, kích thước không cố định
-            <img src={demoFileUrl(cover.name)} alt="" className="absolute inset-0 size-full object-cover opacity-90" />
-          )}
-          <div className="absolute inset-0 bg-gradient-to-t from-viewport/70 to-transparent" />
-          <Badge tone="ember" className="absolute top-4 left-4 bg-paper-raised/95">
-            <Clapperboard aria-hidden />
-            Kịch bản demo
-          </Badge>
-        </div>
-        <div className="flex flex-col justify-center gap-4 p-6 sm:p-8">
-          <div>
-            <p className="text-xs font-medium tracking-wide text-ink-subtle uppercase">
-              {demo.source.dataset} · {demo.source.sequence}
-            </p>
-            <h2 className="mt-1.5 text-xl font-semibold tracking-tight">{demo.title}</h2>
-            <p className="mt-2 text-sm leading-relaxed text-ink-muted">{demo.description}</p>
-          </div>
-          <p className="text-sm leading-relaxed text-ink-muted">
-            Đi qua đủ các bước như khi bạn tự tải video: tải lên, chọn video, theo dõi từng giai đoạn và mở scene 3D. Kết
-            quả đã được xử lý sẵn nên tiến trình chạy nhanh.
-          </p>
-          <div className="flex flex-wrap items-center gap-3">
-            <Link href="/demo" className={buttonVariants({})}>
-              <Play aria-hidden />
-              Bắt đầu demo
-            </Link>
-            {demo.origin === "smoke_run" && <Badge tone="ochre">Bản smoke tạm</Badge>}
-          </div>
-        </div>
+    <section aria-labelledby="samples-home-heading" className="mt-10">
+      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 id="samples-home-heading" className="text-sm font-semibold tracking-wide text-ink-subtle uppercase">
+          Thử với video mẫu
+        </h2>
+        <p className="text-sm text-ink-subtle">Đi qua đủ các bước như video của bạn; kết quả đã xử lý sẵn nên chạy nhanh.</p>
       </div>
-    </Card>
+      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {samples.map((sample) => (
+          <li key={sample.sample_id}>
+            <Link
+              href={`/new?sample=${encodeURIComponent(sample.sample_id)}`}
+              className="group flex h-full flex-col overflow-hidden rounded-2xl border border-line bg-paper-raised transition-[border-color,box-shadow] duration-200 hover:border-line-strong hover:shadow-md focus-visible:ring-3 focus-visible:ring-ember/40 focus-visible:outline-none"
+            >
+              <div className="relative aspect-video bg-viewport">
+                {sample.cover && (
+                  // eslint-disable-next-line @next/next/no-img-element -- ảnh mẫu từ API, kích thước không cố định
+                  <img src={sampleFileUrl(sample.sample_id, sample.cover)} alt="" className="size-full object-cover opacity-90" loading="lazy" />
+                )}
+                <Badge tone="ember" className="absolute top-3 left-3 bg-paper-raised/95">
+                  <Clapperboard aria-hidden />
+                  Video mẫu
+                </Badge>
+              </div>
+              <div className="flex flex-1 items-center justify-between gap-3 p-4">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium tracking-wide text-ink-subtle uppercase">
+                    {sample.source.dataset} · {sample.source.sequence}
+                  </p>
+                  <p className="mt-1 truncate font-semibold text-ink">{sample.title}</p>
+                </div>
+                <Play className="size-4 shrink-0 text-ember-strong transition-transform duration-200 group-hover:translate-x-0.5" aria-hidden />
+              </div>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
