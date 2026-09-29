@@ -89,6 +89,16 @@ export function MetricConfirmView({
   // Bản xem trước chỉ còn hiệu lực khi điểm và khoảng cách không đổi.
   const current = preview && input && JSON.stringify(preview.input) === JSON.stringify(input) ? preview.result : null;
   const hint = nextPointHint(inspection.points.length);
+  // Nút bị khóa phải nói rõ vì sao, không để người dùng đoán.
+  const blockedReason = input
+    ? null
+    : inspection.points.length < METRIC_POINT_COUNT
+      ? `Cần chọn đủ ${METRIC_POINT_COUNT} điểm (đã chọn ${inspection.points.length}).`
+      : lidarAvailable
+        ? lidarResult?.error
+          ? "Chưa có số đo LiDAR: chọn lại điểm bị báo lỗi ở trên."
+          : "Đang chờ số đo LiDAR…"
+        : "Nhập khoảng cách thật của A–B và C–D (mét).";
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -237,6 +247,7 @@ export function MetricConfirmView({
           {busy && !current ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden /> : null}
           Xem trước
         </Button>
+        {blockedReason && <p className="-mt-2 text-xs text-ink-subtle">{blockedReason}</p>}
 
         {current && (
           <div className="space-y-2 rounded-xl border border-line p-3 text-sm">
