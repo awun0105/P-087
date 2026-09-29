@@ -8,8 +8,11 @@ import { directUpload, xhrPutPart } from "@/lib/api/directUpload";
 import {
   parseDemoManifest,
   parseJobProgress,
+  parseMetricPreview,
   type DemoManifest,
   type JobProgress,
+  type MetricInput,
+  type MetricPreview,
   type ParamValue,
   type ProcessingEvaluation,
   type ProcessingOptions,
@@ -187,4 +190,21 @@ function proxyUpload(file: File, onProgress: (fraction: number) => void): Upload
     request.send(file);
   });
   return { promise, abort: () => request.abort() };
+}
+
+/** Xem trước tỉ lệ mét từ điểm đã chọn; backend chưa ghi xác nhận. */
+export async function previewMetric(jobId: string, input: MetricInput): Promise<MetricPreview> {
+  const data = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/metric/preview`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return parseMetricPreview(data);
+}
+
+/** Xác nhận đúng bản xem trước đã hiển thị (checksum); người xác nhận lấy từ phiên đăng nhập. */
+export function confirmMetric(jobId: string, input: MetricInput, previewChecksum: string): Promise<unknown> {
+  return apiFetch(`${API}/jobs/${encodeURIComponent(jobId)}/metric/confirm`, {
+    method: "POST",
+    body: JSON.stringify({ input, preview_checksum: previewChecksum }),
+  });
 }

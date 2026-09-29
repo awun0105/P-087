@@ -90,6 +90,27 @@ export interface JobProgress {
   error: ExecutionErrorView | null;
 }
 
+/** Điểm chọn trên 3DGS (hệ gốc file, đơn vị SfM) + khoảng cách thật A–B. Khớp `UserMetricInput`. */
+export interface MetricInput {
+  floor_points: [MetricPoint, MetricPoint, MetricPoint];
+  point_a: MetricPoint;
+  point_b: MetricPoint;
+  distance_m: number;
+}
+
+export type MetricPoint = [number, number, number];
+
+/** Số liệu xem trước để người dùng tự kiểm; chưa phải xác nhận. Khớp `MetricPreviewView`. */
+export interface MetricPreview {
+  preview_checksum: string;
+  scale_m_per_sfm_unit: number;
+  floor_residual_m: number;
+  measured_distance_m: number;
+  camera_height_min_m: number;
+  camera_height_max_m: number;
+  warnings: string[];
+}
+
 export interface DemoFile {
   name: string;
   media_type: string;
@@ -220,4 +241,18 @@ export function parseDemoManifest(value: unknown): DemoManifest {
     throw new Error("Tên file demo không hợp lệ");
   }
   return value as unknown as DemoManifest;
+}
+
+const METRIC_NUMBERS = [
+  "scale_m_per_sfm_unit", "floor_residual_m", "measured_distance_m", "camera_height_min_m", "camera_height_max_m",
+] as const;
+
+/** Số liệu xem trước phải đủ và hữu hạn; không hiển thị scale từ response lạ. */
+export function parseMetricPreview(value: unknown): MetricPreview {
+  if (!isRecord(value) || typeof value.preview_checksum !== "string" || !Array.isArray(value.warnings) ||
+      !value.warnings.every((warning) => typeof warning === "string") ||
+      !METRIC_NUMBERS.every((key) => typeof value[key] === "number" && Number.isFinite(value[key]))) {
+    throw new Error("Bản xem trước tỉ lệ từ backend không hợp lệ");
+  }
+  return value as unknown as MetricPreview;
 }
