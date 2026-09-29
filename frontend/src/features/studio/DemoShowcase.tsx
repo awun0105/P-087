@@ -4,7 +4,6 @@ import { Aperture, Cpu, Images, ScanSearch, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { stageMeta } from "@/features/studio/stages";
-import { demoFileUrl } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import type { StageId } from "@/lib/contracts/api";
 import type { DemoManifest } from "@/lib/contracts/studio";
@@ -17,10 +16,13 @@ export function DemoShowcase({
   demo,
   stage,
   fraction,
+  fileUrl,
 }: {
   demo: DemoManifest;
   stage: StageId;
   fraction: number;
+  /** URL phục vụ file của đúng video mẫu (allow-list + checksum ở backend). */
+  fileUrl: (name: string) => string;
 }) {
   const meta = stageMeta(stage);
   const frames = demo.frames;
@@ -34,16 +36,16 @@ export function DemoShowcase({
       icon = <ScanSearch aria-hidden />;
       body = demo.video ? (
         <video
-          src={demoFileUrl(demo.video.name)}
+          src={fileUrl(demo.video.name)}
           className="aspect-video w-full rounded-xl bg-viewport object-cover"
           muted
           loop
           autoPlay
           playsInline
-          aria-label="Video gốc của kịch bản demo"
+          aria-label="Video gốc của video mẫu"
         />
       ) : (
-        <FrameImage name={cover?.name} />
+        <FrameImage src={cover ? fileUrl(cover.name) : undefined} />
       );
       break;
     case "ST-PRIVACY-GATE":
@@ -74,7 +76,7 @@ export function DemoShowcase({
               )}
             >
               {/* eslint-disable-next-line @next/next/no-img-element -- ảnh demo từ API */}
-              <img src={demoFileUrl(frame.name)} alt="" className="size-full object-cover" loading="lazy" />
+              <img src={fileUrl(frame.name)} alt="" className="size-full object-cover" loading="lazy" />
               {stage === "ST-CAMERA-POSE" && index < revealed && (
                 <span className="absolute top-1.5 left-1.5 rounded bg-viewport/70 px-1.5 py-0.5 font-mono text-[10px] text-paper">
                   cam {index + 1}
@@ -92,7 +94,7 @@ export function DemoShowcase({
           {cover && (
             // eslint-disable-next-line @next/next/no-img-element -- ảnh demo từ API
             <img
-              src={demoFileUrl(cover.name)}
+              src={fileUrl(cover.name)}
               alt=""
               className="size-full object-cover transition-[filter] duration-500"
               style={{ filter: `blur(${Math.round((1 - fraction) * 14)}px) saturate(${0.6 + fraction * 0.4})` }}
@@ -121,8 +123,8 @@ export function DemoShowcase({
   );
 }
 
-function FrameImage({ name }: { name?: string }) {
-  if (!name) return <div className="aspect-video rounded-xl bg-viewport" />;
+function FrameImage({ src }: { src?: string }) {
+  if (!src) return <div className="aspect-video rounded-xl bg-viewport" />;
   // eslint-disable-next-line @next/next/no-img-element -- ảnh demo từ API
-  return <img src={demoFileUrl(name)} alt="" className="aspect-video w-full rounded-xl object-cover" />;
+  return <img src={src} alt="" className="aspect-video w-full rounded-xl object-cover" />;
 }

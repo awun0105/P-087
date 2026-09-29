@@ -30,7 +30,7 @@ const PRESET_LABEL: Record<PresetKey, { title: string; hint: string }> = {
 /**
  * Bảng thông số xử lý theo file cấu hình chung.
  *
- * `editable=false` (kịch bản demo): hiện đúng thông số đã chạy, khóa sửa.
+ * `editable=false` (video mẫu): hiện đúng thông số đã chạy, khóa sửa.
  * `editable=true` (người dùng thật): preset + chỉnh từng ô; ô gây nguy cơ crash
  * tô đỏ kèm lý do theo ước lượng tài nguyên của máy worker.
  */
@@ -69,7 +69,7 @@ export function ProcessingSettings({
           <p className="mt-1 text-sm text-ink-muted">
             {editable
               ? "Mặc định là cấu hình tối thiểu cho chất lượng tốt. Tăng dần tới mức tối đa mà máy xử lý chịu được."
-              : "Thông số thật đã dùng khi xử lý sẵn kịch bản này — chỉ để xem."}
+              : "Thông số thật đã dùng khi xử lý sẵn video mẫu này — chỉ để xem."}
           </p>
         </div>
         {!editable && (
