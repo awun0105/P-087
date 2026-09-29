@@ -39,6 +39,7 @@ def __getattr__(name: str) -> object:
         "UserMetricPreview",
         "UserMetricPort",
         "LidarMeasurements",
+        "DemoSelection",
         "check_tolerance_m",
         "publish_json",
     }:
@@ -57,6 +58,7 @@ def __getattr__(name: str) -> object:
 
 
 __all__ = [
+    "DemoSelection",
     "InputDetection",
     "InputKind",
     "InputRejectedError",

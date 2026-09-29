@@ -24,7 +24,12 @@ from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.identity import canonical_json_bytes
 from src.models.contracts.manifests import StageId
 from src.services.reconstruction.rgb.canonical.floor_frame import floor_frame
-from src.services.reconstruction.rgb.canonical.lidar_assist import LidarAssist, LidarAssistContext, LidarDistance
+from src.services.reconstruction.rgb.canonical.lidar_assist import (
+    LidarAssist,
+    LidarAssistContext,
+    LidarDistance,
+    demo_points,
+)
 from src.services.reconstruction.rgb.canonical.metric import MetricCanonicalizer, MetricDependencies
 from src.services.reconstruction.rgb.canonical.metric_math import scale_from_distance
 from src.services.reconstruction.rgb.canonical.metric_models import (
@@ -121,6 +126,15 @@ class LidarMeasurements(BaseModel):
     check: LidarDistance
 
 
+class DemoSelection(BaseModel):
+    """7 điểm tự chọn từ LiDAR (A, B, C, D, 3 điểm sàn — hệ SfM) + số đo của chúng."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    points: list[Point]
+    measurements: LidarMeasurements
+
+
 @dataclass(frozen=True)
 class _Built:
     preview: MetricPreview
@@ -185,6 +199,20 @@ class UserMetricPort:
         """Đo A/B và C/D trên LiDAR (dataset mẫu) để UI điền sẵn số đo."""
         context = self._lidar_context(job_id, source_visual, support)
         return LidarMeasurements(anchor=self.lidar.measure(context, *anchor), check=self.lidar.measure(context, *check))
+
+    def demo_selection(
+        self, job_id: str, source_visual: ProductArtifactRef, support: ProductArtifactRef | None
+    ) -> DemoSelection:
+        """Dataset mẫu: tự chọn 7 điểm trên sàn LiDAR để demo luồng xác nhận (ADR 0004 §6)."""
+        context = self._lidar_context(job_id, source_visual, support)
+        visual = self.visuals.load(source_visual)
+        cameras = [pose.translation for pose in self.poses.load(visual.source_camera_poses).poses]
+        points = demo_points(context, cameras)
+        measured = LidarMeasurements(
+            anchor=self.lidar.measure(context, points[0], points[1]),
+            check=self.lidar.measure(context, points[2], points[3]),
+        )
+        return DemoSelection(points=points, measurements=measured)
 
     def _evidence(
         self, job_id: str, source_visual: ProductArtifactRef, data: UserMetricInput, support: ProductArtifactRef | None
