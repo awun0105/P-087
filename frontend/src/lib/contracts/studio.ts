@@ -105,12 +105,19 @@ export interface JobProgress {
   error: ExecutionErrorView | null;
 }
 
-/** Điểm chọn trên 3DGS (hệ gốc file, đơn vị SfM) + khoảng cách thật A–B. Khớp `UserMetricInput`. */
+/** Nguồn số đo: người dùng đo ngoài đời, hoặc LiDAR của dataset mẫu (ADR 0004 §6). */
+export type DistanceSource = "user_measured" | "lidar_demo";
+
+/** Điểm chọn trên 3DGS (hệ gốc file, đơn vị SfM) + số đo A–B, C–D. Khớp `UserMetricInput`. */
 export interface MetricInput {
   floor_points: [MetricPoint, MetricPoint, MetricPoint];
   point_a: MetricPoint;
   point_b: MetricPoint;
   distance_m: number;
+  check_a: MetricPoint;
+  check_b: MetricPoint;
+  check_distance_m: number;
+  distance_source: DistanceSource;
 }
 
 export type MetricPoint = [number, number, number];
@@ -123,7 +130,25 @@ export interface MetricPreview {
   measured_distance_m: number;
   camera_height_min_m: number;
   camera_height_max_m: number;
+  distance_source: DistanceSource;
+  check_measured_m: number;
+  check_error_m: number;
+  check_tolerance_m: number;
+  check_passed: boolean;
   warnings: string[];
+}
+
+/** Một phép đo LiDAR: điểm LiDAR đã bắt và khoảng cách (mét). Khớp `LidarDistance`. */
+export interface LidarDistance {
+  clicked_world: [MetricPoint, MetricPoint];
+  lidar_points_m: [MetricPoint, MetricPoint];
+  snap_offsets_m: [number, number];
+  distance_m: number;
+}
+
+export interface LidarMeasurements {
+  anchor: LidarDistance;
+  check: LidarDistance;
 }
 
 export interface DemoFile {
@@ -260,14 +285,34 @@ export function parseDemoManifest(value: unknown): DemoManifest {
 
 const METRIC_NUMBERS = [
   "scale_m_per_sfm_unit", "floor_residual_m", "measured_distance_m", "camera_height_min_m", "camera_height_max_m",
+  "check_measured_m", "check_error_m", "check_tolerance_m",
 ] as const;
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
 
 /** Số liệu xem trước phải đủ và hữu hạn; không hiển thị scale từ response lạ. */
 export function parseMetricPreview(value: unknown): MetricPreview {
   if (!isRecord(value) || typeof value.preview_checksum !== "string" || !Array.isArray(value.warnings) ||
       !value.warnings.every((warning) => typeof warning === "string") ||
-      !METRIC_NUMBERS.every((key) => typeof value[key] === "number" && Number.isFinite(value[key]))) {
+      typeof value.check_passed !== "boolean" ||
+      (value.distance_source !== "user_measured" && value.distance_source !== "lidar_demo") ||
+      !METRIC_NUMBERS.every((key) => isFiniteNumber(value[key]))) {
     throw new Error("Bản xem trước tỉ lệ từ backend không hợp lệ");
   }
   return value as unknown as MetricPreview;
+}
+
+function isLidarDistance(value: unknown): value is LidarDistance {
+  return isRecord(value) && isFiniteNumber(value.distance_m) && value.distance_m > 0 &&
+    Array.isArray(value.snap_offsets_m) && value.snap_offsets_m.length === 2 && value.snap_offsets_m.every(isFiniteNumber);
+}
+
+/** Số đo LiDAR phải dương, hữu hạn trước khi điền vào ô khoảng cách. */
+export function parseLidarMeasurements(value: unknown): LidarMeasurements {
+  if (!isRecord(value) || !isLidarDistance(value.anchor) || !isLidarDistance(value.check)) {
+    throw new Error("Số đo LiDAR từ backend không hợp lệ");
+  }
+  return value as unknown as LidarMeasurements;
 }

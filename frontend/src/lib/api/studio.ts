@@ -8,10 +8,13 @@ import { directUpload, xhrPutPart } from "@/lib/api/directUpload";
 import {
   parseDemoManifest,
   parseJobProgress,
+  parseLidarMeasurements,
   parseMetricPreview,
   type DemoManifest,
   type JobProgress,
+  type LidarMeasurements,
   type MetricInput,
+  type MetricPoint,
   type MetricPreview,
   type ParamValue,
   type ProcessingEvaluation,
@@ -190,6 +193,27 @@ function proxyUpload(file: File, onProgress: (fraction: number) => void): Upload
     request.send(file);
   });
   return { promise, abort: () => request.abort() };
+}
+
+/** Scene có số đo LiDAR sẵn (dataset mẫu) không; lỗi mạng coi như không có (nhập tay). */
+export async function getMetricAssist(jobId: string): Promise<{ lidar_available: boolean }> {
+  const result = await fetchApi<{ lidar_available: boolean }>(`${API}/jobs/${encodeURIComponent(jobId)}/metric/assist`);
+  return result.ok && typeof result.data.lidar_available === "boolean" ? result.data : { lidar_available: false };
+}
+
+/** Đo A/B và C/D trên LiDAR để điền sẵn khoảng cách (chỉ scene có hỗ trợ LiDAR). */
+export async function measureOnLidar(
+  jobId: string,
+  anchor: [MetricPoint, MetricPoint],
+  check: [MetricPoint, MetricPoint],
+  signal?: AbortSignal,
+): Promise<LidarMeasurements> {
+  const data = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/metric/lidar`, {
+    method: "POST",
+    body: JSON.stringify({ point_a: anchor[0], point_b: anchor[1], check_a: check[0], check_b: check[1] }),
+    signal,
+  });
+  return parseLidarMeasurements(data);
 }
 
 /** Xem trước tỉ lệ mét từ điểm đã chọn; backend chưa ghi xác nhận. */
