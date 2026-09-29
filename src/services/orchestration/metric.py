@@ -1,6 +1,7 @@
 """Xác nhận tỉ lệ mét cho scene Studio (REC-06 anchor + frame) — ranh giới EX-PRODUCT.
 
-Người dùng chọn trên scene 3DGS: 3 điểm sàn, hai điểm A/B và nhập khoảng cách thật.
+Người dùng chọn trên scene 3DGS: A/B, C/D, 3 điểm sàn và nhập khoảng cách thật; scene
+dựng từ dataset mẫu có bản ghi hỗ trợ LiDAR thì khoảng cách lấy từ LiDAR (ADR 0004 §6).
 Phần tính toán/bản ghi REC-06 đi qua port công khai `src.services.reconstruction`;
 PRODUCT giữ authority: chỉ job đang chờ mới xác nhận được, quyết định ghi rõ ai xác
 nhận đúng preview nào, rồi bản xác nhận bất biến được ghi vào JobManifest qua CAS.
@@ -11,13 +12,22 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from src.models.contracts.artifacts import ProductArtifactRef
-from src.models.contracts.manifests import JobManifest
+from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
+from src.models.contracts.manifests import JobManifest, StageId
 from src.models.contracts.preview import ReconstructionPreview
-from src.services.orchestration.artifacts import ArtifactStoreError, FilesystemArtifactStore
+from src.services.orchestration.artifacts import ArtifactStoreError, FilesystemArtifactStore, sha256_file
 from src.services.orchestration.jobs.progress import awaiting_metric_confirmation
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.reconstruction import UserMetricInput, UserMetricPreview, publish_json, user_metric_port
+from src.services.reconstruction import (
+    LidarMeasurements,
+    UserMetricInput,
+    UserMetricPreview,
+    lidar_support_uri,
+    publish_json,
+    user_metric_port,
+)
+
+Point = tuple[float, float, float]
 
 #: Ngưỡng cảnh báo (không chặn): người dùng tự quyết sau khi xem số liệu.
 FLOOR_RESIDUAL_WARN_M = 0.05
@@ -69,11 +79,42 @@ class MetricConfirmationService:
             raise MetricConfirmationError("Scene không ở bước chờ xác nhận tỉ lệ mét")
         return job, preview
 
+    def lidar_support(self, job_id: str) -> ProductArtifactRef | None:
+        """Bản ghi hỗ trợ LiDAR của job (dataset mẫu); None với video người dùng.
+
+        Bản ghi do bước chuẩn bị offline publish tại URI cố định; checksum tính từ bytes
+        đang có, port REC kiểm tiếp căn chỉnh/LiDAR/camera pose bên trong.
+        """
+        path = self.registry.runtime_resolver.resolve(lidar_support_uri(job_id))
+        if not path.is_file():
+            return None
+        return ProductArtifactRef(
+            artifact_type="DemoLidarSupport",
+            schema_version="1.0",
+            artifact_uri=lidar_support_uri(job_id),
+            artifact_checksum=sha256_file(path),
+            data_class=ArtifactDataClass.DERIVED,
+            producer_stage=StageId.RGB_LIDAR_ALIGN,
+            job_id=job_id,
+        )
+
+    def lidar_measurements(
+        self, job_id: str, anchor: tuple[Point, Point], check: tuple[Point, Point]
+    ) -> LidarMeasurements:
+        """Khoảng cách LiDAR cho A/B và C/D để UI điền sẵn (chỉ scene có hỗ trợ LiDAR)."""
+        _, contract = self._waiting_job(job_id)
+        try:
+            return self.port.lidar_measurements(
+                job_id, contract.source_visual_ref, self.lidar_support(job_id), anchor, check
+            )
+        except ValueError as error:
+            raise MetricConfirmationError(str(error)) from error
+
     def preview(self, job_id: str, data: UserMetricInput) -> MetricPreviewView:
         """Tính trước, chưa xác nhận; kèm cảnh báo để người dùng tự kiểm."""
         _, contract = self._waiting_job(job_id)
         try:
-            summary = self.port.preview(job_id, contract.source_visual_ref, data)
+            summary = self.port.preview(job_id, contract.source_visual_ref, data, self.lidar_support(job_id))
         except ValueError as error:
             raise MetricConfirmationError(str(error)) from error
         warnings: list[str] = []
@@ -120,7 +161,13 @@ class MetricConfirmationService:
 
         try:
             reference = self.port.confirm(
-                job_id, contract.source_visual_ref, data, preview_checksum, decision_ref, verify
+                job_id,
+                contract.source_visual_ref,
+                data,
+                preview_checksum,
+                decision_ref,
+                verify,
+                self.lidar_support(job_id),
             )
         except ValueError as error:
             raise MetricConfirmationError(str(error)) from error

@@ -7,7 +7,7 @@ nhận lấy từ phiên đăng nhập, không nhận từ body.
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, FiniteFloat
 
 from src.api import schemas
 from src.api.auth import require_editor
@@ -21,9 +21,10 @@ from src.services.orchestration.metric import (
     MetricPreviewView,
 )
 from src.services.orchestration.projects import JobNotFoundError
-from src.services.reconstruction import UserMetricInput
+from src.services.reconstruction import LidarMeasurements, UserMetricInput
 
 router = APIRouter()
+Point = tuple[FiniteFloat, FiniteFloat, FiniteFloat]
 _ERRORS = {404: {"model": schemas.ApiErrorResponse}, 409: {"model": schemas.ApiErrorResponse}}
 
 
@@ -51,6 +52,42 @@ def _service(job_id: str) -> MetricConfirmationService:
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     return MetricConfirmationService(registry)
+
+
+class MetricAssist(BaseModel):
+    """Scene có số đo LiDAR sẵn (dataset mẫu) hay người dùng phải nhập tay."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lidar_available: bool
+
+
+class LidarMeasureRequest(BaseModel):
+    """Hai đoạn cần đo trên LiDAR: A/B và C/D (hệ gốc file 3DGS)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    point_a: Point
+    point_b: Point
+    check_a: Point
+    check_b: Point
+
+
+@router.get("/jobs/{job_id}/metric/assist", response_model=MetricAssist, responses=_ERRORS)
+def metric_assist(job_id: str) -> MetricAssist:
+    """UI hỏi trước: có LiDAR thì ô khoảng cách chỉ đọc và điền từ LiDAR (ADR 0004 §6)."""
+    return MetricAssist(lidar_available=_service(job_id).lidar_support(job_id) is not None)
+
+
+@router.post("/jobs/{job_id}/metric/lidar", response_model=LidarMeasurements, responses=_ERRORS)
+def measure_on_lidar(job_id: str, request: LidarMeasureRequest) -> LidarMeasurements:
+    """Đo A/B và C/D trên point cloud LiDAR để điền sẵn số đo (dataset mẫu)."""
+    try:
+        return _service(job_id).lidar_measurements(
+            job_id, (request.point_a, request.point_b), (request.check_a, request.check_b)
+        )
+    except MetricConfirmationError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 
 
 @router.post("/jobs/{job_id}/metric/preview", response_model=MetricPreviewView, responses=_ERRORS)

@@ -14,6 +14,9 @@ _INPUT = {
     "point_a": [0, 0, 0],
     "point_b": [1, 0, 0],
     "distance_m": 2.0,
+    "check_a": [0, 1, 0],
+    "check_b": [0, 1.5, 0],
+    "check_distance_m": 1.0,
 }
 
 
@@ -53,6 +56,15 @@ async def test_job_not_waiting_is_409(client: AsyncClient) -> None:
         "/api/v1/jobs/job-fixture-001/metric/confirm", json={"input": _INPUT, "preview_checksum": "sha256:x"}
     )
     assert confirm.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_lidar_assist_absent_without_prepared_support(client: AsyncClient) -> None:
+    assist = await client.get("/api/v1/jobs/job-fixture-001/metric/assist")
+    assert assist.status_code == 200 and assist.json() == {"lidar_available": False}
+    points = {key: _INPUT[key] for key in ("point_a", "point_b", "check_a", "check_b")}
+    measured = await client.post("/api/v1/jobs/job-fixture-001/metric/lidar", json=points)
+    assert measured.status_code == 409
 
 
 @pytest.mark.asyncio
