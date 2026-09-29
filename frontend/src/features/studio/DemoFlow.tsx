@@ -255,7 +255,7 @@ function ProcessStep({ demo, onDone }: { demo: DemoManifest; onDone: () => void 
       <Card className="h-fit p-5 sm:p-6">
         <PipelineTimeline
           stages={views}
-          timeNote={totalReal ? `Trên GPU thật: ${formatDuration(totalReal)}` : "Phát lại nhanh"}
+          timeNote={totalReal ? `Thời gian chạy thật: ${formatDuration(totalReal)}` : "Phát lại nhanh"}
         />
         <div className="mt-6 flex justify-end gap-2">
           {!finished ? (
