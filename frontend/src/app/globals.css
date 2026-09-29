@@ -92,3 +92,49 @@
   top: 0;
   z-index: 1;
 }
+
+/* ── Studio MVP ─────────────────────────────────────────────────────────── */
+.studio-root {
+  color-scheme: light;
+  font-family: var(--font-studio);
+}
+
+/* Dải chạy cho stage không đo được phần trăm (không bịa số). */
+@keyframes studio-indeterminate {
+  from {
+    left: -35%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+.studio-indeterminate {
+  animation: studio-indeterminate 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes studio-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgb(232 116 59 / 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 10px rgb(232 116 59 / 0);
+  }
+}
+
+.studio-pulse {
+  animation: studio-pulse-ring 1.6s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-indeterminate {
+    animation: none;
+    left: 0;
+    width: 100%;
+    opacity: 0.5;
+  }
+
+  .studio-pulse {
+    animation: none;
+  }
+}
