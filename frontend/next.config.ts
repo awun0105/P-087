@@ -19,10 +19,15 @@ const nextConfig: NextConfig = {
    * `proxy.ts` vì proxy buộc Next buffer body (mặc định 10MB) → hỏng upload video.
    */
   async redirects() {
-    if (process.env.LEGACY_UI === "1") return [];
-    return ["/legacy/:path*", "/projects/:path*", "/jobs/:path*", "/viewer/:path*", "/legacy", "/projects", "/viewer"].map(
+    // Trang "Kịch bản demo" đã gộp vào Scene mới (phần video mẫu).
+    const merged = [
+      { source: "/demo", destination: "/new", permanent: false },
+      { source: "/demo/:path*", destination: "/new", permanent: false },
+    ];
+    if (process.env.LEGACY_UI === "1") return merged;
+    return [...merged, ...["/legacy/:path*", "/projects/:path*", "/jobs/:path*", "/viewer/:path*", "/legacy", "/projects", "/viewer"].map(
       (source) => ({ source, destination: "/", permanent: false }),
-    );
+    )];
   },
   async rewrites() {
     return [
