@@ -7,10 +7,12 @@ import { ApiError, apiFetch, fetchApi, type ApiResult } from "@/lib/api/client";
 import { directUpload, xhrPutPart } from "@/lib/api/directUpload";
 import {
   parseDemoManifest,
+  parseDemoSelection,
   parseJobProgress,
   parseLidarMeasurements,
   parseMetricPreview,
   type DemoManifest,
+  type DemoSelection,
   type JobProgress,
   type LidarMeasurements,
   type MetricInput,
@@ -214,6 +216,12 @@ export async function measureOnLidar(
     signal,
   });
   return parseLidarMeasurements(data);
+}
+
+/** Dataset mẫu: hệ thống tự chọn 7 điểm trên sàn LiDAR và đo sẵn. */
+export async function getDemoPoints(jobId: string): Promise<DemoSelection> {
+  const data = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/metric/demo-points`);
+  return parseDemoSelection(data);
 }
 
 /** Xem trước tỉ lệ mét từ điểm đã chọn; backend chưa ghi xác nhận. */

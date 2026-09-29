@@ -108,6 +108,11 @@ export class SplatInspection {
   undo(): void { this.schedule(() => this.history.undo()); }
   redo(): void { this.schedule(() => this.history.redo()); }
   clear(): void { this.schedule(() => this.history.commit([])); }
+  /** Đặt bộ điểm có sẵn (vd demo tự chọn từ LiDAR); vẫn vào history để hoàn tác được. */
+  setPoints(points: readonly InspectionPoint[]): void {
+    const next = points.slice(0, this.maxPoints).map((point) => [point[0], point[1], point[2]] as const);
+    this.schedule(() => this.history.commit(next));
+  }
 
   private blockNavigation = (event: Event): void => {
     if (!this.state.measuring || this.disposed) return;

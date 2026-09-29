@@ -143,7 +143,15 @@ export interface LidarDistance {
   clicked_world: [MetricPoint, MetricPoint];
   lidar_points_m: [MetricPoint, MetricPoint];
   snap_offsets_m: [number, number];
+  /** Điểm dùng để đo: bắt vào LiDAR, hay vị trí theo căn chỉnh khi LiDAR không phủ tới. */
+  point_sources: ["lidar_surface" | "trajectory_alignment", "lidar_surface" | "trajectory_alignment"];
   distance_m: number;
+}
+
+/** 7 điểm hệ thống tự chọn trên sàn LiDAR (A, B, C, D, 3 điểm sàn) + số đo (dataset mẫu). */
+export interface DemoSelection {
+  points: MetricPoint[];
+  measurements: LidarMeasurements;
 }
 
 export interface LidarMeasurements {
@@ -315,4 +323,14 @@ export function parseLidarMeasurements(value: unknown): LidarMeasurements {
     throw new Error("Số đo LiDAR từ backend không hợp lệ");
   }
   return value as unknown as LidarMeasurements;
+}
+
+/** Bộ điểm demo phải đủ 7 điểm hữu hạn và số đo hợp lệ trước khi vẽ lên scene. */
+export function parseDemoSelection(value: unknown): DemoSelection {
+  if (!isRecord(value) || !Array.isArray(value.points) || value.points.length !== 7 ||
+      !value.points.every((point) => Array.isArray(point) && point.length === 3 && point.every(isFiniteNumber))) {
+    throw new Error("Bộ điểm demo từ backend không hợp lệ");
+  }
+  parseLidarMeasurements(value.measurements);
+  return value as unknown as DemoSelection;
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { metricInput, nextPointHint, parseDistance, segments } from "@/features/studio/metric";
-import { parseLidarMeasurements, parseMetricPreview } from "@/lib/contracts/studio";
+import { parseDemoSelection, parseLidarMeasurements, parseMetricPreview } from "@/lib/contracts/studio";
 
 const POINTS = [
   [0, 0, 0],
@@ -81,5 +81,20 @@ describe("metric confirmation input", () => {
     const distance = { clicked_world: [], lidar_points_m: [], snap_offsets_m: [0.01, 0.02], distance_m: 2 };
     expect(parseLidarMeasurements({ anchor: distance, check: distance }).anchor.distance_m).toBe(2);
     expect(() => parseLidarMeasurements({ anchor: { ...distance, distance_m: 0 }, check: distance })).toThrow();
+  });
+
+  it("accepts only a full 7-point demo selection", () => {
+    const distance = {
+      clicked_world: [],
+      lidar_points_m: [],
+      snap_offsets_m: [0, 0],
+      point_sources: ["lidar_surface", "lidar_surface"],
+      distance_m: 2,
+    };
+    const measurements = { anchor: distance, check: distance };
+    const points = Array.from({ length: 7 }, (_, index) => [index, 0, 0]);
+    expect(parseDemoSelection({ points, measurements }).points).toHaveLength(7);
+    expect(() => parseDemoSelection({ points: points.slice(0, 6), measurements })).toThrow();
+    expect(() => parseDemoSelection({ points: [...points.slice(0, 6), [0, Number.NaN, 0]], measurements })).toThrow();
   });
 });
