@@ -185,7 +185,35 @@ API đọc artifact chưa có thì tải về (verify checksum). REC không cầ
 - [x] Thảo luận và chốt quyết định; ADR 0003 + plan này (2026-09-29).
 - [x] Merge docs vào `develop` (PR #9, merge commit `902bbc0`).
 - [x] Đồng bộ `docs/` và `docs/execution/` theo ADR 0003 và hiện trạng (2026-09-29).
-- [ ] Phase 1 … 14.
+- [x] **Đợt code 1 (2026-09-29, nhánh `feat/cloud-studio`)** — không cần tài khoản cloud:
+  - Kho file S3 (phase 2): `artifacts/remote.py` (`ObjectStore`, `S3ObjectStore`, `ArtifactRemote`)
+    sau `ArtifactResolver`: đọc thiếu thì tải + verify checksum, publish thì đẩy lên, sync theo
+    namespace; worker kéo input/đẩy output quanh mỗi REC CLI (`jobs/runner.py`). REC không sửa.
+  - Upload thẳng (phase 4 phần 1): `uploads/direct.py` + `/api/v1/uploads/direct*`; trình duyệt PUT
+    từng phần 16 MiB (4 luồng, thử lại, nối lại qua localStorage); server tự lấy danh sách phần,
+    ghép và tự tính SHA-256 (không tin client); khai sai kích thước → FAILED + xóa object.
+  - Postgres + migration (phase 3): `MIGRATIONS` v1→v3 theo `r2s_schema.version`; `/health` chạy
+    `SELECT 1` (503 khi DB lỗi) — giữ Supabase thức theo Amendment 3.
+  - Đăng nhập 2 role (phase 6): `orchestration/auth` (scrypt stdlib, phiên httpOnly lưu băm, mã
+    mời một lần, nhật ký, hạn mức scene/ngày), `src/api/auth.py`, guard theo route (upload/scene/
+    product = Editor; review/release = Reviewer; video mẫu + thông số = công khai), CLI tạo Reviewer
+    đầu tiên; UI đăng nhập/đăng ký/Nhóm. `AUTH_REQUIRED` mặc định tắt (local/test).
+  - Benchmark (phase 8 phần ghi): `orchestration/benchmark.py` — worker publish
+    `jobs/<job>/benchmark/attempt-N.json`; `scripts/benchmark/collect.py` → `eval/results/benchmarks.jsonl`.
+  - Hạ tầng: `scripts/cloud/configure_bucket.py` (CORS + hủy multipart bỏ dở), env mẫu.
+  - **Evidence:** pytest 940 passed / 22 skipped với Postgres 16 + MinIO thật trong Docker tạm;
+    vitest 111/111, eslint, typecheck, `next build` pass. QA Chrome headless: upload 40 MiB qua
+    `/new` đi thẳng MinIO (checksum khớp, không request video qua API); đăng nhập bật: khách chỉ
+    thấy video mẫu, Reviewer tạo mã mời ở `/team`. **Hai "máy" tách cache** (API/GPU khác
+    `ARTIFACT_ROOT`, chung DB + MinIO), job thật `job-a133f8c24292` (30 frame, 1k bước, T2000):
+    cache API không có video, GPU kéo video + đẩy 65 artifact, API đọc preview 200; benchmark
+    67 s, SOG 0.12 MB, ~$0.006 ở $0.34/giờ.
+  - **Quyết định kỹ thuật:** giữ proxy `/api/v1` qua Next để cookie phiên cùng domain với UI
+    (UI Vercel, API Railway khác domain); video vẫn đi thẳng R2 nên proxy chỉ mang JSON.
+  - **Chưa kiểm chứng:** R2/Supabase/Railway/Vercel/Vast.ai thật (chưa có tài khoản);
+    `configure_bucket` trên R2 (MinIO không hỗ trợ API CORS/lifecycle); Supavisor pooler.
+  - **Giới hạn đo:** privacy/tách frame chạy chung CLI prepare nên không có số giây riêng.
+- [ ] Phase 1 (thử GPU thuê), 5 (tách worker + bật/tắt GPU), 7 (LOD), 9–11 (giám sát, kiểm thử GPU, deploy), 12–14.
 
 ## Decisions
 
