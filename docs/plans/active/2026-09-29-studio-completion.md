@@ -123,7 +123,13 @@ Mỗi gói: code + test tập trung + cập nhật task file liên quan + commit
   - tạo scene từ PLY/ZIP trả 409 cho tới gói 5; UI hiện loại + số Gaussian/bậc SH.
   - Proof: `pytest tests` → 983 passed, 40 skipped; frontend `tsc`, `eslint` sạch, `vitest run` → 119 passed.
   - Chưa làm: browser QA thật với file PLY/ZIP lớn; kiểm Range trên R2/MinIO thật (mới fake store).
-- [ ] Gói 2 … Gói 7.
+- [~] Gói 2 (đổi theo ADR 0004 §6): dataset lấy số đo từ LiDAR, không nhập tay.
+  - [x] Căn chỉnh SfM → world theo quỹ đạo camera trên job thật: RMS 6,8 cm trên
+    quỹ đạo 16,7 m (REC-09 evidence).
+  - [ ] Publish alignment + LiDAR vào store của job; API xem trước trả khoảng cách LiDAR
+    cho A/B, C/D (bắt điểm vào point cloud); UI ô số chỉ đọc.
+  - [ ] Browser QA; đo `e` = sai lệch click so với LiDAR.
+- [ ] Gói 3 … Gói 7.
 
 ## Validation
 
