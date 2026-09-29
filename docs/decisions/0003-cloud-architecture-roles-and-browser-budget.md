@@ -29,14 +29,14 @@ thiết kế. Cần thông báo Product Owner (Cường, EX-PRODUCT) và QA/Vali
 |---|---|---|---|
 | A. Web UI | Vercel (Hobby) | Giao diện Next.js | Không xử lý dữ liệu, không để file lớn đi qua |
 | B. Server điều khiển | Railway (Hobby): FastAPI + Postgres | Nguồn sự thật: API, đăng nhập, quyền, hàng đợi job, audit, cấp link file có hạn | Không chạy xử lý nặng |
-| C. GPU worker | RunPod Pod (Community Cloud, RTX 3090/4090) | COLMAP, Brush, SOG, tạo bản nhẹ (LOD), ảnh bìa/video xoay, áp chỉnh sửa lên bản gốc | Không giữ dữ liệu lâu dài; tắt đi không mất gì |
+| C. GPU worker | **Vast.ai** (chính), RunPod (dự phòng) — xem Amendment 1 | COLMAP, Brush, SOG, tạo bản nhẹ (LOD), ảnh bìa/video xoay, áp chỉnh sửa lên bản gốc | Không giữ dữ liệu lâu dài; tắt đi không mất gì |
 | D. Kho file | Cloudflare R2 (S3 API) | Video gốc, frame, 3DGS, export | — |
 
 - Upload: trình duyệt xin link tạm (presigned, multipart) rồi gửi **thẳng lên R2**.
 - Tải scene/file: trình duyệt tải thẳng từ R2 bằng link có hạn, không qua UI/API.
 - Worker nhận job, báo tiến trình và commit kết quả qua server điều khiển; mọi
   handoff vẫn là logical `artifact://` URI + SHA-256 như Contract hiện hành.
-- GPU tự bật khi có job (RunPod API) và tự tắt khi rảnh (mặc định 10 phút).
+- GPU tự bật khi có job (API của nhà cung cấp) và tự tắt khi rảnh (mặc định 10 phút).
 
 ### 2. Ngân sách trình duyệt
 
@@ -86,7 +86,7 @@ Chỉ hai role theo PRD §3.4; Reviewer có mọi quyền của Editor, thêm qu
   dung lượng theo tài khoản.
 - Tự dọn: frame và file trung gian xóa sau N ngày; giữ video gốc, scene cuối, export.
 - Docker image GPU đóng sẵn và ghim version COLMAP/Brush/splat-transform.
-- Hạn mức chi tiêu trên RunPod; cảnh báo khi worker mất heartbeat; sao lưu Postgres.
+- Hạn mức chi tiêu/nạp trước trên nhà cung cấp GPU; cảnh báo khi worker mất heartbeat; sao lưu Postgres.
 
 ### 5. Database
 
@@ -126,16 +126,35 @@ Positive:
 - Web và dữ liệu sống độc lập với máy GPU; GPU chỉ tốn tiền khi có job.
 - Trình duyệt tải bản nhẹ nên máy yếu vẫn dùng được; máy không render nổi có video.
 - Chi phí ước tính ~$10–20/tháng (INFERENCE: Railway $5–10, R2 ~$0 trong 10 GB,
-  GPU ~$0.1/job giả định 15–20 phút trên 4090 — chưa đo trên RunPod).
+  GPU ~$0.1/job giả định 15–20 phút trên 4090 — chưa đo trên máy thuê).
 
 Tradeoffs / risks:
 
-- **COLMAP đang chạy qua Docker; pod RunPod không chạy Docker lồng** → phải cài
+- **COLMAP đang chạy qua Docker; instance Vast.ai/RunPod đều là container, không chạy Docker lồng** → phải cài
   COLMAP trực tiếp vào image.
 - **Brush và nén SOG cần Vulkan trong container** → phải kiểm trên pod thật trước.
 - LOD: chưa xác minh `splat-transform` có sẵn bước giảm Gaussian (UNKNOWN).
 - Lấy danh sách thao tác chỉnh sửa từ SuperSplat để gửi lệnh: UNKNOWN, rủi ro cao.
 - Phụ thuộc ba nhà cung cấp; giữ S3 API và Postgres chuẩn để dễ đổi.
+
+## Amendment 1 — 2026-09-29: nhà cung cấp GPU
+
+Owner chọn **Vast.ai làm nhà cung cấp GPU chính**, **RunPod là dự phòng** (hết GPU,
+Vast lỗi, hoặc phương án khác).
+
+- Lý do: Vast.ai là chợ GPU nên thường rẻ hơn (RTX 3090 từ ~$0.10/giờ, 4090 từ
+  ~$0.14–0.32/giờ theo trang giá 2026-09-29; giá dao động) so với RunPod Community
+  ($0.22 / $0.34). Đổi lại chất lượng host không đều.
+- **Worker không phụ thuộc nhà cung cấp:** một Docker image GPU dùng chung; một adapter
+  nhỏ `tạo instance / hủy instance / trạng thái` cho từng nhà cung cấp (Vast, RunPod).
+  Server điều khiển gọi adapter; logic job, artifact và tiến trình không biết đang chạy ở đâu.
+- Instance là **dùng-xong-hủy** (tạo từ image khi có việc, hủy khi rảnh) thay vì
+  stop/start, vì dữ liệu nằm ở Postgres + R2; host biến mất thì job chạy lại nơi khác.
+- Lọc host Vast theo điểm tin cậy cao, ưu tiên datacenter, đủ VRAM/đĩa; đặt giới hạn
+  giá/giờ trong adapter.
+- Phase 1 đo trên **cả hai** bằng cùng image: Vulkan + COLMAP chạy được không, thời gian
+  khởi động, thời gian + giá một job mẫu. Nếu Vast không chạy được Vulkan/COLMAP thì
+  chuyển RunPod thành chính và ghi amendment mới.
 
 ## Follow-Up
 
