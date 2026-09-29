@@ -58,6 +58,10 @@ def __getattr__(name: str) -> object:
         from src.services.reconstruction import finalize
 
         return getattr(finalize, name)
+    if name in {"CameraMarker", "camera_markers", "frame_images"}:
+        from src.services.reconstruction import views
+
+        return getattr(views, name)
     if name == "lidar_support_uri":
         from src.services.reconstruction.rgb.canonical.lidar_assist import support_uri
 
@@ -70,6 +74,9 @@ def __getattr__(name: str) -> object:
 
 
 __all__ = [
+    "CameraMarker",
+    "camera_markers",
+    "frame_images",
     "ConfirmationSummary",
     "FinalizeRequest",
     "FinalizeResult",
