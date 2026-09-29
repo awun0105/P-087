@@ -22,7 +22,7 @@ cầu owner sửa source document; không tự chọn một bên trong task file
 - **Studio MVP** (lát cắt video → EX-REC → 3DGS → editor) đã merge vào `develop`
   (PR #9). Công việc này đi qua plan, **không tạo task ID mới**; mapping sang task
   PRODUCT/REC hiện có ghi ở [`ex_product/PLAN.md`](tracks/ex_product/PLAN.md) §6.
-- **ADR 0003** (Accepted): Web UI Vercel, FastAPI + Postgres Railway, kho file R2,
+- **ADR 0003** (Accepted): Web UI Vercel, FastAPI Railway, PostgreSQL Supabase, kho file R2,
   GPU Vast.ai (dự phòng RunPod) tự bật/tắt; hai role Editor/Reviewer, khách chỉ dùng video mẫu; trình
   duyệt chỉ nhận bản 3DGS nhẹ. Contract §7.4 có amendment cho backend S3-compatible.
 - **ADR 0002** (Proposed): privacy tự xác nhận cho MVP — còn chờ Product Owner và

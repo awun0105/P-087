@@ -146,7 +146,7 @@ SceneIR
 
 **Công nghệ chính:**
 FastAPI, Python, Next.js, TypeScript, PlayCanvas/SuperSplat, REST/SSE/WebSocket, Docker.
-Triển khai cloud (ADR 0003): Vercel, Railway + PostgreSQL, Cloudflare R2, GPU Vast.ai (dự phòng RunPod).
+Triển khai cloud (ADR 0003): Vercel, Railway (API) + Supabase (PostgreSQL), Cloudflare R2, GPU Vast.ai (dự phòng RunPod).
 
 **Phù hợp nếu thích:**
 Full-stack, backend architecture, frontend 3D, software engineering, system integration, product UX.

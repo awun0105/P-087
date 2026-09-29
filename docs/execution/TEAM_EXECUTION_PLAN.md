@@ -335,7 +335,7 @@ Hoàn thiện:
 - Tech Lead đặt mốc MVP nội bộ 4 ngày từ 29/09: lát cắt video → EX-REC → 3DGS →
   editor chạy được để demo (ADR 0002; đã merge `develop`, PR #9).
 - Trong tuần 2, EX-REC + EX-PRODUCT làm tiếp kiến trúc cloud theo ADR 0003
-  (Vercel, Railway + Postgres, R2, GPU Vast.ai / dự phòng RunPod) và đăng nhập hai role, theo
+  (Vercel, Railway + Supabase Postgres, R2, GPU Vast.ai / dự phòng RunPod) và đăng nhập hai role, theo
   [plan Cloud Studio](../plans/active/2026-09-29-cloud-studio.md). Làm được đến đâu
   dùng đến đó; fallback demo là stack một máy GPU (`scripts/gpu/run_stack.sh`).
 - Không đổi milestone M2–M6 ở Chương 11; SCENE/SIM nối vào khi có artifact thật.
