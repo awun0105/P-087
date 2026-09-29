@@ -95,11 +95,20 @@ def job_progress(job: JobManifest, attempts: list[JobAttemptRecord], preview_rea
     """Chiếu JobManifest + journal thành tiến trình từng stage của attempt hiện tại."""
     events = _current_attempt(attempts)
     attempt_start = next((event.recorded_at for event in events if event.status == JobStatus.QUEUED), None)
+    # Retry bước hoàn tất bắt đầu thẳng ở hình học: các stage trước đó không chạy lại
+    # trong attempt này, kết quả của chúng (preview, xác nhận) là artifact attempt trước.
+    first_running = next((event.current_stage for event in events if event.status == JobStatus.RUNNING), None)
+    carried = (
+        set(STUDIO_PIPELINE[: STUDIO_PIPELINE.index(first_running)]) if first_running in STUDIO_PIPELINE else set()
+    )
     records = {
         stage.stage_id: stage
         for stage in job.stage_artifacts
         # Chỉ tính record của attempt hiện tại khi có mốc thời gian để so.
-        if attempt_start is None or stage.completed_at is None or stage.completed_at >= attempt_start
+        if stage.stage_id in carried
+        or attempt_start is None
+        or stage.completed_at is None
+        or stage.completed_at >= attempt_start
     }
     stage_starts: dict[StageId, datetime] = {}
     for event in events:

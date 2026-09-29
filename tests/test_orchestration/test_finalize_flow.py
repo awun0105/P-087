@@ -107,6 +107,16 @@ def test_failure_then_retry_resumes_finalize_only(tmp_path: Path) -> None:
     assert dispatch_next(registry, runner=unexpected, video_runner=unexpected, finalize_runner=finalize)
     assert calls == [queued.job_id]
 
+    # Worker nhận lại (QUEUED → RUNNING ở hình học): các bước trước vẫn hiện đã xong.
+    resumed = registry.transition_job(
+        queued.job_id,
+        TransitionRequest(target_status=JobStatus.RUNNING, current_stage=StageId.RGB_GEOMETRY),
+        expected_checksum=queued.job_manifest_checksum,
+    )
+    progress = job_progress(resumed, registry.list_job_attempts(resumed.job_id), preview_ready=True)
+    states = {stage.stage_id: stage.state for stage in progress.stages}
+    assert states[StageId.METRIC_CANONICALIZE] == "succeeded" and states[StageId.RGB_GEOMETRY] == "running"
+
 
 def test_dispatch_routes_confirmed_running_job_to_finalize(tmp_path: Path) -> None:
     registry, job, confirmation = _confirmed(tmp_path)
