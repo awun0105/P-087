@@ -17,6 +17,23 @@ track/task files không được override chúng.
 Nếu hai nguồn thực sự mâu thuẫn, coding agent phải dừng ở policy boundary và yêu
 cầu owner sửa source document; không tự chọn một bên trong task file.
 
+## Cập nhật 2026-09-29
+
+- **Studio MVP** (lát cắt video → EX-REC → 3DGS → editor) đã merge vào `develop`
+  (PR #9). Công việc này đi qua plan, **không tạo task ID mới**; mapping sang task
+  PRODUCT/REC hiện có ghi ở [`ex_product/PLAN.md`](tracks/ex_product/PLAN.md) §6.
+- **ADR 0003** (Accepted): Web UI Vercel, FastAPI + Postgres Railway, kho file R2,
+  GPU RunPod tự bật/tắt; hai role Editor/Reviewer, khách chỉ dùng video mẫu; trình
+  duyệt chỉ nhận bản 3DGS nhẹ. Contract §7.4 có amendment cho backend S3-compatible.
+- **ADR 0002** (Proposed): privacy tự xác nhận cho MVP — còn chờ Product Owner và
+  QA Lead; lệch với `ex_product/TRACK.md` §Authority Gates và Contract §3.3.1.
+- **Đường dẫn module đổi** (ảnh hưởng nhánh đang mở): `reconstruction/rgb/` chia theo
+  stage (`preflight/ frames/ pose/ splat/ geometry/ canonical/`),
+  `src/api/routes_studio.py` → `src/api/studio/`, `orchestration/jobs/preview_cli.py`
+  → `jobs/runner.py`, `orchestration/demo/` → `samples/`.
+- CI có thêm job frontend; GitHub Actions của org đang không chạy do billing
+  (từ 26/09) — kết quả kiểm tra hiện là local.
+
 ## Execution Entry Points
 
 - [High-level team track overview](../TRACKS.md)

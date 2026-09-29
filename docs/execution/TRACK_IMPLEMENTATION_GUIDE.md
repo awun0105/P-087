@@ -21,6 +21,11 @@ Shared architecture/schema/testing rules xem [`TEAM_EXECUTION_CONTRACT.md`](./TE
 
 **Traceability:** Mỗi task ID trong tài liệu này phải xuất hiện trong crosswalk tại [`TEAM_EXECUTION_CONTRACT.md` Chương 13](./TEAM_EXECUTION_CONTRACT.md). Implementation steps, tests và Definition of Done kế thừa traceability của task ID; thêm hoặc đổi tên task phải cập nhật crosswalk trong cùng change.
 
+**Ghi chú 2026-09-29:** Studio MVP (ADR 0002) và kiến trúc cloud (ADR 0003) được
+thực hiện qua plan trong `docs/plans/active/`, **không thêm task ID**; phần chạm vào
+task hiện có được ghi trong `tracks/ex_product/PLAN.md` §6 và `tracks/ex_rec/TRACK.md`.
+Code REC trong `rgb/` nay chia theo stage (`rgb/{preflight,frames,pose,splat,geometry,canonical}/`).
+
 Mỗi track đều theo cùng workflow:
 
 ```text
