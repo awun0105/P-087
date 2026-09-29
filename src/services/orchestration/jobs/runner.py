@@ -27,7 +27,16 @@ from uuid import uuid4
 
 from src.config import Settings, get_settings
 from src.models.contracts.artifacts import ProductArtifactRef
-from src.models.contracts.manifests import ExecutionError, JobManifest, JobStatus, StageArtifact, StageId, StageStatus
+from src.models.contracts.manifests import (
+    ExecutionError,
+    InputManifest,
+    JobManifest,
+    JobStatus,
+    StageArtifact,
+    StageId,
+    StageStatus,
+)
+from src.services.orchestration.artifacts import ArtifactResolver
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import (
     ResolvedProcessing,
@@ -190,6 +199,8 @@ def _start_attempt(
         TransitionRequest(target_status=JobStatus.RUNNING, current_stage=first_stage),
         expected_checksum=initial.job_manifest_checksum,
     )
+    # Máy GPU thuê khởi động với cache rỗng: kéo artifact các attempt trước của job về.
+    registry.runtime_resolver.sync_down(job_id)
     return _Attempt(registry, settings, job, workspace), profile
 
 
@@ -227,6 +238,8 @@ def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: Res
     exit_code, payload = _run_tool(
         attempt, "preview", command, attempt.settings.product_preview_timeout_seconds, progress
     )
+    # REC ghi mọi output vào `jobs/<job_id>/`; đẩy lên kho file trước khi commit để API đọc được.
+    attempt.registry.runtime_resolver.sync_up(attempt.job.job_id)
     if exit_code not in {0, 1}:
         raise RuntimeError("Preview worker không trả result hợp lệ")
     reference = ProductArtifactRef.model_validate(payload.get("result_ref"))
@@ -236,11 +249,19 @@ def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: Res
     return attempt.registry.record_preview(attempt.job, receipt)
 
 
+def _pull_input(resolver: ArtifactResolver, manifest_ref: ProductArtifactRef) -> None:
+    """Đưa InputManifest và video gốc vào cache cục bộ, kiểm đúng checksum trong manifest."""
+    manifest = InputManifest.model_validate_json(resolver.require(manifest_ref).read_bytes())
+    for item in manifest.files:
+        resolver.require_uri(item.artifact_uri, item.checksum)
+
+
 def _execute_prepare(attempt: _Attempt, profile: ResolvedProcessing) -> JobManifest:
     """Chuẩn bị input video qua REC CLI và ghi các stage vào JobManifest."""
     project = attempt.registry.get_project(attempt.job.project_id)
     if project.input_manifest_ref is None:
         raise ValueError("Project không có InputManifest đã publish")
+    _pull_input(attempt.registry.runtime_resolver, project.input_manifest_ref)
     quality_profile = json.loads(attempt.settings.product_upload_quality_profile.read_bytes())
     request = {
         "schema_version": "1.0",
@@ -265,6 +286,7 @@ def _execute_prepare(attempt: _Attempt, profile: ResolvedProcessing) -> JobManif
         str(attempt.registry.runtime_resolver.artifact_root),
     ]
     exit_code, payload = _run_tool(attempt, "prepare", command, attempt.settings.product_prepare_timeout_seconds)
+    attempt.registry.runtime_resolver.sync_up(attempt.job.job_id)
     if exit_code not in {0, 1} or "result" not in payload:
         raise RuntimeError("Prepare worker không trả result hợp lệ")
     receipt = PreparedInputReceipt.model_validate(payload["result"])
