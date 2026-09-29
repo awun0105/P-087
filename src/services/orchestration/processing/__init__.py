@@ -5,6 +5,7 @@ from src.services.orchestration.processing.config import (
     build_job_config,
     config_bytes,
     is_presets_file,
+    job_config_reference,
     load_presets,
     preset_values,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "config_bytes",
     "evaluate",
     "is_presets_file",
+    "job_config_reference",
     "load_presets",
     "maximum_for_machine",
     "preset_values",

@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
+from src.models.contracts.manifests import StageId
 from src.services.orchestration.artifacts import sha256_bytes
 from src.services.orchestration.processing.models import (
     JobProcessingConfig,
@@ -73,3 +75,16 @@ def build_job_config(
 def config_bytes(config: JobProcessingConfig) -> bytes:
     """Bytes xác định (sort key) để checksum ổn định giữa các lần publish."""
     return json.dumps(config.model_dump(mode="json"), sort_keys=True, indent=2).encode("utf-8") + b"\n"
+
+
+def job_config_reference(job_id: str, checksum: str) -> ProductArtifactRef:
+    """Vị trí cố định của cấu hình xử lý riêng của job; checksum = `JobManifest.config_checksum`."""
+    return ProductArtifactRef(
+        artifact_type="JobProcessingConfig",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{job_id}/config/processing.json",
+        artifact_checksum=checksum,
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.INPUT_VALIDATE,
+        job_id=job_id,
+    )

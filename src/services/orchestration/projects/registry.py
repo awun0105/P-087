@@ -51,6 +51,7 @@ from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeSta
 from src.services.orchestration.jobs.models import JobAttemptRecord, PreparedInputReceipt, TransitionRequest
 from src.services.orchestration.jobs.profile import ExecutionProfile
 from src.services.orchestration.jobs.service import JobLifecycle
+from src.services.orchestration.processing import JobProcessingConfig, config_bytes, job_config_reference
 from src.services.orchestration.projects.errors import (
     JobNotFoundError,
     ProjectNotFoundError,
@@ -364,11 +365,22 @@ class ProjectRegistry:
 
     # --- jobs -------------------------------------------------------------
 
-    def create_job(self, request: JobCreateInput) -> JobManifest:
-        """Tạo job QUEUED cho một project, sau khi qua privacy gate."""
+    def create_job(self, request: JobCreateInput, processing: JobProcessingConfig | None = None) -> JobManifest:
+        """Tạo job QUEUED cho một project, sau khi qua privacy gate.
+
+        `processing` (Studio) được publish thành `config/processing.json` của job và
+        checksum bytes của nó là `config_checksum`; không có thì dùng profile chung.
+        """
         project = self.get_project(request.project_id)
         require_project_dispatch(project)
-        job = self._build_queued_job(project, request.scene_revision)
+        job_id = f"job-{uuid4().hex[:12]}"
+        config_checksum = None
+        if processing is not None:
+            payload = config_bytes(processing)
+            reference = job_config_reference(job_id, sha256_bytes(payload))
+            FilesystemArtifactStore(self.runtime_resolver).publish(reference, payload)
+            config_checksum = reference.artifact_checksum
+        job = self._build_queued_job(project, request.scene_revision, job_id, config_checksum)
         reference = (
             self.lifecycle.store.publish_manifest(job) if self.persistence else self.lifecycle.persist_initial(job)
         )
@@ -582,7 +594,9 @@ class ProjectRegistry:
         self.persistence.save_job(updated, reference, event, expected=expected)
         return updated
 
-    def _build_queued_job(self, project: ProjectRecord, scene_revision: str) -> JobManifest:
+    def _build_queued_job(
+        self, project: ProjectRecord, scene_revision: str, job_id: str, config_checksum: Checksum | None
+    ) -> JobManifest:
         """Runtime job không được mang config/versions synthetic của fixture."""
         profile = self.execution_profile
         if profile is None:
@@ -597,12 +611,12 @@ class ProjectRegistry:
             )
         draft = JobManifest(
             schema_version=_SCHEMA_VERSION,
-            job_id=f"job-{uuid4().hex[:12]}",
+            job_id=job_id,
             project_id=project.project_id,
             scene_revision=scene_revision,
             status=JobStatus.QUEUED,
             input_manifest_checksum=project.input_manifest_checksum,
-            config_checksum=profile.config_checksum,
+            config_checksum=config_checksum or profile.config_checksum,
             runtime_manifest_checksum=profile.runtime_manifest_checksum,
             seed=profile.seed,
             started_at=datetime.now(UTC),
