@@ -2,7 +2,7 @@
 
 import { ArrowLeft, ArrowRight, Film, Loader2, Play } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { Button, Card, EmptyState, Notice, formatBytes } from "@/components/studio/primitives";
 import { FlowStepper } from "@/features/studio/FlowStepper";
@@ -53,12 +53,17 @@ export function NewSceneFlow() {
     };
   }, []);
 
+  // Chỉ nhận kết quả của lần chọn mới nhất: chọn nhanh hai mẫu thì response đến
+  // muộn của mẫu trước không được ghi đè mẫu đang hiển thị.
+  const latestPick = useRef<string | null>(null);
   const pickSample = useCallback((id: string) => {
+    latestPick.current = id;
     setSampleId(id);
     setSample(null);
     setSampleError(null);
     setStep(1);
     void getSample(id).then((result) => {
+      if (latestPick.current !== id) return;
       if (result.ok) setSample(result.data);
       else setSampleError(result.error.detail);
     });
@@ -73,6 +78,7 @@ export function NewSceneFlow() {
   }, [requested, pickSample]);
 
   const backToUpload = () => {
+    latestPick.current = null;
     setSampleId(null);
     setSample(null);
     setStep(0);
