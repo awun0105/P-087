@@ -137,7 +137,8 @@ trang fallback (stack một máy) nếu cloud trục trặc.
 ## Progress
 
 - [x] Thảo luận và chốt quyết định; ADR 0003 + plan này (2026-09-29).
-- [ ] Merge docs vào `develop`.
+- [x] Merge docs vào `develop` (PR #9, merge commit `902bbc0`).
+- [x] Đồng bộ `docs/` và `docs/execution/` theo ADR 0003 và hiện trạng (2026-09-29).
 - [ ] Phase 1 … 14.
 
 ## Decisions
