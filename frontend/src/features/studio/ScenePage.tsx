@@ -7,7 +7,7 @@ import { Badge, Button, Card, Notice, formatBytes } from "@/components/studio/pr
 import { FlowStepper } from "@/features/studio/FlowStepper";
 import { PipelineTimeline, type StageView } from "@/features/studio/PipelineTimeline";
 import { STUDIO_STAGES } from "@/features/studio/stages";
-import { SceneWorkspace } from "@/features/studio/SceneWorkspace";
+import { SceneWorkspace, type GeometryState } from "@/features/studio/SceneWorkspace";
 import { usePolling } from "@/features/studio/usePolling";
 import { getJob, getPreview, getProject, jobArtifactContentUrl } from "@/lib/api/endpoints";
 import { cancelJob, getJobProgress, retryJob } from "@/lib/api/studio";
@@ -74,7 +74,10 @@ export function ScenePage({ jobId }: { jobId: string }) {
     [jobId, preview],
   );
 
-  const settled = preview !== null || progress?.status === "FAILED" || progress?.status === "CANCELLED";
+  // Sau preview vẫn theo dõi: worker còn dựng collision sau khi người dùng xác nhận tỉ lệ.
+  // Chỉ dừng khi job đã kết thúc, hoặc đang chờ chính người dùng xác nhận.
+  const finished = progress?.status === "SUCCEEDED" || progress?.status === "FAILED" || progress?.status === "CANCELLED";
+  const settled = finished || (preview !== null && progress?.waiting_for === "metric_confirmation");
   usePolling(poll, 3000, !settled);
 
   async function act(action: () => Promise<unknown>) {
@@ -102,6 +105,8 @@ export function ScenePage({ jobId }: { jobId: string }) {
           state: metricState(progress),
           onConfirmed: () => void poll(new AbortController().signal),
         }}
+        geometry={geometryState(progress)}
+        onRetryGeometry={progress?.status === "FAILED" ? () => void act(() => retryJob(jobId)) : undefined}
       />
     );
   }
@@ -223,6 +228,15 @@ function metricState(progress: JobProgress | null): "waiting" | "confirmed" | "n
   if (progress?.waiting_for === "metric_confirmation") return "waiting";
   const metric = progress?.stages.find((stage) => stage.stage_id === "ST-METRIC-CANONICALIZE");
   return metric?.state === "succeeded" ? "confirmed" : "none";
+}
+
+/** Bước hình học/collision (REC-05/REC-10) chạy tự động sau khi xác nhận tỉ lệ. */
+function geometryState(progress: JobProgress | null): GeometryState {
+  const stage = progress?.stages.find((item) => item.stage_id === "ST-RGB-GEOMETRY");
+  if (stage?.state === "running") return "running";
+  if (stage?.state === "succeeded") return "done";
+  if (stage?.state === "failed") return "failed";
+  return "none";
 }
 
 function stageSeconds(started: string | null, completed: string | null, now: number | null): number | null {
