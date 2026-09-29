@@ -6,6 +6,8 @@ import { useCallback, useEffect, useId, useState } from "react";
 
 import { Button, Card, EmptyState, Notice, formatBytes } from "@/components/studio/primitives";
 import { FlowStepper } from "@/features/studio/FlowStepper";
+import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
+import { useProcessingForm } from "@/features/studio/useProcessingForm";
 import { UploadDropzone } from "@/features/studio/UploadDropzone";
 import { createSceneFromUpload, listUploads } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
@@ -97,7 +99,11 @@ function SelectAndConfirm({ preselect, onBack }: { preselect: string | null; onB
     return () => clearTimeout(timer);
   }, [load]);
 
-  const ready = Boolean(selected && name.trim() && owner.trim() && purpose.trim() && rights && anonymized && retention);
+  const processing = useProcessingForm(true);
+  const blocked = processing.evaluation?.blocking ?? false;
+  const ready = Boolean(
+    selected && name.trim() && owner.trim() && purpose.trim() && rights && anonymized && retention && !blocked,
+  );
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -112,7 +118,7 @@ function SelectAndConfirm({ preselect, onBack }: { preselect: string | null; onB
         rights_to_use_confirmed: rights,
         anonymization_confirmed: anonymized,
         retention_acknowledged: retention,
-      });
+      }, processing.values ?? undefined);
       router.push(`/scenes/${encodeURIComponent(created.job.job_id)}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Không tạo được scene");
@@ -237,6 +243,28 @@ function SelectAndConfirm({ preselect, onBack }: { preselect: string | null; onB
         </div>
       </Card>
 
+      {processing.options && processing.values ? (
+        <ProcessingSettings
+          parameters={processing.options.parameters}
+          values={processing.values}
+          editable
+          evaluation={processing.evaluation}
+          capability={processing.options.capability}
+          activePreset={processing.activePreset}
+          onPreset={processing.applyPreset}
+          onChange={processing.setValue}
+          note={`Ước lượng tài nguyên là heuristic, không phải phép đo. ${processing.options.resource_note}`}
+        />
+      ) : processing.error ? (
+        <Notice tone="ochre">Không tải được bảng thông số: {processing.error}. Scene sẽ dùng cấu hình mặc định của máy chủ.</Notice>
+      ) : null}
+
+      {blocked && (
+        <Notice tone="rust">
+          Thông số hiện tại vượt cấu hình máy xử lý và có thể làm job bị crash. Giảm các ô tô đỏ hoặc chọn “Tối đa cho máy
+          này”.
+        </Notice>
+      )}
       {error && <Notice tone="rust">{error}</Notice>}
 
       <div className="flex items-center justify-between gap-3">

@@ -9,6 +9,8 @@ import { DemoShowcase } from "@/features/studio/DemoShowcase";
 import { FlowStepper } from "@/features/studio/FlowStepper";
 import { GuideCallout } from "@/features/studio/GuideCallout";
 import { PipelineTimeline } from "@/features/studio/PipelineTimeline";
+import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
+import { useProcessingForm } from "@/features/studio/useProcessingForm";
 import { MVP_STAGES } from "@/features/studio/stages";
 import { useDemoReplay } from "@/features/studio/useDemoReplay";
 import { demoFileUrl, getDemo } from "@/lib/api/studio";
@@ -179,6 +181,9 @@ function SelectStep({ demo, onStart }: { demo: DemoManifest; onStart: () => void
           <p className="flex gap-2"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-sage" aria-hidden />Có quyền sử dụng video ({demo.source.dataset} công khai).</p>
           <p className="flex gap-2"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-sage" aria-hidden />Video không có khuôn mặt hoặc biển số chưa làm mờ.</p>
         </div>
+        <div className="mt-6">
+          <DemoProcessing demo={demo} />
+        </div>
         <div className="mt-6 flex justify-end">
           <Button size="lg" onClick={onStart} disabled={!selected}>
             <Play aria-hidden />
@@ -190,6 +195,34 @@ function SelectStep({ demo, onStart }: { demo: DemoManifest; onStart: () => void
         Video vừa tải nằm trong danh sách. Chọn nó, kiểm tra phần xác nhận dữ liệu rồi bấm <strong>Bắt đầu xử lý</strong>.
       </GuideCallout>
     </div>
+  );
+}
+
+/**
+ * Thông số thật đã dùng khi xử lý sẵn, hiển thị chỉ đọc. Nhãn/giới hạn lấy từ file
+ * cấu hình chung; bundle cũ chưa ghi thông số thì nói rõ thay vì điền giá trị giả.
+ */
+function DemoProcessing({ demo }: { demo: DemoManifest }) {
+  const form = useProcessingForm(Boolean(demo.processing));
+  if (!demo.processing) {
+    return (
+      <Notice tone="neutral" icon={<Info aria-hidden />}>
+        Bundle demo này được tạo trước khi có bảng thông số nên không ghi lại thông số xử lý.
+      </Notice>
+    );
+  }
+  if (!form.options) {
+    return form.error ? <Notice tone="ochre">Không tải được nhãn thông số: {form.error}</Notice> : null;
+  }
+  const machine = demo.machine ?? {};
+  const machineLabel = [machine.gpu_model, machine.vram, machine.brush].filter(Boolean).join(" · ") || null;
+  return (
+    <ProcessingSettings
+      parameters={form.options.parameters}
+      values={demo.processing}
+      editable={false}
+      machineLabel={machineLabel}
+    />
   );
 }
 
