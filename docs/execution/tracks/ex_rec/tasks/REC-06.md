@@ -333,6 +333,17 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 
 ## 12. Result / Evidence
 
+### 2026-09-30 — canonical mét + kiểm C/D cuối trong worker
+
+Chạy thật 2026-09-30 trên `job-ac2bfd924cc6` (video Aisle_CW, GPU Quadro T2000, adapter index 1),
+branch `feat/studio-integration`. Xác nhận tỉ lệ bằng 7 điểm tự chọn trên sàn LiDAR (ADR 0004 §6).
+- Canonical pose + visual (SOG `rec06/…/scene.sog`, `sha256:24433bcef2d6…`); camera cao 0,35 m.
+- Kiểm C/D trên artifact canonical: lệch 4,4e-16 m / ngưỡng 0,0493 m, record
+  `bundle-metric.json` (`sha256:19ebc4249530…`). **Giới hạn:** trên dataset A/B và C/D cùng
+  lấy từ một căn chỉnh LiDAR nên lệch ~0 không phải phép kiểm độc lập như video người dùng.
+- Authority: PRODUCT xác minh MetricDecision rồi truyền checksum; REC chỉ nhận đúng quyết định đó.
+
+
 ### 2026-09-29 — xác nhận tỉ lệ mét từ UI (branch `feat/rec-completion`)
 
 Status giữ `IN_PROGRESS`: chưa có independent test distance trên dữ liệu thật và
