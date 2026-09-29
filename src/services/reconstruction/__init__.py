@@ -46,6 +46,18 @@ def __getattr__(name: str) -> object:
         from src.services.reconstruction import metric_port
 
         return getattr(metric_port, name)
+    if name in {
+        "ConfirmationSummary",
+        "FinalizeRequest",
+        "FinalizeResult",
+        "GeometryProfile",
+        "confirmation_summary",
+        "load_finalize_result",
+        "load_geometry_profile",
+    }:
+        from src.services.reconstruction import finalize
+
+        return getattr(finalize, name)
     if name == "lidar_support_uri":
         from src.services.reconstruction.rgb.canonical.lidar_assist import support_uri
 
@@ -58,6 +70,13 @@ def __getattr__(name: str) -> object:
 
 
 __all__ = [
+    "ConfirmationSummary",
+    "FinalizeRequest",
+    "FinalizeResult",
+    "GeometryProfile",
+    "confirmation_summary",
+    "load_finalize_result",
+    "load_geometry_profile",
     "DemoSelection",
     "InputDetection",
     "InputKind",
