@@ -227,6 +227,17 @@ Phase 5 — Packaging GPU/SSH + demo run
   số + máy (`e744840`); nén SOG bằng WebGPU (`c4a70b2`): 7,7 s so với >15 phút CPU.
   Job thật `job-ac2bfd924cc6` (50 frame, 7k bước, 960px, T2000): tổng 7 phút 41 s;
   bundle `data/demo/aisle_cw_params` (pipeline_job, có thông số).
+- [x] Phase 7 — gộp kịch bản demo vào Scene mới (2026-09-29, yêu cầu owner):
+  thư viện video mẫu `PRODUCT_DEMO_DIR` = thư mục chứa nhiều bundle, API
+  `/samples`, `/samples/{id}`, `/samples/{id}/files/{name}` thay `/demo` (`0530e0b`,
+  runbook `8b5cf8e`). Bước "Tải video lên" có lưới "Hoặc thử với video mẫu"; chọn
+  mẫu → Chọn video (video, xác nhận dữ liệu, thông số chỉ đọc) → Xử lý (phát lại
+  artifact thật theo tỉ lệ thời lượng đo được) → Mở scene tại
+  `/samples/{id}/scene` (`06653ff`…`94cbdee`). `/new?sample=<id>` chọn sẵn mẫu;
+  `/demo` redirect về `/new`; Scenes home và header bỏ mục "Kịch bản demo".
+  QA headless Chrome (CDP): /demo→/new, chọn mẫu, phát lại, link scene, editor
+  fallback WebGL2 đều hiển thị. Lưu ý: commit `06653ff` vô tình gồm cả phần xóa
+  DemoFlow/GuideCallout/route demo (đã stage trước); không rewrite history.
 
 ## Validation
 
