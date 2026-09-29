@@ -4,7 +4,9 @@ Date: 2026-09-29
 
 ## Status
 
-Active — chưa bắt đầu code. Bắt đầu sau khi docs quyết định được merge vào `develop`.
+Paused (2026-09-29) — đợt code 1 đã merge `develop`; phần đưa lên cloud và vận hành còn 21 việc,
+ghi ở [handoff](../../execution/tracks/ex_product/HANDOFF-2026-09-29-cloud-ops.md). Ưu tiên tiếp theo của owner:
+hoàn thiện pipeline ứng dụng và UI/UX.
 
 ## Outcome
 
@@ -113,7 +115,7 @@ Production là Supabase (ADR 0003 Amendment 3): kết nối qua pooler, cùng v�
 ### Benchmark và số liệu cần đo (mục 9)
 
 Mỗi job ghi một bản ghi benchmark (artifact JSON cạnh kết quả, kèm checksum) và script
-tổng hợp sang `eval/results/benchmarks.jsonl` + bảng trong `eval/results/report.md`.
+tổng hợp theo mã loại benchmark (mục lục `eval/protocols/BENCHMARKS.md`): `eval/results/<mã>/<nhãn>.jsonl` + bảng trong `eval/results/report.md`.
 
 | Nhóm | Số đo | Nguồn |
 |---|---|---|
@@ -155,12 +157,82 @@ trang fallback (stack một máy) nếu cloud trục trặc.
 - Không kịp → demo bằng stack một máy (`scripts/gpu/run_stack.sh`).
 - LOD/`splat-transform` và lấy thao tác SuperSplat là UNKNOWN → kiểm trước khi cam kết.
 
+## Task Capsule — đợt code 1 (2026-09-29, nhánh `feat/cloud-studio`)
+
+```text
+Task / outcome: phần không cần tài khoản cloud — kho file S3 (mirror), upload thẳng,
+  Postgres + migration, đăng nhập 2 role, ghi benchmark.
+Authority anchors: ADR 0003 (+ Amendment 1–3); Contract §3.1/§7.4 amendment; PRD §3.4,
+  NFR-04; ARCHITECTURE §Database/§Deployment.
+Dependencies and current state: artifact store filesystem (`artifacts/store.py`), resolver
+  dùng trực tiếp ở ~40 chỗ trong REC/orchestration; RuntimeDatabase có nhánh Postgres
+  nhưng psycopg chưa cài, chưa test; chưa có auth.
+Inputs / outputs: env S3 (endpoint/bucket/key), DATABASE_URL; ra API upload/auth mới.
+Owned paths: src/services/orchestration/**, src/api/**, src/config.py, frontend/**,
+  tests/test_orchestration, tests/test_api, tests/integration, requirements*.in/lock.
+Do-not-modify paths: src/services/reconstruction/** (REC giữ nguyên, đọc/ghi local cache),
+  src/services/scene/**, src/services/simulation/**, shared contracts.
+Proof required: unit test với object store giả; integration với MinIO + Postgres trong
+  Docker tạm (container riêng, xóa sau khi test); ruff; pytest toàn bộ; frontend checks.
+Unknowns / blockers: R2 hỗ trợ conditional PUT (If-None-Match) — fallback HEAD + checksum;
+  Supavisor pooler với psycopg (kiểm khi có tài khoản).
+```
+
+Thiết kế kho file: filesystem vẫn là **cache cục bộ** trên mỗi máy; lớp **mirror** đồng
+bộ với S3 ở ranh giới — worker kéo input trước job, đẩy namespace job sau mỗi stage;
+API đọc artifact chưa có thì tải về (verify checksum). REC không cần sửa.
+
 ## Progress
 
 - [x] Thảo luận và chốt quyết định; ADR 0003 + plan này (2026-09-29).
 - [x] Merge docs vào `develop` (PR #9, merge commit `902bbc0`).
 - [x] Đồng bộ `docs/` và `docs/execution/` theo ADR 0003 và hiện trạng (2026-09-29).
-- [ ] Phase 1 … 14.
+- [x] **Đợt code 1 (2026-09-29, nhánh `feat/cloud-studio`)** — không cần tài khoản cloud:
+  - Kho file S3 (phase 2): `artifacts/remote.py` (`ObjectStore`, `S3ObjectStore`, `ArtifactRemote`)
+    sau `ArtifactResolver`: đọc thiếu thì tải + verify checksum, publish thì đẩy lên, sync theo
+    namespace; worker kéo input/đẩy output quanh mỗi REC CLI (`jobs/runner.py`). REC không sửa.
+  - Upload thẳng (phase 4 phần 1): `uploads/direct.py` + `/api/v1/uploads/direct*`; trình duyệt PUT
+    từng phần 16 MiB (4 luồng, thử lại, nối lại qua localStorage); server tự lấy danh sách phần,
+    ghép và tự tính SHA-256 (không tin client); khai sai kích thước → FAILED + xóa object.
+  - Postgres + migration (phase 3): `MIGRATIONS` v1→v3 theo `r2s_schema.version`; `/health` chạy
+    `SELECT 1` (503 khi DB lỗi) — giữ Supabase thức theo Amendment 3.
+  - Đăng nhập 2 role (phase 6): `orchestration/auth` (scrypt stdlib, phiên httpOnly lưu băm, mã
+    mời một lần, nhật ký, hạn mức scene/ngày), `src/api/auth.py`, guard theo route (upload/scene/
+    product = Editor; review/release = Reviewer; video mẫu + thông số = công khai), CLI tạo Reviewer
+    đầu tiên; UI đăng nhập/đăng ký/Nhóm. `AUTH_REQUIRED` mặc định tắt (local/test).
+  - Benchmark (phase 8 phần ghi): `orchestration/benchmark.py` — worker publish
+    `jobs/<job>/benchmark/pipeline_runtime/attempt-N.json`; `scripts/benchmark/collect.py` →
+    `eval/results/pipeline_runtime/<nhãn>.jsonl`; mục lục `eval/protocols/BENCHMARKS.md`.
+  - Hạ tầng: `scripts/cloud/configure_bucket.py` (CORS + hủy multipart bỏ dở), env mẫu.
+  - **Evidence:** pytest 940 passed / 22 skipped với Postgres 16 + MinIO thật trong Docker tạm;
+    vitest 111/111, eslint, typecheck, `next build` pass. QA Chrome headless: upload 40 MiB qua
+    `/new` đi thẳng MinIO (checksum khớp, không request video qua API); đăng nhập bật: khách chỉ
+    thấy video mẫu, Reviewer tạo mã mời ở `/team`. **Hai "máy" tách cache** (API/GPU khác
+    `ARTIFACT_ROOT`, chung DB + MinIO), job thật `job-a133f8c24292` (30 frame, 1k bước, T2000):
+    cache API không có video, GPU kéo video + đẩy 65 artifact, API đọc preview 200; benchmark
+    67 s, SOG 0.12 MB, ~$0.006 ở $0.34/giờ.
+  - **Quyết định kỹ thuật:** giữ proxy `/api/v1` qua Next để cookie phiên cùng domain với UI
+    (UI Vercel, API Railway khác domain); video vẫn đi thẳng R2 nên proxy chỉ mang JSON.
+  - **Chưa kiểm chứng:** R2/Supabase/Railway/Vercel/Vast.ai thật (chưa có tài khoản);
+    `configure_bucket` trên R2 (MinIO không hỗ trợ API CORS/lifecycle); Supavisor pooler.
+  - **Giới hạn đo:** privacy/tách frame chạy chung CLI prepare nên không có số giây riêng.
+- [x] **Rà soát đợt code 1 và sửa (2026-09-29):**
+  - Hạn mức đổi thành **lượt xử lý GPU / 24 giờ** (scene mới + Thử lại, nhật ký `gpu.run`);
+    Reviewer không giới hạn, chỉ Reviewer chỉnh hạn mức của Editor.
+  - Link PUT từng phần ký kèm `Content-Length` → không PUT được phần to hơn khai báo (MinIO: 403).
+  - Phiên upload kẹt VERIFYING khi API khởi động lại: gọi lại complete lên lịch kiểm tra lại;
+    client nhắc mỗi ~1 phút, bỏ cuộc sau 30 phút.
+  - Giới hạn đăng nhập theo email (10/5 phút) + client thật từ `X-Forwarded-For` (100/5 phút):
+    một người nhập sai không khóa cả nhóm qua proxy chung.
+  - Đăng ký bằng mã mời trong một transaction (trước: mã có thể kẹt "pending" khi lỗi giữa chừng).
+  - Bootstrap migration chỉ chạy một lần mỗi tiến trình cho mỗi DB (trước: mỗi request).
+  - Artifact tải thẳng từ kho file: `/jobs/{id}/artifacts/content` trả 307 tới link có hạn sau khi
+    kiểm allow-list; object chưa lên kho thì API tự phục vụ (QA: 307 → MinIO, checksum khớp, khách 401).
+  - Benchmark ghi cả khi job dừng ở bước chuẩn bị; route chat LLM cần Editor khi bật đăng nhập.
+  - **Còn để sau (đã biết):** worker trên máy thuê giữ mật khẩu DB/key R2 → phase 5 dùng API worker +
+    token riêng; chưa có hạn mức dung lượng upload; mỗi transaction mở một kết nối Postgres (cân
+    nhắc pool khi đo độ trễ Supabase); xóa file SQLite khi API đang chạy cần khởi động lại API.
+- [ ] Phase 1 (thử GPU thuê), 5 (tách worker + bật/tắt GPU), 7 (LOD), 9–11 (giám sát, kiểm thử GPU, deploy), 12–14.
 
 ## Decisions
 

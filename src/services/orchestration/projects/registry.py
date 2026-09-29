@@ -41,6 +41,7 @@ from src.models.contracts.validation import CandidatePackage, ValidationReport
 from src.services.orchestration.artifacts import (
     ArtifactChecksumError,
     ArtifactNotFoundError,
+    ArtifactRemote,
     ArtifactResolver,
     FilesystemArtifactStore,
     sha256_bytes,
@@ -67,6 +68,7 @@ from src.services.orchestration.projects.persistence import ProjectPersistence
 from src.services.orchestration.projects.preview import load_job_preview
 from src.services.orchestration.projects.privacy import require_project_dispatch
 from src.services.orchestration.scene.editor import SceneEditor
+from src.services.orchestration.storage import artifact_remote
 from src.services.orchestration.uploads.models import UploadRecord
 
 ContractT = TypeVar("ContractT", bound=BaseModel)
@@ -98,6 +100,7 @@ class ProjectRegistry:
         runtime_root: Path = DEFAULT_RUNTIME_ROOT,
         database: RuntimeDatabase | None = None,
         execution_profile: ExecutionProfile | None = None,
+        remote: ArtifactRemote | None = None,
     ) -> None:
         self.fixture_root = fixture_root
         self.job_fixture_dir = fixture_root / "mock_job"
@@ -106,7 +109,7 @@ class ProjectRegistry:
         self.approval_fixture_path = fixture_root / "mock_job" / "approval_record.json"
         self.candidate_fixture_path = fixture_root / "candidate" / "candidate_package.json"
         self.resolver = ArtifactResolver(self.artifact_root)
-        self.runtime_resolver = ArtifactResolver(runtime_root)
+        self.runtime_resolver = ArtifactResolver(runtime_root, remote)
         self.persistence = ProjectPersistence(database, self.runtime_resolver) if database else None
         self.execution_profile = execution_profile
         self.store = FilesystemArtifactStore(self.resolver)
@@ -678,14 +681,30 @@ class ProjectRegistry:
         """
         return self.resolve_artifact(job_id, reference).read_bytes()
 
-    def resolve_artifact(self, job_id: str, reference: ArtifactRef) -> Path:
-        """Resolve ref canonical, không dùng checksum do client chọn làm authority."""
-        candidates = self._product_visible_references(job_id)
-        canonical = candidates.get(reference.artifact_uri)
+    def authorized_artifact(self, job_id: str, reference: ArtifactRef) -> ArtifactRef:
+        """Ref canonical nếu URI thuộc allow-list của job và checksum khớp; không đọc bytes."""
+        canonical = self._product_visible_references(job_id).get(reference.artifact_uri)
         if canonical is None:
             raise ArtifactNotFoundError("Artifact không thuộc allow-list của job")
         if canonical.artifact_checksum != reference.artifact_checksum:
             raise ArtifactChecksumError("Artifact checksum không khớp reference đã publish")
+        return canonical
+
+    def presigned_artifact_url(self, job_id: str, reference: ArtifactRef, expires_seconds: int) -> str | None:
+        """Link tải thẳng từ kho file cho artifact đã kiểm quyền; None khi không có kho file
+        hoặc object chưa lên kho (dữ liệu cũ) — khi đó API tự phục vụ file."""
+        remote = self.runtime_resolver.remote
+        if remote is None or job_id == self._fixture_job_id:
+            return None
+        canonical = self.authorized_artifact(job_id, reference)
+        key = self.runtime_resolver.relative_key(canonical.artifact_uri)
+        if remote.store.head(remote.key(key)) is None:
+            return None
+        return remote.presign(key, expires_seconds)
+
+    def resolve_artifact(self, job_id: str, reference: ArtifactRef) -> Path:
+        """Resolve ref canonical, không dùng checksum do client chọn làm authority."""
+        canonical = self.authorized_artifact(job_id, reference)
         try:
             return self.runtime_resolver.require(canonical)
         except ArtifactNotFoundError:
@@ -745,7 +764,10 @@ def get_project_registry() -> ProjectRegistry:
         else None
     )
     registry = ProjectRegistry(
-        runtime_root=settings.artifact_root, database=RuntimeDatabase(settings.database_url), execution_profile=profile
+        runtime_root=settings.artifact_root,
+        database=RuntimeDatabase(settings.database_url),
+        execution_profile=profile,
+        remote=artifact_remote(settings),
     )
     if settings.product_fixture_mode:
         registry.seed_from_fixtures()

@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -72,6 +72,26 @@ class Settings(BaseSettings):
 
     # Artifact root được resolve thành absolute path tại runtime; contracts chỉ giữ URI.
     artifact_root: Path = Path("./data/artifacts")
+    # Kho file S3-compatible (Cloudflare R2 / MinIO, ADR 0003). Để trống bucket thì chỉ
+    # dùng filesystem local; khi có bucket, `artifact_root` là cache cục bộ của máy này.
+    artifact_s3_bucket: str | None = None
+    artifact_s3_endpoint: str | None = None
+    artifact_s3_region: str = "auto"
+    artifact_s3_access_key_id: str | None = Field(default=None, repr=False)
+    artifact_s3_secret_access_key: SecretStr | None = None
+    artifact_s3_prefix: str = ""
+    artifact_presign_seconds: int = Field(default=900, ge=60, le=86400)
+
+    # Đăng nhập hai role (ADR 0003 §3). Tắt cho local dev/test; bật trên deployment cloud.
+    auth_required: bool = False
+    auth_session_days: int = Field(default=7, ge=1, le=90)
+    auth_invite_days: int = Field(default=7, ge=1, le=30)
+    # None → tự bật cookie Secure ngoài development/test.
+    auth_cookie_secure: bool | None = None
+
+    # Benchmark mỗi job (plan Cloud Studio mục 9): đơn giá GPU/giờ để ước tính chi phí.
+    benchmark_gpu_hourly_usd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    benchmark_label: str | None = Field(default=None, max_length=100)
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -99,6 +119,8 @@ class Settings(BaseSettings):
             raise ValueError("ARTIFACT_ROOT must be absolute outside development/test")
         if (self.product_processing_config is None) != (self.product_runtime_manifest is None):
             raise ValueError("PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST phải khai báo cùng nhau")
+        if self.artifact_s3_bucket and not (self.artifact_s3_access_key_id and self.artifact_s3_secret_access_key):
+            raise ValueError("ARTIFACT_S3_BUCKET cần ARTIFACT_S3_ACCESS_KEY_ID và ARTIFACT_S3_SECRET_ACCESS_KEY")
         if self.product_fixture_mode and self.app_env in {"staging", "production"}:
             raise ValueError("PRODUCT_FIXTURE_MODE chỉ dùng cho development/test")
         return self

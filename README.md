@@ -102,8 +102,12 @@ Không commit `.env`. Các biến chính:
 |---|---|
 | LLM | `LLM_PROVIDER`, API key và model của provider được chọn |
 | App | `APP_ENV`, `APP_HOST`, `APP_PORT`, `CORS_ORIGINS`, `LOG_LEVEL` |
-| Artifacts | `ARTIFACT_ROOT` (runtime resolve thành absolute path; contract chỉ lưu logical URI) |
-| Organizer scaffold | `DATABASE_URL`, `CHROMA_PERSIST_DIR` (chưa phải product database/vector-store decision) |
+| Artifacts | `ARTIFACT_ROOT` (cache cục bộ; contract chỉ lưu logical URI) |
+| Kho file (ADR 0003) | `ARTIFACT_S3_BUCKET`, `ARTIFACT_S3_ENDPOINT`, `ARTIFACT_S3_REGION`, `ARTIFACT_S3_ACCESS_KEY_ID`, `ARTIFACT_S3_SECRET_ACCESS_KEY`, `ARTIFACT_S3_PREFIX`, `ARTIFACT_PRESIGN_SECONDS` — để trống bucket = chỉ filesystem |
+| Đăng nhập (ADR 0003) | `AUTH_REQUIRED` (mặc định `false`), `AUTH_SESSION_DAYS`, `AUTH_INVITE_DAYS`, `AUTH_COOKIE_SECURE` |
+| Benchmark | `BENCHMARK_GPU_HOURLY_USD`, `BENCHMARK_LABEL` |
+| Database | `DATABASE_URL` — SQLite local, PostgreSQL (Supabase) khi deploy; migration tự chạy khi khởi động |
+| Organizer scaffold | `CHROMA_PERSIST_DIR` (chưa phải vector-store decision) |
 | AI logs | `AI_LOG_SERVER`, `AI_LOG_API_KEY`, `AI_LOG_DIR` |
 
 Chỉ API key của `LLM_PROVIDER` đang chọn là bắt buộc để chạy backend scaffold.
@@ -117,9 +121,9 @@ Bản đồ nhanh (kiểm theo checkout 2026-09-29). Placement/ownership chính 
 |---|---|---|
 | `src/models/contracts/` | Shared typed contracts giữa các track | Nhóm |
 | `src/services/reconstruction/` | EX-REC: `rgb/{preflight,frames,pose,splat,geometry,canonical}` theo stage, `adapters/` (COLMAP/Brush/splat-transform), `lidar/`, `alignment/`, CLI `prepare_cli`/`preview_cli` | Nhóm |
-| `src/services/orchestration/` | EX-PRODUCT: `jobs/` (lifecycle, `runner`, `worker_cli`), `projects/`, `uploads/`, `processing/` (thông số xử lý), `samples/` (video mẫu), `artifacts/`, `scene/` (SceneIR revision) | Nhóm |
+| `src/services/orchestration/` | EX-PRODUCT: `jobs/` (lifecycle, migration, `runner`, `worker_cli`), `projects/`, `uploads/` (+ upload thẳng), `processing/` (thông số xử lý), `samples/` (video mẫu), `artifacts/` (+ kho file S3), `auth/` (2 role), `storage.py`, `benchmark.py`, `scene/` (SceneIR revision) | Nhóm |
 | `src/services/scene/`, `src/services/simulation/` | EX-SCENE, EX-SIM (nhiều package còn là placeholder) | Nhóm |
-| `src/api/` | `routes.py` (gốc), `routes_product.py`, `studio/` (route Studio MVP) | Scaffold + nhóm |
+| `src/api/` | `routes.py` (gốc), `routes_product.py`, `auth.py` (đăng nhập, quyền), `studio/` (route Studio MVP) | Scaffold + nhóm |
 | `src/agents/`, `src/llm/`, `src/models/schemas.py` | Chat agent scaffold, chưa thuộc pipeline Real2Sim | Ban tổ chức |
 | `frontend/src/app/(studio)/`, `features/studio/` | Studio MVP (Scenes, Scene mới + video mẫu, trang scene/editor) | Nhóm |
 | `frontend/src/app/(legacy)/`, `features/{jobs,review,scene,viewer}` | UI P0 đầy đủ, giữ để dùng lại; ẩn khi không đặt `LEGACY_UI=1` | Nhóm |
@@ -127,6 +131,8 @@ Bản đồ nhanh (kiểm theo checkout 2026-09-29). Placement/ownership chính 
 | `configs/product/` | File cấu hình chung: thông số xử lý, profile chất lượng upload | Nhóm |
 | `scripts/torwic/` | Offline dataset tooling (`migrations/` = script chạy một lần) | Nhóm |
 | `scripts/gpu/`, `scripts/demo/` | Chạy stack trên máy GPU; export bundle video mẫu | Nhóm |
+| `scripts/benchmark/`, `scripts/cloud/` | Tổng hợp benchmark; cấu hình bucket kho file | Nhóm |
+| `eval/protocols/BENCHMARKS.md` | Mục lục các loại benchmark (mã, chỉ số, nơi lưu kết quả) | Nhóm |
 | `scripts/log_*`, `scripts/setup*` | AI log + setup | Ban tổ chức |
 | `tests/` | Theo track; `tests/test_reconstruction/{support,smoke}` = fixture và smoke chạy tay | Nhóm |
 | `docs/guide/` | Sách hướng dẫn | Ban tổ chức |

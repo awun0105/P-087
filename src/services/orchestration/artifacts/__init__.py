@@ -16,6 +16,13 @@ from src.services.orchestration.artifacts.errors import (
     ArtifactTooLargeError,
     InvalidArtifactUriError,
 )
+from src.services.orchestration.artifacts.remote import (
+    ArtifactRemote,
+    ObjectStore,
+    RemoteObject,
+    S3ObjectStore,
+    UploadedPart,
+)
 from src.services.orchestration.artifacts.store import (
     ArtifactResolver,
     FilesystemArtifactStore,
@@ -26,13 +33,18 @@ __all__ = [
     "ArtifactAlreadyExistsError",
     "ArtifactChecksumError",
     "ArtifactNotFoundError",
+    "ArtifactRemote",
     "ArtifactResolver",
     "ArtifactSchemaError",
     "ArtifactStoreError",
     "ArtifactTooLargeError",
     "FilesystemArtifactStore",
     "InvalidArtifactUriError",
+    "ObjectStore",
+    "RemoteObject",
+    "S3ObjectStore",
     "StreamingPublication",
+    "UploadedPart",
     "canonical_json_bytes",
     "sha256_bytes",
     "sha256_file",

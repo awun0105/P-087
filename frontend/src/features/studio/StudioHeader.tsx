@@ -1,17 +1,24 @@
 "use client";
 
-import { Box, Plus } from "lucide-react";
+import { Box, LogIn, LogOut, Plus } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { buttonVariants } from "@/components/studio/primitives";
+import { Badge, Button, buttonVariants } from "@/components/studio/primitives";
+import { useAuth } from "@/features/studio/AuthProvider";
+import { isReviewer } from "@/lib/api/auth";
 import { cn } from "@/lib/cn";
 
-const NAV = [{ href: "/", label: "Scenes" }] as const;
+const NAV = [
+  { href: "/", label: "Scenes", reviewerOnly: false },
+  { href: "/team", label: "Nhóm", reviewerOnly: true },
+] as const;
 
 /** Thanh trên cùng tối giản: logo, điều hướng, một nút hành động chính. */
 export function StudioHeader() {
   const pathname = usePathname();
+  const { me, logout } = useAuth();
+  const nav = NAV.filter((item) => !item.reviewerOnly || (me?.auth_required && isReviewer(me)));
   return (
     <header className="sticky top-0 z-30 border-b border-line/80 bg-paper/85 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-6xl items-center gap-6 px-4 sm:px-6">
@@ -22,7 +29,7 @@ export function StudioHeader() {
           <span className="text-[15px] font-semibold tracking-tight">Real2Sim Studio</span>
         </Link>
         <nav aria-label="Điều hướng chính" className="hidden items-center gap-1 sm:flex">
-          {NAV.map((item) => {
+          {nav.map((item) => {
             const active = item.href === "/" ? pathname === "/" || pathname.startsWith("/scenes") : pathname.startsWith(item.href);
             return (
               <Link
@@ -44,6 +51,26 @@ export function StudioHeader() {
             <Plus aria-hidden />
             Scene mới
           </Link>
+          {me?.auth_required &&
+            (me.user ? (
+              <div className="flex items-center gap-2 border-l border-line pl-2">
+                <span className="hidden text-sm text-ink-muted md:inline">{me.user.display_name}</span>
+                <Badge tone={me.user.role === "reviewer" ? "ember" : "neutral"}>
+                  {me.user.role === "reviewer" ? "Reviewer" : "Editor"}
+                </Badge>
+                <Button variant="ghost" size="sm" onClick={() => void logout()} aria-label="Đăng xuất">
+                  <LogOut aria-hidden />
+                </Button>
+              </div>
+            ) : (
+              <Link
+                href={`/login?next=${encodeURIComponent(pathname)}`}
+                className={buttonVariants({ variant: "ghost", size: "sm" })}
+              >
+                <LogIn aria-hidden />
+                Đăng nhập
+              </Link>
+            ))}
         </div>
       </div>
     </header>

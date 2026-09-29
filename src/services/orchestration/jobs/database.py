@@ -8,6 +8,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from threading import Lock
 from typing import Protocol, cast
 
 
@@ -49,20 +50,58 @@ class RuntimeTransaction:
         return " FOR UPDATE" if self.postgres else ""
 
 
-_TABLES = (
-    "CREATE TABLE IF NOT EXISTS r2s_projects (project_id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
-    """CREATE TABLE IF NOT EXISTS r2s_jobs (
-        job_id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES r2s_projects(project_id),
-        version INTEGER NOT NULL, manifest_ref TEXT NOT NULL)""",
-    """CREATE TABLE IF NOT EXISTS r2s_job_events (
-        job_id TEXT NOT NULL REFERENCES r2s_jobs(job_id), version INTEGER NOT NULL,
-        payload TEXT NOT NULL, PRIMARY KEY(job_id, version))""",
-    "CREATE INDEX IF NOT EXISTS r2s_jobs_by_project ON r2s_jobs(project_id)",
-    # Bảng cộng thêm (không đổi bảng cũ): video upload chờ được chọn để tạo scene.
-    "CREATE TABLE IF NOT EXISTS r2s_uploads (upload_id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
-    # Bảng cộng thêm: cấu hình máy do worker tự đo (GPU/VRAM/CPU/RAM/đĩa).
-    "CREATE TABLE IF NOT EXISTS r2s_workers (worker_id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
+#: Migration có thứ tự (ADR 0003 §5): mỗi bước chỉ CREATE/ALTER cộng thêm, chạy trong
+#: transaction bootstrap; không drop/reset. DB có version mới hơn code bị từ chối.
+MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
+    (
+        1,
+        (
+            "CREATE TABLE IF NOT EXISTS r2s_projects (project_id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
+            """CREATE TABLE IF NOT EXISTS r2s_jobs (
+                job_id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES r2s_projects(project_id),
+                version INTEGER NOT NULL, manifest_ref TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS r2s_job_events (
+                job_id TEXT NOT NULL REFERENCES r2s_jobs(job_id), version INTEGER NOT NULL,
+                payload TEXT NOT NULL, PRIMARY KEY(job_id, version))""",
+            "CREATE INDEX IF NOT EXISTS r2s_jobs_by_project ON r2s_jobs(project_id)",
+        ),
+    ),
+    (
+        # Studio MVP: các bảng này từng được tạo `IF NOT EXISTS` khi schema còn v1, nên
+        # migration giữ `IF NOT EXISTS` để DB cũ nâng lên v2 mà không lỗi, không mất dữ liệu.
+        2,
+        (
+            # Video upload chờ được chọn để tạo scene.
+            "CREATE TABLE IF NOT EXISTS r2s_uploads (upload_id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
+            # Cấu hình máy do worker tự đo (GPU/VRAM/CPU/RAM/đĩa).
+            "CREATE TABLE IF NOT EXISTS r2s_workers (worker_id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
+            # Phiên upload thẳng lên kho file (ADR 0003), UPLOADING→READY.
+            "CREATE TABLE IF NOT EXISTS r2s_upload_sessions (upload_id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
+        ),
+    ),
+    (
+        # Đăng nhập hai role (ADR 0003 §3): tài khoản, mã mời, phiên, nhật ký thao tác.
+        3,
+        (
+            """CREATE TABLE r2s_users (
+                user_id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, payload TEXT NOT NULL)""",
+            "CREATE TABLE r2s_invites (code_hash TEXT PRIMARY KEY, payload TEXT NOT NULL)",
+            """CREATE TABLE r2s_sessions (
+                token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES r2s_users(user_id),
+                expires_at TEXT NOT NULL, payload TEXT NOT NULL)""",
+            """CREATE TABLE r2s_audit_log (
+                entry_id TEXT PRIMARY KEY, at TEXT NOT NULL, user_id TEXT, action TEXT NOT NULL,
+                payload TEXT NOT NULL)""",
+            "CREATE INDEX r2s_audit_by_user ON r2s_audit_log(user_id, at)",
+        ),
+    ),
 )
+LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
+
+#: DB đã kiểm/chạy migration trong tiến trình này. API tạo RuntimeDatabase mỗi request;
+#: chỉ lần đầu mới cần transaction bootstrap (tránh khóa ghi + vòng mạng mỗi request).
+_READY: set[str] = set()
+_READY_LOCK = Lock()
 
 
 class RuntimeDatabase:
@@ -80,7 +119,10 @@ class RuntimeDatabase:
                 raise ValueError("Runtime database cần file SQLite bền vững, không dùng memory/URI options")
             self._sqlite_path = Path(value).expanduser().resolve()
             self._sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-        self._initialize()
+        with _READY_LOCK:
+            if url not in _READY:
+                self._initialize()
+                _READY.add(url)
 
     def _connect(self) -> SqlConnection:
         if self.postgres:
@@ -111,15 +153,35 @@ class RuntimeDatabase:
             connection.close()
 
     def _initialize(self) -> None:
+        """Tạo bảng version rồi chạy các migration còn thiếu trong một transaction có khóa."""
         with self.transaction(write=True) as tx:
             if self.postgres:
                 tx.execute("SELECT pg_advisory_xact_lock(hashtext('real2sim.runtime.schema'))")
             tx.execute(
                 "CREATE TABLE IF NOT EXISTS r2s_schema (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL)"
             )
-            tx.execute("INSERT INTO r2s_schema(id, version) VALUES (1, 1) ON CONFLICT(id) DO NOTHING")
+            tx.execute("INSERT INTO r2s_schema(id, version) VALUES (1, 0) ON CONFLICT(id) DO NOTHING")
             row = tx.execute("SELECT version FROM r2s_schema WHERE id=1").fetchone()
-            if row != (1,):
-                raise RuntimeError("Runtime database schema chưa được hỗ trợ; cần migration trước khi khởi động")
-            for statement in _TABLES:
-                tx.execute(statement)
+            current = row[0] if row else 0
+            if current > LATEST_SCHEMA_VERSION:
+                raise RuntimeError(
+                    f"Runtime database ở schema v{current}, code chỉ hỗ trợ tới v{LATEST_SCHEMA_VERSION}; "
+                    "cập nhật code trước khi khởi động"
+                )
+            for version, statements in MIGRATIONS:
+                if version <= current:
+                    continue
+                for statement in statements:
+                    tx.execute(statement)
+                tx.execute("UPDATE r2s_schema SET version=? WHERE id=1", (version,))
+
+    def schema_version(self) -> int:
+        """Version schema hiện tại (dùng cho health/chẩn đoán)."""
+        with self.transaction() as tx:
+            row = tx.execute("SELECT version FROM r2s_schema WHERE id=1").fetchone()
+        return int(row[0]) if row else 0
+
+    def ping(self) -> None:
+        """Truy vấn nhẹ; `/health` dùng để kiểm DB và giữ Supabase Free không tạm dừng."""
+        with self.transaction() as tx:
+            tx.execute("SELECT 1").fetchone()

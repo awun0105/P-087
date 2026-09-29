@@ -1056,7 +1056,7 @@ Một lỗi kiến trúc nguy hiểm là lạm dụng DVC để lưu trữ mọi
 **Triển khai đã chốt (ADR 0003, 2026-09-29):** PostgreSQL chạy trên Supabase (gói Free, chỉ dùng như Postgres chuẩn; giữ thức bằng truy vấn định kỳ; `pg_dump` hằng đêm lên R2);
 Artifact Store dùng Cloudflare R2 (S3-compatible) sau `ArtifactResolver` cho
 deployment, filesystem cho local/test (Contract §7.4 amendment). Benchmark của MVP
-ghi thành JSON artifact mỗi job + `eval/results/benchmarks.jsonl`; MLflow là tùy chọn
+ghi theo mã loại (mục lục `eval/protocols/BENCHMARKS.md`; kết quả `eval/results/<mã>/<nhãn>.jsonl`); MLflow là tùy chọn
 về sau, không bắt buộc cho MVP.
 
 5. **MLflow (Experiment Tracking & Evaluation History):**

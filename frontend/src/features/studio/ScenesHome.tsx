@@ -1,12 +1,14 @@
 "use client";
 
-import { ArrowRight, Clapperboard, Film, Play, RefreshCw, Upload } from "lucide-react";
+import { ArrowRight, Clapperboard, Film, LogIn, Play, RefreshCw, Upload } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useState } from "react";
 
 import { Badge, Card, EmptyState, Notice, buttonVariants, formatBytes } from "@/components/studio/primitives";
+import { useAuth } from "@/features/studio/AuthProvider";
 import { sceneStatus } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
+import { canEdit } from "@/lib/api/auth";
 import { listSamples, listScenes, sampleFileUrl } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import type { SampleSummary, SceneSummary } from "@/lib/contracts/studio";
@@ -19,16 +21,23 @@ export function ScenesHome() {
   const [samples, setSamples] = useState<SampleSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  const { me } = useAuth();
+  const signedIn = canEdit(me);
+
   const load = useCallback(async () => {
-    const [sceneResult, sampleResult] = await Promise.all([listScenes(), listSamples()]);
-    if (sceneResult.ok) {
+    // Khách không có quyền xem scene của nhóm: chỉ tải video mẫu, không poll lỗi 401.
+    const [sceneResult, sampleResult] = await Promise.all([
+      signedIn ? listScenes() : Promise.resolve(null),
+      listSamples(),
+    ]);
+    if (sceneResult?.ok) {
       setScenes(sceneResult.data.scenes);
       setError(null);
-    } else {
+    } else if (sceneResult) {
       setError(sceneResult.error.detail);
     }
     setSamples(sampleResult.ok ? sampleResult.data.samples : []);
-  }, []);
+  }, [signedIn]);
 
   const anyActive = scenes?.some((scene) => sceneStatus(scene.latest_job, scene.preview_ready).active) ?? true;
   usePolling(load, anyActive ? 4000 : 20000, true);
@@ -64,7 +73,20 @@ export function ScenesHome() {
             Không tải được danh sách scene: {error}. Trang sẽ tự thử lại.
           </Notice>
         )}
-        {scenes === null && !error && <SceneGridSkeleton />}
+        {me !== null && !signedIn && (
+          <EmptyState
+            icon={<LogIn aria-hidden />}
+            title="Đăng nhập để xem scene của nhóm"
+            action={
+              <Link href="/login" className={buttonVariants({})}>
+                Đăng nhập
+              </Link>
+            }
+          >
+            Khách có thể thử ngay với video mẫu ở trên.
+          </EmptyState>
+        )}
+        {signedIn && scenes === null && !error && <SceneGridSkeleton />}
         {scenes && scenes.length === 0 && (
           <EmptyState
             icon={<Film aria-hidden />}

@@ -27,6 +27,7 @@ def studio(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     from src.api.studio import deps
 
     settings = SimpleNamespace(
+        artifact_s3_bucket=None,
         database_url=f"sqlite:///{tmp_path / 'runtime.db'}",
         artifact_root=tmp_path / "artifacts",
         product_upload_max_bytes=64,

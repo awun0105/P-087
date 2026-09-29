@@ -7,7 +7,7 @@ Route gọi hàm trong module này (không import thẳng `get_settings`) nên t
 from fastapi import HTTPException, status
 
 from src.config import Settings, get_settings
-from src.services.orchestration.artifacts import ArtifactResolver, ArtifactStoreError
+from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.processing import (
     MachineCapability,
@@ -19,7 +19,8 @@ from src.services.orchestration.processing import (
 from src.services.orchestration.processing.capability import latest as latest_capability
 from src.services.orchestration.projects import ProjectRegistry, get_project_registry
 from src.services.orchestration.samples import DemoLibrary
-from src.services.orchestration.uploads import VideoUploadService
+from src.services.orchestration.storage import runtime_resolver
+from src.services.orchestration.uploads import DirectUploadService, VideoUploadService
 
 
 def settings() -> Settings:
@@ -37,9 +38,21 @@ def uploads() -> VideoUploadService:
     current = settings()
     return VideoUploadService(
         RuntimeDatabase(current.database_url),
-        ArtifactResolver(current.artifact_root),
+        runtime_resolver(current),
         current.product_upload_max_bytes,
     )
+
+
+def direct_uploads() -> DirectUploadService:
+    """Service upload thẳng lên kho file; deployment chưa có kho file → 409."""
+    current = settings()
+    resolver = runtime_resolver(current)
+    if resolver.remote is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Deployment chưa cấu hình kho file (ARTIFACT_S3_*); dùng upload qua API",
+        )
+    return DirectUploadService(RuntimeDatabase(current.database_url), resolver, current.product_upload_max_bytes)
 
 
 def sample_library() -> DemoLibrary:

@@ -4,6 +4,7 @@
  */
 
 import { ApiError, apiFetch, fetchApi, type ApiResult } from "@/lib/api/client";
+import { directUpload, xhrPutPart } from "@/lib/api/directUpload";
 import {
   parseDemoManifest,
   parseJobProgress,
@@ -105,8 +106,61 @@ export interface UploadHandle {
   abort: () => void;
 }
 
-/** Stream file lên `/uploads`; `onProgress` nhận tỉ lệ bytes đã gửi (đo thật, 0..1). */
-export function uploadVideo(file: File, onProgress: (fraction: number) => void): UploadHandle {
+/**
+ * Tải video lên: có kho file (ADR 0003) thì upload thẳng theo từng phần, không thì
+ * stream qua API. `onProgress` nhận tỉ lệ bytes đã gửi (đo thật, 0..1); `onVerifying`
+ * báo lúc server đang tự kiểm checksum sau khi gửi xong.
+ */
+export function uploadVideo(
+  file: File,
+  onProgress: (fraction: number) => void,
+  onVerifying?: () => void,
+): UploadHandle {
+  const controller = new AbortController();
+  let proxy: UploadHandle | null = null;
+  const promise = (async () => {
+    const config = await apiFetch<{ direct: boolean; max_bytes: number }>(`${API}/uploads/config`);
+    if (file.size > config.max_bytes) {
+      throw new ApiError(413, `Video vượt giới hạn ${formatLimit(config.max_bytes)}`);
+    }
+    if (!config.direct) {
+      proxy = proxyUpload(file, onProgress);
+      if (controller.signal.aborted) proxy.abort();
+      return proxy.promise;
+    }
+    const state = await directUpload(
+      file,
+      { onProgress, onVerifying, signal: controller.signal },
+      { api: apiFetch, putPart: xhrPutPart, sleep: (ms) => new Promise((r) => setTimeout(r, ms)), storage: browserStorage() },
+    );
+    const uploads = await apiFetch<{ uploads: UploadRecord[] }>(`${API}/uploads`);
+    const record = uploads.uploads.find((item) => item.upload_id === state.upload_id);
+    if (!record) throw new ApiError(404, "Không thấy video vừa tải lên trong danh sách");
+    return record;
+  })();
+  return {
+    promise,
+    abort: () => {
+      controller.abort();
+      proxy?.abort();
+    },
+  };
+}
+
+function browserStorage(): Storage | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function formatLimit(bytes: number): string {
+  return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`;
+}
+
+/** Đường cũ: stream cả file qua API (`/uploads`) khi deployment chưa có kho file. */
+function proxyUpload(file: File, onProgress: (fraction: number) => void): UploadHandle {
   const request = new XMLHttpRequest();
   const promise = new Promise<UploadRecord>((resolve, reject) => {
     request.open("POST", `${API}/uploads?filename=${encodeURIComponent(file.name)}`);

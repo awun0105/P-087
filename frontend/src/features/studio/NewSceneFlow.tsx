@@ -1,15 +1,18 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Film, Loader2, Play } from "lucide-react";
+import { ArrowLeft, ArrowRight, Film, Loader2, LogIn, Play } from "lucide-react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 
-import { Button, Card, EmptyState, Notice, formatBytes } from "@/components/studio/primitives";
+import { Button, Card, EmptyState, Notice, buttonVariants, formatBytes } from "@/components/studio/primitives";
+import { useAuth } from "@/features/studio/AuthProvider";
 import { FlowStepper } from "@/features/studio/FlowStepper";
 import { SamplePicker, SampleProcessStep, SampleReadyStep, SampleSelectStep } from "@/features/studio/SampleFlow";
 import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
 import { useProcessingForm } from "@/features/studio/useProcessingForm";
 import { UploadDropzone } from "@/features/studio/UploadDropzone";
+import { canEdit } from "@/lib/api/auth";
 import { createSceneFromUpload, getSample, listSamples, listUploads } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import type { DataOrigin, DemoManifest, SampleSummary, UploadRecord } from "@/lib/contracts/studio";
@@ -35,6 +38,7 @@ const ORIGINS: { value: DataOrigin; label: string }[] = [
  */
 export function NewSceneFlow() {
   const searchParams = useSearchParams();
+  const { me } = useAuth();
   const [step, setStep] = useState(0);
   const [preselect, setPreselect] = useState<string | null>(null);
   const [samples, setSamples] = useState<SampleSummary[]>([]);
@@ -96,20 +100,34 @@ export function NewSceneFlow() {
       <div className="mt-8">
         {step === 0 && (
           <div className="space-y-10">
-            <div className="space-y-4">
-              <UploadDropzone
-                onUploaded={(record) => {
-                  setPreselect(record.upload_id);
-                  setStep(1);
-                }}
-              />
-              <div className="flex justify-end">
-                <Button variant="ghost" onClick={() => setStep(1)}>
-                  Chọn video đã tải trước đó
-                  <ArrowRight aria-hidden />
-                </Button>
+            {canEdit(me) ? (
+              <div className="space-y-4">
+                <UploadDropzone
+                  onUploaded={(record) => {
+                    setPreselect(record.upload_id);
+                    setStep(1);
+                  }}
+                />
+                <div className="flex justify-end">
+                  <Button variant="ghost" onClick={() => setStep(1)}>
+                    Chọn video đã tải trước đó
+                    <ArrowRight aria-hidden />
+                  </Button>
+                </div>
               </div>
-            </div>
+            ) : me !== null ? (
+              <EmptyState
+                icon={<LogIn aria-hidden />}
+                title="Đăng nhập để tải video của bạn"
+                action={
+                  <Link href="/login?next=/new" className={buttonVariants({})}>
+                    Đăng nhập
+                  </Link>
+                }
+              >
+                Xử lý video dùng máy chủ GPU nên cần tài khoản của nhóm. Bạn vẫn có thể thử ngay với video mẫu bên dưới.
+              </EmptyState>
+            ) : null}
             <SamplePicker samples={samples} selected={sampleId} onPick={pickSample} />
           </div>
         )}

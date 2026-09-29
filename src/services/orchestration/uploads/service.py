@@ -33,7 +33,7 @@ class PendingUpload:
     publication: StreamingPublication
 
 
-def _display_name(filename: str) -> str:
+def display_name(filename: str) -> str:
     """Bỏ thư mục client gửi kèm, giữ tên hiển thị ngắn và in được."""
     name = PurePosixPath(filename.replace("\\", "/")).name.strip()
     name = re.sub(r"[\x00-\x1f]", "", name)[:255]
@@ -52,7 +52,7 @@ class VideoUploadService:
 
     def begin(self, filename: str) -> PendingUpload:
         """Kiểm đuôi file rồi mở publication; đích là `input/source<ext>` trong namespace upload."""
-        name = _display_name(filename)
+        name = display_name(filename)
         suffix = PurePosixPath(name).suffix.lower()
         media_type = VIDEO_EXTENSIONS.get(suffix)
         if media_type is None:

@@ -21,6 +21,7 @@ export function UploadDropzone({ onUploaded }: { onUploaded: (record: UploadReco
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const handle = useRef<UploadHandle | null>(null);
 
   useEffect(() => () => handle.current?.abort(), []);
@@ -35,18 +36,21 @@ export function UploadDropzone({ onUploaded }: { onUploaded: (record: UploadReco
     setError(null);
     setProgress(0);
     setUploading(true);
-    const upload = uploadVideo(candidate, setProgress);
+    setVerifying(false);
+    const upload = uploadVideo(candidate, setProgress, () => setVerifying(true));
     handle.current = upload;
     upload.promise.then(
       (record) => {
         handle.current = null;
         setUploading(false);
+        setVerifying(false);
         setProgress(1);
         onUploaded(record);
       },
       (cause: unknown) => {
         handle.current = null;
         setUploading(false);
+        setVerifying(false);
         setProgress(null);
         setError(cause instanceof Error ? cause.message : "Tải lên thất bại");
       },
@@ -98,7 +102,11 @@ export function UploadDropzone({ onUploaded }: { onUploaded: (record: UploadReco
             <div className="flex items-baseline justify-between gap-3 text-sm">
               <span className="truncate font-medium">{file.name}</span>
               <span className="shrink-0 tabular-nums text-ink-subtle">
-                {progress >= 1 ? "Đã tải xong" : `${Math.round(progress * 100)}% · ${formatBytes(file.size)}`}
+                {verifying
+                  ? "Đang kiểm tra video trên máy chủ…"
+                  : progress >= 1
+                    ? "Đã tải xong"
+                    : `${Math.round(progress * 100)}% · ${formatBytes(file.size)}`}
               </span>
             </div>
             <ProgressBar value={progress} label={`Tải lên ${file.name}`} className="mt-2" />
