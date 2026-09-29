@@ -238,6 +238,26 @@ Phase 5 — Packaging GPU/SSH + demo run
   QA headless Chrome (CDP): /demo→/new, chọn mẫu, phát lại, link scene, editor
   fallback WebGL2 đều hiển thị. Lưu ý: commit `06653ff` vô tình gồm cả phần xóa
   DemoFlow/GuideCallout/route demo (đã stage trước); không rewrite history.
+- [x] Phase 8 — dọn cấu trúc repo (2026-09-29, yêu cầu owner; không xóa code):
+  audit dựa trên git history (scaffold ban tổ chức = 108 file của `52d85fb`),
+  đồ thị import Python/TS, không dựa vào docs. Đã làm: tách fixture/smoke REC
+  khỏi thư mục test (`7b787c1`); `merge*.py/sh` → `scripts/torwic/migrations/`
+  (`24a5585`); ignore `target/` (`9a56ac1`); `jobs/preview_cli` → `jobs/runner`
+  (`1ad9024`); `orchestration/demo` → `samples` (`8b16f27`); `routes_studio.py` →
+  package `src/api/studio/` + `deps.py` (`e00ae60`, OpenAPI giữ đủ 35 route);
+  `rgb/` chia theo stage `preflight/frames/pose/splat/geometry/canonical`
+  (`00bf49e`, docs `581f8d4`, `5fa3a51`); README/CONTEXT (`ad1aaa0`) và
+  ARCHITECTURE (`7a08465`) theo checkout thật. Proof: pytest 886 passed / 22
+  skipped trước và sau; ruff sạch trừ lỗi có sẵn ở `scripts/check_contract_mirror.py`;
+  các CLI `-m` của REC/worker chạy `--help` được; `npm run typecheck` pass.
+  Cố ý không làm: đổi tên `orchestration/scene` và tách `routes_product.py`
+  (module của Cường, WORKLOG/task link nhiều); chuyển UI "(legacy)" vào
+  `legacy/` (thực chất là tính năng P0 PRODUCT-07/07A/09/10 sẽ dùng lại); xóa
+  package placeholder SCENE/SIM, `reconstruction/worker.py`, `AddObstacle`/
+  `ObjectActions` (owner yêu cầu giữ code dùng sau); bỏ bắt buộc API key LLM
+  khi khởi động (validator của `Settings` có test khóa). `import
+  scripts.torwic.prefusion_cloud` lỗi thiếu `open3d` là có sẵn từ trước.
+  Commit `1ad9024`/`8b16f27` lẫn file do rename stage sẵn; gộp lại vẫn đúng.
 
 ## Validation
 
