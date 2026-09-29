@@ -114,7 +114,7 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 ### Verified 2026-09-26 — task-level completion
 
 - Implementation: `adapters/brush.py`, `brush_input.py`, `brush_runtime.py`,
-  `splat.py`, `splat_bridge.mjs`; internal manifest/resolver tại `rgb/visual.py`
+  `splat.py`, `splat_bridge.mjs`; internal manifest/resolver tại `rgb/splat/visual.py`
   và `visual_publication.py`. Reuse Brush trainer, COLMAP undistorter,
   FFmpeg image probe và splat-transform parser/stats/filter/SOG codec. Không thêm
   Python dependency, không copy upstream algorithms hoặc sửa shared contracts.

@@ -156,7 +156,7 @@ Task COMPLETE (Status: `DONE`).
 2026-09-25 checkpoint:
 
 - Added `adapters/colmap.py`, `colmap_runtime.py`, `colmap_model.py`,
-  `rgb/camera_pose.py`, `pose_publication.py`, focused tests and manual
+  `rgb/pose/camera_pose.py`, `pose_publication.py`, focused tests and manual
   `tests/test_reconstruction/smoke/rec03_smoke.py`. No source vendoring or new app
   dependency. Reuse COLMAP algorithms; adapt orchestration/selection concepts.
 - `.venv/bin/pytest tests/test_reconstruction/test_rec03_colmap.py -q`:

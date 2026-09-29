@@ -29,7 +29,7 @@ beige + cam) chạy song song với UI hiện tại, gồm hai chế độ trên
   EX-SIM chưa có producer. Đây là **thu hẹp scope cho demo MVP**, cần Product Owner
   (Cường) ghi nhận vào `docs/decisions/` — xem Decisions.
 - Code nền: `src/services/reconstruction/preview_worker.py` (COLMAP→Brush→preview,
-  publish stage events), `rgb/frame_extraction.py` (FFmpeg `video_decode`, cần
+  publish stage events), `rgb/frames/frame_extraction.py` (FFmpeg `video_decode`, cần
   quality report + `PrivacyDispatchProof`), `orchestration/jobs/{dispatch,worker_cli,preview_cli}.py`
   (queue consumer Codex để dở, chưa commit), viewer PlayCanvas trong
   `frontend/src/features/viewer/`.

@@ -405,7 +405,7 @@ seed/clearance và downstream runtime proof. Không đánh dấu toàn REC-05 BL
 
 **Implemented / VERIFIED**
 
-- `rgb/voxel.py`: typed config, explicit capsule/seeds/GPU, deterministic config
+- `rgb/geometry/voxel.py`: typed config, explicit capsule/seeds/GPU, deterministic config
   checksum; hai invocation tách cluster seed khỏi navigation seed. Không dùng
   floor-fill và không áp metric scale ngầm.
 - `adapters/voxel_runtime.py` + `voxel_inspect.mjs`: pin CLI/API 3.6.6 `afbc281`,

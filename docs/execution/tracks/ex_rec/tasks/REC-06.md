@@ -301,7 +301,7 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 
 ### Resume 2026-09-27 — canonical camera pose publication
 
-- `rgb/canonical_poses.py`: immutable content-addressed derivative, giữ nguyên
+- `rgb/canonical/canonical_poses.py`: immutable content-addressed derivative, giữ nguyên
   intrinsics và inventory; áp full s/R/t lên camera centers/orientations. Không
   sửa raw pose manifest. Resolver kiểm checksum, identity/provenance, confirmation
   authority và recompute payload từ exact raw source; rehash payload sai vẫn bị chặn.
@@ -434,7 +434,7 @@ Không dùng checkpoint này để đóng task hoặc cho phép real bundle publ
 
 - User khóa ba system paths giữ nguyên: RGB + measured anchor, RGB + LiDAR,
   RGB + future auto-estimator. LiDAR hỗ trợ chỉ thuộc dataset demo adapter.
-- Added `rgb/demo_metric_models.py`, `rgb/demo_metric.py`: bắt buộc explicit
+- Added `rgb/canonical/demo_metric_models.py`, `rgb/canonical/demo_metric.py`: bắt buộc explicit
   `prepared_dataset_demo`, ba modes `rgb_lidar_fusion`, `rgb_auto_scale_proxy`,
   `rgb_two_point`. Prepared measurement chứa RGB/LiDAR pair và exact refs;
   injected verifier xác minh physical correspondence/scene/frame/unit, không có
@@ -465,15 +465,15 @@ Không dùng checkpoint này để đóng task hoặc cho phép real bundle publ
 
 **VERIFIED implementation**
 
-- `rgb/metric_math.py`: finite positive scale từ distance anchor, explicit
+- `rgb/canonical/metric_math.py`: finite positive scale từ distance anchor, explicit
   `p_world = s R p_sfm + t_m`, unit quaternion xyzw, inverse và canonical camera
   pose derivative. Camera center được scale; orientation được compose đúng thứ tự,
   không scale quaternion/intrinsics hoặc mutate raw pose.
-- `rgb/metric_models.py`: internal EX-REC `MetricRequest`, `MetricPreview`,
+- `rgb/canonical/metric_models.py`: internal EX-REC `MetricRequest`, `MetricPreview`,
   `MetricAcceptance`, `MetricConfirmation`, `MetricConversionPlan`. Preview luôn
   `UNCONFIRMED`; record scope chỉ `anchor_and_frame_only`. Không sửa shared schema
   hoặc tự cho whole scene/bundle `CONFIRMED`/physics-ready.
-- `rgb/metric.py`: consume published REC-03/04 refs qua existing `VisualResolver`;
+- `rgb/canonical/metric.py`: consume published REC-03/04 refs qua existing `VisualResolver`;
   verify master/measurement/frame/decision bytes và lineage. Confirm/publish/load
   đều cần injected acceptance verifier; default không có verifier nên fail closed.
   Content-addressed record path và existing atomic ArtifactWriter giữ revisions
@@ -483,7 +483,7 @@ Không dùng checkpoint này để đóng task hoặc cho phép real bundle publ
   `payload_converted: false`, source refs, confirmation checksum, transform và
   shared canonical CoordinateSystem. Input ngoài raw dependency hoặc đã có
   applied-record checksum đều bị reject để tránh double scaling.
-- `rgb/metric_seed.py` + `propose_navigation_seed()`: lấy camera đầu **registered**,
+- `rgb/canonical/metric_seed.py` + `propose_navigation_seed()`: lấy camera đầu **registered**,
   áp confirmed transform, trả source pose/frame/checksum và point trong world.
   Luôn `UNVALIDATED`, `capsule_clearance_verified: false`. Test riêng cho trường
   hợp frame đầu registered là 7; không giả định Frame 0 luôn tồn tại. Chưa tự nối
