@@ -40,7 +40,7 @@ const runtime = {
   destroy: vi.fn(),
   frameScene: vi.fn(),
 };
-const createViewer = vi.fn(async (_options?: ViewerOptions) => runtime);
+const createViewer = vi.fn<(options?: ViewerOptions) => Promise<typeof runtime>>(async () => runtime);
 vi.mock("@playcanvas/supersplat-viewer/viewer", () => ({
   createViewer: (options?: ViewerOptions) => createViewer(options),
 }));
