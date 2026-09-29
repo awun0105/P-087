@@ -1,7 +1,7 @@
 # EX-PRODUCT — Kế hoạch thực hiện theo milestone
 
 **Track Owner:** Cường.
-**Cập nhật lần cuối:** 26/09/2026.
+**Cập nhật lần cuối:** 29/09/2026 (xem §6).
 
 File này ghi thứ tự thực hiện và trạng thái từng task của `EX-PRODUCT` theo
 milestone. Nguồn milestone: [`TEAM_EXECUTION_PLAN.md`](../../TEAM_EXECUTION_PLAN.md)
@@ -189,3 +189,27 @@ Giao tiếp giữa các track **chỉ qua artifacts**, không import code của 
 - Raw `ground_truth` / `evaluation_only` không được đi qua product boundary.
 - Release bind đúng candidate đã validation và approval.
 - Không nâng fixture/mock proof thành runtime acceptance trong evidence.
+
+---
+
+## 6. Cập nhật 29/09/2026 — Studio MVP và kiến trúc cloud
+
+Công việc do Tech Lead làm theo [plan MVP Studio](../../../plans/active/2026-09-29-mvp-studio-demo.md)
+(không tạo task ID mới). Bảng dưới là **evidence quan sát được**, không tự đổi
+`Status` trong task file; owner cập nhật task sau khi rà.
+
+| Task | Phần Studio MVP đã chạm | Mức evidence |
+|---|---|---|
+| PRODUCT-03/08 | Queue worker ngoài HTTP (`worker_cli` + `runner`) chạy REC thật qua process: prepare → COLMAP → Brush → SOG | Chạy thật local (Quadro T2000, job `job-ac2bfd924cc6`); chưa có SCENE/SIM |
+| PRODUCT-04 | Upload video stream vào artifact store; video mẫu phục vụ theo allow-list + checksum | Test API + chạy local |
+| PRODUCT-05 | UI Studio mới (Scenes, Scene mới, trang scene), UI cũ ẩn | Build + QA Chrome headless |
+| PRODUCT-06 | Real Brush 3DGS (SOG) hiển thị trong browser: editor SuperSplat (WebGPU) / viewer WebGL2 | Viewer WebGL2 QA headless; **editor WebGPU chưa kiểm trên browser có GPU** |
+| PRODUCT-09 | Tiến trình từng stage, hủy/thử lại | Test + chạy local |
+| PRODUCT-10/11 | Panel review/release khóa chỉ đọc (`enabled=false`) tới khi có backend thật | Test vitest |
+
+Tiếp theo theo [ADR 0003](../../../decisions/0003-cloud-architecture-roles-and-browser-budget.md)
+và [plan Cloud Studio](../../../plans/active/2026-09-29-cloud-studio.md): R2, Postgres +
+migration, upload thẳng, tách GPU worker, đăng nhập + 2 role, LOD trình duyệt.
+
+Kiểm chứng 29/09: `pytest` 886 passed / 22 skipped; ruff sạch; frontend lint,
+typecheck, vitest 102/102, build pass trên checkout sạch.
