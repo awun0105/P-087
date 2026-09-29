@@ -12,6 +12,7 @@ import {
   type ParamValue,
   type ProcessingEvaluation,
   type ProcessingOptions,
+  type SampleSummary,
   type SceneFromUpload,
   type SceneSummary,
   type SourceRightsAttestation,
@@ -78,19 +79,25 @@ export function retryJob(jobId: string): Promise<unknown> {
   return apiFetch(`${API}/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
 }
 
-export async function getDemo(): Promise<ApiResult<DemoManifest>> {
-  const result = await fetchApi<unknown>(`${API}/demo`);
+/** Video mẫu đã xử lý sẵn (thẻ ở bước tải video lên). */
+export function listSamples(): Promise<ApiResult<{ samples: SampleSummary[] }>> {
+  return fetchApi<{ samples: SampleSummary[] }>(`${API}/samples`);
+}
+
+/** Manifest đầy đủ của một video mẫu, parse tại biên. */
+export async function getSample(sampleId: string): Promise<ApiResult<DemoManifest>> {
+  const result = await fetchApi<unknown>(`${API}/samples/${encodeURIComponent(sampleId)}`);
   if (!result.ok) return result;
   try {
     return { ok: true, data: parseDemoManifest(result.data) };
   } catch (cause) {
-    return { ok: false, error: new ApiError(502, cause instanceof Error ? cause.message : "Demo không hợp lệ") };
+    return { ok: false, error: new ApiError(502, cause instanceof Error ? cause.message : "Video mẫu không hợp lệ") };
   }
 }
 
-/** URL tương đối cùng origin để cả `<img>` và editor nhúng dùng được. */
-export function demoFileUrl(name: string): string {
-  return `${API}/demo/files/${encodeURIComponent(name)}`;
+/** URL tương đối cùng origin để `<img>`, `<video>` và editor nhúng dùng được. */
+export function sampleFileUrl(sampleId: string, name: string): string {
+  return `${API}/samples/${encodeURIComponent(sampleId)}/files/${encodeURIComponent(name)}`;
 }
 
 export interface UploadHandle {

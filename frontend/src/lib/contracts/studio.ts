@@ -152,6 +152,20 @@ export interface ProcessingOptions {
   resource_note: string;
 }
 
+export interface SampleSummary {
+  sample_id: string;
+  title: string;
+  description: string;
+  origin: "pipeline_job" | "smoke_run";
+  source: { dataset: string; sequence: string; note: string };
+  cover: string | null;
+  video: DemoFile | null;
+  frame_count: number | null;
+  total_seconds: number | null;
+  has_processing: boolean;
+  machine: Record<string, string>;
+}
+
 export interface DemoManifest {
   schema_version: "1.0";
   demo_id: string;
