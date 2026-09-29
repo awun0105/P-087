@@ -79,6 +79,35 @@ def _write(out: Path, manifest: DemoManifest) -> None:
     print(json.dumps({"demo_dir": str(out), "files": len(manifest.files())}))
 
 
+def _job_processing(resolver: object, job: JobManifest) -> dict[str, int | float | str] | None:
+    """Thông số thật của job từ `config/processing.json`; job legacy không có → None."""
+    from src.services.orchestration.artifacts import ArtifactStoreError
+    from src.services.orchestration.processing import JobProcessingConfig, job_config_reference
+
+    try:
+        path = resolver.require(job_config_reference(job.job_id, job.config_checksum))  # type: ignore[attr-defined]
+    except ArtifactStoreError:
+        return None
+    return JobProcessingConfig.model_validate_json(path.read_bytes()).params
+
+
+def _machine() -> dict[str, str]:
+    """GPU/driver đã xử lý, đọc từ RuntimeManifest của worker (không đo lại)."""
+    from src.config import get_settings
+    from src.models.contracts.manifests import RuntimeManifest
+
+    path = get_settings().product_runtime_manifest
+    if path is None or not path.is_file():
+        return {}
+    manifest = RuntimeManifest.model_validate_json(path.read_bytes())
+    keys = ("gpu_model", "vram", "nvidia_driver", "brush", "colmap")
+    return {
+        key: manifest.components[key].version or ""
+        for key in keys
+        if key in manifest.components and manifest.components[key].version
+    }
+
+
 def export_job(args: argparse.Namespace) -> None:
     """Bundle từ job thật: video gốc, frame đại diện, SOG preview, thời lượng từ journal."""
     from src.services.orchestration.projects.registry import get_project_registry
@@ -113,6 +142,8 @@ def export_job(args: argparse.Namespace) -> None:
     _write(
         args.out,
         DemoManifest(
+            processing=_job_processing(resolver, job),
+            machine=_machine(),
             demo_id=args.demo_id,
             title=args.title,
             description=args.description,

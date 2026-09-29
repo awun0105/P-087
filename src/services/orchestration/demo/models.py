@@ -73,6 +73,10 @@ class DemoManifest(BaseModel):
     frames: list[DemoFile] = Field(default_factory=list, max_length=48)
     frame_count: int | None = Field(default=None, ge=0)
     splat: DemoFile
+    #: Thông số xử lý thật của job (theo file cấu hình chung); None với bundle cũ/smoke.
+    processing: dict[str, int | float | str] | None = None
+    #: Máy đã xử lý (từ RuntimeManifest), ví dụ {"gpu_model": "RTX 4090", "vram": "24564 MiB"}.
+    machine: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _unique_names(self) -> Self:
