@@ -10,6 +10,9 @@ import type { NextConfig } from "next";
 const BACKEND_ORIGIN = process.env.REAL2SIM_API_URL ?? "http://127.0.0.1:8000";
 
 const nextConfig: NextConfig = {
+  // Không để `next dev` sinh AGENTS.md/CLAUDE.md trong frontend/: harness của repo
+  // nằm ở AGENTS.md gốc, file sinh tự động sẽ mâu thuẫn với authority map.
+  agentRules: false,
   async rewrites() {
     return [
       {

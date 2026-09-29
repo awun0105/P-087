@@ -4,8 +4,11 @@ import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-/** Path của SuperSplat editor đã build (`npm run build:editor` → public/editor). */
-const EDITOR_PATH = "/editor/";
+/**
+ * Entry của SuperSplat editor đã build (`npm run build:editor` → public/editor).
+ * Trỏ thẳng index.html: Next bỏ dấu `/` cuối nên `/editor/` sẽ thành `/editor` (404).
+ */
+const EDITOR_PATH = "/editor/index.html";
 
 /**
  * Nhúng SuperSplat editor (vendor, MIT) cùng origin và nạp đúng file 3DGS của
