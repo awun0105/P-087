@@ -15,6 +15,7 @@ from src.services.orchestration.jobs.progress import JobProgress, job_progress
 from src.services.orchestration.processing import build_job_config, evaluate, is_presets_file, preset_values
 from src.services.orchestration.projects import JobCreateInput, JobNotFoundError, PrivacyGateBlockedError
 from src.services.orchestration.projects.models import UploadProjectInput
+from src.services.orchestration.stage_views import StageViewList, stage_views
 from src.services.orchestration.uploads import UploadNotFoundError
 
 router = APIRouter()
@@ -148,3 +149,12 @@ def get_job_progress(job_id: str) -> JobProgress:
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     return job_progress(job, attempts, deps.preview_ready(registry, job_id))
+
+
+@router.get("/jobs/{job_id}/stage-views", response_model=StageViewList)
+def get_stage_views(job_id: str) -> StageViewList:
+    """Kết quả xem được của từng bước (ADR 0005); UI chọn một lớp để nạp."""
+    try:
+        return stage_views(deps.registry(), job_id)
+    except JobNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error

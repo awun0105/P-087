@@ -813,6 +813,11 @@ class ProjectRegistry:
             preview = self.get_preview(job_id)
             references.extend((preview.source_visual_ref, preview.camera_pose_ref, preview.delivery_ref))
         references.extend(self.scene.artifact_references_for_job(job_id))
+        if job_id != self._fixture_job_id:
+            # Lớp xem từng bước (ADR 0005): ảnh frame và ref trong ReconstructionBundle.
+            from src.services.orchestration.stage_views import view_references
+
+            references.extend(view_references(self, self.get_job(job_id)))
         if job_id == self._fixture_job_id:
             visual = self.scene.visual_binding(job_id)
             if visual.reference is not None:
