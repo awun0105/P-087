@@ -160,6 +160,9 @@ export interface ProjectResponse {
   input_manifest_checksum: string;
   source_rights_attestation: Record<string, unknown>;
   privacy: PrivacyStateResponse;
+  /** Chỉ có với project tạo từ video upload (Studio MVP). */
+  input_video?: { original_name: string; media_type: string; size_bytes: number } | null;
+  created_at?: string | null;
 }
 
 export interface ProjectListResponse {
