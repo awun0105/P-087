@@ -335,6 +335,7 @@ def run_video_job(job_id: str, *, expected_checksum: str | None = None) -> JobMa
     try:
         attempt.job = _execute_prepare(attempt, profile)
         if attempt.job.status != JobStatus.RUNNING:
+            _record_benchmark(attempt)  # job dừng ở bước chuẩn bị (vd video lỗi) vẫn có số đo
             return attempt.job
         frames = prepared_frame_reference(attempt.job)
         if frames is None:
