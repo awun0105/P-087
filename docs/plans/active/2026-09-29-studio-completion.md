@@ -116,7 +116,14 @@ Mỗi gói: code + test tập trung + cập nhật task file liên quan + commit
   baseline — code EX-SCENE), không conflict; ruff format riêng một commit.
   `pytest tests` → 975 passed, 40 skipped. Code SIM/SCENE là baseline của track owner,
   chưa được EX-REC review nội dung.
-- [ ] Gói 1 … Gói 7.
+- [x] Gói 1 — nhận diện đầu vào vào upload (`95fa90d`, `d930196`, `350b1e1`, `f2a59bf`, frontend commit kế tiếp):
+  - hai đường upload nhận `.mp4/.mov/.ply/.zip`, nhận diện theo bytes trước khi ghi record; đuôi
+    phải khớp nội dung; file sai loại không được lưu (stream) hoặc bị xóa khỏi kho file (upload thẳng);
+  - upload thẳng đọc kho file theo đoạn Range (khối 64 KiB), không kéo cả video về API server;
+  - tạo scene từ PLY/ZIP trả 409 cho tới gói 5; UI hiện loại + số Gaussian/bậc SH.
+  - Proof: `pytest tests` → 983 passed, 40 skipped; frontend `tsc`, `eslint` sạch, `vitest run` → 119 passed.
+  - Chưa làm: browser QA thật với file PLY/ZIP lớn; kiểm Range trên R2/MinIO thật (mới fake store).
+- [ ] Gói 2 … Gói 7.
 
 ## Validation
 
