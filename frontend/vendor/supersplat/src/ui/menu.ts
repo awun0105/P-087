@@ -17,7 +17,6 @@ import sceneImport from './svg/import.svg';
 import logoSvg from './svg/logo.svg';
 import sceneNew from './svg/new.svg';
 import sceneOpen from './svg/open.svg';
-import scenePublish from './svg/publish.svg';
 import sceneSave from './svg/save.svg';
 import selectAll from './svg/select-all.svg';
 import selectDuplicate from './svg/select-duplicate.svg';
@@ -266,14 +265,9 @@ class Menu extends Container {
             extra: shortcutManager.formatShortcut('scene.reexport'),
             isEnabled: () => !!lastExport && !events.invoke('scene.empty'),
             onSelect: () => events.fire('scene.reexport')
-        }, {
-            // separator
-        }, {
-            text: () => i18n.t('menu.file.publish', { ellipsis: true }),
-            icon: createSvg(scenePublish),
-            isEnabled: () => !events.invoke('scene.empty'),
-            onSelect: async () => await events.invoke('show.publishSettingsDialog')
         }]);
+        // Real2Sim: bỏ "Publish" lên superspl.at — ngoài scope MVP và sẽ gửi scene
+        // ra dịch vụ bên ngoài; export chỉ tải file về máy người dùng.
 
         // track undo/redo availability for menu item enablement
         let canUndo = false;
