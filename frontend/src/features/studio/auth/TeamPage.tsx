@@ -69,7 +69,8 @@ export function TeamPage() {
     <main className="mx-auto max-w-4xl px-4 pt-10 pb-20 sm:px-6">
       <h1 className="text-3xl font-semibold tracking-tight">Nhóm</h1>
       <p className="mt-2 text-[15px] text-ink-muted">
-        Editor dựng và chỉnh scene; Reviewer có thêm quyền duyệt scene và quản lý thành viên.
+        Editor dựng và chỉnh scene, có hạn mức số scene mới mỗi 24 giờ (Reviewer chỉnh được). Reviewer có
+        thêm quyền duyệt scene, quản lý thành viên và không bị giới hạn.
       </p>
       <InviteCard />
       {error && (
@@ -83,7 +84,7 @@ export function TeamPage() {
             <tr>
               <th className="px-4 py-3 font-medium">Thành viên</th>
               <th className="px-4 py-3 font-medium">Role</th>
-              <th className="px-4 py-3 font-medium">Scene/ngày</th>
+              <th className="px-4 py-3 font-medium">Scene/24 giờ</th>
               <th className="px-4 py-3 font-medium">Trạng thái</th>
             </tr>
           </thead>
@@ -111,6 +112,9 @@ export function TeamPage() {
                     </select>
                   </td>
                   <td className="px-4 py-3">
+                    {user.role === "reviewer" ? (
+                      <span className="text-ink-muted">Không giới hạn</span>
+                    ) : (
                     <input
                       aria-label={`Hạn mức scene mỗi ngày của ${user.display_name}`}
                       type="number"
@@ -123,6 +127,7 @@ export function TeamPage() {
                       }}
                       className="h-9 w-20 rounded-lg border border-line-strong bg-paper-raised px-2 tabular-nums"
                     />
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {isSelf ? (

@@ -39,6 +39,11 @@ def has_role(user: UserRecord, required: Role) -> bool:
     return user.active and ROLE_RANK[user.role] >= ROLE_RANK[required]
 
 
+def has_unlimited_quota(user: UserRecord) -> bool:
+    """Reviewer không bị giới hạn số scene/ngày; hạn mức chỉ áp cho Editor."""
+    return user.role == "reviewer"
+
+
 class AuthService:
     """Mỗi request một instance; không giữ state ngoài DB."""
 

@@ -9,7 +9,7 @@ from src.api import schemas
 from src.api.auth import auth_service, require_editor
 from src.api.studio import deps
 from src.models.contracts.manifests import JobManifest
-from src.services.orchestration.auth import UserRecord
+from src.services.orchestration.auth import UserRecord, has_unlimited_quota
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.progress import JobProgress, job_progress
 from src.services.orchestration.processing import build_job_config, evaluate, is_presets_file, preset_values
@@ -59,10 +59,10 @@ def create_scene_from_upload(
     """Tạo scene từ video đã upload và xếp hàng job xử lý (worker chạy ngoài API).
 
     Kiểm execution profile trước khi tạo project để không sinh scene mồ côi khi
-    deployment chưa cấu hình worker. Khi bật đăng nhập: kiểm hạn mức job/ngày của
-    tài khoản và ghi nhật ký `scene.create`.
+    deployment chưa cấu hình worker. Khi bật đăng nhập: kiểm hạn mức scene/24 giờ của
+    Editor (Reviewer không giới hạn) và ghi nhật ký `scene.create`.
     """
-    if user is not None:
+    if user is not None and not has_unlimited_quota(user):
         since = datetime.now(UTC) - timedelta(days=1)
         if auth_service().count_actions(user.user_id, "scene.create", since) >= user.daily_job_quota:
             raise HTTPException(

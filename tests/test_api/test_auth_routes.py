@@ -120,3 +120,15 @@ async def test_login_is_rate_limited(client: AsyncClient, secured: AuthService) 
         for _ in range(11)
     ]
     assert codes[:10] == [401] * 10 and codes[10] == 429
+
+
+@pytest.mark.asyncio
+async def test_reviewer_has_no_daily_quota(client: AsyncClient, secured: AuthService) -> None:
+    reviewer = secured.create_user("lead@example.com", "Lead", PASSWORD, "reviewer")
+    secured.update_user(reviewer, reviewer.user_id, daily_job_quota=0)
+    await _login(client, "lead@example.com")
+    response = await client.post(
+        "/api/v1/scenes/from-upload", json={"upload_id": "upload-x", "name": "Kho", "attestation": ATTESTATION}
+    )
+    # Không bị 429: qua bước hạn mức, dừng ở kiểm tra sau (chưa cấu hình worker/không có upload).
+    assert response.status_code != 429, response.text

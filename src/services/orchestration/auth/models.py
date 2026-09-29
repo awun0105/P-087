@@ -34,7 +34,7 @@ class UserRecord(BaseModel):
     password_hash: str = Field(repr=False)
     active: bool = True
     created_at: datetime
-    #: Hạn mức job mỗi ngày (giữ chi phí GPU).
+    #: Hạn mức scene mới mỗi 24 giờ của Editor (giữ chi phí GPU); Reviewer không giới hạn.
     daily_job_quota: int = Field(default=10, ge=0, le=1000)
 
 
