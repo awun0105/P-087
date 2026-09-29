@@ -5,8 +5,9 @@ Date: 2026-09-29
 ## Status
 
 Active — owner (Quân) yêu cầu ngày 2026-09-29: "ghi các quyết định vào docs, cho kế
-hoạch tổng thể tất cả các việc còn thiếu, rồi thực hiện theo kế hoạch". Branch hiện
-tại `feat/rec-completion` (từ `develop` tại `7a58880`).
+hoạch tổng thể tất cả các việc còn thiếu, rồi thực hiện theo kế hoạch". Branch tích hợp
+`feat/studio-integration` (từ `develop` tại `103b5fb`, sau PR #15), đã merge `feat/sim`
+và `feat/scene-01-bundle-consumer`; mọi gói dưới đây làm và tích hợp trên branch này.
 
 ## Outcome
 
@@ -107,7 +108,14 @@ Mỗi gói: code + test tập trung + cập nhật task file liên quan + commit
 
 ## Progress
 
-- [x] Ghi ADR 0004, 0005 và plan này.
+- [x] Ghi ADR 0004, 0005 và plan này; chốt Q1–Q4 (`722dcdf`).
+- [x] PR #15 `feat/rec-completion` → `develop` (`103b5fb`). Xóa `feat/cloud-studio`,
+  `feat/product-rec`, `feat/ex-scene` (local + remote; đã kiểm 0 commit chưa vào develop).
+- [x] Tạo `feat/studio-integration`; merge `origin/feat/sim` (SIM-03 enrichment, SIM-05
+  USD builder — code EX-SIM) và `origin/feat/scene-01-bundle-consumer` (SCENE-02…10
+  baseline — code EX-SCENE), không conflict; ruff format riêng một commit.
+  `pytest tests` → 975 passed, 40 skipped. Code SIM/SCENE là baseline của track owner,
+  chưa được EX-REC review nội dung.
 - [ ] Gói 1 … Gói 7.
 
 ## Validation
