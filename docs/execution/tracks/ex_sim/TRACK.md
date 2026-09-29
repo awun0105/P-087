@@ -45,6 +45,14 @@ Outputs:
 - `InternRobotics/Re3Sim`: Tier-0 System Architecture Reference & Code Donor cho IsaacLab `MeshConverterCfg`, stage units normalization (`metersPerUnit=1.0`), collision approximation selection (`SIM-02`, `SIM-05`) theo [Audit #7](../../audits/07_re3sim.md).
 - Không tự viết lại USD core, physics engine hoặc Isaac runtime.
 
+## Hiện trạng trên `develop` (2026-09-29)
+
+- Có preflight rules và collider generator (SIM-02/04, PR #6/#7) trong
+  `src/services/simulation/`; `usd/ isaac/ validation/` còn là placeholder. Code mới
+  của track chưa được push.
+- Kiến trúc cloud (ADR 0003) chưa quyết định nơi chạy Isaac Sim (cần GPU có RT core,
+  vd 3090/4090, nặng hơn pipeline REC); cần quyết định riêng khi nối vào.
+
 ## Authority Gates
 
 - Isaac/CUDA/driver/GPU hiện `UNVERIFIED/TBD` và phải được runtime manifest ghi lại sau provisioning; không block synthetic Foundation.

@@ -330,6 +330,16 @@ Hoàn thiện:
 - transform editing;
 - review shell.
 
+## 6.4.1 Cập nhật 29/09 — Studio MVP và kiến trúc cloud
+
+- Tech Lead đặt mốc MVP nội bộ 4 ngày từ 29/09: lát cắt video → EX-REC → 3DGS →
+  editor chạy được để demo (ADR 0002; đã merge `develop`, PR #9).
+- Trong tuần 2, EX-REC + EX-PRODUCT làm tiếp kiến trúc cloud theo ADR 0003
+  (Vercel, Railway + Postgres, R2, RunPod) và đăng nhập hai role, theo
+  [plan Cloud Studio](../plans/active/2026-09-29-cloud-studio.md). Làm được đến đâu
+  dùng đến đó; fallback demo là stack một máy GPU (`scripts/gpu/run_stack.sh`).
+- Không đổi milestone M2–M6 ở Chương 11; SCENE/SIM nối vào khi có artifact thật.
+
 ## 6.5 Integration #1 — 04–05/10
 
 Bắt buộc chứng minh:

@@ -49,6 +49,22 @@ Outputs:
 - Team sở hữu validation, normalization, artifact publication, metric/alignment và provenance.
 - Không tự viết lại SfM, 3DGS trainer, dense MVS hoặc generic point-cloud primitives.
 
+## Cập nhật 2026-09-29
+
+- Code REC chia theo stage: `rgb/preflight/` (REC-02), `rgb/frames/` (REC-02A),
+  `rgb/pose/` (REC-03), `rgb/splat/` (REC-04), `rgb/geometry/` (REC-05),
+  `rgb/canonical/` (REC-06); fixture/smoke test ở `tests/test_reconstruction/{support,smoke}/`.
+- Studio MVP gọi REC qua entrypoint ổn định `prepare_cli` (kiểm video → privacy tự
+  xác nhận → tách frame, chọn frame nét nhất theo cửa sổ, lấy mẫu theo fps × thời
+  lượng) và `preview_cli` (COLMAP → Brush → SOG). Thông số xử lý đọc từ
+  `configs/product/processing_presets_v1.json`; nén SOG chạy GPU qua WebGPU (Dawn).
+- Chạy thật local: job 50 frame / 7k bước / 960px, tổng 7 phút 41 giây (Quadro T2000).
+- Kiến trúc cloud (ADR 0003): REC chạy trong GPU worker RunPod; COLMAP phải cài native
+  trong image (pod không chạy Docker lồng), Brush/SOG cần Vulkan trong container — kiểm
+  ở phase 1 của [plan Cloud Studio](../../../plans/active/2026-09-29-cloud-studio.md).
+- Metric scale giữ ba hướng của ADR 0001; trong cloud, LiDAR/registration và tính scale
+  chạy ở worker, trình duyệt chỉ chọn điểm A/B.
+
 ## Authority Gates
 
 - Canonical convention đã khóa: meter, Z-up, right-handed, world frame `world`, transform `parent_from_local`, quaternion `xyzw`, angle `radian`.

@@ -147,6 +147,11 @@ artifact://jobs/<job_id>/<artifact-path>
 `./data/artifacts/`; production/deployment phải cấu hình absolute path. Absolute
 local filesystem path không được serialize vào contract.
 
+**Amendment 2026-09-29 (ADR 0003):** deployment cloud được phép dùng backend
+S3-compatible (Cloudflare R2) sau `ArtifactResolver`. Logical URI
+`artifact://jobs/<job_id>/<artifact-path>` và checksum protocol không đổi; bucket,
+endpoint, key hay presigned URL không được serialize vào contract.
+
 ### 3.1.1 Checksum identity protocol (Foundation v1.0)
 
 | Field/role | Identity được hash | Verification owner |
@@ -884,6 +889,14 @@ Bắt buộc:
 - atomic publication và immutable destination;
 - consumer chỉ dùng published artifact refs;
 - critical artifact không chỉ tồn tại trên laptop cá nhân.
+
+**Amendment 2026-09-29 (ADR 0003):** backend S3-compatible (Cloudflare R2) được
+dùng thay `FilesystemArtifactStore` cho deployment cloud, sau cùng `ArtifactResolver`,
+với các bắt buộc trên giữ nguyên: publish chỉ khi object đã upload xong (multipart
+hoàn tất), không ghi đè key đã publish, SHA-256 tính khi ghi và verify ở consumer,
+link tải/upload cho trình duyệt là presigned có hạn và không vào contract. Local/test
+vẫn dùng filesystem. Cần producer (EX-PRODUCT) + consumer (EX-SCENE/EX-SIM) review
+khi triển khai (phase 2 của plan Cloud Studio).
 
 ---
 

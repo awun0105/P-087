@@ -749,6 +749,15 @@ Chương này tập trung vào khía cạnh Software Engineering: Cách con ngư
 - **Trách nhiệm của Web UI:** Web Studio (Next.js, PlayCanvas Engine, FastAPI) là nơi user upload video, xem tiến độ, render real 3DGS `VisualArtifact` (định dạng SOG/compressed PLY) của Primary RGB Scene và chuyển sang các view Geometry mesh, Point Cloud, Collider/SceneObject transforms để inspect và chỉnh scene trên cùng một Viewport.
 - **Canonical placement:** EX-PRODUCT sở hữu cả backend và frontend. FastAPI routes nằm ở `src/api/`, job/artifact/review/release logic nằm ở `src/services/orchestration/`, còn toàn bộ Next.js/TypeScript Web Studio nằm ở root `frontend/` theo [`ARCHITECTURE.md`](../../ARCHITECTURE.md). Frontend chỉ gọi backend qua typed API contract; không tạo business-state source of truth cạnh tranh trong Next.js hoặc local React state.
 - **Renderer scope:** P0 sử dụng `PlayCanvas Engine` (v2.22.4) và `@playcanvas/supersplat-viewer` (v1.35.2) với cơ chế Single Scene Graph (`pc.Entity`). WebGPU được ưu tiên khi khả dụng; WebGL2 fallback phải được qualification trên browser mục tiêu, báo lỗi khi cả hai backend không khả dụng. Toàn bộ các lớp (Visual SOG, Mesh GLB, Collider GLB) phải dùng chung scene graph/depth và canonical transform mapping. Viewer resolve checksum/coordinate metadata từ `VisualArtifact`, hiển thị lỗi rõ khi thiếu/không tương thích và dọn dẹp GPU resources (`destroy()`) khi unmount. Synthetic fixture hoặc PLY point cloud không chứng minh browser đã render 3DGS.
+- **Hiện trạng Studio MVP (2026-09-29, ADR 0002):** UI mặc định là Studio
+  (`frontend/src/app/(studio)`): upload video, chọn video mẫu đã xử lý sẵn, theo dõi
+  tiến trình, mở scene. Scene mở trong editor SuperSplat 3.4.2 vendored
+  (`frontend/vendor/supersplat`, WebGPU); không có WebGPU thì dùng viewer
+  supersplat-viewer WebGL2. Chỉnh sửa trong editor chưa lưu thành SceneIR revision.
+- **Ngân sách trình duyệt (ADR 0003):** trình duyệt chỉ nhận bản 3DGS nhẹ (LOD) theo
+  khả năng thiết bị, tự hạ mức khi FPS tụt; bản đầy đủ, export và ảnh/video xem trước
+  do GPU worker tạo. Không dùng pixel streaming.
+
 ### Human Object Confirmation
 Human Object Confirmation — P0
 
@@ -1044,6 +1053,12 @@ Một lỗi kiến trúc nguy hiểm là lạm dụng DVC để lưu trữ mọi
 4. **DVC (Data Version Control — Locked Benchmarks & Datasets):**
    - Chỉ dùng để quản lý phiên bản dataset tĩnh (`TorWIC`), golden fixtures dùng cho kiểm thử, và curated benchmark snapshots.
    - ❌ **CẤM dùng DVC cho SceneRevision nghiệp vụ:** Khi người dùng dịch chuyển pallet 20cm trên Web Studio, hệ thống tạo SceneRevision mới trong PostgreSQL và ghi JSON vào Artifact Store; KHÔNG kích hoạt DVC commit/push.
+**Triển khai đã chốt (ADR 0003, 2026-09-29):** PostgreSQL chạy trên Railway;
+Artifact Store dùng Cloudflare R2 (S3-compatible) sau `ArtifactResolver` cho
+deployment, filesystem cho local/test (Contract §7.4 amendment). Benchmark của MVP
+ghi thành JSON artifact mỗi job + `eval/results/benchmarks.jsonl`; MLflow là tùy chọn
+về sau, không bắt buộc cho MVP.
+
 5. **MLflow (Experiment Tracking & Evaluation History):**
    - Chỉ dùng để ghi nhận lịch sử thử nghiệm kỹ thuật của các đợt chạy reconstruction và evaluation (`EV-VISUAL`, `EV-GEOMETRY`, `EV-POSE`, `EV-PATH`).
    - Ghi nhận: hyperparameters (COLMAP matching mode, Brush iterations/densification parameters), metrics (PSNR, SSIM, LPIPS, Chamfer Distance, ATE RMSE), runtime, VRAM, và artifact URIs.
@@ -1346,6 +1361,19 @@ EX-PRODUCT không clone nguyên dashboard starter vào repository. Các repo Web
 chỉ cung cấp generic UI/graphics patterns; FastAPI, SceneIR, artifact lineage,
 authorization, review và release vẫn theo Real2Sim contracts. Khi copy/adapt
 code phải kiểm tra license của đúng revision và giữ attribution/notice cần thiết.
+
+**Cập nhật 2026-09-29:** `playcanvas/supersplat` không chỉ là code donor: toàn bộ
+editor 3.4.2 (MIT) được vendor tại `frontend/vendor/supersplat/` và nhúng vào Studio
+làm editor Gaussian (ADR 0002); notice ở `frontend/THIRD_PARTY_NOTICES.md`.
+
+#### Hạ tầng triển khai (ADR 0003)
+
+| Thành phần | Dịch vụ | Vai trò |
+|---|---|---|
+| Web UI | Vercel (Hobby) | Host Next.js; không cõng file lớn |
+| Server điều khiển | Railway (Hobby): FastAPI + PostgreSQL | API, đăng nhập/role, hàng đợi, audit, cấp presigned URL |
+| Kho file | Cloudflare R2 | Video, frame, 3DGS, export; upload/download thẳng từ trình duyệt |
+| GPU worker | RunPod Pod (Community Cloud, RTX 3090/4090) | COLMAP (native), Brush, SOG, LOD, ảnh/video xem trước; tự bật/tắt |
 
 ### 7.1.0 Phân tầng Repository Chuẩn hóa (Repo Tiers A–E)
 

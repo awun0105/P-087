@@ -123,7 +123,7 @@ cho phép push/force-push. Chưa merge/switch/delete hoặc sửa UI/backend.
   trước heavy Vast.ai nếu cần, nhưng chỉ bắt đầu integration sau EX-REC completion.
   Chưa chạy training/provision cloud.
   Quadro T2000 4GiB / NVIDIA 580.178.04 được xác nhận ngoài sandbox.
-- Resume từ task files và HANDOFF-2026-09-27-coordinate-audit.md checkpoint đầu,
+- Resume từ task files và HANDOFF-2026-09-27-coordinate-audit.md checkpoint đầu (file đã xóa ngày 29/09, xem lịch sử git commit `6553258`),
   không làm lại canonical visual hoặc dùng các historical DONE bên dưới làm proof.
 
 ### Resume audit 2026-09-27 — HEAD 41ca8eb

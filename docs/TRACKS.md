@@ -132,7 +132,8 @@ SceneIR
 - Artifact registry/storage.
 - Job progress/error/retry.
 - Next.js frontend.
-- Three.js 3D Viewer.
+- 3D Viewer: PlayCanvas + supersplat-viewer, editor SuperSplat (cập nhật 29/09;
+  bản đầu dùng Three.js).
 - Hiển thị:
   - Visual;
   - Geometry;
@@ -144,7 +145,8 @@ SceneIR
 - Release đúng Candidate đã được validation.
 
 **Công nghệ chính:**
-FastAPI, Python, Next.js, TypeScript, Three.js, REST/SSE/WebSocket, Docker.
+FastAPI, Python, Next.js, TypeScript, PlayCanvas/SuperSplat, REST/SSE/WebSocket, Docker.
+Triển khai cloud (ADR 0003): Vercel, Railway + PostgreSQL, Cloudflare R2, RunPod GPU.
 
 **Phù hợp nếu thích:**
 Full-stack, backend architecture, frontend 3D, software engineering, system integration, product UX.

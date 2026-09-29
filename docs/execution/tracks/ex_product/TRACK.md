@@ -36,12 +36,19 @@ Outputs: project/job lifecycle, scene revisions, review history,
   **Trạng thái 2026-09-27: mới chỉ khai báo trong `package.json`, chưa có dòng code nào
   `import` từ `playcanvas`.** Không có `pc.Entity`, `TranslateGizmo`, `RotateGizmo`
   hay `RenderPassPicker` nào được dùng. Xem `PRODUCT-06.md` §13.1.
+  **Cập nhật 2026-09-29:** `playcanvas` đã được import (`features/viewer/splat-inspection.ts`);
+  vẫn chưa dùng `TranslateGizmo`/`RotateGizmo`/`RenderPassPicker` trong `frontend/src`.
 - `@playcanvas/supersplat-viewer` (v1.35.2): **Tier A — Embedded 3DGS Viewport Core**, nạp SOG/Streamed SOG LOD và collision GLB, API `createViewer({ ui: false })` với WebGPU/WebGL2 fallback tự động. Xem [Audit #9](../../audits/09_supersplat_viewer.md).
 - `playcanvas/splat-transform` (v3.6.6): Core utility cho Gaussian artifact validation, SOG conversion và voxel collision mesh generation. Xem [Audit #4a](../../audits/04a_splat_transform.md).
 - `playcanvas/supersplat`: Code donor cho logic `EntityTransformHandler`, `EditHistory` (Undo/Redo) và shaders selection (`PRODUCT-07`).
   **Trạng thái 2026-09-27: chưa lấy module nào.** Không có undo/redo, không có
   `EntityTransformHandler`, không có selection shader; selection chỉ là click vào
   proxy box của Three.js. `PRODUCT-07` DoD mới đạt 1/4.
+  **Cập nhật 2026-09-29:** toàn bộ editor SuperSplat 3.4.2 (MIT) được vendor tại
+  `frontend/vendor/supersplat/`, build ra `public/editor/` và nhúng vào Studio
+  (`features/studio/EditorFrame.tsx`). Editor chạy WebGPU; không có WebGPU thì Studio
+  dùng viewer WebGL2 (supersplat-viewer). Chỉnh sửa trong editor **chưa** lưu về
+  backend thành SceneIR revision — chỉ export file (ADR 0002); PRODUCT-07 DoD không đổi.
 - Single Scene Graph: Toàn bộ các lớp (Visual SOG, Mesh GLB, Collider GLB) đều nằm chung một Scene Graph trên PlayCanvas Engine, chia sẻ chung GPU Render Pass và Depth buffer, gắn chặt với canonical `SceneIR` transforms; không có scene truth riêng trong browser.
   **Trạng thái 2026-09-27: đạt một phần.** Collider GLB của environment đã đi qua
   `createViewer({ collisionUrl })` nên nằm trong **cùng** `pc.AppBase` với SOG — đây
@@ -56,6 +63,16 @@ Outputs: project/job lifecycle, scene revisions, review history,
   `@radix-ui`, `class-variance-authority`, `clsx`, `tailwind-merge`, `lucide-react`
   hay `components.json` trong `frontend/`; `components/ui/` gồm 6 file ~150 dòng viết
   tay bằng Tailwind, icon là ký tự Unicode. Sửa lại để khớp `PLAN.md`.
+  **Cập nhật 2026-09-29:** Studio MVP dùng `lucide-react`, `class-variance-authority`,
+  `clsx`, `tailwind-merge` cho primitives tại `components/studio/` (viết lại theo pattern
+  shadcn, không copy starter); vẫn không có `@radix-ui` hay `components.json`.
+- **Studio MVP (2026-09-29, ADR 0002):** route group `(studio)` là UI mặc định
+  (Scenes, Scene mới + video mẫu, trang scene + editor); UI P0 đầy đủ nằm ở
+  `(legacy)`, ẩn trừ khi `LEGACY_UI=1`. Route Studio ở `src/api/studio/`, queue
+  worker `orchestration/jobs/worker_cli.py` + `runner.py` chạy REC thật qua process.
+- **Kiến trúc cloud (ADR 0003, chưa triển khai):** Vercel (UI), Railway (FastAPI +
+  Postgres), Cloudflare R2 (file, upload/download thẳng), RunPod (GPU tự bật/tắt);
+  hai role Editor/Reviewer, khách chỉ dùng video mẫu; trình duyệt chỉ nhận bản nhẹ.
 - P0 không yêu cầu advanced scheduler hoặc multi-tenant infrastructure.
 - Product workflow/lifecycle là project-owned; starter chỉ cung cấp generic UI patterns, không mang Clerk/organization/billing hoặc Next.js business backend vào hệ thống.
 
@@ -66,6 +83,9 @@ Outputs: project/job lifecycle, scene revisions, review history,
 - Persisted edits phải đi qua backend SceneIR revision; React state không phải source of truth.
 - Release phải bind exact candidate, validation và approval; EvaluationReport bắt buộc theo run type/protocol.
 - Editor/Reviewer authorization và source-rights/privacy gates không được bypass cho demo.
+  **Ghi chú 2026-09-29:** Studio MVP đang chạy privacy `self_attested`
+  (`PRODUCT_PRIVACY_MODE`), mặc định code vẫn `qa_verified`. Quyết định này nằm ở
+  ADR 0002 (*Proposed*) và cần Product Owner + QA Lead chấp nhận hoặc từ chối.
 
 ## Task Index
 
