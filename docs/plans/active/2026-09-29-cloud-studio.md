@@ -113,7 +113,7 @@ Production là Supabase (ADR 0003 Amendment 3): kết nối qua pooler, cùng v�
 ### Benchmark và số liệu cần đo (mục 9)
 
 Mỗi job ghi một bản ghi benchmark (artifact JSON cạnh kết quả, kèm checksum) và script
-tổng hợp sang `eval/results/benchmarks.jsonl` + bảng trong `eval/results/report.md`.
+tổng hợp theo mã loại benchmark (mục lục `eval/protocols/BENCHMARKS.md`): `eval/results/<mã>/<nhãn>.jsonl` + bảng trong `eval/results/report.md`.
 
 | Nhóm | Số đo | Nguồn |
 |---|---|---|
@@ -199,7 +199,8 @@ API đọc artifact chưa có thì tải về (verify checksum). REC không cầ
     product = Editor; review/release = Reviewer; video mẫu + thông số = công khai), CLI tạo Reviewer
     đầu tiên; UI đăng nhập/đăng ký/Nhóm. `AUTH_REQUIRED` mặc định tắt (local/test).
   - Benchmark (phase 8 phần ghi): `orchestration/benchmark.py` — worker publish
-    `jobs/<job>/benchmark/attempt-N.json`; `scripts/benchmark/collect.py` → `eval/results/benchmarks.jsonl`.
+    `jobs/<job>/benchmark/pipeline_runtime/attempt-N.json`; `scripts/benchmark/collect.py` →
+    `eval/results/pipeline_runtime/<nhãn>.jsonl`; mục lục `eval/protocols/BENCHMARKS.md`.
   - Hạ tầng: `scripts/cloud/configure_bucket.py` (CORS + hủy multipart bỏ dở), env mẫu.
   - **Evidence:** pytest 940 passed / 22 skipped với Postgres 16 + MinIO thật trong Docker tạm;
     vitest 111/111, eslint, typecheck, `next build` pass. QA Chrome headless: upload 40 MiB qua
