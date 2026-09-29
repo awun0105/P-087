@@ -62,3 +62,6 @@ out/
 # Harness core maintenance binary
 scripts/bin/harness
 scripts/bin/harness.exe
+
+# Studio runtime env (chứa đường dẫn máy, có thể chứa key)
+scripts/gpu/studio.env
