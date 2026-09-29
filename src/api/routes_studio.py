@@ -5,6 +5,8 @@ mà không cần thêm dependency; file I/O đồng bộ chạy qua threadpool �
 event loop. Các endpoint còn lại là `def` đồng bộ như `routes_product`.
 """
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
@@ -26,6 +28,7 @@ from src.services.orchestration.projects import (
     JobCreateInput,
     JobNotFoundError,
     PrivacyGateBlockedError,
+    ProjectRegistry,
     get_project_registry,
 )
 from src.services.orchestration.projects.models import UploadProjectInput
@@ -45,6 +48,24 @@ class UploadListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     uploads: list[UploadRecord]
+
+
+class SceneSummary(BaseModel):
+    """Một scene trên màn hình Scenes: project upload + job mới nhất."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project: schemas.ProjectResponse
+    latest_job: JobManifest | None = None
+    preview_ready: bool = False
+
+
+class SceneListResponse(BaseModel):
+    """Scene tạo từ video upload, mới nhất trước."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scenes: list[SceneSummary]
 
 
 class SceneFromUploadResponse(BaseModel):
@@ -142,12 +163,7 @@ def get_job_progress(job_id: str) -> JobProgress:
         attempts = registry.list_job_attempts(job_id)
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    try:
-        registry.get_preview(job_id)
-        preview_ready = True
-    except (ArtifactStoreError, ValueError):
-        preview_ready = False
-    return job_progress(job, attempts, preview_ready)
+    return job_progress(job, attempts, _preview_ready(registry, job_id))
 
 
 @router.get("/demo", response_model=DemoManifest)
@@ -171,3 +187,34 @@ def get_demo_file(name: str) -> FileResponse:
         media_type=entry.media_type,
         headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
     )
+
+
+def _preview_ready(registry: ProjectRegistry, job_id: str) -> bool:
+    """Preview 3DGS đã commit và verify được (không dùng file lẻ trên đĩa)."""
+    try:
+        registry.get_preview(job_id)
+    except (ArtifactStoreError, ValueError):
+        return False
+    return True
+
+
+@router.get("/scenes", response_model=SceneListResponse)
+def list_scenes() -> SceneListResponse:
+    """Scene của Studio (project tạo từ upload); project fixture/dataset không hiện ở đây."""
+    registry = get_project_registry()
+    scenes: list[SceneSummary] = []
+    for project in registry.list_projects():
+        if project.input_manifest_ref is None:
+            continue
+        jobs = registry.list_jobs(project.project_id)
+        latest = max(jobs, key=lambda job: job.started_at) if jobs else None
+        scenes.append(
+            SceneSummary(
+                project=schemas.project_response(project),
+                latest_job=latest,
+                preview_ready=latest is not None and _preview_ready(registry, latest.job_id),
+            )
+        )
+    # Project upload luôn có created_at; mốc 0 chỉ là phòng hờ cho record cũ.
+    scenes.sort(key=lambda scene: scene.project.created_at or datetime.min.replace(tzinfo=UTC), reverse=True)
+    return SceneListResponse(scenes=scenes)

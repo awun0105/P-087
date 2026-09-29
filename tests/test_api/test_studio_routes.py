@@ -160,3 +160,17 @@ async def test_progress_endpoint_reports_queued_pipeline(client: AsyncClient, st
     ]
     assert {stage["state"] for stage in body["stages"]} == {"pending"}
     assert (await client.get("/api/v1/jobs/job-missing/progress")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_scenes_lists_uploaded_scenes_only(client: AsyncClient, studio: SimpleNamespace) -> None:
+    studio.registry.seed_from_fixtures()
+    upload = await _upload(client)
+    created = await client.post(
+        "/api/v1/scenes/from-upload",
+        json={"upload_id": upload["upload_id"], "name": "Kho A", "attestation": _ATTESTATION},
+    )
+    body = (await client.get("/api/v1/scenes")).json()["scenes"]
+    assert [scene["project"]["name"] for scene in body] == ["Kho A"]
+    assert body[0]["latest_job"]["job_id"] == created.json()["job"]["job_id"]
+    assert body[0]["preview_ready"] is False
