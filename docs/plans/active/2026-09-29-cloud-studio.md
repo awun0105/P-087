@@ -4,7 +4,9 @@ Date: 2026-09-29
 
 ## Status
 
-Active — chưa bắt đầu code. Bắt đầu sau khi docs quyết định được merge vào `develop`.
+Paused (2026-09-29) — đợt code 1 đã merge `develop`; phần đưa lên cloud và vận hành còn 21 việc,
+ghi ở [handoff](../../execution/tracks/ex_product/HANDOFF-2026-09-29-cloud-ops.md). Ưu tiên tiếp theo của owner:
+hoàn thiện pipeline ứng dụng và UI/UX.
 
 ## Outcome
 
