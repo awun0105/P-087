@@ -36,8 +36,8 @@ data/
 # Cache autotune của Brush (burn/wgpu) sinh ở thư mục chạy
 target/
 
-# Cấu hình/credential AWS CLI cục bộ — không bao giờ commit
-.aws/
+# File cấu hình/credential AWS cục bộ (file hoặc thư mục .aws) — không bao giờ commit
+.aws
 
 # Logs
 logs/
