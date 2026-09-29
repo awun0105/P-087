@@ -8,6 +8,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Button, Card, EmptyState, Notice, buttonVariants, formatBytes } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { FlowStepper } from "@/features/studio/FlowStepper";
+import { canCreateScene, describeDetection } from "@/features/studio/inputKinds";
 import { SamplePicker, SampleProcessStep, SampleReadyStep, SampleSelectStep } from "@/features/studio/SampleFlow";
 import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
 import { useProcessingForm } from "@/features/studio/useProcessingForm";
@@ -197,8 +198,10 @@ function SelectAndConfirm({ preselect, onBack }: { preselect: string | null; onB
 
   const processing = useProcessingForm(true);
   const blocked = processing.evaluation?.blocking ?? false;
+  const selectedUpload = uploads?.find((upload) => upload.upload_id === selected) ?? null;
+  const supported = selectedUpload === null || canCreateScene(selectedUpload);
   const ready = Boolean(
-    selected && name.trim() && owner.trim() && purpose.trim() && rights && anonymized && retention && !blocked,
+    selected && supported && name.trim() && owner.trim() && purpose.trim() && rights && anonymized && retention && !blocked,
   );
 
   async function submit(event: React.FormEvent) {
@@ -274,13 +277,19 @@ function SelectAndConfirm({ preselect, onBack }: { preselect: string | null; onB
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{upload.original_name}</p>
                 <p className="text-sm text-ink-muted">
-                  {formatBytes(upload.size_bytes)} · {DATE.format(new Date(upload.received_at))}
+                  {describeDetection(upload)} · {formatBytes(upload.size_bytes)} · {DATE.format(new Date(upload.received_at))}
                   {upload.project_ids.length > 0 && ` · đã dùng cho ${upload.project_ids.length} scene`}
                 </p>
               </div>
             </label>
           ))}
         </fieldset>
+        {!supported && (
+          <Notice tone="ochre" className="mt-4">
+            Máy chủ đã nhận diện file này là {selectedUpload ? describeDetection(selectedUpload) : "file 3DGS"}. Luồng dựng
+            scene từ file 3DGS đang được làm; hiện chỉ video mới bắt đầu xử lý được.
+          </Notice>
+        )}
         <div className="mt-5">
           <label htmlFor={ids.name} className="text-sm font-medium">
             Tên scene

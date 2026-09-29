@@ -9,15 +9,30 @@ import type { JobManifest, StageId } from "@/lib/contracts/api";
 
 export type VideoMediaType = "video/mp4" | "video/quicktime";
 
+export type UploadMediaType = VideoMediaType | "application/x-ply" | "application/zip";
+
+/** Loại đầu vào máy chủ nhận diện theo nội dung (ADR 0004). */
+export type InputKind = "rgb_video" | "gaussian_ply" | "gaussian_ply_colmap";
+
+export interface InputDetection {
+  kind: InputKind;
+  gaussian: { gaussian_count: number; sh_degree: number; encoding: string } | null;
+  ply_member: string | null;
+  colmap_dir: string | null;
+  colmap_format: "bin" | "txt" | null;
+}
+
 export interface UploadRecord {
   upload_id: string;
   original_name: string;
-  media_type: VideoMediaType;
+  media_type: UploadMediaType;
   size_bytes: number;
   checksum: string;
   artifact_uri: string;
   received_at: string;
   project_ids: string[];
+  input_kind?: InputKind;
+  detection?: InputDetection | null;
 }
 
 export type DataOrigin = "public_or_synthetic" | "self_collected_no_pii" | "anonymized";
