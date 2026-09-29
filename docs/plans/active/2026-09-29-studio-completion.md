@@ -34,14 +34,14 @@ ba hướng tỉ lệ trên Aisle_CW.
   (REC-06, UI + API đã có, commits `66f3433`…`c48ec4d`). Sau xác nhận chưa có bước nào chạy.
 - Nhận diện loại đầu vào: có module (`95fa90d`), chưa nối vào upload.
 
-## Quyết định còn mở (cần owner trước gói tương ứng)
+## Quyết định đã chốt trước gói 3 (owner, 2026-09-29)
 
-| # | Câu hỏi | Chặn gói |
+| # | Quyết định | Ghi tại |
 | --- | --- | --- |
-| Q1 | Video người dùng có bắt chọn cặp kiểm độc lập C/D để bundle VERIFIED không? | 3 |
-| Q2 | `tolerance_m` tính thế nào (REC-06 §Tolerance vẫn chờ) | 3 |
-| Q3 | Ngưỡng voxel (opacity, cluster) và seed robot cho video người dùng | 3 |
-| Q4 | Nới `ReconstructionBundle` cho visual import không frame/pose (ADR 0004 §4) — cần EX-SCENE/EX-SIM review | 5b |
+| Q1 | C/D bắt buộc, chọn cùng bước A/B + sàn, kiểm ngay khi xem trước | REC-06 |
+| Q2 | `tolerance_m = 2√2·e·(1 + L_CD/L_AB)`, đoạn ≥ 0,5 m, ≤ 5% L_CD; `e = 1 cm` tạm, đo và khóa ở gói 2 | REC-06 |
+| Q3 | Voxel từ `configs/product/geometry_v1.json` (chưa hiệu chỉnh); seed camera hạ sát sàn, dời ≤ 1 m, hỏng thì mời click | REC-05 |
+| Q4 | Không nới `ReconstructionBundle`; `.ply` trần dừng trước bundle | ADR 0004 §4 |
 
 ## Các gói việc (thứ tự thực hiện)
 
@@ -59,6 +59,7 @@ Mỗi gói: code + test tập trung + cập nhật task file liên quan + commit
 ### Gói 2 — Ổn định bước xác nhận tỉ lệ (REC-06) · EX-REC + EX-PRODUCT
 
 - Browser QA chọn điểm thật trên một job Aisle_CW đang chờ; test HTTP luồng đủ.
+- Đo sai số click `e` so với LiDAR trên đoạn hiệu chỉnh riêng, khóa vào REC-06 (Q2).
 - Proof: ảnh chụp QA + test; REC-06 evidence.
 
 ### Gói 3 — Chạy tiếp sau xác nhận: REC-06 canonical → REC-05 → REC-10 → REC-11 · EX-REC
@@ -66,7 +67,7 @@ Mỗi gói: code + test tập trung + cập nhật task file liên quan + commit
 - Worker nhận job RUNNING ở METRIC có bản xác nhận → canonical visual + poses →
   voxel/collision (capsule OTTO 0,4610/0,308) → bundle metric verify → ReconstructionBundle.
 - Timeline thêm các bước này; job SUCCEEDED khi bundle publish.
-- Phụ thuộc Q1–Q3. Proof: test fixture toàn chuỗi qua runner + một lần chạy GPU thật.
+- Theo Q1–Q3; UI xác nhận tỉ lệ thêm C/D (7 điểm). Proof: test fixture toàn chuỗi qua runner + một lần chạy GPU thật.
 
 ### Gói 4 — Xem kết quả từng bước (ADR 0005) · EX-PRODUCT
 
@@ -81,7 +82,7 @@ Mỗi gói: code + test tập trung + cập nhật task file liên quan + commit
 - 5a `gaussian_ply_colmap`: đọc model COLMAP → camera pose + visual import có
   camera → đi tiếp như video từ REC-06.
 - 5b `gaussian_ply`: visual import không camera; REC-06 thêm điểm "phía trên sàn",
-  bỏ kiểm độ cao camera; REC-05 seed do người dùng click. Tới REC-05; bundle chờ Q4.
+  bỏ kiểm độ cao camera; REC-05 seed do người dùng click. Tới REC-05, không tạo bundle (Q4).
 - Cả hai: server chuyển PLY → SOG để xem, không cần GPU.
 
 ### Gói 6 — Demo ba hướng trên Aisle_CW (ADR 0004 §5) · EX-REC + EX-PRODUCT

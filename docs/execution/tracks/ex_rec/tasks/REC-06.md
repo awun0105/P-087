@@ -47,6 +47,25 @@ Code: `rgb/canonical/floor_frame.py`, port công khai `metric_port.py`
 là authority của PRODUCT (`src/services/orchestration/metric.py`), REC chỉ gọi
 `verify(preview_checksum, decision_ref)`.
 
+### Owner chốt 2026-09-29 — kiểm độc lập C/D và công thức tolerance
+
+Thay mục "Tolerance — chờ số đo" bên dưới (giữ lại làm lịch sử).
+
+1. **C/D bắt buộc với video người dùng.** Căn cứ: `bundle_validation.py:52` không
+   publish bundle khi thiếu `verification_ref`; nới quy tắc này là hạ validation.
+   C/D là hai đầu một vật khác A/B, chọn cùng bước với A/B + 3 điểm sàn (7 điểm).
+   Kiểm C/D ngay khi xem trước (chưa tốn GPU); REC-06 kiểm lại trên artifact canonical
+   sau REC-05 như hiện có. Demo hướng LiDAR lấy C/D từ số đo LiDAR.
+2. **Công thức tolerance** (theo "tính từ baseline A/B"):
+   `tolerance_m = 2·√2·e·(1 + L_CD/L_AB)`, `e` = sai số click một điểm trên 3DGS,
+   hệ số 2 ≈ 95%. Chặn chất lượng: `L_AB ≥ 0,5 m`, `L_CD ≥ 0,5 m`, và
+   `tolerance_m ≤ 5%·L_CD` (REC-05: lối đi sai ≤ 10–20 cm; 5% của lối 3 m = 15 cm),
+   không đạt thì yêu cầu chọn vật dài hơn.
+3. **`e = 0,01 m` là PROPOSAL tạm**, chưa đo. Đo và khóa `e` ở gói 2 của
+   [plan tổng thể](../../../../plans/active/2026-09-29-studio-completion.md) bằng
+   click lặp trên Aisle_CW so với LiDAR, trên đoạn hiệu chỉnh riêng, khóa trước
+   đánh giá cuối (TEAM_EXECUTION_PLAN: không đổi threshold sau khi xem kết quả).
+
 ### Tolerance — chờ số đo trên baseline thật
 
 Owner chọn **không chốt số tròn**, yêu cầu tính từ đúng baseline của cặp A/B sẽ

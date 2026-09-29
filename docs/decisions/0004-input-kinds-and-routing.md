@@ -4,12 +4,9 @@ Date: 2026-09-29
 
 ## Status
 
-Accepted (phần 1–3, 5) — Tech Lead / EX-REC owner (Quân) chốt ngày 2026-09-29:
+Accepted — Tech Lead / EX-REC owner (Quân) chốt ngày 2026-09-29:
 "hỗ trợ tất cả các cách, đầu vào cần bước đọc file và kiểm tra file thuộc dạng nào
-thì đi qua luồng xử lý của dạng đó".
-
-**Proposed** (phần 4) — nới `ReconstructionBundle` cho visual import không có
-frame/pose là thay đổi shared contract; cần EX-SCENE và EX-SIM review trước khi code.
+thì đi qua luồng xử lý của dạng đó". Phần 4 chốt cùng ngày: không nới shared contract.
 
 ## Context
 
@@ -58,12 +55,13 @@ từ tên file. Chỉ `rgb_video` tiêu tốn quota GPU cho bước dựng; impo
   camera để đề xuất). Capsule theo quyết định owner trong REC-05.
 - Provenance ghi `visual_source = "user_import"`; không gắn nhãn là output Brush.
 
-### 4. Bundle cho visual import — PROPOSED
+### 4. Bundle cho visual import — không nới contract (owner chốt 2026-09-29)
 
-`gaussian_ply` chỉ tới được REC-10 nếu `ReconstructionBundle` cho phép
-`rgb_frame_refs`/`camera_pose_refs` rỗng khi `visual_source = "user_import"`.
-Chưa code phần này. Trước khi có review, luồng `gaussian_ply` dừng sau REC-05 với
-trạng thái rõ ràng. `gaussian_ply_colmap` không cần thay đổi này.
+`ReconstructionBundle` **giữ nguyên**. Luồng `gaussian_ply` (không camera/ảnh) dừng
+sau xem / xác nhận tỉ lệ / REC-05 với trạng thái rõ ràng, không tạo bundle. Lý do:
+EX-SCENE cần frame ảnh gốc (SCENE-02 tách vật thể bằng SAM2 trên ảnh), nên nới
+contract cũng không đi tiếp được. Cần đi hết pipeline thì dùng `gaussian_ply_colmap`
+kèm ảnh. Chỉ cần thông báo EX-SCENE/EX-SIM, không cần review contract.
 
 ### 5. Ba hướng tỉ lệ cho demo (cùng video Aisle_CW)
 
@@ -88,4 +86,4 @@ trạng thái rõ ràng. `gaussian_ply_colmap` không cần thay đổi này.
 2. Import `gaussian_ply` tới xem/chỉnh sửa/xác nhận tỉ lệ.
 3. Import `gaussian_ply_colmap`.
 4. Demo ba hướng trên Aisle_CW (RGB only là mock).
-5. Xin EX-SCENE/EX-SIM review phần 4.
+5. Thông báo EX-SCENE/EX-SIM về phần 4 (không đổi contract).
