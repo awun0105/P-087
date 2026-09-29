@@ -26,7 +26,7 @@ cứng ở `z = 0`** (`offset_xyz = (0,0,-thickness/2)` → mặt trên ở `z=0
 gốc thì sàn của Isaac lệch **23,45 cm** so với sàn thật.
 
 Áp dụng trong `CanonicalFrameDeclaration.translation_m` của REC-06
-(`src/services/reconstruction/rgb/metric_models.py:36`) — **thuộc ownership
+(`src/services/reconstruction/rgb/canonical/metric_models.py:36`) — **thuộc ownership
 EX-REC**, không cần sửa EX-SIM.
 
 Ghi chú phạm vi: đây là lựa chọn cho **demo Aisle_CW**. Với video người dùng upload,
@@ -36,7 +36,7 @@ Ghi chú phạm vi: đây là lựa chọn cho **demo Aisle_CW**. Với video ng
 
 Owner chọn **không chốt số tròn**, yêu cầu tính từ đúng baseline của cặp A/B sẽ
 dùng. Số hardcode hiện tại `tolerance_m = 0.05` tại
-`src/services/reconstruction/rgb/metric_verification.py:24` **chưa được chốt là
+`src/services/reconstruction/rgb/canonical/metric_verification.py:24` **chưa được chốt là
 authority** và sẽ bị thay khi có số đo. PRD §11.4 câu 4 vẫn `TBD` cho tới lúc đó.
 
 ### 2026-09-27 — thử tự suy A/B từ dữ liệu: KHÔNG ĐẠT, cần người chọn
@@ -417,7 +417,7 @@ cũ không chứng minh canonical visual/published poses hay independent measure
 Không dùng checkpoint này để đóng task hoặc cho phép real bundle publication.
 
 **Implemented / VERIFIED:**
-- `src/services/reconstruction/rgb/metric_verification.py`:
+- `src/services/reconstruction/rgb/canonical/metric_verification.py`:
   - `CrossArtifactVerificationRequest`: yêu cầu kiểm định chéo metric scale giữa `RGBMetricConfirmation`, `VisualArtifact`, `RgbGeometry` và `CameraPoseArtifact`.
   - `MetricVerificationService`:
     - Thẩm định `RgbGeometry` mang đúng `applied_confirmation_checksum` và `scale_applied`, loại bỏ rủi ro double-scaling.

@@ -392,7 +392,7 @@ seed/clearance và downstream runtime proof. Không đánh dấu toàn REC-05 BL
 - `src/services/reconstruction/adapters/voxel.py`:
   - Thêm `ProductVoxelRequest` ràng buộc chặt chẽ với `MetricConfirmation` từ REC-06.
   - Thêm `run_product(request, workspace)` trên `SplatTransformVoxelAdapter`, kiểm tra source checksum và chống double-scaling (`applied_record_checksum`).
-- `src/services/reconstruction/rgb/geometry_publication.py`:
+- `src/services/reconstruction/rgb/geometry/geometry_publication.py`:
   - `GeometryPublisher`: xuất bản `collision.glb` thành `ProductArtifactRef` (`artifact_type="RgbGeometry"`, `producer_stage=StageId.RGB_GEOMETRY`), kèm `geometry.voxel.json` (`VoxelMetadata`).
   - `GeometryResolver`: đọc và xác thực tính toàn vẹn của geometry artifact refs.
   - `RgbGeometryService`: service điều phối toàn bộ pipeline, kiểm tra điều kiện tiên quyết (confirmation đã `CONFIRMED`, visual master khớp anchor master, seed proposal hợp lệ), gọi voxelizer adapter và xuất bản artifacts.

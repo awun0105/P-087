@@ -74,9 +74,9 @@ selects 954 of the frozen 983 reconstruction IDs. Do not duplicate or delete
 those PNGs. The video path decodes via FFmpeg 6.1.1 with explicit no-resampling
 policy, preserves decoded PTS, and publishes only quality-accepted frames.
 
-- Add `src/services/reconstruction/rgb/frame_set.py` for a versioned ordered
+- Add `src/services/reconstruction/rgb/frames/frame_set.py` for a versioned ordered
   frame inventory, checksum validation and a direct REC-03 resolution interface.
-- Add `src/services/reconstruction/rgb/frame_extraction.py` for privacy/quality
+- Add `src/services/reconstruction/rgb/frames/frame_extraction.py` for privacy/quality
   gates, source-byte verification, deterministic FFmpeg command, immutable
   publication and structured `ST-FRAME-EXTRACT` result/error.
 - Add `src/services/reconstruction/adapters/torwic_frame_source.py` only at the
