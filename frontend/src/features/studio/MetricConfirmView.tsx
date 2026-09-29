@@ -1,20 +1,27 @@
 "use client";
 
-import { Check, Loader2, Redo2, Ruler, Undo2, X } from "lucide-react";
-import { useCallback, useState } from "react";
+import { Check, Loader2, Radar, Redo2, Ruler, Undo2, X } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Button, Notice } from "@/components/studio/primitives";
-import { METRIC_POINT_COUNT, METRIC_POINT_LABELS, metricInput, nextPointHint } from "@/features/studio/metric";
+import {
+  METRIC_POINT_COUNT,
+  METRIC_POINT_LABELS,
+  metricInput,
+  nextPointHint,
+  segments,
+} from "@/features/studio/metric";
 import { EMPTY_INSPECTION, type InspectionState } from "@/features/viewer/inspection-history";
 import { PlayCanvasScene, usePlayCanvasCapability } from "@/features/viewer/PlayCanvasScene";
 import type { SplatInspection } from "@/features/viewer/splat-inspection";
-import { confirmMetric, previewMetric } from "@/lib/api/studio";
-import type { MetricInput, MetricPreview } from "@/lib/contracts/studio";
+import { confirmMetric, getMetricAssist, measureOnLidar, previewMetric } from "@/lib/api/studio";
+import type { LidarMeasurements, MetricInput, MetricPreview } from "@/lib/contracts/studio";
 
 /**
- * Bước xác nhận tỉ lệ mét (REC-06) sau khi xem 3DGS: chọn A/B trên vật biết kích
- * thước, 3 điểm sàn, nhập khoảng cách thật → xem trước số liệu → xác nhận. Điểm lấy
- * trong hệ gốc file 3DGS; tính toán và bản ghi xác nhận thuộc backend.
+ * Bước xác nhận tỉ lệ mét (REC-06) sau khi xem 3DGS: chọn A/B (vật biết kích thước),
+ * C/D (vật khác để kiểm), 3 điểm sàn → xem trước → xác nhận. Scene dựng từ dataset mẫu
+ * có LiDAR thì khoảng cách lấy từ LiDAR, chỉ đọc (ADR 0004 §6); video người dùng nhập tay.
+ * Điểm lấy trong hệ gốc file 3DGS; tính toán và bản ghi xác nhận thuộc backend.
  */
 export function MetricConfirmView({
   jobId,
@@ -32,7 +39,9 @@ export function MetricConfirmView({
   const [capability, setCapability] = usePlayCanvasCapability();
   const [controller, setController] = useState<SplatInspection | null>(null);
   const [inspection, setInspection] = useState<InspectionState>(EMPTY_INSPECTION);
-  const [distance, setDistance] = useState("");
+  const [lidarAvailable, setLidarAvailable] = useState<boolean | null>(null);
+  const [lidar, setLidar] = useState<{ points: InspectionState["points"]; result: LidarMeasurements | null; error: string | null } | null>(null);
+  const [typed, setTyped] = useState({ anchor: "", check: "" });
   const [preview, setPreview] = useState<{ input: MetricInput; result: MetricPreview } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +51,41 @@ export function MetricConfirmView({
     next?.setMeasuring(true);
   }, []);
 
-  const input = metricInput(inspection.points, distance);
+  useEffect(() => {
+    let alive = true;
+    void getMetricAssist(jobId).then((assist) => {
+      if (alive) setLidarAvailable(assist.lidar_available);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [jobId]);
+
+  // Dataset có LiDAR: đủ A–D thì đo ngay trên LiDAR; đổi điểm thì đo lại.
+  const pairs = segments(inspection.points);
+  const pairKey = pairs ? JSON.stringify(pairs) : null;
+  useEffect(() => {
+    if (!lidarAvailable || !pairs || pairKey === null) return;
+    const controllerAbort = new AbortController();
+    const points = inspection.points;
+    measureOnLidar(jobId, pairs[0], pairs[1], controllerAbort.signal).then(
+      (result) => setLidar({ points, result, error: null }),
+      (cause: unknown) => {
+        if (!controllerAbort.signal.aborted) {
+          setLidar({ points, result: null, error: cause instanceof Error ? cause.message : "Không đo được trên LiDAR" });
+        }
+      },
+    );
+    return () => controllerAbort.abort();
+    // pairKey đại diện cho `pairs`; tránh đo lại khi chỉ đổi điểm sàn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId, lidarAvailable, pairKey]);
+
+  const lidarResult = lidar && pairKey !== null && JSON.stringify(segments(lidar.points)) === pairKey ? lidar : null;
+  const source = lidarAvailable ? "lidar_demo" : "user_measured";
+  const anchorDistance = lidarAvailable ? String(lidarResult?.result?.anchor.distance_m ?? "") : typed.anchor;
+  const checkDistance = lidarAvailable ? String(lidarResult?.result?.check.distance_m ?? "") : typed.check;
+  const input = metricInput(inspection.points, anchorDistance, checkDistance, source);
   // Bản xem trước chỉ còn hiệu lực khi điểm và khoảng cách không đổi.
   const current = preview && input && JSON.stringify(preview.input) === JSON.stringify(input) ? preview.result : null;
   const hint = nextPointHint(inspection.points.length);
@@ -99,9 +142,15 @@ export function MetricConfirmView({
           </Button>
         </div>
         <p className="text-xs leading-relaxed text-ink-muted">
-          Scene dựng từ video chưa có đơn vị mét. Chọn hai đầu một vật bạn biết kích thước thật, rồi 3 điểm trên mặt sàn.
-          Sàn sẽ thành mặt z = 0, A là gốc tọa độ.
+          Scene dựng từ video chưa có đơn vị mét. Chọn hai đầu một vật biết kích thước (A, B), hai đầu một vật khác để
+          kiểm (C, D), rồi 3 điểm trên mặt sàn. Sàn sẽ thành mặt z = 0, A là gốc tọa độ.
         </p>
+        {lidarAvailable && (
+          <Notice tone="ochre" icon={<Radar aria-hidden />}>
+            Scene từ dataset mẫu có LiDAR: khoảng cách lấy từ LiDAR để mô phỏng số đo ngoài đời. Video của bạn sẽ cần nhập
+            số đo thật.
+          </Notice>
+        )}
 
         <div className="flex flex-wrap gap-2">
           <Button
@@ -116,7 +165,13 @@ export function MetricConfirmView({
             <Undo2 aria-hidden />
             Hoàn tác
           </Button>
-          <Button variant="secondary" size="sm" disabled={!inspection.canRedo || inspection.busy} onClick={() => controller?.redo()}>
+          <Button
+            variant="secondary"
+            size="sm"
+            aria-label="Làm lại"
+            disabled={!inspection.canRedo || inspection.busy}
+            onClick={() => controller?.redo()}
+          >
             <Redo2 aria-hidden />
           </Button>
         </div>
@@ -128,29 +183,50 @@ export function MetricConfirmView({
           {METRIC_POINT_LABELS.map((label, index) => (
             <li key={label} className="flex gap-2">
               <span className="w-12 font-medium text-ink">{label}</span>
-              <span className="font-mono">
-                {inspection.points[index]?.map((value) => value.toFixed(3)).join(", ") ?? "—"}
-              </span>
+              <span className="font-mono">{inspection.points[index]?.map((value) => value.toFixed(3)).join(", ") ?? "—"}</span>
             </li>
           ))}
         </ol>
 
-        <label className="block text-sm text-ink">
-          Khoảng cách thật A–B (mét)
-          <input
-            type="text"
-            inputMode="decimal"
-            value={distance}
-            onChange={(event) => setDistance(event.target.value)}
-            placeholder="vd 0,90"
-            className="mt-1 block w-full rounded-lg border border-line-strong bg-paper px-3 py-2 text-sm"
-          />
-        </label>
+        {lidarAvailable ? (
+          <div className="space-y-1 rounded-xl border border-line p-3 text-sm" aria-live="polite">
+            <p className="font-medium text-ink">Số đo từ LiDAR</p>
+            {!pairs && <p className="text-xs text-ink-subtle">Chọn đủ A, B, C, D để đo.</p>}
+            {pairs && !lidarResult && (
+              <p className="flex items-center gap-2 text-xs text-ink-muted">
+                <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden /> Đang đo trên LiDAR…
+              </p>
+            )}
+            {lidarResult?.error && <Notice tone="rust">{lidarResult.error}</Notice>}
+            {lidarResult?.result && (
+              <>
+                <p>
+                  A–B: <span className="font-mono">{lidarResult.result.anchor.distance_m.toFixed(3)} m</span>
+                </p>
+                <p>
+                  C–D: <span className="font-mono">{lidarResult.result.check.distance_m.toFixed(3)} m</span>
+                </p>
+                <p className="text-xs text-ink-subtle">
+                  Điểm bắt vào LiDAR cách chỗ click tối đa{" "}
+                  {(
+                    Math.max(...lidarResult.result.anchor.snap_offsets_m, ...lidarResult.result.check.snap_offsets_m) * 100
+                  ).toFixed(1)}{" "}
+                  cm.
+                </p>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <DistanceField label="Khoảng cách thật A–B (mét)" value={typed.anchor} onChange={(anchor) => setTyped({ ...typed, anchor })} />
+            <DistanceField label="Khoảng cách thật C–D (mét)" value={typed.check} onChange={(check) => setTyped({ ...typed, check })} />
+          </div>
+        )}
 
         <Button
           variant="secondary"
           className="w-full"
-          disabled={!input || busy}
+          disabled={!input || busy || lidarAvailable === null}
           onClick={() =>
             input &&
             void run(async () => {
@@ -171,6 +247,10 @@ export function MetricConfirmView({
               Độ cao camera: {current.camera_height_min_m.toFixed(2)}–{current.camera_height_max_m.toFixed(2)} m
             </p>
             <p>Độ lệch 3 điểm sàn: {(current.floor_residual_m * 100).toFixed(1)} cm</p>
+            <p className={current.check_passed ? "text-sage" : "text-rust"}>
+              Kiểm C–D: đo được {current.check_measured_m.toFixed(3)} m, lệch {(current.check_error_m * 100).toFixed(1)} cm
+              (ngưỡng {(current.check_tolerance_m * 100).toFixed(1)} cm) — {current.check_passed ? "đạt" : "không đạt"}
+            </p>
             {current.warnings.map((warning) => (
               <Notice key={warning} tone="ochre">
                 {warning}
@@ -178,7 +258,7 @@ export function MetricConfirmView({
             ))}
             <Button
               className="w-full"
-              disabled={busy || !input}
+              disabled={busy || !input || !current.check_passed}
               onClick={() =>
                 input &&
                 void run(async () => {
@@ -194,9 +274,25 @@ export function MetricConfirmView({
         )}
         {error && <Notice tone="rust">{error}</Notice>}
         <p className="text-xs text-ink-subtle">
-          Điểm lấy từ độ sâu Gaussian, có thể lệch ở vùng mờ. Kiểm độ cao camera có hợp lý không trước khi xác nhận.
+          Điểm lấy từ độ sâu Gaussian, có thể lệch ở vùng mờ. Kiểm độ cao camera và kết quả C–D trước khi xác nhận.
         </p>
       </aside>
     </div>
+  );
+}
+
+function DistanceField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="block text-sm text-ink">
+      {label}
+      <input
+        type="text"
+        inputMode="decimal"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="vd 0,90"
+        className="mt-1 block w-full rounded-lg border border-line-strong bg-paper px-3 py-2 text-sm"
+      />
+    </label>
   );
 }
