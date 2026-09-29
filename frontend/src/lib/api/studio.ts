@@ -9,6 +9,9 @@ import {
   parseJobProgress,
   type DemoManifest,
   type JobProgress,
+  type ParamValue,
+  type ProcessingEvaluation,
+  type ProcessingOptions,
   type SceneFromUpload,
   type SceneSummary,
   type SourceRightsAttestation,
@@ -29,10 +32,28 @@ export function createSceneFromUpload(
   uploadId: string,
   name: string,
   attestation: SourceRightsAttestation,
+  processing?: Record<string, ParamValue>,
 ): Promise<SceneFromUpload> {
   return apiFetch<SceneFromUpload>(`${API}/scenes/from-upload`, {
     method: "POST",
-    body: JSON.stringify({ upload_id: uploadId, name, attestation }),
+    body: JSON.stringify({ upload_id: uploadId, name, attestation, processing }),
+  });
+}
+
+/** Thông số chỉnh được, preset và cấu hình máy worker (từ file cấu hình chung). */
+export function getProcessingOptions(): Promise<ApiResult<ProcessingOptions>> {
+  return fetchApi<ProcessingOptions>(`${API}/processing/options`);
+}
+
+/** Ước lượng tài nguyên của bộ thông số so với máy worker. */
+export function evaluateProcessing(
+  params: Record<string, ParamValue>,
+  signal?: AbortSignal,
+): Promise<ApiResult<ProcessingEvaluation>> {
+  return fetchApi<ProcessingEvaluation>(`${API}/processing/evaluate`, {
+    method: "POST",
+    body: JSON.stringify({ params }),
+    signal,
   });
 }
 

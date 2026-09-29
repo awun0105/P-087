@@ -101,6 +101,57 @@ export interface DemoStage {
   summary: string;
 }
 
+export type ParamValue = number | string;
+
+export interface ParameterSpec {
+  key: string;
+  group: "sampling" | "colmap" | "brush";
+  label: string;
+  description: string;
+  kind: "number" | "integer" | "choice";
+  unit: string | null;
+  min: number | null;
+  max: number | null;
+  step: number | null;
+  choices: { value: string; label: string }[] | null;
+}
+
+export interface MachineCapability {
+  worker_id: string;
+  measured_at: string;
+  gpu_name: string | null;
+  vram_total_gb: number | null;
+  cpu_count: number;
+  ram_total_gb: number;
+  disk_free_gb: number;
+}
+
+export type ResourceStatus = "ok" | "warn" | "danger" | "unknown";
+
+export interface ResourceEstimate {
+  resource: "vram" | "ram" | "disk";
+  required_gb: number;
+  available_gb: number | null;
+  status: ResourceStatus;
+  message: string;
+}
+
+export interface ProcessingEvaluation {
+  resources: ResourceEstimate[];
+  parameters: { key: string; status: ResourceStatus; message: string | null }[];
+  blocking: boolean;
+  note: string;
+}
+
+export interface ProcessingOptions {
+  profile_id: string;
+  parameters: ParameterSpec[];
+  presets: { minimum_quality: Record<string, ParamValue>; maximum: Record<string, ParamValue>; machine_maximum: Record<string, ParamValue> };
+  capability: MachineCapability | null;
+  default_evaluation: ProcessingEvaluation;
+  resource_note: string;
+}
+
 export interface DemoManifest {
   schema_version: "1.0";
   demo_id: string;
@@ -115,6 +166,8 @@ export interface DemoManifest {
   frames: DemoFile[];
   frame_count: number | null;
   splat: DemoFile;
+  processing?: Record<string, ParamValue> | null;
+  machine?: Record<string, string>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
