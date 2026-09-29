@@ -215,6 +215,19 @@ Phase 5 — Packaging GPU/SSH + demo run
   checksum) phục vụ qua API riêng; Studio dựng cùng màn hình từ job thật hoặc
   bundle. Trước khi có GPU run đầy đủ, bundle tạm từ smoke `rec04_smoke_work_10b`.
 
+- [x] Phase 6 — cấu hình xử lý chung + bảng thông số (2026-09-29, yêu cầu owner):
+  REC chọn frame nét nhất theo cửa sổ + chỉ decode frame được chọn (`de5ce26`),
+  prepare lấy mẫu theo fps × thời lượng (`601066e`); file chung
+  `configs/product/processing_presets_v1.json` + module `processing` (preset,
+  đo máy worker, ước lượng VRAM/RAM/đĩa heuristic, "tối đa cho máy này") (`403fe2b`);
+  config riêng từng job `config/processing.json` = `config_checksum` (`197ef2a`),
+  worker validate lại theo file chung (`75a12f7`), heartbeat đo máy (`6b20292`);
+  API options/evaluate + chặn cấu hình đỏ ở server (`3b0e65a`); UI bảng thông số
+  chỉnh được (Scene mới) / chỉ đọc (demo) (`d03a7f2`, `7de978b`); bundle ghi thông
+  số + máy (`e744840`); nén SOG bằng WebGPU (`c4a70b2`): 7,7 s so với >15 phút CPU.
+  Job thật `job-ac2bfd924cc6` (50 frame, 7k bước, 960px, T2000): tổng 7 phút 41 s;
+  bundle `data/demo/aisle_cw_params` (pipeline_job, có thông số).
+
 ## Validation
 
 - Focused proof: pytest cho dispatch/worker/upload/progress/demo import; vitest
@@ -224,7 +237,13 @@ Phase 5 — Packaging GPU/SSH + demo run
 
 ## Result
 
-Checkpoint 2026-09-29 (chưa DONE; còn GPU run chính thức và QA editor thật):
+Checkpoint 2026-09-29 (chưa DONE; còn GPU run chính thức và QA editor thật).
+Cập nhật sau Phase 6: `pytest tests -q` 885 passed, 22 skipped; ruff/eslint sạch;
+`npm run build` pass; vitest 96 passed + 4 fail cũ của UI legacy. QA CDP headless:
+bảng thông số tô đỏ khi vượt VRAM/đĩa, demo bước 2 chỉ đọc, bước 3 phát lại đúng
+thời lượng thật.
+
+Checkpoint trước:
 
 - Validation đã chạy: `pytest tests -q` 867 passed, 22 skipped; `ruff check` +
   `ruff format --check` (src, tests, scripts/demo, scripts/gpu) pass; frontend
