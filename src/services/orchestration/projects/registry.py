@@ -41,6 +41,7 @@ from src.models.contracts.validation import CandidatePackage, ValidationReport
 from src.services.orchestration.artifacts import (
     ArtifactChecksumError,
     ArtifactNotFoundError,
+    ArtifactRemote,
     ArtifactResolver,
     FilesystemArtifactStore,
     sha256_bytes,
@@ -67,6 +68,7 @@ from src.services.orchestration.projects.persistence import ProjectPersistence
 from src.services.orchestration.projects.preview import load_job_preview
 from src.services.orchestration.projects.privacy import require_project_dispatch
 from src.services.orchestration.scene.editor import SceneEditor
+from src.services.orchestration.storage import artifact_remote
 from src.services.orchestration.uploads.models import UploadRecord
 
 ContractT = TypeVar("ContractT", bound=BaseModel)
@@ -98,6 +100,7 @@ class ProjectRegistry:
         runtime_root: Path = DEFAULT_RUNTIME_ROOT,
         database: RuntimeDatabase | None = None,
         execution_profile: ExecutionProfile | None = None,
+        remote: ArtifactRemote | None = None,
     ) -> None:
         self.fixture_root = fixture_root
         self.job_fixture_dir = fixture_root / "mock_job"
@@ -106,7 +109,7 @@ class ProjectRegistry:
         self.approval_fixture_path = fixture_root / "mock_job" / "approval_record.json"
         self.candidate_fixture_path = fixture_root / "candidate" / "candidate_package.json"
         self.resolver = ArtifactResolver(self.artifact_root)
-        self.runtime_resolver = ArtifactResolver(runtime_root)
+        self.runtime_resolver = ArtifactResolver(runtime_root, remote)
         self.persistence = ProjectPersistence(database, self.runtime_resolver) if database else None
         self.execution_profile = execution_profile
         self.store = FilesystemArtifactStore(self.resolver)
@@ -745,7 +748,10 @@ def get_project_registry() -> ProjectRegistry:
         else None
     )
     registry = ProjectRegistry(
-        runtime_root=settings.artifact_root, database=RuntimeDatabase(settings.database_url), execution_profile=profile
+        runtime_root=settings.artifact_root,
+        database=RuntimeDatabase(settings.database_url),
+        execution_profile=profile,
+        remote=artifact_remote(settings),
     )
     if settings.product_fixture_mode:
         registry.seed_from_fixtures()

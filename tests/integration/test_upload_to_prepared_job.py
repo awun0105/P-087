@@ -53,6 +53,7 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     database = RuntimeDatabase(f"sqlite:///{tmp_path / 'runtime.db'}")
     registry = ProjectRegistry(runtime_root=tmp_path / "artifacts", database=database, execution_profile=profile)
     settings = SimpleNamespace(
+        artifact_s3_bucket=None,
         product_processing_config=config,
         product_worker_root=tmp_path / "workers",
         product_upload_quality_profile=ROOT / "configs/product/upload_quality_v1.json",
