@@ -187,3 +187,15 @@ NumPy ở SIM vẫn hiện diện ngoài ownership (xem REC-10 audit evidence).
   - Max args: 3 parameters.
   - Type annotations đầy đủ.
   - Ruff check & format: pass 100%.
+
+## 12. Result / Evidence
+
+### 2026-09-30 — worker hoàn tất sau xác nhận tỉ lệ
+
+- `src/services/reconstruction/finalize.py` + `finalize_cli.py`; PRODUCT `run_finalize_job`,
+  queue tự nhận job RUNNING đã xác nhận hoặc QUEUED sau retry (chỉ chạy lại bước hoàn tất).
+- Chạy thật trên `job-ac2bfd924cc6` (Aisle_CW, Quadro T2000 adapter 1): SUCCEEDED sau ~74 s
+  (canonical + voxel/carve + verify + bundle).
+- Các lần hỏng trước đó đều là lỗi thật đã sửa: iGPU index 0 (`VK_ERROR_DEVICE_LOST`),
+  artifact theo nội dung đã có khi chạy lại, lọc cụm xoá hết Gaussian, tam giác suy biến.
+- Tests: `test_finalize_flow.py` (4), `pytest tests` 1003 passed / 40 skipped.

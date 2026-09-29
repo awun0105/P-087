@@ -132,7 +132,15 @@ Mỗi gói: code + test tập trung + cập nhật task file liên quan + commit
     ô số chỉ đọc khi có LiDAR (`14d3626`…`463da3b`). Khứ hồi trên dữ liệu thật đúng khoảng cách.
     `pytest tests` → 992 passed, 40 skipped; `tsc`, `eslint` sạch; `vitest run` → 120 passed.
   - [ ] Browser QA; đo `e` = sai lệch click so với LiDAR.
-- [ ] Gói 3 … Gói 7.
+- [x] Gói 3 — pipeline EX-REC hoàn tất trong worker: canonical mét → REC-05 collision →
+  kiểm C/D cuối → ReconstructionBundle; job `job-ac2bfd924cc6` SUCCEEDED trên GPU thật
+  (evidence REC-05/06/10/11). Hiệu chỉnh REC-05: vùng cắt + filter-floaters, bỏ tam giác 0.
+- [x] Gói 4 — `GET /jobs/{id}/stage-views` + UI "Kết quả từng bước" (frame, quỹ đạo camera,
+  3DGS, 3DGS hệ mét, collision mesh); allow-list thêm ref của bundle và ảnh frame. Chưa có
+  point cloud COLMAP/LiDAR và bản xem nhẹ (thumbnail/LOD).
+- [ ] Gói 5, 6, 7.
+- Hở tích hợp đã thấy (thuộc track khác, chưa sửa): EX-SIM `usd/usda.py` chưa đưa collision
+  mesh môi trường vào USD; EX-SCENE decomposition chưa khoét vùng vật thể khỏi mesh môi trường.
 
 ## Validation
 
