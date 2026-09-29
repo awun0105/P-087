@@ -60,6 +60,8 @@ _TABLES = (
     "CREATE INDEX IF NOT EXISTS r2s_jobs_by_project ON r2s_jobs(project_id)",
     # Bảng cộng thêm (không đổi bảng cũ): video upload chờ được chọn để tạo scene.
     "CREATE TABLE IF NOT EXISTS r2s_uploads (upload_id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
+    # Bảng cộng thêm: cấu hình máy do worker tự đo (GPU/VRAM/CPU/RAM/đĩa).
+    "CREATE TABLE IF NOT EXISTS r2s_workers (worker_id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
 )
 
 
