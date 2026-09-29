@@ -48,7 +48,7 @@ def test_plan_parts_respects_s3_limits() -> None:
 
 
 def test_full_flow_records_server_checksum(store: MemoryObjectStore, service: DirectUploadService) -> None:
-    payload = b"v" * (MIN_PART_BYTES + 123)
+    payload = b"\x00\x00\x00\x14ftypqt  " + b"v" * (MIN_PART_BYTES + 111)
     session = service.begin("C:\\clips\\Kho A.MOV", len(payload))
     assert session.status == "UPLOADING" and session.part_count == 2
     assert session.artifact_uri == f"artifact://jobs/{session.upload_id}/input/source.mov"

@@ -80,6 +80,12 @@ def create_scene_from_upload(
         upload = uploads.get(request.upload_id)
     except UploadNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    if upload.input_kind != "rgb_video":
+        # Luồng import 3DGS (ADR 0004 §3) chưa có worker; không tạo job video từ file PLY/ZIP.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Đã nhận file 3DGS nhưng luồng dựng scene từ PLY/ZIP chưa được bật trên máy chủ",
+        )
     processing = None
     if settings.product_processing_config is not None and is_presets_file(settings.product_processing_config):
         presets, presets_checksum = deps.presets()

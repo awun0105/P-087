@@ -71,7 +71,7 @@ def test_upload_records_and_row_locks_work(runtime_database_url: str, tmp_path: 
     database = RuntimeDatabase(runtime_database_url)
     service = VideoUploadService(database, ArtifactResolver(tmp_path / "artifacts"), 1024)
     pending = service.begin("kho.mp4")
-    pending.publication.write(b"video")
+    pending.publication.write(b"\x00\x00\x00\x14ftypqt  " + b"video")
     record = service.finish(pending)
     assert service.get(record.upload_id).checksum == record.checksum
     service.link_project(record.upload_id, "project-a")
@@ -101,7 +101,7 @@ def test_registry_project_job_lifecycle(runtime_database_url: str, tmp_path: Pat
     )
     uploads = VideoUploadService(database, registry.runtime_resolver, 1024)
     pending = uploads.begin("kho.mp4")
-    pending.publication.write(b"video-bytes")
+    pending.publication.write(b"\x00\x00\x00\x14ftypqt  " + b"video-bytes")
     upload = uploads.finish(pending)
     project = registry.create_project_from_upload(
         upload,

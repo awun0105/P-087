@@ -57,7 +57,9 @@ async def client():
         yield ac
 
 
-async def _upload(client: AsyncClient, name: str = "kho.mp4", body: bytes = b"fake-mp4-bytes") -> dict:
+async def _upload(
+    client: AsyncClient, name: str = "kho.mp4", body: bytes = b"\x00\x00\x00\x14ftypqt  " + b"fake-mp4"
+) -> dict:
     response = await client.post("/api/v1/uploads", params={"filename": name}, content=body)
     assert response.status_code == 201, response.text
     return response.json()
@@ -69,7 +71,7 @@ async def test_upload_streams_video_and_lists_it(client: AsyncClient, studio: Si
     assert record["original_name"] == "Kho A.MP4" and record["media_type"] == "video/mp4"
     assert record["artifact_uri"] == f"artifact://jobs/{record['upload_id']}/input/source.mp4"
     stored = studio.root / "artifacts/jobs" / record["upload_id"] / "input/source.mp4"
-    assert stored.read_bytes() == b"fake-mp4-bytes"
+    assert stored.read_bytes() == b"\x00\x00\x00\x14ftypqt  " + b"fake-mp4"
     listed = (await client.get("/api/v1/uploads")).json()["uploads"]
     assert [item["upload_id"] for item in listed] == [record["upload_id"]]
     assert "artifacts" not in str(listed)
@@ -248,3 +250,21 @@ async def test_scene_uses_chosen_processing_and_server_blocks_red(client: AsyncC
     path = studio.registry.runtime_resolver.require(job_config_reference(job["job_id"], job["config_checksum"]))
     stored = json.loads(path.read_text())
     assert stored["brush"]["total_train_iters"] == 12000 and stored["colmap"]["num_threads"] == 8
+
+
+@pytest.mark.asyncio
+async def test_scene_from_gaussian_upload_is_refused_until_import_flow_exists(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    """ADR 0004: file PLY 3DGS được nhận và nhận diện, nhưng chưa tạo job video từ nó."""
+    from tests.test_reconstruction.test_input_detection import _gaussian
+
+    studio.settings.product_upload_max_bytes = 4096
+
+    upload = await _upload(client, name="scene.ply", body=_gaussian(count=1, sh_rest=0))
+    assert upload["input_kind"] == "gaussian_ply"
+    response = await client.post(
+        "/api/v1/scenes/from-upload",
+        json={"upload_id": upload["upload_id"], "name": "Scene PLY", "attestation": _ATTESTATION},
+    )
+    assert response.status_code == 409 and "PLY/ZIP" in response.json()["detail"]

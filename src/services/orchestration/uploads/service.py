@@ -1,18 +1,30 @@
-"""Nhận video upload theo stream vào artifact store và ghi danh sách upload bền vững.
+"""Nhận upload theo stream vào artifact store và ghi danh sách upload bền vững.
 
-Video được giữ nguyên bytes gốc (PRD FR-01: không làm mất input khi job lỗi). Tên
-file người dùng chỉ để hiển thị; đường dẫn lưu trữ do hệ thống đặt.
+File được giữ nguyên bytes gốc (PRD FR-01: không làm mất input khi job lỗi). Tên
+file người dùng chỉ để hiển thị; đường dẫn lưu trữ do hệ thống đặt. Loại đầu vào
+(video, PLY 3DGS, ZIP PLY + COLMAP) nhận diện theo bytes trước khi ghi record (ADR 0004).
 """
 
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
+from typing import BinaryIO
 from uuid import uuid4
 
 from src.services.orchestration.artifacts import ArtifactResolver, StreamingPublication
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
-from src.services.orchestration.uploads.models import VIDEO_EXTENSIONS, UploadRecord
+from src.services.orchestration.uploads.models import (
+    KIND_MEDIA_TYPES,
+    UNSUPPORTED_EXTENSION,
+    UPLOAD_EXTENSIONS,
+    UploadRecord,
+)
+from src.services.reconstruction import InputDetection, InputRejectedError, detect_stream
+
+#: ZIP giải nén tối đa gấp đôi giới hạn upload: PLY/ảnh nén kém nên file thật không
+#: vượt; chặn zip bomb mà không cần đọc hết nội dung.
+ZIP_EXPANSION_LIMIT = 2
 
 
 class UploadError(ValueError):
@@ -42,6 +54,17 @@ def display_name(filename: str) -> str:
     return name
 
 
+def classify_upload(stream: BinaryIO, size_bytes: int, media_type: str, max_bytes: int) -> InputDetection:
+    """Nhận diện loại theo bytes; đuôi file phải khớp nội dung để người dùng không nhầm."""
+    try:
+        detection = detect_stream(stream, size_bytes, max_bytes * ZIP_EXPANSION_LIMIT)
+    except InputRejectedError as error:
+        raise UploadError(str(error)) from error
+    if media_type not in KIND_MEDIA_TYPES[detection.kind]:
+        raise UploadError("Đuôi file không khớp nội dung; đổi đúng đuôi (.mp4/.mov, .ply hoặc .zip) rồi tải lại")
+    return detection
+
+
 class VideoUploadService:
     """Mỗi request một instance; không giữ state ngoài DB và artifact store."""
 
@@ -54,16 +77,19 @@ class VideoUploadService:
         """Kiểm đuôi file rồi mở publication; đích là `input/source<ext>` trong namespace upload."""
         name = display_name(filename)
         suffix = PurePosixPath(name).suffix.lower()
-        media_type = VIDEO_EXTENSIONS.get(suffix)
+        media_type = UPLOAD_EXTENSIONS.get(suffix)
         if media_type is None:
-            raise UploadError("Chỉ hỗ trợ video .mp4 hoặc .mov quay bằng camera di chuyển")
+            raise UploadError(UNSUPPORTED_EXTENSION)
         upload_id = f"upload-{uuid4().hex[:12]}"
         uri = f"artifact://jobs/{upload_id}/input/source{suffix}"
         return PendingUpload(upload_id, name, media_type, StreamingPublication(self.resolver, uri, self.max_bytes))
 
     def finish(self, pending: PendingUpload) -> UploadRecord:
-        """Commit bytes rồi ghi record; lỗi DB không để lại record trỏ tới file thiếu."""
-        checksum = pending.publication.commit()
+        """Nhận diện loại, commit bytes rồi ghi record; file sai loại không được lưu."""
+        publication = pending.publication
+        with publication.staged_path().open("rb") as stream:
+            detection = classify_upload(stream, publication.size_bytes, pending.media_type, self.max_bytes)
+        checksum = publication.commit()
         record = UploadRecord(
             upload_id=pending.upload_id,
             original_name=pending.original_name,
@@ -72,6 +98,8 @@ class VideoUploadService:
             checksum=checksum,
             artifact_uri=pending.publication.artifact_uri,
             received_at=datetime.now(UTC),
+            input_kind=detection.kind,
+            detection=detection,
         )
         with self.database.transaction(write=True) as tx:
             tx.execute(
