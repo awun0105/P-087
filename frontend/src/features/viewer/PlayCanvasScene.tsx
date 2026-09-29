@@ -90,6 +90,8 @@ export interface PlayCanvasSceneProps {
   onFailed: () => void;
   onRuntime?: (runtime: PlayCanvasRuntime) => void;
   enableInspection?: boolean;
+  /** Số điểm tối đa của một bộ chọn (2 = đo A/B, 5 = xác nhận tỉ lệ mét). */
+  inspectionMaxPoints?: number;
   onInspectionReady?: (controller: SplatInspection | null) => void;
   onInspectionState?: (state: InspectionState) => void;
 }
@@ -106,6 +108,7 @@ export function PlayCanvasScene({
   onFailed,
   onRuntime,
   enableInspection = false,
+  inspectionMaxPoints = 2,
   onInspectionReady,
   onInspectionState,
 }: PlayCanvasSceneProps) {
@@ -165,7 +168,7 @@ export function PlayCanvasScene({
           try {
             const { SplatInspection } = await import("./splat-inspection");
             if (disposed) return;
-            inspection = new SplatInspection(viewer, onInspectionState);
+            inspection = new SplatInspection(viewer, onInspectionState, inspectionMaxPoints);
             onInspectionReady?.(inspection);
           } catch (error: unknown) {
             if (!disposed) onInspectionState({ ...EMPTY_INSPECTION, error: "Không khởi tạo được công cụ inspection; viewer vẫn dùng được." });
@@ -198,7 +201,7 @@ export function PlayCanvasScene({
       handle = null;
     };
   }, [capability, collisionUrl, contentUrl, contentFile, contentFilename, showControls, mode, onFailed, publish,
-    enableInspection, onInspectionReady, onInspectionState, renderer]);
+    enableInspection, inspectionMaxPoints, onInspectionReady, onInspectionState, renderer]);
 
   return (
     <div
