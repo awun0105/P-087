@@ -16,7 +16,7 @@ from src.models.contracts.manifests import ExecutionError, JobManifest, JobStatu
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import load_prepared_profile, prepared_frame_reference, require_profile
 from src.services.orchestration.jobs.models import TransitionRequest
-from src.services.orchestration.jobs.preview_cli import run_prepared_job, run_video_job
+from src.services.orchestration.jobs.runner import run_prepared_job, run_video_job
 from src.services.orchestration.processing import is_presets_file, load_presets
 from src.services.orchestration.processing.capability import probe as probe_capability
 from src.services.orchestration.processing.capability import record as record_capability

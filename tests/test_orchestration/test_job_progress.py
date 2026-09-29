@@ -9,9 +9,9 @@ import pytest
 from src.models.contracts.manifests import ExecutionError, JobStatus, StageArtifact, StageId
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.models import JobAttemptRecord, TransitionRequest
-from src.services.orchestration.jobs.preview_cli import _Attempt, _StageProgress
 from src.services.orchestration.jobs.profile import ExecutionProfile
 from src.services.orchestration.jobs.progress import MVP_PIPELINE, job_progress
+from src.services.orchestration.jobs.runner import _Attempt, _StageProgress
 from src.services.orchestration.projects.models import JobCreateInput
 from src.services.orchestration.projects.registry import ProjectRegistry
 

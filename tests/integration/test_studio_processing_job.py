@@ -12,7 +12,7 @@ import pytest
 
 from src.models.contracts.manifests import JobStatus
 from src.services.orchestration.artifacts import ArtifactResolver
-from src.services.orchestration.jobs import preview_cli, worker_cli
+from src.services.orchestration.jobs import runner, worker_cli
 from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.jobs.profile import ExecutionProfile
 from src.services.orchestration.processing import build_job_config, job_config_reference, load_presets, preset_values
@@ -45,15 +45,15 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         product_prepare_timeout_seconds=120,
         product_preview_timeout_seconds=120,
     )
-    monkeypatch.setattr(preview_cli, "get_settings", lambda: settings)
-    monkeypatch.setattr(preview_cli, "get_project_registry", lambda: registry)
+    monkeypatch.setattr(runner, "get_settings", lambda: settings)
+    monkeypatch.setattr(runner, "get_project_registry", lambda: registry)
     calls: list[dict] = []
 
-    def fake_preview(attempt: preview_cli._Attempt, frames: object, resolved: object) -> object:
+    def fake_preview(attempt: runner._Attempt, frames: object, resolved: object) -> object:
         calls.append({"frames": frames, "resolved": resolved})
         return attempt.job
 
-    monkeypatch.setattr(preview_cli, "_execute_preview", fake_preview)
+    monkeypatch.setattr(runner, "_execute_preview", fake_preview)
     video = tmp_path / "walk.mp4"
     subprocess.run(
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi",

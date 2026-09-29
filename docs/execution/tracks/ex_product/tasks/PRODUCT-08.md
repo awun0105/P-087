@@ -59,7 +59,7 @@ P0 không tự mở rộng sang advanced scheduler, multi-tenant platform hoặc
 ## 9. Implementation Plan
 
 2026-09-28: nối lát cắt prepared frames→REC CLI→public consumer verifier→durable
-JobManifest→preview API→viewer. Runner nằm ở orchestration/jobs/preview_cli.py,
+JobManifest→preview API→viewer. Runner nằm ở orchestration/jobs/runner.py,
 không import REC internals; public port trả shared receipt. Claim bằng CAS,
 timeout/cancel dừng process group, late result không ghi đè job revision mới.
 Không coi runner prepared-frame là upload/video/privacy pipeline hoàn chỉnh;

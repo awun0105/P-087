@@ -14,7 +14,7 @@ import pytest
 
 from src.models.contracts.manifests import JobStatus, StageId
 from src.services.orchestration.artifacts import ArtifactResolver
-from src.services.orchestration.jobs import preview_cli, worker_cli
+from src.services.orchestration.jobs import runner, worker_cli
 from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.jobs.dispatch import prepared_frame_reference
 from src.services.orchestration.jobs.profile import ExecutionProfile
@@ -60,15 +60,15 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         product_prepare_timeout_seconds=120,
         product_preview_timeout_seconds=120,
     )
-    monkeypatch.setattr(preview_cli, "get_settings", lambda: settings)
-    monkeypatch.setattr(preview_cli, "get_project_registry", lambda: registry)
+    monkeypatch.setattr(runner, "get_settings", lambda: settings)
+    monkeypatch.setattr(runner, "get_project_registry", lambda: registry)
     previews: list[str] = []
 
-    def fake_preview(attempt: preview_cli._Attempt, frames: object, profile: dict) -> object:
+    def fake_preview(attempt: runner._Attempt, frames: object, profile: dict) -> object:
         previews.append(frames.artifact_uri)  # type: ignore[attr-defined]
         return attempt.job
 
-    monkeypatch.setattr(preview_cli, "_execute_preview", fake_preview)
+    monkeypatch.setattr(runner, "_execute_preview", fake_preview)
     uploads = VideoUploadService(database, ArtifactResolver(tmp_path / "artifacts"), max_bytes=10_000_000)
     return SimpleNamespace(registry=registry, uploads=uploads, previews=previews, root=tmp_path)
 
@@ -116,9 +116,9 @@ def test_prepare_failure_ends_attempt_with_stage_error(world: SimpleNamespace, m
     # Làm hỏng profile chất lượng → REC CLI trả lỗi setup (exit 2) → runner ghi FAILED.
     broken = world.root / "broken_profile.json"
     broken.write_text("{}")
-    preview_cli.get_settings().product_upload_quality_profile = broken
+    runner.get_settings().product_upload_quality_profile = broken
     with pytest.raises(RuntimeError, match="Prepare worker"):
-        preview_cli.run_video_job(job_id)
+        runner.run_video_job(job_id)
     job = world.registry.get_job(job_id)
     assert job.status == JobStatus.FAILED
     last = world.registry.list_job_attempts(job_id)[-1]
