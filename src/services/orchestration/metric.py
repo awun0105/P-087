@@ -19,6 +19,7 @@ from src.services.orchestration.artifacts import ArtifactStoreError, FilesystemA
 from src.services.orchestration.jobs.progress import awaiting_metric_confirmation
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.reconstruction import (
+    DemoSelection,
     LidarMeasurements,
     UserMetricInput,
     UserMetricPreview,
@@ -107,6 +108,14 @@ class MetricConfirmationService:
             return self.port.lidar_measurements(
                 job_id, contract.source_visual_ref, self.lidar_support(job_id), anchor, check
             )
+        except ValueError as error:
+            raise MetricConfirmationError(str(error)) from error
+
+    def demo_selection(self, job_id: str) -> DemoSelection:
+        """Dataset mẫu: 7 điểm tự chọn từ LiDAR + số đo, để UI vẽ và điền sẵn."""
+        _, contract = self._waiting_job(job_id)
+        try:
+            return self.port.demo_selection(job_id, contract.source_visual_ref, self.lidar_support(job_id))
         except ValueError as error:
             raise MetricConfirmationError(str(error)) from error
 

@@ -21,7 +21,7 @@ from src.services.orchestration.metric import (
     MetricPreviewView,
 )
 from src.services.orchestration.projects import JobNotFoundError
-from src.services.reconstruction import LidarMeasurements, UserMetricInput
+from src.services.reconstruction import DemoSelection, LidarMeasurements, UserMetricInput
 
 router = APIRouter()
 Point = tuple[FiniteFloat, FiniteFloat, FiniteFloat]
@@ -86,6 +86,15 @@ def measure_on_lidar(job_id: str, request: LidarMeasureRequest) -> LidarMeasurem
         return _service(job_id).lidar_measurements(
             job_id, (request.point_a, request.point_b), (request.check_a, request.check_b)
         )
+    except MetricConfirmationError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+@router.get("/jobs/{job_id}/metric/demo-points", response_model=DemoSelection, responses=_ERRORS)
+def demo_points(job_id: str) -> DemoSelection:
+    """Dataset mẫu: hệ thống tự chọn 7 điểm trên sàn LiDAR và đo sẵn (demo luồng xác nhận)."""
+    try:
+        return _service(job_id).demo_selection(job_id)
     except MetricConfirmationError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 
