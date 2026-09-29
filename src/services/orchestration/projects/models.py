@@ -66,6 +66,16 @@ class ProjectCreateInput(BaseModel):
     attestation: SourceRightsAttestation
 
 
+class UploadProjectInput(BaseModel):
+    """Tạo scene/project từ một video đã upload, kèm lời khai nguồn dữ liệu."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    upload_id: Identifier
+    name: str = Field(min_length=1, max_length=200)
+    attestation: SourceRightsAttestation
+
+
 class JobCreateInput(BaseModel):
     """Yêu cầu tạo job trong một project."""
 

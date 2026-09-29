@@ -7,7 +7,7 @@ unit/fixture cũ, không phải đường persistence của deployed API.
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import TypeVar
+from typing import Literal, TypeVar
 from uuid import uuid4
 
 from pydantic import BaseModel
@@ -22,6 +22,8 @@ from src.models.contracts.artifacts import (
 )
 from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.manifests import (
+    InputConfiguration,
+    InputFile,
     InputManifest,
     JobManifest,
     JobStatus,
@@ -40,6 +42,7 @@ from src.services.orchestration.artifacts import (
     ArtifactNotFoundError,
     ArtifactResolver,
     FilesystemArtifactStore,
+    sha256_bytes,
     sha256_file,
     with_canonical_checksum,
 )
@@ -52,14 +55,17 @@ from src.services.orchestration.projects.errors import (
     ProjectNotFoundError,
 )
 from src.services.orchestration.projects.models import (
+    InputVideoSummary,
     JobCreateInput,
     ProjectCreateInput,
     ProjectRecord,
+    UploadProjectInput,
 )
 from src.services.orchestration.projects.persistence import ProjectPersistence
 from src.services.orchestration.projects.preview import load_job_preview
 from src.services.orchestration.projects.privacy import require_project_dispatch
 from src.services.orchestration.scene.editor import SceneEditor
+from src.services.orchestration.uploads.models import UploadRecord
 
 ContractT = TypeVar("ContractT", bound=BaseModel)
 
@@ -233,6 +239,73 @@ class ProjectRegistry:
             input_manifest_checksum=request.input_manifest_checksum,
             source_rights_attestation=attestation,
             privacy_report=self._preliminary_privacy_report(request.input_manifest_checksum),
+        )
+        if self.persistence is not None:
+            self.persistence.save_project(record)
+        else:
+            self._projects[project_id] = record
+            self._project_jobs[project_id] = []
+        return record
+
+    def create_project_from_upload(
+        self,
+        upload: UploadRecord,
+        request: UploadProjectInput,
+        privacy_mode: Literal["qa_verified", "self_attested"],
+    ) -> ProjectRecord:
+        """Dựng InputManifest cho video đã upload, publish nó rồi tạo project.
+
+        Manifest nằm trong namespace của project (immutable); video giữ nguyên ở
+        namespace upload. `attested=True` là field mà EX-REC privacy gate đọc.
+        """
+        if upload.upload_id != request.upload_id:
+            raise ValueError("upload không khớp request")
+        project_id = f"project-{uuid4().hex[:12]}"
+        attestation: JsonObject = {**request.attestation.model_dump(mode="json"), "attested": True}
+        draft = InputManifest(
+            schema_version=_SCHEMA_VERSION,
+            source_type="upload",
+            received_at=upload.received_at,
+            files=[
+                InputFile(
+                    original_name=upload.original_name,
+                    media_type=upload.media_type,
+                    size_bytes=upload.size_bytes,
+                    checksum=upload.checksum,
+                    artifact_uri=upload.artifact_uri,
+                    data_class=ArtifactDataClass.PRODUCT_INPUT,
+                )
+            ],
+            input_configuration=InputConfiguration(rgb_present=True, registered_lidar_present=False),
+            source_rights_attestation=attestation,
+            preparation_provenance={"upload_id": upload.upload_id},
+            input_manifest_checksum=_PLACEHOLDER_CHECKSUM,
+        )
+        manifest = with_canonical_checksum(draft, "input_manifest_checksum")
+        payload = manifest.model_dump_json(indent=2).encode("utf-8") + b"\n"
+        reference = ProductArtifactRef(
+            artifact_type="InputManifest",
+            schema_version=_SCHEMA_VERSION,
+            artifact_uri=f"artifact://jobs/{project_id}/input/input_manifest.json",
+            artifact_checksum=sha256_bytes(payload),
+            data_class=ArtifactDataClass.PRODUCT_INPUT,
+            producer_stage=StageId.INPUT_VALIDATE,
+            job_id=project_id,
+        )
+        FilesystemArtifactStore(self.runtime_resolver).publish(reference, payload)
+        record = ProjectRecord(
+            project_id=project_id,
+            name=request.name,
+            source_type="upload",
+            input_manifest_checksum=manifest.input_manifest_checksum,
+            source_rights_attestation=attestation,
+            privacy_report=self._preliminary_privacy_report(manifest.input_manifest_checksum),
+            privacy_mode=privacy_mode,
+            input_manifest_ref=reference,
+            input_video=InputVideoSummary(
+                original_name=upload.original_name, media_type=upload.media_type, size_bytes=upload.size_bytes
+            ),
+            created_at=datetime.now(UTC),
         )
         if self.persistence is not None:
             self.persistence.save_project(record)
