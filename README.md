@@ -69,6 +69,11 @@ Swagger UI: <http://localhost:8000/docs>
 Chạy cả Studio (API + queue worker + Next.js) với tool xử lý thật: xem runbook
 [`scripts/gpu/README.md`](scripts/gpu/README.md) (`scripts/gpu/run_stack.sh`).
 
+Kiến trúc cloud đã chốt nhưng chưa triển khai ([ADR 0003](docs/decisions/0003-cloud-architecture-roles-and-browser-budget.md),
+[plan](docs/plans/active/2026-09-29-cloud-studio.md)): Web UI trên Vercel, API + Postgres
+trên Railway, kho file Cloudflare R2, GPU RunPod tự bật/tắt; hai role Editor/Reviewer,
+khách chỉ dùng video mẫu.
+
 Chạy kiểm tra:
 
 ```bash
