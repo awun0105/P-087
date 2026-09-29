@@ -22,7 +22,7 @@ Owner (Cường) và QA/Validation Lead (Đạt) xác nhận để thành Accept
 ## Decision
 
 1. Studio MVP là UI mới (route group `(studio)`); UI cũ giữ nguyên code, ẩn sau
-   `LEGACY_UI=1` (`frontend/src/proxy.ts`).
+   `LEGACY_UI=1` (`redirects()` trong `frontend/next.config.ts`).
 2. Lát cắt MVP: upload video → `ST-INPUT-VALIDATE` → `ST-PRIVACY-GATE` →
    `ST-FRAME-EXTRACT` (stride) → `ST-CAMERA-POSE` → `ST-VISUAL-RECON` →
    `ReconstructionPreview` (metric `UNCONFIRMED`) → editor.

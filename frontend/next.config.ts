@@ -13,6 +13,17 @@ const nextConfig: NextConfig = {
   // Không để `next dev` sinh AGENTS.md/CLAUDE.md trong frontend/: harness của repo
   // nằm ở AGENTS.md gốc, file sinh tự động sẽ mâu thuẫn với authority map.
   agentRules: false,
+  /**
+   * UI cũ (route group `(legacy)`) giữ nguyên code nhưng ẩn khỏi MVP: mọi route cũ
+   * chuyển về Studio, trừ khi chạy với `LEGACY_UI=1`. Dùng `redirects` thay vì
+   * `proxy.ts` vì proxy buộc Next buffer body (mặc định 10MB) → hỏng upload video.
+   */
+  async redirects() {
+    if (process.env.LEGACY_UI === "1") return [];
+    return ["/legacy/:path*", "/projects/:path*", "/jobs/:path*", "/viewer/:path*", "/legacy", "/projects", "/viewer"].map(
+      (source) => ({ source, destination: "/", permanent: false }),
+    );
+  },
   async rewrites() {
     return [
       {
