@@ -20,7 +20,7 @@ from src.services.orchestration.processing.capability import latest as latest_ca
 from src.services.orchestration.projects import ProjectRegistry, get_project_registry
 from src.services.orchestration.samples import DemoLibrary
 from src.services.orchestration.storage import runtime_resolver
-from src.services.orchestration.uploads import VideoUploadService
+from src.services.orchestration.uploads import DirectUploadService, VideoUploadService
 
 
 def settings() -> Settings:
@@ -41,6 +41,18 @@ def uploads() -> VideoUploadService:
         runtime_resolver(current),
         current.product_upload_max_bytes,
     )
+
+
+def direct_uploads() -> DirectUploadService:
+    """Service upload thẳng lên kho file; deployment chưa có kho file → 409."""
+    current = settings()
+    resolver = runtime_resolver(current)
+    if resolver.remote is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Deployment chưa cấu hình kho file (ARTIFACT_S3_*); dùng upload qua API",
+        )
+    return DirectUploadService(RuntimeDatabase(current.database_url), resolver, current.product_upload_max_bytes)
 
 
 def sample_library() -> DemoLibrary:
