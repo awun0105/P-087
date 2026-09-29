@@ -41,7 +41,7 @@ def _load_frame_ids(paths: tuple[Path, ...]) -> tuple[str, ...]:
 
 def _mask_for_frame(frame_id: str, index: int, view: ValidatedBundleView) -> MaskObservation:
     hint = "fixture-object-001"
-    seed = hashlib.sha256(f"{frame_id}:{hint}".encode("utf-8")).hexdigest()
+    seed = hashlib.sha256(f"{frame_id}:{hint}".encode()).hexdigest()
     return MaskObservation(
         mask_id=f"mask-{index + 1:06d}",
         frame_id=frame_id,

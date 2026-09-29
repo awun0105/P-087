@@ -8,4 +8,3 @@ __all__ = [
     "build_candidate_package",
     "generate_scene_usda",
 ]
-

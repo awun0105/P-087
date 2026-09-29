@@ -15,7 +15,12 @@ from src.services.scene.candidates.builder import build_candidates
 from src.services.scene.candidates.models import CandidateObject, CandidateState
 from src.services.scene.candidates.operations import confirm_candidate, ignore_candidate, rename_candidate
 from src.services.scene.decomposition.baseline import decompose_scene
-from src.services.scene.editing.commands import PrimitiveObjectCommand, add_primitive_object, move_object, set_object_active
+from src.services.scene.editing.commands import (
+    PrimitiveObjectCommand,
+    add_primitive_object,
+    move_object,
+    set_object_active,
+)
 from src.services.scene.extraction.deterministic import extract_fixture_masks
 from src.services.scene.publisher import build_scene_ir
 from src.services.scene.worker import run_fixture_scene_worker

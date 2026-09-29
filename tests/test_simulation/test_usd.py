@@ -136,4 +136,3 @@ def test_build_candidate_package_rejects_mismatched_checksum(
 
     with pytest.raises(ValueError, match="scene_ir_checksum không khớp"):
         build_candidate_package(req)
-

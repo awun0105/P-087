@@ -101,4 +101,3 @@ def generate_scene_usda(scene: SceneIR) -> str:
 
     lines.extend(["    }", "}"])
     return "\n".join(lines) + "\n"
-

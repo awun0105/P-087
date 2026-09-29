@@ -41,7 +41,9 @@ class CandidateBuildRequest(BaseModel):
 def _validate_preflight_gate(scene: SceneIR, report: PreflightReport) -> None:
     """Kiểm tra Preflight report phải PASS và khớp chính xác bản sửa đổi SceneIR."""
     if report.blocking_result != RuleResult.PASS:
-        raise ValueError(f"Không thể build CandidatePackage khi Preflight chưa PASS (hiện tại: {report.blocking_result})")
+        raise ValueError(
+            f"Không thể build CandidatePackage khi Preflight chưa PASS (hiện tại: {report.blocking_result})"
+        )
     if report.scene_revision != scene.scene_revision:
         raise ValueError(
             f"Preflight report scene_revision '{report.scene_revision}' không khớp với "
@@ -149,4 +151,3 @@ def build_candidate_package(req: CandidateBuildRequest) -> CandidatePackage:
         )
 
     return sealed_pkg
-
