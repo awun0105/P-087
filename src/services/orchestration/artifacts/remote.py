@@ -12,9 +12,11 @@ Bất biến giữ nguyên như filesystem store:
 """
 
 import hashlib
+import io
 import logging
 import os
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
@@ -104,6 +106,10 @@ class ObjectStore(Protocol):
 
     def delete(self, key: str) -> None:
         """Xóa object (chỉ dùng cho upload bị từ chối khi kiểm tra)."""
+        ...
+
+    def read_range(self, key: str, start: int, length: int) -> bytes:
+        """Đọc một đoạn bytes (HTTP Range); dùng để nhận diện file mà không tải cả object."""
         ...
 
 
@@ -233,6 +239,12 @@ class ArtifactRemote:
         """Xóa object bị từ chối sau kiểm tra."""
         self.store.delete(self.key(relative))
 
+    def open_ranged(self, relative: str, size_bytes: int) -> "RangedObjectReader":
+        """File-like chỉ đọc, seek được, tải theo đoạn: đủ cho header/mục lục ZIP."""
+        return RangedObjectReader(
+            lambda start, length: self.store.read_range(self.key(relative), start, length), size_bytes
+        )
+
 
 class S3ObjectStore:
     """Object store qua boto3 cho Cloudflare R2, MinIO hoặc S3."""
@@ -354,3 +366,65 @@ class S3ObjectStore:
     def delete(self, key: str) -> None:
         """DeleteObject."""
         self.client.delete_object(Bucket=self.bucket, Key=key)
+
+    def read_range(self, key: str, start: int, length: int) -> bytes:
+        """GetObject với header Range (byte cuối tính cả)."""
+        if length <= 0:
+            return b""
+        response = self.client.get_object(Bucket=self.bucket, Key=key, Range=f"bytes={start}-{start + length - 1}")
+        return response["Body"].read()
+
+
+class RangedObjectReader(io.RawIOBase):
+    """Stream seek được trên object từ xa; mỗi lần đọc thiếu thì tải một khối.
+
+    Nhận diện file chỉ đọc header đầu file và mục lục ZIP ở cuối, nên tải theo khối
+    64 KiB là đủ và tránh kéo cả video nhiều GB về API server.
+    """
+
+    BLOCK = 64 * 1024
+
+    def __init__(self, fetch: Callable[[int, int], bytes], size_bytes: int) -> None:
+        super().__init__()
+        self._fetch = fetch
+        self._size = size_bytes
+        self._position = 0
+        self._blocks: dict[int, bytes] = {}
+
+    def readable(self) -> bool:
+        """Chỉ đọc."""
+        return True
+
+    def seekable(self) -> bool:
+        """Seek tự do trong phạm vi object."""
+        return True
+
+    def tell(self) -> int:
+        """Vị trí hiện tại."""
+        return self._position
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        """Như file thường; không tải gì cho tới khi đọc."""
+        base = {io.SEEK_SET: 0, io.SEEK_CUR: self._position, io.SEEK_END: self._size}[whence]
+        self._position = max(0, base + offset)
+        return self._position
+
+    def _block(self, index: int) -> bytes:
+        if index not in self._blocks:
+            start = index * self.BLOCK
+            self._blocks[index] = self._fetch(start, min(self.BLOCK, self._size - start))
+        return self._blocks[index]
+
+    def readinto(self, buffer: memoryview) -> int:  # type: ignore[override]
+        """Đọc từ các khối đã tải (tải thêm khi thiếu)."""
+        wanted = min(len(buffer), self._size - self._position)
+        copied = 0
+        while copied < wanted:
+            index, offset = divmod(self._position, self.BLOCK)
+            chunk = self._block(index)[offset : offset + wanted - copied]
+            if not chunk:
+                break
+            buffer[copied : copied + len(chunk)] = chunk
+            copied += len(chunk)
+            self._position += len(chunk)
+        return copied

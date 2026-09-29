@@ -186,6 +186,13 @@ class StreamingPublication:
         self._digest.update(chunk)
         self._stream.write(chunk)
 
+    def staged_path(self) -> Path:
+        """Flush và trả file tạm để kiểm nội dung trước `commit` (chỉ đọc, hết hiệu lực sau commit/abort)."""
+        if self._closed:
+            raise ValueError("publication đã đóng")
+        self._stream.flush()
+        return self._temporary
+
     def commit(self) -> str:
         """Fsync, link sang đích và trả checksum `sha256:`; payload rỗng bị từ chối."""
         if self._closed:
