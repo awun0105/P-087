@@ -1,7 +1,8 @@
+import csv
 import json
 import shutil
 from pathlib import Path
-import csv
+
 
 def main():
     rec01 = Path("data/torwic_slam_rec01/aisle_cw")
@@ -27,6 +28,7 @@ def main():
     manifest_file = rec01 / "manifest.json"
     if manifest_file.exists():
         shutil.move(manifest_file, out_deri / "preparation_manifest.json")
+
 
 if __name__ == "__main__":
     main()

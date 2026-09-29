@@ -297,8 +297,8 @@ SHA-256 list của 1.094 raw RGB/calibration/timestamps files trước/sau
 giống nhau (`cmp` exit 0). Broken evaluation-only GT symlink hiện có được
 chỉnh relative target thành `../../raw/global/groundtruth_map.ply` và resolve
 đúng, không sửa raw GT bytes. `data/torwic_slam_rec01` đã không còn tồn tại
-khi audit cuối; hai script migration untracked có sẵn (`merge.py`,
-`merge_rec01.sh`) được giữ nguyên, không stage. Các output cũ được đối chiếu
+khi audit cuối; hai script migration có sẵn (nay ở `scripts/torwic/migrations/rec01_merge.py`,
+`rec01_merge.sh`) được giữ nguyên, không stage. Các output cũ được đối chiếu
 với raw và canonical generated refs; legacy preparation manifest được lưu
 tạm ở `/tmp` trong lúc migration.
 
