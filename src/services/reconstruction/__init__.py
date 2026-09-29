@@ -33,18 +33,26 @@ def user_metric_port(
 
 
 def __getattr__(name: str) -> object:
-    """Model public của port REC-06 (import lười để API không kéo module REC khi không dùng)."""
+    """Model public của port REC-06 / nhận diện đầu vào (import lười để API không kéo module REC khi không dùng)."""
     if name in {"UserMetricInput", "UserMetricPreview", "UserMetricPort", "publish_json"}:
         from src.services.reconstruction import metric_port
 
         return getattr(metric_port, name)
+    if name in {"detect_input", "InputDetection", "InputKind", "InputRejectedError"}:
+        from src.services.reconstruction.inputs import detect
+
+        return getattr(detect, name)
     raise AttributeError(name)
 
 
 __all__ = [
+    "InputDetection",
+    "InputKind",
+    "InputRejectedError",
     "UserMetricInput",
     "UserMetricPort",
     "UserMetricPreview",
+    "detect_input",
     "publish_json",
     "user_metric_port",
     "verify_prepared_preview",
