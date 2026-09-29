@@ -1,15 +1,15 @@
 """Scene Studio: tạo scene từ video đã upload, liệt kê scene, tiến trình job."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict
 
 from src.api import schemas
-from src.api.auth import auth_service, require_editor
+from src.api.auth import enforce_gpu_quota, record_gpu_run, require_editor
 from src.api.studio import deps
 from src.models.contracts.manifests import JobManifest
-from src.services.orchestration.auth import UserRecord, has_unlimited_quota
+from src.services.orchestration.auth import UserRecord
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.progress import JobProgress, job_progress
 from src.services.orchestration.processing import build_job_config, evaluate, is_presets_file, preset_values
@@ -60,15 +60,9 @@ def create_scene_from_upload(
 
     Kiểm execution profile trước khi tạo project để không sinh scene mồ côi khi
     deployment chưa cấu hình worker. Khi bật đăng nhập: kiểm hạn mức scene/24 giờ của
-    Editor (Reviewer không giới hạn) và ghi nhật ký `scene.create`.
+    Editor (Reviewer không giới hạn) theo số lần xử lý GPU/24 giờ và ghi nhật ký.
     """
-    if user is not None and not has_unlimited_quota(user):
-        since = datetime.now(UTC) - timedelta(days=1)
-        if auth_service().count_actions(user.user_id, "scene.create", since) >= user.daily_job_quota:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Đã dùng hết hạn mức {user.daily_job_quota} scene trong 24 giờ; nhờ Reviewer nâng hạn mức",
-            )
+    enforce_gpu_quota(user)
     settings = deps.settings()
     if settings.product_privacy_mode != "self_attested":
         raise HTTPException(
@@ -112,8 +106,7 @@ def create_scene_from_upload(
         job = registry.create_job(JobCreateInput(project_id=project.project_id), processing)
     except (PrivacyGateBlockedError, RuntimeStateConflictError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    if user is not None:
-        auth_service().audit(user.user_id, "scene.create", project.project_id, {"job_id": job.job_id})
+    record_gpu_run(user, job.job_id, {"kind": "scene.create", "project_id": project.project_id})
     return SceneFromUploadResponse(project=schemas.project_response(project), job=job)
 
 

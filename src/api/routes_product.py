@@ -11,11 +11,12 @@ from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
 from src.api import schemas
-from src.api.auth import require_reviewer
+from src.api.auth import enforce_gpu_quota, record_gpu_run, require_editor, require_reviewer
 from src.models.contracts.artifacts import ArtifactRef, Checksum
 from src.models.contracts.manifests import JobManifest, JobStatus
 from src.models.contracts.preview import ReconstructionPreview
 from src.services.orchestration.artifacts import ArtifactNotFoundError, ArtifactStoreError
+from src.services.orchestration.auth import UserRecord
 from src.services.orchestration.jobs import (
     InvalidTransitionError,
     JobLifecycleError,
@@ -169,16 +170,22 @@ def transition_job(job_id: str, request: TransitionRequest) -> JobManifest:
 
 
 @router.post("/jobs/{job_id}/retry", response_model=JobManifest)
-def retry_job(job_id: str) -> JobManifest:
-    """Chạy lại một job FAILED. Attempt mới được nối thêm, không ghi đè attempt cũ."""
+def retry_job(job_id: str, user: UserRecord | None = Depends(require_editor)) -> JobManifest:
+    """Chạy lại một job FAILED. Attempt mới được nối thêm, không ghi đè attempt cũ.
+
+    Mỗi lần thử lại là một lần xử lý GPU nên tính vào hạn mức của Editor.
+    """
+    enforce_gpu_quota(user)
     try:
-        return _registry().transition_job(job_id, TransitionRequest(target_status=JobStatus.QUEUED))
+        job = _registry().transition_job(job_id, TransitionRequest(target_status=JobStatus.QUEUED))
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except JobLifecycleError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
     except (RuntimeStateConflictError, PrivacyGateBlockedError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    record_gpu_run(user, job_id, {"kind": "job.retry"})
+    return job
 
 
 @router.get("/jobs/{job_id}/attempts", response_model=schemas.JobAttemptListResponse)

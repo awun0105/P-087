@@ -132,3 +132,14 @@ async def test_reviewer_has_no_daily_quota(client: AsyncClient, secured: AuthSer
     )
     # Không bị 429: qua bước hạn mức, dừng ở kiểm tra sau (chưa cấu hình worker/không có upload).
     assert response.status_code != 429, response.text
+
+
+@pytest.mark.asyncio
+async def test_retry_counts_against_gpu_quota(client: AsyncClient, secured: AuthService) -> None:
+    reviewer = secured.create_user("lead@example.com", "Lead", PASSWORD, "reviewer")
+    editor = secured.create_user("e@example.com", "E", PASSWORD, "editor")
+    secured.update_user(reviewer, editor.user_id, daily_job_quota=1)
+    secured.audit(editor.user_id, "gpu.run", "job-old", {"kind": "scene.create"})  # đã dùng 1 lượt
+    await _login(client, "e@example.com")
+    response = await client.post("/api/v1/jobs/job-x/retry")
+    assert response.status_code == 429 and "xử lý GPU" in response.json()["detail"]

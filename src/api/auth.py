@@ -7,6 +7,7 @@ Khi `AUTH_REQUIRED=false` (local dev/test), các dependency quyền cho qua.
 
 import time
 from collections import deque
+from datetime import UTC, datetime, timedelta
 from threading import Lock
 from typing import Literal
 
@@ -22,6 +23,7 @@ from src.services.orchestration.auth import (
     Role,
     UserRecord,
     has_role,
+    has_unlimited_quota,
     public,
 )
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
@@ -63,6 +65,27 @@ def _require(role: Role):  # noqa: ANN202 - trả dependency FastAPI
 #: Dependency cho route cần quyền Editor (Reviewer cũng qua) / chỉ Reviewer.
 require_editor = _require("editor")
 require_reviewer = _require("reviewer")
+
+#: Hành động nhật ký cho mỗi lần xử lý GPU (scene mới hoặc thử lại) — đơn vị hạn mức.
+GPU_RUN_ACTION = "gpu.run"
+
+
+def enforce_gpu_quota(user: UserRecord | None) -> None:
+    """Chặn khi Editor đã dùng hết số lần xử lý GPU trong 24 giờ; Reviewer không giới hạn."""
+    if user is None or has_unlimited_quota(user):
+        return
+    since = datetime.now(UTC) - timedelta(days=1)
+    if auth_service().count_actions(user.user_id, GPU_RUN_ACTION, since) >= user.daily_job_quota:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Đã dùng hết {user.daily_job_quota} lần xử lý GPU trong 24 giờ; nhờ Reviewer nâng hạn mức",
+        )
+
+
+def record_gpu_run(user: UserRecord | None, target: str, details: dict[str, str]) -> None:
+    """Ghi một lần xử lý GPU vào nhật ký (dùng để tính hạn mức)."""
+    if user is not None:
+        auth_service().audit(user.user_id, GPU_RUN_ACTION, target, details)
 
 
 class _LoginLimiter:

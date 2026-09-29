@@ -69,7 +69,7 @@ export function TeamPage() {
     <main className="mx-auto max-w-4xl px-4 pt-10 pb-20 sm:px-6">
       <h1 className="text-3xl font-semibold tracking-tight">Nhóm</h1>
       <p className="mt-2 text-[15px] text-ink-muted">
-        Editor dựng và chỉnh scene, có hạn mức số scene mới mỗi 24 giờ (Reviewer chỉnh được). Reviewer có
+        Editor dựng và chỉnh scene, có hạn mức số lần xử lý GPU (scene mới hoặc thử lại) mỗi 24 giờ do Reviewer chỉnh. Reviewer có
         thêm quyền duyệt scene, quản lý thành viên và không bị giới hạn.
       </p>
       <InviteCard />
@@ -84,7 +84,7 @@ export function TeamPage() {
             <tr>
               <th className="px-4 py-3 font-medium">Thành viên</th>
               <th className="px-4 py-3 font-medium">Role</th>
-              <th className="px-4 py-3 font-medium">Scene/24 giờ</th>
+              <th className="px-4 py-3 font-medium">Lượt GPU/24 giờ</th>
               <th className="px-4 py-3 font-medium">Trạng thái</th>
             </tr>
           </thead>
@@ -116,7 +116,7 @@ export function TeamPage() {
                       <span className="text-ink-muted">Không giới hạn</span>
                     ) : (
                     <input
-                      aria-label={`Hạn mức scene mỗi ngày của ${user.display_name}`}
+                      aria-label={`Hạn mức lượt xử lý GPU mỗi 24 giờ của ${user.display_name}`}
                       type="number"
                       min={0}
                       max={1000}
