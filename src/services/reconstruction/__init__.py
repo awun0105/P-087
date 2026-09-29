@@ -38,7 +38,7 @@ def __getattr__(name: str) -> object:
         from src.services.reconstruction import metric_port
 
         return getattr(metric_port, name)
-    if name in {"detect_input", "InputDetection", "InputKind", "InputRejectedError"}:
+    if name in {"detect_input", "detect_stream", "InputDetection", "InputKind", "InputRejectedError"}:
         from src.services.reconstruction.inputs import detect
 
         return getattr(detect, name)
@@ -53,6 +53,7 @@ __all__ = [
     "UserMetricPort",
     "UserMetricPreview",
     "detect_input",
+    "detect_stream",
     "publish_json",
     "user_metric_port",
     "verify_prepared_preview",
