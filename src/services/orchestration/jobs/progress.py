@@ -77,13 +77,25 @@ def job_progress(job: JobManifest, attempts: list[JobAttemptRecord], preview_rea
         if event.status == JobStatus.RUNNING:
             stage_starts.setdefault(event.current_stage, event.recorded_at)
     failure = next((event.error for event in reversed(events) if event.error is not None), None)
+    # Pipeline chạy tuần tự: journal cho thấy đã sang stage sau → stage trước đã xong,
+    # dù StageArtifact của nó chỉ được commit cùng receipt ở cuối attempt.
+    advanced = {
+        stage_id: stage_starts[later]
+        for index, stage_id in enumerate(MVP_PIPELINE)
+        if stage_id in stage_starts
+        for later in MVP_PIPELINE[index + 1 :]
+        if later in stage_starts
+    }
     stages: list[StageProgress] = []
     for stage_id in MVP_PIPELINE:
         record = records.get(stage_id)
         state: StageState = "pending"
         error = None
+        completed_at = record.completed_at if record is not None else None
         if record is not None and record.status == StageStatus.SUCCEEDED:
             state = "succeeded"
+        elif record is None and stage_id in advanced and job.current_stage != stage_id:
+            state, completed_at = "succeeded", advanced[stage_id]
         elif record is not None and record.status == StageStatus.FAILED:
             state, error = "failed", record.error
         elif job.current_stage == stage_id:
@@ -99,7 +111,7 @@ def job_progress(job: JobManifest, attempts: list[JobAttemptRecord], preview_rea
                 stage_id=stage_id,
                 state=state,
                 started_at=stage_starts.get(stage_id),
-                completed_at=record.completed_at if record is not None else None,
+                completed_at=completed_at,
                 error=error,
             )
         )

@@ -124,3 +124,24 @@ def test_stage_progress_reader_advances_job_and_waits_for_complete_line(tmp_path
     registry.transition_job(job.job_id, TransitionRequest(target_status=JobStatus.CANCELLED))
     with pytest.raises(RuntimeStateConflictError):
         registry.record_stage_progress(attempt.job, StageId.CAMERA_POSE)
+
+
+def test_stage_left_behind_in_journal_counts_as_done_before_receipt(tmp_path: Path) -> None:
+    """COLMAP xong (journal đã sang VISUAL_RECON) nhưng receipt chưa commit StageArtifact."""
+    job = _job(
+        tmp_path,
+        status=JobStatus.RUNNING,
+        current_stage=StageId.VISUAL_RECON,
+        stage_artifacts=[_succeeded(s, 2) for s in MVP_PIPELINE[:3]],
+    )
+    attempts = [
+        _event(1, JobStatus.QUEUED, StageId.INPUT_VALIDATE, 0),
+        _event(1, JobStatus.RUNNING, StageId.INPUT_VALIDATE, 1),
+        _event(1, JobStatus.RUNNING, StageId.CAMERA_POSE, 3),
+        _event(1, JobStatus.RUNNING, StageId.VISUAL_RECON, 8),
+    ]
+    progress = job_progress(job, attempts, preview_ready=False)
+    assert [stage.state for stage in progress.stages] == ["succeeded"] * 4 + ["running"]
+    camera = progress.stages[3]
+    assert camera.started_at == _T0 + timedelta(minutes=3)
+    assert camera.completed_at == _T0 + timedelta(minutes=8)
