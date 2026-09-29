@@ -5,16 +5,16 @@ import { useEffect, useState } from "react";
 
 import { Badge, Notice } from "@/components/studio/primitives";
 import { SceneWorkspace } from "@/features/studio/SceneWorkspace";
-import { demoFileUrl, getDemo } from "@/lib/api/studio";
+import { getSample, sampleFileUrl } from "@/lib/api/studio";
 import type { DemoManifest } from "@/lib/contracts/studio";
 
-/** Editor cho scene của kịch bản demo (file 3DGS trong demo bundle). */
-export function DemoScene() {
+/** Editor cho scene của video mẫu (file 3DGS trong bundle đã xử lý sẵn). */
+export function SampleScene({ sampleId }: { sampleId: string }) {
   const [demo, setDemo] = useState<DemoManifest | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
-    void getDemo().then((result) => {
+    void getSample(sampleId).then((result) => {
       if (!alive) return;
       if (result.ok) setDemo(result.data);
       else setError(result.error.detail);
@@ -22,12 +22,12 @@ export function DemoScene() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [sampleId]);
 
   if (error) {
     return (
       <main className="mx-auto max-w-3xl px-4 py-10">
-        <Notice tone="rust">Không mở được scene demo: {error}</Notice>
+        <Notice tone="rust">Không mở được scene mẫu: {error}</Notice>
       </main>
     );
   }
@@ -41,10 +41,10 @@ export function DemoScene() {
   return (
     <SceneWorkspace
       title={demo.title}
-      backHref="/demo"
-      contentUrl={demoFileUrl(demo.splat.name)}
+      backHref={`/new?sample=${encodeURIComponent(sampleId)}`}
+      contentUrl={sampleFileUrl(sampleId, demo.splat.name)}
       filename={demo.splat.name}
-      badges={<Badge tone="ember">Kịch bản demo</Badge>}
+      badges={<Badge tone="ember">Video mẫu</Badge>}
     />
   );
 }
