@@ -27,7 +27,8 @@ src/
 ├── api/                              # Organizer scaffold; EX-PRODUCT
 │   ├── routes.py                     # Organizer scaffold; include các router
 │   ├── routes_product.py             # Project/job/artifact/scene/review API
-│   └── studio/                       # Studio MVP: uploads, scenes, processing, samples (+ deps)
+│   ├── auth.py                       # Đăng nhập 2 role, mã mời, guard quyền, hạn mức GPU (ADR 0003)
+│   └── studio/                       # Studio MVP: uploads (+ upload thẳng), scenes, processing, samples (+ deps)
 ├── agents/                           # Organizer scaffold; giữ nguyên
 ├── llm/                              # Organizer scaffold; giữ nguyên
 ├── models/
@@ -67,15 +68,18 @@ src/
     │   ├── isaac/
     │   └── validation/
     └── orchestration/                # EX-PRODUCT
-        ├── jobs/                     # lifecycle, runtime DB, runner, worker_cli, progress
-        ├── artifacts/
-        ├── projects/                 # project registry, privacy policy
-        ├── uploads/                  # video upload (stream vào artifact store)
+        ├── jobs/                     # lifecycle, runtime DB + migration, runner, worker_cli, progress
+        ├── artifacts/                # resolver/store; remote.py = kho file S3/R2 (cache cục bộ tự đồng bộ)
+        ├── auth/                     # tài khoản, mã mời, phiên, nhật ký, CLI tạo Reviewer
+        ├── projects/                 # project registry, privacy policy, link tải có hạn
+        ├── uploads/                  # upload qua API + upload thẳng lên kho file (direct.py)
         ├── processing/               # thông số xử lý theo configs/product, đo máy worker
         ├── samples/                  # thư viện video mẫu đã xử lý sẵn
         ├── scene/                    # SceneIR revision cho viewer (PRODUCT-06)
         ├── review/
-        └── release/
+        ├── release/
+        ├── storage.py                # dựng resolver runtime (+ kho file) từ Settings
+        └── benchmark.py              # benchmark `pipeline_runtime` mỗi attempt
 
 frontend/                             # EX-PRODUCT; Next.js Web Studio
 ├── src/
@@ -102,6 +106,7 @@ frontend/                             # EX-PRODUCT; Next.js Web Studio
 configs/product/                      # EX-PRODUCT; file cấu hình chung (thông số xử lý, upload quality)
 scripts/torwic/                       # EX-REC; offline dataset preparation only (`migrations/` = chạy một lần)
 scripts/gpu/, scripts/demo/           # Chạy stack trên máy GPU; export bundle video mẫu
+scripts/benchmark/, scripts/cloud/    # Tổng hợp benchmark; cấu hình bucket kho file (CORS, lifecycle)
 fixtures/                             # Shared contract-shaped development fixtures
 ├── artifact_store/                   # Resolvable synthetic payload bytes
 ├── reconstruction_bundle/
@@ -126,6 +131,7 @@ eval/                                 # Top-level name is stable
 ├── pose/
 ├── object/
 ├── path/
+│                                     # protocols/BENCHMARKS.md: mục lục loại benchmark (mã → giao thức, kết quả)
 ├── protocols/
 └── results/report.md                 # Existing acceptance report; giữ nguyên
 ```
