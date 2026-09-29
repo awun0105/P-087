@@ -157,7 +157,7 @@ Task COMPLETE (Status: `DONE`).
 
 - Added `adapters/colmap.py`, `colmap_runtime.py`, `colmap_model.py`,
   `rgb/camera_pose.py`, `pose_publication.py`, focused tests and manual
-  `tests/test_reconstruction/rec03_smoke.py`. No source vendoring or new app
+  `tests/test_reconstruction/smoke/rec03_smoke.py`. No source vendoring or new app
   dependency. Reuse COLMAP algorithms; adapt orchestration/selection concepts.
 - `.venv/bin/pytest tests/test_reconstruction/test_rec03_colmap.py -q`:
   **27 passed**. Fixture orchestration/parser/inverse transform, deterministic
