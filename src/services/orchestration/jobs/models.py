@@ -5,11 +5,12 @@ attempt. Lịch sử attempt là khái niệm product, nên nằm ở đây.
 """
 
 from datetime import datetime
+from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.models.contracts.artifacts import ArtifactUri, Checksum, Identifier
-from src.models.contracts.manifests import ExecutionError, JobStatus, StageId
+from src.models.contracts.artifacts import ArtifactUri, Checksum, Identifier, ProductArtifactRef
+from src.models.contracts.manifests import ExecutionError, JobStatus, StageArtifact, StageId, StageStatus
 
 
 class JobAttemptRecord(BaseModel):
@@ -47,3 +48,35 @@ class JobDetail(BaseModel):
 
     job_id: Identifier
     attempts: list[JobAttemptRecord]
+
+
+class PreparedInputReceipt(BaseModel):
+    """Phần PRODUCT đọc từ kết quả `prepare` của EX-REC, chỉ qua shared contracts.
+
+    Field khác trong payload của REC (stride, số frame) bị bỏ qua: PRODUCT không
+    phụ thuộc model nội bộ của track khác.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    job_id: Identifier
+    input_manifest_checksum: Checksum
+    stage_artifacts: list[StageArtifact]
+    frame_set_ref: ProductArtifactRef | None = None
+    error: ExecutionError | None = None
+
+    @model_validator(mode="after")
+    def _outcome(self) -> Self:
+        if (self.error is None) == (self.frame_set_ref is None):
+            raise ValueError("prepare receipt cần đúng một trong frame_set_ref hoặc error")
+        if self.frame_set_ref is not None:
+            frames = [
+                stage
+                for stage in self.stage_artifacts
+                if stage.stage_id == StageId.FRAME_EXTRACT and stage.status == StageStatus.SUCCEEDED
+            ]
+            if len(frames) != 1 or frames[0].artifact_uri != self.frame_set_ref.artifact_uri:
+                raise ValueError("frame_set_ref phải khớp stage ST-FRAME-EXTRACT đã SUCCEEDED")
+            if frames[0].artifact_checksum != self.frame_set_ref.artifact_checksum:
+                raise ValueError("frame_set_ref checksum khác stage record")
+        return self

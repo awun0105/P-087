@@ -33,6 +33,7 @@ from src.models.contracts.manifests import (
     RuntimeManifest,
     StageArtifact,
     StageId,
+    StageStatus,
 )
 from src.models.contracts.preview import PreviewWorkerReceipt, ReconstructionPreview
 from src.models.contracts.release import ApprovalRecord
@@ -47,7 +48,7 @@ from src.services.orchestration.artifacts import (
     with_canonical_checksum,
 )
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
-from src.services.orchestration.jobs.models import JobAttemptRecord, TransitionRequest
+from src.services.orchestration.jobs.models import JobAttemptRecord, PreparedInputReceipt, TransitionRequest
 from src.services.orchestration.jobs.profile import ExecutionProfile
 from src.services.orchestration.jobs.service import JobLifecycle
 from src.services.orchestration.projects.errors import (
@@ -493,6 +494,52 @@ class ProjectRegistry:
         )
         if receipt.error is None:
             load_job_preview(updated, self.runtime_resolver)
+        reference = self.lifecycle.store.publish_manifest(updated)
+        history = self.persistence.list_attempts(expected.job_id)
+        event = JobAttemptRecord(
+            attempt=history[-1].attempt,
+            status=updated.status,
+            current_stage=updated.current_stage,
+            recorded_at=datetime.now(UTC),
+            error=receipt.error,
+            job_manifest_uri=reference.artifact_uri,
+            job_manifest_checksum=reference.artifact_checksum,
+        )
+        self.persistence.save_job(updated, reference, event, expected=expected)
+        return updated
+
+    def record_prepared_input(self, expected: JobManifest, receipt: PreparedInputReceipt) -> JobManifest:
+        """Worker-only reducer cho bước chuẩn bị video; CAS trên revision RUNNING đã claim.
+
+        Mọi stage SUCCEEDED phải resolve đúng checksum trước khi vào journal; lỗi
+        stage kết thúc attempt ở FAILED với ExecutionError của REC.
+        """
+        if self.persistence is None:
+            raise RuntimeStateConflictError("Real worker cần durable registry")
+        if (
+            expected.status != JobStatus.RUNNING
+            or receipt.job_id != expected.job_id
+            or receipt.input_manifest_checksum != expected.input_manifest_checksum
+        ):
+            raise ValueError("Prepare receipt khác job/input đang chạy")
+        for stage in receipt.stage_artifacts:
+            if stage.status != StageStatus.SUCCEEDED:
+                continue
+            if not (stage.artifact_uri or "").startswith(f"artifact://jobs/{expected.job_id}/"):
+                raise ValueError("Prepared artifact phải thuộc namespace của job")
+            self.runtime_resolver.require(self._to_product_ref(expected.job_id, stage))
+        failed = receipt.error is not None
+        updated = with_canonical_checksum(
+            expected.model_copy(
+                update={
+                    "stage_artifacts": [*expected.stage_artifacts, *receipt.stage_artifacts],
+                    "status": JobStatus.FAILED if failed else JobStatus.RUNNING,
+                    "current_stage": receipt.error.stage_id if receipt.error else StageId.CAMERA_POSE,
+                    "completed_at": datetime.now(UTC) if failed else None,
+                }
+            ),
+            "job_manifest_checksum",
+        )
         reference = self.lifecycle.store.publish_manifest(updated)
         history = self.persistence.list_attempts(expected.job_id)
         event = JobAttemptRecord(
