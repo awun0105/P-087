@@ -70,7 +70,9 @@ def test_running_job_marks_done_running_and_pending_stages(tmp_path: Path) -> No
         _event(1, JobStatus.RUNNING, StageId.CAMERA_POSE, 3),
     ]
     progress = job_progress(job, attempts, preview_ready=False)
-    assert [stage.state for stage in progress.stages] == ["succeeded", "succeeded", "succeeded", "running", "pending"]
+    assert [stage.state for stage in progress.stages] == [
+        "succeeded", "succeeded", "succeeded", "running", "pending", "pending"
+    ]  # fmt: skip
     camera = progress.stages[3]
     assert camera.started_at == _T0 + timedelta(minutes=3) and camera.completed_at is None
     assert progress.updated_at == _T0 + timedelta(minutes=3) and progress.error is None
@@ -98,7 +100,7 @@ def test_failed_stage_carries_error_and_retry_resets_to_new_attempt(tmp_path: Pa
     fresh = job_progress(retried, retry_events, preview_ready=False)
     assert fresh.attempt == 2 and fresh.error is None
     # Frame set của attempt 1 hoàn tất trước khi attempt 2 bắt đầu nên không tính lại.
-    assert [stage.state for stage in fresh.stages] == ["pending"] * 5
+    assert [stage.state for stage in fresh.stages] == ["pending"] * 6
 
 
 def test_stage_progress_reader_advances_job_and_waits_for_complete_line(tmp_path: Path) -> None:
@@ -141,7 +143,29 @@ def test_stage_left_behind_in_journal_counts_as_done_before_receipt(tmp_path: Pa
         _event(1, JobStatus.RUNNING, StageId.VISUAL_RECON, 8),
     ]
     progress = job_progress(job, attempts, preview_ready=False)
-    assert [stage.state for stage in progress.stages] == ["succeeded"] * 4 + ["running"]
+    assert [stage.state for stage in progress.stages] == ["succeeded"] * 4 + ["running", "pending"]
     camera = progress.stages[3]
     assert camera.started_at == _T0 + timedelta(minutes=3)
     assert camera.completed_at == _T0 + timedelta(minutes=8)
+
+
+def test_preview_ready_job_waits_for_metric_confirmation(tmp_path: Path) -> None:
+    """Sau preview, job RUNNING ở REC-06 là chờ người xác nhận tỉ lệ, không phải đang chạy."""
+    job = _job(
+        tmp_path,
+        status=JobStatus.RUNNING,
+        current_stage=StageId.METRIC_CANONICALIZE,
+        stage_artifacts=[_succeeded(s, 2) for s in MVP_PIPELINE],
+    )
+    attempts = [
+        _event(1, JobStatus.QUEUED, StageId.INPUT_VALIDATE, 0),
+        _event(1, JobStatus.RUNNING, StageId.INPUT_VALIDATE, 1),
+        _event(1, JobStatus.RUNNING, StageId.METRIC_CANONICALIZE, 9),
+    ]
+    waiting = job_progress(job, attempts, preview_ready=True)
+    assert waiting.waiting_for == "metric_confirmation"
+    assert [stage.state for stage in waiting.stages] == ["succeeded"] * 5 + ["waiting"]
+
+    # Chưa có preview (vd đang dựng) → không báo chờ người.
+    not_ready = job_progress(job, attempts, preview_ready=False)
+    assert not_ready.waiting_for is None and not_ready.stages[-1].state == "running"

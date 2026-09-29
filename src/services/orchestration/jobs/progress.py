@@ -1,8 +1,13 @@
 """Tiến trình theo stage của pipeline MVP (video → 3DGS preview), suy từ state bền vững.
 
 PRODUCT-09: không có phần trăm ước đoán. Mỗi stage chỉ có trạng thái quan sát được
-(pending/running/succeeded/failed/cancelled) cùng thời điểm lấy từ journal attempt
-và StageArtifact đã publish.
+(pending/running/waiting/succeeded/failed/cancelled) cùng thời điểm lấy từ journal
+attempt và StageArtifact đã publish.
+
+Sau preview 3DGS, job ở `RUNNING` tại `ST-METRIC-CANONICALIZE` là **chủ đích**: pipeline
+chờ người xác nhận tỉ lệ mét (REC-06) rồi mới đi tiếp. `JobStatus` là shared contract nên
+không thêm trạng thái; tiến trình báo `waiting_for="metric_confirmation"` để UI hiển
+thị "chờ bạn" thay vì "đang chạy".
 """
 
 from datetime import datetime
@@ -13,7 +18,7 @@ from pydantic import BaseModel, ConfigDict
 from src.models.contracts.manifests import ExecutionError, JobManifest, JobStatus, StageId, StageStatus
 from src.services.orchestration.jobs.models import JobAttemptRecord
 
-#: Thứ tự stage của lát cắt MVP; stage sau metric/SceneIR chưa thuộc Studio MVP.
+#: 5 stage tới preview 3DGS (video mẫu, export bundle dùng danh sách này).
 MVP_PIPELINE: tuple[StageId, ...] = (
     StageId.INPUT_VALIDATE,
     StageId.PRIVACY_GATE,
@@ -21,8 +26,12 @@ MVP_PIPELINE: tuple[StageId, ...] = (
     StageId.CAMERA_POSE,
     StageId.VISUAL_RECON,
 )
+#: Tiến trình job Studio: preview + bước xác nhận tỉ lệ mét (REC-06) chờ người dùng.
+STUDIO_PIPELINE: tuple[StageId, ...] = (*MVP_PIPELINE, StageId.METRIC_CANONICALIZE)
 
-StageState = Literal["pending", "running", "succeeded", "failed", "cancelled"]
+StageState = Literal["pending", "running", "waiting", "succeeded", "failed", "cancelled"]
+#: Việc pipeline đang chờ con người làm (không phải worker).
+WaitingFor = Literal["metric_confirmation"]
 
 
 class StageProgress(BaseModel):
@@ -51,7 +60,19 @@ class JobProgress(BaseModel):
     completed_at: datetime | None = None
     stages: list[StageProgress]
     preview_ready: bool
+    waiting_for: WaitingFor | None = None
     error: ExecutionError | None = None
+
+
+def awaiting_metric_confirmation(job: JobManifest, preview_ready: bool) -> bool:
+    """Preview xong, job dừng ở REC-06 chờ người chọn A/B và nhập khoảng cách thật."""
+    metric_done = any(stage.stage_id == StageId.METRIC_CANONICALIZE for stage in job.stage_artifacts)
+    return (
+        preview_ready
+        and job.status == JobStatus.RUNNING
+        and job.current_stage == StageId.METRIC_CANONICALIZE
+        and not metric_done
+    )
 
 
 def _current_attempt(attempts: list[JobAttemptRecord]) -> list[JobAttemptRecord]:
@@ -81,13 +102,14 @@ def job_progress(job: JobManifest, attempts: list[JobAttemptRecord], preview_rea
     # dù StageArtifact của nó chỉ được commit cùng receipt ở cuối attempt.
     advanced = {
         stage_id: stage_starts[later]
-        for index, stage_id in enumerate(MVP_PIPELINE)
+        for index, stage_id in enumerate(STUDIO_PIPELINE)
         if stage_id in stage_starts
-        for later in MVP_PIPELINE[index + 1 :]
+        for later in STUDIO_PIPELINE[index + 1 :]
         if later in stage_starts
     }
+    waiting = awaiting_metric_confirmation(job, preview_ready)
     stages: list[StageProgress] = []
-    for stage_id in MVP_PIPELINE:
+    for stage_id in STUDIO_PIPELINE:
         record = records.get(stage_id)
         state: StageState = "pending"
         error = None
@@ -106,6 +128,8 @@ def job_progress(job: JobManifest, attempts: list[JobAttemptRecord], preview_rea
             }.get(job.status, "pending")
             if state == "failed":
                 error = failure
+            if waiting:
+                state = "waiting"
         stages.append(
             StageProgress(
                 stage_id=stage_id,
@@ -125,5 +149,6 @@ def job_progress(job: JobManifest, attempts: list[JobAttemptRecord], preview_rea
         completed_at=job.completed_at,
         stages=stages,
         preview_ready=preview_ready,
+        waiting_for="metric_confirmation" if waiting else None,
         error=failure if job.status == JobStatus.FAILED else None,
     )
