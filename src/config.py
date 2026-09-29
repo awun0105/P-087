@@ -89,6 +89,10 @@ class Settings(BaseSettings):
     # None → tự bật cookie Secure ngoài development/test.
     auth_cookie_secure: bool | None = None
 
+    # Benchmark mỗi job (plan Cloud Studio mục 9): đơn giá GPU/giờ để ước tính chi phí.
+    benchmark_gpu_hourly_usd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    benchmark_label: str | None = Field(default=None, max_length=100)
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

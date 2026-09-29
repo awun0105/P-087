@@ -37,7 +37,8 @@ from src.models.contracts.manifests import (
     StageStatus,
 )
 from src.services.orchestration.artifacts import ArtifactResolver
-from src.services.orchestration.jobs.database import RuntimeStateConflictError
+from src.services.orchestration.benchmark import build_benchmark, publish_benchmark
+from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import (
     ResolvedProcessing,
     prepared_frame_reference,
@@ -45,6 +46,7 @@ from src.services.orchestration.jobs.dispatch import (
     resolve_job_processing,
 )
 from src.services.orchestration.jobs.models import PreparedInputReceipt, TransitionRequest
+from src.services.orchestration.processing.capability import latest as latest_capability
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
 from src.services.reconstruction import verify_prepared_preview
 
@@ -246,7 +248,25 @@ def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: Res
     receipt = verify_prepared_preview(reference, attempt.registry.runtime_resolver.require)
     if receipt.attempt_id != attempt_id or (receipt.error is None) != (exit_code == 0):
         raise ValueError("Worker result khác attempt/exit status")
-    return attempt.registry.record_preview(attempt.job, receipt)
+    job = attempt.registry.record_preview(attempt.job, receipt)
+    _record_benchmark(attempt)
+    return job
+
+
+def _record_benchmark(attempt: _Attempt) -> None:
+    """Ghi benchmark sau attempt; không bao giờ làm hỏng job vì lỗi đo đạc (process boundary)."""
+    try:
+        machine = latest_capability(RuntimeDatabase(attempt.settings.database_url))
+        benchmark = build_benchmark(
+            attempt.registry,
+            attempt.job.job_id,
+            machine=machine,
+            gpu_hourly_usd=attempt.settings.benchmark_gpu_hourly_usd,
+            label=attempt.settings.benchmark_label,
+        )
+        publish_benchmark(attempt.registry, benchmark)
+    except Exception:
+        logger.exception("Không ghi được benchmark cho job %s", attempt.job.job_id)
 
 
 def _pull_input(resolver: ArtifactResolver, manifest_ref: ProductArtifactRef) -> None:
