@@ -112,3 +112,28 @@ def test_tampered_or_out_of_bounds_config_is_not_run(world: SimpleNamespace) -> 
     failed = world.registry.get_job(job.job_id)
     assert failed.status == JobStatus.FAILED
     assert world.calls == []
+
+
+def test_benchmark_record_from_real_prepare(world: SimpleNamespace) -> None:
+    """Benchmark lấy thông số thật của job, kích thước input và thời gian stage đo được."""
+    from src.services.orchestration.benchmark import JobBenchmark, build_benchmark, publish_benchmark
+
+    params = preset_values(world.presets, "minimum_quality")
+    config = build_job_config(world.presets, world.checksum, params, None)
+    job = world.registry.create_job(JobCreateInput(project_id=world.project.project_id), config)
+    assert worker_cli.dispatch_next(world.registry) is True
+
+    benchmark = build_benchmark(world.registry, job.job_id, gpu_hourly_usd=1.0, label="integration")
+    assert benchmark.processing == params and benchmark.config_checksum == job.config_checksum
+    assert benchmark.input_size_bytes == world.project.input_video.size_bytes
+    assert benchmark.sog_size_bytes is None  # preview giả, chưa có SOG
+    assert [stage.stage_id for stage in benchmark.stages][0] == "ST-INPUT-VALIDATE"
+    measured = [stage.seconds for stage in benchmark.stages if stage.seconds is not None]
+    assert measured and all(seconds >= 0 for seconds in measured)
+    if benchmark.total_seconds is not None:
+        assert benchmark.estimated_gpu_cost_usd == round(benchmark.total_seconds / 3600, 4)
+
+    reference = publish_benchmark(world.registry, benchmark)
+    assert reference.artifact_uri == f"artifact://jobs/{job.job_id}/benchmark/attempt-1.json"
+    stored = JobBenchmark.model_validate_json(world.registry.runtime_resolver.require(reference).read_bytes())
+    assert stored.label == "integration"
