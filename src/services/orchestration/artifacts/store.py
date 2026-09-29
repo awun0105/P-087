@@ -1,5 +1,6 @@
 """Filesystem-backed implementation of the logical artifact store."""
 
+import hashlib
 import os
 import re
 import tempfile
@@ -14,6 +15,7 @@ from src.services.orchestration.artifacts.errors import (
     ArtifactAlreadyExistsError,
     ArtifactNotFoundError,
     ArtifactSchemaError,
+    ArtifactTooLargeError,
     InvalidArtifactUriError,
 )
 
@@ -104,3 +106,66 @@ class FilesystemArtifactStore:
             raise ArtifactAlreadyExistsError(f"artifact already exists: {destination.name}") from error
         finally:
             temporary_path.unlink(missing_ok=True)
+
+
+class StreamingPublication:
+    """Publish một artifact lớn (video upload) theo chunk, vẫn atomic và immutable.
+
+    Bytes được ghi vào file tạm cùng thư mục đích, băm SHA-256 trong lúc ghi rồi
+    `os.link` sang đích ở `commit()`; lỗi hoặc `abort()` không để lại artifact dở.
+    Caller async phải gọi `write` qua threadpool vì đây là file I/O đồng bộ.
+    """
+
+    def __init__(self, resolver: ArtifactResolver, artifact_uri: str, max_bytes: int) -> None:
+        if max_bytes < 1:
+            raise ValueError("max_bytes phải dương")
+        self.artifact_uri = artifact_uri
+        self.destination = resolver.resolve(artifact_uri)
+        self.destination.parent.mkdir(parents=True, exist_ok=True)
+        if self.destination.exists():
+            raise ArtifactAlreadyExistsError(f"artifact already exists: {self.destination.name}")
+        self.max_bytes = max_bytes
+        self.size_bytes = 0
+        self._digest = hashlib.sha256()
+        descriptor, temporary_name = tempfile.mkstemp(dir=self.destination.parent, prefix=".upload-")
+        self._temporary = Path(temporary_name)
+        self._stream = os.fdopen(descriptor, "wb")
+        self._closed = False
+
+    def write(self, chunk: bytes) -> None:
+        """Ghi một chunk; vượt giới hạn thì hủy ngay, không chờ hết body."""
+        if self._closed:
+            raise ValueError("publication đã đóng")
+        self.size_bytes += len(chunk)
+        if self.size_bytes > self.max_bytes:
+            self.abort()
+            raise ArtifactTooLargeError(f"payload vượt giới hạn {self.max_bytes} bytes")
+        self._digest.update(chunk)
+        self._stream.write(chunk)
+
+    def commit(self) -> str:
+        """Fsync, link sang đích và trả checksum `sha256:`; payload rỗng bị từ chối."""
+        if self._closed:
+            raise ValueError("publication đã đóng")
+        if self.size_bytes == 0:
+            self.abort()
+            raise ValueError("payload rỗng")
+        try:
+            self._stream.flush()
+            os.fsync(self._stream.fileno())
+            self._stream.close()
+            os.link(self._temporary, self.destination)
+        except FileExistsError as error:
+            raise ArtifactAlreadyExistsError(f"artifact already exists: {self.destination.name}") from error
+        finally:
+            self._closed = True
+            self._temporary.unlink(missing_ok=True)
+        return "sha256:" + self._digest.hexdigest()
+
+    def abort(self) -> None:
+        """Bỏ file tạm; gọi nhiều lần vẫn an toàn."""
+        if self._closed:
+            return
+        self._closed = True
+        self._stream.close()
+        self._temporary.unlink(missing_ok=True)

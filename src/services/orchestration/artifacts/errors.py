@@ -23,3 +23,7 @@ class ArtifactChecksumError(ArtifactStoreError):
 
 class ArtifactSchemaError(ArtifactStoreError):
     """Raised when a JSON artifact does not validate against its contract."""
+
+
+class ArtifactTooLargeError(ArtifactStoreError):
+    """Streamed payload vượt giới hạn cấu hình; không có file nào được publish."""

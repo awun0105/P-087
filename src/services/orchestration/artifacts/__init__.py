@@ -13,11 +13,13 @@ from src.services.orchestration.artifacts.errors import (
     ArtifactNotFoundError,
     ArtifactSchemaError,
     ArtifactStoreError,
+    ArtifactTooLargeError,
     InvalidArtifactUriError,
 )
 from src.services.orchestration.artifacts.store import (
     ArtifactResolver,
     FilesystemArtifactStore,
+    StreamingPublication,
 )
 
 __all__ = [
@@ -27,8 +29,10 @@ __all__ = [
     "ArtifactResolver",
     "ArtifactSchemaError",
     "ArtifactStoreError",
+    "ArtifactTooLargeError",
     "FilesystemArtifactStore",
     "InvalidArtifactUriError",
+    "StreamingPublication",
     "canonical_json_bytes",
     "sha256_bytes",
     "sha256_file",

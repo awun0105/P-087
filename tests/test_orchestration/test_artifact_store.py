@@ -77,3 +77,41 @@ def test_load_model_enforces_schema_version(tmp_path: Path) -> None:
 
     with pytest.raises(ArtifactSchemaError, match="invalid RuntimeManifest"):
         resolver.load_model(reference, RuntimeManifest)
+
+
+def test_streaming_publication_commits_atomically_with_checksum(tmp_path: Path) -> None:
+    import hashlib
+
+    from src.services.orchestration.artifacts import StreamingPublication
+
+    resolver = ArtifactResolver(tmp_path)
+    publication = StreamingPublication(resolver, "artifact://jobs/upload-1/input/clip.mp4", max_bytes=10)
+    publication.write(b"abc")
+    publication.write(b"def")
+    checksum = publication.commit()
+    assert checksum == "sha256:" + hashlib.sha256(b"abcdef").hexdigest()
+    assert resolver.resolve("artifact://jobs/upload-1/input/clip.mp4").read_bytes() == b"abcdef"
+    assert [p.name for p in (tmp_path / "jobs/upload-1/input").iterdir()] == ["clip.mp4"]
+
+
+def test_streaming_publication_rejects_oversize_empty_and_existing(tmp_path: Path) -> None:
+    from src.services.orchestration.artifacts import (
+        ArtifactAlreadyExistsError,
+        ArtifactTooLargeError,
+        StreamingPublication,
+    )
+
+    resolver = ArtifactResolver(tmp_path)
+    uri = "artifact://jobs/upload-2/input/clip.mp4"
+    big = StreamingPublication(resolver, uri, max_bytes=4)
+    with pytest.raises(ArtifactTooLargeError):
+        big.write(b"12345")
+    empty = StreamingPublication(resolver, uri, max_bytes=4)
+    with pytest.raises(ValueError, match="rỗng"):
+        empty.commit()
+    assert list((tmp_path / "jobs/upload-2/input").iterdir()) == []
+    ok = StreamingPublication(resolver, uri, max_bytes=4)
+    ok.write(b"1")
+    ok.commit()
+    with pytest.raises(ArtifactAlreadyExistsError):
+        StreamingPublication(resolver, uri, max_bytes=4)
