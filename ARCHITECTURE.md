@@ -399,7 +399,8 @@ P0. Không đưa LLM/agent vào đường bắt buộc
   events/attempts. Con trỏ + event commit cùng transaction; stale writers bị CAS
   từ chối. Binary vẫn ở artifact store, không lưu trong DB.
 - **Migrations:** bootstrap chỉ tạo schema v1 còn thiếu; version lạ bị từ chối,
-  không tự drop/reset. Chưa chọn Alembic. Scene/review/release chưa được coi là
+  không tự drop/reset. Không dùng Alembic: ADR 0003 chốt chuỗi migration có thứ tự
+  theo `r2s_schema.version`, chạy được trên SQLite và Postgres. Scene/review/release chưa được coi là
   đã migrate chỉ vì project/job có persistence.
 - **P0 durable boundary hiện có:** logical artifact URI qua
   `ArtifactResolver`/`FilesystemArtifactStore`; exact storage/runtime wiring của
@@ -457,6 +458,13 @@ driver/CUDA, Isaac/OpenUSD và tool versions phải ghi vào runtime manifest sa
 provisioning; hiện vẫn `UNVERIFIED/TBD`. Không suy ra đã có frontend/worker
 containers từ sơ đồ.
 
+**Deployment đã chốt (ADR 0003, 2026-09-29; chưa triển khai):** Web UI trên Vercel;
+server điều khiển (FastAPI + Postgres) trên Railway; kho file Cloudflare R2 (S3 API,
+presigned upload/download, trình duyệt không tải file lớn qua UI/API); GPU worker
+trên RunPod Pod tự bật khi có job và tự tắt khi rảnh. Trình duyệt chỉ nhận bản 3DGS
+nhẹ (LOD) theo khả năng thiết bị; xử lý nặng, export và ảnh/video xem trước chạy ở
+server. Hiện trạng chạy thật vẫn là một máy (`scripts/gpu/run_stack.sh`).
+
 ## Security
 
 - Secret qua environment/`Settings`, không commit `.env` hay log credential.
@@ -465,7 +473,9 @@ containers từ sơ đồ.
 - Product-facing boundary từ chối raw GT/evaluation-only data bằng typed
   classification; GT-assisted derived artifact giữ provenance cho evaluation.
 - Editor/Reviewer actions và exact candidate approval/release cần authorization
-  cùng audit evidence. Cơ chế identity/login cụ thể chưa được chốt.
+  cùng audit evidence. Cơ chế đã chốt (ADR 0003, chưa triển khai): tài khoản tự
+  quản trong FastAPI/Postgres, mã mời theo role, cookie phiên httpOnly, kiểm quyền
+  trên từng route; hai role Editor/Reviewer theo PRD §3.4, khách chỉ dùng video mẫu.
 - `src/main.py` hiện cấu hình CORS từ `Settings.cors_origins`; allowed origins
   của Web Studio phải được cấu hình khi deploy. Rate limiting và production
   perimeter chưa được khóa/kiểm chứng, không claim đã triển khai.
