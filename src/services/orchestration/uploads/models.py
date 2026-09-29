@@ -26,3 +26,28 @@ class UploadRecord(BaseModel):
     artifact_uri: ArtifactUri
     received_at: datetime
     project_ids: list[Identifier] = Field(default_factory=list)
+
+
+UploadSessionStatus = Literal["UPLOADING", "VERIFYING", "READY", "FAILED"]
+
+
+class UploadSession(BaseModel):
+    """Phiên upload thẳng từ trình duyệt lên kho file (multipart, nối lại được).
+
+    `multipart_id` là id nội bộ của kho file, không trả cho client. Chỉ thành
+    `UploadRecord` khi server tự tính checksum/kích thước xong (`READY`).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    upload_id: Identifier
+    original_name: str = Field(min_length=1, max_length=255)
+    media_type: VideoMediaType
+    size_bytes: int = Field(gt=0)
+    part_size: int = Field(gt=0)
+    part_count: int = Field(ge=1, le=10000)
+    artifact_uri: ArtifactUri
+    multipart_id: str = Field(min_length=1, repr=False)
+    status: UploadSessionStatus
+    error: str | None = None
+    created_at: datetime
