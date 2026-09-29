@@ -29,8 +29,8 @@ from src.models.contracts.manifests import (  # noqa: E402
     StageId,
     StageStatus,
 )
-from src.services.orchestration.jobs.transitions import ALLOWED_TRANSITIONS  # noqa: E402
 from src.models.contracts.scene import ColliderSpec, SceneEnvironment, SceneObject  # noqa: E402
+from src.services.orchestration.jobs.transitions import ALLOWED_TRANSITIONS  # noqa: E402
 
 # TS constant -> giá trị backend tương ứng
 ENUM_MIRRORS: dict[str, list[str]] = {
@@ -131,7 +131,17 @@ def _check_no_widening(source: str) -> list[str]:
     problems = []
     # `ArtifactRef.producer_stage` là `Identifier` tự do ở Pydantic nên `string` là
     # đúng; chỉ các field có enum/Literal mới bị cấm nới.
-    for field in ("stage_id", "current_stage", "up_axis", "handedness", "unit", "result", "decision", "scope", "source_type"):
+    for field in (
+        "stage_id",
+        "current_stage",
+        "up_axis",
+        "handedness",
+        "unit",
+        "result",
+        "decision",
+        "scope",
+        "source_type",
+    ):
         for match in re.finditer(rf"^\s{{2}}{field}\??: ([^;]+);", source, re.M):
             declared = match.group(1).strip()
             if declared in {"string", "string | null"}:
@@ -141,9 +151,7 @@ def _check_no_widening(source: str) -> list[str]:
 
 def main() -> int:
     source = _read()
-    problems = (
-        _check_enums(source) + _check_models(source) + _check_transitions(source) + _check_no_widening(source)
-    )
+    problems = _check_enums(source) + _check_models(source) + _check_transitions(source) + _check_no_widening(source)
     if problems:
         print("FAIL — mirror TypeScript lệch với Pydantic:")
         for problem in problems:
