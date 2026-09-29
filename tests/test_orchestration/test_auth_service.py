@@ -106,3 +106,11 @@ def test_count_actions_for_quota(auth: AuthService) -> None:
     since = datetime.now(UTC) - timedelta(days=1)
     assert auth.count_actions(editor.user_id, "scene.create", since) == 3
     assert auth.count_actions(editor.user_id, "scene.create", datetime.now(UTC) + timedelta(minutes=1)) == 0
+
+
+def test_duplicate_email_on_register_keeps_invite_usable(auth: AuthService) -> None:
+    reviewer = auth.create_user("r@example.com", "R", PASSWORD, "reviewer")
+    code, _ = auth.create_invite(reviewer, "editor")
+    with pytest.raises(RuntimeStateConflictError):
+        auth.register(code, "r@example.com", "Trùng", PASSWORD)  # email đã có → rollback
+    assert auth.register(code, "new@example.com", "Mới", PASSWORD).role == "editor"
