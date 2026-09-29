@@ -71,7 +71,7 @@ Outputs: project/job lifecycle, scene revisions, review history,
   `(legacy)`, ẩn trừ khi `LEGACY_UI=1`. Route Studio ở `src/api/studio/`, queue
   worker `orchestration/jobs/worker_cli.py` + `runner.py` chạy REC thật qua process.
 - **Kiến trúc cloud (ADR 0003, chưa triển khai):** Vercel (UI), Railway (FastAPI +
-  Postgres), Cloudflare R2 (file, upload/download thẳng), RunPod (GPU tự bật/tắt);
+  Postgres), Cloudflare R2 (file, upload/download thẳng), Vast.ai / dự phòng RunPod (GPU tự bật/tắt, worker không phụ thuộc nhà cung cấp);
   hai role Editor/Reviewer, khách chỉ dùng video mẫu; trình duyệt chỉ nhận bản nhẹ.
 - P0 không yêu cầu advanced scheduler hoặc multi-tenant infrastructure.
 - Product workflow/lifecycle là project-owned; starter chỉ cung cấp generic UI patterns, không mang Clerk/organization/billing hoặc Next.js business backend vào hệ thống.

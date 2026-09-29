@@ -37,4 +37,4 @@ External providers interact with the Core strictly via Canonical Artifacts (e.g.
 | Component | Runtime mode | Python | Torch | CUDA | Source revision | Dependency lock | Status |
 |---|---|---|---|---|---|---|---|
 | Core / Foundation | native | 3.12.x | - | - | Foundation SHA | requirements.lock.txt | SUPPORTED |
-| REC GPU tools (Studio) | separate processes | - | - | driver 580.178.04 | COLMAP image `sha256:b8498ebe…`, Brush 0.3.0, splat-transform 3.6.6, FFmpeg 6.1.1 | `runtime_manifest.json` (gitignored, sinh bằng `scripts/gpu/make_runtime_manifest.py`) | Verified local Quadro T2000 (29/09); RunPod image UNVERIFIED (ADR 0003) |
+| REC GPU tools (Studio) | separate processes | - | - | driver 580.178.04 | COLMAP image `sha256:b8498ebe…`, Brush 0.3.0, splat-transform 3.6.6, FFmpeg 6.1.1 | `runtime_manifest.json` (gitignored, sinh bằng `scripts/gpu/make_runtime_manifest.py`) | Verified local Quadro T2000 (29/09); image GPU trên Vast.ai/RunPod UNVERIFIED (ADR 0003) |

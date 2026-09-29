@@ -71,7 +71,7 @@ Chạy cả Studio (API + queue worker + Next.js) với tool xử lý thật: xe
 
 Kiến trúc cloud đã chốt nhưng chưa triển khai ([ADR 0003](docs/decisions/0003-cloud-architecture-roles-and-browser-budget.md),
 [plan](docs/plans/active/2026-09-29-cloud-studio.md)): Web UI trên Vercel, API + Postgres
-trên Railway, kho file Cloudflare R2, GPU RunPod tự bật/tắt; hai role Editor/Reviewer,
+trên Railway, kho file Cloudflare R2, GPU Vast.ai (dự phòng RunPod) tự bật/tắt; hai role Editor/Reviewer,
 khách chỉ dùng video mẫu.
 
 Chạy kiểm tra:

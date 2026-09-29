@@ -1373,7 +1373,7 @@ làm editor Gaussian (ADR 0002); notice ở `frontend/THIRD_PARTY_NOTICES.md`.
 | Web UI | Vercel (Hobby) | Host Next.js; không cõng file lớn |
 | Server điều khiển | Railway (Hobby): FastAPI + PostgreSQL | API, đăng nhập/role, hàng đợi, audit, cấp presigned URL |
 | Kho file | Cloudflare R2 | Video, frame, 3DGS, export; upload/download thẳng từ trình duyệt |
-| GPU worker | RunPod Pod (Community Cloud, RTX 3090/4090) | COLMAP (native), Brush, SOG, LOD, ảnh/video xem trước; tự bật/tắt |
+| GPU worker | Vast.ai (chính), RunPod (dự phòng); adapter theo nhà cung cấp, image dùng chung | COLMAP (native), Brush, SOG, LOD, ảnh/video xem trước; tự bật/tắt |
 
 ### 7.1.0 Phân tầng Repository Chuẩn hóa (Repo Tiers A–E)
 

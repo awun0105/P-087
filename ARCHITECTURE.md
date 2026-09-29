@@ -461,7 +461,7 @@ containers từ sơ đồ.
 **Deployment đã chốt (ADR 0003, 2026-09-29; chưa triển khai):** Web UI trên Vercel;
 server điều khiển (FastAPI + Postgres) trên Railway; kho file Cloudflare R2 (S3 API,
 presigned upload/download, trình duyệt không tải file lớn qua UI/API); GPU worker
-trên RunPod Pod tự bật khi có job và tự tắt khi rảnh. Trình duyệt chỉ nhận bản 3DGS
+trên Vast.ai (dự phòng RunPod, worker không phụ thuộc nhà cung cấp) tự bật khi có job và tự tắt khi rảnh. Trình duyệt chỉ nhận bản 3DGS
 nhẹ (LOD) theo khả năng thiết bị; xử lý nặng, export và ảnh/video xem trước chạy ở
 server. Hiện trạng chạy thật vẫn là một máy (`scripts/gpu/run_stack.sh`).
 

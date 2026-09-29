@@ -59,8 +59,8 @@ Outputs:
   lượng) và `preview_cli` (COLMAP → Brush → SOG). Thông số xử lý đọc từ
   `configs/product/processing_presets_v1.json`; nén SOG chạy GPU qua WebGPU (Dawn).
 - Chạy thật local: job 50 frame / 7k bước / 960px, tổng 7 phút 41 giây (Quadro T2000).
-- Kiến trúc cloud (ADR 0003): REC chạy trong GPU worker RunPod; COLMAP phải cài native
-  trong image (pod không chạy Docker lồng), Brush/SOG cần Vulkan trong container — kiểm
+- Kiến trúc cloud (ADR 0003): REC chạy trong GPU worker (Vast.ai, dự phòng RunPod); COLMAP phải cài native
+  trong image (instance là container, không chạy Docker lồng), Brush/SOG cần Vulkan trong container — kiểm
   ở phase 1 của [plan Cloud Studio](../../../plans/active/2026-09-29-cloud-studio.md).
 - Metric scale giữ ba hướng của ADR 0001; trong cloud, LiDAR/registration và tính scale
   chạy ở worker, trình duyệt chỉ chọn điểm A/B.

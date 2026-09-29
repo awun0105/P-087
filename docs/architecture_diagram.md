@@ -49,7 +49,7 @@ graph LR
     U([Người dùng / trình duyệt]) --> UI[Web UI<br/>Next.js trên Vercel]
     UI -->|REST| API[Server điều khiển<br/>FastAPI + PostgreSQL trên Railway]
     U -->|presigned upload/download| R2[(Cloudflare R2<br/>video, frame, 3DGS, export)]
-    API -->|bật/tắt, giao job| GPU[GPU worker RunPod<br/>COLMAP, Brush, SOG, LOD]
+    API -->|bật/tắt, giao job| GPU[GPU worker Vast.ai / dự phòng RunPod<br/>COLMAP, Brush, SOG, LOD]
     GPU -->|đọc input, ghi artifact| R2
     GPU -->|tiến trình, kết quả| API
     API -->|cấp link có hạn| R2
