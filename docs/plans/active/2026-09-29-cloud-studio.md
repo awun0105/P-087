@@ -1,4 +1,4 @@
-# Execution Plan: Cloud Studio (Vercel + Railway + R2 + RunPod)
+# Execution Plan: Cloud Studio (Vercel + Railway + R2 + Vast.ai/RunPod)
 
 Date: 2026-09-29
 
@@ -30,9 +30,11 @@ Không đổi schema shared contract khi chưa có producer/consumer review.
 
 ## Approach — phases
 
-1. **Kiểm khả thi RunPod (làm đầu tiên).** Thuê pod rẻ; kiểm Vulkan trong container
-   (Brush `--version` + train ngắn, Dawn WebGPU cho SOG), COLMAP cài native (không
-   Docker lồng). Không đạt → tìm image/nhà cung cấp khác trước khi làm tiếp.
+1. **Kiểm khả thi GPU thuê (làm đầu tiên).** Cùng một Docker image, thuê instance rẻ
+   trên **Vast.ai (chính)** và **RunPod (dự phòng)**; kiểm Vulkan trong container (Brush
+   `--version` + train ngắn, Dawn WebGPU cho SOG), COLMAP cài native (không Docker lồng);
+   đo thời gian khởi động, thời gian + giá job mẫu. Vast không đạt → RunPod thành chính
+   (ghi amendment ADR 0003).
 2. **Kho file R2.** Backend S3 sau `ArtifactResolver` (URI `artifact://` giữ nguyên),
    presigned GET/PUT, multipart upload, CORS bucket, lifecycle xóa file trung gian.
 3. **Postgres + migration.** Chuỗi migration theo `r2s_schema.version` (ADR 0003 §5),
@@ -41,7 +43,9 @@ Không đổi schema shared contract khi chưa có producer/consumer review.
    bỏ route proxy upload của Next; `ffprobe` kiểm nhanh trước khi xếp hàng.
 5. **Tách worker GPU.** Worker nhận job/báo tiến trình/commit qua server điều khiển,
    tải input và đẩy artifact qua R2; Docker image GPU ghim version; tự tắt khi rảnh;
-   server tự bật pod qua RunPod API khi có job.
+   server tạo instance qua **adapter nhà cung cấp** (Vast.ai chính, RunPod dự phòng:
+   tạo / hủy / trạng thái, lọc host theo độ tin cậy và trần giá) khi có job; instance
+   dùng-xong-hủy vì dữ liệu nằm ở Postgres + R2.
 6. **Đăng nhập + 2 role** (ADR 0003 §3): users/invites/audit_log, cookie phiên, kiểm
    quyền theo route, hạn mức; khách chỉ dùng video mẫu.
 7. **Ngân sách trình duyệt:** LOD nhẹ/vừa/đầy đủ, client tự chọn và tự hạ theo FPS,
@@ -49,7 +53,7 @@ Không đổi schema shared contract khi chưa có producer/consumer review.
 8. **Benchmark / metric** (mục 9 bên dưới): ghi số đo mỗi job, script tổng hợp.
 9. **Giám sát + chống đốt tiền** (mục 7 bên dưới).
 10. **Kiểm thử GPU + E2E sau deploy** (mục 10 bên dưới).
-11. **Deploy + chuẩn bị demo:** Vercel/Railway/R2/RunPod; video mẫu lên R2; tài khoản
+11. **Deploy + chuẩn bị demo:** Vercel/Railway/R2/Vast.ai (+ RunPod dự phòng); video mẫu lên R2; tài khoản
     Editor và Reviewer demo; bật GPU trước buổi demo; checklist fallback.
 12. Hợp nhất UI P0 đầy đủ (sửa object, validation, review) vào Studio.
 13. Chỉnh sửa gửi dạng lệnh về server (phụ thuộc khả năng lấy thao tác từ SuperSplat).
@@ -74,8 +78,9 @@ Không đổi schema shared contract khi chưa có producer/consumer review.
 
 ### Giám sát và giới hạn chi phí (mục 7 — cách tiện nhất)
 
-- RunPod: đặt spending limit/auto-recharge tắt trong tài khoản; worker tự
-  `runpodctl stop pod` (hoặc RunPod API) khi hàng đợi rỗng 10 phút.
+- Vast.ai: nạp trước số tiền nhỏ, tắt auto-recharge; RunPod: đặt spending limit. Worker
+  tự yêu cầu hủy instance (qua server → adapter) khi hàng đợi rỗng 10 phút; server có
+  job dọn dẹp hủy instance không còn heartbeat để tránh máy mồ côi tính tiền.
 - Worker heartbeat: bảng `r2s_workers` đã có; server kiểm định kỳ, quá 15 phút không
   heartbeat mà còn job RUNNING → đánh dấu lỗi + gửi cảnh báo qua Discord/Slack webhook
   (một biến môi trường URL, không cần dịch vụ giám sát riêng).
@@ -83,7 +88,7 @@ Không đổi schema shared contract khi chưa có producer/consumer review.
   đẩy lên R2 (giữ 7 bản).
 - Giới hạn tần suất: hạn mức theo tài khoản trong DB (job/ngày, GB) là lớp chính;
   thêm giới hạn request theo IP ở middleware FastAPI cho route đăng nhập/upload.
-- Log: stdout JSON có `job_id`, `stage`, `attempt` — Railway/RunPod đều xem được.
+- Log: stdout JSON có `job_id`, `stage`, `attempt` — Railway/Vast.ai/RunPod đều xem được.
 
 ### Database (mục 8)
 
@@ -118,7 +123,7 @@ dữ liệu evaluation-only trong đường runtime.
 2. **Smoke GPU:** `scripts/gpu/smoke.sh` chạy trong đúng Docker image GPU: in version
    tool, chạy video fixture nhỏ (~30 frame, ~1k bước) đầu-cuối, kiểm artifact +
    checksum, ghi bản ghi benchmark. Chạy mỗi khi đổi image/pipeline; có thể kích
-   hoạt tay bằng GitHub Actions `workflow_dispatch` gọi RunPod API.
+   hoạt tay bằng GitHub Actions `workflow_dispatch` gọi adapter nhà cung cấp GPU.
 3. **E2E sau deploy:** script gọi API đã deploy: đăng nhập tài khoản test → upload video
    mẫu nhỏ → chờ job xong → tải LOD nhẹ → kiểm checksum. Chạy sau mỗi lần deploy.
 4. Kết quả smoke/E2E lưu cùng định dạng benchmark để theo dõi hồi quy.
@@ -130,7 +135,8 @@ trang fallback (stack một máy) nếu cloud trục trặc.
 
 ## Risks And Recovery
 
-- Vulkan/COLMAP trên RunPod không chạy → đổi image hoặc nhà cung cấp (phase 1 chặn).
+- Vulkan/COLMAP trên Vast.ai không chạy → thử RunPod; cả hai không chạy → đổi image hoặc nhà cung cấp (phase 1 chặn).
+- Host Vast.ai không ổn định → lọc theo độ tin cậy; job chạy lại trên instance khác.
 - Không kịp → demo bằng stack một máy (`scripts/gpu/run_stack.sh`).
 - LOD/`splat-transform` và lấy thao tác SuperSplat là UNKNOWN → kiểm trước khi cam kết.
 
