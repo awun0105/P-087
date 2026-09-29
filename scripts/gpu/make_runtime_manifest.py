@@ -68,9 +68,13 @@ def main() -> None:
         raise SystemExit(f"{args.out} đã tồn tại; runtime mới cần file mới")
     if shutil.which("ffmpeg") is None:
         print("Cảnh báo: thiếu ffmpeg — upload video sẽ không xử lý được", file=sys.stderr)
-    payload = {"schema_version": "1.0", "components": collect(), "runtime_manifest_checksum": "sha256:" + "0" * 64}
-    payload["runtime_manifest_checksum"] = canonical_content_checksum(payload, "runtime_manifest_checksum")
-    manifest = RuntimeManifest.model_validate(payload)
+    draft = RuntimeManifest.model_validate(
+        {"schema_version": "1.0", "components": collect(), "runtime_manifest_checksum": "sha256:" + "0" * 64}
+    )
+    # Checksum tính trên model đã chuẩn hóa (kể cả field mặc định) — đúng cách loader verify.
+    manifest = draft.model_copy(
+        update={"runtime_manifest_checksum": canonical_content_checksum(draft, "runtime_manifest_checksum")}
+    )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(manifest.model_dump_json(indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"runtime_manifest": str(args.out), "checksum": manifest.runtime_manifest_checksum}))
