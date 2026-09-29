@@ -1,7 +1,7 @@
 "use client";
 
-import { Check, Loader2, Radar, Redo2, Ruler, Undo2, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { Check, Loader2, Radar, Redo2, Ruler, Sparkles, Undo2, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button, Notice } from "@/components/studio/primitives";
 import {
@@ -14,7 +14,7 @@ import {
 import { EMPTY_INSPECTION, type InspectionState } from "@/features/viewer/inspection-history";
 import { PlayCanvasScene, usePlayCanvasCapability } from "@/features/viewer/PlayCanvasScene";
 import type { SplatInspection } from "@/features/viewer/splat-inspection";
-import { confirmMetric, getMetricAssist, measureOnLidar, previewMetric } from "@/lib/api/studio";
+import { confirmMetric, getDemoPoints, getMetricAssist, measureOnLidar, previewMetric } from "@/lib/api/studio";
 import type { LidarMeasurements, MetricInput, MetricPreview } from "@/lib/contracts/studio";
 
 /**
@@ -45,7 +45,10 @@ export function MetricConfirmView({
   const [preview, setPreview] = useState<{ input: MetricInput; result: MetricPreview } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [demoRunning, setDemoRunning] = useState(false);
+  const timers = useRef<number[]>([]);
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
+  useEffect(() => () => timers.current.forEach((timer) => window.clearTimeout(timer)), []);
   const onReady = useCallback((next: SplatInspection | null) => {
     setController(next);
     next?.setMeasuring(true);
@@ -99,6 +102,41 @@ export function MetricConfirmView({
           ? "Chưa có số đo LiDAR: chọn lại điểm bị báo lỗi ở trên."
           : "Đang chờ số đo LiDAR…"
         : "Nhập khoảng cách thật của A–B và C–D (mét).";
+
+  /** Dataset mẫu: lấy 7 điểm tự chọn từ LiDAR rồi vẽ lần lượt từng điểm, xong tự xem trước. */
+  async function runDemo() {
+    if (!controller) return;
+    setError(null);
+    setDemoRunning(true);
+    setPreview(null);
+    try {
+      const selection = await getDemoPoints(jobId);
+      controller.setMeasuring(false);
+      timers.current.forEach((timer) => window.clearTimeout(timer));
+      timers.current = selection.points.map((_, index) =>
+        window.setTimeout(() => {
+          controller.setPoints(selection.points.slice(0, index + 1));
+          if (index === selection.points.length - 1) {
+            setDemoRunning(false);
+            const demoInput = metricInput(
+              selection.points,
+              String(selection.measurements.anchor.distance_m),
+              String(selection.measurements.check.distance_m),
+              "lidar_demo",
+            );
+            if (demoInput) {
+              void run(async () => {
+                setPreview({ input: demoInput, result: await previewMetric(jobId, demoInput) });
+              });
+            }
+          }
+        }, 450 * (index + 1)),
+      );
+    } catch (cause) {
+      setDemoRunning(false);
+      setError(cause instanceof Error ? cause.message : "Không tự chọn được điểm");
+    }
+  }
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -162,6 +200,13 @@ export function MetricConfirmView({
           </Notice>
         )}
 
+        {lidarAvailable && (
+          <Button className="w-full" disabled={!controller || demoRunning || busy} onClick={() => void runDemo()}>
+            {demoRunning ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden /> : <Sparkles aria-hidden />}
+            {demoRunning ? "Đang chọn điểm trên LiDAR…" : "Tự chọn điểm (demo LiDAR)"}
+          </Button>
+        )}
+
         <div className="flex flex-wrap gap-2">
           <Button
             variant={inspection.measuring ? "primary" : "secondary"}
@@ -216,6 +261,13 @@ export function MetricConfirmView({
                 <p>
                   C–D: <span className="font-mono">{lidarResult.result.check.distance_m.toFixed(3)} m</span>
                 </p>
+                {[...lidarResult.result.anchor.point_sources, ...lidarResult.result.check.point_sources].includes(
+                  "trajectory_alignment",
+                ) && (
+                  <p className="text-xs text-ochre">
+                    Một số điểm nằm ngoài vùng LiDAR phủ: dùng vị trí quy đổi mét theo căn chỉnh quỹ đạo (sai lệch ~7 cm).
+                  </p>
+                )}
                 <p className="text-xs text-ink-subtle">
                   Điểm bắt vào LiDAR cách chỗ click tối đa{" "}
                   {(
