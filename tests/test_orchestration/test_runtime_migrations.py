@@ -4,11 +4,8 @@ PostgreSQL chỉ chạy khi có `R2S_TEST_POSTGRES_URL` (URL tới database qu�
 `postgresql://r2s:r2s-test@127.0.0.1:15432/postgres`); mỗi test tạo database riêng.
 """
 
-import os
 import sqlite3
-from collections.abc import Iterator
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
 
@@ -19,26 +16,6 @@ from src.services.orchestration.jobs.database import (
     RuntimeStateConflictError,
 )
 from src.services.orchestration.uploads import VideoUploadService
-
-POSTGRES_ADMIN = os.environ.get("R2S_TEST_POSTGRES_URL")
-
-
-@pytest.fixture(params=["sqlite", "postgres"])
-def database_url(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[str]:
-    if request.param == "sqlite":
-        yield f"sqlite:///{tmp_path / 'runtime.db'}"
-        return
-    if POSTGRES_ADMIN is None:
-        pytest.skip("cần R2S_TEST_POSTGRES_URL để chạy trên PostgreSQL")
-    import psycopg
-
-    name = f"r2s_test_{uuid4().hex[:12]}"
-    with psycopg.connect(POSTGRES_ADMIN, autocommit=True) as admin:
-        admin.execute(f"CREATE DATABASE {name}")
-    base = POSTGRES_ADMIN.rsplit("/", 1)[0]
-    yield f"{base}/{name}"
-    with psycopg.connect(POSTGRES_ADMIN, autocommit=True) as admin:
-        admin.execute(f"DROP DATABASE {name} WITH (FORCE)")
 
 
 def _tables(database: RuntimeDatabase) -> set[str]:
@@ -51,21 +28,21 @@ def _tables(database: RuntimeDatabase) -> set[str]:
         return {row[0] for row in tx.execute(query).fetchall()}
 
 
-def test_fresh_database_reaches_latest_version(database_url: str) -> None:
-    database = RuntimeDatabase(database_url)
+def test_fresh_database_reaches_latest_version(runtime_database_url: str) -> None:
+    database = RuntimeDatabase(runtime_database_url)
     assert database.schema_version() == LATEST_SCHEMA_VERSION
     assert {"r2s_projects", "r2s_jobs", "r2s_job_events", "r2s_uploads", "r2s_upload_sessions"} <= _tables(database)
     database.ping()
     # Khởi động lại (process khác) không chạy lại migration, không lỗi.
-    assert RuntimeDatabase(database_url).schema_version() == LATEST_SCHEMA_VERSION
+    assert RuntimeDatabase(runtime_database_url).schema_version() == LATEST_SCHEMA_VERSION
 
 
-def test_newer_schema_is_refused(database_url: str) -> None:
-    database = RuntimeDatabase(database_url)
+def test_newer_schema_is_refused(runtime_database_url: str) -> None:
+    database = RuntimeDatabase(runtime_database_url)
     with database.transaction(write=True) as tx:
         tx.execute("UPDATE r2s_schema SET version=? WHERE id=1", (LATEST_SCHEMA_VERSION + 1,))
     with pytest.raises(RuntimeError, match="cập nhật code"):
-        RuntimeDatabase(database_url)
+        RuntimeDatabase(runtime_database_url)
 
 
 def test_legacy_v1_sqlite_upgrades_without_losing_rows(tmp_path: Path) -> None:
@@ -87,9 +64,9 @@ def test_legacy_v1_sqlite_upgrades_without_losing_rows(tmp_path: Path) -> None:
     assert "r2s_upload_sessions" in _tables(database)
 
 
-def test_upload_records_and_row_locks_work(database_url: str, tmp_path: Path) -> None:
+def test_upload_records_and_row_locks_work(runtime_database_url: str, tmp_path: Path) -> None:
     """Đường ghi thật (INSERT, SELECT … FOR UPDATE trên Postgres, CAS) chạy trên cả hai DB."""
-    database = RuntimeDatabase(database_url)
+    database = RuntimeDatabase(runtime_database_url)
     service = VideoUploadService(database, ArtifactResolver(tmp_path / "artifacts"), 1024)
     pending = service.begin("kho.mp4")
     pending.publication.write(b"video")
@@ -101,7 +78,7 @@ def test_upload_records_and_row_locks_work(database_url: str, tmp_path: Path) ->
     assert service.list()[0].project_ids == ["project-a"]
 
 
-def test_registry_project_job_lifecycle(database_url: str, tmp_path: Path) -> None:
+def test_registry_project_job_lifecycle(runtime_database_url: str, tmp_path: Path) -> None:
     """Luồng Studio thật trên DB: upload → project → job QUEUED → CAS RUNNING; revision cũ bị từ chối."""
     from src.models.contracts.manifests import JobStatus
     from src.services.orchestration.jobs.models import TransitionRequest
@@ -109,7 +86,7 @@ def test_registry_project_job_lifecycle(database_url: str, tmp_path: Path) -> No
     from src.services.orchestration.projects.models import JobCreateInput, UploadProjectInput
     from src.services.orchestration.projects.registry import ProjectRegistry
 
-    database = RuntimeDatabase(database_url)
+    database = RuntimeDatabase(runtime_database_url)
     probe = ProjectRegistry(runtime_root=tmp_path / "artifacts")
     registry = ProjectRegistry(
         runtime_root=tmp_path / "artifacts",

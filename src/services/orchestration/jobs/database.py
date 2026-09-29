@@ -78,6 +78,22 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
             "CREATE TABLE IF NOT EXISTS r2s_upload_sessions (upload_id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
         ),
     ),
+    (
+        # Đăng nhập hai role (ADR 0003 §3): tài khoản, mã mời, phiên, nhật ký thao tác.
+        3,
+        (
+            """CREATE TABLE r2s_users (
+                user_id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, payload TEXT NOT NULL)""",
+            "CREATE TABLE r2s_invites (code_hash TEXT PRIMARY KEY, payload TEXT NOT NULL)",
+            """CREATE TABLE r2s_sessions (
+                token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES r2s_users(user_id),
+                expires_at TEXT NOT NULL, payload TEXT NOT NULL)""",
+            """CREATE TABLE r2s_audit_log (
+                entry_id TEXT PRIMARY KEY, at TEXT NOT NULL, user_id TEXT, action TEXT NOT NULL,
+                payload TEXT NOT NULL)""",
+            "CREATE INDEX r2s_audit_by_user ON r2s_audit_log(user_id, at)",
+        ),
+    ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
