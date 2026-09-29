@@ -36,6 +36,8 @@ class PreviewDependencies:
     colmap: ColmapProcess
     brush: VisualProcess
     splat: SplatArtifactProcessor
+    #: Báo stage event cho orchestrator (sau khi event đã publish); None = không báo.
+    on_event: Callable[[StageArtifact], None] | None = None
 
 
 class PreparedPreviewWorker:
@@ -91,6 +93,8 @@ class _AttemptPublication:
         self.current_stage = stage.stage_id
         self.publish(("StageArtifact", f"events/{self.event_index:04d}.json"), stage.model_dump_json().encode())
         self.event_index += 1
+        if self.deps.on_event is not None:
+            self.deps.on_event(stage)
 
 
 class _PreviewExecution:

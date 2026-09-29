@@ -211,3 +211,34 @@ def test_consumer_rejects_forged_stage_even_with_new_checksum(tmp_path: Path) ->
     forged = ref.model_copy(update={"artifact_checksum": "sha256:" + hashlib.sha256(payload).hexdigest()})
     with pytest.raises(ValueError, match="stage differs"):
         worker.load(forged)
+
+
+def test_cli_progress_file_streams_stage_events(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Orchestrator đọc được stage RUNNING/SUCCEEDED theo thứ tự trong lúc worker chạy."""
+    from src.models.contracts.manifests import StageArtifact
+
+    worker, request, resolver = preview(tmp_path)
+    monkeypatch.setattr(preview_cli, "BrushRuntimeSettings", lambda: worker.deps.brush.settings)
+    monkeypatch.setattr(preview_cli, "ColmapRuntimeSettings", lambda: worker.deps.colmap.settings)
+    monkeypatch.setattr(preview_cli, "SplatRuntimeSettings", lambda: worker.deps.splat.settings)
+    monkeypatch.setattr(preview_cli, "VisualProcess", lambda settings: worker.deps.brush)
+    monkeypatch.setattr(preview_cli, "ColmapProcess", lambda settings: worker.deps.colmap)
+    monkeypatch.setattr(preview_cli, "SplatArtifactProcessor", lambda settings, process: worker.deps.splat)
+    path = tmp_path / "request.json"
+    path.write_text(request.model_dump_json())
+    progress = tmp_path / "progress.jsonl"
+    args = [
+        "--request", str(path), "--store-root", str(resolver.artifact_root),
+        "--workspace", str(tmp_path / "cli"), "--progress-file", str(progress),
+    ]  # fmt: skip
+    assert preview_cli.main(args) == 0
+    capsys.readouterr()
+    events = [StageArtifact.model_validate_json(line) for line in progress.read_text().splitlines()]
+    assert [(event.stage_id, event.status) for event in events] == [
+        ("ST-CAMERA-POSE", "RUNNING"),
+        ("ST-CAMERA-POSE", "SUCCEEDED"),
+        ("ST-VISUAL-RECON", "RUNNING"),
+        ("ST-VISUAL-RECON", "SUCCEEDED"),
+    ]

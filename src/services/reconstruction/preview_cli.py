@@ -4,8 +4,10 @@ import argparse
 import json
 import logging
 import signal
+from collections.abc import Callable
 from pathlib import Path
 
+from src.models.contracts.manifests import StageArtifact
 from src.services.reconstruction.adapters.brush_runtime import BrushRuntimeSettings, VisualProcess
 from src.services.reconstruction.adapters.colmap_runtime import ColmapProcess, ColmapRuntimeSettings
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor, SplatRuntimeSettings
@@ -20,7 +22,26 @@ def create_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument("--request", type=Path, required=True)
     parser.add_argument("--store-root", type=Path, required=True)
     parser.add_argument("--workspace", type=Path, required=True)
+    parser.add_argument(
+        "--progress-file",
+        type=Path,
+        default=None,
+        help="Append một dòng JSON StageArtifact cho mỗi stage event (orchestrator đọc để hiện tiến trình)",
+    )
     return parser
+
+
+def _progress_writer(path: Path | None) -> Callable[[StageArtifact], None] | None:
+    """Ghi từng event thành một dòng và flush ngay để tiến trình hiện theo thời gian thực."""
+    if path is None:
+        return None
+
+    def write(stage: StageArtifact) -> None:
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(stage.model_dump_json() + "\n")
+            stream.flush()
+
+    return write
 
 
 def _execute(args: argparse.Namespace) -> int:
@@ -37,6 +58,7 @@ def _execute(args: argparse.Namespace) -> int:
         colmap=ColmapProcess(ColmapRuntimeSettings()),
         brush=brush,
         splat=SplatArtifactProcessor(SplatRuntimeSettings(), brush),
+        on_event=_progress_writer(args.progress_file),
     )
     result, reference = PreparedPreviewWorker(dependencies).run(request, args.workspace)
     print(json.dumps({"result": result.model_dump(mode="json"), "result_ref": reference.model_dump(mode="json")}))
