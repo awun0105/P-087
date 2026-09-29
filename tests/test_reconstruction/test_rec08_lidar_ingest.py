@@ -24,7 +24,10 @@ from src.services.reconstruction.lidar import (
     inspect_point_cloud,
     inspect_point_cloud_header,
     inspect_rec07_preparation,
+    load_bridge_decision,
 )
+
+BRIDGE_CONFIG = Path(__file__).resolve().parents[2] / "configs/datasets/torwic_aisle_cw/coordinate_bridge.json"
 
 
 def _create_test_ply(path: Path, point_count: int = 10) -> Checksum:
@@ -194,3 +197,43 @@ def test_ingest_real_rec07_output(tmp_path: Path) -> None:
     assert prepared.source_frame == manifest["request"]["target_frame"]
     with pytest.raises(ValueError, match="UNVERIFIED"):
         build_request_from_rec07_manifest(manifest_file, ply_file, "job-aisle-cw-01")
+
+    # Có bản ghi cầu nối (quyết định owner, file cấu hình dataset) → khai phép biến đổi sang world.
+    bridge = load_bridge_decision(BRIDGE_CONFIG, evidence_root=Path("data"))
+    request = build_request_from_rec07_manifest(manifest_file, ply_file, "job-aisle-cw-01", bridge)
+    assert request.source_frame == "torwic_map"
+    transform = request.declared_transform_to_canonical
+    assert transform.parent_frame == "world" and transform.local_frame == "torwic_map"
+    assert transform.translation_xyz == (0.0, 0.0, 0.2345)  # sàn -0,2345 m → z=0
+    assert transform.rotation_quaternion_xyzw == (0.0, 0.0, 0.0, 1.0)
+    details = request.preprocessing_provenance.details
+    assert details["coordinate_bridge_checksum"] == bridge.checksum()
+    assert details["handedness_source"] == "owner_decision"
+    request.validate_payload()  # bytes vẫn là output REC-07 gốc, không bị sửa
+    result = LiDARIngestService(FilesystemArtifactStore(ArtifactResolver(tmp_path / "store"))).ingest_with_metadata(
+        request
+    )
+    assert result.geometry_ref.artifact_checksum == prepared.source_input_checksum
+
+
+def test_bridge_decision_guards(tmp_path: Path) -> None:
+    """Bản ghi cầu nối: không cho frame gốc trùng world, kiểm checksum bằng chứng."""
+    bridge = load_bridge_decision(BRIDGE_CONFIG)
+    assert bridge.transform().translation_xyz[2] == -bridge.floor_z_in_source_m
+    with pytest.raises(ValueError, match="source_frame"):
+        bridge.model_copy(update={"source_frame": "world"}).transform()
+    evidence_dir = tmp_path / "rec07_axis_evidence_20260927"
+    evidence_dir.mkdir()
+    (evidence_dir / "up_axis_proof.png").write_bytes(b"not the real proof")
+    with pytest.raises(ValueError, match="checksum"):
+        load_bridge_decision(BRIDGE_CONFIG, evidence_root=tmp_path)
+
+
+def test_bridge_frame_must_match_manifest(tmp_path: Path) -> None:
+    smoke_dir = Path("data/torwic_slam/derived/aisle_cw/rec07_smoke_sub100_104")
+    manifest_file, ply_file = smoke_dir / "preparation_manifest.json", smoke_dir / "registered_lidar.ply"
+    if not manifest_file.is_file() or not ply_file.is_file():
+        pytest.skip("Chưa có output smoke REC-07 trên đĩa")
+    wrong = load_bridge_decision(BRIDGE_CONFIG).model_copy(update={"rec07_target_frame": "odom"})
+    with pytest.raises(ValueError, match="không khớp frame"):
+        build_request_from_rec07_manifest(manifest_file, ply_file, "job-aisle-cw-01", wrong)
