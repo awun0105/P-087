@@ -137,3 +137,26 @@ async def test_scene_from_upload_requires_mvp_privacy_mode_and_known_upload(
         json={"upload_id": upload["upload_id"], "name": "x", "attestation": no_anonymization},
     )
     assert invalid.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_progress_endpoint_reports_queued_pipeline(client: AsyncClient, studio: SimpleNamespace) -> None:
+    upload = await _upload(client)
+    created = await client.post(
+        "/api/v1/scenes/from-upload",
+        json={"upload_id": upload["upload_id"], "name": "Kho A", "attestation": _ATTESTATION},
+    )
+    job_id = created.json()["job"]["job_id"]
+    response = await client.get(f"/api/v1/jobs/{job_id}/progress")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "QUEUED" and body["preview_ready"] is False and body["attempt"] == 1
+    assert [stage["stage_id"] for stage in body["stages"]] == [
+        "ST-INPUT-VALIDATE",
+        "ST-PRIVACY-GATE",
+        "ST-FRAME-EXTRACT",
+        "ST-CAMERA-POSE",
+        "ST-VISUAL-RECON",
+    ]
+    assert {stage["state"] for stage in body["stages"]} == {"pending"}
+    assert (await client.get("/api/v1/jobs/job-missing/progress")).status_code == 404

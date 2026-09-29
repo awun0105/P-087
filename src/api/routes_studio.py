@@ -12,10 +12,17 @@ from pydantic import BaseModel, ConfigDict
 from src.api import schemas
 from src.config import get_settings
 from src.models.contracts.manifests import JobManifest
-from src.services.orchestration.artifacts import ArtifactAlreadyExistsError, ArtifactResolver, ArtifactTooLargeError
+from src.services.orchestration.artifacts import (
+    ArtifactAlreadyExistsError,
+    ArtifactResolver,
+    ArtifactStoreError,
+    ArtifactTooLargeError,
+)
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
+from src.services.orchestration.jobs.progress import JobProgress, job_progress
 from src.services.orchestration.projects import (
     JobCreateInput,
+    JobNotFoundError,
     PrivacyGateBlockedError,
     get_project_registry,
 )
@@ -122,3 +129,20 @@ def create_scene_from_upload(request: UploadProjectInput) -> SceneFromUploadResp
     except (PrivacyGateBlockedError, RuntimeStateConflictError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     return SceneFromUploadResponse(project=schemas.project_response(project), job=job)
+
+
+@router.get("/jobs/{job_id}/progress", response_model=JobProgress)
+def get_job_progress(job_id: str) -> JobProgress:
+    """Tiến trình từng stage của attempt hiện tại; UI poll endpoint này."""
+    registry = get_project_registry()
+    try:
+        job = registry.get_job(job_id)
+        attempts = registry.list_job_attempts(job_id)
+    except JobNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    try:
+        registry.get_preview(job_id)
+        preview_ready = True
+    except (ArtifactStoreError, ValueError):
+        preview_ready = False
+    return job_progress(job, attempts, preview_ready)
