@@ -7,11 +7,12 @@ nên không chặn event loop.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import ValidationError
 
 from src.api import schemas
 from src.api.auth import enforce_gpu_quota, record_gpu_run, require_editor, require_reviewer
+from src.config import get_settings
 from src.models.contracts.artifacts import ArtifactRef, Checksum
 from src.models.contracts.manifests import JobManifest, JobStatus
 from src.models.contracts.preview import ReconstructionPreview
@@ -307,7 +308,13 @@ def get_artifact_content(
             producer_stage="ST-EDIT",
             job_id=job_id,
         )
-        path = _registry().resolve_artifact(job_id, reference)
+        registry = _registry()
+        # Có kho file: trình duyệt tải thẳng từ R2 bằng link có hạn (ADR 0003), API không
+        # cõng file lớn qua băng thông tính phí. Quyền đọc vẫn kiểm theo allow-list ở trên.
+        link = registry.presigned_artifact_url(job_id, reference, get_settings().artifact_presign_seconds)
+        if link is not None:
+            return RedirectResponse(link, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+        path = registry.resolve_artifact(job_id, reference)
     except ValidationError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
     except ArtifactStoreError as error:

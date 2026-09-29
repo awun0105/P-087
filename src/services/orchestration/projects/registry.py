@@ -681,14 +681,30 @@ class ProjectRegistry:
         """
         return self.resolve_artifact(job_id, reference).read_bytes()
 
-    def resolve_artifact(self, job_id: str, reference: ArtifactRef) -> Path:
-        """Resolve ref canonical, không dùng checksum do client chọn làm authority."""
-        candidates = self._product_visible_references(job_id)
-        canonical = candidates.get(reference.artifact_uri)
+    def authorized_artifact(self, job_id: str, reference: ArtifactRef) -> ArtifactRef:
+        """Ref canonical nếu URI thuộc allow-list của job và checksum khớp; không đọc bytes."""
+        canonical = self._product_visible_references(job_id).get(reference.artifact_uri)
         if canonical is None:
             raise ArtifactNotFoundError("Artifact không thuộc allow-list của job")
         if canonical.artifact_checksum != reference.artifact_checksum:
             raise ArtifactChecksumError("Artifact checksum không khớp reference đã publish")
+        return canonical
+
+    def presigned_artifact_url(self, job_id: str, reference: ArtifactRef, expires_seconds: int) -> str | None:
+        """Link tải thẳng từ kho file cho artifact đã kiểm quyền; None khi không có kho file
+        hoặc object chưa lên kho (dữ liệu cũ) — khi đó API tự phục vụ file."""
+        remote = self.runtime_resolver.remote
+        if remote is None or job_id == self._fixture_job_id:
+            return None
+        canonical = self.authorized_artifact(job_id, reference)
+        key = self.runtime_resolver.relative_key(canonical.artifact_uri)
+        if remote.store.head(remote.key(key)) is None:
+            return None
+        return remote.presign(key, expires_seconds)
+
+    def resolve_artifact(self, job_id: str, reference: ArtifactRef) -> Path:
+        """Resolve ref canonical, không dùng checksum do client chọn làm authority."""
+        canonical = self.authorized_artifact(job_id, reference)
         try:
             return self.runtime_resolver.require(canonical)
         except ArtifactNotFoundError:
