@@ -10,8 +10,8 @@ from dataclasses import dataclass
 
 from src.models.contracts.artifacts import Checksum, ProductArtifactRef
 from src.models.contracts.manifests import StageId
-from src.services.reconstruction.rgb.metric_math import SimilarityTransform
-from src.services.reconstruction.rgb.metric_models import (
+from src.services.reconstruction.rgb.canonical.metric_math import SimilarityTransform
+from src.services.reconstruction.rgb.canonical.metric_models import (
     MetricAcceptance,
     MetricConfirmation,
     MetricConversionPlan,
@@ -19,9 +19,9 @@ from src.services.reconstruction.rgb.metric_models import (
     MetricRequest,
     confirmation_record,
 )
-from src.services.reconstruction.rgb.metric_seed import CameraSeedProposal
-from src.services.reconstruction.rgb.publication import ArtifactWriter
-from src.services.reconstruction.rgb.visual_publication import VisualResolver
+from src.services.reconstruction.rgb.canonical.metric_seed import CameraSeedProposal
+from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
+from src.services.reconstruction.rgb.splat.visual_publication import VisualResolver
 
 
 @dataclass(frozen=True)

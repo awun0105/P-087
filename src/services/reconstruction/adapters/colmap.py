@@ -12,10 +12,10 @@ from src.models.contracts.manifests import StageArtifact, StageId, StageStatus
 from src.services.reconstruction.adapters.colmap_input import ColmapImageInput, ColmapInputAdapter
 from src.services.reconstruction.adapters.colmap_model import ParsedSparseModel, read_sparse_model, select_sparse_model
 from src.services.reconstruction.adapters.colmap_runtime import ColmapError, ColmapProcess, reconstruction_commands
-from src.services.reconstruction.rgb.camera_pose import CameraPoseArtifact, ColmapConfig
-from src.services.reconstruction.rgb.frame_set import FrameSetResolver, _sha256
-from src.services.reconstruction.rgb.pose_publication import CameraPoseResolver, PosePublisher
-from src.services.reconstruction.rgb.publication import ArtifactWriter
+from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver, _sha256
+from src.services.reconstruction.rgb.pose.camera_pose import CameraPoseArtifact, ColmapConfig
+from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver, PosePublisher
+from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
 
 
 @dataclass(frozen=True)

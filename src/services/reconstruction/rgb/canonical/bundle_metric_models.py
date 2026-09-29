@@ -8,7 +8,7 @@ from pydantic import Field, FiniteFloat, model_validator
 from src.models.contracts.artifacts import Checksum, ContractModel, ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum, canonical_json_bytes
 from src.services.reconstruction.bundle import BundleBuildRequest
-from src.services.reconstruction.rgb.metric_models import DistanceAnchor, EvidenceKind
+from src.services.reconstruction.rgb.canonical.metric_models import DistanceAnchor, EvidenceKind
 
 
 class BundleMetricRequest(ContractModel):

@@ -20,7 +20,7 @@ from src.services.reconstruction.lidar.models import (
     compute_file_checksum,
     inspect_point_cloud,
 )
-from src.services.reconstruction.rgb.publication import ArtifactWriter
+from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
 
 
 @dataclass(frozen=True)

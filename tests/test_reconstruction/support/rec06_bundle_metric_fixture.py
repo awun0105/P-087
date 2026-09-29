@@ -12,21 +12,24 @@ from src.services.reconstruction.adapters.splat import SplatRuntimeSettings
 from src.services.reconstruction.adapters.voxel import SplatTransformVoxelAdapter
 from src.services.reconstruction.adapters.voxel_runtime import VoxelRuntimeSettings
 from src.services.reconstruction.bundle import BundleBuildRequest
-from src.services.reconstruction.rgb.bundle_metric import BundleMetricDependencies, BundleMetricVerifier
-from src.services.reconstruction.rgb.bundle_metric_models import BundleMetricAcceptance, BundleMetricRequest
-from src.services.reconstruction.rgb.canonical_poses import CanonicalPoseService
-from src.services.reconstruction.rgb.canonical_visual import CanonicalVisualDependencies, CanonicalVisualService
-from src.services.reconstruction.rgb.canonical_visual_models import CanonicalVisualRequest
-from src.services.reconstruction.rgb.geometry_publication import (
+from src.services.reconstruction.rgb.canonical.bundle_metric import BundleMetricDependencies, BundleMetricVerifier
+from src.services.reconstruction.rgb.canonical.bundle_metric_models import BundleMetricAcceptance, BundleMetricRequest
+from src.services.reconstruction.rgb.canonical.canonical_poses import CanonicalPoseService
+from src.services.reconstruction.rgb.canonical.canonical_visual import (
+    CanonicalVisualDependencies,
+    CanonicalVisualService,
+)
+from src.services.reconstruction.rgb.canonical.canonical_visual_models import CanonicalVisualRequest
+from src.services.reconstruction.rgb.canonical.metric import MetricCanonicalizer, MetricDependencies
+from src.services.reconstruction.rgb.canonical.metric_models import DistanceAnchor, MetricAcceptance, MetricPreview
+from src.services.reconstruction.rgb.geometry.geometry_publication import (
     GeometryDependencies,
     GeometryExecutionRequest,
     GeometryPublisher,
     RgbGeometryService,
 )
-from src.services.reconstruction.rgb.metric import MetricCanonicalizer, MetricDependencies
-from src.services.reconstruction.rgb.metric_models import DistanceAnchor, MetricAcceptance, MetricPreview
-from src.services.reconstruction.rgb.pose_publication import CameraPoseResolver
-from src.services.reconstruction.rgb.visual_publication import VisualResolver
+from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
+from src.services.reconstruction.rgb.splat.visual_publication import VisualResolver
 from tests.test_reconstruction.support.rec06_fixtures import _request
 from tests.test_reconstruction.test_rec05_adapter import FixtureProcess, config
 from tests.test_reconstruction.test_rec06_canonical_visual import FixturePackaging

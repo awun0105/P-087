@@ -14,7 +14,7 @@ from src.services.reconstruction.adapters.voxel_clearance import validate_seed_c
 from src.services.reconstruction.adapters.voxel_octree import CellBox, VoxelOctree
 from src.services.reconstruction.adapters.voxel_output import VoxelMetadata
 from src.services.reconstruction.adapters.voxel_runtime import GeometryError
-from src.services.reconstruction.rgb.voxel import world_from_native
+from src.services.reconstruction.rgb.geometry.voxel import world_from_native
 from tests.test_reconstruction.support.rec05_occupancy_fixture import wall, write_occupancy
 from tests.test_reconstruction.test_rec05_adapter import adapter, request
 from tests.test_reconstruction.test_rec05_voxel import config

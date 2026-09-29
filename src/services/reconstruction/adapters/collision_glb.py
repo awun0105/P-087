@@ -7,7 +7,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.services.reconstruction.rgb.voxel import Vector3, world_from_native
+from src.services.reconstruction.rgb.geometry.voxel import Vector3, world_from_native
 
 
 @dataclass(frozen=True)

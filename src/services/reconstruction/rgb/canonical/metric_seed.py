@@ -6,8 +6,8 @@ from pydantic import Field
 
 from src.models.contracts.artifacts import Checksum, ContractModel, ProductArtifactRef
 from src.models.contracts.coordinates import CoordinateSystem
-from src.services.reconstruction.rgb.camera_pose import Vector3
-from src.services.reconstruction.rgb.metric_models import EvidenceKind
+from src.services.reconstruction.rgb.canonical.metric_models import EvidenceKind
+from src.services.reconstruction.rgb.pose.camera_pose import Vector3
 
 
 class CameraSeedProposal(ContractModel):

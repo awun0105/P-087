@@ -8,9 +8,13 @@ import pytest
 
 from src.models.contracts.identity import canonical_content_checksum
 from src.services.orchestration.artifacts.errors import ArtifactAlreadyExistsError, ArtifactChecksumError
-from src.services.reconstruction.rgb.metric import MetricCanonicalizer
-from src.services.reconstruction.rgb.metric_models import MetricConfirmation, MetricRequest, independent_distance_error
-from src.services.reconstruction.rgb.metric_seed import CameraSeedProposal
+from src.services.reconstruction.rgb.canonical.metric import MetricCanonicalizer
+from src.services.reconstruction.rgb.canonical.metric_models import (
+    MetricConfirmation,
+    MetricRequest,
+    independent_distance_error,
+)
+from src.services.reconstruction.rgb.canonical.metric_seed import CameraSeedProposal
 from tests.test_reconstruction.support.rec06_fixtures import acceptance_for, metric_fixture
 
 

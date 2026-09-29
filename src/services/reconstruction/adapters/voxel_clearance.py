@@ -18,7 +18,7 @@ from src.services.reconstruction.adapters.voxel_seed_search import (
     find_connected_seed,
     search_plan,
 )
-from src.services.reconstruction.rgb.voxel import VoxelConfig
+from src.services.reconstruction.rgb.geometry.voxel import VoxelConfig
 
 
 def validate_seed_clearance(workspace: Path, config: VoxelConfig) -> dict:

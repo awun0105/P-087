@@ -10,8 +10,8 @@ from src.models.contracts.manifests import StageArtifact, StageId, StageStatus
 from src.services.reconstruction.adapters.brush_input import BrushInput, BrushInputAdapter
 from src.services.reconstruction.adapters.brush_runtime import Invocation, VisualError, VisualProcess, brush_command
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor
-from src.services.reconstruction.rgb.visual import BrushConfig, BrushVisualArtifact, SplatInspection
-from src.services.reconstruction.rgb.visual_publication import VisualPublisher, VisualResolver
+from src.services.reconstruction.rgb.splat.visual import BrushConfig, BrushVisualArtifact, SplatInspection
+from src.services.reconstruction.rgb.splat.visual_publication import VisualPublisher, VisualResolver
 
 
 @dataclass(frozen=True)

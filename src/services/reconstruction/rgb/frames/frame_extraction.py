@@ -15,10 +15,10 @@ from pydantic import Field, model_validator
 from src.models.contracts.artifacts import ArtifactDataClass, Checksum, ContractModel, ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
 from src.models.contracts.manifests import ExecutionError, InputFile, InputManifest, StageArtifact, StageId, StageStatus
-from src.services.reconstruction.rgb.frame_set import NormalizedRGBFrame, NormalizedRGBFrameSet, _sha256
-from src.services.reconstruction.rgb.privacy import PrivacyDispatchProof, RGBPrivacyGate
-from src.services.reconstruction.rgb.publication import ArtifactWriter
-from src.services.reconstruction.rgb.quality_models import RGBFrameQuality, RGBQualityReport
+from src.services.reconstruction.rgb.frames.frame_set import NormalizedRGBFrame, NormalizedRGBFrameSet, _sha256
+from src.services.reconstruction.rgb.preflight.privacy import PrivacyDispatchProof, RGBPrivacyGate
+from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
+from src.services.reconstruction.rgb.preflight.quality_models import RGBFrameQuality, RGBQualityReport
 
 
 class ExtractionConfig(ContractModel):

@@ -5,9 +5,13 @@ from pathlib import Path
 
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.reconstruction import PreprocessingProvenance
-from src.services.reconstruction.rgb.demo_metric import DemoMetricAdapter, DemoMetricDependencies
-from src.services.reconstruction.rgb.demo_metric_models import DemoLidarMeasurement, DemoMetricMode, DemoMetricRequest
-from src.services.reconstruction.rgb.metric import MetricCanonicalizer
+from src.services.reconstruction.rgb.canonical.demo_metric import DemoMetricAdapter, DemoMetricDependencies
+from src.services.reconstruction.rgb.canonical.demo_metric_models import (
+    DemoLidarMeasurement,
+    DemoMetricMode,
+    DemoMetricRequest,
+)
+from src.services.reconstruction.rgb.canonical.metric import MetricCanonicalizer
 from tests.test_reconstruction.support.rec06_fixtures import metric_fixture, publish_evidence
 
 

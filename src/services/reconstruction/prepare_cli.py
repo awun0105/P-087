@@ -19,8 +19,7 @@ from src.models.contracts.artifacts import ArtifactDataClass, ArtifactRef, Produ
 from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
 from src.models.contracts.manifests import ExecutionError, InputManifest, StageArtifact, StageId, StageStatus
 from src.services.reconstruction.prepare_models import PrepareInputRequest, PrepareInputResult
-from src.services.reconstruction.rgb.ffmpeg_probe import FFmpegRGBProbe
-from src.services.reconstruction.rgb.frame_extraction import (
+from src.services.reconstruction.rgb.frames.frame_extraction import (
     ExtractionConfig,
     FFmpegFrameDecoder,
     FrameExtractionDependencies,
@@ -28,10 +27,11 @@ from src.services.reconstruction.rgb.frame_extraction import (
     FrameExtractionRequest,
     RGBFrameExtractor,
 )
-from src.services.reconstruction.rgb.privacy import SelfAttestedPrivacyGate
-from src.services.reconstruction.rgb.publication import ArtifactWriter, RGBPreflightPublisher
-from src.services.reconstruction.rgb.quality import RGBQualityValidator, RGBValidationError, RGBVideoRequest
-from src.services.reconstruction.rgb.quality_models import RGBQualityProfile
+from src.services.reconstruction.rgb.preflight.ffmpeg_probe import FFmpegRGBProbe
+from src.services.reconstruction.rgb.preflight.privacy import SelfAttestedPrivacyGate
+from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter, RGBPreflightPublisher
+from src.services.reconstruction.rgb.preflight.quality import RGBQualityValidator, RGBValidationError, RGBVideoRequest
+from src.services.reconstruction.rgb.preflight.quality_models import RGBQualityProfile
 
 logger = logging.getLogger(__name__)
 

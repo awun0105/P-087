@@ -11,14 +11,14 @@ from scripts.torwic.rec02_evidence import _write_immutable
 from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
 from src.models.contracts.manifests import InputManifest, PrivacyInspectionScope, PrivacyResult, PrivacyValidationReport
 from src.services.orchestration.artifacts.store import ArtifactResolver, FilesystemArtifactStore
-from src.services.reconstruction.rgb.privacy import (
+from src.services.reconstruction.rgb.preflight.privacy import (
     PrivacyDispatchProof,
     PrivacyInspectionEvidence,
     PrivacyQAAcceptance,
     PrivacyReviewRequest,
     RGBPrivacyGate,
 )
-from src.services.reconstruction.rgb.publication import RGBPreflightPublisher, VerifiedPrivacyPublication
+from src.services.reconstruction.rgb.preflight.publication import RGBPreflightPublisher, VerifiedPrivacyPublication
 
 
 @dataclass(frozen=True)

@@ -7,8 +7,8 @@ from pydantic import model_validator
 from src.models.contracts.artifacts import Checksum, ContractModel, ProductArtifactRef
 from src.models.contracts.manifests import ExecutionError, StageArtifact, StageId
 from src.services.reconstruction.attempt import PathSegment
-from src.services.reconstruction.rgb.camera_pose import ColmapConfig
-from src.services.reconstruction.rgb.visual import BrushConfig
+from src.services.reconstruction.rgb.pose.camera_pose import ColmapConfig
+from src.services.reconstruction.rgb.splat.visual import BrushConfig
 
 
 class PreparedPreviewRequest(ContractModel):

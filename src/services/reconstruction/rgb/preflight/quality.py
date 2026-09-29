@@ -6,8 +6,8 @@ from pathlib import Path
 
 from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.manifests import ExecutionError, StageId
-from src.services.reconstruction.rgb.ffmpeg_probe import FFmpegProbeError, FFmpegRGBProbe
-from src.services.reconstruction.rgb.quality_models import (
+from src.services.reconstruction.rgb.preflight.ffmpeg_probe import FFmpegProbeError, FFmpegRGBProbe
+from src.services.reconstruction.rgb.preflight.quality_models import (
     RGBFrameAsset,
     RGBFrameQuality,
     RGBMotionDiagnostics,

@@ -9,9 +9,9 @@ from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.manifests import StageId
 from src.services.reconstruction.attempt import PublicationNamespace
-from src.services.reconstruction.rgb.camera_pose import CameraPoseArtifact
-from src.services.reconstruction.rgb.frame_set import FrameSetResolver, _sha256
-from src.services.reconstruction.rgb.publication import ArtifactWriter
+from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver, _sha256
+from src.services.reconstruction.rgb.pose.camera_pose import CameraPoseArtifact
+from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
 
 
 class PosePublisher:

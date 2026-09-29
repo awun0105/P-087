@@ -8,10 +8,10 @@ from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.manifests import StageId
 from src.services.reconstruction.attempt import PublicationNamespace
-from src.services.reconstruction.rgb.frame_set import _sha256
-from src.services.reconstruction.rgb.pose_publication import CameraPoseResolver
-from src.services.reconstruction.rgb.publication import ArtifactWriter
-from src.services.reconstruction.rgb.visual import BrushVisualArtifact
+from src.services.reconstruction.rgb.frames.frame_set import _sha256
+from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
+from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
+from src.services.reconstruction.rgb.splat.visual import BrushVisualArtifact
 
 
 class VisualPublisher:

@@ -7,8 +7,8 @@ from typing import Protocol
 from src.models.contracts.artifacts import ArtifactDataClass, ArtifactRef, ProductArtifactRef
 from src.models.contracts.identity import verify_content_checksum
 from src.models.contracts.manifests import InputManifest, PrivacyResult, PrivacyValidationReport, StageId
-from src.services.reconstruction.rgb.privacy import PrivacyDispatchProof, RGBPrivacyGate
-from src.services.reconstruction.rgb.quality_models import RGBQualityReport
+from src.services.reconstruction.rgb.preflight.privacy import PrivacyDispatchProof, RGBPrivacyGate
+from src.services.reconstruction.rgb.preflight.quality_models import RGBQualityReport
 
 
 class ArtifactWriter(Protocol):

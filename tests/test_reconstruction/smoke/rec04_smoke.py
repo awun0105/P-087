@@ -19,10 +19,10 @@ from src.services.reconstruction.adapters.brush_runtime import BrushRuntimeSetti
 from src.services.reconstruction.adapters.colmap_runtime import ColmapProcess, ColmapRuntimeSettings
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor, SplatRuntimeSettings
 from src.services.reconstruction.adapters.torwic_frame_source import TorwicFrameSource, TorwicFrameSourceConfig
-from src.services.reconstruction.rgb.frame_set import FrameSetResolver
-from src.services.reconstruction.rgb.pose_publication import CameraPoseResolver
-from src.services.reconstruction.rgb.visual import BrushConfig
-from src.services.reconstruction.rgb.visual_publication import VisualPublisher, VisualResolver
+from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver
+from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
+from src.services.reconstruction.rgb.splat.visual import BrushConfig
+from src.services.reconstruction.rgb.splat.visual_publication import VisualPublisher, VisualResolver
 
 
 class SmokeSettings(BaseSettings):

@@ -10,7 +10,7 @@ from typing import Literal, Self
 from pydantic import ConfigDict, Field, FiniteFloat, model_validator
 
 from src.models.contracts.artifacts import ContractModel
-from src.services.reconstruction.rgb.camera_pose import CameraPose, Quaternion, Vector3
+from src.services.reconstruction.rgb.pose.camera_pose import CameraPose, Quaternion, Vector3
 
 
 def _finite(values: tuple[float, ...]) -> None:

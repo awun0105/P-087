@@ -13,7 +13,7 @@ from src.services.reconstruction.adapters.colmap_runtime import ColmapProcess, C
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor, SplatRuntimeSettings
 from src.services.reconstruction.preview_models import PreparedPreviewRequest
 from src.services.reconstruction.preview_worker import PreparedPreviewWorker, PreviewDependencies
-from src.services.reconstruction.rgb.frame_set import FrameSetResolver
+from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver
 
 
 def create_cli_parser() -> argparse.ArgumentParser:

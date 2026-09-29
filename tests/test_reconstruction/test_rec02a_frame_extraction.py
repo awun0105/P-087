@@ -14,7 +14,7 @@ from src.models.contracts.manifests import InputManifest, PrivacyInspectionScope
 from src.services.orchestration.artifacts.store import ArtifactResolver, FilesystemArtifactStore
 from src.services.reconstruction.adapters.colmap_input import ColmapInputAdapter
 from src.services.reconstruction.adapters.torwic_frame_source import TorwicFrameSource, TorwicFrameSourceConfig
-from src.services.reconstruction.rgb.frame_extraction import (
+from src.services.reconstruction.rgb.frames.frame_extraction import (
     ExtractionConfig,
     FFmpegFrameDecoder,
     FrameExtractionDependencies,
@@ -22,15 +22,19 @@ from src.services.reconstruction.rgb.frame_extraction import (
     FrameExtractionRequest,
     RGBFrameExtractor,
 )
-from src.services.reconstruction.rgb.frame_set import FrameSetResolver, NormalizedRGBFrameSet
-from src.services.reconstruction.rgb.privacy import (
+from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver, NormalizedRGBFrameSet
+from src.services.reconstruction.rgb.preflight.privacy import (
     PrivacyDispatchProof,
     PrivacyInspectionEvidence,
     PrivacyQAAcceptance,
     PrivacyReviewRequest,
     RGBPrivacyGate,
 )
-from src.services.reconstruction.rgb.quality_models import RGBFrameQuality, RGBMotionDiagnostics, RGBQualityReport
+from src.services.reconstruction.rgb.preflight.quality_models import (
+    RGBFrameQuality,
+    RGBMotionDiagnostics,
+    RGBQualityReport,
+)
 
 ROOT = Path(__file__).parents[2]
 

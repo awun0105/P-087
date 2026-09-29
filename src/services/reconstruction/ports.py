@@ -6,7 +6,7 @@ from pathlib import Path
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.preview import PreviewWorkerReceipt
 from src.services.reconstruction.preview_validation import PreviewReadDependencies, load_preview
-from src.services.reconstruction.rgb.frame_set import FrameSetResolver
+from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver
 
 
 def verify_prepared_preview(

@@ -8,8 +8,8 @@ import pytest
 
 from src.models.contracts.identity import canonical_content_checksum
 from src.services.orchestration.artifacts.errors import ArtifactChecksumError
-from src.services.reconstruction.rgb.canonical_poses import CanonicalCameraPoseArtifact, CanonicalPoseService
-from src.services.reconstruction.rgb.metric_math import canonical_camera_pose
+from src.services.reconstruction.rgb.canonical.canonical_poses import CanonicalCameraPoseArtifact, CanonicalPoseService
+from src.services.reconstruction.rgb.canonical.metric_math import canonical_camera_pose
 from tests.test_reconstruction.support.rec06_fixtures import acceptance_for, metric_fixture
 
 
@@ -99,7 +99,7 @@ def test_reject_rehashed_semantically_wrong_payload(tmp_path: Path, change: str)
 
 def _publish_forgery(service: CanonicalPoseService, data: dict) -> None:
     """Fixture attacker tự ký hash mới nhưng không đổi confirmed source."""
-    from src.services.reconstruction.rgb.canonical_poses import _reference
+    from src.services.reconstruction.rgb.canonical.canonical_poses import _reference
 
     data["artifact_checksum"] = canonical_content_checksum(data, "artifact_checksum")
     artifact = CanonicalCameraPoseArtifact.model_validate(data)

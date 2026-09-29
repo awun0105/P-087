@@ -16,12 +16,15 @@ from src.services.reconstruction.adapters.gaussian_scale import (
     SplatTransformSimilarityAdapter,
 )
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor
-from src.services.reconstruction.rgb.canonical_poses import CanonicalPoseService
-from src.services.reconstruction.rgb.canonical_visual_models import CanonicalVisualManifest, CanonicalVisualRequest
-from src.services.reconstruction.rgb.frame_set import _sha256
-from src.services.reconstruction.rgb.metric import MetricCanonicalizer
-from src.services.reconstruction.rgb.metric_models import MetricConfirmation
-from src.services.reconstruction.rgb.visual import BrushVisualArtifact, SplatInspection
+from src.services.reconstruction.rgb.canonical.canonical_poses import CanonicalPoseService
+from src.services.reconstruction.rgb.canonical.canonical_visual_models import (
+    CanonicalVisualManifest,
+    CanonicalVisualRequest,
+)
+from src.services.reconstruction.rgb.canonical.metric import MetricCanonicalizer
+from src.services.reconstruction.rgb.canonical.metric_models import MetricConfirmation
+from src.services.reconstruction.rgb.frames.frame_set import _sha256
+from src.services.reconstruction.rgb.splat.visual import BrushVisualArtifact, SplatInspection
 
 
 @dataclass(frozen=True)

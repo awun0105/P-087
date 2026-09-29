@@ -12,9 +12,9 @@ from src.models.contracts.artifacts import Checksum, ContractModel, ProductArtif
 from src.models.contracts.coordinates import CoordinateSystem
 from src.models.contracts.manifests import StageId
 from src.services.reconstruction.adapters.collision_glb import read_collision_glb
-from src.services.reconstruction.rgb.canonical_poses import CanonicalPoseService
-from src.services.reconstruction.rgb.metric import MetricCanonicalizer
-from src.services.reconstruction.rgb.metric_models import (
+from src.services.reconstruction.rgb.canonical.canonical_poses import CanonicalPoseService
+from src.services.reconstruction.rgb.canonical.metric import MetricCanonicalizer
+from src.services.reconstruction.rgb.canonical.metric_models import (
     DistanceAnchor,
     EvidenceKind,
     MetricConfirmation,

@@ -20,7 +20,7 @@ from src.models.contracts.reconstruction import (
     VoxelGridSummary,
 )
 from src.services.reconstruction.alignment.transforms import validated_transform
-from src.services.reconstruction.rgb.voxel import Vector3, world_from_native
+from src.services.reconstruction.rgb.geometry.voxel import Vector3, world_from_native
 
 
 class GeometryArtifactInput(ContractModel):

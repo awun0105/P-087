@@ -13,8 +13,8 @@ from src.services.reconstruction.adapters.gaussian_scale import (
 from src.services.reconstruction.adapters.voxel import SplatTransformVoxelAdapter, SyntheticVoxelRequest, file_checksum
 from src.services.reconstruction.adapters.voxel_clearance import validate_seed_clearance
 from src.services.reconstruction.adapters.voxel_runtime import VoxelProcess, VoxelRuntimeSettings
-from src.services.reconstruction.rgb.metric_math import SimilarityTransform
-from src.services.reconstruction.rgb.voxel import VoxelConfig
+from src.services.reconstruction.rgb.canonical.metric_math import SimilarityTransform
+from src.services.reconstruction.rgb.geometry.voxel import VoxelConfig
 from tests.test_reconstruction.smoke.rec05_smoke import smoke_config, synthetic_room
 
 

@@ -9,10 +9,14 @@ from src.models.contracts.artifacts import Checksum, ContractModel, ProductArtif
 from src.models.contracts.coordinates import CoordinateSystem
 from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.manifests import StageId
-from src.services.reconstruction.rgb.camera_pose import CameraIntrinsics
-from src.services.reconstruction.rgb.metric import MetricCanonicalizer
-from src.services.reconstruction.rgb.metric_math import CanonicalCameraPose, SimilarityTransform, canonical_camera_pose
-from src.services.reconstruction.rgb.metric_models import EvidenceKind
+from src.services.reconstruction.rgb.canonical.metric import MetricCanonicalizer
+from src.services.reconstruction.rgb.canonical.metric_math import (
+    CanonicalCameraPose,
+    SimilarityTransform,
+    canonical_camera_pose,
+)
+from src.services.reconstruction.rgb.canonical.metric_models import EvidenceKind
+from src.services.reconstruction.rgb.pose.camera_pose import CameraIntrinsics
 
 
 class CanonicalCameraPoseArtifact(ContractModel):

@@ -19,7 +19,7 @@ from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.manifests import InputConfiguration, StageId
 from src.models.contracts.reconstruction import AlignmentRecord, DepthFrameSet, ReconstructionBundle
 from src.services.reconstruction.bundle_validation import BundleDependencies, validate_bundle_sources
-from src.services.reconstruction.rgb.publication import ArtifactWriter
+from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
 
 
 class BundleBuildRequest(ContractModel):

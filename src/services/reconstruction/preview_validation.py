@@ -9,9 +9,9 @@ from src.models.contracts.manifests import StageId
 from src.models.contracts.preview import ReconstructionPreview
 from src.services.reconstruction.attempt import PublicationNamespace
 from src.services.reconstruction.preview_models import PreparedPreviewRequest, PreparedPreviewResult
-from src.services.reconstruction.rgb.frame_set import FrameSetResolver, _sha256
-from src.services.reconstruction.rgb.pose_publication import CameraPoseResolver
-from src.services.reconstruction.rgb.visual_publication import VisualResolver
+from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver, _sha256
+from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
+from src.services.reconstruction.rgb.splat.visual_publication import VisualResolver
 
 
 @dataclass(frozen=True)

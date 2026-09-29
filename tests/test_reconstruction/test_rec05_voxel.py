@@ -11,7 +11,7 @@ from src.services.reconstruction.adapters.voxel_runtime import (
     VoxelRuntimeSettings,
     require_carve,
 )
-from src.services.reconstruction.rgb.voxel import (
+from src.services.reconstruction.rgb.geometry.voxel import (
     VoxelConfig,
     cluster_command,
     collision_command,

@@ -22,7 +22,7 @@ from src.models.contracts.manifests import (
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.services.reconstruction.bundle import BundleBuildRequest, ReconstructionBundleService
 from src.services.reconstruction.bundle_validation import BundleDependencies
-from src.services.reconstruction.rgb.publication import ArtifactWriter
+from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
 
 logger = logging.getLogger("ex_rec.worker")
 

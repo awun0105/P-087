@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.manifests import StageId
 from src.models.contracts.reconstruction import AlignmentRecord
-from src.services.reconstruction.rgb.frame_set import _sha256
+from src.services.reconstruction.rgb.frames.frame_set import _sha256
 
 if TYPE_CHECKING:
     from src.services.reconstruction.bundle import BundleBuildRequest

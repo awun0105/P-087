@@ -4,13 +4,13 @@ import math
 
 import pytest
 
-from src.services.reconstruction.rgb.camera_pose import CameraPose
-from src.services.reconstruction.rgb.metric_math import (
+from src.services.reconstruction.rgb.canonical.metric_math import (
     SimilarityTransform,
     canonical_camera_pose,
     rotate,
     scale_from_distance,
 )
+from src.services.reconstruction.rgb.pose.camera_pose import CameraPose
 
 
 def transform() -> SimilarityTransform:

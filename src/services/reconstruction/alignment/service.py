@@ -10,8 +10,8 @@ from src.models.contracts.manifests import StageId
 from src.models.contracts.reconstruction import AlignmentRecord, AlignmentStatus
 from src.services.reconstruction.alignment.models import AlignmentRequest
 from src.services.reconstruction.alignment.transforms import validated_transform
-from src.services.reconstruction.rgb.frame_set import _sha256
-from src.services.reconstruction.rgb.publication import ArtifactWriter
+from src.services.reconstruction.rgb.frames.frame_set import _sha256
+from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
 
 
 class RgbLidarAlignmentService:

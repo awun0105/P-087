@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from src.services.reconstruction.rgb.quality_models import RGBFrameAsset, RGBQualityProfile
+from src.services.reconstruction.rgb.preflight.quality_models import RGBFrameAsset, RGBQualityProfile
 
 _BLUR_LINE = re.compile(r"lavfi\.blur=([0-9.eE+-]+)")
 _LOCAL_MOTION = re.compile(r"\(LM\s+(-?\d+)\s+(-?\d+)\s+")

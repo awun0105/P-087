@@ -8,7 +8,7 @@ from src.models.contracts.artifacts import Checksum, ContractModel, ProductArtif
 from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.reconstruction import VisualArtifact
 from src.services.reconstruction.adapters.gaussian_scale import GaussianTransformReceipt
-from src.services.reconstruction.rgb.visual import SplatInspection
+from src.services.reconstruction.rgb.splat.visual import SplatInspection
 
 
 class CanonicalVisualRequest(ContractModel):

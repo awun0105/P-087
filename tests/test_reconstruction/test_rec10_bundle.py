@@ -22,7 +22,7 @@ from src.services.reconstruction.alignment import (
 )
 from src.services.reconstruction.bundle import BundleBuildRequest, ReconstructionBundleService
 from src.services.reconstruction.lidar import LiDARIngestRequest, LiDARIngestService
-from src.services.reconstruction.rgb.geometry_publication import GeometryExecutionRequest
+from src.services.reconstruction.rgb.geometry.geometry_publication import GeometryExecutionRequest
 from src.services.scene.bundle_consumer import load_reconstruction_bundle
 from tests.test_reconstruction.support.rec09_fixtures import reviewed_fixture
 from tests.test_reconstruction.support.rec10_fixtures import reviewed_bundle_fixture

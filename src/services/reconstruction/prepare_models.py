@@ -7,7 +7,7 @@ from pydantic import Field, model_validator
 from src.models.contracts.artifacts import Checksum, ContractModel, ProductArtifactRef
 from src.models.contracts.manifests import ExecutionError, StageArtifact, StageId
 from src.services.reconstruction.attempt import PathSegment
-from src.services.reconstruction.rgb.quality_models import RGBQualityProfile
+from src.services.reconstruction.rgb.preflight.quality_models import RGBQualityProfile
 
 
 class PrepareInputRequest(ContractModel):

@@ -20,9 +20,9 @@ from src.services.reconstruction.adapters.colmap_runtime import (
     ColmapRuntimeSettings,
     reconstruction_commands,
 )
-from src.services.reconstruction.rgb.camera_pose import CameraPoseArtifact, ColmapConfig
-from src.services.reconstruction.rgb.frame_set import FrameSetResolver
-from src.services.reconstruction.rgb.pose_publication import CameraPoseResolver
+from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver
+from src.services.reconstruction.rgb.pose.camera_pose import CameraPoseArtifact, ColmapConfig
+from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
 
 
 def config(**changes: object) -> ColmapConfig:

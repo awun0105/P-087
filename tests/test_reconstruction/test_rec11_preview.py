@@ -19,9 +19,9 @@ from src.services.reconstruction.adapters.brush_runtime import Invocation
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor, SplatRuntimeSettings
 from src.services.reconstruction.preview_models import PreparedPreviewRequest, PreparedPreviewResult
 from src.services.reconstruction.preview_worker import PreparedPreviewWorker, PreviewDependencies
-from src.services.reconstruction.rgb.frame_set import FrameSetResolver
-from src.services.reconstruction.rgb.pose_publication import CameraPoseResolver
-from src.services.reconstruction.rgb.visual_publication import VisualResolver
+from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver
+from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
+from src.services.reconstruction.rgb.splat.visual_publication import VisualResolver
 from tests.test_reconstruction.test_rec03_colmap import FixtureProcess
 from tests.test_reconstruction.test_rec03_colmap import config as colmap_config
 from tests.test_reconstruction.test_rec04_brush import FixtureBrush, FixtureProcessor, png_frames

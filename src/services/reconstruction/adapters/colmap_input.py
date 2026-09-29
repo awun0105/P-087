@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.models.contracts.artifacts import ProductArtifactRef
-from src.services.reconstruction.rgb.frame_set import FrameSetResolver
+from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver
 
 
 @dataclass(frozen=True)

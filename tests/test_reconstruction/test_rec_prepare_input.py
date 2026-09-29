@@ -20,11 +20,11 @@ from src.services.reconstruction.prepare_cli import (
     target_frames,
 )
 from src.services.reconstruction.prepare_models import PrepareInputRequest
-from src.services.reconstruction.rgb.ffmpeg_probe import FFmpegRGBProbe
-from src.services.reconstruction.rgb.frame_extraction import FFmpegFrameDecoder
-from src.services.reconstruction.rgb.frame_set import FrameSetResolver
-from src.services.reconstruction.rgb.quality import RGBQualityValidator
-from src.services.reconstruction.rgb.quality_models import RGBQualityProfile
+from src.services.reconstruction.rgb.frames.frame_extraction import FFmpegFrameDecoder
+from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver
+from src.services.reconstruction.rgb.preflight.ffmpeg_probe import FFmpegRGBProbe
+from src.services.reconstruction.rgb.preflight.quality import RGBQualityValidator
+from src.services.reconstruction.rgb.preflight.quality_models import RGBQualityProfile
 
 ROOT = Path(__file__).resolve().parents[2]
 JOB = "job-prepare-test"

@@ -11,9 +11,12 @@ from src.services.reconstruction.adapters.brush_runtime import BrushRuntimeSetti
 from src.services.reconstruction.adapters.gaussian_scale import SplatTransformSimilarityAdapter
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor, SplatRuntimeSettings
 from src.services.reconstruction.adapters.voxel_runtime import VoxelProcess, VoxelRuntimeSettings
-from src.services.reconstruction.rgb.canonical_visual import CanonicalVisualDependencies, CanonicalVisualService
-from src.services.reconstruction.rgb.canonical_visual_models import CanonicalVisualRequest
-from src.services.reconstruction.rgb.visual import SplatInspection
+from src.services.reconstruction.rgb.canonical.canonical_visual import (
+    CanonicalVisualDependencies,
+    CanonicalVisualService,
+)
+from src.services.reconstruction.rgb.canonical.canonical_visual_models import CanonicalVisualRequest
+from src.services.reconstruction.rgb.splat.visual import SplatInspection
 from tests.test_reconstruction.test_rec04_brush import FixtureProcessor
 from tests.test_reconstruction.test_rec05_adapter import FixtureProcess
 from tests.test_reconstruction.test_rec05_scale import _rows

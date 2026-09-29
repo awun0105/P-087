@@ -7,14 +7,14 @@ import pytest
 from pydantic import ValidationError
 
 from src.services.orchestration.artifacts.errors import ArtifactChecksumError
-from src.services.reconstruction.rgb.canonical_poses import CanonicalPoseService
-from src.services.reconstruction.rgb.geometry_publication import GeometryExecutionRequest
-from src.services.reconstruction.rgb.metric_models import DistanceAnchor
-from src.services.reconstruction.rgb.metric_verification import (
+from src.services.reconstruction.rgb.canonical.canonical_poses import CanonicalPoseService
+from src.services.reconstruction.rgb.canonical.metric_models import DistanceAnchor
+from src.services.reconstruction.rgb.canonical.metric_verification import (
     CrossArtifactVerificationReport,
     CrossArtifactVerificationRequest,
     MetricVerificationService,
 )
+from src.services.reconstruction.rgb.geometry.geometry_publication import GeometryExecutionRequest
 from tests.test_reconstruction.support.rec06_fixtures import acceptance_for, publish_evidence
 from tests.test_reconstruction.test_rec05_adapter import config
 from tests.test_reconstruction.test_rec05_product_pipeline import setup_pipeline

@@ -4,7 +4,7 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.services.reconstruction.rgb.camera_pose import CameraIntrinsics, CameraPose, SparseModelStats
+from src.services.reconstruction.rgb.pose.camera_pose import CameraIntrinsics, CameraPose, SparseModelStats
 
 
 @dataclass(frozen=True)

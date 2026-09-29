@@ -11,7 +11,7 @@ from src.models.contracts.manifests import (
     PrivacyResult,
     PrivacyValidationReport,
 )
-from src.services.reconstruction.rgb.quality import RGBValidationError
+from src.services.reconstruction.rgb.preflight.quality import RGBValidationError
 
 
 @dataclass(frozen=True)

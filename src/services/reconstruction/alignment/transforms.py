@@ -3,7 +3,7 @@
 import math
 
 from src.models.contracts.coordinates import Transform
-from src.services.reconstruction.rgb.metric_math import compose_rotation, rotate
+from src.services.reconstruction.rgb.canonical.metric_math import compose_rotation, rotate
 
 
 def validated_transform(transform: Transform) -> Transform:

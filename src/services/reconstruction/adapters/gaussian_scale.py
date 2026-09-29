@@ -9,8 +9,8 @@ from pydantic import Field
 
 from src.models.contracts.artifacts import Checksum, ContractModel
 from src.services.reconstruction.adapters.voxel_runtime import VoxelProcess
-from src.services.reconstruction.rgb.frame_set import _sha256
-from src.services.reconstruction.rgb.metric_math import SimilarityTransform
+from src.services.reconstruction.rgb.canonical.metric_math import SimilarityTransform
+from src.services.reconstruction.rgb.frames.frame_set import _sha256
 
 
 class GaussianTransformRequest(ContractModel):

@@ -13,8 +13,12 @@ from pydantic import Field, FiniteFloat, model_validator
 from src.models.contracts.artifacts import ContractModel, Identifier, ProductArtifactRef
 from src.models.contracts.manifests import StageId
 from src.models.contracts.reconstruction import PreprocessingProvenance
-from src.services.reconstruction.rgb.camera_pose import Vector3
-from src.services.reconstruction.rgb.metric_models import CanonicalFrameDeclaration, EvidenceKind, MetricPreview
+from src.services.reconstruction.rgb.canonical.metric_models import (
+    CanonicalFrameDeclaration,
+    EvidenceKind,
+    MetricPreview,
+)
+from src.services.reconstruction.rgb.pose.camera_pose import Vector3
 
 
 class DemoMetricMode(StrEnum):

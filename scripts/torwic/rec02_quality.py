@@ -9,9 +9,9 @@ from pathlib import Path
 from scripts.torwic import prepare_dataset as prep
 from scripts.torwic.canonical_dataset import validate_canonical_manifest
 from src.models.contracts.identity import verify_content_checksum
-from src.services.reconstruction.rgb.ffmpeg_probe import FFmpegRGBProbe
-from src.services.reconstruction.rgb.quality import RGBQualityRequest, RGBQualityValidator
-from src.services.reconstruction.rgb.quality_models import RGBFrameAsset, RGBQualityProfile, RGBQualityReport
+from src.services.reconstruction.rgb.preflight.ffmpeg_probe import FFmpegRGBProbe
+from src.services.reconstruction.rgb.preflight.quality import RGBQualityRequest, RGBQualityValidator
+from src.services.reconstruction.rgb.preflight.quality_models import RGBFrameAsset, RGBQualityProfile, RGBQualityReport
 
 
 def build_request(dataset_root: Path, traversal_id: str, profile: RGBQualityProfile) -> RGBQualityRequest:

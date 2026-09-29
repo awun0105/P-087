@@ -8,7 +8,7 @@ from typing import Literal, Self
 from pydantic import Field, model_validator
 
 from src.models.contracts.artifacts import ContractModel
-from src.services.reconstruction.rgb.voxel import Vector3, VoxelConfig
+from src.services.reconstruction.rgb.geometry.voxel import Vector3, VoxelConfig
 
 
 class VoxelBounds(ContractModel):

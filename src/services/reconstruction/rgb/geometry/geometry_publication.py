@@ -18,18 +18,18 @@ from src.services.reconstruction.adapters.voxel_clearance import clearance_from_
 from src.services.reconstruction.adapters.voxel_octree import VoxelOctree
 from src.services.reconstruction.adapters.voxel_output import VoxelMetadata
 from src.services.reconstruction.attempt import PathSegment
-from src.services.reconstruction.rgb.frame_set import _sha256
-from src.services.reconstruction.rgb.geometry_artifact import (
+from src.services.reconstruction.rgb.canonical.metric import MetricCanonicalizer
+from src.services.reconstruction.rgb.canonical.metric_models import MetricConfirmation
+from src.services.reconstruction.rgb.canonical.metric_seed import CameraSeedProposal
+from src.services.reconstruction.rgb.frames.frame_set import _sha256
+from src.services.reconstruction.rgb.geometry.geometry_artifact import (
     GeometryArtifactInput,
     _voxel_summary,
     build_geometry_artifact,
 )
-from src.services.reconstruction.rgb.metric import MetricCanonicalizer
-from src.services.reconstruction.rgb.metric_models import MetricConfirmation
-from src.services.reconstruction.rgb.metric_seed import CameraSeedProposal
-from src.services.reconstruction.rgb.publication import ArtifactWriter
-from src.services.reconstruction.rgb.visual_publication import VisualResolver
-from src.services.reconstruction.rgb.voxel import VoxelConfig
+from src.services.reconstruction.rgb.geometry.voxel import VoxelConfig
+from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
+from src.services.reconstruction.rgb.splat.visual_publication import VisualResolver
 
 
 class GeometryExecutionRequest(ContractModel):

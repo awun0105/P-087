@@ -26,7 +26,11 @@ from src.models.contracts.artifacts import ArtifactDataClass
 from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
 from src.models.contracts.manifests import PrivacyInspectionScope, PrivacyResult
 from src.services.orchestration.artifacts.store import ArtifactResolver
-from src.services.reconstruction.rgb.privacy import PrivacyInspectionEvidence, PrivacyReviewRequest, RGBPrivacyGate
+from src.services.reconstruction.rgb.preflight.privacy import (
+    PrivacyInspectionEvidence,
+    PrivacyReviewRequest,
+    RGBPrivacyGate,
+)
 
 
 def _source(root: Path) -> CanonicalSource:

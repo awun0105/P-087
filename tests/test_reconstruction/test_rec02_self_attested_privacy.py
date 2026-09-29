@@ -6,13 +6,13 @@ import pytest
 
 from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.manifests import InputManifest, PrivacyResult
-from src.services.reconstruction.rgb.privacy import (
+from src.services.reconstruction.rgb.preflight.privacy import (
     SELF_ATTESTED_REFERENCE,
     PrivacyDispatchProof,
     PrivacyQAAcceptance,
     SelfAttestedPrivacyGate,
 )
-from src.services.reconstruction.rgb.quality import RGBValidationError
+from src.services.reconstruction.rgb.preflight.quality import RGBValidationError
 
 ROOT = Path(__file__).resolve().parents[2]
 

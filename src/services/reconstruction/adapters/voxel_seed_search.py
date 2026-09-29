@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 from src.services.reconstruction.adapters.voxel_octree import Cell, CellBox, VoxelOctree
 from src.services.reconstruction.adapters.voxel_output import VoxelMetadata
-from src.services.reconstruction.rgb.voxel import (
+from src.services.reconstruction.rgb.geometry.voxel import (
     Vector3,
     VoxelConfig,
     native_from_world,

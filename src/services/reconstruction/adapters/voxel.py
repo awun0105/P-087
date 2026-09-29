@@ -20,8 +20,8 @@ from src.services.reconstruction.adapters.gaussian_scale import (
 from src.services.reconstruction.adapters.voxel_clearance import validate_seed_clearance
 from src.services.reconstruction.adapters.voxel_output import validate_voxel_output, write_evidence
 from src.services.reconstruction.adapters.voxel_runtime import GeometryError, VoxelProcess, require_carve
-from src.services.reconstruction.rgb.metric_models import MetricConfirmation
-from src.services.reconstruction.rgb.voxel import (
+from src.services.reconstruction.rgb.canonical.metric_models import MetricConfirmation
+from src.services.reconstruction.rgb.geometry.voxel import (
     VoxelConfig,
     cluster_command,
     collision_command,

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from src.services.reconstruction.adapters.voxel import SplatTransformVoxelAdapter, SyntheticVoxelRequest, file_checksum
 from src.services.reconstruction.adapters.voxel_runtime import VoxelProcess, VoxelRuntimeSettings
-from src.services.reconstruction.rgb.voxel import VoxelConfig
+from src.services.reconstruction.rgb.geometry.voxel import VoxelConfig
 
 
 def synthetic_room(path: Path) -> None:

@@ -6,8 +6,8 @@ from pathlib import Path
 
 from src.models.contracts.identity import verify_content_checksum
 from src.models.contracts.manifests import InputManifest
-from src.services.reconstruction.rgb.quality import RGBQualityRequest, RGBValidationError, RGBVideoRequest
-from src.services.reconstruction.rgb.quality_models import RGBFrameAsset, RGBQualityProfile
+from src.services.reconstruction.rgb.preflight.quality import RGBQualityRequest, RGBValidationError, RGBVideoRequest
+from src.services.reconstruction.rgb.preflight.quality_models import RGBFrameAsset, RGBQualityProfile
 
 
 @dataclass(frozen=True)

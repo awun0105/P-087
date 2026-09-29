@@ -8,7 +8,7 @@ import argparse
 import json
 from pathlib import Path
 
-from src.services.reconstruction.rgb.metric_models import MetricConfirmation, independent_distance_error
+from src.services.reconstruction.rgb.canonical.metric_models import MetricConfirmation, independent_distance_error
 from tests.test_reconstruction.support.rec06_fixtures import acceptance_for, metric_fixture
 
 

@@ -9,8 +9,12 @@ from pydantic import Field, FiniteFloat, model_validator
 from src.models.contracts.artifacts import Checksum, ContractModel, Identifier, ProductArtifactRef
 from src.models.contracts.coordinates import CoordinateSystem
 from src.models.contracts.identity import canonical_content_checksum, canonical_json_bytes
-from src.services.reconstruction.rgb.camera_pose import Quaternion, Vector3
-from src.services.reconstruction.rgb.metric_math import SimilarityTransform, scale_from_distance, unit_quaternion
+from src.services.reconstruction.rgb.canonical.metric_math import (
+    SimilarityTransform,
+    scale_from_distance,
+    unit_quaternion,
+)
+from src.services.reconstruction.rgb.pose.camera_pose import Quaternion, Vector3
 
 EvidenceKind = Literal["synthetic_fixture", "real_measurement"]
 

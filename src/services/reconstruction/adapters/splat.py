@@ -6,8 +6,8 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.services.reconstruction.adapters.brush_runtime import Invocation, VisualProcess
-from src.services.reconstruction.rgb.frame_set import _sha256
-from src.services.reconstruction.rgb.visual import SplatInspection
+from src.services.reconstruction.rgb.frames.frame_set import _sha256
+from src.services.reconstruction.rgb.splat.visual import SplatInspection
 
 
 class SplatRuntimeSettings(BaseSettings):

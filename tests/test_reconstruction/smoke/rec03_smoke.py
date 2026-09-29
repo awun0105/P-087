@@ -16,9 +16,9 @@ from src.services.reconstruction.adapters.colmap import ColmapAdapter, ColmapDep
 from src.services.reconstruction.adapters.colmap_model import read_sparse_model
 from src.services.reconstruction.adapters.colmap_runtime import ColmapProcess, ColmapRuntimeSettings
 from src.services.reconstruction.adapters.torwic_frame_source import TorwicFrameSource, TorwicFrameSourceConfig
-from src.services.reconstruction.rgb.camera_pose import ColmapConfig
-from src.services.reconstruction.rgb.frame_set import FrameSetResolver
-from src.services.reconstruction.rgb.pose_publication import CameraPoseResolver
+from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver
+from src.services.reconstruction.rgb.pose.camera_pose import ColmapConfig
+from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
 
 
 class SmokeSettings(BaseSettings):

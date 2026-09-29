@@ -14,8 +14,8 @@ from src.services.reconstruction.adapters.gaussian_scale import (
 )
 from src.services.reconstruction.adapters.voxel_runtime import GeometryError, VoxelProcess, VoxelRuntimeSettings
 from src.services.reconstruction.lidar.cloud_header import read_header
-from src.services.reconstruction.rgb.frame_set import _sha256
-from src.services.reconstruction.rgb.metric_math import SimilarityTransform
+from src.services.reconstruction.rgb.canonical.metric_math import SimilarityTransform
+from src.services.reconstruction.rgb.frames.frame_set import _sha256
 from tests.test_reconstruction.test_rec04_brush import gaussian_ply
 from tests.test_reconstruction.test_rec05_adapter import FixtureProcess
 

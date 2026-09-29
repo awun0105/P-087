@@ -25,9 +25,9 @@ from src.services.reconstruction.adapters.brush_runtime import (
 )
 from src.services.reconstruction.adapters.colmap import ColmapAdapter, ColmapDependencies, ColmapRequest
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor, SplatRuntimeSettings
-from src.services.reconstruction.rgb.pose_publication import CameraPoseResolver
-from src.services.reconstruction.rgb.visual import BrushConfig, BrushVisualArtifact, SplatInspection
-from src.services.reconstruction.rgb.visual_publication import VisualPublisher, VisualResolver
+from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
+from src.services.reconstruction.rgb.splat.visual import BrushConfig, BrushVisualArtifact, SplatInspection
+from src.services.reconstruction.rgb.splat.visual_publication import VisualPublisher, VisualResolver
 from tests.test_reconstruction.test_rec03_colmap import FixtureProcess, frame_source, reference
 from tests.test_reconstruction.test_rec03_colmap import config as colmap_config
 

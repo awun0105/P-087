@@ -6,9 +6,9 @@ import math
 from pathlib import Path
 
 from src.models.contracts.artifacts import ProductArtifactRef
-from src.services.reconstruction.rgb.metric import MetricCanonicalizer, MetricDependencies
-from src.services.reconstruction.rgb.metric_models import MetricAcceptance, MetricPreview, MetricRequest
-from src.services.reconstruction.rgb.publication import ArtifactWriter
+from src.services.reconstruction.rgb.canonical.metric import MetricCanonicalizer, MetricDependencies
+from src.services.reconstruction.rgb.canonical.metric_models import MetricAcceptance, MetricPreview, MetricRequest
+from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
 from tests.test_reconstruction.test_rec04_brush import adapter
 
 

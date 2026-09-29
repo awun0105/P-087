@@ -14,7 +14,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.models.contracts.manifests import ExecutionError, StageArtifact, StageId, StageStatus
-from src.services.reconstruction.rgb.visual import BrushConfig
+from src.services.reconstruction.rgb.splat.visual import BrushConfig
 
 
 class BrushRuntimeSettings(BaseSettings):

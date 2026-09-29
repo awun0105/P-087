@@ -20,7 +20,7 @@ from src.models.contracts.reconstruction import (
     SeedDecision,
     VoxelGridSummary,
 )
-from src.services.reconstruction.rgb.geometry_artifact import (
+from src.services.reconstruction.rgb.geometry.geometry_artifact import (
     GeometryArtifactInput,
     build_geometry_artifact,
 )

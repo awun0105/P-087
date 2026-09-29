@@ -10,7 +10,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.models.contracts.manifests import ExecutionError, StageArtifact, StageId, StageStatus
-from src.services.reconstruction.rgb.camera_pose import ColmapConfig
+from src.services.reconstruction.rgb.pose.camera_pose import ColmapConfig
 
 
 class ColmapRuntimeSettings(BaseSettings):

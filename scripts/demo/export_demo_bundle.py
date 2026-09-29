@@ -19,10 +19,10 @@ from pathlib import Path
 
 from src.models.contracts.manifests import InputManifest, JobManifest, JobStatus, StageStatus
 from src.services.orchestration.artifacts import sha256_file
-from src.services.orchestration.samples import DemoFile, DemoManifest, DemoSource, DemoStage
 from src.services.orchestration.jobs.dispatch import prepared_frame_reference
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.jobs.progress import MVP_PIPELINE
+from src.services.orchestration.samples import DemoFile, DemoManifest, DemoSource, DemoStage
 
 _MEDIA = {".mp4": "video/mp4", ".mov": "video/quicktime", ".png": "image/png", ".jpg": "image/jpeg"}
 _MEDIA.update({".jpeg": "image/jpeg", ".sog": "application/octet-stream", ".ply": "application/octet-stream"})

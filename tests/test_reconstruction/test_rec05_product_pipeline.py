@@ -9,7 +9,7 @@ import pytest
 from src.models.contracts.manifests import StageId
 from src.services.reconstruction.adapters.voxel import ProductVoxelRequest, SplatTransformVoxelAdapter, file_checksum
 from src.services.reconstruction.adapters.voxel_runtime import VoxelRuntimeSettings
-from src.services.reconstruction.rgb.geometry_publication import (
+from src.services.reconstruction.rgb.geometry.geometry_publication import (
     GeometryDependencies,
     GeometryExecutionRequest,
     GeometryPublisher,

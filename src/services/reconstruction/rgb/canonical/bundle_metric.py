@@ -10,13 +10,13 @@ from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.manifests import StageId
 from src.services.reconstruction.bundle import BundleBuildRequest
 from src.services.reconstruction.bundle_validation import BundleDependencies, bundle_references
-from src.services.reconstruction.rgb.bundle_metric_models import (
+from src.services.reconstruction.rgb.canonical.bundle_metric_models import (
     BundleMetricAcceptance,
     BundleMetricRecord,
     BundleMetricRequest,
 )
-from src.services.reconstruction.rgb.canonical_visual import CanonicalVisualService
-from src.services.reconstruction.rgb.metric_verification import (
+from src.services.reconstruction.rgb.canonical.canonical_visual import CanonicalVisualService
+from src.services.reconstruction.rgb.canonical.metric_verification import (
     CrossArtifactVerificationRequest,
     MetricVerificationService,
 )
