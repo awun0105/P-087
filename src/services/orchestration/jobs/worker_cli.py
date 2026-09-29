@@ -7,7 +7,8 @@ reclaim RUNNING theo timeout vì trainer có thể vẫn còn sống trên host 
 import argparse
 import logging
 import signal
-from threading import Event
+from pathlib import Path
+from threading import Event, Thread
 from typing import Protocol
 
 from src.config import get_settings
@@ -16,6 +17,9 @@ from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import load_prepared_profile, prepared_frame_reference, require_profile
 from src.services.orchestration.jobs.models import TransitionRequest
 from src.services.orchestration.jobs.preview_cli import run_prepared_job, run_video_job
+from src.services.orchestration.processing import is_presets_file, load_presets
+from src.services.orchestration.processing.capability import probe as probe_capability
+from src.services.orchestration.processing.capability import record as record_capability
 from src.services.orchestration.projects.errors import PrivacyGateBlockedError
 from src.services.orchestration.projects.privacy import require_project_dispatch
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
@@ -106,6 +110,32 @@ def dispatch_next(
     return False
 
 
+#: Chu kỳ đo lại cấu hình máy; nhỏ hơn TTL của số đo (15 phút) để UI luôn có số mới.
+CAPABILITY_INTERVAL_SECONDS = 300
+
+
+def _start_capability_heartbeat(registry: ProjectRegistry, worker_root: Path) -> Event:
+    """Đo và ghi cấu hình máy ngay, rồi lặp ở luồng nền (job dài không làm số đo quá hạn).
+
+    Trả Event để dừng luồng khi worker thoát; lỗi đo được log, không làm dừng worker.
+    """
+    stop = Event()
+    database = registry.persistence.database if registry.persistence is not None else None
+
+    def beat() -> None:
+        while True:
+            try:
+                if database is not None:
+                    record_capability(database, probe_capability(worker_root))
+            except (OSError, ValueError, RuntimeError) as error:
+                logger.warning("Không ghi được cấu hình máy worker: %s", type(error).__name__)
+            if stop.wait(CAPABILITY_INTERVAL_SECONDS):
+                return
+
+    Thread(target=beat, name="capability-heartbeat", daemon=True).start()
+    return stop
+
+
 def main(argv: list[str] | None = None) -> int:
     """Worker cần cùng DB/store/profile với API; không tạo background thread ở HTTP."""
     parser = argparse.ArgumentParser(description="Consume durable prepared RGB jobs")
@@ -117,7 +147,11 @@ def main(argv: list[str] | None = None) -> int:
     if registry.execution_profile is None or settings.product_processing_config is None:
         logger.error("Configure PRODUCT_PROCESSING_CONFIG and PRODUCT_RUNTIME_MANIFEST before starting worker")
         return 2
-    load_prepared_profile(settings.product_processing_config, registry.execution_profile)
+    if is_presets_file(settings.product_processing_config):
+        load_presets(settings.product_processing_config)
+    else:
+        load_prepared_profile(settings.product_processing_config, registry.execution_profile)
+    heartbeat = _start_capability_heartbeat(registry, settings.product_worker_root)
     previous = signal.getsignal(signal.SIGTERM)
 
     def interrupt(signum: int, frame: object) -> None:
@@ -136,6 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         return 130
     finally:
+        heartbeat.set()
         signal.signal(signal.SIGTERM, previous)
 
 

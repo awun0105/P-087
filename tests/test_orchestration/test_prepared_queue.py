@@ -187,3 +187,24 @@ def test_dispatch_failure_before_claim_is_recorded_on_job(tmp_path: Path) -> Non
     runner = _Runner()
     assert dispatch_next(registry, runner) is False
     assert runner.calls == []
+
+
+def test_capability_heartbeat_records_worker_machine(tmp_path: Path) -> None:
+    """Worker ghi cấu hình máy ngay khi khởi động để API kiểm thông số người dùng chọn."""
+    import time
+
+    from src.services.orchestration.jobs.worker_cli import _start_capability_heartbeat
+    from src.services.orchestration.processing.capability import latest
+
+    registry = _registry(tmp_path)
+    stop = _start_capability_heartbeat(registry, tmp_path / "workers")
+    try:
+        assert registry.persistence is not None
+        for _ in range(50):
+            capability = latest(registry.persistence.database)
+            if capability is not None:
+                break
+            time.sleep(0.05)
+        assert capability is not None and capability.cpu_count >= 1 and capability.disk_free_gb >= 0
+    finally:
+        stop.set()
