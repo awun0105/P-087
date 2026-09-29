@@ -10,10 +10,13 @@ export interface SceneStatusView {
 }
 
 /**
- * Nhãn trạng thái scene cho người dùng. Preview sẵn sàng thì scene "Sẵn sàng"
- * dù job vẫn RUNNING ở bước xác nhận tỉ lệ mét (chưa thuộc Studio MVP).
+ * Nhãn trạng thái scene cho người dùng. Preview sẵn sàng mà job còn RUNNING ở bước
+ * xác nhận tỉ lệ mét (REC-06) nghĩa là đang chờ người dùng, không phải worker đang chạy.
  */
 export function sceneStatus(job: JobManifest | null, previewReady: boolean): SceneStatusView {
+  if (previewReady && job?.status === "RUNNING" && job.current_stage === "ST-METRIC-CANONICALIZE") {
+    return { label: "Chờ xác nhận tỉ lệ", tone: "ochre", active: false };
+  }
   if (previewReady) return { label: "Sẵn sàng", tone: "sage", active: false };
   if (job === null) return { label: "Chưa xử lý", tone: "neutral", active: false };
   switch (job.status) {

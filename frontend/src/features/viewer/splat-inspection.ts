@@ -16,8 +16,14 @@ export class SplatInspection {
   private readonly inputGates = new Set<"measure" | "form">();
   private readonly colorA = new Color(0.2, 0.8, 1);
   private readonly colorB = new Color(1, 0.7, 0.2);
+  private readonly colorFloor = new Color(0.4, 0.9, 0.4);
 
-  constructor(private readonly viewer: ViewerHandle, private readonly notify: (state: InspectionState) => void) {
+  /** `maxPoints` 2 = cặp đo A/B; 5 = A, B rồi 3 điểm sàn cho xác nhận tỉ lệ mét (REC-06). */
+  constructor(
+    private readonly viewer: ViewerHandle,
+    private readonly notify: (state: InspectionState) => void,
+    private readonly maxPoints = 2,
+  ) {
     const canvas = viewer.app.graphicsDevice.canvas;
     if (!(canvas instanceof HTMLCanvasElement)) throw new Error("Inspection cần HTML canvas");
     this.canvas = canvas;
@@ -128,8 +134,8 @@ export class SplatInspection {
       const source = sourceFromWorld.transformPoint(point);
       const value: InspectionPoint = [source.x, source.y, source.z];
       if (!value.every(Number.isFinite)) throw new Error("GPU trả tọa độ không hữu hạn");
-      // Sau A/B, click mới bắt đầu phép đo mới; history vẫn giữ cặp cũ để undo.
-      this.history.commit(this.history.current.length === 2 ? [value] : [...this.history.current, value]);
+      // Đủ điểm thì click mới bắt đầu bộ mới; history vẫn giữ bộ cũ để undo.
+      this.history.commit(this.history.current.length >= this.maxPoints ? [value] : [...this.history.current, value]);
     });
   };
 
@@ -141,12 +147,17 @@ export class SplatInspection {
       const points = this.state.points.map((point) => transform.transformPoint(new Vec3(...point)));
       points.forEach((point, index) => {
         const size = Math.max(point.distance(camera.entity.getPosition()) * 0.004, 0.00001);
-        const color = index === 0 ? this.colorA : this.colorB;
+        const color = index === 0 ? this.colorA : index === 1 ? this.colorB : this.colorFloor;
         for (const offset of [new Vec3(size, 0, 0), new Vec3(0, size, 0), new Vec3(0, 0, size)]) {
           this.viewer.app.drawLine(point.clone().sub(offset), point.clone().add(offset), color, false);
         }
       });
-      if (points.length === 2) this.viewer.app.drawLine(points[0], points[1], this.colorB, false);
+      if (points.length >= 2) this.viewer.app.drawLine(points[0], points[1], this.colorB, false);
+      const floor = points.slice(2);
+      floor.forEach((point, index) => {
+        const next = floor[(index + 1) % floor.length];
+        if (floor.length === 3 || index + 1 < floor.length) this.viewer.app.drawLine(point, next, this.colorFloor, false);
+      });
     } catch (error: unknown) {
       // Asset có thể đang unload; báo lỗi tool một lần, không làm hỏng viewport.
       if (!this.state.error) {

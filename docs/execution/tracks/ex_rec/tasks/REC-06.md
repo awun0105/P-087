@@ -32,6 +32,40 @@ EX-REC**, không cần sửa EX-SIM.
 Ghi chú phạm vi: đây là lựa chọn cho **demo Aisle_CW**. Với video người dùng upload,
 `translation_m` suy ra từ anchor của họ; số `0,2345` không được nhúng vào `src/`.
 
+### 2026-09-29 — khung tọa độ cho video người dùng: 3 điểm sàn + đoạn A/B (PROPOSAL)
+
+**PROPOSAL, chờ owner chốt** (tổng quát hóa quyết định "dịch sàn về z=0" ở trên, không
+thay nó). Anchor chỉ cho scale; hướng và gốc phải khai báo tường minh. Với video người
+dùng, khai báo lấy từ chính điểm họ chọn trên scene 3DGS sau preview:
+
+- 3 điểm sàn → pháp tuyến sàn là +Z (chiều quay về phía tâm camera), sàn là z = 0;
+- A→B chiếu lên sàn → +X; gốc là hình chiếu của A xuống sàn;
+- camera centers chỉ dùng để chọn chiều pháp tuyến, không quyết định hướng/gốc.
+
+Code: `rgb/canonical/floor_frame.py`, port công khai `metric_port.py`
+(`UserMetricPort.preview/confirm`, `evidence_kind="real_measurement"`). Người xác nhận
+là authority của PRODUCT (`src/services/orchestration/metric.py`), REC chỉ gọi
+`verify(preview_checksum, decision_ref)`.
+
+### Owner chốt 2026-09-29 — kiểm độc lập C/D và công thức tolerance
+
+Thay mục "Tolerance — chờ số đo" bên dưới (giữ lại làm lịch sử).
+
+1. **C/D bắt buộc với video người dùng.** Căn cứ: `bundle_validation.py:52` không
+   publish bundle khi thiếu `verification_ref`; nới quy tắc này là hạ validation.
+   C/D là hai đầu một vật khác A/B, chọn cùng bước với A/B + 3 điểm sàn (7 điểm).
+   Kiểm C/D ngay khi xem trước (chưa tốn GPU); REC-06 kiểm lại trên artifact canonical
+   sau REC-05 như hiện có. Demo hướng LiDAR lấy C/D từ số đo LiDAR.
+2. **Công thức tolerance** (theo "tính từ baseline A/B"):
+   `tolerance_m = 2·√2·e·(1 + L_CD/L_AB)`, `e` = sai số click một điểm trên 3DGS,
+   hệ số 2 ≈ 95%. Chặn chất lượng: `L_AB ≥ 0,5 m`, `L_CD ≥ 0,5 m`, và
+   `tolerance_m ≤ 5%·L_CD` (REC-05: lối đi sai ≤ 10–20 cm; 5% của lối 3 m = 15 cm),
+   không đạt thì yêu cầu chọn vật dài hơn.
+3. **`e = 0,01 m` là PROPOSAL tạm**, chưa đo. Đo và khóa `e` ở gói 2 của
+   [plan tổng thể](../../../../plans/active/2026-09-29-studio-completion.md) bằng
+   click lặp trên Aisle_CW so với LiDAR, trên đoạn hiệu chỉnh riêng, khóa trước
+   đánh giá cuối (TEAM_EXECUTION_PLAN: không đổi threshold sau khi xem kết quả).
+
 ### Tolerance — chờ số đo trên baseline thật
 
 Owner chọn **không chốt số tròn**, yêu cầu tính từ đúng baseline của cặp A/B sẽ
@@ -298,6 +332,25 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 - [ ] Focused tests và required handoff proof pass; evidence/limitations được ghi.
 
 ## 12. Result / Evidence
+
+### 2026-09-29 — xác nhận tỉ lệ mét từ UI (branch `feat/rec-completion`)
+
+Status giữ `IN_PROGRESS`: chưa có independent test distance trên dữ liệu thật và
+REC-05/10/11 chưa nhận bản xác nhận trong worker.
+
+- Commits: `99e92a3` floor frame, `66f3433` port REC-06, `8306ae7` reducer ghi xác nhận
+  vào job (CAS), `f183133` service PRODUCT, `ad51c2d` API
+  `POST /api/v1/jobs/{job_id}/metric/{preview,confirm}`, `521bb45`/`c3985a0`/`c48ec4d` UI.
+- `pytest tests/test_reconstruction/test_rec06_floor_frame.py
+  tests/test_reconstruction/test_rec06_user_metric_port.py
+  tests/test_orchestration/test_metric_confirmation_record.py tests/test_api/test_metric_routes.py`
+  → pass (4 + 3 + 2 + 4). Port test: preview → confirm → `require_real` trả CONFIRMED,
+  B về đúng (2, 0, 0) m; preview cũ/quyết định không hợp lệ/sàn thẳng hàng bị từ chối.
+- `pytest tests/test_api tests/test_orchestration` → 291 passed, 13 skipped.
+- Frontend: `tsc --noEmit` sạch, `eslint` sạch, `vitest run` → 116 passed.
+- **Chưa làm:** browser QA chọn điểm thật trên một job đang chờ; test HTTP luồng đủ
+  (hiện là fixture proof ở tầng port + guard ở tầng API).
+
 
 ### Resume 2026-09-27 — canonical camera pose publication
 

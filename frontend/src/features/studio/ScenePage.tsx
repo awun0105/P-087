@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Badge, Button, Card, Notice, formatBytes } from "@/components/studio/primitives";
 import { FlowStepper } from "@/features/studio/FlowStepper";
 import { PipelineTimeline, type StageView } from "@/features/studio/PipelineTimeline";
+import { STUDIO_STAGES } from "@/features/studio/stages";
 import { SceneWorkspace } from "@/features/studio/SceneWorkspace";
 import { usePolling } from "@/features/studio/usePolling";
 import { getJob, getPreview, getProject, jobArtifactContentUrl } from "@/lib/api/endpoints";
@@ -96,6 +97,11 @@ export function ScenePage({ jobId }: { jobId: string }) {
         contentUrl={preview.url}
         filename={preview.filename}
         badges={<Badge tone="sage">Dựng từ video của bạn</Badge>}
+        metric={{
+          jobId,
+          state: metricState(progress),
+          onConfirmed: () => void poll(new AbortController().signal),
+        }}
       />
     );
   }
@@ -138,7 +144,11 @@ export function ScenePage({ jobId }: { jobId: string }) {
         </div>
         <Card className="h-fit p-5 sm:p-6">
           {progress ? (
-            <PipelineTimeline stages={views} timeNote={`Cập nhật ${new Date(progress.updated_at).toLocaleTimeString("vi-VN")}`} />
+            <PipelineTimeline
+              stages={views}
+              stageList={STUDIO_STAGES}
+              timeNote={`Cập nhật ${new Date(progress.updated_at).toLocaleTimeString("vi-VN")}`}
+            />
           ) : (
             <p className="flex items-center gap-2 text-sm text-ink-muted" role="status">
               <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
@@ -206,6 +216,13 @@ function StatusPanel({ progress, now }: { progress: JobProgress | null; now: num
       </p>
     </Card>
   );
+}
+
+/** Scene đang chờ người dùng xác nhận tỉ lệ, đã xác nhận, hay chưa tới bước đó. */
+function metricState(progress: JobProgress | null): "waiting" | "confirmed" | "none" {
+  if (progress?.waiting_for === "metric_confirmation") return "waiting";
+  const metric = progress?.stages.find((stage) => stage.stage_id === "ST-METRIC-CANONICALIZE");
+  return metric?.state === "succeeded" ? "confirmed" : "none";
 }
 
 function stageSeconds(started: string | null, completed: string | null, now: number | null): number | null {

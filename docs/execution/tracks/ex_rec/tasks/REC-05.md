@@ -501,6 +501,21 @@ git diff --check
    Giữ fallback có điều kiện khi primary real spike không đạt, không phải prerequisite
    bắt buộc cho synthetic SplatTransform development.
 
+### Owner chốt 2026-09-29 — thông số voxel và seed cho video người dùng
+
+1. Thông số đọc từ file config versioned `configs/product/geometry_v1.json`
+   (checksum ghi vào job), không có default trong `src/`.
+2. `resolution_m = 0,05` (baseline). `opacity = 0,1`, `cluster_resolution_m = 0,1`,
+   `cluster_opacity = 0,1`, `cluster_min_contribution = 0,004` lấy từ smoke tổng
+   hợp, **chưa hiệu chỉnh**; hiệu chỉnh trong spike Aisle_CW 3 resolution ở trên.
+3. Capsule theo mục dưới (OTTO 0,4610 / 0,308 m).
+4. **Seed (PROPOSAL được owner đồng ý):** camera đầu đã registered sau transform mét,
+   **hạ xuống `z = capsule_height/2 + 0,05 m`** trên sàn z=0 người dùng đã xác nhận.
+   Không còn là "tự suy khoảng camera–sàn" mà ADR 0001 cấm, vì sàn đã đo
+   (REC-06 floor frame). Relocation ≤ `max_seed_relocation_m = 1,0` theo ADR 0001.
+5. Seed vẫn hỏng → job dừng với lỗi rõ, UI mời người dùng click điểm robot đứng
+   trên sàn (UX thuộc PRODUCT-06).
+
 ### Owner chốt capsule robot 2026-09-27 — thay số demo
 
 Số demo cũ `radius=0.35 m` / `height=1.20 m` **không còn dùng**. Owner cung cấp

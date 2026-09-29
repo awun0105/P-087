@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
+from src.models.contracts.coordinates import CoordinateSystem
 from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.manifests import StageId
 from src.models.contracts.reconstruction import (
@@ -14,6 +15,7 @@ from src.models.contracts.reconstruction import (
     PreprocessingDependency,
     PreprocessingProvenance,
 )
+from src.services.reconstruction.lidar.coordinate_bridge import CoordinateBridgeDecision
 from src.services.reconstruction.lidar.models import (
     LiDARIngestRequest,
     PrefusedLiDARSource,
@@ -130,10 +132,44 @@ def _build_dependencies(req_info: dict, uses_gt: bool) -> list[PreprocessingDepe
     return dependencies
 
 
-def build_request_from_rec07_manifest(manifest_path: Path, ply_path: Path, job_id: str) -> LiDARIngestRequest:
-    """Legacy API từ chối implicit canonical promotion; dùng native preparation reader."""
-    inspect_rec07_preparation(manifest_path, ply_path)
-    raise ValueError("prefusion coordinates UNVERIFIED; canonical coordinate evidence/conversion required")
+def build_request_from_rec07_manifest(
+    manifest_path: Path,
+    ply_path: Path,
+    job_id: str,
+    bridge: CoordinateBridgeDecision | None = None,
+) -> LiDARIngestRequest:
+    """Dựng request REC-08 từ output REC-07.
+
+    Không có bản ghi cầu nối tọa độ → vẫn từ chối (không tự đổi nhãn frame gốc thành
+    `world`). Có bản ghi → khai `declared_transform_to_canonical` theo quyết định đã
+    ghi và đưa checksum bản ghi vào provenance; bytes LiDAR không bị sửa.
+    """
+    prepared = inspect_rec07_preparation(manifest_path, ply_path)
+    if bridge is None:
+        raise ValueError("prefusion coordinates UNVERIFIED; canonical coordinate evidence/conversion required")
+    if prepared.source_frame != bridge.rec07_target_frame:
+        raise ValueError("bản ghi cầu nối không khớp frame của manifest REC-07")
+    provenance = prepared.preprocessing_provenance.model_copy(
+        update={
+            "details": {
+                **prepared.preprocessing_provenance.details,
+                "coordinate_bridge_checksum": bridge.checksum(),
+                "coordinate_bridge_dataset": bridge.dataset,
+                "handedness_source": bridge.handedness_source,
+                "origin_rule_source": bridge.origin_rule_source,
+            }
+        }
+    )
+    return LiDARIngestRequest(
+        job_id=job_id,
+        lidar_file=ply_path,
+        source_input_checksum=prepared.source_input_checksum,
+        geometry_format="ply",
+        coordinate_system=CoordinateSystem(),
+        source_frame=bridge.source_frame,
+        declared_transform_to_canonical=bridge.transform(),
+        preprocessing_provenance=provenance,
+    )
 
 
 def _identity(request: LiDARIngestRequest) -> str:

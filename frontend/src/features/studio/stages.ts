@@ -1,6 +1,7 @@
 /**
- * Mô tả hiển thị cho 5 stage của lát cắt MVP (khớp `MVP_PIPELINE` ở backend).
- * Chỉ là copy UI; trạng thái thật luôn lấy từ API tiến trình.
+ * Mô tả hiển thị các stage. `MVP_STAGES` = 5 stage tới preview 3DGS (khớp `MVP_PIPELINE`,
+ * dùng cho video mẫu); `STUDIO_STAGES` thêm bước xác nhận tỉ lệ mét (khớp
+ * `STUDIO_PIPELINE`, dùng cho job thật). Chỉ là copy UI; trạng thái thật lấy từ API.
  */
 
 import type { StageId } from "@/lib/contracts/api";
@@ -45,6 +46,17 @@ export const MVP_STAGES: readonly StageMeta[] = [
   },
 ] as const;
 
+/** REC-06: COLMAP/Brush không biết 1 đơn vị là bao nhiêu mét — người dùng cho một khoảng cách thật. */
+export const METRIC_STAGE: StageMeta = {
+  id: "ST-METRIC-CANONICALIZE",
+  title: "Xác nhận tỉ lệ mét",
+  short: "Tỉ lệ mét",
+  description:
+    "Chọn hai điểm A, B trên scene (vd hai mép lối đi) và nhập khoảng cách thật; hệ thống quy đổi cả scene sang mét để dùng cho mô phỏng.",
+};
+
+export const STUDIO_STAGES: readonly StageMeta[] = [...MVP_STAGES, METRIC_STAGE];
+
 export function stageMeta(id: StageId): StageMeta | undefined {
-  return MVP_STAGES.find((stage) => stage.id === id);
+  return STUDIO_STAGES.find((stage) => stage.id === id);
 }
