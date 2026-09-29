@@ -47,7 +47,8 @@ graph LR
 ```mermaid
 graph LR
     U([Người dùng / trình duyệt]) --> UI[Web UI<br/>Next.js trên Vercel]
-    UI -->|REST| API[Server điều khiển<br/>FastAPI + PostgreSQL trên Railway]
+    UI -->|REST| API[Server điều khiển<br/>FastAPI trên Railway]
+    API --> DB[(PostgreSQL<br/>Supabase)]
     U -->|presigned upload/download| R2[(Cloudflare R2<br/>video, frame, 3DGS, export)]
     API -->|bật/tắt, giao job| GPU[GPU worker Vast.ai / dự phòng RunPod<br/>COLMAP, Brush, SOG, LOD]
     GPU -->|đọc input, ghi artifact| R2

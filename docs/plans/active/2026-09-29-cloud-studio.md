@@ -1,4 +1,4 @@
-# Execution Plan: Cloud Studio (Vercel + Railway + R2 + Vast.ai/RunPod)
+# Execution Plan: Cloud Studio (Vercel + Railway + Supabase + R2 + Vast.ai/RunPod)
 
 Date: 2026-09-29
 
@@ -38,7 +38,8 @@ Không đổi schema shared contract khi chưa có producer/consumer review.
 2. **Kho file R2.** Backend S3 sau `ArtifactResolver` (URI `artifact://` giữ nguyên),
    presigned GET/PUT, multipart upload, CORS bucket, lifecycle xóa file trung gian.
 3. **Postgres + migration.** Chuỗi migration theo `r2s_schema.version` (ADR 0003 §5),
-   test trên SQLite và Postgres.
+   test trên SQLite và Postgres; deploy lên Supabase qua pooler Supavisor (session mode);
+   `/health` truy vấn DB + tác vụ nền hằng ngày giữ Supabase không tạm dừng (Amendment 3).
 4. **Upload thẳng.** API cấp link multipart; client upload, nối lại khi rớt mạng;
    bỏ route proxy upload của Next; `ffprobe` kiểm nhanh trước khi xếp hàng.
 5. **Tách worker GPU.** Worker nhận job/báo tiến trình/commit qua server điều khiển,
@@ -53,7 +54,7 @@ Không đổi schema shared contract khi chưa có producer/consumer review.
 8. **Benchmark / metric** (mục 9 bên dưới): ghi số đo mỗi job, script tổng hợp.
 9. **Giám sát + chống đốt tiền** (mục 7 bên dưới).
 10. **Kiểm thử GPU + E2E sau deploy** (mục 10 bên dưới).
-11. **Deploy + chuẩn bị demo:** Vercel/Railway/R2/Vast.ai (+ RunPod dự phòng); video mẫu lên R2; tài khoản
+11. **Deploy + chuẩn bị demo:** Vercel/Railway/Supabase/R2/Vast.ai (+ RunPod dự phòng); video mẫu lên R2; tài khoản
     Editor và Reviewer demo; bật GPU trước buổi demo; checklist fallback.
     DevOps theo sổ tay (`docs/guide/chapter-09.md` tiêu chí DevOps): Docker Compose nhiều
     service (API, worker, frontend, Postgres, MinIO cho local), Dockerfile riêng cho GPU
@@ -87,8 +88,9 @@ Không đổi schema shared contract khi chưa có producer/consumer review.
 - Worker heartbeat: bảng `r2s_workers` đã có; server kiểm định kỳ, quá 15 phút không
   heartbeat mà còn job RUNNING → đánh dấu lỗi + gửi cảnh báo qua Discord/Slack webhook
   (một biến môi trường URL, không cần dịch vụ giám sát riêng).
-- Postgres: dùng backup của Railway nếu gói có; không có thì cron `pg_dump` hằng đêm
-  đẩy lên R2 (giữ 7 bản).
+- Postgres (Supabase Free): không dựa vào backup của gói Free; tác vụ nền trong API chạy
+  `pg_dump` hằng đêm đẩy lên R2 (giữ 7 bản). Giữ thức: `/health` chạy `SELECT 1` (UptimeRobot
+  5 phút/lần) + tác vụ nền chạm DB mỗi ngày; theo dõi email cảnh báo tạm dừng của Supabase.
 - Giới hạn tần suất: hạn mức theo tài khoản trong DB (job/ngày, GB) là lớp chính;
   thêm giới hạn request theo IP ở middleware FastAPI cho route đăng nhập/upload.
 - Log: stdout JSON có `job_id`, `stage`, `attempt` — Railway/Vast.ai/RunPod đều xem được.
@@ -106,6 +108,7 @@ Không đổi schema shared contract khi chưa có producer/consumer review.
 
 Theo ADR 0003 §5: migration có thứ tự trong code, chạy trong transaction, test trên
 SQLite + Postgres, không drop/reset; backup trước khi chạy migration production.
+Production là Supabase (ADR 0003 Amendment 3): kết nối qua pooler, cùng vùng với Railway.
 
 ### Benchmark và số liệu cần đo (mục 9)
 

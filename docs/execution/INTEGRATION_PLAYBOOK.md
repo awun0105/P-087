@@ -1053,7 +1053,7 @@ Một lỗi kiến trúc nguy hiểm là lạm dụng DVC để lưu trữ mọi
 4. **DVC (Data Version Control — Locked Benchmarks & Datasets):**
    - Chỉ dùng để quản lý phiên bản dataset tĩnh (`TorWIC`), golden fixtures dùng cho kiểm thử, và curated benchmark snapshots.
    - ❌ **CẤM dùng DVC cho SceneRevision nghiệp vụ:** Khi người dùng dịch chuyển pallet 20cm trên Web Studio, hệ thống tạo SceneRevision mới trong PostgreSQL và ghi JSON vào Artifact Store; KHÔNG kích hoạt DVC commit/push.
-**Triển khai đã chốt (ADR 0003, 2026-09-29):** PostgreSQL chạy trên Railway;
+**Triển khai đã chốt (ADR 0003, 2026-09-29):** PostgreSQL chạy trên Supabase (gói Free, chỉ dùng như Postgres chuẩn; giữ thức bằng truy vấn định kỳ; `pg_dump` hằng đêm lên R2);
 Artifact Store dùng Cloudflare R2 (S3-compatible) sau `ArtifactResolver` cho
 deployment, filesystem cho local/test (Contract §7.4 amendment). Benchmark của MVP
 ghi thành JSON artifact mỗi job + `eval/results/benchmarks.jsonl`; MLflow là tùy chọn
@@ -1371,7 +1371,8 @@ làm editor Gaussian (ADR 0002); notice ở `frontend/THIRD_PARTY_NOTICES.md`.
 | Thành phần | Dịch vụ | Vai trò |
 |---|---|---|
 | Web UI | Vercel (Hobby) | Host Next.js; không cõng file lớn |
-| Server điều khiển | Railway (Hobby): FastAPI + PostgreSQL | API, đăng nhập/role, hàng đợi, audit, cấp presigned URL |
+| Server điều khiển | Railway (Hobby): FastAPI |
+| Database | Supabase (Free): PostgreSQL qua pooler Supavisor | API, đăng nhập/role, hàng đợi, audit, cấp presigned URL |
 | Kho file | Cloudflare R2 | Video, frame, 3DGS, export; upload/download thẳng từ trình duyệt |
 | GPU worker | Vast.ai (chính), RunPod (dự phòng); adapter theo nhà cung cấp, image dùng chung | COLMAP (native), Brush, SOG, LOD, ảnh/video xem trước; tự bật/tắt |
 
