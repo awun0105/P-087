@@ -6,11 +6,12 @@ thuộc ownership của EX-PRODUCT. Mọi handler ở đây là `def` đồng b�
 nên không chặn event loop.
 """
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
 from src.api import schemas
+from src.api.auth import require_reviewer
 from src.models.contracts.artifacts import ArtifactRef, Checksum
 from src.models.contracts.manifests import JobManifest, JobStatus
 from src.models.contracts.preview import ReconstructionPreview
@@ -412,6 +413,7 @@ def add_object(
         409: {"model": schemas.ApiErrorResponse},
         422: {"model": schemas.ApiErrorResponse},
     },
+    dependencies=[Depends(require_reviewer)],
 )
 def review_action(
     job_id: str,
@@ -444,6 +446,7 @@ def review_action(
         409: {"model": schemas.ApiErrorResponse},
         422: {"model": schemas.ApiErrorResponse},
     },
+    dependencies=[Depends(require_reviewer)],
 )
 def release_candidate(
     job_id: str,
