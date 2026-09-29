@@ -133,17 +133,17 @@ export function PlayCanvasScene({
     const objectUrl = contentFile ? URL.createObjectURL(contentFile) : null;
     const resolvedUrl = objectUrl ?? contentUrl!;
 
-    void import("@playcanvas/supersplat-viewer/viewer")
-      .then(async (module) => {
+    void Promise.all([import("@playcanvas/supersplat-viewer/viewer"), import("@playcanvas/supersplat-viewer/settings")])
+      .then(async ([module, settingsModule]) => {
         if (disposed) return;
         const viewer = await module.createViewer({
           container: host,
           contentUrl: resolvedUrl,
           contentFilename: contentFile?.name ?? contentFilename ?? new URL(resolvedUrl, window.location.href).pathname.split("/").pop(),
           collisionUrl: collisionUrl ?? undefined,
-          // Bắt buộc theo `CreateViewerOptions`. `{}` đi qua `migrateV1` nên viewer tự
-          // điền default. Chưa verify bằng browser thật — xem `PRODUCT-06.md` §13.1.
-          settings: {},
+          // `{}` làm viewer 1.35.2 crash ("reading 'color'") khi chạy browser thật
+          // (2026-09-29); dùng default chính thức của thư viện, camera khung môi trường.
+          settings: settingsModule.defaultSettings("environment"),
           renderer,
           ui: showControls,
         });
