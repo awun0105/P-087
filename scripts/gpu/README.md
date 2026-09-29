@@ -80,18 +80,20 @@ Export bundle từ job vừa chạy (thời lượng stage lấy từ journal th
 
 ```bash
 set -a; source scripts/gpu/studio.env; set +a
-.venv/bin/python -m scripts.demo.export_demo_bundle --out /opt/real2sim/state/demo/aisle_cw \
+.venv/bin/python -m scripts.demo.export_demo_bundle --out /opt/real2sim/state/demo/library/aisle-cw \
   --note "GPU <model>, Brush 30k bước" job --job-id <job_id>
-tar -C /opt/real2sim/state/demo -czf aisle_cw_demo.tgz aisle_cw
+tar -C /opt/real2sim/state/demo/library -czf aisle_cw_demo.tgz aisle-cw
 ```
 
-Mang `aisle_cw_demo.tgz` về máy demo, giải nén và đặt
-`PRODUCT_DEMO_DIR=<thư mục aisle_cw>`. Bundle tự kiểm checksum từng file khi phục vụ.
+Mang `aisle_cw_demo.tgz` về máy demo, giải nén vào thư mục thư viện
+(`PRODUCT_DEMO_DIR`, mặc định `data/demo/library`). Mỗi thư mục con là một video
+mẫu (id = tên thư mục) hiện ở bước "Tải video lên" của Scene mới. Bundle tự kiểm
+checksum từng file khi phục vụ.
 
 ## 6. Kiểm tra nhanh
 
-- `curl localhost:8000/api/v1/demo` trả manifest `origin: "pipeline_job"`.
-- Studio › Kịch bản demo chạy đủ 4 bước; bước cuối mở editor.
+- `curl localhost:8000/api/v1/samples` liệt kê video mẫu, `origin: "pipeline_job"`.
+- Studio › Scene mới › chọn video mẫu chạy đủ các bước; bước cuối mở editor.
 - Editor SuperSplat cần WebGPU (Chrome/Edge mới); trình duyệt không có WebGPU sẽ
   tự chuyển sang viewer WebGL2 chỉ xem.
 
