@@ -74,6 +74,8 @@ class UploadProjectInput(BaseModel):
     upload_id: Identifier
     name: str = Field(min_length=1, max_length=200)
     attestation: SourceRightsAttestation
+    #: Thông số xử lý theo file cấu hình chung; None → preset "tối thiểu cho chất lượng tốt".
+    processing: dict[str, int | float | str] | None = None
 
 
 class JobCreateInput(BaseModel):

@@ -24,6 +24,20 @@ from src.services.orchestration.artifacts import (
 from src.services.orchestration.demo import DemoBundle, DemoManifest, DemoUnavailableError
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.progress import JobProgress, job_progress
+from src.services.orchestration.processing import (
+    Evaluation,
+    MachineCapability,
+    ParameterSpec,
+    ProcessingConfigError,
+    ProcessingPresets,
+    build_job_config,
+    evaluate,
+    is_presets_file,
+    load_presets,
+    maximum_for_machine,
+    preset_values,
+)
+from src.services.orchestration.processing.capability import latest as latest_capability
 from src.services.orchestration.projects import (
     JobCreateInput,
     JobNotFoundError,
@@ -48,6 +62,27 @@ class UploadListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     uploads: list[UploadRecord]
+
+
+class ProcessingOptions(BaseModel):
+    """Mọi thứ UI cần để vẽ bảng thông số: spec, preset, máy worker và ước lượng mặc định."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile_id: str
+    parameters: list[ParameterSpec]
+    presets: dict[str, dict[str, int | float | str]]
+    capability: MachineCapability | None
+    default_evaluation: Evaluation
+    resource_note: str
+
+
+class EvaluateRequest(BaseModel):
+    """Bộ thông số cần kiểm (đủ mọi key của file cấu hình chung)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    params: dict[str, int | float | str]
 
 
 class SceneSummary(BaseModel):
@@ -145,10 +180,30 @@ def create_scene_from_upload(request: UploadProjectInput) -> SceneFromUploadResp
         upload = uploads.get(request.upload_id)
     except UploadNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    processing = None
+    if settings.product_processing_config is not None and is_presets_file(settings.product_processing_config):
+        presets, presets_checksum = _presets()
+        capability = _capability()
+        params = request.processing or preset_values(presets, "minimum_quality")
+        try:
+            evaluation = evaluate(presets, params, capability)
+            processing = build_job_config(presets, presets_checksum, params, capability)
+        except ValueError as error:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+        if evaluation.blocking:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Thông số vượt cấu hình máy xử lý và có thể crash; giảm các ô được tô đỏ",
+            )
+    elif request.processing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Worker chưa dùng file thông số chung; không nhận thông số tùy chỉnh",
+        )
     project = registry.create_project_from_upload(upload, request, settings.product_privacy_mode)
     uploads.link_project(upload.upload_id, project.project_id)
     try:
-        job = registry.create_job(JobCreateInput(project_id=project.project_id))
+        job = registry.create_job(JobCreateInput(project_id=project.project_id), processing)
     except (PrivacyGateBlockedError, RuntimeStateConflictError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     return SceneFromUploadResponse(project=schemas.project_response(project), job=job)
@@ -218,3 +273,51 @@ def list_scenes() -> SceneListResponse:
     # Project upload luôn có created_at; mốc 0 chỉ là phòng hờ cho record cũ.
     scenes.sort(key=lambda scene: scene.project.created_at or datetime.min.replace(tzinfo=UTC), reverse=True)
     return SceneListResponse(scenes=scenes)
+
+
+def _presets() -> tuple[ProcessingPresets, str]:
+    """File cấu hình chung đang dùng (PRODUCT_PROCESSING_CONFIG)."""
+    path = get_settings().product_processing_config
+    if path is None or not is_presets_file(path):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Chưa cấu hình file thông số chung: đặt PRODUCT_PROCESSING_CONFIG=configs/product/processing_presets_v1.json",
+        )
+    try:
+        return load_presets(path)
+    except ProcessingConfigError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+def _capability() -> MachineCapability | None:
+    return latest_capability(RuntimeDatabase(get_settings().database_url))
+
+
+@router.get("/processing/options", response_model=ProcessingOptions)
+def get_processing_options() -> ProcessingOptions:
+    """Thông số chỉnh được + preset tối thiểu/tối đa/tối đa cho máy worker hiện tại."""
+    presets, _ = _presets()
+    capability = _capability()
+    minimum = preset_values(presets, "minimum_quality")
+    return ProcessingOptions(
+        profile_id=presets.profile_id,
+        parameters=presets.parameters,
+        presets={
+            "minimum_quality": minimum,
+            "maximum": preset_values(presets, "maximum"),
+            "machine_maximum": maximum_for_machine(presets, capability),
+        },
+        capability=capability,
+        default_evaluation=evaluate(presets, minimum, capability),
+        resource_note=presets.resource_model.note,
+    )
+
+
+@router.post("/processing/evaluate", response_model=Evaluation)
+def evaluate_processing(request: EvaluateRequest) -> Evaluation:
+    """Ước lượng tài nguyên của bộ thông số so với máy worker (đỏ = có thể crash)."""
+    presets, _ = _presets()
+    try:
+        return evaluate(presets, request.params, _capability())
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error

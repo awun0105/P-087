@@ -31,6 +31,7 @@ def studio(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         artifact_root=tmp_path / "artifacts",
         product_upload_max_bytes=64,
         product_privacy_mode="self_attested",
+        product_processing_config=Path(__file__).resolve().parents[2] / "configs/product/processing_presets_v1.json",
     )
     probe = ProjectRegistry(runtime_root=tmp_path / "artifacts")
     registry = ProjectRegistry(
@@ -174,3 +175,74 @@ async def test_scenes_lists_uploaded_scenes_only(client: AsyncClient, studio: Si
     assert [scene["project"]["name"] for scene in body] == ["Kho A"]
     assert body[0]["latest_job"]["job_id"] == created.json()["job"]["job_id"]
     assert body[0]["preview_ready"] is False
+
+
+def _record_machine(studio: SimpleNamespace, vram: float) -> None:
+    from datetime import UTC, datetime
+
+    from src.services.orchestration.processing.capability import record
+    from src.services.orchestration.processing.models import MachineCapability
+
+    record(
+        RuntimeDatabase(studio.settings.database_url),
+        MachineCapability(
+            worker_id="gpu",
+            measured_at=datetime.now(UTC),
+            gpu_name="GPU test",
+            vram_total_gb=vram,
+            cpu_count=8,
+            ram_total_gb=32,
+            disk_free_gb=200,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_processing_options_include_machine_presets(client: AsyncClient, studio: SimpleNamespace) -> None:
+    unknown = (await client.get("/api/v1/processing/options")).json()
+    assert unknown["capability"] is None
+    assert unknown["presets"]["machine_maximum"] == unknown["presets"]["minimum_quality"]
+    _record_machine(studio, vram=4)
+    body = (await client.get("/api/v1/processing/options")).json()
+    assert body["capability"]["gpu_name"] == "GPU test"
+    assert {p["key"] for p in body["parameters"]} == set(body["presets"]["minimum_quality"])
+    machine = body["presets"]["machine_maximum"]
+    assert machine["brush.max_splats"] < body["presets"]["maximum"]["brush.max_splats"]
+    checked = (await client.post("/api/v1/processing/evaluate", json={"params": machine})).json()
+    assert not checked["blocking"]
+    red = (await client.post("/api/v1/processing/evaluate", json={"params": body["presets"]["maximum"]})).json()
+    assert red["blocking"]
+    assert {p["key"]: p["status"] for p in red["parameters"]}["brush.max_splats"] == "danger"
+    bad = await client.post("/api/v1/processing/evaluate", json={"params": {"brush.max_splats": 1}})
+    assert bad.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_scene_uses_chosen_processing_and_server_blocks_red(client: AsyncClient, studio: SimpleNamespace) -> None:
+    import json
+
+    from src.services.orchestration.processing import job_config_reference
+
+    _record_machine(studio, vram=4)
+    options = (await client.get("/api/v1/processing/options")).json()
+    upload = await _upload(client)
+    blocked = await client.post(
+        "/api/v1/scenes/from-upload",
+        json={
+            "upload_id": upload["upload_id"],
+            "name": "Quá tải",
+            "attestation": _ATTESTATION,
+            "processing": options["presets"]["maximum"],
+        },
+    )
+    assert blocked.status_code == 409 and "đỏ" in blocked.json()["detail"]
+    chosen = {**options["presets"]["minimum_quality"], "brush.total_train_iters": 12000}
+    created = await client.post(
+        "/api/v1/scenes/from-upload",
+        json={"upload_id": upload["upload_id"], "name": "Tùy chỉnh", "attestation": _ATTESTATION, "processing": chosen},
+    )
+    assert created.status_code == 201, created.text
+    job = created.json()["job"]
+    path = studio.registry.runtime_resolver.require(job_config_reference(job["job_id"], job["config_checksum"]))
+    stored = json.loads(path.read_text())
+    assert stored["brush"]["total_train_iters"] == 12000 and stored["colmap"]["num_threads"] == 8
