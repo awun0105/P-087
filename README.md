@@ -4,7 +4,11 @@
 
 **Team:** P-087 — VinUni AI20K Build Phase, Cohort 4
 
-**Trạng thái:** Foundation Baseline M0 (contracts/fixtures synthetic); MVP P0 đang phát triển. Chưa có real reconstruction, browser 3DGS hoặc Isaac acceptance.
+**Trạng thái (2026-09-29):** Studio MVP chạy được luồng video → 3DGS: upload video,
+EX-REC chạy thật (kiểm video → xác nhận dữ liệu → tách frame → COLMAP → Brush → SOG),
+xem/chỉnh scene trong editor SuperSplat (WebGPU) hoặc viewer WebGL2. Đã chạy thật
+trên GPU local (Quadro T2000); editor WebGPU chưa kiểm trên browser có GPU; EX-SCENE,
+EX-SIM và Isaac Sim chưa nối vào luồng. Chi tiết: [plan MVP](docs/plans/active/2026-09-29-mvp-studio-demo.md).
 
 **Phạm vi P0:** Warehouse / Indoor AMR, primary RGB workflow, NVIDIA Isaac Sim
 
@@ -34,12 +38,12 @@ Real2Sim Studio tổ chức một workflow thống nhất:
 | Layer | Technology | Trạng thái |
 |---|---|---|
 | Contracts | Pydantic 2 | Foundation baseline với synthetic fixture/integration proof |
-| Backend | FastAPI, Python 3.12 | Organizer scaffold |
+| Backend | FastAPI, Python 3.12, SQLite runtime DB | API product + Studio (upload, scene, tiến trình, thông số, video mẫu); queue worker ngoài HTTP |
 | Agent scaffold | LangGraph, LangChain, multi-provider LLM | Có sẵn, chưa phải Real2Sim pipeline |
-| Reconstruction | FFmpeg, COLMAP, Brush, splat-transform, Open3D; OpenMVS fallback | Planned integration |
+| Reconstruction | FFmpeg, COLMAP (Docker), Brush 0.3.0, splat-transform 3.6.6 (SOG nén bằng WebGPU) | Chạy thật local cho luồng video → 3DGS; Open3D chỉ dùng trong offline tooling; OpenMVS chưa tích hợp |
 | Scene/Object | SAM2, Open3D, NumPy | Planned integration |
 | Simulation | Trimesh, Scipy, OpenUSD, NVIDIA Isaac Sim, IsaacLab | Preflight rules & Collider generator (SIM-02/04) đã hoàn thành; Isaac Sim runtime đang phát triển |
-| Frontend | Next.js, React, TypeScript, PlayCanvas Engine + supersplat-viewer | Planned; chưa scaffold |
+| Frontend | Next.js 16, React 19, TypeScript, Tailwind 4, SuperSplat 3.4.2 (vendored), PlayCanvas + supersplat-viewer | Studio MVP chạy; UI P0 đầy đủ (review/release, HITL edit) giữ code, ẩn sau `LEGACY_UI=1` |
 | DevOps | Docker, Docker Compose, GitHub Actions | Scaffold backend và CI config; chưa chứng minh full product deployment |
 
 ## Quick Start
@@ -53,14 +57,17 @@ cd P-087
 make setup
 source .venv/bin/activate
 
-# 3. make setup tạo .env nếu chưa có; chọn LLM_PROVIDER và
-# điền API key tương ứng để chạy backend chat scaffold hiện tại
+# 3. make setup tạo .env nếu chưa có; chọn LLM_PROVIDER và điền API key
+# tương ứng (Settings bắt buộc key của provider đang chọn khi khởi động)
 
-# 4. Chạy backend hiện tại
+# 4. Chạy backend
 make run
 ```
 
 Swagger UI: <http://localhost:8000/docs>
+
+Chạy cả Studio (API + queue worker + Next.js) với tool xử lý thật: xem runbook
+[`scripts/gpu/README.md`](scripts/gpu/README.md) (`scripts/gpu/run_stack.sh`).
 
 Chạy kiểm tra:
 
@@ -93,30 +100,44 @@ Chỉ API key của `LLM_PROVIDER` đang chọn là bắt buộc để chạy ba
 
 ## Project Structure
 
-- `src/models/contracts/`: shared typed handoff contracts; `fixtures/` và
-  `tests/` chứa synthetic proof cho phát triển song song.
-- `src/services/reconstruction/`, `scene/`, `simulation/`, `orchestration/`:
-  lần lượt thuộc EX-REC, EX-SCENE, EX-SIM, EX-PRODUCT.
-- `src/api/`: backend FastAPI của EX-PRODUCT; các route hiện có vẫn chủ yếu là
-  organizer chat scaffold.
-- `frontend/`: Next.js Web Studio do EX-PRODUCT tạo trong `PRODUCT-05`; hiện
-  chưa được scaffold. Viewer đặt tại `frontend/src/features/viewer/`.
-- `scripts/torwic/`: offline dataset tooling; `eval/`: evaluation protocols.
+Bản đồ nhanh (kiểm theo checkout 2026-09-29). Placement/ownership chính thức:
+[`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
-Placement và ownership đầy đủ chỉ khóa tại [`ARCHITECTURE.md`](./ARCHITECTURE.md),
-không suy trạng thái triển khai từ sơ đồ thư mục mục tiêu.
+| Đường dẫn | Nội dung | Nguồn |
+|---|---|---|
+| `src/models/contracts/` | Shared typed contracts giữa các track | Nhóm |
+| `src/services/reconstruction/` | EX-REC: `rgb/{preflight,frames,pose,splat,geometry,canonical}` theo stage, `adapters/` (COLMAP/Brush/splat-transform), `lidar/`, `alignment/`, CLI `prepare_cli`/`preview_cli` | Nhóm |
+| `src/services/orchestration/` | EX-PRODUCT: `jobs/` (lifecycle, `runner`, `worker_cli`), `projects/`, `uploads/`, `processing/` (thông số xử lý), `samples/` (video mẫu), `artifacts/`, `scene/` (SceneIR revision) | Nhóm |
+| `src/services/scene/`, `src/services/simulation/` | EX-SCENE, EX-SIM (nhiều package còn là placeholder) | Nhóm |
+| `src/api/` | `routes.py` (gốc), `routes_product.py`, `studio/` (route Studio MVP) | Scaffold + nhóm |
+| `src/agents/`, `src/llm/`, `src/models/schemas.py` | Chat agent scaffold, chưa thuộc pipeline Real2Sim | Ban tổ chức |
+| `frontend/src/app/(studio)/`, `features/studio/` | Studio MVP (Scenes, Scene mới + video mẫu, trang scene/editor) | Nhóm |
+| `frontend/src/app/(legacy)/`, `features/{jobs,review,scene,viewer}` | UI P0 đầy đủ, giữ để dùng lại; ẩn khi không đặt `LEGACY_UI=1` | Nhóm |
+| `frontend/vendor/supersplat/` | SuperSplat editor (MIT), build ra `public/editor` | Bên thứ ba |
+| `configs/product/` | File cấu hình chung: thông số xử lý, profile chất lượng upload | Nhóm |
+| `scripts/torwic/` | Offline dataset tooling (`migrations/` = script chạy một lần) | Nhóm |
+| `scripts/gpu/`, `scripts/demo/` | Chạy stack trên máy GPU; export bundle video mẫu | Nhóm |
+| `scripts/log_*`, `scripts/setup*` | AI log + setup | Ban tổ chức |
+| `tests/` | Theo track; `tests/test_reconstruction/{support,smoke}` = fixture và smoke chạy tay | Nhóm |
+| `docs/guide/` | Sách hướng dẫn | Ban tổ chức |
+| `docs/execution/`, `docs/plans/`, `docs/decisions/` | Contract, task theo track, plan, ADR | Nhóm |
 
 ## API Endpoints
 
-Các endpoint dưới đây thuộc organizer scaffold hiện tại; Real2Sim APIs sẽ được bổ sung theo execution contract.
+Đầy đủ tại Swagger (`/docs`). Nhóm chính:
 
-| Method | Path | Mô tả |
+| Nhóm | Path | Mô tả |
 |---|---|---|
-| `GET` | `/health` | Kiểm tra backend và environment |
-| `GET` | `/api/v1/status` | Kiểm tra LangGraph agent scaffold |
-| `POST` | `/api/v1/chat` | Gửi message tới agent scaffold |
+| Health | `GET /health` | Kiểm tra backend và environment |
+| Studio | `POST/GET /api/v1/uploads` | Upload video (stream raw body) và liệt kê |
+| Studio | `POST /api/v1/scenes/from-upload`, `GET /api/v1/scenes` | Tạo scene + xếp job, danh sách scene |
+| Studio | `GET /api/v1/jobs/{id}/progress` | Tiến trình từng stage |
+| Studio | `GET /api/v1/processing/options`, `POST /api/v1/processing/evaluate` | Bảng thông số, ước lượng tài nguyên |
+| Studio | `GET /api/v1/samples[/{id}[/files/{name}]]` | Video mẫu đã xử lý sẵn |
+| Product | `/api/v1/projects…`, `/api/v1/jobs/{id}/…` | Project/job/artifact, preview, scene, validation, review |
+| Scaffold | `GET /api/v1/status`, `POST /api/v1/chat` | LangGraph agent scaffold |
 
-Request mẫu:
+Request mẫu cho `/api/v1/chat`:
 
 ```json
 {
@@ -148,7 +169,7 @@ Response mẫu:
 
 ## Demo và triển khai
 
-- **Screenshot/GIF:** chưa có vì frontend chưa được scaffold.
+- **Screenshot/GIF:** chưa có.
 - **Live URL:** chưa triển khai.
 - **Video demo:** chưa thực hiện.
 
