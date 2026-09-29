@@ -20,7 +20,12 @@ from pathlib import Path
 
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.manifests import StageId
-from src.services.orchestration.artifacts import ArtifactResolver, FilesystemArtifactStore
+from src.services.orchestration.artifacts import (
+    ArtifactAlreadyExistsError,
+    ArtifactResolver,
+    FilesystemArtifactStore,
+    sha256_file,
+)
 from src.services.reconstruction.lidar import (
     LiDARIngestService,
     build_request_from_rec07_manifest,
@@ -42,11 +47,28 @@ def _json_ref(job_id: str, uri: str, payload: bytes, artifact_type: str) -> Prod
     )
 
 
+class _IdempotentWriter:
+    """Chạy lại script an toàn: artifact đã có cùng checksum thì dùng lại, khác thì từ chối."""
+
+    def __init__(self, resolver: ArtifactResolver) -> None:
+        self.resolver = resolver
+        self.store = FilesystemArtifactStore(resolver)
+
+    def publish(self, reference: ProductArtifactRef, payload: bytes) -> ProductArtifactRef:
+        """Publish một lần; không bao giờ ghi đè nội dung khác."""
+        path = self.resolver.resolve(reference.artifact_uri)
+        if path.is_file():
+            if sha256_file(path) == reference.artifact_checksum:
+                return reference
+            raise ArtifactAlreadyExistsError(f"{reference.artifact_uri} đã có với nội dung khác")
+        return self.store.publish(reference, payload)
+
+
 def publish(
     store_root: Path, job_id: str, rec07_dir: Path, alignment_path: Path, bridge_path: Path
 ) -> ProductArtifactRef:
     """REC-08 ingest + publish căn chỉnh + bản ghi hỗ trợ; trả ref bản ghi hỗ trợ."""
-    writer = FilesystemArtifactStore(ArtifactResolver(store_root))
+    writer = _IdempotentWriter(ArtifactResolver(store_root))
     request = build_request_from_rec07_manifest(
         rec07_dir / "preparation_manifest.json",
         rec07_dir / "registered_lidar.ply",
@@ -69,7 +91,9 @@ def publish(
     )
     support = DemoLidarSupport(
         job_id=job_id,
-        camera_poses_checksum=alignment["inputs"]["camera_poses_artifact_checksum"],
+        # Checksum bytes của file pose = `artifact_checksum` của ref mà viewer/REC-04 trỏ tới;
+        # không dùng self-checksum bên trong JSON (khác loại, không bao giờ khớp ref).
+        camera_poses_checksum=alignment["inputs"]["camera_poses_checksum"],
         alignment_ref=alignment_ref,
         lidar_geometry_ref=lidar.geometry_ref,
         lidar_metadata_ref=lidar.metadata_ref,
