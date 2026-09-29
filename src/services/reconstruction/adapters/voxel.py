@@ -12,7 +12,7 @@ from typing import Literal
 
 from src.models.contracts.artifacts import Checksum, ContractModel
 from src.models.contracts.coordinates import CoordinateSystem
-from src.services.reconstruction.adapters.collision_glb import canonicalize_collision, topology
+from src.services.reconstruction.adapters.collision_glb import canonicalize_collision, degenerate_removed, topology
 from src.services.reconstruction.adapters.gaussian_scale import (
     GaussianTransformRequest,
     SplatTransformSimilarityAdapter,
@@ -198,6 +198,7 @@ class SplatTransformVoxelAdapter:
             **_coordinate_evidence(request.config, scale_applied),
             native_voxel_metadata=metadata.model_dump(mode="json", by_alias=True),
             topology=topology(mesh),
+            degenerate_triangles_removed=degenerate_removed(workspace / "geometry.collision.glb"),
             canonical_bounds=dict(
                 min=[min(p[i] for p in mesh.positions) for i in range(3)],
                 max=[max(p[i] for p in mesh.positions) for i in range(3)],

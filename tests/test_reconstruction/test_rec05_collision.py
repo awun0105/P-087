@@ -8,6 +8,7 @@ import pytest
 
 from src.services.reconstruction.adapters.collision_glb import (
     canonicalize_collision,
+    degenerate_removed,
     read_collision_glb,
     topology,
 )
@@ -89,3 +90,20 @@ def test_invalid_collision_rejected(tmp_path: Path, case: str) -> None:
         path.write_bytes(payload[:-1])
     with pytest.raises(ValueError):
         read_collision_glb(path)
+
+
+def test_canonical_derivative_drops_zero_area_triangles(tmp_path: Path) -> None:
+    """Output tool có tam giác thẳng hàng: derivative bỏ chúng, bề mặt còn lại giữ nguyên."""
+    document, binary = collision_fixture()
+    triangles = len(binary[48:]) // 12
+    extra = struct.pack("<3I", 0, 1, 1)  # lặp đỉnh → diện tích 0
+    document["accessors"][1]["count"] += 3
+    document["bufferViews"][1]["byteLength"] += 12
+    document["buffers"][0]["byteLength"] += 12
+    source, output = tmp_path / "native.glb", tmp_path / "world.glb"
+    write_fixture(source, (document, binary + extra))
+    with pytest.raises(ValueError, match="degenerate"):
+        read_collision_glb(source)
+    mesh = canonicalize_collision(source, output)
+    assert len(mesh.triangles) == triangles and topology(mesh)["degenerate_triangles"] == 0
+    assert degenerate_removed(source) == 1
