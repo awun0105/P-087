@@ -508,6 +508,34 @@ class ProjectRegistry:
         self.persistence.save_job(updated, reference, event, expected=expected)
         return updated
 
+    def record_stage_progress(self, expected: JobManifest, stage_id: StageId) -> JobManifest:
+        """Worker-only: job RUNNING chuyển sang stage đang chạy mới (không thêm artifact).
+
+        Dùng cho tiến trình quan sát được (REC stage event), không phải phần trăm
+        ước đoán; CAS bảo đảm không ghi đè cancel/retry xảy ra song song.
+        """
+        if self.persistence is None:
+            raise RuntimeStateConflictError("Real worker cần durable registry")
+        if expected.status != JobStatus.RUNNING:
+            raise ValueError("Chỉ job RUNNING mới đổi stage đang chạy")
+        if expected.current_stage == stage_id:
+            return expected
+        updated = with_canonical_checksum(
+            expected.model_copy(update={"current_stage": stage_id}), "job_manifest_checksum"
+        )
+        reference = self.lifecycle.store.publish_manifest(updated)
+        history = self.persistence.list_attempts(expected.job_id)
+        event = JobAttemptRecord(
+            attempt=history[-1].attempt,
+            status=updated.status,
+            current_stage=stage_id,
+            recorded_at=datetime.now(UTC),
+            job_manifest_uri=reference.artifact_uri,
+            job_manifest_checksum=reference.artifact_checksum,
+        )
+        self.persistence.save_job(updated, reference, event, expected=expected)
+        return updated
+
     def record_prepared_input(self, expected: JobManifest, receipt: PreparedInputReceipt) -> JobManifest:
         """Worker-only reducer cho bước chuẩn bị video; CAS trên revision RUNNING đã claim.
 

@@ -27,7 +27,7 @@ from uuid import uuid4
 
 from src.config import Settings, get_settings
 from src.models.contracts.artifacts import ProductArtifactRef
-from src.models.contracts.manifests import ExecutionError, JobManifest, JobStatus, StageId
+from src.models.contracts.manifests import ExecutionError, JobManifest, JobStatus, StageArtifact, StageId, StageStatus
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import load_prepared_profile, prepared_frame_reference, require_profile
 from src.services.orchestration.jobs.models import PreparedInputReceipt, TransitionRequest
@@ -72,7 +72,36 @@ class _Attempt:
     workspace: Path
 
 
-def _run_tool(attempt: _Attempt, name: str, command: list[str], timeout: float) -> tuple[int, dict]:
+class _StageProgress:
+    """Đọc dần progress file của REC (JSON lines StageArtifact) và đẩy stage RUNNING vào job."""
+
+    def __init__(self, attempt: _Attempt, path: Path) -> None:
+        self.attempt = attempt
+        self.path = path
+        self.offset = 0
+
+    def poll(self) -> None:
+        """Chỉ xử lý dòng hoàn chỉnh; dòng đang ghi dở đợi lượt sau."""
+        if not self.path.is_file():
+            return
+        with self.path.open("rb") as stream:
+            stream.seek(self.offset)
+            chunk = stream.read()
+        complete = chunk[: chunk.rfind(b"\n") + 1]
+        self.offset += len(complete)
+        for line in complete.splitlines():
+            stage = StageArtifact.model_validate_json(line)
+            if stage.status == StageStatus.RUNNING and stage.stage_id != self.attempt.job.current_stage:
+                self.attempt.job = self.attempt.registry.record_stage_progress(self.attempt.job, stage.stage_id)
+
+
+def _run_tool(
+    attempt: _Attempt,
+    name: str,
+    command: list[str],
+    timeout: float,
+    progress: _StageProgress | None = None,
+) -> tuple[int, dict]:
     """Chạy một REC CLI trong process group riêng, hủy khi job revision đổi (cancel)."""
     stdout_path = attempt.workspace / f"{name}.stdout.json"
     with stdout_path.open("xb") as output, (attempt.workspace / f"{name}.stderr.log").open("xb") as errors:
@@ -83,6 +112,8 @@ def _run_tool(attempt: _Attempt, name: str, command: list[str], timeout: float) 
         pause = Event()
         try:
             while process.poll() is None:
+                if progress is not None:
+                    progress.poll()  # Tự cập nhật attempt.job trước khi so revision để phát hiện cancel.
                 current = attempt.registry.get_job(attempt.job.job_id)
                 if current.job_manifest_checksum != attempt.job.job_manifest_checksum:
                     raise PreviewCancelledError("Job revision đã thay đổi trong khi worker chạy")
@@ -175,8 +206,13 @@ def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: dic
         str(attempt.registry.runtime_resolver.artifact_root),
         "--workspace",
         str(attempt.workspace / "rec"),
+        "--progress-file",
+        str(attempt.workspace / "preview.progress.jsonl"),
     ]
-    exit_code, payload = _run_tool(attempt, "preview", command, attempt.settings.product_preview_timeout_seconds)
+    progress = _StageProgress(attempt, attempt.workspace / "preview.progress.jsonl")
+    exit_code, payload = _run_tool(
+        attempt, "preview", command, attempt.settings.product_preview_timeout_seconds, progress
+    )
     if exit_code not in {0, 1}:
         raise RuntimeError("Preview worker không trả result hợp lệ")
     reference = ProductArtifactRef.model_validate(payload.get("result_ref"))
