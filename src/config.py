@@ -63,8 +63,9 @@ class Settings(BaseSettings):
     product_upload_quality_profile: Path = Path("./configs/product/upload_quality_v1.json")
     product_target_frame_count: int = Field(default=240, ge=2, le=5000)
     product_prepare_timeout_seconds: float = Field(default=3600, gt=0, allow_inf_nan=False)
-    # Demo bundle export từ một job thật (scripts/demo/export_demo_bundle.py).
-    product_demo_dir: Path = Path("./data/demo/current")
+    # Thư viện video mẫu đã xử lý sẵn: mỗi thư mục con là một bundle export từ job
+    # thật (scripts/demo/export_demo_bundle.py); thư mục chứa manifest.json = một mẫu.
+    product_demo_dir: Path = Path("./data/demo/library")
 
     # Kho vector
     chroma_persist_dir: str = "./data/chroma"

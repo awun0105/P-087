@@ -24,23 +24,34 @@ def _file(root: Path, name: str, data: bytes, media: str) -> DemoFile:
     )
 
 
-@pytest.fixture
-def bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    from src.api import routes_studio
-
-    (tmp_path / "files").mkdir()
+def _write_bundle(root: Path, demo_id: str, durations: list[float | None]) -> None:
+    (root / "files").mkdir(parents=True)
     manifest = DemoManifest(
-        demo_id="demo",
-        title="Demo",
-        origin="smoke_run",
+        demo_id=demo_id,
+        title=f"Demo {demo_id}",
+        origin="pipeline_job",
         source=DemoSource(dataset="TorWIC-SLAM", sequence="Aisle_CW"),
         produced_at=datetime(2026, 9, 29, tzinfo=UTC),
-        stages=[DemoStage(stage_id=StageId.CAMERA_POSE, duration_seconds=12.5)],
-        frames=[_file(tmp_path, "frame-000001.png", b"png", "image/png")],
-        splat=_file(tmp_path, "scene.sog", b"sog-bytes", "application/octet-stream"),
+        stages=[
+            DemoStage(stage_id=stage, duration_seconds=seconds)
+            for stage, seconds in zip((StageId.CAMERA_POSE, StageId.VISUAL_RECON), durations, strict=True)
+        ],
+        frames=[_file(root, "frame-000001.png", b"png", "image/png")],
+        splat=_file(root, "scene.sog", b"sog-bytes", "application/octet-stream"),
+        processing={"brush.total_train_iters": 7000},
     )
-    (tmp_path / "manifest.json").write_text(manifest.model_dump_json())
-    (tmp_path / "files" / "secret.txt").write_text("not listed")
+    (root / "manifest.json").write_text(manifest.model_dump_json())
+    (root / "files" / "secret.txt").write_text("not listed")
+
+
+@pytest.fixture
+def library(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    from src.api import routes_studio
+
+    _write_bundle(tmp_path / "aisle", "a", [12.5, 60.0])
+    _write_bundle(tmp_path / "loop", "b", [10.0, None])
+    (tmp_path / "broken").mkdir()
+    (tmp_path / "broken" / "manifest.json").write_text("{}")
     monkeypatch.setattr(routes_studio, "get_settings", lambda: SimpleNamespace(product_demo_dir=tmp_path))
     return tmp_path
 
@@ -54,21 +65,40 @@ async def client():
 
 
 @pytest.mark.asyncio
-async def test_demo_manifest_and_allow_listed_file(client: AsyncClient, bundle: Path) -> None:
-    manifest = (await client.get("/api/v1/demo")).json()
-    assert manifest["origin"] == "smoke_run" and manifest["splat"]["name"] == "scene.sog"
-    response = await client.get("/api/v1/demo/files/scene.sog")
-    assert response.status_code == 200 and response.content == b"sog-bytes"
-    for name in ("secret.txt", "..%2Fmanifest.json", "missing.png"):
-        assert (await client.get(f"/api/v1/demo/files/{name}")).status_code == 404
+async def test_sample_library_lists_valid_bundles(client: AsyncClient, library: Path) -> None:
+    samples = (await client.get("/api/v1/samples")).json()["samples"]
+    assert [item["sample_id"] for item in samples] == ["aisle", "loop"]
+    assert samples[0]["total_seconds"] == 72.5 and samples[0]["has_processing"] is True
+    assert samples[1]["total_seconds"] is None  # thiếu thời lượng một stage → không đoán
+    assert samples[0]["cover"] == "frame-000001.png"
+    assert (await client.get("/api/v1/samples/aisle")).json()["processing"] == {"brush.total_train_iters": 7000}
 
 
 @pytest.mark.asyncio
-async def test_tampered_or_missing_bundle_is_404(client: AsyncClient, bundle: Path) -> None:
-    (bundle / "files" / "scene.sog").write_bytes(b"tampered!")
-    assert (await client.get("/api/v1/demo/files/scene.sog")).status_code == 404
-    (bundle / "manifest.json").unlink()
-    assert (await client.get("/api/v1/demo")).status_code == 404
+async def test_sample_files_are_allow_listed_and_checksummed(client: AsyncClient, library: Path) -> None:
+    response = await client.get("/api/v1/samples/aisle/files/scene.sog")
+    assert response.status_code == 200 and response.content == b"sog-bytes"
+    for path in (
+        "/api/v1/samples/aisle/files/secret.txt",
+        "/api/v1/samples/aisle/files/..%2Fmanifest.json",
+        "/api/v1/samples/missing/files/scene.sog",
+        "/api/v1/samples/broken",
+    ):
+        assert (await client.get(path)).status_code == 404
+    (library / "aisle" / "files" / "scene.sog").write_bytes(b"tampered!")
+    assert (await client.get("/api/v1/samples/aisle/files/scene.sog")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_single_bundle_root_still_works(client: AsyncClient, tmp_path: Path, monkeypatch) -> None:
+    from src.api import routes_studio
+
+    _write_bundle(tmp_path / "single", "torwic-aisle-cw", [1.0, 2.0])
+    monkeypatch.setattr(routes_studio, "get_settings", lambda: SimpleNamespace(product_demo_dir=tmp_path / "single"))
+    samples = (await client.get("/api/v1/samples")).json()["samples"]
+    assert [item["sample_id"] for item in samples] == ["torwic-aisle-cw"]
+    monkeypatch.setattr(routes_studio, "get_settings", lambda: SimpleNamespace(product_demo_dir=tmp_path / "none"))
+    assert (await client.get("/api/v1/samples")).json()["samples"] == []
 
 
 def test_stage_durations_follow_completed_chain() -> None:

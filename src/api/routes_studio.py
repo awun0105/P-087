@@ -21,7 +21,7 @@ from src.services.orchestration.artifacts import (
     ArtifactStoreError,
     ArtifactTooLargeError,
 )
-from src.services.orchestration.demo import DemoBundle, DemoManifest, DemoUnavailableError
+from src.services.orchestration.demo import DemoLibrary, DemoManifest, DemoUnavailableError, SampleSummary
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.progress import JobProgress, job_progress
 from src.services.orchestration.processing import (
@@ -221,20 +221,38 @@ def get_job_progress(job_id: str) -> JobProgress:
     return job_progress(job, attempts, _preview_ready(registry, job_id))
 
 
-@router.get("/demo", response_model=DemoManifest)
-def get_demo() -> DemoManifest:
-    """Manifest kịch bản demo (output thật đã xử lý sẵn); 404 khi deployment không có."""
+class SampleListResponse(BaseModel):
+    """Video mẫu đã xử lý sẵn, hiển thị cạnh ô tải video lên."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    samples: list[SampleSummary]
+
+
+def _samples() -> DemoLibrary:
+    return DemoLibrary(get_settings().product_demo_dir)
+
+
+@router.get("/samples", response_model=SampleListResponse)
+def list_samples() -> SampleListResponse:
+    """Mọi video mẫu hợp lệ trong thư viện; rỗng khi deployment chưa có bundle nào."""
+    return SampleListResponse(samples=_samples().summaries())
+
+
+@router.get("/samples/{sample_id}", response_model=DemoManifest)
+def get_sample(sample_id: str) -> DemoManifest:
+    """Manifest của một video mẫu: stage, thời lượng thật, thông số, file."""
     try:
-        return DemoBundle(get_settings().product_demo_dir).manifest()
+        return _samples().bundle(sample_id).manifest()
     except DemoUnavailableError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
 
 
-@router.get("/demo/files/{name}")
-def get_demo_file(name: str) -> FileResponse:
-    """Một file của demo bundle; chỉ tên trong allow-list và đúng checksum mới được trả."""
+@router.get("/samples/{sample_id}/files/{name}")
+def get_sample_file(sample_id: str, name: str) -> FileResponse:
+    """Một file của video mẫu; chỉ tên trong allow-list và đúng checksum mới được trả."""
     try:
-        entry, path = DemoBundle(get_settings().product_demo_dir).file(name)
+        entry, path = _samples().bundle(sample_id).file(name)
     except DemoUnavailableError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     return FileResponse(
