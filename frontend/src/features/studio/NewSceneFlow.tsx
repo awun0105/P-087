@@ -253,7 +253,7 @@ function SelectAndConfirm({ preselect, onBack }: { preselect: string | null; onB
           activePreset={processing.activePreset}
           onPreset={processing.applyPreset}
           onChange={processing.setValue}
-          note={`Ước lượng tài nguyên là heuristic, không phải phép đo. ${processing.options.resource_note}`}
+          note={processing.options.resource_note}
         />
       ) : processing.error ? (
         <Notice tone="ochre">Không tải được bảng thông số: {processing.error}. Scene sẽ dùng cấu hình mặc định của máy chủ.</Notice>
