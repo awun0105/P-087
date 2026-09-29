@@ -337,3 +337,51 @@ def test_real_ffmpeg_video_stride_keeps_every_nth_accepted_frame(tmp_path: Path)
     result = service.execute(FrameExtractionRequest(manifest, quality, proof, _stride_config(2), "rec02a-test"))
     assert [frame.frame_id for frame in result.frame_set.frames] == [0, 2, 5]
     assert result.frame_set.extraction_config_checksum == _stride_config(2).config_checksum
+
+
+def test_real_ffmpeg_sharpest_window_keeps_least_blurry_frame_per_window(tmp_path: Path) -> None:
+    """Mỗi cửa sổ 3 frame đã qua quality giữ frame có blur_score thấp nhất (nét nhất)."""
+    video = tmp_path / "clip.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi",
+            "-i", "testsrc2=duration=2:size=32x24:rate=3", "-c:v", "mpeg4", str(video),
+        ],
+        check=True,
+    )  # fmt: skip
+    manifest = _manifest((video,), "video/mp4")
+    quality = _quality(manifest, (0, 1, 2, 3, 4, 5))
+    scores = {0: 3.0, 1: 1.0, 2: 2.0, 3: 5.0, 4: 5.0, 5: 4.0}
+    payload = quality.model_dump(mode="json")
+    for row in payload["frames"]:
+        row["blur_score"] = scores[row["frame_id"]]
+    payload["report_checksum"] = canonical_content_checksum(payload, "report_checksum")
+    quality = RGBQualityReport.model_validate(payload)
+    gate, proof = _privacy(manifest, 6)
+    service, resolver = _service(tmp_path, manifest, (video,), gate)
+    result = service.execute(
+        FrameExtractionRequest(manifest, quality, proof, _stride_config(3, "quality_sharpest_window"), "rec02a-test")
+    )
+    assert [frame.frame_id for frame in result.frame_set.frames] == [1, 5]
+    rows = FrameSetResolver(resolver.require, resolver.require).materialize(result.frame_set)
+    assert [row[2] for row in rows] == ["0.333333", "1.666667"]
+
+
+def test_selective_decode_matches_full_decode_bytes(tmp_path: Path) -> None:
+    """Decode có chọn frame cho đúng pixel như decode toàn bộ tại cùng chỉ số."""
+    video = tmp_path / "clip.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi",
+            "-i", "testsrc2=duration=2:size=32x24:rate=4", "-c:v", "mpeg4", str(video),
+        ],
+        check=True,
+    )  # fmt: skip
+    decoder = FFmpegFrameDecoder()
+    (tmp_path / "all").mkdir()
+    (tmp_path / "some").mkdir()
+    every = decoder.decode(video, tmp_path / "all")
+    picked = decoder.decode(video, tmp_path / "some", [2, 5, 7])
+    assert [path.read_bytes() for path in picked] == [every[i].read_bytes() for i in (2, 5, 7)]
+    with pytest.raises(FrameExtractionError):
+        decoder.decode(video, tmp_path / "some", [5, 2])

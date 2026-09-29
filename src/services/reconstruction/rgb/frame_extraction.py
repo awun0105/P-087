@@ -26,12 +26,14 @@ class ExtractionConfig(ContractModel):
 
     `quality_accepted_stride` chỉ dành cho video: giữ mỗi frame thứ `frame_stride`
     trong các frame đã qua quality, để video 30fps không đổ hàng nghìn ảnh gần
-    trùng vào COLMAP. Stride nằm trong config nên được bind qua checksum.
+    trùng vào COLMAP. `quality_sharpest_window` chia frame đã qua quality thành cửa
+    sổ `frame_stride` frame liên tiếp và giữ frame nét nhất (blur_score thấp nhất,
+    theo `blurdetect`: điểm cao = nhòe). Stride nằm trong config nên được bind qua checksum.
     """
 
     schema_version: Literal["1.0"] = "1.0"
     mode: Literal["image_refs", "video_decode"]
-    sampling_policy: Literal["quality_accepted", "quality_accepted_stride"]
+    sampling_policy: Literal["quality_accepted", "quality_accepted_stride", "quality_sharpest_window"]
     timestamp_policy: Literal["source_timestamp", "source_pts"]
     frame_stride: int | None = Field(default=None, ge=2)
     config_checksum: Checksum
@@ -41,11 +43,16 @@ class ExtractionConfig(ContractModel):
         if self.mode == "image_refs":
             allowed = {("quality_accepted", "source_timestamp")}
         else:
-            allowed = {("quality_accepted", "source_pts"), ("quality_accepted_stride", "source_pts")}
+            allowed = {
+                ("quality_accepted", "source_pts"),
+                ("quality_accepted_stride", "source_pts"),
+                ("quality_sharpest_window", "source_pts"),
+            }
         if (self.sampling_policy, self.timestamp_policy) not in allowed:
             raise ValueError("extraction mode and sampling/timestamp policy mismatch")
-        if (self.sampling_policy == "quality_accepted_stride") != (self.frame_stride is not None):
-            raise ValueError("frame_stride is required exactly for quality_accepted_stride")
+        strided = self.sampling_policy in {"quality_accepted_stride", "quality_sharpest_window"}
+        if strided != (self.frame_stride is not None):
+            raise ValueError("frame_stride is required exactly for strided sampling policies")
         # Bỏ field None khỏi identity: config cũ (chưa có stride) giữ nguyên checksum.
         identity = self.model_dump(mode="json", exclude_none=True)
         if canonical_content_checksum(identity, "config_checksum") != self.config_checksum:
@@ -177,8 +184,21 @@ class FFmpegFrameDecoder:
             )
         return values
 
-    def decode(self, video: Path, output: Path) -> tuple[Path, ...]:
-        """Giải mã toàn bộ frame một lần; không dùng `-y` hay xóa output cũ."""
+    def decode(self, video: Path, output: Path, frame_ids: list[int] | None = None) -> tuple[Path, ...]:
+        """Giải mã một lần; `frame_ids` (tăng dần) → chỉ ghi các frame đó, theo đúng thứ tự.
+
+        Chọn frame bằng filter `select` trong script file để video dài không phải
+        ghi hàng chục nghìn PNG tạm ra đĩa. Không dùng `-y` hay xóa output cũ.
+        """
+        selection: list[str] = []
+        if frame_ids is not None:
+            if not frame_ids or frame_ids != sorted(set(frame_ids)) or frame_ids[0] < 0:
+                raise FrameExtractionError(
+                    "FRAME_SELECTION_INVALID", "Frame selection must be ordered and unique", "Rerun extraction"
+                )
+            script = output / "select.filter"
+            script.write_text("select=" + "+".join(f"eq(n\\,{frame_id})" for frame_id in frame_ids))
+            selection = ["-filter_script:v", str(script)]
         command = [
             self.ffmpeg,
             "-hide_banner",
@@ -193,6 +213,7 @@ class FFmpegFrameDecoder:
             str(video),
             "-map",
             "0:v:0",
+            *selection,
             "-fps_mode",
             "passthrough",
             "-pix_fmt",
@@ -371,23 +392,39 @@ class RGBFrameExtractor:
             raise FrameExtractionError(
                 "FRAME_QUALITY_MISMATCH", "Video quality source checksum differs", "Rerun REC-02 quality"
             )
+        chosen = self._chosen_frames(request)
         with tempfile.TemporaryDirectory(prefix="rec02a_frames_") as directory:
             timestamps = self.deps.decoder.timestamps(video)
-            images = self.deps.decoder.decode(video, Path(directory))
-            if len(images) != len(timestamps) or request.quality.selected_frame_ids != list(range(len(images))):
+            if len(timestamps) != len(request.quality.frames) or request.quality.selected_frame_ids != list(
+                range(len(timestamps))
+            ):
                 raise FrameExtractionError(
                     "FRAME_DECODE_MISMATCH", "Decoded frames differ from REC-02", "Rerun validation on this video"
                 )
-            return self._publish_video_frames(request, VideoDecodeResult(images, timestamps, file.checksum))
+            images = self.deps.decoder.decode(video, Path(directory), [row.frame_id for row in chosen])
+            if len(images) != len(chosen):
+                raise FrameExtractionError(
+                    "FRAME_DECODE_MISMATCH", "Decoded frames differ from REC-02", "Rerun validation on this video"
+                )
+            return self._publish_video_frames(request, chosen, VideoDecodeResult(images, timestamps, file.checksum))
+
+    @staticmethod
+    def _chosen_frames(request: FrameExtractionRequest) -> list[RGBFrameQuality]:
+        """Frame giữ lại theo sampling policy, luôn trong tập đã qua quality."""
+        accepted = [row for row in request.quality.frames if row.quality == "accepted"]
+        stride = request.config.frame_stride or 1
+        if request.config.sampling_policy == "quality_sharpest_window":
+            windows = (accepted[index : index + stride] for index in range(0, len(accepted), stride))
+            return [min(window, key=lambda row: (row.blur_score, row.frame_id)) for window in windows]
+        return accepted[::stride]
 
     def _publish_video_frames(
-        self, request: FrameExtractionRequest, decoded: VideoDecodeResult
+        self, request: FrameExtractionRequest, chosen: list[RGBFrameQuality], decoded: VideoDecodeResult
     ) -> list[NormalizedRGBFrame]:
         rows = []
-        accepted = [quality for quality in request.quality.frames if quality.quality == "accepted"]
-        for quality in accepted[:: request.config.frame_stride or 1]:
+        for quality, image in zip(chosen, decoded.images, strict=True):
             frame_id = quality.frame_id
-            payload = decoded.images[frame_id].read_bytes()
+            payload = image.read_bytes()
             ref = self._reference(
                 _ArtifactSpec(request.job_id, f"rec02a/frames/{frame_id:06d}.png", "RGBFrame"), payload
             )
