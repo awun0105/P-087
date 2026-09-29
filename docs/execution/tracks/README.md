@@ -12,6 +12,19 @@ integration gates.
 
 Owners: EX-REC `@awun0105`; EX-SCENE Đức; EX-SIM Đạt; EX-PRODUCT Cường.
 
+## Hiện trạng trên `develop` (2026-09-29)
+
+| Track | Code đã có (quan sát từ repo) | Chưa có |
+|---|---|---|
+| EX-REC | Kiểm video, privacy gate, tách frame, COLMAP, Brush, SOG (GPU), LiDAR ingest, alignment, bundle; chạy thật local trong Studio | Chạy trên GPU thuê; metric scale cho video người dùng |
+| EX-SCENE | `bundle_consumer` đọc `ReconstructionBundle` (SCENE-01) | Mask/association/decomposition/SceneIR thật (package còn placeholder) |
+| EX-SIM | Preflight rules, collider generator (SIM-02/04) | OpenUSD, Isaac runtime (package còn placeholder) |
+| EX-PRODUCT | API product + Studio, queue worker, Studio UI + editor SuperSplat, UI P0 ẩn | Đăng nhập/role, cloud (ADR 0003), review/release thật |
+
+Nơi chạy Isaac Sim trong kiến trúc cloud chưa được quyết định (ADR 0003 chỉ phủ
+REC). EX-SCENE/EX-SIM chưa push phần code mới; bảng này chỉ ghi code đã có trên
+`develop`.
+
 ## Rules For Coding Agents
 
 1. Đọc `TRACK.md`, task file được giao và các source sections được link trong task.

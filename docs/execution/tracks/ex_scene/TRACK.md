@@ -36,6 +36,14 @@ Output: valid, versioned `SceneIR`; collider có thể chưa đầy đủ ở ha
 - ObjectGS, SegAnyGaussians, OpenReal2Sim và gs-real2sim là references/donors cho các utilities chuyên biệt.
 - Team sở hữu candidate lifecycle, deterministic association baseline, HITL operations, decomposition và SceneIR behavior.
 
+## Hiện trạng trên `develop` (2026-09-29)
+
+- Có `src/services/scene/bundle_consumer.py` (SCENE-01, PR #8) đọc `ReconstructionBundle`
+  qua shared contract; các package `association/ candidates/ decomposition/ editing/
+  extraction/` còn là placeholder. Code mới của track chưa được push.
+- Kiến trúc cloud (ADR 0003) chưa quyết định nơi chạy worker SCENE (SAM2 cần GPU);
+  khi nối vào, dùng cùng mô hình worker nhận job qua server và đọc/ghi artifact R2.
+
 ## Authority Gates
 
 - Final `SceneIR`/`SceneObject` field set phải theo normative Contract; Playbook projection và fixture không tự tạo authority.
