@@ -131,3 +131,22 @@ describe("directUpload", () => {
     ).rejects.toThrow("Kích thước khác khai báo");
   });
 });
+
+describe("directUpload — kiểm tra kẹt", () => {
+  it("nhắc server kiểm tra lại định kỳ và bỏ cuộc sau giới hạn", async () => {
+    const server = fakeServer({ size: 4 });
+    // Server không bao giờ rời VERIFYING (vd tác vụ nền mất khi API khởi động lại).
+    server.api.mockImplementation(async (path: string, init?: RequestInit) => {
+      if ((init?.method ?? "GET") === "POST" && path === "/api/v1/uploads/direct") {
+        return { upload_id: "upload-1", original_name: "kho.mp4", size_bytes: 4, part_size: 4, part_count: 1, status: "UPLOADING", error: null, uploaded_parts: [] };
+      }
+      if (path.endsWith("/urls")) return { urls: { 1: "https://store/part-1" } };
+      return { upload_id: "upload-1", original_name: "kho.mp4", size_bytes: 4, part_size: 4, part_count: 1, status: "VERIFYING", error: null, uploaded_parts: [] };
+    });
+    await expect(
+      directUpload(file(4), { onProgress: () => {}, signal: new AbortController().signal, pollMs: 60_000 }, server.deps),
+    ).rejects.toThrow("quá lâu");
+    const completes = server.api.mock.calls.filter(([path, init]) => String(path).endsWith("/complete") && init?.method === "POST");
+    expect(completes.length).toBeGreaterThan(1); // có gọi lại "hoàn tất"
+  });
+});

@@ -155,10 +155,20 @@ export async function directUpload(file: File, options: DirectUploadOptions, dep
 
   aborted(signal);
   options.onVerifying?.();
-  let state = await deps.api<DirectUploadState>(`${API}/${encodeURIComponent(uploadId)}/complete`, { method: "POST" });
-  while (state.status === "VERIFYING") {
-    await deps.sleep(options.pollMs ?? 1500);
-    state = await deps.api<DirectUploadState>(`${API}/${encodeURIComponent(uploadId)}`);
+  const completeUrl = `${API}/${encodeURIComponent(uploadId)}/complete`;
+  let state = await deps.api<DirectUploadState>(completeUrl, { method: "POST" });
+  const pollMs = options.pollMs ?? 1500;
+  const nudgeEvery = Math.max(1, Math.round(60_000 / pollMs)); // ~1 phút nhắc server kiểm tra lại
+  const maxPolls = Math.round((30 * 60_000) / pollMs); // bỏ cuộc sau ~30 phút
+  for (let poll = 1; state.status === "VERIFYING"; poll += 1) {
+    if (poll > maxPolls) throw new ApiError(504, "Máy chủ kiểm tra video quá lâu; thử lại sau ít phút");
+    aborted(signal);
+    await deps.sleep(pollMs);
+    // Tác vụ kiểm tra nền có thể mất khi API khởi động lại: thỉnh thoảng gọi lại "hoàn tất".
+    state = await deps.api<DirectUploadState>(
+      poll % nudgeEvery === 0 ? completeUrl : `${API}/${encodeURIComponent(uploadId)}`,
+      poll % nudgeEvery === 0 ? { method: "POST" } : undefined,
+    );
   }
   writeSaved(deps.storage, resumeKey(file), null);
   if (state.status !== "READY") throw new ApiError(422, state.error ?? "Video không qua được bước kiểm tra");

@@ -106,3 +106,21 @@ async def test_lying_about_size_is_rejected(client: AsyncClient, cloud: Settings
     completed = await client.post(f"/api/v1/uploads/direct/{upload_id}/complete")
     assert completed.status_code == 422  # thiếu phần → không ghép
     assert (await client.get("/api/v1/uploads")).json()["uploads"] == []
+
+
+@pytest.mark.asyncio
+async def test_stuck_verification_is_resumed_by_complete(client: AsyncClient, cloud: Settings) -> None:
+    """Mô phỏng API khởi động lại giữa lúc kiểm tra: phiên kẹt VERIFYING, gọi lại complete là xong."""
+    from src.api.studio import deps
+
+    begun = (await client.post("/api/v1/uploads/direct", json={"filename": "kho.mp4", "size_bytes": 7})).json()
+    upload_id = begun["upload_id"]
+    url = (await client.post(f"/api/v1/uploads/direct/{upload_id}/urls", json={"part_numbers": [1]})).json()["urls"]
+    with httpx.Client(timeout=30) as storage:
+        assert storage.put(url["1"], content=b"7 bytes").status_code == 200
+    deps.direct_uploads().complete(upload_id)  # ghép nhưng không có tác vụ kiểm tra nền
+    assert (await client.get(f"/api/v1/uploads/direct/{upload_id}")).json()["status"] == "VERIFYING"
+
+    resumed = await client.post(f"/api/v1/uploads/direct/{upload_id}/complete")
+    assert resumed.status_code == 200
+    assert (await client.get(f"/api/v1/uploads/direct/{upload_id}")).json()["status"] == "READY"

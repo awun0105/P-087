@@ -189,9 +189,22 @@ def _verify_in_background(upload_id: str) -> None:
 
 @router.post("/uploads/direct/{upload_id}/complete", response_model=DirectUploadState)
 def complete_direct_upload(upload_id: str, background: BackgroundTasks) -> DirectUploadState:
-    """Ghép các phần; server tự tính checksum trong nền, client poll tới READY/FAILED."""
+    """Ghép các phần; server tự tính checksum trong nền, client poll tới READY/FAILED.
+
+    Gọi lại khi phiên đang VERIFYING sẽ lên lịch kiểm tra lại: tác vụ nền mất khi API
+    khởi động lại thì phiên không kẹt mãi. Nhiều lần kiểm tra song song vẫn an toàn vì
+    bước ghi kết quả là CAS theo trạng thái.
+    """
+    service = deps.direct_uploads()
     try:
-        session = deps.direct_uploads().complete(upload_id)
+        current = service.get(upload_id)
+    except UploadNotFoundError as error:
+        raise _upload_errors(error) from error
+    if current.status == "VERIFYING":
+        background.add_task(_verify_in_background, upload_id)
+        return _state(current)
+    try:
+        session = service.complete(upload_id)
     except (UploadError, UploadNotFoundError, RuntimeStateConflictError) as error:
         raise _upload_errors(error) from error
     background.add_task(_verify_in_background, upload_id)
