@@ -1,4 +1,8 @@
-"""Filesystem-backed implementation of the logical artifact store."""
+"""Filesystem-backed implementation of the logical artifact store.
+
+Khi có `ArtifactRemote` (kho file S3-compatible, ADR 0003), filesystem là cache cục bộ:
+đọc artifact chưa có thì tải về và kiểm checksum, publish xong thì đẩy lên kho file.
+"""
 
 import hashlib
 import os
@@ -18,6 +22,7 @@ from src.services.orchestration.artifacts.errors import (
     ArtifactTooLargeError,
     InvalidArtifactUriError,
 )
+from src.services.orchestration.artifacts.remote import ArtifactRemote
 
 ContractT = TypeVar("ContractT", bound=BaseModel)
 _URI_PREFIX = "artifact://jobs/"
@@ -26,8 +31,9 @@ _URI_PREFIX = "artifact://jobs/"
 class ArtifactResolver:
     """Map logical artifact URIs into one configured filesystem root."""
 
-    def __init__(self, artifact_root: Path) -> None:
+    def __init__(self, artifact_root: Path, remote: ArtifactRemote | None = None) -> None:
         self.artifact_root = artifact_root.expanduser().resolve()
+        self.remote = remote
 
     def resolve(self, artifact_uri: str) -> Path:
         """Resolve one safe logical URI without allowing path traversal."""
@@ -39,11 +45,46 @@ class ArtifactResolver:
 
     def require(self, reference: ArtifactRef) -> Path:
         """Resolve, assert existence and verify checksum for a reference."""
-        path = self.resolve(reference.artifact_uri)
+        return self.require_uri(reference.artifact_uri, reference.artifact_checksum)
+
+    def require_uri(self, artifact_uri: str, checksum: str) -> Path:
+        """Như `require` nhưng nhận URI + checksum (vd `InputFile` của InputManifest)."""
+        path = self.resolve(artifact_uri)
+        if not path.is_file() and self.remote is not None:
+            self.remote.fetch(self.relative_key(artifact_uri), path, checksum)
         if not path.is_file():
-            raise ArtifactNotFoundError(f"artifact does not exist: {reference.artifact_uri}")
-        verify_file_checksum(path, reference.artifact_checksum)
+            raise ArtifactNotFoundError(f"artifact does not exist: {artifact_uri}")
+        verify_file_checksum(path, checksum)
         return path
+
+    def relative_key(self, artifact_uri: str) -> str:
+        """Key logical `jobs/<namespace>/<path>` dùng chung giữa filesystem và kho file."""
+        return self._parse_relative_path(artifact_uri).as_posix()
+
+    def published(self, artifact_uri: str) -> None:
+        """Hook sau khi publish cục bộ: đẩy artifact lên kho file nếu có."""
+        if self.remote is not None:
+            self.remote.push(self.relative_key(artifact_uri), self.resolve(artifact_uri))
+
+    def sync_down(self, namespace: str) -> int:
+        """Tải các artifact còn thiếu của một namespace `jobs/<namespace>` từ kho file."""
+        if self.remote is None:
+            return 0
+        relative = self._namespace_dir(namespace)
+        return self.remote.pull_tree(relative, self.artifact_root / relative)
+
+    def sync_up(self, namespace: str) -> int:
+        """Đẩy mọi artifact đã publish cục bộ của một namespace lên kho file."""
+        if self.remote is None:
+            return 0
+        relative = self._namespace_dir(namespace)
+        return self.remote.push_tree(relative, self.artifact_root / relative)
+
+    @staticmethod
+    def _namespace_dir(namespace: str) -> str:
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", namespace) is None:
+            raise InvalidArtifactUriError("artifact namespace không hợp lệ")
+        return f"jobs/{namespace}"
 
     def load_model(self, reference: ArtifactRef, model_type: type[ContractT]) -> ContractT:
         """Load JSON and enforce the target Pydantic contract/schema version."""
@@ -82,6 +123,7 @@ class FilesystemArtifactStore:
             raise ValueError("reference checksum does not match publication payload")
         destination = self.resolver.resolve(reference.artifact_uri)
         self._atomic_create(destination, payload)
+        self.resolver.published(reference.artifact_uri)
         return reference
 
     def publish_model(self, reference: ArtifactRef, model: BaseModel) -> ArtifactRef:
@@ -120,6 +162,7 @@ class StreamingPublication:
         if max_bytes < 1:
             raise ValueError("max_bytes phải dương")
         self.artifact_uri = artifact_uri
+        self.resolver = resolver
         self.destination = resolver.resolve(artifact_uri)
         self.destination.parent.mkdir(parents=True, exist_ok=True)
         if self.destination.exists():
@@ -160,6 +203,7 @@ class StreamingPublication:
         finally:
             self._closed = True
             self._temporary.unlink(missing_ok=True)
+        self.resolver.published(self.artifact_uri)
         return "sha256:" + self._digest.hexdigest()
 
     def abort(self) -> None:
