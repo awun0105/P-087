@@ -15,7 +15,7 @@ from src.models.contracts.manifests import ExecutionError, JobManifest, JobStatu
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import load_prepared_profile, prepared_frame_reference, require_profile
 from src.services.orchestration.jobs.models import TransitionRequest
-from src.services.orchestration.jobs.preview_cli import run_prepared_job
+from src.services.orchestration.jobs.preview_cli import run_prepared_job, run_video_job
 from src.services.orchestration.projects.errors import PrivacyGateBlockedError
 from src.services.orchestration.projects.privacy import require_project_dispatch
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
@@ -27,6 +27,12 @@ class PreparedRunner(Protocol):
     """Seam cho real CLI adapter và regression giả lập; không import REC internals."""
 
     def __call__(self, job_id: str, frame_set_uri: str, *, expected_checksum: str) -> JobManifest: ...
+
+
+class VideoRunner(Protocol):
+    """Seam cho job của video upload: prepare rồi preview trong một attempt."""
+
+    def __call__(self, job_id: str, *, expected_checksum: str) -> JobManifest: ...
 
 
 def _record_dispatch_failure(registry: ProjectRegistry, job: JobManifest, cause: Exception) -> None:
@@ -55,8 +61,15 @@ def _record_dispatch_failure(registry: ProjectRegistry, job: JobManifest, cause:
         logger.info("Không ghi đè job hoặc privacy revision mới hơn khi ghi dispatch failure")
 
 
-def dispatch_next(registry: ProjectRegistry, runner: PreparedRunner = run_prepared_job) -> bool:
+def dispatch_next(
+    registry: ProjectRegistry,
+    runner: PreparedRunner = run_prepared_job,
+    video_runner: VideoRunner = run_video_job,
+) -> bool:
     """Xử lý tối đa một job mỗi lượt; skip input chưa chuẩn bị/profile khác.
+
+    Job có frame set (dataset hoặc retry sau lỗi preview) đi thẳng vào preview; job
+    của video upload chưa có frame set thì chạy prepare trước.
 
     Một manifest hỏng được log riêng, không làm chết queue của các project khác.
     Exception rộng chỉ tại boundary của mỗi job; cause được log bằng tên type
@@ -71,12 +84,16 @@ def dispatch_next(registry: ProjectRegistry, runner: PreparedRunner = run_prepar
             try:
                 candidate = registry.get_job(job_id)
                 require_profile(candidate, registry.execution_profile)
-                require_project_dispatch(registry.get_project(candidate.project_id))
+                project = registry.get_project(candidate.project_id)
+                require_project_dispatch(project)
                 job = candidate
                 frames = prepared_frame_reference(job)
-                if frames is None:
-                    continue
-                runner(job_id, frames.artifact_uri, expected_checksum=job.job_manifest_checksum)
+                if frames is not None:
+                    runner(job_id, frames.artifact_uri, expected_checksum=job.job_manifest_checksum)
+                    return True
+                if project.input_manifest_ref is None:
+                    continue  # Chưa có input để chuẩn bị (ví dụ project dataset chưa publish frames).
+                video_runner(job_id, expected_checksum=job.job_manifest_checksum)
                 return True
             except (RuntimeStateConflictError, PrivacyGateBlockedError):
                 continue  # Job không eligible hoặc runner khác đã claim; không auto retry.
