@@ -1,5 +1,12 @@
+import { Suspense } from "react";
+
 import { NewSceneFlow } from "@/features/studio/NewSceneFlow";
 
 export default function NewScenePage() {
-  return <NewSceneFlow />;
+  // useSearchParams (`?sample=`) cần Suspense boundary khi build tĩnh.
+  return (
+    <Suspense>
+      <NewSceneFlow />
+    </Suspense>
+  );
 }

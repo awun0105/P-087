@@ -1,17 +1,18 @@
 "use client";
 
 import { ArrowLeft, ArrowRight, Film, Loader2, Play } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useId, useState } from "react";
 
 import { Button, Card, EmptyState, Notice, formatBytes } from "@/components/studio/primitives";
 import { FlowStepper } from "@/features/studio/FlowStepper";
+import { SamplePicker, SampleProcessStep, SampleReadyStep, SampleSelectStep } from "@/features/studio/SampleFlow";
 import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
 import { useProcessingForm } from "@/features/studio/useProcessingForm";
 import { UploadDropzone } from "@/features/studio/UploadDropzone";
-import { createSceneFromUpload, listUploads } from "@/lib/api/studio";
+import { createSceneFromUpload, getSample, listSamples, listUploads } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
-import type { DataOrigin, UploadRecord } from "@/lib/contracts/studio";
+import type { DataOrigin, DemoManifest, SampleSummary, UploadRecord } from "@/lib/contracts/studio";
 
 const STEPS = [
   { key: "upload", label: "Tải video lên" },
@@ -28,37 +29,108 @@ const ORIGINS: { value: DataOrigin; label: string }[] = [
   { value: "public_or_synthetic", label: "Dữ liệu công khai hoặc tổng hợp" },
 ];
 
-/** Luồng thật: tải video → chọn video + xác nhận dữ liệu → tạo scene và chuyển sang theo dõi. */
+/**
+ * Luồng tạo scene: tải video của mình (job thật trên máy chủ GPU) hoặc chọn video mẫu
+ * đã xử lý sẵn — video mẫu đi qua cùng các bước nhưng phát lại kết quả thật đã lưu.
+ */
 export function NewSceneFlow() {
+  const searchParams = useSearchParams();
   const [step, setStep] = useState(0);
   const [preselect, setPreselect] = useState<string | null>(null);
+  const [samples, setSamples] = useState<SampleSummary[]>([]);
+  const [sampleId, setSampleId] = useState<string | null>(null);
+  const [sample, setSample] = useState<DemoManifest | null>(null);
+  const [sampleError, setSampleError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void listSamples().then((result) => {
+      // Deployment chưa có thư viện mẫu → chỉ ẩn phần video mẫu, không chặn luồng tải lên.
+      if (alive && result.ok) setSamples(result.data.samples);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const pickSample = useCallback((id: string) => {
+    setSampleId(id);
+    setSample(null);
+    setSampleError(null);
+    setStep(1);
+    void getSample(id).then((result) => {
+      if (result.ok) setSample(result.data);
+      else setSampleError(result.error.detail);
+    });
+  }, []);
+
+  // `/new?sample=<id>` (từ trang Scenes) chọn sẵn video mẫu.
+  const requested = searchParams.get("sample");
+  useEffect(() => {
+    if (!requested) return;
+    const timer = setTimeout(() => pickSample(requested), 0);
+    return () => clearTimeout(timer);
+  }, [requested, pickSample]);
+
+  const backToUpload = () => {
+    setSampleId(null);
+    setSample(null);
+    setStep(0);
+  };
+
   return (
-    <main className="mx-auto max-w-4xl px-4 pt-10 pb-20 sm:px-6">
+    <main className={cn("mx-auto px-4 pt-10 pb-20 sm:px-6", sampleId && step >= 2 ? "max-w-6xl" : "max-w-4xl")}>
       <h1 className="text-3xl font-semibold tracking-tight">Scene mới</h1>
       <p className="mt-2 text-[15px] text-ink-muted">
-        Tải video quay kho, chọn video để xử lý, hệ thống dựng scene 3D trên máy chủ GPU.
+        Tải video quay kho hoặc chọn một video mẫu, hệ thống dựng scene 3D trên máy chủ GPU.
       </p>
       <div className="mt-8">
         <FlowStepper steps={STEPS} current={step} />
       </div>
       <div className="mt-8">
         {step === 0 && (
-          <div className="space-y-4">
-            <UploadDropzone
-              onUploaded={(record) => {
-                setPreselect(record.upload_id);
-                setStep(1);
-              }}
-            />
-            <div className="flex justify-end">
-              <Button variant="ghost" onClick={() => setStep(1)}>
-                Chọn video đã tải trước đó
-                <ArrowRight aria-hidden />
-              </Button>
+          <div className="space-y-10">
+            <div className="space-y-4">
+              <UploadDropzone
+                onUploaded={(record) => {
+                  setPreselect(record.upload_id);
+                  setStep(1);
+                }}
+              />
+              <div className="flex justify-end">
+                <Button variant="ghost" onClick={() => setStep(1)}>
+                  Chọn video đã tải trước đó
+                  <ArrowRight aria-hidden />
+                </Button>
+              </div>
             </div>
+            <SamplePicker samples={samples} selected={sampleId} onPick={pickSample} />
           </div>
         )}
-        {step === 1 && <SelectAndConfirm preselect={preselect} onBack={() => setStep(0)} />}
+        {step >= 1 && sampleId ? (
+          sampleError ? (
+            <div className="space-y-4">
+              <Notice tone="rust">Không tải được video mẫu: {sampleError}</Notice>
+              <Button variant="ghost" onClick={backToUpload}>
+                <ArrowLeft aria-hidden />
+                Chọn video khác
+              </Button>
+            </div>
+          ) : !sample ? (
+            <p className="flex items-center gap-2 text-sm text-ink-muted" role="status">
+              <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
+              Đang tải video mẫu…
+            </p>
+          ) : step === 1 ? (
+            <SampleSelectStep sampleId={sampleId} sample={sample} onBack={backToUpload} onStart={() => setStep(2)} />
+          ) : step === 2 ? (
+            <SampleProcessStep sampleId={sampleId} sample={sample} onDone={() => setStep(3)} />
+          ) : (
+            <SampleReadyStep sampleId={sampleId} sample={sample} />
+          )
+        ) : (
+          step === 1 && <SelectAndConfirm preselect={preselect} onBack={() => setStep(0)} />
+        )}
       </div>
     </main>
   );
