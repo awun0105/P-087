@@ -31,11 +31,12 @@ class SimilarityFit(ContractModel):
 
     def apply(self, point: Vector3) -> Vector3:
         """Đưa một điểm từ hệ source sang target."""
-        rotated = _matrix(self.rotation_xyzw) @ np.asarray(point, dtype=float)
+        rotated = rotation_matrix(self.rotation_xyzw) @ np.asarray(point, dtype=float)
         return tuple(float(value) for value in self.scale * rotated + np.asarray(self.translation))  # type: ignore[return-value]
 
 
-def _matrix(quaternion: Quaternion) -> np.ndarray:
+def rotation_matrix(quaternion: Quaternion) -> np.ndarray:
+    """Ma trận quay 3×3 của quaternion xyzw (đã chuẩn hóa)."""
     x, y, z, w = quaternion
     return np.array(
         [
