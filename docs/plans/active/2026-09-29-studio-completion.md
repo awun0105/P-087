@@ -126,8 +126,11 @@ Mỗi gói: code + test tập trung + cập nhật task file liên quan + commit
 - [~] Gói 2 (đổi theo ADR 0004 §6): dataset lấy số đo từ LiDAR, không nhập tay.
   - [x] Căn chỉnh SfM → world theo quỹ đạo camera trên job thật: RMS 6,8 cm trên
     quỹ đạo 16,7 m (REC-09 evidence).
-  - [ ] Publish alignment + LiDAR vào store của job; API xem trước trả khoảng cách LiDAR
-    cho A/B, C/D (bắt điểm vào point cloud); UI ô số chỉ đọc.
+  - [x] Publish alignment + LiDAR vào store của job (`scripts/torwic/publish_demo_lidar.py`,
+    đã chạy cho `job-ac2bfd924cc6`); bắt điểm click vào LiDAR trong 20 cm; API `metric/assist`,
+    `metric/lidar`; REC-06 thêm C/D + ngưỡng Q2, nguồn `lidar_demo` server tự đo lại; UI 7 điểm,
+    ô số chỉ đọc khi có LiDAR (`14d3626`…`463da3b`). Khứ hồi trên dữ liệu thật đúng khoảng cách.
+    `pytest tests` → 992 passed, 40 skipped; `tsc`, `eslint` sạch; `vitest run` → 120 passed.
   - [ ] Browser QA; đo `e` = sai lệch click so với LiDAR.
 - [ ] Gói 3 … Gói 7.
 
