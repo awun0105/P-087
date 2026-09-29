@@ -55,6 +55,9 @@ Không đổi schema shared contract khi chưa có producer/consumer review.
 10. **Kiểm thử GPU + E2E sau deploy** (mục 10 bên dưới).
 11. **Deploy + chuẩn bị demo:** Vercel/Railway/R2/Vast.ai (+ RunPod dự phòng); video mẫu lên R2; tài khoản
     Editor và Reviewer demo; bật GPU trước buổi demo; checklist fallback.
+    DevOps theo sổ tay (`docs/guide/chapter-09.md` tiêu chí DevOps): Docker Compose nhiều
+    service (API, worker, frontend, Postgres, MinIO cho local), Dockerfile riêng cho GPU
+    worker, `/health`, Live URL trong README, Sentry + UptimeRobot (mục 7).
 12. Hợp nhất UI P0 đầy đủ (sửa object, validation, review) vào Studio.
 13. Chỉnh sửa gửi dạng lệnh về server (phụ thuộc khả năng lấy thao tác từ SuperSplat).
 14. Tên miền riêng (Vercel đã có HTTPS).
@@ -89,6 +92,15 @@ Không đổi schema shared contract khi chưa có producer/consumer review.
 - Giới hạn tần suất: hạn mức theo tài khoản trong DB (job/ngày, GB) là lớp chính;
   thêm giới hạn request theo IP ở middleware FastAPI cho route đăng nhập/upload.
 - Log: stdout JSON có `job_id`, `stage`, `attempt` — Railway/Vast.ai/RunPod đều xem được.
+- **Sentry** (gói Developer miễn phí: 5.000 lỗi/tháng, 1 user, lưu 30 ngày): `sentry-sdk`
+  cho FastAPI + worker, `@sentry/nextjs` cho frontend; tắt gửi PII, không gửi nội dung
+  video/artifact; DSN qua biến môi trường. Kiểm license trước khi thêm dependency.
+- **UptimeRobot** (miễn phí: 50 monitor, 5 phút/lần, 1 trang trạng thái): ping `/health`
+  của API và trang chủ Web UI; cảnh báo email khi sập. Railway/Vercel không ngủ nên chỉ
+  dùng để cảnh báo + bằng chứng uptime; `/health` không được bật GPU.
+- **CI:** workflow đã có job Python + frontend, nhưng runner GitHub Actions do bot của ban
+  tổ chức quản lý đang bị chặn billing (từ 26/09) — ngoài quyền của nhóm. Trước mỗi merge
+  chạy cùng các bước ở local/checkout sạch và ghi kết quả vào PR.
 
 ### Database (mục 8)
 
