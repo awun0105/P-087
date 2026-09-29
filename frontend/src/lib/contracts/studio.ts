@@ -1,5 +1,5 @@
 /**
- * Mirror của `src/api/routes_studio.py`, `jobs/progress.py`, `demo/models.py`.
+ * Mirror của `src/api/studio/`, `jobs/progress.py`, `samples/models.py`.
  *
  * Dữ liệu từ API được parse tại biên (không cast mù) để UI không hiển thị trạng
  * thái sai khi backend đổi shape.

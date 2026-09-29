@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 
 from src.agents.graph import agent
 from src.api.routes_product import router as product_router
-from src.api.routes_studio import router as studio_router
+from src.api.studio import router as studio_router
 from src.models.schemas import ChatRequest, ChatResponse
 
 router = APIRouter()

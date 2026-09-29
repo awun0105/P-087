@@ -46,13 +46,13 @@ def _write_bundle(root: Path, demo_id: str, durations: list[float | None]) -> No
 
 @pytest.fixture
 def library(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    from src.api import routes_studio
+    from src.api.studio import deps
 
     _write_bundle(tmp_path / "aisle", "a", [12.5, 60.0])
     _write_bundle(tmp_path / "loop", "b", [10.0, None])
     (tmp_path / "broken").mkdir()
     (tmp_path / "broken" / "manifest.json").write_text("{}")
-    monkeypatch.setattr(routes_studio, "get_settings", lambda: SimpleNamespace(product_demo_dir=tmp_path))
+    monkeypatch.setattr(deps, "get_settings", lambda: SimpleNamespace(product_demo_dir=tmp_path))
     return tmp_path
 
 
@@ -91,13 +91,13 @@ async def test_sample_files_are_allow_listed_and_checksummed(client: AsyncClient
 
 @pytest.mark.asyncio
 async def test_single_bundle_root_still_works(client: AsyncClient, tmp_path: Path, monkeypatch) -> None:
-    from src.api import routes_studio
+    from src.api.studio import deps
 
     _write_bundle(tmp_path / "single", "torwic-aisle-cw", [1.0, 2.0])
-    monkeypatch.setattr(routes_studio, "get_settings", lambda: SimpleNamespace(product_demo_dir=tmp_path / "single"))
+    monkeypatch.setattr(deps, "get_settings", lambda: SimpleNamespace(product_demo_dir=tmp_path / "single"))
     samples = (await client.get("/api/v1/samples")).json()["samples"]
     assert [item["sample_id"] for item in samples] == ["torwic-aisle-cw"]
-    monkeypatch.setattr(routes_studio, "get_settings", lambda: SimpleNamespace(product_demo_dir=tmp_path / "none"))
+    monkeypatch.setattr(deps, "get_settings", lambda: SimpleNamespace(product_demo_dir=tmp_path / "none"))
     assert (await client.get("/api/v1/samples")).json()["samples"] == []
 
 

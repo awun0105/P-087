@@ -24,7 +24,7 @@ _ATTESTATION = {
 
 @pytest.fixture
 def studio(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
-    from src.api import routes_studio
+    from src.api.studio import deps
 
     settings = SimpleNamespace(
         database_url=f"sqlite:///{tmp_path / 'runtime.db'}",
@@ -43,8 +43,8 @@ def studio(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
             seed=7,
         ),
     )
-    monkeypatch.setattr(routes_studio, "get_settings", lambda: settings)
-    monkeypatch.setattr(routes_studio, "get_project_registry", lambda: registry)
+    monkeypatch.setattr(deps, "get_settings", lambda: settings)
+    monkeypatch.setattr(deps, "get_project_registry", lambda: registry)
     return SimpleNamespace(settings=settings, registry=registry, root=tmp_path)
 
 
