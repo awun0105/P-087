@@ -122,9 +122,20 @@ Phase 5 — Packaging GPU/SSH + demo run
   22 skipped; `ruff check src tests` + `ruff format --check` pass.
   Còn lại: `frontend/src/components/job-lifecycle.tsx` vẫn có nút mock-worker
   (backend trả 409) — UI cũ sẽ bị ẩn ở Phase 4 nên không sửa.
-- [ ] Phase 1 — upload + prepare input + FRAME_EXTRACT
-- [ ] Phase 2 — progress + delivery API
-- [ ] Phase 3 — demo import + replay
+- [x] Phase 1 — upload + prepare input + FRAME_EXTRACT (2026-09-29):
+  REC stride (`5f0bf63`), SelfAttestedPrivacyGate (`70bfd42`), `prepare_cli`
+  (`d9f0e38`); PRODUCT privacy theo project (`8dad63a`), StreamingPublication
+  (`9facadb`), uploads + r2s_uploads (`2d65ec5`), project từ upload (`89ded01`),
+  API `/uploads`, `/scenes/from-upload` (`29bd650`), reducer prepare (`9afcabf`),
+  worker `run_video_job` (`066448b`). Proof: FFmpeg thật qua subprocess REC CLI,
+  preview COLMAP/Brush là stub (tests/integration/test_upload_to_prepared_job.py).
+- [x] Phase 2 — progress API (2026-09-29): REC `--progress-file` (`7a33f27`),
+  worker cập nhật stage đang chạy (`9ab074b`), `GET /jobs/{id}/progress`
+  (`fbdb147`), `GET /scenes` (`552790a`). Delivery SOG dùng API artifact sẵn có.
+- [~] Phase 3 — demo bundle (2026-09-29): API `/demo`, `/demo/files/{name}`
+  (`107922c`), script export `job`/`smoke` (`8929a23`). Bundle tạm local từ smoke
+  `rec04_smoke_work_10b` (origin=smoke_run, không commit vì data/ ignored). Còn:
+  export từ job GPU thật Aisle_CW (Phase 5).
 - [ ] Phase 4 — Studio UI mới
   - [x] Vendor SuperSplat 3.4.2 nguyên bản vào `frontend/vendor/supersplat/`
     (`09ab2ee`), script `npm run build:editor` → `public/editor/` (`061a5cf`),
