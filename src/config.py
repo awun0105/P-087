@@ -56,6 +56,13 @@ class Settings(BaseSettings):
     product_worker_root: Path = Path("./data/product_workers")
     product_preview_timeout_seconds: float = Field(default=21600, gt=0, allow_inf_nan=False)
     product_queue_poll_seconds: float = Field(default=3, ge=0.1, le=60, allow_inf_nan=False)
+    # MVP 2026-09-29: `self_attested` cho phép video upload chạy với lời tự khai
+    # không có khuôn mặt/biển số; mặc định giữ cổng QA `VERIFIED_ANONYMIZED`.
+    product_privacy_mode: Literal["qa_verified", "self_attested"] = "qa_verified"
+    product_upload_max_bytes: int = Field(default=2 * 1024**3, ge=1024)
+    product_upload_quality_profile: Path = Path("./configs/product/upload_quality_v1.json")
+    product_target_frame_count: int = Field(default=240, ge=2, le=5000)
+    product_prepare_timeout_seconds: float = Field(default=3600, gt=0, allow_inf_nan=False)
 
     # Kho vector
     chroma_persist_dir: str = "./data/chroma"

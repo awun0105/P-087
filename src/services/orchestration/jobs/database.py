@@ -58,6 +58,8 @@ _TABLES = (
         job_id TEXT NOT NULL REFERENCES r2s_jobs(job_id), version INTEGER NOT NULL,
         payload TEXT NOT NULL, PRIMARY KEY(job_id, version))""",
     "CREATE INDEX IF NOT EXISTS r2s_jobs_by_project ON r2s_jobs(project_id)",
+    # Bảng cộng thêm (không đổi bảng cũ): video upload chờ được chọn để tạo scene.
+    "CREATE TABLE IF NOT EXISTS r2s_uploads (upload_id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
 )
 
 
