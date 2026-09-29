@@ -74,7 +74,7 @@ coordinate evidence bridge; không đổi status DONE chỉ từ successful repl
 
 Bổ sung evidence cho canonical coordinate bridge, **không** phải acceptance.
 Owner cho phép mở rộng lát cắt smoke từ 5 lên 20 scan. Không sửa code: chạy
-`tests/test_reconstruction/rec07_smoke.py` với env `REC07_SMOKE_*` sẵn có, nên
+`tests/test_reconstruction/smoke/rec07_smoke.py` với env `REC07_SMOKE_*` sẵn có, nên
 regression 5-frame cũ giữ nguyên.
 
 **Vì sao chọn frame 100–119:** REC-03/04 đã dựng COLMAP/Brush trên frames
@@ -87,7 +87,7 @@ sắc nét theo playbook, **không** phải bản đồ toàn cửa hàng.
 **VERIFIED — chạy thật, Open3D 0.19.0 / NumPy 2.5.3:**
 - Command: `REC07_SMOKE_START_FRAME=100 REC07_SMOKE_FRAME_COUNT=20
   REC07_SMOKE_OUTPUT_RELATIVE=derived/aisle_cw/rec07_prefusion_sub100_119
-  data/rec07_runtime/bin/python -m tests.test_reconstruction.rec07_smoke`
+  data/rec07_runtime/bin/python -m tests.test_reconstruction.smoke.rec07_smoke`
 - Output: `derived/aisle_cw/rec07_prefusion_sub100_119/`, 20 scan, voxel 0,05 m.
 - Point count **133.039** (bản 5-frame: 54.957; gấp 2,42×).
 - PLY SHA-256 `4d7cce292587d0d22cf0925ad28c57085c9c10f5007bd1b7dad202d66e6ded4c`
@@ -266,8 +266,8 @@ Audit 2026-09-27: focused/offline subset proof có, nhưng source coordinate rev
    - Kiểm thử: path traversal rejection, frame ID mismatch rejection, GT declaration requirements, output directory boundary (`derived/`), checksum tamper detection, unnormalized quaternion rejection, desynchronized timestamp detection, CLI invocation, và tính đơn định (deterministic SHA-256 byte-for-byte reproducibility).
 
 2. **Real-Tool Smoke Execution trên Aisle_CW:**
-   - Script: `tests/test_reconstruction/rec07_smoke.py`
-   - Command: `data/rec07_runtime/bin/python -m tests.test_reconstruction.rec07_smoke`
+   - Script: `tests/test_reconstruction/smoke/rec07_smoke.py`
+   - Command: `data/rec07_runtime/bin/python -m tests.test_reconstruction.smoke.rec07_smoke`
    - Input: Scans 100 đến 104 (`raw/traversals/aisle_cw/lidar/00010[0-4].pcd`, 262.144 points/scan từ cảm biến Ouster OS1-128).
    - Output directory: `data/torwic_slam/derived/aisle_cw/rec07_smoke_sub100_104/`
    - Output files:

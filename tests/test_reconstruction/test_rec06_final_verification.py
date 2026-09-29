@@ -15,7 +15,7 @@ from src.services.reconstruction.rgb.metric_verification import (
     CrossArtifactVerificationRequest,
     MetricVerificationService,
 )
-from tests.test_reconstruction.rec06_fixtures import acceptance_for, publish_evidence
+from tests.test_reconstruction.support.rec06_fixtures import acceptance_for, publish_evidence
 from tests.test_reconstruction.test_rec05_adapter import config
 from tests.test_reconstruction.test_rec05_product_pipeline import setup_pipeline
 

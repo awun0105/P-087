@@ -27,7 +27,7 @@ from src.services.reconstruction.rgb.metric import MetricCanonicalizer, MetricDe
 from src.services.reconstruction.rgb.metric_models import DistanceAnchor, MetricAcceptance, MetricPreview
 from src.services.reconstruction.rgb.pose_publication import CameraPoseResolver
 from src.services.reconstruction.rgb.visual_publication import VisualResolver
-from tests.test_reconstruction.rec06_fixtures import _request
+from tests.test_reconstruction.support.rec06_fixtures import _request
 from tests.test_reconstruction.test_rec05_adapter import FixtureProcess, config
 from tests.test_reconstruction.test_rec06_canonical_visual import FixturePackaging
 from tests.test_reconstruction.test_rec11_preview import preview

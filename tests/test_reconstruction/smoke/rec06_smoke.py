@@ -1,6 +1,6 @@
 """Reproducible REC-06 fixture handoff; không đọc Aisle_CW/GT hoặc xác nhận scale thật.
 
-python -m tests.test_reconstruction.rec06_smoke --output data/rec06_smoke/<new-attempt>
+python -m tests.test_reconstruction.smoke.rec06_smoke --output data/rec06_smoke/<new-attempt>
 Source reconstruction và review authority là fixture; resolver/store/math là code thật.
 """
 
@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 from src.services.reconstruction.rgb.metric_models import MetricConfirmation, independent_distance_error
-from tests.test_reconstruction.rec06_fixtures import acceptance_for, metric_fixture
+from tests.test_reconstruction.support.rec06_fixtures import acceptance_for, metric_fixture
 
 
 def fixture_error(record: MetricConfirmation) -> float:

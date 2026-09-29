@@ -1,4 +1,4 @@
-"""Manual real-tool qualification: python -m tests.test_reconstruction.rec03_smoke.
+"""Manual real-tool qualification: python -m tests.test_reconstruction.smoke.rec03_smoke.
 
 Cấu hình qua REC03_SMOKE_* và REC03_COLMAP_*; không chạy trong pytest thường.
 Runner này chỉ compose real producer/consumer để lưu evidence, không là REC-11.

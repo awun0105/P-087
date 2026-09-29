@@ -11,7 +11,7 @@ from src.services.orchestration.artifacts.errors import ArtifactAlreadyExistsErr
 from src.services.reconstruction.rgb.metric import MetricCanonicalizer
 from src.services.reconstruction.rgb.metric_models import MetricConfirmation, MetricRequest, independent_distance_error
 from src.services.reconstruction.rgb.metric_seed import CameraSeedProposal
-from tests.test_reconstruction.rec06_fixtures import acceptance_for, metric_fixture
+from tests.test_reconstruction.support.rec06_fixtures import acceptance_for, metric_fixture
 
 
 @pytest.fixture

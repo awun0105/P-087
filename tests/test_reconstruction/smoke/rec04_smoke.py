@@ -1,4 +1,4 @@
-"""Manual real-tool smoke: python -m tests.test_reconstruction.rec04_smoke.
+"""Manual real-tool smoke: python -m tests.test_reconstruction.smoke.rec04_smoke.
 
 REC04_SMOKE_* chọn published inputs; REC04_BRUSH_*, REC04_SPLAT_* và
 REC03_COLMAP_* inject pinned runtimes. Không dùng test/evaluation-only frames.

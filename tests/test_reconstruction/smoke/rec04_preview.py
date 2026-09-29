@@ -14,7 +14,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.services.reconstruction.adapters.brush_runtime import Invocation
 from src.services.reconstruction.rgb.camera_pose import CameraPose
-from tests.test_reconstruction.rec04_smoke import SmokeSettings, dependencies
+from tests.test_reconstruction.smoke.rec04_smoke import SmokeSettings, dependencies
 
 
 class PreviewSettings(BaseSettings):

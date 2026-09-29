@@ -9,7 +9,7 @@ from src.services.reconstruction.bundle import ReconstructionBundleService
 from src.services.reconstruction.bundle_validation import BundleDependencies
 from src.services.reconstruction.rgb.bundle_metric import BundleMetricVerifier
 from src.services.scene.bundle_consumer import load_reconstruction_bundle
-from tests.test_reconstruction.rec06_bundle_metric_fixture import evidence, fixture
+from tests.test_reconstruction.support.rec06_bundle_metric_fixture import evidence, fixture
 
 
 def test_canonical_pipeline_bundle_consumed_by_scene(tmp_path: Path) -> None:

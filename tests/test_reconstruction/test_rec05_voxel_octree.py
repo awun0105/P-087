@@ -15,7 +15,7 @@ import pytest
 from src.services.reconstruction.adapters.voxel_octree import CellBox, VoxelOctree
 from src.services.reconstruction.adapters.voxel_output import VoxelMetadata
 from src.services.reconstruction.adapters.voxel_seed_search import _box_any
-from tests.test_reconstruction.rec05_occupancy_fixture import GRID_CELLS, wall, write_occupancy
+from tests.test_reconstruction.support.rec05_occupancy_fixture import GRID_CELLS, wall, write_occupancy
 
 SOLID_WORD = 0xFF000000
 

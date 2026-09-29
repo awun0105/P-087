@@ -461,7 +461,7 @@ export REC05_VOXEL_MODULE_PATH="$PWD/data/rec04_runtime/node_modules/@playcanvas
 export REC05_TEST_SPLAT_MODULE="$REC05_VOXEL_MODULE_PATH"
 export REC04_TEST_SPLAT_MODULE="$REC05_VOXEL_MODULE_PATH"
 export REC05_TEST_GPU=1
-.venv/bin/python -m tests.test_reconstruction.rec05_smoke --output data/rec05_smoke/synthetic-20260926-03
+.venv/bin/python -m tests.test_reconstruction.smoke.rec05_smoke --output data/rec05_smoke/synthetic-20260926-03
 .venv/bin/pytest tests/test_reconstruction/test_rec05_*.py -q
 .venv/bin/pytest tests/ -q
 .venv/bin/ruff check src/ tests/

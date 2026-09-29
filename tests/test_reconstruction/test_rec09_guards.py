@@ -18,7 +18,7 @@ from src.services.reconstruction.alignment import (
     load_torwic_cam_to_lidar_transform,
     normalize_torwic_extrinsics,
 )
-from tests.test_reconstruction.rec09_fixtures import alignment_fixture
+from tests.test_reconstruction.support.rec09_fixtures import alignment_fixture
 
 
 def _reference(kind: str) -> ProductArtifactRef:

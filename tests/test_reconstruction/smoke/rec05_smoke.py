@@ -1,6 +1,6 @@
 """Synthetic GPU qualification REC-05; không chạy Aisle_CW hoặc cấp metric record.
 
-Chạy bằng python -m tests.test_reconstruction.rec05_smoke --help.
+Chạy bằng python -m tests.test_reconstruction.smoke.rec05_smoke --help.
 Fixture room canonical 2 x 3 x 1.5m và một floater tách biệt; không phải robot thật.
 """
 

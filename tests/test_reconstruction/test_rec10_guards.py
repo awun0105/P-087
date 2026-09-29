@@ -10,7 +10,7 @@ from src.models.contracts.manifests import InputConfiguration, StageId
 from src.services.orchestration.artifacts import ArtifactResolver, FilesystemArtifactStore
 from src.services.reconstruction.bundle import BundleBuildRequest, ReconstructionBundleService
 from src.services.reconstruction.bundle_validation import BundleDependencies
-from tests.test_reconstruction.rec10_fixtures import simple_bundle_fixture
+from tests.test_reconstruction.support.rec10_fixtures import simple_bundle_fixture
 
 
 def unverified_request() -> BundleBuildRequest:

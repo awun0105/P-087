@@ -10,7 +10,7 @@ from src.models.contracts.identity import canonical_content_checksum
 from src.services.orchestration.artifacts.errors import ArtifactChecksumError
 from src.services.reconstruction.rgb.canonical_poses import CanonicalCameraPoseArtifact, CanonicalPoseService
 from src.services.reconstruction.rgb.metric_math import canonical_camera_pose
-from tests.test_reconstruction.rec06_fixtures import acceptance_for, metric_fixture
+from tests.test_reconstruction.support.rec06_fixtures import acceptance_for, metric_fixture
 
 
 def pose_service(root: Path) -> tuple:

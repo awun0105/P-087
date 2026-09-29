@@ -443,7 +443,7 @@ Không dùng checkpoint này để đóng task hoặc cho phép real bundle publ
 - Chỉ fusion trả geometry input để compose; đó chưa là fused output. Hai modes
   RGB giữ RGB geometry và assisted provenance. Core `metric.py`, shared contracts
   và frontend không đổi. Actual source/correspondence solver và demo UI chưa có.
-- `tests/test_reconstruction/rec06_demo_fixtures.py` và
+- `tests/test_reconstruction/support/rec06_demo_fixtures.py` và
   `test_rec06_demo_metric.py`: 35 new fixture cases, store/resolver thật,
   synthetic correspondence/authority. Có GT-lineage, immutable publish,
   wrong scene/selection, source-byte tamper, missing verifier và normal-upload
@@ -496,7 +496,7 @@ Không dùng checkpoint này để đóng task hoặc cho phép real bundle publ
 
 ```bash
 .venv/bin/pytest tests/test_reconstruction/test_rec06_*.py -q
-.venv/bin/python -m tests.test_reconstruction.rec06_smoke --output data/rec06_smoke/fixture-20260926-02
+.venv/bin/python -m tests.test_reconstruction.smoke.rec06_smoke --output data/rec06_smoke/fixture-20260926-02
 .venv/bin/ruff check src/ tests/
 .venv/bin/ruff format --check src/ tests/
 git diff --check

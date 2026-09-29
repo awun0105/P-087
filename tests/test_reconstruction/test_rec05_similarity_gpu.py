@@ -15,7 +15,7 @@ from src.services.reconstruction.adapters.voxel_clearance import validate_seed_c
 from src.services.reconstruction.adapters.voxel_runtime import VoxelProcess, VoxelRuntimeSettings
 from src.services.reconstruction.rgb.metric_math import SimilarityTransform
 from src.services.reconstruction.rgb.voxel import VoxelConfig
-from tests.test_reconstruction.rec05_smoke import smoke_config, synthetic_room
+from tests.test_reconstruction.smoke.rec05_smoke import smoke_config, synthetic_room
 
 
 def _config(transform: SimilarityTransform) -> VoxelConfig:

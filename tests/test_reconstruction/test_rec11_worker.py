@@ -14,7 +14,7 @@ from src.services.reconstruction.worker import (
     WorkerExecutionResult,
     main,
 )
-from tests.test_reconstruction.rec10_fixtures import simple_bundle_fixture
+from tests.test_reconstruction.support.rec10_fixtures import simple_bundle_fixture
 
 
 def _config(root: Path, request: BundleBuildRequest) -> WorkerConfig:

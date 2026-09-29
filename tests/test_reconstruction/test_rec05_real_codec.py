@@ -7,7 +7,7 @@ import pytest
 
 from src.services.reconstruction.adapters import voxel
 from src.services.reconstruction.adapters.voxel_runtime import GeometryError, VoxelProcess, VoxelRuntimeSettings
-from tests.test_reconstruction.rec05_smoke import smoke_config, synthetic_room
+from tests.test_reconstruction.smoke.rec05_smoke import smoke_config, synthetic_room
 from tests.test_reconstruction.test_rec04_brush import gaussian_ply
 
 

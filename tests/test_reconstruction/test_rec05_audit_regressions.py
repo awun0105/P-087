@@ -12,7 +12,7 @@ from src.services.reconstruction.adapters.voxel_clearance import validate_seed_c
 from src.services.reconstruction.adapters.voxel_runtime import VoxelRuntimeSettings
 from src.services.reconstruction.rgb.geometry_publication import GeometryExecutionRequest, GeometryResolver
 from src.services.reconstruction.rgb.voxel import native_from_world
-from tests.test_reconstruction.rec05_occupancy_fixture import wall, write_occupancy
+from tests.test_reconstruction.support.rec05_occupancy_fixture import wall, write_occupancy
 from tests.test_reconstruction.test_rec05_adapter import FixtureProcess, request
 from tests.test_reconstruction.test_rec05_clearance import CUBE, world_of
 from tests.test_reconstruction.test_rec05_product_pipeline import setup_pipeline

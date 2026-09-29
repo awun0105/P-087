@@ -8,8 +8,8 @@ import pytest
 from src.services.orchestration.artifacts.errors import ArtifactAlreadyExistsError, ArtifactChecksumError
 from src.services.reconstruction.rgb.demo_metric import DemoMetricAdapter
 from src.services.reconstruction.rgb.demo_metric_models import DemoLidarMeasurement, DemoMetricMode, DemoMetricRequest
-from tests.test_reconstruction.rec06_demo_fixtures import demo_fixture, request_for
-from tests.test_reconstruction.rec06_fixtures import acceptance_for
+from tests.test_reconstruction.support.rec06_demo_fixtures import demo_fixture, request_for
+from tests.test_reconstruction.support.rec06_fixtures import acceptance_for
 
 
 @pytest.fixture

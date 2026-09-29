@@ -16,7 +16,7 @@ from src.services.reconstruction.rgb.geometry_publication import (
     GeometryResolver,
     RgbGeometryService,
 )
-from tests.test_reconstruction.rec06_fixtures import acceptance_for, metric_fixture
+from tests.test_reconstruction.support.rec06_fixtures import acceptance_for, metric_fixture
 from tests.test_reconstruction.test_rec05_adapter import FixtureProcess, config
 
 

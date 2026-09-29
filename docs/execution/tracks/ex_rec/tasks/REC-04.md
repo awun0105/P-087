@@ -151,8 +151,8 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
   `.venv/bin/pytest tests/test_reconstruction tests/test_contracts tests/integration -q`
   **226 passed**. Cả hai pytest commands truyền `REC04_TEST_SPLAT_MODULE` tới
   installed pinned module để 5 real codec cases chạy, không skip.
-- Reproduction entrypoints: `python -m tests.test_reconstruction.rec04_smoke`
-  và `python -m tests.test_reconstruction.rec04_preview`; config qua Settings/
+- Reproduction entrypoints: `python -m tests.test_reconstruction.smoke.rec04_smoke`
+  và `python -m tests.test_reconstruction.smoke.rec04_preview`; config qua Settings/
   environment. Provisioned runtime + command script ở ignored `data/rec04_runtime/`.
   NVIDIA unavailable; không thay driver. Attempt `10` thất bại do sandbox Docker
   permission được giữ riêng; `10b` thành công nhưng `10c` thêm explicit GPU log.
