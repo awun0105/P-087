@@ -34,10 +34,21 @@ def user_metric_port(
 
 def __getattr__(name: str) -> object:
     """Model public của port REC-06 / nhận diện đầu vào (import lười để API không kéo module REC khi không dùng)."""
-    if name in {"UserMetricInput", "UserMetricPreview", "UserMetricPort", "publish_json"}:
+    if name in {
+        "UserMetricInput",
+        "UserMetricPreview",
+        "UserMetricPort",
+        "LidarMeasurements",
+        "check_tolerance_m",
+        "publish_json",
+    }:
         from src.services.reconstruction import metric_port
 
         return getattr(metric_port, name)
+    if name == "lidar_support_uri":
+        from src.services.reconstruction.rgb.canonical.lidar_assist import support_uri
+
+        return support_uri
     if name in {"detect_input", "detect_stream", "InputDetection", "InputKind", "InputRejectedError"}:
         from src.services.reconstruction.inputs import detect
 
@@ -49,11 +60,14 @@ __all__ = [
     "InputDetection",
     "InputKind",
     "InputRejectedError",
+    "LidarMeasurements",
     "UserMetricInput",
     "UserMetricPort",
     "UserMetricPreview",
+    "check_tolerance_m",
     "detect_input",
     "detect_stream",
+    "lidar_support_uri",
     "publish_json",
     "user_metric_port",
     "verify_prepared_preview",
