@@ -1,9 +1,9 @@
 "use client";
 
-import { AlertTriangle, Check, Circle, CircleSlash, Loader2 } from "lucide-react";
+import { AlertTriangle, Check, Circle, CircleSlash, Hand, Loader2 } from "lucide-react";
 
 import { ProgressBar, formatDuration } from "@/components/studio/primitives";
-import { MVP_STAGES } from "@/features/studio/stages";
+import { MVP_STAGES, type StageMeta } from "@/features/studio/stages";
 import { cn } from "@/lib/cn";
 import type { StageId } from "@/lib/contracts/api";
 import type { StageState } from "@/lib/contracts/studio";
@@ -21,6 +21,7 @@ export interface StageView {
 const ICONS: Record<StageState, typeof Check> = {
   pending: Circle,
   running: Loader2,
+  waiting: Hand,
   succeeded: Check,
   failed: AlertTriangle,
   cancelled: CircleSlash,
@@ -30,19 +31,28 @@ const ICONS: Record<StageState, typeof Check> = {
  * Danh sách stage dọc. Tổng tiến trình tính theo số stage đã xong (quan sát được),
  * không quy đổi thời gian thành phần trăm.
  */
-export function PipelineTimeline({ stages, timeNote }: { stages: readonly StageView[]; timeNote?: string }) {
+export function PipelineTimeline({
+  stages,
+  timeNote,
+  stageList = MVP_STAGES,
+}: {
+  stages: readonly StageView[];
+  timeNote?: string;
+  /** Danh sách stage hiển thị; mặc định 5 stage tới preview (video mẫu). */
+  stageList?: readonly StageMeta[];
+}) {
   const done = stages.filter((stage) => stage.state === "succeeded").length;
   return (
     <div>
       <div className="mb-5 flex items-baseline justify-between gap-4">
         <p className="text-sm font-medium text-ink">
-          {done}/{stages.length} bước hoàn tất
+          {done}/{stageList.length} bước hoàn tất
         </p>
         {timeNote && <p className="text-xs text-ink-subtle">{timeNote}</p>}
       </div>
-      <ProgressBar value={done / stages.length} label="Tổng tiến trình" className="mb-6" />
+      <ProgressBar value={done / stageList.length} label="Tổng tiến trình" className="mb-6" />
       <ol className="space-y-1" aria-live="polite">
-        {MVP_STAGES.map((meta) => {
+        {stageList.map((meta) => {
           const stage = stages.find((item) => item.stage_id === meta.id);
           const state = stage?.state ?? "pending";
           const Icon = ICONS[state];
@@ -52,6 +62,7 @@ export function PipelineTimeline({ stages, timeNote }: { stages: readonly StageV
               className={cn(
                 "rounded-xl px-3 py-3 transition-colors duration-300",
                 state === "running" && "bg-ember-soft/60",
+                state === "waiting" && "bg-ember-soft/40 ring-1 ring-ember/40",
                 state === "failed" && "bg-rust-soft",
               )}
             >
@@ -61,6 +72,7 @@ export function PipelineTimeline({ stages, timeNote }: { stages: readonly StageV
                     "mt-0.5 grid size-6 shrink-0 place-items-center rounded-full",
                     state === "succeeded" && "bg-ink text-paper",
                     state === "running" && "bg-ember-strong text-white",
+                    state === "waiting" && "bg-paper-raised text-ember-strong ring-2 ring-ember",
                     state === "failed" && "bg-rust text-white",
                     (state === "pending" || state === "cancelled") && "text-ink-subtle",
                   )}
@@ -77,8 +89,11 @@ export function PipelineTimeline({ stages, timeNote }: { stages: readonly StageV
                       <span className="shrink-0 text-xs tabular-nums text-ink-subtle">{formatDuration(stage.seconds)}</span>
                     )}
                   </div>
-                  {(state === "running" || state === "failed") && (
+                  {(state === "running" || state === "failed" || state === "waiting") && (
                     <p className="mt-1 text-sm leading-relaxed text-ink-muted">{meta.description}</p>
+                  )}
+                  {state === "waiting" && (
+                    <p className="mt-2 text-xs font-medium tracking-wide text-ember-strong uppercase">Đang chờ bạn</p>
                   )}
                   {state === "running" && (
                     <ProgressBar value={stage?.fraction ?? null} label={`Tiến trình ${meta.title}`} className="mt-3" />
@@ -102,6 +117,7 @@ export function PipelineTimeline({ stages, timeNote }: { stages: readonly StageV
 const STATE_LABEL: Record<StageState, string> = {
   pending: "chưa chạy",
   running: "đang chạy",
+  waiting: "đang chờ bạn",
   succeeded: "đã xong",
   failed: "lỗi",
   cancelled: "đã hủy",

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Badge, Button, Card, Notice, formatBytes } from "@/components/studio/primitives";
 import { FlowStepper } from "@/features/studio/FlowStepper";
 import { PipelineTimeline, type StageView } from "@/features/studio/PipelineTimeline";
+import { STUDIO_STAGES } from "@/features/studio/stages";
 import { SceneWorkspace } from "@/features/studio/SceneWorkspace";
 import { usePolling } from "@/features/studio/usePolling";
 import { getJob, getPreview, getProject, jobArtifactContentUrl } from "@/lib/api/endpoints";
@@ -138,7 +139,11 @@ export function ScenePage({ jobId }: { jobId: string }) {
         </div>
         <Card className="h-fit p-5 sm:p-6">
           {progress ? (
-            <PipelineTimeline stages={views} timeNote={`Cập nhật ${new Date(progress.updated_at).toLocaleTimeString("vi-VN")}`} />
+            <PipelineTimeline
+              stages={views}
+              stageList={STUDIO_STAGES}
+              timeNote={`Cập nhật ${new Date(progress.updated_at).toLocaleTimeString("vi-VN")}`}
+            />
           ) : (
             <p className="flex items-center gap-2 text-sm text-ink-muted" role="status">
               <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />

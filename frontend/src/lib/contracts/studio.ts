@@ -58,7 +58,7 @@ export interface SceneFromUpload {
   job: JobManifest;
 }
 
-export type StageState = "pending" | "running" | "succeeded" | "failed" | "cancelled";
+export type StageState = "pending" | "running" | "waiting" | "succeeded" | "failed" | "cancelled";
 
 export interface ExecutionErrorView {
   error_code: string;
@@ -85,6 +85,8 @@ export interface JobProgress {
   completed_at: string | null;
   stages: StageProgress[];
   preview_ready: boolean;
+  /** Pipeline đang chờ người dùng làm gì (vd xác nhận tỉ lệ mét sau preview). */
+  waiting_for?: "metric_confirmation" | null;
   error: ExecutionErrorView | null;
 }
 
@@ -188,7 +190,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const STAGE_STATES: readonly StageState[] = ["pending", "running", "succeeded", "failed", "cancelled"];
+const STAGE_STATES: readonly StageState[] = ["pending", "running", "waiting", "succeeded", "failed", "cancelled"];
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /** Kiểm các field UI dùng để vẽ tiến trình; shape lạ → ném lỗi thay vì hiển thị sai. */
