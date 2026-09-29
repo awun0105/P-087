@@ -14,7 +14,8 @@ router.include_router(studio_router)
 router.include_router(auth_router)
 
 
-@router.post("/chat", response_model=ChatResponse)
+# Chat gọi LLM (tốn tiền theo token): cần Editor khi bật đăng nhập; tắt đăng nhập thì như cũ.
+@router.post("/chat", response_model=ChatResponse, dependencies=[Depends(require_editor)])
 async def chat(request: ChatRequest) -> ChatResponse:
     """Chat với AI agent."""
     try:

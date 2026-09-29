@@ -68,6 +68,7 @@ async def test_guest_sees_samples_but_not_team_data(client: AsyncClient, secured
         ("POST", "/api/v1/uploads/direct"),
         ("GET", "/api/v1/projects"),
         ("GET", "/api/v1/auth/users"),
+        ("POST", "/api/v1/chat"),
     ]:
         response = await client.request(method, path, json={} if method == "POST" else None)
         assert response.status_code == 401, (path, response.text)
