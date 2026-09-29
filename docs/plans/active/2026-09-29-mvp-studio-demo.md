@@ -141,10 +141,23 @@ Phase 5 — Packaging GPU/SSH + demo run
     (`09ab2ee`), script `npm run build:editor` → `public/editor/` (`061a5cf`),
     theme nâu ấm + cam, nền viewport #1f1b17, splat chọn màu cam (`f26c675`).
     Build rollup pass; tsc pass; eslint 0 error. Chưa mở editor trong browser.
-  - [ ] Studio shell/pages, ẩn UI cũ bằng route group + `proxy.ts` sau flag.
-  - [ ] Nhúng editor: `/editor/?load=<artifact content url>&filename=scene.sog`,
-    xử lý `supersplat:navigate-home`; ẩn Publish (superspl.at) trong menu.
-- [ ] Phase 5 — GPU packaging + Aisle_CW run
+  - [x] UI cũ vào route group `(legacy)` (`e0a3dff`), ẩn bằng `redirects()` trong
+    next.config + flag `LEGACY_UI=1` (`a112f1e`; bỏ `proxy.ts` vì buộc Next buffer
+    body 10MB). Gỡ Publish superspl.at khỏi editor (`7ae8d37`).
+  - [x] Studio: primitives shadcn-adapt (`34e62fc`), Scenes (`f77afff`), demo 4 bước
+    có hướng dẫn + phát lại theo thời lượng thật (`201d53e`), Scene mới với upload
+    đo tiến độ thật + xác nhận dữ liệu (`2b5a208`), trang scene theo stage + hủy/thử
+    lại + editor (`77b38e7`), WebGPU check + fallback viewer WebGL2 (`e98f23d`),
+    route handler stream upload qua Next (`7b67e7c`).
+  - [x] Sửa viewer có sẵn: `settings: {}` làm supersplat-viewer crash → dùng
+    `defaultSettings("environment")` (`870aed5`).
+- [~] Phase 5 — packaging (2026-09-29): runtime manifest từ version thật
+  (`b6ec915`, fix checksum `8871b3f`), processing config local/GPU, `run_stack.sh`,
+  env mẫu, runbook `scripts/gpu/README.md` (`2ec7ba0`). **Local E2E thật** trên
+  Quadro T2000: video Aisle_CW 200 frame upload → prepare 16 s → COLMAP 53 s →
+  Brush 3000 bước 89 s → preview SOG ~1 MB (job-95697015634c, `data/studio_local`),
+  export demo bundle origin=pipeline_job. Còn: chạy cấu hình GPU 30k trên máy thuê,
+  export bundle chính thức.
 
 ## Decisions
 
@@ -211,4 +224,18 @@ Phase 5 — Packaging GPU/SSH + demo run
 
 ## Result
 
-Chưa có.
+Checkpoint 2026-09-29 (chưa DONE; còn GPU run chính thức và QA editor thật):
+
+- Validation đã chạy: `pytest tests -q` 867 passed, 22 skipped; `ruff check` +
+  `ruff format --check` (src, tests, scripts/demo, scripts/gpu) pass; frontend
+  `npm run typecheck` pass, `eslint .` 0 error (1 warning có sẵn), `npm run build`
+  pass; `vitest` 96 passed, 4 failed — cả 4 thuộc UI cũ ReviewLifecycle/Release và
+  fail y hệt ở `89e7410` (trước thay đổi của đợt này), UI đó đã ẩn.
+- Runtime: API + worker + Next dev chạy local với tool thật; upload 15 MB qua Next
+  route handler 201 (checksum khớp); legacy route → 307 về `/`.
+- Browser (Chrome headless, SwiftShader): Scenes/Demo/Scene mới render đúng; trang
+  scene không có WebGPU → fallback WebGL2 render SOG thật của job local.
+- Chưa kiểm: editor SuperSplat trên WebGPU thật (headless không tạo được WebGPU
+  device) — cần mở bằng Chrome/Edge có GPU; bước tương tác demo (click) chưa E2E tự
+  động; GPU 30k chưa chạy.
+- Privacy tự khai + scope Studio: ADR 0002 **Proposed**, chờ Cường/Đạt.
