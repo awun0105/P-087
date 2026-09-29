@@ -155,6 +155,31 @@ trang fallback (stack một máy) nếu cloud trục trặc.
 - Không kịp → demo bằng stack một máy (`scripts/gpu/run_stack.sh`).
 - LOD/`splat-transform` và lấy thao tác SuperSplat là UNKNOWN → kiểm trước khi cam kết.
 
+## Task Capsule — đợt code 1 (2026-09-29, nhánh `feat/cloud-studio`)
+
+```text
+Task / outcome: phần không cần tài khoản cloud — kho file S3 (mirror), upload thẳng,
+  Postgres + migration, đăng nhập 2 role, ghi benchmark.
+Authority anchors: ADR 0003 (+ Amendment 1–3); Contract §3.1/§7.4 amendment; PRD §3.4,
+  NFR-04; ARCHITECTURE §Database/§Deployment.
+Dependencies and current state: artifact store filesystem (`artifacts/store.py`), resolver
+  dùng trực tiếp ở ~40 chỗ trong REC/orchestration; RuntimeDatabase có nhánh Postgres
+  nhưng psycopg chưa cài, chưa test; chưa có auth.
+Inputs / outputs: env S3 (endpoint/bucket/key), DATABASE_URL; ra API upload/auth mới.
+Owned paths: src/services/orchestration/**, src/api/**, src/config.py, frontend/**,
+  tests/test_orchestration, tests/test_api, tests/integration, requirements*.in/lock.
+Do-not-modify paths: src/services/reconstruction/** (REC giữ nguyên, đọc/ghi local cache),
+  src/services/scene/**, src/services/simulation/**, shared contracts.
+Proof required: unit test với object store giả; integration với MinIO + Postgres trong
+  Docker tạm (container riêng, xóa sau khi test); ruff; pytest toàn bộ; frontend checks.
+Unknowns / blockers: R2 hỗ trợ conditional PUT (If-None-Match) — fallback HEAD + checksum;
+  Supavisor pooler với psycopg (kiểm khi có tài khoản).
+```
+
+Thiết kế kho file: filesystem vẫn là **cache cục bộ** trên mỗi máy; lớp **mirror** đồng
+bộ với S3 ở ranh giới — worker kéo input trước job, đẩy namespace job sau mỗi stage;
+API đọc artifact chưa có thì tải về (verify checksum). REC không cần sửa.
+
 ## Progress
 
 - [x] Thảo luận và chốt quyết định; ADR 0003 + plan này (2026-09-29).
