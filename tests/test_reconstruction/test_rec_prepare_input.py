@@ -17,6 +17,7 @@ from src.services.reconstruction.prepare_cli import (
     PrepareDependencies,
     VideoInputPreparer,
     frame_stride,
+    target_frames,
 )
 from src.services.reconstruction.prepare_models import PrepareInputRequest
 from src.services.reconstruction.rgb.ffmpeg_probe import FFmpegRGBProbe
@@ -125,11 +126,18 @@ def test_frame_stride_caps_frame_count() -> None:
     assert frame_stride(1800, 240) == 8
 
 
+def test_target_frames_scale_with_duration_and_cap() -> None:
+    """Video dài có nhiều frame hơn; trần max_frames và sàn 2 frame luôn giữ."""
+    assert target_frames(60, 3, 300) == 180
+    assert target_frames(600, 3, 300) == 300
+    assert target_frames(0.2, 1, 300) == 2
+
+
 def test_video_prepares_quality_privacy_and_strided_frame_set(tmp_path: Path) -> None:
     preparer, resolver, store = _preparer(tmp_path)
     manifest_ref = _publish_input(store, _video(tmp_path, "testsrc2=duration=2:size=32x24:rate=6"), _ATTESTED)
     request = PrepareInputRequest(
-        job_id=JOB, input_manifest_ref=manifest_ref, quality_profile=_profile(), target_frame_count=4
+        job_id=JOB, input_manifest_ref=manifest_ref, quality_profile=_profile(), sample_fps=2, max_frames=50
     )
     result = preparer.run(request)
     assert result.error is None and result.frame_set_ref is not None
@@ -138,9 +146,12 @@ def test_video_prepares_quality_privacy_and_strided_frame_set(tmp_path: Path) ->
         StageId.PRIVACY_GATE,
         StageId.FRAME_EXTRACT,
     ]
+    # 12 frame, thời lượng 11/6 s × 2 fps → 4 frame mong muốn → cửa sổ 3 frame.
     assert result.selected_frame_count == 12 and result.frame_stride == 3
+    assert result.video_duration_seconds is not None and 1.8 < result.video_duration_seconds < 1.9
     frames = FrameSetResolver(resolver.require, resolver.require).load(result.frame_set_ref)
-    assert [frame.frame_id for frame in frames.frames] == [0, 3, 6, 9]
+    ids = [frame.frame_id for frame in frames.frames]
+    assert len(ids) == 4 and all(window * 3 <= frame_id < window * 3 + 3 for window, frame_id in enumerate(ids))
     # Retry cùng job publish lại đúng bytes → idempotent, không kẹt ArtifactAlreadyExists.
     again = preparer.run(request)
     assert again.frame_set_ref == result.frame_set_ref

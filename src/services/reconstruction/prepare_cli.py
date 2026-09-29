@@ -54,12 +54,17 @@ def frame_stride(accepted_count: int, target: int) -> int:
     return max(1, math.ceil(accepted_count / target))
 
 
+def target_frames(duration_seconds: float, sample_fps: float, max_frames: int) -> int:
+    """Số frame mong muốn theo thời lượng; tối thiểu 2 frame, tối đa `max_frames`."""
+    return max(2, min(max_frames, math.ceil(duration_seconds * sample_fps)))
+
+
 def extraction_config(stride: int) -> ExtractionConfig:
-    """Config video có checksum; stride 1 dùng policy cũ để giữ identity quen thuộc."""
+    """Config video có checksum; stride 1 giữ mọi frame đã qua quality."""
     payload: dict[str, object] = {
         "schema_version": "1.0",
         "mode": "video_decode",
-        "sampling_policy": "quality_accepted" if stride == 1 else "quality_accepted_stride",
+        "sampling_policy": "quality_accepted" if stride == 1 else "quality_sharpest_window",
         "timestamp_policy": "source_pts",
         "config_checksum": "sha256:" + "0" * 64,
     }
@@ -95,11 +100,15 @@ class VideoInputPreparer:
         except RGBValidationError as error:
             failure = error.to_execution_error().model_copy(update={"stage_id": StageId.PRIVACY_GATE})
             return self._failed(request, manifest, stages, failure)
-        stride = frame_stride(len(quality.effective_reconstruction_frame_ids), request.target_frame_count)
         extractor = RGBFrameExtractor(
             FrameExtractionDependencies(self.deps.writer, self.deps.resolve_uri, gate, self.deps.decoder)
         )
         try:
+            # PTS thật của video → thời lượng; lỗi PTS là lỗi của stage tách frame.
+            timestamps = [float(value) for value in self.deps.decoder.timestamps(video.path)]
+            duration = max(0.0, timestamps[-1] - timestamps[0])
+            wanted = target_frames(duration, request.sample_fps, request.max_frames)
+            stride = frame_stride(len(quality.effective_reconstruction_frame_ids), wanted)
             extracted = extractor.execute(
                 FrameExtractionRequest(manifest, quality, proof, extraction_config(stride), request.job_id)
             )
@@ -113,6 +122,7 @@ class VideoInputPreparer:
             stage_artifacts=stages,
             frame_set_ref=extracted.reference,
             frame_stride=stride,
+            video_duration_seconds=duration,
             selected_frame_count=len(quality.selected_frame_ids),
             extracted_frame_count=len(extracted.frame_set.frames),
         )

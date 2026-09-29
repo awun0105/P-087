@@ -235,7 +235,8 @@ def _execute_prepare(attempt: _Attempt) -> JobManifest:
         "input_manifest_ref": project.input_manifest_ref.model_dump(mode="json"),
         "quality_profile": quality_profile,
         "privacy_mode": "self_attested",
-        "target_frame_count": attempt.settings.product_target_frame_count,
+        "sample_fps": 3.0,
+        "max_frames": attempt.settings.product_target_frame_count,
     }
     request_path = attempt.workspace / "prepare.request.json"
     with request_path.open("x", encoding="utf-8") as stream:

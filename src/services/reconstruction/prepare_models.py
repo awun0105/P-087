@@ -13,8 +13,9 @@ from src.services.reconstruction.rgb.quality_models import RGBQualityProfile
 class PrepareInputRequest(ContractModel):
     """Một video upload đã publish kèm InputManifest; privacy chỉ có chế độ tự khai MVP.
 
-    `target_frame_count` là trần số frame đưa sang COLMAP: CLI tính stride từ số
-    frame đã qua quality, không cắt theo FPS hay thời lượng.
+    Lấy mẫu theo thời lượng: số frame mong muốn = thời lượng video × `sample_fps`,
+    chặn trên bởi `max_frames`; trong mỗi cửa sổ giữ frame nét nhất. Video dài
+    vì vậy tự có nhiều frame hơn, không bị một trần cố định làm thưa đi.
     """
 
     schema_version: Literal["1.0"] = "1.0"
@@ -23,7 +24,8 @@ class PrepareInputRequest(ContractModel):
     input_manifest_ref: ProductArtifactRef
     quality_profile: RGBQualityProfile
     privacy_mode: Literal["self_attested"] = "self_attested"
-    target_frame_count: int = Field(default=240, ge=2, le=5000)
+    sample_fps: float = Field(default=3.0, gt=0, le=30, allow_inf_nan=False)
+    max_frames: int = Field(default=300, ge=2, le=5000)
 
     @model_validator(mode="after")
     def _manifest_ref(self) -> Self:
@@ -42,6 +44,7 @@ class PrepareInputResult(ContractModel):
     stage_artifacts: list[StageArtifact]
     frame_set_ref: ProductArtifactRef | None = None
     frame_stride: int | None = Field(default=None, ge=1)
+    video_duration_seconds: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     selected_frame_count: int | None = Field(default=None, ge=0)
     extracted_frame_count: int | None = Field(default=None, ge=0)
     error: ExecutionError | None = None
