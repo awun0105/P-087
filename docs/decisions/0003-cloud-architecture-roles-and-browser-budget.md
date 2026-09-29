@@ -156,6 +156,12 @@ Vast lỗi, hoặc phương án khác).
   khởi động, thời gian + giá một job mẫu. Nếu Vast không chạy được Vulkan/COLMAP thì
   chuyển RunPod thành chính và ghi amendment mới.
 
+## Amendment 2 — 2026-09-29: giám sát miễn phí
+
+Thêm Sentry (gói Developer miễn phí) để ghi lỗi FastAPI/worker/frontend và UptimeRobot
+(gói miễn phí) để cảnh báo khi API/Web UI sập, theo tiêu chí DevOps trong
+`docs/guide/chapter-09.md`. Không thêm chi phí; không gửi PII hay nội dung video.
+
 ## Follow-Up
 
 - Plan triển khai: `docs/plans/active/2026-09-29-cloud-studio.md`.
