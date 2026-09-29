@@ -551,6 +551,47 @@ class ProjectRegistry:
         self.persistence.save_job(updated, reference, event, expected=expected)
         return updated
 
+    def record_metric_confirmation(self, expected: JobManifest, reference: ProductArtifactRef) -> JobManifest:
+        """Ghi xác nhận tỉ lệ mét (REC-06 anchor + frame) vào job đang chờ; CAS theo revision.
+
+        Job vẫn RUNNING ở `ST-METRIC-CANONICALIZE` để worker tiếp tục REC-05/REC-10; stage
+        artifact SUCCEEDED chỉ nói bước người xác nhận đã xong, không phải final REC-06.
+        """
+        if self.persistence is None:
+            raise RuntimeStateConflictError("Xác nhận tỉ lệ cần durable registry")
+        if expected.status != JobStatus.RUNNING or expected.current_stage != StageId.METRIC_CANONICALIZE:
+            raise ValueError("Job không ở bước chờ xác nhận tỉ lệ mét")
+        if any(stage.stage_id == StageId.METRIC_CANONICALIZE for stage in expected.stage_artifacts):
+            raise RuntimeStateConflictError("Job đã có xác nhận tỉ lệ mét")
+        if reference.job_id != expected.job_id or reference.artifact_type != "RGBMetricConfirmation":
+            raise ValueError("Xác nhận tỉ lệ không thuộc job này")
+        self.runtime_resolver.require(reference)
+        stage = StageArtifact(
+            stage_id=StageId.METRIC_CANONICALIZE,
+            status="SUCCEEDED",
+            completed_at=datetime.now(UTC),
+            artifact_type=reference.artifact_type,
+            artifact_uri=reference.artifact_uri,
+            artifact_checksum=reference.artifact_checksum,
+            data_class=reference.data_class,
+        )
+        updated = with_canonical_checksum(
+            expected.model_copy(update={"stage_artifacts": [*expected.stage_artifacts, stage]}),
+            "job_manifest_checksum",
+        )
+        manifest_ref = self.lifecycle.store.publish_manifest(updated)
+        history = self.persistence.list_attempts(expected.job_id)
+        event = JobAttemptRecord(
+            attempt=history[-1].attempt,
+            status=updated.status,
+            current_stage=updated.current_stage,
+            recorded_at=datetime.now(UTC),
+            job_manifest_uri=manifest_ref.artifact_uri,
+            job_manifest_checksum=manifest_ref.artifact_checksum,
+        )
+        self.persistence.save_job(updated, manifest_ref, event, expected=expected)
+        return updated
+
     def record_prepared_input(self, expected: JobManifest, receipt: PreparedInputReceipt) -> JobManifest:
         """Worker-only reducer cho bước chuẩn bị video; CAS trên revision RUNNING đã claim.
 
