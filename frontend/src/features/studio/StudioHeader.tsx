@@ -47,7 +47,7 @@ export function StudioHeader() {
           <Link href="/demo" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "sm:hidden")}>
             Demo
           </Link>
-          <Link href="/new" className={buttonVariants({ size: "sm" })}>
+          <Link href="/new" className={buttonVariants({ variant: "secondary", size: "sm" })}>
             <Plus aria-hidden />
             Scene mới
           </Link>
