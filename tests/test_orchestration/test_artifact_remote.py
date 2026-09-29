@@ -18,41 +18,10 @@ from src.services.orchestration.artifacts import (
     ArtifactResolver,
     FilesystemArtifactStore,
     InvalidArtifactUriError,
-    RemoteObject,
     StreamingPublication,
     sha256_bytes,
 )
-
-
-class MemoryObjectStore:
-    """Object store giả: key → (bytes, checksum metadata)."""
-
-    def __init__(self) -> None:
-        self.objects: dict[str, tuple[bytes, str | None]] = {}
-        self.puts = 0
-
-    def head(self, key: str) -> RemoteObject | None:
-        if key not in self.objects:
-            return None
-        payload, checksum = self.objects[key]
-        return RemoteObject(key=key, size_bytes=len(payload), checksum=checksum)
-
-    def put_file(self, key: str, path: Path, checksum: str) -> None:
-        self.puts += 1
-        self.objects[key] = (path.read_bytes(), checksum)
-
-    def get_file(self, key: str, destination: Path) -> None:
-        destination.write_bytes(self.objects[key][0])
-
-    def list_objects(self, prefix: str) -> list[RemoteObject]:
-        return [
-            RemoteObject(key=key, size_bytes=len(payload))
-            for key, (payload, _) in sorted(self.objects.items())
-            if key.startswith(prefix)
-        ]
-
-    def presign_get(self, key: str, expires_seconds: int) -> str:
-        return f"https://example.invalid/{key}?expires={expires_seconds}"
+from tests.test_orchestration.memory_object_store import MemoryObjectStore
 
 
 def _ref(uri: str, payload: bytes) -> ArtifactRef:
