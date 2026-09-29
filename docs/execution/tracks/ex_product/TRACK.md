@@ -33,11 +33,29 @@ Outputs: project/job lifecycle, scene revisions, review history,
 - FastAPI, basic worker/queue, SSE/WebSocket/polling.
 - Next.js + TypeScript trong root `frontend/`.
 - `playcanvas/engine` (v2.22.4): **Tier A — Web 3D Runtime Core**, Single Scene Graph (`pc.Entity`), Depth-synced GSplat & Mesh, Transform Gizmos (`TranslateGizmo`, `RotateGizmo`). Xem [Audit #8](../../audits/08_playcanvas_engine.md).
+  **Trạng thái 2026-09-27: mới chỉ khai báo trong `package.json`, chưa có dòng code nào
+  `import` từ `playcanvas`.** Không có `pc.Entity`, `TranslateGizmo`, `RotateGizmo`
+  hay `RenderPassPicker` nào được dùng. Xem `PRODUCT-06.md` §13.1.
 - `@playcanvas/supersplat-viewer` (v1.35.2): **Tier A — Embedded 3DGS Viewport Core**, nạp SOG/Streamed SOG LOD và collision GLB, API `createViewer({ ui: false })` với WebGPU/WebGL2 fallback tự động. Xem [Audit #9](../../audits/09_supersplat_viewer.md).
 - `playcanvas/splat-transform` (v3.6.6): Core utility cho Gaussian artifact validation, SOG conversion và voxel collision mesh generation. Xem [Audit #4a](../../audits/04a_splat_transform.md).
 - `playcanvas/supersplat`: Code donor cho logic `EntityTransformHandler`, `EditHistory` (Undo/Redo) và shaders selection (`PRODUCT-07`).
+  **Trạng thái 2026-09-27: chưa lấy module nào.** Không có undo/redo, không có
+  `EntityTransformHandler`, không có selection shader; selection chỉ là click vào
+  proxy box của Three.js. `PRODUCT-07` DoD mới đạt 1/4.
 - Single Scene Graph: Toàn bộ các lớp (Visual SOG, Mesh GLB, Collider GLB) đều nằm chung một Scene Graph trên PlayCanvas Engine, chia sẻ chung GPU Render Pass và Depth buffer, gắn chặt với canonical `SceneIR` transforms; không có scene truth riêng trong browser.
-- Generic Web shell được adapt có chọn lọc từ [`Kiranism/next-shadcn-dashboard-starter`](https://github.com/Kiranism/next-shadcn-dashboard-starter); [`arhamkhnz/next-shadcn-admin-dashboard`](https://github.com/arhamkhnz/next-shadcn-admin-dashboard) và [`shadcndashboard/next-shadcn-dashboard`](https://github.com/shadcndashboard/next-shadcn-dashboard) là UI references, không phải codebase thứ hai.
+  **Trạng thái 2026-09-27: đạt một phần.** Collider GLB của environment đã đi qua
+  `createViewer({ collisionUrl })` nên nằm trong **cùng** `pc.AppBase` với SOG — đây
+  là phần Single Scene Graph đã có thật. Ba view kỹ thuật còn lại (Geometry mesh,
+  Point Cloud, Collider object) vẫn do `SceneCanvas` (Three.js) dựng ở renderer
+  riêng và **loại trừ nhau** với view Visual, nên chưa thể depth-sync hay so sánh
+  splat-vs-collider trực tiếp. Transform canonical vẫn là nguồn duy nhất cho cả hai
+  qua `features/viewer/layers.ts`.
+- Generic Web shell: [`Kiranism/next-shadcn-dashboard-starter`](https://github.com/Kiranism/next-shadcn-dashboard-starter), [`arhamkhnz/next-shadcn-admin-dashboard`](https://github.com/arhamkhnz/next-shadcn-admin-dashboard) và [`shadcndashboard/next-shadcn-dashboard`](https://github.com/shadcndashboard/next-shadcn-dashboard) là **UI references tham khảo, không phải codebase được adapt**.
+  **Đính chính 2026-09-27:** dòng này trước đây ghi "được adapt có chọn lọc" — sai,
+  và `PLAN.md:123` đã ghi `❌ Không — shell viết tay`. Thực tế: không có
+  `@radix-ui`, `class-variance-authority`, `clsx`, `tailwind-merge`, `lucide-react`
+  hay `components.json` trong `frontend/`; `components/ui/` gồm 6 file ~150 dòng viết
+  tay bằng Tailwind, icon là ký tự Unicode. Sửa lại để khớp `PLAN.md`.
 - P0 không yêu cầu advanced scheduler hoặc multi-tenant infrastructure.
 - Product workflow/lifecycle là project-owned; starter chỉ cung cấp generic UI patterns, không mang Clerk/organization/billing hoặc Next.js business backend vào hệ thống.
 

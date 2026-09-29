@@ -7,9 +7,9 @@
 | Mã dự án | RAV-01 |
 | Tên sản phẩm | Real2Sim Studio |
 | Phạm vi bản phát hành | Warehouse MVP |
-| Phiên bản tài liệu | v1.14 |
+| Phiên bản tài liệu | v1.15 |
 | Trạng thái | Foundation Baseline; benchmark/runtime acceptance inputs pending |
-| Ngày cập nhật | 25/09/2026 |
+| Ngày cập nhật | 29/09/2026 |
 | Thời gian thực hiện dự kiến | 4 tuần |
 | Người dùng chính | Kỹ sư mô phỏng (Simulation Engineer) |
 | Miền ứng dụng | Kho trong nhà, robot di động tự hành (Indoor Warehouse AMR) |
@@ -31,6 +31,7 @@
 | v1.12 | 23/09/2026 | Product decision: khôi phục direct browser rendering của real 3DGS `VisualArtifact` thành yêu cầu P0; mesh, point cloud và collider là các view kỹ thuật ngang hàng, không phải fallback. Giữ Next.js + Three.js/WebGL2 baseline; renderer cụ thể phải qualification bằng output producer thật. |
 | v1.13 | 24/09/2026 | Làm rõ hai điểm HITL, Save Draft/Submit for Validation, candidate bất biến và validation evidence (report, replay, screenshots, logs) trước final review. Lỗi capture replay không đổi kết quả validation; Primary Demo vẫn phải có replay để đạt acceptance. |
 | v1.14 | 25/09/2026 | Đồng bộ viewer P0 với PlayCanvas Engine 2.22.4 + supersplat-viewer 1.35.2; WebGL2 baseline, WebGPU ưu tiên khi khả dụng. Giữ nguyên real Brush/browser proof và AC-11; không coi thay đổi thư viện là runtime acceptance. |
+| v1.15 | 29/09/2026 | Khách (không đăng nhập) chỉ dùng video mẫu, không tốn GPU; upload/chạy job cần tài khoản Editor; tài khoản qua mã mời. Không thêm role — vẫn Editor/Reviewer (ADR 0003). |
 
 ### 0.2 Chủ sở hữu và người phê duyệt (Owners and Approvers)
 
@@ -234,6 +235,8 @@ MVP không nhằm:
 | Chỉnh scene đã duyệt | Có, nhưng phải tạo version mới | Có, nhưng phải tạo version mới |
 
 Nếu Reviewer chỉnh sửa scene, thay đổi đó phải tạo một revision mới ở trạng thái `DRAFT`; revision phải được validation lại và quay về `READY_FOR_REVIEW` trước khi có thể approve. Một người có thể giữ nhiều vai trò trong bản demo nội bộ, nhưng hệ thống vẫn phải ghi lại hành động chỉnh sửa và hành động phê duyệt riêng biệt. Việc có Reviewer độc lập được khuyến nghị cho evaluation và release, nhưng cơ chế bắt buộc hai tài khoản khác nhau không phải yêu cầu của MVP.
+
+Người chưa đăng nhập (khách, kể cả kỹ sư thực địa chỉ muốn dùng thử) chỉ xem và thử video mẫu đã xử lý sẵn; upload video và chạy job cần tài khoản Editor. Tài khoản được tạo qua mã mời do Reviewer phát, mỗi mã gắn một role. Reviewer tự duyệt revision của chính mình được phép nhưng phải được gắn nhãn “tự duyệt” (ADR 0003).
 
 ### 3.5 User Stories
 

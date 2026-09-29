@@ -25,6 +25,9 @@ thư mục đã được implement ở checkout hiện tại):
 ```text
 src/
 ├── api/                              # Organizer scaffold; EX-PRODUCT
+│   ├── routes.py                     # Organizer scaffold; include các router
+│   ├── routes_product.py             # Project/job/artifact/scene/review API
+│   └── studio/                       # Studio MVP: uploads, scenes, processing, samples (+ deps)
 ├── agents/                           # Organizer scaffold; giữ nguyên
 ├── llm/                              # Organizer scaffold; giữ nguyên
 ├── models/
@@ -40,10 +43,17 @@ src/
 │       └── release.py
 └── services/
     ├── reconstruction/               # EX-REC
-    │   ├── adapters/
-    │   ├── rgb/
+    │   ├── adapters/                 # COLMAP/Brush/splat-transform (+ cầu nối Node .mjs)
+    │   ├── rgb/                      # Chia theo stage:
+    │   │   ├── preflight/            #   REC-02 chất lượng video, privacy gate, report
+    │   │   ├── frames/               #   REC-02A frame set
+    │   │   ├── pose/                 #   REC-03 camera pose
+    │   │   ├── splat/                #   REC-04 visual 3DGS
+    │   │   ├── geometry/             #   REC-05 voxel/geometry
+    │   │   └── canonical/            #   REC-06 metric/world canonicalization
     │   ├── lidar/
-    │   └── alignment/
+    │   ├── alignment/
+    │   └── prepare_cli.py, preview_cli.py  # Entrypoint ổn định worker gọi qua process
     ├── scene/                        # EX-SCENE
     │   ├── extraction/
     │   ├── association/
@@ -57,16 +67,24 @@ src/
     │   ├── isaac/
     │   └── validation/
     └── orchestration/                # EX-PRODUCT
-        ├── jobs/
+        ├── jobs/                     # lifecycle, runtime DB, runner, worker_cli, progress
         ├── artifacts/
+        ├── projects/                 # project registry, privacy policy
+        ├── uploads/                  # video upload (stream vào artifact store)
+        ├── processing/               # thông số xử lý theo configs/product, đo máy worker
+        ├── samples/                  # thư viện video mẫu đã xử lý sẵn
+        ├── scene/                    # SceneIR revision cho viewer (PRODUCT-06)
         ├── review/
         └── release/
 
 frontend/                             # EX-PRODUCT; Next.js Web Studio
 ├── src/
 │   ├── app/                          # routes, layouts, page composition
-│   ├── components/                   # shared presentational components
+│   │   ├── (studio)/                 # Studio MVP (mặc định)
+│   │   └── (legacy)/                 # UI P0 đầy đủ; redirect về Studio trừ khi LEGACY_UI=1
+│   ├── components/                   # shared presentational components (`studio/` = primitives MVP)
 │   ├── features/
+│   │   ├── studio/                   # luồng Studio MVP: Scenes, Scene mới + video mẫu, editor
 │   │   ├── projects/
 │   │   ├── jobs/
 │   │   ├── viewer/
@@ -76,11 +94,14 @@ frontend/                             # EX-PRODUCT; Next.js Web Studio
 │   └── lib/
 │       ├── api/                      # typed FastAPI client
 │       └── contracts/                # frontend projections of API schemas
-├── public/
+├── public/                           # `editor/` = SuperSplat build (npm run build:editor)
+├── vendor/supersplat/                # SuperSplat editor vendored (MIT)
 ├── tests/                            # frontend unit/component/browser tests
 └── package.json
 
-scripts/torwic/                       # EX-REC; offline dataset preparation only
+configs/product/                      # EX-PRODUCT; file cấu hình chung (thông số xử lý, upload quality)
+scripts/torwic/                       # EX-REC; offline dataset preparation only (`migrations/` = chạy một lần)
+scripts/gpu/, scripts/demo/           # Chạy stack trên máy GPU; export bundle video mẫu
 fixtures/                             # Shared contract-shaped development fixtures
 ├── artifact_store/                   # Resolvable synthetic payload bytes
 ├── reconstruction_bundle/
@@ -92,7 +113,7 @@ fixtures/                             # Shared contract-shaped development fixtu
 tests/                                # Existing tests remain; track suites are additive
 ├── test_contracts/
 ├── test_api/                          # Organizer API/scaffold tests
-├── test_reconstruction/
+├── test_reconstruction/              # `support/` fixture dùng chung, `smoke/` smoke chạy tay với tool thật
 ├── test_scene/
 ├── test_simulation/
 ├── test_orchestration/
@@ -317,8 +338,9 @@ candidate/report/approval cũ. `SceneIR` vẫn là source of truth; OpenUSD là 
 Các mục của organizer scaffold được giữ nhưng diễn giải theo Real2Sim. Appendix
 này mô tả **kiến trúc mục tiêu** và **trạng thái triển khai quan sát được**, không
 thay thế PRD, shared Contract hoặc quyết định runtime chưa được khóa. Ở checkout
-hiện tại, typed contracts, synthetic fixtures và filesystem artifact store đã có;
-`frontend/` chưa được tạo, FastAPI vẫn là chat-agent scaffold, và
+hiện tại (2026-09-29), typed contracts, synthetic fixtures và filesystem artifact
+store đã có; FastAPI có API product + Studio và queue worker chạy REC thật qua
+process boundary; `frontend/` có Studio MVP (upload → 3DGS → editor) và UI P0 ẩn;
 `docker-compose.yml` mới khai báo backend. Fixture/integration proof không phải
 real Brush, browser hoặc Isaac acceptance.
 
@@ -351,7 +373,8 @@ real Brush, browser hoặc Isaac acceptance.
 - **Authentication/authorization:** PRD/Contract yêu cầu tách quyền Editor và
   Reviewer, audit review decision và chỉ release candidate đã validate/approve.
   Cơ chế đăng nhập/token/session cụ thể chưa được khóa; không mặc định JWT hoặc
-  bỏ auth. `src/api/routes.py` hiện chỉ có chat/status scaffold.
+  bỏ auth. `src/api/routes.py` giữ chat/status scaffold và include
+  `routes_product.py` + `studio/`.
 
 ### 3. AI Agent (LangGraph)
 
@@ -369,13 +392,16 @@ P0. Không đưa LLM/agent vào đường bắt buộc
 
 ### 4. Database
 
-- **Type:** product database chưa được chọn ở Foundation; không bắt buộc
-  PostgreSQL. `src/config.py` còn default SQLite của organizer scaffold, không
-  phải quyết định persistence cho job/review/release.
-- **Tables:** chưa khóa product tables; contract artifacts và fixture job không
-  đồng nghĩa đã có production schema.
-- **Migrations:** chưa chọn migration tool cho product data. Không coi Alembic là
-  requirement đã được chấp nhận.
+- **Type:** runtime PRODUCT dùng SQLite file cho local và adapter PostgreSQL
+  cho deployment qua `Settings.database_url`. PostgreSQL cần driver psycopg 3;
+  chưa có cloud/database acceptance chỉ từ việc adapter tồn tại.
+- **Tables:** schema v1 giữ projects, con trỏ immutable JobManifest và journal
+  events/attempts. Con trỏ + event commit cùng transaction; stale writers bị CAS
+  từ chối. Binary vẫn ở artifact store, không lưu trong DB.
+- **Migrations:** bootstrap chỉ tạo schema v1 còn thiếu; version lạ bị từ chối,
+  không tự drop/reset. Không dùng Alembic: ADR 0003 chốt chuỗi migration có thứ tự
+  theo `r2s_schema.version`, chạy được trên SQLite và Postgres. Scene/review/release chưa được coi là
+  đã migrate chỉ vì project/job có persistence.
 - **P0 durable boundary hiện có:** logical artifact URI qua
   `ArtifactResolver`/`FilesystemArtifactStore`; exact storage/runtime wiring của
   product workflow thuộc EX-PRODUCT tasks.
@@ -432,6 +458,13 @@ driver/CUDA, Isaac/OpenUSD và tool versions phải ghi vào runtime manifest sa
 provisioning; hiện vẫn `UNVERIFIED/TBD`. Không suy ra đã có frontend/worker
 containers từ sơ đồ.
 
+**Deployment đã chốt (ADR 0003, 2026-09-29; chưa triển khai):** Web UI trên Vercel;
+server điều khiển (FastAPI + Postgres) trên Railway; kho file Cloudflare R2 (S3 API,
+presigned upload/download, trình duyệt không tải file lớn qua UI/API); GPU worker
+trên RunPod Pod tự bật khi có job và tự tắt khi rảnh. Trình duyệt chỉ nhận bản 3DGS
+nhẹ (LOD) theo khả năng thiết bị; xử lý nặng, export và ảnh/video xem trước chạy ở
+server. Hiện trạng chạy thật vẫn là một máy (`scripts/gpu/run_stack.sh`).
+
 ## Security
 
 - Secret qua environment/`Settings`, không commit `.env` hay log credential.
@@ -440,7 +473,9 @@ containers từ sơ đồ.
 - Product-facing boundary từ chối raw GT/evaluation-only data bằng typed
   classification; GT-assisted derived artifact giữ provenance cho evaluation.
 - Editor/Reviewer actions và exact candidate approval/release cần authorization
-  cùng audit evidence. Cơ chế identity/login cụ thể chưa được chốt.
+  cùng audit evidence. Cơ chế đã chốt (ADR 0003, chưa triển khai): tài khoản tự
+  quản trong FastAPI/Postgres, mã mời theo role, cookie phiên httpOnly, kiểm quyền
+  trên từng route; hai role Editor/Reviewer theo PRD §3.4, khách chỉ dùng video mẫu.
 - `src/main.py` hiện cấu hình CORS từ `Settings.cors_origins`; allowed origins
   của Web Studio phải được cấu hình khi deploy. Rate limiting và production
   perimeter chưa được khóa/kiểm chứng, không claim đã triển khai.
@@ -450,8 +485,8 @@ containers từ sơ đồ.
 | Decision | Choice | Reason |
 |----------|--------|--------|
 | Backend boundary | FastAPI tại `src/api/` | Product API và typed worker/artifact orchestration |
-| Frontend boundary | Next.js/TypeScript tại root `frontend/` | Web Studio và client-side 3D viewer; chưa scaffold |
-| Viewer P0 | PlayCanvas Engine + @playcanvas/supersplat-viewer (WebGL2/WebGPU) | Real 3DGS Visual (SOG) và kỹ thuật Geometry/Point Cloud/Collider trên cùng SceneIR |
+| Frontend boundary | Next.js/TypeScript tại root `frontend/` | Web Studio và client-side 3D viewer; Studio MVP đã có |
+| Viewer P0 | PlayCanvas Engine + @playcanvas/supersplat-viewer (WebGL2/WebGPU) | Real 3DGS Visual (SOG) và kỹ thuật Geometry/Point Cloud/Collider trên cùng SceneIR. **Hiện trạng 2026-09-27: Visual + collider environment ở cùng `pc.AppContext`; ba view kỹ thuật còn lại dựng bằng Three.js ở renderer riêng — xem `ex_product/TRACK.md` §Technology And Strategy** |
 | Shared state | `SceneIR` + immutable artifact contracts | Một canonical scene/object transform; không dùng USD/browser state làm truth |
 | Artifact storage P0 | Resolver + filesystem store | Logical URI/SHA-256, atomic immutable handoff; có synthetic Foundation proof |
 | Worker boundary | Isolated runtimes + published artifacts | Tránh import internals/coupling GPU dependencies giữa tracks |

@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "candidate_checksum": "sha256:7cc30d42394e6df440c2c0533c64aad0923997961baffef07ec1388fc1876bdb",
+  "candidate_checksum": "sha256:4d3a1a0aefcd3261fa98de4f4231c02501d64113980060d8232296784068dbae",
   "validator_version": "fixture-validator-1.0",
   "environment_versions": {"isaac_sim": "UNVERIFIED", "gpu": "UNVERIFIED"},
   "checks": [{
@@ -28,5 +28,5 @@
     "message": "Observed fixture label only; no hidden benchmark expectation was read."
   }],
   "overall_result": "PASS",
-  "report_checksum": "sha256:92b29d678517e4342343542e434dcb2efe303979333baadddd9d489ea84d10ac"
+  "report_checksum": "sha256:fadf97c29411f5fabb8294437e562d6e886a23bfd4a46083b613d3c704f3b807"
 }

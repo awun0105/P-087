@@ -1,0 +1,140 @@
+@import "tailwindcss";
+
+/*
+ * Web Studio dùng nền tối cố định: đây là công cụ xem scene 3D, và nền sáng
+ * làm sai cảm nhận về độ tương phản của point cloud/collider.
+ *
+ * Theme token tập trung ở đây để mọi component dùng chung, tránh hardcode
+ * `slate-800`/`bg-slate-900/50` rải rác khó bảo trì.
+ */
+@theme inline {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Surfaces */
+  --color-surface-0: #020617;
+  --color-surface-1: #0f172a;
+  --color-surface-2: #1e293b;
+  --color-surface-3: #334155;
+
+  /* Borders */
+  --color-border-subtle: #1e293b;
+  --color-border-default: #334155;
+  --color-border-strong: #475569;
+
+  /* Accents */
+  --color-accent: #0ea5e9;
+  --color-accent-hover: #38bdf8;
+  --color-accent-muted: #0c4a6e;
+
+  /* Semantics */
+  --color-ok: #10b981;
+  --color-ok-muted: #064e3b;
+  --color-warn: #f59e0b;
+  --color-warn-muted: #451a03;
+  --color-danger: #f43f5e;
+  --color-danger-muted: #4c0519;
+  --color-info: #38bdf8;
+  --color-info-muted: #0c4a6e;
+
+  /* Text */
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #cbd5e1;
+  --color-text-tertiary: #94a3b8;
+  --color-text-muted: #64748b;
+  --color-text-disabled: #475569;
+
+  /* Radius / shadow */
+  --radius-panel: 0.75rem;
+  --shadow-panel: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+}
+
+/* UI cũ (route group `(legacy)`) giữ nền tối; Studio mới dùng nền beige sáng. */
+.legacy-root {
+  color-scheme: dark;
+}
+
+/*
+ * Studio MVP — Minimalism/Swiss, beige + cam (quyết định owner 2026-09-29).
+ * Chrome sáng; viewport 3D nâu than ấm vì Gaussian khó đọc trên nền sáng.
+ * Tương phản chữ: ink/paper ~13:1, ink-muted/paper ~5.6:1, trắng/ember-strong ~4.6:1.
+ */
+@theme inline {
+  --font-studio: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  --color-paper: #f5efe6;
+  --color-paper-raised: #fbf8f3;
+  --color-paper-sunken: #ede4d6;
+  --color-line: #e2d6c3;
+  --color-line-strong: #cbbba3;
+
+  --color-ink: #2b2520;
+  --color-ink-muted: #6b5f52;
+  --color-ink-subtle: #8a7e70;
+
+  --color-ember: #e8743b;
+  --color-ember-strong: #c2551f;
+  --color-ember-soft: #fbe3d3;
+
+  --color-viewport: #1f1b17;
+
+  --color-sage: #5e8c61;
+  --color-sage-soft: #e3ede0;
+  --color-ochre: #b7862a;
+  --color-ochre-soft: #f6ead0;
+  --color-rust: #b8452f;
+  --color-rust-soft: #f6dcd5;
+}
+
+/* Utility nhỏ cho bảng dày thông tin */
+.th-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+/* ── Studio MVP ─────────────────────────────────────────────────────────── */
+.studio-root {
+  color-scheme: light;
+  font-family: var(--font-studio);
+}
+
+/* Dải chạy cho stage không đo được phần trăm (không bịa số). */
+@keyframes studio-indeterminate {
+  from {
+    left: -35%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+.studio-indeterminate {
+  animation: studio-indeterminate 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes studio-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgb(232 116 59 / 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 10px rgb(232 116 59 / 0);
+  }
+}
+
+.studio-pulse {
+  animation: studio-pulse-ring 1.6s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-indeterminate {
+    animation: none;
+    left: 0;
+    width: 100%;
+    opacity: 0.5;
+  }
+
+  .studio-pulse {
+    animation: none;
+  }
+}

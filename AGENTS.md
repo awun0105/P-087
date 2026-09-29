@@ -211,7 +211,7 @@ artifacts. React/Next.js local state không được trở thành competing sour
 
 - Type hints và return type bắt buộc cho mọi function/method.
 - Public functions/classes/modules cần docstring có ích.
-- Mỗi function tối đa 30 dòng; tối đa 3 parameters. Nếu boundary cần nhiều fields,
+- Nếu boundary cần nhiều fields,
   dùng typed/Pydantic model thay vì parameter list dài.
 - Naming: file/function `snake_case`, class `PascalCase`, constant `UPPER_SNAKE`.
 - Import order: standard library → third-party → local modules.

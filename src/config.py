@@ -48,7 +48,24 @@ class Settings(BaseSettings):
     mistral_model: str = "mistral-small-latest"
 
     # Cơ sở dữ liệu
-    database_url: str = "sqlite:///./data/app.db"
+    database_url: str = Field(default="sqlite:///./data/app.db", repr=False)
+    product_fixture_mode: bool = False
+    product_processing_config: Path | None = None
+    product_runtime_manifest: Path | None = None
+    product_seed: int | None = None
+    product_worker_root: Path = Path("./data/product_workers")
+    product_preview_timeout_seconds: float = Field(default=21600, gt=0, allow_inf_nan=False)
+    product_queue_poll_seconds: float = Field(default=3, ge=0.1, le=60, allow_inf_nan=False)
+    # MVP 2026-09-29: `self_attested` cho phép video upload chạy với lời tự khai
+    # không có khuôn mặt/biển số; mặc định giữ cổng QA `VERIFIED_ANONYMIZED`.
+    product_privacy_mode: Literal["qa_verified", "self_attested"] = "qa_verified"
+    product_upload_max_bytes: int = Field(default=2 * 1024**3, ge=1024)
+    product_upload_quality_profile: Path = Path("./configs/product/upload_quality_v1.json")
+    product_target_frame_count: int = Field(default=240, ge=2, le=5000)
+    product_prepare_timeout_seconds: float = Field(default=3600, gt=0, allow_inf_nan=False)
+    # Thư viện video mẫu đã xử lý sẵn: mỗi thư mục con là một bundle export từ job
+    # thật (scripts/demo/export_demo_bundle.py); thư mục chứa manifest.json = một mẫu.
+    product_demo_dir: Path = Path("./data/demo/library")
 
     # Kho vector
     chroma_persist_dir: str = "./data/chroma"
@@ -80,6 +97,10 @@ class Settings(BaseSettings):
             raise ValueError(f"Missing API key for LLM provider: {self.llm_provider}")
         if self.app_env in {"staging", "production"} and not self.artifact_root.is_absolute():
             raise ValueError("ARTIFACT_ROOT must be absolute outside development/test")
+        if (self.product_processing_config is None) != (self.product_runtime_manifest is None):
+            raise ValueError("PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST phải khai báo cùng nhau")
+        if self.product_fixture_mode and self.app_env in {"staging", "production"}:
+            raise ValueError("PRODUCT_FIXTURE_MODE chỉ dùng cho development/test")
         return self
 
 

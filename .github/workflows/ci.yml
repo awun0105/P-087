@@ -25,10 +25,10 @@ jobs:
           uv pip sync requirements.lock.txt requirements-dev.lock.txt --system
 
       - name: Lint with ruff
-        run: ruff check src/ tests/ scripts/check_foundation.py
+        run: ruff check src/ tests/ scripts/
 
       - name: Check formatting with ruff
-        run: ruff format --check src/ tests/ scripts/check_foundation.py
+        run: ruff format --check src/ tests/ scripts/
 
       - name: Run tests
         run: pytest tests/ -v --tb=short
@@ -38,3 +38,37 @@ jobs:
 
       - name: Check Integration Foundation readiness
         run: python -m scripts.check_foundation
+
+      - name: Check TypeScript contract mirror
+        run: python -m scripts.check_contract_mirror
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build

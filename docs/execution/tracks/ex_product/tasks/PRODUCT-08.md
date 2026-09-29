@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-PRODUCT` |
 | Priority | `P0` |
-| Status | `TODO` |
+| Status | `IN_PROGRESS` |
 | Owner | Cường |
 | Target milestone | `M2/M3` |
 
@@ -58,6 +58,14 @@ P0 không tự mở rộng sang advanced scheduler, multi-tenant platform hoặc
 
 ## 9. Implementation Plan
 
+2026-09-28: nối lát cắt prepared frames→REC CLI→public consumer verifier→durable
+JobManifest→preview API→viewer. Runner nằm ở orchestration/jobs/runner.py,
+không import REC internals; public port trả shared receipt. Claim bằng CAS,
+timeout/cancel dừng process group, late result không ghi đè job revision mới.
+Không coi runner prepared-frame là upload/video/privacy pipeline hoàn chỉnh;
+không dispatch SCENE/SIM trong đợt owner yêu cầu này. Tests mới chưa chạy theo
+yêu cầu owner; chỉ static proof.
+
 Assignee điền files, API/UI flow, state ownership, failure handling và proof sau inspect. Không đổi scope.
 
 ## 10. Tests
@@ -84,4 +92,3 @@ Expected evidence:
 - Integration JobManifest/artifact graph.
 - M2 handoff test output.
 - Controlled upstream-failure trace.
-

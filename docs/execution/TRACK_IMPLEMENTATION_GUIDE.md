@@ -227,6 +227,11 @@ master PLY không bị mutate. Geometry là input cho EX-SIM validation, chưa t
 chứng minh collision đúng. OpenMVS fallback nhận REC-03 COLMAP model và được
 chuẩn hóa bằng cùng transform.
 
+Phân biệt implementation qualification và real-scene gate: adapter/unit/synthetic
+GPU smoke được làm song song trước khi REC-06 có confirmation. Chỉ real metric-aware
+spike chờ confirmed transform, locked capsule dimensions và valid walkable seed;
+không suy scale từ fixture và không đánh dấu toàn REC-05 BLOCKED vì thiếu các input này.
+
 ### REC-06 — RGB metric scale
 
 Dùng locked real-world anchor theo PRD. REC-06 gồm hai pha trong cùng task:

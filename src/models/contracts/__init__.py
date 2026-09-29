@@ -15,13 +15,17 @@ from src.models.contracts.manifests import (
 )
 from src.models.contracts.reconstruction import (
     AlignmentRecord,
+    CapsuleFootprint,
     DependencyOrigin,
     DepthFrameSet,
+    GeometryArtifact,
     LiDARGeometryArtifact,
     PreprocessingDependency,
     PreprocessingProvenance,
     ReconstructionBundle,
+    SeedDecision,
     VisualArtifact,
+    VoxelGridSummary,
 )
 from src.models.contracts.release import (
     ApprovalRecord,
@@ -42,6 +46,7 @@ __all__ = [
     "ArtifactRef",
     "ArtifactDataClass",
     "CandidatePackage",
+    "CapsuleFootprint",
     "ColliderSpec",
     "ContractModel",
     "CoordinateSystem",
@@ -53,6 +58,7 @@ __all__ = [
     "InputManifest",
     "JobManifest",
     "JobStatus",
+    "GeometryArtifact",
     "LiDARGeometryArtifact",
     "MetricScale",
     "PreprocessingDependency",
@@ -70,5 +76,7 @@ __all__ = [
     "StageStatus",
     "Transform",
     "ValidationReport",
+    "SeedDecision",
+    "VoxelGridSummary",
     "VisualArtifact",
 ]

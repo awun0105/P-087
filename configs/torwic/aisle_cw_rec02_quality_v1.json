@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "torwic_slam.aisle_cw.rec02_quality_v1",
+  "measurement_width": 640,
+  "measurement_height": 360,
+  "blur_exclude_gt": 8.5,
+  "active_transition_px_gt": 1.0,
+  "warn_active_ratio_lt": 0.7,
+  "warn_static_run_gt": 60,
+  "profile_checksum": "sha256:9aadfceaa52f2013f6a0a0ad2929283a603b5517fa41902e41b0b784fb0ee36a"
+}

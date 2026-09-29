@@ -1282,8 +1282,8 @@ frontend/
 └── src/features/viewer/
 ```
 
-`PRODUCT-05` đã giao scaffold frontend; `PRODUCT-06` giao viewer. Checkout hiện
-chưa có `frontend/`, nhưng placement này đã khóa và không phải P1/stretch.
+`PRODUCT-05` đã giao scaffold frontend; `PRODUCT-06` giao viewer. `frontend/` đã có
+(Studio MVP + UI P0 ẩn sau `LEGACY_UI=1`); placement này đã khóa và không phải P1/stretch.
 
 ---
 

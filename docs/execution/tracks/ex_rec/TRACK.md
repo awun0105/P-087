@@ -6,7 +6,9 @@ Biến moving-camera RGB và Registered LiDAR thành reconstruction artifacts ch
 để EX-SCENE consume trực tiếp.
 
 ```text
-RGB → poses → visual + RGB geometry → metric/canonical → ReconstructionBundle
+RGB → poses → visual → REC-06 confirmed metric transform
+    → metric working derivative → REC-05 voxel/collision
+    → REC-06 final cross-artifact verification → ReconstructionBundle
 Registered LiDAR → LiDARGeometryArtifact → conditional alignment/composition
 ```
 
@@ -69,14 +71,24 @@ Outputs:
 | [REC-06](./tasks/REC-06.md) | RGB metric scale | REC-03/04 cho anchor confirmation; REC-05 cho final verification | confirmed metric reconstruction |
 | [REC-07](./tasks/REC-07.md) | TorWIC LiDAR prefusion | REC-01 | `registered_lidar.ply` + provenance |
 | [REC-08](./tasks/REC-08.md) | Registered LiDAR ingest | registered LiDAR | `LiDARGeometryArtifact` |
-| [REC-09](./tasks/REC-09.md) | RGB–LiDAR alignment | REC-06/08 | confirmed alignment record |
+| [REC-09](./tasks/REC-09.md) | RGB–LiDAR alignment | REC-03/04 + REC-08 cho preparation; REC-06/05 cho final record | confirmed alignment record |
 | [REC-10](./tasks/REC-10.md) | Publish ReconstructionBundle | REC-02A/03/04/05/06; REC-08/09 conditional | `ReconstructionBundle` |
 | [REC-11](./tasks/REC-11.md) | Worker entrypoint | REC-10 | stable worker/CLI |
 
 ## Track Definition Of Done
 
-REC-06 có pha xác nhận anchor trước REC-05 và pha kiểm tra toàn bộ artifacts
-sau REC-05; REC-05 không phụ thuộc trạng thái DONE của REC-06. Đây là ordering
+ADR 0001 phân biệt ba system paths (RGB + measured anchor, RGB + LiDAR,
+RGB + future estimator) với adapter demo dùng LiDAR hỗ trợ hai RGB modes.
+REC-07/08 và preparation REC-09 được làm trước real REC-05 để chuẩn bị nguồn
+metric cho demo; final AlignmentRecord vẫn bind RGB geometry sau REC-05.
+Demo-assisted proof không thay real RGB-only hoặc estimator acceptance.
+
+REC-06 có pha xác nhận anchor/transform trước REC-05 metric-aware generation và
+pha kiểm tra toàn bộ artifacts sau REC-05; REC-05 không phụ thuộc trạng thái DONE
+của REC-06. Adapter/unit tests/synthetic GPU qualification của REC-05 vẫn làm
+độc lập bằng fixture có kích thước biết trước. Chỉ real Aisle_CW metric-aware
+spike chờ confirmation record, locked robot capsule và valid walkable seed;
+không đánh dấu cả REC-05 BLOCKED chỉ vì prerequisite này chưa có. Đây là ordering
 nội bộ EX-REC theo Integration §3.3, không thêm task/stage ID.
 
 - Real RGB path tạo visual, geometry và metric artifacts.

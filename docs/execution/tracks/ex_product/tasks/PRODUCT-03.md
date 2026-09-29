@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-PRODUCT` |
 | Priority | `P0` |
-| Status | `TODO` |
+| Status | `IN_PROGRESS` |
 | Owner | Cường |
 | Target milestone | `M1/M2` |
 
@@ -55,7 +55,13 @@ P0 không tự mở rộng sang advanced scheduler, multi-tenant platform hoặc
 
 ## 9. Implementation Plan
 
-Assignee điền files, API/UI flow, state ownership, failure handling và proof sau inspect. Không đổi scope.
+2026-09-28: dùng durable QUEUED jobs làm hàng đợi basic, worker process riêng
+poll theo trang và chỉ dispatch prepared RGB có frame artifact thành công.
+Claim bind exact revision (CAS), không lấy lại job mới sau stale retry/cancel.
+Config/runtime mismatch không được worker khác profile claim. Không tự retry
+RUNNING sau hard kill; cần xác minh trainer đã dừng trước recovery. UI chỉ được
+cancel/retry, không đóng vai mock worker. Bổ sung regression queue/claim/error
+và polling; owner yêu cầu chỉ static checks, không chạy lại tests.
 
 ## 10. Tests
 
@@ -81,4 +87,3 @@ Expected evidence:
 - Interface examples.
 - Mock/real contract tests.
 - Timeout/failure record.
-

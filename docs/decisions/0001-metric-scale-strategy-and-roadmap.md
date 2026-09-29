@@ -17,16 +17,78 @@ Accepted
 
 Nhóm thống nhất chiến lược Metric Scale toàn diện như sau:
 
+### Phân biệt hệ thống thật và adapter demo
+
+Owner clarification tiếp theo 2026-09-26: **hệ thống vẫn có ba hướng riêng**:
+
+| Hướng hệ thống | Nguồn metric thật | Adapter dùng thử dataset |
+| --- | --- | --- |
+| RGB-only + anchor | Người dùng nhập số đo thực tế cho A/B | LiDAR cung cấp số đo gợi ý cho A/B để trải nghiệm thao tác nhập/xác nhận |
+| RGB + LiDAR | LiDAR đã registered, căn chỉnh cùng RGB | Dùng bộ RGB + LiDAR có sẵn |
+| RGB + auto-estimate scale | Thuật toán suy scale từ RGB, phát triển sau | LiDAR tạm cung cấp scale **thay estimator trong demo**, không phải implementation estimator |
+
+Ba chế độ bên dưới chỉ là adapter demo cho ba hướng này, không thay kiến trúc
+hệ thống bằng ba pipeline phụ thuộc LiDAR. Upload RGB thông thường không được
+tự chuyển sang LiDAR-assisted. Khi estimator thật chưa có, hướng auto-estimate
+ngoài demo phải báo chưa khả dụng, không âm thầm lấy scale demo. Nhãn `ESTIMATED`
+của estimator cũng không thay bước xác nhận metric trước downstream.
+
 ### 1. Giải pháp Testing Pipeline & Demo với Dataset `Aisle_CW` (Tận dụng LiDAR)
 
-Để kiểm thử thông suốt pipeline tái tạo và mô phỏng mà không cần con người phải phỏng đoán hay tự bịa số mét:
+Owner clarification 2026-09-26: chuẩn bị **cả ba chế độ dùng thử** trên dataset
+có sẵn, không chọn một shortcut thay cho hai chế độ còn lại:
 
-- **Sử dụng 3D LiDAR (Ouster OS1-128) có sẵn của `Aisle_CW`:**
-  - File quét LiDAR trong `data/torwic_slam/raw/traversals/aisle_cw/lidar/` đã mang sẵn đơn vị mét vật lý chuẩn xác ($1.0 = 1\text{m}$).
-  - *Cách 1 (Nhanh cho REC-06 & REC-05):* Trích xuất khoảng cách laser thực tế giữa 2 cột kệ kho từ đám mây điểm LiDAR làm `DistanceAnchor` cho REC-06 để giải hệ số co giãn $s$.
-  - *Cách 2 (Multimodal chuẩn):* Triển khai tiếp `REC-07` (Prefusion gộp 1.092 file `.pcd` bằng Open3D) $\rightarrow$ `REC-08` (`LiDARGeometryArtifact`) $\rightarrow$ `REC-09` (Alignment khớp RGB với LiDAR).
+| Chế độ demo | Trải nghiệm | Vai trò LiDAR |
+| --- | --- | --- |
+| RGB + LiDAR | Xem/fuse hai modality cùng scene | Geometry source và nguồn metric sau căn chỉnh |
+| RGB demo auto-scale | Chọn dữ liệu RGB mẫu, không phải tự đo/nhập khoảng cách | Proxy tạm cho estimator qua measurement/alignment đã chuẩn bị |
+| RGB + chọn hai điểm | Chọn A/B; hệ thống gợi ý khoảng cách để nhập/xác nhận | Đo hai vị trí tương ứng trên LiDAR đã căn chỉnh |
+
+- “Ẩn LiDAR” là ẩn thao tác kỹ thuật/layer khỏi luồng dùng thử, **không** xóa
+  nguồn LiDAR khỏi provenance hoặc gọi kết quả là RGB-only auto-estimation.
+  Hai chế độ RGB hỗ trợ là demo LiDAR-assisted, không thay bằng chứng nghiệm thu
+  RGB-only độc lập. AI auto-scale vẫn là backlog, chưa được thực thi bởi shortcut này.
+- Chuẩn bị chung: REC-07 prefusion → REC-08 registered LiDAR → REC-09 đối chiếu
+  same-scene RGB/metric evidence. REC-07/08 không chờ REC-06 DONE. RGB master từ
+  REC-03/04 vẫn bất biến; metric transform phải có trước REC-05 voxel/capsule.
+- Runtime chỉ nhận registered LiDAR/product-safe prepared evidence, không đọc
+  raw scan sequence, `traj_gt.txt` hoặc evaluation map. Nếu offline prefusion dùng
+  trajectory GT thì giữ nhãn GT-assisted và checksum dependency tới downstream.
+- Chọn A/B phải có correspondence với đúng vị trí vật lý trên LiDAR. Không có
+  mapping/đủ coverage thì báo không đo được hoặc yêu cầu chọn lại; không đo khoảng
+  cách pixel, dùng điểm gần bất kỳ hoặc tự điền số giả. Measurement không tự cấp
+  `CONFIRMED`; giữ review/confirmation gate và bind exact RGB/LiDAR/selection.
+- Native unit mét không chứng minh phép đo không có sai số. Không dùng cùng
+  measurement để vừa calibration vừa claim independent evaluation accuracy.
 - **Quy chuẩn hạt giống đục rỗng voxel (`navigation_seed_world` của REC-05):**
-  - Trích xuất tự động từ tọa độ Camera ở khung hình đầu tiên (Frame 0) trong quỹ đạo camera (trajectory) của COLMAP/dataset. Đây là vị trí chắc chắn nằm trong lối đi trống, đảm bảo thuật toán `--voxel-carve` chạy tự động và không bị skip.
+  - Theo owner clarification 2026-09-26: camera đầu tiên **đã registered** là nguồn
+    seed **đề xuất**, không nhất thiết là Frame 0. Chuyển camera center qua confirmed
+    metric/world transform trước khi đề xuất; giữ source pose ref/checksum và frame ID.
+  - Camera center không chứng minh capsule robot vừa trong không gian đó. Bắt buộc
+    kiểm bounds và capsule clearance trên geometry/occupancy tương ứng; không tự
+    suy camera-to-ground offset hoặc coi seed là walkable chỉ vì camera từng ở đó.
+  - Nếu seed không hợp lệ, từ chối attempt hoặc yêu cầu chọn lại. Không bỏ validation,
+    auto-pass hoặc coi upstream relocate/skip carve là chứng nhận seed ban đầu hợp lệ.
+  - **Owner amendment 2026-09-27 — seed relocation có kiểm soát:** bổ sung lựa chọn
+    thứ ba bên cạnh *từ chối* và *yêu cầu chọn lại*: **tự tìm seed hợp lệ trong
+    không gian liên thông rồi ghi cả hai điểm vào evidence.** Điều kiện bắt buộc:
+    1. Tìm kiếm phải **có kiểm tra liên thông (connectivity)** trên vùng không khí
+       tự do, không được dùng quét vỏ cube/Chebyshev như `findNearestFreeCell` của
+       upstream `splat-transform` 3.6.6. Ô trống bên kia bức tường không phải ứng viên.
+    2. **Có giới hạn khoảng cách** tính bằng mét. Vượt ngưỡng thì từ chối, không nới.
+    3. **Ghi rõ relocation** trong clearance evidence: `requested_seed_world`,
+       `accepted_seed_world`, khoảng cách dịch chuyển, phương pháp tìm kiếm, và
+       occupancy checksum đã dùng làm căn cứ. Không được ghi đè seed đã yêu cầu.
+    4. `capsule_clearance_verified` trong `CameraSeedProposal` **vẫn là `False`**;
+       việc xác thực thuộc adapter/occupancy, không thuộc proposal của camera.
+    5. Consumer phải **tự kiểm lại** từ bytes occupancy đã publish, không được tin
+       trường `status` do producer ghi.
+    6. Lựa chọn này **không** thay thế `CLEAR/BLOCKED` của EX-SIM: capsule vừa và cùng
+       vùng liên thông không chứng minh robot đi tới được. Nếu không tìm được ứng viên
+       trong ngưỡng thì quay về hành vi từ chối như trước.
+  - Việc chọn lại seed thủ công trên **3D viewport** vẫn thuộc `PRODUCT-06`
+    (`EX-PRODUCT`) và chưa có đặc tả UX; relocation ở trên là đường không phụ thuộc
+    EX-PRODUCT, không phải sự thay thế cho UX đó.
 
 ### 2. Giải pháp Sản phẩm Thực tế (Khi người dùng tải lên Video Monocular RGB bất kỳ)
 
@@ -53,14 +115,19 @@ Khi ứng dụng chính thức vận hành và người dùng gửi video thực
 
 Positive:
 - Phân định rõ ràng: LiDAR giải quyết nhanh chóng bài toán testing pipeline/demo cho `Aisle_CW` mà không cần đoán số liệu.
-- Sản phẩm thực tế có thiết kế hoàn chỉnh: Luồng HITL 2 điểm trên 3DGS đảm bảo xử lý được mọi video monocular RGB của người dùng.
-- Pipeline P0 chạy hoàn toàn mượt mà trên CPU/iGPU hiện có, không phụ thuộc GPU rời đắt đỏ.
-- Tháo gỡ hoàn toàn điểm nghẽn cho REC-05/06, mở đường cho REC-05 chạy 3 mức phân giải Voxel Collision.
+- Giữ luồng HITL khoảng cách đo ngoài đời cho upload RGB không có LiDAR; không
+  giả định video bất kỳ đều có LiDAR đi kèm.
+- Có đường triển khai dùng lại artifacts cho cả ba chế độ; performance, real
+  correspondence, metric confirmation và collision vẫn phải có runtime evidence.
 
 Tradeoffs:
 - Với video tải lên tùy ý của người dùng ở bản P0, người dùng cần thao tác click 2 điểm trên 3D viewer thay vì hệ thống tự động hoàn toàn.
 
 ## Follow-Up
 
-- Bổ sung kịch bản trích xuất anchor từ LiDAR cho testing `Aisle_CW` tại REC-06.
-- Kết nối Camera Frame 0 làm seed tự động cho REC-05.
+- Chuẩn bị registered LiDAR và correspondence dùng chung cho ba chế độ; nối
+  EX-REC measurement/preview với EX-PRODUCT demo controls theo shared boundary.
+- Tách metric preparation trước REC-05 khỏi final geometry-bound AlignmentRecord
+  sau REC-05; không thêm scale vào shared rigid Transform hoặc sửa schema ngầm.
+- Kết nối camera đầu registered làm seed đề xuất cho REC-05, với bounds/capsule
+  clearance validation bắt buộc trước khi coi seed hợp lệ.

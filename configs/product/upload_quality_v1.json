@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "product.upload_rgb_quality_v1",
+  "measurement_width": 640,
+  "measurement_height": 360,
+  "blur_exclude_gt": null,
+  "active_transition_px_gt": 1.0,
+  "warn_active_ratio_lt": 0.5,
+  "warn_static_run_gt": 90,
+  "profile_checksum": "sha256:b74849f01fdcb6482d534ee3d3d6da21dfe902de31d54f6303839362bbbd64d1"
+}
