@@ -16,7 +16,8 @@ from src.models.contracts.manifests import ExecutionError, JobManifest, JobStatu
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import load_prepared_profile, prepared_frame_reference, require_profile
 from src.services.orchestration.jobs.models import TransitionRequest
-from src.services.orchestration.jobs.runner import run_prepared_job, run_video_job
+from src.services.orchestration.jobs.progress import awaiting_finalize
+from src.services.orchestration.jobs.runner import run_finalize_job, run_prepared_job, run_video_job
 from src.services.orchestration.processing import is_presets_file, load_presets
 from src.services.orchestration.processing.capability import probe as probe_capability
 from src.services.orchestration.processing.capability import record as record_capability
@@ -37,6 +38,37 @@ class VideoRunner(Protocol):
     """Seam cho job của video upload: prepare rồi preview trong một attempt."""
 
     def __call__(self, job_id: str, *, expected_checksum: str) -> JobManifest: ...
+
+
+def _record_finalize_failure(registry: ProjectRegistry, job: JobManifest, cause: Exception) -> None:
+    """Lỗi trước khi runner hoàn tất claim được job: ghi FAILED ở bước hình học, không lặp vô hạn."""
+    error = ExecutionError(
+        stage_id=StageId.RGB_GEOMETRY,
+        error_code="REC_FINALIZE_DISPATCH_FAILED",
+        human_message="Không bắt đầu được bước dựng hình học/bundle; kiểm cấu hình geometry và log worker rồi thử lại",
+        retryable=False,
+        details={"exception_type": type(cause).__name__},
+    )
+    try:
+        current = registry.get_job(job.job_id)
+        if current.job_manifest_checksum != job.job_manifest_checksum or current.status not in {
+            JobStatus.QUEUED,
+            JobStatus.RUNNING,
+        }:
+            return  # Runner đã ghi kết quả/lỗi của chính nó, hoặc job đã đổi.
+        if current.status == JobStatus.QUEUED:
+            current = registry.transition_job(
+                job.job_id,
+                TransitionRequest(target_status=JobStatus.RUNNING, current_stage=StageId.RGB_GEOMETRY),
+                expected_checksum=current.job_manifest_checksum,
+            )
+        registry.transition_job(
+            job.job_id,
+            TransitionRequest(target_status=JobStatus.FAILED, error=error),
+            expected_checksum=current.job_manifest_checksum,
+        )
+    except (RuntimeStateConflictError, PrivacyGateBlockedError):
+        logger.info("Không ghi đè revision mới hơn khi ghi lỗi bước hoàn tất")
 
 
 def _record_dispatch_failure(registry: ProjectRegistry, job: JobManifest, cause: Exception) -> None:
@@ -69,6 +101,7 @@ def dispatch_next(
     registry: ProjectRegistry,
     runner: PreparedRunner = run_prepared_job,
     video_runner: VideoRunner = run_video_job,
+    finalize_runner: VideoRunner = run_finalize_job,
 ) -> bool:
     """Xử lý tối đa một job mỗi lượt; skip input chưa chuẩn bị/profile khác.
 
@@ -87,6 +120,18 @@ def dispatch_next(
             job: JobManifest | None = None
             try:
                 candidate = registry.get_job(job_id)
+                if awaiting_finalize(candidate):
+                    # Người dùng đã xác nhận tỉ lệ (job RUNNING, hoặc QUEUED khi retry): chạy
+                    # tiếp REC-05/REC-10 trên cùng job; vẫn qua cổng privacy của project.
+                    require_project_dispatch(registry.get_project(candidate.project_id))
+                    try:
+                        finalize_runner(job_id, expected_checksum=candidate.job_manifest_checksum)
+                    except RuntimeStateConflictError:
+                        raise
+                    except Exception as error:
+                        logger.error("Finalize dispatch failed job=%s cause=%s", job_id, type(error).__name__)
+                        _record_finalize_failure(registry, candidate, error)
+                    return True
                 require_profile(candidate, registry.execution_profile)
                 project = registry.get_project(candidate.project_id)
                 require_project_dispatch(project)

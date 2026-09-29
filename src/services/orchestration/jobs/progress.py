@@ -15,7 +15,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from src.models.contracts.manifests import ExecutionError, JobManifest, JobStatus, StageId, StageStatus
+from src.models.contracts.manifests import (
+    ExecutionError,
+    JobManifest,
+    JobStatus,
+    StageArtifact,
+    StageId,
+    StageStatus,
+)
 from src.services.orchestration.jobs.models import JobAttemptRecord
 
 #: 5 stage tới preview 3DGS (video mẫu, export bundle dùng danh sách này).
@@ -27,7 +34,8 @@ MVP_PIPELINE: tuple[StageId, ...] = (
     StageId.VISUAL_RECON,
 )
 #: Tiến trình job Studio: preview + bước xác nhận tỉ lệ mét (REC-06) chờ người dùng.
-STUDIO_PIPELINE: tuple[StageId, ...] = (*MVP_PIPELINE, StageId.METRIC_CANONICALIZE)
+#: Studio: sau preview là xác nhận tỉ lệ (người dùng), rồi hình học/collision + bundle (REC-05/10).
+STUDIO_PIPELINE: tuple[StageId, ...] = (*MVP_PIPELINE, StageId.METRIC_CANONICALIZE, StageId.RGB_GEOMETRY)
 
 StageState = Literal["pending", "running", "waiting", "succeeded", "failed", "cancelled"]
 #: Việc pipeline đang chờ con người làm (không phải worker).
@@ -151,4 +159,36 @@ def job_progress(job: JobManifest, attempts: list[JobAttemptRecord], preview_rea
         preview_ready=preview_ready,
         waiting_for="metric_confirmation" if waiting else None,
         error=failure if job.status == JobStatus.FAILED else None,
+    )
+
+
+def metric_confirmation_stage(job: JobManifest) -> StageArtifact | None:
+    """StageArtifact xác nhận tỉ lệ (REC-06) của job, nếu người dùng đã xác nhận."""
+    return next(
+        (
+            stage
+            for stage in job.stage_artifacts
+            if stage.stage_id == StageId.METRIC_CANONICALIZE
+            and stage.status == StageStatus.SUCCEEDED
+            and stage.artifact_type == "RGBMetricConfirmation"
+        ),
+        None,
+    )
+
+
+def _has_bundle(job: JobManifest) -> bool:
+    return any(stage.artifact_type == "ReconstructionBundle" for stage in job.stage_artifacts)
+
+
+def awaiting_finalize(job: JobManifest) -> bool:
+    """Việc cho queue ở bước hoàn tất EX-REC.
+
+    - RUNNING ở stage xác nhận, đã có bản xác nhận: lần chạy đầu sau khi người dùng xác nhận.
+    - QUEUED (retry sau khi bước hoàn tất lỗi), đã có bản xác nhận, chưa có bundle: chỉ
+      chạy lại bước hoàn tất; preview và xác nhận là artifact bất biến của attempt trước.
+    """
+    if metric_confirmation_stage(job) is None or _has_bundle(job):
+        return False
+    return job.status == JobStatus.QUEUED or (
+        job.status == JobStatus.RUNNING and job.current_stage == StageId.METRIC_CANONICALIZE
     )

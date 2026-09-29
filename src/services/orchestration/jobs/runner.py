@@ -46,9 +46,15 @@ from src.services.orchestration.jobs.dispatch import (
     resolve_job_processing,
 )
 from src.services.orchestration.jobs.models import PreparedInputReceipt, TransitionRequest
+from src.services.orchestration.jobs.progress import awaiting_finalize, metric_confirmation_stage
 from src.services.orchestration.processing.capability import latest as latest_capability
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
-from src.services.reconstruction import verify_prepared_preview
+from src.services.reconstruction import (
+    confirmation_summary,
+    load_finalize_result,
+    load_geometry_profile,
+    verify_prepared_preview,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -341,6 +347,96 @@ def run_video_job(job_id: str, *, expected_checksum: str | None = None) -> JobMa
         if frames is None:
             raise ValueError("Prepare thành công nhưng thiếu frame set")
         return _execute_preview(attempt, frames, profile)
+    except BaseException as error:
+        _record_runner_failure(attempt, error)
+        raise
+
+
+def _authorized_decision(attempt_registry: ProjectRegistry, job: JobManifest) -> tuple[ProductArtifactRef, str]:
+    """PRODUCT xác minh quyết định người dùng trước khi giao REC chạy tiếp (authority của PRODUCT)."""
+    from src.services.orchestration.metric import MetricDecision
+
+    stage = metric_confirmation_stage(job)
+    if stage is None or stage.artifact_uri is None or stage.artifact_checksum is None:
+        raise ValueError("Job chưa có xác nhận tỉ lệ mét")
+    resolver = attempt_registry.runtime_resolver
+    resolver.require_uri(stage.artifact_uri, stage.artifact_checksum)
+    summary = confirmation_summary(stage.artifact_uri, stage.artifact_checksum, job.job_id, resolver.require)
+    decision = MetricDecision.model_validate_json(resolver.require(summary.decision_ref).read_bytes())
+    if decision.job_id != job.job_id or decision.preview_checksum != summary.preview_checksum:
+        raise ValueError("Quyết định xác nhận không khớp job/preview")
+    if get_settings().auth_required and decision.decided_by is None:
+        raise ValueError("Quyết định xác nhận thiếu người xác nhận")
+    return summary.reference, summary.decision_ref.artifact_checksum
+
+
+def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> JobManifest:
+    """Sau xác nhận tỉ lệ: REC-06 canonical → REC-05 geometry → REC-10 bundle; job kết thúc.
+
+    Claim bằng CAS chuyển stage METRIC → RGB_GEOMETRY nên hai worker không cùng chạy.
+    """
+    settings = get_settings()
+    registry = get_project_registry()
+    job = registry.get_job(job_id)
+    if expected_checksum is not None and job.job_manifest_checksum != expected_checksum:
+        raise RuntimeStateConflictError("Queue candidate đã thay đổi trước dispatch")
+    if re.fullmatch(_JOB_ID_PATTERN, job_id) is None:
+        raise ValueError("Job ID không thể dùng làm worker namespace")
+    if not awaiting_finalize(job):
+        raise RuntimeStateConflictError("Job không chờ bước hoàn tất")
+    confirmation, decision_checksum = _authorized_decision(registry, job)
+    profile = load_geometry_profile(settings.product_geometry_config)
+    if settings.product_geometry_gpu_index is not None:
+        profile = profile.model_copy(update={"gpu_index": settings.product_geometry_gpu_index})
+    registry.runtime_resolver.sync_down(job_id)
+    if job.status == JobStatus.QUEUED:
+        # Retry sau lỗi bước hoàn tất: attempt mới bắt đầu thẳng ở hình học (CAS claim).
+        job = registry.transition_job(
+            job_id,
+            TransitionRequest(target_status=JobStatus.RUNNING, current_stage=StageId.RGB_GEOMETRY),
+            expected_checksum=job.job_manifest_checksum,
+        )
+    else:
+        job = registry.record_stage_progress(job, StageId.RGB_GEOMETRY)
+    attempt_id = f"finalize-{uuid4().hex}"
+    workspace = settings.product_worker_root.expanduser().resolve() / job_id / attempt_id
+    workspace.mkdir(parents=True, exist_ok=False)
+    attempt = _Attempt(registry, settings, job, workspace)
+    try:
+        request = {
+            "schema_version": "1.0",
+            "execution_scope": "product_finalize",
+            "job_id": job_id,
+            "attempt_id": attempt_id,
+            "confirmation_ref": confirmation.model_dump(mode="json"),
+            "authorized_decision_checksum": decision_checksum,
+            "geometry": profile.model_dump(mode="json"),
+        }
+        request_path = workspace / "finalize.request.json"
+        with request_path.open("x", encoding="utf-8") as stream:
+            json.dump(request, stream)
+        command = [
+            sys.executable,
+            "-m",
+            "src.services.reconstruction.finalize_cli",
+            "--request",
+            str(request_path),
+            "--store-root",
+            str(registry.runtime_resolver.artifact_root),
+            "--workspace",
+            str(workspace / "rec"),
+            "--progress-file",
+            str(workspace / "finalize.progress.jsonl"),
+        ]
+        exit_code, payload = _run_tool(attempt, "finalize", command, settings.product_finalize_timeout_seconds)
+        registry.runtime_resolver.sync_up(job_id)
+        if exit_code not in {0, 1}:
+            raise RuntimeError("Finalize worker không trả result hợp lệ")
+        reference = ProductArtifactRef.model_validate(payload.get("result_ref"))
+        result = load_finalize_result(reference, registry.runtime_resolver.require)
+        if result.attempt_id != attempt_id or (result.error is None) != (exit_code == 0):
+            raise ValueError("Finalize result khác attempt/exit status")
+        return registry.record_finalize(attempt.job, result, reference)
     except BaseException as error:
         _record_runner_failure(attempt, error)
         raise
