@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-REC` |
 | Priority | `P0` |
-| Status | `VALIDATING` |
+| Status | `DONE` |
 | Owner | `@awun0105` |
 | Target milestone | `M1/M2` |
 
@@ -250,12 +250,30 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 - [x] Output tái tạo được từ immutable raw input.
 - [x] Mọi use của `traj_gt` được khai báo rõ.
 - [x] Artifact không được claim là independent LiDAR mapping benchmark khi methodology không cho phép.
-- [ ] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+- [x] Focused tests và required handoff proof pass; evidence/limitations được ghi.
+  (2026-09-29: handoff REC-07 → REC-08 chạy trên output thật qua cầu nối tọa độ, xem §12.)
 
 Audit 2026-09-27: focused/offline subset proof có, nhưng source coordinate review
 → REC-08 canonical ingest handoff chưa hoàn tất. Status giữ VALIDATING.
 
 ## 12. Result / Evidence
+
+### Cầu nối tọa độ đã triển khai — 2026-09-29
+
+- Output REC-07 **vẫn** `coordinate_status="UNVERIFIED"` (bytes ở frame gốc map GT) —
+  đúng quy tắc "UNVERIFIED không tự thành canonical". Chuyển sang `world` đi qua bản ghi
+  tường minh `configs/datasets/torwic_aisle_cw/coordinate_bridge.json`
+  (`src/services/reconstruction/lidar/coordinate_bridge.py`): frame gốc đặt tên
+  `torwic_map`; handedness = **owner decision**, up-axis/đơn vị = **đo đạc**, gốc = **owner
+  decision** dịch sàn −0,2345 m về z=0 (REC-06.md, `01305c9`); bằng chứng
+  `up_axis_proof.png`, `camera_chain_final.png` bind bằng SHA-256.
+- `build_request_from_rec07_manifest(..., bridge)` khai `declared_transform_to_canonical`
+  (`world_from_torwic_map`: tịnh tiến z +0,2345, không xoay) và ghi checksum bản ghi vào
+  `preprocessing_provenance.details`; không có bản ghi → vẫn từ chối như cũ.
+- VERIFIED: `test_ingest_real_rec07_output` trên output REC-07 thật (`rec07_smoke_sub100_104`):
+  request dựng đúng, `validate_payload()` pass, REC-08 publish với checksum bytes gốc;
+  guard frame lệch manifest và bằng chứng sai checksum đều bị từ chối.
+  `pytest tests/test_reconstruction -q`: 483 passed, 22 skipped.
 
 ### Evidence 2026-09-26 — REC-07 Hoàn thành (DONE)
 

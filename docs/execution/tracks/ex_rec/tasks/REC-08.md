@@ -91,6 +91,24 @@ coordinate-review bridge và mixed consumer handoff còn pending, không DONE.
 
 ## 12. Result / Evidence
 
+### Cầu nối tọa độ cho REC-07 → REC-08 — 2026-09-29
+
+- Output REC-07 **vẫn** `coordinate_status="UNVERIFIED"` (bytes ở frame gốc map GT) —
+  đúng quy tắc "UNVERIFIED không tự thành canonical". Chuyển sang `world` đi qua bản ghi
+  tường minh `configs/datasets/torwic_aisle_cw/coordinate_bridge.json`
+  (`src/services/reconstruction/lidar/coordinate_bridge.py`): frame gốc đặt tên
+  `torwic_map`; handedness = **owner decision**, up-axis/đơn vị = **đo đạc**, gốc = **owner
+  decision** dịch sàn −0,2345 m về z=0 (REC-06.md, `01305c9`); bằng chứng
+  `up_axis_proof.png`, `camera_chain_final.png` bind bằng SHA-256.
+- `build_request_from_rec07_manifest(..., bridge)` khai `declared_transform_to_canonical`
+  (`world_from_torwic_map`: tịnh tiến z +0,2345, không xoay) và ghi checksum bản ghi vào
+  `preprocessing_provenance.details`; không có bản ghi → vẫn từ chối như cũ.
+- VERIFIED: `test_ingest_real_rec07_output` trên output REC-07 thật (`rec07_smoke_sub100_104`):
+  request dựng đúng, `validate_payload()` pass, REC-08 publish với checksum bytes gốc;
+  guard frame lệch manifest và bằng chứng sai checksum đều bị từ chối.
+  `pytest tests/test_reconstruction -q`: 483 passed, 22 skipped.
+- Còn mở: REC-09/composer đọc LiDARGeometryArtifact qua published ref (DoD mục 3).
+
 ### Audit correction 2026-09-27 — không kế thừa historical DONE
 
 - VERIFIED: 6 red regressions tái hiện binary fake bounds/truncation và ASCII
