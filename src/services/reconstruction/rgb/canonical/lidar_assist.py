@@ -2,8 +2,9 @@
 
 Điểm click (hệ SfM của 3DGS) → world bằng căn chỉnh quỹ đạo camera đã chuẩn bị
 (REC-09, GT-assisted) → bắt vào điểm LiDAR gần nhất (REC-08, đã sang world qua cầu
-nối tọa độ). Khoảng cách tính giữa hai điểm LiDAR đã bắt, nên là số đo cảm biến;
-căn chỉnh chỉ dùng để tìm đúng chỗ trên point cloud.
+nối tọa độ). Điểm có LiDAR trong `SNAP_RADIUS_M` dùng điểm LiDAR (số đo cảm biến);
+point cloud không phủ tới (chỉ gộp một đoạn scan) thì dùng vị trí đã quy đổi mét theo
+căn chỉnh — không chặn người dùng, và ghi rõ nguồn từng điểm ở `point_sources`.
 
 Job không có bản ghi hỗ trợ (`demo_lidar_support.json`) thì không có số đo LiDAR;
 video thật của người dùng luôn ở trường hợp đó.
@@ -49,12 +50,19 @@ class DemoLidarSupport(ContractModel):
     assistance: Literal["ground_truth_assisted_dataset_demo"] = "ground_truth_assisted_dataset_demo"
 
 
+PointSource = Literal["lidar_surface", "trajectory_alignment"]
+
+
 class LidarDistance(ContractModel):
-    """Một phép đo: điểm click sang world, điểm LiDAR đã bắt và khoảng cách."""
+    """Một phép đo: điểm click sang world, điểm dùng để đo (LiDAR hoặc căn chỉnh) và khoảng cách.
+
+    `snap_offsets_m` là khoảng cách tới điểm LiDAR gần nhất (kể cả khi không bắt được).
+    """
 
     clicked_world: tuple[Vector3, Vector3]
     lidar_points_m: tuple[Vector3, Vector3]
     snap_offsets_m: tuple[FiniteFloat, FiniteFloat]
+    point_sources: tuple[PointSource, PointSource]
     distance_m: FiniteFloat = Field(gt=0)
 
 
@@ -117,25 +125,84 @@ class LidarAssist:
 
     @staticmethod
     def measure(context: LidarAssistContext, point_a: Vector3, point_b: Vector3) -> LidarDistance:
-        """Bắt hai điểm vào LiDAR; điểm xa bề mặt quá bán kính thì từ chối."""
+        """Bắt từng điểm vào LiDAR nếu có trong bán kính, không thì dùng vị trí theo căn chỉnh."""
         clicked = (context.fit.apply(point_a), context.fit.apply(point_b))
-        snapped: list[tuple[float, float, float]] = []
+        used: list[tuple[float, float, float]] = []
         offsets: list[float] = []
-        for label, point in zip(("thứ nhất", "thứ hai"), clicked, strict=True):
+        sources: list[PointSource] = []
+        for point in clicked:
             gaps = np.linalg.norm(context.points_world - np.asarray(point), axis=1)
             index = int(gaps.argmin())
-            if gaps[index] > SNAP_RADIUS_M:
-                raise ValueError(
-                    f"Điểm {label} cách bề mặt LiDAR {gaps[index] * 100:.0f} cm; chọn lại trên bề mặt rõ nét"
-                )
-            snapped.append(tuple(float(value) for value in context.points_world[index]))  # type: ignore[arg-type]
             offsets.append(float(gaps[index]))
-        distance = math.dist(snapped[0], snapped[1])
+            if gaps[index] <= SNAP_RADIUS_M:
+                used.append(tuple(float(value) for value in context.points_world[index]))  # type: ignore[arg-type]
+                sources.append("lidar_surface")
+            else:
+                used.append(point)
+                sources.append("trajectory_alignment")
+        distance = math.dist(used[0], used[1])
         if distance <= 0:
-            raise ValueError("hai điểm bắt vào cùng một điểm LiDAR; chọn hai đầu xa nhau hơn")
+            raise ValueError("Hai điểm trùng nhau sau khi đo; chọn hai đầu xa nhau hơn")
         return LidarDistance(
             clicked_world=clicked,
-            lidar_points_m=(snapped[0], snapped[1]),  # type: ignore[arg-type]
+            lidar_points_m=(used[0], used[1]),  # type: ignore[arg-type]
             snap_offsets_m=(offsets[0], offsets[1]),
+            point_sources=(sources[0], sources[1]),
             distance_m=distance,
         )
+
+
+#: Vị trí mục tiêu (mét, theo hướng đi d và phương ngang p, tính từ camera gốc) của 7 điểm
+#: demo: A, B, C, D rồi 3 điểm sàn. A–B dài 2 m, C–D 1,5 m (đều ≥ 0,5 m và qua ngưỡng Q2).
+_DEMO_TARGETS = (
+    (1.5, 0.0),
+    (3.5, 0.0),
+    (1.5, 0.8),
+    (3.0, 0.8),
+    (1.2, -0.7),
+    (3.8, -0.7),
+    (2.5, 0.9),
+)
+_FLOOR_BAND_M = 0.03
+_TARGET_TOLERANCE_M = 0.15
+_MIN_FLOOR_POINTS = 5000
+
+
+def _inverse(fit: SimilarityFit, point: np.ndarray) -> Vector3:
+    """world → SfM (nghịch đảo phép đồng dạng)."""
+    local = rotation_matrix(fit.rotation_xyzw).T @ ((point - np.asarray(fit.translation)) / fit.scale)
+    return tuple(float(value) for value in local)  # type: ignore[return-value]
+
+
+def demo_points(context: LidarAssistContext, camera_centers_sfm: list[Vector3]) -> list[Vector3]:
+    """7 điểm demo (hệ SfM) lấy từ điểm LiDAR trên sàn, phía trước camera mà LiDAR phủ dày.
+
+    Mô phỏng người dùng click: điểm nằm đúng bề mặt LiDAR và trong vùng camera đã quay
+    (nên có trên 3DGS). Không đủ điểm sàn quanh quỹ đạo thì báo lỗi, không bịa điểm.
+    """
+    cameras = np.array([context.fit.apply(point) for point in camera_centers_sfm])
+    floor = context.points_world[np.abs(context.points_world[:, 2]) < _FLOOR_BAND_M]
+    if len(cameras) < 2 or not len(floor):
+        raise ValueError("Không đủ camera hoặc điểm sàn LiDAR để tự chọn điểm")
+    coverage = [
+        int(((gaps > 1.0) & (gaps < 4.0)).sum())
+        for gaps in (np.linalg.norm(floor[:, :2] - camera[:2], axis=1) for camera in cameras)
+    ]
+    base = next((index for index, count in enumerate(coverage) if count >= _MIN_FLOOR_POINTS), None)
+    if base is None:
+        raise ValueError("LiDAR không phủ đủ mặt sàn quanh quỹ đạo camera để tự chọn điểm")
+    ahead = cameras[min(base + 10, len(cameras) - 1)] - cameras[base]
+    if np.linalg.norm(ahead[:2]) < 0.1:
+        raise ValueError("Camera gần như đứng yên; không xác định được hướng đi")
+    direction = np.array([ahead[0], ahead[1], 0.0]) / np.linalg.norm(ahead[:2])
+    across = np.array([-direction[1], direction[0], 0.0])
+    origin = np.array([cameras[base][0], cameras[base][1], 0.0])
+    chosen: list[Vector3] = []
+    for forward, side in _DEMO_TARGETS:
+        target = origin + forward * direction + side * across
+        gaps = np.linalg.norm(floor - target, axis=1)
+        index = int(gaps.argmin())
+        if gaps[index] > _TARGET_TOLERANCE_M:
+            raise ValueError("Vùng sàn phía trước camera thiếu điểm LiDAR; không tự chọn được")
+        chosen.append(_inverse(context.fit, floor[index]))
+    return chosen

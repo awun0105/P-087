@@ -1,5 +1,6 @@
 """Port REC-06 cho PRODUCT: xem trước/xác nhận tỉ lệ từ điểm người dùng chọn (fixture REC-03/04)."""
 
+import math
 from pathlib import Path
 
 import pytest
@@ -201,6 +202,7 @@ def test_dataset_distances_come_from_lidar_and_are_rechecked(tmp_path: Path) -> 
     )
     assert measured.anchor.distance_m == pytest.approx(2.0, abs=1e-5)
     assert measured.check.distance_m == pytest.approx(1.0, abs=1e-5)
+    assert measured.anchor.point_sources == ("lidar_surface", "lidar_surface")
     lidar_input = data.model_copy(
         update={
             "distance_source": "lidar_demo",
@@ -226,3 +228,17 @@ def test_lidar_support_must_bind_pose_file_checksum_not_inner_checksum(tmp_path:
         port.lidar_measurements(
             JOB, visual.reference, support, (data.point_a, data.point_b), (data.check_a, data.check_b)
         )
+
+
+def test_points_without_lidar_coverage_fall_back_to_alignment(tmp_path: Path) -> None:
+    """Point cloud chỉ phủ một đoạn: không chặn người dùng, dùng vị trí theo căn chỉnh và ghi nguồn."""
+    port, visual, data, _, writer = _world(tmp_path)
+    world = [tuple(4 * v for v in point) for point in (data.point_a, data.check_a, data.check_b)]  # thiếu B
+    support = _lidar_support(tmp_path, visual, writer, world)
+    far_b = (data.point_b[0], data.point_b[1], data.point_b[2] + 0.5)  # 2 m trên sàn, xa mọi điểm LiDAR
+    measured = port.lidar_measurements(
+        JOB, visual.reference, support, (data.point_a, far_b), (data.check_a, data.check_b)
+    )
+    assert measured.anchor.point_sources == ("lidar_surface", "trajectory_alignment")
+    assert measured.anchor.snap_offsets_m[1] > 0.2
+    assert measured.anchor.distance_m == pytest.approx(math.dist((0, 0, 0), (2.0, 0, 2.0)), abs=1e-4)
