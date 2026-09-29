@@ -36,7 +36,16 @@ set -a; source scripts/gpu/studio.env; set +a
 .venv/bin/python -m scripts.gpu.make_runtime_manifest --out "$PRODUCT_RUNTIME_MANIFEST"
 ```
 
-## 3. Chạy stack
+## 3. Thông số xử lý
+
+Mọi thông số (lấy mẫu frame, COLMAP, Brush) nằm trong **một file chung**
+`configs/product/processing_presets_v1.json`: nhãn, giới hạn min/max, preset
+"tối thiểu cho chất lượng tốt" và "tối đa", giá trị cố định và hệ số ước lượng
+VRAM/RAM/đĩa. Worker tự đo máy (GPU, VRAM, CPU, RAM, ổ trống) mỗi 5 phút; UI dùng
+số đo đó để đề xuất "tối đa cho máy này" và tô đỏ thông số có thể gây crash.
+Thông số người dùng chọn được lưu thành `config/processing.json` của job.
+
+## 4. Chạy stack
 
 ```bash
 scripts/gpu/run_stack.sh scripts/gpu/studio.env
@@ -46,7 +55,7 @@ scripts/gpu/run_stack.sh scripts/gpu/studio.env
 Truy cập từ máy mình qua SSH tunnel: `ssh -L 3000:localhost:3000 <gpu-host>` rồi
 mở http://localhost:3000.
 
-## 4. Xử lý Aisle_CW và export demo
+## 5. Xử lý Aisle_CW và export demo
 
 ```bash
 # Video từ frame chuẩn hóa (đúng FPS theo timestamps.csv, 1092 frame ≈ 109 s)
@@ -79,7 +88,7 @@ tar -C /opt/real2sim/state/demo -czf aisle_cw_demo.tgz aisle_cw
 Mang `aisle_cw_demo.tgz` về máy demo, giải nén và đặt
 `PRODUCT_DEMO_DIR=<thư mục aisle_cw>`. Bundle tự kiểm checksum từng file khi phục vụ.
 
-## 5. Kiểm tra nhanh
+## 6. Kiểm tra nhanh
 
 - `curl localhost:8000/api/v1/demo` trả manifest `origin: "pipeline_job"`.
 - Studio › Kịch bản demo chạy đủ 4 bước; bước cuối mở editor.
@@ -88,6 +97,6 @@ Mang `aisle_cw_demo.tgz` về máy demo, giải nén và đặt
 
 ## Đã kiểm trên máy local (2026-09-29)
 
-Quadro T2000 4 GB, `processing_local_v1.json`: video 200 frame → 50 frame sau
-stride; kiểm tra 10 s, tách frame 5 s, COLMAP 53 s, Brush 3000 bước 89 s; SOG
+Quadro T2000 4 GB, cấu hình local cũ (trước file chung): video 200 frame → 50
+frame sau stride; kiểm tra 10 s, tách frame 5 s, COLMAP 53 s, Brush 3000 bước 89 s; SOG
 ~1 MB render được trong Chrome (WebGL2). Chưa chạy cấu hình GPU 30k bước.
