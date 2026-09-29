@@ -55,6 +55,8 @@ def test_full_flow_records_server_checksum(store: MemoryObjectStore, service: Di
 
     urls = service.part_urls(session.upload_id, [2, 1, 1], 600)
     assert sorted(urls) == [1, 2]
+    # Mỗi link chỉ nhận đúng kích thước phần của nó (phần cuối nhỏ hơn).
+    assert urls[1].endswith(f"length={MIN_PART_BYTES}") and urls[2].endswith("length=123")
     _upload_all(store, service, session.upload_id, payload)
     assert service.uploaded_parts(service.get(session.upload_id)) == [1, 2]
 

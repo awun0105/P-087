@@ -77,6 +77,9 @@ async def test_browser_style_direct_upload(client: AsyncClient, cloud: Settings)
         # Chỉ đẩy phần 1 trước để kiểm tra nối lại (resume) thấy đúng phần đã lên.
         first = storage.put(urls["urls"]["1"], content=payload[:part_size])
         assert first.status_code == 200
+        # Link đã ký kích thước: PUT to hơn phần khai báo bị kho file từ chối.
+        oversized = storage.put(urls["urls"]["2"], content=payload[part_size:] + b"extra")
+        assert oversized.status_code == 403
         resumed = (await client.get(f"/api/v1/uploads/direct/{upload_id}")).json()
         assert resumed["uploaded_parts"] == [1]
         assert storage.put(urls["urls"]["2"], content=payload[part_size:]).status_code == 200
@@ -94,12 +97,12 @@ async def test_browser_style_direct_upload(client: AsyncClient, cloud: Settings)
 
 @pytest.mark.asyncio
 async def test_lying_about_size_is_rejected(client: AsyncClient, cloud: Settings) -> None:
+    """Khai 5000 byte nhưng gửi 5 byte: link đã ký kích thước nên kho file từ chối ngay khi PUT."""
     begun = (await client.post("/api/v1/uploads/direct", json={"filename": "kho.mp4", "size_bytes": 5000})).json()
     upload_id = begun["upload_id"]
     url = (await client.post(f"/api/v1/uploads/direct/{upload_id}/urls", json={"part_numbers": [1]})).json()["urls"]
     with httpx.Client(timeout=30) as storage:
-        storage.put(url["1"], content=b"short")
-    await client.post(f"/api/v1/uploads/direct/{upload_id}/complete")
-    final = (await client.get(f"/api/v1/uploads/direct/{upload_id}")).json()
-    assert final["status"] == "FAILED"
+        assert storage.put(url["1"], content=b"short").status_code == 403
+    completed = await client.post(f"/api/v1/uploads/direct/{upload_id}/complete")
+    assert completed.status_code == 422  # thiếu phần → không ghép
     assert (await client.get("/api/v1/uploads")).json()["uploads"] == []

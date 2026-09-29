@@ -80,8 +80,10 @@ class ObjectStore(Protocol):
         """Mở multipart upload cho trình duyệt; trả upload id của kho file."""
         ...
 
-    def presign_part(self, key: str, multipart_id: str, part_number: int, expires_seconds: int) -> str:
-        """Link PUT có hạn cho một phần."""
+    def presign_part(
+        self, key: str, multipart_id: str, part_number: int, expires_seconds: int, content_length: int
+    ) -> str:
+        """Link PUT có hạn cho một phần; chữ ký gắn `Content-Length` nên không PUT được to hơn."""
         ...
 
     def list_parts(self, key: str, multipart_id: str) -> list[UploadedPart]:
@@ -205,9 +207,11 @@ class ArtifactRemote:
             raise ArtifactAlreadyExistsError(f"artifact already exists: {relative}")
         return self.store.create_multipart(self.key(relative), content_type)
 
-    def part_url(self, relative: str, multipart_id: str, part_number: int, expires_seconds: int) -> str:
-        """Link PUT có hạn cho một phần."""
-        return self.store.presign_part(self.key(relative), multipart_id, part_number, expires_seconds)
+    def part_url(
+        self, relative: str, multipart_id: str, part_number: int, expires_seconds: int, content_length: int
+    ) -> str:
+        """Link PUT có hạn cho một phần, chỉ nhận đúng `content_length` byte."""
+        return self.store.presign_part(self.key(relative), multipart_id, part_number, expires_seconds, content_length)
 
     def uploaded_parts(self, relative: str, multipart_id: str) -> list[UploadedPart]:
         """Các phần đã lên kho file."""
@@ -297,11 +301,19 @@ class S3ObjectStore:
         response = self.client.create_multipart_upload(Bucket=self.bucket, Key=key, ContentType=content_type)
         return response["UploadId"]
 
-    def presign_part(self, key: str, multipart_id: str, part_number: int, expires_seconds: int) -> str:
-        """Presigned UploadPart (PUT)."""
+    def presign_part(
+        self, key: str, multipart_id: str, part_number: int, expires_seconds: int, content_length: int
+    ) -> str:
+        """Presigned UploadPart (PUT) có ký `Content-Length` (chặn PUT phần to hơn khai báo)."""
         return self.client.generate_presigned_url(
             "upload_part",
-            Params={"Bucket": self.bucket, "Key": key, "UploadId": multipart_id, "PartNumber": part_number},
+            Params={
+                "Bucket": self.bucket,
+                "Key": key,
+                "UploadId": multipart_id,
+                "PartNumber": part_number,
+                "ContentLength": content_length,
+            },
             ExpiresIn=expires_seconds,
         )
 

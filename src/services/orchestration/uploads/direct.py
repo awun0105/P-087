@@ -28,6 +28,13 @@ def plan_parts(size_bytes: int) -> tuple[int, int]:
     return part_size, max(1, math.ceil(size_bytes / part_size))
 
 
+def part_length(session: UploadSession, part_number: int) -> int:
+    """Kích thước đúng của một phần (phần cuối có thể nhỏ hơn)."""
+    if part_number < session.part_count:
+        return session.part_size
+    return session.size_bytes - (session.part_count - 1) * session.part_size
+
+
 class DirectUploadService:
     """Mỗi request một instance; state nằm trong DB và kho file."""
 
@@ -97,7 +104,9 @@ class DirectUploadService:
             raise UploadError("Số thứ tự phần không hợp lệ")
         key = self.resolver.relative_key(session.artifact_uri)
         return {
-            number: self.remote.part_url(key, session.multipart_id, number, expires_seconds)
+            number: self.remote.part_url(
+                key, session.multipart_id, number, expires_seconds, part_length(session, number)
+            )
             for number in sorted(set(part_numbers))
         }
 

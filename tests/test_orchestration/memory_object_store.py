@@ -43,8 +43,10 @@ class MemoryObjectStore:
         self.multiparts[multipart_id] = (key, {})
         return multipart_id
 
-    def presign_part(self, key: str, multipart_id: str, part_number: int, expires_seconds: int) -> str:
-        return f"https://store.invalid/{key}?upload={multipart_id}&part={part_number}"
+    def presign_part(
+        self, key: str, multipart_id: str, part_number: int, expires_seconds: int, content_length: int
+    ) -> str:
+        return f"https://store.invalid/{key}?upload={multipart_id}&part={part_number}&length={content_length}"
 
     def upload_part(self, multipart_id: str, part_number: int, payload: bytes) -> str:
         """Thay cho PUT của trình duyệt; trả ETag."""
