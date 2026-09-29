@@ -214,6 +214,22 @@ API đọc artifact chưa có thì tải về (verify checksum). REC không cầ
   - **Chưa kiểm chứng:** R2/Supabase/Railway/Vercel/Vast.ai thật (chưa có tài khoản);
     `configure_bucket` trên R2 (MinIO không hỗ trợ API CORS/lifecycle); Supavisor pooler.
   - **Giới hạn đo:** privacy/tách frame chạy chung CLI prepare nên không có số giây riêng.
+- [x] **Rà soát đợt code 1 và sửa (2026-09-29):**
+  - Hạn mức đổi thành **lượt xử lý GPU / 24 giờ** (scene mới + Thử lại, nhật ký `gpu.run`);
+    Reviewer không giới hạn, chỉ Reviewer chỉnh hạn mức của Editor.
+  - Link PUT từng phần ký kèm `Content-Length` → không PUT được phần to hơn khai báo (MinIO: 403).
+  - Phiên upload kẹt VERIFYING khi API khởi động lại: gọi lại complete lên lịch kiểm tra lại;
+    client nhắc mỗi ~1 phút, bỏ cuộc sau 30 phút.
+  - Giới hạn đăng nhập theo email (10/5 phút) + client thật từ `X-Forwarded-For` (100/5 phút):
+    một người nhập sai không khóa cả nhóm qua proxy chung.
+  - Đăng ký bằng mã mời trong một transaction (trước: mã có thể kẹt "pending" khi lỗi giữa chừng).
+  - Bootstrap migration chỉ chạy một lần mỗi tiến trình cho mỗi DB (trước: mỗi request).
+  - Artifact tải thẳng từ kho file: `/jobs/{id}/artifacts/content` trả 307 tới link có hạn sau khi
+    kiểm allow-list; object chưa lên kho thì API tự phục vụ (QA: 307 → MinIO, checksum khớp, khách 401).
+  - Benchmark ghi cả khi job dừng ở bước chuẩn bị; route chat LLM cần Editor khi bật đăng nhập.
+  - **Còn để sau (đã biết):** worker trên máy thuê giữ mật khẩu DB/key R2 → phase 5 dùng API worker +
+    token riêng; chưa có hạn mức dung lượng upload; mỗi transaction mở một kết nối Postgres (cân
+    nhắc pool khi đo độ trễ Supabase); xóa file SQLite khi API đang chạy cần khởi động lại API.
 - [ ] Phase 1 (thử GPU thuê), 5 (tách worker + bật/tắt GPU), 7 (LOD), 9–11 (giám sát, kiểm thử GPU, deploy), 12–14.
 
 ## Decisions
