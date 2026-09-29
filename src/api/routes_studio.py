@@ -7,6 +7,7 @@ event loop. Các endpoint còn lại là `def` đồng bộ như `routes_product
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
 from src.api import schemas
@@ -18,6 +19,7 @@ from src.services.orchestration.artifacts import (
     ArtifactStoreError,
     ArtifactTooLargeError,
 )
+from src.services.orchestration.demo import DemoBundle, DemoManifest, DemoUnavailableError
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.progress import JobProgress, job_progress
 from src.services.orchestration.projects import (
@@ -146,3 +148,26 @@ def get_job_progress(job_id: str) -> JobProgress:
     except (ArtifactStoreError, ValueError):
         preview_ready = False
     return job_progress(job, attempts, preview_ready)
+
+
+@router.get("/demo", response_model=DemoManifest)
+def get_demo() -> DemoManifest:
+    """Manifest kịch bản demo (output thật đã xử lý sẵn); 404 khi deployment không có."""
+    try:
+        return DemoBundle(get_settings().product_demo_dir).manifest()
+    except DemoUnavailableError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+
+
+@router.get("/demo/files/{name}")
+def get_demo_file(name: str) -> FileResponse:
+    """Một file của demo bundle; chỉ tên trong allow-list và đúng checksum mới được trả."""
+    try:
+        entry, path = DemoBundle(get_settings().product_demo_dir).file(name)
+    except DemoUnavailableError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    return FileResponse(
+        path,
+        media_type=entry.media_type,
+        headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
+    )
