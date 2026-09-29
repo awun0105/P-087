@@ -83,6 +83,11 @@ make test
 pytest tests/test_simulation/ -v
 ```
 
+CI (`.github/workflows/ci.yml`) có job Python (ruff, pytest, foundation/contract
+mirror check) và job frontend (lint, typecheck, vitest, build). Runner GitHub Actions
+do ban tổ chức quản lý đang bị chặn billing từ 26/09/2026 nên job không khởi động;
+nhóm chạy cùng các bước ở local trước mỗi lần merge và ghi kết quả trong PR.
+
 Chạy bằng Docker:
 
 ```bash
