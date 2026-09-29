@@ -1,8 +1,9 @@
-"""Bản ghi benchmark cho mỗi attempt job (plan Cloud Studio, mục 9).
+"""Benchmark loại `pipeline_runtime`: thời gian/chi phí xử lý mỗi attempt job.
 
-Chỉ dùng dữ liệu product nhìn thấy được qua contract: journal stage, cấu hình xử lý của
-job, máy worker tự đo, kích thước input/SOG. Không đọc manifest nội bộ của EX-REC.
-Số liệu chất lượng ảnh (PSNR/SSIM) và sai số metric thuộc evaluation, không nằm ở đây.
+Mục lục mọi loại benchmark: `eval/protocols/BENCHMARKS.md`; giao thức loại này:
+`eval/protocols/pipeline_runtime.md`. Chỉ dùng dữ liệu product nhìn thấy được qua
+contract (journal stage, cấu hình job, máy worker, kích thước input/SOG); không đọc
+manifest nội bộ của EX-REC. Chất lượng ảnh, sai số pose/metric là loại benchmark khác.
 """
 
 from datetime import UTC, datetime
@@ -17,6 +18,8 @@ from src.services.orchestration.processing import JobProcessingConfig, MachineCa
 from src.services.orchestration.projects.registry import ProjectRegistry
 
 BENCHMARK_SCHEMA_VERSION: Literal["1.0"] = "1.0"
+#: Mã loại benchmark; dùng làm tên thư mục kết quả `eval/results/<kind>/`.
+BENCHMARK_KIND: Literal["pipeline_runtime"] = "pipeline_runtime"
 
 
 class StageTiming(BaseModel):
@@ -29,12 +32,13 @@ class StageTiming(BaseModel):
     seconds: float | None = Field(default=None, ge=0)
 
 
-class JobBenchmark(BaseModel):
+class PipelineRuntimeBenchmark(BaseModel):
     """Một bản ghi benchmark bất biến theo job + attempt."""
 
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["1.0"] = BENCHMARK_SCHEMA_VERSION
+    benchmark_kind: Literal["pipeline_runtime"] = BENCHMARK_KIND
     job_id: str
     project_id: str
     attempt: int
@@ -59,7 +63,7 @@ def build_benchmark(
     machine: MachineCapability | None = None,
     gpu_hourly_usd: float | None = None,
     label: str | None = None,
-) -> JobBenchmark:
+) -> PipelineRuntimeBenchmark:
     """Dựng bản ghi từ trạng thái hiện tại của job (không ghi gì)."""
     job = registry.get_job(job_id)
     attempts = registry.list_job_attempts(job_id)
@@ -100,7 +104,7 @@ def build_benchmark(
             sog_size = None
 
     cost = round(total / 3600 * gpu_hourly_usd, 4) if total is not None and gpu_hourly_usd is not None else None
-    return JobBenchmark(
+    return PipelineRuntimeBenchmark(
         job_id=job.job_id,
         project_id=job.project_id,
         attempt=progress.attempt,
@@ -119,13 +123,13 @@ def build_benchmark(
     )
 
 
-def publish_benchmark(registry: ProjectRegistry, benchmark: JobBenchmark) -> ProductArtifactRef:
+def publish_benchmark(registry: ProjectRegistry, benchmark: PipelineRuntimeBenchmark) -> ProductArtifactRef:
     """Publish bản ghi thành artifact bất biến cạnh kết quả job (tự đẩy lên kho file nếu có)."""
     payload = benchmark.model_dump_json(indent=2).encode("utf-8") + b"\n"
     reference = ProductArtifactRef(
-        artifact_type="JobBenchmark",
+        artifact_type="PipelineRuntimeBenchmark",
         schema_version=BENCHMARK_SCHEMA_VERSION,
-        artifact_uri=f"artifact://jobs/{benchmark.job_id}/benchmark/attempt-{benchmark.attempt}.json",
+        artifact_uri=f"artifact://jobs/{benchmark.job_id}/benchmark/{BENCHMARK_KIND}/attempt-{benchmark.attempt}.json",
         artifact_checksum=sha256_bytes(payload),
         data_class=ArtifactDataClass.DERIVED,
         producer_stage="benchmark",

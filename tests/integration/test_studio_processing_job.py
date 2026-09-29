@@ -116,7 +116,7 @@ def test_tampered_or_out_of_bounds_config_is_not_run(world: SimpleNamespace) -> 
 
 def test_benchmark_record_from_real_prepare(world: SimpleNamespace) -> None:
     """Benchmark lấy thông số thật của job, kích thước input và thời gian stage đo được."""
-    from src.services.orchestration.benchmark import JobBenchmark, build_benchmark, publish_benchmark
+    from src.services.orchestration.benchmark import PipelineRuntimeBenchmark, build_benchmark, publish_benchmark
 
     params = preset_values(world.presets, "minimum_quality")
     config = build_job_config(world.presets, world.checksum, params, None)
@@ -134,6 +134,8 @@ def test_benchmark_record_from_real_prepare(world: SimpleNamespace) -> None:
         assert benchmark.estimated_gpu_cost_usd == round(benchmark.total_seconds / 3600, 4)
 
     reference = publish_benchmark(world.registry, benchmark)
-    assert reference.artifact_uri == f"artifact://jobs/{job.job_id}/benchmark/attempt-1.json"
-    stored = JobBenchmark.model_validate_json(world.registry.runtime_resolver.require(reference).read_bytes())
-    assert stored.label == "integration"
+    assert reference.artifact_uri == f"artifact://jobs/{job.job_id}/benchmark/pipeline_runtime/attempt-1.json"
+    stored = PipelineRuntimeBenchmark.model_validate_json(
+        world.registry.runtime_resolver.require(reference).read_bytes()
+    )
+    assert stored.label == "integration" and stored.benchmark_kind == "pipeline_runtime"
