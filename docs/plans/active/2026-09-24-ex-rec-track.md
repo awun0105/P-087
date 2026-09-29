@@ -295,6 +295,15 @@ agent verify** — agent thử nhiều URL datasheet đều 404 và không đoá
 khóa `coordinate_status` phải ghi nguồn là owner decision, không ghi VERIFIED từ
 tài liệu.
 
+> **Cập nhật 2026-09-29 — các câu hỏi dưới đây ĐÃ CÓ QUYẾT ĐỊNH, đoạn này là lịch sử:**
+> gốc `world` = **dịch sàn về z=0** qua `translation_m` của REC-06, chỉ cho demo Aisle_CW,
+> không nhúng số vào `src/` (`REC-06.md`, commit `01305c9`); capsule robot = OTTO 100D,
+> **bán kính ngoại tiếp 0,4610 m** (`REC-05.md`, `01305c9`); `tolerance_m` tính từ baseline
+> thật của cặp A/B (`REC-06.md`); chuỗi camera: **`image_left` đã undistorted sẵn**
+> (commit `4078686`); handedness thuận tay (owner, `5713976`). Còn lại là việc code:
+> mở 3 chỗ `coordinate_status="UNVERIFIED"` với nguồn = owner decision, và thao tác chọn
+> A/B mỗi lần chạy (không phải quyết định chờ owner).
+
 **Còn lại cho coordinate bridge — chỉ còn quy tắc gốc `world`:** sàn đo được ở
 `z ≈ -0,24 m` (ba nguồn độc lập khớp nhau), z=0 của map frame không phải sàn
 (README:219 robot bắt đầu tại gốc map). Owner cần chốt mốc đặt gốc, ví dụ
