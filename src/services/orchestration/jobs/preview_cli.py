@@ -29,7 +29,12 @@ from src.config import Settings, get_settings
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.manifests import ExecutionError, JobManifest, JobStatus, StageArtifact, StageId, StageStatus
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
-from src.services.orchestration.jobs.dispatch import load_prepared_profile, prepared_frame_reference, require_profile
+from src.services.orchestration.jobs.dispatch import (
+    ResolvedProcessing,
+    prepared_frame_reference,
+    require_profile,
+    resolve_job_processing,
+)
 from src.services.orchestration.jobs.models import PreparedInputReceipt, TransitionRequest
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
 from src.services.reconstruction import verify_prepared_preview
@@ -156,7 +161,9 @@ def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:
         logger.info("Worker failure không ghi đè revision mới hơn")
 
 
-def _start_attempt(job_id: str, expected_checksum: str | None, first_stage: StageId) -> tuple[_Attempt, dict]:
+def _start_attempt(
+    job_id: str, expected_checksum: str | None, first_stage: StageId
+) -> tuple[_Attempt, ResolvedProcessing]:
     """Kiểm profile rồi CAS claim QUEUED→RUNNING; hai runner không thể cùng thắng."""
     settings = get_settings()
     registry = get_project_registry()
@@ -169,7 +176,13 @@ def _start_attempt(job_id: str, expected_checksum: str | None, first_stage: Stag
     if profile_path is None or registry.execution_profile is None:
         raise ValueError("Worker cần execution profile đã cấu hình")
     require_profile(initial, registry.execution_profile)
-    profile = load_prepared_profile(profile_path, registry.execution_profile)
+    profile = resolve_job_processing(
+        initial,
+        registry.execution_profile,
+        profile_path,
+        registry.runtime_resolver,
+        settings.product_target_frame_count,
+    )
     workspace = settings.product_worker_root.expanduser().resolve() / job_id / f"attempt-{uuid4().hex}"
     workspace.mkdir(parents=True, exist_ok=False)
     job = registry.transition_job(
@@ -180,7 +193,7 @@ def _start_attempt(job_id: str, expected_checksum: str | None, first_stage: Stag
     return _Attempt(registry, settings, job, workspace), profile
 
 
-def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: dict) -> JobManifest:
+def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: ResolvedProcessing) -> JobManifest:
     """COLMAP → Brush → preview trên frame set đã verify, rồi commit receipt."""
     attempt.registry.runtime_resolver.require(frames)
     attempt_id = f"preview-{uuid4().hex}"
@@ -191,7 +204,8 @@ def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: dic
         "attempt_id": attempt_id,
         "source_input_checksum": attempt.job.input_manifest_checksum,
         "frame_set_ref": frames.model_dump(mode="json"),
-        **profile,
+        "colmap": profile.colmap,
+        "brush": profile.brush,
     }
     request_path = attempt.workspace / "preview.request.json"
     with request_path.open("x", encoding="utf-8") as stream:
@@ -222,7 +236,7 @@ def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: dic
     return attempt.registry.record_preview(attempt.job, receipt)
 
 
-def _execute_prepare(attempt: _Attempt) -> JobManifest:
+def _execute_prepare(attempt: _Attempt, profile: ResolvedProcessing) -> JobManifest:
     """Chuẩn bị input video qua REC CLI và ghi các stage vào JobManifest."""
     project = attempt.registry.get_project(attempt.job.project_id)
     if project.input_manifest_ref is None:
@@ -235,8 +249,8 @@ def _execute_prepare(attempt: _Attempt) -> JobManifest:
         "input_manifest_ref": project.input_manifest_ref.model_dump(mode="json"),
         "quality_profile": quality_profile,
         "privacy_mode": "self_attested",
-        "sample_fps": 3.0,
-        "max_frames": attempt.settings.product_target_frame_count,
+        "sample_fps": profile.sample_fps,
+        "max_frames": profile.max_frames,
     }
     request_path = attempt.workspace / "prepare.request.json"
     with request_path.open("x", encoding="utf-8") as stream:
@@ -277,7 +291,7 @@ def run_video_job(job_id: str, *, expected_checksum: str | None = None) -> JobMa
     """Upload video → frame set → preview trong một attempt; dừng ngay ở stage lỗi."""
     attempt, profile = _start_attempt(job_id, expected_checksum, StageId.INPUT_VALIDATE)
     try:
-        attempt.job = _execute_prepare(attempt)
+        attempt.job = _execute_prepare(attempt, profile)
         if attempt.job.status != JobStatus.RUNNING:
             return attempt.job
         frames = prepared_frame_reference(attempt.job)
