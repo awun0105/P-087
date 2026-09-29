@@ -11,8 +11,8 @@ from httpx import ASGITransport, AsyncClient
 
 from scripts.demo.export_demo_bundle import stage_durations
 from src.models.contracts.manifests import JobManifest, JobStatus, StageArtifact, StageId
-from src.services.orchestration.demo import DemoFile, DemoManifest, DemoSource, DemoStage
 from src.services.orchestration.jobs.models import JobAttemptRecord
+from src.services.orchestration.samples import DemoFile, DemoManifest, DemoSource, DemoStage
 
 ROOT = Path(__file__).resolve().parents[2]
 

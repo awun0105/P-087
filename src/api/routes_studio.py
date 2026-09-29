@@ -21,7 +21,6 @@ from src.services.orchestration.artifacts import (
     ArtifactStoreError,
     ArtifactTooLargeError,
 )
-from src.services.orchestration.demo import DemoLibrary, DemoManifest, DemoUnavailableError, SampleSummary
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.progress import JobProgress, job_progress
 from src.services.orchestration.processing import (
@@ -46,6 +45,7 @@ from src.services.orchestration.projects import (
     get_project_registry,
 )
 from src.services.orchestration.projects.models import UploadProjectInput
+from src.services.orchestration.samples import DemoLibrary, DemoManifest, DemoUnavailableError, SampleSummary
 from src.services.orchestration.uploads import (
     UploadError,
     UploadNotFoundError,

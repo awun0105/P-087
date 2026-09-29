@@ -19,7 +19,7 @@ from pathlib import Path
 
 from src.models.contracts.manifests import InputManifest, JobManifest, JobStatus, StageStatus
 from src.services.orchestration.artifacts import sha256_file
-from src.services.orchestration.demo import DemoFile, DemoManifest, DemoSource, DemoStage
+from src.services.orchestration.samples import DemoFile, DemoManifest, DemoSource, DemoStage
 from src.services.orchestration.jobs.dispatch import prepared_frame_reference
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.jobs.progress import MVP_PIPELINE

@@ -7,7 +7,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from src.services.orchestration.artifacts import sha256_file
-from src.services.orchestration.demo.models import DemoFile, DemoManifest, DemoSource
+from src.services.orchestration.samples.models import DemoFile, DemoManifest, DemoSource
 
 logger = logging.getLogger(__name__)
 

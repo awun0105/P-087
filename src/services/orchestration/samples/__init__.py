@@ -1,7 +1,7 @@
-"""Kịch bản demo đã xử lý sẵn cho Studio MVP (EX-PRODUCT)."""
+"""Thư viện video mẫu đã xử lý sẵn cho Studio MVP (EX-PRODUCT)."""
 
-from src.services.orchestration.demo.bundle import DemoBundle, DemoLibrary, DemoUnavailableError, SampleSummary
-from src.services.orchestration.demo.models import DemoFile, DemoManifest, DemoSource, DemoStage
+from src.services.orchestration.samples.bundle import DemoBundle, DemoLibrary, DemoUnavailableError, SampleSummary
+from src.services.orchestration.samples.models import DemoFile, DemoManifest, DemoSource, DemoStage
 
 __all__ = [
     "DemoBundle",
