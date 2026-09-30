@@ -355,6 +355,27 @@ nên không biết chỗ nào thật sự còn thiếu. Tách rõ:
 
 ## 12. Result / Evidence
 
+### 2026-09-30 — 3 mức voxel + kiểm chặn giả trên quỹ đạo robot (chưa đạt)
+
+Benchmark mới `collision_path_clearance` (`eval/path/path_clearance.py`, giao thức
+`eval/protocols/collision_path_clearance.md`), kết quả `eval/results/collision_path_clearance/aisle-cw-local-t2000.jsonl`.
+Camera Aisle_CW gắn trên robot nên capsule OTTO dọc quỹ đạo (50 vị trí) phải trống.
+
+| Voxel | Tam giác | Thời gian (T2000) | Bị chặn (mọi độ cao) | Bị chặn bởi phần > 0,10 m | > 0,15 m |
+| --- | --- | --- | --- | --- | --- |
+| 0,10 m | 74.669 | 8,2 s | 28/50 | 21/50 | 20/50 |
+| 0,05 m | 224.745 | 20,6 s | 33/50 | 26/50 | 14/50 |
+| 0,025 m | 737.602 | 106,2 s | 34/50 | — | — |
+
+- Phần lớn xâm phạm là **lớp sàn dày** (Gaussian nhiễu sát sàn, z 0,03–0,15 m).
+- Vẫn còn vật cản giả thật: cách tâm camera tối thiểu 4–7 cm ở phần > 0,15 m — nhiều khả năng
+  Gaussian rác gần ống kính của 3DGS preview thưa (98.611 Gaussian, preset chất lượng thấp).
+- Thử "bỏ Gaussian trong ống 0,4 m quanh quỹ đạo camera" (free-space carving): > 0,15 m còn
+  10/50, > 0,10 m còn 20/50 — cải thiện một phần, **chưa đưa vào pipeline**.
+- **Kết luận: tiêu chí "không ghost-block" CHƯA ĐẠT.** Hướng tiếp: 3DGS chất lượng cao hơn
+  (nhiều iteration hơn), carving theo tia nhìn (visibility), hoặc dọn sàn theo mặt z = 0;
+  sau đó chạy lại benchmark. Isaac CLEAR/BLOCKED vẫn cần máy RTX.
+
 ### 2026-09-30 — REC-05 chạy trong worker Studio trên Aisle_CW thật
 
 Chạy thật 2026-09-30 trên `job-ac2bfd924cc6` (video Aisle_CW, GPU Quadro T2000, adapter index 1),
