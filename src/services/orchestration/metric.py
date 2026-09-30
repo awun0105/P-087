@@ -16,13 +16,15 @@ from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.manifests import JobManifest, StageId
 from src.models.contracts.preview import ReconstructionPreview
 from src.services.orchestration.artifacts import ArtifactStoreError, FilesystemArtifactStore, sha256_file
-from src.services.orchestration.jobs.progress import awaiting_metric_confirmation
+from src.services.orchestration.jobs.progress import awaiting_metric_confirmation, metric_confirmation_stage
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.reconstruction import (
     DemoSelection,
     LidarMeasurements,
+    ModeComparison,
     UserMetricInput,
     UserMetricPreview,
+    confirmation_summary,
     lidar_support_uri,
     publish_json,
     user_metric_port,
@@ -107,6 +109,26 @@ class MetricConfirmationService:
         try:
             return self.port.lidar_measurements(
                 job_id, contract.source_visual_ref, self.lidar_support(job_id), anchor, check
+            )
+        except ValueError as error:
+            raise MetricConfirmationError(str(error)) from error
+
+    def comparison(self, job_id: str) -> ModeComparison:
+        """Ba hướng tỉ lệ trên cùng scene (demo so sánh); cần preview, không cần đang chờ."""
+        job = self.registry.get_job(job_id)
+        try:
+            contract = self.registry.get_preview(job_id)
+        except (ArtifactStoreError, ValueError) as error:
+            raise MetricConfirmationError("Scene chưa có preview 3DGS") from error
+        stage = metric_confirmation_stage(job)
+        confirmation = None
+        if stage is not None and stage.artifact_uri is not None and stage.artifact_checksum is not None:
+            confirmation = confirmation_summary(
+                stage.artifact_uri, stage.artifact_checksum, job_id, self.registry.runtime_resolver.require
+            ).reference
+        try:
+            return self.port.mode_comparison(
+                job_id, contract.source_visual_ref, confirmation, self.lidar_support(job_id)
             )
         except ValueError as error:
             raise MetricConfirmationError(str(error)) from error
