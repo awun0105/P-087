@@ -14,7 +14,7 @@ import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
 import { useProcessingForm } from "@/features/studio/useProcessingForm";
 import { UploadDropzone } from "@/features/studio/UploadDropzone";
 import { canEdit } from "@/lib/api/auth";
-import { createSceneFromUpload, getSample, listSamples, listUploads } from "@/lib/api/studio";
+import { createImport, createSceneFromUpload, getSample, listSamples, listUploads } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import type { DataOrigin, DemoManifest, SampleSummary, UploadRecord } from "@/lib/contracts/studio";
 
@@ -284,10 +284,29 @@ function SelectAndConfirm({ preselect, onBack }: { preselect: string | null; onB
             </label>
           ))}
         </fieldset>
-        {!supported && (
+        {!supported && selectedUpload && (
           <Notice tone="ochre" className="mt-4">
-            Máy chủ đã nhận diện file này là {selectedUpload ? describeDetection(selectedUpload) : "file 3DGS"}. Luồng dựng
-            scene từ file 3DGS đang được làm; hiện chỉ video mới bắt đầu xử lý được.
+            <p>
+              Máy chủ đã nhận diện file này là {describeDetection(selectedUpload)}. File 3DGS không có camera nên mở để{" "}
+              <strong>xem và chỉnh sửa</strong>; không qua xác nhận tỉ lệ mét hay dựng collision.
+            </p>
+            <Button
+              size="sm"
+              className="mt-3"
+              disabled={submitting || !name.trim()}
+              onClick={() => {
+                setSubmitting(true);
+                setError(null);
+                createImport(selectedUpload.upload_id, name.trim())
+                  .then((created) => router.push(`/imports/${created.import_id}`))
+                  .catch((cause: unknown) => {
+                    setError(cause instanceof Error ? cause.message : "Không mở được scene 3DGS");
+                    setSubmitting(false);
+                  });
+              }}
+            >
+              Mở scene 3DGS
+            </Button>
           </Notice>
         )}
         <div className="mt-5">

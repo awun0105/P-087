@@ -15,6 +15,7 @@ import {
   parseStageViews,
   type DemoManifest,
   type DemoSelection,
+  type ImportedScene,
   type JobProgress,
   type LidarMeasurements,
   type MetricInput,
@@ -255,4 +256,22 @@ export function confirmMetric(jobId: string, input: MetricInput, previewChecksum
 export async function getModeComparison(jobId: string, signal?: AbortSignal): Promise<ModeComparison> {
   const data = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/metric/comparison`, { signal });
   return parseModeComparison(data);
+}
+
+/** Tạo scene import từ upload 3DGS; máy chủ nén PLY → SOG trong nền. */
+export function createImport(uploadId: string, name: string): Promise<ImportedScene> {
+  return apiFetch<ImportedScene>(`${API}/imports`, { method: "POST", body: JSON.stringify({ upload_id: uploadId, name }) });
+}
+
+export function getImport(importId: string, signal?: AbortSignal): Promise<ApiResult<ImportedScene>> {
+  return fetchApi<ImportedScene>(`${API}/imports/${encodeURIComponent(importId)}`, { signal });
+}
+
+export function listImports(): Promise<ApiResult<{ imports: ImportedScene[] }>> {
+  return fetchApi<{ imports: ImportedScene[] }>(`${API}/imports`);
+}
+
+/** URL SOG của scene import (tên file `.sog` để viewer chọn đúng parser). */
+export function importContentUrl(importId: string): string {
+  return `${API}/imports/${encodeURIComponent(importId)}/content/scene.sog`;
 }

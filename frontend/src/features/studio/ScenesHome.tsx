@@ -9,15 +9,16 @@ import { useAuth } from "@/features/studio/AuthProvider";
 import { sceneStatus } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
 import { canEdit } from "@/lib/api/auth";
-import { listSamples, listScenes, sampleFileUrl } from "@/lib/api/studio";
+import { listImports, listSamples, listScenes, sampleFileUrl } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
-import type { SampleSummary, SceneSummary } from "@/lib/contracts/studio";
+import type { ImportedScene, SampleSummary, SceneSummary } from "@/lib/contracts/studio";
 
 const DATE = new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeStyle: "short" });
 
 /** Màn hình Scenes: video mẫu + danh sách scene của người dùng (dữ liệu từ backend). */
 export function ScenesHome() {
   const [scenes, setScenes] = useState<SceneSummary[] | null>(null);
+  const [imports, setImports] = useState<ImportedScene[]>([]);
   const [samples, setSamples] = useState<SampleSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,10 +27,12 @@ export function ScenesHome() {
 
   const load = useCallback(async () => {
     // Khách không có quyền xem scene của nhóm: chỉ tải video mẫu, không poll lỗi 401.
-    const [sceneResult, sampleResult] = await Promise.all([
+    const [sceneResult, sampleResult, importResult] = await Promise.all([
       signedIn ? listScenes() : Promise.resolve(null),
       listSamples(),
+      signedIn ? listImports() : Promise.resolve(null),
     ]);
+    setImports(importResult?.ok ? importResult.data.imports : []);
     if (sceneResult?.ok) {
       setScenes(sceneResult.data.scenes);
       setError(null);
@@ -111,6 +114,29 @@ export function ScenesHome() {
           </ul>
         )}
       </section>
+
+      {imports.length > 0 && (
+        <section aria-labelledby="imports-heading" className="mt-10">
+          <h2 id="imports-heading" className="mb-4 text-sm font-semibold tracking-wide text-ink-subtle uppercase">
+            Scene import (file 3DGS)
+          </h2>
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {imports.map((item) => (
+              <li key={item.import_id}>
+                <Link
+                  href={`/imports/${item.import_id}`}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-line bg-paper-raised p-4 text-sm transition-colors hover:border-line-strong"
+                >
+                  <span className="truncate font-medium text-ink">{item.name}</span>
+                  <span className="shrink-0 text-xs text-ink-subtle">
+                    {item.status === "READY" ? "Sẵn sàng" : item.status === "FAILED" ? "Lỗi" : "Đang nén…"}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </main>
   );
 }

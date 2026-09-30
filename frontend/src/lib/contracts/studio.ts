@@ -402,3 +402,15 @@ export function parseModeComparison(value: unknown): ModeComparison {
   }
   return value as unknown as ModeComparison;
 }
+
+/** Scene import từ file 3DGS, chỉ xem/chỉnh sửa (ADR 0004 §3). Khớp `ImportedScene`. */
+export interface ImportedScene {
+  import_id: string;
+  upload_id: string;
+  name: string;
+  input_kind: "gaussian_ply" | "gaussian_ply_colmap";
+  status: "PACKAGING" | "READY" | "FAILED";
+  delivery_ref: { artifact_uri: string; artifact_checksum: string } | null;
+  error: string | null;
+  created_at: string;
+}
