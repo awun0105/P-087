@@ -1,12 +1,15 @@
 "use client";
 
-import { ArrowRight, Clapperboard, Film, LogIn, Play, RefreshCw, Upload } from "lucide-react";
+import { ArrowRight, Clapperboard, Film, LayoutGrid, List, LogIn, Play, RefreshCw, Search, Upload } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
+import { Input } from "@/components/shadcn/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/shadcn/table";
+import { ToggleGroup, ToggleGroupItem } from "@/components/shadcn/toggle-group";
 import { Badge, Card, EmptyState, Notice, buttonVariants, formatBytes } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
-import { sceneStatus } from "@/features/studio/sceneStatus";
+import { STATUS_FILTERS, sceneStatus, type SceneStatusGroup } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
 import { canEdit } from "@/lib/api/auth";
 import { listImports, listSamples, listScenes, sampleFileUrl } from "@/lib/api/studio";
@@ -41,6 +44,18 @@ export function ScenesHome() {
     }
     setSamples(sampleResult.ok ? sampleResult.data.samples : []);
   }, [signedIn]);
+
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<SceneStatusGroup | "all">("all");
+  const [view, setView] = useState<"grid" | "list">(readView);
+  const shown = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return (scenes ?? []).filter(
+      (scene) =>
+        (!needle || scene.project.name.toLowerCase().includes(needle)) &&
+        (filter === "all" || sceneStatus(scene.latest_job, scene.preview_ready).group === filter),
+    );
+  }, [scenes, query, filter]);
 
   const anyActive = scenes?.some((scene) => sceneStatus(scene.latest_job, scene.preview_ready).active) ?? true;
   usePolling(load, anyActive ? 4000 : 20000, true);
@@ -105,14 +120,71 @@ export function ScenesHome() {
           </EmptyState>
         )}
         {scenes && scenes.length > 0 && (
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <div className="relative min-w-48 flex-1 sm:max-w-xs">
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-subtle" aria-hidden />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Tìm theo tên scene"
+                aria-label="Tìm theo tên scene"
+                className="pl-8"
+              />
+            </div>
+            <ToggleGroup
+              type="single"
+              value={filter}
+              onValueChange={(value) => value && setFilter(value as SceneStatusGroup | "all")}
+              variant="outline"
+              size="sm"
+              aria-label="Lọc theo trạng thái"
+            >
+              {STATUS_FILTERS.map((item) => (
+                <ToggleGroupItem key={item.value} value={item.value}>
+                  {item.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+            <ToggleGroup
+              type="single"
+              value={view}
+              onValueChange={(value) => {
+                if (!value) return;
+                setView(value as "grid" | "list");
+                writeView(value as "grid" | "list");
+              }}
+              variant="outline"
+              size="sm"
+              className="ml-auto"
+              aria-label="Kiểu hiển thị"
+            >
+              <ToggleGroupItem value="grid" aria-label="Lưới">
+                <LayoutGrid aria-hidden />
+              </ToggleGroupItem>
+              <ToggleGroupItem value="list" aria-label="Danh sách">
+                <List aria-hidden />
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+        )}
+        {scenes && scenes.length > 0 && shown.length === 0 && (
+          <p className="rounded-xl border border-line p-6 text-center text-sm text-ink-muted">
+            Không có scene khớp bộ lọc.{" "}
+            <button type="button" className="font-medium text-ember-strong hover:underline" onClick={() => { setQuery(""); setFilter("all"); }}>
+              Xoá bộ lọc
+            </button>
+          </p>
+        )}
+        {shown.length > 0 && view === "grid" && (
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {scenes.map((scene) => (
+            {shown.map((scene) => (
               <li key={scene.project.project_id}>
                 <SceneCard scene={scene} />
               </li>
             ))}
           </ul>
         )}
+        {shown.length > 0 && view === "list" && <SceneTable scenes={shown} />}
       </section>
 
       {imports.length > 0 && (
@@ -129,7 +201,7 @@ export function ScenesHome() {
                 >
                   <span className="truncate font-medium text-ink">{item.name}</span>
                   <span className="shrink-0 text-xs text-ink-subtle">
-                    {item.status === "READY" ? "Sẵn sàng" : item.status === "FAILED" ? "Lỗi" : "Đang nén…"}
+                    {item.status === "READY" ? "Mở xem/chỉnh" : item.status === "FAILED" ? "Lỗi" : "Đang nén…"}
                   </span>
                 </Link>
               </li>
@@ -246,6 +318,71 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
     >
       {content}
     </Link>
+  );
+}
+
+const VIEW_KEY = "r2s.scenes.view";
+
+/** Kiểu hiển thị là tiện ích riêng của người xem; storage có thể bị chặn nên luôn có mặc định. */
+function readView(): "grid" | "list" {
+  try {
+    return typeof window !== "undefined" && window.localStorage.getItem(VIEW_KEY) === "list" ? "list" : "grid";
+  } catch {
+    return "grid";
+  }
+}
+
+function writeView(view: "grid" | "list"): void {
+  try {
+    window.localStorage.setItem(VIEW_KEY, view);
+  } catch {
+    // Không lưu được thì lần sau mở lại dạng lưới.
+  }
+}
+
+/** Dạng danh sách: đọc nhanh trạng thái và mốc thời gian của nhiều scene. */
+function SceneTable({ scenes }: { scenes: SceneSummary[] }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-line">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Scene</TableHead>
+            <TableHead>Trạng thái</TableHead>
+            <TableHead className="hidden md:table-cell">Video</TableHead>
+            <TableHead className="hidden sm:table-cell">Tạo lúc</TableHead>
+            <TableHead className="w-0" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {scenes.map((scene) => {
+            const status = sceneStatus(scene.latest_job, scene.preview_ready);
+            const job = scene.latest_job;
+            return (
+              <TableRow key={scene.project.project_id}>
+                <TableCell className="max-w-64 truncate font-medium">{scene.project.name}</TableCell>
+                <TableCell>
+                  <Badge tone={status.tone}>{status.label}</Badge>
+                </TableCell>
+                <TableCell className="hidden max-w-56 truncate text-ink-muted md:table-cell">
+                  {scene.project.input_video?.original_name ?? "—"}
+                </TableCell>
+                <TableCell className="hidden text-ink-muted sm:table-cell">
+                  {scene.project.created_at ? DATE.format(new Date(scene.project.created_at)) : "—"}
+                </TableCell>
+                <TableCell className="text-right">
+                  {job && (
+                    <Link href={`/scenes/${encodeURIComponent(job.job_id)}`} className="font-medium whitespace-nowrap text-ember-strong hover:underline">
+                      {scene.preview_ready ? "Mở scene" : "Xem tiến trình"}
+                    </Link>
+                  )}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
   );
 }
 
