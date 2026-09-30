@@ -66,6 +66,17 @@ Outputs: project/job lifecycle, scene revisions, review history,
   **Cập nhật 2026-09-29:** Studio MVP dùng `lucide-react`, `class-variance-authority`,
   `clsx`, `tailwind-merge` cho primitives tại `components/studio/` (viết lại theo pattern
   shadcn, không copy starter); vẫn không có `@radix-ui` hay `components.json`.
+  **Cập nhật 2026-09-30:** refactor UI theo PRODUCT.md P1–P6 **có** adapt donor
+  `arhamkhnz/next-shadcn-admin-dashboard` (MIT, commit 3502692): component chép vào
+  `components/shadcn/` (notice ở `frontend/THIRD_PARTY_NOTICES.md`), thêm `radix-ui` 1.6.7 +
+  `tw-animate-css` 1.4.0; AppShell (sidebar Scenes · Jobs · Nhóm, breadcrumb); màn scene 4 tab
+  (`features/studio/scene/`); palette beige/cam (D-04). `components/studio/primitives` là lớp
+  component của app, Button dựng trên Button của bộ shadcn. Component chưa dùng được giữ lại
+  theo owner để mở rộng sau.
+- **Pipeline v2 (2026-09-30, [ADR 0007](../../../decisions/0007-object-centric-hybrid-usd-pipeline.md)):**
+  Studio chuyển sang sửa **scene theo vật** — mỗi vật một entity Gaussian trong PlayCanvas, gizmo
+  dịch/xoay/co giãn, ẩn/xoá hiện nền đã vá, thêm từ thư viện asset Isaac, đổi nhãn/khối lượng,
+  hoàn tác (PRODUCT-06/07/07A). Theo [plan pipeline v2](../../../plans/active/2026-09-30-pipeline-v2.md), pha C.
 - **Studio MVP (2026-09-29, ADR 0002):** route group `(studio)` là UI mặc định
   (Scenes, Scene mới + video mẫu, trang scene + editor); UI P0 đầy đủ nằm ở
   `(legacy)`, ẩn trừ khi `LEGACY_UI=1`. Route Studio ở `src/api/studio/`, queue
