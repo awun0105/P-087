@@ -115,15 +115,21 @@ def _box_glb(dimensions: tuple[float, float, float]) -> bytes:
     return buffer.getvalue()
 
 
-def candidate_objects(
+def box_from_points(points: np.ndarray, voxels: int | None = None) -> Candidate:
+    """Hộp OBB quanh trục Z (đứng trên sàn) cho một cụm điểm — thay OBB tối thiểu Open3D của R2G."""
+    center, yaw, dims = _yaw_box(points)
+    return Candidate(center, yaw, tuple(max(value, 0.05) for value in dims), voxels or len(points))  # type: ignore[arg-type]
+
+
+def objects_from_candidates(
     job_id: str,
-    vertices: np.ndarray,
+    candidates: list[Candidate],
     publish: Callable[[ProductArtifactRef, bytes], ProductArtifactRef],
-    config: GeometricConfig = GeometricConfig(),
+    provenance: dict,
 ) -> list[SceneObject]:
-    """SceneObject CANDIDATE (chưa active) cho từng khối; hộp GLB publish bất biến theo nội dung."""
+    """SceneObject CANDIDATE (chưa active) cho từng hộp; GLB hộp publish bất biến theo nội dung."""
     objects: list[SceneObject] = []
-    for number, candidate in enumerate(find_candidates(vertices, config), start=1):
+    for number, candidate in enumerate(candidates, start=1):
         object_id = f"candidate-{number:03d}"
         payload = _box_glb(candidate.dimensions)
         digest = hashlib.sha256(payload).hexdigest()
@@ -155,16 +161,23 @@ def candidate_objects(
                 ),
                 geometry_ref=reference,
                 primitive_dimensions_xyz_m=candidate.dimensions,
-                tags=["geometric_candidate"],
-                provenance={
-                    "method": METHOD,
-                    "voxel_m": config.voxel_m,
-                    "voxels": candidate.voxels,
-                    "note": "ứng viên hình học, cần người xác nhận",
-                },
+                tags=[provenance.get("method", METHOD)],
+                provenance={**provenance, "support": candidate.voxels, "note": "ứng viên, cần người xác nhận"},
             )
         )
     return objects
+
+
+def candidate_objects(
+    job_id: str,
+    vertices: np.ndarray,
+    publish: Callable[[ProductArtifactRef, bytes], ProductArtifactRef],
+    config: GeometricConfig = GeometricConfig(),
+) -> list[SceneObject]:
+    """Fallback hình học: ứng viên từ collision mesh (ADR 0006 §2)."""
+    return objects_from_candidates(
+        job_id, find_candidates(vertices, config), publish, {"method": METHOD, "voxel_m": config.voxel_m}
+    )
 
 
 def collision_vertices(glb_bytes: bytes) -> np.ndarray:
