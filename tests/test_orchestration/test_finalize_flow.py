@@ -76,7 +76,10 @@ def test_success_records_geometry_and_bundle_and_closes_job(tmp_path: Path) -> N
     assert done.status == JobStatus.SUCCEEDED and done.completed_at is not None
     assert not awaiting_finalize(done)
     progress = job_progress(done, registry.list_job_attempts(job.job_id), preview_ready=True)
-    assert progress.stages[-1].stage_id == StageId.RGB_GEOMETRY and progress.stages[-1].state == "succeeded"
+    states = {stage.stage_id: stage.state for stage in progress.stages}
+    assert states[StageId.RGB_GEOMETRY] == "succeeded"
+    # Không có artifact tách vật thể → stage đó không được báo xong.
+    assert states[StageId.OBJECT_EXTRACT] == "pending"
     with pytest.raises((RuntimeStateConflictError, ValueError)):
         registry.record_finalize(job, result, result_ref)  # revision cũ: CAS từ chối
 

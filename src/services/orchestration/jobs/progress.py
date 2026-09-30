@@ -34,8 +34,14 @@ MVP_PIPELINE: tuple[StageId, ...] = (
     StageId.VISUAL_RECON,
 )
 #: Tiến trình job Studio: preview + bước xác nhận tỉ lệ mét (REC-06) chờ người dùng.
-#: Studio: sau preview là xác nhận tỉ lệ (người dùng), rồi hình học/collision + bundle (REC-05/10).
-STUDIO_PIPELINE: tuple[StageId, ...] = (*MVP_PIPELINE, StageId.METRIC_CANONICALIZE, StageId.RGB_GEOMETRY)
+#: Studio: sau preview là xác nhận tỉ lệ (người dùng), hình học/collision + bundle (REC-05/10),
+#: rồi tách vật thể ứng viên (SAMPro3D/SAM2, ADR 0006).
+STUDIO_PIPELINE: tuple[StageId, ...] = (
+    *MVP_PIPELINE,
+    StageId.METRIC_CANONICALIZE,
+    StageId.RGB_GEOMETRY,
+    StageId.OBJECT_EXTRACT,
+)
 
 StageState = Literal["pending", "running", "waiting", "succeeded", "failed", "cancelled"]
 #: Việc pipeline đang chờ con người làm (không phải worker).

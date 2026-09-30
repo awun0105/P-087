@@ -163,6 +163,7 @@ async def test_progress_endpoint_reports_queued_pipeline(client: AsyncClient, st
         "ST-VISUAL-RECON",
         "ST-METRIC-CANONICALIZE",
         "ST-RGB-GEOMETRY",
+        "ST-OBJECT-EXTRACT",
     ]
     assert {stage["state"] for stage in body["stages"]} == {"pending"}
     assert (await client.get("/api/v1/jobs/job-missing/progress")).status_code == 404

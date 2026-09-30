@@ -596,7 +596,11 @@ class ProjectRegistry:
         return updated
 
     def record_finalize(
-        self, expected: JobManifest, result: "FinalizeResult", result_ref: ProductArtifactRef
+        self,
+        expected: JobManifest,
+        result: "FinalizeResult",
+        result_ref: ProductArtifactRef,
+        extra_stages: list[StageArtifact] | None = None,
     ) -> JobManifest:
         """Worker-only: ghi kết quả hoàn tất EX-REC (geometry + bundle) và kết thúc job.
 
@@ -605,8 +609,13 @@ class ProjectRegistry:
         """
         if self.persistence is None:
             raise RuntimeStateConflictError("Real worker cần durable registry")
-        if expected.status != JobStatus.RUNNING or expected.current_stage != StageId.RGB_GEOMETRY:
+        if expected.status != JobStatus.RUNNING or expected.current_stage not in {
+            StageId.RGB_GEOMETRY,
+            StageId.OBJECT_EXTRACT,
+        }:
             raise ValueError("Job không ở bước hoàn tất hình học")
+        # Bước tách vật thể (ADR 0006) chạy trong PRODUCT sau bundle; artifact của nó đi kèm.
+        extra = list(extra_stages or [])
         if result.job_id != expected.job_id or result_ref.job_id != expected.job_id:
             raise ValueError("Kết quả hoàn tất khác job")
         self.runtime_resolver.require(result_ref)
@@ -618,9 +627,11 @@ class ProjectRegistry:
         updated = with_canonical_checksum(
             expected.model_copy(
                 update={
-                    "stage_artifacts": [*expected.stage_artifacts, *result.stage_artifacts],
+                    "stage_artifacts": [*expected.stage_artifacts, *result.stage_artifacts, *extra],
                     "status": JobStatus.FAILED if failed else JobStatus.SUCCEEDED,
-                    "current_stage": result.error.stage_id if result.error else StageId.RGB_GEOMETRY,
+                    "current_stage": result.error.stage_id
+                    if result.error
+                    else (StageId.OBJECT_EXTRACT if extra else StageId.RGB_GEOMETRY),
                     "completed_at": now,
                 }
             ),

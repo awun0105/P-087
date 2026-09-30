@@ -61,7 +61,7 @@ def test_confirmation_is_recorded_once(tmp_path: Path) -> None:
     progress = job_progress(updated, registry.list_job_attempts(job.job_id), preview_ready=True)
     # Xác nhận xong: bước xác nhận succeeded, bước hình học chờ worker (chưa chạy).
     assert progress.waiting_for is None
-    assert [stage.state for stage in progress.stages[-2:]] == ["succeeded", "pending"]
+    assert [stage.state for stage in progress.stages[-3:]] == ["succeeded", "pending", "pending"]
     with pytest.raises(RuntimeStateConflictError):
         registry.record_metric_confirmation(updated, reference)
 

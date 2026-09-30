@@ -370,6 +370,34 @@ def _authorized_decision(attempt_registry: ProjectRegistry, job: JobManifest) ->
     return summary.reference, summary.decision_ref.artifact_checksum
 
 
+def _extract_scene_stage(
+    attempt: _Attempt, workspace: Path, bundle_ref: ProductArtifactRef | None
+) -> list[StageArtifact]:
+    """Tách vật thể (ADR 0006) sau bundle; lỗi không làm hỏng job (tái dựng đã xong).
+
+    Bundle chưa nằm trong JobManifest ở thời điểm này (ghi cùng `record_finalize`), nên đọc
+    thẳng từ ref trong kết quả REC đã qua consumer `load_finalize_result`.
+    """
+    from src.models.contracts.reconstruction import ReconstructionBundle
+    from src.services.orchestration.scene_extraction import extract_scene
+
+    if bundle_ref is None:
+        return []
+    try:
+        attempt.job = attempt.registry.record_stage_progress(attempt.job, StageId.OBJECT_EXTRACT)
+        bundle = ReconstructionBundle.model_validate_json(
+            attempt.registry.runtime_resolver.require(bundle_ref).read_bytes()
+        )
+        stage = extract_scene(attempt.registry, attempt.job, bundle, attempt.settings, workspace / "scene")
+        attempt.registry.runtime_resolver.sync_up(attempt.job.job_id)
+        return [stage]
+    except RuntimeStateConflictError:
+        raise
+    except Exception:  # noqa: BLE001 - process boundary: ghi log, job vẫn hoàn tất phần tái dựng
+        logger.exception("Tách vật thể thất bại job=%s", attempt.job.job_id)
+        return []
+
+
 def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> JobManifest:
     """Sau xác nhận tỉ lệ: REC-06 canonical → REC-05 geometry → REC-10 bundle; job kết thúc.
 
@@ -436,7 +464,10 @@ def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> Jo
         result = load_finalize_result(reference, registry.runtime_resolver.require)
         if result.attempt_id != attempt_id or (result.error is None) != (exit_code == 0):
             raise ValueError("Finalize result khác attempt/exit status")
-        return registry.record_finalize(attempt.job, result, reference)
+        extra: list[StageArtifact] = []
+        if result.error is None:
+            extra = _extract_scene_stage(attempt, workspace, result.bundle_ref)
+        return registry.record_finalize(attempt.job, result, reference, extra)
     except BaseException as error:
         _record_runner_failure(attempt, error)
         raise

@@ -1,7 +1,7 @@
 /**
  * Mô tả hiển thị các stage. `MVP_STAGES` = 5 stage tới preview 3DGS (khớp `MVP_PIPELINE`,
- * dùng cho video mẫu); `STUDIO_STAGES` thêm bước xác nhận tỉ lệ mét và hình học/collision
- * (khớp `STUDIO_PIPELINE`, dùng cho job thật). Chỉ là copy UI; trạng thái thật lấy từ API.
+ * dùng cho video mẫu); `STUDIO_STAGES` thêm bước xác nhận tỉ lệ mét, hình học/collision và
+ * tách vật thể (khớp `STUDIO_PIPELINE`, dùng cho job thật). Chỉ là copy UI; trạng thái thật lấy từ API.
  */
 
 import type { StageId } from "@/lib/contracts/api";
@@ -64,7 +64,16 @@ export const GEOMETRY_STAGE: StageMeta = {
     "Quy đổi 3DGS và camera sang mét, dựng collision mesh bằng voxel và khoét không gian cho robot, kiểm lại tỉ lệ bằng đoạn C–D rồi đóng gói bundle cho mô phỏng.",
 };
 
-export const STUDIO_STAGES: readonly StageMeta[] = [...MVP_STAGES, METRIC_STAGE, GEOMETRY_STAGE];
+/** ADR 0006: SAMPro3D + SAM2 tách vật thể ứng viên từ scene đã quy đổi mét; người dùng xác nhận sau. */
+export const OBJECT_STAGE: StageMeta = {
+  id: "ST-OBJECT-EXTRACT",
+  title: "Tách vật thể",
+  short: "Vật thể",
+  description:
+    "SAM2 phân đoạn vật thể trên từng khung hình, bỏ phiếu gộp thành vật thể 3D ứng viên (hộp theo sàn) để bạn xác nhận; thiếu runtime thì tách theo hình học của collision mesh.",
+};
+
+export const STUDIO_STAGES: readonly StageMeta[] = [...MVP_STAGES, METRIC_STAGE, GEOMETRY_STAGE, OBJECT_STAGE];
 
 export function stageMeta(id: StageId): StageMeta | undefined {
   return STUDIO_STAGES.find((stage) => stage.id === id);
