@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, Download, Loader2, ShieldCheck, XCircle } from "lucide-react";
+import { Ban, Check, CheckCircle2, Circle, Download, Loader2, ShieldCheck, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Badge, Button, buttonVariants } from "@/components/studio/primitives";
@@ -67,7 +67,7 @@ export function ReviewPanel({ jobId, sceneRevision }: { jobId: string; sceneRevi
   }
 
   if (!state) {
-    return error ? <p className="border-t border-line p-3 text-xs text-rust">{error}</p> : null;
+    return error ? <p className="p-4 text-xs text-rust">{error}</p> : null;
   }
   const { record, validation } = state;
   const status = STATUS_LABEL[record.status];
@@ -83,14 +83,16 @@ export function ReviewPanel({ jobId, sceneRevision }: { jobId: string; sceneRevi
     );
   const allAccepted = state.warning_ids.every((id) => accepted.includes(id));
   return (
-    <section className="space-y-2 border-t border-line p-3 text-xs" aria-label="Kiểm tra và duyệt">
+    <section className="space-y-3 p-4 text-xs" aria-label="Kiểm tra và duyệt">
       <div className="flex items-center justify-between gap-2">
         <p className="flex items-center gap-1.5 text-sm font-semibold text-ink">
           <ShieldCheck className="size-4" aria-hidden /> Kiểm tra & duyệt
         </p>
         <Badge tone={status.tone}>{status.label}</Badge>
       </div>
-      {state.blockers.map((blocker) => (
+      <ReviewSteps state={state} />
+      {/* Thiếu gói/validation đã hiện ở các chặng; lý do chặn chỉ thêm khi đã có báo cáo (vd. FAIL). */}
+      {state.validation && state.blockers.map((blocker) => (
         <p key={blocker} className="text-ink-muted">
           {blocker}
         </p>
@@ -201,5 +203,60 @@ export function ReviewPanel({ jobId, sceneRevision }: { jobId: string; sceneRevi
       {record.status === "REJECTED" && <p className="text-ink-muted">Sửa scene (tạo revision mới) rồi tạo gói và kiểm tra lại.</p>}
       {error && <p className="text-rust">{error}</p>}
     </section>
+  );
+}
+
+type StepState = "done" | "next" | "unavailable" | "blocked";
+
+/**
+ * Bốn chặng gói → validation Isaac → duyệt → phát hành (S09–S12). Validation Isaac cần máy RTX và
+ * simulation worker (SIM-06..09) chưa có trong repo: khi chưa có báo cáo, chặng này và các chặng
+ * sau hiện "Chưa khả dụng" (PRODUCT.md Q2) thay vì giả như đang chờ.
+ */
+function ReviewSteps({ state }: { state: ReviewStateView }) {
+  const status = state.record.status;
+  const hasPackage = status !== "DRAFT" || state.validation !== null;
+  const validated = state.validation?.overall_result === "PASS";
+  const decided = status === "APPROVED" || status === "REJECTED" || status === "RELEASED";
+  const steps: { label: string; state: StepState; note: string }[] = [
+    { label: "Gói mô phỏng + preflight", state: hasPackage ? "done" : "next", note: hasPackage ? "Có gói cho revision này" : "Tạo gói ở khung bên cạnh" },
+    {
+      label: "Validation Isaac Sim",
+      state: state.validation ? (validated ? "done" : "blocked") : hasPackage ? "unavailable" : "blocked",
+      note: state.validation
+        ? `Kết quả ${state.validation.overall_result}`
+        : "Chưa khả dụng: cần máy RTX chạy Isaac Sim (SIM-06..09 chưa triển khai)",
+    },
+    {
+      label: "Người duyệt quyết định",
+      state: decided ? "done" : status === "READY_FOR_REVIEW" ? "next" : state.validation ? "blocked" : "unavailable",
+      note: decided ? (status === "REJECTED" ? "Bị từ chối" : "Đã duyệt") : "Chỉ mở khi validation đạt",
+    },
+    {
+      label: "Phát hành",
+      state: status === "RELEASED" ? "done" : status === "APPROVED" ? "next" : state.validation ? "blocked" : "unavailable",
+      note: status === "RELEASED" ? "Đã có bản phát hành" : "Tự đóng gói ngay sau khi được duyệt",
+    },
+  ];
+  const icon = (value: StepState) =>
+    value === "done" ? (
+      <Check className="size-3.5 text-sage" aria-hidden />
+    ) : value === "unavailable" ? (
+      <Ban className="size-3.5 text-ink-subtle" aria-hidden />
+    ) : (
+      <Circle className={cn("size-3.5", value === "next" ? "text-ember" : "text-ink-subtle")} aria-hidden />
+    );
+  return (
+    <ol className="space-y-1.5" aria-label="Các chặng duyệt">
+      {steps.map((step) => (
+        <li key={step.label} className="flex items-start gap-2">
+          <span className="mt-0.5">{icon(step.state)}</span>
+          <span>
+            <span className={cn("font-medium", step.state === "unavailable" ? "text-ink-muted" : "text-ink")}>{step.label}</span>
+            <span className="block text-ink-subtle">{step.note}</span>
+          </span>
+        </li>
+      ))}
+    </ol>
   );
 }

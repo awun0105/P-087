@@ -75,12 +75,14 @@ describe("ReviewPanel", () => {
     await waitFor(() => expect(reject).toBeEnabled());
   });
 
-  it("chưa có validation: hiện lý do chặn, không có nút duyệt", async () => {
+  it("chưa có validation: chặng Isaac chưa khả dụng, không có nút duyệt", async () => {
     vi.mocked(global.fetch).mockResolvedValueOnce(
       reply({ ...state("CANDIDATE_READY"), validation: null, warning_ids: [], blockers: ["Chưa có báo cáo validation Isaac"] }),
     );
     render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" />);
-    expect(await screen.findByText(/Chưa có báo cáo validation Isaac/)).toBeInTheDocument();
+    // Q2: validation Isaac chưa có runtime → báo "Chưa khả dụng", không giả như đang chờ.
+    expect(await screen.findByText(/Chưa khả dụng: cần máy RTX/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Phê duyệt để phát hành" })).toBeNull();
+    expect(screen.getByText("Có gói cho revision này")).toBeInTheDocument();
   });
 });

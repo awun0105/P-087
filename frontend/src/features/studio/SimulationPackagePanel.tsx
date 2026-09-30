@@ -68,7 +68,7 @@ export function SimulationPackagePanel({
 
   const pkg = result?.value ?? null;
   return (
-    <section className="space-y-2 border-t border-line p-3" aria-label="Gói mô phỏng">
+    <section className="space-y-2 p-4" aria-label="Gói mô phỏng">
       <div className="flex items-center justify-between gap-2">
         <p className="flex items-center gap-1.5 text-sm font-semibold text-ink">
           <PackageOpen className="size-4" aria-hidden /> Gói mô phỏng Isaac

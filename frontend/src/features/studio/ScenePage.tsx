@@ -241,7 +241,7 @@ export function ScenePage({ jobId }: { jobId: string }) {
             }}
           />
         )}
-        {current === "review" && <ReviewTab jobId={jobId} />}
+        {current === "review" && <ReviewTab jobId={jobId} onSaveState={setSave} />}
         {current === "results" && preview && <ResultsTab jobId={jobId} preview={preview} />}
       </div>
     </main>
@@ -478,7 +478,7 @@ function StudioTab({
 
 // ── Kiểm tra & duyệt ───────────────────────────────────────────────────────
 
-function ReviewTab({ jobId }: { jobId: string }) {
+function ReviewTab({ jobId, onSaveState }: { jobId: string; onSaveState: (state: SaveState) => void }) {
   const [revision, setRevision] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -486,11 +486,14 @@ function ReviewTab({ jobId }: { jobId: string }) {
     const controller = new AbortController();
     getJobScene(jobId, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
-      if (result.ok) setRevision(result.data.scene.scene_revision);
-      else setError(result.error.detail);
+      if (result.ok) {
+        setRevision(result.data.scene.scene_revision);
+        // Tạo gói ghi một revision mới (collider vật đã xác nhận) → header phải theo revision đó.
+        onSaveState({ status: "saved", revision: result.data.scene.scene_revision });
+      } else setError(result.error.detail);
     });
     return () => controller.abort();
-  }, [jobId, reload]);
+  }, [jobId, reload, onSaveState]);
   if (error) return <Notice tone="rust" className="m-4">{error}</Notice>;
   if (!revision) return <p className="p-6 text-sm text-ink-muted" role="status">Đang tải scene…</p>;
   return (
