@@ -1,5 +1,9 @@
 Team mình chia project thành 4 track chính. Mỗi người chọn 1 track làm owner chính, nhưng vẫn phối hợp qua shared contracts và integration chung.
 
+> **Cập nhật 30/09/2026:** pipeline v2 ([ADR 0007](./decisions/0007-object-centric-hybrid-usd-pipeline.md)) giữ
+> nguyên 4 track; phần việc mới của từng track ghi ở
+> [TRACK_IMPLEMENTATION_GUIDE §1.3](./execution/TRACK_IMPLEMENTATION_GUIDE.md) và các `TRACK.md`.
+
 ### 1. EX-REC — Reconstruction & Dataset Pipeline
 
 **Mục tiêu:** biến dữ liệu đầu vào RGB/LiDAR thành các artifact 3D chuẩn để các track sau sử dụng.
