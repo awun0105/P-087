@@ -63,6 +63,10 @@ def __getattr__(name: str) -> object:
         from src.services.reconstruction import views
 
         return getattr(views, name)
+    if name in {"extract_member", "package_splat"}:
+        from src.services.reconstruction import imports
+
+        return getattr(imports, name)
     if name == "lidar_support_uri":
         from src.services.reconstruction.rgb.canonical.lidar_assist import support_uri
 
@@ -75,6 +79,8 @@ def __getattr__(name: str) -> object:
 
 
 __all__ = [
+    "extract_member",
+    "package_splat",
     "ModeComparison",
     "CameraMarker",
     "camera_markers",
