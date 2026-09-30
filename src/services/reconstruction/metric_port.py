@@ -36,9 +36,11 @@ from src.services.reconstruction.rgb.canonical.metric_models import (
     CanonicalFrameDeclaration,
     DistanceAnchor,
     MetricAcceptance,
+    MetricConfirmation,
     MetricPreview,
     MetricRequest,
 )
+from src.services.reconstruction.rgb.canonical.mode_comparison import ModeComparison, compare_modes
 from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver
 from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
 from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
@@ -213,6 +215,43 @@ class UserMetricPort:
             check=self.lidar.measure(context, points[2], points[3]),
         )
         return DemoSelection(points=points, measurements=measured)
+
+    def mode_comparison(
+        self,
+        job_id: str,
+        source_visual: ProductArtifactRef,
+        confirmation: ProductArtifactRef | None,
+        support: ProductArtifactRef | None,
+    ) -> ModeComparison:
+        """So sánh RGB only (mock) / anchor người dùng / LiDAR trên cùng camera (chỉ hiển thị).
+
+        Bản xác nhận được đọc từ bytes đã kiểm checksum để hiển thị; authority đã được kiểm
+        khi xác nhận và sẽ kiểm lại ở mọi bước dùng nó để sinh artifact.
+        """
+        visual = self.visuals.load(source_visual)
+        cameras = [pose.translation for pose in self.poses.load(visual.source_camera_poses).poses]
+        user = None
+        check = None
+        if confirmation is not None:
+            record = MetricConfirmation.model_validate_json(self.visuals.require(confirmation).read_bytes())
+            user = record.preview.transform
+            declaration = MeasurementDeclaration.model_validate_json(
+                self.visuals.require(record.preview.request.anchor.measurement_ref).read_bytes()
+            )
+            check = (declaration.input.check_a, declaration.input.check_b)
+        lidar = self._lidar_context(job_id, source_visual, support).fit if support is not None else None
+        result = compare_modes(job_id, cameras, user, lidar, check)
+        if confirmation is not None and declaration.input.distance_source == "lidar_demo":
+            # Điểm/số đo tự chọn từ LiDAR: độ lệch với cột LiDAR gần 0 là đương nhiên, không phải
+            # độ chính xác của người click. Click tay mới lộ sai số thật.
+            modes = [
+                mode.model_copy(update={"note": mode.note + " Số đo A–B, C–D lấy từ LiDAR (dataset mẫu)."})
+                if mode.mode == "user_anchor"
+                else mode
+                for mode in result.modes
+            ]
+            result = result.model_copy(update={"modes": modes})
+        return result
 
     def _evidence(
         self, job_id: str, source_visual: ProductArtifactRef, data: UserMetricInput, support: ProductArtifactRef | None

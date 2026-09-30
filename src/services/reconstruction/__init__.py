@@ -40,6 +40,7 @@ def __getattr__(name: str) -> object:
         "UserMetricPort",
         "LidarMeasurements",
         "DemoSelection",
+        "ModeComparison",
         "check_tolerance_m",
         "publish_json",
     }:
@@ -74,6 +75,7 @@ def __getattr__(name: str) -> object:
 
 
 __all__ = [
+    "ModeComparison",
     "CameraMarker",
     "camera_markers",
     "frame_images",
