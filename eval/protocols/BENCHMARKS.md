@@ -21,6 +21,7 @@ không điền ước đoán như kết quả.
 | `metric_scale` | Sai số tỉ lệ mét | sai số scale %, sai số khoảng cách A/B (m) | So với LiDAR/GT (ADR 0001) | `eval/geometry/` | Chưa |
 | `browser_render` | Trình duyệt có mượt không | thời gian tải scene, FPS theo LOD/thiết bị | Client gửi lên | `eval/visual/` | Chưa (cần LOD) |
 | `workflow_time` | SM-06: thời gian thao tác tay vs dùng công cụ | phút hands-on, số bước thủ công | Đo tay | `eval/protocols/` | Chưa |
+| `metric_click_error` | REC-06: `e` = sai số một lần click trên 3DGS | khoảng cách bề mặt 3DGS→LiDAR (vùng LiDAR phủ), lệch k px quy ra mét | Căn chỉnh quỹ đạo GT-assisted (chỉ dataset demo) | `eval/geometry/click_error.py` | **Có** — chạy tay |
 | `collision_path_clearance` | REC-05: collision mesh có chặn giả đường robot đã đi | % vị trí camera bị mesh chiếm capsule, theo mức voxel | Camera canonical + mesh REC-05 (không GT) | `eval/path/path_clearance.py` | **Có** — chạy tay |
 | `path_validation` | SM-04: va chạm/đường đi | CLEAR/BLOCKED khớp nhãn 5/5 | EX-SIM | `eval/path/` | Chưa |
 | `object_coverage` | SM-05: độ phủ candidate object | recall theo danh sách gán nhãn | EX-SCENE | `eval/object/` | Chưa |
