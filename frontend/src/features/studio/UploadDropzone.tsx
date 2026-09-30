@@ -3,11 +3,12 @@
 import { FileVideo, Upload, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
-import { Button, Notice, ProgressBar, formatBytes } from "@/components/studio/primitives";
+import { Button, Notice, ProgressBar } from "@/components/studio/primitives";
 import { uploadVideo, type UploadHandle } from "@/lib/api/studio";
 import { UPLOAD_ACCEPT, rejectFileName } from "@/features/studio/inputKinds";
 import { cn } from "@/lib/cn";
 import type { UploadRecord } from "@/lib/contracts/studio";
+import { formatBytes } from "@/lib/format";
 
 /**
  * Chọn hoặc kéo-thả video / file 3DGS rồi tải lên backend. Máy chủ nhận diện loại

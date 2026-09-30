@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 
-import { Badge, Button, Card, EmptyState, Notice, buttonVariants, formatBytes } from "@/components/studio/primitives";
+import { Badge, Button, Card, EmptyState, Notice, buttonVariants } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { FlowStepper } from "@/features/studio/FlowStepper";
 import { canCreateScene, describeDetection } from "@/features/studio/inputKinds";
@@ -17,6 +17,7 @@ import { canEdit } from "@/lib/api/auth";
 import { createImport, createSceneFromUpload, getSample, listSamples, listUploads } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import type { DataOrigin, DemoManifest, SampleSummary, UploadRecord } from "@/lib/contracts/studio";
+import { formatBytes } from "@/lib/format";
 
 const STEPS = [
   { key: "upload", label: "Nguồn dữ liệu" },

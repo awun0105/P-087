@@ -7,7 +7,7 @@ import { useCallback, useMemo, useState } from "react";
 import { Input } from "@/components/shadcn/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/shadcn/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/shadcn/toggle-group";
-import { Badge, Card, EmptyState, Notice, buttonVariants, formatBytes } from "@/components/studio/primitives";
+import { Badge, Card, EmptyState, Notice, buttonVariants } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { STATUS_FILTERS, sceneStatus, type SceneStatusGroup } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
@@ -15,6 +15,7 @@ import { canEdit } from "@/lib/api/auth";
 import { listImports, listSamples, listScenes, sampleFileUrl } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import type { ImportedScene, SampleSummary, SceneSummary } from "@/lib/contracts/studio";
+import { formatBytes } from "@/lib/format";
 
 const DATE = new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeStyle: "short" });
 
@@ -233,7 +234,7 @@ function SamplesHero({ samples }: { samples: SampleSummary[] }) {
               <div className="relative aspect-video bg-viewport">
                 {sample.cover && (
                   // eslint-disable-next-line @next/next/no-img-element -- ảnh mẫu từ API, kích thước không cố định
-                  <img src={sampleFileUrl(sample.sample_id, sample.cover)} alt="" className="size-full object-cover opacity-90" loading="lazy" />
+                  <img src={sampleFileUrl(sample.sample_id, sample.cover)} alt="" className="size-full object-cover opacity-90" loading="lazy" decoding="async" />
                 )}
                 <Badge tone="ember" className="absolute top-3 left-3 bg-paper-raised/95">
                   <Clapperboard aria-hidden />
@@ -278,6 +279,7 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
             src={`/api/v1/jobs/${encodeURIComponent(job.job_id)}/thumbnail.jpg`}
             alt=""
             loading="lazy"
+            decoding="async"
             onError={() => setThumbnailFailed(true)}
             className="size-full object-cover"
           />

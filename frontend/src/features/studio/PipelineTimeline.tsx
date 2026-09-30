@@ -2,11 +2,12 @@
 
 import { AlertTriangle, Check, Circle, CircleSlash, Hand, Loader2 } from "lucide-react";
 
-import { ProgressBar, formatDuration } from "@/components/studio/primitives";
+import { ProgressBar } from "@/components/studio/primitives";
 import { MVP_STAGES, type StageMeta } from "@/features/studio/stages";
 import { cn } from "@/lib/cn";
 import type { StageId } from "@/lib/contracts/api";
 import type { StageState } from "@/lib/contracts/studio";
+import { formatDuration } from "@/lib/format";
 
 export interface StageView {
   stage_id: StageId;

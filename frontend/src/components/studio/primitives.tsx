@@ -1,12 +1,14 @@
 /**
- * UI primitive của Studio MVP, adapt từ pattern shadcn/ui (button/card/badge/
- * progress) trong `next-shadcn-admin-dashboard` (MIT) sang token beige/cam.
- * Không dùng Radix: các thành phần ở đây đủ bằng HTML gốc + aria.
+ * Lớp component của app Studio (token beige/cam, từ vựng trạng thái sage/ochre/rust). Feature
+ * import Button/Badge/Card/Notice… từ đây; `components/shadcn/*` là bộ nền (Radix) cho widget
+ * phức tạp (sidebar, dialog, table, input). Button dựng trên Button của bộ nền để chỉ có một
+ * hành vi gốc (focus, disabled, `asChild`), phần nhìn theo biến thể Studio bên dưới.
  */
 
 import { cva, type VariantProps } from "class-variance-authority";
 import type { ComponentProps, ReactNode } from "react";
 
+import { Button as BaseButton } from "@/components/shadcn/button";
 import { cn } from "@/lib/cn";
 
 export const buttonVariants = cva(
@@ -33,10 +35,21 @@ export const buttonVariants = cva(
   },
 );
 
-export type ButtonProps = ComponentProps<"button"> & VariantProps<typeof buttonVariants>;
+export type ButtonProps = ComponentProps<"button"> & VariantProps<typeof buttonVariants> & { asChild?: boolean };
 
-export function Button({ className, variant, size, type = "button", ...props }: ButtonProps) {
-  return <button type={type} className={cn(buttonVariants({ variant, size }), className)} {...props} />;
+/** Biến thể Studio → biến thể bộ nền (giữ `data-variant` có nghĩa cho CSS/test). */
+const BASE_VARIANT = { primary: "default", secondary: "outline", ghost: "ghost", danger: "destructive" } as const;
+
+export function Button({ className, variant, size, asChild = false, type, ...props }: ButtonProps) {
+  return (
+    <BaseButton
+      asChild={asChild}
+      type={asChild ? undefined : (type ?? "button")}
+      variant={BASE_VARIANT[variant ?? "primary"]}
+      className={cn(buttonVariants({ variant, size }), className)}
+      {...props}
+    />
+  );
 }
 
 export function Card({ className, ...props }: ComponentProps<"section">) {
@@ -98,9 +111,10 @@ export function ProgressBar({
       {clamped === null ? (
         <div className="studio-indeterminate absolute inset-y-0 w-1/3 rounded-full bg-ember" />
       ) : (
+        // scaleX thay vì width: đổi tiến độ không làm tính lại layout (mượt khi poll cập nhật).
         <div
-          className="h-full rounded-full bg-ember transition-[width] duration-300 ease-out"
-          style={{ width: `${clamped * 100}%` }}
+          className="h-full w-full origin-left rounded-full bg-ember transition-transform duration-300 ease-out"
+          style={{ transform: `scaleX(${clamped})` }}
         />
       )}
     </div>
@@ -163,27 +177,4 @@ export function Notice({
       <div className="min-w-0">{children}</div>
     </div>
   );
-}
-
-/** Định dạng dung lượng file theo đơn vị nhị phân, 1 chữ số thập phân. */
-export function formatBytes(bytes: number): string {
-  const units = ["B", "KB", "MB", "GB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
-}
-
-/** "3 phút 12 giây" — thời lượng đo được, không làm tròn thành ước lượng. */
-export function formatDuration(seconds: number): string {
-  const total = Math.max(0, Math.round(seconds));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const rest = total % 60;
-  if (hours > 0) return `${hours} giờ ${minutes} phút`;
-  if (minutes > 0) return `${minutes} phút ${rest} giây`;
-  return `${rest} giây`;
 }

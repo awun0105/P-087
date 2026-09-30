@@ -3,7 +3,7 @@
 import { Check, Clock, Loader2, RotateCcw, Ruler, Square } from "lucide-react";
 import { useState } from "react";
 
-import { Button, Card, Notice, formatBytes } from "@/components/studio/primitives";
+import { Button, Card, Notice } from "@/components/studio/primitives";
 import { ModeComparisonView } from "@/features/studio/ModeComparisonView";
 import { PipelineTimeline, type StageView } from "@/features/studio/PipelineTimeline";
 import { ModeButton } from "@/features/studio/scene/badges";
@@ -11,6 +11,7 @@ import { stageSeconds, useNow, type SceneInfo } from "@/features/studio/scene/st
 import { STUDIO_STAGES } from "@/features/studio/stages";
 import { StageViewer } from "@/features/studio/StageViewer";
 import type { JobProgress } from "@/lib/contracts/studio";
+import { formatBytes } from "@/lib/format";
 
 export function ProgressTab({
   jobId,
