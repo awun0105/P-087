@@ -53,6 +53,19 @@ Outputs:
 - Kiến trúc cloud (ADR 0003) chưa quyết định nơi chạy Isaac Sim (cần GPU có RT core,
   vd 3090/4090, nặng hơn pipeline REC); cần quyết định riêng khi nối vào.
 
+## Cập nhật 2026-09-30 (`feat/studio-integration`, PR #16)
+
+- SIM-05: khoét vùng vật khỏi mesh môi trường (`colliders/carve.py`), layer
+  `environment_collision.usda`, gói mô phỏng zip tất định theo revision; `job-123dfd4868d8` preflight
+  PASS 6/6. Isaac validation (SIM-06..09) chưa có: cần máy RTX.
+- **Isaac Sim nhận gì** (tra cứu, [audit #10](../../audits/10_pipeline_v2_methods.md)): hình ảnh bằng mesh
+  **hoặc** Gaussian (ParticleField, Isaac ≥ 5.0); Gaussian không có va chạm; rigid body động không
+  dùng triangle mesh (convex decomposition/SDF); cần Mass, Physics Material, `LabelsAPI`;
+  occupancy map chỉ thấy hình học có collision.
+- **Pipeline v2 ([ADR 0007](../../../decisions/0007-object-centric-hybrid-usd-pipeline.md)):** SIM-02/03 collider phân rã
+  lồi (CoACD) + khối lượng/vật liệu; SIM-04 preflight theo SimReady; SIM-05 xuất USD lai
+  (Gaussian qua 3DGRUT + collider); SIM-06 validation trên Isaac ≥ 5.0.
+
 ## Authority Gates
 
 - Isaac/CUDA/driver/GPU hiện `UNVERIFIED/TBD` và phải được runtime manifest ghi lại sau provisioning; không block synthetic Foundation.
