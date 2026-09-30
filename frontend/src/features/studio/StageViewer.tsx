@@ -3,7 +3,7 @@
 import { Canvas } from "@react-three/fiber";
 import { Grid, OrbitControls } from "@react-three/drei";
 import { Loader2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
@@ -170,11 +170,18 @@ function disposeTree(root: THREE.Object3D): void {
 
 function MeshLayer({ jobId, view }: { jobId: string; view: StageView }) {
   const ref = view.refs[0];
-  const url = ref ? jobArtifactContentUrl(jobId, ref) : null;
+  if (!ref) return <Notice>Bước này chưa có collision mesh.</Notice>;
+  return <CollisionMeshCanvas url={jobArtifactContentUrl(jobId, ref)} />;
+}
+
+/**
+ * Collision mesh canonical (mét, Z-up, sàn z = 0) trong three.js. `children` vẽ trong cùng
+ * khung Z-up (vd hộp vật thể ứng viên); mesh và material được giải phóng khi unmount/đổi URL.
+ */
+export function CollisionMeshCanvas({ url, children }: { url: string; children?: ReactNode }) {
   const [state, setState] = useState<{ root?: THREE.Group; error?: string; triangles?: number } | null>(null);
 
   useEffect(() => {
-    if (!url) return;
     const controller = new AbortController();
     let root: THREE.Group | undefined;
     fetch(url, { signal: controller.signal })
@@ -207,7 +214,6 @@ function MeshLayer({ jobId, view }: { jobId: string; view: StageView }) {
 
   // Mesh canonical Z-up; three.js Y-up → xoay -90° quanh X một lần ở group cha.
   const rotation = useMemo(() => [-Math.PI / 2, 0, 0] as [number, number, number], []);
-  if (!url) return <Notice>Bước này chưa có collision mesh.</Notice>;
   if (state?.error) return <Notice tone="rust">Không đọc được collision mesh: {state.error}</Notice>;
   if (!state?.root) {
     return (
@@ -223,6 +229,7 @@ function MeshLayer({ jobId, view }: { jobId: string; view: StageView }) {
         <directionalLight position={[10, 20, 10]} intensity={0.9} />
         <group rotation={rotation}>
           <primitive object={state.root} dispose={null} />
+          {children}
         </group>
         <Grid args={[40, 40]} cellSize={1} sectionSize={5} infiniteGrid fadeDistance={60} />
         <OrbitControls makeDefault />

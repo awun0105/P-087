@@ -5,6 +5,7 @@
 
 import { ApiError, apiFetch, fetchApi, type ApiResult } from "@/lib/api/client";
 import { directUpload, xhrPutPart } from "@/lib/api/directUpload";
+import type { SceneEditResponse, SceneResponse } from "@/lib/contracts/api";
 import {
   parseDemoManifest,
   parseDemoSelection,
@@ -274,4 +275,46 @@ export function listImports(): Promise<ApiResult<{ imports: ImportedScene[] }>> 
 /** URL SOG của scene import (tên file `.sog` để viewer chọn đúng parser). */
 export function importContentUrl(importId: string): string {
   return `${API}/imports/${encodeURIComponent(importId)}/content/scene.sog`;
+}
+
+// ── vật thể trong SceneIR (PRODUCT-07/07A, ADR 0006) ─────────────────────────
+
+/** SceneIR hiện tại của job; 404 khi bước tách vật thể chưa publish revision nào. */
+export function getJobScene(jobId: string, signal?: AbortSignal): Promise<ApiResult<SceneResponse>> {
+  return fetchApi<SceneResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene`, { signal });
+}
+
+export type ObjectAction = "confirm" | "ignore" | "hide" | "delete" | "rename";
+
+/** Thao tác trên một vật thể; `expectedRevision` là khoá optimistic (revision cũ → 409). */
+export function applyObjectAction(
+  jobId: string,
+  objectId: string,
+  action: ObjectAction,
+  expectedRevision: string,
+  extra: { active?: boolean; name?: string } = {},
+): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/scene/objects/${encodeURIComponent(objectId)}/${action}`,
+    { method: "POST", body: JSON.stringify({ expected_scene_revision: expectedRevision, ...extra }) },
+  );
+}
+
+/** Thêm vật cản hộp; `center` là tâm hộp theo mét trong khung world (sàn z = 0). */
+export function addBoxObstacle(
+  jobId: string,
+  expectedRevision: string,
+  name: string,
+  dimensions: [number, number, number],
+  center: [number, number, number],
+): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/objects`, {
+    method: "POST",
+    body: JSON.stringify({
+      expected_scene_revision: expectedRevision,
+      name,
+      dimensions_xyz_m: dimensions,
+      position_xyz: center,
+    }),
+  });
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Box, Check, Columns3, Info, Layers, Loader2, Ruler, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Box, Boxes, Check, Columns3, Info, Layers, Loader2, Ruler, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 
@@ -8,6 +8,7 @@ import { Badge, Button } from "@/components/studio/primitives";
 import { EditorFrame } from "@/features/studio/EditorFrame";
 import { MetricConfirmView } from "@/features/studio/MetricConfirmView";
 import { ModeComparisonView } from "@/features/studio/ModeComparisonView";
+import { ObjectReviewView } from "@/features/studio/ObjectReviewView";
 import { StageViewer } from "@/features/studio/StageViewer";
 
 /** Trạng thái tỉ lệ mét của scene người dùng (không có với scene mẫu). */
@@ -20,7 +21,7 @@ export interface SceneMetric {
 /** Bước hình học/collision sau xác nhận tỉ lệ (REC-05/REC-10). */
 export type GeometryState = "none" | "running" | "done" | "failed";
 
-type Panel = "editor" | "metric" | "stages" | "compare";
+type Panel = "editor" | "metric" | "stages" | "compare" | "objects";
 
 /**
  * Workspace toàn màn hình cho một scene 3DGS: thanh thông tin mảnh phía trên, phần
@@ -93,6 +94,16 @@ export function SceneWorkspace({
               {shown === "stages" ? "Về editor" : "Kết quả từng bước"}
             </Button>
           )}
+          {metric && geometry === "done" && (
+            <Button
+              size="sm"
+              variant={shown === "objects" ? "primary" : "secondary"}
+              onClick={() => setPanel(shown === "objects" ? "editor" : "objects")}
+            >
+              <Boxes aria-hidden />
+              {shown === "objects" ? "Về editor" : "Vật thể"}
+            </Button>
+          )}
           {metric && (
             <Button
               size="sm"
@@ -122,6 +133,8 @@ export function SceneWorkspace({
           />
         ) : shown === "stages" && metric ? (
           <StageViewer jobId={metric.jobId} />
+        ) : shown === "objects" && metric ? (
+          <ObjectReviewView jobId={metric.jobId} />
         ) : shown === "compare" && metric ? (
           <ModeComparisonView jobId={metric.jobId} />
         ) : (
