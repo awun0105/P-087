@@ -322,3 +322,33 @@ def test_artifact_references_are_product_visible_only(editor: SceneEditor) -> No
     scene = editor.current(_JOB_ID).scene
     for reference in SceneEditor.artifact_references(scene):
         assert reference.data_class in {"product_input", "derived"}
+
+
+# ── revision dựng từ bundle (EX-SCENE, ADR 0006) ─────────────────────────────
+
+
+def test_publish_initial_keeps_existing_revision(editor: SceneEditor) -> None:
+    """Chạy lại bước tách vật thể không được ghi đè revision người dùng đã sửa."""
+    scene = editor.current(_JOB_ID).scene
+    first = editor.publish_initial(_JOB_ID, scene.model_copy(update={"objects": []}))
+    assert first.scene.objects == scene.objects  # revision đã có (seed) được giữ nguyên
+
+
+def test_publish_initial_requires_root_revision(tmp_path) -> None:
+    editor = SceneEditor(tmp_path / "no-fixture", ArtifactResolver(tmp_path / "artifacts"))
+    scene = SceneEditor(_FIXTURE_ROOT, ArtifactResolver(tmp_path / "seed")).current(_JOB_ID).scene
+    with pytest.raises(SceneEditRejectedError):
+        editor.publish_initial(_JOB_ID, scene.model_copy(update={"scene_revision": "rev-002"}))
+    revision = editor.publish_initial(_JOB_ID, scene)
+    assert revision.scene.scene_revision == "rev-001" and revision.supersedes_revision is None
+
+
+def test_publish_next_bumps_revision_and_rejects_stale_client(editor: SceneEditor) -> None:
+    scene = editor.current(_JOB_ID).scene
+    result = editor.publish_next(_JOB_ID, "rev-001", scene.model_copy(update={"objects": []}), "reject_object")
+    assert result.revision.scene.scene_revision == "rev-002"
+    assert result.revision.supersedes_revision == "rev-001"
+    assert result.revision.scene.provenance["operation"] == "reject_object"
+    assert editor.current(_JOB_ID).scene.objects == []
+    with pytest.raises(SceneRevisionConflictError):
+        editor.publish_next(_JOB_ID, "rev-001", scene, "confirm_object")

@@ -41,6 +41,8 @@ _REVISION_PATTERN = re.compile(r"^(?P<prefix>.*?)(?P<number>\d+)$")
 _SCHEMA_VERSION = "1.0"
 #: Chặn trên cho vòng dò revision lúc phục hồi; revision tăng 1 mỗi lần sửa.
 _MAX_RECOVERY_STEPS = 1000
+#: Revision gốc của mọi job (fixture và scene dựng từ bundle đều bắt đầu từ đây).
+_ROOT_REVISION = "rev-001"
 
 
 class SceneEditor:
@@ -156,6 +158,41 @@ class SceneEditor:
             revision=revision,
         )
 
+    def publish_initial(self, job_id: str, scene: SceneIR) -> SceneRevision:
+        """Revision đầu của job dựng từ bundle (EX-SCENE). Đã có revision thì giữ nguyên, không ghi đè."""
+        existing = self._recover(job_id)
+        if existing is not None:
+            self._revisions[job_id] = existing
+            return existing
+        if scene.scene_revision != _ROOT_REVISION:
+            raise SceneEditRejectedError("revision đầu của job phải là revision gốc (rev-001)")
+        revision = self._publish(job_id, with_canonical_checksum(scene, "scene_ir_checksum"), supersedes=None)
+        self._revisions[job_id] = revision
+        return revision
+
+    def publish_next(self, job_id: str, expected_revision: str, scene: SceneIR, operation: str) -> SceneEditResult:
+        """Publish kết quả một thao tác domain EX-SCENE (xác nhận/loại/thêm vật) thành revision kế tiếp.
+
+        Khoá optimistic như `apply`: client giữ revision cũ thì 409, không ghi đè.
+        """
+        previous = self.current(job_id)
+        current = previous.scene
+        if expected_revision != current.scene_revision:
+            raise SceneRevisionConflictError(
+                f"scene đã đổi: client đang giữ {expected_revision}, revision hiện tại là {current.scene_revision}"
+            )
+        draft = scene.model_copy(
+            update={
+                "scene_revision": _next_scene_revision(current.scene_revision),
+                "provenance": {**scene.provenance, "edited_from": current.scene_revision, "operation": operation},
+            }
+        )
+        revision = self._publish(
+            job_id, with_canonical_checksum(draft, "scene_ir_checksum"), supersedes=current.scene_revision
+        )
+        self._revisions[job_id] = revision
+        return SceneEditResult(job_id=job_id, previous_scene_revision=current.scene_revision, revision=revision)
+
     @classmethod
     def _build_revision(cls, scene: SceneIR, command: SceneEditCommand) -> SceneIR:
         """Dựng SceneIR kế tiếp; revision cũ không bao giờ bị sửa.
@@ -217,11 +254,11 @@ class SceneEditor:
         """Revision cao nhất đã publish trên đĩa; None nếu job chưa có gì.
 
         `ArtifactResolver` cố ý không có API liệt kê thư mục, nên dò tăng dần từ
-        revision của fixture. Chuỗi revision liền mạch theo cấu trúc vì
+        revision gốc. Chuỗi revision liền mạch theo cấu trúc vì
         `_next_scene_revision` luôn cộng một, nên dừng ở revision đầu tiên chưa có
         là đúng; job mới chỉ tốn một lần kiểm tra tồn tại.
         """
-        revision = self._fixture_scene().scene_revision
+        revision = _ROOT_REVISION
         latest: SceneRevision | None = None
         for _ in range(_MAX_RECOVERY_STEPS):
             recovered = self._load_revision(job_id, revision)
