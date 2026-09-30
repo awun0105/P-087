@@ -59,7 +59,14 @@ def __getattr__(name: str) -> object:
         from src.services.reconstruction import finalize
 
         return getattr(finalize, name)
-    if name in {"CameraMarker", "camera_markers", "frame_images"}:
+    if name in {
+        "CameraMarker",
+        "CameraView",
+        "camera_markers",
+        "camera_views",
+        "frame_images",
+        "metric_gaussian_points",
+    }:
         from src.services.reconstruction import views
 
         return getattr(views, name)
@@ -83,6 +90,9 @@ __all__ = [
     "package_splat",
     "ModeComparison",
     "CameraMarker",
+    "CameraView",
+    "camera_views",
+    "metric_gaussian_points",
     "camera_markers",
     "frame_images",
     "ConfirmationSummary",
