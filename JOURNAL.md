@@ -166,16 +166,22 @@
 
 ### 1. Lâm Quang Anh Quân (`EX-REC` — Reconstruction)
 - **Mục tiêu tuần này:**
-  - [ ] Triển khai hoàn tất REC-05 (Voxel Geometry & Collision Mesh) và xuất file `collision.glb` watertight.
-  - [ ] Triển khai REC-06 (Metric Scale Anchor) để chuẩn hóa kích thước mét thật cho mô hình 3D.
-- **Đã hoàn thành:**
-  - [Chỉ điền kết quả đã có bằng chứng]
+  - [ ] Triển khai hoàn tất REC-05 (Voxel Geometry & Collision Mesh) và xuất file `collision.glb` watertight. *(collision mesh chạy thật trong pipeline; tiêu chí chặn giả ghost-block chưa đạt, watertight chưa kiểm — xem REC-05)*
+  - [x] Triển khai REC-06 (Metric Scale Anchor) để chuẩn hóa kích thước mét thật cho mô hình 3D. *(xác nhận tỉ lệ từ UI, PR #15; sai số `e` đo lần 1 ≈ 15,6 cm, chưa khoá)*
+- **Đã hoàn thành (đến 30/09):**
+  - Tích hợp đầu-cuối trên `feat/studio-integration` (PR #16): tách vật SAMPro3D + SAM2, sửa SceneIR theo vật, gói mô phỏng USD + preflight (PASS 6/6 trên `job-123dfd4868d8`), duyệt/phát hành, refactor UI theo PRODUCT.md.
+  - Đo chất lượng 3DGS: `seg-5fps-cap600k` PSNR 28,80 / SSIM 0,927 / LPIPS 0,268.
+  - Audit repo + tra cứu Isaac Sim → chốt pipeline v2 (ADR 0007): scene theo vật, xuất USD lai.
 - **Khó khăn & Giải pháp:**
   | Khó khăn | Giải pháp | Kết quả |
   |----------|-----------|---------|
-  | [Vấn đề thực tế] | [Cách xử lý] | [Kết quả/evidence] |
+  | 3DGS hệ mét nằm lệch trục trong viewer | Viewer luôn xoay splat theo quy ước COLMAP; đặt riêng phép xoay cho nội dung Z-up | Hiển thị đúng, camera mở tại góc quay đầu tiên |
+  | Brush crash khi 5 fps (663k splat, GPU 4 GB) | Giới hạn `max_splats` 600k | Lượt chấm hoàn tất, điểm tốt nhất hiện có |
+  | Video train-split có khoảng trống làm COLMAP vỡ nhiều mảnh | Dùng đoạn liền 154–527 | Sweep so sánh được |
+  | Ẩn/xoá vật chỉ đổi màu hộp, hình không đổi | Tra cứu Isaac + audit repo, đổi đích pipeline | ADR 0007 |
 - **Bài học:**
-  - [Bài học từ công việc thực tế]
+  - Kiểm tra "đầu vào thật sự" của hệ đích (Isaac nhận cả Gaussian) trước khi thiết kế pipeline.
+  - Ba lớp dữ liệu cùng hệ toạ độ chưa phải là scene chỉnh sửa được; cần ghép theo vật từ đầu.
 
 ### 2. Lê Mạnh Cường (`EX-PRODUCT` — Product/Orchestration)
 - **Mục tiêu tuần này:**
