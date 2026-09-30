@@ -14,3 +14,9 @@ eval/
 .dockerignore
 Dockerfile
 docker-compose.yml
+# Image API (ADR 0003 khối B): không mang dữ liệu/runtime cục bộ hay frontend (deploy riêng).
+data/
+frontend/
+scripts/gpu/studio.env
+.aws
+**/node_modules
