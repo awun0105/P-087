@@ -166,7 +166,11 @@ Mỗi gói: code + test tập trung + cập nhật task file liên quan + commit
     0,22 m, p90 0,46 m; mọi phép đổi trục khác lệch 3–9 m. Collision job-ac2 tạo 01:03, **trước** khi có
     vùng cắt (`c74f77d` 01:13) nên còn rác z −6,8…11,8 m; job-123 đã cắt (z −0,8…5,3 m). Demo dùng
     job-123 hoặc chạy lại bước hoàn tất job-ac2 (chờ owner).
-  - [ ] Browser QA tương tác của owner; lọc ứng viên kệ/xà.
+  - [ ] Browser QA tương tác của owner. Không lọc ứng viên kệ/xà (owner, 2026-09-30; ADR 0006).
+- Quyết định owner 2026-09-30: chuẩn bị dữ liệu demo (tải thêm lượt TorWIC, mỗi camera của mỗi lượt
+  thành một video, chạy pipeline) **làm sau**, khi phần mềm gần hoàn chỉnh và workflow đã sẵn sàng.
+  Hướng đã chốt: mỗi góc quay (camera trái/phải) của mỗi lượt là một video riêng để so góc nào dựng
+  tốt nhất; không ghép nhiều góc/nhiều lượt vào một video.
   - [ ] EX-SIM: collider môi trường + vật đã xác nhận, enrichment/preflight, USD candidate có mesh
     môi trường, nút "Tạo gói mô phỏng"; Isaac cần máy RTX (owner).
 - [x] Gói 5 — scene import từ file 3DGS, chỉ xem/chỉnh sửa: nhận `.ply`/`.zip`, nén PLY → SOG bằng

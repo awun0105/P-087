@@ -79,4 +79,6 @@ SAM2 (~2,5–3 GB, dependency mới) được owner đồng ý 2026-09-30 ("ok l
 
 - EX-SIM: collider cho vật đã xác nhận + collider môi trường từ collision mesh, USD candidate
   (hiện `usd/usda.py` chỉ phát ground plane), khoét vật khỏi mesh môi trường.
-- Lọc ứng viên kệ/xà (vd bỏ khối lơ lửng không chạm sàn/kệ, hoặc phân loại) — cần đo trước khi đổi.
+- **Không** thêm luật lọc ứng viên kệ/xà (owner quyết 2026-09-30): ứng viên sai là hệ quả của 3DGS
+  preview kém (job-ac2/123 chỉ dựng từ 50 ảnh trong 20 s đầu của 109 s Aisle_CW, xem
+  `recon_visual_quality`), không phải lỗi thuật toán; sửa bằng 3DGS tốt hơn, không bằng heuristic.
