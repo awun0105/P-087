@@ -160,6 +160,12 @@ Mỗi gói: code + test tập trung + cập nhật task file liên quan + commit
     `features/viewer/source-frame.ts`) và mở tại camera quay đầu tiên. Collision mesh và hộp vật thể
     phủ lên 3DGS màu trong cùng app PlayCanvas (`scene-overlay.ts`). Kiểm bằng Chrome headless
     (SwiftShader) trên job-ac2: Brush và hệ mét cùng góc mở, sàn nằm ngang, hộp khớp vật.
+  - [x] Sửa tiếp: lớp phủ gọi `renderNextFrame` (viewer render theo yêu cầu nên trước đó bật/tắt
+    không hiện tới khi xoay camera); tâm xoay 35% quỹ đạo (zoom orbit nhân theo khoảng cách tới tâm).
+  - Đo khớp collision ↔ 3DGS hệ mét (job-ac2, không đổi trục): Gaussian → đỉnh mesh gần nhất trung vị
+    0,22 m, p90 0,46 m; mọi phép đổi trục khác lệch 3–9 m. Collision job-ac2 tạo 01:03, **trước** khi có
+    vùng cắt (`c74f77d` 01:13) nên còn rác z −6,8…11,8 m; job-123 đã cắt (z −0,8…5,3 m). Demo dùng
+    job-123 hoặc chạy lại bước hoàn tất job-ac2 (chờ owner).
   - [ ] Browser QA tương tác của owner; lọc ứng viên kệ/xà.
   - [ ] EX-SIM: collider môi trường + vật đã xác nhận, enrichment/preflight, USD candidate có mesh
     môi trường, nút "Tạo gói mô phỏng"; Isaac cần máy RTX (owner).
