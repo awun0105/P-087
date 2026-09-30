@@ -65,6 +65,12 @@ Thay mục "Tolerance — chờ số đo" bên dưới (giữ lại làm lịch 
    [plan tổng thể](../../../../plans/active/2026-09-29-studio-completion.md) bằng
    click lặp trên Aisle_CW so với LiDAR, trên đoạn hiệu chỉnh riêng, khóa trước
    đánh giá cuối (TEAM_EXECUTION_PLAN: không đổi threshold sau khi xem kết quả).
+   **Đo lần 1 (2026-09-30, `metric_click_error`, job-ac2, 3DGS preview 50 ảnh):** trong vùng
+   LiDAR phủ, bề mặt 3DGS → LiDAR trung vị 15,5 cm (p90 58 cm; đã gồm RMS căn chỉnh 6,8 cm và
+   khoảng cách điểm LiDAR 3,5 cm); lệch pixel ở độ sâu 2,9 m: 0,9 cm (2 px) – 2,3 cm (5 px).
+   `e` ≈ 15,6 cm, gần như toàn bộ do 3DGS preview kém (xem `recon_visual_quality`), không do tay
+   click. **Chưa khóa `e`**: đo lại trên 3DGS của preset chất lượng mới rồi owner chốt. Ghi chú:
+   tâm Gaussian là proxy của điểm click (bề mặt render), có xu hướng ước lượng cao.
 
 ### Tolerance — chờ số đo trên baseline thật
 
