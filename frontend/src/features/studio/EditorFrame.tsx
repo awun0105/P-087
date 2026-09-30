@@ -79,7 +79,7 @@ export function EditorFrame({
   return (
     <div className="relative size-full bg-viewport">
       {(mode === "checking" || !loaded) && (
-        <div className="absolute inset-0 z-10 grid place-items-center text-ink/80" role="status">
+        <div className="absolute inset-0 z-10 grid place-items-center text-paper/80" role="status">
           <div className="flex flex-col items-center gap-3 text-sm">
             <Loader2 className="size-6 animate-spin text-ember motion-reduce:animate-none" aria-hidden />
             {mode === "checking" ? "Đang kiểm tra WebGPU…" : "Đang mở editor 3D…"}
@@ -122,13 +122,13 @@ function WebGlViewer({ contentUrl, filename, onTryEditor }: { contentUrl: string
         </Button>
       </div>
       {failed ? (
-        <div className="grid size-full place-items-center p-6 text-center text-sm text-ink/80" role="alert">
+        <div className="grid size-full place-items-center p-6 text-center text-sm text-paper/80" role="alert">
           Không render được 3DGS: trình duyệt cần WebGL2 hoặc WebGPU và đủ bộ nhớ GPU.
         </div>
       ) : (
         <>
           {!runtime.loaded && (
-            <p className="absolute right-4 bottom-4 z-10 rounded-lg bg-viewport/80 px-3 py-1.5 text-xs text-ink/80" role="status">
+            <p className="absolute right-4 bottom-4 z-10 rounded-lg bg-viewport/80 px-3 py-1.5 text-xs text-paper/80" role="status">
               Đang nạp {Math.round(runtime.progress)}%
             </p>
           )}

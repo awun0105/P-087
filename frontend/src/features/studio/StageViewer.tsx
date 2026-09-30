@@ -166,7 +166,7 @@ function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageVie
   const ref = view.refs[0];
   if (!ref) return <Notice>Bước này chưa có file 3DGS.</Notice>;
   if (capability === "failed" || capability === "unavailable") {
-    return <p className="grid size-full place-items-center text-sm text-ink/80">Trình duyệt không render được 3DGS (cần WebGL2).</p>;
+    return <p className="grid size-full place-items-center text-sm text-paper/80">Trình duyệt không render được 3DGS (cần WebGL2).</p>;
   }
   return (
     <PlayCanvasScene
@@ -241,7 +241,7 @@ export function CollisionMeshCanvas({ url, children }: { url: string; children?:
   if (state?.error) return <Notice tone="rust">Không đọc được collision mesh: {state.error}</Notice>;
   if (!state?.root) {
     return (
-      <p className="flex h-full items-center justify-center gap-2 text-sm text-ink/80" role="status">
+      <p className="flex h-full items-center justify-center gap-2 text-sm text-paper/80" role="status">
         <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden /> Đang tải collision mesh…
       </p>
     );
@@ -258,7 +258,7 @@ export function CollisionMeshCanvas({ url, children }: { url: string; children?:
         <Grid args={[40, 40]} cellSize={1} sectionSize={5} infiniteGrid fadeDistance={60} />
         <OrbitControls makeDefault />
       </Canvas>
-      <p className="absolute bottom-3 left-3 rounded-md bg-viewport/80 px-2 py-1 text-xs text-ink/80">
+      <p className="absolute bottom-3 left-3 rounded-md bg-viewport/80 px-2 py-1 text-xs text-paper/80">
         {state.triangles?.toLocaleString("vi-VN")} tam giác · lưới 1 m, sàn z = 0
       </p>
     </>

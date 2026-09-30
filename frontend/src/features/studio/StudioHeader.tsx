@@ -23,7 +23,7 @@ export function StudioHeader() {
     <header className="sticky top-0 z-30 border-b border-line/80 bg-paper/85 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-6xl items-center gap-6 px-4 sm:px-6">
         <Link href="/" className="flex items-center gap-2.5 rounded-lg text-ink focus-visible:ring-3 focus-visible:ring-ember/40 focus-visible:outline-none">
-          <span className="grid size-8 place-items-center rounded-lg bg-ink text-ink">
+          <span className="grid size-8 place-items-center rounded-lg bg-ink text-paper">
             <Box className="size-4" aria-hidden />
           </span>
           <span className="text-[15px] font-semibold tracking-tight">Real2Sim Studio</span>

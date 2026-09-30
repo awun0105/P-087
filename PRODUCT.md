@@ -482,6 +482,8 @@ S01–S14 là mã **màn hình UX**, không phải task ID. Một số là tab/p
 
 ### 7.5 Palette và ngữ nghĩa hình ảnh
 
+> **Cập nhật 30/09/2026:** owner đã bỏ palette dưới đây cho Studio và dùng lại beige + cam (xem D-04). Bảng giữ lại làm lịch sử.
+
 **REQUIREMENT — palette do người dùng cung cấp**, áp dụng cho prototype; đây là brief màu, không phải hệ design token/CSS:
 
 | Màu | Vai trò |
@@ -619,7 +621,7 @@ Mỗi quyết định chỉ chốt cách **UI thể hiện**; không đổi PRD,
 | D-01 | Dùng donor thế nào | **Mang phần UI của donor vào `frontend/` hiện có**, không thay thế repo: copy `src/components/ui/*` cần dùng (shadcn/radix), shell sidebar + header, auth v2 layout, bảng (Tasks) và grid/list (File Manager) làm mẫu; giữ nguyên `lib/api`, contracts, viewer PlayCanvas/three, test và route Studio. Không copy trang domain bị REJECT ở §3.2 | Hai stack trùng (Next 16.3.6, React 19, Tailwind v4, lucide 1.48 — VERIFIED `package.json`); thay repo sẽ mất viewer, contracts và 137 test đang xanh |
 | D-02 | Công cụ dev | Giữ **ESLint + Vitest + tsc** của repo; không chuyển sang Biome/Husky của donor. Code copy từ donor được format lại theo ESLint của repo | AGENTS.md: dùng scripts có thật trong `frontend/package.json`; tránh hai bộ lint |
 | D-03 | Dependency mới | Chỉ thêm thứ component cần: `radix-ui`, `sonner`, `@tanstack/react-table` (Jobs), `next-themes` chỉ nếu bật light mode. **Không** thêm `zustand` (state bền vững thuộc backend — AGENTS §8), không thêm chart khi chưa có số liệu thật. Ghi nguồn donor (MIT) + thư viện vào `frontend/THIRD_PARTY_NOTICES.md` | Kiểm license trước khi thêm (tất cả MIT); ít dependency nhất |
-| D-04 | Theme | **Dark mặc định, một theme**, token theo palette §7.5 (Deep Navy nền, Deep Slate panel, Jade CTA, Cyan geometry, Gold collider, trạng thái Success/Warning/Error kèm chữ). Không có theme switcher/preset playground. Light mode là follow-up | Viewport 3D đọc tốt trên nền tối; bỏ theme beige hiện tại |
+| D-04 | Theme | **Sửa 30/09/2026 (owner):** dùng lại theme sáng **beige + cam** (paper `#f5efe6`, ink `#2b2520`, CTA ember `#c2551f`/`#e8743b`, viewport 3D nâu than `#1f1b17`), một theme; token shadcn lấy cùng giá trị. Palette tối §7.5 (Deep Navy/Jade) đã thử ở P1 và bị owner bỏ vì không đẹp. Không có theme switcher/preset playground | Owner đánh giá trực quan sau khi xem bản tối; viewport vẫn nền tối nên 3DGS đọc tốt |
 | D-05 | Dữ liệu minh họa trong app thật | **Cấm** hiển thị số liệu, verdict, report, replay hay approval minh họa như kết quả. Màn chưa có runtime dùng trạng thái `Chưa khả dụng` + lý do + điều kiện mở. Kịch bản handoff §10 dùng cho test/QA với fixture có nhãn, không cho người dùng | Ranh giới §2.3, AGENTS §1.5 |
 | D-06 | Jobs (S04) lấy dữ liệu từ đâu | Giai đoạn đầu dựng từ `GET /api/v1/scenes` (scene + job mới nhất) và `GET /jobs/{id}/progress`; không thêm API tổng hợp mới cho tới khi cần lọc/phân trang phía server | Tránh đổi contract backend chỉ vì UI |
 | D-07 | Vị trí các tính năng hiện có trong IA scene | Tab trong scene: **Tiến trình** (timeline + kết quả từng bước + so sánh 3 hướng khi có dữ liệu LiDAR demo), **Studio** (viewport 3DGS hệ mét / editor Gaussian; panel Tỉ lệ mét S07, panel Vật thể S08, inspector), **Kiểm tra & duyệt** (gói mô phỏng + preflight; Isaac/review "Chưa khả dụng"), **Kết quả** (xuất bản làm việc, tải gói mô phỏng; release "Chưa khả dụng") | Khớp IA §3.1; không tạo trang global mới |
