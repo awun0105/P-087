@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Box, Boxes, Check, Columns3, Info, Layers, Loader2, Ruler, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Box, Boxes, Check, Columns3, Info, Layers, Loader2, Pencil, Ruler, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 
@@ -10,6 +10,7 @@ import { MetricConfirmView } from "@/features/studio/MetricConfirmView";
 import { ModeComparisonView } from "@/features/studio/ModeComparisonView";
 import { ObjectReviewView } from "@/features/studio/ObjectReviewView";
 import { StageViewer } from "@/features/studio/StageViewer";
+import { cn } from "@/lib/cn";
 
 /** Trạng thái tỉ lệ mét của scene người dùng (không có với scene mẫu). */
 export interface SceneMetric {
@@ -22,6 +23,14 @@ export interface SceneMetric {
 export type GeometryState = "none" | "running" | "done" | "failed";
 
 type Panel = "editor" | "metric" | "stages" | "compare" | "objects";
+
+/** Các chế độ xem của một scene; xác nhận tỉ lệ là một bước (nút riêng), không phải tab. */
+const TABS: readonly { id: Exclude<Panel, "metric">; label: string; hint: string; icon: ReactNode }[] = [
+  { id: "editor", label: "Editor 3DGS", hint: "Xem và chỉnh 3DGS (SuperSplat)", icon: <Pencil aria-hidden /> },
+  { id: "stages", label: "Kết quả từng bước", hint: "Frame, camera, 3DGS, hệ mét, collision", icon: <Layers aria-hidden /> },
+  { id: "objects", label: "Vật thể", hint: "Xác nhận vật thể ứng viên, thêm vật cản", icon: <Boxes aria-hidden /> },
+  { id: "compare", label: "So sánh 3 hướng", hint: "RGB only, anchor người dùng, LiDAR", icon: <Columns3 aria-hidden /> },
+];
 
 /**
  * Workspace toàn màn hình cho một scene 3DGS: thanh thông tin mảnh phía trên, phần
@@ -84,41 +93,48 @@ export function SceneWorkspace({
               Xác nhận tỉ lệ mét
             </Button>
           )}
-          {metric && (
-            <Button
-              size="sm"
-              variant={shown === "stages" ? "primary" : "secondary"}
-              onClick={() => setPanel(shown === "stages" ? "editor" : "stages")}
-            >
-              <Layers aria-hidden />
-              {shown === "stages" ? "Về editor" : "Kết quả từng bước"}
-            </Button>
-          )}
-          {metric && geometry === "done" && (
-            <Button
-              size="sm"
-              variant={shown === "objects" ? "primary" : "secondary"}
-              onClick={() => setPanel(shown === "objects" ? "editor" : "objects")}
-            >
-              <Boxes aria-hidden />
-              {shown === "objects" ? "Về editor" : "Vật thể"}
-            </Button>
-          )}
-          {metric && (
-            <Button
-              size="sm"
-              variant={shown === "compare" ? "primary" : "secondary"}
-              onClick={() => setPanel(shown === "compare" ? "editor" : "compare")}
-            >
-              <Columns3 aria-hidden />
-              {shown === "compare" ? "Về editor" : "So sánh 3 hướng"}
-            </Button>
-          )}
         </div>
-        <p className="ml-auto hidden text-xs text-ink-subtle lg:block">
-          Chọn vùng để xóa/di chuyển · File › Export để tải PLY/SOG
-        </p>
+        {!metric && (
+          <p className="ml-auto hidden text-xs text-ink-subtle lg:block">
+            Chọn vùng để xóa/di chuyển · File › Export để tải PLY/SOG
+          </p>
+        )}
       </div>
+      {metric && (
+        <nav
+          className="flex items-center gap-1 overflow-x-auto border-b border-line bg-paper px-4 py-1.5 sm:px-6"
+          role="tablist"
+          aria-label="Chế độ xem scene"
+        >
+          {TABS.map((tab) => {
+            const locked = tab.id === "objects" && geometry !== "done";
+            const active = shown === tab.id || (tab.id === "editor" && shown === "metric");
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                disabled={locked}
+                title={locked ? "Có sau khi dựng collision xong" : tab.hint}
+                onClick={() => setPanel(tab.id)}
+                className={cn(
+                  "flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 [&_svg]:size-4",
+                  active ? "bg-ember-soft font-medium text-ember-strong" : "text-ink-muted hover:bg-paper-sunken hover:text-ink",
+                )}
+              >
+                {tab.icon}
+                {tab.label}
+              </button>
+            );
+          })}
+          {shown === "editor" && (
+            <p className="ml-auto hidden shrink-0 text-xs text-ink-subtle lg:block">
+              Chọn vùng để xóa/di chuyển · File › Export để tải PLY/SOG
+            </p>
+          )}
+        </nav>
+      )}
       <div className="min-h-0 flex-1">
         {shown === "metric" && metric ? (
           <MetricConfirmView

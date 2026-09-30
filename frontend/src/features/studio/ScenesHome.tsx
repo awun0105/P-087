@@ -186,39 +186,55 @@ function SamplesHero({ samples }: { samples: SampleSummary[] }) {
 }
 
 function SceneCard({ scene }: { scene: SceneSummary }) {
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
   const status = sceneStatus(scene.latest_job, scene.preview_ready);
   const job = scene.latest_job;
   const created = scene.project.created_at ? DATE.format(new Date(scene.project.created_at)) : null;
+  // Frame đầu chỉ có sau khi trích frame; trước đó (hoặc ảnh lỗi) giữ icon.
+  const hasFrames = job?.stage_artifacts.some((stage) => stage.stage_id === "ST-FRAME-EXTRACT") ?? false;
   const content = (
     <Card
       className={cn(
-        "group flex h-full flex-col p-5 transition-[border-color,box-shadow] duration-200",
+        "group flex h-full flex-col overflow-hidden transition-[border-color,box-shadow] duration-200",
         job && "hover:border-line-strong hover:shadow-md",
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="grid size-10 place-items-center rounded-xl bg-paper-sunken text-ink-muted">
-          <Film className="size-5" aria-hidden />
-        </div>
-        <Badge tone={status.tone}>
+      <div className="relative aspect-video w-full bg-paper-sunken">
+        {job && hasFrames && !thumbnailFailed ? (
+          // eslint-disable-next-line @next/next/no-img-element -- JPEG nhỏ do API tạo, không qua next/image
+          <img
+            src={`/api/v1/jobs/${encodeURIComponent(job.job_id)}/thumbnail.jpg`}
+            alt=""
+            loading="lazy"
+            onError={() => setThumbnailFailed(true)}
+            className="size-full object-cover"
+          />
+        ) : (
+          <div className="grid size-full place-items-center text-ink-subtle">
+            <Film className="size-8" aria-hidden />
+          </div>
+        )}
+        <Badge tone={status.tone} className="absolute top-3 right-3 shadow-sm">
           {status.active && <span className="studio-pulse size-1.5 rounded-full bg-current" aria-hidden />}
           {status.label}
         </Badge>
       </div>
-      <h3 className="mt-4 truncate text-base font-semibold text-ink">{scene.project.name}</h3>
-      <p className="mt-1 truncate text-sm text-ink-muted">
-        {scene.project.input_video
-          ? `${scene.project.input_video.original_name} · ${formatBytes(scene.project.input_video.size_bytes)}`
-          : "Không có video"}
-      </p>
-      <div className="mt-auto flex items-center justify-between pt-5 text-xs text-ink-subtle">
-        <span>{created}</span>
-        {job && (
-          <span className="flex items-center gap-1 font-medium text-ink-muted transition-colors group-hover:text-ember-strong">
-            {scene.preview_ready ? "Mở scene" : "Xem tiến trình"}
-            <ArrowRight className="size-3.5" aria-hidden />
-          </span>
-        )}
+      <div className="flex flex-1 flex-col p-5">
+        <h3 className="truncate text-base font-semibold text-ink">{scene.project.name}</h3>
+        <p className="mt-1 truncate text-sm text-ink-muted">
+          {scene.project.input_video
+            ? `${scene.project.input_video.original_name} · ${formatBytes(scene.project.input_video.size_bytes)}`
+            : "Không có video"}
+        </p>
+        <div className="mt-auto flex items-center justify-between pt-5 text-xs text-ink-subtle">
+          <span>{created}</span>
+          {job && (
+            <span className="flex items-center gap-1 font-medium text-ink-muted transition-colors group-hover:text-ember-strong">
+              {scene.preview_ready ? "Mở scene" : "Xem tiến trình"}
+              <ArrowRight className="size-3.5" aria-hidden />
+            </span>
+          )}
+        </div>
       </div>
     </Card>
   );
@@ -237,7 +253,7 @@ function SceneGridSkeleton() {
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label="Đang tải scene">
       {[0, 1, 2].map((key) => (
-        <div key={key} className="h-44 animate-pulse rounded-2xl border border-line bg-paper-raised motion-reduce:animate-none" />
+        <div key={key} className="h-72 animate-pulse rounded-2xl border border-line bg-paper-raised motion-reduce:animate-none" />
       ))}
     </div>
   );
