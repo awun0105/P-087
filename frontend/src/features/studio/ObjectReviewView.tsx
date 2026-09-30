@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Badge, Button, Notice } from "@/components/studio/primitives";
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
+import { SimulationPackagePanel } from "@/features/studio/SimulationPackagePanel";
 import { CollisionMeshCanvas } from "@/features/studio/StageViewer";
 import type { OverlayBox } from "@/features/viewer/scene-overlay";
 import { jobArtifactContentUrl } from "@/lib/api/endpoints";
@@ -33,6 +34,7 @@ export function ObjectReviewView({ jobId }: { jobId: string }) {
   const [showIgnored, setShowIgnored] = useState(false);
   const [cameras, setCameras] = useState<StageView["cameras"]>([]);
   const [focus, setFocus] = useState<{ id: string; nonce: number } | undefined>();
+  const [reload, setReload] = useState(0);
 
   /** Chọn từ danh sách: đánh dấu và cho camera bay tới vật. */
   const selectFromList = (object: SceneObject) => {
@@ -53,7 +55,13 @@ export function ObjectReviewView({ jobId }: { jobId: string }) {
       else if (result.error.status === 404) setMissing(true);
       else setError(result.error.detail);
     });
+    return () => controller.abort();
+  }, [jobId, reload]);
+
+  useEffect(() => {
+    const controller = new AbortController();
     // Camera quay hệ mét để mở scene tại góc camera đầu tiên; thiếu thì dùng camera mặc định.
+    // Tách khỏi lần tải scene: camera không đổi khi sửa vật, tải lại sẽ tạo lại viewer 3D.
     getStageViews(jobId, controller.signal).then(
       (views) => setCameras(views.find((view) => view.kind === "gaussian" && view.unit === "meter")?.cameras ?? []),
       () => undefined,
@@ -196,6 +204,11 @@ export function ObjectReviewView({ jobId }: { jobId: string }) {
             </li>
           ))}
         </ul>
+        <SimulationPackagePanel
+          jobId={jobId}
+          sceneRevision={scene.scene_revision}
+          onSceneChanged={() => setReload((value) => value + 1)}
+        />
         <AddObstacleForm
           busy={busy}
           onAdd={(name, dimensions, center) =>

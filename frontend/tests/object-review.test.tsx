@@ -59,6 +59,21 @@ function reply(body: unknown, status = 200): Response {
   return { ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) } as Response;
 }
 
+/** Mock fetch theo URL: mỗi route một hàng đợi phản hồi, gói mô phỏng mặc định chưa có. */
+function routeFetch(routes: Record<string, Response[]>) {
+  vi.mocked(global.fetch).mockImplementation(async (input) => {
+    const url = String(input);
+    const key = Object.keys(routes).find((pattern) => url.includes(pattern));
+    if (key && routes[key].length) return routes[key].shift()!;
+    if (url.includes("/simulation-package")) return reply(null);
+    throw new Error(`fetch không mong đợi: ${url}`);
+  });
+}
+
+function calls(pattern: string) {
+  return vi.mocked(global.fetch).mock.calls.filter(([url]) => String(url).includes(pattern));
+}
+
 describe("ObjectReviewView", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -66,22 +81,25 @@ describe("ObjectReviewView", () => {
   });
 
   it("xác nhận ứng viên với revision hiện tại và hiển thị revision mới", async () => {
-    vi.mocked(global.fetch)
-      .mockResolvedValueOnce(reply({ scene: scene("rev-001", "CANDIDATE") }))
-      .mockResolvedValueOnce(reply({ scene_revision: "rev-002", scene: scene("rev-002", "CONFIRMED", "CONFIRMED") }));
+    routeFetch({
+      "/objects/candidate-001/confirm": [
+        reply({ scene_revision: "rev-002", scene: scene("rev-002", "CONFIRMED", "CONFIRMED") }),
+      ],
+      "/scene": [reply({ scene: scene("rev-001", "CANDIDATE") })],
+    });
     render(<ObjectReviewView jobId="job-a" />);
     expect(await screen.findByText("1 vật thể · 1 chờ xác nhận")).toBeInTheDocument();
     // Hộp ứng viên màu vàng phủ trên 3DGS hệ mét.
     expect(screen.getByTestId("metric-scene")).toHaveTextContent("candidate-001:#facc15");
     fireEvent.click(screen.getByRole("button", { name: /Xác nhận/ }));
     await waitFor(() => expect(screen.getByText("Đã xác nhận")).toBeInTheDocument());
-    const [url, init] = vi.mocked(global.fetch).mock.calls[1]!;
+    const [[url, init]] = calls("/confirm");
     expect(String(url)).toContain("/api/v1/jobs/job-a/scene/objects/candidate-001/confirm");
     expect(JSON.parse((init as RequestInit).body as string).expected_scene_revision).toBe("rev-001");
   });
 
   it("ẩn ứng viên đã loại trừ khi bật hiển thị", async () => {
-    vi.mocked(global.fetch).mockResolvedValueOnce(reply({ scene: scene("rev-003", "CANDIDATE", "IGNORED") }));
+    routeFetch({ "/scene": [reply({ scene: scene("rev-003", "CANDIDATE", "IGNORED") })] });
     render(<ObjectReviewView jobId="job-a" />);
     expect(await screen.findByText("1 vật thể · 0 chờ xác nhận")).toBeInTheDocument();
     expect(screen.queryByText("Vật thể 1")).toBeNull();
@@ -90,8 +108,41 @@ describe("ObjectReviewView", () => {
   });
 
   it("báo rõ khi bước tách vật thể chưa có scene", async () => {
-    vi.mocked(global.fetch).mockResolvedValueOnce(reply({ detail: "Job chưa publish SceneIR" }, 404));
+    routeFetch({ "/scene": [reply({ detail: "Job chưa publish SceneIR" }, 404)] });
     render(<ObjectReviewView jobId="job-a" />);
     expect(await screen.findByText(/Chưa có vật thể/)).toBeInTheDocument();
+  });
+
+  it("tạo gói mô phỏng: preflight chưa đạt thì hiện mục lỗi, không có nút tải", async () => {
+    const failed = {
+      scene_revision: "rev-002",
+      source_scene_revision: "rev-001",
+      created_at: "2026-09-30T00:00:00Z",
+      confirmed_objects: 1,
+      environment_triangles: 1000,
+      carved_triangles: 20,
+      preflight: {
+        blocking_result: "FAIL",
+        rules: [
+          { rule_id: "METRIC_SCALE_MISSING", result: "PASS", affected_object_ids: [], remediation: null },
+          {
+            rule_id: "OBJECT_OUT_OF_BOUNDS",
+            result: "FAIL",
+            affected_object_ids: ["user-001"],
+            remediation: "Điều chỉnh vật thể về trong ranh giới kho",
+          },
+        ],
+      },
+      package_ref: null,
+    };
+    routeFetch({ "/scene": [reply({ scene: scene("rev-001", "CONFIRMED", "CONFIRMED") })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    await screen.findByText("1 vật thể · 0 chờ xác nhận");
+    vi.mocked(global.fetch).mockImplementationOnce(async () => reply(failed));
+    fireEvent.click(screen.getByRole("button", { name: "Tạo gói mô phỏng" }));
+    expect(await screen.findByText("Vật nằm trong kho, trên sàn")).toBeInTheDocument();
+    expect(screen.getByText(/user-001/)).toBeInTheDocument();
+    expect(screen.queryByText(/Tải gói/)).toBeNull();
+    expect(screen.getByText(/Chưa đạt kiểm tra/)).toBeInTheDocument();
   });
 });

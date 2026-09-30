@@ -318,3 +318,58 @@ export function addBoxObstacle(
     }),
   });
 }
+
+// ── gói mô phỏng Isaac (EX-SIM SIM-02…05) ───────────────────────────────────
+
+export interface PreflightRuleView {
+  rule_id: string;
+  result: "PASS" | "FAIL" | "WARN" | string;
+  affected_object_ids: string[];
+  remediation: string | null;
+}
+
+/** Tập con của `SimulationPackage` backend mà UI hiển thị; các field khác bỏ qua. */
+export interface SimulationPackageView {
+  scene_revision: string;
+  source_scene_revision: string;
+  created_at: string;
+  confirmed_objects: number;
+  environment_triangles: number;
+  carved_triangles: number;
+  preflight: { blocking_result: string; rules: PreflightRuleView[] };
+  package_ref: { artifact_uri: string; artifact_checksum: string } | null;
+}
+
+function parseSimulationPackage(value: unknown): SimulationPackageView | null {
+  if (value === null) return null;
+  const data = value as Partial<SimulationPackageView>;
+  if (
+    typeof data.scene_revision !== "string" ||
+    typeof data.confirmed_objects !== "number" ||
+    !data.preflight ||
+    !Array.isArray(data.preflight.rules)
+  ) {
+    throw new ApiError(502, "Backend trả gói mô phỏng sai contract");
+  }
+  return data as SimulationPackageView;
+}
+
+/** Gói của revision scene hiện tại; null khi chưa tạo hoặc scene đã sửa sau lần tạo. */
+export async function getSimulationPackage(jobId: string, signal?: AbortSignal): Promise<SimulationPackageView | null> {
+  return parseSimulationPackage(
+    await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/simulation-package`, { signal }),
+  );
+}
+
+/** Tạo gói: preflight FAIL vẫn trả báo cáo (package_ref null), không đổi scene. */
+export async function createSimulationPackage(jobId: string): Promise<SimulationPackageView> {
+  const result = parseSimulationPackage(
+    await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/simulation-package`, { method: "POST" }),
+  );
+  if (!result) throw new ApiError(502, "Backend không trả gói mô phỏng");
+  return result;
+}
+
+export function simulationPackageDownloadUrl(jobId: string): string {
+  return `${API}/jobs/${encodeURIComponent(jobId)}/simulation-package/download`;
+}
