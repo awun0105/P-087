@@ -11,6 +11,15 @@ import { ObjectReviewView } from "@/features/studio/ObjectReviewView";
 vi.mock("@/features/studio/StageViewer", () => ({
   CollisionMeshCanvas: () => <div data-testid="mesh" />,
 }));
+vi.mock("@/features/studio/MetricSceneView", () => ({
+  MetricSceneView: ({ boxes }: { boxes: { id: string; color: string }[] }) => (
+    <div data-testid="metric-scene">{boxes.map((box) => `${box.id}:${box.color}`).join(",")}</div>
+  ),
+}));
+vi.mock("@/lib/api/studio", async (original) => ({
+  ...(await original<typeof import("@/lib/api/studio")>()),
+  getStageViews: vi.fn(async () => []),
+}));
 
 const ref = {
   artifact_type: "SceneObjectGeometry",
@@ -25,7 +34,10 @@ const ref = {
 function scene(revision: string, state: "CANDIDATE" | "CONFIRMED", review?: string) {
   return {
     scene_revision: revision,
-    environment: { geometry_ref: { ...ref, artifact_uri: "artifact://jobs/job-a/rec05/collision.glb" } },
+    environment: {
+      geometry_ref: { ...ref, artifact_uri: "artifact://jobs/job-a/rec05/collision.glb" },
+      visual_ref: { ...ref, artifact_uri: "artifact://jobs/job-a/rec06/scene.sog" },
+    },
     provenance: { object_extraction: "sampro3d_sam2_v1" },
     objects: [
       {
@@ -59,6 +71,8 @@ describe("ObjectReviewView", () => {
       .mockResolvedValueOnce(reply({ scene_revision: "rev-002", scene: scene("rev-002", "CONFIRMED", "CONFIRMED") }));
     render(<ObjectReviewView jobId="job-a" />);
     expect(await screen.findByText("1 vật thể · 1 chờ xác nhận")).toBeInTheDocument();
+    // Hộp ứng viên màu vàng phủ trên 3DGS hệ mét.
+    expect(screen.getByTestId("metric-scene")).toHaveTextContent("candidate-001:#facc15");
     fireEvent.click(screen.getByRole("button", { name: /Xác nhận/ }));
     await waitFor(() => expect(screen.getByText("Đã xác nhận")).toBeInTheDocument());
     const [url, init] = vi.mocked(global.fetch).mock.calls[1]!;

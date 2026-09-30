@@ -1,14 +1,23 @@
 "use client";
 
 import { Check, Eye, EyeOff, Loader2, Plus, X } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Badge, Button, Notice } from "@/components/studio/primitives";
+import { MetricSceneView } from "@/features/studio/MetricSceneView";
 import { CollisionMeshCanvas } from "@/features/studio/StageViewer";
+import type { OverlayBox } from "@/features/viewer/scene-overlay";
 import { jobArtifactContentUrl } from "@/lib/api/endpoints";
-import { addBoxObstacle, applyObjectAction, getJobScene, type ObjectAction } from "@/lib/api/studio";
+import {
+  addBoxObstacle,
+  applyObjectAction,
+  getJobScene,
+  getStageViews,
+  type ObjectAction,
+} from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import type { SceneIR, SceneObject } from "@/lib/contracts/api";
+import type { StageView } from "@/lib/contracts/studio";
 
 /**
  * Xác nhận vật thể ứng viên (ADR 0006, PRODUCT-07/07A): hộp ứng viên vẽ trên collision mesh,
@@ -22,6 +31,7 @@ export function ObjectReviewView({ jobId }: { jobId: string }) {
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [showIgnored, setShowIgnored] = useState(false);
+  const [cameras, setCameras] = useState<StageView["cameras"]>([]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -31,8 +41,32 @@ export function ObjectReviewView({ jobId }: { jobId: string }) {
       else if (result.error.status === 404) setMissing(true);
       else setError(result.error.detail);
     });
+    // Camera quay hệ mét để mở scene tại góc camera đầu tiên; thiếu thì dùng camera mặc định.
+    getStageViews(jobId, controller.signal).then(
+      (views) => setCameras(views.find((view) => view.kind === "gaussian" && view.unit === "meter")?.cameras ?? []),
+      () => undefined,
+    );
     return () => controller.abort();
   }, [jobId]);
+
+  const visibleObjects = useMemo(
+    () => scene?.objects.filter((object) => showIgnored || !isIgnored(object)) ?? [],
+    [scene, showIgnored],
+  );
+  const boxes = useMemo<OverlayBox[]>(
+    () =>
+      visibleObjects
+        .filter((object) => object.primitive_dimensions_xyz_m)
+        .map((object) => ({
+          id: object.id,
+          center: object.transform.translation_xyz,
+          rotation_xyzw: object.transform.rotation_quaternion_xyzw,
+          dimensions: object.primitive_dimensions_xyz_m!,
+          color: object.id === selected ? SELECTED_COLOR : stateColor(object),
+          emphasized: object.id === selected,
+        })),
+    [visibleObjects, selected],
+  );
 
   async function run(mutate: (revision: string) => Promise<{ scene: SceneIR }>) {
     if (!scene) return;
@@ -62,22 +96,33 @@ export function ObjectReviewView({ jobId }: { jobId: string }) {
       </p>
     );
   }
-  const visible = scene.objects.filter((object) => showIgnored || !isIgnored(object));
+  const visible = visibleObjects;
   const pending = scene.objects.filter((object) => object.state === "CANDIDATE" && !isIgnored(object)).length;
   const method = String(scene.provenance.object_extraction ?? "không rõ");
   return (
     <div className="flex size-full flex-col lg:flex-row">
       <div className="relative min-h-[50vh] flex-1 bg-viewport">
-        <CollisionMeshCanvas url={jobArtifactContentUrl(jobId, scene.environment.geometry_ref)}>
-          {visible.map((object) => (
-            <ObjectBox
-              key={object.id}
-              object={object}
-              selected={object.id === selected}
-              onSelect={() => setSelected(object.id)}
-            />
-          ))}
-        </CollisionMeshCanvas>
+        {scene.environment.visual_ref ? (
+          <MetricSceneView
+            jobId={jobId}
+            visual={scene.environment.visual_ref}
+            collision={scene.environment.geometry_ref}
+            cameras={cameras}
+            boxes={boxes}
+          />
+        ) : (
+          // Scene không có visual 3DGS: chỉ còn collision mesh để định vị hộp.
+          <CollisionMeshCanvas url={jobArtifactContentUrl(jobId, scene.environment.geometry_ref)}>
+            {visible.map((object) => (
+              <ObjectBox
+                key={object.id}
+                object={object}
+                selected={object.id === selected}
+                onSelect={() => setSelected(object.id)}
+              />
+            ))}
+          </CollisionMeshCanvas>
+        )}
       </div>
       <aside className="flex max-h-[50vh] w-full flex-col border-t border-line bg-paper-raised lg:max-h-none lg:w-96 lg:border-t-0 lg:border-l">
         <div className="space-y-1 border-b border-line px-4 py-3">
@@ -147,6 +192,14 @@ export function ObjectReviewView({ jobId }: { jobId: string }) {
   );
 }
 
+const SELECTED_COLOR = "#f97316";
+
+/** Màu hộp theo trạng thái review: vàng = ứng viên, xanh lá = đã xác nhận, xám = đã loại/ẩn. */
+function stateColor(object: SceneObject): string {
+  if (isIgnored(object) || !object.active && object.state === "CONFIRMED") return "#9ca3af";
+  return object.state === "CONFIRMED" ? "#22c55e" : "#facc15";
+}
+
 function isIgnored(object: SceneObject): boolean {
   return object.provenance.review === "IGNORED";
 }
@@ -167,7 +220,7 @@ function StateBadge({ object }: { object: SceneObject }) {
 function ObjectBox({ object, selected, onSelect }: { object: SceneObject; selected: boolean; onSelect: () => void }) {
   const dimensions = object.primitive_dimensions_xyz_m;
   if (!dimensions) return null;
-  const color = selected ? "#f97316" : isIgnored(object) ? "#6b7280" : object.state === "CONFIRMED" ? "#22c55e" : "#facc15";
+  const color = selected ? SELECTED_COLOR : stateColor(object);
   return (
     <mesh
       position={object.transform.translation_xyz}

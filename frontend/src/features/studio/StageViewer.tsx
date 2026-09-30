@@ -9,7 +9,9 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 import { Notice } from "@/components/studio/primitives";
 import { requireEmbeddedGlb } from "@/features/viewer/GlbArtifact";
+import { MetricSceneView } from "@/features/studio/MetricSceneView";
 import { PlayCanvasScene, usePlayCanvasCapability } from "@/features/viewer/PlayCanvasScene";
+import { recordingCameraPose } from "@/features/viewer/source-frame";
 import { jobArtifactContentUrl } from "@/lib/api/endpoints";
 import { getStageViews } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
@@ -72,16 +74,34 @@ export function StageViewer({ jobId }: { jobId: string }) {
       </p>
       <div className="relative min-h-0 flex-1 bg-viewport" role="tabpanel">
         {/* `key` buộc unmount lớp cũ để giải phóng GPU/listener trước khi nạp lớp mới. */}
-        <StageLayer key={`${view.stage_id}-${view.kind}`} jobId={jobId} view={view} />
+        <StageLayer key={`${view.stage_id}-${view.kind}`} jobId={jobId} view={view} views={views} />
       </div>
     </div>
   );
 }
 
-function StageLayer({ jobId, view }: { jobId: string; view: StageView }) {
+function StageLayer({ jobId, view, views }: { jobId: string; view: StageView; views: StageView[] }) {
   if (view.kind === "frames") return <FramesLayer jobId={jobId} view={view} />;
   if (view.kind === "cameras") return <CamerasLayer view={view} />;
-  if (view.kind === "gaussian") return <GaussianLayer jobId={jobId} view={view} />;
+  // Lớp hệ mét dùng chung scene: 3DGS màu + collision mesh phủ lên, cùng hệ Z-up.
+  const metric = views.find((item) => item.kind === "gaussian" && item.unit === "meter");
+  const mesh = views.find((item) => item.kind === "mesh");
+  if (metric?.refs[0] && (view === metric || view === mesh)) {
+    return (
+      <MetricSceneView
+        jobId={jobId}
+        visual={metric.refs[0]}
+        collision={mesh?.refs[0]}
+        cameras={metric.cameras}
+        defaultLayers={{ splat: true, collision: view === mesh, boxes: false }}
+      />
+    );
+  }
+  if (view.kind === "gaussian") {
+    // 3DGS Brush ở hệ SfM của COLMAP: cùng hệ với quỹ đạo camera của bước ước lượng camera.
+    const sfm = views.find((item) => item.kind === "cameras")?.cameras ?? [];
+    return <GaussianLayer jobId={jobId} view={view} cameras={view.cameras.length ? view.cameras : sfm} />;
+  }
   return <MeshLayer jobId={jobId} view={view} />;
 }
 
@@ -138,9 +158,11 @@ function CamerasLayer({ view }: { view: StageView }) {
   );
 }
 
-function GaussianLayer({ jobId, view }: { jobId: string; view: StageView }) {
+function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageView; cameras: StageView["cameras"] }) {
   const [capability, setCapability] = usePlayCanvasCapability();
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
+  const frame = view.unit === "meter" ? "z_up" : "colmap";
+  const initialCamera = useMemo(() => recordingCameraPose(frame, cameras), [frame, cameras]);
   const ref = view.refs[0];
   if (!ref) return <Notice>Bước này chưa có file 3DGS.</Notice>;
   if (capability === "failed" || capability === "unavailable") {
@@ -155,6 +177,8 @@ function GaussianLayer({ jobId, view }: { jobId: string; view: StageView }) {
       mode="VISUAL"
       capability={capability}
       onFailed={fail}
+      sourceFrame={frame}
+      initialCamera={initialCamera}
     />
   );
 }
