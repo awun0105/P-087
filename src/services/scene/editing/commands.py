@@ -32,6 +32,29 @@ def set_object_active(scene: SceneIR, object_id: str, active: bool) -> SceneIR:
     return _replace_object(scene, updated, operation)
 
 
+def confirm_object(scene: SceneIR, object_id: str) -> SceneIR:
+    """Người dùng xác nhận ứng viên là vật thể thật: CONFIRMED và active cho mô phỏng."""
+    target = _find_object(scene, object_id)
+    review = {**target.provenance, "review": "CONFIRMED"}
+    updated = target.model_copy(
+        update={"state": SceneObjectState.CONFIRMED, "active": True, "provenance": review}, deep=True
+    )
+    return _replace_object(scene, updated, "confirm")
+
+
+def ignore_object(scene: SceneIR, object_id: str) -> SceneIR:
+    """Loại ứng viên: SceneIR chỉ có CANDIDATE/CONFIRMED nên giữ CANDIDATE, tắt active, ghi IGNORED.
+
+    Không xoá khỏi revision để còn audit và khôi phục (PRD: confirm/ignore/correct là metric vận hành).
+    """
+    target = _find_object(scene, object_id)
+    if target.state == SceneObjectState.CONFIRMED:
+        raise ValueError("vật thể đã xác nhận; ẩn/xoá thay vì loại ứng viên")
+    review = {**target.provenance, "review": "IGNORED"}
+    updated = target.model_copy(update={"active": False, "provenance": review}, deep=True)
+    return _replace_object(scene, updated, "ignore")
+
+
 def add_primitive_object(scene: SceneIR, command: "PrimitiveObjectCommand") -> SceneIR:
     """Add a user-defined primitive object with explicit metric dimensions."""
     if command.object_id in {item.id for item in scene.objects}:
