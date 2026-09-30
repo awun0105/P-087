@@ -65,6 +65,17 @@ Outputs:
 - Metric scale giữ ba hướng của ADR 0001; trong cloud, LiDAR/registration và tính scale
   chạy ở worker, trình duyệt chỉ chọn điểm A/B.
 
+## Cập nhật 2026-09-30
+
+- Đo chất lượng 3DGS (`recon_visual_quality`): đoạn liền 154–527 Aisle_CW, `seg-5fps-cap600k`
+  (187 ảnh, 24 view eval) PSNR 28,80 / SSIM 0,927 / LPIPS 0,268; `seg-3fps` 25,35 / 0,888 / 0,308.
+  seg-5fps không giới hạn splat crash wgpu ở 663k splat (GPU 4 GB). Preset T2000 = 5 fps +
+  `max_splats` 600k là PROPOSAL, chưa khoá. Sai số `e` đo lần 1 ≈ 15,6 cm (REC-06), chưa khoá.
+- **Pipeline v2 ([ADR 0007](../../../decisions/0007-object-centric-hybrid-usd-pipeline.md)):** REC-04/05 mở rộng
+  sang 3DGS có nhãn vật trong hệ mét, mesh nền và vá nền (LaMa + fine-tune) chạy trên GPU thuê;
+  Brush giữ làm bản xem nhanh. Pha A chạy thử trên `job-123dfd4868d8`
+  ([plan](../../../plans/active/2026-09-30-pipeline-v2.md)).
+
 ## Authority Gates
 
 - Canonical convention đã khóa: meter, Z-up, right-handed, world frame `world`, transform `parent_from_local`, quaternion `xyzw`, angle `radian`.
