@@ -230,8 +230,20 @@ Mỗi gói: code + test tập trung + cập nhật task file liên quan + commit
     `components/shadcn/*` chép từ donor chưa dùng; route legacy sau `LEGACY_UI` (D-10).
   - Ẩn/xoá vật chỉ đổi SceneIR + màu hộp; Gaussian của vật vẫn hiện trong 3DGS. "delete" ở
     backend = `active=false` (trùng "hide"). Chưa có sửa transform (Q5), đặt vật cản bằng click.
-  - Sweep: seg-5fps (không giới hạn splat) crash wgpu ở iter 22.6k, 663k splat (GPU 4 GB); đang chấm
-    lại `seg-5fps-cap600k` (`--max-splats 600000`, cùng mức splat cuối của seg-3fps).
+  - Sweep: seg-5fps (không giới hạn splat) crash wgpu ở iter 22.6k, 663k splat (GPU 4 GB). Chấm lại
+    `seg-5fps-cap600k` (`--max-splats 600000`): 187 ảnh, 24 view eval, **PSNR 28,80 / SSIM 0,927 /
+    LPIPS 0,268**, 2812 s — so với seg-3fps (94 ảnh, 12 view) 25,35 / 0,888 / 0,308. INFERENCE: nhiều
+    ảnh hơn trên cùng đoạn liền giúp rõ; tập view eval khác nhau nên không so tuyệt đối. PROPOSAL:
+    preset T2000 = 5 fps + `max_splats` 600k; chưa khoá, cần đo lại e trên bản này.
+
+### 2026-09-30 — refactor UI sạch + hiệu năng (owner yêu cầu)
+
+- Palette beige/cam dùng lại (D-04 cập nhật). `ScenePage` tách thành `scene/` (mỗi tab một file).
+  Button Studio dựng trên Button bộ nền; hàm định dạng ở `lib/format.ts`. Không xoá component thừa
+  (owner giữ để mở rộng).
+- Hiệu năng (đo trên `next build` + `next start`): JS ban đầu màn scene 1982 → 770 KB (tab tải theo
+  nhu cầu, `ssr: false` cho tab WebGL); Studio giữ sống khi đổi tab (không tải lại 3DGS); animation
+  chỉ transform/opacity; poll cập nhật ngay khi quay lại tab; Jobs vừa màn 390 px.
   - Deploy tách FE/BE theo ADR 0003: code sẵn (Postgres, R2, auth, proxy `/api/v1`), còn các mục 🔑
     tài khoản và worker API có token trong HANDOFF cloud-ops.
 
