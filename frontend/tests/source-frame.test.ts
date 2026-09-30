@@ -34,7 +34,7 @@ describe("source frame", () => {
       { center: [12, 3, 0.4], rotation_xyzw: lookX },
     ])!;
     expect(pose.position).toEqual([2, 0.4, -3]);
-    expect(pose.target[0]).toBeCloseTo(3); // 10% của quỹ đạo 10 m phía trước
+    expect(pose.target[0]).toBeCloseTo(5.5); // 35% của quỹ đạo 10 m phía trước
     expect(pose.target[1]).toBeCloseTo(0.4); // cùng độ cao: nhìn ngang, không cắm xuống sàn
   });
 

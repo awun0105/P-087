@@ -53,8 +53,8 @@ export interface DisplayCameraPose {
 
 /**
  * Đặt camera viewer tại camera quay đầu tiên, nhìn theo hướng của nó. Tâm xoay (target) ở phía
- * trước một đoạn bằng 10% đường chéo quỹ đạo, để orbit xoay quanh vùng đang nhìn chứ không
- * quanh gốc toạ độ tuỳ ý.
+ * trước 35% đường chéo quỹ đạo (2–15 đơn vị): orbit của PlayCanvas zoom theo tỉ lệ khoảng cách
+ * tới tâm (`dist × (1 + delta)`), tâm quá gần làm mỗi nấc cuộn chỉ đi vài chục cm.
  */
 export function recordingCameraPose(
   frame: SourceFrame,
@@ -66,7 +66,7 @@ export function recordingCameraPose(
   const low = [0, 1, 2].map((axis) => Math.min(...cameras.map((camera) => camera.center[axis])));
   const high = [0, 1, 2].map((axis) => Math.max(...cameras.map((camera) => camera.center[axis])));
   const diagonal = Math.hypot(high[0] - low[0], high[1] - low[1], high[2] - low[2]);
-  const distance = Math.max(diagonal * 0.1, 0.5);
+  const distance = Math.min(Math.max(diagonal * 0.35, 2), 15);
   const forward = rotate(first.rotation_xyzw, [0, 0, 1]);
   const target: Vec3 = [
     first.center[0] + forward[0] * distance,

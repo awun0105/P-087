@@ -90,6 +90,7 @@ export function MetricSceneView({
         contentUrl={contentUrl}
         contentFilename={visual.artifact_uri.split("/").pop() ?? "scene.sog"}
         renderer="webgl"
+        showControls
         mode="VISUAL"
         capability={capability}
         onFailed={fail}
@@ -103,7 +104,7 @@ export function MetricSceneView({
         {toggle("boxes", "Hộp vật thể", !boxes.length)}
       </div>
       <p className="absolute bottom-3 left-3 rounded-md bg-viewport/80 px-2 py-1 text-xs text-paper/80">
-        Hệ mét, sàn z = 0 · mở tại camera quay đầu tiên · kéo chuột để xoay, cuộn để zoom
+        Hệ mét, sàn z = 0 · mở tại camera quay đầu tiên · kéo chuột để xoay, cuộn để zoom, chế độ bay (WASD) ở góc phải
         {collisionState?.triangles ? ` · collision ${Math.round(collisionState.triangles).toLocaleString("vi-VN")} tam giác` : ""}
         {collisionState?.error ? ` · không nạp được collision: ${collisionState.error}` : ""}
       </p>

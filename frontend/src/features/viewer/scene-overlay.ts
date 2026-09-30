@@ -89,6 +89,7 @@ export class SceneOverlay {
         }
         this.collisionEntity = entity;
         this.root.addChild(entity);
+        this.redraw();
         resolve(triangles);
       });
       asset.once("error", (error: unknown) => reject(new Error(String(error))));
@@ -100,17 +101,19 @@ export class SceneOverlay {
   setCollision(visible: boolean, opacity: number): void {
     if (this.collisionEntity) this.collisionEntity.enabled = visible;
     const current = this.collisionMaterial;
-    if (!current) return;
+    if (!current) return this.redraw();
     current.opacity = opacity;
     current.blendType = opacity < 1 ? BLEND_NORMAL : BLEND_NONE;
     current.depthWrite = opacity >= 1;
     current.update();
+    this.redraw();
   }
 
   /** Bật/tắt splat của viewer (entity upstream tên `gsplat`). */
   setSplatVisible(visible: boolean): void {
     const splat = this.app.root.findByName("gsplat");
     if (splat) splat.enabled = visible;
+    this.redraw();
   }
 
   /** Vẽ lại toàn bộ hộp; hộp được nhấn mạnh đậm hơn. */
@@ -127,6 +130,7 @@ export class SceneOverlay {
       entity.setLocalScale(...box.dimensions);
       this.boxRoot.addChild(entity);
     }
+    this.redraw();
   }
 
   destroy(): void {
@@ -138,6 +142,14 @@ export class SceneOverlay {
       this.app.assets?.remove(this.collisionAsset);
       this.collisionAsset.unload();
     }
+  }
+
+  /**
+   * Viewer render theo yêu cầu (tắt `autoRender` sau frame đầu, chỉ vẽ lại khi camera đổi):
+   * đổi lớp phủ mà không xin frame mới thì màn hình giữ nguyên tới lần xoay camera kế tiếp.
+   */
+  private redraw(): void {
+    if (!this.destroyed) this.app.renderNextFrame = true;
   }
 
   private releaseMaterials(): void {
