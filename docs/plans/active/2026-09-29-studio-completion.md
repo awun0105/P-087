@@ -155,7 +155,12 @@ Mỗi gói: code + test tập trung + cập nhật task file liên quan + commit
     được chạy bù ngoài worker (manifest không có StageArtifact OBJECT_EXTRACT).
   - [x] API confirm/ignore/hide/delete/rename + thêm vật cản hộp (thay stub 501); UI "Vật thể" trên
     collision mesh. `pytest tests` → 1026 passed, 40 skipped; `tsc`, `eslint` sạch; `vitest` → 127 passed.
-  - [ ] Browser QA màn Vật thể; lọc ứng viên kệ/xà.
+  - [x] Sửa hiển thị (2026-09-30): supersplat-viewer luôn xoay splat 180° quanh Z (quy ước COLMAP),
+    làm 3DGS hệ mét Z-up nằm nghiêng 90°; nay mỗi lớp khai hệ nguồn (`colmap`/`z_up`,
+    `features/viewer/source-frame.ts`) và mở tại camera quay đầu tiên. Collision mesh và hộp vật thể
+    phủ lên 3DGS màu trong cùng app PlayCanvas (`scene-overlay.ts`). Kiểm bằng Chrome headless
+    (SwiftShader) trên job-ac2: Brush và hệ mét cùng góc mở, sàn nằm ngang, hộp khớp vật.
+  - [ ] Browser QA tương tác của owner; lọc ứng viên kệ/xà.
   - [ ] EX-SIM: collider môi trường + vật đã xác nhận, enrichment/preflight, USD candidate có mesh
     môi trường, nút "Tạo gói mô phỏng"; Isaac cần máy RTX (owner).
 - [x] Gói 5 — scene import từ file 3DGS, chỉ xem/chỉnh sửa: nhận `.ply`/`.zip`, nén PLY → SOG bằng
