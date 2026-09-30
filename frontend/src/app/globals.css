@@ -173,42 +173,62 @@
   font-family: var(--font-studio);
 }
 
-/* Dải chạy cho stage không đo được phần trăm (không bịa số). */
+/*
+ * Animation chỉ dùng transform/opacity: trình duyệt chạy trên compositor (GPU), không tính lại
+ * layout/vẽ lại mỗi khung hình như khi animate `left` hay `box-shadow`.
+ */
+
+/* Dải chạy cho stage không đo được phần trăm (không bịa số). Dải rộng 1/3 → 300% = hết thanh. */
 @keyframes studio-indeterminate {
   from {
-    left: -35%;
+    transform: translateX(-100%);
   }
   to {
-    left: 100%;
+    transform: translateX(300%);
   }
 }
 
 .studio-indeterminate {
+  left: 0;
+  will-change: transform;
   animation: studio-indeterminate 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
+/* Chấm "đang chạy": vòng lan ra là lớp giả phóng to + mờ dần. */
 @keyframes studio-pulse-ring {
-  0% {
-    box-shadow: 0 0 0 0 rgb(232 116 59 / 0.45);
+  from {
+    transform: scale(1);
+    opacity: 0.45;
   }
-  100% {
-    box-shadow: 0 0 0 10px rgb(232 116 59 / 0);
+  to {
+    transform: scale(3.5);
+    opacity: 0;
   }
 }
 
 .studio-pulse {
+  position: relative;
+}
+
+.studio-pulse::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
   animation: studio-pulse-ring 1.6s ease-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .studio-indeterminate {
     animation: none;
-    left: 0;
+    transform: none;
     width: 100%;
     opacity: 0.5;
   }
 
-  .studio-pulse {
+  .studio-pulse::after {
     animation: none;
+    opacity: 0;
   }
 }

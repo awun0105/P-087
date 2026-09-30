@@ -140,7 +140,7 @@ export function ScenePage({ jobId }: { jobId: string }) {
           )}
         </div>
       </div>
-      <nav className="flex items-center gap-1 overflow-x-auto border-b border-line bg-paper px-4 py-1.5 sm:px-6" role="tablist" aria-label="Vùng của scene">
+      <nav className="flex items-center gap-1 overflow-x-auto [scrollbar-width:none] border-b border-line bg-paper px-4 py-1.5 sm:px-6" role="tablist" aria-label="Vùng của scene">
         {tabs.map((item) => (
           <button
             key={item.id}

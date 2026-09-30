@@ -76,7 +76,7 @@ export function DemoShowcase({
               )}
             >
               {/* eslint-disable-next-line @next/next/no-img-element -- ảnh demo từ API */}
-              <img src={fileUrl(frame.name)} alt="" className="size-full object-cover" loading="lazy" />
+              <img src={fileUrl(frame.name)} alt="" className="size-full object-cover" loading="lazy" decoding="async" />
               {stage === "ST-CAMERA-POSE" && index < revealed && (
                 <span className="absolute top-1.5 left-1.5 rounded bg-viewport/70 px-1.5 py-0.5 font-mono text-[10px] text-paper">
                   cam {index + 1}

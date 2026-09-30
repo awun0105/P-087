@@ -209,7 +209,10 @@ function MachinePanel({
                   aria-valuemax={100}
                   aria-valuenow={Math.round(ratio * 100)}
                 >
-                  <div className={cn("h-full rounded-full transition-[width] duration-300", STATUS_BAR[item.status])} style={{ width: `${ratio * 100}%` }} />
+                  <div
+                    className={cn("h-full w-full origin-left rounded-full transition-transform duration-300", STATUS_BAR[item.status])}
+                    style={{ transform: `scaleX(${ratio})` }}
+                  />
                 </div>
                 {item.status === "danger" && <p className="mt-1 text-xs text-rust">{item.message}</p>}
               </li>

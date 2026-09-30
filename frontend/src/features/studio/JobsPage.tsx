@@ -127,7 +127,7 @@ export function JobsPage() {
                 <TableHead className="hidden md:table-cell">Bước hiện tại</TableHead>
                 <TableHead className="hidden sm:table-cell">Bắt đầu</TableHead>
                 <TableHead className="hidden lg:table-cell">Tổng thời gian</TableHead>
-                <TableHead className="w-0" />
+                <TableHead className="hidden w-0 sm:table-cell" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -136,8 +136,14 @@ export function JobsPage() {
                 const status = sceneStatus(job, scene.preview_ready);
                 return (
                   <TableRow key={job.job_id}>
-                    <TableCell className="max-w-64">
-                      <p className="truncate font-medium">{scene.project.name}</p>
+                    <TableCell className="max-w-44 sm:max-w-64">
+                      {/* Tên là liên kết: màn hẹp ẩn cột "Mở tiến trình" nhưng vẫn mở được scene. */}
+                      <Link
+                        href={`/scenes/${encodeURIComponent(job.job_id)}`}
+                        className="block truncate font-medium hover:text-ember-strong hover:underline"
+                      >
+                        {scene.project.name}
+                      </Link>
                       <p className="truncate font-mono text-xs text-ink-subtle">{job.job_id}</p>
                     </TableCell>
                     <TableCell>
@@ -156,7 +162,7 @@ export function JobsPage() {
                             }`
                           : "—"}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="hidden text-right sm:table-cell">
                       <Link href={`/scenes/${encodeURIComponent(job.job_id)}`} className="font-medium whitespace-nowrap text-ember-strong hover:underline">
                         Mở tiến trình
                       </Link>

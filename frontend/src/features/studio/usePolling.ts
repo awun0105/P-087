@@ -30,9 +30,18 @@ export function usePolling(task: (signal: AbortSignal) => Promise<void>, interva
       }
       if (!stopped) timer = setTimeout(tick, intervalMs);
     };
+    // Quay lại tab: cập nhật ngay thay vì chờ hết chu kỳ (có thể 20 s) mới thấy trạng thái mới.
+    const onVisible = () => {
+      if (document.visibilityState !== "visible" || stopped) return;
+      if (timer) clearTimeout(timer);
+      controller?.abort();
+      void tick();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     void tick();
     return () => {
       stopped = true;
+      document.removeEventListener("visibilitychange", onVisible);
       controller?.abort();
       if (timer) clearTimeout(timer);
     };
