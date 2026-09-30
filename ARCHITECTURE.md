@@ -303,6 +303,29 @@ candidate/report/approval cũ. `SceneIR` vẫn là source of truth; OpenUSD là 
 để validate, không phải scene state cạnh tranh. Browser P0 phải xem được real
 3DGS `VisualArtifact` cùng các technical views, không chỉ mesh/point cloud.
 
+### Pipeline v2 (ADR 0007, 30/09/2026)
+
+[ADR 0007](docs/decisions/0007-object-centric-hybrid-usd-pipeline.md) đổi đích của pipeline
+thành **scene theo vật** xuất **USD lai** cho Isaac Sim: Gaussian của nền (đã vá chỗ vật che) và
+của từng vật để hiển thị; collider `UsdPhysics` để va chạm (nền: triangle mesh tĩnh; vật động:
+convex decomposition/SDF), khối lượng, vật liệu vật lý, nhãn `LabelsAPI`. Sơ đồ trên vẫn đúng ở
+mức ranh giới track; bên trong các track, vị trí dự kiến cho code mới như sau (khoá khi bắt đầu
+pha B, sau khi pha A chọn phương pháp):
+
+| Chặng v2 | Vị trí dự kiến | Owner |
+|---|---|---|
+| Mask vật theo video (SAM2 lan mask, ID ổn định) | `src/services/scene/extraction/` | EX-SCENE |
+| 3DGS có nhãn vật, vá nền (LaMa + fine-tune) | `src/services/reconstruction/rgb/` (stage mới cạnh `splat/`) | EX-REC |
+| Mesh nền + mesh từng vật (TSDF), tách Environment/SceneObject | `src/services/scene/decomposition/` | EX-SCENE |
+| Gợi ý nhãn, danh mục asset Isaac | `src/services/scene/` (module ngữ nghĩa mới) | EX-SCENE |
+| Collider phân rã lồi, khối lượng, vật liệu vật lý | `src/services/simulation/colliders/` | EX-SIM |
+| Xuất USD lai (ParticleField qua 3DGRUT), preflight v2 | `src/services/simulation/usd/`, `preflight/` | EX-SIM |
+| Artifact/trường contract mới (Gaussian theo vật, nền đã vá, collider vật, vật lý) | `src/models/contracts/scene.py` | Shared |
+| Studio theo vật (khối Gaussian mỗi vật, gizmo) | `frontend/src/features/viewer/`, `features/studio/` | EX-PRODUCT |
+
+Các chặng 4–7 cần runtime GPU riêng (Python/CUDA, tách khỏi app như `data/scene_runtime`);
+image GPU worker chỉ được thêm khi runtime đó khoá ở pha B (xem quy tắc Dockerfile ở trên).
+
 ### Pipeline glossary
 
 - **SfM (Structure from Motion):** ước lượng camera poses và cấu trúc thưa từ
