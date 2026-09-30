@@ -4,7 +4,11 @@ Date: 2026-09-29
 
 ## Status
 
-Active — owner (Quân) yêu cầu ngày 2026-09-29: "ghi các quyết định vào docs, cho kế
+Active — chờ merge PR #16 (`feat/studio-integration` → `develop`, mở 2026-09-30); sau khi
+merge chuyển sang `docs/plans/completed/`. Việc tiếp theo nằm ở
+[plan pipeline v2](./2026-09-30-pipeline-v2.md) (ADR 0007).
+
+Gốc: owner (Quân) yêu cầu ngày 2026-09-29: "ghi các quyết định vào docs, cho kế
 hoạch tổng thể tất cả các việc còn thiếu, rồi thực hiện theo kế hoạch". Branch tích hợp
 `feat/studio-integration` (từ `develop` tại `103b5fb`, sau PR #15), đã merge `feat/sim`
 và `feat/scene-01-bundle-consumer`; mọi gói dưới đây làm và tích hợp trên branch này.
