@@ -27,6 +27,11 @@ Real2Sim Studio tổ chức một workflow thống nhất:
 - Sinh collider/OpenUSD, chạy validation trong Isaac Sim, sau đó Reviewer approve hoặc reject.
 - Lưu artifact, checksum và provenance để phát hành đúng candidate đã được kiểm tra.
 
+**Hướng pipeline v2 (30/09/2026, [ADR 0007](./docs/decisions/0007-object-centric-hybrid-usd-pipeline.md)):**
+video → scene 3D **theo vật** chỉnh sửa được (thêm/xoá/sửa vật, nền vá sẵn chỗ vật che, nhãn và
+khối lượng) → xuất **USD lai** cho Isaac Sim: Gaussian để hiển thị, collider để va chạm. Đang ở pha
+chạy thử; xem [plan pipeline v2](./docs/plans/active/2026-09-30-pipeline-v2.md).
+
 
 ## Target User
 
@@ -182,6 +187,7 @@ Response mẫu:
 - [Team Execution Plan](./docs/execution/TEAM_EXECUTION_PLAN.md)
 - [Track Implementation Guide](./docs/execution/TRACK_IMPLEMENTATION_GUIDE.md)
 - [Execution Tracks](./docs/execution/tracks/README.md)
+- [Quyết định kiến trúc/sản phẩm (ADR)](./docs/decisions/README.md) và [UX Studio](./PRODUCT.md)
 
 ## Demo và triển khai
 
