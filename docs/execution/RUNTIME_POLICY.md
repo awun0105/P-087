@@ -38,3 +38,5 @@ External providers interact with the Core strictly via Canonical Artifacts (e.g.
 |---|---|---|---|---|---|---|---|
 | Core / Foundation | native | 3.12.x | - | - | Foundation SHA | requirements.lock.txt | SUPPORTED |
 | REC GPU tools (Studio) | separate processes | - | - | driver 580.178.04 | COLMAP image `sha256:b8498ebe…`, Brush 0.3.0, splat-transform 3.6.6, FFmpeg 6.1.1 | `runtime_manifest.json` (gitignored, sinh bằng `scripts/gpu/make_runtime_manifest.py`) | Verified local Quadro T2000 (29/09); image GPU trên Vast.ai/RunPod UNVERIFIED (ADR 0003) |
+| Scene runtime (SAMPro3D + SAM2, LPIPS, usd-core) | dedicated virtualenv `data/scene_runtime` (gitignored), gọi qua subprocess | 3.12.3 | 2.7.1+cu126 | 12.6 | SAM2 source `private/sam2` @ `2b90b9f` (sam2.1 hiera tiny); usd-core 26.8; lpips 0.1.4 | chưa có lockfile | Verified local T2000 (30/09, ADR 0006); lockfile + pin chính thức còn thiếu |
+| Pipeline v2 providers (Gaussian Grouping/ObjectGS, LaMa, 3DGRUT, CoACD…) | dedicated runtime trên GPU thuê | TBD | TBD | TBD | pin khi dựng ở pha A | TBD | Planned (ADR 0007); chưa cài |
