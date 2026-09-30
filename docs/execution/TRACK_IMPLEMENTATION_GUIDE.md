@@ -81,6 +81,23 @@ Nguyên tắc chung:
 
 Nếu muốn đổi backend hoặc strategy, output contract phải giữ nguyên và phải tuân [`TEAM_EXECUTION_CONTRACT.md`](./TEAM_EXECUTION_CONTRACT.md).
 
+## 1.3 Cập nhật 30/09/2026 — pipeline v2
+
+Owner chốt [ADR 0007](../decisions/0007-object-centric-hybrid-usd-pipeline.md): scene theo vật
+chỉnh sửa được, xuất USD lai cho Isaac Sim. Task ID hiện có **không đổi**; công việc v2 được ánh
+xạ vào chúng như sau (owner cấp ID mới nếu một việc không vừa task nào):
+
+| Task hiện có | Việc thêm theo pipeline v2 |
+|---|---|
+| REC-04, REC-05 | 3DGS có nhãn vật trong hệ mét; mesh nền; vá nền (LaMa + fine-tune) |
+| SCENE-02, SCENE-03 | Mask vật theo video (SAM2 lan mask, ID ổn định) thay SAMPro3D-trên-hộp |
+| SCENE-06, SCENE-07, SCENE-08, SCENE-08A | Tách nền/vật với Gaussian + mesh riêng; sửa theo vật; thêm asset Isaac |
+| SIM-02, SIM-03, SIM-04, SIM-05, SIM-06 | Collider phân rã lồi, khối lượng/vật liệu, preflight theo SimReady, USD lai (ParticleField), validation Isaac ≥ 5.0 |
+| PRODUCT-06, PRODUCT-07, PRODUCT-07A | Viewer mỗi vật một entity Gaussian, gizmo, thêm từ thư viện, đổi nhãn/khối lượng |
+
+Baseline công cụ: [INTEGRATION_PLAYBOOK — Phụ lục v2](./INTEGRATION_PLAYBOOK.md#phụ-lục-v2-baseline-công-cụ-cho-pipeline-v2-adr-0007).
+Code nghiên cứu phi thương mại được dùng lại theo [ADR 0008](../decisions/0008-research-code-license-policy.md).
+
 ---
 
 # Chương 2. EX-REC — Dataset & Reconstruction
