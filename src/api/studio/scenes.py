@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
 from src.api import schemas
@@ -16,6 +17,7 @@ from src.services.orchestration.processing import build_job_config, evaluate, is
 from src.services.orchestration.projects import JobCreateInput, JobNotFoundError, PrivacyGateBlockedError
 from src.services.orchestration.projects.models import UploadProjectInput
 from src.services.orchestration.stage_views import StageViewList, stage_views
+from src.services.orchestration.thumbnails import scene_thumbnail
 from src.services.orchestration.uploads import UploadNotFoundError
 
 router = APIRouter()
@@ -158,3 +160,19 @@ def get_stage_views(job_id: str) -> StageViewList:
         return stage_views(deps.registry(), job_id)
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+
+
+@router.get("/jobs/{job_id}/thumbnail.jpg", response_class=FileResponse)
+def get_job_thumbnail(job_id: str) -> FileResponse:
+    """Ảnh nhỏ của frame đầu cho thẻ scene; 404 khi job chưa trích frame."""
+    registry = deps.registry()
+    # Cache dẫn xuất cạnh kho artifact, không nằm trong kho (không phải artifact).
+    cache = deps.settings().artifact_root.expanduser().resolve().parent / "thumbnail_cache"
+    try:
+        path = scene_thumbnail(registry, job_id, cache)
+    except JobNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    if path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job chưa có frame để làm ảnh xem trước")
+    # Tên file khoá theo checksum frame bất biến → cache trình duyệt dài hạn an toàn.
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
