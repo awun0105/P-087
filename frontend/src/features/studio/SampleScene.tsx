@@ -33,7 +33,7 @@ export function SampleScene({ sampleId }: { sampleId: string }) {
   }
   if (!demo) {
     return (
-      <main className="grid h-[calc(100dvh-4rem)] place-items-center text-sm text-ink-muted" role="status">
+      <main className="grid h-[calc(100dvh-3rem)] place-items-center text-sm text-ink-muted" role="status">
         <Loader2 className="size-5 animate-spin motion-reduce:animate-none" aria-hidden />
       </main>
     );

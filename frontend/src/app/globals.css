@@ -1,4 +1,9 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "../styles/shadcn-variants.css";
+
+/* Component donor (shadcn, style radix-nova) dùng `dark:`; app chỉ có theme tối (PRODUCT.md D-04). */
+@custom-variant dark (&:is(.dark *));
 
 /*
  * Web Studio dùng nền tối cố định: đây là công cụ xem scene 3D, và nền sáng
@@ -49,41 +54,109 @@
   --shadow-panel: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
 }
 
-/* UI cũ (route group `(legacy)`) giữ nền tối; Studio mới dùng nền beige sáng. */
+/* UI cũ (route group `(legacy)`) giữ bộ token surface riêng. */
 .legacy-root {
   color-scheme: dark;
 }
 
 /*
- * Studio MVP — Minimalism/Swiss, beige + cam (quyết định owner 2026-09-29).
- * Chrome sáng; viewport 3D nâu than ấm vì Gaussian khó đọc trên nền sáng.
- * Tương phản chữ: ink/paper ~13:1, ink-muted/paper ~5.6:1, trắng/ember-strong ~4.6:1.
+ * Studio — theme tối theo palette owner (PRODUCT.md §7.5, D-04, 30/09/2026).
+ * Tên token cũ giữ nguyên để component hiện có đổi theme mà không phải viết lại:
+ * paper = nền, paper-raised = card/panel, ink = chữ, ember = CTA (Jade), sage/ochre/rust = trạng thái.
+ * Tương phản: ink/paper ~18:1, ink-muted/paper ~7:1, paper(navy)/ember(jade) ~8:1 cho chữ trên nút chính.
  */
 @theme inline {
   --font-studio: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 
-  --color-paper: #f5efe6;
-  --color-paper-raised: #fbf8f3;
-  --color-paper-sunken: #ede4d6;
-  --color-line: #e2d6c3;
-  --color-line-strong: #cbbba3;
+  --color-paper: #07111f; /* Deep Navy */
+  --color-paper-raised: #111c2e; /* Deep Slate */
+  --color-paper-sunken: #0d1829;
+  --color-line: #22314d;
+  --color-line-strong: #2e4064;
 
-  --color-ink: #2b2520;
-  --color-ink-muted: #6b5f52;
-  --color-ink-subtle: #8a7e70;
+  --color-ink: #f6f8fb; /* Mist White */
+  --color-ink-muted: #94a3b8; /* Steel Gray */
+  --color-ink-subtle: #64748b;
 
-  --color-ember: #e8743b;
-  --color-ember-strong: #c2551f;
-  --color-ember-soft: #fbe3d3;
+  --color-ember: #18c5a3; /* Jade — CTA, tương tác */
+  --color-ember-strong: #3dd9ba;
+  --color-ember-soft: #0e2f31;
 
-  --color-viewport: #1f1b17;
+  --color-geometry: #38bdf8; /* Electric Cyan — geometry/data */
+  --color-collider: #d8ad55; /* Metallic Gold — physics/collider, không phải cảnh báo */
 
-  --color-sage: #5e8c61;
-  --color-sage-soft: #e3ede0;
-  --color-ochre: #b7862a;
-  --color-ochre-soft: #f6ead0;
-  --color-rust: #b8452f;
-  --color-rust-soft: #f6dcd5;
+  --color-viewport: #050b14;
+
+  --color-sage: #22c55e; /* Success */
+  --color-sage-soft: #0f2a1c;
+  --color-ochre: #f59e0b; /* Warning */
+  --color-ochre-soft: #33240a;
+  --color-rust: #ef4444; /* Error */
+  --color-rust-soft: #3a1518;
+}
+
+/* Token ngữ nghĩa cho component donor (shadcn) — cùng palette với token Studio ở trên. */
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: #07111f;
+  --foreground: #f6f8fb;
+  --card: #111c2e;
+  --card-foreground: #f6f8fb;
+  --popover: #111c2e;
+  --popover-foreground: #f6f8fb;
+  --primary: #18c5a3;
+  --primary-foreground: #07111f;
+  --secondary: #1a2740;
+  --secondary-foreground: #f6f8fb;
+  --muted: #16223a;
+  --muted-foreground: #94a3b8;
+  --accent: #1a2740;
+  --accent-foreground: #f6f8fb;
+  --destructive: #ef4444;
+  --border: #22314d;
+  --input: #2a3a57;
+  --ring: #18c5a3;
+  --sidebar: #0b1628;
+  --sidebar-foreground: #f6f8fb;
+  --sidebar-primary: #18c5a3;
+  --sidebar-primary-foreground: #07111f;
+  --sidebar-accent: #16223a;
+  --sidebar-accent-foreground: #f6f8fb;
+  --sidebar-border: #1b2a44;
+  --sidebar-ring: #18c5a3;
 }
 
 /* Utility nhỏ cho bảng dày thông tin */
@@ -95,7 +168,7 @@
 
 /* ── Studio MVP ─────────────────────────────────────────────────────────── */
 .studio-root {
-  color-scheme: light;
+  color-scheme: dark;
   font-family: var(--font-studio);
 }
 
@@ -115,10 +188,10 @@
 
 @keyframes studio-pulse-ring {
   0% {
-    box-shadow: 0 0 0 0 rgb(232 116 59 / 0.45);
+    box-shadow: 0 0 0 0 rgb(24 197 163 / 0.45);
   }
   100% {
-    box-shadow: 0 0 0 10px rgb(232 116 59 / 0);
+    box-shadow: 0 0 0 10px rgb(24 197 163 / 0);
   }
 }
 

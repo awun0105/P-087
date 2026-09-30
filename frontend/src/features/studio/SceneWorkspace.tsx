@@ -58,7 +58,7 @@ export function SceneWorkspace({
   const [panel, setPanel] = useState<Panel>("editor");
   const shown: Panel = panel === "metric" && metric?.state !== "waiting" ? "editor" : panel;
   return (
-    <main className="flex h-[calc(100dvh-4rem)] flex-col">
+    <main className="flex h-[calc(100dvh-3rem)] flex-col">
       <div className="flex flex-wrap items-center gap-3 border-b border-line bg-paper-raised px-4 py-2.5 sm:px-6">
         <Link
           href={backHref}
