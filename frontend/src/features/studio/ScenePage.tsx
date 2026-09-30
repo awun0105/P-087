@@ -1,21 +1,34 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { Box, Package, Pencil, RotateCcw, Ruler, ShieldCheck, Workflow } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 import { Badge, Button, Notice } from "@/components/studio/primitives";
 import type { SaveState } from "@/features/studio/ObjectReviewView";
 import { GeometryBadge, MetricBadge, ModeButton, SaveStatus } from "@/features/studio/scene/badges";
-import { ProgressTab } from "@/features/studio/scene/ProgressTab";
-import { ResultsTab } from "@/features/studio/scene/ResultsTab";
-import { ReviewTab } from "@/features/studio/scene/ReviewTab";
 import { metricState, stageState, type Preview, type SceneInfo, type StudioMode, type Tab } from "@/features/studio/scene/state";
-import { StudioTab } from "@/features/studio/scene/StudioTab";
 import { usePolling } from "@/features/studio/usePolling";
 import { getJob, getPreview, getProject, jobArtifactContentUrl } from "@/lib/api/endpoints";
 import { cancelJob, getJobProgress, retryJob } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import type { JobProgress } from "@/lib/contracts/studio";
+
+/**
+ * Mỗi tab là một chunk riêng: three.js (kết quả từng bước) và PlayCanvas (Studio) chỉ tải khi mở
+ * tab cần chúng, trang scene không phải tải trước toàn bộ viewer.
+ */
+function TabLoading() {
+  return (
+    <p className="flex items-center gap-2 p-6 text-sm text-ink-muted" role="status">
+      Đang tải…
+    </p>
+  );
+}
+const ProgressTab = dynamic(() => import("@/features/studio/scene/ProgressTab").then((m) => m.ProgressTab), { loading: TabLoading, ssr: false });
+const StudioTab = dynamic(() => import("@/features/studio/scene/StudioTab").then((m) => m.StudioTab), { loading: TabLoading, ssr: false });
+const ReviewTab = dynamic(() => import("@/features/studio/scene/ReviewTab").then((m) => m.ReviewTab), { loading: TabLoading, ssr: false });
+const ResultsTab = dynamic(() => import("@/features/studio/scene/ResultsTab").then((m) => m.ResultsTab), { loading: TabLoading, ssr: false });
 
 /**
  * Ngữ cảnh một scene dựng từ video (PRODUCT.md §3.1, D-07): header giữ tên scene, trạng thái và
@@ -31,6 +44,8 @@ export function ScenePage({ jobId }: { jobId: string }) {
   const [tab, setTab] = useState<Tab | null>(null);
   const [mode, setMode] = useState<StudioMode>("scene");
   const [save, setSave] = useState<SaveState | null>(null);
+  // Studio giữ sống sau lần mở đầu: đổi tab rồi quay lại không phải tải lại 3DGS lên GPU.
+  const [studioVisited, setStudioVisited] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -134,7 +149,10 @@ export function ScenePage({ jobId }: { jobId: string }) {
             aria-selected={current === item.id}
             disabled={item.locked !== null}
             title={item.locked ?? undefined}
-            onClick={() => setTab(item.id)}
+            onClick={() => {
+              if (current === "studio") setStudioVisited(true);
+              setTab(item.id);
+            }}
             className={cn(
               "flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 [&_svg]:size-4",
               current === item.id ? "bg-ember-soft font-medium text-ember-strong" : "text-ink-muted hover:bg-paper-sunken hover:text-ink",
@@ -167,7 +185,7 @@ export function ScenePage({ jobId }: { jobId: string }) {
           {error}
         </Notice>
       )}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="relative min-h-0 flex-1 overflow-y-auto">
         {current === "progress" && (
           <ProgressTab
             jobId={jobId}
@@ -182,7 +200,11 @@ export function ScenePage({ jobId }: { jobId: string }) {
             onRetry={() => void act(() => retryJob(jobId))}
           />
         )}
-        {current === "studio" && preview && (
+        {(current === "studio" || studioVisited) && preview && (
+          <div
+            className={cn("absolute inset-0", current !== "studio" && "pointer-events-none invisible")}
+            aria-hidden={current !== "studio"}
+          >
           <StudioTab
             jobId={jobId}
             title={info?.name ?? "Scene"}
@@ -190,6 +212,7 @@ export function ScenePage({ jobId }: { jobId: string }) {
             mode={studioMode}
             geometry={geometry}
             sceneReady={sceneReady}
+            revision={save?.revision ?? null}
             onSaveState={setSave}
             onMetricClose={() => setMode("scene")}
             onMetricConfirmed={() => {
@@ -197,6 +220,7 @@ export function ScenePage({ jobId }: { jobId: string }) {
               void poll(new AbortController().signal);
             }}
           />
+          </div>
         )}
         {current === "review" && <ReviewTab jobId={jobId} onSaveState={setSave} />}
         {current === "results" && preview && <ResultsTab jobId={jobId} preview={preview} />}

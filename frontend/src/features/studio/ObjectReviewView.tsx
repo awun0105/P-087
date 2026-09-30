@@ -1,11 +1,11 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { Check, Crosshair, Eye, EyeOff, Loader2, Pencil, Plus, X } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Badge, Button, Notice } from "@/components/studio/primitives";
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
-import { CollisionMeshCanvas } from "@/features/studio/StageViewer";
 import type { OverlayBox } from "@/features/viewer/scene-overlay";
 import { ApiError } from "@/lib/api/client";
 import { jobArtifactContentUrl } from "@/lib/api/endpoints";
@@ -19,6 +19,9 @@ import {
 import { cn } from "@/lib/cn";
 import type { SceneIR, SceneObject } from "@/lib/contracts/api";
 import type { StageView } from "@/lib/contracts/studio";
+
+// Chỉ dùng khi scene không có 3DGS: tải three.js theo nhu cầu, không kéo vào mọi lần mở Studio.
+const CollisionMeshCanvas = dynamic(() => import("@/features/studio/StageViewer").then((m) => m.CollisionMeshCanvas), { ssr: false });
 
 /** Trạng thái lưu SceneObject cho header scene (PRODUCT.md Q5: mỗi thao tác là một revision). */
 export type SaveState =
@@ -41,7 +44,16 @@ const FILTERS: { value: Filter; label: string; match: (object: SceneObject) => b
  * Mỗi thao tác là một revision SceneIR mới ở backend; màn hình chỉ giữ revision vừa nhận, không tự
  * sửa scene ở client.
  */
-export function ObjectReviewView({ jobId, onSaveState }: { jobId: string; onSaveState?: (state: SaveState) => void }) {
+export function ObjectReviewView({
+  jobId,
+  revision,
+  onSaveState,
+}: {
+  jobId: string;
+  /** Revision mới nhất nơi khác biết; khác revision đang giữ thì tải lại (tránh 409 khi thao tác). */
+  revision?: string | null;
+  onSaveState?: (state: SaveState) => void;
+}) {
   const [scene, setScene] = useState<SceneIR | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [missing, setMissing] = useState(false);
@@ -51,6 +63,7 @@ export function ObjectReviewView({ jobId, onSaveState }: { jobId: string; onSave
   const [cameras, setCameras] = useState<StageView["cameras"]>([]);
   const [focus, setFocus] = useState<{ id: string; nonce: number } | undefined>();
   const [reload, setReload] = useState(0);
+  const stale = Boolean(revision && scene && !busy && revision !== scene.scene_revision);
 
   /** Chọn và cho camera bay tới vật (từ danh sách hoặc nút trong inspector). */
   const flyTo = (id: string) => {
@@ -75,7 +88,7 @@ export function ObjectReviewView({ jobId, onSaveState }: { jobId: string; onSave
       else setError(result.error.detail);
     });
     return () => controller.abort();
-  }, [jobId, reload]); // eslint-disable-line react-hooks/exhaustive-deps -- onSaveState chỉ là kênh báo lên header
+  }, [jobId, reload, stale]); // eslint-disable-line react-hooks/exhaustive-deps -- onSaveState chỉ là kênh báo lên header
 
   useEffect(() => {
     const controller = new AbortController();

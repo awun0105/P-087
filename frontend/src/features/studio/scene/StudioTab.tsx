@@ -13,6 +13,7 @@ export function StudioTab({
   mode,
   geometry,
   sceneReady,
+  revision,
   onSaveState,
   onMetricClose,
   onMetricConfirmed,
@@ -23,6 +24,8 @@ export function StudioTab({
   mode: StudioMode;
   geometry: StageState;
   sceneReady: boolean;
+  /** Revision mới nhất header biết (vd. sau khi tạo gói); Studio giữ sống dùng để tự tải lại. */
+  revision: string | null;
   onSaveState: (state: SaveState) => void;
   onMetricClose: () => void;
   onMetricConfirmed: () => void;
@@ -44,7 +47,7 @@ export function StudioTab({
       </div>
     );
   }
-  if (sceneReady) return <ObjectReviewView jobId={jobId} onSaveState={onSaveState} />;
+  if (sceneReady) return <ObjectReviewView jobId={jobId} revision={revision} onSaveState={onSaveState} />;
   return (
     <div className="flex h-full flex-col">
       <Notice tone={geometry === "failed" ? "rust" : "ochre"} className="m-3">
