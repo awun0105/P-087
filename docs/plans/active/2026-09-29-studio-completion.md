@@ -147,6 +147,9 @@ Mỗi gói: code + test tập trung + cập nhật task file liên quan + commit
 - [x] Gói 4 — `GET /jobs/{id}/stage-views` + UI "Kết quả từng bước" (frame, quỹ đạo camera,
   3DGS, 3DGS hệ mét, collision mesh); allow-list thêm ref của bundle và ảnh frame. Chưa có
   point cloud COLMAP/LiDAR và bản xem nhẹ (thumbnail/LOD).
+- [ ] Gói 8 — tích hợp EX-SCENE/EX-SIM (ADR 0006): SAMPro3D adapt + SAM2 (chờ owner đồng ý cài
+  runtime PyTorch + SAM2); fallback hình học `scene/geometric.py` đã có (30 ứng viên trên
+  Aisle_CW, chưa đối chiếu ảnh); tiếp: SceneIR từ bundle, xác nhận vật thể, collider/USD.
 - [ ] Gói 5, 6, 7.
 - Hở tích hợp đã thấy (thuộc track khác, chưa sửa): EX-SIM `usd/usda.py` chưa đưa collision
   mesh môi trường vào USD; EX-SCENE decomposition chưa khoét vùng vật thể khỏi mesh môi trường.
