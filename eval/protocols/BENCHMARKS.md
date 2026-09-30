@@ -15,7 +15,7 @@ không điền ước đoán như kết quả.
 | Mã | Đo gì | Chỉ số chính | Nguồn / ranh giới | Thư mục evaluator | Trạng thái |
 |---|---|---|---|---|---|
 | `pipeline_runtime` | Thời gian, chi phí xử lý một job | giây từng stage, tổng giây, kích thước input/SOG, GPU, $ ước tính | Product runtime (journal job) | `src/services/orchestration/benchmark.py` | **Có** — worker tự ghi |
-| `recon_visual_quality` | Chất lượng ảnh render 3DGS | PSNR, SSIM, LPIPS trên frame giữ lại | Evaluation-only split | `eval/visual/` | Chưa |
+| `recon_visual_quality` | Chất lượng ảnh render 3DGS | PSNR, SSIM, LPIPS-VGG trên mỗi ảnh thứ 8 của chính video (7k…30k bước) | Ảnh của job (video chỉ train split) | `eval/visual/brush_quality.py` | **Có** — chạy tay |
 | `recon_pose` | Độ chính xác quỹ đạo camera | ATE/RPE so với `traj_gt` | Evaluation-only GT | `eval/pose/` | Chưa |
 | `recon_geometry` | Độ chính xác hình học | Chamfer, F-score so với GT `.ply` | Evaluation-only GT | `eval/geometry/` | Chưa |
 | `metric_scale` | Sai số tỉ lệ mét | sai số scale %, sai số khoảng cách A/B (m) | So với LiDAR/GT (ADR 0001) | `eval/geometry/` | Chưa |

@@ -5,11 +5,16 @@ luồng upload như video người dùng. Chỉ đọc `normalized/`, không đ�
 `evaluation_only/`.
 
     python -m scripts.demo.make_torwic_video --sequence-dir data/torwic_slam/normalized/aisle_cw \\
-        --out data/demo/tmp/aisle_cw.mp4 [--start 0 --count 400]
+        --out data/demo/tmp/aisle_cw.mp4 [--start 0 --count 400] \\
+        [--train-split data/torwic_slam/derived/aisle_cw/benchmark_split.json]
+
+`--train-split` chỉ giữ `train_frame_ids` của benchmark split: frame held-out là evaluation-only,
+không được vào runtime (DATASET_PLAYBOOK). Chỗ bỏ held-out thành bước nhảy ngắn trong video.
 """
 
 import argparse
 import csv
+import json
 import shutil
 import subprocess
 import tempfile
@@ -32,8 +37,12 @@ def main() -> None:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--count", type=int, default=None)
+    parser.add_argument("--train-split", type=Path, default=None)
     args = parser.parse_args()
     frames = sorted((args.sequence_dir / "rgb_frames").glob("*.png"))
+    if args.train_split is not None:
+        train = set(json.loads(args.train_split.read_text())["train_frame_ids"])
+        frames = [frame for frame in frames if int(frame.stem) in train]
     selected = frames[args.start : None if args.count is None else args.start + args.count]
     if len(selected) < 2:
         raise SystemExit("Cần ít nhất 2 frame")
@@ -52,7 +61,8 @@ def main() -> None:
             ],
             check=True,
         )  # fmt: skip
-    print(f"{args.out} · {len(selected)} frame · {fps:.3f} fps")
+    split = f" · chỉ train split ({args.train_split})" if args.train_split else ""
+    print(f"{args.out} · {len(selected)} frame · {fps:.3f} fps{split}")
 
 
 if __name__ == "__main__":
