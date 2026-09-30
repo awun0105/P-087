@@ -123,7 +123,7 @@ def review_state(registry: ProjectRegistry, job_id: str) -> ReviewState:
         return ReviewState(
             job_id=job_id,
             record=record,
-            blockers=["Chưa có gói mô phỏng cho revision này — tạo gói ở tab Vật thể / Kiểm tra"],
+            blockers=["Chưa có gói mô phỏng cho revision này — bấm Tạo gói mô phỏng"],
         )
     candidate = package.candidate.candidate_checksum
     record = record.model_copy(update={"status": SceneRevisionStatus.CANDIDATE_READY, "candidate_checksum": candidate})

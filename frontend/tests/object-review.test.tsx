@@ -3,10 +3,11 @@
  * thị revision backend trả về. Canvas 3D được thay bằng stub (jsdom không có WebGL).
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ObjectReviewView } from "@/features/studio/ObjectReviewView";
+import { ObjectReviewView, type SaveState } from "@/features/studio/ObjectReviewView";
+import { SimulationPackagePanel } from "@/features/studio/SimulationPackagePanel";
 
 vi.mock("@/features/studio/StageViewer", () => ({
   CollisionMeshCanvas: () => <div data-testid="mesh" />,
@@ -94,7 +95,7 @@ describe("ObjectReviewView", () => {
     expect(await screen.findByText("1 vật thể · 1 chờ xác nhận")).toBeInTheDocument();
     // Hộp ứng viên màu vàng phủ trên 3DGS hệ mét.
     expect(screen.getByTestId("metric-scene")).toHaveTextContent("candidate-001:#facc15");
-    fireEvent.click(screen.getByRole("button", { name: /Xác nhận/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Xác nhận Vật thể 1" }));
     await waitFor(() => expect(screen.getByText("Đã xác nhận")).toBeInTheDocument());
     const [[url, init]] = calls("/confirm");
     expect(String(url)).toContain("/api/v1/jobs/job-a/scene/objects/candidate-001/confirm");
@@ -106,8 +107,41 @@ describe("ObjectReviewView", () => {
     render(<ObjectReviewView jobId="job-a" />);
     expect(await screen.findByText("1 vật thể · 0 chờ xác nhận")).toBeInTheDocument();
     expect(screen.queryByText("Vật thể 1")).toBeNull();
-    fireEvent.click(screen.getByLabelText("Hiện cả ứng viên đã loại"));
+    fireEvent.click(screen.getByRole("button", { name: "Đã loại · 1" }));
+    expect(screen.getByText("Vật thể 1")).toBeInTheDocument();
     expect(screen.getByText("Đã loại")).toBeInTheDocument();
+  });
+
+  it("inspector đổi tên gửi revision hiện tại; báo trạng thái lưu lên header", async () => {
+    const renamed = scene("rev-002", "CONFIRMED", "CONFIRMED");
+    renamed.objects[0].name = "Pallet A";
+    routeFetch({
+      "/objects/candidate-001/rename": [reply({ scene_revision: "rev-002", scene: renamed })],
+      "/scene": [reply({ scene: scene("rev-001", "CONFIRMED", "CONFIRMED") })],
+    });
+    const states: string[] = [];
+    render(<ObjectReviewView jobId="job-a" onSaveState={(state) => states.push(`${state.status}:${state.revision}`)} />);
+    fireEvent.click(await screen.findByText("Vật thể 1"));
+    fireEvent.change(screen.getByLabelText("Tên"), { target: { value: "Pallet A" } });
+    fireEvent.click(screen.getByRole("button", { name: /Đổi tên/ }));
+    await waitFor(() => expect(states).toContain("saved:rev-002"));
+    expect(states).toEqual(["saved:rev-001", "saving:rev-001", "saved:rev-002"]);
+    const [[, init]] = calls("/rename");
+    expect(JSON.parse((init as RequestInit).body as string)).toMatchObject({ expected_scene_revision: "rev-001", name: "Pallet A" });
+  });
+
+  it("409 (scene đổi ở lượt khác): báo lỗi lưu, thử lại là tải bản mới", async () => {
+    routeFetch({
+      "/objects/candidate-001/confirm": [reply({ detail: "scene đã đổi" }, 409)],
+      "/scene": [reply({ scene: scene("rev-001", "CANDIDATE") }), reply({ scene: scene("rev-004", "CANDIDATE") })],
+    });
+    let last: SaveState | null = null;
+    render(<ObjectReviewView jobId="job-a" onSaveState={(state) => (last = state)} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Xác nhận Vật thể 1" }));
+    expect(await screen.findByText(/Scene đã đổi ở lượt khác/)).toBeInTheDocument();
+    expect(last).toMatchObject({ status: "error", revision: "rev-001" });
+    act(() => (last as unknown as { retry: () => void }).retry());
+    await waitFor(() => expect(last).toMatchObject({ status: "saved", revision: "rev-004" }));
   });
 
   it("báo rõ khi bước tách vật thể chưa có scene", async () => {
@@ -138,11 +172,12 @@ describe("ObjectReviewView", () => {
       },
       package_ref: null,
     };
-    routeFetch({ "/scene": [reply({ scene: scene("rev-001", "CONFIRMED", "CONFIRMED") })] });
-    render(<ObjectReviewView jobId="job-a" />);
-    await screen.findByText("1 vật thể · 0 chờ xác nhận");
+    // Panel gói nằm ở tab "Kiểm tra & duyệt" (D-07), không còn trong danh sách vật thể.
+    routeFetch({});
+    render(<SimulationPackagePanel jobId="job-a" sceneRevision="rev-001" onSceneChanged={() => {}} />);
+    const create = await screen.findByRole("button", { name: "Tạo gói mô phỏng" });
     vi.mocked(global.fetch).mockImplementationOnce(async () => reply(failed));
-    fireEvent.click(screen.getByRole("button", { name: "Tạo gói mô phỏng" }));
+    fireEvent.click(create);
     expect(await screen.findByText("Vật nằm trong kho, trên sàn")).toBeInTheDocument();
     expect(screen.getByText(/user-001/)).toBeInTheDocument();
     expect(screen.queryByText(/Tải gói/)).toBeNull();
