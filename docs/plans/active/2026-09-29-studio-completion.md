@@ -35,6 +35,15 @@ ba hướng tỉ lệ trên Aisle_CW.
   (REC-06, UI + API đã có, commits `66f3433`…`c48ec4d`). Sau xác nhận chưa có bước nào chạy.
 - Nhận diện loại đầu vào: có module (`95fa90d`), chưa nối vào upload.
 
+## Quyết định Tech Lead 2026-09-30 — hoàn thiện tích hợp liên track
+
+Owner/Tech Lead (Quân): "việc của chúng ta là tái dùng những gì EX-SCENE/EX-SIM đã làm để nối
+lại tất cả và implement hoàn thiện sản phẩm". Branch `feat/studio-integration` được phép sửa
+code EX-SCENE (`src/services/scene/`) và EX-SIM (`src/services/simulation/`) để nối REC bundle →
+SceneIR → collider/preflight → USD candidate, giữ shared contract (đổi contract vẫn cần ghi rõ)
+và ghi nguồn/evidence tại task file tương ứng. Gói 5: scene import `.ply` chỉ để xem/chỉnh sửa,
+không đổi contract `ReconstructionPreview` (hướng 1 đã đề xuất).
+
 ## Quyết định đã chốt trước gói 3 (owner, 2026-09-29)
 
 | # | Quyết định | Ghi tại |
