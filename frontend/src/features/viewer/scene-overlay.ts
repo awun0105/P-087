@@ -81,6 +81,14 @@ export class SceneOverlay {
   private readonly boxIds = new Map<Entity, string>();
   private destroyed = false;
 
+  /**
+   * App còn dùng được: chưa `destroy()` và PlayCanvas chưa tự huỷ app (vd. mất WebGL device —
+   * khi đó `app.root` thành null trước khi viewer kịp gọi `onApp(null)`).
+   */
+  private get alive(): boolean {
+    return !this.destroyed && this.app.root != null;
+  }
+
   constructor(app: ViewerAppLike) {
     this.app = app as unknown as AppBase;
     this.root = new Entity("r2s-overlay", this.app);
@@ -124,6 +132,7 @@ export class SceneOverlay {
   }
 
   setCollision(visible: boolean, opacity: number): void {
+    if (!this.alive) return;
     if (this.collisionEntity) this.collisionEntity.enabled = visible;
     const current = this.collisionMaterial;
     if (!current) return this.redraw();
@@ -136,6 +145,7 @@ export class SceneOverlay {
 
   /** Bật/tắt splat của viewer (entity upstream tên `gsplat`). */
   setSplatVisible(visible: boolean): void {
+    if (!this.alive) return;
     const splat = this.app.root.findByName("gsplat");
     if (splat) splat.enabled = visible;
     this.redraw();
@@ -143,6 +153,7 @@ export class SceneOverlay {
 
   /** Vẽ lại toàn bộ hộp; hộp được nhấn mạnh đậm hơn. */
   setBoxes(boxes: readonly OverlayBox[]): void {
+    if (!this.alive) return;
     for (const child of [...this.boxRoot.children]) child.destroy();
     this.boxIds.clear();
     this.releaseMaterials();
@@ -165,8 +176,9 @@ export class SceneOverlay {
    * `CameraComponent.screenToWorld`). Chỉ xét hộp đang vẽ.
    */
   pick(x: number, y: number): string | null {
+    if (!this.alive) return null;
     const camera = this.app.root.findComponents("camera")[0] as CameraComponent | undefined;
-    if (!camera || this.destroyed) return null;
+    if (!camera) return null;
     const origin = camera.entity.getPosition().clone();
     const direction = camera.screenToWorld(x, y, camera.farClip, new PcVec3()).sub(origin).normalize();
     let best: string | null = null;
@@ -201,7 +213,7 @@ export class SceneOverlay {
    * đổi lớp phủ mà không xin frame mới thì màn hình giữ nguyên tới lần xoay camera kế tiếp.
    */
   private redraw(): void {
-    if (!this.destroyed) this.app.renderNextFrame = true;
+    if (this.alive) this.app.renderNextFrame = true;
   }
 
   private releaseMaterials(): void {

@@ -205,7 +205,7 @@ export function PlayCanvasScene({
         if (app && sourceFrame !== "colmap") {
           const [ex, ey, ez] = DISPLAY_EULER[sourceFrame];
           orient = () => {
-            const entity = app.root.findByName("gsplat");
+            const entity = app.root?.findByName("gsplat");
             if (!entity) return;
             entity.setLocalEulerAngles(ex, ey, ez);
             app.off("update", orient!);
