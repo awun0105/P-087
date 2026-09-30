@@ -146,13 +146,29 @@ export function ScenePage({ jobId }: { jobId: string }) {
               </span>
             </Card>
           )}
+          {jobId && progress?.stages.some((stage) => stage.stage_id === "ST-FRAME-EXTRACT" && stage.state === "succeeded") && (
+            <Card className="overflow-hidden">
+              {/* eslint-disable-next-line @next/next/no-img-element -- JPEG nhỏ do API tạo */}
+              <img
+                src={`/api/v1/jobs/${encodeURIComponent(jobId)}/thumbnail.jpg`}
+                alt="Khung hình đầu của video"
+                className="aspect-video w-full object-cover"
+                onError={(event) => {
+                  event.currentTarget.parentElement?.setAttribute("hidden", "");
+                }}
+              />
+              <p className="px-4 py-3 text-xs text-ink-muted">
+                Khung hình đầu đã tách. Kết quả từng bước (camera, 3DGS…) xem được khi preview xong.
+              </p>
+            </Card>
+          )}
         </div>
         <Card className="h-fit p-5 sm:p-6">
           {progress ? (
             <PipelineTimeline
               stages={views}
               stageList={STUDIO_STAGES}
-              timeNote={`Cập nhật ${new Date(progress.updated_at).toLocaleTimeString("vi-VN")}`}
+              timeNote={`Bước gần nhất đổi lúc ${new Date(progress.updated_at).toLocaleTimeString("vi-VN")}`}
             />
           ) : (
             <p className="flex items-center gap-2 text-sm text-ink-muted" role="status">
