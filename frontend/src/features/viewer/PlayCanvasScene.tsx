@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import type { ViewMode } from "@/features/viewer/layers";
+import { DISPLAY_EULER, type DisplayCameraPose, type SourceFrame } from "@/features/viewer/source-frame";
 import type { SplatInspection } from "./splat-inspection";
 import { EMPTY_INSPECTION, type InspectionState } from "./inspection-history";
 
@@ -94,6 +95,33 @@ export interface PlayCanvasSceneProps {
   inspectionMaxPoints?: number;
   onInspectionReady?: (controller: SplatInspection | null) => void;
   onInspectionState?: (state: InspectionState) => void;
+  /** Hệ trục của nội dung; mặc định `colmap` (output Brush). Artifact hệ mét REC-06 là `z_up`. */
+  sourceFrame?: SourceFrame;
+  /** Camera khởi đầu trong không gian hiển thị (vd camera quay đầu tiên); caller memo hoá. */
+  initialCamera?: DisplayCameraPose;
+  /**
+   * Điểm đến của camera (không gian hiển thị), khai lúc tạo viewer; `ViewerControls.select(i)` bay
+   * tới điểm thứ i bằng transition của viewer. Hotspot mặc định bị ẩn: host tự vẽ danh sách.
+   * Caller memo hoá theo nội dung, vì đổi mảng này sẽ tạo lại viewer.
+   */
+  annotations?: readonly ViewerAnnotation[];
+  /**
+   * App PlayCanvas và điều khiển camera của viewer khi sẵn sàng (null khi huỷ), để host gắn lớp
+   * phủ cùng scene graph và cho camera bay tới vật.
+   */
+  onApp?: (app: ViewerAppLike | null, controls?: ViewerControls) => void;
+}
+
+export interface ViewerAnnotation {
+  position: [number, number, number];
+  title: string;
+  camera: DisplayCameraPose;
+}
+
+/** Điều khiển camera qua API công khai của supersplat-viewer (`selectAnnotation`). */
+export interface ViewerControls {
+  /** Bay tới annotation thứ `index`; false nếu viewer chưa nạp xong (API yêu cầu `state.loaded`). */
+  select(index: number): boolean;
 }
 
 export function PlayCanvasScene({
@@ -111,6 +139,10 @@ export function PlayCanvasScene({
   inspectionMaxPoints = 2,
   onInspectionReady,
   onInspectionState,
+  sourceFrame = "colmap",
+  initialCamera,
+  annotations,
+  onApp,
 }: PlayCanvasSceneProps) {
   const container = useRef<HTMLDivElement | null>(null);
   const [runtime, setRuntime] = useState<PlayCanvasRuntime>(INITIAL_RUNTIME);
@@ -136,9 +168,21 @@ export function PlayCanvasScene({
     const objectUrl = contentFile ? URL.createObjectURL(contentFile) : null;
     const resolvedUrl = objectUrl ?? contentUrl!;
 
+    let orient: (() => void) | null = null;
+
     void Promise.all([import("@playcanvas/supersplat-viewer/viewer"), import("@playcanvas/supersplat-viewer/settings")])
       .then(async ([module, settingsModule]) => {
         if (disposed) return;
+        const settings = settingsModule.defaultSettings("environment");
+        if (initialCamera) settings.cameras = [{ initial: initialCamera }];
+        if (annotations?.length) {
+          settings.annotations = annotations.map((item) => ({
+            position: item.position,
+            title: item.title,
+            text: "",
+            camera: { initial: item.camera },
+          }));
+        }
         const viewer = await module.createViewer({
           container: host,
           contentUrl: resolvedUrl,
@@ -146,7 +190,7 @@ export function PlayCanvasScene({
           collisionUrl: collisionUrl ?? undefined,
           // `{}` làm viewer 1.35.2 crash ("reading 'color'") khi chạy browser thật
           // (2026-09-29); dùng default chính thức của thư viện, camera khung môi trường.
-          settings: settingsModule.defaultSettings("environment"),
+          settings,
           renderer,
           ui: showControls,
         });
@@ -155,6 +199,30 @@ export function PlayCanvasScene({
           return;
         }
         handle = viewer;
+        // Upstream tạo entity `gsplat` khi asset nạp xong, với phép xoay COLMAP cố định. Đặt lại
+        // phép xoay theo hệ nguồn ở frame đầu tiên có entity (trước khi render), rồi bỏ listener.
+        const app = viewer.app as unknown as ViewerAppLike | undefined;
+        if (app && sourceFrame !== "colmap") {
+          const [ex, ey, ez] = DISPLAY_EULER[sourceFrame];
+          orient = () => {
+            const entity = app.root?.findByName("gsplat");
+            if (!entity) return;
+            entity.setLocalEulerAngles(ex, ey, ez);
+            app.off("update", orient!);
+            orient = null;
+          };
+          app.on("update", orient);
+        }
+        if (annotations?.length) viewer.state.showAnnotations = false;
+        if (app) {
+          onApp?.(app, {
+            select: (index) => {
+              if (disposed || !viewer.state.loaded) return false;
+              viewer.selectAnnotation(index);
+              return true;
+            },
+          });
+        }
         // EventHandler của PlayCanvas bắn `<key>:changed`; `on` trả EventHandle
         // để huỷ. Không tự poll `state` vì đó là nguồn thật của thư viện.
         for (const event of ["progress:changed", "loaded:changed", "hasCollision:changed", "walkAllowed:changed"]) {
@@ -186,6 +254,8 @@ export function PlayCanvasScene({
     return () => {
       disposed = true;
       subscriptions.forEach((subscription) => subscription.off());
+      if (orient && handle?.app) (handle.app as unknown as ViewerAppLike).off("update", orient);
+      onApp?.(null);
       onInspectionReady?.(null);
       const activeHandle = handle;
       const release = () => {
@@ -201,7 +271,8 @@ export function PlayCanvasScene({
       handle = null;
     };
   }, [capability, collisionUrl, contentUrl, contentFile, contentFilename, showControls, mode, onFailed, publish,
-    enableInspection, inspectionMaxPoints, onInspectionReady, onInspectionState, renderer]);
+    enableInspection, inspectionMaxPoints, onInspectionReady, onInspectionState, renderer, sourceFrame, initialCamera,
+    annotations, onApp]);
 
   return (
     <div
@@ -216,6 +287,15 @@ export function PlayCanvasScene({
       data-engine={capability === "ready" ? "playcanvas" : undefined}
     />
   );
+}
+
+/** Phần của `pc.AppBase` mà host dùng (tìm entity, sự kiện frame, gắn lớp phủ). */
+export interface ViewerAppLike {
+  readonly root: {
+    findByName(name: string): { setLocalEulerAngles(x: number, y: number, z: number): void; enabled: boolean } | null;
+  };
+  on(event: "update", handler: () => void): unknown;
+  off(event: "update", handler: () => void): unknown;
 }
 
 /** Chỉ những field host thật sự dùng, để không phụ thuộc shape đầy đủ của thư viện. */

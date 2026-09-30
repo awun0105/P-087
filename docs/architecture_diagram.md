@@ -50,7 +50,7 @@ graph LR
     UI -->|REST| API[Server điều khiển<br/>FastAPI trên Railway]
     API --> DB[(PostgreSQL<br/>Supabase)]
     U -->|presigned upload/download| R2[(Cloudflare R2<br/>video, frame, 3DGS, export)]
-    API -->|bật/tắt, giao job| GPU[GPU worker Vast.ai / dự phòng RunPod<br/>COLMAP, Brush, SOG, LOD]
+    API -->|bật/tắt, giao job| GPU[GPU worker Vast.ai / dự phòng RunPod<br/>COLMAP, Brush, SOG, LOD<br/>+ pipeline v2: mask SAM2, Gaussian có nhãn, vá nền]
     GPU -->|đọc input, ghi artifact| R2
     GPU -->|tiến trình, kết quả| API
     API -->|cấp link có hạn| R2
@@ -58,4 +58,6 @@ graph LR
 
 Hiện trạng chạy thật vẫn là một máy (`scripts/gpu/run_stack.sh`); sơ đồ trên là
 đích triển khai theo [plan Cloud Studio](plans/active/2026-09-29-cloud-studio.md).
+Pipeline v2 ([ADR 0007](decisions/0007-object-centric-hybrid-usd-pipeline.md)) chạy thêm các chặng GPU nặng
+trên cùng worker thuê (ước tính 16–24 GB); đầu ra là USD lai cho Isaac Sim.
 

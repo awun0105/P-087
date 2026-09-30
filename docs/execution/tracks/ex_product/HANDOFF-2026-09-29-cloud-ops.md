@@ -80,6 +80,24 @@ upload 40 MiB qua trình duyệt thẳng MinIO; 307 → MinIO khớp checksum, k
 **Thứ tự đề xuất khi làm lại:** 1–2 → 5–6 → 15–16, 19 → 17–18, 20 → 12 → 10; có tài khoản thì
 3 → 8–9 → 7, 11 → 4 → 13–14 → 21.
 
+### Cập nhật 2026-09-30 (audit trước deploy, `feat/studio-integration`)
+
+Đã sửa (VERIFIED, có test/chạy thật):
+
+- Route stream `/api/v1/uploads` của Next không chuyển cookie phiên → khi `AUTH_REQUIRED=true` mọi
+  upload/liệt kê video bị 401; nay chuyển tiếp `cookie`/`authorization` (test `upload-route.test.ts`).
+- `.dockerignore` kéo `data/` (24 GB) và `frontend/` vào image API; nay loại ra. Dockerfile nghe
+  `${PORT:-8000}` cho Railway. Image 602 MB build và chạy được: `/health` `database: ok`.
+- Đường Postgres: 13 test chỉ chạy với Postgres đã xanh trên Postgres 16 tạm (`R2S_TEST_POSTGRES_URL`).
+
+Còn lưu ý:
+
+- `Settings` bắt buộc có key của LLM provider dù Studio không dùng LLM → deploy phải đặt
+  `OPENAI_API_KEY` giả như `scripts/gpu/studio.env.example` (đề xuất: chỉ kiểm key khi bật route agent).
+- Image API không có ffmpeg → thumbnail scene trả 404 (UI tự ẩn); cài ffmpeg nếu muốn có ảnh bìa.
+- Pipeline v2 ([ADR 0007](../../../decisions/0007-object-centric-hybrid-usd-pipeline.md)) cần GPU thuê lớn hơn (ước tính
+  16–24 GB) cho chặng mask/Gaussian có nhãn/vá nền; image GPU worker phải thêm runtime đó ở pha B.
+
 ## 3. Tài khoản cần tạo (owner)
 
 Vast.ai (nạp $5–10, tắt auto-recharge) · RunPod (dự phòng, spending limit) · Supabase · Cloudflare R2 ·

@@ -5,14 +5,24 @@
 
 import { ApiError, apiFetch, fetchApi, type ApiResult } from "@/lib/api/client";
 import { directUpload, xhrPutPart } from "@/lib/api/directUpload";
+import type { SceneEditResponse, SceneResponse } from "@/lib/contracts/api";
 import {
   parseDemoManifest,
+  parseDemoSelection,
   parseJobProgress,
+  parseLidarMeasurements,
   parseMetricPreview,
+  parseModeComparison,
+  parseStageViews,
   type DemoManifest,
+  type DemoSelection,
+  type ImportedScene,
   type JobProgress,
+  type LidarMeasurements,
   type MetricInput,
+  type MetricPoint,
   type MetricPreview,
+  type ModeComparison,
   type ParamValue,
   type ProcessingEvaluation,
   type ProcessingOptions,
@@ -20,8 +30,15 @@ import {
   type SceneFromUpload,
   type SceneSummary,
   type SourceRightsAttestation,
+  type StageView,
   type UploadRecord,
 } from "@/lib/contracts/studio";
+
+/** Kết quả xem được của từng bước (frame, camera, 3DGS, collision mesh). */
+export async function getStageViews(jobId: string, signal?: AbortSignal): Promise<StageView[]> {
+  const data = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/stage-views`, { signal });
+  return parseStageViews(data);
+}
 
 const API = "/api/v1";
 
@@ -192,6 +209,33 @@ function proxyUpload(file: File, onProgress: (fraction: number) => void): Upload
   return { promise, abort: () => request.abort() };
 }
 
+/** Scene có số đo LiDAR sẵn (dataset mẫu) không; lỗi mạng coi như không có (nhập tay). */
+export async function getMetricAssist(jobId: string): Promise<{ lidar_available: boolean }> {
+  const result = await fetchApi<{ lidar_available: boolean }>(`${API}/jobs/${encodeURIComponent(jobId)}/metric/assist`);
+  return result.ok && typeof result.data.lidar_available === "boolean" ? result.data : { lidar_available: false };
+}
+
+/** Đo A/B và C/D trên LiDAR để điền sẵn khoảng cách (chỉ scene có hỗ trợ LiDAR). */
+export async function measureOnLidar(
+  jobId: string,
+  anchor: [MetricPoint, MetricPoint],
+  check: [MetricPoint, MetricPoint],
+  signal?: AbortSignal,
+): Promise<LidarMeasurements> {
+  const data = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/metric/lidar`, {
+    method: "POST",
+    body: JSON.stringify({ point_a: anchor[0], point_b: anchor[1], check_a: check[0], check_b: check[1] }),
+    signal,
+  });
+  return parseLidarMeasurements(data);
+}
+
+/** Dataset mẫu: hệ thống tự chọn 7 điểm trên sàn LiDAR và đo sẵn. */
+export async function getDemoPoints(jobId: string): Promise<DemoSelection> {
+  const data = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/metric/demo-points`);
+  return parseDemoSelection(data);
+}
+
 /** Xem trước tỉ lệ mét từ điểm đã chọn; backend chưa ghi xác nhận. */
 export async function previewMetric(jobId: string, input: MetricInput): Promise<MetricPreview> {
   const data = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/metric/preview`, {
@@ -207,4 +251,199 @@ export function confirmMetric(jobId: string, input: MetricInput, previewChecksum
     method: "POST",
     body: JSON.stringify({ input, preview_checksum: previewChecksum }),
   });
+}
+
+/** Demo 3 hướng tỉ lệ trên cùng scene: RGB only (mô phỏng), anchor người dùng, LiDAR. */
+export async function getModeComparison(jobId: string, signal?: AbortSignal): Promise<ModeComparison> {
+  const data = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/metric/comparison`, { signal });
+  return parseModeComparison(data);
+}
+
+/** Tạo scene import từ upload 3DGS; máy chủ nén PLY → SOG trong nền. */
+export function createImport(uploadId: string, name: string): Promise<ImportedScene> {
+  return apiFetch<ImportedScene>(`${API}/imports`, { method: "POST", body: JSON.stringify({ upload_id: uploadId, name }) });
+}
+
+export function getImport(importId: string, signal?: AbortSignal): Promise<ApiResult<ImportedScene>> {
+  return fetchApi<ImportedScene>(`${API}/imports/${encodeURIComponent(importId)}`, { signal });
+}
+
+export function listImports(): Promise<ApiResult<{ imports: ImportedScene[] }>> {
+  return fetchApi<{ imports: ImportedScene[] }>(`${API}/imports`);
+}
+
+/** URL SOG của scene import (tên file `.sog` để viewer chọn đúng parser). */
+export function importContentUrl(importId: string): string {
+  return `${API}/imports/${encodeURIComponent(importId)}/content/scene.sog`;
+}
+
+// ── vật thể trong SceneIR (PRODUCT-07/07A, ADR 0006) ─────────────────────────
+
+/** SceneIR hiện tại của job; 404 khi bước tách vật thể chưa publish revision nào. */
+export function getJobScene(jobId: string, signal?: AbortSignal): Promise<ApiResult<SceneResponse>> {
+  return fetchApi<SceneResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene`, { signal });
+}
+
+export type ObjectAction = "confirm" | "ignore" | "hide" | "delete" | "rename";
+
+/** Thao tác trên một vật thể; `expectedRevision` là khoá optimistic (revision cũ → 409). */
+export function applyObjectAction(
+  jobId: string,
+  objectId: string,
+  action: ObjectAction,
+  expectedRevision: string,
+  extra: { active?: boolean; name?: string } = {},
+): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/scene/objects/${encodeURIComponent(objectId)}/${action}`,
+    { method: "POST", body: JSON.stringify({ expected_scene_revision: expectedRevision, ...extra }) },
+  );
+}
+
+/** Thêm vật cản hộp; `center` là tâm hộp theo mét trong khung world (sàn z = 0). */
+export function addBoxObstacle(
+  jobId: string,
+  expectedRevision: string,
+  name: string,
+  dimensions: [number, number, number],
+  center: [number, number, number],
+): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/objects`, {
+    method: "POST",
+    body: JSON.stringify({
+      expected_scene_revision: expectedRevision,
+      name,
+      dimensions_xyz_m: dimensions,
+      position_xyz: center,
+    }),
+  });
+}
+
+// ── gói mô phỏng Isaac (EX-SIM SIM-02…05) ───────────────────────────────────
+
+export interface PreflightRuleView {
+  rule_id: string;
+  result: "PASS" | "FAIL" | "WARN" | string;
+  affected_object_ids: string[];
+  remediation: string | null;
+}
+
+/** Tập con của `SimulationPackage` backend mà UI hiển thị; các field khác bỏ qua. */
+export interface SimulationPackageView {
+  scene_revision: string;
+  source_scene_revision: string;
+  created_at: string;
+  confirmed_objects: number;
+  environment_triangles: number;
+  carved_triangles: number;
+  preflight: { blocking_result: string; rules: PreflightRuleView[] };
+  package_ref: { artifact_uri: string; artifact_checksum: string } | null;
+}
+
+function parseSimulationPackage(value: unknown): SimulationPackageView | null {
+  if (value === null) return null;
+  const data = value as Partial<SimulationPackageView>;
+  if (
+    typeof data.scene_revision !== "string" ||
+    typeof data.confirmed_objects !== "number" ||
+    !data.preflight ||
+    !Array.isArray(data.preflight.rules)
+  ) {
+    throw new ApiError(502, "Backend trả gói mô phỏng sai contract");
+  }
+  return data as SimulationPackageView;
+}
+
+/** Gói của revision scene hiện tại; null khi chưa tạo hoặc scene đã sửa sau lần tạo. */
+export async function getSimulationPackage(jobId: string, signal?: AbortSignal): Promise<SimulationPackageView | null> {
+  return parseSimulationPackage(
+    await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/simulation-package`, { signal }),
+  );
+}
+
+/** Tạo gói: preflight FAIL vẫn trả báo cáo (package_ref null), không đổi scene. */
+export async function createSimulationPackage(jobId: string): Promise<SimulationPackageView> {
+  const result = parseSimulationPackage(
+    await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/simulation-package`, { method: "POST" }),
+  );
+  if (!result) throw new ApiError(502, "Backend không trả gói mô phỏng");
+  return result;
+}
+
+export function simulationPackageDownloadUrl(jobId: string): string {
+  return `${API}/jobs/${encodeURIComponent(jobId)}/simulation-package/download`;
+}
+
+// ── duyệt & phát hành (PRODUCT-10/11) ────────────────────────────────────────
+
+export type RevisionStatus =
+  | "DRAFT"
+  | "PROCESSING"
+  | "CANDIDATE_READY"
+  | "VALIDATING"
+  | "READY_FOR_REVIEW"
+  | "APPROVED"
+  | "REJECTED"
+  | "RELEASED";
+
+/** Tập con `ReviewState` backend mà UI dùng. */
+export interface ReviewStateView {
+  record: {
+    scene_revision: string;
+    status: RevisionStatus;
+    candidate_checksum: string | null;
+    validation_report_checksum: string | null;
+  };
+  validation: {
+    overall_result: string;
+    validator_version: string;
+    checks: { check_id: string; result: string; message: string | null }[];
+    path_results: { pair_id: string; result: string; message: string | null }[];
+  } | null;
+  warning_ids: string[];
+  approval: { reviewer_id: string; decision: "APPROVE" | "REJECT"; reason: string | null; decided_at: string } | null;
+  release: { release_timestamp: string; release_manifest_checksum: string } | null;
+  release_archive: { artifact_uri: string } | null;
+  blockers: string[];
+}
+
+function parseReviewState(value: unknown): ReviewStateView {
+  const data = value as Partial<ReviewStateView>;
+  if (!data.record || typeof data.record.status !== "string" || !Array.isArray(data.blockers)) {
+    throw new ApiError(502, "Backend trả trạng thái duyệt sai contract");
+  }
+  return data as ReviewStateView;
+}
+
+export async function getReviewState(jobId: string, signal?: AbortSignal): Promise<ReviewStateView> {
+  return parseReviewState(await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/review-state`, { signal }));
+}
+
+/** Quyết định trên đúng gói + báo cáo đang hiển thị; backend lấy reviewer từ phiên đăng nhập. */
+export async function submitReviewDecision(
+  jobId: string,
+  body: {
+    decision: "APPROVE" | "REJECT";
+    candidate_checksum: string;
+    validation_report_checksum: string;
+    accepted_warning_ids: string[];
+    reason?: string;
+  },
+): Promise<ReviewStateView> {
+  return parseReviewState(
+    await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/review-decision`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+export async function retryReleaseSeal(jobId: string): Promise<ReviewStateView> {
+  return parseReviewState(
+    await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/release-seal`, { method: "POST" }),
+  );
+}
+
+export function releaseDownloadUrl(jobId: string): string {
+  return `${API}/jobs/${encodeURIComponent(jobId)}/release-download`;
 }

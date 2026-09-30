@@ -7,7 +7,7 @@ unit/fixture cũ, không phải đường persistence của deployed API.
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal, TypeVar
+from typing import TYPE_CHECKING, Literal, TypeVar
 from uuid import uuid4
 
 from pydantic import BaseModel
@@ -70,6 +70,9 @@ from src.services.orchestration.projects.privacy import require_project_dispatch
 from src.services.orchestration.scene.editor import SceneEditor
 from src.services.orchestration.storage import artifact_remote
 from src.services.orchestration.uploads.models import UploadRecord
+
+if TYPE_CHECKING:
+    from src.services.reconstruction import FinalizeResult
 
 ContractT = TypeVar("ContractT", bound=BaseModel)
 
@@ -592,6 +595,62 @@ class ProjectRegistry:
         self.persistence.save_job(updated, manifest_ref, event, expected=expected)
         return updated
 
+    def record_finalize(
+        self,
+        expected: JobManifest,
+        result: "FinalizeResult",
+        result_ref: ProductArtifactRef,
+        extra_stages: list[StageArtifact] | None = None,
+    ) -> JobManifest:
+        """Worker-only: ghi kết quả hoàn tất EX-REC (geometry + bundle) và kết thúc job.
+
+        Kết quả đã qua consumer REC (`load_finalize_result`); ở đây chỉ kiểm đúng job/
+        stage đang chạy rồi CAS. Lỗi → FAILED với ExecutionError của REC.
+        """
+        if self.persistence is None:
+            raise RuntimeStateConflictError("Real worker cần durable registry")
+        if expected.status != JobStatus.RUNNING or expected.current_stage not in {
+            StageId.RGB_GEOMETRY,
+            StageId.OBJECT_EXTRACT,
+        }:
+            raise ValueError("Job không ở bước hoàn tất hình học")
+        # Bước tách vật thể (ADR 0006) chạy trong PRODUCT sau bundle; artifact của nó đi kèm.
+        extra = list(extra_stages or [])
+        if result.job_id != expected.job_id or result_ref.job_id != expected.job_id:
+            raise ValueError("Kết quả hoàn tất khác job")
+        self.runtime_resolver.require(result_ref)
+        for stage in result.stage_artifacts:
+            if stage.artifact_uri is not None and stage.artifact_checksum is not None:
+                self.runtime_resolver.require_uri(stage.artifact_uri, stage.artifact_checksum)
+        failed = result.error is not None
+        now = datetime.now(UTC)
+        updated = with_canonical_checksum(
+            expected.model_copy(
+                update={
+                    "stage_artifacts": [*expected.stage_artifacts, *result.stage_artifacts, *extra],
+                    "status": JobStatus.FAILED if failed else JobStatus.SUCCEEDED,
+                    "current_stage": result.error.stage_id
+                    if result.error
+                    else (StageId.OBJECT_EXTRACT if extra else StageId.RGB_GEOMETRY),
+                    "completed_at": now,
+                }
+            ),
+            "job_manifest_checksum",
+        )
+        manifest_ref = self.lifecycle.store.publish_manifest(updated)
+        history = self.persistence.list_attempts(expected.job_id)
+        event = JobAttemptRecord(
+            attempt=history[-1].attempt,
+            status=updated.status,
+            current_stage=updated.current_stage,
+            recorded_at=now,
+            error=result.error,
+            job_manifest_uri=manifest_ref.artifact_uri,
+            job_manifest_checksum=manifest_ref.artifact_checksum,
+        )
+        self.persistence.save_job(updated, manifest_ref, event, expected=expected)
+        return updated
+
     def record_prepared_input(self, expected: JobManifest, receipt: PreparedInputReceipt) -> JobManifest:
         """Worker-only reducer cho bước chuẩn bị video; CAS trên revision RUNNING đã claim.
 
@@ -765,6 +824,11 @@ class ProjectRegistry:
             preview = self.get_preview(job_id)
             references.extend((preview.source_visual_ref, preview.camera_pose_ref, preview.delivery_ref))
         references.extend(self.scene.artifact_references_for_job(job_id))
+        if job_id != self._fixture_job_id:
+            # Lớp xem từng bước (ADR 0005): ảnh frame và ref trong ReconstructionBundle.
+            from src.services.orchestration.stage_views import view_references
+
+            references.extend(view_references(self, self.get_job(job_id)))
         if job_id == self._fixture_job_id:
             visual = self.scene.visual_binding(job_id)
             if visual.reference is not None:

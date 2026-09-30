@@ -34,11 +34,51 @@ def user_metric_port(
 
 def __getattr__(name: str) -> object:
     """Model public của port REC-06 / nhận diện đầu vào (import lười để API không kéo module REC khi không dùng)."""
-    if name in {"UserMetricInput", "UserMetricPreview", "UserMetricPort", "publish_json"}:
+    if name in {
+        "UserMetricInput",
+        "UserMetricPreview",
+        "UserMetricPort",
+        "LidarMeasurements",
+        "DemoSelection",
+        "ModeComparison",
+        "check_tolerance_m",
+        "publish_json",
+    }:
         from src.services.reconstruction import metric_port
 
         return getattr(metric_port, name)
-    if name in {"detect_input", "InputDetection", "InputKind", "InputRejectedError"}:
+    if name in {
+        "ConfirmationSummary",
+        "FinalizeRequest",
+        "FinalizeResult",
+        "GeometryProfile",
+        "confirmation_summary",
+        "load_finalize_result",
+        "load_geometry_profile",
+    }:
+        from src.services.reconstruction import finalize
+
+        return getattr(finalize, name)
+    if name in {
+        "CameraMarker",
+        "CameraView",
+        "camera_markers",
+        "camera_views",
+        "frame_images",
+        "metric_gaussian_points",
+    }:
+        from src.services.reconstruction import views
+
+        return getattr(views, name)
+    if name in {"extract_member", "package_splat"}:
+        from src.services.reconstruction import imports
+
+        return getattr(imports, name)
+    if name == "lidar_support_uri":
+        from src.services.reconstruction.rgb.canonical.lidar_assist import support_uri
+
+        return support_uri
+    if name in {"detect_input", "detect_stream", "InputDetection", "InputKind", "InputRejectedError"}:
         from src.services.reconstruction.inputs import detect
 
         return getattr(detect, name)
@@ -46,13 +86,34 @@ def __getattr__(name: str) -> object:
 
 
 __all__ = [
+    "extract_member",
+    "package_splat",
+    "ModeComparison",
+    "CameraMarker",
+    "CameraView",
+    "camera_views",
+    "metric_gaussian_points",
+    "camera_markers",
+    "frame_images",
+    "ConfirmationSummary",
+    "FinalizeRequest",
+    "FinalizeResult",
+    "GeometryProfile",
+    "confirmation_summary",
+    "load_finalize_result",
+    "load_geometry_profile",
+    "DemoSelection",
     "InputDetection",
     "InputKind",
     "InputRejectedError",
+    "LidarMeasurements",
     "UserMetricInput",
     "UserMetricPort",
     "UserMetricPreview",
+    "check_tolerance_m",
     "detect_input",
+    "detect_stream",
+    "lidar_support_uri",
     "publish_json",
     "user_metric_port",
     "verify_prepared_preview",

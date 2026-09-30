@@ -340,6 +340,18 @@ Hoàn thiện:
   dùng đến đó; fallback demo là stack một máy GPU (`scripts/gpu/run_stack.sh`).
 - Không đổi milestone M2–M6 ở Chương 11; SCENE/SIM nối vào khi có artifact thật.
 
+## 6.4.2 Cập nhật 30/09 — tích hợp Studio đầu-cuối và pipeline v2
+
+- Tech Lead giao EX-REC hoàn thiện tích hợp EX-SCENE/EX-SIM/EX-PRODUCT trên
+  `feat/studio-integration`: tách vật SAMPro3D + SAM2 (ADR 0006), sửa SceneIR theo vật, gói mô
+  phỏng USD + preflight, duyệt/phát hành, refactor UI theo PRODUCT.md P1–P6. PR #16 vào `develop`.
+- Owner chốt **pipeline v2** ([ADR 0007](../decisions/0007-object-centric-hybrid-usd-pipeline.md)):
+  scene theo vật chỉnh sửa được, xuất USD lai cho Isaac Sim; PRD v1.16 kéo vá nền, gợi ý nhãn,
+  thay asset vào phạm vi. Lộ trình A chạy thử → B backend → C Studio v2 → D Isaac → E deploy,
+  theo [plan pipeline v2](../plans/active/2026-09-30-pipeline-v2.md).
+- Milestone M2–M6 chưa đổi ngày. Owner quyết định cắt phạm vi pha B–D cho vừa mốc sau khi pha A
+  có số liệu. Validation Isaac (SIM-06..09) vẫn cần máy RTX.
+
 ## 6.5 Integration #1 — 04–05/10
 
 Bắt buộc chứng minh:

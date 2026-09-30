@@ -71,7 +71,7 @@ def test_running_job_marks_done_running_and_pending_stages(tmp_path: Path) -> No
     ]
     progress = job_progress(job, attempts, preview_ready=False)
     assert [stage.state for stage in progress.stages] == [
-        "succeeded", "succeeded", "succeeded", "running", "pending", "pending"
+        "succeeded", "succeeded", "succeeded", "running", "pending", "pending", "pending", "pending"
     ]  # fmt: skip
     camera = progress.stages[3]
     assert camera.started_at == _T0 + timedelta(minutes=3) and camera.completed_at is None
@@ -100,7 +100,7 @@ def test_failed_stage_carries_error_and_retry_resets_to_new_attempt(tmp_path: Pa
     fresh = job_progress(retried, retry_events, preview_ready=False)
     assert fresh.attempt == 2 and fresh.error is None
     # Frame set của attempt 1 hoàn tất trước khi attempt 2 bắt đầu nên không tính lại.
-    assert [stage.state for stage in fresh.stages] == ["pending"] * 6
+    assert [stage.state for stage in fresh.stages] == ["pending"] * 8
 
 
 def test_stage_progress_reader_advances_job_and_waits_for_complete_line(tmp_path: Path) -> None:
@@ -143,7 +143,12 @@ def test_stage_left_behind_in_journal_counts_as_done_before_receipt(tmp_path: Pa
         _event(1, JobStatus.RUNNING, StageId.VISUAL_RECON, 8),
     ]
     progress = job_progress(job, attempts, preview_ready=False)
-    assert [stage.state for stage in progress.stages] == ["succeeded"] * 4 + ["running", "pending"]
+    assert [stage.state for stage in progress.stages] == ["succeeded"] * 4 + [
+        "running",
+        "pending",
+        "pending",
+        "pending",
+    ]
     camera = progress.stages[3]
     assert camera.started_at == _T0 + timedelta(minutes=3)
     assert camera.completed_at == _T0 + timedelta(minutes=8)
@@ -164,8 +169,8 @@ def test_preview_ready_job_waits_for_metric_confirmation(tmp_path: Path) -> None
     ]
     waiting = job_progress(job, attempts, preview_ready=True)
     assert waiting.waiting_for == "metric_confirmation"
-    assert [stage.state for stage in waiting.stages] == ["succeeded"] * 5 + ["waiting"]
+    assert [stage.state for stage in waiting.stages] == ["succeeded"] * 5 + ["waiting", "pending", "pending"]
 
     # Chưa có preview (vd đang dựng) → không báo chờ người.
     not_ready = job_progress(job, attempts, preview_ready=False)
-    assert not_ready.waiting_for is None and not_ready.stages[-1].state == "running"
+    assert not_ready.waiting_for is None and not_ready.stages[-3].state == "running"

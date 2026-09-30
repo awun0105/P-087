@@ -55,6 +55,15 @@ class Settings(BaseSettings):
     product_seed: int | None = None
     product_worker_root: Path = Path("./data/product_workers")
     product_preview_timeout_seconds: float = Field(default=21600, gt=0, allow_inf_nan=False)
+    #: Thông số REC-05 (voxel/capsule) cho bước hoàn tất sau xác nhận tỉ lệ (owner chốt 2026-09-29).
+    product_geometry_config: Path = Path("configs/product/geometry_v1.json")
+    product_finalize_timeout_seconds: float = Field(default=7200, gt=0, allow_inf_nan=False)
+    #: GPU adapter cho splat-transform, theo từng máy (`--list-gpus`); None = dùng giá trị trong profile.
+    product_geometry_gpu_index: int | None = Field(default=None, ge=0)
+    #: Runtime SAM2 cho tách vật thể (ADR 0006); thiếu thì dùng fallback hình học.
+    product_scene_runtime_python: Path | None = None
+    product_sam2_checkpoint: Path | None = None
+    product_scene_timeout_seconds: float = Field(default=1800, gt=0, allow_inf_nan=False)
     product_queue_poll_seconds: float = Field(default=3, ge=0.1, le=60, allow_inf_nan=False)
     # MVP 2026-09-29: `self_attested` cho phép video upload chạy với lời tự khai
     # không có khuôn mặt/biển số; mặc định giữ cổng QA `VERIFIED_ANONYMIZED`.

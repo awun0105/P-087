@@ -340,7 +340,10 @@
 ### 1. Lâm Quang Anh Quân (`EX-REC` — Reconstruction)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Lâm Quang Anh Quân | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Lâm Quang Anh Quân | Tích hợp liên track trên `feat/studio-integration`: tách vật SAMPro3D + SAM2, sửa SceneIR theo vật, gói mô phỏng USD + preflight, duyệt/phát hành | ✅ Done | PR #16; ADR 0006; `job-123dfd4868d8` 30 ứng viên, gói rev-008 preflight PASS 6/6 | Chưa ghi nhận |
+| Lâm Quang Anh Quân | Refactor UI theo PRODUCT.md P1–P6, sửa lỗi audit (cookie upload, Docker context/`$PORT`, overlay 3D), tối ưu tải trang | ✅ Done | PR #16; JS ban đầu màn scene 1982 → 770 KB; vitest 144/144, pytest 1040 passed | Chưa ghi nhận |
+| Lâm Quang Anh Quân | Đo chất lượng 3DGS (`recon_visual_quality`) | ✅ Done | `seg-5fps-cap600k` PSNR 28,80 / SSIM 0,927 / LPIPS 0,268 (`eval/protocols/recon_visual_quality.md`) | Chưa ghi nhận |
+| Lâm Quang Anh Quân | Audit repo + tra cứu Isaac Sim; chốt pipeline v2 và đồng bộ tài liệu | ✅ Done | Audit #10, ADR 0007/0008, PRD v1.16, plan pipeline v2 | Chưa ghi nhận |
 
 ### 2. Lê Mạnh Cường (`EX-PRODUCT` — Product/Orchestration)
 | Member | Task | Status | Output | Time |

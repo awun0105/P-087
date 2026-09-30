@@ -355,6 +355,46 @@ nên không biết chỗ nào thật sự còn thiếu. Tách rõ:
 
 ## 12. Result / Evidence
 
+### 2026-09-30 — 3 mức voxel + kiểm chặn giả trên quỹ đạo robot (chưa đạt)
+
+Benchmark mới `collision_path_clearance` (`eval/path/path_clearance.py`, giao thức
+`eval/protocols/collision_path_clearance.md`), kết quả `eval/results/collision_path_clearance/aisle-cw-local-t2000.jsonl`.
+Camera Aisle_CW gắn trên robot nên capsule OTTO dọc quỹ đạo (50 vị trí) phải trống.
+
+| Voxel | Tam giác | Thời gian (T2000) | Bị chặn (mọi độ cao) | Bị chặn bởi phần > 0,10 m | > 0,15 m |
+| --- | --- | --- | --- | --- | --- |
+| 0,10 m | 74.669 | 8,2 s | 28/50 | 21/50 | 20/50 |
+| 0,05 m | 224.745 | 20,6 s | 33/50 | 26/50 | 14/50 |
+| 0,025 m | 737.602 | 106,2 s | 34/50 | — | — |
+
+- Phần lớn xâm phạm là **lớp sàn dày** (Gaussian nhiễu sát sàn, z 0,03–0,15 m).
+- Vẫn còn vật cản giả thật: cách tâm camera tối thiểu 4–7 cm ở phần > 0,15 m — nhiều khả năng
+  Gaussian rác gần ống kính của 3DGS preview thưa (98.611 Gaussian, preset chất lượng thấp).
+- Thử "bỏ Gaussian trong ống 0,4 m quanh quỹ đạo camera" (free-space carving): > 0,15 m còn
+  10/50, > 0,10 m còn 20/50 — cải thiện một phần, **chưa đưa vào pipeline**.
+- **Kết luận: tiêu chí "không ghost-block" CHƯA ĐẠT.** Hướng tiếp: 3DGS chất lượng cao hơn
+  (nhiều iteration hơn), carving theo tia nhìn (visibility), hoặc dọn sàn theo mặt z = 0;
+  sau đó chạy lại benchmark. Isaac CLEAR/BLOCKED vẫn cần máy RTX.
+
+### 2026-09-30 — REC-05 chạy trong worker Studio trên Aisle_CW thật
+
+Chạy thật 2026-09-30 trên `job-ac2bfd924cc6` (video Aisle_CW, GPU Quadro T2000, adapter index 1),
+branch `feat/studio-integration`. Xác nhận tỉ lệ bằng 7 điểm tự chọn trên sàn LiDAR (ADR 0004 §6).
+- Profile `configs/product/geometry_v1.json`: voxel 0,05 m, capsule OTTO 0,461/0,308 m.
+- **Hiệu chỉnh (không còn dùng số smoke):** 3DGS preview thưa (98.611 Gaussian) làm
+  `--filter-cluster` xoá gần hết ở mọi mức (0,1 m: 2.040 khối; 1,0 m upstream: 29 khối, còn ~1k);
+  Brush còn sinh Gaussian rác cách hàng trăm mét (lưới 896×529×282 m). Thay bằng
+  (1) `--filter-box` = khung camera ± 6 m ngang, −0,5…4 m cao, (2) `--filter-floaters`
+  0,05/0,1/0,004 (mặc định upstream) → giữ 75.385/98.611 Gaussian.
+- Seed = camera đầu hạ xuống sàn: chấp nhận tại chỗ (−1,515; 0,012; 0,204), không dời.
+- Collision GLB: 224.745 tam giác, 112.733 đỉnh; bỏ 397 tam giác diện tích 0 của upstream
+  (derivative; tool output giữ nguyên). Sau khi bỏ còn 1.183 cạnh biên dọc chỗ tam giác
+  suy biến (khe rộng 0) và 3 cạnh non-manifold — chưa kiểm ảnh hưởng trong Isaac.
+- Artifact: `rec05/81a7b1b1…/collision.glb` (`sha256:d616e6f8e84a…`).
+- Tests: `test_rec05_collision.py` (10), REC-05 cũ 103 passed.
+- Còn thiếu: 3 mức resolution, kiểm lối đi/ghost-block, Isaac CLEAR/BLOCKED (EX-SIM).
+
+
 ### Follow-up chưa cấp task ID — audit splat-transform public export chưa dùng (2026-09-27)
 
 Đây là **proposal**, chưa phải authority. Không tự cấp task ID theo quy tắc harness;

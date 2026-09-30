@@ -2,11 +2,12 @@
 
 import { AlertTriangle, Check, Circle, CircleSlash, Hand, Loader2 } from "lucide-react";
 
-import { ProgressBar, formatDuration } from "@/components/studio/primitives";
+import { ProgressBar } from "@/components/studio/primitives";
 import { MVP_STAGES, type StageMeta } from "@/features/studio/stages";
 import { cn } from "@/lib/cn";
 import type { StageId } from "@/lib/contracts/api";
 import type { StageState } from "@/lib/contracts/studio";
+import { formatDuration } from "@/lib/format";
 
 export interface StageView {
   stage_id: StageId;
@@ -70,7 +71,7 @@ export function PipelineTimeline({
                 <span
                   className={cn(
                     "mt-0.5 grid size-6 shrink-0 place-items-center rounded-full",
-                    state === "succeeded" && "bg-ink text-paper",
+                    state === "succeeded" && "bg-sage text-paper",
                     state === "running" && "bg-ember-strong text-white",
                     state === "waiting" && "bg-paper-raised text-ember-strong ring-2 ring-ember",
                     state === "failed" && "bg-rust text-white",

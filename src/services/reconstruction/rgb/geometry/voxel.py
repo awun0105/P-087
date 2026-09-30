@@ -1,9 +1,9 @@
 """Config REC-05; không suy mét, footprint hoặc opacity từ defaults upstream."""
 
 import hashlib
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import Field, FiniteFloat
+from pydantic import Field, FiniteFloat, model_validator
 
 from src.models.contracts.artifacts import ContractModel
 from src.models.contracts.identity import canonical_json_bytes
@@ -28,6 +28,21 @@ class VoxelConfig(ContractModel):
     # khí liên thông, nhưng chỉ trong ngưỡng này. Không có ứng viên thì từ chối.
     max_seed_relocation_m: FiniteFloat = Field(default=1.0, gt=0)
     gpu_index: int = Field(ge=0, strict=True)
+    #: Vùng làm việc canonical (min, max). Brush có thể sinh Gaussian rác cách hàng trăm mét
+    #: làm lưới voxel phình và rỗng; cắt bằng `--filter-box` của upstream trước khi lọc cụm.
+    crop_box_world: tuple[Vector3, Vector3] | None = None
+    #: Bước dọn Gaussian rác trước voxel hoá. `cluster`: giữ cụm liên thông tại seed (cần 3DGS
+    #: dày). `floaters`: bỏ Gaussian không góp vào voxel đặc nào — hiệu chỉnh 2026-09-30 trên
+    #: Aisle_CW: preview thưa (~98k Gaussian) vỡ thành hàng trăm cụm nên `cluster` xoá gần hết.
+    cleanup: Literal["cluster", "floaters"] = "cluster"
+
+    @model_validator(mode="after")
+    def _crop_order(self) -> Self:
+        if self.crop_box_world is not None:
+            low, high = self.crop_box_world
+            if any(a >= b for a, b in zip(low, high, strict=True)):
+                raise ValueError("crop box min phải nhỏ hơn max trên mọi trục")
+        return self
 
     def checksum(self) -> str:
         """Bind toàn bộ knobs/footprint/seed với evidence của attempt."""
@@ -50,6 +65,19 @@ def _vector(point: Vector3) -> str:
     return ",".join(str(value) for value in point)
 
 
+def _crop_arguments(config: VoxelConfig) -> tuple[str, ...]:
+    """`--filter-box` trong hệ native Y-up (sau hai phép xoay), từ 8 góc của box canonical."""
+    if config.crop_box_world is None:
+        return ()
+    low, high = config.crop_box_world
+    corners = [
+        native_from_world((x, y, z)) for x in (low[0], high[0]) for y in (low[1], high[1]) for z in (low[2], high[2])
+    ]
+    native_low = [min(corner[axis] for corner in corners) for axis in range(3)]
+    native_high = [max(corner[axis] for corner in corners) for axis in range(3)]
+    return ("--filter-box", ",".join(str(value) for value in (*native_low, *native_high)))
+
+
 def cluster_command(config: VoxelConfig) -> tuple[str, ...]:
     """Input PLY raw xyz đã canonical; bỏ PLY flip rồi đổi sang native Y-up."""
     cluster = f"{config.cluster_resolution_m},{config.cluster_opacity},{config.cluster_min_contribution}"
@@ -61,10 +89,12 @@ def cluster_command(config: VoxelConfig) -> tuple[str, ...]:
         "0,0,180",
         "--rotate",
         "-90,0,0",
-        "--seed-pos",
-        _vector(native_from_world(config.cluster_seed_world)),
-        "--filter-cluster",
-        cluster,
+        *_crop_arguments(config),
+        *(
+            ("--filter-floaters", cluster)
+            if config.cleanup == "floaters"
+            else ("--seed-pos", _vector(native_from_world(config.cluster_seed_world)), "--filter-cluster", cluster)
+        ),
         "cluster.ply",
     )
 

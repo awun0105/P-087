@@ -116,9 +116,9 @@ def _colmap_model(names: list[str]) -> tuple[str, Literal["bin", "txt"]]:
     return directory, fmt  # type: ignore[return-value]
 
 
-def _detect_zip(path: Path, max_uncompressed: int) -> InputDetection:
+def _detect_zip(stream: BinaryIO, max_uncompressed: int) -> InputDetection:
     try:
-        with zipfile.ZipFile(path) as archive:
+        with zipfile.ZipFile(stream) as archive:
             names = _safe_names(archive, max_uncompressed)
             plies = [name for name in names if PurePosixPath(name).suffix.lower() == ".ply"]
             colmap_dir, colmap_format = _colmap_model(names)
@@ -145,17 +145,22 @@ def _detect_zip(path: Path, max_uncompressed: int) -> InputDetection:
     )
 
 
-def detect_input(path: Path, max_uncompressed_bytes: int) -> InputDetection:
-    """Nhận diện theo bytes: video MP4/MOV, PLY 3DGS, hoặc ZIP (PLY 3DGS + COLMAP)."""
-    with path.open("rb") as stream:
-        head = stream.read(16)
-        stream.seek(0)
-        if head.startswith(b"ply"):
-            return InputDetection(kind="gaussian_ply", gaussian=_gaussian_evidence(stream, path.stat().st_size))
+def detect_stream(stream: BinaryIO, size_bytes: int, max_uncompressed_bytes: int) -> InputDetection:
+    """Nhận diện trên stream seek được (file cục bộ hoặc object đọc theo đoạn)."""
+    head = stream.read(16)
+    stream.seek(0)
+    if head.startswith(b"ply"):
+        return InputDetection(kind="gaussian_ply", gaussian=_gaussian_evidence(stream, size_bytes))
     if head.startswith(b"PK\x03\x04"):
-        return _detect_zip(path, max_uncompressed_bytes)
+        return _detect_zip(stream, max_uncompressed_bytes)
     if _is_video(head):
         return InputDetection(kind="rgb_video")
     raise InputRejectedError(
         "Không nhận diện được file. Hỗ trợ: video .mp4/.mov, scene 3DGS .ply, hoặc .zip gồm PLY 3DGS + model COLMAP"
     )
+
+
+def detect_input(path: Path, max_uncompressed_bytes: int) -> InputDetection:
+    """Nhận diện file cục bộ theo bytes: video MP4/MOV, PLY 3DGS, hoặc ZIP (PLY 3DGS + COLMAP)."""
+    with path.open("rb") as stream:
+        return detect_stream(stream, path.stat().st_size, max_uncompressed_bytes)

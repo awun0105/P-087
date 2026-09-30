@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-PRODUCT` |
 | Priority | `P0` |
-| Status | `IN_PROGRESS` |
+| Status | `VALIDATING` |
 | Owner | Cường |
 | Target milestone | `M3/M4` |
 
@@ -128,3 +128,23 @@ python -m ruff format --check src/ tests/ frontend/ # 105 files already formatte
 - Đây là fake endpoint; backend chưa thực sự seal `ReleaseManifest` vào artifact store.
 - Điều kiện "Locked acceptance requires EvaluationReport" chưa kiểm tra vì `EvaluationReport` chưa có trong fixture/API.
 - Browser smoke thật cho release route vẫn pending trong session này; UI tests đã bao phủ disabled states và payload.
+
+### Cập nhật 2026-09-30 — backend thật (nhóm EX-REC theo uỷ quyền Tech Lead, nhánh `feat/studio-integration`)
+
+- **Implementation:** `src/services/orchestration/review/workflow.py` (trạng thái suy từ artifact bất biến theo
+  candidate checksum: gói → `CANDIDATE_READY`, `ValidationReport` PASS → `READY_FOR_REVIEW`, `ApprovalRecord`
+  → `APPROVED`/`REJECTED`, `ReleaseManifest` → `RELEASED`; sửa scene = revision mới nên quyết định cũ tự hết
+  hiệu lực), API `src/api/studio/review.py` (`GET review-state`, `POST review-decision`, `POST release-seal`,
+  `GET release-download`), UI `frontend/src/features/studio/ReviewPanel.tsx`.
+- **Quyền:** chỉ Reviewer đã đăng nhập, **fail closed kể cả khi `AUTH_REQUIRED=false`**; reviewer lấy từ phiên,
+  không từ payload; audit `review.approve|reject`, `release.seal`.
+- **Duyệt:** phải chấp nhận từng cảnh báo (check không PASS trong báo cáo PASS) theo `check_id`; một quyết định
+  mỗi candidate (lần hai 409); checksum gói/báo cáo lệch → 409 (màn hình cũ). Từ chối bắt buộc lý do.
+- **Phát hành:** tự niêm phong ngay sau duyệt (không có cổng người thứ hai); lỗi giữ `APPROVED` + `release-seal`
+  thử lại. `ReleaseManifest` ORDINARY có checksum canonical; zip phát hành chép nguyên entry của gói đã kiểm
+  (không build lại USD) + manifest + validation report + approval record.
+- **Proof:** `pytest tests/test_orchestration/test_review_workflow.py tests/test_api/test_review_routes.py` → 7 passed;
+  `pytest tests` → 1040 passed, 40 skipped; vitest 140 passed (gồm `review-panel.test.tsx`).
+- **Giới hạn:** `ValidationReport` trong test là **fixture**; chưa có báo cáo Isaac thật (SIM-06 cần máy RTX) nên
+  chưa có real candidate report/media handoff. Route legacy `/jobs/{id}/review/{action}`, `/release` vẫn trả 501.
+  Chưa gắn nhãn tự duyệt (chưa lưu người sửa từng revision). Status giữ `VALIDATING` tới khi có báo cáo thật.

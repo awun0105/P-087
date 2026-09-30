@@ -59,7 +59,9 @@ def test_confirmation_is_recorded_once(tmp_path: Path) -> None:
     metric = [stage for stage in updated.stage_artifacts if stage.stage_id == StageId.METRIC_CANONICALIZE]
     assert metric[0].artifact_uri == reference.artifact_uri
     progress = job_progress(updated, registry.list_job_attempts(job.job_id), preview_ready=True)
-    assert progress.waiting_for is None and progress.stages[-1].state == "succeeded"
+    # Xác nhận xong: bước xác nhận succeeded, bước hình học chờ worker (chưa chạy).
+    assert progress.waiting_for is None
+    assert [stage.state for stage in progress.stages[-3:]] == ["succeeded", "pending", "pending"]
     with pytest.raises(RuntimeStateConflictError):
         registry.record_metric_confirmation(updated, reference)
 

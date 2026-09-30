@@ -35,3 +35,14 @@ THE SOFTWARE.
 `vendor/supersplat/` là bản copy của `playcanvas/supersplat` v3.4.2 (commit
 `f76e676`) theo MIT License ở trên, được build thành `public/editor/` và nhúng
 vào Studio. Chi tiết nguồn gốc và chỉnh sửa: `vendor/supersplat/PROVENANCE.md`.
+
+## next-shadcn-admin-dashboard (UI nền Studio)
+
+Component `src/components/shadcn/*`, hook `src/hooks/use-mobile.ts` (viết lại) và khung
+sidebar/header của `src/features/shell/` lấy từ
+[`arhamkhnz/next-shadcn-admin-dashboard`](https://github.com/arhamkhnz/next-shadcn-admin-dashboard)
+commit `3502692` (2026-09-28), MIT License — Copyright (c) 2024 Mohammed Arham Khan. Đã đổi đường
+dẫn import và theme; không chép các trang domain mẫu (PRODUCT.md §3.2).
+
+`src/styles/shadcn-variants.css` chép từ gói npm `shadcn@4.21.0` (`dist/tailwind.css`), MIT License.
+Dependency thêm: `radix-ui@1.6.7` (MIT), `tw-animate-css@1.4.0` (MIT).

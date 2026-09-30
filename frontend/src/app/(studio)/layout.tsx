@@ -1,13 +1,15 @@
+import { TooltipProvider } from "@/components/shadcn/tooltip";
+import { AppShell } from "@/features/shell/AppShell";
 import { AuthProvider } from "@/features/studio/AuthProvider";
-import { StudioHeader } from "@/features/studio/StudioHeader";
 
-/** Khung Studio MVP: nền beige, chữ nâu than; viewport 3D tự đặt nền tối ấm. */
+/** Khung Studio: shell sidebar + header theo dashboard donor, theme tối palette (PRODUCT.md D-01, D-04). */
 export default function StudioLayout({ children }: { children: React.ReactNode }) {
   return (
     <AuthProvider>
       <div className="studio-root min-h-screen bg-paper text-ink antialiased">
-        <StudioHeader />
-        {children}
+        <TooltipProvider>
+          <AppShell>{children}</AppShell>
+        </TooltipProvider>
       </div>
     </AuthProvider>
   );

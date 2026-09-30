@@ -58,6 +58,7 @@ export function ProcessingSettings({
   note?: string;
 }) {
   const statusOf = (key: string) => evaluation?.parameters.find((item) => item.key === key);
+  const flagged = evaluation?.parameters.some((item) => item.status !== "ok") ?? false;
   return (
     <Card className="p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -107,7 +108,12 @@ export function ProcessingSettings({
 
       <MachinePanel capability={capability} machineLabel={machineLabel} evaluation={evaluation} editable={editable} />
 
-      <div className="mt-6 space-y-6">
+      {/* Thông số chi tiết thu gọn khi đang dùng preset và không có ô cảnh báo (PRODUCT.md P3). */}
+      <details className="group mt-6" open={!editable || activePreset === null || flagged}>
+        <summary className="cursor-pointer text-sm font-medium text-ink-muted select-none hover:text-ink">
+          Thông số chi tiết ({parameters.length} tham số)
+        </summary>
+      <div className="mt-4 space-y-6">
         {GROUPS.map((group) => {
           const specs = parameters.filter((spec) => spec.group === group.key);
           if (specs.length === 0) return null;
@@ -135,6 +141,7 @@ export function ProcessingSettings({
           );
         })}
       </div>
+      </details>
       {note && <p className="mt-5 text-xs leading-relaxed text-ink-subtle">{note}</p>}
     </Card>
   );
@@ -202,7 +209,10 @@ function MachinePanel({
                   aria-valuemax={100}
                   aria-valuenow={Math.round(ratio * 100)}
                 >
-                  <div className={cn("h-full rounded-full transition-[width] duration-300", STATUS_BAR[item.status])} style={{ width: `${ratio * 100}%` }} />
+                  <div
+                    className={cn("h-full w-full origin-left rounded-full transition-transform duration-300", STATUS_BAR[item.status])}
+                    style={{ transform: `scaleX(${ratio})` }}
+                  />
                 </div>
                 {item.status === "danger" && <p className="mt-1 text-xs text-rust">{item.message}</p>}
               </li>

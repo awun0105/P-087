@@ -100,6 +100,28 @@ same-scene measurement evidence của Aisle_CW.
 
 ## 12. Result / Evidence
 
+### 2026-09-29 — căn chỉnh SfM → world bằng quỹ đạo camera (GT-assisted, dataset demo)
+
+Quyết định owner 2026-09-29 (ADR 0004 §5): trên dataset mẫu, khoảng cách A/B, C/D
+lấy từ LiDAR thay vì người dùng tự đo; cần căn chỉnh 3DGS ↔ LiDAR. Chọn căn chỉnh
+theo quỹ đạo camera vì chính xác (hàng chục cặp điểm) và không thêm thao tác tay.
+
+- Code: `alignment/similarity.py` (Umeyama, chặn phản xạ, từ chối suy biến);
+  `scripts/torwic/align_sfm_to_world.py` (ghép frame theo nội dung ảnh + kiểm dãy
+  đều → tâm camera map = `T_map_from_os(i)·t_os_from_cam` → cầu nối world → fit).
+- **GT-assisted:** đọc `traj_gt.txt` ở bước chuẩn bị dataset theo DATASET_PLAYBOOK;
+  chỉ cho demo/integration, không claim độ chính xác RGB-only.
+- Chạy thật trên `job-ac2bfd924cc6` (video `aisle_cw_200.mp4`): frame video `f` ↔
+  ảnh dataset `f + 100` (frame 100–299), khớp đúng dãy đều. 50 cặp tâm camera,
+  quỹ đạo 16,68 m (bề ngang 14,14 m): scale **1,2062 m/đơn vị SfM**, residual
+  trung vị **4,4 cm**, p90 9,4 cm, RMS **6,8 cm**, max 20,5 cm (frame 88/92/199).
+  Output `data/torwic_slam/derived/aisle_cw/rec09_alignment_job-ac2bfd924cc6/alignment.json`
+  (`sha256:0f340050…`, git-ignored).
+- Test: `test_rec09_similarity_fit.py` (3), `test_rec09_trajectory_alignment.py` (2) pass.
+- Chưa làm: publish alignment + LiDAR (REC-08) vào store của job; bắt điểm click vào
+  point cloud LiDAR để ra khoảng cách; bản ghi AlignmentRecord chính thức.
+
+
 ### Audit correction 2026-09-27 — implementation, chưa real acceptance
 
 - VERIFIED: bốn regression tests đã fail trên code cũ (auto-CONFIRMED,

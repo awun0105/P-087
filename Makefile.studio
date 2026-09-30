@@ -1,0 +1,175 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Makefile TẠM cho Studio MVP (video → 3DGS). KHÔNG ghi đè Makefile gốc.
+#
+#   make -f Makefile.studio up        # bật FastAPI + queue worker + Next.js
+#   make -f Makefile.studio down      # kill process đang giữ port
+#   make -f Makefile.studio status    # xem port nào đang giữ
+#   make -f Makefile.studio env       # (re)sinh scripts/gpu/studio.env
+#
+# Quy tắc của file này:
+#   1. Chỉ bind vào port TRỐNG — tự dò lên từ API_PORT/WEB_PORT, in ra port chọn
+#      được và tiến trình đang chiếm port nếu phải nhảy.
+#   2. Ctrl+C (SIGINT/SIGTERM) hoặc `make ... down` → kill đúng các tiến trình
+#      đang giữ port của stack này, không đụng port khác.
+#   3. Không ghi đè file env đã tồn tại trừ khi FORCE_ENV=1 (chỉ patch 3 dòng port).
+#   4. Port của lần chạy gần nhất lưu ở data/studio_local/studio-ports.env để
+#      `status`/`down` biết cần dọn port nào (thư mục data/ đã git-ignore).
+#
+# Xoá file này khi MVP xong; phần chạy thật nằm ở scripts/gpu/run_stack.sh.
+# ─────────────────────────────────────────────────────────────────────────────
+
+SHELL := /bin/bash
+.SHELLFLAGS := -eu -o pipefail -c
+.ONESHELL:
+.DEFAULT_GOAL := help
+
+ROOT       := $(CURDIR)
+ENV_FILE   := $(ROOT)/scripts/gpu/studio.env
+STACK      := $(ROOT)/scripts/gpu/run_stack.sh
+VENV_PY    := $(ROOT)/.venv/bin/python
+PORT_STATE := $(ROOT)/data/studio_local/studio-ports.env
+
+API_PORT      ?= 8010
+WEB_PORT      ?= 3010
+PORT_SCAN     ?= 20
+FRONTEND_MODE ?= dev
+DEMO_DIR      ?= $(ROOT)/data/demo/library
+BRUSH  := $(ROOT)/data/rec04_runtime/brush/brush-app-x86_64-unknown-linux-gnu/brush_app
+SPLAT  := $(ROOT)/data/rec04_runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
+COLMAP := $(ROOT)/data/rec04_runtime/colmap-launcher.sh
+
+# Hàm dùng chung cho các target (make mở rộng $ → $$).
+define PORT_HELPERS
+port_busy() { ss -ltnH "sport = :$$1" 2>/dev/null | grep -q .; }
+port_owner() { fuser -n tcp "$$1" 2>/dev/null || true; }
+port_free_from() {
+  local port="$$1" tried=0
+  while [ "$$tried" -lt "$(PORT_SCAN)" ]; do
+    if ! port_busy "$$port"; then echo "$$port"; return 0; fi
+    tried=$$((tried + 1)); port=$$((port + 1))
+  done
+  echo ""
+}
+free_port_or_die() {
+  local label="$$1" start="$$2" chosen
+  chosen=$$(port_free_from "$$start")
+  if [ -z "$$chosen" ]; then
+    echo "[!] Không còn port trống cho $$label trong $$start..$$((start + $(PORT_SCAN) - 1))." >&2
+    echo "    Thử: make -f Makefile.studio up API_PORT=9000 WEB_PORT=3000" >&2
+    exit 1
+  fi
+  if [ "$$chosen" != "$$start" ]; then
+    echo "[!] $$label: port $$start đang bị PID $$(port_owner "$$start") chiếm → dùng $$chosen." >&2
+  fi
+  echo "$$chosen"
+}
+kill_port() {
+  local port="$$1"
+  if ! port_busy "$$port"; then echo "[stop] port $$port đã trống."; return 0; fi
+  local pids; pids=$$(port_owner "$$port")
+  echo "[stop] kill port $$port (PID $$pids)"
+  fuser -k -TERM -n tcp "$$port" >/dev/null 2>&1 || true
+}
+endef
+
+.PHONY: help up down status env
+
+help:
+	@echo "Studio MVP — lệnh có sẵn:"
+	@echo "  make -f Makefile.studio up       # bật API + worker + web (tự tìm port trống)"
+	@echo "  make -f Makefile.studio down     # kill tiến trình đang giữ port của stack"
+	@echo "  make -f Makefile.studio status   # in port/pid hiện tại"
+	@echo "  make -f Makefile.studio env      # sinh lại scripts/gpu/studio.env (FORCE_ENV=1 để ghi đè)"
+	@echo ""
+	@echo "  Tham số: API_PORT=$(API_PORT) WEB_PORT=$(WEB_PORT) FRONTEND_MODE=$(FRONTEND_MODE) DEMO_DIR=$(DEMO_DIR)"
+
+## env: tạo file cấu hình runtime cho máy này (không ghi đè nếu đã có).
+env:
+	@if [ -f "$(ENV_FILE)" ] && [ "$(FORCE_ENV)" != "1" ]; then \
+	  echo "[env] giữ nguyên $(ENV_FILE) (FORCE_ENV=1 để sinh lại)."; \
+	else \
+	  echo "[env] sinh $(ENV_FILE)"; \
+	  mkdir -p "$(dir $(ENV_FILE))"; \
+	  cat > "$(ENV_FILE)" <<'EOF'
+	# Sinh tự động bởi Makefile.studio — đường dẫn tuyệt đối của máy này.
+	APP_ENV=development
+	DATABASE_URL=sqlite:////home/lqaq/PROJECT/AI20K/P-087/data/studio_local/runtime.db
+	ARTIFACT_ROOT=/home/lqaq/PROJECT/AI20K/P-087/data/studio_local/artifacts
+	PRODUCT_WORKER_ROOT=/home/lqaq/PROJECT/AI20K/P-087/data/studio_local/workers
+	# MVP: người upload tự xác nhận không có khuôn mặt/biển số (xem ADR 0002).
+	PRODUCT_PRIVACY_MODE=self_attested
+	PRODUCT_UPLOAD_MAX_BYTES=4294967296
+	PRODUCT_PROCESSING_CONFIG=/home/lqaq/PROJECT/AI20K/P-087/configs/product/processing_presets_v1.json
+	PRODUCT_RUNTIME_MANIFEST=/home/lqaq/PROJECT/AI20K/P-087/data/studio_local/runtime_manifest.json
+	# Thư viện video mẫu: mỗi thư mục con là một bundle đã xử lý sẵn.
+	PRODUCT_DEMO_DIR=/home/lqaq/PROJECT/AI20K/P-087/data/demo/library
+	REC03_COLMAP_COMMAND='["sh","/home/lqaq/PROJECT/AI20K/P-087/data/rec04_runtime/colmap-launcher.sh"]'
+	# Identity/version của runtime đã chạy thật trên máy này (job-ac2bfd924cc6); đổi binary thì cập nhật cùng.
+	REC03_COLMAP_RUNTIME_IDENTITY=colmap-image-sha256:b8498ebecab11c3f9b9a25370e3fcfb6de9b6bcd4f3c85d5dc39a40229f40954
+	REC03_COLMAP_TIMEOUT_SECONDS=3600
+	REC04_BRUSH_COMMAND='["/home/lqaq/PROJECT/AI20K/P-087/data/rec04_runtime/brush/brush-app-x86_64-unknown-linux-gnu/brush_app"]'
+	REC04_BRUSH_EXPECTED_VERSION=0.3.0
+	REC04_BRUSH_RUNTIME_IDENTITY=brush-v0.3.0-linux-archive-sha256:4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20
+	# Brush train qua Vulkan: chỉ định ICD NVIDIA để không rơi về GPU tích hợp/CPU.
+	REC04_BRUSH_ENVIRONMENT='{"RUST_LOG":"info,wgpu_core=warn","VK_ICD_FILENAMES":"/usr/share/vulkan/icd.d/nvidia_icd.json"}'
+	REC04_BRUSH_TIMEOUT_SECONDS=3600
+	REC04_SPLAT_MODULE_PATH=/home/lqaq/PROJECT/AI20K/P-087/data/rec04_runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
+	REC04_SPLAT_DEVICE=gpu
+	# LLM_PROVIDER/OPENAI_API_KEY lấy từ .env ở root repo (Settings đọc .env); không ghi key vào đây.
+	EOF
+	fi
+
+## up: chạy API + worker + web; Ctrl+C dọn cả ba và giải phóng port.
+up: env
+	@$(PORT_HELPERS)
+	@for path in "$(VENV_PY)" "$(STACK)" "$(BRUSH)" "$(SPLAT)" "$(COLMAP)"; do \
+	  [ -e "$$path" ] || { echo "[!] Thiếu: $$path (xem scripts/gpu/README.md §2)"; exit 1; }; \
+	done
+	@command -v docker >/dev/null || { echo "[!] COLMAP chạy trong docker — cần docker CLI."; exit 1; }
+	@[ -d "$(ROOT)/frontend/node_modules" ] || { echo "[!] Thiếu frontend/node_modules — chạy: (cd frontend && npm ci)"; exit 1; }
+	@api=$$(free_port_or_die "API" "$(API_PORT)"); \
+	 web=$$(free_port_or_die "Web" "$(WEB_PORT)"); \
+	 mkdir -p "$(dir $(PORT_STATE))"; \
+	 printf 'API_PORT=%s\nWEB_PORT=%s\n' "$$api" "$$web" > "$(PORT_STATE)"; \
+	 set_env() { \
+	   local key="$$1" value="$$2" tmp; \
+	   if grep -qE "^$$key=" "$(ENV_FILE)"; then \
+	     tmp=$$(mktemp); sed -E "s|^$$key=.*|$$key=$$value|" "$(ENV_FILE)" > "$$tmp"; mv "$$tmp" "$(ENV_FILE)"; \
+	   else printf '%s=%s\n' "$$key" "$$value" >> "$(ENV_FILE)"; fi; \
+	 }; \
+	 set_env APP_PORT "$$api"; set_env STUDIO_WEB_PORT "$$web"; \
+	 set_env REAL2SIM_API_URL "http://127.0.0.1:$$api"; \
+	 echo ""; \
+	 echo "  Studio : http://localhost:$$web"; \
+	 echo "  API    : http://127.0.0.1:$$api/docs"; \
+	 echo "  Video mẫu: http://localhost:$$web/new"; \
+	 echo "  Dừng   : Ctrl+C (tự kill các port trên)"; \
+	 echo ""; \
+	 cleanup() { \
+	   trap - INT TERM EXIT; \
+	   echo ""; echo "[stop] dừng FastAPI + worker + Next.js…"; \
+	   [ -n "$${STACK_PID:-}" ] && kill -TERM "$$STACK_PID" 2>/dev/null || true; \
+	   sleep 1; \
+	   kill_port "$$web"; kill_port "$$api"; \
+	   echo "[stop] xong."; \
+	 }; \
+	 trap cleanup INT TERM EXIT; \
+	 STUDIO_FRONTEND="$(FRONTEND_MODE)" "$(STACK)" "$(ENV_FILE)" & \
+	 STACK_PID=$$!; \
+	 wait "$$STACK_PID" || true
+
+## down: kill tiến trình đang giữ port của lần chạy gần nhất.
+down:
+	@$(PORT_HELPERS)
+	@if [ -f "$(PORT_STATE)" ]; then . "$(PORT_STATE)"; else API_PORT="$(API_PORT)"; WEB_PORT="$(WEB_PORT)"; fi; \
+	 kill_port "$$WEB_PORT"; kill_port "$$API_PORT"; rm -f "$(PORT_STATE)"
+
+## status: port nào đang bị ai chiếm.
+status:
+	@$(PORT_HELPERS)
+	@if [ -f "$(PORT_STATE)" ]; then . "$(PORT_STATE)"; else API_PORT="$(API_PORT)"; WEB_PORT="$(WEB_PORT)"; fi; \
+	 for entry in "API:$$API_PORT" "Web:$$WEB_PORT"; do \
+	   label=$${entry%%:*}; port=$${entry##*:}; \
+	   if port_busy "$$port"; then echo "[status] $$label :$$port ĐANG CHẠY (PID $$(port_owner "$$port"))"; \
+	   else echo "[status] $$label :$$port trống"; fi; \
+	 done

@@ -61,7 +61,7 @@ def _world(tmp_path: Path, remote: ArtifactRemote | None) -> tuple[ProjectRegist
     )
     uploads = VideoUploadService(database, registry.runtime_resolver, 1024)
     pending = uploads.begin("kho.mp4")
-    pending.publication.write(b"video")
+    pending.publication.write(b"\x00\x00\x00\x14ftypqt  " + b"video")
     upload = uploads.finish(pending)
     project = registry.create_project_from_upload(
         upload, UploadProjectInput(upload_id=upload.upload_id, name="Kho", attestation=ATTESTATION), "self_attested"

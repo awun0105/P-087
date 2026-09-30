@@ -15,7 +15,8 @@ const nextConfig: NextConfig = {
   agentRules: false,
   /**
    * UI cũ (route group `(legacy)`) giữ nguyên code nhưng ẩn khỏi MVP: mọi route cũ
-   * chuyển về Studio, trừ khi chạy với `LEGACY_UI=1`. Dùng `redirects` thay vì
+   * chuyển về Studio, trừ khi chạy với `LEGACY_UI=1` (`/jobs` trống là trang Jobs mới, chỉ
+   * `/jobs/<id>/...` là legacy). Dùng `redirects` thay vì
    * `proxy.ts` vì proxy buộc Next buffer body (mặc định 10MB) → hỏng upload video.
    */
   async redirects() {
@@ -25,7 +26,7 @@ const nextConfig: NextConfig = {
       { source: "/demo/:path*", destination: "/new", permanent: false },
     ];
     if (process.env.LEGACY_UI === "1") return merged;
-    return [...merged, ...["/legacy/:path*", "/projects/:path*", "/jobs/:path*", "/viewer/:path*", "/legacy", "/projects", "/viewer"].map(
+    return [...merged, ...["/legacy/:path*", "/projects/:path*", "/jobs/:path+", "/viewer/:path*", "/legacy", "/projects", "/viewer"].map(
       (source) => ({ source, destination: "/", permanent: false }),
     )];
   },

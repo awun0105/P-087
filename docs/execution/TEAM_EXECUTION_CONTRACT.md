@@ -466,6 +466,21 @@ geometry dimensions.
 
 `EX-SIM` tạo collider rồi ghi ra **SceneIR revision cùng schema**, không tạo competing scene format.
 
+### 3.7.0 Thay đổi dự kiến cho pipeline v2 (ADR 0007) — **Proposed, chưa là contract**
+
+[ADR 0007](../decisions/0007-object-centric-hybrid-usd-pipeline.md) cần các bổ sung sau. Mục này
+chỉ ghi ý định; schema chính thức chỉ đổi khi producer và consumer cùng review, có version mới
+và migration/fixture tương ứng (§3.1). Tới lúc đó, contract hiện hành vẫn là authority.
+
+| Thành phần | Bổ sung dự kiến | Producer → Consumer |
+|---|---|---|
+| `SceneObject.visual_ref` (đã có) | Trỏ tới Gaussian của riêng vật (artifact mới) | EX-REC/EX-SCENE → EX-PRODUCT, EX-SIM |
+| `SceneEnvironment.visual_ref` (đã có) | Trỏ tới Gaussian nền **đã vá**; provenance ghi vùng nào là hình suy đoán | EX-REC → EX-PRODUCT, EX-SIM |
+| `SceneObject.collider` (`ColliderSpec`, đã có) | `collider_type` phân rã lồi (hoặc SDF) kèm `geometry_ref` các phần lồi | EX-SIM → EX-SIM (USD), EX-PRODUCT |
+| Vật lý của vật | Trường có kiểu: khối lượng (kg), nguồn khối lượng (mật độ × thể tích / người nhập / asset), vật liệu (ma sát tĩnh/động, restitution) | EX-SIM/EX-SCENE → EX-SIM (USD) |
+| `SceneObject.semantic_class`, `asset_ref` (đã có) | Nhãn từ danh mục asset Isaac; `asset_ref` khi thay vật bằng asset | EX-SCENE/EX-PRODUCT → EX-SIM |
+| `CandidatePackage` | Thêm layer Gaussian (`ParticleField3DGaussianSplat`) cho nền và từng vật; khai báo `kilogramsPerUnit` | EX-SIM → Isaac validation |
+
 ## 3.7.1 `PreflightReport`
 
 Tối thiểu:

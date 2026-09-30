@@ -1,4 +1,4 @@
-"""Upload video thẳng từ trình duyệt lên kho file (multipart presigned, ADR 0003).
+"""Upload file (video, PLY 3DGS, ZIP) thẳng từ trình duyệt lên kho file (multipart presigned, ADR 0003).
 
 Web UI và API không cõng bytes video: API chỉ mở phiên, cấp link PUT có hạn cho
 từng phần, rồi ghép và **tự tính** checksum/kích thước từ kho file trước khi coi
@@ -12,8 +12,18 @@ from uuid import uuid4
 
 from src.services.orchestration.artifacts import ArtifactRemote, ArtifactResolver
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
-from src.services.orchestration.uploads.models import VIDEO_EXTENSIONS, UploadRecord, UploadSession
-from src.services.orchestration.uploads.service import UploadError, UploadNotFoundError, display_name
+from src.services.orchestration.uploads.models import (
+    UNSUPPORTED_EXTENSION,
+    UPLOAD_EXTENSIONS,
+    UploadRecord,
+    UploadSession,
+)
+from src.services.orchestration.uploads.service import (
+    UploadError,
+    UploadNotFoundError,
+    classify_upload,
+    display_name,
+)
 
 #: Phần tối thiểu 16 MiB (S3 yêu cầu ≥ 5 MiB trừ phần cuối); tối đa 10.000 phần.
 MIN_PART_BYTES = 16 * 1024 * 1024
@@ -50,13 +60,13 @@ class DirectUploadService:
         """Kiểm tên/đuôi/dung lượng khai báo rồi mở multipart trên kho file."""
         name = display_name(filename)
         suffix = PurePosixPath(name).suffix.lower()
-        media_type = VIDEO_EXTENSIONS.get(suffix)
+        media_type = UPLOAD_EXTENSIONS.get(suffix)
         if media_type is None:
-            raise UploadError("Chỉ hỗ trợ video .mp4 hoặc .mov quay bằng camera di chuyển")
+            raise UploadError(UNSUPPORTED_EXTENSION)
         if size_bytes <= 0:
             raise UploadError("File rỗng")
         if size_bytes > self.max_bytes:
-            raise UploadError(f"Video vượt giới hạn {self.max_bytes} bytes")
+            raise UploadError(f"File vượt giới hạn {self.max_bytes} bytes")
         upload_id = f"upload-{uuid4().hex[:12]}"
         uri = f"artifact://jobs/{upload_id}/input/source{suffix}"
         part_size, part_count = plan_parts(size_bytes)
@@ -125,17 +135,24 @@ class DirectUploadService:
         return self._update(session, status="VERIFYING")
 
     def verify(self, upload_id: str) -> UploadSession:
-        """Server tự tính checksum/kích thước từ kho file rồi ghi UploadRecord (READY).
+        """Server tự tính checksum/kích thước và nhận diện loại từ kho file rồi ghi UploadRecord (READY).
 
-        Kích thước khác khai báo hoặc vượt giới hạn → FAILED và xóa object, vì bytes
-        không khớp những gì người dùng đã chọn.
+        Kích thước khác khai báo, vượt giới hạn hoặc sai loại → FAILED và xóa object, vì
+        bytes không khớp những gì người dùng đã chọn. Nhận diện đọc theo đoạn (Range),
+        không tải cả file về API server.
         """
         session = self._require_status(upload_id, "VERIFYING")
         key = self.resolver.relative_key(session.artifact_uri)
         checksum, size = self.remote.digest(key)
         if size != session.size_bytes or size > self.max_bytes:
             self.remote.delete(key)
-            return self._update(session, status="FAILED", error="Kích thước video trên kho file khác khai báo")
+            return self._update(session, status="FAILED", error="Kích thước file trên kho file khác khai báo")
+        try:
+            with self.remote.open_ranged(key, size) as stream:
+                detection = classify_upload(stream, size, session.media_type, self.max_bytes)  # type: ignore[arg-type]
+        except UploadError as error:
+            self.remote.delete(key)
+            return self._update(session, status="FAILED", error=str(error))
         record = UploadRecord(
             upload_id=session.upload_id,
             original_name=session.original_name,
@@ -144,6 +161,8 @@ class DirectUploadService:
             checksum=checksum,
             artifact_uri=session.artifact_uri,
             received_at=datetime.now(UTC),
+            input_kind=detection.kind,
+            detection=detection,
         )
         with self.database.transaction(write=True) as tx:
             row = tx.execute(

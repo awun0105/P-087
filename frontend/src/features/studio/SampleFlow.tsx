@@ -3,7 +3,7 @@
 import { ArrowLeft, ArrowRight, Box, CheckCircle2, Clapperboard, Clock, FastForward, Info, Play } from "lucide-react";
 import Link from "next/link";
 
-import { Badge, Button, Card, Notice, buttonVariants, formatBytes, formatDuration } from "@/components/studio/primitives";
+import { Badge, Button, Card, Notice, buttonVariants } from "@/components/studio/primitives";
 import { DemoShowcase } from "@/features/studio/DemoShowcase";
 import { PipelineTimeline } from "@/features/studio/PipelineTimeline";
 import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
@@ -13,6 +13,7 @@ import { useProcessingForm } from "@/features/studio/useProcessingForm";
 import { sampleFileUrl } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import type { DemoManifest, SampleSummary } from "@/lib/contracts/studio";
+import { formatBytes, formatDuration } from "@/lib/format";
 
 /**
  * Luồng video mẫu trong trang Scene mới: cùng các bước như video tải lên, nhưng

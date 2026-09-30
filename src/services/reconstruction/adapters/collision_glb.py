@@ -84,8 +84,12 @@ def _ranges(document: dict, mesh: CollisionMesh) -> None:
             raise ValueError("collision bounds differ from positions")
 
 
-def read_collision_glb(path: Path) -> CollisionMesh:
-    """Reject truncated/nonfinite/foreign-layout output trước publication."""
+def read_collision_glb(path: Path, *, allow_degenerate: bool = False) -> CollisionMesh:
+    """Reject truncated/nonfinite/foreign-layout output trước publication.
+
+    `allow_degenerate` chỉ dùng khi đọc output gốc của tool để canonical hóa; mọi mesh
+    publish/consume vẫn phải sạch tam giác diện tích 0.
+    """
     try:
         document, binary = _chunks(path.read_bytes())
         _layout(document, binary)
@@ -98,7 +102,7 @@ def read_collision_glb(path: Path) -> CollisionMesh:
         triangles = tuple(zip(indices[::3], indices[1::3], indices[2::3], strict=True))
         mesh = CollisionMesh(positions, triangles)
         _ranges(document, mesh)
-        if topology(mesh)["degenerate_triangles"]:
+        if not allow_degenerate and topology(mesh)["degenerate_triangles"]:
             raise ValueError("degenerate collision triangles")
         if len(binary) != len(positions) * 12 + len(indices) * 4:
             raise ValueError("unexpected collision buffer payload")
@@ -126,15 +130,34 @@ def topology(mesh: CollisionMesh) -> dict[str, int]:
     )
 
 
+def _is_degenerate(mesh: CollisionMesh, triangle: tuple[int, int, int]) -> bool:
+    a, b, c = triangle
+    p, q, r = mesh.positions[a], mesh.positions[b], mesh.positions[c]
+    u, v = tuple(y - x for x, y in zip(p, q)), tuple(y - x for x, y in zip(p, r))
+    cross = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+    return len({a, b, c}) < 3 or sum(x * x for x in cross) == 0
+
+
 def canonicalize_collision(source: Path, destination: Path) -> CollisionMesh:
-    """Chỉ bake R_x(+90°) vào derivative; giữ nguyên native tool output."""
-    mesh = read_collision_glb(source)
-    document, binary = _chunks(source.read_bytes())
+    """Bake R_x(+90°) vào derivative và bỏ tam giác diện tích 0; giữ nguyên native tool output.
+
+    splat-transform 3.6.6 sau bước gộp mặt đồng phẳng có thể để lại vài tam giác thẳng
+    hàng (Aisle_CW 2026-09-30: 397/225.142). Chúng không có diện tích nên không đổi bề mặt
+    va chạm; số đã bỏ đo được bằng `degenerate_removed(source)` và ghi vào report.
+    """
+    mesh = read_collision_glb(source, allow_degenerate=True)
+    kept = [triangle for triangle in mesh.triangles if not _is_degenerate(mesh, triangle)]
+    if not kept:
+        raise ValueError("collision mesh has no non-degenerate triangles")
+    document, _ = _chunks(source.read_bytes())
     points = tuple(world_from_native(point) for point in mesh.positions)
-    data = bytearray(binary)
-    offset = document["bufferViews"][0]["byteOffset"]
-    for index, point in enumerate(points):
-        struct.pack_into("<fff", data, offset + index * 12, *point)
+    positions = b"".join(struct.pack("<fff", *point) for point in points)
+    indices = b"".join(struct.pack("<3I", *triangle) for triangle in kept)
+    data = positions + indices
+    document["bufferViews"][1]["byteOffset"] = len(positions)
+    document["bufferViews"][1]["byteLength"] = len(indices)
+    document["accessors"][1]["count"] = len(kept) * 3
+    document["buffers"][0]["byteLength"] = len(data)
     document["accessors"][0]["min"] = [min(p[i] for p in points) for i in range(3)]
     document["accessors"][0]["max"] = [max(p[i] for p in points) for i in range(3)]
     encoded = json.dumps(document, separators=(",", ":")).encode()
@@ -145,3 +168,8 @@ def canonicalize_collision(source: Path, destination: Path) -> CollisionMesh:
     with destination.open("xb") as stream:
         stream.write(payload)
     return read_collision_glb(destination)
+
+
+def degenerate_removed(source: Path) -> int:
+    """Số tam giác diện tích 0 trong output gốc của tool (đã bị bỏ khỏi derivative)."""
+    return topology(read_collision_glb(source, allow_degenerate=True))["degenerate_triangles"]

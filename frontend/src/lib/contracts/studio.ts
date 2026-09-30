@@ -9,15 +9,30 @@ import type { JobManifest, StageId } from "@/lib/contracts/api";
 
 export type VideoMediaType = "video/mp4" | "video/quicktime";
 
+export type UploadMediaType = VideoMediaType | "application/x-ply" | "application/zip";
+
+/** Loại đầu vào máy chủ nhận diện theo nội dung (ADR 0004). */
+export type InputKind = "rgb_video" | "gaussian_ply" | "gaussian_ply_colmap";
+
+export interface InputDetection {
+  kind: InputKind;
+  gaussian: { gaussian_count: number; sh_degree: number; encoding: string } | null;
+  ply_member: string | null;
+  colmap_dir: string | null;
+  colmap_format: "bin" | "txt" | null;
+}
+
 export interface UploadRecord {
   upload_id: string;
   original_name: string;
-  media_type: VideoMediaType;
+  media_type: UploadMediaType;
   size_bytes: number;
   checksum: string;
   artifact_uri: string;
   received_at: string;
   project_ids: string[];
+  input_kind?: InputKind;
+  detection?: InputDetection | null;
 }
 
 export type DataOrigin = "public_or_synthetic" | "self_collected_no_pii" | "anonymized";
@@ -90,12 +105,19 @@ export interface JobProgress {
   error: ExecutionErrorView | null;
 }
 
-/** Điểm chọn trên 3DGS (hệ gốc file, đơn vị SfM) + khoảng cách thật A–B. Khớp `UserMetricInput`. */
+/** Nguồn số đo: người dùng đo ngoài đời, hoặc LiDAR của dataset mẫu (ADR 0004 §6). */
+export type DistanceSource = "user_measured" | "lidar_demo";
+
+/** Điểm chọn trên 3DGS (hệ gốc file, đơn vị SfM) + số đo A–B, C–D. Khớp `UserMetricInput`. */
 export interface MetricInput {
   floor_points: [MetricPoint, MetricPoint, MetricPoint];
   point_a: MetricPoint;
   point_b: MetricPoint;
   distance_m: number;
+  check_a: MetricPoint;
+  check_b: MetricPoint;
+  check_distance_m: number;
+  distance_source: DistanceSource;
 }
 
 export type MetricPoint = [number, number, number];
@@ -108,7 +130,33 @@ export interface MetricPreview {
   measured_distance_m: number;
   camera_height_min_m: number;
   camera_height_max_m: number;
+  distance_source: DistanceSource;
+  check_measured_m: number;
+  check_error_m: number;
+  check_tolerance_m: number;
+  check_passed: boolean;
   warnings: string[];
+}
+
+/** Một phép đo LiDAR: điểm LiDAR đã bắt và khoảng cách (mét). Khớp `LidarDistance`. */
+export interface LidarDistance {
+  clicked_world: [MetricPoint, MetricPoint];
+  lidar_points_m: [MetricPoint, MetricPoint];
+  snap_offsets_m: [number, number];
+  /** Điểm dùng để đo: bắt vào LiDAR, hay vị trí theo căn chỉnh khi LiDAR không phủ tới. */
+  point_sources: ["lidar_surface" | "trajectory_alignment", "lidar_surface" | "trajectory_alignment"];
+  distance_m: number;
+}
+
+/** 7 điểm hệ thống tự chọn trên sàn LiDAR (A, B, C, D, 3 điểm sàn) + số đo (dataset mẫu). */
+export interface DemoSelection {
+  points: MetricPoint[];
+  measurements: LidarMeasurements;
+}
+
+export interface LidarMeasurements {
+  anchor: LidarDistance;
+  check: LidarDistance;
 }
 
 export interface DemoFile {
@@ -245,14 +293,124 @@ export function parseDemoManifest(value: unknown): DemoManifest {
 
 const METRIC_NUMBERS = [
   "scale_m_per_sfm_unit", "floor_residual_m", "measured_distance_m", "camera_height_min_m", "camera_height_max_m",
+  "check_measured_m", "check_error_m", "check_tolerance_m",
 ] as const;
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
 
 /** Số liệu xem trước phải đủ và hữu hạn; không hiển thị scale từ response lạ. */
 export function parseMetricPreview(value: unknown): MetricPreview {
   if (!isRecord(value) || typeof value.preview_checksum !== "string" || !Array.isArray(value.warnings) ||
       !value.warnings.every((warning) => typeof warning === "string") ||
-      !METRIC_NUMBERS.every((key) => typeof value[key] === "number" && Number.isFinite(value[key]))) {
+      typeof value.check_passed !== "boolean" ||
+      (value.distance_source !== "user_measured" && value.distance_source !== "lidar_demo") ||
+      !METRIC_NUMBERS.every((key) => isFiniteNumber(value[key]))) {
     throw new Error("Bản xem trước tỉ lệ từ backend không hợp lệ");
   }
   return value as unknown as MetricPreview;
+}
+
+function isLidarDistance(value: unknown): value is LidarDistance {
+  return isRecord(value) && isFiniteNumber(value.distance_m) && value.distance_m > 0 &&
+    Array.isArray(value.snap_offsets_m) && value.snap_offsets_m.length === 2 && value.snap_offsets_m.every(isFiniteNumber);
+}
+
+/** Số đo LiDAR phải dương, hữu hạn trước khi điền vào ô khoảng cách. */
+export function parseLidarMeasurements(value: unknown): LidarMeasurements {
+  if (!isRecord(value) || !isLidarDistance(value.anchor) || !isLidarDistance(value.check)) {
+    throw new Error("Số đo LiDAR từ backend không hợp lệ");
+  }
+  return value as unknown as LidarMeasurements;
+}
+
+/** Bộ điểm demo phải đủ 7 điểm hữu hạn và số đo hợp lệ trước khi vẽ lên scene. */
+export function parseDemoSelection(value: unknown): DemoSelection {
+  if (!isRecord(value) || !Array.isArray(value.points) || value.points.length !== 7 ||
+      !value.points.every((point) => Array.isArray(point) && point.length === 3 && point.every(isFiniteNumber))) {
+    throw new Error("Bộ điểm demo từ backend không hợp lệ");
+  }
+  parseLidarMeasurements(value.measurements);
+  return value as unknown as DemoSelection;
+}
+
+/** Lớp xem được của một bước (ADR 0005). Khớp `StageView` backend. */
+export interface StageView {
+  stage_id: string;
+  kind: "frames" | "cameras" | "gaussian" | "mesh";
+  title: string;
+  note: string;
+  unit: "meter" | "arbitrary";
+  refs: { artifact_uri: string; artifact_checksum: string; artifact_type: string }[];
+  cameras: { frame_id: number; center: [number, number, number]; rotation_xyzw: [number, number, number, number] }[];
+}
+
+const VIEW_KINDS: readonly StageView["kind"][] = ["frames", "cameras", "gaussian", "mesh"];
+
+/** Danh sách lớp xem: kind phải biết, ref phải có URI/checksum, camera phải hữu hạn. */
+export function parseStageViews(value: unknown): StageView[] {
+  if (!isRecord(value) || !Array.isArray(value.views)) throw new Error("Danh sách kết quả từng bước không hợp lệ");
+  for (const view of value.views) {
+    if (!isRecord(view) || !VIEW_KINDS.includes(view.kind as StageView["kind"]) || typeof view.title !== "string" ||
+        !Array.isArray(view.refs) || !Array.isArray(view.cameras) ||
+        !view.refs.every((ref) => isRecord(ref) && typeof ref.artifact_uri === "string" && typeof ref.artifact_checksum === "string") ||
+        !view.cameras.every((camera) => isRecord(camera) && Array.isArray(camera.center) && camera.center.every(isFiniteNumber))) {
+      throw new Error("Một lớp xem không hợp lệ");
+    }
+  }
+  return value.views as unknown as StageView[];
+}
+
+/** Một cột của màn hình so sánh 3 hướng tỉ lệ (ADR 0004 §5). Khớp `ModeResult`. */
+export interface ModeResult {
+  mode: "rgb_only" | "user_anchor" | "lidar";
+  title: string;
+  status: "mock" | "measured" | "missing";
+  note: string;
+  steps: string[];
+  scale_m_per_sfm_unit: number | null;
+  camera_height_mean_m: number | null;
+  camera_height_range_m: [number, number] | null;
+}
+
+export interface ModeComparison {
+  job_id: string;
+  modes: ModeResult[];
+  difference: {
+    scale_diff_percent: number;
+    floor_tilt_deg: number;
+    camera_height_diff_m: number;
+    check_segment_user_m: number | null;
+    check_segment_lidar_m: number | null;
+    check_segment_error_m: number | null;
+  } | null;
+  lidar_ground_truth_assisted: boolean;
+}
+
+/** Cột "mock" không bao giờ được mang số (không hiển thị số giả). */
+export function parseModeComparison(value: unknown): ModeComparison {
+  if (!isRecord(value) || !Array.isArray(value.modes) || value.modes.length !== 3) {
+    throw new Error("So sánh 3 hướng từ backend không hợp lệ");
+  }
+  for (const mode of value.modes) {
+    if (!isRecord(mode) || typeof mode.title !== "string" || !["mock", "measured", "missing"].includes(String(mode.status))) {
+      throw new Error("Một hướng so sánh không hợp lệ");
+    }
+    if (mode.status !== "measured" && mode.scale_m_per_sfm_unit != null) throw new Error("Hướng chưa đo không được có số tỉ lệ");
+    if (mode.status === "measured" && !isFiniteNumber(mode.scale_m_per_sfm_unit)) throw new Error("Thiếu tỉ lệ đo được");
+  }
+  return value as unknown as ModeComparison;
+}
+
+/** Scene import từ file 3DGS, chỉ xem/chỉnh sửa (ADR 0004 §3). Khớp `ImportedScene`. */
+export interface ImportedScene {
+  import_id: string;
+  upload_id: string;
+  name: string;
+  input_kind: "gaussian_ply" | "gaussian_ply_colmap";
+  status: "PACKAGING" | "READY" | "FAILED";
+  delivery_ref: { artifact_uri: string; artifact_checksum: string } | null;
+  error: string | null;
+  created_at: string;
 }

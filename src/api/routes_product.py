@@ -6,6 +6,8 @@ thuộc ownership của EX-PRODUCT. Mọi handler ở đây là `def` đồng b�
 nên không chặn event loop.
 """
 
+from collections.abc import Callable
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import ValidationError
@@ -37,10 +39,13 @@ from src.services.orchestration.projects import (
 )
 from src.services.orchestration.scene import (
     SceneEditCommand,
+    SceneEditor,
+    SceneEditResult,
     SceneError,
     SceneRevisionConflictError,
 )
 from src.services.orchestration.scene.errors import SceneNotAvailableError
+from src.services.orchestration.scene.objects import OBJECT_ACTIONS, add_box_object, apply_object_action
 
 router = APIRouter(tags=["product"])
 
@@ -343,7 +348,7 @@ def get_named_artifact_content(
     return get_artifact_content(job_id, artifact_uri, artifact_checksum)
 
 
-# ── PRODUCT-07: object actions (fake stub) ───────────────────────────────────
+# ── PRODUCT-07: object actions ───────────────────────────────────────────────
 
 
 @router.post(
@@ -362,29 +367,24 @@ def object_action(
     action: str,
     request: schemas.ObjectActionRequest,
 ) -> schemas.SceneEditResponse:
-    """Chặn mutation chưa nối EX-SCENE, không dùng transform rỗng giả thành công."""
+    """confirm/ignore ứng viên, hide/delete/rename vật thể — lệnh domain EX-SCENE, revision mới."""
     _job_or_404(job_id)
-    editor = _registry().scene
-    try:
-        current = editor.current(job_id)
-    except SceneNotAvailableError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
-    if current.scene.scene_revision != request.expected_scene_revision:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"scene đã đổi: client đang giữ {request.expected_scene_revision}, revision hiện tại là {current.scene.scene_revision}",
-        )
-    if object_id not in {obj.id for obj in current.scene.objects}:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"object {object_id} không tồn tại trong revision",
-        )
-    if action not in {"confirm", "ignore", "hide", "delete", "rename"}:
+    if action not in OBJECT_ACTIONS:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"action {action} không được hỗ trợ",
         )
-    raise HTTPException(status_code=501, detail="Object action chưa nối EX-SCENE; không tạo revision giả")
+    return _scene_mutation(
+        lambda editor: apply_object_action(
+            editor,
+            job_id,
+            object_id,
+            action,  # type: ignore[arg-type] - đã kiểm trong OBJECT_ACTIONS
+            request.expected_scene_revision,
+            active=request.active,
+            name=request.name,
+        )
+    )
 
 
 @router.post(
@@ -401,19 +401,37 @@ def add_object(
     job_id: str,
     request: schemas.AddObjectRequest,
 ) -> schemas.SceneEditResponse:
-    """Add obstacle chưa có domain producer; không publish revision giả."""
+    """Thêm vật cản hộp do người dùng đặt (PRODUCT-07A); `position_xyz` là tâm hộp (mét, world)."""
     _job_or_404(job_id)
-    editor = _registry().scene
+    if request.collider_type != "AABB" or request.origin != "user_added":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="chỉ hỗ trợ vật cản hộp (AABB) do người dùng thêm",
+        )
+    return _scene_mutation(
+        lambda editor: add_box_object(
+            editor,
+            job_id,
+            request.expected_scene_revision,
+            request.name,
+            request.dimensions_xyz_m,
+            request.position_xyz,
+        )
+    )
+
+
+def _scene_mutation(mutate: Callable[[SceneEditor], SceneEditResult]) -> schemas.SceneEditResponse:
+    """Map lỗi thao tác scene giống `/scene/edits`: revision cũ/bất biến artifact → 409, lệnh sai → 422."""
     try:
-        current = editor.current(job_id)
+        return schemas.scene_edit_response(mutate(_registry().scene))
     except SceneNotAvailableError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    if current.scene.scene_revision != request.expected_scene_revision:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"scene đã đổi: client đang giữ {request.expected_scene_revision}, revision hiện tại là {current.scene.scene_revision}",
-        )
-    raise HTTPException(status_code=501, detail="Add obstacle chưa nối EX-SCENE; không tạo revision giả")
+    except SceneRevisionConflictError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    except ArtifactStoreError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    except SceneError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
 
 
 # ── PRODUCT-10/11: review & release (fake stub) ──────────────────────────────

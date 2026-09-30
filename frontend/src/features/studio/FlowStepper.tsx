@@ -30,7 +30,7 @@ export function FlowStepper({ steps, current }: { steps: readonly FlowStep[]; cu
                 <span
                   className={cn(
                     "grid size-6 place-items-center rounded-full text-xs font-semibold",
-                    done && "bg-ink text-paper",
+                    done && "bg-sage text-paper",
                     active && "bg-ember-strong text-white",
                     !done && !active && "border border-line-strong text-ink-subtle",
                   )}

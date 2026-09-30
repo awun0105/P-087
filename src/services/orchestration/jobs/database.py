@@ -95,6 +95,11 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
             "CREATE INDEX r2s_audit_by_user ON r2s_audit_log(user_id, at)",
         ),
     ),
+    (
+        # Scene 3DGS người dùng tải lên, chỉ xem/chỉnh sửa (ADR 0004 §3, gói 5).
+        4,
+        ("CREATE TABLE r2s_imports (import_id TEXT PRIMARY KEY, upload_id TEXT NOT NULL, payload TEXT NOT NULL)",),
+    ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 

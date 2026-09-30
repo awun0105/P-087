@@ -73,3 +73,6 @@ class MemoryObjectStore:
 
     def delete(self, key: str) -> None:
         self.objects.pop(key, None)
+
+    def read_range(self, key: str, start: int, length: int) -> bytes:
+        return self.objects[key][0][start : start + length]

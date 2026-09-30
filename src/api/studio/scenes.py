@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
 from src.api import schemas
@@ -15,6 +16,8 @@ from src.services.orchestration.jobs.progress import JobProgress, job_progress
 from src.services.orchestration.processing import build_job_config, evaluate, is_presets_file, preset_values
 from src.services.orchestration.projects import JobCreateInput, JobNotFoundError, PrivacyGateBlockedError
 from src.services.orchestration.projects.models import UploadProjectInput
+from src.services.orchestration.stage_views import StageViewList, stage_views
+from src.services.orchestration.thumbnails import scene_thumbnail
 from src.services.orchestration.uploads import UploadNotFoundError
 
 router = APIRouter()
@@ -80,6 +83,12 @@ def create_scene_from_upload(
         upload = uploads.get(request.upload_id)
     except UploadNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    if upload.input_kind != "rgb_video":
+        # Luồng import 3DGS (ADR 0004 §3) chưa có worker; không tạo job video từ file PLY/ZIP.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Đã nhận file 3DGS nhưng luồng dựng scene từ PLY/ZIP chưa được bật trên máy chủ",
+        )
     processing = None
     if settings.product_processing_config is not None and is_presets_file(settings.product_processing_config):
         presets, presets_checksum = deps.presets()
@@ -142,3 +151,28 @@ def get_job_progress(job_id: str) -> JobProgress:
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     return job_progress(job, attempts, deps.preview_ready(registry, job_id))
+
+
+@router.get("/jobs/{job_id}/stage-views", response_model=StageViewList)
+def get_stage_views(job_id: str) -> StageViewList:
+    """Kết quả xem được của từng bước (ADR 0005); UI chọn một lớp để nạp."""
+    try:
+        return stage_views(deps.registry(), job_id)
+    except JobNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+
+
+@router.get("/jobs/{job_id}/thumbnail.jpg", response_class=FileResponse)
+def get_job_thumbnail(job_id: str) -> FileResponse:
+    """Ảnh nhỏ của frame đầu cho thẻ scene; 404 khi job chưa trích frame."""
+    registry = deps.registry()
+    # Cache dẫn xuất cạnh kho artifact, không nằm trong kho (không phải artifact).
+    cache = deps.settings().artifact_root.expanduser().resolve().parent / "thumbnail_cache"
+    try:
+        path = scene_thumbnail(registry, job_id, cache)
+    except JobNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    if path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job chưa có frame để làm ảnh xem trước")
+    # Tên file khoá theo checksum frame bất biến → cache trình duyệt dài hạn an toàn.
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})

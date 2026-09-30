@@ -20,8 +20,15 @@
 - [Execution Documentation](execution/README.md): contracts, integration,
   task catalog, milestones và track entrypoints.
 
-## Hiện trạng và quyết định mới nhất (2026-09-29)
+## Hiện trạng và quyết định mới nhất (2026-09-30)
 
+- Tích hợp Studio đầu-cuối (tách vật, gói mô phỏng, duyệt/phát hành, refactor UI): PR #16,
+  [plan hoàn thiện Studio](plans/active/2026-09-29-studio-completion.md).
+- **Pipeline v2** — scene theo vật chỉnh sửa được, xuất USD lai cho Isaac Sim:
+  [ADR 0007](decisions/0007-object-centric-hybrid-usd-pipeline.md),
+  [plan pipeline v2](plans/active/2026-09-30-pipeline-v2.md),
+  [audit #10](execution/audits/10_pipeline_v2_methods.md); PRD v1.16.
+- Dùng lại code nghiên cứu phi thương mại: [ADR 0008](decisions/0008-research-code-license-policy.md).
 - Studio MVP (video → 3DGS → editor) đã có trên `develop`:
   [plan MVP Studio](plans/active/2026-09-29-mvp-studio-demo.md),
   [ADR 0002](decisions/0002-studio-mvp-video-to-3dgs.md) (*Proposed*).

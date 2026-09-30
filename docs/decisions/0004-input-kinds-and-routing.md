@@ -71,6 +71,15 @@ kèm ảnh. Chỉ cần thông báo EX-SCENE/EX-SIM, không cần review contrac
 | RGB + anchor người dùng | A/B + 3 điểm sàn trên scene 3DGS (REC-06) | Đã có |
 | RGB + LiDAR | REC-07/08 LiDAR → REC-09 alignment | Chỉ dataset đã chuẩn bị |
 
+### 6. Dataset mẫu: số đo lấy từ LiDAR (owner chốt 2026-09-29)
+
+Trên dataset có LiDAR (Aisle_CW), người thử demo **không tự đo ngoài đời**: vẫn click
+A/B, C/D và 3 điểm sàn trên 3DGS để mô phỏng luồng thật, nhưng khoảng cách do hệ
+thống lấy từ LiDAR (ô số chỉ đọc, nhãn "Số đo từ LiDAR · mô phỏng số đo ngoài đời").
+Video thật của người dùng vẫn nhập tay. Điểm click được đưa sang LiDAR qua căn chỉnh
+SfM → world theo quỹ đạo camera (REC-09, GT-assisted, chỉ cho demo). Bản xác nhận ghi
+nguồn số đo ở `measurement_ref`, không ghi là người dùng đo.
+
 ## Consequences
 
 - Upload nhận thêm `.ply` và `.zip`; UI một ô tải lên, server báo loại nhận diện

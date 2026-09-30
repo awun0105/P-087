@@ -1,23 +1,28 @@
 "use client";
 
-import { ArrowRight, Clapperboard, Film, LogIn, Play, RefreshCw, Upload } from "lucide-react";
+import { ArrowRight, Clapperboard, Film, LayoutGrid, List, LogIn, Play, RefreshCw, Search, Upload } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
-import { Badge, Card, EmptyState, Notice, buttonVariants, formatBytes } from "@/components/studio/primitives";
+import { Input } from "@/components/shadcn/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/shadcn/table";
+import { ToggleGroup, ToggleGroupItem } from "@/components/shadcn/toggle-group";
+import { Badge, Card, EmptyState, Notice, buttonVariants } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
-import { sceneStatus } from "@/features/studio/sceneStatus";
+import { STATUS_FILTERS, sceneStatus, type SceneStatusGroup } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
 import { canEdit } from "@/lib/api/auth";
-import { listSamples, listScenes, sampleFileUrl } from "@/lib/api/studio";
+import { listImports, listSamples, listScenes, sampleFileUrl } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
-import type { SampleSummary, SceneSummary } from "@/lib/contracts/studio";
+import type { ImportedScene, SampleSummary, SceneSummary } from "@/lib/contracts/studio";
+import { formatBytes } from "@/lib/format";
 
 const DATE = new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeStyle: "short" });
 
 /** Màn hình Scenes: video mẫu + danh sách scene của người dùng (dữ liệu từ backend). */
 export function ScenesHome() {
   const [scenes, setScenes] = useState<SceneSummary[] | null>(null);
+  const [imports, setImports] = useState<ImportedScene[]>([]);
   const [samples, setSamples] = useState<SampleSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,10 +31,12 @@ export function ScenesHome() {
 
   const load = useCallback(async () => {
     // Khách không có quyền xem scene của nhóm: chỉ tải video mẫu, không poll lỗi 401.
-    const [sceneResult, sampleResult] = await Promise.all([
+    const [sceneResult, sampleResult, importResult] = await Promise.all([
       signedIn ? listScenes() : Promise.resolve(null),
       listSamples(),
+      signedIn ? listImports() : Promise.resolve(null),
     ]);
+    setImports(importResult?.ok ? importResult.data.imports : []);
     if (sceneResult?.ok) {
       setScenes(sceneResult.data.scenes);
       setError(null);
@@ -38,6 +45,18 @@ export function ScenesHome() {
     }
     setSamples(sampleResult.ok ? sampleResult.data.samples : []);
   }, [signedIn]);
+
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<SceneStatusGroup | "all">("all");
+  const [view, setView] = useState<"grid" | "list">(readView);
+  const shown = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return (scenes ?? []).filter(
+      (scene) =>
+        (!needle || scene.project.name.toLowerCase().includes(needle)) &&
+        (filter === "all" || sceneStatus(scene.latest_job, scene.preview_ready).group === filter),
+    );
+  }, [scenes, query, filter]);
 
   const anyActive = scenes?.some((scene) => sceneStatus(scene.latest_job, scene.preview_ready).active) ?? true;
   usePolling(load, anyActive ? 4000 : 20000, true);
@@ -102,15 +121,95 @@ export function ScenesHome() {
           </EmptyState>
         )}
         {scenes && scenes.length > 0 && (
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <div className="relative min-w-48 flex-1 sm:max-w-xs">
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-subtle" aria-hidden />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Tìm theo tên scene"
+                aria-label="Tìm theo tên scene"
+                className="pl-8"
+              />
+            </div>
+            <ToggleGroup
+              type="single"
+              value={filter}
+              onValueChange={(value) => value && setFilter(value as SceneStatusGroup | "all")}
+              variant="outline"
+              size="sm"
+              aria-label="Lọc theo trạng thái"
+            >
+              {STATUS_FILTERS.map((item) => (
+                <ToggleGroupItem key={item.value} value={item.value}>
+                  {item.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+            <ToggleGroup
+              type="single"
+              value={view}
+              onValueChange={(value) => {
+                if (!value) return;
+                setView(value as "grid" | "list");
+                writeView(value as "grid" | "list");
+              }}
+              variant="outline"
+              size="sm"
+              className="ml-auto"
+              aria-label="Kiểu hiển thị"
+            >
+              <ToggleGroupItem value="grid" aria-label="Lưới">
+                <LayoutGrid aria-hidden />
+              </ToggleGroupItem>
+              <ToggleGroupItem value="list" aria-label="Danh sách">
+                <List aria-hidden />
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+        )}
+        {scenes && scenes.length > 0 && shown.length === 0 && (
+          <p className="rounded-xl border border-line p-6 text-center text-sm text-ink-muted">
+            Không có scene khớp bộ lọc.{" "}
+            <button type="button" className="font-medium text-ember-strong hover:underline" onClick={() => { setQuery(""); setFilter("all"); }}>
+              Xoá bộ lọc
+            </button>
+          </p>
+        )}
+        {shown.length > 0 && view === "grid" && (
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {scenes.map((scene) => (
+            {shown.map((scene) => (
               <li key={scene.project.project_id}>
                 <SceneCard scene={scene} />
               </li>
             ))}
           </ul>
         )}
+        {shown.length > 0 && view === "list" && <SceneTable scenes={shown} />}
       </section>
+
+      {imports.length > 0 && (
+        <section aria-labelledby="imports-heading" className="mt-10">
+          <h2 id="imports-heading" className="mb-4 text-sm font-semibold tracking-wide text-ink-subtle uppercase">
+            Scene import (file 3DGS)
+          </h2>
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {imports.map((item) => (
+              <li key={item.import_id}>
+                <Link
+                  href={`/imports/${item.import_id}`}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-line bg-paper-raised p-4 text-sm transition-colors hover:border-line-strong"
+                >
+                  <span className="truncate font-medium text-ink">{item.name}</span>
+                  <span className="shrink-0 text-xs text-ink-subtle">
+                    {item.status === "READY" ? "Mở xem/chỉnh" : item.status === "FAILED" ? "Lỗi" : "Đang nén…"}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </main>
   );
 }
@@ -135,7 +234,7 @@ function SamplesHero({ samples }: { samples: SampleSummary[] }) {
               <div className="relative aspect-video bg-viewport">
                 {sample.cover && (
                   // eslint-disable-next-line @next/next/no-img-element -- ảnh mẫu từ API, kích thước không cố định
-                  <img src={sampleFileUrl(sample.sample_id, sample.cover)} alt="" className="size-full object-cover opacity-90" loading="lazy" />
+                  <img src={sampleFileUrl(sample.sample_id, sample.cover)} alt="" className="size-full object-cover opacity-90" loading="lazy" decoding="async" />
                 )}
                 <Badge tone="ember" className="absolute top-3 left-3 bg-paper-raised/95">
                   <Clapperboard aria-hidden />
@@ -160,39 +259,56 @@ function SamplesHero({ samples }: { samples: SampleSummary[] }) {
 }
 
 function SceneCard({ scene }: { scene: SceneSummary }) {
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
   const status = sceneStatus(scene.latest_job, scene.preview_ready);
   const job = scene.latest_job;
   const created = scene.project.created_at ? DATE.format(new Date(scene.project.created_at)) : null;
+  // Frame đầu chỉ có sau khi trích frame; trước đó (hoặc ảnh lỗi) giữ icon.
+  const hasFrames = job?.stage_artifacts.some((stage) => stage.stage_id === "ST-FRAME-EXTRACT") ?? false;
   const content = (
     <Card
       className={cn(
-        "group flex h-full flex-col p-5 transition-[border-color,box-shadow] duration-200",
+        "group flex h-full flex-col overflow-hidden transition-[border-color,box-shadow] duration-200",
         job && "hover:border-line-strong hover:shadow-md",
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="grid size-10 place-items-center rounded-xl bg-paper-sunken text-ink-muted">
-          <Film className="size-5" aria-hidden />
-        </div>
-        <Badge tone={status.tone}>
+      <div className="relative aspect-video w-full bg-paper-sunken">
+        {job && hasFrames && !thumbnailFailed ? (
+          // eslint-disable-next-line @next/next/no-img-element -- JPEG nhỏ do API tạo, không qua next/image
+          <img
+            src={`/api/v1/jobs/${encodeURIComponent(job.job_id)}/thumbnail.jpg`}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            onError={() => setThumbnailFailed(true)}
+            className="size-full object-cover"
+          />
+        ) : (
+          <div className="grid size-full place-items-center text-ink-subtle">
+            <Film className="size-8" aria-hidden />
+          </div>
+        )}
+        <Badge tone={status.tone} className="absolute top-3 right-3 shadow-sm">
           {status.active && <span className="studio-pulse size-1.5 rounded-full bg-current" aria-hidden />}
           {status.label}
         </Badge>
       </div>
-      <h3 className="mt-4 truncate text-base font-semibold text-ink">{scene.project.name}</h3>
-      <p className="mt-1 truncate text-sm text-ink-muted">
-        {scene.project.input_video
-          ? `${scene.project.input_video.original_name} · ${formatBytes(scene.project.input_video.size_bytes)}`
-          : "Không có video"}
-      </p>
-      <div className="mt-auto flex items-center justify-between pt-5 text-xs text-ink-subtle">
-        <span>{created}</span>
-        {job && (
-          <span className="flex items-center gap-1 font-medium text-ink-muted transition-colors group-hover:text-ember-strong">
-            {scene.preview_ready ? "Mở scene" : "Xem tiến trình"}
-            <ArrowRight className="size-3.5" aria-hidden />
-          </span>
-        )}
+      <div className="flex flex-1 flex-col p-5">
+        <h3 className="truncate text-base font-semibold text-ink">{scene.project.name}</h3>
+        <p className="mt-1 truncate text-sm text-ink-muted">
+          {scene.project.input_video
+            ? `${scene.project.input_video.original_name} · ${formatBytes(scene.project.input_video.size_bytes)}`
+            : "Không có video"}
+        </p>
+        <div className="mt-auto flex items-center justify-between pt-5 text-xs text-ink-subtle">
+          <span>{created}</span>
+          {job && (
+            <span className="flex items-center gap-1 font-medium text-ink-muted transition-colors group-hover:text-ember-strong">
+              {scene.preview_ready ? "Mở scene" : "Xem tiến trình"}
+              <ArrowRight className="size-3.5" aria-hidden />
+            </span>
+          )}
+        </div>
       </div>
     </Card>
   );
@@ -207,11 +323,76 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
   );
 }
 
+const VIEW_KEY = "r2s.scenes.view";
+
+/** Kiểu hiển thị là tiện ích riêng của người xem; storage có thể bị chặn nên luôn có mặc định. */
+function readView(): "grid" | "list" {
+  try {
+    return typeof window !== "undefined" && window.localStorage.getItem(VIEW_KEY) === "list" ? "list" : "grid";
+  } catch {
+    return "grid";
+  }
+}
+
+function writeView(view: "grid" | "list"): void {
+  try {
+    window.localStorage.setItem(VIEW_KEY, view);
+  } catch {
+    // Không lưu được thì lần sau mở lại dạng lưới.
+  }
+}
+
+/** Dạng danh sách: đọc nhanh trạng thái và mốc thời gian của nhiều scene. */
+function SceneTable({ scenes }: { scenes: SceneSummary[] }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-line">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Scene</TableHead>
+            <TableHead>Trạng thái</TableHead>
+            <TableHead className="hidden md:table-cell">Video</TableHead>
+            <TableHead className="hidden sm:table-cell">Tạo lúc</TableHead>
+            <TableHead className="w-0" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {scenes.map((scene) => {
+            const status = sceneStatus(scene.latest_job, scene.preview_ready);
+            const job = scene.latest_job;
+            return (
+              <TableRow key={scene.project.project_id}>
+                <TableCell className="max-w-64 truncate font-medium">{scene.project.name}</TableCell>
+                <TableCell>
+                  <Badge tone={status.tone}>{status.label}</Badge>
+                </TableCell>
+                <TableCell className="hidden max-w-56 truncate text-ink-muted md:table-cell">
+                  {scene.project.input_video?.original_name ?? "—"}
+                </TableCell>
+                <TableCell className="hidden text-ink-muted sm:table-cell">
+                  {scene.project.created_at ? DATE.format(new Date(scene.project.created_at)) : "—"}
+                </TableCell>
+                <TableCell className="text-right">
+                  {job && (
+                    <Link href={`/scenes/${encodeURIComponent(job.job_id)}`} className="font-medium whitespace-nowrap text-ember-strong hover:underline">
+                      {scene.preview_ready ? "Mở scene" : "Xem tiến trình"}
+                    </Link>
+                  )}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
 function SceneGridSkeleton() {
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label="Đang tải scene">
       {[0, 1, 2].map((key) => (
-        <div key={key} className="h-44 animate-pulse rounded-2xl border border-line bg-paper-raised motion-reduce:animate-none" />
+        <div key={key} className="h-72 animate-pulse rounded-2xl border border-line bg-paper-raised motion-reduce:animate-none" />
       ))}
     </div>
   );

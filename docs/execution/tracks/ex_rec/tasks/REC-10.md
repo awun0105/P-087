@@ -106,6 +106,17 @@ chưa đủ required handoff proof để DONE.
 
 ## 12. Result / Evidence
 
+### 2026-09-30 — ReconstructionBundle thật đầu tiên từ Studio
+
+Chạy thật 2026-09-30 trên `job-ac2bfd924cc6` (video Aisle_CW, GPU Quadro T2000, adapter index 1),
+branch `feat/studio-integration`. Xác nhận tỉ lệ bằng 7 điểm tự chọn trên sàn LiDAR (ADR 0004 §6).
+- Bundle `reconstruction/e5751aff…/bundle.json` (`sha256:2d1f4a1a81dd…`): 3DGS hệ mét, pose
+  canonical, collision GLB (= canonical geometry), frame refs, metric CONFIRMED 1 m/đơn vị,
+  verification_ref bắt buộc (`bundle_validation.py:52`).
+- Chưa có consumer thật: EX-SCENE `bundle_consumer`/EX-SIM USD chưa chạy trên bundle này.
+  EX-SIM `usd/usda.py` hiện chỉ sinh ground plane, chưa tham chiếu mesh môi trường (ghi ở plan).
+
+
 ### Canonical RGB verification bridge — 2026-09-27 sau 427ab83
 
 REC-06 `BundleMetricVerifier.verify_bundle` nay là concrete verifier port cho

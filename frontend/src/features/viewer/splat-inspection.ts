@@ -16,9 +16,16 @@ export class SplatInspection {
   private readonly inputGates = new Set<"measure" | "form">();
   private readonly colorA = new Color(0.2, 0.8, 1);
   private readonly colorB = new Color(1, 0.7, 0.2);
+  private readonly colorCheck = new Color(0.9, 0.4, 0.9);
   private readonly colorFloor = new Color(0.4, 0.9, 0.4);
 
-  /** `maxPoints` 2 = cặp đo A/B; 5 = A, B rồi 3 điểm sàn cho xác nhận tỉ lệ mét (REC-06). */
+  /** Vai trò điểm theo vị trí: 2 = cặp đo A/B; ≥ 5 = các cặp đoạn rồi 3 điểm sàn cuối (REC-06). */
+  private role(index: number): "anchor" | "check" | "floor" {
+    if (this.maxPoints >= 5 && index >= this.maxPoints - 3) return "floor";
+    return index < 2 ? "anchor" : "check";
+  }
+
+  /** `maxPoints` 2 = cặp đo A/B; 7 = A, B, C, D rồi 3 điểm sàn cho xác nhận tỉ lệ mét (REC-06). */
   constructor(
     private readonly viewer: ViewerHandle,
     private readonly notify: (state: InspectionState) => void,
@@ -101,6 +108,11 @@ export class SplatInspection {
   undo(): void { this.schedule(() => this.history.undo()); }
   redo(): void { this.schedule(() => this.history.redo()); }
   clear(): void { this.schedule(() => this.history.commit([])); }
+  /** Đặt bộ điểm có sẵn (vd demo tự chọn từ LiDAR); vẫn vào history để hoàn tác được. */
+  setPoints(points: readonly InspectionPoint[]): void {
+    const next = points.slice(0, this.maxPoints).map((point) => [point[0], point[1], point[2]] as const);
+    this.schedule(() => this.history.commit(next));
+  }
 
   private blockNavigation = (event: Event): void => {
     if (!this.state.measuring || this.disposed) return;
@@ -147,13 +159,18 @@ export class SplatInspection {
       const points = this.state.points.map((point) => transform.transformPoint(new Vec3(...point)));
       points.forEach((point, index) => {
         const size = Math.max(point.distance(camera.entity.getPosition()) * 0.004, 0.00001);
-        const color = index === 0 ? this.colorA : index === 1 ? this.colorB : this.colorFloor;
+        const role = this.role(index);
+        const color = role === "floor" ? this.colorFloor : role === "check" ? this.colorCheck : index === 0 ? this.colorA : this.colorB;
         for (const offset of [new Vec3(size, 0, 0), new Vec3(0, size, 0), new Vec3(0, 0, size)]) {
           this.viewer.app.drawLine(point.clone().sub(offset), point.clone().add(offset), color, false);
         }
       });
-      if (points.length >= 2) this.viewer.app.drawLine(points[0], points[1], this.colorB, false);
-      const floor = points.slice(2);
+      // Đoạn A–B (và C–D) nối từng cặp; điểm sàn nối thành tam giác.
+      for (let start = 0; start + 1 < points.length && this.role(start + 1) !== "floor"; start += 2) {
+        const color = this.role(start) === "check" ? this.colorCheck : this.colorB;
+        this.viewer.app.drawLine(points[start], points[start + 1], color, false);
+      }
+      const floor = points.filter((_, index) => this.role(index) === "floor");
       floor.forEach((point, index) => {
         const next = floor[(index + 1) % floor.length];
         if (floor.length === 3 || index + 1 < floor.length) this.viewer.app.drawLine(point, next, this.colorFloor, false);

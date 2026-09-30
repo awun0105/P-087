@@ -7,14 +7,14 @@
 | Mã dự án | RAV-01 |
 | Tên sản phẩm | Real2Sim Studio |
 | Phạm vi bản phát hành | Warehouse MVP |
-| Phiên bản tài liệu | v1.15 |
-| Trạng thái | Foundation Baseline; benchmark/runtime acceptance inputs pending |
-| Ngày cập nhật | 29/09/2026 |
+| Phiên bản tài liệu | v1.16 |
+| Trạng thái | Foundation Baseline; benchmark/runtime acceptance inputs pending; pipeline v2 (ADR 0007) đang chạy thử |
+| Ngày cập nhật | 30/09/2026 |
 | Thời gian thực hiện dự kiến | 4 tuần |
 | Người dùng chính | Kỹ sư mô phỏng (Simulation Engineer) |
 | Miền ứng dụng | Kho trong nhà, robot di động tự hành (Indoor Warehouse AMR) |
 | Trình mô phỏng mục tiêu | NVIDIA Isaac Sim |
-| Tài liệu tiền nhiệm | PRD v1.13 |
+| Tài liệu tiền nhiệm | PRD v1.15 |
 | Tài liệu liên quan | [BRIEF](./BRIEF.md), [DATASET_PLAYBOOK](./DATASET_PLAYBOOK.md), [WIREFRAME](./WIREFRAME_AND_UI_FLOW.md), [Execution Contract](./execution/TEAM_EXECUTION_CONTRACT.md), [Execution Plan](./execution/TEAM_EXECUTION_PLAN.md), [Track Guide](./execution/TRACK_IMPLEMENTATION_GUIDE.md), [Integration Playbook](./execution/INTEGRATION_PLAYBOOK.md) |
 
 ### 0.1 Lịch sử thay đổi (Change Log)
@@ -32,6 +32,7 @@
 | v1.13 | 24/09/2026 | Làm rõ hai điểm HITL, Save Draft/Submit for Validation, candidate bất biến và validation evidence (report, replay, screenshots, logs) trước final review. Lỗi capture replay không đổi kết quả validation; Primary Demo vẫn phải có replay để đạt acceptance. |
 | v1.14 | 25/09/2026 | Đồng bộ viewer P0 với PlayCanvas Engine 2.22.4 + supersplat-viewer 1.35.2; WebGL2 baseline, WebGPU ưu tiên khi khả dụng. Giữ nguyên real Brush/browser proof và AC-11; không coi thay đổi thư viện là runtime acceptance. |
 | v1.15 | 29/09/2026 | Khách (không đăng nhập) chỉ dùng video mẫu, không tốn GPU; upload/chạy job cần tài khoản Editor; tài khoản qua mã mời. Không thêm role — vẫn Editor/Reviewer (ADR 0003). |
+| v1.16 | 30/09/2026 | Owner chốt pipeline v2 ([ADR 0007](./decisions/0007-object-centric-hybrid-usd-pipeline.md)): scene theo vật chỉnh sửa được, xuất USD lai (Gaussian để hiển thị, collider để va chạm) cho Isaac Sim. Kéo vào phạm vi hiện tại: xoá vật kèm vá nền, gợi ý nhãn, thay vật bằng asset (mục 4.3.1). FR-11 bổ sung yêu cầu USD lai, khối lượng, vật liệu vật lý, nhãn ngữ nghĩa. Acceptance định lượng của các mục mới khoá sau pha chạy thử. |
 
 ### 0.2 Chủ sở hữu và người phê duyệt (Owners and Approvers)
 
@@ -355,6 +356,21 @@ Full LiDAR-only product configuration thuộc P1.
 - nhiều tầng;
 - miền đường bộ và CARLA;
 - các trình mô phỏng khác.
+
+#### 4.3.1 Điều chỉnh phạm vi theo pipeline v2 (owner, 30/09/2026)
+
+Theo [ADR 0007](./decisions/0007-object-centric-hybrid-usd-pipeline.md), các mục sau được kéo
+vào phạm vi hiện tại, đi kèm pipeline v2. Chúng **chưa** là release blocker P0 cho tới khi
+acceptance định lượng được khoá sau pha chạy thử (pha A):
+
+| Mục | Mức cũ | Nội dung trong pipeline v2 |
+|---|---|---|
+| Xoá vật kèm điền vùng bị che (3D inpainting) | P2 | Vá sẵn nền cho mọi vùng vật che lúc dựng; xoá/di chuyển vật hiện nền đã vá. Vùng chưa từng được quay phải gắn nhãn là hình suy đoán. |
+| Background recovery, plane/surface completion, visual inpainting sau Delete | P1 | Gộp vào bước vá nền (Gaussian + mesh sàn/kệ). |
+| Đặt tên semantic tự động, phân loại có mô hình thị giác-ngôn ngữ | P2 | Chỉ **gợi ý** nhãn (so với danh mục asset Isaac); người dùng xác nhận. Không tự gán. |
+| Thay vật thể bằng asset | P2 | Tuỳ chọn thay vật bằng asset Isaac cùng loại/kích thước, người dùng chọn. |
+
+Không đổi: một vật được thêm/xoá/sửa luôn qua revision và cổng duyệt như FR-08/FR-10.
 
 ---
 
@@ -778,6 +794,17 @@ Candidate package phải bảo toàn:
 - asset reference;
 - candidate manifest;
 - checksum của toàn bộ candidate package.
+
+Bổ sung v1.16 (pipeline v2, [ADR 0007](./decisions/0007-object-centric-hybrid-usd-pipeline.md)) — candidate package là **USD lai**:
+
+- hình ảnh bằng Gaussian (`ParticleField3DGaussianSplat`) cho nền và từng vật; mesh có texture là tuỳ chọn;
+- va chạm bằng `UsdPhysics` collider: nền tĩnh dùng triangle mesh; vật động dùng convex decomposition (hoặc SDF), không dùng triangle mesh;
+- mỗi vật động có RigidBody, khối lượng (kg), vật liệu vật lý (ma sát, restitution);
+- nhãn ngữ nghĩa qua `UsdSemantics.LabelsAPI`;
+- khai báo đơn vị mét và kg, trục Z hướng lên;
+- mọi vật cản có collider, để bản đồ occupancy của Isaac nhìn thấy.
+
+Phiên bản Isaac Sim khoá cho validation phải ≥ 5.0 (hỗ trợ Gaussian); phiên bản cụ thể khoá khi có máy RTX.
 
 Validation Report không nằm bên trong immutable Candidate Package trước validation.
 Validation Report phải tham chiếu tới checksum của Candidate Package đã được kiểm tra.

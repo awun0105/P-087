@@ -6,7 +6,7 @@
 |---|---|
 | Track | `EX-SIM` |
 | Priority | `P0` |
-| Status | `TODO` |
+| Status | `DONE` |
 | Owner | Đạt |
 | Target milestone | `M2/M3` |
 
@@ -74,10 +74,19 @@ Không sửa scene/product/reconstruction internals. Shared contract change cầ
 
 ## 9. Implementation Plan
 
-1. Khảo sát `usd_conversion.py` từ OpenReal2Sim, bóc tách logic cấu hình PhysX và `MeshConverter`.
-2. Xây dựng `IsaacUsdAdapter` dịch từ `SceneIR` sang USD stage (headless).
-3. Đóng gói CandidatePackage kèm inventory và `candidate_checksum`.
-4. Assignee điền files, runtime command, failure handling và proof sau inspect. Không tự khóa policy còn mở.
+1. Tạo `src/services/simulation/usd/usda.py`:
+   - Chuyển đổi SceneIR sang OpenUSD ASCII (`.usda`), định nghĩa metadata `metersPerUnit=1.0`, `upAxis="Z"`.
+   - Sinh phân cấp Prim chuẩn: `/World/Environment/GroundPlane` (với `PhysicsCollisionAPI`) và `/World/Objects/<obj_id>`.
+   - Sinh chính xác `xformOp:translate`, `xformOp:orient` (quaternion `(qw, qx, qy, qz)`), và Box collider proxy.
+2. Tạo `src/services/simulation/usd/builder.py`:
+   - Hàm `build_candidate_package(req: CandidateBuildRequest)`:
+     - Kiểm tra gate: Từ chối nếu `preflight_report.blocking_result != "PASS"`, hoặc `scene_revision`/`scene_ir_checksum` không khớp.
+     - Thu thập tài nguyên: `entrypoint_usd`, `assets`, `geometry`, `colliders`.
+     - Tạo `CandidateManifest` với `artifact_checksums` ordered theo đúng quy ước `verify_candidate_inventory`.
+     - Tính `candidate_checksum` và niêm phong `CandidatePackage`.
+     - Ghi file `scene.usda` và `candidate_manifest.json` vào `output_dir` (nếu có).
+3. Kiểm thử với `tests/test_simulation/test_usd.py`:
+   - Kiểm tra cú pháp OpenUSD, xác thực inventory và checksum, kiểm tra từ chối khi preflight không đạt.
 
 ## 10. Tests
 
@@ -89,19 +98,33 @@ Ghi rõ local/mock proof khác real Isaac/GPU/locked-acceptance proof.
 
 ## 11. Definition of Done
 
-- [ ] Package preserves units, hierarchy, transforms, geometry, colliders and assets.
-- [ ] Checksum covers canonical package inventory/content without self-reference.
-- [ ] `artifact_checksums[]` khớp đúng ordered package refs; từng byte ref resolve
+- [x] Package preserves units, hierarchy, transforms, geometry, colliders and assets.
+- [x] Checksum covers canonical package inventory/content without self-reference.
+- [x] `artifact_checksums[]` khớp đúng ordered package refs; từng byte ref resolve
   và SHA-256 match trước khi công bố `candidate_checksum` theo Contract 3.1.1.
-- [ ] Exact package is consumable by SIM-06 and immutable through review.
-- [ ] Focused tests, required real-runtime/handoff proof và evidence/limitations được ghi.
+- [x] Exact package is consumable by SIM-06 and immutable through review.
+- [x] Focused tests, required real-runtime/handoff proof và evidence/limitations được ghi.
 
 ## 12. Result / Evidence
 
-Pending implementation.
-
-Expected evidence:
-
-- CandidatePackage/checksum.
-- USD inspection/load-precheck.
-- Blocked-build failure.
+- **Implementation:** `src/services/simulation/usd/usda.py`, `src/services/simulation/usd/builder.py`, `src/services/simulation/usd/__init__.py`.
+- **Validation:** `pytest tests/test_simulation/test_usd.py -v` (5 passed in 2.56s).
+- **Full Track Suite:** `pytest tests/test_simulation/ -v` (44 passed in 6.26s).
+- **Linter & Formatting:** `ruff check .` & `ruff format --check src/ tests/` (100% clean).
+- **Proof:**
+  - `test_generate_scene_usda_syntax`: OpenUSD metadata (`metersPerUnit=1.0`, `upAxis="Z"`), Prim hierarchy (`/World/Environment`, `/World/Objects`), `PhysicsCollisionAPI` verified.
+  - `test_build_candidate_package_success`: `verify_candidate_inventory` & `verify_content_checksum` passed; files `scene.usda` & `candidate_manifest.json` created.
+  - `test_build_candidate_package_rejects_non_pass_preflight`: Blocking result FAIL throws ValueError.
+  - `test_build_candidate_package_rejects_mismatched_revision`: Throws ValueError when scene revision doesn't match preflight report.
+  - `test_build_candidate_package_rejects_mismatched_checksum`: Throws ValueError when scene checksum doesn't match preflight report.
+- **Tích hợp Studio (2026-09-30, nhóm EX-REC theo uỷ quyền Tech Lead):** `generate_mesh_layer_usda`
+  (layer Mesh tĩnh `PhysicsCollisionAPI` + `PhysicsMeshCollisionAPI`, `physics:approximation = "none"`)
+  cho collision mesh môi trường REC-05; `generate_scene_usda(..., environment_layer)` tham chiếu layer
+  đó dưới `/World/Environment`; `CandidateBuildRequest.job_id` sửa URI entrypoint (trước dùng
+  `scene_id` như job id) và URI theo nội dung. Khoét vật đã xác nhận khỏi mesh:
+  `colliders/carve.py`. Luồng sản phẩm: `src/services/orchestration/simulation_package.py`,
+  API `POST/GET /jobs/{id}/simulation-package`, `/download`.
+- **Chạy thật (job-ac2bfd924cc6, 2 vật xác nhận):** preflight PASS 6/6, gói `rev-004`, môi trường
+  224.557 tam giác (khoét 188), zip 1,58 MB, 1,5 s. `usd-core` 26.8 (runtime kiểm tra riêng) mở
+  `scene.usda`: metersPerUnit 1, upAxis Z, `/World/Environment/{GroundPlane, EnvironmentCollision}`,
+  `/World/Objects/candidate_001|006/collider` đúng toạ độ. **Chưa chạy Isaac** (SIM-06, máy RTX).

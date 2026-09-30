@@ -14,6 +14,13 @@ file hoặc ví dụ ở đây làm lý do đổi contract.
 
 Không tự ý implement feature chỉ dựa trên context này. Với mỗi task sau đó, phải tuân thủ scope cụ thể của task và các tài liệu trong repository.
 
+**Cập nhật 30/09/2026:** đích của pipeline đổi theo
+[ADR 0007](./docs/decisions/0007-object-centric-hybrid-usd-pipeline.md) — scene theo vật chỉnh sửa
+được, xuất USD lai (Gaussian để hiển thị, collider để va chạm) cho Isaac Sim; PRD v1.16 kéo vá nền,
+gợi ý nhãn, thay asset vào phạm vi. Một số mô tả công nghệ bên dưới (vd. SAMPro3D-trên-hộp,
+collider hộp) là đường tạm hiện tại, không phải đích cuối. Code nghiên cứu phi thương mại được
+dùng lại theo [ADR 0008](./docs/decisions/0008-research-code-license-policy.md).
+
 ---
 
 # 1. Mục tiêu sản phẩm

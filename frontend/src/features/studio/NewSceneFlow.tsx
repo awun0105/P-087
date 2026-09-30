@@ -5,21 +5,23 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 
-import { Button, Card, EmptyState, Notice, buttonVariants, formatBytes } from "@/components/studio/primitives";
+import { Badge, Button, Card, EmptyState, Notice, buttonVariants } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { FlowStepper } from "@/features/studio/FlowStepper";
+import { canCreateScene, describeDetection } from "@/features/studio/inputKinds";
 import { SamplePicker, SampleProcessStep, SampleReadyStep, SampleSelectStep } from "@/features/studio/SampleFlow";
 import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
 import { useProcessingForm } from "@/features/studio/useProcessingForm";
 import { UploadDropzone } from "@/features/studio/UploadDropzone";
 import { canEdit } from "@/lib/api/auth";
-import { createSceneFromUpload, getSample, listSamples, listUploads } from "@/lib/api/studio";
+import { createImport, createSceneFromUpload, getSample, listSamples, listUploads } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import type { DataOrigin, DemoManifest, SampleSummary, UploadRecord } from "@/lib/contracts/studio";
+import { formatBytes } from "@/lib/format";
 
 const STEPS = [
-  { key: "upload", label: "Tải video lên" },
-  { key: "select", label: "Chọn video" },
+  { key: "upload", label: "Nguồn dữ liệu" },
+  { key: "select", label: "Thiết lập & bắt đầu" },
   { key: "process", label: "Xử lý" },
   { key: "scene", label: "Mở scene" },
 ] as const;
@@ -197,9 +199,19 @@ function SelectAndConfirm({ preselect, onBack }: { preselect: string | null; onB
 
   const processing = useProcessingForm(true);
   const blocked = processing.evaluation?.blocking ?? false;
-  const ready = Boolean(
-    selected && name.trim() && owner.trim() && purpose.trim() && rights && anonymized && retention && !blocked,
-  );
+  const selectedUpload = uploads?.find((upload) => upload.upload_id === selected) ?? null;
+  const supported = selectedUpload === null || canCreateScene(selectedUpload);
+  // Lý do khoá nút, hiện ngay cạnh CTA (PRODUCT.md §7.4) thay vì nút xám không giải thích.
+  const missing = [
+    !selected && "Chưa chọn video",
+    selected && !supported && "File này là 3DGS — dùng “Mở scene 3DGS” ở trên",
+    !name.trim() && "Chưa đặt tên scene",
+    !owner.trim() && "Chưa khai người/đơn vị sở hữu dữ liệu",
+    !purpose.trim() && "Chưa khai mục đích sử dụng",
+    !(rights && anonymized && retention) && "Chưa tick đủ 3 xác nhận dữ liệu",
+    blocked && "Thông số vượt cấu hình máy xử lý",
+  ].filter((reason): reason is string => Boolean(reason));
+  const ready = missing.length === 0;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -274,13 +286,38 @@ function SelectAndConfirm({ preselect, onBack }: { preselect: string | null; onB
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{upload.original_name}</p>
                 <p className="text-sm text-ink-muted">
-                  {formatBytes(upload.size_bytes)} · {DATE.format(new Date(upload.received_at))}
+                  {describeDetection(upload)} · {formatBytes(upload.size_bytes)} · {DATE.format(new Date(upload.received_at))}
                   {upload.project_ids.length > 0 && ` · đã dùng cho ${upload.project_ids.length} scene`}
                 </p>
               </div>
             </label>
           ))}
         </fieldset>
+        {!supported && selectedUpload && (
+          <Notice tone="ochre" className="mt-4">
+            <p>
+              Máy chủ đã nhận diện file này là {describeDetection(selectedUpload)}. File 3DGS không có camera nên mở để{" "}
+              <strong>xem và chỉnh sửa</strong>; không qua xác nhận tỉ lệ mét hay dựng collision.
+            </p>
+            <Button
+              size="sm"
+              className="mt-3"
+              disabled={submitting || !name.trim()}
+              onClick={() => {
+                setSubmitting(true);
+                setError(null);
+                createImport(selectedUpload.upload_id, name.trim())
+                  .then((created) => router.push(`/imports/${created.import_id}`))
+                  .catch((cause: unknown) => {
+                    setError(cause instanceof Error ? cause.message : "Không mở được scene 3DGS");
+                    setSubmitting(false);
+                  });
+              }}
+            >
+              Mở scene 3DGS
+            </Button>
+          </Notice>
+        )}
         <div className="mt-5">
           <label htmlFor={ids.name} className="text-sm font-medium">
             Tên scene
@@ -297,7 +334,10 @@ function SelectAndConfirm({ preselect, onBack }: { preselect: string | null; onB
       </Card>
 
       <Card className="p-5 sm:p-6">
-        <h2 className="text-base font-semibold">Xác nhận dữ liệu</h2>
+        <h2 className="flex flex-wrap items-center gap-2 text-base font-semibold">
+          Xác nhận dữ liệu
+          <Badge tone="ochre">Tự khai — chưa qua QA</Badge>
+        </h2>
         <p className="mt-1 text-sm text-ink-muted">
           Hệ thống chưa tự làm mờ khuôn mặt/biển số. Bạn xác nhận video phù hợp; lời xác nhận được lưu cùng scene.
         </p>
@@ -362,6 +402,30 @@ function SelectAndConfirm({ preselect, onBack }: { preselect: string | null; onB
         </Notice>
       )}
       {error && <Notice tone="rust">{error}</Notice>}
+
+      <Card className="p-5 sm:p-6">
+        <h2 className="text-base font-semibold">Tóm tắt trước khi xử lý</h2>
+        <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
+          <dt className="text-ink-muted">Video</dt>
+          <dd>{selectedUpload ? `${selectedUpload.original_name} · ${describeDetection(selectedUpload)} · ${formatBytes(selectedUpload.size_bytes)}` : "Chưa chọn"}</dd>
+          <dt className="text-ink-muted">Tên scene</dt>
+          <dd>{name.trim() || "Chưa đặt"}</dd>
+          <dt className="text-ink-muted">Nguồn dữ liệu</dt>
+          <dd>{ORIGINS.find((item) => item.value === origin)?.label} · tự khai</dd>
+          <dt className="text-ink-muted">Thông số</dt>
+          <dd>{processing.activePreset ? "Theo preset đã chọn" : processing.values ? "Tuỳ chỉnh" : "Mặc định của máy chủ"}</dd>
+        </dl>
+        {missing.length > 0 && (
+          <div className="mt-4 text-sm">
+            <p className="font-medium text-ochre">Chưa bắt đầu được vì:</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5 text-ink-muted">
+              {missing.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </Card>
 
       <div className="flex items-center justify-between gap-3">
         <Button variant="ghost" onClick={onBack}>

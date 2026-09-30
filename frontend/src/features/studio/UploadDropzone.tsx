@@ -3,15 +3,16 @@
 import { FileVideo, Upload, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
-import { Button, Notice, ProgressBar, formatBytes } from "@/components/studio/primitives";
+import { Button, Notice, ProgressBar } from "@/components/studio/primitives";
 import { uploadVideo, type UploadHandle } from "@/lib/api/studio";
+import { UPLOAD_ACCEPT, rejectFileName } from "@/features/studio/inputKinds";
 import { cn } from "@/lib/cn";
 import type { UploadRecord } from "@/lib/contracts/studio";
-
-const ACCEPT = ".mp4,.mov,video/mp4,video/quicktime";
+import { formatBytes } from "@/lib/format";
 
 /**
- * Chọn hoặc kéo-thả một video rồi stream lên backend. Kéo-thả chỉ là cách phụ:
+ * Chọn hoặc kéo-thả video / file 3DGS rồi tải lên backend. Máy chủ nhận diện loại
+ * theo nội dung (ADR 0004); đuôi file chỉ lọc sớm. Kéo-thả chỉ là cách phụ:
  * nút chọn file luôn dùng được bằng bàn phím (WCAG 2.5.7).
  */
 export function UploadDropzone({ onUploaded }: { onUploaded: (record: UploadRecord) => void }) {
@@ -28,8 +29,9 @@ export function UploadDropzone({ onUploaded }: { onUploaded: (record: UploadReco
 
   function start(candidate: File | undefined) {
     if (!candidate) return;
-    if (!/\.(mp4|mov)$/i.test(candidate.name)) {
-      setError("Chỉ nhận video .mp4 hoặc .mov.");
+    const rejected = rejectFileName(candidate.name);
+    if (rejected) {
+      setError(rejected);
       return;
     }
     setFile(candidate);
@@ -80,12 +82,14 @@ export function UploadDropzone({ onUploaded }: { onUploaded: (record: UploadReco
         <span className="grid size-12 place-items-center rounded-full bg-ember-soft text-ember-strong">
           <Upload className="size-5" aria-hidden />
         </span>
-        <span className="mt-4 text-base font-semibold text-ink">Kéo video vào đây hoặc bấm để chọn</span>
-        <span className="mt-1 text-sm text-ink-muted">MP4 hoặc MOV · camera di chuyển chậm, cảnh tĩnh, đủ sáng</span>
+        <span className="mt-4 text-base font-semibold text-ink">Kéo video hoặc file 3DGS vào đây, hoặc bấm để chọn</span>
+        <span className="mt-1 text-sm text-ink-muted">
+          Video MP4/MOV (camera di chuyển chậm, cảnh tĩnh, đủ sáng) · scene 3DGS .ply · .zip gồm PLY + COLMAP
+        </span>
         <input
           id={inputId}
           type="file"
-          accept={ACCEPT}
+          accept={UPLOAD_ACCEPT}
           className="sr-only"
           disabled={uploading}
           onChange={(event) => {
@@ -103,7 +107,7 @@ export function UploadDropzone({ onUploaded }: { onUploaded: (record: UploadReco
               <span className="truncate font-medium">{file.name}</span>
               <span className="shrink-0 tabular-nums text-ink-subtle">
                 {verifying
-                  ? "Đang kiểm tra video trên máy chủ…"
+                  ? "Máy chủ đang kiểm tra và nhận diện file…"
                   : progress >= 1
                     ? "Đã tải xong"
                     : `${Math.round(progress * 100)}% · ${formatBytes(file.size)}`}

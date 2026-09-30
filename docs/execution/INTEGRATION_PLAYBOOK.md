@@ -18,6 +18,11 @@
 **P1:** Full standalone LiDAR-only product configuration.
 **Hướng kiến trúc dài hạn:** Universal Real2Sim Core với DomainAdapter và SimulatorAdapter; MVP hiện tại chỉ khóa Warehouse / Indoor AMR + Isaac Sim.
 
+**Cập nhật 30/09/2026 — pipeline v2:** [ADR 0007](../decisions/0007-object-centric-hybrid-usd-pipeline.md)
+đổi đích thành scene theo vật + USD lai cho Isaac Sim. Baseline công cụ cho các chặng mới ở
+[Phụ lục v2](#phụ-lục-v2-baseline-công-cụ-cho-pipeline-v2-adr-0007); phần còn lại của tài liệu vẫn
+là baseline P0 cho chặng 1–3 và luồng duyệt/phát hành.
+
 **Foundation runtime status:** target là cloud NVIDIA GPU + Isaac Sim. GPU model,
 VRAM, NVIDIA driver, CUDA runtime, IsaacLab, OpenUSD, COLMAP, Brush, OpenMVS và
 SAM2 versions đều `UNVERIFIED/TBD` cho tới khi machine thật được provision; exact
@@ -1094,7 +1099,12 @@ Delete
 do not compose/render/export these subsets
 ```
 
-### Level 3 — P1 / Stretch: Background completion
+### Level 3 — Background completion (kéo vào phạm vi theo ADR 0007 / PRD v1.16 §4.3.1)
+
+Pipeline v2 vá sẵn nền cho mọi vùng vật che ngay lúc dựng (quy trình Gaussian Grouping:
+mask vùng khuất → LaMa 2D → fine-tune Gaussian nền; vá lỗ mesh sàn/kệ), để xoá/di chuyển vật
+hiện nền tức thì. Sơ đồ quyết định bên dưới giữ nguyên ý: dùng quan sát thật từ frame khác khi
+có, chỉ vá suy đoán khi không có.
 ```text
 Deleted region
       ↓
@@ -1489,3 +1499,26 @@ Sau đó Integration #1 mới thay fixture bằng real artifact.
 - **Phase D (Physics & Scene IR Revisions):** ST-COLLIDER → Physics-enriched SceneIR → ST-EDIT → Preflight.
 - **Phase E (Simulator):** Dịch `.json` sang `.usd`, chạy CandidatePackage và validation report trên Isaac Sim.
 - **Phase F (Web HITL & Orchestration):** Review / Release. **API Contract và Minimal Viewer Shell phải được code song song từ sớm** cùng các Phase Core để tránh trễ hạn P0 Release Blocker. Không được đợi chạy xong toàn bộ CLI mới làm Web.
+
+---
+
+# Phụ lục v2: Baseline công cụ cho pipeline v2 (ADR 0007)
+
+Nguồn: [ADR 0007](../decisions/0007-object-centric-hybrid-usd-pipeline.md),
+[audit #10](./audits/10_pipeline_v2_methods.md). Phương pháp đánh dấu "chọn sau pha A" chưa khoá;
+pha A so các ứng viên trên đoạn 37 s (`job-123dfd4868d8`) bằng cùng tiêu chí đo.
+
+| Chặng | Baseline (ứng viên) | Giấy phép | Đầu ra |
+|---|---|---|---|
+| 1–3b | Như P0: kiểm video, frame, COLMAP, tỉ lệ mét, bản xem nhanh Brush | — | Giữ nguyên |
+| 4 Mask vật theo video | SAM2 video predictor (runtime `data/scene_runtime`) | Apache-2.0 | Mask theo frame, ID vật ổn định |
+| 5 3DGS có nhãn vật | Gaussian Grouping (ObjectGS) + prior độ sâu/pháp tuyến MoGe; train trong hệ mét | Apache-2.0 / MIT; rasterizer Inria theo ADR 0008 | Gaussian có ID vật |
+| 6 Mesh + collider | TSDF từ độ sâu render theo vật (cách của ObjectGS) — so với SuGaR/Frosting, dn-splatter, Spirula cho mesh nền; CoACD phân rã lồi cho vật | MIT / Apache / Inria | Triangle mesh nền, collider vật |
+| 7 Vá nền | Gaussian Grouping: DEVA mask vùng khuất → LaMa → fine-tune Gaussian nền | Apache-2.0; DEVA CC BY-NC-SA | Gaussian nền đã vá |
+| 8 Nhãn + vật lý | Danh mục asset Isaac (`Simple_Warehouse/Props`), gợi ý bằng CLIP, bảng mật độ/ma sát theo nhãn | — | `semantic_class`, khối lượng, vật liệu |
+| 9 Studio | PlayCanvas: một entity Gaussian cho nền + mỗi vật; gizmo transform | MIT | Revision SceneIR |
+| 10 Xuất USD lai | 3DGRUT chuyển PLY → `ParticleField3DGaussianSplat`; `UsdPhysics` collider/RigidBody/Mass/Material; `LabelsAPI` | Apache-2.0 | Candidate package cho Isaac ≥ 5.0 |
+
+Tiêu chí đo của pha A: tách vật đúng các vật chính (kiểm bằng mắt, có ảnh); mesh so với LiDAR
+TorWIC (cách đo của `metric_click_error`); PSNR/SSIM/LPIPS vùng nền sau khi xoá vật trên frame giữ
+lại; thời gian, VRAM, chi phí GPU; USD mở được trong Isaac.

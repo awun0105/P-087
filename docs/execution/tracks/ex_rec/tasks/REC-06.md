@@ -65,6 +65,12 @@ Thay mục "Tolerance — chờ số đo" bên dưới (giữ lại làm lịch 
    [plan tổng thể](../../../../plans/active/2026-09-29-studio-completion.md) bằng
    click lặp trên Aisle_CW so với LiDAR, trên đoạn hiệu chỉnh riêng, khóa trước
    đánh giá cuối (TEAM_EXECUTION_PLAN: không đổi threshold sau khi xem kết quả).
+   **Đo lần 1 (2026-09-30, `metric_click_error`, job-ac2, 3DGS preview 50 ảnh):** trong vùng
+   LiDAR phủ, bề mặt 3DGS → LiDAR trung vị 15,5 cm (p90 58 cm; đã gồm RMS căn chỉnh 6,8 cm và
+   khoảng cách điểm LiDAR 3,5 cm); lệch pixel ở độ sâu 2,9 m: 0,9 cm (2 px) – 2,3 cm (5 px).
+   `e` ≈ 15,6 cm, gần như toàn bộ do 3DGS preview kém (xem `recon_visual_quality`), không do tay
+   click. **Chưa khóa `e`**: đo lại trên 3DGS của preset chất lượng mới rồi owner chốt. Ghi chú:
+   tâm Gaussian là proxy của điểm click (bề mặt render), có xu hướng ước lượng cao.
 
 ### Tolerance — chờ số đo trên baseline thật
 
@@ -332,6 +338,17 @@ Phân biệt local/mock proof với real tool/GPU smoke trong Result.
 - [ ] Focused tests và required handoff proof pass; evidence/limitations được ghi.
 
 ## 12. Result / Evidence
+
+### 2026-09-30 — canonical mét + kiểm C/D cuối trong worker
+
+Chạy thật 2026-09-30 trên `job-ac2bfd924cc6` (video Aisle_CW, GPU Quadro T2000, adapter index 1),
+branch `feat/studio-integration`. Xác nhận tỉ lệ bằng 7 điểm tự chọn trên sàn LiDAR (ADR 0004 §6).
+- Canonical pose + visual (SOG `rec06/…/scene.sog`, `sha256:24433bcef2d6…`); camera cao 0,35 m.
+- Kiểm C/D trên artifact canonical: lệch 4,4e-16 m / ngưỡng 0,0493 m, record
+  `bundle-metric.json` (`sha256:19ebc4249530…`). **Giới hạn:** trên dataset A/B và C/D cùng
+  lấy từ một căn chỉnh LiDAR nên lệch ~0 không phải phép kiểm độc lập như video người dùng.
+- Authority: PRODUCT xác minh MetricDecision rồi truyền checksum; REC chỉ nhận đúng quyết định đó.
+
 
 ### 2026-09-29 — xác nhận tỉ lệ mét từ UI (branch `feat/rec-completion`)
 

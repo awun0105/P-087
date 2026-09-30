@@ -1,16 +1,17 @@
 "use client";
 
-import { Loader2, LogIn, UserPlus } from "lucide-react";
+import { Box, Loader2, LogIn, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useId, useState } from "react";
 
-import { Button, Card, Notice } from "@/components/studio/primitives";
+import { Input } from "@/components/shadcn/input";
+import { Label } from "@/components/shadcn/label";
+import { Button, Notice } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { login, register } from "@/lib/api/auth";
 
-const INPUT =
-  "mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3 text-sm outline-none focus-visible:border-ember focus-visible:ring-3 focus-visible:ring-ember/30";
+const INPUT = "mt-1.5 h-10";
 
 /** Chỉ cho quay lại đường dẫn nội bộ (tránh open redirect qua `?next=`). */
 export function safeNext(value: string | null): string {
@@ -20,20 +21,60 @@ export function safeNext(value: string | null): string {
 function Field({ id, label, children }: { id: string; label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label htmlFor={id} className="text-sm font-medium">
-        {label}
-      </label>
+      <Label htmlFor={id}>{label}</Label>
       {children}
     </div>
   );
 }
 
+const STEPS = [
+  "Video camera di chuyển chậm trong kho",
+  "Scene 3D Gaussian Splatting, quy đổi sang mét",
+  "Collision mesh và vật thể bạn xác nhận",
+  "Gói OpenUSD cho Isaac Sim, qua duyệt trước khi phát hành",
+];
+
+/**
+ * Layout đăng nhập/mã mời theo auth v2 của dashboard donor (PRODUCT.md S02): form bên trái,
+ * panel giới thiệu luồng thật bên phải; không SSO, không chọn role, không số liệu quảng cáo.
+ */
 function Shell({ title, lead, children }: { title: string; lead: string; children: React.ReactNode }) {
   return (
-    <main className="mx-auto max-w-md px-4 pt-14 pb-20 sm:px-6">
-      <h1 className="text-3xl font-semibold tracking-tight">{title}</h1>
-      <p className="mt-2 text-[15px] text-ink-muted">{lead}</p>
-      <Card className="mt-8 p-6">{children}</Card>
+    <main className="grid min-h-dvh bg-paper p-2 text-ink lg:grid-cols-2">
+      <div className="flex items-center justify-center px-4 py-10">
+        <div className="w-full max-w-sm">
+          <Link href="/" className="mb-10 flex items-center gap-2 font-semibold">
+            <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
+              <Box className="size-4" aria-hidden />
+            </span>
+            Real2Sim Studio
+          </Link>
+          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+          <p className="mt-2 text-sm text-ink-muted">{lead}</p>
+          <div className="mt-8">{children}</div>
+          <p className="mt-8 text-sm text-ink-muted">
+            Chưa có tài khoản?{" "}
+            <Link href="/new" className="font-medium text-ember-strong underline-offset-4 hover:underline">
+              Thử với video mẫu
+            </Link>{" "}
+            — không cần đăng nhập.
+          </p>
+        </div>
+      </div>
+      <aside className="relative hidden flex-col justify-between rounded-3xl bg-paper-raised p-10 lg:flex" aria-label="Real2Sim Studio làm gì">
+        <p className="text-sm font-medium tracking-wide text-ember-strong uppercase">Từ video tới scene mô phỏng</p>
+        <ol className="space-y-5">
+          {STEPS.map((step, index) => (
+            <li key={step} className="flex items-start gap-3">
+              <span className="grid size-7 shrink-0 place-items-center rounded-full border border-line-strong text-xs font-semibold text-ink-muted">
+                {index + 1}
+              </span>
+              <span className="pt-1 text-[15px]">{step}</span>
+            </li>
+          ))}
+        </ol>
+        <p className="text-sm text-ink-muted">Editor tạo scene và chỉnh sửa; Reviewer duyệt và phát hành. Quyền do mã mời quyết định.</p>
+      </aside>
     </main>
   );
 }
@@ -66,10 +107,10 @@ export function LoginForm() {
     <Shell title="Đăng nhập" lead="Dành cho thành viên nhóm. Khách vẫn có thể thử video mẫu mà không cần tài khoản.">
       <form onSubmit={submit} className="space-y-4">
         <Field id={ids.email} label="Email">
-          <input id={ids.email} type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} className={INPUT} />
+          <Input id={ids.email} type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} className={INPUT} />
         </Field>
         <Field id={ids.password} label="Mật khẩu">
-          <input id={ids.password} type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} className={INPUT} />
+          <Input id={ids.password} type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} className={INPUT} />
         </Field>
         {error && <Notice tone="rust">{error}</Notice>}
         <Button type="submit" className="w-full" disabled={busy}>
@@ -117,16 +158,16 @@ export function RegisterForm() {
     <Shell title="Tạo tài khoản" lead="Nhập mã mời do Reviewer của nhóm gửi. Mã chỉ dùng được một lần.">
       <form onSubmit={submit} className="space-y-4">
         <Field id={ids.code} label="Mã mời">
-          <input id={ids.code} required value={code} onChange={(e) => setCode(e.target.value)} className={INPUT} autoComplete="off" />
+          <Input id={ids.code} required value={code} onChange={(e) => setCode(e.target.value)} className={INPUT} autoComplete="off" />
         </Field>
         <Field id={ids.name} label="Tên hiển thị">
-          <input id={ids.name} required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} className={INPUT} autoComplete="name" />
+          <Input id={ids.name} required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} className={INPUT} autoComplete="name" />
         </Field>
         <Field id={ids.email} label="Email">
-          <input id={ids.email} type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className={INPUT} autoComplete="email" />
+          <Input id={ids.email} type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className={INPUT} autoComplete="email" />
         </Field>
         <Field id={ids.password} label="Mật khẩu (ít nhất 10 ký tự)">
-          <input id={ids.password} type="password" minLength={10} required value={password} onChange={(e) => setPassword(e.target.value)} className={INPUT} autoComplete="new-password" />
+          <Input id={ids.password} type="password" minLength={10} required value={password} onChange={(e) => setPassword(e.target.value)} className={INPUT} autoComplete="new-password" />
         </Field>
         {error && <Notice tone="rust">{error}</Notice>}
         <Button type="submit" className="w-full" disabled={busy}>

@@ -13,6 +13,7 @@
 > 7. [`07_re3sim.md`](./07_re3sim.md) — `InternRobotics/Re3Sim` (Tier-0 System Architecture Reference)  
 > 8. [`08_playcanvas_engine.md`](./08_playcanvas_engine.md) — `playcanvas/engine` (Tier-0 Web 3D Runtime Core)  
 > 9. [`09_supersplat_viewer.md`](./09_supersplat_viewer.md) — `@playcanvas/supersplat-viewer` (Tier-0 Embedded 3DGS Viewport Core)  
+> 10. [`10_pipeline_v2_methods.md`](./10_pipeline_v2_methods.md) — phương pháp cho pipeline v2 (ADR 0007): Gaussian Grouping, ObjectGS, SAGA, SuGaR/Frosting, dn-splatter, Spirula, MoGe, IsaacLab, Re3Sim, 3DGRUT + yêu cầu thật của Isaac Sim (2026-09-30). Bổ sung, không thay các audit trên. Lưu ý: kết luận "không thay SAM2 + R2G bằng Gaussian Grouping trong baseline P0" của audit #6 được ADR 0007 xem lại cho pipeline v2.  
 
 ---
 

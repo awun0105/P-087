@@ -44,6 +44,17 @@ Output: valid, versioned `SceneIR`; collider có thể chưa đầy đủ ở ha
 - Kiến trúc cloud (ADR 0003) chưa quyết định nơi chạy worker SCENE (SAM2 cần GPU);
   khi nối vào, dùng cùng mô hình worker nhận job qua server và đọc/ghi artifact R2.
 
+## Cập nhật 2026-09-30 (`feat/studio-integration`, PR #16)
+
+- Tách vật thật: SAMPro3D adapt với SAM2 (ADR 0006), stage `ST-OBJECT-EXTRACT`, fallback hình học;
+  `job-123dfd4868d8` 30 ứng viên. SceneIR sửa theo vật: xác nhận / loại / ẩn / đổi tên / thêm vật
+  cản hộp, mỗi thao tác một revision (`src/services/scene/editing/`,
+  `src/services/orchestration/scene/objects.py`).
+- **Pipeline v2 ([ADR 0007](../../../decisions/0007-object-centric-hybrid-usd-pipeline.md)):** SCENE-02/03 chuyển sang mask
+  vật theo video (SAM2 lan mask, ID ổn định); SCENE-06/07 tách nền/vật với Gaussian + mesh riêng;
+  gợi ý nhãn từ danh mục asset Isaac; SCENE-08A thêm asset Isaac. SAMPro3D-trên-hộp là đường tạm
+  cho tới khi v2 có bằng chứng.
+
 ## Authority Gates
 
 - Final `SceneIR`/`SceneObject` field set phải theo normative Contract; Playbook projection và fixture không tự tạo authority.
