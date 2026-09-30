@@ -667,6 +667,28 @@ Làm theo từng pha nhỏ, mỗi pha commit riêng và phải xanh `tsc` + `esl
 
 Thứ tự ưu tiên nếu thiếu thời gian: P1 → P2 → P4 → P5 → P3 → P6 → P7 (các màn người dùng nhìn thấy nhiều nhất trước).
 
+### 13.1 Tình trạng (30/09/2026, `feat/studio-integration`, PR #16)
+
+| Pha | Tình trạng | Bằng chứng |
+| --- | --- | --- |
+| P1–P2 | Xong | tsc/eslint/vitest xanh; ảnh chụp shell, Scenes, Jobs, đăng nhập, Nhóm trên dữ liệu thật |
+| P3 | Xong phần UI | Chưa ghi nhận lần upload thật một video và một PLY qua UI mới sau refactor |
+| P4 | Xong | Màn scene 4 tab (`features/studio/scene/`), revision + trạng thái lưu Q5, 409 → tải bản mới |
+| P5 | Xong | QA `job-123dfd4868d8`: xác nhận vật, đổi tên, bay tới vật, bật/tắt lớp; xác nhận tỉ lệ dùng lại màn cũ |
+| P6 | Xong | Tạo gói thật qua UI → rev-008, preflight PASS 6/6, zip 1,1 MB tải được; Isaac/duyệt "Chưa khả dụng" |
+| P7 | Hoãn | Owner giữ component chưa dùng để mở rộng; legacy theo D-10 |
+
+Sau P6: palette đổi lại beige/cam (D-04 sửa), tách `ScenePage` theo tab, tab tải theo nhu cầu (JS ban
+đầu màn scene 1982 → 770 KB), giữ Studio sống khi đổi tab, animation chỉ transform/opacity.
+
+### 13.2 Studio v2 theo pipeline v2 (ADR 0007)
+
+[ADR 0007](docs/decisions/0007-object-centric-hybrid-usd-pipeline.md) đổi Studio thành editor
+**scene theo vật**. S06/S08 mở rộng: mỗi vật một khối Gaussian riêng; gizmo dịch/xoay/co giãn;
+ẩn/xoá hiện nền đã vá (vùng vá suy đoán có nhãn); thêm vật từ thư viện asset Isaac hoặc hình khối;
+đổi nhãn (gợi ý, người dùng xác nhận) và khối lượng/vật liệu; hoàn tác; đo khoảng cách. S09 xuất
+USD lai. Thiết kế chi tiết màn làm ở pha C của [plan pipeline v2](docs/plans/active/2026-09-30-pipeline-v2.md).
+
 <!-- Nguồn repository có đường dẫn thật; đường dẫn donor chỉ phục vụ tra cứu reference, không phải ownership mới. -->
 [prd]: docs/PRD.md
 [contract]: docs/execution/TEAM_EXECUTION_CONTRACT.md
