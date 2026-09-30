@@ -282,3 +282,63 @@ async def test_content_for_missing_job_404(client) -> None:
         params={"artifact_uri": "artifact://jobs/x/y.ply", "artifact_checksum": "sha256:" + "0" * 64},
     )
     assert r.status_code == 404
+
+
+# ── object actions / thêm vật cản (PRODUCT-07/07A) ───────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_object_actions_publish_new_revisions(client) -> None:
+    body = await _scene(client)
+    object_id = body["scene"]["objects"][0]["id"]
+    hidden = await client.post(
+        f"{_JOB}/scene/objects/{object_id}/hide", json={"expected_scene_revision": "rev-001", "active": False}
+    )
+    assert hidden.status_code == 201, hidden.text
+    assert hidden.json()["scene_revision"] == "rev-002"
+    target = next(o for o in hidden.json()["scene"]["objects"] if o["id"] == object_id)
+    assert target["active"] is False
+    confirmed = await client.post(
+        f"{_JOB}/scene/objects/{object_id}/confirm", json={"expected_scene_revision": "rev-002"}
+    )
+    assert confirmed.status_code == 201
+    target = next(o for o in confirmed.json()["scene"]["objects"] if o["id"] == object_id)
+    assert target["state"] == "CONFIRMED" and target["active"] is True
+    # Vật đã xác nhận không "loại ứng viên" được nữa.
+    ignored = await client.post(f"{_JOB}/scene/objects/{object_id}/ignore", json={"expected_scene_revision": "rev-003"})
+    assert ignored.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_object_action_rejects_stale_revision_unknown_object_and_action(client) -> None:
+    body = await _scene(client)
+    object_id = body["scene"]["objects"][0]["id"]
+    stale = await client.post(f"{_JOB}/scene/objects/{object_id}/confirm", json={"expected_scene_revision": "rev-009"})
+    assert stale.status_code == 409
+    missing = await client.post(
+        f"{_JOB}/scene/objects/object-nope/confirm", json={"expected_scene_revision": "rev-001"}
+    )
+    assert missing.status_code == 422
+    bad = await client.post(f"{_JOB}/scene/objects/{object_id}/explode", json={"expected_scene_revision": "rev-001"})
+    assert bad.status_code == 422
+    assert (await _scene(client))["scene_revision"] == "rev-001"  # không lệnh nào tạo revision
+
+
+@pytest.mark.asyncio
+async def test_add_box_obstacle_is_confirmed_user_object(client) -> None:
+    payload = {
+        "expected_scene_revision": "rev-001",
+        "name": "Thùng",
+        "dimensions_xyz_m": [0.6, 0.4, 0.5],
+        "position_xyz": [1.0, 2.0, 0.25],
+    }
+    added = await client.post(f"{_JOB}/scene/objects", json=payload)
+    assert added.status_code == 201, added.text
+    box = next(o for o in added.json()["scene"]["objects"] if o["id"] == "user-001")
+    assert box["state"] == "CONFIRMED" and box["origin"] == "user_added"
+    assert box["transform"]["translation_xyz"] == [1.0, 2.0, 0.25]
+    assert box["primitive_dimensions_xyz_m"] == [0.6, 0.4, 0.5]
+    flat = await client.post(
+        f"{_JOB}/scene/objects", json={**payload, "expected_scene_revision": "rev-002", "dimensions_xyz_m": [0, 1, 1]}
+    )
+    assert flat.status_code == 422
