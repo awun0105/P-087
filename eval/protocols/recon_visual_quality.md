@@ -53,3 +53,23 @@ Brush, thời gian train, PSNR/SSIM từng mốc, LPIPS mốc cuối, dung lư�
   hình của mình**, không so thẳng với số công bố trên Mip-NeRF 360.
 - Ảnh giữ lại nằm xen giữa ảnh train (cùng quỹ đạo), nên đo khả năng tái tạo góc nhìn gần quỹ đạo,
   không đo góc nhìn xa quỹ đạo.
+
+## Các lượt đã chạy (Quadro T2000 4 GB, Brush 30k bước, 1280 px)
+
+Kết quả: `eval/results/recon_visual_quality/aisle-cw-local-t2000.jsonl`.
+
+| Nhãn | Job | Đầu vào | Ảnh đăng ký | `max_splats` | PSNR | SSIM | LPIPS (VGG) | View eval | Train |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `sweep-a-20s-3fps` | `job-286e7c86555e` | 20 s đầu, 3 fps | 50 | 1,5 M | 28,62 | 0,896 | 0,265 | 7 | 2244 s |
+| `seg-3fps` | `job-cb8815e2a770` | đoạn liền 154–527 (37 s), 3 fps | 94 | 1,5 M | 25,35 | 0,888 | 0,308 | 12 | 2779 s |
+| `seg-5fps-cap600k` | `job-13a0fda27f9f` | đoạn liền 154–527, 5 fps | 187 | 600 k | 28,80 | 0,927 | 0,268 | 24 | 2812 s |
+
+Ghi chú:
+
+- `seg-5fps` với `max_splats` 1,5 M **không có kết quả**: Brush panic trong wgpu ở iter ~22,6k khi
+  đạt ~663k splat (GPU 4 GB). Trên máy 4 GB dùng `--max-splats 600000`; seg-3fps kết thúc ở ~601k
+  splat nên hai lượt đoạn liền có cùng mức splat cuối.
+- Mỗi lượt có tập view eval khác nhau (mỗi ảnh thứ 8 của chính nó) nên chỉ so theo xu hướng giữa
+  các cấu hình, không so tuyệt đối. Lượt `seg-10fps` bị bỏ vì bước kiểm chất lượng chỉ giữ 187/374
+  khung, trùng tập ảnh với 5 fps.
+- PROPOSAL (chưa khoá): preset máy 4 GB = lấy mẫu 5 fps + `max_splats` 600k.
