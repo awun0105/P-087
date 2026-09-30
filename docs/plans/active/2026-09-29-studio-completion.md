@@ -182,6 +182,12 @@ Mỗi gói: code + test tập trung + cập nhật task file liên quan + commit
   A (20 s, 3 fps), B (98 s, 5 fps), C (98 s, 10 fps) trên video chỉ train split. Phát hiện: video
   `aisle_cw_200.mp4` của job-ac2/123 chứa 36 frame held-out (118–153) của benchmark split — hai job
   này không dùng làm số đo đánh giá; video mới lọc bằng `--train-split`.
+  - Kết quả A (20 s đầu, 3 fps, 60 ảnh): PSNR 28,62 · SSIM 0,896 · LPIPS-VGG 0,265 (7 ảnh giữ lại, 37 phút).
+  - B/C trên video train split **bị gãy**: khoảng trống 3,6 s (bỏ held-out) vượt cửa sổ so khớp tuần tự
+    của COLMAP (15 ảnh) → B chỉ đăng ký 164/328 ảnh (4 model con), C fail (6 model con, lớn nhất 246/493).
+    Đo lại trên đoạn liền frame 154–527 (không held-out, không khoảng trống): 3/5/10 fps.
+  - Follow-up sản phẩm (chưa làm): video người dùng có đoạn đứt/quay nhanh cũng có thể gãy như vậy —
+    cân nhắc loop detection (vocab tree) hoặc cửa sổ so khớp theo thời gian thay vì số ảnh.
 - [~] `e` (REC-06): đo lần 1 ≈ 15,6 cm trên 3DGS preview (`metric_click_error`); đo lại trên preset mới.
 - [x] Gói 5 — scene import từ file 3DGS, chỉ xem/chỉnh sửa: nhận `.ply`/`.zip`, nén PLY → SOG bằng
   splat-transform (bảng `r2s_imports`, migration v4), trang `/imports/[id]`. Chạy thật qua API: PLY

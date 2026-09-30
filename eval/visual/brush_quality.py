@@ -78,11 +78,7 @@ def run(args: argparse.Namespace) -> dict:
     resolve = registry.runtime_resolver.require
     reference, params = pose_reference(args.job)
     work = args.work / args.label
-    if work.exists():
-        shutil.rmtree(work)
-    work.mkdir(parents=True)
     poses = CameraPoseResolver(resolve, FrameSetResolver(resolve, resolve))
-    prepared = BrushInputAdapter(poses, ColmapProcess(ColmapRuntimeSettings())).prepare(reference, work)
     config = BrushConfig(
         total_train_iters=args.iters,
         max_resolution=args.max_resolution,
@@ -92,20 +88,39 @@ def run(args: argparse.Namespace) -> dict:
         refine_every=args.refine_every,
         sog_iterations=1,
     )
-    runtime = BrushRuntimeSettings()
-    process = VisualProcess(runtime.model_copy(update={"timeout_seconds": args.timeout}))
-    version = process.qualify(work)
-    command = (
-        *brush_command(config, work, process.iteration_flag),
-        "--eval-split-every",
-        str(args.eval_split_every),
-        "--eval-every",
-        str(args.eval_every),
-        "--eval-save-to-disk",
-    )
-    started = time.monotonic()
-    log = process.run(Invocation("brush-eval", runtime.command, command), work)
-    train_seconds = time.monotonic() - started
+    log_path = work / "brush-eval.log"
+    if args.resume and log_path.is_file() and EVAL_LINE.search(log_path.read_text()):
+        # Lượt trước đã train xong nhưng dừng trước khi ghi kết quả: dùng lại log + ảnh render.
+        log = log_path.read_text()
+        finished = [json.loads(line) for line in log.splitlines() if line.startswith('{"returncode"')]
+        train_seconds = finished[-1]["elapsed_seconds"] if finished else float("nan")
+        version = next(
+            (
+                line.split()[-1]
+                for line in (work / "brush-version.log").read_text().splitlines()
+                if line.startswith("brush")
+            ),
+            "unknown",
+        )
+    else:
+        if work.exists():
+            shutil.rmtree(work)
+        work.mkdir(parents=True)
+        BrushInputAdapter(poses, ColmapProcess(ColmapRuntimeSettings())).prepare(reference, work)
+        runtime = BrushRuntimeSettings()
+        process = VisualProcess(runtime.model_copy(update={"timeout_seconds": args.timeout}))
+        version = process.qualify(work)
+        command = (
+            *brush_command(config, work, process.iteration_flag),
+            "--eval-split-every",
+            str(args.eval_split_every),
+            "--eval-every",
+            str(args.eval_every),
+            "--eval-save-to-disk",
+        )
+        started = time.monotonic()
+        log = process.run(Invocation("brush-eval", runtime.command, command), work)
+        train_seconds = time.monotonic() - started
     evals = [
         {"iter": int(match[1]), "psnr": float(match[2]), "ssim": float(match[3])} for match in EVAL_LINE.finditer(log)
     ]
@@ -141,7 +156,7 @@ def run(args: argparse.Namespace) -> dict:
         "recorded_at": datetime.now(UTC).isoformat(),
         "job_id": args.job,
         "camera_pose_ref": reference.artifact_uri,
-        "registered_images": len(prepared.artifact.poses),
+        "registered_images": len(poses.load(reference).poses),
         "eval_split_every": args.eval_split_every,
         "processing_params": params,
         "brush_config": config.model_dump(exclude={"schema_version", "sog_iterations"}),
@@ -161,7 +176,7 @@ def run(args: argparse.Namespace) -> dict:
     with args.out.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(record, ensure_ascii=False) + "\n")
     # Giữ PLY cuối (để import xem) và ảnh render mốc cuối; bỏ ảnh train/undistort nặng.
-    for heavy in ("source", "training", "undistorted"):
+    for heavy in ("source", "target", "training", "undistorted"):
         shutil.rmtree(work / heavy, ignore_errors=True)
     return record
 
@@ -182,6 +197,7 @@ def main() -> int:
     parser.add_argument("--lpips-net", default="vgg", choices=("vgg", "alex"))
     parser.add_argument("--timeout", type=float, default=4 * 3600)
     parser.add_argument("--machine", default="local-t2000")
+    parser.add_argument("--resume", action="store_true", help="dùng lại log/ảnh render nếu lượt trước đã train xong")
     args = parser.parse_args()
     record = run(args)
     print(json.dumps(record["final"], ensure_ascii=False), record["train_seconds"], "s")
