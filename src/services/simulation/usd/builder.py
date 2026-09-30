@@ -36,6 +36,11 @@ class CandidateBuildRequest(BaseModel):
     job_manifest_checksum: Checksum
     build_config: dict[str, Any] = Field(default_factory=dict)
     output_dir: Path | None = None
+    #: Job sở hữu artifact; None giữ quy ước cũ (dùng scene_id) cho fixture.
+    job_id: str | None = None
+    #: Layer collider môi trường (đường dẫn tương đối trong gói) và ref artifact của nó.
+    environment_layer: str | None = None
+    environment_layer_ref: ProductArtifactRef | None = None
 
 
 def _validate_preflight_gate(scene: SceneIR, report: PreflightReport) -> None:
@@ -76,17 +81,17 @@ def _collect_scene_refs(
     return assets, geometry, colliders
 
 
-def _create_entrypoint_ref(scene_id: str, usda_bytes: bytes) -> ProductArtifactRef:
-    """Tạo ProductArtifactRef cho file scene.usda entrypoint."""
+def _create_entrypoint_ref(owner: str, usda_bytes: bytes) -> ProductArtifactRef:
+    """Tạo ProductArtifactRef cho file scene.usda entrypoint (đường dẫn theo nội dung)."""
     digest = hashlib.sha256(usda_bytes).hexdigest()
     return ProductArtifactRef(
         artifact_type="OpenUSDEntrypoint",
         schema_version="1.0",
-        artifact_uri=f"artifact://jobs/{scene_id}/candidate/scene.usda",
+        artifact_uri=f"artifact://jobs/{owner}/candidate/{digest}/scene.usda",
         artifact_checksum=f"sha256:{digest}",
         data_class="derived",
         producer_stage="ST-CANDIDATE-BUILD",
-        job_id=scene_id,
+        job_id=owner,
     )
 
 
@@ -100,11 +105,13 @@ def build_candidate_package(req: CandidateBuildRequest) -> CandidatePackage:
     """Xây dựng và niêm phong CandidatePackage từ SceneIR đã qua Preflight PASS."""
     _validate_preflight_gate(req.scene, req.preflight_report)
 
-    usda_text = generate_scene_usda(req.scene)
+    usda_text = generate_scene_usda(req.scene, req.environment_layer)
     usda_bytes = usda_text.encode("utf-8")
-    entrypoint_usd = _create_entrypoint_ref(req.scene.scene_id, usda_bytes)
+    entrypoint_usd = _create_entrypoint_ref(req.job_id or req.scene.scene_id, usda_bytes)
 
     assets, geometry, colliders = _collect_scene_refs(req.scene)
+    if req.environment_layer_ref is not None:
+        colliders.append(req.environment_layer_ref)
     ordered_refs = [entrypoint_usd, *assets, *geometry, *colliders]
     artifact_checksums = [ref.artifact_checksum for ref in ordered_refs]
 
