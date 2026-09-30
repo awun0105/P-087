@@ -126,7 +126,7 @@ export function JobsPage() {
                 <TableHead>Trạng thái</TableHead>
                 <TableHead className="hidden md:table-cell">Bước hiện tại</TableHead>
                 <TableHead className="hidden sm:table-cell">Bắt đầu</TableHead>
-                <TableHead className="hidden lg:table-cell">Thời gian</TableHead>
+                <TableHead className="hidden lg:table-cell">Tổng thời gian</TableHead>
                 <TableHead className="w-0" />
               </TableRow>
             </TableHeader>
@@ -143,13 +143,17 @@ export function JobsPage() {
                     <TableCell>
                       <Badge tone={status.tone}>{status.label}</Badge>
                     </TableCell>
-                    <TableCell className="hidden text-ink-muted md:table-cell">{job.current_stage ? (stageMeta(job.current_stage)?.title ?? job.current_stage) : "—"}</TableCell>
+                    <TableCell className="hidden text-ink-muted md:table-cell">{job.status === "SUCCEEDED" ? "Hoàn tất" : job.current_stage ? (stageMeta(job.current_stage)?.title ?? job.current_stage) : "—"}</TableCell>
                     <TableCell className="hidden text-ink-muted sm:table-cell">{job.started_at ? TIME.format(new Date(job.started_at)) : "—"}</TableCell>
                     <TableCell className="hidden text-ink-muted lg:table-cell">
                       {status.group === "action"
                         ? "Đang chờ bạn"
                         : job.started_at
-                          ? `${duration(job.started_at, job.completed_at, now)}${job.completed_at ? "" : " (đang chạy)"}`
+                          ? // Manifest không có thời gian từng bước: job đã qua bước tỉ lệ mét thì tổng gồm cả lúc
+                            // chờ người chọn điểm — ghi rõ, không trình bày như thời gian máy chạy.
+                            `${duration(job.started_at, job.completed_at, now)}${job.completed_at ? "" : " (đang chạy)"}${
+                              job.stage_artifacts.some((item) => item.stage_id === "ST-METRIC-CANONICALIZE") ? " · gồm lúc chờ bạn" : ""
+                            }`
                           : "—"}
                     </TableCell>
                     <TableCell className="text-right">
