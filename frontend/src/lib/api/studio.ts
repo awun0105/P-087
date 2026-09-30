@@ -373,3 +373,77 @@ export async function createSimulationPackage(jobId: string): Promise<Simulation
 export function simulationPackageDownloadUrl(jobId: string): string {
   return `${API}/jobs/${encodeURIComponent(jobId)}/simulation-package/download`;
 }
+
+// ── duyệt & phát hành (PRODUCT-10/11) ────────────────────────────────────────
+
+export type RevisionStatus =
+  | "DRAFT"
+  | "PROCESSING"
+  | "CANDIDATE_READY"
+  | "VALIDATING"
+  | "READY_FOR_REVIEW"
+  | "APPROVED"
+  | "REJECTED"
+  | "RELEASED";
+
+/** Tập con `ReviewState` backend mà UI dùng. */
+export interface ReviewStateView {
+  record: {
+    scene_revision: string;
+    status: RevisionStatus;
+    candidate_checksum: string | null;
+    validation_report_checksum: string | null;
+  };
+  validation: {
+    overall_result: string;
+    validator_version: string;
+    checks: { check_id: string; result: string; message: string | null }[];
+    path_results: { pair_id: string; result: string; message: string | null }[];
+  } | null;
+  warning_ids: string[];
+  approval: { reviewer_id: string; decision: "APPROVE" | "REJECT"; reason: string | null; decided_at: string } | null;
+  release: { release_timestamp: string; release_manifest_checksum: string } | null;
+  release_archive: { artifact_uri: string } | null;
+  blockers: string[];
+}
+
+function parseReviewState(value: unknown): ReviewStateView {
+  const data = value as Partial<ReviewStateView>;
+  if (!data.record || typeof data.record.status !== "string" || !Array.isArray(data.blockers)) {
+    throw new ApiError(502, "Backend trả trạng thái duyệt sai contract");
+  }
+  return data as ReviewStateView;
+}
+
+export async function getReviewState(jobId: string, signal?: AbortSignal): Promise<ReviewStateView> {
+  return parseReviewState(await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/review-state`, { signal }));
+}
+
+/** Quyết định trên đúng gói + báo cáo đang hiển thị; backend lấy reviewer từ phiên đăng nhập. */
+export async function submitReviewDecision(
+  jobId: string,
+  body: {
+    decision: "APPROVE" | "REJECT";
+    candidate_checksum: string;
+    validation_report_checksum: string;
+    accepted_warning_ids: string[];
+    reason?: string;
+  },
+): Promise<ReviewStateView> {
+  return parseReviewState(
+    await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/review-decision`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+export async function retryReleaseSeal(jobId: string): Promise<ReviewStateView> {
+  return parseReviewState(
+    await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/release-seal`, { method: "POST" }),
+  );
+}
+
+export function releaseDownloadUrl(jobId: string): string {
+  return `${API}/jobs/${encodeURIComponent(jobId)}/release-download`;
+}

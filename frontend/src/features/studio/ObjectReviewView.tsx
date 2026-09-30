@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Badge, Button, Notice } from "@/components/studio/primitives";
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
+import { ReviewPanel } from "@/features/studio/ReviewPanel";
 import { SimulationPackagePanel } from "@/features/studio/SimulationPackagePanel";
 import { CollisionMeshCanvas } from "@/features/studio/StageViewer";
 import type { OverlayBox } from "@/features/viewer/scene-overlay";
@@ -209,6 +210,7 @@ export function ObjectReviewView({ jobId }: { jobId: string }) {
           sceneRevision={scene.scene_revision}
           onSceneChanged={() => setReload((value) => value + 1)}
         />
+        <ReviewPanel jobId={jobId} sceneRevision={scene.scene_revision} />
         <AddObstacleForm
           busy={busy}
           onAdd={(name, dimensions, center) =>

@@ -66,6 +66,9 @@ function routeFetch(routes: Record<string, Response[]>) {
     const key = Object.keys(routes).find((pattern) => url.includes(pattern));
     if (key && routes[key].length) return routes[key].shift()!;
     if (url.includes("/simulation-package")) return reply(null);
+    if (url.includes("/review-state")) {
+      return reply({ record: { scene_revision: "rev-001", status: "DRAFT", candidate_checksum: null, validation_report_checksum: null }, validation: null, warning_ids: [], approval: null, release: null, release_archive: null, blockers: ["Chưa có gói mô phỏng"] });
+    }
     throw new Error(`fetch không mong đợi: ${url}`);
   });
 }
