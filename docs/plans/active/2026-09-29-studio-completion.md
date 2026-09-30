@@ -203,6 +203,37 @@ Mỗi gói: code + test tập trung + cập nhật task file liên quan + commit
   CONFIRMED (REC-09) hay chỉ là bản demo; push + PR `feat/studio-integration` → `develop`.
 - Hở tích hợp đã thấy (thuộc track khác, chưa sửa): EX-SIM `usd/usda.py` chưa đưa collision
   mesh môi trường vào USD; EX-SCENE decomposition chưa khoét vùng vật thể khỏi mesh môi trường.
+  (Cả hai đã xử lý ở gói 8: `carve.py`, `environment_collision.usda`.)
+
+### 2026-09-30 — UI refactor P4–P6 + audit toàn bộ (VERIFIED trừ khi ghi khác)
+
+- P4–P6 xong: màn scene 4 tab D-07 (`ScenePage.tsx`), Studio danh sách · viewport · inspector
+  (đổi tên, xác nhận/loại, ẩn, bay tới), header `rev-00N · đã lưu / Đang lưu… / Lưu lỗi + Thử lại`
+  (Q5, 409 → tải bản mới), Kiểm tra & duyệt 4 chặng với Isaac "Chưa khả dụng" (Q2), Kết quả tải
+  SOG/gói/phát hành. Bằng chứng: tạo gói thật `job-123dfd4868d8` qua UI → rev-008, preflight PASS
+  6/6, 150.896 tam giác (khoét 2.080), zip 1,1 MB tải được qua proxy Next (200).
+- Lỗi đã sửa trong audit: overlay 3D crash khi PlayCanvas tự huỷ app; icon bước xong trắng trên
+  trắng; thời gian bước tỉ lệ mét tính cả lúc chờ người; header không theo revision mới sau tạo gói;
+  route `/api/v1/uploads` bỏ cookie phiên (bật đăng nhập → 401 khi tải/liệt kê video); Jobs trình
+  bày tổng thời gian (gồm chờ người) như thời gian chạy; `.dockerignore` kéo `data/` (24 GB) +
+  `frontend/` vào image API; Dockerfile không nghe `$PORT`.
+- Kiểm chứng: vitest 144/144, eslint, tsc, `next build` xanh; pytest 1040 passed/40 skipped
+  (SQLite) và 1053 passed/27 skipped khi có Postgres 16 tạm (`R2S_TEST_POSTGRES_URL`); image API
+  602 MB build + chạy với `PORT=9000`, `/health` `database: ok`, `/api/v1/scenes|samples|uploads/config|auth/me` 200.
+- Còn mở (chưa sửa, cần quyết định/khác phạm vi):
+  - `Settings.validate_llm_provider` bắt buộc key LLM dù Studio không dùng LLM (template LangGraph);
+    deploy phải đặt `OPENAI_API_KEY` giả như `studio.env.example`. Đề xuất: chỉ kiểm key khi route
+    agent được bật.
+  - `.env` gốc (local, gitignored) trỏ Postgres mẫu `user@localhost/dbname`: lệnh chạy ngoài
+    `studio.env` sẽ lỗi DB (đã gặp khi chấm sweep).
+  - UI thừa (P7, chưa xoá vì chưa được giao): `StudioHeader.tsx` không còn import; 13 component
+    `components/shadcn/*` chép từ donor chưa dùng; route legacy sau `LEGACY_UI` (D-10).
+  - Ẩn/xoá vật chỉ đổi SceneIR + màu hộp; Gaussian của vật vẫn hiện trong 3DGS. "delete" ở
+    backend = `active=false` (trùng "hide"). Chưa có sửa transform (Q5), đặt vật cản bằng click.
+  - Sweep: seg-5fps (không giới hạn splat) crash wgpu ở iter 22.6k, 663k splat (GPU 4 GB); đang chấm
+    lại `seg-5fps-cap600k` (`--max-splats 600000`, cùng mức splat cuối của seg-3fps).
+  - Deploy tách FE/BE theo ADR 0003: code sẵn (Postgres, R2, auth, proxy `/api/v1`), còn các mục 🔑
+    tài khoản và worker API có token trong HANDOFF cloud-ops.
 
 ## Validation
 
