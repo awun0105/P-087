@@ -11,6 +11,7 @@ import {
   parseJobProgress,
   parseLidarMeasurements,
   parseMetricPreview,
+  parseModeComparison,
   parseStageViews,
   type DemoManifest,
   type DemoSelection,
@@ -19,6 +20,7 @@ import {
   type MetricInput,
   type MetricPoint,
   type MetricPreview,
+  type ModeComparison,
   type ParamValue,
   type ProcessingEvaluation,
   type ProcessingOptions,
@@ -247,4 +249,10 @@ export function confirmMetric(jobId: string, input: MetricInput, previewChecksum
     method: "POST",
     body: JSON.stringify({ input, preview_checksum: previewChecksum }),
   });
+}
+
+/** Demo 3 hướng tỉ lệ trên cùng scene: RGB only (mô phỏng), anchor người dùng, LiDAR. */
+export async function getModeComparison(jobId: string, signal?: AbortSignal): Promise<ModeComparison> {
+  const data = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/metric/comparison`, { signal });
+  return parseModeComparison(data);
 }

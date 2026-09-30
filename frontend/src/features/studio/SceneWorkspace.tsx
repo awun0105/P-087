@@ -1,12 +1,13 @@
 "use client";
 
-import { ArrowLeft, Box, Check, Info, Layers, Loader2, Ruler, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Box, Check, Columns3, Info, Layers, Loader2, Ruler, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 
 import { Badge, Button } from "@/components/studio/primitives";
 import { EditorFrame } from "@/features/studio/EditorFrame";
 import { MetricConfirmView } from "@/features/studio/MetricConfirmView";
+import { ModeComparisonView } from "@/features/studio/ModeComparisonView";
 import { StageViewer } from "@/features/studio/StageViewer";
 
 /** Trạng thái tỉ lệ mét của scene người dùng (không có với scene mẫu). */
@@ -19,7 +20,7 @@ export interface SceneMetric {
 /** Bước hình học/collision sau xác nhận tỉ lệ (REC-05/REC-10). */
 export type GeometryState = "none" | "running" | "done" | "failed";
 
-type Panel = "editor" | "metric" | "stages";
+type Panel = "editor" | "metric" | "stages" | "compare";
 
 /**
  * Workspace toàn màn hình cho một scene 3DGS: thanh thông tin mảnh phía trên, phần
@@ -92,6 +93,16 @@ export function SceneWorkspace({
               {shown === "stages" ? "Về editor" : "Kết quả từng bước"}
             </Button>
           )}
+          {metric && (
+            <Button
+              size="sm"
+              variant={shown === "compare" ? "primary" : "secondary"}
+              onClick={() => setPanel(shown === "compare" ? "editor" : "compare")}
+            >
+              <Columns3 aria-hidden />
+              {shown === "compare" ? "Về editor" : "So sánh 3 hướng"}
+            </Button>
+          )}
         </div>
         <p className="ml-auto hidden text-xs text-ink-subtle lg:block">
           Chọn vùng để xóa/di chuyển · File › Export để tải PLY/SOG
@@ -111,6 +122,8 @@ export function SceneWorkspace({
           />
         ) : shown === "stages" && metric ? (
           <StageViewer jobId={metric.jobId} />
+        ) : shown === "compare" && metric ? (
+          <ModeComparisonView jobId={metric.jobId} />
         ) : (
           <EditorFrame contentUrl={contentUrl} filename={filename} homeHref={backHref} title={`Editor 3D: ${title}`} />
         )}

@@ -361,3 +361,44 @@ export function parseStageViews(value: unknown): StageView[] {
   }
   return value.views as unknown as StageView[];
 }
+
+/** Một cột của màn hình so sánh 3 hướng tỉ lệ (ADR 0004 §5). Khớp `ModeResult`. */
+export interface ModeResult {
+  mode: "rgb_only" | "user_anchor" | "lidar";
+  title: string;
+  status: "mock" | "measured" | "missing";
+  note: string;
+  steps: string[];
+  scale_m_per_sfm_unit: number | null;
+  camera_height_mean_m: number | null;
+  camera_height_range_m: [number, number] | null;
+}
+
+export interface ModeComparison {
+  job_id: string;
+  modes: ModeResult[];
+  difference: {
+    scale_diff_percent: number;
+    floor_tilt_deg: number;
+    camera_height_diff_m: number;
+    check_segment_user_m: number | null;
+    check_segment_lidar_m: number | null;
+    check_segment_error_m: number | null;
+  } | null;
+  lidar_ground_truth_assisted: boolean;
+}
+
+/** Cột "mock" không bao giờ được mang số (không hiển thị số giả). */
+export function parseModeComparison(value: unknown): ModeComparison {
+  if (!isRecord(value) || !Array.isArray(value.modes) || value.modes.length !== 3) {
+    throw new Error("So sánh 3 hướng từ backend không hợp lệ");
+  }
+  for (const mode of value.modes) {
+    if (!isRecord(mode) || typeof mode.title !== "string" || !["mock", "measured", "missing"].includes(String(mode.status))) {
+      throw new Error("Một hướng so sánh không hợp lệ");
+    }
+    if (mode.status !== "measured" && mode.scale_m_per_sfm_unit != null) throw new Error("Hướng chưa đo không được có số tỉ lệ");
+    if (mode.status === "measured" && !isFiniteNumber(mode.scale_m_per_sfm_unit)) throw new Error("Thiếu tỉ lệ đo được");
+  }
+  return value as unknown as ModeComparison;
+}

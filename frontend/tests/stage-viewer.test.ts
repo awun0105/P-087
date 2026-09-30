@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { topDownAxes } from "@/features/studio/StageViewer";
-import { parseStageViews, type StageView } from "@/lib/contracts/studio";
+import { parseModeComparison, parseStageViews, type StageView } from "@/lib/contracts/studio";
 
 const camera = (center: [number, number, number]) => ({ frame_id: 0, center, rotation_xyzw: [0, 0, 0, 1] as [number, number, number, number] });
 
@@ -18,5 +18,19 @@ describe("stage viewer", () => {
     expect(parseStageViews({ job_id: "j", views: [view] })).toHaveLength(1);
     expect(() => parseStageViews({ job_id: "j", views: [{ ...view, kind: "video" }] })).toThrow();
     expect(() => parseStageViews({ job_id: "j", views: [{ ...view, cameras: [{ center: [0, Number.NaN, 0] }] }] })).toThrow();
+  });
+});
+
+
+describe("mode comparison contract", () => {
+  const mode = (status: string, scale: number | null) => ({
+    mode: "lidar", title: "t", status, note: "", steps: [], scale_m_per_sfm_unit: scale,
+    camera_height_mean_m: null, camera_height_range_m: null,
+  });
+  it("never accepts a number on a mock or missing column", () => {
+    const ok = { job_id: "j", modes: [mode("mock", null), mode("missing", null), mode("measured", 1.2)], difference: null, lidar_ground_truth_assisted: true };
+    expect(parseModeComparison(ok).modes).toHaveLength(3);
+    expect(() => parseModeComparison({ ...ok, modes: [mode("mock", 1.1), mode("missing", null), mode("measured", 1.2)] })).toThrow();
+    expect(() => parseModeComparison({ ...ok, modes: [mode("mock", null), mode("missing", null), mode("measured", null)] })).toThrow();
   });
 });
