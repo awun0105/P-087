@@ -117,4 +117,14 @@ Ghi rõ local/mock proof khác real Isaac/GPU/locked-acceptance proof.
   - `test_build_candidate_package_rejects_non_pass_preflight`: Blocking result FAIL throws ValueError.
   - `test_build_candidate_package_rejects_mismatched_revision`: Throws ValueError when scene revision doesn't match preflight report.
   - `test_build_candidate_package_rejects_mismatched_checksum`: Throws ValueError when scene checksum doesn't match preflight report.
-
+- **Tích hợp Studio (2026-09-30, nhóm EX-REC theo uỷ quyền Tech Lead):** `generate_mesh_layer_usda`
+  (layer Mesh tĩnh `PhysicsCollisionAPI` + `PhysicsMeshCollisionAPI`, `physics:approximation = "none"`)
+  cho collision mesh môi trường REC-05; `generate_scene_usda(..., environment_layer)` tham chiếu layer
+  đó dưới `/World/Environment`; `CandidateBuildRequest.job_id` sửa URI entrypoint (trước dùng
+  `scene_id` như job id) và URI theo nội dung. Khoét vật đã xác nhận khỏi mesh:
+  `colliders/carve.py`. Luồng sản phẩm: `src/services/orchestration/simulation_package.py`,
+  API `POST/GET /jobs/{id}/simulation-package`, `/download`.
+- **Chạy thật (job-ac2bfd924cc6, 2 vật xác nhận):** preflight PASS 6/6, gói `rev-004`, môi trường
+  224.557 tam giác (khoét 188), zip 1,58 MB, 1,5 s. `usd-core` 26.8 (runtime kiểm tra riêng) mở
+  `scene.usda`: metersPerUnit 1, upAxis Z, `/World/Environment/{GroundPlane, EnvironmentCollision}`,
+  `/World/Objects/candidate_001|006/collider` đúng toạ độ. **Chưa chạy Isaac** (SIM-06, máy RTX).

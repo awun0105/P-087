@@ -171,8 +171,18 @@ Mỗi gói: code + test tập trung + cập nhật task file liên quan + commit
   thành một video, chạy pipeline) **làm sau**, khi phần mềm gần hoàn chỉnh và workflow đã sẵn sàng.
   Hướng đã chốt: mỗi góc quay (camera trái/phải) của mỗi lượt là một video riêng để so góc nào dựng
   tốt nhất; không ghép nhiều góc/nhiều lượt vào một video.
-  - [ ] EX-SIM: collider môi trường + vật đã xác nhận, enrichment/preflight, USD candidate có mesh
-    môi trường, nút "Tạo gói mô phỏng"; Isaac cần máy RTX (owner).
+  - [x] EX-SIM: khoét vật khỏi mesh môi trường, collider hộp, enrichment, preflight, CandidatePackage có
+    layer USD mesh môi trường, nút "Tạo gói mô phỏng" + tải zip (evidence SIM-05). Còn: Isaac (SIM-06+,
+    máy RTX, owner).
+  - [x] UI: bấm hộp trong 3D để chọn, bấm danh sách thì camera bay tới vật (annotation của viewer, đứng
+    tại camera quay đã thấy vật).
+- [~] Gói 7 UI/UX: thẻ scene có ảnh xem trước (JPEG 480 px, cache theo checksum frame); workspace dùng
+  thanh tab; trang đang xử lý hiện khung hình đầu. Chưa làm: LOD/streaming cho scene rất lớn.
+- [~] Chất lượng 3DGS (`recon_visual_quality`): nguyên nhân nhòe = chỉ 50 ảnh trong 20 s đầu. Đang chạy
+  A (20 s, 3 fps), B (98 s, 5 fps), C (98 s, 10 fps) trên video chỉ train split. Phát hiện: video
+  `aisle_cw_200.mp4` của job-ac2/123 chứa 36 frame held-out (118–153) của benchmark split — hai job
+  này không dùng làm số đo đánh giá; video mới lọc bằng `--train-split`.
+- [~] `e` (REC-06): đo lần 1 ≈ 15,6 cm trên 3DGS preview (`metric_click_error`); đo lại trên preset mới.
 - [x] Gói 5 — scene import từ file 3DGS, chỉ xem/chỉnh sửa: nhận `.ply`/`.zip`, nén PLY → SOG bằng
   splat-transform (bảng `r2s_imports`, migration v4), trang `/imports/[id]`. Chạy thật qua API: PLY
   98.611 Gaussian → SOG 3,98 MB, READY sau ~9 s (`import-0673049ea3ed`). ZIP PLY + COLMAP hiện cũng
