@@ -1,11 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { Notice } from "@/components/studio/primitives";
-import { PlayCanvasScene, usePlayCanvasCapability, type ViewerAppLike } from "@/features/viewer/PlayCanvasScene";
+import {
+  PlayCanvasScene,
+  usePlayCanvasCapability,
+  type ViewerAnnotation,
+  type ViewerAppLike,
+  type ViewerControls,
+} from "@/features/viewer/PlayCanvasScene";
 import { SceneOverlay, type OverlayBox } from "@/features/viewer/scene-overlay";
-import { recordingCameraPose, type CameraMarkerLike } from "@/features/viewer/source-frame";
+import {
+  objectViewPose,
+  recordingCameraPose,
+  toDisplay,
+  type CameraMarkerLike,
+} from "@/features/viewer/source-frame";
 import { jobArtifactContentUrl } from "@/lib/api/endpoints";
 import { cn } from "@/lib/cn";
 
@@ -25,6 +36,8 @@ export function MetricSceneView({
   cameras,
   boxes = [],
   defaultLayers = { splat: true, collision: false, boxes: true },
+  focus,
+  onPickBox,
 }: {
   jobId: string;
   visual: Ref;
@@ -32,6 +45,10 @@ export function MetricSceneView({
   cameras: readonly CameraMarkerLike[];
   boxes?: readonly OverlayBox[];
   defaultLayers?: { splat: boolean; collision: boolean; boxes: boolean };
+  /** Yêu cầu camera bay tới hộp `id`; `nonce` đổi để bay lại cùng vật. */
+  focus?: { id: string; nonce: number };
+  /** Người dùng bấm (không kéo) trúng một hộp trong 3D. */
+  onPickBox?: (id: string) => void;
 }) {
   const [capability, setCapability] = usePlayCanvasCapability();
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
@@ -44,11 +61,48 @@ export function MetricSceneView({
 
   // Viewer gọi onApp(app) khi tạo và onApp(null) trước khi huỷ app → lớp phủ sống đúng bằng app.
   const overlayRef = useRef<SceneOverlay | null>(null);
-  const onApp = useCallback((app: ViewerAppLike | null) => {
+  const controls = useRef<ViewerControls | null>(null);
+  const onApp = useCallback((app: ViewerAppLike | null, next?: ViewerControls) => {
     overlayRef.current?.destroy();
     overlayRef.current = app ? new SceneOverlay(app) : null;
+    controls.current = next ?? null;
     setOverlay(overlayRef.current);
   }, []);
+
+  // Mỗi hộp là một điểm đến camera của viewer. Khoá theo hình học (id, tâm, kích thước), không theo
+  // màu/trạng thái, để chọn hay xác nhận vật không tạo lại viewer; chỉ thêm/bớt vật mới tạo lại.
+  const geometryKey = JSON.stringify(boxes.map((box) => [box.id, box.center, box.dimensions]));
+  const annotationIds = useMemo(() => boxes.map((box) => box.id), [geometryKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const annotations = useMemo<ViewerAnnotation[]>(
+    () =>
+      boxes.map((box) => ({
+        position: toDisplay("z_up", box.center),
+        title: box.id,
+        camera: objectViewPose(box.center, box.dimensions, cameras),
+      })),
+    [geometryKey, cameras], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  useEffect(() => {
+    if (!focus) return;
+    const index = annotationIds.indexOf(focus.id);
+    if (index >= 0) controls.current?.select(index);
+  }, [focus, annotationIds]);
+
+  // Bấm = nhấn và nhả gần như tại chỗ, nhanh; kéo để xoay camera không tính là chọn.
+  const press = useRef<{ x: number; y: number; time: number } | null>(null);
+  const onPointerDown = (event: ReactPointerEvent) => {
+    press.current = { x: event.clientX, y: event.clientY, time: event.timeStamp };
+  };
+  const onPointerUp = (event: ReactPointerEvent) => {
+    const start = press.current;
+    press.current = null;
+    if (!start || !overlay || !onPickBox || !(event.target instanceof HTMLCanvasElement)) return;
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 5 || event.timeStamp - start.time > 400) return;
+    const rect = event.target.getBoundingClientRect();
+    const id = overlay.pick(event.clientX - rect.left, event.clientY - rect.top);
+    if (id) onPickBox(id);
+  };
 
   useEffect(() => {
     if (!overlay || !collisionUrl) return;
@@ -85,7 +139,7 @@ export function MetricSceneView({
     </label>
   );
   return (
-    <div className="relative size-full">
+    <div className="relative size-full" onPointerDown={onPointerDown} onPointerUp={onPointerUp}>
       <PlayCanvasScene
         contentUrl={contentUrl}
         contentFilename={visual.artifact_uri.split("/").pop() ?? "scene.sog"}
@@ -96,6 +150,7 @@ export function MetricSceneView({
         onFailed={fail}
         sourceFrame="z_up"
         initialCamera={initialCamera}
+        annotations={annotations}
         onApp={onApp}
       />
       <div className="absolute top-3 left-3 flex flex-wrap gap-3 rounded-md bg-viewport/80 px-3 py-1.5 text-xs text-paper/90">

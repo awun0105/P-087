@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { recordingCameraPose, rotate, toDisplay } from "@/features/viewer/source-frame";
+import { objectViewPose, recordingCameraPose, rotate, toDisplay } from "@/features/viewer/source-frame";
 
 /** Bỏ −0 để so bằng giá trị. */
 const clean = (v: number[]) => v.map((x) => x + 0);
@@ -40,5 +40,26 @@ describe("source frame", () => {
 
   it("không có camera thì để viewer dùng mặc định", () => {
     expect(recordingCameraPose("colmap", [])).toBeUndefined();
+  });
+});
+
+describe("objectViewPose", () => {
+  // Camera nhìn theo +x của world (xem test camera khởi đầu).
+  const lookX: [number, number, number, number] = [0.5, -0.5, 0.5, -0.5];
+
+  it("đứng tại camera quay gần nhất đã nhìn thấy vật", () => {
+    const cameras = [
+      { center: [0, 0, 0.4] as [number, number, number], rotation_xyzw: lookX },
+      { center: [3, 0, 0.4] as [number, number, number], rotation_xyzw: lookX },
+    ];
+    const pose = objectViewPose([6, 0, 0.3], [1, 1, 0.6], cameras);
+    expect(pose.position).toEqual(toDisplay("z_up", [3, 0, 0.4])); // gần hơn và vật ở phía trước
+    expect(pose.target).toEqual(toDisplay("z_up", [6, 0, 0.3]));
+  });
+
+  it("không camera nào thấy vật thì lùi ra và nâng lên", () => {
+    const behind = [{ center: [10, 0, 0.4] as [number, number, number], rotation_xyzw: lookX }];
+    const pose = objectViewPose([6, 0, 0.3], [1, 1, 0.6], behind);
+    expect(pose.position[1]).toBeGreaterThan(0.3); // cao hơn tâm vật (trục y hiển thị = z canonical)
   });
 });

@@ -75,3 +75,46 @@ export function recordingCameraPose(
   ];
   return { position: toDisplay(frame, first.center), target: toDisplay(frame, target), fov };
 }
+
+/**
+ * Góc nhìn tới một vật (hệ canonical Z-up), trả pose ở không gian hiển thị cho annotation.
+ *
+ * Ưu tiên đứng tại camera quay thật gần nhất đã thấy vật (vật nằm phía trước, lệch trục ≤ ~45°,
+ * cách 1,5–8 m): camera đó chắc chắn có đường nhìn thông, không bị vật khác chắn. Không có camera
+ * nào như vậy thì lùi theo phương ngang về phía camera đầu tiên, nâng cao hơn tâm vật.
+ */
+export function objectViewPose(
+  center: Vec3,
+  dimensions: Vec3,
+  cameras: readonly CameraMarkerLike[],
+  fov = 60,
+): DisplayCameraPose {
+  let best: CameraMarkerLike | undefined;
+  let bestDistance = Infinity;
+  for (const camera of cameras) {
+    const offset: Vec3 = [center[0] - camera.center[0], center[1] - camera.center[1], center[2] - camera.center[2]];
+    const distance = Math.hypot(...offset);
+    if (distance < 1.5 || distance > 8 || distance >= bestDistance) continue;
+    const forward = rotate(camera.rotation_xyzw, [0, 0, 1]);
+    const alignment = (forward[0] * offset[0] + forward[1] * offset[1] + forward[2] * offset[2]) / distance;
+    if (alignment < 0.7) continue;
+    best = camera;
+    bestDistance = distance;
+  }
+  if (best) return { position: toDisplay("z_up", best.center), target: toDisplay("z_up", center), fov };
+  const size = Math.max(...dimensions);
+  const distance = Math.max(2, size * 2.5);
+  const from = cameras[0]?.center;
+  let dx = (from?.[0] ?? center[0] - 1) - center[0];
+  let dy = (from?.[1] ?? center[1]) - center[1];
+  const length = Math.hypot(dx, dy);
+  if (length < 1e-6) {
+    dx = -1;
+    dy = 0;
+  } else {
+    dx /= length;
+    dy /= length;
+  }
+  const eye: Vec3 = [center[0] + dx * distance, center[1] + dy * distance, center[2] + Math.max(0.8, size)];
+  return { position: toDisplay("z_up", eye), target: toDisplay("z_up", center), fov };
+}

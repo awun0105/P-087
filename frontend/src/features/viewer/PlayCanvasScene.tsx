@@ -99,8 +99,29 @@ export interface PlayCanvasSceneProps {
   sourceFrame?: SourceFrame;
   /** Camera khởi đầu trong không gian hiển thị (vd camera quay đầu tiên); caller memo hoá. */
   initialCamera?: DisplayCameraPose;
-  /** App PlayCanvas của viewer khi sẵn sàng (null khi huỷ), để host gắn lớp phủ cùng scene graph. */
-  onApp?: (app: ViewerAppLike | null) => void;
+  /**
+   * Điểm đến của camera (không gian hiển thị), khai lúc tạo viewer; `ViewerControls.select(i)` bay
+   * tới điểm thứ i bằng transition của viewer. Hotspot mặc định bị ẩn: host tự vẽ danh sách.
+   * Caller memo hoá theo nội dung, vì đổi mảng này sẽ tạo lại viewer.
+   */
+  annotations?: readonly ViewerAnnotation[];
+  /**
+   * App PlayCanvas và điều khiển camera của viewer khi sẵn sàng (null khi huỷ), để host gắn lớp
+   * phủ cùng scene graph và cho camera bay tới vật.
+   */
+  onApp?: (app: ViewerAppLike | null, controls?: ViewerControls) => void;
+}
+
+export interface ViewerAnnotation {
+  position: [number, number, number];
+  title: string;
+  camera: DisplayCameraPose;
+}
+
+/** Điều khiển camera qua API công khai của supersplat-viewer (`selectAnnotation`). */
+export interface ViewerControls {
+  /** Bay tới annotation thứ `index`; false nếu viewer chưa nạp xong (API yêu cầu `state.loaded`). */
+  select(index: number): boolean;
 }
 
 export function PlayCanvasScene({
@@ -120,6 +141,7 @@ export function PlayCanvasScene({
   onInspectionState,
   sourceFrame = "colmap",
   initialCamera,
+  annotations,
   onApp,
 }: PlayCanvasSceneProps) {
   const container = useRef<HTMLDivElement | null>(null);
@@ -153,6 +175,14 @@ export function PlayCanvasScene({
         if (disposed) return;
         const settings = settingsModule.defaultSettings("environment");
         if (initialCamera) settings.cameras = [{ initial: initialCamera }];
+        if (annotations?.length) {
+          settings.annotations = annotations.map((item) => ({
+            position: item.position,
+            title: item.title,
+            text: "",
+            camera: { initial: item.camera },
+          }));
+        }
         const viewer = await module.createViewer({
           container: host,
           contentUrl: resolvedUrl,
@@ -183,7 +213,16 @@ export function PlayCanvasScene({
           };
           app.on("update", orient);
         }
-        if (app) onApp?.(app);
+        if (annotations?.length) viewer.state.showAnnotations = false;
+        if (app) {
+          onApp?.(app, {
+            select: (index) => {
+              if (disposed || !viewer.state.loaded) return false;
+              viewer.selectAnnotation(index);
+              return true;
+            },
+          });
+        }
         // EventHandler của PlayCanvas bắn `<key>:changed`; `on` trả EventHandle
         // để huỷ. Không tự poll `state` vì đó là nguồn thật của thư viện.
         for (const event of ["progress:changed", "loaded:changed", "hasCollision:changed", "walkAllowed:changed"]) {
@@ -233,7 +272,7 @@ export function PlayCanvasScene({
     };
   }, [capability, collisionUrl, contentUrl, contentFile, contentFilename, showControls, mode, onFailed, publish,
     enableInspection, inspectionMaxPoints, onInspectionReady, onInspectionState, renderer, sourceFrame, initialCamera,
-    onApp]);
+    annotations, onApp]);
 
   return (
     <div

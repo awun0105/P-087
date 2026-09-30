@@ -32,6 +32,18 @@ export function ObjectReviewView({ jobId }: { jobId: string }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [showIgnored, setShowIgnored] = useState(false);
   const [cameras, setCameras] = useState<StageView["cameras"]>([]);
+  const [focus, setFocus] = useState<{ id: string; nonce: number } | undefined>();
+
+  /** Chọn từ danh sách: đánh dấu và cho camera bay tới vật. */
+  const selectFromList = (object: SceneObject) => {
+    setSelected(object.id);
+    setFocus((previous) => ({ id: object.id, nonce: (previous?.nonce ?? 0) + 1 }));
+  };
+  /** Chọn bằng cách bấm hộp trong 3D: đánh dấu và cuộn danh sách tới vật đó. */
+  const selectFromScene = (id: string) => {
+    setSelected(id);
+    document.getElementById(`object-${id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -109,6 +121,8 @@ export function ObjectReviewView({ jobId }: { jobId: string }) {
             collision={scene.environment.geometry_ref}
             cameras={cameras}
             boxes={boxes}
+            focus={focus}
+            onPickBox={selectFromScene}
           />
         ) : (
           // Scene không có visual 3DGS: chỉ còn collision mesh để định vị hộp.
@@ -147,8 +161,9 @@ export function ObjectReviewView({ jobId }: { jobId: string }) {
           {visible.map((object) => (
             <li
               key={object.id}
-              className={cn("space-y-2 px-4 py-3", object.id === selected && "bg-ember-soft/40")}
-              onClick={() => setSelected(object.id)}
+              id={`object-${object.id}`}
+              className={cn("cursor-pointer space-y-2 px-4 py-3", object.id === selected && "bg-ember-soft/40")}
+              onClick={() => selectFromList(object)}
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="truncate text-sm font-medium text-ink">{object.name}</span>

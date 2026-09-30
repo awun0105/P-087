@@ -15,12 +15,36 @@ import {
   Entity,
   Quat,
   StandardMaterial,
+  Vec3 as PcVec3,
   type AppBase,
+  type CameraComponent,
   type ContainerResource,
 } from "playcanvas";
 
 import { DISPLAY_EULER, type Vec3 } from "@/features/viewer/source-frame";
 import type { ViewerAppLike } from "@/features/viewer/PlayCanvasScene";
+
+/**
+ * Khoảng cách dọc tia (tham số t) tới lần chạm đầu với hộp đơn vị [-0,5; 0,5]³, hoặc null.
+ * Tia đã đưa về khung local của hộp bằng ma trận nghịch đảo (gồm cả scale), nên t giữ nguyên ý
+ * nghĩa như ở world và so được giữa các hộp.
+ */
+export function rayUnitBox(origin: Vec3, direction: Vec3): number | null {
+  let near = -Infinity;
+  let far = Infinity;
+  for (let axis = 0; axis < 3; axis += 1) {
+    if (Math.abs(direction[axis]) < 1e-12) {
+      if (origin[axis] < -0.5 || origin[axis] > 0.5) return null;
+      continue;
+    }
+    const a = (-0.5 - origin[axis]) / direction[axis];
+    const b = (0.5 - origin[axis]) / direction[axis];
+    near = Math.max(near, Math.min(a, b));
+    far = Math.min(far, Math.max(a, b));
+  }
+  if (far < Math.max(near, 0)) return null;
+  return near > 0 ? near : far;
+}
 
 export interface OverlayBox {
   id: string;
@@ -54,6 +78,7 @@ export class SceneOverlay {
   private collisionAsset: Asset | null = null;
   private collisionEntity: Entity | null = null;
   private collisionMaterial: StandardMaterial | null = null;
+  private readonly boxIds = new Map<Entity, string>();
   private destroyed = false;
 
   constructor(app: ViewerAppLike) {
@@ -119,6 +144,7 @@ export class SceneOverlay {
   /** Vẽ lại toàn bộ hộp; hộp được nhấn mạnh đậm hơn. */
   setBoxes(boxes: readonly OverlayBox[]): void {
     for (const child of [...this.boxRoot.children]) child.destroy();
+    this.boxIds.clear();
     this.releaseMaterials();
     for (const box of boxes) {
       const fill = material(box.color, box.emphasized ? 0.55 : 0.28, false);
@@ -129,12 +155,38 @@ export class SceneOverlay {
       entity.setLocalRotation(new Quat(...box.rotation_xyzw));
       entity.setLocalScale(...box.dimensions);
       this.boxRoot.addChild(entity);
+      this.boxIds.set(entity, box.id);
     }
     this.redraw();
   }
 
+  /**
+   * Hộp gần nhất dưới con trỏ. `x`, `y` là toạ độ CSS pixel tính từ góc trên-trái canvas (quy ước
+   * `CameraComponent.screenToWorld`). Chỉ xét hộp đang vẽ.
+   */
+  pick(x: number, y: number): string | null {
+    const camera = this.app.root.findComponents("camera")[0] as CameraComponent | undefined;
+    if (!camera || this.destroyed) return null;
+    const origin = camera.entity.getPosition().clone();
+    const direction = camera.screenToWorld(x, y, camera.farClip, new PcVec3()).sub(origin).normalize();
+    let best: string | null = null;
+    let nearest = Infinity;
+    for (const [entity, id] of this.boxIds) {
+      const inverse = entity.getWorldTransform().clone().invert();
+      const o = inverse.transformPoint(origin, new PcVec3());
+      const d = inverse.transformVector(direction, new PcVec3());
+      const hit = rayUnitBox([o.x, o.y, o.z], [d.x, d.y, d.z]);
+      if (hit !== null && hit < nearest) {
+        nearest = hit;
+        best = id;
+      }
+    }
+    return best;
+  }
+
   destroy(): void {
     this.destroyed = true;
+    this.boxIds.clear();
     this.root.destroy();
     this.releaseMaterials();
     this.collisionMaterial?.destroy();
