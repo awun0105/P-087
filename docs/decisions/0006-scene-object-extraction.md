@@ -6,7 +6,8 @@ Date: 2026-09-30
 
 Accepted (hướng kỹ thuật) — Tech Lead (Quân) chốt ngày 2026-09-30 sau khi đọc source R2G
 (`private/R2G/src/sampro3d` @386ac05, `src/assist-gs` @4a382f4). Việc cài runtime PyTorch +
-SAM2 (~2,5–3 GB, dependency mới) vẫn cần owner xác nhận riêng trước khi thực hiện.
+SAM2 (~2,5–3 GB, dependency mới) được owner đồng ý 2026-09-30 ("ok làm đi") và đã cài ở
+`data/scene_runtime` (xem §Implementation).
 
 ## Context
 
@@ -49,4 +50,33 @@ SAM2 (~2,5–3 GB, dependency mới) vẫn cần owner xác nhận riêng trư�
 
 - Thêm runtime GPU cho EX-SCENE; worker có thêm bước tách vật thể sau bundle.
 - Chất lượng phụ thuộc 3DGS preview (thưa) và độ chính xác z-buffer; cần đo trên Aisle_CW.
-- Chưa làm: cài runtime (chờ owner), adapter SAM2, voting/consolidation, UI xác nhận.
+
+## Implementation (2026-09-30)
+
+- Runtime: `data/scene_runtime` (uv venv Python 3.12, torch 2.7.1+cu126, sam2 @2b90b9f,
+  `sam2.1_hiera_tiny.pt` sha256 7402e0d8…). App gọi qua subprocess
+  (`src/services/scene/sampro3d/sam2_runner.py`), cấu hình bằng `PRODUCT_SCENE_RUNTIME_PYTHON`,
+  `PRODUCT_SAM2_CHECKPOINT`, `PRODUCT_SCENE_TIMEOUT_SECONDS`; thiếu → fallback hình học; lỗi cả
+  hai → SceneIR chỉ có môi trường. Bước này không làm hỏng job (tái dựng đã xong).
+- Khác Decision §1: OBB theo yaw (`geometric._yaw_box`, PCA trên XY) thay
+  `trimesh.bounds.oriented_bounds` vì vật đứng trên sàn; NMS theo Jaccard tập điểm thay box NMS;
+  thành phần liên thông lớn nhất theo đồ thị bán kính 0,15 m thay DBSCAN.
+- Pipeline: `STUDIO_PIPELINE` thêm `ST-OBJECT-EXTRACT` sau `ST-RGB-GEOMETRY`; worker chạy
+  `extract_scene` sau finalize thành công và ghi StageArtifact SceneIR cùng `record_finalize`.
+  SceneIR rev-001: môi trường = visual SOG + collision mesh REC-05 của bundle; vật = CANDIDATE,
+  `active=false`.
+- Xác nhận (SCENE-05/PRODUCT-07) không đổi contract SceneIR (chỉ có CANDIDATE/CONFIRMED + active):
+  `confirm` → CONFIRMED + active; `ignore` → giữ CANDIDATE, active=false,
+  `provenance.review="IGNORED"` (còn audit/khôi phục; vật đã xác nhận không ignore được);
+  `hide` → đổi active; `delete` → active=false. Thêm vật cản (PRODUCT-07A): hộp AABB CONFIRMED,
+  `position_xyz` là **tâm hộp** (mét, world); UI Studio đặt tâm ở z = cao/2 (trên sàn).
+- Evidence (T2000 4 GB, job-ac2bfd924cc6 Aisle_CW): 16 602 điểm, 400 prompt, 198,5 s,
+  `sampro3d_sam2_v1`, 27 ứng viên. Kiểm overlay trước đó: pallet bọc nilon và cột được tách
+  đúng; thanh đứng/xà kệ bị tách nhầm thành vật (nhiều ứng viên lơ lửng z ≈ 1,5–3,6 m) — vì vậy
+  người dùng bắt buộc xác nhận. Chưa có metric segmentation có nhãn: không claim chất lượng.
+
+## Còn lại
+
+- EX-SIM: collider cho vật đã xác nhận + collider môi trường từ collision mesh, USD candidate
+  (hiện `usd/usda.py` chỉ phát ground plane), khoét vật khỏi mesh môi trường.
+- Lọc ứng viên kệ/xà (vd bỏ khối lơ lửng không chạm sàn/kệ, hoặc phân loại) — cần đo trước khi đổi.

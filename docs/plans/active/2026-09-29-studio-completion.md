@@ -147,9 +147,17 @@ Mỗi gói: code + test tập trung + cập nhật task file liên quan + commit
 - [x] Gói 4 — `GET /jobs/{id}/stage-views` + UI "Kết quả từng bước" (frame, quỹ đạo camera,
   3DGS, 3DGS hệ mét, collision mesh); allow-list thêm ref của bundle và ảnh frame. Chưa có
   point cloud COLMAP/LiDAR và bản xem nhẹ (thumbnail/LOD).
-- [ ] Gói 8 — tích hợp EX-SCENE/EX-SIM (ADR 0006): SAMPro3D adapt + SAM2 (chờ owner đồng ý cài
-  runtime PyTorch + SAM2); fallback hình học `scene/geometric.py` đã có (30 ứng viên trên
-  Aisle_CW, chưa đối chiếu ảnh); tiếp: SceneIR từ bundle, xác nhận vật thể, collider/USD.
+- [~] Gói 8 — tích hợp EX-SCENE/EX-SIM (ADR 0006 §Implementation):
+  - [x] Runtime SAM2 `data/scene_runtime` (owner đồng ý 2026-09-30); SAMPro3D adapt
+    (`src/services/scene/sampro3d/`), fallback hình học dùng chung hộp ứng viên; THIRD_PARTY_NOTICES.
+  - [x] Stage `ST-OBJECT-EXTRACT` sau collision; SceneIR rev-001 từ bundle; `publish_initial/next`.
+    Chạy thật `job-ac2bfd924cc6`: 198,5 s, 27 ứng viên (`sampro3d_sam2_v1`); job cũ đã SUCCEEDED
+    được chạy bù ngoài worker (manifest không có StageArtifact OBJECT_EXTRACT).
+  - [x] API confirm/ignore/hide/delete/rename + thêm vật cản hộp (thay stub 501); UI "Vật thể" trên
+    collision mesh. `pytest tests` → 1026 passed, 40 skipped; `tsc`, `eslint` sạch; `vitest` → 127 passed.
+  - [ ] Browser QA màn Vật thể; lọc ứng viên kệ/xà.
+  - [ ] EX-SIM: collider môi trường + vật đã xác nhận, enrichment/preflight, USD candidate có mesh
+    môi trường, nút "Tạo gói mô phỏng"; Isaac cần máy RTX (owner).
 - [x] Gói 5 — scene import từ file 3DGS, chỉ xem/chỉnh sửa: nhận `.ply`/`.zip`, nén PLY → SOG bằng
   splat-transform (bảng `r2s_imports`, migration v4), trang `/imports/[id]`. Chạy thật qua API: PLY
   98.611 Gaussian → SOG 3,98 MB, READY sau ~9 s (`import-0673049ea3ed`). ZIP PLY + COLMAP hiện cũng
@@ -159,8 +167,8 @@ Mỗi gói: code + test tập trung + cập nhật task file liên quan + commit
   0,245° sàn (điểm tự chọn từ LiDAR nên lệch nhỏ là đương nhiên).
 - [x] REC-05 đánh giá 3 mức voxel + chặn giả trên quỹ đạo (benchmark `collision_path_clearance`):
   **chưa đạt** tiêu chí ghost-block (xem REC-05).
-- [ ] Gói 7 (UI/UX), gói 8 (chờ cài SAM2).
-- Chờ owner: cài runtime PyTorch + SAM2; GT-assisted alignment có được ghi `AlignmentRecord`
+- [ ] Gói 7 (UI/UX), gói 8 phần EX-SIM.
+- Chờ owner: GT-assisted alignment có được ghi `AlignmentRecord`
   CONFIRMED (REC-09) hay chỉ là bản demo; push + PR `feat/studio-integration` → `develop`.
 - Hở tích hợp đã thấy (thuộc track khác, chưa sửa): EX-SIM `usd/usda.py` chưa đưa collision
   mesh môi trường vào USD; EX-SCENE decomposition chưa khoét vùng vật thể khỏi mesh môi trường.
