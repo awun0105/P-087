@@ -66,6 +66,7 @@ def __getattr__(name: str) -> object:
         "camera_views",
         "frame_images",
         "metric_gaussian_points",
+        "metric_visual_master",
     }:
         from src.services.reconstruction import views
 
