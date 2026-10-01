@@ -6,12 +6,12 @@ from fastapi.responses import FileResponse
 from src.api import schemas
 from src.api.auth import enforce_gpu_quota, record_gpu_run, require_editor
 from src.api.product import deps
-from src.services.orchestration import scene_objectify_queue
 from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.auth import UserRecord
-from src.services.orchestration.scene import SceneEditCommand, SceneError, SceneRevisionConflictError
+from src.services.orchestration.scene import SceneEditCommand, SceneError, SceneRevisionConflictError, objectify_queue
 from src.services.orchestration.scene.catalog import load_catalog, suggest_classes
 from src.services.orchestration.scene.errors import SceneNotAvailableError
+from src.services.orchestration.scene.objectify_queue import ObjectifyRequestError, ObjectifyState
 from src.services.orchestration.scene.objects import (
     OBJECT_ACTIONS,
     add_box_object,
@@ -19,7 +19,6 @@ from src.services.orchestration.scene.objects import (
     apply_object_action,
     restore_revision,
 )
-from src.services.orchestration.scene_objectify_queue import ObjectifyRequestError, ObjectifyState
 
 router = APIRouter()
 
@@ -188,7 +187,7 @@ def get_objectify_state(job_id: str) -> ObjectifyState:
     """Scene đang là scene theo vật hay đường hộp, và yêu cầu chạy lại gần nhất đang ở đâu."""
     deps.job_or_404(job_id)
     try:
-        return scene_objectify_queue.state(deps.registry(), deps.settings(), job_id)
+        return objectify_queue.state(deps.registry(), deps.settings(), job_id)
     except SceneNotAvailableError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
@@ -210,7 +209,7 @@ def request_objectify(
     deps.job_or_404(job_id)
     enforce_gpu_quota(user)
     try:
-        result = scene_objectify_queue.request(
+        result = objectify_queue.request(
             deps.registry(), deps.settings(), job_id, request.expected_scene_revision, request.mode
         )
     except SceneNotAvailableError as error:

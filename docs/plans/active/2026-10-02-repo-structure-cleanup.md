@@ -95,7 +95,7 @@ Out of scope:
 - [x] Pha 1: thư mục gốc và tài liệu (commit `ebb7443`, `c3d2803`).
 - [x] Pha 2: `src/api/product/`.
 - [x] Dọn `data/` (ngoài kế hoạch ban đầu, owner yêu cầu 02/10).
-- [ ] Pha 3: orchestration theo miền.
+- [x] Pha 3: orchestration theo miền.
 - [ ] Pha 4a: validation / duyệt / phát hành trong UI mới.
 - [ ] Pha 4b: xoá UI cũ.
 - [ ] Pha 5: đồng bộ tài liệu cấu trúc.
@@ -144,6 +144,22 @@ Out of scope:
 - VERIFIED: OpenAPI (sắp key) trùng byte với baseline (71 path / 77 operation / 142 schema); ánh xạ URL → hàm xử lý
   trùng baseline trên 5.229 URL mẫu; `pytest tests/ -q` 1125 passed / 40 skipped; `ruff`, `check_foundation`,
   `check_contract_mirror` exit 0; `import src.main` và `jobs.worker_cli` trong tiến trình mới chạy được.
+
+### Pha 3 — orchestration theo miền (xong)
+
+- 8 module dời bằng `git mv` theo bảng ánh xạ; 32 chỗ import ở 20 file sửa theo; hai hằng đường dẫn tính theo độ sâu
+  thư mục sửa (`scene/objectify.py` `parents[4]`, `review/simulation_package.py` `parents[3]`); 3 chuỗi monkeypatch
+  trong test trỏ `…jobs.stage_views.job_bundle`. Gốc `orchestration/` còn `storage.py`, `benchmark.py`,
+  `environment.py`.
+- Test mới `tests/test_orchestration/test_module_paths.py`: bốn đường dẫn runner (`LIFT_RUNNER`, `CONVEX_RUNNER`,
+  `INPAINT_RUNNER`, `HYBRID_RUNNER`) phải trỏ tới file có thật.
+- VERIFIED: 17 module (kể cả `src.main`, `jobs.worker_cli`, `jobs.runner`, từng module vừa dời, `projects.registry`)
+  import được khi là điểm vào đầu tiên của một tiến trình mới — không có vòng lặp import; `--help` của
+  `scripts/scene/reobjectify.py` và `eval.geometry.click_error` chạy được; OpenAPI và ánh xạ URL → hàm trùng baseline;
+  `pytest tests/ -q` 1126 passed / 40 skipped; `ruff`, `check_foundation` exit 0; khởi động lại `r2s-stack`: `/health`
+  200, worker chạy, log không có lỗi import.
+- Chưa kiểm: chạy một job thật qua worker trên GPU sau khi dời (các bước dùng runner theo đường dẫn file đã có test
+  khẳng định đường dẫn, nhưng chưa có lượt chạy thật).
 
 ### Dọn `data/` (xong phần an toàn)
 

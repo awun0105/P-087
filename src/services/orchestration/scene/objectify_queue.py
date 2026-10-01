@@ -23,11 +23,11 @@ from pydantic import BaseModel, ConfigDict
 from src.config import Settings
 from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeTransaction
+from src.services.orchestration.jobs.stage_views import job_bundle
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneError, SceneRevisionConflictError
-from src.services.orchestration.scene_extraction import use_boxes
-from src.services.orchestration.scene_objectify import AWAITING_CHOICE, METHOD, ObjectifyError, reobjectify
-from src.services.orchestration.stage_views import job_bundle
+from src.services.orchestration.scene.extraction import use_boxes
+from src.services.orchestration.scene.objectify import AWAITING_CHOICE, METHOD, ObjectifyError, reobjectify
 
 logger = logging.getLogger(__name__)
 

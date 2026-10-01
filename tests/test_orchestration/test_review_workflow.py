@@ -13,6 +13,7 @@ import pytest
 from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
 from src.models.contracts.release import ApprovalDecision, SceneRevisionStatus
 from src.models.contracts.validation import PathResult, RuleResult, ValidationCheck, ValidationReport
+from src.services.orchestration.review.simulation_package import build_simulation_package
 from src.services.orchestration.review.workflow import (
     ReviewError,
     decide,
@@ -21,7 +22,6 @@ from src.services.orchestration.review.workflow import (
     seal_release,
 )
 from src.services.orchestration.scene.objects import add_box_object, apply_object_action
-from src.services.orchestration.simulation_package import build_simulation_package
 from tests.test_orchestration.test_simulation_package import _scene_job
 
 ZERO = "sha256:" + "0" * 64

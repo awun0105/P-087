@@ -24,7 +24,7 @@ from src.services.orchestration.processing.capability import record as record_ca
 from src.services.orchestration.projects.errors import PrivacyGateBlockedError
 from src.services.orchestration.projects.privacy import require_project_dispatch
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
-from src.services.orchestration.scene_objectify_queue import process_next, recover_interrupted
+from src.services.orchestration.scene.objectify_queue import process_next, recover_interrupted
 
 logger = logging.getLogger(__name__)
 

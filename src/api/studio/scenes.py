@@ -13,11 +13,11 @@ from src.models.contracts.manifests import JobManifest
 from src.services.orchestration.auth import UserRecord
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.progress import JobProgress, job_progress
+from src.services.orchestration.jobs.stage_views import StageViewList, stage_views
+from src.services.orchestration.jobs.thumbnails import scene_thumbnail
 from src.services.orchestration.processing import build_job_config, evaluate, is_presets_file, preset_values
 from src.services.orchestration.projects import JobCreateInput, JobNotFoundError, PrivacyGateBlockedError
 from src.services.orchestration.projects.models import UploadProjectInput
-from src.services.orchestration.stage_views import StageViewList, stage_views
-from src.services.orchestration.thumbnails import scene_thumbnail
 from src.services.orchestration.uploads import UploadNotFoundError
 
 router = APIRouter()

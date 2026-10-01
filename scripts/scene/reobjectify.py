@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.config import get_settings  # noqa: E402
 from src.services.orchestration.projects import get_project_registry  # noqa: E402
-from src.services.orchestration.scene_objectify import ObjectifyError, reobjectify  # noqa: E402
+from src.services.orchestration.scene.objectify import ObjectifyError, reobjectify  # noqa: E402
 
 
 def main() -> int:

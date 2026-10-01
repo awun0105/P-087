@@ -49,7 +49,7 @@ METHOD = "objectify_v1(sampro3d_sam2+render_lift+coacd+seed_inpaint)"
 #: Giá trị `provenance.object_extraction` khi tách theo vật lỗi hết số lần thử: scene chỉ có môi trường,
 #: chờ người dùng chọn chạy lại hoặc dùng hộp ứng viên.
 AWAITING_CHOICE = "objectify_failed_awaiting_choice"
-_REPO = Path(__file__).resolve().parents[3]
+_REPO = Path(__file__).resolve().parents[4]
 LIFT_RUNNER = _REPO / "src/services/scene/association/lift_runner.py"
 CONVEX_RUNNER = _REPO / "src/services/simulation/colliders/convex_runner.py"
 INPAINT_RUNNER = _REPO / "src/services/reconstruction/rgb/inpaint/inpaint_runner.py"
@@ -352,7 +352,7 @@ def reobjectify(registry: ProjectRegistry, job_id: str, settings: Settings, work
     Vật và trạng thái xác nhận của revision trước không mang sang: tập vật mới là ứng viên mới.
     """
     from src.services.orchestration.artifacts import FilesystemArtifactStore
-    from src.services.orchestration.stage_views import job_bundle
+    from src.services.orchestration.jobs.stage_views import job_bundle
     from src.services.scene.publisher import with_scene_checksum
 
     job = registry.get_job(job_id)

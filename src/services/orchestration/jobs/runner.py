@@ -357,7 +357,7 @@ def run_video_job(job_id: str, *, expected_checksum: str | None = None) -> JobMa
 
 def _authorized_decision(attempt_registry: ProjectRegistry, job: JobManifest) -> tuple[ProductArtifactRef, str]:
     """PRODUCT xác minh quyết định người dùng trước khi giao REC chạy tiếp (authority của PRODUCT)."""
-    from src.services.orchestration.metric import MetricDecision
+    from src.services.orchestration.jobs.metric import MetricDecision
 
     stage = metric_confirmation_stage(job)
     if stage is None or stage.artifact_uri is None or stage.artifact_checksum is None:
@@ -382,7 +382,7 @@ def _extract_scene_stage(
     thẳng từ ref trong kết quả REC đã qua consumer `load_finalize_result`.
     """
     from src.models.contracts.reconstruction import ReconstructionBundle
-    from src.services.orchestration.scene_extraction import extract_scene
+    from src.services.orchestration.scene.extraction import extract_scene
 
     if bundle_ref is None:
         return []

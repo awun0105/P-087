@@ -8,8 +8,8 @@ import logging
 import subprocess
 from pathlib import Path
 
+from src.services.orchestration.jobs.stage_views import job_frame_images
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.orchestration.stage_views import job_frame_images
 
 logger = logging.getLogger(__name__)
 

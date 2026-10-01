@@ -193,7 +193,7 @@ Bản đồ nhanh (kiểm theo checkout 2026-09-29). Placement/ownership chính 
 |---|---|---|
 | `src/models/contracts/` | Shared typed contracts giữa các track | Nhóm |
 | `src/services/reconstruction/` | EX-REC: `rgb/{preflight,frames,pose,splat,geometry,canonical}` theo stage, `adapters/` (COLMAP/Brush/splat-transform), `lidar/`, `alignment/`, CLI `prepare_cli`/`preview_cli` | Nhóm |
-| `src/services/orchestration/` | EX-PRODUCT: `jobs/` (lifecycle, migration, `runner`, `worker_cli`), `projects/`, `uploads/` (+ upload thẳng), `processing/` (thông số xử lý), `samples/` (video mẫu), `artifacts/` (+ kho file S3), `auth/` (2 role), `storage.py`, `benchmark.py`, `scene/` (SceneIR revision) | Nhóm |
+| `src/services/orchestration/` | EX-PRODUCT: `jobs/` (lifecycle, migration, `runner`, `worker_cli`), `projects/`, `uploads/` (+ upload thẳng), `processing/` (thông số xử lý), `samples/` (video mẫu), `artifacts/` (+ kho file S3), `auth/` (2 role), `scene/` (SceneIR revision, tách theo vật), `review/` (duyệt/phát hành, gói mô phỏng); gốc chỉ còn `storage.py`, `benchmark.py`, `environment.py` | Nhóm |
 | `src/services/scene/`, `src/services/simulation/` | EX-SCENE, EX-SIM (nhiều package còn là placeholder) | Nhóm |
 | `src/api/` | `routes.py` (điểm vào), `auth.py` (đăng nhập, quyền), `schemas.py`, `product/` (hợp đồng UI P0: project, job, artifact, scene, review), `studio/` (route của Studio) | Scaffold + nhóm |
 | `src/agents/`, `src/llm/`, `src/models/schemas.py` | Chat agent scaffold, chưa thuộc pipeline Real2Sim | Ban tổ chức |

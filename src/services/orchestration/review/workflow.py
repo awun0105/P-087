@@ -36,7 +36,7 @@ from src.models.contracts.release import (
 from src.models.contracts.validation import RuleResult, ValidationReport
 from src.services.orchestration.artifacts import ArtifactAlreadyExistsError
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.orchestration.simulation_package import SimulationPackage, current_package
+from src.services.orchestration.review.simulation_package import SimulationPackage, current_package
 
 SCHEMA_VERSION = "1.0"
 ZERO = "sha256:" + "0" * 64

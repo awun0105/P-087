@@ -60,7 +60,7 @@ HYBRID_BUILD_CONFIG = {
     "object_collider": "convex_decomposition_or_box",
     "object_physics": "rigid_body_mass_material_labels",
 }
-HYBRID_RUNNER = Path(__file__).resolve().parents[2] / "services/simulation/usd/hybrid_runner.py"
+HYBRID_RUNNER = Path(__file__).resolve().parents[3] / "services/simulation/usd/hybrid_runner.py"
 
 
 class SimulationPackage(BaseModel):

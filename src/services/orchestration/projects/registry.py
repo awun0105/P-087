@@ -826,7 +826,7 @@ class ProjectRegistry:
         references.extend(self.scene.artifact_references_for_job(job_id))
         if job_id != self._fixture_job_id:
             # Lớp xem từng bước (ADR 0005): ảnh frame và ref trong ReconstructionBundle.
-            from src.services.orchestration.stage_views import view_references
+            from src.services.orchestration.jobs.stage_views import view_references
 
             references.extend(view_references(self, self.get_job(job_id)))
         if job_id == self._fixture_job_id:

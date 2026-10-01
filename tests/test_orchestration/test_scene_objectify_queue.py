@@ -10,11 +10,13 @@ import pytest
 
 from src.config import Settings
 from src.models.contracts.reconstruction import ReconstructionBundle
-from src.services.orchestration import scene_extraction, scene_objectify, scene_objectify_queue
+from src.services.orchestration.scene import extraction as scene_extraction
+from src.services.orchestration.scene import objectify as scene_objectify
+from src.services.orchestration.scene import objectify_queue as scene_objectify_queue
 from src.services.orchestration.scene.errors import SceneRevisionConflictError
-from src.services.orchestration.scene_extraction import extract_scene
-from src.services.orchestration.scene_objectify import AWAITING_CHOICE, ObjectifyError, objectify_with_retry
-from src.services.orchestration.scene_objectify_queue import ObjectifyRequestError
+from src.services.orchestration.scene.extraction import extract_scene
+from src.services.orchestration.scene.objectify import AWAITING_CHOICE, ObjectifyError, objectify_with_retry
+from src.services.orchestration.scene.objectify_queue import ObjectifyRequestError
 from tests.test_orchestration.test_finalize_flow import _confirmed
 from tests.test_orchestration.test_scene_extraction import _FIXTURE, _collision
 
@@ -96,7 +98,7 @@ def test_user_chooses_boxes_and_worker_publishes_next_revision(world, monkeypatc
     monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
     extract_scene(registry, job, bundle, settings, tmp_path / "work")
     monkeypatch.setattr(scene_extraction, "_sam2_runtime", lambda _: None)  # đường hộp → tách hình học
-    monkeypatch.setattr("src.services.orchestration.stage_views.job_bundle", lambda *_: bundle)
+    monkeypatch.setattr("src.services.orchestration.jobs.stage_views.job_bundle", lambda *_: bundle)
 
     queued = scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "boxes")
     assert (queued.status, queued.mode, queued.base_revision) == ("queued", "boxes", "rev-001")
@@ -211,7 +213,7 @@ def test_api_and_worker_on_different_machines_share_requests_and_revisions(world
     worker_scene = SceneEditor(api_scene.fixture_scene_path.parents[1], worker_registry.runtime_resolver)
     monkeypatch.setattr(worker_registry, "scene", worker_scene)
     monkeypatch.setattr(scene_extraction, "_sam2_runtime", lambda _: None)
-    monkeypatch.setattr("src.services.orchestration.stage_views.job_bundle", lambda *_: bundle)
+    monkeypatch.setattr("src.services.orchestration.jobs.stage_views.job_bundle", lambda *_: bundle)
     assert scene_objectify_queue.process_next(worker_registry, settings) is True
 
     # API thấy kết quả mà không cần chung đĩa hay khởi động lại.
@@ -231,7 +233,7 @@ def test_api_process_sees_revision_published_by_another_process(world, monkeypat
     other = SceneEditor(registry.scene.fixture_scene_path.parents[1], registry.runtime_resolver)
     assert other.current(job.job_id).scene.scene_revision == "rev-001"
     monkeypatch.setattr(scene_extraction, "_sam2_runtime", lambda _: None)
-    monkeypatch.setattr("src.services.orchestration.stage_views.job_bundle", lambda *_: bundle)
+    monkeypatch.setattr("src.services.orchestration.jobs.stage_views.job_bundle", lambda *_: bundle)
 
     scene_extraction.use_boxes(registry, job.job_id, settings, tmp_path / "boxes")
 

@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from src.services.orchestration import imports as imports_module
 from src.services.orchestration.artifacts import ArtifactResolver
-from src.services.orchestration.imports import ImportService, SceneImportError
 from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.uploads import VideoUploadService
+from src.services.orchestration.uploads import scene_imports as imports_module
+from src.services.orchestration.uploads.scene_imports import ImportService, SceneImportError
 from tests.test_reconstruction.test_input_detection import _gaussian
 
 MP4 = b"\x00\x00\x00\x18ftypmp42"

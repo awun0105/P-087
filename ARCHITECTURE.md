@@ -71,18 +71,23 @@ src/
     │   ├── isaac/
     │   └── validation/
     └── orchestration/                # EX-PRODUCT
-        ├── jobs/                     # lifecycle, runtime DB + migration, runner, worker_cli, progress
+        ├── jobs/                     # lifecycle, runtime DB + migration, runner, worker_cli, progress;
+        │                             #   metric (xác nhận tỉ lệ mét), stage_views, thumbnails
         ├── artifacts/                # resolver/store; remote.py = kho file S3/R2 (cache cục bộ tự đồng bộ)
         ├── auth/                     # tài khoản, mã mời, phiên, nhật ký, CLI tạo Reviewer
         ├── projects/                 # project registry, privacy policy, link tải có hạn
-        ├── uploads/                  # upload qua API + upload thẳng lên kho file (direct.py)
+        ├── uploads/                  # upload qua API + upload thẳng lên kho file (direct.py); scene_imports (3DGS)
         ├── processing/               # thông số xử lý theo configs/product, đo máy worker
         ├── samples/                  # thư viện video mẫu đã xử lý sẵn
-        ├── scene/                    # SceneIR revision cho viewer (PRODUCT-06)
-        ├── review/
+        ├── scene/                    # SceneIR revision, thao tác vật thể, danh mục asset; extraction, objectify,
+        │                             #   objectify_queue (tách scene theo vật, pipeline v2)
+        ├── review/                   # workflow duyệt/phát hành, lifecycle; simulation_package (gói mô phỏng)
         ├── release/
         ├── storage.py                # dựng resolver runtime (+ kho file) từ Settings
-        └── benchmark.py              # benchmark `pipeline_runtime` mỗi attempt
+        ├── benchmark.py              # benchmark `pipeline_runtime` mỗi attempt
+        └── environment.py            # fingerprint môi trường runtime (scripts/doctor.py)
+                                      # Gốc orchestration chỉ giữ ba file hạ tầng dùng chung ở trên; use-case nằm
+                                      # trong thư mục con cùng miền.
 
 frontend/                             # EX-PRODUCT; Next.js Web Studio
 ├── src/

@@ -23,7 +23,7 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial import cKDTree
 
-from src.services.orchestration.metric import MetricConfirmationService
+from src.services.orchestration.jobs.metric import MetricConfirmationService
 from src.services.orchestration.projects.registry import get_project_registry
 from src.services.reconstruction.alignment.similarity import rotation_matrix
 from src.services.reconstruction.lidar.cloud_header import read_header

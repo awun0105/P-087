@@ -2,7 +2,7 @@
 
 Đường chính là tách theo vật (pipeline v2, ADR 0007), thử tối đa `product_objectify_attempts` lần. Hết số
 lần mà vẫn lỗi thì **không tự lùi về hộp**: publish SceneIR chỉ có môi trường, đánh dấu chờ người dùng chọn
-"chạy lại" hoặc "dùng hộp ứng viên" (`scene_objectify_queue`). Máy không cấu hình runtime tách theo vật thì
+"chạy lại" hoặc "dùng hộp ứng viên" (`scene/objectify_queue.py`). Máy không cấu hình runtime tách theo vật thì
 đi thẳng đường hộp (ADR 0006: SAMPro3D + SAM2, rồi tách hình học). Bước này không làm hỏng job: tái dựng
 đã xong, vật thể còn thêm tay được.
 """
@@ -20,8 +20,8 @@ from src.models.contracts.scene import SceneObject
 from src.services.orchestration.artifacts import FilesystemArtifactStore
 from src.services.orchestration.jobs.progress import metric_confirmation_stage
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.orchestration.scene_objectify import AWAITING_CHOICE, ObjectifyError, Publish, objectify_with_retry
-from src.services.orchestration.scene_objectify import METHOD as OBJECTIFY_METHOD
+from src.services.orchestration.scene.objectify import AWAITING_CHOICE, ObjectifyError, Publish, objectify_with_retry
+from src.services.orchestration.scene.objectify import METHOD as OBJECTIFY_METHOD
 from src.services.reconstruction import camera_views, confirmation_summary, metric_gaussian_points
 from src.services.scene.builder import scene_from_bundle
 from src.services.scene.geometric import GeometricConfig, candidate_objects, collision_vertices, objects_from_candidates
@@ -159,7 +159,7 @@ def use_boxes(registry: ProjectRegistry, job_id: str, settings: Settings, worksp
 
     Vật của revision trước không mang sang (tập hộp mới là ứng viên mới); hoàn tác quay lại được.
     """
-    from src.services.orchestration.stage_views import job_bundle
+    from src.services.orchestration.jobs.stage_views import job_bundle
 
     job = registry.get_job(job_id)
     bundle = job_bundle(registry, job)
