@@ -241,6 +241,9 @@ def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: Res
         str(attempt.workspace / "rec"),
         "--progress-file",
         str(attempt.workspace / "preview.progress.jsonl"),
+        # Cùng thư mục cho mọi attempt của job: retry sau khi đứt dùng lại COLMAP + checkpoint Brush.
+        "--resume-root",
+        str(attempt.workspace.parent / "resume"),
     ]
     progress = _StageProgress(attempt, attempt.workspace / "preview.progress.jsonl")
     exit_code, payload = _run_tool(

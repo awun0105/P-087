@@ -18,6 +18,7 @@ from src.services.reconstruction.adapters.colmap_runtime import ColmapProcess
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor
 from src.services.reconstruction.attempt import PublicationNamespace
 from src.services.reconstruction.preview_models import PreparedPreviewRequest, PreparedPreviewResult
+from src.services.reconstruction.resume import ResumeCache
 from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver, _sha256
 from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
 from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
@@ -38,6 +39,8 @@ class PreviewDependencies:
     splat: SplatArtifactProcessor
     #: Báo stage event cho orchestrator (sau khi event đã publish); None = không báo.
     on_event: Callable[[StageArtifact], None] | None = None
+    #: Kho dùng lại COLMAP + checkpoint Brush giữa các attempt trên cùng máy; None = luôn chạy từ đầu.
+    resume: ResumeCache | None = None
 
 
 class PreparedPreviewWorker:
@@ -106,6 +109,7 @@ class _PreviewExecution:
         self.poses = CameraPoseResolver(deps.resolve, deps.frames)
         self.visuals = VisualResolver(deps.resolve, self.poses)
         self.pose_ref: ProductArtifactRef | None = None
+        self.resume_key: str | None = None
         self.visual_ref: ProductArtifactRef | None = None
         self.delivery_ref: ProductArtifactRef | None = None
         self.preview_ref: ProductArtifactRef | None = None
@@ -150,7 +154,9 @@ class _PreviewExecution:
 
     def _colmap(self, workspace: Path) -> None:
         self._start(StageId.CAMERA_POSE)
-        deps = ColmapDependencies(self.deps.frames, self.deps.colmap, self.deps.writer, self.deps.resolve)
+        deps = ColmapDependencies(
+            self.deps.frames, self.deps.colmap, self.deps.writer, self.deps.resolve, self.deps.resume
+        )
         result = ColmapAdapter(deps).execute(
             ColmapRequest(
                 frame_set=self.request.frame_set_ref,
@@ -161,7 +167,7 @@ class _PreviewExecution:
             )
         )
         self._complete(result.stage)
-        self.pose_ref = result.reference
+        self.pose_ref, self.resume_key = result.reference, result.resume_key
 
     def _brush(self, workspace: Path) -> None:
         self._start(StageId.VISUAL_RECON)
@@ -173,8 +179,9 @@ class _PreviewExecution:
             self.deps.splat,
             VisualPublisher(self.deps.writer, self.request.job_id, self.request.attempt_id),
             self.visuals,
+            self.deps.resume,
         )
-        result = BrushAdapter(deps).execute(BrushRequest(self.pose_ref, self.request.brush, workspace))
+        result = BrushAdapter(deps).execute(BrushRequest(self.pose_ref, self.request.brush, workspace, self.resume_key))
         self._complete(result.stage)
         self.visual_ref, self.delivery_ref = result.reference, result.artifact.delivery
         preview = ReconstructionPreview(
