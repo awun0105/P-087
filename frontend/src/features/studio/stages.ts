@@ -64,13 +64,14 @@ export const GEOMETRY_STAGE: StageMeta = {
     "Quy đổi 3DGS và camera sang mét, dựng collision mesh bằng voxel và khoét không gian cho robot, kiểm lại tỉ lệ bằng đoạn C–D rồi đóng gói bundle cho mô phỏng.",
 };
 
-/** ADR 0006: SAMPro3D + SAM2 tách vật thể ứng viên từ scene đã quy đổi mét; người dùng xác nhận sau. */
+/** ADR 0007 (v2): tách scene thành nền đã vá + từng vật có Gaussian/collider riêng; lỗi 3 lần thì người dùng chọn
+ * chạy lại hoặc dùng hộp ứng viên (ADR 0006). Người dùng xác nhận vật sau. */
 export const OBJECT_STAGE: StageMeta = {
   id: "ST-OBJECT-EXTRACT",
   title: "Tách vật thể",
   short: "Vật thể",
   description:
-    "SAM2 phân đoạn vật thể trên từng khung hình, bỏ phiếu gộp thành vật thể 3D ứng viên (hộp theo sàn) để bạn xác nhận; thiếu runtime thì tách theo hình học của collision mesh.",
+    "Tách scene thành nền đã vá và từng vật có hình 3DGS + collider riêng (SAM2 phân đoạn, gán nhãn theo đóng góp render) để bạn xác nhận. Thử tối đa 3 lần; vẫn lỗi thì bạn chọn chạy lại hoặc dùng hộp ứng viên. Máy không có runtime tách theo vật thì dùng hộp.",
 };
 
 export const STUDIO_STAGES: readonly StageMeta[] = [...MVP_STAGES, METRIC_STAGE, GEOMETRY_STAGE, OBJECT_STAGE];

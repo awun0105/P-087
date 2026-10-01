@@ -61,12 +61,30 @@ export function NextAction({ jobId, progress, current, mode, sceneReady, revisio
     title = "Đang đọc bước tiếp theo";
     description = "Đối chiếu vật thể, gói và trạng thái duyệt của revision hiện tại.";
     if (detail && (revision === null || detail.scene.scene_revision === revision)) {
+<<<<<<< Updated upstream
       const pending = detail.scene.objects.filter((object) => object.active && object.state !== "CONFIRMED" && object.provenance.review !== "IGNORED").length;
       const pkg = detail.pkg?.scene_revision === detail.scene.scene_revision ? detail.pkg : null;
       const review = detail.review?.record.scene_revision === detail.scene.scene_revision ? detail.review : null;
       if (pending) {
         title = "Cần xác nhận vật thể";
         description = String(pending) + " ứng viên đang bật chưa được xác nhận.";
+=======
+      // Ứng viên do pipeline tạo có `active=false` cho tới khi được xác nhận, nên đếm theo trạng thái (cùng quy tắc
+      // với bộ lọc "Chờ xác nhận" của Studio), không theo cờ `active`.
+      const review_of = (object: SceneIR["objects"][number]) => object.provenance.review;
+      const pending = detail.scene.objects.filter((object) => object.state === "CANDIDATE" && review_of(object) !== "IGNORED" && review_of(object) !== "DELETED").length;
+      const awaitingChoice = detail.scene.provenance.object_extraction === "objectify_failed_awaiting_choice";
+      const pkg = detail.pkg?.scene_revision === detail.scene.scene_revision ? detail.pkg : null;
+      const review = detail.review?.record.scene_revision === detail.scene.scene_revision ? detail.review : null;
+      if (awaitingChoice) {
+        // Pipeline v2: tách theo vật lỗi hết số lần thử; scene chỉ có môi trường cho tới khi người dùng chọn.
+        title = "Tách theo vật chưa thành công";
+        description = "Chọn chạy lại tách theo vật hoặc dùng hộp ứng viên trong Studio.";
+        action = { label: "Mở Studio để chọn", tab: "studio", mode: "scene" };
+      } else if (pending) {
+        title = "Cần xác nhận vật thể";
+        description = String(pending) + " ứng viên chưa được xác nhận.";
+>>>>>>> Stashed changes
         action = { label: "Xác nhận vật thể", tab: "studio", mode: "scene" };
       } else if (review?.record.status === "RELEASED" && review.release && review.release_archive) {
         title = "Đã có bản phát hành"; description = "Tải đúng gói đã được kiểm tra và duyệt."; action = { label: "Xem kết quả", tab: "results" };

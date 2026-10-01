@@ -69,4 +69,27 @@ describe("workflow scene", () => {
     expect(screen.queryByRole("button", { name: "Mở tạo gói mô phỏng" })).toBeNull();
     expect(screen.queryByText("private diagnostic")).toBeNull();
   });
+<<<<<<< Updated upstream
+=======
+  it("pipeline v2: ứng viên (active=false) vẫn tính là chờ xác nhận; tách vật lỗi thì dẫn về Studio để chọn", async () => {
+    const response = buildFixtureScene();
+    const candidate = { ...response.scene.objects[0], state: "CANDIDATE" as const, active: false };
+    const scene = { ...response.scene, objects: [candidate] };
+    vi.mocked(getJobScene).mockResolvedValue({ ok: true, data: { ...response, scene } });
+    vi.mocked(getSimulationPackage).mockRejectedValue(new ApiError(404, "none"));
+    vi.mocked(getReviewState).mockRejectedValue(new ApiError(404, "none"));
+    const done = { ...progress, status: "SUCCEEDED" as const, waiting_for: null };
+    const view = render(<NextAction jobId="job-1" progress={done} current="progress" mode="scene" sceneReady revision={scene.scene_revision} busy={false} onOpen={vi.fn()} onRetry={vi.fn()} />);
+    expect(await screen.findByText("Cần xác nhận vật thể")).toBeInTheDocument();
+    expect(screen.getByText("1 ứng viên chưa được xác nhận.")).toBeInTheDocument();
+    view.unmount();
+
+    const failed = { ...scene, objects: [], provenance: { ...scene.provenance, object_extraction: "objectify_failed_awaiting_choice" } };
+    vi.mocked(getJobScene).mockResolvedValue({ ok: true, data: { ...response, scene: failed } });
+    render(<NextAction jobId="job-1" progress={done} current="progress" mode="scene" sceneReady revision={scene.scene_revision} busy={false} onOpen={vi.fn()} onRetry={vi.fn()} />);
+    expect(await screen.findByText("Tách theo vật chưa thành công")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mở Studio để chọn" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Mở tạo gói mô phỏng" })).toBeNull();
+  });
+>>>>>>> Stashed changes
 });
