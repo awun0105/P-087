@@ -63,6 +63,7 @@ def apply_object_action(
     name: str | None = None,
     semantic_class: str | None = None,
     mass_kg: float | None = None,
+    asset_family: str | None = None,
 ) -> SceneEditResult:
     """Một thao tác trên một vật, publish revision kế tiếp.
 
@@ -88,7 +89,9 @@ def apply_object_action(
             updated = duplicate_object(scene, object_id, _next_id(scene, "user"), _DUPLICATE_OFFSET_M)
         elif action == "label":
             target = next(item for item in scene.objects if item.id == object_id)
-            physics = physics_for(semantic_class, object_volume_m3(target), mass_kg) if semantic_class else None
+            physics = (
+                physics_for(semantic_class, object_volume_m3(target), mass_kg, asset_family) if semantic_class else None
+            )
             updated = set_object_semantics(scene, object_id, semantic_class, physics)
         elif action == "rename":
             updated = rename_object(scene, object_id, name or "")

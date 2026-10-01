@@ -220,6 +220,7 @@ describe("ObjectReviewView", () => {
     expect(JSON.parse((labelled()[0][1] as RequestInit).body as string)).toMatchObject({
       expected_scene_revision: "rev-002",
       semantic_class: "pallet",
+      asset_family: "SM_PaletteA",
       mass_kg: 31.5,
     });
 

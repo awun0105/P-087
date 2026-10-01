@@ -292,7 +292,7 @@ export function applyObjectAction(
   objectId: string,
   action: ObjectAction,
   expectedRevision: string,
-  extra: { active?: boolean; name?: string; semantic_class?: string | null; mass_kg?: number | null } = {},
+  extra: { active?: boolean; name?: string; semantic_class?: string | null; mass_kg?: number | null; asset_family?: string | null } = {},
 ): Promise<SceneEditResponse> {
   return apiFetch<SceneEditResponse>(
     `${API}/jobs/${encodeURIComponent(jobId)}/scene/objects/${encodeURIComponent(objectId)}/${action}`,

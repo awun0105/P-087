@@ -191,6 +191,8 @@ class ObjectActionRequest(ApiModel):
     # action = label (ADR 0007): nhãn lớp; khối lượng người dùng nhập (bỏ trống = mặc định của nhãn).
     semantic_class: str | None = Field(default=None, max_length=64)
     mass_kg: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    # Asset danh mục người dùng chọn làm nhãn (phải cùng lớp với semantic_class); chỉ để hiện lại lựa chọn.
+    asset_family: str | None = Field(default=None, max_length=128)
 
 
 class ObjectifyRequest(ApiModel):

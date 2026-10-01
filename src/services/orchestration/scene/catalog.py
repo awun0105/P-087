@@ -91,9 +91,20 @@ def suggest_classes(dimensions_xyz_m: tuple[float, float, float], limit: int = 3
     return [name for name, _ in sorted(scored.items(), key=lambda item: item[1])[:limit]]
 
 
-def physics_for(semantic_class: str | None, volume_m3: float | None, mass_kg: float | None = None) -> ObjectPhysics:
-    """Vật lý cho một vật: khối lượng người dùng nhập > khối lượng mặc định của nhãn > mật độ × thể tích."""
-    defaults = load_catalog().defaults(semantic_class)
+def physics_for(
+    semantic_class: str | None, volume_m3: float | None, mass_kg: float | None = None, asset_family: str | None = None
+) -> ObjectPhysics:
+    """Vật lý cho một vật: khối lượng người dùng nhập > khối lượng mặc định của nhãn > mật độ × thể tích.
+
+    `asset_family` là asset người dùng đã chọn làm nhãn; ghi vào provenance để Studio hiện lại đúng lựa chọn
+    (nhãn lưu trong SceneIR vẫn là lớp của asset). Asset không có trong danh mục hoặc khác lớp → ValueError.
+    """
+    catalog = load_catalog()
+    if asset_family is not None:
+        entry = catalog.family(asset_family)
+        if entry is None or entry.semantic_class != semantic_class:
+            raise ValueError(f"asset {asset_family} không thuộc nhãn {semantic_class}")
+    defaults = catalog.defaults(semantic_class)
     dynamic = bool(defaults.get("dynamic", True))
     density = defaults.get("density_kg_m3")
     source: MassSource | None = None
@@ -117,6 +128,7 @@ def physics_for(semantic_class: str | None, volume_m3: float | None, mass_kg: fl
         restitution=float(defaults.get("restitution", 0.1)),
         provenance={
             "semantic_class": semantic_class,
+            **({"asset_family": asset_family} if asset_family is not None else {}),
             "volume_m3": volume_m3,
             "note": defaults.get("note", "nhãn chưa có trong danh mục; mật độ khối bao giả định"),
         },

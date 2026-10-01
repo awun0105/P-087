@@ -386,7 +386,8 @@ function Inspector({
   const [mass, setMass] = useState(object.physics?.mass_source === "user" ? String(object.physics.mass_kg ?? "") : "");
   // Người dùng chọn thẳng một asset trong danh mục Isaac; nhãn lưu vào scene là lớp của asset đó.
   const assets = catalog ? catalog.entries.filter((item) => item.semantic_class) : [];
-  const [family, setFamily] = useState("");
+  const savedFamily = object.physics?.provenance?.asset_family;
+  const [family, setFamily] = useState(typeof savedFamily === "string" ? savedFamily : "");
   const chosen = assets.find((item) => item.family === family) ?? assets.find((item) => item.semantic_class === label);
   const placed = isPlaced(object);
   const removed = isIgnored(object);
@@ -486,7 +487,7 @@ function Inspector({
           className="space-y-2"
           onSubmit={(event) => {
             event.preventDefault();
-            if (massValid) onAct("label", { semantic_class: label || null, mass_kg: label ? massValue : null });
+            if (massValid) onAct("label", { semantic_class: label || null, mass_kg: label ? massValue : null, asset_family: label ? (chosen?.family ?? null) : null });
           }}
         >
           <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
@@ -565,7 +566,7 @@ function Inspector({
   );
 }
 
-type ActionExtra = { active?: boolean; name?: string; semantic_class?: string | null; mass_kg?: number | null };
+type ActionExtra = { active?: boolean; name?: string; semantic_class?: string | null; mass_kg?: number | null; asset_family?: string | null };
 
 const MASS_SOURCE: Record<string, string> = {
   catalog_default: "mặc định của nhãn",

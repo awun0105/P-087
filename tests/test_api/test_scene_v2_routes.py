@@ -147,3 +147,19 @@ async def test_objectify_state_and_request_without_reconstruction_bundle(client)
     assert refused.status_code == 409 and "hệ mét" in refused.json()["detail"]
     stale = await client.post(f"{_JOB}/scene/objectify", json={"expected_scene_revision": "rev-009"})
     assert stale.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_label_remembers_chosen_asset_and_rejects_asset_of_other_class(client) -> None:
+    labelled = await client.post(
+        f"{_JOB}/scene/objects/{_PALLET}/label",
+        json={"expected_scene_revision": "rev-001", "semantic_class": "pallet", "asset_family": "SM_PaletteA"},
+    )
+    assert labelled.status_code == 201
+    assert _object(labelled.json(), _PALLET)["physics"]["provenance"]["asset_family"] == "SM_PaletteA"
+
+    wrong = await client.post(
+        f"{_JOB}/scene/objects/{_PALLET}/label",
+        json={"expected_scene_revision": "rev-002", "semantic_class": "box", "asset_family": "SM_PaletteA"},
+    )
+    assert wrong.status_code == 422 and "không thuộc nhãn" in wrong.json()["detail"]

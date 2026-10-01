@@ -394,6 +394,7 @@ def object_action(
             name=request.name,
             semantic_class=request.semantic_class,
             mass_kg=request.mass_kg,
+            asset_family=request.asset_family,
         )
     )
 
