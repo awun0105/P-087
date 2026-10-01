@@ -69,8 +69,6 @@ describe("workflow scene", () => {
     expect(screen.queryByRole("button", { name: "Mở tạo gói mô phỏng" })).toBeNull();
     expect(screen.queryByText("private diagnostic")).toBeNull();
   });
-<<<<<<< Updated upstream
-=======
   it("pipeline v2: ứng viên (active=false) vẫn tính là chờ xác nhận; tách vật lỗi thì dẫn về Studio để chọn", async () => {
     const response = buildFixtureScene();
     const candidate = { ...response.scene.objects[0], state: "CANDIDATE" as const, active: false };
@@ -91,5 +89,4 @@ describe("workflow scene", () => {
     expect(screen.getByRole("button", { name: "Mở Studio để chọn" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Mở tạo gói mô phỏng" })).toBeNull();
   });
->>>>>>> Stashed changes
 });
