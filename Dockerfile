@@ -9,6 +9,11 @@ COPY requirements.in requirements.lock.txt ./
 RUN uv pip sync --system requirements.lock.txt \
     && uv pip check
 
+# Runtime xuất USD lai (ADR 0007): `usd-core` tách khỏi dependency của app (RUNTIME_POLICY §2), không cần GPU.
+# Có nó thì API tự dựng được gói USD lai khi worker GPU ở máy khác; phiên bản ghim như scripts/gpu/setup_scene_runtime.sh.
+RUN uv venv /opt/usd_runtime --python /usr/local/bin/python \
+    && uv pip install --python /opt/usd_runtime/bin/python usd-core==26.8 numpy trimesh==5.1.0
+
 # ---- Stage 2: Production ----
 FROM python:3.12.14-slim-bookworm
 
@@ -16,8 +21,10 @@ WORKDIR /app
 
 # `uv pip sync --system` cài vào /usr/local của base image nên không cần copy site-packages.
 COPY --from=deps /usr/local /usr/local
+COPY --from=deps /opt/usd_runtime /opt/usd_runtime
 
-ENV PATH=/usr/local/bin:$PATH
+ENV PATH=/usr/local/bin:$PATH \
+    PRODUCT_SCENE_RUNTIME_PYTHON=/opt/usd_runtime/bin/python
 
 # Security: run as non-root user
 RUN useradd -m appuser

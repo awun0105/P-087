@@ -9,7 +9,7 @@ khoản, nạp tiền, nhập secret). Không secret nào được ghi vào repo
 | --- | --- | --- | --- |
 | **A. Một máy GPU thuê chạy cả API + worker** (`stack`) | Demo, lấy artifact nhanh | 1 instance vast.ai | Image chưa build thật |
 | **B. Chạy lô rồi lấy gói job** (`batch`) | Chỉ cần artifact, tắt máy ngay | 1 instance + Hugging Face | Lệnh đã chạy trên máy local |
-| **C. Worker nối vào DB + kho file chung** (`worker`) | Web chạy thường trực, GPU bật khi cần | Railway + Supabase + R2 + vast.ai | Code có sẵn, chưa triển khai |
+| **C. Worker nối vào DB + kho file chung** (`worker`) | Web chạy thường trực, GPU tự bật khi có việc | Railway + Supabase + R2 + vast.ai | Code có sẵn (kể cả tự bật/tắt GPU), chưa triển khai thật |
 
 Kaggle: xem `scripts/kaggle/README.md` (phụ thuộc Vulkan, phải thử trước).
 
@@ -66,12 +66,45 @@ vast.ai; chạy trên máy nhiều GPU; `sync` artifact giữa worker và R2 ở
 | Tạo Reviewer đầu tiên | Railway shell | `python -m src.services.orchestration.auth.cli create-user --role reviewer ...` |
 | Thuê GPU, chạy worker | vast.ai | image `real2sim-gpu`, lệnh `worker`, cùng `DATABASE_URL` + `ARTIFACT_S3_*` |
 
-Giới hạn hiện tại của cách C cần biết trước khi làm:
+Biến cần đặt thêm trên **API** (Railway) khi worker ở máy khác:
 
-- Nút "Chạy lại tách theo vật / Dùng hộp" ghi yêu cầu vào đĩa của worker (`PRODUCT_WORKER_ROOT`), nên API trên
-  Railway và worker trên vast.ai **chưa** dùng chung được tính năng này (cần chuyển sang DB — chưa làm).
+- `PRODUCT_OBJECTIFY_REMOTE_WORKER=true` — báo cho Studio biết có worker lo việc tách theo vật (API không tự kiểm
+  được runtime GPU của máy khác). Thiếu biến này nút "Chạy lại tách theo vật" bị ẩn.
+- `PRODUCT_SCENE_RUNTIME_PYTHON` đã được image API đặt sẵn (runtime `usd-core` nhỏ, không cần GPU) để API tự dựng
+  gói USD lai.
+- (tuỳ chọn) hình khối asset thư viện: chạy `scripts/scene/build_asset_previews.py` lúc deploy và trỏ
+  `PRODUCT_ASSET_PREVIEW_DIR` tới thư mục kết quả; không có thì Studio vẽ hộp.
+
+API và worker ở hai máy đã dùng chung được (2026-10-01): yêu cầu "chạy lại tách theo vật / dùng hộp" nằm trong DB,
+và mọi chỗ kiểm "artifact đã có chưa" đều tìm cả trên kho file. Đã kiểm bằng test hai máy giả lập (chung DB + kho
+file, khác đĩa); **chưa chạy trên Railway + R2 thật**.
+
+Giới hạn còn lại của cách C:
+
 - Kho checkpoint train nằm trên đĩa worker: destroy instance là mất, retry chạy lại từ đầu.
-- Tự bật/tắt GPU theo hàng đợi (ADR 0003 §1) chưa có; bạn bật/tắt instance bằng tay.
+- Xác nhận hệ mét và dựng gói USD chạy trong tiến trình API và phải tải 3DGS gốc (hàng trăm MB) về máy API: cần
+  đĩa + RAM tương ứng trên Railway.
+
+### Tự bật/tắt GPU theo hàng đợi
+
+`scripts/cloud/gpu_autoscaler.py` chạy thường trực cạnh API (cùng `DATABASE_URL` + `ARTIFACT_S3_*`), đếm việc đang
+chờ GPU và bật/tắt worker trên vast.ai. Job đang chờ **người dùng** xác nhận hệ mét không giữ GPU bật.
+
+| `VAST_MODE` | Cách hoạt động | Hợp khi |
+| --- | --- | --- |
+| `instance` (mặc định) | Bạn thuê sẵn 1 instance, đặt `VAST_INSTANCE_ID`; autoscaler chỉ start/stop | Dùng thường xuyên: bật lại nhanh, giữ checkpoint; nhưng lúc stop vẫn tính tiền đĩa, và có thể không bật lại được ngay nếu GPU đang có người khác thuê |
+| `rent` | Mỗi lần cần: tìm offer rẻ nhất ≥ `VAST_MIN_GPU_RAM_GB` trong giá trần `VAST_MAX_DPH`, thuê với `VAST_IMAGE`, rảnh thì destroy | Dùng thưa: không tốn gì lúc rảnh; mỗi lần bật mất vài phút kéo image |
+
+```bash
+export VAST_API_KEY=...            # tạo ở vast.ai → Account → API keys; chỉ đặt qua biến môi trường
+export VAST_MODE=instance VAST_INSTANCE_ID=<id>      # hoặc: VAST_MODE=rent VAST_IMAGE=<user>/real2sim-gpu:v2
+python -m scripts.cloud.gpu_autoscaler --once --dry-run   # xem quyết định, chưa bật/tắt gì
+python -m scripts.cloud.gpu_autoscaler                    # chạy thật (rảnh 10 phút thì tắt: GPU_IDLE_MINUTES)
+```
+
+Chưa gọi API vast.ai thật (chưa có tài khoản): logic và dạng request đã test bằng transport giả theo tài liệu
+vast.ai. Lần đầu hãy chạy `--once --dry-run`, rồi `--once`, và theo dõi trang Instances của vast.ai. Ở mode `rent`
+secret DB/kho file được gửi vào biến môi trường của instance thuê — dùng key quyền vừa đủ, đặt hạn mức nạp tiền.
 
 ## 5. Chi phí tham khảo
 
