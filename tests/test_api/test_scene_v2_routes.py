@@ -137,7 +137,13 @@ async def test_label_suggestions_use_object_size(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_objectify_state_and_request_without_reconstruction_bundle(client) -> None:
+async def test_objectify_state_and_request_without_reconstruction_bundle(client, tmp_path, monkeypatch) -> None:
+    from src.api import routes_product
+    from src.config import Settings
+
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'runtime.db'}")
+    monkeypatch.setattr(routes_product, "get_settings", lambda: settings)
+
     state = await client.get(f"{_JOB}/scene/objectify")
     assert state.status_code == 200
     assert state.json()["status"] == "idle" and state.json()["object_centric"] is False
