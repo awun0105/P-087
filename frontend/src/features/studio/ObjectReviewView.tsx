@@ -175,8 +175,9 @@ export function ObjectReviewView({
   const method = String(scene.provenance.object_extraction ?? "không rõ");
   return (
     <div className="grid size-full grid-rows-[minmax(50vh,1fr)_auto_auto] lg:grid-cols-[18rem_minmax(0,1fr)_20rem] lg:grid-rows-1">
-      <aside className="order-2 flex max-h-[50vh] min-h-0 flex-col border-t border-line bg-paper-raised lg:order-1 lg:max-h-none lg:border-t-0 lg:border-r">
+      <aside aria-label="Danh sách vật thể" className="order-2 flex max-h-[50vh] min-h-0 flex-col border-t border-line bg-paper-raised lg:order-1 lg:max-h-none lg:border-t-0 lg:border-r">
         <div className="space-y-2 border-b border-line px-3 py-3">
+          <h2 className="text-xs font-semibold tracking-wide text-ink-subtle uppercase">Vật thể trong scene</h2>
           <p className="text-sm font-semibold text-ink">
             {scene.objects.length} vật thể · {counts.pending} chờ xác nhận
           </p>
@@ -203,13 +204,14 @@ export function ObjectReviewView({
             <li
               key={object.id}
               id={`object-${object.id}`}
-              className={cn("flex cursor-pointer items-center gap-2 px-3 py-2", object.id === selected && "bg-ember-soft/40")}
-              onClick={() => flyTo(object.id)}
+              className={cn("flex items-center gap-2 px-3 py-2", object.id === selected && "bg-ember-soft/40")}
             >
-              <span className="size-2.5 shrink-0 rounded-sm" style={{ background: stateColor(object) }} aria-hidden />
-              <span className="min-w-0 flex-1 truncate text-sm text-ink">{object.name}</span>
+              <button type="button" aria-label={`Chọn ${object.name}`} aria-pressed={object.id === selected} onClick={() => flyTo(object.id)} className="flex min-w-0 flex-1 items-center gap-2 rounded py-1 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ember">
+                <span className="size-2.5 shrink-0 rounded-sm" style={{ background: stateColor(object) }} aria-hidden />
+                <span className="truncate text-sm text-ink">{object.name}</span>
+              </button>
               {object.state === "CANDIDATE" && !isIgnored(object) ? (
-                <span className="flex shrink-0 gap-1" onClick={(event) => event.stopPropagation()}>
+                <span className="flex shrink-0 gap-1">
                   <Button size="sm" variant="secondary" disabled={busy} aria-label={`Xác nhận ${object.name}`} title="Xác nhận" onClick={() => act(object, "confirm")}>
                     <Check aria-hidden />
                   </Button>
@@ -245,6 +247,7 @@ export function ObjectReviewView({
         )}
       </div>
       <aside className="order-3 flex min-h-0 flex-col overflow-y-auto border-t border-line bg-paper-raised lg:border-t-0 lg:border-l" aria-label="Inspector">
+        <h2 className="border-b border-line px-4 py-3 text-xs font-semibold tracking-wide text-ink-subtle uppercase">Chi tiết vật thể</h2>
         {error && (
           <Notice tone="rust" className="m-3">
             {error}

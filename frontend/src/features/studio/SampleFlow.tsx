@@ -36,7 +36,7 @@ export function SamplePicker({
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 id="samples-heading" className="flex items-center gap-2 text-base font-semibold">
           <Clapperboard className="size-4 text-ember-strong" aria-hidden />
-          Hoặc thử với video mẫu
+          Chọn video mẫu
         </h2>
         <p className="text-sm text-ink-muted">Kết quả đã được pipeline xử lý sẵn — tiến trình phát lại nhanh.</p>
       </div>
@@ -148,7 +148,7 @@ export function SampleSelectStep({
         </Button>
         <Button size="lg" onClick={onStart}>
           <Play aria-hidden />
-          Bắt đầu xử lý
+          Xem phát lại
         </Button>
       </div>
     </div>

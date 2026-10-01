@@ -75,6 +75,7 @@ export function ProgressTab({
             <PipelineTimeline
               stages={views}
               stageList={STUDIO_STAGES}
+              jobId={jobId}
               timeNote={`Bước gần nhất đổi lúc ${new Date(progress.updated_at).toLocaleTimeString("vi-VN")}`}
             />
           ) : (
@@ -99,6 +100,7 @@ export function ProgressTab({
           </div>
         </Card>
       </div>
+      <p className="text-sm text-ink-muted">Chọn tên một giai đoạn đã xong trong timeline để mở Inspect. Giai đoạn đang chạy hoặc đang chờ xác nhận chưa có kết quả Inspect.</p>
       {hasPreview && (
         <section className="space-y-3">
           <div className="flex items-center gap-1" role="group" aria-label="Kết quả của pipeline">

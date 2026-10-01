@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Clapperboard, Film, LayoutGrid, List, LogIn, Play, RefreshCw, Search, Upload } from "lucide-react";
+import { ArrowRight, Clapperboard, Film, LayoutGrid, List, LogIn, Play, Plus, RefreshCw, Search } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
 
@@ -25,6 +25,8 @@ export function ScenesHome() {
   const [imports, setImports] = useState<ImportedScene[]>([]);
   const [samples, setSamples] = useState<SampleSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [sampleError, setSampleError] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
 
   const { me } = useAuth();
   const signedIn = canEdit(me);
@@ -36,14 +38,16 @@ export function ScenesHome() {
       listSamples(),
       signedIn ? listImports() : Promise.resolve(null),
     ]);
-    setImports(importResult?.ok ? importResult.data.imports : []);
+    if (importResult?.ok) { setImports(importResult.data.imports); setImportError(null); }
+    else if (importResult) setImportError(importResult.error.detail);
     if (sceneResult?.ok) {
       setScenes(sceneResult.data.scenes);
       setError(null);
     } else if (sceneResult) {
       setError(sceneResult.error.detail);
     }
-    setSamples(sampleResult.ok ? sampleResult.data.samples : []);
+    if (sampleResult.ok) { setSamples(sampleResult.data.samples); setSampleError(null); }
+    else setSampleError(sampleResult.error.detail);
   }, [signedIn]);
 
   const [query, setQuery] = useState("");
@@ -59,7 +63,11 @@ export function ScenesHome() {
   }, [scenes, query, filter]);
 
   const anyActive = scenes?.some((scene) => sceneStatus(scene.latest_job, scene.preview_ready).active) ?? true;
-  usePolling(load, anyActive ? 4000 : 20000, true);
+  usePolling(load, signedIn && anyActive ? 4000 : 20000, true);
+  const continuing = (scenes ?? []).filter((scene) => {
+    const group = sceneStatus(scene.latest_job, scene.preview_ready).group;
+    return group === "action" || group === "running" || group === "failed";
+  }).slice(0, 3);
 
   return (
     <main className="mx-auto max-w-6xl px-4 pt-10 pb-20 sm:px-6">
@@ -67,27 +75,46 @@ export function ScenesHome() {
         <div>
           <h1 className="text-3xl font-semibold tracking-tight text-ink">Scenes</h1>
           <p className="mt-1.5 max-w-xl text-[15px] leading-relaxed text-ink-muted">
-            Biến video quay trong kho thành scene 3D Gaussian Splatting để xem, chỉnh sửa và xuất file.
+            Tiếp tục scene đang làm, dựng từ video hoặc mở một file 3DGS đã có.
           </p>
         </div>
-        <Link href="/new" className={buttonVariants({ size: "lg" })}>
-          <Upload aria-hidden />
-          Tải video lên
-        </Link>
+        <Link href="/new" className={buttonVariants({ size: "lg" })}><Plus aria-hidden /> Scene mới</Link>
       </div>
 
-      {samples.length > 0 && <SamplesHero samples={samples} />}
+      {!signedIn && samples.length > 0 && <SamplesHero samples={samples} />}
+      {!signedIn && sampleError && <Notice tone="rust" className="mt-6">Không tải được mẫu: {sampleError}. Trang sẽ thử lại.</Notice>}
+
+      {signedIn && continuing.length > 0 && (
+        <section aria-labelledby="continue-heading" className="mt-8 rounded-2xl border border-line bg-paper-raised p-5">
+          <div className="flex items-center justify-between gap-2">
+            <h2 id="continue-heading" className="font-semibold">Tiếp tục công việc</h2>
+            <Link href="/jobs" className="text-sm font-medium text-ember-strong hover:underline">Xem Jobs</Link>
+          </div>
+          <ul className="mt-3 divide-y divide-line">
+            {continuing.map((scene) => {
+              const status = sceneStatus(scene.latest_job, scene.preview_ready);
+              return <li key={scene.project.project_id}>
+                <Link href={`/scenes/${encodeURIComponent(scene.latest_job!.job_id)}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg py-3 focus-visible:outline-2 focus-visible:outline-ember">
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{scene.project.name}</span>
+                  <Badge tone={status.tone}>{status.label}</Badge>
+                  <ArrowRight className="size-4 text-ember-strong" aria-hidden />
+                </Link>
+              </li>;
+            })}
+          </ul>
+        </section>
+      )}
 
       <section aria-labelledby="scenes-heading" className="mt-12">
         <div className="mb-4 flex items-center justify-between">
           <h2 id="scenes-heading" className="text-sm font-semibold tracking-wide text-ink-subtle uppercase">
             Scene của bạn
           </h2>
-          {scenes && scenes.length > 0 && (
+          {signedIn && scenes && scenes.length > 0 && (
             <span className="text-sm text-ink-subtle">{scenes.length} scene</span>
           )}
         </div>
-        {error && (
+        {signedIn && error && (
           <Notice tone="rust" icon={<RefreshCw aria-hidden />} className="mb-4">
             Không tải được danh sách scene: {error}. Trang sẽ tự thử lại.
           </Notice>
@@ -97,30 +124,25 @@ export function ScenesHome() {
             icon={<LogIn aria-hidden />}
             title="Đăng nhập để xem scene của nhóm"
             action={
-              <Link href="/login" className={buttonVariants({})}>
+              <Link href="/login?next=/scenes" className={buttonVariants({})}>
                 Đăng nhập
               </Link>
             }
           >
-            Khách có thể thử ngay với video mẫu ở trên.
+            Khách có thể thử với mẫu đã xử lý sẵn.
           </EmptyState>
         )}
+        {me === null && <p role="status" className="text-sm text-ink-muted">Đang kiểm tra quyền truy cập…</p>}
         {signedIn && scenes === null && !error && <SceneGridSkeleton />}
-        {scenes && scenes.length === 0 && (
+        {signedIn && scenes && scenes.length === 0 && (
           <EmptyState
             icon={<Film aria-hidden />}
             title="Chưa có scene nào"
-            action={
-              <Link href="/new" className={buttonVariants({})}>
-                <Upload aria-hidden />
-                Tải video đầu tiên
-              </Link>
-            }
           >
-            Quay video bằng camera di chuyển chậm quanh khu vực cần dựng, rồi tải lên. Có thể thử trước với video mẫu.
+            Chọn “Scene mới” ở đầu trang để dựng từ video hoặc mở file 3DGS. Bạn cũng có thể thử mẫu đã xử lý sẵn.
           </EmptyState>
         )}
-        {scenes && scenes.length > 0 && (
+        {signedIn && scenes && scenes.length > 0 && (
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <div className="relative min-w-48 flex-1 sm:max-w-xs">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-subtle" aria-hidden />
@@ -168,7 +190,7 @@ export function ScenesHome() {
             </ToggleGroup>
           </div>
         )}
-        {scenes && scenes.length > 0 && shown.length === 0 && (
+        {signedIn && scenes && scenes.length > 0 && shown.length === 0 && (
           <p className="rounded-xl border border-line p-6 text-center text-sm text-ink-muted">
             Không có scene khớp bộ lọc.{" "}
             <button type="button" className="font-medium text-ember-strong hover:underline" onClick={() => { setQuery(""); setFilter("all"); }}>
@@ -176,7 +198,7 @@ export function ScenesHome() {
             </button>
           </p>
         )}
-        {shown.length > 0 && view === "grid" && (
+        {signedIn && shown.length > 0 && view === "grid" && (
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {shown.map((scene) => (
               <li key={scene.project.project_id}>
@@ -185,13 +207,14 @@ export function ScenesHome() {
             ))}
           </ul>
         )}
-        {shown.length > 0 && view === "list" && <SceneTable scenes={shown} />}
+        {signedIn && shown.length > 0 && view === "list" && <SceneTable scenes={shown} />}
       </section>
 
-      {imports.length > 0 && (
+      {signedIn && importError && <Notice tone="rust" className="mt-6">Không tải được scene import: {importError}. Trang sẽ thử lại.</Notice>}
+      {signedIn && imports.length > 0 && (
         <section aria-labelledby="imports-heading" className="mt-10">
           <h2 id="imports-heading" className="mb-4 text-sm font-semibold tracking-wide text-ink-subtle uppercase">
-            Scene import (file 3DGS)
+            Scene import · chỉ xem/chỉnh Gaussian
           </h2>
           <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {imports.map((item) => (
@@ -210,6 +233,8 @@ export function ScenesHome() {
           </ul>
         </section>
       )}
+      {signedIn && samples.length > 0 && <SamplesHero samples={samples} />}
+      {signedIn && sampleError && <Notice tone="rust" className="mt-6">Không tải được mẫu: {sampleError}. Trang sẽ thử lại.</Notice>}
     </main>
   );
 }
@@ -222,7 +247,7 @@ function SamplesHero({ samples }: { samples: SampleSummary[] }) {
         <h2 id="samples-home-heading" className="text-sm font-semibold tracking-wide text-ink-subtle uppercase">
           Thử với video mẫu
         </h2>
-        <p className="text-sm text-ink-subtle">Đi qua đủ các bước như video của bạn; kết quả đã xử lý sẵn nên chạy nhanh.</p>
+        <p className="text-sm text-ink-subtle">Kết quả đã xử lý sẵn · phát lại để khám phá · không tạo job mới.</p>
       </div>
       <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {samples.map((sample) => (

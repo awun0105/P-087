@@ -42,7 +42,7 @@ export function StudioTab({
           Chỉnh Gaussian trong SuperSplat: thay đổi chỉ nằm trong phiên editor và xuất ra file (File › Export PLY/SOG); không lưu vào scene, không qua duyệt.
         </p>
         <div className="min-h-0 flex-1">
-          <EditorFrame contentUrl={preview.url} filename={preview.filename} homeHref="/" title={`Editor 3D: ${title}`} />
+          <EditorFrame contentUrl={preview.url} filename={preview.filename} homeHref="/scenes" title={`Editor 3D: ${title}`} />
         </div>
       </div>
     );
@@ -58,7 +58,7 @@ export function StudioTab({
             : "Bản xem 3DGS (chưa quy đổi mét). Studio vật thể mở sau khi xác nhận tỉ lệ và dựng collision."}
       </Notice>
       <div className="min-h-0 flex-1">
-        <EditorFrame contentUrl={preview.url} filename={preview.filename} homeHref="/" title={`Editor 3D: ${title}`} />
+        <EditorFrame contentUrl={preview.url} filename={preview.filename} homeHref="/scenes" title={`Editor 3D: ${title}`} />
       </div>
     </div>
   );

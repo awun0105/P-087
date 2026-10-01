@@ -3,7 +3,9 @@
 import { Ban, Check, CheckCircle2, Circle, Download, Loader2, ShieldCheck, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { Badge, Button, buttonVariants } from "@/components/studio/primitives";
+import { Badge, Button, Notice, buttonVariants } from "@/components/studio/primitives";
+import { useAuth } from "@/features/studio/AuthProvider";
+import { isReviewer } from "@/lib/api/auth";
 import {
   getReviewState,
   releaseDownloadUrl,
@@ -31,18 +33,24 @@ const STATUS_LABEL: Record<RevisionStatus, { label: string; tone: "neutral" | "o
  * Duyệt xong hệ thống tự phát hành (không có bước duyệt thứ hai).
  */
 export function ReviewPanel({ jobId, sceneRevision }: { jobId: string; sceneRevision: string }) {
+  const { me } = useAuth();
   const [state, setState] = useState<ReviewStateView | null>(null);
+  const [loadedRevision, setLoadedRevision] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [accepted, setAccepted] = useState<string[]>([]);
   const [reason, setReason] = useState("");
   const [confirming, setConfirming] = useState(false);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
     getReviewState(jobId, controller.signal).then(
       (value) => {
+        if (controller.signal.aborted) return;
         setState(value);
+        setLoadedRevision(sceneRevision);
+        setError(null);
         setAccepted([]);
         setConfirming(false);
       },
@@ -51,7 +59,7 @@ export function ReviewPanel({ jobId, sceneRevision }: { jobId: string; sceneRevi
       },
     );
     return () => controller.abort();
-  }, [jobId, sceneRevision]);
+  }, [jobId, sceneRevision, reload]);
 
   async function run(action: () => Promise<ReviewStateView>) {
     setBusy(true);
@@ -66,10 +74,14 @@ export function ReviewPanel({ jobId, sceneRevision }: { jobId: string; sceneRevi
     }
   }
 
-  if (!state) {
-    return error ? <p className="p-4 text-xs text-rust">{error}</p> : null;
+  if (!state || loadedRevision !== sceneRevision) {
+    return error ? <Notice tone="rust" className="m-4">{error} <Button size="sm" variant="secondary" onClick={() => { setError(null); setReload((value) => value + 1); }}>Thử lại</Button></Notice> : <p role="status" className="p-4 text-sm text-ink-muted">Đang đọc trạng thái duyệt…</p>;
   }
   const { record, validation } = state;
+  if (record.scene_revision !== sceneRevision) {
+    return <Notice tone="ochre" className="m-4">Trạng thái duyệt đang thuộc {record.scene_revision}; scene hiện tại là {sceneRevision}. Tải lại scene trước khi quyết định.</Notice>;
+  }
+  const reviewer = isReviewer(me);
   const status = STATUS_LABEL[record.status];
   const decision = (value: "APPROVE" | "REJECT") =>
     run(() =>
@@ -83,7 +95,7 @@ export function ReviewPanel({ jobId, sceneRevision }: { jobId: string; sceneRevi
     );
   const allAccepted = state.warning_ids.every((id) => accepted.includes(id));
   return (
-    <section className="space-y-3 p-4 text-xs" aria-label="Kiểm tra và duyệt">
+    <section className="space-y-3 p-5 text-sm" aria-label="Kiểm tra và duyệt">
       <div className="flex items-center justify-between gap-2">
         <p className="flex items-center gap-1.5 text-sm font-semibold text-ink">
           <ShieldCheck className="size-4" aria-hidden /> Kiểm tra & duyệt
@@ -124,7 +136,8 @@ export function ReviewPanel({ jobId, sceneRevision }: { jobId: string; sceneRevi
           </ul>
         </div>
       )}
-      {record.status === "READY_FOR_REVIEW" && (
+      {record.status === "READY_FOR_REVIEW" && !reviewer && <Notice tone="ochre">Chỉ Reviewer có quyền phê duyệt hoặc yêu cầu sửa. Bạn có thể xem báo cáo và bằng chứng của revision này.</Notice>}
+      {record.status === "READY_FOR_REVIEW" && reviewer && (
         <div className="space-y-2">
           {state.warning_ids.length > 0 && (
             <fieldset className="space-y-1">
@@ -184,7 +197,7 @@ export function ReviewPanel({ jobId, sceneRevision }: { jobId: string; sceneRevi
           {state.approval.reason && <span className="block text-ink">Lý do: {state.approval.reason}</span>}
         </p>
       )}
-      {record.status === "APPROVED" && (
+      {record.status === "APPROVED" && reviewer && (
         <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(() => retryReleaseSeal(jobId))}>
           Thử lại phát hành
         </Button>

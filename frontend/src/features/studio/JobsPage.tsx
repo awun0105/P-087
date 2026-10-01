@@ -83,7 +83,7 @@ export function JobsPage() {
           }
         />
       )}
-      {error && (
+      {signedIn && error && (
         <Notice tone="rust" icon={<RefreshCw aria-hidden />} className="mt-6">
           Không tải được danh sách: {error}. Đang hiển thị dữ liệu lần tải trước; trang sẽ tự thử lại.
         </Notice>
@@ -111,13 +111,13 @@ export function JobsPage() {
         </div>
       )}
       {signedIn && scenes === null && !error && <p className="text-sm text-ink-muted" role="status">Đang tải…</p>}
-      {scenes !== null && jobs.length === 0 && (
-        <EmptyState className="mt-4" icon={<ListChecks aria-hidden />} title="Chưa có lần xử lý nào" action={<Link href="/new" className={buttonVariants({})}>Tạo scene</Link>}>
-          Tạo scene từ video để bắt đầu một lần xử lý.
+      {signedIn && scenes !== null && jobs.length === 0 && (
+        <EmptyState className="mt-4" icon={<ListChecks aria-hidden />} title="Chưa có lần xử lý nào">
+          Vào <Link href="/scenes" className="font-medium text-ember-strong hover:underline">Scenes</Link> và chọn “Scene mới”, rồi dựng từ video để bắt đầu một lần xử lý.
         </EmptyState>
       )}
-      {jobs.length > 0 && shown.length === 0 && <p className="rounded-xl border border-line p-6 text-center text-sm text-ink-muted">Không có lần xử lý khớp bộ lọc.</p>}
-      {shown.length > 0 && (
+      {signedIn && jobs.length > 0 && shown.length === 0 && <p className="rounded-xl border border-line p-6 text-center text-sm text-ink-muted">Không có lần xử lý khớp bộ lọc. <button type="button" onClick={() => { setQuery(""); setFilter("all"); }} className="font-medium text-ember-strong hover:underline">Xoá bộ lọc</button></p>}
+      {signedIn && shown.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-line">
           <Table>
             <TableHeader>
@@ -164,7 +164,7 @@ export function JobsPage() {
                     </TableCell>
                     <TableCell className="hidden text-right sm:table-cell">
                       <Link href={`/scenes/${encodeURIComponent(job.job_id)}`} className="font-medium whitespace-nowrap text-ember-strong hover:underline">
-                        Mở tiến trình
+                        Mở scene
                       </Link>
                     </TableCell>
                   </TableRow>

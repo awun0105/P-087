@@ -21,7 +21,7 @@ import type { StageView } from "@/lib/contracts/studio";
  * Kết quả từng bước của pipeline (ADR 0005): frame, camera, 3DGS, collision mesh.
  * Danh sách do backend trả; mỗi lúc chỉ nạp một lớp và giải phóng lớp cũ khi đổi.
  */
-export function StageViewer({ jobId }: { jobId: string }) {
+export function StageViewer({ jobId, stageId, fallbackStageId }: { jobId: string; stageId?: string; fallbackStageId?: string }) {
   const [views, setViews] = useState<StageView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState(0);
@@ -30,6 +30,7 @@ export function StageViewer({ jobId }: { jobId: string }) {
     const controller = new AbortController();
     getStageViews(jobId, controller.signal).then(
       (result) => {
+        if (controller.signal.aborted) return;
         setViews(result);
         setSelected(Math.max(0, result.length - 1));
       },
@@ -48,21 +49,26 @@ export function StageViewer({ jobId }: { jobId: string }) {
       </p>
     );
   }
-  if (!views.length) return <Notice>Chưa có bước nào xong để xem.</Notice>;
-  const view = views[Math.min(selected, views.length - 1)];
+  const exact = stageId ? views.filter((view) => view.stage_id === stageId) : views;
+  const fallback = exact.length === 0 && fallbackStageId ? views.filter((view) => view.stage_id === fallbackStageId) : [];
+  const available = exact.length ? exact : fallback;
+  if (!available.length) return <Notice>{stageId ? "Giai đoạn đã xong nhưng API chưa cung cấp lớp xem cho giai đoạn này. Xem metadata và artifact đã publish trong Thông tin đầu ra." : "Chưa có bước nào xong để xem."}</Notice>;
+  const selectedIndex = Math.min(selected, available.length - 1);
+  const view = available[selectedIndex];
   return (
     <div className="flex size-full flex-col">
+      {fallback.length > 0 && <Notice tone="ochre" className="shrink-0 rounded-none">Bản xác nhận tỉ lệ đã có, nhưng API chưa cung cấp 3DGS hệ mét (bản dẫn xuất xuất hiện khi worker hoàn tất hình học). Đang xem lại Gaussian gốc, đơn vị SfM; số đo đã xác nhận xem trong “Xem số đo & so sánh”.</Notice>}
       <div className="flex flex-wrap gap-1 border-b border-line bg-paper-raised px-3 py-2" role="tablist" aria-label="Kết quả từng bước">
-        {views.map((item, index) => (
+        {available.map((item, index) => (
           <button
             key={`${item.stage_id}-${item.kind}`}
             type="button"
             role="tab"
-            aria-selected={index === selected}
+            aria-selected={index === selectedIndex}
             onClick={() => setSelected(index)}
             className={cn(
               "rounded-lg px-3 py-1.5 text-sm transition-colors",
-              index === selected ? "bg-ember-soft font-medium text-ember-strong" : "text-ink-muted hover:bg-paper-sunken",
+              index === selectedIndex ? "bg-ember-soft font-medium text-ember-strong" : "text-ink-muted hover:bg-paper-sunken",
             )}
           >
             {item.title}

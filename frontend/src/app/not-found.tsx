@@ -11,7 +11,7 @@ export default function NotFound() {
         Đường dẫn không tồn tại hoặc scene không còn truy cập được với tài khoản này.
       </p>
       <Button asChild variant="secondary">
-        <Link href="/">Về Scenes</Link>
+        <Link href="/scenes">Về Scenes</Link>
       </Button>
     </main>
   );

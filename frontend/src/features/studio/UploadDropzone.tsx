@@ -5,7 +5,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { Button, Notice, ProgressBar } from "@/components/studio/primitives";
 import { uploadVideo, type UploadHandle } from "@/lib/api/studio";
-import { UPLOAD_ACCEPT, rejectFileName } from "@/features/studio/inputKinds";
+import { GAUSSIAN_ACCEPT, VIDEO_ACCEPT, rejectFileNameFor } from "@/features/studio/inputKinds";
 import { cn } from "@/lib/cn";
 import type { UploadRecord } from "@/lib/contracts/studio";
 import { formatBytes } from "@/lib/format";
@@ -15,7 +15,7 @@ import { formatBytes } from "@/lib/format";
  * theo nội dung (ADR 0004); đuôi file chỉ lọc sớm. Kéo-thả chỉ là cách phụ:
  * nút chọn file luôn dùng được bằng bàn phím (WCAG 2.5.7).
  */
-export function UploadDropzone({ onUploaded }: { onUploaded: (record: UploadRecord) => void }) {
+export function UploadDropzone({ kind, onUploaded }: { kind: "video" | "gaussian"; onUploaded: (record: UploadRecord) => void }) {
   const inputId = useId();
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
@@ -24,12 +24,16 @@ export function UploadDropzone({ onUploaded }: { onUploaded: (record: UploadReco
   const [uploading, setUploading] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const handle = useRef<UploadHandle | null>(null);
+  const mounted = useRef(true);
 
-  useEffect(() => () => handle.current?.abort(), []);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; handle.current?.abort(); };
+  }, []);
 
   function start(candidate: File | undefined) {
     if (!candidate) return;
-    const rejected = rejectFileName(candidate.name);
+    const rejected = rejectFileNameFor(candidate.name, kind);
     if (rejected) {
       setError(rejected);
       return;
@@ -43,6 +47,7 @@ export function UploadDropzone({ onUploaded }: { onUploaded: (record: UploadReco
     handle.current = upload;
     upload.promise.then(
       (record) => {
+        if (!mounted.current) return;
         handle.current = null;
         setUploading(false);
         setVerifying(false);
@@ -50,6 +55,7 @@ export function UploadDropzone({ onUploaded }: { onUploaded: (record: UploadReco
         onUploaded(record);
       },
       (cause: unknown) => {
+        if (!mounted.current) return;
         handle.current = null;
         setUploading(false);
         setVerifying(false);
@@ -74,7 +80,7 @@ export function UploadDropzone({ onUploaded }: { onUploaded: (record: UploadReco
           if (!uploading) start(event.dataTransfer.files[0]);
         }}
         className={cn(
-          "flex cursor-pointer flex-col items-center rounded-2xl border-2 border-dashed px-6 py-12 text-center transition-colors duration-200",
+          "flex cursor-pointer flex-col items-center rounded-2xl border-2 border-dashed px-6 py-12 text-center transition-colors duration-200 focus-within:ring-3 focus-within:ring-ember/40",
           dragging ? "border-ember bg-ember-soft/60" : "border-line-strong bg-paper-raised hover:border-ember/60",
           uploading && "pointer-events-none opacity-70",
         )}
@@ -82,14 +88,18 @@ export function UploadDropzone({ onUploaded }: { onUploaded: (record: UploadReco
         <span className="grid size-12 place-items-center rounded-full bg-ember-soft text-ember-strong">
           <Upload className="size-5" aria-hidden />
         </span>
-        <span className="mt-4 text-base font-semibold text-ink">Kéo video hoặc file 3DGS vào đây, hoặc bấm để chọn</span>
+        <span className="mt-4 text-base font-semibold text-ink">
+          {kind === "video" ? "Kéo video vào đây, hoặc bấm để chọn" : "Kéo file 3DGS vào đây, hoặc bấm để chọn"}
+        </span>
         <span className="mt-1 text-sm text-ink-muted">
-          Video MP4/MOV (camera di chuyển chậm, cảnh tĩnh, đủ sáng) · scene 3DGS .ply · .zip gồm PLY + COLMAP
+          {kind === "video"
+            ? "MP4/MOV · camera di chuyển chậm, cảnh tĩnh và đủ sáng · tạo reconstruction job sau bước khai báo"
+            : "PLY hoặc ZIP gồm PLY + COLMAP · chỉ xem/chỉnh Gaussian và xuất file; không dựng collision hay phát hành"}
         </span>
         <input
           id={inputId}
           type="file"
-          accept={UPLOAD_ACCEPT}
+          accept={kind === "video" ? VIDEO_ACCEPT : GAUSSIAN_ACCEPT}
           className="sr-only"
           disabled={uploading}
           onChange={(event) => {

@@ -125,9 +125,36 @@ Người dùng mở ứng dụng để tiếp tục một scene hoặc tạo sce
 
 ### 3.1 IA đề xuất cho prototype
 
-**Global sidebar:** `Scenes` · `Jobs` · `Nhóm` (Reviewer). CTA `Scene mới` luôn tìm thấy được. Video mẫu là khu vực trong Scenes/Scene mới. Hồ sơ hiện tại và đăng xuất nằm ở footer/sidebar account menu.
+**DECISION (user, 01/10/2026 — landing page Stitch):** tích hợp landing page
+user cung cấp tại `/landing`, ngoài AppShell. Giữ bố cục/SVG của export và dùng
+Next.js/Tailwind hiện có; các CTA `Open Studio` dẫn tới `/` (Tổng quan app).
+Landing là trang giới thiệu với scene/metric/trạng thái minh họa được ghi nhãn,
+không phải report backend hoặc bằng chứng validation. Scope này thay giới hạn
+proposal trước đây không tạo landing; không thêm pricing/billing/analytics.
+
+**DECISION (user, 01/10/2026):** trang đầu `/` là **Tổng quan**: giới thiệu Studio,
+tóm tắt hành trình, loại đầu vào và tổng hợp công việc từ API hiện có. Thư viện
+scene có route riêng `/scenes`. Global sidebar: `Tổng quan` · `Scenes` · `Jobs` ·
+`Nhóm` (Reviewer). Nút `Scene mới` nằm trong trang `/scenes`, không lặp ở sidebar
+hoặc global header. Video mẫu vẫn là khu vực trong Scenes/Scene mới. Hồ sơ và
+đăng xuất ở footer/sidebar account menu. Tổng quan không hiển thị số liệu giả,
+không tạo API/state backend mới và không biến preview thành kết quả validation.
 
 **Trong một scene:** breadcrumb `Scenes › <Tên scene>` và các vùng `Tiến trình` · `Studio` · `Validation & Review` · `Kết quả`. Chưa có dữ liệu cho vùng nào thì giải thích điều kiện mở vùng đó, không dẫn tới trang trắng. “Objects” là panel của Studio; “Simulation Replay” thuộc báo cáo; dữ liệu nguồn thuộc scene. Không tạo các trang toàn cục Scene Editor, Objects, Simulation, Datasets hoặc Releases chỉ vì chúng xuất hiện trong U2.
+
+**DECISION (user, 01/10/2026 — Inspect từng giai đoạn):** Tiến trình hiển thị
+8 giai đoạn Studio. Chọn một giai đoạn đã hoàn tất để xem tóm tắt và mở trang
+Inspect trong ngữ cảnh job: `/scenes/[jobId]/stages/[stageId]`. Một shell Inspect
+dùng chung, nội dung khác nhau cho từng stage: (1) đầu vào/kiểm tra, (2) privacy,
+(3) frame, (4) camera, (5) Gaussian, (6) hệ mét, (7) collision, (8) vật thể.
+Đây là workspace dạng màn xem 3DGS: viewport lớn là nội dung chính; metadata
+và artifact trong panel phụ thu gọn. Stage 5–8 dùng viewport/công cụ Studio hiện có; Gaussian edit chỉ export file,
+object edit tạo revision backend. Artifact đã publish không bị editor ghi đè.
+Link trực tiếp cũng kiểm progress; stage chưa xong không hiện như có kết quả.
+Công cụ đo ở Studio vẫn mở lúc chờ xác nhận. User chốt Inspect 6 cũng chỉ mở
+sau khi hoàn tất; kết quả xác nhận đã publish chỉ đọc, không xác nhận lại.
+Thiếu lớp xem/API phải giải thích rõ, chỉ đọc metadata/download đúng allow-list,
+không tạo report/số đo/kết quả giả để lấp trang.
 
 “Tạo project” được đáp ứng trong thao tác `Scene mới`: nhập tên một lần và đi thẳng vào chọn dữ liệu. Kết quả của luồng video là project scene được tạo cùng job đầu tiên; màn tiếp nhận cần xác nhận tên project và lần xử lý, giữ danh tính project trong phần chi tiết của Scenes/Jobs. Không bỏ ngữ cảnh project, cũng không bổ sung phân cấp organization → workspace → project → nhiều scene khi chưa có nhu cầu được chốt. [Current creation flow][r-new], [project + job được tạo][r-create]. Import 3DGS riêng không được trình bày như đã tạo job reconstruction.
 
@@ -151,7 +178,7 @@ Người dùng mở ứng dụng để tiếp tục một scene hoặc tạo sce
 | CRM, Finance, Analytics, Productivity, E-commerce, Academy, Logistics, Patient Monitoring | **REJECT** | Domain/dashboard không phục vụ hành trình dựng và duyệt scene; không tái dùng số liệu hay biểu đồ để lấp trang |
 | Chat, Mail (cả độc lập và dưới dashboard), Calendar, Kanban, Invoice | **REJECT** | Không thêm cộng tác realtime, email, lịch, task board hoặc thanh toán |
 | Legacy donor: Default/CRM/Finance/Analytics v1; Coming soon | **REJECT** | Không giữ menu phiên bản cũ hoặc link chết |
-| Trang ngoài dashboard của donor | **REJECT nội dung template** | U1 chỉ định hướng giới thiệu sản phẩm ngắn ở khu vực khách/video mẫu; chưa tạo landing marketing riêng |
+| Trang ngoài dashboard của donor | **REJECT nội dung template** | Không lấy trang marketing của dashboard donor. User đã giao riêng export Stitch cho `/landing` ngày 01/10/2026 (§3.1) |
 | Theme/layout playground, GitHub menu, support card, account switcher mẫu | **REJECT khỏi UX sản phẩm** | Dùng palette đã cho, một hệ navigation; hiện tài khoản thật, không đổi user bằng dữ liệu demo |
 
 Nguồn donor: [navigation][d-nav], [shell][d-shell], [default][d-default], [file manager][d-files], [tasks][d-tasks], [infrastructure][d-infra], [users][d-users], [roles][d-roles], [auth v2][d-auth]. Donor mang [MIT License][d-license]; đây là ghi nhận nguồn, chưa thực hiện reuse code.
@@ -317,7 +344,7 @@ S01–S14 là mã **màn hình UX**, không phải task ID. Một số là tab/p
 
 ### S01 — Scenes hub
 
-- **Purpose / entry:** trang đầu ứng dụng; tiếp tục công việc hoặc thử mẫu.
+- **Purpose / entry:** thư viện `/scenes`, đi từ Tổng quan hoặc sidebar; tiếp tục công việc hoặc thử mẫu.
 - **Required information:** tên/thumbnail scene, project context cho luồng video, trạng thái theo nghĩa người dùng, cập nhật gần nhất, hành động tiếp theo; mẫu và import chỉ xem/chỉnh có nhãn riêng.
 - **Primary action:** `Scene mới`; trên mỗi scene là `Tiếp tục`, `Xác nhận tỉ lệ`, `Xem kết quả` hoặc `Review` đúng trạng thái/quyền.
 - **Secondary actions:** tìm theo tên, lọc trạng thái, chuyển grid/list; xem mẫu; đăng nhập.
@@ -576,7 +603,7 @@ Các quyết định dưới đây đủ cụ thể để dựng prototype. Cộ
 | Report/replay cùng ngữ cảnh candidate; approval hiển thị riêng với kết quả validation | REQUIREMENT + PROPOSAL bố cục |
 | Một confirmation phê duyệt rồi hệ thống phát hành; UI tách rõ APPROVED/đang phát hành/RELEASED và lỗi phát hành | REQUIREMENT lifecycle, PROPOSAL presentation |
 | Local PLY/SOG export được gắn nhãn bản làm việc; release chỉ từ đúng candidate đã được phê duyệt; tải candidate nội bộ không tự trở thành tính năng bắt buộc | VERIFIED source + PROPOSAL nhãn; REQUIREMENT release |
-| Không tạo landing marketing hoặc analytics dashboard trong prototype đầu tiên | PROPOSAL giới hạn phạm vi |
+| Landing `/landing` từ export Stitch được user giao riêng (§3.1); không thêm analytics dashboard | REQUIREMENT mới từ user + giới hạn scope |
 
 **Kịch bản handoff bắt buộc cho design agent:** một đường RGB chính; một sample replay; một input bị chặn; một job lỗi/retry; một lần metric check không đạt rồi sửa; một edit chưa lưu; một validation fail; một report thiếu media; một rejection → revision mới; một approval → release lỗi rồi phục hồi; một lần mở bằng Editor không có quyền duyệt. Đây là kịch bản prototype, không phải claim kết quả runtime.
 
@@ -645,7 +672,7 @@ Không có quyết định architecture/schema/acceptance nào được sửa đ
 
 - ~~Implement UI, copy donor code~~ — **đã đổi 30/09/2026:** implement UI trong `frontend/` và copy có chọn lọc code UI donor (MIT, ghi nguồn) nay **trong phạm vi** (§13). Vẫn ngoài phạm vi: sửa backend/schema/contract chỉ để phục vụ UI, đổi production architecture, sửa task/authority documents.
 - Tạo `DESIGN.md`, dựng prototype riêng trong OpenDesign hoặc dùng Impeccable — thay bằng implement trực tiếp trong app (§13).
-- Tạo generic PRD, marketing landing đầy đủ, pricing, billing, CRM, project-management suite hay hệ thống analytics mới.
+- Tạo generic PRD, pricing, billing, CRM, project-management suite hay hệ thống analytics mới. Landing từ export Stitch đã được user yêu cầu riêng (§3.1).
 - Thêm custom role, SSO, chia sẻ công khai, nhiều tổ chức, cộng tác realtime hoặc workflow approval mới.
 - Thiết kế thuật toán reconstruction/physics, tự đặt ngưỡng đánh giá, dùng hình minh họa làm benchmark hoặc cam kết an toàn robot thật.
 - Bắt buộc hỗ trợ mọi import/thiết bị, editor mobile đầy đủ, AI auto-scale hay segmentation nâng cao ngoài P0.
