@@ -262,7 +262,7 @@ def pull_bundle(job_id: str, repo_id: str, out: Path) -> Path:
     return target
 
 
-def _runtime() -> tuple[RuntimeDatabase, Path]:
+def runtime() -> tuple[RuntimeDatabase, Path]:
     """DB runtime và thư mục `jobs/` của artifact store theo Settings của máy này."""
     from src.config import get_settings
     from src.services.orchestration.storage import runtime_resolver
@@ -291,10 +291,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "export":
-            database, jobs_root = _runtime()
+            database, jobs_root = runtime()
             print(export_bundle(database, jobs_root, args.job_id, args.out))
         elif args.command == "import":
-            database, jobs_root = _runtime()
+            database, jobs_root = runtime()
             print(import_bundle(database, jobs_root, args.bundle))
             print("Khởi động lại API/worker đang chạy để thấy job vừa nạp.")
         elif args.command == "push":
