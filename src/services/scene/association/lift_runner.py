@@ -138,6 +138,8 @@ def run(request: dict) -> dict:
     predictor = SAM2ImagePredictor(build_sam2(request["sam2_config"], request["sam2_checkpoint"], device="cuda"))
     width = int(config.get("width", 640))
     prompts_per_object = int(config.get("prompts", 4))
+    #: Số vật hỏi SAM2 trong một lô; tự giảm khi hết VRAM (xem vòng lặp dự đoán).
+    sam_batch = int(config.get("sam_batch", 32))
     min_visible = int(config.get("min_visible_seeds", 8))
     contribution = torch.zeros((count, objects), dtype=torch.float32)
     # Tổng đóng góp của Gaussian i trong các góc mà vật k có mask: mẫu số riêng cho từng vật, để góc
@@ -188,14 +190,24 @@ def run(request: dict) -> dict:
         accepted: list[tuple[int, np.ndarray]] = []
         with torch.inference_mode(), torch.autocast("cuda", dtype=torch.float16):
             predictor.set_image(image)
-            for start in range(0, len(candidates), 32):
-                chunk = candidates[start : start + 32]
+            start = 0
+            while start < len(candidates):
+                chunk = candidates[start : start + sam_batch]
                 coords = np.stack([spread_prompts(points, prompts_per_object) for _, points in chunk]).astype(
                     np.float32
                 )
-                masks, scores, _ = predictor.predict(
-                    point_coords=coords, point_labels=np.ones(coords.shape[:2]), multimask_output=False
-                )
+                try:
+                    masks, scores, _ = predictor.predict(
+                        point_coords=coords, point_labels=np.ones(coords.shape[:2]), multimask_output=False
+                    )
+                except torch.cuda.OutOfMemoryError:
+                    # Hết VRAM: giảm nửa lô và làm lại đúng lô này; lô nhỏ hơn được giữ cho các view sau.
+                    if sam_batch == 1:
+                        raise
+                    torch.cuda.empty_cache()
+                    sam_batch = max(1, sam_batch // 2)
+                    continue
+                start += len(chunk)
                 masks = masks.reshape(len(chunk), h, w) > 0
                 for (index, points), mask, score in zip(chunk, masks, scores.reshape(-1), strict=True):
                     hit = mask[points[:, 1].astype(int), points[:, 0].astype(int)].mean()

@@ -114,6 +114,13 @@ Giới hạn đã biết:
 - Vật thêm từ thư viện hiện bằng hộp trên web; trong USD là tham chiếu URL asset Isaac (chưa mở thử trong Isaac).
 - Vật chưa gán nhãn được xuất với khối lượng mặc định (mật độ giả định × thể tích).
 - Chưa mở USD lai trong Isaac Sim (chưa có máy RTX); LiDAR trên Gaussian vẫn UNKNOWN.
+- gsplat biên dịch kernel CUDA lúc chạy; nếu cache kernel hỏng và máy thiếu `Python.h` thì bước gán nhãn lỗi và
+  job lùi về đường hộp mà vẫn `SUCCEEDED` (đã gặp trên `job-1421190ff700`, sửa bằng dựng lại kernel + `scripts/scene/reobjectify.py`).
+- Không có checkpoint giữa chừng: đứt giữa lúc train 3DGS là train lại từ đầu (xem plan).
+
+Bổ sung 2026-10-01 (job mới đầu-cuối `job-1421190ff700`): collider ∥ vá nền chạy song song (vá nền xong sau
+3 phút 23 giây trong lúc CoACD đang chạy); số đo thời gian trên máy local lần này **không** dùng để so sánh vì
+chạy dưới trần CPU và bị watchdog nhiệt ngắt quãng.
 
 ## Alternatives Considered
 

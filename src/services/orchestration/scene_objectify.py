@@ -3,7 +3,7 @@
 Điều phối các provider qua process riêng trong runtime GPU (`data/scene_runtime`):
 
     hạt giống SAMPro3D → gán nhãn theo đóng góp render (`lift_runner`) → cắt PLY (numpy)
-    → collider phân rã lồi (`convex_runner`) → vá nền (`inpaint_runner`) → nén SOG cho web
+    → collider phân rã lồi (`convex_runner`, CPU) ∥ vá nền (`inpaint_runner`, GPU) → nén SOG cho web
 
 Mọi đầu ra publish thành artifact bất biến theo nội dung; module trả phần `SceneEnvironment` +
 `SceneObject` để nơi gọi ghi revision SceneIR (revision đầu của job mới, hoặc revision kế tiếp khi
@@ -16,6 +16,7 @@ import json
 import logging
 import subprocess
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -192,39 +193,29 @@ def objectify(
     for part in parts:
         (workspace / f"object_{part.index:03d}.ply").write_bytes(gaussian_split.write_gaussian_ply(part.rows))
 
-    convex = _run(
-        python,
-        CONVEX_RUNNER,
-        {
-            "objects": [
-                {
-                    "id": str(part.index),
-                    "gaussians_ply": str(workspace / f"object_{part.index:03d}.ply"),
-                    "output_glb": str(workspace / f"object_{part.index:03d}.glb"),
-                }
-                for part in parts
-            ]
-        },
-        workspace,
-        "convex",
-        timeout,
-    )
+    # Collider chỉ dùng CPU, vá nền chỉ dùng GPU, và hai bước không đọc kết quả của nhau → chạy song song.
+    convex_request = {
+        "objects": [
+            {
+                "id": str(part.index),
+                "gaussians_ply": str(workspace / f"object_{part.index:03d}.ply"),
+                "output_glb": str(workspace / f"object_{part.index:03d}.glb"),
+            }
+            for part in parts
+        ]
+    }
+    inpaint_request = {
+        "background_ply": str(workspace / "background.ply"),
+        "objects_ply": str(workspace / "objects_world.ply"),
+        "output_ply": str(workspace / "background_inpainted.ply"),
+        "lama_checkpoint": str(settings.product_lama_checkpoint) if settings.product_lama_checkpoint else None,
+        "views": view_requests,
+    }
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        convex_job = pool.submit(_run, python, CONVEX_RUNNER, convex_request, workspace, "convex", timeout)
+        inpaint_job = pool.submit(_run, python, INPAINT_RUNNER, inpaint_request, workspace, "inpaint", timeout)
+        convex, inpaint = convex_job.result(), inpaint_job.result()
     colliders = {int(item["id"]): item for item in convex["objects"]}
-
-    inpaint = _run(
-        python,
-        INPAINT_RUNNER,
-        {
-            "background_ply": str(workspace / "background.ply"),
-            "objects_ply": str(workspace / "objects_world.ply"),
-            "output_ply": str(workspace / "background_inpainted.ply"),
-            "lama_checkpoint": str(settings.product_lama_checkpoint) if settings.product_lama_checkpoint else None,
-            "views": view_requests,
-        },
-        workspace,
-        "inpaint",
-        timeout,
-    )
     try:
         sog = package_splat(
             workspace / "background_inpainted.ply", workspace / "sog", settings.product_geometry_gpu_index

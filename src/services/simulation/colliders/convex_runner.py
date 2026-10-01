@@ -104,7 +104,10 @@ def build_one(item: dict, config: dict) -> dict:
 def build(request: dict) -> dict:
     """Dựng collider cho mọi vật trong request (song song theo vật); trả tóm tắt từng vật."""
     config = request.get("config") or {}
-    workers = int(config.get("workers") or max(1, min(8, (os.cpu_count() or 2) // 2)))
+    # Mặc định dùng gần hết số nhân được cấp (theo affinity/cgroup của tiến trình), chừa 1 nhân cho bước GPU
+    # chạy song song; không cần nhiều tiến trình hơn số vật.
+    cores = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 2)
+    workers = int(config.get("workers") or max(1, min(len(request["objects"]), cores - 1)))
     items = request["objects"]
     if workers <= 1 or len(items) <= 1:
         results = [build_one(item, config) for item in items]
