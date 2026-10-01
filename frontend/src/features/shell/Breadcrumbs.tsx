@@ -12,6 +12,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/shadcn/breadcrumb";
 import { inspectionStage, progressHref } from "@/features/studio/inspection";
+import { APP_HOME } from "@/lib/routes";
 
 interface Crumb {
   label: string;
@@ -39,7 +40,7 @@ export function usePageTitle(title: string | null): void {
 
 export function crumbsFor(pathname: string, detailTitle?: string | null): Crumb[] {
   const scenes: Crumb = { label: "Scenes", href: "/scenes" };
-  if (pathname === "/") return [{ label: "Tổng quan" }];
+  if (pathname === APP_HOME) return [{ label: "Tổng quan" }];
   if (pathname === "/scenes") return [{ label: "Scenes" }];
   if (pathname.startsWith("/new")) return [scenes, { label: "Scene mới" }];
   if (pathname.startsWith("/jobs")) return [{ label: "Jobs" }];
@@ -50,7 +51,7 @@ export function crumbsFor(pathname: string, detailTitle?: string | null): Crumb[
   const inspection = /^\/scenes\/([^/]+)\/stages\/([^/]+)$/.exec(pathname);
   if (inspection) return [scenes, { label: detailTitle ?? "Scene", href: progressHref(decodeURIComponent(inspection[1])) }, { label: inspectionStage(inspection[2])?.title ?? "Giai đoạn" }];
   if (pathname.startsWith("/scenes/")) return [scenes, { label: detailTitle ?? "Đang tải scene…" }];
-  return [{ label: "Tổng quan", href: "/" }];
+  return [{ label: "Tổng quan", href: APP_HOME }];
 }
 
 export function Breadcrumbs({ pathname }: { pathname: string }) {

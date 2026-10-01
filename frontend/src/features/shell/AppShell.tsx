@@ -35,11 +35,12 @@ import {
 import { Breadcrumbs, PageTitleProvider } from "@/features/shell/Breadcrumbs";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { isReviewer } from "@/lib/api/auth";
+import { APP_HOME } from "@/lib/routes";
 
 /** IA Tổng quan/Scenes theo PRODUCT.md §3.1; thao tác tạo scene nằm trong Scenes. */
 const NAV = [
   { heading: "Ứng dụng", items: [
-    { href: "/", label: "Tổng quan", icon: LayoutDashboard, reviewerOnly: false },
+    { href: APP_HOME, label: "Tổng quan", icon: LayoutDashboard, reviewerOnly: false },
   ] },
   { heading: "Công việc", items: [
     { href: "/scenes", label: "Scenes", icon: Clapperboard, reviewerOnly: false },
@@ -54,7 +55,6 @@ const NAV = [
 const BARE_ROUTES = ["/login", "/register"];
 
 export function isActive(pathname: string, href: string): boolean {
-  if (href === "/") return pathname === "/";
   if (href === "/scenes") return pathname === "/scenes" || pathname === "/new" || ["/scenes/", "/imports/", "/samples/"].some((route) => pathname.startsWith(route));
   return pathname === href || pathname.startsWith(`${href}/`);
 }
@@ -92,7 +92,7 @@ function AppSidebar({ pathname }: { pathname: string }) {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton asChild size="lg" tooltip="Real2Sim Studio">
-              <Link href="/">
+              <Link href={APP_HOME}>
                 <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
                   <Box className="size-4" aria-hidden />
                 </span>

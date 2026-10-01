@@ -10,21 +10,23 @@ import type { JobProgress } from "@/lib/contracts/studio";
 
 describe("ngữ cảnh điều hướng", () => {
   it("active đúng nhóm route, không nhận prefix trùng tên", () => {
-    expect(isActive("/", "/")).toBe(true);
-    expect(isActive("/scenes/job-a", "/")).toBe(false);
+    expect(isActive("/overview", "/overview")).toBe(true);
+    expect(isActive("/scenes/job-a", "/overview")).toBe(false);
+    expect(isActive("/", "/overview")).toBe(false); // `/` là landing, không phải Tổng quan
     expect(isActive("/scenes", "/scenes")).toBe(true);
     expect(isActive("/scenes/job-a", "/scenes")).toBe(true);
     expect(isActive("/imports/import-a", "/scenes")).toBe(true);
     expect(isActive("/new", "/scenes")).toBe(true);
     expect(isActive("/", "/scenes")).toBe(false);
     expect(isActive("/scenes-old", "/scenes")).toBe(false);
-    expect(isActive("/newish", "/")).toBe(false);
+    expect(isActive("/overview-old", "/overview")).toBe(false);
     expect(isActive("/jobs-old", "/jobs")).toBe(false);
     expect(isActive("/jobs", "/jobs")).toBe(true);
   });
 
   it("Tổng quan tách khỏi Scenes; breadcrumb chi tiết quay lại thư viện", () => {
-    expect(crumbsFor("/")).toEqual([{ label: "Tổng quan" }]);
+    expect(crumbsFor("/overview")).toEqual([{ label: "Tổng quan" }]);
+    expect(crumbsFor("/trang-la")).toEqual([{ label: "Tổng quan", href: "/overview" }]);
     expect(crumbsFor("/scenes")).toEqual([{ label: "Scenes" }]);
     expect(crumbsFor("/scenes/job-a", "Kho A")).toEqual([{ label: "Scenes", href: "/scenes" }, { label: "Kho A" }]);
     expect(crumbsFor("/new")[0].href).toBe("/scenes");

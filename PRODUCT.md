@@ -125,14 +125,29 @@ Người dùng mở ứng dụng để tiếp tục một scene hoặc tạo sce
 
 ### 3.1 IA đề xuất cho prototype
 
-**DECISION (user, 01/10/2026 — landing page Stitch):** tích hợp landing page
-user cung cấp tại `/landing`, ngoài AppShell. Giữ bố cục/SVG của export và dùng
-Next.js/Tailwind hiện có; các CTA `Open Studio` dẫn tới `/` (Tổng quan app).
-Landing là trang giới thiệu với scene/metric/trạng thái minh họa được ghi nhãn,
-không phải report backend hoặc bằng chứng validation. Scope này thay giới hạn
-proposal trước đây không tạo landing; không thêm pricing/billing/analytics.
+**DECISION (user, 01/10/2026 — trang đầu và cửa vào app; thay phần route của hai
+quyết định bên dưới):** landing là **trang đầu tiên khi mở domain**, ở `/`, ngoài
+AppShell. Trang chính của ứng dụng là **Tổng quan** ở `/overview`. Các CTA
+`Open Studio` của landing dẫn vào app **qua màn đăng nhập** (`/login?next=/overview`;
+màn đăng nhập có lối sang đăng ký bằng mã mời và lối thử video mẫu cho khách).
+Người đã đăng nhập bấm CTA thì được chuyển thẳng tới Tổng quan; deployment không
+bật đăng nhập (chế độ local, không có tài khoản) cũng được chuyển thẳng. Sau đăng
+nhập/đăng ký không có đích cụ thể thì về `/overview`, không về landing. `/landing`
+cũ chuyển hướng về `/`; route legacy chuyển hướng về `/overview`. Khách vẫn mở
+trực tiếp được các trang công khai của app (video mẫu, bản Tổng quan cho khách)
+theo ADR 0003 §3; backend vẫn kiểm quyền trên từng route.
 
-**DECISION (user, 01/10/2026):** trang đầu `/` là **Tổng quan**: giới thiệu Studio,
+**DECISION (user, 01/10/2026 — landing page Stitch; route đã thay bởi quyết định
+trên):** tích hợp landing page user cung cấp, ngoài AppShell (ban đầu tại
+`/landing`, nay tại `/`). Giữ bố cục/SVG của export và dùng Next.js/Tailwind hiện
+có; các CTA `Open Studio` dẫn vào app (ban đầu tới `/`, nay qua đăng nhập tới
+`/overview`). Landing là trang giới thiệu với scene/metric/trạng thái minh họa
+được ghi nhãn, không phải report backend hoặc bằng chứng validation. Scope này
+thay giới hạn proposal trước đây không tạo landing; không thêm
+pricing/billing/analytics.
+
+**DECISION (user, 01/10/2026; route đã thay bởi quyết định đầu mục này):** trang
+chính của app là **Tổng quan** (ban đầu ở `/`, nay ở `/overview`): giới thiệu Studio,
 tóm tắt hành trình, loại đầu vào và tổng hợp công việc từ API hiện có. Thư viện
 scene có route riêng `/scenes`. Global sidebar: `Tổng quan` · `Scenes` · `Jobs` ·
 `Nhóm` (Reviewer). Nút `Scene mới` nằm trong trang `/scenes`, không lặp ở sidebar
@@ -185,7 +200,7 @@ không bịa profile. Backend profile/password không thuộc đợt frontend n�
 | CRM, Finance, Analytics, Productivity, E-commerce, Academy, Logistics, Patient Monitoring | **REJECT** | Domain/dashboard không phục vụ hành trình dựng và duyệt scene; không tái dùng số liệu hay biểu đồ để lấp trang |
 | Chat, Mail (cả độc lập và dưới dashboard), Calendar, Kanban, Invoice | **REJECT** | Không thêm cộng tác realtime, email, lịch, task board hoặc thanh toán |
 | Legacy donor: Default/CRM/Finance/Analytics v1; Coming soon | **REJECT** | Không giữ menu phiên bản cũ hoặc link chết |
-| Trang ngoài dashboard của donor | **REJECT nội dung template** | Không lấy trang marketing của dashboard donor. User đã giao riêng export Stitch cho `/landing` ngày 01/10/2026 (§3.1) |
+| Trang ngoài dashboard của donor | **REJECT nội dung template** | Không lấy trang marketing của dashboard donor. User đã giao riêng export Stitch làm landing ngày 01/10/2026, nay là trang đầu `/` (§3.1) |
 | Theme/layout playground, GitHub menu, support card, account switcher mẫu | **REJECT khỏi UX sản phẩm** | Dùng palette đã cho, một hệ navigation; hiện tài khoản thật, không đổi user bằng dữ liệu demo |
 
 Nguồn donor: [navigation][d-nav], [shell][d-shell], [default][d-default], [file manager][d-files], [tasks][d-tasks], [infrastructure][d-infra], [users][d-users], [roles][d-roles], [auth v2][d-auth]. Donor mang [MIT License][d-license]; đây là ghi nhận nguồn, chưa thực hiện reuse code.
@@ -365,7 +380,7 @@ S01–S14 là mã **màn hình UX**, không phải task ID. Một số là tab/p
 - **Primary action:** `Đăng nhập` hoặc `Tạo tài khoản bằng mã mời`.
 - **Secondary actions:** chuyển giữa hai màn, quay lại video mẫu; không có role toggle hoặc SSO.
 - **States:** nhập, validation field, đang gửi, sai thông tin/mã mời, tài khoản không hoạt động, thành công; không hiển thị mật khẩu trong phản hồi.
-- **Exit / transition:** trở lại entry hợp lệ đã yêu cầu hoặc S01. Illustration phụ không đẩy form/feedback xuống dưới màn hình.
+- **Exit / transition:** trở lại entry hợp lệ đã yêu cầu, mặc định là Tổng quan `/overview` (§3.1); người đã có phiên — hoặc deployment không bật đăng nhập — không thấy form mà được chuyển thẳng tới đích. Illustration phụ không đẩy form/feedback xuống dưới màn hình.
 
 ### S03 — Scene mới: nguồn và thiết lập
 
@@ -610,7 +625,7 @@ Các quyết định dưới đây đủ cụ thể để dựng prototype. Cộ
 | Report/replay cùng ngữ cảnh candidate; approval hiển thị riêng với kết quả validation | REQUIREMENT + PROPOSAL bố cục |
 | Một confirmation phê duyệt rồi hệ thống phát hành; UI tách rõ APPROVED/đang phát hành/RELEASED và lỗi phát hành | REQUIREMENT lifecycle, PROPOSAL presentation |
 | Local PLY/SOG export được gắn nhãn bản làm việc; release chỉ từ đúng candidate đã được phê duyệt; tải candidate nội bộ không tự trở thành tính năng bắt buộc | VERIFIED source + PROPOSAL nhãn; REQUIREMENT release |
-| Landing `/landing` từ export Stitch được user giao riêng (§3.1); không thêm analytics dashboard | REQUIREMENT mới từ user + giới hạn scope |
+| Landing từ export Stitch được user giao riêng, là trang đầu `/`; CTA vào app qua đăng nhập (§3.1); không thêm analytics dashboard | REQUIREMENT mới từ user + giới hạn scope |
 
 **Kịch bản handoff bắt buộc cho design agent:** một đường RGB chính; một sample replay; một input bị chặn; một job lỗi/retry; một lần metric check không đạt rồi sửa; một edit chưa lưu; một validation fail; một report thiếu media; một rejection → revision mới; một approval → release lỗi rồi phục hồi; một lần mở bằng Editor không có quyền duyệt. Đây là kịch bản prototype, không phải claim kết quả runtime.
 

@@ -1,6 +1,8 @@
 import Link from "next/link";
 
-/** Adapt từ export Stitch user cung cấp; SVG/metrics là minh họa, CTA mở app thật. */
+import { STUDIO_ENTRY } from "@/lib/routes";
+
+/** Adapt từ export Stitch user cung cấp; SVG/metrics là minh họa, CTA mở app thật qua màn đăng nhập. */
 export function LandingPage() {
   return (
     <main id="landing-top" className="landing-page bg-[#F5EFE6] text-[#2B2520] selection:bg-[#FBE3D3] selection:text-[#C2551F]">
@@ -39,7 +41,7 @@ export function LandingPage() {
       <div className={"flex items-center gap-4"}>
         <a href={"#documentation"} className={"hidden sm:inline-flex text-xs font-mono-tech text-[#6B5F52] hover:text-[#2B2520] items-center gap-1.5"}>
           <span className={"w-1.5 h-1.5 rounded-full bg-[#5E8C61]"}></span>{"\n          Design preview\n        "}</a>
-        <Link href={"/"} className={"inline-flex items-center justify-center px-4 py-2 text-sm font-semibold text-white rounded-md bg-[#C2551F] hover:bg-[#E8743B] transition-all shadow-sm active:translate-y-px focus:outline-none focus:ring-2 focus:ring-[#E8743B] focus:ring-offset-2 focus:ring-offset-[#F5EFE6]"}>{"\n          Open Studio\n          "}<svg className={"w-4 h-4 ml-1.5"} fill={"none"} viewBox={"0 0 24 24"} stroke={"currentColor"} aria-hidden={"true"}>
+        <Link href={STUDIO_ENTRY} className={"inline-flex items-center justify-center px-4 py-2 text-sm font-semibold text-white rounded-md bg-[#C2551F] hover:bg-[#E8743B] transition-all shadow-sm active:translate-y-px focus:outline-none focus:ring-2 focus:ring-[#E8743B] focus:ring-offset-2 focus:ring-offset-[#F5EFE6]"}>{"\n          Open Studio\n          "}<svg className={"w-4 h-4 ml-1.5"} fill={"none"} viewBox={"0 0 24 24"} stroke={"currentColor"} aria-hidden={"true"}>
             <path strokeLinecap={"round"} strokeLinejoin={"round"} strokeWidth={"2"} d={"M14 5l7 7m0 0l-7 7m7-7H3"} />
           </svg>
         </Link>
@@ -76,7 +78,7 @@ export function LandingPage() {
 
 
           <div className={"flex flex-wrap items-center gap-4 mb-10"}>
-            <Link href={"/"} className={"px-6 py-3.5 text-sm font-semibold text-white rounded-md bg-[#C2551F] hover:bg-[#E8743B] transition-all shadow-sm flex items-center gap-2 group"}>
+            <Link href={STUDIO_ENTRY} className={"px-6 py-3.5 text-sm font-semibold text-white rounded-md bg-[#C2551F] hover:bg-[#E8743B] transition-all shadow-sm flex items-center gap-2 group"}>
               <span>{"Open Studio"}</span>
               <svg className={"w-4 h-4 transform group-hover:translate-x-1 transition-transform"} fill={"none"} viewBox={"0 0 24 24"} stroke={"currentColor"} aria-hidden={"true"}>
                 <path strokeLinecap={"round"} strokeLinejoin={"round"} strokeWidth={"2"} d={"M14 5l7 7m0 0l-7 7m7-7H3"} />
@@ -1253,7 +1255,7 @@ export function LandingPage() {
       <p className={"text-xl sm:text-2xl font-mono-tech text-[#E8743B] mb-10 tracking-wide"}>{"\n        Reconstruct. Inspect. Validate.\n      "}</p>
 
       <div className={"flex flex-wrap items-center justify-center gap-5"}>
-        <Link href={"/"} className={"px-8 py-4 text-base font-semibold text-white rounded-md bg-[#C2551F] hover:bg-[#E8743B] transition-all shadow-md active:translate-y-px"}>{"\n          Open Real2Sim Studio\n        "}</Link>
+        <Link href={STUDIO_ENTRY} className={"px-8 py-4 text-base font-semibold text-white rounded-md bg-[#C2551F] hover:bg-[#E8743B] transition-all shadow-md active:translate-y-px"}>{"\n          Open Real2Sim Studio\n        "}</Link>
         <a href={"#documentation"} className={"px-8 py-4 text-base font-semibold text-[#FBF8F3] rounded-md bg-[#2B2520] hover:bg-[#38312B] border border-[rgba(245,239,230,0.15)] transition-all"}>{"\n          View Documentation\n        "}</a>
       </div>
 

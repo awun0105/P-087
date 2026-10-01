@@ -755,6 +755,26 @@ runtime; Chrome headless điều khiển qua CDP (click/gõ thật). Không ph�
   luồng tạo scene/import/trang giai đoạn với tài khoản thật; nội dung landing vẫn là minh hoạ (một số mục như
   CARLA, ROS2/pcap, "Sub-cm" không phải năng lực đã có của pipeline).
 
+### Trang đầu = landing, cửa vào app qua đăng nhập — 2026-10-01 (trên `feat/pipeline-v2`)
+
+- **Authority:** quyết định của user ghi ở PRODUCT §3.1 (thay phần route của hai quyết định cũ): `/` là landing,
+  Tổng quan ở `/overview`, CTA `Open Studio` → `/login?next=/overview`.
+- **Changed:** `app/page.tsx` (landing, chuyển từ `app/landing/`), `app/(studio)/overview/page.tsx` (Tổng quan, chuyển
+  từ `app/(studio)/page.tsx`), `lib/routes.ts` (`LANDING`, `APP_HOME`, `STUDIO_ENTRY`), AppShell/Breadcrumbs/OverviewPage
+  trỏ `APP_HOME`, `AuthForms` (đích mặc định `APP_HOME`; cổng vào: đã có phiên hoặc chế độ local thì `replace` tới
+  đích, đang đọc phiên thì không vẽ form), `next.config.ts` (`/landing` → `/`, legacy → `/overview`).
+- **VERIFIED — unit:** 37 file / 222 test, tsc, eslint, `next build` (`/`, `/overview`, `/login`, `/register` static).
+- **VERIFIED — browser, API bật đăng nhập (bản production, Chrome headless bấm/gõ thật), 21/21 bước:** mở `/` thấy
+  landing không có khung app; 3 CTA cùng trỏ `/login?next=%2Foverview`; khách bấm CTA dừng ở form đăng nhập (có lối
+  "Tạo tài khoản" và "Thử với video mẫu"); sai mật khẩu báo "Sai email hoặc mật khẩu"; đúng thì vào `/overview`; đã
+  đăng nhập mở `/` vẫn thấy landing và bấm CTA thì qua `/login` rồi vào thẳng `/overview` không thấy form; đăng ký bằng
+  link mời (không có `next`) về `/overview`; đã đăng nhập mở `/register` được chuyển vào app; khách gõ `/overview` thấy
+  bản cho khách; `/landing` → `/`; `/projects` → `/overview`.
+- **VERIFIED — browser, chế độ local (`AUTH_REQUIRED=false`, dev server):** `/` là landing; bấm CTA đi qua `/login` rồi
+  vào thẳng `/overview` ("Chế độ local · không đăng nhập").
+- **Limits:** chưa thử trên deployment HTTPS thật; landing chưa có nút "Sign in"/"Sign up" riêng (đi qua CTA); nội
+  dung minh hoạ của landing chưa rà lại theo Claims Boundary của PRD.
+
 ### Publication check — user yêu cầu commit & push, 2026-10-01
 
 - User đã giao commit/push phần UI/UX đang có trên `feat/studio-ux-restructure`.

@@ -12,6 +12,7 @@ import { sceneStatus } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
 import { canEdit } from "@/lib/api/auth";
 import { listImports, listScenes } from "@/lib/api/studio";
+import { STUDIO_ENTRY } from "@/lib/routes";
 import type { ImportedScene, SceneSummary } from "@/lib/contracts/studio";
 
 const JOURNEY = [
@@ -47,7 +48,7 @@ export function OverviewPage() {
         </div>
         {me === null ? <p role="status" className="text-sm text-ink-muted">Đang kiểm tra quyền truy cập…</p>
           : signedIn ? <WorkSummary key={me.user?.user_id ?? "local"} />
-            : <Card className="p-5"><p className="font-medium">Khám phá Studio với mẫu đã xử lý sẵn</p><p className="mt-2 text-sm leading-relaxed text-ink-muted">Mở Scenes để xem mẫu. Đăng nhập để xem công việc của nhóm, tải dữ liệu riêng và tạo scene.</p><Link href="/login?next=/" className="mt-3 inline-block text-sm font-medium text-ember-strong hover:underline">Đăng nhập để xem tổng hợp</Link></Card>}
+            : <Card className="p-5"><p className="font-medium">Khám phá Studio với mẫu đã xử lý sẵn</p><p className="mt-2 text-sm leading-relaxed text-ink-muted">Mở Scenes để xem mẫu. Đăng nhập để xem công việc của nhóm, tải dữ liệu riêng và tạo scene.</p><Link href={STUDIO_ENTRY} className="mt-3 inline-block text-sm font-medium text-ember-strong hover:underline">Đăng nhập để xem tổng hợp</Link></Card>}
       </section>
 
       <section aria-labelledby="journey-heading">

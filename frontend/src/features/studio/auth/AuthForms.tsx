@@ -5,7 +5,7 @@ import { authErrorMessage } from "@/lib/ui-error";
 import { Box, Loader2, LogIn, UserPlus } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useRouter, useSearchParams } from "next/navigation";
-import { cloneElement, isValidElement, useId, useState, type ComponentProps } from "react";
+import { cloneElement, isValidElement, useEffect, useId, useRef, useState, type ComponentProps } from "react";
 
 import { Input } from "@/components/shadcn/input";
 import { Label } from "@/components/shadcn/label";
@@ -13,13 +13,32 @@ import { Button, Notice } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { notifySuccess, FieldError } from "@/components/studio/feedback";
 import { login, register } from "@/lib/api/auth";
+import { APP_HOME } from "@/lib/routes";
 
 const INPUT = "mt-1.5 h-10";
 
-/** Chỉ cho quay lại đường dẫn nội bộ (tránh open redirect qua `?next=`). */
+/** Chỉ cho quay lại đường dẫn nội bộ (tránh open redirect qua `?next=`); thiếu/không hợp lệ thì về Tổng quan của app. */
 export function safeNext(value: string | null): string {
-  if (!value || !value.startsWith("/") || value.startsWith("//") || /[\\\u0000-\u001f]/.test(value)) return "/";
+  if (!value || !value.startsWith("/") || value.startsWith("//") || /[\\\u0000-\u001f]/.test(value)) return APP_HOME;
   return value;
+}
+
+/**
+ * Màn đăng nhập/đăng ký là cửa vào app từ landing. Ai không cần qua cửa — đã đăng nhập, hoặc deployment không bật
+ * đăng nhập (chế độ local, không có tài khoản nào để đăng nhập) — được chuyển thẳng tới đích. Trả `true` khi
+ * chưa nên vẽ form: đang đọc phiên (`me === null`) hoặc đang chuyển đi.
+ */
+function useEntryGate(next: string): { pending: boolean; markNavigated: () => void } {
+  const router = useRouter();
+  const { me } = useAuth();
+  const navigated = useRef(false);
+  const passThrough = me !== null && (!me.auth_required || me.user !== null);
+  useEffect(() => {
+    if (!passThrough || navigated.current) return;
+    navigated.current = true;
+    router.replace(next);
+  }, [passThrough, next, router]);
+  return { pending: me === null || passThrough, markNavigated: () => { navigated.current = true; } };
 }
 
 function Field({ id, label, children, error }: { id: string; label: string; children: React.ReactNode; error?: string }) {
@@ -95,10 +114,24 @@ function Shell({ title, lead, children }: { title: string; lead: string; childre
   );
 }
 
+/** Đang đọc phiên hoặc đang chuyển tới đích: giữ khung trang, không nháy form cho người không cần đăng nhập. */
+function EntryPending() {
+  return (
+    <main className="grid min-h-dvh place-items-center bg-paper text-ink" role="status" aria-live="polite">
+      <p className="flex items-center gap-2 text-sm text-ink-muted">
+        <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
+        Đang kiểm tra phiên đăng nhập…
+      </p>
+    </main>
+  );
+}
+
 export function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const { refresh } = useAuth();
+  const next = safeNext(params.get("next"));
+  const gate = useEntryGate(next);
   const { fieldErrors, validate } = useFieldValidation();
   const ids = { email: useId(), password: useId() };
   const [email, setEmail] = useState("");
@@ -113,15 +146,17 @@ export function LoginForm() {
     setError(null);
     try {
       await login(email, password);
+      gate.markNavigated(); // form tự điều hướng; không để cổng vào `replace` thêm lần nữa khi phiên vừa có
       await refresh();
       notifySuccess("Đã đăng nhập.");
-      router.push(safeNext(params.get("next")));
+      router.push(next);
     } catch (cause) {
       setError(authErrorMessage(cause, "Đăng nhập thất bại"));
       setBusy(false);
     }
   }
 
+  if (gate.pending && !busy) return <EntryPending />;
   return (
     <Shell title="Đăng nhập" lead="Dành cho thành viên nhóm. Khách vẫn có thể thử video mẫu mà không cần tài khoản.">
       <form onInvalid={validate} onBlurCapture={validate} onChangeCapture={validate} onSubmit={submit} className="space-y-4">
@@ -138,7 +173,7 @@ export function LoginForm() {
         </Button>
         <p className="text-center text-sm text-ink-muted">
           Có mã mời?{" "}
-          <Link href={"/register?next=" + encodeURIComponent(safeNext(params.get("next")))} className="font-medium text-ember-strong underline-offset-4 hover:underline">
+          <Link href={"/register?next=" + encodeURIComponent(next)} className="font-medium text-ember-strong underline-offset-4 hover:underline">
             Tạo tài khoản
           </Link>
         </p>
@@ -151,6 +186,8 @@ export function RegisterForm() {
   const router = useRouter();
   const params = useSearchParams();
   const { refresh } = useAuth();
+  const next = safeNext(params.get("next"));
+  const gate = useEntryGate(next);
   const { fieldErrors, validate } = useFieldValidation();
   const ids = { code: useId(), name: useId(), email: useId(), password: useId() };
   const [code, setCode] = useState(params.get("code") ?? "");
@@ -167,15 +204,17 @@ export function RegisterForm() {
     setError(null);
     try {
       await register({ invite_code: code.trim(), email, display_name: name.trim(), password });
+      gate.markNavigated();
       await refresh();
       notifySuccess("Đã tạo tài khoản và đăng nhập.");
-      router.push(safeNext(params.get("next")));
+      router.push(next);
     } catch (cause) {
       setError(authErrorMessage(cause, "Không tạo được tài khoản"));
       setBusy(false);
     }
   }
 
+  if (gate.pending && !busy) return <EntryPending />;
   return (
     <Shell title="Tạo tài khoản" lead="Nhập mã mời do Reviewer của nhóm gửi. Mã chỉ dùng được một lần.">
       <form onInvalid={validate} onBlurCapture={validate} onChangeCapture={validate} onSubmit={submit} className="space-y-4">
@@ -196,7 +235,7 @@ export function RegisterForm() {
           {busy ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden /> : <UserPlus aria-hidden />}
           Tạo tài khoản
         </Button>
-        <p className="text-center text-sm text-ink-muted">Đã có tài khoản? <Link href={"/login?next=" + encodeURIComponent(safeNext(params.get("next")))} className="font-medium text-ember-strong hover:underline">Đăng nhập</Link></p>
+        <p className="text-center text-sm text-ink-muted">Đã có tài khoản? <Link href={"/login?next=" + encodeURIComponent(next)} className="font-medium text-ember-strong hover:underline">Đăng nhập</Link></p>
       </form>
     </Shell>
   );

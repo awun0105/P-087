@@ -49,7 +49,7 @@ describe("Tổng quan và thư viện riêng", () => {
     auth.me = { auth_required: true, user: null };
     render(<OverviewPage />);
     expect(screen.getByText("Khám phá Studio với mẫu đã xử lý sẵn")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Đăng nhập để xem tổng hợp" })).toHaveAttribute("href", "/login?next=/");
+    expect(screen.getByRole("link", { name: "Đăng nhập để xem tổng hợp" })).toHaveAttribute("href", "/login?next=%2Foverview");
     expect(listScenes).not.toHaveBeenCalled();
     expect(listImports).not.toHaveBeenCalled();
   });

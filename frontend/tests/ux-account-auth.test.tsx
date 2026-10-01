@@ -5,8 +5,8 @@ import { LoginForm, RegisterForm, safeNext } from "@/features/studio/auth/AuthFo
 import { login, register, type Me } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 
-const state = vi.hoisted(() => ({ me: null as Me | null, refresh: vi.fn(), logout: vi.fn(), push: vi.fn(), search: "" }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: state.push }), useSearchParams: () => new URLSearchParams(state.search) }));
+const state = vi.hoisted(() => ({ me: null as Me | null, refresh: vi.fn(), logout: vi.fn(), push: vi.fn(), replace: vi.fn(), search: "" }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: state.push, replace: state.replace }), useSearchParams: () => new URLSearchParams(state.search) }));
 vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => state }));
 vi.mock("@/lib/api/auth", async (original) => ({ ...(await original<typeof import("@/lib/api/auth")>()), login: vi.fn(), register: vi.fn() }));
 beforeEach(() => { vi.clearAllMocks(); state.me = { auth_required: true, user: null }; state.search = "next=%2Fnew%3Fsource%3Dvideo%26step%3Dsetup"; state.refresh.mockResolvedValue(undefined); });
@@ -59,11 +59,43 @@ describe("tài khoản và đích sau xác thực", () => {
     fireEvent.submit(screen.getByLabelText("Email").closest("form")!);
     expect(await screen.findByText("Mã mời không hợp lệ, đã dùng hoặc đã hết hạn")).toBeInTheDocument();
   });
+  it("cửa vào app: đã đăng nhập hoặc chế độ local thì chuyển thẳng tới đích, không vẽ form", () => {
+    const user = { user_id: "fixture", email: "fixture@example.com", display_name: "Fixture", role: "editor" as const, active: true, daily_job_quota: 10 };
+    // Đang đọc phiên: chưa biết có cần đăng nhập không → không vẽ form, không chuyển hướng.
+    state.me = null;
+    const loading = render(<LoginForm />);
+    expect(screen.getByRole("status")).toHaveTextContent("Đang kiểm tra phiên đăng nhập");
+    expect(screen.queryByLabelText("Email")).toBeNull();
+    expect(state.replace).not.toHaveBeenCalled();
+    loading.unmount();
+
+    // Đã đăng nhập: CTA của landing đi qua /login nhưng người dùng tới thẳng đích.
+    state.me = { auth_required: true, user };
+    const signedIn = render(<LoginForm />);
+    expect(state.replace).toHaveBeenCalledTimes(1);
+    expect(state.replace).toHaveBeenCalledWith("/new?source=video&step=setup");
+    expect(screen.queryByLabelText("Email")).toBeNull();
+    signedIn.unmount();
+
+    // Chế độ local (không bật đăng nhập): không có tài khoản để đăng nhập → vào thẳng app; thiếu next thì về Tổng quan.
+    state.replace.mockClear();
+    state.search = "";
+    state.me = { auth_required: false, user: null };
+    const local = render(<LoginForm />);
+    expect(state.replace).toHaveBeenCalledWith("/overview");
+    local.unmount();
+
+    state.replace.mockClear();
+    state.me = { auth_required: true, user };
+    render(<RegisterForm />);
+    expect(state.replace).toHaveBeenCalledWith("/overview");
+    expect(screen.queryByLabelText("Mã mời")).toBeNull();
+  });
   it("đăng ký giữ next và từ chối đích chuyển ra ngoài", () => {
     render(<RegisterForm />);
     expect(screen.getByRole("link", { name: /Đăng nhập/ })).toHaveAttribute("href", expect.stringContaining("next="));
     expect(register).not.toHaveBeenCalled();
-    expect(safeNext("/\\evil.example")).toBe("/");
-    expect(safeNext("/path\n")).toBe("/");
+    expect(safeNext("/\\evil.example")).toBe("/overview");
+    expect(safeNext("/path\n")).toBe("/overview");
   });
 });
