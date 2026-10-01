@@ -28,6 +28,16 @@ mkdir -p /opt/real2sim/runtime && cd /opt/real2sim/runtime
 #    thể thêm `--gpus all` nếu bật use_gpu trong processing config.
 ```
 
+Runtime tách scene theo vật (pipeline v2, ADR 0007 — SAM2, gsplat, CoACD, usd-core, LaMa):
+
+```bash
+sudo apt install python3.12-dev               # header để gsplat biên dịch kernel CUDA (cần nvcc)
+scripts/gpu/setup_scene_runtime.sh /opt/real2sim/scene_runtime
+# in ra 3 biến PRODUCT_SCENE_RUNTIME_PYTHON / PRODUCT_SAM2_CHECKPOINT / PRODUCT_LAMA_CHECKPOINT
+```
+
+Thiếu runtime này job vẫn chạy: bước tách vật lùi về hộp ứng viên (ADR 0006) hoặc tách hình học.
+
 Copy `scripts/gpu/studio.env.example` → `scripts/gpu/studio.env`, sửa đường dẫn.
 Giá trị JSON giữ nháy đơn. Sinh runtime manifest **trên chính máy này**:
 

@@ -35,7 +35,7 @@ export function ResultsTab({ jobId, preview }: { jobId: string; preview: Preview
         icon={<ClipboardCheck aria-hidden />}
         title="Gói mô phỏng (candidate)"
         badge={pkg?.package_ref ? <Badge tone="ochre">{pkg.scene_revision} · đã qua preflight, chưa validation</Badge> : <Badge tone="neutral">Chưa có</Badge>}
-        body="OpenUSD (scene.usda + collider môi trường) của đúng revision hiện tại, để chạy kiểm tra trong Isaac Sim. Không phải bản phát hành."
+        body="OpenUSD của đúng revision hiện tại cho Isaac Sim ≥ 5.0: hình bằng Gaussian (nền đã vá + từng vật đã xác nhận), collider, khối lượng và nhãn. Scene dựng bằng đường cũ chỉ có collider. Không phải bản phát hành."
         action={
           pkg?.package_ref ? (
             <a href={simulationPackageDownloadUrl(jobId)} className={buttonVariants({ variant: "secondary", size: "sm" })}>

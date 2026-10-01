@@ -81,7 +81,8 @@ export function SimulationPackagePanel({
       {error && <p className="text-xs text-rust">{error}</p>}
       {!pkg && !error && (
         <p className="text-xs text-ink-muted">
-          Chỉ vật đã xác nhận đi vào gói. Hệ thống khoét chỗ vật khỏi mesh môi trường, gắn collider hộp, rồi kiểm
+          Chỉ vật đã xác nhận thành vật riêng trong gói (hình + collider + khối lượng + nhãn); ứng viên chưa xác nhận nằm
+          trong hình của nền. Hệ thống khoét chỗ vật khỏi collision mesh môi trường, rồi kiểm
           trước khi đóng gói USD.
         </p>
       )}
@@ -116,7 +117,7 @@ export function SimulationPackagePanel({
               href={simulationPackageDownloadUrl(jobId)}
               className={cn(buttonVariants({ size: "sm", variant: "secondary" }), "w-full")}
             >
-              <Download aria-hidden /> Tải gói (.zip: scene.usda + collider môi trường)
+              <Download aria-hidden /> Tải gói USD cho Isaac (.zip)
             </a>
           ) : (
             <p className="text-rust">Chưa đạt kiểm tra; sửa theo các mục đỏ rồi tạo lại.</p>
