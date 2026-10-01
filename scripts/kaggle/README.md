@@ -15,7 +15,7 @@ run_job → export → push  ─────────►  jobs/<job_id>/bundl
 | --- | --- |
 | `setup_kaggle.sh` | Cài COLMAP (apt, CPU), Vulkan, Brush, Node + splat-transform, venv app, runtime tách theo vật; ghi `kaggle.env` |
 | `preflight.py` | Kiểm từng công cụ pipeline cần; thiếu mục bắt buộc → dừng trước khi tốn giờ GPU |
-| `run_job.py` | Video (+ điểm đo) → job chạy tới chỗ dừng → xuất gói → đẩy Hugging Face |
+| `run_job.py` | Một hoặc nhiều video (+ điểm đo) → job chạy tới chỗ dừng → xuất gói → đẩy Hugging Face; số worker song song theo VRAM trống |
 | `job_bundle.py` | `export` / `import` / `push` / `pull` gói job |
 | `real2sim_kaggle.ipynb` | Notebook gồm các ô lệnh dưới đây |
 
@@ -86,6 +86,14 @@ Sau bước xác nhận có hai cách đi tiếp:
 ```
 
 Rồi `pull` + `import` lại trên máy Studio: gói mới là bản chạy tiếp của job nên job được cập nhật tại chỗ.
+
+Nhiều video một lượt: `--video a.mp4 b.mp4 c.mp4`. Mặc định `--workers auto` chia VRAM trống của GPU đầu tiên
+cho nhu cầu một job (ví dụ T4 16 GB với preset mặc định → 3 job song song); đặt tay bằng `--workers 2`. Chưa
+chia việc ra hai GPU của Kaggle T4×2. Phiên bị ngắt giữa lúc train: trong cùng phiên thì `retry` train tiếp từ
+checkpoint; sang phiên mới thì mất kho checkpoint (nằm trong `/kaggle/working/r2s/workers`) và chạy lại từ đầu.
+
+Hình khối asset thư viện cho Studio (tuỳ chọn, chạy trên máy có Studio):
+`data/scene_runtime/bin/python scripts/scene/build_asset_previews.py --out data/asset_previews`.
 
 ## Quy tắc của gói
 
