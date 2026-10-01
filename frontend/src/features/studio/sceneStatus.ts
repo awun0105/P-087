@@ -1,4 +1,5 @@
-import type { JobManifest } from "@/lib/contracts/api";
+import type { JobManifest, JobStatus, StageId } from "@/lib/contracts/api";
+import type { JobProgress } from "@/lib/contracts/studio";
 import { stageMeta } from "@/features/studio/stages";
 
 export type SceneStatusTone = "neutral" | "ember" | "sage" | "ochre" | "rust";
@@ -22,20 +23,29 @@ export interface SceneStatusView {
  */
 export function sceneStatus(job: JobManifest | null, previewReady: boolean): SceneStatusView {
   if (job === null) return { label: "Chưa xử lý", tone: "neutral", active: false, group: "idle" };
-  const stage = job.current_stage ? stageMeta(job.current_stage) : undefined;
-  switch (job.status) {
+  const confirmed = job.stage_artifacts.some((item) => item.stage_id === "ST-METRIC-CANONICALIZE");
+  return deriveStatus(job.status, job.current_stage, job.current_stage === "ST-METRIC-CANONICALIZE" && previewReady && !confirmed);
+}
+
+/** Header scene đọc progress thật; cùng bảng nhãn với Scenes/Jobs, không suy DONE từ preview. */
+export function progressSceneStatus(progress: JobProgress): SceneStatusView {
+  return deriveStatus(progress.status, progress.current_stage, progress.waiting_for === "metric_confirmation");
+}
+
+function deriveStatus(status: JobStatus, currentStage: StageId | null, waitingMetric: boolean): SceneStatusView {
+  const stage = currentStage ? stageMeta(currentStage) : undefined;
+  switch (status) {
     case "QUEUED":
       return { label: "Đang chờ worker", tone: "ochre", active: true, group: "running" };
     case "RUNNING": {
-      const confirmed = job.stage_artifacts.some((item) => item.stage_id === "ST-METRIC-CANONICALIZE");
-      if (job.current_stage === "ST-METRIC-CANONICALIZE" && previewReady && !confirmed) {
+      if (waitingMetric) {
         // Preview xong, pipeline dừng chờ người chọn điểm — không phải worker đang chạy.
         return { label: "Cần xác nhận tỉ lệ", tone: "ochre", active: false, group: "action" };
       }
-      if (job.current_stage === "ST-METRIC-CANONICALIZE" || job.current_stage === "ST-RGB-GEOMETRY") {
+      if (currentStage === "ST-METRIC-CANONICALIZE" || currentStage === "ST-RGB-GEOMETRY") {
         return { label: "Đang dựng collision", tone: "ember", active: true, group: "running" };
       }
-      if (job.current_stage === "ST-OBJECT-EXTRACT") {
+      if (currentStage === "ST-OBJECT-EXTRACT") {
         return { label: "Đang tách vật thể", tone: "ember", active: true, group: "running" };
       }
       return { label: stage ? `Đang chạy · ${stage.short}` : "Đang xử lý", tone: "ember", active: true, group: "running" };

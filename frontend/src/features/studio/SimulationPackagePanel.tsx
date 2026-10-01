@@ -1,5 +1,9 @@
 "use client";
 
+import { notifySuccess } from "@/components/studio/feedback";
+
+import { errorMessage } from "@/lib/ui-error";
+
 import { CheckCircle2, Download, Loader2, PackageOpen, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -23,7 +27,7 @@ const RULE_LABEL: Record<string, string> = {
 };
 
 /**
- * Gói mô phỏng cho Isaac: backend khoét vật khỏi mesh môi trường, gắn collider hộp, chạy
+ * Gói mô phỏng cho Isaac: backend khoét vật khỏi mesh môi trường, gắn collider (khối lồi hoặc hộp), chạy
  * preflight; PASS thì đóng gói USD để tải. Gói khoá theo revision scene — sửa vật sau đó thì
  * phải tạo lại. Physics chưa chạy ở đây (Isaac cần máy RTX).
  */
@@ -43,9 +47,13 @@ export function SimulationPackagePanel({
   useEffect(() => {
     const controller = new AbortController();
     getSimulationPackage(jobId, controller.signal).then(
-      (value) => setResult({ revision: sceneRevision, value }),
+      (value) => {
+        if (controller.signal.aborted) return;
+        setError(null);
+        setResult({ revision: sceneRevision, value });
+      },
       (cause: unknown) => {
-        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Không đọc được gói");
+        if (!controller.signal.aborted) setError(errorMessage(cause, "Không đọc được gói"));
       },
     );
     return () => controller.abort();
@@ -56,19 +64,22 @@ export function SimulationPackagePanel({
     setError(null);
     try {
       const value = await createSimulationPackage(jobId);
-      setResult({ revision: value.scene_revision, value });
+      // Preflight FAIL không publish revision: báo cáo thuộc source hiện tại,
+      // dù physics enrichment tạm có một scene_revision khác (backend contract).
+      setResult({ revision: value.package_ref ? value.scene_revision : value.source_scene_revision, value });
       // PASS tạo revision scene có physics; màn cha tải lại scene để đồng bộ.
-      if (value.package_ref) onSceneChanged();
+      if (value.package_ref) { notifySuccess("Đã tạo gói mô phỏng của revision mới."); onSceneChanged(); }
     } catch (cause: unknown) {
-      setError(cause instanceof Error ? cause.message : "Tạo gói thất bại");
+      setError(errorMessage(cause, "Tạo gói thất bại"));
     } finally {
       setBusy(false);
     }
   }
 
-  const pkg = result?.value ?? null;
+  const value = result?.revision === sceneRevision ? result.value : null;
+  const pkg = value && (value.package_ref ? value.scene_revision : value.source_scene_revision) === sceneRevision ? value : null;
   return (
-    <section className="space-y-2 p-4" aria-label="Gói mô phỏng">
+    <section className="space-y-3 p-5" aria-label="Gói mô phỏng">
       <div className="flex items-center justify-between gap-2">
         <p className="flex items-center gap-1.5 text-sm font-semibold text-ink">
           <PackageOpen className="size-4" aria-hidden /> Gói mô phỏng Isaac
@@ -78,9 +89,9 @@ export function SimulationPackagePanel({
           {pkg?.package_ref ? "Kiểm tra lại" : "Tạo gói mô phỏng"}
         </Button>
       </div>
-      {error && <p className="text-xs text-rust">{error}</p>}
+      {error && <p role="alert" className="text-sm text-rust">{error}</p>}
       {!pkg && !error && (
-        <p className="text-xs text-ink-muted">
+        <p className="text-sm text-ink-muted">
           Chỉ vật đã xác nhận thành vật riêng trong gói (hình + collider + khối lượng + nhãn); ứng viên chưa xác nhận nằm
           trong hình của nền. Hệ thống khoét chỗ vật khỏi collision mesh môi trường, rồi kiểm
           trước khi đóng gói USD.

@@ -4,6 +4,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ReviewPanel } from "@/features/studio/ReviewPanel";
+import type { Me } from "@/lib/api/auth";
+
+const auth = vi.hoisted(() => ({ me: { auth_required: false, user: null } as Me }));
+vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => auth }));
 
 const CANDIDATE = "sha256:" + "c".repeat(64);
 const REPORT = "sha256:" + "d".repeat(64);
@@ -37,6 +41,7 @@ describe("ReviewPanel", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     global.fetch = vi.fn();
+    auth.me = { auth_required: false, user: null };
   });
 
   it("phê duyệt chỉ sau khi chấp nhận cảnh báo và xác nhận, gửi đúng checksum", async () => {
@@ -84,5 +89,30 @@ describe("ReviewPanel", () => {
     expect(await screen.findByText(/Chưa khả dụng: cần máy RTX/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Phê duyệt để phát hành" })).toBeNull();
     expect(screen.getByText("Có gói cho revision này")).toBeInTheDocument();
+  });
+
+  it("Editor chỉ đọc báo cáo; không thấy action duyệt hoặc từ chối", async () => {
+    auth.me = { auth_required: true, user: { user_id: "editor-1", email: "editor@example.com", display_name: "Editor", role: "editor", active: true, daily_job_quota: 10 } };
+    vi.mocked(global.fetch).mockResolvedValueOnce(reply(state("READY_FOR_REVIEW")));
+    render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" />);
+    expect(await screen.findByText(/Chỉ Reviewer có quyền/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Phê duyệt để phát hành" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Yêu cầu sửa" })).toBeNull();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("không cho quyết định trên trạng thái của revision cũ", async () => {
+    vi.mocked(global.fetch).mockResolvedValueOnce(reply(state("READY_FOR_REVIEW")));
+    render(<ReviewPanel jobId="job-a" sceneRevision="rev-005" />);
+    expect(await screen.findByText(/Trạng thái duyệt đang thuộc rev-004/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Phê duyệt để phát hành" })).toBeNull();
+  });
+
+  it("lỗi đọc trạng thái duyệt có đường thử lại", async () => {
+    vi.mocked(global.fetch).mockRejectedValueOnce(new Error("Mất kết nối")).mockResolvedValueOnce(reply(state("READY_FOR_REVIEW")));
+    render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Không kết nối được máy chủ");
+    fireEvent.click(screen.getByRole("button", { name: "Thử lại" }));
+    expect(await screen.findByRole("button", { name: "Phê duyệt để phát hành" })).toBeInTheDocument();
   });
 });

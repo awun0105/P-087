@@ -152,7 +152,12 @@ describe("ObjectReviewView", () => {
     });
     const states: string[] = [];
     render(<ObjectReviewView jobId="job-a" onSaveState={(state) => states.push(`${state.status}:${state.revision}`)} />);
-    fireEvent.click(await screen.findByText("Vật thể 1"));
+    const choose = await screen.findByRole("button", { name: "Chọn Vật thể 1" });
+    expect(choose).toHaveAttribute("aria-pressed", "false");
+    choose.focus();
+    expect(choose).toHaveFocus();
+    fireEvent.click(choose);
+    expect(choose).toHaveAttribute("aria-pressed", "true");
     fireEvent.change(screen.getByLabelText("Tên"), { target: { value: "Pallet A" } });
     fireEvent.click(screen.getByRole("button", { name: /Đổi tên/ }));
     await waitFor(() => expect(states).toContain("saved:rev-002"));

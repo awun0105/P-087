@@ -5,6 +5,8 @@
 import type { InputKind, UploadRecord } from "@/lib/contracts/studio";
 
 export const UPLOAD_ACCEPT = ".mp4,.mov,.ply,.zip,video/mp4,video/quicktime,application/zip";
+export const VIDEO_ACCEPT = ".mp4,.mov,video/mp4,video/quicktime";
+export const GAUSSIAN_ACCEPT = ".ply,.zip,application/zip";
 
 const ACCEPTED_NAME = /\.(mp4|mov|ply|zip)$/i;
 
@@ -17,6 +19,12 @@ export const INPUT_KIND_LABELS: Record<InputKind, string> = {
 /** Lọc sớm theo đuôi; null khi hợp lệ, ngược lại là lời nhắc cho người dùng. */
 export function rejectFileName(name: string): string | null {
   return ACCEPTED_NAME.test(name) ? null : "Chỉ nhận video .mp4/.mov, scene 3DGS .ply hoặc .zip (PLY 3DGS + model COLMAP).";
+}
+
+/** Lọc sớm theo nhánh UX; kết quả nhận diện của máy chủ vẫn là authority cuối cùng. */
+export function rejectFileNameFor(name: string, kind: "video" | "gaussian"): string | null {
+  if (kind === "video") return /\.(mp4|mov)$/i.test(name) ? null : "Dựng từ video chỉ nhận .mp4/.mov. Chọn Mở 3DGS để tải .ply/.zip.";
+  return /\.(ply|zip)$/i.test(name) ? null : "Mở 3DGS chỉ nhận .ply hoặc .zip có PLY. Chọn Dựng từ video cho .mp4/.mov.";
 }
 
 /** Record cũ (trước ADR 0004) không có `input_kind` là video. */

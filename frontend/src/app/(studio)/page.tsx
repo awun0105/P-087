@@ -1,5 +1,5 @@
-import { ScenesHome } from "@/features/studio/ScenesHome";
+import { OverviewPage } from "@/features/studio/OverviewPage";
 
 export default function StudioHomePage() {
-  return <ScenesHome />;
+  return <OverviewPage />;
 }

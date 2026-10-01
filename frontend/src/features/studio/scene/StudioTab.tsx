@@ -5,6 +5,8 @@ import { EditorFrame } from "@/features/studio/EditorFrame";
 import { MetricConfirmView } from "@/features/studio/MetricConfirmView";
 import { ObjectReviewView, type SaveState } from "@/features/studio/ObjectReviewView";
 import type { Preview, StageState, StudioMode } from "@/features/studio/scene/state";
+import { PreviewScene } from "@/features/studio/scene/PreviewScene";
+import type { MetricDraft } from "@/features/studio/MetricConfirmView";
 
 export function StudioTab({
   jobId,
@@ -17,6 +19,8 @@ export function StudioTab({
   onSaveState,
   onMetricClose,
   onMetricConfirmed,
+  metricDraft,
+  onMetricDraft,
 }: {
   jobId: string;
   title: string;
@@ -29,20 +33,19 @@ export function StudioTab({
   onSaveState: (state: SaveState) => void;
   onMetricClose: () => void;
   onMetricConfirmed: () => void;
+  metricDraft?: MetricDraft;
+  onMetricDraft?: (draft: MetricDraft) => void;
 }) {
   if (mode === "metric") {
     return (
-      <MetricConfirmView jobId={jobId} contentUrl={preview.url} filename={preview.filename} onClose={onMetricClose} onConfirmed={onMetricConfirmed} />
+      <MetricConfirmView jobId={jobId} contentUrl={preview.url} filename={preview.filename} onClose={onMetricClose} onConfirmed={onMetricConfirmed} draft={metricDraft} onDraft={onMetricDraft} />
     );
   }
   if (mode === "gaussian") {
     return (
       <div className="flex h-full flex-col">
-        <p className="border-b border-line bg-paper px-4 py-1.5 text-xs text-ink-muted">
-          Chỉnh Gaussian trong SuperSplat: thay đổi chỉ nằm trong phiên editor và xuất ra file (File › Export PLY/SOG); không lưu vào scene, không qua duyệt.
-        </p>
         <div className="min-h-0 flex-1">
-          <EditorFrame contentUrl={preview.url} filename={preview.filename} homeHref="/" title={`Editor 3D: ${title}`} />
+          <EditorFrame contentUrl={preview.url} filename={preview.filename} homeHref="/scenes" title={`Editor 3D: ${title}`} />
         </div>
       </div>
     );
@@ -58,7 +61,7 @@ export function StudioTab({
             : "Bản xem 3DGS (chưa quy đổi mét). Studio vật thể mở sau khi xác nhận tỉ lệ và dựng collision."}
       </Notice>
       <div className="min-h-0 flex-1">
-        <EditorFrame contentUrl={preview.url} filename={preview.filename} homeHref="/" title={`Editor 3D: ${title}`} />
+        <PreviewScene preview={preview} />
       </div>
     </div>
   );

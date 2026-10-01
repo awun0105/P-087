@@ -1,49 +1,66 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Film, Loader2, LogIn, Play } from "lucide-react";
-import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { errorMessage } from "@/lib/ui-error";
 
-import { Badge, Button, Card, EmptyState, Notice, buttonVariants } from "@/components/studio/primitives";
+import { ArrowLeft, ArrowRight, Box, Clapperboard, Film, Loader2, LogIn } from "lucide-react";
+import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { Button, EmptyState, Notice, buttonVariants } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { FlowStepper } from "@/features/studio/FlowStepper";
 import { canCreateScene, describeDetection } from "@/features/studio/inputKinds";
+import { ImportSetupStep } from "@/features/studio/ImportSetupStep";
 import { SamplePicker, SampleProcessStep, SampleReadyStep, SampleSelectStep } from "@/features/studio/SampleFlow";
-import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
-import { useProcessingForm } from "@/features/studio/useProcessingForm";
 import { UploadDropzone } from "@/features/studio/UploadDropzone";
+import { VideoSetupStep } from "@/features/studio/VideoSetupStep";
 import { canEdit } from "@/lib/api/auth";
-import { createImport, createSceneFromUpload, getSample, listSamples, listUploads } from "@/lib/api/studio";
+import { getSample, listSamples } from "@/lib/api/studio";
+import { useUrlState } from "@/features/studio/useUrlState";
+import { PageHeader } from "@/components/studio/feedback";
 import { cn } from "@/lib/cn";
-import type { DataOrigin, DemoManifest, SampleSummary, UploadRecord } from "@/lib/contracts/studio";
-import { formatBytes } from "@/lib/format";
+import type { DemoManifest, SampleSummary, UploadRecord } from "@/lib/contracts/studio";
 
-const STEPS = [
-  { key: "upload", label: "Nguồn dữ liệu" },
-  { key: "select", label: "Thiết lập & bắt đầu" },
-  { key: "process", label: "Xử lý" },
-  { key: "scene", label: "Mở scene" },
-] as const;
-
-const DATE = new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" });
-
-const ORIGINS: { value: DataOrigin; label: string }[] = [
-  { value: "self_collected_no_pii", label: "Tự quay, không có người/biển số" },
-  { value: "anonymized", label: "Đã làm mờ khuôn mặt/biển số" },
-  { value: "public_or_synthetic", label: "Dữ liệu công khai hoặc tổng hợp" },
+type Source = "video" | "gaussian" | "sample";
+const VIDEO_STEPS = [{ key: "video", label: "Chọn video" }, { key: "settings", label: "Khai báo & tạo job" }];
+const IMPORT_STEPS = [{ key: "gaussian", label: "Chọn file 3DGS" }, { key: "import", label: "Mở scene import" }];
+const SAMPLE_STEPS = [
+  { key: "sample", label: "Chọn mẫu" },
+  { key: "inspect", label: "Xem mẫu" },
+  { key: "replay", label: "Phát lại có sẵn" },
+  { key: "open", label: "Mở scene mẫu" },
 ];
 
 /**
- * Luồng tạo scene: tải video của mình (job thật trên máy chủ GPU) hoặc chọn video mẫu
- * đã xử lý sẵn — video mẫu đi qua cùng các bước nhưng phát lại kết quả thật đã lưu.
+ * Ba cửa vào dùng chung nguồn upload thật: video tạo job, 3DGS tạo import,
+ * mẫu chỉ phát lại artifact đã có. Mỗi nhánh có setup và từ vựng riêng.
  */
 export function NewSceneFlow() {
-  const searchParams = useSearchParams();
+  const { me } = useAuth();
+  return <NewSceneFlowBody key={me?.user?.user_id ?? (me?.auth_required ? "guest" : "local")} />;
+}
+function NewSceneFlowBody() {
+  const { params, update } = useUrlState();
   const { me } = useAuth();
   const [step, setStep] = useState(0);
+  const [source, setSource] = useState<Source | null>(null);
   const [preselect, setPreselect] = useState<string | null>(null);
+  const routeKey = params.toString();
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const route = new URLSearchParams(routeKey);
+      const next = route.get("source");
+      if (next === "video" || next === "gaussian") { setSource(next); setStep(route.get("step") === "setup" ? 1 : 0); setPreselect(route.get("upload")); }
+      else if (next === "sample" || route.get("sample")) { setSource("sample"); setStep(route.get("sample") ? route.get("step") === "replay" ? 2 : route.get("step") === "ready" ? 3 : 1 : 0); }
+      else if (!route.get("sample")) { setSource(null); setStep(0); }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [routeKey]);
+  const [detectedMessage, setDetectedMessage] = useState<string | null>(null);
   const [samples, setSamples] = useState<SampleSummary[]>([]);
+  const [samplesReady, setSamplesReady] = useState(false);
+  const [samplesError, setSamplesError] = useState<string | null>(null);
+  const [samplesReload, setSamplesReload] = useState(0);
   const [sampleId, setSampleId] = useState<string | null>(null);
   const [sample, setSample] = useState<DemoManifest | null>(null);
   const [sampleError, setSampleError] = useState<string | null>(null);
@@ -51,95 +68,133 @@ export function NewSceneFlow() {
   useEffect(() => {
     let alive = true;
     void listSamples().then((result) => {
-      // Deployment chưa có thư viện mẫu → chỉ ẩn phần video mẫu, không chặn luồng tải lên.
-      if (alive && result.ok) setSamples(result.data.samples);
+      if (!alive) return;
+      setSamplesReady(true);
+      if (result.ok) setSamples(result.data.samples);
+      else setSamplesError(errorMessage(result.error));
     });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [samplesReload]);
 
   // Chỉ nhận kết quả của lần chọn mới nhất: chọn nhanh hai mẫu thì response đến
   // muộn của mẫu trước không được ghi đè mẫu đang hiển thị.
   const latestPick = useRef<string | null>(null);
   const pickSample = useCallback((id: string) => {
     latestPick.current = id;
+    if (window.location.search.indexOf("sample=" + encodeURIComponent(id)) === -1) update({ source: "sample", sample: id, step: "setup", upload: null });
+    setSource("sample");
     setSampleId(id);
     setSample(null);
     setSampleError(null);
-    setStep(1);
+    const routeStep = new URLSearchParams(window.location.search).get("step");
+    setStep(routeStep === "replay" ? 2 : routeStep === "ready" ? 3 : 1);
     void getSample(id).then((result) => {
       if (latestPick.current !== id) return;
       if (result.ok) setSample(result.data);
-      else setSampleError(result.error.detail);
+      else setSampleError(errorMessage(result.error));
     });
-  }, []);
+  }, [update]);
 
   // `/new?sample=<id>` (từ trang Scenes) chọn sẵn video mẫu.
-  const requested = searchParams.get("sample");
+  const requested = params.get("sample");
   useEffect(() => {
     if (!requested) return;
     const timer = setTimeout(() => pickSample(requested), 0);
     return () => clearTimeout(timer);
   }, [requested, pickSample]);
 
-  const backToUpload = () => {
+  const backToSample = () => {
+    update({ source: "sample", sample: null, step: "input" });
     latestPick.current = null;
     setSampleId(null);
     setSample(null);
     setStep(0);
   };
 
+  const chooseSource = (value: Source) => {
+    update({ source: value, step: "input", upload: null, sample: null });
+    setSource(value);
+    setStep(0);
+    setPreselect(null);
+    setDetectedMessage(null);
+  };
+
+  const backToSources = () => {
+    update({ source: null, step: null, upload: null, sample: null });
+    latestPick.current = null;
+    setSource(null);
+    setStep(0);
+    setPreselect(null);
+    setSampleId(null);
+    setSample(null);
+    setDetectedMessage(null);
+  };
+
+  const uploaded = (record: UploadRecord) => {
+    // Máy chủ nhận diện theo nội dung, kể cả khi người dùng chọn sai nhánh từ đuôi file.
+    const detected: Source = canCreateScene(record) ? "video" : "gaussian";
+    update({ source: detected, step: "setup", upload: record.upload_id, sample: null });
+    setDetectedMessage(detected === source ? null : `Máy chủ nhận diện file là ${describeDetection(record)}; đã chuyển sang luồng ${detected === "video" ? "dựng từ video" : "mở 3DGS"}.`);
+    setSource(detected);
+    setPreselect(record.upload_id);
+    setStep(1);
+  };
+
+  const steps = source === "sample" ? SAMPLE_STEPS : source === "gaussian" ? IMPORT_STEPS : VIDEO_STEPS;
+  const loginHref = "/login?next=" + encodeURIComponent("/new" + (routeKey ? "?" + routeKey : ""));
+
   return (
     <main className={cn("mx-auto px-4 pt-10 pb-20 sm:px-6", sampleId && step >= 2 ? "max-w-6xl" : "max-w-4xl")}>
-      <h1 className="text-3xl font-semibold tracking-tight">Scene mới</h1>
-      <p className="mt-2 text-[15px] text-ink-muted">
-        Tải video quay kho hoặc chọn một video mẫu, hệ thống dựng scene 3D trên máy chủ GPU.
-      </p>
+      <PageHeader title="Scene mới" description="Chọn nguồn dữ liệu, kiểm tra thiết lập rồi mở scene hoặc bắt đầu xử lý." />
+      {params.get("source") && !["video", "gaussian", "sample"].includes(params.get("source")!) && <p role="status" className="mt-4 text-sm text-ink-muted">Nguồn dữ liệu trong link không hợp lệ. Chọn một cách bắt đầu bên dưới.</p>}
+      {source ? (
+        <div className="mt-8 space-y-4">
+          <button type="button" onClick={backToSources} className="text-sm font-medium text-ember-strong hover:underline">
+            ← Đổi cách bắt đầu
+          </button>
+          <FlowStepper steps={steps} current={step} />
+        </div>
+      ) : null}
       <div className="mt-8">
-        <FlowStepper steps={STEPS} current={step} />
-      </div>
-      <div className="mt-8">
-        {step === 0 && (
-          <div className="space-y-10">
-            {canEdit(me) ? (
-              <div className="space-y-4">
-                <UploadDropzone
-                  onUploaded={(record) => {
-                    setPreselect(record.upload_id);
-                    setStep(1);
-                  }}
-                />
-                <div className="flex justify-end">
-                  <Button variant="ghost" onClick={() => setStep(1)}>
-                    Chọn video đã tải trước đó
-                    <ArrowRight aria-hidden />
-                  </Button>
-                </div>
-              </div>
-            ) : me !== null ? (
-              <EmptyState
-                icon={<LogIn aria-hidden />}
-                title="Đăng nhập để tải video của bạn"
-                action={
-                  <Link href="/login?next=/new" className={buttonVariants({})}>
-                    Đăng nhập
-                  </Link>
-                }
-              >
-                Xử lý video dùng máy chủ GPU nên cần tài khoản của nhóm. Bạn vẫn có thể thử ngay với video mẫu bên dưới.
-              </EmptyState>
-            ) : null}
-            <SamplePicker samples={samples} selected={sampleId} onPick={pickSample} />
+        {!source && (
+          <div className="grid gap-4 md:grid-cols-3">
+            <SourceCard icon={<Film aria-hidden />} title="Dựng từ video" detail="MP4/MOV → job tái dựng → scene hệ mét" onClick={() => chooseSource("video")} />
+            <SourceCard icon={<Box aria-hidden />} title="Mở 3DGS" detail="PLY/ZIP → xem, chỉnh Gaussian và xuất file" onClick={() => chooseSource("gaussian")} />
+            <SourceCard icon={<Clapperboard aria-hidden />} title="Thử mẫu" detail="Xem kết quả đã xử lý sẵn, không chạy job mới" onClick={() => chooseSource("sample")} />
           </div>
         )}
-        {step >= 1 && sampleId ? (
+        {source && step === 0 && (
+          source === "sample" ? (
+            !samplesReady ? <p role="status" className="text-sm text-ink-muted">Đang tải video mẫu…</p>
+              : samplesError ? <Notice tone="rust">Không tải được video mẫu: {samplesError} <Button variant="secondary" size="sm" onClick={() => { setSamplesReady(false); setSamplesError(null); setSamplesReload((value) => value + 1); }}>Thử lại</Button></Notice>
+                : samples.length === 0 ? <EmptyState icon={<Clapperboard aria-hidden />} title="Chưa có video mẫu">Thử lại khi thư viện mẫu có dữ liệu.</EmptyState>
+                  : <SamplePicker samples={samples} selected={sampleId} onPick={pickSample} />
+          ) : canEdit(me) ? (
+            <div className="space-y-4">
+              <UploadDropzone kind={source} onUploaded={uploaded} />
+              <div className="flex justify-end">
+                <Button variant="ghost" onClick={() => { setStep(1); update({ step: "setup" }); }}>
+                  Chọn {source === "video" ? "video" : "file 3DGS"} đã tải trước đó
+                  <ArrowRight aria-hidden />
+                </Button>
+              </div>
+            </div>
+          ) : me !== null ? (
+            <EmptyState icon={<LogIn aria-hidden />} title="Đăng nhập để dùng dữ liệu của bạn" action={<Link href={loginHref} className={buttonVariants({})}>Đăng nhập</Link>}>
+              Khách có thể thử bằng mẫu đã xử lý sẵn; tải file và tạo job cần tài khoản của nhóm.
+            </EmptyState>
+          ) : <p role="status" className="text-sm text-ink-muted">Đang kiểm tra quyền truy cập…</p>
+        )}
+        {detectedMessage && step === 1 && <Notice tone="ochre" className="mb-5">{detectedMessage}</Notice>}
+        {source === "sample" && step >= 1 && sampleId ? (
           sampleError ? (
             <div className="space-y-4">
-              <Notice tone="rust">Không tải được video mẫu: {sampleError}</Notice>
-              <Button variant="ghost" onClick={backToUpload}>
+              <Notice tone="rust">Không tải được video mẫu: {sampleError} <Button size="sm" variant="secondary" onClick={() => pickSample(sampleId)}>Thử lại</Button></Notice>
+              <Button variant="ghost" onClick={backToSample}>
                 <ArrowLeft aria-hidden />
-                Chọn video khác
+                Chọn mẫu khác
               </Button>
             </div>
           ) : !sample ? (
@@ -148,324 +203,31 @@ export function NewSceneFlow() {
               Đang tải video mẫu…
             </p>
           ) : step === 1 ? (
-            <SampleSelectStep sampleId={sampleId} sample={sample} onBack={backToUpload} onStart={() => setStep(2)} />
+            <SampleSelectStep sampleId={sampleId} sample={sample} onBack={backToSample} onStart={() => { setStep(2); update({ step: "replay" }); }} />
           ) : step === 2 ? (
-            <SampleProcessStep sampleId={sampleId} sample={sample} onDone={() => setStep(3)} />
+            <SampleProcessStep sampleId={sampleId} sample={sample} onDone={() => { setStep(3); update({ step: "ready" }); }} />
           ) : (
             <SampleReadyStep sampleId={sampleId} sample={sample} />
           )
-        ) : (
-          step === 1 && <SelectAndConfirm preselect={preselect} onBack={() => setStep(0)} />
+        ) : null}
+        {source !== "sample" && source && step === 1 && (
+          canEdit(me) ? source === "video"
+            ? <VideoSetupStep preselect={preselect} onBack={() => { setStep(0); update({ step: "input" }); }} />
+            : <ImportSetupStep preselect={preselect} onBack={() => { setStep(0); update({ step: "input" }); }} />
+            : <EmptyState icon={<LogIn aria-hidden />} title="Đăng nhập để tiếp tục" action={<Link href={loginHref} className={buttonVariants({})}>Đăng nhập</Link>}>Phiên đăng nhập đã kết thúc. File đã tải vẫn được lưu trên máy chủ.</EmptyState>
         )}
       </div>
     </main>
   );
 }
 
-function SelectAndConfirm({ preselect, onBack }: { preselect: string | null; onBack: () => void }) {
-  const router = useRouter();
-  const ids = { name: useId(), owner: useId(), origin: useId(), purpose: useId() };
-  const [uploads, setUploads] = useState<UploadRecord[] | null>(null);
-  const [selected, setSelected] = useState<string | null>(preselect);
-  const [name, setName] = useState("");
-  const [owner, setOwner] = useState("");
-  const [origin, setOrigin] = useState<DataOrigin>("self_collected_no_pii");
-  const [purpose, setPurpose] = useState("Dựng scene mô phỏng kho cho robot AMR");
-  const [rights, setRights] = useState(false);
-  const [anonymized, setAnonymized] = useState(false);
-  const [retention, setRetention] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  const load = useCallback(async () => {
-    const result = await listUploads();
-    if (!result.ok) {
-      setError(result.error.detail);
-      return;
-    }
-    setUploads(result.data.uploads);
-    const first = result.data.uploads.find((item) => item.upload_id === preselect) ?? result.data.uploads[0];
-    if (first) {
-      setSelected((current) => current ?? first.upload_id);
-      setName((current) => current || first.original_name.replace(/\.[^.]+$/, ""));
-    }
-  }, [preselect]);
-
-  useEffect(() => {
-    // Nạp danh sách một lần khi vào bước; setState xảy ra sau await nên không đồng bộ trong effect.
-    const timer = setTimeout(() => void load(), 0);
-    return () => clearTimeout(timer);
-  }, [load]);
-
-  const processing = useProcessingForm(true);
-  const blocked = processing.evaluation?.blocking ?? false;
-  const selectedUpload = uploads?.find((upload) => upload.upload_id === selected) ?? null;
-  const supported = selectedUpload === null || canCreateScene(selectedUpload);
-  // Lý do khoá nút, hiện ngay cạnh CTA (PRODUCT.md §7.4) thay vì nút xám không giải thích.
-  const missing = [
-    !selected && "Chưa chọn video",
-    selected && !supported && "File này là 3DGS — dùng “Mở scene 3DGS” ở trên",
-    !name.trim() && "Chưa đặt tên scene",
-    !owner.trim() && "Chưa khai người/đơn vị sở hữu dữ liệu",
-    !purpose.trim() && "Chưa khai mục đích sử dụng",
-    !(rights && anonymized && retention) && "Chưa tick đủ 3 xác nhận dữ liệu",
-    blocked && "Thông số vượt cấu hình máy xử lý",
-  ].filter((reason): reason is string => Boolean(reason));
-  const ready = missing.length === 0;
-
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    if (!selected || !ready) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      const created = await createSceneFromUpload(selected, name.trim(), {
-        data_origin: origin,
-        declared_owner: owner.trim(),
-        declared_purpose: purpose.trim(),
-        rights_to_use_confirmed: rights,
-        anonymization_confirmed: anonymized,
-        retention_acknowledged: retention,
-      }, processing.values ?? undefined);
-      router.push(`/scenes/${encodeURIComponent(created.job.job_id)}`);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Không tạo được scene");
-      setSubmitting(false);
-    }
-  }
-
-  if (uploads === null && !error) {
-    return (
-      <p className="flex items-center gap-2 text-sm text-ink-muted" role="status">
-        <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
-        Đang tải danh sách video…
-      </p>
-    );
-  }
-  if (uploads && uploads.length === 0) {
-    return (
-      <EmptyState
-        icon={<Film aria-hidden />}
-        title="Chưa có video nào"
-        action={
-          <Button onClick={onBack}>
-            <ArrowLeft aria-hidden />
-            Tải video lên
-          </Button>
-        }
-      />
-    );
-  }
-
+function SourceCard({ icon, title, detail, onClick }: { icon: React.ReactNode; title: string; detail: string; onClick: () => void }) {
   return (
-    <form onSubmit={submit} className="space-y-6">
-      <Card className="p-5 sm:p-6">
-        <h2 className="text-base font-semibold">Chọn video để xử lý</h2>
-        <fieldset className="mt-4 space-y-2">
-          <legend className="sr-only">Video đã tải lên</legend>
-          {uploads?.map((upload) => (
-            <label
-              key={upload.upload_id}
-              className={cn(
-                "flex cursor-pointer items-center gap-4 rounded-xl border p-3 transition-colors duration-200",
-                selected === upload.upload_id ? "border-ember bg-ember-soft/50" : "border-line hover:border-line-strong",
-              )}
-            >
-              <input
-                type="radio"
-                name="upload"
-                value={upload.upload_id}
-                checked={selected === upload.upload_id}
-                onChange={() => {
-                  setSelected(upload.upload_id);
-                  setName(upload.original_name.replace(/\.[^.]+$/, ""));
-                }}
-                className="size-4 accent-ember-strong"
-              />
-              <Film className="size-5 shrink-0 text-ink-muted" aria-hidden />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{upload.original_name}</p>
-                <p className="text-sm text-ink-muted">
-                  {describeDetection(upload)} · {formatBytes(upload.size_bytes)} · {DATE.format(new Date(upload.received_at))}
-                  {upload.project_ids.length > 0 && ` · đã dùng cho ${upload.project_ids.length} scene`}
-                </p>
-              </div>
-            </label>
-          ))}
-        </fieldset>
-        {!supported && selectedUpload && (
-          <Notice tone="ochre" className="mt-4">
-            <p>
-              Máy chủ đã nhận diện file này là {describeDetection(selectedUpload)}. File 3DGS không có camera nên mở để{" "}
-              <strong>xem và chỉnh sửa</strong>; không qua xác nhận tỉ lệ mét hay dựng collision.
-            </p>
-            <Button
-              size="sm"
-              className="mt-3"
-              disabled={submitting || !name.trim()}
-              onClick={() => {
-                setSubmitting(true);
-                setError(null);
-                createImport(selectedUpload.upload_id, name.trim())
-                  .then((created) => router.push(`/imports/${created.import_id}`))
-                  .catch((cause: unknown) => {
-                    setError(cause instanceof Error ? cause.message : "Không mở được scene 3DGS");
-                    setSubmitting(false);
-                  });
-              }}
-            >
-              Mở scene 3DGS
-            </Button>
-          </Notice>
-        )}
-        <div className="mt-5">
-          <label htmlFor={ids.name} className="text-sm font-medium">
-            Tên scene
-          </label>
-          <input
-            id={ids.name}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            maxLength={200}
-            required
-            className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3 text-sm outline-none focus-visible:border-ember focus-visible:ring-3 focus-visible:ring-ember/30"
-          />
-        </div>
-      </Card>
-
-      <Card className="p-5 sm:p-6">
-        <h2 className="flex flex-wrap items-center gap-2 text-base font-semibold">
-          Xác nhận dữ liệu
-          <Badge tone="ochre">Tự khai — chưa qua QA</Badge>
-        </h2>
-        <p className="mt-1 text-sm text-ink-muted">
-          Hệ thống chưa tự làm mờ khuôn mặt/biển số. Bạn xác nhận video phù hợp; lời xác nhận được lưu cùng scene.
-        </p>
-        <div className="mt-5 grid gap-4 sm:grid-cols-2">
-          <Field id={ids.owner} label="Người/đơn vị sở hữu dữ liệu">
-            <input
-              id={ids.owner}
-              value={owner}
-              onChange={(event) => setOwner(event.target.value)}
-              maxLength={200}
-              required
-              placeholder="Ví dụ: Nhóm P-087"
-              className={INPUT}
-            />
-          </Field>
-          <Field id={ids.origin} label="Nguồn dữ liệu">
-            <select id={ids.origin} value={origin} onChange={(event) => setOrigin(event.target.value as DataOrigin)} className={INPUT}>
-              {ORIGINS.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field id={ids.purpose} label="Mục đích sử dụng" className="sm:col-span-2">
-            <input id={ids.purpose} value={purpose} onChange={(event) => setPurpose(event.target.value)} maxLength={500} required className={INPUT} />
-          </Field>
-        </div>
-        <div className="mt-5 space-y-3">
-          <Check checked={rights} onChange={setRights}>
-            Tôi có quyền sử dụng video này cho mục đích trên.
-          </Check>
-          <Check checked={anonymized} onChange={setAnonymized}>
-            Video <strong>không có khuôn mặt hoặc biển số</strong>, hoặc đã được làm mờ trước khi tải lên.
-          </Check>
-          <Check checked={retention} onChange={setRetention}>
-            Tôi hiểu video gốc và kết quả được lưu trên máy chủ để dựng scene.
-          </Check>
-        </div>
-      </Card>
-
-      {processing.options && processing.values ? (
-        <ProcessingSettings
-          parameters={processing.options.parameters}
-          values={processing.values}
-          editable
-          evaluation={processing.evaluation}
-          capability={processing.options.capability}
-          activePreset={processing.activePreset}
-          onPreset={processing.applyPreset}
-          onChange={processing.setValue}
-          note={processing.options.resource_note}
-        />
-      ) : processing.error ? (
-        <Notice tone="ochre">Không tải được bảng thông số: {processing.error}. Scene sẽ dùng cấu hình mặc định của máy chủ.</Notice>
-      ) : null}
-
-      {blocked && (
-        <Notice tone="rust">
-          Thông số hiện tại vượt cấu hình máy xử lý và có thể làm job bị crash. Giảm các ô tô đỏ hoặc chọn “Tối đa cho máy
-          này”.
-        </Notice>
-      )}
-      {error && <Notice tone="rust">{error}</Notice>}
-
-      <Card className="p-5 sm:p-6">
-        <h2 className="text-base font-semibold">Tóm tắt trước khi xử lý</h2>
-        <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
-          <dt className="text-ink-muted">Video</dt>
-          <dd>{selectedUpload ? `${selectedUpload.original_name} · ${describeDetection(selectedUpload)} · ${formatBytes(selectedUpload.size_bytes)}` : "Chưa chọn"}</dd>
-          <dt className="text-ink-muted">Tên scene</dt>
-          <dd>{name.trim() || "Chưa đặt"}</dd>
-          <dt className="text-ink-muted">Nguồn dữ liệu</dt>
-          <dd>{ORIGINS.find((item) => item.value === origin)?.label} · tự khai</dd>
-          <dt className="text-ink-muted">Thông số</dt>
-          <dd>{processing.activePreset ? "Theo preset đã chọn" : processing.values ? "Tuỳ chỉnh" : "Mặc định của máy chủ"}</dd>
-        </dl>
-        {missing.length > 0 && (
-          <div className="mt-4 text-sm">
-            <p className="font-medium text-ochre">Chưa bắt đầu được vì:</p>
-            <ul className="mt-1 list-disc space-y-0.5 pl-5 text-ink-muted">
-              {missing.map((reason) => (
-                <li key={reason}>{reason}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </Card>
-
-      <div className="flex items-center justify-between gap-3">
-        <Button variant="ghost" onClick={onBack}>
-          <ArrowLeft aria-hidden />
-          Tải video khác
-        </Button>
-        <Button type="submit" size="lg" disabled={!ready || submitting}>
-          {submitting ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden /> : <Play aria-hidden />}
-          Bắt đầu xử lý
-        </Button>
-      </div>
-    </form>
-  );
-}
-
-const INPUT =
-  "mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3 text-sm outline-none focus-visible:border-ember focus-visible:ring-3 focus-visible:ring-ember/30";
-
-function Field({ id, label, className, children }: { id: string; label: string; className?: string; children: React.ReactNode }) {
-  return (
-    <div className={className}>
-      <label htmlFor={id} className="text-sm font-medium">
-        {label}
-      </label>
-      {children}
-    </div>
-  );
-}
-
-function Check({ checked, onChange, children }: { checked: boolean; onChange: (value: boolean) => void; children: React.ReactNode }) {
-  return (
-    <label className="flex cursor-pointer items-start gap-3 text-sm text-ink">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-        required
-        className="mt-0.5 size-4 shrink-0 accent-ember-strong"
-      />
-      <span>{children}</span>
-    </label>
+    <button type="button" onClick={onClick} className="group flex min-h-48 flex-col items-start rounded-2xl border border-line bg-paper-raised p-5 text-left transition-[border-color,box-shadow] hover:border-ember hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ember">
+      <span className="grid size-10 place-items-center rounded-xl bg-ember-soft text-ember-strong [&_svg]:size-5">{icon}</span>
+      <span className="mt-5 text-lg font-semibold text-ink">{title}</span>
+      <span className="mt-1 text-sm leading-relaxed text-ink-muted">{detail}</span>
+      <span className="mt-auto flex items-center gap-1 pt-5 text-sm font-medium text-ember-strong">Tiếp tục <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" aria-hidden /></span>
+    </button>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { Fragment } from "react";
+import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
+import { createContext, Fragment, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import {
   Breadcrumb,
@@ -11,40 +11,64 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/shadcn/breadcrumb";
+import { inspectionStage, progressHref } from "@/features/studio/inspection";
 
 interface Crumb {
   label: string;
   href?: string;
 }
 
-/** Breadcrumb suy từ đường dẫn; tên scene cụ thể do màn scene tự hiển thị trong nội dung (P4). */
-export function crumbsFor(pathname: string): Crumb[] {
-  const scenes: Crumb = { label: "Scenes", href: "/" };
-  if (pathname === "/") return [{ label: "Scenes" }];
+const PageTitleContext = createContext<{ title: string | null; setTitle: (title: string | null) => void } | null>(null);
+
+/** Màn chi tiết đăng ký tên lấy từ API; shell không tự suy tên từ URL hoặc giữ business state. */
+export function PageTitleProvider({ children }: { children: ReactNode }) {
+  const [title, setTitle] = useState<string | null>(null);
+  const value = useMemo(() => ({ title, setTitle }), [title]);
+  return <PageTitleContext.Provider value={value}>{children}</PageTitleContext.Provider>;
+}
+
+export function usePageTitle(title: string | null): void {
+  const context = useContext(PageTitleContext);
+  if (!context) throw new Error("usePageTitle cần nằm trong PageTitleProvider");
+  const { setTitle } = context;
+  useEffect(() => {
+    setTitle(title);
+    return () => setTitle(null);
+  }, [setTitle, title]);
+}
+
+export function crumbsFor(pathname: string, detailTitle?: string | null): Crumb[] {
+  const scenes: Crumb = { label: "Scenes", href: "/scenes" };
+  if (pathname === "/") return [{ label: "Tổng quan" }];
+  if (pathname === "/scenes") return [{ label: "Scenes" }];
   if (pathname.startsWith("/new")) return [scenes, { label: "Scene mới" }];
   if (pathname.startsWith("/jobs")) return [{ label: "Jobs" }];
   if (pathname.startsWith("/team")) return [{ label: "Nhóm" }];
-  if (pathname.startsWith("/imports/")) return [scenes, { label: "Scene import" }];
-  if (pathname.startsWith("/samples/")) return [scenes, { label: "Video mẫu" }];
-  if (pathname.startsWith("/scenes/")) return [scenes, { label: "Scene" }];
-  return [scenes];
+  if (pathname === "/account") return [{ label: "Tài khoản" }];
+  if (pathname.startsWith("/imports/")) return [scenes, { label: detailTitle ?? "Scene import" }];
+  if (pathname.startsWith("/samples/")) return [scenes, { label: detailTitle ?? "Video mẫu" }];
+  const inspection = /^\/scenes\/([^/]+)\/stages\/([^/]+)$/.exec(pathname);
+  if (inspection) return [scenes, { label: detailTitle ?? "Scene", href: progressHref(decodeURIComponent(inspection[1])) }, { label: inspectionStage(inspection[2])?.title ?? "Giai đoạn" }];
+  if (pathname.startsWith("/scenes/")) return [scenes, { label: detailTitle ?? "Đang tải scene…" }];
+  return [{ label: "Tổng quan", href: "/" }];
 }
 
 export function Breadcrumbs({ pathname }: { pathname: string }) {
-  const crumbs = crumbsFor(pathname);
+  const context = useContext(PageTitleContext);
+  const crumbs = crumbsFor(pathname, context?.title);
   return (
-    <Breadcrumb>
-      <BreadcrumbList>
+    <Breadcrumb className="min-w-0">
+      <BreadcrumbList className="flex-nowrap">
         {crumbs.map((crumb, index) => (
           <Fragment key={`${crumb.label}-${index}`}>
             {index > 0 && <BreadcrumbSeparator />}
-            <BreadcrumbItem>
+            <BreadcrumbItem className="min-w-0">
               {crumb.href ? (
                 <BreadcrumbLink asChild>
                   <Link href={crumb.href}>{crumb.label}</Link>
                 </BreadcrumbLink>
               ) : (
-                <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                <BreadcrumbPage className="truncate" title={crumb.label}>{crumb.label}</BreadcrumbPage>
               )}
             </BreadcrumbItem>
           </Fragment>

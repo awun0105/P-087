@@ -27,10 +27,10 @@ export function SceneWorkspace({
       <div className="flex flex-wrap items-center gap-3 border-b border-line bg-paper-raised px-4 py-2.5 sm:px-6">
         <h1 className="truncate text-base font-semibold text-ink">{title}</h1>
         <div className="flex flex-wrap items-center gap-2">{badges}</div>
-        <p className="ml-auto hidden text-xs text-ink-subtle lg:block">
-          Chọn vùng để xoá/di chuyển · File › Export để tải PLY/SOG
-        </p>
       </div>
+      <p className="border-b border-line bg-paper px-4 py-2 text-xs text-ink-muted sm:px-6">
+        Chỉnh Gaussian trong phiên editor · File › Export để tải PLY/SOG · thay đổi không lưu thành SceneIR revision.
+      </p>
       <div className="min-h-0 flex-1">
         <EditorFrame contentUrl={contentUrl} filename={filename} homeHref={backHref} title={`Editor 3D: ${title}`} />
       </div>

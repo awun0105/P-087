@@ -1,9 +1,12 @@
 "use client";
 
-import { Box, ChevronsUpDown, Clapperboard, ListChecks, LogIn, LogOut, Plus, Users } from "lucide-react";
-import Link from "next/link";
+import { Box, ChevronsUpDown, Clapperboard, LayoutDashboard, ListChecks, LogIn, LogOut, Users, UserRound } from "lucide-react";
+import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { ErrorFeedback } from "@/components/studio/feedback";
+import { errorMessage } from "@/lib/ui-error";
+import { useNavigationGuard } from "@/features/shell/NavigationGuard";
 
 import {
   DropdownMenu,
@@ -20,6 +23,7 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
@@ -28,23 +32,31 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/shadcn/sidebar";
-import { Breadcrumbs } from "@/features/shell/Breadcrumbs";
+import { Breadcrumbs, PageTitleProvider } from "@/features/shell/Breadcrumbs";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { isReviewer } from "@/lib/api/auth";
 
-/** Điều hướng toàn cục chỉ gồm Scenes · Jobs · Nhóm (PRODUCT.md §3.1); phần khác nằm trong ngữ cảnh scene. */
+/** IA Tổng quan/Scenes theo PRODUCT.md §3.1; thao tác tạo scene nằm trong Scenes. */
 const NAV = [
-  { href: "/", label: "Scenes", icon: Clapperboard, reviewerOnly: false },
-  { href: "/jobs", label: "Jobs", icon: ListChecks, reviewerOnly: false },
-  { href: "/team", label: "Nhóm", icon: Users, reviewerOnly: true },
+  { heading: "Ứng dụng", items: [
+    { href: "/", label: "Tổng quan", icon: LayoutDashboard, reviewerOnly: false },
+  ] },
+  { heading: "Công việc", items: [
+    { href: "/scenes", label: "Scenes", icon: Clapperboard, reviewerOnly: false },
+    { href: "/jobs", label: "Jobs", icon: ListChecks, reviewerOnly: false },
+  ] },
+  { heading: "Quản lý", items: [
+    { href: "/team", label: "Nhóm", icon: Users, reviewerOnly: true },
+  ] },
 ] as const;
 
 /** Trang không cần khung ứng dụng (đăng nhập/đăng ký có layout riêng). */
 const BARE_ROUTES = ["/login", "/register"];
 
-function isActive(pathname: string, href: string): boolean {
-  if (href === "/") return pathname === "/" || pathname.startsWith("/scenes") || pathname.startsWith("/imports");
-  return pathname.startsWith(href);
+export function isActive(pathname: string, href: string): boolean {
+  if (href === "/") return pathname === "/";
+  if (href === "/scenes") return pathname === "/scenes" || pathname === "/new" || ["/scenes/", "/imports/", "/samples/"].some((route) => pathname.startsWith(route));
+  return pathname === href || pathname.startsWith(`${href}/`);
 }
 
 /**
@@ -57,22 +69,23 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (BARE_ROUTES.some((route) => pathname.startsWith(route))) return <>{children}</>;
   return (
     <SidebarProvider>
-      <AppSidebar pathname={pathname} />
-      <SidebarInset className="min-w-0">
-        <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background/80 px-3 backdrop-blur-md">
-          <SidebarTrigger className="-ml-1" aria-label="Thu gọn / mở thanh bên" />
-          <Separator orientation="vertical" className="mx-1 data-[orientation=vertical]:h-4" />
-          <Breadcrumbs pathname={pathname} />
-        </header>
-        <div className="min-h-0 min-w-0 flex-1">{children}</div>
-      </SidebarInset>
+      <PageTitleProvider key={pathname}>
+        <AppSidebar pathname={pathname} />
+        <SidebarInset className="min-w-0">
+          <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background/80 px-3 backdrop-blur-md">
+            <SidebarTrigger className="-ml-1" aria-label="Thu gọn / mở thanh bên" />
+            <Separator orientation="vertical" className="mx-1 data-[orientation=vertical]:h-4" />
+            <Breadcrumbs pathname={pathname} />
+          </header>
+          <div className="min-h-0 min-w-0 flex-1">{children}</div>
+        </SidebarInset>
+      </PageTitleProvider>
     </SidebarProvider>
   );
 }
 
 function AppSidebar({ pathname }: { pathname: string }) {
   const { me } = useAuth();
-  const nav = NAV.filter((item) => !item.reviewerOnly || (me?.auth_required && isReviewer(me)));
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
@@ -87,33 +100,32 @@ function AppSidebar({ pathname }: { pathname: string }) {
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton asChild tooltip="Scene mới" className="bg-primary text-primary-foreground hover:bg-primary/85 hover:text-primary-foreground">
-              <Link href="/new">
-                <Plus aria-hidden />
-                <span>Scene mới</span>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {nav.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton asChild isActive={isActive(pathname, item.href)} tooltip={item.label}>
-                    <Link href={item.href}>
-                      <item.icon aria-hidden />
-                      <span>{item.label}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {NAV.map((group) => {
+          const items = group.items.filter((item) => !item.reviewerOnly || (me?.auth_required && isReviewer(me)));
+          if (items.length === 0) return null;
+          return (
+            <SidebarGroup key={group.heading}>
+              <SidebarGroupLabel>{group.heading}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {items.map((item) => (
+                    <SidebarMenuItem key={item.href}>
+                      <SidebarMenuButton asChild isActive={isActive(pathname, item.href)} tooltip={item.label}>
+                        <Link href={item.href} aria-current={isActive(pathname, item.href) ? "page" : undefined}>
+                          <item.icon aria-hidden />
+                          <span>{item.label}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          );
+        })}
       </SidebarContent>
       <SidebarFooter>
         <AccountMenu pathname={pathname} />
@@ -124,6 +136,13 @@ function AppSidebar({ pathname }: { pathname: string }) {
 
 function AccountMenu({ pathname }: { pathname: string }) {
   const { me, logout } = useAuth();
+  const { navigate } = useNavigationGuard();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function signOut() {
+    setBusy(true); setError(null);
+    try { await logout(); } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(false); }
+  }
   if (!me?.auth_required) {
     // Deployment local không bật đăng nhập: không có tài khoản để hiện, không giả một user.
     return <p className="px-2 text-xs text-sidebar-foreground/60 group-data-[collapsible=icon]:hidden">Chế độ local · không đăng nhập</p>;
@@ -170,12 +189,14 @@ function AccountMenu({ pathname }: { pathname: string }) {
               </p>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => void logout()}>
+            <DropdownMenuItem asChild><Link href="/account"><UserRound aria-hidden />Tài khoản của tôi</Link></DropdownMenuItem>
+            <DropdownMenuItem disabled={busy} onSelect={() => void navigate(() => { void signOut(); }, undefined, true)}>
               <LogOut aria-hidden />
               Đăng xuất
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {error && <ErrorFeedback message={error} />}
       </SidebarMenuItem>
     </SidebarMenu>
   );
