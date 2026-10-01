@@ -479,6 +479,30 @@ export async function createSimulationPackage(jobId: string): Promise<Simulation
   return result;
 }
 
+// ── bản ghi Rerun của quá trình train 3DGS (chế độ xem tuỳ chọn, ngoài pipeline) ──
+
+export interface TrainingRecording {
+  available: boolean;
+  size_bytes: number | null;
+}
+
+/** Job có bản ghi Rerun hay không; lỗi hoặc dữ liệu lạ coi như không có để chế độ xem chính không bị ảnh hưởng. */
+export async function getTrainingRecording(jobId: string, signal?: AbortSignal): Promise<TrainingRecording> {
+  const none: TrainingRecording = { available: false, size_bytes: null };
+  try {
+    const value = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/training-recording`, { signal });
+    if (typeof value !== "object" || value === null) return none;
+    const { available, size_bytes } = value as Record<string, unknown>;
+    return { available: available === true, size_bytes: typeof size_bytes === "number" ? size_bytes : null };
+  } catch {
+    return none;
+  }
+}
+
+export function trainingRecordingUrl(jobId: string): string {
+  return `${API}/jobs/${encodeURIComponent(jobId)}/training-recording.rrd`;
+}
+
 export function simulationPackageDownloadUrl(jobId: string): string {
   return `${API}/jobs/${encodeURIComponent(jobId)}/simulation-package/download`;
 }

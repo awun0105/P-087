@@ -46,3 +46,7 @@ dẫn import và theme; không chép các trang domain mẫu (PRODUCT.md §3.2).
 
 `src/styles/shadcn-variants.css` chép từ gói npm `shadcn@4.21.0` (`dist/tailwind.css`), MIT License.
 Dependency thêm: `radix-ui@1.6.7` (MIT), `tw-animate-css@1.4.0` (MIT).
+
+`@rerun-io/web-viewer-react@0.24.1` + `@rerun-io/web-viewer@0.24.1` (MIT OR Apache-2.0, © Rerun Technologies AB):
+viewer Rerun nhúng cho chế độ xem "Quá trình train" của bước 3DGS. Ghim đúng 0.24.1 vì phải khớp SDK Rerun mà
+Brush 0.3.0 nhúng.

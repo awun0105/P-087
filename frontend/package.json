@@ -16,6 +16,7 @@
     "@playcanvas/supersplat-viewer": "1.35.2",
     "@react-three/drei": "^10.7.8",
     "@react-three/fiber": "^9.8.0",
+    "@rerun-io/web-viewer-react": "0.24.1",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "lucide-react": "1.48.0",

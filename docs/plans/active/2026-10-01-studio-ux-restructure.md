@@ -812,6 +812,21 @@ runtime; Chrome headless điều khiển qua CDP (click/gõ thật). Không ph�
   xem ảnh Tổng quan và tab Studio — chữ, thẻ, viền, nhãn nổi trong khung 3D đọc được.
 - **Limits:** chưa xem các màn còn lại và dialog/menu ở theme tối; landing và UI legacy không có theme tối.
 
+### Chế độ xem "Quá trình train (Rerun)" ở bước 3DGS — 2026-10-02 (trên `feat/pipeline-v2`)
+
+- **Authority:** user yêu cầu nhúng Rerun như chế độ xem thứ hai tuỳ chọn, thêm vào chứ không thay viewer hiện tại.
+- **Changed:** API chỉ đọc `GET /jobs/{id}/training-recording` và `…/training-recording.rrd` (file ở
+  `PRODUCT_RERUN_RECORDING_DIR/<job>.rrd`); `eval/visual/brush_quality.py --rerun | --rerun-save`; frontend thêm
+  `@rerun-io/web-viewer-react@0.24.1` (khớp SDK Rerun trong Brush 0.3.0), `RerunTrainingView`, nhóm nút
+  "Scene 3D | Quá trình train (Rerun)" chỉ hiện khi job có bản ghi (`?view=training`).
+- **VERIFIED:** pytest file route 12 passed; ruff; `tsc`, `eslint`, `vitest` 38 file / 227 test, `next build` (có
+  `re_viewer_bg.wasm` 37 MB, tải lười). Lượt train đánh giá 7.000 bước của `job-1bb733ae40ad` ghi ra bản ghi 226 MB
+  (PSNR 24,92 / SSIM 0,867 / LPIPS 0,347 trên 7 view giữ lại). Browser (Chrome headless, bản production): mở
+  `?view=training` thấy viewer Rerun với cặp ground_truth/render từng view, khung `world` có camera, đồ thị loss.
+- **Limits:** bản ghi là của lượt train đánh giá riêng, tạo bằng lệnh; pipeline sản phẩm chưa ghi Rerun. Chưa thử trên
+  GPU thật của trình duyệt (headless dùng software rasterizer) và chưa thử khi API/worker khác máy. File 226 MB tải
+  trọn vào bộ nhớ trình duyệt.
+
 ### Publication check — user yêu cầu commit & push, 2026-10-01
 
 - User đã giao commit/push phần UI/UX đang có trên `feat/studio-ux-restructure`.
