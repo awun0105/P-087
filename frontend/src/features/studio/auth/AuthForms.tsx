@@ -149,7 +149,9 @@ export function LoginForm() {
       gate.markNavigated(); // form tự điều hướng; không để cổng vào `replace` thêm lần nữa khi phiên vừa có
       await refresh();
       notifySuccess("Đã đăng nhập.");
-      router.push(next);
+      // `replace`, không `push`: màn đăng nhập không nằm lại trong lịch sử. Nếu còn, bấm Back từ app sẽ rơi vào
+      // /login, cổng vào thấy đã có phiên lại đẩy về app — người dùng không quay lại được trang trước.
+      router.replace(next);
     } catch (cause) {
       setError(authErrorMessage(cause, "Đăng nhập thất bại"));
       setBusy(false);
@@ -207,7 +209,7 @@ export function RegisterForm() {
       gate.markNavigated();
       await refresh();
       notifySuccess("Đã tạo tài khoản và đăng nhập.");
-      router.push(next);
+      router.replace(next);
     } catch (cause) {
       setError(authErrorMessage(cause, "Không tạo được tài khoản"));
       setBusy(false);

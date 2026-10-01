@@ -27,3 +27,33 @@ describe("landing → app", () => {
     expect(redirects.some((item) => item.source !== "/landing" && item.destination === "/")).toBe(false);
   });
 });
+
+describe("mục trong landing không làm hỏng nút Back", () => {
+  it("bấm link #mục: cuộn tới mục, đổi hash bằng replaceState (giữ state của router), không thêm history entry", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    history.replaceState({ __NA: true, tree: "landing" }, "", "/");
+    const before = history.length;
+    const scrolled: string[] = [];
+    Element.prototype.scrollIntoView = function scrollIntoView() { scrolled.push(this.id); };
+    render(<LandingPage />);
+
+    fireEvent.click(screen.getAllByRole("link", { name: "Workflow" })[0]);
+
+    expect(scrolled).toEqual(["workflow"]);
+    expect(location.hash).toBe("#workflow");
+    expect(history.length).toBe(before);
+    // State của Next vẫn còn trên entry này → `popstate` khi Back từ app được router xử lý, landing hiện lại.
+    expect(history.state).toMatchObject({ __NA: true, tree: "landing" });
+    expect(document.activeElement?.id).toBe("workflow");
+  });
+
+  it("click có phím bổ trợ để nguyên cho trình duyệt (mở tab mới)", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    history.replaceState({ __NA: true }, "", "/");
+    render(<LandingPage />);
+    const link = screen.getAllByRole("link", { name: "Product" })[0];
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true });
+    fireEvent(link, event);
+    expect(event.defaultPrevented).toBe(false);
+  });
+});

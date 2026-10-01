@@ -1,11 +1,13 @@
 import Link from "next/link";
 
+import { LandingAnchors } from "@/features/landing/LandingAnchors";
 import { STUDIO_ENTRY } from "@/lib/routes";
 
 /** Adapt từ export Stitch user cung cấp; SVG/metrics là minh họa, CTA mở app thật qua màn đăng nhập. */
 export function LandingPage() {
   return (
     <main id="landing-top" className="landing-page bg-[#F5EFE6] text-[#2B2520] selection:bg-[#FBE3D3] selection:text-[#C2551F]">
+      <LandingAnchors />
 
 
 

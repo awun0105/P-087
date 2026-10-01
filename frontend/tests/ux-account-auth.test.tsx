@@ -37,7 +37,9 @@ describe("tài khoản và đích sau xác thực", () => {
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "fixture@example.com" } });
     fireEvent.change(screen.getByLabelText("Mật khẩu"), { target: { value: "fixture-password" } });
     fireEvent.submit(screen.getByLabelText("Email").closest("form")!);
-    await waitFor(() => expect(state.push).toHaveBeenCalledWith("/new?source=video&step=setup"));
+    // Thay entry của màn đăng nhập (không push): Back từ đích không rơi lại vào /login.
+    await waitFor(() => expect(state.replace).toHaveBeenCalledWith("/new?source=video&step=setup"));
+    expect(state.push).not.toHaveBeenCalled();
   });
   it("sai mật khẩu / mã mời hỏng: hiện đúng lý do backend trả, không báo 'phiên hết hạn'", async () => {
     vi.mocked(login).mockRejectedValue(new ApiError(401, "Sai email hoặc mật khẩu"));
@@ -48,6 +50,7 @@ describe("tài khoản và đích sau xác thực", () => {
     expect(await screen.findByText("Sai email hoặc mật khẩu")).toBeInTheDocument();
     expect(screen.queryByText(/Phiên đăng nhập đã hết hạn/)).toBeNull();
     expect(state.push).not.toHaveBeenCalled();
+    expect(state.replace).not.toHaveBeenCalled();
     view.unmount();
 
     vi.mocked(register).mockRejectedValue(new ApiError(401, "Mã mời không hợp lệ, đã dùng hoặc đã hết hạn"));
