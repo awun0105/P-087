@@ -5,7 +5,7 @@ import { useSessionDraft, clearStudioDrafts } from "@/features/studio/drafts";
 import { EMPTY_SETUP, parseSetupDraft } from "@/features/studio/setup-draft";
 import { useUrlState } from "@/features/studio/useUrlState";
 import { pageSlice } from "@/features/studio/ListControls";
-import { errorMessage } from "@/lib/ui-error";
+import { authErrorMessage, errorMessage } from "@/lib/ui-error";
 import { ApiError } from "@/lib/api/client";
 import { logout } from "@/lib/api/auth";
 
@@ -24,6 +24,31 @@ describe("feedback và boundary lỗi", () => {
     expect(errorMessage(new ApiError(401, "raw"))).toContain("Đăng nhập");
     expect(errorMessage(new ApiError(409, "raw"))).toContain("Tải lại");
     expect(errorMessage(new Error("Mất kết nối"))).toBe("Mất kết nối");
+  });
+  it("giữ lý do backend viết cho người dùng ở 403/409/429; chi tiết kỹ thuật và câu mặc định vẫn bị thay", () => {
+    // Phản hồi thật của backend (đo trên API ngày 2026-10-01): 409 không chỉ là "dữ liệu đã đổi".
+    const metric = "A–B quá ngắn so với C–D nên không kiểm chắc được; chọn vật dài hơn làm A–B";
+    expect(errorMessage(new ApiError(409, metric))).toBe(metric);
+    expect(errorMessage(new ApiError(409, "Scene này không có số đo LiDAR; nhập khoảng cách đo ngoài đời"))).toContain("LiDAR");
+    expect(errorMessage(new ApiError(403, "Chỉ Reviewer được duyệt và phát hành"))).toBe("Chỉ Reviewer được duyệt và phát hành");
+    expect(errorMessage(new ApiError(429, "Thử đăng nhập quá nhiều lần; đợi vài phút"))).toContain("đợi vài phút");
+    // Chi tiết kỹ thuật, câu mặc định của framework/proxy, HTML: không hiện, dùng hướng phục hồi theo mã.
+    expect(errorMessage(new ApiError(409, "artifact does not exist: artifact://jobs/job-a/scene/x.json"))).toContain("Tải lại");
+    expect(errorMessage(new ApiError(409, "checksum mismatch: expected sha256:abc, observed sha256:def"))).toContain("Tải lại");
+    expect(errorMessage(new ApiError(403, "Forbidden"))).toContain("chưa có quyền");
+    expect(errorMessage(new ApiError(405, "Method Not Allowed"))).toBe("Không thực hiện được thao tác. Hãy thử lại.");
+    expect(errorMessage(new ApiError(400, "<html><body>Bad Gateway</body></html>"))).not.toContain("<html");
+    expect(errorMessage(new ApiError(503, "Máy chủ đang bảo trì tới 9 giờ"))).toBe("Máy chủ chưa xử lý được yêu cầu. Hãy thử lại.");
+    // 401/404 giữ hướng phục hồi chung của PRODUCT.md, kể cả khi backend có câu riêng.
+    expect(errorMessage(new ApiError(401, "Cần đăng nhập"))).toContain("Đăng nhập để tiếp tục");
+    expect(errorMessage(new ApiError(404, "không tìm thấy upload: upload-x"))).toContain("quay về Scenes");
+  });
+  it("thao tác tài khoản: 401 là bị từ chối có lý do, không phải hết phiên", () => {
+    expect(authErrorMessage(new ApiError(401, "Sai email hoặc mật khẩu"), "Đăng nhập thất bại")).toBe("Sai email hoặc mật khẩu");
+    expect(authErrorMessage(new ApiError(401, "Mã mời không hợp lệ, đã dùng hoặc đã hết hạn"))).toContain("Mã mời");
+    expect(authErrorMessage(new ApiError(401, "Unauthorized"), "Đăng nhập thất bại")).toBe("Đăng nhập thất bại");
+    expect(authErrorMessage(new ApiError(429, "Thử đăng nhập quá nhiều lần; đợi vài phút"))).toContain("đợi vài phút");
+    expect(authErrorMessage(new ApiError(0, "không gọi được backend: TypeError"))).toContain("Không kết nối được máy chủ");
   });
   it("logout HTTP thất bại không resolve như thành công", async () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 500 }));

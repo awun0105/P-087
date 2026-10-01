@@ -1,6 +1,6 @@
 "use client";
 
-import { errorMessage } from "@/lib/ui-error";
+import { authErrorMessage } from "@/lib/ui-error";
 
 import { Box, Loader2, LogIn, UserPlus } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
@@ -117,7 +117,7 @@ export function LoginForm() {
       notifySuccess("Đã đăng nhập.");
       router.push(safeNext(params.get("next")));
     } catch (cause) {
-      setError(errorMessage(cause, "Đăng nhập thất bại"));
+      setError(authErrorMessage(cause, "Đăng nhập thất bại"));
       setBusy(false);
     }
   }
@@ -171,7 +171,7 @@ export function RegisterForm() {
       notifySuccess("Đã tạo tài khoản và đăng nhập.");
       router.push(safeNext(params.get("next")));
     } catch (cause) {
-      setError(errorMessage(cause, "Không tạo được tài khoản"));
+      setError(authErrorMessage(cause, "Không tạo được tài khoản"));
       setBusy(false);
     }
   }

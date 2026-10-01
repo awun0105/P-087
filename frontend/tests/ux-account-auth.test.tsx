@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AccountPage } from "@/features/studio/auth/AccountPage";
 import { LoginForm, RegisterForm, safeNext } from "@/features/studio/auth/AuthForms";
 import { login, register, type Me } from "@/lib/api/auth";
+import { ApiError } from "@/lib/api/client";
 
 const state = vi.hoisted(() => ({ me: null as Me | null, refresh: vi.fn(), logout: vi.fn(), push: vi.fn(), search: "" }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: state.push }), useSearchParams: () => new URLSearchParams(state.search) }));
@@ -37,6 +38,26 @@ describe("tài khoản và đích sau xác thực", () => {
     fireEvent.change(screen.getByLabelText("Mật khẩu"), { target: { value: "fixture-password" } });
     fireEvent.submit(screen.getByLabelText("Email").closest("form")!);
     await waitFor(() => expect(state.push).toHaveBeenCalledWith("/new?source=video&step=setup"));
+  });
+  it("sai mật khẩu / mã mời hỏng: hiện đúng lý do backend trả, không báo 'phiên hết hạn'", async () => {
+    vi.mocked(login).mockRejectedValue(new ApiError(401, "Sai email hoặc mật khẩu"));
+    const view = render(<LoginForm />);
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "fixture@example.com" } });
+    fireEvent.change(screen.getByLabelText("Mật khẩu"), { target: { value: "sai-mat-khau" } });
+    fireEvent.submit(screen.getByLabelText("Email").closest("form")!);
+    expect(await screen.findByText("Sai email hoặc mật khẩu")).toBeInTheDocument();
+    expect(screen.queryByText(/Phiên đăng nhập đã hết hạn/)).toBeNull();
+    expect(state.push).not.toHaveBeenCalled();
+    view.unmount();
+
+    vi.mocked(register).mockRejectedValue(new ApiError(401, "Mã mời không hợp lệ, đã dùng hoặc đã hết hạn"));
+    render(<RegisterForm />);
+    fireEvent.change(screen.getByLabelText("Mã mời"), { target: { value: "ma-da-dung" } });
+    fireEvent.change(screen.getByLabelText("Tên hiển thị"), { target: { value: "Fixture" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "fixture@example.com" } });
+    fireEvent.change(screen.getByLabelText(/Mật khẩu/), { target: { value: "fixture-password" } });
+    fireEvent.submit(screen.getByLabelText("Email").closest("form")!);
+    expect(await screen.findByText("Mã mời không hợp lệ, đã dùng hoặc đã hết hạn")).toBeInTheDocument();
   });
   it("đăng ký giữ next và từ chối đích chuyển ra ngoài", () => {
     render(<RegisterForm />);

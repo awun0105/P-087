@@ -2,7 +2,7 @@
 
 import { notifySuccess } from "@/components/studio/feedback";
 
-import { errorMessage } from "@/lib/ui-error";
+import { authErrorMessage, errorMessage } from "@/lib/ui-error";
 
 import { Check, Copy, Loader2, Ticket, Users } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
@@ -70,7 +70,7 @@ export function TeamPage() {
       await load();
       notifySuccess("Đã cập nhật thành viên.");
     } catch (cause) {
-      setError(errorMessage(cause, "Không cập nhật được"));
+      setError(authErrorMessage(cause, "Không cập nhật được"));
     } finally { setPendingUsers((old) => old.filter((id) => id !== user.user_id)); }
   }
 
@@ -179,7 +179,7 @@ function InviteCard() {
       setInvite(await createInvite(role));
       notifySuccess("Đã tạo mã mời.");
     } catch (cause) {
-      setError(errorMessage(cause, "Không tạo được mã mời"));
+      setError(authErrorMessage(cause, "Không tạo được mã mời"));
     } finally { setBusy(false); }
   }
 

@@ -730,6 +730,31 @@ role gates hiện có proof component, chưa có browser auth proof.
 - **Next executable step:** mở `http://127.0.0.1:3011/landing`, kiểm desktop/màn
   nhỏ và click Open Studio; ghi browser evidence nếu browser được kết nối.
 
+### Browser evidence sau khi merge vào `feat/pipeline-v2` — 2026-10-01
+
+Môi trường: frontend bản production (`next start`) trỏ vào một API tạm có `AUTH_REQUIRED=true` trên bản sao DB
+runtime; Chrome headless điều khiển qua CDP (click/gõ thật). Không phải deployment cloud.
+
+- **VERIFIED — landing:** `/landing` render ở 1500 px và ~500 px; ba CTA `Open Studio` đều `href="/"`, bấm thì
+  vào Tổng quan. Landing không có link đăng nhập/đăng ký và trong app không có link nào trỏ về `/landing`
+  (đúng phạm vi PRODUCT §3.1; có nối thêm hay không là quyết định của owner).
+- **VERIFIED — auth 19/19 bước:** khách ở `/` và `/scenes` thấy lời mời đăng nhập → `/login?next=/scenes` → sai
+  mật khẩu báo lỗi → đúng mật khẩu quay về `/scenes` (13 scene, menu Nhóm) → `/team` tạo link mời → đăng xuất →
+  `/register?code=…` (mã điền sẵn, mật khẩu < 10 ký tự bị chặn) → tự đăng nhập về `/` với role Editor →
+  `/account` → `/team` báo chỉ Reviewer → đăng xuất. Qua proxy `/api/v1`: cookie `r2s_session` HttpOnly +
+  SameSite=lax; khách gọi route cần quyền nhận 401, Editor gọi route Reviewer nhận 403; upload qua route
+  handler có chuyển cookie.
+- **Lỗi nối backend đã sửa:** `errorMessage` thay mọi `detail` của 401/403/409/429 bằng câu chung, nên sai mật
+  khẩu hiện "Phiên đăng nhập đã hết hạn", và lỗi nghiệp vụ 409 của backend (vd "A–B quá ngắn so với C–D…; chọn
+  vật dài hơn làm A–B", "Scene này không có số đo LiDAR; nhập khoảng cách đo ngoài đời") hiện thành "Dữ liệu đã
+  thay đổi… Tải lại". Nay: `detail` là một câu an toàn (không trace/path/URI/checksum/JSON/HTML, không phải câu
+  mặc định của framework) thì hiện ở 403/409/429/4xx khác; 401 và 404 giữ câu phục hồi chung; thao tác tài
+  khoản dùng `authErrorMessage` (401 = bị từ chối có lý do). Hai assertion gốc của nhánh UX (`401 "raw"`,
+  `409 "raw"`) giữ nguyên và vẫn pass. **PROPOSAL chờ owner xác nhận** vì đây là chỉnh UX policy về lỗi.
+- **Limits:** chưa thử trên deployment thật (cookie `Secure` sau HTTPS, Vercel + Railway); chưa bấm thử các
+  luồng tạo scene/import/trang giai đoạn với tài khoản thật; nội dung landing vẫn là minh hoạ (một số mục như
+  CARLA, ROS2/pcap, "Sub-cm" không phải năng lực đã có của pipeline).
+
 ### Publication check — user yêu cầu commit & push, 2026-10-01
 
 - User đã giao commit/push phần UI/UX đang có trên `feat/studio-ux-restructure`.
