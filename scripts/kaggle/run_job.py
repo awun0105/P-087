@@ -11,6 +11,9 @@ endpoint như Studio vẫn gọi, chờ job chạy, rồi dùng `job_bundle` đ�
     python -m scripts.kaggle.run_job --job-id job-abc --metric-input metric.json \\
         --out /kaggle/working/bundles --hf-repo <user>/real2sim-artifacts
 
+Nhiều video một lượt: `--video a.mp4 b.mp4 c.mp4` (mỗi video một job). Số worker chạy song song lấy theo
+VRAM trống (`--workers auto`, mặc định) hoặc đặt tay (`--workers 2`); các job còn lại xếp hàng.
+
 Truyền cả `--video` và `--metric-input` thì chạy một mạch — chỉ đúng khi điểm đo được lấy trên chính
 3DGS của lần chạy này (hệ SfM đổi theo từng lần dựng), nên bình thường phải đi hai lượt.
 
@@ -33,6 +36,13 @@ from scripts.kaggle.job_bundle import BundleError, export_bundle, push_bundle, r
 
 _METRIC_STAGE = "ST-METRIC-CANONICALIZE"
 _POLL_SECONDS = 15.0
+#: VRAM dành cho bước tách theo vật (SAM2 + render gán nhãn + vá nền). Giả định thận trọng, chưa đo trên GPU
+#: lớn: lần chạy thật trên T2000 4 GB dùng dưới 4 GB với scene ~330k Gaussian.
+_OBJECTIFY_VRAM_GB = 4.0
+#: Chừa 25 % để không tràn VRAM khi hai job cùng ở đỉnh.
+_VRAM_HEADROOM = 1.25
+#: COLMAP + CoACD của một job dùng tốt khoảng 4 nhân.
+_CORES_PER_JOB = 4
 
 
 class RunError(RuntimeError):
@@ -78,8 +88,8 @@ class Api:
 class Stack:
     """API + worker chạy nền trong lúc lệnh này làm việc; log ghi ra thư mục `log_dir`."""
 
-    def __init__(self, port: int, log_dir: Path) -> None:
-        self.port, self.log_dir = port, log_dir
+    def __init__(self, port: int, log_dir: Path, workers: int = 1) -> None:
+        self.port, self.log_dir, self.workers = port, log_dir, workers
         self.api = Api(port)
         self.processes: list[subprocess.Popen[bytes]] = []
 
@@ -88,8 +98,10 @@ class Stack:
         environment = {**os.environ, "APP_PORT": str(self.port)}
         commands = {
             "api": [sys.executable, "-m", "uvicorn", "src.main:app", "--host", "127.0.0.1", "--port", str(self.port)],
-            "worker": [sys.executable, "-m", "src.services.orchestration.jobs.worker_cli"],
         }
+        # Nhiều worker cùng đọc một hàng đợi: mỗi job chỉ một worker nhận được (claim bằng CAS trong DB).
+        for index in range(self.workers):
+            commands[f"worker-{index}"] = [sys.executable, "-m", "src.services.orchestration.jobs.worker_cli"]
         for name, command in commands.items():
             log = (self.log_dir / f"{name}.log").open("ab")
             self.processes.append(subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=environment))
@@ -122,21 +134,68 @@ def _stage_states(progress: dict) -> dict[str, str]:
     return {stage["stage_id"]: stage["state"] for stage in progress["stages"]}
 
 
-def wait_for_pause(stack: Stack, job_id: str) -> dict:
-    """Chờ tới khi job dừng: xong, lỗi, hoặc đang chờ người xác nhận hệ mét. In tiến trình khi đổi stage."""
-    seen = None
+def wait_for_pause(stack: Stack, job_ids: list[str]) -> dict[str, dict]:
+    """Chờ tới khi mọi job dừng: xong, lỗi, hoặc đang chờ người xác nhận hệ mét. In tiến trình khi đổi stage."""
+    seen: dict[str, tuple[str, str]] = {}
+    paused: dict[str, dict] = {}
     while True:
         stack.require_alive()
-        progress = stack.api.call("GET", f"/api/v1/jobs/{job_id}/progress")
-        marker = (progress["status"], progress["current_stage"])
-        if marker != seen:
-            print(f"[{time.strftime('%H:%M:%S')}] {progress['status']} · {progress['current_stage']}", flush=True)
-            seen = marker
-        if progress["status"] not in ("RUNNING", "QUEUED"):
-            return progress
-        if _stage_states(progress).get(_METRIC_STAGE) == "waiting":
-            return progress
+        for job_id in job_ids:
+            if job_id in paused:
+                continue
+            progress = stack.api.call("GET", f"/api/v1/jobs/{job_id}/progress")
+            marker = (progress["status"], progress["current_stage"])
+            if marker != seen.get(job_id):
+                print(f"[{time.strftime('%H:%M:%S')}] {job_id} {marker[0]} · {marker[1]}", flush=True)
+                seen[job_id] = marker
+            waiting = _stage_states(progress).get(_METRIC_STAGE) == "waiting"
+            if progress["status"] not in ("RUNNING", "QUEUED") or waiting:
+                paused[job_id] = progress
+        if len(paused) == len(job_ids):
+            return paused
         time.sleep(_POLL_SECONDS)
+
+
+def plan_workers(requested: str, jobs: int, processing: dict | None) -> tuple[int, str]:
+    """Số worker chạy song song trên GPU này + lý do.
+
+    `auto`: chia VRAM trống của GPU đầu tiên cho nhu cầu một job (ước lượng train của file cấu hình xử lý,
+    không thấp hơn mức dành cho bước tách theo vật), chặn thêm theo RAM và số nhân. Chưa chia việc ra nhiều
+    GPU: mọi worker dùng GPU mà Brush/torch chọn mặc định.
+    """
+    if requested != "auto":
+        return max(1, min(int(requested), jobs)), "theo --workers"
+    from src.config import get_settings
+    from src.services.orchestration.processing import load_presets
+    from src.services.orchestration.processing.config import preset_values
+    from src.services.orchestration.processing.resources import estimate_gb
+
+    try:
+        text = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        ).stdout
+        free_gb = float(text.splitlines()[0]) / 1024
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        return 1, "không đọc được VRAM"
+    config = get_settings().product_processing_config
+    if config is None:
+        return 1, "chưa có file cấu hình xử lý"
+    presets, _ = load_presets(config)
+    need = estimate_gb(presets.resource_model, {**preset_values(presets, "minimum_quality"), **(processing or {})})
+    per_job = max(need["vram"], _OBJECTIFY_VRAM_GB) * _VRAM_HEADROOM
+    ram_gb = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1e9
+    limits = {
+        "VRAM": int(free_gb // per_job),
+        "RAM": int(ram_gb // max(need["ram"], 1.0)),
+        "CPU": max(1, len(os.sched_getaffinity(0)) // _CORES_PER_JOB),
+        "số job": jobs,
+    }
+    bound = min(limits, key=lambda name: limits[name])
+    return max(1, limits[bound]), f"VRAM trống {free_gb:.1f} GB, mỗi job ~{per_job:.1f} GB; chặn bởi {bound}"
 
 
 def confirm_metric(api: Api, job_id: str, metric_input: dict) -> None:
@@ -180,47 +239,75 @@ def _json_file(path: Path | None) -> dict | None:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Điều phối một lượt chạy; trả exit code (0 = job dừng ở trạng thái mong đợi và đã xuất gói)."""
-    metric_input = _json_file(args.metric_input)
-    with Stack(args.port, args.out / "logs") as stack:
+    """Điều phối một lượt chạy; trả exit code (0 = mọi job dừng ở trạng thái mong đợi và đã xuất gói)."""
+    metrics = [_json_file(path) for path in args.metric_input]
+    processing = _json_file(args.processing)
+    count = len(args.video or args.job_id)
+    if len(metrics) not in (0, count):
+        raise RunError("--metric-input phải bỏ trống hoặc đủ một file cho mỗi job, theo đúng thứ tự")
+    workers, reason = plan_workers(args.workers, count, processing)
+    print(f"worker song song: {workers} ({reason})")
+    with Stack(args.port, args.out / "logs", workers) as stack:
         api = stack.api
-        job_id = args.job_id
-        if job_id is None:
+        job_ids = list(args.job_id or [])
+        if args.video:
             attestation = _json_file(args.attestation)
             if attestation is None:
                 raise RunError("Tạo job mới cần --attestation (lời khai nguồn dữ liệu)")
-            job_id = create_job(api, args.video, args.name, attestation, _json_file(args.processing))
-            print(f"job: {job_id}")
-        progress = wait_for_pause(stack, job_id)
-        if progress["status"] == "RUNNING" and metric_input is not None:
-            confirm_metric(api, job_id, metric_input)
-            progress = wait_for_pause(stack, job_id)
-        if progress["status"] == "SUCCEEDED":
-            report_scene(api, job_id)
-        elif progress["status"] == "RUNNING":
-            print("Job đang chờ xác nhận hệ mét: nạp gói vào Studio để chọn điểm, hoặc chạy lượt 2 với --metric-input.")
-        else:
-            failed = [stage for stage in progress["stages"] if stage.get("error")]
-            print(f"[!] Job {progress['status']}: {failed[-1]['error'] if failed else 'không rõ'}", file=sys.stderr)
+            for video in args.video:
+                name = args.name if count == 1 else f"{args.name} · {video.stem}"
+                job_ids.append(create_job(api, video, name, attestation, processing))
+                print(f"job: {job_ids[-1]} ← {video.name}")
+        paused = wait_for_pause(stack, job_ids)
+        if metrics:
+            confirmed = []
+            for job_id, metric in zip(job_ids, metrics, strict=True):
+                if paused[job_id]["status"] == "RUNNING" and metric is not None:
+                    confirm_metric(api, job_id, metric)
+                    confirmed.append(job_id)
+            paused.update(wait_for_pause(stack, confirmed))
+        for job_id in job_ids:
+            progress = paused[job_id]
+            if progress["status"] == "SUCCEEDED":
+                report_scene(api, job_id)
+            elif progress["status"] == "RUNNING":
+                print(
+                    f"{job_id}: chờ xác nhận hệ mét — nạp gói vào Studio để chọn điểm, hoặc chạy lượt 2 với --metric-input."
+                )
+            else:
+                failed = [stage for stage in progress["stages"] if stage.get("error")]
+                print(
+                    f"[!] {job_id} {progress['status']}: {failed[-1]['error'] if failed else 'không rõ'}",
+                    file=sys.stderr,
+                )
     # Xuất sau khi API/worker đã dừng để không chụp DB giữa lúc đang ghi.
     database, jobs_root = runtime()
-    bundle = export_bundle(database, jobs_root, job_id, args.out / time.strftime("%Y%m%d-%H%M%S"))
-    print(f"gói: {bundle}")
-    if args.hf_repo:
-        print(f"đã đẩy: {push_bundle(bundle, args.hf_repo)}")
-    return 0 if progress["status"] in ("SUCCEEDED", "RUNNING") else 1
+    out = args.out / time.strftime("%Y%m%d-%H%M%S")
+    for job_id in job_ids:
+        bundle = export_bundle(database, jobs_root, job_id, out)
+        print(f"gói: {bundle}")
+        if args.hf_repo:
+            print(f"đã đẩy: {push_bundle(bundle, args.hf_repo)}")
+    return 0 if all(paused[job_id]["status"] in ("SUCCEEDED", "RUNNING") for job_id in job_ids) else 1
 
 
 def main(argv: list[str] | None = None) -> int:
     """CLI; trả exit code."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--video", type=Path, help="video đầu vào (tạo job mới)")
-    source.add_argument("--job-id", help="job đã có trên máy này (vd. vừa nạp từ gói) để chạy tiếp")
+    source.add_argument("--video", type=Path, nargs="+", help="một hoặc nhiều video đầu vào (mỗi video một job)")
+    source.add_argument("--job-id", nargs="+", help="job đã có trên máy này (vd. vừa nạp từ gói) để chạy tiếp")
     parser.add_argument("--name", default="Scene từ Kaggle")
     parser.add_argument("--attestation", type=Path, help="JSON SourceRightsAttestation (bắt buộc khi tạo job)")
     parser.add_argument("--processing", type=Path, help="JSON thông số xử lý; bỏ trống = preset mặc định")
-    parser.add_argument("--metric-input", type=Path, help="JSON UserMetricInput để xác nhận hệ mét")
+    parser.add_argument(
+        "--metric-input",
+        type=Path,
+        nargs="*",
+        default=[],
+        help="JSON UserMetricInput, một file cho mỗi job theo thứ tự",
+    )
+    parser.add_argument("--workers", default="auto", help="số worker song song trên GPU, hoặc `auto` theo VRAM trống")
     parser.add_argument("--out", type=Path, required=True, help="thư mục chứa gói xuất ra và log")
     parser.add_argument("--hf-repo", help="dataset repo Hugging Face để đẩy gói (cần HF_TOKEN)")
     parser.add_argument("--port", type=int, default=8000)

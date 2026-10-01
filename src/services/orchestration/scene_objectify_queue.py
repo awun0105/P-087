@@ -148,6 +148,7 @@ def recover_interrupted(settings: Settings) -> int:
     recovered = 0
     for path in sorted(root.glob(f"*/{_FILE}")):
         record = _read(path)
+        path.with_suffix(".lock").unlink(missing_ok=True)
         if record is not None and record.status == "running":
             _write(
                 path,
@@ -171,6 +172,12 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
         if record is None or record.status != "queued":
             continue
         job_id = path.parent.name
+        lock = path.with_suffix(".lock")
+        try:
+            # Nhiều worker cùng quét: tạo file khoá kiểu "chỉ tạo mới" để chỉ một worker nhận yêu cầu này.
+            lock.open("x").close()
+        except FileExistsError:
+            continue
         running = record.model_copy(update={"status": "running", "started_at": datetime.now(UTC)})
         _write(path, running)
         outcome: dict[str, object]
@@ -186,5 +193,6 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
             logger.warning("Dựng lại tập vật (%s) lỗi job=%s cause=%s", record.mode, job_id, error)
             outcome = {"status": "failed", "error": str(error)[:500]}
         _write(path, running.model_copy(update={**outcome, "finished_at": datetime.now(UTC)}))
+        lock.unlink(missing_ok=True)
         return True
     return False
