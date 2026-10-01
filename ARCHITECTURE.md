@@ -92,17 +92,19 @@ src/
 frontend/                             # EX-PRODUCT; Next.js Web Studio
 ├── src/
 │   ├── app/                          # routes, layouts, page composition
-│   │   ├── (studio)/                 # Studio MVP (mặc định)
-│   │   └── (legacy)/                 # UI P0 đầy đủ; redirect về Studio trừ khi LEGACY_UI=1
-│   ├── components/                   # shared presentational components (`studio/` = primitives MVP)
+│   │   ├── page.tsx                  # landing (`/`)
+│   │   └── (studio)/                 # app Studio: overview, scenes, jobs, new, team, account, login/register
+│   ├── components/
+│   │   ├── shadcn/                   # bộ nền Radix (donor), không chứa logic sản phẩm
+│   │   └── studio/                   # primitives và phản hồi của Studio (Button, Card, Notice, CopyButton…)
 │   ├── features/
-│   │   ├── studio/                   # luồng Studio MVP: Scenes, Scene mới + video mẫu, editor
-│   │   ├── projects/
-│   │   ├── jobs/
-│   │   ├── viewer/
-│   │   ├── scene/
-│   │   ├── validation/
-│   │   └── review/
+│   │   ├── landing/                  # trang đầu
+│   │   ├── shell/                    # khung app: sidebar, header, breadcrumb, đổi theme
+│   │   ├── studio/                   # mọi màn của Studio; `scene/` (tab của một scene), `inspection/` (xem từng bước),
+│   │   │                             #   `auth/` (đăng nhập, nhóm, tài khoản)
+│   │   └── viewer/                   # engine 3D dùng chung: PlayCanvas scene, lớp phủ vật thể, GLB, đo đạc
+│   │                                 # UI P0 cũ (route `(legacy)`, features scene/review/jobs, components/ui) đã xoá
+│   │                                 # 02/10/2026 — STUDIO_UX_SPEC.md D-10; URL cũ chuyển hướng về /overview.
 │   └── lib/
 │       ├── api/                      # typed FastAPI client
 │       └── contracts/                # frontend projections of API schemas

@@ -4,7 +4,7 @@ Date: 2026-10-02
 
 ## Status
 
-Active — nhánh `feat/pipeline-v2` (chưa push).
+Completed (02/10/2026) — nhánh `feat/pipeline-v2`, chưa push. Việc còn mở nằm ở mục *Follow-up* cuối file.
 
 ## Outcome
 
@@ -96,9 +96,9 @@ Out of scope:
 - [x] Pha 2: `src/api/product/`.
 - [x] Dọn `data/` (ngoài kế hoạch ban đầu, owner yêu cầu 02/10).
 - [x] Pha 3: orchestration theo miền.
-- [ ] Pha 4a: validation / duyệt / phát hành trong UI mới.
-- [ ] Pha 4b: xoá UI cũ.
-- [ ] Pha 5: đồng bộ tài liệu cấu trúc.
+- [x] Pha 4a: validation / duyệt / phát hành trong UI mới (commit `e27fc2b`).
+- [x] Pha 4b: xoá UI cũ.
+- [x] Pha 5: đồng bộ tài liệu cấu trúc.
 
 ## Decisions
 
@@ -126,7 +126,7 @@ Out of scope:
 
 ## Result
 
-Đang làm — cập nhật sau mỗi pha.
+Xong cả năm pha và phần dọn `data/`. Chi tiết và bằng chứng theo từng pha:
 
 ### Pha 1 — thư mục gốc và tài liệu (xong)
 
@@ -187,3 +187,52 @@ Out of scope:
   - Ảnh trùng giữa `torwic_slam/raw` và `normalized` (khoảng 1,5 GB) là do thiết kế dataset; không gộp bằng hardlink vì
     công cụ ghi đè tại chỗ ở `normalized` sẽ làm hỏng `raw`.
 - Phát hiện: test backend ghi job vào `data/artifacts` (kho mặc định) mỗi lần chạy — rác tích lại, chưa sửa.
+
+### Pha 4a — validation / duyệt / phát hành trong UI mới (xong)
+
+- Backend (chỉ thêm): `ReviewState.isaac_runtime_proof`; quy tắc `has_isaac_runtime_proof` ở
+  `orchestration/review/lifecycle.py` dùng chung cho `/review-state` và `/jobs/{id}/validation`. Quy tắc cũ chỉ so đúng
+  chuỗi `UNVERIFIED`; nay thiếu khoá `isaac_sim` hoặc giá trị bắt đầu bằng `UNVERIFIED`/`TBD` đều là chưa có bằng chứng
+  (validator SIM-06 trên `origin/feat/sim` ghi `UNVERIFIED (local environment)`).
+- Frontend: parser chuẩn hoá ở biên API cho `ReviewStateView`; `ValidationReportCard` (S10), `TraceList`, `CopyButton`;
+  `ReviewPanel` (cảnh báo kèm thông điệp/bằng chứng, nguồn kết quả của quyết định), thẻ `Bản phát hành` (S12).
+- VERIFIED: OpenAPI khác baseline đúng một thuộc tính `isaac_runtime_proof`; pytest review 36 passed (5 case mới);
+  `vitest` 39 file / 236 test (9 test mới, dùng `fixtures/validation_report/*.json` qua parser thật); `tsc`, `eslint`,
+  `next build` exit 0.
+- VERIFIED — trình duyệt, môi trường cô lập (bản gương hardlink của kho artifact + bản sao DB, không ghi vào kho thật;
+  gắn một `ValidationReport` **tổng hợp ghi rõ UNVERIFIED** qua `record_validation_report`), 18/18 bước: Editor chỉ đọc;
+  Reviewer thấy 4 check + 2 Start–Goal, môi trường UNVERIFIED nguyên văn, bằng chứng và Nguồn kết quả mở được, thẻ
+  không tràn ngang; nút duyệt khoá tới khi chấp nhận cảnh báo; duyệt → phát hành → tải zip 24 MB; URL cũ chuyển hướng.
+- Limits: chưa có `ValidationReport` từ Isaac thật; link tải từng bằng chứng chưa có (chỉ hiện URI + nút chép vì chưa
+  kiểm allow-list cho artifact bằng chứng).
+
+### Pha 4b — xoá UI cũ (xong)
+
+- Xoá 47 file: 38 file nguồn (`app/(legacy)/**`, `components/ui/*`, 4 file lẻ trong `components/`, `features/{scene,
+  review,jobs}`, 9 file UI cũ trong `features/viewer`) và 9 file test của chúng; bỏ 8 hàm client chỉ UI cũ gọi, cờ
+  `LEGACY_UI`, khối token theme tối cũ và `.legacy-root` trong `globals.css`. Giữ redirect URL cũ về `/overview`.
+- Giữ: engine 3D dùng chung trong `features/viewer` (7 file), 16 component shadcn chưa dùng, `StudioHeader.tsx`,
+  `lib/contracts/api.ts`, dependency `three`/`@react-three/*` (còn file import).
+- VERIFIED: `npm run typecheck` (có `next typegen`), `eslint` exit 0; `vitest` 30 file / 174 test; `next build` còn 15
+  route, không còn trang cũ; `rg` không còn import tới đường dẫn đã xoá; trình duyệt 18/18 bước (6 trang chính, 4 tab
+  của scene, màn xem bước Hình học & collision, 6 URL cũ chuyển hướng, trang 404).
+
+### Pha 5 — tài liệu cấu trúc (xong)
+
+- `ARCHITECTURE.md` (cây `src/api`, `orchestration`, `frontend/src`), `README.md` (bản đồ thư mục gốc, bản đồ `data/`,
+  Project Structure), `docs/README.md`, `docs/STUDIO_UX_SPEC.md` (D-10 sửa, hiện trạng S10–S12, 5 link trỏ file đã
+  xoá chuyển sang phần thay thế), `TRACK.md` của EX-PRODUCT, `docs/CONTEXT.md`, `docs/WIREFRAME_AND_UI_FLOW.md`.
+- VERIFIED: kiểm link tương đối của các tài liệu sống: không link hỏng. Backend sau cùng: `pytest tests/ -q` 1131
+  passed / 40 skipped; `ruff`, `check_foundation`, `check_contract_mirror` exit 0.
+
+## Follow-up (cần owner quyết)
+
+1. **Chặn duyệt khi báo cáo không có bằng chứng Isaac thật?** Hiện chỉ cảnh báo; lượt thử cho thấy Reviewer duyệt và
+   phát hành được gói dựa trên báo cáo tổng hợp.
+2. **Xoá scene cũ trong Studio** (13 scene, 4,2 GB): cần một thao tác xoá scene được hỗ trợ và danh sách scene giữ lại.
+3. **Endpoint backend chỉ UI cũ gọi** (`/projects…`, `/jobs/{id}/transitions`, `/validation`, `/review`,
+   `/review/{action}`, `/release`): giữ hay bỏ — là hợp đồng API có test riêng của EX-PRODUCT.
+4. **Nối validator SIM-06/07** (`origin/feat/sim`) vào luồng Studio để có báo cáo thật.
+5. **Test backend để rác vào `data/artifacts`** mỗi lần chạy (4 thư mục job một lượt).
+6. Chạy một job thật qua worker trên GPU sau khi dời module `orchestration` (đã có test đường dẫn runner, chưa có lượt
+   chạy thật).

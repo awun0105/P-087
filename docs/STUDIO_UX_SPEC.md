@@ -58,7 +58,7 @@ Vấn đề UX chính là khoảng cách giữa Studio hiện tại và quy trì
 | Workspace 3DGS | Editor nhúng; chỉ dẫn File → Export PLY/SOG; fallback chỉ xem | Edit Gaussian cục bộ chưa tương đương lưu SceneObject revision |
 | `/new?sample=…`, `/samples/[sampleId]/scene` | Cấu hình mẫu chỉ đọc; phát lại tiến trình đã ghi; có bỏ qua để mở scene | Không phải job GPU mới, không dùng thời gian replay làm ETA |
 | `/login`, `/register`, `/team` | Đăng nhập, mã mời; Reviewer quản lý nhóm | Không có đăng nhập bằng cách chọn role tùy ý |
-| `/projects/…`, `/jobs/…/{viewer,validation,review,release}` | UI legacy có project/job, viewer và báo cáo | Mặc định chuyển về Studio; cần `LEGACY_UI=1` để truy cập |
+| `/projects/…`, `/jobs/…/{viewer,validation,review,release}` | UI legacy có project/job, viewer và báo cáo — **đã xoá 02/10/2026** (D-10) | URL cũ chuyển hướng về `/overview`; phần validation/duyệt/phát hành nằm ở tab `Kiểm tra & duyệt` và `Kết quả` của scene |
 
 Nguồn: [ScenesHome][r-home], [NewSceneFlow][r-new], [inputKinds][r-input], [ImportScenePage][r-import], [ScenePage][r-scene], [MetricConfirmView][r-metric], [SampleFlow][r-sample], [EditorFrame][r-editor], [StudioHeader][r-header], [route visibility][r-routes].
 
@@ -75,7 +75,7 @@ File 3DGS đã upload → Mở scene 3DGS → nén bản xem → workspace chỉ
                    → export bản làm việc; chưa có đường metric/collision/release
 ```
 
-Luồng validation/review/release đầy đủ **chưa nằm trong navigation mặc định**. Review và release legacy mặc định chỉ đọc; source API trả lỗi chưa triển khai thay vì tạo approval/release giả. Phần report có nhãn phân biệt fixture với bằng chứng Isaac thật. Nguồn: [ReviewLifecycle][r-review], [ReleasePanel][r-release], [product routes][r-api], [Validation page][r-validation]. Không lấy comment cũ “fake stub trả thành công” làm mô tả behavior hiện tại.
+**Cập nhật 02/10/2026:** validation/duyệt/phát hành nằm trong scene của Studio: tab `Kiểm tra & duyệt` (gói mô phỏng + preflight, báo cáo validation chi tiết, quyết định của Reviewer) và tab `Kết quả` (bản phát hành kèm nguồn kết quả). UI legacy và các màn review/release chỉ đọc của nó đã xoá (D-10); endpoint ghi của hợp đồng P0 (`review/{action}`, `release`) vẫn trả 501 thay vì tạo approval/release giả. Báo cáo có nhãn phân biệt kết quả không có bằng chứng Isaac thật. Nguồn: [ReviewPanel][r-review], [ResultsTab][r-release], [product routes][r-api], [ValidationReportCard][r-validation].
 
 ### 2.2a Hiện trạng cập nhật sau HEAD `6868686` (VERIFIED — source + chạy thật, 30/09/2026)
 
@@ -86,7 +86,7 @@ Các capability dưới đây đã có trên `feat/studio-integration` (chưa me
 | Stage `ST-OBJECT-EXTRACT` sau collision | SAMPro3D + SAM2 tạo SceneObject CANDIDATE (SceneIR rev-001); fallback hình học khi thiếu runtime | Ứng viên sai (kệ/xà) do 3DGS preview kém — không thêm luật lọc (owner, ADR 0006) |
 | Xác nhận vật thể (S08) | Tab `Vật thể`: 3DGS màu + hộp màu theo trạng thái, confirm/ignore/ẩn, thêm vật cản hộp; bấm hộp trong 3D để chọn, bấm danh sách thì camera bay tới | Mỗi thao tác publish ngay một revision SceneIR (không có nút "Lưu nháp" riêng) |
 | Gói mô phỏng (một phần S09/S12) | `Tạo gói mô phỏng`: khoét vật khỏi mesh môi trường, collider hộp, preflight 6 luật, CandidatePackage + zip `scene.usda` tải về; gói khoá theo revision | **Chưa chạy Isaac** (SIM-06+), chưa có Start–Goal/footprint, chưa review/release (API 501) |
-| Duyệt & phát hành (S10–S12, PRODUCT-10/11) | Panel `Kiểm tra & duyệt`: trạng thái suy từ artifact theo gói; Reviewer đã đăng nhập duyệt (chấp nhận từng cảnh báo, xác nhận) hoặc từ chối kèm lý do; duyệt xong tự niêm phong `ReleaseManifest`, tải zip phát hành | Chưa có `ValidationReport` Isaac thật nên luồng chỉ đi hết với fixture; khi chưa có báo cáo hiện lý do chặn |
+| Duyệt & phát hành (S10–S12, PRODUCT-10/11) | Panel `Kiểm tra & duyệt`: trạng thái suy từ artifact theo gói; Reviewer đã đăng nhập duyệt (chấp nhận từng cảnh báo kèm thông điệp/bằng chứng, xác nhận) hoặc từ chối kèm lý do; duyệt xong tự niêm phong `ReleaseManifest`, tải zip phát hành. Thẻ `Báo cáo validation` (02/10/2026): từng check, Start–Goal, bằng chứng, `Nguồn kết quả` (revision, checksum gói/báo cáo); quyết định và bản phát hành có checksum để truy vết | Chưa có `ValidationReport` Isaac thật nên luồng chỉ đi hết với báo cáo tổng hợp trong môi trường thử; báo cáo không có bằng chứng Isaac thật mang cảnh báo nhưng **chưa bị chặn duyệt** (cần owner quyết); khi chưa có báo cáo hiện lý do chặn |
 | Kết quả từng bước (ADR 0005) | Frame, quỹ đạo camera, 3DGS Brush, 3DGS hệ mét, collision mesh phủ lên 3DGS; bật/tắt lớp | Chưa có LOD cho scene rất lớn |
 | So sánh 3 hướng đo tỉ lệ | RGB-only (mock, không số), anchor người dùng, LiDAR demo | RGB-only chỉ mô tả, chưa có số đo thật |
 | Scenes / workspace | Thẻ có ảnh xem trước (JPEG 480 px); workspace dùng thanh tab Editor 3DGS · Kết quả từng bước · Vật thể · So sánh 3 hướng | Vẫn theo theme beige cũ, chưa theo palette/donor |
@@ -676,7 +676,7 @@ Mỗi quyết định chỉ chốt cách **UI thể hiện**; không đổi PRD,
 | D-07 | Vị trí các tính năng hiện có trong IA scene | Tab trong scene: **Tiến trình** (timeline, attempt, lỗi, mở view từng giai đoạn; so sánh hệ mét ở workspace stage 6), **Studio** (viewport 3DGS hệ mét / editor Gaussian; panel Tỉ lệ mét S07, panel Vật thể S08, inspector), **Kiểm tra & duyệt** (gói mô phỏng + preflight; report/duyệt chỉ hiện khi backend có bằng chứng), **Kết quả** (xuất bản làm việc, gói candidate, release theo đúng revision/checksum) | Khớp IA §3.1 và quyết định 01/10; không tạo trang global mới |
 | D-08 | Studio dùng viewer nào | Mặc định **viewer hệ mét PlayCanvas** (3DGS + lớp collision/hộp) khi scene đã có metric; trước metric dùng viewer preview SfM. Editor SuperSplat (iframe) là chế độ `Chỉnh Gaussian` riêng trong Studio, có nhãn export-only | Hai loại edit khác nghĩa (Q5); viewer hệ mét là nơi thao tác SceneObject |
 | D-09 | S09 Start–Goal / footprint | **Chưa làm** cho tới khi SIM-06 có path validation; S09 hiện chỉ "Tạo gói mô phỏng" + preflight thật. Footprint mặc định OTTO (0,461/0,308 m) chỉ hiện khi validation dùng nó | Không tự điền robot/kích thước không có nguồn (§S09) |
-| D-10 | UI legacy (`/projects`, `/jobs/...`) | Giữ nguyên sau cờ `LEGACY_UI=1` trong lúc refactor; component tái dùng được (review, release, validation) chuyển sang UI mới khi backend sẵn sàng. **Xoá legacy chỉ khi owner đồng ý** sau khi UI mới đạt parity | Quy ước owner: không xoá code còn dùng được |
+| D-10 | UI legacy (`/projects`, `/jobs/...`) | **Sửa 02/10/2026 (owner):** đưa phần validation / duyệt / phát hành vào UI mới (thẻ `Báo cáo validation`, `Nguồn kết quả` ở tab `Kiểm tra & duyệt` và `Kết quả`) rồi **xoá hẳn** các trang cũ và toàn bộ code chỉ UI cũ dùng: route group `(legacy)`, `features/{scene,review,jobs}`, `components/ui`, các panel cũ trong `features/viewer`, cờ `LEGACY_UI`. URL cũ vẫn chuyển hướng về `/overview`. Engine 3D dùng chung trong `features/viewer` giữ nguyên | Trước 02/10: giữ sau cờ `LEGACY_UI=1`. Owner quyết xoá sau khi UI mới có đủ phần duyệt/phát hành/validation; lấy lại code cũ từ git khi cần. Endpoint backend của hợp đồng P0 không xoá trong đợt này |
 | D-11 | Ngôn ngữ, responsive | Tiếng Việt, thuật ngữ kỹ thuật giữ nguyên (3DGS, collider, revision); desktop là mục tiêu thao tác 3D; màn hẹp chỉ đảm bảo xem trạng thái/báo cáo, sidebar thành sheet | Theo §7.4 |
 | D-12 | Tên nhãn trạng thái scene | Một bảng nhãn duy nhất suy từ JobManifest + progress + SceneIR, dùng chung cho Scenes, Jobs, header: `Đang chờ worker` · `Đang chạy · <stage>` · `Cần xác nhận tỉ lệ` · `Đang dựng collision` · `Cần xác nhận vật thể` (có ứng viên chưa xử lý) · `Sẵn sàng tạo gói` · `Đã có gói mô phỏng` · `Lỗi · <stage>` · `Đã huỷ`. Không có nhãn "Sẵn sàng" chung | §3 Clarity; tránh nhầm preview với sẵn sàng mô phỏng |
 | D-13 | Kiểu chữ và nét kẻ theo landing | **Owner quyết 01/10/2026:** app dùng bộ chữ của landing — **Plus Jakarta Sans** cho chữ giao diện, **IBM Plex Mono** cho nhãn kỹ thuật (utility `label-tech`: mono, chữ hoa, 12px) và giá trị kỹ thuật (ID, revision, số liệu); tiêu đề đậm (`font-extrabold`/`font-bold` + `tracking-tight`), nút `font-semibold`. Palette giữ D-04 (trùng landing); viền đổi sang mực ấm pha loãng của landing (`line` 0,16 · `line-strong` 0,36 · `line-dark` cho nền tối) và viền không khai báo màu của component donor mặc định theo `--border`; bôi chọn chữ, thanh cuộn và tên sản phẩm ("Real2Sim" + nhãn mono "Studio") theo landing. Font nạp một lần ở root layout bằng `next/font` với subset `vietnamese` | Owner muốn app cùng bộ nhận diện với landing; landing không đổi. UI legacy (D-10) giữ palette tối riêng, chỉ nhận font chung. Nhãn kỹ thuật trung tính dùng `ink-muted` (5,43:1 trên paper) vì `ink-subtle` (3,47:1) không đạt AA ở cỡ chữ nhỏ; overline màu `ember-strong` giữ như landing dù chỉ 3,98:1 trên paper — đổi màu này cần owner quyết |
@@ -765,6 +765,8 @@ Browser visual QA và real worker/GPU/roles vẫn là cổng riêng; static/fixt
 không thay thế các cổng đó. Increment này không thay scope Studio v2 của Claude.
 
 <!-- Nguồn repository có đường dẫn thật; đường dẫn donor chỉ phục vụ tra cứu reference, không phải ownership mới. -->
+<!-- 02/10/2026: nguồn của UI legacy (ReviewLifecycle, ReleasePanel, trang validation, ViewerPanel, states) đã xoá theo D-10;
+     các nhãn r-review, r-release, r-validation, r-viewer, r-states trỏ sang phần thay thế trong Studio. Bản gốc: git trước commit xoá. -->
 [prd]: PRD.md
 [contract]: execution/TEAM_EXECUTION_CONTRACT.md
 [adr2]: decisions/0002-studio-mvp-video-to-3dgs.md
@@ -788,16 +790,16 @@ không thay thế các cổng đó. Increment này không thay scope Studio v2 c
 [r-workspace]: ../frontend/src/features/studio/SceneWorkspace.tsx
 [r-timeline]: ../frontend/src/features/studio/PipelineTimeline.tsx
 [r-status]: ../frontend/src/features/studio/sceneStatus.ts
-[r-viewer]: ../frontend/src/features/viewer/ViewerPanel.tsx
+[r-viewer]: ../frontend/src/features/viewer/PlayCanvasScene.tsx
 [r-auth]: ../frontend/src/features/studio/auth/AuthForms.tsx
 [r-team]: ../frontend/src/features/studio/auth/TeamPage.tsx
-[r-review]: ../frontend/src/features/review/ReviewLifecycle.tsx
-[r-release]: ../frontend/src/features/review/ReleasePanel.tsx
-[r-validation]: <frontend/src/app/(legacy)/jobs/[jobId]/validation/page.tsx>
+[r-review]: ../frontend/src/features/studio/ReviewPanel.tsx
+[r-release]: ../frontend/src/features/studio/scene/ResultsTab.tsx
+[r-validation]: ../frontend/src/features/studio/ValidationReportCard.tsx
 [r-api]: ../src/api/product/scene.py
 [r-routes]: ../frontend/next.config.ts
 [r-styles]: ../frontend/src/app/globals.css
-[r-states]: ../frontend/src/components/states.tsx
+[r-states]: ../frontend/src/components/studio/feedback.tsx
 [d-image]: /home/lqaq/PROJECT/AI20K/private/UI-UX/next-shadcn-admin-dashboard/media/default/default-dark.webp
 [d-nav]: /home/lqaq/PROJECT/AI20K/private/UI-UX/next-shadcn-admin-dashboard/src/navigation/sidebar/sidebar-items.ts
 [d-shell]: </home/lqaq/PROJECT/AI20K/private/UI-UX/next-shadcn-admin-dashboard/src/app/(main)/dashboard/layout.tsx>

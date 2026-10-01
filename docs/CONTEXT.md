@@ -1290,7 +1290,7 @@ frontend/
 ```
 
 `PRODUCT-05` đã giao scaffold frontend; `PRODUCT-06` giao viewer. `frontend/` đã có
-(Studio MVP + UI P0 ẩn sau `LEGACY_UI=1`); placement này đã khóa và không phải P1/stretch.
+(Studio; UI P0 cũ đã xoá 02/10/2026 theo STUDIO_UX_SPEC.md D-10); placement này đã khóa và không phải P1/stretch.
 
 ---
 

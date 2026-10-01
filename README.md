@@ -48,7 +48,7 @@ chạy thử; xem [plan pipeline v2](./docs/plans/active/2026-09-30-pipeline-v2.
 | Reconstruction | FFmpeg, COLMAP (Docker), Brush 0.3.0, splat-transform 3.6.6 (SOG nén bằng WebGPU) | Chạy thật local cho luồng video → 3DGS; Open3D chỉ dùng trong offline tooling; OpenMVS chưa tích hợp |
 | Scene/Object | SAM2, Open3D, NumPy | Planned integration |
 | Simulation | Trimesh, Scipy, OpenUSD, NVIDIA Isaac Sim, IsaacLab | Preflight rules & Collider generator (SIM-02/04) đã hoàn thành; Isaac Sim runtime đang phát triển |
-| Frontend | Next.js 16, React 19, TypeScript, Tailwind 4, SuperSplat 3.4.2 (vendored), PlayCanvas + supersplat-viewer | Studio MVP chạy; UI P0 đầy đủ (review/release, HITL edit) giữ code, ẩn sau `LEGACY_UI=1` |
+| Frontend | Next.js 16, React 19, TypeScript, Tailwind 4, SuperSplat 3.4.2 (vendored), PlayCanvas + supersplat-viewer | Studio chạy đủ luồng video → scene → gói mô phỏng → duyệt/phát hành (validation Isaac thật chưa có); UI P0 cũ đã xoá 02/10/2026 |
 | DevOps | Docker, Docker Compose, GitHub Actions | Scaffold backend và CI config; chưa chứng minh full product deployment |
 
 ## Quick Start
@@ -198,7 +198,7 @@ Bản đồ nhanh (kiểm theo checkout 2026-09-29). Placement/ownership chính 
 | `src/api/` | `routes.py` (điểm vào), `auth.py` (đăng nhập, quyền), `schemas.py`, `product/` (hợp đồng UI P0: project, job, artifact, scene, review), `studio/` (route của Studio) | Scaffold + nhóm |
 | `src/agents/`, `src/llm/`, `src/models/schemas.py` | Chat agent scaffold, chưa thuộc pipeline Real2Sim | Ban tổ chức |
 | `frontend/src/app/(studio)/`, `features/studio/` | Studio MVP (Scenes, Scene mới + video mẫu, trang scene/editor) | Nhóm |
-| `frontend/src/app/(legacy)/`, `features/{jobs,review,scene,viewer}` | UI P0 đầy đủ, giữ để dùng lại; ẩn khi không đặt `LEGACY_UI=1` | Nhóm |
+| `frontend/src/features/viewer/`, `features/shell/`, `components/{shadcn,studio}` | Engine 3D dùng chung (PlayCanvas, lớp phủ vật thể), khung app, bộ component nền và primitives của Studio | Nhóm + donor |
 | `frontend/vendor/supersplat/` | SuperSplat editor (MIT), build ra `public/editor` | Bên thứ ba |
 | `configs/product/` | File cấu hình chung: thông số xử lý, profile chất lượng upload | Nhóm |
 | `scripts/torwic/` | Offline dataset tooling (`migrations/` = script chạy một lần) | Nhóm |

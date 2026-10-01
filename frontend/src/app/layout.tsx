@@ -25,8 +25,8 @@ export const metadata: Metadata = {
 };
 
 /**
- * Root layout chỉ giữ html/body và font; khung giao diện thuộc từng route group:
- * `(studio)` là Studio MVP, `(legacy)` là UI cũ được ẩn sau flag `LEGACY_UI`.
+ * Root layout chỉ giữ html/body, font và script theme; khung giao diện của app nằm ở route group `(studio)`, còn
+ * landing (`/`) tự dựng khung riêng.
  */
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

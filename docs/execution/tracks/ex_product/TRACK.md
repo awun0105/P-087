@@ -78,8 +78,9 @@ Outputs: project/job lifecycle, scene revisions, review history,
   dịch/xoay/co giãn, ẩn/xoá hiện nền đã vá, thêm từ thư viện asset Isaac, đổi nhãn/khối lượng,
   hoàn tác (PRODUCT-06/07/07A). Theo [plan pipeline v2](../../../plans/active/2026-09-30-pipeline-v2.md), pha C.
 - **Studio MVP (2026-09-29, ADR 0002):** route group `(studio)` là UI mặc định
-  (Scenes, Scene mới + video mẫu, trang scene + editor); UI P0 đầy đủ nằm ở
-  `(legacy)`, ẩn trừ khi `LEGACY_UI=1`. Route Studio ở `src/api/studio/`, queue
+  (Scenes, Scene mới + video mẫu, trang scene + editor). **Cập nhật 2026-10-02:** UI P0 cũ (`(legacy)`,
+  `components/ui/`, `features/{scene,review,jobs}`) đã xoá theo STUDIO_UX_SPEC.md D-10 sau khi phần
+  validation/duyệt/phát hành có trong Studio. Route Studio ở `src/api/studio/`, queue
   worker `orchestration/jobs/worker_cli.py` + `runner.py` chạy REC thật qua process.
 - **Kiến trúc cloud (ADR 0003, chưa triển khai):** Vercel (UI), Railway (FastAPI), Supabase
   (PostgreSQL), Cloudflare R2 (file, upload/download thẳng), Vast.ai / dự phòng RunPod (GPU tự bật/tắt, worker không phụ thuộc nhà cung cấp);
