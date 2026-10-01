@@ -14,6 +14,7 @@ run_job → export → push  ─────────►  jobs/<job_id>/bundl
 | File | Việc |
 | --- | --- |
 | `setup_kaggle.sh` | Cài COLMAP (apt, CPU), Vulkan, Brush, Node + splat-transform, venv app, runtime tách theo vật; ghi `kaggle.env` |
+| `probe_vulkan.sh` | Kiểm 1–2 phút: Vulkan có thấy GPU NVIDIA không (không cần mã nguồn) |
 | `preflight.py` | Kiểm từng công cụ pipeline cần; thiếu mục bắt buộc → dừng trước khi tốn giờ GPU |
 | `run_job.py` | Một hoặc nhiều video (+ điểm đo) → job chạy tới chỗ dừng → xuất gói → đẩy Hugging Face; số worker song song theo VRAM trống |
 | `job_bundle.py` | `export` / `import` / `push` / `pull` gói job |
@@ -28,6 +29,39 @@ run_job → export → push  ─────────►  jobs/<job_id>/bundl
   Kaggle (rủi ro lớn nhất — không có thì Brush không train được và hiện chưa có trainer thay thế); COLMAP
   bản apt thay cho image đã ghim; `push`/`pull` lên Hugging Face (chưa có token trong phiên làm việc này).
   Lần chạy Kaggle đầu tiên: chạy `preflight` và ghi kết quả vào đây.
+
+## Kaggle có chạy được không — tra cứu 2026-10-01
+
+| Bước pipeline | Cần gì | Trên Kaggle |
+| --- | --- | --- |
+| Tách frame, COLMAP | CPU, ffmpeg, COLMAP bản apt | Chạy được (4 nhân CPU, chậm hơn máy thuê) — INFERENCE, chưa chạy |
+| **Train 3DGS (Brush)** | **Vulkan trên GPU** | **Chưa rõ, nhiều khả năng KHÔNG** — xem dưới |
+| Nén SOG, dựng voxel (splat-transform) | WebGPU → Vulkan | Cùng số phận với Brush; nén SOG có đường lùi CPU |
+| Tách theo vật (SAM2, gsplat, LaMa), collider | CUDA + nvcc, CPU | Chạy được: Kaggle sinh ra cho CUDA — INFERENCE, chưa chạy |
+
+Về Vulkan (điểm quyết định):
+
+- Một hướng dẫn chạy LLM trên Kaggle ghi rõ container Kaggle "có driver NVIDIA nhưng **không có Vulkan ICD**",
+  backend Vulkan lặng lẽ chạy bằng CPU (`llvmpipe`), 0 MB VRAM được dùng.
+- Thiếu **file ICD** thì tự ghi được (script cài đã làm). Cái không tự sửa được là thiếu **thư viện đồ hoạ của
+  driver** (`libGLX_nvidia.so.0`, `libnvidia-glcore`): NVIDIA runtime chỉ mount chúng khi container được cấp
+  quyền `graphics`. Image GPU của Kaggle (bản R) đặt `NVIDIA_DRIVER_CAPABILITIES=compute,utility` — tức chỉ CUDA.
+- Ngược lại, image Python GPU của Kaggle dựng trên image của Colab, và trên Colab T4 người ta bật được Vulkan
+  phần cứng bằng cách ghi ICD trỏ tới `libGLX_nvidia.so.0`. Nên chưa thể kết luận chắc cho Kaggle.
+
+→ **UNKNOWN cho tới khi chạy `probe_vulkan.sh` trên Kaggle (1–2 phút, không cần mã nguồn).** Nếu ra
+`VULKAN_GPU=no`: Brush không dùng được trên Kaggle; lựa chọn là (a) train trên vast.ai bằng `Dockerfile.gpu`,
+hoặc (b) thêm một trainer 3DGS chạy CUDA (gsplat) làm đường thay thế — đổi công cụ baseline nên cần owner quyết.
+
+Giới hạn Kaggle khác: phiên tối đa 12 giờ, ~30 giờ GPU/tuần, `/kaggle/working` chỉ 20 GB (vì vậy runtime đặt ở
+`/kaggle/tmp`, ~60 GB, mất khi hết phiên), bật Internet cần xác minh số điện thoại, không có Docker.
+
+Nguồn: [TurboLLM trên Kaggle](https://turbollm.dev/guides/turbollm-on-kaggle) ·
+[Kaggle docker-rstats gpu.Dockerfile](https://github.com/Kaggle/docker-rstats/blob/main/gpu.Dockerfile) ·
+[Kaggle docker-python Dockerfile.tmpl](https://github.com/Kaggle/docker-python/blob/main/Dockerfile.tmpl) ·
+[WebGPU/Vulkan trên Colab T4](https://github.com/hosein-ul/colab-webgpu-chrome) ·
+[NVIDIA Container Toolkit — driver capabilities](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/docker-specialized.html) ·
+[Kaggle Notebooks docs](https://www.kaggle.com/docs/notebooks)
 
 ## Chuẩn bị (một lần)
 
@@ -47,12 +81,15 @@ run_job → export → push  ─────────►  jobs/<job_id>/bundl
 ## Các ô lệnh trên Kaggle
 
 ```bash
+# Ô 0 — kiểm Vulkan trước khi làm gì khác: dán nội dung scripts/kaggle/probe_vulkan.sh vào một ô %%bash
+#        (chỉ đi tiếp các ô dưới nếu kết quả là VULKAN_GPU=yes)
+
 # Ô 1 — mã nguồn + cài đặt (khoảng 15–25 phút lần đầu; gsplat biên dịch kernel CUDA)
 git clone --branch feat/pipeline-v2 https://$GITHUB_TOKEN@github.com/<org>/<repo>.git /kaggle/working/app
-cd /kaggle/working/app && bash scripts/kaggle/setup_kaggle.sh /kaggle/working/r2s
+cd /kaggle/working/app && bash scripts/kaggle/setup_kaggle.sh /kaggle/tmp/r2s
 
 # Ô 2 — kiểm máy (phải "đủ điều kiện chạy" mới đi tiếp)
-cd /kaggle/working/app && set -a && source /kaggle/working/r2s/kaggle.env && set +a
+cd /kaggle/working/app && set -a && source /kaggle/tmp/r2s/kaggle.env && set +a
 .venv/bin/python -m scripts.kaggle.preflight
 
 # Ô 3 — lượt 1: video → 3DGS, dừng ở bước chờ xác nhận hệ mét, đẩy gói lên Hugging Face
@@ -90,7 +127,7 @@ Rồi `pull` + `import` lại trên máy Studio: gói mới là bản chạy ti�
 Nhiều video một lượt: `--video a.mp4 b.mp4 c.mp4`. Mặc định `--workers auto` chia VRAM trống của GPU đầu tiên
 cho nhu cầu một job (ví dụ T4 16 GB với preset mặc định → 3 job song song); đặt tay bằng `--workers 2`. Chưa
 chia việc ra hai GPU của Kaggle T4×2. Phiên bị ngắt giữa lúc train: trong cùng phiên thì `retry` train tiếp từ
-checkpoint; sang phiên mới thì mất kho checkpoint (nằm trong `/kaggle/working/r2s/workers`) và chạy lại từ đầu.
+checkpoint; sang phiên mới thì mất kho checkpoint (nằm trong `/kaggle/tmp/r2s/workers`) và chạy lại từ đầu.
 
 Hình khối asset thư viện cho Studio (tuỳ chọn, chạy trên máy có Studio):
 `data/scene_runtime/bin/python scripts/scene/build_asset_previews.py --out data/asset_previews`.
@@ -101,7 +138,7 @@ Hình khối asset thư viện cho Studio (tuỳ chọn, chạy trên máy có S
 - `import` chỉ nhận gói là **bản chạy tiếp** của job đang có (hoặc job chưa có). Hai máy cùng chạy tiếp một
   job theo hai hướng thì gói bị từ chối, DB không đổi.
 - Mọi file được kiểm sha256 trước khi nạp. Token không bao giờ nằm trong gói, file env hay tham số lệnh.
-- Giới hạn Kaggle: phiên tối đa 12 giờ, hết phiên mất `/kaggle/working/r2s` (phải cài lại); đẩy gói lên
+- Giới hạn Kaggle: phiên tối đa 12 giờ, hết phiên mất `/kaggle/tmp/r2s` (phải cài lại); đẩy gói lên
   Hugging Face ngay sau mỗi lượt là cách giữ kết quả.
 
 ## Khi đã có kho S3 + DB chung (ADR 0003)

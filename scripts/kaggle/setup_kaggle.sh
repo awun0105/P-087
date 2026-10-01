@@ -2,7 +2,7 @@
 # Cài toàn bộ runtime pipeline trên một máy GPU KHÔNG có Docker (Kaggle notebook; cũng dùng được cho
 # GPU thuê dạng container). Không đụng luồng chính: chỉ cài công cụ và ghi một file env riêng.
 #
-#   bash scripts/kaggle/setup_kaggle.sh [thư_mục_state]      # mặc định: /kaggle/working/r2s
+#   bash scripts/kaggle/setup_kaggle.sh [thư_mục_state]      # mặc định: /kaggle/tmp/r2s
 #   set -a; source <state>/kaggle.env; set +a
 #   .venv/bin/python -m scripts.kaggle.preflight
 #
@@ -12,7 +12,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-STATE="${1:-/kaggle/working/r2s}"
+# /kaggle/working bị giới hạn 20 GB (là output của notebook); runtime + workspace để ở /kaggle/tmp (~60 GB, không
+# được lưu lại). Chỉ gói job xuất ra mới nên nằm trong /kaggle/working.
+STATE="${1:-/kaggle/tmp/r2s}"
 RUNTIME="$STATE/runtime"
 BRUSH_VERSION="0.3.0"
 BRUSH_URL="https://github.com/ArthurBrussee/brush/releases/download/v${BRUSH_VERSION}/brush-app-x86_64-unknown-linux-gnu.tar.xz"

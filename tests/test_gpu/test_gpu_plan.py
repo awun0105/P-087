@@ -59,7 +59,7 @@ def test_single_gpu_keeps_default_environment() -> None:
 
 def test_limits_by_jobs_cpu_and_ram() -> None:
     assert len(_plan(_t4x2(), jobs=1)) == 1
-    assert len(_plan(_t4x2(), cores=8)) == 2
+    assert len(_plan(_t4x2(), cores=4)) == 2  # Kaggle T4×2: 4 nhân → mỗi GPU một job
     assert len(_plan(_t4x2(), ram_gb=20.0)) == 2
 
 

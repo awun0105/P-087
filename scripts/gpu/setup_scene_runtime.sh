@@ -49,6 +49,21 @@ mkdir -p "$RUNTIME/checkpoints" "$RUNTIME/weights"
 fetch "$SAM2_CHECKPOINT_URL" "$RUNTIME/checkpoints/sam2.1_hiera_tiny.pt" "$SAM2_CHECKPOINT_SHA"
 fetch "$LAMA_URL" "$RUNTIME/weights/big-lama.pt" "$LAMA_SHA"
 
+if [ "${R2S_SKIP_GPU_CHECK:-0}" = "1" ]; then
+  # Lúc build image Docker không có GPU: chỉ kiểm import và biên dịch sẵn kernel gsplat (cần nvcc, không cần GPU).
+  # Bài render thật được kiểm lại khi container chạy (`scripts/kaggle/preflight.py`).
+  echo "[kiểm] import + biên dịch kernel gsplat, bỏ qua bài render GPU…"
+  "$PY" - <<'PY'
+import torch, coacd, skimage, cv2, trimesh  # noqa: F401
+from gsplat.cuda._backend import _C
+from pxr import UsdVol
+from sam2.build_sam import build_sam2  # noqa: F401
+
+assert _C is not None, "kernel gsplat không biên dịch được"
+assert hasattr(UsdVol, "ParticleField3DGaussianSplat"), "usd-core thiếu schema ParticleField"
+print("ok (chưa kiểm GPU): torch", torch.__version__)
+PY
+else
 echo "[kiểm] import + biên dịch kernel gsplat (lần đầu mất vài phút)…"
 "$PY" - <<'PY'
 import torch, gsplat, coacd, skimage, cv2, trimesh  # noqa: F401
@@ -67,6 +82,7 @@ image, _, _ = gsplat.rasterization(
 )
 print("ok: torch", torch.__version__, "· gsplat", gsplat.__version__, "· render", tuple(image.shape))
 PY
+fi
 
 cat <<EOF
 

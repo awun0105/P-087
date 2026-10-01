@@ -32,8 +32,9 @@ from dataclasses import asdict, dataclass
 OBJECTIFY_VRAM_GB = 4.0
 #: Chừa 25 % để hai job cùng ở đỉnh không tràn VRAM.
 VRAM_HEADROOM = 1.25
-#: COLMAP + CoACD của một job dùng tốt khoảng 4 nhân.
-CORES_PER_JOB = 4
+#: Một job cần ít nhất khoảng 2 nhân (COLMAP, CoACD chạy CPU; Brush và torch chủ yếu dùng GPU). Kaggle T4×2
+#: chỉ có 4 nhân: mức này cho phép 2 job song song, mỗi GPU một job.
+CORES_PER_JOB = 2
 
 
 @dataclass(frozen=True)
