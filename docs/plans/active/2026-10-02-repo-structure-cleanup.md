@@ -42,6 +42,8 @@ In scope:
 - Pha 3: dời 8 module `orchestration` vào thư mục con theo miền.
 - Pha 4: (a) chi tiết validation/duyệt/phát hành trong UI mới; (b) xoá UI cũ.
 - Pha 5: đồng bộ `ARCHITECTURE.md`, `README.md`, `docs/README.md`.
+- Bổ sung 02/10 (owner yêu cầu giữa chừng): dọn `data/` — xoá phần trùng và phần cũ không dùng, gom thư mục bằng chứng
+  lẻ, viết bản đồ `data/`. `data/` không nằm trong git nên phần xoá không hoàn tác được.
 
 Out of scope:
 
@@ -74,6 +76,7 @@ Out of scope:
 | `src/services/orchestration/stage_views.py` | `…/orchestration/jobs/stage_views.py` | 3 |
 | `src/services/orchestration/thumbnails.py` | `…/orchestration/jobs/thumbnails.py` | 3 |
 | `src/services/orchestration/imports.py` | `…/orchestration/uploads/scene_imports.py` | 3 |
+| `data/{rec05_smoke,rec06_smoke,rec07_axis_evidence_20260927,rec05_similarity_audit_20260927,rec06_scale_experiment_20260927,eval_runs}` | `data/evidence/<cùng tên>` | data |
 | `frontend/src/app/(legacy)/**`, `features/{scene,review,jobs}`, `components/ui`, UI cũ trong `features/viewer` | đã xoá (lấy lại từ git trước commit xoá) | 4b |
 
 ## Risks And Recovery
@@ -91,6 +94,7 @@ Out of scope:
 - [x] Pha 0: fetch, baseline test, baseline OpenAPI, bản ghi này.
 - [x] Pha 1: thư mục gốc và tài liệu (commit `ebb7443`, `c3d2803`).
 - [x] Pha 2: `src/api/product/`.
+- [x] Dọn `data/` (ngoài kế hoạch ban đầu, owner yêu cầu 02/10).
 - [ ] Pha 3: orchestration theo miền.
 - [ ] Pha 4a: validation / duyệt / phát hành trong UI mới.
 - [ ] Pha 4b: xoá UI cũ.
@@ -107,6 +111,9 @@ Out of scope:
 - 2026-10-02: tách `routes_product.py` theo chủ đề nên **thứ tự đăng ký** của 7 operation đổi so với trước (kế hoạch
   ban đầu ghi "giữ nguyên thứ tự"). Chấp nhận vì không có hai route nào chồng nhau: ánh xạ URL → hàm xử lý của 5.229
   URL mẫu (mọi tham số thử cả tên trùng đoạn tĩnh như `content`, `objects`, `catalog`) trùng hoàn toàn baseline.
+- 2026-10-02 (owner): `data/` — xoá mọi file/artifact trùng hoặc cũ không dùng, chỉ giữ thứ phục vụ demo; bố cục chỉ gom
+  phần lẻ và viết bản đồ, **không** đổi tên thư mục mà cấu hình/venv đang trỏ tới.
+- 2026-10-02: không xoá scene nào trong kho artifact và không đụng `raw/`⇄`normalized/` của TorWIC (xem Result).
 - 2026-10-02: 7 file `requirements*`, `Makefile.studio`, `Dockerfile.gpu` giữ ở gốc — cặp với file của ban tổ chức
   cùng tên; ARCHITECTURE không cho tạo thư mục cấp cao nhất mới.
 
@@ -137,3 +144,30 @@ Out of scope:
 - VERIFIED: OpenAPI (sắp key) trùng byte với baseline (71 path / 77 operation / 142 schema); ánh xạ URL → hàm xử lý
   trùng baseline trên 5.229 URL mẫu; `pytest tests/ -q` 1125 passed / 40 skipped; `ruff`, `check_foundation`,
   `check_contract_mirror` exit 0; `import src.main` và `jobs.worker_cli` trong tiến trình mới chạy được.
+
+### Dọn `data/` (xong phần an toàn)
+
+- Đã xoá (kiểm trước: DB và JSON trong kho artifact không trỏ tới; 3 job liên quan đã `SUCCEEDED`, không có yêu cầu
+  scene đang chờ/chạy):
+  - `data/studio_local/workers/*` — bản sao làm việc, log và checkpoint của job đã xong, import, backfill: 2,8 GB.
+  - `data/demo/{tmp,current,local_job,aisle_cw_params}` — bundle xuất thử cũ và video cắt tạm: 206 MB (giữ
+    `data/demo/library` mà stack đang dùng).
+  - `data/studio_local/qa/profile` — hồ sơ Chrome của script QA: 300 MB.
+  - `data/torwic_slam/derived/aisle_cw/{rec03_smoke_workspace_sub100_200,rec04_smoke_work_10,rec04_smoke_work_10b,rec04_smoke_work_10c}`
+    — workspace chạy thử COLMAP/Brush hồi tháng 9: 553 MB. Giữ `rec03_smoke_artifacts_sub100_200`,
+    `rec04_smoke_artifacts_10c` (bằng chứng đã publish) và mọi thư mục code còn trỏ tới (`benchmark_split.json`,
+    `rec07_prefusion_sub100_119`, `rec07_smoke_sub100_104`, `rec09_alignment_*`).
+  - 160 thư mục job do test để lại trong `data/artifacts/jobs` và 3 thư mục upload rỗng không có trong DB.
+- Gộp 926 bản sao trùng nội dung trong `data/studio_local/artifacts` bằng hardlink (kho ghi bằng file tạm + đổi tên và
+  từ chối ghi đè nên không có sửa tại chỗ): 1,3 GB; mọi đường dẫn artifact giữ nguyên.
+- Gom 6 thư mục bằng chứng lẻ vào `data/evidence/`; README có mục "Bản đồ thư mục `data/`".
+- VERIFIED: ổ đĩa trống 10,4 GB → 15,6 GB; `data/` 23 GB → khoảng 18 GB. Sau khi dọn: 87/87 artifact mà 13 scene tham
+  chiếu qua API khớp checksum SHA-256; đọc SceneIR và preview của 3 scene demo qua API được; `/health` 200.
+- Chưa làm, cần owner chọn:
+  - **Xoá scene cũ trong Studio.** 13 scene chiếm 4,2 GB; chưa có thao tác xoá scene được hỗ trợ (xoá tay DB + kho dễ
+    làm hỏng registry). Các job "Đo chất lượng A/D3/D5" và `job-ac2bfd924cc6` là nguồn của số đo trong `eval/results/`.
+  - `data/rec07_runtime` (1,6 GB, môi trường Open3D cho tooling LiDAR offline): không thuộc luồng demo nhưng cần cho
+    REC-07/08/09.
+  - Ảnh trùng giữa `torwic_slam/raw` và `normalized` (khoảng 1,5 GB) là do thiết kế dataset; không gộp bằng hardlink vì
+    công cụ ghi đè tại chỗ ở `normalized` sẽ làm hỏng `raw`.
+- Phát hiện: test backend ghi job vào `data/artifacts` (kho mặc định) mỗi lần chạy — rác tích lại, chưa sửa.

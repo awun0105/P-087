@@ -164,6 +164,26 @@ Thư mục gốc giữ nguyên khung do ban tổ chức (BTC) cung cấp — kh�
 
 Sinh lại ba file lock bằng `make lock` (`scripts/lock_dependencies.sh`).
 
+## Bản đồ thư mục `data/`
+
+`data/` không nằm trong git: dữ liệu, môi trường cài sẵn và kết quả chạy. Tên các thư mục có ghi "cấu hình trỏ tới" được
+`scripts/gpu/studio.env`, `Makefile.studio` hoặc giá trị mặc định trong code dùng theo đường dẫn — đổi tên thì phải sửa
+cấu hình tương ứng.
+
+| Thư mục | Nội dung | Tạo lại bằng |
+|---|---|---|
+| `data/studio_local/` | Stack Studio cục bộ (cấu hình trỏ tới): `runtime.db`, `artifacts/` (kho artifact của các scene), `workers/` (thư mục làm việc của worker — xoá được khi không có job đang chạy), `qa/` (script và ảnh kiểm thử trình duyệt), `seed-accounts/` | `make -f Makefile.studio up` |
+| `data/demo/library/` | Thư viện video mẫu đã xử lý sẵn (`PRODUCT_DEMO_DIR`) | `scripts/demo/export_demo_bundle.py` |
+| `data/asset_previews/` | GLB xem trước của asset danh mục | `scripts/scene/build_asset_previews.py` |
+| `data/rerun_recordings/` | Bản ghi Rerun của quá trình train (`<job_id>.rrd`) | `eval/visual/brush_quality.py --rerun-save` |
+| `data/rec04_runtime/` | Công cụ dựng hình (cấu hình trỏ tới): launcher COLMAP, Brush, splat-transform | [`scripts/gpu/README.md`](./scripts/gpu/README.md) |
+| `data/scene_runtime/` | Môi trường Python tách vật thể (cấu hình trỏ tới): PyTorch, SAM2, gsplat, LaMa, CoACD, usd-core và trọng số | `scripts/gpu/setup_scene_runtime.sh` |
+| `data/rec07_runtime/` | Môi trường Python cho tooling LiDAR offline (Open3D); test REC-07 tự bỏ qua khi thiếu | `requirements-offline.lock.txt` |
+| `data/tools/rerun-0.24.1/` | Viewer Rerun đúng phiên bản Brush nhúng | [`eval/visual/README.md`](./eval/visual/README.md) |
+| `data/torwic_slam/` | Dataset TorWIC: `raw/` (gốc, bất biến), `normalized/`, `derived/`, `evaluation_only/` | `scripts/torwic/` |
+| `data/evidence/` | Bằng chứng chạy thử theo task (REC-05/06/07, sweep chất lượng). Task file cũ ghi đường dẫn không có `evidence/` | — |
+| `data/artifacts/` | Kho artifact mặc định khi chạy không có `studio.env`; test để lại file ở đây, xoá được | tự tạo |
+
 ## Project Structure
 
 Bản đồ nhanh (kiểm theo checkout 2026-09-29). Placement/ownership chính thức:
