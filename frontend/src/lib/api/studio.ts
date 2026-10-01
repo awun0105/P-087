@@ -284,7 +284,7 @@ export function getJobScene(jobId: string, signal?: AbortSignal): Promise<ApiRes
   return fetchApi<SceneResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene`, { signal });
 }
 
-export type ObjectAction = "confirm" | "ignore" | "hide" | "delete" | "rename";
+export type ObjectAction = "confirm" | "ignore" | "hide" | "delete" | "rename" | "restore" | "duplicate" | "label";
 
 /** Thao tác trên một vật thể; `expectedRevision` là khoá optimistic (revision cũ → 409). */
 export function applyObjectAction(
@@ -292,7 +292,7 @@ export function applyObjectAction(
   objectId: string,
   action: ObjectAction,
   expectedRevision: string,
-  extra: { active?: boolean; name?: string } = {},
+  extra: { active?: boolean; name?: string; semantic_class?: string | null; mass_kg?: number | null } = {},
 ): Promise<SceneEditResponse> {
   return apiFetch<SceneEditResponse>(
     `${API}/jobs/${encodeURIComponent(jobId)}/scene/objects/${encodeURIComponent(objectId)}/${action}`,
@@ -316,6 +316,77 @@ export function addBoxObstacle(
       dimensions_xyz_m: dimensions,
       position_xyz: center,
     }),
+  });
+}
+
+// ── scene theo vật (pipeline v2, ADR 0007) ───────────────────────────────────
+
+/** Ghi transform mới của một vật (mét, Z-up) thành revision kế tiếp. */
+export function setObjectTransform(
+  jobId: string,
+  expectedRevision: string,
+  objectId: string,
+  translation: [number, number, number],
+  rotation: [number, number, number, number],
+): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/edits`, {
+    method: "POST",
+    body: JSON.stringify({
+      expected_scene_revision: expectedRevision,
+      edits: [{ object_id: objectId, translation_xyz: translation, rotation_quaternion_xyzw: rotation }],
+    }),
+  });
+}
+
+export interface CatalogEntry {
+  family: string;
+  semantic_class: string | null;
+  size_xyz_m: [number, number, number];
+  dynamic: boolean;
+  default_mass_kg: number | null;
+}
+
+export interface SceneCatalog {
+  classes: string[];
+  entries: CatalogEntry[];
+  physics_note: string;
+}
+
+/** Danh mục nhãn + asset Isaac đặt được; giá trị vật lý là mặc định tham khảo. */
+export function getSceneCatalog(signal?: AbortSignal): Promise<SceneCatalog> {
+  return apiFetch<SceneCatalog>(`${API}/scene/catalog`, { signal });
+}
+
+/** Nhãn gợi ý theo kích thước vật (chỉ để sắp danh sách chọn; người dùng xác nhận). */
+export function getLabelSuggestions(jobId: string, objectId: string, signal?: AbortSignal): Promise<{ suggestions: string[] }> {
+  return apiFetch<{ suggestions: string[] }>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/scene/objects/${encodeURIComponent(objectId)}/label-suggestions`,
+    { signal },
+  );
+}
+
+/** Thêm một vật từ danh mục; `position` là điểm đặt trên sàn (mét). */
+export function addCatalogObject(
+  jobId: string,
+  expectedRevision: string,
+  family: string,
+  position: [number, number, number],
+): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/catalog-objects`, {
+    method: "POST",
+    body: JSON.stringify({ expected_scene_revision: expectedRevision, family, position_xyz: position }),
+  });
+}
+
+/** Hoàn tác: đưa nội dung một revision cũ thành revision kế tiếp. */
+export function restoreSceneRevision(
+  jobId: string,
+  expectedRevision: string,
+  targetRevision: string,
+): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/restore`, {
+    method: "POST",
+    body: JSON.stringify({ expected_scene_revision: expectedRevision, target_revision: targetRevision }),
   });
 }
 

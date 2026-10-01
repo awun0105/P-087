@@ -133,8 +133,13 @@ class SceneEditor:
         references = [scene.environment.geometry_ref]
         if scene.environment.collider_ref is not None:
             references.append(scene.environment.collider_ref)
+        if scene.environment.visual_ref is not None:
+            references.append(scene.environment.visual_ref)
         for item in scene.objects:
             references.append(item.geometry_ref)
+            # Scene theo vật (pipeline v2): Gaussian riêng của từng vật cho viewer.
+            if item.visual_ref is not None:
+                references.append(item.visual_ref)
             if item.collider is not None and item.collider.geometry_ref is not None:
                 references.append(item.collider.geometry_ref)
         return references

@@ -240,6 +240,17 @@ def run(request: dict) -> dict:
 
     share = contribution / seen_with.clamp(min=1e-6)
     share[contribution < float(config.get("min_contribution", 0.05))] = 0.0
+    # Ràng buộc không gian: đóng góp render tính cả Gaussian nằm xa phía sau trên cùng tia nhìn (nền, đốm
+    # lơ lửng). Chỉ nhận Gaussian nằm trong hộp bao hạt giống của vật, nới mỗi phía max(biên tối thiểu, tỉ lệ cạnh).
+    positions = means.cpu()
+    margin_min = float(config.get("box_margin_m", 0.15))
+    margin_ratio = float(config.get("box_margin_ratio", 0.2))
+    for index, seed in enumerate(seeds):
+        points = positions[torch.from_numpy(np.asarray(seed, dtype=np.int64))]
+        low, high = points.min(dim=0).values, points.max(dim=0).values
+        margin = torch.clamp((high - low) * margin_ratio, min=margin_min)
+        outside = ((positions < low - margin) | (positions > high + margin)).any(dim=1)
+        share[outside, index] = 0.0
     best_share, best = share.max(dim=1)
     assigned = best_share > float(config.get("majority", 0.5))
     labels = torch.where(assigned, best, torch.full_like(best, -1)).numpy().astype(np.int32)

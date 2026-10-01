@@ -136,3 +136,38 @@ def test_build_candidate_package_rejects_mismatched_checksum(
 
     with pytest.raises(ValueError, match="scene_ir_checksum không khớp"):
         build_candidate_package(req)
+
+
+def test_hybrid_entrypoint_and_layers_are_sealed_by_candidate_checksum(
+    physics_scene: SceneIR, pass_preflight_report: PreflightReport, tmp_path: Path
+) -> None:
+    """Pipeline v2: entrypoint USD lai dựng sẵn + các layer của nó nằm trong inventory đã niêm phong."""
+    layer = physics_scene.environment.geometry_ref.model_copy(
+        update={
+            "artifact_type": "OpenUSDLayer",
+            "artifact_uri": "artifact://jobs/job-fixture-001/simulation/aa/hybrid/environment.usdc",
+            "artifact_checksum": "sha256:" + "a" * 64,
+        }
+    )
+
+    def build(entrypoint: bytes, layers: list) -> object:
+        return build_candidate_package(
+            CandidateBuildRequest(
+                scene=physics_scene,
+                preflight_report=pass_preflight_report,
+                job_manifest_checksum="sha256:" + "b" * 64,
+                output_dir=tmp_path,
+                entrypoint_bytes=entrypoint,
+                extra_assets=layers,
+            )
+        )
+
+    package = build(b"#usda 1.0\n(hybrid)\n", [layer])
+
+    assert (tmp_path / "scene.usda").read_bytes() == b"#usda 1.0\n(hybrid)\n"
+    assert layer in package.assets and layer.artifact_checksum in package.candidate_manifest.artifact_checksums
+    verify_candidate_inventory(package)
+    verify_content_checksum(package, "candidate_checksum")
+    # Đổi entrypoint hoặc bỏ layer đều đổi checksum của candidate.
+    assert build(b"#usda 1.0\n(other)\n", [layer]).candidate_checksum != package.candidate_checksum
+    assert build(b"#usda 1.0\n(hybrid)\n", []).candidate_checksum != package.candidate_checksum

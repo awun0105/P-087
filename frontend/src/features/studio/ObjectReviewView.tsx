@@ -1,20 +1,26 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Check, Crosshair, Eye, EyeOff, Loader2, Pencil, Plus, X } from "lucide-react";
+import { Check, Copy, Crosshair, Eye, EyeOff, Library, Loader2, Move3d, Pencil, Plus, RotateCw, Tag, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Badge, Button, Notice } from "@/components/studio/primitives";
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
-import type { OverlayBox } from "@/features/viewer/scene-overlay";
+import type { GizmoMode, OverlayBox, OverlayObject } from "@/features/viewer/scene-overlay";
 import { ApiError } from "@/lib/api/client";
 import { jobArtifactContentUrl } from "@/lib/api/endpoints";
 import {
   addBoxObstacle,
+  addCatalogObject,
   applyObjectAction,
   getJobScene,
+  getLabelSuggestions,
+  getSceneCatalog,
   getStageViews,
+  restoreSceneRevision,
+  setObjectTransform,
   type ObjectAction,
+  type SceneCatalog,
 } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import type { SceneIR, SceneObject } from "@/lib/contracts/api";
@@ -35,7 +41,7 @@ const FILTERS: { value: Filter; label: string; match: (object: SceneObject) => b
   { value: "all", label: "Chưa loại", match: (object) => !isIgnored(object) },
   { value: "pending", label: "Chờ xác nhận", match: (object) => object.state === "CANDIDATE" && !isIgnored(object) },
   { value: "confirmed", label: "Đã xác nhận", match: (object) => object.state === "CONFIRMED" },
-  { value: "ignored", label: "Đã loại", match: isIgnored },
+  { value: "ignored", label: "Đã loại/xoá", match: isIgnored },
 ];
 
 /**
@@ -63,6 +69,8 @@ export function ObjectReviewView({
   const [cameras, setCameras] = useState<StageView["cameras"]>([]);
   const [focus, setFocus] = useState<{ id: string; nonce: number } | undefined>();
   const [reload, setReload] = useState(0);
+  const [tool, setTool] = useState<GizmoMode | "none">("none");
+  const [catalog, setCatalog] = useState<SceneCatalog | null>(null);
   const stale = Boolean(revision && scene && !busy && revision !== scene.scene_revision);
 
   /** Chọn và cho camera bay tới vật (từ danh sách hoặc nút trong inspector). */
@@ -100,6 +108,26 @@ export function ObjectReviewView({
     );
     return () => controller.abort();
   }, [jobId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    // Danh mục nhãn/asset không đổi theo scene: tải một lần; lỗi thì chỉ mất phần gán nhãn/thư viện.
+    getSceneCatalog(controller.signal).then(setCatalog, () => undefined);
+    return () => controller.abort();
+  }, []);
+
+  // Scene theo vật (pipeline v2): mỗi vật có Gaussian riêng. Vật đã loại/xoá hoặc đang ẩn không vẽ.
+  const splats = useMemo<OverlayObject[]>(
+    () =>
+      (scene?.objects ?? []).map((object) => ({
+        id: object.id,
+        url: object.visual_ref?.artifact_type === "ObjectGaussians" ? jobArtifactContentUrl(jobId, object.visual_ref) : null,
+        position: object.transform.translation_xyz,
+        rotation_xyzw: object.transform.rotation_quaternion_xyzw,
+        visible: isPlaced(object),
+      })),
+    [scene, jobId],
+  );
 
   const counts = useMemo(
     () => Object.fromEntries(FILTERS.map((item) => [item.value, scene?.objects.filter(item.match).length ?? 0])) as Record<Filter, number>,
@@ -154,7 +182,7 @@ export function ObjectReviewView({
     }
   }
 
-  const act = (object: SceneObject, action: ObjectAction, extra?: { active?: boolean; name?: string }) =>
+  const act = (object: SceneObject, action: ObjectAction, extra?: ActionExtra) =>
     run((revision) => applyObjectAction(jobId, object.id, action, revision, extra));
 
   if (missing) {
@@ -173,13 +201,29 @@ export function ObjectReviewView({
   }
   const current = scene.objects.find((object) => object.id === selected) ?? null;
   const method = String(scene.provenance.object_extraction ?? "không rõ");
+  const previous = typeof scene.provenance.edited_from === "string" ? scene.provenance.edited_from : null;
+  const inpainted = Number(scene.provenance.inpainted_gaussians ?? 0);
   return (
     <div className="grid size-full grid-rows-[minmax(50vh,1fr)_auto_auto] lg:grid-cols-[18rem_minmax(0,1fr)_20rem] lg:grid-rows-1">
       <aside className="order-2 flex max-h-[50vh] min-h-0 flex-col border-t border-line bg-paper-raised lg:order-1 lg:max-h-none lg:border-t-0 lg:border-r">
         <div className="space-y-2 border-b border-line px-3 py-3">
-          <p className="text-sm font-semibold text-ink">
-            {scene.objects.length} vật thể · {counts.pending} chờ xác nhận
-          </p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-ink">
+              {scene.objects.length} vật thể · {counts.pending} chờ xác nhận
+            </p>
+            {previous && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                title={`Hoàn tác: quay về ${previous} (ghi thành revision mới)`}
+                aria-label="Hoàn tác"
+                onClick={() => run((revision) => restoreSceneRevision(jobId, revision, previous))}
+              >
+                <Undo2 aria-hidden />
+              </Button>
+            )}
+          </div>
           <div className="flex flex-wrap gap-1" role="group" aria-label="Lọc vật thể">
             {FILTERS.map((item) => (
               <button
@@ -232,6 +276,9 @@ export function ObjectReviewView({
             collision={scene.environment.geometry_ref}
             cameras={cameras}
             boxes={boxes}
+            objects={splats}
+            gizmo={tool !== "none" && current && isPlaced(current) ? { id: current.id, mode: tool } : null}
+            onTransform={(id, position, rotation) => run((revision) => setObjectTransform(jobId, revision, id, position, rotation))}
             focus={focus}
             onPickBox={selectFromScene}
           />
@@ -255,6 +302,10 @@ export function ObjectReviewView({
             key={current.id}
             object={current}
             busy={busy}
+            jobId={jobId}
+            catalog={catalog}
+            tool={tool}
+            onTool={setTool}
             onAct={(action, extra) => act(current, action, extra)}
             onFlyTo={() => flyTo(current.id)}
             onClose={() => setSelected(null)}
@@ -266,8 +317,21 @@ export function ObjectReviewView({
             <p>
               Tách bằng <code>{method}</code>. Ứng viên là gợi ý; chỉ vật đã xác nhận và đang hiện mới đi vào gói mô phỏng.
             </p>
+            {inpainted > 0 && (
+              <p>
+                Nền đã được vá {inpainted.toLocaleString("vi-VN")} Gaussian ở chỗ vật từng che — đó là hình suy đoán, chưa
+                từng được quay.
+              </p>
+            )}
             <Legend />
           </div>
+        )}
+        {catalog && (
+          <CatalogForm
+            catalog={catalog}
+            busy={busy}
+            onAdd={(family, position) => run((revision) => addCatalogObject(jobId, revision, family, position))}
+          />
         )}
         <AddObstacleForm
           busy={busy}
@@ -301,17 +365,41 @@ function Legend() {
 function Inspector({
   object,
   busy,
+  jobId,
+  catalog,
+  tool,
+  onTool,
   onAct,
   onFlyTo,
   onClose,
 }: {
   object: SceneObject;
   busy: boolean;
-  onAct: (action: ObjectAction, extra?: { active?: boolean; name?: string }) => void;
+  jobId: string;
+  catalog: SceneCatalog | null;
+  tool: GizmoMode | "none";
+  onTool: (tool: GizmoMode | "none") => void;
+  onAct: (action: ObjectAction, extra?: ActionExtra) => void;
   onFlyTo: () => void;
   onClose: () => void;
 }) {
   const [name, setName] = useState(object.name);
+  const [label, setLabel] = useState(object.semantic_class ?? "");
+  const [mass, setMass] = useState(object.physics?.mass_source === "user" ? String(object.physics.mass_kg ?? "") : "");
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    getLabelSuggestions(jobId, object.id, controller.signal).then(
+      (result) => setSuggestions(result.suggestions),
+      () => setSuggestions([]),
+    );
+    return () => controller.abort();
+  }, [jobId, object.id]);
+  const placed = isPlaced(object);
+  const removed = isIgnored(object);
+  const massValue = mass.trim() === "" ? null : Number(mass);
+  const massValid = massValue === null || (Number.isFinite(massValue) && massValue > 0);
+  const classes = catalog ? [...suggestions, ...catalog.classes.filter((item) => !suggestions.includes(item))] : [];
   const [x, y, z] = object.transform.translation_xyz;
   const size = object.primitive_dimensions_xyz_m;
   const rename = (event: FormEvent) => {
@@ -360,13 +448,91 @@ function Inspector({
             </Button>
           </>
         )}
-        {object.state === "CONFIRMED" && (
+        {object.state === "CONFIRMED" && !removed && (
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => onAct("hide", { active: !object.active })}>
             {object.active ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
             {object.active ? "Ẩn khỏi mô phỏng" : "Đưa lại vào mô phỏng"}
           </Button>
         )}
+        {removed ? (
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAct("restore")}>
+            <Undo2 aria-hidden /> Khôi phục
+          </Button>
+        ) : (
+          <>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => onAct("duplicate")}>
+              <Copy aria-hidden /> Nhân bản
+            </Button>
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={busy}
+              onClick={() => {
+                if (window.confirm(`Xoá "${object.name}" khỏi scene? Hình và collider của vật không còn trong scene và gói mô phỏng.`)) onAct("delete");
+              }}
+            >
+              <Trash2 aria-hidden /> Xoá
+            </Button>
+          </>
+        )}
       </div>
+      {placed && (
+        <div className="space-y-1.5">
+          <p className="text-xs text-ink-muted">Di chuyển trong 3D (thả chuột là lưu thành revision mới)</p>
+          <div className="flex gap-1.5" role="group" aria-label="Công cụ biến đổi">
+            <Button size="sm" variant={tool === "translate" ? "primary" : "secondary"} aria-pressed={tool === "translate"} onClick={() => onTool(tool === "translate" ? "none" : "translate")}>
+              <Move3d aria-hidden /> Dịch
+            </Button>
+            <Button size="sm" variant={tool === "rotate" ? "primary" : "secondary"} aria-pressed={tool === "rotate"} onClick={() => onTool(tool === "rotate" ? "none" : "rotate")}>
+              <RotateCw aria-hidden /> Xoay
+            </Button>
+          </div>
+        </div>
+      )}
+      {catalog && !removed && (
+        <form
+          className="space-y-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (massValid) onAct("label", { semantic_class: label || null, mass_kg: label ? massValue : null });
+          }}
+        >
+          <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+            <span className="flex items-center gap-1">
+              <Tag className="size-3.5" aria-hidden /> Nhãn {suggestions.length > 0 && <span className="text-ink-subtle">(gợi ý theo kích thước xếp trước)</span>}
+            </span>
+            <select className="h-8 rounded-md border border-line-strong bg-paper px-2 text-sm text-ink" value={label} onChange={(event) => setLabel(event.target.value)}>
+              <option value="">Chưa gán</option>
+              {classes.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+            Khối lượng (kg) — bỏ trống để dùng mặc định của nhãn
+            <input
+              className="h-8 rounded-md border border-line-strong bg-paper px-2 text-sm text-ink"
+              inputMode="decimal"
+              value={mass}
+              disabled={!label}
+              aria-invalid={!massValid}
+              onChange={(event) => setMass(event.target.value)}
+            />
+          </label>
+          {object.physics && (
+            <p className="text-xs text-ink-muted">
+              {object.physics.dynamic
+                ? `Hiện tại: ${object.physics.mass_kg?.toLocaleString("vi-VN", { maximumFractionDigits: 2 })} kg (${MASS_SOURCE[object.physics.mass_source ?? "user"]}) · ma sát ${object.physics.static_friction}`
+                : "Vật cố định: chỉ có collider tĩnh, không có khối lượng."}
+            </p>
+          )}
+          <Button size="sm" variant="secondary" type="submit" disabled={busy || !massValid}>
+            Lưu nhãn
+          </Button>
+        </form>
+      )}
       <form className="flex items-end gap-2" onSubmit={rename}>
         <label className="flex min-w-0 flex-1 flex-col gap-0.5 text-xs text-ink-muted">
           Tên
@@ -385,6 +551,96 @@ function Inspector({
   );
 }
 
+type ActionExtra = { active?: boolean; name?: string; semantic_class?: string | null; mass_kg?: number | null };
+
+const MASS_SOURCE: Record<string, string> = {
+  catalog_default: "mặc định của nhãn",
+  catalog_density: "mật độ giả định × thể tích",
+  user: "bạn nhập",
+  asset: "theo asset",
+};
+
+/** Vật đang có mặt trong scene: ứng viên chờ xác nhận hoặc vật đã xác nhận đang hiện. */
+function isPlaced(object: SceneObject): boolean {
+  if (isIgnored(object)) return false;
+  return object.state === "CANDIDATE" || object.active;
+}
+
+/** Thêm vật từ thư viện asset Isaac: chọn họ asset + vị trí trên sàn. */
+function CatalogForm({
+  catalog,
+  busy,
+  onAdd,
+}: {
+  catalog: SceneCatalog;
+  busy: boolean;
+  onAdd: (family: string, position: [number, number, number]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [family, setFamily] = useState(catalog.entries[0]?.family ?? "");
+  const [x, setX] = useState("0");
+  const [y, setY] = useState("0");
+  if (!open) {
+    return (
+      <div className="border-t border-line p-3">
+        <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
+          <Library aria-hidden /> Thêm từ thư viện
+        </Button>
+      </div>
+    );
+  }
+  const entry = catalog.entries.find((item) => item.family === family);
+  const valid = Boolean(entry) && Number.isFinite(Number(x)) && Number.isFinite(Number(y));
+  return (
+    <form
+      className="space-y-2 border-t border-line p-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!valid) return;
+        onAdd(family, [Number(x), Number(y), 0]);
+        setOpen(false);
+      }}
+    >
+      <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+        Asset Isaac
+        <select className="h-8 rounded-md border border-line-strong bg-paper px-2 text-sm text-ink" value={family} onChange={(event) => setFamily(event.target.value)}>
+          {catalog.entries.map((item) => (
+            <option key={item.family} value={item.family}>
+              {item.semantic_class} · {item.family.replace(/^SM_/, "")}
+            </option>
+          ))}
+        </select>
+      </label>
+      {entry && (
+        <p className="text-xs text-ink-muted">
+          {entry.size_xyz_m.map((value) => value.toFixed(2)).join(" × ")} m ·{" "}
+          {entry.dynamic ? (entry.default_mass_kg ? `${entry.default_mass_kg} kg (mặc định)` : "khối lượng theo mật độ giả định") : "vật cố định"}. Trên
+          web vật hiện bằng hộp; trong Isaac là asset thật.
+        </p>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+          Vị trí X (m)
+          <input className="h-8 rounded-md border border-line-strong bg-paper px-2 text-sm text-ink" inputMode="decimal" value={x} onChange={(event) => setX(event.target.value)} />
+        </label>
+        <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+          Vị trí Y (m)
+          <input className="h-8 rounded-md border border-line-strong bg-paper px-2 text-sm text-ink" inputMode="decimal" value={y} onChange={(event) => setY(event.target.value)} />
+        </label>
+      </div>
+      <p className="text-xs text-ink-subtle">{catalog.physics_note}</p>
+      <div className="flex gap-2">
+        <Button size="sm" type="submit" disabled={busy || !valid}>
+          Thêm
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
+          Huỷ
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 const SELECTED_COLOR = "#f97316";
 
 /** Màu hộp theo trạng thái review: vàng = ứng viên, xanh lá = đã xác nhận, xám = đã loại/ẩn. */
@@ -394,10 +650,11 @@ function stateColor(object: SceneObject): string {
 }
 
 function isIgnored(object: SceneObject): boolean {
-  return object.provenance.review === "IGNORED";
+  return object.provenance.review === "IGNORED" || object.provenance.review === "DELETED";
 }
 
 function StateBadge({ object }: { object: SceneObject }) {
+  if (object.provenance.review === "DELETED") return <Badge>Đã xoá</Badge>;
   if (isIgnored(object)) return <Badge>Đã loại</Badge>;
   if (object.state === "CANDIDATE") return <Badge tone="ochre">Ứng viên</Badge>;
   return object.active ? <Badge tone="sage">Đã xác nhận</Badge> : <Badge>Đang ẩn</Badge>;

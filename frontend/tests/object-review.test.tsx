@@ -13,8 +13,20 @@ vi.mock("@/features/studio/StageViewer", () => ({
   CollisionMeshCanvas: () => <div data-testid="mesh" />,
 }));
 vi.mock("@/features/studio/MetricSceneView", () => ({
-  MetricSceneView: ({ boxes }: { boxes: { id: string; color: string }[] }) => (
-    <div data-testid="metric-scene">{boxes.map((box) => `${box.id}:${box.color}`).join(",")}</div>
+  MetricSceneView: ({
+    boxes,
+    objects = [],
+    gizmo,
+  }: {
+    boxes: { id: string; color: string }[];
+    objects?: { id: string; url: string | null; visible: boolean }[];
+    gizmo?: { id: string; mode: string } | null;
+  }) => (
+    <div data-testid="metric-scene">
+      {boxes.map((box) => `${box.id}:${box.color}`).join(",")}
+      <span data-testid="splats">{objects.map((item) => `${item.id}:${item.url ? "ply" : "none"}:${item.visible}`).join(",")}</span>
+      <span data-testid="gizmo">{gizmo ? `${gizmo.id}:${gizmo.mode}` : "none"}</span>
+    </div>
   ),
 }));
 vi.mock("@/lib/api/studio", async (original) => ({
@@ -64,6 +76,9 @@ function reply(body: unknown, status = 200): Response {
 function routeFetch(routes: Record<string, Response[]>) {
   vi.mocked(global.fetch).mockImplementation(async (input) => {
     const url = String(input);
+    // Danh mục và gợi ý nhãn (pipeline v2) không thuộc kịch bản từng test: trả rỗng.
+    if (url.includes("/scene/catalog")) return reply({ classes: ["pallet", "box"], entries: [], physics_note: "" });
+    if (url.includes("/label-suggestions")) return reply({ suggestions: ["pallet"] });
     const key = Object.keys(routes).find((pattern) => url.includes(pattern));
     if (key && routes[key].length) return routes[key].shift()!;
     if (url.includes("/simulation-package")) return reply(null);
@@ -107,7 +122,7 @@ describe("ObjectReviewView", () => {
     render(<ObjectReviewView jobId="job-a" />);
     expect(await screen.findByText("1 vật thể · 0 chờ xác nhận")).toBeInTheDocument();
     expect(screen.queryByText("Vật thể 1")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Đã loại · 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Đã loại/xoá · 1" }));
     expect(screen.getByText("Vật thể 1")).toBeInTheDocument();
     expect(screen.getByText("Đã loại")).toBeInTheDocument();
   });
@@ -142,6 +157,61 @@ describe("ObjectReviewView", () => {
     expect(last).toMatchObject({ status: "error", revision: "rev-001" });
     act(() => (last as unknown as { retry: () => void }).retry());
     await waitFor(() => expect(last).toMatchObject({ status: "saved", revision: "rev-004" }));
+  });
+
+  it("scene theo vật: Gaussian riêng của vật tới viewer; vật đã xoá không vẽ; gizmo theo công cụ đang chọn", async () => {
+    const v2 = scene("rev-005", "CONFIRMED", "CONFIRMED");
+    const gaussians = { ...ref, artifact_type: "ObjectGaussians", artifact_uri: "artifact://jobs/job-a/scene/objects/x.ply" };
+    v2.objects[0] = { ...v2.objects[0], visual_ref: gaussians } as (typeof v2.objects)[0];
+    const deleted = scene("rev-006", "CONFIRMED", "DELETED");
+    deleted.objects[0] = { ...deleted.objects[0], active: false, visual_ref: gaussians } as (typeof deleted.objects)[0];
+    routeFetch({
+      "/objects/candidate-001/delete": [reply({ scene_revision: "rev-006", scene: deleted })],
+      "/scene": [reply({ scene: v2 })],
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ObjectReviewView jobId="job-a" />);
+    expect(await screen.findByTestId("splats")).toHaveTextContent("candidate-001:ply:true");
+
+    fireEvent.click(screen.getByText("Vật thể 1"));
+    fireEvent.click(screen.getByRole("button", { name: /Dịch/ }));
+    expect(screen.getByTestId("gizmo")).toHaveTextContent("candidate-001:translate");
+
+    fireEvent.click(screen.getByRole("button", { name: /Xoá/ }));
+    await waitFor(() => expect(screen.getByTestId("splats")).toHaveTextContent("candidate-001:ply:false"));
+    expect(screen.getByTestId("gizmo")).toHaveTextContent("none");
+  });
+
+  it("gán nhãn gửi nhãn + khối lượng người dùng nhập; hoàn tác quay về revision trước", async () => {
+    const base = scene("rev-002", "CONFIRMED", "CONFIRMED");
+    (base.provenance as Record<string, unknown>).edited_from = "rev-001";
+    const labelledScene = scene("rev-003", "CONFIRMED", "CONFIRMED");
+    (labelledScene.provenance as Record<string, unknown>).edited_from = "rev-002";
+    routeFetch({
+      "/objects/candidate-001/label": [reply({ scene_revision: "rev-003", scene: labelledScene })],
+      "/scene/restore": [reply({ scene_revision: "rev-004", scene: scene("rev-004", "CONFIRMED", "CONFIRMED") })],
+      "/scene": [reply({ scene: base })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByText("Vật thể 1"));
+    fireEvent.change(await screen.findByLabelText(/Nhãn/), { target: { value: "pallet" } });
+    fireEvent.change(screen.getByLabelText(/Khối lượng/), { target: { value: "31.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Lưu nhãn" }));
+    // "/label-suggestions" cũng chứa "/label": chỉ lấy đúng lệnh gán nhãn.
+    const labelled = () => calls("/label").filter(([url]) => String(url).endsWith("/label"));
+    await waitFor(() => expect(labelled()).toHaveLength(1));
+    expect(JSON.parse((labelled()[0][1] as RequestInit).body as string)).toMatchObject({
+      expected_scene_revision: "rev-002",
+      semantic_class: "pallet",
+      mass_kg: 31.5,
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Hoàn tác" }));
+    await waitFor(() => expect(calls("/scene/restore")).toHaveLength(1));
+    expect(JSON.parse((calls("/scene/restore")[0][1] as RequestInit).body as string)).toMatchObject({
+      expected_scene_revision: "rev-003",
+      target_revision: "rev-002",
+    });
   });
 
   it("báo rõ khi bước tách vật thể chưa có scene", async () => {

@@ -76,6 +76,26 @@ def gaussian_arrays(ply: dict[str, np.ndarray]) -> dict[str, np.ndarray | int]:
     }
 
 
+def merged_gaussians(base: Path | None, extras: list[dict]) -> dict[str, np.ndarray | int] | None:
+    """Gaussian nền + Gaussian của các vật không xuất riêng (ứng viên chưa xác nhận), dời về world.
+
+    Mọi file cùng nguồn 3DGS nên cùng bậc SH; khác bậc là lỗi dữ liệu, không tự cắt/đệm.
+    """
+    parts = [gaussian_arrays(read_gaussian_ply(base))] if base else []
+    for extra in extras:
+        arrays = gaussian_arrays(read_gaussian_ply(Path(extra["ply"])))
+        arrays["positions"] = np.asarray(arrays["positions"]) + np.asarray(extra["translation"], dtype=np.float32)
+        parts.append(arrays)
+    if not parts:
+        return None
+    if len({int(part["per_particle"]) for part in parts}) != 1:
+        raise ValueError("các file Gaussian khác bậc SH, không gộp được")
+    merged: dict[str, np.ndarray | int] = {"degree": parts[0]["degree"], "per_particle": parts[0]["per_particle"]}
+    for key in ("positions", "rotations", "scales", "opacities", "coefficients"):
+        merged[key] = np.concatenate([np.asarray(part[key]) for part in parts])
+    return merged
+
+
 def write_particle_field(stage: Usd.Stage, path: str, gaussians: dict[str, np.ndarray | int]) -> int:
     """Ghi Gaussian vào `UsdVol.ParticleField3DGaussianSplat`; trả số Gaussian."""
     field = UsdVol.ParticleField3DGaussianSplat.Define(stage, path)
@@ -170,10 +190,11 @@ def build(request: dict) -> dict:
 
     env = request.get("environment") or {}
     env_stage = new_layer(out / "environment.usdc")
-    if env.get("gaussians_ply"):
-        summary["environment_gaussians"] = write_particle_field(
-            env_stage, "/Root/Visual", gaussian_arrays(read_gaussian_ply(Path(env["gaussians_ply"])))
-        )
+    environment_gaussians = merged_gaussians(
+        Path(env["gaussians_ply"]) if env.get("gaussians_ply") else None, env.get("extra_gaussians") or []
+    )
+    if environment_gaussians is not None:
+        summary["environment_gaussians"] = write_particle_field(env_stage, "/Root/Visual", environment_gaussians)
     if env.get("collision_mesh"):
         vertices, faces = load_mesh(Path(env["collision_mesh"]))
         write_mesh(env_stage, "/Root/Collision", vertices, faces, UsdPhysics.Tokens.none)
@@ -203,6 +224,13 @@ def build(request: dict) -> dict:
             entry["gaussians"] = write_particle_field(
                 stage, "/Root/Visual", gaussian_arrays(read_gaussian_ply(Path(item["gaussians_ply"])))
             )
+        if item.get("asset_usd"):
+            # Vật thêm từ danh mục: hình là asset Isaac (tham chiếu URL). Gốc asset ở đáy nên hạ nửa chiều cao
+            # để khớp transform của vật (đặt tại tâm hộp bao).
+            asset = UsdGeom.Xform.Define(stage, "/Root/Asset")
+            asset.GetPrim().GetReferences().AddReference(item["asset_usd"])
+            asset.AddTranslateOp().Set(Gf.Vec3d(0, 0, -float(item.get("asset_drop_m", 0.0))))
+            entry["asset"] = item["asset_usd"]
         UsdGeom.Scope.Define(stage, "/Root/Collision")
         parts = [load_mesh(Path(part)) for part in item.get("collision_parts") or []]
         if item.get("collision_glb"):

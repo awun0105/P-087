@@ -122,6 +122,8 @@ export interface ViewerAnnotation {
 export interface ViewerControls {
   /** Bay tới annotation thứ `index`; false nếu viewer chưa nạp xong (API yêu cầu `state.loaded`). */
   select(index: number): boolean;
+  /** Bật/tắt điều khiển camera của viewer (tắt trong lúc kéo gizmo để hai bên không tranh con trỏ). */
+  setInputEnabled(enabled: boolean): void;
 }
 
 export function PlayCanvasScene({
@@ -220,6 +222,9 @@ export function PlayCanvasScene({
               if (disposed || !viewer.state.loaded) return false;
               viewer.selectAnnotation(index);
               return true;
+            },
+            setInputEnabled: (enabled) => {
+              if (!disposed) viewer.state.inputEnabled = enabled;
             },
           });
         }

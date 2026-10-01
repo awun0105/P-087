@@ -41,6 +41,10 @@ class CandidateBuildRequest(BaseModel):
     #: Layer collider môi trường (đường dẫn tương đối trong gói) và ref artifact của nó.
     environment_layer: str | None = None
     environment_layer_ref: ProductArtifactRef | None = None
+    #: Pipeline v2 (ADR 0007): entrypoint USD lai dựng sẵn (thay bản collision-only sinh từ SceneIR) và
+    #: các layer của nó; cả hai đi vào inventory nên `candidate_checksum` phủ toàn bộ gói.
+    entrypoint_bytes: bytes | None = None
+    extra_assets: list[ProductArtifactRef] = Field(default_factory=list)
 
 
 def _validate_preflight_gate(scene: SceneIR, report: PreflightReport) -> None:
@@ -105,11 +109,11 @@ def build_candidate_package(req: CandidateBuildRequest) -> CandidatePackage:
     """Xây dựng và niêm phong CandidatePackage từ SceneIR đã qua Preflight PASS."""
     _validate_preflight_gate(req.scene, req.preflight_report)
 
-    usda_text = generate_scene_usda(req.scene, req.environment_layer)
-    usda_bytes = usda_text.encode("utf-8")
+    usda_bytes = req.entrypoint_bytes or generate_scene_usda(req.scene, req.environment_layer).encode("utf-8")
     entrypoint_usd = _create_entrypoint_ref(req.job_id or req.scene.scene_id, usda_bytes)
 
     assets, geometry, colliders = _collect_scene_refs(req.scene)
+    assets = [*assets, *req.extra_assets]
     if req.environment_layer_ref is not None:
         colliders.append(req.environment_layer_ref)
     ordered_refs = [entrypoint_usd, *assets, *geometry, *colliders]

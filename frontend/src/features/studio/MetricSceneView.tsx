@@ -10,7 +10,7 @@ import {
   type ViewerAppLike,
   type ViewerControls,
 } from "@/features/viewer/PlayCanvasScene";
-import { SceneOverlay, type OverlayBox } from "@/features/viewer/scene-overlay";
+import { SceneOverlay, type GizmoMode, type OverlayBox, type OverlayObject } from "@/features/viewer/scene-overlay";
 import {
   objectViewPose,
   recordingCameraPose,
@@ -19,6 +19,8 @@ import {
 } from "@/features/viewer/source-frame";
 import { jobArtifactContentUrl } from "@/lib/api/endpoints";
 import { cn } from "@/lib/cn";
+
+const EMPTY_OBJECTS: readonly OverlayObject[] = [];
 
 interface Ref {
   artifact_uri: string;
@@ -35,6 +37,9 @@ export function MetricSceneView({
   collision,
   cameras,
   boxes = [],
+  objects = EMPTY_OBJECTS,
+  gizmo = null,
+  onTransform,
   defaultLayers = { splat: true, collision: false, boxes: true },
   focus,
   onPickBox,
@@ -44,6 +49,12 @@ export function MetricSceneView({
   collision?: Ref;
   cameras: readonly CameraMarkerLike[];
   boxes?: readonly OverlayBox[];
+  /** Scene theo vật (pipeline v2): mỗi vật một khối Gaussian riêng, transform lấy từ SceneIR. */
+  objects?: readonly OverlayObject[];
+  /** Vật đang gắn gizmo và chế độ; null = không có gizmo. */
+  gizmo?: { id: string; mode: GizmoMode } | null;
+  /** Người dùng thả gizmo: transform mới của vật (mét, Z-up) để ghi revision. */
+  onTransform?: (id: string, position: [number, number, number], rotation: [number, number, number, number]) => void;
   defaultLayers?: { splat: boolean; collision: boolean; boxes: boolean };
   /** Yêu cầu camera bay tới hộp `id`; `nonce` đổi để bay lại cùng vật. */
   focus?: { id: string; nonce: number };
@@ -69,9 +80,10 @@ export function MetricSceneView({
     setOverlay(overlayRef.current);
   }, []);
 
-  // Mỗi hộp là một điểm đến camera của viewer. Khoá theo hình học (id, tâm, kích thước), không theo
-  // màu/trạng thái, để chọn hay xác nhận vật không tạo lại viewer; chỉ thêm/bớt vật mới tạo lại.
-  const geometryKey = JSON.stringify(boxes.map((box) => [box.id, box.center, box.dimensions]));
+  // Mỗi hộp là một điểm đến camera của viewer (chỉ khai báo được lúc tạo viewer). Khoá theo tập id,
+  // không theo màu/trạng thái/vị trí: chọn, xác nhận hay dời vật không tạo lại viewer (tải lại 3DGS);
+  // chỉ thêm/bớt vật mới tạo lại. Vật vừa dời giữ điểm bay tới của vị trí cũ cho tới lần tạo lại kế.
+  const geometryKey = JSON.stringify(boxes.map((box) => box.id));
   const annotationIds = useMemo(() => boxes.map((box) => box.id), [geometryKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const annotations = useMemo<ViewerAnnotation[]>(
     () =>
@@ -115,6 +127,34 @@ export function MetricSceneView({
       active = false;
     };
   }, [overlay, collisionUrl]);
+
+  useEffect(() => {
+    if (!overlay) return;
+    // Tắt lớp 3DGS thì ẩn cả Gaussian của vật (cùng một lớp hình).
+    overlay.setObjects(objects.map((item) => ({ ...item, visible: item.visible && layers.splat })));
+  }, [overlay, objects, layers.splat]);
+
+  const transformed = useRef(onTransform);
+  useEffect(() => {
+    transformed.current = onTransform;
+  }, [onTransform]);
+  const gizmoId = gizmo?.id ?? null;
+  const gizmoMode = gizmo?.mode ?? "translate";
+  useEffect(() => {
+    if (!overlay || !gizmoId) return;
+    overlay.attachGizmo(gizmoId, gizmoMode, {
+      onStart: () => controls.current?.setInputEnabled(false),
+      onEnd: (id, position, rotation) => {
+        controls.current?.setInputEnabled(true);
+        transformed.current?.(id, position, rotation);
+      },
+    });
+    return () => {
+      overlay.detachGizmo();
+      controls.current?.setInputEnabled(true);
+    };
+    // `objects` trong deps: gizmo gắn lại sau khi vật được tạo/đổi revision.
+  }, [overlay, gizmoId, gizmoMode, objects]);
 
   useEffect(() => {
     if (!overlay) return;
