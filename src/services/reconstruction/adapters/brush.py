@@ -17,7 +17,7 @@ from src.services.reconstruction.adapters.brush_runtime import (
     brush_command,
 )
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor
-from src.services.reconstruction.resume import ResumeCache, checkpoint_interval, content_key, ply_is_complete
+from src.services.reconstruction.resume import ResumeCache, checkpoint_interval, content_key
 from src.services.reconstruction.rgb.splat.visual import BrushConfig, BrushVisualArtifact, SplatInspection
 from src.services.reconstruction.rgb.splat.visual_publication import VisualPublisher, VisualResolver
 
@@ -117,8 +117,8 @@ class BrushAdapter:
         process.run(Invocation("brush-train", process.settings.command, arguments), request.workspace)
         if checkpointing is None or resume is None or key is None:
             return
-        final = checkpointing.directory / f"ckpt_{total}.ply"
-        if not ply_is_complete(final):
+        final = resume.checkpoints(key).get(total)
+        if final is None:
             raise VisualError("VISUAL_ARTIFACT_INVALID", "Brush did not export the final step")
         shutil.move(final, request.workspace / "output" / "visual.ply")
         resume.clear_checkpoints(key)

@@ -104,14 +104,20 @@ class ResumeCache:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    def latest_checkpoint(self, key: str, below: int) -> tuple[int, Path] | None:
-        """Checkpoint nguyên vẹn có số bước lớn nhất và nhỏ hơn `below` (tổng số bước); None nếu không có."""
-        found = []
+    def checkpoints(self, key: str) -> dict[int, Path]:
+        """`bước → file` của các checkpoint nguyên vẹn. Brush đệm số 0 vào tên theo độ dài tổng số bước
+        (`ckpt_02500.ply`), nên luôn đọc số bước từ tên thay vì tự ghép tên."""
+        found = {}
         for path in (self.root / f"brush-{key}").glob("ckpt_*.ply"):
             match = _CHECKPOINT.fullmatch(path.name)
-            if match and int(match.group(1)) < below and ply_is_complete(path):
-                found.append((int(match.group(1)), path))
-        return max(found) if found else None
+            if match and ply_is_complete(path):
+                found[int(match.group(1))] = path
+        return found
+
+    def latest_checkpoint(self, key: str, below: int) -> tuple[int, Path] | None:
+        """Checkpoint nguyên vẹn có số bước lớn nhất và nhỏ hơn `below` (tổng số bước); None nếu không có."""
+        earlier = {step: path for step, path in self.checkpoints(key).items() if step < below}
+        return max(earlier.items()) if earlier else None
 
     def clear_checkpoints(self, key: str) -> None:
         """Xoá checkpoint của khoá (train xong, hoặc sparse model đã đổi)."""

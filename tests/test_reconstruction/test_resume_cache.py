@@ -34,12 +34,13 @@ def test_ply_complete_detects_truncated_checkpoint(tmp_path: Path) -> None:
 def test_latest_checkpoint_skips_truncated_and_final_step(tmp_path: Path) -> None:
     cache = ResumeCache(tmp_path)
     directory = cache.checkpoint_dir("k")
-    _ply(directory / "ckpt_2500.ply", 4)
-    _ply(directory / "ckpt_5000.ply", 4)
+    _ply(directory / "ckpt_02500.ply", 4)  # Brush đệm số 0 theo độ dài tổng số bước
+    _ply(directory / "ckpt_05000.ply", 4)
     _ply(directory / "ckpt_7500.ply", 4, truncate=1)  # đang ghi dở lúc máy tắt
     _ply(directory / "ckpt_30000.ply", 4)  # bước cuối không phải điểm để train tiếp
 
-    assert cache.latest_checkpoint("k", 30000) == (5000, directory / "ckpt_5000.ply")
+    assert cache.latest_checkpoint("k", 30000) == (5000, directory / "ckpt_05000.ply")
+    assert cache.checkpoints("k")[30000] == directory / "ckpt_30000.ply"
     assert cache.latest_checkpoint("khác", 30000) is None
     cache.clear_checkpoints("k")
     assert cache.latest_checkpoint("k", 30000) is None
