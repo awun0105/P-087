@@ -114,13 +114,26 @@ Giới hạn đã biết:
 - Vật thêm từ thư viện hiện bằng hộp trên web; trong USD là tham chiếu URL asset Isaac (chưa mở thử trong Isaac).
 - Vật chưa gán nhãn được xuất với khối lượng mặc định (mật độ giả định × thể tích).
 - Chưa mở USD lai trong Isaac Sim (chưa có máy RTX); LiDAR trên Gaussian vẫn UNKNOWN.
-- gsplat biên dịch kernel CUDA lúc chạy; nếu cache kernel hỏng và máy thiếu `Python.h` thì bước gán nhãn lỗi và
-  job lùi về đường hộp mà vẫn `SUCCEEDED` (đã gặp trên `job-1421190ff700`, sửa bằng dựng lại kernel + `scripts/scene/reobjectify.py`).
+- gsplat biên dịch kernel CUDA lúc chạy; nếu cache kernel hỏng và máy thiếu `Python.h` thì bước gán nhãn lỗi
+  (trước 2026-10-01 chiều: job lùi về đường hộp mà vẫn `SUCCEEDED`; nay thử lại 3 lần rồi chờ người dùng chọn)
+  — lần gặp thật (đã gặp trên `job-1421190ff700`, sửa bằng dựng lại kernel + `scripts/scene/reobjectify.py`).
 - Không có checkpoint giữa chừng: đứt giữa lúc train 3DGS là train lại từ đầu (xem plan).
 
 Bổ sung 2026-10-01 (job mới đầu-cuối `job-1421190ff700`): collider ∥ vá nền chạy song song (vá nền xong sau
 3 phút 23 giây trong lúc CoACD đang chạy); số đo thời gian trên máy local lần này **không** dùng để so sánh vì
 chạy dưới trần CPU và bị watchdog nhiệt ngắt quãng.
+
+Bổ sung 2026-10-01 (chiều) — thay đổi hành vi so với bản đầu:
+
+- **Không tự lùi về hộp.** Tách theo vật thử tối đa `PRODUCT_OBJECTIFY_ATTEMPTS` (mặc định 3) lần; hết lần thì
+  scene chỉ có môi trường, `provenance.object_extraction = objectify_failed_awaiting_choice`, người dùng chọn
+  "chạy lại" hoặc "dùng hộp ứng viên" trên Studio. Máy không cấu hình runtime tách theo vật vẫn đi thẳng đường
+  hộp như ADR 0006 (không có lựa chọn nào khác để đưa ra).
+- **Checkpoint/resume** cho REC-03/REC-04 qua kho resume cục bộ (xem `src/services/reconstruction/resume.py`).
+  Quy tắc "không resume database cũ / không biến partial output thành success" giữ nguyên: chỉ dùng lại sparse
+  model của lần COLMAP **đã hoàn tất và đã publish được**; artifact vẫn publish trong namespace của attempt mới,
+  log artifact ghi `REUSED_SPARSE_MODEL` và `--start-iter`.
+- **Đường Kaggle** (`scripts/kaggle/`) thêm ngoài luồng chính; không đổi contract.
 
 ## Alternatives Considered
 

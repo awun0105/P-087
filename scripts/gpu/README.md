@@ -81,6 +81,15 @@ Ngưỡng mặc định: đóng băng khi CPU ≥ 90°C hoặc GPU ≥ 82°C, ch
 (ngưỡng chạy tiếp phải cao hơn nhiệt nền lúc máy rảnh, nếu không stack sẽ bị giữ đóng băng)
 (đổi bằng `HOT_CPU`, `HOT_GPU`, `COOL_CPU`, `COOL_GPU`). Máy thuê trong datacenter không cần bước này.
 
+### Đứt giữa chừng: checkpoint và chạy tiếp
+
+Trong lúc train 3DGS, Brush xuất checkpoint định kỳ vào `PRODUCT_WORKER_ROOT/<job_id>/resume/` (mặc định khoảng
+2.500 bước một lần; đổi bằng `REC04_BRUSH_CHECKPOINT_EVERY`, đặt `0` để tắt). Job `FAILED` vì máy tắt/worker chết
+thì bấm **Thử lại** (hoặc `POST /api/v1/jobs/<job_id>/retry`): attempt mới dùng lại kết quả COLMAP và train tiếp
+từ checkpoint mới nhất. Kho này chỉ nằm trên máy worker; đổi máy thì chạy lại từ đầu.
+
+Không có Docker (Kaggle, GPU thuê dạng container): xem `scripts/kaggle/README.md`.
+
 ## 5. Xử lý Aisle_CW và export demo
 
 ```bash
