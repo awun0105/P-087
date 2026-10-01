@@ -25,6 +25,9 @@ class ColliderType(StrEnum):
     OBB = "OBB"
     CONVEX_HULL = "CONVEX_HULL"
     SIMPLIFIED_MESH = "SIMPLIFIED_MESH"
+    # Pipeline v2 (ADR 0007): rigid body động không dùng được triangle mesh trong Isaac → nhiều mảnh
+    # lồi (CoACD); `geometry_ref` trỏ tới file chứa các mảnh.
+    CONVEX_DECOMPOSITION = "CONVEX_DECOMPOSITION"
 
 
 class ColliderSpec(ContractModel):
@@ -37,6 +40,42 @@ class ColliderSpec(ContractModel):
     geometry_ref: ProductArtifactRef | None = None
     parameters: JsonObject
     provenance: JsonObject
+
+
+class MassSource(StrEnum):
+    """Khối lượng lấy từ đâu — để Reviewer biết số nào là đo, số nào là mặc định."""
+
+    CATALOG_DEFAULT = "catalog_default"
+    CATALOG_DENSITY = "catalog_density"
+    USER = "user"
+    ASSET = "asset"
+
+
+def _absent(value: object) -> bool:
+    """Trường tuỳ chọn thêm sau (pipeline v2) không ghi khi rỗng, để checksum SceneIR cũ giữ nguyên."""
+    return value is None
+
+
+class ObjectPhysics(ContractModel):
+    """Thuộc tính vật lý của một vật cho Isaac (RigidBody, Mass, Physics Material; ADR 0007).
+
+    `dynamic=False`: vật cố định (kệ, cột) — chỉ có collider tĩnh, không RigidBody.
+    """
+
+    dynamic: bool
+    mass_kg: PositiveDimension | None = None
+    mass_source: MassSource | None = None
+    density_kg_m3: PositiveDimension | None = None
+    static_friction: Annotated[FiniteFloat, Field(ge=0)]
+    dynamic_friction: Annotated[FiniteFloat, Field(ge=0)]
+    restitution: Annotated[FiniteFloat, Field(ge=0, le=1)]
+    provenance: JsonObject
+
+    @model_validator(mode="after")
+    def _dynamic_needs_mass(self) -> Self:
+        if self.dynamic and (self.mass_kg is None or self.mass_source is None):
+            raise ValueError("vật động cần mass_kg và mass_source")
+        return self
 
 
 class SceneObjectOrigin(StrEnum):
@@ -71,6 +110,7 @@ class SceneObject(ContractModel):
     semantic_class: str | None = None
     tags: list[str] = Field(default_factory=list)
     provenance: JsonObject
+    physics: ObjectPhysics | None = Field(default=None, exclude_if=_absent)
 
     @model_validator(mode="after")
     def _validate_representation_binding(self) -> Self:
@@ -90,6 +130,8 @@ class SceneEnvironment(ContractModel):
     visual_ref: ProductArtifactRef | None = None
     geometry_ref: ProductArtifactRef
     collider_ref: ProductArtifactRef | None = None
+    # Bản 3DGS gốc (PLY) của nền cho bộ xuất USD; `visual_ref` là bản nén cho trình duyệt (SOG).
+    visual_master_ref: ProductArtifactRef | None = Field(default=None, exclude_if=_absent)
 
 
 class SceneIR(ContractModel):
