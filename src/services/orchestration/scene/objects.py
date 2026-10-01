@@ -13,7 +13,8 @@ import trimesh
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.coordinates import Transform
 from src.models.contracts.manifests import StageId
-from src.models.contracts.scene import SceneIR
+from src.models.contracts.scene import SceneIR, SceneObject
+from src.services.orchestration.scene.catalog import load_catalog, physics_for
 from src.services.orchestration.scene.editor import SceneEditor
 from src.services.orchestration.scene.errors import (
     SceneEditRejectedError,
@@ -25,13 +26,21 @@ from src.services.scene.editing.commands import (
     PrimitiveObjectCommand,
     add_primitive_object,
     confirm_object,
+    delete_object,
+    duplicate_object,
     ignore_object,
     rename_object,
+    restore_object,
     set_object_active,
+    set_object_semantics,
 )
 
-ObjectAction = Literal["confirm", "ignore", "hide", "delete", "rename"]
-OBJECT_ACTIONS: frozenset[str] = frozenset({"confirm", "ignore", "hide", "delete", "rename"})
+ObjectAction = Literal["confirm", "ignore", "hide", "delete", "rename", "restore", "duplicate", "label"]
+OBJECT_ACTIONS: frozenset[str] = frozenset(
+    {"confirm", "ignore", "hide", "delete", "rename", "restore", "duplicate", "label"}
+)
+#: Bản sao đặt lệch sang bên để không trùng khít vật gốc.
+_DUPLICATE_OFFSET_M = (0.5, 0.0, 0.0)
 
 
 def _current(editor: SceneEditor, job_id: str, expected_revision: str) -> SceneIR:
@@ -52,8 +61,15 @@ def apply_object_action(
     *,
     active: bool | None = None,
     name: str | None = None,
+    semantic_class: str | None = None,
+    mass_kg: float | None = None,
 ) -> SceneEditResult:
-    """confirm/ignore ứng viên; hide (active=False, hoặc active=True để hiện lại); delete (tắt hẳn); rename."""
+    """Một thao tác trên một vật, publish revision kế tiếp.
+
+    confirm/ignore ứng viên; hide (active=False/True); delete (vật thêm tay gỡ hẳn, vật tái dựng đánh
+    dấu DELETED); restore; rename; duplicate; label (nhãn + vật lý: khối lượng người dùng nhập, nếu
+    không thì mặc định của nhãn hoặc mật độ × thể tích collider).
+    """
     scene = _current(editor, job_id, expected_revision)
     if object_id not in {item.id for item in scene.objects}:
         raise SceneObjectNotFoundError(f"object {object_id} không tồn tại trong revision")
@@ -65,7 +81,15 @@ def apply_object_action(
         elif action == "hide":
             updated = set_object_active(scene, object_id, bool(active))
         elif action == "delete":
-            updated = set_object_active(scene, object_id, False)
+            updated = delete_object(scene, object_id)
+        elif action == "restore":
+            updated = restore_object(scene, object_id)
+        elif action == "duplicate":
+            updated = duplicate_object(scene, object_id, _next_id(scene, "user"), _DUPLICATE_OFFSET_M)
+        elif action == "label":
+            target = next(item for item in scene.objects if item.id == object_id)
+            physics = physics_for(semantic_class, object_volume_m3(target), mass_kg) if semantic_class else None
+            updated = set_object_semantics(scene, object_id, semantic_class, physics)
         elif action == "rename":
             updated = rename_object(scene, object_id, name or "")
         else:
@@ -73,6 +97,27 @@ def apply_object_action(
     except ValueError as error:
         raise SceneEditRejectedError(str(error)) from error
     return editor.publish_next(job_id, expected_revision, updated, action)
+
+
+def _next_id(scene: SceneIR, prefix: str) -> str:
+    """Id `prefix-NNN` chưa dùng trong revision."""
+    taken = {item.id for item in scene.objects}
+    number = 1
+    while f"{prefix}-{number:03d}" in taken:
+        number += 1
+    return f"{prefix}-{number:03d}"
+
+
+def object_volume_m3(item: SceneObject) -> float | None:
+    """Thể tích để suy khối lượng: thể tích các khối lồi nếu có, không thì thể tích hộp bao."""
+    if item.collider is not None:
+        volume = item.collider.parameters.get("volume_m3")
+        if isinstance(volume, int | float) and volume > 0:
+            return float(volume)
+    if item.primitive_dimensions_xyz_m is not None:
+        x, y, z = item.primitive_dimensions_xyz_m
+        return float(x * y * z)
+    return None
 
 
 def _box_glb(dimensions: tuple[float, float, float]) -> bytes:
@@ -129,3 +174,74 @@ def add_box_object(
     except ValueError as error:
         raise SceneEditRejectedError(str(error)) from error
     return editor.publish_next(job_id, expected_revision, updated, "add_primitive")
+
+
+def add_catalog_object(
+    editor: SceneEditor,
+    job_id: str,
+    expected_revision: str,
+    family: str,
+    position_xyz: tuple[float, float, float],
+    name: str = "",
+) -> SceneEditResult:
+    """Thêm một vật từ danh mục asset Isaac (ADR 0007): hộp đúng kích thước asset, nhãn + vật lý mặc định.
+
+    Trên web vật hiện bằng hộp; khi xuất USD, vật tham chiếu asset Isaac qua `provenance.asset_url`.
+    `position_xyz` là điểm đặt trên sàn (đáy hộp), tâm hộp được nâng nửa chiều cao.
+    """
+    scene = _current(editor, job_id, expected_revision)
+    entry = load_catalog().family(family)
+    if entry is None or not entry.placeable:
+        raise SceneEditRejectedError(f"họ asset {family} không có trong danh mục đặt được")
+    dimensions = tuple(max(float(value), 0.01) for value in entry.size_xyz_m)
+    object_id = _next_id(scene, "asset")
+    payload = _box_glb(dimensions)  # type: ignore[arg-type]
+    digest = hashlib.sha256(payload).hexdigest()
+    reference = ProductArtifactRef(
+        artifact_type="SceneObjectGeometry",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{job_id}/scene/user_objects/{digest}.glb",
+        artifact_checksum=f"sha256:{digest}",
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.EDIT,
+        job_id=job_id,
+    )
+    if not editor.resolver.resolve(reference.artifact_uri).is_file():
+        editor.store.publish(reference, payload)
+    volume = dimensions[0] * dimensions[1] * dimensions[2]
+    command = PrimitiveObjectCommand(
+        object_id=object_id,
+        name=name.strip() or f"{entry.semantic_class or family} ({object_id})",
+        transform=Transform(
+            parent_frame="world",
+            local_frame=object_id,
+            translation_xyz=(position_xyz[0], position_xyz[1], position_xyz[2] + dimensions[2] / 2),
+            rotation_quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
+        ),
+        geometry_ref=reference,
+        dimensions_xyz_m=dimensions,  # type: ignore[arg-type]
+        semantic_class=entry.semantic_class,
+        physics=physics_for(entry.semantic_class, volume),
+        provenance={"catalog_family": entry.family, "asset_url": entry.asset_url, "operation": "add_catalog_asset"},
+    )
+    try:
+        updated = add_primitive_object(scene, command)
+    except ValueError as error:
+        raise SceneEditRejectedError(str(error)) from error
+    return editor.publish_next(job_id, expected_revision, updated, "add_catalog_asset")
+
+
+def restore_revision(editor: SceneEditor, job_id: str, expected_revision: str, target_revision: str) -> SceneEditResult:
+    """Hoàn tác: publish nội dung của một revision cũ thành revision kế tiếp (lịch sử chỉ tiến, không xoá)."""
+    current = _current(editor, job_id, expected_revision)
+    target = editor.revision(job_id, target_revision)
+    if target is None:
+        raise SceneEditRejectedError(f"không có revision {target_revision}")
+    restored = current.model_copy(
+        update={
+            "environment": target.scene.environment,
+            "objects": target.scene.objects,
+            "provenance": {**target.scene.provenance, "restored_from": target_revision, "invalidates_validation": True},
+        }
+    )
+    return editor.publish_next(job_id, expected_revision, restored, "restore_revision")

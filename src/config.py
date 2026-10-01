@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     product_scene_runtime_python: Path | None = None
     product_sam2_checkpoint: Path | None = None
     product_scene_timeout_seconds: float = Field(default=1800, gt=0, allow_inf_nan=False)
+    #: Pipeline v2 (ADR 0007): trọng số LaMa TorchScript cho vá nền; thiếu thì dùng cv2.inpaint.
+    product_lama_checkpoint: Path | None = None
+    #: Bật tách scene theo vật (Gaussian + collider từng vật, vá nền). Cần runtime có gsplat/coacd.
+    product_objectify: bool = True
     product_queue_poll_seconds: float = Field(default=3, ge=0.1, le=60, allow_inf_nan=False)
     # MVP 2026-09-29: `self_attested` cho phép video upload chạy với lời tự khai
     # không có khuôn mặt/biển số; mặc định giữ cổng QA `VERIFIED_ANONYMIZED`.

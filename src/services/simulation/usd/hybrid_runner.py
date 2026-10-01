@@ -101,6 +101,15 @@ def load_mesh(path: Path) -> tuple[np.ndarray, np.ndarray]:
     return np.asarray(mesh.vertices, dtype=np.float32), np.asarray(mesh.faces, dtype=np.int32)
 
 
+def load_parts(path: Path) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Các khối lồi trong một GLB collider (mỗi geometry một khối), theo thứ tự tên."""
+    loaded = trimesh.load(path, process=False)
+    meshes = (
+        [loaded] if isinstance(loaded, trimesh.Trimesh) else [loaded.geometry[name] for name in sorted(loaded.geometry)]
+    )
+    return [(np.asarray(m.vertices, dtype=np.float32), np.asarray(m.faces, dtype=np.int32)) for m in meshes]
+
+
 def write_mesh(stage: Usd.Stage, path: str, vertices: np.ndarray, faces: np.ndarray, approximation: str) -> None:
     """Mesh collider (không hiển thị) với CollisionAPI + MeshCollisionAPI."""
     mesh = UsdGeom.Mesh.Define(stage, path)
@@ -195,8 +204,10 @@ def build(request: dict) -> dict:
                 stage, "/Root/Visual", gaussian_arrays(read_gaussian_ply(Path(item["gaussians_ply"])))
             )
         UsdGeom.Scope.Define(stage, "/Root/Collision")
-        for index, part in enumerate(item.get("collision_parts") or []):
-            vertices, faces = load_mesh(Path(part))
+        parts = [load_mesh(Path(part)) for part in item.get("collision_parts") or []]
+        if item.get("collision_glb"):
+            parts += load_parts(Path(item["collision_glb"]))
+        for index, (vertices, faces) in enumerate(parts):
             write_mesh(stage, f"/Root/Collision/part_{index:03d}", vertices, faces, UsdPhysics.Tokens.convexHull)
             entry["collision_parts"] += 1
         if not entry["collision_parts"] and item.get("box_dims"):

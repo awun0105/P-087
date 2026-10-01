@@ -187,6 +187,51 @@ class ObjectActionRequest(ApiModel):
     expected_scene_revision: Identifier
     active: bool | None = None
     name: str | None = None
+    # action = label (ADR 0007): nhãn lớp; khối lượng người dùng nhập (bỏ trống = mặc định của nhãn).
+    semantic_class: str | None = Field(default=None, max_length=64)
+    mass_kg: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+
+
+class AddCatalogObjectRequest(ApiModel):
+    """Body thêm vật từ danh mục asset Isaac (ADR 0007); `position_xyz` là điểm đặt trên sàn."""
+
+    expected_scene_revision: Identifier
+    family: str = Field(min_length=1, max_length=128)
+    position_xyz: tuple[float, float, float]
+    name: str = ""
+
+
+class RestoreRevisionRequest(ApiModel):
+    """Body hoàn tác về một revision cũ (publish thành revision kế tiếp)."""
+
+    expected_scene_revision: Identifier
+    target_revision: Identifier
+
+
+class CatalogEntryResponse(ApiModel):
+    """Một họ asset đặt được."""
+
+    family: str
+    semantic_class: str | None
+    size_xyz_m: tuple[float, float, float]
+    dynamic: bool
+    default_mass_kg: float | None
+
+
+class SceneCatalogResponse(ApiModel):
+    """Danh mục nhãn và asset cho Studio."""
+
+    classes: list[str]
+    entries: list[CatalogEntryResponse]
+    physics_note: str
+
+
+class LabelSuggestionResponse(ApiModel):
+    """Nhãn gợi ý cho một vật theo kích thước; người dùng phải xác nhận."""
+
+    object_id: Identifier
+    suggestions: list[str]
+    basis: str
 
 
 class AddObjectRequest(ApiModel):

@@ -44,8 +44,15 @@ from src.services.orchestration.scene import (
     SceneError,
     SceneRevisionConflictError,
 )
+from src.services.orchestration.scene.catalog import load_catalog, suggest_classes
 from src.services.orchestration.scene.errors import SceneNotAvailableError
-from src.services.orchestration.scene.objects import OBJECT_ACTIONS, add_box_object, apply_object_action
+from src.services.orchestration.scene.objects import (
+    OBJECT_ACTIONS,
+    add_box_object,
+    add_catalog_object,
+    apply_object_action,
+    restore_revision,
+)
 
 router = APIRouter(tags=["product"])
 
@@ -383,6 +390,8 @@ def object_action(
             request.expected_scene_revision,
             active=request.active,
             name=request.name,
+            semantic_class=request.semantic_class,
+            mass_kg=request.mass_kg,
         )
     )
 
@@ -417,6 +426,89 @@ def add_object(
             request.dimensions_xyz_m,
             request.position_xyz,
         )
+    )
+
+
+@router.get("/scene/catalog", response_model=schemas.SceneCatalogResponse)
+def get_scene_catalog() -> schemas.SceneCatalogResponse:
+    """Danh mục nhãn + asset Isaac đặt được (ADR 0007); giá trị vật lý là mặc định tham khảo."""
+    catalog = load_catalog()
+    return schemas.SceneCatalogResponse(
+        classes=catalog.classes(),
+        entries=[
+            schemas.CatalogEntryResponse(
+                family=entry.family,
+                semantic_class=entry.semantic_class,
+                size_xyz_m=entry.size_xyz_m,
+                dynamic=bool(entry.physics.get("dynamic", True)),
+                default_mass_kg=entry.physics.get("mass_kg"),
+            )
+            for entry in catalog.placeable()
+        ],
+        physics_note=catalog.physics_note,
+    )
+
+
+@router.get(
+    "/jobs/{job_id}/scene/objects/{object_id}/label-suggestions",
+    response_model=schemas.LabelSuggestionResponse,
+    responses={404: {"model": schemas.ApiErrorResponse}},
+)
+def get_label_suggestions(job_id: str, object_id: str) -> schemas.LabelSuggestionResponse:
+    """Gợi ý nhãn theo kích thước hộp bao của vật; chỉ để sắp danh sách chọn, không tự gán."""
+    _job_or_404(job_id)
+    try:
+        scene = _registry().scene.current(job_id).scene
+    except SceneNotAvailableError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    target = next((item for item in scene.objects if item.id == object_id), None)
+    dimensions = target and (
+        target.primitive_dimensions_xyz_m or (target.collider.dimensions_xyz_m if target.collider else None)
+    )
+    if target is None or dimensions is None:
+        raise HTTPException(status_code=404, detail="vật không tồn tại hoặc không có kích thước")
+    return schemas.LabelSuggestionResponse(
+        object_id=object_id,
+        suggestions=suggest_classes(dimensions),
+        basis="kích thước hộp bao so với danh mục asset",
+    )
+
+
+@router.post(
+    "/jobs/{job_id}/scene/catalog-objects",
+    response_model=schemas.SceneEditResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"model": schemas.ApiErrorResponse},
+        409: {"model": schemas.ApiErrorResponse},
+        422: {"model": schemas.ApiErrorResponse},
+    },
+)
+def add_catalog_scene_object(job_id: str, request: schemas.AddCatalogObjectRequest) -> schemas.SceneEditResponse:
+    """Thêm một vật từ danh mục asset Isaac: nhãn + vật lý mặc định, revision mới."""
+    _job_or_404(job_id)
+    return _scene_mutation(
+        lambda editor: add_catalog_object(
+            editor, job_id, request.expected_scene_revision, request.family, request.position_xyz, request.name
+        )
+    )
+
+
+@router.post(
+    "/jobs/{job_id}/scene/restore",
+    response_model=schemas.SceneEditResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"model": schemas.ApiErrorResponse},
+        409: {"model": schemas.ApiErrorResponse},
+        422: {"model": schemas.ApiErrorResponse},
+    },
+)
+def restore_scene_revision(job_id: str, request: schemas.RestoreRevisionRequest) -> schemas.SceneEditResponse:
+    """Hoàn tác: nội dung revision cũ thành revision kế tiếp; lịch sử không bị xoá."""
+    _job_or_404(job_id)
+    return _scene_mutation(
+        lambda editor: restore_revision(editor, job_id, request.expected_scene_revision, request.target_revision)
     )
 
 

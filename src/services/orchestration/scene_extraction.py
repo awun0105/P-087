@@ -17,6 +17,8 @@ from src.models.contracts.reconstruction import ReconstructionBundle
 from src.services.orchestration.artifacts import FilesystemArtifactStore
 from src.services.orchestration.jobs.progress import metric_confirmation_stage
 from src.services.orchestration.projects.registry import ProjectRegistry
+from src.services.orchestration.scene_objectify import METHOD as OBJECTIFY_METHOD
+from src.services.orchestration.scene_objectify import ObjectifyError, objectify
 from src.services.reconstruction import camera_views, confirmation_summary, metric_gaussian_points
 from src.services.scene.builder import scene_from_bundle
 from src.services.scene.geometric import GeometricConfig, candidate_objects, collision_vertices, objects_from_candidates
@@ -79,7 +81,21 @@ def extract_scene(
         else None
     )
     objects, method, note = [], "none", ""
-    if runtime is not None and runtime.available():
+    environment, extra = None, {}
+    if settings.product_objectify and runtime is not None and runtime.available():
+        # Pipeline v2 (ADR 0007): nền đã vá + Gaussian/collider từng vật. Lỗi → lùi về đường hộp.
+        try:
+            result = objectify(registry, job, bundle, settings, workspace / "objectify", publish)
+            objects, environment, extra, method = (
+                result.objects,
+                result.environment,
+                result.provenance,
+                OBJECTIFY_METHOD,
+            )
+        except (ObjectifyError, ValueError, OSError) as error:
+            logger.warning("Tách theo vật thất bại job=%s cause=%s; dùng đường hộp", job.job_id, error)
+            note = f"tách theo vật lỗi ({type(error).__name__}); dùng hộp ứng viên"
+    if method == "none" and runtime is not None and runtime.available():
         try:
             points, frames = _points_and_frames(registry, job, bundle)
             candidates = extract(points, frames, runtime, workspace / "sampro3d")
@@ -90,7 +106,7 @@ def extract_scene(
                 "SAMPro3D thất bại job=%s cause=%s; dùng fallback hình học", job.job_id, type(error).__name__
             )
             note = f"SAMPro3D lỗi ({type(error).__name__}); dùng tách hình học"
-    else:
+    elif method == "none":
         note = "chưa cấu hình runtime SAM2; dùng tách hình học"
     if method == "none":
         try:
@@ -100,7 +116,7 @@ def extract_scene(
         except (ValueError, OSError) as error:
             logger.warning("Tách hình học thất bại job=%s cause=%s", job.job_id, type(error).__name__)
             note = f"{note}; tách hình học lỗi ({type(error).__name__}), scene chỉ có môi trường"
-    scene = scene_from_bundle(bundle, objects, {"object_extraction": method, "note": note})
+    scene = scene_from_bundle(bundle, objects, {"object_extraction": method, "note": note, **extra}, environment)
     revision = registry.scene.publish_initial(job.job_id, scene)
     reference = revision.scene_reference
     return StageArtifact(

@@ -170,6 +170,10 @@ class SceneEditor:
         self._revisions[job_id] = revision
         return revision
 
+    def revision(self, job_id: str, scene_revision: str) -> SceneRevision | None:
+        """Một revision đã publish của job (đọc lại, kiểm checksum); None nếu chưa có."""
+        return self._load_revision(job_id, scene_revision)
+
     def publish_next(self, job_id: str, expected_revision: str, scene: SceneIR, operation: str) -> SceneEditResult:
         """Publish kết quả một thao tác domain EX-SCENE (xác nhận/loại/thêm vật) thành revision kế tiếp.
 
