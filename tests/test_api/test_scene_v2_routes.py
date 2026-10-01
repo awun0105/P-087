@@ -163,3 +163,21 @@ async def test_label_remembers_chosen_asset_and_rejects_asset_of_other_class(cli
         json={"expected_scene_revision": "rev-002", "semantic_class": "box", "asset_family": "SM_PaletteA"},
     )
     assert wrong.status_code == 422 and "không thuộc nhãn" in wrong.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_catalog_preview_served_only_for_known_family_with_file(client, tmp_path, monkeypatch) -> None:
+    from src.api import routes_product
+    from src.config import Settings
+
+    (tmp_path / "SM_PaletteA.glb").write_bytes(b"glTF-fake")
+    monkeypatch.setattr(routes_product, "get_settings", lambda: Settings(product_asset_preview_dir=tmp_path))
+
+    entries = (await client.get("/api/v1/scene/catalog")).json()["entries"]
+    flags = {entry["family"]: entry["has_preview"] for entry in entries}
+    assert flags["SM_PaletteA"] is True and flags["SM_CardBoxA"] is False
+
+    served = await client.get("/api/v1/scene/catalog/SM_PaletteA/preview.glb")
+    assert served.status_code == 200 and served.content == b"glTF-fake"
+    assert (await client.get("/api/v1/scene/catalog/SM_CardBoxA/preview.glb")).status_code == 404
+    assert (await client.get("/api/v1/scene/catalog/..%2F..%2Fsecret/preview.glb")).status_code == 404

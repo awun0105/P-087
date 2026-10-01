@@ -436,6 +436,7 @@ def add_object(
 def get_scene_catalog() -> schemas.SceneCatalogResponse:
     """Danh mục nhãn + asset Isaac đặt được (ADR 0007); giá trị vật lý là mặc định tham khảo."""
     catalog = load_catalog()
+    previews = get_settings().product_asset_preview_dir
     return schemas.SceneCatalogResponse(
         classes=catalog.classes(),
         entries=[
@@ -445,11 +446,23 @@ def get_scene_catalog() -> schemas.SceneCatalogResponse:
                 size_xyz_m=entry.size_xyz_m,
                 dynamic=bool(entry.physics.get("dynamic", True)),
                 default_mass_kg=entry.physics.get("mass_kg"),
+                has_preview=(previews / f"{entry.family}.glb").is_file(),
             )
             for entry in catalog.placeable()
         ],
         physics_note=catalog.physics_note,
     )
+
+
+@router.get("/scene/catalog/{family}/preview.glb", responses={404: {"model": schemas.ApiErrorResponse}})
+def get_catalog_preview(family: str) -> FileResponse:
+    """Hình khối của một asset danh mục (GLB, mét, Z lên, tâm hộp bao tại gốc) để Studio vẽ thay cho hộp."""
+    entry = load_catalog().family(family)
+    # Tên file lấy từ danh mục, không từ tham số đường dẫn: không đọc được file ngoài thư mục xem trước.
+    path = get_settings().product_asset_preview_dir / f"{entry.family}.glb" if entry is not None else None
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="asset chưa có bản xem trước")
+    return FileResponse(path, media_type="model/gltf-binary", headers={"Cache-Control": "public, max-age=86400"})
 
 
 @router.get(

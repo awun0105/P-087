@@ -229,6 +229,8 @@ class CatalogEntryResponse(ApiModel):
     size_xyz_m: tuple[float, float, float]
     dynamic: bool
     default_mass_kg: float | None
+    #: Máy này có GLB xem trước của asset (hình khối thật) hay Studio phải vẽ hộp.
+    has_preview: bool = False
 
 
 class SceneCatalogResponse(ApiModel):

@@ -77,8 +77,10 @@ function material(hex: string, opacity: number, lit: boolean): StandardMaterial 
 /** Một vật của scene theo vật (pipeline v2): Gaussian riêng trong hệ cục bộ + transform của vật. */
 export interface OverlayObject {
   id: string;
-  /** URL file PLY Gaussian của vật; null với vật không có hình riêng (vật cản hộp, asset). */
+  /** URL hình riêng của vật; null với vật không có hình riêng (vật cản hộp, asset chưa có bản xem trước). */
   url: string | null;
+  /** `gsplat` (mặc định): PLY Gaussian của vật tách từ scene. `model`: GLB hình khối của asset thư viện. */
+  kind?: "gsplat" | "model";
   position: Vec3;
   rotation_xyzw: [number, number, number, number];
   visible: boolean;
@@ -220,11 +222,16 @@ export class SceneOverlay {
         record = { entity, asset: null, url: item.url };
         this.objects.set(item.id, record);
         if (item.url) {
-          const asset = new Asset(`r2s-object-${item.id}`, "gsplat", { url: item.url, filename: "object.ply" });
+          const model = item.kind === "model";
+          const asset = model
+            ? new Asset(`r2s-object-${item.id}`, "container", { url: item.url, filename: "asset.glb" })
+            : new Asset(`r2s-object-${item.id}`, "gsplat", { url: item.url, filename: "object.ply" });
           record.asset = asset;
           asset.once("load", () => {
             if (this.destroyed || this.objects.get(item.id)?.asset !== asset) return;
-            entity.addComponent("gsplat", { asset });
+            // GLB giữ màu đỉnh của asset; entity con bị huỷ cùng entity của vật khi gỡ.
+            if (model) entity.addChild((asset.resource as ContainerResource).instantiateRenderEntity());
+            else entity.addComponent("gsplat", { asset });
             this.redraw();
           });
           this.app.assets.add(asset);

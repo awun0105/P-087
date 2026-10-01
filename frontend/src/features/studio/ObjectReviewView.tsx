@@ -14,6 +14,7 @@ import {
   addBoxObstacle,
   addCatalogObject,
   applyObjectAction,
+  catalogPreviewUrl,
   getJobScene,
   getSceneCatalog,
   getStageViews,
@@ -28,6 +29,14 @@ import type { StageView } from "@/lib/contracts/studio";
 
 // Chỉ dùng khi scene không có 3DGS: tải three.js theo nhu cầu, không kéo vào mọi lần mở Studio.
 const CollisionMeshCanvas = dynamic(() => import("@/features/studio/StageViewer").then((m) => m.CollisionMeshCanvas), { ssr: false });
+
+/** Hình riêng của một vật trong viewer: Gaussian của vật tách từ scene, hoặc GLB của asset thư viện. */
+function objectVisual(jobId: string, object: SceneObject, previews: ReadonlySet<string>): Pick<OverlayObject, "url" | "kind"> {
+  if (object.visual_ref?.artifact_type === "ObjectGaussians") return { url: jobArtifactContentUrl(jobId, object.visual_ref), kind: "gsplat" };
+  const family = object.provenance?.catalog_family;
+  if (typeof family === "string" && previews.has(family)) return { url: catalogPreviewUrl(family), kind: "model" };
+  return { url: null };
+}
 
 /** Trạng thái lưu SceneObject cho header scene (PRODUCT.md Q5: mỗi thao tác là một revision). */
 export type SaveState =
@@ -116,17 +125,18 @@ export function ObjectReviewView({
     return () => controller.abort();
   }, []);
 
+  const previews = useMemo(() => new Set((catalog?.entries ?? []).filter((item) => item.has_preview).map((item) => item.family)), [catalog]);
   // Scene theo vật (pipeline v2): mỗi vật có Gaussian riêng. Vật đã loại/xoá hoặc đang ẩn không vẽ.
   const splats = useMemo<OverlayObject[]>(
     () =>
       (scene?.objects ?? []).map((object) => ({
         id: object.id,
-        url: object.visual_ref?.artifact_type === "ObjectGaussians" ? jobArtifactContentUrl(jobId, object.visual_ref) : null,
+        ...objectVisual(jobId, object, previews),
         position: object.transform.translation_xyz,
         rotation_xyzw: object.transform.rotation_quaternion_xyzw,
         visible: isPlaced(object),
       })),
-    [scene, jobId],
+    [scene, jobId, previews],
   );
 
   const counts = useMemo(

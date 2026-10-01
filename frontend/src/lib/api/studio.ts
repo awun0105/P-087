@@ -3,7 +3,7 @@
  * dùng XMLHttpRequest vì `fetch` chưa báo được tiến độ gửi body.
  */
 
-import { ApiError, apiFetch, fetchApi, type ApiResult } from "@/lib/api/client";
+import { ApiError, apiFetch, apiUrl, fetchApi, type ApiResult } from "@/lib/api/client";
 import { directUpload, xhrPutPart } from "@/lib/api/directUpload";
 import type { SceneEditResponse, SceneResponse } from "@/lib/contracts/api";
 import {
@@ -344,12 +344,19 @@ export interface CatalogEntry {
   size_xyz_m: [number, number, number];
   dynamic: boolean;
   default_mass_kg: number | null;
+  /** Máy chủ có GLB hình khối của asset; không có thì vẽ hộp. */
+  has_preview?: boolean;
 }
 
 export interface SceneCatalog {
   classes: string[];
   entries: CatalogEntry[];
   physics_note: string;
+}
+
+/** GLB hình khối của một asset danh mục (mét, Z lên, tâm hộp bao tại gốc). */
+export function catalogPreviewUrl(family: string): string {
+  return apiUrl(`${API}/scene/catalog/${encodeURIComponent(family)}/preview.glb`, {});
 }
 
 /** Danh mục nhãn + asset Isaac đặt được; giá trị vật lý là mặc định tham khảo. */

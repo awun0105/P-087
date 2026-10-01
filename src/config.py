@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     product_lama_checkpoint: Path | None = None
     #: Bật tách scene theo vật (Gaussian + collider từng vật, vá nền). Cần runtime có gsplat/coacd.
     product_objectify: bool = True
+    #: GLB xem trước của asset danh mục (sinh bằng scripts/scene/build_asset_previews.py); thiếu thì Studio vẽ hộp.
+    product_asset_preview_dir: Path = Path("./data/asset_previews")
     #: Số lần thử tách theo vật trước khi dừng và để người dùng chọn (chạy lại / dùng hộp).
     product_objectify_attempts: int = Field(default=3, ge=1, le=10)
     product_queue_poll_seconds: float = Field(default=3, ge=0.1, le=60, allow_inf_nan=False)
