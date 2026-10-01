@@ -71,7 +71,7 @@ const STEPS = [
 ];
 
 /**
- * Layout đăng nhập/mã mời theo auth v2 của dashboard donor (PRODUCT.md S02): form bên trái,
+ * Layout đăng nhập/mã mời theo auth v2 của dashboard donor (STUDIO_UX_SPEC.md S02): form bên trái,
  * panel giới thiệu luồng thật bên phải; không SSO, không chọn role, không số liệu quảng cáo.
  */
 function Shell({ title, lead, children }: { title: string; lead: string; children: React.ReactNode }) {

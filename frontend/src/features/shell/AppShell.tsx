@@ -39,7 +39,7 @@ import { useAuth } from "@/features/studio/AuthProvider";
 import { isReviewer } from "@/lib/api/auth";
 import { APP_HOME } from "@/lib/routes";
 
-/** IA Tổng quan/Scenes theo PRODUCT.md §3.1; thao tác tạo scene nằm trong Scenes. */
+/** IA Tổng quan/Scenes theo STUDIO_UX_SPEC.md §3.1; thao tác tạo scene nằm trong Scenes. */
 const NAV = [
   { heading: "Ứng dụng", items: [
     { href: APP_HOME, label: "Tổng quan", icon: LayoutDashboard, reviewerOnly: false },
@@ -63,7 +63,7 @@ export function isActive(pathname: string, href: string): boolean {
 
 /**
  * Khung ứng dụng theo shell của dashboard donor (sidebar thu gọn + header mảnh), bỏ search,
- * theme switcher, GitHub menu, account switcher mẫu (PRODUCT.md §3.2). Tài khoản và hạn mức lấy
+ * theme switcher, GitHub menu, account switcher mẫu (STUDIO_UX_SPEC.md §3.2). Tài khoản và hạn mức lấy
  * từ `/auth/me` — backend vẫn kiểm quyền trên từng route.
  */
 export function AppShell({ children }: { children: ReactNode }) {

@@ -1,5 +1,5 @@
 /**
- * Theme sáng/tối của Studio (PRODUCT.md D-14). Lựa chọn là sở thích hiển thị của từng trình duyệt nên nằm ở
+ * Theme sáng/tối của Studio (STUDIO_UX_SPEC.md D-14). Lựa chọn là sở thích hiển thị của từng trình duyệt nên nằm ở
  * localStorage, không phải state của backend. Class `dark` trên <html> là nguồn duy nhất cho CSS; script
  * `THEME_INIT_SCRIPT` gắn class trước lần vẽ đầu để trang không nháy theme sáng.
  */

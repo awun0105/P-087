@@ -117,6 +117,53 @@ Không commit `.env`. Các biến chính:
 
 Chỉ API key của `LLM_PROVIDER` đang chọn là bắt buộc để chạy backend scaffold.
 
+## Bản đồ thư mục gốc
+
+Thư mục gốc giữ nguyên khung do ban tổ chức (BTC) cung cấp — không đổi tên, dời hay xoá
+([`ARCHITECTURE.md`](./ARCHITECTURE.md)). Bảng dưới nói rõ từng file dùng để làm gì.
+
+**Đọc trước**
+
+| File | Vai trò | Nguồn |
+|---|---|---|
+| `README.md` | README của dự án (file này) | BTC, nhóm viết lại |
+| `AGENTS.md` | Quy tắc làm việc cho coding agent và bảng authority (tài liệu nào quyết định việc gì) | Nhóm |
+| `ARCHITECTURE.md` | Vị trí chuẩn của từng loại code và ownership theo track | BTC, nhóm viết lại |
+| `docs/` | Mọi tài liệu khác; bắt đầu từ [`docs/README.md`](./docs/README.md) | Nhóm + guide của BTC |
+
+**Nhật ký nộp bài (deliverable Demo Day)**
+
+| File | Vai trò | Nguồn |
+|---|---|---|
+| `WORKLOG.md` | Việc đã làm theo ngày, chia theo 4 track | Khung BTC, nhóm ghi |
+| `JOURNAL.md` | Kết quả, quyết định và bài học theo tuần | Khung BTC, nhóm ghi |
+
+**Khung mẫu của BTC (không dùng để chạy dự án)**
+
+| File | Vai trò |
+|---|---|
+| `README_starter.md` | Hướng dẫn dùng template AI20K (cấu trúc mẫu, danh sách deliverable) |
+| `README_boilerplate.md` | Khung README mẫu để đội điền; README thật là `README.md` |
+| `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `LICENSE` | Quy định chung của chương trình |
+
+**Build và phụ thuộc**
+
+| File | Vai trò | Nguồn |
+|---|---|---|
+| `requirements.in` → `requirements.lock.txt` | Phụ thuộc runtime của API/worker. `Dockerfile`, `Dockerfile.gpu`, CI và `scripts/setup.sh` cài từ file lock | BTC + nhóm |
+| `requirements-dev.in` → `requirements-dev.lock.txt` | Công cụ dev/test (ruff, pytest…); CI và `scripts/setup.sh` cài từ file lock | Nhóm |
+| `requirements-offline.in` → `requirements-offline.lock.txt` | Tooling dataset offline cho `scripts/torwic/` (open3d), tách khỏi runtime | Nhóm |
+| `requirements.txt` | File phụ thuộc gốc của template; build và CI của dự án **không** dùng, giữ vì thuộc khung BTC | BTC |
+| `Makefile` | Lệnh dev của template: `run`, `test`, `lint`, `setup`, `lock`, `doctor`, `smoke` | BTC |
+| `Makefile.studio` | Chạy cả stack Studio cục bộ (API + worker + web): `make -f Makefile.studio up` | Nhóm |
+| `Dockerfile` | Image API (CPU); `docker-compose.yml` build từ file này | BTC, nhóm sửa |
+| `Dockerfile.gpu` | Image GPU worker (COLMAP, Brush, runtime tách vật thể) | Nhóm |
+| `docker-compose.yml` | Compose mẫu của template cho image API | BTC |
+| `ruff.toml`, `.python-version`, `.env.example`, `.gitignore`, `.dockerignore` | Cấu hình công cụ và mẫu biến môi trường | BTC + nhóm |
+| `THIRD_PARTY_NOTICES.md` | Nguồn và giấy phép của code, mô hình, asset bên thứ ba (backend và frontend) | Nhóm |
+
+Sinh lại ba file lock bằng `make lock` (`scripts/lock_dependencies.sh`).
+
 ## Project Structure
 
 Bản đồ nhanh (kiểm theo checkout 2026-09-29). Placement/ownership chính thức:
@@ -187,7 +234,10 @@ Response mẫu:
 - [Team Execution Plan](./docs/execution/TEAM_EXECUTION_PLAN.md)
 - [Track Implementation Guide](./docs/execution/TRACK_IMPLEMENTATION_GUIDE.md)
 - [Execution Tracks](./docs/execution/tracks/README.md)
-- [Quyết định kiến trúc/sản phẩm (ADR)](./docs/decisions/README.md) và [UX Studio](./PRODUCT.md)
+- [Quyết định kiến trúc/sản phẩm (ADR)](./docs/decisions/README.md)
+- [Đặc tả UX Web Studio](./docs/STUDIO_UX_SPEC.md): IA, màn hình, trạng thái UI và các quyết định Q/D-xx. PRD quyết định
+  phạm vi và acceptance; đặc tả UX không override PRD
+- [Onboarding cho coding agent](./docs/CONTEXT.md): tổng quan định hướng, không phải source of truth
 
 ## Demo và triển khai
 

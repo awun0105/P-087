@@ -169,7 +169,7 @@
   - [ ] Triển khai hoàn tất REC-05 (Voxel Geometry & Collision Mesh) và xuất file `collision.glb` watertight. *(collision mesh chạy thật trong pipeline; tiêu chí chặn giả ghost-block chưa đạt, watertight chưa kiểm — xem REC-05)*
   - [x] Triển khai REC-06 (Metric Scale Anchor) để chuẩn hóa kích thước mét thật cho mô hình 3D. *(xác nhận tỉ lệ từ UI, PR #15; sai số `e` đo lần 1 ≈ 15,6 cm, chưa khoá)*
 - **Đã hoàn thành (đến 30/09):**
-  - Tích hợp đầu-cuối trên `feat/studio-integration` (PR #16): tách vật SAMPro3D + SAM2, sửa SceneIR theo vật, gói mô phỏng USD + preflight (PASS 6/6 trên `job-123dfd4868d8`), duyệt/phát hành, refactor UI theo PRODUCT.md.
+  - Tích hợp đầu-cuối trên `feat/studio-integration` (PR #16): tách vật SAMPro3D + SAM2, sửa SceneIR theo vật, gói mô phỏng USD + preflight (PASS 6/6 trên `job-123dfd4868d8`), duyệt/phát hành, refactor UI theo STUDIO_UX_SPEC.md.
   - Đo chất lượng 3DGS: `seg-5fps-cap600k` PSNR 28,80 / SSIM 0,927 / LPIPS 0,268.
   - Audit repo + tra cứu Isaac Sim → chốt pipeline v2 (ADR 0007): scene theo vật, xuất USD lai.
 - **Khó khăn & Giải pháp:**

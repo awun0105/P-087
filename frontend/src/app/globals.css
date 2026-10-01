@@ -13,7 +13,7 @@
  * `slate-800`/`bg-slate-900/50` rải rác khó bảo trì.
  */
 @theme inline {
-  /* Bộ chữ của landing cho toàn app (PRODUCT.md D-13); biến font do next/font đặt trên <html> ở app/layout.tsx. */
+  /* Bộ chữ của landing cho toàn app (STUDIO_UX_SPEC.md D-13); biến font do next/font đặt trên <html> ở app/layout.tsx. */
   --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
@@ -62,7 +62,7 @@
 
 /*
  * Studio — Minimalism/Swiss, beige + cam (quyết định owner 2026-09-29; owner chọn lại bộ này
- * thay palette tối ngày 30/09/2026, PRODUCT.md D-04). Chrome sáng; viewport 3D nâu than ấm vì
+ * thay palette tối ngày 30/09/2026, STUDIO_UX_SPEC.md D-04). Chrome sáng; viewport 3D nâu than ấm vì
  * Gaussian khó đọc trên nền sáng. Tương phản: ink/paper ~13:1, ink-muted/paper ~5.4:1,
  * trắng/ember-strong ~4.6:1.
  *
@@ -194,7 +194,7 @@
 }
 
 /*
- * Theme tối (PRODUCT.md D-14): giữ tông nâu than ấm của khung viewport trên landing (#1F1B17 / #171412) thay vì xám
+ * Theme tối (STUDIO_UX_SPEC.md D-14): giữ tông nâu than ấm của khung viewport trên landing (#1F1B17 / #171412) thay vì xám
  * xanh, để hai theme vẫn là một bộ nhận diện. Nền là nâu than, thẻ sáng hơn nền một bậc, chữ là màu paper của theme
  * sáng; màu nhấn/trạng thái dùng bản sáng hơn để đủ tương phản trên nền tối (chữ nhỏ ≥ 5:1, đo bằng công thức WCAG).
  * `--primary` (nền nút chính) giữ cam đậm vì chữ trắng trên đó đạt 4,6:1 ở cả hai theme. Viewport 3D tối hơn nền

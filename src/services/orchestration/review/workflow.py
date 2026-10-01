@@ -9,7 +9,7 @@ Trạng thái không lưu riêng mà **suy ra từ artifact bất biến** gắn
 
 Sửa scene tạo revision mới, revision mới chưa có gói nên mọi report/quyết định cũ tự hết hiệu lực
 (Contract §9). Quyết định chỉ do Reviewer đã xác thực; không nhận reviewer_id từ payload.
-Phát hành tự chạy ngay sau khi duyệt, không có thêm cổng người (PRODUCT.md F8); lỗi niêm phong giữ
+Phát hành tự chạy ngay sau khi duyệt, không có thêm cổng người (STUDIO_UX_SPEC.md F8); lỗi niêm phong giữ
 `APPROVED` và cho thử lại. Không build lại USD: bản phát hành dùng lại đúng byte của gói đã kiểm.
 """
 

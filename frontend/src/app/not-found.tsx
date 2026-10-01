@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { Button } from "@/components/studio/primitives";
 
-/** 404 chung: nói rõ không tìm thấy và đưa về Scenes (PRODUCT.md §6 trạng thái chung). */
+/** 404 chung: nói rõ không tìm thấy và đưa về Scenes (STUDIO_UX_SPEC.md §6 trạng thái chung). */
 export default function NotFound() {
   return (
     <main className="studio-root flex min-h-dvh flex-col items-center justify-center gap-3 bg-paper px-4 text-center text-ink">

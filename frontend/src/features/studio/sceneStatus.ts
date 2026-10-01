@@ -16,7 +16,7 @@ export interface SceneStatusView {
 }
 
 /**
- * Bảng nhãn trạng thái dùng chung cho Scenes, Jobs và header (PRODUCT.md D-12).
+ * Bảng nhãn trạng thái dùng chung cho Scenes, Jobs và header (STUDIO_UX_SPEC.md D-12).
  *
  * Không có nhãn "Sẵn sàng" chung: có preview không có nghĩa là sẵn sàng mô phỏng. Nhãn chỉ nói
  * điều danh sách biết chắc từ JobManifest; trạng thái vật thể/gói/duyệt nằm trong màn scene.

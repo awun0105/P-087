@@ -41,7 +41,7 @@ const ReviewTab = dynamic(() => import("@/features/studio/scene/ReviewTab").then
 const ResultsTab = dynamic(() => import("@/features/studio/scene/ResultsTab").then((m) => m.ResultsTab), { loading: TabLoading, ssr: false });
 
 /**
- * Ngữ cảnh một scene dựng từ video (PRODUCT.md §3.1, D-07): header giữ tên scene, trạng thái và
+ * Ngữ cảnh một scene dựng từ video (STUDIO_UX_SPEC.md §3.1, D-07): header giữ tên scene, trạng thái và
  * một CTA theo trạng thái; bốn tab Tiến trình · Studio · Kiểm tra & duyệt · Kết quả. Trạng thái bền
  * vững ở backend; màn này chỉ giữ tab/chế độ đang xem.
  */

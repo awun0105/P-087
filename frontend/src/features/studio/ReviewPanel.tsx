@@ -230,7 +230,7 @@ type StepState = "done" | "next" | "unavailable" | "blocked";
 /**
  * Bốn chặng gói → validation Isaac → duyệt → phát hành (S09–S12). Validation Isaac cần máy RTX và
  * simulation worker (SIM-06..09) chưa có trong repo: khi chưa có báo cáo, chặng này và các chặng
- * sau hiện "Chưa khả dụng" (PRODUCT.md Q2) thay vì giả như đang chờ.
+ * sau hiện "Chưa khả dụng" (STUDIO_UX_SPEC.md Q2) thay vì giả như đang chờ.
  */
 function ReviewSteps({ state }: { state: ReviewStateView }) {
   const status = state.record.status;

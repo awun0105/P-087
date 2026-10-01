@@ -669,7 +669,7 @@ Mỗi quyết định chỉ chốt cách **UI thể hiện**; không đổi PRD,
 | --- | --- | --- | --- |
 | D-01 | Dùng donor thế nào | **Mang phần UI của donor vào `frontend/` hiện có**, không thay thế repo: copy `src/components/ui/*` cần dùng (shadcn/radix), shell sidebar + header, auth v2 layout, bảng (Tasks) và grid/list (File Manager) làm mẫu; giữ nguyên `lib/api`, contracts, viewer PlayCanvas/three, test và route Studio. Không copy trang domain bị REJECT ở §3.2 | Hai stack trùng (Next 16.3.6, React 19, Tailwind v4, lucide 1.48 — VERIFIED `package.json`); thay repo sẽ mất viewer, contracts và 137 test đang xanh |
 | D-02 | Công cụ dev | Giữ **ESLint + Vitest + tsc** của repo; không chuyển sang Biome/Husky của donor. Code copy từ donor được format lại theo ESLint của repo | AGENTS.md: dùng scripts có thật trong `frontend/package.json`; tránh hai bộ lint |
-| D-03 | Dependency mới | Chỉ thêm thứ component cần: `radix-ui`, `sonner`, `@tanstack/react-table` (Jobs), `next-themes` chỉ nếu bật light mode. **Không** thêm `zustand` (state bền vững thuộc backend — AGENTS §8), không thêm chart khi chưa có số liệu thật. Ghi nguồn donor (MIT) + thư viện vào `frontend/THIRD_PARTY_NOTICES.md` | Kiểm license trước khi thêm (tất cả MIT); ít dependency nhất |
+| D-03 | Dependency mới | Chỉ thêm thứ component cần: `radix-ui`, `sonner`, `@tanstack/react-table` (Jobs), `next-themes` chỉ nếu bật light mode. **Không** thêm `zustand` (state bền vững thuộc backend — AGENTS §8), không thêm chart khi chưa có số liệu thật. Ghi nguồn donor (MIT) + thư viện vào `THIRD_PARTY_NOTICES.md` (phần Frontend) | Kiểm license trước khi thêm (tất cả MIT); ít dependency nhất |
 | D-04 | Theme | **Sửa 30/09/2026 (owner):** dùng lại theme sáng **beige + cam** (paper `#f5efe6`, ink `#2b2520`, CTA ember `#c2551f`/`#e8743b`, viewport 3D nâu than `#1f1b17`), một theme; token shadcn lấy cùng giá trị. Palette tối §7.5 (Deep Navy/Jade) đã thử ở P1 và bị owner bỏ vì không đẹp. Không có theme switcher/preset playground | Owner đánh giá trực quan sau khi xem bản tối; viewport vẫn nền tối nên 3DGS đọc tốt |
 | D-05 | Dữ liệu minh họa trong app thật | **Cấm** hiển thị số liệu, verdict, report, replay hay approval minh họa như kết quả. Màn chưa có runtime dùng trạng thái `Chưa khả dụng` + lý do + điều kiện mở. Kịch bản handoff §10 dùng cho test/QA với fixture có nhãn, không cho người dùng | Ranh giới §2.3, AGENTS §1.5 |
 | D-06 | Jobs (S04) lấy dữ liệu từ đâu | Giai đoạn đầu dựng từ `GET /api/v1/scenes` (scene + job mới nhất) và `GET /jobs/{id}/progress`; không thêm API tổng hợp mới cho tới khi cần lọc/phân trang phía server | Tránh đổi contract backend chỉ vì UI |
@@ -734,11 +734,11 @@ Sau P6: palette đổi lại beige/cam (D-04 sửa), tách `ScenePage` theo tab,
 
 ### 13.2 Studio v2 theo pipeline v2 (ADR 0007)
 
-[ADR 0007](docs/decisions/0007-object-centric-hybrid-usd-pipeline.md) đổi Studio thành editor
+[ADR 0007](decisions/0007-object-centric-hybrid-usd-pipeline.md) đổi Studio thành editor
 **scene theo vật**. S06/S08 mở rộng: mỗi vật một khối Gaussian riêng; gizmo dịch/xoay/co giãn;
 ẩn/xoá hiện nền đã vá (vùng vá suy đoán có nhãn); thêm vật từ thư viện asset Isaac hoặc hình khối;
 đổi nhãn (gợi ý, người dùng xác nhận) và khối lượng/vật liệu; hoàn tác; đo khoảng cách. S09 xuất
-USD lai. Thiết kế chi tiết màn làm ở pha C của [plan pipeline v2](docs/plans/active/2026-09-30-pipeline-v2.md).
+USD lai. Thiết kế chi tiết màn làm ở pha C của [plan pipeline v2](plans/active/2026-09-30-pipeline-v2.md).
 
 ### 13.3 Increment UX được user giao implement (01/10/2026)
 
@@ -760,44 +760,44 @@ USD lai. Thiết kế chi tiết màn làm ở pha C của [plan pipeline v2](do
   Profile (summary chỉ đọc), auth v2 (field/layout). REJECT search/theme/account
   switcher giả, billing/CRM/analytics và backend profile chưa có API.
 
-Implementation và evidence ghi trong [execution plan](docs/plans/active/2026-10-01-studio-ux-restructure.md).
+Implementation và evidence ghi trong [execution plan](plans/active/2026-10-01-studio-ux-restructure.md).
 Browser visual QA và real worker/GPU/roles vẫn là cổng riêng; static/fixture proof
 không thay thế các cổng đó. Increment này không thay scope Studio v2 của Claude.
 
 <!-- Nguồn repository có đường dẫn thật; đường dẫn donor chỉ phục vụ tra cứu reference, không phải ownership mới. -->
-[prd]: docs/PRD.md
-[contract]: docs/execution/TEAM_EXECUTION_CONTRACT.md
-[adr2]: docs/decisions/0002-studio-mvp-video-to-3dgs.md
-[adr3]: docs/decisions/0003-cloud-architecture-roles-and-browser-budget.md
-[adr4]: docs/decisions/0004-input-kinds-and-routing.md
-[adr5]: docs/decisions/0005-stage-results-viewer.md
-[rec06]: docs/execution/tracks/ex_rec/tasks/REC-06.md
-[r-home]: frontend/src/features/studio/ScenesHome.tsx
-[r-new]: frontend/src/features/studio/NewSceneFlow.tsx
-[r-input]: frontend/src/features/studio/inputKinds.ts
-[r-import]: frontend/src/features/studio/ImportScenePage.tsx
-[r-import-api]: src/api/studio/imports.py
-[r-create]: src/api/studio/scenes.py
-[r-upload]: frontend/src/features/studio/UploadDropzone.tsx
-[r-settings]: frontend/src/features/studio/ProcessingSettings.tsx
-[r-scene]: frontend/src/features/studio/ScenePage.tsx
-[r-metric]: frontend/src/features/studio/MetricConfirmView.tsx
-[r-sample]: frontend/src/features/studio/SampleFlow.tsx
-[r-editor]: frontend/src/features/studio/EditorFrame.tsx
-[r-header]: frontend/src/features/studio/StudioHeader.tsx
-[r-workspace]: frontend/src/features/studio/SceneWorkspace.tsx
-[r-timeline]: frontend/src/features/studio/PipelineTimeline.tsx
-[r-status]: frontend/src/features/studio/sceneStatus.ts
-[r-viewer]: frontend/src/features/viewer/ViewerPanel.tsx
-[r-auth]: frontend/src/features/studio/auth/AuthForms.tsx
-[r-team]: frontend/src/features/studio/auth/TeamPage.tsx
-[r-review]: frontend/src/features/review/ReviewLifecycle.tsx
-[r-release]: frontend/src/features/review/ReleasePanel.tsx
+[prd]: PRD.md
+[contract]: execution/TEAM_EXECUTION_CONTRACT.md
+[adr2]: decisions/0002-studio-mvp-video-to-3dgs.md
+[adr3]: decisions/0003-cloud-architecture-roles-and-browser-budget.md
+[adr4]: decisions/0004-input-kinds-and-routing.md
+[adr5]: decisions/0005-stage-results-viewer.md
+[rec06]: execution/tracks/ex_rec/tasks/REC-06.md
+[r-home]: ../frontend/src/features/studio/ScenesHome.tsx
+[r-new]: ../frontend/src/features/studio/NewSceneFlow.tsx
+[r-input]: ../frontend/src/features/studio/inputKinds.ts
+[r-import]: ../frontend/src/features/studio/ImportScenePage.tsx
+[r-import-api]: ../src/api/studio/imports.py
+[r-create]: ../src/api/studio/scenes.py
+[r-upload]: ../frontend/src/features/studio/UploadDropzone.tsx
+[r-settings]: ../frontend/src/features/studio/ProcessingSettings.tsx
+[r-scene]: ../frontend/src/features/studio/ScenePage.tsx
+[r-metric]: ../frontend/src/features/studio/MetricConfirmView.tsx
+[r-sample]: ../frontend/src/features/studio/SampleFlow.tsx
+[r-editor]: ../frontend/src/features/studio/EditorFrame.tsx
+[r-header]: ../frontend/src/features/studio/StudioHeader.tsx
+[r-workspace]: ../frontend/src/features/studio/SceneWorkspace.tsx
+[r-timeline]: ../frontend/src/features/studio/PipelineTimeline.tsx
+[r-status]: ../frontend/src/features/studio/sceneStatus.ts
+[r-viewer]: ../frontend/src/features/viewer/ViewerPanel.tsx
+[r-auth]: ../frontend/src/features/studio/auth/AuthForms.tsx
+[r-team]: ../frontend/src/features/studio/auth/TeamPage.tsx
+[r-review]: ../frontend/src/features/review/ReviewLifecycle.tsx
+[r-release]: ../frontend/src/features/review/ReleasePanel.tsx
 [r-validation]: <frontend/src/app/(legacy)/jobs/[jobId]/validation/page.tsx>
-[r-api]: src/api/routes_product.py
-[r-routes]: frontend/next.config.ts
-[r-styles]: frontend/src/app/globals.css
-[r-states]: frontend/src/components/states.tsx
+[r-api]: ../src/api/routes_product.py
+[r-routes]: ../frontend/next.config.ts
+[r-styles]: ../frontend/src/app/globals.css
+[r-states]: ../frontend/src/components/states.tsx
 [d-image]: /home/lqaq/PROJECT/AI20K/private/UI-UX/next-shadcn-admin-dashboard/media/default/default-dark.webp
 [d-nav]: /home/lqaq/PROJECT/AI20K/private/UI-UX/next-shadcn-admin-dashboard/src/navigation/sidebar/sidebar-items.ts
 [d-shell]: </home/lqaq/PROJECT/AI20K/private/UI-UX/next-shadcn-admin-dashboard/src/app/(main)/dashboard/layout.tsx>

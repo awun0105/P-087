@@ -30,7 +30,7 @@ function duration(start: string, end: string | null, now: number): string {
 }
 
 /**
- * Jobs (S04): lần xử lý mới nhất của mỗi scene, dựng từ `/scenes` (PRODUCT.md D-06). Chỉ đọc —
+ * Jobs (S04): lần xử lý mới nhất của mỗi scene, dựng từ `/scenes` (STUDIO_UX_SPEC.md D-06). Chỉ đọc —
  * huỷ/thử lại nằm trong màn tiến trình của scene; không có kéo đổi trạng thái hay xếp lịch.
  */
 export function JobsPage() {

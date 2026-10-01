@@ -138,11 +138,11 @@ từng màn**. Mỗi lát triển khai sau này phải có diff và proof riêng
 - **Authority:** [PRD](../../PRD.md) sở hữu hành vi và acceptance; [shared contract](../../execution/TEAM_EXECUTION_CONTRACT.md)
   sở hữu revision, validation/review/release; [Architecture](../../../ARCHITECTURE.md)
   đặt frontend tại `frontend/` và backend state tại FastAPI/shared artifacts.
-- **Design handoff hiện hành:** [PRODUCT.md](../../../PRODUCT.md) §3.1, §7.1–7.4,
+- **Design handoff hiện hành:** [STUDIO_UX_SPEC.md](../../STUDIO_UX_SPEC.md) §3.1, §7.1–7.4,
   D-04–D-12 và §13; [EX-PRODUCT track](../../execution/tracks/ex_product/TRACK.md).
   Baseline chọn global `Scenes · Jobs · Nhóm` và bốn vùng bên trong scene;
   video mẫu ở Scenes/Scene mới. Request tiếp theo của user thêm Tổng quan `/`
-  và tách thư viện `/scenes`; quyết định đã lưu tại PRODUCT.md §3.1/S01.
+  và tách thư viện `/scenes`; quyết định đã lưu tại STUDIO_UX_SPEC.md §3.1/S01.
 - **Source đã inspect (VERIFIED, `bdc4b92`):** route group `frontend/src/app/(studio)/`;
   `features/shell/{AppShell,Breadcrumbs}.tsx`; `features/studio/{ScenesHome,JobsPage,NewSceneFlow,UploadDropzone,ScenePage,SceneWorkspace}.tsx`;
   `features/studio/scene/{ProgressTab,StudioTab,ReviewTab,ResultsTab}.tsx`;
@@ -236,9 +236,9 @@ active/collapsed item của donor, dùng nav Real2Sim theo bảng dưới.
 | Quản lý | `Nhóm` | Chỉ Reviewer; account/quota/logout ở footer. |
 
 Không thêm global `Objects`, `Simulation`, `Datasets`, `Releases`: các vùng này
-thuộc scene hoặc chưa có nguồn dữ liệu độc lập (PRODUCT.md §3.1/D-07). Nếu owner
+thuộc scene hoặc chưa có nguồn dữ liệu độc lập (STUDIO_UX_SPEC.md §3.1/D-07). Nếu owner
 muốn `Mẫu`, `File đã tải` hay `Thư viện asset` thành trang riêng, phải chốt **đối
-tượng người dùng, route, nguồn dữ liệu, quyền và CTA** trong `PRODUCT.md` trước;
+tượng người dùng, route, nguồn dữ liệu, quyền và CTA** trong `STUDIO_UX_SPEC.md` trước;
 `Thư viện asset` còn phụ thuộc pipeline v2. Đây là decision gate, không phải hạng
 mục triển khai mặc định.
 
@@ -306,7 +306,7 @@ kiểm tra lại trên browser, không coi screenshot donor là bằng chứng u
 
 | Lát | Phạm vi file dự kiến | Phụ thuộc/điểm dừng | Reviewable outcome |
 | --- | --- | --- | --- |
-| 0. Chốt IA | Plan này + `PRODUCT.md` **nếu owner chốt thay đổi** | Review bảng ADAPT/REJECT donor, route/role và trang toàn cục; chưa sửa code trước khi chốt phần thay đổi behavior. | Sơ đồ route/role, wireflow ba nhánh, transition table, baseline ảnh desktop/hẹp và bảng đối chiếu donor→Real2Sim. |
+| 0. Chốt IA | Plan này + `STUDIO_UX_SPEC.md` **nếu owner chốt thay đổi** | Review bảng ADAPT/REJECT donor, route/role và trang toàn cục; chưa sửa code trước khi chốt phần thay đổi behavior. | Sơ đồ route/role, wireflow ba nhánh, transition table, baseline ảnh desktop/hẹp và bảng đối chiếu donor→Real2Sim. |
 | 1. Shell | `features/shell/`, layout và focused tests | Dùng shell đã port từ donor; không cần contract v2; giữ sidebar collapse và auth. | Nhóm nav, breadcrumb/active state, CTA, lý do khi không có quyền. |
 | 2. Ba cửa vào | `NewSceneFlow`, `UploadDropzone`, `SampleFlow`, `ImportScenePage` và focused tests | File Manager chỉ là pattern chọn/list, không là upload API; giữ API upload/import/sample và privacy policy. | Mỗi nhánh có tên, step, trạng thái và exit rõ; upload không lẫn sample. |
 | 3. Ngữ cảnh scene | `ScenePage`, `scene/state`, `ProgressTab`, `Breadcrumbs` và focused tests | Tham khảo nhóm trạng thái của Infrastructure; giữ poll/preview và viewer lifecycle; chỉ thêm URL view state nếu Back/Forward đúng. | Mở từ Scenes/Jobs về cùng scene, biết revision và việc tiếp theo. |
@@ -324,7 +324,7 @@ progress, quyết định, failed attempts và proof sau từng lát.
 - **Claude đang sửa backend:** làm trong worktree/branch riêng; không sửa
   `src/models/contracts/`, API hoặc plan pipeline v2. Khi tới Studio v2, đọc
   contract được chốt, migration và artifact mới rồi mới thiết kế adapter UI.
-- **IA mới vượt `PRODUCT.md` §3.1/D-07:** dừng phần trang mới; owner chốt quyết định
+- **IA mới vượt `STUDIO_UX_SPEC.md` §3.1/D-07:** dừng phần trang mới; owner chốt quyết định
   nhỏ nhất và cập nhật source authority trước khi code. Phần nhóm nhãn/luồng trong
   IA hiện hành có thể làm độc lập.
 - **Mất ngữ cảnh viewer khi đổi tab/URL:** giữ cơ chế lazy load + giữ Studio sống;
@@ -337,7 +337,7 @@ progress, quyết định, failed attempts và proof sau từng lát.
 
 ## Progress
 
-- [x] 2026-10-01: đọc harness, workflow, PRD/contract/architecture, PRODUCT.md,
+- [x] 2026-10-01: đọc harness, workflow, PRD/contract/architecture, STUDIO_UX_SPEC.md,
   track và source UI liên quan; xác nhận checkout chính có backend diff chưa commit.
 - [x] 2026-10-01: tạo `feat/studio-ux-restructure` từ `develop` `bdc4b92` trong
   worktree riêng; chưa sửa frontend/backend.
@@ -384,7 +384,7 @@ progress, quyết định, failed attempts và proof sau từng lát.
 - Tests mới: `studio-navigation`, `studio-input-flows`, `studio-results`;
   bổ sung `review-panel` và `object-review`. Canvas/worker được mock ở test UI.
 - Không sửa backend, shared schema, dependency manifest/lock, vendor editor
-  hoặc legacy. PRODUCT.md §3.1/S01 được cập nhật theo request tách Tổng quan/Scenes
+  hoặc legacy. STUDIO_UX_SPEC.md §3.1/S01 được cập nhật theo request tách Tổng quan/Scenes
   của user; không đổi contract, acceptance hoặc task đã khóa. Không commit/push/merge.
 
 ### Wireflow và state cần kiểm trong lượt triển khai
@@ -415,7 +415,7 @@ mới và stale candidate phải có lời nhắc/hành động hoặc lý do kh
   **Được thay thế bởi request kế tiếp:** CTA nằm trong `/scenes`, sidebar không
   còn CTA; `/` trở thành Tổng quan như quyết định sau đây.
 - 2026-10-01 (user decision): tách Tổng quan `/` và Scenes `/scenes`; giữ một
-  nút `Scene mới` trong Scenes. Cập nhật `PRODUCT.md` §3.1/S01 để lưu quyết định
+  nút `Scene mới` trong Scenes. Cập nhật `STUDIO_UX_SPEC.md` §3.1/S01 để lưu quyết định
   này; không đổi task ID, API/schema, acceptance runtime hoặc legacy scaffold.
 - 2026-10-01 (contract inspection): preflight FAIL không publish SceneIR mới;
   báo cáo trả `scene_revision` của enrichment tạm, còn `source_scene_revision`
@@ -493,13 +493,13 @@ role gates hiện có proof component, chưa có browser auth proof.
 
 - Task / outcome: theo request user, `/` giới thiệu/tổng hợp; `/scenes` quản lý
   scene; nút tạo scene chỉ trong thư viện, không lặp shell/empty state.
-- Authority anchors: request user 2026-10-01; PRODUCT.md §3.1/S01; PRD §6;
+- Authority anchors: request user 2026-10-01; STUDIO_UX_SPEC.md §3.1/S01; PRD §6;
   ARCHITECTURE frontend ownership; giữ shared revision/role/artifact contracts.
 - Dependencies/current state: Next 16.3.6/React 19.2.8; API `listScenes` và
   `listImports` hiện có; QA riêng chưa có scene/worker/sample thật.
 - Inputs/outputs: API scene/import summaries → số liệu đọc được, loading/error
   có retry; không tạo metrics/reports giả hay API/state backend mới.
-- Owned paths: frontend overview/route/shell/library/backlinks/tests, PRODUCT.md
+- Owned paths: frontend overview/route/shell/library/backlinks/tests, STUDIO_UX_SPEC.md
   phần IA được user đổi và plan này. Không sửa backend/vendor/legacy/locked tasks.
 - Proof required: active route/breadcrumb, không fetch private data cho guest,
   số liệu API/partial failure, một CTA đúng vị trí, lint/typecheck/test/build/HTTP.
@@ -543,7 +543,7 @@ role gates hiện có proof component, chưa có browser auth proof.
   link quay lại từ import/editor/404 đều trỏ đúng thư viện `/scenes`.
 - Paths: route `/`, route mới `/scenes`, `OverviewPage`, shell, `ScenesHome`,
   `JobsPage`, `ImportScenePage`, `scene/StudioTab`, `not-found`, hai bộ test
-  navigation/overview; PRODUCT.md §3.1/S01 và plan này. Không sửa backend,
+  navigation/overview; STUDIO_UX_SPEC.md §3.1/S01 và plan này. Không sửa backend,
   shared contracts, dependency manifest/lock hoặc vendor.
 - `npm test -- tests/studio-overview.test.tsx tests/studio-navigation.test.tsx`:
   exit 0, 2 files/10 tests. Proof positive/negative: API totals, guest no private
@@ -602,7 +602,7 @@ role gates hiện có proof component, chưa có browser auth proof.
 
 - Outcome: stage đã xong trên timeline có selection/details/Inspect; route
   chung với tám nội dung, viewport/tool riêng cho 5–8, quay lại đúng Tiến trình.
-- Authority: request user; PRODUCT.md §3.1 decision mới; PRD §6; Architecture
+- Authority: request user; STUDIO_UX_SPEC.md §3.1 decision mới; PRD §6; Architecture
   EX-PRODUCT; shared artifact identity/revision; PRODUCT-06/09 và ADR 0005.
 - Dependencies: progress, job/project, artifact allow-list, stage-views và
   công cụ viewer/editor/metric/object hiện có. Stage-views không có view cho

@@ -4,22 +4,22 @@ Bạn đang làm việc trên project **Real2Sim Studio — Warehouse / Indoor A
 
 Mục tiêu của context này là giúp bạn định hướng project trước khi nhận coding task.
 Đây là **onboarding overview, không phải source of truth**: bắt đầu từ
-[`AGENTS.md`](./AGENTS.md) và [`docs/WORKFLOW.md`](./docs/WORKFLOW.md); lấy P0
-scope/acceptance từ [`docs/PRD.md`](./docs/PRD.md), shared schemas từ
-[`TEAM_EXECUTION_CONTRACT.md`](./docs/execution/TEAM_EXECUTION_CONTRACT.md),
-placement từ [`ARCHITECTURE.md`](./ARCHITECTURE.md), task ID/scope từ
-[`TRACK_IMPLEMENTATION_GUIDE.md`](./docs/execution/TRACK_IMPLEMENTATION_GUIDE.md).
+[`AGENTS.md`](../AGENTS.md) và [`docs/WORKFLOW.md`](WORKFLOW.md); lấy P0
+scope/acceptance từ [`docs/PRD.md`](PRD.md), shared schemas từ
+[`TEAM_EXECUTION_CONTRACT.md`](execution/TEAM_EXECUTION_CONTRACT.md),
+placement từ [`ARCHITECTURE.md`](../ARCHITECTURE.md), task ID/scope từ
+[`TRACK_IMPLEMENTATION_GUIDE.md`](execution/TRACK_IMPLEMENTATION_GUIDE.md).
 Nếu summary này khác authority, dùng authority và báo drift; không lấy ngày sửa
 file hoặc ví dụ ở đây làm lý do đổi contract.
 
 Không tự ý implement feature chỉ dựa trên context này. Với mỗi task sau đó, phải tuân thủ scope cụ thể của task và các tài liệu trong repository.
 
 **Cập nhật 30/09/2026:** đích của pipeline đổi theo
-[ADR 0007](./docs/decisions/0007-object-centric-hybrid-usd-pipeline.md) — scene theo vật chỉnh sửa
+[ADR 0007](decisions/0007-object-centric-hybrid-usd-pipeline.md) — scene theo vật chỉnh sửa
 được, xuất USD lai (Gaussian để hiển thị, collider để va chạm) cho Isaac Sim; PRD v1.16 kéo vá nền,
 gợi ý nhãn, thay asset vào phạm vi. Một số mô tả công nghệ bên dưới (vd. SAMPro3D-trên-hộp,
 collider hộp) là đường tạm hiện tại, không phải đích cuối. Code nghiên cứu phi thương mại được
-dùng lại theo [ADR 0008](./docs/decisions/0008-research-code-license-policy.md).
+dùng lại theo [ADR 0008](decisions/0008-research-code-license-policy.md).
 
 ---
 
@@ -178,7 +178,7 @@ Project contract mới là source of truth.
 # 5. System/research reference strategy
 
 Repo map và mức ưu tiên hiện hành nằm ở
-[`INTEGRATION_PLAYBOOK.md` §7.1](./docs/execution/INTEGRATION_PLAYBOOK.md).
+[`INTEGRATION_PLAYBOOK.md` §7.1](execution/INTEGRATION_PLAYBOOK.md).
 `VR-Robo`, `R2G` và `Re3Sim` là Tier-0 system references; `OpenReal2Sim`
 là research/architecture reference cho background completion và
 reconstruction→simulation patterns, **không** phải repo bắt buộc phải chạy đầu
@@ -1218,7 +1218,7 @@ Không thay root Dockerfile chỉ vì muốn structure đẹp hơn.
 
 # 27. Additive Real2Sim placement (summary)
 
-Summary để định hướng; [`ARCHITECTURE.md`](./ARCHITECTURE.md) là authority cho
+Summary để định hướng; [`ARCHITECTURE.md`](../ARCHITECTURE.md) là authority cho
 placement và ownership. Tree dưới đây là mục tiêu, không chứng minh từng module
 đã được implement:
 

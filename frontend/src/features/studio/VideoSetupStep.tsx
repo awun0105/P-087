@@ -74,7 +74,7 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
   const blocked = processing.evaluation?.blocking ?? false;
   const selectedUpload = uploads?.find((upload) => upload.upload_id === selected) ?? null;
   const supported = selectedUpload === null || canCreateScene(selectedUpload);
-  // Lý do khoá nút, hiện ngay cạnh CTA (PRODUCT.md §7.4) thay vì nút xám không giải thích.
+  // Lý do khoá nút, hiện ngay cạnh CTA (STUDIO_UX_SPEC.md §7.4) thay vì nút xám không giải thích.
   const missing = [
     !selected && "Chưa chọn video",
     selected && !supported && "Máy chủ nhận diện file này không phải video",
