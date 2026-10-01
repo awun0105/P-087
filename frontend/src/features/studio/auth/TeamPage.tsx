@@ -1,7 +1,11 @@
 "use client";
 
+import { notifySuccess } from "@/components/studio/feedback";
+
+import { errorMessage } from "@/lib/ui-error";
+
 import { Check, Copy, Loader2, Ticket, Users } from "lucide-react";
-import Link from "next/link";
+import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useCallback, useEffect, useState } from "react";
 
 import { Badge, Button, Card, EmptyState, Notice, buttonVariants } from "@/components/studio/primitives";
@@ -13,13 +17,14 @@ export function TeamPage() {
   const { me } = useAuth();
   const [users, setUsers] = useState<PublicUser[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pendingUsers, setPendingUsers] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     const result = await listUsers();
     if (result.ok) {
       setUsers(result.data);
       setError(null);
-    } else setError(result.error.detail);
+    } else setError(errorMessage(result.error));
   }, []);
 
   useEffect(() => {
@@ -57,12 +62,16 @@ export function TeamPage() {
 
   const self = me.user;
   async function change(user: PublicUser, changes: Partial<Pick<PublicUser, "role" | "active" | "daily_job_quota">>) {
+    if (pendingUsers.includes(user.user_id)) return;
+    setPendingUsers((old) => [...old, user.user_id]);
+    setError(null);
     try {
       await updateUser(user.user_id, changes);
       await load();
+      notifySuccess("Đã cập nhật thành viên.");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Không cập nhật được");
-    }
+      setError(errorMessage(cause, "Không cập nhật được"));
+    } finally { setPendingUsers((old) => old.filter((id) => id !== user.user_id)); }
   }
 
   return (
@@ -103,7 +112,7 @@ export function TeamPage() {
                     <select
                       aria-label={`Role của ${user.display_name}`}
                       value={user.role}
-                      disabled={isSelf}
+                      disabled={isSelf || pendingUsers.includes(user.user_id)}
                       onChange={(event) => void change(user, { role: event.target.value as Role })}
                       className="h-9 rounded-lg border border-line-strong bg-paper-raised px-2"
                     >
@@ -133,7 +142,7 @@ export function TeamPage() {
                     {isSelf ? (
                       <Badge tone="sage">Đang hoạt động</Badge>
                     ) : (
-                      <Button variant="ghost" size="sm" onClick={() => void change(user, { active: !user.active })}>
+                      <Button variant="ghost" size="sm" disabled={pendingUsers.includes(user.user_id)} onClick={() => void change(user, { active: !user.active })}>
                         {user.active ? "Khóa" : "Mở khóa"}
                       </Button>
                     )}
@@ -158,16 +167,20 @@ function InviteCard() {
   const [role, setRole] = useState<Role>("editor");
   const [invite, setInvite] = useState<{ code: string; role: Role; expires_at: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function generate() {
+    if (busy) return;
+    setBusy(true);
     setError(null);
     setCopied(false);
     try {
       setInvite(await createInvite(role));
+      notifySuccess("Đã tạo mã mời.");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Không tạo được mã mời");
-    }
+      setError(errorMessage(cause, "Không tạo được mã mời"));
+    } finally { setBusy(false); }
   }
 
   const link = invite ? `${window.location.origin}/register?code=${encodeURIComponent(invite.code)}` : "";
@@ -187,7 +200,7 @@ function InviteCard() {
           <option value="editor">Editor — dựng và chỉnh scene</option>
           <option value="reviewer">Reviewer — thêm quyền duyệt</option>
         </select>
-        <Button onClick={() => void generate()}>Tạo mã mời</Button>
+        <Button disabled={busy} onClick={() => void generate()}>{busy ? "Đang tạo…" : "Tạo mã mời"}</Button>
       </div>
       {error && (
         <Notice tone="rust" className="mt-4">
@@ -206,7 +219,7 @@ function InviteCard() {
               variant="secondary"
               size="sm"
               onClick={() => {
-                void navigator.clipboard.writeText(link).then(() => setCopied(true));
+                void Promise.resolve().then(() => navigator.clipboard.writeText(link)).then(() => { setCopied(true); setError(null); }).catch(() => setError("Không sao chép được. Hãy chọn và chép link hiển thị."));
               }}
             >
               {copied ? <Check aria-hidden /> : <Copy aria-hidden />}

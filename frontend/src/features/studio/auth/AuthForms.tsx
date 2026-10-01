@@ -1,30 +1,46 @@
 "use client";
 
+import { errorMessage } from "@/lib/ui-error";
+
 import { Box, Loader2, LogIn, UserPlus } from "lucide-react";
-import Link from "next/link";
+import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useId, useState } from "react";
+import { cloneElement, isValidElement, useId, useState, type ComponentProps } from "react";
 
 import { Input } from "@/components/shadcn/input";
 import { Label } from "@/components/shadcn/label";
 import { Button, Notice } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
+import { notifySuccess, FieldError } from "@/components/studio/feedback";
 import { login, register } from "@/lib/api/auth";
 
 const INPUT = "mt-1.5 h-10";
 
 /** Chỉ cho quay lại đường dẫn nội bộ (tránh open redirect qua `?next=`). */
 export function safeNext(value: string | null): string {
-  return value && value.startsWith("/") && !value.startsWith("//") ? value : "/";
+  if (!value || !value.startsWith("/") || value.startsWith("//") || /[\\\u0000-\u001f]/.test(value)) return "/";
+  return value;
 }
 
-function Field({ id, label, children }: { id: string; label: string; children: React.ReactNode }) {
+function Field({ id, label, children, error }: { id: string; label: string; children: React.ReactNode; error?: string }) {
   return (
     <div>
       <Label htmlFor={id}>{label}</Label>
-      {children}
+      {isValidElement<ComponentProps<"input">>(children) ? cloneElement(children, { "aria-invalid": !!error, "aria-describedby": error ? id + "-error" : undefined }) : children}
+      <FieldError id={id + "-error"} message={error ?? null} />
     </div>
   );
+}
+
+function useFieldValidation() {
+  const [fieldErrors, setErrors] = useState<Record<string, string>>({});
+  function validate(event: React.SyntheticEvent<HTMLFormElement>) {
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement)) return;
+    const message = input.validity.valid ? "" : input.validity.typeMismatch ? "Nhập email đúng định dạng." : input.validity.tooShort ? "Mật khẩu cần ít nhất 10 ký tự." : "Điền thông tin bắt buộc.";
+    setErrors((old) => ({ ...old, [input.id]: message }));
+  }
+  return { fieldErrors, validate };
 }
 
 const STEPS = [
@@ -54,7 +70,7 @@ function Shell({ title, lead, children }: { title: string; lead: string; childre
           <div className="mt-8">{children}</div>
           <p className="mt-8 text-sm text-ink-muted">
             Chưa có tài khoản?{" "}
-            <Link href="/new" className="font-medium text-ember-strong underline-offset-4 hover:underline">
+            <Link href="/new?source=sample" className="font-medium text-ember-strong underline-offset-4 hover:underline">
               Thử với video mẫu
             </Link>{" "}
             — không cần đăng nhập.
@@ -83,6 +99,7 @@ export function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const { refresh } = useAuth();
+  const { fieldErrors, validate } = useFieldValidation();
   const ids = { email: useId(), password: useId() };
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -91,25 +108,27 @@ export function LoginForm() {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
       await login(email, password);
       await refresh();
+      notifySuccess("Đã đăng nhập.");
       router.push(safeNext(params.get("next")));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Đăng nhập thất bại");
+      setError(errorMessage(cause, "Đăng nhập thất bại"));
       setBusy(false);
     }
   }
 
   return (
     <Shell title="Đăng nhập" lead="Dành cho thành viên nhóm. Khách vẫn có thể thử video mẫu mà không cần tài khoản.">
-      <form onSubmit={submit} className="space-y-4">
-        <Field id={ids.email} label="Email">
+      <form onInvalid={validate} onBlurCapture={validate} onChangeCapture={validate} onSubmit={submit} className="space-y-4">
+        <Field error={fieldErrors[ids.email]} id={ids.email} label="Email">
           <Input id={ids.email} type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} className={INPUT} />
         </Field>
-        <Field id={ids.password} label="Mật khẩu">
+        <Field error={fieldErrors[ids.password]} id={ids.password} label="Mật khẩu">
           <Input id={ids.password} type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} className={INPUT} />
         </Field>
         {error && <Notice tone="rust">{error}</Notice>}
@@ -119,7 +138,7 @@ export function LoginForm() {
         </Button>
         <p className="text-center text-sm text-ink-muted">
           Có mã mời?{" "}
-          <Link href="/register" className="font-medium text-ember-strong underline-offset-4 hover:underline">
+          <Link href={"/register?next=" + encodeURIComponent(safeNext(params.get("next")))} className="font-medium text-ember-strong underline-offset-4 hover:underline">
             Tạo tài khoản
           </Link>
         </p>
@@ -132,6 +151,7 @@ export function RegisterForm() {
   const router = useRouter();
   const params = useSearchParams();
   const { refresh } = useAuth();
+  const { fieldErrors, validate } = useFieldValidation();
   const ids = { code: useId(), name: useId(), email: useId(), password: useId() };
   const [code, setCode] = useState(params.get("code") ?? "");
   const [name, setName] = useState("");
@@ -142,31 +162,33 @@ export function RegisterForm() {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
       await register({ invite_code: code.trim(), email, display_name: name.trim(), password });
       await refresh();
-      router.push("/");
+      notifySuccess("Đã tạo tài khoản và đăng nhập.");
+      router.push(safeNext(params.get("next")));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Không tạo được tài khoản");
+      setError(errorMessage(cause, "Không tạo được tài khoản"));
       setBusy(false);
     }
   }
 
   return (
     <Shell title="Tạo tài khoản" lead="Nhập mã mời do Reviewer của nhóm gửi. Mã chỉ dùng được một lần.">
-      <form onSubmit={submit} className="space-y-4">
-        <Field id={ids.code} label="Mã mời">
+      <form onInvalid={validate} onBlurCapture={validate} onChangeCapture={validate} onSubmit={submit} className="space-y-4">
+        <Field error={fieldErrors[ids.code]} id={ids.code} label="Mã mời">
           <Input id={ids.code} required value={code} onChange={(e) => setCode(e.target.value)} className={INPUT} autoComplete="off" />
         </Field>
-        <Field id={ids.name} label="Tên hiển thị">
+        <Field error={fieldErrors[ids.name]} id={ids.name} label="Tên hiển thị">
           <Input id={ids.name} required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} className={INPUT} autoComplete="name" />
         </Field>
-        <Field id={ids.email} label="Email">
+        <Field error={fieldErrors[ids.email]} id={ids.email} label="Email">
           <Input id={ids.email} type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className={INPUT} autoComplete="email" />
         </Field>
-        <Field id={ids.password} label="Mật khẩu (ít nhất 10 ký tự)">
+        <Field error={fieldErrors[ids.password]} id={ids.password} label="Mật khẩu (ít nhất 10 ký tự)">
           <Input id={ids.password} type="password" minLength={10} required value={password} onChange={(e) => setPassword(e.target.value)} className={INPUT} autoComplete="new-password" />
         </Field>
         {error && <Notice tone="rust">{error}</Notice>}
@@ -174,6 +196,7 @@ export function RegisterForm() {
           {busy ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden /> : <UserPlus aria-hidden />}
           Tạo tài khoản
         </Button>
+        <p className="text-center text-sm text-ink-muted">Đã có tài khoản? <Link href={"/login?next=" + encodeURIComponent(safeNext(params.get("next")))} className="font-medium text-ember-strong hover:underline">Đăng nhập</Link></p>
       </form>
     </Shell>
   );

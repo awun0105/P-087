@@ -1,5 +1,9 @@
 "use client";
 
+import { notifySuccess } from "@/components/studio/feedback";
+
+import { errorMessage } from "@/lib/ui-error";
+
 import { FileVideo, Upload, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
@@ -52,6 +56,7 @@ export function UploadDropzone({ kind, onUploaded }: { kind: "video" | "gaussian
         setUploading(false);
         setVerifying(false);
         setProgress(1);
+        notifySuccess("Đã tải lên và kiểm tra file.");
         onUploaded(record);
       },
       (cause: unknown) => {
@@ -60,7 +65,7 @@ export function UploadDropzone({ kind, onUploaded }: { kind: "video" | "gaussian
         setUploading(false);
         setVerifying(false);
         setProgress(null);
-        setError(cause instanceof Error ? cause.message : "Tải lên thất bại");
+        setError(errorMessage(cause, "Tải lên thất bại"));
       },
     );
   }

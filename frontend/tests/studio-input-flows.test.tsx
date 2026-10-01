@@ -23,11 +23,28 @@ const gaussian: UploadRecord = { ...video, upload_id: "ply-1", original_name: "w
 
 beforeEach(() => {
   vi.clearAllMocks();
+  sessionStorage.clear();
+  history.replaceState({}, "", "/new");
   vi.mocked(listUploads).mockResolvedValue({ ok: true, data: { uploads: [video, gaussian] } });
   vi.mocked(listSamples).mockResolvedValue({ ok: true, data: { samples: [] } });
 });
 
 describe("ba cửa vào", () => {
+  it("remount giữ form; chuyển video bỏ xác nhận của đầu vào cũ", async () => {
+    const second = { ...video, upload_id: "video-2", original_name: "room.mp4" };
+    vi.mocked(listUploads).mockResolvedValue({ ok: true, data: { uploads: [video, second] } });
+    const view = render(<VideoSetupStep preselect="video-1" onBack={vi.fn()} />);
+    fireEvent.change(await screen.findByLabelText("Tên scene"), { target: { value: "Tên nháp" } });
+    screen.getAllByRole("checkbox").forEach((checkbox) => fireEvent.click(checkbox));
+    await waitFor(() => expect(sessionStorage.getItem("studio:draft:video:v1:local")).toContain("Tên nháp"));
+    view.unmount();
+    render(<VideoSetupStep preselect={null} onBack={vi.fn()} />);
+    expect(await screen.findByLabelText("Tên scene")).toHaveValue("Tên nháp");
+    screen.getAllByRole("checkbox").forEach((checkbox) => expect(checkbox).toBeChecked());
+    fireEvent.click(screen.getAllByRole("radio")[1]);
+    screen.getAllByRole("checkbox").forEach((checkbox) => expect(checkbox).not.toBeChecked());
+    expect(screen.getByLabelText("Tên scene")).toHaveValue("room");
+  });
   it("chỉ form đúng nhánh xuất hiện; thử mẫu không tạo job/import", async () => {
     render(<NewSceneFlow />);
     expect(screen.getByRole("button", { name: /Dựng từ video/ })).toBeInTheDocument();

@@ -156,6 +156,13 @@ sau khi hoàn tất; kết quả xác nhận đã publish chỉ đọc, không x
 Thiếu lớp xem/API phải giải thích rõ, chỉ đọc metadata/download đúng allow-list,
 không tạo report/số đo/kết quả giả để lấp trang.
 
+**DECISION (user, 01/10/2026 — cải thiện UX tiếp theo):** S05 chỉ giữ timeline,
+thời gian, lỗi và lịch sử attempt; viewer lớn mở tại route stage. So sánh các
+phương án hệ mét đặt trong workspace stage 6. CTA bước tiếp theo đối chiếu
+published state/revision; không suy ra thiếu gói khi request đọc gói bị lỗi.
+Trang `/account` hiện thông tin `/auth/me` chỉ đọc và đăng xuất; chế độ local
+không bịa profile. Backend profile/password không thuộc đợt frontend này.
+
 “Tạo project” được đáp ứng trong thao tác `Scene mới`: nhập tên một lần và đi thẳng vào chọn dữ liệu. Kết quả của luồng video là project scene được tạo cùng job đầu tiên; màn tiếp nhận cần xác nhận tên project và lần xử lý, giữ danh tính project trong phần chi tiết của Scenes/Jobs. Không bỏ ngữ cảnh project, cũng không bổ sung phân cấp organization → workspace → project → nhiều scene khi chưa có nhu cầu được chốt. [Current creation flow][r-new], [project + job được tạo][r-create]. Import 3DGS riêng không được trình bày như đã tạo job reconstruction.
 
 ### 3.2 Giữ, đổi hay bỏ phần nào của dashboard base
@@ -383,7 +390,7 @@ S01–S14 là mã **màn hình UX**, không phải task ID. Một số là tab/p
 ### S05 — Tiến trình của scene
 
 - **Purpose / entry:** sau tạo job hoặc từ S01/S04; giữ ngữ cảnh một scene.
-- **Required information:** project/scene đã được tạo, trạng thái tổng, stage, attempt, elapsed/update time; timeline; panel xem kết quả stage đã có; cảnh báo/lỗi. Với nhánh LiDAR đã chuẩn bị, hiển thị nguồn dữ liệu, cùng scene/traversal và bước căn chỉnh/geometry contribution theo §4.
+- **Required information:** project/scene đã được tạo, trạng thái tổng, stage, attempt, elapsed/update time; timeline và lịch sử attempt; link mở view kết quả của stage hoàn tất; cảnh báo/lỗi. Với nhánh LiDAR đã chuẩn bị, workspace stage hiển thị nguồn dữ liệu, cùng scene/traversal và bước căn chỉnh/geometry contribution theo §4.
 - **Primary action:** theo trạng thái: chờ tự động; `Xác nhận tỉ lệ`; `Xác nhận object`; `Mở Studio`; `Thử lại` nếu được phép.
 - **Secondary actions:** hủy có confirmation; xem input, chi tiết lỗi/log; trở về Scenes.
 - **States:** queued, running, waiting-for-user, succeeded, failed, cancelled; pending cancel/retry; mất kết nối; stage chưa có artifact/artifact không đọc được.
@@ -651,7 +658,7 @@ Mỗi quyết định chỉ chốt cách **UI thể hiện**; không đổi PRD,
 | D-04 | Theme | **Sửa 30/09/2026 (owner):** dùng lại theme sáng **beige + cam** (paper `#f5efe6`, ink `#2b2520`, CTA ember `#c2551f`/`#e8743b`, viewport 3D nâu than `#1f1b17`), một theme; token shadcn lấy cùng giá trị. Palette tối §7.5 (Deep Navy/Jade) đã thử ở P1 và bị owner bỏ vì không đẹp. Không có theme switcher/preset playground | Owner đánh giá trực quan sau khi xem bản tối; viewport vẫn nền tối nên 3DGS đọc tốt |
 | D-05 | Dữ liệu minh họa trong app thật | **Cấm** hiển thị số liệu, verdict, report, replay hay approval minh họa như kết quả. Màn chưa có runtime dùng trạng thái `Chưa khả dụng` + lý do + điều kiện mở. Kịch bản handoff §10 dùng cho test/QA với fixture có nhãn, không cho người dùng | Ranh giới §2.3, AGENTS §1.5 |
 | D-06 | Jobs (S04) lấy dữ liệu từ đâu | Giai đoạn đầu dựng từ `GET /api/v1/scenes` (scene + job mới nhất) và `GET /jobs/{id}/progress`; không thêm API tổng hợp mới cho tới khi cần lọc/phân trang phía server | Tránh đổi contract backend chỉ vì UI |
-| D-07 | Vị trí các tính năng hiện có trong IA scene | Tab trong scene: **Tiến trình** (timeline + kết quả từng bước + so sánh 3 hướng khi có dữ liệu LiDAR demo), **Studio** (viewport 3DGS hệ mét / editor Gaussian; panel Tỉ lệ mét S07, panel Vật thể S08, inspector), **Kiểm tra & duyệt** (gói mô phỏng + preflight; Isaac/review "Chưa khả dụng"), **Kết quả** (xuất bản làm việc, tải gói mô phỏng; release "Chưa khả dụng") | Khớp IA §3.1; không tạo trang global mới |
+| D-07 | Vị trí các tính năng hiện có trong IA scene | Tab trong scene: **Tiến trình** (timeline, attempt, lỗi, mở view từng giai đoạn; so sánh hệ mét ở workspace stage 6), **Studio** (viewport 3DGS hệ mét / editor Gaussian; panel Tỉ lệ mét S07, panel Vật thể S08, inspector), **Kiểm tra & duyệt** (gói mô phỏng + preflight; report/duyệt chỉ hiện khi backend có bằng chứng), **Kết quả** (xuất bản làm việc, gói candidate, release theo đúng revision/checksum) | Khớp IA §3.1 và quyết định 01/10; không tạo trang global mới |
 | D-08 | Studio dùng viewer nào | Mặc định **viewer hệ mét PlayCanvas** (3DGS + lớp collision/hộp) khi scene đã có metric; trước metric dùng viewer preview SfM. Editor SuperSplat (iframe) là chế độ `Chỉnh Gaussian` riêng trong Studio, có nhãn export-only | Hai loại edit khác nghĩa (Q5); viewer hệ mét là nơi thao tác SceneObject |
 | D-09 | S09 Start–Goal / footprint | **Chưa làm** cho tới khi SIM-06 có path validation; S09 hiện chỉ "Tạo gói mô phỏng" + preflight thật. Footprint mặc định OTTO (0,461/0,308 m) chỉ hiện khi validation dùng nó | Không tự điền robot/kích thước không có nguồn (§S09) |
 | D-10 | UI legacy (`/projects`, `/jobs/...`) | Giữ nguyên sau cờ `LEGACY_UI=1` trong lúc refactor; component tái dùng được (review, release, validation) chuyển sang UI mới khi backend sẵn sàng. **Xoá legacy chỉ khi owner đồng ý** sau khi UI mới đạt parity | Quy ước owner: không xoá code còn dùng được |
@@ -715,6 +722,30 @@ Sau P6: palette đổi lại beige/cam (D-04 sửa), tách `ScenePage` theo tab,
 ẩn/xoá hiện nền đã vá (vùng vá suy đoán có nhãn); thêm vật từ thư viện asset Isaac hoặc hình khối;
 đổi nhãn (gợi ý, người dùng xác nhận) và khối lượng/vật liệu; hoàn tác; đo khoảng cách. S09 xuất
 USD lai. Thiết kế chi tiết màn làm ở pha C của [plan pipeline v2](docs/plans/active/2026-09-30-pipeline-v2.md).
+
+### 13.3 Increment UX được user giao implement (01/10/2026)
+
+- Success toast chỉ sau mutation được API xác nhận; autosave dùng trạng thái revision.
+  Lỗi field cạnh input, lỗi request tại panel có đường phục hồi; lời giải thích dài
+  trong HelpDetails. Không toast từ polling hoặc khẳng định download đã hoàn tất.
+- Tab/mode scene, view stage 6, bước/nguồn wizard và tìm/lọc/view/sort/page của
+  danh sách nằm trong URL. Đổi tab giữ Studio đã mount; đổi mode/rời Gaussian
+  dirty cần xác nhận. UNKNOWN từ iframe cũng cần xác nhận, không coi như sạch.
+- Draft form trong sessionStorage của tab, tách theo actor và loại input; chỉ
+  field allow-list, không File/password/token. Đối chiếu upload/schema processing
+  khi phục hồi; đổi video reset consent, logout xoá draft. Điểm đo tạm trong phiên
+  scene tách theo job/attempt/artifact; không trở thành state backend.
+- Scenes phân trang 12, Jobs 20 ở frontend trên danh sách API hiện có. Bộ lọc
+  trạng thái áp dụng video jobs; import và mẫu là các nhóm có chức năng riêng.
+- Account chỉ đọc; đăng nhập/đăng ký giữ `next` nội bộ tới đúng bước đang làm.
+  Mẫu đi thẳng nhánh sample, có nhãn kết quả đã xử lý sẵn và không tạo job.
+- ADAPT donor File Manager (toolbar/grid/list/pagination), Tasks (bảng status),
+  Profile (summary chỉ đọc), auth v2 (field/layout). REJECT search/theme/account
+  switcher giả, billing/CRM/analytics và backend profile chưa có API.
+
+Implementation và evidence ghi trong [execution plan](docs/plans/active/2026-10-01-studio-ux-restructure.md).
+Browser visual QA và real worker/GPU/roles vẫn là cổng riêng; static/fixture proof
+không thay thế các cổng đó. Increment này không thay scope Studio v2 của Claude.
 
 <!-- Nguồn repository có đường dẫn thật; đường dẫn donor chỉ phục vụ tra cứu reference, không phải ownership mới. -->
 [prd]: docs/PRD.md

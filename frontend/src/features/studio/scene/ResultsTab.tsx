@@ -1,5 +1,7 @@
 "use client";
 
+import { errorMessage } from "@/lib/ui-error";
+
 import { ClipboardCheck, Download, Pencil, ShieldCheck } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
@@ -13,6 +15,8 @@ interface ResultState {
   pkg: SimulationPackageView | null;
   review: ReviewStateView | null;
   errors: string[];
+  packageError: boolean;
+  reviewError: boolean;
   revision: string | null;
 }
 
@@ -39,8 +43,9 @@ export function ResultsTab({ jobId, preview, revision, onOpenGaussian, onOpenRev
       if (controller.signal.aborted) return;
       // Chưa có SceneIR là 404 hợp lệ; lỗi mạng/server phải có đường thử lại.
       const errors = [pkgResult, reviewResult, revisionResult].flatMap((item) => item.status === "rejected" && !(item.reason instanceof ApiError && item.reason.status === 404)
-        ? [item.reason instanceof Error ? item.reason.message : "Không đọc được kết quả"] : []);
-      setResult({ key, pkg: pkgResult.status === "fulfilled" ? pkgResult.value : null, review: reviewResult.status === "fulfilled" ? reviewResult.value : null, revision: revisionResult.status === "fulfilled" ? revisionResult.value : null, errors });
+        ? [errorMessage(item.reason, "Không đọc được kết quả")] : []);
+      const unreadable = (item: PromiseSettledResult<unknown>) => item.status === "rejected" && !(item.reason instanceof ApiError && item.reason.status === 404);
+      setResult({ key, pkg: pkgResult.status === "fulfilled" ? pkgResult.value : null, review: reviewResult.status === "fulfilled" ? reviewResult.value : null, revision: revisionResult.status === "fulfilled" ? revisionResult.value : null, errors, packageError: unreadable(pkgResult), reviewError: unreadable(reviewResult) });
     });
     return () => controller.abort();
   }, [jobId, key, revision]);
@@ -76,7 +81,7 @@ export function ResultsTab({ jobId, preview, revision, onOpenGaussian, onOpenRev
       <ResultCard
         icon={<ClipboardCheck aria-hidden />}
         title="Gói mô phỏng (candidate)"
-        badge={pkg?.package_ref ? <Badge tone={packageCurrent ? "ochre" : "rust"}>{pkg.scene_revision} · {packageCurrent ? `preflight ${pkg.preflight.blocking_result}` : currentRevision ? "revision cũ" : "chưa đối chiếu revision"}</Badge> : <Badge tone="neutral">{loading ? "Đang kiểm tra" : "Chưa có"}</Badge>}
+        badge={pkg?.package_ref ? <Badge tone={packageCurrent ? "ochre" : "rust"}>{pkg.scene_revision} · {packageCurrent ? `preflight ${pkg.preflight.blocking_result}` : currentRevision ? "revision cũ" : "chưa đối chiếu revision"}</Badge> : <Badge tone="neutral">{loading ? "Đang kiểm tra" : result?.packageError ? "Chưa đọc được gói" : "Chưa có"}</Badge>}
         body="OpenUSD (scene.usda + collider môi trường) của đúng revision hiện tại, để chạy kiểm tra trong Isaac Sim. Không phải bản phát hành."
         detail={pkg ? `Tạo lúc ${new Date(pkg.created_at).toLocaleString("vi-VN")}${packageCurrent ? "" : currentRevision ? " · Scene đã đổi; cần tạo lại gói." : " · Cần đọc revision scene trước khi tải."}` : "Tạo gói trong Kiểm tra & duyệt sau khi xác nhận vật thể."}
         action={
@@ -90,7 +95,7 @@ export function ResultsTab({ jobId, preview, revision, onOpenGaussian, onOpenRev
       <ResultCard
         icon={<ShieldCheck aria-hidden />}
         title="Bản phát hành"
-        badge={released ? <Badge tone="sage">{review.record.scene_revision} · đã phát hành</Badge> : <Badge tone="neutral">{loading ? "Đang kiểm tra" : "Chưa phát hành"}</Badge>}
+        badge={released ? <Badge tone="sage">{review.record.scene_revision} · đã phát hành</Badge> : <Badge tone="neutral">{loading ? "Đang kiểm tra" : result?.reviewError ? "Chưa đọc được trạng thái" : "Chưa phát hành"}</Badge>}
         body={
           released
             ? "Gói đã validation và được Reviewer duyệt, kèm release manifest, báo cáo validation và bản ghi duyệt."

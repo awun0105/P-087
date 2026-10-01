@@ -1,10 +1,13 @@
 "use client";
 
+import { errorMessage } from "@/lib/ui-error";
+
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 
 import { Button, Notice } from "@/components/studio/primitives";
 import { EditorFrame } from "@/features/studio/EditorFrame";
+import { useUrlState } from "@/features/studio/useUrlState";
 import { progressHref } from "@/features/studio/inspection";
 import { getPreview, jobArtifactContentUrl } from "@/lib/api/endpoints";
 import type { StageId } from "@/lib/contracts/api";
@@ -16,7 +19,9 @@ const Comparison = dynamic(() => import("@/features/studio/ModeComparisonView").
 
 /** Workspace scene chung cho 5–8; công cụ hiện có giữ nguyên hệ tọa độ và biên lưu. */
 export function StageSceneWorkspace({ jobId, stageId, title }: { jobId: string; stageId: StageId; title: string }) {
-  const [mode, setMode] = useState<"scene" | "comparison">("scene");
+  const { params, update } = useUrlState();
+  const mode = params.get("view") === "comparison" ? "comparison" : "scene";
+  const setMode = (view: string) => update({ view });
   return <div className="flex h-full min-h-[24rem] flex-col">
     <div className="flex flex-wrap items-center gap-3 border-b border-line bg-paper-raised px-4 py-2">
       <p className="min-w-0 flex-1 text-xs text-ink-muted">{stageId === "ST-VISUAL-RECON" ? "Gaussian gốc · chưa quy đổi mét · chỉnh trong phiên, File › Export PLY/SOG"
@@ -43,7 +48,7 @@ function GaussianWorkspace({ jobId, title }: { jobId: string; title: string }) {
     void getPreview(jobId).then((result) => {
       if (!alive) return;
       if (result.ok) { setPreview(result.data); setError(null); }
-      else setError(result.error.detail);
+      else setError(errorMessage(result.error));
     });
     return () => { alive = false; };
   }, [jobId, reload]);

@@ -1,5 +1,9 @@
 "use client";
 
+import { notifySuccess } from "@/components/studio/feedback";
+
+import { errorMessage } from "@/lib/ui-error";
+
 import { Ban, Check, CheckCircle2, Circle, Download, Loader2, ShieldCheck, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -55,7 +59,7 @@ export function ReviewPanel({ jobId, sceneRevision }: { jobId: string; sceneRevi
         setConfirming(false);
       },
       (cause: unknown) => {
-        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Không đọc được trạng thái duyệt");
+        if (!controller.signal.aborted) setError(errorMessage(cause, "Không đọc được trạng thái duyệt"));
       },
     );
     return () => controller.abort();
@@ -65,10 +69,12 @@ export function ReviewPanel({ jobId, sceneRevision }: { jobId: string; sceneRevi
     setBusy(true);
     setError(null);
     try {
-      setState(await action());
+      const next = await action();
+      setState(next);
+      notifySuccess(next.record.status === "RELEASED" ? "Đã phát hành gói được duyệt." : next.record.status === "REJECTED" ? "Đã gửi yêu cầu sửa." : "Đã ghi nhận thao tác duyệt; xem trạng thái mới trong panel.");
       setConfirming(false);
     } catch (cause: unknown) {
-      setError(cause instanceof Error ? cause.message : "Thao tác thất bại");
+      setError(errorMessage(cause, "Thao tác thất bại"));
     } finally {
       setBusy(false);
     }

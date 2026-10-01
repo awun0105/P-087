@@ -1,5 +1,7 @@
 "use client";
 
+import { errorMessage } from "@/lib/ui-error";
+
 import { ArrowLeft, Film, Loader2, Play } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useState } from "react";
@@ -11,6 +13,10 @@ import { useProcessingForm } from "@/features/studio/useProcessingForm";
 import { createSceneFromUpload, listUploads } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import type { DataOrigin, UploadRecord } from "@/lib/contracts/studio";
+import { useAuth } from "@/features/studio/AuthProvider";
+import { useSessionDraft } from "@/features/studio/drafts";
+import { EMPTY_SETUP, parseSetupDraft, type SetupDraft } from "@/features/studio/setup-draft";
+import { notifySuccess, FieldError } from "@/components/studio/feedback";
 import { formatBytes } from "@/lib/format";
 
 const DATE = new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" });
@@ -25,40 +31,46 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
   const router = useRouter();
   const ids = { name: useId(), owner: useId(), origin: useId(), purpose: useId() };
   const [uploads, setUploads] = useState<UploadRecord[] | null>(null);
-  const [selected, setSelected] = useState<string | null>(preselect);
-  const [name, setName] = useState("");
-  const [owner, setOwner] = useState("");
-  const [origin, setOrigin] = useState<DataOrigin>("self_collected_no_pii");
-  const [purpose, setPurpose] = useState("Dựng scene mô phỏng kho cho robot AMR");
-  const [rights, setRights] = useState(false);
-  const [anonymized, setAnonymized] = useState(false);
-  const [retention, setRetention] = useState(false);
+  const { me } = useAuth();
+  const actor = me?.user?.user_id ?? (me?.auth_required ? "guest" : "local");
+  const { value: draft, setValue: setDraft, ready: draftReady, clear } = useSessionDraft("video:v1:" + actor, { ...EMPTY_SETUP, selected: preselect }, parseSetupDraft);
+  const { selected, name, owner, origin, purpose, rights, anonymized, retention } = draft;
+  const field = <K extends keyof SetupDraft,>(key: K) => (value: SetupDraft[K]) => setDraft((current) => ({ ...current, [key]: value }));
+  const setName = field("name"), setOwner = field("owner"), setOrigin = field("origin"), setPurpose = field("purpose");
+  const setRights = field("rights"), setAnonymized = field("anonymized"), setRetention = field("retention");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     const result = await listUploads();
     if (!result.ok) {
-      setError(result.error.detail);
+      setError(errorMessage(result.error));
       return;
     }
     const videos = result.data.uploads.filter(canCreateScene);
     setUploads(videos);
     setError(null);
-    const first = videos.find((item) => item.upload_id === preselect) ?? videos[0];
-    setSelected((current) => videos.some((item) => item.upload_id === current) ? current : first?.upload_id ?? null);
-    if (first) {
-      setName((current) => current || first.original_name.replace(/\.[^.]+$/, ""));
-    }
-  }, [preselect]);
+    setDraft((current) => {
+      const first = videos.find((item) => item.upload_id === preselect) ?? videos.find((item) => item.upload_id === current.selected) ?? videos[0];
+      const changed = current.selected !== (first?.upload_id ?? null);
+      return { ...current, selected: first?.upload_id ?? null, name: changed || !current.name ? first?.original_name.replace(/\.[^.]+$/, "") ?? "" : current.name,
+        ...(changed ? { rights: false, anonymized: false, retention: false } : {}) };
+    });
+  }, [preselect, setDraft]);
 
   useEffect(() => {
     // Nạp danh sách một lần khi vào bước; setState xảy ra sau await nên không đồng bộ trong effect.
+    if (!draftReady) return;
     const timer = setTimeout(() => void load(), 0);
     return () => clearTimeout(timer);
-  }, [load]);
+  }, [load, draftReady]);
 
-  const processing = useProcessingForm(true);
+  const processing = useProcessingForm(true, draft.processing, draftReady);
+  useEffect(() => {
+    if (!draftReady || !processing.values) return;
+    setDraft((current) => JSON.stringify(current.processing) === JSON.stringify(processing.values) ? current : { ...current, processing: processing.values });
+  }, [draftReady, processing.values, setDraft]);
   const blocked = processing.evaluation?.blocking ?? false;
   const selectedUpload = uploads?.find((upload) => upload.upload_id === selected) ?? null;
   const supported = selectedUpload === null || canCreateScene(selectedUpload);
@@ -71,12 +83,15 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
     !purpose.trim() && "Chưa khai mục đích sử dụng",
     !(rights && anonymized && retention) && "Chưa tick đủ 3 xác nhận dữ liệu",
     blocked && "Thông số vượt cấu hình máy xử lý",
+    processing.loading && "Đang tải cấu hình xử lý",
+    processing.evaluating && "Đang kiểm tra thông số xử lý",
+    processing.options && processing.error && "Chưa kiểm tra được thông số; thử lại hoặc đổi preset",
   ].filter((reason): reason is string => Boolean(reason));
   const ready = missing.length === 0;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!selected || !ready) return;
+    if (!selected || !ready || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -88,13 +103,16 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
         anonymization_confirmed: anonymized,
         retention_acknowledged: retention,
       }, processing.values ?? undefined);
+      clear();
+      notifySuccess("Đã tạo job. Bạn có thể theo dõi tại Tiến trình.");
       router.push(`/scenes/${encodeURIComponent(created.job.job_id)}`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Không tạo được scene");
+      setError(errorMessage(cause, "Không tạo được scene"));
       setSubmitting(false);
     }
   }
 
+  if (!draftReady) return <p role="status" className="text-sm text-ink-muted">Đang khôi phục form…</p>;
   if (uploads === null && error) {
     return <Notice tone="rust">Không tải được danh sách video: {error} <Button size="sm" variant="secondary" onClick={() => void load()}>Thử lại</Button></Notice>;
   }
@@ -141,8 +159,7 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
                 value={upload.upload_id}
                 checked={selected === upload.upload_id}
                 onChange={() => {
-                  setSelected(upload.upload_id);
-                  setName(upload.original_name.replace(/\.[^.]+$/, ""));
+                  setDraft((current) => ({ ...current, selected: upload.upload_id, name: upload.original_name.replace(/\.[^.]+$/, ""), rights: false, anonymized: false, retention: false }));
                 }}
                 className="size-4 accent-ember-strong"
               />
@@ -163,12 +180,15 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
           </label>
           <input
             id={ids.name}
+            aria-invalid={touched.name && !name.trim()} aria-describedby={touched.name && !name.trim() ? ids.name + "-error" : undefined}
+            onBlur={() => setTouched((old) => ({ ...old, name: true }))}
             value={name}
             onChange={(event) => setName(event.target.value)}
             maxLength={200}
             required
             className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3 text-sm outline-none focus-visible:border-ember focus-visible:ring-3 focus-visible:ring-ember/30"
           />
+          <FieldError id={ids.name + "-error"} message={touched.name && !name.trim() ? "Nhập tên scene." : null} />
         </div>
       </Card>
 
@@ -184,6 +204,8 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
           <Field id={ids.owner} label="Người/đơn vị sở hữu dữ liệu">
             <input
               id={ids.owner}
+              onBlur={() => setTouched((old) => ({ ...old, owner: true }))}
+              aria-invalid={touched.owner && !owner.trim()} aria-describedby={touched.owner && !owner.trim() ? ids.owner + "-error" : undefined}
               value={owner}
               onChange={(event) => setOwner(event.target.value)}
               maxLength={200}
@@ -191,6 +213,7 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
               placeholder="Ví dụ: Nhóm P-087"
               className={INPUT}
             />
+            <FieldError id={ids.owner + "-error"} message={touched.owner && !owner.trim() ? "Nhập người hoặc đơn vị sở hữu dữ liệu." : null} />
           </Field>
           <Field id={ids.origin} label="Nguồn dữ liệu">
             <select id={ids.origin} value={origin} onChange={(event) => setOrigin(event.target.value as DataOrigin)} className={INPUT}>
@@ -202,7 +225,8 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
             </select>
           </Field>
           <Field id={ids.purpose} label="Mục đích sử dụng" className="sm:col-span-2">
-            <input id={ids.purpose} value={purpose} onChange={(event) => setPurpose(event.target.value)} maxLength={500} required className={INPUT} />
+            <input id={ids.purpose} value={purpose} onChange={(event) => setPurpose(event.target.value)} onBlur={() => setTouched((old) => ({ ...old, purpose: true }))} aria-invalid={touched.purpose && !purpose.trim()} aria-describedby={touched.purpose && !purpose.trim() ? ids.purpose + "-error" : undefined} maxLength={500} required className={INPUT} />
+            <FieldError id={ids.purpose + "-error"} message={touched.purpose && !purpose.trim() ? "Nhập mục đích sử dụng dữ liệu." : null} />
           </Field>
         </div>
         <div className="mt-5 space-y-3">
@@ -230,9 +254,11 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
           onChange={processing.setValue}
           note={processing.options.resource_note}
         />
-      ) : processing.error ? (
-        <Notice tone="ochre">Không tải được bảng thông số: {processing.error}. Scene sẽ dùng cấu hình mặc định của máy chủ.</Notice>
       ) : null}
+      {processing.error && <Notice tone={processing.options ? "rust" : "ochre"}>
+        {processing.error} {!processing.options && "Có thể tiếp tục với cấu hình mặc định của máy chủ."}
+        <Button size="sm" variant="secondary" onClick={processing.retry}>Thử lại thông số</Button>
+      </Notice>}
 
       {blocked && (
         <Notice tone="rust">
@@ -266,6 +292,7 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
         )}
       </Card>
 
+      <p className="text-xs text-ink-muted">Form được giữ trong phiên tab. <button type="button" className="font-medium text-ember-strong" onClick={() => { clear(); setDraft({ ...EMPTY_SETUP, selected }); processing.applyPreset("minimum_quality"); }}>Bỏ bản nháp</button></p>
       <div className="flex items-center justify-between gap-3">
         <Button variant="ghost" onClick={onBack}>
           <ArrowLeft aria-hidden />

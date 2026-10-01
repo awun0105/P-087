@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { createContext, Fragment, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import {
@@ -44,6 +44,7 @@ export function crumbsFor(pathname: string, detailTitle?: string | null): Crumb[
   if (pathname.startsWith("/new")) return [scenes, { label: "Scene mới" }];
   if (pathname.startsWith("/jobs")) return [{ label: "Jobs" }];
   if (pathname.startsWith("/team")) return [{ label: "Nhóm" }];
+  if (pathname === "/account") return [{ label: "Tài khoản" }];
   if (pathname.startsWith("/imports/")) return [scenes, { label: detailTitle ?? "Scene import" }];
   if (pathname.startsWith("/samples/")) return [scenes, { label: detailTitle ?? "Video mẫu" }];
   const inspection = /^\/scenes\/([^/]+)\/stages\/([^/]+)$/.exec(pathname);

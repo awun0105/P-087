@@ -34,6 +34,7 @@ describe("kết quả đúng revision", () => {
     vi.mocked(getSimulationPackage).mockRejectedValueOnce(new Error("Mất kết nối"));
     render(<ResultsTab jobId="job-a" preview={preview} revision="rev-1" />);
     expect(await screen.findByText(/Mất kết nối/)).toBeInTheDocument();
+    expect(screen.getByText("Chưa đọc được gói")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Tải bản phát hành" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Thử lại" }));
     expect(await screen.findByRole("link", { name: "Tải gói" })).toBeInTheDocument();
@@ -41,7 +42,7 @@ describe("kết quả đúng revision", () => {
   it("chưa biết revision thì phải đọc SceneIR; lỗi đọc không được mở download", async () => {
     vi.mocked(getJobScene).mockResolvedValue({ ok: false, error: new ApiError(503, "Không đọc được revision") });
     render(<ResultsTab jobId="job-a" preview={preview} revision={null} />);
-    expect(await screen.findByText(/Không đọc được revision/)).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Máy chủ chưa xử lý được yêu cầu");
     expect(getJobScene).toHaveBeenCalled();
     expect(screen.queryByRole("link", { name: "Tải gói" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Tải bản phát hành" })).toBeNull();

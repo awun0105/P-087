@@ -1,5 +1,8 @@
 "use client";
 
+
+import { errorMessage } from "@/lib/ui-error";
+
 import dynamic from "next/dynamic";
 import { Check, Crosshair, Eye, EyeOff, Loader2, Pencil, Plus, X } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
@@ -85,7 +88,7 @@ export function ObjectReviewView({
         setError(null);
         onSaveState?.({ status: "saved", revision: result.data.scene.scene_revision });
       } else if (result.error.status === 404) setMissing(true);
-      else setError(result.error.detail);
+      else setError(errorMessage(result.error));
     });
     return () => controller.abort();
   }, [jobId, reload, stale]); // eslint-disable-line react-hooks/exhaustive-deps -- onSaveState chỉ là kênh báo lên header
@@ -139,9 +142,7 @@ export function ObjectReviewView({
       const conflict = cause instanceof ApiError && cause.status === 409;
       const message = conflict
         ? "Scene đã đổi ở lượt khác. Tải bản mới rồi thao tác lại."
-        : cause instanceof Error
-          ? cause.message
-          : "Thao tác thất bại";
+        : errorMessage(cause, "Thao tác thất bại");
       setError(message);
       onSaveState?.({
         status: "error",

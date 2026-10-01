@@ -1,12 +1,14 @@
 "use client";
 
-import { Info } from "lucide-react";
+import { errorMessage } from "@/lib/ui-error";
+
 import { useEffect, useState } from "react";
 
 import { Badge, Button, Card, Notice } from "@/components/studio/primitives";
 import type { SaveState } from "@/features/studio/ObjectReviewView";
 import { ReviewPanel } from "@/features/studio/ReviewPanel";
 import { SimulationPackagePanel } from "@/features/studio/SimulationPackagePanel";
+import { HelpDetails } from "@/components/studio/feedback";
 import { getJobScene } from "@/lib/api/studio";
 
 export function ReviewTab({ jobId, onSaveState }: { jobId: string; onSaveState: (state: SaveState) => void }) {
@@ -22,7 +24,7 @@ export function ReviewTab({ jobId, onSaveState }: { jobId: string; onSaveState: 
         setRevision(result.data.scene.scene_revision);
         // Tạo gói ghi một revision mới (collider vật đã xác nhận) → header phải theo revision đó.
         onSaveState({ status: "saved", revision: result.data.scene.scene_revision });
-      } else setError(result.error.detail);
+      } else setError(errorMessage(result.error));
     });
     return () => controller.abort();
   }, [jobId, reload, onSaveState]);
@@ -40,10 +42,10 @@ export function ReviewTab({ jobId, onSaveState }: { jobId: string; onSaveState: 
       <Card className="overflow-hidden">
         <ReviewPanel jobId={jobId} sceneRevision={revision} />
       </Card>
-      <Notice icon={<Info aria-hidden />} className="lg:col-span-2">
+      <div className="lg:col-span-2"><HelpDetails title="Gói và quyết định duyệt gắn với revision nào?">
         Mọi thay đổi vật thể sau khi tạo gói sẽ sinh revision mới: gói, báo cáo validation và quyết định duyệt cũ không còn áp dụng
         cho revision đó.
-      </Notice>
+      </HelpDetails></div>
     </div>
   );
 }

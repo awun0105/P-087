@@ -1,5 +1,7 @@
 "use client";
 
+import { errorMessage } from "@/lib/ui-error";
+
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -19,7 +21,7 @@ export function SampleScene({ sampleId }: { sampleId: string }) {
     void getSample(sampleId).then((result) => {
       if (!alive) return;
       if (result.ok) setDemo(result.data);
-      else setError(result.error.detail);
+      else setError(errorMessage(result.error));
     });
     return () => {
       alive = false;

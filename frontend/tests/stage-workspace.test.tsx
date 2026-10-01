@@ -38,7 +38,7 @@ describe("workspace scene 5–8", () => {
   it("5 lỗi preview không mount editor, có thể thử lại", async () => {
     vi.mocked(getPreview).mockResolvedValueOnce({ ok: false, error: new ApiError(503, "Preview tạm thời không có") });
     render(<StageSceneWorkspace jobId="job-a" stageId="ST-VISUAL-RECON" title="Kho A" />);
-    expect(await screen.findByText(/Preview tạm thời không có/)).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Máy chủ chưa xử lý được yêu cầu");
     expect(screen.queryByLabelText("5. 3DGS: Kho A")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Thử lại" }));
     expect(await screen.findByLabelText("5. 3DGS: Kho A")).toBeInTheDocument();

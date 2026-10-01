@@ -2,7 +2,7 @@
 
 import { AlertTriangle, Check, Circle, CircleSlash, Hand, Loader2 } from "lucide-react";
 import { useState } from "react";
-import Link from "next/link";
+import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 
 import { ProgressBar } from "@/components/studio/primitives";
 import { MVP_STAGES, type StageMeta } from "@/features/studio/stages";
@@ -117,7 +117,7 @@ export function PipelineTimeline({
                   {jobId && state === "succeeded" && selected === meta.id && (
                     <div id={`stage-detail-${meta.id}`} className="mt-3 space-y-2 border-t border-line pt-3">
                       <p className="text-sm leading-relaxed text-ink-muted">{meta.description}</p>
-                      <Link href={inspectHref(jobId, meta.id)} className="inline-flex rounded-lg bg-ember-soft px-3 py-2 text-sm font-medium text-ember-strong focus-visible:outline-2 focus-visible:outline-ember">Inspect giai đoạn</Link>
+                      <Link href={inspectHref(jobId, meta.id)} className="inline-flex rounded-lg bg-ember-soft px-3 py-2 text-sm font-medium text-ember-strong focus-visible:outline-2 focus-visible:outline-ember">Xem giai đoạn</Link>
                     </div>
                   )}
                 </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowLeft, ArrowRight, Box, CheckCircle2, Clapperboard, Clock, FastForward, Info, Play } from "lucide-react";
-import Link from "next/link";
+import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 
 import { Badge, Button, Card, Notice, buttonVariants } from "@/components/studio/primitives";
 import { DemoShowcase } from "@/features/studio/DemoShowcase";

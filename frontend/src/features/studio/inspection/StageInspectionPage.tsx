@@ -1,8 +1,10 @@
 "use client";
 
+import { errorMessage } from "@/lib/ui-error";
+
 import { ArrowLeft, Download, Info, Loader2 } from "lucide-react";
 import dynamic from "next/dynamic";
-import Link from "next/link";
+import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useEffect, useState } from "react";
 
 import { Badge, Button, Card, Notice } from "@/components/studio/primitives";
@@ -42,7 +44,7 @@ export function StageInspectionPage({ jobId, stageId }: { jobId: string; stageId
       try {
         const progress = await getJobProgress(jobId, controller.signal);
         if (controller.signal.aborted) return;
-        if (!progress.ok) { setError(progress.error.detail); return; }
+        if (!progress.ok) { setError(errorMessage(progress.error)); return; }
         if (!canInspect(progress.data, meta.id)) {
           setSnapshot({ progress: progress.data, job: null, project: null, artifacts: [], warnings: [] });
           return;
@@ -56,10 +58,10 @@ export function StageInspectionPage({ jobId, stageId }: { jobId: string; stageId
           progress: progress.data, job: job.ok ? job.data : null,
           project: project?.ok ? project.data : null,
           artifacts: artifacts.ok ? artifacts.data.artifacts.filter((ref) => ref.producer_stage === meta.id || uris.has(ref.artifact_uri)) : [],
-          warnings: [!job.ok && `Job: ${job.error.detail}`, project && !project.ok && `Project: ${project.error.detail}`, !artifacts.ok && `Artifact: ${artifacts.error.detail}`].filter((value): value is string => Boolean(value)),
+          warnings: [!job.ok && `Job: ${errorMessage(job.error)}`, project && !project.ok && `Project: ${errorMessage(project.error)}`, !artifacts.ok && `Artifact: ${errorMessage(artifacts.error)}`].filter((value): value is string => Boolean(value)),
         });
       } catch (cause) {
-        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Không tải được giai đoạn");
+        if (!controller.signal.aborted) setError(errorMessage(cause, "Không tải được giai đoạn"));
       }
     })();
     return () => controller.abort();

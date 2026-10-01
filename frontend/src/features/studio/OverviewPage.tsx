@@ -1,7 +1,9 @@
 "use client";
 
+import { errorMessage } from "@/lib/ui-error";
+
 import { ArrowRight, Box, Clapperboard, Film, Layers3, ListChecks, ShieldCheck, Workflow } from "lucide-react";
-import Link from "next/link";
+import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useCallback, useState, type ReactNode } from "react";
 
 import { Badge, Button, Card, Notice, buttonVariants } from "@/components/studio/primitives";
@@ -92,7 +94,7 @@ function WorkSummary() {
     setSnapshot((previous) => ({
       scenes: scenes.ok ? scenes.data.scenes : previous?.scenes ?? null,
       imports: imports.ok ? imports.data.imports : previous?.imports ?? null,
-      errors: [!scenes.ok && `Scenes: ${scenes.error.detail}`, !imports.ok && `Import: ${imports.error.detail}`].filter((value): value is string => Boolean(value)),
+      errors: [!scenes.ok && `Scenes: ${errorMessage(scenes.error)}`, !imports.ok && `Import: ${errorMessage(imports.error)}`].filter((value): value is string => Boolean(value)),
     }));
   }, []);
   usePolling(load, 20000, true);

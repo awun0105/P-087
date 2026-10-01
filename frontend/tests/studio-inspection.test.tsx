@@ -40,12 +40,12 @@ describe("Inspect theo giai đoạn", () => {
   it("timeline chỉ chọn được bước xong; selection mở link đúng stage, mẫu không tạo link job", () => {
     const stages = STUDIO_STAGES.map((stage, n) => ({ stage_id: stage.id, state: n === 0 ? "succeeded" as const : "pending" as const, seconds: null, fraction: null }));
     const view = render(<PipelineTimeline stages={stages} stageList={STUDIO_STAGES} jobId="job-a" />);
-    expect(screen.queryByRole("link", { name: "Inspect giai đoạn" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Xem giai đoạn" })).toBeNull();
     expect(screen.getAllByRole("button")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: /Kiểm tra video/ }));
-    expect(screen.getByRole("link", { name: "Inspect giai đoạn" })).toHaveAttribute("href", "/scenes/job-a/stages/ST-INPUT-VALIDATE");
+    expect(screen.getByRole("link", { name: "Xem giai đoạn" })).toHaveAttribute("href", "/scenes/job-a/stages/ST-INPUT-VALIDATE");
     view.rerender(<PipelineTimeline stages={stages} stageList={STUDIO_STAGES} />);
-    expect(screen.queryByRole("link", { name: "Inspect giai đoạn" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Xem giai đoạn" })).toBeNull();
   });
 
   it("tám giai đoạn đều có mapping; waiting metric không được Inspect", () => {
@@ -82,7 +82,7 @@ describe("Inspect theo giai đoạn", () => {
   it("lỗi API có retry, không bật viewport hoặc xem lỗi thành thành công", async () => {
     vi.mocked(getJobProgress).mockResolvedValueOnce({ ok: false, error: new ApiError(503, "Mất kết nối") });
     show("ST-VISUAL-RECON");
-    expect(await screen.findByText("Mất kết nối")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(getJob).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Thử lại" }));
     expect(await screen.findByText("Scene: ST-VISUAL-RECON")).toBeInTheDocument();

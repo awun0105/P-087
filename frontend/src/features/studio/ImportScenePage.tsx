@@ -1,7 +1,9 @@
 "use client";
 
+import { errorMessage } from "@/lib/ui-error";
+
 import { Loader2 } from "lucide-react";
-import Link from "next/link";
+import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useCallback, useState } from "react";
 
 import { Badge, Button, Card, Notice, buttonVariants } from "@/components/studio/primitives";
@@ -24,7 +26,7 @@ export function ImportScenePage({ importId }: { importId: string }) {
     async (signal: AbortSignal) => {
       const result = await getImport(importId, signal);
       if (!result.ok) {
-        setError(result.error.status === 404 ? "Không tìm thấy scene import này." : result.error.detail);
+        setError(result.error.status === 404 ? "Không tìm thấy scene import này." : errorMessage(result.error));
         return;
       }
       setError(null);

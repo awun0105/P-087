@@ -1,8 +1,9 @@
 "use client";
 
+import { errorMessage } from "@/lib/ui-error";
+
 import { ArrowLeft, ArrowRight, Box, Clapperboard, Film, Loader2, LogIn } from "lucide-react";
-import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button, EmptyState, Notice, buttonVariants } from "@/components/studio/primitives";
@@ -15,6 +16,8 @@ import { UploadDropzone } from "@/features/studio/UploadDropzone";
 import { VideoSetupStep } from "@/features/studio/VideoSetupStep";
 import { canEdit } from "@/lib/api/auth";
 import { getSample, listSamples } from "@/lib/api/studio";
+import { useUrlState } from "@/features/studio/useUrlState";
+import { PageHeader } from "@/components/studio/feedback";
 import { cn } from "@/lib/cn";
 import type { DemoManifest, SampleSummary, UploadRecord } from "@/lib/contracts/studio";
 
@@ -33,15 +36,31 @@ const SAMPLE_STEPS = [
  * mẫu chỉ phát lại artifact đã có. Mỗi nhánh có setup và từ vựng riêng.
  */
 export function NewSceneFlow() {
-  const searchParams = useSearchParams();
+  const { me } = useAuth();
+  return <NewSceneFlowBody key={me?.user?.user_id ?? (me?.auth_required ? "guest" : "local")} />;
+}
+function NewSceneFlowBody() {
+  const { params, update } = useUrlState();
   const { me } = useAuth();
   const [step, setStep] = useState(0);
   const [source, setSource] = useState<Source | null>(null);
   const [preselect, setPreselect] = useState<string | null>(null);
+  const routeKey = params.toString();
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const route = new URLSearchParams(routeKey);
+      const next = route.get("source");
+      if (next === "video" || next === "gaussian") { setSource(next); setStep(route.get("step") === "setup" ? 1 : 0); setPreselect(route.get("upload")); }
+      else if (next === "sample" || route.get("sample")) { setSource("sample"); setStep(route.get("sample") ? route.get("step") === "replay" ? 2 : route.get("step") === "ready" ? 3 : 1 : 0); }
+      else if (!route.get("sample")) { setSource(null); setStep(0); }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [routeKey]);
   const [detectedMessage, setDetectedMessage] = useState<string | null>(null);
   const [samples, setSamples] = useState<SampleSummary[]>([]);
   const [samplesReady, setSamplesReady] = useState(false);
   const [samplesError, setSamplesError] = useState<string | null>(null);
+  const [samplesReload, setSamplesReload] = useState(0);
   const [sampleId, setSampleId] = useState<string | null>(null);
   const [sample, setSample] = useState<DemoManifest | null>(null);
   const [sampleError, setSampleError] = useState<string | null>(null);
@@ -52,32 +71,34 @@ export function NewSceneFlow() {
       if (!alive) return;
       setSamplesReady(true);
       if (result.ok) setSamples(result.data.samples);
-      else setSamplesError(result.error.detail);
+      else setSamplesError(errorMessage(result.error));
     });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [samplesReload]);
 
   // Chỉ nhận kết quả của lần chọn mới nhất: chọn nhanh hai mẫu thì response đến
   // muộn của mẫu trước không được ghi đè mẫu đang hiển thị.
   const latestPick = useRef<string | null>(null);
   const pickSample = useCallback((id: string) => {
     latestPick.current = id;
+    if (window.location.search.indexOf("sample=" + encodeURIComponent(id)) === -1) update({ source: "sample", sample: id, step: "setup", upload: null });
     setSource("sample");
     setSampleId(id);
     setSample(null);
     setSampleError(null);
-    setStep(1);
+    const routeStep = new URLSearchParams(window.location.search).get("step");
+    setStep(routeStep === "replay" ? 2 : routeStep === "ready" ? 3 : 1);
     void getSample(id).then((result) => {
       if (latestPick.current !== id) return;
       if (result.ok) setSample(result.data);
-      else setSampleError(result.error.detail);
+      else setSampleError(errorMessage(result.error));
     });
-  }, []);
+  }, [update]);
 
   // `/new?sample=<id>` (từ trang Scenes) chọn sẵn video mẫu.
-  const requested = searchParams.get("sample");
+  const requested = params.get("sample");
   useEffect(() => {
     if (!requested) return;
     const timer = setTimeout(() => pickSample(requested), 0);
@@ -85,6 +106,7 @@ export function NewSceneFlow() {
   }, [requested, pickSample]);
 
   const backToSample = () => {
+    update({ source: "sample", sample: null, step: "input" });
     latestPick.current = null;
     setSampleId(null);
     setSample(null);
@@ -92,6 +114,7 @@ export function NewSceneFlow() {
   };
 
   const chooseSource = (value: Source) => {
+    update({ source: value, step: "input", upload: null, sample: null });
     setSource(value);
     setStep(0);
     setPreselect(null);
@@ -99,6 +122,7 @@ export function NewSceneFlow() {
   };
 
   const backToSources = () => {
+    update({ source: null, step: null, upload: null, sample: null });
     latestPick.current = null;
     setSource(null);
     setStep(0);
@@ -111,6 +135,7 @@ export function NewSceneFlow() {
   const uploaded = (record: UploadRecord) => {
     // Máy chủ nhận diện theo nội dung, kể cả khi người dùng chọn sai nhánh từ đuôi file.
     const detected: Source = canCreateScene(record) ? "video" : "gaussian";
+    update({ source: detected, step: "setup", upload: record.upload_id, sample: null });
     setDetectedMessage(detected === source ? null : `Máy chủ nhận diện file là ${describeDetection(record)}; đã chuyển sang luồng ${detected === "video" ? "dựng từ video" : "mở 3DGS"}.`);
     setSource(detected);
     setPreselect(record.upload_id);
@@ -118,13 +143,12 @@ export function NewSceneFlow() {
   };
 
   const steps = source === "sample" ? SAMPLE_STEPS : source === "gaussian" ? IMPORT_STEPS : VIDEO_STEPS;
+  const loginHref = "/login?next=" + encodeURIComponent("/new" + (routeKey ? "?" + routeKey : ""));
 
   return (
     <main className={cn("mx-auto px-4 pt-10 pb-20 sm:px-6", sampleId && step >= 2 ? "max-w-6xl" : "max-w-4xl")}>
-      <h1 className="text-3xl font-semibold tracking-tight">Scene mới</h1>
-      <p className="mt-2 text-[15px] text-ink-muted">
-        Chọn cách bắt đầu. Video tạo job dựng scene; file 3DGS mở để xem/chỉnh; mẫu phát lại kết quả đã xử lý sẵn.
-      </p>
+      <PageHeader title="Scene mới" description="Chọn nguồn dữ liệu, kiểm tra thiết lập rồi mở scene hoặc bắt đầu xử lý." />
+      {params.get("source") && !["video", "gaussian", "sample"].includes(params.get("source")!) && <p role="status" className="mt-4 text-sm text-ink-muted">Nguồn dữ liệu trong link không hợp lệ. Chọn một cách bắt đầu bên dưới.</p>}
       {source ? (
         <div className="mt-8 space-y-4">
           <button type="button" onClick={backToSources} className="text-sm font-medium text-ember-strong hover:underline">
@@ -144,21 +168,21 @@ export function NewSceneFlow() {
         {source && step === 0 && (
           source === "sample" ? (
             !samplesReady ? <p role="status" className="text-sm text-ink-muted">Đang tải video mẫu…</p>
-              : samplesError ? <Notice tone="rust">Không tải được video mẫu: {samplesError}</Notice>
+              : samplesError ? <Notice tone="rust">Không tải được video mẫu: {samplesError} <Button variant="secondary" size="sm" onClick={() => { setSamplesReady(false); setSamplesError(null); setSamplesReload((value) => value + 1); }}>Thử lại</Button></Notice>
                 : samples.length === 0 ? <EmptyState icon={<Clapperboard aria-hidden />} title="Chưa có video mẫu">Thử lại khi thư viện mẫu có dữ liệu.</EmptyState>
                   : <SamplePicker samples={samples} selected={sampleId} onPick={pickSample} />
           ) : canEdit(me) ? (
             <div className="space-y-4">
               <UploadDropzone kind={source} onUploaded={uploaded} />
               <div className="flex justify-end">
-                <Button variant="ghost" onClick={() => setStep(1)}>
+                <Button variant="ghost" onClick={() => { setStep(1); update({ step: "setup" }); }}>
                   Chọn {source === "video" ? "video" : "file 3DGS"} đã tải trước đó
                   <ArrowRight aria-hidden />
                 </Button>
               </div>
             </div>
           ) : me !== null ? (
-            <EmptyState icon={<LogIn aria-hidden />} title="Đăng nhập để dùng dữ liệu của bạn" action={<Link href="/login?next=/new" className={buttonVariants({})}>Đăng nhập</Link>}>
+            <EmptyState icon={<LogIn aria-hidden />} title="Đăng nhập để dùng dữ liệu của bạn" action={<Link href={loginHref} className={buttonVariants({})}>Đăng nhập</Link>}>
               Khách có thể thử bằng mẫu đã xử lý sẵn; tải file và tạo job cần tài khoản của nhóm.
             </EmptyState>
           ) : <p role="status" className="text-sm text-ink-muted">Đang kiểm tra quyền truy cập…</p>
@@ -167,7 +191,7 @@ export function NewSceneFlow() {
         {source === "sample" && step >= 1 && sampleId ? (
           sampleError ? (
             <div className="space-y-4">
-              <Notice tone="rust">Không tải được video mẫu: {sampleError}</Notice>
+              <Notice tone="rust">Không tải được video mẫu: {sampleError} <Button size="sm" variant="secondary" onClick={() => pickSample(sampleId)}>Thử lại</Button></Notice>
               <Button variant="ghost" onClick={backToSample}>
                 <ArrowLeft aria-hidden />
                 Chọn mẫu khác
@@ -179,18 +203,18 @@ export function NewSceneFlow() {
               Đang tải video mẫu…
             </p>
           ) : step === 1 ? (
-            <SampleSelectStep sampleId={sampleId} sample={sample} onBack={backToSample} onStart={() => setStep(2)} />
+            <SampleSelectStep sampleId={sampleId} sample={sample} onBack={backToSample} onStart={() => { setStep(2); update({ step: "replay" }); }} />
           ) : step === 2 ? (
-            <SampleProcessStep sampleId={sampleId} sample={sample} onDone={() => setStep(3)} />
+            <SampleProcessStep sampleId={sampleId} sample={sample} onDone={() => { setStep(3); update({ step: "ready" }); }} />
           ) : (
             <SampleReadyStep sampleId={sampleId} sample={sample} />
           )
         ) : null}
         {source !== "sample" && source && step === 1 && (
           canEdit(me) ? source === "video"
-            ? <VideoSetupStep preselect={preselect} onBack={() => setStep(0)} />
-            : <ImportSetupStep preselect={preselect} onBack={() => setStep(0)} />
-            : <EmptyState icon={<LogIn aria-hidden />} title="Đăng nhập để tiếp tục" action={<Link href="/login?next=/new" className={buttonVariants({})}>Đăng nhập</Link>}>Phiên đăng nhập đã kết thúc. File đã tải vẫn được lưu trên máy chủ.</EmptyState>
+            ? <VideoSetupStep preselect={preselect} onBack={() => { setStep(0); update({ step: "input" }); }} />
+            : <ImportSetupStep preselect={preselect} onBack={() => { setStep(0); update({ step: "input" }); }} />
+            : <EmptyState icon={<LogIn aria-hidden />} title="Đăng nhập để tiếp tục" action={<Link href={loginHref} className={buttonVariants({})}>Đăng nhập</Link>}>Phiên đăng nhập đã kết thúc. File đã tải vẫn được lưu trên máy chủ.</EmptyState>
         )}
       </div>
     </main>

@@ -1,9 +1,12 @@
 "use client";
 
-import { Box, ChevronsUpDown, Clapperboard, LayoutDashboard, ListChecks, LogIn, LogOut, Users } from "lucide-react";
-import Link from "next/link";
+import { Box, ChevronsUpDown, Clapperboard, LayoutDashboard, ListChecks, LogIn, LogOut, Users, UserRound } from "lucide-react";
+import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { ErrorFeedback } from "@/components/studio/feedback";
+import { errorMessage } from "@/lib/ui-error";
+import { useNavigationGuard } from "@/features/shell/NavigationGuard";
 
 import {
   DropdownMenu,
@@ -133,6 +136,13 @@ function AppSidebar({ pathname }: { pathname: string }) {
 
 function AccountMenu({ pathname }: { pathname: string }) {
   const { me, logout } = useAuth();
+  const { navigate } = useNavigationGuard();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function signOut() {
+    setBusy(true); setError(null);
+    try { await logout(); } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(false); }
+  }
   if (!me?.auth_required) {
     // Deployment local không bật đăng nhập: không có tài khoản để hiện, không giả một user.
     return <p className="px-2 text-xs text-sidebar-foreground/60 group-data-[collapsible=icon]:hidden">Chế độ local · không đăng nhập</p>;
@@ -179,12 +189,14 @@ function AccountMenu({ pathname }: { pathname: string }) {
               </p>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => void logout()}>
+            <DropdownMenuItem asChild><Link href="/account"><UserRound aria-hidden />Tài khoản của tôi</Link></DropdownMenuItem>
+            <DropdownMenuItem disabled={busy} onSelect={() => void navigate(() => { void signOut(); }, undefined, true)}>
               <LogOut aria-hidden />
               Đăng xuất
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {error && <ErrorFeedback message={error} />}
       </SidebarMenuItem>
     </SidebarMenu>
   );

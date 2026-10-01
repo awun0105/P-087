@@ -1,7 +1,9 @@
 "use client";
 
+import { errorMessage } from "@/lib/ui-error";
+
 import { ArrowRight, Clapperboard, Film, LayoutGrid, List, LogIn, Play, Plus, RefreshCw, Search } from "lucide-react";
-import Link from "next/link";
+import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useCallback, useMemo, useState } from "react";
 
 import { Input } from "@/components/shadcn/input";
@@ -15,6 +17,7 @@ import { canEdit } from "@/lib/api/auth";
 import { listImports, listSamples, listScenes, sampleFileUrl } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import type { ImportedScene, SampleSummary, SceneSummary } from "@/lib/contracts/studio";
+import { useListState, pageSlice, ListPagination, SortControl } from "@/features/studio/ListControls";
 import { formatBytes } from "@/lib/format";
 
 const DATE = new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeStyle: "short" });
@@ -39,29 +42,32 @@ export function ScenesHome() {
       signedIn ? listImports() : Promise.resolve(null),
     ]);
     if (importResult?.ok) { setImports(importResult.data.imports); setImportError(null); }
-    else if (importResult) setImportError(importResult.error.detail);
+    else if (importResult) setImportError(errorMessage(importResult.error));
     if (sceneResult?.ok) {
       setScenes(sceneResult.data.scenes);
       setError(null);
     } else if (sceneResult) {
-      setError(sceneResult.error.detail);
+      setError(errorMessage(sceneResult.error));
     }
     if (sampleResult.ok) { setSamples(sampleResult.data.samples); setSampleError(null); }
-    else setSampleError(sampleResult.error.detail);
+    else setSampleError(errorMessage(sampleResult.error));
   }, [signedIn]);
 
-  const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<SceneStatusGroup | "all">("all");
-  const [view, setView] = useState<"grid" | "list">(readView);
+  const { query, setQuery, filter, setFilter, view, setView, sort, setSort, params, update, clear } = useListState();
   const shown = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return (scenes ?? []).filter(
       (scene) =>
         (!needle || scene.project.name.toLowerCase().includes(needle)) &&
         (filter === "all" || sceneStatus(scene.latest_job, scene.preview_ready).group === filter),
-    );
-  }, [scenes, query, filter]);
+    ).sort((a, b) => sort === "name" ? a.project.name.localeCompare(b.project.name, "vi") : Date.parse(b.project.created_at ?? b.latest_job?.started_at ?? "") - Date.parse(a.project.created_at ?? a.latest_job?.started_at ?? ""));
+  }, [scenes, query, filter, sort]);
 
+  const pagination = pageSlice(shown, params.get("page"), 12);
+  const filteredImports = imports.filter((item) => item.name.toLowerCase().includes(query.trim().toLowerCase())).sort((a, b) => sort === "name" ? a.name.localeCompare(b.name, "vi") : Date.parse(b.created_at) - Date.parse(a.created_at));
+  const importPage = pageSlice(filteredImports, params.get("importsPage"), 12);
+  const filteredSamples = samples.filter((item) => item.title.toLowerCase().includes(query.trim().toLowerCase()));
+  const samplePage = pageSlice(filteredSamples, params.get("samplesPage"), 12);
   const anyActive = scenes?.some((scene) => sceneStatus(scene.latest_job, scene.preview_ready).active) ?? true;
   usePolling(load, signedIn && anyActive ? 4000 : 20000, true);
   const continuing = (scenes ?? []).filter((scene) => {
@@ -81,7 +87,7 @@ export function ScenesHome() {
         <Link href="/new" className={buttonVariants({ size: "lg" })}><Plus aria-hidden /> Scene mới</Link>
       </div>
 
-      {!signedIn && samples.length > 0 && <SamplesHero samples={samples} />}
+      {!signedIn && samples.length > 0 && <SamplesHero samples={samplePage.items} />}
       {!signedIn && sampleError && <Notice tone="rust" className="mt-6">Không tải được mẫu: {sampleError}. Trang sẽ thử lại.</Notice>}
 
       {signedIn && continuing.length > 0 && (
@@ -108,7 +114,7 @@ export function ScenesHome() {
       <section aria-labelledby="scenes-heading" className="mt-12">
         <div className="mb-4 flex items-center justify-between">
           <h2 id="scenes-heading" className="text-sm font-semibold tracking-wide text-ink-subtle uppercase">
-            Scene của bạn
+            Scene từ video · job
           </h2>
           {signedIn && scenes && scenes.length > 0 && (
             <span className="text-sm text-ink-subtle">{scenes.length} scene</span>
@@ -142,7 +148,7 @@ export function ScenesHome() {
             Chọn “Scene mới” ở đầu trang để dựng từ video hoặc mở file 3DGS. Bạn cũng có thể thử mẫu đã xử lý sẵn.
           </EmptyState>
         )}
-        {signedIn && scenes && scenes.length > 0 && (
+        {signedIn && (
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <div className="relative min-w-48 flex-1 sm:max-w-xs">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-subtle" aria-hidden />
@@ -168,13 +174,13 @@ export function ScenesHome() {
                 </ToggleGroupItem>
               ))}
             </ToggleGroup>
+            <SortControl value={sort} onChange={setSort} />
             <ToggleGroup
               type="single"
               value={view}
               onValueChange={(value) => {
                 if (!value) return;
                 setView(value as "grid" | "list");
-                writeView(value as "grid" | "list");
               }}
               variant="outline"
               size="sm"
@@ -193,21 +199,22 @@ export function ScenesHome() {
         {signedIn && scenes && scenes.length > 0 && shown.length === 0 && (
           <p className="rounded-xl border border-line p-6 text-center text-sm text-ink-muted">
             Không có scene khớp bộ lọc.{" "}
-            <button type="button" className="font-medium text-ember-strong hover:underline" onClick={() => { setQuery(""); setFilter("all"); }}>
+            <button type="button" className="font-medium text-ember-strong hover:underline" onClick={clear}>
               Xoá bộ lọc
             </button>
           </p>
         )}
         {signedIn && shown.length > 0 && view === "grid" && (
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {shown.map((scene) => (
+            {pagination.items.map((scene) => (
               <li key={scene.project.project_id}>
                 <SceneCard scene={scene} />
               </li>
             ))}
           </ul>
         )}
-        {signedIn && shown.length > 0 && view === "list" && <SceneTable scenes={shown} />}
+        {signedIn && shown.length > 0 && view === "list" && <SceneTable scenes={pagination.items} />}
+        {signedIn && <ListPagination {...pagination} total={shown.length} onChange={(page) => update({ page: String(page) })} />}
       </section>
 
       {signedIn && importError && <Notice tone="rust" className="mt-6">Không tải được scene import: {importError}. Trang sẽ thử lại.</Notice>}
@@ -216,8 +223,8 @@ export function ScenesHome() {
           <h2 id="imports-heading" className="mb-4 text-sm font-semibold tracking-wide text-ink-subtle uppercase">
             Scene import · chỉ xem/chỉnh Gaussian
           </h2>
-          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {imports.map((item) => (
+          <ul className={view === "list" ? "space-y-2" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-3"}>
+            {importPage.items.map((item) => (
               <li key={item.import_id}>
                 <Link
                   href={`/imports/${item.import_id}`}
@@ -231,9 +238,13 @@ export function ScenesHome() {
               </li>
             ))}
           </ul>
+          <ListPagination {...importPage} total={filteredImports.length} onChange={(page) => update({ importsPage: String(page) })} />
+          {filteredImports.length === 0 && <p className="text-sm text-ink-muted">Không có scene import khớp tên tìm kiếm.</p>}
         </section>
       )}
-      {signedIn && samples.length > 0 && <SamplesHero samples={samples} />}
+      {signedIn && samples.length > 0 && <SamplesHero samples={samplePage.items} />}
+      {samples.length > 0 && filteredSamples.length === 0 && <p className="mt-4 text-sm text-ink-muted">Không có mẫu khớp tìm kiếm.</p>}
+      {samples.length > 0 && <ListPagination {...samplePage} total={filteredSamples.length} onChange={(page) => update({ samplesPage: String(page) })} />}
       {signedIn && sampleError && <Notice tone="rust" className="mt-6">Không tải được mẫu: {sampleError}. Trang sẽ thử lại.</Notice>}
     </main>
   );
@@ -347,26 +358,6 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
     </Link>
   );
 }
-
-const VIEW_KEY = "r2s.scenes.view";
-
-/** Kiểu hiển thị là tiện ích riêng của người xem; storage có thể bị chặn nên luôn có mặc định. */
-function readView(): "grid" | "list" {
-  try {
-    return typeof window !== "undefined" && window.localStorage.getItem(VIEW_KEY) === "list" ? "list" : "grid";
-  } catch {
-    return "grid";
-  }
-}
-
-function writeView(view: "grid" | "list"): void {
-  try {
-    window.localStorage.setItem(VIEW_KEY, view);
-  } catch {
-    // Không lưu được thì lần sau mở lại dạng lưới.
-  }
-}
-
 /** Dạng danh sách: đọc nhanh trạng thái và mốc thời gian của nhiều scene. */
 function SceneTable({ scenes }: { scenes: SceneSummary[] }) {
   return (

@@ -1,5 +1,9 @@
 "use client";
 
+import { notifySuccess } from "@/components/studio/feedback";
+
+import { errorMessage } from "@/lib/ui-error";
+
 import { CheckCircle2, Download, Loader2, PackageOpen, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -49,7 +53,7 @@ export function SimulationPackagePanel({
         setResult({ revision: sceneRevision, value });
       },
       (cause: unknown) => {
-        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Không đọc được gói");
+        if (!controller.signal.aborted) setError(errorMessage(cause, "Không đọc được gói"));
       },
     );
     return () => controller.abort();
@@ -64,9 +68,9 @@ export function SimulationPackagePanel({
       // dù physics enrichment tạm có một scene_revision khác (backend contract).
       setResult({ revision: value.package_ref ? value.scene_revision : value.source_scene_revision, value });
       // PASS tạo revision scene có physics; màn cha tải lại scene để đồng bộ.
-      if (value.package_ref) onSceneChanged();
+      if (value.package_ref) { notifySuccess("Đã tạo gói mô phỏng của revision mới."); onSceneChanged(); }
     } catch (cause: unknown) {
-      setError(cause instanceof Error ? cause.message : "Tạo gói thất bại");
+      setError(errorMessage(cause, "Tạo gói thất bại"));
     } finally {
       setBusy(false);
     }
@@ -85,7 +89,7 @@ export function SimulationPackagePanel({
           {pkg?.package_ref ? "Kiểm tra lại" : "Tạo gói mô phỏng"}
         </Button>
       </div>
-      {error && <p className="text-sm text-rust">{error}</p>}
+      {error && <p role="alert" className="text-sm text-rust">{error}</p>}
       {!pkg && !error && (
         <p className="text-sm text-ink-muted">
           Chỉ vật đã xác nhận đi vào gói. Hệ thống khoét chỗ vật khỏi mesh môi trường, gắn collider hộp, rồi kiểm

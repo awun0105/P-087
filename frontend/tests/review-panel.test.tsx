@@ -111,7 +111,7 @@ describe("ReviewPanel", () => {
   it("lỗi đọc trạng thái duyệt có đường thử lại", async () => {
     vi.mocked(global.fetch).mockRejectedValueOnce(new Error("Mất kết nối")).mockResolvedValueOnce(reply(state("READY_FOR_REVIEW")));
     render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" />);
-    expect(await screen.findByText(/Mất kết nối/)).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Không kết nối được máy chủ");
     fireEvent.click(screen.getByRole("button", { name: "Thử lại" }));
     expect(await screen.findByRole("button", { name: "Phê duyệt để phát hành" })).toBeInTheDocument();
   });

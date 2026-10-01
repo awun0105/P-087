@@ -1,5 +1,7 @@
 "use client";
 
+import { errorMessage } from "@/lib/ui-error";
+
 import { FlaskConical, Loader2, Radar, Ruler } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
@@ -24,7 +26,7 @@ export function ModeComparisonView({ jobId }: { jobId: string }) {
   useEffect(() => {
     const controller = new AbortController();
     getModeComparison(jobId, controller.signal).then(setData, (cause: unknown) => {
-      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Không tải được so sánh");
+      if (!controller.signal.aborted) setError(errorMessage(cause, "Không tải được so sánh"));
     });
     return () => controller.abort();
   }, [jobId]);

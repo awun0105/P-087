@@ -1,5 +1,7 @@
 "use client";
 
+import { errorMessage } from "@/lib/ui-error";
+
 import { Canvas } from "@react-three/fiber";
 import { Grid, OrbitControls } from "@react-three/drei";
 import { Loader2 } from "lucide-react";
@@ -35,7 +37,7 @@ export function StageViewer({ jobId, stageId, fallbackStageId }: { jobId: string
         setSelected(Math.max(0, result.length - 1));
       },
       (cause: unknown) => {
-        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Không tải được kết quả");
+        if (!controller.signal.aborted) setError(errorMessage(cause, "Không tải được kết quả"));
       },
     );
     return () => controller.abort();
@@ -234,7 +236,7 @@ export function CollisionMeshCanvas({ url, children }: { url: string; children?:
         setState({ root, triangles });
       })
       .catch((cause: unknown) => {
-        if (!controller.signal.aborted) setState({ error: cause instanceof Error ? cause.message : String(cause) });
+        if (!controller.signal.aborted) setState({ error: errorMessage(cause, "Không tải được lớp xem. Hãy thử lại.") });
       });
     return () => {
       controller.abort();

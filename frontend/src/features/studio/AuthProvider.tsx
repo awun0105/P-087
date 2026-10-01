@@ -3,6 +3,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import { getMe, logout as apiLogout, type Me } from "@/lib/api/auth";
+import { clearStudioDrafts } from "@/features/studio/drafts";
+import { notifySuccess, ErrorFeedback } from "@/components/studio/feedback";
+import { errorMessage } from "@/lib/ui-error";
 
 interface AuthState {
   /** `null` khi đang tải lần đầu. */
@@ -19,11 +22,13 @@ const AuthContext = createContext<AuthState | null>(null);
  */
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const result = await getMe();
     // Backend không trả được: coi như khách của deployment bắt đăng nhập (an toàn hơn).
     setMe(result.ok ? result.data : { auth_required: true, user: null });
+    setError(result.ok ? null : errorMessage(result.error));
   }, []);
 
   useEffect(() => {
@@ -33,11 +38,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     await apiLogout();
+    clearStudioDrafts();
     await refresh();
+    notifySuccess("Đã đăng xuất.");
   }, [refresh]);
 
   const value = useMemo(() => ({ me, refresh, logout }), [me, refresh, logout]);
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={value}>{error && <ErrorFeedback className="mx-4 mt-4" message={"Chưa xác minh được phiên tài khoản. " + error} retry={() => void refresh()} />}{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthState {

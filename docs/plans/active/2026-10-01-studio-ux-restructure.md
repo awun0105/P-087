@@ -5,7 +5,10 @@ Branch: `feat/studio-ux-restructure` (từ `develop` tại `bdc4b92`)
 
 ## Status
 
-VALIDATING — đã tích hợp landing page Stitch user cung cấp tại `/landing`,
+VALIDATING — đã triển khai increment feedback/navigation/stage views/drafts/lists/
+account theo plan chốt 01/10/2026. Static/component proof đã chạy; browser visual
+QA và real worker/GPU/roles còn cần evidence riêng (chi tiết checkpoint bên dưới).
+Các increment trước vẫn VALIDATING — đã tích hợp landing page Stitch user cung cấp tại `/landing`,
 CTA mở app Tổng quan `/`; lint/typecheck, production build và HTTP proof exit 0.
 Workspace Inspect đã tới VALIDATING;
 lint/typecheck, 187 frontend tests và Webpack production build exit 0. Còn
@@ -21,6 +24,105 @@ Plan này là record duy nhất cho đợt cải thiện UX sau PR #16; không t
 [plan pipeline v2](./2026-09-30-pipeline-v2.md).
 
 ## Outcome
+
+### Accepted implementation increment — 01/10/2026
+
+User giao implement plan trong chat. Record này quản lý increment tiếp theo:
+
+- Authority: PRD §3.4, PRODUCT §3.1/§7.1–7.4, D-04–D-12, shared revision/checksum
+  contracts, Architecture frontend ownership. Plan mới chốt frontend trước,
+  viewer stage riêng, session-tab drafts, account chỉ đọc.
+- Owned: frontend Studio/shell/components/tests và PRODUCT/record này.
+  Không sửa backend, vendor editor, shared schemas, dependency hoặc Git refs.
+- Implementation order: (1) feedback primitives + errors, (2) next action/header,
+  (3) URL/navigation guard, (4) progress/attempts/stage views, (5) drafts/auth,
+  (6) list controls/account, (7) tests/static/build và runtime proof khả dụng.
+- Feedback policy: field errors tại field; mutation/load errors tại panel;
+  success toast sau response; autosave dùng revision status; hướng dẫn dài dùng
+  HelpDetails. Không toast từ polling hoặc giả download-completed.
+- URL: scene tab/mode, stage-6 view, wizard source/step/upload, list query/filter/
+  view/sort/page. Native history giữ mounted viewer và metadata Next.
+- Draft chỉ giữ field allow-list trong sessionStorage theo actor/source; validate
+  upload và processing schema lại; đổi input reset consent; logout xoá drafts.
+- Proof required: focused positive/negative tests cho feedback, drafts, guards,
+  URL/list state, auth/revision gates; lint/typecheck/full tests/build. Browser
+  và real worker/GPU/roles có evidence riêng, không suy từ mocked tests.
+- VERIFIED baseline: branch feat/studio-ux-restructure sạch tại ea68053; API
+  preview auth_required=false, scenes=[]; CUA chưa có browser.
+
+#### Implementation checkpoint (01/10/2026, increment hiện tại)
+
+- VERIFIED — `feedback.tsx`/`ui-error.ts`: Radix success toast, PageHeader,
+  HelpDetails, field/panel errors; lỗi HTTP/network có thông báo phục hồi an toàn.
+  Success chỉ sau upload/create/confirm/package/review/auth/team được API ack.
+  Autosave vẫn dùng SaveStatus, package preflight FAIL không toast thành công.
+- VERIFIED — ScenePage/NextAction/ProgressTab/AttemptHistory: timeline và lịch sử
+  records từ API, checksum thu gọn; CTA dựa state/revision, lỗi đọc không suy thành
+  thiếu gói. Viewer stage riêng, stage 6 comparison có URL. Bước chưa xong vẫn khoá.
+  Default Studio trước SceneIR là viewer chỉ đọc, editor chỉ ở chế độ Gaussian.
+- VERIFIED — NavigationGuard/editor-dirty: bridge kiểm origin + frame, timeout/
+  abort/cleanup; dirty/UNKNOWN cần xác nhận trước rời editor hoặc đổi mode, kể cả
+  native Back. Giữ metadata history Next. Đổi tab giữ mounted Studio; đóng metric
+  về Progress, draft đo chỉ dùng trong cùng job/attempt/artifact.
+- VERIFIED — NewSceneFlow/drafts/setup forms/useProcessingForm/AuthForms: URL
+  source/step/upload/sample, auth next nội bộ xuyên login/register; bản nháp actor/
+  source trong sessionStorage, input/schema được đối chiếu, đổi video reset consent.
+  Không công bố preset mặc định trước khi restore draft; evaluation cũ bị ẩn khi
+  sửa, lỗi có retry. Bỏ bản nháp reset preset; logout xoá storage draft.
+- VERIFIED — ScenesHome/JobsPage/ListControls/AccountPage/AppShell: tìm/lọc/view/
+  sort/page trong URL, Scenes 12/Jobs 20; import và mẫu nhóm riêng; readonly account
+  từ /me, local/guest có state riêng, logout lỗi không báo success.
+- Donor ADAPT: File Manager toolbar/grid/list, Tasks table/status, Profile summary,
+  auth v2 layout/fields. Dùng Radix/shadcn có sẵn; không thêm dependency/copy vendor.
+- Changed boundaries: chỉ PRODUCT, plan này, frontend Studio/shell/components/
+  auth adapter và tests. Backend, shared schemas, vendor, package/lockfile, legacy
+  routes, Git refs và checkout Claude không bị sửa.
+
+#### Validation / limitations
+
+- `cd frontend && npm run lint`: exit 0, không warning ở lượt cuối.
+- `cd frontend && npm run typecheck`: exit 0, Next route typegen + TypeScript.
+- `cd frontend && npm test -- --maxWorkers=4`: exit 0, **36 files / 211 tests**.
+  24 tests thêm so với baseline 187: feedback/privacy/actor drafts, iframe guard /
+  native Back, processing restoration/evaluation retry, account/auth next,
+  ScenePage close/reopen và NextAction unknown/retryable; form remount/consent.
+- First failures: tests nhãn Inspect cũ và raw transport messages được đổi đúng
+  UX policy, vẫn giữ retry/revision/download gates; assertion kiểm nội dung lỗi an
+  toàn. Test cancel dialog cần đợi Promise settle; dynamic import khi chạy nhiều
+  worker vượt timeout 1s, dùng timeout 3s và 4 workers. Không sửa expected artifact/
+  schema để làm xanh. Lint phát hiện declaration/effect issues và đã sửa.
+- `cd frontend && REAL2SIM_API_URL=http://127.0.0.1:8011 npm run build -- --webpack`:
+  exit 0, route `/account` và stage routes có trong production output. Dùng Webpack
+  theo fallback đã ghi ở increment trước; không claim Turbopack build.
+- Sau chỉnh snapshot ban đầu của URL hook để tránh SSR/hydration mismatch,
+  `npm test -- tests/ux-feedback-drafts.test.tsx tests/ux-navigation-guard.test.tsx
+  tests/ux-scene-flow.test.tsx tests/studio-input-flows.test.tsx --maxWorkers=4`:
+  exit 0, **4 files / 21 tests**; production build cuối cũng exit 0.
+- HTTP smoke trên dev preview `http://127.0.0.1:3011`: `/`, `/scenes`, `/jobs`,
+  `/new?source=video&step=setup`, `/account`, `/login?next=...`, `/register`,
+  `/landing` đều **200 HTML**. Auth/scenes proxy **200**:
+  `auth_required=false`, không user, `scenes=[]`. Đây là HTTP proof, không phải
+  browser interaction/hydration hoặc role acceptance.
+- CUA inventory: `apps=[]`, `browsers=[]`. Chưa có browser visual QA/screenshots,
+  WebGPU/WebGL renderer proof hoặc real upload→metric→objects→package→release.
+  Không seed/mock job vào backend. Fixture tests không chứng minh Isaac acceptance.
+- Next runtime acceptance: mở preview trong browser, kiểm desktop/hẹp, link tab /
+  Back/Forward với Gaussian dirty; chạy real video/PLY và auth-enabled Editor /
+  Reviewer khi backend pipeline/artifacts của Claude sẵn sàng. Profile/password
+  mutations và Studio v2 theo ADR 0007 thuộc increment/backend khác.
+
+#### Publication checkpoint (01/10/2026)
+
+- User yêu cầu `commit & push`; outcome là lưu increment này trên
+  `origin/feat/studio-ux-restructure`. Authority: AGENTS §11 Git Safety.
+- Trước publication: HEAD và remote branch đều `ea68053`; index rỗng, scope audit
+  xác nhận 41 modified + 18 new source/test files thuộc increment. `.env`, `.next`
+  và node_modules được ignore; scan không thấy credential thật trong changed files.
+- Proof làm mới: `cd frontend && npm test -- --maxWorkers=4` exit 0,
+  **36 files / 211 tests** (17:14 giờ local); `git diff --check` exit 0.
+- Scope commit: PRODUCT, plan này và frontend source/tests của increment. Git
+  commit/ref là evidence publication; status plan vẫn VALIDATING do runtime gates
+  ở trên còn mở.
 
 Người dùng hiểu mình đang ở đâu, có thể chọn đúng đường **dựng từ video / mở 3DGS /
 thử mẫu**, theo dõi job, chỉnh scene, kiểm tra và lấy đúng loại kết quả mà không nhầm
