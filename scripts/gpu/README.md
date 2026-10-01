@@ -65,6 +65,21 @@ scripts/gpu/run_stack.sh scripts/gpu/studio.env
 Truy cập từ máy mình qua SSH tunnel: `ssh -L 3000:localhost:3000 <gpu-host>` rồi
 mở http://localhost:3000.
 
+### Chạy trên laptop: bảo vệ nhiệt
+
+Laptop có thể tự tắt vì quá nhiệt khi train 3DGS (đã xảy ra 2026-10-01 trên ThinkPad P1/T2000 khi
+chạy hai việc nặng cùng lúc). Chạy stack dưới systemd với trần CPU và bật watchdog nhiệt; watchdog
+đóng băng stack khi nóng và thả ra khi nguội, job không mất tiến độ. Chỉ chạy một việc nặng một lúc.
+
+```bash
+systemd-run --user --unit r2s-stack -p CPUQuota=250% --working-directory="$PWD" make -f Makefile.studio up
+systemd-run --user --unit r2s-thermal --working-directory="$PWD" scripts/gpu/thermal_guard.sh r2s-stack
+journalctl --user -u r2s-thermal -f      # xem các lần đóng băng/chạy tiếp
+```
+
+Ngưỡng mặc định: đóng băng khi CPU ≥ 88°C hoặc GPU ≥ 82°C, chạy tiếp khi CPU ≤ 72°C và GPU ≤ 68°C
+(đổi bằng `HOT_CPU`, `HOT_GPU`, `COOL_CPU`, `COOL_GPU`). Máy thuê trong datacenter không cần bước này.
+
 ## 5. Xử lý Aisle_CW và export demo
 
 ```bash
