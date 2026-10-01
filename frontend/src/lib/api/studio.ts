@@ -519,7 +519,37 @@ export type RevisionStatus =
   | "REJECTED"
   | "RELEASED";
 
-/** Tập con `ReviewState` backend mà UI dùng. */
+/** Tham chiếu tới một artifact làm bằng chứng (ảnh, log, replay…) của một check hoặc cặp Start–Goal. */
+export interface EvidenceRefView {
+  artifact_uri: string;
+  artifact_checksum: string;
+}
+
+export interface ValidationCheckView {
+  check_id: string;
+  result: string;
+  message: string | null;
+  evidence_refs: EvidenceRefView[];
+}
+
+export interface PathResultView {
+  pair_id: string;
+  result: string;
+  message: string | null;
+  evidence_refs: EvidenceRefView[];
+}
+
+export interface ValidationReportView {
+  overall_result: string;
+  validator_version: string;
+  candidate_checksum: string | null;
+  report_checksum: string | null;
+  environment_versions: Record<string, string>;
+  checks: ValidationCheckView[];
+  path_results: PathResultView[];
+}
+
+/** Phần `ReviewState` backend mà UI dùng, đã chuẩn hoá ở biên API (thiếu trường phụ thì nhận giá trị rỗng). */
 export interface ReviewStateView {
   record: {
     scene_revision: string;
@@ -527,25 +557,112 @@ export interface ReviewStateView {
     candidate_checksum: string | null;
     validation_report_checksum: string | null;
   };
-  validation: {
-    overall_result: string;
-    validator_version: string;
-    checks: { check_id: string; result: string; message: string | null }[];
-    path_results: { pair_id: string; result: string; message: string | null }[];
-  } | null;
+  validation: ValidationReportView | null;
+  /** Báo cáo có bằng chứng chạy Isaac Sim thật không; null khi chưa có báo cáo hoặc backend không trả cờ. */
+  isaac_runtime_proof: boolean | null;
   warning_ids: string[];
-  approval: { reviewer_id: string; decision: "APPROVE" | "REJECT"; reason: string | null; decided_at: string } | null;
-  release: { release_timestamp: string; release_manifest_checksum: string } | null;
+  approval: {
+    reviewer_id: string;
+    decision: "APPROVE" | "REJECT";
+    reason: string | null;
+    decided_at: string;
+    candidate_checksum: string | null;
+    validation_report_checksum: string | null;
+    record_checksum: string | null;
+    accepted_warning_ids: string[];
+  } | null;
+  release: {
+    release_timestamp: string;
+    release_manifest_checksum: string;
+    candidate_checksum: string | null;
+    validation_report_checksum: string | null;
+  } | null;
   release_archive: { artifact_uri: string } | null;
   blockers: string[];
 }
 
+type Json = Record<string, unknown>;
+
+function isObject(value: unknown): value is Json {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function text(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function evidenceRefs(value: unknown): EvidenceRefView[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const uri = isObject(item) ? text(item.artifact_uri) : null;
+    const checksum = isObject(item) ? text(item.artifact_checksum) : null;
+    return uri && checksum ? [{ artifact_uri: uri, artifact_checksum: checksum }] : [];
+  });
+}
+
+function validationReport(value: unknown): ValidationReportView | null {
+  if (!isObject(value)) return null;
+  const rows = (items: unknown, key: "check_id" | "pair_id") =>
+    (Array.isArray(items) ? items : []).flatMap((item) => {
+      const id = isObject(item) ? text(item[key]) : null;
+      if (!isObject(item) || !id) return [];
+      return [{ id, result: text(item.result) ?? "?", message: text(item.message), evidence_refs: evidenceRefs(item.evidence_refs) }];
+    });
+  const versions = isObject(value.environment_versions) ? value.environment_versions : {};
+  return {
+    overall_result: text(value.overall_result) ?? "?",
+    validator_version: text(value.validator_version) ?? "?",
+    candidate_checksum: text(value.candidate_checksum),
+    report_checksum: text(value.report_checksum),
+    environment_versions: Object.fromEntries(Object.entries(versions).flatMap(([key, version]) => (typeof version === "string" ? [[key, version]] : []))),
+    checks: rows(value.checks, "check_id").map(({ id, ...rest }) => ({ check_id: id, ...rest })),
+    path_results: rows(value.path_results, "pair_id").map(({ id, ...rest }) => ({ pair_id: id, ...rest })),
+  };
+}
+
 function parseReviewState(value: unknown): ReviewStateView {
-  const data = value as Partial<ReviewStateView>;
-  if (!data.record || typeof data.record.status !== "string" || !Array.isArray(data.blockers)) {
+  const record = isObject(value) ? value.record : null;
+  const status = isObject(record) ? text(record.status) : null;
+  const revision = isObject(record) ? text(record.scene_revision) : null;
+  if (!isObject(value) || !isObject(record) || !status || !revision || !Array.isArray(value.blockers)) {
     throw new ApiError(502, "Backend trả trạng thái duyệt sai contract");
   }
-  return data as ReviewStateView;
+  const approval = isObject(value.approval) ? value.approval : null;
+  const release = isObject(value.release) ? value.release : null;
+  const archive = isObject(value.release_archive) ? text(value.release_archive.artifact_uri) : null;
+  return {
+    record: {
+      scene_revision: revision,
+      status: status as RevisionStatus,
+      candidate_checksum: text(record.candidate_checksum),
+      validation_report_checksum: text(record.validation_report_checksum),
+    },
+    validation: validationReport(value.validation),
+    isaac_runtime_proof: typeof value.isaac_runtime_proof === "boolean" ? value.isaac_runtime_proof : null,
+    warning_ids: strings(value.warning_ids),
+    approval: approval && {
+      reviewer_id: text(approval.reviewer_id) ?? "?",
+      decision: approval.decision === "REJECT" ? "REJECT" : "APPROVE",
+      reason: text(approval.reason),
+      decided_at: text(approval.decided_at) ?? "",
+      candidate_checksum: text(approval.candidate_checksum),
+      validation_report_checksum: text(approval.validation_report_checksum),
+      record_checksum: text(approval.record_checksum),
+      accepted_warning_ids: strings(approval.accepted_warning_ids),
+    },
+    release: release && {
+      release_timestamp: text(release.release_timestamp) ?? "",
+      release_manifest_checksum: text(release.release_manifest_checksum) ?? "",
+      candidate_checksum: text(release.candidate_checksum),
+      validation_report_checksum: text(release.validation_report_checksum),
+    },
+    release_archive: archive ? { artifact_uri: archive } : null,
+    blockers: strings(value.blockers),
+  };
 }
 
 export async function getReviewState(jobId: string, signal?: AbortSignal): Promise<ReviewStateView> {

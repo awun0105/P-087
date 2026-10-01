@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, CircleHelp, X } from "lucide-react";
+import { Check, CheckCircle2, CircleHelp, Copy, X } from "lucide-react";
 import { Toast } from "radix-ui";
 import { useEffect, useState, type ReactNode } from "react";
 
@@ -57,4 +57,29 @@ export function ErrorFeedback({ message, retry, className }: { message: string; 
 
 export function FieldError({ id, message }: { id: string; message: string | null }) {
   return message ? <p id={id} role="alert" className="mt-1 text-sm text-rust">{message}</p> : null;
+}
+
+/**
+ * Nút chép một giá trị kỹ thuật (checksum, URI artifact) vào clipboard. Kết quả báo ngay trên nút và cho trình đọc màn
+ * hình; Clipboard API có thể vắng mặt (trang không bảo mật) hoặc bị từ chối quyền nên lỗi phải hiện, không im lặng.
+ */
+export function CopyButton({ value, label }: { value: string; label: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const copy = () => {
+    void Promise.resolve()
+      .then(() => navigator.clipboard.writeText(value))
+      .then(() => setState("copied"), () => setState("failed"));
+  };
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      aria-label={`Chép ${label}`}
+      title={state === "failed" ? "Không chép được; hãy chọn và chép tay" : `Chép ${label}`}
+      className="inline-flex size-6 shrink-0 items-center justify-center rounded text-ink-muted hover:bg-paper-sunken hover:text-ink focus-visible:outline-2 focus-visible:outline-ember"
+    >
+      {state === "copied" ? <Check className="size-3.5 text-sage" aria-hidden /> : state === "failed" ? <X className="size-3.5 text-rust" aria-hidden /> : <Copy className="size-3.5" aria-hidden />}
+      <span className="sr-only" role="status">{state === "copied" ? "Đã chép" : state === "failed" ? "Không chép được" : ""}</span>
+    </button>
+  );
 }

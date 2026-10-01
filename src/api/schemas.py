@@ -30,6 +30,7 @@ from src.models.contracts.validation import ValidationReport
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.projects.models import InputVideoSummary, ProjectRecord
 from src.services.orchestration.projects.privacy import project_block_reason
+from src.services.orchestration.review.lifecycle import has_isaac_runtime_proof
 from src.services.orchestration.scene.models import SceneEditResult, SceneRevision, VisualBinding
 
 __all__ = [
@@ -341,12 +342,11 @@ def scene_response(revision: SceneRevision, visual: VisualBinding) -> SceneRespo
 
 def validation_state(job_id: str, report: ValidationReport) -> ValidationStateResponse:
     """Chiếu ValidationReport thành state mà màn hình validation tiêu thụ."""
-    versions = report.environment_versions
     return ValidationStateResponse(
         job_id=job_id,
         report=report,
         report_checksum_verified=report.report_checksum.startswith("sha256:"),
-        isaac_runtime_proof=versions.get("isaac_sim", "UNVERIFIED") != "UNVERIFIED",
+        isaac_runtime_proof=has_isaac_runtime_proof(report),
     )
 
 

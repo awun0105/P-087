@@ -36,6 +36,7 @@ from src.models.contracts.release import (
 from src.models.contracts.validation import RuleResult, ValidationReport
 from src.services.orchestration.artifacts import ArtifactAlreadyExistsError
 from src.services.orchestration.projects.registry import ProjectRegistry
+from src.services.orchestration.review.lifecycle import has_isaac_runtime_proof
 from src.services.orchestration.review.simulation_package import SimulationPackage, current_package
 
 SCHEMA_VERSION = "1.0"
@@ -59,6 +60,8 @@ class ReviewState(BaseModel):
     record: SceneRevisionRecord
     package: SimulationPackage | None = None
     validation: ValidationReport | None = None
+    #: Báo cáo có bằng chứng chạy Isaac thật không (`has_isaac_runtime_proof`); None khi chưa có báo cáo.
+    isaac_runtime_proof: bool | None = None
     warning_ids: list[str] = []
     approval: ApprovalRecord | None = None
     release: ReleaseManifest | None = None
@@ -134,6 +137,7 @@ def review_state(registry: ProjectRegistry, job_id: str) -> ReviewState:
         return state
     report = ValidationReport.model_validate_json(raw)
     state.validation = report
+    state.isaac_runtime_proof = has_isaac_runtime_proof(report)
     state.warning_ids = [check.check_id for check in report.checks if check.result != RuleResult.PASS]
     state.record = state.record.model_copy(update={"validation_report_checksum": report.report_checksum})
     if report.overall_result != RuleResult.PASS:

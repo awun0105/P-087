@@ -108,6 +108,30 @@ describe("ReviewPanel", () => {
     expect(screen.queryByRole("button", { name: "Phê duyệt để phát hành" })).toBeNull();
   });
 
+  it("cảnh báo cần chấp nhận hiện kèm thông điệp và bằng chứng của check; báo cáo thiếu bằng chứng Isaac có cảnh báo", async () => {
+    vi.mocked(global.fetch).mockResolvedValueOnce(reply(state("READY_FOR_REVIEW", { isaac_runtime_proof: false })));
+    const onState = vi.fn();
+    render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" onState={onState} />);
+    const checkbox = await screen.findByLabelText("penetration_minor");
+    expect(checkbox).toHaveAccessibleDescription("2 cm · không kèm bằng chứng");
+    expect(screen.getByText(/chưa có bằng chứng chạy Isaac Sim thật/)).toBeInTheDocument();
+    // Màn cha nhận đúng trạng thái đã chuẩn hoá để vẽ thẻ báo cáo.
+    await waitFor(() => expect(onState).toHaveBeenLastCalledWith(expect.objectContaining({ isaac_runtime_proof: false, warning_ids: ["penetration_minor"] })));
+  });
+
+  it("đã quyết định thì hiện nguồn kết quả: checksum gói, báo cáo và bản ghi duyệt", async () => {
+    const record = "sha256:" + "a".repeat(64);
+    vi.mocked(global.fetch).mockResolvedValueOnce(
+      reply(state("APPROVED", {
+        approval: { reviewer_id: "u-rev", decision: "APPROVE", reason: null, decided_at: "2026-09-30T10:00:00Z", candidate_checksum: CANDIDATE, validation_report_checksum: REPORT, record_checksum: record, accepted_warning_ids: ["penetration_minor"] },
+      })),
+    );
+    render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" />);
+    expect(await screen.findByText("Nguồn kết quả của quyết định")).toBeInTheDocument();
+    expect(screen.getByText(record)).toBeInTheDocument();
+    expect(screen.getByText(CANDIDATE)).toBeInTheDocument();
+  });
+
   it("lỗi đọc trạng thái duyệt có đường thử lại", async () => {
     vi.mocked(global.fetch).mockRejectedValueOnce(new Error("Mất kết nối")).mockResolvedValueOnce(reply(state("READY_FOR_REVIEW")));
     render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" />);

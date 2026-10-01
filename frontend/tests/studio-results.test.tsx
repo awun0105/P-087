@@ -8,7 +8,7 @@ import { getJobScene, getReviewState, getSimulationPackage, type ReviewStateView
 
 vi.mock("@/lib/api/studio", async (original) => ({ ...(await original<typeof import("@/lib/api/studio")>()), getReviewState: vi.fn(), getSimulationPackage: vi.fn(), getJobScene: vi.fn() }));
 const pkg: SimulationPackageView = { scene_revision: "rev-1", source_scene_revision: "rev-0", created_at: "2026-10-01T00:00:00Z", confirmed_objects: 1, environment_triangles: 100, carved_triangles: 5, preflight: { blocking_result: "PASS", rules: [] }, package_ref: { artifact_uri: "artifact://test/candidate", artifact_checksum: "sha256:test" } };
-const review: ReviewStateView = { record: { scene_revision: "rev-1", status: "RELEASED", candidate_checksum: "sha256:candidate", validation_report_checksum: "sha256:report" }, validation: null, warning_ids: [], approval: null, release: { release_timestamp: "2026-10-01T00:01:00Z", release_manifest_checksum: "sha256:release" }, release_archive: { artifact_uri: "artifact://test/release" }, blockers: [] };
+const review: ReviewStateView = { record: { scene_revision: "rev-1", status: "RELEASED", candidate_checksum: "sha256:candidate", validation_report_checksum: "sha256:report" }, validation: null, isaac_runtime_proof: null, warning_ids: [], approval: { reviewer_id: "user-reviewer", decision: "APPROVE", reason: null, decided_at: "2026-10-01T00:00:30Z", candidate_checksum: "sha256:candidate", validation_report_checksum: "sha256:report", record_checksum: "sha256:approval", accepted_warning_ids: [] }, release: { release_timestamp: "2026-10-01T00:01:00Z", release_manifest_checksum: "sha256:release", candidate_checksum: "sha256:candidate", validation_report_checksum: "sha256:report" }, release_archive: { artifact_uri: "artifact://test/release" }, blockers: [] };
 const preview = { url: "/preview.sog", filename: "preview.sog" };
 beforeEach(() => {
   vi.clearAllMocks();
@@ -21,6 +21,10 @@ describe("kết quả đúng revision", () => {
     render(<ResultsTab jobId="job-a" preview={preview} revision="rev-1" />);
     expect(await screen.findByRole("link", { name: "Tải gói" })).toHaveAttribute("href", "/api/v1/jobs/job-a/simulation-package/download");
     expect(screen.getByRole("link", { name: "Tải bản phát hành" })).toHaveAttribute("href", "/api/v1/jobs/job-a/release-download");
+    // S12: bản phát hành truy vết được tới gói, báo cáo, người duyệt và manifest.
+    expect(screen.getByText(/duyệt bởi user-reviewer/)).toBeInTheDocument();
+    expect(screen.getByText("sha256:release")).toBeInTheDocument();
+    expect(screen.getByText("sha256:report")).toBeInTheDocument();
   });
   it("revision đã đổi thì chỉ giữ download bản làm việc", async () => {
     render(<ResultsTab jobId="job-a" preview={preview} revision="rev-2" />);

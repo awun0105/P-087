@@ -9,12 +9,15 @@ import type { SaveState } from "@/features/studio/ObjectReviewView";
 import { ReviewPanel } from "@/features/studio/ReviewPanel";
 import { SimulationPackagePanel } from "@/features/studio/SimulationPackagePanel";
 import { HelpDetails } from "@/components/studio/feedback";
-import { getJobScene } from "@/lib/api/studio";
+import { ValidationReportCard } from "@/features/studio/ValidationReportCard";
+import { getJobScene, type ReviewStateView } from "@/lib/api/studio";
 
 export function ReviewTab({ jobId, onSaveState }: { jobId: string; onSaveState: (state: SaveState) => void }) {
   const [revision, setRevision] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  // Trạng thái duyệt do ReviewPanel tải; ở đây chỉ dùng lại để vẽ báo cáo chi tiết của đúng revision.
+  const [review, setReview] = useState<ReviewStateView | null>(null);
   useEffect(() => {
     const controller = new AbortController();
     getJobScene(jobId, controller.signal).then((result) => {
@@ -40,8 +43,13 @@ export function ReviewTab({ jobId, onSaveState }: { jobId: string; onSaveState: 
         <SimulationPackagePanel jobId={jobId} sceneRevision={revision} onSceneChanged={() => setReload((value) => value + 1)} />
       </Card>
       <Card className="overflow-hidden">
-        <ReviewPanel jobId={jobId} sceneRevision={revision} />
+        <ReviewPanel jobId={jobId} sceneRevision={revision} onState={setReview} />
       </Card>
+      {review?.validation && review.record.scene_revision === revision && (
+        <Card className="overflow-hidden lg:col-span-2">
+          <ValidationReportCard state={review} />
+        </Card>
+      )}
       <div className="lg:col-span-2"><HelpDetails title="Gói và quyết định duyệt gắn với revision nào?">
         Mọi thay đổi vật thể sau khi tạo gói sẽ sinh revision mới: gói, báo cáo validation và quyết định duyệt cũ không còn áp dụng
         cho revision đó.

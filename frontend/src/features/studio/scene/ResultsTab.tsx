@@ -7,6 +7,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { Badge, Button, Card, Notice, buttonVariants } from "@/components/studio/primitives";
 import type { Preview } from "@/features/studio/scene/state";
+import { TraceList } from "@/features/studio/TraceList";
 import { ApiError } from "@/lib/api/client";
 import { getJobScene, getReviewState, getSimulationPackage, releaseDownloadUrl, simulationPackageDownloadUrl, type ReviewStateView, type SimulationPackageView } from "@/lib/api/studio";
 
@@ -102,7 +103,22 @@ export function ResultsTab({ jobId, preview, revision, onOpenGaussian, onOpenRev
             : review && !reviewCurrent ? currentRevision ? "Scene đã đổi revision; kết quả duyệt cũ không áp dụng." : "Chưa đối chiếu được revision scene; thử lại trước khi tải bản phát hành."
               : review?.blockers[0] ?? "Chỉ có sau khi gói qua validation Isaac và được Reviewer duyệt."
         }
-        detail={released ? `Phát hành lúc ${new Date(review.release!.release_timestamp).toLocaleString("vi-VN")}` : undefined}
+        detail={released ? `Phát hành lúc ${new Date(review.release!.release_timestamp).toLocaleString("vi-VN")}${review.approval ? ` · duyệt bởi ${review.approval.reviewer_id}` : ""}` : undefined}
+        extra={released ? (
+          <details className="mt-2 text-xs">
+            <summary className="cursor-pointer text-ink-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-ember">Nguồn kết quả của bản phát hành</summary>
+            <div className="mt-2">
+              <TraceList
+                rows={[
+                  { label: "Revision scene", value: review.record.scene_revision },
+                  { label: "Checksum gói (candidate)", value: review.release!.candidate_checksum ?? review.record.candidate_checksum },
+                  { label: "Checksum báo cáo validation", value: review.release!.validation_report_checksum ?? review.record.validation_report_checksum },
+                  { label: "Checksum release manifest", value: review.release!.release_manifest_checksum },
+                ]}
+              />
+            </div>
+          </details>
+        ) : undefined}
         action={
           released ? (
             <a href={releaseDownloadUrl(jobId)} className={buttonVariants({ size: "sm" })}>
@@ -115,7 +131,7 @@ export function ResultsTab({ jobId, preview, revision, onOpenGaussian, onOpenRev
   );
 }
 
-function ResultCard({ icon, title, badge, body, detail, action }: { icon: ReactNode; title: string; badge: ReactNode; body: string; detail?: string; action: ReactNode }) {
+function ResultCard({ icon, title, badge, body, detail, extra, action }: { icon: ReactNode; title: string; badge: ReactNode; body: string; detail?: string; extra?: ReactNode; action: ReactNode }) {
   return (
     <Card className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center">
       <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-paper-sunken text-ink-muted [&_svg]:size-5">{icon}</div>
@@ -125,6 +141,7 @@ function ResultCard({ icon, title, badge, body, detail, action }: { icon: ReactN
         </p>
         <p className="mt-1 text-sm text-ink-muted">{body}</p>
         {detail && <p className="mt-2 text-xs text-ink-subtle">{detail}</p>}
+        {extra}
       </div>
       <div className="flex flex-wrap gap-2 sm:max-w-60 sm:justify-end">{action}</div>
     </Card>
