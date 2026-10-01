@@ -129,6 +129,16 @@ def main() -> int:
         mark = "OK  " if ok else ("LỖI " if required else "THIẾU")
         print(f"{mark} {name:<24} {detail}" + ("" if ok else f"  → {consequence}"))
         blocked = blocked or (required and not ok)
+    try:
+        from scripts.gpu.gpu_plan import plan_for_machine
+
+        gpus, result = plan_for_machine(64)
+        print(f"\nChia GPU: {len(gpus)} GPU → {len(result.slots)} worker song song ({result.reason})")
+        for gpu in gpus:
+            vulkan = "ghép được" if gpu.wgpu_discrete_index is not None else "CHƯA ghép được (Brush dùng GPU mặc định)"
+            print(f"  GPU {gpu.index}: {gpu.name}, trống {gpu.free_gb:.1f}/{gpu.total_gb:.1f} GB, Vulkan {vulkan}")
+    except (ImportError, ValueError, OSError) as error:
+        print(f"\nChia GPU: không lập được kế hoạch ({error})")
     print("\nKết luận:", "CHƯA chạy được pipeline trên máy này." if blocked else "đủ điều kiện chạy.")
     return 1 if blocked else 0
 

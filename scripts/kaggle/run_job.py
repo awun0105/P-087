@@ -11,8 +11,9 @@ endpoint như Studio vẫn gọi, chờ job chạy, rồi dùng `job_bundle` đ�
     python -m scripts.kaggle.run_job --job-id job-abc --metric-input metric.json \\
         --out /kaggle/working/bundles --hf-repo <user>/real2sim-artifacts
 
-Nhiều video một lượt: `--video a.mp4 b.mp4 c.mp4` (mỗi video một job). Số worker chạy song song lấy theo
-VRAM trống (`--workers auto`, mặc định) hoặc đặt tay (`--workers 2`); các job còn lại xếp hàng.
+Nhiều video một lượt: `--video a.mp4 b.mp4 c.mp4` (mỗi video một job). Số worker và GPU của từng worker do
+`scripts/gpu/gpu_plan.py` chia theo VRAM trống của từng GPU (`--workers auto`, mặc định), hoặc đặt tay tổng số
+worker (`--workers 2`); các job còn lại xếp hàng.
 
 Truyền cả `--video` và `--metric-input` thì chạy một mạch — chỉ đúng khi điểm đo được lấy trên chính
 3DGS của lần chạy này (hệ SfM đổi theo từng lần dựng), nên bình thường phải đi hai lượt.
@@ -32,17 +33,12 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from scripts.gpu.gpu_plan import plan_for_machine
+from scripts.gpu.run_workers import WORKER_COMMAND
 from scripts.kaggle.job_bundle import BundleError, export_bundle, push_bundle, runtime
 
 _METRIC_STAGE = "ST-METRIC-CANONICALIZE"
 _POLL_SECONDS = 15.0
-#: VRAM dành cho bước tách theo vật (SAM2 + render gán nhãn + vá nền). Giả định thận trọng, chưa đo trên GPU
-#: lớn: lần chạy thật trên T2000 4 GB dùng dưới 4 GB với scene ~330k Gaussian.
-_OBJECTIFY_VRAM_GB = 4.0
-#: Chừa 25 % để không tràn VRAM khi hai job cùng ở đỉnh.
-_VRAM_HEADROOM = 1.25
-#: COLMAP + CoACD của một job dùng tốt khoảng 4 nhân.
-_CORES_PER_JOB = 4
 
 
 class RunError(RuntimeError):
@@ -88,23 +84,21 @@ class Api:
 class Stack:
     """API + worker chạy nền trong lúc lệnh này làm việc; log ghi ra thư mục `log_dir`."""
 
-    def __init__(self, port: int, log_dir: Path, workers: int = 1) -> None:
-        self.port, self.log_dir, self.workers = port, log_dir, workers
+    def __init__(self, port: int, log_dir: Path, worker_environments: list[dict[str, str]] | None = None) -> None:
+        self.port, self.log_dir = port, log_dir
+        #: Một phần tử cho mỗi worker: biến môi trường ghim worker đó vào một GPU (rỗng = mặc định).
+        self.worker_environments = worker_environments or [{}]
         self.api = Api(port)
         self.processes: list[subprocess.Popen[bytes]] = []
 
     def __enter__(self) -> "Stack":
         self.log_dir.mkdir(parents=True, exist_ok=True)
         environment = {**os.environ, "APP_PORT": str(self.port)}
-        commands = {
-            "api": [sys.executable, "-m", "uvicorn", "src.main:app", "--host", "127.0.0.1", "--port", str(self.port)],
-        }
+        api = [sys.executable, "-m", "uvicorn", "src.main:app", "--host", "127.0.0.1", "--port", str(self.port)]
+        self._start("api", api, environment)
         # Nhiều worker cùng đọc một hàng đợi: mỗi job chỉ một worker nhận được (claim bằng CAS trong DB).
-        for index in range(self.workers):
-            commands[f"worker-{index}"] = [sys.executable, "-m", "src.services.orchestration.jobs.worker_cli"]
-        for name, command in commands.items():
-            log = (self.log_dir / f"{name}.log").open("ab")
-            self.processes.append(subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=environment))
+        for index, pinned in enumerate(self.worker_environments):
+            self._start(f"worker-{index}", WORKER_COMMAND, {**environment, **pinned})
         for _ in range(120):
             self.require_alive()
             try:
@@ -113,6 +107,10 @@ class Stack:
             except (urllib.error.URLError, OSError):
                 time.sleep(1.0)
         raise RunError(f"API không lên sau 120 giây; xem {self.log_dir}/api.log")
+
+    def _start(self, name: str, command: list[str], environment: dict[str, str]) -> None:
+        log = (self.log_dir / f"{name}.log").open("ab")
+        self.processes.append(subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=environment))
 
     def require_alive(self) -> None:
         """API hoặc worker chết giữa chừng thì dừng ngay thay vì chờ vô hạn."""
@@ -154,48 +152,6 @@ def wait_for_pause(stack: Stack, job_ids: list[str]) -> dict[str, dict]:
         if len(paused) == len(job_ids):
             return paused
         time.sleep(_POLL_SECONDS)
-
-
-def plan_workers(requested: str, jobs: int, processing: dict | None) -> tuple[int, str]:
-    """Số worker chạy song song trên GPU này + lý do.
-
-    `auto`: chia VRAM trống của GPU đầu tiên cho nhu cầu một job (ước lượng train của file cấu hình xử lý,
-    không thấp hơn mức dành cho bước tách theo vật), chặn thêm theo RAM và số nhân. Chưa chia việc ra nhiều
-    GPU: mọi worker dùng GPU mà Brush/torch chọn mặc định.
-    """
-    if requested != "auto":
-        return max(1, min(int(requested), jobs)), "theo --workers"
-    from src.config import get_settings
-    from src.services.orchestration.processing import load_presets
-    from src.services.orchestration.processing.config import preset_values
-    from src.services.orchestration.processing.resources import estimate_gb
-
-    try:
-        text = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=True,
-        ).stdout
-        free_gb = float(text.splitlines()[0]) / 1024
-    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
-        return 1, "không đọc được VRAM"
-    config = get_settings().product_processing_config
-    if config is None:
-        return 1, "chưa có file cấu hình xử lý"
-    presets, _ = load_presets(config)
-    need = estimate_gb(presets.resource_model, {**preset_values(presets, "minimum_quality"), **(processing or {})})
-    per_job = max(need["vram"], _OBJECTIFY_VRAM_GB) * _VRAM_HEADROOM
-    ram_gb = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1e9
-    limits = {
-        "VRAM": int(free_gb // per_job),
-        "RAM": int(ram_gb // max(need["ram"], 1.0)),
-        "CPU": max(1, len(os.sched_getaffinity(0)) // _CORES_PER_JOB),
-        "số job": jobs,
-    }
-    bound = min(limits, key=lambda name: limits[name])
-    return max(1, limits[bound]), f"VRAM trống {free_gb:.1f} GB, mỗi job ~{per_job:.1f} GB; chặn bởi {bound}"
 
 
 def confirm_metric(api: Api, job_id: str, metric_input: dict) -> None:
@@ -245,9 +201,13 @@ def run(args: argparse.Namespace) -> int:
     count = len(args.video or args.job_id)
     if len(metrics) not in (0, count):
         raise RunError("--metric-input phải bỏ trống hoặc đủ một file cho mỗi job, theo đúng thứ tự")
-    workers, reason = plan_workers(args.workers, count, processing)
-    print(f"worker song song: {workers} ({reason})")
-    with Stack(args.port, args.out / "logs", workers) as stack:
+    gpus, plan = plan_for_machine(
+        count if args.workers == "auto" else min(count, max(1, int(args.workers))), processing
+    )
+    print(f"{len(gpus)} GPU, {len(plan.slots)} worker song song — {plan.reason}")
+    for slot in plan.slots:
+        print(f"  worker {slot.worker} → GPU {slot.gpu_index}")
+    with Stack(args.port, args.out / "logs", [slot.environment for slot in plan.slots]) as stack:
         api = stack.api
         job_ids = list(args.job_id or [])
         if args.video:
@@ -307,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help="JSON UserMetricInput, một file cho mỗi job theo thứ tự",
     )
-    parser.add_argument("--workers", default="auto", help="số worker song song trên GPU, hoặc `auto` theo VRAM trống")
+    parser.add_argument("--workers", default="auto", help="tổng số worker, hoặc `auto` theo VRAM trống từng GPU")
     parser.add_argument("--out", type=Path, required=True, help="thư mục chứa gói xuất ra và log")
     parser.add_argument("--hf-repo", help="dataset repo Hugging Face để đẩy gói (cần HF_TOKEN)")
     parser.add_argument("--port", type=int, default=8000)
