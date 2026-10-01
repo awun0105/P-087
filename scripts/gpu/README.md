@@ -77,7 +77,8 @@ systemd-run --user --unit r2s-thermal --working-directory="$PWD" scripts/gpu/the
 journalctl --user -u r2s-thermal -f      # xem các lần đóng băng/chạy tiếp
 ```
 
-Ngưỡng mặc định: đóng băng khi CPU ≥ 88°C hoặc GPU ≥ 82°C, chạy tiếp khi CPU ≤ 72°C và GPU ≤ 68°C
+Ngưỡng mặc định: đóng băng khi CPU ≥ 90°C hoặc GPU ≥ 82°C, chạy tiếp khi CPU ≤ 80°C và GPU ≤ 68°C
+(ngưỡng chạy tiếp phải cao hơn nhiệt nền lúc máy rảnh, nếu không stack sẽ bị giữ đóng băng)
 (đổi bằng `HOT_CPU`, `HOT_GPU`, `COOL_CPU`, `COOL_GPU`). Máy thuê trong datacenter không cần bước này.
 
 ## 5. Xử lý Aisle_CW và export demo

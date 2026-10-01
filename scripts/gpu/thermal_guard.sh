@@ -11,8 +11,8 @@
 set -euo pipefail
 
 UNIT="${1:-r2s-stack}"
-HOT_CPU="${HOT_CPU:-88}"; HOT_GPU="${HOT_GPU:-82}"
-COOL_CPU="${COOL_CPU:-72}"; COOL_GPU="${COOL_GPU:-68}"
+HOT_CPU="${HOT_CPU:-90}"; HOT_GPU="${HOT_GPU:-82}"
+COOL_CPU="${COOL_CPU:-80}"; COOL_GPU="${COOL_GPU:-68}"
 POLL="${POLL:-3}"
 
 cpu_zone=""
