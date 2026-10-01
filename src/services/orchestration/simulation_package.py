@@ -101,7 +101,7 @@ def _reference(job_id: str, uri_tail: str, artifact_type: str, stage: StageId, p
 
 def _publish(registry: ProjectRegistry, reference: ProductArtifactRef, payload: bytes) -> ProductArtifactRef:
     """Publish idempotent: cùng nội dung → cùng URI, đã có thì dùng lại."""
-    if registry.runtime_resolver.resolve(reference.artifact_uri).is_file():
+    if registry.runtime_resolver.locate(reference.artifact_uri) is not None:
         return reference
     return registry.scene.store.publish(reference, payload)
 
@@ -109,8 +109,8 @@ def _publish(registry: ProjectRegistry, reference: ProductArtifactRef, payload: 
 def current_package(registry: ProjectRegistry, job_id: str) -> SimulationPackage | None:
     """Gói của revision SceneIR hiện tại, nếu đã tạo."""
     revision = registry.scene.current(job_id).scene.scene_revision
-    path = registry.runtime_resolver.resolve(record_uri(job_id, revision))
-    return SimulationPackage.model_validate_json(path.read_bytes()) if path.is_file() else None
+    path = registry.runtime_resolver.locate(record_uri(job_id, revision))
+    return SimulationPackage.model_validate_json(path.read_bytes()) if path is not None else None
 
 
 def _carved_environment(registry: ProjectRegistry, scene: SceneIR) -> tuple[np.ndarray, np.ndarray, int]:

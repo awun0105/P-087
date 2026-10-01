@@ -150,3 +150,26 @@ def test_without_remote_behaviour_is_unchanged(tmp_path: Path) -> None:
     shutil.rmtree(tmp_path / "jobs")
     with pytest.raises(ArtifactNotFoundError):
         resolver.require(reference)
+
+
+def test_locate_finds_artifact_published_by_another_machine(tmp_path) -> None:  # noqa: ANN001
+    """`locate` thay cho `resolve().is_file()`: đĩa này chưa có nhưng kho file có thì tải về; chưa có ở đâu → None."""
+    from src.services.orchestration.artifacts import ArtifactRemote, ArtifactResolver
+    from tests.test_orchestration.memory_object_store import MemoryObjectStore
+
+    store = MemoryObjectStore()
+    writer = ArtifactResolver(tmp_path / "worker", ArtifactRemote(store))
+    reader = ArtifactResolver(tmp_path / "api", ArtifactRemote(store))
+    uri = "artifact://jobs/job-a/scene/scene_ir.rev-002.json"
+
+    assert reader.locate(uri) is None
+    path = writer.resolve(uri)
+    path.parent.mkdir(parents=True)
+    path.write_text("scene")
+    writer.published(uri)
+
+    # Kết quả "chưa có" được nhớ vài giây; `fresh=True` hỏi lại kho file ngay.
+    assert reader.locate(uri) is None
+    found = reader.locate(uri, fresh=True)
+    assert found is not None and found.read_text() == "scene" and found.is_relative_to(tmp_path / "api")
+    assert ArtifactResolver(tmp_path / "local-only").locate(uri) is None

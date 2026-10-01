@@ -6,19 +6,15 @@ Hai kiểu yêu cầu, đều do người dùng chọn trên Studio:
 - `boxes`: dùng hộp ứng viên (ADR 0006) — lựa chọn lùi khi tách theo vật không thành công.
 
 Job đã `SUCCEEDED` là trạng thái kết thúc (PRODUCT-02) nên việc này **không** đổi vòng đời job: nó là
-một thao tác trên scene, kết quả là revision SceneIR kế tiếp do `reobjectify` ghi. Trạng thái yêu cầu là
-một file JSON nhỏ trong workspace của worker (`PRODUCT_WORKER_ROOT/<job_id>/objectify_request.json`),
-không phải artifact và không nằm trong SceneIR.
-
-Giới hạn: API và worker phải nhìn thấy cùng `PRODUCT_WORKER_ROOT` (triển khai một máy / một volume).
-Triển khai tách API và worker ở hai máy cần chuyển trạng thái này sang DB — chưa làm.
+một thao tác trên scene, kết quả là revision SceneIR kế tiếp. Trạng thái yêu cầu nằm trong bảng
+`r2s_scene_requests` của DB runtime — cùng DB mà API và worker đã dùng chung cho hàng đợi job — nên chạy được
+cả khi API và worker ở hai máy khác nhau. Mỗi job giữ yêu cầu gần nhất; không phải artifact, không nằm trong
+SceneIR.
 """
 
 import logging
-import os
-import re
-from datetime import UTC, datetime
-from pathlib import Path
+import socket
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import uuid4
 
@@ -26,6 +22,7 @@ from pydantic import BaseModel, ConfigDict
 
 from src.config import Settings
 from src.services.orchestration.artifacts import ArtifactStoreError
+from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeTransaction
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneError, SceneRevisionConflictError
 from src.services.orchestration.scene_extraction import use_boxes
@@ -34,8 +31,6 @@ from src.services.orchestration.stage_views import job_bundle
 
 logger = logging.getLogger(__name__)
 
-_FILE = "objectify_request.json"
-_JOB_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
 ObjectifyStatus = Literal["idle", "queued", "running", "done", "failed"]
 ObjectifyMode = Literal["objectify", "boxes"]
 
@@ -80,26 +75,26 @@ class _Record(BaseModel):
     requested_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    #: Máy của worker đã nhận yêu cầu (để nhận ra yêu cầu mồ côi khi worker máy đó khởi động lại).
+    worker_host: str | None = None
 
 
-def _path(settings: Settings, job_id: str) -> Path:
-    if _JOB_ID.fullmatch(job_id) is None:
-        raise ObjectifyRequestError("job_id không hợp lệ")
-    return settings.product_worker_root.expanduser().resolve() / job_id / _FILE
+def _database(settings: Settings) -> RuntimeDatabase:
+    return RuntimeDatabase(settings.database_url)
 
 
-def _read(path: Path) -> _Record | None:
-    if not path.is_file():
-        return None
-    return _Record.model_validate_json(path.read_text(encoding="utf-8"))
+def _read(tx: RuntimeTransaction, job_id: str, *, lock: bool = False) -> _Record | None:
+    suffix = tx.lock_suffix() if lock else ""
+    row = tx.execute("SELECT payload FROM r2s_scene_requests WHERE job_id=?" + suffix, (job_id,)).fetchone()
+    return _Record.model_validate_json(row[0]) if row is not None else None
 
 
-def _write(path: Path, record: _Record) -> None:
-    """Ghi qua file tạm rồi đổi tên để bên đọc không bao giờ thấy file dở."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(f".{uuid4().hex}.tmp")
-    temporary.write_text(record.model_dump_json(), encoding="utf-8")
-    os.replace(temporary, path)
+def _write(tx: RuntimeTransaction, job_id: str, record: _Record) -> None:
+    tx.execute(
+        "INSERT INTO r2s_scene_requests(job_id,status,payload) VALUES (?,?,?) "
+        "ON CONFLICT(job_id) DO UPDATE SET status=excluded.status, payload=excluded.payload",
+        (job_id, record.status, record.model_dump_json()),
+    )
 
 
 def runtime_available(settings: Settings) -> bool:
@@ -109,15 +104,20 @@ def runtime_available(settings: Settings) -> bool:
 
 
 def state(registry: ProjectRegistry, settings: Settings, job_id: str) -> ObjectifyState:
-    """Trạng thái cho UI: scene đang là đường nào, có chạy lại được không, yêu cầu gần nhất ra sao."""
+    """Trạng thái cho UI: scene đang là đường nào, có chạy lại được không, yêu cầu gần nhất ra sao.
+
+    `available` phản ánh máy đang trả lời (API). Khi worker ở máy khác, API không biết runtime của worker:
+    đặt `PRODUCT_OBJECTIFY_REMOTE_WORKER=true` trên API để báo "có worker lo việc này".
+    """
     provenance = registry.scene.current(job_id).scene.provenance
-    record = _read(_path(settings, job_id))
+    with _database(settings).transaction() as tx:
+        record = _read(tx, job_id)
     note = provenance.get("note")
     return ObjectifyState(
-        **(record.model_dump() if record is not None else {}),
+        **(record.model_dump(exclude={"worker_host"}) if record is not None else {}),
         object_centric=provenance.get("object_extraction") == METHOD,
         awaiting_choice=provenance.get("object_extraction") == AWAITING_CHOICE,
-        available=runtime_available(settings),
+        available=runtime_available(settings) or settings.product_objectify_remote_worker,
         note=str(note) if note else None,
     )
 
@@ -125,74 +125,92 @@ def state(registry: ProjectRegistry, settings: Settings, job_id: str) -> Objecti
 def request(
     registry: ProjectRegistry, settings: Settings, job_id: str, expected_revision: str, mode: ObjectifyMode
 ) -> ObjectifyState:
-    """Xếp hàng một yêu cầu; từ chối khi đang có yêu cầu dở, scene đã đổi, hoặc máy thiếu điều kiện."""
+    """Xếp hàng một yêu cầu; từ chối khi đang có yêu cầu dở, scene đã đổi, hoặc không máy nào làm được."""
     job = registry.get_job(job_id)
     current = registry.scene.current(job_id).scene.scene_revision
     if current != expected_revision:
         raise SceneRevisionConflictError(f"scene đã ở {current}, không phải {expected_revision}; tải lại rồi thử lại")
-    if mode == "objectify" and not runtime_available(settings):
+    if mode == "objectify" and not (runtime_available(settings) or settings.product_objectify_remote_worker):
         raise ObjectifyRequestError("Máy xử lý chưa cài runtime tách theo vật (xem scripts/gpu/README.md)")
     if job_bundle(registry, job) is None:
         raise ObjectifyRequestError("Job chưa có kết quả dựng hình hệ mét nên chưa dựng được tập vật")
-    path = _path(settings, job_id)
-    previous = _read(path)
-    if previous is not None and previous.status in ("queued", "running"):
-        raise ObjectifyRequestError("Đang có một yêu cầu dựng lại tập vật cho scene này")
-    _write(path, _Record(status="queued", mode=mode, base_revision=current, requested_at=datetime.now(UTC)))
+    with _database(settings).transaction(write=True) as tx:
+        previous = _read(tx, job_id, lock=True)
+        if previous is not None and previous.status in ("queued", "running"):
+            raise ObjectifyRequestError("Đang có một yêu cầu dựng lại tập vật cho scene này")
+        _write(tx, job_id, _Record(status="queued", mode=mode, base_revision=current, requested_at=datetime.now(UTC)))
     return state(registry, settings, job_id)
 
 
-def recover_interrupted(settings: Settings) -> int:
-    """Lúc worker khởi động: yêu cầu còn ghi "running" là của lần chạy đã chết → đánh dấu lỗi để chạy lại được."""
-    root = settings.product_worker_root.expanduser().resolve()
+#: Yêu cầu "running" lâu hơn mức này coi như worker đã chết, dù ở máy nào (dài hơn nhiều so với 3 lần thử).
+_STALE_AFTER = timedelta(hours=3)
+#: Lúc worker khởi động, yêu cầu "running" của chính máy này mà cũ hơn mức này là của lần chạy trước đã chết.
+#: Không lấy 0: các worker cùng nhóm khởi động lệch nhau vài giây, worker khởi động sau không được huỷ việc
+#: worker khởi động trước vừa nhận.
+_OWN_HOST_GRACE = timedelta(seconds=60)
+
+
+def recover_interrupted(settings: Settings, host: str | None = None) -> int:
+    """Lúc worker khởi động: đánh dấu lỗi các yêu cầu "running" mồ côi để người dùng chạy lại được.
+
+    Mồ côi = do máy `host` (mặc định: máy này) nhận từ trước khi nhóm worker hiện tại khởi động, hoặc đã
+    "running" quá `_STALE_AFTER` ở bất kỳ máy nào (máy đó đã bị tắt/trả).
+    """
+    host = host or socket.gethostname()
+    now = datetime.now(UTC)
     recovered = 0
-    for path in sorted(root.glob(f"*/{_FILE}")):
-        record = _read(path)
-        path.with_suffix(".lock").unlink(missing_ok=True)
-        if record is not None and record.status == "running":
-            _write(
-                path,
-                record.model_copy(
-                    update={
-                        "status": "failed",
-                        "error": "Worker dừng giữa chừng; bấm chạy lại.",
-                        "finished_at": datetime.now(UTC),
-                    }
-                ),
-            )
+    with _database(settings).transaction(write=True) as tx:
+        rows = tx.execute("SELECT job_id, payload FROM r2s_scene_requests WHERE status=?", ("running",)).fetchall()
+        for job_id, payload in rows:
+            record = _Record.model_validate_json(payload)
+            age = now - (record.started_at or record.requested_at)
+            if not (age > _STALE_AFTER or (record.worker_host == host and age > _OWN_HOST_GRACE)):
+                continue
+            update = {"status": "failed", "error": "Worker dừng giữa chừng; bấm chạy lại.", "finished_at": now}
+            _write(tx, str(job_id), record.model_copy(update=update))
             recovered += 1
     return recovered
 
 
+def _claim(settings: Settings) -> tuple[str, _Record] | None:
+    """Nhận một yêu cầu đang chờ: đọc có khoá rồi ghi `running` trong cùng transaction, nên chỉ một worker nhận."""
+    with _database(settings).transaction(write=True) as tx:
+        row = tx.execute(
+            "SELECT job_id FROM r2s_scene_requests WHERE status=? ORDER BY job_id LIMIT 1", ("queued",)
+        ).fetchone()
+        if row is None:
+            return None
+        job_id = str(row[0])
+        record = _read(tx, job_id, lock=True)
+        if record is None or record.status != "queued":
+            return None
+        running = record.model_copy(
+            update={"status": "running", "started_at": datetime.now(UTC), "worker_host": socket.gethostname()}
+        )
+        _write(tx, job_id, running)
+    return job_id, running
+
+
 def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
     """Worker: thực hiện tối đa một yêu cầu đang chờ; trả True nếu đã xử lý một yêu cầu."""
-    root = settings.product_worker_root.expanduser().resolve()
-    for path in sorted(root.glob(f"*/{_FILE}")):
-        record = _read(path)
-        if record is None or record.status != "queued":
-            continue
-        job_id = path.parent.name
-        lock = path.with_suffix(".lock")
-        try:
-            # Nhiều worker cùng quét: tạo file khoá kiểu "chỉ tạo mới" để chỉ một worker nhận yêu cầu này.
-            lock.open("x").close()
-        except FileExistsError:
-            continue
-        running = record.model_copy(update={"status": "running", "started_at": datetime.now(UTC)})
-        _write(path, running)
-        outcome: dict[str, object]
-        try:
-            current = registry.scene.current(job_id).scene.scene_revision
-            if current != record.base_revision:
-                raise ObjectifyError(f"scene đã đổi sang {current} sau khi yêu cầu; yêu cầu lại nếu vẫn cần")
-            workspace = path.parent / f"{record.mode}-{uuid4().hex}"
-            operation = reobjectify if record.mode == "objectify" else use_boxes
-            revision = operation(registry, job_id, settings, workspace)
-            outcome = {"status": "done", "result_revision": revision}
-        except (ObjectifyError, ArtifactStoreError, SceneError, ValueError, OSError) as error:
-            logger.warning("Dựng lại tập vật (%s) lỗi job=%s cause=%s", record.mode, job_id, error)
-            outcome = {"status": "failed", "error": str(error)[:500]}
-        _write(path, running.model_copy(update={**outcome, "finished_at": datetime.now(UTC)}))
-        lock.unlink(missing_ok=True)
-        return True
-    return False
+    claimed = _claim(settings)
+    if claimed is None:
+        return False
+    job_id, running = claimed
+    outcome: dict[str, object]
+    try:
+        # Worker ở máy khác: lấy về artifact mới nhất của job (kể cả revision scene do API ghi khi người dùng sửa).
+        registry.runtime_resolver.sync_down(job_id)
+        current = registry.scene.current(job_id).scene.scene_revision
+        if current != running.base_revision:
+            raise ObjectifyError(f"scene đã đổi sang {current} sau khi yêu cầu; yêu cầu lại nếu vẫn cần")
+        root = settings.product_worker_root.expanduser().resolve() / job_id
+        operation = reobjectify if running.mode == "objectify" else use_boxes
+        revision = operation(registry, job_id, settings, root / f"{running.mode}-{uuid4().hex}")
+        outcome = {"status": "done", "result_revision": revision}
+    except (ObjectifyError, ArtifactStoreError, SceneError, ValueError, OSError) as error:
+        logger.warning("Dựng lại tập vật (%s) lỗi job=%s cause=%s", running.mode, job_id, error)
+        outcome = {"status": "failed", "error": str(error)[:500]}
+    with _database(settings).transaction(write=True) as tx:
+        _write(tx, job_id, running.model_copy(update={**outcome, "finished_at": datetime.now(UTC)}))
+    return True

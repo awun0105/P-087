@@ -70,7 +70,7 @@ class MetricConfirmationService:
         self.port = user_metric_port(registry.runtime_resolver.require, self.writer, self._exists)
 
     def _exists(self, artifact_uri: str) -> bool:
-        return self.registry.runtime_resolver.resolve(artifact_uri).is_file()
+        return self.registry.runtime_resolver.locate(artifact_uri) is not None
 
     def _waiting_job(self, job_id: str) -> tuple[JobManifest, ReconstructionPreview]:
         job = self.registry.get_job(job_id)
@@ -88,8 +88,8 @@ class MetricConfirmationService:
         Bản ghi do bước chuẩn bị offline publish tại URI cố định; checksum tính từ bytes
         đang có, port REC kiểm tiếp căn chỉnh/LiDAR/camera pose bên trong.
         """
-        path = self.registry.runtime_resolver.resolve(lidar_support_uri(job_id))
-        if not path.is_file():
+        path = self.registry.runtime_resolver.locate(lidar_support_uri(job_id))
+        if path is None:
             return None
         return ProductArtifactRef(
             artifact_type="DemoLidarSupport",

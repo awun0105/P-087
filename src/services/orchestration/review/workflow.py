@@ -96,8 +96,8 @@ def _ref(job_id: str, uri: str, artifact_type: str, stage: StageId, payload: byt
 
 
 def _read(registry: ProjectRegistry, uri: str) -> bytes | None:
-    path = registry.runtime_resolver.resolve(uri)
-    return path.read_bytes() if path.is_file() else None
+    path = registry.runtime_resolver.locate(uri)
+    return path.read_bytes() if path is not None else None
 
 
 def _publish_once(registry: ProjectRegistry, reference: ProductArtifactRef, payload: bytes) -> None:
@@ -294,7 +294,7 @@ def seal_release(registry: ProjectRegistry, job_id: str) -> ReviewState:
         StageId.RELEASE,
         archive,
     )
-    if not registry.runtime_resolver.resolve(archive_ref.artifact_uri).is_file():
+    if registry.runtime_resolver.locate(archive_ref.artifact_uri) is None:
         registry.scene.store.publish(archive_ref, archive)
     uri = release_uri(job_id, candidate.candidate_checksum)
     _publish_once(registry, _ref(job_id, uri, "ReleaseManifest", StageId.RELEASE, manifest_bytes), manifest_bytes)
@@ -318,7 +318,7 @@ def _release_archive_ref(
     registry: ProjectRegistry, job_id: str, manifest: ReleaseManifest
 ) -> ProductArtifactRef | None:
     uri = f"artifact://jobs/{job_id}/release/{_hex(manifest.candidate_checksum)}/release.zip"
-    path = registry.runtime_resolver.resolve(uri)
-    if not path.is_file():
+    path = registry.runtime_resolver.locate(uri)
+    if path is None:
         return None
     return _ref(job_id, uri, "ReleaseArchive", StageId.RELEASE, path.read_bytes())

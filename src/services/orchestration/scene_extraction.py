@@ -77,7 +77,7 @@ def _idempotent_publish(registry: ProjectRegistry) -> Publish:
     store = FilesystemArtifactStore(registry.runtime_resolver)
 
     def publish(reference, payload):  # noqa: ANN001, ANN202 - writer idempotent theo nội dung
-        if registry.runtime_resolver.resolve(reference.artifact_uri).is_file():
+        if registry.runtime_resolver.locate(reference.artifact_uri) is not None:
             return reference
         return store.publish(reference, payload)
 

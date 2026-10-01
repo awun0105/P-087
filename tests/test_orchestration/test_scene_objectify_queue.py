@@ -33,6 +33,7 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
         product_scene_runtime_python=python,
         product_sam2_checkpoint=checkpoint,
         product_worker_root=tmp_path / "workers",
+        database_url=f"sqlite:///{tmp_path / 'requests.db'}",
     )
     monkeypatch.setattr(scene_objectify_queue, "job_bundle", lambda *_: bundle)
     return registry, job, bundle, settings
@@ -142,7 +143,9 @@ def test_request_rejects_stale_revision_and_missing_runtime(world, monkeypatch, 
     assert scene_objectify_queue.request(registry, bare, job.job_id, "rev-001", "boxes").status == "queued"
 
 
-def test_worker_restart_marks_interrupted_request_failed(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+def test_worker_restart_marks_only_orphaned_requests_failed(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    from datetime import timedelta
+
     registry, job, bundle, settings = world
     monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
     extract_scene(registry, job, bundle, settings, tmp_path / "work")
@@ -156,8 +159,67 @@ def test_worker_restart_marks_interrupted_request_failed(world, monkeypatch, tmp
         scene_objectify_queue.process_next(registry, settings)
     assert scene_objectify_queue.state(registry, settings, job.job_id).status == "running"
 
+    # Worker cùng nhóm khởi động lệch vài giây, hoặc worker ở máy khác: không được huỷ việc đang chạy.
+    assert scene_objectify_queue.recover_interrupted(settings) == 0
+    monkeypatch.setattr(scene_objectify_queue, "_OWN_HOST_GRACE", timedelta(0))
+    assert scene_objectify_queue.recover_interrupted(settings, host="may-khac") == 0
+    # Chính máy đã nhận yêu cầu khởi động lại sau khi chết: yêu cầu mồ côi → lỗi, người dùng chạy lại được.
     assert scene_objectify_queue.recover_interrupted(settings) == 1
     assert scene_objectify_queue.state(registry, settings, job.job_id).status == "failed"
+    assert scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "boxes").status == "queued"
+
+
+def test_second_worker_cannot_claim_a_request_already_taken(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "work")
+    scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "objectify")
+
+    assert scene_objectify_queue._claim(settings) is not None
+    assert scene_objectify_queue._claim(settings) is None
+
+
+def test_api_and_worker_on_different_machines_share_requests_and_revisions(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    """Hai máy: đĩa artifact và workspace riêng, chỉ chung DB runtime + kho file (ADR 0003)."""
+    from src.services.orchestration.artifacts import ArtifactRemote, ArtifactResolver
+    from src.services.orchestration.scene.editor import SceneEditor
+    from tests.test_orchestration.memory_object_store import MemoryObjectStore
+
+    worker_registry, job, bundle, settings = world
+    remote = ArtifactRemote(MemoryObjectStore())
+    worker_registry.runtime_resolver.remote = remote
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(worker_registry, job, bundle, settings, tmp_path / "work")
+    worker_registry.runtime_resolver.sync_up(job.job_id)
+
+    # "Máy API": đĩa trống, không có runtime GPU, không thấy workspace của worker.
+    api_resolver = ArtifactResolver(tmp_path / "api-disk", remote)
+    api_scene = SceneEditor(worker_registry.scene.fixture_scene_path.parents[1], api_resolver)
+    api_settings = settings.model_copy(
+        update={
+            "product_scene_runtime_python": None,
+            "product_worker_root": tmp_path / "api-workers",
+            "product_objectify_remote_worker": True,
+        }
+    )
+    assert api_scene.current(job.job_id).scene.scene_revision == "rev-001"  # tải từ kho file
+    monkeypatch.setattr(worker_registry, "scene", api_scene)  # API đọc scene qua đĩa của chính nó
+    queued = scene_objectify_queue.request(worker_registry, api_settings, job.job_id, "rev-001", "boxes")
+    assert queued.status == "queued" and queued.available
+
+    # "Máy worker": nhận yêu cầu từ DB, dựng hộp, đẩy revision mới lên kho file.
+    worker_scene = SceneEditor(api_scene.fixture_scene_path.parents[1], worker_registry.runtime_resolver)
+    monkeypatch.setattr(worker_registry, "scene", worker_scene)
+    monkeypatch.setattr(scene_extraction, "_sam2_runtime", lambda _: None)
+    monkeypatch.setattr("src.services.orchestration.stage_views.job_bundle", lambda *_: bundle)
+    assert scene_objectify_queue.process_next(worker_registry, settings) is True
+
+    # API thấy kết quả mà không cần chung đĩa hay khởi động lại.
+    monkeypatch.setattr(worker_registry, "scene", api_scene)
+    done = scene_objectify_queue.state(worker_registry, api_settings, job.job_id)
+    assert (done.status, done.result_revision) == ("done", "rev-002")
+    assert api_scene.current(job.job_id).scene.scene_revision == "rev-002"
+    assert not (tmp_path / "api-workers").exists()
 
 
 def test_api_process_sees_revision_published_by_another_process(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001

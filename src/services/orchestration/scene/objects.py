@@ -158,7 +158,7 @@ def add_box_object(
         job_id=job_id,
     )
     # GLB hộp định danh theo nội dung: đã có thì dùng lại (cùng kích thước → cùng bytes).
-    if not editor.resolver.resolve(reference.artifact_uri).is_file():
+    if editor.resolver.locate(reference.artifact_uri) is None:
         editor.store.publish(reference, payload)
     command = PrimitiveObjectCommand(
         object_id=object_id,
@@ -209,7 +209,7 @@ def add_catalog_object(
         producer_stage=StageId.EDIT,
         job_id=job_id,
     )
-    if not editor.resolver.resolve(reference.artifact_uri).is_file():
+    if editor.resolver.locate(reference.artifact_uri) is None:
         editor.store.publish(reference, payload)
     volume = dimensions[0] * dimensions[1] * dimensions[2]
     command = PrimitiveObjectCommand(

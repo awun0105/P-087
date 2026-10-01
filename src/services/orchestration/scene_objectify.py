@@ -362,7 +362,7 @@ def reobjectify(registry: ProjectRegistry, job_id: str, settings: Settings, work
     store = FilesystemArtifactStore(registry.runtime_resolver)
 
     def publish(reference: ProductArtifactRef, payload: bytes) -> ProductArtifactRef:
-        if registry.runtime_resolver.resolve(reference.artifact_uri).is_file():
+        if registry.runtime_resolver.locate(reference.artifact_uri) is not None:
             return reference
         return store.publish(reference, payload)
 

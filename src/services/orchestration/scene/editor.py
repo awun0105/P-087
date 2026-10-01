@@ -79,7 +79,7 @@ class SceneEditor:
         # revision liền mạch nên chỉ cần dò tiếp từ bản đang giữ — thường là một lần kiểm tồn tại.
         for _ in range(_MAX_RECOVERY_STEPS):
             cached = self._revisions[job_id]
-            newer = self._load_revision(job_id, _next_scene_revision(cached.scene.scene_revision))
+            newer = self._load_revision(job_id, _next_scene_revision(cached.scene.scene_revision), fresh=True)
             if newer is None:
                 break
             self._revisions[job_id] = newer
@@ -285,10 +285,10 @@ class SceneEditor:
             revision = _next_scene_revision(revision)
         raise SceneEditRejectedError(f"chuỗi revision của {job_id} vượt {_MAX_RECOVERY_STEPS} bước")
 
-    def _load_revision(self, job_id: str, revision: str) -> SceneRevision | None:
+    def _load_revision(self, job_id: str, revision: str, *, fresh: bool = False) -> SceneRevision | None:
         """Đọc một revision đã publish; None nếu chưa có. Hỏng thì raise, không đoán."""
-        path = self.resolver.resolve(scene_artifact_uri(job_id, revision))
-        if not path.is_file():
+        path = self.resolver.locate(scene_artifact_uri(job_id, revision), fresh=fresh)
+        if path is None:
             return None
         reference = self._reference_for(job_id, revision, sha256_file(path))
         scene = SceneIR.model_validate_json(path.read_text(encoding="utf-8"))
@@ -368,7 +368,8 @@ class SceneEditor:
         try:
             self.store.publish(reference, payload)
         except ArtifactAlreadyExistsError:
-            if self.resolver.resolve(reference.artifact_uri).read_bytes() != payload:
+            existing = self.resolver.locate(reference.artifact_uri)
+            if existing is None or existing.read_bytes() != payload:
                 raise
 
 

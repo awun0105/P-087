@@ -100,6 +100,16 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
         4,
         ("CREATE TABLE r2s_imports (import_id TEXT PRIMARY KEY, upload_id TEXT NOT NULL, payload TEXT NOT NULL)",),
     ),
+    (
+        # Yêu cầu dựng lại tập vật của scene (chạy lại tách theo vật / dùng hộp): API ghi, worker nhận.
+        # Nằm trong DB chung để API và worker ở hai máy khác nhau vẫn thấy nhau; mỗi job giữ yêu cầu gần nhất.
+        5,
+        (
+            """CREATE TABLE r2s_scene_requests (
+                job_id TEXT PRIMARY KEY, status TEXT NOT NULL, payload TEXT NOT NULL)""",
+            "CREATE INDEX r2s_scene_requests_by_status ON r2s_scene_requests(status)",
+        ),
+    ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
