@@ -166,7 +166,7 @@ export function MetricConfirmView({
     <div className="grid size-full lg:grid-cols-[1fr_22rem]">
       <div className="relative min-h-80 bg-viewport">
         {capability === "failed" || capability === "unavailable" ? (
-          <p className="grid size-full place-items-center p-6 text-center text-sm text-paper/80" role="alert">
+          <p className="grid size-full place-items-center p-6 text-center text-sm text-on-dark/80" role="alert">
             Không render được 3DGS để chọn điểm: trình duyệt cần WebGL2 hoặc WebGPU.
           </p>
         ) : (

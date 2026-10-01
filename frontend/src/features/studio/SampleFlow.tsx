@@ -118,7 +118,7 @@ export function SampleSelectStep({
           {sample.video ? (
             <video src={fileUrl(sample.video.name)} className="size-full object-cover" controls muted playsInline preload="metadata" />
           ) : (
-            <div className="grid size-full place-items-center text-sm text-paper/70">Bundle này không kèm video gốc</div>
+            <div className="grid size-full place-items-center text-sm text-on-dark/70">Bundle này không kèm video gốc</div>
           )}
         </div>
         {sample.source.note && (

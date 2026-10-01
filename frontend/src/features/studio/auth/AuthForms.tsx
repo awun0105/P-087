@@ -10,6 +10,7 @@ import { cloneElement, isValidElement, useEffect, useId, useRef, useState, type 
 import { Input } from "@/components/shadcn/input";
 import { Label } from "@/components/shadcn/label";
 import { BrandWordmark, Button, Notice } from "@/components/studio/primitives";
+import { ThemeToggle } from "@/features/shell/ThemeToggle";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { notifySuccess, FieldError } from "@/components/studio/feedback";
 import { login, register } from "@/lib/api/auth";
@@ -75,7 +76,8 @@ const STEPS = [
  */
 function Shell({ title, lead, children }: { title: string; lead: string; children: React.ReactNode }) {
   return (
-    <main className="grid min-h-dvh bg-paper p-2 text-ink lg:grid-cols-2">
+    <main className="relative grid min-h-dvh bg-paper p-2 text-ink lg:grid-cols-2">
+      <ThemeToggle className="absolute top-4 right-4 z-10" />
       <div className="flex items-center justify-center px-4 py-10">
         <div className="w-full max-w-sm">
           <Link href="/" className="mb-10 flex items-center gap-2 font-semibold">

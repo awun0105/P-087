@@ -800,6 +800,18 @@ runtime; Chrome headless điều khiển qua CDP (click/gõ thật). Không ph�
   `ink-subtle` 3,47:1, `ember-strong` 3,98:1 trên paper; hai màu sau không đạt AA cho chữ nhỏ và vẫn đang được dùng
   (có từ trước), chưa đổi vì là màu của bộ nhận diện.
 
+### Theme sáng/tối — 2026-10-01 (trên `feat/pipeline-v2`)
+
+- **Authority:** user yêu cầu nút đổi dark/light, light là bản hiện tại; ghi ở PRODUCT §11.2 D-14.
+- **Changed:** `globals.css` (token Studio thành biến ở `:root`, bản tối ở `.dark`, token `on-dark` và
+  `destructive-fill` cho chỗ nền luôn tối/đặc), `lib/theme.ts` + `features/shell/ThemeToggle.tsx` (nút ở header và
+  trang đăng nhập, lưu localStorage), `app/layout.tsx` (script gắn class trước lần vẽ đầu), nút chính và bước đang
+  chạy dùng `bg-primary`, chữ trên khung 3D dùng `text-on-dark`.
+- **VERIFIED:** `tsc` 0, `eslint` 0, `vitest` 38 file / 227 test (thêm `tests/theme-toggle.test.tsx`), `next build` 0.
+  Browser (Chrome headless, bản production, chế độ local): bấm nút đổi sang tối ở Tổng quan, Jobs và tab Studio; đã
+  xem ảnh Tổng quan và tab Studio — chữ, thẻ, viền, nhãn nổi trong khung 3D đọc được.
+- **Limits:** chưa xem các màn còn lại và dialog/menu ở theme tối; landing và UI legacy không có theme tối.
+
 ### Publication check — user yêu cầu commit & push, 2026-10-01
 
 - User đã giao commit/push phần UI/UX đang có trên `feat/studio-ux-restructure`.

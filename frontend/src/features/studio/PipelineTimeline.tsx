@@ -79,9 +79,9 @@ export function PipelineTimeline({
                   className={cn(
                     "mt-0.5 grid size-6 shrink-0 place-items-center rounded-full",
                     state === "succeeded" && "bg-sage text-paper",
-                    state === "running" && "bg-ember-strong text-white",
+                    state === "running" && "bg-primary text-primary-foreground",
                     state === "waiting" && "bg-paper-raised text-ember-strong ring-2 ring-ember",
-                    state === "failed" && "bg-rust text-white",
+                    state === "failed" && "bg-destructive-fill text-white",
                     (state === "pending" || state === "cancelled") && "text-ink-subtle",
                   )}
                 >

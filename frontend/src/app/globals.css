@@ -2,7 +2,7 @@
 @import "tw-animate-css";
 @import "../styles/shadcn-variants.css";
 
-/* Component donor (shadcn) dùng `dark:`; Studio chạy theme sáng beige/cam nên không gắn class `dark` (D-04). */
+/* Component donor (shadcn) dùng `dark:`; class `dark` trên <html> bật theme tối của Studio (D-14). */
 @custom-variant dark (&:is(.dark *));
 
 /*
@@ -74,33 +74,36 @@
 @theme inline {
   --font-studio: var(--font-sans);
 
-  --color-paper: #f5efe6;
-  --color-paper-raised: #fbf8f3;
-  --color-paper-sunken: #ede4d6;
-  --color-line: rgb(107 95 82 / 0.16);
-  --color-line-strong: rgb(107 95 82 / 0.36);
+  /* Giá trị nằm ở `:root` (sáng) và `.dark` (tối) bên dưới để đổi theme không phải build lại utility (D-14). */
+  --color-paper: var(--studio-paper);
+  --color-paper-raised: var(--studio-paper-raised);
+  --color-paper-sunken: var(--studio-paper-sunken);
+  --color-line: var(--studio-line);
+  --color-line-strong: var(--studio-line-strong);
   --color-line-dark: rgb(245 239 230 / 0.12);
+  --color-on-dark: #f5efe6; /* chữ trên nền luôn tối (viewport 3D, ô nền mực) — không đổi theo theme */
 
-  --color-ink: #2b2520;
-  --color-ink-muted: #6b5f52;
-  --color-ink-subtle: #8a7e70;
+  --color-ink: var(--studio-ink);
+  --color-ink-muted: var(--studio-ink-muted);
+  --color-ink-subtle: var(--studio-ink-subtle);
 
   --color-ember: #e8743b;
-  --color-ember-strong: #c2551f;
-  --color-ember-soft: #fbe3d3;
+  --color-ember-strong: var(--studio-ember-strong);
+  --color-ember-soft: var(--studio-ember-soft);
 
-  --color-geometry: #2f7ea8; /* geometry/data */
-  --color-collider: #b7862a; /* physics/collider */
+  --color-geometry: var(--studio-geometry); /* geometry/data */
+  --color-collider: var(--studio-ochre); /* physics/collider */
 
-  --color-viewport: #1f1b17;
-  --color-viewport-deep: #171412; /* thanh tiêu đề/đáy của khung tối, như khung viewport trên landing */
+  --color-viewport: var(--studio-viewport);
+  --color-viewport-deep: var(--studio-viewport-deep); /* thanh tiêu đề/đáy của khung tối, như khung viewport trên landing */
 
-  --color-sage: #5e8c61;
-  --color-sage-soft: #e3ede0;
-  --color-ochre: #b7862a;
-  --color-ochre-soft: #f6ead0;
-  --color-rust: #b8452f;
-  --color-rust-soft: #f6dcd5;
+  --color-sage: var(--studio-sage);
+  --color-sage-soft: var(--studio-sage-soft);
+  --color-ochre: var(--studio-ochre);
+  --color-ochre-soft: var(--studio-ochre-soft);
+  --color-rust: var(--studio-rust);
+  --color-rust-soft: var(--studio-rust-soft);
+  --color-destructive-fill: #b8452f; /* nền đặc của nút nguy hiểm khi hover; chữ trắng 5,3:1 ở cả hai theme */
 }
 
 /* Token ngữ nghĩa cho component donor (shadcn) — cùng palette với token Studio ở trên. */
@@ -166,6 +169,84 @@
   --sidebar-accent-foreground: #2b2520;
   --sidebar-border: rgb(107 95 82 / 0.16);
   --sidebar-ring: #e8743b;
+
+  /* Token Studio — theme sáng (mặc định), cùng palette với landing. */
+  --studio-paper: #f5efe6;
+  --studio-paper-raised: #fbf8f3;
+  --studio-paper-sunken: #ede4d6;
+  --studio-line: rgb(107 95 82 / 0.16);
+  --studio-line-strong: rgb(107 95 82 / 0.36);
+  --studio-ink: #2b2520;
+  --studio-ink-muted: #6b5f52;
+  --studio-ink-subtle: #8a7e70;
+  --studio-ember-strong: #c2551f;
+  --studio-ember-soft: #fbe3d3;
+  --studio-geometry: #2f7ea8;
+  --studio-viewport: #1f1b17;
+  --studio-viewport-deep: #171412;
+  --studio-sage: #5e8c61;
+  --studio-sage-soft: #e3ede0;
+  --studio-ochre: #b7862a;
+  --studio-ochre-soft: #f6ead0;
+  --studio-rust: #b8452f;
+  --studio-rust-soft: #f6dcd5;
+  --studio-scrollbar: #d9cebf;
+}
+
+/*
+ * Theme tối (PRODUCT.md D-14): giữ tông nâu than ấm của khung viewport trên landing (#1F1B17 / #171412) thay vì xám
+ * xanh, để hai theme vẫn là một bộ nhận diện. Nền là nâu than, thẻ sáng hơn nền một bậc, chữ là màu paper của theme
+ * sáng; màu nhấn/trạng thái dùng bản sáng hơn để đủ tương phản trên nền tối (chữ nhỏ ≥ 5:1, đo bằng công thức WCAG).
+ * `--primary` (nền nút chính) giữ cam đậm vì chữ trắng trên đó đạt 4,6:1 ở cả hai theme. Viewport 3D tối hơn nền
+ * trang một bậc để vẫn tách khỏi chrome. Class `dark` gắn trên <html> (script trong app/layout.tsx); landing và UI cũ
+ * dùng màu riêng nên không đổi.
+ */
+.dark {
+  --studio-paper: #1b1714;
+  --studio-paper-raised: #25201c;
+  --studio-paper-sunken: #141110;
+  --studio-line: rgb(245 239 230 / 0.12);
+  --studio-line-strong: rgb(245 239 230 / 0.26);
+  --studio-ink: #f5efe6;
+  --studio-ink-muted: #b8ab9b;
+  --studio-ink-subtle: #9a8d7e;
+  --studio-ember-strong: #f0935f;
+  --studio-ember-soft: #3d2518;
+  --studio-geometry: #5aa9d1;
+  --studio-viewport: #110f0d;
+  --studio-viewport-deep: #0b0a09;
+  --studio-sage: #8fb891;
+  --studio-sage-soft: #1f2b20;
+  --studio-ochre: #d9a94a;
+  --studio-ochre-soft: #33290f;
+  --studio-rust: #e88771;
+  --studio-rust-soft: #3a1d16;
+  --studio-scrollbar: #4a4038;
+
+  --background: #1b1714;
+  --foreground: #f5efe6;
+  --card: #25201c;
+  --card-foreground: #f5efe6;
+  --popover: #25201c;
+  --popover-foreground: #f5efe6;
+  --secondary: #322b25;
+  --secondary-foreground: #f5efe6;
+  --muted: #322b25;
+  --muted-foreground: #b8ab9b;
+  --accent: #3d2518;
+  --accent-foreground: #f5efe6;
+  --destructive: #e88771;
+  --border: rgb(245 239 230 / 0.12);
+  --input: rgb(245 239 230 / 0.26);
+  --sidebar: #25201c;
+  --sidebar-foreground: #f5efe6;
+  --sidebar-accent: #322b25;
+  --sidebar-accent-foreground: #f5efe6;
+  --sidebar-border: rgb(245 239 230 / 0.12);
+}
+
+.dark .studio-root {
+  color-scheme: dark;
 }
 
 /*
@@ -216,15 +297,15 @@
  * Bôi chọn: nền cam nhạt, chữ cam đậm (cùng giá trị với ember-soft / ember-strong).
  */
 html:has(.studio-root) ::selection {
-  background: var(--accent);
-  color: var(--primary);
+  background: var(--studio-ember-soft);
+  color: var(--studio-ember-strong);
 }
 
 /* Thanh cuộn mảnh, màu ấm — theo chuẩn CSS (Chrome ≥ 121, Firefox); trình duyệt cũ giữ thanh cuộn mặc định. */
 html:has(.studio-root),
 html:has(.studio-root) * {
   scrollbar-width: thin;
-  scrollbar-color: #d9cebf transparent;
+  scrollbar-color: var(--studio-scrollbar) transparent;
 }
 
 /*

@@ -19,10 +19,10 @@ export const buttonVariants = cva(
   {
     variants: {
       variant: {
-        primary: "bg-ember-strong text-white shadow-sm hover:bg-ember",
+        primary: "bg-primary text-primary-foreground shadow-sm hover:bg-ember",
         secondary: "border border-line-strong bg-paper-raised text-ink shadow-xs hover:border-ink-subtle hover:bg-paper-sunken",
         ghost: "text-ink-muted hover:bg-paper-sunken hover:text-ink",
-        danger: "border border-rust/30 bg-rust-soft text-rust hover:bg-rust hover:text-white",
+        danger: "border border-rust/30 bg-rust-soft text-rust hover:bg-destructive-fill hover:text-white",
       },
       size: {
         sm: "h-8 px-3 text-sm [&_svg]:size-4",

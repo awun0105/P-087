@@ -31,7 +31,7 @@ export function FlowStepper({ steps, current }: { steps: readonly FlowStep[]; cu
                   className={cn(
                     "grid size-6 place-items-center rounded-full text-xs font-semibold",
                     done && "bg-sage text-paper",
-                    active && "bg-ember-strong text-white",
+                    active && "bg-primary text-primary-foreground",
                     !done && !active && "border border-line-strong text-ink-subtle",
                   )}
                 >
