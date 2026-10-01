@@ -7,6 +7,7 @@ nên không chặn event loop.
 """
 
 from collections.abc import Callable
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
@@ -463,6 +464,33 @@ def get_catalog_preview(family: str) -> FileResponse:
     if path is None or not path.is_file():
         raise HTTPException(status_code=404, detail="asset chưa có bản xem trước")
     return FileResponse(path, media_type="model/gltf-binary", headers={"Cache-Control": "public, max-age=86400"})
+
+
+def _training_recording(job_id: str) -> Path:
+    """File bản ghi Rerun của job; tên lấy từ job đã tra được, không từ tham số đường dẫn."""
+    job = _job_or_404(job_id)
+    return get_settings().product_rerun_recording_dir / f"{job.job_id}.rrd"
+
+
+@router.get(
+    "/jobs/{job_id}/training-recording",
+    response_model=schemas.TrainingRecordingResponse,
+    responses={404: {"model": schemas.ApiErrorResponse}},
+)
+def get_training_recording(job_id: str) -> schemas.TrainingRecordingResponse:
+    """Job có bản ghi Rerun của quá trình train 3DGS không (chế độ xem tuỳ chọn, ngoài pipeline)."""
+    path = _training_recording(job_id)
+    available = path.is_file()
+    return schemas.TrainingRecordingResponse(available=available, size_bytes=path.stat().st_size if available else None)
+
+
+@router.get("/jobs/{job_id}/training-recording.rrd", responses={404: {"model": schemas.ApiErrorResponse}})
+def download_training_recording(job_id: str) -> FileResponse:
+    """Bản ghi Rerun (.rrd) cho viewer Rerun nhúng trong Studio."""
+    path = _training_recording(job_id)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="job chưa có bản ghi quá trình train")
+    return FileResponse(path, media_type="application/octet-stream")
 
 
 @router.get(

@@ -195,6 +195,13 @@ class ObjectActionRequest(ApiModel):
     asset_family: str | None = Field(default=None, max_length=128)
 
 
+class TrainingRecordingResponse(ApiModel):
+    """Bản ghi Rerun của quá trình train 3DGS: có hay không, và nặng bao nhiêu để UI báo trước khi tải."""
+
+    available: bool
+    size_bytes: int | None = Field(default=None, ge=0)
+
+
 class ObjectifyRequest(ApiModel):
     """Body yêu cầu dựng lại tập vật trên đúng revision đang hiển thị.
 

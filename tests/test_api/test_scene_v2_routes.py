@@ -187,3 +187,21 @@ async def test_catalog_preview_served_only_for_known_family_with_file(client, tm
     assert served.status_code == 200 and served.content == b"glTF-fake"
     assert (await client.get("/api/v1/scene/catalog/SM_CardBoxA/preview.glb")).status_code == 404
     assert (await client.get("/api/v1/scene/catalog/..%2F..%2Fsecret/preview.glb")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_training_recording_is_optional_and_served_only_for_known_job(client, tmp_path, monkeypatch) -> None:
+    from src.api import routes_product
+    from src.config import Settings
+
+    monkeypatch.setattr(routes_product, "get_settings", lambda: Settings(product_rerun_recording_dir=tmp_path))
+    # Chưa có bản ghi: chế độ xem không khả dụng, pipeline không bị ảnh hưởng.
+    assert (await client.get(f"{_JOB}/training-recording")).json() == {"available": False, "size_bytes": None}
+    assert (await client.get(f"{_JOB}/training-recording.rrd")).status_code == 404
+
+    job_id = _JOB.rsplit("/", 1)[-1]
+    (tmp_path / f"{job_id}.rrd").write_bytes(b"RRF2-fake")
+    assert (await client.get(f"{_JOB}/training-recording")).json() == {"available": True, "size_bytes": 9}
+    served = await client.get(f"{_JOB}/training-recording.rrd")
+    assert served.status_code == 200 and served.content == b"RRF2-fake"
+    assert (await client.get("/api/v1/jobs/job-khong-co/training-recording.rrd")).status_code == 404

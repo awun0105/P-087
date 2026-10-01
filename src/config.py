@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     product_objectify_remote_worker: bool = False
     #: GLB xem trước của asset danh mục (sinh bằng scripts/scene/build_asset_previews.py); thiếu thì Studio vẽ hộp.
     product_asset_preview_dir: Path = Path("./data/asset_previews")
+    #: Bản ghi Rerun của quá trình train 3DGS (`<job_id>.rrd`, sinh bằng eval/visual/brush_quality.py --rerun-save).
+    #: Là dữ liệu soi/đánh giá tuỳ chọn, không phải artifact của pipeline; thiếu thì Studio không hiện chế độ xem này.
+    product_rerun_recording_dir: Path = Path("./data/rerun_recordings")
     #: Số lần thử tách theo vật trước khi dừng và để người dùng chọn (chạy lại / dùng hộp).
     product_objectify_attempts: int = Field(default=3, ge=1, le=10)
     product_queue_poll_seconds: float = Field(default=3, ge=0.1, le=60, allow_inf_nan=False)
