@@ -59,7 +59,7 @@ export function ResultsTab({ jobId, preview, revision, onOpenGaussian, onOpenRev
   return (
     <div className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6">
       <div>
-        <h2 className="text-xl font-semibold">Kết quả của scene</h2>
+        <h2 className="text-xl font-bold tracking-tight">Kết quả của scene</h2>
         <p className="mt-1 text-sm text-ink-muted">Chọn đúng loại file cho công việc tiếp theo.{currentRevision && ` Scene hiện tại: ${currentRevision}.`}</p>
       </div>
       {loading && <p role="status" className="text-sm text-ink-muted">Đang đọc gói và trạng thái phát hành…</p>}
@@ -120,7 +120,7 @@ function ResultCard({ icon, title, badge, body, detail, action }: { icon: ReactN
     <Card className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center">
       <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-paper-sunken text-ink-muted [&_svg]:size-5">{icon}</div>
       <div className="min-w-0 flex-1">
-        <p className="flex flex-wrap items-center gap-2 font-medium">
+        <p className="flex flex-wrap items-center gap-2 font-bold">
           {title} {badge}
         </p>
         <p className="mt-1 text-sm text-ink-muted">{body}</p>

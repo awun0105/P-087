@@ -103,7 +103,7 @@ export function PipelineTimeline({
                     <p className="mt-1 text-sm leading-relaxed text-ink-muted">{meta.description}</p>
                   )}
                   {state === "waiting" && (
-                    <p className="mt-2 text-xs font-medium tracking-wide text-ember-strong uppercase">Đang chờ bạn</p>
+                    <p className="label-tech mt-2 text-ember-strong">Đang chờ bạn</p>
                   )}
                   {state === "running" && (
                     <ProgressBar value={stage?.fraction ?? null} label={`Tiến trình ${meta.title}`} className="mt-3" />

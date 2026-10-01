@@ -193,7 +193,7 @@ export function MetricConfirmView({
         }}
       >
         <div className="flex items-center justify-between gap-2">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
+          <h2 className="flex items-center gap-2 text-sm font-bold text-ink">
             <Ruler className="size-4" aria-hidden />
             Xác nhận tỉ lệ mét
           </h2>

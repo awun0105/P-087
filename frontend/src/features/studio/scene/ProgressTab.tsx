@@ -20,7 +20,7 @@ export function ProgressTab({ jobId, progress, info, busy, onCancel }: {
     seconds: stage.stage_id === "ST-METRIC-CANONICALIZE" ? null : stageSeconds(stage.started_at, stage.completed_at, stage.state === "running" ? now : null),
   })) ?? [];
   return <div className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6">
-    <div><h2 className="text-xl font-semibold">Tiến trình xử lý</h2><p className="mt-1 text-sm text-ink-muted">Chọn giai đoạn đã hoàn tất để mở view kết quả.</p></div>
+    <div><h2 className="text-xl font-bold tracking-tight">Tiến trình xử lý</h2><p className="mt-1 text-sm text-ink-muted">Chọn giai đoạn đã hoàn tất để mở view kết quả.</p></div>
     <Card className="p-5 sm:p-6">
       {progress ? <PipelineTimeline stages={views} stageList={STUDIO_STAGES} jobId={jobId} timeNote={"Cập nhật lúc " + new Date(progress.updated_at).toLocaleTimeString("vi-VN")} /> : <p role="status" className="text-sm text-ink-muted">Đang tải tiến trình…</p>}
       {(progress?.status === "RUNNING" || progress?.status === "QUEUED") && !progress.waiting_for && <div className="mt-4 flex justify-end"><Button variant="danger" size="sm" disabled={busy} onClick={onCancel}><Square aria-hidden />Huỷ xử lý</Button></div>}

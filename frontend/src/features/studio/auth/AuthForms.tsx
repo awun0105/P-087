@@ -9,7 +9,7 @@ import { cloneElement, isValidElement, useEffect, useId, useRef, useState, type 
 
 import { Input } from "@/components/shadcn/input";
 import { Label } from "@/components/shadcn/label";
-import { Button, Notice } from "@/components/studio/primitives";
+import { BrandWordmark, Button, Notice } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { notifySuccess, FieldError } from "@/components/studio/feedback";
 import { login, register } from "@/lib/api/auth";
@@ -82,9 +82,9 @@ function Shell({ title, lead, children }: { title: string; lead: string; childre
             <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
               <Box className="size-4" aria-hidden />
             </span>
-            Real2Sim Studio
+            <BrandWordmark />
           </Link>
-          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+          <h1 className="text-2xl font-extrabold tracking-tight">{title}</h1>
           <p className="mt-2 text-sm text-ink-muted">{lead}</p>
           <div className="mt-8">{children}</div>
           <p className="mt-8 text-sm text-ink-muted">
@@ -97,7 +97,7 @@ function Shell({ title, lead, children }: { title: string; lead: string; childre
         </div>
       </div>
       <aside className="relative hidden flex-col justify-between rounded-3xl bg-paper-raised p-10 lg:flex" aria-label="Real2Sim Studio làm gì">
-        <p className="text-sm font-medium tracking-wide text-ember-strong uppercase">Từ video tới scene mô phỏng</p>
+        <p className="label-tech text-ember-strong">Từ video tới scene mô phỏng</p>
         <ol className="space-y-5">
           {STEPS.map((step, index) => (
             <li key={step} className="flex items-start gap-3">

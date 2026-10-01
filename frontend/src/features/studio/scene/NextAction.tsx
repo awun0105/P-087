@@ -92,7 +92,7 @@ export function NextAction({ jobId, progress, current, mode, sceneReady, revisio
   const atTarget = action && current === action.tab && (!action.mode || mode === action.mode);
   return <section aria-label="Bước tiếp theo" className="border-b border-line bg-paper px-4 py-3 sm:px-6">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="min-w-0"><p className="text-sm font-semibold">{title}</p><p className="mt-0.5 text-sm text-ink-muted">{description}</p></div>
+      <div className="min-w-0"><p className="text-sm font-bold">{title}</p><p className="mt-0.5 text-sm text-ink-muted">{description}</p></div>
       {progress.status === "FAILED" && progress.error?.retryable && <Button size="sm" disabled={busy} onClick={onRetry}>Thử lại</Button>}
       {action && !atTarget && <Button size="sm" onClick={() => onOpen(action!.tab, action!.mode)}>{action.label}</Button>}
     </div>

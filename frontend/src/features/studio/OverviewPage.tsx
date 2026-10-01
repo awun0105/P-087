@@ -31,8 +31,8 @@ export function OverviewPage() {
       <section className="relative overflow-hidden rounded-3xl border border-line bg-paper-raised p-6 sm:p-10" aria-labelledby="overview-title">
         <div aria-hidden className="pointer-events-none absolute -top-24 -right-20 size-80 rounded-full bg-ember-soft/60 blur-3xl" />
         <div className="relative max-w-3xl">
-          <p className="text-xs font-semibold tracking-widest text-ember-strong uppercase">Real2Sim Studio</p>
-          <h1 id="overview-title" className="mt-4 text-3xl leading-tight font-semibold tracking-tight sm:text-4xl">Từ dữ liệu thực đến scene 3D cho mô phỏng</h1>
+          <p className="label-tech text-ember-strong">Real2Sim Studio</p>
+          <h1 id="overview-title" className="mt-4 text-3xl leading-tight font-extrabold tracking-tight sm:text-4xl">Từ dữ liệu thực đến scene 3D cho mô phỏng</h1>
           <p className="mt-4 max-w-2xl text-base leading-relaxed text-ink-muted">Một không gian để dựng scene từ video, xem 3DGS, chuẩn bị vật thể và theo dõi kết quả. Bắt đầu trong Scenes; mỗi scene giữ tiến trình, Studio, kiểm tra và file đầu ra của riêng nó.</p>
           <Link href="/scenes" className={`${buttonVariants({ size: "lg" })} mt-6`}>Mở Scenes <ArrowRight aria-hidden /></Link>
         </div>
@@ -41,7 +41,7 @@ export function OverviewPage() {
       <section aria-labelledby="summary-heading">
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 id="summary-heading" className="text-xl font-semibold">Tổng hợp công việc</h2>
+            <h2 id="summary-heading" className="text-xl font-bold tracking-tight">Tổng hợp công việc</h2>
             <p className="mt-1 text-sm text-ink-muted">Scene và lần xử lý mới nhất, theo quyền truy cập của bạn.</p>
           </div>
           <Link href="/jobs" className="inline-flex items-center gap-1 text-sm font-medium text-ember-strong hover:underline">Xem Jobs <ArrowRight className="size-4" aria-hidden /></Link>
@@ -52,19 +52,19 @@ export function OverviewPage() {
       </section>
 
       <section aria-labelledby="journey-heading">
-        <h2 id="journey-heading" className="text-xl font-semibold">Một hành trình, bốn vùng công việc</h2>
+        <h2 id="journey-heading" className="text-xl font-bold tracking-tight">Một hành trình, bốn vùng công việc</h2>
         <p className="mt-1 text-sm text-ink-muted">Luồng dựng từ video đi từ dữ liệu tới scene và kết quả có thể kiểm tra.</p>
         <ol className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {JOURNEY.map((step, index) => <li key={step.label} className="rounded-2xl border border-line bg-paper-raised p-5">
             <div className="flex items-center justify-between"><step.icon className="size-5 text-ember-strong" aria-hidden /><span className="font-mono text-xs text-ink-subtle">0{index + 1}</span></div>
-            <h3 className="mt-5 font-semibold">{step.label}</h3><p className="mt-2 text-sm leading-relaxed text-ink-muted">{step.detail}</p>
+            <h3 className="mt-5 font-bold">{step.label}</h3><p className="mt-2 text-sm leading-relaxed text-ink-muted">{step.detail}</p>
           </li>)}
         </ol>
         <p className="mt-3 text-sm leading-relaxed text-ink-muted">Validation Isaac và phát hành chỉ khả dụng khi có runtime, báo cáo và quyết định Reviewer hợp lệ. Bản xem 3DGS chưa phải scene đã được kiểm tra để mô phỏng.</p>
       </section>
 
       <section aria-labelledby="sources-heading">
-        <h2 id="sources-heading" className="text-xl font-semibold">Chọn điểm bắt đầu phù hợp</h2>
+        <h2 id="sources-heading" className="text-xl font-bold tracking-tight">Chọn điểm bắt đầu phù hợp</h2>
         <div className="mt-5 grid gap-4 md:grid-cols-3">
           <SourceInfo icon={<Film aria-hidden />} title="Dựng từ video" kind="MP4 / MOV">Video RGB tạo job tái dựng. Xác nhận tỉ lệ và chuẩn bị vật thể trước khi tạo gói mô phỏng.</SourceInfo>
           <SourceInfo icon={<Box aria-hidden />} title="Mở 3DGS có sẵn" kind="PLY / ZIP">Xem và chỉnh Gaussian, xuất PLY/SOG. Nhánh import không có pipeline hệ mét, collision hoặc review/release.</SourceInfo>
@@ -114,11 +114,11 @@ function WorkSummary() {
       {!snapshot && <p role="status" className="text-sm text-ink-muted">Đang tải tổng hợp…</p>}
       {snapshot && snapshot.errors.length > 0 && <Notice tone="rust">Chưa tải đủ dữ liệu tổng hợp. {snapshot.errors.join(" · ")} Dữ liệu đọc được trước đó được giữ lại. <Button variant="secondary" size="sm" className="ml-2" onClick={() => void load(new AbortController().signal)}>Thử lại</Button></Notice>}
       <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {stats.map((stat) => <div key={stat.label} className="rounded-2xl border border-line bg-paper-raised p-5"><dt className="text-sm text-ink-muted">{stat.label}</dt><dd className="mt-2 text-3xl font-semibold tabular-nums">{stat.value === undefined ? "—" : stat.value}</dd></div>)}
+        {stats.map((stat) => <div key={stat.label} className="rounded-2xl border border-line bg-paper-raised p-5"><dt className="text-sm text-ink-muted">{stat.label}</dt><dd className="mt-2 font-mono text-3xl font-bold tabular-nums">{stat.value === undefined ? "—" : stat.value}</dd></div>)}
       </dl>
       {scenes && scenes.length === 0 && <p className="text-sm text-ink-muted">Chưa có scene từ video. Vào Scenes để chọn mẫu, mở 3DGS hoặc tạo scene đầu tiên.</p>}
       {continuing.length > 0 && <Card className="p-5">
-        <h3 className="font-semibold">Công việc cần tiếp tục</h3>
+        <h3 className="font-bold">Công việc cần tiếp tục</h3>
         <ul className="mt-3 divide-y divide-line">{continuing.map((scene) => {
           const status = sceneStatus(scene.latest_job, scene.preview_ready);
           return <li key={scene.project.project_id}><Link href={`/scenes/${encodeURIComponent(scene.latest_job!.job_id)}`} className="flex flex-wrap items-center justify-between gap-2 rounded py-3 focus-visible:outline-2 focus-visible:outline-ember"><span className="min-w-0 flex-1 truncate text-sm font-medium">{scene.project.name}</span><Badge tone={status.tone}>{status.label}</Badge><ArrowRight className="size-4 text-ember-strong" aria-hidden /></Link></li>;
@@ -129,7 +129,7 @@ function WorkSummary() {
 }
 
 function SourceInfo({ icon, title, kind, children }: { icon: ReactNode; title: string; kind: string; children: ReactNode }) {
-  return <Card className="p-5"><div className="flex items-center justify-between gap-3"><span className="grid size-10 place-items-center rounded-xl bg-ember-soft text-ember-strong [&_svg]:size-5">{icon}</span><Badge tone="neutral">{kind}</Badge></div><h3 className="mt-4 font-semibold">{title}</h3><p className="mt-2 text-sm leading-relaxed text-ink-muted">{children}</p></Card>;
+  return <Card className="p-5"><div className="flex items-center justify-between gap-3"><span className="grid size-10 place-items-center rounded-xl bg-ember-soft text-ember-strong [&_svg]:size-5">{icon}</span><Badge tone="neutral">{kind}</Badge></div><h3 className="mt-4 font-bold">{title}</h3><p className="mt-2 text-sm leading-relaxed text-ink-muted">{children}</p></Card>;
 }
 
 function AreaLink({ href, icon, title, detail }: { href: string; icon: ReactNode; title: string; detail: string }) {

@@ -266,7 +266,7 @@ export function CollisionMeshCanvas({ url, children }: { url: string; children?:
         <Grid args={[40, 40]} cellSize={1} sectionSize={5} infiniteGrid fadeDistance={60} />
         <OrbitControls makeDefault />
       </Canvas>
-      <p className="absolute bottom-3 left-3 rounded-md bg-viewport/80 px-2 py-1 text-xs text-paper/80">
+      <p className="absolute bottom-3 left-3 rounded-md border border-line-dark bg-viewport-deep/85 px-2 py-1 text-xs text-paper/80">
         {state.triangles?.toLocaleString("vi-VN")} tam giác · lưới 1 m, sàn z = 0
       </p>
     </>

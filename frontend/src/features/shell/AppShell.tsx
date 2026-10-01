@@ -5,6 +5,7 @@ import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { ErrorFeedback } from "@/components/studio/feedback";
+import { BrandWordmark } from "@/components/studio/primitives";
 import { errorMessage } from "@/lib/ui-error";
 import { useNavigationGuard } from "@/features/shell/NavigationGuard";
 
@@ -96,7 +97,7 @@ function AppSidebar({ pathname }: { pathname: string }) {
                 <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
                   <Box className="size-4" aria-hidden />
                 </span>
-                <span className="font-semibold tracking-tight">Real2Sim Studio</span>
+                <BrandWordmark />
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>

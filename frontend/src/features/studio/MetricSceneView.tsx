@@ -193,12 +193,12 @@ export function MetricSceneView({
         annotations={annotations}
         onApp={onApp}
       />
-      <div className="absolute top-3 left-3 flex flex-wrap gap-3 rounded-md bg-viewport/80 px-3 py-1.5 text-xs text-paper/90">
+      <div className="absolute top-3 left-3 flex flex-wrap gap-3 rounded-md border border-line-dark bg-viewport-deep/85 px-3 py-1.5 text-xs text-paper/90">
         {toggle("splat", "3DGS màu")}
         {toggle("collision", "Collision mesh", !collisionUrl)}
         {toggle("boxes", "Hộp vật thể", !boxes.length)}
       </div>
-      <p className="absolute bottom-3 left-3 rounded-md bg-viewport/80 px-2 py-1 text-xs text-paper/80">
+      <p className="absolute bottom-3 left-3 rounded-md border border-line-dark bg-viewport-deep/85 px-2 py-1 text-xs text-paper/80">
         Hệ mét, sàn z = 0 · mở tại camera quay đầu tiên · kéo chuột để xoay, cuộn để zoom, chế độ bay (WASD) ở góc phải
         {collisionState?.triangles ? ` · collision ${Math.round(collisionState.triangles).toLocaleString("vi-VN")} tam giác` : ""}
         {collisionState?.error ? ` · không nạp được collision: ${collisionState.error}` : ""}

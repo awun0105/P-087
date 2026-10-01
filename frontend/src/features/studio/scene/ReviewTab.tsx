@@ -33,7 +33,7 @@ export function ReviewTab({ jobId, onSaveState }: { jobId: string; onSaveState: 
   return (
     <div className="mx-auto grid max-w-5xl gap-4 px-4 py-6 sm:px-6 lg:grid-cols-2">
       <div className="lg:col-span-2">
-        <h2 className="flex flex-wrap items-center gap-2 text-xl font-semibold">Kiểm tra & duyệt <Badge tone="neutral">{revision}</Badge></h2>
+        <h2 className="flex flex-wrap items-center gap-2 text-xl font-bold tracking-tight">Kiểm tra & duyệt <Badge tone="neutral">{revision}</Badge></h2>
         <p className="mt-1 text-sm text-ink-muted">Tạo gói và đọc preflight trước; validation cùng quyết định Reviewer áp dụng cho đúng gói của revision này.</p>
       </div>
       <Card className="overflow-hidden">

@@ -218,7 +218,7 @@ export function ObjectReviewView({
     <div className="grid size-full grid-rows-[minmax(50vh,1fr)_auto_auto] lg:grid-cols-[18rem_minmax(0,1fr)_20rem] lg:grid-rows-1">
       <aside aria-label="Danh sách vật thể" className="order-2 flex max-h-[50vh] min-h-0 flex-col border-t border-line bg-paper-raised lg:order-1 lg:max-h-none lg:border-t-0 lg:border-r">
         <div className="space-y-2 border-b border-line px-3 py-3">
-          <h2 className="text-xs font-semibold tracking-wide text-ink-subtle uppercase">Vật thể trong scene</h2>
+          <h2 className="label-tech text-ink-muted">Vật thể trong scene</h2>
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm font-semibold text-ink">
               {scene.objects.length} vật thể · {counts.pending} chờ xác nhận
@@ -305,7 +305,7 @@ export function ObjectReviewView({
         )}
       </div>
       <aside className="order-3 flex min-h-0 flex-col overflow-y-auto border-t border-line bg-paper-raised lg:border-t-0 lg:border-l" aria-label="Inspector">
-        <h2 className="border-b border-line px-4 py-3 text-xs font-semibold tracking-wide text-ink-subtle uppercase">Chi tiết vật thể</h2>
+        <h2 className="label-tech border-b border-line px-4 py-3 text-ink-muted">Chi tiết vật thể</h2>
         <ObjectifyNotice jobId={jobId} revision={scene.scene_revision} onRevision={() => setReload((value) => value + 1)} />
         {error && (
           <Notice tone="rust" className="m-3">

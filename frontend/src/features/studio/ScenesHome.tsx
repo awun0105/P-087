@@ -79,7 +79,7 @@ export function ScenesHome() {
     <main className="mx-auto max-w-6xl px-4 pt-10 pb-20 sm:px-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-ink">Scenes</h1>
+          <h1 className="text-3xl font-extrabold tracking-tight text-ink">Scenes</h1>
           <p className="mt-1.5 max-w-xl text-[15px] leading-relaxed text-ink-muted">
             Tiếp tục scene đang làm, dựng từ video hoặc mở một file 3DGS đã có.
           </p>
@@ -93,7 +93,7 @@ export function ScenesHome() {
       {signedIn && continuing.length > 0 && (
         <section aria-labelledby="continue-heading" className="mt-8 rounded-2xl border border-line bg-paper-raised p-5">
           <div className="flex items-center justify-between gap-2">
-            <h2 id="continue-heading" className="font-semibold">Tiếp tục công việc</h2>
+            <h2 id="continue-heading" className="font-bold">Tiếp tục công việc</h2>
             <Link href="/jobs" className="text-sm font-medium text-ember-strong hover:underline">Xem Jobs</Link>
           </div>
           <ul className="mt-3 divide-y divide-line">
@@ -113,7 +113,7 @@ export function ScenesHome() {
 
       <section aria-labelledby="scenes-heading" className="mt-12">
         <div className="mb-4 flex items-center justify-between">
-          <h2 id="scenes-heading" className="text-sm font-semibold tracking-wide text-ink-subtle uppercase">
+          <h2 id="scenes-heading" className="label-tech text-ink-muted">
             Scene từ video · job
           </h2>
           {signedIn && scenes && scenes.length > 0 && (
@@ -220,7 +220,7 @@ export function ScenesHome() {
       {signedIn && importError && <Notice tone="rust" className="mt-6">Không tải được scene import: {importError}. Trang sẽ thử lại.</Notice>}
       {signedIn && imports.length > 0 && (
         <section aria-labelledby="imports-heading" className="mt-10">
-          <h2 id="imports-heading" className="mb-4 text-sm font-semibold tracking-wide text-ink-subtle uppercase">
+          <h2 id="imports-heading" className="label-tech mb-4 text-ink-muted">
             Scene import · chỉ xem/chỉnh Gaussian
           </h2>
           <ul className={view === "list" ? "space-y-2" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-3"}>
@@ -255,7 +255,7 @@ function SamplesHero({ samples }: { samples: SampleSummary[] }) {
   return (
     <section aria-labelledby="samples-home-heading" className="mt-10">
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 id="samples-home-heading" className="text-sm font-semibold tracking-wide text-ink-subtle uppercase">
+        <h2 id="samples-home-heading" className="label-tech text-ink-muted">
           Thử với video mẫu
         </h2>
         <p className="text-sm text-ink-subtle">Kết quả đã xử lý sẵn · phát lại để khám phá · không tạo job mới.</p>
@@ -279,7 +279,7 @@ function SamplesHero({ samples }: { samples: SampleSummary[] }) {
               </div>
               <div className="flex flex-1 items-center justify-between gap-3 p-4">
                 <div className="min-w-0">
-                  <p className="text-xs font-medium tracking-wide text-ink-subtle uppercase">
+                  <p className="label-tech text-ink-muted">
                     {sample.source.dataset} · {sample.source.sequence}
                   </p>
                   <p className="mt-1 truncate font-semibold text-ink">{sample.title}</p>
@@ -330,7 +330,7 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
         </Badge>
       </div>
       <div className="flex flex-1 flex-col p-5">
-        <h3 className="truncate text-base font-semibold text-ink">{scene.project.name}</h3>
+        <h3 className="truncate text-base font-bold text-ink">{scene.project.name}</h3>
         <p className="mt-1 truncate text-sm text-ink-muted">
           {scene.project.input_video
             ? `${scene.project.input_video.original_name} · ${formatBytes(scene.project.input_video.size_bytes)}`

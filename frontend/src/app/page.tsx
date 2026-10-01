@@ -1,11 +1,6 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, Plus_Jakarta_Sans } from "next/font/google";
-
 import { LandingPage } from "@/features/landing/LandingPage";
 import "@/features/landing/landing.css";
-
-const sans = Plus_Jakarta_Sans({ subsets: ["latin"], variable: "--font-landing-sans", display: "swap" });
-const mono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-landing-mono", display: "swap" });
 
 export const metadata: Metadata = {
   title: "Real2Sim Studio — From Reality to Simulation",
@@ -17,5 +12,5 @@ export const metadata: Metadata = {
  * các CTA của landing dẫn vào app qua đăng nhập (`STUDIO_ENTRY` trong `lib/routes.ts`).
  */
 export default function LandingRoute() {
-  return <div lang="en" className={`${sans.variable} ${mono.variable}`}><LandingPage /></div>;
+  return <div lang="en"><LandingPage /></div>;
 }

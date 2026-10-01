@@ -21,14 +21,15 @@
     .landing-page {
       background-color: var(--paper);
       color: var(--ink);
-      font-family: var(--font-landing-sans), -apple-system, BlinkMacSystemFont, sans-serif;
+      /* Font nạp một lần ở root layout và dùng chung với app (globals.css: --font-sans / --font-mono). */
+      font-family: var(--font-sans);
       /* Clip ngang để header sticky vẫn bám viewport, không tạo scroll container mới. */
       overflow-x: clip;
       -webkit-font-smoothing: antialiased;
     }
 
     .landing-page .font-mono-tech {
-      font-family: var(--font-landing-mono), monospace;
+      font-family: var(--font-mono);
     }
 
     /* Subtle grid pattern */

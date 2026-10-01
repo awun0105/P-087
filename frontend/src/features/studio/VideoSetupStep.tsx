@@ -142,7 +142,7 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
   return (
     <form onSubmit={submit} className="space-y-6">
       <Card className="p-5 sm:p-6">
-        <h2 className="text-base font-semibold">Chọn video để xử lý</h2>
+        <h2 className="text-base font-bold">Chọn video để xử lý</h2>
         <fieldset className="mt-4 space-y-2">
           <legend className="sr-only">Video đã tải lên</legend>
           {uploads?.map((upload) => (
@@ -193,7 +193,7 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
       </Card>
 
       <Card className="p-5 sm:p-6">
-        <h2 className="flex flex-wrap items-center gap-2 text-base font-semibold">
+        <h2 className="flex flex-wrap items-center gap-2 text-base font-bold">
           Xác nhận dữ liệu
           <Badge tone="ochre">Tự khai — chưa qua QA</Badge>
         </h2>
@@ -269,7 +269,7 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
       {error && <Notice tone="rust">{error}</Notice>}
 
       <Card className="p-5 sm:p-6">
-        <h2 className="text-base font-semibold">Tóm tắt trước khi xử lý</h2>
+        <h2 className="text-base font-bold">Tóm tắt trước khi xử lý</h2>
         <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
           <dt className="text-ink-muted">Video</dt>
           <dd>{selectedUpload ? `${selectedUpload.original_name} · ${describeDetection(selectedUpload)} · ${formatBytes(selectedUpload.size_bytes)}` : "Chưa chọn"}</dd>

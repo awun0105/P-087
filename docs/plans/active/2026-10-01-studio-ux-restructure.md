@@ -775,6 +775,31 @@ runtime; Chrome headless điều khiển qua CDP (click/gõ thật). Không ph�
 - **Limits:** chưa thử trên deployment HTTPS thật; landing chưa có nút "Sign in"/"Sign up" riêng (đi qua CTA); nội
   dung minh hoạ của landing chưa rà lại theo Claims Boundary của PRD.
 
+
+### Bộ chữ và nét kẻ của landing cho toàn app — 2026-10-01 (trên `feat/pipeline-v2`)
+
+- **Authority:** user yêu cầu lấy palette và font của landing áp cho toàn bộ UI; ghi ở PRODUCT §11.2 D-13.
+- **Finding:** palette nền/chữ/nhấn của app vốn trùng landing (D-04). Khác nhau là font (app: Inter), cách kẻ viền
+  (app: màu be đặc; landing: mực ấm pha loãng), nhãn kỹ thuật mono chữ hoa, độ đậm tiêu đề/nút và tên sản phẩm.
+- **Changed:** `app/layout.tsx` nạp Plus Jakarta Sans + IBM Plex Mono (subset `vietnamese`) cho mọi trang, landing
+  dùng chung thay vì nạp riêng; `globals.css`: `--font-sans`/`--font-mono`, `line`/`line-strong` dạng alpha,
+  `line-dark`, `viewport-deep`, utility `label-tech`, màu viền mặc định của Studio trong `@layer base` (hết đường kẻ
+  đậm ở bảng Jobs và mép sidebar), bôi chọn chữ + thanh cuộn; codemod 23 file Studio (tiêu đề `font-extrabold`/
+  `font-bold` + `tracking-tight`, overline → `label-tech`); nút `font-semibold`, nút phụ có bóng nhẹ + hover sunken;
+  số liệu Tổng quan dùng mono; nhãn nổi trong khung 3D có nền tối sâu + viền `line-dark`; `BrandWordmark` ở sidebar
+  và trang đăng nhập. Landing và UI legacy không đổi phần nhìn (legacy chỉ nhận font chung).
+- **VERIFIED — static/unit:** `tsc --noEmit` exit 0; `eslint src tests next.config.ts` exit 0; `vitest run` 37 file /
+  224 test; `next build` exit 0. CSS build có `@font-face` subset `U+1EA0-1EF9` cho cả hai font, `.label-tech`,
+  `.border-line-dark`, rule viền mặc định.
+- **VERIFIED — browser (Chrome headless, bản production, chế độ local):** ảnh trước/sau 11 màn (Tổng quan, Scenes,
+  Jobs, 4 tab scene, Scene mới, Nhóm, Tài khoản, landing) của lượt sửa đầu: tiếng Việt hiển thị đủ dấu ở cả hai
+  font, không tràn chữ; landing giống hệt trước khi đổi. Lượt sửa hai mới soi màn Jobs: đường kẻ hàng của bảng và
+  mép sidebar thành nét mảnh, tên sản phẩm vừa sidebar.
+- **Limits:** lượt sửa hai (màu viền mặc định, tiêu đề thẻ, `BrandWordmark`) ở các màn còn lại, trang 404 và các màn
+  đăng nhập/đăng ký/Nhóm ở chế độ có tài khoản chưa soi ảnh — owner kiểm tra bằng mắt. Tương phản đo bằng công thức WCAG: `ink-muted` 5,43:1,
+  `ink-subtle` 3,47:1, `ember-strong` 3,98:1 trên paper; hai màu sau không đạt AA cho chữ nhỏ và vẫn đang được dùng
+  (có từ trước), chưa đổi vì là màu của bộ nhận diện.
+
 ### Publication check — user yêu cầu commit & push, 2026-10-01
 
 - User đã giao commit/push phần UI/UX đang có trên `feat/studio-ux-restructure`.

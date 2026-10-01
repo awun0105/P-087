@@ -12,7 +12,7 @@ import { Button as BaseButton } from "@/components/shadcn/button";
 import { cn } from "@/lib/cn";
 
 export const buttonVariants = cva(
-  "inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-[10px] font-medium whitespace-nowrap " +
+  "inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-[10px] font-semibold whitespace-nowrap " +
     "transition-[background-color,border-color,color,transform] duration-200 outline-none select-none " +
     "focus-visible:ring-3 focus-visible:ring-ember/40 active:translate-y-px disabled:pointer-events-none " +
     "disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
@@ -20,7 +20,7 @@ export const buttonVariants = cva(
     variants: {
       variant: {
         primary: "bg-ember-strong text-white shadow-sm hover:bg-ember",
-        secondary: "border border-line-strong bg-paper-raised text-ink hover:border-ink-subtle hover:bg-paper",
+        secondary: "border border-line-strong bg-paper-raised text-ink shadow-xs hover:border-ink-subtle hover:bg-paper-sunken",
         ghost: "text-ink-muted hover:bg-paper-sunken hover:text-ink",
         danger: "border border-rust/30 bg-rust-soft text-rust hover:bg-rust hover:text-white",
       },
@@ -49,6 +49,21 @@ export function Button({ className, variant, size, asChild = false, type, ...pro
       className={cn(buttonVariants({ variant, size }), className)}
       {...props}
     />
+  );
+}
+
+/**
+ * Tên sản phẩm theo lockup của landing: "Real2Sim" đậm, "Studio" là nhãn mono trong khung nhỏ. Dùng ở sidebar và
+ * trang đăng nhập để người đi từ landing sang app thấy cùng một tên.
+ */
+export function BrandWordmark({ className }: { className?: string }) {
+  return (
+    <span className={cn("flex items-baseline gap-1.5", className)}>
+      <span className="text-base font-bold tracking-tight text-ink">Real2Sim</span>{" "}
+      <span className="rounded border border-line bg-paper-sunken px-1.5 py-0.5 font-mono text-[11px] leading-none font-semibold tracking-widest text-ink-muted uppercase">
+        Studio
+      </span>
+    </span>
   );
 }
 
@@ -144,7 +159,7 @@ export function EmptyState({
       <div className="mb-4 grid size-12 place-items-center rounded-full bg-ember-soft text-ember-strong [&_svg]:size-6">
         {icon}
       </div>
-      <h3 className="text-base font-semibold text-ink">{title}</h3>
+      <h3 className="text-base font-bold text-ink">{title}</h3>
       {children && <div className="mt-1.5 max-w-md text-sm text-ink-muted">{children}</div>}
       {action && <div className="mt-6">{action}</div>}
     </div>

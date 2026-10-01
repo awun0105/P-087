@@ -63,7 +63,7 @@ export function ProcessingSettings({
     <Card className="p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="flex items-center gap-2 text-base font-semibold">
+          <h2 className="flex items-center gap-2 text-base font-bold">
             <Gauge className="size-4 text-ember-strong" aria-hidden />
             Thông số xử lý
           </h2>

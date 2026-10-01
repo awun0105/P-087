@@ -80,7 +80,7 @@ export function StageInspectionPage({ jobId, stageId }: { jobId: string; stageId
     <main className="flex h-[calc(100dvh-3rem)] min-h-0 flex-col">
       <header className="flex flex-wrap items-center gap-3 border-b border-line bg-paper-raised px-4 py-3">
         <Link href={progressHref(jobId)} className="inline-flex items-center gap-1 text-sm text-ember-strong hover:underline"><ArrowLeft className="size-4" aria-hidden /> Về Tiến trình</Link>
-        <div className="min-w-0 flex-1"><h1 className="truncate font-semibold">{index + 1}. {meta.title}</h1><p className="truncate text-xs text-ink-muted">{snapshot?.project?.name ?? jobId}</p></div>
+        <div className="min-w-0 flex-1"><h1 className="truncate font-bold">{index + 1}. {meta.title}</h1><p className="truncate text-xs text-ink-muted">{snapshot?.project?.name ?? jobId}</p></div>
         {ready && <Badge tone="sage">Đã xử lý xong</Badge>}
         {snapshot && <Badge tone="neutral">Lần chạy {snapshot.progress.attempt}</Badge>}
         {ready && <Button variant="ghost" size="sm" aria-expanded={details} aria-controls="stage-output-info" onClick={() => setDetails((value) => !value)}><Info aria-hidden /> Thông tin đầu ra</Button>}
@@ -105,7 +105,7 @@ export function StageInspectionPage({ jobId, stageId }: { jobId: string; stageId
                       : <SceneWorkspace jobId={jobId} stageId={meta.id} title={snapshot.project?.name ?? "Scene"} />}
                 </section>
                 {details && <aside id="stage-output-info" aria-label="Thông tin đầu ra" className="max-h-[40vh] shrink-0 overflow-y-auto border-t border-line bg-paper-raised p-4 lg:max-h-none lg:w-80 lg:border-t-0 lg:border-l">
-                  <h2 className="font-semibold">Đầu ra của giai đoạn</h2>
+                  <h2 className="font-bold">Đầu ra của giai đoạn</h2>
                   <p className="mt-2 text-sm leading-relaxed text-ink-muted">{meta.description}</p>
                   <p className="mt-3 text-xs text-ink-muted">Artifact đã publish là bất biến. Chỉnh Gaussian xuất file riêng; chỉnh vật thể tạo SceneIR revision mới.</p>
                   <p className="mt-3 text-xs text-ink-muted">Hoàn tất: {snapshot.progress.stages.find((stage) => stage.stage_id === meta.id)?.completed_at ? new Date(snapshot.progress.stages.find((stage) => stage.stage_id === meta.id)!.completed_at!).toLocaleString("vi-VN") : "Không có mốc thời gian"}</p>
@@ -137,5 +137,5 @@ function InputStage({ stageId, snapshot }: { stageId: StageId; snapshot: Snapsho
     ["Định dạng", project.input_video?.media_type ?? "Không có dữ liệu"], ["Dung lượng", project.input_video ? formatBytes(project.input_video.size_bytes) : "Không có dữ liệu"],
     ["Checksum đầu vào", project.input_manifest_checksum],
   ];
-  return <div className="mx-auto max-w-3xl space-y-4 p-6"><Card className="p-5"><h2 className="text-lg font-semibold">{privacy ? "Quyền riêng tư của đầu vào" : "Đầu vào đã kiểm tra"}</h2><dl className="mt-4 divide-y divide-line">{values.map(([label, value]) => <div key={label} className="grid gap-1 py-3 sm:grid-cols-[12rem_1fr]"><dt className="text-sm text-ink-muted">{label}</dt><dd className="break-all text-sm">{value}</dd></div>)}</dl></Card><Notice>{privacy ? "Xác nhận của người tải lên và kết quả QA là hai cơ chế riêng. Thông tin trên lấy từ project hiện tại; report chi tiết chỉ xem khi backend publish artifact." : "API hiện cung cấp metadata video và artifact của bước. Chưa có API summary cho từng chỉ số nhòe/chuyển động; không hiển thị số đo giả."}</Notice></div>;
+  return <div className="mx-auto max-w-3xl space-y-4 p-6"><Card className="p-5"><h2 className="text-lg font-bold tracking-tight">{privacy ? "Quyền riêng tư của đầu vào" : "Đầu vào đã kiểm tra"}</h2><dl className="mt-4 divide-y divide-line">{values.map(([label, value]) => <div key={label} className="grid gap-1 py-3 sm:grid-cols-[12rem_1fr]"><dt className="text-sm text-ink-muted">{label}</dt><dd className="break-all text-sm">{value}</dd></div>)}</dl></Card><Notice>{privacy ? "Xác nhận của người tải lên và kết quả QA là hai cơ chế riêng. Thông tin trên lấy từ project hiện tại; report chi tiết chỉ xem khi backend publish artifact." : "API hiện cung cấp metadata video và artifact của bước. Chưa có API summary cho từng chỉ số nhòe/chuyển động; không hiển thị số đo giả."}</Notice></div>;
 }

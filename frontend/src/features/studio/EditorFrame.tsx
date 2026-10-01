@@ -153,7 +153,7 @@ function WebGlViewer({ contentUrl, filename, onTryEditor }: { contentUrl: string
       ) : (
         <>
           {!runtime.loaded && (
-            <p className="absolute right-4 bottom-4 z-10 rounded-lg bg-viewport/80 px-3 py-1.5 text-xs text-paper/80" role="status">
+            <p className="absolute right-4 bottom-4 z-10 rounded-lg border border-line-dark bg-viewport-deep/85 px-3 py-1.5 text-xs text-paper/80" role="status">
               Đang nạp {Math.round(runtime.progress)}%
             </p>
           )}

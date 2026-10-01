@@ -13,8 +13,9 @@
  * `slate-800`/`bg-slate-900/50` rải rác khó bảo trì.
  */
 @theme inline {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Bộ chữ của landing cho toàn app (PRODUCT.md D-13); biến font do next/font đặt trên <html> ở app/layout.tsx. */
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   /* Surfaces */
   --color-surface-0: #020617;
@@ -62,17 +63,23 @@
 /*
  * Studio — Minimalism/Swiss, beige + cam (quyết định owner 2026-09-29; owner chọn lại bộ này
  * thay palette tối ngày 30/09/2026, PRODUCT.md D-04). Chrome sáng; viewport 3D nâu than ấm vì
- * Gaussian khó đọc trên nền sáng. Tương phản: ink/paper ~13:1, ink-muted/paper ~5.6:1,
+ * Gaussian khó đọc trên nền sáng. Tương phản: ink/paper ~13:1, ink-muted/paper ~5.4:1,
  * trắng/ember-strong ~4.6:1.
+ *
+ * Cùng một palette với landing (features/landing/landing.css). Từ 01/10/2026 app dùng luôn cách kẻ viền của
+ * landing: viền là mực ấm (ink-muted) pha loãng thay cho màu be đặc, nên trên mọi nền (paper, raised, sunken)
+ * đường kẻ đều mảnh và cùng tông. `line` = --border-subtle của landing (0.16); `line-strong` 0.36 giữ độ rõ của
+ * viền ô nhập/nút phụ ngang mức cũ (#cbbba3 trên paper, tương phản ~1.65:1). `line-dark` cho viền trên nền tối.
  */
 @theme inline {
-  --font-studio: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-studio: var(--font-sans);
 
   --color-paper: #f5efe6;
   --color-paper-raised: #fbf8f3;
   --color-paper-sunken: #ede4d6;
-  --color-line: #e2d6c3;
-  --color-line-strong: #cbbba3;
+  --color-line: rgb(107 95 82 / 0.16);
+  --color-line-strong: rgb(107 95 82 / 0.36);
+  --color-line-dark: rgb(245 239 230 / 0.12);
 
   --color-ink: #2b2520;
   --color-ink-muted: #6b5f52;
@@ -86,6 +93,7 @@
   --color-collider: #b7862a; /* physics/collider */
 
   --color-viewport: #1f1b17;
+  --color-viewport-deep: #171412; /* thanh tiêu đề/đáy của khung tối, như khung viewport trên landing */
 
   --color-sage: #5e8c61;
   --color-sage-soft: #e3ede0;
@@ -147,8 +155,8 @@
   --accent: #fbe3d3;
   --accent-foreground: #2b2520;
   --destructive: #b8452f;
-  --border: #e2d6c3;
-  --input: #cbbba3;
+  --border: rgb(107 95 82 / 0.16);
+  --input: rgb(107 95 82 / 0.36);
   --ring: #e8743b;
   --sidebar: #fbf8f3;
   --sidebar-foreground: #2b2520;
@@ -156,8 +164,22 @@
   --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: #ede4d6;
   --sidebar-accent-foreground: #2b2520;
-  --sidebar-border: #e2d6c3;
+  --sidebar-border: rgb(107 95 82 / 0.16);
   --sidebar-ring: #e8743b;
+}
+
+/*
+ * Màu viền mặc định của Studio = viền mảnh của theme. Component donor (shadcn) viết `border`/`border-b` trần và
+ * trông chờ màu viền của theme; Tailwind v4 mặc định là currentColor nên các đường đó ra màu mực đậm (đường kẻ
+ * hàng của bảng Jobs, mép sidebar) — khác hẳn đường kẻ mảnh của landing. Đặt trong `@layer base` nên mọi utility
+ * `border-*` có màu vẫn thắng; chỉ áp cho trang có `.studio-root`, UI cũ và landing giữ nguyên.
+ */
+@layer base {
+  html:has(.studio-root) *,
+  html:has(.studio-root) ::before,
+  html:has(.studio-root) ::after {
+    border-color: var(--border);
+  }
 }
 
 /* Utility nhỏ cho bảng dày thông tin */
@@ -167,10 +189,42 @@
   z-index: 1;
 }
 
+/*
+ * Nhãn kỹ thuật theo overline của landing (`text-xs font-mono-tech uppercase tracking-wider font-semibold`): mono,
+ * 12px, chữ hoa, giãn chữ. Dùng cho overline và tiêu đề cột/nhóm thông tin. Màu do nơi dùng quyết định, như landing:
+ * `text-ember-strong` cho overline của trang, `text-ink-muted` cho nhãn trung tính (ink-subtle không đủ tương phản
+ * ở cỡ chữ này).
+ */
+@utility label-tech {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 /* ── Studio MVP ─────────────────────────────────────────────────────────── */
 .studio-root {
   color-scheme: light;
   font-family: var(--font-studio);
+}
+
+/*
+ * Bôi chọn chữ và thanh cuộn như landing. Gắn theo <html> thay vì `.studio-root` để nội dung portal (dialog, menu,
+ * sheet — Radix đặt ngoài `.studio-root`) cũng theo; UI cũ (`.legacy-root`) và landing không bị đổi.
+ * Bôi chọn: nền cam nhạt, chữ cam đậm (cùng giá trị với ember-soft / ember-strong).
+ */
+html:has(.studio-root) ::selection {
+  background: var(--accent);
+  color: var(--primary);
+}
+
+/* Thanh cuộn mảnh, màu ấm — theo chuẩn CSS (Chrome ≥ 121, Firefox); trình duyệt cũ giữ thanh cuộn mặc định. */
+html:has(.studio-root),
+html:has(.studio-root) * {
+  scrollbar-width: thin;
+  scrollbar-color: #d9cebf transparent;
 }
 
 /*

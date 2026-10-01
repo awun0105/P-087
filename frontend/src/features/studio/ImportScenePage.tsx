@@ -58,7 +58,7 @@ export function ImportScenePage({ importId }: { importId: string }) {
   if (scene?.status === "FAILED") {
     return (
       <main className="mx-auto max-w-3xl space-y-4 px-4 py-10">
-        <h1 className="text-2xl font-semibold">{scene.name}</h1>
+        <h1 className="text-2xl font-extrabold tracking-tight">{scene.name}</h1>
         <Notice tone="rust">{scene.error ?? "Không nén được scene 3DGS."}</Notice>
         <Link href="/new" className={buttonVariants({ variant: "secondary" })}>Chọn file khác</Link>
       </main>
@@ -66,7 +66,7 @@ export function ImportScenePage({ importId }: { importId: string }) {
   }
   return (
     <main className="mx-auto max-w-3xl space-y-5 px-4 py-10">
-      <h1 className="text-2xl font-semibold">{scene?.name ?? "Đang mở scene import…"}</h1>
+      <h1 className="text-2xl font-extrabold tracking-tight">{scene?.name ?? "Đang mở scene import…"}</h1>
       <Card className="space-y-3 p-6">
         <p className="flex items-center gap-2 text-sm" role="status"><Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />Máy chủ đang chuẩn bị bản xem SOG…</p>
         <p className="text-sm text-ink-muted">File 3DGS chỉ được chuyển sang định dạng xem nhẹ, không chạy reconstruction. Có thể rời trang và mở lại từ Scenes khi xong.</p>

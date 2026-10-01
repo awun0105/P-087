@@ -34,7 +34,7 @@ export function SamplePicker({
   return (
     <section aria-labelledby="samples-heading">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 id="samples-heading" className="flex items-center gap-2 text-base font-semibold">
+        <h2 id="samples-heading" className="flex items-center gap-2 text-base font-bold">
           <Clapperboard className="size-4 text-ember-strong" aria-hidden />
           Chọn video mẫu
         </h2>
@@ -65,7 +65,7 @@ export function SamplePicker({
                   </Badge>
                 </div>
                 <div className="flex flex-1 flex-col p-4">
-                  <p className="text-xs font-medium tracking-wide text-ink-subtle uppercase">
+                  <p className="label-tech text-ink-muted">
                     {sample.source.dataset} · {sample.source.sequence}
                   </p>
                   <p className="mt-1 font-semibold text-ink">{sample.title}</p>
@@ -107,7 +107,7 @@ export function SampleSelectStep({
     <div className="space-y-6">
       <Card className="p-5 sm:p-6">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-base font-semibold">{sample.title}</h2>
+          <h2 className="text-base font-bold">{sample.title}</h2>
           <Badge tone="ember">Video mẫu · xử lý sẵn</Badge>
           {sample.origin === "smoke_run" && <Badge tone="ochre">Bản smoke tạm</Badge>}
         </div>

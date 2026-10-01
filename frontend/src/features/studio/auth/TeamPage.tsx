@@ -76,7 +76,7 @@ export function TeamPage() {
 
   return (
     <main className="mx-auto max-w-4xl px-4 pt-10 pb-20 sm:px-6">
-      <h1 className="text-3xl font-semibold tracking-tight">Nhóm</h1>
+      <h1 className="text-3xl font-extrabold tracking-tight">Nhóm</h1>
       <p className="mt-2 text-[15px] text-ink-muted">
         Editor dựng và chỉnh scene, có hạn mức số lần xử lý GPU (scene mới hoặc thử lại) mỗi 24 giờ do Reviewer chỉnh. Reviewer có
         thêm quyền duyệt scene, quản lý thành viên và không bị giới hạn.
@@ -89,7 +89,7 @@ export function TeamPage() {
       )}
       <Card className="mt-6 overflow-hidden">
         <table className="w-full text-left text-sm">
-          <thead className="bg-paper-sunken text-xs tracking-wide text-ink-subtle uppercase">
+          <thead className="label-tech bg-paper-sunken text-ink-muted">
             <tr>
               <th className="px-4 py-3 font-medium">Thành viên</th>
               <th className="px-4 py-3 font-medium">Role</th>
@@ -186,7 +186,7 @@ function InviteCard() {
   const link = invite ? `${window.location.origin}/register?code=${encodeURIComponent(invite.code)}` : "";
   return (
     <Card className="mt-8 p-5 sm:p-6">
-      <h2 className="flex items-center gap-2 text-base font-semibold">
+      <h2 className="flex items-center gap-2 text-base font-bold">
         <Ticket className="size-4 text-ember-strong" aria-hidden />
         Mời thành viên
       </h2>

@@ -162,7 +162,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
     <main className="flex h-[calc(100dvh-3rem)] flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-paper-raised px-4 py-3 sm:px-6">
         <div className="mr-2 min-w-0">
-          <h1 className="truncate text-base font-semibold">{info?.name ?? "Đang tải scene…"}</h1>
+          <h1 className="truncate text-base font-bold">{info?.name ?? "Đang tải scene…"}</h1>
           <details className="text-xs text-ink-muted"><summary className="cursor-pointer">Thông tin job</summary><p className="break-all font-mono">{jobId}</p></details>
         </div>
         {status && <Badge tone={status.tone}>{status.label}</Badge>}

@@ -225,7 +225,7 @@ function SourceCard({ icon, title, detail, onClick }: { icon: React.ReactNode; t
   return (
     <button type="button" onClick={onClick} className="group flex min-h-48 flex-col items-start rounded-2xl border border-line bg-paper-raised p-5 text-left transition-[border-color,box-shadow] hover:border-ember hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ember">
       <span className="grid size-10 place-items-center rounded-xl bg-ember-soft text-ember-strong [&_svg]:size-5">{icon}</span>
-      <span className="mt-5 text-lg font-semibold text-ink">{title}</span>
+      <span className="mt-5 text-lg font-bold tracking-tight text-ink">{title}</span>
       <span className="mt-1 text-sm leading-relaxed text-ink-muted">{detail}</span>
       <span className="mt-auto flex items-center gap-1 pt-5 text-sm font-medium text-ember-strong">Tiếp tục <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" aria-hidden /></span>
     </button>
