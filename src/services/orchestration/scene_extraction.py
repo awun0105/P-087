@@ -1,8 +1,10 @@
-"""Bước tách vật thể sau REC bundle (ADR 0006): SceneIR ứng viên cho người dùng xác nhận.
+"""Bước tách vật thể sau REC bundle: SceneIR ứng viên cho người dùng xác nhận.
 
-Đường chính SAMPro3D + SAM2 (runtime riêng); không có runtime hoặc lỗi thì lùi về tách hình
-học từ collision mesh; lỗi cả hai vẫn publish SceneIR chỉ có môi trường. Bước này không làm
-hỏng job: tái dựng đã xong, vật thể còn thêm tay được.
+Đường chính là tách theo vật (pipeline v2, ADR 0007), thử tối đa `product_objectify_attempts` lần. Hết số
+lần mà vẫn lỗi thì **không tự lùi về hộp**: publish SceneIR chỉ có môi trường, đánh dấu chờ người dùng chọn
+"chạy lại" hoặc "dùng hộp ứng viên" (`scene_objectify_queue`). Máy không cấu hình runtime tách theo vật thì
+đi thẳng đường hộp (ADR 0006: SAMPro3D + SAM2, rồi tách hình học). Bước này không làm hỏng job: tái dựng
+đã xong, vật thể còn thêm tay được.
 """
 
 import logging
@@ -14,14 +16,16 @@ import numpy as np
 from src.config import Settings
 from src.models.contracts.manifests import JobManifest, StageArtifact, StageId, StageStatus
 from src.models.contracts.reconstruction import ReconstructionBundle
+from src.models.contracts.scene import SceneObject
 from src.services.orchestration.artifacts import FilesystemArtifactStore
 from src.services.orchestration.jobs.progress import metric_confirmation_stage
 from src.services.orchestration.projects.registry import ProjectRegistry
+from src.services.orchestration.scene_objectify import AWAITING_CHOICE, ObjectifyError, Publish, objectify_with_retry
 from src.services.orchestration.scene_objectify import METHOD as OBJECTIFY_METHOD
-from src.services.orchestration.scene_objectify import ObjectifyError, objectify
 from src.services.reconstruction import camera_views, confirmation_summary, metric_gaussian_points
 from src.services.scene.builder import scene_from_bundle
 from src.services.scene.geometric import GeometricConfig, candidate_objects, collision_vertices, objects_from_candidates
+from src.services.scene.publisher import with_scene_checksum
 from src.services.scene.sampro3d.pipeline import METHOD as SAMPRO3D_METHOD
 from src.services.scene.sampro3d.pipeline import CameraFrame, Sam2Runtime, extract
 
@@ -59,11 +63,17 @@ def _points_and_frames(
     return points[inside], frames
 
 
-def extract_scene(
-    registry: ProjectRegistry, job: JobManifest, bundle: ReconstructionBundle, settings: Settings, workspace: Path
-) -> StageArtifact:
-    """Tạo + publish SceneIR rev-001; trả StageArtifact OBJECT_EXTRACT (luôn SUCCEEDED, ghi phương pháp)."""
-    started = datetime.now(UTC)
+def _sam2_runtime(settings: Settings) -> Sam2Runtime | None:
+    if not (settings.product_scene_runtime_python and settings.product_sam2_checkpoint):
+        return None
+    return Sam2Runtime(
+        settings.product_scene_runtime_python,
+        settings.product_sam2_checkpoint,
+        timeout_seconds=settings.product_scene_timeout_seconds,
+    )
+
+
+def _idempotent_publish(registry: ProjectRegistry) -> Publish:
     store = FilesystemArtifactStore(registry.runtime_resolver)
 
     def publish(reference, payload):  # noqa: ANN001, ANN202 - writer idempotent theo nội dung
@@ -71,31 +81,22 @@ def extract_scene(
             return reference
         return store.publish(reference, payload)
 
-    runtime = (
-        Sam2Runtime(
-            settings.product_scene_runtime_python,
-            settings.product_sam2_checkpoint,
-            timeout_seconds=settings.product_scene_timeout_seconds,
-        )
-        if settings.product_scene_runtime_python and settings.product_sam2_checkpoint
-        else None
-    )
-    objects, method, note = [], "none", ""
-    environment, extra = None, {}
-    if settings.product_objectify and runtime is not None and runtime.available():
-        # Pipeline v2 (ADR 0007): nền đã vá + Gaussian/collider từng vật. Lỗi → lùi về đường hộp.
-        try:
-            result = objectify(registry, job, bundle, settings, workspace / "objectify", publish)
-            objects, environment, extra, method = (
-                result.objects,
-                result.environment,
-                result.provenance,
-                OBJECTIFY_METHOD,
-            )
-        except (ObjectifyError, ValueError, OSError) as error:
-            logger.warning("Tách theo vật thất bại job=%s cause=%s; dùng đường hộp", job.job_id, error)
-            note = f"tách theo vật lỗi ({type(error).__name__}); dùng hộp ứng viên"
-    if method == "none" and runtime is not None and runtime.available():
+    return publish
+
+
+def box_candidates(
+    registry: ProjectRegistry,
+    job: JobManifest,
+    bundle: ReconstructionBundle,
+    settings: Settings,
+    workspace: Path,
+    publish: Publish,
+) -> tuple[list[SceneObject], str, str]:
+    """Đường hộp (ADR 0006): SAMPro3D + SAM2, lỗi/thiếu runtime thì tách hình học. Trả (vật, phương pháp, ghi chú)."""
+    objects: list[SceneObject] = []
+    method, note = "none", ""
+    runtime = _sam2_runtime(settings)
+    if runtime is not None and runtime.available():
         try:
             points, frames = _points_and_frames(registry, job, bundle)
             candidates = extract(points, frames, runtime, workspace / "sampro3d")
@@ -106,7 +107,7 @@ def extract_scene(
                 "SAMPro3D thất bại job=%s cause=%s; dùng fallback hình học", job.job_id, type(error).__name__
             )
             note = f"SAMPro3D lỗi ({type(error).__name__}); dùng tách hình học"
-    elif method == "none":
+    else:
         note = "chưa cấu hình runtime SAM2; dùng tách hình học"
     if method == "none":
         try:
@@ -116,6 +117,28 @@ def extract_scene(
         except (ValueError, OSError) as error:
             logger.warning("Tách hình học thất bại job=%s cause=%s", job.job_id, type(error).__name__)
             note = f"{note}; tách hình học lỗi ({type(error).__name__}), scene chỉ có môi trường"
+    return objects, method, note
+
+
+def extract_scene(
+    registry: ProjectRegistry, job: JobManifest, bundle: ReconstructionBundle, settings: Settings, workspace: Path
+) -> StageArtifact:
+    """Tạo + publish SceneIR rev-001; trả StageArtifact OBJECT_EXTRACT (luôn SUCCEEDED, ghi phương pháp)."""
+    started = datetime.now(UTC)
+    publish = _idempotent_publish(registry)
+    runtime = _sam2_runtime(settings)
+    objects: list[SceneObject] = []
+    environment, extra = None, {}
+    if settings.product_objectify and runtime is not None and runtime.available():
+        try:
+            result = objectify_with_retry(registry, job, bundle, settings, workspace / "objectify", publish)
+            objects, environment, extra = result.objects, result.environment, result.provenance
+            method, note = OBJECTIFY_METHOD, ""
+        except ObjectifyError as error:
+            # Không tự lùi về hộp (owner quyết 2026-10-01): scene chỉ có môi trường, chờ người dùng chọn.
+            method, note = AWAITING_CHOICE, f"{error}; chọn chạy lại hoặc dùng hộp ứng viên"
+    else:
+        objects, method, note = box_candidates(registry, job, bundle, settings, workspace, publish)
     scene = scene_from_bundle(bundle, objects, {"object_extraction": method, "note": note, **extra}, environment)
     revision = registry.scene.publish_initial(job.job_id, scene)
     reference = revision.scene_reference
@@ -129,3 +152,33 @@ def extract_scene(
         artifact_checksum=reference.artifact_checksum,
         data_class=reference.data_class,
     )
+
+
+def use_boxes(registry: ProjectRegistry, job_id: str, settings: Settings, workspace: Path) -> str:
+    """Người dùng chọn dùng hộp ứng viên: ghi **revision kế tiếp** với vật từ đường hộp, môi trường gốc của bundle.
+
+    Vật của revision trước không mang sang (tập hộp mới là ứng viên mới); hoàn tác quay lại được.
+    """
+    from src.services.orchestration.stage_views import job_bundle
+
+    job = registry.get_job(job_id)
+    bundle = job_bundle(registry, job)
+    if bundle is None:
+        raise ValueError("job chưa có ReconstructionBundle hệ mét")
+    objects, method, note = box_candidates(registry, job, bundle, settings, workspace, _idempotent_publish(registry))
+    current = registry.scene.current(job_id).scene
+    fresh = scene_from_bundle(bundle, objects, {})
+    updated = current.model_copy(
+        update={
+            "environment": fresh.environment,
+            "objects": objects,
+            "provenance": {
+                "bundle_checksum": current.provenance.get("bundle_checksum"),
+                "object_extraction": method,
+                "note": f"người dùng chọn dùng hộp ứng viên. {note}".strip(),
+            },
+        }
+    )
+    published = registry.scene.publish_next(job_id, current.scene_revision, with_scene_checksum(updated), "use_boxes")
+    registry.runtime_resolver.sync_up(job_id)
+    return published.revision.scene.scene_revision

@@ -390,6 +390,37 @@ export function restoreSceneRevision(
   });
 }
 
+// ── dựng lại tập vật: chạy lại tách theo vật / dùng hộp ứng viên ─────────────
+
+export type ObjectifyMode = "objectify" | "boxes";
+
+/** Trạng thái tách theo vật của scene + yêu cầu dựng lại gần nhất (worker thực hiện). */
+export interface ObjectifyState {
+  status: "idle" | "queued" | "running" | "done" | "failed";
+  mode: ObjectifyMode | null;
+  /** Tách theo vật lỗi hết số lần thử; scene chỉ có môi trường, chờ người dùng chọn. */
+  awaiting_choice: boolean;
+  object_centric: boolean;
+  /** Máy xử lý có runtime tách theo vật. */
+  available: boolean;
+  note: string | null;
+  base_revision: string | null;
+  result_revision: string | null;
+  error: string | null;
+}
+
+export function getObjectifyState(jobId: string, signal?: AbortSignal): Promise<ObjectifyState> {
+  return apiFetch<ObjectifyState>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/objectify`, { signal });
+}
+
+/** Xếp hàng dựng lại tập vật trên đúng revision đang hiển thị. */
+export function requestObjectify(jobId: string, expectedRevision: string, mode: ObjectifyMode): Promise<ObjectifyState> {
+  return apiFetch<ObjectifyState>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/objectify`, {
+    method: "POST",
+    body: JSON.stringify({ expected_scene_revision: expectedRevision, mode }),
+  });
+}
+
 // ── gói mô phỏng Isaac (EX-SIM SIM-02…05) ───────────────────────────────────
 
 export interface PreflightRuleView {

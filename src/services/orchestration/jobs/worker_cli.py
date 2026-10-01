@@ -24,6 +24,7 @@ from src.services.orchestration.processing.capability import record as record_ca
 from src.services.orchestration.projects.errors import PrivacyGateBlockedError
 from src.services.orchestration.projects.privacy import require_project_dispatch
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
+from src.services.orchestration.scene_objectify_queue import process_next, recover_interrupted
 
 logger = logging.getLogger(__name__)
 
@@ -206,8 +207,10 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGTERM, interrupt)
     pause = Event()
     try:
+        recover_interrupted(settings)
         while True:
-            handled = dispatch_next(registry)
+            # Job trong hàng đợi đi trước; rảnh mới nhận yêu cầu chạy lại tách theo vật (cùng dùng GPU).
+            handled = dispatch_next(registry) or process_next(registry, settings)
             if args.once:
                 return 0
             if not handled:

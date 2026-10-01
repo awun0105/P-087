@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Badge, Button, Notice } from "@/components/studio/primitives";
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
+import { ObjectifyNotice } from "@/features/studio/ObjectifyNotice";
 import type { GizmoMode, OverlayBox, OverlayObject } from "@/features/viewer/scene-overlay";
 import { ApiError } from "@/lib/api/client";
 import { jobArtifactContentUrl } from "@/lib/api/endpoints";
@@ -291,6 +292,7 @@ export function ObjectReviewView({
         )}
       </div>
       <aside className="order-3 flex min-h-0 flex-col overflow-y-auto border-t border-line bg-paper-raised lg:border-t-0 lg:border-l" aria-label="Inspector">
+        <ObjectifyNotice jobId={jobId} revision={scene.scene_revision} onRevision={() => setReload((value) => value + 1)} />
         {error && (
           <Notice tone="rust" className="m-3">
             {error}

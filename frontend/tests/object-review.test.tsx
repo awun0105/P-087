@@ -86,6 +86,11 @@ function routeFetch(routes: Record<string, Response[]>) {
         ],
         physics_note: "",
       });
+    // Trạng thái tách theo vật: mặc định scene đã là scene theo vật (không hiện thông báo), trừ khi test tự cấp.
+    if (url.includes("/scene/objectify")) {
+      const queued = routes["/scene/objectify"];
+      return queued?.length ? queued.shift()! : reply(objectify({ object_centric: true }));
+    }
     const key = Object.keys(routes).find((pattern) => url.includes(pattern));
     if (key && routes[key].length) return routes[key].shift()!;
     if (url.includes("/simulation-package")) return reply(null);
@@ -94,6 +99,10 @@ function routeFetch(routes: Record<string, Response[]>) {
     }
     throw new Error(`fetch không mong đợi: ${url}`);
   });
+}
+
+function objectify(overrides: Record<string, unknown>) {
+  return { status: "idle", mode: null, awaiting_choice: false, object_centric: false, available: true, note: null, base_revision: null, result_revision: null, error: null, ...overrides };
 }
 
 function calls(pattern: string) {
@@ -260,5 +269,33 @@ describe("ObjectReviewView", () => {
     expect(screen.getByText(/user-001/)).toBeInTheDocument();
     expect(screen.queryByText(/Tải gói/)).toBeNull();
     expect(screen.getByText(/Chưa đạt kiểm tra/)).toBeInTheDocument();
+  });
+  it("tách theo vật lỗi sau 3 lần: cho chọn chạy lại hoặc dùng hộp; chọn hộp gửi mode boxes", async () => {
+    routeFetch({
+      "/scene/objectify": [
+        reply(objectify({ awaiting_choice: true, note: "tách theo vật lỗi sau 3 lần: hết VRAM" })),
+        reply(objectify({ status: "queued", mode: "boxes", awaiting_choice: true, base_revision: "rev-002" })),
+      ],
+      "/scene": [reply({ scene: scene("rev-002", "CONFIRMED", "CONFIRMED") })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+
+    expect(await screen.findByText(/không thành công sau 3 lần thử/)).toBeTruthy();
+    expect(screen.getByText(/hết VRAM/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Chạy lại tách theo vật/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Dùng hộp ứng viên/ }));
+
+    const posts = () => calls("/scene/objectify").filter(([, init]) => (init as RequestInit | undefined)?.method === "POST");
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(JSON.parse((posts()[0][1] as RequestInit).body as string)).toEqual({ expected_scene_revision: "rev-002", mode: "boxes" });
+    expect(await screen.findByText(/Đang dựng hộp ứng viên/)).toBeTruthy();
+  });
+
+  it("scene theo vật: không hiện thông báo tách vật", async () => {
+    routeFetch({ "/scene": [reply({ scene: scene("rev-002", "CONFIRMED", "CONFIRMED") })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    await screen.findByText("Vật thể 1");
+    await waitFor(() => expect(calls("/scene/objectify")).toHaveLength(1));
+    expect(screen.queryByText(/hộp ứng viên/)).toBeNull();
   });
 });

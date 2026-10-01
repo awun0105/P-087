@@ -134,3 +134,16 @@ async def test_label_suggestions_use_object_size(client) -> None:
 
     assert response.status_code == 200
     assert len(response.json()["suggestions"]) >= 1
+
+
+@pytest.mark.asyncio
+async def test_objectify_state_and_request_without_reconstruction_bundle(client) -> None:
+    state = await client.get(f"{_JOB}/scene/objectify")
+    assert state.status_code == 200
+    assert state.json()["status"] == "idle" and state.json()["object_centric"] is False
+
+    # Job fixture không có ReconstructionBundle hệ mét → không xếp hàng, trả 409 có lý do.
+    refused = await client.post(f"{_JOB}/scene/objectify", json={"expected_scene_revision": "rev-001", "mode": "boxes"})
+    assert refused.status_code == 409 and "hệ mét" in refused.json()["detail"]
+    stale = await client.post(f"{_JOB}/scene/objectify", json={"expected_scene_revision": "rev-009"})
+    assert stale.status_code == 409

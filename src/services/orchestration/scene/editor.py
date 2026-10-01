@@ -75,6 +75,14 @@ class SceneEditor:
                     )
                 recovered = self._publish(job_id, fixture, supersedes=None)
             self._revisions[job_id] = recovered
+        # Tiến trình khác (worker chạy lại tách theo vật) có thể đã publish revision kế tiếp; chuỗi
+        # revision liền mạch nên chỉ cần dò tiếp từ bản đang giữ — thường là một lần kiểm tồn tại.
+        for _ in range(_MAX_RECOVERY_STEPS):
+            cached = self._revisions[job_id]
+            newer = self._load_revision(job_id, _next_scene_revision(cached.scene.scene_revision))
+            if newer is None:
+                break
+            self._revisions[job_id] = newer
         return self._revisions[job_id]
 
     def visual_binding(self, job_id: str | None = None) -> VisualBinding:

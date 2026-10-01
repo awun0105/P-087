@@ -46,6 +46,9 @@ from src.services.scene.sampro3d.pipeline import CameraFrame, Sam2Runtime, run_s
 logger = logging.getLogger(__name__)
 
 METHOD = "objectify_v1(sampro3d_sam2+render_lift+coacd+seed_inpaint)"
+#: Giá trị `provenance.object_extraction` khi tách theo vật lỗi hết số lần thử: scene chỉ có môi trường,
+#: chờ người dùng chọn chạy lại hoặc dùng hộp ứng viên.
+AWAITING_CHOICE = "objectify_failed_awaiting_choice"
 _REPO = Path(__file__).resolve().parents[3]
 LIFT_RUNNER = _REPO / "src/services/scene/association/lift_runner.py"
 CONVEX_RUNNER = _REPO / "src/services/simulation/colliders/convex_runner.py"
@@ -318,6 +321,30 @@ def objectify(
     return ObjectifyResult(environment=environment, objects=objects, provenance=provenance)
 
 
+def objectify_with_retry(
+    registry: ProjectRegistry,
+    job: JobManifest,
+    bundle: ReconstructionBundle,
+    settings: Settings,
+    workspace: Path,
+    publish: Publish,
+) -> ObjectifyResult:
+    """Thử `objectify` tối đa `product_objectify_attempts` lần, mỗi lần một workspace riêng (giữ log từng lần).
+
+    Lỗi GPU thường thoáng qua (hết VRAM do tiến trình khác, driver) nên đáng thử lại; hết số lần thì ném
+    `ObjectifyError` kèm lỗi cuối — nơi gọi **không** tự lùi về đường hộp mà để người dùng chọn.
+    """
+    attempts = settings.product_objectify_attempts
+    last: Exception | None = None
+    for number in range(1, attempts + 1):
+        try:
+            return objectify(registry, job, bundle, settings, workspace / f"attempt-{number}", publish)
+        except (ObjectifyError, ValueError, OSError) as error:
+            logger.warning("Tách theo vật lỗi job=%s lần %d/%d: %s", job.job_id, number, attempts, error)
+            last = error
+    raise ObjectifyError(f"tách theo vật lỗi sau {attempts} lần: {last}") from last
+
+
 def reobjectify(registry: ProjectRegistry, job_id: str, settings: Settings, workspace: Path) -> str:
     """Chạy lại tách theo vật cho job đã có SceneIR; ghi **revision kế tiếp** (không sửa revision cũ).
 
@@ -339,7 +366,7 @@ def reobjectify(registry: ProjectRegistry, job_id: str, settings: Settings, work
             return reference
         return store.publish(reference, payload)
 
-    result = objectify(registry, job, bundle, settings, workspace, publish)
+    result = objectify_with_retry(registry, job, bundle, settings, workspace, publish)
     current = registry.scene.current(job_id).scene
     updated = current.model_copy(
         update={

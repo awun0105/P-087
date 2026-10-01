@@ -18,6 +18,7 @@ from src.config import get_settings
 from src.models.contracts.artifacts import ArtifactRef, Checksum
 from src.models.contracts.manifests import JobManifest, JobStatus
 from src.models.contracts.preview import ReconstructionPreview
+from src.services.orchestration import scene_objectify_queue
 from src.services.orchestration.artifacts import ArtifactNotFoundError, ArtifactStoreError
 from src.services.orchestration.auth import UserRecord
 from src.services.orchestration.jobs import (
@@ -53,6 +54,7 @@ from src.services.orchestration.scene.objects import (
     apply_object_action,
     restore_revision,
 )
+from src.services.orchestration.scene_objectify_queue import ObjectifyRequestError, ObjectifyState
 
 router = APIRouter(tags=["product"])
 
@@ -447,6 +449,48 @@ def get_scene_catalog() -> schemas.SceneCatalogResponse:
         ],
         physics_note=catalog.physics_note,
     )
+
+
+@router.get(
+    "/jobs/{job_id}/scene/objectify",
+    response_model=ObjectifyState,
+    responses={404: {"model": schemas.ApiErrorResponse}},
+)
+def get_objectify_state(job_id: str) -> ObjectifyState:
+    """Scene đang là scene theo vật hay đường hộp, và yêu cầu chạy lại gần nhất đang ở đâu."""
+    _job_or_404(job_id)
+    try:
+        return scene_objectify_queue.state(_registry(), get_settings(), job_id)
+    except SceneNotAvailableError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.post(
+    "/jobs/{job_id}/scene/objectify",
+    response_model=ObjectifyState,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={404: {"model": schemas.ApiErrorResponse}, 409: {"model": schemas.ApiErrorResponse}},
+)
+def request_objectify(
+    job_id: str, request: schemas.ObjectifyRequest, user: UserRecord | None = Depends(require_editor)
+) -> ObjectifyState:
+    """Xếp hàng chạy lại tách theo vật (hoặc dùng hộp ứng viên); worker thực hiện, ghi revision SceneIR kế tiếp.
+
+    Tập vật mới là ứng viên mới: xác nhận/nhãn của revision hiện tại không mang sang (vẫn hoàn tác được).
+    Đây là một lần xử lý GPU nên tính vào hạn mức của Editor.
+    """
+    _job_or_404(job_id)
+    enforce_gpu_quota(user)
+    try:
+        result = scene_objectify_queue.request(
+            _registry(), get_settings(), job_id, request.expected_scene_revision, request.mode
+        )
+    except SceneNotAvailableError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (ObjectifyRequestError, SceneRevisionConflictError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    record_gpu_run(user, job_id, {"kind": f"scene.{request.mode}"})
+    return result
 
 
 @router.get(

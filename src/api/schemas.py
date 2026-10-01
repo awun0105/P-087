@@ -47,6 +47,7 @@ __all__ = [
     "project_response",
     "review_state",
     "scene_edit_response",
+    "ObjectifyRequest",
     "scene_response",
     "validation_state",
 ]
@@ -190,6 +191,16 @@ class ObjectActionRequest(ApiModel):
     # action = label (ADR 0007): nhãn lớp; khối lượng người dùng nhập (bỏ trống = mặc định của nhãn).
     semantic_class: str | None = Field(default=None, max_length=64)
     mass_kg: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+
+
+class ObjectifyRequest(ApiModel):
+    """Body yêu cầu dựng lại tập vật trên đúng revision đang hiển thị.
+
+    `objectify` = chạy lại tách theo vật; `boxes` = dùng hộp ứng viên (người dùng chọn lùi).
+    """
+
+    expected_scene_revision: Identifier
+    mode: Literal["objectify", "boxes"] = "objectify"
 
 
 class AddCatalogObjectRequest(ApiModel):

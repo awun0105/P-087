@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     product_lama_checkpoint: Path | None = None
     #: Bật tách scene theo vật (Gaussian + collider từng vật, vá nền). Cần runtime có gsplat/coacd.
     product_objectify: bool = True
+    #: Số lần thử tách theo vật trước khi dừng và để người dùng chọn (chạy lại / dùng hộp).
+    product_objectify_attempts: int = Field(default=3, ge=1, le=10)
     product_queue_poll_seconds: float = Field(default=3, ge=0.1, le=60, allow_inf_nan=False)
     # MVP 2026-09-29: `self_attested` cho phép video upload chạy với lời tự khai
     # không có khuôn mặt/biển số; mặc định giữ cổng QA `VERIFIED_ANONYMIZED`.
