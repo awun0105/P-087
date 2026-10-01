@@ -659,7 +659,7 @@ Mỗi quyết định chỉ chốt cách **UI thể hiện**; không đổi PRD,
 | Q2 | SceneObject → Isaac → review/release trong Studio | Hiện **thật** các bước đã có: xác nhận vật (S08), tạo gói mô phỏng + preflight (S09 phần gói), tải gói (S12 phần candidate). Isaac validation, review và release hiển thị trạng thái **"Chưa khả dụng"** kèm lý do ("cần máy RTX / API chưa triển khai") và điều kiện mở; không dựng report, verdict hay approval minh họa | App thật không được hiển thị kết quả không có nguồn (D-05). Mở lại khi SIM-06 và PRODUCT-10/11 có runtime |
 | Q3 | Import PLY/ZIP tới đâu | Giữ **chỉ xem/chỉnh** (quyết định gói 5, [ADR 0004 §3][adr4]); nhãn `Scene import · chỉ xem/chỉnh sửa`; không hiện CTA metric/collision/release cho import. ZIP có COLMAP cũng theo nhánh này cho tới khi có ADR khác | Video là happy path duy nhất tới gói mô phỏng |
 | Q4 | Calibration error/tolerance | UI chỉ đọc **kết quả hệ thống trả về** (ngưỡng C–D, độ lệch, đạt/không) của lần xem trước; không in con số độ chính xác cố định trong copy. `e` khoá sau khi đo lại trên preset chất lượng mới (REC-06) | `e` lần 1 ≈ 15,6 cm, chưa khoá |
-| Q5 | Save của Gaussian editor và SceneObject draft | Hai mô hình tách hẳn. **SceneObject:** mỗi thao tác (xác nhận, loại, ẩn, thêm vật cản, sửa transform) ghi ngay một revision; header hiện `rev-00N · đã lưu` sau khi backend trả revision mới, `Đang lưu…` trong lúc chờ, `Lưu lỗi` kèm thử lại. **Không có nút "Lưu nháp"** vì API không có draft chưa lưu. **Editor Gaussian (SuperSplat):** chỉ `Xuất bản làm việc (PLY/SOG)`, nhãn "chỉ trong phiên editor, không lưu vào scene" | Theo behavior API hiện có ([routes_product][r-api], `SceneEditor.publish_next`); sửa F5/S06 "Lưu nháp" thành "lưu theo từng thao tác" |
+| Q5 | Save của Gaussian editor và SceneObject draft | Hai mô hình tách hẳn. **SceneObject:** mỗi thao tác (xác nhận, loại, ẩn, thêm vật cản, sửa transform) ghi ngay một revision; header hiện `rev-00N · đã lưu` sau khi backend trả revision mới, `Đang lưu…` trong lúc chờ, `Lưu lỗi` kèm thử lại. **Không có nút "Lưu nháp"** vì API không có draft chưa lưu. **Editor Gaussian (SuperSplat):** chỉ `Xuất bản làm việc (PLY/SOG)`, nhãn "chỉ trong phiên editor, không lưu vào scene" | Theo behavior API hiện có ([`src/api/product/scene.py`][r-api], `SceneEditor.publish_next`); sửa F5/S06 "Lưu nháp" thành "lưu theo từng thao tác" |
 | Q6 | LOD, overlay, thiết bị yếu | Baseline WebGL2; kiểm capability trước khi tạo viewer; không chạy được thì hiện lý do và đường về danh sách. Overlay chỉ bật lớp có artifact. LOD/streaming **để sau** (follow-up), không hiện tuỳ chọn LOD khi chưa có | Chưa có browser acceptance cho LOD |
 | Q7 | Thời gian lưu dữ liệu và hạn mức | Chỉ hiện **hạn mức job/ngày** của tài khoản (`daily_job_quota`, có trong API) ở menu tài khoản và trang Nhóm; không hiện thời gian lưu trữ, dung lượng hay giá | Chưa có policy retention |
 
@@ -794,7 +794,7 @@ không thay thế các cổng đó. Increment này không thay scope Studio v2 c
 [r-review]: ../frontend/src/features/review/ReviewLifecycle.tsx
 [r-release]: ../frontend/src/features/review/ReleasePanel.tsx
 [r-validation]: <frontend/src/app/(legacy)/jobs/[jobId]/validation/page.tsx>
-[r-api]: ../src/api/routes_product.py
+[r-api]: ../src/api/product/scene.py
 [r-routes]: ../frontend/next.config.ts
 [r-styles]: ../frontend/src/app/globals.css
 [r-states]: ../frontend/src/components/states.tsx

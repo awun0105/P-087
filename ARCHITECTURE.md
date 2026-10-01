@@ -25,10 +25,13 @@ thư mục đã được implement ở checkout hiện tại):
 ```text
 src/
 ├── api/                              # Organizer scaffold; EX-PRODUCT
-│   ├── routes.py                     # Organizer scaffold; include các router
-│   ├── routes_product.py             # Project/job/artifact/scene/review API
+│   ├── routes.py                     # Organizer scaffold; điểm vào duy nhất: include router product, studio, auth
 │   ├── auth.py                       # Đăng nhập 2 role, mã mời, guard quyền, hạn mức GPU (ADR 0003)
-│   └── studio/                       # Studio MVP: uploads (+ upload thẳng), scenes, processing, samples (+ deps)
+│   ├── schemas.py                    # DTO của product API (khác models/schemas.py của chat mẫu)
+│   ├── product/                      # Hợp đồng UI P0, mỗi module một nhóm route (+ deps):
+│   │                                 #   projects, jobs, artifacts, scene, review
+│   └── studio/                       # Studio: uploads (+ upload thẳng), scenes, metric, imports, simulation,
+│                                     #   review, processing, samples (+ deps)
 ├── agents/                           # Organizer scaffold; giữ nguyên
 ├── llm/                              # Organizer scaffold; giữ nguyên
 ├── models/
@@ -403,7 +406,7 @@ real Brush, browser hoặc Isaac acceptance.
   Reviewer, audit review decision và chỉ release candidate đã validate/approve.
   Cơ chế đăng nhập/token/session cụ thể chưa được khóa; không mặc định JWT hoặc
   bỏ auth. `src/api/routes.py` giữ chat/status scaffold và include
-  `routes_product.py` + `studio/`.
+  `product/` + `studio/`.
 
 ### 3. AI Agent (LangGraph)
 

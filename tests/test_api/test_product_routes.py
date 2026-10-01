@@ -45,12 +45,12 @@ def isolated_registry(tmp_path, monkeypatch):
     Without this, POSTing a job would publish JobManifest revisions into the real
     `data/artifacts` tree and leak state between tests.
     """
-    from src.api import routes_product
+    from src.api.product import deps as product_deps
     from src.services.orchestration.projects.registry import ProjectRegistry
 
     registry = ProjectRegistry(runtime_root=tmp_path / "artifacts")
     registry.seed_from_fixtures()
-    monkeypatch.setattr(routes_product, "get_project_registry", lambda: registry)
+    monkeypatch.setattr(product_deps, "get_project_registry", lambda: registry)
     return registry
 
 

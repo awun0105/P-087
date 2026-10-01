@@ -1,9 +1,11 @@
+"""Điểm vào duy nhất của API: gắn router product, studio và auth; giữ hai endpoint chat mẫu của template."""
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.agents.graph import agent
 from src.api.auth import require_editor
 from src.api.auth import router as auth_router
-from src.api.routes_product import router as product_router
+from src.api.product import router as product_router
 from src.api.studio import router as studio_router
 from src.models.schemas import ChatRequest, ChatResponse
 

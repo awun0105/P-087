@@ -10,12 +10,12 @@ _PALLET = "object-pallet-001"
 
 @pytest.fixture(autouse=True)
 def isolated_registry(tmp_path, monkeypatch):
-    from src.api import routes_product
+    from src.api.product import deps as product_deps
     from src.services.orchestration.projects.registry import ProjectRegistry
 
     registry = ProjectRegistry(runtime_root=tmp_path / "artifacts")
     registry.seed_from_fixtures()
-    monkeypatch.setattr(routes_product, "get_project_registry", lambda: registry)
+    monkeypatch.setattr(product_deps, "get_project_registry", lambda: registry)
     return registry
 
 
@@ -138,11 +138,11 @@ async def test_label_suggestions_use_object_size(client) -> None:
 
 @pytest.mark.asyncio
 async def test_objectify_state_and_request_without_reconstruction_bundle(client, tmp_path, monkeypatch) -> None:
-    from src.api import routes_product
+    from src.api.product import deps as product_deps
     from src.config import Settings
 
     settings = Settings(database_url=f"sqlite:///{tmp_path / 'runtime.db'}")
-    monkeypatch.setattr(routes_product, "get_settings", lambda: settings)
+    monkeypatch.setattr(product_deps, "get_settings", lambda: settings)
 
     state = await client.get(f"{_JOB}/scene/objectify")
     assert state.status_code == 200
@@ -173,11 +173,11 @@ async def test_label_remembers_chosen_asset_and_rejects_asset_of_other_class(cli
 
 @pytest.mark.asyncio
 async def test_catalog_preview_served_only_for_known_family_with_file(client, tmp_path, monkeypatch) -> None:
-    from src.api import routes_product
+    from src.api.product import deps as product_deps
     from src.config import Settings
 
     (tmp_path / "SM_PaletteA.glb").write_bytes(b"glTF-fake")
-    monkeypatch.setattr(routes_product, "get_settings", lambda: Settings(product_asset_preview_dir=tmp_path))
+    monkeypatch.setattr(product_deps, "get_settings", lambda: Settings(product_asset_preview_dir=tmp_path))
 
     entries = (await client.get("/api/v1/scene/catalog")).json()["entries"]
     flags = {entry["family"]: entry["has_preview"] for entry in entries}
@@ -191,10 +191,10 @@ async def test_catalog_preview_served_only_for_known_family_with_file(client, tm
 
 @pytest.mark.asyncio
 async def test_training_recording_is_optional_and_served_only_for_known_job(client, tmp_path, monkeypatch) -> None:
-    from src.api import routes_product
+    from src.api.product import deps as product_deps
     from src.config import Settings
 
-    monkeypatch.setattr(routes_product, "get_settings", lambda: Settings(product_rerun_recording_dir=tmp_path))
+    monkeypatch.setattr(product_deps, "get_settings", lambda: Settings(product_rerun_recording_dir=tmp_path))
     # Chưa có bản ghi: chế độ xem không khả dụng, pipeline không bị ảnh hưởng.
     assert (await client.get(f"{_JOB}/training-recording")).json() == {"available": False, "size_bytes": None}
     assert (await client.get(f"{_JOB}/training-recording.rrd")).status_code == 404

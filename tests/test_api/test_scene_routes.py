@@ -15,12 +15,12 @@ _JOB = "/api/v1/jobs/job-fixture-001"
 @pytest.fixture(autouse=True)
 def isolated_registry(tmp_path, monkeypatch):
     """Per-test registry writing revisions into tmp_path, seeded from fixtures."""
-    from src.api import routes_product
+    from src.api.product import deps as product_deps
     from src.services.orchestration.projects.registry import ProjectRegistry
 
     registry = ProjectRegistry(runtime_root=tmp_path / "artifacts")
     registry.seed_from_fixtures()
-    monkeypatch.setattr(routes_product, "get_project_registry", lambda: registry)
+    monkeypatch.setattr(product_deps, "get_project_registry", lambda: registry)
     return registry
 
 
@@ -162,12 +162,12 @@ async def test_edit_on_missing_job_404(client) -> None:
 
 def _restart_registry(tmp_path, monkeypatch):
     """Registry mới trên cùng runtime root — mô phỏng backend khởi động lại."""
-    from src.api import routes_product
+    from src.api.product import deps as product_deps
     from src.services.orchestration.projects.registry import ProjectRegistry
 
     registry = ProjectRegistry(runtime_root=tmp_path / "artifacts")
     registry.seed_from_fixtures()
-    monkeypatch.setattr(routes_product, "get_project_registry", lambda: registry)
+    monkeypatch.setattr(product_deps, "get_project_registry", lambda: registry)
     return registry
 
 

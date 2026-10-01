@@ -89,8 +89,8 @@ Out of scope:
 ## Progress
 
 - [x] Pha 0: fetch, baseline test, baseline OpenAPI, bản ghi này.
-- [ ] Pha 1: thư mục gốc và tài liệu.
-- [ ] Pha 2: `src/api/product/`.
+- [x] Pha 1: thư mục gốc và tài liệu (commit `ebb7443`, `c3d2803`).
+- [x] Pha 2: `src/api/product/`.
 - [ ] Pha 3: orchestration theo miền.
 - [ ] Pha 4a: validation / duyệt / phát hành trong UI mới.
 - [ ] Pha 4b: xoá UI cũ.
@@ -104,6 +104,9 @@ Out of scope:
   UI cũ dùng (thay D-10 "giữ legacy sau cờ `LEGACY_UI=1`").
 - 2026-10-02: `storage.py`, `benchmark.py`, `environment.py` giữ ở gốc `orchestration` (hạ tầng dùng chung; hai file
   đầu đã là vị trí chuẩn trong ARCHITECTURE).
+- 2026-10-02: tách `routes_product.py` theo chủ đề nên **thứ tự đăng ký** của 7 operation đổi so với trước (kế hoạch
+  ban đầu ghi "giữ nguyên thứ tự"). Chấp nhận vì không có hai route nào chồng nhau: ánh xạ URL → hàm xử lý của 5.229
+  URL mẫu (mọi tham số thử cả tên trùng đoạn tĩnh như `content`, `objects`, `catalog`) trùng hoàn toàn baseline.
 - 2026-10-02: 7 file `requirements*`, `Makefile.studio`, `Dockerfile.gpu` giữ ở gốc — cặp với file của ban tổ chức
   cùng tên; ARCHITECTURE không cho tạo thư mục cấp cao nhất mới.
 
@@ -116,4 +119,21 @@ Out of scope:
 
 ## Result
 
-Chưa xong — cập nhật sau mỗi pha.
+Đang làm — cập nhật sau mỗi pha.
+
+### Pha 1 — thư mục gốc và tài liệu (xong)
+
+- Gốc còn 29 file được track (trước 31). `PRODUCT.md` → `docs/STUDIO_UX_SPEC.md` (46 chỗ / 27 file đổi tên, 35 link
+  trong file viết lại), `CONTEXT.md` → `docs/CONTEXT.md` (10 link), notices gộp một file, README có mục "Bản đồ thư
+  mục gốc", `AGENTS.md` §2 có dòng authority cho đặc tả UX.
+- VERIFIED: `ruff check`/`ruff format --check` exit 0; `scripts.check_foundation` và `scripts.check_contract_mirror`
+  exit 0; frontend `tsc` và `eslint` exit 0; kiểm link tương đối của 14 tài liệu sống: không link hỏng. `WORKLOG.md`
+  có 7 link hỏng **từ trước** (trỏ file đã bị xoá ở các đợt cũ) — không sửa vì là bản ghi lịch sử.
+
+### Pha 2 — `src/api/product/` (xong)
+
+- `routes_product.py` (669 dòng) → `product/{projects,jobs,artifacts,scene,review,deps}.py` + `__init__.py`; `routes.py`
+  đổi một dòng import; 3 file test patch `src.api.product.deps`.
+- VERIFIED: OpenAPI (sắp key) trùng byte với baseline (71 path / 77 operation / 142 schema); ánh xạ URL → hàm xử lý
+  trùng baseline trên 5.229 URL mẫu; `pytest tests/ -q` 1125 passed / 40 skipped; `ruff`, `check_foundation`,
+  `check_contract_mirror` exit 0; `import src.main` và `jobs.worker_cli` trong tiến trình mới chạy được.
