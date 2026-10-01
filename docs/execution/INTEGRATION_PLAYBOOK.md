@@ -1374,7 +1374,7 @@ code phải kiểm tra license của đúng revision và giữ attribution/notic
 
 **Cập nhật 2026-09-29:** `playcanvas/supersplat` không chỉ là code donor: toàn bộ
 editor 3.4.2 (MIT) được vendor tại `frontend/vendor/supersplat/` và nhúng vào Studio
-làm editor Gaussian (ADR 0002); notice ở `frontend/THIRD_PARTY_NOTICES.md`.
+làm editor Gaussian (ADR 0002); notice ở `THIRD_PARTY_NOTICES.md` (phần Frontend).
 
 #### Hạ tầng triển khai (ADR 0003)
 

@@ -1,9 +1,12 @@
-# Third-party notices (backend)
+# Third-party notices
 
-Ghi nguồn cho code bên thứ ba được ADAPT/REUSE trong `src/`. Notice của frontend nằm ở
-`frontend/THIRD_PARTY_NOTICES.md`.
+Ghi nguồn cho code, mô hình và asset bên thứ ba được ADAPT/REUSE trong repository. Một file cho cả repo:
+phần *Backend và pipeline* cho `src/` và runtime GPU, phần *Frontend* cho `frontend/`. Đưa code bên thứ ba vào thì
+cập nhật file này trong cùng commit (ADR 0008).
 
-## SAMPro3D (qua R2G)
+## Backend và pipeline
+
+### SAMPro3D (qua R2G)
 
 - Upstream: https://github.com/BigCiLeng/R2G — thư mục `src/sampro3d` (SAMPro3D của Mutian Xu,
   Xingyilang Yin), submodule @`386ac05`, bản R2G đọc tại @`e93b621`.
@@ -15,7 +18,7 @@ Ghi nguồn cho code bên thứ ba được ADAPT/REUSE trong `src/`. Notice c�
   depth; NMS theo tập điểm thay box NMS; đồ thị bán kính (`scipy.spatial.cKDTree`) thay DBSCAN;
   sàn z = 0 đã xác nhận (REC-06) thay RANSAC; không dùng CUDA extension `pointops`.
 
-## SAM 2 (Segment Anything Model 2)
+### SAM 2 (Segment Anything Model 2)
 
 - Upstream: https://github.com/facebookresearch/sam2 @`2b90b9f`, checkpoint
   `sam2.1_hiera_tiny.pt`.
@@ -24,7 +27,7 @@ Ghi nguồn cho code bên thứ ba được ADAPT/REUSE trong `src/`. Notice c�
   code app chỉ gọi `sam2.build_sam.build_sam2` và `SAM2ImagePredictor` từ
   `src/services/scene/sampro3d/sam2_runner.py`. Không vendor source SAM2 vào repository.
 
-## Pipeline v2 — tách scene theo vật (ADR 0007)
+### Pipeline v2 — tách scene theo vật (ADR 0007)
 
 Phương pháp/quy ước tham khảo từ các nguồn dưới đây; code trong `src/` tự viết, không chép file nguồn.
 Thư viện chạy trong runtime riêng (`scripts/gpu/setup_scene_runtime.sh`), không vendor vào repository.
@@ -42,3 +45,60 @@ Thư viện chạy trong runtime riêng (`scripts/gpu/setup_scene_runtime.sh`), 
 
 Dùng code nghiên cứu phi thương mại theo ADR 0008 (đồ án học tập): hiện chưa có file nào trong `src/` chép từ
 nguồn phi thương mại.
+
+## Frontend
+
+### PlayCanvas / SuperSplat integration
+
+`frontend/src/features/viewer/inspection-history.ts` adapts the FIFO command queue and
+history cursor discipline from `playcanvas/supersplat` (commit `f76e676`,
+`src/command-queue.ts`, `src/edit-history.ts`). The inspection controller follows
+the two-point measurement interaction of `src/tools/measure-tool.ts`, but does
+not copy its local rescaling behavior: Real2Sim metric confirmation belongs to
+the backend. PlayCanvas `Picker` and `supersplat-viewer` are used via their pinned
+library APIs; renderer/selection algorithms are not reimplemented here.
+
+Upstream: https://github.com/playcanvas/supersplat
+
+Copyright (c) 2011-2026 PlayCanvas Ltd.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+### Vendored SuperSplat editor
+
+`frontend/vendor/supersplat/` là bản copy của `playcanvas/supersplat` v3.4.2 (commit
+`f76e676`) theo MIT License ở trên, được build thành `frontend/public/editor/` và nhúng
+vào Studio. Chi tiết nguồn gốc và chỉnh sửa: `frontend/vendor/supersplat/PROVENANCE.md`.
+
+### next-shadcn-admin-dashboard (UI nền Studio)
+
+Component `frontend/src/components/shadcn/*`, hook `frontend/src/hooks/use-mobile.ts` (viết lại) và khung
+sidebar/header của `frontend/src/features/shell/` lấy từ
+[`arhamkhnz/next-shadcn-admin-dashboard`](https://github.com/arhamkhnz/next-shadcn-admin-dashboard)
+commit `3502692` (2026-09-28), MIT License — Copyright (c) 2024 Mohammed Arham Khan. Đã đổi đường
+dẫn import và theme; không chép các trang domain mẫu (STUDIO_UX_SPEC.md §3.2).
+
+`frontend/src/styles/shadcn-variants.css` chép từ gói npm `shadcn@4.21.0` (`dist/tailwind.css`), MIT License.
+Dependency thêm: `radix-ui@1.6.7` (MIT), `tw-animate-css@1.4.0` (MIT).
+
+### Rerun web viewer
+
+`@rerun-io/web-viewer-react@0.24.1` + `@rerun-io/web-viewer@0.24.1` (MIT OR Apache-2.0, © Rerun Technologies AB):
+viewer Rerun nhúng cho chế độ xem "Quá trình train" của bước 3DGS. Ghim đúng 0.24.1 vì phải khớp SDK Rerun mà
+Brush 0.3.0 nhúng.
