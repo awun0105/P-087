@@ -65,7 +65,7 @@ hay ObjectGS, TSDF hay SuGaR/Frosting cho mesh nền) **chưa khoá**: chọn th
    khối lượng;
    7. **vá nền sẵn** cho mọi vùng vật che: render nền không có vật → LaMa → fine-tune Gaussian
    nền; vá lỗ mesh sàn/kệ; chạy một lần lúc dựng để thêm/xoá/sửa vật là tức thì;
-   8. **nhãn + vật lý**: gợi ý nhãn (CLIP) so với danh mục asset Isaac, người dùng xác nhận;
+   8. **nhãn + vật lý**: người dùng chọn nhãn từ danh sách asset Isaac tải sẵn (owner quyết 2026-10-01: không gợi ý bằng CLIP);
    bảng mật độ/ma sát theo nhãn có nguồn; khối lượng = mật độ × thể tích, sửa tay được; tuỳ chọn
    thay vật bằng asset Isaac cùng loại (`asset_ref`);
    9. **Studio theo vật**: nền và từng vật là các khối Gaussian riêng trong PlayCanvas; chọn,
@@ -98,7 +98,7 @@ Phương pháp thực tế của từng chặng — có chỗ khác dự kiến 
 | 4–5 Nhãn vật cho Gaussian | Hạt giống SAMPro3D (đã có) → SAM2 dựng mask 2D từng vật ở mỗi góc từ hạt giống đang thấy → **gán theo đóng góp render** (kiểu FlashSplat: một lượt backward của gsplat cho ma trận đóng góp) + ràng buộc nằm trong hộp bao hạt giống. **Không** train lại Gaussian Grouping: cách này chạy được trên 4 GB, không cần rasterizer Inria, và cho kết quả tách dùng được; train có nhãn vẫn là phương án nâng chất lượng. | `scene/association/lift_runner.py`, `scene/decomposition/gaussian_split.py` | 60 hạt giống → 57 vật, 61.693 Gaussian; 75 s |
 | 6 Collider | Tâm Gaussian → lưới chiếm chỗ → marching cubes → CoACD (≤ 8 khối lồi); môi trường = mesh REC-05 khoét theo hộp vật đã xác nhận | `simulation/colliders/convex_runner.py` | 57/57 vật, không lỗi; ~2–5 phút |
 | 7 Vá nền | Render nền/vật bằng gsplat → vùng thủng → LaMa → gieo Gaussian theo độ sâu nội suy, lần lượt từng góc (không fine-tune) | `reconstruction/rgb/inpaint/inpaint_runner.py` | 1.547 Gaussian vá, 27/50 góc có lỗ; 16 s |
-| 8 Nhãn + vật lý | Danh mục 59 họ asset từ `Simple_Warehouse/Props` (12 nhãn đặt được); gợi ý nhãn theo **kích thước** (chưa có CLIP); khối lượng: người nhập > mặc định của nhãn > mật độ × thể tích | `configs/product/object_catalog_v1.json`, `orchestration/scene/catalog.py` | — |
+| 8 Nhãn + vật lý | Danh mục 59 họ asset từ `Simple_Warehouse/Props` (12 nhãn đặt được); người dùng **chọn asset trong danh sách** (kèm kích thước, khối lượng mặc định); nhãn lưu là lớp của asset; không dùng CLIP; khối lượng: người nhập > mặc định của nhãn > mật độ × thể tích | `configs/product/object_catalog_v1.json`, `orchestration/scene/catalog.py` | — |
 | 9 Studio | Mỗi vật một entity Gaussian; gizmo dịch/xoay; nhãn/khối lượng; nhân bản; xoá/khôi phục; thêm từ thư viện; hoàn tác | `frontend/src/features/viewer/scene-overlay.ts`, `features/studio/ObjectReviewView.tsx` | QA trình duyệt: kéo gizmo → revision mới |
 | 10 Xuất | USD lai tự ghi bằng `usd-core` 26.8 (đã có schema ParticleField; **không cần 3DGRUT**); layer nằm trong inventory của candidate | `simulation/usd/hybrid_runner.py`, `orchestration/simulation_package.py` | gói 75 MB, dựng 8 s, preflight PASS 6/6 |
 

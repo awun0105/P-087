@@ -14,7 +14,6 @@ import {
   addCatalogObject,
   applyObjectAction,
   getJobScene,
-  getLabelSuggestions,
   getSceneCatalog,
   getStageViews,
   restoreSceneRevision,
@@ -302,7 +301,6 @@ export function ObjectReviewView({
             key={current.id}
             object={current}
             busy={busy}
-            jobId={jobId}
             catalog={catalog}
             tool={tool}
             onTool={setTool}
@@ -365,7 +363,6 @@ function Legend() {
 function Inspector({
   object,
   busy,
-  jobId,
   catalog,
   tool,
   onTool,
@@ -375,7 +372,6 @@ function Inspector({
 }: {
   object: SceneObject;
   busy: boolean;
-  jobId: string;
   catalog: SceneCatalog | null;
   tool: GizmoMode | "none";
   onTool: (tool: GizmoMode | "none") => void;
@@ -386,20 +382,14 @@ function Inspector({
   const [name, setName] = useState(object.name);
   const [label, setLabel] = useState(object.semantic_class ?? "");
   const [mass, setMass] = useState(object.physics?.mass_source === "user" ? String(object.physics.mass_kg ?? "") : "");
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  useEffect(() => {
-    const controller = new AbortController();
-    getLabelSuggestions(jobId, object.id, controller.signal).then(
-      (result) => setSuggestions(result.suggestions),
-      () => setSuggestions([]),
-    );
-    return () => controller.abort();
-  }, [jobId, object.id]);
+  // Người dùng chọn thẳng một asset trong danh mục Isaac; nhãn lưu vào scene là lớp của asset đó.
+  const assets = catalog ? catalog.entries.filter((item) => item.semantic_class) : [];
+  const [family, setFamily] = useState("");
+  const chosen = assets.find((item) => item.family === family) ?? assets.find((item) => item.semantic_class === label);
   const placed = isPlaced(object);
   const removed = isIgnored(object);
   const massValue = mass.trim() === "" ? null : Number(mass);
   const massValid = massValue === null || (Number.isFinite(massValue) && massValue > 0);
-  const classes = catalog ? [...suggestions, ...catalog.classes.filter((item) => !suggestions.includes(item))] : [];
   const [x, y, z] = object.transform.translation_xyz;
   const size = object.primitive_dimensions_xyz_m;
   const rename = (event: FormEvent) => {
@@ -499,17 +489,39 @@ function Inspector({
         >
           <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
             <span className="flex items-center gap-1">
-              <Tag className="size-3.5" aria-hidden /> Nhãn {suggestions.length > 0 && <span className="text-ink-subtle">(gợi ý theo kích thước xếp trước)</span>}
+              <Tag className="size-3.5" aria-hidden /> Nhãn — chọn asset tương ứng trong thư viện Isaac
             </span>
-            <select className="h-8 rounded-md border border-line-strong bg-paper px-2 text-sm text-ink" value={label} onChange={(event) => setLabel(event.target.value)}>
+            <select
+              className="h-8 rounded-md border border-line-strong bg-paper px-2 text-sm text-ink"
+              value={chosen?.family ?? ""}
+              onChange={(event) => {
+                const entry = assets.find((item) => item.family === event.target.value);
+                setFamily(entry?.family ?? "");
+                setLabel(entry?.semantic_class ?? "");
+              }}
+            >
               <option value="">Chưa gán</option>
-              {classes.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
+              {catalog.classes.map((name) => (
+                <optgroup key={name} label={name}>
+                  {assets
+                    .filter((item) => item.semantic_class === name)
+                    .map((item) => (
+                      <option key={item.family} value={item.family}>
+                        {item.family.replace(/^SM_/, "")} · {item.size_xyz_m.map((value) => value.toFixed(2)).join("×")} m
+                      </option>
+                    ))}
+                </optgroup>
               ))}
             </select>
           </label>
+          {chosen && (
+            <p className="text-xs text-ink-muted">
+              Nhãn <span className="font-medium text-ink">{chosen.semantic_class}</span> ·{" "}
+              {chosen.dynamic
+                ? `khối lượng mặc định ${chosen.default_mass_kg === null ? "theo mật độ × thể tích" : `${chosen.default_mass_kg} kg`}`
+                : "vật cố định (collider tĩnh)"}
+            </p>
+          )}
           <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
             Khối lượng (kg) — bỏ trống để dùng mặc định của nhãn
             <input

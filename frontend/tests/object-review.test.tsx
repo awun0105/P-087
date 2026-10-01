@@ -76,9 +76,16 @@ function reply(body: unknown, status = 200): Response {
 function routeFetch(routes: Record<string, Response[]>) {
   vi.mocked(global.fetch).mockImplementation(async (input) => {
     const url = String(input);
-    // Danh mục và gợi ý nhãn (pipeline v2) không thuộc kịch bản từng test: trả rỗng.
-    if (url.includes("/scene/catalog")) return reply({ classes: ["pallet", "box"], entries: [], physics_note: "" });
-    if (url.includes("/label-suggestions")) return reply({ suggestions: ["pallet"] });
+    // Danh mục asset (pipeline v2): người dùng chọn asset, nhãn gửi đi là lớp của asset.
+    if (url.includes("/scene/catalog"))
+      return reply({
+        classes: ["pallet", "box"],
+        entries: [
+          { family: "SM_PaletteA", semantic_class: "pallet", size_xyz_m: [1.2, 1.0, 0.15], dynamic: true, default_mass_kg: 25 },
+          { family: "SM_CardBoxA", semantic_class: "box", size_xyz_m: [0.4, 0.4, 0.3], dynamic: true, default_mass_kg: null },
+        ],
+        physics_note: "",
+      });
     const key = Object.keys(routes).find((pattern) => url.includes(pattern));
     if (key && routes[key].length) return routes[key].shift()!;
     if (url.includes("/simulation-package")) return reply(null);
@@ -194,7 +201,8 @@ describe("ObjectReviewView", () => {
     });
     render(<ObjectReviewView jobId="job-a" />);
     fireEvent.click(await screen.findByText("Vật thể 1"));
-    fireEvent.change(await screen.findByLabelText(/Nhãn/), { target: { value: "pallet" } });
+    fireEvent.change(await screen.findByLabelText(/Nhãn/), { target: { value: "SM_PaletteA" } });
+    expect(screen.getByText(/khối lượng mặc định 25 kg/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText(/Khối lượng/), { target: { value: "31.5" } });
     fireEvent.click(screen.getByRole("button", { name: "Lưu nhãn" }));
     // "/label-suggestions" cũng chứa "/label": chỉ lấy đúng lệnh gán nhãn.
