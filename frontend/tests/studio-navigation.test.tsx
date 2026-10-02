@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { isActive } from "@/features/shell/AppShell";
-import { Breadcrumbs, crumbsFor, PageTitleProvider, usePageTitle } from "@/features/shell/Breadcrumbs";
+import { backHref, Breadcrumbs, crumbsFor, PageTitleProvider, usePageTitle } from "@/features/shell/Breadcrumbs";
 import { SceneTabs, type SceneTabItem } from "@/features/studio/scene/SceneTabs";
 import { progressSceneStatus } from "@/features/studio/sceneStatus";
 import type { JobProgress } from "@/lib/contracts/studio";
@@ -31,6 +31,17 @@ describe("ngữ cảnh điều hướng", () => {
     expect(crumbsFor("/scenes/job-a", "Kho A")).toEqual([{ label: "Scenes", href: "/scenes" }, { label: "Kho A" }]);
     expect(crumbsFor("/new")[0].href).toBe("/scenes");
     expect(crumbsFor("/imports/import-a")[0].href).toBe("/scenes");
+  });
+
+  it("nút Quay lại trỏ về cấp cha; trang cấp cao nhất không có nút", () => {
+    expect(backHref("/scenes/job-a")).toBe("/scenes");
+    expect(backHref("/new")).toBe("/scenes");
+    expect(backHref("/imports/import-a")).toBe("/scenes");
+    expect(backHref("/samples/mau-1")).toBe("/scenes");
+    expect(backHref("/scenes/job-a/stages/frames")).toBe(crumbsFor("/scenes/job-a/stages/frames")[1].href);
+    expect(backHref("/scenes/job-a/stages/frames")).not.toBe("/scenes");
+    expect(backHref("/account")).toBe("/overview");
+    for (const top of ["/overview", "/scenes", "/jobs", "/team"]) expect(backHref(top)).toBeNull();
   });
 
   it("breadcrumb lấy tên API và bỏ tên khi màn chi tiết rời đi", () => {

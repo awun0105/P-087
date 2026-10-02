@@ -1,6 +1,6 @@
 "use client";
 
-import { Box, ChevronsUpDown, Clapperboard, LayoutDashboard, ListChecks, LogIn, LogOut, Users, UserRound } from "lucide-react";
+import { ArrowLeft, Box, ChevronsUpDown, Clapperboard, LayoutDashboard, ListChecks, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, Users, UserRound } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -17,6 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/shadcn/dropdown-menu";
+import { Button } from "@/components/shadcn/button";
 import { Separator } from "@/components/shadcn/separator";
 import {
   Sidebar,
@@ -32,8 +33,9 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarTrigger,
+  useSidebar,
 } from "@/components/shadcn/sidebar";
-import { Breadcrumbs, PageTitleProvider } from "@/features/shell/Breadcrumbs";
+import { backHref, Breadcrumbs, PageTitleProvider } from "@/features/shell/Breadcrumbs";
 import { ThemeToggle } from "@/features/shell/ThemeToggle";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { isReviewer } from "@/lib/api/auth";
@@ -75,8 +77,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         <AppSidebar pathname={pathname} />
         <SidebarInset className="min-w-0">
           <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background/80 px-3 backdrop-blur-md">
-            <SidebarTrigger className="-ml-1" aria-label="Thu gọn / mở thanh bên" />
-            <Separator orientation="vertical" className="mx-1 data-[orientation=vertical]:h-4" />
+            {/* Màn hẹp: thanh bên là ngăn trượt nên header giữ nút mở; màn rộng thì nút thu gọn nằm trong thanh bên. */}
+            <SidebarTrigger className="-ml-1 md:hidden" aria-label="Mở thanh bên" />
+            <BackButton pathname={pathname} />
             <Breadcrumbs pathname={pathname} />
             <ThemeToggle className="ml-auto size-8 [&_svg]:size-4" />
           </header>
@@ -87,23 +90,63 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
+/** Nút "Quay lại" ở đầu header; chỉ hiện trên trang con (có cấp cha trong breadcrumb). */
+function BackButton({ pathname }: { pathname: string }) {
+  const href = backHref(pathname);
+  if (!href) return null;
+  return (
+    <>
+      <Button asChild variant="ghost" size="sm" className="-ml-1 gap-1.5 px-2">
+        <Link href={href} aria-label="Quay lại trang trước">
+          <ArrowLeft aria-hidden />
+          <span className="hidden sm:inline">Quay lại</span>
+        </Link>
+      </Button>
+      <Separator orientation="vertical" className="mx-1 data-[orientation=vertical]:h-4" />
+    </>
+  );
+}
+
+/**
+ * Đầu thanh bên: logo + nút thu gọn. Khi thu gọn chỉ còn nút mở lại, đứng ở vị trí của logo và trên các mục điều hướng.
+ */
+function SidebarBrand() {
+  const { state, isMobile, toggleSidebar } = useSidebar();
+  const collapsed = state === "collapsed" && !isMobile;
+  const label = collapsed ? "Mở thanh bên" : "Thu gọn thanh bên";
+  return (
+    <SidebarMenu>
+      <SidebarMenuItem className="flex items-center gap-1">
+        {!collapsed && (
+          <SidebarMenuButton asChild size="lg" className="min-w-0 flex-1">
+            <Link href={APP_HOME}>
+              <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
+                <Box className="size-4" aria-hidden />
+              </span>
+              <BrandWordmark />
+            </Link>
+          </SidebarMenuButton>
+        )}
+        <SidebarMenuButton
+          tooltip={label}
+          aria-label={label}
+          aria-expanded={!collapsed}
+          onClick={toggleSidebar}
+          className={collapsed ? undefined : "size-8 w-8 flex-none justify-center"}
+        >
+          {collapsed ? <PanelLeftOpen aria-hidden /> : <PanelLeftClose aria-hidden />}
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    </SidebarMenu>
+  );
+}
+
 function AppSidebar({ pathname }: { pathname: string }) {
   const { me } = useAuth();
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton asChild size="lg" tooltip="Real2Sim Studio">
-              <Link href={APP_HOME}>
-                <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
-                  <Box className="size-4" aria-hidden />
-                </span>
-                <BrandWordmark />
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <SidebarBrand />
       </SidebarHeader>
       <SidebarContent>
         {NAV.map((group) => {

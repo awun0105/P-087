@@ -54,6 +54,17 @@ export function crumbsFor(pathname: string, detailTitle?: string | null): Crumb[
   return [{ label: "Tổng quan", href: APP_HOME }];
 }
 
+/**
+ * Đích của nút "Quay lại" trên header: cấp cha gần nhất trong breadcrumb. Dùng đường dẫn xác định thay cho lịch sử trình
+ * duyệt để mở trang con bằng link trực tiếp vẫn quay về đúng chỗ; trang cấp cao nhất trả null (không có nút).
+ */
+export function backHref(pathname: string): string | null {
+  // Trang tài khoản mở từ menu người dùng, không có mục điều hướng riêng nên quay về trang chủ của app.
+  if (pathname === "/account") return APP_HOME;
+  const parents = crumbsFor(pathname).slice(0, -1).filter((crumb) => crumb.href);
+  return parents.at(-1)?.href ?? null;
+}
+
 export function Breadcrumbs({ pathname }: { pathname: string }) {
   const context = useContext(PageTitleContext);
   const crumbs = crumbsFor(pathname, context?.title);
