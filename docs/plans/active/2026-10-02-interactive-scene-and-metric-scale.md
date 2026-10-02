@@ -156,7 +156,7 @@ khi chỉ có test giả lập.
 - [ ] H3 Tường ma của mesh va chạm — hoãn (owner, 02/10/2026)
 - [ ] H4 Nhân vật 3D, góc nhìn thứ ba
 - [ ] H5 Đẩy vật thể
-- [ ] H6 Đề xuất tỉ lệ mét tự động
+- [~] H6 Đề xuất tỉ lệ mét tự động — code, test và chạy thật local xong (02/10/2026); chưa kiểm trên trình duyệt
 - [ ] H7 Hàng đợi nhiều người dùng
 - [ ] H8 Việc đang kẹt / cần máy thuê
 
@@ -192,3 +192,22 @@ khi chỉ có test giả lập.
   project nên không khởi động được server thứ hai; không dừng tiến trình của agent khác. Phần chưa được chứng minh:
   GLB collider hiển thị đúng vị trí/hướng trong scene, nét cạnh (wireframe) vẽ được, và tô sáng Gaussian theo vật
   (chưa làm).
+
+### H6 (02/10/2026) — VALIDATING
+
+Owner chốt: chỉ MoGe-2, có tự đề xuất mặt sàn; làm theo bộ ba của ADR 0001 §2 (chi tiết và số đo ở mục
+"Implementation" của ADR). Thay đổi chính: `rgb/canonical/auto_scale.py`, `metric_proposal.py`,
+`adapters/moge_runner.py`, nguồn `ai_estimated` trong `metric_port.py`; worker gọi `_propose_metric` trước
+`record_preview`; `GET /jobs/{id}/metric/proposal`; `MetricConfirmView` hiện đề xuất và nút "Dùng đề xuất tự động";
+`setup_scene_runtime.sh` cài MoGe-2 ghim commit + trọng số có checksum; biến `REC06_MOGE_PYTHON/MODEL`.
+
+- Validation: `pytest tests/ -q` 1337 passed / 40 skipped; `ruff check .` sạch; `npm test` 207 passed, typecheck +
+  lint sạch.
+- Chạy thật: `propose_metric` qua đúng đường worker trên kho tách riêng (job `job-ab730e702ee9`) tạo artifact, gọi
+  lại không chạy lại mô hình, `MetricConfirmationService.auto_proposal` đọc lại được. So với LiDAR trên scene mẫu:
+  xem ADR.
+- **Chưa kiểm:** màn xác nhận trên trình duyệt (điền bảy điểm, xem trước, xác nhận bằng nguồn `ai_estimated`); một
+  job chạy trọn với worker thật có bật MoGe; sai số trên scene khác và trên video người dùng; cài đặt trên máy mới
+  bằng `setup_scene_runtime.sh` (trên máy này cài tay cùng các lệnh đó).
+- Lưu ý vận hành: đường dẫn `REC06_MOGE_PYTHON` phải trỏ thẳng vào `bin/python` của venv; nếu bị giải symlink về
+  interpreter gốc thì runner không thấy torch.

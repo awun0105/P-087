@@ -123,6 +123,29 @@ Positive:
 Tradeoffs:
 - Với video tải lên tùy ý của người dùng ở bản P0, người dùng cần thao tác click 2 điểm trên 3D viewer thay vì hệ thống tự động hoàn toàn.
 
+## Implementation — AI Auto-Scale Assist (02/10/2026)
+
+Owner (Quân) yêu cầu triển khai lộ trình P1 của §2 và chốt hai điểm: **chỉ dùng MoGe-2** (không thêm mô hình
+so sánh), và **thêm đề xuất mặt sàn tự động** (ngoài phạm vi ban đầu của ADR, vốn chỉ gợi ý kích thước).
+
+- `MoGe2Backend`: `src/services/reconstruction/adapters/moge_runner.py`, chạy trong runtime GPU qua subprocess,
+  dùng tiêu cự của COLMAP thay cho để mô hình tự đoán. GPU trả NaN với fp16 (Quadro T2000) thì tự chạy lại fp32.
+- `ColmapSparseDepthProjector` và `RobustScaleAligner`: `rgb/canonical/auto_scale.py`. Pixel của điểm thưa đọc từ
+  `images.txt` (không tự chiếu lại). Tỉ lệ = trung vị của trung vị từng ảnh của `z_mét / z_sfm`; chỉ tỉ lệ, không
+  có hệ số dịch, đúng Alternative 3 đã bị từ chối.
+- Mặt sàn: RANSAC mặt phẳng trên các điểm thưa có pháp tuyến (do MoGe đoán) gần thẳng đứng và nằm dưới camera.
+- Kết quả là artifact `MetricScaleProposal`, `status = ESTIMATED`, tại
+  `rec06/auto/<checksum 3DGS>/metric_proposal.json`. Worker tạo ngay sau khi có 3DGS, trước khi job chờ xác nhận.
+- REC-06 có thêm nguồn khoảng cách `ai_estimated`: người dùng chấp nhận ước lượng thì bản xác nhận vẫn do người
+  dùng quyết định (HITL giữ nguyên), bản khai đo đạc ghi rõ đề xuất đã dùng (`estimate`). Backend chỉ nhận nguồn
+  này khi hai khoảng cách đúng bằng độ dài SfM × tỉ lệ đề xuất. Đoạn kiểm C–D khi đó dùng cùng ước lượng nên
+  **không** kiểm được sai số; UI và cảnh báo của bản xem trước nói rõ điều này.
+- Số đo thật (VERIFIED, 02/10/2026, Quadro T2000, MoGe-2 vit-base, scene `Aisle_CW` có tỉ lệ xác nhận bằng LiDAR
+  = 1,2062 m/đơn vị): 50 ảnh cho 1,2037 (lệch −0,2%); 16 ảnh cho 1,0942 (lệch −9,3%). Tỉ lệ từng ảnh dao động
+  0,80–2,06 (độ phân tán 38%), nên sai số chuẩn của trung vị với 50 ảnh vào khoảng ±7%: kết quả −0,2% nằm trong
+  khoảng đó chứ không chứng minh độ chính xác 0,2%. Ba điểm sàn đề xuất lệch mặt sàn LiDAR −0,12 … +0,06 m.
+  Một scene, một mô hình: chưa đủ để nêu sai số chung. 94 giây cho 50 ảnh, 1,6 GB VRAM.
+
 ## Follow-Up
 
 - Chuẩn bị registered LiDAR và correspondence dùng chung cho ba chế độ; nối

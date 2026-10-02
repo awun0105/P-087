@@ -27,6 +27,19 @@ cập nhật file này trong cùng commit (ADR 0008).
   code app chỉ gọi `sam2.build_sam.build_sam2` và `SAM2ImagePredictor` từ
   `src/services/scene/sampro3d/sam2_runner.py`. Không vendor source SAM2 vào repository.
 
+### MoGe-2 (đề xuất tỉ lệ mét tự động, ADR 0001 §2)
+
+- Upstream: https://github.com/microsoft/MoGe @`b942f00` (bản thời MoGe-2; nhánh main hiện là MoGe-3 với
+  dependency khác), trọng số `Ruicheng/moge-2-vitb-normal` (`model.pt`, sha256 `16b8110e…`).
+- License: MIT cho mã và cho trọng số (theo `LICENSE` của repository và model card, kiểm 02/10/2026);
+  phần DINOv2 trong repository theo Apache License 2.0.
+- Phụ thuộc đi kèm: `utils3d` (https://github.com/EasternJournalist/utils3d @`3fab839`, MIT).
+- Dùng như thư viện (REUSE, không sửa) trong runtime `REC06_MOGE_PYTHON`; code app chỉ gọi
+  `moge.model.v2.MoGeModel` từ `src/services/reconstruction/adapters/moge_runner.py`. Không vendor source vào
+  repository. Cài `--no-deps` để không đổi phiên bản thư viện của SAM 2 và gsplat trong cùng runtime.
+- Ý tưởng ghép độ sâu thưa COLMAP với độ sâu mét (DN-Splatter) và giải tỉ lệ scale-only (MonoSplat) được viết
+  lại theo ADR 0001, không chép mã của hai dự án đó.
+
 ### Pipeline v2 — tách scene theo vật (ADR 0007)
 
 Phương pháp/quy ước tham khảo từ các nguồn dưới đây; code trong `src/` tự viết, không chép file nguồn.
