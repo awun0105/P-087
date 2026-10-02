@@ -240,6 +240,47 @@ Commands đã xác nhận hoặc planned sau khi thêm file test:
 - Increment commits: `b6436dc` UX decision; `f81bc90` snapshot Maximum; `a3f727c` admission/migration/API; `8606da7` demo backend/export; `956c91d` queue UI; `4917d12` video mẫu upload UI. Evidence được commit riêng sau các nhóm code. Staged diff và ignored `.env`/`.venv` đã kiểm, không stage unrelated changes.
 - Next executable step cho owner/audit: browser interaction QA trên `/new` với hai mẫu local và progress resource-wait, rồi real worker/GPU profiling với structured config. Chỉ mở empirical estimator hoặc cleanup khẩn cấp khi có samples/validation và lease/retention rule; chưa có các proof này trong increment hiện tại.
 
+## Audit và increment sửa lỗi (Claude Code, 02/10/2026)
+
+Owner yêu cầu audit phần Codex đã commit rồi sửa các lỗi tìm được trên cùng branch, commit nhóm nhỏ, không push.
+Baseline audit (VERIFIED): `pytest tests/ -q` 1251 passed / 40 skipped; ruff check + format sạch; `npm test` 193 passed;
+`npm run typecheck` sạch. Chưa có lượt chạy pipeline thật nào sau increment của Codex (thư mục worker trống).
+
+### Phát hiện
+
+| # | Phát hiện | Bằng chứng |
+| --- | --- | --- |
+| A1 | Máy nhiều GPU: `nvidia-smi` trả nhiều dòng → VRAM trống "unknown" → mọi job có cấu hình structured chờ vô hạn. `nvidia-smi` không nghe theo `CUDA_VISIBLE_DEVICES` mà `scripts/gpu/gpu_plan.py` đặt cho từng worker. | INFERENCE từ code (không có máy 2 GPU); `maximum_for_machine` với VRAM None trả preset tối thiểu là VERIFIED. |
+| A2 | Preset Maximum tính theo tài nguyên trống tức thời, gồm cả phần job đang chạy của chính worker chiếm. Máy này: rảnh 370 ảnh / 1,3 M Gaussian / 1440; còn 0,6 GB VRAM thì 30 / 100 k / 480 (dưới cả preset tối thiểu). | VERIFIED bằng thử nghiệm. |
+| A3 | Telemetry cộng theo process group, nhưng Brush (`adapters/brush_runtime.py`) và voxel (`adapters/voxel_runtime.py`) chạy `start_new_session=True`; tách vật thể chạy trong tiến trình worker. Con 300 MB ở session riêng chỉ ghi được 0,011 GiB. | VERIFIED. VRAM của Brush qua Vulkan có hiện ở `--query-compute-apps` hay không: UNKNOWN. |
+| A4 | Lỗi DB khi ghi observation chờ làm job preview thành FAILED không retry; ở nhánh finalize lỗi bị nuốt và lặp mỗi lượt poll. | VERIFIED (giả lập `database is locked`). |
+| A5 | Runner tạo workspace bằng `resolve()`, guard cleanup dùng `absolute()`: worker root đi qua symlink thì cleanup bị bỏ qua, chỉ có một dòng warning. | VERIFIED. |
+| A6 | Chờ vô hạn không có lối ra: (a) cấu hình vừa tổng VRAM nhưng không vừa phần trống lúc máy rảnh; (b) thiếu đĩa không bao giờ bị chặn và không có gì tự giải phóng đĩa; (c) UI không hiện thiếu gì, thiếu bao nhiêu dù API đã trả. | VERIFIED (a: dải 3,33–3,68 GiB trên T2000; b: cần 24,9 GB / còn 0,5 GB vẫn `blocking=False`). |
+| A7 | Nhiều worker chung GPU: không giữ chỗ; VRAM chỉ bị chiếm nhiều phút sau claim (sau prepare + COLMAP) nên hai worker cùng qua gate. | INFERENCE từ code. |
+| A8 | Cleanup giữ file `.txt` của COLMAP vì trùng đuôi "diagnostic"; `resume/` và scratch của attempt lỗi/huỷ không bao giờ được dọn; telemetry chỉ nằm trên đĩa worker, không có consumer. | VERIFIED. |
+
+### Quyết định thiết kế của increment sửa lỗi
+
+- **GPU của worker:** worker đo đúng GPU nó được ghim (`CUDA_VISIBLE_DEVICES`, mục đầu tiên; máy một GPU thì GPU đó).
+  Nhiều GPU mà không ghim vẫn là unknown — không đoán thiết bị.
+- **Maximum:** tính theo số đo lúc máy rảnh (worker không chạy gì, không worker nào khác giữ chỗ) do heartbeat ghi lại;
+  phần đang trống tức thời chỉ dùng cho quyết định chạy ngay hay chờ. Chưa từng đo lúc rảnh thì dùng tổng năng lực.
+- **Giữ chỗ:** bảng `r2s_resource_reservations` (một dòng mỗi worker). Gate và ghi giữ chỗ nằm trong cùng một
+  transaction có khoá; phần khả dụng = min(đang trống, tổng − phần worker khác đã giữ). Giữ chỗ hết hạn theo
+  heartbeat hoặc khi tiến trình worker cùng host không còn.
+- **Lý do chờ:** `busy` (pipeline đang dùng, sẽ tự hết), `external` (thứ khác trên máy đang dùng), `exceeds_machine`
+  (vượt tổng năng lực máy này), `unmeasured`. Không tự FAILED job: máy khác có thể chạy được; UI nói rõ để người
+  dùng quyết định.
+- **Lỗi của gate:** lỗi đọc cấu hình → để runner báo lỗi theo đường có sẵn; lỗi ghi observation → chờ lượt sau,
+  không đổi trạng thái job.
+- **Lease của attempt:** runner giữ `flock` trên `attempt.lock` suốt attempt; dọn theo áp lực đĩa chỉ đụng attempt
+  không còn lease, không có tiến trình nào đứng trong thư mục, và job không có giữ chỗ còn sống. Tuổi thư mục
+  không cấp quyền xoá.
+- **Telemetry:** theo cây tiến trình (PPID + thời điểm khởi động, cùng cách `psutil` định danh tiến trình) thay cho
+  process group; thêm số đo mức GPU của worker (ghi tên riêng, không gộp với số theo PID); bước tách vật thể được
+  lấy mẫu; bản ghi lưu thêm vào `r2s_resource_usage` để không mất khi trả máy thuê.
+- Không thêm dependency: `psutil` chỉ có trong `requirements-offline.lock.txt`, không có trong lock runtime.
+
 ---
 
 ## Phụ lục: Bối cảnh thảo luận gốc (Handover Transcript)
