@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { Notice } from "@/components/studio/primitives";
+import { CameraToolbar } from "@/features/viewer/CameraToolbar";
 import {
+  INITIAL_RUNTIME,
   PlayCanvasScene,
   usePlayCanvasCapability,
   type ViewerAnnotation,
@@ -17,7 +19,7 @@ import {
   toDisplay,
   type CameraMarkerLike,
 } from "@/features/viewer/source-frame";
-import { jobArtifactContentUrl } from "@/lib/api/endpoints";
+import { jobArtifactContentUrl, jobWalkCollisionUrl } from "@/lib/api/endpoints";
 import { cn } from "@/lib/cn";
 
 const EMPTY_OBJECTS: readonly OverlayObject[] = [];
@@ -69,6 +71,11 @@ export function MetricSceneView({
   const initialCamera = useMemo(() => recordingCameraPose("z_up", cameras), [cameras]);
   const contentUrl = jobArtifactContentUrl(jobId, visual);
   const collisionUrl = collision ? jobArtifactContentUrl(jobId, collision) : null;
+  // Viewer đọc toạ độ đỉnh thô của lưới va chạm, nên chế độ đi bộ dùng bản đã xoay sang không gian hiển thị.
+  const walkCollisionUrl = collision ? jobWalkCollisionUrl(jobId, collision) : null;
+  const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
+  const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
+  const [wheelFactor, setWheelFactor] = useState(2);
 
   // Viewer gọi onApp(app) khi tạo và onApp(null) trước khi huỷ app → lớp phủ sống đúng bằng app.
   const overlayRef = useRef<SceneOverlay | null>(null);
@@ -77,6 +84,7 @@ export function MetricSceneView({
     overlayRef.current?.destroy();
     overlayRef.current = app ? new SceneOverlay(app) : null;
     controls.current = next ?? null;
+    setViewerControls(next ?? null);
     setOverlay(overlayRef.current);
   }, []);
 
@@ -192,14 +200,20 @@ export function MetricSceneView({
         initialCamera={initialCamera}
         annotations={annotations}
         onApp={onApp}
+        collisionUrl={walkCollisionUrl}
+        onRuntime={setRuntime}
+        wheelFactor={wheelFactor}
       />
-      <div className="absolute top-3 left-3 flex flex-wrap gap-3 rounded-md border border-line-dark bg-viewport-deep/85 px-3 py-1.5 text-xs text-on-dark/90">
-        {toggle("splat", "3DGS màu")}
-        {toggle("collision", "Collision mesh", !collisionUrl)}
-        {toggle("boxes", "Hộp vật thể", !boxes.length)}
+      <div className="absolute top-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-col items-start gap-2">
+        <div className="flex flex-wrap gap-3 rounded-md border border-line-dark bg-viewport-deep/85 px-3 py-1.5 text-xs text-on-dark/90">
+          {toggle("splat", "3DGS màu")}
+          {toggle("collision", "Collision mesh", !collisionUrl)}
+          {toggle("boxes", "Hộp vật thể", !boxes.length)}
+        </div>
+        <CameraToolbar runtime={runtime} controls={viewerControls} wheelFactor={wheelFactor} onWheelFactor={setWheelFactor} />
       </div>
       <p className="absolute bottom-3 left-3 rounded-md border border-line-dark bg-viewport-deep/85 px-2 py-1 text-xs text-on-dark/80">
-        Hệ mét, sàn z = 0 · mở tại camera quay đầu tiên · kéo chuột để xoay, cuộn để zoom, chế độ bay (WASD) ở góc phải
+        Hệ mét, sàn z = 0 · mở tại camera quay đầu tiên
         {collisionState?.triangles ? ` · collision ${Math.round(collisionState.triangles).toLocaleString("vi-VN")} tam giác` : ""}
         {collisionState?.error ? ` · không nạp được collision: ${collisionState.error}` : ""}
       </p>

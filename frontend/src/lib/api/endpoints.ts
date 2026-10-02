@@ -67,3 +67,18 @@ export function jobArtifactContentUrl(
     artifact_checksum: ref.artifact_checksum,
   });
 }
+
+/**
+ * Lưới va chạm của job đã xoay sang không gian hiển thị, cho chế độ đi bộ của viewer. Đường dẫn
+ * giữ đuôi `.glb` vì viewer chọn loader theo đuôi file.
+ */
+export function jobWalkCollisionUrl(
+  jobId: string,
+  ref: { artifact_uri: string; artifact_checksum: string },
+): string {
+  const filename = ref.artifact_uri.split("/").pop();
+  return apiUrl(`/api/v1/jobs/${encodeURIComponent(jobId)}/walk-collision/${encodeURIComponent(filename ?? "collision.glb")}`, {
+    artifact_uri: ref.artifact_uri,
+    artifact_checksum: ref.artifact_checksum,
+  });
+}
