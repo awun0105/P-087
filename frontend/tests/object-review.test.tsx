@@ -125,7 +125,8 @@ describe("ObjectReviewView", () => {
     render(<ObjectReviewView jobId="job-a" />);
     expect(await screen.findByText("1 vật thể · 1 chờ xác nhận")).toBeInTheDocument();
     // Hộp ứng viên màu vàng phủ trên 3DGS hệ mét.
-    expect(screen.getByTestId("metric-scene")).toHaveTextContent("candidate-001:#facc15");
+    // Màu khung lấy từ bảng màu (ochre = ứng viên); jsdom không nạp CSS nên nhận giá trị dự phòng của bảng mặc định.
+    expect(screen.getByTestId("metric-scene")).toHaveTextContent("candidate-001:#b7862a");
     fireEvent.click(screen.getByRole("button", { name: "Xác nhận Vật thể 1" }));
     await waitFor(() => expect(screen.getByText("Đã xác nhận")).toBeInTheDocument());
     const [[url, init]] = calls("/confirm");

@@ -28,6 +28,7 @@ import {
 } from "playcanvas";
 
 import { DISPLAY_EULER, type Vec3 } from "@/features/viewer/source-frame";
+import { themeColor } from "@/lib/theme";
 import type { ViewerAppLike } from "@/features/viewer/PlayCanvasScene";
 
 /**
@@ -258,7 +259,7 @@ export class SceneOverlay {
       asset.once("load", () => {
         if (this.destroyed) return resolve(0);
         const entity = (asset.resource as ContainerResource).instantiateRenderEntity();
-        this.collisionMaterial = material("#8aa4c8", opacity, true);
+        this.collisionMaterial = material(themeColor("--studio-geometry", "#2f7ea8"), opacity, true);
         let triangles = 0;
         for (const render of entity.findComponents("render") as unknown as { meshInstances: { material: unknown; mesh: { primitive: { count: number }[] } }[] }[]) {
           for (const instance of render.meshInstances) {
@@ -364,7 +365,7 @@ export class SceneOverlay {
     paint(solid, fill, false);
     outline.root.addChild(solid);
     if (emphasized) {
-      const edge = material("#ffffff", 1, false);
+      const edge = material(themeColor("--studio-on-dark", "#f5efe6"), 1, false);
       this.materials.push(edge);
       const wire = container.instantiateRenderEntity();
       paint(wire, edge, true);

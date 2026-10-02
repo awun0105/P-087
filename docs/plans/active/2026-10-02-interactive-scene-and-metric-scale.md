@@ -152,7 +152,7 @@ khi chỉ có test giả lập.
 ## Progress
 
 - [x] H1 Điều khiển viewer + đi bộ góc nhìn thứ nhất (02/10/2026; xem Result)
-- [~] H2 Chọn vật theo hình dáng — code + test đơn vị xong (02/10/2026), chưa kiểm trên trình duyệt
+- [~] H2 Chọn vật theo hình dáng — code + test xong; trình duyệt: 26 collider tải được, không lỗi console; chưa ai nhìn hình
 - [ ] H3 Tường ma của mesh va chạm — hoãn (owner, 02/10/2026)
 - [ ] H4 Nhân vật 3D, góc nhìn thứ ba
 - [ ] H5 Đẩy vật thể
@@ -211,3 +211,13 @@ Owner chốt: chỉ MoGe-2, có tự đề xuất mặt sàn; làm theo bộ ba 
   bằng `setup_scene_runtime.sh` (trên máy này cài tay cùng các lệnh đó).
 - Lưu ý vận hành: đường dẫn `REC06_MOGE_PYTHON` phải trỏ thẳng vào `bin/python` của venv; nếu bị giải symlink về
   interpreter gốc thì runner không thấy torch.
+
+### Bổ sung 02/10/2026 (cuối ngày)
+
+- H2, kiểm trên Chrome headless với scene `job-ab730e702ee9` (bước Vật thể): 26 file collider GLB được tải (HTTP 200),
+  không có lỗi console, lớp "Khung vật thể" bật. Vẫn **chưa** có ai nhìn hình khối và nét viền trên màn hình.
+- Theme Gruvbox (owner yêu cầu, ngoài các hạng mục H1–H8; quyết định ghi ở `STUDIO_UX_SPEC.md` D-17): thêm bảng màu
+  thứ hai với bản sáng/tối, menu chọn giao diện, toàn bộ màu của UI (kể cả landing, lớp phủ 3D, trình xem 3D nhúng) đi
+  qua biến; font đồng bộ ở `<body>` và trình xem nhúng. Validation: `npm test` 217 passed, typecheck + lint sạch; Chrome
+  headless đo màu/font tính ra của `/` và `/login` ở cả bốn biến thể đúng giá trị đã định, landing giữ bản sáng khi bật
+  chế độ tối, không lỗi console. Chưa kiểm bằng mắt từng màn.

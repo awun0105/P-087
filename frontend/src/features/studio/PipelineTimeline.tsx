@@ -81,7 +81,7 @@ export function PipelineTimeline({
                     state === "succeeded" && "bg-sage text-paper",
                     state === "running" && "bg-primary text-primary-foreground",
                     state === "waiting" && "bg-paper-raised text-ember-strong ring-2 ring-ember",
-                    state === "failed" && "bg-destructive-fill text-white",
+                    state === "failed" && "bg-destructive-fill text-on-accent",
                     (state === "pending" || state === "cancelled") && "text-ink-subtle",
                   )}
                 >

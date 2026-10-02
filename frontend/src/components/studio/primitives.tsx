@@ -22,7 +22,7 @@ export const buttonVariants = cva(
         primary: "bg-primary text-primary-foreground shadow-sm hover:bg-ember",
         secondary: "border border-line-strong bg-paper-raised text-ink shadow-xs hover:border-ink-subtle hover:bg-paper-sunken",
         ghost: "text-ink-muted hover:bg-paper-sunken hover:text-ink",
-        danger: "border border-rust/30 bg-rust-soft text-rust hover:bg-destructive-fill hover:text-white",
+        danger: "border border-rust/30 bg-rust-soft text-rust hover:bg-destructive-fill hover:text-on-accent",
       },
       size: {
         sm: "h-8 px-3 text-sm [&_svg]:size-4",
@@ -70,7 +70,7 @@ export function BrandWordmark({ className }: { className?: string }) {
 export function Card({ className, ...props }: ComponentProps<"section">) {
   return (
     <section
-      className={cn("rounded-2xl border border-line bg-paper-raised shadow-[0_1px_2px_rgb(43_37_32/0.04)]", className)}
+      className={cn("rounded-2xl border border-line bg-paper-raised shadow-[0_1px_2px_var(--studio-shadow)]", className)}
       {...props}
     />
   );
