@@ -342,6 +342,25 @@ Lượt chạy thật đầu-cuối trên máy local (VERIFIED, 02/10/2026 14:15
   bằng chứng về độ chính xác mét. 4 lần `nvidia-smi` quá 2 giây (INFERENCE: lúc unit bị đóng băng vì nhiệt); mẫu đó
   bị bỏ, job không bị ảnh hưởng. Vẫn chưa chạy: máy 2 GPU, PostgreSQL, R2, trình duyệt.
 
+### Chạy song song không tràn bộ nhớ (owner chốt 02/10/2026: tận dụng hết GPU, không để tràn RAM/VRAM)
+
+- **Quy tắc:** job chỉ chạy chung GPU khi có số đo chứng minh nó vừa; chưa có số đo (cấu hình mới, máy mới, job
+  legacy, hoặc lượt trước chết vì hết bộ nhớ) thì chạy một mình trên GPU, và lượt đó tạo số đo cho job sau.
+- **Số đo → ngân sách** (`processing/observed.py`): lượt hoàn tất trên cùng model GPU và cùng runtime, có mọi thông số
+  số học ≥ job đang xét, cho chặn trên; cùng cấu hình lấy mức cao nhất đã thấy, giữa các cấu hình lấy chặn chặt nhất.
+  Pha preview cần số đo của `preview`; pha hoàn tất cần cả `finalize` và `scene_extract`. Không có hệ số viết tay.
+- **Một mình thì không so VRAM với ước lượng:** ước lượng sai không giữ job chờ vô hạn (thay cho hành vi cũ chờ khi
+  `external`/`unmeasured` về VRAM). RAM và đĩa vẫn được kiểm với số đo tức thời.
+- **Hết bộ nhớ:** tool lỗi sau khi GPU hoặc RAM đã dùng quá `danger_ratio` thì bản ghi đo mang `exhausted=true`
+  (suy luận, không chắc). Job FAILED kiểu đó được runner tự đưa về QUEUED **đúng một lần** và chạy lại một mình; lần
+  hai giữ FAILED. Không qua API retry nên không trừ hạn mức người dùng.
+- Validation: `pytest tests/ -q` 1308 passed / 40 skipped; `ruff check .` sạch; frontend 194 passed, typecheck/lint
+  sạch. Toàn bộ là test fixture/giả lập nhiều worker trên một DB; **chưa chạy thật với hai worker trên một GPU**.
+- Giới hạn: chặn trên theo cấu hình không phủ được video dài hơn mọi video từng chạy; NVIDIA không chia cứng VRAM
+  giữa tiến trình và Brush không có tuỳ chọn giới hạn, nên không có trần cứng cho từng job; lỗi hết bộ nhớ ở bước tách
+  vật thể không đi qua đường tự chạy lại này (bước đó có chính sách thử lại riêng); số worker tối đa mỗi GPU vẫn do
+  `scripts/gpu/gpu_plan.py` quyết định lúc khởi động.
+
 Giới hạn còn lại (chưa làm, không claim):
 
 - Chưa chạy trên máy 2 GPU, với PostgreSQL/R2, hoặc qua trình duyệt.
