@@ -37,7 +37,7 @@ một dòng vào `eval/results/<mã>/<nhãn>.jsonl`.
 ### Sai số của đề xuất tỉ lệ tự động
 
 ```bash
-python -m eval.pose.scale_proposal_error --job <job-id> --traversal "<dataset>/Aisle_CW" \\
+python -m eval.pose.scale_proposal_error --job <job-id> --traversal "<dataset>/Aisle_CW" \
     --calibration "<dataset>/calibrations.txt" --start <start> --label <nhãn> --out-dir eval/results [--create]
 ```
 
