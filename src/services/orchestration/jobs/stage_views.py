@@ -33,6 +33,8 @@ class StageView(BaseModel):
     unit: Literal["meter", "arbitrary"]
     refs: list[ProductArtifactRef] = []
     cameras: list[CameraMarker] = []
+    #: Khoá của lớp LiDAR chồng lên scene (`GET /jobs/{id}/lidar-overlay`); None = scene không có LiDAR đã căn chỉnh.
+    lidar_overlay: str | None = None
 
 
 class StageViewList(BaseModel):
@@ -127,6 +129,9 @@ def stage_views(registry: ProjectRegistry, job_id: str) -> StageViewList:
         )
     bundle = job_bundle(registry, job)
     if bundle is not None:
+        overlay = None
+        if bundle.alignment_record is not None and bundle.lidar_geometry_ref is not None:
+            overlay = bundle.alignment_record.artifact_checksum.removeprefix("sha256:")
         if bundle.visual_artifact_ref is not None:
             views.append(
                 StageView(
@@ -137,6 +142,7 @@ def stage_views(registry: ProjectRegistry, job_id: str) -> StageViewList:
                     unit="meter",
                     refs=[bundle.visual_artifact_ref],
                     cameras=camera_markers(bundle.camera_pose_refs[0], resolve) if bundle.camera_pose_refs else [],
+                    lidar_overlay=overlay,
                 )
             )
         views.append(

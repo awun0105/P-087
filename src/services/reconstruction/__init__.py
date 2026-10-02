@@ -70,6 +70,7 @@ def __getattr__(name: str) -> object:
         "camera_markers",
         "camera_views",
         "frame_images",
+        "lidar_overlay_points",
         "metric_gaussian_points",
         "metric_visual_master",
     }:
@@ -125,6 +126,7 @@ __all__ = [
     "LidarPackageRecord",
     "LidarPackageResult",
     "propose_metric_from_lidar",
+    "lidar_overlay_points",
     "extract_member",
     "package_splat",
     "ModeComparison",

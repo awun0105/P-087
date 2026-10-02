@@ -14,6 +14,9 @@ import {
   CULLFACE_NONE,
   Entity,
   Gizmo,
+  Mesh,
+  MeshInstance as PcMeshInstance,
+  PRIMITIVE_POINTS,
   Quat,
   RENDERSTYLE_WIREFRAME,
   RotateGizmo,
@@ -222,6 +225,9 @@ export class SceneOverlay {
   private readonly shapes = new Map<string, ShapeRecord>();
   private readonly objectRoot: Entity;
   private readonly objects = new Map<string, { entity: Entity; asset: Asset | null; url: string | null }>();
+  private pointsEntity: Entity | null = null;
+  private pointsMesh: Mesh | null = null;
+  private pointsMaterial: StandardMaterial | null = null;
   private gizmoLayer: Layer | null = null;
   private gizmo: TranslateGizmo | RotateGizmo | null = null;
   private destroyed = false;
@@ -276,6 +282,40 @@ export class SceneOverlay {
       this.app.assets.add(asset);
       this.app.assets.load(asset);
     });
+  }
+
+  /**
+   * Nạp lớp điểm (vd đám mây LiDAR) từ mảng `x y z` liên tiếp ở hệ canonical Z-up, mét. Gọi lại thì thay lớp cũ.
+   * Điểm vẽ bằng màu phát sáng một tông để phân biệt với 3DGS; trả về số điểm.
+   */
+  setPoints(positions: Float32Array | null): number {
+    if (!this.alive) return 0;
+    this.releasePoints();
+    if (!positions || positions.length < 3) {
+      this.redraw();
+      return 0;
+    }
+    const mesh = new Mesh(this.app.graphicsDevice);
+    mesh.setPositions(positions);
+    mesh.update(PRIMITIVE_POINTS);
+    const fill = material(themeColor("--studio-marker-a", "#33ccff"), 1, false);
+    const entity = new Entity("r2s-points", this.app);
+    entity.addComponent("render", { meshInstances: [new PcMeshInstance(mesh, fill)], castShadows: false });
+    this.root.addChild(entity);
+    this.pointsEntity = entity;
+    this.pointsMesh = mesh;
+    this.pointsMaterial = fill;
+    this.redraw();
+    return positions.length / 3;
+  }
+
+  private releasePoints(): void {
+    this.pointsEntity?.destroy();
+    this.pointsMesh?.destroy();
+    this.pointsMaterial?.destroy();
+    this.pointsEntity = null;
+    this.pointsMesh = null;
+    this.pointsMaterial = null;
   }
 
   setCollision(visible: boolean, opacity: number): void {
@@ -503,6 +543,7 @@ export class SceneOverlay {
     for (const record of this.objects.values()) this.releaseObject(record);
     this.objects.clear();
     this.outlines = [];
+    this.releasePoints();
     this.root.destroy();
     for (const record of this.shapes.values()) {
       this.app.assets?.remove(record.asset);

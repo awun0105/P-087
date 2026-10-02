@@ -39,3 +39,13 @@ async def test_job_without_results_has_no_views(client: AsyncClient, registry: P
 @pytest.mark.asyncio
 async def test_unknown_job_is_404(client: AsyncClient) -> None:
     assert (await client.get("/api/v1/jobs/no-such-job/stage-views")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_lidar_overlay_is_404_for_a_scene_without_aligned_lidar(
+    client: AsyncClient, registry: ProjectRegistry
+) -> None:
+    job = registry.create_job(JobCreateInput(project_id="project-fixture-001"))
+    response = await client.get(f"/api/v1/jobs/{job.job_id}/lidar-overlay")
+    assert response.status_code == 404 and "LiDAR" in response.json()["detail"]
+    assert (await client.get("/api/v1/jobs/no-such-job/lidar-overlay")).status_code == 404

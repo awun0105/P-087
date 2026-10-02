@@ -19,7 +19,7 @@ import {
   toDisplay,
   type CameraMarkerLike,
 } from "@/features/viewer/source-frame";
-import { jobArtifactContentUrl, jobWalkCollisionUrl } from "@/lib/api/endpoints";
+import { jobArtifactContentUrl, jobLidarOverlayUrl, jobWalkCollisionUrl } from "@/lib/api/endpoints";
 import { cn } from "@/lib/cn";
 
 const EMPTY_OBJECTS: readonly OverlayObject[] = [];
@@ -43,6 +43,7 @@ export function MetricSceneView({
   gizmo = null,
   onTransform,
   defaultLayers = { splat: true, collision: false, boxes: true },
+  lidarOverlay = null,
   focus,
   onPickBox,
 }: {
@@ -58,6 +59,8 @@ export function MetricSceneView({
   /** Người dùng thả gizmo: transform mới của vật (mét, Z-up) để ghi revision. */
   onTransform?: (id: string, position: [number, number, number], rotation: [number, number, number, number]) => void;
   defaultLayers?: { splat: boolean; collision: boolean; boxes: boolean };
+  /** Khoá lớp LiDAR đã căn chỉnh của scene (từ `StageView.lidar_overlay`); null = scene không có LiDAR. */
+  lidarOverlay?: string | null;
   /** Yêu cầu camera bay tới hộp `id`; `nonce` đổi để bay lại cùng vật. */
   focus?: { id: string; nonce: number };
   /** Người dùng bấm (không kéo) trúng một hộp trong 3D. */
@@ -66,7 +69,9 @@ export function MetricSceneView({
   const [capability, setCapability] = usePlayCanvasCapability();
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
   const [overlay, setOverlay] = useState<SceneOverlay | null>(null);
-  const [layers, setLayers] = useState(defaultLayers);
+  const [layers, setLayers] = useState({ ...defaultLayers, lidar: false });
+  const [lidarState, setLidarState] = useState<{ points?: number; error?: string } | null>(null);
+  const lidarUrl = lidarOverlay ? jobLidarOverlayUrl(jobId, lidarOverlay) : null;
   const [collisionState, setCollisionState] = useState<{ triangles?: number; error?: string } | null>(null);
   const initialCamera = useMemo(() => recordingCameraPose("z_up", cameras), [cameras]);
   const contentUrl = jobArtifactContentUrl(jobId, visual);
@@ -135,6 +140,31 @@ export function MetricSceneView({
       active = false;
     };
   }, [overlay, collisionUrl]);
+
+  // Lớp LiDAR chỉ tải khi người dùng bật (vài MB); tắt thì giải phóng GPU, bật lại lấy từ cache của trình duyệt.
+  const lidarWanted = layers.lidar && lidarUrl !== null;
+  useEffect(() => {
+    if (!overlay || !lidarWanted || !lidarUrl) return;
+    const controller = new AbortController();
+    fetch(lidarUrl, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const bytes = await response.arrayBuffer();
+        if (bytes.byteLength === 0 || bytes.byteLength % 12 !== 0) throw new Error("dữ liệu điểm không hợp lệ");
+        return new Float32Array(bytes);
+      })
+      .then((positions) => {
+        if (controller.signal.aborted) return;
+        setLidarState({ points: overlay.setPoints(positions) });
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setLidarState({ error: error instanceof Error ? error.message : String(error) });
+      });
+    return () => {
+      controller.abort();
+      overlay.setPoints(null);
+    };
+  }, [overlay, lidarWanted, lidarUrl]);
 
   useEffect(() => {
     if (!overlay) return;
@@ -209,6 +239,7 @@ export function MetricSceneView({
           {toggle("splat", "3DGS màu")}
           {toggle("collision", "Collision mesh", !collisionUrl)}
           {toggle("boxes", "Khung vật thể", !boxes.length)}
+          {lidarUrl && toggle("lidar", "Đám mây LiDAR")}
         </div>
         <CameraToolbar runtime={runtime} controls={viewerControls} wheelFactor={wheelFactor} onWheelFactor={setWheelFactor} />
       </div>
@@ -216,6 +247,8 @@ export function MetricSceneView({
         Hệ mét, sàn z = 0 · mở tại camera quay đầu tiên
         {collisionState?.triangles ? ` · collision ${Math.round(collisionState.triangles).toLocaleString("vi-VN")} tam giác` : ""}
         {collisionState?.error ? ` · không nạp được collision: ${collisionState.error}` : ""}
+        {layers.lidar && lidarState?.points ? ` · LiDAR ${lidarState.points.toLocaleString("vi-VN")} điểm` : ""}
+        {layers.lidar && lidarState?.error ? ` · không nạp được LiDAR: ${lidarState.error}` : ""}
       </p>
     </div>
   );

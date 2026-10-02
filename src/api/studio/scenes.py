@@ -10,9 +10,11 @@ from src.api import schemas
 from src.api.auth import auth_service, enforce_gpu_quota, record_gpu_run, require_editor
 from src.api.studio import deps
 from src.models.contracts.manifests import JobManifest, JobStatus
+from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.auth import Actor, UserRecord, actor_of
 from src.services.orchestration.jobs.admission import resource_wait
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
+from src.services.orchestration.jobs.lidar_overlay import lidar_overlay_file
 from src.services.orchestration.jobs.progress import JobProgress, awaiting_finalize, job_progress
 from src.services.orchestration.jobs.queue import job_requesters, queue_position
 from src.services.orchestration.jobs.stage_views import StageViewList, stage_views
@@ -191,6 +193,27 @@ def get_stage_views(job_id: str) -> StageViewList:
         return stage_views(deps.registry(), job_id)
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+
+
+@router.get("/jobs/{job_id}/lidar-overlay", response_class=FileResponse)
+def get_lidar_overlay(job_id: str) -> FileResponse:
+    """Đám mây LiDAR đã căn chỉnh của scene, thu gọn để vẽ chồng lên 3DGS: float32 little-endian `x y z` (mét, Z-up)."""
+    registry = deps.registry()
+    cache = deps.settings().artifact_root.expanduser().resolve().parent / "lidar_overlay_cache"
+    try:
+        path = lidar_overlay_file(registry, job_id, cache)
+    except JobNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except (ArtifactStoreError, ValueError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Không đọc được dữ liệu LiDAR của scene này"
+        ) from error
+    if path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene này không có LiDAR đã căn chỉnh")
+    # Tên file khoá theo checksum bản ghi căn chỉnh (bất biến) → cache trình duyệt dài hạn an toàn.
+    return FileResponse(
+        path, media_type="application/octet-stream", headers={"Cache-Control": "private, max-age=86400"}
+    )
 
 
 @router.get("/jobs/{job_id}/thumbnail.jpg", response_class=FileResponse)

@@ -103,6 +103,7 @@ function StageLayer({ jobId, view, views }: { jobId: string; view: StageView; vi
         collision={mesh?.refs[0]}
         cameras={metric.cameras}
         defaultLayers={{ splat: true, collision: view === mesh, boxes: false }}
+        lidarOverlay={metric.lidar_overlay ?? null}
       />
     );
   }

@@ -528,6 +528,8 @@ export interface StageView {
   unit: "meter" | "arbitrary";
   refs: { artifact_uri: string; artifact_checksum: string; artifact_type: string }[];
   cameras: { frame_id: number; center: [number, number, number]; rotation_xyzw: [number, number, number, number] }[];
+  /** Khoá của lớp LiDAR đã căn chỉnh chồng lên scene; null/thiếu = scene không có lớp này. */
+  lidar_overlay?: string | null;
 }
 
 const VIEW_KINDS: readonly StageView["kind"][] = ["frames", "cameras", "gaussian", "mesh"];
@@ -539,7 +541,8 @@ export function parseStageViews(value: unknown): StageView[] {
     if (!isRecord(view) || !VIEW_KINDS.includes(view.kind as StageView["kind"]) || typeof view.title !== "string" ||
         !Array.isArray(view.refs) || !Array.isArray(view.cameras) ||
         !view.refs.every((ref) => isRecord(ref) && typeof ref.artifact_uri === "string" && typeof ref.artifact_checksum === "string") ||
-        !view.cameras.every((camera) => isRecord(camera) && Array.isArray(camera.center) && camera.center.every(isFiniteNumber))) {
+        !view.cameras.every((camera) => isRecord(camera) && Array.isArray(camera.center) && camera.center.every(isFiniteNumber)) ||
+        !(view.lidar_overlay === undefined || view.lidar_overlay === null || typeof view.lidar_overlay === "string")) {
       throw new Error("Một lớp xem không hợp lệ");
     }
   }

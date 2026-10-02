@@ -31,7 +31,7 @@ hướng dẫn.
 | L8 | UI `/new/import-video`: ô LiDAR, giải thích ba luồng và dữ liệu cần, kết quả nhận diện; timeline có bước LiDAR | **DONE** (`LidarPackageSection.tsx`, test); chưa mở trên trình duyệt |
 | L9 | Bộ mẫu TorWIC ở cả hai dạng, kèm video camera trái cùng traversal; nâng giới hạn upload cho gói LiDAR | Công cụ **DONE** (`scripts/demo/make_torwic_lidar_samples.py`); đã dựng Aisle_CW 100–599 trên ổ ngoài. Chưa có: chọn mẫu ngay trong UI (hiện phải tải file lên), nâng giới hạn upload |
 | L10 | Mesh va chạm từ LiDAR (vùng LiDAR phủ) + phần còn lại từ 3DGS; đo bằng `collision_path_clearance` và `metric_click_error` | Đo `collision_path_clearance` **DONE** (`eval/path/lidar_clearance.py`, kết quả ở `eval/protocols/collision_path_clearance.md`): LiDAR nguyên trạng chặn nhầm 100/100, sau khi bỏ điểm gần cảm biến < 2 m và dải sàn 15 cm còn 0/100 (mesh 3DGS: 38/100). Thay mesh canonical bằng LiDAR: **chờ quyết định** — `GeometryArtifact.source_modality` của shared contract chỉ nhận `rgb_3dgs` và cấm phụ thuộc ground truth |
-| L11 | Lớp LiDAR chồng lên scene trong viewer | TODO |
+| L11 | Lớp LiDAR chồng lên scene trong viewer | **DONE** (03/10/2026): `GET /jobs/{id}/lidar-overlay` (điểm ở hệ `world` theo đúng `AlignmentRecord`, thu gọn ≤ 300.000 điểm, cache theo checksum căn chỉnh); nút "Đám mây LiDAR" trong màn scene hệ mét và collision. VERIFIED trên bundle thật: 206.491 điểm, 2,5 MB, sàn ở z ≈ 0. Chưa mở trên trình duyệt |
 
 Thứ tự: L3 → L4 → L5 → L6 → L7 → L8 → L9 → L10 → L11. L5 là thay đổi sâu nhất (scene ra khỏi REC-03 đã có đơn vị mét
 thay vì `arbitrary_sfm`), nên làm thành một nhánh rõ ràng theo kind của job, không đụng luồng A.

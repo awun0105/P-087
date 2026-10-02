@@ -72,6 +72,11 @@ export function jobArtifactContentUrl(
  * Lưới va chạm của job đã xoay sang không gian hiển thị, cho chế độ đi bộ của viewer. Đường dẫn
  * giữ đuôi `.glb` vì viewer chọn loader theo đuôi file.
  */
+/** Lớp LiDAR đã căn chỉnh của scene (float32 xyz, mét, Z-up); `key` đổi theo bản căn chỉnh để cache đúng bản. */
+export function jobLidarOverlayUrl(jobId: string, key: string): string {
+  return apiUrl(`/api/v1/jobs/${encodeURIComponent(jobId)}/lidar-overlay`, { v: key });
+}
+
 export function jobWalkCollisionUrl(
   jobId: string,
   ref: { artifact_uri: string; artifact_checksum: string },
