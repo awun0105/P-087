@@ -49,6 +49,7 @@ from src.services.orchestration.jobs.models import PreparedInputReceipt, Transit
 from src.services.orchestration.jobs.progress import awaiting_finalize, metric_confirmation_stage
 from src.services.orchestration.jobs.workspace import cleanup_attempt_workspace
 from src.services.orchestration.processing.capability import latest as latest_capability
+from src.services.orchestration.processing.telemetry import Outcome, ResourceContext, ResourceSampler
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
 from src.services.reconstruction import (
     confirmation_summary,
@@ -69,20 +70,22 @@ class PreviewCancelledError(RuntimeError):
 
 def _stop(process: subprocess.Popen) -> None:
     """Nhả cả COLMAP/Brush/FFmpeg con; không để GPU tiếp tục chạy sau khi cancel."""
-    if process.poll() is not None:
-        return
+    # Leader có thể đã thoát nhưng children trong group vẫn đọc scratch/GPU.
     try:
         os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
+        process.wait()
         return
     try:
         process.wait(timeout=10)
     except subprocess.TimeoutExpired:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass  # Process vừa thoát giữa timeout và kill; vẫn reap phía dưới.
-        process.wait()
+        pass
+    # Sau TERM, parent có thể thoát trước child. Dừng group còn lại trước cleanup.
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.wait()
 
 
 @dataclass
@@ -127,32 +130,76 @@ def _run_tool(
 ) -> tuple[int, dict]:
     """Chạy một REC CLI trong process group riêng, hủy khi job revision đổi (cancel)."""
     stdout_path = attempt.workspace / f"{name}.stdout.json"
-    with stdout_path.open("xb") as output, (attempt.workspace / f"{name}.stderr.log").open("xb") as errors:
-        process = subprocess.Popen(
-            command, stdout=output, stderr=errors, stdin=subprocess.DEVNULL, start_new_session=True
+    sampler = _resource_sampler(attempt, name)
+    outcome: Outcome = "failed"
+    exit_code: int | None = None
+    try:
+        with stdout_path.open("xb") as output, (attempt.workspace / f"{name}.stderr.log").open("xb") as errors:
+            process = subprocess.Popen(
+                command, stdout=output, stderr=errors, stdin=subprocess.DEVNULL, start_new_session=True
+            )
+            deadline = time.monotonic() + timeout
+            pause = Event()
+            try:
+                while process.poll() is None:
+                    if progress is not None:
+                        progress.poll()  # Tự cập nhật attempt.job trước khi so revision để phát hiện cancel.
+                    current = attempt.registry.get_job(attempt.job.job_id)
+                    if current.job_manifest_checksum != attempt.job.job_manifest_checksum:
+                        raise PreviewCancelledError("Job revision đã thay đổi trong khi worker chạy")
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(f"{name} worker quá thời gian cấu hình")
+                    _sample_resources(sampler, process.pid)
+                    pause.wait(1)
+            finally:
+                _stop(process)
+                exit_code = process.returncode
+                _sample_resources(sampler, process.pid)
+        if stdout_path.stat().st_size > _MAX_TOOL_RESPONSE_BYTES:
+            raise ValueError(f"{name} worker response vượt giới hạn 1 MiB")
+        lines = stdout_path.read_bytes().strip().splitlines()
+        payload = json.loads(lines[-1]) if lines else None
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"{name} worker không trả result hợp lệ")
+        outcome = "completed" if exit_code == 0 else "failed"
+        return exit_code, payload
+    except PreviewCancelledError:
+        outcome = "cancelled"
+        raise
+    except TimeoutError:
+        outcome = "timeout"
+        raise
+    finally:
+        if sampler is not None:
+            try:
+                sampler.finish(outcome, exit_code)
+            except Exception as error:  # noqa: BLE001 - telemetry process boundary, preserve primary result/error
+                logger.warning("Không ghi được resource telemetry cause=%s", type(error).__name__)
+
+
+def _resource_sampler(attempt: _Attempt, tool: str) -> ResourceSampler | None:
+    """Best effort measurement boundary; probe lỗi không chặn dispatch hoặc đổi config."""
+    try:
+        context = ResourceContext(
+            job_id=attempt.job.job_id,
+            attempt_id=attempt.workspace.name,
+            tool=tool,
+            config_checksum=attempt.job.config_checksum,
+            runtime_manifest_checksum=attempt.job.runtime_manifest_checksum,
         )
-        deadline = time.monotonic() + timeout
-        pause = Event()
+        return ResourceSampler(context, workspace=attempt.workspace, worker_root=attempt.settings.product_worker_root)
+    except Exception as error:  # noqa: BLE001 - measurement boundary must not change job execution
+        logger.warning("Không tạo được resource sampler cause=%s", type(error).__name__)
+        return None
+
+
+def _sample_resources(sampler: ResourceSampler | None, process_group: int) -> None:
+    """Isolation boundary: sampler fail không làm tool chạy thành công trở thành lỗi."""
+    if sampler is not None:
         try:
-            while process.poll() is None:
-                if progress is not None:
-                    progress.poll()  # Tự cập nhật attempt.job trước khi so revision để phát hiện cancel.
-                current = attempt.registry.get_job(attempt.job.job_id)
-                if current.job_manifest_checksum != attempt.job.job_manifest_checksum:
-                    raise PreviewCancelledError("Job revision đã thay đổi trong khi worker chạy")
-                if time.monotonic() >= deadline:
-                    raise TimeoutError(f"{name} worker quá thời gian cấu hình")
-                pause.wait(1)
-            exit_code = process.returncode
-        finally:
-            _stop(process)
-    if stdout_path.stat().st_size > _MAX_TOOL_RESPONSE_BYTES:
-        raise ValueError(f"{name} worker response vượt giới hạn 1 MiB")
-    lines = stdout_path.read_bytes().strip().splitlines()
-    payload = json.loads(lines[-1]) if lines else None
-    if not isinstance(payload, dict):
-        raise RuntimeError(f"{name} worker không trả result hợp lệ")
-    return exit_code, payload
+            sampler.sample(process_group)
+        except Exception as error:  # noqa: BLE001 - preserve worker error/result if optional monitoring fails
+            logger.warning("Không lấy được resource sample cause=%s", type(error).__name__)
 
 
 def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:

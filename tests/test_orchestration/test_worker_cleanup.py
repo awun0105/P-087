@@ -13,6 +13,7 @@ from src.services.orchestration.jobs import runner
 from src.services.orchestration.jobs.workspace import cleanup_attempt_workspace
 from tests.test_orchestration.test_finalize_flow import _confirmed, _publish, _stage
 from tests.test_orchestration.test_prepared_queue import _registry
+from tests.test_reconstruction.test_rec11_preview import preview
 
 
 def _workspace(tmp_path: Path) -> Path:
@@ -96,6 +97,40 @@ def test_cleanup_does_not_follow_nested_symlink(tmp_path: Path) -> None:
     (workspace / "model.bin").symlink_to(outside / "model.bin")
     cleanup_attempt_workspace(workspace, worker_root=tmp_path / "workers", artifact_root=tmp_path / "artifacts")
     assert (outside / "model.bin").read_bytes() == b"keep"
+
+
+def test_preview_producer_outputs_resolve_after_scratch_cleanup(tmp_path: Path) -> None:
+    """Real REC producer/store/consumer qua fixture tools; không manual conversion."""
+    worker, request, resolver = preview(tmp_path)
+    workspace = tmp_path / "workers" / request.job_id / ("attempt-" + "d" * 32)
+    workspace.mkdir(parents=True)
+    output, reference = worker.run(request, workspace / "rec")
+    assert output.preview_complete
+    result = cleanup_attempt_workspace(
+        workspace, worker_root=tmp_path / "workers", artifact_root=resolver.artifact_root
+    )
+    receipt = runner.verify_prepared_preview(reference, resolver.require)
+    assert result.files_removed > 0 and receipt.error is None
+    assert receipt.preview_ref is not None and resolver.require(output.delivery_ref).read_bytes() == b"fixture SOG"
+
+
+def test_cleanup_io_error_is_reported_without_removing_diagnostics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = _workspace(tmp_path)
+    unlink = Path.unlink
+
+    def deny(path: Path, *args: object, **kwargs: object) -> None:
+        if path.name == "database.db":
+            raise PermissionError("private path")
+        unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", deny)
+    result = cleanup_attempt_workspace(
+        workspace, worker_root=tmp_path / "workers", artifact_root=tmp_path / "artifacts"
+    )
+    assert result.errors == 1 and result.files_removed == 0
+    assert (workspace / "rec" / "database.db").is_file() and (workspace / "rec" / "process.log").is_file()
 
 
 @pytest.mark.parametrize("failure", [None, "receipt", "verify", "sync", "commit"])
