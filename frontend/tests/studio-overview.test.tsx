@@ -72,4 +72,18 @@ describe("Tổng quan và thư viện riêng", () => {
     expect(screen.getByRole("link", { name: "Scene mới" })).toHaveAttribute("href", "/new");
     expect(document.querySelectorAll('a[href="/new"]')).toHaveLength(1);
   });
+
+  it("thẻ scene ghi rõ ai tạo và ai chạy lại gần nhất; không biết thì không ghi", async () => {
+    const mine = { ...scene("job-a", "RUNNING"), requested_by: { user_id: "u-2", display_name: "Bình" } };
+    mine.project = { ...mine.project, name: "Kho có chủ", created_by: { user_id: "u-1", display_name: "An" } };
+    const anonymous = scene("job-b", "QUEUED");
+    anonymous.project = { ...anonymous.project, name: "Kho không rõ" };
+    vi.mocked(listScenes).mockResolvedValue({ ok: true, data: { scenes: [mine, anonymous] } });
+    render(<ScenesHome />);
+    const owned = (await screen.findByRole("heading", { name: "Kho có chủ" })).closest("a")!;
+    expect(owned).toHaveTextContent("tạo bởi An");
+    expect(owned).toHaveTextContent("chạy bởi Bình");
+    const unknown = screen.getByRole("heading", { name: "Kho không rõ" }).closest("a")!;
+    expect(unknown).not.toHaveTextContent("tạo bởi");
+  });
 });

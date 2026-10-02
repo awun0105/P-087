@@ -13,6 +13,7 @@ from typing import BinaryIO
 from uuid import uuid4
 
 from src.services.orchestration.artifacts import ArtifactResolver, StreamingPublication
+from src.services.orchestration.auth.models import Actor
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.uploads.models import (
     KIND_MEDIA_TYPES,
@@ -84,8 +85,8 @@ class VideoUploadService:
         uri = f"artifact://jobs/{upload_id}/input/source{suffix}"
         return PendingUpload(upload_id, name, media_type, StreamingPublication(self.resolver, uri, self.max_bytes))
 
-    def finish(self, pending: PendingUpload) -> UploadRecord:
-        """Nhận diện loại, commit bytes rồi ghi record; file sai loại không được lưu."""
+    def finish(self, pending: PendingUpload, uploaded_by: Actor | None = None) -> UploadRecord:
+        """Nhận diện loại, commit bytes rồi ghi record (kèm người tải lên); file sai loại không được lưu."""
         publication = pending.publication
         with publication.staged_path().open("rb") as stream:
             detection = classify_upload(stream, publication.size_bytes, pending.media_type, self.max_bytes)
@@ -100,6 +101,7 @@ class VideoUploadService:
             received_at=datetime.now(UTC),
             input_kind=detection.kind,
             detection=detection,
+            uploaded_by=uploaded_by,
         )
         with self.database.transaction(write=True) as tx:
             tx.execute(

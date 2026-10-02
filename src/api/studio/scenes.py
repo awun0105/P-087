@@ -7,14 +7,14 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
 from src.api import schemas
-from src.api.auth import enforce_gpu_quota, record_gpu_run, require_editor
+from src.api.auth import auth_service, enforce_gpu_quota, record_gpu_run, require_editor
 from src.api.studio import deps
 from src.models.contracts.manifests import JobManifest, JobStatus
-from src.services.orchestration.auth import UserRecord
+from src.services.orchestration.auth import Actor, UserRecord, actor_of
 from src.services.orchestration.jobs.admission import resource_wait
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.progress import JobProgress, awaiting_finalize, job_progress
-from src.services.orchestration.jobs.queue import queue_position
+from src.services.orchestration.jobs.queue import job_requesters, queue_position
 from src.services.orchestration.jobs.stage_views import StageViewList, stage_views
 from src.services.orchestration.jobs.thumbnails import scene_thumbnail
 from src.services.orchestration.processing import build_job_config, evaluate, is_presets_file, preset_values
@@ -37,6 +37,8 @@ class SceneSummary(BaseModel):
     #: Thời gian máy đã xử lý của job mới nhất (tổng các bước đã chạy xong); không gồm lúc xếp hàng và lúc chờ người
     #: dùng. None = job chưa có bước nào được đo.
     processing_seconds: float | None = None
+    #: Người bấm chạy job mới nhất (tạo scene hoặc thử lại), theo nhật ký lượt xử lý; None khi không bật đăng nhập.
+    requested_by: Actor | None = None
 
 
 class SceneListResponse(BaseModel):
@@ -126,7 +128,7 @@ def create_scene_from_upload(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="File đính kèm không phải gói LiDAR (.zip gồm đám mây hoặc scan, quỹ đạo, calibration, thời điểm frame)",
             )
-    project = registry.create_project_from_upload(upload, request, settings.product_privacy_mode, lidar)
+    project = registry.create_project_from_upload(upload, request, settings.product_privacy_mode, lidar, actor_of(user))
     uploads.link_project(upload.upload_id, project.project_id)
     if lidar is not None:
         uploads.link_project(lidar.upload_id, project.project_id)
@@ -146,6 +148,8 @@ def list_scenes() -> SceneListResponse:
     measured = (
         processing_seconds(load_usages(registry.persistence.database)) if registry.persistence is not None else {}
     )
+    requesters = job_requesters(registry.persistence.database) if registry.persistence is not None else {}
+    actors = auth_service().actors() if requesters else {}
     for project in registry.list_projects():
         if project.input_manifest_ref is None:
             continue
@@ -157,6 +161,7 @@ def list_scenes() -> SceneListResponse:
                 latest_job=latest,
                 preview_ready=latest is not None and deps.preview_ready(registry, latest.job_id),
                 processing_seconds=None if latest is None else measured.get(latest.job_id),
+                requested_by=None if latest is None else actors.get(requesters.get(latest.job_id, "")),
             )
         )
     # Project upload luôn có created_at; mốc 0 chỉ là phòng hờ cho record cũ.

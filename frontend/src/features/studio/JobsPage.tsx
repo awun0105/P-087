@@ -134,6 +134,7 @@ export function JobsPage() {
                 <TableHead>Scene</TableHead>
                 <TableHead>Trạng thái</TableHead>
                 <TableHead className="hidden md:table-cell">Bước hiện tại</TableHead>
+                <TableHead className="hidden xl:table-cell">Người chạy</TableHead>
                 <TableHead className="hidden sm:table-cell">Bắt đầu</TableHead>
                 <TableHead className="hidden lg:table-cell">Thời gian xử lý</TableHead>
                 <TableHead className="hidden w-0 sm:table-cell" />
@@ -159,6 +160,7 @@ export function JobsPage() {
                       <Badge tone={status.tone}>{status.label}</Badge>
                     </TableCell>
                     <TableCell className="hidden text-ink-muted md:table-cell">{job.status === "SUCCEEDED" ? "Hoàn tất" : job.current_stage ? (stageMeta(job.current_stage)?.title ?? job.current_stage) : "—"}</TableCell>
+                    <TableCell className="hidden text-ink-muted xl:table-cell">{(scene.requested_by ?? scene.project.created_by)?.display_name ?? "—"}</TableCell>
                     <TableCell className="hidden text-xs value-tech text-ink-muted sm:table-cell">{job.started_at ? TIME.format(new Date(job.started_at)) : "—"}</TableCell>
                     <TableCell className="hidden text-xs value-tech text-ink-muted lg:table-cell">
                       {processingTime(scene)}

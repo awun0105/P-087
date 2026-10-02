@@ -27,6 +27,7 @@ from src.models.contracts.manifests import (
 from src.models.contracts.release import ApprovalRecord
 from src.models.contracts.scene import SceneIR
 from src.models.contracts.validation import ValidationReport
+from src.services.orchestration.auth.models import Actor
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.projects.models import InputVideoSummary, ProjectRecord
 from src.services.orchestration.projects.privacy import project_block_reason
@@ -93,6 +94,7 @@ class ProjectResponse(ApiModel):
     privacy: PrivacyStateResponse
     input_video: InputVideoSummary | None = None
     created_at: datetime | None = None
+    created_by: Actor | None = None
 
 
 class ProjectListResponse(ApiModel):
@@ -323,6 +325,7 @@ def project_response(record: ProjectRecord) -> ProjectResponse:
         privacy=privacy_state(record),
         input_video=record.input_video,
         created_at=record.created_at,
+        created_by=record.created_by,
     )
 
 

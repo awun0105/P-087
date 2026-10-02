@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.models.contracts.artifacts import Checksum, Identifier, JsonObject, ProductArtifactRef
 from src.models.contracts.manifests import PrivacyValidationReport, SourceType
+from src.services.orchestration.auth.models import Actor
 
 
 class DataOrigin(StrEnum):
@@ -135,3 +136,5 @@ class ProjectRecord(BaseModel):
     input_manifest_ref: ProductArtifactRef | None = None
     input_video: InputVideoSummary | None = None
     created_at: datetime | None = None
+    #: Người tạo scene; None với project cũ, fixture hoặc khi không bật đăng nhập.
+    created_by: Actor | None = None

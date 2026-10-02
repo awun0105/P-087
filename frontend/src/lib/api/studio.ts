@@ -576,6 +576,8 @@ export interface ReviewStateView {
   /** Báo cáo có bằng chứng chạy Isaac Sim thật không; null khi chưa có báo cáo hoặc backend không trả cờ. */
   isaac_runtime_proof: boolean | null;
   warning_ids: string[];
+  /** Tên hiển thị của người duyệt (backend điền từ tài khoản); null thì UI hiện id. */
+  reviewer_name?: string | null;
   approval: {
     reviewer_id: string;
     decision: "APPROVE" | "REJECT";
@@ -659,6 +661,7 @@ function parseReviewState(value: unknown): ReviewStateView {
     validation: validationReport(value.validation),
     isaac_runtime_proof: typeof value.isaac_runtime_proof === "boolean" ? value.isaac_runtime_proof : null,
     warning_ids: strings(value.warning_ids),
+    reviewer_name: text(value.reviewer_name),
     approval: approval && {
       reviewer_id: text(approval.reviewer_id) ?? "?",
       decision: approval.decision === "REJECT" ? "REJECT" : "APPROVE",

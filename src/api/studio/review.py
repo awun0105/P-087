@@ -44,9 +44,17 @@ def _reviewer(request: Request) -> UserRecord:
     return user
 
 
+def _named(state: ReviewState) -> ReviewState:
+    """Điền tên người duyệt để UI hiện ai đã quyết định (không gian chung của nhóm, ADR 0003)."""
+    if state.approval is None:
+        return state
+    user = auth.auth_service().get_user(state.approval.reviewer_id)
+    return state.model_copy(update={"reviewer_name": user.display_name if user else None})
+
+
 def _state(job_id: str) -> ReviewState:
     try:
-        return review_state(deps.registry(), job_id)
+        return _named(review_state(deps.registry(), job_id))
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except SceneNotAvailableError as error:
@@ -88,7 +96,7 @@ def post_review_decision(job_id: str, body: ReviewDecisionRequest, request: Requ
         job_id,
         {"candidate_checksum": body.candidate_checksum, "scene_revision": result.record.scene_revision},
     )
-    return result
+    return _named(result)
 
 
 @router.post("/jobs/{job_id}/release-seal", response_model=ReviewState)
@@ -103,7 +111,7 @@ def post_release_seal(job_id: str, request: Request) -> ReviewState:
     auth.auth_service().audit(
         reviewer.user_id, "release.seal", job_id, {"scene_revision": result.record.scene_revision}
     )
-    return result
+    return _named(result)
 
 
 @router.get("/jobs/{job_id}/release-download", response_class=FileResponse)

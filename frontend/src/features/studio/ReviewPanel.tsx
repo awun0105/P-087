@@ -204,7 +204,7 @@ export function ReviewPanel({ jobId, sceneRevision, onState }: {
       )}
       {state.approval && (
         <p className="text-ink-muted">
-          {state.approval.decision === "APPROVE" ? "Duyệt" : "Từ chối"} bởi {state.approval.reviewer_id} lúc{" "}
+          {state.approval.decision === "APPROVE" ? "Duyệt" : "Từ chối"} bởi <strong className="font-semibold text-ink">{state.reviewer_name ?? state.approval.reviewer_id}</strong> lúc{" "}
           {new Date(state.approval.decided_at).toLocaleString("vi-VN")}
           {state.approval.reason && <span className="block text-ink">Lý do: {state.approval.reason}</span>}
         </p>

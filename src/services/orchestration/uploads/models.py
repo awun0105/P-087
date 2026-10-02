@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.models.contracts.artifacts import ArtifactUri, Checksum, Identifier
+from src.services.orchestration.auth.models import Actor
 from src.services.reconstruction import InputDetection, InputKind
 
 VideoMediaType = Literal["video/mp4", "video/quicktime"]
@@ -53,6 +54,8 @@ class UploadRecord(BaseModel):
     project_ids: list[Identifier] = Field(default_factory=list)
     input_kind: InputKind = "rgb_video"
     detection: InputDetection | None = None
+    #: Người tải file lên; None với record cũ hoặc khi không bật đăng nhập.
+    uploaded_by: Actor | None = None
 
 
 UploadSessionStatus = Literal["UPLOADING", "VERIFYING", "READY", "FAILED"]
@@ -78,3 +81,4 @@ class UploadSession(BaseModel):
     status: UploadSessionStatus
     error: str | None = None
     created_at: datetime
+    uploaded_by: Actor | None = None

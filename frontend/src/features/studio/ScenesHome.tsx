@@ -235,7 +235,10 @@ export function ScenesHome() {
                   href={`/imports/${item.import_id}`}
                   className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-xl border border-line bg-paper-raised p-4 text-sm transition-colors hover:border-line-strong"
                 >
-                  <span className="truncate font-medium text-ink">{item.name}</span>
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-ink">{item.name}</span>
+                    {item.created_by_name && <span className="block truncate text-xs text-ink-subtle">Tạo bởi {item.created_by_name}</span>}
+                  </span>
                   <span className="shrink-0 text-xs text-ink-subtle">
                     {item.status === "READY" ? "Mở xem/chỉnh" : item.status === "FAILED" ? "Lỗi" : "Đang nén…"}
                   </span>
@@ -295,7 +298,12 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
             : "Không có video"}
         </p>
         <div className="mt-auto flex items-center justify-between pt-5 text-xs text-ink-subtle">
-          <span className="value-tech">{created}</span>
+          <span className="min-w-0 truncate">
+            <span className="value-tech">{created}</span>
+            {/* Nhóm dùng chung một không gian: ghi rõ scene này do ai tạo (và ai chạy lại gần nhất nếu khác người). */}
+            {scene.project.created_by && <> · tạo bởi {scene.project.created_by.display_name}</>}
+            {scene.requested_by && scene.requested_by.user_id !== scene.project.created_by?.user_id && <> · chạy bởi {scene.requested_by.display_name}</>}
+          </span>
           {job && (
             <span className="flex items-center gap-1 font-medium text-ink-muted transition-colors group-hover:text-ember-strong">
               {scene.preview_ready ? "Mở scene" : "Xem tiến trình"}

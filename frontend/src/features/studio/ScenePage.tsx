@@ -74,7 +74,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
       const project = await getProject(job.data.project_id);
       if (!project.ok || !alive) return;
       const video = project.data.input_video;
-      setInfo({ name: project.data.name, videoName: video?.original_name ?? null, videoSize: video?.size_bytes ?? null });
+      setInfo({ name: project.data.name, videoName: video?.original_name ?? null, videoSize: video?.size_bytes ?? null, createdBy: project.data.created_by?.display_name ?? null });
     })();
     return () => {
       alive = false;

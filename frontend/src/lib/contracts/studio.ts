@@ -47,6 +47,12 @@ export interface InputDetection {
   lidar?: LidarEvidence | null;
 }
 
+/** Người thực hiện một thao tác (tải file, tạo scene, chạy job), chụp lại lúc thao tác; null = không biết. */
+export interface Actor {
+  user_id: string;
+  display_name: string;
+}
+
 export interface UploadRecord {
   upload_id: string;
   original_name: string;
@@ -58,6 +64,7 @@ export interface UploadRecord {
   project_ids: string[];
   input_kind?: InputKind;
   detection?: InputDetection | null;
+  uploaded_by?: Actor | null;
 }
 
 export type DataOrigin = "public_or_synthetic" | "self_collected_no_pii" | "anonymized";
@@ -85,6 +92,7 @@ export interface StudioProject {
   privacy: StudioPrivacy;
   input_video: { original_name: string; media_type: VideoMediaType; size_bytes: number } | null;
   created_at: string | null;
+  created_by?: Actor | null;
 }
 
 export interface SceneSummary {
@@ -93,6 +101,8 @@ export interface SceneSummary {
   preview_ready: boolean;
   /** Thời gian máy đã xử lý (tổng các bước đã chạy xong), không gồm lúc xếp hàng và lúc chờ người dùng; null = chưa đo. */
   processing_seconds?: number | null;
+  /** Người bấm chạy job mới nhất (tạo scene hoặc thử lại). */
+  requested_by?: Actor | null;
 }
 
 export interface SceneFromUpload {
@@ -572,4 +582,5 @@ export interface ImportedScene {
   delivery_ref: { artifact_uri: string; artifact_checksum: string } | null;
   error: string | null;
   created_at: string;
+  created_by_name?: string | null;
 }

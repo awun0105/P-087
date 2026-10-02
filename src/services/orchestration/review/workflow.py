@@ -64,6 +64,8 @@ class ReviewState(BaseModel):
     isaac_runtime_proof: bool | None = None
     warning_ids: list[str] = []
     approval: ApprovalRecord | None = None
+    #: Tên hiển thị của `approval.reviewer_id`, API điền lúc trả về (contract ApprovalRecord chỉ lưu id).
+    reviewer_name: str | None = None
     release: ReleaseManifest | None = None
     release_archive: ProductArtifactRef | None = None
     #: Lý do chưa duyệt được (hiện nguyên văn trên UI).

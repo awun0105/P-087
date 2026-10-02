@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from src.services.orchestration.auth.models import (
     ROLE_RANK,
+    Actor,
     AuditEntry,
     InviteRecord,
     PublicUser,
@@ -88,6 +89,10 @@ class AuthService:
         with self.database.transaction() as tx:
             row = tx.execute("SELECT payload FROM r2s_users WHERE user_id=?", (user_id,)).fetchone()
         return UserRecord.model_validate_json(row[0]) if row else None
+
+    def actors(self) -> dict[str, Actor]:
+        """Mọi tài khoản dưới dạng Actor theo id, để hiện tên người thao tác từ các bản ghi chỉ lưu id."""
+        return {user.user_id: Actor(user_id=user.user_id, display_name=user.display_name) for user in self.list_users()}
 
     def list_users(self) -> list[UserRecord]:
         """Mọi tài khoản, cũ nhất trước."""

@@ -342,3 +342,52 @@ async def test_scene_from_upload_carries_a_lidar_package(client: AsyncClient, st
         },
     )
     assert wrong.status_code == 409 and "gói LiDAR" in wrong.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_uploads_and_scenes_show_who_did_what(
+    client: AsyncClient, studio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nhóm dùng chung (ADR 0003): file, scene và job phải ghi rõ người tải lên, người tạo, người chạy."""
+    from src.api import auth
+    from src.main import app
+    from src.services.orchestration.auth import AuthService
+
+    identity = SimpleNamespace(
+        database_url=studio.settings.database_url, auth_required=True, auth_session_days=7, auth_invite_days=7
+    )
+    monkeypatch.setattr(auth, "get_settings", lambda: identity)
+    service = AuthService(RuntimeDatabase(studio.settings.database_url))
+    uploader = service.create_user("an@example.com", "An", "mat-khau-du-dai-1", "editor")
+    creator = service.create_user("binh@example.com", "Bình", "mat-khau-du-dai-2", "reviewer")
+    current = {"user": uploader}
+    monkeypatch.setitem(app.dependency_overrides, auth.require_editor, lambda: current["user"])
+
+    upload = await _upload(client)
+    assert upload["uploaded_by"] == {"user_id": uploader.user_id, "display_name": "An"}
+    assert (await client.get("/api/v1/uploads")).json()["uploads"][0]["uploaded_by"]["display_name"] == "An"
+
+    current["user"] = creator  # người khác trong nhóm tạo scene từ file An đã tải
+    created = await client.post(
+        "/api/v1/scenes/from-upload",
+        json={"upload_id": upload["upload_id"], "name": "Kho A", "attestation": _ATTESTATION},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["project"]["created_by"] == {"user_id": creator.user_id, "display_name": "Bình"}
+    scene = (await client.get("/api/v1/scenes")).json()["scenes"][0]
+    assert scene["project"]["created_by"]["display_name"] == "Bình"
+    assert scene["requested_by"] == {"user_id": creator.user_id, "display_name": "Bình"}
+
+
+@pytest.mark.asyncio
+async def test_actions_without_login_have_no_actor(client: AsyncClient, studio: SimpleNamespace) -> None:
+    """Deployment không bật đăng nhập: không biết ai thao tác thì để trống, không điền tên giả."""
+    upload = await _upload(client)
+    assert upload["uploaded_by"] is None
+    created = await client.post(
+        "/api/v1/scenes/from-upload",
+        json={"upload_id": upload["upload_id"], "name": "Kho A", "attestation": _ATTESTATION},
+    )
+    assert created.json()["project"]["created_by"] is None
+    scene = (await client.get("/api/v1/scenes")).json()["scenes"][0]
+    assert scene["requested_by"] is None

@@ -49,6 +49,7 @@ from src.services.orchestration.artifacts import (
     sha256_file,
     with_canonical_checksum,
 )
+from src.services.orchestration.auth.models import Actor
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.models import JobAttemptRecord, PreparedInputReceipt, TransitionRequest
 from src.services.orchestration.jobs.profile import ExecutionProfile
@@ -262,6 +263,7 @@ class ProjectRegistry:
         request: UploadProjectInput,
         privacy_mode: Literal["qa_verified", "self_attested"],
         lidar: UploadRecord | None = None,
+        created_by: Actor | None = None,
     ) -> ProjectRecord:
         """Dựng InputManifest cho video đã upload, publish nó rồi tạo project.
 
@@ -366,6 +368,7 @@ class ProjectRegistry:
                 original_name=upload.original_name, media_type=upload.media_type, size_bytes=upload.size_bytes
             ),
             created_at=datetime.now(UTC),
+            created_by=created_by,
         )
         if self.persistence is not None:
             self.persistence.save_project(record)

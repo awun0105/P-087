@@ -7,12 +7,14 @@ store qua API (local/không có kho file). File I/O đồng bộ chạy qua thre
 
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.api.auth import require_editor
 from src.api.studio import deps
 from src.services.orchestration.artifacts import ArtifactAlreadyExistsError, ArtifactTooLargeError
+from src.services.orchestration.auth import UserRecord, actor_of
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.uploads import (
     MAX_URLS_PER_REQUEST,
@@ -36,7 +38,11 @@ class UploadListResponse(BaseModel):
 
 
 @router.post("/uploads", response_model=UploadRecord, status_code=status.HTTP_201_CREATED)
-async def upload_video(request: Request, filename: str = Query(..., min_length=1, max_length=255)) -> UploadRecord:
+async def upload_video(
+    request: Request,
+    filename: str = Query(..., min_length=1, max_length=255),
+    user: UserRecord | None = Depends(require_editor),
+) -> UploadRecord:
     """Nhận bytes video trong body; bytes gốc được giữ nguyên, checksum tính khi ghi."""
     service = deps.uploads()
     try:
@@ -47,7 +53,7 @@ async def upload_video(request: Request, filename: str = Query(..., min_length=1
         async for chunk in request.stream():
             if chunk:
                 await run_in_threadpool(pending.publication.write, chunk)
-        return await run_in_threadpool(service.finish, pending)
+        return await run_in_threadpool(service.finish, pending, actor_of(user))
     except ArtifactTooLargeError as error:
         raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(error)) from error
     except ValueError as error:
@@ -144,10 +150,12 @@ def upload_config() -> UploadConfig:
 
 
 @router.post("/uploads/direct", response_model=DirectUploadState, status_code=status.HTTP_201_CREATED)
-def begin_direct_upload(request: DirectUploadRequest) -> DirectUploadState:
+def begin_direct_upload(
+    request: DirectUploadRequest, user: UserRecord | None = Depends(require_editor)
+) -> DirectUploadState:
     """Mở phiên upload thẳng; client xin link từng nhóm phần qua `/urls`."""
     try:
-        return _state(deps.direct_uploads().begin(request.filename, request.size_bytes))
+        return _state(deps.direct_uploads().begin(request.filename, request.size_bytes, actor_of(user)))
     except (UploadError, ArtifactAlreadyExistsError) as error:
         raise _upload_errors(error) from error
 

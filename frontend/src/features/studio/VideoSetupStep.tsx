@@ -168,6 +168,7 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
                 <p className="truncate text-sm font-medium">{upload.original_name}</p>
                 <p className="text-sm text-ink-muted">
                   {describeDetection(upload)} · {formatBytes(upload.size_bytes)} · {DATE.format(new Date(upload.received_at))}
+                  {upload.uploaded_by && ` · tải lên bởi ${upload.uploaded_by.display_name}`}
                   {upload.project_ids.length > 0 && ` · đã dùng cho ${upload.project_ids.length} scene`}
                 </p>
               </div>

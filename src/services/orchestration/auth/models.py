@@ -38,6 +38,24 @@ class UserRecord(BaseModel):
     daily_job_quota: int = Field(default=10, ge=0, le=1000)
 
 
+class Actor(BaseModel):
+    """Người thực hiện một thao tác (tải file, tạo scene, chạy job, duyệt), chụp lại lúc thao tác xảy ra.
+
+    Studio là không gian chung của nhóm (ADR 0003): ai đăng nhập cũng thấy mọi scene, nên giao diện phải nói rõ thứ
+    gì do ai làm. Tên được lưu kèm id để vẫn hiện được khi tài khoản đổi tên hoặc bị vô hiệu hoá.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str
+    display_name: str = Field(min_length=1, max_length=100)
+
+
+def actor_of(user: "UserRecord | None") -> Actor | None:
+    """Actor của tài khoản đang đăng nhập; None khi deployment không bật đăng nhập (không biết ai thao tác)."""
+    return None if user is None else Actor(user_id=user.user_id, display_name=user.display_name)
+
+
 class PublicUser(BaseModel):
     """Thông tin trả cho client; không có hash."""
 

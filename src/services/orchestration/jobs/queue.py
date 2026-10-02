@@ -66,7 +66,7 @@ class QueuePosition(BaseModel):
     estimate_samples: int = Field(ge=0)
 
 
-def _owners(database: RuntimeDatabase) -> dict[str, str]:
+def job_requesters(database: RuntimeDatabase) -> dict[str, str]:
     """Người yêu cầu gần nhất của từng job, đọc từ nhật ký lần xử lý GPU."""
     with database.transaction() as tx:
         rows = tx.execute(
@@ -119,7 +119,7 @@ def waiting_jobs(registry: ProjectRegistry) -> list[WaitingJob]:
             waiting.append(WaitingJob(job_id=job_id, phase="finalize", queued_at=confirmed or event.recorded_at))
     if not waiting:
         return []
-    owners = _owners(database)
+    owners = job_requesters(database)
     last_served: dict[str, datetime] = {}
     waiting_ids = {item.job_id for item in waiting}
     for job_id, at in served.items():

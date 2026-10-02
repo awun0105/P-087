@@ -76,6 +76,11 @@ Chỉ hai role theo PRD §3.4; Reviewer có mọi quyền của Editor, thêm qu
   Tự duyệt scene của chính mình được phép nhưng gắn nhãn "tự duyệt" (PRD §3.4
   không bắt buộc hai tài khoản trong MVP).
 - Không gian chung của nhóm: người đã đăng nhập thấy mọi project.
+  **Bổ sung owner chốt 02/10/2026:** vẫn là nhóm chung (không tách dữ liệu theo người), nhưng giao diện phải hiện
+  người tải từng file, người tạo scene/tiến trình và người duyệt scene. File tải lên và project lưu kèm người thao tác
+  (id + tên lúc thao tác); người chạy job lấy từ nhật ký lượt xử lý GPU; tên người duyệt được tra từ
+  `ApprovalRecord.reviewer_id` (contract không đổi). Bản ghi cũ và deployment không bật đăng nhập không có thông tin
+  này và UI để trống, không điền tên giả. Artifact luôn lưu theo mã job nên kết quả không lẫn giữa các job.
 
 ### 4. Tiết kiệm chi phí và vận hành
 

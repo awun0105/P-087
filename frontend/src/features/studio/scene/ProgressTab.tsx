@@ -36,6 +36,7 @@ export function ProgressTab({ jobId, progress, info, busy, onCancel }: {
     {progress && <AttemptHistory jobId={jobId} attempt={progress.attempt} status={progress.status} />}
     <HelpDetails title="Đầu vào và cách theo dõi">
       {info?.videoName && <p>Video gốc: {info.videoName}{info.videoSize !== null ? " · " + formatBytes(info.videoSize) : ""}</p>}
+      {info?.createdBy && <p>Scene do {info.createdBy} tạo.</p>}
       <p>Job vẫn chạy khi bạn rời trang. Bước tỉ lệ mét cần thao tác của bạn trong Studio; view giai đoạn 6 chỉ mở sau khi bước này hoàn tất.</p>
       <p>Thời gian từng bước lấy từ API; thời gian chờ bạn xác nhận không được trình bày như thời gian máy xử lý.</p>
     </HelpDetails>

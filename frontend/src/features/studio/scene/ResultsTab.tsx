@@ -103,7 +103,7 @@ export function ResultsTab({ jobId, preview, revision, onOpenGaussian, onOpenRev
             : review && !reviewCurrent ? currentRevision ? "Scene đã đổi revision; kết quả duyệt cũ không áp dụng." : "Chưa đối chiếu được revision scene; thử lại trước khi tải bản phát hành."
               : review?.blockers[0] ?? "Chỉ có sau khi gói qua validation Isaac và được Reviewer duyệt."
         }
-        detail={released ? `Phát hành lúc ${new Date(review.release!.release_timestamp).toLocaleString("vi-VN")}${review.approval ? ` · duyệt bởi ${review.approval.reviewer_id}` : ""}` : undefined}
+        detail={released ? `Phát hành lúc ${new Date(review.release!.release_timestamp).toLocaleString("vi-VN")}${review.approval ? ` · duyệt bởi ${review.reviewer_name ?? review.approval.reviewer_id}` : ""}` : undefined}
         extra={released ? (
           <details className="mt-2 text-xs">
             <summary className="cursor-pointer text-ink-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-ember">Nguồn kết quả của bản phát hành</summary>
