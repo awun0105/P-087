@@ -22,9 +22,9 @@ hướng dẫn.
 | # | Việc | Trạng thái |
 |---|---|---|
 | L1 | Nhận diện gói LiDAR theo nội dung + thông báo từ chối (`inputs/detect.py`, upload kinds) | **DONE** (test + chạy trên gói TorWIC thật) |
-| L2 | Thử nghiệm cách dựng pose bám quỹ đạo (COLMAP) trên Aisle_CW | **DONE ở mức SfM**; đang đo chất lượng 3DGS |
-| L3 | Ghép scan trong worker bằng numpy (`reconstruction/lidar/fusion.py`), không thêm Open3D vào runtime | TODO |
-| L4 | Stage `ST-LIDAR-INGEST`: giải gói, ghép (luồng C), REC-08 nhận đám mây, ghi provenance (quỹ đạo ground truth hay tự tính) | TODO |
+| L2 | Thử nghiệm cách dựng pose bám quỹ đạo (COLMAP) trên Aisle_CW | **DONE** (SfM + chất lượng 3DGS; số ở ADR 0009) |
+| L3 | Ghép scan trong worker bằng numpy (`reconstruction/lidar/fusion.py`), không thêm Open3D vào runtime | **DONE** (20 scan thật: 133.978 điểm trong 3 s; lệch bản Open3D tối đa 6 cm) |
+| L4 | Stage `ST-LIDAR-INGEST`: giải gói, ghép (luồng C), REC-08 nhận đám mây, ghi provenance (quỹ đạo ground truth hay tự tính) | Dịch vụ **DONE** (`lidar/package.py`; sàn ước lượng −0,2235 m, owner đo −0,2345 m); chưa nối vào worker |
 | L5 | Pose camera từ quỹ đạo + calibration + thời điểm frame; REC-03 chạy `point_triangulator` rồi `pose_prior_mapper --input_path` thay cho `mapper` khi job có gói LiDAR | TODO |
 | L6 | Bước tỉ lệ mét cho job LiDAR: không chọn điểm; bản ghi căn chỉnh + màn xác nhận (tỉ lệ, sai số, số frame) | TODO |
 | L7 | Job mang gói LiDAR: API tạo scene nhận `lidar_upload_id`, `InputManifest.lidar_metadata`, bundle `registered_lidar_present` | TODO |
@@ -49,7 +49,8 @@ thay vì `arbitrary_sfm`), nên làm thành một nhánh rõ ràng theo kind c�
 - Cách chọn: pose từ quỹ đạo → `point_triangulator` → `pose_prior_mapper --input_path` (σ vị trí 5 cm). 100/100 ảnh,
   một mảnh, sai số chiếu lại 0,52 px, lệch quỹ đạo trung vị 8,0 cm, tỉ lệ 1,0003; 22 giây so với 49 giây của `mapper`.
 - `mapper` hiện tại trên cùng ảnh: 91/100 ảnh và đứt thành hai mảnh (71 + 20).
-- Brush thật, 7000 bước, 960 px, giữ lại 1/8 ảnh: cách bám quỹ đạo đạt PSNR 22,83 / SSIM 0,836 trên 13 ảnh giữ lại.
+- Chất lượng 3DGS trên cùng 71 ảnh: `mapper` 23,93 dB; bám quỹ đạo 23,46 dB (σ 5 cm) và 23,64 dB (σ 20 cm). Kém
+  0,3–0,5 dB, đổi lại dựng đủ ảnh thành một mảnh trong hệ mét. Một lượt chạy mỗi cách.
 - Quy tắc giữ lại ảnh của Brush (`chỉ số % N == 0` theo thứ tự tên) đã đối chiếu với ảnh Brush lưu ra: khớp. Đây là
   phần còn nợ của `2026-10-02-evaluation-system.md`.
 

@@ -143,8 +143,23 @@ Aisle_CW, 100 ảnh camera trái (ảnh 100–595, cách 5), COLMAP 4.3.0.dev0, 
 | Như trên rồi `bundle_adjuster` tự do | 100 | 0,41 px | trôi: trung vị 2,0 m, tỉ lệ lệch 12% |
 | **Pose từ quỹ đạo + `point_triangulator`, rồi `pose_prior_mapper --input_path` (σ = 5 cm)** | **100, một mảnh** | **0,52 px** | **trung vị 8,0 cm, lớn nhất 22 cm, tỉ lệ 1,0003** |
 
-Cách cuối là cách chọn để làm tiếp. Chưa đo: chất lượng 3DGS (PSNR trên ảnh giữ lại) và độ lệch bề mặt so với LiDAR
-của từng cách; chưa thử traversal khác; quỹ đạo dùng ở đây là ground truth nên chưa nói được gì về quỹ đạo tự tính.
+Cách cuối là cách chọn để làm tiếp.
+
+Chất lượng 3DGS (Brush 0.3.0, 7000 bước, 960 px, 400k Gaussian, giữ lại 1/8 ảnh; PSNR tự tính trên **cùng 71 ảnh
+train và cùng 9 ảnh giữ lại**, mỗi cách một lượt chạy):
+
+| Cách dựng pose (71 ảnh 100–450) | PSNR | SSIM (Brush) | Lệch quỹ đạo trung vị |
+|---|---|---|---|
+| `mapper` | 23,93 dB | 0,862 | — (hệ SfM) |
+| Bám quỹ đạo, σ = 5 cm | 23,46 dB | 0,856 | 8 cm |
+| Bám quỹ đạo, σ = 20 cm | 23,64 dB | 0,856 | 10,5 cm |
+
+Bám quỹ đạo kém `mapper` 0,3–0,5 dB; mới một lượt mỗi cách nên chưa biết phần nào là nhiễu giữa các lượt train. Đổi
+lại nó dựng đủ 100/100 ảnh thành một mảnh trong hệ mét (trên 100 ảnh: PSNR 22,70 trên 13 ảnh giữ lại, gồm cả đoạn
+455–595 mà `mapper` bỏ rơi). Nới σ lên 20 cm lấy lại khoảng 0,2 dB và lệch quỹ đạo thêm 2,5 cm.
+
+Chưa đo: độ lệch bề mặt so với LiDAR của từng cách; chưa thử traversal khác; quỹ đạo dùng ở đây là ground truth nên
+chưa nói được gì về quỹ đạo tự tính.
 
 ## Câu hỏi còn mở
 
