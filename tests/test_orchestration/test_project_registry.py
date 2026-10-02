@@ -42,9 +42,13 @@ _FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "fixtures"
 
 
 @pytest.fixture
-def registry() -> ProjectRegistry:
-    """Fresh in-memory registry backed by the repo's shared fixtures."""
-    instance = ProjectRegistry(_FIXTURE_ROOT)
+def registry(tmp_path: Path) -> ProjectRegistry:
+    """Fresh in-memory registry backed by the repo's shared fixtures.
+
+    `runtime_root` phải là thư mục tạm: `create_job` ghi JobManifest xuống đĩa, và mặc định của registry là kho
+    artifact thật của repo (`data/artifacts`).
+    """
+    instance = ProjectRegistry(_FIXTURE_ROOT, runtime_root=tmp_path / "artifacts")
     instance.seed_from_fixtures()
     return instance
 
