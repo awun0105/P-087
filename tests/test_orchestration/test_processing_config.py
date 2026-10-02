@@ -83,6 +83,26 @@ def test_unknown_machine_is_not_reported_as_safe() -> None:
     assert maximum_for_machine(presets, None) == preset_values(presets, "minimum_quality")
 
 
+def test_live_headroom_drives_estimate_and_maximum_but_busy_gpu_can_enqueue() -> None:
+    presets, _ = load_presets(PRESETS)
+    live = _machine().model_copy(update={"headroom_measured": True, "vram_free_gb": 0.1, "ram_available_gb": 100})
+    params = preset_values(presets, "minimum_quality")
+    evaluation = evaluate(presets, params, live)
+    gpu = next(item for item in evaluation.resources if item.resource == "vram")
+    assert gpu.available_gb == 0.1 and gpu.status == "danger" and "job sẽ chờ" in gpu.message
+    assert not evaluation.blocking  # Cấu hình vừa capacity máy, GPU chỉ đang bận.
+    disk_busy = live.model_copy(update={"disk_free_gb": 0.1})
+    assert not evaluate(presets, params, disk_busy).blocking
+    too_small = live.model_copy(update={"vram_total_gb": 0.1})
+    assert evaluate(presets, params, too_small).blocking
+    unknown = live.model_copy(update={"vram_free_gb": None})
+    assert maximum_for_machine(presets, unknown) == params
+    assert (
+        next(item for item in evaluate(presets, params, unknown).resources if item.resource == "vram").status
+        == "unknown"
+    )
+
+
 @pytest.mark.parametrize(
     "machine",
     [_machine(), _machine(vram=4, ram=31, disk=12), _machine(vram=2, ram=8, disk=3, cpu=4)],

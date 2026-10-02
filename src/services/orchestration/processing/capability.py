@@ -106,6 +106,7 @@ def probe(worker_root: Path) -> MachineCapability:
     """Đo GPU/VRAM (nvidia-smi), CPU, RAM và ổ trống tại thư mục làm việc của worker."""
     gpu_name, vram = _gpu()
     worker_root.mkdir(parents=True, exist_ok=True)
+    live = measure_live_headroom(worker_root)
     return MachineCapability(
         worker_id=f"{socket.gethostname()}:{os.getpid()}",
         measured_at=datetime.now(UTC),
@@ -114,6 +115,9 @@ def probe(worker_root: Path) -> MachineCapability:
         cpu_count=os.cpu_count() or 1,
         ram_total_gb=_ram_gb(),
         disk_free_gb=round(shutil.disk_usage(worker_root).free / 1024**3, 2),
+        headroom_measured=True,
+        vram_free_gb=live["vram_free_gb"],
+        ram_available_gb=live["ram_available_gb"],
     )
 
 

@@ -149,6 +149,10 @@ class MachineCapability(BaseModel):
     cpu_count: int = Field(ge=1)
     ram_total_gb: float = Field(gt=0)
     disk_free_gb: float = Field(ge=0)
+    #: Snapshot live; False giữ tương thích với payload của worker cũ.
+    headroom_measured: bool = False
+    vram_free_gb: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    ram_available_gb: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
 class JobProcessingConfig(BaseModel):

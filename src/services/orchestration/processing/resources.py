@@ -51,7 +51,7 @@ class ParameterStatus(BaseModel):
 
 
 class Evaluation(BaseModel):
-    """Kết quả kiểm tra một bộ thông số; `blocking` = có tài nguyên đỏ."""
+    """Kết quả kiểm tra; `blocking` khi vượt năng lực máy, không chỉ bận tạm thời."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -90,12 +90,16 @@ def estimate_gb(model: ResourceModel, params: dict[str, ParamValue]) -> dict[Res
 def _available(capability: MachineCapability | None) -> dict[Resource, float | None]:
     if capability is None:
         return {"vram": None, "ram": None, "disk": None}
+    if capability.headroom_measured:
+        return {"vram": capability.vram_free_gb, "ram": capability.ram_available_gb, "disk": capability.disk_free_gb}
     return {"vram": capability.vram_total_gb, "ram": capability.ram_total_gb, "disk": capability.disk_free_gb}
 
 
 def _status(model: ResourceModel, required: float, available: float | None) -> Status:
-    if available is None or available <= 0:
+    if available is None:
         return "unknown"
+    if available <= 0:
+        return "danger"
     ratio = required / available
     if ratio >= model.danger_ratio:
         return "danger"
@@ -115,6 +119,12 @@ def evaluate(
     values = presets.validate_params(params)
     required = estimate_gb(model, values)
     available = _available(capability)
+    capacity: dict[Resource, float | None] = {
+        "vram": capability.vram_total_gb if capability else None,
+        "ram": capability.ram_total_gb if capability else None,
+        # Không có disk total: free disk là tình trạng tạm thời, gate worker sẽ chờ khi thiếu.
+        "disk": capability.disk_free_gb if capability and not capability.headroom_measured else None,
+    }
     resources: list[ResourceEstimate] = []
     marks: dict[str, ParameterStatus] = {}
     rank = {"ok": 0, "unknown": 0, "warn": 1, "danger": 2}
@@ -126,7 +136,14 @@ def evaluate(
         else:
             message = f"Cần khoảng {required[resource]:.1f} GB / máy có {have:.1f} GB {_LABEL[resource]}"
             if status == "danger":
-                message += " — có thể crash, hãy giảm thông số được tô đỏ"
+                if (
+                    capability
+                    and capability.headroom_measured
+                    and _status(model, required[resource], capacity[resource]) != "danger"
+                ):
+                    message += " — hiện thiếu tài nguyên; job sẽ chờ và tự chạy tiếp khi đủ"
+                else:
+                    message += " — có thể crash, hãy giảm thông số được tô đỏ"
         resources.append(
             ResourceEstimate(
                 resource=resource,
@@ -151,7 +168,8 @@ def evaluate(
     return Evaluation(
         resources=resources,
         parameters=parameters,
-        blocking=any(item.status == "danger" for item in resources),
+        # Bận tạm thời không cấm enqueue. Chỉ chặn cấu hình vượt capacity thật đã biết.
+        blocking=any(_status(model, required[name], capacity[name]) == "danger" for name in ("vram", "ram", "disk")),
         note=model.note,
     )
 
@@ -197,6 +215,8 @@ def maximum_for_machine(presets: ProcessingPresets, capability: MachineCapabilit
         return minimum
     model = presets.resource_model
     available = _available(capability)
+    if capability.headroom_measured and any(value is None for value in available.values()):
+        return minimum  # Không suy maximum từ snapshot thiếu RAM/VRAM.
     floor = {spec.key: (spec.min if spec.kind != "choice" else minimum[spec.key]) for spec in presets.parameters}
     if _fits(model, minimum, available):
         low, high = minimum, dict(presets.presets["maximum"])
