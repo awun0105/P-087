@@ -1,0 +1,189 @@
+"""Bảng đánh giá: chỉ số lấy đúng từ dữ liệu, bước chưa có kết quả không bị bịa số, báo cáo xuất đúng nội dung."""
+
+from datetime import UTC, datetime
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+
+from src.models.contracts.scene import SceneIR, SceneObjectOrigin, SceneObjectState
+from src.services.orchestration.artifacts import ArtifactNotFoundError
+from src.services.orchestration.evaluation import (
+    JobEvaluation,
+    Metric,
+    StageEvaluation,
+    evaluate_job,
+    evaluation_markdown,
+    scorecard,
+)
+from src.services.orchestration.projects.registry import ProjectRegistry
+
+_ROOT = Path(__file__).resolve().parents[2]
+_GEOMETRY = _ROOT / "configs" / "product" / "geometry_v1.json"
+
+
+def _scene(reviews: list[tuple[str, str | None]]) -> SceneIR:
+    """SceneIR fixture với danh sách vật `(origin, review)`; review None = chưa duyệt."""
+    scene = SceneIR.model_validate_json((_ROOT / "fixtures" / "scene_ir" / "scene.json").read_text())
+    template = scene.objects[0]
+    objects = []
+    for index, (origin, review) in enumerate(reviews):
+        name = f"object-{index:03d}"
+        provenance = {**template.provenance, **({"review": review} if review else {})}
+        objects.append(
+            template.model_copy(
+                update={
+                    "id": name,
+                    "local_frame": name,
+                    "origin": SceneObjectOrigin(origin),
+                    "state": SceneObjectState.CONFIRMED if review == "CONFIRMED" else SceneObjectState.CANDIDATE,
+                    "transform": template.transform.model_copy(update={"local_frame": name}),
+                    "provenance": provenance,
+                },
+                deep=True,
+            )
+        )
+    return scene.model_copy(update={"objects": objects})
+
+
+def _values(metrics: list[Metric]) -> dict[str, object]:
+    return {metric.key: metric.value for metric in metrics}
+
+
+def test_object_metrics_use_the_reviewers_decisions() -> None:
+    scene = _scene(
+        [("reconstructed", "CONFIRMED")] * 3
+        + [("reconstructed", "IGNORED"), ("reconstructed", "DELETED")]
+        + [("reconstructed", None)] * 5
+        + [("user_added", None)] * 2
+    )
+    metrics = scorecard._object_metrics(scene)
+    assert metrics is not None
+    assert _values(metrics) == {
+        "objects.precision": 60.0,  # 3 xác nhận trên 5 vật đã duyệt
+        "objects.reviewed": 50.0,  # 5 trên 10 vật máy đề xuất
+        "objects.user_added": 2,
+        "objects.proposed": 10,
+    }
+    assert "còn 5 chưa duyệt" in next(m.display for m in metrics if m.key == "objects.reviewed")
+
+
+def test_object_precision_is_unknown_until_something_is_reviewed() -> None:
+    metrics = scorecard._object_metrics(_scene([("reconstructed", None)] * 4))
+    assert metrics is not None
+    precision = next(metric for metric in metrics if metric.key == "objects.precision")
+    assert precision.value is None and precision.display == "Chưa có vật nào được duyệt"
+    assert scorecard._object_metrics(None) is None
+
+
+def test_group_distinguishes_not_run_from_unreadable() -> None:
+    def broken() -> list[Metric]:
+        raise ArtifactNotFoundError("mất file")
+
+    assert scorecard._group("g", "Nhóm", lambda: None).status == "pending"
+    unreadable = scorecard._group("g", "Nhóm", broken)
+    assert unreadable.status == "unavailable" and unreadable.metrics == []
+    measured = scorecard._group("g", "Nhóm", lambda: [Metric(key="k", label="L", value=1, display="1", meaning="m")])
+    assert measured.status == "measured" and len(measured.metrics) == 1
+
+
+def test_job_without_results_reports_every_group_as_pending(tmp_path: Path) -> None:
+    registry = ProjectRegistry(runtime_root=tmp_path / "artifacts")
+    registry.seed_from_fixtures()
+    job = registry.create_job(SimpleNamespace(project_id="project-fixture-001", scene_revision="rev-001"))
+
+    evaluation = evaluate_job(registry, job.job_id, _GEOMETRY)
+
+    assert evaluation.job_id == job.job_id and evaluation.job_status == "QUEUED"
+    assert [group.group_id for group in evaluation.groups] == [
+        "ST-INPUT-VALIDATE",
+        "ST-CAMERA-POSE",
+        "ST-VISUAL-RECON",
+        "ST-METRIC-CANONICALIZE",
+        "ST-RGB-GEOMETRY",
+        "ST-OBJECT-EXTRACT",
+        "system",
+    ]
+    assert {group.status for group in evaluation.groups} == {"pending"}
+    assert all(group.metrics == [] for group in evaluation.groups)
+
+
+def _evaluation() -> JobEvaluation:
+    return JobEvaluation(
+        job_id="job-1",
+        project_id="project-1",
+        scene_name="Kho | A",
+        job_status="SUCCEEDED",
+        scene_revision="rev-002",
+        generated_at=datetime(2026, 10, 2, 3, 0, tzinfo=UTC),
+        groups=[
+            StageEvaluation(
+                group_id="ST-CAMERA-POSE",
+                title="Vị trí camera",
+                status="measured",
+                metrics=[
+                    Metric(
+                        key="pose.registered_ratio",
+                        label="Ảnh dựng được",
+                        value=96.0,
+                        unit="%",
+                        display="96.0 % (48/50)",
+                        meaning="Phần ảnh | có vị trí",
+                        verdict="ok",
+                        threshold="≥ 50%",
+                    ),
+                    Metric(key="pose.error", label="Sai số", value=None, display="Chưa đo", meaning="Lệch pixel"),
+                ],
+            ),
+            StageEvaluation(
+                group_id="ST-RGB-GEOMETRY", title="Hình học", status="pending", note="Bước này chưa có kết quả."
+            ),
+        ],
+    )
+
+
+def test_markdown_report_carries_values_verdicts_and_unmeasured_steps() -> None:
+    report = evaluation_markdown(_evaluation())
+    assert report.startswith("# Đánh giá scene: Kho | A\n")
+    assert "`job-1` · trạng thái SUCCEEDED · revision `rev-002`" in report
+    assert "| Ảnh dựng được | 96.0 % (48/50) | Đạt (≥ 50%) | Phần ảnh \\| có vị trí |" in report
+    assert "| Sai số | Chưa đo | — | Lệch pixel |" in report
+    assert "## Hình học\n\n_Chưa có kết quả._ Bước này chưa có kết quả." in report
+    assert "không so với ground truth" in report
+
+
+@pytest_asyncio.fixture
+async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
+    from src.api import auth
+    from src.api.studio import deps
+    from src.main import app
+
+    settings = SimpleNamespace(
+        auth_required=False, database_url=f"sqlite:///{tmp_path / 'runtime.db'}", product_geometry_config=_GEOMETRY
+    )
+    registry = ProjectRegistry(runtime_root=tmp_path / "artifacts")
+    registry.seed_from_fixtures()
+    monkeypatch.setattr(deps, "get_settings", lambda: settings)
+    monkeypatch.setattr(auth, "get_settings", lambda: settings)
+    monkeypatch.setattr(deps, "get_project_registry", lambda: registry)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+
+
+@pytest.mark.asyncio
+async def test_evaluation_routes_return_scorecard_and_downloadable_report(client: AsyncClient) -> None:
+    assert (await client.get("/api/v1/jobs/khong-co/evaluation")).status_code == 404
+    assert (await client.get("/api/v1/jobs/khong-co/evaluation/report.md")).status_code == 404
+
+    response = await client.get("/api/v1/jobs/job-fixture-001/evaluation")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["job_id"] == "job-fixture-001" and len(body["groups"]) == 7
+    assert all(group["status"] in {"measured", "pending", "unavailable"} for group in body["groups"])
+
+    report = await client.get("/api/v1/jobs/job-fixture-001/evaluation/report.md")
+    assert report.status_code == 200 and report.headers["content-type"].startswith("text/markdown")
+    assert report.headers["content-disposition"] == 'attachment; filename="evaluation-job-fixture-001.md"'
+    assert report.text.startswith("# Đánh giá scene:")

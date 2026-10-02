@@ -9,6 +9,7 @@ import type { SaveState } from "@/features/studio/ObjectReviewView";
 import { ReviewPanel } from "@/features/studio/ReviewPanel";
 import { SimulationPackagePanel } from "@/features/studio/SimulationPackagePanel";
 import { HelpDetails } from "@/components/studio/feedback";
+import { EvaluationCard } from "@/features/studio/evaluation/EvaluationCard";
 import { ValidationReportCard } from "@/features/studio/ValidationReportCard";
 import { getJobScene, type ReviewStateView } from "@/lib/api/studio";
 
@@ -50,6 +51,9 @@ export function ReviewTab({ jobId, onSaveState }: { jobId: string; onSaveState: 
           <ValidationReportCard state={review} />
         </Card>
       )}
+      <Card className="overflow-hidden lg:col-span-2">
+        <EvaluationCard jobId={jobId} revision={revision} />
+      </Card>
       <div className="lg:col-span-2"><HelpDetails title="Gói và quyết định duyệt gắn với revision nào?">
         Mọi thay đổi vật thể sau khi tạo gói sẽ sinh revision mới: gói, báo cáo validation và quyết định duyệt cũ không còn áp dụng
         cho revision đó.

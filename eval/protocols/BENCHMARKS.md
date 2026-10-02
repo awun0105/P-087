@@ -28,3 +28,13 @@ không điền ước đoán như kết quả.
 
 Dữ liệu evaluation-only (GT, split giữ lại) chỉ dùng trong evaluator, không bao giờ vào runtime
 (`docs/DATASET_PLAYBOOK.md`).
+
+## Chỉ số tự kiểm trong Studio (không phải benchmark)
+
+Bảng đánh giá của từng scene trong Studio (`src/services/orchestration/evaluation/`, STUDIO_UX_SPEC D-16) đo từ chính
+artifact của job, không dùng GT, nên có cho cả dữ liệu người dùng. Nó không thay các benchmark ở trên: benchmark trả lời
+"hệ thống chính xác tới đâu trên dataset đối chứng", bảng tự kiểm trả lời "scene này có dấu hiệu sai không".
+
+Một chỉ số dùng chung phép đo với benchmark: "vị trí camera đã đi qua bị mesh chặn" là phép kiểm của
+`collision_path_clearance` áp lên mesh đã publish của job. Đối chiếu ngày 02/10/2026 trên `job-ac2bfd924cc6`: bảng tự
+kiểm cho 33/50 vị trí, 224.745 tam giác — trùng dòng 0,05 m của `eval/results/collision_path_clearance/`.

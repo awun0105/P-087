@@ -783,3 +783,73 @@ export function restoreTrash(entryIds: string[]): Promise<TrashActionResult> {
 export function purgeTrash(entryIds: string[]): Promise<TrashActionResult> {
   return trashAction("purge", entryIds);
 }
+
+/** Một chỉ số của bảng đánh giá (STUDIO_UX_SPEC.md D-16). `value` null = chưa đo; `display` nêu lý do. */
+export interface EvaluationMetric {
+  key: string;
+  label: string;
+  value: number | string | null;
+  unit: string | null;
+  display: string;
+  meaning: string;
+  verdict: "ok" | "warn" | "fail" | null;
+  threshold: string | null;
+}
+
+export interface EvaluationGroup {
+  group_id: string;
+  title: string;
+  status: "measured" | "pending" | "unavailable";
+  note: string | null;
+  metrics: EvaluationMetric[];
+}
+
+export interface JobEvaluation {
+  job_id: string;
+  scene_name: string;
+  job_status: string;
+  scene_revision: string | null;
+  generated_at: string;
+  groups: EvaluationGroup[];
+}
+
+const EVALUATION_STATUS = ["measured", "pending", "unavailable"] as const;
+const EVALUATION_VERDICT = ["ok", "warn", "fail"] as const;
+
+/** Kiểm bảng đánh giá ở biên API: thiếu field bắt buộc là lỗi, không hiện bảng dở dang như kết quả. */
+export function parseJobEvaluation(data: unknown): JobEvaluation {
+  const invalid = () => new ApiError(502, "Dữ liệu đánh giá không hợp lệ");
+  if (!isRecord(data) || typeof data.job_id !== "string" || typeof data.scene_name !== "string" || !Array.isArray(data.groups)) throw invalid();
+  const groups = data.groups.map((group): EvaluationGroup => {
+    const status = isRecord(group) ? EVALUATION_STATUS.find((value) => value === group.status) : undefined;
+    if (!isRecord(group) || !status || typeof group.group_id !== "string" || typeof group.title !== "string" || !Array.isArray(group.metrics)) throw invalid();
+    const metrics = group.metrics.map((metric): EvaluationMetric => {
+      if (!isRecord(metric) || typeof metric.key !== "string" || typeof metric.label !== "string" || typeof metric.display !== "string" || typeof metric.meaning !== "string") throw invalid();
+      const value = typeof metric.value === "number" || typeof metric.value === "string" ? metric.value : null;
+      return {
+        key: metric.key, label: metric.label, value, display: metric.display, meaning: metric.meaning,
+        unit: typeof metric.unit === "string" ? metric.unit : null,
+        verdict: EVALUATION_VERDICT.find((item) => item === metric.verdict) ?? null,
+        threshold: typeof metric.threshold === "string" ? metric.threshold : null,
+      };
+    });
+    return { group_id: group.group_id, title: group.title, status, note: typeof group.note === "string" ? group.note : null, metrics };
+  });
+  return {
+    job_id: data.job_id,
+    scene_name: data.scene_name,
+    job_status: typeof data.job_status === "string" ? data.job_status : "",
+    scene_revision: typeof data.scene_revision === "string" ? data.scene_revision : null,
+    generated_at: typeof data.generated_at === "string" ? data.generated_at : "",
+    groups,
+  };
+}
+
+export async function getJobEvaluation(jobId: string, signal?: AbortSignal): Promise<JobEvaluation> {
+  return parseJobEvaluation(await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/evaluation`, { signal }));
+}
+
+/** Link tải báo cáo Markdown của bảng đánh giá (backend đặt tên file). */
+export function evaluationReportUrl(jobId: string): string {
+  return `${API}/jobs/${encodeURIComponent(jobId)}/evaluation/report.md`;
+}

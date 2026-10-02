@@ -12,6 +12,7 @@ import { usePageTitle } from "@/features/shell/Breadcrumbs";
 import { canInspect, inspectHref, inspectionStage, progressHref } from "@/features/studio/inspection";
 import { STUDIO_STAGES } from "@/features/studio/stages";
 import { getJob, getProject, jobArtifactContentUrl, listJobArtifacts } from "@/lib/api/endpoints";
+import { StageMetrics } from "@/features/studio/evaluation/EvaluationCard";
 import { getJobProgress } from "@/lib/api/studio";
 import type { JobManifest, ProductArtifactRef, Project, StageId } from "@/lib/contracts/api";
 import type { JobProgress } from "@/lib/contracts/studio";
@@ -105,7 +106,8 @@ export function StageInspectionPage({ jobId, stageId }: { jobId: string; stageId
                       : <SceneWorkspace jobId={jobId} stageId={meta.id} title={snapshot.project?.name ?? "Scene"} />}
                 </section>
                 {details && <aside id="stage-output-info" aria-label="Thông tin đầu ra" className="max-h-[40vh] shrink-0 overflow-y-auto border-t border-line bg-paper-raised p-4 lg:max-h-none lg:w-80 lg:border-t-0 lg:border-l">
-                  <h2 className="font-bold">Đầu ra của giai đoạn</h2>
+                  <StageMetrics jobId={jobId} groupId={meta.id} />
+                  <h2 className="mt-6 font-bold">Đầu ra của giai đoạn</h2>
                   <p className="mt-2 text-sm leading-relaxed text-ink-muted">{meta.description}</p>
                   <p className="mt-3 text-xs text-ink-muted">Artifact đã publish là bất biến. Chỉnh Gaussian xuất file riêng; chỉnh vật thể tạo SceneIR revision mới.</p>
                   <p className="mt-3 text-xs text-ink-muted">Hoàn tất: {snapshot.progress.stages.find((stage) => stage.stage_id === meta.id)?.completed_at ? new Date(snapshot.progress.stages.find((stage) => stage.stage_id === meta.id)!.completed_at!).toLocaleString("vi-VN") : "Không có mốc thời gian"}</p>

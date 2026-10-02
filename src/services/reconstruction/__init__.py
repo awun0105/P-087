@@ -71,6 +71,21 @@ def __getattr__(name: str) -> object:
         from src.services.reconstruction import views
 
         return getattr(views, name)
+    if name in {
+        "GeometryQuality",
+        "InputQuality",
+        "MetricQuality",
+        "PoseQuality",
+        "VisualQuality",
+        "geometry_quality",
+        "input_quality",
+        "metric_quality",
+        "pose_quality",
+        "visual_quality",
+    }:
+        from src.services.reconstruction import quality
+
+        return getattr(quality, name)
     if name in {"extract_member", "package_splat"}:
         from src.services.reconstruction import imports
 
