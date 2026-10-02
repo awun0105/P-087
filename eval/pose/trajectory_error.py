@@ -24,6 +24,7 @@ import numpy as np
 
 from eval.reference.torwic import PoseSet, base_record, ground_truth_poses, job_poses, percentiles, write_record
 from src.models.contracts.manifests import StageId
+from src.services.orchestration.jobs.stage_views import job_bundle
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
 from src.services.reconstruction.alignment.similarity import fit_similarity, rotation_matrix
 from src.services.reconstruction.lidar.world_alignment import fit_world_from_lidar_map
@@ -102,7 +103,19 @@ def run(args: argparse.Namespace) -> list[dict]:
     records = [pose]
     if metric is not None:
         scale = base_record("metric_scale", args.label, args.job, args.traversal, args.start)
-        records.append(scale | shared | metric_errors(metric, truth))
+        # Nguồn số đo mà job dùng để lấy tỉ lệ: `lidar_demo` và `lidar_trajectory` (quỹ đạo ground truth) suy ra từ
+        # chính quỹ đạo này, nên sai số tỉ lệ khi đó không phải số đo độc lập.
+        bundle = job_bundle(registry, registry.get_job(args.job))
+        source = bundle.provenance.get("distance_source") if bundle is not None else None
+        independent = source not in {"lidar_demo", "lidar_trajectory"} or (
+            source == "lidar_trajectory" and not shared["job_used_this_trajectory"]
+        )
+        records.append(
+            scale
+            | shared
+            | {"distance_source": source, "scale_is_independent": independent}
+            | metric_errors(metric, truth)
+        )
     for record in records:
         out = args.out_dir / record["benchmark"] / f"{args.label}.jsonl" if args.out_dir else None
         write_record(registry, record, out)

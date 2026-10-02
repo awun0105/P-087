@@ -371,7 +371,7 @@ def _trajectory_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Met
 
 
 #: Mã benchmark đối chứng mà evaluator ở `eval/` ghi theo job (`eval/protocols/BENCHMARKS.md`).
-_REFERENCE_CODES = ("recon_pose", "metric_scale", "recon_geometry")
+_REFERENCE_CODES = ("recon_pose", "metric_scale", "recon_geometry", "metric_scale_proposal")
 REFERENCE_GROUP_ID = "reference"
 
 
@@ -388,7 +388,7 @@ def _reference_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metr
     """Chỉ số so với ground truth của dataset; chỉ có ở scene dựng từ dataset đã chạy evaluator."""
     records = {code: _reference_record(registry, job.job_id, code) for code in _REFERENCE_CODES}
     metrics: list[Metric] = []
-    pose, scale, geometry = (records[code] for code in _REFERENCE_CODES)
+    pose, scale, geometry, proposal = (records[code] for code in _REFERENCE_CODES)
     guided = " Scene này dựng bám theo chính quỹ đạo đó nên số đo mức bám, không phải độ chính xác độc lập."
     if pose is not None:
         note = guided if pose.get("job_used_this_trajectory") else ""
@@ -424,7 +424,9 @@ def _reference_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metr
             ),
         ]
     if scale is not None:
-        note = guided if scale.get("job_used_this_trajectory") else ""
+        note = ""
+        if scale.get("scale_is_independent") is False or scale.get("job_used_this_trajectory"):
+            note = " Tỉ lệ của scene này được suy từ chính quỹ đạo chuẩn nên số này không phải số đo độc lập."
         metrics.append(
             Metric(
                 key="reference.scale_error",
@@ -434,6 +436,22 @@ def _reference_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metr
                 display=_number(float(scale["scale_error_percent"]), 2, "%"),
                 meaning="Một mét trong scene dài hơn (+) hay ngắn hơn (−) một mét thật bao nhiêu phần trăm, tính từ "
                 f"quỹ đạo chuẩn.{note}",
+                source="reference",
+            )
+        )
+    if proposal is not None:
+        methods = {"moge2_sparse_depth_scale_only": "mô hình ước lượng độ sâu", "lidar_trajectory_alignment": "LiDAR"}
+        note = "" if proposal.get("scale_is_independent") else " Đề xuất này suy từ chính quỹ đạo chuẩn, không độc lập."
+        metrics.append(
+            Metric(
+                key="reference.scale_proposal_error",
+                label="Sai số của đề xuất tỉ lệ tự động",
+                value=proposal["proposal_error_percent"],
+                unit="%",
+                display=_number(float(proposal["proposal_error_percent"]), 2, "%"),
+                meaning="Tỉ lệ mét hệ thống tự đề xuất ("
+                f"{methods.get(proposal['proposal_method'], proposal['proposal_method'])}) lệch tỉ lệ thật bao "
+                f"nhiêu, trước khi người dùng xác nhận hay sửa. Dương = scene bị phóng to.{note}",
                 source="reference",
             )
         )

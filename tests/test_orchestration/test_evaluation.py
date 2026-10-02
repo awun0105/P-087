@@ -247,11 +247,16 @@ def test_reference_group_appears_only_after_an_evaluator_recorded_results(tmp_pa
     scale = base_record("metric_scale", "unit-test", job.job_id, traversal, 0)
     write_record(registry, scale | {"job_used_this_trajectory": False, "scale_error_percent": -1.25}, None)
 
+    proposal = base_record("metric_scale_proposal", "unit-test", job.job_id, traversal, 0)
+    proposal |= {"proposal_method": "moge2_sparse_depth_scale_only", "proposal_error_percent": -0.24}
+    write_record(registry, proposal | {"scale_is_independent": True}, None)
+
     group = next(g for g in evaluate_job(registry, job.job_id, _GEOMETRY).groups if g.group_id == "reference")
     values = _values(group.metrics)
     assert group.status == "measured" and "ground truth" in (group.note or "")
     assert values["reference.ate"] == 8.1 and values["reference.scale_error"] == -1.25
     assert {metric.source for metric in group.metrics} == {"reference"}
+    assert values["reference.scale_proposal_error"] == -0.24
     assert "reference.surface_accuracy" not in values
     ate = next(metric for metric in group.metrics if metric.key == "reference.ate")
     assert "không phải độ chính xác độc lập" in ate.meaning

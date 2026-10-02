@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from eval.geometry.surface_error import map_points, near_path, surface_scores
+from eval.pose.scale_proposal_error import proposal_error
 from eval.pose.trajectory_error import metric_errors, trajectory_errors
 from eval.reference.torwic import PoseSet
 
@@ -92,3 +93,11 @@ def test_map_reader_accepts_the_dataset_layout_with_normals_and_empty_faces(tmp_
     path.write_bytes(header.encode() + struct.pack("<6f", 1, 2, 3, 0, 0, 1))
     with pytest.raises(ValueError, match="thiếu dữ liệu"):
         map_points(path)
+
+
+def test_proposal_error_is_relative_to_the_true_scale() -> None:
+    assert proposal_error(1.2, 1.2) == 0.0
+    assert proposal_error(1.212, 1.2) == pytest.approx(1.0, abs=1e-3)
+    assert proposal_error(1.14, 1.2) == pytest.approx(-5.0, abs=1e-3)
+    with pytest.raises(ValueError, match="dương"):
+        proposal_error(1.0, 0.0)

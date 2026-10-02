@@ -59,7 +59,10 @@ không ước lượng; nhãn đạt/không đạt chỉ gán khi ngưỡng đã
 - Bảng đánh giá: khối "So với dữ liệu đối chứng" (chỉ khi job có bản ghi); nhóm "Tỉ lệ mét" của job LiDAR hiện độ
   lệch pose ↔ quỹ đạo thay cho phép kiểm C–D (C–D của luồng này sinh từ chính căn chỉnh nên không độc lập).
 - VERIFIED trên `job-101e9b56344c`: số ở `eval/results/{recon_pose,metric_scale,recon_geometry}/`.
-- Chưa làm: sai số khoảng cách A–B/C–D so với LiDAR, đối chứng tách vật thể (mục 4), chấm các job chỉ có video.
+- Chấm hai job chỉ có video trong kho thật (`job-ac2bfd924cc6`, `job-1bb733ae40ad`): ATE 6,8 cm trên 16,7 m; đề xuất tỉ
+  lệ tự động MoGe-2 lệch −0,24% và −0,11% (`eval/pose/scale_proposal_error.py`, bước 4 của H6). Chi tiết ở
+  `eval/protocols/reference_torwic.md`.
+- Chưa làm: đối chứng tách vật thể (mục 4); mới có một video (Aisle_CW) nên chưa đặt ngưỡng.
 
 ## Next step
 
