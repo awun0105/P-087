@@ -239,6 +239,14 @@ class ArtifactRemote:
         """Xóa object bị từ chối sau kiểm tra."""
         self.store.delete(self.key(relative))
 
+    def delete_tree(self, relative_dir: str) -> int:
+        """Xoá mọi object của một namespace `jobs/<ns>`; trả số object đã xoá. Chạy lại được nếu dừng giữa chừng."""
+        prefix = self.key(relative_dir.rstrip("/") + "/")
+        objects = self.store.list_objects(prefix)
+        for item in objects:
+            self.store.delete(item.key)
+        return len(objects)
+
     def open_ranged(self, relative: str, size_bytes: int) -> "RangedObjectReader":
         """File-like chỉ đọc, seek được, tải theo đoạn: đủ cho header/mục lục ZIP."""
         return RangedObjectReader(

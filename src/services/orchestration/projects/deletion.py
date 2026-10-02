@@ -11,9 +11,11 @@ Thứ tự: ghi `deletion_record.json` (đủ để khôi phục) → xoá các 
 rác. Dừng giữa chừng chỉ để lại thư mục mồ côi, DB không bao giờ trỏ tới file đã mất. `restore_deletion` làm ngược lại;
 chỉ `purge_deletion` mới xoá hẳn.
 
+Deployment có kho file S3/R2: lúc gỡ, object trên kho được giữ nguyên (không còn dòng DB nào trỏ tới, và `restore`
+không phải tải lại); `purge_deletion` xoá mọi object của các namespace đã gỡ rồi mới xoá thư mục thùng rác.
+
 Từ chối (fail closed): job đang chờ worker hoặc đang chạy, bản nhập đang đóng gói, yêu cầu dựng lại vật đang chờ/chạy,
-scene đã có bản phát hành (PRD US-06) khi chưa cho phép rõ ràng, và deployment dùng kho file S3 (gỡ cục bộ sẽ để lại
-object trên kho).
+scene đã có bản phát hành (PRD US-06) khi chưa cho phép rõ ràng.
 """
 
 import json
@@ -30,7 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.models.contracts.artifacts import ArtifactRef, Identifier
 from src.models.contracts.manifests import JobManifest, JobStatus, StageId
-from src.services.orchestration.artifacts import ArtifactResolver, ArtifactStoreError
+from src.services.orchestration.artifacts import ArtifactRemote, ArtifactResolver, ArtifactStoreError
 from src.services.orchestration.auth.models import AuditEntry
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError, RuntimeTransaction
 from src.services.orchestration.jobs.progress import metric_confirmation_stage
@@ -136,6 +138,8 @@ class DeletionPlan(BaseModel):
     rows: list[StoredRow]
     upload_unlinks: list[UploadUnlink]
     items: list[MovedItem]
+    #: Namespace `jobs/<ns>` của mọi thứ bị gỡ, kể cả khi máy này không có bản cache; purge dùng để xoá trên kho file.
+    remote_namespaces: list[str] = Field(default_factory=list)
     size_bytes: int
     blockers: list[str]
 
@@ -223,6 +227,7 @@ class _Collector:
         self.request = request
         self.rows: list[StoredRow] = []
         self.items: list[MovedItem] = []
+        self.namespaces: list[str] = []
         self.summary: list[SummaryLine] = []
         self.unlinks: list[UploadUnlink] = []
         self.blockers: list[str] = []
@@ -243,6 +248,7 @@ class _Collector:
             rows=self.rows,
             upload_unlinks=self.unlinks,
             items=self.items,
+            remote_namespaces=self.namespaces,
             size_bytes=_tree_size([self.context.live_path(item) for item in self.items]),
             blockers=self.blockers,
         )
@@ -255,6 +261,8 @@ class _Collector:
 
     def _add_item(self, kind: ItemKind, name: str) -> None:
         item = MovedItem(kind=kind, name=name)
+        if kind == "artifact":
+            self.namespaces.append(_safe(name))
         if self.context.live_path(item).exists():
             self.items.append(item)
 
@@ -443,8 +451,6 @@ def apply_deletion(context: DeletionContext, request: DeletionRequest, trash_roo
 
     Kế hoạch được tính lại trong chính transaction ghi, nên điều kiện từ chối được kiểm trên trạng thái mới nhất.
     """
-    if context.resolver.remote is not None:
-        raise DeletionRefusedError(["deployment dùng kho file S3: gỡ cục bộ sẽ để lại object trên kho"])
     entry = trash_root / f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{uuid4().hex[:6]}"
     created = False
     try:
@@ -521,11 +527,25 @@ def restore_deletion(context: DeletionContext, entry: Path) -> DeletionRecord:
     return record
 
 
-def purge_deletion(entry: Path) -> int:
-    """Xoá hẳn một lần gỡ khỏi thùng rác; trả dung lượng thư mục đã xoá (byte)."""
+@dataclass(frozen=True)
+class PurgeResult:
+    """Những gì một lần purge đã xoá hẳn."""
+
+    local_bytes: int
+    remote_objects: int
+
+
+def purge_deletion(entry: Path, remote: ArtifactRemote | None = None) -> PurgeResult:
+    """Xoá hẳn một lần gỡ: object trên kho file trước (nếu deployment có), thư mục thùng rác sau.
+
+    Xoá kho file trước để nếu dừng giữa chừng thì thư mục thùng rác vẫn còn và chạy lại purge là xong phần còn lại.
+    """
     record = load_record(entry)
     if record.state == "planned":
         raise DeletionRefusedError([f"{entry.name}: lần gỡ chưa hoàn tất; chạy restore rồi gỡ lại"])
+    removed = 0
+    if remote is not None and record.state == "removed":
+        removed = sum(remote.delete_tree(f"jobs/{_safe(name)}") for name in record.plan.remote_namespaces)
     size = _tree_size([entry])
     shutil.rmtree(entry)
-    return size
+    return PurgeResult(local_bytes=size, remote_objects=removed)

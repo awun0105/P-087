@@ -84,10 +84,12 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _run(args: argparse.Namespace, settings: Settings) -> int:
-    if args.command == "purge":
-        print(f"Đã xoá hẳn {args.entry.name}: {_megabytes(purge_deletion(args.entry))}")
-        return 0
     context = build_context(settings)
+    if args.command == "purge":
+        result = purge_deletion(args.entry, context.resolver.remote)
+        on_store = f", {result.remote_objects} object trên kho file" if context.resolver.remote is not None else ""
+        print(f"Đã xoá hẳn {args.entry.name}: {_megabytes(result.local_bytes)} trên máy{on_store}")
+        return 0
     if args.command == "restore":
         record = restore_deletion(context, args.entry)
         print(f"Đã khôi phục {len(record.plan.summary)} mục từ {args.entry.name}")

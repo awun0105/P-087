@@ -351,13 +351,45 @@ def test_import_being_packaged_is_refused(world: SimpleNamespace) -> None:
     _refused(world, "đang được đóng gói", import_ids=[record.import_id])
 
 
-def test_deployment_with_remote_file_store_is_refused(world: SimpleNamespace) -> None:
-    project_id, _ = _scene(world, _upload(world), "Kho S3")
-    world.context.resolver.remote = ArtifactRemote(MemoryObjectStore())
+def test_remote_file_store_objects_survive_delete_and_go_on_purge(world: SimpleNamespace) -> None:
+    project_id, job_id = _scene(world, _upload(world), "Kho R2")
+    kept_project, kept_job = _scene(world, _upload(world, "keep.mp4"), "Giữ")
+    store = MemoryObjectStore()
+    world.context.resolver.remote = ArtifactRemote(store, "studio")
     try:
-        _refused(world, "kho file S3", project_ids=[project_id])
+        for namespace in (project_id, job_id, kept_project, kept_job):
+            world.context.resolver.sync_up(namespace)
+        before = set(store.objects)
+        gone = {key for key in before if f"/{project_id}/" in key or f"/{job_id}/" in key}
+        assert gone and gone != before
+
+        entry = _delete(world, project_ids=[project_id])
+        assert set(store.objects) == before  # gỡ chưa đụng kho file: restore không phải tải lại
+
+        result = purge_deletion(entry, world.context.resolver.remote)
     finally:
         world.context.resolver.remote = None
+
+    upload_keys = {key for key in before - set(store.objects)}
+    assert upload_keys == gone
+    assert result.remote_objects == len(gone) and result.local_bytes > 0
+    assert world.registry.get_job(kept_job).project_id == kept_project
+
+
+def test_restored_deletion_never_removes_remote_objects(world: SimpleNamespace) -> None:
+    project_id, job_id = _scene(world, _upload(world), "Khôi phục trên R2")
+    store = MemoryObjectStore()
+    world.context.resolver.remote = ArtifactRemote(store)
+    try:
+        world.context.resolver.sync_up(job_id)
+        before = set(store.objects)
+        entry = _delete(world, project_ids=[project_id])
+        restore_deletion(world.context, entry)
+        result = purge_deletion(entry, world.context.resolver.remote)
+    finally:
+        world.context.resolver.remote = None
+    assert set(store.objects) == before and result.remote_objects == 0
+    assert world.registry.get_job(job_id).job_id == job_id
 
 
 def test_failed_transaction_leaves_no_trace(world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -433,7 +465,7 @@ def test_purge_only_removes_a_finished_trash_entry(world: SimpleNamespace) -> No
 
     with pytest.raises(DeletionRefusedError, match="không phải thư mục của một lần gỡ"):
         purge_deletion(stranger)
-    assert purge_deletion(entry) > 0
+    assert purge_deletion(entry).local_bytes > 0
 
     assert not entry.exists() and (stranger / "data.txt").is_file()
     assert _files(world) == live
