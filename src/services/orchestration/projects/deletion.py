@@ -1,15 +1,15 @@
-"""Gỡ scene khỏi Studio theo cách khôi phục được: dòng DB và thư mục của scene chuyển vào thùng rác.
+"""Thùng rác scene: gỡ scene khỏi Studio theo cách khôi phục được, và xoá hẳn khi người dùng chọn.
 
-Studio chưa có policy lưu trữ (PRD NFR-05: thời gian lưu do Chủ sở hữu sản phẩm xác nhận; STUDIO_UX_SPEC Q7), nên đây
-là thao tác vận hành chạy bằng CLI (`delete_cli`), không phải tính năng của UI/API.
+Dùng chung cho trang Thùng rác của Studio (STUDIO_UX_SPEC D-15, API `studio/trash.py`) và CLI vận hành `delete_cli`.
 
 Một scene = project + các job của nó. Gỡ scene kéo theo journal và yêu cầu dựng lại vật của job, thư mục artifact của
 job/project, thư mục làm việc của worker và bản ghi Rerun. Upload nguồn chỉ bị gỡ khi không còn scene hay bản nhập nào
 dùng nó. Scene nhập (import) được gỡ theo cùng cách.
 
-Thứ tự: ghi `deletion_record.json` (đủ để khôi phục) → xoá các dòng DB trong một transaction → chuyển thư mục vào thùng
-rác. Dừng giữa chừng chỉ để lại thư mục mồ côi, DB không bao giờ trỏ tới file đã mất. `restore_deletion` làm ngược lại;
-chỉ `purge_deletion` mới xoá hẳn.
+Thứ tự: trong một transaction, ghi bản ghi vào bảng `r2s_trash` (đủ để khôi phục) và xoá các dòng DB của scene → rồi
+chuyển thư mục vào thùng rác. Dừng giữa chừng chỉ để lại thư mục chưa dời, DB không bao giờ trỏ tới file đã mất.
+`restore_deletion` làm ngược lại; chỉ `purge_deletion` mới xoá hẳn. Bản ghi nằm trong DB vì đĩa của API trên cloud
+không bền.
 
 Deployment có kho file S3/R2: lúc gỡ, object trên kho được giữ nguyên (không còn dòng DB nào trỏ tới, và `restore`
 không phải tải lại); `purge_deletion` xoá mọi object của các namespace đã gỡ rồi mới xoá thư mục thùng rác.
@@ -30,12 +30,14 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.config import Settings
 from src.models.contracts.artifacts import ArtifactRef, Identifier
 from src.models.contracts.manifests import JobManifest, JobStatus, StageId
-from src.services.orchestration.artifacts import ArtifactRemote, ArtifactResolver, ArtifactStoreError
+from src.services.orchestration.artifacts import ArtifactResolver, ArtifactStoreError
 from src.services.orchestration.auth.models import AuditEntry
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError, RuntimeTransaction
 from src.services.orchestration.jobs.progress import metric_confirmation_stage
+from src.services.orchestration.storage import runtime_resolver
 from src.services.orchestration.uploads.models import UploadRecord
 
 RECORD_NAME = "deletion_record.json"
@@ -145,9 +147,10 @@ class DeletionPlan(BaseModel):
 
 
 class DeletionRecord(BaseModel):
-    """Bản ghi của một lần gỡ, nằm trong thư mục thùng rác của lần đó.
+    """Bản ghi của một lần gỡ = một mục trong thùng rác (một dòng `r2s_trash`).
 
-    `planned`: đã ghi bản ghi, DB/thư mục có thể mới gỡ một phần. `removed`: gỡ xong. `restored`: đã khôi phục.
+    `state` chỉ còn để đọc bản ghi dạng file của phiên bản trước (`deletion_record.json`); mục trong DB luôn là
+    `removed`, khôi phục hoặc xoá hẳn thì dòng bị xoá.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -155,7 +158,8 @@ class DeletionRecord(BaseModel):
     schema_version: Literal["1.0"] = "1.0"
     entry_id: str
     created_at: datetime
-    state: Literal["planned", "removed", "restored"]
+    state: Literal["planned", "removed", "restored"] = "removed"
+    deleted_by: str | None = None
     plan: DeletionPlan
 
 
@@ -174,6 +178,11 @@ class DeletionContext:
     resolver: ArtifactResolver
     worker_root: Path
     rerun_dir: Path
+    trash_root: Path
+
+    def entry_dir(self, entry_id: str) -> Path:
+        """Thư mục giữ file của một mục thùng rác."""
+        return self.trash_root / _safe(entry_id)
 
     def live_path(self, item: MovedItem) -> Path:
         """Vị trí đang dùng của một mục."""
@@ -371,19 +380,20 @@ def _key(row: StoredRow) -> tuple[str, tuple[str | int, ...]]:
     return " AND ".join(f"{column}=?" for column in columns), tuple(row.values[column] for column in columns)
 
 
-def _audit(tx: RuntimeTransaction, action: str, line: SummaryLine, entry_id: str) -> None:
-    """Ghi nhật ký trong cùng transaction với thay đổi; `user_id` trống vì đây là thao tác CLI của người vận hành."""
+def _audit(tx: RuntimeTransaction, action: str, line: SummaryLine, record: "DeletionRecord", actor: str | None) -> None:
+    """Ghi nhật ký trong cùng transaction với thay đổi; `actor` trống khi là thao tác CLI của người vận hành."""
+    entry_id = record.entry_id
     entry = AuditEntry(
         entry_id=uuid4().hex,
         at=datetime.now(UTC),
-        user_id=None,
+        user_id=actor,
         action=action,
         target=line.identifier,
         details={"name": line.name, "trash_entry": entry_id},
     )
     tx.execute(
         "INSERT INTO r2s_audit_log(entry_id, at, user_id, action, payload) VALUES (?, ?, ?, ?, ?)",
-        (entry.entry_id, entry.at.isoformat(), None, action, entry.model_dump_json()),
+        (entry.entry_id, entry.at.isoformat(), actor, action, entry.model_dump_json()),
     )
 
 
@@ -428,56 +438,66 @@ def _delete_rows(tx: RuntimeTransaction, plan: DeletionPlan) -> None:
         _unlink_upload(tx, unlink)
 
 
-def _write_record(entry: Path, record: DeletionRecord) -> None:
-    """Ghi nguyên tử để bản ghi không bao giờ nằm dở dang trên đĩa."""
-    temporary = entry / f".{RECORD_NAME}.tmp"
-    temporary.write_text(record.model_dump_json(indent=2) + "\n", encoding="utf-8")
-    temporary.replace(entry / RECORD_NAME)
+def context_from_settings(settings: Settings) -> DeletionContext:
+    """Định vị DB, kho artifact, thư mục theo job và thùng rác của deployment này."""
+    artifact_root = settings.artifact_root.expanduser().resolve()
+    trash_root = settings.product_trash_root
+    return DeletionContext(
+        database=RuntimeDatabase(settings.database_url),
+        resolver=runtime_resolver(settings),
+        worker_root=settings.product_worker_root.expanduser().resolve(),
+        rerun_dir=settings.product_rerun_recording_dir.expanduser().resolve(),
+        trash_root=trash_root.expanduser().resolve() if trash_root else artifact_root.parent / "trash",
+    )
 
 
-def load_record(entry: Path) -> DeletionRecord:
-    """Đọc bản ghi của một thư mục thùng rác; thư mục không do thao tác này tạo thì từ chối."""
-    path = entry / RECORD_NAME
-    if not path.is_file():
-        raise DeletionRefusedError([f"{entry.name}: không phải thư mục của một lần gỡ (thiếu {RECORD_NAME})"])
-    record = DeletionRecord.model_validate_json(path.read_text(encoding="utf-8"))
-    if record.entry_id != entry.name:
-        raise DeletionRefusedError([f"{entry.name}: bản ghi thuộc lần gỡ khác ({record.entry_id})"])
-    return record
+def list_trash(database: RuntimeDatabase) -> list[DeletionRecord]:
+    """Các mục đang nằm trong thùng rác, mới gỡ nhất trước."""
+    with database.transaction() as tx:
+        rows = tx.execute("SELECT payload FROM r2s_trash ORDER BY deleted_at DESC, entry_id").fetchall()
+    return [DeletionRecord.model_validate_json(row[0]) for row in rows]
 
 
-def apply_deletion(context: DeletionContext, request: DeletionRequest, trash_root: Path) -> DeletionRecord:
-    """Gỡ theo yêu cầu; thư mục của lần gỡ là `trash_root / record.entry_id`.
+def get_trash_entry(database: RuntimeDatabase, entry_id: str) -> DeletionRecord:
+    """Một mục thùng rác; không có (đã khôi phục/xoá hẳn hoặc ID sai) thì từ chối."""
+    with database.transaction() as tx:
+        row = tx.execute("SELECT payload FROM r2s_trash WHERE entry_id=?", (entry_id,)).fetchone()
+    if row is None:
+        raise DeletionRefusedError([f"{entry_id}: không có trong thùng rác"])
+    return DeletionRecord.model_validate_json(row[0])
+
+
+def _take_entry(tx: RuntimeTransaction, record: DeletionRecord) -> None:
+    """Xoá dòng thùng rác trong transaction kết thúc mục đó; hai thao tác cùng lúc thì chỉ một bên thắng."""
+    if tx.execute("DELETE FROM r2s_trash WHERE entry_id=?", (record.entry_id,)).rowcount != 1:
+        raise RuntimeStateConflictError(f"Mục thùng rác {record.entry_id} vừa được xử lý ở nơi khác")
+
+
+def apply_deletion(context: DeletionContext, request: DeletionRequest, actor: str | None = None) -> DeletionRecord:
+    """Chuyển scene/bản nhập theo yêu cầu vào thùng rác; trả bản ghi của mục vừa tạo.
 
     Kế hoạch được tính lại trong chính transaction ghi, nên điều kiện từ chối được kiểm trên trạng thái mới nhất.
     """
-    entry = trash_root / f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{uuid4().hex[:6]}"
-    created = False
-    try:
-        with context.database.transaction(write=True) as tx:
-            plan = _Collector(context, tx, request).plan()
-            if plan.blockers:
-                raise DeletionRefusedError(plan.blockers)
-            record = DeletionRecord(entry_id=entry.name, created_at=datetime.now(UTC), state="planned", plan=plan)
-            entry.mkdir(parents=True)
-            created = True
-            _write_record(entry, record)
-            _delete_rows(tx, plan)
-            for line in plan.summary:
-                _audit(tx, f"{line.kind}.delete", line, entry.name)
-    except BaseException:
-        # Transaction đã rollback: không có gì bị gỡ nên không để lại thư mục thùng rác rỗng gây hiểu nhầm.
-        if created:
-            shutil.rmtree(entry, ignore_errors=True)
-        raise
+    entry_id = f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{uuid4().hex[:6]}"
+    with context.database.transaction(write=True) as tx:
+        plan = _Collector(context, tx, request).plan()
+        if plan.blockers:
+            raise DeletionRefusedError(plan.blockers)
+        record = DeletionRecord(entry_id=entry_id, created_at=datetime.now(UTC), deleted_by=actor, plan=plan)
+        tx.execute(
+            "INSERT INTO r2s_trash(entry_id, deleted_at, payload) VALUES (?, ?, ?)",
+            (entry_id, record.created_at.isoformat(), record.model_dump_json()),
+        )
+        _delete_rows(tx, plan)
+        for line in plan.summary:
+            _audit(tx, f"{line.kind}.delete", line, record, actor)
+    entry = context.entry_dir(entry_id)
     for item in plan.items:
         source = context.live_path(item)
         if source.exists():
             target = trash_path(entry, item)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(source), str(target))
-    record = record.model_copy(update={"state": "removed"})
-    _write_record(entry, record)
     return record
 
 
@@ -494,11 +514,13 @@ def _restore_row(tx: RuntimeTransaction, row: StoredRow) -> None:
         raise RuntimeStateConflictError(f"{row.table} đã có dòng khác nội dung cho {parameters}")
 
 
-def restore_deletion(context: DeletionContext, entry: Path) -> DeletionRecord:
-    """Đưa scene đã gỡ trở lại: thư mục trước, dòng DB sau, để DB không trỏ tới file chưa có."""
-    record = load_record(entry)
-    if record.state == "restored":
-        raise DeletionRefusedError([f"{entry.name}: đã khôi phục trước đó"])
+def restore_deletion(context: DeletionContext, entry_id: str, actor: str | None = None) -> DeletionRecord:
+    """Đưa một mục thùng rác trở lại: thư mục trước, dòng DB sau, để DB không trỏ tới file chưa có.
+
+    Deployment có kho file thì file thiếu trên máy này không phải lỗi: artifact được tải lại từ kho khi cần.
+    """
+    record = get_trash_entry(context.database, entry_id)
+    entry = context.entry_dir(entry_id)
     moves: list[tuple[Path, Path]] = []
     problems: list[str] = []
     for item in record.plan.items:
@@ -507,7 +529,7 @@ def restore_deletion(context: DeletionContext, entry: Path) -> DeletionRecord:
             problems.append(f"{item.kind}/{item.name}: vị trí đang dùng đã có dữ liệu khác")
         elif source.exists():
             moves.append((source, target))
-        elif not target.exists():
+        elif not target.exists() and context.resolver.remote is None:
             problems.append(f"{item.kind}/{item.name}: không còn trong thùng rác lẫn vị trí đang dùng")
     if problems:
         raise DeletionRefusedError(problems)
@@ -515,37 +537,75 @@ def restore_deletion(context: DeletionContext, entry: Path) -> DeletionRecord:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(source), str(target))
     with context.database.transaction(write=True) as tx:
+        _take_entry(tx, record)
         for table in _TABLE_COLUMNS:
             for row in (row for row in record.plan.rows if row.table == table):
                 _restore_row(tx, row)
         for unlink in record.plan.upload_unlinks:
             _relink_upload(tx, unlink)
         for line in record.plan.summary:
-            _audit(tx, f"{line.kind}.restore", line, entry.name)
-    record = record.model_copy(update={"state": "restored"})
-    _write_record(entry, record)
+            _audit(tx, f"{line.kind}.restore", line, record, actor)
+    shutil.rmtree(entry, ignore_errors=True)
     return record
 
 
 @dataclass(frozen=True)
 class PurgeResult:
-    """Những gì một lần purge đã xoá hẳn."""
+    """Những gì một lần xoá hẳn đã xoá."""
 
     local_bytes: int
     remote_objects: int
 
 
-def purge_deletion(entry: Path, remote: ArtifactRemote | None = None) -> PurgeResult:
-    """Xoá hẳn một lần gỡ: object trên kho file trước (nếu deployment có), thư mục thùng rác sau.
+def purge_deletion(context: DeletionContext, entry_id: str, actor: str | None = None) -> PurgeResult:
+    """Xoá hẳn một mục thùng rác, không khôi phục được: kho file (nếu có) → thư mục trên máy → dòng thùng rác.
 
-    Xoá kho file trước để nếu dừng giữa chừng thì thư mục thùng rác vẫn còn và chạy lại purge là xong phần còn lại.
+    Dòng thùng rác bị xoá sau cùng, nên dừng giữa chừng thì mục vẫn còn trong thùng rác và xoá lại là xong phần còn lại.
     """
-    record = load_record(entry)
-    if record.state == "planned":
-        raise DeletionRefusedError([f"{entry.name}: lần gỡ chưa hoàn tất; chạy restore rồi gỡ lại"])
+    record = get_trash_entry(context.database, entry_id)
+    remote = context.resolver.remote
     removed = 0
-    if remote is not None and record.state == "removed":
+    if remote is not None:
         removed = sum(remote.delete_tree(f"jobs/{_safe(name)}") for name in record.plan.remote_namespaces)
+    entry = context.entry_dir(entry_id)
     size = _tree_size([entry])
-    shutil.rmtree(entry)
+    shutil.rmtree(entry, ignore_errors=True)
+    with context.database.transaction(write=True) as tx:
+        _take_entry(tx, record)
+        for line in record.plan.summary:
+            _audit(tx, f"{line.kind}.purge", line, record, actor)
     return PurgeResult(local_bytes=size, remote_objects=removed)
+
+
+def import_legacy_entry(context: DeletionContext, directory: Path) -> DeletionRecord:
+    """Đưa một lần gỡ của phiên bản trước (thư mục có `deletion_record.json`) vào thùng rác hiện tại.
+
+    Sau đó mục này khôi phục/xoá hẳn như mọi mục khác. Chỉ nhận lần gỡ đã hoàn tất.
+    """
+    path = directory / RECORD_NAME
+    if not path.is_file():
+        raise DeletionRefusedError([f"{directory.name}: không phải thư mục của một lần gỡ (thiếu {RECORD_NAME})"])
+    record = DeletionRecord.model_validate_json(path.read_text(encoding="utf-8"))
+    if record.entry_id != directory.name or record.state != "removed":
+        raise DeletionRefusedError([f"{directory.name}: bản ghi không khớp thư mục hoặc lần gỡ chưa hoàn tất"])
+    record = record.model_copy(update={"plan": _with_namespaces(record.plan)})
+    target = context.entry_dir(record.entry_id)
+    if directory.resolve() != target.resolve():
+        if target.exists():
+            raise DeletionRefusedError([f"{record.entry_id}: thùng rác đã có thư mục cùng tên"])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(directory), str(target))
+    with context.database.transaction(write=True) as tx:
+        tx.execute(
+            "INSERT INTO r2s_trash(entry_id, deleted_at, payload) VALUES (?, ?, ?)",
+            (record.entry_id, record.created_at.isoformat(), record.model_dump_json()),
+        )
+    (target / RECORD_NAME).unlink(missing_ok=True)
+    return record
+
+
+def _with_namespaces(plan: DeletionPlan) -> DeletionPlan:
+    """Bản ghi cũ chưa có danh sách namespace cho kho file: suy từ các mục artifact đã dời."""
+    if plan.remote_namespaces:
+        return plan
+    return plan.model_copy(update={"remote_namespaces": [item.name for item in plan.items if item.kind == "artifact"]})

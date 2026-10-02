@@ -110,6 +110,12 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
             "CREATE INDEX r2s_scene_requests_by_status ON r2s_scene_requests(status)",
         ),
     ),
+    (
+        # Thùng rác scene: bản ghi của mỗi lần gỡ (dòng DB đã gỡ + namespace file) để khôi phục hoặc xoá hẳn.
+        # Nằm trong DB vì đĩa của API trên cloud không bền; file trên kho S3/R2 chỉ bị xoá khi xoá hẳn.
+        6,
+        ("CREATE TABLE r2s_trash (entry_id TEXT PRIMARY KEY, deleted_at TEXT NOT NULL, payload TEXT NOT NULL)",),
+    ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 

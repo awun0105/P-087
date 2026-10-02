@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,7 +21,9 @@ from src.services.orchestration.projects.deletion import (
     DeletionRefusedError,
     DeletionRequest,
     apply_deletion,
-    load_record,
+    get_trash_entry,
+    import_legacy_entry,
+    list_trash,
     plan_deletion,
     purge_deletion,
     restore_deletion,
@@ -74,7 +77,9 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         registry=registry,
         uploads=VideoUploadService(database, registry.runtime_resolver, 8 * 1024 * 1024),
         imports=ImportService(database, registry.runtime_resolver, tmp_path / "workers" / "imports"),
-        context=DeletionContext(database, registry.runtime_resolver, tmp_path / "workers", tmp_path / "rerun"),
+        context=DeletionContext(
+            database, registry.runtime_resolver, tmp_path / "workers", tmp_path / "rerun", tmp_path / "trash"
+        ),
         trash=tmp_path / "trash",
     )
 
@@ -129,9 +134,13 @@ def _files(world: SimpleNamespace) -> dict[str, str]:
     return found
 
 
-def _delete(world: SimpleNamespace, **ids: list[str] | bool) -> Path:
-    record = apply_deletion(world.context, DeletionRequest(**ids), world.trash)
-    return world.trash / record.entry_id
+def _delete(world: SimpleNamespace, **ids: list[str] | bool) -> str:
+    """Gỡ và trả entry_id của mục thùng rác vừa tạo."""
+    return apply_deletion(world.context, DeletionRequest(**ids)).entry_id
+
+
+def _in_trash(world: SimpleNamespace) -> list[str]:
+    return [record.entry_id for record in list_trash(world.database)]
 
 
 def _refused(world: SimpleNamespace, match: str, **ids: list[str] | bool) -> None:
@@ -140,7 +149,7 @@ def _refused(world: SimpleNamespace, match: str, **ids: list[str] | bool) -> Non
     with pytest.raises(DeletionRefusedError, match=match):
         _delete(world, **ids)
     assert (_rows(world), _files(world)) == (rows, files)
-    assert not world.trash.exists() or not list(world.trash.iterdir())
+    assert _in_trash(world) == [] and (not world.trash.exists() or not list(world.trash.iterdir()))
 
 
 def test_plan_lists_what_would_go_and_changes_nothing(world: SimpleNamespace) -> None:
@@ -180,12 +189,13 @@ def test_delete_removes_the_scene_everywhere_and_leaves_other_scenes_alone(world
     assert {name: digest for name, digest in _files(world).items() if name in kept_files} == kept_files
     assert world.registry.get_job(other_job).status == JobStatus.CANCELLED
 
-    assert load_record(entry).state == "removed"
+    record = get_trash_entry(world.database, entry)
+    assert record.deleted_by is None and [line.name for line in record.plan.summary][0] == "Gỡ"
     for moved in (f"artifact/{job_id}", f"artifact/{project_id}", f"worker/{job_id}", f"rerun/{job_id}.rrd"):
-        assert (entry / moved).exists()
+        assert (world.trash / entry / moved).exists()
     audit = AuthService(world.database).recent_audit()
     assert {(row.action, row.target, row.user_id) for row in audit} >= {("scene.delete", project_id, None)}
-    assert all(row.details["trash_entry"] == entry.name for row in audit if row.action.endswith(".delete"))
+    assert all(row.details["trash_entry"] == entry for row in audit if row.action.endswith(".delete"))
 
 
 def test_shared_upload_is_kept_until_its_last_scene_goes(world: SimpleNamespace) -> None:
@@ -216,15 +226,17 @@ def test_restore_brings_back_exactly_what_was_removed(world: SimpleNamespace) ->
 
     entry = _delete(world, project_ids=[project_id, own_project])
     assert _rows(world) != rows and _files(world) != files
-    record = restore_deletion(world.context, entry)
+    restore_deletion(world.context, entry, "user-1")
 
-    assert record.state == "restored" and load_record(entry).state == "restored"
     assert (_rows(world), _files(world)) == (rows, files)
     assert world.registry.get_job(job_id).status == JobStatus.CANCELLED
-    assert [path.name for path in entry.rglob("*") if path.is_file()] == [RECORD_NAME]
+    assert _in_trash(world) == [] and not (world.trash / entry).exists()
     actions = [row.action for row in AuthService(world.database).recent_audit()]
     assert actions.count("scene.restore") == 2 and actions.count("upload.restore") == 1
-    with pytest.raises(DeletionRefusedError, match="đã khôi phục"):
+    assert {row.user_id for row in AuthService(world.database).recent_audit() if row.action == "scene.restore"} == {
+        "user-1"
+    }
+    with pytest.raises(DeletionRefusedError, match="không có trong thùng rác"):
         restore_deletion(world.context, entry)
 
 
@@ -366,7 +378,7 @@ def test_remote_file_store_objects_survive_delete_and_go_on_purge(world: SimpleN
         entry = _delete(world, project_ids=[project_id])
         assert set(store.objects) == before  # gỡ chưa đụng kho file: restore không phải tải lại
 
-        result = purge_deletion(entry, world.context.resolver.remote)
+        result = purge_deletion(world.context, entry)
     finally:
         world.context.resolver.remote = None
 
@@ -376,20 +388,22 @@ def test_remote_file_store_objects_survive_delete_and_go_on_purge(world: SimpleN
     assert world.registry.get_job(kept_job).project_id == kept_project
 
 
-def test_restored_deletion_never_removes_remote_objects(world: SimpleNamespace) -> None:
+def test_restore_on_a_remote_deployment_works_without_the_local_cache(world: SimpleNamespace) -> None:
+    """Đĩa của API trên cloud không bền: thư mục thùng rác mất thì file vẫn nằm trên kho, khôi phục vẫn phải được."""
     project_id, job_id = _scene(world, _upload(world), "Khôi phục trên R2")
     store = MemoryObjectStore()
     world.context.resolver.remote = ArtifactRemote(store)
     try:
-        world.context.resolver.sync_up(job_id)
+        for namespace in (project_id, job_id):
+            world.context.resolver.sync_up(namespace)
         before = set(store.objects)
         entry = _delete(world, project_ids=[project_id])
+        shutil.rmtree(world.trash / entry)
         restore_deletion(world.context, entry)
-        result = purge_deletion(entry, world.context.resolver.remote)
+        assert set(store.objects) == before
+        assert world.registry.get_job(job_id).job_id == job_id
     finally:
         world.context.resolver.remote = None
-    assert set(store.objects) == before and result.remote_objects == 0
-    assert world.registry.get_job(job_id).job_id == job_id
 
 
 def test_failed_transaction_leaves_no_trace(world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -404,7 +418,7 @@ def test_failed_transaction_leaves_no_trace(world: SimpleNamespace, monkeypatch:
         _delete(world, project_ids=[project_id])
 
     assert (_rows(world), _files(world)) == (rows, files)
-    assert list(world.trash.iterdir()) == []
+    assert _in_trash(world) == [] and not world.trash.exists()
 
 
 def test_delete_interrupted_while_moving_files_can_be_restored(
@@ -426,12 +440,9 @@ def test_delete_interrupted_while_moving_files_can_be_restored(
         with pytest.raises(OSError, match="đĩa lỗi"):
             _delete(world, project_ids=[project_id])
 
-    (entry,) = world.trash.iterdir()
-    assert load_record(entry).state == "planned"
+    (entry,) = _in_trash(world)
     with pytest.raises(JobNotFoundError):
         world.registry.get_job(job_id)
-    with pytest.raises(DeletionRefusedError, match="chưa hoàn tất"):
-        purge_deletion(entry)
 
     restore_deletion(world.context, entry)
 
@@ -444,45 +455,70 @@ def test_restore_never_overwrites_data_in_the_live_location(world: SimpleNamespa
     occupied = world.root / "artifacts" / "jobs" / job_id
     occupied.mkdir(parents=True)
     (occupied / "other.txt").write_text("khác")
-    trashed = sorted(str(path.relative_to(entry)) for path in entry.rglob("*"))
+    folder = world.trash / entry
+    trashed = sorted(str(path.relative_to(folder)) for path in folder.rglob("*"))
 
     with pytest.raises(DeletionRefusedError, match="đã có dữ liệu khác"):
         restore_deletion(world.context, entry)
 
-    assert sorted(str(path.relative_to(entry)) for path in entry.rglob("*")) == trashed
-    assert world.registry.list_projects() == []
+    assert sorted(str(path.relative_to(folder)) for path in folder.rglob("*")) == trashed
+    assert world.registry.list_projects() == [] and _in_trash(world) == [entry]
     assert (occupied / "other.txt").read_text() == "khác"
 
 
-def test_purge_only_removes_a_finished_trash_entry(world: SimpleNamespace) -> None:
+def test_purge_removes_the_entry_for_good_and_nothing_else(world: SimpleNamespace) -> None:
     project_id, _ = _scene(world, _upload(world), "Xoá hẳn")
     kept_project, kept_job = _scene(world, _upload(world, "keep.mp4"), "Giữ")
+    other = _delete(world, project_ids=[kept_project])
     entry = _delete(world, project_ids=[project_id])
-    live = _files(world)
-    stranger = world.root / "not-a-trash-entry"
-    stranger.mkdir()
-    (stranger / "data.txt").write_text("đừng xoá")
+    rows = _rows(world)
 
-    with pytest.raises(DeletionRefusedError, match="không phải thư mục của một lần gỡ"):
-        purge_deletion(stranger)
-    assert purge_deletion(entry).local_bytes > 0
+    result = purge_deletion(world.context, entry, "user-9")
 
-    assert not entry.exists() and (stranger / "data.txt").is_file()
-    assert _files(world) == live
+    assert result.local_bytes > 0 and result.remote_objects == 0
+    assert not (world.trash / entry).exists() and _in_trash(world) == [other]
+    assert _rows(world) == rows
+    with pytest.raises(DeletionRefusedError, match="không có trong thùng rác"):
+        restore_deletion(world.context, entry)
+    with pytest.raises(DeletionRefusedError, match="không có trong thùng rác"):
+        purge_deletion(world.context, entry)
+    audit = AuthService(world.database).recent_audit()
+    assert ("scene.purge", project_id, "user-9") in {(row.action, row.target, row.user_id) for row in audit}
+    restore_deletion(world.context, other)
     assert world.registry.get_job(kept_job).project_id == kept_project
 
 
-def test_record_from_another_entry_is_not_accepted(world: SimpleNamespace) -> None:
-    project_id, _ = _scene(world, _upload(world), "Sai thư mục")
+def test_entry_ids_cannot_escape_the_trash_folder(world: SimpleNamespace) -> None:
+    with pytest.raises(DeletionRefusedError):
+        purge_deletion(world.context, "../artifacts")
+    with pytest.raises(DeletionRefusedError):
+        restore_deletion(world.context, "../artifacts")
+
+
+def test_legacy_file_based_entry_can_be_imported_then_restored(world: SimpleNamespace) -> None:
+    """Lần gỡ của phiên bản trước giữ bản ghi dạng file trong thư mục; nhập vào thì dùng như mục thường."""
+    project_id, job_id = _scene(world, _upload(world), "Kiểu cũ")
+    rows, files = _rows(world), _files(world)
     entry = _delete(world, project_ids=[project_id])
-    renamed = entry.with_name("renamed")
-    entry.rename(renamed)
-    with pytest.raises(DeletionRefusedError, match="thuộc lần gỡ khác"):
-        purge_deletion(renamed)
-    assert (renamed / RECORD_NAME).is_file()
+    record = get_trash_entry(world.database, entry)
+    legacy = world.root / "elsewhere" / entry
+    legacy.parent.mkdir()
+    (world.trash / entry).rename(legacy)
+    old_plan = record.plan.model_copy(update={"remote_namespaces": []})
+    (legacy / RECORD_NAME).write_text(record.model_copy(update={"plan": old_plan}).model_dump_json())
+    with world.database.transaction(write=True) as tx:
+        tx.execute("DELETE FROM r2s_trash")
+
+    imported = import_legacy_entry(world.context, legacy)
+
+    assert _in_trash(world) == [entry] and job_id in imported.plan.remote_namespaces
+    with pytest.raises(DeletionRefusedError, match="thiếu"):
+        import_legacy_entry(world.context, world.root / "elsewhere")
+    restore_deletion(world.context, entry)
+    assert (_rows(world), _files(world)) == (rows, files)
 
 
-def test_cli_plans_deletes_restores_and_purges(
+def test_cli_plans_deletes_lists_restores_and_purges(
     world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     project_id, job_id = _scene(world, _upload(world), "Qua CLI")
@@ -493,6 +529,7 @@ def test_cli_plans_deletes_restores_and_purges(
         artifact_s3_bucket=None,
         product_worker_root=world.root / "workers",
         product_rerun_recording_dir=world.root / "rerun",
+        product_trash_root=None,
     )
     monkeypatch.setattr(delete_cli, "get_settings", lambda: settings)
     rows, files = _rows(world), _files(world)
@@ -506,14 +543,18 @@ def test_cli_plans_deletes_restores_and_purges(
     assert (_rows(world), _files(world)) == (rows, files)
 
     assert delete_cli.main(["delete", "--project", project_id]) == 0
-    output = capsys.readouterr().out
-    (entry,) = (world.root / "trash").iterdir()
-    assert "Đã gỡ: 1 scene, 1 upload" in output and str(entry) in output
+    (entry,) = _in_trash(world)
+    assert "Đã gỡ: 1 scene, 1 upload" in capsys.readouterr().out
+    assert (world.root / "trash" / entry).is_dir()
     with pytest.raises(JobNotFoundError):
         world.registry.get_job(job_id)
+    assert delete_cli.main(["list"]) == 0
+    assert entry in capsys.readouterr().out
 
-    assert delete_cli.main(["restore", "--entry", str(entry)]) == 0
+    assert delete_cli.main(["restore", "--entry", entry]) == 0
     assert (_rows(world), _files(world)) == (rows, files)
-    assert delete_cli.main(["purge", "--entry", str(entry)]) == 0
-    assert not entry.exists()
-    assert delete_cli.main(["purge", "--entry", str(entry)]) == 1
+    assert delete_cli.main(["delete", "--project", project_id]) == 0
+    (entry,) = _in_trash(world)
+    assert delete_cli.main(["purge", "--entry", entry]) == 0
+    assert _in_trash(world) == []
+    assert delete_cli.main(["purge", "--entry", entry]) == 1
