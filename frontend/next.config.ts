@@ -24,8 +24,8 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       // Trang "Kịch bản demo" đã gộp vào Scene mới (phần video mẫu).
-      { source: "/demo", destination: "/new", permanent: false },
-      { source: "/demo/:path*", destination: "/new", permanent: false },
+      { source: "/demo", destination: "/new/try-demo", permanent: false },
+      { source: "/demo/:path*", destination: "/new/try-demo", permanent: false },
       // Landing từng ở `/landing`; nay là trang đầu `/` (owner quyết 01/10/2026). Giữ link cũ còn dùng được.
       { source: "/landing", destination: "/", permanent: false },
       ...["/legacy/:path*", "/projects/:path*", "/jobs/:path+", "/viewer/:path*", "/legacy", "/projects", "/viewer"].map(

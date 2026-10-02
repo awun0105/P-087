@@ -45,7 +45,7 @@ export function SampleScene({ sampleId }: { sampleId: string }) {
   return (
     <SceneWorkspace
       title={demo.title}
-      backHref={`/new?sample=${encodeURIComponent(sampleId)}`}
+      backHref={`/new/try-demo?sample=${encodeURIComponent(sampleId)}`}
       contentUrl={sampleFileUrl(sampleId, demo.splat.name)}
       filename={demo.splat.name}
       badges={<Badge tone="ember">Video mẫu · xử lý sẵn</Badge>}

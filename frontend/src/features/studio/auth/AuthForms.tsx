@@ -95,7 +95,7 @@ function Shell({ title, lead, children }: { title: string; lead: string; childre
           <div className="mt-8">{children}</div>
           <p className="mt-8 text-sm text-ink-muted">
             Chưa có tài khoản?{" "}
-            <Link href="/new?source=sample" className="font-medium text-ember-strong underline-offset-4 hover:underline">
+            <Link href="/new/try-demo" className="font-medium text-ember-strong underline-offset-4 hover:underline">
               Thử với video mẫu
             </Link>{" "}
             — không cần đăng nhập.

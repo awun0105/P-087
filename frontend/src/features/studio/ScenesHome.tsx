@@ -2,7 +2,7 @@
 
 import { errorMessage } from "@/lib/ui-error";
 
-import { ArrowRight, Clapperboard, Film, LayoutGrid, List, LogIn, Play, Plus, RefreshCw, Search } from "lucide-react";
+import { ArrowRight, Film, LayoutGrid, List, LogIn, Plus, RefreshCw, Search } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useCallback, useMemo, useState } from "react";
 
@@ -14,32 +14,29 @@ import { useAuth } from "@/features/studio/AuthProvider";
 import { STATUS_FILTERS, sceneStatus, type SceneStatusGroup } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
 import { canEdit } from "@/lib/api/auth";
-import { listImports, listSamples, listScenes, moveImportToTrash, moveSceneToTrash, sampleFileUrl } from "@/lib/api/studio";
+import { listImports, listScenes, moveImportToTrash, moveSceneToTrash } from "@/lib/api/studio";
 import { MoveToTrashButton } from "@/features/studio/trash/MoveToTrashButton";
 import { cn } from "@/lib/cn";
-import type { ImportedScene, SampleSummary, SceneSummary } from "@/lib/contracts/studio";
+import type { ImportedScene, SceneSummary } from "@/lib/contracts/studio";
 import { useListState, pageSlice, ListPagination, SortControl } from "@/features/studio/ListControls";
 import { formatBytes } from "@/lib/format";
 
 const DATE = new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeStyle: "short" });
 
-/** Màn hình Scenes: video mẫu + danh sách scene của người dùng (dữ liệu từ backend). */
+/** Màn hình Scenes: danh sách scene của người dùng (dữ liệu từ backend). Video mẫu nằm ở `/new/try-demo`. */
 export function ScenesHome() {
   const [scenes, setScenes] = useState<SceneSummary[] | null>(null);
   const [imports, setImports] = useState<ImportedScene[]>([]);
-  const [samples, setSamples] = useState<SampleSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [sampleError, setSampleError] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
 
   const { me } = useAuth();
   const signedIn = canEdit(me);
 
   const load = useCallback(async () => {
-    // Khách không có quyền xem scene của nhóm: chỉ tải video mẫu, không poll lỗi 401.
-    const [sceneResult, sampleResult, importResult] = await Promise.all([
+    // Khách không có quyền xem scene của nhóm: không gọi API, không poll lỗi 401.
+    const [sceneResult, importResult] = await Promise.all([
       signedIn ? listScenes() : Promise.resolve(null),
-      listSamples(),
       signedIn ? listImports() : Promise.resolve(null),
     ]);
     if (importResult?.ok) { setImports(importResult.data.imports); setImportError(null); }
@@ -50,8 +47,6 @@ export function ScenesHome() {
     } else if (sceneResult) {
       setError(errorMessage(sceneResult.error));
     }
-    if (sampleResult.ok) { setSamples(sampleResult.data.samples); setSampleError(null); }
-    else setSampleError(errorMessage(sampleResult.error));
   }, [signedIn]);
 
   const { query, setQuery, filter, setFilter, view, setView, sort, setSort, params, update, clear } = useListState();
@@ -67,8 +62,6 @@ export function ScenesHome() {
   const pagination = pageSlice(shown, params.get("page"), 12);
   const filteredImports = imports.filter((item) => item.name.toLowerCase().includes(query.trim().toLowerCase())).sort((a, b) => sort === "name" ? a.name.localeCompare(b.name, "vi") : Date.parse(b.created_at) - Date.parse(a.created_at));
   const importPage = pageSlice(filteredImports, params.get("importsPage"), 12);
-  const filteredSamples = samples.filter((item) => item.title.toLowerCase().includes(query.trim().toLowerCase()));
-  const samplePage = pageSlice(filteredSamples, params.get("samplesPage"), 12);
   const anyActive = scenes?.some((scene) => sceneStatus(scene.latest_job, scene.preview_ready).active) ?? true;
   usePolling(load, signedIn && anyActive ? 4000 : 20000, true);
   const continuing = (scenes ?? []).filter((scene) => {
@@ -88,8 +81,12 @@ export function ScenesHome() {
         <Link href="/new" className={buttonVariants({ size: "lg" })}><Plus aria-hidden /> Scene mới</Link>
       </div>
 
-      {!signedIn && samples.length > 0 && <SamplesHero samples={samplePage.items} />}
-      {!signedIn && sampleError && <Notice tone="rust" className="mt-6">Không tải được mẫu: {sampleError}. Trang sẽ thử lại.</Notice>}
+      {!signedIn && me !== null && (
+        <Notice className="mt-8">
+          Scene của nhóm chỉ hiện sau khi đăng nhập. Chưa có tài khoản vẫn xem được kết quả đã xử lý sẵn ở{" "}
+          <Link href="/new/try-demo" className="font-medium text-ember-strong hover:underline">Thử mẫu</Link>.
+        </Notice>
+      )}
 
       {signedIn && continuing.length > 0 && (
         <section aria-labelledby="continue-heading" className="mt-8 rounded-2xl border border-line bg-paper-raised p-5">
@@ -251,55 +248,7 @@ export function ScenesHome() {
           {filteredImports.length === 0 && <p className="text-sm text-ink-muted">Không có scene import khớp tên tìm kiếm.</p>}
         </section>
       )}
-      {signedIn && samples.length > 0 && <SamplesHero samples={samplePage.items} />}
-      {samples.length > 0 && filteredSamples.length === 0 && <p className="mt-4 text-sm text-ink-muted">Không có mẫu khớp tìm kiếm.</p>}
-      {samples.length > 0 && <ListPagination {...samplePage} total={filteredSamples.length} onChange={(page) => update({ samplesPage: String(page) })} />}
-      {signedIn && sampleError && <Notice tone="rust" className="mt-6">Không tải được mẫu: {sampleError}. Trang sẽ thử lại.</Notice>}
     </main>
-  );
-}
-
-/** Lối vào video mẫu: mở thẳng bước video mẫu trong trang Scene mới. */
-function SamplesHero({ samples }: { samples: SampleSummary[] }) {
-  return (
-    <section aria-labelledby="samples-home-heading" className="mt-10">
-      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 id="samples-home-heading" className="label-tech text-ink-muted">
-          Thử với video mẫu
-        </h2>
-        <p className="text-sm text-ink-subtle">Kết quả đã xử lý sẵn · phát lại để khám phá · không tạo job mới.</p>
-      </div>
-      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {samples.map((sample) => (
-          <li key={sample.sample_id}>
-            <Link
-              href={`/new?sample=${encodeURIComponent(sample.sample_id)}`}
-              className="group flex h-full flex-col overflow-hidden rounded-2xl border border-line bg-paper-raised transition-[border-color,box-shadow] duration-200 hover:border-line-strong hover:shadow-md focus-visible:ring-3 focus-visible:ring-ember/40 focus-visible:outline-none"
-            >
-              <div className="relative aspect-video bg-viewport">
-                {sample.cover && (
-                  // eslint-disable-next-line @next/next/no-img-element -- ảnh mẫu từ API, kích thước không cố định
-                  <img src={sampleFileUrl(sample.sample_id, sample.cover)} alt="" className="size-full object-cover opacity-90" loading="lazy" decoding="async" />
-                )}
-                <Badge tone="ember" className="absolute top-3 left-3 bg-paper-raised/95">
-                  <Clapperboard aria-hidden />
-                  Video mẫu
-                </Badge>
-              </div>
-              <div className="flex flex-1 items-center justify-between gap-3 p-4">
-                <div className="min-w-0">
-                  <p className="label-tech text-ink-muted">
-                    {sample.source.dataset} · {sample.source.sequence}
-                  </p>
-                  <p className="mt-1 truncate font-semibold text-ink">{sample.title}</p>
-                </div>
-                <Play className="size-4 shrink-0 text-ember-strong transition-transform duration-200 group-hover:translate-x-0.5" aria-hidden />
-              </div>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
   );
 }
 

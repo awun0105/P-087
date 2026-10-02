@@ -51,12 +51,14 @@ Vấn đề UX chính là khoảng cách giữa Studio hiện tại và quy trì
 | Surface hiện có | Entry / nội dung / hành vi quan sát được | Giới hạn cần giữ rõ |
 | --- | --- | --- |
 | `/` — Scenes | Video mẫu, scene của nhóm, trạng thái, CTA “Scene mới” | Không có dashboard KPI vận hành hay cây project nhiều tầng |
-| `/new` | Upload hoặc dùng file đã tải; đặt tên scene; khai báo quyền/dữ liệu; thông số xử lý | Video tạo project + job reconstruction; PLY/ZIP có nhánh `Mở scene 3DGS` riêng |
+| `/new` | Trang chọn cách bắt đầu, dẫn tới ba trang riêng (**owner yêu cầu 02/10/2026**; link cũ `/new?source=…` tự chuyển) | Không có form ở trang này |
+| `/new/import-video` | Upload hoặc dùng video đã tải; đặt tên scene; khai báo quyền/dữ liệu; thông số xử lý | Video tạo project + job reconstruction |
+| `/new/import-scene` | Upload hoặc dùng file PLY/ZIP 3DGS đã tải; đặt tên | Tạo scene import, không chạy job GPU |
 | `/imports/[importId]` | Theo dõi nén PLY/ZIP thành bản xem SOG; READY mở workspace, FAILED hiện lỗi | Chỉ xem/chỉnh Gaussian, chưa xác nhận tỉ lệ/collision. ZIP được nhận diện có COLMAP cũng chưa đi tiếp đường metric trong UI import này |
 | `/scenes/[jobId]` | Timeline, chờ worker, thời gian chạy, hủy/thử lại; mở workspace khi preview xuất hiện | Có preview không chứng minh toàn bộ pipeline đã hoàn thành |
 | Xác nhận tỉ lệ | Chọn A/B, C/D và ba điểm sàn; xem trước rồi xác nhận | C/D kiểm độc lập; đổi điểm/số đo làm preview cũ mất hiệu lực |
 | Workspace 3DGS | Editor nhúng; chỉ dẫn File → Export PLY/SOG; fallback chỉ xem | Edit Gaussian cục bộ chưa tương đương lưu SceneObject revision |
-| `/new?sample=…`, `/samples/[sampleId]/scene` | Cấu hình mẫu chỉ đọc; phát lại tiến trình đã ghi; có bỏ qua để mở scene | Không phải job GPU mới, không dùng thời gian replay làm ETA |
+| `/new/try-demo`, `/new/try-demo?sample=…`, `/samples/[sampleId]/scene` | Cấu hình mẫu chỉ đọc; phát lại tiến trình đã ghi; có bỏ qua để mở scene | Không phải job GPU mới, không dùng thời gian replay làm ETA |
 | `/login`, `/register`, `/team` | Đăng nhập, mã mời; Reviewer quản lý nhóm | Không có đăng nhập bằng cách chọn role tùy ý |
 | `/projects/…`, `/jobs/…/{viewer,validation,review,release}` | UI legacy có project/job, viewer và báo cáo — **đã xoá 02/10/2026** (D-10) | URL cũ chuyển hướng về `/overview`; phần validation/duyệt/phát hành nằm ở tab `Kiểm tra & duyệt` và `Kết quả` của scene |
 
@@ -187,7 +189,7 @@ không bịa profile. Backend profile/password không thuộc đợt frontend n�
 | Trang / phần donor | Quyết định | Đích trong Real2Sim và cách xử lý |
 | --- | --- | --- |
 | Dashboard shell: sidebar, header, content area | **ADAPT** | Giữ sidebar thu gọn và khung nội dung; header đổi thành breadcrumb, trạng thái và CTA theo ngữ cảnh; Studio ưu tiên viewport rộng |
-| Default dashboard | **ADAPT** | Thành Scenes hub: scene gần đây, chờ thao tác, chờ duyệt và video mẫu. Bỏ doanh thu, khách hàng, growth chart và số liệu mẫu |
+| Default dashboard | **ADAPT** | Thành Scenes hub: scene gần đây, chờ thao tác, chờ duyệt. Video mẫu chỉ còn ở `/new/try-demo` (owner 02/10/2026: bỏ khối “Thử với video mẫu” khỏi Scenes vì trùng). Bỏ doanh thu, khách hàng, growth chart và số liệu mẫu |
 | File Manager | **ADAPT** | Dùng grid/list và thumbnail cho Scenes; dùng danh sách file để chọn input đã tải và xem kết quả. Bỏ folder tùy ý, share link công khai, star/trash nếu chưa có product behavior |
 | Tasks | **ADAPT** | Thành Jobs: tên scene, stage, trạng thái, lần chạy, cập nhật gần nhất; lọc theo trạng thái. Không cho kéo đổi job status hay tạo task công việc |
 | Infrastructure | **ADAPT có chọn lọc** | Lấy phân nhóm trạng thái và thông tin chi tiết cho trang Tiến trình. Không tạo trang quản trị GPU/server, deploy hoặc billing |

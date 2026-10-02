@@ -61,7 +61,7 @@ const NAV = [
 const BARE_ROUTES = ["/login", "/register"];
 
 export function isActive(pathname: string, href: string): boolean {
-  if (href === "/scenes") return pathname === "/scenes" || pathname === "/new" || ["/scenes/", "/imports/", "/samples/"].some((route) => pathname.startsWith(route));
+  if (href === "/scenes") return pathname === "/scenes" || pathname === "/new" || pathname.startsWith("/new/") || ["/scenes/", "/imports/", "/samples/"].some((route) => pathname.startsWith(route));
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 

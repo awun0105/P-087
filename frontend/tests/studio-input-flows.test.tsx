@@ -9,7 +9,7 @@ import { VideoSetupStep } from "@/features/studio/VideoSetupStep";
 import { createImport, createSceneFromUpload, listSamples, listUploads, uploadVideo } from "@/lib/api/studio";
 import type { UploadRecord } from "@/lib/contracts/studio";
 
-const navigation = vi.hoisted(() => ({ push: vi.fn() }));
+const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => navigation, useSearchParams: () => new URLSearchParams() }));
 vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => ({ me: { auth_required: false, user: null } }) }));
 vi.mock("@/features/studio/useProcessingForm", () => ({ useProcessingForm: () => ({ options: null, values: null, evaluation: null, error: null, activePreset: null }) }));
@@ -45,18 +45,40 @@ describe("ba cửa vào", () => {
     screen.getAllByRole("checkbox").forEach((checkbox) => expect(checkbox).not.toBeChecked());
     expect(screen.getByLabelText("Tên scene")).toHaveValue("room");
   });
-  it("chỉ form đúng nhánh xuất hiện; thử mẫu không tạo job/import", async () => {
-    render(<NewSceneFlow />);
-    expect(screen.getByRole("button", { name: /Dựng từ video/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Mở 3DGS/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Thử mẫu/ }));
+  it("trang chọn dẫn tới ba trang riêng; mỗi trang chỉ có form của nhánh đó", async () => {
+    const chooser = render(<NewSceneFlow />);
+    expect(screen.getByRole("link", { name: /Dựng từ video/ })).toHaveAttribute("href", "/new/import-video");
+    expect(screen.getByRole("link", { name: /Mở 3DGS/ })).toHaveAttribute("href", "/new/import-scene");
+    expect(screen.getByRole("link", { name: /Thử mẫu/ })).toHaveAttribute("href", "/new/try-demo");
+    expect(screen.queryByLabelText(/Kéo video/)).toBeNull();
+    chooser.unmount();
+
+    const demo = render(<NewSceneFlow source="sample" />);
     expect(await screen.findByText("Chưa có video mẫu")).toBeInTheDocument();
     expect(screen.queryByLabelText(/Kéo video/)).toBeNull();
+    expect(screen.getByRole("link", { name: /Đổi cách bắt đầu/ })).toHaveAttribute("href", "/new");
     expect(createSceneFromUpload).not.toHaveBeenCalled();
     expect(createImport).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: /Đổi cách bắt đầu/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Mở 3DGS/ }));
+    demo.unmount();
+
+    const scene = render(<NewSceneFlow source="gaussian" />);
     expect(screen.getByLabelText(/Kéo file 3DGS/)).toHaveAttribute("accept", ".ply,.zip,application/zip");
+    expect(screen.queryByLabelText(/Kéo video/)).toBeNull();
+    scene.unmount();
+
+    render(<NewSceneFlow source="video" />);
+    expect(screen.getByLabelText(/Kéo video/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Kéo file 3DGS/)).toBeNull();
+  });
+
+  it("link cũ /new?source=… và /new?sample=… được chuyển sang trang mới, giữ tham số còn lại", async () => {
+    history.replaceState({}, "", "/new?source=video&step=setup&upload=video-1");
+    const first = render(<NewSceneFlow />);
+    await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith("/new/import-video?step=setup&upload=video-1"));
+    first.unmount();
+    history.replaceState({}, "", "/new?sample=aisle");
+    render(<NewSceneFlow />);
+    await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith("/new/try-demo?sample=aisle"));
   });
 
   it("import chỉ chọn 3DGS; lỗi giữ tên và gọi đúng API", async () => {
