@@ -40,6 +40,7 @@ from src.models.contracts.manifests import (
 )
 from src.services.orchestration.artifacts import ArtifactResolver
 from src.services.orchestration.benchmark import build_benchmark, publish_benchmark
+from src.services.orchestration.jobs.admission import ResourceAdmission, job_drivers
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import (
     ResolvedProcessing,
@@ -50,7 +51,10 @@ from src.services.orchestration.jobs.dispatch import (
 from src.services.orchestration.jobs.models import PreparedInputReceipt, TransitionRequest
 from src.services.orchestration.jobs.progress import awaiting_finalize, metric_confirmation_stage
 from src.services.orchestration.jobs.workspace import attempt_lease, cleanup_attempt_workspace, cleanup_finished_job
+from src.services.orchestration.processing import is_presets_file, load_presets
 from src.services.orchestration.processing.capability import latest as latest_capability
+from src.services.orchestration.processing.capability import measure_capacity
+from src.services.orchestration.processing.observed import load_usages
 from src.services.orchestration.processing.telemetry import (
     Outcome,
     ResourceContext,
@@ -104,6 +108,8 @@ class _Attempt:
     settings: Settings
     job: JobManifest
     workspace: Path
+    #: Một công cụ của attempt này lỗi trong lúc GPU/RAM gần cạn (suy luận từ số đo).
+    exhausted: bool = False
 
 
 class _StageProgress:
@@ -181,21 +187,23 @@ def _run_tool(
         outcome = "interrupted"  # Worker nhận SIGTERM/Ctrl+C: không phải lỗi của tool.
         raise
     finally:
-        _finish_resources(attempt, sampler, outcome, exit_code)
+        usage = _finish_resources(attempt, sampler, outcome, exit_code)
+        attempt.exhausted = attempt.exhausted or (usage is not None and usage.exhausted)
 
 
 def _finish_resources(
     attempt: _Attempt, sampler: ResourceSampler | None, outcome: Outcome, exit_code: int | None
-) -> None:
+) -> ResourceUsage | None:
     """Ghi bản ghi đo vào workspace rồi vào DB; lỗi ghi không che kết quả/lỗi chính của tool."""
     if sampler is None:
-        return
+        return None
     try:
         usage = sampler.finish(outcome, exit_code)
     except Exception as error:  # noqa: BLE001 - telemetry process boundary, preserve primary result/error
         logger.warning("Không ghi được resource telemetry cause=%s", type(error).__name__)
-        return
+        return None
     _persist_usage(attempt, usage)
+    return usage
 
 
 def _persist_usage(attempt: _Attempt, usage: ResourceUsage) -> None:
@@ -235,16 +243,63 @@ def _sampled(attempt: _Attempt, tool: str) -> Iterator[None]:
 def _resource_sampler(attempt: _Attempt, tool: str) -> ResourceSampler | None:
     """Best effort measurement boundary; probe lỗi không chặn dispatch hoặc đổi config."""
     try:
+        settings, registry = attempt.settings, attempt.registry
+        shared: bool | None = None
+        if registry.persistence is not None:
+            shared = ResourceAdmission(registry, settings).shares_gpu()
         context = ResourceContext(
             job_id=attempt.job.job_id,
             attempt_id=attempt.workspace.name,
             tool=tool,
             config_checksum=attempt.job.config_checksum,
             runtime_manifest_checksum=attempt.job.runtime_manifest_checksum,
+            params=job_drivers(registry, settings, attempt.job),
+            shared_gpu=shared,
         )
-        return ResourceSampler(context, workspace=attempt.workspace, worker_root=attempt.settings.product_worker_root)
+        ratio: float | None = None
+        path = settings.product_processing_config
+        if path is not None and is_presets_file(path):
+            ratio = load_presets(path)[0].resource_model.danger_ratio
+        return ResourceSampler(
+            context,
+            workspace=attempt.workspace,
+            worker_root=settings.product_worker_root,
+            exhaustion_ratio=ratio,
+            ram_total_gb=measure_capacity(settings.product_worker_root)["ram"],
+        )
     except Exception as error:  # noqa: BLE001 - measurement boundary must not change job execution
         logger.warning("Không tạo được resource sampler cause=%s", type(error).__name__)
+        return None
+
+
+def _requeue_if_exhausted(attempt: _Attempt) -> JobManifest | None:
+    """Job FAILED vì nhiều khả năng hết bộ nhớ: tự đưa về hàng đợi đúng một lần.
+
+    Lượt chạy lại được gate cho chạy một mình trên GPU (job đã có bản ghi `exhausted`). Lượt đó
+    mà vẫn hết bộ nhớ thì giữ FAILED: máy này không đủ cho cấu hình, chạy lại nữa chỉ lặp vô ích.
+    Đây là hệ thống tự sửa việc xếp lịch, không qua API retry nên không tính vào hạn mức người dùng.
+    """
+    persistence = attempt.registry.persistence
+    if not attempt.exhausted or persistence is None:
+        return None
+    try:
+        current = attempt.registry.get_job(attempt.job.job_id)
+        if current.status != JobStatus.FAILED:
+            return None
+        earlier = sum(
+            1 for usage in load_usages(persistence.database) if usage.job_id == current.job_id and usage.exhausted
+        )
+        if earlier > 1:
+            logger.warning("Job %s hết bộ nhớ cả khi chạy một mình; giữ FAILED", current.job_id)
+            return None
+        logger.warning("Job %s có dấu hiệu hết bộ nhớ; tự xếp lại để chạy một mình trên GPU", current.job_id)
+        return attempt.registry.transition_job(
+            current.job_id,
+            TransitionRequest(target_status=JobStatus.QUEUED),
+            expected_checksum=current.job_manifest_checksum,
+        )
+    except Exception as error:  # noqa: BLE001 - tự phục hồi là best effort; job vẫn FAILED đúng như đã ghi
+        logger.warning("Không tự xếp lại được job sau khi hết bộ nhớ cause=%s", type(error).__name__)
         return None
 
 
@@ -475,9 +530,11 @@ def run_prepared_job(job_id: str, frame_set_uri: str, *, expected_checksum: str 
     attempt, profile = _start_attempt(job_id, expected_checksum, StageId.CAMERA_POSE)
     try:
         with attempt_lease(attempt.workspace):
-            return _execute_preview(attempt, frames, profile)
+            job = _execute_preview(attempt, frames, profile)
+        return _requeue_if_exhausted(attempt) or job
     except BaseException as error:
         _record_runner_failure(attempt, error)
+        _requeue_if_exhausted(attempt)
         raise
 
 
@@ -493,9 +550,11 @@ def run_video_job(job_id: str, *, expected_checksum: str | None = None) -> JobMa
             frames = prepared_frame_reference(attempt.job)
             if frames is None:
                 raise ValueError("Prepare thành công nhưng thiếu frame set")
-            return _execute_preview(attempt, frames, profile)
+            job = _execute_preview(attempt, frames, profile)
+        return _requeue_if_exhausted(attempt) or job
     except BaseException as error:
         _record_runner_failure(attempt, error)
+        _requeue_if_exhausted(attempt)
         raise
 
 
@@ -622,9 +681,10 @@ def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> Jo
                 _cleanup_attempt_workspace(attempt)
             if completed.status == JobStatus.SUCCEEDED:
                 _cleanup_finished_job(attempt)
-            return completed
+        return _requeue_if_exhausted(attempt) or completed
     except BaseException as error:
         _record_runner_failure(attempt, error)
+        _requeue_if_exhausted(attempt)
         raise
 
 

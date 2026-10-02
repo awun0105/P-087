@@ -146,7 +146,7 @@ def _dispatch(
                     # Người dùng đã xác nhận tỉ lệ (job RUNNING, hoặc QUEUED khi retry): chạy
                     # tiếp REC-05/REC-10 trên cùng job; vẫn qua cổng privacy của project.
                     require_project_dispatch(registry.get_project(candidate.project_id))
-                    if admission is not None and not admission(candidate):
+                    if admission is not None and not admission(candidate, "finalize"):
                         continue
                     try:
                         finalize_runner(job_id, expected_checksum=candidate.job_manifest_checksum)

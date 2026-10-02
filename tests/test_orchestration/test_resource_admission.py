@@ -6,6 +6,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock
+from uuid import uuid4
 
 import pytest
 
@@ -18,6 +19,8 @@ from src.services.orchestration.jobs.progress import job_progress
 from src.services.orchestration.jobs.worker_cli import dispatch_next
 from src.services.orchestration.processing import build_job_config, job_config_reference, load_presets, preset_values
 from src.services.orchestration.processing.capability import GpuReading
+from src.services.orchestration.processing.observed import numeric_params
+from src.services.orchestration.processing.telemetry import ResourceUsage
 from src.services.orchestration.projects.models import JobCreateInput
 from src.services.orchestration.projects.registry import ProjectRegistry
 from tests.test_orchestration.test_metric_confirmation_record import _confirmation
@@ -52,7 +55,7 @@ def test_insufficient_or_unknown_resource_waits_without_claim_or_config_change(
     monkeypatch.setattr(
         admission,
         "measure_live_headroom",
-        lambda path: {"vram_free_gb": free, "ram_available_gb": 100.0, "disk_free_gb": 100.0},
+        lambda path: {"vram_free_gb": 100.0, "ram_available_gb": free, "disk_free_gb": 100.0},
     )
     config_path = registry.runtime_resolver.require(job_config_reference(job.job_id, job.config_checksum))
     original = config_path.read_bytes()
@@ -66,7 +69,7 @@ def test_insufficient_or_unknown_resource_waits_without_claim_or_config_change(
     assert registry.get_job(job.job_id) == job and config_path.read_bytes() == original
     assert registry.list_job_attempts(job.job_id) == events
     wait = resource_wait(gate.database, job)
-    assert wait is not None and wait.waiting_on == ["vram"]
+    assert wait is not None and wait.waiting_on == ["ram"]
     progress = job_progress(job, events, False, wait)
     assert progress.waiting_for == "resources" and progress.status == "QUEUED"
     assert all(stage.state == "pending" for stage in progress.stages if stage.stage_id != "ST-FRAME-EXTRACT")
@@ -76,7 +79,7 @@ def test_resource_recovery_automatically_dispatches_same_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     registry, job, gate = _queued(tmp_path)
-    current = {"vram_free_gb": 0.01, "ram_available_gb": 100.0, "disk_free_gb": 100.0}
+    current = {"vram_free_gb": 100.0, "ram_available_gb": 0.01, "disk_free_gb": 100.0}
     monkeypatch.setattr(admission, "measure_live_headroom", lambda path: current)
     assert not dispatch_next(registry, admission=gate)
     calls: list[str] = []
@@ -88,7 +91,7 @@ def test_resource_recovery_automatically_dispatches_same_config(
             job_id, TransitionRequest(target_status=JobStatus.RUNNING), expected_checksum=expected_checksum
         )
 
-    current["vram_free_gb"] = 100.0
+    current["ram_available_gb"] = 100.0
     assert dispatch_next(registry, runner=run, admission=gate)
     running = registry.get_job(job.job_id)
     assert calls == [job.job_id] and running.config_checksum == job.config_checksum
@@ -102,7 +105,7 @@ def test_cancelled_job_is_not_resumed_and_old_observation_is_ignored(
     monkeypatch.setattr(
         admission,
         "measure_live_headroom",
-        lambda path: {"vram_free_gb": 0.01, "ram_available_gb": 100.0, "disk_free_gb": 100.0},
+        lambda path: {"vram_free_gb": 100.0, "ram_available_gb": 0.01, "disk_free_gb": 100.0},
     )
     assert not dispatch_next(registry, admission=gate)
     cancelled = registry.transition_job(
@@ -136,7 +139,7 @@ def test_confirmed_job_waits_then_continues_finalize_without_changing_config(
     job = registry.transition_job(job.job_id, TransitionRequest(target_status=JobStatus.RUNNING))
     job = registry.record_stage_progress(job, StageId.METRIC_CANONICALIZE)
     job = registry.record_metric_confirmation(job, _confirmation(registry, job.job_id))
-    current = {"vram_free_gb": 0.01, "ram_available_gb": 100.0, "disk_free_gb": 100.0}
+    current = {"vram_free_gb": 100.0, "ram_available_gb": 0.01, "disk_free_gb": 100.0}
     monkeypatch.setattr(admission, "measure_live_headroom", lambda path: current)
     calls: list[str] = []
 
@@ -151,7 +154,7 @@ def test_confirmed_job_waits_then_continues_finalize_without_changing_config(
     assert progress.waiting_for == "resources" and not calls
     assert progress.stages[-3].state == "succeeded" and progress.stages[-2].state == "pending"
     assert registry.get_job(job.job_id) == job
-    current["vram_free_gb"] = 100.0
+    current["ram_available_gb"] = 100.0
     assert dispatch_next(registry, finalize_runner=finalize, admission=gate)
     assert calls == [job.job_id] and registry.get_job(job.job_id).config_checksum == job.config_checksum
 
@@ -168,8 +171,8 @@ async def test_progress_api_reads_durable_wait_snapshot(tmp_path: Path, monkeypa
         admission,
         "measure_live_headroom",
         lambda path: {
-            "vram_free_gb": None,
-            "ram_available_gb": 100.0,
+            "vram_free_gb": 100.0,
+            "ram_available_gb": None,
             "disk_free_gb": 100.0,
         },
     )
@@ -182,7 +185,7 @@ async def test_progress_api_reads_durable_wait_snapshot(tmp_path: Path, monkeypa
     payload = response.json()
     assert payload["waiting_for"] == "resources" and payload["status"] == "QUEUED"
     assert payload["resource_wait"]["job_manifest_checksum"] == job.job_manifest_checksum
-    assert payload["resource_wait"]["available_gb"]["vram"] is None
+    assert payload["resource_wait"]["available_gb"]["ram"] is None
 
 
 # --- Increment audit: GPU của worker, giữ chỗ, lý do chờ, lỗi của gate, dọn khi thiếu đĩa ---
@@ -221,24 +224,116 @@ def _reservations(gate: ResourceAdmission) -> dict[str, admission.Reservation]:
     return {row[0]: admission.Reservation.model_validate_json(row[1]) for row in rows}
 
 
-def test_second_worker_on_same_gpu_waits_for_what_the_first_reserved(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def _measure(
+    gate: ResourceAdmission, tool: str, vram: float, ram: float, *, params: dict | None = None, **changes: object
 ) -> None:
-    """VRAM chưa bị chiếm (job đầu còn ở bước COLMAP) nhưng đã được giữ chỗ: worker thứ hai phải chờ."""
+    """Ghi một bản ghi đo của lượt chạy trước (cùng GPU, cùng runtime, cấu hình preset tối thiểu)."""
+    presets, _ = load_presets(PRESETS)
+    now = datetime.now(UTC)
+    fields: dict[str, object] = {
+        "job_id": "job-earlier",
+        "attempt_id": "attempt-earlier",
+        "tool": tool,
+        "config_checksum": "sha256:" + "c" * 64,
+        "runtime_manifest_checksum": gate.registry.get_job("job-fixture-001").runtime_manifest_checksum,
+        "params": params or numeric_params(preset_values(presets, "minimum_quality")),
+        "gpu_name": GPU.name,
+        "shared_gpu": False,
+        "started_at": now,
+        "completed_at": now,
+        "outcome": "completed",
+        "exit_code": 0,
+        "duration_seconds": 1.0,
+        "sample_count": 1,
+        "ram_sample_count": 1,
+        "vram_sample_count": 1,
+        "gpu_sample_count": 1,
+        "scratch_sample_count": 1,
+        "peak_ram_gb": ram,
+        "peak_vram_gb": vram,
+        "headroom_before": {},
+    }
+    usage = ResourceUsage(**{**fields, **changes})
+    with gate.database.transaction(write=True) as tx:
+        tx.execute(
+            "INSERT INTO r2s_resource_usage(usage_id,job_id,recorded_at,payload) VALUES (?,?,?,?)",
+            (uuid4().hex, usage.job_id, now.isoformat(), usage.model_dump_json()),
+        )
+
+
+def test_unmeasured_job_runs_alone_and_blocks_sharing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Chưa có số đo cho cấu hình: job đầu chạy một mình trên GPU, job sau chờ dù VRAM còn trống."""
     registry, first, gate = _queued(tmp_path)
     second = _second_job(registry)
     _machine(monkeypatch)
     other = _second_worker(gate)
     assert gate(first)
-    assert _reservations(gate)[gate.worker_id].required_gb == {"vram": 2.22, "ram": 7.08, "disk": 5.96}
-    assert not other(second)  # số đo tức thời vẫn báo 3,8 GB trống
+    assert _reservations(gate)[gate.worker_id].exclusive
+    assert not other(second)
     wait = resource_wait(gate.database, second)
     assert wait is not None and wait.waiting_on == ["vram"] and wait.reasons == {"vram": "busy"}
-    assert wait.available_gb["vram"] == pytest.approx(4.0 - 2.22) and wait.capacity_gb["vram"] == 4.0
+    assert wait.needs_exclusive_gpu and wait.estimate_scope == "configured_preview"
     assert other.worker_id not in _reservations(gate)
     gate.release()
     assert other(second) and resource_wait(gate.database, second) is None
     assert set(_reservations(gate)) == {other.worker_id}
+
+
+def test_job_alone_on_gpu_is_not_held_back_by_a_wrong_estimate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ước lượng cao hơn phần trống (hoặc không đo được VRAM) không giữ job chờ vô hạn khi GPU không có job khác."""
+    for index, vram in enumerate((0.3, None)):
+        registry, job, gate = _queued(tmp_path / str(index))
+        _machine(monkeypatch, {**LIVE, "vram_free_gb": vram})
+        assert gate(job) and resource_wait(gate.database, job) is None
+
+
+def test_measured_jobs_share_a_gpu_until_measured_budgets_no_longer_fit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, first, gate = _queued(tmp_path)
+    second, third = _second_job(registry), _second_job(registry, "c")
+    _machine(monkeypatch)
+    _measure(gate, "preview", vram=1.5, ram=3.0)
+    other, another = _second_worker(gate), _second_worker(gate, "same-host:worker-c")
+    assert gate(first)
+    mine = _reservations(gate)[gate.worker_id]
+    assert not mine.exclusive and mine.required_gb == {"vram": 1.5, "ram": 3.0, "disk": 5.96}
+    assert other(second)  # 4 GB: hai job 1,5 GB chạy chung được
+    assert not another(third)  # job thứ ba: 4 − 3 = 1 GB còn lại < 1,5 GB
+    wait = resource_wait(gate.database, third)
+    assert wait is not None and wait.estimate_scope == "measured" and not wait.needs_exclusive_gpu
+    assert wait.reasons == {"vram": "busy"} and wait.available_gb["vram"] == pytest.approx(1.0)
+    other.release()
+    assert another(third)
+
+
+def test_measured_budget_still_respects_what_is_actually_free(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Số đo nói cần 1,5 GB mà GPU chỉ còn 1 GB (thứ khác chiếm): chờ, vì chạy là tràn."""
+    registry, job, gate = _queued(tmp_path)
+    _machine(monkeypatch, {**LIVE, "vram_free_gb": 1.0})
+    _measure(gate, "preview", vram=1.5, ram=3.0)
+    assert not gate(job)
+    assert resource_wait(gate.database, job).reasons == {"vram": "external"}
+
+
+def test_finalize_needs_measurements_of_both_its_tools(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry, job, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+    _measure(gate, "finalize", vram=0.2, ram=0.8)
+    assert gate(job, "finalize") and _reservations(gate)[gate.worker_id].exclusive  # thiếu số đo tách vật thể
+    gate.release()
+    _measure(gate, "scene_extract", vram=2.3, ram=4.6)
+    assert gate(job, "finalize")
+    mine = _reservations(gate)[gate.worker_id]
+    assert not mine.exclusive and mine.required_gb == {"vram": 2.3, "ram": 4.6, "disk": 5.96}
+
+
+def test_job_that_ran_out_of_memory_before_reruns_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry, job, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+    _measure(gate, "preview", vram=1.5, ram=3.0)
+    _measure(gate, "preview", vram=1.5, ram=3.0, job_id=job.job_id, outcome="failed", exit_code=1, exhausted=True)
+    assert gate(job) and _reservations(gate)[gate.worker_id].exclusive
 
 
 def test_reservation_on_another_gpu_of_the_same_host_only_shares_ram_and_disk(
@@ -249,8 +344,8 @@ def test_reservation_on_another_gpu_of_the_same_host_only_shares_ram_and_disk(
     _machine(monkeypatch)
     other = _second_worker(gate)
     assert gate(first)
-    monkeypatch.setattr(admission, "bound_gpu", lambda: GpuReading(1, "GPU-other", "T4", 4.0, 3.8, 0.2))
-    assert other(second)  # GPU khác: VRAM của GPU kia không bị trừ
+    monkeypatch.setattr(admission, "bound_gpu", lambda: GpuReading(1, "GPU-other", "T2000", 4.0, 3.8, 0.2))
+    assert other(second)  # GPU khác: job chạy một mình trên GPU kia không chặn GPU này
 
 
 def test_dead_or_stale_reservations_do_not_block(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -280,9 +375,9 @@ def test_dead_or_stale_reservations_do_not_block(tmp_path: Path, monkeypatch: py
 @pytest.mark.parametrize(
     ("live", "capacity", "reason"),
     [
-        ({**LIVE, "vram_free_gb": 0.5}, CAPACITY, "external"),  # không worker nào giữ chỗ: thứ khác đang chiếm
-        ({**LIVE, "vram_free_gb": 0.9}, {**CAPACITY, "vram": 1.0}, "exceeds_machine"),
-        ({**LIVE, "vram_free_gb": None}, {**CAPACITY, "vram": None}, "unmeasured"),
+        ({**LIVE, "ram_available_gb": 0.5}, CAPACITY, "external"),  # không worker nào giữ chỗ: thứ khác đang chiếm
+        ({**LIVE, "ram_available_gb": 0.9}, {**CAPACITY, "ram": 1.0}, "exceeds_machine"),
+        ({**LIVE, "ram_available_gb": None}, {**CAPACITY, "ram": None}, "unmeasured"),
     ],
 )
 def test_wait_reason_tells_whether_waiting_can_help(
@@ -292,16 +387,16 @@ def test_wait_reason_tells_whether_waiting_can_help(
     _machine(monkeypatch, live, capacity)
     assert not gate(job)
     wait = resource_wait(gate.database, job)
-    assert wait is not None and wait.reasons == {"vram": reason}
+    assert wait is not None and wait.reasons == {"ram": reason}
     assert registry.get_job(job.job_id) == job  # không lý do nào tự đổi trạng thái job
     progress = job_progress(job, registry.list_job_attempts(job.job_id), False, wait)
-    assert progress.resource_wait is not None and progress.resource_wait.reasons == {"vram": reason}
+    assert progress.resource_wait is not None and progress.resource_wait.reasons == {"ram": reason}
 
 
 def test_gate_failure_never_changes_job_state_and_recovers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Lỗi DB thoáng qua khi ghi observation: job vẫn QUEUED, lượt poll sau chạy bình thường."""
     registry, job, gate = _queued(tmp_path)
-    live = _machine(monkeypatch, {**LIVE, "vram_free_gb": 0.01})
+    live = _machine(monkeypatch, {**LIVE, "ram_available_gb": 0.01})
     real = gate.database.transaction
     failures = {"left": 1}
 
@@ -318,7 +413,7 @@ def test_gate_failure_never_changes_job_state_and_recovers(tmp_path: Path, monke
 
     assert not dispatch_next(registry, runner=unexpected, admission=gate)
     assert registry.get_job(job.job_id) == job and registry.get_job(job.job_id).status == JobStatus.QUEUED
-    live["vram_free_gb"] = 3.8
+    live["ram_available_gb"] = 60.0
     calls: list[str] = []
 
     def run(job_id: str, uri: str, *, expected_checksum: str) -> JobManifest:
@@ -363,7 +458,8 @@ def test_disk_shortage_reclaims_scratch_once_per_interval_then_retries(
     live = _machine(monkeypatch, {**LIVE, "disk_free_gb": 1.0})
     other = _second_worker(gate)
     with gate.database.transaction(write=True) as tx:
-        other._reserve(tx, registry.get_job("job-fixture-001"), None, GPU.uuid)
+        # Worker cùng máy nhưng ở GPU khác: chỉ chia RAM/đĩa với worker này.
+        other._reserve(tx, registry.get_job("job-fixture-001"), None, "GPU-other", exclusive=True)
     calls: list[set[str]] = []
 
     def reclaim(*, worker_root: Path, artifact_root: Path, protected_jobs: set[str]) -> CleanupResult:

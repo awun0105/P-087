@@ -35,6 +35,12 @@ from src.services.orchestration.processing.capability import (
     measure_live_headroom,
     worker_identity,
 )
+from src.services.orchestration.processing.observed import (
+    exhausted_before,
+    load_usages,
+    numeric_params,
+    observed_budget,
+)
 from src.services.orchestration.processing.procfs import process_alive, process_table, process_tree
 from src.services.orchestration.processing.resources import estimate_gb
 
@@ -67,10 +73,13 @@ class ResourceWait(BaseModel):
     required_gb: dict[Resource, float]
     available_gb: dict[Resource, float | None]
     waiting_on: list[Resource]
-    estimate_scope: Literal["configured_preview"] = "configured_preview"
+    #: `measured`: VRAM/RAM cần lấy từ số đo các lượt chạy trước; `configured_preview`: ước lượng theo cấu hình.
+    estimate_scope: Literal["configured_preview", "measured"] = "configured_preview"
     #: Mặc định rỗng để đọc được observation do bản worker trước ghi.
     reasons: dict[Resource, WaitReason] = Field(default_factory=dict)
     capacity_gb: dict[Resource, float | None] = Field(default_factory=dict)
+    #: Chưa có số đo cho cấu hình này (hoặc lượt trước hết bộ nhớ): job phải chạy một mình trên GPU.
+    needs_exclusive_gpu: bool = False
 
 
 class Reservation(BaseModel):
@@ -85,6 +94,8 @@ class Reservation(BaseModel):
     job_id: str
     #: None với job chưa có mô hình ước lượng (legacy profile): vẫn đánh dấu máy đang bận.
     required_gb: dict[Resource, float] | None
+    #: Job chạy một mình trên GPU này: chưa có số đo nên không ai được chạy chung.
+    exclusive: bool = False
     reserved_at: datetime
     heartbeat_at: datetime
 
@@ -101,8 +112,45 @@ def resource_wait(database: RuntimeDatabase, job: JobManifest) -> ResourceWait |
     return wait
 
 
+Phase = Literal["preview", "finalize"]
+#: Công cụ runner chạy trong mỗi lần nhận job; ngân sách đo được phải phủ hết các công cụ này.
+PHASE_TOOLS: dict[Phase, tuple[str, ...]] = {"preview": ("preview",), "finalize": ("finalize", "scene_extract")}
+
+
+class Demand(BaseModel):
+    """Nhu cầu tài nguyên của một lần nhận job và độ tin của nó."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    required_gb: dict[Resource, float]
+    danger_ratio: float
+    #: True: VRAM/RAM lấy từ số đo → được chạy chung GPU. False: chỉ có ước lượng → phải chạy một mình.
+    measured: bool
+
+
+def job_drivers(registry: ProjectRegistry, settings: Settings, job: JobManifest) -> dict[str, float] | None:
+    """Thông số số học của cấu hình job (khoá tra số đo); None với job legacy hoặc cấu hình không đọc được."""
+    path = settings.product_processing_config
+    profile = registry.execution_profile
+    if path is None or profile is None or job.config_checksum == profile.config_checksum or not is_presets_file(path):
+        return None
+    try:
+        presets, _ = load_presets(path)
+        config_path = registry.runtime_resolver.require(job_config_reference(job.job_id, job.config_checksum))
+        config = JobProcessingConfig.model_validate_json(config_path.read_bytes())
+        return numeric_params(presets.validate_params(config.params))
+    except (ArtifactStoreError, OSError, ValueError):
+        return None
+
+
 class ResourceAdmission:
-    """Gate của một worker theo model config hiện có; không hạ cấu hình.
+    """Gate của một worker; không hạ cấu hình.
+
+    Quy tắc chạy chung GPU: job chỉ được chạy cùng job khác khi đã có **số đo** chứng minh nó
+    vừa (`processing/observed.py`). Chưa có số đo — cấu hình mới, máy mới, job legacy, hoặc lượt
+    trước của job chết vì hết bộ nhớ — thì job chạy một mình trên GPU; lượt đó tạo ra số đo cho
+    các job sau. Khi chạy một mình, VRAM không bị so với ước lượng: ước lượng sai không được
+    giữ job chờ vô hạn.
 
     Một instance cho mỗi tiến trình worker. `__call__` trả True thì worker đang giữ chỗ
     cho job đó tới khi `release()`; heartbeat gọi `touch()` để giữ chỗ không hết hạn.
@@ -122,8 +170,8 @@ class ResourceAdmission:
 
     # --- Ước lượng của job ---------------------------------------------------
 
-    def _requirement(self, job: JobManifest) -> tuple[dict[Resource, float], float] | None:
-        """(ước lượng GiB, ngưỡng danger) của job; None khi job chưa có mô hình ước lượng."""
+    def _demand(self, job: JobManifest, phase: Phase, gpu_name: str | None) -> Demand | None:
+        """Nhu cầu của job cho lần nhận này; None khi job chưa có mô hình ước lượng (legacy)."""
         path = self.settings.product_processing_config
         profile = self.registry.execution_profile
         if (
@@ -139,13 +187,32 @@ class ResourceAdmission:
             presets, _ = load_presets(path)
             config_path = self.registry.runtime_resolver.require(job_config_reference(job.job_id, job.config_checksum))
             config = JobProcessingConfig.model_validate_json(config_path.read_bytes())
-            required = estimate_gb(presets.resource_model, presets.validate_params(config.params))
+            params = presets.validate_params(config.params)
+            estimate = estimate_gb(presets.resource_model, params)
         except (ArtifactStoreError, OSError, ValueError) as error:
             # Cấu hình không đọc được là lỗi của job, không phải thiếu tài nguyên: cho qua để
             # runner báo lỗi theo đường có sẵn (ghi FAILED đúng stage), thay vì chờ vô hạn.
             logger.warning("Không đọc được cấu hình job để ước lượng cause=%s", type(error).__name__)
             return None
-        return required, presets.resource_model.danger_ratio
+        usages = load_usages(self.database)
+        budget = None
+        if not exhausted_before(usages, job.job_id):
+            budget = observed_budget(
+                usages,
+                tools=PHASE_TOOLS[phase],
+                params=numeric_params(params),
+                gpu_name=gpu_name,
+                runtime_manifest_checksum=job.runtime_manifest_checksum,
+            )
+        if budget is None:
+            return Demand(required_gb=estimate, danger_ratio=presets.resource_model.danger_ratio, measured=False)
+        # Đĩa vẫn theo ước lượng: số đo scratch chỉ là phần trong workspace, chưa gồm artifact publish.
+        required: dict[Resource, float] = {
+            "vram": round(budget["vram"], 2),
+            "ram": round(budget["ram"], 2),
+            "disk": estimate["disk"],
+        }
+        return Demand(required_gb=required, danger_ratio=presets.resource_model.danger_ratio, measured=True)
 
     # --- Giữ chỗ -------------------------------------------------------------
 
@@ -174,7 +241,13 @@ class ResourceAdmission:
         return alive
 
     def _reserve(
-        self, tx: RuntimeTransaction, job: JobManifest, required: dict[Resource, float] | None, gpu_uuid: str | None
+        self,
+        tx: RuntimeTransaction,
+        job: JobManifest,
+        required: dict[Resource, float] | None,
+        gpu_uuid: str | None,
+        *,
+        exclusive: bool,
     ) -> None:
         now = datetime.now(UTC)
         reservation = Reservation(
@@ -184,6 +257,7 @@ class ResourceAdmission:
             gpu_uuid=gpu_uuid,
             job_id=job.job_id,
             required_gb=required,
+            exclusive=exclusive,
             reserved_at=now,
             heartbeat_at=now,
         )
@@ -248,14 +322,12 @@ class ResourceAdmission:
 
     # --- Gate ----------------------------------------------------------------
 
-    def _decide(
-        self,
-        job: JobManifest,
-        required: dict[Resource, float],
-        danger_ratio: float,
-        gpu_uuid: str | None,
-    ) -> bool:
-        """Đo, trừ phần worker khác đã giữ, rồi ghi giữ chỗ hoặc observation chờ trong một transaction."""
+    def _decide(self, job: JobManifest, demand: Demand | None, gpu_uuid: str | None) -> bool:
+        """Đo, trừ phần worker khác đã giữ, rồi ghi giữ chỗ hoặc observation chờ trong một transaction.
+
+        `demand` None (job legacy) hoặc `measured=False` nghĩa là chưa biết job dùng bao nhiêu:
+        chỉ nhận khi không worker nào khác đang dùng GPU này, và giữ cả GPU cho nó.
+        """
         root = self.settings.product_worker_root
         live = measure_live_headroom(root)
         capacity = measure_capacity(root)
@@ -265,26 +337,44 @@ class ResourceAdmission:
             "disk": live["disk_free_gb"],
         }
         total: dict[Resource, float | None] = {name: capacity[name] for name in RESOURCES}
+        exclusive = demand is None or not demand.measured
         now = datetime.now(UTC)
         with self.database.transaction(write=True) as tx:
             self._lock(tx)
             others = self._others(tx, now)
+            gpu_peers = [item for item in others if self._shares(item, "vram", gpu_uuid)]
+            if demand is None:
+                # Job legacy: không có con số nào để so; chỉ cần GPU không có ai.
+                if gpu_peers:
+                    return False
+                self._reserve(tx, job, None, gpu_uuid, exclusive=True)
+                return True
+            required, danger_ratio = demand.required_gb, demand.danger_ratio
             available: dict[Resource, float | None] = {}
             sharing: dict[Resource, bool] = {}
             for name in RESOURCES:
                 # VRAM chia theo GPU; RAM và đĩa chia theo máy.
-                peers = [item for item in others if self._shares(item, name, gpu_uuid)]
+                peers = gpu_peers if name == "vram" else [item for item in others if self._shares(item, name, gpu_uuid)]
                 sharing[name] = bool(peers)
                 held = sum(item.required_gb[name] for item in peers if item.required_gb is not None)
                 value = free[name]
                 if value is not None and held > 0 and total[name] is not None:
                     # Job vừa được nhận chưa chiếm hết phần của nó: không tính phần đó là còn trống.
                     value = max(0.0, min(value, total[name] - held))
+                if name == "vram" and any(item.exclusive for item in peers):
+                    value = 0.0  # Job kia đang chạy một mình để đo: không ai được chạy chung.
                 available[name] = value
             waiting: list[Resource] = []
             reasons: dict[Resource, WaitReason] = {}
             for name in RESOURCES:
                 have = available[name]
+                if name == "vram" and exclusive:
+                    # Chưa có số đo: không so VRAM với ước lượng (ước lượng sai sẽ giữ job chờ vô hạn);
+                    # điều kiện duy nhất là GPU không có job nào khác của pipeline.
+                    if gpu_peers:
+                        waiting.append(name)
+                        reasons[name] = "busy"
+                    continue
                 if have is not None and required[name] < have * danger_ratio:
                     continue
                 waiting.append(name)
@@ -301,8 +391,10 @@ class ResourceAdmission:
                     required_gb=required,
                     available_gb=available,
                     waiting_on=waiting,
+                    estimate_scope="measured" if demand.measured else "configured_preview",
                     reasons=reasons,
                     capacity_gb=total,
+                    needs_exclusive_gpu=exclusive,
                 )
                 tx.execute(
                     "INSERT INTO r2s_resource_waits(job_id,payload) VALUES (?,?) "
@@ -314,9 +406,21 @@ class ResourceAdmission:
                 self._disk_short = "disk" in waiting and reasons["disk"] != "exceeds_machine"
             else:
                 tx.execute("DELETE FROM r2s_resource_waits WHERE job_id=?", (job.job_id,))
-                self._reserve(tx, job, required, gpu_uuid)
+                self._reserve(tx, job, required, gpu_uuid, exclusive=exclusive)
                 self._disk_short = False
         return not waiting
+
+    def shares_gpu(self) -> bool | None:
+        """Có worker khác đang giữ chỗ trên GPU của worker này không; None khi không kiểm được."""
+        try:
+            gpu = bound_gpu()
+            with self.database.transaction(write=True) as tx:
+                self._lock(tx)
+                others = self._others(tx, datetime.now(UTC))
+            return any(self._shares(item, "vram", gpu.uuid if gpu is not None else None) for item in others)
+        except Exception as error:  # noqa: BLE001 - chỉ là nhãn của số đo, không được chặn job
+            logger.warning("Không kiểm được GPU có chạy chung không cause=%s", type(error).__name__)
+            return None
 
     def _reclaim_disk(self, job: JobManifest) -> bool:
         """Thiếu đĩa: dọn scratch không còn ai dùng và thùng rác quá hạn. Trả True nếu đã thử dọn."""
@@ -345,25 +449,19 @@ class ResourceAdmission:
         )
         return True
 
-    def __call__(self, job: JobManifest) -> bool:
-        """True khi đủ headroom (và đã giữ chỗ); thiếu/unknown giữ nguyên queue/config và ghi diagnostic.
+    def __call__(self, job: JobManifest, phase: Phase = "preview") -> bool:
+        """True khi worker được nhận job (và đã giữ chỗ); ngược lại giữ nguyên queue/config và ghi diagnostic.
 
         Lỗi của chính gate (DB, quét thư mục) không được đổi trạng thái job: trả False để
         lượt poll sau thử lại.
         """
-        requirement = self._requirement(job)
         try:
             gpu = bound_gpu()
             gpu_uuid = gpu.uuid if gpu is not None else None
-            if requirement is None:
-                with self.database.transaction(write=True) as tx:
-                    self._lock(tx)
-                    self._reserve(tx, job, None, gpu_uuid)
-                return True
-            required, danger_ratio = requirement
-            admitted = self._decide(job, required, danger_ratio, gpu_uuid)
+            demand = self._demand(job, phase, gpu.name if gpu is not None else None)
+            admitted = self._decide(job, demand, gpu_uuid)
             if not admitted and self._disk_short and self._reclaim_disk(job):
-                admitted = self._decide(job, required, danger_ratio, gpu_uuid)
+                admitted = self._decide(job, demand, gpu_uuid)
             return admitted
         except Exception as error:  # noqa: BLE001 - ranh giới gate: lỗi đo/ghi observation không phải lỗi của job
             logger.warning("Resource admission lỗi, thử lại lượt sau job=%s cause=%s", job.job_id, type(error).__name__)
