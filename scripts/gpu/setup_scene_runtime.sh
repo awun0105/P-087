@@ -96,6 +96,11 @@ print("ok: torch", torch.__version__, "· gsplat", gsplat.__version__, "· rende
 PY
 fi
 
+# LPIPS chấm ảnh giữ lại sau khi train 3DGS: tải sẵn trọng số VGG vào cache của torch để worker không cần mạng lúc
+# chạy job. Tải lỗi thì bỏ qua — bảng chỉ số sẽ ghi LPIPS "chưa đo", PSNR/SSIM vẫn có.
+"$PY" -c "import lpips; lpips.LPIPS(net='vgg', verbose=False)" >/dev/null 2>&1 \
+  || echo "[cảnh báo] chưa tải được trọng số LPIPS-VGG; LPIPS sẽ không được chấm cho tới khi tải được."
+
 cat <<EOF
 
 Runtime sẵn sàng. Thêm vào file env của stack (vd scripts/gpu/studio.env):
@@ -104,4 +109,5 @@ Runtime sẵn sàng. Thêm vào file env của stack (vd scripts/gpu/studio.env)
   PRODUCT_LAMA_CHECKPOINT=$RUNTIME/weights/big-lama.pt
   REC06_MOGE_PYTHON=$PY
   REC06_MOGE_MODEL=$RUNTIME/weights/moge-2-vitb-normal.pt
+  REC04_BRUSH_LPIPS_PYTHON=$PY
 EOF

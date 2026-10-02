@@ -107,6 +107,7 @@ PRODUCT_SAM2_CHECKPOINT=$STATE/scene_runtime/checkpoints/sam2.1_hiera_tiny.pt
 PRODUCT_LAMA_CHECKPOINT=$STATE/scene_runtime/weights/big-lama.pt
 REC06_MOGE_PYTHON=$STATE/scene_runtime/bin/python
 REC06_MOGE_MODEL=$STATE/scene_runtime/weights/moge-2-vitb-normal.pt
+REC04_BRUSH_LPIPS_PYTHON=$STATE/scene_runtime/bin/python
 PRODUCT_SCENE_TIMEOUT_SECONDS=3600
 EOF
 set -a; source "$ENV_FILE"; set +a
