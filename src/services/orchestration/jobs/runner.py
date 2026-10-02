@@ -20,6 +20,8 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
@@ -47,9 +49,15 @@ from src.services.orchestration.jobs.dispatch import (
 )
 from src.services.orchestration.jobs.models import PreparedInputReceipt, TransitionRequest
 from src.services.orchestration.jobs.progress import awaiting_finalize, metric_confirmation_stage
-from src.services.orchestration.jobs.workspace import cleanup_attempt_workspace
+from src.services.orchestration.jobs.workspace import attempt_lease, cleanup_attempt_workspace, cleanup_finished_job
 from src.services.orchestration.processing.capability import latest as latest_capability
-from src.services.orchestration.processing.telemetry import Outcome, ResourceContext, ResourceSampler
+from src.services.orchestration.processing.telemetry import (
+    Outcome,
+    ResourceContext,
+    ResourceSampler,
+    ResourceUsage,
+    sampled_section,
+)
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
 from src.services.reconstruction import (
     confirmation_summary,
@@ -169,12 +177,59 @@ def _run_tool(
     except TimeoutError:
         outcome = "timeout"
         raise
+    except KeyboardInterrupt:
+        outcome = "interrupted"  # Worker nhận SIGTERM/Ctrl+C: không phải lỗi của tool.
+        raise
     finally:
-        if sampler is not None:
-            try:
-                sampler.finish(outcome, exit_code)
-            except Exception as error:  # noqa: BLE001 - telemetry process boundary, preserve primary result/error
-                logger.warning("Không ghi được resource telemetry cause=%s", type(error).__name__)
+        _finish_resources(attempt, sampler, outcome, exit_code)
+
+
+def _finish_resources(
+    attempt: _Attempt, sampler: ResourceSampler | None, outcome: Outcome, exit_code: int | None
+) -> None:
+    """Ghi bản ghi đo vào workspace rồi vào DB; lỗi ghi không che kết quả/lỗi chính của tool."""
+    if sampler is None:
+        return
+    try:
+        usage = sampler.finish(outcome, exit_code)
+    except Exception as error:  # noqa: BLE001 - telemetry process boundary, preserve primary result/error
+        logger.warning("Không ghi được resource telemetry cause=%s", type(error).__name__)
+        return
+    _persist_usage(attempt, usage)
+
+
+def _persist_usage(attempt: _Attempt, usage: ResourceUsage) -> None:
+    """Lưu bản ghi vào runtime DB: đĩa của máy GPU thuê mất khi trả máy, DB thì không."""
+    persistence = attempt.registry.persistence
+    if persistence is None:
+        return
+    try:
+        with persistence.database.transaction(write=True) as tx:
+            tx.execute(
+                "INSERT INTO r2s_resource_usage(usage_id,job_id,recorded_at,payload) VALUES (?,?,?,?)",
+                (uuid4().hex, usage.job_id, usage.completed_at.isoformat(), usage.model_dump_json()),
+            )
+    except Exception as error:  # noqa: BLE001 - ranh giới DB của số đo: không đổi kết quả job
+        logger.warning("Không lưu được resource telemetry vào DB cause=%s", type(error).__name__)
+
+
+@contextmanager
+def _sampled(attempt: _Attempt, tool: str) -> Iterator[None]:
+    """Đo một bước chạy ngay trong tiến trình worker (không qua `_run_tool`)."""
+    sampler = _resource_sampler(attempt, tool)
+    outcome: Outcome = "failed"
+    try:
+        with sampled_section(
+            sampler,
+            on_error=lambda error: logger.warning("Không lấy được resource sample cause=%s", type(error).__name__),
+        ):
+            yield
+        outcome = "completed"
+    except KeyboardInterrupt:
+        outcome = "interrupted"
+        raise
+    finally:
+        _finish_resources(attempt, sampler, outcome, None)
 
 
 def _resource_sampler(attempt: _Attempt, tool: str) -> ResourceSampler | None:
@@ -329,6 +384,26 @@ def _cleanup_attempt_workspace(attempt: _Attempt) -> None:
         logger.warning("Bỏ qua scratch cleanup cause=%s", type(error).__name__)
 
 
+def _cleanup_finished_job(attempt: _Attempt) -> None:
+    """Job đã SUCCEEDED: bỏ scratch của các attempt cũ và resume (không còn retry nào đọc)."""
+    if attempt.settings.product_worker_keep_scratch:
+        return
+    try:
+        result = cleanup_finished_job(
+            attempt.job.job_id,
+            worker_root=attempt.settings.product_worker_root,
+            artifact_root=attempt.registry.runtime_resolver.artifact_root,
+        )
+        logger.info(
+            "Finished-job cleanup files=%s bytes=%s errors=%s",
+            result.files_removed,
+            result.bytes_removed,
+            result.errors,
+        )
+    except (OSError, ValueError) as error:
+        logger.warning("Bỏ qua finished-job cleanup cause=%s", type(error).__name__)
+
+
 def _record_benchmark(attempt: _Attempt) -> None:
     """Ghi benchmark sau attempt; không bao giờ làm hỏng job vì lỗi đo đạc (process boundary)."""
     try:
@@ -399,7 +474,8 @@ def run_prepared_job(job_id: str, frame_set_uri: str, *, expected_checksum: str 
         raise ValueError("Frame set không phải output thành công duy nhất trong JobManifest")
     attempt, profile = _start_attempt(job_id, expected_checksum, StageId.CAMERA_POSE)
     try:
-        return _execute_preview(attempt, frames, profile)
+        with attempt_lease(attempt.workspace):
+            return _execute_preview(attempt, frames, profile)
     except BaseException as error:
         _record_runner_failure(attempt, error)
         raise
@@ -409,14 +485,15 @@ def run_video_job(job_id: str, *, expected_checksum: str | None = None) -> JobMa
     """Upload video → frame set → preview trong một attempt; dừng ngay ở stage lỗi."""
     attempt, profile = _start_attempt(job_id, expected_checksum, StageId.INPUT_VALIDATE)
     try:
-        attempt.job = _execute_prepare(attempt, profile)
-        if attempt.job.status != JobStatus.RUNNING:
-            _record_benchmark(attempt)  # job dừng ở bước chuẩn bị (vd video lỗi) vẫn có số đo
-            return attempt.job
-        frames = prepared_frame_reference(attempt.job)
-        if frames is None:
-            raise ValueError("Prepare thành công nhưng thiếu frame set")
-        return _execute_preview(attempt, frames, profile)
+        with attempt_lease(attempt.workspace):
+            attempt.job = _execute_prepare(attempt, profile)
+            if attempt.job.status != JobStatus.RUNNING:
+                _record_benchmark(attempt)  # job dừng ở bước chuẩn bị (vd video lỗi) vẫn có số đo
+                return attempt.job
+            frames = prepared_frame_reference(attempt.job)
+            if frames is None:
+                raise ValueError("Prepare thành công nhưng thiếu frame set")
+            return _execute_preview(attempt, frames, profile)
     except BaseException as error:
         _record_runner_failure(attempt, error)
         raise
@@ -458,7 +535,8 @@ def _extract_scene_stage(
         bundle = ReconstructionBundle.model_validate_json(
             attempt.registry.runtime_resolver.require(bundle_ref).read_bytes()
         )
-        stage = extract_scene(attempt.registry, attempt.job, bundle, attempt.settings, workspace / "scene")
+        with _sampled(attempt, "scene_extract"):
+            stage = extract_scene(attempt.registry, attempt.job, bundle, attempt.settings, workspace / "scene")
         attempt.registry.runtime_resolver.sync_up(attempt.job.job_id)
         return [stage]
     except RuntimeStateConflictError:
@@ -501,47 +579,50 @@ def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> Jo
     workspace.mkdir(parents=True, exist_ok=False)
     attempt = _Attempt(registry, settings, job, workspace)
     try:
-        request = {
-            "schema_version": "1.0",
-            "execution_scope": "product_finalize",
-            "job_id": job_id,
-            "attempt_id": attempt_id,
-            "confirmation_ref": confirmation.model_dump(mode="json"),
-            "authorized_decision_checksum": decision_checksum,
-            "geometry": profile.model_dump(mode="json"),
-        }
-        request_path = workspace / "finalize.request.json"
-        with request_path.open("x", encoding="utf-8") as stream:
-            json.dump(request, stream)
-        command = [
-            sys.executable,
-            "-m",
-            "src.services.reconstruction.finalize_cli",
-            "--request",
-            str(request_path),
-            "--store-root",
-            str(registry.runtime_resolver.artifact_root),
-            "--workspace",
-            str(workspace / "rec"),
-            "--progress-file",
-            str(workspace / "finalize.progress.jsonl"),
-        ]
-        exit_code, payload = _run_tool(attempt, "finalize", command, settings.product_finalize_timeout_seconds)
-        registry.runtime_resolver.sync_up(job_id)
-        if exit_code not in {0, 1}:
-            raise RuntimeError("Finalize worker không trả result hợp lệ")
-        reference = ProductArtifactRef.model_validate(payload.get("result_ref"))
-        result = load_finalize_result(reference, registry.runtime_resolver.require)
-        if result.attempt_id != attempt_id or (result.error is None) != (exit_code == 0):
-            raise ValueError("Finalize result khác attempt/exit status")
-        extra: list[StageArtifact] = []
-        if result.error is None:
-            extra = _extract_scene_stage(attempt, workspace, result.bundle_ref)
-        completed = registry.record_finalize(attempt.job, result, reference, extra)
-        # Scene consumer đã chạy xong trước durable commit; lỗi extraction vẫn giữ scratch để debug.
-        if result.error is None and extra:
-            _cleanup_attempt_workspace(attempt)
-        return completed
+        with attempt_lease(workspace):
+            request = {
+                "schema_version": "1.0",
+                "execution_scope": "product_finalize",
+                "job_id": job_id,
+                "attempt_id": attempt_id,
+                "confirmation_ref": confirmation.model_dump(mode="json"),
+                "authorized_decision_checksum": decision_checksum,
+                "geometry": profile.model_dump(mode="json"),
+            }
+            request_path = workspace / "finalize.request.json"
+            with request_path.open("x", encoding="utf-8") as stream:
+                json.dump(request, stream)
+            command = [
+                sys.executable,
+                "-m",
+                "src.services.reconstruction.finalize_cli",
+                "--request",
+                str(request_path),
+                "--store-root",
+                str(registry.runtime_resolver.artifact_root),
+                "--workspace",
+                str(workspace / "rec"),
+                "--progress-file",
+                str(workspace / "finalize.progress.jsonl"),
+            ]
+            exit_code, payload = _run_tool(attempt, "finalize", command, settings.product_finalize_timeout_seconds)
+            registry.runtime_resolver.sync_up(job_id)
+            if exit_code not in {0, 1}:
+                raise RuntimeError("Finalize worker không trả result hợp lệ")
+            reference = ProductArtifactRef.model_validate(payload.get("result_ref"))
+            result = load_finalize_result(reference, registry.runtime_resolver.require)
+            if result.attempt_id != attempt_id or (result.error is None) != (exit_code == 0):
+                raise ValueError("Finalize result khác attempt/exit status")
+            extra: list[StageArtifact] = []
+            if result.error is None:
+                extra = _extract_scene_stage(attempt, workspace, result.bundle_ref)
+            completed = registry.record_finalize(attempt.job, result, reference, extra)
+            # Scene consumer đã chạy xong trước durable commit; lỗi extraction vẫn giữ scratch để debug.
+            if result.error is None and extra:
+                _cleanup_attempt_workspace(attempt)
+            if completed.status == JobStatus.SUCCEEDED:
+                _cleanup_finished_job(attempt)
+            return completed
     except BaseException as error:
         _record_runner_failure(attempt, error)
         raise

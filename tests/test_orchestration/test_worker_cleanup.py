@@ -1,5 +1,7 @@
 """Fixture proof cho cleanup boundary; không thay GPU/browser/runtime acceptance."""
 
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -10,7 +12,14 @@ from src.config import Settings
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.services.orchestration.artifacts import ArtifactResolver, FilesystemArtifactStore, sha256_bytes
 from src.services.orchestration.jobs import runner
-from src.services.orchestration.jobs.workspace import cleanup_attempt_workspace
+from src.services.orchestration.jobs.workspace import (
+    CleanupResult,
+    attempt_in_use,
+    attempt_lease,
+    cleanup_attempt_workspace,
+    cleanup_finished_job,
+    reclaim_worker_scratch,
+)
 from tests.test_orchestration.test_finalize_flow import _confirmed, _publish, _stage
 from tests.test_orchestration.test_prepared_queue import _registry
 from tests.test_reconstruction.test_rec11_preview import preview
@@ -228,3 +237,163 @@ def test_finalize_consumes_scene_before_cleanup(tmp_path: Path, monkeypatch: pyt
     assert runner.run_finalize_job(job.job_id) == job
     scratch = list((tmp_path / "workers").rglob("model.bin"))
     assert bool(scratch) == failed
+
+
+def test_cleanup_works_when_worker_root_is_reached_through_a_symlink(tmp_path: Path) -> None:
+    """Dữ liệu worker nằm trên ổ khác qua symlink: runner tạo workspace dưới đường dẫn đã giải."""
+    real = tmp_path / "external-drive"
+    (real / "workers").mkdir(parents=True)
+    (tmp_path / "data").symlink_to(real, target_is_directory=True)
+    configured = tmp_path / "data" / "workers"
+    for root in (configured, tmp_path / "linked-root"):
+        if root.name == "linked-root":
+            root.symlink_to(real / "workers", target_is_directory=True)  # chính worker root là symlink
+        workspace = root.resolve() / "job-a" / ("attempt-" + "e" * 32)  # như runner: resolve() rồi mới ghép
+        (workspace / "rec").mkdir(parents=True, exist_ok=True)
+        (workspace / "rec" / "database.db").write_bytes(b"scratch")
+        result = cleanup_attempt_workspace(workspace, worker_root=root, artifact_root=tmp_path / "artifacts")
+        assert result.files_removed == 1 and not (workspace / "rec" / "database.db").exists()
+        # Workspace hết file thì bị gỡ luôn. Đường dẫn chưa giải của cùng workspace cũng được nhận.
+        assert not workspace.exists()
+        workspace.mkdir(parents=True)
+        (workspace / "model.bin").write_bytes(b"x")
+        unresolved = root / "job-a" / workspace.name
+        assert cleanup_attempt_workspace(
+            unresolved, worker_root=root, artifact_root=tmp_path / "artifacts"
+        ).files_removed
+
+
+def test_large_intermediate_text_is_scratch_but_logs_are_always_kept(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    megabyte = 1024 * 1024
+    (workspace / "rec" / "points3D.txt").write_bytes(b"p" * (2 * megabyte))  # model COLMAP dạng text
+    (workspace / "rec" / "transforms.json").write_bytes(b"t" * (2 * megabyte))
+    (workspace / "rec" / "cameras.txt").write_text("small")
+    (workspace / "rec" / "brush.log").write_bytes(b"l" * (2 * megabyte))
+    cleanup_attempt_workspace(workspace, worker_root=tmp_path / "workers", artifact_root=tmp_path / "artifacts")
+    left = {path.name for path in workspace.rglob("*") if path.is_file()}
+    assert left == {"process.log", "preview.progress.jsonl", "preview.stdout.json", "cameras.txt", "brush.log"}
+
+
+def test_lease_marks_attempt_in_use_until_runner_leaves(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    assert not attempt_in_use(workspace)
+    with attempt_lease(workspace):
+        assert attempt_in_use(workspace)
+    assert not attempt_in_use(workspace)
+    # Lease của tiến trình đã chết tự nhả; tiến trình đứng trong workspace (như Brush) cũng là "đang dùng".
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import fcntl,sys,time; h=open(sys.argv[1],'a'); fcntl.flock(h, fcntl.LOCK_EX); print('ok', flush=True);"
+            " time.sleep(60)",
+            str(workspace / "attempt.lock"),
+        ],
+        stdout=subprocess.PIPE,
+    )
+    try:
+        assert holder.stdout is not None and holder.stdout.readline().strip() == b"ok"
+        assert attempt_in_use(workspace)
+    finally:
+        holder.kill()
+        holder.wait()
+    assert not attempt_in_use(workspace)
+    inside = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], cwd=workspace / "rec")
+    try:
+        assert attempt_in_use(workspace)
+    finally:
+        inside.kill()
+        inside.wait()
+    assert not attempt_in_use(workspace)
+
+
+def _job_with_history(tmp_path: Path, job_id: str = "job-a") -> tuple[Path, Path, Path]:
+    """Job có một attempt cũ đã dừng, một attempt đang chạy (giữ lease) và thư mục resume."""
+    root = tmp_path / "workers" / job_id
+    old, active, resume = root / ("attempt-" + "1" * 32), root / ("finalize-" + "2" * 32), root / "resume"
+    for directory in (old, active, resume / "colmap-key" / "sparse"):
+        directory.mkdir(parents=True)
+    (old / "database.db").write_bytes(b"old scratch")
+    (old / "preview.stderr.log").write_text("why it failed")
+    (active / "model.bin").write_bytes(b"active")
+    (resume / "colmap-key" / "sparse" / "points3D.bin").write_bytes(b"sparse")
+    return old, active, resume
+
+
+def test_finished_job_drops_resume_and_idle_attempts_only(tmp_path: Path) -> None:
+    old, active, resume = _job_with_history(tmp_path)
+    roots = {"worker_root": tmp_path / "workers", "artifact_root": tmp_path / "artifacts"}
+    with attempt_lease(active):
+        result = cleanup_finished_job("job-a", **roots)
+    assert not resume.exists() and not (old / "database.db").exists()
+    assert (old / "preview.stderr.log").read_text() == "why it failed"
+    assert (active / "model.bin").read_bytes() == b"active"  # attempt còn lease không bị đụng
+    assert result.files_removed == 2 and result.bytes_removed == len(b"old scratch") + len(b"sparse")
+    assert cleanup_finished_job("job-a", **roots).files_removed == 2  # lease đã nhả: model.bin + attempt.lock
+    for unsafe in ("../workers", "missing-job", "job-a/attempt"):
+        assert cleanup_finished_job(unsafe, **roots) == CleanupResult()
+
+
+def test_resume_symlink_is_not_followed(tmp_path: Path) -> None:
+    root = tmp_path / "workers" / "job-a"
+    outside = tmp_path / "outside"
+    outside.mkdir(parents=True)
+    (outside / "keep.bin").write_bytes(b"keep")
+    root.mkdir(parents=True)
+    (root / "resume").symlink_to(outside, target_is_directory=True)
+    cleanup_finished_job("job-a", worker_root=tmp_path / "workers", artifact_root=tmp_path / "artifacts")
+    assert (outside / "keep.bin").read_bytes() == b"keep"
+
+
+def test_disk_pressure_reclaims_only_unused_attempts_and_never_resume(tmp_path: Path) -> None:
+    old, active, resume = _job_with_history(tmp_path)
+    protected_old, _, _ = _job_with_history(tmp_path, "job-reserved")
+    with attempt_lease(active):
+        result = reclaim_worker_scratch(
+            worker_root=tmp_path / "workers", artifact_root=tmp_path / "artifacts", protected_jobs={"job-reserved"}
+        )
+    assert result.files_removed == 1 and not (old / "database.db").exists()
+    assert (active / "model.bin").is_file() and (resume / "colmap-key" / "sparse" / "points3D.bin").is_file()
+    assert (protected_old / "database.db").is_file()  # job đang có worker giữ chỗ
+    assert reclaim_worker_scratch(
+        worker_root=tmp_path / "missing", artifact_root=tmp_path / "artifacts", protected_jobs=set()
+    ) == CleanupResult(errors=1)
+
+
+@pytest.mark.parametrize("status", [runner.JobStatus.SUCCEEDED, runner.JobStatus.FAILED])
+def test_finalize_drops_resume_only_when_job_succeeded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: runner.JobStatus
+) -> None:
+    registry, job, confirmation = _confirmed(tmp_path / "runtime")
+    reference = _publish(registry, job.job_id, "result.json", "RecFinalizeResult", runner.StageId.RGB_GEOMETRY)
+    old, _, resume = _job_with_history(tmp_path, job.job_id)
+    settings = Settings(product_worker_root=tmp_path / "workers")
+    monkeypatch.setattr(runner, "get_settings", lambda: settings)
+    monkeypatch.setattr(runner, "get_project_registry", lambda: registry)
+    monkeypatch.setattr(runner, "_authorized_decision", lambda *args: (confirmation, "sha256:" + "a" * 64))
+    failed = status == runner.JobStatus.FAILED
+    monkeypatch.setattr(
+        runner, "_run_tool", lambda *args: (int(failed), {"result_ref": reference.model_dump(mode="json")})
+    )
+    monkeypatch.setattr(
+        runner,
+        "load_finalize_result",
+        lambda *args: SimpleNamespace(
+            attempt_id=next(
+                path.name
+                for path in (tmp_path / "workers" / job.job_id).glob("finalize-*")
+                if path.name != "finalize-" + "2" * 32
+            ),
+            error="failed" if failed else None,
+            bundle_ref=reference,
+        ),
+    )
+    monkeypatch.setattr(
+        runner, "_extract_scene_stage", lambda *args: [_stage(reference, runner.StageId.OBJECT_EXTRACT)]
+    )
+    done = job.model_copy(update={"status": status})
+    monkeypatch.setattr(registry, "record_finalize", lambda *args: done)
+    assert runner.run_finalize_job(job.job_id) == done
+    assert resume.exists() == failed and (old / "database.db").exists() == failed
+    assert (old / "preview.stderr.log").is_file()
