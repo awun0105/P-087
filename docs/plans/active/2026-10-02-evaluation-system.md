@@ -54,3 +54,10 @@ không ước lượng; nhãn đạt/không đạt chỉ gán khi ngưỡng đã
 ## Next step
 
 Pha 2 mục 1–2, dùng dữ liệu đã có trên ổ ngoài (`/media/usb/AI20K/TorWIC SLAM Dataset`).
+
+## Decision (owner, 02/10/2026): để dành ảnh cho PSNR/SSIM/LPIPS
+
+Owner chốt: **có** để dành ảnh để đo chất lượng dựng hình ("phải có metric để đo lường kết quả"). Áp dụng cho pha 3.
+PROPOSAL cách làm, chưa code: giữ lại 1/8 số frame đã trích (cách làm quen thuộc của các bộ dữ liệu NeRF/3DGS), không
+đưa vào train; COLMAP vẫn dựng pose cho mọi frame để có pose của ảnh giữ lại. Hệ quả: số ảnh train giảm 12,5%. Cần ghi
+vào cấu hình xử lý của job (đổi `config_checksum`) và hiện trong scorecard là số đo trên ảnh giữ lại.

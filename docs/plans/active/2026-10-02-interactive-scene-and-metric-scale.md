@@ -151,7 +151,7 @@ khi chỉ có test giả lập.
 
 ## Progress
 
-- [ ] H1 Điều khiển viewer + đi bộ góc nhìn thứ nhất
+- [x] H1 Điều khiển viewer + đi bộ góc nhìn thứ nhất (02/10/2026; xem Result)
 - [ ] H2 Chọn vật theo hình dáng
 - [ ] H3 Tường ma của mesh va chạm — hoãn (owner, 02/10/2026)
 - [ ] H4 Nhân vật 3D, góc nhìn thứ ba
@@ -159,3 +159,23 @@ khi chỉ có test giả lập.
 - [ ] H6 Đề xuất tỉ lệ mét tự động
 - [ ] H7 Hàng đợi nhiều người dùng
 - [ ] H8 Việc đang kẹt / cần máy thuê
+
+## Result
+
+### H1 (02/10/2026)
+
+- `GET /api/v1/jobs/{job_id}/walk-collision/{filename}`: lưới va chạm của job xoay sang không gian hiển thị
+  (`orchestration/jobs/display_glb.py`); quyền đọc theo allow-list như `artifacts/content`; artifact gốc không đổi.
+  Lý do: viewer đọc toạ độ đỉnh thô của GLB va chạm, không áp transform của node, còn Studio hiển thị scene hệ mét
+  bằng phép xoay `(x, y, z) → (x, z, −y)`.
+- `PlayCanvasScene`: `ViewerControls.setCameraMode/frameScene/resetCamera`, `runtime.cameraMode`, `wheelFactor` (nhân
+  bước cuộn ở lớp host vì tốc độ zoom của viewer là hằng số nội bộ `wheelSpeed`, không có trong settings).
+- `CameraToolbar` trên `MetricSceneView`: Xoay / Bay / Đi bộ, Toàn cảnh, Về vị trí đầu, tốc độ zoom (mặc định ×2), gợi ý
+  phím theo chế độ. Bấm đúp để lấy tâm xoay là hành vi có sẵn của viewer, chỉ ghi vào gợi ý.
+- Validation: `pytest` test mới 14 (transform GLB + route) pass; `ruff check .` sạch; `npm test` 199 passed,
+  typecheck + lint sạch.
+- Chạy thật (Chrome headless, WebGL2 phần mềm) trên scene `job-ab730e702ee9` qua API + `next dev`: viewer nạp xong,
+  `walk-collision/collision.glb` trả 200, nút Đi bộ được bật (viewer báo `walkAllowed`), bấm Bay → Đi bộ → Xoay → Toàn
+  cảnh thì chế độ viewer báo về đổi đúng theo.
+- **Chưa kiểm:** lưới va chạm có khớp hình với 3DGS khi đi bộ không (cần nhìn bằng mắt — việc của owner); cảm giác
+  điều khiển; chuột thật với khoá con trỏ. H3 (tường ma) hoãn nên đi bộ có thể bị chặn ở lối đi thật.
