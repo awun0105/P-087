@@ -9,7 +9,7 @@ Date: 2026-10-02
   không được chỉ scan thô, phải có hiển thị thông báo cho người dùng rõ ràng".
 - **Mục 6 và 7: Accepted** — owner chốt cùng ngày: LiDAR dùng cho "tất cả vai trò"; bộ mẫu có "tất cả" các dạng,
   "nhớ phải chia ra cho user hiểu là luồng nào cần data dạng nào".
-- **Mục 4–5: Proposed** — chưa phải authority; chờ owner chốt (xem "Câu hỏi còn mở").
+- **Mục 4–5:** được thay bởi phần "Bổ sung owner chốt 02/10/2026" bên dưới.
 
 Thay thế câu "LiDAR của người dùng chưa hỗ trợ ở P0; hướng LiDAR chỉ chạy trên dataset đã chuẩn bị" của
 [0004](0004-input-kinds-and-routing.md) mục 1. Các phần khác của 0004 giữ nguyên.
@@ -111,9 +111,42 @@ kèm video cùng traversal. Trang giải thích rõ từng luồng cần dữ li
 - Rủi ro: quỹ đạo người dùng nộp có thể là pose của khung khác (camera, thân robot) → đám mây ghép bị nhoè. Cần số đo
   độ sắc của đám mây ghép và ảnh xem trước để người dùng tự kiểm trước khi căn chỉnh.
 
+## Bổ sung owner chốt 02/10/2026 (sau phần trên)
+
+Các điểm dưới đây **Accepted** và thay cho chỗ khác biệt ở mục 1, 4 và 5:
+
+- **Gói LiDAR luôn có đủ: quỹ đạo, calibration camera ↔ LiDAR, thời điểm frame** (như `traj_gt.txt`,
+  `calibrations.txt`, `frame_times.txt` của TorWIC), cộng với hoặc các scan `.pcd` chưa đăng ký, hoặc một đám mây
+  `.ply`/`.pcd` đã đăng ký. Scan thô được ghép thành đám mây đã đăng ký trước; sau đó hai dạng xử lý như nhau. Đám mây
+  đã đăng ký nộp trần (không kèm quỹ đạo và calibration) bị từ chối kèm hướng dẫn — khác với bảng ở mục 1.
+- **Không có màn chọn cặp điểm.** Căn chỉnh tính từ quỹ đạo + calibration + thời điểm frame.
+- **Bước tỉ lệ mét ở luồng LiDAR không chọn điểm:** màn hình hiện tỉ lệ, sai số căn chỉnh, số frame khớp và một nút
+  xác nhận. Chưa đặt ngưỡng tự chạy tiếp vì mới có số đo trên một scene.
+- **Hướng dựng pose: COLMAP bám theo quỹ đạo** — lấy pose từ quỹ đạo làm điểm xuất phát rồi cho COLMAP tinh chỉnh có
+  ràng buộc vị trí, để scene nằm thẳng trong hệ mét của LiDAR.
+- Owner cho sửa `docs/PRD.md` và `docs/STUDIO_UX_SPEC.md` theo ADR này (đã sửa cùng ngày).
+
+Mặc định kỹ thuật (PROPOSAL, owner chưa phản đối): chỉ video camera trái đi được luồng LiDAR; hệ LiDAR có Z hướng lên
+và mặt sàn ước lượng từ đám mây; nâng giới hạn upload cho gói LiDAR và cho nộp một phần scan; mẫu TorWIC ghi rõ quỹ
+đạo là ground truth của dataset.
+
+### Số đo thử nghiệm (VERIFIED, 02/10/2026)
+
+Aisle_CW, 100 ảnh camera trái (ảnh 100–595, cách 5), COLMAP 4.3.0.dev0, CPU, cùng feature và matching
+(`data/evidence/eval_runs/pose_prior/`, không commit):
+
+| Cách dựng pose | Ảnh dựng được | Sai số chiếu lại | Lệch so với quỹ đạo |
+|---|---|---|---|
+| `mapper` (như pipeline hiện tại) | 91, đứt thành hai mảnh 71 + 20 | 0,59 px | chỉ so được sau khi khớp riêng từng mảnh: RMS 11,9 cm và 51,4 cm |
+| `pose_prior_mapper` từ đầu (vị trí σ = 5 cm) | 91, vẫn đứt 71 + 20 | 0,59 px | trung vị 7,1 cm và 26,4 cm, không cần khớp |
+| Pose cố định từ quỹ đạo + `point_triangulator` | 100, một mảnh | 1,63 px | 0 (đúng quỹ đạo) |
+| Như trên rồi `bundle_adjuster` tự do | 100 | 0,41 px | trôi: trung vị 2,0 m, tỉ lệ lệch 12% |
+| **Pose từ quỹ đạo + `point_triangulator`, rồi `pose_prior_mapper --input_path` (σ = 5 cm)** | **100, một mảnh** | **0,52 px** | **trung vị 8,0 cm, lớn nhất 22 cm, tỉ lệ 1,0003** |
+
+Cách cuối là cách chọn để làm tiếp. Chưa đo: chất lượng 3DGS (PSNR trên ảnh giữ lại) và độ lệch bề mặt so với LiDAR
+của từng cách; chưa thử traversal khác; quỹ đạo dùng ở đây là ground truth nên chưa nói được gì về quỹ đạo tự tính.
+
 ## Câu hỏi còn mở
 
-1. Cách căn chỉnh (mục 5). Owner nêu hướng (02/10/2026): luồng LiDAR + video dành cho kỹ sư nên họ nộp kèm quỹ đạo.
-   Còn phải chốt: quỹ đạo chỉ đủ để căn chỉnh tự động khi có thêm phép biến đổi camera ↔ LiDAR (calibration) và quan
-   hệ thời gian giữa video và quỹ đạo. Bắt buộc cả ba cho mọi luồng LiDAR, hay giữ đường chọn cặp điểm cho trường hợp
-   thiếu (vd. chỉ nộp đám mây đã đăng ký)?
+Không còn câu hỏi sản phẩm nào chờ owner. Việc kỹ thuật còn phải đo trước khi khoá: chất lượng 3DGS của cách dựng pose
+bám quỹ đạo, và mesh va chạm dựng từ LiDAR so với mesh từ 3DGS.

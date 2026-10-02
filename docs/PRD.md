@@ -33,6 +33,7 @@
 | v1.14 | 25/09/2026 | Đồng bộ viewer P0 với PlayCanvas Engine 2.22.4 + supersplat-viewer 1.35.2; WebGL2 baseline, WebGPU ưu tiên khi khả dụng. Giữ nguyên real Brush/browser proof và AC-11; không coi thay đổi thư viện là runtime acceptance. |
 | v1.15 | 29/09/2026 | Khách (không đăng nhập) chỉ dùng video mẫu, không tốn GPU; upload/chạy job cần tài khoản Editor; tài khoản qua mã mời. Không thêm role — vẫn Editor/Reviewer (ADR 0003). |
 | v1.16 | 30/09/2026 | Owner chốt pipeline v2 ([ADR 0007](./decisions/0007-object-centric-hybrid-usd-pipeline.md)): scene theo vật chỉnh sửa được, xuất USD lai (Gaussian để hiển thị, collider để va chạm) cho Isaac Sim. Kéo vào phạm vi hiện tại: xoá vật kèm vá nền, gợi ý nhãn, thay vật bằng asset (mục 4.3.1). FR-11 bổ sung yêu cầu USD lai, khối lượng, vật liệu vật lý, nhãn ngữ nghĩa. Acceptance định lượng của các mục mới khoá sau pha chạy thử. |
+| v1.17 | 02/10/2026 | LiDAR của người dùng đi kèm video (ADR 0009): nhận gói đám mây đã đăng ký hoặc scan thô, bắt buộc kèm quỹ đạo + calibration + thời điểm frame; ghép scan theo quỹ đạo và căn chỉnh RGB ↔ LiDAR vào phạm vi làm. LiDAR odometry/SLAM và job chỉ-LiDAR giữ nguyên ngoài phạm vi |
 
 ### 0.2 Chủ sở hữu và người phê duyệt (Owners and Approvers)
 
@@ -347,8 +348,8 @@ Full LiDAR-only product configuration thuộc P1.
 
 - đặt tên semantic tự động;
 - phân loại có hỗ trợ mô hình thị giác-ngôn ngữ (VLM-assisted classification);
-- xử lý chuỗi LiDAR thô, LiDAR odometry hoặc LiDAR SLAM;
-- căn chỉnh cảm biến tự động;
+- LiDAR odometry hoặc LiDAR SLAM (tự ước lượng quỹ đạo từ scan thô). Ghép scan thô **khi người dùng nộp kèm quỹ đạo** không thuộc mục này: đã vào phạm vi làm theo quyết định owner 02/10/2026 ([ADR 0009](./decisions/0009-user-lidar-input-and-routing.md));
+- căn chỉnh cảm biến tự động khi **không có** quỹ đạo và calibration. Căn chỉnh RGB ↔ LiDAR từ quỹ đạo + calibration + thời điểm frame do người dùng nộp đã vào phạm vi làm (ADR 0009);
 - RGB-D như một input contract riêng;
 - tái dựng scene động;
 - xóa vật thể kèm điền vùng bị che (3D inpainting/scene completion);
@@ -404,7 +405,7 @@ Hệ thống nhận:
 - video RGB từ camera di chuyển; và
 - point cloud LiDAR đã được đăng ký hoặc hợp nhất (registered/fused).
 
-Hai nguồn phải mô tả cùng một môi trường và có đủ vùng không gian chồng lặp. MVP có thể yêu cầu dữ liệu đã được căn chỉnh trước. Nếu chưa căn chỉnh, hệ thống phải từ chối hoặc đánh dấu scene chưa đủ điều kiện fusion; không được âm thầm ghép hai nguồn sai hệ tọa độ.
+Hai nguồn phải mô tả cùng một môi trường và có đủ vùng không gian chồng lặp. MVP có thể yêu cầu dữ liệu đã được căn chỉnh trước. Từ 02/10/2026 (ADR 0009) người dùng nộp LiDAR kèm video ở dạng gói gồm quỹ đạo, calibration camera ↔ LiDAR, thời điểm frame và hoặc đám mây đã đăng ký, hoặc các scan thô; hệ thống ghép scan (nếu cần) và căn chỉnh từ các dữ liệu đó, người dùng xem sai số rồi xác nhận. Nếu chưa căn chỉnh, hệ thống phải từ chối hoặc đánh dấu scene chưa đủ điều kiện fusion; không được âm thầm ghép hai nguồn sai hệ tọa độ.
 
 ### 5.3 Registered LiDAR Input và LiDAR-only Product Configuration
 
