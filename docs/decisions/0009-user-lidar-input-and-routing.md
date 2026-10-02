@@ -161,6 +161,11 @@ lại nó dựng đủ 100/100 ảnh thành một mảnh trong hệ mét (trên 
 Chưa đo: độ lệch bề mặt so với LiDAR của từng cách; chưa thử traversal khác; quỹ đạo dùng ở đây là ground truth nên
 chưa nói được gì về quỹ đạo tự tính.
 
+**Job thật qua toàn bộ pipeline (02/10/2026):** `job-101e9b56344c`, video Aisle_CW 100–599 + gói 100 scan thô, σ = 5 cm:
+100/100 frame, sai số chiếu lại 0,53 px, pose lệch quỹ đạo trung vị 10,6 cm (lớn nhất 33 cm), tỉ lệ 0,9980, PSNR 24,82 /
+SSIM 0,875 / LPIPS 0,367 trên 13 ảnh giữ lại; xác nhận tỉ lệ không chọn điểm; job SUCCEEDED với 14 vật. Chi tiết:
+[plan](../plans/active/2026-10-02-lidar-video-flow.md).
+
 ## Câu hỏi còn mở
 
 Không còn câu hỏi sản phẩm nào chờ owner. Việc kỹ thuật còn phải đo trước khi khoá: chất lượng 3DGS của cách dựng pose
