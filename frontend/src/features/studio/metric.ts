@@ -4,7 +4,7 @@
  * sàn làm z=0, A→B làm trục X, A làm gốc, và đo lại C–D để kiểm tỉ lệ.
  */
 import type { InspectionPoint } from "@/features/viewer/inspection-history";
-import type { DistanceSource, MetricInput, MetricPoint } from "@/lib/contracts/studio";
+import type { DistanceSource, MetricInput, MetricPoint, MetricProposal } from "@/lib/contracts/studio";
 
 export const METRIC_POINT_COUNT = 7;
 
@@ -12,6 +12,28 @@ export const METRIC_POINT_LABELS = ["A", "B", "C", "D", "Sàn 1", "Sàn 2", "Sà
 
 /** Độ dài tối thiểu mỗi đoạn, khớp `MIN_SEGMENT_M` của backend. */
 export const MIN_SEGMENT_M = 0.5;
+
+/**
+ * Bảy điểm của đề xuất tự động theo đúng thứ tự A, B, C, D, sàn 1–3; null khi đề xuất chỉ có tỉ lệ
+ * (không tìm được mặt sàn) — khi đó người dùng tự chọn điểm và chỉ khoảng cách được điền.
+ */
+export function proposalPoints(proposal: MetricProposal): MetricPoint[] | null {
+  if (!proposal.floor || !proposal.segments) return null;
+  const { point_a, point_b, check_a, check_b } = proposal.segments;
+  return [point_a, point_b, check_a, check_b, ...proposal.floor.points];
+}
+
+/**
+ * Khoảng cách A–B và C–D theo tỉ lệ đề xuất: độ dài trong scene × tỉ lệ. Backend chỉ nhận nguồn
+ * `ai_estimated` khi hai số này đúng bằng phép tính đó, nên luôn tính lại từ điểm đang chọn.
+ */
+export function estimatedDistances(
+  pairs: [[MetricPoint, MetricPoint], [MetricPoint, MetricPoint]],
+  scale: number,
+): [number, number] {
+  const length = ([a, b]: [MetricPoint, MetricPoint]) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * scale;
+  return [length(pairs[0]), length(pairs[1])];
+}
 
 /** Hướng dẫn cho điểm kế tiếp cần chọn (null khi đã đủ). */
 export function nextPointHint(count: number): string | null {

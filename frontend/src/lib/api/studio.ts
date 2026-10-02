@@ -9,6 +9,7 @@ import type { SceneEditResponse, SceneResponse } from "@/lib/contracts/api";
 import {
   parseDemoManifest,
   parseDemoSelection,
+  parseMetricProposal,
   parseJobProgress,
   parseLidarMeasurements,
   parseMetricPreview,
@@ -16,6 +17,7 @@ import {
   parseStageViews,
   type DemoManifest,
   type DemoSelection,
+  type MetricProposal,
   type ImportedScene,
   type JobProgress,
   type LidarMeasurements,
@@ -234,6 +236,17 @@ export async function measureOnLidar(
 export async function getDemoPoints(jobId: string): Promise<DemoSelection> {
   const data = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/metric/demo-points`);
   return parseDemoSelection(data);
+}
+
+/** Đề xuất tỉ lệ/mặt sàn tự động của scene; null khi worker không tạo (không bật hoặc không đủ dữ liệu). */
+export async function getMetricProposal(jobId: string): Promise<MetricProposal | null> {
+  const result = await fetchApi<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/metric/proposal`);
+  if (!result.ok) return null;
+  try {
+    return parseMetricProposal(result.data);
+  } catch {
+    return null; // Đề xuất hỏng thì coi như không có: người dùng vẫn nhập tay được.
+  }
 }
 
 /** Xem trước tỉ lệ mét từ điểm đã chọn; backend chưa ghi xác nhận. */

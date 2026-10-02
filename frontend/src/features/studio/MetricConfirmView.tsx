@@ -9,15 +9,17 @@ import { Button, Notice } from "@/components/studio/primitives";
 import {
   METRIC_POINT_COUNT,
   METRIC_POINT_LABELS,
+  estimatedDistances,
   metricInput,
   nextPointHint,
+  proposalPoints,
   segments,
 } from "@/features/studio/metric";
 import { EMPTY_INSPECTION, type InspectionState } from "@/features/viewer/inspection-history";
 import { PlayCanvasScene, usePlayCanvasCapability } from "@/features/viewer/PlayCanvasScene";
 import type { SplatInspection } from "@/features/viewer/splat-inspection";
-import { confirmMetric, getDemoPoints, getMetricAssist, measureOnLidar, previewMetric } from "@/lib/api/studio";
-import type { LidarMeasurements, MetricInput, MetricPreview } from "@/lib/contracts/studio";
+import { confirmMetric, getDemoPoints, getMetricAssist, getMetricProposal, measureOnLidar, previewMetric } from "@/lib/api/studio";
+import type { LidarMeasurements, MetricInput, MetricPreview, MetricProposal } from "@/lib/contracts/studio";
 import { HelpDetails, notifySuccess } from "@/components/studio/feedback";
 
 export interface MetricDraft { points: InspectionState["points"]; typed: { anchor: string; check: string } }
@@ -56,6 +58,9 @@ export function MetricConfirmView({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [demoRunning, setDemoRunning] = useState(false);
+  const [proposal, setProposal] = useState<MetricProposal | null>(null);
+  // Người dùng chọn dùng ước lượng tự động làm khoảng cách (thay cho số đo ngoài đời).
+  const [useEstimate, setUseEstimate] = useState(false);
   const timers = useRef<number[]>([]);
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
   useEffect(() => () => timers.current.forEach((timer) => window.clearTimeout(timer)), []);
@@ -70,6 +75,16 @@ export function MetricConfirmView({
     let alive = true;
     void getMetricAssist(jobId).then((assist) => {
       if (alive) setLidarAvailable(assist.lidar_available);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [jobId]);
+
+  useEffect(() => {
+    let alive = true;
+    void getMetricProposal(jobId).then((next) => {
+      if (alive) setProposal(next);
     });
     return () => {
       alive = false;
@@ -97,9 +112,16 @@ export function MetricConfirmView({
   }, [jobId, lidarAvailable, pairKey]);
 
   const lidarResult = lidar && pairKey !== null && JSON.stringify(segments(lidar.points)) === pairKey ? lidar : null;
-  const source = lidarAvailable ? "lidar_demo" : "user_measured";
-  const anchorDistance = lidarAvailable ? String(lidarResult?.result?.anchor.distance_m ?? "") : typed.anchor;
-  const checkDistance = lidarAvailable ? String(lidarResult?.result?.check.distance_m ?? "") : typed.check;
+  // Ước lượng tự động chỉ dùng khi scene không có LiDAR và người dùng đã chọn dùng nó.
+  const estimating = !lidarAvailable && useEstimate && proposal !== null;
+  const estimated = estimating && pairs ? estimatedDistances(pairs, proposal.scale_m_per_sfm_unit) : null;
+  const source = lidarAvailable ? "lidar_demo" : estimating ? "ai_estimated" : "user_measured";
+  const anchorDistance = lidarAvailable
+    ? String(lidarResult?.result?.anchor.distance_m ?? "")
+    : estimating ? String(estimated?.[0] ?? "") : typed.anchor;
+  const checkDistance = lidarAvailable
+    ? String(lidarResult?.result?.check.distance_m ?? "")
+    : estimating ? String(estimated?.[1] ?? "") : typed.check;
   const input = metricInput(inspection.points, anchorDistance, checkDistance, source);
   // Bản xem trước chỉ còn hiệu lực khi điểm và khoảng cách không đổi.
   const current = preview && input && JSON.stringify(preview.input) === JSON.stringify(input) ? preview.result : null;
@@ -113,7 +135,21 @@ export function MetricConfirmView({
         ? lidarResult?.error
           ? "Chưa có số đo LiDAR: chọn lại điểm bị báo lỗi ở trên."
           : "Đang chờ số đo LiDAR…"
-        : "Nhập khoảng cách thật của A–B và C–D (mét).";
+        : estimating
+          ? "Đoạn A–B và C–D theo ước lượng phải dài ít nhất 0,5 m; chọn hai điểm xa nhau hơn."
+          : "Nhập khoảng cách thật của A–B và C–D (mét).";
+
+  /** Điền bảy điểm của đề xuất (nếu có mặt sàn) và chuyển sang dùng khoảng cách ước lượng. */
+  function applyProposal() {
+    if (!proposal || !controller) return;
+    const points = proposalPoints(proposal);
+    if (points) {
+      controller.setMeasuring(false);
+      controller.setPoints(points);
+    }
+    setPreview(null);
+    setUseEstimate(true);
+  }
 
   /** Dataset mẫu: lấy 7 điểm tự chọn từ LiDAR rồi vẽ lần lượt từng điểm, xong tự xem trước. */
   async function runDemo() {
@@ -218,6 +254,31 @@ export function MetricConfirmView({
           </Notice>
         )}
 
+        {lidarAvailable === false && proposal && (
+          <div className="space-y-2 rounded-xl border border-line p-3 text-sm" data-testid="metric-proposal">
+            <p className="flex items-center gap-2 font-medium text-ink">
+              <Sparkles className="size-4" aria-hidden /> Đề xuất tự động (ước lượng từ ảnh)
+            </p>
+            <p>
+              Tỉ lệ ước lượng: <span className="font-mono">{proposal.scale_m_per_sfm_unit.toPrecision(4)}</span> m/đơn vị, sai số
+              ước tính ±{(proposal.relative_uncertainty * 100).toFixed(0)}% (từ {proposal.frames_used} ảnh).
+              {proposal.floor ? " Có đề xuất mặt sàn." : " Không tìm được mặt sàn: bạn tự chọn điểm."}
+            </p>
+            <p className="text-xs text-ink-subtle">
+              Đây là ước lượng của mô hình đoán độ sâu, không phải số đo. Cần chính xác thì đo thật một đoạn và nhập tay.
+            </p>
+            {useEstimate ? (
+              <Button variant="secondary" size="sm" disabled={busy} onClick={() => { setUseEstimate(false); setPreview(null); }}>
+                Nhập số đo thật thay cho ước lượng
+              </Button>
+            ) : (
+              <Button size="sm" disabled={!controller || busy} onClick={applyProposal}>
+                Dùng đề xuất tự động
+              </Button>
+            )}
+          </div>
+        )}
+
         {lidarAvailable && (
           <Button className="w-full" disabled={!controller || demoRunning || busy} onClick={() => void runDemo()}>
             {demoRunning ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden /> : <Sparkles aria-hidden />}
@@ -294,6 +355,19 @@ export function MetricConfirmView({
                   cm.
                 </p>
               </>
+            )}
+          </div>
+        ) : estimating ? (
+          <div className="space-y-1 rounded-xl border border-line p-3 text-sm" aria-live="polite">
+            <p className="font-medium text-ink">Khoảng cách theo ước lượng tự động</p>
+            {estimated ? (
+              <>
+                <p>A–B: <span className="font-mono">{estimated[0].toFixed(3)} m</span></p>
+                <p>C–D: <span className="font-mono">{estimated[1].toFixed(3)} m</span></p>
+                <p className="text-xs text-ink-subtle">Tính từ điểm đang chọn × tỉ lệ ước lượng; đổi điểm thì số đổi theo.</p>
+              </>
+            ) : (
+              <p className="text-xs text-ink-subtle">Chọn đủ A, B, C, D để tính.</p>
             )}
           </div>
         ) : (

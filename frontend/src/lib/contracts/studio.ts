@@ -127,7 +127,29 @@ export interface JobProgress {
 }
 
 /** Nguồn số đo: người dùng đo ngoài đời, hoặc LiDAR của dataset mẫu (ADR 0004 §6). */
-export type DistanceSource = "user_measured" | "lidar_demo";
+/** `ai_estimated`: khoảng cách lấy từ đề xuất tự động (ADR 0001 §2), không phải số đo ngoài đời. */
+export type DistanceSource = "user_measured" | "lidar_demo" | "ai_estimated";
+
+/**
+ * Đề xuất tỉ lệ mét và mặt sàn tự động của worker (MoGe-2 + điểm thưa COLMAP). Luôn là ước lượng:
+ * người dùng chấp nhận hoặc sửa ở bước xác nhận. Khớp `MetricProposal` backend.
+ */
+export interface MetricProposal {
+  status: "ESTIMATED";
+  job_id: string;
+  scale_m_per_sfm_unit: number;
+  /** Độ phân tán tương đối của tỉ lệ giữa các ảnh. */
+  frame_dispersion: number;
+  /** Sai số chuẩn tương đối của tỉ lệ (chỉ phần nhiễu giữa các ảnh). */
+  relative_uncertainty: number;
+  frames_used: number;
+  pairs_used: number;
+  floor: { points: [MetricPoint, MetricPoint, MetricPoint]; residual_m: number; support_points: number } | null;
+  segments: {
+    point_a: MetricPoint; point_b: MetricPoint; distance_m: number;
+    check_a: MetricPoint; check_b: MetricPoint; check_distance_m: number;
+  } | null;
+}
 
 /** Điểm chọn trên 3DGS (hệ gốc file, đơn vị SfM) + số đo A–B, C–D. Khớp `UserMetricInput`. */
 export interface MetricInput {
@@ -371,7 +393,7 @@ export function parseMetricPreview(value: unknown): MetricPreview {
   if (!isRecord(value) || typeof value.preview_checksum !== "string" || !Array.isArray(value.warnings) ||
       !value.warnings.every((warning) => typeof warning === "string") ||
       typeof value.check_passed !== "boolean" ||
-      (value.distance_source !== "user_measured" && value.distance_source !== "lidar_demo") ||
+      !["user_measured", "lidar_demo", "ai_estimated"].includes(String(value.distance_source)) ||
       !METRIC_NUMBERS.every((key) => isFiniteNumber(value[key]))) {
     throw new Error("Bản xem trước tỉ lệ từ backend không hợp lệ");
   }
@@ -389,6 +411,28 @@ export function parseLidarMeasurements(value: unknown): LidarMeasurements {
     throw new Error("Số đo LiDAR từ backend không hợp lệ");
   }
   return value as unknown as LidarMeasurements;
+}
+
+function isMetricPoint(value: unknown): value is MetricPoint {
+  return Array.isArray(value) && value.length === 3 && value.every(isFiniteNumber);
+}
+
+/** Đề xuất tự động phải có tỉ lệ dương, hữu hạn và điểm hợp lệ trước khi điền vào bước xác nhận. */
+export function parseMetricProposal(value: unknown): MetricProposal {
+  const positive = (item: unknown) => isFiniteNumber(item) && item > 0;
+  const floor = isRecord(value) ? value.floor : undefined;
+  const pairs = isRecord(value) ? value.segments : undefined;
+  if (!isRecord(value) || value.status !== "ESTIMATED" || typeof value.job_id !== "string" ||
+      !positive(value.scale_m_per_sfm_unit) || !isFiniteNumber(value.frame_dispersion) || value.frame_dispersion < 0 ||
+      !isFiniteNumber(value.relative_uncertainty) || value.relative_uncertainty < 0 ||
+      !positive(value.frames_used) || !positive(value.pairs_used) ||
+      (floor !== null && !(isRecord(floor) && Array.isArray(floor.points) && floor.points.length === 3 &&
+        floor.points.every(isMetricPoint) && isFiniteNumber(floor.residual_m))) ||
+      (pairs !== null && !(isRecord(pairs) && [pairs.point_a, pairs.point_b, pairs.check_a, pairs.check_b].every(isMetricPoint) &&
+        positive(pairs.distance_m) && positive(pairs.check_distance_m)))) {
+    throw new Error("Đề xuất tỉ lệ tự động từ backend không hợp lệ");
+  }
+  return value as unknown as MetricProposal;
 }
 
 /** Bộ điểm demo phải đủ 7 điểm hữu hạn và số đo hợp lệ trước khi vẽ lên scene. */
