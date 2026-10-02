@@ -9,10 +9,20 @@ import type { JobManifest, StageId } from "@/lib/contracts/api";
 
 export type VideoMediaType = "video/mp4" | "video/quicktime";
 
-export type UploadMediaType = VideoMediaType | "application/x-ply" | "application/zip";
+export type UploadMediaType = VideoMediaType | "application/x-ply" | "application/x-pcd" | "application/zip";
 
-/** Loại đầu vào máy chủ nhận diện theo nội dung (ADR 0004). */
-export type InputKind = "rgb_video" | "gaussian_ply" | "gaussian_ply_colmap";
+/** Loại đầu vào máy chủ nhận diện theo nội dung (ADR 0004; LiDAR theo ADR 0009). */
+export type InputKind = "rgb_video" | "gaussian_ply" | "gaussian_ply_colmap" | "registered_lidar" | "lidar_scan_sequence";
+
+/** Bằng chứng LiDAR: đám mây đã đăng ký có `point_count`; chuỗi scan có số scan, số pose và file quỹ đạo. */
+export interface LidarEvidence {
+  geometry_format: "ply" | "pcd";
+  point_count: number | null;
+  scan_count: number | null;
+  pose_count: number | null;
+  trajectory_member: string | null;
+  pairing: "index_in_name" | "sorted_order" | null;
+}
 
 export interface InputDetection {
   kind: InputKind;
@@ -20,6 +30,7 @@ export interface InputDetection {
   ply_member: string | null;
   colmap_dir: string | null;
   colmap_format: "bin" | "txt" | null;
+  lidar?: LidarEvidence | null;
 }
 
 export interface UploadRecord {
@@ -66,6 +77,8 @@ export interface SceneSummary {
   project: StudioProject;
   latest_job: JobManifest | null;
   preview_ready: boolean;
+  /** Thời gian máy đã xử lý (tổng các bước đã chạy xong), không gồm lúc xếp hàng và lúc chờ người dùng; null = chưa đo. */
+  processing_seconds?: number | null;
 }
 
 export interface SceneFromUpload {

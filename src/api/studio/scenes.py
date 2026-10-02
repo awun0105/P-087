@@ -18,6 +18,7 @@ from src.services.orchestration.jobs.queue import queue_position
 from src.services.orchestration.jobs.stage_views import StageViewList, stage_views
 from src.services.orchestration.jobs.thumbnails import scene_thumbnail
 from src.services.orchestration.processing import build_job_config, evaluate, is_presets_file, preset_values
+from src.services.orchestration.processing.observed import load_usages, processing_seconds
 from src.services.orchestration.projects import JobCreateInput, JobNotFoundError, PrivacyGateBlockedError
 from src.services.orchestration.projects.models import UploadProjectInput
 from src.services.orchestration.uploads import UploadNotFoundError
@@ -33,6 +34,9 @@ class SceneSummary(BaseModel):
     project: schemas.ProjectResponse
     latest_job: JobManifest | None = None
     preview_ready: bool = False
+    #: Thời gian máy đã xử lý của job mới nhất (tổng các bước đã chạy xong); không gồm lúc xếp hàng và lúc chờ người
+    #: dùng. None = job chưa có bước nào được đo.
+    processing_seconds: float | None = None
 
 
 class SceneListResponse(BaseModel):
@@ -126,6 +130,9 @@ def list_scenes() -> SceneListResponse:
     """Scene của Studio (project tạo từ upload); project fixture/dataset không hiện ở đây."""
     registry = deps.registry()
     scenes: list[SceneSummary] = []
+    measured = (
+        processing_seconds(load_usages(registry.persistence.database)) if registry.persistence is not None else {}
+    )
     for project in registry.list_projects():
         if project.input_manifest_ref is None:
             continue
@@ -136,6 +143,7 @@ def list_scenes() -> SceneListResponse:
                 project=schemas.project_response(project),
                 latest_job=latest,
                 preview_ready=latest is not None and deps.preview_ready(registry, latest.job_id),
+                processing_seconds=None if latest is None else measured.get(latest.job_id),
             )
         )
     # Project upload luôn có created_at; mốc 0 chỉ là phòng hờ cho record cũ.
