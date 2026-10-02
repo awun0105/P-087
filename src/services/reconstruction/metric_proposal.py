@@ -82,6 +82,28 @@ class SegmentProposal(BaseModel):
     check_distance_m: float = Field(gt=0)
 
 
+class TrajectoryAlignment(BaseModel):
+    """Bằng chứng của đề xuất lấy từ gói LiDAR (ADR 0009): pose camera cuối cùng so với quỹ đạo người dùng nộp.
+
+    Scene được dựng bám theo quỹ đạo nên đã nằm trong hệ mét của LiDAR; các số ở đây cho người dùng thấy nó bám sát
+    tới đâu trước khi xác nhận. Quỹ đạo sai (khác lượt quay, sai calibration, lệch thời gian) hiện ra thành độ lệch lớn.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    trajectory_origin: Literal["estimated", "ground_truth"]
+    input_frames: int = Field(ge=1)
+    registered_frames: int = Field(ge=1)
+    #: Khoảng cách giữa tâm camera cuối cùng và quỹ đạo, tính thẳng trong hệ của quỹ đạo (mét).
+    offset_median_m: float = Field(ge=0)
+    offset_p90_m: float = Field(ge=0)
+    offset_max_m: float = Field(ge=0)
+    #: Chiều dài đường đi của camera (mét); tỉ lệ càng chắc khi đường đi càng dài so với độ lệch.
+    path_length_m: float = Field(ge=0)
+    lidar_package_checksum: str
+    camera_poses_checksum: str
+
+
 class MetricProposal(BaseModel):
     """Ước lượng tự động, chưa được ai xác nhận; mọi con số đi kèm độ không chắc chắn."""
 
@@ -92,8 +114,9 @@ class MetricProposal(BaseModel):
     status: Literal["ESTIMATED"] = "ESTIMATED"
     job_id: str
     source_visual_checksum: str
-    method: Literal["moge2_sparse_depth_scale_only"] = "moge2_sparse_depth_scale_only"
-    #: Checksum của trọng số mô hình đã dùng (đổi mô hình là đổi đề xuất).
+    #: `lidar_trajectory_alignment`: tỉ lệ và sàn lấy từ gói LiDAR của job (không phải mô hình đoán độ sâu).
+    method: Literal["moge2_sparse_depth_scale_only", "lidar_trajectory_alignment"] = "moge2_sparse_depth_scale_only"
+    #: Checksum của trọng số mô hình đã dùng (đổi mô hình là đổi đề xuất); với LiDAR là checksum bản ghi gói.
     model_checksum: str
     scale_m_per_sfm_unit: float = Field(gt=0)
     #: Độ phân tán tương đối của tỉ lệ giữa các ảnh (1,4826·MAD / trung vị).
@@ -105,6 +128,8 @@ class MetricProposal(BaseModel):
     pairs_used: int = Field(ge=1)
     floor: FloorProposal | None = None
     segments: SegmentProposal | None = None
+    #: Chỉ có với `lidar_trajectory_alignment`.
+    alignment: TrajectoryAlignment | None = None
 
 
 def proposal_uri(job_id: str, source_visual: ProductArtifactRef) -> str:

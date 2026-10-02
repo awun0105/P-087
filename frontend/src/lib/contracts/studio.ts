@@ -179,15 +179,30 @@ export interface JobProgress {
 
 /** Nguồn số đo: người dùng đo ngoài đời, hoặc LiDAR của dataset mẫu (ADR 0004 §6). */
 /** `ai_estimated`: khoảng cách lấy từ đề xuất tự động (ADR 0001 §2), không phải số đo ngoài đời. */
-export type DistanceSource = "user_measured" | "lidar_demo" | "ai_estimated";
+/** `lidar_trajectory`: khoảng cách suy từ gói LiDAR của job qua căn chỉnh quỹ đạo (ADR 0009), không ai chọn điểm. */
+export type DistanceSource = "user_measured" | "lidar_demo" | "ai_estimated" | "lidar_trajectory";
 
 /**
  * Đề xuất tỉ lệ mét và mặt sàn tự động của worker (MoGe-2 + điểm thưa COLMAP). Luôn là ước lượng:
  * người dùng chấp nhận hoặc sửa ở bước xác nhận. Khớp `MetricProposal` backend.
  */
+/** Bằng chứng căn chỉnh của đề xuất lấy từ gói LiDAR: pose camera cuối cùng so với quỹ đạo người dùng nộp. */
+export interface TrajectoryAlignment {
+  trajectory_origin: "estimated" | "ground_truth";
+  input_frames: number;
+  registered_frames: number;
+  offset_median_m: number;
+  offset_p90_m: number;
+  offset_max_m: number;
+  path_length_m: number;
+}
+
 export interface MetricProposal {
   status: "ESTIMATED";
   job_id: string;
+  /** `lidar_trajectory_alignment`: tỉ lệ và sàn lấy từ gói LiDAR; mặc định là ước lượng của mô hình đoán độ sâu. */
+  method?: "moge2_sparse_depth_scale_only" | "lidar_trajectory_alignment";
+  alignment?: TrajectoryAlignment | null;
   scale_m_per_sfm_unit: number;
   /** Độ phân tán tương đối của tỉ lệ giữa các ảnh. */
   frame_dispersion: number;
@@ -452,7 +467,7 @@ export function parseMetricPreview(value: unknown): MetricPreview {
   if (!isRecord(value) || typeof value.preview_checksum !== "string" || !Array.isArray(value.warnings) ||
       !value.warnings.every((warning) => typeof warning === "string") ||
       typeof value.check_passed !== "boolean" ||
-      !["user_measured", "lidar_demo", "ai_estimated"].includes(String(value.distance_source)) ||
+      !["user_measured", "lidar_demo", "ai_estimated", "lidar_trajectory"].includes(String(value.distance_source)) ||
       !METRIC_NUMBERS.every((key) => isFiniteNumber(value[key]))) {
     throw new Error("Bản xem trước tỉ lệ từ backend không hợp lệ");
   }

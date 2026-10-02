@@ -16,6 +16,7 @@ import {
   segments,
 } from "@/features/studio/metric";
 import { EMPTY_INSPECTION, type InspectionState } from "@/features/viewer/inspection-history";
+import { LidarMetricConfirm } from "@/features/studio/LidarMetricConfirm";
 import { PlayCanvasScene, usePlayCanvasCapability } from "@/features/viewer/PlayCanvasScene";
 import type { SplatInspection } from "@/features/viewer/splat-inspection";
 import { confirmMetric, getDemoPoints, getMetricAssist, getMetricProposal, measureOnLidar, previewMetric } from "@/lib/api/studio";
@@ -196,6 +197,35 @@ export function MetricConfirmView({
     } finally {
       setBusy(false);
     }
+  }
+
+  if (proposal?.method === "lidar_trajectory_alignment") {
+    // Job có gói LiDAR (ADR 0009): không có bước chọn điểm; khung 3D chỉ để xem scene.
+    return (
+      <div className="grid size-full lg:grid-cols-[1fr_22rem]">
+        <div className="relative min-h-80 bg-viewport">
+          {capability === "failed" || capability === "unavailable" ? (
+            <p className="grid size-full place-items-center p-6 text-center text-sm text-on-dark/80" role="alert">
+              Không render được 3DGS: trình duyệt cần WebGL2 hoặc WebGPU. Bạn vẫn xác nhận được tỉ lệ ở bên cạnh.
+            </p>
+          ) : (
+            <PlayCanvasScene contentUrl={contentUrl} contentFilename={filename} renderer="webgl" mode="VISUAL" capability={capability} onFailed={fail} />
+          )}
+        </div>
+        <aside className="space-y-4 overflow-y-auto border-l border-line bg-paper-raised p-4" aria-label="Xác nhận tỉ lệ mét">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 text-sm font-bold text-ink">
+              <Ruler className="size-4" aria-hidden />
+              Xác nhận tỉ lệ mét
+            </h2>
+            <Button variant="ghost" size="sm" onClick={onClose}>
+              <X aria-hidden /> Về Tiến trình
+            </Button>
+          </div>
+          <LidarMetricConfirm jobId={jobId} proposal={proposal} onConfirmed={onConfirmed} />
+        </aside>
+      </div>
+    );
   }
 
   return (

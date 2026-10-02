@@ -50,7 +50,13 @@ from src.services.reconstruction.rgb.splat.visual_publication import VisualResol
 Point = tuple[FiniteFloat, FiniteFloat, FiniteFloat]
 #: `ai_estimated`: khoảng cách lấy từ đề xuất tự động (ADR 0001 §2) — người dùng chấp nhận ước lượng,
 #: không phải số đo ngoài đời; bản khai giữ lại đề xuất đã dùng.
-DistanceSource = Literal["user_measured", "lidar_demo", "ai_estimated"]
+#: `lidar_trajectory`: khoảng cách suy từ gói LiDAR của job qua căn chỉnh quỹ đạo (ADR 0009), không ai chọn điểm.
+DistanceSource = Literal["user_measured", "lidar_demo", "ai_estimated", "lidar_trajectory"]
+#: Nguồn khoảng cách lấy từ đề xuất của hệ thống ↔ phương pháp của đề xuất phải khớp.
+_PROPOSAL_METHODS = {
+    "ai_estimated": "moge2_sparse_depth_scale_only",
+    "lidar_trajectory": "lidar_trajectory_alignment",
+}
 
 #: Sai số click một điểm trên 3DGS — PROPOSAL tạm, đo và khóa ở gói 2 (REC-06).
 CLICK_UNCERTAINTY_M = 0.01
@@ -316,11 +322,14 @@ class UserMetricPort:
         Người dùng được chọn điểm khác với điểm đề xuất (vd. tự chọn sàn), nhưng không được khai một
         con số tự nghĩ ra dưới nhãn ước lượng tự động: số đo thật phải gửi với nguồn `user_measured`.
         """
-        if data.distance_source != "ai_estimated":
+        if data.distance_source not in _PROPOSAL_METHODS:
             return None
         proposal = self.auto_proposal(job_id, source_visual)
         if proposal is None or self.locate is None:
             raise ValueError("Scene này không có đề xuất tỉ lệ tự động; nhập khoảng cách đo ngoài đời")
+        if proposal.method != _PROPOSAL_METHODS[data.distance_source]:
+            # Không cho gắn nhãn "từ LiDAR" lên một ước lượng của mô hình đoán độ sâu, và ngược lại.
+            raise ValueError("Nguồn khoảng cách không khớp loại đề xuất của scene này; lấy lại đề xuất")
         scale = proposal.scale_m_per_sfm_unit
         expected = (math.dist(data.point_a, data.point_b) * scale, math.dist(data.check_a, data.check_b) * scale)
         if (

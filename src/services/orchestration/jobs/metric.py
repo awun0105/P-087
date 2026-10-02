@@ -181,6 +181,21 @@ class MetricConfirmationService:
                 f"Khoảng cách là ước lượng tự động từ ảnh{margin}, không phải số đo ngoài đời; "
                 "đoạn kiểm C–D dùng cùng ước lượng nên không kiểm được sai số. Đo thật một đoạn để chính xác hơn"
             )
+        if summary.distance_source == "lidar_trajectory":
+            proposal = self.auto_proposal(job_id)
+            alignment = proposal.alignment if proposal is not None else None
+            if alignment is not None:
+                origin = (
+                    "quỹ đạo chuẩn (ground truth) của dataset"
+                    if alignment.trajectory_origin == "ground_truth"
+                    else "quỹ đạo do người nộp tự tính"
+                )
+                warnings.append(
+                    f"Tỉ lệ và mặt sàn lấy từ gói LiDAR ({origin}): {alignment.registered_frames}/"
+                    f"{alignment.input_frames} frame khớp, pose lệch quỹ đạo trung vị "
+                    f"{alignment.offset_median_m * 100:.0f} cm, lớn nhất {alignment.offset_max_m * 100:.0f} cm. "
+                    "Đoạn kiểm C–D nằm trên cùng mặt sàn LiDAR nên không phải phép kiểm độc lập"
+                )
         return MetricPreviewView(**summary.model_dump(), warnings=warnings)
 
     def confirm(

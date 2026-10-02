@@ -374,6 +374,25 @@ def _start_attempt(
     return _Attempt(registry, settings, job, workspace), profile
 
 
+def _lidar_package_ref(job: JobManifest) -> ProductArtifactRef | None:
+    """`LidarPackageRecord` của job nếu bước nhận LiDAR đã chạy xong; job chỉ có video trả None."""
+    stage = next(
+        (item for item in job.stage_artifacts if item.stage_id == StageId.LIDAR_INGEST and item.artifact_uri),
+        None,
+    )
+    if stage is None:
+        return None
+    return ProductArtifactRef(
+        artifact_type=stage.artifact_type or "LidarPackageRecord",
+        schema_version="1.0",
+        artifact_uri=stage.artifact_uri,
+        artifact_checksum=stage.artifact_checksum,
+        data_class=stage.data_class,
+        producer_stage=StageId.LIDAR_INGEST,
+        job_id=job.job_id,
+    )
+
+
 def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: ResolvedProcessing) -> JobManifest:
     """COLMAP → Brush → preview trên frame set đã verify, rồi commit receipt."""
     attempt.registry.runtime_resolver.require(frames)
@@ -389,24 +408,9 @@ def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: Res
         "brush": profile.brush,
     }
     # Job có gói LiDAR (ADR 0009): giao bản ghi gói cho REC để dựng pose bám theo quỹ đạo.
-    lidar = next(
-        (
-            stage
-            for stage in attempt.job.stage_artifacts
-            if stage.stage_id == StageId.LIDAR_INGEST and stage.artifact_uri
-        ),
-        None,
-    )
+    lidar = _lidar_package_ref(attempt.job)
     if lidar is not None:
-        request["lidar_package_ref"] = ProductArtifactRef(
-            artifact_type=lidar.artifact_type or "LidarPackageRecord",
-            schema_version="1.0",
-            artifact_uri=lidar.artifact_uri,
-            artifact_checksum=lidar.artifact_checksum,
-            data_class=lidar.data_class,
-            producer_stage=StageId.LIDAR_INGEST,
-            job_id=attempt.job.job_id,
-        ).model_dump(mode="json")
+        request["lidar_package_ref"] = lidar.model_dump(mode="json")
     request_path = attempt.workspace / "preview.request.json"
     with request_path.open("x", encoding="utf-8") as stream:
         json.dump(request, stream)
@@ -458,10 +462,26 @@ def _propose_metric(attempt: _Attempt, preview_ref: ProductArtifactRef | None) -
         return
     resolver = attempt.registry.runtime_resolver
     try:
+        preview = ReconstructionPreview.model_validate_json(resolver.require(preview_ref).read_bytes())
+        lidar = _lidar_package_ref(attempt.job)
+        if lidar is not None:
+            # Job có gói LiDAR (ADR 0009): tỉ lệ và sàn lấy từ căn chỉnh quỹ đạo, không chạy mô hình đoán độ sâu.
+            from src.services.reconstruction import propose_metric_from_lidar
+
+            propose_metric_from_lidar(
+                attempt.job.job_id,
+                preview.source_visual_ref,
+                lidar,
+                resolver.require,
+                FilesystemArtifactStore(resolver),
+                resolver.locate,
+            )
+            resolver.sync_up(attempt.job.job_id)
+            logger.info("Đề xuất tỉ lệ từ LiDAR job=%s", attempt.job.job_id)
+            return
         settings = MogeSettings()
         if settings.python is None or settings.model is None:
             return
-        preview = ReconstructionPreview.model_validate_json(resolver.require(preview_ref).read_bytes())
         with _sampled(attempt, "metric_proposal"):
             reference = propose_metric(
                 attempt.job.job_id,

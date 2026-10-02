@@ -107,6 +107,10 @@ def __getattr__(name: str) -> object:
         from src.services.reconstruction.inputs import detect
 
         return getattr(detect, name)
+    if name == "propose_metric_from_lidar":
+        from src.services.reconstruction.lidar.metric import propose_metric_from_lidar
+
+        return propose_metric_from_lidar
     if name in {"LidarPackageError", "LidarPackageIngest", "LidarPackageRecord", "LidarPackageResult"}:
         from src.services.reconstruction.lidar import package
 
@@ -120,6 +124,7 @@ __all__ = [
     "LidarPackageIngest",
     "LidarPackageRecord",
     "LidarPackageResult",
+    "propose_metric_from_lidar",
     "extract_member",
     "package_splat",
     "ModeComparison",
