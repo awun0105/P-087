@@ -38,7 +38,8 @@ from src.models.contracts.manifests import (
     StageId,
     StageStatus,
 )
-from src.services.orchestration.artifacts import ArtifactResolver
+from src.models.contracts.preview import ReconstructionPreview
+from src.services.orchestration.artifacts import ArtifactResolver, FilesystemArtifactStore
 from src.services.orchestration.benchmark import build_benchmark, publish_benchmark
 from src.services.orchestration.jobs.admission import ResourceAdmission, job_drivers
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
@@ -64,9 +65,11 @@ from src.services.orchestration.processing.telemetry import (
 )
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
 from src.services.reconstruction import (
+    MogeSettings,
     confirmation_summary,
     load_finalize_result,
     load_geometry_profile,
+    propose_metric,
     verify_prepared_preview,
 )
 
@@ -415,11 +418,45 @@ def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: Res
     receipt = verify_prepared_preview(reference, attempt.registry.runtime_resolver.require)
     if receipt.attempt_id != attempt_id or (receipt.error is None) != (exit_code == 0):
         raise ValueError("Worker result khác attempt/exit status")
+    # Trước khi job chuyển sang chờ xác nhận tỉ lệ: khi người dùng mở bước đó thì đề xuất đã có (hoặc
+    # chắc chắn không có), UI không phải đoán "đang tính" hay "không bật".
+    _propose_metric(attempt, receipt.preview_ref)
     job = attempt.registry.record_preview(attempt.job, receipt)
     _record_benchmark(attempt)
     if receipt.error is None:
         _cleanup_attempt_workspace(attempt)
     return job
+
+
+def _propose_metric(attempt: _Attempt, preview_ref: ProductArtifactRef | None) -> None:
+    """Đề xuất tỉ lệ/mặt sàn tự động (ADR 0001 §2) cho preview vừa dựng; không bao giờ làm hỏng job.
+
+    Không cấu hình runtime MoGe, không đủ dữ liệu hoặc lỗi runtime đều chỉ có nghĩa là không có đề
+    xuất: người dùng xác nhận tỉ lệ bằng số đo tay như trước.
+    """
+    if preview_ref is None:
+        return
+    resolver = attempt.registry.runtime_resolver
+    try:
+        settings = MogeSettings()
+        if settings.python is None or settings.model is None:
+            return
+        preview = ReconstructionPreview.model_validate_json(resolver.require(preview_ref).read_bytes())
+        with _sampled(attempt, "metric_proposal"):
+            reference = propose_metric(
+                attempt.job.job_id,
+                preview.source_visual_ref,
+                resolver.require,
+                FilesystemArtifactStore(resolver),
+                resolver.locate,
+                attempt.workspace / "metric_proposal",
+                settings,
+            )
+        if reference is not None:
+            resolver.sync_up(attempt.job.job_id)
+        logger.info("Đề xuất tỉ lệ tự động job=%s: %s", attempt.job.job_id, "có" if reference else "không có")
+    except Exception as error:  # noqa: BLE001 - bước phụ trợ: lỗi không được chặn preview đã dựng xong
+        logger.warning("Không tạo được đề xuất tỉ lệ job=%s cause=%s", attempt.job.job_id, type(error).__name__)
 
 
 def _cleanup_attempt_workspace(attempt: _Attempt) -> None:

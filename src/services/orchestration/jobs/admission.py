@@ -115,6 +115,8 @@ def resource_wait(database: RuntimeDatabase, job: JobManifest) -> ResourceWait |
 Phase = Literal["preview", "finalize"]
 #: Công cụ runner chạy trong mỗi lần nhận job; ngân sách đo được phải phủ hết các công cụ này.
 PHASE_TOOLS: dict[Phase, tuple[str, ...]] = {"preview": ("preview",), "finalize": ("finalize", "scene_extract")}
+#: Bước phụ trợ chạy cùng lần nhận job nhưng chỉ khi deployment bật (đề xuất tỉ lệ bằng MoGe-2).
+PHASE_OPTIONAL_TOOLS: dict[Phase, tuple[str, ...]] = {"preview": ("metric_proposal",), "finalize": ()}
 
 
 class Demand(BaseModel):
@@ -200,6 +202,7 @@ class ResourceAdmission:
             budget = observed_budget(
                 usages,
                 tools=PHASE_TOOLS[phase],
+                optional_tools=PHASE_OPTIONAL_TOOLS[phase],
                 params=numeric_params(params),
                 gpu_name=gpu_name,
                 runtime_manifest_checksum=job.runtime_manifest_checksum,

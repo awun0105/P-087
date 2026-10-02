@@ -61,11 +61,15 @@ def observed_budget(
     usages: Iterable[ResourceUsage],
     *,
     tools: Sequence[str],
+    optional_tools: Sequence[str] = (),
     params: dict[str, float],
     gpu_name: str | None,
     runtime_manifest_checksum: str,
 ) -> dict[Measured, float] | None:
     """Chặn trên VRAM/RAM (GiB) cho job chạy các `tools`; None nếu thiếu số đo cho bất kỳ tool nào.
+
+    `optional_tools` là bước phụ trợ có thể không bật trên deployment: có số đo thì tính vào, chưa có
+    thì bỏ qua thay vì coi cả job là chưa biết.
 
     Chỉ dùng lượt hoàn tất trên cùng model GPU và cùng runtime (đổi Brush/SAM2 là số đo cũ
     không còn đúng).
@@ -80,7 +84,7 @@ def observed_budget(
         and dominates(usage.params, params)
     ]
     budget: dict[Measured, float] = {"vram": 0.0, "ram": 0.0}
-    for tool in tools:
+    for tool in [*tools, *optional_tools]:
         groups: dict[tuple[tuple[str, float], ...], dict[Measured, float]] = {}
         for usage in relevant:
             vram = _vram(usage)
@@ -89,6 +93,8 @@ def observed_budget(
             group = groups.setdefault(tuple(sorted(usage.params.items())), {"vram": 0.0, "ram": 0.0})  # type: ignore[union-attr]
             group["vram"], group["ram"] = max(group["vram"], vram), max(group["ram"], usage.peak_ram_gb)
         if not groups:
+            if tool in optional_tools:
+                continue  # Bước phụ trợ chưa từng chạy trên máy này (vd. không bật): không chặn ngân sách.
             return None
         for name in ("vram", "ram"):
             budget[name] = max(budget[name], min(group[name] for group in groups.values()))

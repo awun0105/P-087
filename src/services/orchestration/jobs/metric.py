@@ -21,6 +21,7 @@ from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.reconstruction import (
     DemoSelection,
     LidarMeasurements,
+    MetricProposal,
     ModeComparison,
     UserMetricInput,
     UserMetricPreview,
@@ -67,7 +68,9 @@ class MetricConfirmationService:
     def __init__(self, registry: ProjectRegistry) -> None:
         self.registry = registry
         self.writer = FilesystemArtifactStore(registry.runtime_resolver)
-        self.port = user_metric_port(registry.runtime_resolver.require, self.writer, self._exists)
+        self.port = user_metric_port(
+            registry.runtime_resolver.require, self.writer, self._exists, registry.runtime_resolver.locate
+        )
 
     def _exists(self, artifact_uri: str) -> bool:
         return self.registry.runtime_resolver.locate(artifact_uri) is not None
@@ -133,6 +136,20 @@ class MetricConfirmationService:
         except ValueError as error:
             raise MetricConfirmationError(str(error)) from error
 
+    def auto_proposal(self, job_id: str) -> MetricProposal | None:
+        """Đề xuất tỉ lệ/mặt sàn tự động của scene (ESTIMATED); None khi worker không tạo.
+
+        Chỉ cần scene có preview: đề xuất là số liệu để xem, không đổi trạng thái job.
+        """
+        try:
+            contract = self.registry.get_preview(job_id)
+        except (ArtifactStoreError, ValueError) as error:
+            raise MetricConfirmationError("Scene chưa có preview 3DGS") from error
+        try:
+            return self.port.auto_proposal(job_id, contract.source_visual_ref)
+        except ValueError as error:
+            raise MetricConfirmationError(str(error)) from error
+
     def demo_selection(self, job_id: str) -> DemoSelection:
         """Dataset mẫu: 7 điểm tự chọn từ LiDAR + số đo, để UI vẽ và điền sẵn."""
         _, contract = self._waiting_job(job_id)
@@ -156,6 +173,13 @@ class MetricConfirmationService:
             warnings.append(
                 f"Độ cao camera suy ra {summary.camera_height_min_m:.2f}–{summary.camera_height_max_m:.2f} m "
                 "bất thường; kiểm lại điểm chọn hoặc khoảng cách"
+            )
+        if summary.distance_source == "ai_estimated":
+            proposal = self.auto_proposal(job_id)
+            margin = f" (sai số ước tính ±{proposal.relative_uncertainty * 100:.0f}%)" if proposal is not None else ""
+            warnings.append(
+                f"Khoảng cách là ước lượng tự động từ ảnh{margin}, không phải số đo ngoài đời; "
+                "đoạn kiểm C–D dùng cùng ước lượng nên không kiểm được sai số. Đo thật một đoạn để chính xác hơn"
             )
         return MetricPreviewView(**summary.model_dump(), warnings=warnings)
 
