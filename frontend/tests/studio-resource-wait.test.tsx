@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ProgressTab } from "@/features/studio/scene/ProgressTab";
+import { roughDuration } from "@/features/studio/scene/QueueStatus";
 import { progressSceneStatus } from "@/features/studio/sceneStatus";
 import { parseJobProgress, type JobProgress } from "@/lib/contracts/studio";
 
@@ -50,6 +51,24 @@ describe("đợi tài nguyên với config đã chọn", () => {
     // Observation của worker cũ (không có lý do) vẫn hiện số đo.
     rerender(<ProgressTab jobId={progress.job_id} progress={progress} info={null} busy={false} onCancel={vi.fn()} />);
     expect(screen.getByText(/VRAM GPU: cần khoảng 6\.0 GB, đang có 3\.0 GB/)).toBeInTheDocument();
+  });
+  it("hiện vị trí hàng đợi và thời gian chờ chỉ khi có số đo", () => {
+    const queue = { position: 3, waiting: 4, running: 1, workers: 1, estimated_wait_seconds: 1500, estimate_samples: 6 };
+    const { rerender } = render(<ProgressTab jobId={progress.job_id} progress={{ ...progress, waiting_for: null, resource_wait: null, queue }} info={null} busy={false} onCancel={vi.fn()} />);
+    expect(screen.getByText(/Trước bạn còn 2 job đang chờ\. 1 job đang chạy trên 1 máy xử lý\./)).toBeInTheDocument();
+    expect(screen.getByText(/Dự kiến chờ khoảng 25 phút \(ước tính từ 6 lượt chạy đã đo/)).toBeInTheDocument();
+    expect(screen.getByText(/xoay vòng theo người gửi/)).toBeInTheDocument();
+    rerender(<ProgressTab jobId={progress.job_id} progress={{ ...progress, waiting_for: null, resource_wait: null, queue: { ...queue, position: 1, waiting: 1, running: 0, estimated_wait_seconds: null, estimate_samples: 0 } }} info={null} busy={false} onCancel={vi.fn()} />);
+    expect(screen.getByText(/Job của bạn là job kế tiếp\./)).toBeInTheDocument();
+    expect(screen.getByText(/Chưa ước tính được thời gian chờ/)).toBeInTheDocument();
+    expect(screen.queryByText(/khoảng \d+ phút/)).not.toBeInTheDocument(); // không có số đo thì không điền số
+    expect(roughDuration(20)).toBe("khoảng 1 phút");
+    expect(roughDuration(3900)).toBe("khoảng 1 giờ 5 phút");
+    expect(roughDuration(7200)).toBe("khoảng 2 giờ");
+    expect(parseJobProgress({ ...progress, queue }).queue?.position).toBe(3);
+    expect(() => parseJobProgress({ ...progress, queue: { ...queue, position: 0 } })).toThrow();
+    expect(() => parseJobProgress({ ...progress, queue: { ...queue, estimated_wait_seconds: -5 } })).toThrow();
+    expect(() => parseJobProgress({ ...progress, queue: { ...queue, workers: "many" } })).toThrow();
   });
   it("parse snapshot backend và từ chối nguồn số đo lỗi", () => {
     expect(() => parseJobProgress({ ...progress, resource_wait: { ...progress.resource_wait, reasons: { vram: "invented" } } })).toThrow();

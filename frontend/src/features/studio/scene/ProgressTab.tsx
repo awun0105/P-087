@@ -7,6 +7,7 @@ import { PipelineTimeline, type StageView } from "@/features/studio/PipelineTime
 import { stageSeconds, useNow, type SceneInfo } from "@/features/studio/scene/state";
 import { STUDIO_STAGES } from "@/features/studio/stages";
 import { AttemptHistory } from "@/features/studio/scene/AttemptHistory";
+import { QueueStatus } from "@/features/studio/scene/QueueStatus";
 import { ResourceWaitDetail } from "@/features/studio/scene/ResourceWaitDetail";
 import type { JobProgress } from "@/lib/contracts/studio";
 import { formatBytes } from "@/lib/format";
@@ -23,9 +24,10 @@ export function ProgressTab({ jobId, progress, info, busy, onCancel }: {
   return <div className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6">
     <div><h2 className="text-xl font-bold tracking-tight">Tiến trình xử lý</h2><p className="mt-1 text-sm text-ink-muted">Chọn giai đoạn đã hoàn tất để mở view kết quả.</p></div>
     <Card className="p-5 sm:p-6">
-      {(progress?.status === "QUEUED" || progress?.waiting_for === "resources") && <div role="status" className="mb-5 space-y-2 text-sm text-ink-muted">
+      {(progress?.status === "QUEUED" || progress?.waiting_for === "resources" || progress?.queue) && <div role="status" className="mb-5 space-y-2 text-sm text-ink-muted">
         <p>{progress.waiting_for === "resources" ? "Đang chờ đủ tài nguyên trên máy xử lý." : "Job đã vào hàng đợi, đang chờ máy xử lý."} Cấu hình đã chọn được giữ nguyên; job tự chạy tiếp khi đến lượt và đủ tài nguyên.</p>
         <ProgressBar value={null} label="Đang chờ trong hàng đợi" />
+        {progress.queue && <QueueStatus queue={progress.queue} />}
         {progress.waiting_for === "resources" && progress.resource_wait && <ResourceWaitDetail wait={progress.resource_wait} />}
       </div>}
       {progress ? <PipelineTimeline stages={views} stageList={STUDIO_STAGES} jobId={jobId} timeNote={"Cập nhật lúc " + new Date(progress.updated_at).toLocaleTimeString("vi-VN")} /> : <p role="status" className="text-sm text-ink-muted">Đang tải tiến trình…</p>}

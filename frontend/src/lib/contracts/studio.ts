@@ -110,6 +110,18 @@ export interface ResourceWaitView {
   capacity_gb?: Partial<Record<ResourceName, number | null>>;
 }
 
+/** Vị trí của job theo đúng thứ tự worker sẽ nhận (xoay vòng theo người yêu cầu). Khớp `QueuePosition`. */
+export interface QueuePositionView {
+  /** 1 = job kế tiếp được nhận. */
+  position: number;
+  waiting: number;
+  running: number;
+  workers: number;
+  /** Ước tính từ thời lượng đã đo của các lượt chạy trước; null khi chưa có số đo. */
+  estimated_wait_seconds: number | null;
+  estimate_samples: number;
+}
+
 export interface JobProgress {
   job_id: string;
   status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
@@ -123,6 +135,8 @@ export interface JobProgress {
   /** Pipeline đang chờ người dùng làm gì (vd xác nhận tỉ lệ mét sau preview). */
   waiting_for?: "metric_confirmation" | "resources" | null;
   resource_wait?: ResourceWaitView | null;
+  /** Vị trí trong hàng đợi khi job đang chờ máy xử lý; null khi đang chạy, đã xong hoặc chờ người dùng. */
+  queue?: QueuePositionView | null;
   error: ExecutionErrorView | null;
 }
 
@@ -351,6 +365,14 @@ export function parseJobProgress(value: unknown): JobProgress {
         !Object.entries(capacity).every(([key, amount]) => ["vram", "ram", "disk"].includes(key) &&
           (amount === null || isFiniteNumber(amount)))) {
       throw new Error("Lý do chờ tài nguyên không hợp lệ");
+    }
+  }
+  if (value.queue !== undefined && value.queue !== null) {
+    const queue = value.queue;
+    if (!isRecord(queue) || !["position", "waiting", "running", "workers", "estimate_samples"].every((key) => Number.isInteger(queue[key]) && (queue[key] as number) >= 0) ||
+        (queue.position as number) < 1 || (queue.workers as number) < 1 ||
+        (queue.estimated_wait_seconds !== null && !(isFiniteNumber(queue.estimated_wait_seconds) && queue.estimated_wait_seconds >= 0))) {
+      throw new Error("Vị trí hàng đợi từ backend không hợp lệ");
     }
   }
   return value as unknown as JobProgress;
