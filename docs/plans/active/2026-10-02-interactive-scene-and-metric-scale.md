@@ -70,7 +70,12 @@ local; owner tự kiểm bằng mắt. Rủi ro: chế độ walk của thư vi�
 
 Proof: test tia–lưới (trúng, trượt, vật chồng nhau chọn vật gần hơn); test hiện có của bước duyệt vật vẫn xanh.
 
-### H3 — Chất lượng mesh va chạm ("tường ma")
+### H3 — Chất lượng mesh va chạm ("tường ma") — HOÃN theo owner
+
+**DECISION (owner, 02/10/2026):** không ưu tiên. Owner nhận định nguyên nhân là chất lượng tái tạo 3DGS hiện chưa tốt,
+không phải thông số dựng mesh; không đổi `geometry_v1.json`. Hệ quả chấp nhận: chế độ Đi bộ có thể bị chặn ở lối đi thật
+trên các scene hiện có; chế độ Bay tự do (không va chạm) luôn dùng được để xem scene. Nội dung dưới đây giữ lại để tham
+khảo khi chất lượng 3DGS được cải thiện.
 
 Điều kiện để H1 dùng được trên scene thật. Việc: tái hiện bằng số đo `path clearance` đã có; tìm nguyên nhân (cỡ voxel
 0,05 m, ngưỡng opacity, bước carve, điểm seed); đề xuất thay đổi thông số hình học. Đổi `configs/product/geometry_v1.json`
@@ -136,7 +141,7 @@ H6: bước 1–3 độc lập; bước 4 chờ ổ ngoài
 H7 độc lập
 ```
 
-Làm H1 và H2 trước (nhỏ, thấy ngay), rồi H3, H6, H4, H5, H7.
+Làm H1 và H2 trước (nhỏ, thấy ngay), rồi H6, H4, H5, H7. H3 hoãn theo quyết định owner.
 
 ## Proof chung
 
@@ -148,7 +153,7 @@ khi chỉ có test giả lập.
 
 - [ ] H1 Điều khiển viewer + đi bộ góc nhìn thứ nhất
 - [ ] H2 Chọn vật theo hình dáng
-- [ ] H3 Tường ma của mesh va chạm
+- [ ] H3 Tường ma của mesh va chạm — hoãn (owner, 02/10/2026)
 - [ ] H4 Nhân vật 3D, góc nhìn thứ ba
 - [ ] H5 Đẩy vật thể
 - [ ] H6 Đề xuất tỉ lệ mét tự động
