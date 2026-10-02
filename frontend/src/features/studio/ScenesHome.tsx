@@ -346,7 +346,7 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
             : "Không có video"}
         </p>
         <div className="mt-auto flex items-center justify-between pt-5 text-xs text-ink-subtle">
-          <span>{created}</span>
+          <span className="value-tech">{created}</span>
           {job && (
             <span className="flex items-center gap-1 font-medium text-ink-muted transition-colors group-hover:text-ember-strong">
               {scene.preview_ready ? "Mở scene" : "Xem tiến trình"}

@@ -120,7 +120,7 @@ export function UploadDropzone({ kind, onUploaded }: { kind: "video" | "gaussian
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline justify-between gap-3 text-sm">
               <span className="truncate font-medium">{file.name}</span>
-              <span className="shrink-0 tabular-nums text-ink-subtle">
+              <span className="shrink-0 value-tech text-ink-subtle">
                 {verifying
                   ? "Máy chủ đang kiểm tra và nhận diện file…"
                   : progress >= 1

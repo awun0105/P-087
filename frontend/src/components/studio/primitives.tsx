@@ -76,8 +76,9 @@ export function Card({ className, ...props }: ComponentProps<"section">) {
   );
 }
 
+/** Nhãn trạng thái theo thẻ kỹ thuật của landing: mono 11px, chữ hoa, bo góc nhỏ (không phải viên thuốc). */
 const badgeVariants = cva(
-  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap [&_svg]:size-3.5",
+  "inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-[11px] leading-4 font-medium tracking-wide whitespace-nowrap uppercase [&_svg]:size-3.5",
   {
     variants: {
       tone: {

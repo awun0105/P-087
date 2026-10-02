@@ -203,7 +203,7 @@ function MachinePanel({
                     <Icon className="size-3.5 text-ink-muted" aria-hidden />
                     {meta.label}
                   </span>
-                  <span className={cn("tabular-nums", item.status === "danger" ? "text-rust" : "text-ink-subtle")}>
+                  <span className={cn("value-tech", item.status === "danger" ? "text-rust" : "text-ink-subtle")}>
                     {item.required_gb.toFixed(1)}
                     {item.available_gb !== null ? ` / ${item.available_gb.toFixed(1)} GB` : " GB"}
                   </span>
@@ -260,7 +260,7 @@ function ParameterField({
           {spec.label}
         </label>
         {spec.kind !== "choice" && (
-          <span className="shrink-0 text-xs tabular-nums text-ink-subtle">
+          <span className="shrink-0 text-xs value-tech text-ink-subtle">
             {formatValue(spec, spec.min)}–{formatValue(spec, spec.max)} {spec.unit}
           </span>
         )}
@@ -307,7 +307,7 @@ function ParameterField({
                 const next = Number(event.target.value);
                 if (Number.isFinite(next)) onChange(spec.kind === "integer" ? Math.round(next) : next);
               }}
-              className="h-9 w-28 rounded-lg border border-line-strong bg-paper-raised px-2.5 text-right text-sm tabular-nums outline-none focus-visible:border-ember focus-visible:ring-3 focus-visible:ring-ember/30 disabled:opacity-80"
+              className="h-9 w-28 rounded-lg border border-line-strong bg-paper-raised px-2.5 text-right text-sm value-tech outline-none focus-visible:border-ember focus-visible:ring-3 focus-visible:ring-ember/30 disabled:opacity-80"
             />
           </div>
         )}

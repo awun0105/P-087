@@ -96,7 +96,7 @@ export function PipelineTimeline({
                       </>}
                     </p>
                     {stage?.seconds != null && state !== "pending" && (
-                      <span className="shrink-0 text-xs tabular-nums text-ink-subtle">{formatDuration(stage.seconds)}</span>
+                      <span className="shrink-0 text-xs value-tech text-ink-subtle">{formatDuration(stage.seconds)}</span>
                     )}
                   </div>
                   {(state === "running" || state === "failed" || state === "waiting") && (

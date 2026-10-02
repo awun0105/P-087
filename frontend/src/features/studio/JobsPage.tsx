@@ -155,8 +155,8 @@ export function JobsPage() {
                       <Badge tone={status.tone}>{status.label}</Badge>
                     </TableCell>
                     <TableCell className="hidden text-ink-muted md:table-cell">{job.status === "SUCCEEDED" ? "Hoàn tất" : job.current_stage ? (stageMeta(job.current_stage)?.title ?? job.current_stage) : "—"}</TableCell>
-                    <TableCell className="hidden text-ink-muted sm:table-cell">{job.started_at ? TIME.format(new Date(job.started_at)) : "—"}</TableCell>
-                    <TableCell className="hidden text-ink-muted lg:table-cell">
+                    <TableCell className="hidden text-xs value-tech text-ink-muted sm:table-cell">{job.started_at ? TIME.format(new Date(job.started_at)) : "—"}</TableCell>
+                    <TableCell className="hidden text-xs value-tech text-ink-muted lg:table-cell">
                       {status.group === "action"
                         ? "Đang chờ bạn"
                         : job.started_at

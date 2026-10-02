@@ -30,7 +30,7 @@ function MetricRow({ metric }: { metric: EvaluationMetric }) {
   return (
     <div className="border-t border-line py-3 first:border-t-0">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <dt className="text-sm text-ink-muted">{metric.label}</dt>
+        <dt className="text-ink-muted">{metric.label}</dt>
         <dd className={`text-sm font-semibold ${metric.value === null ? "font-normal text-ink-subtle" : "text-ink"}`}>
           {metric.display}
           {verdict && <Badge tone={verdict.tone} className="ml-2 align-middle">{verdict.label}</Badge>}

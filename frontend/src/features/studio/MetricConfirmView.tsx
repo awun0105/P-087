@@ -399,9 +399,9 @@ export function MetricConfirmView({
               Tỉ lệ: <span className="font-mono">{current.scale_m_per_sfm_unit.toPrecision(5)}</span> m/đơn vị
             </p>
             <p>
-              Độ cao camera: {current.camera_height_min_m.toFixed(2)}–{current.camera_height_max_m.toFixed(2)} m
+              Độ cao camera: <span className="font-mono">{current.camera_height_min_m.toFixed(2)}–{current.camera_height_max_m.toFixed(2)} m</span>
             </p>
-            <p>Độ lệch 3 điểm sàn: {(current.floor_residual_m * 100).toFixed(1)} cm</p>
+            <p>Độ lệch 3 điểm sàn: <span className="font-mono">{(current.floor_residual_m * 100).toFixed(1)} cm</span></p>
             <p className={current.check_passed ? "text-sage" : "text-rust"}>
               Kiểm C–D: đo được {current.check_measured_m.toFixed(3)} m, lệch {(current.check_error_m * 100).toFixed(1)} cm
               (ngưỡng {(current.check_tolerance_m * 100).toFixed(1)} cm) — {current.check_passed ? "đạt" : "không đạt"}
