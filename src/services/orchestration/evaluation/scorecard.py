@@ -22,6 +22,7 @@ from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneError
 from src.services.reconstruction import (
     GeometryQuality,
+    VisualQuality,
     geometry_quality,
     input_quality,
     metric_quality,
@@ -182,7 +183,55 @@ def _visual_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric]
     if visual is None:
         return None
     quality = visual_quality(visual, registry.runtime_resolver.require)
-    held_out = "Chưa đo — cần lượt đánh giá giữ lại ảnh không train (eval/protocols/recon_visual_quality.md)"
+    return [
+        *_visual_core(quality),
+        *_held_out_metrics(quality),
+    ]
+
+
+def _held_out_metrics(quality: VisualQuality) -> list[Metric]:
+    """PSNR/SSIM/LPIPS trên ảnh giữ lại không train (giao thức: eval/protocols/recon_visual_quality.md)."""
+    label = "PSNR trên ảnh không train"
+    meaning = "Scene có tái hiện đúng góc nhìn chưa từng thấy không; đây là thước đo chính của chất lượng 3DGS."
+    if quality.held_out_frames is None or quality.held_out_psnr is None:
+        reason = (
+            "Chưa đo — scene này train trên mọi ảnh, không giữ lại ảnh để chấm"
+            if quality.held_out_frames is None
+            else "Chưa đo — lượt train này không in kết quả chấm ảnh giữ lại"
+        )
+        return [Metric(key="visual.novel_view_quality", label=label, value=None, display=reason, meaning=meaning)]
+    views = f"trên {quality.held_out_frames} ảnh giữ lại"
+    return [
+        Metric(
+            key="visual.novel_view_quality",
+            label=label,
+            value=round(quality.held_out_psnr, 2),
+            unit="dB",
+            display=f"{quality.held_out_psnr:.2f} dB {views}",
+            meaning=meaning + " Cao hơn là tốt hơn.",
+        ),
+        Metric(
+            key="visual.novel_view_ssim",
+            label="SSIM trên ảnh không train",
+            value=None if quality.held_out_ssim is None else round(quality.held_out_ssim, 4),
+            display="Chưa đo" if quality.held_out_ssim is None else f"{quality.held_out_ssim:.3f} {views}",
+            meaning="Độ giống về cấu trúc ảnh (0–1). Cao hơn là tốt hơn.",
+        ),
+        Metric(
+            key="visual.novel_view_lpips",
+            label="LPIPS trên ảnh không train",
+            value=None if quality.held_out_lpips is None else round(quality.held_out_lpips, 4),
+            display=(
+                "Chưa đo — máy xử lý chưa cấu hình runtime LPIPS"
+                if quality.held_out_lpips is None
+                else f"{quality.held_out_lpips:.3f} {views} (mạng VGG)"
+            ),
+            meaning="Khác biệt theo cảm nhận của mắt người. Thấp hơn là tốt hơn.",
+        ),
+    ]
+
+
+def _visual_core(quality: VisualQuality) -> list[Metric]:
     return [
         Metric(
             key="visual.gaussians",
@@ -207,13 +256,6 @@ def _visual_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric]
             unit="bước",
             display=f"{_number(quality.train_iterations, 0, 'bước')} trên {quality.training_frames} ảnh",
             meaning="Số bước tối ưu và số ảnh đã dùng; cần để so sánh công bằng giữa các lượt chạy.",
-        ),
-        Metric(
-            key="visual.novel_view_quality",
-            label="PSNR / SSIM / LPIPS trên ảnh không train",
-            value=None,
-            display=held_out,
-            meaning="Scene có tái hiện đúng góc nhìn chưa từng thấy không; đây là thước đo chính của chất lượng 3DGS.",
         ),
     ]
 

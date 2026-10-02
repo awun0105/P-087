@@ -187,3 +187,35 @@ async def test_evaluation_routes_return_scorecard_and_downloadable_report(client
     assert report.status_code == 200 and report.headers["content-type"].startswith("text/markdown")
     assert report.headers["content-disposition"] == 'attachment; filename="evaluation-job-fixture-001.md"'
     assert report.text.startswith("# Đánh giá scene:")
+
+
+def test_held_out_quality_reports_scores_or_the_reason_it_is_missing() -> None:
+    """PSNR/SSIM/LPIPS chỉ hiện khi đã đo trên ảnh giữ lại; thiếu thì nêu lý do, không điền số."""
+    from src.services.orchestration.evaluation.scorecard import _held_out_metrics
+    from src.services.reconstruction import VisualQuality
+
+    base = dict(gaussians=1000, nonfinite_values=0, training_frames=44, train_iterations=30000)
+
+    old_scene = _held_out_metrics(VisualQuality(**base))
+    assert [metric.key for metric in old_scene] == ["visual.novel_view_quality"]
+    assert old_scene[0].value is None and "train trên mọi ảnh" in old_scene[0].display
+
+    no_report = _held_out_metrics(VisualQuality(**base, held_out_frames=6))
+    assert no_report[0].value is None and "không in kết quả" in no_report[0].display
+
+    measured = _held_out_metrics(
+        VisualQuality(**base, held_out_frames=6, held_out_psnr=28.6165, held_out_ssim=0.89637, held_out_lpips=None)
+    )
+    by_key = {metric.key: metric for metric in measured}
+    assert by_key["visual.novel_view_quality"].value == 28.62 and by_key["visual.novel_view_quality"].unit == "dB"
+    assert "6 ảnh giữ lại" in by_key["visual.novel_view_quality"].display
+    assert by_key["visual.novel_view_ssim"].value == 0.8964
+    assert (
+        by_key["visual.novel_view_lpips"].value is None and "chưa cấu hình" in by_key["visual.novel_view_lpips"].display
+    )
+
+    with_lpips = _held_out_metrics(
+        VisualQuality(**base, held_out_frames=6, held_out_psnr=28.0, held_out_ssim=0.9, held_out_lpips=0.26495)
+    )
+    assert with_lpips[2].value == pytest.approx(0.265, abs=1e-3)
+    assert "VGG" in with_lpips[2].display
