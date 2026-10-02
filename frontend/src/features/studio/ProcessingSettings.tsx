@@ -183,6 +183,9 @@ function MachinePanel({
       <p className="mt-1 text-sm text-ink-muted">
         {header ?? "Chưa có số đo — worker chưa chạy hoặc chưa báo cấu hình. Không kiểm được nguy cơ crash."}
       </p>
+      {editable && capability?.headroom_measured && <p className="mt-2 text-xs text-ink-subtle">
+        Tài nguyên còn trống đo lúc {new Date(capability.measured_at).toLocaleTimeString("vi-VN")}. Maximum là ước lượng theo snapshot này; khi đến lượt, worker đo lại và chờ nếu thiếu, giữ nguyên cấu hình bạn chọn.
+      </p>}
       {editable && evaluation && (
         <ul className="mt-4 grid gap-3 sm:grid-cols-3">
           {evaluation.resources.map((item) => {

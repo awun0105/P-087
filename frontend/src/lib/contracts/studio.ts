@@ -101,7 +101,15 @@ export interface JobProgress {
   stages: StageProgress[];
   preview_ready: boolean;
   /** Pipeline đang chờ người dùng làm gì (vd xác nhận tỉ lệ mét sau preview). */
-  waiting_for?: "metric_confirmation" | null;
+  waiting_for?: "metric_confirmation" | "resources" | null;
+  resource_wait?: {
+    job_manifest_checksum: string;
+    checked_at: string;
+    required_gb: Record<"vram" | "ram" | "disk", number>;
+    available_gb: Record<"vram" | "ram" | "disk", number | null>;
+    waiting_on: ("vram" | "ram" | "disk")[];
+    estimate_scope: "configured_preview";
+  } | null;
   error: ExecutionErrorView | null;
 }
 
@@ -195,6 +203,9 @@ export interface MachineCapability {
   cpu_count: number;
   ram_total_gb: number;
   disk_free_gb: number;
+  headroom_measured?: boolean;
+  vram_free_gb?: number | null;
+  ram_available_gb?: number | null;
 }
 
 export type ResourceStatus = "ok" | "warn" | "danger" | "unknown";
@@ -272,6 +283,20 @@ export function parseJobProgress(value: unknown): JobProgress {
     if (!isRecord(stage) || typeof stage.stage_id !== "string" ||
         !STAGE_STATES.includes(stage.state as StageState)) {
       throw new Error("Stage trong tiến trình không hợp lệ");
+    }
+  }
+  if (value.waiting_for !== undefined && value.waiting_for !== null && value.waiting_for !== "metric_confirmation" && value.waiting_for !== "resources") {
+    throw new Error("Lý do chờ của job không hợp lệ");
+  }
+  if (value.resource_wait !== undefined && value.resource_wait !== null) {
+    const wait = value.resource_wait;
+    if (!isRecord(wait) || typeof wait.checked_at !== "string" || typeof wait.job_manifest_checksum !== "string" ||
+        !isRecord(wait.required_gb) || !isRecord(wait.available_gb) || !Array.isArray(wait.waiting_on) ||
+        wait.estimate_scope !== "configured_preview" ||
+        !["vram", "ram", "disk"].every((key) => isFiniteNumber((wait.required_gb as Record<string, unknown>)[key]) &&
+          ((wait.available_gb as Record<string, unknown>)[key] === null || isFiniteNumber((wait.available_gb as Record<string, unknown>)[key]))) ||
+        !wait.waiting_on.every((key) => typeof key === "string" && ["vram", "ram", "disk"].includes(key))) {
+      throw new Error("Snapshot tài nguyên chờ không hợp lệ");
     }
   }
   return value as unknown as JobProgress;

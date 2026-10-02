@@ -29,6 +29,7 @@ export function sceneStatus(job: JobManifest | null, previewReady: boolean): Sce
 
 /** Header scene đọc progress thật; cùng bảng nhãn với Scenes/Jobs, không suy DONE từ preview. */
 export function progressSceneStatus(progress: JobProgress): SceneStatusView {
+  if (progress.waiting_for === "resources") return { label: "Đang chờ tài nguyên", tone: "ochre", active: true, group: "running" };
   return deriveStatus(progress.status, progress.current_stage, progress.waiting_for === "metric_confirmation");
 }
 

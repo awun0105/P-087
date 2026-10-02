@@ -50,6 +50,9 @@ export function NextAction({ jobId, progress, current, mode, sceneReady, revisio
   } else if (progress.status === "CANCELLED") {
     title = "Đã huỷ xử lý";
     description = "Kết quả đã publish vẫn được giữ; mở giai đoạn hoàn tất để xem.";
+  } else if (progress.waiting_for === "resources") {
+    title = "Đang chờ tài nguyên";
+    description = "Giữ nguyên cấu hình đã chọn. Máy xử lý kiểm tra lại và tự chạy tiếp khi đủ tài nguyên; có thể rời trang hoặc huỷ job.";
   } else if (progress.waiting_for === "metric_confirmation") {
     title = "Cần bạn xác nhận tỉ lệ mét";
     description = "Chọn điểm và nhập kích thước thật để pipeline tiếp tục.";
