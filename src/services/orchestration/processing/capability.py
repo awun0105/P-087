@@ -4,6 +4,8 @@ Xử lý chạy trên máy worker (GPU server) nên cần số đo của chính 
 phải của máy người dùng đang mở trình duyệt.
 """
 
+import logging
+import math
 import os
 import shutil
 import socket
@@ -16,6 +18,58 @@ from src.services.orchestration.processing.models import MachineCapability
 
 #: Số đo cũ hơn mức này coi như worker không còn chạy.
 CAPABILITY_TTL = timedelta(minutes=15)
+logger = logging.getLogger(__name__)
+
+
+def _live_vram_gb() -> float | None:
+    """Free VRAM cho máy một GPU; đa GPU chưa bind đúng device thì trả unknown."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=True,
+        )
+        rows = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        if len(rows) != 1:
+            logger.info("Live VRAM unknown: chưa bind GPU của workload")
+            return None
+        value = float(rows[0]) / 1024
+        if not math.isfinite(value) or value < 0:
+            raise ValueError("Invalid VRAM measurement")
+        return value
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        logger.warning("Không đo được live VRAM cause=%s", type(error).__name__)
+        return None
+
+
+def _live_ram_gb() -> float | None:
+    """MemAvailable tính cả cache có thể thu hồi, không dùng MemFree/MemTotal."""
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                value = int(line.split()[1]) / 1024**2
+                if value < 0:
+                    raise ValueError("Invalid RAM measurement")
+                return value
+    except (OSError, ValueError, IndexError) as error:
+        logger.warning("Không đo được live RAM cause=%s", type(error).__name__)
+    return None
+
+
+def measure_live_headroom(worker_root: Path) -> dict[str, float | None]:
+    """Đo VRAM/RAM/đĩa khả dụng tức thời (GiB); probe lỗi trả None, không tạo thư mục.
+
+    Đây là snapshot, không phải reservation hoặc cam kết cấu hình sẽ chạy được.
+    Multi-GPU cần adapter xác định device trước khi dùng để admission.
+    """
+    try:
+        disk = shutil.disk_usage(worker_root).free / 1024**3
+    except OSError as error:
+        logger.warning("Không đo được live disk cause=%s", type(error).__name__)
+        disk = None
+    return {"vram_free_gb": _live_vram_gb(), "ram_available_gb": _live_ram_gb(), "disk_free_gb": disk}
 
 
 def _gpu() -> tuple[str | None, float | None]:
