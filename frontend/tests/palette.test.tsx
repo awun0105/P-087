@@ -135,6 +135,38 @@ describe("bốn biến thể giao diện đều đủ tương phản (WCAG)", ()
   });
 });
 
+describe("Gruvbox chỉ dùng màu của bảng tham chiếu", () => {
+  // gruvbox (morhetz, colors/gruvbox.vim) và gruvbox-material (sainnhe, autoload/gruvbox_material.vim, nền medium/hard).
+  const REFERENCE = new Set([
+    // gruvbox: nền/chữ
+    "#1d2021", "#282828", "#32302f", "#3c3836", "#504945", "#665c54", "#7c6f64", "#928374",
+    "#f9f5d7", "#fbf1c7", "#f2e5bc", "#ebdbb2", "#d5c4a1", "#bdae93", "#a89984",
+    // gruvbox: bright / neutral / faded
+    "#fb4934", "#b8bb26", "#fabd2f", "#83a598", "#d3869b", "#8ec07c", "#fe8019",
+    "#cc241d", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a", "#d65d0e",
+    "#9d0006", "#79740e", "#b57614", "#076678", "#8f3f71", "#427b58", "#af3a03",
+    // gruvbox-material: bậc nền và nền nhạt của trạng thái
+    "#141617", "#1b1b1b", "#45403d", "#5a524c", "#3b4439", "#4f422e", "#4c3432", "#374141",
+    "#f4e8be", "#eee0b7", "#e5d5ad", "#ddccab", "#dee2b6", "#fae7b3", "#f1d9b5", "#dadec0",
+  ]);
+  // Nền cam nhạt: bảng tham chiếu không có sẵn, pha orange vào bg0 (16% bản sáng, 20% bản tối).
+  const DERIVED = new Set(["#f5d9a9", "#533a25"]);
+
+  it.each([".theme-gruvbox,\n.theme-gruvbox .landing-page {", ".theme-gruvbox.dark {"])("%s", (selector) => {
+    const strangers = Object.entries(variables(selector)).filter(([, value]) => !REFERENCE.has(value) && !DERIVED.has(value));
+    expect(strangers).toEqual([]);
+  });
+});
+
+describe("kiểu chữ theo landing", () => {
+  it("nhãn trường, tiêu đề cột và giá trị kỹ thuật dùng chữ mono; chữ thường dùng bộ sans chung", () => {
+    expect(CSS).toMatch(/html:has\(\.studio-root\) :is\(th, dt\) \{\s*font-family: var\(--font-mono\)/);
+    expect(CSS).toMatch(/html:has\(\.studio-root\) :is\(code, kbd, samp, time, dd\) \{\s*font-family: var\(--font-mono\)/);
+    expect(CSS).toMatch(/@utility value-tech \{\s*font-family: var\(--font-mono\)/);
+    expect(CSS).toMatch(/body \{\s*font-family: var\(--font-sans\)/);
+  });
+});
+
 describe("UI không viết cứng mã màu", () => {
   const files: string[] = [];
   const walk = (directory: string) => {

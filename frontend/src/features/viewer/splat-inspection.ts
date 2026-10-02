@@ -3,6 +3,7 @@
  */
 import { CameraComponent, Color, GSplatComponent, Mat4, Picker, Vec3 } from "playcanvas";
 import type { ViewerHandle } from "@playcanvas/supersplat-viewer/viewer";
+import { subscribeTheme, themeColor } from "@/lib/theme";
 import { EMPTY_INSPECTION, InspectionHistory, type InspectionPoint, type InspectionState } from "./inspection-history";
 
 /** Controller một viewport; history/readback cùng FIFO, teardown chờ readback kết thúc. */
@@ -14,10 +15,20 @@ export class SplatInspection {
   private disposed = false;
   private originalInput = true;
   private readonly inputGates = new Set<"measure" | "form">();
-  private readonly colorA = new Color(0.2, 0.8, 1);
-  private readonly colorB = new Color(1, 0.7, 0.2);
-  private readonly colorCheck = new Color(0.9, 0.4, 0.9);
-  private readonly colorFloor = new Color(0.4, 0.9, 0.4);
+  // Màu điểm đo lấy từ bảng màu đang chọn (globals.css `--studio-marker-*`); đọc lại khi người dùng đổi bảng màu.
+  private colorA = new Color();
+  private colorB = new Color();
+  private colorCheck = new Color();
+  private colorFloor = new Color();
+  private readonly unsubscribeTheme: () => void;
+
+  private readColors = (): void => {
+    this.colorA = new Color().fromString(themeColor("--studio-marker-a", "#33ccff"));
+    this.colorB = new Color().fromString(themeColor("--studio-marker-b", "#ffb333"));
+    this.colorCheck = new Color().fromString(themeColor("--studio-marker-check", "#e666e6"));
+    this.colorFloor = new Color().fromString(themeColor("--studio-marker-floor", "#66e666"));
+    this.viewer.app.renderNextFrame = true;
+  };
 
   /** Vai trò điểm theo vị trí: 2 = cặp đo A/B; ≥ 5 = các cặp đoạn rồi 3 điểm sàn cuối (REC-06). */
   private role(index: number): "anchor" | "check" | "floor" {
@@ -43,6 +54,8 @@ export class SplatInspection {
     for (const event of ["pointermove", "pointerup", "click", "dblclick"]) {
       canvas.addEventListener(event, this.blockNavigation, true);
     }
+    this.readColors();
+    this.unsubscribeTheme = subscribeTheme(this.readColors);
     viewer.app.on("prerender", this.draw);
     this.publish();
   }
@@ -192,6 +205,7 @@ export class SplatInspection {
       this.canvas.removeEventListener(event, this.blockNavigation, true);
     }
     this.viewer.app.off("prerender", this.draw);
+    this.unsubscribeTheme();
     if (this.inputGates.size) this.viewer.state.inputEnabled = this.originalInput;
     await this.history.idle();
     this.picker.destroy();

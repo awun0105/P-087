@@ -162,6 +162,11 @@
   --studio-viewport-raised: #38312b;
   --studio-scrim: rgb(0 0 0 / 0.1);
   --studio-shadow: rgb(43 37 32 / 0.04);
+  /* Điểm đo trong khung 3D (A, B, đoạn kiểm tra, mặt sàn): màu sáng để nổi trên Gaussian, không đổi theo sáng/tối. */
+  --studio-marker-a: #33ccff;
+  --studio-marker-b: #ffb333;
+  --studio-marker-check: #e666e6;
+  --studio-marker-floor: #66e666;
 }
 
 /*
@@ -218,130 +223,145 @@
 }
 
 /*
- * Gruvbox (bảng màu của morhetz, bản "medium"). Vai trò giữ nguyên như bảng mặc định, chỉ đổi giá trị:
- *   nền      : bg0 (paper), bg0_h (thẻ nổi ở bản sáng) / bg0_s (thẻ nổi ở bản tối), bg1 hoặc bg0_h (vùng lõm)
- *   chữ      : fg0/fg1 (ink), fg3 (muted), fg4 (subtle)
- *   nhấn     : orange — bản sáng dùng faded #af3a03 cho chữ/nút, neutral #d65d0e cho điểm nhấn; bản tối dùng bright #fe8019
- *   hình học : blue; đạt/xác nhận: green; cảnh báo/collider: yellow; lỗi/nguy hiểm: red
- *   viewport : nền tối của Gruvbox (bg0 / bg0_h) ở cả hai bản
- * Bản sáng dùng nhóm "faded", bản tối dùng nhóm "bright" để chữ nhỏ đạt tương phản ≥ 4,5:1 trên nền.
+ * Gruvbox — lấy đúng giá trị từ hai repo tham chiếu (không tự pha màu):
+ *   - nền, viền và nền nhạt của trạng thái: gruvbox-material (sainnhe), `autoload/gruvbox_material.vim`, nền "medium";
+ *   - chữ và màu nhấn: gruvbox gốc (morhetz), `colors/gruvbox.vim` — chính là lựa chọn `foreground = original` của
+ *     gruvbox-material: bản sáng dùng nhóm "faded", bản tối dùng nhóm "bright".
+ * Vai trò theo cách gruvbox-material tô giao diện của trình soạn thảo:
+ *   trang            bg0            (Normal)
+ *   sidebar          bg_dim         (thanh bên / cây thư mục)
+ *   thẻ              bg1            (CursorLine, statusline1)
+ *   vùng lõm, chip   bg4 sáng / bg3 tối
+ *   menu, popover    bg3            (Pmenu, NormalFloat); mục đang trỏ bg5
+ *   viền             bg5 sáng / statusline3 tối (VertSplit); viền ô nhập đậm hơn một bậc
+ *   chữ              fg1; chữ phụ fg2; chữ mờ fg3 (sáng) / grey2 (tối)
+ *   nhấn             orange (Title); hình học blue (Info); đạt green; cảnh báo yellow (Warning); lỗi red (Error)
+ *   nền trạng thái   bg_visual_green / yellow / red (VirtualText*); nền cam nhạt là orange pha 16–20% vào bg0 vì
+ *                    bảng tham chiếu không có sẵn bg_visual_orange
+ *   khung 3D         bg0_hard của bản tối ở cả hai chế độ
+ * Giữ nguyên màu gốc nên vài cặp chữ màu trên nền nhạt chỉ đạt 3–4:1 (vd. yellow faded trên bg_visual_yellow);
+ * chữ thường và chữ trên nút vẫn ≥ 4,5:1 (tests/palette.test.tsx).
  */
 .theme-gruvbox,
 .theme-gruvbox .landing-page {
   --studio-paper: #fbf1c7;
-  --studio-paper-raised: #f9f5d7;
-  --studio-paper-sunken: #ebdbb2;
-  --studio-line: rgb(124 111 100 / 0.22);
-  --studio-line-strong: rgb(124 111 100 / 0.5);
-  --studio-line-dark: rgb(235 219 178 / 0.14);
-  --studio-ink: #282828;
-  --studio-ink-muted: #665c54;
-  --studio-ink-subtle: #7c6f64;
+  --studio-paper-raised: #f4e8be;
+  --studio-paper-sunken: #e5d5ad;
+  --studio-line: #ddccab;
+  --studio-line-strong: #bdae93;
+  --studio-line-dark: #504945;
+  --studio-ink: #3c3836;
+  --studio-ink-muted: #504945;
+  --studio-ink-subtle: #665c54;
   --studio-ember: #d65d0e;
   --studio-ember-strong: #af3a03;
-  --studio-ember-soft: #f6d7ae;
+  --studio-ember-soft: #f5d9a9;
   --studio-geometry: #076678;
-  --studio-viewport: #282828;
-  --studio-viewport-deep: #1d2021;
+  --studio-viewport: #1d2021;
+  --studio-viewport-deep: #141617;
   --studio-viewport-raised: #3c3836;
   --studio-sage: #79740e;
-  --studio-sage-soft: #e5e3ae;
+  --studio-sage-soft: #dee2b6;
   --studio-ochre: #b57614;
-  --studio-ochre-soft: #f6e3a6;
+  --studio-ochre-soft: #fae7b3;
   --studio-rust: #9d0006;
-  --studio-rust-soft: #f5cfb9;
-  --studio-scrollbar: #d5c4a1;
-  --studio-scrollbar-hover: #bdae93;
-  --studio-on-dark: #fbf1c7;
+  --studio-rust-soft: #f1d9b5;
+  --studio-scrollbar: #bdae93;
+  --studio-scrollbar-hover: #a89984;
+  --studio-on-dark: #ebdbb2;
   --studio-on-accent: #fbf1c7;
   --studio-destructive-fill: #9d0006;
-  --studio-scrim: rgb(40 40 40 / 0.25);
-  --studio-shadow: rgb(40 40 40 / 0.06);
+  --studio-scrim: rgb(40 40 40 / 0.35);
+  --studio-shadow: rgb(40 40 40 / 0.08);
+  --studio-marker-a: #83a598;
+  --studio-marker-b: #fabd2f;
+  --studio-marker-check: #d3869b;
+  --studio-marker-floor: #b8bb26;
 
   --background: #fbf1c7;
-  --foreground: #282828;
-  --card: #f9f5d7;
-  --card-foreground: #282828;
-  --popover: #f9f5d7;
-  --popover-foreground: #282828;
+  --foreground: #3c3836;
+  --card: #f4e8be;
+  --card-foreground: #3c3836;
+  --popover: #eee0b7;
+  --popover-foreground: #3c3836;
   --primary: #af3a03;
   --primary-foreground: #fbf1c7;
-  --secondary: #ebdbb2;
-  --secondary-foreground: #282828;
-  --muted: #ebdbb2;
-  --muted-foreground: #665c54;
-  --accent: #f6d7ae;
-  --accent-foreground: #282828;
+  --secondary: #e5d5ad;
+  --secondary-foreground: #3c3836;
+  --muted: #e5d5ad;
+  --muted-foreground: #504945;
+  --accent: #ddccab;
+  --accent-foreground: #3c3836;
   --destructive: #9d0006;
-  --border: rgb(124 111 100 / 0.22);
-  --input: rgb(124 111 100 / 0.5);
+  --border: #ddccab;
+  --input: #bdae93;
   --ring: #d65d0e;
-  --sidebar: #f9f5d7;
-  --sidebar-foreground: #282828;
+  --sidebar: #f2e5bc;
+  --sidebar-foreground: #3c3836;
   --sidebar-primary: #af3a03;
   --sidebar-primary-foreground: #fbf1c7;
-  --sidebar-accent: #ebdbb2;
-  --sidebar-accent-foreground: #282828;
-  --sidebar-border: rgb(124 111 100 / 0.22);
+  --sidebar-accent: #e5d5ad;
+  --sidebar-accent-foreground: #3c3836;
+  --sidebar-border: #ddccab;
   --sidebar-ring: #d65d0e;
 }
 
 .theme-gruvbox.dark {
   --studio-paper: #282828;
   --studio-paper-raised: #32302f;
-  --studio-paper-sunken: #1d2021;
-  --studio-line: rgb(235 219 178 / 0.12);
-  --studio-line-strong: rgb(235 219 178 / 0.28);
-  --studio-line-dark: rgb(235 219 178 / 0.12);
+  --studio-paper-sunken: #45403d;
+  --studio-line: #504945;
+  --studio-line-strong: #665c54;
+  --studio-line-dark: #504945;
   --studio-ink: #ebdbb2;
-  --studio-ink-muted: #bdae93;
+  --studio-ink-muted: #d5c4a1;
   --studio-ink-subtle: #a89984;
   --studio-ember: #fe8019;
   --studio-ember-strong: #fe8019;
-  --studio-ember-soft: #4b2a12;
+  --studio-ember-soft: #533a25;
   --studio-geometry: #83a598;
   --studio-viewport: #1d2021;
   --studio-viewport-deep: #141617;
   --studio-viewport-raised: #3c3836;
   --studio-sage: #b8bb26;
-  --studio-sage-soft: #33371a;
+  --studio-sage-soft: #3b4439;
   --studio-ochre: #fabd2f;
-  --studio-ochre-soft: #423513;
+  --studio-ochre-soft: #4f422e;
   --studio-rust: #fb4934;
-  --studio-rust-soft: #3b1d19;
-  --studio-scrollbar: #504945;
-  --studio-scrollbar-hover: #665c54;
+  --studio-rust-soft: #4c3432;
+  --studio-scrollbar: #5a524c;
+  --studio-scrollbar-hover: #7c6f64;
   --studio-on-dark: #ebdbb2;
   --studio-on-accent: #fbf1c7;
   --studio-destructive-fill: #cc241d;
-  --studio-scrim: rgb(0 0 0 / 0.45);
+  --studio-scrim: rgb(0 0 0 / 0.5);
   --studio-shadow: rgb(0 0 0 / 0.3);
 
   --background: #282828;
   --foreground: #ebdbb2;
   --card: #32302f;
   --card-foreground: #ebdbb2;
-  --popover: #32302f;
+  --popover: #45403d;
   --popover-foreground: #ebdbb2;
   --primary: #fe8019;
   --primary-foreground: #1d2021;
-  --secondary: #3c3836;
+  --secondary: #45403d;
   --secondary-foreground: #ebdbb2;
-  --muted: #3c3836;
-  --muted-foreground: #bdae93;
-  --accent: #4b2a12;
+  --muted: #45403d;
+  --muted-foreground: #d5c4a1;
+  --accent: #5a524c;
   --accent-foreground: #ebdbb2;
   --destructive: #fb4934;
-  --border: rgb(235 219 178 / 0.12);
-  --input: rgb(235 219 178 / 0.28);
+  --border: #504945;
+  --input: #665c54;
   --ring: #fe8019;
-  --sidebar: #32302f;
+  --sidebar: #1b1b1b;
   --sidebar-foreground: #ebdbb2;
   --sidebar-primary: #fe8019;
   --sidebar-primary-foreground: #1d2021;
   --sidebar-accent: #3c3836;
   --sidebar-accent-foreground: #ebdbb2;
-  --sidebar-border: rgb(235 219 178 / 0.12);
+  --sidebar-border: #504945;
   --sidebar-ring: #fe8019;
 }
 
@@ -404,6 +424,40 @@ html .sse-viewer {
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+}
+
+/*
+ * Giá trị kỹ thuật (ID, checksum, thời lượng, dung lượng, toạ độ, số đếm): mono với chữ số đều cột, như các ô số
+ * liệu của landing. Cỡ và màu do nơi dùng quyết định.
+ */
+@utility value-tech {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Kiểu chữ của landing áp cho cả app (D-13): chữ thường và tiêu đề là Plus Jakarta Sans; mọi thứ thuộc lớp "kỹ thuật"
+ * là IBM Plex Mono — nhãn trường (dt) và giá trị của nó (dd), tiêu đề cột (th), mã và thời điểm. Đặt ở `@layer base` nên utility ở nơi dùng
+ * vẫn thắng. Chỉ áp cho trang có `.studio-root` (kể cả portal của dialog/menu); landing tự đặt class của nó.
+ */
+@layer base {
+  html:has(.studio-root) :is(th, dt) {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  html:has(.studio-root) :is(code, kbd, samp, time, dd) {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  html:has(.studio-root) :is(h1, h2, h3) {
+    letter-spacing: -0.025em;
+  }
 }
 
 /* ── Studio MVP ─────────────────────────────────────────────────────────── */
