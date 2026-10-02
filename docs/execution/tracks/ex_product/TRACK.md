@@ -85,6 +85,18 @@ Outputs: project/job lifecycle, scene revisions, review history,
 - **Kiến trúc cloud (ADR 0003, chưa triển khai):** Vercel (UI), Railway (FastAPI), Supabase
   (PostgreSQL), Cloudflare R2 (file, upload/download thẳng), Vast.ai / dự phòng RunPod (GPU tự bật/tắt, worker không phụ thuộc nhà cung cấp);
   hai role Editor/Reviewer, khách chỉ dùng video mẫu; trình duyệt chỉ nhận bản nhẹ.
+- **Cập nhật 2026-10-02:**
+  - Tài nguyên và hàng đợi ([plan](../../../plans/active/2026-10-02-resource-management-cleanup.md)): worker giữ chỗ
+    tài nguyên theo số đo thật, chỉ cho chạy chung GPU khi cấu hình đã có số đo, xếp lại một lần khi nghi hết bộ nhớ,
+    dọn workspace sau khi xong; hàng đợi xoay vòng theo người yêu cầu, API trả vị trí và thời gian chờ ước tính.
+  - Trang Scene mới tách thành `/new/import-video`, `/new/import-scene`, `/new/try-demo`; khối video mẫu ở Scenes đã bỏ.
+  - Không gian vẫn chung cho cả nhóm, nhưng hiện người tải file, người tạo scene, người chạy job và người duyệt
+    (ADR 0003 bổ sung, STUDIO_UX_SPEC D-18).
+  - Cột thời gian ở Jobs là thời gian máy xử lý, không gồm lúc chờ (D-19). Bảng màu Gruvbox và kiểu chữ theo landing
+    (D-13, D-17, D-21).
+  - Viewer: thanh điều khiển camera (xoay/bay/đi bộ có va chạm), chọn vật theo hình dáng collider thay cho hộp.
+  - Job mang gói LiDAR ([ADR 0009](../../../decisions/0009-user-lidar-input-and-routing.md)): API tạo scene nhận
+    `lidar`, worker có bước `ST-LIDAR-INGEST`; ô LiDAR trên UI chưa mở cho tới khi bước căn chỉnh xong.
 - P0 không yêu cầu advanced scheduler hoặc multi-tenant infrastructure.
 - Product workflow/lifecycle là project-owned; starter chỉ cung cấp generic UI patterns, không mang Clerk/organization/billing hoặc Next.js business backend vào hệ thống.
 

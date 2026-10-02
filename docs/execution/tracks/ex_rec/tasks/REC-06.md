@@ -660,3 +660,7 @@ Commits: `fc5093e` bootstrap → `590a5a8` math/poses → `b07c322` confirmation
 provenance → `5c7c732` guards → `b80c3d9` fixture smoke → `f823f99` seed rule
 clarification → `b1ed5d8` typed camera seed proposal → `9643125` seed smoke evidence
 → `7f15874` LiDAR anchor boundary. Không push từ lượt này.
+
+## Cập nhật 02/10/2026 (không đổi Goal/I/O/DoD đã khoá)
+
+Thêm đề xuất tỉ lệ mét + mặt sàn tự động bằng MoGe-2 (`distance_source = ai_estimated`, người dùng vẫn xác nhận) — [ADR 0001](../../../../decisions/0001-metric-scale-strategy-and-roadmap.md) mục Implementation. Job có gói LiDAR sẽ lấy tỉ lệ và sàn từ LiDAR, không chọn điểm ([ADR 0009](../../../../decisions/0009-user-lidar-input-and-routing.md), chưa làm).

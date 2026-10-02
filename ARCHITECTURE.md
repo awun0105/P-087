@@ -47,16 +47,20 @@ src/
 │       └── release.py
 └── services/
     ├── reconstruction/               # EX-REC
-    │   ├── adapters/                 # COLMAP/Brush/splat-transform (+ cầu nối Node .mjs)
+    │   ├── adapters/                 # COLMAP/Brush/splat-transform (+ cầu nối Node .mjs); moge_runner, lpips_runner
+    │   │                             #   (script độc lập chạy trong data/scene_runtime)
+    │   ├── inputs/                   # nhận diện loại đầu vào theo nội dung: video, 3DGS, gói LiDAR (ADR 0004, 0009)
     │   ├── rgb/                      # Chia theo stage:
     │   │   ├── preflight/            #   REC-02 chất lượng video, privacy gate, report
     │   │   ├── frames/               #   REC-02A frame set
     │   │   ├── pose/                 #   REC-03 camera pose
     │   │   ├── splat/                #   REC-04 visual 3DGS
     │   │   ├── geometry/             #   REC-05 voxel/geometry
-    │   │   └── canonical/            #   REC-06 metric/world canonicalization
-    │   ├── lidar/
-    │   ├── alignment/
+    │   │   └── canonical/            #   REC-06 metric/world canonicalization; auto_scale (đề xuất tỉ lệ MoGe-2)
+    │   ├── lidar/                    # REC-08 nhận LiDAR; fusion (ghép scan theo quỹ đạo, numpy), package (gói LiDAR
+    │   │                             #   của người dùng → LiDARGeometryArtifact + LidarPackageRecord, ADR 0009)
+    │   ├── alignment/                # REC-09 bản ghi căn chỉnh, fit đồng dạng
+    │   ├── metric_proposal.py, quality.py  # đề xuất tỉ lệ mét; cổng đọc chỉ số cho bảng đánh giá
     │   └── prepare_cli.py, preview_cli.py  # Entrypoint ổn định worker gọi qua process
     ├── scene/                        # EX-SCENE
     │   ├── extraction/
@@ -73,13 +77,15 @@ src/
     └── orchestration/                # EX-PRODUCT
         ├── jobs/                     # lifecycle, runtime DB + migration, runner, worker_cli, progress;
         │                             #   metric (xác nhận tỉ lệ mét), stage_views, thumbnails;
-        │                             #   admission (chờ + giữ chỗ tài nguyên), workspace (dọn scratch, lease attempt)
+        │                             #   admission (chờ + giữ chỗ tài nguyên), workspace (dọn scratch, lease attempt);
+        │                             #   queue (thứ tự xoay vòng theo người yêu cầu, vị trí + thời gian chờ ước tính)
         ├── artifacts/                # resolver/store; remote.py = kho file S3/R2 (cache cục bộ tự đồng bộ)
         ├── auth/                     # tài khoản, mã mời, phiên, nhật ký, CLI tạo Reviewer
         ├── projects/                 # project registry, privacy policy, link tải có hạn; deletion (thùng rác scene)
         ├── uploads/                  # upload qua API + upload thẳng lên kho file (direct.py); scene_imports (3DGS)
         ├── processing/               # thông số xử lý theo configs/product, đo máy worker (capability),
-        │                             #   ước lượng tài nguyên (resources), số đo theo lần chạy (telemetry, procfs)
+        │                             #   ước lượng tài nguyên (resources), số đo theo lần chạy (telemetry, procfs),
+        │                             #   ngân sách và thời gian xử lý suy từ số đo (observed)
         ├── samples/                  # thư viện video mẫu đã xử lý sẵn
         ├── scene/                    # SceneIR revision, thao tác vật thể, danh mục asset; extraction, objectify,
         │                             #   objectify_queue (tách scene theo vật, pipeline v2)
@@ -251,7 +257,7 @@ flowchart TB
     subgraph REC["EX-REC: Dataset + Reconstruction"]
         INPUT --> RGB["RGB video/frames: validate + privacy; extract frames if needed"]
         INPUT --> DEPTH["Optional sensor depth + scale metadata"]
-        INPUT --> LIDAR["Optional registered LiDAR / adapter-prefused scans"]
+        INPUT --> LIDAR["Optional LiDAR package: registered cloud or raw scans + trajectory (ADR 0009)"]
         RGB --> POSE["Camera poses / SfM (COLMAP P0)"]
         POSE --> VIS["VisualArtifact: real 3DGS (Brush P0)"]
         POSE --> ANCHOR["REC-06: confirm locked anchor / metric transform"]
@@ -338,6 +344,33 @@ pha B, sau khi pha A chọn phương pháp):
 
 Các chặng 4–7 cần runtime GPU riêng (Python/CUDA, tách khỏi app như `data/scene_runtime`);
 image GPU worker chỉ được thêm khi runtime đó khoá ở pha B (xem quy tắc Dockerfile ở trên).
+
+### Trạng thái pipeline hiện hành (cập nhật 02/10/2026)
+
+Sơ đồ ở trên giữ ranh giới track. Bảng dưới ghi các bước Studio thật sự chạy và công cụ của từng bước sau các quyết
+định của owner tới 02/10/2026 ([ADR 0001](docs/decisions/0001-metric-scale-strategy-and-roadmap.md),
+[0004](docs/decisions/0004-input-kinds-and-routing.md), [0009](docs/decisions/0009-user-lidar-input-and-routing.md)).
+Ba luồng đầu vào: **A** chỉ video; **B** video + gói LiDAR đã đăng ký; **C** video + gói scan thô. Gói B/C luôn kèm quỹ
+đạo, calibration camera ↔ LiDAR và thời điểm frame.
+
+| Bước (stage) | Công cụ | Luồng | Trạng thái |
+|---|---|---|---|
+| Nhận diện đầu vào theo nội dung | `reconstruction/inputs/detect.py` | A, B, C | Đã có |
+| Kiểm video, privacy tự khai, tách frame (`ST-INPUT-VALIDATE`…`ST-FRAME-EXTRACT`) | FFmpeg | A, B, C | Đã có |
+| Nhận LiDAR (`ST-LIDAR-INGEST`): giải gói, ghép scan theo quỹ đạo (C), tìm sàn, publish `LiDARGeometryArtifact` | numpy (`lidar/fusion.py`, `lidar/package.py`) | B, C | Đã có trong worker |
+| Pose camera (`ST-CAMERA-POSE`) | COLMAP `mapper` | A | Đã có |
+| Pose camera bám quỹ đạo | COLMAP `point_triangulator` + `pose_prior_mapper` | B, C | Đã thử nghiệm, đang đưa vào pipeline |
+| 3DGS (`ST-VISUAL-RECON`), giữ lại 1/8 ảnh để chấm PSNR/SSIM/LPIPS | Brush, `lpips` | A, B, C | Đã có |
+| Đề xuất tỉ lệ mét + mặt sàn | MoGe-2 | A | Đã có (ước lượng; người dùng xác nhận) |
+| Xác nhận tỉ lệ (`ST-METRIC-CANONICALIZE`) | Người dùng chọn điểm / nhập số đo | A | Đã có |
+| Xác nhận tỉ lệ từ LiDAR, không chọn điểm | Căn chỉnh theo quỹ đạo | B, C | Chưa làm |
+| Hình học & collision (`ST-RGB-GEOMETRY`), bundle | splat-transform | A, B, C | Đã có (mesh từ 3DGS) |
+| Mesh va chạm từ LiDAR ở vùng LiDAR phủ | — | B, C | Chưa làm |
+| Tách vật thể (`ST-OBJECT-EXTRACT`) | SAM2, gsplat, CoACD, LaMa | A, B, C | Đã có |
+
+Điều phối: worker nhận job theo hàng đợi xoay vòng theo người yêu cầu, giữ chỗ tài nguyên theo số đo thật và chỉ cho
+chạy chung GPU khi cấu hình đã có số đo (`orchestration/jobs/{admission,queue}.py`, `processing/observed.py`).
+Chế độ hai camera cho COLMAP không làm (owner cấm). LiDAR odometry/SLAM và job chỉ-LiDAR ngoài phạm vi.
 
 ### Pipeline glossary
 
