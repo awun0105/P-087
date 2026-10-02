@@ -15,7 +15,7 @@ Kết quả demo **phải** đến từ chính pipeline này (không vẽ tay, k
 
 ```bash
 git clone <repo> /opt/real2sim/app && cd /opt/real2sim/app
-git checkout feat/product-rec
+git checkout feat/pipeline-v2                # hoặc develop sau khi PR của nhánh này được merge
 make setup                                   # .venv + dependencies từ lockfile
 (cd frontend && npm ci && npm run build:editor)
 
