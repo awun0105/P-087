@@ -180,9 +180,9 @@ cấu hình tương ứng.
 | `data/scene_runtime/` | Môi trường Python tách vật thể (cấu hình trỏ tới): PyTorch, SAM2, gsplat, LaMa, CoACD, usd-core và trọng số | `scripts/gpu/setup_scene_runtime.sh` |
 | `data/rec07_runtime/` | Môi trường Python cho tooling LiDAR offline (Open3D); test REC-07 tự bỏ qua khi thiếu | `requirements-offline.lock.txt` |
 | `data/tools/rerun-0.24.1/` | Viewer Rerun đúng phiên bản Brush nhúng | [`eval/visual/README.md`](./eval/visual/README.md) |
-| `data/torwic_slam/` | Dataset TorWIC: `raw/` (gốc, bất biến), `normalized/`, `derived/`, `evaluation_only/` | `scripts/torwic/` |
+| `data/torwic_slam/` | Dataset TorWIC: `raw/` (gốc, bất biến), `normalized/`, `derived/`, `evaluation_only/`. Ảnh RGB của `normalized/` là hardlink tới `raw/` (một bản vật lý, chỉ đọc — không ghi đè tại chỗ) | `scripts/torwic/`; gộp ảnh trùng: `scripts/torwic/dedupe_rgb_frames.py` |
 | `data/evidence/` | Bằng chứng chạy thử theo task (REC-05/06/07, sweep chất lượng). Task file cũ ghi đường dẫn không có `evidence/` | — |
-| `data/artifacts/` | Kho artifact mặc định khi chạy không có `studio.env`; test để lại file ở đây, xoá được | tự tạo |
+| `data/artifacts/` | Kho artifact mặc định khi chạy không có `studio.env`. Test không được ghi vào đây (guard ở `tests/conftest.py`) | tự tạo |
 
 ## Project Structure
 

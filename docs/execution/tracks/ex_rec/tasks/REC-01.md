@@ -311,6 +311,57 @@ REC-02A/REC-03 phải dùng split reconstruction IDs khi đưa frame vào pipeli
 và evaluator thuộc owner khác chỉ dùng held-out IDs. REC-01 artifact tự nó
 không chứng minh privacy, full decode, GPU reconstruction hoặc E2E handoff.
 
+### Một bản vật lý cho ảnh RGB giữa `raw/` và `normalized/` (2026-10-02)
+
+Owner yêu cầu bỏ phần ảnh trùng trong store: `normalized/aisle_cw/rgb_frames/`
+là bản sao nguyên byte của `raw/traversals/aisle_cw/image_left/` (1.092 PNG,
+1.277.825.992 byte). Tool mới `scripts/torwic/dedupe_rgb_frames.py` thay từng
+bản sao bằng hardlink tới file raw rồi đặt file dùng chung thành chỉ đọc.
+Output contract ở mục 6 không đổi: đường dẫn, bytes, checksum, data class và
+manifest giữ nguyên. Publisher (`prepare_dataset.py`, `canonical_dataset.py`)
+không bị sửa, nên SHA-256 của hai script vẫn trùng provenance trong manifest đã
+publish ở mục trên.
+
+- Trình tự của tool: `validate_canonical_manifest` cho cả store (sai thì dừng
+  trước khi đụng file) → hash lại hai phía của từng frame ngay trước khi thay →
+  tạo link dưới tên tạm rồi rename nguyên tử → validate lại sau khi xong.
+- Chỉ-đọc là chốt bảo vệ raw. Hai tên trỏ cùng dữ liệu nên ghi đè tại chỗ qua
+  `normalized/` sẽ sửa luôn `raw/`; với file chỉ đọc thao tác đó lỗi
+  `PermissionError`. Thay file bằng rename chỉ tách liên kết: raw còn nguyên,
+  validator báo `Generated checksum mismatch`.
+- Chọn hardlink thay vì symlink (DATASET_PLAYBOOK §13.1 cho phép
+  "copy/symlink"): consumer vẫn thấy file thường, và chép riêng `normalized/`
+  sang máy khác không tạo link gãy. Đây là lựa chọn triển khai, ghi ở
+  DATASET_PLAYBOOK §12.4.
+
+Command thật:
+`.venv/bin/python -m scripts.torwic.dedupe_rgb_frames --dataset-root data/torwic_slam --apply`
+→ `frame_count 1092, shared 1092, duplicated 0, linked 1092, writable_shared 0`.
+
+Bằng chứng quan sát (máy local, ext4):
+
+- SHA-256 của 1.094 file raw (RGB, calibration, timestamps) trước/sau giống
+  nhau (`cmp` exit 0); tên, kích thước, mtime của 2.188 file trong `raw/` không
+  đổi.
+- `preparation_manifest.json`, `dataset_manifest.yaml`, `benchmark_split.json`
+  giống từng byte; byte SHA-256 của hai file đầu vẫn là `10c917dd…ff98ebb` và
+  `c1f734a8…b831239d` như mục trên.
+- `data/torwic_slam` 5,7 GB → 4,5 GB; dung lượng trống tăng 1.221 MiB. Cả 1.092
+  frame normalized có 2 link, mode `0444`; `ffprobe` đọc frame qua đường dẫn
+  normalized được (png 1280×720).
+- Chạy lại command publish của mục trên trên store đã gộp: exit 0, manifest
+  không đổi, 1.092 frame vẫn dùng chung, không còn thư mục stage.
+- `.venv/bin/pytest tests/test_reconstruction -q`: 535 pass, 22 skip, gồm 13
+  test mới ở `test_rec01_rgb_dedupe.py` (chỉ báo cáo, gộp, chạy lại, ghi đè tại
+  chỗ, thay bằng rename, store sai, frame đổi sau validate, filesystem không có
+  hardlink, file tạm sót, publish lại, store chưa chuẩn bị, CLI). Tắt từng chốt
+  (chỉ-đọc, hash lại trước khi thay, validate trước) thì test tương ứng fail.
+
+Giới hạn: xoá `normalized/` rồi publish lại sẽ tạo bản sao mới, khi đó chạy lại
+tool. Tài khoản root bỏ qua quyền file nên chốt chỉ-đọc không chặn được root.
+Raw và normalized khác filesystem, hoặc filesystem không có hardlink, thì tool
+báo lỗi và giữ nguyên bản sao.
+
 ## Correction Task (2026-09-24)
 1. Không tạo data/torwic_slam_rec01 nữa.
 2. Merge valid REC-01 outputs vào canonical:
