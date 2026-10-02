@@ -18,6 +18,7 @@ from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import load_prepared_profile, prepared_frame_reference, require_profile
 from src.services.orchestration.jobs.models import TransitionRequest
 from src.services.orchestration.jobs.progress import awaiting_finalize
+from src.services.orchestration.jobs.queue import fair_order, waiting_jobs
 from src.services.orchestration.jobs.runner import run_finalize_job, run_prepared_job, run_video_job
 from src.services.orchestration.processing import is_presets_file, load_presets
 from src.services.orchestration.processing.capability import probe as probe_capability
@@ -133,53 +134,50 @@ def _dispatch(
     admission: ResourceAdmission | None,
 ) -> bool:
     """Một lượt quét hàng đợi của `dispatch_next`."""
-    persistence = registry.persistence
-    if persistence is None:
+    if registry.persistence is None:
         raise ValueError("Queue consumer cần durable registry")
-    cursor = ""
-    while page := persistence.job_ids_after(cursor):
-        for job_id in page:
-            job: JobManifest | None = None
-            try:
-                candidate = registry.get_job(job_id)
-                if awaiting_finalize(candidate):
-                    # Người dùng đã xác nhận tỉ lệ (job RUNNING, hoặc QUEUED khi retry): chạy
-                    # tiếp REC-05/REC-10 trên cùng job; vẫn qua cổng privacy của project.
-                    require_project_dispatch(registry.get_project(candidate.project_id))
-                    if admission is not None and not admission(candidate, "finalize"):
-                        continue
-                    try:
-                        finalize_runner(job_id, expected_checksum=candidate.job_manifest_checksum)
-                    except RuntimeStateConflictError:
-                        raise
-                    except Exception as error:
-                        logger.error("Finalize dispatch failed job=%s cause=%s", job_id, type(error).__name__)
-                        _record_finalize_failure(registry, candidate, error)
-                    return True
-                require_profile(candidate, registry.execution_profile)
-                project = registry.get_project(candidate.project_id)
-                require_project_dispatch(project)
-                job = candidate
-                frames = prepared_frame_reference(job)
-                if frames is not None:
-                    if admission is not None and not admission(job):
-                        continue
-                    runner(job_id, frames.artifact_uri, expected_checksum=job.job_manifest_checksum)
-                    return True
-                if project.input_manifest_ref is None:
-                    continue  # Chưa có input để chuẩn bị (ví dụ project dataset chưa publish frames).
+    # Thứ tự xoay vòng theo người yêu cầu (jobs/queue.py): cũng là thứ tự UI báo cho người dùng.
+    for job_id in [item.job_id for item in fair_order(waiting_jobs(registry))]:
+        job: JobManifest | None = None
+        try:
+            candidate = registry.get_job(job_id)
+            if awaiting_finalize(candidate):
+                # Người dùng đã xác nhận tỉ lệ (job RUNNING, hoặc QUEUED khi retry): chạy
+                # tiếp REC-05/REC-10 trên cùng job; vẫn qua cổng privacy của project.
+                require_project_dispatch(registry.get_project(candidate.project_id))
+                if admission is not None and not admission(candidate, "finalize"):
+                    continue
+                try:
+                    finalize_runner(job_id, expected_checksum=candidate.job_manifest_checksum)
+                except RuntimeStateConflictError:
+                    raise
+                except Exception as error:
+                    logger.error("Finalize dispatch failed job=%s cause=%s", job_id, type(error).__name__)
+                    _record_finalize_failure(registry, candidate, error)
+                return True
+            require_profile(candidate, registry.execution_profile)
+            project = registry.get_project(candidate.project_id)
+            require_project_dispatch(project)
+            job = candidate
+            frames = prepared_frame_reference(job)
+            if frames is not None:
                 if admission is not None and not admission(job):
                     continue
-                video_runner(job_id, expected_checksum=job.job_manifest_checksum)
+                runner(job_id, frames.artifact_uri, expected_checksum=job.job_manifest_checksum)
                 return True
-            except (RuntimeStateConflictError, PrivacyGateBlockedError):
-                continue  # Job không eligible hoặc runner khác đã claim; không auto retry.
-            except Exception as error:
-                logger.error("Prepared queue dispatch failed job=%s cause=%s", job_id, type(error).__name__)
-                if job is not None:
-                    _record_dispatch_failure(registry, job, error)
-                    return True
-        cursor = page[-1]
+            if project.input_manifest_ref is None:
+                continue  # Chưa có input để chuẩn bị (ví dụ project dataset chưa publish frames).
+            if admission is not None and not admission(job):
+                continue
+            video_runner(job_id, expected_checksum=job.job_manifest_checksum)
+            return True
+        except (RuntimeStateConflictError, PrivacyGateBlockedError):
+            continue  # Job không eligible hoặc runner khác đã claim; không auto retry.
+        except Exception as error:
+            logger.error("Prepared queue dispatch failed job=%s cause=%s", job_id, type(error).__name__)
+            if job is not None:
+                _record_dispatch_failure(registry, job, error)
+                return True
     return False
 
 

@@ -25,6 +25,7 @@ from src.models.contracts.manifests import (
 )
 from src.services.orchestration.jobs.admission import ResourceWait
 from src.services.orchestration.jobs.models import JobAttemptRecord
+from src.services.orchestration.jobs.queue import QueuePosition
 
 #: 5 stage tới preview 3DGS (video mẫu, export bundle dùng danh sách này).
 MVP_PIPELINE: tuple[StageId, ...] = (
@@ -77,6 +78,8 @@ class JobProgress(BaseModel):
     preview_ready: bool
     waiting_for: WaitingFor | None = None
     resource_wait: ResourceWait | None = None
+    #: Vị trí trong hàng đợi khi job đang chờ worker; None khi job đang chạy, đã xong hoặc chờ người dùng.
+    queue: QueuePosition | None = None
     error: ExecutionError | None = None
 
 
@@ -100,7 +103,11 @@ def _current_attempt(attempts: list[JobAttemptRecord]) -> list[JobAttemptRecord]
 
 
 def job_progress(
-    job: JobManifest, attempts: list[JobAttemptRecord], preview_ready: bool, resource_wait: ResourceWait | None = None
+    job: JobManifest,
+    attempts: list[JobAttemptRecord],
+    preview_ready: bool,
+    resource_wait: ResourceWait | None = None,
+    queue: QueuePosition | None = None,
 ) -> JobProgress:
     """Chiếu JobManifest + journal thành tiến trình từng stage của attempt hiện tại."""
     events = _current_attempt(attempts)
@@ -187,6 +194,7 @@ def job_progress(
         preview_ready=preview_ready,
         waiting_for="metric_confirmation" if waiting else ("resources" if resources else None),
         resource_wait=resources,
+        queue=queue if job.status == JobStatus.QUEUED or awaiting_finalize(job) else None,
         error=failure if job.status == JobStatus.FAILED else None,
     )
 
