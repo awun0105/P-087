@@ -213,6 +213,7 @@ Commands đã xác nhận hoặc planned sau khi thêm file test:
 - [x] Demo tại bước upload: adapter bundle cũ + export + replay đủ 8 stage; stage thiếu/failed không thành success khi skip.
 - [x] Ghi lasting UI decision tại `docs/STUDIO_UX_SPEC.md` S03/S05.
 - [x] Kết thúc broader validation và commit các nhóm admission/demo/docs.
+- [x] Audit (Claude Code) + increment sửa lỗi A1–A8; xem mục "Audit và increment sửa lỗi".
 - [ ] Follow-up có gate: cleanup khẩn cấp và hook từng step nội bộ; estimator empirical cần samples/validation protocol. Không thuộc phần đã được chứng minh của increment này.
 
 ## Decisions
@@ -280,6 +281,43 @@ Baseline audit (VERIFIED): `pytest tests/ -q` 1251 passed / 40 skipped; ruff che
   process group; thêm số đo mức GPU của worker (ghi tên riêng, không gộp với số theo PID); bước tách vật thể được
   lấy mẫu; bản ghi lưu thêm vào `r2s_resource_usage` để không mất khi trả máy thuê.
 - Không thêm dependency: `psutil` chỉ có trong `requirements-offline.lock.txt`, không có trong lock runtime.
+
+### Kết quả increment sửa lỗi (02/10/2026)
+
+| # | Đã sửa | File chính |
+| --- | --- | --- |
+| A1 | Worker đo đúng GPU được ghim (chỉ số hoặc UUID trong `CUDA_VISIBLE_DEVICES`); `gpu_plan` đặt thêm `CUDA_DEVICE_ORDER=PCI_BUS_ID`. Nhiều GPU mà không ghim vẫn là unknown, hiện lý do `unmeasured`. | `processing/capability.py`, `scripts/gpu/gpu_plan.py` |
+| A2 | Maximum tính theo mốc máy rảnh do heartbeat ghi; chưa có mốc thì theo tổng năng lực. | `processing/resources.py`, `processing/models.py`, `jobs/worker_cli.py` |
+| A3 | Telemetry theo cây tiến trình; thêm mức GPU của cả máy; bước tách vật thể được lấy mẫu; bản ghi vào `r2s_resource_usage` (migration 8). | `processing/telemetry.py`, `processing/procfs.py`, `jobs/runner.py` |
+| A4 | Lỗi của gate trả "chờ lượt sau"; cấu hình job không đọc được thì để runner báo lỗi theo đường có sẵn. | `jobs/admission.py` |
+| A5 | Guard cleanup giải symlink của worker root giống runner. | `jobs/workspace.py` |
+| A6 | Bốn lý do chờ (`busy`/`external`/`exceeds_machine`/`unmeasured`) + tổng năng lực trong observation; UI hiện chi tiết; chặn cấu hình vượt tổng ổ đĩa; thiếu đĩa thì dọn scratch không còn ai dùng + thùng rác quá hạn rồi đo lại (tối đa một lần mỗi 5 phút). | `jobs/admission.py`, `scene/ResourceWaitDetail.tsx` |
+| A7 | Giữ chỗ theo worker (`r2s_resource_reservations`), gate + ghi trong một transaction có khoá; nhả khi lượt dispatch kết thúc; hết hạn theo heartbeat hoặc khi tiến trình cùng host đã chết. | `jobs/admission.py`, `jobs/worker_cli.py` |
+| A8 | File `.json/.txt/.yaml/.out/.err` trên 1 MiB là scratch (log và `.jsonl` luôn giữ); job SUCCEEDED thì dọn scratch attempt cũ và `resume/`; lease `flock` cho attempt. | `jobs/workspace.py`, `jobs/runner.py` |
+
+Validation (VERIFIED trên máy local, Quadro T2000):
+
+- `pytest tests/ -q`: **1290 passed, 40 skipped** (trước increment 1251/40); `ruff check` + `ruff format --check` sạch
+  (`src/ tests/ scripts/gpu`). 40 skip gồm các test PostgreSQL: migration 8 và khoá `pg_advisory_xact_lock` của giữ chỗ
+  **chưa chạy trên PostgreSQL thật**.
+- Frontend: `npm test` 194 passed / 34 file; `npm run typecheck`, `npm run lint` sạch.
+- `scripts.check_contract_mirror` PASS, `scripts.check_foundation` READY.
+- Chạy Brush thật (binary của `Makefile.studio`, 1500 bước, dữ liệu tổng hợp 12 ảnh) dưới một CLI cha, Brush ở session
+  riêng như adapter: bộ đo ghi được 29 mẫu, peak RAM 0,33 GiB, peak VRAM theo PID 0,53 GiB, mức GPU cả máy 0,54 GiB.
+  Trên máy này driver NVIDIA có báo VRAM theo PID cho Brush (Vulkan). Trong container: UNKNOWN; khi đó còn số mức GPU.
+- Test tiến trình thật: con 200 MB ở session riêng được tính; lease bị giữ bởi tiến trình khác và tự nhả khi nó chết;
+  tiến trình đứng trong workspace chặn việc dọn.
+
+Giới hạn còn lại (chưa làm, không claim):
+
+- Chưa có lượt chạy pipeline thật đầu-cuối sau increment (worker thật + COLMAP + Brush + finalize), chưa chạy trên
+  máy 2 GPU, chưa chạy với PostgreSQL/R2.
+- Gate của bước hoàn tất vẫn dùng ước lượng của bước preview (`estimate_scope=configured_preview`); chưa có mô hình cho
+  hình học/tách vật thể. Không tự đặt hệ số: giờ đã có số đo của bước này để làm mô hình ở pha 4.
+- Hàng đợi tách lại vật thể (`scene/objectify_queue.py`) không giữ chỗ và chưa được lấy mẫu; workspace
+  `objectify-*`/`boxes-*` của nó chưa có chính sách dọn.
+- Nhiều worker trên máy khác loại: observation chờ của một job do worker đo sau cùng ghi đè.
+- Estimator học từ `r2s_resource_usage` (pha 4) chưa làm; bảng chưa có chính sách xoá bớt.
 
 ---
 

@@ -72,12 +72,14 @@ src/
     │   └── validation/
     └── orchestration/                # EX-PRODUCT
         ├── jobs/                     # lifecycle, runtime DB + migration, runner, worker_cli, progress;
-        │                             #   metric (xác nhận tỉ lệ mét), stage_views, thumbnails
+        │                             #   metric (xác nhận tỉ lệ mét), stage_views, thumbnails;
+        │                             #   admission (chờ + giữ chỗ tài nguyên), workspace (dọn scratch, lease attempt)
         ├── artifacts/                # resolver/store; remote.py = kho file S3/R2 (cache cục bộ tự đồng bộ)
         ├── auth/                     # tài khoản, mã mời, phiên, nhật ký, CLI tạo Reviewer
         ├── projects/                 # project registry, privacy policy, link tải có hạn; deletion (thùng rác scene)
         ├── uploads/                  # upload qua API + upload thẳng lên kho file (direct.py); scene_imports (3DGS)
-        ├── processing/               # thông số xử lý theo configs/product, đo máy worker
+        ├── processing/               # thông số xử lý theo configs/product, đo máy worker (capability),
+        │                             #   ước lượng tài nguyên (resources), số đo theo lần chạy (telemetry, procfs)
         ├── samples/                  # thư viện video mẫu đã xử lý sẵn
         ├── scene/                    # SceneIR revision, thao tác vật thể, danh mục asset; extraction, objectify,
         │                             #   objectify_queue (tách scene theo vật, pipeline v2)

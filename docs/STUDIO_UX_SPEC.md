@@ -399,6 +399,13 @@ nguyên cho job. Worker đo lại trên máy thực thi khi đến lượt. Nế
 tài nguyên, vẫn cho job vào hàng đợi với nguyên cấu hình đã chọn; cấu hình vượt
 tổng năng lực máy đã biết vẫn bị chặn.
 
+**Làm rõ (owner yêu cầu sửa sau audit, 02/10/2026):** "snapshot" dùng cho `Maximum`
+là lần đo gần nhất **lúc máy xử lý rảnh** (worker không chạy job, không worker nào
+khác giữ chỗ), không phải phần trống tức thời: khi máy đang chạy job khác, phần
+trống đã bị chính job đó chiếm và `Maximum` không được hạ theo. UI ghi thời điểm
+của lần đo lúc rảnh; máy chưa có lần đo đó thì nói rõ là ước lượng theo tổng năng
+lực. Tổng năng lực bị chặn gồm cả tổng dung lượng ổ của máy xử lý.
+
 ### S04 — Jobs
 
 - **Purpose / entry:** mục Jobs trong sidebar; theo dõi các lần xử lý của nhóm, không phải bảng quản lý task.
@@ -424,6 +431,13 @@ cấu hình/checksum, chờ trong durable queue và tự chạy tiếp khi worke
 nguyên. UI tiếp tục polling, hiện lý do chờ và thanh tiến trình có animation
 indeterminate; không tăng phần trăm xử lý hoặc đánh dấu stage đang chạy khi worker
 chưa bắt đầu. Người dùng vẫn có thể hủy job đang chờ.
+
+Khi chờ tài nguyên, UI hiện lần đo gần nhất của máy xử lý: thiếu tài nguyên nào,
+cần khoảng bao nhiêu, đang có bao nhiêu, và một trong bốn lý do — job khác đang
+dùng (tự hết), chương trình khác trên máy đang chiếm, cấu hình vượt tổng năng lực
+máy này (sẽ không tự chạy ở đây), hoặc máy chưa đo được. Không lý do nào tự đổi
+cấu hình hay tự đánh dấu job lỗi; người dùng quyết định chờ hay huỷ. Số "cần" là
+ước lượng theo cấu hình, không trình bày như phép đo.
 
 Video mẫu ở bước upload dùng đủ 8 stage của pipeline Studio hiện tại. Bundle cũ
 chỉ replay các stage có kết quả đã ghi; stage còn thiếu hiện chưa có kết quả, kể
