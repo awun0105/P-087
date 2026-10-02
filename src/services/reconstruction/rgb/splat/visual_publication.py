@@ -80,7 +80,10 @@ class VisualResolver:
         poses = self.poses.load(artifact.source_camera_poses)
         if artifact.source_frame_set != poses.source_frame_set:
             raise ValueError("visual frame-set lineage mismatch")
-        if artifact.training_frame_ids != [pose.frame_id for pose in poses.poses]:
+        # Ảnh train + ảnh giữ lại phải đúng bằng các ảnh COLMAP đã đăng ký: không ảnh nào bị bỏ lặng lẽ.
+        if sorted(artifact.training_frame_ids + (artifact.held_out_frame_ids or [])) != [
+            pose.frame_id for pose in poses.poses
+        ]:
             raise ValueError("visual training inventory differs from selected COLMAP model")
         for ref in (artifact.master, artifact.delivery, *artifact.logs.values()):
             self.require(ref)

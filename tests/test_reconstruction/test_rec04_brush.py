@@ -318,3 +318,124 @@ def test_store_corruption_prevents_manifest(tmp_path: Path, monkeypatch: pytest.
     with pytest.raises(VisualError):
         service.execute(request)
     assert not list((tmp_path / "store").rglob("visual.json"))
+
+
+# ── Giữ lại ảnh không train để chấm PSNR/SSIM/LPIPS ─────────────────────────────────────────────
+
+
+def holdout_config(split: int = 3) -> BrushConfig:
+    return config().model_copy(update={"eval_split_every": split})
+
+
+class HoldoutBrush(FixtureBrush):
+    """Brush giả có eval split: lưu ảnh render của ảnh giữ lại và in dòng chấm ở bước cuối."""
+
+    def __init__(self, rendered: tuple[str, ...] | None = ("000000",), report: bool = True, flags: bool = True) -> None:
+        super().__init__()
+        self.rendered, self.report, self.flags = rendered, report, flags
+
+    def run(self, invocation: Invocation, workspace: Path) -> str:
+        if invocation.name == "brush-help":
+            text = " ".join(brush_command(holdout_config() if self.flags else config(), workspace, "--total-steps"))
+        elif invocation.name == "brush-train":
+            gaussian_ply(workspace / "output/visual.ply")
+            if self.rendered is not None:
+                renders = workspace / "output/eval_10"
+                renders.mkdir()
+                for name in self.rendered:
+                    (renders / f"{name}.png").write_bytes(b"render")
+            text = "Eval iter 10: PSNR 27.5, ssim 0.875" if self.report else "fixture training"
+        else:
+            return super().run(invocation, workspace)
+        (workspace / f"{invocation.name}.log").write_text(text)
+        return text
+
+
+def holdout_adapter(root: Path, process: HoldoutBrush, split: int = 3) -> tuple[BrushAdapter, BrushRequest]:
+    service, request = adapter(root)
+    deps = service.deps
+    processor = FixtureProcessor(SplatRuntimeSettings(module_path=root / "fixture.mjs"), process)
+    service = BrushAdapter(BrushDependencies(deps.inputs, process, processor, deps.publisher, deps.resolver))
+    return service, BrushRequest(request.camera_poses, holdout_config(split), request.workspace)
+
+
+def test_holdout_field_is_absent_from_old_documents() -> None:
+    """Cấu hình không giữ ảnh phải cho đúng checksum như trước khi có trường mới (artifact cũ vẫn đọc được)."""
+    assert config().checksum() == "sha256:4c82ed7cdb4cd995dce6b2bfd99155d222b2f0c10c8e591b3025a6fe0b6240db"
+    assert "eval_split_every" not in config().model_dump(mode="json")
+    assert holdout_config().checksum() != config().checksum()
+    assert not any(arg.startswith("--eval") for arg in brush_command(config(), Path("w"), "--total-steps"))
+
+
+def test_holdout_command_evaluates_once_at_the_final_step() -> None:
+    args = brush_command(holdout_config(8), Path("w"), "--total-steps")
+    assert args[args.index("--eval-split-every") + 1] == "8"
+    assert args[args.index("--eval-every") + 1] == "10"
+    assert "--eval-save-to-disk" in args
+
+
+def test_holdout_publishes_inventory_and_quality(tmp_path: Path) -> None:
+    service, request = holdout_adapter(tmp_path, HoldoutBrush())
+    result = service.execute(request)
+    assert result.artifact.training_frame_ids == [1, 2]
+    assert result.artifact.held_out_frame_ids == [0]
+    quality = result.artifact.holdout_quality
+    assert quality is not None
+    assert (quality.psnr, quality.ssim, quality.views, quality.iteration) == (27.5, 0.875, 1, 10)
+    assert quality.lpips is None and quality.lpips_net is None  # chưa cấu hình runtime LPIPS
+    assert service.deps.resolver.load(result.reference) == result.artifact
+
+
+def test_holdout_scores_lpips_when_runtime_is_configured(tmp_path: Path) -> None:
+    fake = tmp_path / "fake-python"
+    fake.write_text('#!/bin/sh\necho \'{"net": "vgg", "count": 1, "lpips": 0.25}\'\n')
+    fake.chmod(0o755)
+    process = HoldoutBrush()
+    process.settings = process.settings.model_copy(update={"lpips_python": fake})
+    service, request = holdout_adapter(tmp_path, process)
+    quality = service.execute(request).artifact.holdout_quality
+    assert quality is not None and quality.lpips == 0.25 and quality.lpips_net == "vgg"
+
+
+def test_holdout_lpips_failure_does_not_fail_the_stage(tmp_path: Path) -> None:
+    fake = tmp_path / "fake-python"
+    fake.write_text("#!/bin/sh\nexit 3\n")
+    fake.chmod(0o755)
+    process = HoldoutBrush()
+    process.settings = process.settings.model_copy(update={"lpips_python": fake})
+    service, request = holdout_adapter(tmp_path, process)
+    quality = service.execute(request).artifact.holdout_quality
+    assert quality is not None and quality.psnr == 27.5 and quality.lpips is None
+
+
+def test_holdout_rejects_a_split_that_differs_from_the_record(tmp_path: Path) -> None:
+    """Brush giữ lại ảnh khác với quy tắc đã ghi thì không còn biết ảnh nào đã train: không publish."""
+    service, request = holdout_adapter(tmp_path, HoldoutBrush(rendered=("000001",)))
+    with pytest.raises(VisualError) as error:
+        service.execute(request)
+    assert error.value.code == "VISUAL_ARTIFACT_INVALID"
+
+
+def test_holdout_without_eval_report_keeps_inventory_but_no_score(tmp_path: Path) -> None:
+    service, request = holdout_adapter(tmp_path, HoldoutBrush(rendered=None, report=False))
+    artifact = service.execute(request).artifact
+    assert artifact.held_out_frame_ids == [0] and artifact.training_frame_ids == [1, 2]
+    assert artifact.holdout_quality is None
+
+
+def test_holdout_requires_runtime_support(tmp_path: Path) -> None:
+    service, request = holdout_adapter(tmp_path, HoldoutBrush(flags=False))
+    with pytest.raises(VisualError) as error:
+        service.execute(request)
+    assert error.value.code == "BRUSH_CLI_UNSUPPORTED"
+
+
+def test_holdout_inventory_must_be_disjoint_and_match_config(tmp_path: Path) -> None:
+    service, request = holdout_adapter(tmp_path, HoldoutBrush())
+    document = service.execute(request).artifact.model_dump(mode="json")
+    for change in ({"held_out_frame_ids": [1]}, {"held_out_frame_ids": None}):
+        tampered = document | change
+        tampered = {key: value for key, value in tampered.items() if value is not None}
+        tampered["artifact_checksum"] = canonical_content_checksum(tampered, "artifact_checksum")
+        with pytest.raises(ValueError):
+            BrushVisualArtifact.model_validate(tampered)

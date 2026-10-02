@@ -3,7 +3,7 @@
 Dùng gói `lpips` 0.1.4 chính thức (BSD-2, Zhang et al. 2018), mạng VGG như quy ước báo cáo của
 3DGS/SuGaR/Frosting. Không import code app (runtime không có pydantic). In một dòng JSON.
 
-    <scene_runtime>/bin/python eval/visual/lpips_score.py --renders <dir> --gt <dir> [--net vgg]
+    <scene_runtime>/bin/python src/services/reconstruction/adapters/lpips_runner.py --renders <dir> --gt <dir> [--net vgg]
 """
 
 import argparse

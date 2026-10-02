@@ -1,7 +1,10 @@
 """REC-04 orchestration: Brush trainer và splat-transform nguyên engine qua adapters."""
 
+import json
 import logging
+import re
 import shutil
+import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,8 +21,18 @@ from src.services.reconstruction.adapters.brush_runtime import (
 )
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor
 from src.services.reconstruction.resume import ResumeCache, checkpoint_interval, content_key
-from src.services.reconstruction.rgb.splat.visual import BrushConfig, BrushVisualArtifact, SplatInspection
+from src.services.reconstruction.rgb.splat.visual import (
+    BrushConfig,
+    BrushVisualArtifact,
+    HoldoutQuality,
+    SplatInspection,
+)
 from src.services.reconstruction.rgb.splat.visual_publication import VisualPublisher, VisualResolver
+
+#: Dòng Brush in sau mỗi lần chấm ảnh giữ lại.
+EVAL_LINE = re.compile(r"Eval iter (\d+): PSNR ([0-9.]+), ssim ([0-9.]+)")
+LPIPS_RUNNER = Path(__file__).with_name("lpips_runner.py")
+LPIPS_TIMEOUT_SECONDS = 900
 
 
 @dataclass(frozen=True)
@@ -78,10 +91,20 @@ class BrushAdapter:
     def _execute(self, request: BrushRequest) -> BrushResult:
         inputs = self.deps.inputs.prepare(request.camera_poses, request.workspace)
         version = self.deps.process.qualify(request.workspace)
+        split = request.config.eval_split_every
+        if split is not None and not self.deps.process.supports_eval_split:
+            raise VisualError("BRUSH_CLI_UNSUPPORTED", "Brush runtime cannot hold out evaluation images")
         (request.workspace / "output").mkdir()
-        self._train(request)
+        log = self._train(request)
+        holdout = None if split is None else self._holdout(request, split, log)
         inspection = self.deps.processor.process_artifact(request.workspace, request.config.sog_iterations)
         payload = self._payload(request, (inputs, inspection, version))
+        if holdout is not None:
+            held_out, quality = holdout
+            payload["training_frame_ids"] = [i for i in payload["training_frame_ids"] if i not in set(held_out)]
+            payload["held_out_frame_ids"] = held_out
+            if quality is not None:
+                payload["holdout_quality"] = quality.model_dump(mode="json")
         self._verify_payload(payload)
         artifact, ref = self.deps.publisher.manifest(payload)
         self.deps.resolver.load(ref)
@@ -96,8 +119,11 @@ class BrushAdapter:
         )
         return BrushResult(artifact, ref, stage)
 
-    def _train(self, request: BrushRequest) -> None:
-        """Train ra `output/visual.ply`; có kho resume thì checkpoint định kỳ và train tiếp từ bản mới nhất."""
+    def _train(self, request: BrushRequest) -> str:
+        """Train ra `output/visual.ply`; có kho resume thì checkpoint định kỳ và train tiếp từ bản mới nhất.
+
+        Trả log của Brush. Ảnh render của lần chấm cuối (nếu có) luôn nằm ở `output/eval_<bước>/`.
+        """
         process, resume = self.deps.process, self.deps.resume
         total = request.config.total_train_iters
         checkpointing, key = None, None
@@ -114,14 +140,77 @@ class BrushAdapter:
                 latest[0] if latest is not None else 0,
             )
         arguments = brush_command(request.config, request.workspace, process.iteration_flag, checkpointing)
-        process.run(Invocation("brush-train", process.settings.command, arguments), request.workspace)
+        log = process.run(Invocation("brush-train", process.settings.command, arguments), request.workspace)
         if checkpointing is None or resume is None or key is None:
-            return
+            return log
         final = resume.checkpoints(key).get(total)
         if final is None:
             raise VisualError("VISUAL_ARTIFACT_INVALID", "Brush did not export the final step")
-        shutil.move(final, request.workspace / "output" / "visual.ply")
+        output = request.workspace / "output"
+        shutil.move(final, output / "visual.ply")
+        # Brush lưu ảnh chấm cạnh file xuất, tức trong kho checkpoint sắp bị xoá.
+        for renders in checkpointing.directory.glob("eval_*"):
+            shutil.move(renders, output / renders.name)
         resume.clear_checkpoints(key)
+        return log
+
+    def _holdout(self, request: BrushRequest, split: int, log: str) -> tuple[list[int], HoldoutQuality | None]:
+        """Ảnh Brush đã giữ lại và điểm chấm ở bước cuối.
+
+        Brush giữ lại ảnh có chỉ số chia hết cho `split` theo thứ tự tên. Khi Brush có lưu ảnh render của lần chấm,
+        danh sách đó phải trùng với quy tắc này — lệch thì dừng, vì không còn biết chắc ảnh nào đã được train.
+        """
+        images = request.workspace / "training" / "images"
+        names = sorted(path.stem for path in images.iterdir())
+        held_out = [int(name) for index, name in enumerate(names) if index % split == 0]
+        total = request.config.total_train_iters
+        renders = request.workspace / "output" / f"eval_{total}"
+        if renders.is_dir():
+            rendered = sorted(int(path.stem) for path in renders.glob("*.png"))
+            if rendered != held_out:
+                raise VisualError("VISUAL_ARTIFACT_INVALID", "Brush held out different images than recorded")
+        final = [match for match in EVAL_LINE.finditer(log) if int(match[1]) == total]
+        if not final:
+            return held_out, None
+        lpips = self._lpips(renders, images, request.workspace) if renders.is_dir() else None
+        quality = HoldoutQuality(
+            eval_split_every=split,
+            iteration=total,
+            views=len(held_out),
+            psnr=float(final[-1][2]),
+            ssim=float(final[-1][3]),
+            lpips=lpips,
+            lpips_net=None if lpips is None else "vgg",
+        )
+        return held_out, quality
+
+    def _lpips(self, renders: Path, images: Path, workspace: Path) -> float | None:
+        """LPIPS-VGG trong runtime có torch (`REC04_BRUSH_LPIPS_PYTHON`). Không cấu hình hoặc lỗi → None.
+
+        LPIPS là số đo phụ: thiếu runtime, thiếu trọng số mạng hay hết giờ không được làm hỏng bước dựng hình.
+        """
+        python = self.deps.process.settings.lpips_python
+        if python is None:
+            return None
+        command = [str(python), str(LPIPS_RUNNER), "--renders", str(renders), "--gt", str(images), "--net", "vgg"]
+        try:
+            completed = subprocess.run(  # noqa: S603 - argv cố định, không qua shell
+                command, capture_output=True, text=True, check=False, timeout=LPIPS_TIMEOUT_SECONDS
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            logging.getLogger(__name__).warning("LPIPS không chạy được: %s", type(error).__name__)
+            return None
+        (workspace / "lpips.log").write_text(completed.stdout[-4000:] + completed.stderr[-4000:])
+        if completed.returncode != 0:
+            logging.getLogger(__name__).warning("LPIPS thoát với mã %d; xem lpips.log", completed.returncode)
+            return None
+        try:
+            result = json.loads(completed.stdout.strip().splitlines()[-1])
+            if int(result["count"]) != len(list(renders.glob("*.png"))):
+                return None
+            return float(result["lpips"])
+        except (IndexError, KeyError, TypeError, ValueError):
+            return None
 
     def _verify_payload(self, payload: dict) -> None:
         """Không công bố manifest thành công nếu injected store làm hỏng payload."""

@@ -3,7 +3,7 @@
 Giao thức theo cách báo cáo của 3DGS/SuGaR/Frosting (chỉ lấy phương pháp, không chép code Inria):
 giữ lại mỗi ảnh thứ 8 của chính tập ảnh đã đăng ký (Brush `--eval-split-every 8`), render đúng
 camera đó, chấm PSNR/SSIM (Brush tự tính, render nền đen, làm tròn 8-bit) và LPIPS-VGG
-(`eval/visual/lpips_score.py`, gói `lpips` BSD-2) ở nhiều mốc bước. Ảnh held-out của benchmark
+(`src/services/reconstruction/adapters/lpips_runner.py`, gói `lpips` BSD-2) ở nhiều mốc bước. Ảnh held-out của benchmark
 split dataset không đi vào đây: job nguồn chỉ nhận video train split.
 
 Đầu vào là camera pose REC-03 mà một job sản phẩm đã publish (cùng ảnh, cùng COLMAP), nên cấu
@@ -29,6 +29,7 @@ from src.config import get_settings
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.manifests import StageId, StageStatus
 from src.services.orchestration.projects.registry import get_project_registry
+from src.services.reconstruction.adapters.brush import LPIPS_RUNNER
 from src.services.reconstruction.adapters.brush_input import BrushInputAdapter
 from src.services.reconstruction.adapters.brush_runtime import (
     BrushRuntimeSettings,
@@ -42,7 +43,7 @@ from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseReso
 from src.services.reconstruction.rgb.splat.visual import BrushConfig
 
 EVAL_LINE = re.compile(r"Eval iter (\d+): PSNR ([0-9.]+), ssim ([0-9.]+)")
-LPIPS_SCRIPT = Path(__file__).with_name("lpips_score.py")
+LPIPS_SCRIPT = LPIPS_RUNNER
 
 
 def rerun_flags(args: argparse.Namespace) -> tuple[str, ...]:

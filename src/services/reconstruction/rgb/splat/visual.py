@@ -9,6 +9,11 @@ from src.models.contracts.artifacts import Checksum, ContractModel, JsonObject, 
 from src.models.contracts.identity import canonical_content_checksum, canonical_json_bytes
 
 
+def _absent(value: object) -> bool:
+    """Trường thêm sau schema 1.0 không xuất hiện trong JSON khi chưa dùng (giữ nguyên checksum cũ)."""
+    return value is None
+
+
 class BrushConfig(ContractModel):
     """Các knobs được khóa trước execution; defaults còn lại thuộc runtime pin."""
 
@@ -20,6 +25,9 @@ class BrushConfig(ContractModel):
     max_splats: int = Field(gt=0)
     refine_every: int = Field(gt=0)
     sog_iterations: int = Field(gt=0)
+    #: Giữ lại mỗi ảnh thứ N (theo thứ tự tên) không train, để chấm PSNR/SSIM/LPIPS ở bước cuối. None = train trên
+    #: mọi ảnh như trước. Trường bị bỏ khỏi JSON khi None nên checksum của cấu hình và artifact cũ không đổi.
+    eval_split_every: int | None = Field(default=None, ge=2, exclude_if=_absent)
 
     def checksum(self) -> str:
         """Content identity của config không bao gồm private executable paths."""
@@ -44,6 +52,22 @@ class SplatInspection(ContractModel):
     sog_compress_seconds: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
+class HoldoutQuality(ContractModel):
+    """Chất lượng ảnh render ở camera của ảnh giữ lại (không train), do Brush chấm ở bước train cuối.
+
+    PSNR/SSIM là số Brush in ra (render nền đen, làm tròn 8-bit); LPIPS chấm riêng trên ảnh Brush lưu ra đĩa và chỉ
+    có khi worker cấu hình runtime LPIPS. Giao thức: `eval/protocols/recon_visual_quality.md`.
+    """
+
+    eval_split_every: int = Field(ge=2)
+    iteration: int = Field(gt=0)
+    views: int = Field(gt=0)
+    psnr: float = Field(allow_inf_nan=False)
+    ssim: float = Field(allow_inf_nan=False)
+    lpips: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    lpips_net: Literal["vgg"] | None = None
+
+
 class BrushVisualArtifact(ContractModel):
     """Manifest nội bộ EX-REC; không gắn nhãn meter cho SfM chưa confirmed."""
 
@@ -56,6 +80,10 @@ class BrushVisualArtifact(ContractModel):
     brush_version: str
     runtime_identity: str
     training_frame_ids: list[int]
+    #: Ảnh đã đăng ký pose nhưng không đưa vào train (config.eval_split_every). Không có trường = train mọi ảnh.
+    held_out_frame_ids: list[int] | None = Field(default=None, exclude_if=_absent)
+    #: None khi có giữ ảnh nhưng runtime không in kết quả chấm (vd. train tiếp từ checkpoint của đúng bước cuối).
+    holdout_quality: HoldoutQuality | None = Field(default=None, exclude_if=_absent)
     parent_frame: Literal["sfm_world"] = "sfm_world"
     scale_status: Literal["arbitrary_sfm"] = "arbitrary_sfm"
     world_alignment_status: Literal["unconfirmed"] = "unconfirmed"
@@ -71,6 +99,20 @@ class BrushVisualArtifact(ContractModel):
     def _verify(self) -> "BrushVisualArtifact":
         if self.training_frame_ids != sorted(set(self.training_frame_ids)) or len(self.training_frame_ids) < 2:
             raise ValueError("invalid registered training frame inventory")
+        held_out = self.held_out_frame_ids
+        if (held_out is None) != (self.config.eval_split_every is None):
+            raise ValueError("held-out inventory must match the configured eval split")
+        if held_out is not None and (
+            not held_out or held_out != sorted(set(held_out)) or set(held_out) & set(self.training_frame_ids)
+        ):
+            raise ValueError("invalid held-out frame inventory")
+        quality = self.holdout_quality
+        if quality is not None and (
+            held_out is None
+            or quality.views != len(held_out)
+            or quality.eval_split_every != self.config.eval_split_every
+        ):
+            raise ValueError("held-out quality does not describe the held-out inventory")
         if self.config_checksum != self.config.checksum():
             raise ValueError("visual config checksum mismatch")
         if self.inspection.num_gaussians > self.config.max_splats:

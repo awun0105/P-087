@@ -49,6 +49,12 @@ class VisualQuality(ContractModel):
     nonfinite_values: int | None
     training_frames: int
     train_iterations: int | None
+    #: Số ảnh giữ lại không train; None = scene train trên mọi ảnh (không có phép đo góc nhìn mới).
+    held_out_frames: int | None = None
+    #: Điểm trên ảnh giữ lại ở bước train cuối; None = chưa đo.
+    held_out_psnr: float | None = None
+    held_out_ssim: float | None = None
+    held_out_lpips: float | None = None
 
 
 class MetricQuality(ContractModel):
@@ -141,7 +147,13 @@ def visual_quality(visual: ProductArtifactRef, resolve: Resolve) -> VisualQualit
     """Đọc BrushVisualArtifact: số Gaussian, giá trị không hữu hạn và cấu hình train đã dùng."""
     document = _load(visual, resolve)
     inspection = document.get("inspection") or {}
+    held_out = document.get("held_out_frame_ids")
+    holdout = document.get("holdout_quality") or {}
     return VisualQuality(
+        held_out_frames=None if held_out is None else len(held_out),
+        held_out_psnr=holdout.get("psnr"),
+        held_out_ssim=holdout.get("ssim"),
+        held_out_lpips=holdout.get("lpips"),
         gaussians=inspection.get("num_gaussians"),
         nonfinite_values=inspection.get("nonfinite_count"),
         training_frames=len(document.get("training_frame_ids", [])),

@@ -16,7 +16,7 @@ pháp đo (công thức và quy ước là kiến thức chung):
 | Ảnh giữ lại | mỗi ảnh thứ 8 của tập ảnh đã đăng ký (Brush `--eval-split-every 8`, như `llffhold = 8`) |
 | PSNR | trên ảnh [0, 1], cao hơn là tốt hơn — Brush tự tính |
 | SSIM | cửa sổ Gaussian 11 px, σ = 1,5, cao hơn là tốt hơn — Brush tự tính |
-| LPIPS | mạng VGG, thấp hơn là tốt hơn — `eval/visual/lpips_score.py`, gói `lpips` 0.1.4 (BSD-2) |
+| LPIPS | mạng VGG, thấp hơn là tốt hơn — `src/services/reconstruction/adapters/lpips_runner.py`, gói `lpips` 0.1.4 (BSD-2) |
 | Mốc bước | 7k, 14k, 21k, 28k, 30k (`--eval-every 7000`); báo mốc cuối, giữ cả đường cong |
 | Render | nền đen, làm tròn 8-bit trước khi so (Brush `eval_stats`) |
 
@@ -28,8 +28,10 @@ lưu ở `output/eval_<iter>/<tên>.png` và được chấm LPIPS với ảnh t
 - Ảnh giữ lại là ảnh **của chính video đầu vào**, không phải `evaluation_only/` của dataset.
 - Video TorWIC đưa vào job chỉ gồm `train_frame_ids` của benchmark split
   (`scripts/demo/make_torwic_video.py --train-split`); frame held-out không vào runtime.
-- Lượt chấm bỏ ~12,5% ảnh khỏi train; đây là chế độ thí nghiệm. Lượt chạy sản phẩm vẫn train trên
-  toàn bộ ảnh — điểm tuyệt đối của sản phẩm vì vậy cao hơn một chút so với số đo ở đây.
+- Lượt chấm bỏ ~12,5% ảnh khỏi train. Từ 02/10/2026 (quyết định owner, `docs/plans/active/2026-10-02-evaluation-system.md`)
+  lượt chạy sản phẩm cũng giữ lại mỗi ảnh thứ 8 (`brush.eval_split_every` trong `configs/product/processing_presets_v1.json`)
+  và ghi PSNR/SSIM/LPIPS ở bước cuối vào `BrushVisualArtifact.holdout_quality`; scene dựng trước ngày đó train trên
+  toàn bộ ảnh và không có số đo này.
 
 ## Cách chạy
 
