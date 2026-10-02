@@ -261,4 +261,10 @@ Xong cả năm pha và phần dọn `data/`. Chi tiết và bằng chứng theo 
     lại 7 bảng DB và file giống hệt gốc; stack thật sau khi gỡ: 5 scene, 1 scene nhập, 32/32 artifact khớp checksum
     qua API, dữ liệu API của scene giữ lại giống hệt trước khi gỡ, ID đã gỡ trả 404. Bản sao DB trước khi gỡ:
     `data/studio_local/backups/runtime-before-scene-delete-20261002.db`.
-
+- **Dời dữ liệu nặng sang ổ ngoài (owner yêu cầu, 02/10/2026).** `data/torwic_slam/raw/traversals/aisle_cw/{lidar,
+  image_left}` thay bằng symlink tới `/media/usb/AI20K/TorWIC SLAM Dataset/Aisle_CW/` sau khi so từng byte 2.184 file
+  (0 khác); máy trống thêm 3,3 GB. Ảnh RGB vẫn ở `normalized/` trên máy. VERIFIED khi cắm ổ:
+  `validate_canonical_manifest` pass, `pytest tests/test_reconstruction` 535 passed / 22 skipped. Không cắm ổ thì
+  tooling dataset offline không chạy. Thùng rác scene (`20261002T013259Z-79b733`) đã nén sang
+  `/media/usb/AI20K/P-087 archive/scene-trash-20261002T013259Z-79b733.tar` (1.713 file, `tar -d` khớp) rồi xoá bản trên
+  máy; khôi phục cần giải nén về `data/studio_local/trash/` trước khi chạy `delete_cli restore`.
