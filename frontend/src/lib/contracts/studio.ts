@@ -90,6 +90,23 @@ export interface StageProgress {
   error: ExecutionErrorView | null;
 }
 
+export type ResourceName = "vram" | "ram" | "disk";
+/** busy: job khác đang dùng; external: chương trình khác chiếm; exceeds_machine: vượt tổng máy; unmeasured: không đo được. */
+export type ResourceWaitReason = "busy" | "external" | "exceeds_machine" | "unmeasured";
+
+/** Lần đo gần nhất của worker khi job chờ tài nguyên (bind đúng revision của job). */
+export interface ResourceWaitView {
+  job_manifest_checksum: string;
+  checked_at: string;
+  required_gb: Record<ResourceName, number>;
+  available_gb: Record<ResourceName, number | null>;
+  waiting_on: ResourceName[];
+  estimate_scope: "configured_preview";
+  /** Thiếu ở observation do bản worker cũ ghi. */
+  reasons?: Partial<Record<ResourceName, ResourceWaitReason>>;
+  capacity_gb?: Partial<Record<ResourceName, number | null>>;
+}
+
 export interface JobProgress {
   job_id: string;
   status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
@@ -102,14 +119,7 @@ export interface JobProgress {
   preview_ready: boolean;
   /** Pipeline đang chờ người dùng làm gì (vd xác nhận tỉ lệ mét sau preview). */
   waiting_for?: "metric_confirmation" | "resources" | null;
-  resource_wait?: {
-    job_manifest_checksum: string;
-    checked_at: string;
-    required_gb: Record<"vram" | "ram" | "disk", number>;
-    available_gb: Record<"vram" | "ram" | "disk", number | null>;
-    waiting_on: ("vram" | "ram" | "disk")[];
-    estimate_scope: "configured_preview";
-  } | null;
+  resource_wait?: ResourceWaitView | null;
   error: ExecutionErrorView | null;
 }
 
@@ -208,6 +218,13 @@ export interface MachineCapability {
   headroom_measured?: boolean;
   vram_free_gb?: number | null;
   ram_available_gb?: number | null;
+  gpu_uuid?: string | null;
+  disk_total_gb?: number | null;
+  /** Mốc "máy rảnh": lần đo gần nhất khi pipeline không dùng máy; preset Maximum tính theo mốc này. */
+  idle_measured_at?: string | null;
+  idle_vram_free_gb?: number | null;
+  idle_ram_available_gb?: number | null;
+  idle_disk_free_gb?: number | null;
 }
 
 export type ResourceStatus = "ok" | "warn" | "danger" | "unknown";
@@ -299,6 +316,15 @@ export function parseJobProgress(value: unknown): JobProgress {
           ((wait.available_gb as Record<string, unknown>)[key] === null || isFiniteNumber((wait.available_gb as Record<string, unknown>)[key]))) ||
         !wait.waiting_on.every((key) => typeof key === "string" && ["vram", "ram", "disk"].includes(key))) {
       throw new Error("Snapshot tài nguyên chờ không hợp lệ");
+    }
+    const reasons = wait.reasons ?? {};
+    const capacity = wait.capacity_gb ?? {};
+    if (!isRecord(reasons) || !isRecord(capacity) ||
+        !Object.entries(reasons).every(([key, reason]) => ["vram", "ram", "disk"].includes(key) &&
+          ["busy", "external", "exceeds_machine", "unmeasured"].includes(String(reason))) ||
+        !Object.entries(capacity).every(([key, amount]) => ["vram", "ram", "disk"].includes(key) &&
+          (amount === null || isFiniteNumber(amount)))) {
+      throw new Error("Lý do chờ tài nguyên không hợp lệ");
     }
   }
   return value as unknown as JobProgress;

@@ -184,7 +184,11 @@ function MachinePanel({
         {header ?? "Chưa có số đo — worker chưa chạy hoặc chưa báo cấu hình. Không kiểm được nguy cơ crash."}
       </p>
       {editable && capability?.headroom_measured && <p className="mt-2 text-xs text-ink-subtle">
-        Tài nguyên còn trống đo lúc {new Date(capability.measured_at).toLocaleTimeString("vi-VN")}. Maximum là ước lượng theo snapshot này; khi đến lượt, worker đo lại và chờ nếu thiếu, giữ nguyên cấu hình bạn chọn.
+        Tài nguyên còn trống đo lúc {new Date(capability.measured_at).toLocaleTimeString("vi-VN")}.{" "}
+        {capability.idle_measured_at
+          ? `Maximum là ước lượng theo lần đo lúc máy rảnh (${new Date(capability.idle_measured_at).toLocaleTimeString("vi-VN")}), không bị hạ khi máy đang chạy job khác;`
+          : "Máy chưa có lần đo lúc rảnh nên Maximum là ước lượng theo tổng năng lực máy;"}
+        {" "}khi đến lượt, worker đo lại và chờ nếu thiếu, giữ nguyên cấu hình bạn chọn.
       </p>}
       {editable && evaluation && (
         <ul className="mt-4 grid gap-3 sm:grid-cols-3">
