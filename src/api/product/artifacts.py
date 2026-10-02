@@ -11,6 +11,7 @@ from src.api.product import deps
 from src.models.contracts.artifacts import ArtifactRef, Checksum
 from src.models.contracts.preview import ReconstructionPreview
 from src.services.orchestration.artifacts import ArtifactNotFoundError, ArtifactStoreError
+from src.services.orchestration.jobs.display_glb import display_space_glb
 from src.services.orchestration.projects import JobNotFoundError
 
 router = APIRouter()
@@ -98,6 +99,49 @@ def get_named_artifact_content(
     if filename != artifact_uri.rsplit("/", 1)[-1]:
         raise HTTPException(status_code=404, detail="artifact filename does not match its reference")
     return get_artifact_content(job_id, artifact_uri, artifact_checksum)
+
+
+@router.get("/jobs/{job_id}/walk-collision/{filename}")
+def get_walk_collision(
+    job_id: str,
+    filename: str,
+    artifact_uri: str = Query(..., min_length=1),
+    artifact_checksum: Checksum = Query(...),
+) -> Response:
+    """Lưới va chạm của job đã xoay sang không gian hiển thị, cho chế độ đi bộ của viewer.
+
+    Quyền đọc như `artifacts/content`: URI/checksum phải nằm trong allow-list của job. Bytes
+    trả về là bản dẫn xuất tính tại chỗ từ artifact đã verify checksum; artifact gốc không đổi.
+    Luôn đi qua API (không redirect sang kho file) vì kho chỉ giữ bản canonical.
+    """
+    if filename != artifact_uri.rsplit("/", 1)[-1] or not filename.lower().endswith(".glb"):
+        raise HTTPException(status_code=404, detail="artifact filename does not match its reference")
+    deps.job_or_404(job_id)
+    try:
+        reference = ArtifactRef(
+            artifact_type="ArtifactContent",
+            schema_version="1.0",
+            artifact_uri=artifact_uri,
+            artifact_checksum=artifact_checksum,
+            data_class="derived",
+            producer_stage="ST-EDIT",
+            job_id=job_id,
+        )
+        payload = display_space_glb(deps.registry().resolve_artifact(job_id, reference).read_bytes())
+    except ValidationError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+    except ArtifactStoreError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=f"Không dùng được lưới va chạm: {error}"
+        ) from error
+    return Response(
+        payload,
+        media_type="model/gltf-binary",
+        # Nội dung gắn với checksum trong URL nên trình duyệt được giữ lại.
+        headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 def _training_recording(job_id: str) -> Path:

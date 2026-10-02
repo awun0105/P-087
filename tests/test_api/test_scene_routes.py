@@ -342,3 +342,52 @@ async def test_add_box_obstacle_is_confirmed_user_object(client) -> None:
         f"{_JOB}/scene/objects", json={**payload, "expected_scene_revision": "rev-002", "dimensions_xyz_m": [0, 1, 1]}
     )
     assert flat.status_code == 422
+
+
+# ── walk collision: lưới va chạm xoay sang không gian hiển thị cho chế độ đi bộ ───────────
+
+
+@pytest.mark.asyncio
+async def test_walk_collision_serves_display_space_glb(client, tmp_path, monkeypatch) -> None:
+    from src.services.orchestration.projects.registry import ProjectRegistry
+    from tests.test_orchestration.test_display_glb import build_glb, parse
+
+    source = tmp_path / "collision.glb"
+    source.write_bytes(build_glb())
+    seen: list[str] = []
+
+    def resolve(self: ProjectRegistry, job_id: str, reference: object) -> object:
+        seen.append(reference.artifact_uri)  # allow-list vẫn do registry quyết định
+        return source
+
+    monkeypatch.setattr(ProjectRegistry, "resolve_artifact", resolve)
+    params = {
+        "artifact_uri": "artifact://jobs/job-fixture-001/rec05/abc/collision.glb",
+        "artifact_checksum": "sha256:" + "1" * 64,
+    }
+    r = await client.get(f"{_JOB}/walk-collision/collision.glb", params=params)
+    assert r.status_code == 200 and r.headers["content-type"] == "model/gltf-binary"
+    assert parse(r.content)[1].tolist() == [[0, 0, 0], [1, 0, 0], [0, 0, -2], [0, 3, 0]]
+    assert seen == [params["artifact_uri"]] and source.read_bytes() == build_glb()  # artifact gốc không đổi
+    # Tên file phải khớp ref và phải là .glb (viewer chọn loader theo đuôi).
+    assert (await client.get(f"{_JOB}/walk-collision/other.glb", params=params)).status_code == 404
+    source.write_bytes(b"not a glb")
+    r = await client.get(f"{_JOB}/walk-collision/collision.glb", params=params)
+    assert r.status_code == 409 and "lưới va chạm" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_walk_collision_respects_the_job_allow_list(client) -> None:
+    r = await client.get(
+        f"{_JOB}/walk-collision/secret.glb",
+        params={
+            "artifact_uri": "artifact://jobs/job-fixture-001/evaluation_only/secret.glb",
+            "artifact_checksum": "sha256:" + "0" * 64,
+        },
+    )
+    assert r.status_code == 404
+    body = await _scene(client)
+    reference = body["scene"]["environment"]["geometry_ref"]  # artifact thật của job nhưng không phải GLB
+    name = reference["artifact_uri"].rsplit("/", 1)[-1]
+    r = await client.get(f"{_JOB}/walk-collision/{name}", params=reference)
+    assert r.status_code == 404
