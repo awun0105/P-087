@@ -269,3 +269,29 @@ def test_reference_label_must_follow_the_benchmark_naming_rule() -> None:
 
     with pytest.raises(ValueError, match="nhãn"):
         base_record("recon_pose", "Nhãn Sai", "job-x", Path("Aisle_CW"), 0)
+
+
+def test_lidar_group_reports_the_ingested_package(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    record = SimpleNamespace(
+        kind="lidar_scan_sequence",
+        point_count=1000,
+        pose_count=50,
+        floor_support_points=300,
+        trajectory_origin="estimated",
+        fusion=SimpleNamespace(scan_count=10, removed_points=250, input_points=1000),
+    )
+    path = tmp_path / "record.json"
+    path.write_text("{}")
+    monkeypatch.setattr(scorecard, "_reference", lambda *_args: object())
+    monkeypatch.setattr(scorecard.LidarPackageRecord, "model_validate_json", classmethod(lambda _cls, _raw: record))
+    registry = SimpleNamespace(runtime_resolver=SimpleNamespace(require=lambda _ref: path))
+
+    values = _values(scorecard._lidar_metrics(registry, SimpleNamespace()))  # type: ignore[arg-type]
+
+    assert values["lidar.scans"] == 10 and values["lidar.removed_points"] == 25.0
+    assert values["lidar.points"] == 1000 and values["lidar.trajectory_origin"] == "estimated"
+
+    record.fusion = None
+    record.kind = "registered_lidar"
+    registered = _values(scorecard._lidar_metrics(registry, SimpleNamespace()))  # type: ignore[arg-type]
+    assert "lidar.scans" not in registered and registered["lidar.kind"] == "registered_lidar"

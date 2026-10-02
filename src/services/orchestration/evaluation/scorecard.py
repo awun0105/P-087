@@ -23,6 +23,7 @@ from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneError
 from src.services.reconstruction import (
     GeometryQuality,
+    LidarPackageRecord,
     VisualQuality,
     geometry_quality,
     input_quality,
@@ -314,6 +315,75 @@ def _metric_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric]
         ),
         *scale_metrics,
     ]
+
+
+def _lidar_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric] | None:
+    """Gói LiDAR của job (ADR 0009): bao nhiêu dữ liệu đã nhận và mặt sàn được ước lượng từ bao nhiêu điểm."""
+    reference = _reference(job, StageId.LIDAR_INGEST, "LidarPackageRecord")
+    if reference is None:
+        return None
+    record = LidarPackageRecord.model_validate_json(registry.runtime_resolver.require(reference).read_bytes())
+    kinds = {"registered_lidar": "đám mây đã đăng ký", "lidar_scan_sequence": "scan thô + quỹ đạo (hệ thống ghép)"}
+    origin = {"ground_truth": "quỹ đạo chuẩn của dataset", "estimated": "quỹ đạo do SLAM/odometry tính"}
+    metrics = [
+        Metric(
+            key="lidar.kind",
+            label="Dạng gói LiDAR",
+            value=record.kind,
+            display=kinds[record.kind],
+            meaning="Gói có sẵn đám mây đã đăng ký, hay gồm các scan thô để hệ thống ghép theo quỹ đạo.",
+        ),
+        Metric(
+            key="lidar.points",
+            label="Số điểm của đám mây đã đăng ký",
+            value=record.point_count,
+            display=_number(record.point_count, 0, "điểm"),
+            meaning="Đám mây dùng để lấy mặt sàn và để đối chiếu với scene.",
+        ),
+        Metric(
+            key="lidar.poses",
+            label="Số pose trong quỹ đạo",
+            value=record.pose_count,
+            display=_number(record.pose_count, 0, "pose"),
+            meaning="Mỗi pose ứng với một frame của video; thiếu pose so với video thì bước dựng pose sẽ dừng.",
+        ),
+        Metric(
+            key="lidar.floor_support",
+            label="Số điểm làm căn cứ cho mặt sàn",
+            value=record.floor_support_points,
+            display=_number(record.floor_support_points, 0, "điểm"),
+            meaning="Mặt sàn (z = 0 của scene) ước lượng từ các điểm LiDAR nằm dưới đường đi của cảm biến; càng nhiều "
+            "điểm càng chắc.",
+        ),
+        Metric(
+            key="lidar.trajectory_origin",
+            label="Nguồn quỹ đạo",
+            value=record.trajectory_origin,
+            display=origin[record.trajectory_origin],
+            meaning="Quỹ đạo chuẩn của dataset chỉ có ở dữ liệu mẫu; dữ liệu thật dùng quỹ đạo từ SLAM/odometry.",
+        ),
+    ]
+    if record.fusion is not None:
+        removed = _percent(record.fusion.removed_points, record.fusion.input_points)
+        metrics[2:2] = [
+            Metric(
+                key="lidar.scans",
+                label="Số scan đã ghép",
+                value=record.fusion.scan_count,
+                display=_number(record.fusion.scan_count, 0, "scan"),
+                meaning="Số scan thô được đưa về chung một hệ theo quỹ đạo.",
+            ),
+            Metric(
+                key="lidar.removed_points",
+                label="Điểm bị loại khi ghép",
+                value=removed,
+                unit="%",
+                display=_number(removed, 1, "%"),
+                meaning="Điểm quá gần hoặc quá xa cảm biến, hoặc tia không có phản hồi. Vài chục phần trăm là bình thường; "
+                "gần 100% là dấu hiệu sai đơn vị.",
+            ),
+        ]
+    return metrics
 
 
 def _trajectory_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric]:
@@ -657,6 +727,10 @@ def evaluate_job(registry: ProjectRegistry, job_id: str, geometry_config: Path) 
         _group(StageId.OBJECT_EXTRACT.value, "Tách vật thể", lambda: _object_metrics(scene)),
         _group("system", "Hệ thống", lambda: _system_metrics(registry, job)),
     ]
+    # Bước nhận LiDAR chỉ có ở job có gói LiDAR; job chỉ có video không hiện một nhóm "chưa có kết quả" thừa.
+    if any(stage.stage_id == StageId.LIDAR_INGEST for stage in job.stage_artifacts):
+        lidar = _group(StageId.LIDAR_INGEST.value, "Dữ liệu LiDAR", lambda: _lidar_metrics(registry, job))
+        groups.insert(1, lidar)
     # Khối đối chứng chỉ có khi evaluator ở `eval/` đã ghi bản ghi cho job (scene dựng từ dataset có ground truth);
     # scene của người dùng không có khối này thay vì hiện một khối "chưa có kết quả" không bao giờ có.
     reference = _group(REFERENCE_GROUP_ID, "So với dữ liệu đối chứng", lambda: _reference_metrics(registry, job))
