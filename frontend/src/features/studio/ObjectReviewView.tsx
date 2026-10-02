@@ -161,8 +161,13 @@ export function ObjectReviewView({
           dimensions: object.primitive_dimensions_xyz_m!,
           color: object.id === selected ? SELECTED_COLOR : stateColor(object),
           emphasized: object.id === selected,
+          // Collider phân rã lồi bám theo hình vật; vật chỉ có hộp (thêm tay, asset thư viện) thì vẽ hộp.
+          shapeUrl:
+            object.collider?.geometry_ref && object.collider.geometry_ref.artifact_uri.endsWith(".glb")
+              ? jobArtifactContentUrl(jobId, object.collider.geometry_ref)
+              : null,
         })),
-    [visibleObjects, selected],
+    [visibleObjects, selected, jobId],
   );
 
   async function run(mutate: (revision: string) => Promise<{ scene: SceneIR }>) {

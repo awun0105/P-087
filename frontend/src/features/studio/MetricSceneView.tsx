@@ -208,7 +208,7 @@ export function MetricSceneView({
         <div className="flex flex-wrap gap-3 rounded-md border border-line-dark bg-viewport-deep/85 px-3 py-1.5 text-xs text-on-dark/90">
           {toggle("splat", "3DGS màu")}
           {toggle("collision", "Collision mesh", !collisionUrl)}
-          {toggle("boxes", "Hộp vật thể", !boxes.length)}
+          {toggle("boxes", "Khung vật thể", !boxes.length)}
         </div>
         <CameraToolbar runtime={runtime} controls={viewerControls} wheelFactor={wheelFactor} onWheelFactor={setWheelFactor} />
       </div>
