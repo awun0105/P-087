@@ -46,24 +46,14 @@ set -a; source scripts/gpu/studio.env; set +a
 .venv/bin/python -m scripts.gpu.make_runtime_manifest --out "$PRODUCT_RUNTIME_MANIFEST"
 ```
 
-### Cấu hình khi chạy trên máy teammate
+### Chạy trên máy teammate
 
-Chạy `make -f Makefile.studio env` **từ root repo** để sinh `scripts/gpu/studio.env`
-với đường dẫn của checkout trên máy đó. Data khôi phục cần nằm tại
-`data/studio_local/runtime.db`, `data/studio_local/artifacts/` và `data/demo/library/`;
-asset preview và bản ghi Rerun dùng các thư mục mặc định trong `data/`.
-Có thể chọn thư viện mẫu khác bằng `make -f Makefile.studio env DEMO_DIR=/duong/dan/library`.
-
-Lệnh giữ nguyên env đã tồn tại. Với env copy từ máy khác, cập nhật đường dẫn trong
-file đó; nếu muốn dùng lại baseline mặc định, sao lưu cấu hình riêng trước rồi chạy
-`make -f Makefile.studio env FORCE_ENV=1`. File được sinh chỉ cấu hình đường dẫn,
-không cài runtime hoặc chứng minh máy mới đã chạy GPU thành công. Khi cài runtime
-tách vật thể, thêm các biến mà `setup_scene_runtime.sh` in ra vào env này.
-
-`make setup` cài Python dependencies từ lockfile; `npm ci` trong `frontend/` cài
-frontend dependencies. Docker trong stack local này dùng cho COLMAP qua launcher;
-Brush và splat-transform cần cài riêng theo mục 2. `docker-compose.yml` ở root
-chỉ khởi động backend, chưa thay thế các bước cài frontend, worker và GPU runtime.
+Không cần làm tay các bước ở trên: xem [docs/guide/run-studio-on-any-machine.md](../../docs/guide/run-studio-on-any-machine.md).
+Tóm tắt: `docker compose -f docker-compose.studio.yml up --build` (mọi hệ điều hành, chế độ xem/chỉnh), hoặc
+`make -f Makefile.studio start DATA=r2s-studio-data.tar.gz` (Linux/macOS; trên Linux có GPU NVIDIA thì chạy được job
+mới). `scripts/gpu/studio.env` do `scripts/studio/make_env.sh` sinh theo thư mục checkout của máy đang chạy; file đã
+có thì giữ nguyên, `FORCE_ENV=1` để sinh lại (bản cũ được sao lưu). Runtime xử lý (Brush, splat-transform, image COLMAP)
+do `scripts/studio/bootstrap.sh` cài với phiên bản ghim và checksum.
 
 ## 3. Thông số xử lý
 

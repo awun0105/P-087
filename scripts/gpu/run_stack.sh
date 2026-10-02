@@ -16,6 +16,8 @@ set -a
 source "$env_file"
 set +a
 
+# Node do scripts/studio/bootstrap.sh tải (nếu có) được ưu tiên hơn Node của hệ thống.
+[ -d "$root/data/tools/node/bin" ] && export PATH="$root/data/tools/node/bin:$PATH"
 python_bin="${STUDIO_PYTHON:-$root/.venv/bin/python}"
 mkdir -p "$(dirname "${ARTIFACT_ROOT:?}")" "${PRODUCT_WORKER_ROOT:?}"
 

@@ -19,6 +19,8 @@ BRUSH_SHA256=4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20
 BRUSH_URL="https://github.com/ArthurBrussee/brush/releases/download/v${BRUSH_VERSION}/brush-app-x86_64-unknown-linux-gnu.tar.xz"
 COLMAP_IMAGE="colmap/colmap@sha256:b8498ebecab11c3f9b9a25370e3fcfb6de9b6bcd4f3c85d5dc39a40229f40954"
 UV_VERSION=0.9.4
+NODE_MAJOR=24
+NODE_VERSION=v24.11.1
 runtime="$root/data/rec04_runtime"
 tools="$root/data/tools"
 
@@ -28,12 +30,29 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 # ── 1. Công cụ nền ──────────────────────────────────────────────────────────────────────────────
 missing=()
-for tool in git curl ffmpeg node npm tar; do have "$tool" || missing+=("$tool"); done
+for tool in git curl ffmpeg tar; do have "$tool" || missing+=("$tool"); done
 if [ "${#missing[@]}" -gt 0 ]; then
-  fail "Thiếu: ${missing[*]}. Ubuntu/Debian: sudo apt install git curl ffmpeg xz-utils zstd; Node 20+: https://nodejs.org (hoặc nvm install 22)."
+  fail "Thiếu: ${missing[*]}. Ubuntu/Debian: sudo apt install git curl ffmpeg xz-utils; macOS: brew install git curl ffmpeg."
 fi
-node_major="$(node -p 'process.versions.node.split(".")[0]')"
-[ "$node_major" -ge 20 ] || fail "Cần Node 20 trở lên (đang có $(node --version))."
+# Node 24 (npm 11) là bản CI dùng và là bản tạo lockfile; npm 10 từ chối `npm ci`. Máy chưa có đúng bản thì tải bản
+# chính thức vào data/tools/node (không đụng Node của hệ thống); run_stack.sh cũng ưu tiên bản này.
+export PATH="$tools/node/bin:$PATH"
+node_major="$(have node && node -p 'process.versions.node.split(".")[0]' || echo 0)"
+if [ "$node_major" -lt "$NODE_MAJOR" ]; then
+  case "$(uname -s)-$(uname -m)" in
+    Linux-x86_64) node_platform=linux-x64 ;;
+    Linux-aarch64) node_platform=linux-arm64 ;;
+    Darwin-arm64) node_platform=darwin-arm64 ;;
+    Darwin-x86_64) node_platform=darwin-x64 ;;
+    *) fail "Cần Node $NODE_MAJOR; không có bản tải sẵn cho $(uname -sm). Cài Node $NODE_MAJOR rồi chạy lại, hoặc dùng Docker." ;;
+  esac
+  say "Tải Node $NODE_VERSION vào data/tools/node (máy đang có: $(have node && node --version || echo 'không có'))…"
+  mkdir -p "$tools/node"
+  curl -L --fail --progress-bar "https://nodejs.org/dist/$NODE_VERSION/node-$NODE_VERSION-$node_platform.tar.gz" \
+    | tar -xzf - -C "$tools/node" --strip-components=1
+  hash -r
+  [ "$(node -p 'process.versions.node.split(".")[0]')" -ge "$NODE_MAJOR" ] || fail "Không cài được Node $NODE_VERSION."
+fi
 
 # ── 2. Python: uv tự tải Python 3.12 nếu máy chưa có, rồi cài đúng lockfile ───────────────────────
 if have uv; then

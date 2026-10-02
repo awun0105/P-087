@@ -4,7 +4,8 @@
 #
 # Trình duyệt chỉ gọi origin của web; Next chuyển tiếp `/api/v1/*` sang API (REAL2SIM_API_URL). Rewrites được chốt lúc
 # build nên địa chỉ API phải có cả ở build (ARG) lẫn lúc chạy (ENV, cho route upload và fetch phía server).
-FROM node:22-bookworm-slim AS build
+# Node 24 (npm 11): cùng bản với CI và với lockfile; npm 10 từ chối `npm ci` trên lockfile này.
+FROM node:24-bookworm-slim AS build
 WORKDIR /app
 ARG REAL2SIM_API_URL=http://api:8000
 ENV REAL2SIM_API_URL=$REAL2SIM_API_URL NEXT_TELEMETRY_DISABLED=1
@@ -14,7 +15,7 @@ COPY . .
 # Trình chỉnh Gaussian nhúng (SuperSplat, mã nguồn vendored) → public/editor, rồi build app.
 RUN npm run build:editor && npm run build
 
-FROM node:22-bookworm-slim
+FROM node:24-bookworm-slim
 WORKDIR /app
 ARG REAL2SIM_API_URL=http://api:8000
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 REAL2SIM_API_URL=$REAL2SIM_API_URL PORT=3000

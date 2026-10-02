@@ -613,6 +613,8 @@ def _execute_lidar_ingest(attempt: _Attempt) -> JobManifest:
     if not manifest.input_configuration.registered_lidar_present or not isinstance(declared, dict):
         return attempt.job
     package = next(item for item in manifest.files if item.media_type == "application/zip")
+    # Ghi bước đang chạy ngay từ đầu để timeline hiện "Nhận dữ liệu LiDAR" thay vì bước kế tiếp (ghép scan mất vài phút).
+    attempt.job = attempt.registry.record_stage_progress(attempt.job, StageId.LIDAR_INGEST)
     started = datetime.now(UTC)
     try:
         with _sampled(attempt, "lidar_ingest"):
