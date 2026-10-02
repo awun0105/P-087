@@ -152,7 +152,7 @@ khi chỉ có test giả lập.
 ## Progress
 
 - [x] H1 Điều khiển viewer + đi bộ góc nhìn thứ nhất (02/10/2026; xem Result)
-- [ ] H2 Chọn vật theo hình dáng
+- [~] H2 Chọn vật theo hình dáng — code + test đơn vị xong (02/10/2026), chưa kiểm trên trình duyệt
 - [ ] H3 Tường ma của mesh va chạm — hoãn (owner, 02/10/2026)
 - [ ] H4 Nhân vật 3D, góc nhìn thứ ba
 - [ ] H5 Đẩy vật thể
@@ -179,3 +179,16 @@ khi chỉ có test giả lập.
   cảnh thì chế độ viewer báo về đổi đúng theo.
 - **Chưa kiểm:** lưới va chạm có khớp hình với 3DGS khi đi bộ không (cần nhìn bằng mắt — việc của owner); cảm giác
   điều khiển; chuột thật với khoá con trỏ. H3 (tường ma) hoãn nên đi bộ có thể bị chặn ở lối đi thật.
+
+### H2 (02/10/2026) — VALIDATING
+
+- `scene-overlay.ts`: khung vật vẽ bằng GLB collider phân rã lồi của vật (`OverlayBox.shapeUrl`), vật đang chọn có thêm
+  nét cạnh; hộp chỉ là hình lùi trong lúc GLB đang tải hoặc tải lỗi. Bắt chọn bằng tia cắt lưới (`rayTriangles`), vật
+  chưa có hình thì vẫn theo hộp. Asset hình dáng nạp một lần cho cả vòng đời lớp phủ.
+- `ObjectReviewView` truyền `collider.geometry_ref` (GLB) làm `shapeUrl`; nhãn lớp đổi thành "Khung vật thể".
+- Validation: `npm test` 203 passed (4 test mới cho tia–lưới, gồm ca bấm vào khoảng trống trong hộp bao), typecheck +
+  lint sạch.
+- **Chưa kiểm trên trình duyệt:** lúc kiểm, một `next dev` khác (do Codex chạy, cổng 3000) đang giữ khoá dev của
+  project nên không khởi động được server thứ hai; không dừng tiến trình của agent khác. Phần chưa được chứng minh:
+  GLB collider hiển thị đúng vị trí/hướng trong scene, nét cạnh (wireframe) vẽ được, và tô sáng Gaussian theo vật
+  (chưa làm).
