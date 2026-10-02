@@ -80,7 +80,7 @@ kill_port() {
 }
 endef
 
-.PHONY: help start setup setup-runtime up down status env data-pack data-unpack account docker docker-down
+.PHONY: help start setup setup-runtime up down status env data-pack data-unpack account samples docker docker-down
 
 help:
 	@echo "Studio — lệnh có sẵn:"
@@ -94,6 +94,7 @@ help:
 	@echo "  make -f Makefile.studio data-pack [OUT=file]      # đóng gói dữ liệu gửi teammate"
 	@echo "  make -f Makefile.studio data-unpack DATA=file     # khôi phục gói dữ liệu (FORCE=1 để thay dữ liệu đang có)"
 	@echo "  make -f Makefile.studio account EMAIL=a@b NAME='Tên'  # tạo tài khoản Reviewer"
+	@echo "  make -f Makefile.studio samples SAMPLES=dir       # đưa bộ mẫu video + gói LiDAR vào danh sách file"
 	@echo "  make -f Makefile.studio docker         # chạy bằng Docker (chỉ xem)"
 	@echo ""
 	@echo "  Tham số: API_PORT=$(API_PORT) WEB_PORT=$(WEB_PORT) FRONTEND_MODE=$(FRONTEND_MODE) DEMO_DIR=$(DEMO_DIR)"
@@ -127,6 +128,11 @@ account: env
 	@[ -n "$(EMAIL)" ] && [ -n "$(NAME)" ] || { echo "Cần EMAIL=... NAME=..."; exit 1; }
 	@set -a; . "$(ENV_FILE)"; set +a; \
 	 "$(VENV_PY)" -m src.services.orchestration.auth.cli create-user --email "$(EMAIL)" --name "$(NAME)" --role reviewer
+
+## samples: đưa bộ mẫu video + gói LiDAR (scripts/demo/make_torwic_lidar_samples.py) vào danh sách file để chọn.
+samples: env
+	@[ -n "$(SAMPLES)" ] || { echo "Cần SAMPLES=<thư mục bộ mẫu>"; exit 1; }
+	@set -a; . "$(ENV_FILE)"; set +a; "$(VENV_PY)" -m scripts.studio.seed_samples --dir "$(SAMPLES)"
 
 ## docker: API + web trong container, dữ liệu mount từ ./data (chỉ xem; xử lý job cần cài native với GPU).
 docker:
