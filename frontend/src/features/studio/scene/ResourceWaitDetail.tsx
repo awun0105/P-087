@@ -16,19 +16,29 @@ function gigabytes(value: number | null | undefined): string {
 
 /**
  * Chi tiết lần đo gần nhất của worker khi job chờ tài nguyên: thiếu gì, cần bao nhiêu, đang có bao nhiêu.
- * Số "cần" là ước lượng theo cấu hình đã chọn, không phải phép đo.
+ * Số "cần" là số đo của các lượt chạy trước (`measured`) hoặc ước lượng theo cấu hình; UI nói rõ là loại nào.
  */
 export function ResourceWaitDetail({ wait }: { wait: ResourceWaitView }) {
+  const measured = wait.estimate_scope === "measured";
   return (
     <div className="rounded-lg bg-paper-sunken p-3">
       <ul className="space-y-2">
         {wait.waiting_on.map((resource) => {
           const reason = wait.reasons?.[resource];
           const capacity = wait.capacity_gb?.[resource];
+          // Chưa có số đo: job không được chạy chung GPU, nên con số VRAM không phải là thứ đang thiếu.
+          if (resource === "vram" && wait.needs_exclusive_gpu) {
+            return (
+              <li key={resource}>
+                <p className="font-medium text-ink">GPU: đang chờ được chạy một mình</p>
+                <p className="mt-0.5">Cấu hình này chưa có số đo trên máy xử lý, nên job sẽ chạy một mình trên GPU để đo. Job tự chạy khi job đang dùng GPU xong.</p>
+              </li>
+            );
+          }
           return (
             <li key={resource}>
               <p className="font-medium text-ink">
-                {LABEL[resource]}: cần khoảng {gigabytes(wait.required_gb[resource])}, đang có {gigabytes(wait.available_gb[resource])}
+                {LABEL[resource]}: {measured && resource !== "disk" ? "các lượt chạy trước đã dùng tới" : "cần khoảng"} {gigabytes(wait.required_gb[resource])}, đang có {gigabytes(wait.available_gb[resource])}
                 {capacity !== null && capacity !== undefined ? ` (máy có tổng ${gigabytes(capacity)})` : ""}
               </p>
               {reason && <p className="mt-0.5">{REASON[reason]}</p>}
