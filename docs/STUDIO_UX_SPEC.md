@@ -393,6 +393,12 @@ S01–S14 là mã **màn hình UX**, không phải task ID. Một số là tab/p
 
 **Biến thể mẫu:** thay form khai báo bằng nguồn mẫu, video và cấu hình chỉ đọc; CTA `Xem quá trình dựng mẫu`. Khi sample không tải được, thử lại hoặc chọn mẫu khác; không hiển thị form upload lỗi. Sau xác nhận chuyển sang biến thể replay tại S05.
 
+**DECISION (user, 02/10/2026):** preset `Maximum` dùng phần tài nguyên còn trống
+ở snapshot worker gần nhất, kèm thời điểm đo; đây là ước lượng, không giữ chỗ tài
+nguyên cho job. Worker đo lại trên máy thực thi khi đến lượt. Nếu tạm thời thiếu
+tài nguyên, vẫn cho job vào hàng đợi với nguyên cấu hình đã chọn; cấu hình vượt
+tổng năng lực máy đã biết vẫn bị chặn.
+
 ### S04 — Jobs
 
 - **Purpose / entry:** mục Jobs trong sidebar; theo dõi các lần xử lý của nhóm, không phải bảng quản lý task.
@@ -412,6 +418,17 @@ S01–S14 là mã **màn hình UX**, không phải task ID. Một số là tab/p
 - **Exit / transition:** S07/S08/S06; job mới hoặc retry vẫn giữ được lịch sử. Preview xuất hiện bằng thông báo/CTA, không thay toàn bộ màn hình bất ngờ.
 
 **Biến thể replay mẫu:** giữ nhãn `Kết quả đã xử lý sẵn — đang phát lại`; có trạng thái loading, replay đang chạy, đã tới cuối, thiếu dữ liệu/lỗi. CTA `Bỏ qua và mở scene` trong lúc replay, `Mở scene mẫu` khi xong. Không có cancel/retry GPU; thiếu scene mẫu thì khóa mở và giải thích. Thời gian trong replay được ghi là thời lượng đã ghi của mẫu.
+
+**DECISION (user, 02/10/2026):** khi thiếu tài nguyên lúc dispatch, job giữ nguyên
+cấu hình/checksum, chờ trong durable queue và tự chạy tiếp khi worker đo đủ tài
+nguyên. UI tiếp tục polling, hiện lý do chờ và thanh tiến trình có animation
+indeterminate; không tăng phần trăm xử lý hoặc đánh dấu stage đang chạy khi worker
+chưa bắt đầu. Người dùng vẫn có thể hủy job đang chờ.
+
+Video mẫu ở bước upload dùng đủ 8 stage của pipeline Studio hiện tại. Bundle cũ
+chỉ replay các stage có kết quả đã ghi; stage còn thiếu hiện chưa có kết quả, kể
+cả khi chọn `Bỏ qua và mở scene`. Không suy kết quả tỉ lệ mét, collision hoặc vật
+thể từ việc bundle đã có bản xem 3DGS.
 
 ### S06 — Studio workspace
 
