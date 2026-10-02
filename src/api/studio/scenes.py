@@ -11,6 +11,7 @@ from src.api.auth import enforce_gpu_quota, record_gpu_run, require_editor
 from src.api.studio import deps
 from src.models.contracts.manifests import JobManifest
 from src.services.orchestration.auth import UserRecord
+from src.services.orchestration.jobs.admission import resource_wait
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.progress import JobProgress, job_progress
 from src.services.orchestration.jobs.stage_views import StageViewList, stage_views
@@ -150,7 +151,8 @@ def get_job_progress(job_id: str) -> JobProgress:
         attempts = registry.list_job_attempts(job_id)
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    return job_progress(job, attempts, deps.preview_ready(registry, job_id))
+    observation = resource_wait(registry.persistence.database, job) if registry.persistence is not None else None
+    return job_progress(job, attempts, deps.preview_ready(registry, job_id), observation)
 
 
 @router.get("/jobs/{job_id}/stage-views", response_model=StageViewList)

@@ -13,6 +13,7 @@ from typing import Protocol
 
 from src.config import get_settings
 from src.models.contracts.manifests import ExecutionError, JobManifest, JobStatus, StageId
+from src.services.orchestration.jobs.admission import ResourceAdmission
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import load_prepared_profile, prepared_frame_reference, require_profile
 from src.services.orchestration.jobs.models import TransitionRequest
@@ -103,6 +104,7 @@ def dispatch_next(
     runner: PreparedRunner = run_prepared_job,
     video_runner: VideoRunner = run_video_job,
     finalize_runner: VideoRunner = run_finalize_job,
+    admission: ResourceAdmission | None = None,
 ) -> bool:
     """Xử lý tối đa một job mỗi lượt; skip input chưa chuẩn bị/profile khác.
 
@@ -125,6 +127,8 @@ def dispatch_next(
                     # Người dùng đã xác nhận tỉ lệ (job RUNNING, hoặc QUEUED khi retry): chạy
                     # tiếp REC-05/REC-10 trên cùng job; vẫn qua cổng privacy của project.
                     require_project_dispatch(registry.get_project(candidate.project_id))
+                    if admission is not None and not admission(candidate):
+                        continue
                     try:
                         finalize_runner(job_id, expected_checksum=candidate.job_manifest_checksum)
                     except RuntimeStateConflictError:
@@ -139,10 +143,14 @@ def dispatch_next(
                 job = candidate
                 frames = prepared_frame_reference(job)
                 if frames is not None:
+                    if admission is not None and not admission(job):
+                        continue
                     runner(job_id, frames.artifact_uri, expected_checksum=job.job_manifest_checksum)
                     return True
                 if project.input_manifest_ref is None:
                     continue  # Chưa có input để chuẩn bị (ví dụ project dataset chưa publish frames).
+                if admission is not None and not admission(job):
+                    continue
                 video_runner(job_id, expected_checksum=job.job_manifest_checksum)
                 return True
             except (RuntimeStateConflictError, PrivacyGateBlockedError):
@@ -206,11 +214,12 @@ def main(argv: list[str] | None = None) -> int:
 
     signal.signal(signal.SIGTERM, interrupt)
     pause = Event()
+    admission = ResourceAdmission(registry, settings)
     try:
         recover_interrupted(settings)
         while True:
             # Job trong hàng đợi đi trước; rảnh mới nhận yêu cầu chạy lại tách theo vật (cùng dùng GPU).
-            handled = dispatch_next(registry) or process_next(registry, settings)
+            handled = dispatch_next(registry, admission=admission) or process_next(registry, settings)
             if args.once:
                 return 0
             if not handled:

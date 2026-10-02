@@ -23,6 +23,7 @@ from src.models.contracts.manifests import (
     StageId,
     StageStatus,
 )
+from src.services.orchestration.jobs.admission import ResourceWait
 from src.services.orchestration.jobs.models import JobAttemptRecord
 
 #: 5 stage tới preview 3DGS (video mẫu, export bundle dùng danh sách này).
@@ -44,8 +45,8 @@ STUDIO_PIPELINE: tuple[StageId, ...] = (
 )
 
 StageState = Literal["pending", "running", "waiting", "succeeded", "failed", "cancelled"]
-#: Việc pipeline đang chờ con người làm (không phải worker).
-WaitingFor = Literal["metric_confirmation"]
+#: Lý do pipeline chờ: người xác nhận hoặc worker chưa đủ tài nguyên.
+WaitingFor = Literal["metric_confirmation", "resources"]
 
 
 class StageProgress(BaseModel):
@@ -75,6 +76,7 @@ class JobProgress(BaseModel):
     stages: list[StageProgress]
     preview_ready: bool
     waiting_for: WaitingFor | None = None
+    resource_wait: ResourceWait | None = None
     error: ExecutionError | None = None
 
 
@@ -97,7 +99,9 @@ def _current_attempt(attempts: list[JobAttemptRecord]) -> list[JobAttemptRecord]
     return [event for event in attempts if event.attempt == latest]
 
 
-def job_progress(job: JobManifest, attempts: list[JobAttemptRecord], preview_ready: bool) -> JobProgress:
+def job_progress(
+    job: JobManifest, attempts: list[JobAttemptRecord], preview_ready: bool, resource_wait: ResourceWait | None = None
+) -> JobProgress:
     """Chiếu JobManifest + journal thành tiến trình từng stage của attempt hiện tại."""
     events = _current_attempt(attempts)
     attempt_start = next((event.recorded_at for event in events if event.status == JobStatus.QUEUED), None)
@@ -131,6 +135,13 @@ def job_progress(job: JobManifest, attempts: list[JobAttemptRecord], preview_rea
         if later in stage_starts
     }
     waiting = awaiting_metric_confirmation(job, preview_ready)
+    resources = (
+        resource_wait
+        if resource_wait is not None
+        and resource_wait.job_manifest_checksum == job.job_manifest_checksum
+        and (job.status == JobStatus.QUEUED or awaiting_finalize(job))
+        else None
+    )
     stages: list[StageProgress] = []
     for stage_id in STUDIO_PIPELINE:
         record = records.get(stage_id)
@@ -153,6 +164,8 @@ def job_progress(job: JobManifest, attempts: list[JobAttemptRecord], preview_rea
                 error = failure
             if waiting:
                 state = "waiting"
+            elif resources is not None and state == "running":
+                state = "pending"
         stages.append(
             StageProgress(
                 stage_id=stage_id,
@@ -168,11 +181,12 @@ def job_progress(job: JobManifest, attempts: list[JobAttemptRecord], preview_rea
         current_stage=job.current_stage,
         attempt=events[-1].attempt if events else 1,
         started_at=job.started_at,
-        updated_at=events[-1].recorded_at if events else job.started_at,
+        updated_at=resources.checked_at if resources else (events[-1].recorded_at if events else job.started_at),
         completed_at=job.completed_at,
         stages=stages,
         preview_ready=preview_ready,
-        waiting_for="metric_confirmation" if waiting else None,
+        waiting_for="metric_confirmation" if waiting else ("resources" if resources else None),
+        resource_wait=resources,
         error=failure if job.status == JobStatus.FAILED else None,
     )
 

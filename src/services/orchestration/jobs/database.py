@@ -116,6 +116,13 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
         6,
         ("CREATE TABLE r2s_trash (entry_id TEXT PRIMARY KEY, deleted_at TEXT NOT NULL, payload TEXT NOT NULL)",),
     ),
+    (
+        # Observation tài nguyên bind job revision; JobManifest vẫn sở hữu queue/lifecycle.
+        7,
+        (
+            "CREATE TABLE r2s_resource_waits (job_id TEXT PRIMARY KEY REFERENCES r2s_jobs(job_id) ON DELETE CASCADE, payload TEXT NOT NULL)",
+        ),
+    ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
