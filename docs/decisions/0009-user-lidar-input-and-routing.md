@@ -7,7 +7,9 @@ Date: 2026-10-02
 - **Mục 1–3: Accepted** — Tech Lead / EX-REC owner (Quân) chốt ngày 2026-10-02: "nên nhận tất cả loại, tuỳ theo đầu
   vào mà hệ thống sẽ kiểm tra rồi cho ra thông báo rồi sẽ phân luồng xử lý … luồng hai phải là scan thô + quỹ đạo chứ
   không được chỉ scan thô, phải có hiển thị thông báo cho người dùng rõ ràng".
-- **Mục 4–6: Proposed** — chưa phải authority; chờ owner chốt (xem "Câu hỏi còn mở").
+- **Mục 6 và 7: Accepted** — owner chốt cùng ngày: LiDAR dùng cho "tất cả vai trò"; bộ mẫu có "tất cả" các dạng,
+  "nhớ phải chia ra cho user hiểu là luồng nào cần data dạng nào".
+- **Mục 4–5: Proposed** — chưa phải authority; chờ owner chốt (xem "Câu hỏi còn mở").
 
 Thay thế câu "LiDAR của người dùng chưa hỗ trợ ở P0; hướng LiDAR chỉ chạy trên dataset đã chuẩn bị" của
 [0004](0004-input-kinds-and-routing.md) mục 1. Các phần khác của 0004 giữ nguyên.
@@ -84,10 +86,20 @@ Video người dùng không có quỹ đạo camera thật, nên cách khớp t�
 `CONFIRMED`. Phép đồng dạng cho luôn tỉ lệ mét. Riêng dataset có quỹ đạo camera + calibration thì giữ thêm đường khớp
 tâm camera (ghi rõ là có ground truth).
 
-### 6. LiDAR dùng vào việc gì (Proposed)
+### 6. LiDAR dùng vào việc gì (Accepted — cả ba)
 
 (a) Tỉ lệ mét lấy từ căn chỉnh thay cho số đo tay; (b) mesh va chạm dựng từ LiDAR thay cho mesh từ 3DGS — đây là
 "bằng chứng LiDAR đóng góp" của PRD §4.2; (c) lớp LiDAR chồng lên scene để đối chiếu.
+
+Số đo hiện có trên Aisle_CW (`eval/results/`, căn chỉnh có dùng ground truth): bề mặt 3DGS lệch LiDAR trung vị
+15,5 cm ở vùng LiDAR phủ (chỉ 34% điểm trong 10 cm); mesh va chạm từ 3DGS chặn nhầm 56–68% vị trí camera đã đi qua.
+Chưa có số đo cho mesh dựng từ LiDAR — phải đo bằng cùng hai benchmark trước khi kết luận nó tốt hơn. Vùng LiDAR không
+quét tới (48% bề mặt 3DGS ở lượt đo trên) vẫn phải lấy từ 3DGS, và UI ghi rõ phần nào đến từ nguồn nào.
+
+### 7. Bộ LiDAR mẫu (Accepted)
+
+Trang `/new/import-video` có sẵn dữ liệu TorWIC ở cả hai dạng (đám mây đã đăng ký; scan thô + quỹ đạo), mỗi mẫu đi
+kèm video cùng traversal. Trang giải thích rõ từng luồng cần dữ liệu dạng nào trước khi người dùng chọn.
 
 ## Consequences
 
@@ -101,6 +113,7 @@ tâm camera (ghi rõ là có ground truth).
 
 ## Câu hỏi còn mở
 
-1. Cách căn chỉnh (mục 5): chọn cặp điểm + tinh chỉnh, tự động hoàn toàn, hay bắt nộp file đã căn sẵn.
-2. Vai trò của LiDAR (mục 6): chọn (a), (b), (c) nào.
-3. Có cần bộ LiDAR mẫu TorWIC để chọn ở trang import-video không, và ở dạng nào (đã đăng ký, hay scan thô + quỹ đạo).
+1. Cách căn chỉnh (mục 5). Owner nêu hướng (02/10/2026): luồng LiDAR + video dành cho kỹ sư nên họ nộp kèm quỹ đạo.
+   Còn phải chốt: quỹ đạo chỉ đủ để căn chỉnh tự động khi có thêm phép biến đổi camera ↔ LiDAR (calibration) và quan
+   hệ thời gian giữa video và quỹ đạo. Bắt buộc cả ba cho mọi luồng LiDAR, hay giữ đường chọn cặp điểm cho trường hợp
+   thiếu (vd. chỉ nộp đám mây đã đăng ký)?
