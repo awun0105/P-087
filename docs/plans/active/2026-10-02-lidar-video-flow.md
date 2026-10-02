@@ -30,7 +30,7 @@ hướng dẫn.
 | L7 | Job mang gói LiDAR: API tạo scene nhận `lidar`, `InputManifest.lidar_metadata`, bundle `registered_lidar_present` | Tạo scene + manifest **DONE**; bundle vẫn ghi `registered_lidar_present=False` (chờ L10: cần `AlignmentRecord` CONFIRMED giữa hình học RGB và LiDAR) |
 | L8 | UI `/new/import-video`: ô LiDAR, giải thích ba luồng và dữ liệu cần, kết quả nhận diện; timeline có bước LiDAR | **DONE** (`LidarPackageSection.tsx`, test); chưa mở trên trình duyệt |
 | L9 | Bộ mẫu TorWIC ở cả hai dạng, kèm video camera trái cùng traversal; nâng giới hạn upload cho gói LiDAR | Công cụ **DONE** (`scripts/demo/make_torwic_lidar_samples.py`); đã dựng Aisle_CW 100–599 trên ổ ngoài. Chưa có: chọn mẫu ngay trong UI (hiện phải tải file lên), nâng giới hạn upload |
-| L10 | Mesh va chạm từ LiDAR (vùng LiDAR phủ) + phần còn lại từ 3DGS; đo bằng `collision_path_clearance` và `metric_click_error` | TODO |
+| L10 | Mesh va chạm từ LiDAR (vùng LiDAR phủ) + phần còn lại từ 3DGS; đo bằng `collision_path_clearance` và `metric_click_error` | Đo `collision_path_clearance` **DONE** (`eval/path/lidar_clearance.py`, kết quả ở `eval/protocols/collision_path_clearance.md`): LiDAR nguyên trạng chặn nhầm 100/100, sau khi bỏ điểm gần cảm biến < 2 m và dải sàn 15 cm còn 0/100 (mesh 3DGS: 38/100). Thay mesh canonical bằng LiDAR: **chờ quyết định** — `GeometryArtifact.source_modality` của shared contract chỉ nhận `rgb_3dgs` và cấm phụ thuộc ground truth |
 | L11 | Lớp LiDAR chồng lên scene trong viewer | TODO |
 
 Thứ tự: L3 → L4 → L5 → L6 → L7 → L8 → L9 → L10 → L11. L5 là thay đổi sâu nhất (scene ra khỏi REC-03 đã có đơn vị mét
