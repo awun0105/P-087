@@ -103,6 +103,7 @@ class UploadUnlink(BaseModel):
     upload_id: str
     removed_project_ids: list[str]
     original_project_ids: list[str]
+    original_payload: str
 
 
 class MovedItem(BaseModel):
@@ -330,7 +331,12 @@ class _Collector:
                     self.blockers.append(f"{upload_id}: còn được dùng bởi {', '.join(still_used)}")
                 if removed:
                     self.unlinks.append(
-                        UploadUnlink(upload_id=upload_id, removed_project_ids=removed, original_project_ids=linked)
+                        UploadUnlink(
+                            upload_id=upload_id,
+                            removed_project_ids=removed,
+                            original_project_ids=linked,
+                            original_payload=str(row.values["payload"]),
+                        )
                     )
                 continue
             self.rows += [row] + self._select("r2s_upload_sessions", "upload_id=?", (upload_id,))
@@ -373,18 +379,35 @@ def _audit(tx: RuntimeTransaction, action: str, line: SummaryLine, entry_id: str
     )
 
 
-def _set_upload_projects(tx: RuntimeTransaction, upload_id: str, wanted: list[str], *, keep_new: bool) -> None:
-    """Ghi lại danh sách project của một upload đang được giữ.
-
-    `keep_new`: khi khôi phục, project gắn vào upload sau lần gỡ vẫn được giữ ở cuối danh sách.
-    """
+def _locked_upload(tx: RuntimeTransaction, upload_id: str) -> UploadRecord:
+    """Upload đang được giữ, đọc có khoá trong transaction ghi."""
     row = tx.execute("SELECT payload FROM r2s_uploads WHERE upload_id=?" + tx.lock_suffix(), (upload_id,)).fetchone()
     if row is None:
-        raise RuntimeStateConflictError(f"Upload {upload_id} đã đổi; đọc lại trước khi gỡ/khôi phục")
-    record = UploadRecord.model_validate_json(row[0])
-    extra = [project_id for project_id in record.project_ids if project_id not in wanted] if keep_new else []
-    updated = record.model_copy(update={"project_ids": [*wanted, *extra]})
-    tx.execute("UPDATE r2s_uploads SET payload=? WHERE upload_id=?", (updated.model_dump_json(), upload_id))
+        raise RuntimeStateConflictError(f"Upload {upload_id} không còn; đọc lại trước khi gỡ/khôi phục")
+    return UploadRecord.model_validate_json(row[0])
+
+
+def _unlink_upload(tx: RuntimeTransaction, unlink: UploadUnlink) -> None:
+    """Bỏ các project đã gỡ khỏi một upload còn scene khác dùng."""
+    record = _locked_upload(tx, unlink.upload_id)
+    kept = [project_id for project_id in record.project_ids if project_id not in unlink.removed_project_ids]
+    payload = record.model_copy(update={"project_ids": kept}).model_dump_json()
+    tx.execute("UPDATE r2s_uploads SET payload=? WHERE upload_id=?", (payload, unlink.upload_id))
+
+
+def _relink_upload(tx: RuntimeTransaction, unlink: UploadUnlink) -> None:
+    """Gắn lại các project vừa khôi phục vào upload.
+
+    Upload không đổi gì từ lúc gỡ thì trả lại đúng payload cũ: record đời trước thiếu vài field mặc định, ghi lại qua
+    model sẽ cho payload khác bytes. Đã có scene mới gắn vào thì giữ chúng ở cuối danh sách.
+    """
+    current = _locked_upload(tx, unlink.upload_id)
+    original = UploadRecord.model_validate_json(unlink.original_payload)
+    added = [project_id for project_id in current.project_ids if project_id not in original.project_ids]
+    untouched = not added and current == original.model_copy(update={"project_ids": current.project_ids})
+    merged = current.model_copy(update={"project_ids": [*original.project_ids, *added]})
+    payload = unlink.original_payload if untouched else merged.model_dump_json()
+    tx.execute("UPDATE r2s_uploads SET payload=? WHERE upload_id=?", (payload, unlink.upload_id))
 
 
 def _delete_rows(tx: RuntimeTransaction, plan: DeletionPlan) -> None:
@@ -394,8 +417,7 @@ def _delete_rows(tx: RuntimeTransaction, plan: DeletionPlan) -> None:
             if tx.execute(f"DELETE FROM {table} WHERE {where}", parameters).rowcount != 1:
                 raise RuntimeStateConflictError(f"Dòng {table} đã đổi; đọc lại trước khi gỡ")
     for unlink in plan.upload_unlinks:
-        kept = [p for p in unlink.original_project_ids if p not in unlink.removed_project_ids]
-        _set_upload_projects(tx, unlink.upload_id, kept, keep_new=False)
+        _unlink_upload(tx, unlink)
 
 
 def _write_record(entry: Path, record: DeletionRecord) -> None:
@@ -491,7 +513,7 @@ def restore_deletion(context: DeletionContext, entry: Path) -> DeletionRecord:
             for row in (row for row in record.plan.rows if row.table == table):
                 _restore_row(tx, row)
         for unlink in record.plan.upload_unlinks:
-            _set_upload_projects(tx, unlink.upload_id, unlink.original_project_ids, keep_new=True)
+            _relink_upload(tx, unlink)
         for line in record.plan.summary:
             _audit(tx, f"{line.kind}.restore", line, entry.name)
     record = record.model_copy(update={"state": "restored"})

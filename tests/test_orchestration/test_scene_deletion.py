@@ -240,6 +240,23 @@ def test_restore_keeps_scenes_linked_to_the_upload_after_the_deletion(world: Sim
     assert world.uploads.get(upload.upload_id).project_ids == [first, second, third]
 
 
+def test_restore_puts_back_a_legacy_upload_payload_byte_for_byte(world: SimpleNamespace) -> None:
+    """Record upload đời trước thiếu field mặc định; ghi lại qua model sẽ làm payload khác bytes."""
+    upload = _upload(world)
+    first, _ = _scene(world, upload, "Một")
+    _scene(world, upload, "Hai")
+    with world.database.transaction(write=True) as tx:
+        payload = json.loads(tx.execute("SELECT payload FROM r2s_uploads").fetchone()[0])
+        legacy = {key: value for key, value in payload.items() if key not in {"input_kind", "detection"}}
+        tx.execute("UPDATE r2s_uploads SET payload=?", (json.dumps(legacy, separators=(",", ":")),))
+    rows = _rows(world)
+
+    entry = _delete(world, project_ids=[first])
+    restore_deletion(world.context, entry)
+
+    assert _rows(world) == rows
+
+
 @pytest.mark.parametrize(
     ("target", "stage", "reason"),
     [
