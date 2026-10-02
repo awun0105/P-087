@@ -308,10 +308,43 @@ Validation (VERIFIED trên máy local, Quadro T2000):
 - Test tiến trình thật: con 200 MB ở session riêng được tính; lease bị giữ bởi tiến trình khác và tự nhả khi nó chết;
   tiến trình đứng trong workspace chặn việc dọn.
 
+Lượt chạy thật đầu-cuối trên máy local (VERIFIED, 02/10/2026 14:15–14:49, job `job-ab730e702ee9`):
+
+- Môi trường: API + một worker thật qua `scripts/kaggle/run_job.Stack`, kho tách riêng tại
+  `data/studio_local/qa/audit-run-20261002/` (SQLite schema v8, không đụng DB/scene của Studio local), video mẫu
+  `data/demo/library/aisle-cw/files/input.mp4`, cấu hình 60 ảnh / 7000 bước / 500 k Gaussian / 960. COLMAP (docker),
+  Brush, splat-transform, SAM2 + gsplat + CoACD + LaMa đều là runtime thật. Chạy dưới `CPUQuota=250%` và
+  `thermal_guard.sh` (có đóng băng/thả nhiều lần vì CPU 91–94°C).
+- Chờ rồi tự chạy: chèn giữ chỗ 3,5 GB VRAM của một "worker khác" cùng GPU → API trả `waiting_for=resources`,
+  `reasons={"vram":"busy"}`, cần 1,53 / có 0,5 / tổng 4,0 GB; sau 8 giây vẫn QUEUED, chưa có thư mục attempt. Xoá giữ
+  chỗ → 2 giây sau worker nhận job, ghi giữ chỗ của chính nó và giữ `attempt.lock`.
+- Kết quả: job SUCCEEDED đủ 8 stage; scene `rev-001` 26 vật qua `objectify_v1`; evaluation trả đủ 7 nhóm; stage views
+  đọc được sau khi dọn. Giữ chỗ và observation chờ đều về 0 dòng sau mỗi pha.
+- Mốc rảnh: lúc Brush đang train heartbeat ghi VRAM trống 2,83 GB, mốc rảnh giữ 3,62 GB; `machine_maximum` =
+  370 ảnh / 1,3 M / 1440.
+- Dọn: preview xoá 71 file / 223 MB, finalize 175 file / 317 MB, job xong xoá `resume/` 7,6 MB. Thư mục worker còn
+  75 file log/JSON, 1,0 MB.
+- Số đo (4 bản ghi trong `r2s_resource_usage`):
+
+  | Bước | Thời gian | Peak RAM | Peak VRAM theo PID | Mức GPU cả máy | Peak scratch |
+  | --- | --- | --- | --- | --- | --- |
+  | prepare | 65 s | 0,16 GiB | — | 0,01 GiB | 0 |
+  | preview (COLMAP + Brush) | 458 s | 0,77 GiB | 0,95 GiB | 0,96 GiB | 0,30 GiB |
+  | finalize (hình học) | 91 s | 0,80 GiB | 0,21 GiB | 0,22 GiB | 0,16 GiB |
+  | scene_extract (tách vật thể) | 1257 s | 4,59 GiB (gồm worker) | 2,27 GiB | 2,28 GiB | 0,21 GiB |
+
+- Phát hiện từ số đo: ước lượng dùng cho gate của bước hoàn tất (VRAM 1,53 / RAM 2,2 GB, là ước lượng của bước
+  preview) **thấp hơn** mức bước tách vật thể thật sự dùng (VRAM 2,27 / RAM 4,59 GiB). Ước lượng preview thì cao hơn
+  thực tế (0,95 GiB). Một mẫu chưa đủ để đặt mô hình; đây là dữ liệu đầu vào cho pha 4.
+- Giới hạn của lượt này: COLMAP local chạy trong container docker nên **không** nằm trong cây tiến trình được đo (RAM
+  của preview chưa gồm COLMAP); trên image GPU, COLMAP chạy trực tiếp. Điểm hệ mét do script tự chọn từ 3DGS với tỉ
+  lệ giả định camera cao 1 m (kho tách riêng không có số đo LiDAR) — chỉ để chạy được bước hoàn tất, không phải
+  bằng chứng về độ chính xác mét. 4 lần `nvidia-smi` quá 2 giây (INFERENCE: lúc unit bị đóng băng vì nhiệt); mẫu đó
+  bị bỏ, job không bị ảnh hưởng. Vẫn chưa chạy: máy 2 GPU, PostgreSQL, R2, trình duyệt.
+
 Giới hạn còn lại (chưa làm, không claim):
 
-- Chưa có lượt chạy pipeline thật đầu-cuối sau increment (worker thật + COLMAP + Brush + finalize), chưa chạy trên
-  máy 2 GPU, chưa chạy với PostgreSQL/R2.
+- Chưa chạy trên máy 2 GPU, với PostgreSQL/R2, hoặc qua trình duyệt.
 - Gate của bước hoàn tất vẫn dùng ước lượng của bước preview (`estimate_scope=configured_preview`); chưa có mô hình cho
   hình học/tách vật thể. Không tự đặt hệ số: giờ đã có số đo của bước này để làm mô hình ở pha 4.
 - Hàng đợi tách lại vật thể (`scene/objectify_queue.py`) không giữ chỗ và chưa được lấy mẫu; workspace
