@@ -172,7 +172,7 @@ cấu hình tương ứng.
 
 | Thư mục | Nội dung | Tạo lại bằng |
 |---|---|---|
-| `data/studio_local/` | Stack Studio cục bộ (cấu hình trỏ tới): `runtime.db`, `artifacts/` (kho artifact của các scene), `workers/` (thư mục làm việc của worker — xoá được khi không có job đang chạy), `qa/` (script và ảnh kiểm thử trình duyệt), `seed-accounts/` | `make -f Makefile.studio up` |
+| `data/studio_local/` | Stack Studio cục bộ (cấu hình trỏ tới): `runtime.db`, `artifacts/` (kho artifact của các scene), `workers/` (thư mục làm việc của worker — xoá được khi không có job đang chạy), `trash/` (scene đã gỡ bằng `projects/delete_cli`, khôi phục được tới khi `purge`), `backups/`, `qa/` (script và ảnh kiểm thử trình duyệt), `seed-accounts/` | `make -f Makefile.studio up` |
 | `data/demo/library/` | Thư viện video mẫu đã xử lý sẵn (`PRODUCT_DEMO_DIR`) | `scripts/demo/export_demo_bundle.py` |
 | `data/asset_previews/` | GLB xem trước của asset danh mục | `scripts/scene/build_asset_previews.py` |
 | `data/rerun_recordings/` | Bản ghi Rerun của quá trình train (`<job_id>.rrd`) | `eval/visual/brush_quality.py --rerun-save` |

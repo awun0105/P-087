@@ -236,3 +236,29 @@ Xong cả năm pha và phần dọn `data/`. Chi tiết và bằng chứng theo 
 5. **Test backend để rác vào `data/artifacts`** mỗi lần chạy (4 thư mục job một lượt).
 6. Chạy một job thật qua worker trên GPU sau khi dời module `orchestration` (đã có test đường dẫn runner, chưa có lượt
    chạy thật).
+
+## Follow-up đã làm (02/10/2026, sau khi đóng plan)
+
+- **Mục 5 — test để rác vào `data/artifacts`: đã sửa.** Fixture của `test_project_registry.py` dùng `runtime_root` tạm;
+  `tests/conftest.py` có guard autouse làm fail test nào ghi job vào kho mặc định. VERIFIED: guard bắt một test cố tình
+  ghi; `pytest tests/ -q` 1131 passed / 40 skipped, `data/artifacts/jobs` trống sau lượt chạy. File test trước dùng
+  CRLF, lần sửa chuyển sang LF nên diff hiện 484 dòng (thay đổi thật: 7 thêm / 3 bớt).
+- **Ảnh trùng `torwic_slam/raw` ⇄ `normalized`: đã gộp** bằng `scripts/torwic/dedupe_rgb_frames.py` (hardlink + chỉ
+  đọc). Chi tiết và bằng chứng ở `REC-01.md` mục "Một bản vật lý cho ảnh RGB…" và `DATASET_PLAYBOOK.md` §12.4. Store
+  5,7 GB → 4,5 GB; checksum 1.094 file raw và manifest không đổi.
+- **Mục 2 — xoá scene cũ: có thao tác được hỗ trợ và đã áp dụng "mỗi loại giữ một bản".**
+  `src/services/orchestration/projects/{deletion,delete_cli}.py`: xoá dòng DB trong một transaction, chuyển thư mục vào
+  thùng rác kèm bản ghi, `restore` khôi phục, `purge` mới xoá hẳn; từ chối job đang chạy/chờ worker, scene đã phát hành
+  (US-06), kho file S3; ghi audit log. Chỉ là CLI vận hành, UI/API không có nút xoá (chưa có policy retention).
+  - Giữ: `E2E v2 + resume` (hoàn tất, tách vật thể, có bản ghi Rerun), `Kho TorWIC · Aisle CW` (hoàn tất, dataset có
+    LiDAR), `Đo chất lượng D5` (chờ xác nhận tỉ lệ), `Đo chất lượng C` (lỗi), `via_next` (đã huỷ), scene nhập `scene`
+    (`import-9dab842704e8`).
+  - Gỡ vào `data/studio_local/trash/20261002T013259Z-79b733` (2,2 GB): 8 scene, 2 scene nhập, 3 upload không còn ai
+    dùng. **Chưa purge**, chờ owner xác nhận danh sách. Trong số bị gỡ có nguồn bằng chứng: `job-123dfd4868d8` (ADR
+    0007 pha A), `job-286e7c86555e` và `job-cb8815e2a770` (bảng ở `eval/protocols/recon_visual_quality.md`),
+    `job-1421190ff700` (ADR 0007, `scripts/kaggle/README.md`).
+  - VERIFIED: 23 test (tắt từng chốt an toàn thì test tương ứng fail); diễn tập trên bản gương: gỡ rồi khôi phục cho
+    lại 7 bảng DB và file giống hệt gốc; stack thật sau khi gỡ: 5 scene, 1 scene nhập, 32/32 artifact khớp checksum
+    qua API, dữ liệu API của scene giữ lại giống hệt trước khi gỡ, ID đã gỡ trả 404. Bản sao DB trước khi gỡ:
+    `data/studio_local/backups/runtime-before-scene-delete-20261002.db`.
+
