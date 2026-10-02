@@ -25,11 +25,16 @@ def user_metric_port(
     resolve: Callable[[ProductArtifactRef], Path],
     writer: object,
     exists: Callable[[str], bool],
+    locate: Callable[[str], Path | None] | None = None,
 ) -> "UserMetricPort":
-    """Public port REC-06: xem trước/xác nhận tỉ lệ mét từ điểm người dùng chọn."""
+    """Public port REC-06: xem trước/xác nhận tỉ lệ mét từ điểm người dùng chọn.
+
+    `locate` (URI → file hoặc None) cho port đọc đề xuất tỉ lệ tự động của worker; bỏ trống thì
+    deployment không có đề xuất.
+    """
     from src.services.reconstruction.metric_port import UserMetricPort as Port
 
-    return Port(resolve, writer, exists)  # type: ignore[arg-type]
+    return Port(resolve, writer, exists, locate)  # type: ignore[arg-type]
 
 
 def __getattr__(name: str) -> object:
@@ -90,6 +95,10 @@ def __getattr__(name: str) -> object:
         from src.services.reconstruction import imports
 
         return getattr(imports, name)
+    if name in {"MetricProposal", "MogeSettings", "load_proposal", "propose_metric", "proposal_uri"}:
+        from src.services.reconstruction import metric_proposal
+
+        return getattr(metric_proposal, name)
     if name == "lidar_support_uri":
         from src.services.reconstruction.rgb.canonical.lidar_assist import support_uri
 
@@ -130,6 +139,11 @@ __all__ = [
     "detect_input",
     "detect_stream",
     "lidar_support_uri",
+    "MetricProposal",
+    "MogeSettings",
+    "load_proposal",
+    "propose_metric",
+    "proposal_uri",
     "publish_json",
     "user_metric_port",
     "verify_prepared_preview",

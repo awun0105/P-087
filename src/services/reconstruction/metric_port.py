@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.identity import canonical_json_bytes
 from src.models.contracts.manifests import StageId
+from src.services.reconstruction.metric_proposal import MetricProposal, load_proposal, proposal_uri
 from src.services.reconstruction.rgb.canonical.floor_frame import floor_frame
 from src.services.reconstruction.rgb.canonical.lidar_assist import (
     LidarAssist,
@@ -47,7 +48,9 @@ from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
 from src.services.reconstruction.rgb.splat.visual_publication import VisualResolver
 
 Point = tuple[FiniteFloat, FiniteFloat, FiniteFloat]
-DistanceSource = Literal["user_measured", "lidar_demo"]
+#: `ai_estimated`: khoảng cách lấy từ đề xuất tự động (ADR 0001 §2) — người dùng chấp nhận ước lượng,
+#: không phải số đo ngoài đời; bản khai giữ lại đề xuất đã dùng.
+DistanceSource = Literal["user_measured", "lidar_demo", "ai_estimated"]
 
 #: Sai số click một điểm trên 3DGS — PROPOSAL tạm, đo và khóa ở gói 2 (REC-06).
 CLICK_UNCERTAINTY_M = 0.01
@@ -55,6 +58,8 @@ MIN_SEGMENT_M = 0.5
 MAX_TOLERANCE_RATIO = 0.05
 #: Số LiDAR client gửi lại phải trùng số server đo (chỉ chênh do làm tròn JSON).
 _LIDAR_MATCH_M = 1e-6
+#: Khoảng cách nguồn `ai_estimated` phải trùng độ dài SfM × tỉ lệ đề xuất (chỉ chênh do làm tròn).
+_ESTIMATE_MATCH_M = 1e-6
 
 
 def check_tolerance_m(distance_ab_m: float, distance_cd_m: float) -> float:
@@ -87,6 +92,18 @@ class LidarEvidence(BaseModel):
     check: LidarDistance
 
 
+class EstimateEvidence(BaseModel):
+    """Đề xuất tự động mà người dùng đã chấp nhận làm khoảng cách (không phải số đo ngoài đời)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    proposal_checksum: str
+    method: str
+    scale_m_per_sfm_unit: float
+    relative_uncertainty: float
+    frames_used: int
+
+
 class MeasurementDeclaration(BaseModel):
     """Bản khai đo đạc: measurement_ref + frame evidence_ref của REC-06."""
 
@@ -99,6 +116,7 @@ class MeasurementDeclaration(BaseModel):
     source_visual_checksum: str
     input: UserMetricInput
     lidar: LidarEvidence | None = None
+    estimate: EstimateEvidence | None = None
 
 
 class UserMetricPreview(BaseModel):
@@ -171,7 +189,10 @@ class UserMetricPort:
         resolve: Callable[[ProductArtifactRef], Path],
         writer: ArtifactWriter,
         exists: Callable[[str], bool],
+        locate: Callable[[str], Path | None] | None = None,
     ) -> None:
+        #: Tìm file theo URI cố định (đề xuất tự động); None = deployment không có đề xuất.
+        self.locate = locate
         frames = FrameSetResolver(resolve, resolve)
         self.poses = CameraPoseResolver(resolve, frames)
         self.visuals = VisualResolver(resolve, self.poses)
@@ -256,7 +277,7 @@ class UserMetricPort:
     def _evidence(
         self, job_id: str, source_visual: ProductArtifactRef, data: UserMetricInput, support: ProductArtifactRef | None
     ) -> LidarEvidence | None:
-        if data.distance_source == "user_measured":
+        if data.distance_source != "lidar_demo":
             return None
         measured = self.lidar_measurements(
             job_id, source_visual, support, (data.point_a, data.point_b), (data.check_a, data.check_b)
@@ -269,6 +290,45 @@ class UserMetricPort:
         if support is None:  # _lidar_context đã từ chối; giữ kiểm tra cho type checker
             raise ValueError("Scene này không có số đo LiDAR")
         return LidarEvidence(support_checksum=support.artifact_checksum, anchor=measured.anchor, check=measured.check)
+
+    def auto_proposal(self, job_id: str, source_visual: ProductArtifactRef) -> MetricProposal | None:
+        """Đề xuất tỉ lệ/mặt sàn tự động của đúng bản 3DGS này; None khi worker không tạo."""
+        if self.locate is None:
+            return None
+        return load_proposal(job_id, source_visual, self.locate)
+
+    def _estimate(
+        self, job_id: str, source_visual: ProductArtifactRef, data: UserMetricInput
+    ) -> EstimateEvidence | None:
+        """Nguồn `ai_estimated` chỉ hợp lệ khi hai khoảng cách đúng bằng độ dài SfM × tỉ lệ của đề xuất.
+
+        Người dùng được chọn điểm khác với điểm đề xuất (vd. tự chọn sàn), nhưng không được khai một
+        con số tự nghĩ ra dưới nhãn ước lượng tự động: số đo thật phải gửi với nguồn `user_measured`.
+        """
+        if data.distance_source != "ai_estimated":
+            return None
+        proposal = self.auto_proposal(job_id, source_visual)
+        if proposal is None or self.locate is None:
+            raise ValueError("Scene này không có đề xuất tỉ lệ tự động; nhập khoảng cách đo ngoài đời")
+        scale = proposal.scale_m_per_sfm_unit
+        expected = (math.dist(data.point_a, data.point_b) * scale, math.dist(data.check_a, data.check_b) * scale)
+        if (
+            abs(expected[0] - data.distance_m) > _ESTIMATE_MATCH_M
+            or abs(expected[1] - data.check_distance_m) > _ESTIMATE_MATCH_M
+        ):
+            raise ValueError("Khoảng cách không khớp đề xuất tự động; lấy lại đề xuất hoặc nhập số đo thật")
+        path = self.locate(proposal_uri(job_id, source_visual))
+        if path is None:  # auto_proposal vừa đọc được; giữ kiểm tra cho type checker
+            raise ValueError("Scene này không có đề xuất tỉ lệ tự động")
+        with path.open("rb") as stream:
+            checksum = "sha256:" + hashlib.file_digest(stream, "sha256").hexdigest()
+        return EstimateEvidence(
+            proposal_checksum=checksum,
+            method=proposal.method,
+            scale_m_per_sfm_unit=scale,
+            relative_uncertainty=proposal.relative_uncertainty,
+            frames_used=proposal.frames_used,
+        )
 
     def _build(
         self,
@@ -283,12 +343,17 @@ class UserMetricPort:
         if tolerance > MAX_TOLERANCE_RATIO * data.check_distance_m:
             raise ValueError("A–B quá ngắn so với C–D nên không kiểm chắc được; chọn vật dài hơn làm A–B")
         lidar = self._evidence(job_id, source_visual, data, support)
+        estimate = self._estimate(job_id, source_visual, data)
         visual = self.visuals.load(source_visual)
         cameras = [pose.translation for pose in self.poses.load(visual.source_camera_poses).poses]
         scale = scale_from_distance((data.point_a, data.point_b), data.distance_m)
         frame = floor_frame(data.floor_points, data.point_a, data.point_b, scale, cameras)
         declaration = MeasurementDeclaration(
-            job_id=job_id, source_visual_checksum=source_visual.artifact_checksum, input=data, lidar=lidar
+            job_id=job_id,
+            source_visual_checksum=source_visual.artifact_checksum,
+            input=data,
+            lidar=lidar,
+            estimate=estimate,
         )
         evidence = publish_json(
             self.writer, self.exists, job_id, "declarations", declaration, declaration.artifact_type
