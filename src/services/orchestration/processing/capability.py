@@ -113,6 +113,11 @@ def _live_ram_gb() -> float | None:
     return None
 
 
+def ram_available_gb() -> float | None:
+    """RAM còn dùng được của cả máy (GiB); None khi không đọc được `/proc/meminfo`."""
+    return _live_ram_gb()
+
+
 def measure_live_headroom(worker_root: Path) -> dict[str, float | None]:
     """Đo VRAM/RAM/đĩa khả dụng tức thời (GiB); probe lỗi trả None, không tạo thư mục.
 

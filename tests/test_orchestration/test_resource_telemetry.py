@@ -15,6 +15,7 @@ from src.config import Settings
 from src.services.orchestration.jobs import runner
 from src.services.orchestration.jobs.workspace import cleanup_attempt_workspace
 from src.services.orchestration.processing import telemetry
+from src.services.orchestration.processing.capability import GpuReading
 from tests.test_orchestration.test_prepared_queue import _registry
 
 
@@ -121,7 +122,7 @@ def test_sampled_peaks_duration_and_record_survive_cleanup(tmp_path: Path, monke
     workspace.mkdir(parents=True)
     (workspace / "scratch.bin").write_bytes(b"scratch")
     monkeypatch.setattr(telemetry, "measure_live_headroom", lambda path: {"vram_free_gb": None, "ram_available_gb": 5})
-    monkeypatch.setattr(telemetry, "_gpu_used", lambda: 0.5)
+    monkeypatch.setattr(telemetry, "_gpu", lambda: _reading(0.5))
     clocks = iter([10.0, 15.0])
     monkeypatch.setattr(telemetry.time, "monotonic", lambda: next(clocks))
     context = telemetry.ResourceContext(
@@ -137,7 +138,8 @@ def test_sampled_peaks_duration_and_record_survive_cleanup(tmp_path: Path, monke
     monkeypatch.setattr(telemetry, "_tree_memory", lambda root, tracked: next(ram))
     monkeypatch.setattr(telemetry, "_tree_vram", lambda pids: next(vram))
     gpu = iter([2.0, 5.0, 1.0])
-    monkeypatch.setattr(telemetry, "_gpu_used", lambda: next(gpu))
+    monkeypatch.setattr(telemetry, "_gpu", lambda: _reading(next(gpu)))
+    monkeypatch.setattr(telemetry, "_ram_available", lambda: 9.0)
     for _ in range(3):
         collector.sample(100)
     usage = collector.finish("completed", 0)
@@ -147,9 +149,47 @@ def test_sampled_peaks_duration_and_record_survive_cleanup(tmp_path: Path, monke
     assert usage.measurement_method == "sampled_process_tree" and not usage.includes_runner_process
     # Mức GPU của cả máy là số riêng, không gộp vào VRAM theo PID.
     assert usage.gpu_used_before_gb == 0.5 and usage.peak_gpu_used_gb == 5 and usage.gpu_sample_count == 3
+    assert usage.min_gpu_free_gb == 3 and usage.min_ram_available_gb == 9 and usage.gpu_name == "T4"
+    assert not usage.exhausted  # tool hoàn tất: không bao giờ là "hết bộ nhớ"
     cleanup_attempt_workspace(workspace, worker_root=tmp_path / "workers", artifact_root=tmp_path / "artifacts")
     loaded = telemetry.ResourceUsage.model_validate_json((workspace / "resource-usage.jsonl").read_text())
     assert loaded == usage and not (workspace / "scratch.bin").exists()
+
+
+def _reading(used: float, total: float = 8.0) -> GpuReading:
+    return GpuReading(index=0, uuid="GPU-test", name="T4", total_gb=total, free_gb=total - used, used_gb=used)
+
+
+@pytest.mark.parametrize(
+    ("outcome", "gpu_used", "ram_available", "expected"),
+    [
+        ("failed", 7.8, 20.0, True),  # GPU 8 GB chỉ còn 0,2 GB lúc tool chết
+        ("failed", 2.0, 1.0, True),  # RAM 32 GB chỉ còn 1 GB
+        ("failed", 2.0, 20.0, False),  # lỗi khác: bộ nhớ còn rộng
+        ("completed", 7.8, 1.0, False),
+        ("cancelled", 7.8, 1.0, False),
+    ],
+)
+def test_exhaustion_is_flagged_only_for_failures_near_the_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str, gpu_used: float, ram_available: float, expected: bool
+) -> None:
+    monkeypatch.setattr(telemetry, "measure_live_headroom", lambda path: {"vram_free_gb": None})
+    monkeypatch.setattr(telemetry, "_gpu", lambda: _reading(gpu_used))
+    monkeypatch.setattr(telemetry, "_ram_available", lambda: ram_available)
+    monkeypatch.setattr(telemetry, "_tree_memory", lambda root, tracked: None)
+    monkeypatch.setattr(telemetry, "_tree_vram", lambda pids: None)
+    context = telemetry.ResourceContext(
+        job_id="job-a", attempt_id="a", tool="preview", config_checksum="c", runtime_manifest_checksum="r"
+    )
+    sampler = telemetry.ResourceSampler(
+        context, workspace=tmp_path, worker_root=tmp_path, exhaustion_ratio=0.92, ram_total_gb=32.0
+    )
+    sampler.sample(1)
+    assert sampler.finish(outcome, 1).exhausted is expected
+    # Không có ngưỡng (job legacy không có mô hình ước lượng) thì không suy đoán.
+    plain = telemetry.ResourceSampler(context, workspace=tmp_path, worker_root=tmp_path)
+    plain.sample(1)
+    assert not plain.finish("failed", 1).exhausted
 
 
 def _attempt(tmp_path: Path) -> runner._Attempt:
@@ -167,7 +207,7 @@ def test_runner_records_local_process_outcomes(tmp_path: Path, monkeypatch: pyte
     attempt = _attempt(tmp_path)
     monkeypatch.setattr(telemetry, "measure_live_headroom", lambda path: {"vram_free_gb": None})
     monkeypatch.setattr(telemetry, "_tree_vram", lambda pids: None)
-    monkeypatch.setattr(telemetry, "_gpu_used", lambda: None)
+    monkeypatch.setattr(telemetry, "_gpu", lambda: None)
     code = "print('{}')"
     if case == "nonzero":
         code += "; raise SystemExit(1)"
@@ -214,7 +254,7 @@ def test_runner_records_local_process_outcomes(tmp_path: Path, monkeypatch: pyte
 def test_worker_interrupt_is_not_recorded_as_tool_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     attempt = _attempt(tmp_path)
     monkeypatch.setattr(telemetry, "measure_live_headroom", lambda path: {"vram_free_gb": None})
-    monkeypatch.setattr(telemetry, "_gpu_used", lambda: None)
+    monkeypatch.setattr(telemetry, "_gpu", lambda: None)
     attempt.registry.get_job.side_effect = KeyboardInterrupt
     with pytest.raises(KeyboardInterrupt):
         runner._run_tool(attempt, "test", [sys.executable, "-c", "import time; time.sleep(30)"], 10)
@@ -229,7 +269,7 @@ def test_step_inside_the_worker_is_sampled_and_never_broken_by_sampling(
     attempt = _attempt(tmp_path)
     monkeypatch.setattr(telemetry, "measure_live_headroom", lambda path: {"vram_free_gb": None})
     monkeypatch.setattr(telemetry, "_tree_vram", lambda pids: None)
-    monkeypatch.setattr(telemetry, "_gpu_used", lambda: None)
+    monkeypatch.setattr(telemetry, "_gpu", lambda: None)
     with runner._sampled(attempt, "scene_extract"):
         subprocess.run([sys.executable, "-c", "b=bytearray(64*1024*1024); import time; time.sleep(0.5)"], check=True)
     usage = telemetry.ResourceUsage.model_validate_json((attempt.workspace / "resource-usage.jsonl").read_text())

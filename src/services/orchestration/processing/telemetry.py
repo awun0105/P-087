@@ -22,7 +22,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.services.orchestration.processing.capability import bound_gpu, measure_live_headroom
+from src.services.orchestration.processing.capability import (
+    GpuReading,
+    bound_gpu,
+    measure_live_headroom,
+    ram_available_gb,
+)
 from src.services.orchestration.processing.procfs import PROC_ROOT, process_table, process_tree, resident_gb
 
 Outcome = Literal["completed", "failed", "cancelled", "timeout", "interrupted"]
@@ -38,12 +43,17 @@ class ResourceContext(BaseModel):
     tool: str
     config_checksum: str
     runtime_manifest_checksum: str
+    #: Thông số số học của cấu hình job và model GPU: khoá để suy ngân sách cho job sau.
+    params: dict[str, float] | None = None
+    gpu_name: str | None = None
+    #: Lúc bắt đầu có worker khác giữ chỗ trên cùng GPU không (None = không kiểm được).
+    shared_gpu: bool | None = None
 
 
 class ResourceUsage(ResourceContext):
     """Bản ghi nội bộ có attribution; các peak dùng GiB và có thể không đo được."""
 
-    schema_version: Literal["1.1"] = "1.1"
+    schema_version: Literal["1.1", "1.2"] = "1.2"
     started_at: datetime
     completed_at: datetime
     outcome: Outcome
@@ -64,6 +74,11 @@ class ResourceUsage(ResourceContext):
     gpu_used_before_gb: float | None = Field(default=None, ge=0)
     peak_gpu_used_gb: float | None = Field(default=None, ge=0)
     peak_scratch_gb: float | None = Field(default=None, ge=0)
+    #: Mức trống thấp nhất của GPU worker được ghim và RAM cả máy trong lúc chạy.
+    min_gpu_free_gb: float | None = Field(default=None, ge=0)
+    min_ram_available_gb: float | None = Field(default=None, ge=0)
+    #: Tool lỗi trong lúc GPU hoặc RAM gần cạn: nhiều khả năng chết vì hết bộ nhớ (suy luận, không chắc).
+    exhausted: bool = False
     headroom_before: dict[str, float | None]
 
 
@@ -113,10 +128,14 @@ def _tree_vram(pids: set[int]) -> float | None:
         return None
 
 
-def _gpu_used() -> float | None:
-    """Mức đã dùng của GPU worker được ghim; None khi không xác định được GPU."""
-    gpu = bound_gpu()
-    return gpu.used_gb if gpu is not None else None
+def _gpu() -> GpuReading | None:
+    """Số đo tức thời của GPU worker được ghim; None khi không xác định được GPU."""
+    return bound_gpu()
+
+
+def _ram_available() -> float | None:
+    """RAM còn dùng được của cả máy (GiB)."""
+    return ram_available_gb()
 
 
 def _scratch_gb(workspace: Path) -> float | None:
@@ -138,13 +157,31 @@ def _scratch_gb(workspace: Path) -> float | None:
 
 
 class ResourceSampler:
-    """Collector best effort theo công cụ; caller poll và finish cả khi tool lỗi/hủy."""
+    """Collector best effort theo công cụ; caller poll và finish cả khi tool lỗi/hủy.
 
-    def __init__(self, context: ResourceContext, *, workspace: Path, worker_root: Path) -> None:
+    `exhaustion_ratio` là ngưỡng "gần cạn" (cùng `danger_ratio` của cấu hình ước lượng):
+    tool lỗi sau khi GPU hoặc RAM đã dùng quá tỉ lệ này thì bản ghi được đánh dấu `exhausted`.
+    """
+
+    def __init__(
+        self,
+        context: ResourceContext,
+        *,
+        workspace: Path,
+        worker_root: Path,
+        exhaustion_ratio: float | None = None,
+        ram_total_gb: float | None = None,
+    ) -> None:
         self.context = context
         self.workspace = workspace
+        self.exhaustion_ratio = exhaustion_ratio
+        self.ram_total = ram_total_gb
         self.headroom = measure_live_headroom(worker_root)
-        self.gpu_before = _gpu_used()
+        gpu = _gpu()
+        self.gpu_before = gpu.used_gb if gpu is not None else None
+        self.gpu_total = gpu.total_gb if gpu is not None else None
+        if gpu is not None and context.gpu_name is None:
+            self.context = context.model_copy(update={"gpu_name": gpu.name})
         self.started_at = datetime.now(UTC)
         self.started = time.monotonic()
         self.samples = 0
@@ -152,15 +189,17 @@ class ResourceSampler:
         self.includes_runner = False
         self.counts = {"ram": 0, "vram": 0, "gpu": 0, "scratch": 0}
         self.peaks: dict[str, float | None] = {"ram": None, "vram": None, "gpu": None, "scratch": None}
+        self.lows: dict[str, float | None] = {"gpu_free": None, "ram_available": None}
 
     def sample(self, root: int) -> None:
         """Lấy mẫu sau cùng cũng hợp lệ khi process vừa thoát (chỉ còn disk và mức GPU)."""
         self.includes_runner = self.includes_runner or root == os.getpid()
         memory = _tree_memory(root, self.tracked)
+        gpu = _gpu()
         values = {
             "ram": sum(memory.values()) if memory else None,
             "vram": _tree_vram(set(memory or {})),
-            "gpu": _gpu_used(),
+            "gpu": gpu.used_gb if gpu is not None else None,
             "scratch": _scratch_gb(self.workspace),
         }
         self.samples += 1
@@ -168,6 +207,17 @@ class ResourceSampler:
             if value is not None:
                 self.counts[key] += 1
                 self.peaks[key] = max(value, self.peaks[key] or 0)
+        for key, low in (("gpu_free", gpu.free_gb if gpu is not None else None), ("ram_available", _ram_available())):
+            if low is not None:
+                self.lows[key] = low if self.lows[key] is None else min(low, self.lows[key])  # type: ignore[type-var]
+
+    def _exhausted(self, outcome: Outcome) -> bool:
+        """Tool lỗi và phần trống thấp nhất đã xuống dưới (1 − ngưỡng) của tổng."""
+        if outcome != "failed" or self.exhaustion_ratio is None:
+            return False
+        spare = 1 - self.exhaustion_ratio
+        checks = ((self.lows["gpu_free"], self.gpu_total), (self.lows["ram_available"], self.ram_total))
+        return any(low is not None and total is not None and low <= total * spare for low, total in checks)
 
     def finish(self, outcome: Outcome, exit_code: int | None) -> ResourceUsage:
         """Append record nội bộ; caller xử lý lỗi disk, không làm thay đổi job state."""
@@ -189,6 +239,9 @@ class ResourceSampler:
             gpu_used_before_gb=self.gpu_before,
             peak_gpu_used_gb=self.peaks["gpu"],
             peak_scratch_gb=self.peaks["scratch"],
+            min_gpu_free_gb=self.lows["gpu_free"],
+            min_ram_available_gb=self.lows["ram_available"],
+            exhausted=self._exhausted(outcome),
             headroom_before=self.headroom,
         )
         with (self.workspace / "resource-usage.jsonl").open("a", encoding="utf-8") as stream:
