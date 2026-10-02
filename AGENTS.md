@@ -38,6 +38,7 @@ Authority được xác định theo **loại quyết định**, không phải t
 | Dataset preparation, leakage, split, evaluation protocol | `docs/DATASET_PLAYBOOK.md` |
 | Shared artifacts, schemas, runtime/review/handoff rules | `docs/execution/TEAM_EXECUTION_CONTRACT.md` |
 | Canonical repository placement và module ownership | `ARCHITECTURE.md` |
+| IA, màn hình, trạng thái UI và quyết định Q/D-xx của Web Studio (không override PRD/contract) | `docs/STUDIO_UX_SPEC.md` |
 | Technical baseline, integration strategy, reusable tools | `docs/execution/INTEGRATION_PLAYBOOK.md` |
 | Locked task IDs và implementation scope | `docs/execution/TRACK_IMPLEMENTATION_GUIDE.md` |
 | Milestone, deadline và team ownership | `docs/execution/TEAM_EXECUTION_PLAN.md` |
@@ -48,7 +49,7 @@ Authority được xác định theo **loại quyết định**, không phải t
 Code/test hiện tại chứng minh implementation đang làm gì; chúng không được override
 product policy hoặc contract đã được chấp nhận. Task/track files là projection và
 execution record; chúng không được âm thầm sửa source of truth cấp cao hơn.
-`CONTEXT.md` và root `README.md` là onboarding/overview, không phải authority cho
+`docs/CONTEXT.md` và root `README.md` là onboarding/overview, không phải authority cho
 P0 acceptance, schema, task scope hay folder placement; nếu chúng khác bảng trên,
 kiểm tra source of truth tương ứng và báo drift, không làm theo hướng dẫn cũ.
 

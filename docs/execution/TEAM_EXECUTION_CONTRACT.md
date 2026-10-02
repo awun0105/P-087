@@ -468,6 +468,12 @@ geometry dimensions.
 
 ### 3.7.0 Thay đổi dự kiến cho pipeline v2 (ADR 0007) — **Proposed, chưa là contract**
 
+> **Cập nhật 01/10/2026:** phần bổ sung dưới đây đã được hiện thực trên nhánh `feat/pipeline-v2`
+> (`src/models/contracts/scene.py`: `ObjectPhysics`, `MassSource`, `ColliderType.CONVEX_DECOMPOSITION`,
+> `SceneObject.physics`, `SceneEnvironment.visual_master_ref`; mirror TypeScript đã khớp). Trường mới là
+> tuỳ chọn và không được ghi khi rỗng, nên SceneIR cũ giữ nguyên checksum (đã kiểm trên 16 revision thật).
+> Vẫn **chờ producer/consumer review** khi mở PR trước khi coi là contract chính thức.
+
 [ADR 0007](../decisions/0007-object-centric-hybrid-usd-pipeline.md) cần các bổ sung sau. Mục này
 chỉ ghi ý định; schema chính thức chỉ đổi khi producer và consumer cùng review, có version mới
 và migration/fixture tương ứng (§3.1). Tới lúc đó, contract hiện hành vẫn là authority.

@@ -1,13 +1,13 @@
 "use client";
 
 import { ArrowLeft, ArrowRight, Box, CheckCircle2, Clapperboard, Clock, FastForward, Info, Play } from "lucide-react";
-import Link from "next/link";
+import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 
 import { Badge, Button, Card, Notice, buttonVariants } from "@/components/studio/primitives";
 import { DemoShowcase } from "@/features/studio/DemoShowcase";
 import { PipelineTimeline } from "@/features/studio/PipelineTimeline";
 import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
-import { MVP_STAGES } from "@/features/studio/stages";
+import { STUDIO_STAGES } from "@/features/studio/stages";
 import { useDemoReplay } from "@/features/studio/useDemoReplay";
 import { useProcessingForm } from "@/features/studio/useProcessingForm";
 import { sampleFileUrl } from "@/lib/api/studio";
@@ -34,9 +34,9 @@ export function SamplePicker({
   return (
     <section aria-labelledby="samples-heading">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 id="samples-heading" className="flex items-center gap-2 text-base font-semibold">
+        <h2 id="samples-heading" className="flex items-center gap-2 text-base font-bold">
           <Clapperboard className="size-4 text-ember-strong" aria-hidden />
-          Hoặc thử với video mẫu
+          Chọn video mẫu
         </h2>
         <p className="text-sm text-ink-muted">Kết quả đã được pipeline xử lý sẵn — tiến trình phát lại nhanh.</p>
       </div>
@@ -65,7 +65,7 @@ export function SamplePicker({
                   </Badge>
                 </div>
                 <div className="flex flex-1 flex-col p-4">
-                  <p className="text-xs font-medium tracking-wide text-ink-subtle uppercase">
+                  <p className="label-tech text-ink-muted">
                     {sample.source.dataset} · {sample.source.sequence}
                   </p>
                   <p className="mt-1 font-semibold text-ink">{sample.title}</p>
@@ -107,7 +107,7 @@ export function SampleSelectStep({
     <div className="space-y-6">
       <Card className="p-5 sm:p-6">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-base font-semibold">{sample.title}</h2>
+          <h2 className="text-base font-bold">{sample.title}</h2>
           <Badge tone="ember">Video mẫu · xử lý sẵn</Badge>
           {sample.origin === "smoke_run" && <Badge tone="ochre">Bản smoke tạm</Badge>}
         </div>
@@ -118,7 +118,7 @@ export function SampleSelectStep({
           {sample.video ? (
             <video src={fileUrl(sample.video.name)} className="size-full object-cover" controls muted playsInline preload="metadata" />
           ) : (
-            <div className="grid size-full place-items-center text-sm text-paper/70">Bundle này không kèm video gốc</div>
+            <div className="grid size-full place-items-center text-sm text-on-dark/70">Bundle này không kèm video gốc</div>
           )}
         </div>
         {sample.source.note && (
@@ -148,7 +148,7 @@ export function SampleSelectStep({
         </Button>
         <Button size="lg" onClick={onStart}>
           <Play aria-hidden />
-          Bắt đầu xử lý
+          Xem phát lại
         </Button>
       </div>
     </div>
@@ -188,9 +188,11 @@ export function SampleProcessStep({
 }) {
   const { views, finished, skip } = useDemoReplay(sample.stages, true);
   const running = views.find((view) => view.state === "running");
-  const shown = running ?? views[views.length - 1];
-  const totalReal = sample.stages.every((stage) => stage.duration_seconds !== null)
-    ? sample.stages.reduce((sum, stage) => sum + (stage.duration_seconds ?? 0), 0)
+  const shown = running ?? views.findLast((view) => view.state === "succeeded") ?? views[0];
+  const recorded = sample.stages.filter((stage) => (stage.state ?? "succeeded") === "succeeded");
+  const missing = STUDIO_STAGES.filter((meta) => !recorded.some((stage) => stage.stage_id === meta.id));
+  const totalReal = recorded.length > 0 && recorded.every((stage) => stage.duration_seconds !== null)
+    ? recorded.reduce((sum, stage) => sum + (stage.duration_seconds ?? 0), 0)
     : null;
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_24rem]">
@@ -210,13 +212,14 @@ export function SampleProcessStep({
           </Notice>
         ) : (
           <Notice icon={<Info aria-hidden />}>
-            Video mẫu: kết quả từng giai đoạn là output thật đã xử lý sẵn, tiến trình được phát lại nhanh theo tỉ lệ thời
-            gian thật ({MVP_STAGES.length} giai đoạn).
+            Kết quả đã xử lý sẵn — đang phát lại {recorded.length} bước đã ghi trong pipeline {STUDIO_STAGES.length} bước.
           </Notice>
         )}
+        {missing.length > 0 && <Notice tone="ochre">Mẫu cũ chưa ghi kết quả: {missing.map((meta) => meta.title).join(", ")}.
+          Các bước này vẫn hiện chưa có kết quả khi bỏ qua replay.</Notice>}
       </div>
       <Card className="h-fit p-5 sm:p-6">
-        <PipelineTimeline stages={views} timeNote={totalReal ? `Thời gian chạy thật: ${formatDuration(totalReal)}` : "Phát lại nhanh"} />
+        <PipelineTimeline stages={views} stageList={STUDIO_STAGES} timeNote={totalReal ? `Các bước đã ghi: ${formatDuration(totalReal)}` : "Phát lại nhanh"} />
         <div className="mt-6 flex justify-end gap-2">
           {!finished ? (
             <Button variant="ghost" size="sm" onClick={skip}>

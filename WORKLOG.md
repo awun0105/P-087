@@ -90,7 +90,7 @@
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
 | Lâm Quang Anh Quân | Đồng bộ tài liệu product, dataset và execution cho bốn track; tách source of truth, handoff, task ID và milestone. | ✅ Done | [Dataset Playbook](docs/DATASET_PLAYBOOK.md), [Contract](docs/execution/TEAM_EXECUTION_CONTRACT.md), [Plan](docs/execution/TEAM_EXECUTION_PLAN.md), [Track Guide](docs/execution/TRACK_IMPLEMENTATION_GUIDE.md); commits `fc6b3b7`, `d0300f2`, `92475ff`. | Chưa ghi nhận |
-| Lâm Quang Anh Quân | Củng cố context và luồng ghi AI-log giữa các phiên/agent. | ✅ Done | [CONTEXT.md](CONTEXT.md) và scripts ghi log; commits `bc0dc87`, `c2e3f65`, `dbb284d`. | Chưa ghi nhận |
+| Lâm Quang Anh Quân | Củng cố context và luồng ghi AI-log giữa các phiên/agent. | ✅ Done | [CONTEXT.md](docs/CONTEXT.md) và scripts ghi log; commits `bc0dc87`, `c2e3f65`, `dbb284d`. | Chưa ghi nhận |
 
 ### 2. Lê Mạnh Cường (`EX-PRODUCT` — Product/Orchestration)
 | Member | Task | Status | Output | Time |
@@ -119,7 +119,7 @@
 | Lâm Quang Anh Quân | Xây dựng Foundation M0 để bốn track có thể phát triển từ shared contracts: models, artifact store, fixtures, contract/integration tests, checker và agent harness/task files. | ✅ Done | [Shared contracts](src/models/contracts/), [fixtures](fixtures/), [Foundation checker](scripts/check_foundation.py), [execution tracks](docs/execution/tracks/); commit `49f2456`. Đây là synthetic handoff proof, không phải GPU/Isaac/3DGS acceptance. | Chưa ghi nhận |
 | Lâm Quang Anh Quân | Chuẩn hóa Python/runtime dependency và cách setup phát triển. | ✅ Done | [Runtime policy](docs/execution/RUNTIME_POLICY.md), [setup script](scripts/setup.sh), lockfiles; commits `ea753bb`, `4080d5d`. | Chưa ghi nhận |
 | Lâm Quang Anh Quân | Đồng bộ kiến trúc và yêu cầu Web Studio: 3DGS thật là view P0, các view geometry/point cloud/collider có thể chuyển riêng; bổ sung graphics references cho EX-PRODUCT và tài liệu báo cáo mentor. | ✅ Done | [ARCHITECTURE](ARCHITECTURE.md), [PRODUCT-06](docs/execution/tracks/ex_product/tasks/PRODUCT-06.md), [PRD](docs/PRD.md), [mentor report](docs/mentor-duty-report/buoi-2/script/script-buoi-2.md); commit `a16425d`. | Chưa ghi nhận |
-| Lâm Quang Anh Quân | Rà lại entrypoints onboarding để không drift với Foundation và các authority docs. | 🔄 WIP | [README](README.md), [AGENTS](AGENTS.md), [CONTEXT](CONTEXT.md) đã sửa và kiểm tra cục bộ; thay đổi hiện ở working tree, chưa commit. | Chưa ghi nhận |
+| Lâm Quang Anh Quân | Rà lại entrypoints onboarding để không drift với Foundation và các authority docs. | 🔄 WIP | [README](README.md), [AGENTS](AGENTS.md), [CONTEXT](docs/CONTEXT.md) đã sửa và kiểm tra cục bộ; thay đổi hiện ở working tree, chưa commit. | Chưa ghi nhận |
 
 ### 2. Lê Mạnh Cường (`EX-PRODUCT` — Product/Orchestration)
 | Member | Task | Status | Output | Time |
@@ -341,7 +341,7 @@
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
 | Lâm Quang Anh Quân | Tích hợp liên track trên `feat/studio-integration`: tách vật SAMPro3D + SAM2, sửa SceneIR theo vật, gói mô phỏng USD + preflight, duyệt/phát hành | ✅ Done | PR #16; ADR 0006; `job-123dfd4868d8` 30 ứng viên, gói rev-008 preflight PASS 6/6 | Chưa ghi nhận |
-| Lâm Quang Anh Quân | Refactor UI theo PRODUCT.md P1–P6, sửa lỗi audit (cookie upload, Docker context/`$PORT`, overlay 3D), tối ưu tải trang | ✅ Done | PR #16; JS ban đầu màn scene 1982 → 770 KB; vitest 144/144, pytest 1040 passed | Chưa ghi nhận |
+| Lâm Quang Anh Quân | Refactor UI theo STUDIO_UX_SPEC.md P1–P6, sửa lỗi audit (cookie upload, Docker context/`$PORT`, overlay 3D), tối ưu tải trang | ✅ Done | PR #16; JS ban đầu màn scene 1982 → 770 KB; vitest 144/144, pytest 1040 passed | Chưa ghi nhận |
 | Lâm Quang Anh Quân | Đo chất lượng 3DGS (`recon_visual_quality`) | ✅ Done | `seg-5fps-cap600k` PSNR 28,80 / SSIM 0,927 / LPIPS 0,268 (`eval/protocols/recon_visual_quality.md`) | Chưa ghi nhận |
 | Lâm Quang Anh Quân | Audit repo + tra cứu Isaac Sim; chốt pipeline v2 và đồng bộ tài liệu | ✅ Done | Audit #10, ADR 0007/0008, PRD v1.16, plan pipeline v2 | Chưa ghi nhận |
 

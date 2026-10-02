@@ -20,6 +20,8 @@ import re
 import shutil
 import subprocess
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -41,6 +43,53 @@ from src.services.reconstruction.rgb.splat.visual import BrushConfig
 
 EVAL_LINE = re.compile(r"Eval iter (\d+): PSNR ([0-9.]+), ssim ([0-9.]+)")
 LPIPS_SCRIPT = Path(__file__).with_name("lpips_score.py")
+
+
+def rerun_flags(args: argparse.Namespace) -> tuple[str, ...]:
+    """Cờ Brush để ghi quá trình train ra Rerun (camera COLMAP, ảnh render ↔ ảnh thật ở mỗi mốc eval, số liệu, splat).
+
+    Brush tự kết nối tới viewer Rerun đang nghe ở 127.0.0.1:9876; viewer phải cùng phiên bản SDK mà Brush nhúng
+    (Brush 0.3.0 → rerun 0.24.1) và phải chạy trước. Ghi toàn bộ splat rất nặng nên mặc định thưa.
+    """
+    if not (args.rerun or args.rerun_save):
+        return ()
+    return (
+        "--rerun-enabled",
+        "--rerun-log-train-stats-every",
+        str(args.rerun_stats_every),
+        "--rerun-log-splats-every",
+        str(args.rerun_splats_every),
+        "--rerun-max-img-size",
+        str(args.rerun_max_img_size),
+    )
+
+
+@contextmanager
+def rerun_receiver(args: argparse.Namespace, work: Path) -> Iterator[None]:
+    """Với `--rerun-save`: chạy viewer Rerun không giao diện để hứng luồng ghi của Brush và lưu thành `.rrd`.
+
+    File chỉ được chuyển tới đích khi train xong, để Studio không mở phải bản ghi dở. Nghe ở 127.0.0.1:9876 (cổng
+    Brush tự kết nối) nên mỗi máy chỉ chạy được một lượt ghi tại một thời điểm.
+    """
+    if args.rerun_save is None:
+        yield
+        return
+    partial = work / "train.rrd"
+    receiver = subprocess.Popen(
+        [str(args.rerun_bin), "--save", str(partial), "--bind", "127.0.0.1", "--port", "9876"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(3)  # chờ cổng gRPC mở trước khi Brush kết nối
+        if receiver.poll() is not None:
+            raise SystemExit(f"Không chạy được {args.rerun_bin} (cổng 9876 đang bận hoặc sai phiên bản)")
+        yield
+    finally:
+        receiver.terminate()
+        receiver.wait(timeout=60)
+    args.rerun_save.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(partial, args.rerun_save)
 
 
 def pose_reference(job_id: str) -> tuple[ProductArtifactRef, dict]:
@@ -117,9 +166,11 @@ def run(args: argparse.Namespace) -> dict:
             "--eval-every",
             str(args.eval_every),
             "--eval-save-to-disk",
+            *rerun_flags(args),
         )
         started = time.monotonic()
-        log = process.run(Invocation("brush-eval", runtime.command, command), work)
+        with rerun_receiver(args, work):
+            log = process.run(Invocation("brush-eval", runtime.command, command), work)
         train_seconds = time.monotonic() - started
     evals = [
         {"iter": int(match[1]), "psnr": float(match[2]), "ssim": float(match[3])} for match in EVAL_LINE.finditer(log)
@@ -194,6 +245,16 @@ def main() -> int:
     parser.add_argument("--refine-every", type=int, default=200)
     parser.add_argument("--eval-split-every", type=int, default=8)
     parser.add_argument("--eval-every", type=int, default=7000)
+    parser.add_argument("--rerun", action="store_true", help="ghi quá trình train ra viewer Rerun 0.24.1 đang chạy sẵn")
+    parser.add_argument(
+        "--rerun-save",
+        type=Path,
+        help="tự hứng và lưu bản ghi thành file .rrd (vd data/rerun_recordings/<job>.rrd để Studio hiển thị)",
+    )
+    parser.add_argument("--rerun-bin", type=Path, default=Path("data/tools/rerun-0.24.1/bin/rerun"))
+    parser.add_argument("--rerun-stats-every", type=int, default=50)
+    parser.add_argument("--rerun-splats-every", type=int, default=2000)
+    parser.add_argument("--rerun-max-img-size", type=int, default=512)
     parser.add_argument("--lpips-net", default="vgg", choices=("vgg", "alex"))
     parser.add_argument("--timeout", type=float, default=4 * 3600)
     parser.add_argument("--machine", default="local-t2000")

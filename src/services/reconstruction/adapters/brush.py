@@ -1,6 +1,7 @@
 """REC-04 orchestration: Brush trainer và splat-transform nguyên engine qua adapters."""
 
 import logging
+import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -8,8 +9,15 @@ from pathlib import Path
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.manifests import StageArtifact, StageId, StageStatus
 from src.services.reconstruction.adapters.brush_input import BrushInput, BrushInputAdapter
-from src.services.reconstruction.adapters.brush_runtime import Invocation, VisualError, VisualProcess, brush_command
+from src.services.reconstruction.adapters.brush_runtime import (
+    Checkpointing,
+    Invocation,
+    VisualError,
+    VisualProcess,
+    brush_command,
+)
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor
+from src.services.reconstruction.resume import ResumeCache, checkpoint_interval, content_key
 from src.services.reconstruction.rgb.splat.visual import BrushConfig, BrushVisualArtifact, SplatInspection
 from src.services.reconstruction.rgb.splat.visual_publication import VisualPublisher, VisualResolver
 
@@ -23,15 +31,19 @@ class BrushDependencies:
     processor: SplatArtifactProcessor
     publisher: VisualPublisher
     resolver: VisualResolver
+    #: Kho checkpoint cục bộ (None = không checkpoint, hành vi cũ).
+    resume: ResumeCache | None = None
 
 
 @dataclass(frozen=True)
 class BrushRequest:
-    """Một immutable attempt, không resume workspace cũ."""
+    """Một immutable attempt, workspace mới; chỉ dùng lại checkpoint cùng sparse model qua `resume_key`."""
 
     camera_poses: ProductArtifactRef
     config: BrushConfig
     workspace: Path
+    #: Khoá sparse model do REC-03 trả; None = không checkpoint/không train tiếp.
+    resume_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -67,10 +79,7 @@ class BrushAdapter:
         inputs = self.deps.inputs.prepare(request.camera_poses, request.workspace)
         version = self.deps.process.qualify(request.workspace)
         (request.workspace / "output").mkdir()
-        arguments = brush_command(request.config, request.workspace, self.deps.process.iteration_flag)
-        self.deps.process.run(
-            Invocation("brush-train", self.deps.process.settings.command, arguments), request.workspace
-        )
+        self._train(request)
         inspection = self.deps.processor.process_artifact(request.workspace, request.config.sog_iterations)
         payload = self._payload(request, (inputs, inspection, version))
         self._verify_payload(payload)
@@ -86,6 +95,33 @@ class BrushAdapter:
             data_class=ref.data_class,
         )
         return BrushResult(artifact, ref, stage)
+
+    def _train(self, request: BrushRequest) -> None:
+        """Train ra `output/visual.ply`; có kho resume thì checkpoint định kỳ và train tiếp từ bản mới nhất."""
+        process, resume = self.deps.process, self.deps.resume
+        total = request.config.total_train_iters
+        checkpointing, key = None, None
+        if resume is not None and request.resume_key is not None and process.settings.checkpoint_every > 0:
+            key = content_key(request.resume_key, request.config.checksum(), process.settings.runtime_identity)
+            latest = resume.latest_checkpoint(key, total)
+            if latest is not None:
+                # Brush lấy `init.ply` trong dataset làm điểm bắt đầu. Trạng thái optimizer không được lưu
+                # nên train tiếp không trùng từng bit với train liền mạch.
+                shutil.copyfile(latest[1], request.workspace / "training" / "init.ply")
+            checkpointing = Checkpointing(
+                resume.checkpoint_dir(key),
+                checkpoint_interval(total, process.settings.checkpoint_every),
+                latest[0] if latest is not None else 0,
+            )
+        arguments = brush_command(request.config, request.workspace, process.iteration_flag, checkpointing)
+        process.run(Invocation("brush-train", process.settings.command, arguments), request.workspace)
+        if checkpointing is None or resume is None or key is None:
+            return
+        final = resume.checkpoints(key).get(total)
+        if final is None:
+            raise VisualError("VISUAL_ARTIFACT_INVALID", "Brush did not export the final step")
+        shutil.move(final, request.workspace / "output" / "visual.ply")
+        resume.clear_checkpoints(key)
 
     def _verify_payload(self, payload: dict) -> None:
         """Không công bố manifest thành công nếu injected store làm hỏng payload."""

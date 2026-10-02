@@ -9,7 +9,7 @@ import pytest
 
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.manifests import StageId
-from src.services.orchestration import thumbnails
+from src.services.orchestration.jobs import thumbnails
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="cần ffmpeg")
 

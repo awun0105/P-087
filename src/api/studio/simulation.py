@@ -6,13 +6,13 @@ from fastapi.responses import FileResponse
 from src.api.studio import deps
 from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.projects import JobNotFoundError
-from src.services.orchestration.scene import SceneError
-from src.services.orchestration.scene.errors import SceneNotAvailableError
-from src.services.orchestration.simulation_package import (
+from src.services.orchestration.review.simulation_package import (
     SimulationPackage,
     build_simulation_package,
     current_package,
 )
+from src.services.orchestration.scene import SceneError
+from src.services.orchestration.scene.errors import SceneNotAvailableError
 
 router = APIRouter()
 

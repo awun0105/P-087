@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from src.models.contracts.scene import SceneIR
+from src.models.contracts.identity import canonical_content_checksum
+from src.models.contracts.scene import ObjectPhysics, SceneIR
 
 FIXTURES = Path(__file__).parents[2] / "fixtures"
 
@@ -87,3 +88,52 @@ def test_review_state_cannot_leak_into_scene_ir() -> None:
 
     with pytest.raises(ValidationError, match="review_state"):
         SceneIR.model_validate(scene_data)
+
+
+def _physics(**overrides: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "dynamic": True,
+        "mass_kg": 25.0,
+        "mass_source": "catalog_default",
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "provenance": {},
+    }
+    return {**base, **overrides}
+
+
+def test_optional_v2_fields_do_not_change_legacy_scene_checksum() -> None:
+    """Trường pipeline v2 không ghi khi rỗng → SceneIR đã lưu trước đó vẫn khớp checksum."""
+    raw = (FIXTURES / "scene_ir/scene.json").read_text(encoding="utf-8")
+    scene = SceneIR.model_validate_json(raw)
+    dumped = scene.model_dump(mode="json")
+
+    assert "physics" not in dumped["objects"][0]
+    assert "visual_master_ref" not in dumped["environment"]
+    assert canonical_content_checksum(scene, "scene_ir_checksum") == json.loads(raw)["scene_ir_checksum"]
+
+
+def test_object_physics_round_trips_and_is_serialized_when_set() -> None:
+    payload = json.loads((FIXTURES / "scene_ir/scene.json").read_text(encoding="utf-8"))
+    payload["objects"][0]["physics"] = _physics()
+    scene = SceneIR.model_validate(payload)
+
+    assert scene.objects[0].physics is not None and scene.objects[0].physics.mass_kg == 25.0
+    assert scene.model_dump(mode="json")["objects"][0]["physics"]["mass_source"] == "catalog_default"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{"mass_kg": None}, {"mass_source": None}, {"mass_kg": 0.0}, {"restitution": 1.5}, {"static_friction": -0.1}],
+)
+def test_object_physics_rejects_invalid_values(overrides: dict[str, object]) -> None:
+    """Vật động phải có khối lượng dương và nguồn; ma sát không âm; độ nảy trong [0, 1]."""
+    with pytest.raises(ValidationError):
+        ObjectPhysics.model_validate(_physics(**overrides))
+
+
+def test_static_object_physics_needs_no_mass() -> None:
+    physics = ObjectPhysics.model_validate(_physics(dynamic=False, mass_kg=None, mass_source=None))
+
+    assert physics.dynamic is False

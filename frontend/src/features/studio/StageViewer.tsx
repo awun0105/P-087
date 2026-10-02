@@ -1,5 +1,7 @@
 "use client";
 
+import { errorMessage } from "@/lib/ui-error";
+
 import { Canvas } from "@react-three/fiber";
 import { Grid, OrbitControls } from "@react-three/drei";
 import { Loader2 } from "lucide-react";
@@ -21,7 +23,7 @@ import type { StageView } from "@/lib/contracts/studio";
  * Kết quả từng bước của pipeline (ADR 0005): frame, camera, 3DGS, collision mesh.
  * Danh sách do backend trả; mỗi lúc chỉ nạp một lớp và giải phóng lớp cũ khi đổi.
  */
-export function StageViewer({ jobId }: { jobId: string }) {
+export function StageViewer({ jobId, stageId, fallbackStageId }: { jobId: string; stageId?: string; fallbackStageId?: string }) {
   const [views, setViews] = useState<StageView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState(0);
@@ -30,11 +32,12 @@ export function StageViewer({ jobId }: { jobId: string }) {
     const controller = new AbortController();
     getStageViews(jobId, controller.signal).then(
       (result) => {
+        if (controller.signal.aborted) return;
         setViews(result);
         setSelected(Math.max(0, result.length - 1));
       },
       (cause: unknown) => {
-        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Không tải được kết quả");
+        if (!controller.signal.aborted) setError(errorMessage(cause, "Không tải được kết quả"));
       },
     );
     return () => controller.abort();
@@ -48,21 +51,26 @@ export function StageViewer({ jobId }: { jobId: string }) {
       </p>
     );
   }
-  if (!views.length) return <Notice>Chưa có bước nào xong để xem.</Notice>;
-  const view = views[Math.min(selected, views.length - 1)];
+  const exact = stageId ? views.filter((view) => view.stage_id === stageId) : views;
+  const fallback = exact.length === 0 && fallbackStageId ? views.filter((view) => view.stage_id === fallbackStageId) : [];
+  const available = exact.length ? exact : fallback;
+  if (!available.length) return <Notice>{stageId ? "Giai đoạn đã xong nhưng API chưa cung cấp lớp xem cho giai đoạn này. Xem metadata và artifact đã publish trong Thông tin đầu ra." : "Chưa có bước nào xong để xem."}</Notice>;
+  const selectedIndex = Math.min(selected, available.length - 1);
+  const view = available[selectedIndex];
   return (
     <div className="flex size-full flex-col">
+      {fallback.length > 0 && <Notice tone="ochre" className="shrink-0 rounded-none">Bản xác nhận tỉ lệ đã có, nhưng API chưa cung cấp 3DGS hệ mét (bản dẫn xuất xuất hiện khi worker hoàn tất hình học). Đang xem lại Gaussian gốc, đơn vị SfM; số đo đã xác nhận xem trong “Xem số đo & so sánh”.</Notice>}
       <div className="flex flex-wrap gap-1 border-b border-line bg-paper-raised px-3 py-2" role="tablist" aria-label="Kết quả từng bước">
-        {views.map((item, index) => (
+        {available.map((item, index) => (
           <button
             key={`${item.stage_id}-${item.kind}`}
             type="button"
             role="tab"
-            aria-selected={index === selected}
+            aria-selected={index === selectedIndex}
             onClick={() => setSelected(index)}
             className={cn(
               "rounded-lg px-3 py-1.5 text-sm transition-colors",
-              index === selected ? "bg-ember-soft font-medium text-ember-strong" : "text-ink-muted hover:bg-paper-sunken",
+              index === selectedIndex ? "bg-ember-soft font-medium text-ember-strong" : "text-ink-muted hover:bg-paper-sunken",
             )}
           >
             {item.title}
@@ -166,7 +174,7 @@ function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageVie
   const ref = view.refs[0];
   if (!ref) return <Notice>Bước này chưa có file 3DGS.</Notice>;
   if (capability === "failed" || capability === "unavailable") {
-    return <p className="grid size-full place-items-center text-sm text-paper/80">Trình duyệt không render được 3DGS (cần WebGL2).</p>;
+    return <p className="grid size-full place-items-center text-sm text-on-dark/80">Trình duyệt không render được 3DGS (cần WebGL2).</p>;
   }
   return (
     <PlayCanvasScene
@@ -228,7 +236,7 @@ export function CollisionMeshCanvas({ url, children }: { url: string; children?:
         setState({ root, triangles });
       })
       .catch((cause: unknown) => {
-        if (!controller.signal.aborted) setState({ error: cause instanceof Error ? cause.message : String(cause) });
+        if (!controller.signal.aborted) setState({ error: errorMessage(cause, "Không tải được lớp xem. Hãy thử lại.") });
       });
     return () => {
       controller.abort();
@@ -241,7 +249,7 @@ export function CollisionMeshCanvas({ url, children }: { url: string; children?:
   if (state?.error) return <Notice tone="rust">Không đọc được collision mesh: {state.error}</Notice>;
   if (!state?.root) {
     return (
-      <p className="flex h-full items-center justify-center gap-2 text-sm text-paper/80" role="status">
+      <p className="flex h-full items-center justify-center gap-2 text-sm text-on-dark/80" role="status">
         <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden /> Đang tải collision mesh…
       </p>
     );
@@ -258,7 +266,7 @@ export function CollisionMeshCanvas({ url, children }: { url: string; children?:
         <Grid args={[40, 40]} cellSize={1} sectionSize={5} infiniteGrid fadeDistance={60} />
         <OrbitControls makeDefault />
       </Canvas>
-      <p className="absolute bottom-3 left-3 rounded-md bg-viewport/80 px-2 py-1 text-xs text-paper/80">
+      <p className="absolute bottom-3 left-3 rounded-md border border-line-dark bg-viewport-deep/85 px-2 py-1 text-xs text-on-dark/80">
         {state.triangles?.toLocaleString("vi-VN")} tam giác · lưới 1 m, sàn z = 0
       </p>
     </>

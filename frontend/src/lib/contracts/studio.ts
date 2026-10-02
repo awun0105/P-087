@@ -90,6 +90,26 @@ export interface StageProgress {
   error: ExecutionErrorView | null;
 }
 
+export type ResourceName = "vram" | "ram" | "disk";
+/** busy: job khác đang dùng; external: chương trình khác chiếm; exceeds_machine: vượt tổng máy; unmeasured: không đo được. */
+export type ResourceWaitReason = "busy" | "external" | "exceeds_machine" | "unmeasured";
+
+/** Lần đo gần nhất của worker khi job chờ tài nguyên (bind đúng revision của job). */
+export interface ResourceWaitView {
+  job_manifest_checksum: string;
+  checked_at: string;
+  required_gb: Record<ResourceName, number>;
+  available_gb: Record<ResourceName, number | null>;
+  waiting_on: ResourceName[];
+  /** measured: số "cần" lấy từ số đo các lượt chạy trước; configured_preview: ước lượng theo cấu hình. */
+  estimate_scope: "configured_preview" | "measured";
+  /** Chưa có số đo cho cấu hình này: job phải chạy một mình trên GPU. */
+  needs_exclusive_gpu?: boolean;
+  /** Thiếu ở observation do bản worker cũ ghi. */
+  reasons?: Partial<Record<ResourceName, ResourceWaitReason>>;
+  capacity_gb?: Partial<Record<ResourceName, number | null>>;
+}
+
 export interface JobProgress {
   job_id: string;
   status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
@@ -101,7 +121,8 @@ export interface JobProgress {
   stages: StageProgress[];
   preview_ready: boolean;
   /** Pipeline đang chờ người dùng làm gì (vd xác nhận tỉ lệ mét sau preview). */
-  waiting_for?: "metric_confirmation" | null;
+  waiting_for?: "metric_confirmation" | "resources" | null;
+  resource_wait?: ResourceWaitView | null;
   error: ExecutionErrorView | null;
 }
 
@@ -168,6 +189,8 @@ export interface DemoFile {
 
 export interface DemoStage {
   stage_id: StageId;
+  /** Bundle cũ chỉ liệt kê stage đã chạy; API mới thêm pending cho các bước thiếu. */
+  state?: "succeeded" | "pending" | "failed";
   duration_seconds: number | null;
   summary: string;
 }
@@ -195,6 +218,16 @@ export interface MachineCapability {
   cpu_count: number;
   ram_total_gb: number;
   disk_free_gb: number;
+  headroom_measured?: boolean;
+  vram_free_gb?: number | null;
+  ram_available_gb?: number | null;
+  gpu_uuid?: string | null;
+  disk_total_gb?: number | null;
+  /** Mốc "máy rảnh": lần đo gần nhất khi pipeline không dùng máy; preset Maximum tính theo mốc này. */
+  idle_measured_at?: string | null;
+  idle_vram_free_gb?: number | null;
+  idle_ram_available_gb?: number | null;
+  idle_disk_free_gb?: number | null;
 }
 
 export type ResourceStatus = "ok" | "warn" | "danger" | "unknown";
@@ -274,6 +307,30 @@ export function parseJobProgress(value: unknown): JobProgress {
       throw new Error("Stage trong tiến trình không hợp lệ");
     }
   }
+  if (value.waiting_for !== undefined && value.waiting_for !== null && value.waiting_for !== "metric_confirmation" && value.waiting_for !== "resources") {
+    throw new Error("Lý do chờ của job không hợp lệ");
+  }
+  if (value.resource_wait !== undefined && value.resource_wait !== null) {
+    const wait = value.resource_wait;
+    if (!isRecord(wait) || typeof wait.checked_at !== "string" || typeof wait.job_manifest_checksum !== "string" ||
+        !isRecord(wait.required_gb) || !isRecord(wait.available_gb) || !Array.isArray(wait.waiting_on) ||
+        (wait.estimate_scope !== "configured_preview" && wait.estimate_scope !== "measured") ||
+        (wait.needs_exclusive_gpu !== undefined && typeof wait.needs_exclusive_gpu !== "boolean") ||
+        !["vram", "ram", "disk"].every((key) => isFiniteNumber((wait.required_gb as Record<string, unknown>)[key]) &&
+          ((wait.available_gb as Record<string, unknown>)[key] === null || isFiniteNumber((wait.available_gb as Record<string, unknown>)[key]))) ||
+        !wait.waiting_on.every((key) => typeof key === "string" && ["vram", "ram", "disk"].includes(key))) {
+      throw new Error("Snapshot tài nguyên chờ không hợp lệ");
+    }
+    const reasons = wait.reasons ?? {};
+    const capacity = wait.capacity_gb ?? {};
+    if (!isRecord(reasons) || !isRecord(capacity) ||
+        !Object.entries(reasons).every(([key, reason]) => ["vram", "ram", "disk"].includes(key) &&
+          ["busy", "external", "exceeds_machine", "unmeasured"].includes(String(reason))) ||
+        !Object.entries(capacity).every(([key, amount]) => ["vram", "ram", "disk"].includes(key) &&
+          (amount === null || isFiniteNumber(amount)))) {
+      throw new Error("Lý do chờ tài nguyên không hợp lệ");
+    }
+  }
   return value as unknown as JobProgress;
 }
 
@@ -287,6 +344,15 @@ export function parseDemoManifest(value: unknown): DemoManifest {
   const files = [value.splat, ...(value.video ? [value.video] : []), ...value.frames];
   if (!files.every((file) => isRecord(file) && typeof file.name === "string" && SAFE_NAME.test(file.name))) {
     throw new Error("Tên file demo không hợp lệ");
+  }
+  const ids = new Set<string>();
+  for (const stage of value.stages) {
+    if (!isRecord(stage) || typeof stage.stage_id !== "string" || ids.has(stage.stage_id) ||
+        (stage.state !== undefined && !["succeeded", "pending", "failed"].includes(String(stage.state))) ||
+        (stage.duration_seconds !== null && (!isFiniteNumber(stage.duration_seconds) || stage.duration_seconds < 0))) {
+      throw new Error("Stage demo từ backend không hợp lệ");
+    }
+    ids.add(stage.stage_id);
   }
   return value as unknown as DemoManifest;
 }

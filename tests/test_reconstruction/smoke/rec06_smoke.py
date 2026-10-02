@@ -1,6 +1,6 @@
 """Reproducible REC-06 fixture handoff; không đọc Aisle_CW/GT hoặc xác nhận scale thật.
 
-python -m tests.test_reconstruction.smoke.rec06_smoke --output data/rec06_smoke/<new-attempt>
+python -m tests.test_reconstruction.smoke.rec06_smoke --output data/evidence/rec06_smoke/<new-attempt>
 Source reconstruction và review authority là fixture; resolver/store/math là code thật.
 """
 

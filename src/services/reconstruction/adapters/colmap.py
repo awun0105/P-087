@@ -12,6 +12,7 @@ from src.models.contracts.manifests import StageArtifact, StageId, StageStatus
 from src.services.reconstruction.adapters.colmap_input import ColmapImageInput, ColmapInputAdapter
 from src.services.reconstruction.adapters.colmap_model import ParsedSparseModel, read_sparse_model, select_sparse_model
 from src.services.reconstruction.adapters.colmap_runtime import ColmapError, ColmapProcess, reconstruction_commands
+from src.services.reconstruction.resume import ResumeCache, content_key
 from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver, _sha256
 from src.services.reconstruction.rgb.pose.camera_pose import CameraPoseArtifact, ColmapConfig
 from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver, PosePublisher
@@ -26,6 +27,8 @@ class ColmapDependencies:
     process: ColmapProcess
     writer: ArtifactWriter
     resolve: Callable[[ProductArtifactRef], Path]
+    #: Kho dùng lại sparse model đã hoàn tất của attempt trước (None = luôn chạy COLMAP).
+    resume: ResumeCache | None = None
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,8 @@ class ColmapResult:
     artifact: CameraPoseArtifact
     reference: ProductArtifactRef
     stage: StageArtifact
+    #: Khoá kho resume của sparse model này; REC-04 dùng để tìm checkpoint cùng hệ toạ độ.
+    resume_key: str | None = None
 
 
 class ColmapAdapter:
@@ -55,7 +60,11 @@ class ColmapAdapter:
         self.deps = dependencies
 
     def execute(self, request: ColmapRequest) -> ColmapResult:
-        """Không resume database cũ hoặc biến partial sparse output thành success."""
+        """Không resume database cũ hoặc biến partial sparse output thành success.
+
+        Sparse model **đã hoàn tất** của lần chạy trước (cùng frame set, cấu hình, runtime) thì được dùng lại
+        qua `ResumeCache`: mọi bước kiểm và publish vẫn chạy đủ trong namespace của attempt này.
+        """
         try:
             request.workspace.mkdir(parents=True, exist_ok=False)
             return self._execute(request)
@@ -75,9 +84,18 @@ class ColmapAdapter:
         images = ColmapInputAdapter(self.deps.frames).prepare(request.frame_set, request.workspace)
         self._vocabulary(request)
         version, feature, match = self.deps.process.capabilities(request.workspace)
-        (request.workspace / "sparse").mkdir()
-        for command in reconstruction_commands(request.config, (feature, match)):
-            self.deps.process.run(command, request.workspace)
+        resume = self.deps.resume
+        key = content_key(
+            request.frame_set.artifact_checksum,
+            request.config.checksum(),
+            self.deps.process.settings.runtime_identity,
+            version,
+        )
+        reused = resume is not None and resume.restore_colmap(key, request.workspace)
+        if not reused:
+            (request.workspace / "sparse").mkdir()
+            for command in reconstruction_commands(request.config, (feature, match)):
+                self.deps.process.run(command, request.workspace)
         models = self._models(request.workspace, images.frame_ids)
         best = select_sparse_model(models)
         ratio = len(best.poses) / len(images.frame_ids)
@@ -96,7 +114,10 @@ class ColmapAdapter:
             data_class=reference.data_class,
             completed_at=datetime.now(UTC),
         )
-        return ColmapResult(artifact, reference, stage)
+        if resume is not None and not reused:
+            # Chỉ giữ sau khi artifact đã publish và consumer đọc lại được: kho không chứa kết quả hỏng.
+            resume.store_colmap(key, request.workspace)
+        return ColmapResult(artifact, reference, stage, key if resume is not None else None)
 
     def _vocabulary(self, request: ColmapRequest) -> None:
         reference = request.config.vocab_tree

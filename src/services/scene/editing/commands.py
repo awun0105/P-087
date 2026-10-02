@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.coordinates import Transform
-from src.models.contracts.scene import SceneIR, SceneObject, SceneObjectOrigin, SceneObjectState
+from src.models.contracts.scene import ObjectPhysics, SceneIR, SceneObject, SceneObjectOrigin, SceneObjectState
 from src.services.scene.publisher import with_scene_checksum
 
 
@@ -55,6 +55,77 @@ def ignore_object(scene: SceneIR, object_id: str) -> SceneIR:
     return _replace_object(scene, updated, "ignore")
 
 
+def delete_object(scene: SceneIR, object_id: str) -> SceneIR:
+    """Xoá vật khỏi scene.
+
+    Vật người dùng thêm bị gỡ hẳn. Vật tái dựng giữ lại trong revision (audit, khôi phục) nhưng tắt
+    active và ghi `review=DELETED` — khác "ẩn" ở chỗ UI xếp nó vào nhóm đã xoá, không hiện trong scene.
+    """
+    target = _find_object(scene, object_id)
+    if target.origin == SceneObjectOrigin.USER_ADDED:
+        return _replace_objects(scene, [item for item in scene.objects if item.id != object_id], "delete")
+    review = {**target.provenance, "review": "DELETED"}
+    updated = target.model_copy(update={"active": False, "provenance": review}, deep=True)
+    return _replace_object(scene, updated, "delete")
+
+
+def restore_object(scene: SceneIR, object_id: str) -> SceneIR:
+    """Đưa vật đã xoá/loại trở lại trạng thái trước đó (ứng viên chờ xác nhận, hoặc đã xác nhận + active)."""
+    target = _find_object(scene, object_id)
+    provenance = {key: value for key, value in target.provenance.items() if key != "review"}
+    confirmed = target.state == SceneObjectState.CONFIRMED
+    if confirmed:
+        provenance["review"] = "CONFIRMED"
+    updated = target.model_copy(update={"active": confirmed, "provenance": provenance}, deep=True)
+    return _replace_object(scene, updated, "restore")
+
+
+def duplicate_object(scene: SceneIR, object_id: str, new_id: str, offset_xyz: tuple[float, float, float]) -> SceneIR:
+    """Nhân bản một vật (dùng chung visual/geometry bất biến) và đặt lệch `offset_xyz` mét."""
+    if new_id in {item.id for item in scene.objects}:
+        raise ValueError(f"duplicate SceneObject.id in SceneIR: {new_id}")
+    source = _find_object(scene, object_id)
+    translation = tuple(
+        value + delta for value, delta in zip(source.transform.translation_xyz, offset_xyz, strict=True)
+    )
+    transform = source.transform.model_copy(update={"local_frame": new_id, "translation_xyz": translation})
+    collider = source.collider
+    if collider is not None:
+        collider = collider.model_copy(
+            update={
+                "collider_id": f"{new_id}-collider",
+                "local_transform": collider.local_transform.model_copy(
+                    update={"parent_frame": new_id, "local_frame": f"{new_id}-collider"}
+                ),
+            }
+        )
+    copy = SceneObject.model_validate(
+        {
+            **source.model_dump(),
+            "id": new_id,
+            "name": f"{source.name} (bản sao)",
+            "local_frame": new_id,
+            "transform": transform.model_dump(),
+            "collider": collider.model_dump() if collider else None,
+            "state": SceneObjectState.CONFIRMED,
+            "active": True,
+            "provenance": {**source.provenance, "review": "CONFIRMED", "duplicated_from": object_id},
+        }
+    )
+    return _replace_objects(scene, [*scene.objects, copy], "duplicate")
+
+
+def set_object_semantics(
+    scene: SceneIR, object_id: str, semantic_class: str | None, physics: ObjectPhysics | None
+) -> SceneIR:
+    """Gán nhãn lớp và thuộc tính vật lý (người dùng xác nhận; hệ thống chỉ gợi ý)."""
+    label = semantic_class.strip() if semantic_class else None
+    updated = _find_object(scene, object_id).model_copy(
+        update={"semantic_class": label or None, "physics": physics}, deep=True
+    )
+    return _replace_object(scene, updated, "label")
+
+
 def add_primitive_object(scene: SceneIR, command: "PrimitiveObjectCommand") -> SceneIR:
     """Add a user-defined primitive object with explicit metric dimensions."""
     if command.object_id in {item.id for item in scene.objects}:
@@ -91,8 +162,11 @@ def _primitive_object(command: "PrimitiveObjectCommand") -> SceneObject:
         local_frame=command.object_id,
         transform=command.transform,
         geometry_ref=command.geometry_ref,
+        asset_ref=command.asset_ref,
         primitive_dimensions_xyz_m=command.dimensions_xyz_m,
-        provenance={"origin": "user_added", "operation": "add_primitive"},
+        semantic_class=command.semantic_class,
+        physics=command.physics,
+        provenance={"origin": "user_added", "operation": "add_primitive", **(command.provenance or {})},
     )
 
 
@@ -105,3 +179,7 @@ class PrimitiveObjectCommand:
     transform: Transform
     geometry_ref: ProductArtifactRef
     dimensions_xyz_m: tuple[float, float, float]
+    asset_ref: ProductArtifactRef | None = None
+    semantic_class: str | None = None
+    physics: ObjectPhysics | None = None
+    provenance: dict | None = None

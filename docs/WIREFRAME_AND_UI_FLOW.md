@@ -14,13 +14,13 @@
 **Trạng thái prototype:** Chưa có artifact HTML được lưu trong repository; wireframe trong tài liệu này là nguồn mô tả UI hiện tại.
 
 **Cập nhật 2026-09-29:** UI đã triển khai là **Studio MVP** (xem §4) — một lát cắt
-của Screen 1–2. Năm màn hình dưới đây vẫn là đích P0; phần đã code của chúng nằm ở
-UI P0 ẩn sau `LEGACY_UI=1`.
+của Screen 1–2. Năm màn hình dưới đây vẫn là đích P0. **Cập nhật 2026-10-02:** UI P0 cũ đã xoá
+(STUDIO_UX_SPEC.md D-10); phần tương ứng nằm trong các tab của scene ở Studio.
 
-**Cập nhật 2026-09-30:** đặc tả UX đang triển khai nằm ở [`PRODUCT.md`](../PRODUCT.md)
+**Cập nhật 2026-09-30:** đặc tả UX đang triển khai nằm ở [`STUDIO_UX_SPEC.md`](STUDIO_UX_SPEC.md)
 (refactor P1–P6: AppShell, màn scene 4 tab Tiến trình · Studio · Kiểm tra & duyệt · Kết quả).
 Studio sẽ chuyển thành editor scene theo vật theo
-[ADR 0007](./decisions/0007-object-centric-hybrid-usd-pipeline.md) (PRODUCT.md §13.2). Wireframe
+[ADR 0007](./decisions/0007-object-centric-hybrid-usd-pipeline.md) (STUDIO_UX_SPEC.md §13.2). Wireframe
 bên dưới giữ làm lịch sử đích P0.
 
 ---

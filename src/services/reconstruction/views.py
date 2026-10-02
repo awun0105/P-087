@@ -125,3 +125,24 @@ def metric_gaussian_points(
     return transform.scale_m_per_sfm_unit * xyz @ rotation_matrix(transform.rotation_xyzw).T + np.asarray(
         transform.translation_m
     )
+
+
+def metric_visual_master(bundle: object, resolve: Callable[[ProductArtifactRef], Path]) -> ProductArtifactRef:
+    """Ref tới PLY 3DGS hệ mét (bản gốc đầy đủ) của một bundle RGB — đầu vào tách vật pipeline v2.
+
+    Đi theo chuỗi đã publish: bundle.provenance.metric_verification_ref → `request.canonical_visual_ref`
+    (CanonicalVisualManifest) → `master_ref`. Mỗi bước đọc qua `resolve` (kiểm checksum); không dò thư mục.
+    """
+    provenance = getattr(bundle, "provenance", None) or {}
+    verification = provenance.get("metric_verification_ref")
+    if not verification:
+        raise ValueError("bundle không có metric_verification_ref (chưa có 3DGS hệ mét)")
+    record = json.loads(resolve(ProductArtifactRef.model_validate(verification)).read_bytes())
+    manifest_ref = (record.get("request") or {}).get("canonical_visual_ref")
+    if not manifest_ref:
+        raise ValueError("bản kiểm metric không tham chiếu CanonicalVisualManifest")
+    manifest = json.loads(resolve(ProductArtifactRef.model_validate(manifest_ref)).read_bytes())
+    master = ProductArtifactRef.model_validate(manifest["master_ref"])
+    if master.artifact_type != "GaussianPLY":
+        raise ValueError("master của CanonicalVisualManifest không phải GaussianPLY")
+    return master

@@ -9,7 +9,7 @@ Trạng thái không lưu riêng mà **suy ra từ artifact bất biến** gắn
 
 Sửa scene tạo revision mới, revision mới chưa có gói nên mọi report/quyết định cũ tự hết hiệu lực
 (Contract §9). Quyết định chỉ do Reviewer đã xác thực; không nhận reviewer_id từ payload.
-Phát hành tự chạy ngay sau khi duyệt, không có thêm cổng người (PRODUCT.md F8); lỗi niêm phong giữ
+Phát hành tự chạy ngay sau khi duyệt, không có thêm cổng người (STUDIO_UX_SPEC.md F8); lỗi niêm phong giữ
 `APPROVED` và cho thử lại. Không build lại USD: bản phát hành dùng lại đúng byte của gói đã kiểm.
 """
 
@@ -36,7 +36,8 @@ from src.models.contracts.release import (
 from src.models.contracts.validation import RuleResult, ValidationReport
 from src.services.orchestration.artifacts import ArtifactAlreadyExistsError
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.orchestration.simulation_package import SimulationPackage, current_package
+from src.services.orchestration.review.lifecycle import has_isaac_runtime_proof
+from src.services.orchestration.review.simulation_package import SimulationPackage, current_package
 
 SCHEMA_VERSION = "1.0"
 ZERO = "sha256:" + "0" * 64
@@ -59,6 +60,8 @@ class ReviewState(BaseModel):
     record: SceneRevisionRecord
     package: SimulationPackage | None = None
     validation: ValidationReport | None = None
+    #: Báo cáo có bằng chứng chạy Isaac thật không (`has_isaac_runtime_proof`); None khi chưa có báo cáo.
+    isaac_runtime_proof: bool | None = None
     warning_ids: list[str] = []
     approval: ApprovalRecord | None = None
     release: ReleaseManifest | None = None
@@ -96,8 +99,8 @@ def _ref(job_id: str, uri: str, artifact_type: str, stage: StageId, payload: byt
 
 
 def _read(registry: ProjectRegistry, uri: str) -> bytes | None:
-    path = registry.runtime_resolver.resolve(uri)
-    return path.read_bytes() if path.is_file() else None
+    path = registry.runtime_resolver.locate(uri)
+    return path.read_bytes() if path is not None else None
 
 
 def _publish_once(registry: ProjectRegistry, reference: ProductArtifactRef, payload: bytes) -> None:
@@ -134,6 +137,7 @@ def review_state(registry: ProjectRegistry, job_id: str) -> ReviewState:
         return state
     report = ValidationReport.model_validate_json(raw)
     state.validation = report
+    state.isaac_runtime_proof = has_isaac_runtime_proof(report)
     state.warning_ids = [check.check_id for check in report.checks if check.result != RuleResult.PASS]
     state.record = state.record.model_copy(update={"validation_report_checksum": report.report_checksum})
     if report.overall_result != RuleResult.PASS:
@@ -294,7 +298,7 @@ def seal_release(registry: ProjectRegistry, job_id: str) -> ReviewState:
         StageId.RELEASE,
         archive,
     )
-    if not registry.runtime_resolver.resolve(archive_ref.artifact_uri).is_file():
+    if registry.runtime_resolver.locate(archive_ref.artifact_uri) is None:
         registry.scene.store.publish(archive_ref, archive)
     uri = release_uri(job_id, candidate.candidate_checksum)
     _publish_once(registry, _ref(job_id, uri, "ReleaseManifest", StageId.RELEASE, manifest_bytes), manifest_bytes)
@@ -318,7 +322,7 @@ def _release_archive_ref(
     registry: ProjectRegistry, job_id: str, manifest: ReleaseManifest
 ) -> ProductArtifactRef | None:
     uri = f"artifact://jobs/{job_id}/release/{_hex(manifest.candidate_checksum)}/release.zip"
-    path = registry.runtime_resolver.resolve(uri)
-    if not path.is_file():
+    path = registry.runtime_resolver.locate(uri)
+    if path is None:
         return None
     return _ref(job_id, uri, "ReleaseArchive", StageId.RELEASE, path.read_bytes())

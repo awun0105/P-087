@@ -1,55 +1,22 @@
 /**
- * Endpoint product, gõ kiểu đầy đủ.
+ * Endpoint product mà Studio dùng, gõ kiểu đầy đủ (project, job, attempt, preview, bytes artifact).
  *
  * Không endpoint nào nhận hay trả đường dẫn filesystem. `artifactContentUrl`
  * chỉ dựng URL từ `artifact://` URI + checksum, và backend vẫn đối chiếu lại
  * với allow-list của job — client không tự quyết định được đọc artifact nào.
  */
 
-import type {
-  ArtifactList,
-  JobAttemptList,
-  JobCreateRequest,
-  JobList,
-  JobManifest,
-  Project,
-  ProjectList,
-  ReviewState,
-  SceneEditCommand,
-  SceneEditResponse,
-  SceneResponse,
-  TransitionRequest,
-  ValidationState,
-} from "@/lib/contracts/api";
+import type { ArtifactList, JobAttemptList, JobManifest, Project } from "@/lib/contracts/api";
 import { apiFetch, apiUrl, fetchApi, type ApiResult } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/client";
 import { parsePreview, type ReconstructionPreview } from "@/lib/contracts/preview";
 
 const PRODUCT = "/api/v1";
 
-function jsonPost(body: unknown): RequestInit {
-  return { method: "POST", body: JSON.stringify(body) };
-}
-
 // ── projects ────────────────────────────────────────────────────────────────
-
-export function listProjects(): Promise<ApiResult<ProjectList>> {
-  return fetchApi<ProjectList>(`${PRODUCT}/projects`);
-}
 
 export function getProject(projectId: string): Promise<ApiResult<Project>> {
   return fetchApi<Project>(`${PRODUCT}/projects/${encodeURIComponent(projectId)}`);
-}
-
-export function listJobs(projectId: string): Promise<ApiResult<JobList>> {
-  return fetchApi<JobList>(`${PRODUCT}/projects/${encodeURIComponent(projectId)}/jobs`);
-}
-
-export function createJob(projectId: string, request: JobCreateRequest = {}): Promise<JobManifest> {
-  return apiFetch<JobManifest>(
-    `${PRODUCT}/projects/${encodeURIComponent(projectId)}/jobs`,
-    jsonPost(request),
-  );
 }
 
 // ── jobs ────────────────────────────────────────────────────────────────────
@@ -66,24 +33,13 @@ export function listJobAttempts(jobId: string): Promise<ApiResult<JobAttemptList
   return fetchApi<JobAttemptList>(`${PRODUCT}/jobs/${encodeURIComponent(jobId)}/attempts`);
 }
 
-export function transitionJob(jobId: string, request: TransitionRequest): Promise<JobManifest> {
-  return apiFetch<JobManifest>(
-    `${PRODUCT}/jobs/${encodeURIComponent(jobId)}/transitions`,
-    jsonPost(request),
-  );
-}
-
 export function retryJob(jobId: string): Promise<JobManifest> {
   return apiFetch<JobManifest>(`${PRODUCT}/jobs/${encodeURIComponent(jobId)}/retry`, {
     method: "POST",
   });
 }
 
-// ── scene (PRODUCT-06) ──────────────────────────────────────────────────────
-
-export function getScene(jobId: string): Promise<ApiResult<SceneResponse>> {
-  return fetchApi<SceneResponse>(`${PRODUCT}/jobs/${encodeURIComponent(jobId)}/scene`);
-}
+// ── preview và artifact (PRODUCT-06) ────────────────────────────────────────
 
 export async function getPreview(jobId: string): Promise<ApiResult<ReconstructionPreview>> {
   const result = await fetchApi<unknown>(`${PRODUCT}/jobs/${encodeURIComponent(jobId)}/preview`);
@@ -93,13 +49,6 @@ export async function getPreview(jobId: string): Promise<ApiResult<Reconstructio
   } catch {
     return { ok: false, error: new ApiError(502, "Backend trả preview sai contract/job identity") };
   }
-}
-
-export function editScene(jobId: string, command: SceneEditCommand): Promise<SceneEditResponse> {
-  return apiFetch<SceneEditResponse>(
-    `${PRODUCT}/jobs/${encodeURIComponent(jobId)}/scene/edits`,
-    jsonPost(command),
-  );
 }
 
 /**
@@ -119,12 +68,17 @@ export function jobArtifactContentUrl(
   });
 }
 
-// ── validation và review ────────────────────────────────────────────────────
-
-export function getValidation(jobId: string): Promise<ApiResult<ValidationState>> {
-  return fetchApi<ValidationState>(`${PRODUCT}/jobs/${encodeURIComponent(jobId)}/validation`);
-}
-
-export function getReview(jobId: string): Promise<ApiResult<ReviewState>> {
-  return fetchApi<ReviewState>(`${PRODUCT}/jobs/${encodeURIComponent(jobId)}/review`);
+/**
+ * Lưới va chạm của job đã xoay sang không gian hiển thị, cho chế độ đi bộ của viewer. Đường dẫn
+ * giữ đuôi `.glb` vì viewer chọn loader theo đuôi file.
+ */
+export function jobWalkCollisionUrl(
+  jobId: string,
+  ref: { artifact_uri: string; artifact_checksum: string },
+): string {
+  const filename = ref.artifact_uri.split("/").pop();
+  return apiUrl(`/api/v1/jobs/${encodeURIComponent(jobId)}/walk-collision/${encodeURIComponent(filename ?? "collision.glb")}`, {
+    artifact_uri: ref.artifact_uri,
+    artifact_checksum: ref.artifact_checksum,
+  });
 }

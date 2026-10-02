@@ -265,6 +265,23 @@ export interface SceneObject {
   tags: string[];
   collider: ColliderSpec | null;
   provenance: Record<string, unknown>;
+  /** Pipeline v2 (ADR 0007); backend không ghi field khi rỗng nên có thể vắng mặt. */
+  physics?: ObjectPhysics | null;
+}
+
+/** `src/models/contracts/scene.py` MassSource — số khối lượng đến từ đâu. */
+export type MassSource = "catalog_default" | "catalog_density" | "user" | "asset";
+
+/** `src/models/contracts/scene.py` ObjectPhysics — RigidBody/Mass/Physics Material cho Isaac. */
+export interface ObjectPhysics {
+  dynamic: boolean;
+  mass_kg: number | null;
+  mass_source: MassSource | null;
+  density_kg_m3: number | null;
+  static_friction: number;
+  dynamic_friction: number;
+  restitution: number;
+  provenance: Record<string, unknown>;
 }
 
 /** `src/models/contracts/scene.py` SceneEnvironment — bản cũ thiếu `visual_ref`. */
@@ -272,6 +289,8 @@ export interface SceneEnvironment {
   visual_ref: ArtifactRef | null;
   geometry_ref: ArtifactRef;
   collider_ref: ArtifactRef | null;
+  /** Bản 3DGS gốc (PLY) cho bộ xuất USD; vắng mặt ở SceneIR cũ. */
+  visual_master_ref?: ArtifactRef | null;
 }
 
 export interface SceneIR {

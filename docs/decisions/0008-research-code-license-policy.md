@@ -19,7 +19,7 @@ Accepted — owner (Quân) chốt ngày 2026-09-30.
 1. Real2Sim Studio (AI20K P-087) là **đồ án học tập, không thương mại**. Được `REUSE`/`ADAPT`
    code có giấy phép phi thương mại dùng cho nghiên cứu/giáo dục.
 2. Quy tắc AGENTS.md vẫn giữ: chỉ lấy phần cần, ghi nguồn (repo, commit, đường dẫn), giấy phép
-   và phần đã sửa vào `THIRD_PARTY_NOTICES.md` (hoặc notice của frontend) ngay khi đưa vào repo.
+   và phần đã sửa vào `THIRD_PARTY_NOTICES.md` ngay khi đưa vào repo.
 3. Nếu dự án chuyển sang dùng thương mại, mọi phần mang giấy phép phi thương mại phải được liệt
    kê lại và thay thế trước khi phát hành.
 

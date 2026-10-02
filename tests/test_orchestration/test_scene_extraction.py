@@ -15,7 +15,7 @@ from src.models.contracts.manifests import StageId, StageStatus
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.models.contracts.scene import SceneObjectState
 from src.services.orchestration.artifacts import FilesystemArtifactStore, sha256_bytes
-from src.services.orchestration.scene_extraction import extract_scene
+from src.services.orchestration.scene.extraction import extract_scene
 from tests.test_orchestration.test_finalize_flow import _confirmed
 
 _FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "reconstruction_bundle" / "manifest.json"

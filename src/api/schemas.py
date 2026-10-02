@@ -7,6 +7,9 @@ thay vì dựng model song song.
 
 Request model nằm ở tầng service (`orchestration.projects.models`) vì đó là input
 của domain, không phải của HTTP — route import thẳng từ đó, không re-export ở đây.
+
+Khác `src/models/schemas.py`: file đó chỉ chứa schema của endpoint chat mẫu trong template
+ban tổ chức, không thuộc API của Real2Sim.
 """
 
 from datetime import datetime
@@ -27,6 +30,7 @@ from src.models.contracts.validation import ValidationReport
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.projects.models import InputVideoSummary, ProjectRecord
 from src.services.orchestration.projects.privacy import project_block_reason
+from src.services.orchestration.review.lifecycle import has_isaac_runtime_proof
 from src.services.orchestration.scene.models import SceneEditResult, SceneRevision, VisualBinding
 
 __all__ = [
@@ -47,6 +51,7 @@ __all__ = [
     "project_response",
     "review_state",
     "scene_edit_response",
+    "ObjectifyRequest",
     "scene_response",
     "validation_state",
 ]
@@ -187,6 +192,72 @@ class ObjectActionRequest(ApiModel):
     expected_scene_revision: Identifier
     active: bool | None = None
     name: str | None = None
+    # action = label (ADR 0007): nhãn lớp; khối lượng người dùng nhập (bỏ trống = mặc định của nhãn).
+    semantic_class: str | None = Field(default=None, max_length=64)
+    mass_kg: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    # Asset danh mục người dùng chọn làm nhãn (phải cùng lớp với semantic_class); chỉ để hiện lại lựa chọn.
+    asset_family: str | None = Field(default=None, max_length=128)
+
+
+class TrainingRecordingResponse(ApiModel):
+    """Bản ghi Rerun của quá trình train 3DGS: có hay không, và nặng bao nhiêu để UI báo trước khi tải."""
+
+    available: bool
+    size_bytes: int | None = Field(default=None, ge=0)
+
+
+class ObjectifyRequest(ApiModel):
+    """Body yêu cầu dựng lại tập vật trên đúng revision đang hiển thị.
+
+    `objectify` = chạy lại tách theo vật; `boxes` = dùng hộp ứng viên (người dùng chọn lùi).
+    """
+
+    expected_scene_revision: Identifier
+    mode: Literal["objectify", "boxes"] = "objectify"
+
+
+class AddCatalogObjectRequest(ApiModel):
+    """Body thêm vật từ danh mục asset Isaac (ADR 0007); `position_xyz` là điểm đặt trên sàn."""
+
+    expected_scene_revision: Identifier
+    family: str = Field(min_length=1, max_length=128)
+    position_xyz: tuple[float, float, float]
+    name: str = ""
+
+
+class RestoreRevisionRequest(ApiModel):
+    """Body hoàn tác về một revision cũ (publish thành revision kế tiếp)."""
+
+    expected_scene_revision: Identifier
+    target_revision: Identifier
+
+
+class CatalogEntryResponse(ApiModel):
+    """Một họ asset đặt được."""
+
+    family: str
+    semantic_class: str | None
+    size_xyz_m: tuple[float, float, float]
+    dynamic: bool
+    default_mass_kg: float | None
+    #: Máy này có GLB xem trước của asset (hình khối thật) hay Studio phải vẽ hộp.
+    has_preview: bool = False
+
+
+class SceneCatalogResponse(ApiModel):
+    """Danh mục nhãn và asset cho Studio."""
+
+    classes: list[str]
+    entries: list[CatalogEntryResponse]
+    physics_note: str
+
+
+class LabelSuggestionResponse(ApiModel):
+    """Nhãn gợi ý cho một vật theo kích thước; người dùng phải xác nhận."""
+
+    object_id: Identifier
+    suggestions: list[str]
+    basis: str
 
 
 class AddObjectRequest(ApiModel):
@@ -271,12 +342,11 @@ def scene_response(revision: SceneRevision, visual: VisualBinding) -> SceneRespo
 
 def validation_state(job_id: str, report: ValidationReport) -> ValidationStateResponse:
     """Chiếu ValidationReport thành state mà màn hình validation tiêu thụ."""
-    versions = report.environment_versions
     return ValidationStateResponse(
         job_id=job_id,
         report=report,
         report_checksum_verified=report.report_checksum.startswith("sha256:"),
-        isaac_runtime_proof=versions.get("isaac_sim", "UNVERIFIED") != "UNVERIFIED",
+        isaac_runtime_proof=has_isaac_runtime_proof(report),
     )
 
 

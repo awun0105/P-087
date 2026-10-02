@@ -83,6 +83,88 @@ def test_unknown_machine_is_not_reported_as_safe() -> None:
     assert maximum_for_machine(presets, None) == preset_values(presets, "minimum_quality")
 
 
+def test_live_headroom_drives_estimate_and_maximum_but_busy_gpu_can_enqueue() -> None:
+    presets, _ = load_presets(PRESETS)
+    live = _machine().model_copy(update={"headroom_measured": True, "vram_free_gb": 0.1, "ram_available_gb": 100})
+    params = preset_values(presets, "minimum_quality")
+    evaluation = evaluate(presets, params, live)
+    gpu = next(item for item in evaluation.resources if item.resource == "vram")
+    assert gpu.available_gb == 0.1 and gpu.status == "danger" and "job sẽ chờ" in gpu.message
+    assert not evaluation.blocking  # Cấu hình vừa capacity máy, GPU chỉ đang bận.
+    disk_busy = live.model_copy(update={"disk_free_gb": 0.1})
+    assert not evaluate(presets, params, disk_busy).blocking
+    too_small = live.model_copy(update={"vram_total_gb": 0.1})
+    assert evaluate(presets, params, too_small).blocking
+    # Mốc rảnh đã đo nhưng thiếu VRAM (không xác định được GPU): không suy Maximum từ số đo thiếu.
+    unknown = live.model_copy(
+        update={"vram_free_gb": None, "idle_measured_at": NOW, "idle_ram_available_gb": 100, "idle_disk_free_gb": 500}
+    )
+    assert maximum_for_machine(presets, unknown) == params
+    assert (
+        next(item for item in evaluate(presets, params, unknown).resources if item.resource == "vram").status
+        == "unknown"
+    )
+
+
+def test_maximum_uses_idle_baseline_not_what_a_running_job_left_free() -> None:
+    """Worker đang train job khác: phần trống tức thời tụt, Maximum vẫn theo mốc lúc máy rảnh."""
+    presets, _ = load_presets(PRESETS)
+    idle = _machine(vram=4, ram=31, disk=20).model_copy(
+        update={
+            "headroom_measured": True,
+            "vram_free_gb": 3.6,
+            "ram_available_gb": 24.0,
+            "idle_measured_at": NOW,
+            "idle_vram_free_gb": 3.6,
+            "idle_ram_available_gb": 24.0,
+            "idle_disk_free_gb": 20.0,
+        }
+    )
+    busy = idle.model_copy(update={"vram_free_gb": 0.6, "ram_available_gb": 6.0, "disk_free_gb": 12.0})
+    best = maximum_for_machine(presets, idle)
+    assert maximum_for_machine(presets, busy) == best
+    minimum = preset_values(presets, "minimum_quality")
+    assert float(best["brush.max_splats"]) >= float(minimum["brush.max_splats"])
+    # Cấu hình đó hiện đỏ vì máy đang bận, nhưng không bị chặn: job chờ rồi chạy với nguyên cấu hình.
+    evaluation = evaluate(presets, best, busy)
+    assert not evaluation.blocking
+    assert any(item.status == "danger" and "job sẽ chờ" in item.message for item in evaluation.resources)
+    # Mốc rảnh nhỏ hơn tổng (thứ khác trên máy luôn chiếm một phần): Maximum không vượt mốc rảnh.
+    total_only = _machine(vram=4, ram=31, disk=20)
+    assert float(best["brush.max_splats"]) <= float(maximum_for_machine(presets, total_only)["brush.max_splats"])
+
+
+def test_disk_larger_than_the_whole_drive_blocks_but_a_full_drive_only_waits() -> None:
+    presets, _ = load_presets(PRESETS)
+    params = preset_values(presets, "maximum")
+    machine = _machine().model_copy(
+        update={"headroom_measured": True, "vram_free_gb": 48, "ram_available_gb": 256, "disk_free_gb": 0.5}
+    )
+    roomy = machine.model_copy(update={"disk_total_gb": 500.0})
+    disk = next(item for item in evaluate(presets, params, roomy).resources if item.resource == "disk")
+    assert disk.status == "danger" and not evaluate(presets, params, roomy).blocking
+    tiny = machine.model_copy(update={"disk_total_gb": 10.0})
+    assert evaluate(presets, params, tiny).blocking
+
+
+def test_shortage_that_persists_when_idle_is_explained_differently() -> None:
+    presets, _ = load_presets(PRESETS)
+    params = preset_values(presets, "minimum_quality")
+    machine = _machine().model_copy(
+        update={
+            "headroom_measured": True,
+            "vram_free_gb": 0.5,
+            "ram_available_gb": 100,
+            "idle_measured_at": NOW,
+            "idle_vram_free_gb": 0.5,
+            "idle_ram_available_gb": 100,
+            "idle_disk_free_gb": 500,
+        }
+    )
+    gpu = next(item for item in evaluate(presets, params, machine).resources if item.resource == "vram")
+    assert "lúc máy xử lý rảnh cũng không đủ" in gpu.message and not evaluate(presets, params, machine).blocking
+
+
 @pytest.mark.parametrize(
     "machine",
     [_machine(), _machine(vram=4, ram=31, disk=12), _machine(vram=2, ram=8, disk=3, cpu=4)],

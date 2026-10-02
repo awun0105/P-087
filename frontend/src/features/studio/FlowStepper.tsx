@@ -11,7 +11,7 @@ export interface FlowStep {
 export function FlowStepper({ steps, current }: { steps: readonly FlowStep[]; current: number }) {
   return (
     <nav aria-label="Các bước" className="w-full">
-      <p className="mb-3 text-xs font-medium tracking-wide text-ink-subtle uppercase sm:hidden">
+      <p className="label-tech mb-3 text-ink-muted sm:hidden">
         Bước {current + 1}/{steps.length} · {steps[current]?.label}
       </p>
       <ol className="hidden items-center gap-2 sm:flex">
@@ -31,7 +31,7 @@ export function FlowStepper({ steps, current }: { steps: readonly FlowStep[]; cu
                   className={cn(
                     "grid size-6 place-items-center rounded-full text-xs font-semibold",
                     done && "bg-sage text-paper",
-                    active && "bg-ember-strong text-white",
+                    active && "bg-primary text-primary-foreground",
                     !done && !active && "border border-line-strong text-ink-subtle",
                   )}
                 >

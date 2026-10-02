@@ -344,7 +344,7 @@ Hoàn thiện:
 
 - Tech Lead giao EX-REC hoàn thiện tích hợp EX-SCENE/EX-SIM/EX-PRODUCT trên
   `feat/studio-integration`: tách vật SAMPro3D + SAM2 (ADR 0006), sửa SceneIR theo vật, gói mô
-  phỏng USD + preflight, duyệt/phát hành, refactor UI theo PRODUCT.md P1–P6. PR #16 vào `develop`.
+  phỏng USD + preflight, duyệt/phát hành, refactor UI theo STUDIO_UX_SPEC.md P1–P6. PR #16 vào `develop`.
 - Owner chốt **pipeline v2** ([ADR 0007](../decisions/0007-object-centric-hybrid-usd-pipeline.md)):
   scene theo vật chỉnh sửa được, xuất USD lai cho Isaac Sim; PRD v1.16 kéo vá nền, gợi ý nhãn,
   thay asset vào phạm vi. Lộ trình A chạy thử → B backend → C Studio v2 → D Isaac → E deploy,

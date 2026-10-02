@@ -108,9 +108,10 @@ class DemoLibrary:
             except DemoUnavailableError:
                 logger.warning("Bỏ qua demo bundle hỏng: %s", sample_id)
                 continue
-            known = [stage.duration_seconds for stage in manifest.stages if stage.duration_seconds is not None]
+            recorded = [stage for stage in manifest.stages if stage.state == "succeeded"]
+            known = [stage.duration_seconds for stage in recorded if stage.duration_seconds is not None]
             # Chỉ báo tổng khi mọi stage có thời lượng đo được; thiếu một stage → không đoán.
-            total = sum(known) if manifest.stages and len(known) == len(manifest.stages) else None
+            total = sum(known) if recorded and len(known) == len(recorded) else None
             cover = manifest.frames[len(manifest.frames) // 2].name if manifest.frames else None
             items.append(
                 SampleSummary(

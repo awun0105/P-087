@@ -63,7 +63,7 @@ export function ProcessingSettings({
     <Card className="p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="flex items-center gap-2 text-base font-semibold">
+          <h2 className="flex items-center gap-2 text-base font-bold">
             <Gauge className="size-4 text-ember-strong" aria-hidden />
             Thông số xử lý
           </h2>
@@ -108,7 +108,7 @@ export function ProcessingSettings({
 
       <MachinePanel capability={capability} machineLabel={machineLabel} evaluation={evaluation} editable={editable} />
 
-      {/* Thông số chi tiết thu gọn khi đang dùng preset và không có ô cảnh báo (PRODUCT.md P3). */}
+      {/* Thông số chi tiết thu gọn khi đang dùng preset và không có ô cảnh báo (STUDIO_UX_SPEC.md P3). */}
       <details className="group mt-6" open={!editable || activePreset === null || flagged}>
         <summary className="cursor-pointer text-sm font-medium text-ink-muted select-none hover:text-ink">
           Thông số chi tiết ({parameters.length} tham số)
@@ -183,6 +183,13 @@ function MachinePanel({
       <p className="mt-1 text-sm text-ink-muted">
         {header ?? "Chưa có số đo — worker chưa chạy hoặc chưa báo cấu hình. Không kiểm được nguy cơ crash."}
       </p>
+      {editable && capability?.headroom_measured && <p className="mt-2 text-xs text-ink-subtle">
+        Tài nguyên còn trống đo lúc {new Date(capability.measured_at).toLocaleTimeString("vi-VN")}.{" "}
+        {capability.idle_measured_at
+          ? `Maximum là ước lượng theo lần đo lúc máy rảnh (${new Date(capability.idle_measured_at).toLocaleTimeString("vi-VN")}), không bị hạ khi máy đang chạy job khác;`
+          : "Máy chưa có lần đo lúc rảnh nên Maximum là ước lượng theo tổng năng lực máy;"}
+        {" "}khi đến lượt, worker đo lại và chờ nếu thiếu, giữ nguyên cấu hình bạn chọn.
+      </p>}
       {editable && evaluation && (
         <ul className="mt-4 grid gap-3 sm:grid-cols-3">
           {evaluation.resources.map((item) => {

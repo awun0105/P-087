@@ -20,6 +20,8 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
@@ -38,6 +40,7 @@ from src.models.contracts.manifests import (
 )
 from src.services.orchestration.artifacts import ArtifactResolver
 from src.services.orchestration.benchmark import build_benchmark, publish_benchmark
+from src.services.orchestration.jobs.admission import ResourceAdmission, job_drivers
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import (
     ResolvedProcessing,
@@ -47,7 +50,18 @@ from src.services.orchestration.jobs.dispatch import (
 )
 from src.services.orchestration.jobs.models import PreparedInputReceipt, TransitionRequest
 from src.services.orchestration.jobs.progress import awaiting_finalize, metric_confirmation_stage
+from src.services.orchestration.jobs.workspace import attempt_lease, cleanup_attempt_workspace, cleanup_finished_job
+from src.services.orchestration.processing import is_presets_file, load_presets
 from src.services.orchestration.processing.capability import latest as latest_capability
+from src.services.orchestration.processing.capability import measure_capacity
+from src.services.orchestration.processing.observed import load_usages
+from src.services.orchestration.processing.telemetry import (
+    Outcome,
+    ResourceContext,
+    ResourceSampler,
+    ResourceUsage,
+    sampled_section,
+)
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
 from src.services.reconstruction import (
     confirmation_summary,
@@ -68,20 +82,22 @@ class PreviewCancelledError(RuntimeError):
 
 def _stop(process: subprocess.Popen) -> None:
     """Nhả cả COLMAP/Brush/FFmpeg con; không để GPU tiếp tục chạy sau khi cancel."""
-    if process.poll() is not None:
-        return
+    # Leader có thể đã thoát nhưng children trong group vẫn đọc scratch/GPU.
     try:
         os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
+        process.wait()
         return
     try:
         process.wait(timeout=10)
     except subprocess.TimeoutExpired:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass  # Process vừa thoát giữa timeout và kill; vẫn reap phía dưới.
-        process.wait()
+        pass
+    # Sau TERM, parent có thể thoát trước child. Dừng group còn lại trước cleanup.
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.wait()
 
 
 @dataclass
@@ -92,6 +108,8 @@ class _Attempt:
     settings: Settings
     job: JobManifest
     workspace: Path
+    #: Một công cụ của attempt này lỗi trong lúc GPU/RAM gần cạn (suy luận từ số đo).
+    exhausted: bool = False
 
 
 class _StageProgress:
@@ -126,32 +144,172 @@ def _run_tool(
 ) -> tuple[int, dict]:
     """Chạy một REC CLI trong process group riêng, hủy khi job revision đổi (cancel)."""
     stdout_path = attempt.workspace / f"{name}.stdout.json"
-    with stdout_path.open("xb") as output, (attempt.workspace / f"{name}.stderr.log").open("xb") as errors:
-        process = subprocess.Popen(
-            command, stdout=output, stderr=errors, stdin=subprocess.DEVNULL, start_new_session=True
+    sampler = _resource_sampler(attempt, name)
+    outcome: Outcome = "failed"
+    exit_code: int | None = None
+    try:
+        with stdout_path.open("xb") as output, (attempt.workspace / f"{name}.stderr.log").open("xb") as errors:
+            process = subprocess.Popen(
+                command, stdout=output, stderr=errors, stdin=subprocess.DEVNULL, start_new_session=True
+            )
+            deadline = time.monotonic() + timeout
+            pause = Event()
+            try:
+                while process.poll() is None:
+                    if progress is not None:
+                        progress.poll()  # Tự cập nhật attempt.job trước khi so revision để phát hiện cancel.
+                    current = attempt.registry.get_job(attempt.job.job_id)
+                    if current.job_manifest_checksum != attempt.job.job_manifest_checksum:
+                        raise PreviewCancelledError("Job revision đã thay đổi trong khi worker chạy")
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(f"{name} worker quá thời gian cấu hình")
+                    _sample_resources(sampler, process.pid)
+                    pause.wait(1)
+            finally:
+                _stop(process)
+                exit_code = process.returncode
+                _sample_resources(sampler, process.pid)
+        if stdout_path.stat().st_size > _MAX_TOOL_RESPONSE_BYTES:
+            raise ValueError(f"{name} worker response vượt giới hạn 1 MiB")
+        lines = stdout_path.read_bytes().strip().splitlines()
+        payload = json.loads(lines[-1]) if lines else None
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"{name} worker không trả result hợp lệ")
+        outcome = "completed" if exit_code == 0 else "failed"
+        return exit_code, payload
+    except PreviewCancelledError:
+        outcome = "cancelled"
+        raise
+    except TimeoutError:
+        outcome = "timeout"
+        raise
+    except KeyboardInterrupt:
+        outcome = "interrupted"  # Worker nhận SIGTERM/Ctrl+C: không phải lỗi của tool.
+        raise
+    finally:
+        usage = _finish_resources(attempt, sampler, outcome, exit_code)
+        attempt.exhausted = attempt.exhausted or (usage is not None and usage.exhausted)
+
+
+def _finish_resources(
+    attempt: _Attempt, sampler: ResourceSampler | None, outcome: Outcome, exit_code: int | None
+) -> ResourceUsage | None:
+    """Ghi bản ghi đo vào workspace rồi vào DB; lỗi ghi không che kết quả/lỗi chính của tool."""
+    if sampler is None:
+        return None
+    try:
+        usage = sampler.finish(outcome, exit_code)
+    except Exception as error:  # noqa: BLE001 - telemetry process boundary, preserve primary result/error
+        logger.warning("Không ghi được resource telemetry cause=%s", type(error).__name__)
+        return None
+    _persist_usage(attempt, usage)
+    return usage
+
+
+def _persist_usage(attempt: _Attempt, usage: ResourceUsage) -> None:
+    """Lưu bản ghi vào runtime DB: đĩa của máy GPU thuê mất khi trả máy, DB thì không."""
+    persistence = attempt.registry.persistence
+    if persistence is None:
+        return
+    try:
+        with persistence.database.transaction(write=True) as tx:
+            tx.execute(
+                "INSERT INTO r2s_resource_usage(usage_id,job_id,recorded_at,payload) VALUES (?,?,?,?)",
+                (uuid4().hex, usage.job_id, usage.completed_at.isoformat(), usage.model_dump_json()),
+            )
+    except Exception as error:  # noqa: BLE001 - ranh giới DB của số đo: không đổi kết quả job
+        logger.warning("Không lưu được resource telemetry vào DB cause=%s", type(error).__name__)
+
+
+@contextmanager
+def _sampled(attempt: _Attempt, tool: str) -> Iterator[None]:
+    """Đo một bước chạy ngay trong tiến trình worker (không qua `_run_tool`)."""
+    sampler = _resource_sampler(attempt, tool)
+    outcome: Outcome = "failed"
+    try:
+        with sampled_section(
+            sampler,
+            on_error=lambda error: logger.warning("Không lấy được resource sample cause=%s", type(error).__name__),
+        ):
+            yield
+        outcome = "completed"
+    except KeyboardInterrupt:
+        outcome = "interrupted"
+        raise
+    finally:
+        _finish_resources(attempt, sampler, outcome, None)
+
+
+def _resource_sampler(attempt: _Attempt, tool: str) -> ResourceSampler | None:
+    """Best effort measurement boundary; probe lỗi không chặn dispatch hoặc đổi config."""
+    try:
+        settings, registry = attempt.settings, attempt.registry
+        shared: bool | None = None
+        if registry.persistence is not None:
+            shared = ResourceAdmission(registry, settings).shares_gpu()
+        context = ResourceContext(
+            job_id=attempt.job.job_id,
+            attempt_id=attempt.workspace.name,
+            tool=tool,
+            config_checksum=attempt.job.config_checksum,
+            runtime_manifest_checksum=attempt.job.runtime_manifest_checksum,
+            params=job_drivers(registry, settings, attempt.job),
+            shared_gpu=shared,
         )
-        deadline = time.monotonic() + timeout
-        pause = Event()
+        ratio: float | None = None
+        path = settings.product_processing_config
+        if path is not None and is_presets_file(path):
+            ratio = load_presets(path)[0].resource_model.danger_ratio
+        return ResourceSampler(
+            context,
+            workspace=attempt.workspace,
+            worker_root=settings.product_worker_root,
+            exhaustion_ratio=ratio,
+            ram_total_gb=measure_capacity(settings.product_worker_root)["ram"],
+        )
+    except Exception as error:  # noqa: BLE001 - measurement boundary must not change job execution
+        logger.warning("Không tạo được resource sampler cause=%s", type(error).__name__)
+        return None
+
+
+def _requeue_if_exhausted(attempt: _Attempt) -> JobManifest | None:
+    """Job FAILED vì nhiều khả năng hết bộ nhớ: tự đưa về hàng đợi đúng một lần.
+
+    Lượt chạy lại được gate cho chạy một mình trên GPU (job đã có bản ghi `exhausted`). Lượt đó
+    mà vẫn hết bộ nhớ thì giữ FAILED: máy này không đủ cho cấu hình, chạy lại nữa chỉ lặp vô ích.
+    Đây là hệ thống tự sửa việc xếp lịch, không qua API retry nên không tính vào hạn mức người dùng.
+    """
+    persistence = attempt.registry.persistence
+    if not attempt.exhausted or persistence is None:
+        return None
+    try:
+        current = attempt.registry.get_job(attempt.job.job_id)
+        if current.status != JobStatus.FAILED:
+            return None
+        earlier = sum(
+            1 for usage in load_usages(persistence.database) if usage.job_id == current.job_id and usage.exhausted
+        )
+        if earlier > 1:
+            logger.warning("Job %s hết bộ nhớ cả khi chạy một mình; giữ FAILED", current.job_id)
+            return None
+        logger.warning("Job %s có dấu hiệu hết bộ nhớ; tự xếp lại để chạy một mình trên GPU", current.job_id)
+        return attempt.registry.transition_job(
+            current.job_id,
+            TransitionRequest(target_status=JobStatus.QUEUED),
+            expected_checksum=current.job_manifest_checksum,
+        )
+    except Exception as error:  # noqa: BLE001 - tự phục hồi là best effort; job vẫn FAILED đúng như đã ghi
+        logger.warning("Không tự xếp lại được job sau khi hết bộ nhớ cause=%s", type(error).__name__)
+        return None
+
+
+def _sample_resources(sampler: ResourceSampler | None, process_group: int) -> None:
+    """Isolation boundary: sampler fail không làm tool chạy thành công trở thành lỗi."""
+    if sampler is not None:
         try:
-            while process.poll() is None:
-                if progress is not None:
-                    progress.poll()  # Tự cập nhật attempt.job trước khi so revision để phát hiện cancel.
-                current = attempt.registry.get_job(attempt.job.job_id)
-                if current.job_manifest_checksum != attempt.job.job_manifest_checksum:
-                    raise PreviewCancelledError("Job revision đã thay đổi trong khi worker chạy")
-                if time.monotonic() >= deadline:
-                    raise TimeoutError(f"{name} worker quá thời gian cấu hình")
-                pause.wait(1)
-            exit_code = process.returncode
-        finally:
-            _stop(process)
-    if stdout_path.stat().st_size > _MAX_TOOL_RESPONSE_BYTES:
-        raise ValueError(f"{name} worker response vượt giới hạn 1 MiB")
-    lines = stdout_path.read_bytes().strip().splitlines()
-    payload = json.loads(lines[-1]) if lines else None
-    if not isinstance(payload, dict):
-        raise RuntimeError(f"{name} worker không trả result hợp lệ")
-    return exit_code, payload
+            sampler.sample(process_group)
+        except Exception as error:  # noqa: BLE001 - preserve worker error/result if optional monitoring fails
+            logger.warning("Không lấy được resource sample cause=%s", type(error).__name__)
 
 
 def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:
@@ -241,6 +399,9 @@ def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: Res
         str(attempt.workspace / "rec"),
         "--progress-file",
         str(attempt.workspace / "preview.progress.jsonl"),
+        # Cùng thư mục cho mọi attempt của job: retry sau khi đứt dùng lại COLMAP + checkpoint Brush.
+        "--resume-root",
+        str(attempt.workspace.parent / "resume"),
     ]
     progress = _StageProgress(attempt, attempt.workspace / "preview.progress.jsonl")
     exit_code, payload = _run_tool(
@@ -256,7 +417,46 @@ def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: Res
         raise ValueError("Worker result khác attempt/exit status")
     job = attempt.registry.record_preview(attempt.job, receipt)
     _record_benchmark(attempt)
+    if receipt.error is None:
+        _cleanup_attempt_workspace(attempt)
     return job
+
+
+def _cleanup_attempt_workspace(attempt: _Attempt) -> None:
+    """Best effort sau verified/durable success; giữ nguyên log, resume và job state."""
+    if attempt.settings.product_worker_keep_scratch:
+        return
+    try:
+        result = cleanup_attempt_workspace(
+            attempt.workspace,
+            worker_root=attempt.settings.product_worker_root,
+            artifact_root=attempt.registry.runtime_resolver.artifact_root,
+        )
+        logger.info(
+            "Scratch cleanup files=%s bytes=%s errors=%s", result.files_removed, result.bytes_removed, result.errors
+        )
+    except (OSError, ValueError) as error:
+        logger.warning("Bỏ qua scratch cleanup cause=%s", type(error).__name__)
+
+
+def _cleanup_finished_job(attempt: _Attempt) -> None:
+    """Job đã SUCCEEDED: bỏ scratch của các attempt cũ và resume (không còn retry nào đọc)."""
+    if attempt.settings.product_worker_keep_scratch:
+        return
+    try:
+        result = cleanup_finished_job(
+            attempt.job.job_id,
+            worker_root=attempt.settings.product_worker_root,
+            artifact_root=attempt.registry.runtime_resolver.artifact_root,
+        )
+        logger.info(
+            "Finished-job cleanup files=%s bytes=%s errors=%s",
+            result.files_removed,
+            result.bytes_removed,
+            result.errors,
+        )
+    except (OSError, ValueError) as error:
+        logger.warning("Bỏ qua finished-job cleanup cause=%s", type(error).__name__)
 
 
 def _record_benchmark(attempt: _Attempt) -> None:
@@ -329,9 +529,12 @@ def run_prepared_job(job_id: str, frame_set_uri: str, *, expected_checksum: str 
         raise ValueError("Frame set không phải output thành công duy nhất trong JobManifest")
     attempt, profile = _start_attempt(job_id, expected_checksum, StageId.CAMERA_POSE)
     try:
-        return _execute_preview(attempt, frames, profile)
+        with attempt_lease(attempt.workspace):
+            job = _execute_preview(attempt, frames, profile)
+        return _requeue_if_exhausted(attempt) or job
     except BaseException as error:
         _record_runner_failure(attempt, error)
+        _requeue_if_exhausted(attempt)
         raise
 
 
@@ -339,22 +542,25 @@ def run_video_job(job_id: str, *, expected_checksum: str | None = None) -> JobMa
     """Upload video → frame set → preview trong một attempt; dừng ngay ở stage lỗi."""
     attempt, profile = _start_attempt(job_id, expected_checksum, StageId.INPUT_VALIDATE)
     try:
-        attempt.job = _execute_prepare(attempt, profile)
-        if attempt.job.status != JobStatus.RUNNING:
-            _record_benchmark(attempt)  # job dừng ở bước chuẩn bị (vd video lỗi) vẫn có số đo
-            return attempt.job
-        frames = prepared_frame_reference(attempt.job)
-        if frames is None:
-            raise ValueError("Prepare thành công nhưng thiếu frame set")
-        return _execute_preview(attempt, frames, profile)
+        with attempt_lease(attempt.workspace):
+            attempt.job = _execute_prepare(attempt, profile)
+            if attempt.job.status != JobStatus.RUNNING:
+                _record_benchmark(attempt)  # job dừng ở bước chuẩn bị (vd video lỗi) vẫn có số đo
+                return attempt.job
+            frames = prepared_frame_reference(attempt.job)
+            if frames is None:
+                raise ValueError("Prepare thành công nhưng thiếu frame set")
+            job = _execute_preview(attempt, frames, profile)
+        return _requeue_if_exhausted(attempt) or job
     except BaseException as error:
         _record_runner_failure(attempt, error)
+        _requeue_if_exhausted(attempt)
         raise
 
 
 def _authorized_decision(attempt_registry: ProjectRegistry, job: JobManifest) -> tuple[ProductArtifactRef, str]:
     """PRODUCT xác minh quyết định người dùng trước khi giao REC chạy tiếp (authority của PRODUCT)."""
-    from src.services.orchestration.metric import MetricDecision
+    from src.services.orchestration.jobs.metric import MetricDecision
 
     stage = metric_confirmation_stage(job)
     if stage is None or stage.artifact_uri is None or stage.artifact_checksum is None:
@@ -379,7 +585,7 @@ def _extract_scene_stage(
     thẳng từ ref trong kết quả REC đã qua consumer `load_finalize_result`.
     """
     from src.models.contracts.reconstruction import ReconstructionBundle
-    from src.services.orchestration.scene_extraction import extract_scene
+    from src.services.orchestration.scene.extraction import extract_scene
 
     if bundle_ref is None:
         return []
@@ -388,7 +594,8 @@ def _extract_scene_stage(
         bundle = ReconstructionBundle.model_validate_json(
             attempt.registry.runtime_resolver.require(bundle_ref).read_bytes()
         )
-        stage = extract_scene(attempt.registry, attempt.job, bundle, attempt.settings, workspace / "scene")
+        with _sampled(attempt, "scene_extract"):
+            stage = extract_scene(attempt.registry, attempt.job, bundle, attempt.settings, workspace / "scene")
         attempt.registry.runtime_resolver.sync_up(attempt.job.job_id)
         return [stage]
     except RuntimeStateConflictError:
@@ -431,45 +638,53 @@ def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> Jo
     workspace.mkdir(parents=True, exist_ok=False)
     attempt = _Attempt(registry, settings, job, workspace)
     try:
-        request = {
-            "schema_version": "1.0",
-            "execution_scope": "product_finalize",
-            "job_id": job_id,
-            "attempt_id": attempt_id,
-            "confirmation_ref": confirmation.model_dump(mode="json"),
-            "authorized_decision_checksum": decision_checksum,
-            "geometry": profile.model_dump(mode="json"),
-        }
-        request_path = workspace / "finalize.request.json"
-        with request_path.open("x", encoding="utf-8") as stream:
-            json.dump(request, stream)
-        command = [
-            sys.executable,
-            "-m",
-            "src.services.reconstruction.finalize_cli",
-            "--request",
-            str(request_path),
-            "--store-root",
-            str(registry.runtime_resolver.artifact_root),
-            "--workspace",
-            str(workspace / "rec"),
-            "--progress-file",
-            str(workspace / "finalize.progress.jsonl"),
-        ]
-        exit_code, payload = _run_tool(attempt, "finalize", command, settings.product_finalize_timeout_seconds)
-        registry.runtime_resolver.sync_up(job_id)
-        if exit_code not in {0, 1}:
-            raise RuntimeError("Finalize worker không trả result hợp lệ")
-        reference = ProductArtifactRef.model_validate(payload.get("result_ref"))
-        result = load_finalize_result(reference, registry.runtime_resolver.require)
-        if result.attempt_id != attempt_id or (result.error is None) != (exit_code == 0):
-            raise ValueError("Finalize result khác attempt/exit status")
-        extra: list[StageArtifact] = []
-        if result.error is None:
-            extra = _extract_scene_stage(attempt, workspace, result.bundle_ref)
-        return registry.record_finalize(attempt.job, result, reference, extra)
+        with attempt_lease(workspace):
+            request = {
+                "schema_version": "1.0",
+                "execution_scope": "product_finalize",
+                "job_id": job_id,
+                "attempt_id": attempt_id,
+                "confirmation_ref": confirmation.model_dump(mode="json"),
+                "authorized_decision_checksum": decision_checksum,
+                "geometry": profile.model_dump(mode="json"),
+            }
+            request_path = workspace / "finalize.request.json"
+            with request_path.open("x", encoding="utf-8") as stream:
+                json.dump(request, stream)
+            command = [
+                sys.executable,
+                "-m",
+                "src.services.reconstruction.finalize_cli",
+                "--request",
+                str(request_path),
+                "--store-root",
+                str(registry.runtime_resolver.artifact_root),
+                "--workspace",
+                str(workspace / "rec"),
+                "--progress-file",
+                str(workspace / "finalize.progress.jsonl"),
+            ]
+            exit_code, payload = _run_tool(attempt, "finalize", command, settings.product_finalize_timeout_seconds)
+            registry.runtime_resolver.sync_up(job_id)
+            if exit_code not in {0, 1}:
+                raise RuntimeError("Finalize worker không trả result hợp lệ")
+            reference = ProductArtifactRef.model_validate(payload.get("result_ref"))
+            result = load_finalize_result(reference, registry.runtime_resolver.require)
+            if result.attempt_id != attempt_id or (result.error is None) != (exit_code == 0):
+                raise ValueError("Finalize result khác attempt/exit status")
+            extra: list[StageArtifact] = []
+            if result.error is None:
+                extra = _extract_scene_stage(attempt, workspace, result.bundle_ref)
+            completed = registry.record_finalize(attempt.job, result, reference, extra)
+            # Scene consumer đã chạy xong trước durable commit; lỗi extraction vẫn giữ scratch để debug.
+            if result.error is None and extra:
+                _cleanup_attempt_workspace(attempt)
+            if completed.status == JobStatus.SUCCEEDED:
+                _cleanup_finished_job(attempt)
+        return _requeue_if_exhausted(attempt) or completed
     except BaseException as error:
         _record_runner_failure(attempt, error)
+        _requeue_if_exhausted(attempt)
         raise
 
 

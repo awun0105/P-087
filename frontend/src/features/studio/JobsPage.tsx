@@ -1,19 +1,24 @@
 "use client";
 
-import { ListChecks, LogIn, RefreshCw, Search } from "lucide-react";
-import Link from "next/link";
+import { errorMessage } from "@/lib/ui-error";
+
+import { ListChecks, LogIn, Search } from "lucide-react";
+import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useCallback, useMemo, useState } from "react";
 
 import { Input } from "@/components/shadcn/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/shadcn/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/shadcn/toggle-group";
-import { Badge, EmptyState, Notice, buttonVariants } from "@/components/studio/primitives";
+import { Badge, EmptyState, buttonVariants } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { STATUS_FILTERS, sceneStatus, type SceneStatusGroup } from "@/features/studio/sceneStatus";
 import { stageMeta } from "@/features/studio/stages";
 import { usePolling } from "@/features/studio/usePolling";
 import { canEdit } from "@/lib/api/auth";
 import { listScenes } from "@/lib/api/studio";
+import { useListState, pageSlice, ListPagination, SortControl } from "@/features/studio/ListControls";
+import { progressHref } from "@/features/studio/inspection";
+import { PageHeader, ErrorFeedback } from "@/components/studio/feedback";
 import type { SceneSummary } from "@/lib/contracts/studio";
 
 const TIME = new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" });
@@ -25,7 +30,7 @@ function duration(start: string, end: string | null, now: number): string {
 }
 
 /**
- * Jobs (S04): lần xử lý mới nhất của mỗi scene, dựng từ `/scenes` (PRODUCT.md D-06). Chỉ đọc —
+ * Jobs (S04): lần xử lý mới nhất của mỗi scene, dựng từ `/scenes` (STUDIO_UX_SPEC.md D-06). Chỉ đọc —
  * huỷ/thử lại nằm trong màn tiến trình của scene; không có kéo đổi trạng thái hay xếp lịch.
  */
 export function JobsPage() {
@@ -33,8 +38,7 @@ export function JobsPage() {
   const signedIn = canEdit(me);
   const [scenes, setScenes] = useState<SceneSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<SceneStatusGroup | "all">("all");
+  const { query, setQuery, filter, setFilter, sort, setSort, params, update, clear } = useListState();
   const [now, setNow] = useState(() => Date.now());
 
   const load = useCallback(async () => {
@@ -45,7 +49,7 @@ export function JobsPage() {
       setScenes(result.data.scenes);
       setError(null);
     } else {
-      setError(result.error.detail);
+      setError(errorMessage(result.error));
     }
   }, [signedIn]);
   const jobs = useMemo(
@@ -67,10 +71,12 @@ export function JobsPage() {
     );
   });
 
+  shown.sort((a, b) => sort === "name" ? a.project.name.localeCompare(b.project.name, "vi") : Date.parse(b.latest_job?.started_at ?? "") - Date.parse(a.latest_job?.started_at ?? ""));
+  const pagination = pageSlice(shown, params.get("page"), 20);
+
   return (
     <main className="mx-auto max-w-6xl px-4 pt-8 pb-16 sm:px-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Jobs</h1>
-      <p className="mt-1 text-sm text-ink-muted">Lần xử lý mới nhất của mỗi scene. Mở một dòng để xem tiến trình, huỷ hoặc thử lại.</p>
+      <PageHeader title="Jobs" description="Lần xử lý mới nhất của mỗi scene. Mở một dòng để theo dõi tiến trình hoặc phục hồi lỗi." />
       {me !== null && !signedIn && (
         <EmptyState
           className="mt-8"
@@ -83,10 +89,8 @@ export function JobsPage() {
           }
         />
       )}
-      {error && (
-        <Notice tone="rust" icon={<RefreshCw aria-hidden />} className="mt-6">
-          Không tải được danh sách: {error}. Đang hiển thị dữ liệu lần tải trước; trang sẽ tự thử lại.
-        </Notice>
+      {signedIn && error && (
+        <ErrorFeedback className="mt-6" message={error + (scenes ? " Đang hiển thị dữ liệu lần tải trước." : "")} retry={() => void load()} />
       )}
       {signedIn && (
         <div className="mt-6 mb-4 flex flex-wrap items-center gap-2">
@@ -108,16 +112,17 @@ export function JobsPage() {
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
+          <SortControl value={sort} onChange={setSort} />
         </div>
       )}
       {signedIn && scenes === null && !error && <p className="text-sm text-ink-muted" role="status">Đang tải…</p>}
-      {scenes !== null && jobs.length === 0 && (
-        <EmptyState className="mt-4" icon={<ListChecks aria-hidden />} title="Chưa có lần xử lý nào" action={<Link href="/new" className={buttonVariants({})}>Tạo scene</Link>}>
-          Tạo scene từ video để bắt đầu một lần xử lý.
+      {signedIn && scenes !== null && jobs.length === 0 && (
+        <EmptyState className="mt-4" icon={<ListChecks aria-hidden />} title="Chưa có lần xử lý nào">
+          Vào <Link href="/scenes" className="font-medium text-ember-strong hover:underline">Scenes</Link> và chọn “Scene mới”, rồi dựng từ video để bắt đầu một lần xử lý.
         </EmptyState>
       )}
-      {jobs.length > 0 && shown.length === 0 && <p className="rounded-xl border border-line p-6 text-center text-sm text-ink-muted">Không có lần xử lý khớp bộ lọc.</p>}
-      {shown.length > 0 && (
+      {signedIn && jobs.length > 0 && shown.length === 0 && <p className="rounded-xl border border-line p-6 text-center text-sm text-ink-muted">Không có lần xử lý khớp bộ lọc. <button type="button" onClick={clear} className="font-medium text-ember-strong hover:underline">Xoá bộ lọc</button></p>}
+      {signedIn && shown.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-line">
           <Table>
             <TableHeader>
@@ -131,7 +136,7 @@ export function JobsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {shown.map((scene) => {
+              {pagination.items.map((scene) => {
                 const job = scene.latest_job!;
                 const status = sceneStatus(job, scene.preview_ready);
                 return (
@@ -139,7 +144,7 @@ export function JobsPage() {
                     <TableCell className="max-w-44 sm:max-w-64">
                       {/* Tên là liên kết: màn hẹp ẩn cột "Mở tiến trình" nhưng vẫn mở được scene. */}
                       <Link
-                        href={`/scenes/${encodeURIComponent(job.job_id)}`}
+                        href={progressHref(job.job_id)}
                         className="block truncate font-medium hover:text-ember-strong hover:underline"
                       >
                         {scene.project.name}
@@ -163,7 +168,7 @@ export function JobsPage() {
                           : "—"}
                     </TableCell>
                     <TableCell className="hidden text-right sm:table-cell">
-                      <Link href={`/scenes/${encodeURIComponent(job.job_id)}`} className="font-medium whitespace-nowrap text-ember-strong hover:underline">
+                      <Link href={progressHref(job.job_id)} className="font-medium whitespace-nowrap text-ember-strong hover:underline">
                         Mở tiến trình
                       </Link>
                     </TableCell>
@@ -174,6 +179,7 @@ export function JobsPage() {
           </Table>
         </div>
       )}
+      {signedIn && shown.length > 0 && <ListPagination {...pagination} total={shown.length} onChange={(page) => update({ page: String(page) })} />}
     </main>
   );
 }

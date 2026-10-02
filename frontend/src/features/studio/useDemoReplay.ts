@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { StageView } from "@/features/studio/PipelineTimeline";
-import { MVP_STAGES } from "@/features/studio/stages";
+import { STUDIO_STAGES } from "@/features/studio/stages";
 import type { DemoStage } from "@/lib/contracts/studio";
 
 /** Tổng thời gian phát lại; mỗi stage giữ tối thiểu đủ lâu để người xem đọc được. */
@@ -15,22 +15,29 @@ const STAGE_MIN_MS = 1400;
  * Bundle thiếu thời lượng (smoke) → chia đều; không bịa số giây thật.
  */
 export function replayPlan(stages: readonly DemoStage[]): number[] {
-  const real = MVP_STAGES.map((meta) => stages.find((stage) => stage.stage_id === meta.id)?.duration_seconds ?? null);
+  const recorded = STUDIO_STAGES.map((meta) => stages.find((stage) => stage.stage_id === meta.id))
+    .filter((stage): stage is DemoStage => !!stage && (stage.state ?? "succeeded") === "succeeded");
+  const real = recorded.map((stage) => stage.duration_seconds);
   const known = real.every((value) => value !== null && value > 0);
   const weights = known ? (real as number[]) : real.map(() => 1);
   const sum = weights.reduce((total, value) => total + value, 0);
   const raw = weights.map((weight) => (weight / sum) * REPLAY_TOTAL_MS);
-  return raw.map((value) => Math.max(STAGE_MIN_MS, value));
+  const lengths = new Map(recorded.map((stage, index) => [stage.stage_id, Math.max(STAGE_MIN_MS, raw[index])]));
+  return STUDIO_STAGES.map((meta) => lengths.get(meta.id) ?? 0);
 }
 
 /** Trạng thái phát lại tại thời điểm `elapsedMs` — hàm thuần để test. */
 export function replayState(stages: readonly DemoStage[], plan: readonly number[], elapsedMs: number): StageView[] {
   let cursor = 0;
-  return MVP_STAGES.map((meta, index) => {
+  return STUDIO_STAGES.map((meta, index) => {
+    const record = stages.find((stage) => stage.stage_id === meta.id);
+    if (!record || (record.state ?? "succeeded") !== "succeeded") {
+      return { stage_id: meta.id, state: record?.state === "failed" ? "failed" : "pending", seconds: null, fraction: null };
+    }
     const start = cursor;
-    const length = plan[index];
+    const length = plan[index] ?? 0;
     cursor += length;
-    const realSeconds = stages.find((stage) => stage.stage_id === meta.id)?.duration_seconds ?? null;
+    const realSeconds = record.duration_seconds;
     if (elapsedMs >= start + length) {
       return { stage_id: meta.id, state: "succeeded", seconds: realSeconds, fraction: 1 };
     }

@@ -15,7 +15,7 @@ Kết quả demo **phải** đến từ chính pipeline này (không vẽ tay, k
 
 ```bash
 git clone <repo> /opt/real2sim/app && cd /opt/real2sim/app
-git checkout feat/product-rec
+git checkout feat/pipeline-v2                # hoặc develop sau khi PR của nhánh này được merge
 make setup                                   # .venv + dependencies từ lockfile
 (cd frontend && npm ci && npm run build:editor)
 
@@ -27,6 +27,16 @@ mkdir -p /opt/real2sim/runtime && cd /opt/real2sim/runtime
 #  - colmap-launcher.sh: copy từ data/rec04_runtime/colmap-launcher.sh; trên GPU có
 #    thể thêm `--gpus all` nếu bật use_gpu trong processing config.
 ```
+
+Runtime tách scene theo vật (pipeline v2, ADR 0007 — SAM2, gsplat, CoACD, usd-core, LaMa):
+
+```bash
+sudo apt install python3.12-dev               # header để gsplat biên dịch kernel CUDA (cần nvcc)
+scripts/gpu/setup_scene_runtime.sh /opt/real2sim/scene_runtime
+# in ra 3 biến PRODUCT_SCENE_RUNTIME_PYTHON / PRODUCT_SAM2_CHECKPOINT / PRODUCT_LAMA_CHECKPOINT
+```
+
+Thiếu runtime này job vẫn chạy: bước tách vật lùi về hộp ứng viên (ADR 0006) hoặc tách hình học.
 
 Copy `scripts/gpu/studio.env.example` → `scripts/gpu/studio.env`, sửa đường dẫn.
 Giá trị JSON giữ nháy đơn. Sinh runtime manifest **trên chính máy này**:
@@ -54,6 +64,31 @@ scripts/gpu/run_stack.sh scripts/gpu/studio.env
 
 Truy cập từ máy mình qua SSH tunnel: `ssh -L 3000:localhost:3000 <gpu-host>` rồi
 mở http://localhost:3000.
+
+### Chạy trên laptop: bảo vệ nhiệt
+
+Laptop có thể tự tắt vì quá nhiệt khi train 3DGS (đã xảy ra 2026-10-01 trên ThinkPad P1/T2000 khi
+chạy hai việc nặng cùng lúc). Chạy stack dưới systemd với trần CPU và bật watchdog nhiệt; watchdog
+đóng băng stack khi nóng và thả ra khi nguội, job không mất tiến độ. Chỉ chạy một việc nặng một lúc.
+
+```bash
+systemd-run --user --unit r2s-stack -p CPUQuota=250% --working-directory="$PWD" make -f Makefile.studio up
+systemd-run --user --unit r2s-thermal --working-directory="$PWD" scripts/gpu/thermal_guard.sh r2s-stack
+journalctl --user -u r2s-thermal -f      # xem các lần đóng băng/chạy tiếp
+```
+
+Ngưỡng mặc định: đóng băng khi CPU ≥ 90°C hoặc GPU ≥ 82°C, chạy tiếp khi CPU ≤ 80°C và GPU ≤ 68°C
+(ngưỡng chạy tiếp phải cao hơn nhiệt nền lúc máy rảnh, nếu không stack sẽ bị giữ đóng băng)
+(đổi bằng `HOT_CPU`, `HOT_GPU`, `COOL_CPU`, `COOL_GPU`). Máy thuê trong datacenter không cần bước này.
+
+### Đứt giữa chừng: checkpoint và chạy tiếp
+
+Trong lúc train 3DGS, Brush xuất checkpoint định kỳ vào `PRODUCT_WORKER_ROOT/<job_id>/resume/` (mặc định khoảng
+2.500 bước một lần; đổi bằng `REC04_BRUSH_CHECKPOINT_EVERY`, đặt `0` để tắt). Job `FAILED` vì máy tắt/worker chết
+thì bấm **Thử lại** (hoặc `POST /api/v1/jobs/<job_id>/retry`): attempt mới dùng lại kết quả COLMAP và train tiếp
+từ checkpoint mới nhất. Kho này chỉ nằm trên máy worker; đổi máy thì chạy lại từ đầu.
+
+Không có Docker (Kaggle, GPU thuê dạng container): xem `scripts/kaggle/README.md`.
 
 ## 5. Xử lý Aisle_CW và export demo
 

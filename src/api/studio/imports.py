@@ -9,15 +9,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from src.api.auth import require_editor
 from src.api.studio import deps
 from src.services.orchestration.auth import UserRecord
-from src.services.orchestration.imports import (
+from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
+from src.services.orchestration.storage import runtime_resolver
+from src.services.orchestration.uploads import UploadNotFoundError
+from src.services.orchestration.uploads.scene_imports import (
     ImportedScene,
     ImportNotFoundError,
     ImportService,
     SceneImportError,
 )
-from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
-from src.services.orchestration.storage import runtime_resolver
-from src.services.orchestration.uploads import UploadNotFoundError
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

@@ -38,10 +38,46 @@ export interface PlayCanvasRuntime {
   progress: number;
   hasCollision: boolean;
   walkAllowed: boolean;
+  /** Bộ điều khiển camera đang chạy trong viewer (đọc từ `state.cameraMode`). */
+  cameraMode: CameraMode;
   graphicsBackend?: string;
 }
 
-export const INITIAL_RUNTIME: PlayCanvasRuntime = { loaded: false, progress: 0, hasCollision: false, walkAllowed: false };
+/** Chế độ camera của supersplat-viewer; `anim` là hoạt ảnh camera dựng sẵn (Studio không dùng). */
+export type CameraMode = "orbit" | "fly" | "walk" | "anim";
+
+export const INITIAL_RUNTIME: PlayCanvasRuntime = {
+  loaded: false,
+  progress: 0,
+  hasCollision: false,
+  walkAllowed: false,
+  cameraMode: "orbit",
+};
+
+/**
+ * Sự kiện con lăn với bước cuộn nhân hệ số. Tốc độ zoom của viewer là hằng số nội bộ
+ * (`wheelSpeed`), không có trong settings, nên host nhân bước cuộn trước khi viewer nhận.
+ */
+export function scaledWheelInit(event: WheelEvent, factor: number): WheelEventInit {
+  return {
+    deltaX: event.deltaX * factor,
+    deltaY: event.deltaY * factor,
+    deltaZ: event.deltaZ * factor,
+    deltaMode: event.deltaMode,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    screenX: event.screenX,
+    screenY: event.screenY,
+    ctrlKey: event.ctrlKey,
+    shiftKey: event.shiftKey,
+    altKey: event.altKey,
+    metaKey: event.metaKey,
+    buttons: event.buttons,
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+  };
+}
 
 export function detectPlayCanvasCapability(): PlayCanvasCapability {
   if (typeof document === "undefined") {
@@ -110,6 +146,8 @@ export interface PlayCanvasSceneProps {
    * phủ cùng scene graph và cho camera bay tới vật.
    */
   onApp?: (app: ViewerAppLike | null, controls?: ViewerControls) => void;
+  /** Hệ số nhân bước cuộn chuột (1 = mặc định của viewer). Đổi không tạo lại viewer. */
+  wheelFactor?: number;
 }
 
 export interface ViewerAnnotation {
@@ -122,6 +160,17 @@ export interface ViewerAnnotation {
 export interface ViewerControls {
   /** Bay tới annotation thứ `index`; false nếu viewer chưa nạp xong (API yêu cầu `state.loaded`). */
   select(index: number): boolean;
+  /** Bật/tắt điều khiển camera của viewer (tắt trong lúc kéo gizmo để hai bên không tranh con trỏ). */
+  setInputEnabled(enabled: boolean): void;
+  /**
+   * Chuyển chế độ camera. `walk` chỉ được khi viewer báo `walkAllowed` (có dữ liệu va chạm và scene
+   * đủ lớn). Trả false khi viewer chưa nạp xong hoặc chế độ không dùng được.
+   */
+  setCameraMode(mode: Exclude<CameraMode, "anim">): boolean;
+  /** Đưa cả scene vào khung hình (chuyển về xoay quanh tâm); false nếu viewer chưa nạp xong. */
+  frameScene(): boolean;
+  /** Về vị trí ban đầu của chế độ hiện tại; false nếu viewer chưa nạp xong. */
+  resetCamera(): boolean;
 }
 
 export function PlayCanvasScene({
@@ -143,8 +192,27 @@ export function PlayCanvasScene({
   initialCamera,
   annotations,
   onApp,
+  wheelFactor = 1,
 }: PlayCanvasSceneProps) {
   const container = useRef<HTMLDivElement | null>(null);
+  const wheel = useRef(wheelFactor);
+  useEffect(() => {
+    wheel.current = wheelFactor;
+  }, [wheelFactor]);
+  useEffect(() => {
+    const host = container.current;
+    if (!host) return;
+    // Bắt ở pha capture trên host (trước canvas của viewer), thay bằng sự kiện đã nhân hệ số.
+    // Sự kiện tự tạo có `isTrusted = false` nên đi thẳng tới viewer, không lặp vô hạn.
+    const rescale = (event: WheelEvent) => {
+      if (!event.isTrusted || wheel.current === 1 || !(event.target instanceof Element)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      event.target.dispatchEvent(new WheelEvent("wheel", scaledWheelInit(event, wheel.current)));
+    };
+    host.addEventListener("wheel", rescale, { capture: true, passive: false });
+    return () => host.removeEventListener("wheel", rescale, { capture: true });
+  }, []);
   const [runtime, setRuntime] = useState<PlayCanvasRuntime>(INITIAL_RUNTIME);
 
   /** Đẩy trạng thái lên host; giữ identity ổn định vì nằm trong deps của effect khác. */
@@ -221,11 +289,30 @@ export function PlayCanvasScene({
               viewer.selectAnnotation(index);
               return true;
             },
+            setInputEnabled: (enabled) => {
+              if (!disposed) viewer.state.inputEnabled = enabled;
+            },
+            setCameraMode: (next) => {
+              if (disposed || !viewer.state.loaded) return false;
+              if (next === "walk" && !viewer.state.walkAllowed) return false;
+              viewer.state.cameraMode = next;
+              return true;
+            },
+            frameScene: () => {
+              if (disposed || !viewer.state.loaded) return false;
+              viewer.frameScene();
+              return true;
+            },
+            resetCamera: () => {
+              if (disposed || !viewer.state.loaded) return false;
+              viewer.resetCamera();
+              return true;
+            },
           });
         }
         // EventHandler của PlayCanvas bắn `<key>:changed`; `on` trả EventHandle
         // để huỷ. Không tự poll `state` vì đó là nguồn thật của thư viện.
-        for (const event of ["progress:changed", "loaded:changed", "hasCollision:changed", "walkAllowed:changed"]) {
+        for (const event of ["progress:changed", "loaded:changed", "hasCollision:changed", "walkAllowed:changed", "cameraMode:changed"]) {
           subscriptions.push(viewer.events.on(event, () => { if (!disposed) publish(readRuntime(viewer)); }));
         }
         if (viewer.app?.assets) {
@@ -301,7 +388,7 @@ export interface ViewerAppLike {
 /** Chỉ những field host thật sự dùng, để không phụ thuộc shape đầy đủ của thư viện. */
 interface ViewerHandleLike {
   readonly app?: { readonly graphicsDevice: { readonly deviceType: string } };
-  readonly state: { loaded: boolean; progress: number; hasCollision: boolean; walkAllowed: boolean };
+  readonly state: { loaded: boolean; progress: number; hasCollision: boolean; walkAllowed: boolean; cameraMode: CameraMode };
   readonly events: { on(key: string, handler: () => void): { off(): void } };
   frameScene(): void;
   resetCamera(): void;
@@ -315,6 +402,7 @@ function readRuntime(viewer: ViewerHandleLike): PlayCanvasRuntime {
     progress: Number.isFinite(viewer.state.progress) ? Math.max(0, Math.min(100, viewer.state.progress)) : 0,
     hasCollision: viewer.state.hasCollision,
     walkAllowed: viewer.state.walkAllowed,
+    cameraMode: viewer.state.cameraMode,
     graphicsBackend: viewer.app?.graphicsDevice.deviceType,
   };
 }

@@ -17,6 +17,8 @@
 - [Product Requirements](PRD.md): scope, priority, behavior và acceptance.
 - [Dataset Playbook](DATASET_PLAYBOOK.md): dataset/evaluation/leakage rules.
 - [Architecture](../ARCHITECTURE.md): canonical placement và module ownership.
+- [Studio UX Spec](STUDIO_UX_SPEC.md): IA, màn hình, trạng thái UI và quyết định Q/D-xx của Web Studio;
+  không override PRD hoặc Execution Contract.
 - [Execution Documentation](execution/README.md): contracts, integration,
   task catalog, milestones và track entrypoints.
 
@@ -48,6 +50,7 @@
 
 ## Supporting Guidance
 
+- [Project Context](CONTEXT.md): onboarding overview cho coding agent; không phải source of truth.
 - `guide/`: scaffold-level coding, testing, architecture và Git guidance.
 - `templates/`: execution-plan và decision templates.
 - `decisions/`: accepted lasting decisions chưa được đặt trực tiếp trong

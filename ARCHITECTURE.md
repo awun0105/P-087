@@ -25,10 +25,13 @@ thư mục đã được implement ở checkout hiện tại):
 ```text
 src/
 ├── api/                              # Organizer scaffold; EX-PRODUCT
-│   ├── routes.py                     # Organizer scaffold; include các router
-│   ├── routes_product.py             # Project/job/artifact/scene/review API
+│   ├── routes.py                     # Organizer scaffold; điểm vào duy nhất: include router product, studio, auth
 │   ├── auth.py                       # Đăng nhập 2 role, mã mời, guard quyền, hạn mức GPU (ADR 0003)
-│   └── studio/                       # Studio MVP: uploads (+ upload thẳng), scenes, processing, samples (+ deps)
+│   ├── schemas.py                    # DTO của product API (khác models/schemas.py của chat mẫu)
+│   ├── product/                      # Hợp đồng UI P0, mỗi module một nhóm route (+ deps):
+│   │                                 #   projects, jobs, artifacts, scene, review
+│   └── studio/                       # Studio: uploads (+ upload thẳng), scenes, metric, imports, simulation,
+│                                     #   review, processing, samples (+ deps)
 ├── agents/                           # Organizer scaffold; giữ nguyên
 ├── llm/                              # Organizer scaffold; giữ nguyên
 ├── models/
@@ -68,33 +71,43 @@ src/
     │   ├── isaac/
     │   └── validation/
     └── orchestration/                # EX-PRODUCT
-        ├── jobs/                     # lifecycle, runtime DB + migration, runner, worker_cli, progress
+        ├── jobs/                     # lifecycle, runtime DB + migration, runner, worker_cli, progress;
+        │                             #   metric (xác nhận tỉ lệ mét), stage_views, thumbnails;
+        │                             #   admission (chờ + giữ chỗ tài nguyên), workspace (dọn scratch, lease attempt)
         ├── artifacts/                # resolver/store; remote.py = kho file S3/R2 (cache cục bộ tự đồng bộ)
         ├── auth/                     # tài khoản, mã mời, phiên, nhật ký, CLI tạo Reviewer
-        ├── projects/                 # project registry, privacy policy, link tải có hạn
-        ├── uploads/                  # upload qua API + upload thẳng lên kho file (direct.py)
-        ├── processing/               # thông số xử lý theo configs/product, đo máy worker
+        ├── projects/                 # project registry, privacy policy, link tải có hạn; deletion (thùng rác scene)
+        ├── uploads/                  # upload qua API + upload thẳng lên kho file (direct.py); scene_imports (3DGS)
+        ├── processing/               # thông số xử lý theo configs/product, đo máy worker (capability),
+        │                             #   ước lượng tài nguyên (resources), số đo theo lần chạy (telemetry, procfs)
         ├── samples/                  # thư viện video mẫu đã xử lý sẵn
-        ├── scene/                    # SceneIR revision cho viewer (PRODUCT-06)
-        ├── review/
+        ├── scene/                    # SceneIR revision, thao tác vật thể, danh mục asset; extraction, objectify,
+        │                             #   objectify_queue (tách scene theo vật, pipeline v2)
+        ├── review/                   # workflow duyệt/phát hành, lifecycle; simulation_package (gói mô phỏng)
+        ├── evaluation/               # bảng đánh giá theo job (chỉ số tự kiểm từng bước) và xuất báo cáo; đọc REC qua reconstruction.quality
         ├── release/
         ├── storage.py                # dựng resolver runtime (+ kho file) từ Settings
-        └── benchmark.py              # benchmark `pipeline_runtime` mỗi attempt
+        ├── benchmark.py              # benchmark `pipeline_runtime` mỗi attempt
+        └── environment.py            # fingerprint môi trường runtime (scripts/doctor.py)
+                                      # Gốc orchestration chỉ giữ ba file hạ tầng dùng chung ở trên; use-case nằm
+                                      # trong thư mục con cùng miền.
 
 frontend/                             # EX-PRODUCT; Next.js Web Studio
 ├── src/
 │   ├── app/                          # routes, layouts, page composition
-│   │   ├── (studio)/                 # Studio MVP (mặc định)
-│   │   └── (legacy)/                 # UI P0 đầy đủ; redirect về Studio trừ khi LEGACY_UI=1
-│   ├── components/                   # shared presentational components (`studio/` = primitives MVP)
+│   │   ├── page.tsx                  # landing (`/`)
+│   │   └── (studio)/                 # app Studio: overview, scenes, jobs, new, team, account, login/register
+│   ├── components/
+│   │   ├── shadcn/                   # bộ nền Radix (donor), không chứa logic sản phẩm
+│   │   └── studio/                   # primitives và phản hồi của Studio (Button, Card, Notice, CopyButton…)
 │   ├── features/
-│   │   ├── studio/                   # luồng Studio MVP: Scenes, Scene mới + video mẫu, editor
-│   │   ├── projects/
-│   │   ├── jobs/
-│   │   ├── viewer/
-│   │   ├── scene/
-│   │   ├── validation/
-│   │   └── review/
+│   │   ├── landing/                  # trang đầu
+│   │   ├── shell/                    # khung app: sidebar, header, breadcrumb, đổi theme
+│   │   ├── studio/                   # mọi màn của Studio; `scene/` (tab của một scene), `inspection/` (xem từng bước),
+│   │   │                             #   `auth/` (đăng nhập, nhóm, tài khoản)
+│   │   └── viewer/                   # engine 3D dùng chung: PlayCanvas scene, lớp phủ vật thể, GLB, đo đạc
+│   │                                 # UI P0 cũ (route `(legacy)`, features scene/review/jobs, components/ui) đã xoá
+│   │                                 # 02/10/2026 — STUDIO_UX_SPEC.md D-10; URL cũ chuyển hướng về /overview.
 │   └── lib/
 │       ├── api/                      # typed FastAPI client
 │       └── contracts/                # frontend projections of API schemas
@@ -403,7 +416,7 @@ real Brush, browser hoặc Isaac acceptance.
   Reviewer, audit review decision và chỉ release candidate đã validate/approve.
   Cơ chế đăng nhập/token/session cụ thể chưa được khóa; không mặc định JWT hoặc
   bỏ auth. `src/api/routes.py` giữ chat/status scaffold và include
-  `routes_product.py` + `studio/`.
+  `product/` + `studio/`.
 
 ### 3. AI Agent (LangGraph)
 

@@ -13,6 +13,7 @@ import pytest
 from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
 from src.models.contracts.release import ApprovalDecision, SceneRevisionStatus
 from src.models.contracts.validation import PathResult, RuleResult, ValidationCheck, ValidationReport
+from src.services.orchestration.review.simulation_package import build_simulation_package
 from src.services.orchestration.review.workflow import (
     ReviewError,
     decide,
@@ -21,7 +22,6 @@ from src.services.orchestration.review.workflow import (
     seal_release,
 )
 from src.services.orchestration.scene.objects import add_box_object, apply_object_action
-from src.services.orchestration.simulation_package import build_simulation_package
 from tests.test_orchestration.test_simulation_package import _scene_job
 
 ZERO = "sha256:" + "0" * 64
@@ -57,6 +57,34 @@ def test_without_validation_report_review_is_blocked(tmp_path: Path) -> None:
     state = review_state(registry, job.job_id)
     assert state.record.status == SceneRevisionStatus.CANDIDATE_READY
     assert state.validation is None and "SIM-06" in state.blockers[0]
+    assert state.isaac_runtime_proof is None
+
+
+@pytest.mark.parametrize(
+    ("isaac_sim", "expected"),
+    [
+        ("UNVERIFIED", False),
+        ("UNVERIFIED (local environment)", False),  # định dạng validator SIM-06 ghi khi máy không có Isaac
+        ("tbd", False),
+        (None, False),  # thiếu khoá isaac_sim
+        ("4.2.0 (omni detected)", True),
+    ],
+)
+def test_review_state_says_whether_report_has_isaac_runtime_proof(
+    tmp_path: Path, isaac_sim: str | None, expected: bool
+) -> None:
+    registry, job, candidate = _packaged(tmp_path)
+    base = _report(candidate)
+    versions = {"gpu": "UNVERIFIED"} if isaac_sim is None else {"isaac_sim": isaac_sim}
+    draft = base.model_copy(update={"environment_versions": versions, "report_checksum": ZERO})
+    report = draft.model_copy(update={"report_checksum": canonical_content_checksum(draft, "report_checksum")})
+    record_validation_report(registry, job.job_id, report)
+
+    state = review_state(registry, job.job_id)
+
+    assert state.isaac_runtime_proof is expected
+    # Cờ chỉ để hiển thị: cổng duyệt hiện vẫn theo overall_result (xem bản ghi plan — PROPOSAL chặn duyệt).
+    assert state.record.status == SceneRevisionStatus.READY_FOR_REVIEW
 
 
 def test_approve_requires_each_warning_then_seals_exact_candidate(tmp_path: Path) -> None:

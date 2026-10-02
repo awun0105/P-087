@@ -7,8 +7,16 @@ from src.services.scene.publisher import with_scene_checksum
 _ZERO_CHECKSUM = "sha256:" + "0" * 64
 
 
-def scene_from_bundle(bundle: ReconstructionBundle, objects: list[SceneObject], provenance: dict) -> SceneIR:
-    """Môi trường = 3DGS hệ mét + collision mesh REC-05; vật thể = ứng viên chờ xác nhận."""
+def scene_from_bundle(
+    bundle: ReconstructionBundle,
+    objects: list[SceneObject],
+    provenance: dict,
+    environment: SceneEnvironment | None = None,
+) -> SceneIR:
+    """Môi trường = 3DGS hệ mét + collision mesh REC-05; vật thể = ứng viên chờ xác nhận.
+
+    `environment` thay môi trường mặc định khi bước tách theo vật (pipeline v2) đã dựng nền đã vá.
+    """
     scene = SceneIR(
         artifact_type="SceneIR",
         schema_version="1.0",
@@ -16,7 +24,8 @@ def scene_from_bundle(bundle: ReconstructionBundle, objects: list[SceneObject], 
         scene_revision="rev-001",
         coordinate_system=bundle.coordinate_system,
         metric_scale=bundle.metric_scale,
-        environment=SceneEnvironment(
+        environment=environment
+        or SceneEnvironment(
             visual_ref=bundle.visual_artifact_ref,
             geometry_ref=bundle.canonical_geometry_ref,
         ),

@@ -13,12 +13,16 @@ import {
   Color,
   CULLFACE_NONE,
   Entity,
+  Gizmo,
   Quat,
+  RotateGizmo,
   StandardMaterial,
+  TranslateGizmo,
   Vec3 as PcVec3,
   type AppBase,
   type CameraComponent,
   type ContainerResource,
+  type Layer,
 } from "playcanvas";
 
 import { DISPLAY_EULER, type Vec3 } from "@/features/viewer/source-frame";
@@ -70,6 +74,26 @@ function material(hex: string, opacity: number, lit: boolean): StandardMaterial 
   return result;
 }
 
+/** Một vật của scene theo vật (pipeline v2): Gaussian riêng trong hệ cục bộ + transform của vật. */
+export interface OverlayObject {
+  id: string;
+  /** URL hình riêng của vật; null với vật không có hình riêng (vật cản hộp, asset chưa có bản xem trước). */
+  url: string | null;
+  /** `gsplat` (mặc định): PLY Gaussian của vật tách từ scene. `model`: GLB hình khối của asset thư viện. */
+  kind?: "gsplat" | "model";
+  position: Vec3;
+  rotation_xyzw: [number, number, number, number];
+  visible: boolean;
+}
+
+export type GizmoMode = "translate" | "rotate";
+
+export interface GizmoHandlers {
+  onStart(): void;
+  /** Transform cục bộ của vật (hệ canonical Z-up, mét) khi người dùng thả gizmo. */
+  onEnd(id: string, position: Vec3, rotation_xyzw: [number, number, number, number]): void;
+}
+
 export class SceneOverlay {
   private readonly app: AppBase;
   private readonly root: Entity;
@@ -79,6 +103,10 @@ export class SceneOverlay {
   private collisionEntity: Entity | null = null;
   private collisionMaterial: StandardMaterial | null = null;
   private readonly boxIds = new Map<Entity, string>();
+  private readonly objectRoot: Entity;
+  private readonly objects = new Map<string, { entity: Entity; asset: Asset | null; url: string | null }>();
+  private gizmoLayer: Layer | null = null;
+  private gizmo: TranslateGizmo | RotateGizmo | null = null;
   private destroyed = false;
 
   /**
@@ -96,6 +124,8 @@ export class SceneOverlay {
     this.root.setLocalEulerAngles(x, y, z);
     this.boxRoot = new Entity("r2s-boxes", this.app);
     this.root.addChild(this.boxRoot);
+    this.objectRoot = new Entity("r2s-objects", this.app);
+    this.root.addChild(this.objectRoot);
     // Splat không cần đèn; đèn này chỉ để mesh collision có khối (bóng theo mặt) khi nhìn.
     const light = new Entity("r2s-light", this.app);
     light.addComponent("light", { type: "directional", color: new Color(1, 1, 1), intensity: 1.1 });
@@ -172,6 +202,99 @@ export class SceneOverlay {
   }
 
   /**
+   * Đồng bộ các vật có Gaussian riêng: thêm vật mới (nạp PLY một lần theo URL), gỡ vật đã mất, cập nhật
+   * transform và ẩn/hiện. Entity của vật nằm dưới gốc Z-up nên toạ độ cục bộ chính là transform SceneIR.
+   */
+  setObjects(items: readonly OverlayObject[]): void {
+    if (!this.alive) return;
+    const wanted = new Set(items.map((item) => item.id));
+    for (const [id, record] of this.objects) {
+      if (wanted.has(id) && record.url === items.find((item) => item.id === id)?.url) continue;
+      if (this.gizmo && this.gizmoTarget === id) this.detachGizmo();
+      this.releaseObject(record);
+      this.objects.delete(id);
+    }
+    for (const item of items) {
+      let record = this.objects.get(item.id);
+      if (!record) {
+        const entity = new Entity(`r2s-object-${item.id}`, this.app);
+        this.objectRoot.addChild(entity);
+        record = { entity, asset: null, url: item.url };
+        this.objects.set(item.id, record);
+        if (item.url) {
+          const model = item.kind === "model";
+          const asset = model
+            ? new Asset(`r2s-object-${item.id}`, "container", { url: item.url, filename: "asset.glb" })
+            : new Asset(`r2s-object-${item.id}`, "gsplat", { url: item.url, filename: "object.ply" });
+          record.asset = asset;
+          asset.once("load", () => {
+            if (this.destroyed || this.objects.get(item.id)?.asset !== asset) return;
+            // GLB giữ màu đỉnh của asset; entity con bị huỷ cùng entity của vật khi gỡ.
+            if (model) entity.addChild((asset.resource as ContainerResource).instantiateRenderEntity());
+            else entity.addComponent("gsplat", { asset });
+            this.redraw();
+          });
+          this.app.assets.add(asset);
+          this.app.assets.load(asset);
+        }
+      }
+      record.entity.setLocalPosition(...item.position);
+      record.entity.setLocalRotation(new Quat(...item.rotation_xyzw));
+      record.entity.enabled = item.visible;
+    }
+    this.redraw();
+  }
+
+  private gizmoTarget: string | null = null;
+
+  /** Gắn gizmo dịch/xoay vào một vật; `null` để gỡ. Kéo gizmo chỉ đổi entity, backend đổi khi `onEnd`. */
+  attachGizmo(id: string | null, mode: GizmoMode, handlers: GizmoHandlers): void {
+    this.detachGizmo();
+    const target = id ? this.objects.get(id)?.entity : undefined;
+    const camera = this.alive ? (this.app.root.findComponents("camera")[0] as CameraComponent | undefined) : undefined;
+    if (!id || !target || !camera) return;
+    this.gizmoLayer ??= Gizmo.createLayer(this.app);
+    const gizmo = mode === "rotate" ? new RotateGizmo(camera, this.gizmoLayer) : new TranslateGizmo(camera, this.gizmoLayer);
+    gizmo.coordSpace = "local";
+    gizmo.attach([target]);
+    gizmo.on("transform:start", () => handlers.onStart());
+    gizmo.on("transform:move", () => {
+      // Hộp của vật đi theo trong lúc kéo để người dùng thấy collider sẽ nằm ở đâu.
+      for (const [box, boxId] of this.boxIds) {
+        if (boxId !== id) continue;
+        box.setLocalPosition(target.getLocalPosition());
+        box.setLocalRotation(target.getLocalRotation());
+      }
+      this.redraw();
+    });
+    gizmo.on("transform:end", () => {
+      const p = target.getLocalPosition();
+      const q = target.getLocalRotation();
+      handlers.onEnd(id, [p.x, p.y, p.z], [q.x, q.y, q.z, q.w]);
+    });
+    gizmo.on("render:update", () => this.redraw());
+    this.gizmo = gizmo;
+    this.gizmoTarget = id;
+    this.redraw();
+  }
+
+  detachGizmo(): void {
+    this.gizmo?.detach();
+    this.gizmo?.destroy();
+    this.gizmo = null;
+    this.gizmoTarget = null;
+    this.redraw();
+  }
+
+  private releaseObject(record: { entity: Entity; asset: Asset | null }): void {
+    record.entity.destroy();
+    if (record.asset) {
+      this.app.assets?.remove(record.asset);
+      record.asset.unload();
+    }
+  }
+
+  /**
    * Hộp gần nhất dưới con trỏ. `x`, `y` là toạ độ CSS pixel tính từ góc trên-trái canvas (quy ước
    * `CameraComponent.screenToWorld`). Chỉ xét hộp đang vẽ.
    */
@@ -197,7 +320,10 @@ export class SceneOverlay {
   }
 
   destroy(): void {
+    this.detachGizmo();
     this.destroyed = true;
+    for (const record of this.objects.values()) this.releaseObject(record);
+    this.objects.clear();
     this.boxIds.clear();
     this.root.destroy();
     this.releaseMaterials();

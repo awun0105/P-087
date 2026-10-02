@@ -51,7 +51,7 @@ class ParameterStatus(BaseModel):
 
 
 class Evaluation(BaseModel):
-    """Kết quả kiểm tra một bộ thông số; `blocking` = có tài nguyên đỏ."""
+    """Kết quả kiểm tra; `blocking` khi vượt năng lực máy, không chỉ bận tạm thời."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -90,12 +90,27 @@ def estimate_gb(model: ResourceModel, params: dict[str, ParamValue]) -> dict[Res
 def _available(capability: MachineCapability | None) -> dict[Resource, float | None]:
     if capability is None:
         return {"vram": None, "ram": None, "disk": None}
+    if capability.headroom_measured:
+        return {"vram": capability.vram_free_gb, "ram": capability.ram_available_gb, "disk": capability.disk_free_gb}
     return {"vram": capability.vram_total_gb, "ram": capability.ram_total_gb, "disk": capability.disk_free_gb}
 
 
+def _idle(capability: MachineCapability | None) -> dict[Resource, float | None] | None:
+    """Phần trống lúc pipeline không dùng máy; None khi worker chưa từng đo lúc rảnh."""
+    if capability is None or capability.idle_measured_at is None:
+        return None
+    return {
+        "vram": capability.idle_vram_free_gb,
+        "ram": capability.idle_ram_available_gb,
+        "disk": capability.idle_disk_free_gb,
+    }
+
+
 def _status(model: ResourceModel, required: float, available: float | None) -> Status:
-    if available is None or available <= 0:
+    if available is None:
         return "unknown"
+    if available <= 0:
+        return "danger"
     ratio = required / available
     if ratio >= model.danger_ratio:
         return "danger"
@@ -115,6 +130,17 @@ def evaluate(
     values = presets.validate_params(params)
     required = estimate_gb(model, values)
     available = _available(capability)
+    capacity: dict[Resource, float | None] = {
+        "vram": capability.vram_total_gb if capability else None,
+        "ram": capability.ram_total_gb if capability else None,
+        # Worker cũ không báo tổng dung lượng ổ: chỉ khi đó mới coi phần trống là giới hạn cứng.
+        "disk": (
+            capability.disk_total_gb
+            if capability and capability.disk_total_gb is not None
+            else (capability.disk_free_gb if capability and not capability.headroom_measured else None)
+        ),
+    }
+    idle = _idle(capability)
     resources: list[ResourceEstimate] = []
     marks: dict[str, ParameterStatus] = {}
     rank = {"ok": 0, "unknown": 0, "warn": 1, "danger": 2}
@@ -126,7 +152,21 @@ def evaluate(
         else:
             message = f"Cần khoảng {required[resource]:.1f} GB / máy có {have:.1f} GB {_LABEL[resource]}"
             if status == "danger":
-                message += " — có thể crash, hãy giảm thông số được tô đỏ"
+                if (
+                    capability
+                    and capability.headroom_measured
+                    and _status(model, required[resource], capacity[resource]) != "danger"
+                ):
+                    # Lúc máy rảnh cũng không đủ thì chờ job khác xong không giải quyết được.
+                    if idle is not None and _status(model, required[resource], idle[resource]) == "danger":
+                        message += (
+                            " — lúc máy xử lý rảnh cũng không đủ; job sẽ chờ tới khi phần đang bị chiếm"
+                            " được giải phóng, hoặc giảm thông số được tô đỏ"
+                        )
+                    else:
+                        message += " — hiện thiếu tài nguyên; job sẽ chờ và tự chạy tiếp khi đủ"
+                else:
+                    message += " — có thể crash, hãy giảm thông số được tô đỏ"
         resources.append(
             ResourceEstimate(
                 resource=resource,
@@ -151,7 +191,8 @@ def evaluate(
     return Evaluation(
         resources=resources,
         parameters=parameters,
-        blocking=any(item.status == "danger" for item in resources),
+        # Bận tạm thời không cấm enqueue. Chỉ chặn cấu hình vượt capacity thật đã biết.
+        blocking=any(_status(model, required[name], capacity[name]) == "danger" for name in ("vram", "ram", "disk")),
         note=model.note,
     )
 
@@ -188,6 +229,11 @@ def _fits(model: ResourceModel, values: dict[str, ParamValue], available: dict[R
 def maximum_for_machine(presets: ProcessingPresets, capability: MachineCapability | None) -> dict[str, ParamValue]:
     """Bộ thông số cao nhất giữa preset tối thiểu và tối đa mà mọi tài nguyên dưới ngưỡng vàng.
 
+    Tính theo mốc "máy rảnh" worker ghi lại, không theo phần đang trống tức thời: lúc
+    worker đang chạy job khác, phần trống đã bị chính job đó chiếm và sẽ được trả lại
+    trước khi job mới chạy (job mới chờ trong hàng đợi với nguyên cấu hình). Worker chưa
+    từng đo lúc rảnh thì dùng tổng năng lực máy.
+
     Tìm nhị phân hệ số nội suy t. Máy yếu tới mức preset tối thiểu cũng không vừa
     thì nội suy tiếp xuống phía min của từng thông số. Không có số đo máy → preset
     tối thiểu (không đoán).
@@ -196,7 +242,14 @@ def maximum_for_machine(presets: ProcessingPresets, capability: MachineCapabilit
     if capability is None:
         return minimum
     model = presets.resource_model
-    available = _available(capability)
+    idle = _idle(capability)
+    available: dict[Resource, float | None] = idle or {
+        "vram": capability.vram_total_gb,
+        "ram": capability.ram_total_gb,
+        "disk": capability.disk_free_gb,
+    }
+    if idle is not None and any(value is None for value in idle.values()):
+        return minimum  # Không suy maximum từ mốc rảnh thiếu số đo RAM/VRAM.
     floor = {spec.key: (spec.min if spec.kind != "choice" else minimum[spec.key]) for spec in presets.parameters}
     if _fits(model, minimum, available):
         low, high = minimum, dict(presets.presets["maximum"])

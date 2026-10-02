@@ -100,6 +100,41 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
         4,
         ("CREATE TABLE r2s_imports (import_id TEXT PRIMARY KEY, upload_id TEXT NOT NULL, payload TEXT NOT NULL)",),
     ),
+    (
+        # Yêu cầu dựng lại tập vật của scene (chạy lại tách theo vật / dùng hộp): API ghi, worker nhận.
+        # Nằm trong DB chung để API và worker ở hai máy khác nhau vẫn thấy nhau; mỗi job giữ yêu cầu gần nhất.
+        5,
+        (
+            """CREATE TABLE r2s_scene_requests (
+                job_id TEXT PRIMARY KEY, status TEXT NOT NULL, payload TEXT NOT NULL)""",
+            "CREATE INDEX r2s_scene_requests_by_status ON r2s_scene_requests(status)",
+        ),
+    ),
+    (
+        # Thùng rác scene: bản ghi của mỗi lần gỡ (dòng DB đã gỡ + namespace file) để khôi phục hoặc xoá hẳn.
+        # Nằm trong DB vì đĩa của API trên cloud không bền; file trên kho S3/R2 chỉ bị xoá khi xoá hẳn.
+        6,
+        ("CREATE TABLE r2s_trash (entry_id TEXT PRIMARY KEY, deleted_at TEXT NOT NULL, payload TEXT NOT NULL)",),
+    ),
+    (
+        # Observation tài nguyên bind job revision; JobManifest vẫn sở hữu queue/lifecycle.
+        7,
+        (
+            "CREATE TABLE r2s_resource_waits (job_id TEXT PRIMARY KEY REFERENCES r2s_jobs(job_id) ON DELETE CASCADE, payload TEXT NOT NULL)",
+        ),
+    ),
+    (
+        # Giữ chỗ tài nguyên: một dòng cho mỗi worker đang chạy job (không phải lifecycle của job).
+        # Số đo tài nguyên theo lần chạy công cụ: lịch sử của máy, không cascade theo job để còn
+        # dùng cho ước lượng sau khi scene bị xoá.
+        8,
+        (
+            "CREATE TABLE r2s_resource_reservations (worker_id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
+            "CREATE TABLE r2s_resource_usage (usage_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, "
+            "recorded_at TEXT NOT NULL, payload TEXT NOT NULL)",
+            "CREATE INDEX r2s_resource_usage_job ON r2s_resource_usage(job_id)",
+        ),
+    ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 

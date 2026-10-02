@@ -75,6 +75,14 @@ class SceneEditor:
                     )
                 recovered = self._publish(job_id, fixture, supersedes=None)
             self._revisions[job_id] = recovered
+        # Tiến trình khác (worker chạy lại tách theo vật) có thể đã publish revision kế tiếp; chuỗi
+        # revision liền mạch nên chỉ cần dò tiếp từ bản đang giữ — thường là một lần kiểm tồn tại.
+        for _ in range(_MAX_RECOVERY_STEPS):
+            cached = self._revisions[job_id]
+            newer = self._load_revision(job_id, _next_scene_revision(cached.scene.scene_revision), fresh=True)
+            if newer is None:
+                break
+            self._revisions[job_id] = newer
         return self._revisions[job_id]
 
     def visual_binding(self, job_id: str | None = None) -> VisualBinding:
@@ -133,8 +141,13 @@ class SceneEditor:
         references = [scene.environment.geometry_ref]
         if scene.environment.collider_ref is not None:
             references.append(scene.environment.collider_ref)
+        if scene.environment.visual_ref is not None:
+            references.append(scene.environment.visual_ref)
         for item in scene.objects:
             references.append(item.geometry_ref)
+            # Scene theo vật (pipeline v2): Gaussian riêng của từng vật cho viewer.
+            if item.visual_ref is not None:
+                references.append(item.visual_ref)
             if item.collider is not None and item.collider.geometry_ref is not None:
                 references.append(item.collider.geometry_ref)
         return references
@@ -169,6 +182,10 @@ class SceneEditor:
         revision = self._publish(job_id, with_canonical_checksum(scene, "scene_ir_checksum"), supersedes=None)
         self._revisions[job_id] = revision
         return revision
+
+    def revision(self, job_id: str, scene_revision: str) -> SceneRevision | None:
+        """Một revision đã publish của job (đọc lại, kiểm checksum); None nếu chưa có."""
+        return self._load_revision(job_id, scene_revision)
 
     def publish_next(self, job_id: str, expected_revision: str, scene: SceneIR, operation: str) -> SceneEditResult:
         """Publish kết quả một thao tác domain EX-SCENE (xác nhận/loại/thêm vật) thành revision kế tiếp.
@@ -268,10 +285,10 @@ class SceneEditor:
             revision = _next_scene_revision(revision)
         raise SceneEditRejectedError(f"chuỗi revision của {job_id} vượt {_MAX_RECOVERY_STEPS} bước")
 
-    def _load_revision(self, job_id: str, revision: str) -> SceneRevision | None:
+    def _load_revision(self, job_id: str, revision: str, *, fresh: bool = False) -> SceneRevision | None:
         """Đọc một revision đã publish; None nếu chưa có. Hỏng thì raise, không đoán."""
-        path = self.resolver.resolve(scene_artifact_uri(job_id, revision))
-        if not path.is_file():
+        path = self.resolver.locate(scene_artifact_uri(job_id, revision), fresh=fresh)
+        if path is None:
             return None
         reference = self._reference_for(job_id, revision, sha256_file(path))
         scene = SceneIR.model_validate_json(path.read_text(encoding="utf-8"))
@@ -351,7 +368,8 @@ class SceneEditor:
         try:
             self.store.publish(reference, payload)
         except ArtifactAlreadyExistsError:
-            if self.resolver.resolve(reference.artifact_uri).read_bytes() != payload:
+            existing = self.resolver.locate(reference.artifact_uri)
+            if existing is None or existing.read_bytes() != payload:
                 raise
 
 

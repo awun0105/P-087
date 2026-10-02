@@ -140,7 +140,7 @@ up: env
 	 set_env APP_PORT "$$api"; set_env STUDIO_WEB_PORT "$$web"; \
 	 set_env REAL2SIM_API_URL "http://127.0.0.1:$$api"; \
 	 echo ""; \
-	 echo "  Studio : http://localhost:$$web"; \
+	 echo "  Studio : http://localhost:$$web   (landing; app: http://localhost:$$web/overview)"; \
 	 echo "  API    : http://127.0.0.1:$$api/docs"; \
 	 echo "  Video mẫu: http://localhost:$$web/new"; \
 	 echo "  Dừng   : Ctrl+C (tự kill các port trên)"; \

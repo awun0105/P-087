@@ -8,6 +8,7 @@ import hashlib
 import os
 import re
 import tempfile
+import time
 from pathlib import Path, PurePosixPath
 from typing import TypeVar
 
@@ -26,6 +27,8 @@ from src.services.orchestration.artifacts.remote import ArtifactRemote
 
 ContractT = TypeVar("ContractT", bound=BaseModel)
 _URI_PREFIX = "artifact://jobs/"
+#: Thời gian nhớ kết quả "kho file chưa có artifact này" (giây).
+_MISSING_TTL_SECONDS = 3.0
 
 
 class ArtifactResolver:
@@ -34,6 +37,7 @@ class ArtifactResolver:
     def __init__(self, artifact_root: Path, remote: ArtifactRemote | None = None) -> None:
         self.artifact_root = artifact_root.expanduser().resolve()
         self.remote = remote
+        self._missing: dict[str, float] = {}
 
     def resolve(self, artifact_uri: str) -> Path:
         """Resolve one safe logical URI without allowing path traversal."""
@@ -55,6 +59,30 @@ class ArtifactResolver:
         if not path.is_file():
             raise ArtifactNotFoundError(f"artifact does not exist: {artifact_uri}")
         verify_file_checksum(path, checksum)
+        return path
+
+    def locate(self, artifact_uri: str, *, fresh: bool = False) -> Path | None:
+        """Đường dẫn cục bộ của một artifact nếu nó đã tồn tại — trên đĩa này **hoặc** trên kho file; None nếu chưa có.
+
+        Dùng thay cho `resolve(uri).is_file()` ở mọi chỗ hỏi "artifact này đã có chưa": khi API và worker ở hai
+        máy (hoặc đĩa của API bị xoá khi deploy lại), artifact do bên kia publish chỉ có trên kho file. Có thì tải
+        về cache cục bộ. Kết quả "chưa có" được nhớ vài giây để một lượt đọc không gọi kho file nhiều lần;
+        `fresh=True` bỏ qua trí nhớ đó cho nơi cần thấy ngay thứ bên kia vừa publish (revision scene kế tiếp).
+        """
+        path = self.resolve(artifact_uri)
+        if path.is_file():
+            return path
+        if self.remote is None:
+            return None
+        now = time.monotonic()
+        if not fresh and now - self._missing.get(artifact_uri, -_MISSING_TTL_SECONDS) < _MISSING_TTL_SECONDS:
+            return None
+        try:
+            self.remote.fetch(self.relative_key(artifact_uri), path)
+        except ArtifactNotFoundError:
+            self._missing[artifact_uri] = now
+            return None
+        self._missing.pop(artifact_uri, None)
         return path
 
     def relative_key(self, artifact_uri: str) -> str:

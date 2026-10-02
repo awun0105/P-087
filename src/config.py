@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     product_runtime_manifest: Path | None = None
     product_seed: int | None = None
     product_worker_root: Path = Path("./data/product_workers")
+    #: Giữ scratch để chẩn đoán; mặc định chỉ dọn attempt đã publish và commit thành công.
+    product_worker_keep_scratch: bool = False
     product_preview_timeout_seconds: float = Field(default=21600, gt=0, allow_inf_nan=False)
     #: Thông số REC-05 (voxel/capsule) cho bước hoàn tất sau xác nhận tỉ lệ (owner chốt 2026-09-29).
     product_geometry_config: Path = Path("configs/product/geometry_v1.json")
@@ -64,6 +66,23 @@ class Settings(BaseSettings):
     product_scene_runtime_python: Path | None = None
     product_sam2_checkpoint: Path | None = None
     product_scene_timeout_seconds: float = Field(default=1800, gt=0, allow_inf_nan=False)
+    #: Pipeline v2 (ADR 0007): trọng số LaMa TorchScript cho vá nền; thiếu thì dùng cv2.inpaint.
+    product_lama_checkpoint: Path | None = None
+    #: Bật tách scene theo vật (Gaussian + collider từng vật, vá nền). Cần runtime có gsplat/coacd.
+    product_objectify: bool = True
+    #: Đặt trên API khi worker tách theo vật chạy ở máy khác (API không tự kiểm được runtime của worker).
+    product_objectify_remote_worker: bool = False
+    #: GLB xem trước của asset danh mục (sinh bằng scripts/scene/build_asset_previews.py); thiếu thì Studio vẽ hộp.
+    product_asset_preview_dir: Path = Path("./data/asset_previews")
+    #: Bản ghi Rerun của quá trình train 3DGS (`<job_id>.rrd`, sinh bằng eval/visual/brush_quality.py --rerun-save).
+    #: Là dữ liệu soi/đánh giá tuỳ chọn, không phải artifact của pipeline; thiếu thì Studio không hiện chế độ xem này.
+    product_rerun_recording_dir: Path = Path("./data/rerun_recordings")
+    #: Thư mục giữ file của scene đã vào thùng rác; None → `trash/` cạnh ARTIFACT_ROOT (cùng filesystem, dời là rename).
+    product_trash_root: Path | None = None
+    #: Mục nằm trong thùng rác quá số ngày này thì tự bị xoá hẳn (owner chốt 7 ngày, STUDIO_UX_SPEC D-15); 0 = tắt.
+    product_trash_retention_days: int = Field(default=7, ge=0, le=365)
+    #: Số lần thử tách theo vật trước khi dừng và để người dùng chọn (chạy lại / dùng hộp).
+    product_objectify_attempts: int = Field(default=3, ge=1, le=10)
     product_queue_poll_seconds: float = Field(default=3, ge=0.1, le=60, allow_inf_nan=False)
     # MVP 2026-09-29: `self_attested` cho phép video upload chạy với lời tự khai
     # không có khuôn mặt/biển số; mặc định giữ cổng QA `VERIFIED_ANONYMIZED`.

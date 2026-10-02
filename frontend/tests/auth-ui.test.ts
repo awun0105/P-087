@@ -31,8 +31,9 @@ describe("quyền phía UI (chỉ để ẩn/hiện; backend vẫn kiểm)", () 
 describe("safeNext", () => {
   it("chỉ cho quay lại đường dẫn nội bộ", () => {
     expect(safeNext("/new?sample=a")).toBe("/new?sample=a");
-    expect(safeNext("https://evil.example")).toBe("/");
-    expect(safeNext("//evil.example")).toBe("/");
-    expect(safeNext(null)).toBe("/");
+    // Đích mặc định là Tổng quan của app; `/` là landing nên không phải nơi quay về sau khi đăng nhập.
+    expect(safeNext("https://evil.example")).toBe("/overview");
+    expect(safeNext("//evil.example")).toBe("/overview");
+    expect(safeNext(null)).toBe("/overview");
   });
 });

@@ -1,5 +1,7 @@
 "use client";
 
+import { errorMessage } from "@/lib/ui-error";
+
 import { Check, Loader2, Radar, Redo2, Ruler, Sparkles, Undo2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -16,6 +18,9 @@ import { PlayCanvasScene, usePlayCanvasCapability } from "@/features/viewer/Play
 import type { SplatInspection } from "@/features/viewer/splat-inspection";
 import { confirmMetric, getDemoPoints, getMetricAssist, measureOnLidar, previewMetric } from "@/lib/api/studio";
 import type { LidarMeasurements, MetricInput, MetricPreview } from "@/lib/contracts/studio";
+import { HelpDetails, notifySuccess } from "@/components/studio/feedback";
+
+export interface MetricDraft { points: InspectionState["points"]; typed: { anchor: string; check: string } }
 
 /**
  * Bước xác nhận tỉ lệ mét (REC-06) sau khi xem 3DGS: chọn A/B (vật biết kích thước),
@@ -29,19 +34,24 @@ export function MetricConfirmView({
   filename,
   onClose,
   onConfirmed,
+  draft,
+  onDraft,
 }: {
   jobId: string;
   contentUrl: string;
   filename: string;
   onClose: () => void;
   onConfirmed: () => void;
+  draft?: MetricDraft;
+  onDraft?: (draft: MetricDraft) => void;
 }) {
   const [capability, setCapability] = usePlayCanvasCapability();
   const [controller, setController] = useState<SplatInspection | null>(null);
   const [inspection, setInspection] = useState<InspectionState>(EMPTY_INSPECTION);
   const [lidarAvailable, setLidarAvailable] = useState<boolean | null>(null);
   const [lidar, setLidar] = useState<{ points: InspectionState["points"]; result: LidarMeasurements | null; error: string | null } | null>(null);
-  const [typed, setTyped] = useState({ anchor: "", check: "" });
+  const [typed, setTyped] = useState(draft?.typed ?? { anchor: "", check: "" });
+  const initialPoints = useRef(draft?.points ?? []);
   const [preview, setPreview] = useState<{ input: MetricInput; result: MetricPreview } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,8 +61,10 @@ export function MetricConfirmView({
   useEffect(() => () => timers.current.forEach((timer) => window.clearTimeout(timer)), []);
   const onReady = useCallback((next: SplatInspection | null) => {
     setController(next);
+    if (next && initialPoints.current.length) next.setPoints(initialPoints.current);
     next?.setMeasuring(true);
   }, []);
+  useEffect(() => { if (controller) onDraft?.({ points: inspection.points, typed }); }, [controller, inspection.points, typed, onDraft]);
 
   useEffect(() => {
     let alive = true;
@@ -75,7 +87,7 @@ export function MetricConfirmView({
       (result) => setLidar({ points, result, error: null }),
       (cause: unknown) => {
         if (!controllerAbort.signal.aborted) {
-          setLidar({ points, result: null, error: cause instanceof Error ? cause.message : "Không đo được trên LiDAR" });
+          setLidar({ points, result: null, error: errorMessage(cause, "Không đo được trên LiDAR") });
         }
       },
     );
@@ -134,7 +146,7 @@ export function MetricConfirmView({
       );
     } catch (cause) {
       setDemoRunning(false);
-      setError(cause instanceof Error ? cause.message : "Không tự chọn được điểm");
+      setError(errorMessage(cause, "Không tự chọn được điểm"));
     }
   }
 
@@ -144,7 +156,7 @@ export function MetricConfirmView({
     try {
       await action();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Thao tác thất bại");
+      setError(errorMessage(cause, "Thao tác thất bại"));
     } finally {
       setBusy(false);
     }
@@ -154,7 +166,7 @@ export function MetricConfirmView({
     <div className="grid size-full lg:grid-cols-[1fr_22rem]">
       <div className="relative min-h-80 bg-viewport">
         {capability === "failed" || capability === "unavailable" ? (
-          <p className="grid size-full place-items-center p-6 text-center text-sm text-paper/80" role="alert">
+          <p className="grid size-full place-items-center p-6 text-center text-sm text-on-dark/80" role="alert">
             Không render được 3DGS để chọn điểm: trình duyệt cần WebGL2 hoặc WebGPU.
           </p>
         ) : (
@@ -181,18 +193,24 @@ export function MetricConfirmView({
         }}
       >
         <div className="flex items-center justify-between gap-2">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
+          <h2 className="flex items-center gap-2 text-sm font-bold text-ink">
             <Ruler className="size-4" aria-hidden />
             Xác nhận tỉ lệ mét
           </h2>
-          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Đóng">
-            <X aria-hidden />
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            <X aria-hidden /> Về Tiến trình
           </Button>
         </div>
-        <p className="text-xs leading-relaxed text-ink-muted">
+        <ol aria-label="Các bước xác nhận tỉ lệ" className="space-y-1 text-sm">
+          {["Chọn A–B và nhập kích thước", "Chọn C–D để kiểm độc lập", "Chọn 3 điểm trên sàn", "Xem trước và kiểm kết quả", "Xác nhận để tiếp tục"].map((step, index) => {
+            const active = inspection.points.length < 2 ? 0 : inspection.points.length < 4 ? 1 : inspection.points.length < 7 ? 2 : !current ? 3 : 4;
+            return <li key={step} aria-current={index === active ? "step" : undefined} className={index === active ? "font-semibold text-ember-strong" : "text-ink-muted"}>{index + 1}. {step}</li>;
+          })}
+        </ol>
+        <HelpDetails title="Cách chọn điểm và hệ tọa độ">
           Scene dựng từ video chưa có đơn vị mét. Chọn hai đầu một vật biết kích thước (A, B), hai đầu một vật khác để
           kiểm (C, D), rồi 3 điểm trên mặt sàn. Sàn sẽ thành mặt z = 0, A là gốc tọa độ.
-        </p>
+        </HelpDetails>
         {lidarAvailable && (
           <Notice tone="ochre" icon={<Radar aria-hidden />}>
             Scene từ dataset mẫu có LiDAR: khoảng cách lấy từ LiDAR để mô phỏng số đo ngoài đời. Video của bạn sẽ cần nhập
@@ -326,6 +344,7 @@ export function MetricConfirmView({
                 input &&
                 void run(async () => {
                   await confirmMetric(jobId, input, current.preview_checksum);
+                  notifySuccess("Đã xác nhận tỉ lệ. Hệ thống đang tiếp tục dựng hình học.");
                   onConfirmed();
                 })
               }

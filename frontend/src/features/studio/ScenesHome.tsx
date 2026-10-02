@@ -1,7 +1,9 @@
 "use client";
 
-import { ArrowRight, Clapperboard, Film, LayoutGrid, List, LogIn, Play, RefreshCw, Search, Upload } from "lucide-react";
-import Link from "next/link";
+import { errorMessage } from "@/lib/ui-error";
+
+import { ArrowRight, Clapperboard, Film, LayoutGrid, List, LogIn, Play, Plus, RefreshCw, Search } from "lucide-react";
+import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useCallback, useMemo, useState } from "react";
 
 import { Input } from "@/components/shadcn/input";
@@ -12,9 +14,11 @@ import { useAuth } from "@/features/studio/AuthProvider";
 import { STATUS_FILTERS, sceneStatus, type SceneStatusGroup } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
 import { canEdit } from "@/lib/api/auth";
-import { listImports, listSamples, listScenes, sampleFileUrl } from "@/lib/api/studio";
+import { listImports, listSamples, listScenes, moveImportToTrash, moveSceneToTrash, sampleFileUrl } from "@/lib/api/studio";
+import { MoveToTrashButton } from "@/features/studio/trash/MoveToTrashButton";
 import { cn } from "@/lib/cn";
 import type { ImportedScene, SampleSummary, SceneSummary } from "@/lib/contracts/studio";
+import { useListState, pageSlice, ListPagination, SortControl } from "@/features/studio/ListControls";
 import { formatBytes } from "@/lib/format";
 
 const DATE = new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeStyle: "short" });
@@ -25,6 +29,8 @@ export function ScenesHome() {
   const [imports, setImports] = useState<ImportedScene[]>([]);
   const [samples, setSamples] = useState<SampleSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [sampleError, setSampleError] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
 
   const { me } = useAuth();
   const signedIn = canEdit(me);
@@ -36,58 +42,86 @@ export function ScenesHome() {
       listSamples(),
       signedIn ? listImports() : Promise.resolve(null),
     ]);
-    setImports(importResult?.ok ? importResult.data.imports : []);
+    if (importResult?.ok) { setImports(importResult.data.imports); setImportError(null); }
+    else if (importResult) setImportError(errorMessage(importResult.error));
     if (sceneResult?.ok) {
       setScenes(sceneResult.data.scenes);
       setError(null);
     } else if (sceneResult) {
-      setError(sceneResult.error.detail);
+      setError(errorMessage(sceneResult.error));
     }
-    setSamples(sampleResult.ok ? sampleResult.data.samples : []);
+    if (sampleResult.ok) { setSamples(sampleResult.data.samples); setSampleError(null); }
+    else setSampleError(errorMessage(sampleResult.error));
   }, [signedIn]);
 
-  const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<SceneStatusGroup | "all">("all");
-  const [view, setView] = useState<"grid" | "list">(readView);
+  const { query, setQuery, filter, setFilter, view, setView, sort, setSort, params, update, clear } = useListState();
   const shown = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return (scenes ?? []).filter(
       (scene) =>
         (!needle || scene.project.name.toLowerCase().includes(needle)) &&
         (filter === "all" || sceneStatus(scene.latest_job, scene.preview_ready).group === filter),
-    );
-  }, [scenes, query, filter]);
+    ).sort((a, b) => sort === "name" ? a.project.name.localeCompare(b.project.name, "vi") : Date.parse(b.project.created_at ?? b.latest_job?.started_at ?? "") - Date.parse(a.project.created_at ?? a.latest_job?.started_at ?? ""));
+  }, [scenes, query, filter, sort]);
 
+  const pagination = pageSlice(shown, params.get("page"), 12);
+  const filteredImports = imports.filter((item) => item.name.toLowerCase().includes(query.trim().toLowerCase())).sort((a, b) => sort === "name" ? a.name.localeCompare(b.name, "vi") : Date.parse(b.created_at) - Date.parse(a.created_at));
+  const importPage = pageSlice(filteredImports, params.get("importsPage"), 12);
+  const filteredSamples = samples.filter((item) => item.title.toLowerCase().includes(query.trim().toLowerCase()));
+  const samplePage = pageSlice(filteredSamples, params.get("samplesPage"), 12);
   const anyActive = scenes?.some((scene) => sceneStatus(scene.latest_job, scene.preview_ready).active) ?? true;
-  usePolling(load, anyActive ? 4000 : 20000, true);
+  usePolling(load, signedIn && anyActive ? 4000 : 20000, true);
+  const continuing = (scenes ?? []).filter((scene) => {
+    const group = sceneStatus(scene.latest_job, scene.preview_ready).group;
+    return group === "action" || group === "running" || group === "failed";
+  }).slice(0, 3);
 
   return (
     <main className="mx-auto max-w-6xl px-4 pt-10 pb-20 sm:px-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-ink">Scenes</h1>
+          <h1 className="text-3xl font-extrabold tracking-tight text-ink">Scenes</h1>
           <p className="mt-1.5 max-w-xl text-[15px] leading-relaxed text-ink-muted">
-            Biến video quay trong kho thành scene 3D Gaussian Splatting để xem, chỉnh sửa và xuất file.
+            Tiếp tục scene đang làm, dựng từ video hoặc mở một file 3DGS đã có.
           </p>
         </div>
-        <Link href="/new" className={buttonVariants({ size: "lg" })}>
-          <Upload aria-hidden />
-          Tải video lên
-        </Link>
+        <Link href="/new" className={buttonVariants({ size: "lg" })}><Plus aria-hidden /> Scene mới</Link>
       </div>
 
-      {samples.length > 0 && <SamplesHero samples={samples} />}
+      {!signedIn && samples.length > 0 && <SamplesHero samples={samplePage.items} />}
+      {!signedIn && sampleError && <Notice tone="rust" className="mt-6">Không tải được mẫu: {sampleError}. Trang sẽ thử lại.</Notice>}
+
+      {signedIn && continuing.length > 0 && (
+        <section aria-labelledby="continue-heading" className="mt-8 rounded-2xl border border-line bg-paper-raised p-5">
+          <div className="flex items-center justify-between gap-2">
+            <h2 id="continue-heading" className="font-bold">Tiếp tục công việc</h2>
+            <Link href="/jobs" className="text-sm font-medium text-ember-strong hover:underline">Xem Jobs</Link>
+          </div>
+          <ul className="mt-3 divide-y divide-line">
+            {continuing.map((scene) => {
+              const status = sceneStatus(scene.latest_job, scene.preview_ready);
+              return <li key={scene.project.project_id}>
+                <Link href={`/scenes/${encodeURIComponent(scene.latest_job!.job_id)}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg py-3 focus-visible:outline-2 focus-visible:outline-ember">
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{scene.project.name}</span>
+                  <Badge tone={status.tone}>{status.label}</Badge>
+                  <ArrowRight className="size-4 text-ember-strong" aria-hidden />
+                </Link>
+              </li>;
+            })}
+          </ul>
+        </section>
+      )}
 
       <section aria-labelledby="scenes-heading" className="mt-12">
         <div className="mb-4 flex items-center justify-between">
-          <h2 id="scenes-heading" className="text-sm font-semibold tracking-wide text-ink-subtle uppercase">
-            Scene của bạn
+          <h2 id="scenes-heading" className="label-tech text-ink-muted">
+            Scene từ video · job
           </h2>
-          {scenes && scenes.length > 0 && (
+          {signedIn && scenes && scenes.length > 0 && (
             <span className="text-sm text-ink-subtle">{scenes.length} scene</span>
           )}
         </div>
-        {error && (
+        {signedIn && error && (
           <Notice tone="rust" icon={<RefreshCw aria-hidden />} className="mb-4">
             Không tải được danh sách scene: {error}. Trang sẽ tự thử lại.
           </Notice>
@@ -97,30 +131,25 @@ export function ScenesHome() {
             icon={<LogIn aria-hidden />}
             title="Đăng nhập để xem scene của nhóm"
             action={
-              <Link href="/login" className={buttonVariants({})}>
+              <Link href="/login?next=/scenes" className={buttonVariants({})}>
                 Đăng nhập
               </Link>
             }
           >
-            Khách có thể thử ngay với video mẫu ở trên.
+            Khách có thể thử với mẫu đã xử lý sẵn.
           </EmptyState>
         )}
+        {me === null && <p role="status" className="text-sm text-ink-muted">Đang kiểm tra quyền truy cập…</p>}
         {signedIn && scenes === null && !error && <SceneGridSkeleton />}
-        {scenes && scenes.length === 0 && (
+        {signedIn && scenes && scenes.length === 0 && (
           <EmptyState
             icon={<Film aria-hidden />}
             title="Chưa có scene nào"
-            action={
-              <Link href="/new" className={buttonVariants({})}>
-                <Upload aria-hidden />
-                Tải video đầu tiên
-              </Link>
-            }
           >
-            Quay video bằng camera di chuyển chậm quanh khu vực cần dựng, rồi tải lên. Có thể thử trước với video mẫu.
+            Chọn “Scene mới” ở đầu trang để dựng từ video hoặc mở file 3DGS. Bạn cũng có thể thử mẫu đã xử lý sẵn.
           </EmptyState>
         )}
-        {scenes && scenes.length > 0 && (
+        {signedIn && (
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <div className="relative min-w-48 flex-1 sm:max-w-xs">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-subtle" aria-hidden />
@@ -146,13 +175,13 @@ export function ScenesHome() {
                 </ToggleGroupItem>
               ))}
             </ToggleGroup>
+            <SortControl value={sort} onChange={setSort} />
             <ToggleGroup
               type="single"
               value={view}
               onValueChange={(value) => {
                 if (!value) return;
                 setView(value as "grid" | "list");
-                writeView(value as "grid" | "list");
               }}
               variant="outline"
               size="sm"
@@ -168,48 +197,64 @@ export function ScenesHome() {
             </ToggleGroup>
           </div>
         )}
-        {scenes && scenes.length > 0 && shown.length === 0 && (
+        {signedIn && scenes && scenes.length > 0 && shown.length === 0 && (
           <p className="rounded-xl border border-line p-6 text-center text-sm text-ink-muted">
             Không có scene khớp bộ lọc.{" "}
-            <button type="button" className="font-medium text-ember-strong hover:underline" onClick={() => { setQuery(""); setFilter("all"); }}>
+            <button type="button" className="font-medium text-ember-strong hover:underline" onClick={clear}>
               Xoá bộ lọc
             </button>
           </p>
         )}
-        {shown.length > 0 && view === "grid" && (
+        {signedIn && shown.length > 0 && view === "grid" && (
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {shown.map((scene) => (
-              <li key={scene.project.project_id}>
+            {pagination.items.map((scene) => (
+              <li key={scene.project.project_id} className="relative">
                 <SceneCard scene={scene} />
+                {/* Nằm ngoài thẻ link của card: nút trong link là HTML không hợp lệ và bấm sẽ điều hướng. */}
+                <MoveToTrashButton
+                  name={scene.project.name}
+                  move={() => moveSceneToTrash(scene.project.project_id)}
+                  onMoved={() => void load()}
+                  className="absolute top-3 left-3 shadow-sm"
+                />
               </li>
             ))}
           </ul>
         )}
-        {shown.length > 0 && view === "list" && <SceneTable scenes={shown} />}
+        {signedIn && shown.length > 0 && view === "list" && <SceneTable scenes={pagination.items} onChanged={() => void load()} />}
+        {signedIn && <ListPagination {...pagination} total={shown.length} onChange={(page) => update({ page: String(page) })} />}
       </section>
 
-      {imports.length > 0 && (
+      {signedIn && importError && <Notice tone="rust" className="mt-6">Không tải được scene import: {importError}. Trang sẽ thử lại.</Notice>}
+      {signedIn && imports.length > 0 && (
         <section aria-labelledby="imports-heading" className="mt-10">
-          <h2 id="imports-heading" className="mb-4 text-sm font-semibold tracking-wide text-ink-subtle uppercase">
-            Scene import (file 3DGS)
+          <h2 id="imports-heading" className="label-tech mb-4 text-ink-muted">
+            Scene import · chỉ xem/chỉnh Gaussian
           </h2>
-          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {imports.map((item) => (
-              <li key={item.import_id}>
+          <ul className={view === "list" ? "space-y-2" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-3"}>
+            {importPage.items.map((item) => (
+              <li key={item.import_id} className="flex items-center gap-2">
                 <Link
                   href={`/imports/${item.import_id}`}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-line bg-paper-raised p-4 text-sm transition-colors hover:border-line-strong"
+                  className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-xl border border-line bg-paper-raised p-4 text-sm transition-colors hover:border-line-strong"
                 >
                   <span className="truncate font-medium text-ink">{item.name}</span>
                   <span className="shrink-0 text-xs text-ink-subtle">
                     {item.status === "READY" ? "Mở xem/chỉnh" : item.status === "FAILED" ? "Lỗi" : "Đang nén…"}
                   </span>
                 </Link>
+                <MoveToTrashButton name={item.name} move={() => moveImportToTrash(item.import_id)} onMoved={() => void load()} />
               </li>
             ))}
           </ul>
+          <ListPagination {...importPage} total={filteredImports.length} onChange={(page) => update({ importsPage: String(page) })} />
+          {filteredImports.length === 0 && <p className="text-sm text-ink-muted">Không có scene import khớp tên tìm kiếm.</p>}
         </section>
       )}
+      {signedIn && samples.length > 0 && <SamplesHero samples={samplePage.items} />}
+      {samples.length > 0 && filteredSamples.length === 0 && <p className="mt-4 text-sm text-ink-muted">Không có mẫu khớp tìm kiếm.</p>}
+      {samples.length > 0 && <ListPagination {...samplePage} total={filteredSamples.length} onChange={(page) => update({ samplesPage: String(page) })} />}
+      {signedIn && sampleError && <Notice tone="rust" className="mt-6">Không tải được mẫu: {sampleError}. Trang sẽ thử lại.</Notice>}
     </main>
   );
 }
@@ -219,10 +264,10 @@ function SamplesHero({ samples }: { samples: SampleSummary[] }) {
   return (
     <section aria-labelledby="samples-home-heading" className="mt-10">
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 id="samples-home-heading" className="text-sm font-semibold tracking-wide text-ink-subtle uppercase">
+        <h2 id="samples-home-heading" className="label-tech text-ink-muted">
           Thử với video mẫu
         </h2>
-        <p className="text-sm text-ink-subtle">Đi qua đủ các bước như video của bạn; kết quả đã xử lý sẵn nên chạy nhanh.</p>
+        <p className="text-sm text-ink-subtle">Kết quả đã xử lý sẵn · phát lại để khám phá · không tạo job mới.</p>
       </div>
       <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {samples.map((sample) => (
@@ -243,7 +288,7 @@ function SamplesHero({ samples }: { samples: SampleSummary[] }) {
               </div>
               <div className="flex flex-1 items-center justify-between gap-3 p-4">
                 <div className="min-w-0">
-                  <p className="text-xs font-medium tracking-wide text-ink-subtle uppercase">
+                  <p className="label-tech text-ink-muted">
                     {sample.source.dataset} · {sample.source.sequence}
                   </p>
                   <p className="mt-1 truncate font-semibold text-ink">{sample.title}</p>
@@ -294,7 +339,7 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
         </Badge>
       </div>
       <div className="flex flex-1 flex-col p-5">
-        <h3 className="truncate text-base font-semibold text-ink">{scene.project.name}</h3>
+        <h3 className="truncate text-base font-bold text-ink">{scene.project.name}</h3>
         <p className="mt-1 truncate text-sm text-ink-muted">
           {scene.project.input_video
             ? `${scene.project.input_video.original_name} · ${formatBytes(scene.project.input_video.size_bytes)}`
@@ -322,28 +367,8 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
     </Link>
   );
 }
-
-const VIEW_KEY = "r2s.scenes.view";
-
-/** Kiểu hiển thị là tiện ích riêng của người xem; storage có thể bị chặn nên luôn có mặc định. */
-function readView(): "grid" | "list" {
-  try {
-    return typeof window !== "undefined" && window.localStorage.getItem(VIEW_KEY) === "list" ? "list" : "grid";
-  } catch {
-    return "grid";
-  }
-}
-
-function writeView(view: "grid" | "list"): void {
-  try {
-    window.localStorage.setItem(VIEW_KEY, view);
-  } catch {
-    // Không lưu được thì lần sau mở lại dạng lưới.
-  }
-}
-
 /** Dạng danh sách: đọc nhanh trạng thái và mốc thời gian của nhiều scene. */
-function SceneTable({ scenes }: { scenes: SceneSummary[] }) {
+function SceneTable({ scenes, onChanged }: { scenes: SceneSummary[]; onChanged: () => void }) {
   return (
     <div className="overflow-hidden rounded-xl border border-line">
       <Table>
@@ -372,12 +397,15 @@ function SceneTable({ scenes }: { scenes: SceneSummary[] }) {
                 <TableCell className="hidden text-ink-muted sm:table-cell">
                   {scene.project.created_at ? DATE.format(new Date(scene.project.created_at)) : "—"}
                 </TableCell>
-                <TableCell className="text-right">
-                  {job && (
-                    <Link href={`/scenes/${encodeURIComponent(job.job_id)}`} className="font-medium whitespace-nowrap text-ember-strong hover:underline">
-                      {scene.preview_ready ? "Mở scene" : "Xem tiến trình"}
-                    </Link>
-                  )}
+                <TableCell>
+                  <div className="flex items-center justify-end gap-3">
+                    {job && (
+                      <Link href={`/scenes/${encodeURIComponent(job.job_id)}`} className="font-medium whitespace-nowrap text-ember-strong hover:underline">
+                        {scene.preview_ready ? "Mở scene" : "Xem tiến trình"}
+                      </Link>
+                    )}
+                    <MoveToTrashButton name={scene.project.name} move={() => moveSceneToTrash(scene.project.project_id)} onMoved={onChanged} />
+                  </div>
                 </TableCell>
               </TableRow>
             );

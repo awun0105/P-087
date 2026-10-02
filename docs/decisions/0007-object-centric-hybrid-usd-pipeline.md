@@ -65,7 +65,7 @@ hay ObjectGS, TSDF hay SuGaR/Frosting cho mesh nền) **chưa khoá**: chọn th
    khối lượng;
    7. **vá nền sẵn** cho mọi vùng vật che: render nền không có vật → LaMa → fine-tune Gaussian
    nền; vá lỗ mesh sàn/kệ; chạy một lần lúc dựng để thêm/xoá/sửa vật là tức thì;
-   8. **nhãn + vật lý**: gợi ý nhãn (CLIP) so với danh mục asset Isaac, người dùng xác nhận;
+   8. **nhãn + vật lý**: người dùng chọn nhãn từ danh sách asset Isaac tải sẵn (owner quyết 2026-10-01: không gợi ý bằng CLIP);
    bảng mật độ/ma sát theo nhãn có nguồn; khối lượng = mật độ × thể tích, sửa tay được; tuỳ chọn
    thay vật bằng asset Isaac cùng loại (`asset_ref`);
    9. **Studio theo vật**: nền và từng vật là các khối Gaussian riêng trong PlayCanvas; chọn,
@@ -87,6 +87,53 @@ hay ObjectGS, TSDF hay SuGaR/Frosting cho mesh nền) **chưa khoá**: chọn th
 7. **Lộ trình:** A chạy thử (script chặng 4–7 + 10 trên đoạn 37 s `job-123`, GPU thuê) → B backend
    (stage, artifact, contract v2, image GPU worker) → C Studio v2 → D bộ xuất USD lai + preflight v2
    + validation Isaac trên máy RTX → E deploy (phần còn lại ADR 0003).
+
+## Implementation (2026-10-01, nhánh `feat/pipeline-v2`)
+
+Đã chạy thật trên `job-123dfd4868d8` (đoạn 37 s Aisle_CW, 335.092 Gaussian, 50 góc nhìn, Quadro T2000 4 GB).
+Phương pháp thực tế của từng chặng — có chỗ khác dự kiến ở §Decision, ghi rõ lý do:
+
+| Chặng | Đã làm | Code | Số đo (VERIFIED) |
+|---|---|---|---|
+| 4–5 Nhãn vật cho Gaussian | Hạt giống SAMPro3D (đã có) → SAM2 dựng mask 2D từng vật ở mỗi góc từ hạt giống đang thấy → **gán theo đóng góp render** (kiểu FlashSplat: một lượt backward của gsplat cho ma trận đóng góp) + ràng buộc nằm trong hộp bao hạt giống. **Không** train lại Gaussian Grouping: cách này chạy được trên 4 GB, không cần rasterizer Inria, và cho kết quả tách dùng được; train có nhãn vẫn là phương án nâng chất lượng. | `scene/association/lift_runner.py`, `scene/decomposition/gaussian_split.py` | 60 hạt giống → 57 vật, 61.693 Gaussian; 75 s |
+| 6 Collider | Tâm Gaussian → lưới chiếm chỗ → marching cubes → CoACD (≤ 8 khối lồi); môi trường = mesh REC-05 khoét theo hộp vật đã xác nhận | `simulation/colliders/convex_runner.py` | 57/57 vật, không lỗi; ~2–5 phút |
+| 7 Vá nền | Render nền/vật bằng gsplat → vùng thủng → LaMa → gieo Gaussian theo độ sâu nội suy, lần lượt từng góc (không fine-tune) | `reconstruction/rgb/inpaint/inpaint_runner.py` | 1.547 Gaussian vá, 27/50 góc có lỗ; 16 s |
+| 8 Nhãn + vật lý | Danh mục 59 họ asset từ `Simple_Warehouse/Props` (12 nhãn đặt được); người dùng **chọn asset trong danh sách** (kèm kích thước, khối lượng mặc định); nhãn lưu là lớp của asset; không dùng CLIP; khối lượng: người nhập > mặc định của nhãn > mật độ × thể tích | `configs/product/object_catalog_v1.json`, `orchestration/scene/catalog.py` | — |
+| 9 Studio | Mỗi vật một entity Gaussian; gizmo dịch/xoay; nhãn/khối lượng; nhân bản; xoá/khôi phục; thêm từ thư viện; hoàn tác | `frontend/src/features/viewer/scene-overlay.ts`, `features/studio/ObjectReviewView.tsx` | QA trình duyệt: kéo gizmo → revision mới |
+| 10 Xuất | USD lai tự ghi bằng `usd-core` 26.8 (đã có schema ParticleField; **không cần 3DGRUT**); layer nằm trong inventory của candidate | `simulation/usd/hybrid_runner.py`, `orchestration/simulation_package.py` | gói 75 MB, dựng 8 s, preflight PASS 6/6 |
+
+Toàn bộ chặng 4–7 + nén SOG: **6 phút 27 giây** trên T2000. Cài runtime: `scripts/gpu/setup_scene_runtime.sh`.
+Contract: thêm `ObjectPhysics`, `ColliderType.CONVEX_DECOMPOSITION`, `SceneObject.physics`,
+`SceneEnvironment.visual_master_ref` (tuỳ chọn, không ghi khi rỗng → checksum SceneIR cũ giữ nguyên).
+
+Giới hạn đã biết:
+
+- Chất lượng tách phụ thuộc mask: vật ít mask còn sót Gaussian trong nền; kệ/cột cũng thành "vật" ứng viên.
+- Vá nền chưa fine-tune: vùng thủng lớn có thể còn mờ/lệch màu; vùng nền bị che nhưng đã có Gaussian nhiễu thì không vá.
+- Co giãn vật chưa hỗ trợ (contract chưa định nghĩa scale); gizmo chỉ dịch/xoay. Sau khi dời vật, "Bay tới" vẫn về góc vị trí cũ cho tới khi tải lại.
+- Vật thêm từ thư viện hiện bằng hộp trên web; trong USD là tham chiếu URL asset Isaac (chưa mở thử trong Isaac).
+- Vật chưa gán nhãn được xuất với khối lượng mặc định (mật độ giả định × thể tích).
+- Chưa mở USD lai trong Isaac Sim (chưa có máy RTX); LiDAR trên Gaussian vẫn UNKNOWN.
+- gsplat biên dịch kernel CUDA lúc chạy; nếu cache kernel hỏng và máy thiếu `Python.h` thì bước gán nhãn lỗi
+  (trước 2026-10-01 chiều: job lùi về đường hộp mà vẫn `SUCCEEDED`; nay thử lại 3 lần rồi chờ người dùng chọn)
+  — lần gặp thật (đã gặp trên `job-1421190ff700`, sửa bằng dựng lại kernel + `scripts/scene/reobjectify.py`).
+- Không có checkpoint giữa chừng: đứt giữa lúc train 3DGS là train lại từ đầu (xem plan).
+
+Bổ sung 2026-10-01 (job mới đầu-cuối `job-1421190ff700`): collider ∥ vá nền chạy song song (vá nền xong sau
+3 phút 23 giây trong lúc CoACD đang chạy); số đo thời gian trên máy local lần này **không** dùng để so sánh vì
+chạy dưới trần CPU và bị watchdog nhiệt ngắt quãng.
+
+Bổ sung 2026-10-01 (chiều) — thay đổi hành vi so với bản đầu:
+
+- **Không tự lùi về hộp.** Tách theo vật thử tối đa `PRODUCT_OBJECTIFY_ATTEMPTS` (mặc định 3) lần; hết lần thì
+  scene chỉ có môi trường, `provenance.object_extraction = objectify_failed_awaiting_choice`, người dùng chọn
+  "chạy lại" hoặc "dùng hộp ứng viên" trên Studio. Máy không cấu hình runtime tách theo vật vẫn đi thẳng đường
+  hộp như ADR 0006 (không có lựa chọn nào khác để đưa ra).
+- **Checkpoint/resume** cho REC-03/REC-04 qua kho resume cục bộ (xem `src/services/reconstruction/resume.py`).
+  Quy tắc "không resume database cũ / không biến partial output thành success" giữ nguyên: chỉ dùng lại sparse
+  model của lần COLMAP **đã hoàn tất và đã publish được**; artifact vẫn publish trong namespace của attempt mới,
+  log artifact ghi `REUSED_SPARSE_MODEL` và `--start-iter`.
+- **Đường Kaggle** (`scripts/kaggle/`) thêm ngoài luồng chính; không đổi contract.
 
 ## Alternatives Considered
 

@@ -868,6 +868,12 @@ small metadata
 
 Không commit RGB, PCD, PLY dung lượng lớn vào source repository.
 
+## 12.4 Ảnh RGB có cần hai bản ở `raw/` và `normalized/` không?
+
+Không. Khi `normalized/<traversal>/rgb_frames/` là bản nguyên byte của `raw/.../image_left/`, store chỉ giữ một bản vật lý: `scripts/torwic/dedupe_rgb_frames.py` thay bản sao bằng hardlink tới file raw và đặt file thành chỉ đọc (owner yêu cầu bỏ phần trùng, 02/10/2026). Đường dẫn, bytes và checksum trong manifest không đổi.
+
+Vì hai tên trỏ cùng dữ liệu, **không ghi đè tại chỗ vào `normalized/rgb_frames/`**. Muốn thay một frame thì ghi file mới rồi rename: liên kết tự tách và `raw/` vẫn nguyên. Xoá `normalized/` rồi chuẩn bị lại sẽ sinh bản sao mới; chạy lại tool để gộp.
+
 # 13. Preprocessing cần làm gì trước khi dataset đi vào product?
 
 Có. TorWIC-SLAM **không nên được feed nguyên trạng vào tất cả stage của Real2Sim Studio**. Preprocessing phải phân biệt rõ giữa:

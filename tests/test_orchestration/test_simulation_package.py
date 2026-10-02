@@ -10,9 +10,9 @@ from pathlib import Path
 from src.config import Settings
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.models.contracts.validation import RuleResult
+from src.services.orchestration.review.simulation_package import build_simulation_package, current_package
+from src.services.orchestration.scene.extraction import extract_scene
 from src.services.orchestration.scene.objects import add_box_object, apply_object_action
-from src.services.orchestration.scene_extraction import extract_scene
-from src.services.orchestration.simulation_package import build_simulation_package, current_package
 from tests.test_orchestration.test_finalize_flow import _confirmed
 from tests.test_orchestration.test_scene_extraction import _FIXTURE, _collision
 

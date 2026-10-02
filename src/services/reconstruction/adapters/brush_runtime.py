@@ -14,6 +14,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.models.contracts.manifests import ExecutionError, StageArtifact, StageId, StageStatus
+from src.services.reconstruction.resume import CHECKPOINT_NAME
 from src.services.reconstruction.rgb.splat.visual import BrushConfig
 
 
@@ -25,6 +26,8 @@ class BrushRuntimeSettings(BaseSettings):
     runtime_identity: str = Field(min_length=1)
     timeout_seconds: float = Field(default=1800, gt=0, allow_inf_nan=False)
     environment: dict[str, str] = Field(default_factory=dict)
+    #: Khoảng cách mong muốn (số bước) giữa hai checkpoint khi có kho resume; 0 = không checkpoint.
+    checkpoint_every: int = Field(default=2500, ge=0)
     model_config = SettingsConfigDict(env_prefix="REC04_BRUSH_", extra="forbid")
 
 
@@ -141,21 +144,33 @@ class VisualProcess:
         return versions[0]
 
 
-def brush_command(config: BrushConfig, workspace: Path, iteration_flag: str) -> tuple[str, ...]:
-    """Không dùng eval split/resume/args.txt; dataset chỉ có registered train images."""
+@dataclass(frozen=True)
+class Checkpointing:
+    """Xuất PLY định kỳ vào `directory`; `start_iter` > 0 = train tiếp từ `training/init.ply`."""
+
+    directory: Path
+    every: int
+    start_iter: int = 0
+
+
+def brush_command(
+    config: BrushConfig, workspace: Path, iteration_flag: str, checkpointing: Checkpointing | None = None
+) -> tuple[str, ...]:
+    """Không dùng eval split/args.txt; dataset chỉ có registered train images.
+
+    Không checkpoint: xuất một lần ở bước cuối thành `output/visual.ply`. Có checkpoint: xuất
+    `ckpt_<bước>.ply` định kỳ (bản ở bước cuối là kết quả), và train tiếp bằng `--start-iter` khi có.
+    """
     values = config.model_dump(exclude={"schema_version", "sog_iterations"})
     args = [str((workspace / "training").resolve())]
     for key, value in values.items():
         flag = iteration_flag if key == "total_train_iters" else "--" + key.replace("_", "-")
         args.extend([flag, str(value)])
-    args.extend(
-        [
-            "--export-every",
-            str(config.total_train_iters),
-            "--export-path",
-            str((workspace / "output").resolve()),
-            "--export-name",
-            "visual.ply",
-        ]
-    )
+    if checkpointing is None:
+        export = [str(config.total_train_iters), str((workspace / "output").resolve()), "visual.ply"]
+    else:
+        export = [str(checkpointing.every), str(checkpointing.directory.resolve()), CHECKPOINT_NAME]
+        if checkpointing.start_iter:
+            args.extend(["--start-iter", str(checkpointing.start_iter)])
+    args.extend(["--export-every", export[0], "--export-path", export[1], "--export-name", export[2]])
     return tuple(args)

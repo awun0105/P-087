@@ -38,7 +38,13 @@ trap cleanup EXIT INT TERM
 
 "$python_bin" -m uvicorn src.main:app --host "${APP_HOST:-0.0.0.0}" --port "${APP_PORT:-8000}" &
 pids+=($!)
-"$python_bin" -m src.services.orchestration.jobs.worker_cli &
+# STUDIO_WORKERS: bỏ trống/1 = một worker (mặc định cũ); `auto` hoặc số N = nhiều worker, mỗi worker ghim vào
+# một GPU theo VRAM trống (scripts/gpu/gpu_plan.py) — dùng trên máy nhiều GPU hoặc GPU nhiều VRAM.
+if [ "${STUDIO_WORKERS:-1}" = "1" ]; then
+  "$python_bin" -m src.services.orchestration.jobs.worker_cli &
+else
+  "$python_bin" -m scripts.gpu.run_workers --workers "$STUDIO_WORKERS" &
+fi
 pids+=($!)
 if [ "${STUDIO_FRONTEND:-prod}" = "dev" ]; then
   (cd frontend && npm run dev -- --port "${STUDIO_WEB_PORT:-3000}") &

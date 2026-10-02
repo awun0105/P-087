@@ -3,7 +3,7 @@
  * proxy `/api/v1` cùng domain — JavaScript không đọc được token.
  */
 
-import { apiFetch, fetchApi, type ApiResult } from "@/lib/api/client";
+import { apiFetch, fetchApi, ApiError, type ApiResult } from "@/lib/api/client";
 
 export type Role = "editor" | "reviewer";
 
@@ -32,7 +32,8 @@ export function login(email: string, password: string): Promise<PublicUser> {
 }
 
 export async function logout(): Promise<void> {
-  await fetch(`${API}/logout`, { method: "POST", cache: "no-store" });
+  const response = await fetch(`${API}/logout`, { method: "POST", cache: "no-store" });
+  if (!response.ok) throw new ApiError(response.status, "Không đăng xuất được.");
 }
 
 export function register(input: {

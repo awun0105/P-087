@@ -1,0 +1,97 @@
+
+    .landing-page {
+      --paper: #F5EFE6;
+      --paper-raised: #FBF8F3;
+      --paper-sunken: #EDE4D6;
+      --ink: #2B2520;
+      --ink-muted: #6B5F52;
+      --ember-strong: #C2551F;
+      --ember: #E8743B;
+      --ember-soft: #FBE3D3;
+      --viewport: #1F1B17;
+      --geometry: #2F7EA8;
+      --collider: #B7862A;
+      --success: #5E8C61;
+      --warning: #B7862A;
+      --error: #B8452F;
+      --border-subtle: rgba(107, 95, 82, 0.16);
+      --border-dark: rgba(245, 239, 230, 0.12);
+    }
+
+    .landing-page {
+      background-color: var(--paper);
+      color: var(--ink);
+      /* Font nạp một lần ở root layout và dùng chung với app (globals.css: --font-sans / --font-mono). */
+      font-family: var(--font-sans);
+      /* Clip ngang để header sticky vẫn bám viewport, không tạo scroll container mới. */
+      overflow-x: clip;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .landing-page .font-mono-tech {
+      font-family: var(--font-mono);
+    }
+
+    /* Subtle grid pattern */
+    .landing-page .bg-grid-tech {
+      background-size: 32px 32px;
+      background-image:
+        linear-gradient(to right, rgba(107, 95, 82, 0.05) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(107, 95, 82, 0.05) 1px, transparent 1px);
+    }
+
+    .landing-page .bg-grid-dark {
+      background-size: 24px 24px;
+      background-image:
+        linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    }
+
+    /* Animated pulse dots */
+    @keyframes landing-pulse-subtle {
+      0%, 100% { opacity: 0.4; transform: scale(1); }
+      50% { opacity: 0.9; transform: scale(1.08); }
+    }
+    .landing-page .animate-landing-pulse-subtle {
+      animation: landing-pulse-subtle 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+
+    @keyframes landing-beam-flow {
+      0% { stroke-dashoffset: 60; }
+      100% { stroke-dashoffset: 0; }
+    }
+    .landing-page .flow-line {
+      stroke-dasharray: 6 6;
+      animation: landing-beam-flow 2.5s linear infinite;
+    }
+
+    /* Perspective 3D rotation */
+    .landing-page .viewport-scene {
+      transform: perspective(1000px) rotateX(16deg) rotateY(-12deg) rotateZ(2deg);
+      transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .landing-page .viewport-container:hover .viewport-scene {
+      transform: perspective(1000px) rotateX(12deg) rotateY(-8deg) rotateZ(1deg);
+    }
+
+    /* Custom smooth scrollbar */
+    .landing-page ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    .landing-page ::-webkit-scrollbar-track {
+      background: var(--paper-sunken);
+    }
+    .landing-page ::-webkit-scrollbar-thumb {
+      background: #D9CEBF;
+      border-radius: 4px;
+    }
+    .landing-page ::-webkit-scrollbar-thumb:hover {
+      background: #C2B6A5;
+    }
+
+.landing-page section { scroll-margin-top: 7rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-page *, .landing-page *::before, .landing-page *::after { animation: none !important; transition: none !important; }
+}

@@ -1,0 +1,1330 @@
+{
+  "catalog": "isaac_simple_warehouse_props",
+  "version": 1,
+  "source": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/",
+  "isaac_version": "5.1",
+  "physics_note": "Giá trị vật lý là mặc định tham khảo (asset Isaac không có MassAPI); sửa được trong Studio.",
+  "entries": [
+    {
+      "family": "SM_BarelPlastic_A",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_BarelPlastic_A_01.usd",
+      "semantic_class": "barel",
+      "placeable": true,
+      "labels": [
+        "barel"
+      ],
+      "size_xyz_m": [
+        0.6,
+        0.7081,
+        0.9014
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 9.0,
+        "static_friction": 0.4,
+        "dynamic_friction": 0.3,
+        "restitution": 0.2,
+        "note": "phuy nhựa HDPE rỗng khoảng 8–10 kg"
+      }
+    },
+    {
+      "family": "SM_BarelPlastic_B",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_BarelPlastic_B_01.usd",
+      "semantic_class": "barel",
+      "placeable": true,
+      "labels": [
+        "barel"
+      ],
+      "size_xyz_m": [
+        0.6,
+        0.7081,
+        0.5882
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 9.0,
+        "static_friction": 0.4,
+        "dynamic_friction": 0.3,
+        "restitution": 0.2,
+        "note": "phuy nhựa HDPE rỗng khoảng 8–10 kg"
+      }
+    },
+    {
+      "family": "SM_BarelPlastic_C",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_BarelPlastic_C_01.usd",
+      "semantic_class": "barel",
+      "placeable": true,
+      "labels": [
+        "barel"
+      ],
+      "size_xyz_m": [
+        0.4213,
+        0.4213,
+        0.5118
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 9.0,
+        "static_friction": 0.4,
+        "dynamic_friction": 0.3,
+        "restitution": 0.2,
+        "note": "phuy nhựa HDPE rỗng khoảng 8–10 kg"
+      }
+    },
+    {
+      "family": "SM_BarelPlastic_D",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_BarelPlastic_D_01.usd",
+      "semantic_class": "barel",
+      "placeable": true,
+      "labels": [
+        "barel"
+      ],
+      "size_xyz_m": [
+        0.2939,
+        0.2939,
+        0.2447
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 9.0,
+        "static_friction": 0.4,
+        "dynamic_friction": 0.3,
+        "restitution": 0.2,
+        "note": "phuy nhựa HDPE rỗng khoảng 8–10 kg"
+      }
+    },
+    {
+      "family": "SM_BeamA_9M",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_BeamA_9M.usd",
+      "semantic_class": null,
+      "placeable": false,
+      "labels": [],
+      "size_xyz_m": [
+        9.0,
+        0.2,
+        0.2
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_BottlePlasticA",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_BottlePlasticA_01.usd",
+      "semantic_class": "bottle",
+      "placeable": true,
+      "labels": [
+        "bottle"
+      ],
+      "size_xyz_m": [
+        0.1442,
+        0.1849,
+        0.3507
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 0.5,
+        "static_friction": 0.4,
+        "dynamic_friction": 0.3,
+        "restitution": 0.3,
+        "note": "chai nhựa có nước, giả định"
+      }
+    },
+    {
+      "family": "SM_BottlePlasticB",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_BottlePlasticB_01.usd",
+      "semantic_class": "bottle",
+      "placeable": true,
+      "labels": [
+        "bottle"
+      ],
+      "size_xyz_m": [
+        0.0973,
+        0.0973,
+        0.2013
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 0.5,
+        "static_friction": 0.4,
+        "dynamic_friction": 0.3,
+        "restitution": 0.3,
+        "note": "chai nhựa có nước, giả định"
+      }
+    },
+    {
+      "family": "SM_BottlePlasticC",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_BottlePlasticC_01.usd",
+      "semantic_class": "bottle",
+      "placeable": true,
+      "labels": [
+        "bottle"
+      ],
+      "size_xyz_m": [
+        0.0973,
+        0.0973,
+        0.2713
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 0.5,
+        "static_friction": 0.4,
+        "dynamic_friction": 0.3,
+        "restitution": 0.3,
+        "note": "chai nhựa có nước, giả định"
+      }
+    },
+    {
+      "family": "SM_BottlePlasticD",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_BottlePlasticD_01.usd",
+      "semantic_class": "bottle",
+      "placeable": true,
+      "labels": [
+        "bottle"
+      ],
+      "size_xyz_m": [
+        0.0608,
+        0.1334,
+        0.2833
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 0.5,
+        "static_friction": 0.4,
+        "dynamic_friction": 0.3,
+        "restitution": 0.3,
+        "note": "chai nhựa có nước, giả định"
+      }
+    },
+    {
+      "family": "SM_BottlePlasticE",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_BottlePlasticE_01.usd",
+      "semantic_class": "bottle",
+      "placeable": true,
+      "labels": [
+        "bottle"
+      ],
+      "size_xyz_m": [
+        0.1521,
+        0.1346,
+        0.2759
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 0.5,
+        "static_friction": 0.4,
+        "dynamic_friction": 0.3,
+        "restitution": 0.3,
+        "note": "chai nhựa có nước, giả định"
+      }
+    },
+    {
+      "family": "SM_BracketBeam",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_BracketBeam.usd",
+      "semantic_class": "bracket",
+      "placeable": true,
+      "labels": [
+        "bracket"
+      ],
+      "size_xyz_m": [
+        2.0,
+        0.0759,
+        0.0657
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_BracketBeam_3m",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_BracketBeam_3m.usd",
+      "semantic_class": "bracket",
+      "placeable": true,
+      "labels": [
+        "bracket"
+      ],
+      "size_xyz_m": [
+        3.0,
+        0.0759,
+        0.0657
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_BracketSlot",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_BracketSlot.usd",
+      "semantic_class": "bracket",
+      "placeable": true,
+      "labels": [
+        "bracket"
+      ],
+      "size_xyz_m": [
+        0.43,
+        0.2349,
+        0.2315
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_BucketPlastic_B",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_BucketPlastic_B.usd",
+      "semantic_class": "bucket",
+      "placeable": true,
+      "labels": [
+        "bucket"
+      ],
+      "size_xyz_m": [
+        0.6105,
+        0.7261,
+        0.6205
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 1.0,
+        "static_friction": 0.4,
+        "dynamic_friction": 0.3,
+        "restitution": 0.2,
+        "note": "xô nhựa rỗng, giả định"
+      }
+    },
+    {
+      "family": "SM_CardBoxA",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_CardBoxA_01.usd",
+      "semantic_class": "box",
+      "placeable": true,
+      "labels": [
+        "box"
+      ],
+      "size_xyz_m": [
+        0.7,
+        0.5,
+        0.5
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "density_kg_m3": 150.0,
+        "static_friction": 0.5,
+        "dynamic_friction": 0.4,
+        "restitution": 0.1,
+        "note": "thùng carton có hàng; mật độ khối bao giả định, nên nhập tay"
+      }
+    },
+    {
+      "family": "SM_CardBoxB",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_CardBoxB_01.usd",
+      "semantic_class": "box",
+      "placeable": true,
+      "labels": [
+        "box"
+      ],
+      "size_xyz_m": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "density_kg_m3": 150.0,
+        "static_friction": 0.5,
+        "dynamic_friction": 0.4,
+        "restitution": 0.1,
+        "note": "thùng carton có hàng; mật độ khối bao giả định, nên nhập tay"
+      }
+    },
+    {
+      "family": "SM_CardBoxC",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_CardBoxC_01.usd",
+      "semantic_class": "box",
+      "placeable": true,
+      "labels": [
+        "box"
+      ],
+      "size_xyz_m": [
+        0.5,
+        0.5,
+        0.25
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "density_kg_m3": 150.0,
+        "static_friction": 0.5,
+        "dynamic_friction": 0.4,
+        "restitution": 0.1,
+        "note": "thùng carton có hàng; mật độ khối bao giả định, nên nhập tay"
+      }
+    },
+    {
+      "family": "SM_CardBoxD",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_CardBoxD_01.usd",
+      "semantic_class": "box",
+      "placeable": true,
+      "labels": [
+        "box"
+      ],
+      "size_xyz_m": [
+        0.38,
+        0.25,
+        0.1487
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "density_kg_m3": 150.0,
+        "static_friction": 0.5,
+        "dynamic_friction": 0.4,
+        "restitution": 0.1,
+        "note": "thùng carton có hàng; mật độ khối bao giả định, nên nhập tay"
+      }
+    },
+    {
+      "family": "SM_CeilingA_6X6",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_CeilingA_6X6.usd",
+      "semantic_class": "ceiling",
+      "placeable": false,
+      "labels": [
+        "ceiling"
+      ],
+      "size_xyz_m": [
+        6.0,
+        6.0,
+        0.0
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_CratePlasticNote_A",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_CratePlasticNote_A_01.usd",
+      "semantic_class": "crate",
+      "placeable": true,
+      "labels": [
+        "crate"
+      ],
+      "size_xyz_m": [
+        0.6164,
+        0.5019,
+        0.4354
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 2.0,
+        "static_friction": 0.4,
+        "dynamic_friction": 0.3,
+        "restitution": 0.2,
+        "note": "két nhựa rỗng, giả định"
+      }
+    },
+    {
+      "family": "SM_CratePlasticNote_B",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_CratePlasticNote_B_03.usd",
+      "semantic_class": "crate",
+      "placeable": true,
+      "labels": [
+        "crate"
+      ],
+      "size_xyz_m": [
+        0.2501,
+        0.2982,
+        0.1363
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 2.0,
+        "static_friction": 0.4,
+        "dynamic_friction": 0.3,
+        "restitution": 0.2,
+        "note": "két nhựa rỗng, giả định"
+      }
+    },
+    {
+      "family": "SM_CratePlastic_A",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_CratePlastic_A_01.usd",
+      "semantic_class": "crate",
+      "placeable": true,
+      "labels": [
+        "crate"
+      ],
+      "size_xyz_m": [
+        0.6164,
+        0.4994,
+        0.4354
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 2.0,
+        "static_friction": 0.4,
+        "dynamic_friction": 0.3,
+        "restitution": 0.2,
+        "note": "két nhựa rỗng, giả định"
+      }
+    },
+    {
+      "family": "SM_CratePlastic_B",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_CratePlastic_B_01.usd",
+      "semantic_class": "crate",
+      "placeable": true,
+      "labels": [
+        "crate"
+      ],
+      "size_xyz_m": [
+        0.4368,
+        0.5299,
+        0.2815
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 2.0,
+        "static_friction": 0.4,
+        "dynamic_friction": 0.3,
+        "restitution": 0.2,
+        "note": "két nhựa rỗng, giả định"
+      }
+    },
+    {
+      "family": "SM_CratePlastic_C",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_CratePlastic_C_01.usd",
+      "semantic_class": "crate",
+      "placeable": true,
+      "labels": [
+        "crate"
+      ],
+      "size_xyz_m": [
+        0.5043,
+        0.767,
+        0.3379
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 2.0,
+        "static_friction": 0.4,
+        "dynamic_friction": 0.3,
+        "restitution": 0.2,
+        "note": "két nhựa rỗng, giả định"
+      }
+    },
+    {
+      "family": "SM_CratePlastic_D",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_CratePlastic_D_01.usd",
+      "semantic_class": "crate",
+      "placeable": true,
+      "labels": [
+        "crate"
+      ],
+      "size_xyz_m": [
+        0.4495,
+        0.6621,
+        0.1881
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 2.0,
+        "static_friction": 0.4,
+        "dynamic_friction": 0.3,
+        "restitution": 0.2,
+        "note": "két nhựa rỗng, giả định"
+      }
+    },
+    {
+      "family": "SM_CratePlastic_E",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_CratePlastic_E_01.usd",
+      "semantic_class": "crate",
+      "placeable": true,
+      "labels": [
+        "crate"
+      ],
+      "size_xyz_m": [
+        0.3919,
+        0.5748,
+        0.384
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 2.0,
+        "static_friction": 0.4,
+        "dynamic_friction": 0.3,
+        "restitution": 0.2,
+        "note": "két nhựa rỗng, giả định"
+      }
+    },
+    {
+      "family": "SM_EmergencyBoardFull",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_EmergencyBoardFull_01.usd",
+      "semantic_class": "emergency_board",
+      "placeable": false,
+      "labels": [
+        "emergency_board"
+      ],
+      "size_xyz_m": [
+        0.1937,
+        0.6433,
+        1.1691
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_FireExtinguisher",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_FireExtinguisher_02.usd",
+      "semantic_class": "fire_extinguisher",
+      "placeable": true,
+      "labels": [
+        "fire_extinguisher"
+      ],
+      "size_xyz_m": [
+        0.1828,
+        0.2958,
+        0.6736
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 9.0,
+        "static_friction": 0.4,
+        "dynamic_friction": 0.3,
+        "restitution": 0.1,
+        "note": "bình chữa cháy loại 6 kg, tổng khoảng 9 kg"
+      }
+    },
+    {
+      "family": "SM_FloorDecal_Keepclear",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_FloorDecal_Keepclear.usd",
+      "semantic_class": "floor_decal",
+      "placeable": false,
+      "labels": [
+        "floor_decal"
+      ],
+      "size_xyz_m": [
+        0.1658,
+        0.9629,
+        0.0
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_FloorDecal_QuadRed2x1",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_FloorDecal_QuadRed2x1.usd",
+      "semantic_class": "floor_decal",
+      "placeable": false,
+      "labels": [
+        "floor_decal"
+      ],
+      "size_xyz_m": [
+        1.0774,
+        2.1544,
+        0.0
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_FloorDecal_RecRed1X1",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_FloorDecal_RecRed1X1.usd",
+      "semantic_class": "floor_decal",
+      "placeable": false,
+      "labels": [
+        "floor_decal"
+      ],
+      "size_xyz_m": [
+        1.0793,
+        1.1587,
+        0.0
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_FloorDecal_StripeFull_4m",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_FloorDecal_StripeFull_4m.usd",
+      "semantic_class": "floor_decal",
+      "placeable": false,
+      "labels": [
+        "floor_decal"
+      ],
+      "size_xyz_m": [
+        4.0,
+        0.1587,
+        0.0
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_FuseBox",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_FuseBox_01.usd",
+      "semantic_class": "fuse_box",
+      "placeable": false,
+      "labels": [
+        "fuse_box"
+      ],
+      "size_xyz_m": [
+        0.4143,
+        0.5386,
+        1.7114
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_LampCeilingA",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_LampCeilingA_04.usd",
+      "semantic_class": "lamp",
+      "placeable": false,
+      "labels": [
+        "lamp"
+      ],
+      "size_xyz_m": [
+        2.0,
+        0.8005,
+        3.1851
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_PaletteA",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_PaletteA_01.usd",
+      "semantic_class": "pallet",
+      "placeable": true,
+      "labels": [
+        "pallet"
+      ],
+      "size_xyz_m": [
+        1.2132,
+        1.0029,
+        0.2111
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 25.0,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "pallet gỗ tiêu chuẩn khoảng 25 kg"
+      }
+    },
+    {
+      "family": "SM_PaperNote_Small",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_PaperNote_Small_06.usd",
+      "semantic_class": "paper_note",
+      "placeable": false,
+      "labels": [
+        "paper_note"
+      ],
+      "size_xyz_m": [
+        0.1716,
+        0.1551,
+        0.0226
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_Paper_Shortcut",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_Paper_Shortcut_05.usd",
+      "semantic_class": "paper_shortcut",
+      "placeable": false,
+      "labels": [
+        "paper_shortcut"
+      ],
+      "size_xyz_m": [
+        0.1698,
+        0.0778,
+        0.0091
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_PillarA_9M",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_PillarA_9M.usd",
+      "semantic_class": "pillar",
+      "placeable": true,
+      "labels": [
+        "pillar"
+      ],
+      "size_xyz_m": [
+        0.4,
+        0.4,
+        9.0
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_PillarPartA_9M",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_PillarPartA_9M.usd",
+      "semantic_class": "pillar",
+      "placeable": true,
+      "labels": [
+        "pillar"
+      ],
+      "size_xyz_m": [
+        9.1,
+        0.5479,
+        9.0
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_PushcartA",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_PushcartA_02.usd",
+      "semantic_class": "cart",
+      "placeable": true,
+      "labels": [
+        "cart"
+      ],
+      "size_xyz_m": [
+        0.9357,
+        1.6481,
+        0.3774
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 15.0,
+        "static_friction": 0.3,
+        "dynamic_friction": 0.2,
+        "restitution": 0.1,
+        "note": "xe đẩy tay, giả định"
+      }
+    },
+    {
+      "family": "SM_RackFrame",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_RackFrame_03.usd",
+      "semantic_class": "rack",
+      "placeable": true,
+      "labels": [
+        "rack"
+      ],
+      "size_xyz_m": [
+        0.1269,
+        1.0,
+        3.0
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_RackPile",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_RackPile_03.usd",
+      "semantic_class": "rack",
+      "placeable": true,
+      "labels": [
+        "rack"
+      ],
+      "size_xyz_m": [
+        0.624,
+        0.986,
+        0.2891
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_RackShelf",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_RackShelf_01.usd",
+      "semantic_class": "rack",
+      "placeable": true,
+      "labels": [
+        "rack"
+      ],
+      "size_xyz_m": [
+        4.0,
+        1.0768,
+        0.3703
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_Rackshield",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_Rackshield_02.usd",
+      "semantic_class": "rack",
+      "placeable": true,
+      "labels": [
+        "rack"
+      ],
+      "size_xyz_m": [
+        0.3484,
+        1.1746,
+        0.5
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_SignA",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_SignA_02.usd",
+      "semantic_class": "sign",
+      "placeable": false,
+      "labels": [
+        "sign"
+      ],
+      "size_xyz_m": [
+        0.0,
+        0.2947,
+        0.2103
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_SignB",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_SignB_02.usd",
+      "semantic_class": "sign",
+      "placeable": false,
+      "labels": [
+        "sign"
+      ],
+      "size_xyz_m": [
+        0.0,
+        0.3273,
+        0.2176
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_SignCVer",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_SignCVer_01.usd",
+      "semantic_class": "sign",
+      "placeable": false,
+      "labels": [
+        "sign"
+      ],
+      "size_xyz_m": [
+        0.0047,
+        0.1,
+        0.3254
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_WallA_3M",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_WallA_3M.usd",
+      "semantic_class": "wall",
+      "placeable": false,
+      "labels": [
+        "wall"
+      ],
+      "size_xyz_m": [
+        0.2,
+        3.0,
+        3.1
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_WallA_6M",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_WallA_6M.usd",
+      "semantic_class": "wall",
+      "placeable": false,
+      "labels": [
+        "wall"
+      ],
+      "size_xyz_m": [
+        0.2,
+        6.0,
+        3.1
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_WallA_InnerCorner",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_WallA_InnerCorner.usd",
+      "semantic_class": "wall",
+      "placeable": false,
+      "labels": [
+        "wall"
+      ],
+      "size_xyz_m": [
+        3.0001,
+        3.0001,
+        3.1
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_WallB_3M",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_WallB_3M.usd",
+      "semantic_class": "wall",
+      "placeable": false,
+      "labels": [
+        "wall"
+      ],
+      "size_xyz_m": [
+        0.0,
+        3.0,
+        3.0
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_WallB_6M",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_WallB_6M.usd",
+      "semantic_class": "wall",
+      "placeable": false,
+      "labels": [
+        "wall"
+      ],
+      "size_xyz_m": [
+        0.0,
+        6.0,
+        3.0
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_WallB_InnerCorner",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_WallB_InnerCorner.usd",
+      "semantic_class": "wall",
+      "placeable": false,
+      "labels": [
+        "wall"
+      ],
+      "size_xyz_m": [
+        3.0001,
+        3.0001,
+        3.0
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_WallWire",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_WallWire_01.usd",
+      "semantic_class": "wire",
+      "placeable": false,
+      "labels": [
+        "wire"
+      ],
+      "size_xyz_m": [
+        0.1688,
+        2.3053,
+        6.0028
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "SM_floor02",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/SM_floor02.usd",
+      "semantic_class": "floor",
+      "placeable": false,
+      "labels": [
+        "floor"
+      ],
+      "size_xyz_m": [
+        6.0,
+        6.0,
+        0.0
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "S_AisleSign",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/S_AisleSign.usd",
+      "semantic_class": "sign",
+      "placeable": false,
+      "labels": [
+        "sign"
+      ],
+      "size_xyz_m": [
+        0.3937,
+        0.0039,
+        0.7874
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "S_Barcode",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/S_Barcode.usd",
+      "semantic_class": "barcode",
+      "placeable": false,
+      "labels": [
+        "barcode"
+      ],
+      "size_xyz_m": [
+        0.0748,
+        0.0748,
+        0.0
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    },
+    {
+      "family": "S_TrafficCone",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/S_TrafficCone.usd",
+      "semantic_class": "cone",
+      "placeable": true,
+      "labels": [
+        "cone"
+      ],
+      "size_xyz_m": [
+        0.3357,
+        0.3339,
+        0.4628
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": true,
+        "mass_kg": 1.0,
+        "static_friction": 0.5,
+        "dynamic_friction": 0.4,
+        "restitution": 0.2,
+        "note": "cọc tiêu nhựa, giả định"
+      }
+    },
+    {
+      "family": "S_WetFloorSign",
+      "asset_url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Simple_Warehouse/Props/S_WetFloorSign.usd",
+      "semantic_class": "sign",
+      "placeable": false,
+      "labels": [
+        "sign"
+      ],
+      "size_xyz_m": [
+        0.267,
+        0.2323,
+        0.6444
+      ],
+      "up_axis": "Z",
+      "physics": {
+        "dynamic": false,
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.1,
+        "note": "kết cấu cố định trong kho"
+      }
+    }
+  ]
+}

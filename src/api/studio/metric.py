@@ -15,7 +15,7 @@ from src.api.studio import deps
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.services.orchestration.auth import UserRecord
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
-from src.services.orchestration.metric import (
+from src.services.orchestration.jobs.metric import (
     MetricConfirmationError,
     MetricConfirmationService,
     MetricPreviewView,

@@ -1,5 +1,7 @@
 "use client";
 
+import { errorMessage } from "@/lib/ui-error";
+
 import { FlaskConical, Loader2, Radar, Ruler } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
@@ -24,7 +26,7 @@ export function ModeComparisonView({ jobId }: { jobId: string }) {
   useEffect(() => {
     const controller = new AbortController();
     getModeComparison(jobId, controller.signal).then(setData, (cause: unknown) => {
-      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Không tải được so sánh");
+      if (!controller.signal.aborted) setError(errorMessage(cause, "Không tải được so sánh"));
     });
     return () => controller.abort();
   }, [jobId]);
@@ -40,7 +42,7 @@ export function ModeComparisonView({ jobId }: { jobId: string }) {
   const diff = data.difference;
   return (
     <div className="size-full overflow-y-auto bg-paper p-4 sm:p-6">
-      <h2 className="text-lg font-semibold text-ink">So sánh 3 hướng khôi phục tỉ lệ</h2>
+      <h2 className="text-lg font-bold tracking-tight text-ink">So sánh 3 hướng khôi phục tỉ lệ</h2>
       <p className="mt-1 text-sm text-ink-muted">
         Cùng video, cùng camera; khác nhau ở cách biết 1 đơn vị 3DGS dài bao nhiêu mét và mặt sàn nằm đâu.
       </p>
@@ -51,7 +53,7 @@ export function ModeComparisonView({ jobId }: { jobId: string }) {
       </div>
       {diff ? (
         <Card className="mt-4 p-4 text-sm">
-          <h3 className="font-semibold text-ink">Anchor người dùng so với LiDAR</h3>
+          <h3 className="font-bold text-ink">Anchor người dùng so với LiDAR</h3>
           <dl className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
             <Row label="Chênh tỉ lệ" value={`${diff.scale_diff_percent.toFixed(2)} %`} />
             <Row label="Góc lệch mặt sàn" value={`${diff.floor_tilt_deg.toFixed(2)}°`} />
@@ -81,7 +83,7 @@ function ModeCard({ mode }: { mode: ModeResult }) {
   return (
     <Card className="flex flex-col gap-2 p-4">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-ink">
+        <h3 className="flex items-center gap-2 text-sm font-bold text-ink">
           {ICONS[mode.mode]}
           {mode.title}
         </h3>

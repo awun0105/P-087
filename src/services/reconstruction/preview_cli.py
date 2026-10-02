@@ -13,6 +13,7 @@ from src.services.reconstruction.adapters.colmap_runtime import ColmapProcess, C
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor, SplatRuntimeSettings
 from src.services.reconstruction.preview_models import PreparedPreviewRequest
 from src.services.reconstruction.preview_worker import PreparedPreviewWorker, PreviewDependencies
+from src.services.reconstruction.resume import ResumeCache
 from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver
 
 
@@ -27,6 +28,12 @@ def create_cli_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="Append một dòng JSON StageArtifact cho mỗi stage event (orchestrator đọc để hiện tiến trình)",
+    )
+    parser.add_argument(
+        "--resume-root",
+        type=Path,
+        default=None,
+        help="Thư mục cục bộ giữ sparse model COLMAP + checkpoint Brush để attempt sau dùng lại (bỏ trống = tắt)",
     )
     return parser
 
@@ -59,6 +66,7 @@ def _execute(args: argparse.Namespace) -> int:
         brush=brush,
         splat=SplatArtifactProcessor(SplatRuntimeSettings(), brush),
         on_event=_progress_writer(args.progress_file),
+        resume=ResumeCache(args.resume_root) if args.resume_root is not None else None,
     )
     result, reference = PreparedPreviewWorker(dependencies).run(request, args.workspace)
     print(json.dumps({"result": result.model_dump(mode="json"), "result_ref": reference.model_dump(mode="json")}))

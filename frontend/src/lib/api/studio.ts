@@ -3,7 +3,7 @@
  * dùng XMLHttpRequest vì `fetch` chưa báo được tiến độ gửi body.
  */
 
-import { ApiError, apiFetch, fetchApi, type ApiResult } from "@/lib/api/client";
+import { ApiError, apiFetch, apiUrl, fetchApi, type ApiResult } from "@/lib/api/client";
 import { directUpload, xhrPutPart } from "@/lib/api/directUpload";
 import type { SceneEditResponse, SceneResponse } from "@/lib/contracts/api";
 import {
@@ -284,7 +284,7 @@ export function getJobScene(jobId: string, signal?: AbortSignal): Promise<ApiRes
   return fetchApi<SceneResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene`, { signal });
 }
 
-export type ObjectAction = "confirm" | "ignore" | "hide" | "delete" | "rename";
+export type ObjectAction = "confirm" | "ignore" | "hide" | "delete" | "rename" | "restore" | "duplicate" | "label";
 
 /** Thao tác trên một vật thể; `expectedRevision` là khoá optimistic (revision cũ → 409). */
 export function applyObjectAction(
@@ -292,7 +292,7 @@ export function applyObjectAction(
   objectId: string,
   action: ObjectAction,
   expectedRevision: string,
-  extra: { active?: boolean; name?: string } = {},
+  extra: { active?: boolean; name?: string; semantic_class?: string | null; mass_kg?: number | null; asset_family?: string | null } = {},
 ): Promise<SceneEditResponse> {
   return apiFetch<SceneEditResponse>(
     `${API}/jobs/${encodeURIComponent(jobId)}/scene/objects/${encodeURIComponent(objectId)}/${action}`,
@@ -316,6 +316,115 @@ export function addBoxObstacle(
       dimensions_xyz_m: dimensions,
       position_xyz: center,
     }),
+  });
+}
+
+// ── scene theo vật (pipeline v2, ADR 0007) ───────────────────────────────────
+
+/** Ghi transform mới của một vật (mét, Z-up) thành revision kế tiếp. */
+export function setObjectTransform(
+  jobId: string,
+  expectedRevision: string,
+  objectId: string,
+  translation: [number, number, number],
+  rotation: [number, number, number, number],
+): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/edits`, {
+    method: "POST",
+    body: JSON.stringify({
+      expected_scene_revision: expectedRevision,
+      edits: [{ object_id: objectId, translation_xyz: translation, rotation_quaternion_xyzw: rotation }],
+    }),
+  });
+}
+
+export interface CatalogEntry {
+  family: string;
+  semantic_class: string | null;
+  size_xyz_m: [number, number, number];
+  dynamic: boolean;
+  default_mass_kg: number | null;
+  /** Máy chủ có GLB hình khối của asset; không có thì vẽ hộp. */
+  has_preview?: boolean;
+}
+
+export interface SceneCatalog {
+  classes: string[];
+  entries: CatalogEntry[];
+  physics_note: string;
+}
+
+/** GLB hình khối của một asset danh mục (mét, Z lên, tâm hộp bao tại gốc). */
+export function catalogPreviewUrl(family: string): string {
+  return apiUrl(`${API}/scene/catalog/${encodeURIComponent(family)}/preview.glb`, {});
+}
+
+/** Danh mục nhãn + asset Isaac đặt được; giá trị vật lý là mặc định tham khảo. */
+export function getSceneCatalog(signal?: AbortSignal): Promise<SceneCatalog> {
+  return apiFetch<SceneCatalog>(`${API}/scene/catalog`, { signal });
+}
+
+/** Nhãn gợi ý theo kích thước vật (chỉ để sắp danh sách chọn; người dùng xác nhận). */
+export function getLabelSuggestions(jobId: string, objectId: string, signal?: AbortSignal): Promise<{ suggestions: string[] }> {
+  return apiFetch<{ suggestions: string[] }>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/scene/objects/${encodeURIComponent(objectId)}/label-suggestions`,
+    { signal },
+  );
+}
+
+/** Thêm một vật từ danh mục; `position` là điểm đặt trên sàn (mét). */
+export function addCatalogObject(
+  jobId: string,
+  expectedRevision: string,
+  family: string,
+  position: [number, number, number],
+): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/catalog-objects`, {
+    method: "POST",
+    body: JSON.stringify({ expected_scene_revision: expectedRevision, family, position_xyz: position }),
+  });
+}
+
+/** Hoàn tác: đưa nội dung một revision cũ thành revision kế tiếp. */
+export function restoreSceneRevision(
+  jobId: string,
+  expectedRevision: string,
+  targetRevision: string,
+): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/restore`, {
+    method: "POST",
+    body: JSON.stringify({ expected_scene_revision: expectedRevision, target_revision: targetRevision }),
+  });
+}
+
+// ── dựng lại tập vật: chạy lại tách theo vật / dùng hộp ứng viên ─────────────
+
+export type ObjectifyMode = "objectify" | "boxes";
+
+/** Trạng thái tách theo vật của scene + yêu cầu dựng lại gần nhất (worker thực hiện). */
+export interface ObjectifyState {
+  status: "idle" | "queued" | "running" | "done" | "failed";
+  mode: ObjectifyMode | null;
+  /** Tách theo vật lỗi hết số lần thử; scene chỉ có môi trường, chờ người dùng chọn. */
+  awaiting_choice: boolean;
+  object_centric: boolean;
+  /** Máy xử lý có runtime tách theo vật. */
+  available: boolean;
+  note: string | null;
+  base_revision: string | null;
+  result_revision: string | null;
+  error: string | null;
+}
+
+export function getObjectifyState(jobId: string, signal?: AbortSignal): Promise<ObjectifyState> {
+  return apiFetch<ObjectifyState>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/objectify`, { signal });
+}
+
+/** Xếp hàng dựng lại tập vật trên đúng revision đang hiển thị. */
+export function requestObjectify(jobId: string, expectedRevision: string, mode: ObjectifyMode): Promise<ObjectifyState> {
+  return apiFetch<ObjectifyState>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/objectify`, {
+    method: "POST",
+    body: JSON.stringify({ expected_scene_revision: expectedRevision, mode }),
   });
 }
 
@@ -370,6 +479,30 @@ export async function createSimulationPackage(jobId: string): Promise<Simulation
   return result;
 }
 
+// ── bản ghi Rerun của quá trình train 3DGS (chế độ xem tuỳ chọn, ngoài pipeline) ──
+
+export interface TrainingRecording {
+  available: boolean;
+  size_bytes: number | null;
+}
+
+/** Job có bản ghi Rerun hay không; lỗi hoặc dữ liệu lạ coi như không có để chế độ xem chính không bị ảnh hưởng. */
+export async function getTrainingRecording(jobId: string, signal?: AbortSignal): Promise<TrainingRecording> {
+  const none: TrainingRecording = { available: false, size_bytes: null };
+  try {
+    const value = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/training-recording`, { signal });
+    if (typeof value !== "object" || value === null) return none;
+    const { available, size_bytes } = value as Record<string, unknown>;
+    return { available: available === true, size_bytes: typeof size_bytes === "number" ? size_bytes : null };
+  } catch {
+    return none;
+  }
+}
+
+export function trainingRecordingUrl(jobId: string): string {
+  return `${API}/jobs/${encodeURIComponent(jobId)}/training-recording.rrd`;
+}
+
 export function simulationPackageDownloadUrl(jobId: string): string {
   return `${API}/jobs/${encodeURIComponent(jobId)}/simulation-package/download`;
 }
@@ -386,7 +519,37 @@ export type RevisionStatus =
   | "REJECTED"
   | "RELEASED";
 
-/** Tập con `ReviewState` backend mà UI dùng. */
+/** Tham chiếu tới một artifact làm bằng chứng (ảnh, log, replay…) của một check hoặc cặp Start–Goal. */
+export interface EvidenceRefView {
+  artifact_uri: string;
+  artifact_checksum: string;
+}
+
+export interface ValidationCheckView {
+  check_id: string;
+  result: string;
+  message: string | null;
+  evidence_refs: EvidenceRefView[];
+}
+
+export interface PathResultView {
+  pair_id: string;
+  result: string;
+  message: string | null;
+  evidence_refs: EvidenceRefView[];
+}
+
+export interface ValidationReportView {
+  overall_result: string;
+  validator_version: string;
+  candidate_checksum: string | null;
+  report_checksum: string | null;
+  environment_versions: Record<string, string>;
+  checks: ValidationCheckView[];
+  path_results: PathResultView[];
+}
+
+/** Phần `ReviewState` backend mà UI dùng, đã chuẩn hoá ở biên API (thiếu trường phụ thì nhận giá trị rỗng). */
 export interface ReviewStateView {
   record: {
     scene_revision: string;
@@ -394,25 +557,112 @@ export interface ReviewStateView {
     candidate_checksum: string | null;
     validation_report_checksum: string | null;
   };
-  validation: {
-    overall_result: string;
-    validator_version: string;
-    checks: { check_id: string; result: string; message: string | null }[];
-    path_results: { pair_id: string; result: string; message: string | null }[];
-  } | null;
+  validation: ValidationReportView | null;
+  /** Báo cáo có bằng chứng chạy Isaac Sim thật không; null khi chưa có báo cáo hoặc backend không trả cờ. */
+  isaac_runtime_proof: boolean | null;
   warning_ids: string[];
-  approval: { reviewer_id: string; decision: "APPROVE" | "REJECT"; reason: string | null; decided_at: string } | null;
-  release: { release_timestamp: string; release_manifest_checksum: string } | null;
+  approval: {
+    reviewer_id: string;
+    decision: "APPROVE" | "REJECT";
+    reason: string | null;
+    decided_at: string;
+    candidate_checksum: string | null;
+    validation_report_checksum: string | null;
+    record_checksum: string | null;
+    accepted_warning_ids: string[];
+  } | null;
+  release: {
+    release_timestamp: string;
+    release_manifest_checksum: string;
+    candidate_checksum: string | null;
+    validation_report_checksum: string | null;
+  } | null;
   release_archive: { artifact_uri: string } | null;
   blockers: string[];
 }
 
+type Json = Record<string, unknown>;
+
+function isObject(value: unknown): value is Json {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function text(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function evidenceRefs(value: unknown): EvidenceRefView[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const uri = isObject(item) ? text(item.artifact_uri) : null;
+    const checksum = isObject(item) ? text(item.artifact_checksum) : null;
+    return uri && checksum ? [{ artifact_uri: uri, artifact_checksum: checksum }] : [];
+  });
+}
+
+function validationReport(value: unknown): ValidationReportView | null {
+  if (!isObject(value)) return null;
+  const rows = (items: unknown, key: "check_id" | "pair_id") =>
+    (Array.isArray(items) ? items : []).flatMap((item) => {
+      const id = isObject(item) ? text(item[key]) : null;
+      if (!isObject(item) || !id) return [];
+      return [{ id, result: text(item.result) ?? "?", message: text(item.message), evidence_refs: evidenceRefs(item.evidence_refs) }];
+    });
+  const versions = isObject(value.environment_versions) ? value.environment_versions : {};
+  return {
+    overall_result: text(value.overall_result) ?? "?",
+    validator_version: text(value.validator_version) ?? "?",
+    candidate_checksum: text(value.candidate_checksum),
+    report_checksum: text(value.report_checksum),
+    environment_versions: Object.fromEntries(Object.entries(versions).flatMap(([key, version]) => (typeof version === "string" ? [[key, version]] : []))),
+    checks: rows(value.checks, "check_id").map(({ id, ...rest }) => ({ check_id: id, ...rest })),
+    path_results: rows(value.path_results, "pair_id").map(({ id, ...rest }) => ({ pair_id: id, ...rest })),
+  };
+}
+
 function parseReviewState(value: unknown): ReviewStateView {
-  const data = value as Partial<ReviewStateView>;
-  if (!data.record || typeof data.record.status !== "string" || !Array.isArray(data.blockers)) {
+  const record = isObject(value) ? value.record : null;
+  const status = isObject(record) ? text(record.status) : null;
+  const revision = isObject(record) ? text(record.scene_revision) : null;
+  if (!isObject(value) || !isObject(record) || !status || !revision || !Array.isArray(value.blockers)) {
     throw new ApiError(502, "Backend trả trạng thái duyệt sai contract");
   }
-  return data as ReviewStateView;
+  const approval = isObject(value.approval) ? value.approval : null;
+  const release = isObject(value.release) ? value.release : null;
+  const archive = isObject(value.release_archive) ? text(value.release_archive.artifact_uri) : null;
+  return {
+    record: {
+      scene_revision: revision,
+      status: status as RevisionStatus,
+      candidate_checksum: text(record.candidate_checksum),
+      validation_report_checksum: text(record.validation_report_checksum),
+    },
+    validation: validationReport(value.validation),
+    isaac_runtime_proof: typeof value.isaac_runtime_proof === "boolean" ? value.isaac_runtime_proof : null,
+    warning_ids: strings(value.warning_ids),
+    approval: approval && {
+      reviewer_id: text(approval.reviewer_id) ?? "?",
+      decision: approval.decision === "REJECT" ? "REJECT" : "APPROVE",
+      reason: text(approval.reason),
+      decided_at: text(approval.decided_at) ?? "",
+      candidate_checksum: text(approval.candidate_checksum),
+      validation_report_checksum: text(approval.validation_report_checksum),
+      record_checksum: text(approval.record_checksum),
+      accepted_warning_ids: strings(approval.accepted_warning_ids),
+    },
+    release: release && {
+      release_timestamp: text(release.release_timestamp) ?? "",
+      release_manifest_checksum: text(release.release_manifest_checksum) ?? "",
+      candidate_checksum: text(release.candidate_checksum),
+      validation_report_checksum: text(release.validation_report_checksum),
+    },
+    release_archive: archive ? { artifact_uri: archive } : null,
+    blockers: strings(value.blockers),
+  };
 }
 
 export async function getReviewState(jobId: string, signal?: AbortSignal): Promise<ReviewStateView> {
@@ -446,4 +696,160 @@ export async function retryReleaseSeal(jobId: string): Promise<ReviewStateView> 
 
 export function releaseDownloadUrl(jobId: string): string {
   return `${API}/jobs/${encodeURIComponent(jobId)}/release-download`;
+}
+
+/** Một thứ nằm trong mục thùng rác: scene, scene nhập, hoặc upload chỉ scene đó dùng. */
+export interface TrashItem {
+  kind: "scene" | "import" | "upload";
+  identifier: string;
+  name: string;
+  detail: string;
+}
+
+/** Một mục thùng rác (STUDIO_UX_SPEC.md D-15). */
+export interface TrashEntry {
+  entry_id: string;
+  title: string;
+  deleted_at: string;
+  /** Thời điểm mục tự bị xoá hẳn; null khi deployment tắt tự xoá. */
+  expires_at: string | null;
+  deleted_by: string | null;
+  size_bytes: number;
+  items: TrashItem[];
+}
+
+/** Kết quả theo từng mục: mục lỗi không chặn các mục còn lại. */
+export interface TrashActionResult {
+  done: string[];
+  failed: { entry_id: string; reason: string }[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+const TRASH_KINDS = ["scene", "import", "upload"] as const;
+
+/** Kiểm dữ liệu thùng rác ở biên API; dữ liệu sai dạng thành lỗi thay vì hiện sai. */
+export function parseTrashEntries(data: unknown): TrashEntry[] {
+  if (!isRecord(data) || !Array.isArray(data.entries)) throw new ApiError(502, "Dữ liệu thùng rác không hợp lệ");
+  return data.entries.map((entry) => {
+    if (
+      !isRecord(entry) || typeof entry.entry_id !== "string" || typeof entry.title !== "string" ||
+      typeof entry.deleted_at !== "string" || typeof entry.size_bytes !== "number" || !Array.isArray(entry.items)
+    ) throw new ApiError(502, "Dữ liệu thùng rác không hợp lệ");
+    const items = entry.items.map((item) => {
+      const kind = isRecord(item) ? TRASH_KINDS.find((value) => value === item.kind) : undefined;
+      if (!isRecord(item) || !kind || typeof item.identifier !== "string" || typeof item.name !== "string") {
+        throw new ApiError(502, "Dữ liệu thùng rác không hợp lệ");
+      }
+      return { kind, identifier: item.identifier, name: item.name, detail: typeof item.detail === "string" ? item.detail : "" };
+    });
+    return {
+      entry_id: entry.entry_id,
+      title: entry.title,
+      deleted_at: entry.deleted_at,
+      expires_at: typeof entry.expires_at === "string" ? entry.expires_at : null,
+      deleted_by: typeof entry.deleted_by === "string" ? entry.deleted_by : null,
+      size_bytes: entry.size_bytes,
+      items,
+    };
+  });
+}
+
+export async function listTrash(signal?: AbortSignal): Promise<TrashEntry[]> {
+  return parseTrashEntries(await apiFetch<unknown>(`${API}/trash`, { signal }));
+}
+
+/** Chuyển scene vào thùng rác (khôi phục được). */
+export function moveSceneToTrash(projectId: string): Promise<unknown> {
+  return apiFetch<unknown>(`${API}/scenes/${encodeURIComponent(projectId)}`, { method: "DELETE" });
+}
+
+/** Chuyển scene nhập vào thùng rác (khôi phục được). */
+export function moveImportToTrash(importId: string): Promise<unknown> {
+  return apiFetch<unknown>(`${API}/imports/${encodeURIComponent(importId)}`, { method: "DELETE" });
+}
+
+function trashAction(action: "restore" | "purge", entryIds: string[]): Promise<TrashActionResult> {
+  return apiFetch<TrashActionResult>(`${API}/trash/${action}`, { method: "POST", body: JSON.stringify({ entry_ids: entryIds }) });
+}
+
+export function restoreTrash(entryIds: string[]): Promise<TrashActionResult> {
+  return trashAction("restore", entryIds);
+}
+
+/** Xoá hẳn, không khôi phục được; chỉ Reviewer. */
+export function purgeTrash(entryIds: string[]): Promise<TrashActionResult> {
+  return trashAction("purge", entryIds);
+}
+
+/** Một chỉ số của bảng đánh giá (STUDIO_UX_SPEC.md D-16). `value` null = chưa đo; `display` nêu lý do. */
+export interface EvaluationMetric {
+  key: string;
+  label: string;
+  value: number | string | null;
+  unit: string | null;
+  display: string;
+  meaning: string;
+  verdict: "ok" | "warn" | "fail" | null;
+  threshold: string | null;
+}
+
+export interface EvaluationGroup {
+  group_id: string;
+  title: string;
+  status: "measured" | "pending" | "unavailable";
+  note: string | null;
+  metrics: EvaluationMetric[];
+}
+
+export interface JobEvaluation {
+  job_id: string;
+  scene_name: string;
+  job_status: string;
+  scene_revision: string | null;
+  generated_at: string;
+  groups: EvaluationGroup[];
+}
+
+const EVALUATION_STATUS = ["measured", "pending", "unavailable"] as const;
+const EVALUATION_VERDICT = ["ok", "warn", "fail"] as const;
+
+/** Kiểm bảng đánh giá ở biên API: thiếu field bắt buộc là lỗi, không hiện bảng dở dang như kết quả. */
+export function parseJobEvaluation(data: unknown): JobEvaluation {
+  const invalid = () => new ApiError(502, "Dữ liệu đánh giá không hợp lệ");
+  if (!isRecord(data) || typeof data.job_id !== "string" || typeof data.scene_name !== "string" || !Array.isArray(data.groups)) throw invalid();
+  const groups = data.groups.map((group): EvaluationGroup => {
+    const status = isRecord(group) ? EVALUATION_STATUS.find((value) => value === group.status) : undefined;
+    if (!isRecord(group) || !status || typeof group.group_id !== "string" || typeof group.title !== "string" || !Array.isArray(group.metrics)) throw invalid();
+    const metrics = group.metrics.map((metric): EvaluationMetric => {
+      if (!isRecord(metric) || typeof metric.key !== "string" || typeof metric.label !== "string" || typeof metric.display !== "string" || typeof metric.meaning !== "string") throw invalid();
+      const value = typeof metric.value === "number" || typeof metric.value === "string" ? metric.value : null;
+      return {
+        key: metric.key, label: metric.label, value, display: metric.display, meaning: metric.meaning,
+        unit: typeof metric.unit === "string" ? metric.unit : null,
+        verdict: EVALUATION_VERDICT.find((item) => item === metric.verdict) ?? null,
+        threshold: typeof metric.threshold === "string" ? metric.threshold : null,
+      };
+    });
+    return { group_id: group.group_id, title: group.title, status, note: typeof group.note === "string" ? group.note : null, metrics };
+  });
+  return {
+    job_id: data.job_id,
+    scene_name: data.scene_name,
+    job_status: typeof data.job_status === "string" ? data.job_status : "",
+    scene_revision: typeof data.scene_revision === "string" ? data.scene_revision : null,
+    generated_at: typeof data.generated_at === "string" ? data.generated_at : "",
+    groups,
+  };
+}
+
+export async function getJobEvaluation(jobId: string, signal?: AbortSignal): Promise<JobEvaluation> {
+  return parseJobEvaluation(await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/evaluation`, { signal }));
+}
+
+/** Link tải báo cáo Markdown của bảng đánh giá (backend đặt tên file). */
+export function evaluationReportUrl(jobId: string): string {
+  return `${API}/jobs/${encodeURIComponent(jobId)}/evaluation/report.md`;
 }

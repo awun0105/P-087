@@ -1374,7 +1374,7 @@ code phải kiểm tra license của đúng revision và giữ attribution/notic
 
 **Cập nhật 2026-09-29:** `playcanvas/supersplat` không chỉ là code donor: toàn bộ
 editor 3.4.2 (MIT) được vendor tại `frontend/vendor/supersplat/` và nhúng vào Studio
-làm editor Gaussian (ADR 0002); notice ở `frontend/THIRD_PARTY_NOTICES.md`.
+làm editor Gaussian (ADR 0002); notice ở `THIRD_PARTY_NOTICES.md` (phần Frontend).
 
 #### Hạ tầng triển khai (ADR 0003)
 
@@ -1515,7 +1515,7 @@ pha A so các ứng viên trên đoạn 37 s (`job-123dfd4868d8`) bằng cùng t
 | 5 3DGS có nhãn vật | Gaussian Grouping (ObjectGS) + prior độ sâu/pháp tuyến MoGe; train trong hệ mét | Apache-2.0 / MIT; rasterizer Inria theo ADR 0008 | Gaussian có ID vật |
 | 6 Mesh + collider | TSDF từ độ sâu render theo vật (cách của ObjectGS) — so với SuGaR/Frosting, dn-splatter, Spirula cho mesh nền; CoACD phân rã lồi cho vật | MIT / Apache / Inria | Triangle mesh nền, collider vật |
 | 7 Vá nền | Gaussian Grouping: DEVA mask vùng khuất → LaMa → fine-tune Gaussian nền | Apache-2.0; DEVA CC BY-NC-SA | Gaussian nền đã vá |
-| 8 Nhãn + vật lý | Danh mục asset Isaac (`Simple_Warehouse/Props`), gợi ý bằng CLIP, bảng mật độ/ma sát theo nhãn | — | `semantic_class`, khối lượng, vật liệu |
+| 8 Nhãn + vật lý | Danh mục asset Isaac (`Simple_Warehouse/Props`), người dùng chọn từ danh sách asset (không dùng CLIP), bảng mật độ/ma sát theo nhãn | — | `semantic_class`, khối lượng, vật liệu |
 | 9 Studio | PlayCanvas: một entity Gaussian cho nền + mỗi vật; gizmo transform | MIT | Revision SceneIR |
 | 10 Xuất USD lai | 3DGRUT chuyển PLY → `ParticleField3DGaussianSplat`; `UsdPhysics` collider/RigidBody/Mass/Material; `LabelsAPI` | Apache-2.0 | Candidate package cho Isaac ≥ 5.0 |
 

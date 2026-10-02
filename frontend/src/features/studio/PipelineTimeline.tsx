@@ -1,9 +1,12 @@
 "use client";
 
 import { AlertTriangle, Check, Circle, CircleSlash, Hand, Loader2 } from "lucide-react";
+import { useState } from "react";
+import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 
 import { ProgressBar } from "@/components/studio/primitives";
 import { MVP_STAGES, type StageMeta } from "@/features/studio/stages";
+import { inspectHref } from "@/features/studio/inspection";
 import { cn } from "@/lib/cn";
 import type { StageId } from "@/lib/contracts/api";
 import type { StageState } from "@/lib/contracts/studio";
@@ -36,12 +39,16 @@ export function PipelineTimeline({
   stages,
   timeNote,
   stageList = MVP_STAGES,
+  jobId,
 }: {
   stages: readonly StageView[];
   timeNote?: string;
   /** Danh sách stage hiển thị; mặc định 5 stage tới preview (video mẫu). */
   stageList?: readonly StageMeta[];
+  /** Mẫu replay không có job nên không tạo link Inspect job giả. */
+  jobId?: string;
 }) {
+  const [selected, setSelected] = useState<StageId | null>(null);
   const done = stages.filter((stage) => stage.state === "succeeded").length;
   return (
     <div>
@@ -72,9 +79,9 @@ export function PipelineTimeline({
                   className={cn(
                     "mt-0.5 grid size-6 shrink-0 place-items-center rounded-full",
                     state === "succeeded" && "bg-sage text-paper",
-                    state === "running" && "bg-ember-strong text-white",
+                    state === "running" && "bg-primary text-primary-foreground",
                     state === "waiting" && "bg-paper-raised text-ember-strong ring-2 ring-ember",
-                    state === "failed" && "bg-rust text-white",
+                    state === "failed" && "bg-destructive-fill text-white",
                     (state === "pending" || state === "cancelled") && "text-ink-subtle",
                   )}
                 >
@@ -83,8 +90,10 @@ export function PipelineTimeline({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-3">
                     <p className={cn("text-sm font-medium", state === "pending" ? "text-ink-subtle" : "text-ink")}>
+                      {jobId && state === "succeeded" ? <button type="button" aria-expanded={selected === meta.id} aria-controls={`stage-detail-${meta.id}`} onClick={() => setSelected((value) => value === meta.id ? null : meta.id)} className="cursor-pointer text-left underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ember">{meta.title}<span className="sr-only"> — đã xong, xem chi tiết</span></button> : <>
                       {meta.title}
                       <span className="sr-only"> — {STATE_LABEL[state]}</span>
+                      </>}
                     </p>
                     {stage?.seconds != null && state !== "pending" && (
                       <span className="shrink-0 text-xs tabular-nums text-ink-subtle">{formatDuration(stage.seconds)}</span>
@@ -94,7 +103,7 @@ export function PipelineTimeline({
                     <p className="mt-1 text-sm leading-relaxed text-ink-muted">{meta.description}</p>
                   )}
                   {state === "waiting" && (
-                    <p className="mt-2 text-xs font-medium tracking-wide text-ember-strong uppercase">Đang chờ bạn</p>
+                    <p className="label-tech mt-2 text-ember-strong">Đang chờ bạn</p>
                   )}
                   {state === "running" && (
                     <ProgressBar value={stage?.fraction ?? null} label={`Tiến trình ${meta.title}`} className="mt-3" />
@@ -104,6 +113,12 @@ export function PipelineTimeline({
                       {stage.error.human_message}{" "}
                       <span className="font-mono text-xs opacity-80">({stage.error.error_code})</span>
                     </p>
+                  )}
+                  {jobId && state === "succeeded" && selected === meta.id && (
+                    <div id={`stage-detail-${meta.id}`} className="mt-3 space-y-2 border-t border-line pt-3">
+                      <p className="text-sm leading-relaxed text-ink-muted">{meta.description}</p>
+                      <Link href={inspectHref(jobId, meta.id)} className="inline-flex rounded-lg bg-ember-soft px-3 py-2 text-sm font-medium text-ember-strong focus-visible:outline-2 focus-visible:outline-ember">Xem giai đoạn</Link>
+                    </div>
                   )}
                 </div>
               </div>
