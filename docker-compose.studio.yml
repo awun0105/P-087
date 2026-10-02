@@ -1,0 +1,67 @@
+# Studio bằng Docker — chạy được trên Linux, macOS, Windows (Docker Desktop), không cần cài Python hay Node.
+#
+#   docker compose -f docker-compose.studio.yml up --build
+#   → mở http://localhost:3010   (API: http://localhost:8010/docs)
+#
+# Dữ liệu: đặt gói `r2s-studio-data.tar.gz` (do `make -f Makefile.studio data-pack` tạo) ở root repo trước lần chạy
+# đầu; service `restore` tự giải vào ./data nếu máy chưa có dữ liệu. Dữ liệu nằm ở ./data trên máy bạn, không nằm
+# trong image, nên `down` rồi `up` lại vẫn còn.
+#
+# Phạm vi: đây là chế độ **xem và chỉnh scene có sẵn** (API + web). Chạy job dựng 3D mới cần GPU NVIDIA trên Linux:
+# dùng `make -f Makefile.studio start` (cài native) hoặc image GPU `Dockerfile.gpu` (xem scripts/gpu/README.md).
+name: real2sim-studio
+
+x-api-environment: &api-environment
+  APP_ENV: development
+  DATABASE_URL: sqlite:////app/data/studio_local/runtime.db
+  ARTIFACT_ROOT: /app/data/studio_local/artifacts
+  PRODUCT_WORKER_ROOT: /app/data/studio_local/workers
+  PRODUCT_DEMO_DIR: /app/data/demo/library
+  PRODUCT_RERUN_RECORDING_DIR: /app/data/rerun_recordings
+  PRODUCT_PRIVACY_MODE: self_attested
+  PRODUCT_GEOMETRY_CONFIG: /app/configs/product/geometry_v1.json
+  # Máy cá nhân: không bắt đăng nhập. Đổi thành "true" rồi tạo tài khoản:
+  #   docker compose -f docker-compose.studio.yml run --rm api python -m src.services.orchestration.auth.cli \
+  #     create-user --email ban@example.com --name "Tên" --role reviewer
+  AUTH_REQUIRED: ${AUTH_REQUIRED:-false}
+
+services:
+  restore:
+    build: { context: ., dockerfile: Dockerfile }
+    user: "${R2S_UID:-1000}:${R2S_GID:-1000}"
+    environment: *api-environment
+    volumes:
+      - ./data:/app/data
+      - ./:/package:ro
+    # Chỉ giải gói khi máy chưa có dữ liệu; không có gói thì bỏ qua (Studio mở với dữ liệu trống).
+    command:
+      - sh
+      - -c
+      - |
+        if [ -f /app/data/studio_local/runtime.db ]; then echo "[restore] đã có dữ liệu, bỏ qua."; exit 0; fi
+        package="$$(ls /package/r2s-studio-data*.tar.gz 2>/dev/null | head -n 1)"
+        if [ -z "$$package" ]; then echo "[restore] không có gói r2s-studio-data*.tar.gz ở root repo: Studio mở với dữ liệu trống."; exit 0; fi
+        python scripts/studio/data_package.py --root /app unpack "$$package"
+
+  api:
+    build: { context: ., dockerfile: Dockerfile }
+    user: "${R2S_UID:-1000}:${R2S_GID:-1000}"
+    depends_on:
+      restore: { condition: service_completed_successfully }
+    environment: *api-environment
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "${API_PORT:-8010}:8000"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      args: { REAL2SIM_API_URL: "http://api:8000" }
+    depends_on: [api]
+    environment:
+      REAL2SIM_API_URL: http://api:8000
+    ports:
+      - "${WEB_PORT:-3010}:3000"
+    restart: unless-stopped
