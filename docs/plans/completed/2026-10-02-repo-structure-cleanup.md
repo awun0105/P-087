@@ -267,4 +267,10 @@ Xong cả năm pha và phần dọn `data/`. Chi tiết và bằng chứng theo 
   `validate_canonical_manifest` pass, `pytest tests/test_reconstruction` 535 passed / 22 skipped. Không cắm ổ thì
   tooling dataset offline không chạy. Thùng rác scene (`20261002T013259Z-79b733`) đã nén sang
   `/media/usb/AI20K/P-087 archive/scene-trash-20261002T013259Z-79b733.tar` (1.713 file, `tar -d` khớp) rồi xoá bản trên
-  máy; khôi phục cần giải nén về `data/studio_local/trash/` trước khi chạy `delete_cli restore`.
+  máy; khôi phục: giải nén ra một thư mục, chạy `delete_cli import-entry --dir <thư mục lần gỡ>` để đưa vào thùng rác, rồi khôi phục từ trang Thùng rác hoặc `delete_cli restore --entry <id>`.
+- **Thùng rác trên UI (owner yêu cầu, 02/10/2026).** Bản ghi lần gỡ chuyển từ file sang bảng `r2s_trash` (migration v6);
+  API `DELETE /scenes/{id}`, `DELETE /imports/{id}`, `GET /trash`, `POST /trash/restore`, `POST /trash/purge`; trang
+  `/trash` và nút gỡ ở trang Scenes; xoá hẳn xoá cả object trên kho S3/R2. Quyết định ghi ở STUDIO_UX_SPEC D-15.
+  VERIFIED: `pytest tests/ -q` 1172 passed / 40 skipped; vitest 183 test; `next build` có `/trash`; stack thật: gỡ
+  `via_next` qua API → vào thùng rác → Editor xoá hẳn bị 403 → khôi phục → job giống hệt trước, 32/32 artifact khớp
+  checksum. Chưa kiểm: xoá hẳn trên bucket R2 thật (mới test với kho file giả lập); chưa nhìn giao diện bằng mắt.
