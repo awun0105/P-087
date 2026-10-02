@@ -71,7 +71,3 @@ scripts/bin/harness.exe
 
 # Studio runtime env (chứa đường dẫn máy, có thể chứa key)
 scripts/gpu/studio.env
-
-# Gói dữ liệu Studio gửi teammate (scripts/studio/data_package.py) — không commit
-r2s-studio-data*.tar.gz
-r2s-studio-data*.tar.gz.partial

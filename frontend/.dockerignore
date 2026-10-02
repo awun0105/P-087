@@ -1,9 +1,0 @@
-node_modules
-.next
-out
-public/editor
-vendor/supersplat/node_modules
-vendor/supersplat/dist
-tests
-coverage
-*.log

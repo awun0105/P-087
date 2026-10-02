@@ -71,17 +71,8 @@ make run
 
 Swagger UI: <http://localhost:8000/docs>
 
-**Chạy cả Studio (web + API) trên máy bất kỳ** — xem [hướng dẫn cho teammate](docs/guide/run-studio-on-any-machine.md):
-
-```bash
-# Mọi hệ điều hành, chỉ cần Docker. Đặt gói dữ liệu r2s-studio-data.tar.gz ở root repo trước (nếu có).
-docker compose -f docker-compose.studio.yml up --build      # → http://localhost:3010
-
-# Hoặc cài native (Linux/macOS); trên Linux có GPU NVIDIA thì chạy được cả job dựng 3D mới.
-make -f Makefile.studio start DATA=r2s-studio-data.tar.gz
-```
-
-Runbook máy GPU thuê và chi tiết runtime xử lý: [`scripts/gpu/README.md`](scripts/gpu/README.md).
+Chạy cả Studio (API + queue worker + Next.js) với tool xử lý thật: xem runbook
+[`scripts/gpu/README.md`](scripts/gpu/README.md) (`scripts/gpu/run_stack.sh`).
 
 Kiến trúc cloud đã chốt nhưng chưa triển khai ([ADR 0003](docs/decisions/0003-cloud-architecture-roles-and-browser-budget.md),
 [plan](docs/plans/active/2026-09-29-cloud-studio.md)): Web UI trên Vercel, API trên Railway,

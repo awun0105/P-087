@@ -1,8 +1,0 @@
-# Script chạy trong container và trên Linux/macOS phải giữ LF, kể cả khi checkout trên Windows (autocrlf).
-*.sh text eol=lf
-*.py text eol=lf
-Makefile text eol=lf
-Makefile.* text eol=lf
-Dockerfile text eol=lf
-Dockerfile.* text eol=lf
-*.yml text eol=lf

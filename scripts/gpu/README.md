@@ -46,15 +46,6 @@ set -a; source scripts/gpu/studio.env; set +a
 .venv/bin/python -m scripts.gpu.make_runtime_manifest --out "$PRODUCT_RUNTIME_MANIFEST"
 ```
 
-### Chạy trên máy teammate
-
-Không cần làm tay các bước ở trên: xem [docs/guide/run-studio-on-any-machine.md](../../docs/guide/run-studio-on-any-machine.md).
-Tóm tắt: `docker compose -f docker-compose.studio.yml up --build` (mọi hệ điều hành, chế độ xem/chỉnh), hoặc
-`make -f Makefile.studio start DATA=r2s-studio-data.tar.gz` (Linux/macOS; trên Linux có GPU NVIDIA thì chạy được job
-mới). `scripts/gpu/studio.env` do `scripts/studio/make_env.sh` sinh theo thư mục checkout của máy đang chạy; file đã
-có thì giữ nguyên, `FORCE_ENV=1` để sinh lại (bản cũ được sao lưu). Runtime xử lý (Brush, splat-transform, image COLMAP)
-do `scripts/studio/bootstrap.sh` cài với phiên bản ghim và checksum.
-
 ## 3. Thông số xử lý
 
 Mọi thông số (lấy mẫu frame, COLMAP, Brush) nằm trong **một file chung**

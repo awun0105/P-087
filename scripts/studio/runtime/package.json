@@ -1,9 +1,0 @@
-{
-  "name": "real2sim-rec-runtime",
-  "private": true,
-  "description": "Runtime Node của EX-REC (splat-transform + PlayCanvas), ghim phiên bản; cài vào data/rec04_runtime bằng scripts/studio/bootstrap.sh",
-  "dependencies": {
-    "@playcanvas/splat-transform": "3.6.6",
-    "playcanvas": "2.22.4"
-  }
-}

@@ -16,12 +16,10 @@ set -a
 source "$env_file"
 set +a
 
-# Node do scripts/studio/bootstrap.sh tải (nếu có) được ưu tiên hơn Node của hệ thống.
-[ -d "$root/data/tools/node/bin" ] && export PATH="$root/data/tools/node/bin:$PATH"
 python_bin="${STUDIO_PYTHON:-$root/.venv/bin/python}"
 mkdir -p "$(dirname "${ARTIFACT_ROOT:?}")" "${PRODUCT_WORKER_ROOT:?}"
 
-if [ ! -f "${PRODUCT_RUNTIME_MANIFEST:?}" ] && [ "${STUDIO_WORKERS:-1}" != "0" ]; then
+if [ ! -f "${PRODUCT_RUNTIME_MANIFEST:?}" ]; then
   echo "Chưa có runtime manifest, sinh mới: $PRODUCT_RUNTIME_MANIFEST"
   "$python_bin" -m scripts.gpu.make_runtime_manifest --out "$PRODUCT_RUNTIME_MANIFEST"
 fi
@@ -42,16 +40,12 @@ trap cleanup EXIT INT TERM
 pids+=($!)
 # STUDIO_WORKERS: bỏ trống/1 = một worker (mặc định cũ); `auto` hoặc số N = nhiều worker, mỗi worker ghim vào
 # một GPU theo VRAM trống (scripts/gpu/gpu_plan.py) — dùng trên máy nhiều GPU hoặc GPU nhiều VRAM.
-# STUDIO_WORKERS=0: chế độ chỉ xem (máy không có runtime xử lý) — không bật worker, job mới nằm chờ.
-if [ "${STUDIO_WORKERS:-1}" = "0" ]; then
-  echo "Không bật worker (STUDIO_WORKERS=0): Studio ở chế độ chỉ xem."
-elif [ "${STUDIO_WORKERS:-1}" = "1" ]; then
+if [ "${STUDIO_WORKERS:-1}" = "1" ]; then
   "$python_bin" -m src.services.orchestration.jobs.worker_cli &
-  pids+=($!)
 else
   "$python_bin" -m scripts.gpu.run_workers --workers "$STUDIO_WORKERS" &
-  pids+=($!)
 fi
+pids+=($!)
 if [ "${STUDIO_FRONTEND:-prod}" = "dev" ]; then
   (cd frontend && npm run dev -- --port "${STUDIO_WEB_PORT:-3000}") &
 else
