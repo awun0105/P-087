@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, EmptyState, Notice, buttonVariants } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { FlowStepper } from "@/features/studio/FlowStepper";
-import { canCreateScene } from "@/features/studio/inputKinds";
+import { canCreateScene, describeDetection, isLidar } from "@/features/studio/inputKinds";
 import { ImportSetupStep } from "@/features/studio/ImportSetupStep";
 import { SamplePicker, SampleProcessStep, SampleReadyStep, SampleSelectStep } from "@/features/studio/SampleFlow";
 import { UploadDropzone } from "@/features/studio/UploadDropzone";
@@ -58,6 +58,7 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [preselect, setPreselect] = useState<string | null>(null);
+  const [lidarNotice, setLidarNotice] = useState<string | null>(null);
   const routeKey = params.toString();
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -139,6 +140,12 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
 
   const uploaded = (record: UploadRecord) => {
     // Máy chủ nhận diện theo nội dung, kể cả khi người dùng chọn sai nhánh từ đuôi file.
+    if (isLidar(record)) {
+      // LiDAR không phải video hay scene 3DGS (ADR 0009): nói rõ đã nhận diện gì, không đẩy sang nhánh import 3DGS.
+      setLidarNotice(`Máy chủ nhận diện file là ${describeDetection(record)}. Đây là dữ liệu LiDAR, không phải ${source === "video" ? "video" : "scene 3DGS"}; file đã được lưu nhưng trang này không dùng nó.`);
+      return;
+    }
+    setLidarNotice(null);
     const detected: Source = canCreateScene(record) ? "video" : "gaussian";
     if (detected !== source) {
       router.push(`${SOURCE_ROUTES[detected]}?step=setup&upload=${encodeURIComponent(record.upload_id)}&switched=1`);
@@ -181,6 +188,7 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
           ) : canEdit(me) ? (
             <div className="space-y-4">
               <UploadDropzone kind={source} onUploaded={uploaded} />
+              {lidarNotice && <Notice tone="ochre">{lidarNotice}</Notice>}
               <div className="flex justify-end">
                 <Button variant="ghost" onClick={() => { setStep(1); update({ step: "setup" }); }}>
                   Chọn {source === "video" ? "video" : "file 3DGS"} đã tải trước đó

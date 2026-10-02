@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useState } from "react";
 
 import { Button, Card, EmptyState, Notice } from "@/components/studio/primitives";
-import { canCreateScene, describeDetection } from "@/features/studio/inputKinds";
+import { describeDetection, isGaussian } from "@/features/studio/inputKinds";
 import { createImport, listUploads } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import type { UploadRecord } from "@/lib/contracts/studio";
@@ -40,7 +40,7 @@ export function ImportSetupStep({ preselect, onBack }: { preselect: string | nul
       setError(errorMessage(result.error));
       return;
     }
-    const gaussian = result.data.uploads.filter((record) => !canCreateScene(record));
+    const gaussian = result.data.uploads.filter(isGaussian);
     setUploads(gaussian);
     setError(null);
     setDraft((current) => {

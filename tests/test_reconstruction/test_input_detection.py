@@ -50,9 +50,7 @@ def test_gaussian_ply_reports_count_and_sh_degree(tmp_path: Path) -> None:
     assert detect_input(_write(tmp_path / "dc.ply", _gaussian(sh_rest=0)), LIMIT).gaussian.sh_degree == 0  # type: ignore[union-attr]
 
 
-def test_point_cloud_and_truncated_ply_are_rejected(tmp_path: Path) -> None:
-    with pytest.raises(InputRejectedError, match="point cloud"):
-        detect_input(_write(tmp_path / "cloud.ply", _ply(("x", "y", "z"))), LIMIT)
+def test_truncated_and_malformed_gaussian_ply_are_rejected(tmp_path: Path) -> None:
     with pytest.raises(InputRejectedError, match="bị cắt"):
         detect_input(_write(tmp_path / "cut.ply", _gaussian(truncate=4)), LIMIT)
     with pytest.raises(InputRejectedError, match="f_rest"):
@@ -94,3 +92,67 @@ def test_zip_bomb_limit_and_unknown_bytes(tmp_path: Path) -> None:
         detect_input(archive, 10)
     with pytest.raises(InputRejectedError, match="Không nhận diện"):
         detect_input(_write(tmp_path / "x.splat", b"\x01\x02\x03" * 20), LIMIT)
+
+
+# ── LiDAR (ADR 0009 §1) ─────────────────────────────────────────────────────────────────────────
+
+
+def _pcd(count: int = 2) -> bytes:
+    header = (
+        "# .PCD v0.7 - Point Cloud Data file format\nVERSION 0.7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\n"
+        f"COUNT 1 1 1\nWIDTH {count}\nHEIGHT 1\nVIEWPOINT 0 0 0 1 0 0 0\nPOINTS {count}\nDATA binary\n"
+    )
+    return header.encode() + struct.pack(f"<{3 * count}f", *([0.5] * 3 * count))
+
+
+def _trajectory(poses: int) -> bytes:
+    return "".join(f"{index * 0.1} {index} 0 0 0 0 0 1\n" for index in range(poses)).encode()
+
+
+def test_point_cloud_file_is_registered_lidar(tmp_path: Path) -> None:
+    ply = detect_input(_write(tmp_path / "cloud.ply", _ply(("x", "y", "z"), count=5)), LIMIT)
+    assert ply.kind == "registered_lidar" and ply.lidar is not None
+    assert (ply.lidar.geometry_format, ply.lidar.point_count) == ("ply", 5)
+    pcd = detect_input(_write(tmp_path / "cloud.pcd", _pcd(7)), LIMIT)
+    assert pcd.kind == "registered_lidar" and pcd.lidar is not None
+    assert (pcd.lidar.geometry_format, pcd.lidar.point_count) == ("pcd", 7)
+    assert pcd.gaussian is None
+
+
+def test_scan_sequence_needs_exactly_one_trajectory(tmp_path: Path) -> None:
+    scans = {f"lidar/{index:06d}.pcd": _pcd() for index in range(3)}
+    detection = detect_input(_zip(tmp_path / "ok.zip", {**scans, "traj_gt.txt": _trajectory(3)}), LIMIT)
+    assert detection.kind == "lidar_scan_sequence" and detection.lidar is not None
+    assert (detection.lidar.scan_count, detection.lidar.pose_count) == (3, 3)
+    assert detection.lidar.trajectory_member == "traj_gt.txt" and detection.lidar.pairing == "index_in_name"
+
+    # File thời gian (một số mỗi dòng) và IMU (7 cột) đi kèm dataset không bị nhầm là quỹ đạo.
+    extras = {"frame_times.txt": b"0.0\n0.1\n0.2\n", "imu.txt": b"0.1 0 0 0 0.2 0.1 -9.8\n" * 3}
+    with_extras = detect_input(_zip(tmp_path / "extras.zip", {**scans, **extras, "traj_gt.txt": _trajectory(3)}), LIMIT)
+    assert with_extras.lidar is not None and with_extras.lidar.trajectory_member == "traj_gt.txt"
+
+    with pytest.raises(InputRejectedError, match="không có file quỹ đạo.*không tự ước lượng quỹ đạo"):
+        detect_input(_zip(tmp_path / "raw.zip", {**scans, **extras}), LIMIT)
+    with pytest.raises(InputRejectedError, match="2 file quỹ đạo"):
+        detect_input(_zip(tmp_path / "two.zip", {**scans, "a.txt": _trajectory(3), "b.txt": _trajectory(3)}), LIMIT)
+    with pytest.raises(InputRejectedError, match="tải thẳng file"):
+        detect_input(_zip(tmp_path / "one.zip", {"cloud.pcd": _pcd()}), LIMIT)
+
+
+def test_scan_sequence_pairs_every_scan_with_a_pose(tmp_path: Path) -> None:
+    # Nộp một phần scan: tên là chỉ số pose, miễn chỉ số nằm trong quỹ đạo.
+    subset = {f"{index:06d}.pcd": _pcd() for index in (100, 110)}
+    partial = detect_input(_zip(tmp_path / "subset.zip", {**subset, "traj.txt": _trajectory(200)}), LIMIT)
+    assert partial.lidar is not None and (partial.lidar.scan_count, partial.lidar.pose_count) == (2, 200)
+    with pytest.raises(InputRejectedError, match="vượt quá quỹ đạo"):
+        detect_input(_zip(tmp_path / "beyond.zip", {**subset, "traj.txt": _trajectory(50)}), LIMIT)
+
+    named = {"scan_a.pcd": _pcd(), "scan_b.pcd": _pcd()}
+    ordered = detect_input(_zip(tmp_path / "named.zip", {**named, "traj.txt": _trajectory(2)}), LIMIT)
+    assert ordered.lidar is not None and ordered.lidar.pairing == "sorted_order"
+    with pytest.raises(InputRejectedError, match="khác số pose"):
+        detect_input(_zip(tmp_path / "count.zip", {**named, "traj.txt": _trajectory(5)}), LIMIT)
+    with pytest.raises(InputRejectedError, match="không đọc được"):
+        detect_input(
+            _zip(tmp_path / "bad.zip", {"a.pcd": b"not a cloud", "b.pcd": _pcd(), "t.txt": _trajectory(2)}), LIMIT
+        )

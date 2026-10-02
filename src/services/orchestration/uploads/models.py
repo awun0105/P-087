@@ -1,4 +1,4 @@
-"""Model product-level cho upload (video, PLY 3DGS, ZIP); không phải shared contract."""
+"""Model product-level cho upload (video, PLY 3DGS, ZIP, LiDAR); không phải shared contract."""
 
 from datetime import datetime
 from typing import Literal
@@ -9,7 +9,7 @@ from src.models.contracts.artifacts import ArtifactUri, Checksum, Identifier
 from src.services.reconstruction import InputDetection, InputKind
 
 VideoMediaType = Literal["video/mp4", "video/quicktime"]
-UploadMediaType = Literal["video/mp4", "video/quicktime", "application/x-ply", "application/zip"]
+UploadMediaType = Literal["video/mp4", "video/quicktime", "application/x-ply", "application/x-pcd", "application/zip"]
 
 #: Đuôi file video → media type ghi vào InputManifest (PRD FR-01, Playbook §2.1).
 VIDEO_EXTENSIONS: dict[str, VideoMediaType] = {".mp4": "video/mp4", ".mov": "video/quicktime"}
@@ -18,14 +18,21 @@ VIDEO_EXTENSIONS: dict[str, VideoMediaType] = {".mp4": "video/mp4", ".mov": "vid
 UPLOAD_EXTENSIONS: dict[str, UploadMediaType] = {
     **VIDEO_EXTENSIONS,
     ".ply": "application/x-ply",
+    ".pcd": "application/x-pcd",
     ".zip": "application/zip",
 }
 KIND_MEDIA_TYPES: dict[str, frozenset[str]] = {
     "rgb_video": frozenset({"video/mp4", "video/quicktime"}),
     "gaussian_ply": frozenset({"application/x-ply"}),
     "gaussian_ply_colmap": frozenset({"application/zip"}),
+    # ADR 0009: LiDAR đi kèm video — một đám mây đã đăng ký, hoặc ZIP scan thô + quỹ đạo.
+    "registered_lidar": frozenset({"application/x-ply", "application/x-pcd"}),
+    "lidar_scan_sequence": frozenset({"application/zip"}),
 }
-UNSUPPORTED_EXTENSION = "Hỗ trợ video .mp4/.mov, scene 3DGS .ply, hoặc .zip gồm PLY 3DGS + model COLMAP"
+UNSUPPORTED_EXTENSION = (
+    "Hỗ trợ video .mp4/.mov; scene 3DGS .ply hoặc .zip (PLY 3DGS + model COLMAP); "
+    "LiDAR đã đăng ký .ply/.pcd hoặc .zip (scan .pcd + file quỹ đạo)"
+)
 
 
 class UploadRecord(BaseModel):
