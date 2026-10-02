@@ -14,7 +14,8 @@ import { useAuth } from "@/features/studio/AuthProvider";
 import { STATUS_FILTERS, sceneStatus, type SceneStatusGroup } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
 import { canEdit } from "@/lib/api/auth";
-import { listImports, listSamples, listScenes, sampleFileUrl } from "@/lib/api/studio";
+import { listImports, listSamples, listScenes, moveImportToTrash, moveSceneToTrash, sampleFileUrl } from "@/lib/api/studio";
+import { MoveToTrashButton } from "@/features/studio/trash/MoveToTrashButton";
 import { cn } from "@/lib/cn";
 import type { ImportedScene, SampleSummary, SceneSummary } from "@/lib/contracts/studio";
 import { useListState, pageSlice, ListPagination, SortControl } from "@/features/studio/ListControls";
@@ -207,13 +208,20 @@ export function ScenesHome() {
         {signedIn && shown.length > 0 && view === "grid" && (
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {pagination.items.map((scene) => (
-              <li key={scene.project.project_id}>
+              <li key={scene.project.project_id} className="relative">
                 <SceneCard scene={scene} />
+                {/* Nằm ngoài thẻ link của card: nút trong link là HTML không hợp lệ và bấm sẽ điều hướng. */}
+                <MoveToTrashButton
+                  name={scene.project.name}
+                  move={() => moveSceneToTrash(scene.project.project_id)}
+                  onMoved={() => void load()}
+                  className="absolute top-3 left-3 shadow-sm"
+                />
               </li>
             ))}
           </ul>
         )}
-        {signedIn && shown.length > 0 && view === "list" && <SceneTable scenes={pagination.items} />}
+        {signedIn && shown.length > 0 && view === "list" && <SceneTable scenes={pagination.items} onChanged={() => void load()} />}
         {signedIn && <ListPagination {...pagination} total={shown.length} onChange={(page) => update({ page: String(page) })} />}
       </section>
 
@@ -225,16 +233,17 @@ export function ScenesHome() {
           </h2>
           <ul className={view === "list" ? "space-y-2" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-3"}>
             {importPage.items.map((item) => (
-              <li key={item.import_id}>
+              <li key={item.import_id} className="flex items-center gap-2">
                 <Link
                   href={`/imports/${item.import_id}`}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-line bg-paper-raised p-4 text-sm transition-colors hover:border-line-strong"
+                  className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-xl border border-line bg-paper-raised p-4 text-sm transition-colors hover:border-line-strong"
                 >
                   <span className="truncate font-medium text-ink">{item.name}</span>
                   <span className="shrink-0 text-xs text-ink-subtle">
                     {item.status === "READY" ? "Mở xem/chỉnh" : item.status === "FAILED" ? "Lỗi" : "Đang nén…"}
                   </span>
                 </Link>
+                <MoveToTrashButton name={item.name} move={() => moveImportToTrash(item.import_id)} onMoved={() => void load()} />
               </li>
             ))}
           </ul>
@@ -359,7 +368,7 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
   );
 }
 /** Dạng danh sách: đọc nhanh trạng thái và mốc thời gian của nhiều scene. */
-function SceneTable({ scenes }: { scenes: SceneSummary[] }) {
+function SceneTable({ scenes, onChanged }: { scenes: SceneSummary[]; onChanged: () => void }) {
   return (
     <div className="overflow-hidden rounded-xl border border-line">
       <Table>
@@ -388,12 +397,15 @@ function SceneTable({ scenes }: { scenes: SceneSummary[] }) {
                 <TableCell className="hidden text-ink-muted sm:table-cell">
                   {scene.project.created_at ? DATE.format(new Date(scene.project.created_at)) : "—"}
                 </TableCell>
-                <TableCell className="text-right">
-                  {job && (
-                    <Link href={`/scenes/${encodeURIComponent(job.job_id)}`} className="font-medium whitespace-nowrap text-ember-strong hover:underline">
-                      {scene.preview_ready ? "Mở scene" : "Xem tiến trình"}
-                    </Link>
-                  )}
+                <TableCell>
+                  <div className="flex items-center justify-end gap-3">
+                    {job && (
+                      <Link href={`/scenes/${encodeURIComponent(job.job_id)}`} className="font-medium whitespace-nowrap text-ember-strong hover:underline">
+                        {scene.preview_ready ? "Mở scene" : "Xem tiến trình"}
+                      </Link>
+                    )}
+                    <MoveToTrashButton name={scene.project.name} move={() => moveSceneToTrash(scene.project.project_id)} onMoved={onChanged} />
+                  </div>
                 </TableCell>
               </TableRow>
             );

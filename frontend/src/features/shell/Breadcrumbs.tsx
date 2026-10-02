@@ -44,6 +44,7 @@ export function crumbsFor(pathname: string, detailTitle?: string | null): Crumb[
   if (pathname === "/scenes") return [{ label: "Scenes" }];
   if (pathname.startsWith("/new")) return [scenes, { label: "Scene mới" }];
   if (pathname.startsWith("/jobs")) return [{ label: "Jobs" }];
+  if (pathname.startsWith("/trash")) return [{ label: "Thùng rác" }];
   if (pathname.startsWith("/team")) return [{ label: "Nhóm" }];
   if (pathname === "/account") return [{ label: "Tài khoản" }];
   if (pathname.startsWith("/imports/")) return [scenes, { label: detailTitle ?? "Scene import" }];

@@ -697,3 +697,86 @@ export async function retryReleaseSeal(jobId: string): Promise<ReviewStateView> 
 export function releaseDownloadUrl(jobId: string): string {
   return `${API}/jobs/${encodeURIComponent(jobId)}/release-download`;
 }
+
+/** Một thứ nằm trong mục thùng rác: scene, scene nhập, hoặc upload chỉ scene đó dùng. */
+export interface TrashItem {
+  kind: "scene" | "import" | "upload";
+  identifier: string;
+  name: string;
+  detail: string;
+}
+
+/** Một mục thùng rác (STUDIO_UX_SPEC.md D-15). */
+export interface TrashEntry {
+  entry_id: string;
+  title: string;
+  deleted_at: string;
+  deleted_by: string | null;
+  size_bytes: number;
+  items: TrashItem[];
+}
+
+/** Kết quả theo từng mục: mục lỗi không chặn các mục còn lại. */
+export interface TrashActionResult {
+  done: string[];
+  failed: { entry_id: string; reason: string }[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+const TRASH_KINDS = ["scene", "import", "upload"] as const;
+
+/** Kiểm dữ liệu thùng rác ở biên API; dữ liệu sai dạng thành lỗi thay vì hiện sai. */
+export function parseTrashEntries(data: unknown): TrashEntry[] {
+  if (!isRecord(data) || !Array.isArray(data.entries)) throw new ApiError(502, "Dữ liệu thùng rác không hợp lệ");
+  return data.entries.map((entry) => {
+    if (
+      !isRecord(entry) || typeof entry.entry_id !== "string" || typeof entry.title !== "string" ||
+      typeof entry.deleted_at !== "string" || typeof entry.size_bytes !== "number" || !Array.isArray(entry.items)
+    ) throw new ApiError(502, "Dữ liệu thùng rác không hợp lệ");
+    const items = entry.items.map((item) => {
+      const kind = isRecord(item) ? TRASH_KINDS.find((value) => value === item.kind) : undefined;
+      if (!isRecord(item) || !kind || typeof item.identifier !== "string" || typeof item.name !== "string") {
+        throw new ApiError(502, "Dữ liệu thùng rác không hợp lệ");
+      }
+      return { kind, identifier: item.identifier, name: item.name, detail: typeof item.detail === "string" ? item.detail : "" };
+    });
+    return {
+      entry_id: entry.entry_id,
+      title: entry.title,
+      deleted_at: entry.deleted_at,
+      deleted_by: typeof entry.deleted_by === "string" ? entry.deleted_by : null,
+      size_bytes: entry.size_bytes,
+      items,
+    };
+  });
+}
+
+export async function listTrash(signal?: AbortSignal): Promise<TrashEntry[]> {
+  return parseTrashEntries(await apiFetch<unknown>(`${API}/trash`, { signal }));
+}
+
+/** Chuyển scene vào thùng rác (khôi phục được). */
+export function moveSceneToTrash(projectId: string): Promise<unknown> {
+  return apiFetch<unknown>(`${API}/scenes/${encodeURIComponent(projectId)}`, { method: "DELETE" });
+}
+
+/** Chuyển scene nhập vào thùng rác (khôi phục được). */
+export function moveImportToTrash(importId: string): Promise<unknown> {
+  return apiFetch<unknown>(`${API}/imports/${encodeURIComponent(importId)}`, { method: "DELETE" });
+}
+
+function trashAction(action: "restore" | "purge", entryIds: string[]): Promise<TrashActionResult> {
+  return apiFetch<TrashActionResult>(`${API}/trash/${action}`, { method: "POST", body: JSON.stringify({ entry_ids: entryIds }) });
+}
+
+export function restoreTrash(entryIds: string[]): Promise<TrashActionResult> {
+  return trashAction("restore", entryIds);
+}
+
+/** Xoá hẳn, không khôi phục được; chỉ Reviewer. */
+export function purgeTrash(entryIds: string[]): Promise<TrashActionResult> {
+  return trashAction("purge", entryIds);
+}
