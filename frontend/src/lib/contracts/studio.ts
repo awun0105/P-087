@@ -176,6 +176,8 @@ export interface DemoFile {
 
 export interface DemoStage {
   stage_id: StageId;
+  /** Bundle cũ chỉ liệt kê stage đã chạy; API mới thêm pending cho các bước thiếu. */
+  state?: "succeeded" | "pending" | "failed";
   duration_seconds: number | null;
   summary: string;
 }
@@ -312,6 +314,15 @@ export function parseDemoManifest(value: unknown): DemoManifest {
   const files = [value.splat, ...(value.video ? [value.video] : []), ...value.frames];
   if (!files.every((file) => isRecord(file) && typeof file.name === "string" && SAFE_NAME.test(file.name))) {
     throw new Error("Tên file demo không hợp lệ");
+  }
+  const ids = new Set<string>();
+  for (const stage of value.stages) {
+    if (!isRecord(stage) || typeof stage.stage_id !== "string" || ids.has(stage.stage_id) ||
+        (stage.state !== undefined && !["succeeded", "pending", "failed"].includes(String(stage.state))) ||
+        (stage.duration_seconds !== null && (!isFiniteNumber(stage.duration_seconds) || stage.duration_seconds < 0))) {
+      throw new Error("Stage demo từ backend không hợp lệ");
+    }
+    ids.add(stage.stage_id);
   }
   return value as unknown as DemoManifest;
 }

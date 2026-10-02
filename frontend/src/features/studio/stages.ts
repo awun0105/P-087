@@ -1,7 +1,7 @@
 /**
  * Mô tả hiển thị các stage. `MVP_STAGES` = 5 stage tới preview 3DGS (khớp `MVP_PIPELINE`,
- * dùng cho video mẫu); `STUDIO_STAGES` thêm bước xác nhận tỉ lệ mét, hình học/collision và
- * tách vật thể (khớp `STUDIO_PIPELINE`, dùng cho job thật). Chỉ là copy UI; trạng thái thật lấy từ API.
+ * là nhóm preview); `STUDIO_STAGES` thêm bước xác nhận tỉ lệ mét, hình học/collision và
+ * tách vật thể (khớp `STUDIO_PIPELINE`, dùng cho job và video mẫu). Trạng thái thật lấy từ API.
  */
 
 import type { StageId } from "@/lib/contracts/api";

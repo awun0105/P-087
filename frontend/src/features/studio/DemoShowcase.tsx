@@ -87,6 +87,12 @@ export function DemoShowcase({
         </ul>
       );
       break;
+    case "ST-METRIC-CANONICALIZE":
+    case "ST-RGB-GEOMETRY":
+    case "ST-OBJECT-EXTRACT":
+      icon = <Cpu aria-hidden />;
+      body = <p className="text-sm text-ink-muted">Mẫu có bản ghi của bước này. Bundle hiện chỉ đóng gói video, frame và 3DGS preview; kết quả tỉ lệ, collision và vật thể cần xem tại job gốc.</p>;
+      break;
     default:
       icon = <Cpu aria-hidden />;
       body = (

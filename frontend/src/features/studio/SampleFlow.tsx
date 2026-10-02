@@ -7,7 +7,7 @@ import { Badge, Button, Card, Notice, buttonVariants } from "@/components/studio
 import { DemoShowcase } from "@/features/studio/DemoShowcase";
 import { PipelineTimeline } from "@/features/studio/PipelineTimeline";
 import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
-import { MVP_STAGES } from "@/features/studio/stages";
+import { STUDIO_STAGES } from "@/features/studio/stages";
 import { useDemoReplay } from "@/features/studio/useDemoReplay";
 import { useProcessingForm } from "@/features/studio/useProcessingForm";
 import { sampleFileUrl } from "@/lib/api/studio";
@@ -188,9 +188,11 @@ export function SampleProcessStep({
 }) {
   const { views, finished, skip } = useDemoReplay(sample.stages, true);
   const running = views.find((view) => view.state === "running");
-  const shown = running ?? views[views.length - 1];
-  const totalReal = sample.stages.every((stage) => stage.duration_seconds !== null)
-    ? sample.stages.reduce((sum, stage) => sum + (stage.duration_seconds ?? 0), 0)
+  const shown = running ?? views.findLast((view) => view.state === "succeeded") ?? views[0];
+  const recorded = sample.stages.filter((stage) => (stage.state ?? "succeeded") === "succeeded");
+  const missing = STUDIO_STAGES.filter((meta) => !recorded.some((stage) => stage.stage_id === meta.id));
+  const totalReal = recorded.length > 0 && recorded.every((stage) => stage.duration_seconds !== null)
+    ? recorded.reduce((sum, stage) => sum + (stage.duration_seconds ?? 0), 0)
     : null;
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_24rem]">
@@ -210,13 +212,14 @@ export function SampleProcessStep({
           </Notice>
         ) : (
           <Notice icon={<Info aria-hidden />}>
-            Video mẫu: kết quả từng giai đoạn là output thật đã xử lý sẵn, tiến trình được phát lại nhanh theo tỉ lệ thời
-            gian thật ({MVP_STAGES.length} giai đoạn).
+            Kết quả đã xử lý sẵn — đang phát lại {recorded.length} bước đã ghi trong pipeline {STUDIO_STAGES.length} bước.
           </Notice>
         )}
+        {missing.length > 0 && <Notice tone="ochre">Mẫu cũ chưa ghi kết quả: {missing.map((meta) => meta.title).join(", ")}.
+          Các bước này vẫn hiện chưa có kết quả khi bỏ qua replay.</Notice>}
       </div>
       <Card className="h-fit p-5 sm:p-6">
-        <PipelineTimeline stages={views} timeNote={totalReal ? `Thời gian chạy thật: ${formatDuration(totalReal)}` : "Phát lại nhanh"} />
+        <PipelineTimeline stages={views} stageList={STUDIO_STAGES} timeNote={totalReal ? `Các bước đã ghi: ${formatDuration(totalReal)}` : "Phát lại nhanh"} />
         <div className="mt-6 flex justify-end gap-2">
           {!finished ? (
             <Button variant="ghost" size="sm" onClick={skip}>
