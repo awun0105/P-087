@@ -2,13 +2,18 @@
 
 from typing import Literal, Self
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from src.models.contracts.artifacts import Checksum, ContractModel, ProductArtifactRef
 from src.models.contracts.manifests import ExecutionError, StageArtifact, StageId
 from src.services.reconstruction.attempt import PathSegment
 from src.services.reconstruction.rgb.pose.camera_pose import ColmapConfig
 from src.services.reconstruction.rgb.splat.visual import BrushConfig
+
+
+def _absent(value: object) -> bool:
+    """Trường thêm sau schema 1.0 không xuất hiện trong JSON khi chưa dùng."""
+    return value is None
 
 
 class PreparedPreviewRequest(ContractModel):
@@ -22,6 +27,9 @@ class PreparedPreviewRequest(ContractModel):
     frame_set_ref: ProductArtifactRef
     colmap: ColmapConfig
     brush: BrushConfig
+    #: `LidarPackageRecord` của job có gói LiDAR (ADR 0009): có thì REC-03 dựng pose bám theo quỹ đạo. Trường vắng
+    #: mặt trong JSON khi không dùng, nên request của job chỉ có video giữ nguyên bytes như trước.
+    lidar_package_ref: ProductArtifactRef | None = Field(default=None, exclude_if=_absent)
 
     @model_validator(mode="after")
     def _source(self) -> Self:
@@ -50,6 +58,8 @@ class PreparedPreviewResult(ContractModel):
     raw_visual_ref: ProductArtifactRef | None = None
     delivery_ref: ProductArtifactRef | None = None
     preview_ref: ProductArtifactRef | None = None
+    #: Bản ghi độ lệch pose ↔ quỹ đạo khi dựng bám quỹ đạo; bằng chứng cho bước xác nhận tỉ lệ của job LiDAR.
+    pose_guidance_ref: ProductArtifactRef | None = Field(default=None, exclude_if=_absent)
     error: ExecutionError | None = None
 
     @model_validator(mode="after")

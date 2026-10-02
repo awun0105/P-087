@@ -388,6 +388,25 @@ def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: Res
         "colmap": profile.colmap,
         "brush": profile.brush,
     }
+    # Job có gói LiDAR (ADR 0009): giao bản ghi gói cho REC để dựng pose bám theo quỹ đạo.
+    lidar = next(
+        (
+            stage
+            for stage in attempt.job.stage_artifacts
+            if stage.stage_id == StageId.LIDAR_INGEST and stage.artifact_uri
+        ),
+        None,
+    )
+    if lidar is not None:
+        request["lidar_package_ref"] = ProductArtifactRef(
+            artifact_type=lidar.artifact_type or "LidarPackageRecord",
+            schema_version="1.0",
+            artifact_uri=lidar.artifact_uri,
+            artifact_checksum=lidar.artifact_checksum,
+            data_class=lidar.data_class,
+            producer_stage=StageId.LIDAR_INGEST,
+            job_id=attempt.job.job_id,
+        ).model_dump(mode="json")
     request_path = attempt.workspace / "preview.request.json"
     with request_path.open("x", encoding="utf-8") as stream:
         json.dump(request, stream)
