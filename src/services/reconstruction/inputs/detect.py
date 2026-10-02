@@ -30,11 +30,21 @@ _MAX_ZIP_ENTRIES = 20000
 _MAX_TRAJECTORY_BYTES = 16 * 1024 * 1024
 _TRAJECTORY_SUFFIXES = {".txt", ".tum", ".csv"}
 _QUATERNION_TOLERANCE = 1e-3
-NO_TRAJECTORY = (
-    "Tìm thấy {scans} scan LiDAR (.pcd) nhưng không có file quỹ đạo. Hệ thống không tự ước lượng quỹ đạo "
-    "(LiDAR odometry/SLAM chưa hỗ trợ). Thêm vào ZIP một file quỹ đạo dạng TUM — mỗi dòng "
-    "`thời_điểm x y z qx qy qz qw`, một dòng cho mỗi scan — hoặc tải lên đám mây LiDAR đã đăng ký (.ply/.pcd)."
+PACKAGE_GUIDE = (
+    "Gói LiDAR là một file .zip gồm: (1) các scan .pcd chưa đăng ký, hoặc một đám mây .ply/.pcd đã đăng ký; "
+    "(2) một file quỹ đạo dạng TUM — mỗi dòng `thời_điểm x y z qx qy qz qw`; "
+    "(3) một file calibration camera ↔ LiDAR; (4) một file thời điểm frame — mỗi dòng một số, một dòng cho mỗi pose."
 )
+NO_TRAJECTORY = (
+    "Tìm thấy {clouds} nhưng không có file quỹ đạo. Hệ thống không tự ước lượng quỹ đạo "
+    "(LiDAR odometry/SLAM chưa hỗ trợ). " + PACKAGE_GUIDE
+)
+BARE_CLOUD = (
+    "Đây là một đám mây điểm LiDAR ({points} điểm) nhưng nộp riêng lẻ thì không căn chỉnh được với video. "
+    + PACKAGE_GUIDE
+)
+#: Khoá ngoại tham số camera trái ↔ LiDAR trong `calibrations.txt` của TorWIC.
+_TORWIC_EXTRINSIC_KEYS = tuple(f"T_cam1_os.{name}" for name in ("px", "py", "pz", "qx", "qy", "qz", "qw"))
 
 
 class InputRejectedError(ValueError):
@@ -52,19 +62,23 @@ class GaussianPlyEvidence(BaseModel):
 
 
 class LidarEvidence(BaseModel):
-    """Bằng chứng LiDAR đã kiểm ở header (ADR 0009 §1).
+    """Bằng chứng gói LiDAR đã kiểm ở mức danh mục (ADR 0009); `ST-LIDAR-INGEST` mới đọc toàn bộ điểm.
 
-    Đám mây đã đăng ký: `point_count`. Chuỗi scan: `scan_count`, `pose_count`, file quỹ đạo và cách ghép scan ↔ pose.
-    Đây là kiểm tra ở mức danh mục; bước `ST-LIDAR-INGEST` mới đọc toàn bộ điểm.
+    Gói luôn có quỹ đạo, calibration và thời điểm frame. Đám mây đã đăng ký: `cloud_member` + `point_count`.
+    Chuỗi scan thô: `scan_count` + cách ghép scan ↔ pose.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     geometry_format: Literal["ply", "pcd"]
+    cloud_member: str | None = None
     point_count: int | None = Field(default=None, gt=0)
     scan_count: int | None = Field(default=None, gt=1)
-    pose_count: int | None = Field(default=None, gt=1)
-    trajectory_member: str | None = None
+    pose_count: int = Field(gt=1)
+    trajectory_member: str
+    calibration_member: str
+    calibration_format: Literal["torwic_txt", "json"]
+    frame_times_member: str
     #: `index_in_name`: tên scan là chỉ số dòng trong quỹ đạo (vd. 000421.pcd ↔ pose 421, cho phép nộp một phần scan);
     #: `sorted_order`: scan thứ i theo thứ tự tên ↔ pose thứ i (số lượng phải bằng nhau).
     pairing: Literal["index_in_name", "sorted_order"] | None = None
@@ -83,16 +97,13 @@ class InputDetection(BaseModel):
     lidar: LidarEvidence | None = None
 
 
-def _point_cloud(stream: BinaryIO) -> InputDetection:
-    """Đám mây điểm (PLY/PCD có x y z, không có thuộc tính 3DGS) là LiDAR đã đăng ký."""
+def _reject_bare_cloud(stream: BinaryIO) -> None:
+    """Đám mây điểm nộp riêng lẻ thiếu quỹ đạo và calibration nên không căn chỉnh được (ADR 0009, owner 02/10/2026)."""
     try:
         header = read_header(stream)
     except ValueError as error:
         raise InputRejectedError(f"File đám mây điểm không đọc được: {error}") from error
-    return InputDetection(
-        kind="registered_lidar",
-        lidar=LidarEvidence(geometry_format=header.geometry_format, point_count=header.point_count),
-    )
+    raise InputRejectedError(BARE_CLOUD.format(points=f"{header.point_count:,}".replace(",", ".")))
 
 
 def _is_gaussian_header(stream: BinaryIO) -> bool:
@@ -129,41 +140,115 @@ def _pose_count(text: str) -> int | None:
     return count or None
 
 
-def _detect_scan_sequence(archive: zipfile.ZipFile, names: list[str], scans: list[str]) -> InputDetection:
-    """ZIP gồm nhiều scan `.pcd` và đúng một file quỹ đạo TUM (ADR 0009: scan thô phải đi kèm quỹ đạo)."""
-    trajectories: list[tuple[str, int]] = []
-    for name in names:
-        info = archive.getinfo(name)
-        if PurePosixPath(name).suffix.lower() not in _TRAJECTORY_SUFFIXES or info.file_size > _MAX_TRAJECTORY_BYTES:
+def _frame_time_count(text: str) -> int | None:
+    """Số dòng nếu file là dãy thời điểm tăng dần (một số hữu hạn mỗi dòng); None nếu không phải."""
+    previous, count = -math.inf, 0
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
             continue
         try:
-            poses = _pose_count(archive.read(name).decode("ascii"))
+            value = float(line)
+        except ValueError:
+            return None
+        if not math.isfinite(value) or value <= previous:
+            return None
+        previous, count = value, count + 1
+    return count or None
+
+
+def _calibration_format(text: str) -> Literal["torwic_txt", "json"] | None:
+    """Calibration camera ↔ LiDAR: `calibrations.txt` kiểu TorWIC, hoặc JSON có khoá `lidar_from_camera`."""
+    if all(key in text for key in _TORWIC_EXTRINSIC_KEYS):
+        return "torwic_txt"
+    stripped = text.lstrip()
+    if stripped.startswith("{") and '"lidar_from_camera"' in stripped:
+        return "json"
+    return None
+
+
+def _exactly_one(found: list[str], what: str, missing: str) -> str:
+    if not found:
+        raise InputRejectedError(missing)
+    if len(found) > 1:
+        raise InputRejectedError(f"ZIP có {len(found)} file {what} ({', '.join(sorted(found))}); chỉ giữ một file")
+    return found[0]
+
+
+def _detect_lidar_package(archive: zipfile.ZipFile, names: list[str], clouds: list[str]) -> InputDetection:
+    """ZIP LiDAR: scan thô hoặc một đám mây đã đăng ký, luôn kèm quỹ đạo + calibration + thời điểm frame."""
+    trajectories: dict[str, int] = {}
+    frame_times: dict[str, int] = {}
+    calibrations: dict[str, Literal["torwic_txt", "json"]] = {}
+    for name in names:
+        info = archive.getinfo(name)
+        if name in clouds or info.file_size > _MAX_TRAJECTORY_BYTES:
+            continue
+        if PurePosixPath(name).suffix.lower() not in _TRAJECTORY_SUFFIXES | {".json", ".yaml", ".yml"}:
+            continue
+        try:
+            text = archive.read(name).decode("utf-8")
         except UnicodeDecodeError:
             continue
-        if poses is not None:
-            trajectories.append((name, poses))
-    if len(scans) == 1 and not trajectories:
-        raise InputRejectedError(
-            "ZIP chỉ có một file .pcd và không có quỹ đạo. Nếu đây là đám mây LiDAR đã đăng ký, tải thẳng file "
-            ".pcd/.ply (không nén). Chuỗi scan thô cần nhiều scan kèm một file quỹ đạo."
-        )
-    if not trajectories:
-        raise InputRejectedError(NO_TRAJECTORY.format(scans=len(scans)))
-    if len(trajectories) > 1:
-        listed = ", ".join(sorted(name for name, _ in trajectories))
-        raise InputRejectedError(f"ZIP có {len(trajectories)} file quỹ đạo ({listed}); chỉ giữ một file")
-    if len(scans) < 2:
-        raise InputRejectedError("Chuỗi scan cần ít nhất 2 file .pcd")
-    trajectory, poses = trajectories[0]
-    ordered = sorted(scans)
+        calibration = _calibration_format(text)
+        if calibration is not None:
+            calibrations[name] = calibration
+        elif (poses := _pose_count(text)) is not None:
+            trajectories[name] = poses
+        elif (times := _frame_time_count(text)) is not None:
+            frame_times[name] = times
+    described = f"{len(clouds)} scan LiDAR (.pcd)" if len(clouds) > 1 else "một đám mây điểm LiDAR"
+    trajectory = _exactly_one(list(trajectories), "quỹ đạo", NO_TRAJECTORY.format(clouds=described))
+    calibration_name = _exactly_one(
+        list(calibrations),
+        "calibration",
+        "Gói LiDAR thiếu file calibration camera ↔ LiDAR (vd. calibrations.txt của TorWIC có các khoá T_cam1_os.*, "
+        'hoặc JSON có khoá "lidar_from_camera"). Không có nó thì không biết camera nằm ở đâu so với LiDAR. '
+        + PACKAGE_GUIDE,
+    )
+    poses = trajectories[trajectory]
+    matching_times = [name for name, count in frame_times.items() if count == poses]
+    if frame_times and not matching_times:
+        counts = ", ".join(f"{name}: {count} dòng" for name, count in sorted(frame_times.items()))
+        raise InputRejectedError(f"File thời điểm frame không khớp quỹ đạo ({poses} pose): {counts}")
+    times_name = _exactly_one(
+        matching_times,
+        "thời điểm frame",
+        "Gói LiDAR thiếu file thời điểm frame (vd. frame_times.txt: mỗi dòng một thời điểm, một dòng cho mỗi pose). "
+        "Không có nó thì không biết frame nào của video ứng với pose nào. " + PACKAGE_GUIDE,
+    )
+    common = dict(
+        pose_count=poses,
+        trajectory_member=trajectory,
+        calibration_member=calibration_name,
+        calibration_format=calibrations[calibration_name],
+        frame_times_member=times_name,
+    )
+    ordered = sorted(clouds)
+    headers = {}
     for name in (ordered[0], ordered[-1]):
         with archive.open(name) as member:
             try:
-                header = read_header(member)  # type: ignore[arg-type]
+                headers[name] = read_header(member)  # type: ignore[arg-type]
             except ValueError as error:
-                raise InputRejectedError(f"Scan {PurePosixPath(name).name} không đọc được: {error}") from error
-        if header.geometry_format != "pcd":
-            raise InputRejectedError(f"Scan {PurePosixPath(name).name} có đuôi .pcd nhưng nội dung không phải PCD")
+                raise InputRejectedError(f"{PurePosixPath(name).name} không đọc được: {error}") from error
+        if {"opacity", "scale_0", "rot_0"} & set(headers[name].fields):
+            raise InputRejectedError(f"{PurePosixPath(name).name} là scene 3DGS, không phải đám mây LiDAR")
+    if len(ordered) == 1:
+        header = headers[ordered[0]]
+        return InputDetection(
+            kind="registered_lidar",
+            lidar=LidarEvidence(
+                geometry_format=header.geometry_format,
+                cloud_member=ordered[0],
+                point_count=header.point_count,
+                **common,
+            ),
+        )
+    if any(PurePosixPath(name).suffix.lower() != ".pcd" for name in ordered):
+        raise InputRejectedError(
+            "Gói có nhiều file đám mây: scan thô phải là .pcd (mỗi scan một file); đám mây đã đăng ký thì chỉ nộp một file"
+        )
     stems = [PurePosixPath(name).stem for name in ordered]
     if all(stem.isdigit() for stem in stems) and len(set(map(int, stems))) == len(stems):
         if max(map(int, stems)) >= poses:
@@ -180,14 +265,18 @@ def _detect_scan_sequence(archive: zipfile.ZipFile, names: list[str], scans: lis
         )
     return InputDetection(
         kind="lidar_scan_sequence",
-        lidar=LidarEvidence(
-            geometry_format="pcd",
-            scan_count=len(ordered),
-            pose_count=poses,
-            trajectory_member=trajectory,
-            pairing=pairing,
-        ),
+        lidar=LidarEvidence(geometry_format="pcd", scan_count=len(ordered), pairing=pairing, **common),
     )
+
+
+def _is_point_cloud_member(archive: zipfile.ZipFile, name: str) -> bool:
+    """PLY trong ZIP là đám mây điểm (không phải 3DGS) khi header đọc được và không có thuộc tính Gaussian."""
+    with archive.open(name) as member:
+        try:
+            header = read_header(member)  # type: ignore[arg-type]
+        except ValueError:
+            return False
+    return not {"opacity", "scale_0", "rot_0"} & set(header.fields)
 
 
 def _gaussian_evidence(stream: BinaryIO, size: int | None) -> GaussianPlyEvidence:
@@ -254,9 +343,13 @@ def _detect_zip(stream: BinaryIO, max_uncompressed: int) -> InputDetection:
     try:
         with zipfile.ZipFile(stream) as archive:
             names = _safe_names(archive, max_uncompressed)
-            scans = [name for name in names if PurePosixPath(name).suffix.lower() == ".pcd"]
-            if scans:
-                return _detect_scan_sequence(archive, names, scans)
+            plies = [name for name in names if PurePosixPath(name).suffix.lower() == ".ply"]
+            clouds = [name for name in names if PurePosixPath(name).suffix.lower() == ".pcd"]
+            has_colmap = any(PurePosixPath(name).stem in _COLMAP_FILES for name in names)
+            if not has_colmap:
+                clouds += [name for name in plies if _is_point_cloud_member(archive, name)]
+            if clouds:
+                return _detect_lidar_package(archive, names, clouds)
             plies = [name for name in names if PurePosixPath(name).suffix.lower() == ".ply"]
             colmap_dir, colmap_format = _colmap_model(names)
             # points3D.ply của COLMAP là point cloud; chỉ đếm PLY có thuộc tính 3DGS.
@@ -288,21 +381,21 @@ def detect_stream(stream: BinaryIO, size_bytes: int, max_uncompressed_bytes: int
     stream.seek(0)
     if head.startswith(b"ply"):
         if not _is_gaussian_header(stream):
-            return _point_cloud(stream)
+            _reject_bare_cloud(stream)
         return InputDetection(kind="gaussian_ply", gaussian=_gaussian_evidence(stream, size_bytes))
     if head.startswith((b"# .PCD", b"VERSION")):
-        return _point_cloud(stream)
+        _reject_bare_cloud(stream)
     if head.startswith(b"PK\x03\x04"):
         return _detect_zip(stream, max_uncompressed_bytes)
     if _is_video(head):
         return InputDetection(kind="rgb_video")
     raise InputRejectedError(
         "Không nhận diện được file. Hỗ trợ: video .mp4/.mov; scene 3DGS .ply hoặc .zip (PLY 3DGS + model COLMAP); "
-        "LiDAR đã đăng ký .ply/.pcd hoặc .zip (scan .pcd + file quỹ đạo)"
+        "gói LiDAR .zip (scan .pcd hoặc đám mây đã đăng ký, kèm quỹ đạo + calibration + thời điểm frame)"
     )
 
 
 def detect_input(path: Path, max_uncompressed_bytes: int) -> InputDetection:
-    """Nhận diện file cục bộ theo bytes: video, PLY 3DGS, ZIP (3DGS + COLMAP), đám mây LiDAR, ZIP scan + quỹ đạo."""
+    """Nhận diện file cục bộ theo bytes: video, PLY 3DGS, ZIP (3DGS + COLMAP), hoặc gói LiDAR .zip."""
     with path.open("rb") as stream:
         return detect_stream(stream, path.stat().st_size, max_uncompressed_bytes)

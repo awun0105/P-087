@@ -25,13 +25,13 @@ KIND_MEDIA_TYPES: dict[str, frozenset[str]] = {
     "rgb_video": frozenset({"video/mp4", "video/quicktime"}),
     "gaussian_ply": frozenset({"application/x-ply"}),
     "gaussian_ply_colmap": frozenset({"application/zip"}),
-    # ADR 0009: LiDAR đi kèm video — một đám mây đã đăng ký, hoặc ZIP scan thô + quỹ đạo.
-    "registered_lidar": frozenset({"application/x-ply", "application/x-pcd"}),
+    # ADR 0009: LiDAR đi kèm video — luôn là gói ZIP có quỹ đạo + calibration + thời điểm frame.
+    "registered_lidar": frozenset({"application/zip"}),
     "lidar_scan_sequence": frozenset({"application/zip"}),
 }
 UNSUPPORTED_EXTENSION = (
     "Hỗ trợ video .mp4/.mov; scene 3DGS .ply hoặc .zip (PLY 3DGS + model COLMAP); "
-    "LiDAR đã đăng ký .ply/.pcd hoặc .zip (scan .pcd + file quỹ đạo)"
+    "gói LiDAR .zip (scan .pcd hoặc đám mây đã đăng ký, kèm quỹ đạo + calibration + thời điểm frame)"
 )
 
 

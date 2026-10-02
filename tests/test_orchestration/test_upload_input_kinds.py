@@ -48,17 +48,13 @@ def test_stream_upload_records_kind_and_evidence(streaming: VideoUploadService) 
     assert bundle.input_kind == "gaussian_ply_colmap" and bundle.detection.colmap_dir == "scene/sparse/0"  # type: ignore[union-attr]
     video = _stream_upload(streaming, "kho.mp4", MP4 + b"payload")
     assert video.input_kind == "rgb_video"
-    # ADR 0009: đám mây điểm (không có thuộc tính 3DGS) là LiDAR đã đăng ký, không còn bị từ chối.
-    cloud = _stream_upload(streaming, "cloud.ply", _ply(("x", "y", "z"), count=3))
-    assert cloud.input_kind == "registered_lidar" and cloud.media_type == "application/x-ply"
-    assert cloud.detection is not None and cloud.detection.lidar.point_count == 3  # type: ignore[union-attr]
 
 
 @pytest.mark.parametrize(
     ("name", "payload", "message"),
     [
         ("scene.mp4", _gaussian(), "không khớp nội dung"),
-        ("cloud.mp4", _ply(("x", "y", "z")), "không khớp nội dung"),
+        ("cloud.ply", _ply(("x", "y", "z")), "nộp riêng lẻ"),
         ("notes.ply", b"hello world, not a ply", "Không nhận diện"),
     ],
 )

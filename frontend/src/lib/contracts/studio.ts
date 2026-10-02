@@ -14,13 +14,20 @@ export type UploadMediaType = VideoMediaType | "application/x-ply" | "applicatio
 /** Loại đầu vào máy chủ nhận diện theo nội dung (ADR 0004; LiDAR theo ADR 0009). */
 export type InputKind = "rgb_video" | "gaussian_ply" | "gaussian_ply_colmap" | "registered_lidar" | "lidar_scan_sequence";
 
-/** Bằng chứng LiDAR: đám mây đã đăng ký có `point_count`; chuỗi scan có số scan, số pose và file quỹ đạo. */
+/**
+ * Bằng chứng gói LiDAR (ADR 0009). Gói luôn có quỹ đạo, calibration và thời điểm frame; đám mây đã đăng ký có
+ * `cloud_member` + `point_count`, chuỗi scan thô có `scan_count`.
+ */
 export interface LidarEvidence {
   geometry_format: "ply" | "pcd";
+  cloud_member: string | null;
   point_count: number | null;
   scan_count: number | null;
-  pose_count: number | null;
-  trajectory_member: string | null;
+  pose_count: number;
+  trajectory_member: string;
+  calibration_member: string;
+  calibration_format: "torwic_txt" | "json";
+  frame_times_member: string;
   pairing: "index_in_name" | "sorted_order" | null;
 }
 
