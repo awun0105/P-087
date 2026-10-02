@@ -80,4 +80,4 @@ def test_no_gpu_or_too_little_vram_still_runs_one_worker() -> None:
 def test_unknown_vulkan_mapping_pins_torch_only() -> None:
     gpus = with_wgpu_indices(parse_nvidia_smi(SMI_T4X2), [])
     _, environment = _plan(gpus)[0]
-    assert environment == {"CUDA_VISIBLE_DEVICES": "0"}
+    assert environment == {"CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": "0"}

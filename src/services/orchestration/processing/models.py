@@ -153,6 +153,15 @@ class MachineCapability(BaseModel):
     headroom_measured: bool = False
     vram_free_gb: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     ram_available_gb: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    #: UUID của GPU worker được ghim (phạm vi giữ chỗ VRAM); None khi chưa xác định.
+    gpu_uuid: str | None = None
+    disk_total_gb: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    #: Mốc "máy rảnh": số đo trống lần gần nhất khi pipeline không dùng máy. Preset Maximum
+    #: tính theo mốc này; số trống tức thời ở trên đã trừ phần job đang chạy chiếm.
+    idle_measured_at: datetime | None = None
+    idle_vram_free_gb: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    idle_ram_available_gb: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    idle_disk_free_gb: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
 class JobProcessingConfig(BaseModel):

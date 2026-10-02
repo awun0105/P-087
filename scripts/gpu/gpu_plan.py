@@ -119,7 +119,9 @@ def worker_environment(gpu: Gpu, gpu_count: int, base_brush_environment: str | N
     """Biến môi trường ghim một worker vào `gpu`. Máy một GPU thì không đổi gì (hành vi mặc định đã đúng)."""
     if gpu_count < 2:
         return {}
-    environment = {"CUDA_VISIBLE_DEVICES": str(gpu.index)}
+    # CUDA mặc định xếp GPU theo tốc độ; ép theo thứ tự PCI để chỉ số trùng với nvidia-smi
+    # (worker cũng đo VRAM của đúng chỉ số này trước khi nhận job).
+    environment = {"CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": str(gpu.index)}
     if gpu.wgpu_discrete_index is not None:
         brush = json.loads(base_brush_environment or "{}")
         brush["CUBECL_WGPU_DEFAULT_DEVICE"] = f"DiscreteGpu({gpu.wgpu_discrete_index})"
