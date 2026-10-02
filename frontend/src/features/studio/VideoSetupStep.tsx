@@ -8,6 +8,7 @@ import { useCallback, useEffect, useId, useState } from "react";
 
 import { Badge, Button, Card, EmptyState, Notice } from "@/components/studio/primitives";
 import { canCreateScene, describeDetection } from "@/features/studio/inputKinds";
+import { LidarPackageSection, NO_LIDAR, lidarAttachment, lidarBlocker, type LidarChoice } from "@/features/studio/LidarPackageSection";
 import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
 import { useProcessingForm } from "@/features/studio/useProcessingForm";
 import { createSceneFromUpload, listUploads } from "@/lib/api/studio";
@@ -31,6 +32,9 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
   const router = useRouter();
   const ids = { name: useId(), owner: useId(), origin: useId(), purpose: useId() };
   const [uploads, setUploads] = useState<UploadRecord[] | null>(null);
+  // Mọi upload (gồm gói LiDAR) và lựa chọn LiDAR của scene này; LiDAR là tuỳ chọn nên mặc định không dùng.
+  const [allUploads, setAllUploads] = useState<UploadRecord[]>([]);
+  const [lidar, setLidar] = useState<LidarChoice>(NO_LIDAR);
   const { me } = useAuth();
   const actor = me?.user?.user_id ?? (me?.auth_required ? "guest" : "local");
   const { value: draft, setValue: setDraft, ready: draftReady, clear } = useSessionDraft("video:v1:" + actor, { ...EMPTY_SETUP, selected: preselect }, parseSetupDraft);
@@ -50,6 +54,7 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
     }
     const videos = result.data.uploads.filter(canCreateScene);
     setUploads(videos);
+    setAllUploads(result.data.uploads);
     setError(null);
     setDraft((current) => {
       const first = videos.find((item) => item.upload_id === preselect) ?? videos.find((item) => item.upload_id === current.selected) ?? videos[0];
@@ -82,6 +87,7 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
     !owner.trim() && "Chưa khai người/đơn vị sở hữu dữ liệu",
     !purpose.trim() && "Chưa khai mục đích sử dụng",
     !(rights && anonymized && retention) && "Chưa tick đủ 3 xác nhận dữ liệu",
+    lidarBlocker(lidar),
     blocked && "Thông số vượt cấu hình máy xử lý",
     processing.loading && "Đang tải cấu hình xử lý",
     processing.evaluating && "Đang kiểm tra thông số xử lý",
@@ -102,7 +108,7 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
         rights_to_use_confirmed: rights,
         anonymization_confirmed: anonymized,
         retention_acknowledged: retention,
-      }, processing.values ?? undefined);
+      }, processing.values ?? undefined, lidarAttachment(lidar));
       clear();
       notifySuccess("Đã tạo job. Bạn có thể theo dõi tại Tiến trình.");
       router.push(`/scenes/${encodeURIComponent(created.job.job_id)}`);
@@ -193,6 +199,13 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
         </div>
       </Card>
 
+      <LidarPackageSection
+        uploads={allUploads}
+        choice={lidar}
+        onChange={setLidar}
+        onUploaded={(record) => setAllUploads((current) => [record, ...current.filter((item) => item.upload_id !== record.upload_id)])}
+      />
+
       <Card className="p-5 sm:p-6">
         <h2 className="flex flex-wrap items-center gap-2 text-base font-bold">
           Xác nhận dữ liệu
@@ -274,6 +287,8 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
         <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
           <dt className="text-ink-muted">Video</dt>
           <dd>{selectedUpload ? `${selectedUpload.original_name} · ${describeDetection(selectedUpload)} · ${formatBytes(selectedUpload.size_bytes)}` : "Chưa chọn"}</dd>
+          <dt className="text-ink-muted">LiDAR</dt>
+          <dd>{lidar.uploadId ? (allUploads.find((item) => item.upload_id === lidar.uploadId)?.original_name ?? "Đã chọn") + " · tỉ lệ mét từ LiDAR" : "Không dùng · tỉ lệ mét ước lượng hoặc đo tay"}</dd>
           <dt className="text-ink-muted">Tên scene</dt>
           <dd>{name.trim() || "Chưa đặt"}</dd>
           <dt className="text-ink-muted">Nguồn dữ liệu</dt>

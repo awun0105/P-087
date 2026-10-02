@@ -7,6 +7,8 @@ import type { InputKind, UploadRecord } from "@/lib/contracts/studio";
 export const UPLOAD_ACCEPT = ".mp4,.mov,.ply,.zip,video/mp4,video/quicktime,application/zip";
 export const VIDEO_ACCEPT = ".mp4,.mov,video/mp4,video/quicktime";
 export const GAUSSIAN_ACCEPT = ".ply,.zip,application/zip";
+/** Gói LiDAR luôn là một file ZIP (ADR 0009). */
+export const LIDAR_ACCEPT = ".zip,application/zip";
 
 const ACCEPTED_NAME = /\.(mp4|mov|ply|zip)$/i;
 
@@ -24,7 +26,8 @@ export function rejectFileName(name: string): string | null {
 }
 
 /** Lọc sớm theo nhánh UX; kết quả nhận diện của máy chủ vẫn là authority cuối cùng. */
-export function rejectFileNameFor(name: string, kind: "video" | "gaussian"): string | null {
+export function rejectFileNameFor(name: string, kind: "video" | "gaussian" | "lidar"): string | null {
+  if (kind === "lidar") return /\.zip$/i.test(name) ? null : "Gói LiDAR là một file .zip gồm đám mây hoặc scan, quỹ đạo, calibration và thời điểm frame.";
   if (kind === "video") return /\.(mp4|mov)$/i.test(name) ? null : "Dựng từ video chỉ nhận .mp4/.mov. Chọn Mở 3DGS để tải .ply/.zip.";
   return /\.(ply|zip)$/i.test(name) ? null : "Mở 3DGS chỉ nhận .ply hoặc .zip có PLY. Chọn Dựng từ video cho .mp4/.mov.";
 }

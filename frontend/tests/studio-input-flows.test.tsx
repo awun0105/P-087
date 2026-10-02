@@ -1,5 +1,5 @@
 /** Proof của form/API bằng mock; không thay acceptance video/GPU hoặc renderer. */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ImportSetupStep } from "@/features/studio/ImportSetupStep";
@@ -41,7 +41,7 @@ describe("ba cửa vào", () => {
     render(<VideoSetupStep preselect={null} onBack={vi.fn()} />);
     expect(await screen.findByLabelText("Tên scene")).toHaveValue("Tên nháp");
     screen.getAllByRole("checkbox").forEach((checkbox) => expect(checkbox).toBeChecked());
-    fireEvent.click(screen.getAllByRole("radio")[1]);
+    fireEvent.click(within(screen.getByRole("group", { name: "Video đã tải lên" })).getAllByRole("radio")[1]);
     screen.getAllByRole("checkbox").forEach((checkbox) => expect(checkbox).not.toBeChecked());
     expect(screen.getByLabelText("Tên scene")).toHaveValue("room");
   });
@@ -101,7 +101,7 @@ describe("ba cửa vào", () => {
     vi.mocked(createSceneFromUpload).mockRejectedValue(new Error("Đã hết hạn mức"));
     render(<VideoSetupStep preselect="ply-1" onBack={vi.fn()} />);
     const name = await screen.findByLabelText("Tên scene");
-    expect(screen.getAllByRole("radio")).toHaveLength(1);
+    expect(within(screen.getByRole("group", { name: "Video đã tải lên" })).getAllByRole("radio")).toHaveLength(1);
     const start = screen.getByRole("button", { name: "Bắt đầu xử lý" });
     expect(start).toBeDisabled();
     fireEvent.change(name, { target: { value: "Kho video" } });
@@ -111,8 +111,54 @@ describe("ba cửa vào", () => {
     fireEvent.click(start);
     expect(await screen.findByText("Đã hết hạn mức")).toBeInTheDocument();
     expect(name).toHaveValue("Kho video");
-    expect(createSceneFromUpload).toHaveBeenCalledWith("video-1", "Kho video", expect.objectContaining({ rights_to_use_confirmed: true, anonymization_confirmed: true, retention_acknowledged: true, declared_owner: "Nhóm thử nghiệm" }), undefined);
+    expect(createSceneFromUpload).toHaveBeenCalledWith("video-1", "Kho video", expect.objectContaining({ rights_to_use_confirmed: true, anonymization_confirmed: true, retention_acknowledged: true, declared_owner: "Nhóm thử nghiệm" }), undefined, undefined);
     expect(createImport).not.toHaveBeenCalled();
+  });
+});
+
+describe("gói LiDAR ở trang dựng từ video", () => {
+  const scans: UploadRecord = {
+    ...video, upload_id: "lidar-1", original_name: "aisle.zip", media_type: "application/zip", input_kind: "lidar_scan_sequence",
+    detection: { kind: "lidar_scan_sequence", gaussian: null, ply_member: null, colmap_dir: null, colmap_format: null,
+      lidar: { geometry_format: "pcd", cloud_member: null, point_count: null, scan_count: 100, pose_count: 500, trajectory_member: "traj_gt.txt", calibration_member: "calibrations.txt", calibration_format: "torwic_txt", frame_times_member: "frame_times.txt", pairing: "index_in_name" } },
+  };
+
+  it("giải thích ba luồng; không chọn gói thì chạy luồng A và không gửi LiDAR", async () => {
+    vi.mocked(listUploads).mockResolvedValue({ ok: true, data: { uploads: [video, scans] } });
+    vi.mocked(createSceneFromUpload).mockResolvedValue({ job: { job_id: "job-1" } } as never);
+    render(<VideoSetupStep preselect="video-1" onBack={vi.fn()} />);
+    await screen.findByLabelText("Tên scene");
+    const flows = within(screen.getByRole("list", { name: "Ba luồng xử lý" }));
+    expect(flows.getAllByRole("listitem")).toHaveLength(3);
+    expect(flows.getByText(/Luồng A · sẽ chạy/)).toBeInTheDocument();
+    expect(screen.getByText(/không tự ước lượng quỹ đạo/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Người/đơn vị sở hữu dữ liệu"), { target: { value: "Nhóm" } });
+    screen.getAllByRole("checkbox").forEach((checkbox) => fireEvent.click(checkbox));
+    fireEvent.click(screen.getByRole("button", { name: "Bắt đầu xử lý" }));
+    await waitFor(() => expect(createSceneFromUpload).toHaveBeenCalled());
+    expect(vi.mocked(createSceneFromUpload).mock.calls[0][4]).toBeUndefined();
+  });
+
+  it("chọn gói scan thô: hiện nhận diện và luồng C, bắt khai đủ rồi mới gửi kèm LiDAR", async () => {
+    vi.mocked(listUploads).mockResolvedValue({ ok: true, data: { uploads: [video, scans] } });
+    vi.mocked(createSceneFromUpload).mockResolvedValue({ job: { job_id: "job-1" } } as never);
+    render(<VideoSetupStep preselect="video-1" onBack={vi.fn()} />);
+    await screen.findByLabelText("Tên scene");
+    fireEvent.change(screen.getByLabelText("Người/đơn vị sở hữu dữ liệu"), { target: { value: "Nhóm" } });
+    screen.getAllByRole("checkbox").forEach((checkbox) => fireEvent.click(checkbox));
+    fireEvent.click(screen.getByRole("radio", { name: /aisle\.zip/ }));
+    expect(screen.getByText(/100 scan · 500 pose/, { selector: "p" })).toHaveTextContent("luồng C");
+    expect(within(screen.getByRole("list", { name: "Ba luồng xử lý" })).getByText(/Luồng C · sẽ chạy/)).toBeInTheDocument();
+    const start = screen.getByRole("button", { name: "Bắt đầu xử lý" });
+    expect(start).toBeDisabled();
+    expect(screen.getByText("Chưa khai nguồn gốc quỹ đạo LiDAR")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: /Quỹ đạo chuẩn/ }));
+    expect(screen.getByText("Chưa xác nhận video và LiDAR cùng một lượt quay")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: /cùng một lượt quay/ }));
+    expect(start).toBeEnabled();
+    fireEvent.click(start);
+    await waitFor(() => expect(createSceneFromUpload).toHaveBeenCalled());
+    expect(vi.mocked(createSceneFromUpload).mock.calls[0][4]).toEqual({ upload_id: "lidar-1", trajectory_origin: "ground_truth", same_scene_confirmed: true });
   });
 });
 
