@@ -295,7 +295,18 @@ class UserMetricPort:
         """Đề xuất tỉ lệ/mặt sàn tự động của đúng bản 3DGS này; None khi worker không tạo."""
         if self.locate is None:
             return None
-        return load_proposal(job_id, source_visual, self.locate)
+        proposal = load_proposal(job_id, source_visual, self.locate)
+        segments = proposal.segments if proposal is not None else None
+        if proposal is not None and segments is not None:
+            # Hai đoạn đề xuất phải qua được chính các điều kiện của bước xem trước (độ dài tối thiểu,
+            # A–B đủ dài so với C–D); không thì chỉ giữ tỉ lệ và mặt sàn, người dùng tự chọn đoạn.
+            tolerance = check_tolerance_m(segments.distance_m, segments.check_distance_m)
+            if (
+                min(segments.distance_m, segments.check_distance_m) < MIN_SEGMENT_M
+                or tolerance > MAX_TOLERANCE_RATIO * segments.check_distance_m
+            ):
+                return proposal.model_copy(update={"segments": None})
+        return proposal
 
     def _estimate(
         self, job_id: str, source_visual: ProductArtifactRef, data: UserMetricInput

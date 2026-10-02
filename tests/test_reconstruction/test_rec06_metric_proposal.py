@@ -241,3 +241,18 @@ def test_runner_process_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         metric_proposal._run_moge(
             request, tmp_path / "w4", settings.model_copy(update={"python": tmp_path / "missing-python"})
         )
+
+
+def test_segments_that_rec06_would_reject_are_not_offered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Đoạn kiểm quá ngắn so với ngưỡng của bước xem trước: giữ tỉ lệ và sàn, không điền sẵn hai đoạn."""
+    arguments, _, locate, visual, writer, _, _, _, store_root = _setup(tmp_path, monkeypatch)
+    propose_metric(*arguments)
+    path = locate(proposal_uri(JOB, visual.reference))
+    assert path is not None
+    stored = MetricProposal.model_validate_json(path.read_bytes())
+    assert stored.segments is not None
+    short = stored.model_copy(update={"segments": stored.segments.model_copy(update={"check_distance_m": 0.52})})
+    port = user_metric_port(arguments[2], writer, lambda uri: False, lambda uri: _written(tmp_path, short))
+    offered = port.auto_proposal(JOB, visual.reference)
+    assert offered is not None and offered.segments is None and offered.floor == short.floor
+    assert offered.scale_m_per_sfm_unit == short.scale_m_per_sfm_unit

@@ -160,3 +160,27 @@ def test_no_floor_is_proposed_without_enough_horizontal_points() -> None:
     ceiling_only = slice(480, 980)  # mặt ngang nhưng ở trên camera
     assert propose_floor(points[ceiling_only], normals[ceiling_only], cameras, down, TRUE_SCALE) is None
     assert propose_floor(points, normals, cameras, down, 0.0) is None
+
+
+def test_projector_handles_rotated_cameras(tmp_path: Path) -> None:
+    """Camera xoay 90° quanh y: trục nhìn của nó là +x của SfM, nên độ sâu là toạ độ x của điểm."""
+    rng = np.random.default_rng(2)
+    points = np.column_stack([rng.uniform(3, 9, 30), rng.uniform(-1, 1, 30), rng.uniform(-2, 2, 30)])
+    half = float(np.sqrt(0.5))
+    pose = CameraPose(
+        frame_id=0, image_id=1, camera_id=1, image_name="000000.png", translation=(1.0, 0.0, 0.0),
+        rotation_xyzw=(0.0, half, 0.0, half),
+    )  # fmt: skip
+    sparse = read_sparse(*_write_sparse(tmp_path, points, [pose]))
+    sample = sparse_samples([pose], sparse, max_frames=5, max_points=100)[0]
+    assert np.allclose(sample.depth_sfm, sample.points[:, 0] - 1.0)
+    assert np.allclose(sample.rotation @ np.array([0, 0, 1]), [1, 0, 0])
+
+
+def test_floor_that_is_only_a_thin_strip_is_not_proposed() -> None:
+    """Điểm sàn nằm gần như trên một đường thẳng: ba điểm sàn sẽ thẳng hàng, REC-06 không dựng được khung."""
+    rng = np.random.default_rng(9)
+    strip = np.column_stack([rng.uniform(-5, 5, 200), np.full(200, 2.5), np.full(200, 4.0)])
+    normals = np.tile([0.0, -1.0, 0.0], (200, 1))
+    cameras = np.zeros((4, 3))
+    assert propose_floor(strip, normals, cameras, np.array([0.0, 1.0, 0.0]), TRUE_SCALE) is None

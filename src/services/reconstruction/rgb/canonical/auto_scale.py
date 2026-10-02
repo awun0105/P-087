@@ -229,6 +229,10 @@ def propose_floor(
     a, b = flat[order[0]], flat[order[-1]]
     side = (flat - centroid) @ across
     third = flat[int(np.argmax(np.abs(side)))]
+    # Ba điểm sàn gần thẳng hàng (sàn chỉ là một dải hẹp) không dựng được khung sàn: không đề xuất.
+    span = np.linalg.norm(b - a)
+    if span <= 0 or np.linalg.norm(np.cross(b - a, third - a)) / span < layer:
+        return None
     # C–D: cặp điểm xa nhau theo trục còn lại, độc lập với A–B để đoạn kiểm không trùng đoạn đo.
     lateral = np.argsort(side)
     c, d = flat[lateral[0]], flat[lateral[-1]]

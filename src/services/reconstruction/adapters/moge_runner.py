@@ -26,10 +26,13 @@ import numpy as np
 
 
 def _sample(grid: np.ndarray, pixels: np.ndarray) -> np.ndarray:
-    """Giá trị tại pixel gần nhất; pixel ngoài ảnh bị kẹp về biên (COLMAP có thể báo keypoint sát mép)."""
+    """Giá trị tại pixel chứa toạ độ; pixel ngoài ảnh bị kẹp về biên (COLMAP có thể báo keypoint sát mép).
+
+    COLMAP đặt gốc ở góc trên-trái của pixel đầu (tâm pixel đầu là 0,5), nên chỉ số pixel là phần nguyên.
+    """
     height, width = grid.shape[:2]
-    u = np.clip(np.rint(pixels[:, 0]).astype(int), 0, width - 1)
-    v = np.clip(np.rint(pixels[:, 1]).astype(int), 0, height - 1)
+    u = np.clip(np.floor(pixels[:, 0]).astype(int), 0, width - 1)
+    v = np.clip(np.floor(pixels[:, 1]).astype(int), 0, height - 1)
     return grid[v, u]
 
 
