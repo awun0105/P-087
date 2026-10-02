@@ -23,6 +23,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
 from uuid import uuid4
@@ -558,6 +559,62 @@ def _execute_prepare(attempt: _Attempt, profile: ResolvedProcessing) -> JobManif
     return attempt.registry.record_prepared_input(attempt.job, receipt)
 
 
+def _execute_lidar_ingest(attempt: _Attempt) -> JobManifest:
+    """`ST-LIDAR-INGEST` cho job có gói LiDAR (ADR 0009): giải gói, ghép scan nếu cần, publish đám mây + bản ghi gói.
+
+    Job chỉ có video trả nguyên job. Bằng chứng nhận diện lấy từ InputManifest (đã lưu lúc tạo scene), không nhận
+    diện lại từ tên file. Chạy ngay trong worker (CPU + RAM, không dùng GPU) và được đo như một công cụ riêng.
+    """
+    from src.services.reconstruction import LidarEvidence, LidarPackageError, LidarPackageIngest
+
+    project = attempt.registry.get_project(attempt.job.project_id)
+    resolver = attempt.registry.runtime_resolver
+    manifest = InputManifest.model_validate_json(resolver.require(project.input_manifest_ref).read_bytes())  # type: ignore[arg-type]
+    declared = (manifest.preparation_provenance or {}).get("lidar")
+    if not manifest.input_configuration.registered_lidar_present or not isinstance(declared, dict):
+        return attempt.job
+    package = next(item for item in manifest.files if item.media_type == "application/zip")
+    started = datetime.now(UTC)
+    try:
+        with _sampled(attempt, "lidar_ingest"):
+            result = LidarPackageIngest(FilesystemArtifactStore(resolver)).ingest(
+                resolver.require_uri(package.artifact_uri, package.checksum),
+                LidarEvidence.model_validate(declared["evidence"]),
+                attempt.job.job_id,
+                declared["trajectory_origin"],
+                attempt.workspace / "lidar",
+            )
+    except LidarPackageError as error:
+        failure = ExecutionError(
+            error_code="LIDAR_PACKAGE_INVALID",
+            stage_id=StageId.LIDAR_INGEST,
+            human_message=str(error),
+            retryable=False,
+            details={"action": "Sửa gói LiDAR theo hướng dẫn rồi tạo scene mới"},
+        )
+        stage = StageArtifact(
+            stage_id=StageId.LIDAR_INGEST,
+            status=StageStatus.FAILED,
+            started_at=started,
+            completed_at=datetime.now(UTC),
+            error=failure,
+        )
+        return attempt.registry.record_lidar_ingest(attempt.job, stage)
+    resolver.sync_up(attempt.job.job_id)
+    reference = result.reference
+    stage = StageArtifact(
+        stage_id=StageId.LIDAR_INGEST,
+        status=StageStatus.SUCCEEDED,
+        artifact_type=reference.artifact_type,
+        artifact_uri=reference.artifact_uri,
+        artifact_checksum=reference.artifact_checksum,
+        data_class=reference.data_class,
+        started_at=started,
+        completed_at=datetime.now(UTC),
+    )
+    return attempt.registry.record_lidar_ingest(attempt.job, stage)
+
+
 def run_prepared_job(job_id: str, frame_set_uri: str, *, expected_checksum: str | None = None) -> JobManifest:
     """Chỉ dispatch frame ref đã publish/allow-list và profile đúng JobManifest."""
     initial = get_project_registry().get_job(job_id)
@@ -587,6 +644,10 @@ def run_video_job(job_id: str, *, expected_checksum: str | None = None) -> JobMa
             frames = prepared_frame_reference(attempt.job)
             if frames is None:
                 raise ValueError("Prepare thành công nhưng thiếu frame set")
+            attempt.job = _execute_lidar_ingest(attempt)
+            if attempt.job.status != JobStatus.RUNNING:
+                _record_benchmark(attempt)  # gói LiDAR hỏng: dừng trước khi tốn GPU cho COLMAP/Brush
+                return attempt.job
             job = _execute_preview(attempt, frames, profile)
         return _requeue_if_exhausted(attempt) or job
     except BaseException as error:

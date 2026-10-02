@@ -115,8 +115,21 @@ def create_scene_from_upload(
             status_code=status.HTTP_409_CONFLICT,
             detail="Worker chưa dùng file thông số chung; không nhận thông số tùy chỉnh",
         )
-    project = registry.create_project_from_upload(upload, request, settings.product_privacy_mode)
+    lidar = None
+    if request.lidar is not None:
+        try:
+            lidar = uploads.get(request.lidar.upload_id)
+        except UploadNotFoundError as error:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+        if lidar.input_kind not in {"registered_lidar", "lidar_scan_sequence"}:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="File đính kèm không phải gói LiDAR (.zip gồm đám mây hoặc scan, quỹ đạo, calibration, thời điểm frame)",
+            )
+    project = registry.create_project_from_upload(upload, request, settings.product_privacy_mode, lidar)
     uploads.link_project(upload.upload_id, project.project_id)
+    if lidar is not None:
+        uploads.link_project(lidar.upload_id, project.project_id)
     try:
         job = registry.create_job(JobCreateInput(project_id=project.project_id), processing)
     except (PrivacyGateBlockedError, RuntimeStateConflictError) as error:

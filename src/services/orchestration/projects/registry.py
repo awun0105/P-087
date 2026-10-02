@@ -27,6 +27,7 @@ from src.models.contracts.manifests import (
     InputManifest,
     JobManifest,
     JobStatus,
+    LidarMetadata,
     PrivacyInspectionScope,
     PrivacyResult,
     PrivacyValidationReport,
@@ -260,14 +261,21 @@ class ProjectRegistry:
         upload: UploadRecord,
         request: UploadProjectInput,
         privacy_mode: Literal["qa_verified", "self_attested"],
+        lidar: UploadRecord | None = None,
     ) -> ProjectRecord:
         """Dựng InputManifest cho video đã upload, publish nó rồi tạo project.
 
         Manifest nằm trong namespace của project (immutable); video giữ nguyên ở
         namespace upload. `attested=True` là field mà EX-REC privacy gate đọc.
+        `lidar` là gói LiDAR đi kèm (ADR 0009): manifest ghi cả hai file, khai cùng scene, và giữ bằng chứng nhận
+        diện của gói để worker chọn luồng mà không nhận diện lại từ tên file.
         """
         if upload.upload_id != request.upload_id:
             raise ValueError("upload không khớp request")
+        if (lidar is None) != (request.lidar is None) or (lidar and lidar.upload_id != request.lidar.upload_id):  # type: ignore[union-attr]
+            raise ValueError("gói LiDAR không khớp request")
+        if lidar is not None and (lidar.detection is None or lidar.detection.lidar is None):
+            raise ValueError("file đính kèm không phải gói LiDAR đã nhận diện")
         project_id = f"project-{uuid4().hex[:12]}"
         attestation: JsonObject = {**request.attestation.model_dump(mode="json"), "attested": True}
         draft = InputManifest(
@@ -282,11 +290,55 @@ class ProjectRegistry:
                     checksum=upload.checksum,
                     artifact_uri=upload.artifact_uri,
                     data_class=ArtifactDataClass.PRODUCT_INPUT,
-                )
+                ),
+                *(
+                    [
+                        InputFile(
+                            original_name=lidar.original_name,
+                            media_type=lidar.media_type,
+                            size_bytes=lidar.size_bytes,
+                            checksum=lidar.checksum,
+                            artifact_uri=lidar.artifact_uri,
+                            data_class=ArtifactDataClass.PRODUCT_INPUT,
+                        )
+                    ]
+                    if lidar is not None
+                    else []
+                ),
             ],
-            input_configuration=InputConfiguration(rgb_present=True, registered_lidar_present=False),
+            input_configuration=InputConfiguration(
+                rgb_present=True,
+                registered_lidar_present=lidar is not None,
+                declared_same_scene=True if lidar is not None else None,
+            ),
+            lidar_metadata=(
+                None
+                if lidar is None
+                else LidarMetadata(
+                    unit="meter",
+                    coordinate_frame="lidar_map",
+                    # Scan thô chỉ thành đám mây đã đăng ký sau ST-LIDAR-INGEST; manifest ghi đúng dạng người dùng nộp.
+                    registration_status=(
+                        "registered" if lidar.input_kind == "registered_lidar" else "scan_sequence_with_trajectory"
+                    ),
+                )
+            ),
             source_rights_attestation=attestation,
-            preparation_provenance={"upload_id": upload.upload_id},
+            preparation_provenance={
+                "upload_id": upload.upload_id,
+                **(
+                    {
+                        "lidar": {
+                            "upload_id": lidar.upload_id,
+                            "input_kind": lidar.input_kind,
+                            "trajectory_origin": request.lidar.trajectory_origin,  # type: ignore[union-attr]
+                            "evidence": lidar.detection.lidar.model_dump(mode="json"),  # type: ignore[union-attr]
+                        }
+                    }
+                    if lidar is not None
+                    else {}
+                ),
+            },
             input_manifest_checksum=_PLACEHOLDER_CHECKSUM,
         )
         manifest = with_canonical_checksum(draft, "input_manifest_checksum")
@@ -691,6 +743,46 @@ class ProjectRegistry:
             current_stage=updated.current_stage,
             recorded_at=datetime.now(UTC),
             error=receipt.error,
+            job_manifest_uri=reference.artifact_uri,
+            job_manifest_checksum=reference.artifact_checksum,
+        )
+        self.persistence.save_job(updated, reference, event, expected=expected)
+        return updated
+
+    def record_lidar_ingest(self, expected: JobManifest, stage: StageArtifact) -> JobManifest:
+        """Worker-only reducer cho `ST-LIDAR-INGEST` (ADR 0009); CAS trên revision RUNNING đã claim.
+
+        Thành công: job đi tiếp sang dựng pose camera. Gói LiDAR lỗi: attempt kết thúc FAILED với lý do của REC —
+        không lặng lẽ bỏ LiDAR để chạy như job chỉ có video (PRD §5.2).
+        """
+        if self.persistence is None:
+            raise RuntimeStateConflictError("Real worker cần durable registry")
+        if expected.status != JobStatus.RUNNING or stage.stage_id != StageId.LIDAR_INGEST:
+            raise ValueError("LiDAR ingest receipt khác job/stage đang chạy")
+        failed = stage.status != StageStatus.SUCCEEDED
+        if not failed:
+            if not (stage.artifact_uri or "").startswith(f"artifact://jobs/{expected.job_id}/"):
+                raise ValueError("LiDAR artifact phải thuộc namespace của job")
+            self.runtime_resolver.require(self._to_product_ref(expected.job_id, stage))
+        updated = with_canonical_checksum(
+            expected.model_copy(
+                update={
+                    "stage_artifacts": [*expected.stage_artifacts, stage],
+                    "status": JobStatus.FAILED if failed else JobStatus.RUNNING,
+                    "current_stage": StageId.LIDAR_INGEST if failed else StageId.CAMERA_POSE,
+                    "completed_at": datetime.now(UTC) if failed else None,
+                }
+            ),
+            "job_manifest_checksum",
+        )
+        reference = self.lifecycle.store.publish_manifest(updated)
+        history = self.persistence.list_attempts(expected.job_id)
+        event = JobAttemptRecord(
+            attempt=history[-1].attempt,
+            status=updated.status,
+            current_stage=updated.current_stage,
+            recorded_at=datetime.now(UTC),
+            error=stage.error,
             job_manifest_uri=reference.artifact_uri,
             job_manifest_checksum=reference.artifact_checksum,
         )

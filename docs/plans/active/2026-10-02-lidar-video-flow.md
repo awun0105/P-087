@@ -24,10 +24,10 @@ hướng dẫn.
 | L1 | Nhận diện gói LiDAR theo nội dung + thông báo từ chối (`inputs/detect.py`, upload kinds) | **DONE** (test + chạy trên gói TorWIC thật) |
 | L2 | Thử nghiệm cách dựng pose bám quỹ đạo (COLMAP) trên Aisle_CW | **DONE** (SfM + chất lượng 3DGS; số ở ADR 0009) |
 | L3 | Ghép scan trong worker bằng numpy (`reconstruction/lidar/fusion.py`), không thêm Open3D vào runtime | **DONE** (20 scan thật: 133.978 điểm trong 3 s; lệch bản Open3D tối đa 6 cm) |
-| L4 | Stage `ST-LIDAR-INGEST`: giải gói, ghép (luồng C), REC-08 nhận đám mây, ghi provenance (quỹ đạo ground truth hay tự tính) | Dịch vụ **DONE** (`lidar/package.py`; sàn ước lượng −0,2235 m, owner đo −0,2345 m); chưa nối vào worker |
+| L4 | Stage `ST-LIDAR-INGEST`: giải gói, ghép (luồng C), REC-08 nhận đám mây, ghi provenance (quỹ đạo ground truth hay tự tính) | **DONE** (`lidar/package.py`; sàn ước lượng −0,2235 m, owner đo −0,2345 m; worker chạy sau bước tách frame, gói hỏng thì job dừng ở đây trước khi tốn GPU) |
 | L5 | Pose camera từ quỹ đạo + calibration + thời điểm frame; REC-03 chạy `point_triangulator` rồi `pose_prior_mapper --input_path` thay cho `mapper` khi job có gói LiDAR | TODO |
 | L6 | Bước tỉ lệ mét cho job LiDAR: không chọn điểm; bản ghi căn chỉnh + màn xác nhận (tỉ lệ, sai số, số frame) | TODO |
-| L7 | Job mang gói LiDAR: API tạo scene nhận `lidar_upload_id`, `InputManifest.lidar_metadata`, bundle `registered_lidar_present` | TODO |
+| L7 | Job mang gói LiDAR: API tạo scene nhận `lidar`, `InputManifest.lidar_metadata`, bundle `registered_lidar_present` | Phần tạo scene + manifest **DONE** (chỉ qua API, chưa có ô trên UI); bundle chờ L6 |
 | L8 | UI `/new/import-video`: ô LiDAR, giải thích ba luồng và dữ liệu cần, kết quả nhận diện; timeline có hai bước LiDAR | TODO |
 | L9 | Bộ mẫu TorWIC ở cả hai dạng, kèm video camera trái cùng traversal; nâng giới hạn upload cho gói LiDAR | TODO |
 | L10 | Mesh va chạm từ LiDAR (vùng LiDAR phủ) + phần còn lại từ 3DGS; đo bằng `collision_path_clearance` và `metric_click_error` | TODO |
@@ -68,3 +68,17 @@ thay vì `arbitrary_sfm`), nên làm thành một nhánh rõ ràng theo kind c�
 
 Một job thật trên Aisle_CW đi từ `/new/import-video` (video + gói scan thô) tới scene có tỉ lệ mét từ LiDAR mà không
 chọn điểm nào; bundle ghi `registered_lidar_present=true` với căn chỉnh `CONFIRMED`; số đo L10 ghi vào `eval/results/`.
+
+## Trạng thái giữa chừng (02/10/2026, tối)
+
+- Đi được tới đâu: tạo scene qua API với `lidar` → worker chuẩn bị video → `ST-LIDAR-INGEST` publish đám mây đã
+  đăng ký + `LidarPackageRecord` → sang COLMAP. Timeline hiện bước "Nhận dữ liệu LiDAR" cho job có gói.
+- **Chưa dùng LiDAR cho việc gì sau bước nhận:** COLMAP vẫn chạy `mapper` như job chỉ có video, bước tỉ lệ mét vẫn là
+  màn chọn điểm, bundle vẫn ghi `registered_lidar_present=False`. Vì vậy **chưa mở ô LiDAR trên UI** (L8): mở trước
+  L5/L6 sẽ thành "nhận LiDAR rồi bỏ qua", điều PRD §4.2 cấm trình bày như đóng góp.
+- Trong lúc bước nhận LiDAR chạy, timeline tạm hiện bước kế tiếp ("Ước lượng camera") là đang chạy, vì bước này chỉ
+  ghi một lần khi xong. Sửa cùng L5.
+- Bước tiếp theo: L5 — `LidarPackageRecord` + frame set → pose camera theo thời điểm frame → REC-03 chạy
+  `point_triangulator` rồi `pose_prior_mapper --input_path`.
+- Validation: `pytest tests/ -q` 1386 passed, 40 skipped; frontend 222 passed, typecheck + lint sạch. Test tích hợp
+  chạy worker thật trên video + gói LiDAR (đạt và hỏng). Chưa chạy job thật trên TorWIC qua stack.

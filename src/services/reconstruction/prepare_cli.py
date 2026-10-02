@@ -135,7 +135,9 @@ class VideoInputPreparer:
 
     def _video(self, manifest: InputManifest, profile: RGBQualityProfile) -> RGBVideoRequest:
         videos = [file for file in manifest.files if file.media_type in _VIDEO_MEDIA_TYPES]
-        if len(videos) != 1 or len(manifest.files) != 1:
+        # File còn lại (nếu có) chỉ được là gói LiDAR đi kèm đã khai trong manifest (ADR 0009); bước này không đọc nó.
+        extras = len(manifest.files) - len(videos)
+        if len(videos) != 1 or extras != int(manifest.input_configuration.registered_lidar_present):
             raise RGBValidationError(
                 "RGB_INPUT_SHAPE_UNSUPPORTED",
                 "Upload preparation expects exactly one mp4/mov video",

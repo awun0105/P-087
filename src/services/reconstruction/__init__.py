@@ -103,14 +103,23 @@ def __getattr__(name: str) -> object:
         from src.services.reconstruction.rgb.canonical.lidar_assist import support_uri
 
         return support_uri
-    if name in {"detect_input", "detect_stream", "InputDetection", "InputKind", "InputRejectedError"}:
+    if name in {"detect_input", "detect_stream", "InputDetection", "InputKind", "InputRejectedError", "LidarEvidence"}:
         from src.services.reconstruction.inputs import detect
 
         return getattr(detect, name)
+    if name in {"LidarPackageError", "LidarPackageIngest", "LidarPackageRecord", "LidarPackageResult"}:
+        from src.services.reconstruction.lidar import package
+
+        return getattr(package, name)
     raise AttributeError(name)
 
 
 __all__ = [
+    "LidarEvidence",
+    "LidarPackageError",
+    "LidarPackageIngest",
+    "LidarPackageRecord",
+    "LidarPackageResult",
     "extract_member",
     "package_splat",
     "ModeComparison",

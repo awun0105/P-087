@@ -31,6 +31,13 @@ export interface LidarEvidence {
   pairing: "index_in_name" | "sorted_order" | null;
 }
 
+/** Gói LiDAR gắn vào scene khi tạo (ADR 0009) cùng hai lời khai bắt buộc. */
+export interface LidarAttachment {
+  upload_id: string;
+  trajectory_origin: "estimated" | "ground_truth";
+  same_scene_confirmed: boolean;
+}
+
 export interface InputDetection {
   kind: InputKind;
   gaussian: { gaussian_count: number; sh_degree: number; encoding: string } | null;

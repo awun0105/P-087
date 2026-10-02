@@ -20,6 +20,7 @@ import {
   type MetricProposal,
   type ImportedScene,
   type JobProgress,
+  type LidarAttachment,
   type LidarMeasurements,
   type MetricInput,
   type MetricPoint,
@@ -57,10 +58,11 @@ export function createSceneFromUpload(
   name: string,
   attestation: SourceRightsAttestation,
   processing?: Record<string, ParamValue>,
+  lidar?: LidarAttachment,
 ): Promise<SceneFromUpload> {
   return apiFetch<SceneFromUpload>(`${API}/scenes/from-upload`, {
     method: "POST",
-    body: JSON.stringify({ upload_id: uploadId, name, attestation, processing }),
+    body: JSON.stringify({ upload_id: uploadId, name, attestation, processing, lidar }),
   });
 }
 

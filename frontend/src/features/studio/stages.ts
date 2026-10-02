@@ -76,6 +76,22 @@ export const OBJECT_STAGE: StageMeta = {
 
 export const STUDIO_STAGES: readonly StageMeta[] = [...MVP_STAGES, METRIC_STAGE, GEOMETRY_STAGE, OBJECT_STAGE];
 
+/** ADR 0009: chỉ job có gói LiDAR mới có bước này; nó chưa có màn xem kết quả riêng. */
+export const LIDAR_STAGE: StageMeta = {
+  id: "ST-LIDAR-INGEST",
+  title: "Nhận dữ liệu LiDAR",
+  short: "LiDAR",
+  description:
+    "Giải gói LiDAR, ghép các scan theo quỹ đạo thành một đám mây đã đăng ký (nếu nộp scan thô), kiểm quỹ đạo, calibration và tìm mặt sàn.",
+};
+
+/** Danh sách stage của một job theo các stage API trả: job có gói LiDAR có thêm bước LiDAR sau bước tách frame. */
+export function stagesFor(stageIds: readonly StageId[]): readonly StageMeta[] {
+  if (!stageIds.includes(LIDAR_STAGE.id)) return STUDIO_STAGES;
+  const index = STUDIO_STAGES.findIndex((stage) => stage.id === "ST-FRAME-EXTRACT") + 1;
+  return [...STUDIO_STAGES.slice(0, index), LIDAR_STAGE, ...STUDIO_STAGES.slice(index)];
+}
+
 export function stageMeta(id: StageId): StageMeta | undefined {
-  return STUDIO_STAGES.find((stage) => stage.id === id);
+  return id === LIDAR_STAGE.id ? LIDAR_STAGE : STUDIO_STAGES.find((stage) => stage.id === id);
 }

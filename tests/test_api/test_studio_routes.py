@@ -270,3 +270,75 @@ async def test_scene_from_gaussian_upload_is_refused_until_import_flow_exists(
         json={"upload_id": upload["upload_id"], "name": "Scene PLY", "attestation": _ATTESTATION},
     )
     assert response.status_code == 409 and "PLY/ZIP" in response.json()["detail"]
+
+
+def _lidar_package() -> bytes:
+    """Gói LiDAR tối thiểu hợp lệ: một đám mây đã đăng ký + quỹ đạo + calibration + thời điểm frame."""
+    import io
+    import struct
+    import zipfile
+
+    cloud = (
+        b"ply\nformat binary_little_endian 1.0\nelement vertex 2\nproperty float x\nproperty float y\n"
+        b"property float z\nend_header\n" + struct.pack("<6f", 0, 0, 0, 1, 1, 1)
+    )
+    calibration = "".join(
+        f"T_cam1_os.{key}: {value}\n" for key, value in zip("px py pz qx qy qz qw".split(), "0 0 0 0 0 0 1".split())
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("map.ply", cloud)
+        archive.writestr("traj.txt", "0.0 0 0 0 0 0 0 1\n0.1 1 0 0 0 0 0 1\n")
+        archive.writestr("calibrations.txt", calibration)
+        archive.writestr("frame_times.txt", "0.0\n0.1\n")
+    return buffer.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_scene_from_upload_carries_a_lidar_package(client: AsyncClient, studio: SimpleNamespace) -> None:
+    """ADR 0009: video + gói LiDAR → manifest ghi cả hai, khai cùng scene, giữ bằng chứng nhận diện của gói."""
+    studio.settings.product_upload_max_bytes = 1024 * 1024
+    video = await _upload(client)
+    package = await _upload(client, "lidar.zip", _lidar_package())
+    assert package["input_kind"] == "registered_lidar"
+    lidar = {"upload_id": package["upload_id"], "trajectory_origin": "ground_truth", "same_scene_confirmed": True}
+    response = await client.post(
+        "/api/v1/scenes/from-upload",
+        json={"upload_id": video["upload_id"], "name": "Kho LiDAR", "attestation": _ATTESTATION, "lidar": lidar},
+    )
+    assert response.status_code == 201, response.text
+    record = studio.registry.get_project(response.json()["project"]["project_id"])
+    manifest = InputManifest.model_validate_json(
+        studio.registry.runtime_resolver.require(record.input_manifest_ref).read_bytes()
+    )
+    assert [item.checksum for item in manifest.files] == [video["checksum"], package["checksum"]]
+    assert manifest.input_configuration.registered_lidar_present and manifest.input_configuration.declared_same_scene
+    assert manifest.lidar_metadata is not None and manifest.lidar_metadata.registration_status == "registered"
+    provenance = manifest.preparation_provenance["lidar"]  # type: ignore[index]
+    assert provenance["trajectory_origin"] == "ground_truth" and provenance["evidence"]["pose_count"] == 2
+    listed = {
+        item["upload_id"]: item["project_ids"] for item in (await client.get("/api/v1/uploads")).json()["uploads"]
+    }
+    assert listed[package["upload_id"]] == [record.project_id]
+
+    # Thiếu lời khai cùng scene, hoặc đính kèm file không phải gói LiDAR: từ chối, không tạo scene.
+    unconfirmed = await client.post(
+        "/api/v1/scenes/from-upload",
+        json={
+            "upload_id": video["upload_id"],
+            "name": "x",
+            "attestation": _ATTESTATION,
+            "lidar": {**lidar, "same_scene_confirmed": False},
+        },
+    )
+    assert unconfirmed.status_code == 422
+    wrong = await client.post(
+        "/api/v1/scenes/from-upload",
+        json={
+            "upload_id": video["upload_id"],
+            "name": "x",
+            "attestation": _ATTESTATION,
+            "lidar": {**lidar, "upload_id": video["upload_id"]},
+        },
+    )
+    assert wrong.status_code == 409 and "gói LiDAR" in wrong.json()["detail"]

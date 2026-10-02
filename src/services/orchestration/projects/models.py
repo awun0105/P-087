@@ -66,6 +66,24 @@ class ProjectCreateInput(BaseModel):
     attestation: SourceRightsAttestation
 
 
+class LidarAttachment(BaseModel):
+    """Gói LiDAR người dùng gắn vào scene và hai lời khai contract bắt buộc cho đầu vào RGB + LiDAR."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    upload_id: Identifier
+    #: Quỹ đạo trong gói do SLAM/odometry tự tính, hay là quỹ đạo chuẩn (ground truth) của dataset.
+    trajectory_origin: Literal["estimated", "ground_truth"]
+    #: Video và LiDAR cùng một không gian, cùng lượt quay; đơn vị mét, trục Z hướng lên.
+    same_scene_confirmed: bool
+
+    @model_validator(mode="after")
+    def _require_same_scene(self) -> "LidarAttachment":
+        if not self.same_scene_confirmed:
+            raise ValueError("cần xác nhận video và LiDAR cùng một không gian")
+        return self
+
+
 class UploadProjectInput(BaseModel):
     """Tạo scene/project từ một video đã upload, kèm lời khai nguồn dữ liệu."""
 
@@ -76,6 +94,8 @@ class UploadProjectInput(BaseModel):
     attestation: SourceRightsAttestation
     #: Thông số xử lý theo file cấu hình chung; None → preset "tối thiểu cho chất lượng tốt".
     processing: dict[str, int | float | str] | None = None
+    #: Gói LiDAR đi kèm video (ADR 0009); None = job chỉ có video.
+    lidar: "LidarAttachment | None" = None
 
 
 class JobCreateInput(BaseModel):

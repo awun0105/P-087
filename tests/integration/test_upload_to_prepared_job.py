@@ -133,3 +133,102 @@ def test_project_without_anonymization_attestation_cannot_queue(world: SimpleNam
     project_id = _queued_job(world, anonymized=False)
     with pytest.raises(PrivacyGateBlockedError):
         world.registry.create_job(JobCreateInput(project_id=project_id))
+
+
+# ── Job có gói LiDAR (ADR 0009) ─────────────────────────────────────────────────────────────────
+
+
+def _lidar_package(root, floor_offset: float = 0.0) -> bytes:  # noqa: ANN001
+    """Gói đám mây đã đăng ký: sàn 6 × 6 m ngay dưới quỹ đạo (hoặc lệch xa `floor_offset` mét để gói hỏng)."""
+    import io
+    import zipfile
+
+    import numpy as np
+
+    from src.services.reconstruction.lidar.fusion import ply_bytes
+
+    grid = np.stack(np.meshgrid(np.arange(-3, 3, 0.05), np.arange(-3, 3, 0.05)), axis=-1).reshape(-1, 2)
+    cloud = np.column_stack([grid + floor_offset, np.zeros(len(grid))])
+    calibration = "".join(
+        f"T_cam1_os.{key}: {value}\n"
+        for key, value in zip("px py pz qx qy qz qw".split(), "0 0 0 0 0 0 1".split(), strict=True)
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("map.ply", ply_bytes(cloud))
+        archive.writestr("traj.txt", "".join(f"{i * 0.125} {i * 0.1} 0 1.0 0 0 0 1\n" for i in range(16)))
+        archive.writestr("calibrations.txt", calibration)
+        archive.writestr("frame_times.txt", "".join(f"{i * 0.125}\n" for i in range(16)))
+    return buffer.getvalue()
+
+
+def _queued_lidar_job(world: SimpleNamespace, package: bytes) -> str:
+    from src.services.orchestration.projects.models import LidarAttachment
+
+    video = world.root / "walk.mp4"
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi",
+         "-i", "testsrc2=duration=2:size=64x48:rate=8", "-c:v", "mpeg4", str(video)],
+        check=True,
+    )  # fmt: skip
+    records = []
+    for name, payload in (("walk.mp4", video.read_bytes()), ("lidar.zip", package)):
+        pending = world.uploads.begin(name)
+        pending.publication.write(payload)
+        records.append(world.uploads.finish(pending))
+    upload, lidar = records
+    assert lidar.input_kind == "registered_lidar"
+    request = UploadProjectInput.model_construct(
+        upload_id=upload.upload_id,
+        name="Walk + LiDAR",
+        attestation=_attestation(True),
+        lidar=LidarAttachment(upload_id=lidar.upload_id, trajectory_origin="estimated", same_scene_confirmed=True),
+    )
+    project = world.registry.create_project_from_upload(upload, request, "self_attested", lidar)
+    return world.registry.create_job(JobCreateInput(project_id=project.project_id)).job_id
+
+
+def test_worker_ingests_the_lidar_package_before_camera_pose(world: SimpleNamespace) -> None:
+    from src.services.orchestration.jobs.progress import job_progress
+    from src.services.reconstruction import LidarPackageRecord
+
+    job_id = _queued_lidar_job(world, _lidar_package(world.root))
+    assert worker_cli.dispatch_next(world.registry) is True
+    job = world.registry.get_job(job_id)
+    assert job.status == JobStatus.RUNNING and job.current_stage == StageId.CAMERA_POSE
+    assert [(stage.stage_id, stage.status) for stage in job.stage_artifacts][-1] == (StageId.LIDAR_INGEST, "SUCCEEDED")
+    stage = job.stage_artifacts[-1]
+    resolver = world.registry.runtime_resolver
+    record = LidarPackageRecord.model_validate_json(
+        resolver.require_uri(stage.artifact_uri, stage.artifact_checksum).read_bytes()
+    )
+    assert record.kind == "registered_lidar" and record.trajectory_origin == "estimated"
+    assert record.floor_z_m == pytest.approx(0.0, abs=0.02) and record.pose_count == 16
+    assert len(world.previews) == 1  # LiDAR xong mới sang dựng pose camera
+    progress = job_progress(job, world.registry.list_job_attempts(job_id), preview_ready=False)
+    ids = [item.stage_id for item in progress.stages]
+    assert ids.index(StageId.LIDAR_INGEST) == ids.index(StageId.FRAME_EXTRACT) + 1
+    assert next(item for item in progress.stages if item.stage_id == StageId.LIDAR_INGEST).state == "succeeded"
+
+
+def test_broken_lidar_package_stops_the_job_before_gpu_work(world: SimpleNamespace) -> None:
+    """Quỹ đạo không nằm trên đám mây: job dừng ở bước LiDAR với lý do rõ, không chạy tiếp như job chỉ có video."""
+    job_id = _queued_lidar_job(world, _lidar_package(world.root, floor_offset=500.0))
+    assert worker_cli.dispatch_next(world.registry) is True
+    job = world.registry.get_job(job_id)
+    assert job.status == JobStatus.FAILED and job.current_stage == StageId.LIDAR_INGEST
+    failed = job.stage_artifacts[-1]
+    assert failed.error is not None and failed.error.error_code == "LIDAR_PACKAGE_INVALID"
+    assert "Không tìm thấy mặt sàn dưới quỹ đạo" in failed.error.human_message
+    assert world.previews == []
+
+
+def test_video_only_job_has_no_lidar_stage(world: SimpleNamespace) -> None:
+    from src.services.orchestration.jobs.progress import job_progress
+
+    job_id = _queued_job(world)
+    assert worker_cli.dispatch_next(world.registry) is True
+    job = world.registry.get_job(job_id)
+    assert all(stage.stage_id != StageId.LIDAR_INGEST for stage in job.stage_artifacts)
+    progress = job_progress(job, world.registry.list_job_attempts(job_id), preview_ready=False)
+    assert StageId.LIDAR_INGEST not in [item.stage_id for item in progress.stages]
