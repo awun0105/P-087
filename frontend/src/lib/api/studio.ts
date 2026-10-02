@@ -711,6 +711,8 @@ export interface TrashEntry {
   entry_id: string;
   title: string;
   deleted_at: string;
+  /** Thời điểm mục tự bị xoá hẳn; null khi deployment tắt tự xoá. */
+  expires_at: string | null;
   deleted_by: string | null;
   size_bytes: number;
   items: TrashItem[];
@@ -747,6 +749,7 @@ export function parseTrashEntries(data: unknown): TrashEntry[] {
       entry_id: entry.entry_id,
       title: entry.title,
       deleted_at: entry.deleted_at,
+      expires_at: typeof entry.expires_at === "string" ? entry.expires_at : null,
       deleted_by: typeof entry.deleted_by === "string" ? entry.deleted_by : null,
       size_bytes: entry.size_bytes,
       items,

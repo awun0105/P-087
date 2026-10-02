@@ -25,6 +25,14 @@ import { errorMessage } from "@/lib/ui-error";
 
 const DATE = new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeStyle: "short" });
 const KIND_LABEL = { scene: "Scene", import: "Scene nhập", upload: "File nguồn" } as const;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** "Còn N ngày" trước khi mục tự bị xoá hẳn; làm tròn lên để ngày cuối vẫn hiện "Còn 1 ngày". */
+export function remainingLabel(expiresAt: string | null, now: number): string {
+  if (!expiresAt) return "Không tự xoá";
+  const days = Math.ceil((Date.parse(expiresAt) - now) / DAY_MS);
+  return days <= 0 ? "Sắp bị xoá hẳn" : `Còn ${days} ngày`;
+}
 
 /**
  * Trang Thùng rác (STUDIO_UX_SPEC.md D-15): scene đã gỡ nằm ở đây tới khi được khôi phục hoặc xoá hẳn. Chọn từng mục,
@@ -41,11 +49,14 @@ export function TrashPage() {
   const [failures, setFailures] = useState<TrashActionResult["failed"]>([]);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState<string[] | null>(null);
+  // Mốc "bây giờ" lấy lúc tải danh sách: render phải thuần, không gọi Date.now() trong thân component.
+  const [loadedAt, setLoadedAt] = useState(0);
 
   const load = useCallback(async () => {
     try {
       const next = await listTrash();
       setEntries(next);
+      setLoadedAt(Date.now());
       // Mục đã bị xử lý ở tab khác thì không còn được chọn.
       setSelected((current) => new Set(next.map((entry) => entry.entry_id).filter((id) => current.has(id))));
       setError(null);
@@ -97,7 +108,7 @@ export function TrashPage() {
     <main className="mx-auto max-w-5xl px-4 pt-10 pb-20 sm:px-6">
       <PageHeader
         title="Thùng rác"
-        description="Scene đã gỡ nằm ở đây cho tới khi bạn khôi phục hoặc xoá hẳn. Xoá hẳn sẽ xoá cả file trên kho lưu trữ và không khôi phục được."
+        description="Scene đã gỡ nằm ở đây tới hạn ở cột “Tự xoá” rồi bị xoá hẳn; trước hạn đó bạn khôi phục hoặc xoá hẳn được. Xoá hẳn sẽ xoá cả file trên kho lưu trữ và không khôi phục được."
         action={all.length > 0 ? (
           <>
             <Button variant="secondary" disabled={busy} onClick={() => void run("restore", all)}><RotateCcw aria-hidden /> Khôi phục tất cả</Button>
@@ -139,6 +150,7 @@ export function TrashPage() {
                   </TableHead>
                   <TableHead>Tên</TableHead>
                   <TableHead className="hidden sm:table-cell">Gỡ lúc</TableHead>
+                  <TableHead>Tự xoá</TableHead>
                   <TableHead className="hidden md:table-cell">Dung lượng</TableHead>
                   <TableHead className="w-0" />
                 </TableRow>
@@ -156,6 +168,7 @@ export function TrashPage() {
                       </p>
                     </TableCell>
                     <TableCell className="hidden text-ink-muted sm:table-cell">{DATE.format(new Date(entry.deleted_at))}</TableCell>
+                    <TableCell className="whitespace-nowrap text-ink-muted">{remainingLabel(entry.expires_at, loadedAt)}</TableCell>
                     <TableCell className="hidden text-ink-muted md:table-cell">{formatBytes(entry.size_bytes)}</TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-2">

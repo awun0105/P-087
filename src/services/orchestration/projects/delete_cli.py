@@ -5,6 +5,7 @@
     python -m src.services.orchestration.projects.delete_cli list
     python -m src.services.orchestration.projects.delete_cli restore --entry <entry_id>
     python -m src.services.orchestration.projects.delete_cli purge --entry <entry_id>
+    python -m src.services.orchestration.projects.delete_cli purge-expired
     python -m src.services.orchestration.projects.delete_cli import-entry --dir <thư mục lần gỡ kiểu cũ>
 
 `plan` chỉ in những gì sẽ bị gỡ. `delete` chuyển scene vào thùng rác, khôi phục được bằng `restore`; chỉ `purge` mới
@@ -28,6 +29,7 @@ from src.services.orchestration.projects.deletion import (
     list_trash,
     plan_deletion,
     purge_deletion,
+    purge_expired,
     restore_deletion,
 )
 
@@ -65,6 +67,7 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--upload", action="append", default=[], help="upload_id không còn ai dùng")
         command.add_argument("--allow-released", action="store_true", help="Cho gỡ cả scene đã có bản phát hành")
     commands.add_parser("list", help="Liệt kê thùng rác")
+    commands.add_parser("purge-expired", help="Xoá hẳn các mục quá hạn (PRODUCT_TRASH_RETENTION_DAYS); dùng cho cron")
     for name, text in (("restore", "Khôi phục một mục thùng rác"), ("purge", "Xoá hẳn một mục thùng rác")):
         commands.add_parser(name, help=text).add_argument("--entry", required=True, help="entry_id trong thùng rác")
     legacy = commands.add_parser("import-entry", help="Đưa một lần gỡ kiểu cũ (có deletion_record.json) vào thùng rác")
@@ -78,6 +81,10 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
         for record in list_trash(context.database):
             print(f"{record.entry_id}  {record.created_at:%Y-%m-%d %H:%M}")
             _print_plan(record.plan, "  gồm")
+        return 0
+    if args.command == "purge-expired":
+        purged = purge_expired(context)
+        print(f"Đã xoá hẳn {len(purged)} mục quá {context.retention_days} ngày")
         return 0
     if args.command == "purge":
         result = purge_deletion(context, args.entry)

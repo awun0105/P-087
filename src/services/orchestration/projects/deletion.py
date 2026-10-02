@@ -19,11 +19,12 @@ scene đã có bản phát hành (PRD US-06) khi chưa cho phép rõ ràng.
 """
 
 import json
+import logging
 import os
 import re
 import shutil
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -39,6 +40,8 @@ from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeSta
 from src.services.orchestration.jobs.progress import metric_confirmation_stage
 from src.services.orchestration.storage import runtime_resolver
 from src.services.orchestration.uploads.models import UploadRecord
+
+logger = logging.getLogger(__name__)
 
 RECORD_NAME = "deletion_record.json"
 ItemKind = Literal["artifact", "worker", "import_worker", "rerun"]
@@ -179,6 +182,12 @@ class DeletionContext:
     worker_root: Path
     rerun_dir: Path
     trash_root: Path
+    #: Số ngày một mục được nằm trong thùng rác trước khi tự bị xoá hẳn; 0 = không tự xoá.
+    retention_days: int = 0
+
+    def expires_at(self, record: "DeletionRecord") -> datetime | None:
+        """Thời điểm mục tự bị xoá hẳn; None khi deployment tắt tự xoá."""
+        return record.created_at + timedelta(days=self.retention_days) if self.retention_days > 0 else None
 
     def entry_dir(self, entry_id: str) -> Path:
         """Thư mục giữ file của một mục thùng rác."""
@@ -448,6 +457,7 @@ def context_from_settings(settings: Settings) -> DeletionContext:
         worker_root=settings.product_worker_root.expanduser().resolve(),
         rerun_dir=settings.product_rerun_recording_dir.expanduser().resolve(),
         trash_root=trash_root.expanduser().resolve() if trash_root else artifact_root.parent / "trash",
+        retention_days=settings.product_trash_retention_days,
     )
 
 
@@ -575,6 +585,28 @@ def purge_deletion(context: DeletionContext, entry_id: str, actor: str | None = 
         for line in record.plan.summary:
             _audit(tx, f"{line.kind}.purge", line, record, actor)
     return PurgeResult(local_bytes=size, remote_objects=removed)
+
+
+def purge_expired(context: DeletionContext, now: datetime | None = None) -> list[str]:
+    """Xoá hẳn các mục đã quá hạn nằm trong thùng rác; trả entry_id đã xoá.
+
+    Gọi mỗi khi thùng rác được mở hoặc có scene mới vào thùng rác (và từ CLI cho cron), nên không cần tiến trình nền.
+    Một mục lỗi được ghi log rồi bỏ qua để không chặn các mục khác hay chặn người dùng xem thùng rác.
+    """
+    if context.retention_days <= 0:
+        return []
+    moment = now or datetime.now(UTC)
+    purged: list[str] = []
+    for record in list_trash(context.database):
+        expires = context.expires_at(record)
+        if expires is None or expires > moment:
+            continue
+        try:
+            purge_deletion(context, record.entry_id)
+            purged.append(record.entry_id)
+        except (DeletionRefusedError, RuntimeStateConflictError, OSError, ArtifactStoreError) as error:
+            logger.warning("Không tự xoá được mục thùng rác %s: %s", record.entry_id, type(error).__name__)
+    return purged
 
 
 def import_legacy_entry(context: DeletionContext, directory: Path) -> DeletionRecord:

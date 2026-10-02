@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MoveToTrashButton } from "@/features/studio/trash/MoveToTrashButton";
-import { TrashPage } from "@/features/studio/trash/TrashPage";
+import { remainingLabel, TrashPage } from "@/features/studio/trash/TrashPage";
 import type { Me } from "@/lib/api/auth";
 import { parseTrashEntries } from "@/lib/api/studio";
 
@@ -13,7 +13,7 @@ vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => auth }));
 
 function entry(id: string, title: string) {
   return {
-    entry_id: id, title, deleted_at: "2026-10-02T01:00:00Z", deleted_by: null, size_bytes: 2_000_000,
+    entry_id: id, title, deleted_at: "2026-10-02T01:00:00Z", expires_at: "2026-10-09T01:00:00Z", deleted_by: null, size_bytes: 2_000_000,
     items: [{ kind: "scene", identifier: `project-${id}`, name: title, detail: "job-1 CANCELLED" }, { kind: "upload", identifier: `upload-${id}`, name: "walk.mp4", detail: "" }],
   };
 }
@@ -127,6 +127,16 @@ describe("MoveToTrashButton", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Chuyển vào thùng rác" }));
     await waitFor(() => expect(onMoved).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  });
+});
+
+describe("remainingLabel", () => {
+  it("đếm ngày còn lại, làm tròn lên; quá hạn và tắt tự xoá có nhãn riêng", () => {
+    const expires = "2026-10-09T01:00:00Z";
+    expect(remainingLabel(expires, Date.parse("2026-10-02T01:00:00Z"))).toBe("Còn 7 ngày");
+    expect(remainingLabel(expires, Date.parse("2026-10-08T12:00:00Z"))).toBe("Còn 1 ngày");
+    expect(remainingLabel(expires, Date.parse("2026-10-09T02:00:00Z"))).toBe("Sắp bị xoá hẳn");
+    expect(remainingLabel(null, 0)).toBe("Không tự xoá");
   });
 });
 

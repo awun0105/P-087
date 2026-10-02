@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -88,6 +89,8 @@ async def test_scene_goes_to_trash_then_restores_or_is_purged(
     assert (await client.get(f"/api/v1/jobs/{first_job}")).status_code == 404
     listed = (await client.get("/api/v1/trash")).json()["entries"]
     assert [item["entry_id"] for item in listed] == [entry["entry_id"]]
+    kept_for = datetime.fromisoformat(listed[0]["expires_at"]) - datetime.fromisoformat(listed[0]["deleted_at"])
+    assert kept_for == timedelta(days=7)
 
     restored = await client.post("/api/v1/trash/restore", json={"entry_ids": [entry["entry_id"], "khong-co"]})
     body = restored.json()
@@ -103,6 +106,23 @@ async def test_scene_goes_to_trash_then_restores_or_is_purged(
     again = await client.post("/api/v1/trash/restore", json={"entry_ids": ids})
     assert again.json()["done"] == [] and len(again.json()["failed"]) == 2
     assert not any((tmp_path / "trash").iterdir())
+
+
+@pytest.mark.asyncio
+async def test_opening_the_trash_drops_expired_entries(
+    client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = _world(tmp_path, monkeypatch, auth_required=False)
+    project_id, _ = _scene(world, _upload(world), "Quá hạn")
+    entry_id = (await client.delete(f"/api/v1/scenes/{project_id}")).json()["entry_id"]
+    with world.database.transaction(write=True) as tx:
+        payload = json.loads(tx.execute("SELECT payload FROM r2s_trash").fetchone()[0])
+        payload["created_at"] = "2026-01-01T00:00:00Z"
+        tx.execute("UPDATE r2s_trash SET payload=?", (json.dumps(payload),))
+
+    assert (await client.get("/api/v1/trash")).json()["entries"] == []
+    restored = await client.post("/api/v1/trash/restore", json={"entry_ids": [entry_id]})
+    assert restored.json()["done"] == [] and not (tmp_path / "trash" / entry_id).exists()
 
 
 @pytest.mark.asyncio

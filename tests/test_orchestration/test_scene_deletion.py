@@ -3,6 +3,8 @@
 import hashlib
 import json
 import shutil
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,6 +28,7 @@ from src.services.orchestration.projects.deletion import (
     list_trash,
     plan_deletion,
     purge_deletion,
+    purge_expired,
     restore_deletion,
 )
 from src.services.orchestration.projects.models import (
@@ -488,6 +491,30 @@ def test_purge_removes_the_entry_for_good_and_nothing_else(world: SimpleNamespac
     assert world.registry.get_job(kept_job).project_id == kept_project
 
 
+def test_entries_older_than_the_retention_are_purged_and_newer_ones_kept(world: SimpleNamespace) -> None:
+    old_project, _ = _scene(world, _upload(world), "Quá hạn")
+    new_project, new_job = _scene(world, _upload(world, "new.mp4"), "Còn hạn")
+    old_entry = _delete(world, project_ids=[old_project])
+    new_entry = _delete(world, project_ids=[new_project])
+    context = replace(world.context, retention_days=7)
+    created = get_trash_entry(world.database, old_entry).created_at
+
+    assert purge_expired(world.context, created + timedelta(days=400)) == []  # tắt tự xoá thì không đụng gì
+    assert purge_expired(context, created + timedelta(days=6, hours=23)) == []
+    assert _in_trash(world) == [new_entry, old_entry] or _in_trash(world) == [old_entry, new_entry]
+    with world.database.transaction(write=True) as tx:
+        aged = get_trash_entry(world.database, old_entry).model_copy(update={"created_at": created - timedelta(days=8)})
+        tx.execute("UPDATE r2s_trash SET payload=? WHERE entry_id=?", (aged.model_dump_json(), old_entry))
+
+    assert purge_expired(context, datetime.now(UTC)) == [old_entry]
+
+    assert _in_trash(world) == [new_entry] and not (world.trash / old_entry).exists()
+    audit = AuthService(world.database).recent_audit()
+    assert ("scene.purge", old_project, None) in {(row.action, row.target, row.user_id) for row in audit}
+    restore_deletion(world.context, new_entry)
+    assert world.registry.get_job(new_job).project_id == new_project
+
+
 def test_entry_ids_cannot_escape_the_trash_folder(world: SimpleNamespace) -> None:
     with pytest.raises(DeletionRefusedError):
         purge_deletion(world.context, "../artifacts")
@@ -530,6 +557,7 @@ def test_cli_plans_deletes_lists_restores_and_purges(
         product_worker_root=world.root / "workers",
         product_rerun_recording_dir=world.root / "rerun",
         product_trash_root=None,
+        product_trash_retention_days=7,
     )
     monkeypatch.setattr(delete_cli, "get_settings", lambda: settings)
     rows, files = _rows(world), _files(world)

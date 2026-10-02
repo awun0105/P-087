@@ -25,6 +25,7 @@ from src.services.orchestration.projects.deletion import (
     context_from_settings,
     list_trash,
     purge_deletion,
+    purge_expired,
     restore_deletion,
 )
 
@@ -40,6 +41,8 @@ class TrashEntry(BaseModel):
     entry_id: str
     title: str
     deleted_at: datetime
+    #: Thời điểm mục tự bị xoá hẳn; None khi deployment tắt tự xoá.
+    expires_at: datetime | None
     deleted_by: str | None
     size_bytes: int
     items: list[SummaryLine]
@@ -83,12 +86,13 @@ def _context() -> DeletionContext:
     return context_from_settings(deps.settings())
 
 
-def _entry(record: DeletionRecord) -> TrashEntry:
+def _entry(context: DeletionContext, record: DeletionRecord) -> TrashEntry:
     primary = next((line for line in record.plan.summary if line.kind != "upload"), record.plan.summary[0])
     return TrashEntry(
         entry_id=record.entry_id,
         title=primary.name,
         deleted_at=record.created_at,
+        expires_at=context.expires_at(record),
         deleted_by=record.deleted_by,
         size_bytes=record.plan.size_bytes,
         items=record.plan.summary,
@@ -96,8 +100,10 @@ def _entry(record: DeletionRecord) -> TrashEntry:
 
 
 def _move_to_trash(request: DeletionRequest, user: UserRecord | None) -> TrashEntry:
+    context = _context()
+    purge_expired(context)
     try:
-        return _entry(apply_deletion(_context(), request, user.user_id if user else None))
+        return _entry(context, apply_deletion(context, request, user.user_id if user else None))
     except DeletionRefusedError as error:
         missing = all("không tìm thấy" in reason for reason in error.reasons)
         code = status.HTTP_404_NOT_FOUND if missing else status.HTTP_409_CONFLICT
@@ -120,8 +126,10 @@ def delete_import(import_id: str, user: UserRecord | None = Depends(require_edit
 
 @router.get("/trash", response_model=TrashListResponse)
 def get_trash() -> TrashListResponse:
-    """Các mục đang nằm trong thùng rác."""
-    return TrashListResponse(entries=[_entry(record) for record in list_trash(_context().database)])
+    """Các mục đang nằm trong thùng rác; mục quá hạn bị xoá hẳn trước khi trả danh sách."""
+    context = _context()
+    purge_expired(context)
+    return TrashListResponse(entries=[_entry(context, record) for record in list_trash(context.database)])
 
 
 def _each(
