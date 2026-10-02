@@ -123,6 +123,18 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
             "CREATE TABLE r2s_resource_waits (job_id TEXT PRIMARY KEY REFERENCES r2s_jobs(job_id) ON DELETE CASCADE, payload TEXT NOT NULL)",
         ),
     ),
+    (
+        # Giữ chỗ tài nguyên: một dòng cho mỗi worker đang chạy job (không phải lifecycle của job).
+        # Số đo tài nguyên theo lần chạy công cụ: lịch sử của máy, không cascade theo job để còn
+        # dùng cho ước lượng sau khi scene bị xoá.
+        8,
+        (
+            "CREATE TABLE r2s_resource_reservations (worker_id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
+            "CREATE TABLE r2s_resource_usage (usage_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, "
+            "recorded_at TEXT NOT NULL, payload TEXT NOT NULL)",
+            "CREATE INDEX r2s_resource_usage_job ON r2s_resource_usage(job_id)",
+        ),
+    ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 

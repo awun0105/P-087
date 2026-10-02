@@ -117,8 +117,27 @@ def dispatch_next(
     """
     if registry.persistence is None or registry.execution_profile is None:
         raise ValueError("Queue consumer cần durable registry và execution profile")
+    try:
+        return _dispatch(registry, runner, video_runner, finalize_runner, admission)
+    finally:
+        # Giữ chỗ chỉ sống trong lúc worker chạy job; kể cả khi runner ném lỗi hoặc worker bị ngắt.
+        if admission is not None:
+            admission.release()
+
+
+def _dispatch(
+    registry: ProjectRegistry,
+    runner: PreparedRunner,
+    video_runner: VideoRunner,
+    finalize_runner: VideoRunner,
+    admission: ResourceAdmission | None,
+) -> bool:
+    """Một lượt quét hàng đợi của `dispatch_next`."""
+    persistence = registry.persistence
+    if persistence is None:
+        raise ValueError("Queue consumer cần durable registry")
     cursor = ""
-    while page := registry.persistence.job_ids_after(cursor):
+    while page := persistence.job_ids_after(cursor):
         for job_id in page:
             job: JobManifest | None = None
             try:
@@ -168,20 +187,29 @@ def dispatch_next(
 CAPABILITY_INTERVAL_SECONDS = 300
 
 
-def _start_capability_heartbeat(registry: ProjectRegistry, worker_root: Path) -> Event:
+def _start_capability_heartbeat(
+    registry: ProjectRegistry, worker_root: Path, admission: ResourceAdmission | None = None
+) -> Event:
     """Đo và ghi cấu hình máy ngay, rồi lặp ở luồng nền (job dài không làm số đo quá hạn).
 
+    Lượt đo lúc pipeline không dùng máy được ghi làm mốc "máy rảnh" (preset Maximum tính theo
+    mốc này); lúc bận thì giữ mốc rảnh gần nhất. Cùng nhịp đó làm mới giữ chỗ của job đang chạy.
     Trả Event để dừng luồng khi worker thoát; lỗi đo được log, không làm dừng worker.
     """
     stop = Event()
     database = registry.persistence.database if registry.persistence is not None else None
 
     def beat() -> None:
+        previous = None
         while True:
             try:
                 if database is not None:
-                    record_capability(database, probe_capability(worker_root))
-            except (OSError, ValueError, RuntimeError) as error:
+                    idle = admission.machine_idle() if admission is not None else False
+                    previous = probe_capability(worker_root, idle=idle, previous=previous)
+                    record_capability(database, previous)
+                    if admission is not None:
+                        admission.touch()
+            except Exception as error:  # noqa: BLE001 - luồng nền: lỗi đo/DB không được làm chết heartbeat
                 logger.warning("Không ghi được cấu hình máy worker: %s", type(error).__name__)
             if stop.wait(CAPABILITY_INTERVAL_SECONDS):
                 return
@@ -205,7 +233,8 @@ def main(argv: list[str] | None = None) -> int:
         load_presets(settings.product_processing_config)
     else:
         load_prepared_profile(settings.product_processing_config, registry.execution_profile)
-    heartbeat = _start_capability_heartbeat(registry, settings.product_worker_root)
+    admission = ResourceAdmission(registry, settings)
+    heartbeat = _start_capability_heartbeat(registry, settings.product_worker_root, admission)
     previous = signal.getsignal(signal.SIGTERM)
 
     def interrupt(signum: int, frame: object) -> None:
@@ -214,7 +243,6 @@ def main(argv: list[str] | None = None) -> int:
 
     signal.signal(signal.SIGTERM, interrupt)
     pause = Event()
-    admission = ResourceAdmission(registry, settings)
     try:
         recover_interrupted(settings)
         while True:
@@ -228,6 +256,7 @@ def main(argv: list[str] | None = None) -> int:
         return 130
     finally:
         heartbeat.set()
+        admission.release()
         signal.signal(signal.SIGTERM, previous)
 
 

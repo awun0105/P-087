@@ -1,7 +1,11 @@
 """Durable queue fixture proof: chờ/tiếp tục/cancel giữ config và provenance."""
 
+import sqlite3
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -13,6 +17,7 @@ from src.services.orchestration.jobs.models import TransitionRequest
 from src.services.orchestration.jobs.progress import job_progress
 from src.services.orchestration.jobs.worker_cli import dispatch_next
 from src.services.orchestration.processing import build_job_config, job_config_reference, load_presets, preset_values
+from src.services.orchestration.processing.capability import GpuReading
 from src.services.orchestration.projects.models import JobCreateInput
 from src.services.orchestration.projects.registry import ProjectRegistry
 from tests.test_orchestration.test_metric_confirmation_record import _confirmation
@@ -178,3 +183,233 @@ async def test_progress_api_reads_durable_wait_snapshot(tmp_path: Path, monkeypa
     assert payload["waiting_for"] == "resources" and payload["status"] == "QUEUED"
     assert payload["resource_wait"]["job_manifest_checksum"] == job.job_manifest_checksum
     assert payload["resource_wait"]["available_gb"]["vram"] is None
+
+
+# --- Increment audit: GPU của worker, giữ chỗ, lý do chờ, lỗi của gate, dọn khi thiếu đĩa ---
+
+GPU = GpuReading(index=0, uuid="GPU-shared", name="T2000", total_gb=4.0, free_gb=3.8, used_gb=0.2)
+LIVE = {"vram_free_gb": 3.8, "ram_available_gb": 60.0, "disk_free_gb": 400.0}
+CAPACITY = {"vram": 4.0, "ram": 64.0, "disk": 500.0}
+
+
+def _machine(monkeypatch: pytest.MonkeyPatch, live: dict | None = None, capacity: dict | None = None) -> dict:
+    """Máy giả lập một GPU 4 GB; trả dict `live` để test đổi số đo giữa các lượt poll."""
+    current = dict(live or LIVE)
+    monkeypatch.setattr(admission, "measure_live_headroom", lambda path: current)
+    monkeypatch.setattr(admission, "measure_capacity", lambda path: capacity or CAPACITY)
+    monkeypatch.setattr(admission, "bound_gpu", lambda: GPU)
+    return current
+
+
+def _second_job(registry: ProjectRegistry, suffix: str = "b") -> JobManifest:
+    presets, checksum = load_presets(PRESETS)
+    config = build_job_config(presets, checksum, preset_values(presets, "minimum_quality"), None)
+    job = registry.create_job(JobCreateInput(project_id="project-fixture-001"), config)
+    return _attach_frames(registry, job, _frame_stage(job.job_id, suffix))
+
+
+def _second_worker(gate: ResourceAdmission, worker_id: str = "same-host:worker-b") -> ResourceAdmission:
+    """Worker khác trên cùng máy (cùng DB); PID vẫn là tiến trình test nên được coi là còn sống."""
+    other = ResourceAdmission(gate.registry, gate.settings)
+    other.worker_id = worker_id
+    return other
+
+
+def _reservations(gate: ResourceAdmission) -> dict[str, admission.Reservation]:
+    with gate.database.transaction() as tx:
+        rows = tx.execute("SELECT worker_id, payload FROM r2s_resource_reservations").fetchall()
+    return {row[0]: admission.Reservation.model_validate_json(row[1]) for row in rows}
+
+
+def test_second_worker_on_same_gpu_waits_for_what_the_first_reserved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """VRAM chưa bị chiếm (job đầu còn ở bước COLMAP) nhưng đã được giữ chỗ: worker thứ hai phải chờ."""
+    registry, first, gate = _queued(tmp_path)
+    second = _second_job(registry)
+    _machine(monkeypatch)
+    other = _second_worker(gate)
+    assert gate(first)
+    assert _reservations(gate)[gate.worker_id].required_gb == {"vram": 2.22, "ram": 7.08, "disk": 5.96}
+    assert not other(second)  # số đo tức thời vẫn báo 3,8 GB trống
+    wait = resource_wait(gate.database, second)
+    assert wait is not None and wait.waiting_on == ["vram"] and wait.reasons == {"vram": "busy"}
+    assert wait.available_gb["vram"] == pytest.approx(4.0 - 2.22) and wait.capacity_gb["vram"] == 4.0
+    assert other.worker_id not in _reservations(gate)
+    gate.release()
+    assert other(second) and resource_wait(gate.database, second) is None
+    assert set(_reservations(gate)) == {other.worker_id}
+
+
+def test_reservation_on_another_gpu_of_the_same_host_only_shares_ram_and_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, first, gate = _queued(tmp_path)
+    second = _second_job(registry)
+    _machine(monkeypatch)
+    other = _second_worker(gate)
+    assert gate(first)
+    monkeypatch.setattr(admission, "bound_gpu", lambda: GpuReading(1, "GPU-other", "T4", 4.0, 3.8, 0.2))
+    assert other(second)  # GPU khác: VRAM của GPU kia không bị trừ
+
+
+def test_dead_or_stale_reservations_do_not_block(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry, job, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+    finished = subprocess.Popen([sys.executable, "-c", "pass"])
+    finished.wait()
+    now = datetime.now(UTC)
+    held = {"vram": 3.9, "ram": 1.0, "disk": 1.0}
+    crashed = admission.Reservation(
+        worker_id="crashed", host=gate.host, pid=finished.pid, gpu_uuid=GPU.uuid, job_id="job-x",
+        required_gb=held, reserved_at=now, heartbeat_at=now,
+    )  # fmt: skip
+    silent = crashed.model_copy(
+        update={"worker_id": "silent", "host": "other-host", "heartbeat_at": now - timedelta(minutes=16)}
+    )
+    with gate.database.transaction(write=True) as tx:
+        for item in (crashed, silent):
+            tx.execute(
+                "INSERT INTO r2s_resource_reservations(worker_id,payload) VALUES (?,?)",
+                (item.worker_id, item.model_dump_json()),
+            )
+    assert gate(job)
+    assert set(_reservations(gate)) == {gate.worker_id}  # dòng chết bị dọn tại chỗ
+
+
+@pytest.mark.parametrize(
+    ("live", "capacity", "reason"),
+    [
+        ({**LIVE, "vram_free_gb": 0.5}, CAPACITY, "external"),  # không worker nào giữ chỗ: thứ khác đang chiếm
+        ({**LIVE, "vram_free_gb": 0.9}, {**CAPACITY, "vram": 1.0}, "exceeds_machine"),
+        ({**LIVE, "vram_free_gb": None}, {**CAPACITY, "vram": None}, "unmeasured"),
+    ],
+)
+def test_wait_reason_tells_whether_waiting_can_help(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, live: dict, capacity: dict, reason: str
+) -> None:
+    registry, job, gate = _queued(tmp_path)
+    _machine(monkeypatch, live, capacity)
+    assert not gate(job)
+    wait = resource_wait(gate.database, job)
+    assert wait is not None and wait.reasons == {"vram": reason}
+    assert registry.get_job(job.job_id) == job  # không lý do nào tự đổi trạng thái job
+    progress = job_progress(job, registry.list_job_attempts(job.job_id), False, wait)
+    assert progress.resource_wait is not None and progress.resource_wait.reasons == {"vram": reason}
+
+
+def test_gate_failure_never_changes_job_state_and_recovers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lỗi DB thoáng qua khi ghi observation: job vẫn QUEUED, lượt poll sau chạy bình thường."""
+    registry, job, gate = _queued(tmp_path)
+    live = _machine(monkeypatch, {**LIVE, "vram_free_gb": 0.01})
+    real = gate.database.transaction
+    failures = {"left": 1}
+
+    def flaky(*args: object, **kwargs: object) -> object:
+        if kwargs.get("write") and failures["left"]:
+            failures["left"] -= 1
+            raise sqlite3.OperationalError("database is locked")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(gate.database, "transaction", flaky)
+
+    def unexpected(*args: object, **kwargs: object) -> JobManifest:
+        raise AssertionError("gate lỗi không được chạy tool")
+
+    assert not dispatch_next(registry, runner=unexpected, admission=gate)
+    assert registry.get_job(job.job_id) == job and registry.get_job(job.job_id).status == JobStatus.QUEUED
+    live["vram_free_gb"] = 3.8
+    calls: list[str] = []
+
+    def run(job_id: str, uri: str, *, expected_checksum: str) -> JobManifest:
+        calls.append(job_id)
+        assert set(_reservations(gate)) == {gate.worker_id}  # giữ chỗ suốt lúc job chạy
+        return registry.get_job(job_id)
+
+    assert dispatch_next(registry, runner=run, admission=gate) and calls == [job.job_id]
+    assert _reservations(gate) == {}  # nhả ngay khi lượt dispatch kết thúc
+
+
+def test_reservation_released_even_when_runner_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry, job, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+
+    def interrupted(job_id: str, uri: str, *, expected_checksum: str) -> JobManifest:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        dispatch_next(registry, runner=interrupted, admission=gate)
+    assert _reservations(gate) == {}
+
+
+def test_unreadable_job_config_is_left_for_the_runner_to_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cấu hình hỏng là lỗi của job, không phải thiếu tài nguyên: không được chờ vô hạn."""
+    registry, job, gate = _queued(tmp_path)
+    _machine(monkeypatch, {**LIVE, "vram_free_gb": 0.01})
+    monkeypatch.setattr(registry.runtime_resolver, "require", Mock(side_effect=admission.ArtifactStoreError("missing")))
+    assert gate(job) and resource_wait(gate.database, job) is None
+    assert _reservations(gate)[gate.worker_id].required_gb is None
+
+
+def test_disk_shortage_reclaims_scratch_once_per_interval_then_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.services.orchestration.jobs.workspace import CleanupResult
+    from src.services.orchestration.projects import deletion
+
+    registry, job, gate = _queued(tmp_path)
+    live = _machine(monkeypatch, {**LIVE, "disk_free_gb": 1.0})
+    other = _second_worker(gate)
+    with gate.database.transaction(write=True) as tx:
+        other._reserve(tx, registry.get_job("job-fixture-001"), None, GPU.uuid)
+    calls: list[set[str]] = []
+
+    def reclaim(*, worker_root: Path, artifact_root: Path, protected_jobs: set[str]) -> CleanupResult:
+        calls.append(set(protected_jobs))
+        live["disk_free_gb"] = 400.0 if len(calls) == 1 else live["disk_free_gb"]
+        return CleanupResult(files_removed=3, bytes_removed=10)
+
+    purge = Mock(return_value=["entry"])
+    monkeypatch.setattr(admission, "reclaim_worker_scratch", reclaim)
+    monkeypatch.setattr(deletion, "purge_expired", purge)
+    monkeypatch.setattr(deletion, "context_from_settings", lambda settings: "context")
+    assert gate(job)  # thiếu đĩa → dọn → đo lại → đủ
+    assert calls == [{"job-fixture-001"}] and purge.call_count == 1  # job worker khác đang chạy được bảo vệ
+    gate.release()
+    live["disk_free_gb"] = 1.0
+    assert not gate(job) and len(calls) == 1  # trong khoảng nghỉ: không quét lại mỗi lượt poll
+    wait = resource_wait(gate.database, job)
+    assert wait is not None and wait.reasons == {"disk": "busy"}
+    # Cấu hình cần nhiều hơn cả ổ đĩa: dọn cũng vô ích, không quét.
+    gate._last_reclaim = None
+    monkeypatch.setattr(admission, "measure_capacity", lambda path: {**CAPACITY, "disk": 2.0})
+    assert not gate(job) and len(calls) == 1
+    assert resource_wait(gate.database, job).reasons == {"disk": "exceeds_machine"}
+
+
+def test_machine_idle_and_heartbeat_touch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry, job, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+    monkeypatch.setattr(admission, "process_tree", lambda table, roots: set(roots))  # worker không có tiến trình con
+    other = _second_worker(gate)
+    assert gate.machine_idle()
+    assert gate(job)
+    assert not gate.machine_idle() and not other.machine_idle()  # đang giữ chỗ / worker cùng máy đang chạy
+    before = _reservations(gate)[gate.worker_id].heartbeat_at
+    gate.touch()
+    assert _reservations(gate)[gate.worker_id].heartbeat_at > before
+    gate.release()
+    assert gate.machine_idle()
+    monkeypatch.setattr(admission, "process_tree", lambda table, roots: {*roots, 999999})  # đang chạy tool
+    assert not gate.machine_idle()
+
+
+def test_legacy_job_without_estimate_still_marks_machine_busy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry, _, gate = _queued(tmp_path)
+    _machine(monkeypatch, {**LIVE, "vram_free_gb": 0.01})
+    legacy = registry.get_job("job-fixture-001")
+    assert gate(legacy)  # chưa có mô hình ước lượng: không bịa yêu cầu, không chờ
+    reservation = _reservations(gate)[gate.worker_id]
+    assert reservation.job_id == legacy.job_id and reservation.required_gb is None
