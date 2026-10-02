@@ -108,3 +108,17 @@ diện; chưa đo mesh so với LiDAR; mesh va chạm của job này vẫn dựn
 
 L10 (mesh va chạm từ LiDAR + số đo, bundle ghi LiDAR), L11 (lớp LiDAR trong viewer), chọn mẫu trong UI, nâng giới hạn
 upload, và hiện đúng bước "Nhận dữ liệu LiDAR" là đang chạy trong lúc nó chạy.
+
+## Chạy trên máy thuê GPU (03/10/2026)
+
+- **Đã sửa:** `Dockerfile.gpu` trước đây cài COLMAP bản apt (3.x) — job video + gói LiDAR sẽ dừng ở bước dựng pose vì
+  không có `pose_prior_mapper`/database 4.x. Image giờ lấy binary COLMAP từ đúng image đã ghim của máy local (cùng
+  digest), trên Ubuntu 24.04; định danh runtime là `colmap-image-<digest>` như ở local. Phần COLMAP đã kiểm bằng một
+  image thử trên Ubuntu 24.04 trần (`colmap help` → 4.3.0.dev0, có `pose_prior_mapper`, không thiếu thư viện).
+  **Chưa build cả image** (đổi nền từ Ubuntu 22.04 sang 24.04, runtime tách vật chưa build lại trên nền mới).
+- `python -m scripts.kaggle.preflight` có thêm dòng "COLMAP dựng bám quỹ đạo" (không bắt buộc): báo trước máy có chạy
+  được luồng LiDAR không.
+- Kaggle (`scripts/kaggle/setup_kaggle.sh`) vẫn cài COLMAP bản apt: chỉ chạy luồng video; job LiDAR ở đó dừng với
+  lỗi `COLMAP_GUIDANCE_INVALID` kèm lý do.
+- Giới hạn upload gói LiDAR: theo `PRODUCT_UPLOAD_MAX_BYTES` của deployment (mặc định 2 GiB; gói mẫu 500 frame lấy mỗi
+  scan thứ 5 nặng 315 MB). Không có giới hạn riêng viết cứng trong code.

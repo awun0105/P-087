@@ -52,6 +52,22 @@ def colmap() -> tuple[bool, str]:
     return ok, "chạy được" if ok else text
 
 
+def colmap_guided() -> tuple[bool, str]:
+    """Luồng video + gói LiDAR (ADR 0009) cần `pose_prior_mapper` của COLMAP 4.x; bản 3.x chỉ chạy được luồng video."""
+    command = _command("REC03_COLMAP_COMMAND")
+    if command is None:
+        return False, "chưa đặt REC03_COLMAP_COMMAND"
+    # Cần cả phần trợ giúp (không chỉ dòng cuối như `_run`) để tìm đúng tuỳ chọn của chế độ bám quỹ đạo.
+    try:
+        done = subprocess.run(
+            [*command, "pose_prior_mapper", "-h"], capture_output=True, text=True, timeout=120.0, check=False
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return False, type(error).__name__
+    ok = "--prior_position_std_x" in done.stdout + done.stderr
+    return ok, "có pose_prior_mapper" if ok else "COLMAP này không có pose_prior_mapper (cần COLMAP ≥ 4.0)"
+
+
 def vulkan() -> tuple[bool, str]:
     """Brush train 3DGS qua Vulkan; phải thấy đúng card NVIDIA, không phải llvmpipe (CPU)."""
     ok, _ = _run(["vulkaninfo", "--summary"])
@@ -113,6 +129,7 @@ CHECKS: list[tuple[str, Callable[[], tuple[bool, str]], bool, str]] = [
     ("GPU NVIDIA", gpu, True, "không chạy được"),
     ("ffmpeg", ffmpeg, True, "không tách được frame"),
     ("COLMAP", colmap, True, "không dựng được pose camera"),
+    ("COLMAP dựng bám quỹ đạo", colmap_guided, False, "job video + gói LiDAR sẽ dừng ở bước dựng pose"),
     ("Vulkan (GPU thật)", vulkan, True, "Brush không train được 3DGS"),
     ("Brush", brush, True, "không train được 3DGS"),
     ("splat-transform", splat_transform, True, "không nén SOG / dựng collision"),
