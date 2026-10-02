@@ -318,6 +318,28 @@ export class SceneOverlay {
     this.pointsMaterial = null;
   }
 
+  /**
+   * Toạ độ đỉnh của lưới va chạm đã nạp, trong không gian hiển thị của viewer (đã áp phép xoay Z-up → Y-up).
+   * Dùng cho các phép kiểm chặn phía trình duyệt (vd camera góc nhìn thứ ba); null khi chưa nạp lưới.
+   */
+  collisionPositions(): Float32Array | null {
+    if (!this.alive || !this.collisionEntity) return null;
+    const result: number[] = [];
+    const point = new PcVec3();
+    for (const render of this.collisionEntity.findComponents("render") as unknown as RenderLike[]) {
+      for (const instance of render.meshInstances) {
+        const local: number[] = [];
+        const count = instance.mesh.getPositions(local);
+        const world = instance.node.getWorldTransform();
+        for (let i = 0; i < count; i += 1) {
+          world.transformPoint(point.set(local[i * 3], local[i * 3 + 1], local[i * 3 + 2]), point);
+          result.push(point.x, point.y, point.z);
+        }
+      }
+    }
+    return result.length ? new Float32Array(result) : null;
+  }
+
   setCollision(visible: boolean, opacity: number): void {
     if (!this.alive) return;
     if (this.collisionEntity) this.collisionEntity.enabled = visible;

@@ -154,9 +154,9 @@ khi chỉ có test giả lập.
 - [x] H1 Điều khiển viewer + đi bộ góc nhìn thứ nhất (02/10/2026; xem Result)
 - [~] H2 Chọn vật theo hình dáng — code + test xong; trình duyệt: 26 collider tải được, không lỗi console; chưa ai nhìn hình
 - [ ] H3 Tường ma của mesh va chạm — hoãn (owner, 02/10/2026)
-- [ ] H4 Nhân vật 3D, góc nhìn thứ ba
+- [~] H4 Nhân vật 3D, góc nhìn thứ ba — góc nhìn thứ ba xong phần code + test (03/10/2026, hình người dựng bằng hình khối); asset nhân vật có khung xương/hoạt ảnh chờ quyết định giấy phép
 - [ ] H5 Đẩy vật thể
-- [~] H6 Đề xuất tỉ lệ mét tự động — code, test và chạy thật local xong (02/10/2026); chưa kiểm trên trình duyệt
+- [~] H6 Đề xuất tỉ lệ mét tự động — code, test và chạy thật local xong (02/10/2026); bước 4 (đo sai số) xong 03/10/2026: −0,24% và −0,11% trên hai scene Aisle_CW (`eval/protocols/reference_torwic.md`); chưa kiểm trên trình duyệt
 - [ ] H7 Hàng đợi nhiều người dùng
 - [ ] H8 Việc đang kẹt / cần máy thuê
 
@@ -246,3 +246,24 @@ Owner chốt: chỉ MoGe-2, có tự đề xuất mặt sàn; làm theo bộ ba 
 - **Video demo TorWIC:** `scripts/demo/make_torwic_demo_videos.py` ghép mỗi traversal thành ba video (camera trái, phải,
   ghép hai camera) kèm `manifest.json`; đang chạy trên ổ ngoài (`/media/usb/AI20K/P-087 demo videos/`), kết quả ghi sau
   khi chạy xong. Video ghép hai camera chỉ để xem demo — pipeline COLMAP không có chế độ hai camera (owner cấm).
+
+### H4 — góc nhìn thứ ba (03/10/2026) — VALIDATING
+
+- `frontend/src/features/viewer/third-person.ts`: trong chế độ Đi bộ, ngay trước khi vẽ mỗi frame đặt hình người tại
+  chỗ người đi đang đứng và lùi camera ra sau lưng (2,4 m, nâng 0,35 m); vẽ xong trả camera về chỗ cũ nên bộ điều khiển
+  đi bộ và va chạm của thư viện viewer không bị đổi. Camera dừng trước vật cản: dò dọc đường lùi trên lưới ô 15 cm
+  dựng từ đỉnh của `collision.glb` đã nạp.
+- Nút "Góc nhìn thứ ba" trên thanh camera (chỉ bật được khi đang Đi bộ).
+- Proof: vitest (phép tính vị trí camera, chặn bởi tường, nút trên thanh công cụ) + typecheck + eslint. **Chưa chạy
+  trên trình duyệt.** INFERENCE cần owner nhìn: thứ tự sắp xếp Gaussian được tính ở tầm mắt nên khi lùi camera có thể
+  thấy nhiễu sắp xếp nhẹ ở vật gần.
+- Chưa làm (bước 1–2 của H4): nhân vật có khung xương và hoạt ảnh. Hình người hiện là capsule + hình cầu dựng trong
+  code. Cần owner chốt nguồn asset (điều khoản asset Isaac Sim cho việc phát trên web, hoặc một mô hình có giấy phép tự
+  do) trước khi đưa file nhân vật vào sản phẩm.
+
+### H5 — đẩy vật thể: chưa làm, cần hai quyết định
+
+- Bộ máy vật lý cho trình duyệt (kế hoạch yêu cầu ghi ADR trước): PROPOSAL dùng ammo.js qua hệ `rigidbody`/`collision`
+  sẵn có của PlayCanvas để khỏi tự viết va chạm; chưa kiểm kích thước tải và giấy phép.
+- Dữ liệu: người đi va chạm với `collision.glb` của cả scene. Nếu lưới này vẫn chứa hình của các vật đã tách thì người
+  đi bị chính lưới tĩnh chặn trước khi chạm vật động — UNKNOWN, cần kiểm trên một scene pipeline v2 thật trước khi làm.

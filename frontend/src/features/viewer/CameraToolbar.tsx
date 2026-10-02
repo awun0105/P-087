@@ -1,6 +1,6 @@
 "use client";
 
-import { Footprints, Maximize, Orbit, Plane, RotateCcw } from "lucide-react";
+import { Footprints, Maximize, Orbit, PersonStanding, Plane, RotateCcw } from "lucide-react";
 import type { ComponentType } from "react";
 
 import type { CameraMode, PlayCanvasRuntime, ViewerControls } from "@/features/viewer/PlayCanvasScene";
@@ -26,12 +26,17 @@ export function CameraToolbar({
   controls,
   wheelFactor,
   onWheelFactor,
+  thirdPerson,
+  onThirdPerson,
   className,
 }: {
   runtime: PlayCanvasRuntime;
   controls: ViewerControls | null;
   wheelFactor: number;
   onWheelFactor: (factor: number) => void;
+  /** Góc nhìn thứ ba đang bật hay không; bỏ trống cả hai prop nếu viewer này không hỗ trợ. */
+  thirdPerson?: boolean;
+  onThirdPerson?: (enabled: boolean) => void;
   className?: string;
 }) {
   const ready = runtime.loaded && controls !== null;
@@ -58,6 +63,19 @@ export function CameraToolbar({
             </button>
           );
         })}
+        {onThirdPerson && (
+          <button
+            type="button"
+            disabled={!ready || runtime.cameraMode !== "walk"}
+            aria-pressed={Boolean(thirdPerson) && runtime.cameraMode === "walk"}
+            title={runtime.cameraMode === "walk" ? "Nhìn từ sau lưng một hình người đặt tại chỗ bạn đang đứng." : "Chỉ dùng được trong chế độ Đi bộ."}
+            onClick={() => onThirdPerson(!thirdPerson)}
+            className={cn(button, thirdPerson && runtime.cameraMode === "walk" ? "bg-on-dark/20 font-medium" : "hover:bg-on-dark/10")}
+          >
+            <PersonStanding className="size-3.5" aria-hidden />
+            Góc nhìn thứ ba
+          </button>
+        )}
         <span className="mx-1 h-4 w-px bg-on-dark/20" aria-hidden />
         <button type="button" disabled={!ready} onClick={() => controls?.frameScene()} className={cn(button, "hover:bg-on-dark/10")}>
           <Maximize className="size-3.5" aria-hidden />

@@ -1,5 +1,6 @@
 "use client";
 
+import type { AppBase } from "playcanvas";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { Notice } from "@/components/studio/primitives";
@@ -13,6 +14,7 @@ import {
   type ViewerControls,
 } from "@/features/viewer/PlayCanvasScene";
 import { SceneOverlay, type GizmoMode, type OverlayBox, type OverlayObject } from "@/features/viewer/scene-overlay";
+import { ThirdPersonRig } from "@/features/viewer/third-person";
 import {
   objectViewPose,
   recordingCameraPose,
@@ -81,11 +83,17 @@ export function MetricSceneView({
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
   const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
   const [wheelFactor, setWheelFactor] = useState(2);
+  const [thirdPerson, setThirdPerson] = useState(false);
 
   // Viewer gọi onApp(app) khi tạo và onApp(null) trước khi huỷ app → lớp phủ sống đúng bằng app.
   const overlayRef = useRef<SceneOverlay | null>(null);
   const controls = useRef<ViewerControls | null>(null);
+  const rigRef = useRef<ThirdPersonRig | null>(null);
+  const [rig, setRig] = useState<ThirdPersonRig | null>(null);
   const onApp = useCallback((app: ViewerAppLike | null, next?: ViewerControls) => {
+    rigRef.current?.destroy();
+    rigRef.current = app ? new ThirdPersonRig(app as unknown as AppBase) : null;
+    setRig(rigRef.current);
     overlayRef.current?.destroy();
     overlayRef.current = app ? new SceneOverlay(app) : null;
     controls.current = next ?? null;
@@ -140,6 +148,18 @@ export function MetricSceneView({
       active = false;
     };
   }, [overlay, collisionUrl]);
+
+  // Góc nhìn thứ ba chỉ có nghĩa khi đang đi bộ; lưới va chạm (nạp xong mới có) giữ camera không lùi xuyên tường.
+  const walking = runtime.cameraMode === "walk";
+  useEffect(() => {
+    // Trích đỉnh của lưới va chạm một lần mỗi khi lưới nạp xong, không lặp lại mỗi lần bật/tắt.
+    rig?.setCollision(overlay?.collisionPositions() ?? null);
+  }, [rig, overlay, collisionState]);
+  useEffect(() => {
+    if (!rig) return;
+    rig.setActive(thirdPerson && walking);
+    return () => rig.setActive(false);
+  }, [rig, thirdPerson, walking]);
 
   // Lớp LiDAR chỉ tải khi người dùng bật (vài MB); tắt thì giải phóng GPU, bật lại lấy từ cache của trình duyệt.
   const lidarWanted = layers.lidar && lidarUrl !== null;
@@ -241,7 +261,7 @@ export function MetricSceneView({
           {toggle("boxes", "Khung vật thể", !boxes.length)}
           {lidarUrl && toggle("lidar", "Đám mây LiDAR")}
         </div>
-        <CameraToolbar runtime={runtime} controls={viewerControls} wheelFactor={wheelFactor} onWheelFactor={setWheelFactor} />
+        <CameraToolbar runtime={runtime} controls={viewerControls} wheelFactor={wheelFactor} onWheelFactor={setWheelFactor} thirdPerson={thirdPerson} onThirdPerson={setThirdPerson} />
       </div>
       <p className="absolute bottom-3 left-3 rounded-md border border-line-dark bg-viewport-deep/85 px-2 py-1 text-xs text-on-dark/80">
         Hệ mét, sàn z = 0 · mở tại camera quay đầu tiên
