@@ -1,6 +1,7 @@
 """Demo bundle API: chỉ phục vụ file trong allow-list, đúng checksum; thiếu bundle → 404."""
 
 import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -40,7 +41,12 @@ def _write_bundle(root: Path, demo_id: str, durations: list[float | None]) -> No
         splat=_file(root, "scene.sog", b"sog-bytes", "application/octet-stream"),
         processing={"brush.total_train_iters": 7000},
     )
-    (root / "manifest.json").write_text(manifest.model_dump_json())
+    # Ghi shape bundle cũ thật sự: chỉ 2 stage đã chạy, chưa có field state.
+    payload = manifest.model_dump(mode="json")
+    payload["stages"] = [
+        stage.model_dump(mode="json", exclude={"state"}) for stage in manifest.stages if stage.state == "succeeded"
+    ]
+    (root / "manifest.json").write_text(json.dumps(payload))
     (root / "files" / "secret.txt").write_text("not listed")
 
 
@@ -72,6 +78,10 @@ async def test_sample_library_lists_valid_bundles(client: AsyncClient, library: 
     assert samples[1]["total_seconds"] is None  # thiếu thời lượng một stage → không đoán
     assert samples[0]["cover"] == "frame-000001.png"
     assert (await client.get("/api/v1/samples/aisle")).json()["processing"] == {"brush.total_train_iters": 7000}
+    stages = (await client.get("/api/v1/samples/aisle")).json()["stages"]
+    assert len(stages) == 8
+    assert sum(stage["state"] == "succeeded" for stage in stages) == 2
+    assert stages[-1]["stage_id"] == StageId.OBJECT_EXTRACT and stages[-1]["state"] == "pending"
 
 
 @pytest.mark.asyncio
@@ -131,4 +141,23 @@ def test_stage_durations_follow_completed_chain() -> None:
         JobAttemptRecord(attempt=1, status=JobStatus.RUNNING, current_stage=StageId.INPUT_VALIDATE, recorded_at=t0),
     ]
     durations = [stage.duration_seconds for stage in stage_durations(job, attempts)]
-    assert durations == [10.0, 1.0, 29.0, 300.0, None]
+    assert durations == [10.0, 1.0, 29.0, 300.0, None, None, None, None]
+    assert [stage.state for stage in stage_durations(job, attempts)] == ["succeeded"] * 4 + ["pending"] * 4
+
+
+def test_export_includes_later_stages_with_real_state_and_timing() -> None:
+    t0 = datetime(2026, 10, 2, tzinfo=UTC)
+    job = JobManifest.model_validate_json((ROOT / "fixtures/mock_job/job_manifest.json").read_text())
+    geometry = StageArtifact(
+        stage_id=StageId.RGB_GEOMETRY,
+        status="SUCCEEDED",
+        artifact_type="Geometry",
+        artifact_uri="artifact://jobs/j/geometry",
+        artifact_checksum="sha256:" + "a" * 64,
+        data_class="derived",
+        started_at=t0,
+        completed_at=t0 + timedelta(seconds=12),
+    )
+    result = stage_durations(job.model_copy(update={"stage_artifacts": [geometry]}), [])
+    assert len(result) == 8 and result[-2].state == "succeeded" and result[-2].duration_seconds == 12
+    assert result[-1].state == "pending" and result[-1].duration_seconds is None

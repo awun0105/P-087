@@ -21,7 +21,7 @@ from src.models.contracts.manifests import InputManifest, JobManifest, JobStatus
 from src.services.orchestration.artifacts import sha256_file
 from src.services.orchestration.jobs.dispatch import prepared_frame_reference
 from src.services.orchestration.jobs.models import JobAttemptRecord
-from src.services.orchestration.jobs.progress import MVP_PIPELINE
+from src.services.orchestration.jobs.progress import MVP_PIPELINE, STUDIO_PIPELINE
 from src.services.orchestration.samples import DemoFile, DemoManifest, DemoSource, DemoStage
 
 _MEDIA = {".mp4": "video/mp4", ".mov": "video/quicktime", ".png": "image/png", ".jpg": "image/jpeg"}
@@ -36,17 +36,31 @@ def stage_durations(job: JobManifest, attempts: Sequence[JobAttemptRecord]) -> l
     latest = attempts[-1].attempt if attempts else 1
     running = [event for event in attempts if event.attempt == latest and event.status == JobStatus.RUNNING]
     cursor = running[0].recorded_at if running else None
-    done = {
-        stage.stage_id: stage.completed_at
-        for stage in job.stage_artifacts
-        if stage.status == StageStatus.SUCCEEDED and stage.completed_at is not None
-    }
+    records = {stage.stage_id: stage for stage in job.stage_artifacts}
     stages = []
-    for stage_id in MVP_PIPELINE:
-        end = done.get(stage_id)
-        duration = (end - cursor).total_seconds() if end is not None and cursor is not None else None
-        stages.append(DemoStage(stage_id=stage_id, duration_seconds=duration if duration and duration >= 0 else None))
-        cursor = end or cursor
+    for stage_id in STUDIO_PIPELINE:
+        record = records.get(stage_id)
+        state = (
+            "succeeded"
+            if record and record.status == StageStatus.SUCCEEDED
+            else ("failed" if record and record.status == StageStatus.FAILED else "pending")
+        )
+        end = record.completed_at if record and state == "succeeded" else None
+        start = record.started_at if record else None
+        if start is None and stage_id in MVP_PIPELINE:
+            start = cursor  # Compatibility: preview cũ chỉ có chuỗi completed_at.
+        if stage_id not in MVP_PIPELINE and start is None:
+            start = next((event.recorded_at for event in running if event.current_stage == stage_id), None)
+        duration = (end - start).total_seconds() if end is not None and start is not None else None
+        stages.append(
+            DemoStage(
+                stage_id=stage_id,
+                state=state,
+                duration_seconds=duration if duration is not None and duration >= 0 else None,
+                summary="Mẫu này chưa ghi kết quả của bước này." if state == "pending" else "",
+            )
+        )
+        cursor = end  # Gap thiếu evidence không được gán thời gian của nhiều bước vào stage sau.
     return stages
 
 

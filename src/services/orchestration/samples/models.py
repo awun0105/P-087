@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from src.models.contracts.artifacts import Checksum
 from src.models.contracts.manifests import StageId
+from src.services.orchestration.jobs.progress import STUDIO_PIPELINE
 
 _FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
@@ -36,11 +37,13 @@ class DemoFile(BaseModel):
 
 
 class DemoStage(BaseModel):
-    """Stage đã chạy thật; `duration_seconds` null khi nguồn không có mốc thời gian."""
+    """Evidence của stage; `duration_seconds` null khi chưa có mốc thời gian."""
 
     model_config = ConfigDict(extra="forbid")
 
     stage_id: StageId
+    #: Bundle cũ chỉ liệt kê stage đã chạy; field mới phân biệt bước chưa có evidence.
+    state: Literal["succeeded", "pending", "failed"] = "succeeded"
     duration_seconds: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     summary: str = Field(default="", max_length=300)
 
@@ -85,6 +88,15 @@ class DemoManifest(BaseModel):
             raise ValueError("demo file names phải duy nhất")
         if not self.splat.name.endswith((".sog", ".ply")):
             raise ValueError("splat phải là .sog hoặc .ply")
+        records = {stage.stage_id: stage for stage in self.stages}
+        if len(records) != len(self.stages):
+            raise ValueError("demo stage IDs phải duy nhất")
+        # Adapter read-only: bundle preview cũ hiện đủ pipeline mới, không ghi success giả.
+        self.stages = [
+            records.get(stage_id)
+            or DemoStage(stage_id=stage_id, state="pending", summary="Mẫu này chưa ghi kết quả của bước này.")
+            for stage_id in STUDIO_PIPELINE
+        ]
         return self
 
     def files(self) -> list[DemoFile]:
