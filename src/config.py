@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     product_runtime_manifest: Path | None = None
     product_seed: int | None = None
     product_worker_root: Path = Path("./data/product_workers")
+    #: Giữ scratch để chẩn đoán; mặc định chỉ dọn attempt đã publish và commit thành công.
+    product_worker_keep_scratch: bool = False
     product_preview_timeout_seconds: float = Field(default=21600, gt=0, allow_inf_nan=False)
     #: Thông số REC-05 (voxel/capsule) cho bước hoàn tất sau xác nhận tỉ lệ (owner chốt 2026-09-29).
     product_geometry_config: Path = Path("configs/product/geometry_v1.json")

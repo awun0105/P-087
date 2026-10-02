@@ -47,6 +47,7 @@ from src.services.orchestration.jobs.dispatch import (
 )
 from src.services.orchestration.jobs.models import PreparedInputReceipt, TransitionRequest
 from src.services.orchestration.jobs.progress import awaiting_finalize, metric_confirmation_stage
+from src.services.orchestration.jobs.workspace import cleanup_attempt_workspace
 from src.services.orchestration.processing.capability import latest as latest_capability
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
 from src.services.reconstruction import (
@@ -259,7 +260,26 @@ def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: Res
         raise ValueError("Worker result khác attempt/exit status")
     job = attempt.registry.record_preview(attempt.job, receipt)
     _record_benchmark(attempt)
+    if receipt.error is None:
+        _cleanup_attempt_workspace(attempt)
     return job
+
+
+def _cleanup_attempt_workspace(attempt: _Attempt) -> None:
+    """Best effort sau verified/durable success; giữ nguyên log, resume và job state."""
+    if attempt.settings.product_worker_keep_scratch:
+        return
+    try:
+        result = cleanup_attempt_workspace(
+            attempt.workspace,
+            worker_root=attempt.settings.product_worker_root,
+            artifact_root=attempt.registry.runtime_resolver.artifact_root,
+        )
+        logger.info(
+            "Scratch cleanup files=%s bytes=%s errors=%s", result.files_removed, result.bytes_removed, result.errors
+        )
+    except (OSError, ValueError) as error:
+        logger.warning("Bỏ qua scratch cleanup cause=%s", type(error).__name__)
 
 
 def _record_benchmark(attempt: _Attempt) -> None:
@@ -470,7 +490,11 @@ def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> Jo
         extra: list[StageArtifact] = []
         if result.error is None:
             extra = _extract_scene_stage(attempt, workspace, result.bundle_ref)
-        return registry.record_finalize(attempt.job, result, reference, extra)
+        completed = registry.record_finalize(attempt.job, result, reference, extra)
+        # Scene consumer đã chạy xong trước durable commit; lỗi extraction vẫn giữ scratch để debug.
+        if result.error is None and extra:
+            _cleanup_attempt_workspace(attempt)
+        return completed
     except BaseException as error:
         _record_runner_failure(attempt, error)
         raise
