@@ -51,15 +51,18 @@ describe("chọn bảng màu", () => {
     expect(currentPalette()).toBe("default"); // giá trị lạ thì giữ bảng mặc định
   });
 
-  it("menu chọn giao diện đổi bảng màu và chế độ, và khớp với nút sáng/tối", () => {
+  it("menu chỉ chọn bảng màu; sáng/tối do nút riêng và không đụng bảng màu", () => {
     render(<><PaletteMenu /><ThemeToggle /></>);
     const trigger = screen.getByRole("button", { name: "Chọn giao diện" });
     fireEvent.keyDown(trigger, { key: "Enter" });
+    expect(screen.queryByRole("menuitem", { name: "Tối" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Sáng" })).toBeNull();
     fireEvent.click(screen.getByRole("menuitem", { name: /Gruvbox/ }));
     expect(currentPalette()).toBe("gruvbox");
     fireEvent.keyDown(screen.getByRole("button", { name: "Chọn giao diện" }), { key: "Enter" });
     expect(screen.getByRole("menuitem", { name: /Gruvbox/ })).toHaveAttribute("aria-current", "true");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Tối" }));
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Chuyển sang giao diện tối" }));
     expect(themeKey()).toBe("dark:gruvbox");
     expect(screen.getByRole("button", { name: "Chuyển sang giao diện sáng" })).toBeInTheDocument();
   });
