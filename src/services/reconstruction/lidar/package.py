@@ -59,6 +59,22 @@ class LidarPackageError(ValueError):
     """Gói LiDAR không xử lý được; message hiển thị được cho người dùng."""
 
 
+class CameraCalibration(ContractModel):
+    """Nội tham số camera theo calibration của gói (pixel, ở độ phân giải `width × height` lúc hiệu chuẩn).
+
+    Méo ống kính theo thứ tự OpenCV `k1 k2 p1 p2`. Frame trích từ video có thể khác độ phân giải; nơi dùng phải quy
+    đổi theo tỉ lệ chiều rộng.
+    """
+
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    fx: FiniteFloat = Field(gt=0)
+    fy: FiniteFloat = Field(gt=0)
+    cx: FiniteFloat
+    cy: FiniteFloat
+    distortion: tuple[FiniteFloat, FiniteFloat, FiniteFloat, FiniteFloat] = (0.0, 0.0, 0.0, 0.0)
+
+
 class LidarPackageRecord(ContractModel):
     """Bản ghi của gói LiDAR sau khi nhận: mọi thứ bước dựng pose camera và căn chỉnh cần, theo checksum."""
 
@@ -72,6 +88,8 @@ class LidarPackageRecord(ContractModel):
     frame_times_ref: ProductArtifactRef
     #: `lidar_sensor_from_camera`: vị trí và hướng camera trong hệ cảm biến LiDAR.
     sensor_from_camera: Transform
+    #: Nội tham số camera nếu calibration có; None thì bước dựng pose để COLMAP tự ước lượng.
+    camera: CameraCalibration | None = None
     lidar_geometry_ref: ProductArtifactRef
     lidar_metadata_ref: ProductArtifactRef
     point_count: int = Field(gt=0)
@@ -117,6 +135,33 @@ def parse_calibration(text: str, fmt: Literal["torwic_txt", "json"]) -> Transfor
         )
     except (KeyError, TypeError, ValueError) as error:
         raise LidarPackageError(f"Calibration camera ↔ LiDAR không đọc được: {error}") from error
+
+
+def parse_camera(text: str, fmt: Literal["torwic_txt", "json"]) -> CameraCalibration | None:
+    """Nội tham số camera trái trong calibration; None khi file không khai (chỉ có ngoại tham số)."""
+    try:
+        if fmt == "json":
+            block = json.loads(text).get("camera")
+            return None if block is None else CameraCalibration.model_validate(block)
+        values: dict[str, str] = {}
+        for line in text.splitlines():
+            key, separator, raw = line.split("#", 1)[0].replace("=", ":", 1).partition(":")
+            if separator and key.strip().startswith("Camera1."):
+                values[key.strip().removeprefix("Camera1.")] = raw.strip()
+        if not {"fx", "fy", "cx", "cy", "width", "height"} <= values.keys():
+            return None
+        distortion = [float(item) for item in values.get("D", "[0, 0, 0, 0]").strip("[]").split(",")][:4]
+        return CameraCalibration(
+            width=int(float(values["width"])),
+            height=int(float(values["height"])),
+            fx=float(values["fx"]),
+            fy=float(values["fy"]),
+            cx=float(values["cx"]),
+            cy=float(values["cy"]),
+            distortion=tuple(distortion + [0.0] * (4 - len(distortion))),  # type: ignore[arg-type]
+        )
+    except (TypeError, ValueError) as error:
+        raise LidarPackageError(f"Nội tham số camera trong calibration không đọc được: {error}") from error
 
 
 def parse_frame_times(text: str, pose_count: int) -> list[float]:
@@ -179,6 +224,7 @@ class LidarPackageIngest:
                 poses = self._poses(trajectory_bytes, evidence)
                 parse_frame_times(times_bytes.decode("utf-8"), len(poses))
                 sensor_from_camera = parse_calibration(calibration_bytes.decode("utf-8"), evidence.calibration_format)
+                camera = parse_camera(calibration_bytes.decode("utf-8"), evidence.calibration_format)
                 points, payload, fmt, fusion, scan_checksums = self._cloud(archive, evidence, poses)
         except (KeyError, zipfile.BadZipFile, UnicodeDecodeError) as error:
             raise LidarPackageError("Gói LiDAR hỏng hoặc đã đổi sau khi tải lên") from error
@@ -245,6 +291,7 @@ class LidarPackageIngest:
                 job_id, f"{base}/frame_times.txt", times_bytes, "LidarFrameTimes", provenance
             ),
             sensor_from_camera=sensor_from_camera,
+            camera=camera,
             lidar_geometry_ref=lidar.geometry_ref,
             lidar_metadata_ref=lidar.metadata_ref,
             point_count=len(points),
