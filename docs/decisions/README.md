@@ -16,3 +16,4 @@ dùng nó như policy. `Proposed` decision không phải authority.
 - [0006: Tách vật thể cho SceneIR — SAMPro3D adapt với SAM2, fallback hình học](0006-scene-object-extraction.md) — *Accepted*; runtime đã cài (2026-09-30). Đường tạm cho tới khi pipeline v2 (0007) thay chặng tách vật
 - [0007: Pipeline v2 — video → scene 3D theo vật chỉnh sửa được → USD lai cho Isaac Sim](0007-object-centric-hybrid-usd-pipeline.md) — *Accepted* hướng kiến trúc; phương pháp chặng 5–7 chọn sau pha A (2026-09-30)
 - [0008: Dùng lại code nghiên cứu có giấy phép phi thương mại](0008-research-code-license-policy.md) — *Accepted* (2026-09-30)
+- [0009: LiDAR của người dùng — loại đầu vào và ba luồng xử lý](0009-user-lidar-input-and-routing.md) — mục 1–3 *Accepted*, mục 4–6 *Proposed* (2026-10-02)

@@ -36,6 +36,8 @@ cụ thể, không đoán.
 Từ chối có hướng dẫn:
 - PLY chỉ có `x y z` (± màu) là point cloud, không phải 3DGS. LiDAR của người dùng
   chưa hỗ trợ ở P0; hướng LiDAR chỉ chạy trên dataset đã chuẩn bị (ADR 0001).
+  **Thay thế ngày 2026-10-02 bởi [0009](0009-user-lidar-input-and-routing.md):** LiDAR của người dùng được nhận
+  kèm video (đám mây đã đăng ký, hoặc scan thô + quỹ đạo).
 - `.splat`, `.ksplat`, `.spz`, `.sog`: chưa hỗ trợ ở P0.
 
 ZIP phải an toàn: giới hạn số entry và tổng dung lượng giải nén, cấm đường dẫn
