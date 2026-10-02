@@ -1,7 +1,7 @@
 # Execution Plan: Hệ thống tự quản lý tài nguyên & Dọn dẹp dữ liệu tạm pipeline (Self-Adaptive Resource Management & Worker Staging Cleanup)
 
 ## Status
-Active / IN_PROGRESS — user đã giao implementation và commit từng nhóm nhỏ ngày 02/10/2026; không push.
+Active / IN_PROGRESS — increment cleanup/telemetry + admission/demo đã implement, validate và commit ngày 02/10/2026; giữ active cho các follow-up có gate; không push.
 - **Tech Lead / người yêu cầu:** Quân (EX-REC)
 - **Canonical ownership:** `EX-PRODUCT` (Cường) sở hữu orchestration; không chuyển ownership sang EX-REC.
 - **Implementer:** Codex Agent
@@ -32,13 +32,13 @@ Active / IN_PROGRESS — user đã giao implementation và commit từng nhóm n
 - **Outcome triển khai dự kiến:** giảm scratch sau attempt thành công, giữ kết quả/log/retry an toàn; bổ sung phép đo và telemetry có provenance trước khi thay estimator hoặc chất lượng xử lý.
 - **Inputs:** Settings, durable job revision, verified worker receipt/result, resolved artifact refs và phép đo trên đúng máy worker.
 - **Outputs:** cleanup report/log và telemetry typed nội bộ theo job/attempt; job/artifact contracts và checksum giữ nguyên ở pha đầu. Telemetry nội bộ không phải shared execution lifecycle.
-- **Owned paths dự kiến:** `src/config.py`, `src/services/orchestration/jobs/runner.py`, `src/services/orchestration/processing/`, `tests/test_orchestration/`; reuse benchmark khi phù hợp, chỉ sửa sau inspect consumer/schema của nó.
-- **Do-not-modify:** shared contracts, REC/SCENE/SIM internals, frontend/API contracts, published artifacts, local artifact cache, thư mục resume dùng chung, dependency locks, task scope/status và authority documents. Mở boundary nào phải ghi quyết định/review trước.
+- **Owned paths:** pha 1 ở `src/config.py`, `jobs/runner.py`, `jobs/workspace.py`, `processing/`, `tests/test_orchestration/`. User mở thêm pha admission queue/progress và demo: `jobs/worker_cli.py`, runtime DB migration nội bộ, `jobs/progress.py`, `src/api/studio/`, product TS contracts/progress/demo UI, sample model/export/tests. Ghi UI decision ở section S05 hiện có của `STUDIO_UX_SPEC.md`; không tạo Q/D/task ID mới.
+- **Do-not-modify:** shared artifact contracts, REC/SCENE/SIM internals, published artifacts, local artifact cache, thư mục resume dùng chung, dependency locks và task Goal/I/O/DoD. Runtime DB chỉ thêm observation về tài nguyên, không tạo job lifecycle/status cạnh tranh.
 - **Out of scope:** đổi frame sampling theo motion/FPS, đổi evaluation split (kể cả 1/8 ảnh), advanced scheduler/multi-tenant queue, cloud provisioning, tự sửa config đã bind checksum, dọn scene/trash hoặc published cache.
 - **Dependencies:** PRODUCT lifecycle/CAS, resolver checksum, public REC receipts; phải re-read code/test/diff trước triển khai. Baseline source không thay thế runtime proof.
 - **Proof required:** positive/negative cleanup, error/unknown probes, telemetry attribution và integration artifact vẫn đọc được sau cleanup; mức runtime/GPU/browser phải báo riêng.
-- **Unknowns / gates:** degradation policy, telemetry shared schema, thu hồi scratch failed/cancelled và cleanup bên trong step/producer chưa có quyết định đủ rõ. Pha độc lập có thể triển khai khi user giao lệnh; không đánh dấu toàn bộ plan BLOCKED.
-  User đang làm rõ admission UX: đo lại khi dispatch; nếu thiếu tài nguyên thì có thể hiện bảng config mới để user xác nhận. Đây là PROPOSAL chờ chốt, chưa thêm lifecycle/UI hoặc đổi config.
+- **Unknowns / gates:** telemetry shared schema, thu hồi scratch failed/cancelled và cleanup bên trong step/producer chưa có quyết định đủ rõ. Tự hạ cấu hình đã được thay bằng policy chờ tài nguyên bên dưới; không còn câu hỏi degradation đang chờ trả lời.
+  **Đã chốt trong session:** giữ cấu hình, chờ vào hàng đợi và tự chạy tiếp; thanh progress vẫn có animation. Không tăng phần trăm hoặc đánh dấu stage đang xử lý khi chưa chạy. Bảng chọn lại config không thuộc flow đã chốt.
 
 ---
 
@@ -64,18 +64,14 @@ Nhằm trả lời dứt khoát câu hỏi của Tech Lead: *"Xóa sớm có là
 ```mermaid
 flowchart TD
     StepStart[Bắt đầu Step] --> M1[Cơ chế 1: Pre-flight Dynamic Check\nĐo VRAM / RAM / Disk thực tế còn trống]
-    M1 --> CheckDisk{Đĩa đủ dung lượng?}
-    CheckDisk -- Không đủ --> M2[Cơ chế 2: Staging Cleanup\nXóa dữ liệu tạm của step trước / attempt cũ]
-    M2 --> RecheckDisk{Đo lại đĩa}
-    RecheckDisk -- Vẫn thiếu --> FailOrDegrade[Hạ mức hoặc cảnh báo người dùng]
-    CheckDisk -- Đủ --> CheckVRAM{VRAM / RAM đủ?}
-    RecheckDisk -- Đủ --> CheckVRAM
-    CheckVRAM -- Thiếu --> M3[Cơ chế 3: Degradation cần owner chốt\nChưa tự đổi cấu hình]
-    CheckVRAM -- Đủ --> RunStep[Tiến trình Worker chạy Step]
-    M3 --> RunStep
+    M1 --> Enough{Đủ headroom theo estimator?}
+    Enough -- Thiếu hoặc unknown --> Wait[Giữ cấu hình / checksum\nChờ trong durable queue, UI animation]
+    Wait --> M1
+    Enough -- Đủ --> RunStep[Worker claim và chạy CLI]
     RunStep --> PublishArtifacts[Kiểm tra Checksum & Publish Artifacts vào Kho]
     PublishArtifacts --> M4[Cơ chế 4: Empirical Profiling\nGhi số đo có provenance theo attempt]
-    M4 --> EndStep[Commit kết quả / kết thúc consumer\nChỉ dọn scratch an toàn của giai đoạn thành công]
+    M4 --> EndStep[Commit kết quả / kết thúc consumer]
+    EndStep --> M2[Cơ chế 2: Cleanup scratch attempt thành công\nGiữ artifact, log và resume]
 ```
 
 ### Cơ chế 1: Pre-flight Dynamic Check (Đo thực tế trước mỗi bước)
@@ -89,7 +85,7 @@ flowchart TD
     - Đo trước mỗi subprocess do PRODUCT trực tiếp quản lý; các step nội bộ COLMAP/Brush/SAM2 cần producer hook riêng, không claim đã đo từng step chỉ nhờ runner.
     - Pha đầu chỉ ghi headroom; thiếu phép đo trả `None` kèm diagnostic, không coi là đủ tài nguyên.
     - Trigger low-disk 10 GiB là đề xuất cần đặt qua Settings trước pha 2. Không dùng số đo tức thời làm reservation GPU hoặc claim đã giải quyết concurrency.
-    - Thiếu VRAM/RAM: policy dừng/chờ/hạ mức cần chốt trước khi enforce. Không tự đổi job config đã bind checksum.
+    - Policy đã chốt: thiếu/unknown thì chờ và đo lại trước dispatch, không tự đổi config. Các hook giữa bước bên trong producer vẫn là follow-up; runner chưa gate riêng từng bước nội bộ.
 
 ### Cơ chế 2: Staging Cleanup (Dọn rác thư mục làm việc của Worker)
 - **Vấn đề hiện tại:** Trong `src/services/orchestration/jobs/runner.py`, biến `workspace = settings.product_worker_root / job_id / attempt_id` được tạo ra nhưng không hề được dọn sau khi chạy xong. Từng để lại hơn 2.8 GB rác trong thư mục `workers/`.
@@ -101,12 +97,12 @@ flowchart TD
   - **Path safety:** Resolve root từ Settings; reject workspace là root/job root, symlink ancestor, nằm ngoài worker root hoặc overlap artifact root. Không follow symlink trong cây; không động tới sibling attempt hoặc `<job_id>/resume`. Cleanup idempotent; lỗi permission/I/O được log và không đổi success đã commit thành FAILED.
   - **Debug:** `PRODUCT_WORKER_KEEP_SCRATCH=True` bỏ qua cleanup; mặc định `False`. Không áp dụng lên artifact lifecycle.
 
-### Cơ chế 3: Graceful Degradation (Tự hạ mức khi thiếu tài nguyên)
-- **PROPOSAL / gate chưa chốt:** Khi đo thấy thiếu tài nguyên, hoặc khi tiến trình gặp lỗi OOM (CUDA Out Of Memory):
-  - Worker tự động chuyển sang nấc cấu hình dự phòng thấp hơn:
-    - *Brush 3DGS:* Giảm `brush.max_resolution` (ví dụ: 1920 $\rightarrow$ 1280), giảm `brush.max_splats` (ví dụ: 1.000.000 $\rightarrow$ 600.000).
-    - *SAM2:* Giảm kích thước batch frame xử lý cùng lúc.
-  - **Audit Trail:** Cần record bind cấu hình gốc/effective config checksum, step/attempt, reason và fallback. Manifests hiện không có `metadata`; producer + consumer phải review/version schema nếu thay shared contract. Chưa có quyết định này thì không implement tự hạ mức, không retry mọi nonzero exit như OOM.
+### Cơ chế 3: Chờ tài nguyên với cấu hình đã chọn
+- **DECISION (user, 02/10/2026):** giữ cấu hình, chờ vào hàng đợi và tự chạy tiếp; UI vẫn có animation. Đề xuất tự hạ cấu hình trước đây được thay bằng policy này.
+- Worker đo trên máy thực thi trước claim prepare/preview/finalize. Job structured config thiếu/unknown VRAM, RAM hoặc disk sẽ chưa được claim; observation bind manifest checksum trong DB migration 7, không tạo attempt hoặc đổi JobStatus.
+- Khi đủ headroom, worker xóa observation rồi dispatch theo CAS/checksum hiện có. Observation quá 15 phút hoặc khác revision không được API trình bày như live. Hủy job ngăn dispatch lại.
+- Preset Maximum dùng snapshot free headroom từ heartbeat, có thời điểm đo trên UI; không phải reservation. Busy tạm thời vẫn được enqueue nếu cấu hình vừa tổng năng lực máy; vượt total capacity đã biết vẫn bị chặn.
+- Gate dùng heuristic preview hiện có, chưa có model riêng cho geometry/SAM2; legacy profile chưa có structured config giữ hành vi cũ, không bịa requirement. OOM thực tế vẫn qua error/retry policy hiện có, không tự đổi chất lượng.
 
 ### Cơ chế 4: Empirical Profiling (Tự học từ các lần chạy thực tế)
 - **Mục tiêu dài hạn:** Hiệu chỉnh estimator bằng dữ liệu đo trên đúng worker/runtime. Không bỏ cold-start heuristic trước khi có dữ liệu và proof.
@@ -144,16 +140,21 @@ flowchart TD
    - Không thêm `metadata` vào `StageArtifact`. Thử reuse benchmark convention nhưng không mở shared schema hoặc đổi benchmark protocol trong pha này.
    - Đo live trước mỗi CLI và lưu trong cùng record; chưa enforce resource policy.
 
-### Pha 2: Tích hợp Pre-flight Check & Dọn dẹp khẩn cấp
-**Gate:** có safe completion marker/lease và retention rule, threshold qua Settings; không scan-delete chỉ theo job terminal hoặc tuổi thư mục.
+### Pha 2: Tích hợp Pre-flight Check, hàng đợi tài nguyên & Dọn dẹp khẩn cấp
+**Đã chốt admission:** đo lại trước claim của worker; thiếu tài nguyên thì giữ checksum/config và job eligible trong durable queue, poll lại và tự dispatch khi đủ. Observation bind checksum, không đổi shared JobStatus. UI hiện đang chờ và animation indeterminate, tiếp tục polling/cancel.
+**Gate cleanup khẩn cấp:** cần safe completion marker/lease và retention rule, threshold qua Settings; không scan-delete chỉ theo job terminal hoặc tuổi thư mục.
 1. Đo trước từng heavy step qua producer/public hook đã review; runner-only measurement ghi rõ coverage CLI.
 2. Cleanup khi dưới ngưỡng chỉ với attempt/step có proof đã kết thúc và không còn dependency; đo lại sau cleanup. Không đụng failed/cancelled/resume/cache nếu chưa có quyền thu hồi.
-3. Nếu vẫn thiếu: structured error/dừng/chờ theo policy được chốt, bound timeout và cancellation. Không âm thầm launch rồi claim đã admission control.
+3. Giữ config và chờ khi thiếu tài nguyên. Chỉ gate theo estimator đang có (preview config), ghi rõ chưa có model riêng cho geometry/SAM2. Legacy job thiếu structured config không bịa resource requirement; limitation phải hiện trong evidence. Unknown headroom của job có model phải tiếp tục chờ, không coi unknown là đủ.
 
-### Pha 3: Cơ chế Tự hạ mức cấu hình (Degrade Policy)
-**Gate:** user chốt cho phép tự hạ mức; owner review quality floor, retries và schema/version của effective config/audit record.
-1. Định nghĩa bảng nấc fallback cho các thuật toán nặng trong `src/services/orchestration/processing/`.
-2. Nhận diện OOM đúng lỗi/adapter, retry hữu hạn ở nấc đã duyệt; config mới không ghi đè provenance cũ. Unknown failure/timeout/cancel không được coi là OOM.
+### Demo hiện hành (user bổ sung scope)
+1. Demo cũ đang có 5 stage tới preview (user quan sát 4); pipeline Studio hiện có 8 stage. Timeline/replay phải dùng danh sách Studio, kể cả với bundle cũ.
+2. Chỉ replay stage có source execution evidence; stage mới chưa được chạy trong bundle cũ hiện chưa có kết quả, không tự chuyển success khi skip.
+3. Export stage từ toàn bộ Studio execution records, giữ state/timing/provenance. Không sửa published payload hoặc bịa metric/geometry/objects; adapter bundle cũ và export mới là canonical fix cho dữ liệu demo đang có.
+4. Proof: compatibility bundle cũ, replay đủ 8 stage, skip không tạo success cho stage missing/failed, frontend/backend parsing và export negative tests.
+
+### Pha 3: Đề xuất tự hạ mức — SUPERSEDED
+User đã chọn chờ tài nguyên trong pha 2. Không triển khai fallback chất lượng hoặc effective config/audit schema trong scope hiện tại.
 
 ### Pha 4: Estimator học từ telemetry
 **Gate:** đủ số đo có attribution và runtime fingerprint; owner chốt cold-start/fallback và validation protocol.
@@ -206,25 +207,38 @@ Commands đã xác nhận hoặc planned sau khi thêm file test:
 - [x] Đọc harness/workflow, inspect branch/source/test owners và session log liên quan.
 - [x] Chỉnh branch, authority, data boundaries, roadmap và proof.
 - [x] Pha 1.1 cleanup + focused proof (16 tests); commit code theo nhóm riêng.
-- [ ] Pha 1.2 live headroom + focused proof + commit nhỏ.
-- [ ] Pha 1.3 telemetry + runner integration + focused proof + commit nhỏ.
-- [ ] Broader orchestration/integration/static checks; cập nhật kết quả và commit evidence.
-- [ ] Pha 2–4: chỉ bắt đầu sau khi gate tương ứng đủ authority/dependency.
+- [x] Pha 1.2 live headroom + focused proof + commit `f49da36`.
+- [x] Pha 1.3 telemetry + runner integration + focused proof; commit `9303c02`.
+- [x] Admission durable queue, snapshot Maximum và UI animation theo user decision; focused backend/API/frontend proof.
+- [x] Demo tại bước upload: adapter bundle cũ + export + replay đủ 8 stage; stage thiếu/failed không thành success khi skip.
+- [x] Ghi lasting UI decision tại `docs/STUDIO_UX_SPEC.md` S03/S05.
+- [x] Kết thúc broader validation và commit các nhóm admission/demo/docs.
+- [ ] Follow-up có gate: cleanup khẩn cấp và hook từng step nội bộ; estimator empirical cần samples/validation protocol. Không thuộc phần đã được chứng minh của increment này.
 
 ## Decisions
 
 - 2026-10-02: user yêu cầu giữ branch `feat/pipeline-v2`, sửa kế hoạch rồi implement/commit theo nhóm nhỏ; không push.
-- 2026-10-02: pha đầu giữ shared schema/config checksum, resume và artifact cache; telemetry nội bộ theo CLI attempt. Chưa duyệt degradation hoặc evaluation split; câu hỏi policy đã gửi trong session hiện tại, phần độc lập tiếp tục.
-- 2026-10-02: phân biệt snapshot chọn preset trước upload với headroom lúc dispatch. User chưa đồng ý tự hạ cấu hình; đang cân nhắc bảng config xác nhận lại, không dùng elapsed time làm approval.
+- 2026-10-02: pha đầu giữ shared schema/config checksum, resume và artifact cache; telemetry nội bộ theo CLI attempt. Evaluation split chưa được duyệt và không thuộc scope.
+- 2026-10-02: snapshot chọn preset trước upload khác headroom lúc dispatch. Bảng chọn lại cấu hình từng được thảo luận; quyết định cuối là chờ với cấu hình cũ ở dòng tiếp theo.
+- 2026-10-02 (user chốt): “chờ vào hàng đợi và chạy tiếp, thanh tiến trình vẫn chạy”. Giữ config; thiếu headroom thì đợi, tự chạy tiếp, animation chờ không phải phần trăm xử lý.
+- 2026-10-02 (user bổ sung): cập nhật demo cũ theo các bước hiện hành; không tạo evidence cho các bước chưa chạy. Mở thêm product queue/progress/sample code boundary như Scope.
 
 ## Result / Recovery Checkpoint
 
-- Current outcome: pha 1.1 code + fixture proof; pha 1.2/1.3 tiếp tục, UI/admission policy chờ quyết định.
-- Changed: plan, `src/config.py`, `jobs/workspace.py`, `jobs/runner.py`, `tests/test_orchestration/test_worker_cleanup.py`.
-- Validation: Ruff check focused exit 0; format chỉ intended files; `.venv/bin/pytest tests/test_orchestration/test_worker_cleanup.py -q` exit 0 — **16 passed**. Tests dùng fixture tool/consumer seam; resolver checksum kiểm thật trong temp filesystem. Broader suite/GPU/browser chưa chạy.
+- Current outcome: pha 1 và increment admission/demo đã implement/validate/commit. Plan tiếp tục active cho các follow-up có gate, không claim hoàn tất estimator empirical/cleanup khẩn cấp.
+- Changed: Settings, workspace cleanup, capability/telemetry, runner; migration 7 + admission/progress/API; snapshot resource evaluation; demo model/library/export; Studio progress/replay/contracts và tests; UX source/plan.
+- Validation pha 1: focused cleanup 16 passed (sau đó thêm 2 integration/I/O tests); live capability + processing config 26 passed; telemetry/cleanup/capability/lifecycle 67 passed. Ruff toàn `src/ tests/` và format check 408 files exit 0. Suite orchestration + 2 integration 360 passed, 13 PostgreSQL skipped. `.venv/bin/pytest tests/ -q -o faulthandler_timeout=45` ngoài sandbox exit 0 — **1242 passed, 40 skipped**, 147.96s. Đây là Python/fixture/local subprocess proof; chưa GPU/browser/cloud E2E.
 - Cleanup finalize: scene extraction failure (không có extra stage) giữ scratch dù REC job đã thành công, để còn diagnostics; không coi cleanup này là toàn bộ recovery/cache policy.
 - Failed attempts: manual patch lần đầu không match context, không sửa file; đọc JSONL session gặp dòng không hợp lệ, retry parser bỏ qua malformed line. Không có runtime failure được suy thành success.
-- Next executable step: commit plan + cleanup riêng; implement live probe/error tests rồi telemetry. Không push.
+- Tests trong sandbox đứng sau các test đầu, đã Ctrl-C (exit 130); chạy ngoài sandbox thành công. `nvidia-smi --help-query-compute-apps` xác nhận `pid,used_memory` là query hợp lệ trên binary cài đặt.
+- Validation increment admission/demo: focused Python 31 passed, 4 PostgreSQL skipped; sau khi thêm finalize/API cases, admission 7 passed; sample + admission 10 passed trước khi thêm 2 cases. Frontend focused 8 passed; toàn bộ `npm test` 193 passed / 34 files. `npm run typecheck`, `npm run lint`, `npm run build` exit 0. Ruff check/format `src/ tests/ scripts/demo/export_demo_bundle.py` exit 0 / 411 files. Browser inventory từ CUA không có browser; chưa real browser QA/GPU/cloud E2E. Vitest có warning multiple Three.js instances ở tests viewer hiện có.
+- Final Python broad: `.venv/bin/pytest tests/ -q -o faulthandler_timeout=45` exit 0 — **1249 passed, 40 skipped**, 203.26s. Sau collection của suite này, thêm 2 finalize/API test cases; `.venv/bin/pytest tests/test_orchestration/test_resource_admission.py -q --tb=short` exit 0 — **7 passed**. Không có source behavior đổi sau broad suite; không cộng 7 test lặp vào tổng broad.
+- Focused command trước broad: `.venv/bin/pytest tests/test_orchestration/test_resource_admission.py tests/test_orchestration/test_processing_config.py tests/test_orchestration/test_runtime_migrations.py tests/test_orchestration/test_job_progress.py tests/test_api/test_sample_routes.py -q --tb=short` — 31 passed, 4 skipped. Frontend focused: `npm test -- --run tests/studio-resource-wait.test.tsx tests/studio-sample-pipeline.test.tsx tests/studio-demo-replay.test.ts` — 8 passed. Tất cả npm checks chạy tại `frontend/`.
+- Local demo evidence: đọc trực tiếp hai `data/demo/library/{aisle-cw,aisle-cw-quick}/manifest.json` qua `DemoManifest.model_validate_json`: mỗi mẫu normalize 8 stage, 5 succeeded + 3 pending; checksum bytes nguồn trước/sau giữ nguyên. Đây là local bundle adapter proof, không phải browser hoặc producer GPU run mới.
+- Failed attempts increment: fixture Settings admission ban đầu thiếu cặp runtime manifest/config, 5 tests fail; sửa fixture cho đúng Settings invariant rồi focused checks pass. Chạy npm từ root gặp ENOENT package.json; chạy đúng `frontend/` thành công. Không nới validator để làm test xanh.
+- Commits đã có: `08a7d2e` plan, `b0b1424` cleanup, `f49da36` live headroom, `9303c02` telemetry. Hai commit docs `0388019`/`b03a957` xuất hiện từ session khác (thêm rồi bỏ plan trùng); giữ nguyên history, vẫn dùng duy nhất plan này. Không push.
+- Increment commits: `b6436dc` UX decision; `f81bc90` snapshot Maximum; `a3f727c` admission/migration/API; `8606da7` demo backend/export; `956c91d` queue UI; `4917d12` video mẫu upload UI. Evidence được commit riêng sau các nhóm code. Staged diff và ignored `.env`/`.venv` đã kiểm, không stage unrelated changes.
+- Next executable step cho owner/audit: browser interaction QA trên `/new` với hai mẫu local và progress resource-wait, rồi real worker/GPU profiling với structured config. Chỉ mở empirical estimator hoặc cleanup khẩn cấp khi có samples/validation và lease/retention rule; chưa có các proof này trong increment hiện tại.
 
 ---
 
