@@ -787,6 +787,10 @@ def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> Jo
                 "authorized_decision_checksum": decision_checksum,
                 "geometry": profile.model_dump(mode="json"),
             }
+            # Job có gói LiDAR (ADR 0009): bước hoàn tất gắn đám mây LiDAR vào bundle bằng căn chỉnh đã xác nhận.
+            lidar = _lidar_package_ref(registry.get_job(job_id))
+            if lidar is not None:
+                request["lidar_package_ref"] = lidar.model_dump(mode="json")
             request_path = workspace / "finalize.request.json"
             with request_path.open("x", encoding="utf-8") as stream:
                 json.dump(request, stream)
