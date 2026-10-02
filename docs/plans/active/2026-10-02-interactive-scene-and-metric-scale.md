@@ -221,3 +221,28 @@ Owner chốt: chỉ MoGe-2, có tự đề xuất mặt sàn; làm theo bộ ba 
   qua biến; font đồng bộ ở `<body>` và trình xem nhúng. Validation: `npm test` 217 passed, typecheck + lint sạch; Chrome
   headless đo màu/font tính ra của `/` và `/login` ở cả bốn biến thể đúng giá trị đã định, landing giữ bản sáng khi bật
   chế độ tối, không lỗi console. Chưa kiểm bằng mắt từng màn.
+
+### Bổ sung 02/10/2026 (tối) — Gruvbox làm lại, kiểu chữ theo landing, H7
+
+- **Gruvbox làm lại** (owner: bản đầu "chưa đúng"; tham chiếu `private/gruvbox`): hai khối `.theme-gruvbox` trong
+  `frontend/src/app/globals.css` viết lại từ bảng của gruvbox (morhetz) và gruvbox-material (sainnhe) — bậc nền
+  bg_dim/bg0/bg1/bg3/bg4/bg5, viền đặc thay cho viền pha alpha, nền trạng thái `bg_visual_*`, chữ fg1/fg2/fg3. Bản đầu
+  tự đoán các màu nhạt và dùng bg0_hard cho thẻ nên thẻ gần như không tách khỏi nền. Điểm đo trong khung 3D
+  (`splat-inspection.ts`, trước viết cứng) đi qua biến `--studio-marker-*`. Chi tiết vai trò: `STUDIO_UX_SPEC.md` D-17.
+- **Kiểu chữ theo landing** (owner: app chưa dùng chữ như landing): VERIFIED trước khi sửa — landing có 126 chỗ dùng
+  chữ mono, app chỉ có ~40 và `Badge`, tiêu đề cột, nhãn trường đều là sans. Sửa ở mức nền (D-13): `dt`/`th` mono chữ
+  hoa, `dd`/`code`/`time` + utility `value-tech` mono, `Badge` theo thẻ nhãn của landing, nhãn nhóm sidebar/menu mono.
+- Validation: `npm test` 221 passed (thêm test: mọi màu Gruvbox thuộc bảng tham chiếu; quy tắc kiểu chữ có trong CSS),
+  typecheck + lint sạch. Chrome headless trên `/jobs` và `/overview` (dev server đang chạy sẵn ở cổng 3010, chỉ đọc):
+  Gruvbox sáng trang `#fbf1c7` / sidebar `#f2e5bc` / thẻ `#f4e8be` / viền `#ddccab` / chữ `#3c3836`; Gruvbox tối
+  `#282828` / `#1b1b1b` / `#32302f` / `#504945` / `#ebdbb2`; nhãn nhóm và overline là IBM Plex Mono chữ hoa, tiêu đề là
+  Plus Jakarta Sans; không lỗi console. **Chưa kiểm:** bảng có dữ liệu (th/badge/ô số) trên trình duyệt — server đó
+  không có job; nhìn bằng mắt từng màn là việc của owner.
+- **H7 — hàng đợi nhiều người dùng: VALIDATING.** Worker nhận job theo thứ tự xoay vòng theo người yêu cầu (người lâu
+  chưa được phục vụ đi trước; trước đó là `ORDER BY job_id`, tức ngẫu nhiên). API tiến trình trả vị trí trong hàng đợi và
+  thời gian chờ ước tính từ thời lượng đã đo của các lượt chạy trước (không có số đo thì trả null, UI nói rõ). Code:
+  `src/services/orchestration/jobs/queue.py`, `worker_cli.py`, `frontend/.../scene/QueueStatus.tsx`. Validation:
+  `pytest tests/ -q` 1352 passed, 40 skipped; frontend test xanh. Chưa kiểm với hai worker và nhiều người dùng thật.
+- **Video demo TorWIC:** `scripts/demo/make_torwic_demo_videos.py` ghép mỗi traversal thành ba video (camera trái, phải,
+  ghép hai camera) kèm `manifest.json`; đang chạy trên ổ ngoài (`/media/usb/AI20K/P-087 demo videos/`), kết quả ghi sau
+  khi chạy xong. Video ghép hai camera chỉ để xem demo — pipeline COLMAP không có chế độ hai camera (owner cấm).
