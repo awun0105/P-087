@@ -219,3 +219,48 @@ def test_held_out_quality_reports_scores_or_the_reason_it_is_missing() -> None:
     )
     assert with_lpips[2].value == pytest.approx(0.265, abs=1e-3)
     assert "VGG" in with_lpips[2].display
+
+
+def test_reference_group_appears_only_after_an_evaluator_recorded_results(tmp_path: Path) -> None:
+    import json
+
+    from eval.reference.torwic import base_record, write_record
+
+    registry = ProjectRegistry(runtime_root=tmp_path / "artifacts")
+    registry.seed_from_fixtures()
+    job = registry.create_job(SimpleNamespace(project_id="project-fixture-001", scene_revision="rev-001"))
+    assert "reference" not in [group.group_id for group in evaluate_job(registry, job.job_id, _GEOMETRY).groups]
+
+    traversal = Path("Aisle_CW")
+    pose = base_record("recon_pose", "unit-test", job.job_id, traversal, 0) | {
+        "job_used_this_trajectory": True,
+        "registered_frames": 40,
+        "path_length_m": 12.5,
+        "ate_similarity_m": {"rmse": 0.5},
+        "rpe_translation_m": {"p50": 0.02},
+        "rpe_rotation_deg": {"p50": 0.4},
+    }
+    write_record(registry, pose, tmp_path / "results" / "recon_pose" / "unit-test.jsonl")
+    # Lượt chấm sau thay lượt trước trong bảng; bản ghi cũ vẫn còn nguyên.
+    second = write_record(registry, pose | {"ate_similarity_m": {"rmse": 0.081}}, None)
+    assert second.artifact_uri.endswith("/benchmark/recon_pose/attempt-2.json")
+    scale = base_record("metric_scale", "unit-test", job.job_id, traversal, 0)
+    write_record(registry, scale | {"job_used_this_trajectory": False, "scale_error_percent": -1.25}, None)
+
+    group = next(g for g in evaluate_job(registry, job.job_id, _GEOMETRY).groups if g.group_id == "reference")
+    values = _values(group.metrics)
+    assert group.status == "measured" and "ground truth" in (group.note or "")
+    assert values["reference.ate"] == 8.1 and values["reference.scale_error"] == -1.25
+    assert {metric.source for metric in group.metrics} == {"reference"}
+    assert "reference.surface_accuracy" not in values
+    ate = next(metric for metric in group.metrics if metric.key == "reference.ate")
+    assert "không phải độ chính xác độc lập" in ate.meaning
+    lines = (tmp_path / "results" / "recon_pose" / "unit-test.jsonl").read_text().splitlines()
+    assert len(lines) == 1 and json.loads(lines[0])["assistance"] == "evaluation_only_ground_truth"
+
+
+def test_reference_label_must_follow_the_benchmark_naming_rule() -> None:
+    from eval.reference.torwic import base_record
+
+    with pytest.raises(ValueError, match="nhãn"):
+        base_record("recon_pose", "Nhãn Sai", "job-x", Path("Aisle_CW"), 0)

@@ -16,9 +16,9 @@ không điền ước đoán như kết quả.
 |---|---|---|---|---|---|
 | `pipeline_runtime` | Thời gian, chi phí xử lý một job | giây từng stage, tổng giây, kích thước input/SOG, GPU, $ ước tính | Product runtime (journal job) | `src/services/orchestration/benchmark.py` | **Có** — worker tự ghi |
 | `recon_visual_quality` | Chất lượng ảnh render 3DGS | PSNR, SSIM, LPIPS-VGG trên mỗi ảnh thứ 8 của chính video (7k…30k bước) | Ảnh của job (video chỉ train split) | `eval/visual/brush_quality.py` | **Có** — chạy tay |
-| `recon_pose` | Độ chính xác quỹ đạo camera | ATE/RPE so với `traj_gt` | Evaluation-only GT | `eval/pose/` | Chưa |
-| `recon_geometry` | Độ chính xác hình học | Chamfer, F-score so với GT `.ply` | Evaluation-only GT | `eval/geometry/` | Chưa |
-| `metric_scale` | Sai số tỉ lệ mét | sai số scale %, sai số khoảng cách A/B (m) | So với LiDAR/GT (ADR 0001) | `eval/geometry/` | Chưa |
+| `recon_pose` | Độ chính xác quỹ đạo camera | ATE/RPE so với `traj_gt` | Evaluation-only GT | `eval/pose/trajectory_error.py` | **Có** — chạy tay, ghi theo job |
+| `recon_geometry` | Độ chính xác hình học | Chamfer, F-score so với GT `.ply` | Evaluation-only GT | `eval/geometry/surface_error.py` | **Có** — chạy tay, ghi theo job |
+| `metric_scale` | Sai số tỉ lệ mét | sai số scale %, sai số khoảng cách A/B (m) | So với LiDAR/GT (ADR 0001) | `eval/pose/trajectory_error.py` | **Có** (sai số tỉ lệ từ quỹ đạo); sai số khoảng cách A/B chưa |
 | `browser_render` | Trình duyệt có mượt không | thời gian tải scene, FPS theo LOD/thiết bị | Client gửi lên | `eval/visual/` | Chưa (cần LOD) |
 | `workflow_time` | SM-06: thời gian thao tác tay vs dùng công cụ | phút hands-on, số bước thủ công | Đo tay | `eval/protocols/` | Chưa |
 | `metric_click_error` | REC-06: `e` = sai số một lần click trên 3DGS | khoảng cách bề mặt 3DGS→LiDAR (vùng LiDAR phủ), lệch k px quy ra mét | Căn chỉnh quỹ đạo GT-assisted (chỉ dataset demo) | `eval/geometry/click_error.py` | **Có** — chạy tay |
@@ -38,3 +38,9 @@ artifact của job, không dùng GT, nên có cho cả dữ liệu người dùn
 Một chỉ số dùng chung phép đo với benchmark: "vị trí camera đã đi qua bị mesh chặn" là phép kiểm của
 `collision_path_clearance` áp lên mesh đã publish của job. Đối chiếu ngày 02/10/2026 trên `job-ac2bfd924cc6`: bảng tự
 kiểm cho 33/50 vị trí, 224.745 tam giác — trùng dòng 0,05 m của `eval/results/collision_path_clearance/`.
+
+## Khối "So với dữ liệu đối chứng" trong Studio
+
+Evaluator `recon_pose`, `metric_scale`, `recon_geometry` ghi bản ghi theo job; bảng đánh giá của scene đọc lượt mới
+nhất của từng mã và hiện thành khối riêng, tách khỏi chỉ số tự kiểm. Scene không có bản ghi (mọi scene của người dùng)
+không có khối này. Giao thức: `eval/protocols/reference_torwic.md`.

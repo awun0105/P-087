@@ -15,6 +15,8 @@ def _group_lines(group: StageEvaluation) -> list[str]:
     lines = [f"## {group.title}", ""]
     if group.status != "measured":
         return [*lines, f"_{_STATUS[group.status]}._ {group.note or ''}".strip(), ""]
+    if group.note:
+        lines += [f"_{group.note}_", ""]
     lines += ["| Chỉ số | Giá trị | Kết luận | Ý nghĩa |", "|---|---|---|---|"]
     for metric in group.metrics:
         verdict = _VERDICT[metric.verdict] if metric.verdict else "—"
@@ -34,8 +36,9 @@ def evaluation_markdown(evaluation: JobEvaluation) -> str:
         f"- Job: `{evaluation.job_id}` · trạng thái {evaluation.job_status}"
         + (f" · revision `{evaluation.scene_revision}`" if evaluation.scene_revision else ""),
         f"- Tạo lúc: {evaluation.generated_at:%Y-%m-%d %H:%M} UTC",
-        "- Phạm vi: chỉ số tự kiểm, đo từ chính dữ liệu của scene (không so với ground truth). Kết luận chỉ có ở "
-        "chỉ số đã có ngưỡng trong cấu hình hoặc tài liệu của dự án; ô “—” nghĩa là chưa có ngưỡng.",
+        "- Phạm vi: chỉ số tự kiểm, đo từ chính dữ liệu của scene (không so với ground truth). Riêng mục “So với dữ "
+        "liệu đối chứng” (nếu có) so với ground truth của dataset. Kết luận chỉ có ở chỉ số đã có ngưỡng trong cấu "
+        "hình hoặc tài liệu của dự án; ô “—” nghĩa là chưa có ngưỡng.",
         "",
     ]
     for group in evaluation.groups:

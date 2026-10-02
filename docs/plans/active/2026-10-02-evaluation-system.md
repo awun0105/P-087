@@ -35,7 +35,7 @@ không ước lượng; nhãn đạt/không đạt chỉ gán khi ngưỡng đã
   scene (luồng điểm mẫu), không phải số đo độc lập, nên phép kiểm này chưa kiểm được gì ở hai scene đó.
 - Lần gọi đầu cho scene có mesh mất khoảng 2–5 giây (đọc GLB); các lần sau lấy từ bộ nhớ đệm.
 
-## Pha 2 — Đối chứng trên TorWIC (CHƯA LÀM)
+## Pha 2 — Đối chứng trên TorWIC (mục 1, 2, 3, 5 XONG 03/10/2026; mục 4 chưa)
 
 1. `recon_pose`: ATE/RPE so với `traj_gt.txt`.
 2. `recon_geometry`: Chamfer, Precision/Recall/F-score 5 cm và 10 cm so với `groundtruth_map.ply`.
@@ -51,9 +51,20 @@ không ước lượng; nhãn đạt/không đạt chỉ gán khi ngưỡng đã
   cảnh báo cho các chỉ số hiện chưa có ngưỡng.
 - Ghi `eval/results/report.md` từ các bản ghi.
 
+### Pha 2 — đã làm (03/10/2026)
+
+- `eval/reference/torwic.py` (pose ground truth, ghi bản ghi theo job), `eval/pose/trajectory_error.py`
+  (`recon_pose` + `metric_scale`), `eval/geometry/surface_error.py` (`recon_geometry`); giao thức
+  `eval/protocols/reference_torwic.md`.
+- Bảng đánh giá: khối "So với dữ liệu đối chứng" (chỉ khi job có bản ghi); nhóm "Tỉ lệ mét" của job LiDAR hiện độ
+  lệch pose ↔ quỹ đạo thay cho phép kiểm C–D (C–D của luồng này sinh từ chính căn chỉnh nên không độc lập).
+- VERIFIED trên `job-101e9b56344c`: số ở `eval/results/{recon_pose,metric_scale,recon_geometry}/`.
+- Chưa làm: sai số khoảng cách A–B/C–D so với LiDAR, đối chứng tách vật thể (mục 4), chấm các job chỉ có video.
+
 ## Next step
 
-Pha 2 mục 1–2, dùng dữ liệu đã có trên ổ ngoài (`/media/usb/AI20K/TorWIC SLAM Dataset`).
+Chấm lại trên các lượt chạy đủ bước ở máy thuê GPU (cả job chỉ có video lẫn job có LiDAR của cùng đoạn) để có số độc
+lập; rồi mới xét ngưỡng cảnh báo (pha 3).
 
 ## Decision (owner, 02/10/2026): để dành ảnh cho PSNR/SSIM/LPIPS
 
