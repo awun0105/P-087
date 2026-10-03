@@ -1828,27 +1828,29 @@ Và nguyên tắc methodology quan trọng nhất là:
 
 Để phục vụ thử nghiệm các luồng (Video-Only vs. Video + LiDAR), dữ liệu gốc từ TorWIC-SLAM được tổ chức tập trung vào một thư mục chuẩn `/media/usb/AI20K/TorWIC_Raw_Scenes/`, phân tách rõ ràng theo 5 kịch bản độc lập. Dữ liệu trong thư mục này là **dữ liệu thô nguyên bản chưa qua xử lý** (unprocessed raw sensor data).
 
-### 31.1 Cấu trúc chuẩn của mỗi kịch bản
+### 31.1 Cấu trúc chuẩn của mỗi kịch bản (gồm đầy đủ 3 góc quay video + cảm biến thô)
 ```text
 TorWIC_Raw_Scenes/
 ├── <Kịch bản>/
-│   ├── video.mp4          # Video RGB camera trái (chuẩn hóa MP4, 30 FPS, đúng số frame gốc)
-│   ├── traj_gt.txt        # Quỹ đạo thực tế robot (Ground Truth Trajectory từ TorWIC)
-│   ├── frame_times.txt    # Mốc thời gian từng khung hình camera (đồng bộ 1-1 với scan)
-│   ├── calibrations.txt   # Ma trận hiệu chuẩn camera & LiDAR (T_cam_os, T_os_cam)
-│   ├── lidar_scans/       # Thư mục chứa các file scan .pcd thô chưa đăng ký (unregistered)
-│   └── metadata.json      # Thông số kỹ thuật (số frame, độ dài giây, số scan LiDAR)
+│   ├── video.mp4 / video_left.mp4  # Video RGB camera trái (chuẩn hóa MP4, 30 FPS, đúng số frame gốc)
+│   ├── video_right.mp4             # Video RGB camera phải
+│   ├── video_stereo.mp4            # Video ghép đôi stereo cả hai camera
+│   ├── traj_gt.txt                 # Quỹ đạo thực tế robot (Ground Truth Trajectory từ TorWIC)
+│   ├── frame_times.txt             # Mốc thời gian từng khung hình camera (đồng bộ 1-1 với scan)
+│   ├── calibrations.txt            # Ma trận hiệu chuẩn camera & LiDAR (T_cam_os, T_os_cam)
+│   ├── lidar_scans/                # Thư mục chứa các file scan .pcd thô chưa đăng ký (unregistered)
+│   └── metadata.json               # Thông số kỹ thuật (số frame, độ dài giây, số scan LiDAR)
 ```
 
-### 31.2 Danh mục 5 kịch bản thô
-1. **`01_LoiDi_Kho_Thuan_Aisle_CW`**: Lối đi kho (chiều thuận), 1.092 frames (~36.4s), 1.092 scans LiDAR.
-2. **`02_HanhLang_Thang_Hallway_Straight_CW`**: Hành lang thẳng khu văn phòng, 1.810 frames (~60.3s), 1.810 scans LiDAR.
-3. **`03_LoiDi_Kho_Nguoc_Aisle_CCW`**: Lối đi kho (ngược chiều), 915 frames (~30.5s), 915 scans LiDAR.
-4. **`04_HanhLang_ToanKhu_Hallway_Full_CW`**: Hành lang toàn khu văn phòng (vòng lặp kín), 2.318 frames (~77.3s), 2.318 scans LiDAR.
-5. **`05_LoiDi_Kho_Dot2_Aisle_CW_Run1`**: Lối đi kho đợt quay 2 (2022-06-15), 1.114 frames (~37.1s), 1.114 scans LiDAR.
+### 31.2 Danh mục 5 kịch bản thô (Tổng cộng 15 video)
+1. **`01_LoiDi_Kho_Thuan_Aisle_CW`**: Lối đi kho (chiều thuận), 1.092 frames (~36.4s), 1.092 scans LiDAR — 3 video (left, right, stereo).
+2. **`02_HanhLang_Thang_Hallway_Straight_CW`**: Hành lang thẳng khu văn phòng, 1.810 frames (~60.3s), 1.810 scans LiDAR — 3 video (left, right, stereo).
+3. **`03_LoiDi_Kho_Nguoc_Aisle_CCW`**: Lối đi kho (ngược chiều), 915 frames (~30.5s), 915 scans LiDAR — 3 video (left, right, stereo).
+4. **`04_HanhLang_ToanKhu_Hallway_Full_CW`**: Hành lang toàn khu văn phòng (vòng lặp kín), 2.318 frames (~77.3s), 2.318 scans LiDAR — 3 video (left, right, stereo).
+5. **`05_LoiDi_Kho_Dot2_Aisle_CW_Run1`**: Lối đi kho đợt quay 2 (2022-06-15), 1.114 frames (~37.1s), 1.114 scans LiDAR — 3 video (left, right, stereo).
 
 ### 31.3 Công cụ tổ chức
-Script thực thi: `python -m scripts.demo.organize_raw_dataset`. Script tự động đọc metadata, tạo hardlink video và text annotations để không tốn dung lượng ổ đĩa, liên kết symlink tới kho scan `.pcd` và phát sinh `manifest.json`.
+Script thực thi: `python -m scripts.demo.organize_raw_dataset`. Script tự động đọc metadata, tạo hardlink cho cả 15 video (left, right, stereo) và text annotations để không tốn dung lượng ổ đĩa, liên kết symlink tới kho scan `.pcd` và phát sinh `manifest.json`.
 
 ---
 
