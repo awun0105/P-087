@@ -226,6 +226,40 @@ def run(args: argparse.Namespace) -> int:
                     confirm_metric(api, job_id, metric)
                     confirmed.append(job_id)
             paused.update(wait_for_pause(stack, confirmed))
+        elif getattr(args, "auto_confirm_proposal", False):
+            confirmed = []
+            for job_id in job_ids:
+                if paused[job_id]["status"] == "RUNNING":
+                    try:
+                        proposal = api.call("GET", f"/api/v1/jobs/{job_id}/metric/proposal")
+                        if proposal and proposal.get("segments") and proposal.get("floor"):
+                            seg = proposal["segments"]
+                            flr = proposal["floor"]
+                            source = (
+                                "lidar_trajectory"
+                                if proposal.get("method") == "lidar_trajectory_alignment"
+                                else "ai_estimated"
+                            )
+                            metric_input = {
+                                "point_a": seg["point_a"],
+                                "point_b": seg["point_b"],
+                                "distance_m": seg["distance_m"],
+                                "check_a": seg["check_a"],
+                                "check_b": seg["check_b"],
+                                "check_distance_m": seg["check_distance_m"],
+                                "distance_source": source,
+                                "floor_points": flr["points"],
+                            }
+                            print(
+                                f"[{job_id}] Tự động xác nhận hệ mét từ đề xuất ({source}, "
+                                f"scale={proposal['scale_m_per_sfm_unit']:.4f})..."
+                            )
+                            confirm_metric(api, job_id, metric_input)
+                            confirmed.append(job_id)
+                    except Exception as err:
+                        print(f"[{job_id}] Không thể tự động xác nhận đề xuất hệ mét: {err}")
+            if confirmed:
+                paused.update(wait_for_pause(stack, confirmed))
         for job_id in job_ids:
             progress = paused[job_id]
             if progress["status"] == "SUCCEEDED":
@@ -266,6 +300,11 @@ def main(argv: list[str] | None = None) -> int:
         nargs="*",
         default=[],
         help="JSON UserMetricInput, một file cho mỗi job theo thứ tự",
+    )
+    parser.add_argument(
+        "--auto-confirm-proposal",
+        action="store_true",
+        help="Tự động xác nhận đề xuất hệ mét (AI Auto-Scale MoGe hoặc LiDAR) khi có",
     )
     parser.add_argument("--workers", default="auto", help="tổng số worker, hoặc `auto` theo VRAM trống từng GPU")
     parser.add_argument("--out", type=Path, required=True, help="thư mục chứa gói xuất ra và log")

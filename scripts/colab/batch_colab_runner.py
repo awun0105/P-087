@@ -109,6 +109,7 @@ cd /content/app && set -a && source /content/r2s/colab.env && set +a
   --video "{remote_video}" \\
   --name "{job_name}" \\
   --attestation /content/app/scripts/colab/attestation.json \\
+  --auto-confirm-proposal \\
   --out /content/bundles \\
   --port 8000
 '''
