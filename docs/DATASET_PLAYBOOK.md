@@ -1824,6 +1824,32 @@ Và nguyên tắc methodology quan trọng nhất là:
 
 > **Ground truth chỉ được dùng để đánh giá hoặc cho preprocessing đã được khai báo rõ; không được vô tình đưa ground truth vào prediction pipeline rồi dùng lại chính ground truth đó để claim independent benchmark.**
 
+# 31. Tổ chức dữ liệu thô phục vụ Studio Demo và Benchmarking (`TorWIC_Raw_Scenes`)
+
+Để phục vụ thử nghiệm các luồng (Video-Only vs. Video + LiDAR), dữ liệu gốc từ TorWIC-SLAM được tổ chức tập trung vào một thư mục chuẩn `/media/usb/AI20K/TorWIC_Raw_Scenes/`, phân tách rõ ràng theo 5 kịch bản độc lập. Dữ liệu trong thư mục này là **dữ liệu thô nguyên bản chưa qua xử lý** (unprocessed raw sensor data).
+
+### 31.1 Cấu trúc chuẩn của mỗi kịch bản
+```text
+TorWIC_Raw_Scenes/
+├── <Kịch bản>/
+│   ├── video.mp4          # Video RGB camera trái (chuẩn hóa MP4, 30 FPS, đúng số frame gốc)
+│   ├── traj_gt.txt        # Quỹ đạo thực tế robot (Ground Truth Trajectory từ TorWIC)
+│   ├── frame_times.txt    # Mốc thời gian từng khung hình camera (đồng bộ 1-1 với scan)
+│   ├── calibrations.txt   # Ma trận hiệu chuẩn camera & LiDAR (T_cam_os, T_os_cam)
+│   ├── lidar_scans/       # Thư mục chứa các file scan .pcd thô chưa đăng ký (unregistered)
+│   └── metadata.json      # Thông số kỹ thuật (số frame, độ dài giây, số scan LiDAR)
+```
+
+### 31.2 Danh mục 5 kịch bản thô
+1. **`01_LoiDi_Kho_Thuan_Aisle_CW`**: Lối đi kho (chiều thuận), 1.092 frames (~36.4s), 1.092 scans LiDAR.
+2. **`02_HanhLang_Thang_Hallway_Straight_CW`**: Hành lang thẳng khu văn phòng, 1.810 frames (~60.3s), 1.810 scans LiDAR.
+3. **`03_LoiDi_Kho_Nguoc_Aisle_CCW`**: Lối đi kho (ngược chiều), 915 frames (~30.5s), 915 scans LiDAR.
+4. **`04_HanhLang_ToanKhu_Hallway_Full_CW`**: Hành lang toàn khu văn phòng (vòng lặp kín), 2.318 frames (~77.3s), 2.318 scans LiDAR.
+5. **`05_LoiDi_Kho_Dot2_Aisle_CW_Run1`**: Lối đi kho đợt quay 2 (2022-06-15), 1.114 frames (~37.1s), 1.114 scans LiDAR.
+
+### 31.3 Công cụ tổ chức
+Script thực thi: `python -m scripts.demo.organize_raw_dataset`. Script tự động đọc metadata, tạo hardlink video và text annotations để không tốn dung lượng ổ đĩa, liên kết symlink tới kho scan `.pcd` và phát sinh `manifest.json`.
+
 ---
 
 ## Official links — quick access
@@ -1834,3 +1860,4 @@ Và nguyên tắc methodology quan trọng nhất là:
 - POV-SLAM RSS 2023: https://roboticsproceedings.org/rss19/p069.html
 - POV-SLAM arXiv: https://arxiv.org/abs/2307.00488
 - DOI: https://doi.org/10.15607/RSS.2023.XIX.069
+
