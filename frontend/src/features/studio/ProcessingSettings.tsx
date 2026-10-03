@@ -221,7 +221,17 @@ function MachinePanel({
                     style={{ transform: `scaleX(${ratio})` }}
                   />
                 </div>
-                {item.status === "danger" && <p className="mt-1 text-xs text-rust">{item.message}</p>}
+                {item.status === "danger" && (
+                  <div className="mt-1 space-y-1">
+                    <p className="text-xs text-rust">{item.message}</p>
+                    {item.resource === "vram" && (
+                      <p className="text-xs font-medium text-ember-strong flex items-center gap-1">
+                        <Sparkles className="size-3 shrink-0" aria-hidden />
+                        Đề xuất: Chuyển sang Colab GPU (Tesla T4 15GB)
+                      </p>
+                    )}
+                  </div>
+                )}
               </li>
             );
           })}

@@ -596,6 +596,7 @@ Research ở đây là **đọc source + phân tích ảnh được cung cấp**
 ### P3 — Setup ít bước, chi tiết mở khi cần
 
 **Finding — VERIFIED:** NewSceneFlow tách upload/chọn file; form có attestation và ProcessingSettings khá nhiều tham số. **Decision: ADAPT.** Hai chặng tương tác “Nguồn dữ liệu” và “Thiết lập & bắt đầu”; summary trước xử lý, advanced settings có thể mở thêm. **Lý do — INFERENCE:** giảm việc người mới phải hiểu mọi tham số trước job đầu tiên. **Evidence:** [NewSceneFlow][r-new], [ProcessingSettings][r-settings]. Đây là đề xuất của tài liệu, không được quy cho Mobbin.
+*Cập nhật 03/10/2026 (Smart Cloud Routing):* Khi tài nguyên VRAM ước tính vượt quá khả năng của GPU cục bộ (nguy cơ crash 95%), thay vì khóa cứng nút bấm hoặc ép người dùng tự động hạ chất lượng mô hình, giao diện hiển thị thẻ đề xuất định tuyến thông minh: cho phép người dùng bấm chuyển quyền xử lý sang máy ảo Colab GPU (Tesla T4 15GB) đã kết nối sẵn để giữ nguyên chất lượng 3DGS cao nhất.
 
 ### P4 — Phân biệt đang chạy với chờ người dùng
 
