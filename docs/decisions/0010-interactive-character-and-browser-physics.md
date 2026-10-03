@@ -8,8 +8,8 @@ Date: 2026-10-03
   kết quả research ở mục Context cho thấy giấy phép không cho dùng trên web, nên dùng nhân vật CC0 thay thế (mục
   Decision 1). Owner xác nhận lại khi đọc ADR này.
 - **Mục 2 (vật lý): Accepted** — owner chốt ngày 03/10/2026 "ok hãy làm như bạn suggest": ammo.js cho H5.
-- **Mục 3 (asset preview của danh mục Isaac): Proposed, bước 1 đã làm** (03/10/2026) — owner hỏi "nên giải quyết thế
-  nào"; Claude đề xuất và làm bước 1 (đảo lại được bằng một biến cấu hình), bước 2 chờ owner đồng ý.
+- **Mục 3 (asset preview của danh mục Isaac): Accepted** (03/10/2026) — owner chốt: thay luôn bằng mô hình CC0 "nhưng
+  vẫn cần đảm bảo mapping đúng với asset của NVIDIA vì cần export usd thì sẽ export bằng asset của NVIDIA".
 
 Liên quan: kế hoạch `docs/plans/active/2026-10-02-interactive-scene-and-metric-scale.md` (H4, H5).
 
@@ -57,8 +57,14 @@ gsplat, script (VERIFIED trong `dist/viewer.js`); không có `anim`, `collision`
    - **Bước 1 (đã làm):** `PRODUCT_ISAAC_ASSET_PREVIEWS` (mặc định: bật ở development/test, tắt ở staging/production).
      Khi tắt, danh mục báo `has_preview=false` và route `/scene/catalog/{family}/preview.glb` trả 404, nên Studio vẽ hộp
      đúng kích thước — kể cả khi gói dữ liệu của deployment có kèm `data/asset_previews`.
-   - **Bước 2 (đề xuất):** bản xem trước CC0 cho các loại vật hay dùng (pallet, thùng carton), ghi nguồn ở
-     `THIRD_PARTY_NOTICES.md`; hình trên web khi đó khác asset Isaac trong gói xuất.
+   - **Bước 2 (đã làm):** cả 34 họ asset đặt được có hình xem trước không thuộc NVIDIA ở
+     `configs/product/catalog_previews/` (472 KB, commit trong repo): 7 nhãn dùng mô hình CC0 (pallet, thùng carton,
+     phuy, cọc giao thông, xô, chai, thùng nhựa — nguồn và sha256 ở `configs/product/catalog_previews_cc0.json` và
+     `THIRD_PARTY_NOTICES.md`), các nhãn còn lại (bình chữa cháy, xe đẩy, dầm, cột, giá kệ) dựng bằng hình khối.
+     Mỗi hình co giãn theo từng trục về đúng `size_xyz_m` của họ asset (sai lệch < 2 mm, có test) — cùng hộp collider
+     mà SceneIR lưu — nên vị trí, kích thước và vật lý trên web khớp với asset NVIDIA mà gói xuất dùng. Mapping họ asset
+     → USD của NVIDIA trong `object_catalog_v1.json` không đổi. API phục vụ bản CC0 trước ở mọi môi trường; bản chuyển
+     từ asset Isaac chỉ dùng khi không có bản CC0 và deployment cho phép.
    - Hỏi NVIDIA xin phép dùng bản chuyển đổi trên web: làm song song nếu muốn, không chặn deploy.
 
 ## Consequences

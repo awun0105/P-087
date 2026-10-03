@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     #: tạo bản chuyển đổi (ADR 0010 mục 3), nên mặc định chỉ bật ở development/test; None = theo APP_ENV. Gói xuất cho
     #: Isaac Sim không bị ảnh hưởng (chỉ trỏ tới asset gốc).
     product_isaac_asset_previews: bool | None = None
+    #: Hình xem trước CC0/tự dựng của danh mục (scripts/scene/build_cc0_previews.py), commit trong repo; được ưu tiên
+    #: hơn bản chuyển từ asset Isaac và dùng được ở mọi môi trường.
+    product_catalog_preview_dir: Path = Path("configs/product/catalog_previews")
     #: Bản ghi Rerun của quá trình train 3DGS (`<job_id>.rrd`, sinh bằng eval/visual/brush_quality.py --rerun-save).
     #: Là dữ liệu soi/đánh giá tuỳ chọn, không phải artifact của pipeline; thiếu thì Studio không hiện chế độ xem này.
     product_rerun_recording_dir: Path = Path("./data/rerun_recordings")

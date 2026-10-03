@@ -1,0 +1,342 @@
+{
+  "SM_BarelPlastic_A": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/MraIiFnpAY",
+    "size_xyz_m": [
+      0.6,
+      0.7081,
+      0.9014
+    ],
+    "sha256": "ed701e8a25106d6b0f1277f8723a9be5e2cf0ac03df26639efcbf74ba25aff69"
+  },
+  "SM_BarelPlastic_B": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/MraIiFnpAY",
+    "size_xyz_m": [
+      0.6,
+      0.7081,
+      0.5882
+    ],
+    "sha256": "389161ff28d3a7264f7398719b5b0407591670d97ed8db8a19872f2bb30096e8"
+  },
+  "SM_BarelPlastic_C": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/MraIiFnpAY",
+    "size_xyz_m": [
+      0.4213,
+      0.4213,
+      0.5118
+    ],
+    "sha256": "dfa7fd75661a46ba43d51f798f416744fa06f36462b05458edcc689d986e1c07"
+  },
+  "SM_BarelPlastic_D": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/MraIiFnpAY",
+    "size_xyz_m": [
+      0.2939,
+      0.2939,
+      0.2447
+    ],
+    "sha256": "d5c6aafde657d63ec2b41b40c5c60b22840ab90e3a2faae8d1e68fc61224367e"
+  },
+  "SM_BottlePlasticA": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/KpxDpidn1Z",
+    "size_xyz_m": [
+      0.1442,
+      0.1849,
+      0.3507
+    ],
+    "sha256": "7fb96a2007737c00102c72229e709ac9026a6ec839855f2a7c580a3d9b0b2af0"
+  },
+  "SM_BottlePlasticB": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/KpxDpidn1Z",
+    "size_xyz_m": [
+      0.0973,
+      0.0973,
+      0.2013
+    ],
+    "sha256": "7294735e3a8f19c58edf28108f98d74e1854b31f614ba6fc6e8851fa1d084f42"
+  },
+  "SM_BottlePlasticC": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/KpxDpidn1Z",
+    "size_xyz_m": [
+      0.0973,
+      0.0973,
+      0.2713
+    ],
+    "sha256": "e27fce0bda6450504c652d96b729c585c22c10ffe9ea2e516b7777c8bd10da4d"
+  },
+  "SM_BottlePlasticD": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/KpxDpidn1Z",
+    "size_xyz_m": [
+      0.0608,
+      0.1334,
+      0.2833
+    ],
+    "sha256": "9f2539bd6f23a65f217838f1c369514ebf17cb5ce1bfab2721f52f6fd08f4869"
+  },
+  "SM_BottlePlasticE": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/KpxDpidn1Z",
+    "size_xyz_m": [
+      0.1521,
+      0.1346,
+      0.2759
+    ],
+    "sha256": "d17c1c792b805d37393063364f8353c9adf7fb8b35cc4b4a728b62777cbd51db"
+  },
+  "SM_BracketBeam": {
+    "kind": "procedural",
+    "source": "beam",
+    "size_xyz_m": [
+      2.0,
+      0.0759,
+      0.0657
+    ],
+    "sha256": "584a960d82e8062ef2f9d6cc4e7c8a6978ecc2d28309d54f50eb85f1e1145d32"
+  },
+  "SM_BracketBeam_3m": {
+    "kind": "procedural",
+    "source": "beam",
+    "size_xyz_m": [
+      3.0,
+      0.0759,
+      0.0657
+    ],
+    "sha256": "1d7c79279116d3ef76336d616274a999c9facd7734896455ed86b00bf2e6efe2"
+  },
+  "SM_BracketSlot": {
+    "kind": "procedural",
+    "source": "box",
+    "size_xyz_m": [
+      0.43,
+      0.2349,
+      0.2315
+    ],
+    "sha256": "d7d9395bbbad7b1e10348aaeb7bf8977e8f5d8f04993678b4f5126ac47114e49"
+  },
+  "SM_BucketPlastic_B": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/83obI9bNun",
+    "size_xyz_m": [
+      0.6105,
+      0.7261,
+      0.6205
+    ],
+    "sha256": "e633bbeec1116a147cb4d38992ba8cc545e77a01998db096833c468d80af216e"
+  },
+  "SM_CardBoxA": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/HvjissDrdr",
+    "size_xyz_m": [
+      0.7,
+      0.5,
+      0.5
+    ],
+    "sha256": "c2a7c15fbd4e66fcdd84ed54b12b79e229d44abee948bd549aa31de17012d92c"
+  },
+  "SM_CardBoxB": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/HvjissDrdr",
+    "size_xyz_m": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "sha256": "9fd36a3b8aa8c3ddf4cd1f970e4e82f4ea9e61e0eac37ea1e87a384f61fc8a6b"
+  },
+  "SM_CardBoxC": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/HvjissDrdr",
+    "size_xyz_m": [
+      0.5,
+      0.5,
+      0.25
+    ],
+    "sha256": "475f05b3c8ce7822822e85b2bd88282f54931ceb8a0ae51937ccea51ceb50ded"
+  },
+  "SM_CardBoxD": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/HvjissDrdr",
+    "size_xyz_m": [
+      0.38,
+      0.25,
+      0.1487
+    ],
+    "sha256": "019ba56efa7ab2dae3a6051222876d52b1cce1579c4989b806be2eee1dc5ab62"
+  },
+  "SM_CratePlasticNote_A": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/CnMGEDwg8s",
+    "size_xyz_m": [
+      0.6164,
+      0.5019,
+      0.4354
+    ],
+    "sha256": "6c8cfe2298fecce5794df57f965e627c3938a3d7cf3d8458818eb463344348f2"
+  },
+  "SM_CratePlasticNote_B": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/CnMGEDwg8s",
+    "size_xyz_m": [
+      0.2501,
+      0.2982,
+      0.1363
+    ],
+    "sha256": "df9ca2ff3c8dd95941bdd744f192bbed7c74399d60ba325257b45c3a4427c2e7"
+  },
+  "SM_CratePlastic_A": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/CnMGEDwg8s",
+    "size_xyz_m": [
+      0.6164,
+      0.4994,
+      0.4354
+    ],
+    "sha256": "43f00bbf5e8c95b6f6042dbaf0b8f793e3059d7b8a9ff7e988543efe2fc4bdfe"
+  },
+  "SM_CratePlastic_B": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/CnMGEDwg8s",
+    "size_xyz_m": [
+      0.4368,
+      0.5299,
+      0.2815
+    ],
+    "sha256": "b7d0efe0358650d2886a821df2289e9c683c8aeb2230bcb371138fecf1750973"
+  },
+  "SM_CratePlastic_C": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/CnMGEDwg8s",
+    "size_xyz_m": [
+      0.5043,
+      0.767,
+      0.3379
+    ],
+    "sha256": "d53f955cb1bc7874890d864584f239e4aa84b041b45ca2cc0a964b7de8dac42f"
+  },
+  "SM_CratePlastic_D": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/CnMGEDwg8s",
+    "size_xyz_m": [
+      0.4495,
+      0.6621,
+      0.1881
+    ],
+    "sha256": "6197fe7468e0cd6d2a6a27072e6bf71976120b69ecbc7331441f547cb2bedf1e"
+  },
+  "SM_CratePlastic_E": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/CnMGEDwg8s",
+    "size_xyz_m": [
+      0.3919,
+      0.5748,
+      0.384
+    ],
+    "sha256": "8d15ac7c7c50061815b6b8df8361571110d6da1867ff66debf60c5c09d8b334d"
+  },
+  "SM_FireExtinguisher": {
+    "kind": "procedural",
+    "source": "fire_extinguisher",
+    "size_xyz_m": [
+      0.1828,
+      0.2958,
+      0.6736
+    ],
+    "sha256": "3bd7b23b4fe2dfbf02823a7a426a70110ea81e5137109746c2139d3b4051bb10"
+  },
+  "SM_PaletteA": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/cUAsYHDqfD",
+    "size_xyz_m": [
+      1.2132,
+      1.0029,
+      0.2111
+    ],
+    "sha256": "db02ab72725fac692f2a628db16f5e9b35cf691f85dac867c8b273b09c247e50"
+  },
+  "SM_PillarA_9M": {
+    "kind": "procedural",
+    "source": "column",
+    "size_xyz_m": [
+      0.4,
+      0.4,
+      9.0
+    ],
+    "sha256": "1cc0991c5bad984caad8ae4b54b2d75db3cc4df0b6ff8c8044c7fbf84bab9831"
+  },
+  "SM_PillarPartA_9M": {
+    "kind": "procedural",
+    "source": "column",
+    "size_xyz_m": [
+      9.1,
+      0.5479,
+      9.0
+    ],
+    "sha256": "40fbee8cbce8341e072984cc522148726884359f2e7064940829e1c3fbdde4fb"
+  },
+  "SM_PushcartA": {
+    "kind": "procedural",
+    "source": "cart",
+    "size_xyz_m": [
+      0.9357,
+      1.6481,
+      0.3774
+    ],
+    "sha256": "f3fd35b2a1b971c19989082f8c3cd016f4215bd765dee0ae4c6b8d36073fe952"
+  },
+  "SM_RackFrame": {
+    "kind": "procedural",
+    "source": "rack_frame",
+    "size_xyz_m": [
+      0.1269,
+      1.0,
+      3.0
+    ],
+    "sha256": "ebefd675a902e12a53646924cccbd3c8b5c9a8e4f631f9329e3a1e23fbc95ee8"
+  },
+  "SM_RackPile": {
+    "kind": "procedural",
+    "source": "box",
+    "size_xyz_m": [
+      0.624,
+      0.986,
+      0.2891
+    ],
+    "sha256": "91884c0a5730dcddd84f732846ee13797004423ab276c3537fd57379df7cb19b"
+  },
+  "SM_RackShelf": {
+    "kind": "procedural",
+    "source": "rack_shelf",
+    "size_xyz_m": [
+      4.0,
+      1.0768,
+      0.3703
+    ],
+    "sha256": "94c217e0c64c149b72b04aa9f361cbc9a6eda0af7ef2344593206f08f9dc3b65"
+  },
+  "SM_Rackshield": {
+    "kind": "procedural",
+    "source": "box",
+    "size_xyz_m": [
+      0.3484,
+      1.1746,
+      0.5
+    ],
+    "sha256": "9320fbb62384f639b34490d4db351d7df4be3eddc6278b62bee5b0aeac5da055"
+  },
+  "S_TrafficCone": {
+    "kind": "cc0",
+    "source": "https://poly.pizza/m/lAx8JytxGD",
+    "size_xyz_m": [
+      0.3357,
+      0.3339,
+      0.4628
+    ],
+    "sha256": "9fd5f853f9c428e2a17f49d2505e3f06fe959648c1970dceda63dc19f346cd0d"
+  }
+}

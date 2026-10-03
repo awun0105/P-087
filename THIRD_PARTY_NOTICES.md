@@ -100,6 +100,23 @@ https://poly.pizza/m/Yg2bQZO6Hj (tải từ `https://static.poly.pizza/3a5f3056-
 sha256 `9c28614f465b7dc105f908c20c22fc045f4b07caf8c5ef0e9f8049eceb6dd38d`). Không chỉnh sửa file. Dùng cho góc nhìn
 thứ ba trong viewer (ADR 0010).
 
+### Hình xem trước danh mục vật thể — CC0 1.0
+
+`configs/product/catalog_previews/*.glb` là hình hiển thị trên web cho các họ asset trong danh mục vật thể (ADR 0010
+mục 3), dựng bằng `scripts/scene/build_cc0_previews.py` từ các mô hình Public Domain (CC0 1.0) dưới đây, co giãn về
+kích thước của họ asset tương ứng. Các loại không có ở đây (bình chữa cháy, xe đẩy, dầm, cột, giá kệ) do script dựng
+bằng hình khối, không thuộc bên thứ ba. Gói xuất cho Isaac Sim vẫn trỏ tới asset gốc của NVIDIA, không dùng các file này.
+
+| Nhãn | Mô hình | Tác giả | Nguồn | sha256 file gốc |
+| --- | --- | --- | --- | --- |
+| pallet | Pallet | Quaternius | https://poly.pizza/m/cUAsYHDqfD | `b773bbfe85743cd1…` |
+| box | Box | Kenney | https://poly.pizza/m/HvjissDrdr | `83d88c4c255f868b…` |
+| barel | Barrel | Quaternius | https://poly.pizza/m/MraIiFnpAY | `0f21493c781b0591…` |
+| cone | Traffic Cone | Quaternius | https://poly.pizza/m/lAx8JytxGD | `70fd5c97f107914f…` |
+| bucket | Bucket | Quaternius | https://poly.pizza/m/83obI9bNun | `bdf24cde2e74d899…` |
+| bottle | Water Bottle | Quaternius | https://poly.pizza/m/KpxDpidn1Z | `abdb532223cc0654…` |
+| crate | Crate | Quaternius | https://poly.pizza/m/CnMGEDwg8s | `997f0a0f09a03169…` |
+
 ### ammo.js (Bullet Physics cho WebAssembly) — zlib
 
 `frontend/public/vendor/ammo/ammo.wasm.js` và `ammo.wasm.wasm`: bản build chính thức trong `builds/` của

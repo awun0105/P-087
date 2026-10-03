@@ -177,7 +177,9 @@ async def test_catalog_preview_served_only_for_known_family_with_file(client, tm
     from src.config import Settings
 
     (tmp_path / "SM_PaletteA.glb").write_bytes(b"glTF-fake")
-    monkeypatch.setattr(product_deps, "get_settings", lambda: Settings(product_asset_preview_dir=tmp_path))
+    empty = tmp_path / "no-cc0"
+    settings = Settings(product_asset_preview_dir=tmp_path, product_catalog_preview_dir=empty)
+    monkeypatch.setattr(product_deps, "get_settings", lambda: settings)
 
     entries = (await client.get("/api/v1/scene/catalog")).json()["entries"]
     flags = {entry["family"]: entry["has_preview"] for entry in entries}
@@ -205,6 +207,7 @@ async def test_isaac_previews_are_off_in_production_unless_enabled(
         app_env=app_env,
         artifact_root=tmp_path / "artifacts",
         product_asset_preview_dir=tmp_path,
+        product_catalog_preview_dir=tmp_path / "no-cc0",
         product_isaac_asset_previews=explicit,
     )
     monkeypatch.setattr(product_deps, "get_settings", lambda: settings)
@@ -267,3 +270,34 @@ async def test_dynamic_object_is_carved_at_its_original_place(client, isolated_r
     assert box.rotation_xyzw == original.transform.rotation_quaternion_xyzw
     assert box.center != (9.0, 9.0, 0.0)
     assert box.half_extents == pytest.approx((0.6 + CARVE_MARGIN_M, 0.4 + CARVE_MARGIN_M, 0.075 + CARVE_MARGIN_M))
+
+
+@pytest.mark.asyncio
+async def test_cc0_previews_cover_every_placeable_family_even_in_production(client, tmp_path, monkeypatch) -> None:
+    from src.api.product import deps as product_deps
+    from src.config import Settings
+
+    settings = Settings(app_env="production", artifact_root=tmp_path / "artifacts", product_asset_preview_dir=tmp_path)
+    monkeypatch.setattr(product_deps, "get_settings", lambda: settings)
+
+    entries = (await client.get("/api/v1/scene/catalog")).json()["entries"]
+    assert entries and all(item["has_preview"] for item in entries)
+    served = await client.get("/api/v1/scene/catalog/SM_PaletteA/preview.glb")
+    assert served.status_code == 200 and served.content[:4] == b"glTF"
+
+
+def test_cc0_previews_match_the_nvidia_asset_sizes() -> None:
+    """Hình xem trước CC0 phải đúng kích thước asset NVIDIA mà gói Isaac sẽ dùng (cùng hộp collider trong SceneIR)."""
+    import json
+    from pathlib import Path
+
+    from src.services.orchestration.jobs.display_glb import glb_bounds
+
+    root = Path(__file__).resolve().parents[2] / "configs/product"
+    catalog = {item["family"]: item for item in json.loads((root / "object_catalog_v1.json").read_text())["entries"]}
+    index = json.loads((root / "catalog_previews/index.json").read_text())
+    assert set(index) == {family for family, item in catalog.items() if item["placeable"]}
+    for family in index:
+        low, high = glb_bounds((root / "catalog_previews" / f"{family}.glb").read_bytes())
+        assert (high - low) == pytest.approx(catalog[family]["size_xyz_m"], abs=2e-3), family
+        assert (high + low) / 2 == pytest.approx([0, 0, 0], abs=2e-3), family
