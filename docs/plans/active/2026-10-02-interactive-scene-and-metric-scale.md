@@ -157,8 +157,8 @@ khi chỉ có test giả lập.
 - [~] H4 Nhân vật 3D, góc nhìn thứ ba — code + test xong (03/10/2026): nhân vật CC0 "Worker" có hoạt ảnh đứng/đi/chạy (ADR 0010; asset Isaac không dùng được trên web theo giấy phép); chưa xem trên trình duyệt
 - [~] H5 Đẩy vật thể — code + test xong (03/10/2026, ammo.js, ADR 0010); chưa xem trên trình duyệt
 - [~] H6 Đề xuất tỉ lệ mét tự động — code, test và chạy thật local xong (02/10/2026); bước 4 (đo sai số) xong 03/10/2026: −0,24% và −0,11% trên hai scene Aisle_CW (`eval/protocols/reference_torwic.md`); chưa kiểm trên trình duyệt
-- [ ] H7 Hàng đợi nhiều người dùng
-- [ ] H8 Việc đang kẹt / cần máy thuê
+- [~] H7 Hàng đợi nhiều người dùng — xoay vòng theo người yêu cầu + vị trí hàng đợi xong (02/10/2026); preset lúc đông người chờ số đo GPU thuê
+- [ ] H8 Việc cần máy thuê GPU (thời gian thật của job, nhiều worker/GPU, PostgreSQL + R2, build image GPU)
 
 ## Result
 

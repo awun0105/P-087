@@ -106,8 +106,10 @@ diện; chưa đo mesh so với LiDAR; mesh va chạm của job này vẫn dựn
 
 ## Còn lại
 
-L10 (mesh va chạm từ LiDAR + số đo, bundle ghi LiDAR), L11 (lớp LiDAR trong viewer), chọn mẫu trong UI, nâng giới hạn
-upload, và hiện đúng bước "Nhận dữ liệu LiDAR" là đang chạy trong lúc nó chạy.
+Cập nhật 03/10/2026: L10 (số đo + bundle mang LiDAR; owner chốt không thay mesh va chạm), L11 (lớp LiDAR trong viewer),
+bộ mẫu chọn được trong UI (`scripts/studio/seed_samples.py`), giới hạn upload theo `PRODUCT_UPLOAD_MAX_BYTES` và timeline
+hiện đúng bước "Nhận dữ liệu LiDAR" đều đã làm. Còn: mở các màn LiDAR trên trình duyệt; chạy lại luồng LiDAR trên máy
+thuê GPU với image COLMAP 4.x mới; thử traversal khác và quỹ đạo không phải ground truth.
 
 ## Chạy trên máy thuê GPU (03/10/2026)
 
