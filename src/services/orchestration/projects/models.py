@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.models.contracts.artifacts import Checksum, Identifier, JsonObject, ProductArtifactRef
 from src.models.contracts.manifests import PrivacyValidationReport, SourceType
+from src.services.orchestration.auth.models import Actor
 
 
 class DataOrigin(StrEnum):
@@ -66,6 +67,24 @@ class ProjectCreateInput(BaseModel):
     attestation: SourceRightsAttestation
 
 
+class LidarAttachment(BaseModel):
+    """Gói LiDAR người dùng gắn vào scene và hai lời khai contract bắt buộc cho đầu vào RGB + LiDAR."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    upload_id: Identifier
+    #: Quỹ đạo trong gói do SLAM/odometry tự tính, hay là quỹ đạo chuẩn (ground truth) của dataset.
+    trajectory_origin: Literal["estimated", "ground_truth"]
+    #: Video và LiDAR cùng một không gian, cùng lượt quay; đơn vị mét, trục Z hướng lên.
+    same_scene_confirmed: bool
+
+    @model_validator(mode="after")
+    def _require_same_scene(self) -> "LidarAttachment":
+        if not self.same_scene_confirmed:
+            raise ValueError("cần xác nhận video và LiDAR cùng một không gian")
+        return self
+
+
 class UploadProjectInput(BaseModel):
     """Tạo scene/project từ một video đã upload, kèm lời khai nguồn dữ liệu."""
 
@@ -76,6 +95,8 @@ class UploadProjectInput(BaseModel):
     attestation: SourceRightsAttestation
     #: Thông số xử lý theo file cấu hình chung; None → preset "tối thiểu cho chất lượng tốt".
     processing: dict[str, int | float | str] | None = None
+    #: Gói LiDAR đi kèm video (ADR 0009); None = job chỉ có video.
+    lidar: "LidarAttachment | None" = None
 
 
 class JobCreateInput(BaseModel):
@@ -97,6 +118,21 @@ class InputVideoSummary(BaseModel):
     size_bytes: int = Field(gt=0)
 
 
+class DemoBaseline(BaseModel):
+    """Mốc "bản demo gốc" của một scene: revision SceneIR mà nút Khôi phục bản demo đưa scene trở về.
+
+    Scene demo vẫn chỉnh sửa và tương tác được như scene thường; khôi phục chỉ tạo revision mới mang nội dung của mốc
+    này (lịch sử revision chỉ tiến, không xoá), không chạy lại bước xử lý nào.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: Identifier
+    scene_revision: Identifier
+    marked_at: datetime
+    marked_by: Actor | None = None
+
+
 class ProjectRecord(BaseModel):
     """Trạng thái project mà API trả ra. Không phải shared contract."""
 
@@ -115,3 +151,7 @@ class ProjectRecord(BaseModel):
     input_manifest_ref: ProductArtifactRef | None = None
     input_video: InputVideoSummary | None = None
     created_at: datetime | None = None
+    #: Người tạo scene; None với project cũ, fixture hoặc khi không bật đăng nhập.
+    created_by: Actor | None = None
+    #: Scene được đánh dấu là bản demo; không ghi vào JSON khi None để bản ghi cũ giữ nguyên bytes (CAS so bytes).
+    demo_baseline: DemoBaseline | None = Field(default=None, exclude_if=lambda value: value is None)

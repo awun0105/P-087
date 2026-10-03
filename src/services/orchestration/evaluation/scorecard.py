@@ -5,6 +5,7 @@ Mỗi nhóm ứng với một bước của pipeline Studio. Số liệu lấy q
 evaluation-only. Kết luận đạt/không đạt chỉ gán khi ngưỡng đã có trong repo; chỉ số khác chỉ nêu số và ý nghĩa.
 """
 
+import json
 import logging
 from collections import OrderedDict
 from collections.abc import Callable
@@ -22,8 +23,11 @@ from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneError
 from src.services.reconstruction import (
     GeometryQuality,
+    LidarPackageRecord,
+    VisualQuality,
     geometry_quality,
     input_quality,
+    load_proposal,
     metric_quality,
     pose_quality,
     visual_quality,
@@ -182,7 +186,55 @@ def _visual_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric]
     if visual is None:
         return None
     quality = visual_quality(visual, registry.runtime_resolver.require)
-    held_out = "Chưa đo — cần lượt đánh giá giữ lại ảnh không train (eval/protocols/recon_visual_quality.md)"
+    return [
+        *_visual_core(quality),
+        *_held_out_metrics(quality),
+    ]
+
+
+def _held_out_metrics(quality: VisualQuality) -> list[Metric]:
+    """PSNR/SSIM/LPIPS trên ảnh giữ lại không train (giao thức: eval/protocols/recon_visual_quality.md)."""
+    label = "PSNR trên ảnh không train"
+    meaning = "Scene có tái hiện đúng góc nhìn chưa từng thấy không; đây là thước đo chính của chất lượng 3DGS."
+    if quality.held_out_frames is None or quality.held_out_psnr is None:
+        reason = (
+            "Chưa đo — scene này train trên mọi ảnh, không giữ lại ảnh để chấm"
+            if quality.held_out_frames is None
+            else "Chưa đo — lượt train này không in kết quả chấm ảnh giữ lại"
+        )
+        return [Metric(key="visual.novel_view_quality", label=label, value=None, display=reason, meaning=meaning)]
+    views = f"trên {quality.held_out_frames} ảnh giữ lại"
+    return [
+        Metric(
+            key="visual.novel_view_quality",
+            label=label,
+            value=round(quality.held_out_psnr, 2),
+            unit="dB",
+            display=f"{quality.held_out_psnr:.2f} dB {views}",
+            meaning=meaning + " Cao hơn là tốt hơn.",
+        ),
+        Metric(
+            key="visual.novel_view_ssim",
+            label="SSIM trên ảnh không train",
+            value=None if quality.held_out_ssim is None else round(quality.held_out_ssim, 4),
+            display="Chưa đo" if quality.held_out_ssim is None else f"{quality.held_out_ssim:.3f} {views}",
+            meaning="Độ giống về cấu trúc ảnh (0–1). Cao hơn là tốt hơn.",
+        ),
+        Metric(
+            key="visual.novel_view_lpips",
+            label="LPIPS trên ảnh không train",
+            value=None if quality.held_out_lpips is None else round(quality.held_out_lpips, 4),
+            display=(
+                "Chưa đo — máy xử lý chưa cấu hình runtime LPIPS"
+                if quality.held_out_lpips is None
+                else f"{quality.held_out_lpips:.3f} {views} (mạng VGG)"
+            ),
+            meaning="Khác biệt theo cảm nhận của mắt người. Thấp hơn là tốt hơn.",
+        ),
+    ]
+
+
+def _visual_core(quality: VisualQuality) -> list[Metric]:
     return [
         Metric(
             key="visual.gaussians",
@@ -208,13 +260,6 @@ def _visual_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric]
             display=f"{_number(quality.train_iterations, 0, 'bước')} trên {quality.training_frames} ảnh",
             meaning="Số bước tối ưu và số ảnh đã dùng; cần để so sánh công bằng giữa các lượt chạy.",
         ),
-        Metric(
-            key="visual.novel_view_quality",
-            label="PSNR / SSIM / LPIPS trên ảnh không train",
-            value=None,
-            display=held_out,
-            meaning="Scene có tái hiện đúng góc nhìn chưa từng thấy không; đây là thước đo chính của chất lượng 3DGS.",
-        ),
     ]
 
 
@@ -228,19 +273,14 @@ def _metric_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric]
     verdict: Verdict | None = None
     if quality.check_error_m is not None and quality.check_tolerance_m is not None:
         verdict = "ok" if quality.check_error_m <= quality.check_tolerance_m else "warn"
-    sources = {"user_measured": "người dùng đo", "lidar": "LiDAR", "lidar_demo": "LiDAR của dataset mẫu"}
-    return [
-        Metric(
-            key="metric.check_error",
-            label="Sai lệch của đoạn kiểm C–D",
-            value=error_cm,
-            unit="cm",
-            display=_number(error_cm, 1, "cm"),
-            meaning="Tỉ lệ tính từ đoạn A–B đem đo đoạn C–D thì lệch số đo thật bao nhiêu. Lớn nghĩa là tỉ lệ mét "
-            "không đáng tin.",
-            verdict=verdict,
-            threshold=None if tolerance_cm is None else f"≤ {tolerance_cm:.1f} cm (ngưỡng REC-06 theo sai số click)",
-        ),
+    sources = {
+        "user_measured": "người dùng đo",
+        "lidar": "LiDAR",
+        "lidar_demo": "LiDAR của dataset mẫu",
+        "lidar_trajectory": "căn chỉnh theo quỹ đạo của gói LiDAR",
+        "ai_estimated": "mô hình ước lượng độ sâu",
+    }
+    scale_metrics = [
         Metric(
             key="metric.scale",
             label="Tỉ lệ đã áp",
@@ -257,6 +297,270 @@ def _metric_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric]
             meaning="Khoảng cách thật lấy từ đâu; số đo tay kém chính xác hơn LiDAR.",
         ),
     ]
+    if quality.distance_source == "lidar_trajectory":
+        # Đoạn C–D của job LiDAR sinh từ chính phép căn chỉnh nên không phải phép kiểm độc lập: thay bằng độ lệch
+        # pose ↔ quỹ đạo, là bằng chứng thật của tỉ lệ ở luồng này (ADR 0009).
+        return [*_trajectory_metrics(registry, job), *scale_metrics]
+    return [
+        Metric(
+            key="metric.check_error",
+            label="Sai lệch của đoạn kiểm C–D",
+            value=error_cm,
+            unit="cm",
+            display=_number(error_cm, 1, "cm"),
+            meaning="Tỉ lệ tính từ đoạn A–B đem đo đoạn C–D thì lệch số đo thật bao nhiêu. Lớn nghĩa là tỉ lệ mét "
+            "không đáng tin.",
+            verdict=verdict,
+            threshold=None if tolerance_cm is None else f"≤ {tolerance_cm:.1f} cm (ngưỡng REC-06 theo sai số click)",
+        ),
+        *scale_metrics,
+    ]
+
+
+def _lidar_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric] | None:
+    """Gói LiDAR của job (ADR 0009): bao nhiêu dữ liệu đã nhận và mặt sàn được ước lượng từ bao nhiêu điểm."""
+    reference = _reference(job, StageId.LIDAR_INGEST, "LidarPackageRecord")
+    if reference is None:
+        return None
+    record = LidarPackageRecord.model_validate_json(registry.runtime_resolver.require(reference).read_bytes())
+    kinds = {"registered_lidar": "đám mây đã đăng ký", "lidar_scan_sequence": "scan thô + quỹ đạo (hệ thống ghép)"}
+    origin = {"ground_truth": "quỹ đạo chuẩn của dataset", "estimated": "quỹ đạo do SLAM/odometry tính"}
+    metrics = [
+        Metric(
+            key="lidar.kind",
+            label="Dạng gói LiDAR",
+            value=record.kind,
+            display=kinds[record.kind],
+            meaning="Gói có sẵn đám mây đã đăng ký, hay gồm các scan thô để hệ thống ghép theo quỹ đạo.",
+        ),
+        Metric(
+            key="lidar.points",
+            label="Số điểm của đám mây đã đăng ký",
+            value=record.point_count,
+            display=_number(record.point_count, 0, "điểm"),
+            meaning="Đám mây dùng để lấy mặt sàn và để đối chiếu với scene.",
+        ),
+        Metric(
+            key="lidar.poses",
+            label="Số pose trong quỹ đạo",
+            value=record.pose_count,
+            display=_number(record.pose_count, 0, "pose"),
+            meaning="Mỗi pose ứng với một frame của video; thiếu pose so với video thì bước dựng pose sẽ dừng.",
+        ),
+        Metric(
+            key="lidar.floor_support",
+            label="Số điểm làm căn cứ cho mặt sàn",
+            value=record.floor_support_points,
+            display=_number(record.floor_support_points, 0, "điểm"),
+            meaning="Mặt sàn (z = 0 của scene) ước lượng từ các điểm LiDAR nằm dưới đường đi của cảm biến; càng nhiều "
+            "điểm càng chắc.",
+        ),
+        Metric(
+            key="lidar.trajectory_origin",
+            label="Nguồn quỹ đạo",
+            value=record.trajectory_origin,
+            display=origin[record.trajectory_origin],
+            meaning="Quỹ đạo chuẩn của dataset chỉ có ở dữ liệu mẫu; dữ liệu thật dùng quỹ đạo từ SLAM/odometry.",
+        ),
+    ]
+    if record.fusion is not None:
+        removed = _percent(record.fusion.removed_points, record.fusion.input_points)
+        metrics[2:2] = [
+            Metric(
+                key="lidar.scans",
+                label="Số scan đã ghép",
+                value=record.fusion.scan_count,
+                display=_number(record.fusion.scan_count, 0, "scan"),
+                meaning="Số scan thô được đưa về chung một hệ theo quỹ đạo.",
+            ),
+            Metric(
+                key="lidar.removed_points",
+                label="Điểm bị loại khi ghép",
+                value=removed,
+                unit="%",
+                display=_number(removed, 1, "%"),
+                meaning="Điểm quá gần hoặc quá xa cảm biến, hoặc tia không có phản hồi. Vài chục phần trăm là bình thường; "
+                "gần 100% là dấu hiệu sai đơn vị.",
+            ),
+        ]
+    return metrics
+
+
+def _trajectory_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric]:
+    """Độ lệch pose camera ↔ quỹ đạo của gói LiDAR, đọc từ đề xuất tỉ lệ mà người dùng đã xác nhận."""
+    preview = registry.get_preview(job.job_id)
+    proposal = load_proposal(job.job_id, preview.source_visual_ref, registry.runtime_resolver.locate)
+    alignment = proposal.alignment if proposal is not None else None
+    if alignment is None:
+        return [
+            Metric(
+                key="metric.trajectory_offset_median",
+                label="Độ lệch pose camera so với quỹ đạo LiDAR (trung vị)",
+                value=None,
+                display="Chưa đo",
+                meaning="Không tìm thấy bản ghi căn chỉnh quỹ đạo của scene này.",
+            )
+        ]
+    origin = {"ground_truth": "quỹ đạo chuẩn của dataset", "estimated": "quỹ đạo do SLAM/odometry tính"}
+    median_cm, max_cm = round(alignment.offset_median_m * 100, 1), round(alignment.offset_max_m * 100, 1)
+    return [
+        Metric(
+            key="metric.trajectory_offset_median",
+            label="Độ lệch pose camera so với quỹ đạo LiDAR (trung vị)",
+            value=median_cm,
+            unit="cm",
+            display=_number(median_cm, 1, "cm"),
+            meaning="Scene được dựng bám theo quỹ đạo của gói LiDAR; số này cho biết pose camera cuối cùng nằm cách "
+            f"quỹ đạo bao xa trên đường đi dài {alignment.path_length_m:.1f} m. Lớn nghĩa là video và gói LiDAR không "
+            "khớp nhau (khác lượt quay, sai calibration, lệch thời gian).",
+        ),
+        Metric(
+            key="metric.trajectory_offset_max",
+            label="Độ lệch lớn nhất",
+            value=max_cm,
+            unit="cm",
+            display=_number(max_cm, 1, "cm"),
+            meaning="Frame lệch quỹ đạo nhiều nhất; đám mây LiDAR có thể nằm lệch scene tới mức này ở chỗ đó.",
+        ),
+        Metric(
+            key="metric.trajectory_frames",
+            label="Frame dựng được trên quỹ đạo",
+            value=_percent(alignment.registered_frames, alignment.input_frames),
+            unit="%",
+            display=f"{alignment.registered_frames}/{alignment.input_frames}",
+            meaning="Số frame có pose sau khi dựng bám quỹ đạo.",
+        ),
+        Metric(
+            key="metric.trajectory_origin",
+            label="Nguồn quỹ đạo",
+            value=alignment.trajectory_origin,
+            display=origin[alignment.trajectory_origin],
+            meaning="Quỹ đạo chuẩn của dataset chỉ có ở dữ liệu mẫu; dữ liệu thật dùng quỹ đạo từ SLAM/odometry.",
+        ),
+    ]
+
+
+#: Mã benchmark đối chứng mà evaluator ở `eval/` ghi theo job (`eval/protocols/BENCHMARKS.md`).
+_REFERENCE_CODES = ("recon_pose", "metric_scale", "recon_geometry", "metric_scale_proposal")
+REFERENCE_GROUP_ID = "reference"
+
+
+def _reference_record(registry: ProjectRegistry, job_id: str, code: str) -> dict | None:
+    """Bản ghi đối chứng mới nhất của một mã; None khi evaluator chưa chạy cho job này."""
+    latest = None
+    attempt = 1
+    while path := registry.runtime_resolver.locate(f"artifact://jobs/{job_id}/benchmark/{code}/attempt-{attempt}.json"):
+        latest, attempt = path, attempt + 1
+    return None if latest is None else json.loads(latest.read_text(encoding="utf-8"))
+
+
+def _reference_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric] | None:
+    """Chỉ số so với ground truth của dataset; chỉ có ở scene dựng từ dataset đã chạy evaluator."""
+    records = {code: _reference_record(registry, job.job_id, code) for code in _REFERENCE_CODES}
+    metrics: list[Metric] = []
+    pose, scale, geometry, proposal = (records[code] for code in _REFERENCE_CODES)
+    guided = " Scene này dựng bám theo chính quỹ đạo đó nên số đo mức bám, không phải độ chính xác độc lập."
+    if pose is not None:
+        note = guided if pose.get("job_used_this_trajectory") else ""
+        ate_cm = round(pose["ate_similarity_m"]["rmse"] * 100, 1)
+        metrics += [
+            Metric(
+                key="reference.ate",
+                label="Sai số vị trí camera (ATE, RMSE)",
+                value=ate_cm,
+                unit="cm",
+                display=_number(ate_cm, 1, "cm"),
+                meaning=f"Tâm camera của scene so với quỹ đạo chuẩn trên {pose['registered_frames']} frame, sau khi "
+                f"khớp hai quỹ đạo (đường đi dài {pose['path_length_m']:.1f} m).{note}",
+                source="reference",
+            ),
+            Metric(
+                key="reference.rpe_translation",
+                label="Sai số dịch chuyển giữa hai frame liên tiếp (RPE, trung vị)",
+                value=round(pose["rpe_translation_m"]["p50"] * 100, 1),
+                unit="cm",
+                display=_number(round(pose["rpe_translation_m"]["p50"] * 100, 1), 1, "cm"),
+                meaning="Sai số cục bộ của chuyển động camera, không phụ thuộc trôi tích luỹ.",
+                source="reference",
+            ),
+            Metric(
+                key="reference.rpe_rotation",
+                label="Sai số góc quay giữa hai frame liên tiếp (RPE, trung vị)",
+                value=round(pose["rpe_rotation_deg"]["p50"], 2),
+                unit="°",
+                display=_number(round(pose["rpe_rotation_deg"]["p50"], 2), 2, "°"),
+                meaning="Sai số hướng camera giữa hai frame đã dựng liên tiếp.",
+                source="reference",
+            ),
+        ]
+    if scale is not None:
+        note = ""
+        if scale.get("scale_is_independent") is False or scale.get("job_used_this_trajectory"):
+            note = " Tỉ lệ của scene này được suy từ chính quỹ đạo chuẩn nên số này không phải số đo độc lập."
+        metrics.append(
+            Metric(
+                key="reference.scale_error",
+                label="Sai số tỉ lệ mét",
+                value=scale["scale_error_percent"],
+                unit="%",
+                display=_number(float(scale["scale_error_percent"]), 2, "%"),
+                meaning="Một mét trong scene dài hơn (+) hay ngắn hơn (−) một mét thật bao nhiêu phần trăm, tính từ "
+                f"quỹ đạo chuẩn.{note}",
+                source="reference",
+            )
+        )
+    if proposal is not None:
+        methods = {"moge2_sparse_depth_scale_only": "mô hình ước lượng độ sâu", "lidar_trajectory_alignment": "LiDAR"}
+        note = "" if proposal.get("scale_is_independent") else " Đề xuất này suy từ chính quỹ đạo chuẩn, không độc lập."
+        metrics.append(
+            Metric(
+                key="reference.scale_proposal_error",
+                label="Sai số của đề xuất tỉ lệ tự động",
+                value=proposal["proposal_error_percent"],
+                unit="%",
+                display=_number(float(proposal["proposal_error_percent"]), 2, "%"),
+                meaning="Tỉ lệ mét hệ thống tự đề xuất ("
+                f"{methods.get(proposal['proposal_method'], proposal['proposal_method'])}) lệch tỉ lệ thật bao "
+                f"nhiêu, trước khi người dùng xác nhận hay sửa. Dương = scene bị phóng to.{note}",
+                source="reference",
+            )
+        )
+    if geometry is not None:
+        accuracy_cm = round(geometry["accuracy_m"]["p50"] * 100, 1)
+        at_10 = geometry["at_10cm"]
+        metrics += [
+            Metric(
+                key="reference.surface_accuracy",
+                label="Bề mặt 3DGS lệch bản đồ chuẩn (trung vị)",
+                value=accuracy_cm,
+                unit="cm",
+                display=_number(accuracy_cm, 1, "cm"),
+                meaning="Khoảng cách từ điểm bề mặt của scene tới điểm gần nhất của bản đồ ground truth, trong "
+                f"{geometry['window_m']:.0f} m quanh đường camera. Đã gồm sai số khớp "
+                f"({geometry['alignment_rms_m'] * 100:.1f} cm).",
+                source="reference",
+            ),
+            Metric(
+                key="reference.precision_10cm",
+                label="Điểm của scene nằm trong 10 cm quanh bề mặt chuẩn (precision)",
+                value=round(at_10["precision"] * 100, 1),
+                unit="%",
+                display=_number(round(at_10["precision"] * 100, 1), 1, "%"),
+                meaning="Phần bề mặt scene dựng đúng chỗ.",
+                source="reference",
+            ),
+            Metric(
+                key="reference.recall_10cm",
+                label="Bề mặt chuẩn được scene phủ trong 10 cm (recall)",
+                value=round(at_10["recall"] * 100, 1),
+                unit="%",
+                display=_number(round(at_10["recall"] * 100, 1), 1, "%"),
+                meaning="Phần bề mặt thật mà scene dựng lại được. Bản đồ chuẩn có cả chỗ camera không nhìn thấy nên "
+                "đây là cận dưới.",
+                source="reference",
+            ),
+        ]
+    return metrics or None
 
 
 def _geometry_metrics(registry: ProjectRegistry, job: JobManifest, geometry_config: Path) -> list[Metric] | None:
@@ -423,6 +727,21 @@ def evaluate_job(registry: ProjectRegistry, job_id: str, geometry_config: Path) 
         _group(StageId.OBJECT_EXTRACT.value, "Tách vật thể", lambda: _object_metrics(scene)),
         _group("system", "Hệ thống", lambda: _system_metrics(registry, job)),
     ]
+    # Bước nhận LiDAR chỉ có ở job có gói LiDAR; job chỉ có video không hiện một nhóm "chưa có kết quả" thừa.
+    if any(stage.stage_id == StageId.LIDAR_INGEST for stage in job.stage_artifacts):
+        lidar = _group(StageId.LIDAR_INGEST.value, "Dữ liệu LiDAR", lambda: _lidar_metrics(registry, job))
+        groups.insert(1, lidar)
+    # Khối đối chứng chỉ có khi evaluator ở `eval/` đã ghi bản ghi cho job (scene dựng từ dataset có ground truth);
+    # scene của người dùng không có khối này thay vì hiện một khối "chưa có kết quả" không bao giờ có.
+    reference = _group(REFERENCE_GROUP_ID, "So với dữ liệu đối chứng", lambda: _reference_metrics(registry, job))
+    if reference.status != "pending":
+        groups.append(
+            reference.model_copy(
+                update={"note": "So với ground truth của dataset TorWIC; không có cho dữ liệu người dùng tự quay."}
+            )
+            if reference.status == "measured"
+            else reference
+        )
     return JobEvaluation(
         job_id=job.job_id,
         project_id=job.project_id,

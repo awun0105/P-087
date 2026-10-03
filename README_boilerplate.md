@@ -2,6 +2,10 @@
 
 > Tóm tắt 1 câu: [Vấn đề] → [Giải pháp AI] cho [Target User]
 
+> **Đây là boilerplate để đội copy và điền nội dung.** Các placeholder của đội
+> được giữ nguyên; setup bên dưới dùng dependency lockfiles hiện tại. Khi làm
+> việc trên Real2Sim Studio P-087, xem `README.md` cho data package và Compose.
+
 ## Vấn đề (Problem)
 
 Mô tả pain point cụ thể với data/số liệu:
@@ -42,8 +46,12 @@ cd <MÃ-ĐỘI>
 cp .env.example .env
 # Edit .env with your API keys
 
-# 3. Install dependencies
-pip install -r requirements.txt
+# 3. Install locked dependencies
+python3.12 -m venv .venv
+source .venv/bin/activate      # Windows: .venv\Scripts\activate
+python -m pip install uv==0.9.4
+uv pip sync requirements.lock.txt requirements-dev.lock.txt
+uv pip check
 
 # 4. Run development server
 uvicorn src.main:app --reload

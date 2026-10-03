@@ -9,7 +9,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { Button, Notice, ProgressBar } from "@/components/studio/primitives";
 import { uploadVideo, type UploadHandle } from "@/lib/api/studio";
-import { GAUSSIAN_ACCEPT, VIDEO_ACCEPT, rejectFileNameFor } from "@/features/studio/inputKinds";
+import { GAUSSIAN_ACCEPT, LIDAR_ACCEPT, VIDEO_ACCEPT, rejectFileNameFor } from "@/features/studio/inputKinds";
 import { cn } from "@/lib/cn";
 import type { UploadRecord } from "@/lib/contracts/studio";
 import { formatBytes } from "@/lib/format";
@@ -19,7 +19,7 @@ import { formatBytes } from "@/lib/format";
  * theo nội dung (ADR 0004); đuôi file chỉ lọc sớm. Kéo-thả chỉ là cách phụ:
  * nút chọn file luôn dùng được bằng bàn phím (WCAG 2.5.7).
  */
-export function UploadDropzone({ kind, onUploaded }: { kind: "video" | "gaussian"; onUploaded: (record: UploadRecord) => void }) {
+export function UploadDropzone({ kind, onUploaded }: { kind: "video" | "gaussian" | "lidar"; onUploaded: (record: UploadRecord) => void }) {
   const inputId = useId();
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
@@ -94,17 +94,19 @@ export function UploadDropzone({ kind, onUploaded }: { kind: "video" | "gaussian
           <Upload className="size-5" aria-hidden />
         </span>
         <span className="mt-4 text-base font-semibold text-ink">
-          {kind === "video" ? "Kéo video vào đây, hoặc bấm để chọn" : "Kéo file 3DGS vào đây, hoặc bấm để chọn"}
+          {kind === "video" ? "Kéo video vào đây, hoặc bấm để chọn" : kind === "lidar" ? "Kéo gói LiDAR (.zip) vào đây, hoặc bấm để chọn" : "Kéo file 3DGS vào đây, hoặc bấm để chọn"}
         </span>
         <span className="mt-1 text-sm text-ink-muted">
           {kind === "video"
             ? "MP4/MOV · camera di chuyển chậm, cảnh tĩnh và đủ sáng · tạo reconstruction job sau bước khai báo"
+            : kind === "lidar"
+              ? "ZIP gồm quỹ đạo + calibration + thời điểm frame, cùng các scan .pcd hoặc một đám mây đã đăng ký"
             : "PLY hoặc ZIP gồm PLY + COLMAP · chỉ xem/chỉnh Gaussian và xuất file; không dựng collision hay phát hành"}
         </span>
         <input
           id={inputId}
           type="file"
-          accept={kind === "video" ? VIDEO_ACCEPT : GAUSSIAN_ACCEPT}
+          accept={kind === "video" ? VIDEO_ACCEPT : kind === "lidar" ? LIDAR_ACCEPT : GAUSSIAN_ACCEPT}
           className="sr-only"
           disabled={uploading}
           onChange={(event) => {
@@ -120,7 +122,7 @@ export function UploadDropzone({ kind, onUploaded }: { kind: "video" | "gaussian
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline justify-between gap-3 text-sm">
               <span className="truncate font-medium">{file.name}</span>
-              <span className="shrink-0 tabular-nums text-ink-subtle">
+              <span className="shrink-0 value-tech text-ink-subtle">
                 {verifying
                   ? "Máy chủ đang kiểm tra và nhận diện file…"
                   : progress >= 1

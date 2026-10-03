@@ -40,6 +40,8 @@ class ImportedScene(BaseModel):
     error: str | None = None
     created_at: datetime
     created_by: str | None = None
+    #: Tên người tạo lúc import (chụp lại để vẫn hiện được khi tài khoản đổi tên); None với record cũ.
+    created_by_name: str | None = None
 
 
 class SceneImportError(ValueError):
@@ -58,7 +60,9 @@ class ImportService:
         self.resolver = resolver
         self.workspace_root = workspace_root
 
-    def create(self, upload: UploadRecord, name: str, created_by: str | None) -> ImportedScene:
+    def create(
+        self, upload: UploadRecord, name: str, created_by: str | None, created_by_name: str | None = None
+    ) -> ImportedScene:
         """Chỉ nhận upload đã nhận diện là 3DGS; bắt đầu ở PACKAGING."""
         if upload.input_kind not in {"gaussian_ply", "gaussian_ply_colmap"}:
             raise SceneImportError("Chỉ file 3DGS (.ply hoặc .zip PLY + COLMAP) mới import thành scene")
@@ -70,6 +74,7 @@ class ImportService:
             status="PACKAGING",
             created_at=datetime.now(UTC),
             created_by=created_by,
+            created_by_name=created_by_name,
         )
         with self.database.transaction(write=True) as tx:
             tx.execute(

@@ -1,4 +1,0 @@
-# Isolated offline Open3D runtime; không install vào app environment mặc định.
-open3d==0.19.0
-pydantic==2.13.5
-pydantic-settings==2.15.0

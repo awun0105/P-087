@@ -21,6 +21,7 @@ from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.reconstruction import (
     DemoSelection,
     LidarMeasurements,
+    MetricProposal,
     ModeComparison,
     UserMetricInput,
     UserMetricPreview,
@@ -67,7 +68,9 @@ class MetricConfirmationService:
     def __init__(self, registry: ProjectRegistry) -> None:
         self.registry = registry
         self.writer = FilesystemArtifactStore(registry.runtime_resolver)
-        self.port = user_metric_port(registry.runtime_resolver.require, self.writer, self._exists)
+        self.port = user_metric_port(
+            registry.runtime_resolver.require, self.writer, self._exists, registry.runtime_resolver.locate
+        )
 
     def _exists(self, artifact_uri: str) -> bool:
         return self.registry.runtime_resolver.locate(artifact_uri) is not None
@@ -133,6 +136,20 @@ class MetricConfirmationService:
         except ValueError as error:
             raise MetricConfirmationError(str(error)) from error
 
+    def auto_proposal(self, job_id: str) -> MetricProposal | None:
+        """Đề xuất tỉ lệ/mặt sàn tự động của scene (ESTIMATED); None khi worker không tạo.
+
+        Chỉ cần scene có preview: đề xuất là số liệu để xem, không đổi trạng thái job.
+        """
+        try:
+            contract = self.registry.get_preview(job_id)
+        except (ArtifactStoreError, ValueError) as error:
+            raise MetricConfirmationError("Scene chưa có preview 3DGS") from error
+        try:
+            return self.port.auto_proposal(job_id, contract.source_visual_ref)
+        except ValueError as error:
+            raise MetricConfirmationError(str(error)) from error
+
     def demo_selection(self, job_id: str) -> DemoSelection:
         """Dataset mẫu: 7 điểm tự chọn từ LiDAR + số đo, để UI vẽ và điền sẵn."""
         _, contract = self._waiting_job(job_id)
@@ -157,6 +174,28 @@ class MetricConfirmationService:
                 f"Độ cao camera suy ra {summary.camera_height_min_m:.2f}–{summary.camera_height_max_m:.2f} m "
                 "bất thường; kiểm lại điểm chọn hoặc khoảng cách"
             )
+        if summary.distance_source == "ai_estimated":
+            proposal = self.auto_proposal(job_id)
+            margin = f" (sai số ước tính ±{proposal.relative_uncertainty * 100:.0f}%)" if proposal is not None else ""
+            warnings.append(
+                f"Khoảng cách là ước lượng tự động từ ảnh{margin}, không phải số đo ngoài đời; "
+                "đoạn kiểm C–D dùng cùng ước lượng nên không kiểm được sai số. Đo thật một đoạn để chính xác hơn"
+            )
+        if summary.distance_source == "lidar_trajectory":
+            proposal = self.auto_proposal(job_id)
+            alignment = proposal.alignment if proposal is not None else None
+            if alignment is not None:
+                origin = (
+                    "quỹ đạo chuẩn (ground truth) của dataset"
+                    if alignment.trajectory_origin == "ground_truth"
+                    else "quỹ đạo do người nộp tự tính"
+                )
+                warnings.append(
+                    f"Tỉ lệ và mặt sàn lấy từ gói LiDAR ({origin}): {alignment.registered_frames}/"
+                    f"{alignment.input_frames} frame khớp, pose lệch quỹ đạo trung vị "
+                    f"{alignment.offset_median_m * 100:.0f} cm, lớn nhất {alignment.offset_max_m * 100:.0f} cm. "
+                    "Đoạn kiểm C–D nằm trên cùng mặt sàn LiDAR nên không phải phép kiểm độc lập"
+                )
         return MetricPreviewView(**summary.model_dump(), warnings=warnings)
 
     def confirm(

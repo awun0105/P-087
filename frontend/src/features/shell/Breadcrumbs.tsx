@@ -38,10 +38,19 @@ export function usePageTitle(title: string | null): void {
   }, [setTitle, title]);
 }
 
+/** Ba trang bắt đầu dưới `/new` (features/studio/NewSceneFlow.tsx `SOURCE_ROUTES`). */
+const NEW_SCENE_PAGES: Record<string, string> = {
+  "/new/import-video": "Dựng từ video",
+  "/new/import-scene": "Mở scene 3DGS",
+  "/new/try-demo": "Thử mẫu",
+};
+
 export function crumbsFor(pathname: string, detailTitle?: string | null): Crumb[] {
   const scenes: Crumb = { label: "Scenes", href: "/scenes" };
   if (pathname === APP_HOME) return [{ label: "Tổng quan" }];
   if (pathname === "/scenes") return [{ label: "Scenes" }];
+  const start = NEW_SCENE_PAGES[pathname];
+  if (start) return [scenes, { label: "Scene mới", href: "/new" }, { label: start }];
   if (pathname.startsWith("/new")) return [scenes, { label: "Scene mới" }];
   if (pathname.startsWith("/jobs")) return [{ label: "Jobs" }];
   if (pathname.startsWith("/trash")) return [{ label: "Thùng rác" }];

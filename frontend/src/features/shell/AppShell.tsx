@@ -36,6 +36,7 @@ import {
   useSidebar,
 } from "@/components/shadcn/sidebar";
 import { backHref, Breadcrumbs, PageTitleProvider } from "@/features/shell/Breadcrumbs";
+import { PaletteMenu } from "@/features/shell/PaletteMenu";
 import { ThemeToggle } from "@/features/shell/ThemeToggle";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { isReviewer } from "@/lib/api/auth";
@@ -60,7 +61,7 @@ const NAV = [
 const BARE_ROUTES = ["/login", "/register"];
 
 export function isActive(pathname: string, href: string): boolean {
-  if (href === "/scenes") return pathname === "/scenes" || pathname === "/new" || ["/scenes/", "/imports/", "/samples/"].some((route) => pathname.startsWith(route));
+  if (href === "/scenes") return pathname === "/scenes" || pathname === "/new" || pathname.startsWith("/new/") || ["/scenes/", "/imports/", "/samples/"].some((route) => pathname.startsWith(route));
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -82,7 +83,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             <SidebarTrigger className="-ml-1 md:hidden" aria-label="Mở thanh bên" />
             <BackButton pathname={pathname} />
             <Breadcrumbs pathname={pathname} />
-            <ThemeToggle className="ml-auto size-8 [&_svg]:size-4" />
+            <PaletteMenu className="ml-auto size-8 [&_svg]:size-4" />
+            <ThemeToggle className="size-8 [&_svg]:size-4" />
           </header>
           <div className="min-h-0 min-w-0 flex-1">{children}</div>
         </SidebarInset>

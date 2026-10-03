@@ -296,3 +296,7 @@ Audit 2026-09-27: focused/offline subset proof có, nhưng source coordinate rev
      - Bounds min: `[-11.1444, -17.7897, -0.5411]` mét.
      - Bounds max: `[14.2995, 32.1617, 6.1304]` mét.
      - Minh bạch provenance: `assistance_class: "GT-assisted"`, `trajectory_gt_used_for_lidar_prefusion: true`.
+
+## Cập nhật 02/10/2026 (không đổi Goal/I/O/DoD đã khoá)
+
+Ngoài công cụ offline cho TorWIC ở task này, worker của Studio ghép scan thô **của người dùng** theo quỹ đạo họ nộp bằng numpy (`src/services/reconstruction/lidar/fusion.py`); trên 20 scan Aisle_CW kết quả lệch bản Open3D của task này tối đa 6 cm (voxel 5 cm). [ADR 0009](../../../../decisions/0009-user-lidar-input-and-routing.md).

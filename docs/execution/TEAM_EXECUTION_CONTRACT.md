@@ -765,9 +765,18 @@ Không sửa source gốc.
 
 ## 5.2 Raw LiDAR
 
-Product MVP không nhận raw scan sequence.
+Product MVP không tự xử lý raw scan sequence **khi không có quỹ đạo**: không chạy LiDAR odometry/SLAM.
 
-TorWIC raw LiDAR phải qua offline:
+**Cập nhật 02/10/2026 ([ADR 0009](../decisions/0009-user-lidar-input-and-routing.md), owner EX-REC chốt; thay câu cũ
+"Product MVP không nhận raw scan sequence"):** người dùng được nộp LiDAR kèm video ở dạng **gói** gồm quỹ đạo,
+calibration camera ↔ LiDAR, thời điểm frame, và hoặc một đám mây đã đăng ký, hoặc các scan thô. Với scan thô, bước
+`ST-LIDAR-INGEST` trong worker ghép scan theo quỹ đạo người dùng nộp rồi publish **cùng một loại artifact như trước**
+(`LiDARGeometryArtifact`, `source_modality = registered_lidar`). Consumer (`EX-SCENE`, `EX-SIM`) không đổi: họ vẫn chỉ
+nhận LiDAR đã đăng ký qua shared artifact, không đọc scan thô. Provenance ghi nguồn gốc quỹ đạo: quỹ đạo ground truth
+→ `origin: ground_truth`, `ground_truth_assisted: true` (quy tắc bên dưới giữ nguyên); quỹ đạo người dùng tự tính →
+`origin: estimated`.
+
+Đường offline cho dataset TorWIC vẫn dùng được:
 
 ```text
 lidar/*.pcd

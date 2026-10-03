@@ -8,7 +8,9 @@ import { directUpload, xhrPutPart } from "@/lib/api/directUpload";
 import type { SceneEditResponse, SceneResponse } from "@/lib/contracts/api";
 import {
   parseDemoManifest,
+  parseDemoState,
   parseDemoSelection,
+  parseMetricProposal,
   parseJobProgress,
   parseLidarMeasurements,
   parseMetricPreview,
@@ -16,8 +18,11 @@ import {
   parseStageViews,
   type DemoManifest,
   type DemoSelection,
+  type DemoState,
+  type MetricProposal,
   type ImportedScene,
   type JobProgress,
+  type LidarAttachment,
   type LidarMeasurements,
   type MetricInput,
   type MetricPoint,
@@ -33,6 +38,30 @@ import {
   type StageView,
   type UploadRecord,
 } from "@/lib/contracts/studio";
+
+/** Scene có phải bản demo không và có đang đúng mốc gốc không. */
+export async function getDemoState(jobId: string, signal?: AbortSignal): Promise<DemoState> {
+  return parseDemoState(await apiFetch<unknown>(`/api/v1/jobs/${encodeURIComponent(jobId)}/demo`, { signal }));
+}
+
+/** Reviewer lấy revision hiện tại làm bản demo gốc. */
+export async function markDemo(jobId: string): Promise<DemoState> {
+  return parseDemoState(await apiFetch<unknown>(`/api/v1/jobs/${encodeURIComponent(jobId)}/demo/baseline`, { method: "POST" }));
+}
+
+/** Reviewer bỏ đánh dấu bản demo; nội dung scene giữ nguyên. */
+export async function clearDemo(jobId: string): Promise<DemoState> {
+  return parseDemoState(await apiFetch<unknown>(`/api/v1/jobs/${encodeURIComponent(jobId)}/demo/baseline`, { method: "DELETE" }));
+}
+
+/** Đưa scene về bản demo gốc bằng một revision mới; `expectedRevision` là revision đang thấy trên màn hình. */
+export async function resetDemo(jobId: string, expectedRevision: string): Promise<DemoState> {
+  return parseDemoState(await apiFetch<unknown>(`/api/v1/jobs/${encodeURIComponent(jobId)}/demo/reset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_scene_revision: expectedRevision }),
+  }));
+}
 
 /** Kết quả xem được của từng bước (frame, camera, 3DGS, collision mesh). */
 export async function getStageViews(jobId: string, signal?: AbortSignal): Promise<StageView[]> {
@@ -55,10 +84,11 @@ export function createSceneFromUpload(
   name: string,
   attestation: SourceRightsAttestation,
   processing?: Record<string, ParamValue>,
+  lidar?: LidarAttachment,
 ): Promise<SceneFromUpload> {
   return apiFetch<SceneFromUpload>(`${API}/scenes/from-upload`, {
     method: "POST",
-    body: JSON.stringify({ upload_id: uploadId, name, attestation, processing }),
+    body: JSON.stringify({ upload_id: uploadId, name, attestation, processing, lidar }),
   });
 }
 
@@ -234,6 +264,17 @@ export async function measureOnLidar(
 export async function getDemoPoints(jobId: string): Promise<DemoSelection> {
   const data = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/metric/demo-points`);
   return parseDemoSelection(data);
+}
+
+/** Đề xuất tỉ lệ/mặt sàn tự động của scene; null khi worker không tạo (không bật hoặc không đủ dữ liệu). */
+export async function getMetricProposal(jobId: string): Promise<MetricProposal | null> {
+  const result = await fetchApi<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/metric/proposal`);
+  if (!result.ok) return null;
+  try {
+    return parseMetricProposal(result.data);
+  } catch {
+    return null; // Đề xuất hỏng thì coi như không có: người dùng vẫn nhập tay được.
+  }
 }
 
 /** Xem trước tỉ lệ mét từ điểm đã chọn; backend chưa ghi xác nhận. */
@@ -561,6 +602,8 @@ export interface ReviewStateView {
   /** Báo cáo có bằng chứng chạy Isaac Sim thật không; null khi chưa có báo cáo hoặc backend không trả cờ. */
   isaac_runtime_proof: boolean | null;
   warning_ids: string[];
+  /** Tên hiển thị của người duyệt (backend điền từ tài khoản); null thì UI hiện id. */
+  reviewer_name?: string | null;
   approval: {
     reviewer_id: string;
     decision: "APPROVE" | "REJECT";
@@ -644,6 +687,7 @@ function parseReviewState(value: unknown): ReviewStateView {
     validation: validationReport(value.validation),
     isaac_runtime_proof: typeof value.isaac_runtime_proof === "boolean" ? value.isaac_runtime_proof : null,
     warning_ids: strings(value.warning_ids),
+    reviewer_name: text(value.reviewer_name),
     approval: approval && {
       reviewer_id: text(approval.reviewer_id) ?? "?",
       decision: approval.decision === "REJECT" ? "REJECT" : "APPROVE",

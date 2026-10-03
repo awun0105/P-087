@@ -134,7 +134,7 @@ export function TeamPage() {
                         const value = Number(event.target.value);
                         if (Number.isInteger(value) && value !== user.daily_job_quota) void change(user, { daily_job_quota: value });
                       }}
-                      className="h-9 w-20 rounded-lg border border-line-strong bg-paper-raised px-2 tabular-nums"
+                      className="h-9 w-20 rounded-lg border border-line-strong bg-paper-raised px-2 value-tech"
                     />
                     )}
                   </td>

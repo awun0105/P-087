@@ -63,4 +63,22 @@ describe("scaledWheelInit", () => {
     const init = scaledWheelInit(event, 4);
     expect(init).toMatchObject({ deltaY: 400, deltaX: -16, clientX: 30, clientY: 40, ctrlKey: true, deltaMode: 1, bubbles: true, cancelable: true });
   });
+
+  it("góc nhìn thứ ba chỉ bật được khi đang đi bộ", () => {
+    const toggle = vi.fn();
+    const { rerender } = render(
+      <CameraToolbar runtime={loaded} controls={controls()} wheelFactor={1} onWheelFactor={vi.fn()} thirdPerson={false} onThirdPerson={toggle} />,
+    );
+    expect(screen.getByRole("button", { name: "Góc nhìn thứ ba" })).toBeDisabled();
+    rerender(
+      <CameraToolbar runtime={{ ...loaded, walkAllowed: true, cameraMode: "walk" }} controls={controls()} wheelFactor={1} onWheelFactor={vi.fn()} thirdPerson={false} onThirdPerson={toggle} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Góc nhìn thứ ba" }));
+    expect(toggle).toHaveBeenCalledWith(true);
+  });
+
+  it("viewer không hỗ trợ góc nhìn thứ ba thì không có nút", () => {
+    render(<CameraToolbar runtime={loaded} controls={controls()} wheelFactor={1} onWheelFactor={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Góc nhìn thứ ba" })).toBeNull();
+  });
 });

@@ -1,5 +1,6 @@
 """REC-03 orchestration, tái sử dụng COLMAP SfM qua process boundary."""
 
+import json
 import logging
 import shutil
 from collections.abc import Callable
@@ -11,6 +12,12 @@ from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.manifests import StageArtifact, StageId, StageStatus
 from src.services.reconstruction.adapters.colmap_input import ColmapImageInput, ColmapInputAdapter
 from src.services.reconstruction.adapters.colmap_model import ParsedSparseModel, read_sparse_model, select_sparse_model
+from src.services.reconstruction.adapters.colmap_priors import (
+    PoseGuidance,
+    PosePriorError,
+    guided_commands,
+    prepare_guidance,
+)
 from src.services.reconstruction.adapters.colmap_runtime import ColmapError, ColmapProcess, reconstruction_commands
 from src.services.reconstruction.resume import ResumeCache, content_key
 from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver, _sha256
@@ -40,6 +47,8 @@ class ColmapRequest:
     workspace: Path
     job_id: str
     attempt_id: str | None = None
+    #: Pose từ quỹ đạo của gói LiDAR (ADR 0009). Có thì dựng bám quỹ đạo thay cho `mapper`; tên ảnh là `<frame_id>.png`.
+    guidance: PoseGuidance | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +60,8 @@ class ColmapResult:
     stage: StageArtifact
     #: Khoá kho resume của sparse model này; REC-04 dùng để tìm checkpoint cùng hệ toạ độ.
     resume_key: str | None = None
+    #: Bản ghi độ lệch giữa pose cuối và quỹ đạo khi dựng bám quỹ đạo (bằng chứng cho bước xác nhận tỉ lệ).
+    guidance_ref: ProductArtifactRef | None = None
 
 
 class ColmapAdapter:
@@ -70,6 +81,8 @@ class ColmapAdapter:
             return self._execute(request)
         except ColmapError:
             raise
+        except PosePriorError as error:
+            raise ColmapError("COLMAP_GUIDANCE_INVALID", str(error)) from error
         except (OSError, ValueError) as error:
             raise ColmapError(
                 "COLMAP_ARTIFACT_INVALID", "COLMAP input/output invalid; inspect attempt artifacts"
@@ -90,11 +103,20 @@ class ColmapAdapter:
             request.config.checksum(),
             self.deps.process.settings.runtime_identity,
             version,
+            *([request.guidance.checksum()] if request.guidance is not None else []),
         )
         reused = resume is not None and resume.restore_colmap(key, request.workspace)
         if not reused:
             (request.workspace / "sparse").mkdir()
-            for command in reconstruction_commands(request.config, (feature, match)):
+            commands = reconstruction_commands(request.config, (feature, match))
+            if request.guidance is not None:
+                # Trích + ghép đặc trưng như thường lệ, rồi dựng bám quỹ đạo thay cho `mapper`.
+                for command in commands[:2]:
+                    self.deps.process.run(command, request.workspace)
+                prepare_guidance(request.workspace, request.guidance)
+                (request.workspace / "sparse" / "0").mkdir()
+                commands = guided_commands(request.config, request.guidance)
+            for command in commands:
                 self.deps.process.run(command, request.workspace)
         models = self._models(request.workspace, images.frame_ids)
         best = select_sparse_model(models)
@@ -117,7 +139,35 @@ class ColmapAdapter:
         if resume is not None and not reused:
             # Chỉ giữ sau khi artifact đã publish và consumer đọc lại được: kho không chứa kết quả hỏng.
             resume.store_colmap(key, request.workspace)
-        return ColmapResult(artifact, reference, stage, key if resume is not None else None)
+        guidance_ref = self._guidance_record(request, artifact, reference) if request.guidance is not None else None
+        return ColmapResult(artifact, reference, stage, key if resume is not None else None, guidance_ref)
+
+    def _guidance_record(
+        self, request: ColmapRequest, artifact: CameraPoseArtifact, poses_ref: ProductArtifactRef
+    ) -> ProductArtifactRef:
+        """Độ lệch giữa tâm camera cuối cùng và quỹ đạo: bằng chứng căn chỉnh hiện cho người dùng xác nhận."""
+        assert request.guidance is not None
+        priors = {prior.image_name: prior.translation for prior in request.guidance.priors}
+        offsets = sorted(
+            sum((a - b) ** 2 for a, b in zip(pose.translation, priors[pose.image_name], strict=True)) ** 0.5
+            for pose in artifact.poses
+        )
+        record = {
+            "schema_version": "1.0",
+            "artifact_type": "PoseGuidanceRecord",
+            "method": "trajectory_guided_colmap",
+            "camera_poses_checksum": poses_ref.artifact_checksum,
+            "guidance_checksum": request.guidance.checksum(),
+            "position_std_m": request.guidance.position_std_m,
+            "calibrated_intrinsics": request.guidance.calibration is not None,
+            "input_frames": len(request.guidance.priors),
+            "registered_frames": len(offsets),
+            "offset_median_m": offsets[len(offsets) // 2],
+            "offset_p90_m": offsets[min(len(offsets) - 1, int(len(offsets) * 0.9))],
+            "offset_max_m": offsets[-1],
+        }
+        publisher = PosePublisher(self.deps.writer, request.job_id, request.attempt_id)
+        return publisher.publish("pose_guidance.json", json.dumps(record, indent=2).encode() + b"\n")
 
     def _vocabulary(self, request: ColmapRequest) -> None:
         reference = request.config.vocab_tree

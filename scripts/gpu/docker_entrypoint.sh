@@ -41,7 +41,9 @@ export PRODUCT_RUNTIME_MANIFEST="${PRODUCT_RUNTIME_MANIFEST:-$STATE/runtime_mani
 export PRODUCT_PREVIEW_TIMEOUT_SECONDS="${PRODUCT_PREVIEW_TIMEOUT_SECONDS:-21600}"
 DEFAULT_COLMAP_COMMAND='["colmap"]'
 export REC03_COLMAP_COMMAND="${REC03_COLMAP_COMMAND:-$DEFAULT_COLMAP_COMMAND}"
-export REC03_COLMAP_RUNTIME_IDENTITY="${REC03_COLMAP_RUNTIME_IDENTITY:-colmap-apt-$(dpkg-query -W -f='${Version}' colmap)}"
+# Định danh = digest của image COLMAP mà binary được lấy ra (cùng giá trị với máy local dùng image đó qua docker).
+COLMAP_DIGEST="${R2S_COLMAP_IMAGE##*@}"
+export REC03_COLMAP_RUNTIME_IDENTITY="${REC03_COLMAP_RUNTIME_IDENTITY:-colmap-image-${COLMAP_DIGEST:-unknown}}"
 export REC03_COLMAP_TIMEOUT_SECONDS="${REC03_COLMAP_TIMEOUT_SECONDS:-7200}"
 DEFAULT_BRUSH_COMMAND="[\"$RUNTIME/brush/brush_app\"]"
 export REC04_BRUSH_COMMAND="${REC04_BRUSH_COMMAND:-$DEFAULT_BRUSH_COMMAND}"
@@ -59,6 +61,12 @@ export PRODUCT_GEOMETRY_CONFIG="${PRODUCT_GEOMETRY_CONFIG:-/opt/real2sim/app/con
 export PRODUCT_SCENE_RUNTIME_PYTHON="${PRODUCT_SCENE_RUNTIME_PYTHON:-$SCENE/bin/python}"
 export PRODUCT_SAM2_CHECKPOINT="${PRODUCT_SAM2_CHECKPOINT:-$SCENE/checkpoints/sam2.1_hiera_tiny.pt}"
 export PRODUCT_LAMA_CHECKPOINT="${PRODUCT_LAMA_CHECKPOINT:-$SCENE/weights/big-lama.pt}"
+export REC04_BRUSH_LPIPS_PYTHON="${REC04_BRUSH_LPIPS_PYTHON:-$SCENE/bin/python}"
+# Đề xuất tỉ lệ mét tự động (MoGe-2): chỉ bật khi image có trọng số; thiếu thì worker bỏ qua bước này.
+if [ -f "$SCENE/weights/moge-2-vitb-normal.pt" ]; then
+  export REC06_MOGE_PYTHON="${REC06_MOGE_PYTHON:-$SCENE/bin/python}"
+  export REC06_MOGE_MODEL="${REC06_MOGE_MODEL:-$SCENE/weights/moge-2-vitb-normal.pt}"
+fi
 export PRODUCT_SCENE_TIMEOUT_SECONDS="${PRODUCT_SCENE_TIMEOUT_SECONDS:-3600}"
 
 PY=.venv/bin/python

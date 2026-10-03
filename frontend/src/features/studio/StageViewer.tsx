@@ -14,6 +14,7 @@ import { requireEmbeddedGlb } from "@/features/viewer/GlbArtifact";
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
 import { PlayCanvasScene, usePlayCanvasCapability } from "@/features/viewer/PlayCanvasScene";
 import { recordingCameraPose } from "@/features/viewer/source-frame";
+import { themeColor } from "@/lib/theme";
 import { jobArtifactContentUrl } from "@/lib/api/endpoints";
 import { getStageViews } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
@@ -102,6 +103,7 @@ function StageLayer({ jobId, view, views }: { jobId: string; view: StageView; vi
         collision={mesh?.refs[0]}
         cameras={metric.cameras}
         defaultLayers={{ splat: true, collision: view === mesh, boxes: false }}
+        lidarOverlay={metric.lidar_overlay ?? null}
       />
     );
   }
@@ -229,7 +231,7 @@ export function CollisionMeshCanvas({ url, children }: { url: string; children?:
         let triangles = 0;
         root.traverse((object) => {
           if (!(object instanceof THREE.Mesh)) return;
-          object.material = new THREE.MeshStandardMaterial({ color: "#8aa4c8", flatShading: true, side: THREE.DoubleSide });
+          object.material = new THREE.MeshStandardMaterial({ color: themeColor("--studio-geometry", "#2f7ea8"), flatShading: true, side: THREE.DoubleSide });
           const index = object.geometry.getIndex();
           triangles += (index ? index.count : object.geometry.getAttribute("position").count) / 3;
         });

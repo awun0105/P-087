@@ -1,4 +1,4 @@
-"""Model product-level cho upload (video, PLY 3DGS, ZIP); không phải shared contract."""
+"""Model product-level cho upload (video, PLY 3DGS, ZIP, LiDAR); không phải shared contract."""
 
 from datetime import datetime
 from typing import Literal
@@ -6,10 +6,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.models.contracts.artifacts import ArtifactUri, Checksum, Identifier
+from src.services.orchestration.auth.models import Actor
 from src.services.reconstruction import InputDetection, InputKind
 
 VideoMediaType = Literal["video/mp4", "video/quicktime"]
-UploadMediaType = Literal["video/mp4", "video/quicktime", "application/x-ply", "application/zip"]
+UploadMediaType = Literal["video/mp4", "video/quicktime", "application/x-ply", "application/x-pcd", "application/zip"]
 
 #: Đuôi file video → media type ghi vào InputManifest (PRD FR-01, Playbook §2.1).
 VIDEO_EXTENSIONS: dict[str, VideoMediaType] = {".mp4": "video/mp4", ".mov": "video/quicktime"}
@@ -18,14 +19,21 @@ VIDEO_EXTENSIONS: dict[str, VideoMediaType] = {".mp4": "video/mp4", ".mov": "vid
 UPLOAD_EXTENSIONS: dict[str, UploadMediaType] = {
     **VIDEO_EXTENSIONS,
     ".ply": "application/x-ply",
+    ".pcd": "application/x-pcd",
     ".zip": "application/zip",
 }
 KIND_MEDIA_TYPES: dict[str, frozenset[str]] = {
     "rgb_video": frozenset({"video/mp4", "video/quicktime"}),
     "gaussian_ply": frozenset({"application/x-ply"}),
     "gaussian_ply_colmap": frozenset({"application/zip"}),
+    # ADR 0009: LiDAR đi kèm video — luôn là gói ZIP có quỹ đạo + calibration + thời điểm frame.
+    "registered_lidar": frozenset({"application/zip"}),
+    "lidar_scan_sequence": frozenset({"application/zip"}),
 }
-UNSUPPORTED_EXTENSION = "Hỗ trợ video .mp4/.mov, scene 3DGS .ply, hoặc .zip gồm PLY 3DGS + model COLMAP"
+UNSUPPORTED_EXTENSION = (
+    "Hỗ trợ video .mp4/.mov; scene 3DGS .ply hoặc .zip (PLY 3DGS + model COLMAP); "
+    "gói LiDAR .zip (scan .pcd hoặc đám mây đã đăng ký, kèm quỹ đạo + calibration + thời điểm frame)"
+)
 
 
 class UploadRecord(BaseModel):
@@ -46,6 +54,8 @@ class UploadRecord(BaseModel):
     project_ids: list[Identifier] = Field(default_factory=list)
     input_kind: InputKind = "rgb_video"
     detection: InputDetection | None = None
+    #: Người tải file lên; None với record cũ hoặc khi không bật đăng nhập.
+    uploaded_by: Actor | None = None
 
 
 UploadSessionStatus = Literal["UPLOADING", "VERIFYING", "READY", "FAILED"]
@@ -71,3 +81,4 @@ class UploadSession(BaseModel):
     status: UploadSessionStatus
     error: str | None = None
     created_at: datetime
+    uploaded_by: Actor | None = None

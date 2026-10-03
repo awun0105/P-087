@@ -18,6 +18,15 @@ Dependencies are grouped into logical, isolated environments. We do NOT use one 
 - Lockfiles: `requirements.lock.txt` and `requirements-dev.lock.txt`.
 - Workflow: Lock with `uv pip compile --generate-hashes --python-version 3.12.14`, sync with `uv pip sync`.
 
+### Offline Dataset Dependencies
+- Source/lock duy nhất: `requirements-offline.in` và `requirements-offline.lock.txt`.
+- REC-07 prefusion dùng Open3D **0.19.0** đã audit; không tự nâng phiên bản vượt
+  gate trong `scripts/torwic/prefusion_cloud.py` hoặc đổi checksum-bound evidence.
+- Pydantic/settings của CLI được khai báo trong profile offline; cài vào venv
+  riêng, không đưa Open3D vào API/core. File template `requirements.txt` và
+  `scripts/torwic/requirements-lidar.txt` đã được owner yêu cầu thay thế bằng
+  các profile canonical ngày 03/10/2026.
+
 ### External Provider Dependencies (e.g. 3DGS, Isaac, SAM2)
 - Must be isolated from the Core.
 - Permitted mechanisms: dedicated virtualenv, vendor containers, or separate processes.
@@ -38,5 +47,5 @@ External providers interact with the Core strictly via Canonical Artifacts (e.g.
 |---|---|---|---|---|---|---|---|
 | Core / Foundation | native | 3.12.x | - | - | Foundation SHA | requirements.lock.txt | SUPPORTED |
 | REC GPU tools (Studio) | separate processes | - | - | driver 580.178.04 | COLMAP image `sha256:b8498ebe…`, Brush 0.3.0, splat-transform 3.6.6, FFmpeg 6.1.1 | `runtime_manifest.json` (gitignored, sinh bằng `scripts/gpu/make_runtime_manifest.py`) | Verified local Quadro T2000 (29/09); image GPU trên Vast.ai/RunPod UNVERIFIED (ADR 0003) |
-| Scene runtime (SAMPro3D + SAM2, LPIPS, usd-core) | dedicated virtualenv `data/scene_runtime` (gitignored), gọi qua subprocess | 3.12.3 | 2.7.1+cu126 | 12.6 | SAM2 source `private/sam2` @ `2b90b9f` (sam2.1 hiera tiny); usd-core 26.8; lpips 0.1.4 | `scripts/gpu/setup_scene_runtime.sh` | Verified local T2000 (30/09, ADR 0006) |
+| Scene runtime (SAMPro3D + SAM2, LPIPS, usd-core, MoGe-2) | dedicated virtualenv `data/scene_runtime` (gitignored), gọi qua subprocess | 3.12.3 | 2.7.1+cu126 | 12.6 | SAM2 source `private/sam2` @ `2b90b9f` (sam2.1 hiera tiny); usd-core 26.8; lpips 0.1.4 | `scripts/gpu/setup_scene_runtime.sh` | Verified local T2000 (30/09, ADR 0006) **Bổ sung 02/10/2026:** cùng venv chạy MoGe-2 (`moge` @ `b942f00`, `utils3d` @ `3fab839`, trọng số `moge-2-vitb-normal` sha256 `16b8110e…`, MIT) cho đề xuất tỉ lệ mét (`REC06_MOGE_PYTHON`/`REC06_MOGE_MODEL`), và LPIPS-VGG cho ảnh giữ lại của REC-04 (`REC04_BRUSH_LPIPS_PYTHON`). MoGe-2 fp16 trả NaN trên GPU dòng TU117 nên tự chạy lại fp32 |
 | Pipeline v2 providers (cùng venv `data/scene_runtime`) | dedicated virtualenv, gọi qua subprocess | 3.12.x | 2.7.1+cu126 | 12.6 (nvcc 12.x để biên dịch gsplat) | gsplat 1.5.3, coacd 1.0.14, scikit-image 0.26.0, opencv-python-headless 5.0.0.93, trimesh 5.1.0, usd-core 26.8; LaMa `big-lama.pt` sha256 `7ba7aa7a…` | `scripts/gpu/setup_scene_runtime.sh` (ghim phiên bản; chưa có lockfile có hash) | Verified local T2000 (01/10, ADR 0007); cần header Python 3.12 khi cài; GPU thuê UNVERIFIED |

@@ -33,7 +33,7 @@ describe("tài khoản và đích sau xác thực", () => {
     vi.mocked(login).mockResolvedValue({ user_id: "fixture", email: "fixture@example.com", display_name: "Fixture", role: "editor", active: true, daily_job_quota: 10 });
     render(<LoginForm />);
     expect(screen.getByRole("link", { name: "Tạo tài khoản" })).toHaveAttribute("href", "/register?next=%2Fnew%3Fsource%3Dvideo%26step%3Dsetup");
-    expect(screen.getByRole("link", { name: "Thử với video mẫu" })).toHaveAttribute("href", "/new?source=sample");
+    expect(screen.getByRole("link", { name: "Thử với video mẫu" })).toHaveAttribute("href", "/new/try-demo");
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "fixture@example.com" } });
     fireEvent.change(screen.getByLabelText("Mật khẩu"), { target: { value: "fixture-password" } });
     fireEvent.submit(screen.getByLabelText("Email").closest("form")!);

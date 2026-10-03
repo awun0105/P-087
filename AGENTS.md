@@ -13,8 +13,10 @@ documents hoặc task files bằng suy luận từ hội thoại.
    khi user chưa yêu cầu change hoặc implementation.
 3. Không tự tạo/đổi task ID, mở rộng scope, đổi acceptance, schema, ownership hoặc
    canonical placement.
-4. Không rename, move hoặc delete organizer-provided scaffold. Không sửa/xóa thay
-   đổi đang có của user ngoài task boundary.
+4. Không rename, move hoặc delete source scaffold do ban tổ chức cung cấp. Ngoại lệ
+   cấu hình dependency/Docker được owner yêu cầu hợp nhất và thay bản cũ đã ghi
+   trong `ARCHITECTURE.md`: chỉ bỏ file dư sau khi capability, consumers và proof
+   đã được kiểm tra. Không sửa/xóa thay đổi của user ngoài task boundary.
 5. Không claim `DONE`, “pass”, “production-ready” hoặc “E2E complete” nếu chưa có
    executable/observable evidence phù hợp.
 6. Nếu source documents mâu thuẫn hoặc thiếu authority cho một quyết định ảnh

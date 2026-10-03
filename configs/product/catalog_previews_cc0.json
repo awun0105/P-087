@@ -1,0 +1,25 @@
+{
+  "version": "1.0",
+  "note": "Hình xem trên web cho danh mục vật thể (ADR 0010 mục 3). Mỗi họ asset vẫn trỏ tới đúng USD của NVIDIA trong object_catalog_v1.json để xuất gói Isaac; ở đây chỉ là hình hiển thị trong trình duyệt, co giãn về đúng size_xyz_m của họ asset. Nguồn 'cc0' là mô hình CC0 1.0 tải theo URL + sha256; nguồn 'procedural' do script dựng bằng hình khối, không thuộc bên thứ ba.",
+  "classes": {
+    "pallet": {"kind": "cc0", "title": "Pallet", "author": "Quaternius", "page": "https://poly.pizza/m/cUAsYHDqfD", "url": "https://static.poly.pizza/e2109848-da3e-41c0-a96f-4471e91f78d9.glb", "sha256": "b773bbfe85743cd14ccb95b46219d99781b6f402babcc4a7a25f4179232ba1d5"},
+    "box": {"kind": "cc0", "title": "Box", "author": "Kenney", "page": "https://poly.pizza/m/HvjissDrdr", "url": "https://static.poly.pizza/abf06b96-4a0c-466b-b091-919cfad7a478.glb", "sha256": "83d88c4c255f868b8fd77c6dc80b666aefd17b07223b12644ac046ebe32727a8"},
+    "barel": {"kind": "cc0", "title": "Barrel", "author": "Quaternius", "page": "https://poly.pizza/m/MraIiFnpAY", "url": "https://static.poly.pizza/1f4a7592-6157-4726-8159-49842c361f11.glb", "sha256": "0f21493c781b05915051fb857600b24e4d9c154e4b19099e2d5932c296fb4834"},
+    "cone": {"kind": "cc0", "title": "Traffic Cone", "author": "Quaternius", "page": "https://poly.pizza/m/lAx8JytxGD", "url": "https://static.poly.pizza/4e13551a-b2fb-4117-9b57-22b2b7db394e.glb", "sha256": "70fd5c97f107914f96dfa3f197041c910c0a441ec43dc2f9db07967c3761afa2"},
+    "bucket": {"kind": "cc0", "title": "Bucket", "author": "Quaternius", "page": "https://poly.pizza/m/83obI9bNun", "url": "https://static.poly.pizza/ab9720c1-bfc4-4afc-a4d5-349fc725f6ae.glb", "sha256": "bdf24cde2e74d8995a2dd4e2f70f6f759e644f1ed5f151e2e9fa2f65fb1fcf0d"},
+    "bottle": {"kind": "cc0", "title": "Water Bottle", "author": "Quaternius", "page": "https://poly.pizza/m/KpxDpidn1Z", "url": "https://static.poly.pizza/3ebef9a3-c2df-49ee-abe1-df38b5777bcd.glb", "sha256": "abdb532223cc06545a893eef3edcfb16df5fffc994a6927e74249dd2326b799c"},
+    "crate": {"kind": "cc0", "title": "Crate", "author": "Quaternius", "page": "https://poly.pizza/m/CnMGEDwg8s", "url": "https://static.poly.pizza/fbfe4b47-02fd-403e-bdfe-eca895ed7a7f.glb", "sha256": "997f0a0f09a031697a35fb6ad9c367e4a8ddf609ba9d8003cd031d3aaec193f6"},
+    "fire_extinguisher": {"kind": "procedural", "shape": "fire_extinguisher"},
+    "cart": {"kind": "procedural", "shape": "cart"},
+    "bracket": {"kind": "procedural", "shape": "beam"},
+    "pillar": {"kind": "procedural", "shape": "column"},
+    "rack": {"kind": "procedural", "shape": "beam"}
+  },
+  "families": {
+    "SM_RackFrame": {"kind": "procedural", "shape": "rack_frame"},
+    "SM_RackShelf": {"kind": "procedural", "shape": "rack_shelf"},
+    "SM_RackPile": {"kind": "procedural", "shape": "box"},
+    "SM_Rackshield": {"kind": "procedural", "shape": "box"},
+    "SM_BracketSlot": {"kind": "procedural", "shape": "box"}
+  }
+}

@@ -620,7 +620,17 @@ real reconstruction, Brush hay Isaac acceptance.
   - Stage này chỉ chạy khi `RGB present && Registered LiDAR present`; các configuration khác phải skip.
   - RGB artifacts và LiDAR input bắt buộc thuộc cùng scene/traversal, có immutable checksums và manifest truy vết được.
   - Sau khi transform được xác nhận, hệ thống mới chạy `ST-METRIC-CANONICALIZE` / `SceneComposer` để tạo unified metric scene.
-  - **Quy định ranh giới MVP:**
+  - **Cập nhật 02/10/2026 ([ADR 0009](../decisions/0009-user-lidar-input-and-routing.md)):**
+    - `ST-LIDAR-INGEST` nhận **gói LiDAR** của người dùng (ZIP: quỹ đạo TUM + calibration camera ↔ LiDAR + thời điểm
+      frame + đám mây đã đăng ký hoặc scan `.pcd` thô). Scan thô được ghép theo quỹ đạo bằng numpy trong worker
+      (`src/services/reconstruction/lidar/fusion.py`); Open3D chỉ còn ở công cụ offline `scripts/torwic/`. Mặt sàn
+      ước lượng từ đám mây dưới quỹ đạo. Thiếu quỹ đạo, calibration hoặc thời điểm frame thì từ chối kèm hướng dẫn.
+    - Căn chỉnh không còn là "input đã aligned hoặc từ chối": pose camera lấy từ quỹ đạo + calibration + thời điểm
+      frame, rồi COLMAP dựng **bám theo quỹ đạo** (mục 3.1), nên scene nằm thẳng trong hệ mét của LiDAR. Người dùng
+      không chọn điểm; họ xem tỉ lệ, sai số và số frame khớp rồi xác nhận. Không có UI chọn cặp điểm.
+    - Trạng thái code: nhận diện gói, ghép scan, `ST-LIDAR-INGEST` trong worker **đã có**; dựng pose bám quỹ đạo và
+      màn xác nhận **đang làm** ([plan](../plans/active/2026-10-02-lidar-video-flow.md)).
+  - **Quy định ranh giới MVP (bản gốc, giữ để truy vết):**
     - **P0:** Bắt buộc input đã aligned hoặc có sẵn ma trận transform, nếu không phải báo lỗi từ chối.
     - **P1:** Cung cấp UI gióng hàng thủ công hoặc bán tự động (Semi-auto ICP).
     - **P2 (Ngoài MVP):** Thuật toán tự động tìm điểm chung (Auto calibration).
@@ -636,6 +646,7 @@ real reconstruction, Brush hay Isaac acceptance.
 - **Luồng dữ liệu:** `Frames -> Feature extraction -> Feature matching -> SfM mapper -> Camera poses & Sparse point cloud`.
 - **Repository tham khảo:** Đọc file `colmap_undistorted_sfm_export.sh` trong repo `Nannigalaxy/video-3d-reconstruction-gsplat` để xem script bọc quanh COLMAP.
 - **Lưu ý chết người:** COLMAP có thể sinh ra nhiều model (ví dụ `sparse/0`, `sparse/1`). Đừng mặc định luôn lấy `0`, phải viết code để chọn model nào chứa nhiều ảnh được nội suy thành công (registered) nhất.
+- **Dựng bám theo quỹ đạo (02/10/2026, ADR 0009) — chỉ cho job có gói LiDAR:** `Frames -> Feature extraction -> Feature matching -> pose từ quỹ đạo + calibration -> point_triangulator -> pose_prior_mapper --input_path (ràng buộc vị trí) -> Camera poses & Sparse point cloud`. Đo trên 100 ảnh Aisle_CW (COLMAP 4.3): `mapper` dựng 91 ảnh và đứt thành hai model; cách bám quỹ đạo dựng 100/100 ảnh thành một model, sai số chiếu lại 0,52 px, lệch quỹ đạo trung vị 8 cm, tỉ lệ 1,0003; PSNR 3DGS kém `mapper` 0,3–0,5 dB trên cùng tập ảnh. `bundle_adjuster` tự do sau khi cố định pose thì trôi 2 m — không dùng. Số đo đầy đủ ở ADR 0009. Job chỉ có video vẫn dùng `mapper`.
 
 ## 3.2 Dựng hình ảnh trực quan (Visual Reconstruction — `ST-VISUAL-RECON`)
 
@@ -805,6 +816,7 @@ P0 không dùng generic `Scale` cho Added Asset cho tới khi propagation sang V
 
 - **Vấn đề:** Các thuật toán AI chạy mất hàng giờ đồng hồ, không thể gói gọn trong một HTTP Request.
 - **Giải pháp:** Dùng FastAPI kết hợp với Worker/Queue. Phát trạng thái (Progress) về client qua WebSocket hoặc SSE.
+- **Cập nhật 02/10/2026 (đã triển khai, [plan tài nguyên](../plans/active/2026-10-02-resource-management-cleanup.md)):** worker nhận job theo thứ tự **xoay vòng theo người yêu cầu** (người lâu chưa được phục vụ đi trước); API tiến trình trả vị trí trong hàng đợi và thời gian chờ ước tính từ thời lượng đã đo. Nhiều job chạy chung một GPU chỉ khi cấu hình đó **đã có số đo** VRAM/RAM của lượt chạy trước; cấu hình chưa đo thì chạy một mình trên GPU. Job chết vì nghi hết bộ nhớ được xếp lại đúng một lần, chạy một mình. Worker đo RAM/VRAM/đĩa theo cây tiến trình của từng bước, dọn workspace sau khi xong, và tự thu hồi đĩa khi thiếu.
 - **Artifact Contract ở cấp stage:** durable cross-stage, cross-worker và cross-track handoff phải publish artifact có logical URI/checksum. Internal computation trong cùng process có thể dùng RAM bình thường; không bắt buộc ghi đĩa giữa mọi function.
 
 P0 mapping:
@@ -1343,12 +1355,14 @@ Tuyệt đối không nhồi nhét tất cả các repo vào chung một dự á
 
 | Repository | Vai trò | Mức ưu tiên | Cách sử dụng |
 |---|---|---|---|
-| `colmap/colmap` | SfM / Camera Pose | Core Backend | CLI / executable backend qua PyCOLMAP |
+| `colmap/colmap` | SfM / Camera Pose | Core Backend | CLI / executable backend qua PyCOLMAP. **02/10/2026:** job có gói LiDAR dùng `point_triangulator` + `pose_prior_mapper` (bám quỹ đạo, ADR 0009) |
 | `ArthurBrussee/brush` | 3DGS visual reconstruction | Core Backend | CLI/container backend (`REC-04`) |
 | [`playcanvas/splat-transform`](https://github.com/playcanvas/splat-transform) | PLY semantic validation, SOG packaging, GPU voxelization, capsule carving, collision GLB | **Tier A — Core Utility & Collision Provider** | Validation & SOG export (`REC-04`), Voxel & Collision GLB generation (`REC-05`, `SIM-02`). Xem [Audit #4a](./audits/04a_splat_transform.md) |
 | `cdcseacave/openMVS` | RGB dense geometry + mesh fallback | Secondary / Fallback | Executable/container fallback backend (`REC-05` fallback) |
 | `facebookresearch/sam2` | Automatic masks + video propagation | Core Backend | Python model worker (`SCENE-02`) |
-| `isl-org/Open3D` | LiDAR, alignment, geometry utilities | Core Library | Python/C++ library (`REC-06`, `SCENE-06`, `SIM-02`) |
+| `isl-org/Open3D` | LiDAR, alignment, geometry utilities | Core Library | Python/C++ library (`REC-06`, `SCENE-06`, `SIM-02`). **02/10/2026:** phía REC chỉ còn dùng ở công cụ offline `scripts/torwic/`; worker ghép scan và nhận LiDAR bằng numpy (ADR 0009) |
+| `microsoft/MoGe` (MoGe-2, MIT) | Đề xuất tỉ lệ mét + mặt sàn cho video chỉ có RGB | Core Model (02/10/2026) | Subprocess trong `data/scene_runtime` (`REC-06`, ADR 0001 mục Implementation); kết quả là ước lượng, người dùng xác nhận |
+| `richzhang/PerceptualSimilarity` (`lpips` 0.1.4, BSD-2) | LPIPS-VGG trên ảnh giữ lại | Core Library (02/10/2026) | Subprocess trong `data/scene_runtime` (`REC-04`, benchmark `recon_visual_quality`); thiếu runtime thì bỏ qua, không làm hỏng job |
 | `mikedh/trimesh` | Mesh/collider utilities | Core Utility | Python library (`SIM-02`) |
 | `PixarAnimationStudios/OpenUSD` | USD scene model & Analytic Plane | Core Simulator Layer | Python/C++ API (`SIM-01`, `SIM-05`) |
 | `isaac-sim/IsaacLab` | Isaac integration/physics | Core Simulator | Simulator worker (`SIM-01`, `SIM-06`) |
@@ -1493,6 +1507,7 @@ Implementation Order dưới đây là **data dependency order cho real artifact
 Sau đó Integration #1 mới thay fixture bằng real artifact.
 
 - **Phase 0 (System Audit):** Đọc các hệ thống Tier-0 (VR-Robo, R2G...) để chốt giải pháp ghép nối cuối cùng.
+- **Cập nhật 02/10/2026 cho Phase A:** (1) Brush giữ lại mỗi ảnh thứ 8 không train và chấm PSNR/SSIM ở bước cuối, LPIPS-VGG chấm thêm khi worker có runtime (`brush.eval_split_every`, [plan đánh giá](../plans/active/2026-10-02-evaluation-system.md)). (2) Trước bước xác nhận tỉ lệ, worker chạy **MoGe-2** để đề xuất tỉ lệ mét và mặt sàn (ADR 0001 mục Implementation); kết quả là ước lượng, người dùng vẫn xác nhận. (3) Người dùng được nộp gói LiDAR kèm video ([ADR 0009](../decisions/0009-user-lidar-input-and-routing.md)), thay cho câu "không cho RGB runtime đọc raw LiDAR" bên dưới đối với dữ liệu người dùng tự nộp; ground truth của dataset vẫn chỉ được dùng khi khai rõ trong provenance.
 - **Phase A (Reconstruction):** `Video -> COLMAP -> Brush -> REC-06 metric confirmation -> metric derivative -> REC-05 splat-transform geometry`; OpenMVS fallback từ COLMAP khi cần. Upload RGB thật dùng known-distance HITL. Dataset demo có ba chế độ: RGB + LiDAR fusion, RGB được LiDAR hỗ trợ scale, RGB chọn hai điểm được LiDAR gợi ý khoảng cách; cả ba dùng prepared same-scene LiDAR evidence, không giả lập AI auto-scale và không cho RGB runtime đọc raw LiDAR/GT. Xem [ADR 0001](../decisions/0001-metric-scale-strategy-and-roadmap.md).
 - **Phase B (Metric):** REC-06 kiểm tra/propagate cùng transform cho pose, visual và geometry (có alignment khi mixed LiDAR), tránh double scaling, rồi xuất `ReconstructionBundle`.
 - **Phase C (Object Identity & Scene Decomposition):** SAM2 → Multi-view association → Human confirmation → SceneDecomposer → Draft SceneIR.

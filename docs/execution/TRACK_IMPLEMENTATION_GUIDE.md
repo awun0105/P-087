@@ -160,6 +160,21 @@ Không nghiên cứu vô hạn.
 
 ## 2.4 Implementation Source Map
 
+> **Cập nhật 02/10/2026** (không đổi task ID hay scope đã khoá; ghi công cụ/cách làm thực tế sau các quyết định
+> của owner — ADR 0001 mục Implementation, [ADR 0009](../decisions/0009-user-lidar-input-and-routing.md)):
+>
+> - `REC-03`: job có gói LiDAR dựng pose **bám theo quỹ đạo** (`point_triangulator` + `pose_prior_mapper`) thay cho
+>   `mapper`; job chỉ có video giữ `mapper`. Đang làm.
+> - `REC-04`: Brush giữ lại mỗi ảnh thứ 8 không train, ghi PSNR/SSIM (và LPIPS-VGG nếu có runtime) vào
+>   `BrushVisualArtifact.holdout_quality`. Đã có.
+> - `REC-06`: thêm đề xuất tỉ lệ mét + mặt sàn tự động bằng MoGe-2 (`distance_source = ai_estimated`); người dùng
+>   vẫn xác nhận. Đã có. Job có gói LiDAR lấy tỉ lệ và sàn từ LiDAR, không chọn điểm. Đang làm.
+> - `REC-07`: ngoài công cụ offline cho TorWIC (Open3D), worker ghép scan thô của người dùng theo quỹ đạo họ nộp
+>   bằng numpy (`lidar/fusion.py`). Đã có.
+> - `REC-08`: nhận gói LiDAR của người dùng (`lidar/package.py`), không dùng Open3D trong worker. Đã có.
+> - `REC-09`: với gói LiDAR, căn chỉnh đến từ quỹ đạo + calibration + thời điểm frame; không có UI chọn cặp điểm.
+> - Ngoài bảng: nhận diện loại đầu vào (`inputs/detect.py`) có thêm hai loại gói LiDAR.
+
 | Stage | Strategy | Source | Lấy từ repo/tool | Team tự code |
 |---|---|---|---|---|
 | `REC-01` TorWIC preparation | `SELF-CODE` | Dataset Playbook + Open3D/FFmpeg | IO/transform/encode primitives | normalizer, split/preparation scripts, manifests |

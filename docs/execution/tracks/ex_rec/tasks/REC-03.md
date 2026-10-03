@@ -189,3 +189,7 @@ Observed evidence:
 - Registered-frame/pose stats: 65/65 registered, 6,202 points, ratio 1.0.
 - COLMAP command/version/log: `COLMAP 4.3.0.dev0`, logged in `process.log`.
 - Small-scene artifact and receipt: `receipt.json` verified.
+
+## Cập nhật 02/10/2026 (không đổi Goal/I/O/DoD đã khoá)
+
+Job có gói LiDAR sẽ dựng pose **bám theo quỹ đạo** (`point_triangulator` + `pose_prior_mapper`) thay cho `mapper`; job chỉ có video không đổi. Thử nghiệm trên Aisle_CW và số đo: [ADR 0009](../../../../decisions/0009-user-lidar-input-and-routing.md). Chưa vào adapter — theo dõi ở [plan](../../../../plans/active/2026-10-02-lidar-video-flow.md) (L5).

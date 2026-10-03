@@ -9,10 +9,34 @@ import type { JobManifest, StageId } from "@/lib/contracts/api";
 
 export type VideoMediaType = "video/mp4" | "video/quicktime";
 
-export type UploadMediaType = VideoMediaType | "application/x-ply" | "application/zip";
+export type UploadMediaType = VideoMediaType | "application/x-ply" | "application/x-pcd" | "application/zip";
 
-/** Loại đầu vào máy chủ nhận diện theo nội dung (ADR 0004). */
-export type InputKind = "rgb_video" | "gaussian_ply" | "gaussian_ply_colmap";
+/** Loại đầu vào máy chủ nhận diện theo nội dung (ADR 0004; LiDAR theo ADR 0009). */
+export type InputKind = "rgb_video" | "gaussian_ply" | "gaussian_ply_colmap" | "registered_lidar" | "lidar_scan_sequence";
+
+/**
+ * Bằng chứng gói LiDAR (ADR 0009). Gói luôn có quỹ đạo, calibration và thời điểm frame; đám mây đã đăng ký có
+ * `cloud_member` + `point_count`, chuỗi scan thô có `scan_count`.
+ */
+export interface LidarEvidence {
+  geometry_format: "ply" | "pcd";
+  cloud_member: string | null;
+  point_count: number | null;
+  scan_count: number | null;
+  pose_count: number;
+  trajectory_member: string;
+  calibration_member: string;
+  calibration_format: "torwic_txt" | "json";
+  frame_times_member: string;
+  pairing: "index_in_name" | "sorted_order" | null;
+}
+
+/** Gói LiDAR gắn vào scene khi tạo (ADR 0009) cùng hai lời khai bắt buộc. */
+export interface LidarAttachment {
+  upload_id: string;
+  trajectory_origin: "estimated" | "ground_truth";
+  same_scene_confirmed: boolean;
+}
 
 export interface InputDetection {
   kind: InputKind;
@@ -20,6 +44,13 @@ export interface InputDetection {
   ply_member: string | null;
   colmap_dir: string | null;
   colmap_format: "bin" | "txt" | null;
+  lidar?: LidarEvidence | null;
+}
+
+/** Người thực hiện một thao tác (tải file, tạo scene, chạy job), chụp lại lúc thao tác; null = không biết. */
+export interface Actor {
+  user_id: string;
+  display_name: string;
 }
 
 export interface UploadRecord {
@@ -33,6 +64,7 @@ export interface UploadRecord {
   project_ids: string[];
   input_kind?: InputKind;
   detection?: InputDetection | null;
+  uploaded_by?: Actor | null;
 }
 
 export type DataOrigin = "public_or_synthetic" | "self_collected_no_pii" | "anonymized";
@@ -60,12 +92,45 @@ export interface StudioProject {
   privacy: StudioPrivacy;
   input_video: { original_name: string; media_type: VideoMediaType; size_bytes: number } | null;
   created_at: string | null;
+  created_by?: Actor | null;
+  /** Mốc bản demo nếu scene được đánh dấu là bản demo. */
+  demo_baseline?: DemoBaseline | null;
+}
+
+/** Mốc "bản demo gốc" của scene: revision mà nút Khôi phục bản demo đưa scene trở về. Khớp `DemoBaseline`. */
+export interface DemoBaseline {
+  job_id: string;
+  scene_revision: string;
+  marked_at: string;
+  marked_by?: Actor | null;
+}
+
+/** Trạng thái bản demo của một job. Khớp `DemoState` backend. */
+export interface DemoState {
+  job_id: string;
+  baseline: DemoBaseline | null;
+  current_revision: string | null;
+  at_baseline: boolean;
+}
+
+/** Kiểm trạng thái bản demo ở biên API: thiếu field là lỗi, không đoán. */
+export function parseDemoState(value: unknown): DemoState {
+  const invalid = () => new Error("Trạng thái bản demo không hợp lệ");
+  if (!isRecord(value) || typeof value.job_id !== "string" || typeof value.at_baseline !== "boolean") throw invalid();
+  if (!(value.current_revision === null || typeof value.current_revision === "string")) throw invalid();
+  const baseline = value.baseline;
+  if (baseline !== null && !(isRecord(baseline) && typeof baseline.scene_revision === "string" && typeof baseline.job_id === "string")) throw invalid();
+  return value as unknown as DemoState;
 }
 
 export interface SceneSummary {
   project: StudioProject;
   latest_job: JobManifest | null;
   preview_ready: boolean;
+  /** Thời gian máy đã xử lý (tổng các bước đã chạy xong), không gồm lúc xếp hàng và lúc chờ người dùng; null = chưa đo. */
+  processing_seconds?: number | null;
+  /** Người bấm chạy job mới nhất (tạo scene hoặc thử lại). */
+  requested_by?: Actor | null;
 }
 
 export interface SceneFromUpload {
@@ -110,6 +175,18 @@ export interface ResourceWaitView {
   capacity_gb?: Partial<Record<ResourceName, number | null>>;
 }
 
+/** Vị trí của job theo đúng thứ tự worker sẽ nhận (xoay vòng theo người yêu cầu). Khớp `QueuePosition`. */
+export interface QueuePositionView {
+  /** 1 = job kế tiếp được nhận. */
+  position: number;
+  waiting: number;
+  running: number;
+  workers: number;
+  /** Ước tính từ thời lượng đã đo của các lượt chạy trước; null khi chưa có số đo. */
+  estimated_wait_seconds: number | null;
+  estimate_samples: number;
+}
+
 export interface JobProgress {
   job_id: string;
   status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
@@ -123,11 +200,50 @@ export interface JobProgress {
   /** Pipeline đang chờ người dùng làm gì (vd xác nhận tỉ lệ mét sau preview). */
   waiting_for?: "metric_confirmation" | "resources" | null;
   resource_wait?: ResourceWaitView | null;
+  /** Vị trí trong hàng đợi khi job đang chờ máy xử lý; null khi đang chạy, đã xong hoặc chờ người dùng. */
+  queue?: QueuePositionView | null;
   error: ExecutionErrorView | null;
 }
 
 /** Nguồn số đo: người dùng đo ngoài đời, hoặc LiDAR của dataset mẫu (ADR 0004 §6). */
-export type DistanceSource = "user_measured" | "lidar_demo";
+/** `ai_estimated`: khoảng cách lấy từ đề xuất tự động (ADR 0001 §2), không phải số đo ngoài đời. */
+/** `lidar_trajectory`: khoảng cách suy từ gói LiDAR của job qua căn chỉnh quỹ đạo (ADR 0009), không ai chọn điểm. */
+export type DistanceSource = "user_measured" | "lidar_demo" | "ai_estimated" | "lidar_trajectory";
+
+/**
+ * Đề xuất tỉ lệ mét và mặt sàn tự động của worker (MoGe-2 + điểm thưa COLMAP). Luôn là ước lượng:
+ * người dùng chấp nhận hoặc sửa ở bước xác nhận. Khớp `MetricProposal` backend.
+ */
+/** Bằng chứng căn chỉnh của đề xuất lấy từ gói LiDAR: pose camera cuối cùng so với quỹ đạo người dùng nộp. */
+export interface TrajectoryAlignment {
+  trajectory_origin: "estimated" | "ground_truth";
+  input_frames: number;
+  registered_frames: number;
+  offset_median_m: number;
+  offset_p90_m: number;
+  offset_max_m: number;
+  path_length_m: number;
+}
+
+export interface MetricProposal {
+  status: "ESTIMATED";
+  job_id: string;
+  /** `lidar_trajectory_alignment`: tỉ lệ và sàn lấy từ gói LiDAR; mặc định là ước lượng của mô hình đoán độ sâu. */
+  method?: "moge2_sparse_depth_scale_only" | "lidar_trajectory_alignment";
+  alignment?: TrajectoryAlignment | null;
+  scale_m_per_sfm_unit: number;
+  /** Độ phân tán tương đối của tỉ lệ giữa các ảnh. */
+  frame_dispersion: number;
+  /** Sai số chuẩn tương đối của tỉ lệ (chỉ phần nhiễu giữa các ảnh). */
+  relative_uncertainty: number;
+  frames_used: number;
+  pairs_used: number;
+  floor: { points: [MetricPoint, MetricPoint, MetricPoint]; residual_m: number; support_points: number } | null;
+  segments: {
+    point_a: MetricPoint; point_b: MetricPoint; distance_m: number;
+    check_a: MetricPoint; check_b: MetricPoint; check_distance_m: number;
+  } | null;
+}
 
 /** Điểm chọn trên 3DGS (hệ gốc file, đơn vị SfM) + số đo A–B, C–D. Khớp `UserMetricInput`. */
 export interface MetricInput {
@@ -331,6 +447,14 @@ export function parseJobProgress(value: unknown): JobProgress {
       throw new Error("Lý do chờ tài nguyên không hợp lệ");
     }
   }
+  if (value.queue !== undefined && value.queue !== null) {
+    const queue = value.queue;
+    if (!isRecord(queue) || !["position", "waiting", "running", "workers", "estimate_samples"].every((key) => Number.isInteger(queue[key]) && (queue[key] as number) >= 0) ||
+        (queue.position as number) < 1 || (queue.workers as number) < 1 ||
+        (queue.estimated_wait_seconds !== null && !(isFiniteNumber(queue.estimated_wait_seconds) && queue.estimated_wait_seconds >= 0))) {
+      throw new Error("Vị trí hàng đợi từ backend không hợp lệ");
+    }
+  }
   return value as unknown as JobProgress;
 }
 
@@ -371,7 +495,7 @@ export function parseMetricPreview(value: unknown): MetricPreview {
   if (!isRecord(value) || typeof value.preview_checksum !== "string" || !Array.isArray(value.warnings) ||
       !value.warnings.every((warning) => typeof warning === "string") ||
       typeof value.check_passed !== "boolean" ||
-      (value.distance_source !== "user_measured" && value.distance_source !== "lidar_demo") ||
+      !["user_measured", "lidar_demo", "ai_estimated", "lidar_trajectory"].includes(String(value.distance_source)) ||
       !METRIC_NUMBERS.every((key) => isFiniteNumber(value[key]))) {
     throw new Error("Bản xem trước tỉ lệ từ backend không hợp lệ");
   }
@@ -389,6 +513,28 @@ export function parseLidarMeasurements(value: unknown): LidarMeasurements {
     throw new Error("Số đo LiDAR từ backend không hợp lệ");
   }
   return value as unknown as LidarMeasurements;
+}
+
+function isMetricPoint(value: unknown): value is MetricPoint {
+  return Array.isArray(value) && value.length === 3 && value.every(isFiniteNumber);
+}
+
+/** Đề xuất tự động phải có tỉ lệ dương, hữu hạn và điểm hợp lệ trước khi điền vào bước xác nhận. */
+export function parseMetricProposal(value: unknown): MetricProposal {
+  const positive = (item: unknown) => isFiniteNumber(item) && item > 0;
+  const floor = isRecord(value) ? value.floor : undefined;
+  const pairs = isRecord(value) ? value.segments : undefined;
+  if (!isRecord(value) || value.status !== "ESTIMATED" || typeof value.job_id !== "string" ||
+      !positive(value.scale_m_per_sfm_unit) || !isFiniteNumber(value.frame_dispersion) || value.frame_dispersion < 0 ||
+      !isFiniteNumber(value.relative_uncertainty) || value.relative_uncertainty < 0 ||
+      !positive(value.frames_used) || !positive(value.pairs_used) ||
+      (floor !== null && !(isRecord(floor) && Array.isArray(floor.points) && floor.points.length === 3 &&
+        floor.points.every(isMetricPoint) && isFiniteNumber(floor.residual_m))) ||
+      (pairs !== null && !(isRecord(pairs) && [pairs.point_a, pairs.point_b, pairs.check_a, pairs.check_b].every(isMetricPoint) &&
+        positive(pairs.distance_m) && positive(pairs.check_distance_m)))) {
+    throw new Error("Đề xuất tỉ lệ tự động từ backend không hợp lệ");
+  }
+  return value as unknown as MetricProposal;
 }
 
 /** Bộ điểm demo phải đủ 7 điểm hữu hạn và số đo hợp lệ trước khi vẽ lên scene. */
@@ -410,6 +556,8 @@ export interface StageView {
   unit: "meter" | "arbitrary";
   refs: { artifact_uri: string; artifact_checksum: string; artifact_type: string }[];
   cameras: { frame_id: number; center: [number, number, number]; rotation_xyzw: [number, number, number, number] }[];
+  /** Khoá của lớp LiDAR đã căn chỉnh chồng lên scene; null/thiếu = scene không có lớp này. */
+  lidar_overlay?: string | null;
 }
 
 const VIEW_KINDS: readonly StageView["kind"][] = ["frames", "cameras", "gaussian", "mesh"];
@@ -421,7 +569,8 @@ export function parseStageViews(value: unknown): StageView[] {
     if (!isRecord(view) || !VIEW_KINDS.includes(view.kind as StageView["kind"]) || typeof view.title !== "string" ||
         !Array.isArray(view.refs) || !Array.isArray(view.cameras) ||
         !view.refs.every((ref) => isRecord(ref) && typeof ref.artifact_uri === "string" && typeof ref.artifact_checksum === "string") ||
-        !view.cameras.every((camera) => isRecord(camera) && Array.isArray(camera.center) && camera.center.every(isFiniteNumber))) {
+        !view.cameras.every((camera) => isRecord(camera) && Array.isArray(camera.center) && camera.center.every(isFiniteNumber)) ||
+        !(view.lidar_overlay === undefined || view.lidar_overlay === null || typeof view.lidar_overlay === "string")) {
       throw new Error("Một lớp xem không hợp lệ");
     }
   }
@@ -479,4 +628,5 @@ export interface ImportedScene {
   delivery_ref: { artifact_uri: string; artifact_checksum: string } | null;
   error: string | null;
   created_at: string;
+  created_by_name?: string | null;
 }

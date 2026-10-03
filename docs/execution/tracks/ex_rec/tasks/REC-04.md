@@ -180,3 +180,7 @@ Expected evidence:
 - Visual screenshots/render sample.
 - Brush/runtime/GPU versions và duration.
 - Artifact manifest/checksum.
+
+## Cập nhật 02/10/2026 (không đổi Goal/I/O/DoD đã khoá)
+
+Brush giữ lại mỗi ảnh thứ 8 không train (`brush.eval_split_every = 8`) và ghi PSNR/SSIM/LPIPS vào `BrushVisualArtifact.holdout_quality`; `training_frame_ids` chỉ còn ảnh thật sự train, thêm `held_out_frame_ids`. Câu "Chỉ đưa registered training frames vào workspace" vẫn đúng (Brush tự tách trong số ảnh đã đăng ký). Chi tiết: [plan đánh giá](../../../../plans/active/2026-10-02-evaluation-system.md).

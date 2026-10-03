@@ -96,6 +96,8 @@ class Reservation(BaseModel):
     required_gb: dict[Resource, float] | None
     #: Job chạy một mình trên GPU này: chưa có số đo nên không ai được chạy chung.
     exclusive: bool = False
+    #: Pha đang chạy (preview hoặc hoàn tất), để ước tính thời gian chờ của hàng đợi.
+    phase: Literal["preview", "finalize"] | None = None
     reserved_at: datetime
     heartbeat_at: datetime
 
@@ -115,6 +117,8 @@ def resource_wait(database: RuntimeDatabase, job: JobManifest) -> ResourceWait |
 Phase = Literal["preview", "finalize"]
 #: Công cụ runner chạy trong mỗi lần nhận job; ngân sách đo được phải phủ hết các công cụ này.
 PHASE_TOOLS: dict[Phase, tuple[str, ...]] = {"preview": ("preview",), "finalize": ("finalize", "scene_extract")}
+#: Bước phụ trợ chạy cùng lần nhận job nhưng chỉ khi deployment bật (đề xuất tỉ lệ bằng MoGe-2).
+PHASE_OPTIONAL_TOOLS: dict[Phase, tuple[str, ...]] = {"preview": ("metric_proposal",), "finalize": ()}
 
 
 class Demand(BaseModel):
@@ -200,6 +204,7 @@ class ResourceAdmission:
             budget = observed_budget(
                 usages,
                 tools=PHASE_TOOLS[phase],
+                optional_tools=PHASE_OPTIONAL_TOOLS[phase],
                 params=numeric_params(params),
                 gpu_name=gpu_name,
                 runtime_manifest_checksum=job.runtime_manifest_checksum,
@@ -248,6 +253,7 @@ class ResourceAdmission:
         gpu_uuid: str | None,
         *,
         exclusive: bool,
+        phase: Phase | None = None,
     ) -> None:
         now = datetime.now(UTC)
         reservation = Reservation(
@@ -258,6 +264,7 @@ class ResourceAdmission:
             job_id=job.job_id,
             required_gb=required,
             exclusive=exclusive,
+            phase=phase,
             reserved_at=now,
             heartbeat_at=now,
         )
@@ -322,7 +329,7 @@ class ResourceAdmission:
 
     # --- Gate ----------------------------------------------------------------
 
-    def _decide(self, job: JobManifest, demand: Demand | None, gpu_uuid: str | None) -> bool:
+    def _decide(self, job: JobManifest, demand: Demand | None, gpu_uuid: str | None, phase: Phase) -> bool:
         """Đo, trừ phần worker khác đã giữ, rồi ghi giữ chỗ hoặc observation chờ trong một transaction.
 
         `demand` None (job legacy) hoặc `measured=False` nghĩa là chưa biết job dùng bao nhiêu:
@@ -347,7 +354,7 @@ class ResourceAdmission:
                 # Job legacy: không có con số nào để so; chỉ cần GPU không có ai.
                 if gpu_peers:
                     return False
-                self._reserve(tx, job, None, gpu_uuid, exclusive=True)
+                self._reserve(tx, job, None, gpu_uuid, exclusive=True, phase=phase)
                 return True
             required, danger_ratio = demand.required_gb, demand.danger_ratio
             available: dict[Resource, float | None] = {}
@@ -406,7 +413,7 @@ class ResourceAdmission:
                 self._disk_short = "disk" in waiting and reasons["disk"] != "exceeds_machine"
             else:
                 tx.execute("DELETE FROM r2s_resource_waits WHERE job_id=?", (job.job_id,))
-                self._reserve(tx, job, required, gpu_uuid, exclusive=exclusive)
+                self._reserve(tx, job, required, gpu_uuid, exclusive=exclusive, phase=phase)
                 self._disk_short = False
         return not waiting
 
@@ -459,9 +466,9 @@ class ResourceAdmission:
             gpu = bound_gpu()
             gpu_uuid = gpu.uuid if gpu is not None else None
             demand = self._demand(job, phase, gpu.name if gpu is not None else None)
-            admitted = self._decide(job, demand, gpu_uuid)
+            admitted = self._decide(job, demand, gpu_uuid, phase)
             if not admitted and self._disk_short and self._reclaim_disk(job):
-                admitted = self._decide(job, demand, gpu_uuid)
+                admitted = self._decide(job, demand, gpu_uuid, phase)
             return admitted
         except Exception as error:  # noqa: BLE001 - ranh giới gate: lỗi đo/ghi observation không phải lỗi của job
             logger.warning("Resource admission lỗi, thử lại lượt sau job=%s cause=%s", job.job_id, type(error).__name__)

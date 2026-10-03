@@ -2,8 +2,8 @@
 
 - `brush_quality.py` — benchmark `recon_visual_quality` (giao thức `eval/protocols/recon_visual_quality.md`):
   train Brush có eval split trên camera pose của một job, chấm PSNR/SSIM/LPIPS.
-- `lpips_score.py` — LPIPS-VGG giữa ảnh render và ảnh thật; chạy trong runtime có torch
-  (`PRODUCT_SCENE_RUNTIME_PYTHON`).
+- LPIPS-VGG giữa ảnh render và ảnh thật: `src/services/reconstruction/adapters/lpips_runner.py` (dùng chung với
+  pipeline sản phẩm từ 02/10/2026); chạy trong runtime có torch (`PRODUCT_SCENE_RUNTIME_PYTHON`).
 
 ## Ghi quá trình train ra Rerun (tuỳ chọn)
 

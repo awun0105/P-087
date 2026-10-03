@@ -160,3 +160,22 @@ def test_requeue_never_touches_a_job_that_is_not_failed_and_survives_errors(
     assert attempt.registry.get_job(queued.job_id) == queued
     monkeypatch.setattr(attempt.registry, "get_job", Mock(side_effect=RuntimeError("db down")))
     assert runner._requeue_if_exhausted(attempt) is None
+
+
+def test_processing_seconds_counts_machine_time_only() -> None:
+    """Thời gian xử lý = tổng các bước đã chạy xong; lượt lỗi và lượt chạy lại cũ không cộng dồn."""
+    from datetime import timedelta
+
+    from src.services.orchestration.processing.observed import processing_seconds
+
+    later = NOW + timedelta(hours=3)  # ba giờ chờ người dùng xác nhận tỉ lệ nằm giữa hai pha, không được tính
+    usages = [
+        _usage("prepare", None, 0.2, duration_seconds=60.0),
+        _usage("preview", 1.0, 1.0, duration_seconds=400.0),
+        _usage("finalize", 0.2, 0.5, duration_seconds=90.0, started_at=later, completed_at=later),
+        _usage("finalize", 0.2, 0.5, duration_seconds=80.0, outcome="failed", exit_code=1),
+        _usage("preview", 1.0, 1.0, duration_seconds=300.0, completed_at=later),  # chạy lại: thay lượt trước
+        _usage("prepare", None, 0.2, duration_seconds=10.0, job_id="job-b"),
+        _usage("preview", 1.0, 1.0, duration_seconds=5.0, job_id="job-c", outcome="failed", exit_code=1),
+    ]
+    assert processing_seconds(usages) == {"job-a": 60.0 + 300.0 + 90.0, "job-b": 10.0}

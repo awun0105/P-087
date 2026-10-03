@@ -146,3 +146,38 @@ def metric_visual_master(bundle: object, resolve: Callable[[ProductArtifactRef],
     if master.artifact_type != "GaussianPLY":
         raise ValueError("master của CanonicalVisualManifest không phải GaussianPLY")
     return master
+
+
+#: Số điểm tối đa của lớp LiDAR gửi cho trình duyệt (float32 xyz → khoảng 3,6 MB); đủ để thấy hình dạng không gian.
+LIDAR_OVERLAY_MAX_POINTS = 300_000
+_LIDAR_OVERLAY_VOXEL_M = 0.05
+_LIDAR_READ_LIMIT = 50_000_000
+
+
+def lidar_overlay_points(
+    bundle: object, resolve: Callable[[ProductArtifactRef], Path], max_points: int = LIDAR_OVERLAY_MAX_POINTS
+) -> np.ndarray | None:
+    """Đám mây LiDAR của bundle trong hệ `world` (mét, Z-up) đã thu gọn để vẽ chồng lên scene; `(N, 3)` float32.
+
+    None khi bundle không có LiDAR đã căn chỉnh (job chỉ có video, hoặc căn chỉnh chưa được xác nhận). Phép đặt vào
+    scene là `transform_target_from_source` của `AlignmentRecord` — đúng phép mà người dùng đã xác nhận, không khớp lại.
+    Thu gọn bằng lưới voxel, tăng dần cỡ ô tới khi vừa `max_points`, nên hình dạng giữ đều ở mọi vùng.
+    """
+    from src.models.contracts.reconstruction import AlignmentStatus, ReconstructionBundle
+    from src.services.reconstruction.alignment.similarity import rotation_matrix
+    from src.services.reconstruction.lidar.fusion import read_points, voxel_downsample
+
+    if not isinstance(bundle, ReconstructionBundle):
+        raise TypeError("cần ReconstructionBundle")
+    record, reference = bundle.alignment_record, bundle.lidar_geometry_ref
+    if record is None or reference is None or record.status != AlignmentStatus.CONFIRMED:
+        return None
+    with resolve(reference).open("rb") as stream:
+        points = read_points(stream, _LIDAR_READ_LIMIT)
+    transform = record.transform_target_from_source
+    world = points @ rotation_matrix(transform.rotation_quaternion_xyzw).T + np.asarray(transform.translation_xyz)
+    voxel = _LIDAR_OVERLAY_VOXEL_M
+    while len(world) > max_points:
+        voxel *= 1.5
+        world = voxel_downsample(world, voxel)
+    return world.astype("<f4")

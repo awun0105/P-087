@@ -114,7 +114,7 @@ function WorkSummary() {
       {!snapshot && <p role="status" className="text-sm text-ink-muted">Đang tải tổng hợp…</p>}
       {snapshot && snapshot.errors.length > 0 && <Notice tone="rust">Chưa tải đủ dữ liệu tổng hợp. {snapshot.errors.join(" · ")} Dữ liệu đọc được trước đó được giữ lại. <Button variant="secondary" size="sm" className="ml-2" onClick={() => void load(new AbortController().signal)}>Thử lại</Button></Notice>}
       <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {stats.map((stat) => <div key={stat.label} className="rounded-2xl border border-line bg-paper-raised p-5"><dt className="text-sm text-ink-muted">{stat.label}</dt><dd className="mt-2 font-mono text-3xl font-bold tabular-nums">{stat.value === undefined ? "—" : stat.value}</dd></div>)}
+        {stats.map((stat) => <div key={stat.label} className="rounded-2xl border border-line bg-paper-raised p-5"><dt className="text-ink-muted">{stat.label}</dt><dd className="mt-2 text-3xl font-bold value-tech">{stat.value === undefined ? "—" : stat.value}</dd></div>)}
       </dl>
       {scenes && scenes.length === 0 && <p className="text-sm text-ink-muted">Chưa có scene từ video. Vào Scenes để chọn mẫu, mở 3DGS hoặc tạo scene đầu tiên.</p>}
       {continuing.length > 0 && <Card className="p-5">

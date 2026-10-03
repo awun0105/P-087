@@ -167,9 +167,9 @@ export function TrashPage() {
                         {entry.items.map((item) => `${KIND_LABEL[item.kind]}${item.kind === "upload" ? ` ${item.name}` : ""}`).join(" · ")}
                       </p>
                     </TableCell>
-                    <TableCell className="hidden text-ink-muted sm:table-cell">{DATE.format(new Date(entry.deleted_at))}</TableCell>
-                    <TableCell className="whitespace-nowrap text-ink-muted">{remainingLabel(entry.expires_at, loadedAt)}</TableCell>
-                    <TableCell className="hidden text-ink-muted md:table-cell">{formatBytes(entry.size_bytes)}</TableCell>
+                    <TableCell className="hidden text-xs value-tech text-ink-muted sm:table-cell">{DATE.format(new Date(entry.deleted_at))}</TableCell>
+                    <TableCell className="text-xs whitespace-nowrap value-tech text-ink-muted">{remainingLabel(entry.expires_at, loadedAt)}</TableCell>
+                    <TableCell className="hidden text-xs value-tech text-ink-muted md:table-cell">{formatBytes(entry.size_bytes)}</TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-2">
                         <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run("restore", [entry.entry_id])} aria-label={`Khôi phục ${entry.title}`}>

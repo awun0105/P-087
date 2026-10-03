@@ -11,6 +11,7 @@ from pathlib import PurePosixPath
 from uuid import uuid4
 
 from src.services.orchestration.artifacts import ArtifactRemote, ArtifactResolver
+from src.services.orchestration.auth.models import Actor
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.uploads.models import (
     UNSUPPORTED_EXTENSION,
@@ -56,7 +57,7 @@ class DirectUploadService:
         self.remote: ArtifactRemote = resolver.remote
         self.max_bytes = max_bytes
 
-    def begin(self, filename: str, size_bytes: int) -> UploadSession:
+    def begin(self, filename: str, size_bytes: int, uploaded_by: Actor | None = None) -> UploadSession:
         """Kiểm tên/đuôi/dung lượng khai báo rồi mở multipart trên kho file."""
         name = display_name(filename)
         suffix = PurePosixPath(name).suffix.lower()
@@ -82,6 +83,7 @@ class DirectUploadService:
             multipart_id=multipart_id,
             status="UPLOADING",
             created_at=datetime.now(UTC),
+            uploaded_by=uploaded_by,
         )
         with self.database.transaction(write=True) as tx:
             tx.execute(
@@ -163,6 +165,7 @@ class DirectUploadService:
             received_at=datetime.now(UTC),
             input_kind=detection.kind,
             detection=detection,
+            uploaded_by=session.uploaded_by,
         )
         with self.database.transaction(write=True) as tx:
             row = tx.execute(

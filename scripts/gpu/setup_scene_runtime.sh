@@ -19,6 +19,12 @@ SAM2_CHECKPOINT_URL="https://dl.fbaipublicfiles.com/segment_anything_2/092824/sa
 SAM2_CHECKPOINT_SHA="7402e0d864fa82708a20fbd15bc84245c2f26dff0eb43a4b5b93452deb34be69"
 LAMA_URL="https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt"
 LAMA_SHA="7ba7aa7ac37a4d41fdbbeba3a2af7ead18058552997e3a3cd1a3b2210c9e6b4c"
+# MoGe-2 (đề xuất tỉ lệ mét tự động, ADR 0001 §2). Ghim commit thời MoGe-2: bản main đã là MoGe-3 với
+# dependency khác. Cài --no-deps để không đổi phiên bản numpy/opencv mà SAM2 và gsplat đang dùng.
+MOGE_COMMIT="b942f00bdc2a2a23ebb474fbe034d487e6dcceec"
+UTILS3D_COMMIT="3fab839f0be9931dac7c8488eb0e1600c236e183"
+MOGE_URL="https://huggingface.co/Ruicheng/moge-2-vitb-normal/resolve/main/model.pt"
+MOGE_SHA="16b8110e86d5dc5a849db120ca96ef3a223fd30b0c9146d1d81db504073da5f6"
 
 need() { command -v "$1" >/dev/null || { echo "[!] Thiếu lệnh: $1" >&2; exit 1; }; }
 need uv; need git; need curl
@@ -44,10 +50,16 @@ uv pip install --python "$PY" \
   "sam-2 @ git+https://github.com/facebookresearch/sam2@${SAM2_COMMIT}" \
   gsplat==1.5.3 coacd==1.0.14 scikit-image==0.26.0 opencv-python-headless==5.0.0.93 \
   trimesh==5.1.0 usd-core==26.8 lpips==0.1.4 rich==15.0.0 scipy==1.18.1
+uv pip install --python "$PY" --no-deps \
+  "moge @ git+https://github.com/microsoft/MoGe.git@${MOGE_COMMIT}" \
+  "utils3d @ git+https://github.com/EasternJournalist/utils3d.git@${UTILS3D_COMMIT}"
+uv pip install --python "$PY" huggingface_hub click
 
 mkdir -p "$RUNTIME/checkpoints" "$RUNTIME/weights"
 fetch "$SAM2_CHECKPOINT_URL" "$RUNTIME/checkpoints/sam2.1_hiera_tiny.pt" "$SAM2_CHECKPOINT_SHA"
 fetch "$LAMA_URL" "$RUNTIME/weights/big-lama.pt" "$LAMA_SHA"
+fetch "$MOGE_URL" "$RUNTIME/weights/moge-2-vitb-normal.pt" "$MOGE_SHA"
+"$PY" -c "from moge.model.v2 import MoGeModel"
 
 if [ "${R2S_SKIP_GPU_CHECK:-0}" = "1" ]; then
   # Lúc build image Docker không có GPU: chỉ kiểm import và biên dịch sẵn kernel gsplat (cần nvcc, không cần GPU).
@@ -84,10 +96,18 @@ print("ok: torch", torch.__version__, "· gsplat", gsplat.__version__, "· rende
 PY
 fi
 
+# LPIPS chấm ảnh giữ lại sau khi train 3DGS: tải sẵn trọng số VGG vào cache của torch để worker không cần mạng lúc
+# chạy job. Tải lỗi thì bỏ qua — bảng chỉ số sẽ ghi LPIPS "chưa đo", PSNR/SSIM vẫn có.
+"$PY" -c "import lpips; lpips.LPIPS(net='vgg', verbose=False)" >/dev/null 2>&1 \
+  || echo "[cảnh báo] chưa tải được trọng số LPIPS-VGG; LPIPS sẽ không được chấm cho tới khi tải được."
+
 cat <<EOF
 
 Runtime sẵn sàng. Thêm vào file env của stack (vd scripts/gpu/studio.env):
   PRODUCT_SCENE_RUNTIME_PYTHON=$PY
   PRODUCT_SAM2_CHECKPOINT=$RUNTIME/checkpoints/sam2.1_hiera_tiny.pt
   PRODUCT_LAMA_CHECKPOINT=$RUNTIME/weights/big-lama.pt
+  REC06_MOGE_PYTHON=$PY
+  REC06_MOGE_MODEL=$RUNTIME/weights/moge-2-vitb-normal.pt
+  REC04_BRUSH_LPIPS_PYTHON=$PY
 EOF

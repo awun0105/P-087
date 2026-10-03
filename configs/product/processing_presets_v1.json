@@ -170,7 +170,8 @@
     "brush": {
       "schema_version": "1.0",
       "seed": 0,
-      "refine_every": 200
+      "refine_every": 200,
+      "eval_split_every": 8
     },
     "colmap_max_threads": 16
   },

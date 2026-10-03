@@ -33,6 +33,7 @@ from src.models.contracts.manifests import (
     StageId,
     StageStatus,
 )
+from src.models.contracts.reconstruction import AlignmentRecord
 from src.services.reconstruction.adapters.gaussian_scale import SplatTransformSimilarityAdapter
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor
 from src.services.reconstruction.adapters.voxel import SplatTransformVoxelAdapter
@@ -101,6 +102,8 @@ class FinalizeRequest(ContractModel):
     confirmation_ref: ProductArtifactRef
     authorized_decision_checksum: Checksum
     geometry: GeometryProfile
+    #: `LidarPackageRecord` của job có gói LiDAR (ADR 0009); None = job chỉ có video.
+    lidar_package_ref: ProductArtifactRef | None = None
 
 
 class FinalizeResult(ContractModel):
@@ -163,6 +166,17 @@ def _json_ref(job_id: str, attempt_id: str, name: str, payload: bytes, artifact_
         producer_stage=StageId.METRIC_CANONICALIZE,
         job_id=job_id,
     )
+
+
+@dataclass(frozen=True)
+class _LidarBinding:
+    """Phần LiDAR của bundle: đám mây đã đăng ký, bản ghi căn chỉnh đã xác nhận và provenance đi kèm."""
+
+    geometry_ref: ProductArtifactRef
+    record: AlignmentRecord
+    provenance: dict
+    #: Đọc lại bản ghi căn chỉnh từ bytes đã publish và kiểm lại quyền xác nhận; cổng bundle bắt buộc có.
+    load: Callable[[ProductArtifactRef], AlignmentRecord]
 
 
 class FinalizeWorker:
@@ -317,6 +331,92 @@ class FinalizeWorker:
         ]
         return self._bundle(request, canonicalizer, visual_service, result, stages)
 
+    def _lidar_alignment(
+        self, request: FinalizeRequest, result: FinalizeResult, distance_source: str
+    ) -> "_LidarBinding | None":
+        """Gắn đám mây LiDAR của gói vào bundle bằng `AlignmentRecord` CONFIRMED (ADR 0009).
+
+        Chỉ khi người dùng đã xác nhận tỉ lệ từ chính căn chỉnh quỹ đạo: màn xác nhận khi đó cho họ xem độ lệch pose ↔
+        quỹ đạo, nên lời xác nhận phủ cả việc LiDAR và scene cùng một chỗ. Job có gói LiDAR nhưng người dùng tự nhập
+        số đo thì bundle vẫn chỉ có RGB — không tự coi căn chỉnh là đã được xác nhận.
+        """
+        if request.lidar_package_ref is None or distance_source != "lidar_trajectory":
+            return None
+        from src.models.contracts.reconstruction import AlignmentStatus
+        from src.services.reconstruction.alignment.models import AlignmentRequest
+        from src.services.reconstruction.alignment.service import RgbLidarAlignmentService
+        from src.services.reconstruction.lidar.camera_priors import camera_priors
+        from src.services.reconstruction.lidar.fusion import parse_trajectory
+        from src.services.reconstruction.lidar.package import LidarPackageRecord
+        from src.services.reconstruction.lidar.world_alignment import fit_world_from_lidar_map
+
+        record = LidarPackageRecord.model_validate_json(self.visuals.require(request.lidar_package_ref).read_bytes())
+        if record.job_id != request.job_id or result.canonical_pose_ref is None or result.geometry_ref is None:
+            raise ValueError("gói LiDAR không thuộc job này hoặc scene chưa có pose/hình học canonical")
+        poses = sorted(
+            json.loads(self.visuals.require(result.canonical_pose_ref).read_text())["poses"],
+            key=lambda pose: pose["frame_id"],
+        )
+        trajectory = parse_trajectory(self.visuals.require(record.trajectory_ref).read_text(encoding="utf-8"))
+        priors = camera_priors(trajectory, record.sensor_from_camera, tuple(pose["frame_id"] for pose in poses))
+        fit = fit_world_from_lidar_map(
+            [prior.translation for prior in priors], [tuple(pose["translation"]) for pose in poses]
+        )
+        ground_truth = record.trajectory_origin == "ground_truth"
+        evidence = {
+            "schema_version": "1.0",
+            "artifact_type": "LidarWorldAlignmentEvidence",
+            "job_id": request.job_id,
+            "method": fit.method,
+            "frame_count": fit.pair_count,
+            "residual_rms_m": fit.rms_residual_m,
+            "residual_median_m": fit.median_residual_m,
+            "residual_max_m": fit.max_residual_m,
+            "lidar_package_checksum": request.lidar_package_ref.artifact_checksum,
+            "canonical_pose_checksum": result.canonical_pose_ref.artifact_checksum,
+            "trajectory_origin": record.trajectory_origin,
+        }
+        payload = json.dumps(evidence, sort_keys=True, indent=2).encode() + b"\n"
+        evidence_ref = self.deps.writer.publish(
+            _json_ref(request.job_id, request.attempt_id, "lidar-alignment.json", payload, evidence["artifact_type"]),
+            payload,
+        )
+        alignment = AlignmentRequest(
+            job_id=request.job_id,
+            rgb_geometry_ref=result.geometry_ref,
+            lidar_geometry_ref=record.lidar_geometry_ref,
+            transform_target_from_source=fit.transform,
+            method="trajectory_camera_centers",
+            status=AlignmentStatus.CONFIRMED,
+            evidence_refs=[evidence_ref, request.confirmation_ref],
+            same_scene_attestation=True,
+            provenance={"ground_truth_assisted": ground_truth, "confirmed_by": "metric_confirmation"},
+        )
+
+        def verify(candidate: AlignmentRequest) -> bool:
+            # Chỉ chấp nhận đúng phép khớp vừa tính, gắn với đúng lời xác nhận tỉ lệ của người dùng.
+            return (
+                candidate.transform_target_from_source == fit.transform
+                and candidate.evidence_refs == [evidence_ref, request.confirmation_ref]
+                and candidate.lidar_geometry_ref == record.lidar_geometry_ref
+            )
+
+        service = RgbLidarAlignmentService(self.deps.writer, self.deps.resolve, verify)
+        aligned, _ = service.align(alignment)
+        return _LidarBinding(
+            load=service.load,
+            geometry_ref=record.lidar_geometry_ref,
+            record=aligned,
+            provenance={
+                "ground_truth_assisted": ground_truth,
+                "lidar_alignment": {
+                    "method": fit.method,
+                    "residual_median_m": round(fit.median_residual_m, 4),
+                    "residual_max_m": round(fit.max_residual_m, 4),
+                },
+            },
+        )
+
     def _bundle(
         self,
         request: FinalizeRequest,
@@ -336,10 +436,17 @@ class FinalizeWorker:
         frames = self.visuals.poses.frames.load(raw.source_frame_set)
         if not (result.visual_delivery_ref and result.canonical_pose_ref and result.geometry_ref):
             raise ValueError("bundle cần visual, pose và geometry canonical đã publish")
+        lidar = self._lidar_alignment(request, result, data.distance_source)
         bundle = BundleBuildRequest(
             job_id=request.job_id,
             source_input_checksum=frames.input_manifest_checksum,
-            input_configuration=InputConfiguration(rgb_present=True, registered_lidar_present=False),
+            input_configuration=InputConfiguration(
+                rgb_present=True,
+                registered_lidar_present=lidar is not None,
+                declared_same_scene=True if lidar else None,
+            ),
+            lidar_geometry_ref=lidar.geometry_ref if lidar else None,
+            alignment_record=lidar.record if lidar else None,
             metric_scale=MetricScale(status="CONFIRMED", meters_per_unit=1),
             rgb_frame_refs=[frame.image for frame in frames.frames],
             camera_pose_refs=[result.canonical_pose_ref],
@@ -352,6 +459,7 @@ class FinalizeWorker:
                 "geometry_profile": request.geometry.profile,
                 "geometry_profile_checksum": "sha256:"
                 + hashlib.sha256(request.geometry.model_dump_json().encode()).hexdigest(),
+                **(lidar.provenance if lidar else {}),
             },
         )
         metric_request = BundleMetricRequest(
@@ -396,7 +504,8 @@ class FinalizeWorker:
         )
         record = verifier.load(verification_ref)
         _, bundle_ref = ReconstructionBundleService(
-            self.deps.writer, BundleDependencies(self.deps.resolve, verifier.verify_bundle)
+            self.deps.writer,
+            BundleDependencies(self.deps.resolve, verifier.verify_bundle, lidar.load if lidar else None),
         ).build_and_publish(bundle.model_copy(update={"verification_ref": verification_ref}))
         stages.append(
             self._event(

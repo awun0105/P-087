@@ -14,9 +14,13 @@ from src.services.reconstruction.adapters.brush import BrushAdapter, BrushDepend
 from src.services.reconstruction.adapters.brush_input import BrushInputAdapter
 from src.services.reconstruction.adapters.brush_runtime import VisualProcess
 from src.services.reconstruction.adapters.colmap import ColmapAdapter, ColmapDependencies, ColmapRequest
-from src.services.reconstruction.adapters.colmap_runtime import ColmapProcess
+from src.services.reconstruction.adapters.colmap_priors import PoseGuidance, PosePrior
+from src.services.reconstruction.adapters.colmap_runtime import ColmapError, ColmapProcess
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor
 from src.services.reconstruction.attempt import PublicationNamespace
+from src.services.reconstruction.lidar.camera_priors import CameraPriorError, camera_priors
+from src.services.reconstruction.lidar.fusion import parse_trajectory
+from src.services.reconstruction.lidar.package import LidarPackageRecord
 from src.services.reconstruction.preview_models import PreparedPreviewRequest, PreparedPreviewResult
 from src.services.reconstruction.resume import ResumeCache
 from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver, _sha256
@@ -109,6 +113,7 @@ class _PreviewExecution:
         self.poses = CameraPoseResolver(deps.resolve, deps.frames)
         self.visuals = VisualResolver(deps.resolve, self.poses)
         self.pose_ref: ProductArtifactRef | None = None
+        self.guidance_ref: ProductArtifactRef | None = None
         self.resume_key: str | None = None
         self.visual_ref: ProductArtifactRef | None = None
         self.delivery_ref: ProductArtifactRef | None = None
@@ -136,7 +141,28 @@ class _PreviewExecution:
             raw_visual_ref=self.visual_ref,
             delivery_ref=self.delivery_ref,
             preview_ref=self.preview_ref,
+            pose_guidance_ref=self.guidance_ref,
             error=error,
+        )
+
+    def _guidance(self) -> PoseGuidance | None:
+        """Pose camera từ gói LiDAR của job (nếu có): dòng quỹ đạo thứ `frame_id` ghép với calibration."""
+        reference = self.request.lidar_package_ref
+        if reference is None:
+            return None
+        record = LidarPackageRecord.model_validate_json(self.deps.resolve(reference).read_bytes())
+        if record.job_id != self.request.job_id:
+            raise ValueError("LiDAR package record belongs to another job")
+        poses = parse_trajectory(self.deps.resolve(record.trajectory_ref).read_text(encoding="utf-8"))
+        frames = self.deps.frames.load(self.request.frame_set_ref)
+        frame_ids = tuple(frame.frame_id for frame in frames.frames)
+        priors = camera_priors(poses, record.sensor_from_camera, frame_ids)
+        camera = record.camera
+        return PoseGuidance(
+            tuple(PosePrior(f"{prior.frame_id:06d}.png", prior.translation, prior.rotation_xyzw) for prior in priors),
+            None
+            if camera is None
+            else (camera.width, camera.height, (camera.fx, camera.fy, camera.cx, camera.cy, *camera.distortion)),
         )
 
     def _validate_source(self) -> None:
@@ -164,10 +190,11 @@ class _PreviewExecution:
                 workspace=workspace,
                 job_id=self.request.job_id,
                 attempt_id=self.request.attempt_id,
+                guidance=self._guidance(),
             )
         )
         self._complete(result.stage)
-        self.pose_ref, self.resume_key = result.reference, result.resume_key
+        self.pose_ref, self.resume_key, self.guidance_ref = result.reference, result.resume_key, result.guidance_ref
 
     def _brush(self, workspace: Path) -> None:
         self._start(StageId.VISUAL_RECON)
@@ -198,10 +225,16 @@ class _PreviewExecution:
         )
 
     def _failure(self, cause: Exception) -> ExecutionError:
+        # Lỗi do gói LiDAR không khớp video là lỗi người dùng sửa được: giữ nguyên lý do, không dùng câu chung.
+        lidar = isinstance(cause, CameraPriorError) or (
+            isinstance(cause, ColmapError) and cause.code == "COLMAP_GUIDANCE_INVALID"
+        )
         error = ExecutionError(
-            error_code="RECONSTRUCTION_PREVIEW_FAILED",
+            error_code="LIDAR_ALIGNMENT_INVALID" if lidar else "RECONSTRUCTION_PREVIEW_FAILED",
             stage_id=self.publication.current_stage,
-            human_message="Preview failed; inspect attempt logs and configured runtime before retrying",
+            human_message=(
+                str(cause) if lidar else "Preview failed; inspect attempt logs and configured runtime before retrying"
+            ),
             retryable=False,
             details={"exception_type": type(cause).__name__},
         )

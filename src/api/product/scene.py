@@ -1,11 +1,14 @@
 """SceneIR của job (PRODUCT-06/07, pipeline v2): revision, sửa transform, thao tác vật thể, danh mục asset, tách lại theo vật."""
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 
 from src.api import schemas
 from src.api.auth import enforce_gpu_quota, record_gpu_run, require_editor
 from src.api.product import deps
+from src.config import Settings
 from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.auth import UserRecord
 from src.services.orchestration.scene import SceneEditCommand, SceneError, SceneRevisionConflictError, objectify_queue
@@ -145,11 +148,23 @@ def add_object(
     )
 
 
+def _preview_path(settings: Settings, family: str) -> Path | None:
+    """Hình xem trước của một họ asset: bản CC0/tự dựng trước; bản chuyển từ asset Isaac chỉ khi deployment cho phép.
+
+    Bản Isaac không được phát trên staging/production theo mặc định vì giấy phép asset của NVIDIA (ADR 0010 mục 3).
+    """
+    cc0 = settings.product_catalog_preview_dir / f"{family}.glb"
+    if cc0.is_file():
+        return cc0
+    isaac = settings.product_asset_preview_dir / f"{family}.glb"
+    return isaac if settings.isaac_asset_previews_enabled and isaac.is_file() else None
+
+
 @router.get("/scene/catalog", response_model=schemas.SceneCatalogResponse)
 def get_scene_catalog() -> schemas.SceneCatalogResponse:
     """Danh mục nhãn + asset Isaac đặt được (ADR 0007); giá trị vật lý là mặc định tham khảo."""
     catalog = load_catalog()
-    previews = deps.settings().product_asset_preview_dir
+    settings = deps.settings()
     return schemas.SceneCatalogResponse(
         classes=catalog.classes(),
         entries=[
@@ -159,7 +174,7 @@ def get_scene_catalog() -> schemas.SceneCatalogResponse:
                 size_xyz_m=entry.size_xyz_m,
                 dynamic=bool(entry.physics.get("dynamic", True)),
                 default_mass_kg=entry.physics.get("mass_kg"),
-                has_preview=(previews / f"{entry.family}.glb").is_file(),
+                has_preview=_preview_path(settings, entry.family) is not None,
             )
             for entry in catalog.placeable()
         ],
@@ -172,8 +187,8 @@ def get_catalog_preview(family: str) -> FileResponse:
     """Hình khối của một asset danh mục (GLB, mét, Z lên, tâm hộp bao tại gốc) để Studio vẽ thay cho hộp."""
     entry = load_catalog().family(family)
     # Tên file lấy từ danh mục, không từ tham số đường dẫn: không đọc được file ngoài thư mục xem trước.
-    path = deps.settings().product_asset_preview_dir / f"{entry.family}.glb" if entry is not None else None
-    if path is None or not path.is_file():
+    path = _preview_path(deps.settings(), entry.family) if entry is not None else None
+    if path is None:
         raise HTTPException(status_code=404, detail="asset chưa có bản xem trước")
     return FileResponse(path, media_type="model/gltf-binary", headers={"Cache-Control": "public, max-age=86400"})
 

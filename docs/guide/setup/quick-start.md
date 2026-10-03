@@ -4,6 +4,15 @@ description: "Khởi tạo project trong 5 phút"
 weight: 1
 ---
 
+> **Phạm vi:** Đây là quick-start cho repo đội được sinh từ AI20K template;
+> placeholder như `<ORG-CỦA-KHOÁ>` và `<MÃ-ĐỘI>` được giữ nguyên. Checkout
+> Real2Sim Studio P-087 dùng chuỗi setup lockfile ở bước 2 bên dưới.
+>
+> Sau khi có `.env.studio` và ZIP data theo
+> [`studio-distribution.md`](../studio-distribution.md), stack hiện tại chạy
+> bằng `docker compose --env-file .env.studio -f docker-compose.yml up --build
+> -d --wait`; máy Linux có thể dùng `make -f Makefile.studio docker`.
+
 ## Quick Start Guide
 
 ### Bước 1: Clone repo của đội
@@ -20,11 +29,13 @@ cd <MÃ-ĐỘI>
 
 ```bash
 # Tạo virtual environment
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate  # macOS/Linux
 
-# Cài dependencies
-pip install -r requirements.txt
+# Cài dependencies từ lockfiles
+python -m pip install uv==0.9.4
+uv pip sync requirements.lock.txt requirements-dev.lock.txt
+uv pip check
 
 # Tạo .env từ template
 cp .env.example .env

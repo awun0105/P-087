@@ -28,6 +28,8 @@ class BrushRuntimeSettings(BaseSettings):
     environment: dict[str, str] = Field(default_factory=dict)
     #: Khoảng cách mong muốn (số bước) giữa hai checkpoint khi có kho resume; 0 = không checkpoint.
     checkpoint_every: int = Field(default=2500, ge=0)
+    #: Python của runtime có torch + gói `lpips` (thường là `data/scene_runtime`); None = không chấm LPIPS.
+    lpips_python: Path | None = None
     model_config = SettingsConfigDict(env_prefix="REC04_BRUSH_", extra="forbid")
 
 
@@ -69,6 +71,7 @@ class VisualProcess:
             raise ValueError("empty Brush runtime command")
         self.settings = settings
         self.iteration_flag = "--total-train-iters"
+        self.supports_eval_split = False
 
     def run(self, invocation: Invocation, workspace: Path) -> str:
         """Log stdout/stderr trên disk; phiên bản/config probe cũng có evidence."""
@@ -141,7 +144,12 @@ class VisualProcess:
         )
         if any(flag not in help_text for flag in required):
             raise VisualError("BRUSH_CLI_UNSUPPORTED", "Brush runtime lacks required training/export controls")
+        self.supports_eval_split = all(flag in help_text for flag in EVAL_FLAGS)
         return versions[0]
+
+
+#: Cờ Brush cho việc giữ lại ảnh không train và chấm ở bước cuối (ảnh render lưu cạnh file xuất).
+EVAL_FLAGS = ("--eval-split-every", "--eval-every", "--eval-save-to-disk")
 
 
 @dataclass(frozen=True)
@@ -156,7 +164,10 @@ class Checkpointing:
 def brush_command(
     config: BrushConfig, workspace: Path, iteration_flag: str, checkpointing: Checkpointing | None = None
 ) -> tuple[str, ...]:
-    """Không dùng eval split/args.txt; dataset chỉ có registered train images.
+    """Dataset chỉ có ảnh đã đăng ký pose; không dùng args.txt.
+
+    `config.eval_split_every` = N: Brush giữ lại mỗi ảnh thứ N không train, chấm PSNR/SSIM một lần ở bước cuối và
+    lưu ảnh render vào `<thư mục xuất>/eval_<bước>/` (để chấm LPIPS). Không đặt thì train trên mọi ảnh.
 
     Không checkpoint: xuất một lần ở bước cuối thành `output/visual.ply`. Có checkpoint: xuất
     `ckpt_<bước>.ply` định kỳ (bản ở bước cuối là kết quả), và train tiếp bằng `--start-iter` khi có.
@@ -173,4 +184,6 @@ def brush_command(
         if checkpointing.start_iter:
             args.extend(["--start-iter", str(checkpointing.start_iter)])
     args.extend(["--export-every", export[0], "--export-path", export[1], "--export-name", export[2]])
+    if config.eval_split_every is not None:
+        args.extend(["--eval-every", str(config.total_train_iters), "--eval-save-to-disk"])
     return tuple(args)

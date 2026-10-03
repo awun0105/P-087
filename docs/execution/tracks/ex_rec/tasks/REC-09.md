@@ -262,3 +262,7 @@ thể sai rõ ràng).
     - Nguồn RGB và LiDAR artifacts giữ nguyên bất biến, không bị sửa đổi.
 - `tests/test_reconstruction/test_rec09_alignment.py`:
   - 6/6 test cases pass: xác nhận thành công AlignmentRecord với LiDAR thật từ `LiDARIngestService`, nạp trực tiếp file `calibrations.txt` của TorWIC thật, từ chối khi khác scene (`same_scene_attestation=False`), từ chối khi lệch job_id, từ chối khi target frame sai, kiểm định roundtrip nghịch đảo transform.
+
+## Cập nhật 02/10/2026 (không đổi Goal/I/O/DoD đã khoá)
+
+Với gói LiDAR của người dùng, căn chỉnh đến từ quỹ đạo + calibration + thời điểm frame (dựng pose bám quỹ đạo), không có UI chọn cặp điểm; người dùng xem sai số rồi xác nhận. Chưa làm — [plan](../../../../plans/active/2026-10-02-lidar-video-flow.md) (L5, L6).

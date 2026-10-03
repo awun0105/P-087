@@ -76,6 +76,25 @@ Outputs:
   Brush giữ làm bản xem nhanh. Pha A chạy thử trên `job-123dfd4868d8`
   ([plan](../../../plans/active/2026-09-30-pipeline-v2.md)).
 
+## Cập nhật 2026-10-02
+
+- **Giữ lại ảnh để chấm (REC-04):** `brush.eval_split_every = 8` trong presets; Brush chấm PSNR/SSIM ở bước cuối,
+  LPIPS-VGG qua `adapters/lpips_runner.py` khi có `REC04_BRUSH_LPIPS_PYTHON`. `BrushVisualArtifact` thêm
+  `held_out_frame_ids` và `holdout_quality`; trường mới vắng mặt trong JSON khi không dùng nên checksum artifact cũ
+  không đổi. Quy tắc chọn ảnh của Brush (chỉ số % N == 0 theo thứ tự tên) đã đối chiếu với Brush 0.3.0 thật.
+- **Đề xuất tỉ lệ mét tự động (REC-06, ADR 0001 mục Implementation):** MoGe-2 trong `data/scene_runtime`
+  (`adapters/moge_runner.py`, `metric_proposal.py`, `rgb/canonical/auto_scale.py`); artifact `MetricScaleProposal`
+  trạng thái ESTIMATED. Aisle_CW: lệch 0,2% (50 ảnh) và 9,3% (16 ảnh) so với tỉ lệ xác nhận bằng LiDAR.
+- **LiDAR của người dùng ([ADR 0009](../../../decisions/0009-user-lidar-input-and-routing.md),
+  [plan](../../../plans/active/2026-10-02-lidar-video-flow.md)):** gói ZIP gồm quỹ đạo + calibration + thời điểm
+  frame + (đám mây đã đăng ký | scan thô). Đã có: nhận diện gói (`inputs/detect.py`), ghép scan bằng numpy
+  (`lidar/fusion.py`), nhận gói và publish `LiDARGeometryArtifact` + `LidarPackageRecord` (`lidar/package.py`), bước
+  `ST-LIDAR-INGEST` trong worker. Đang làm: dựng pose bám quỹ đạo trong REC-03, tỉ lệ mét từ LiDAR không chọn điểm,
+  mesh va chạm từ LiDAR.
+- **Công cụ:** Open3D chỉ còn ở công cụ offline `scripts/torwic/`; worker không cần Open3D. COLMAP 4.3 có
+  `pose_prior_mapper` và `point_triangulator` (đã thử trên Aisle_CW, số đo ở ADR 0009).
+- **Không làm:** chế độ hai camera cho COLMAP (owner cấm); LiDAR odometry/SLAM; job chỉ-LiDAR.
+
 ## Authority Gates
 
 - Canonical convention đã khóa: meter, Z-up, right-handed, world frame `world`, transform `parent_from_local`, quaternion `xyzw`, angle `radian`.

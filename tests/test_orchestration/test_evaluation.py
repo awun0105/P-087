@@ -187,3 +187,111 @@ async def test_evaluation_routes_return_scorecard_and_downloadable_report(client
     assert report.status_code == 200 and report.headers["content-type"].startswith("text/markdown")
     assert report.headers["content-disposition"] == 'attachment; filename="evaluation-job-fixture-001.md"'
     assert report.text.startswith("# Đánh giá scene:")
+
+
+def test_held_out_quality_reports_scores_or_the_reason_it_is_missing() -> None:
+    """PSNR/SSIM/LPIPS chỉ hiện khi đã đo trên ảnh giữ lại; thiếu thì nêu lý do, không điền số."""
+    from src.services.orchestration.evaluation.scorecard import _held_out_metrics
+    from src.services.reconstruction import VisualQuality
+
+    base = dict(gaussians=1000, nonfinite_values=0, training_frames=44, train_iterations=30000)
+
+    old_scene = _held_out_metrics(VisualQuality(**base))
+    assert [metric.key for metric in old_scene] == ["visual.novel_view_quality"]
+    assert old_scene[0].value is None and "train trên mọi ảnh" in old_scene[0].display
+
+    no_report = _held_out_metrics(VisualQuality(**base, held_out_frames=6))
+    assert no_report[0].value is None and "không in kết quả" in no_report[0].display
+
+    measured = _held_out_metrics(
+        VisualQuality(**base, held_out_frames=6, held_out_psnr=28.6165, held_out_ssim=0.89637, held_out_lpips=None)
+    )
+    by_key = {metric.key: metric for metric in measured}
+    assert by_key["visual.novel_view_quality"].value == 28.62 and by_key["visual.novel_view_quality"].unit == "dB"
+    assert "6 ảnh giữ lại" in by_key["visual.novel_view_quality"].display
+    assert by_key["visual.novel_view_ssim"].value == 0.8964
+    assert (
+        by_key["visual.novel_view_lpips"].value is None and "chưa cấu hình" in by_key["visual.novel_view_lpips"].display
+    )
+
+    with_lpips = _held_out_metrics(
+        VisualQuality(**base, held_out_frames=6, held_out_psnr=28.0, held_out_ssim=0.9, held_out_lpips=0.26495)
+    )
+    assert with_lpips[2].value == pytest.approx(0.265, abs=1e-3)
+    assert "VGG" in with_lpips[2].display
+
+
+def test_reference_group_appears_only_after_an_evaluator_recorded_results(tmp_path: Path) -> None:
+    import json
+
+    from eval.reference.torwic import base_record, write_record
+
+    registry = ProjectRegistry(runtime_root=tmp_path / "artifacts")
+    registry.seed_from_fixtures()
+    job = registry.create_job(SimpleNamespace(project_id="project-fixture-001", scene_revision="rev-001"))
+    assert "reference" not in [group.group_id for group in evaluate_job(registry, job.job_id, _GEOMETRY).groups]
+
+    traversal = Path("Aisle_CW")
+    pose = base_record("recon_pose", "unit-test", job.job_id, traversal, 0) | {
+        "job_used_this_trajectory": True,
+        "registered_frames": 40,
+        "path_length_m": 12.5,
+        "ate_similarity_m": {"rmse": 0.5},
+        "rpe_translation_m": {"p50": 0.02},
+        "rpe_rotation_deg": {"p50": 0.4},
+    }
+    write_record(registry, pose, tmp_path / "results" / "recon_pose" / "unit-test.jsonl")
+    # Lượt chấm sau thay lượt trước trong bảng; bản ghi cũ vẫn còn nguyên.
+    second = write_record(registry, pose | {"ate_similarity_m": {"rmse": 0.081}}, None)
+    assert second.artifact_uri.endswith("/benchmark/recon_pose/attempt-2.json")
+    scale = base_record("metric_scale", "unit-test", job.job_id, traversal, 0)
+    write_record(registry, scale | {"job_used_this_trajectory": False, "scale_error_percent": -1.25}, None)
+
+    proposal = base_record("metric_scale_proposal", "unit-test", job.job_id, traversal, 0)
+    proposal |= {"proposal_method": "moge2_sparse_depth_scale_only", "proposal_error_percent": -0.24}
+    write_record(registry, proposal | {"scale_is_independent": True}, None)
+
+    group = next(g for g in evaluate_job(registry, job.job_id, _GEOMETRY).groups if g.group_id == "reference")
+    values = _values(group.metrics)
+    assert group.status == "measured" and "ground truth" in (group.note or "")
+    assert values["reference.ate"] == 8.1 and values["reference.scale_error"] == -1.25
+    assert {metric.source for metric in group.metrics} == {"reference"}
+    assert values["reference.scale_proposal_error"] == -0.24
+    assert "reference.surface_accuracy" not in values
+    ate = next(metric for metric in group.metrics if metric.key == "reference.ate")
+    assert "không phải độ chính xác độc lập" in ate.meaning
+    lines = (tmp_path / "results" / "recon_pose" / "unit-test.jsonl").read_text().splitlines()
+    assert len(lines) == 1 and json.loads(lines[0])["assistance"] == "evaluation_only_ground_truth"
+
+
+def test_reference_label_must_follow_the_benchmark_naming_rule() -> None:
+    from eval.reference.torwic import base_record
+
+    with pytest.raises(ValueError, match="nhãn"):
+        base_record("recon_pose", "Nhãn Sai", "job-x", Path("Aisle_CW"), 0)
+
+
+def test_lidar_group_reports_the_ingested_package(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    record = SimpleNamespace(
+        kind="lidar_scan_sequence",
+        point_count=1000,
+        pose_count=50,
+        floor_support_points=300,
+        trajectory_origin="estimated",
+        fusion=SimpleNamespace(scan_count=10, removed_points=250, input_points=1000),
+    )
+    path = tmp_path / "record.json"
+    path.write_text("{}")
+    monkeypatch.setattr(scorecard, "_reference", lambda *_args: object())
+    monkeypatch.setattr(scorecard.LidarPackageRecord, "model_validate_json", classmethod(lambda _cls, _raw: record))
+    registry = SimpleNamespace(runtime_resolver=SimpleNamespace(require=lambda _ref: path))
+
+    values = _values(scorecard._lidar_metrics(registry, SimpleNamespace()))  # type: ignore[arg-type]
+
+    assert values["lidar.scans"] == 10 and values["lidar.removed_points"] == 25.0
+    assert values["lidar.points"] == 1000 and values["lidar.trajectory_origin"] == "estimated"
+
+    record.fusion = None
+    record.kind = "registered_lidar"
+    registered = _values(scorecard._lidar_metrics(registry, SimpleNamespace()))  # type: ignore[arg-type]
+    assert "lidar.scans" not in registered and registered["lidar.kind"] == "registered_lidar"

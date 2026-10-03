@@ -13,6 +13,8 @@ from src.models.contracts.preview import ReconstructionPreview
 from src.services.orchestration.artifacts import ArtifactNotFoundError, ArtifactStoreError
 from src.services.orchestration.jobs.display_glb import display_space_glb
 from src.services.orchestration.projects import JobNotFoundError
+from src.services.orchestration.scene.errors import SceneError
+from src.services.orchestration.scene.physics import dynamic_carve_boxes
 
 router = APIRouter()
 
@@ -107,8 +109,11 @@ def get_walk_collision(
     filename: str,
     artifact_uri: str = Query(..., min_length=1),
     artifact_checksum: Checksum = Query(...),
+    dynamic: list[str] = Query(default=[]),
 ) -> Response:
     """Lưới va chạm của job đã xoay sang không gian hiển thị, cho chế độ đi bộ của viewer.
+
+    `dynamic`: id các vật động; vùng gốc của chúng bị khoét khỏi lưới để người đi chạm và đẩy được vật (ADR 0010).
 
     Quyền đọc như `artifacts/content`: URI/checksum phải nằm trong allow-list của job. Bytes
     trả về là bản dẫn xuất tính tại chỗ từ artifact đã verify checksum; artifact gốc không đổi.
@@ -127,12 +132,14 @@ def get_walk_collision(
             producer_stage="ST-EDIT",
             job_id=job_id,
         )
-        payload = display_space_glb(deps.registry().resolve_artifact(job_id, reference).read_bytes())
+        registry = deps.registry()
+        carve = dynamic_carve_boxes(registry, job_id, dynamic) if dynamic else []
+        payload = display_space_glb(registry.resolve_artifact(job_id, reference).read_bytes(), carve)
     except ValidationError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
     except ArtifactStoreError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    except ValueError as error:
+    except (ValueError, SceneError) as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=f"Không dùng được lưới va chạm: {error}"
         ) from error

@@ -20,13 +20,19 @@ import { useListState, pageSlice, ListPagination, SortControl } from "@/features
 import { progressHref } from "@/features/studio/inspection";
 import { PageHeader, ErrorFeedback } from "@/components/studio/feedback";
 import type { SceneSummary } from "@/lib/contracts/studio";
+import { formatDuration } from "@/lib/format";
 
 const TIME = new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" });
 
-function duration(start: string, end: string | null, now: number): string {
-  const seconds = Math.max(0, Math.round(((end ? Date.parse(end) : now) - Date.parse(start)) / 1000));
-  const minutes = Math.floor(seconds / 60);
-  return minutes >= 60 ? `${Math.floor(minutes / 60)} giờ ${minutes % 60} phút` : `${minutes} phút ${seconds % 60} giây`;
+/**
+ * Thời gian xử lý = thời gian máy thật sự chạy các bước (backend cộng từ số đo của từng bước), không gồm lúc xếp hàng
+ * và lúc chờ người dùng thao tác. Job chưa có bước nào chạy xong, hoặc dựng trước khi có số đo, thì không có số.
+ */
+function processingTime(scene: SceneSummary): string {
+  const seconds = scene.processing_seconds;
+  const finished = scene.latest_job?.completed_at != null;
+  if (seconds == null) return finished ? "Chưa đo" : "—";
+  return formatDuration(seconds) + (finished ? "" : " (chưa xong)");
 }
 
 /**
@@ -39,12 +45,10 @@ export function JobsPage() {
   const [scenes, setScenes] = useState<SceneSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { query, setQuery, filter, setFilter, sort, setSort, params, update, clear } = useListState();
-  const [now, setNow] = useState(() => Date.now());
 
   const load = useCallback(async () => {
     if (!signedIn) return;
     const result = await listScenes();
-    setNow(Date.now());
     if (result.ok) {
       setScenes(result.data.scenes);
       setError(null);
@@ -130,8 +134,9 @@ export function JobsPage() {
                 <TableHead>Scene</TableHead>
                 <TableHead>Trạng thái</TableHead>
                 <TableHead className="hidden md:table-cell">Bước hiện tại</TableHead>
+                <TableHead className="hidden xl:table-cell">Người chạy</TableHead>
                 <TableHead className="hidden sm:table-cell">Bắt đầu</TableHead>
-                <TableHead className="hidden lg:table-cell">Tổng thời gian</TableHead>
+                <TableHead className="hidden lg:table-cell">Thời gian xử lý</TableHead>
                 <TableHead className="hidden w-0 sm:table-cell" />
               </TableRow>
             </TableHeader>
@@ -155,17 +160,10 @@ export function JobsPage() {
                       <Badge tone={status.tone}>{status.label}</Badge>
                     </TableCell>
                     <TableCell className="hidden text-ink-muted md:table-cell">{job.status === "SUCCEEDED" ? "Hoàn tất" : job.current_stage ? (stageMeta(job.current_stage)?.title ?? job.current_stage) : "—"}</TableCell>
-                    <TableCell className="hidden text-ink-muted sm:table-cell">{job.started_at ? TIME.format(new Date(job.started_at)) : "—"}</TableCell>
-                    <TableCell className="hidden text-ink-muted lg:table-cell">
-                      {status.group === "action"
-                        ? "Đang chờ bạn"
-                        : job.started_at
-                          ? // Manifest không có thời gian từng bước: job đã qua bước tỉ lệ mét thì tổng gồm cả lúc
-                            // chờ người chọn điểm — ghi rõ, không trình bày như thời gian máy chạy.
-                            `${duration(job.started_at, job.completed_at, now)}${job.completed_at ? "" : " (đang chạy)"}${
-                              job.stage_artifacts.some((item) => item.stage_id === "ST-METRIC-CANONICALIZE") ? " · gồm lúc chờ bạn" : ""
-                            }`
-                          : "—"}
+                    <TableCell className="hidden text-ink-muted xl:table-cell">{(scene.requested_by ?? scene.project.created_by)?.display_name ?? "—"}</TableCell>
+                    <TableCell className="hidden text-xs value-tech text-ink-muted sm:table-cell">{job.started_at ? TIME.format(new Date(job.started_at)) : "—"}</TableCell>
+                    <TableCell className="hidden text-xs value-tech text-ink-muted lg:table-cell">
+                      {processingTime(scene)}
                     </TableCell>
                     <TableCell className="hidden text-right sm:table-cell">
                       <Link href={progressHref(job.job_id)} className="font-medium whitespace-nowrap text-ember-strong hover:underline">

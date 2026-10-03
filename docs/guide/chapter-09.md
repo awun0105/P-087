@@ -3,6 +3,11 @@ title: "Nộp bài Demo Day"
 weight: 9
 ---
 
+> **Phạm vi:** Đây là checklist deliverable của AI20K template. Các tên file như
+> `requirements.txt`, `Dockerfile` và `docker-compose.yml` trong checklist là
+> ví dụ/placeholder của template; với Real2Sim Studio P-087, dùng lockfiles,
+> `make setup` và Compose canonical được mô tả trong `README.md`.
+
 ## 9.1 Mười deliverables BTC yêu cầu
 
 Ban Tổ Chức (BTC) AI20K yêu cầu mỗi đội nộp **10 deliverables** cho Demo Day. Tỷ lệ hoàn thành phổ biến như sau (ước tính từ kinh nghiệm):

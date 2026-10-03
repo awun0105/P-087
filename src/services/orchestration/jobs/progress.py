@@ -25,6 +25,7 @@ from src.models.contracts.manifests import (
 )
 from src.services.orchestration.jobs.admission import ResourceWait
 from src.services.orchestration.jobs.models import JobAttemptRecord
+from src.services.orchestration.jobs.queue import QueuePosition
 
 #: 5 stage tới preview 3DGS (video mẫu, export bundle dùng danh sách này).
 MVP_PIPELINE: tuple[StageId, ...] = (
@@ -43,6 +44,21 @@ STUDIO_PIPELINE: tuple[StageId, ...] = (
     StageId.RGB_GEOMETRY,
     StageId.OBJECT_EXTRACT,
 )
+
+
+def studio_pipeline(job: JobManifest) -> tuple[StageId, ...]:
+    """Các stage của một job Studio. Job có gói LiDAR (ADR 0009) có thêm `ST-LIDAR-INGEST` sau bước tách frame.
+
+    Chỉ JobManifest biết job có LiDAR hay không, và chỉ sau khi bước nhận LiDAR đã ghi kết quả (đạt hoặc lỗi); trước
+    đó timeline giống job chỉ có video.
+    """
+    if job.current_stage != StageId.LIDAR_INGEST and not any(
+        stage.stage_id == StageId.LIDAR_INGEST for stage in job.stage_artifacts
+    ):
+        return STUDIO_PIPELINE
+    index = STUDIO_PIPELINE.index(StageId.FRAME_EXTRACT) + 1
+    return (*STUDIO_PIPELINE[:index], StageId.LIDAR_INGEST, *STUDIO_PIPELINE[index:])
+
 
 StageState = Literal["pending", "running", "waiting", "succeeded", "failed", "cancelled"]
 #: Lý do pipeline chờ: người xác nhận hoặc worker chưa đủ tài nguyên.
@@ -77,6 +93,8 @@ class JobProgress(BaseModel):
     preview_ready: bool
     waiting_for: WaitingFor | None = None
     resource_wait: ResourceWait | None = None
+    #: Vị trí trong hàng đợi khi job đang chờ worker; None khi job đang chạy, đã xong hoặc chờ người dùng.
+    queue: QueuePosition | None = None
     error: ExecutionError | None = None
 
 
@@ -100,17 +118,20 @@ def _current_attempt(attempts: list[JobAttemptRecord]) -> list[JobAttemptRecord]
 
 
 def job_progress(
-    job: JobManifest, attempts: list[JobAttemptRecord], preview_ready: bool, resource_wait: ResourceWait | None = None
+    job: JobManifest,
+    attempts: list[JobAttemptRecord],
+    preview_ready: bool,
+    resource_wait: ResourceWait | None = None,
+    queue: QueuePosition | None = None,
 ) -> JobProgress:
     """Chiếu JobManifest + journal thành tiến trình từng stage của attempt hiện tại."""
     events = _current_attempt(attempts)
+    pipeline = studio_pipeline(job)
     attempt_start = next((event.recorded_at for event in events if event.status == JobStatus.QUEUED), None)
     # Retry bước hoàn tất bắt đầu thẳng ở hình học: các stage trước đó không chạy lại
     # trong attempt này, kết quả của chúng (preview, xác nhận) là artifact attempt trước.
     first_running = next((event.current_stage for event in events if event.status == JobStatus.RUNNING), None)
-    carried = (
-        set(STUDIO_PIPELINE[: STUDIO_PIPELINE.index(first_running)]) if first_running in STUDIO_PIPELINE else set()
-    )
+    carried = set(pipeline[: pipeline.index(first_running)]) if first_running in pipeline else set()
     records = {
         stage.stage_id: stage
         for stage in job.stage_artifacts
@@ -129,9 +150,9 @@ def job_progress(
     # dù StageArtifact của nó chỉ được commit cùng receipt ở cuối attempt.
     advanced = {
         stage_id: stage_starts[later]
-        for index, stage_id in enumerate(STUDIO_PIPELINE)
+        for index, stage_id in enumerate(pipeline)
         if stage_id in stage_starts
-        for later in STUDIO_PIPELINE[index + 1 :]
+        for later in pipeline[index + 1 :]
         if later in stage_starts
     }
     waiting = awaiting_metric_confirmation(job, preview_ready)
@@ -143,7 +164,7 @@ def job_progress(
         else None
     )
     stages: list[StageProgress] = []
-    for stage_id in STUDIO_PIPELINE:
+    for stage_id in pipeline:
         record = records.get(stage_id)
         state: StageState = "pending"
         error = None
@@ -187,6 +208,7 @@ def job_progress(
         preview_ready=preview_ready,
         waiting_for="metric_confirmation" if waiting else ("resources" if resources else None),
         resource_wait=resources,
+        queue=queue if job.status == JobStatus.QUEUED or awaiting_finalize(job) else None,
         error=failure if job.status == JobStatus.FAILED else None,
     )
 

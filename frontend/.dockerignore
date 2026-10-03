@@ -1,0 +1,23 @@
+node_modules
+.next
+out
+coverage
+public/editor
+vendor/supersplat/node_modules
+*.log
+*.tsbuildinfo
+tests
+README.md
+
+# Never copy local provider keys or teammate runtime credentials into the web
+# image.  Keep checked-in example templates available for onboarding.
+.env
+.env.*
+*.env
+*.env.*
+**/.env
+**/.env.*
+**/*.env
+**/*.env.*
+!.env*.example
+!**/.env*.example

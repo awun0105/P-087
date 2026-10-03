@@ -34,7 +34,11 @@ def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
     record_validation_report(registry, job.job_id, report)
     audits: list[tuple] = []
     monkeypatch.setattr(deps, "get_project_registry", lambda: registry)
-    monkeypatch.setattr(auth, "auth_service", lambda: SimpleNamespace(audit=lambda *args: audits.append(args)))
+    service = SimpleNamespace(
+        audit=lambda *args: audits.append(args),
+        get_user=lambda user_id: _user("reviewer") if user_id == "u-reviewer" else None,
+    )
+    monkeypatch.setattr(auth, "auth_service", lambda: service)
     body = {
         "decision": "APPROVE",
         "candidate_checksum": candidate,
@@ -59,6 +63,8 @@ def test_reviewer_approves_and_downloads_release(setup, monkeypatch: pytest.Monk
     assert response.status_code == 200, response.text
     state = response.json()
     assert state["record"]["status"] == "RELEASED" and state["approval"]["reviewer_id"] == "u-reviewer"
+    assert state["reviewer_name"] == "reviewer"  # UI hiện tên người duyệt, không chỉ id
+    assert setup.client.get(f"/api/v1/jobs/{setup.job}/review-state").json()["reviewer_name"] == "reviewer"
     assert setup.audits and setup.audits[0][1] == "review.approve"
     download = setup.client.get(f"/api/v1/jobs/{setup.job}/release-download")
     assert download.status_code == 200 and download.headers["content-type"] == "application/zip"

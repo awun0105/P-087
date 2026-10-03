@@ -96,8 +96,13 @@ nhóm chạy cùng các bước ở local trước mỗi lần merge và ghi k�
 Chạy bằng Docker:
 
 ```bash
-docker compose up --build
+docker compose --env-file .env.studio up --build -d --wait
 ```
+
+`docker-compose.yml` là stack **Web Studio** mặc định (restore data + API + web).
+Chuẩn bị ZIP và `.env.studio` theo [hướng dẫn Studio distribution](docs/guide/studio-distribution.md).
+Hướng dẫn bao gồm ZIP có checksum, restore an toàn, hai tài khoản seed của gói team,
+worker GPU và topology production theo ADR 0003.
 
 ## Environment Variables
 
@@ -153,16 +158,20 @@ Thư mục gốc giữ nguyên khung do ban tổ chức (BTC) cung cấp — kh�
 | `requirements.in` → `requirements.lock.txt` | Phụ thuộc runtime của API/worker. `Dockerfile`, `Dockerfile.gpu`, CI và `scripts/setup.sh` cài từ file lock | BTC + nhóm |
 | `requirements-dev.in` → `requirements-dev.lock.txt` | Công cụ dev/test (ruff, pytest…); CI và `scripts/setup.sh` cài từ file lock | Nhóm |
 | `requirements-offline.in` → `requirements-offline.lock.txt` | Tooling dataset offline cho `scripts/torwic/` (open3d), tách khỏi runtime | Nhóm |
-| `requirements.txt` | File phụ thuộc gốc của template; build và CI của dự án **không** dùng, giữ vì thuộc khung BTC | BTC |
 | `Makefile` | Lệnh dev của template: `run`, `test`, `lint`, `setup`, `lock`, `doctor`, `smoke` | BTC |
 | `Makefile.studio` | Chạy cả stack Studio cục bộ (API + worker + web): `make -f Makefile.studio up` | Nhóm |
-| `Dockerfile` | Image API (CPU); `docker-compose.yml` build từ file này | BTC, nhóm sửa |
+| `Dockerfile` | Image API Studio (CPU), có restore/auth entrypoint, USD, ffmpeg và splat-transform | Nhóm |
 | `Dockerfile.gpu` | Image GPU worker (COLMAP, Brush, runtime tách vật thể) | Nhóm |
-| `docker-compose.yml` | Compose mẫu của template cho image API | BTC |
+| `frontend/Dockerfile` | Image Next.js và editor | Nhóm |
+| `docker-compose.yml` | Stack Studio mặc định: restore data, API, web | Nhóm |
+| `docker-compose.gpu.yml` | Override thêm worker NVIDIA và runtime preflight | Nhóm |
 | `ruff.toml`, `.python-version`, `.env.example`, `.gitignore`, `.dockerignore` | Cấu hình công cụ và mẫu biến môi trường | BTC + nhóm |
 | `THIRD_PARTY_NOTICES.md` | Nguồn và giấy phép của code, mô hình, asset bên thứ ba (backend và frontend) | Nhóm |
 
 Sinh lại ba file lock bằng `make lock` (`scripts/lock_dependencies.sh`).
+Chỉnh dependency trong `.in`; cài từ lock tương ứng. Offline LiDAR dùng
+Open3D 0.19.0 và Pydantic/settings trong môi trường riêng. Các file requirements
+template cũ và khai báo LiDAR riêng đã được hợp nhất vào các cặp canonical.
 
 ## Bản đồ thư mục `data/`
 

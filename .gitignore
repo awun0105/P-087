@@ -16,6 +16,14 @@ env/
 .env
 .env.local
 .env.production
+.env.studio
+deploy/studio/*.env
+r2s-studio-data*.zip
+r2s-studio-data*.zip.sha256
+real2sim-studio-source*.zip
+real2sim-studio-source*.zip.sha256
+r2s-studio-data*.tar.gz
+*.partial
 
 # IDE
 .vscode/

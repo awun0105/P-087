@@ -29,7 +29,7 @@ export function FlowStepper({ steps, current }: { steps: readonly FlowStep[]; cu
               >
                 <span
                   className={cn(
-                    "grid size-6 place-items-center rounded-full text-xs font-semibold",
+                    "grid size-6 place-items-center rounded-full font-mono text-xs font-semibold",
                     done && "bg-sage text-paper",
                     active && "bg-primary text-primary-foreground",
                     !done && !active && "border border-line-strong text-ink-subtle",

@@ -37,7 +37,13 @@
 - Kiến trúc cloud, hai role và ngân sách trình duyệt đã chốt, chưa triển khai:
   [ADR 0003](decisions/0003-cloud-architecture-roles-and-browser-budget.md),
   [plan Cloud Studio](plans/active/2026-09-29-cloud-studio.md).
-- Metric scale ba hướng: [ADR 0001](decisions/0001-metric-scale-strategy-and-roadmap.md).
+- Metric scale ba hướng: [ADR 0001](decisions/0001-metric-scale-strategy-and-roadmap.md) (mục Implementation:
+  đề xuất tự động bằng MoGe-2, 02/10/2026).
+- LiDAR của người dùng đi kèm video: [ADR 0009](decisions/0009-user-lidar-input-and-routing.md),
+  [plan luồng video + LiDAR](plans/active/2026-10-02-lidar-video-flow.md).
+- Tài nguyên, hàng đợi nhiều người dùng: [plan](plans/active/2026-10-02-resource-management-cleanup.md).
+  Đánh giá và PSNR trên ảnh giữ lại: [plan](plans/active/2026-10-02-evaluation-system.md).
+  Viewer đi bộ, chọn vật theo hình dáng, đề xuất tỉ lệ: [plan](plans/active/2026-10-02-interactive-scene-and-metric-scale.md).
 - Bản đồ thư mục theo checkout thật: [`README.md`](../README.md) §Project Structure.
 
 ## Execution Entry Points

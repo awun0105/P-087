@@ -72,7 +72,9 @@ def create_import(
     """Tạo scene import và nén PLY → SOG trong nền; client poll tới READY/FAILED."""
     try:
         upload = deps.uploads().get(request.upload_id)
-        record = _service().create(upload, request.name, user.user_id if user else None)
+        record = _service().create(
+            upload, request.name, user.user_id if user else None, user.display_name if user else None
+        )
     except UploadNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except SceneImportError as error:

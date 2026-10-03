@@ -23,6 +23,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
 from uuid import uuid4
@@ -38,7 +39,8 @@ from src.models.contracts.manifests import (
     StageId,
     StageStatus,
 )
-from src.services.orchestration.artifacts import ArtifactResolver
+from src.models.contracts.preview import ReconstructionPreview
+from src.services.orchestration.artifacts import ArtifactResolver, FilesystemArtifactStore
 from src.services.orchestration.benchmark import build_benchmark, publish_benchmark
 from src.services.orchestration.jobs.admission import ResourceAdmission, job_drivers
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
@@ -64,9 +66,11 @@ from src.services.orchestration.processing.telemetry import (
 )
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
 from src.services.reconstruction import (
+    MogeSettings,
     confirmation_summary,
     load_finalize_result,
     load_geometry_profile,
+    propose_metric,
     verify_prepared_preview,
 )
 
@@ -370,6 +374,25 @@ def _start_attempt(
     return _Attempt(registry, settings, job, workspace), profile
 
 
+def _lidar_package_ref(job: JobManifest) -> ProductArtifactRef | None:
+    """`LidarPackageRecord` của job nếu bước nhận LiDAR đã chạy xong; job chỉ có video trả None."""
+    stage = next(
+        (item for item in job.stage_artifacts if item.stage_id == StageId.LIDAR_INGEST and item.artifact_uri),
+        None,
+    )
+    if stage is None:
+        return None
+    return ProductArtifactRef(
+        artifact_type=stage.artifact_type or "LidarPackageRecord",
+        schema_version="1.0",
+        artifact_uri=stage.artifact_uri,
+        artifact_checksum=stage.artifact_checksum,
+        data_class=stage.data_class,
+        producer_stage=StageId.LIDAR_INGEST,
+        job_id=job.job_id,
+    )
+
+
 def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: ResolvedProcessing) -> JobManifest:
     """COLMAP → Brush → preview trên frame set đã verify, rồi commit receipt."""
     attempt.registry.runtime_resolver.require(frames)
@@ -384,6 +407,10 @@ def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: Res
         "colmap": profile.colmap,
         "brush": profile.brush,
     }
+    # Job có gói LiDAR (ADR 0009): giao bản ghi gói cho REC để dựng pose bám theo quỹ đạo.
+    lidar = _lidar_package_ref(attempt.job)
+    if lidar is not None:
+        request["lidar_package_ref"] = lidar.model_dump(mode="json")
     request_path = attempt.workspace / "preview.request.json"
     with request_path.open("x", encoding="utf-8") as stream:
         json.dump(request, stream)
@@ -415,11 +442,61 @@ def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: Res
     receipt = verify_prepared_preview(reference, attempt.registry.runtime_resolver.require)
     if receipt.attempt_id != attempt_id or (receipt.error is None) != (exit_code == 0):
         raise ValueError("Worker result khác attempt/exit status")
+    # Trước khi job chuyển sang chờ xác nhận tỉ lệ: khi người dùng mở bước đó thì đề xuất đã có (hoặc
+    # chắc chắn không có), UI không phải đoán "đang tính" hay "không bật".
+    _propose_metric(attempt, receipt.preview_ref)
     job = attempt.registry.record_preview(attempt.job, receipt)
     _record_benchmark(attempt)
     if receipt.error is None:
         _cleanup_attempt_workspace(attempt)
     return job
+
+
+def _propose_metric(attempt: _Attempt, preview_ref: ProductArtifactRef | None) -> None:
+    """Đề xuất tỉ lệ/mặt sàn tự động (ADR 0001 §2) cho preview vừa dựng; không bao giờ làm hỏng job.
+
+    Không cấu hình runtime MoGe, không đủ dữ liệu hoặc lỗi runtime đều chỉ có nghĩa là không có đề
+    xuất: người dùng xác nhận tỉ lệ bằng số đo tay như trước.
+    """
+    if preview_ref is None:
+        return
+    resolver = attempt.registry.runtime_resolver
+    try:
+        preview = ReconstructionPreview.model_validate_json(resolver.require(preview_ref).read_bytes())
+        lidar = _lidar_package_ref(attempt.job)
+        if lidar is not None:
+            # Job có gói LiDAR (ADR 0009): tỉ lệ và sàn lấy từ căn chỉnh quỹ đạo, không chạy mô hình đoán độ sâu.
+            from src.services.reconstruction import propose_metric_from_lidar
+
+            propose_metric_from_lidar(
+                attempt.job.job_id,
+                preview.source_visual_ref,
+                lidar,
+                resolver.require,
+                FilesystemArtifactStore(resolver),
+                resolver.locate,
+            )
+            resolver.sync_up(attempt.job.job_id)
+            logger.info("Đề xuất tỉ lệ từ LiDAR job=%s", attempt.job.job_id)
+            return
+        settings = MogeSettings()
+        if settings.python is None or settings.model is None:
+            return
+        with _sampled(attempt, "metric_proposal"):
+            reference = propose_metric(
+                attempt.job.job_id,
+                preview.source_visual_ref,
+                resolver.require,
+                FilesystemArtifactStore(resolver),
+                resolver.locate,
+                attempt.workspace / "metric_proposal",
+                settings,
+            )
+        if reference is not None:
+            resolver.sync_up(attempt.job.job_id)
+        logger.info("Đề xuất tỉ lệ tự động job=%s: %s", attempt.job.job_id, "có" if reference else "không có")
+    except Exception as error:  # noqa: BLE001 - bước phụ trợ: lỗi không được chặn preview đã dựng xong
+        logger.warning("Không tạo được đề xuất tỉ lệ job=%s cause=%s", attempt.job.job_id, type(error).__name__)
 
 
 def _cleanup_attempt_workspace(attempt: _Attempt) -> None:
@@ -521,6 +598,64 @@ def _execute_prepare(attempt: _Attempt, profile: ResolvedProcessing) -> JobManif
     return attempt.registry.record_prepared_input(attempt.job, receipt)
 
 
+def _execute_lidar_ingest(attempt: _Attempt) -> JobManifest:
+    """`ST-LIDAR-INGEST` cho job có gói LiDAR (ADR 0009): giải gói, ghép scan nếu cần, publish đám mây + bản ghi gói.
+
+    Job chỉ có video trả nguyên job. Bằng chứng nhận diện lấy từ InputManifest (đã lưu lúc tạo scene), không nhận
+    diện lại từ tên file. Chạy ngay trong worker (CPU + RAM, không dùng GPU) và được đo như một công cụ riêng.
+    """
+    from src.services.reconstruction import LidarEvidence, LidarPackageError, LidarPackageIngest
+
+    project = attempt.registry.get_project(attempt.job.project_id)
+    resolver = attempt.registry.runtime_resolver
+    manifest = InputManifest.model_validate_json(resolver.require(project.input_manifest_ref).read_bytes())  # type: ignore[arg-type]
+    declared = (manifest.preparation_provenance or {}).get("lidar")
+    if not manifest.input_configuration.registered_lidar_present or not isinstance(declared, dict):
+        return attempt.job
+    package = next(item for item in manifest.files if item.media_type == "application/zip")
+    # Ghi bước đang chạy ngay từ đầu để timeline hiện "Nhận dữ liệu LiDAR" thay vì bước kế tiếp (ghép scan mất vài phút).
+    attempt.job = attempt.registry.record_stage_progress(attempt.job, StageId.LIDAR_INGEST)
+    started = datetime.now(UTC)
+    try:
+        with _sampled(attempt, "lidar_ingest"):
+            result = LidarPackageIngest(FilesystemArtifactStore(resolver)).ingest(
+                resolver.require_uri(package.artifact_uri, package.checksum),
+                LidarEvidence.model_validate(declared["evidence"]),
+                attempt.job.job_id,
+                declared["trajectory_origin"],
+                attempt.workspace / "lidar",
+            )
+    except LidarPackageError as error:
+        failure = ExecutionError(
+            error_code="LIDAR_PACKAGE_INVALID",
+            stage_id=StageId.LIDAR_INGEST,
+            human_message=str(error),
+            retryable=False,
+            details={"action": "Sửa gói LiDAR theo hướng dẫn rồi tạo scene mới"},
+        )
+        stage = StageArtifact(
+            stage_id=StageId.LIDAR_INGEST,
+            status=StageStatus.FAILED,
+            started_at=started,
+            completed_at=datetime.now(UTC),
+            error=failure,
+        )
+        return attempt.registry.record_lidar_ingest(attempt.job, stage)
+    resolver.sync_up(attempt.job.job_id)
+    reference = result.reference
+    stage = StageArtifact(
+        stage_id=StageId.LIDAR_INGEST,
+        status=StageStatus.SUCCEEDED,
+        artifact_type=reference.artifact_type,
+        artifact_uri=reference.artifact_uri,
+        artifact_checksum=reference.artifact_checksum,
+        data_class=reference.data_class,
+        started_at=started,
+        completed_at=datetime.now(UTC),
+    )
+    return attempt.registry.record_lidar_ingest(attempt.job, stage)
+
+
 def run_prepared_job(job_id: str, frame_set_uri: str, *, expected_checksum: str | None = None) -> JobManifest:
     """Chỉ dispatch frame ref đã publish/allow-list và profile đúng JobManifest."""
     initial = get_project_registry().get_job(job_id)
@@ -550,6 +685,10 @@ def run_video_job(job_id: str, *, expected_checksum: str | None = None) -> JobMa
             frames = prepared_frame_reference(attempt.job)
             if frames is None:
                 raise ValueError("Prepare thành công nhưng thiếu frame set")
+            attempt.job = _execute_lidar_ingest(attempt)
+            if attempt.job.status != JobStatus.RUNNING:
+                _record_benchmark(attempt)  # gói LiDAR hỏng: dừng trước khi tốn GPU cho COLMAP/Brush
+                return attempt.job
             job = _execute_preview(attempt, frames, profile)
         return _requeue_if_exhausted(attempt) or job
     except BaseException as error:
@@ -648,6 +787,10 @@ def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> Jo
                 "authorized_decision_checksum": decision_checksum,
                 "geometry": profile.model_dump(mode="json"),
             }
+            # Job có gói LiDAR (ADR 0009): bước hoàn tất gắn đám mây LiDAR vào bundle bằng căn chỉnh đã xác nhận.
+            lidar = _lidar_package_ref(registry.get_job(job_id))
+            if lidar is not None:
+                request["lidar_package_ref"] = lidar.model_dump(mode="json")
             request_path = workspace / "finalize.request.json"
             with request_path.open("x", encoding="utf-8") as stream:
                 json.dump(request, stream)

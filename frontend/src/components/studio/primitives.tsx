@@ -22,7 +22,7 @@ export const buttonVariants = cva(
         primary: "bg-primary text-primary-foreground shadow-sm hover:bg-ember",
         secondary: "border border-line-strong bg-paper-raised text-ink shadow-xs hover:border-ink-subtle hover:bg-paper-sunken",
         ghost: "text-ink-muted hover:bg-paper-sunken hover:text-ink",
-        danger: "border border-rust/30 bg-rust-soft text-rust hover:bg-destructive-fill hover:text-white",
+        danger: "border border-rust/30 bg-rust-soft text-rust hover:bg-destructive-fill hover:text-on-accent",
       },
       size: {
         sm: "h-8 px-3 text-sm [&_svg]:size-4",
@@ -70,14 +70,15 @@ export function BrandWordmark({ className }: { className?: string }) {
 export function Card({ className, ...props }: ComponentProps<"section">) {
   return (
     <section
-      className={cn("rounded-2xl border border-line bg-paper-raised shadow-[0_1px_2px_rgb(43_37_32/0.04)]", className)}
+      className={cn("rounded-2xl border border-line bg-paper-raised shadow-[0_1px_2px_var(--studio-shadow)]", className)}
       {...props}
     />
   );
 }
 
+/** Nhãn trạng thái theo thẻ kỹ thuật của landing: mono 11px, chữ hoa, bo góc nhỏ (không phải viên thuốc). */
 const badgeVariants = cva(
-  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap [&_svg]:size-3.5",
+  "inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-[11px] leading-4 font-medium tracking-wide whitespace-nowrap uppercase [&_svg]:size-3.5",
   {
     variants: {
       tone: {

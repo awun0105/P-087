@@ -1,6 +1,21 @@
-# ---- Stage 1: Dependencies ----
-# Dùng đúng lock mà CI và scripts/setup.sh dùng, nên image không thể lệch với test.
-FROM python:3.12.14-slim-bookworm AS deps
+# syntax=docker/dockerfile:1
+#
+# API image for the portable Studio stack.
+#
+# The regular Dockerfile is the control-plane image.  It includes the pinned
+# Node/splat-transform runtime needed when an imported Gaussian asset must be
+# converted to SOG or when geometry commands are requested.  Heavy CUDA/SAM2/
+# Brush dependencies remain in Dockerfile.gpu and are enabled only by the
+# explicit GPU Compose override.
+
+FROM node:24.15.0-bookworm-slim AS node-runtime
+
+WORKDIR /opt/real2sim/runtime
+RUN npm init -y >/dev/null 2>&1 \
+    && npm install --no-audit --no-fund --omit=dev \
+       @playcanvas/splat-transform@3.6.6
+
+FROM python:3.12.14-slim-bookworm AS dependencies
 
 WORKDIR /app
 
@@ -9,38 +24,55 @@ COPY requirements.in requirements.lock.txt ./
 RUN uv pip sync --system requirements.lock.txt \
     && uv pip check
 
-# Runtime xuất USD lai (ADR 0007): `usd-core` tách khỏi dependency của app (RUNTIME_POLICY §2), không cần GPU.
-# Có nó thì API tự dựng được gói USD lai khi worker GPU ở máy khác; phiên bản ghim như scripts/gpu/setup_scene_runtime.sh.
+# API-side USD export is intentionally kept separate from the core lockfile.
 RUN uv venv /opt/usd_runtime --python /usr/local/bin/python \
-    && uv pip install --python /opt/usd_runtime/bin/python usd-core==26.8 numpy trimesh==5.1.0
+    && uv pip install --python /opt/usd_runtime/bin/python \
+       usd-core==26.8 numpy trimesh==5.1.0
 
-# ---- Stage 2: Production ----
 FROM python:3.12.14-slim-bookworm
 
 WORKDIR /app
 
-# `uv pip sync --system` cài vào /usr/local của base image nên không cần copy site-packages.
-COPY --from=deps /usr/local /usr/local
-COPY --from=deps /opt/usd_runtime /opt/usd_runtime
+# ffmpeg is used by the API thumbnail path.  libstdc++ is required by the
+# PlayCanvas native pieces when they are invoked.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg libgcc-s1 libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/bin/npm /usr/local/bin/npm
+COPY --from=node-runtime /usr/local/bin/npx /usr/local/bin/npx
+COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=node-runtime /opt/real2sim/runtime /opt/real2sim/runtime
 
-ENV PATH=/usr/local/bin:$PATH \
-    PRODUCT_SCENE_RUNTIME_PYTHON=/opt/usd_runtime/bin/python
+# `uv pip sync --system` installs core Python packages into /usr/local.
+COPY --from=dependencies /usr/local /usr/local
+COPY --from=dependencies /opt/usd_runtime /opt/usd_runtime
 
-# Security: run as non-root user
-RUN useradd -m appuser
+ENV PATH=/opt/real2sim/runtime/node_modules/.bin:/usr/local/bin:$PATH \
+    PRODUCT_SCENE_RUNTIME_PYTHON=/opt/usd_runtime/bin/python \
+    NODE_PATH=/opt/real2sim/runtime/node_modules
 
-# Copy application code
+# Keep the bind-mount ownership contract deterministic: data-init grants this
+# UID write access before the unprivileged API/restore services start.
+RUN useradd --uid 1000 --user-group --create-home --shell /usr/sbin/nologin appuser
+
+# The root .dockerignore excludes data, frontend and local credentials.  The
+# archive is restored into the bind-mounted /app/data volume by the operator;
+# it is never copied into the image.
 COPY . .
-
-# Create data directory with correct ownership
-RUN mkdir -p /app/data && chown -R appuser:appuser /app
+RUN mkdir -p /app/data /package \
+    && chown -R appuser:appuser /app /opt/real2sim/runtime
 
 USER appuser
+
+ENV REC04_SPLAT_MODULE_PATH=/opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs \
+    REC05_VOXEL_CLI=/opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/bin/cli.mjs \
+    REC05_VOXEL_MODULE_PATH=/opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:' + __import__('os').environ.get('PORT', '8000') + '/health')" || exit 1
 
-# Railway/Render cấp cổng qua $PORT; chạy local vẫn mặc định 8000.
-CMD ["sh", "-c", "exec uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+ENTRYPOINT ["python", "-m", "scripts.studio.container_entrypoint"]
+CMD ["serve"]

@@ -5,12 +5,14 @@ import { errorMessage } from "@/lib/ui-error";
 
 import dynamic from "next/dynamic";
 import { Check, Copy, Crosshair, Eye, EyeOff, Library, Loader2, Move3d, Pencil, Plus, RotateCw, Tag, Trash2, Undo2, X } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent, useSyncExternalStore } from "react";
+import { subscribeTheme, themeColor, themeKey } from "@/lib/theme";
 
 import { Badge, Button, Notice } from "@/components/studio/primitives";
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
 import { ObjectifyNotice } from "@/features/studio/ObjectifyNotice";
 import type { GizmoMode, OverlayBox, OverlayObject } from "@/features/viewer/scene-overlay";
+import type { PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
 import { ApiError } from "@/lib/api/client";
 import { jobArtifactContentUrl } from "@/lib/api/endpoints";
 import {
@@ -142,6 +144,27 @@ export function ObjectReviewView({
     [scene, jobId, previews],
   );
 
+  // Vật động (vật lý của SceneIR) đang đặt trong scene: khi Đi bộ, người đi đẩy được chúng (ADR 0010).
+  const physicsObjects = useMemo<PhysicsObjectInput[]>(
+    () =>
+      (scene?.objects ?? [])
+        .filter((object) => object.physics?.dynamic && object.active && isPlaced(object))
+        .map((object) => ({
+          id: object.id,
+          position: object.transform.translation_xyz,
+          rotation_xyzw: object.transform.rotation_quaternion_xyzw,
+          colliderUrl:
+            object.collider?.geometry_ref && object.collider.geometry_ref.artifact_uri.endsWith(".glb")
+              ? jobArtifactContentUrl(jobId, object.collider.geometry_ref)
+              : null,
+          dimensions: object.primitive_dimensions_xyz_m ?? null,
+          mass_kg: object.physics!.mass_kg ?? 10,
+          friction: object.physics!.dynamic_friction,
+          restitution: object.physics!.restitution,
+        })),
+    [scene, jobId],
+  );
+
   const counts = useMemo(
     () => Object.fromEntries(FILTERS.map((item) => [item.value, scene?.objects.filter(item.match).length ?? 0])) as Record<Filter, number>,
     [scene],
@@ -150,6 +173,7 @@ export function ObjectReviewView({
     const match = FILTERS.find((item) => item.value === filter)!.match;
     return scene?.objects.filter(match) ?? [];
   }, [scene, filter]);
+  const theme = useSyncExternalStore(subscribeTheme, themeKey, () => "light:default");
   const boxes = useMemo<OverlayBox[]>(
     () =>
       visibleObjects
@@ -159,10 +183,16 @@ export function ObjectReviewView({
           center: object.transform.translation_xyz,
           rotation_xyzw: object.transform.rotation_quaternion_xyzw,
           dimensions: object.primitive_dimensions_xyz_m!,
-          color: object.id === selected ? SELECTED_COLOR : stateColor(object),
+          color: object.id === selected ? selectedColor() : stateColor(object),
           emphasized: object.id === selected,
+          // Collider phân rã lồi bám theo hình vật; vật chỉ có hộp (thêm tay, asset thư viện) thì vẽ hộp.
+          shapeUrl:
+            object.collider?.geometry_ref && object.collider.geometry_ref.artifact_uri.endsWith(".glb")
+              ? jobArtifactContentUrl(jobId, object.collider.geometry_ref)
+              : null,
         })),
-    [visibleObjects, selected],
+    // `theme` trong deps: đổi chế độ/bảng màu thì khung vật vẽ lại bằng màu mới.
+    [visibleObjects, selected, jobId, theme], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   async function run(mutate: (revision: string) => Promise<{ scene: SceneIR }>) {
@@ -294,6 +324,7 @@ export function ObjectReviewView({
             onTransform={(id, position, rotation) => run((revision) => setObjectTransform(jobId, revision, id, position, rotation))}
             focus={focus}
             onPickBox={selectFromScene}
+            physicsObjects={physicsObjects}
           />
         ) : (
           // Scene không có visual 3DGS: chỉ còn collision mesh để định vị hộp.
@@ -358,10 +389,10 @@ export function ObjectReviewView({
 
 function Legend() {
   const items = [
-    ["#facc15", "Ứng viên"],
-    ["#22c55e", "Đã xác nhận"],
-    ["#9ca3af", "Đã loại / đang ẩn"],
-    [SELECTED_COLOR, "Đang chọn"],
+    ["var(--studio-ochre)", "Ứng viên"],
+    ["var(--studio-sage)", "Đã xác nhận"],
+    ["var(--studio-ink-subtle)", "Đã loại / đang ẩn"],
+    ["var(--studio-ember)", "Đang chọn"],
   ] as const;
   return (
     <ul className="grid grid-cols-2 gap-1 pt-1">
@@ -670,12 +701,18 @@ function CatalogForm({
   );
 }
 
-const SELECTED_COLOR = "#f97316";
+/**
+ * Màu khung vật lấy từ bảng màu đang chọn (cùng vai trò với badge trạng thái): ember = đang chọn, ochre = ứng viên,
+ * sage = đã xác nhận, ink-subtle = đã loại/ẩn. Lớp phủ 3D cần mã màu cụ thể nên đọc giá trị biến lúc vẽ; component
+ * gọi `useSyncExternalStore(subscribeTheme, themeKey)` để vẽ lại khi đổi theme.
+ */
+function selectedColor(): string {
+  return themeColor("--studio-ember", "#e8743b");
+}
 
-/** Màu hộp theo trạng thái review: vàng = ứng viên, xanh lá = đã xác nhận, xám = đã loại/ẩn. */
 function stateColor(object: SceneObject): string {
-  if (isIgnored(object) || !object.active && object.state === "CONFIRMED") return "#9ca3af";
-  return object.state === "CONFIRMED" ? "#22c55e" : "#facc15";
+  if (isIgnored(object) || !object.active && object.state === "CONFIRMED") return themeColor("--studio-ink-subtle", "#8a7e70");
+  return object.state === "CONFIRMED" ? themeColor("--studio-sage", "#5e8c61") : themeColor("--studio-ochre", "#b7862a");
 }
 
 function isIgnored(object: SceneObject): boolean {
@@ -693,7 +730,7 @@ function StateBadge({ object }: { object: SceneObject }) {
 function ObjectBox({ object, selected, onSelect }: { object: SceneObject; selected: boolean; onSelect: () => void }) {
   const dimensions = object.primitive_dimensions_xyz_m;
   if (!dimensions) return null;
-  const color = selected ? SELECTED_COLOR : stateColor(object);
+  const color = selected ? selectedColor() : stateColor(object);
   return (
     <mesh
       position={object.transform.translation_xyz}

@@ -1,0 +1,127 @@
+name: real2sim-studio
+
+# Explicit local/leased-NVIDIA worker override.  It shares the host data
+# directory with `api`; the API stays the control plane and the GPU image owns
+# COLMAP/Brush/splat-transform.  This is a native NVIDIA container, not Docker
+# inside Docker, and is not a macOS GPU claim.
+services:
+  api:
+    environment:
+      PRODUCT_OBJECTIFY_REMOTE_WORKER: "true"
+      PRODUCT_PROCESSING_CONFIG: /app/configs/product/processing_presets_v1.json
+      PRODUCT_RUNTIME_MANIFEST: /app/data/studio_local/runtime_manifest.json
+    depends_on:
+      data-restore:
+        condition: service_completed_successfully
+      gpu-runtime-init:
+        condition: service_completed_successfully
+
+  # Dockerfile.gpu's entrypoint generates RuntimeManifest from actual
+  # ffmpeg/Brush/splat/NVIDIA probes before this short-lived command exits.
+  # Regenerate it on every start so a stale host manifest cannot be reused;
+  # the previous file is renamed beside it with a timestamp for diagnostics.
+  # The preflight checks the same native runtime before API/worker admission;
+  # it does not claim that a pipeline job succeeded.
+  gpu-runtime-init:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+      network: ${STUDIO_BUILD_NETWORK:-default}
+    env_file:
+      - ${STUDIO_ENV_FILE:-.env.studio}
+    command:
+      - bash
+      - -lc
+      - >-
+        set -euo pipefail;
+        manifest_backup="$${PRODUCT_RUNTIME_MANIFEST}.previous-$$(date -u +%Y%m%dT%H%M%S%N)";
+        if [ -e "$$PRODUCT_RUNTIME_MANIFEST" ]; then
+        mv -- "$$PRODUCT_RUNTIME_MANIFEST" "$$manifest_backup";
+        fi;
+        .venv/bin/python -m scripts.gpu.make_runtime_manifest
+        --out "$$PRODUCT_RUNTIME_MANIFEST";
+        .venv/bin/python -m scripts.kaggle.preflight
+    environment:
+      APP_ENV: development
+      AUTH_REQUIRED: "true"
+      DATABASE_URL: sqlite:////data/studio_local/runtime.db
+      ARTIFACT_ROOT: /data/studio_local/artifacts
+      PRODUCT_WORKER_ROOT: /data/studio_local/workers
+      PRODUCT_PROCESSING_CONFIG: /opt/real2sim/app/configs/product/processing_presets_v1.json
+      PRODUCT_RUNTIME_MANIFEST: /data/studio_local/runtime_manifest.json
+      R2S_STATE: /data
+      # Replace any host-local values inherited from `.env.studio`; all heavy
+      # tools live at these paths inside Dockerfile.gpu.
+      REC03_COLMAP_COMMAND: '["colmap"]'
+      REC03_COLMAP_RUNTIME_IDENTITY:
+      REC04_BRUSH_COMMAND: '["/opt/real2sim/runtime/brush/brush_app"]'
+      REC04_BRUSH_ENVIRONMENT:
+      REC04_BRUSH_RUNTIME_IDENTITY:
+      REC04_SPLAT_MODULE_PATH: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
+      REC05_VOXEL_CLI: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/bin/cli.mjs
+      REC05_VOXEL_MODULE_PATH: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
+      PRODUCT_GEOMETRY_CONFIG: /opt/real2sim/app/configs/product/geometry_v1.json
+      PRODUCT_SCENE_RUNTIME_PYTHON: /opt/real2sim/scene_runtime/bin/python
+      PRODUCT_SAM2_CHECKPOINT: /opt/real2sim/scene_runtime/checkpoints/sam2.1_hiera_tiny.pt
+      PRODUCT_LAMA_CHECKPOINT: /opt/real2sim/scene_runtime/weights/big-lama.pt
+      REC04_BRUSH_LPIPS_PYTHON: /opt/real2sim/scene_runtime/bin/python
+    volumes:
+      - type: bind
+        source: ${STUDIO_DATA_DIR:-./data}
+        target: /data
+    gpus: all
+    depends_on:
+      data-restore:
+        condition: service_completed_successfully
+    restart: "no"
+
+  gpu-worker:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+      network: ${STUDIO_BUILD_NETWORK:-default}
+    env_file:
+      - ${STUDIO_ENV_FILE:-.env.studio}
+    environment:
+      APP_ENV: development
+      AUTH_REQUIRED: "true"
+      AUTH_COOKIE_SECURE: "false"
+      DATABASE_URL: sqlite:////data/studio_local/runtime.db
+      ARTIFACT_ROOT: /data/studio_local/artifacts
+      PRODUCT_WORKER_ROOT: /data/studio_local/workers
+      PRODUCT_PROCESSING_CONFIG: /opt/real2sim/app/configs/product/processing_presets_v1.json
+      PRODUCT_RUNTIME_MANIFEST: /data/studio_local/runtime_manifest.json
+      PRODUCT_DEMO_DIR: /data/demo/library
+      PRODUCT_ASSET_PREVIEW_DIR: /data/asset_previews
+      PRODUCT_RERUN_RECORDING_DIR: /data/rerun_recordings
+      PRODUCT_TRASH_ROOT: /data/studio_local/trash
+      REC04_SPLAT_DEVICE: gpu
+      R2S_STATE: /data
+      # Never pass host-local native paths from `.env.studio` into the GPU
+      # image; the pinned tools live at these paths inside Dockerfile.gpu.
+      REC03_COLMAP_COMMAND: '["colmap"]'
+      REC03_COLMAP_RUNTIME_IDENTITY:
+      REC04_BRUSH_COMMAND: '["/opt/real2sim/runtime/brush/brush_app"]'
+      REC04_BRUSH_ENVIRONMENT:
+      REC04_BRUSH_RUNTIME_IDENTITY:
+      REC04_SPLAT_MODULE_PATH: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
+      REC05_VOXEL_CLI: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/bin/cli.mjs
+      REC05_VOXEL_MODULE_PATH: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
+      PRODUCT_GEOMETRY_CONFIG: /opt/real2sim/app/configs/product/geometry_v1.json
+      PRODUCT_SCENE_RUNTIME_PYTHON: /opt/real2sim/scene_runtime/bin/python
+      PRODUCT_SAM2_CHECKPOINT: /opt/real2sim/scene_runtime/checkpoints/sam2.1_hiera_tiny.pt
+      PRODUCT_LAMA_CHECKPOINT: /opt/real2sim/scene_runtime/weights/big-lama.pt
+      REC04_BRUSH_LPIPS_PYTHON: /opt/real2sim/scene_runtime/bin/python
+    volumes:
+      - type: bind
+        source: ${STUDIO_DATA_DIR:-./data}
+        target: /data
+    gpus: all
+    depends_on:
+      api:
+        condition: service_healthy
+      gpu-runtime-init:
+        condition: service_completed_successfully
+    restart: unless-stopped

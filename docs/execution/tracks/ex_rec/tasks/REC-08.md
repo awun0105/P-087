@@ -150,3 +150,7 @@ coordinate-review bridge và mixed consumer handoff còn pending, không DONE.
      - `pytest tests/test_reconstruction/test_rec08_lidar_ingest.py -v` (4 passed in 0.14s)
      - `pytest tests/test_reconstruction/test_rec10_bundle.py -v` (3 passed in 1.05s)
    - Kiểm thử: Header & cloud inspection (PLY/PCD/NaN/Inf), request validation (checksum mismatch, file missing, non-meter unit, out-of-budget points), service publication e2e qua `FilesystemArtifactStore` thật và `ArtifactResolver`, và integration đọc trực tiếp output thật của REC-07 (`data/torwic_slam/derived/aisle_cw/rec07_smoke_sub100_104/`). Phối hợp trực tiếp vào ReconstructionBundle cho consumer EX-SCENE.
+
+## Cập nhật 02/10/2026 (không đổi Goal/I/O/DoD đã khoá)
+
+Studio nhận **gói LiDAR của người dùng** qua `src/services/reconstruction/lidar/package.py` (dùng lại `LiDARIngestService` của task này) trong bước `ST-LIDAR-INGEST` của worker; phép dịch sàn về z = 0 lấy từ sàn ước lượng trong đám mây thay cho bản ghi cầu nối đo tay của dataset. [ADR 0009](../../../../decisions/0009-user-lidar-input-and-routing.md).

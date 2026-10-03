@@ -21,7 +21,13 @@ from src.services.orchestration.jobs.metric import (
     MetricPreviewView,
 )
 from src.services.orchestration.projects import JobNotFoundError
-from src.services.reconstruction import DemoSelection, LidarMeasurements, ModeComparison, UserMetricInput
+from src.services.reconstruction import (
+    DemoSelection,
+    LidarMeasurements,
+    MetricProposal,
+    ModeComparison,
+    UserMetricInput,
+)
 
 router = APIRouter()
 Point = tuple[FiniteFloat, FiniteFloat, FiniteFloat]
@@ -106,6 +112,18 @@ def demo_points(job_id: str) -> DemoSelection:
         return _service(job_id).demo_selection(job_id)
     except MetricConfirmationError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+@router.get("/jobs/{job_id}/metric/proposal", response_model=MetricProposal, responses=_ERRORS)
+def metric_proposal(job_id: str) -> MetricProposal:
+    """Đề xuất tỉ lệ và mặt sàn tự động (ADR 0001 §2), trạng thái ESTIMATED; 404 khi scene không có."""
+    try:
+        proposal = _service(job_id).auto_proposal(job_id)
+    except MetricConfirmationError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    if proposal is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene này không có đề xuất tỉ lệ tự động")
+    return proposal
 
 
 @router.post("/jobs/{job_id}/metric/preview", response_model=MetricPreviewView, responses=_ERRORS)

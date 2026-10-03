@@ -7,12 +7,24 @@ registry, upload service, file thông số chung) để test chỉ cần patch m
 from fastapi import APIRouter, Depends
 
 from src.api.auth import require_editor
-from src.api.studio import evaluation, imports, metric, processing, review, samples, scenes, simulation, trash, uploads
+from src.api.studio import (
+    demo,
+    evaluation,
+    imports,
+    metric,
+    processing,
+    review,
+    samples,
+    scenes,
+    simulation,
+    trash,
+    uploads,
+)
 
 router = APIRouter(tags=["studio"])
 # Upload và scene tốn GPU/lưu trữ → cần Editor khi bật đăng nhập (ADR 0003 §3).
 # Video mẫu và bảng thông số không có tác dụng phụ → khách dùng được.
-for module in (uploads, scenes, metric, imports, simulation, review, trash, evaluation):
+for module in (uploads, scenes, metric, imports, simulation, review, trash, evaluation, demo):
     router.include_router(module.router, dependencies=[Depends(require_editor)])
 for module in (samples, processing):
     router.include_router(module.router)

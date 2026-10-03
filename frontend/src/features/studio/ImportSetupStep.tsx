@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useState } from "react";
 
 import { Button, Card, EmptyState, Notice } from "@/components/studio/primitives";
-import { canCreateScene, describeDetection } from "@/features/studio/inputKinds";
+import { describeDetection, isGaussian } from "@/features/studio/inputKinds";
 import { createImport, listUploads } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import type { UploadRecord } from "@/lib/contracts/studio";
@@ -40,7 +40,7 @@ export function ImportSetupStep({ preselect, onBack }: { preselect: string | nul
       setError(errorMessage(result.error));
       return;
     }
-    const gaussian = result.data.uploads.filter((record) => !canCreateScene(record));
+    const gaussian = result.data.uploads.filter(isGaussian);
     setUploads(gaussian);
     setError(null);
     setDraft((current) => {
@@ -95,7 +95,7 @@ export function ImportSetupStep({ preselect, onBack }: { preselect: string | nul
               <input type="radio" name="gaussian-upload" value={upload.upload_id} checked={selected === upload.upload_id} onChange={() => { setDraft((current) => ({ ...current, selected: upload.upload_id, name: upload.original_name.replace(/\.[^.]+$/, "") })); }} className="mt-1 size-4 accent-ember-strong" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-medium">{upload.original_name}</span>
-                <span className="block text-xs text-ink-muted">{describeDetection(upload)} · {formatBytes(upload.size_bytes)} · {DATE.format(new Date(upload.received_at))}</span>
+                <span className="block text-xs text-ink-muted">{describeDetection(upload)} · {formatBytes(upload.size_bytes)} · {DATE.format(new Date(upload.received_at))}{upload.uploaded_by ? ` · tải lên bởi ${upload.uploaded_by.display_name}` : ""}</span>
               </span>
             </label>
           ))}

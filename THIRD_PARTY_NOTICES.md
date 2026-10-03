@@ -27,6 +27,19 @@ cập nhật file này trong cùng commit (ADR 0008).
   code app chỉ gọi `sam2.build_sam.build_sam2` và `SAM2ImagePredictor` từ
   `src/services/scene/sampro3d/sam2_runner.py`. Không vendor source SAM2 vào repository.
 
+### MoGe-2 (đề xuất tỉ lệ mét tự động, ADR 0001 §2)
+
+- Upstream: https://github.com/microsoft/MoGe @`b942f00` (bản thời MoGe-2; nhánh main hiện là MoGe-3 với
+  dependency khác), trọng số `Ruicheng/moge-2-vitb-normal` (`model.pt`, sha256 `16b8110e…`).
+- License: MIT cho mã và cho trọng số (theo `LICENSE` của repository và model card, kiểm 02/10/2026);
+  phần DINOv2 trong repository theo Apache License 2.0.
+- Phụ thuộc đi kèm: `utils3d` (https://github.com/EasternJournalist/utils3d @`3fab839`, MIT).
+- Dùng như thư viện (REUSE, không sửa) trong runtime `REC06_MOGE_PYTHON`; code app chỉ gọi
+  `moge.model.v2.MoGeModel` từ `src/services/reconstruction/adapters/moge_runner.py`. Không vendor source vào
+  repository. Cài `--no-deps` để không đổi phiên bản thư viện của SAM 2 và gsplat trong cùng runtime.
+- Ý tưởng ghép độ sâu thưa COLMAP với độ sâu mét (DN-Splatter) và giải tỉ lệ scale-only (MonoSplat) được viết
+  lại theo ADR 0001, không chép mã của hai dự án đó.
+
 ### Pipeline v2 — tách scene theo vật (ADR 0007)
 
 Phương pháp/quy ước tham khảo từ các nguồn dưới đây; code trong `src/` tự viết, không chép file nguồn.
@@ -79,6 +92,47 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+### Nhân vật "Worker" (Quaternius) — CC0 1.0
+
+`frontend/public/characters/worker.glb`: "Worker" của Quaternius, phát hành Public Domain (CC0 1.0). Nguồn:
+https://poly.pizza/m/Yg2bQZO6Hj (tải từ `https://static.poly.pizza/3a5f3056-ffe6-42eb-bd52-122afcbd22b2.glb`,
+sha256 `9c28614f465b7dc105f908c20c22fc045f4b07caf8c5ef0e9f8049eceb6dd38d`). Không chỉnh sửa file. Dùng cho góc nhìn
+thứ ba trong viewer (ADR 0010).
+
+### Hình xem trước danh mục vật thể — CC0 1.0
+
+`configs/product/catalog_previews/*.glb` là hình hiển thị trên web cho các họ asset trong danh mục vật thể (ADR 0010
+mục 3), dựng bằng `scripts/scene/build_cc0_previews.py` từ các mô hình Public Domain (CC0 1.0) dưới đây, co giãn về
+kích thước của họ asset tương ứng. Các loại không có ở đây (bình chữa cháy, xe đẩy, dầm, cột, giá kệ) do script dựng
+bằng hình khối, không thuộc bên thứ ba. Gói xuất cho Isaac Sim vẫn trỏ tới asset gốc của NVIDIA, không dùng các file này.
+
+| Nhãn | Mô hình | Tác giả | Nguồn | sha256 file gốc |
+| --- | --- | --- | --- | --- |
+| pallet | Pallet | Quaternius | https://poly.pizza/m/cUAsYHDqfD | `b773bbfe85743cd1…` |
+| box | Box | Kenney | https://poly.pizza/m/HvjissDrdr | `83d88c4c255f868b…` |
+| barel | Barrel | Quaternius | https://poly.pizza/m/MraIiFnpAY | `0f21493c781b0591…` |
+| cone | Traffic Cone | Quaternius | https://poly.pizza/m/lAx8JytxGD | `70fd5c97f107914f…` |
+| bucket | Bucket | Quaternius | https://poly.pizza/m/83obI9bNun | `bdf24cde2e74d899…` |
+| bottle | Water Bottle | Quaternius | https://poly.pizza/m/KpxDpidn1Z | `abdb532223cc0654…` |
+| crate | Crate | Quaternius | https://poly.pizza/m/CnMGEDwg8s | `997f0a0f09a03169…` |
+
+### ammo.js (Bullet Physics cho WebAssembly) — zlib
+
+`frontend/public/vendor/ammo/ammo.wasm.js` và `ammo.wasm.wasm`: bản build chính thức trong `builds/` của
+https://github.com/kripken/ammo.js (commit `c8779e60159d428f11ff1eb553dc9b6b6e2d317a`), không chỉnh sửa. sha256
+`8481c5250507d3f2c0cecff7cc55a34727f52f96590a2304556a43ca4cf4e0b3` (js) và
+`de36b300b25d244a79ae56ef0e7fee5efe2a3281f346a134945eef0b2fbaa5d8` (wasm). Dùng cho đẩy vật thể trong viewer (ADR 0010).
+
+Copyright (c) 2011 ammo.js contributors
+
+This software is provided 'as-is', without any express or implied warranty. In no event will the authors be held
+liable for any damages arising from the use of this software. Permission is granted to anyone to use this software for
+any purpose, including commercial applications, and to alter it and redistribute it freely, subject to the following
+restrictions: 1. The origin of this software must not be misrepresented; you must not claim that you wrote the original
+software. If you use this software in a product, an acknowledgment in the product documentation would be appreciated
+but is not required. 2. Altered source versions must be plainly marked as such, and must not be misrepresented as being
+the original software. 3. This notice may not be removed or altered from any source distribution.
 
 ### Vendored SuperSplat editor
 

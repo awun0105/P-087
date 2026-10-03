@@ -30,7 +30,7 @@ function MetricRow({ metric }: { metric: EvaluationMetric }) {
   return (
     <div className="border-t border-line py-3 first:border-t-0">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <dt className="text-sm text-ink-muted">{metric.label}</dt>
+        <dt className="text-ink-muted">{metric.label}</dt>
         <dd className={`text-sm font-semibold ${metric.value === null ? "font-normal text-ink-subtle" : "text-ink"}`}>
           {metric.display}
           {verdict && <Badge tone={verdict.tone} className="ml-2 align-middle">{verdict.label}</Badge>}
@@ -48,7 +48,12 @@ function GroupBody({ group }: { group: EvaluationGroup }) {
   if (group.status !== "measured") {
     return <p className="text-sm text-ink-muted">{GROUP_STATUS[group.status]}. {group.note}</p>;
   }
-  return <dl>{group.metrics.map((metric) => <MetricRow key={metric.key} metric={metric} />)}</dl>;
+  return (
+    <>
+      {group.note && <p className="mb-1 text-xs text-ink-subtle">{group.note}</p>}
+      <dl>{group.metrics.map((metric) => <MetricRow key={metric.key} metric={metric} />)}</dl>
+    </>
+  );
 }
 
 /** Chỉ số của một bước, hiện cạnh kết quả của chính bước đó. Bước không có nhóm chỉ số thì không vẽ gì. */
@@ -87,7 +92,7 @@ export function EvaluationCard({ jobId, revision }: { jobId: string; revision: s
         <div>
           <h3 id="evaluation-heading" className="text-lg font-bold tracking-tight">Bảng đánh giá</h3>
           <p className="mt-1 max-w-2xl text-sm text-ink-muted">
-            Chỉ số tự kiểm của từng bước, đo từ chính dữ liệu của scene. Nhãn Đạt/Cần xem chỉ có ở chỉ số đã có ngưỡng; các chỉ số còn lại để bạn tự đánh giá.
+            Chỉ số tự kiểm của từng bước, đo từ chính dữ liệu của scene. Scene dựng từ dataset có ground truth có thêm mục so với dữ liệu đối chứng. Nhãn Đạt/Cần xem chỉ có ở chỉ số đã có ngưỡng; các chỉ số còn lại để bạn tự đánh giá.
           </p>
         </div>
         {data && (

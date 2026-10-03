@@ -168,7 +168,9 @@ def test_preview_cleanup_only_after_verified_commit(
         import json
 
         request = json.loads((workspace / "preview.request.json").read_text())
-        return SimpleNamespace(attempt_id=request["attempt_id"], error="failed" if failure == "receipt" else None)
+        return SimpleNamespace(
+            attempt_id=request["attempt_id"], error="failed" if failure == "receipt" else None, preview_ref=None
+        )
 
     monkeypatch.setattr(runner, "verify_prepared_preview", verify)
     monkeypatch.setattr(runner, "_record_benchmark", lambda *args: None)
@@ -397,3 +399,32 @@ def test_finalize_drops_resume_only_when_job_succeeded(
     assert runner.run_finalize_job(job.job_id) == done
     assert resume.exists() == failed and (old / "database.db").exists() == failed
     assert (old / "preview.stderr.log").is_file()
+
+
+def test_metric_proposal_step_never_blocks_the_preview(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Đề xuất tỉ lệ là bước phụ trợ: không bật thì không chạy gì; lỗi thì chỉ ghi log."""
+    workspace = _workspace(tmp_path)
+    registry = _registry(tmp_path / "runtime")
+    attempt = runner._Attempt(
+        registry, Settings(product_worker_root=tmp_path / "workers"), registry.get_job("job-fixture-001"), workspace
+    )
+    reference = _publish(
+        registry, attempt.job.job_id, "preview.json", "ReconstructionPreview", runner.StageId.VISUAL_RECON
+    )
+    propose = Mock(return_value=None)
+    monkeypatch.setattr(runner, "propose_metric", propose)
+    for name in ("REC06_MOGE_PYTHON", "REC06_MOGE_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+    runner._propose_metric(attempt, None)  # preview lỗi: không có ref
+    runner._propose_metric(attempt, reference)  # runtime MoGe không cấu hình
+    propose.assert_not_called()
+    monkeypatch.setenv("REC06_MOGE_PYTHON", "/usr/bin/python3")
+    monkeypatch.setenv("REC06_MOGE_MODEL", str(tmp_path / "model.pt"))
+    runner._propose_metric(attempt, reference)  # preview.json của fixture không phải ReconstructionPreview: bị bắt
+    propose.assert_not_called()
+    preview = SimpleNamespace(source_visual_ref=reference)
+    monkeypatch.setattr(runner.ReconstructionPreview, "model_validate_json", classmethod(lambda cls, data: preview))
+    propose.side_effect = ValueError("MoGe lỗi")
+    runner._propose_metric(attempt, reference)  # lỗi runtime: không ném ra ngoài
+    assert propose.call_count == 1 and propose.call_args.args[:2] == (attempt.job.job_id, reference)
+    assert propose.call_args.args[5] == workspace / "metric_proposal"

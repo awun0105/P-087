@@ -54,7 +54,7 @@ def test_stream_upload_records_kind_and_evidence(streaming: VideoUploadService) 
     ("name", "payload", "message"),
     [
         ("scene.mp4", _gaussian(), "không khớp nội dung"),
-        ("cloud.ply", _ply(("x", "y", "z")), "point cloud"),
+        ("cloud.ply", _ply(("x", "y", "z")), "nộp riêng lẻ"),
         ("notes.ply", b"hello world, not a ply", "Không nhận diện"),
     ],
 )
