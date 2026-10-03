@@ -166,7 +166,15 @@ chưa nói được gì về quỹ đạo tự tính.
 SSIM 0,875 / LPIPS 0,367 trên 13 ảnh giữ lại; xác nhận tỉ lệ không chọn điểm; job SUCCEEDED với 14 vật. Chi tiết:
 [plan](../plans/active/2026-10-02-lidar-video-flow.md).
 
+## Bổ sung owner chốt 03/10/2026: mesh va chạm vẫn dựng từ 3DGS
+
+Đã đo (`eval/protocols/collision_path_clearance.md`): đám mây LiDAR dùng nguyên trạng chặn nhầm 100/100 vị trí robot
+đã đi qua; bỏ điểm gần cảm biến dưới 2 m và nới dải sàn lên 15 cm thì còn 0/100, so với 38/100 của mesh từ 3DGS. Owner
+quyết định **không** thay mesh va chạm canonical bằng hình học từ LiDAR: `GeometryArtifact` giữ `source_modality =
+rgb_3dgs`, không sửa shared contract. Vai trò (b) ở mục Decision vì thế chỉ còn là số đo đối chứng; LiDAR vẫn dùng cho
+tỉ lệ mét + mặt sàn (a) và lớp chồng lên scene (c), và đi vào bundle qua `lidar_geometry_ref` + `AlignmentRecord`.
+
 ## Câu hỏi còn mở
 
-Không còn câu hỏi sản phẩm nào chờ owner. Việc kỹ thuật còn phải đo trước khi khoá: chất lượng 3DGS của cách dựng pose
-bám quỹ đạo, và mesh va chạm dựng từ LiDAR so với mesh từ 3DGS.
+Không còn câu hỏi sản phẩm nào chờ owner. Việc kỹ thuật còn phải đo: chất lượng 3DGS của cách dựng pose bám quỹ đạo
+trên traversal khác và với quỹ đạo không phải ground truth.
