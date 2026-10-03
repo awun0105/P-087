@@ -20,6 +20,7 @@ MOGE_URL="https://huggingface.co/Ruicheng/moge-2-vitb-normal/resolve/main/model.
 MOGE_SHA="16b8110e86d5dc5a849db120ca96ef3a223fd30b0c9146d1d81db504073da5f6"
 
 export PATH="/usr/local/cuda/bin:$PATH"
+export TORCH_CUDA_ARCH_LIST="7.5"
 
 fetch() {
   if [ ! -f "$2" ] || [ "$(sha256sum "$2" | cut -d' ' -f1)" != "$3" ]; then
@@ -88,6 +89,7 @@ EOF
 
 echo "[cập nhật] Tạo lại runtime manifest..."
 set -a; source "$ENV_FILE"; set +a
+rm -f "$PRODUCT_RUNTIME_MANIFEST"
 .venv/bin/python -m scripts.gpu.make_runtime_manifest --out "$PRODUCT_RUNTIME_MANIFEST"
 
 echo "=== Toàn bộ Scene Runtime (SAM2, MoGe, LaMa, gsplat, CoACD, Rerun) đã sẵn sàng! ==="
