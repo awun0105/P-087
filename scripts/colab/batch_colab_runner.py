@@ -1,5 +1,6 @@
 """Script điều phối tự động (Batch Orchestrator) đưa danh sách kịch bản qua Colab GPU pipeline,
-tải bundle về máy local và import vào Studio local để phục vụ demo.
+tải bundle về máy local, tự động trích xuất Báo cáo đánh giá (Scorecard & Evaluation Report)
+và import vào Studio local để phục vụ demo.
 
 Tương thích với bộ dữ liệu chuẩn hóa `/media/usb/AI20K/TorWIC_Raw_Scenes`.
 """
@@ -8,7 +9,36 @@ import argparse
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+
+
+def upload_to_colab(session: str, local_path: Path, remote_path: str, chunk_size_mb: int = 10) -> None:
+    """Upload file lên Colab, tự động chia nhỏ (chunked upload) nếu file lớn hơn 10MB
+    để không bao giờ bị lỗi 500 của Colab Contents API."""
+    size_mb = local_path.stat().st_size / (1024 * 1024)
+    if size_mb <= chunk_size_mb:
+        subprocess.run(["colab", "upload", "-s", session, str(local_path), remote_path], check=True)
+        return
+
+    print(f"    (File {size_mb:.1f} MB > {chunk_size_mb} MB: tự động upload theo phân đoạn {chunk_size_mb}MB)...")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_prefix = Path(tmpdir) / "chunk_"
+        subprocess.run(["split", "-b", f"{chunk_size_mb}M", str(local_path), str(tmp_prefix)], check=True)
+        parts = sorted(Path(tmpdir).glob("chunk_*"))
+        remote_tmp_dir = f"/content/_tmp_upload_{local_path.stem}"
+        mkdir_script = f"import subprocess; subprocess.run(['mkdir', '-p', '{remote_tmp_dir}'], check=True)"
+        subprocess.run(["colab", "exec", "-s", session, mkdir_script], check=True, capture_output=True)
+
+        for p_idx, part in enumerate(parts, start=1):
+            print(f"      [part {p_idx}/{len(parts)}] -> {part.name}...")
+            remote_part = f"{remote_tmp_dir}/{part.name}"
+            subprocess.run(["colab", "upload", "-s", session, str(part), remote_part], check=True)
+
+        # Hợp nhất các phân đoạn trên Colab và xóa thư mục tạm
+        cat_script = f"import subprocess; subprocess.run('cat {remote_tmp_dir}/chunk_* > {remote_path} && rm -rf {remote_tmp_dir}', shell=True, check=True)"
+        subprocess.run(["colab", "exec", "-s", session, cat_script], check=True, capture_output=True)
+    print(f"    -> Đã tải lên và hợp nhất thành công: {remote_path}")
 
 
 def main() -> int:
@@ -66,8 +96,8 @@ def main() -> int:
         print(f"    Mục đích: {desc}")
 
         remote_video = f"/content/{code}_{video_filename}"
-        print(f"-> Uploading lên Colab: {remote_video}...")
-        subprocess.run(["colab", "upload", "-s", args.session, str(video_path), remote_video], check=True)
+        print(f"-> Đang tải video lên Colab: {remote_video}...")
+        upload_to_colab(args.session, video_path, remote_video)
 
         job_name = f"{code} · {folder}"
         print(f"-> Khởi chạy pipeline trên Colab (job: '{job_name}')...")
@@ -148,7 +178,27 @@ if bundles:
         if import_proc.returncode != 0:
             print(f"[!] Import bundle thất bại: {import_proc.stderr}", file=sys.stderr)
 
-        print(f"-> Kịch bản {code} đã xử lý xong và import thành công vào Studio!")
+        # Tự động xuất Báo cáo đánh giá (Scorecard & Evaluation Report)
+        print("-> Đang trích xuất Báo cáo Đánh giá (Scorecard & Evaluation Report)...")
+        eval_script = f"""
+from src.services.orchestration.projects.registry import get_project_registry
+from src.services.orchestration.evaluation import evaluate_job, evaluation_markdown
+from pathlib import Path
+
+registry = get_project_registry()
+eval_res = evaluate_job(registry, "{bundle_name}")
+json_path = Path("{local_bundle_dest}/evaluation.json")
+md_path = Path("{local_bundle_dest}/evaluation-report.md")
+json_path.write_text(eval_res.model_dump_json(indent=2), encoding="utf-8")
+md_path.write_text(evaluation_markdown(eval_res), encoding="utf-8")
+print(f"[v] Đã lưu {{json_path.name}} và {{md_path.name}} tại {{json_path.parent}}")
+"""
+        eval_proc = subprocess.run([".venv/bin/python", "-c", eval_script], capture_output=True, text=True)
+        print(eval_proc.stdout)
+        if eval_proc.returncode != 0:
+            print(f"[!] Trích xuất đánh giá: {eval_proc.stderr}", file=sys.stderr)
+
+        print(f"-> Kịch bản {code} đã xử lý xong, xuất báo cáo và import thành công vào Studio!")
 
     print("\n=== Hoàn tất toàn bộ batch jobs! ===")
     return 0

@@ -39,8 +39,10 @@ uv pip install --python "$PY" --index-url https://download.pytorch.org/whl/cu126
   torch==2.7.1 torchvision==0.22.1
 
 echo "[3/5] Cài SAM2, gsplat, CoACD, usd-core, lpips, Rerun..."
+export SAM2_BUILD_CUDA="0"
+uv pip install --python "$PY" --no-build-isolation \
+  "sam-2 @ git+https://github.com/facebookresearch/sam2@${SAM2_COMMIT}"
 uv pip install --python "$PY" \
-  "sam-2 @ git+https://github.com/facebookresearch/sam2@${SAM2_COMMIT}" \
   gsplat==1.5.3 coacd==1.0.14 scikit-image==0.26.0 opencv-python-headless==5.0.0.93 \
   trimesh==5.1.0 usd-core==26.8 lpips==0.1.4 rich==15.0.0 scipy==1.18.1 rerun-sdk huggingface_hub click
 
