@@ -30,7 +30,19 @@ class BrushRuntimeSettings(BaseSettings):
     checkpoint_every: int = Field(default=2500, ge=0)
     #: Python của runtime có torch + gói `lpips` (thường là `data/scene_runtime`); None = không chấm LPIPS.
     lpips_python: Path | None = None
+    hang_timeout_seconds: float = Field(default=180.0, ge=0)
     model_config = SettingsConfigDict(env_prefix="REC04_BRUSH_", extra="forbid")
+
+
+FATAL_LOG_PATTERNS: tuple[tuple[str, str, str], ...] = (
+    ("wgpu: requested wait timed out", "VISUAL_GPU_DEADLOCK", "GPU driver timeout/deadlock (wgpu wait timed out)"),
+    ("VK_ERROR_DEVICE_LOST", "VISUAL_GPU_DEADLOCK", "Vulkan GPU device lost"),
+    ("CUDA out of memory", "VISUAL_OUT_OF_MEMORY", "CUDA out of memory"),
+    ("torch.cuda.OutOfMemoryError", "VISUAL_OUT_OF_MEMORY", "PyTorch CUDA out of memory"),
+    ("DeviceLost", "VISUAL_GPU_DEADLOCK", "GPU device lost"),
+    ("wgpu error: Validation Error", "VISUAL_GPU_DEADLOCK", "wgpu validation error"),
+    ("Cannot allocate memory", "VISUAL_OUT_OF_MEMORY", "Cannot allocate memory (OOM)"),
+)
 
 
 class VisualError(ValueError):
@@ -89,6 +101,9 @@ class VisualProcess:
 
     def _invoke(self, invocation: Invocation, target: tuple[Path, TextIO]) -> int:
         workspace, log = target
+        log_path = workspace / f"{invocation.name}.log"
+        poll_interval = 0.5
+        hang_timeout = self.settings.hang_timeout_seconds
         try:
             with subprocess.Popen(
                 [*invocation.command, *invocation.arguments],
@@ -99,12 +114,45 @@ class VisualProcess:
                 start_new_session=True,
                 env=os.environ | self.settings.environment,
             ) as process:
+                deadline = time.monotonic() + self.settings.timeout_seconds
+                last_log_offset = 0
+                last_progress_time = time.monotonic()
                 try:
-                    return process.wait(timeout=self.settings.timeout_seconds)
-                except subprocess.TimeoutExpired as error:
-                    self._kill_group(process)
-                    log.write("\nVISUAL_TIMEOUT\n")
-                    raise VisualError("VISUAL_TIMEOUT", "Visual tool exceeded configured timeout") from error
+                    while process.poll() is None:
+                        now = time.monotonic()
+                        if now >= deadline:
+                            self._kill_group(process)
+                            log.write("\nVISUAL_TIMEOUT\n")
+                            raise VisualError("VISUAL_TIMEOUT", "Visual tool exceeded configured timeout")
+
+                        if log_path.exists():
+                            log_size = log_path.stat().st_size
+                            if log_size > last_log_offset:
+                                try:
+                                    with log_path.open("r", encoding="utf-8", errors="replace") as reader:
+                                        reader.seek(last_log_offset)
+                                        new_text = reader.read()
+                                        last_log_offset = reader.tell()
+                                    last_progress_time = now
+                                    for pattern, err_code, human_desc in FATAL_LOG_PATTERNS:
+                                        if pattern in new_text:
+                                            self._kill_group(process)
+                                            log.write(f"\n{err_code}: {human_desc}\n")
+                                            raise VisualError(err_code, f"{human_desc} detected in {invocation.name}")
+                                except (OSError, UnicodeDecodeError):
+                                    pass
+
+                        if invocation.name == "brush-train" and hang_timeout > 0:
+                            if now - last_progress_time > hang_timeout:
+                                self._kill_group(process)
+                                log.write("\nVISUAL_HANG_TIMEOUT\n")
+                                raise VisualError(
+                                    "VISUAL_HANG_TIMEOUT",
+                                    f"{invocation.name} hung with no log progress for {int(hang_timeout)}s",
+                                )
+
+                        time.sleep(poll_interval)
+                    return process.returncode
                 except BaseException:
                     # Process boundary: SIGINT/SIGTERM được CLI chuyển thành interrupt.
                     # Brush/Node có session riêng; hủy Python cha không tự dừng chúng.
