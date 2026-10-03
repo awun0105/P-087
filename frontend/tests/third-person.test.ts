@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildOccupancy, occupancyTest, thirdPersonCameraPosition, type ThirdPersonOptions } from "@/features/viewer/third-person";
+import { buildOccupancy, gaitForSpeed, occupancyTest, thirdPersonCameraPosition, type ThirdPersonOptions } from "@/features/viewer/third-person";
 
 const OPTIONS: ThirdPersonOptions = { distance: 2, lift: 0.4, margin: 0.2, step: 0.1 };
 
@@ -37,5 +37,12 @@ describe("camera góc nhìn thứ ba", () => {
     expect(occupied([0.1, 0.1, 0.1])).toBe(true);
     expect(occupied([1.02, 2.05, 3.1])).toBe(true);
     expect(occupied([0.4, 0.1, 0.1])).toBe(false);
+  });
+
+  it("dáng đi theo tốc độ: đứng yên, đi bộ, chạy", () => {
+    expect(gaitForSpeed(0)).toBe("idle");
+    expect(gaitForSpeed(Number.NaN)).toBe("idle");
+    expect(gaitForSpeed(1.4)).toBe("walk");
+    expect(gaitForSpeed(4)).toBe("run");
   });
 });

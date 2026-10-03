@@ -93,6 +93,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
+### Nhân vật "Worker" (Quaternius) — CC0 1.0
+
+`frontend/public/characters/worker.glb`: "Worker" của Quaternius, phát hành Public Domain (CC0 1.0). Nguồn:
+https://poly.pizza/m/Yg2bQZO6Hj (tải từ `https://static.poly.pizza/3a5f3056-ffe6-42eb-bd52-122afcbd22b2.glb`,
+sha256 `9c28614f465b7dc105f908c20c22fc045f4b07caf8c5ef0e9f8049eceb6dd38d`). Không chỉnh sửa file. Dùng cho góc nhìn
+thứ ba trong viewer (ADR 0010).
+
 ### Vendored SuperSplat editor
 
 `frontend/vendor/supersplat/` là bản copy của `playcanvas/supersplat` v3.4.2 (commit

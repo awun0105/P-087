@@ -154,7 +154,7 @@ khi chỉ có test giả lập.
 - [x] H1 Điều khiển viewer + đi bộ góc nhìn thứ nhất (02/10/2026; xem Result)
 - [~] H2 Chọn vật theo hình dáng — code + test xong; trình duyệt: 26 collider tải được, không lỗi console; chưa ai nhìn hình
 - [ ] H3 Tường ma của mesh va chạm — hoãn (owner, 02/10/2026)
-- [~] H4 Nhân vật 3D, góc nhìn thứ ba — góc nhìn thứ ba xong phần code + test (03/10/2026, hình người dựng bằng hình khối); asset nhân vật có khung xương/hoạt ảnh chờ quyết định giấy phép
+- [~] H4 Nhân vật 3D, góc nhìn thứ ba — code + test xong (03/10/2026): nhân vật CC0 "Worker" có hoạt ảnh đứng/đi/chạy (ADR 0010; asset Isaac không dùng được trên web theo giấy phép); chưa xem trên trình duyệt
 - [ ] H5 Đẩy vật thể
 - [~] H6 Đề xuất tỉ lệ mét tự động — code, test và chạy thật local xong (02/10/2026); bước 4 (đo sai số) xong 03/10/2026: −0,24% và −0,11% trên hai scene Aisle_CW (`eval/protocols/reference_torwic.md`); chưa kiểm trên trình duyệt
 - [ ] H7 Hàng đợi nhiều người dùng
@@ -257,9 +257,10 @@ Owner chốt: chỉ MoGe-2, có tự đề xuất mặt sàn; làm theo bộ ba 
 - Proof: vitest (phép tính vị trí camera, chặn bởi tường, nút trên thanh công cụ) + typecheck + eslint. **Chưa chạy
   trên trình duyệt.** INFERENCE cần owner nhìn: thứ tự sắp xếp Gaussian được tính ở tầm mắt nên khi lùi camera có thể
   thấy nhiễu sắp xếp nhẹ ở vật gần.
-- Chưa làm (bước 1–2 của H4): nhân vật có khung xương và hoạt ảnh. Hình người hiện là capsule + hình cầu dựng trong
-  code. Cần owner chốt nguồn asset (điều khoản asset Isaac Sim cho việc phát trên web, hoặc một mô hình có giấy phép tự
-  do) trước khi đưa file nhân vật vào sản phẩm.
+- Bước 1–2 của H4 (03/10/2026): research giấy phép asset Isaac Sim → không cho phân phối/tạo bản phái sinh ngoài
+  Isaac Sim (ADR 0010). Dùng "Worker" của Quaternius (CC0, `frontend/public/characters/worker.glb`), hoạt ảnh
+  Idle/Walk/Run chạy qua hệ `anim` mà Studio thêm vào app của viewer; dáng đi theo tốc độ di chuyển, mặt quay theo
+  hướng đi. Hình khối chỉ còn là bản thay thế lúc tải hoặc khi tải lỗi. Chưa xem trên trình duyệt.
 
 ### H5 — đẩy vật thể: chưa làm, cần hai quyết định
 

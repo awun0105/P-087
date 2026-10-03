@@ -5,11 +5,24 @@
  * thay bộ điều khiển đó: ngay trước khi vẽ mỗi frame, nó đặt một hình người tại chỗ người đi đang đứng rồi lùi
  * camera ra sau lưng; vẽ xong thì trả camera về chỗ cũ, nên trạng thái của thư viện không bị đổi.
  *
- * Camera lùi tới đâu bị lưới va chạm chặn tới đó (không nhìn xuyên tường). Hình người hiện là hình khối dựng sẵn
- * trong code — chưa dùng asset nhân vật nào (việc chọn asset và giấy phép là quyết định riêng của owner).
+ * Camera lùi tới đâu bị lưới va chạm chặn tới đó (không nhìn xuyên tường). Nhân vật là "Worker" của Quaternius
+ * (CC0, có khung xương và hoạt ảnh đứng/đi/chạy; xem THIRD_PARTY_NOTICES.md); trong lúc tải hoặc khi tải lỗi thì
+ * hiện hình khối thay thế. Asset người của Isaac Sim không dùng được ở đây: giấy phép của chúng không cho phân phối
+ * hay tạo bản chuyển đổi ra ngoài Isaac Sim (ADR 0010).
  */
 
-import { Color, Entity, StandardMaterial, Vec3 as PcVec3, type AppBase } from "playcanvas";
+import {
+  AnimComponentSystem,
+  Asset,
+  Color,
+  Entity,
+  StandardMaterial,
+  Vec3 as PcVec3,
+  type AnimComponent,
+  type AnimTrack,
+  type AppBase,
+  type ContainerResource,
+} from "playcanvas";
 
 import type { Vec3 } from "@/features/viewer/source-frame";
 import { themeColor } from "@/lib/theme";
@@ -29,6 +42,19 @@ export const THIRD_PERSON_DEFAULTS: ThirdPersonOptions = { distance: 2.4, lift: 
 
 /** Tầm mắt của người đi trong thư viện viewer (mét trên sàn); hình người được dựng theo chiều cao này. */
 export const WALK_EYE_HEIGHT_M = 1.3;
+
+/** Nhân vật CC0 phục vụ cùng frontend (`public/characters`). */
+export const CHARACTER_URL = "/characters/worker.glb";
+
+/** Ba trạng thái hoạt ảnh và tên clip tương ứng trong file nhân vật. */
+export const CHARACTER_CLIPS = { idle: "CharacterArmature|Idle", walk: "CharacterArmature|Walk", run: "CharacterArmature|Run" } as const;
+export type Gait = keyof typeof CHARACTER_CLIPS;
+
+/** Dáng đi theo tốc độ ngang (m/s): đứng yên, đi bộ, chạy. Ngưỡng lấy theo tốc độ đi/chạy của chế độ đi bộ. */
+export function gaitForSpeed(speed: number): Gait {
+  if (!Number.isFinite(speed) || speed < 0.2) return "idle";
+  return speed < 2.4 ? "walk" : "run";
+}
 
 /** Ô lưới va chạm (mét); đủ nhỏ để tường mỏng vẫn chặn camera, đủ lớn để tra nhanh. */
 export const OCCUPANCY_CELL_M = 0.15;
@@ -86,6 +112,12 @@ export class ThirdPersonRig {
   private moved = false;
   private active = false;
   private occupied: (point: Vec3) => boolean = () => false;
+  private character: Entity | null = null;
+  private characterAsset: Asset | null = null;
+  private placeholder: Entity | null = null;
+  private gait: Gait | null = null;
+  private last: { x: number; z: number; time: number } | null = null;
+  private heading = 0;
 
   constructor(app: AppBase, private readonly options: ThirdPersonOptions = THIRD_PERSON_DEFAULTS) {
     this.app = app;
@@ -103,12 +135,76 @@ export class ThirdPersonRig {
     head.addComponent("render", { type: "sphere", material: this.material, castShadows: false });
     head.setLocalScale(0.26, 0.26, 0.26);
     head.setLocalPosition(0, WALK_EYE_HEIGHT_M, 0);
-    this.avatar.addChild(body);
-    this.avatar.addChild(head);
+    const placeholder = new Entity("r2s-avatar-placeholder", app);
+    placeholder.addChild(body);
+    placeholder.addChild(head);
+    this.placeholder = placeholder;
+    this.avatar.addChild(placeholder);
     this.avatar.enabled = false;
     app.root.addChild(this.avatar);
     app.on("prerender", this.before, this);
     app.on("postrender", this.after, this);
+    app.on("update", this.tick, this);
+  }
+
+  /** Nạp nhân vật có hoạt ảnh lần đầu cần tới; lỗi thì giữ hình khối thay thế, không làm hỏng viewer. */
+  private loadCharacter(): void {
+    if (this.characterAsset) return;
+    // Viewer chỉ đăng ký các hệ component nó cần; hoạt ảnh xương cần thêm hệ `anim` (một lần cho mỗi app).
+    if (!(this.app.systems as unknown as { anim?: unknown }).anim) this.app.systems.add(new AnimComponentSystem(this.app));
+    const asset = new Asset("r2s-character", "container", { url: CHARACTER_URL });
+    this.characterAsset = asset;
+    asset.once("load", () => {
+      if (this.characterAsset !== asset || !this.app.root) return;
+      // Kiểu công khai của engine chưa khai `animations`; bản GLB của engine có mảng Asset hoạt ảnh này.
+      const container = asset.resource as ContainerResource & { animations?: Asset[] };
+      const entity = container.instantiateRenderEntity({ castShadows: false });
+      const tracks = new Map((container.animations ?? []).map((item: Asset) => [item.name, item.resource as AnimTrack]));
+      entity.addComponent("anim", { activate: true });
+      const anim = (entity as Entity & { anim: AnimComponent }).anim;
+      for (const [gait, clip] of Object.entries(CHARACTER_CLIPS)) {
+        const track = tracks.get(clip);
+        if (track) anim.assignAnimation(gait, track);
+      }
+      this.character = entity;
+      this.avatar.addChild(entity);
+      this.placeholder?.destroy();
+      this.placeholder = null;
+      this.gait = null;
+      this.app.renderNextFrame = true;
+    });
+    asset.once("error", () => {
+      console.warn("Không tải được nhân vật; dùng hình khối thay thế.");
+    });
+    this.app.assets.add(asset);
+    this.app.assets.load(asset);
+  }
+
+  /** Mỗi frame khi đang bật: giữ viewer vẽ liên tục để hoạt ảnh chạy (viewer chỉ vẽ khi camera đổi). */
+  private tick(): void {
+    if (this.active && this.app.root) this.app.renderNextFrame = true;
+  }
+
+  /** Dáng đi và hướng mặt của nhân vật theo chuyển động ngang của người đi giữa hai frame. */
+  private animate(x: number, z: number, forward: PcVec3): void {
+    const now = performance.now();
+    const previous = this.last;
+    this.last = { x, z, time: now };
+    let speed = 0;
+    if (previous && now > previous.time) {
+      const dx = x - previous.x;
+      const dz = z - previous.z;
+      speed = Math.hypot(dx, dz) / ((now - previous.time) / 1000);
+      // Mặt nhân vật (+Z của glTF) quay theo hướng đang đi; đứng yên thì quay theo hướng nhìn.
+      if (Math.hypot(dx, dz) > 1e-3) this.heading = Math.atan2(dx, dz);
+      else if (Math.hypot(forward.x, forward.z) > 1e-6) this.heading = Math.atan2(forward.x, forward.z);
+    }
+    const gait = gaitForSpeed(speed);
+    const anim = (this.character as (Entity & { anim?: AnimComponent }) | null)?.anim;
+    if (anim && gait !== this.gait) {
+      this.gait = gait;
+      anim.baseLayer?.transition(gait, 0.2);
+    }
   }
 
   /** Lưới va chạm (đỉnh trong không gian hiển thị) để camera không lùi xuyên tường; null = không chặn. */
@@ -119,6 +215,8 @@ export class ThirdPersonRig {
   /** Bật khi đang ở chế độ đi bộ và người dùng chọn góc nhìn thứ ba. */
   setActive(active: boolean): void {
     this.active = active;
+    if (active) this.loadCharacter();
+    this.last = null;
     if (!active) this.avatar.enabled = false;
     if (this.app.root) this.app.renderNextFrame = true;
   }
@@ -136,7 +234,8 @@ export class ThirdPersonRig {
     this.saved.copy(eye);
     this.avatar.enabled = true;
     this.avatar.setPosition(eye.x, eye.y - WALK_EYE_HEIGHT_M, eye.z);
-    this.avatar.setEulerAngles(0, (Math.atan2(-forward.x, -forward.z) * 180) / Math.PI, 0);
+    this.animate(eye.x, eye.z, forward);
+    this.avatar.setEulerAngles(0, (this.heading * 180) / Math.PI, 0);
     const [x, y, z] = thirdPersonCameraPosition([eye.x, eye.y, eye.z], [forward.x, forward.y, forward.z], this.options, this.occupied);
     camera.setPosition(x, y, z);
     this.moved = true;
@@ -152,7 +251,13 @@ export class ThirdPersonRig {
     this.after();
     this.app.off("prerender", this.before, this);
     this.app.off("postrender", this.after, this);
+    this.app.off("update", this.tick, this);
     this.avatar.destroy();
+    if (this.characterAsset) {
+      this.app.assets?.remove(this.characterAsset);
+      this.characterAsset.unload();
+      this.characterAsset = null;
+    }
     this.material.destroy();
   }
 }
