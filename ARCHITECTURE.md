@@ -9,7 +9,9 @@ và immutable artifacts, không import implementation nội bộ.
 
 ## Repository Structure and Module Ownership
 
-Repository giữ nguyên scaffold do ban tổ chức cung cấp và chỉ mở rộng theo chính sách **additive-only**:
+Repository giữ source scaffold do ban tổ chức cung cấp và mở rộng theo chính sách
+**additive-only**, với ngoại lệ cấu hình dependency/Docker đã được owner chấp thuận
+hợp nhất ngày 03/10/2026:
 
 ```text
 KEEP existing organizer scaffold
@@ -17,7 +19,18 @@ KEEP existing organizer scaffold
 ADD minimal Real2Sim modules
 ```
 
-Không rename, move, delete hoặc archive file/thư mục do ban tổ chức cung cấp. Module scaffold hiện có nhưng chưa được Real2Sim sử dụng vẫn được giữ nguyên. `Dockerfile`, `docker-compose.yml`, `src/api/`, `src/agents/`, `src/llm/`, `src/models/schemas.py`, top-level `eval/` và `eval/results/report.md` là các path ổn định.
+Không rename, move, delete hoặc archive source scaffold do ban tổ chức cung cấp.
+Module scaffold hiện có nhưng chưa được Real2Sim sử dụng vẫn được giữ nguyên.
+`src/api/`, `src/agents/`, `src/llm/`, `src/models/schemas.py`, top-level `eval/`
+và `eval/results/report.md` là các path ổn định.
+
+**Cấu hình canonical:** `Dockerfile` là image API Studio, `frontend/Dockerfile`
+là image web, `Dockerfile.gpu` là worker NVIDIA; `docker-compose.yml` là stack
+Studio mặc định, `docker-compose.gpu.yml` là override GPU. Dependency Python dùng
+các cặp `requirements*.in`/`requirements*.lock.txt` cho runtime, dev và offline.
+Owner yêu cầu thay cấu hình cũ bằng bản đang dùng, không giữ bản song song dư:
+file cấu hình được bỏ sau khi hợp nhất đủ capability, cập nhật consumers/docs và
+quan sát proof phù hợp. Đây không phải quyền xóa source, tests hoặc dữ liệu user.
 
 Canonical Real2Sim module structure (placement mục tiêu, không khẳng định mọi
 thư mục đã được implement ở checkout hiện tại):
@@ -416,7 +429,8 @@ thay thế PRD, shared Contract hoặc quyết định runtime chưa được kh
 hiện tại (2026-09-29), typed contracts, synthetic fixtures và filesystem artifact
 store đã có; FastAPI có API product + Studio và queue worker chạy REC thật qua
 process boundary; `frontend/` có Studio MVP (upload → 3DGS → editor) và UI P0 ẩn;
-`docker-compose.yml` mới khai báo backend. Fixture/integration proof không phải
+Sau cleanup 03/10/2026, `docker-compose.yml` chạy restore/API/web; worker NVIDIA
+dùng `docker-compose.gpu.yml`. Fixture/integration proof không phải
 real Brush, browser hoặc Isaac acceptance.
 
 ### Components

@@ -23,6 +23,23 @@ Kaggle: xem `scripts/kaggle/README.md` (phụ thuộc Vulkan, phải thử trư�
 - `Dockerfile` (API cho Railway), `scripts/cloud/configure_bucket.py` (CORS + dọn multipart cho R2), đăng nhập hai role.
 - Checkpoint/resume train 3DGS; thử lại tách theo vật.
 
+Với checkout P-087 hiện tại, `Dockerfile` là image API/control-plane CPU và
+`Dockerfile.gpu` là image worker NVIDIA. Stack Studio local dùng Compose ở root:
+
+```bash
+# CPU: API + web + restore data package
+docker compose --env-file .env.studio -f docker-compose.yml up --build -d --wait
+
+# Linux/NVIDIA: thêm worker và preflight runtime thật
+docker compose --env-file .env.studio -f docker-compose.yml \
+  -f docker-compose.gpu.yml up --build -d --wait
+```
+
+Trên Linux, `make -f Makefile.studio docker` và
+`make -f Makefile.studio docker GPU=1` là alias tương ứng. Windows/macOS dùng
+Docker Compose trực tiếp; phần GPU NVIDIA chỉ áp dụng cho Linux hoặc máy thuê
+được Docker cấp NVIDIA runtime.
+
 **Chưa kiểm chứng:** `Dockerfile.gpu` chưa build (máy dev thiếu ổ đĩa; image ước 15–20 GB); Vulkan trong container
 vast.ai; chạy trên máy nhiều GPU; `sync` artifact giữa worker và R2 ở quy mô thật.
 

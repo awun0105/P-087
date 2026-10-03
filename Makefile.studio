@@ -72,7 +72,7 @@ kill_port() {
 }
 endef
 
-.PHONY: help up down status env
+.PHONY: help up down status env data-pack data-verify data-unpack docker docker-down
 
 help:
 	@echo "Studio MVP — lệnh có sẵn:"
@@ -80,6 +80,10 @@ help:
 	@echo "  make -f Makefile.studio down     # kill tiến trình đang giữ port của stack"
 	@echo "  make -f Makefile.studio status   # in port/pid hiện tại"
 	@echo "  make -f Makefile.studio env      # sinh lại scripts/gpu/studio.env (FORCE_ENV=1 để ghi đè)"
+	@echo "  make -f Makefile.studio data-pack KEEP_SEED_ACCOUNTS=1 OUT=/duong/dan/r2s-studio-data.zip"
+	@echo "  make -f Makefile.studio data-verify DATA=/duong/dan/r2s-studio-data.zip"
+	@echo "  make -f Makefile.studio data-unpack DATA=/duong/dan/r2s-studio-data.zip"
+	@echo "  make -f Makefile.studio docker   # Docker Compose: restore + API + web (GPU=1 thêm worker NVIDIA)"
 	@echo ""
 	@echo "  Tham số: API_PORT=$(API_PORT) WEB_PORT=$(WEB_PORT) FRONTEND_MODE=$(FRONTEND_MODE) DEMO_DIR=$(DEMO_DIR)"
 
@@ -89,31 +93,31 @@ env:
 	  echo "[env] giữ nguyên $(ENV_FILE) (FORCE_ENV=1 để sinh lại)."; \
 	else \
 	  echo "[env] sinh $(ENV_FILE)"; \
-	  mkdir -p "$(dir $(ENV_FILE))"; \
+	  mkdir -p "$$(dirname "$(ENV_FILE)")"; \
 	  cat > "$(ENV_FILE)" <<'EOF'
-	# Sinh tự động bởi Makefile.studio — đường dẫn tuyệt đối của máy này.
+	# Sinh tự động bởi Makefile.studio — đường dẫn lấy từ root repo của máy chạy make.
 	APP_ENV=development
-	DATABASE_URL=sqlite:////home/lqaq/PROJECT/AI20K/P-087/data/studio_local/runtime.db
-	ARTIFACT_ROOT=/home/lqaq/PROJECT/AI20K/P-087/data/studio_local/artifacts
-	PRODUCT_WORKER_ROOT=/home/lqaq/PROJECT/AI20K/P-087/data/studio_local/workers
+	DATABASE_URL='sqlite:///$(ROOT)/data/studio_local/runtime.db'
+	ARTIFACT_ROOT='$(ROOT)/data/studio_local/artifacts'
+	PRODUCT_WORKER_ROOT='$(ROOT)/data/studio_local/workers'
 	# MVP: người upload tự xác nhận không có khuôn mặt/biển số (xem ADR 0002).
 	PRODUCT_PRIVACY_MODE=self_attested
 	PRODUCT_UPLOAD_MAX_BYTES=4294967296
-	PRODUCT_PROCESSING_CONFIG=/home/lqaq/PROJECT/AI20K/P-087/configs/product/processing_presets_v1.json
-	PRODUCT_RUNTIME_MANIFEST=/home/lqaq/PROJECT/AI20K/P-087/data/studio_local/runtime_manifest.json
+	PRODUCT_PROCESSING_CONFIG='$(ROOT)/configs/product/processing_presets_v1.json'
+	PRODUCT_RUNTIME_MANIFEST='$(ROOT)/data/studio_local/runtime_manifest.json'
 	# Thư viện video mẫu: mỗi thư mục con là một bundle đã xử lý sẵn.
-	PRODUCT_DEMO_DIR=/home/lqaq/PROJECT/AI20K/P-087/data/demo/library
-	REC03_COLMAP_COMMAND='["sh","/home/lqaq/PROJECT/AI20K/P-087/data/rec04_runtime/colmap-launcher.sh"]'
-	# Identity/version của runtime đã chạy thật trên máy này (job-ac2bfd924cc6); đổi binary thì cập nhật cùng.
+	PRODUCT_DEMO_DIR='$(DEMO_DIR)'
+	REC03_COLMAP_COMMAND='["sh","$(COLMAP)"]'
+	# Identity/version của baseline đã kiểm (job-ac2bfd924cc6); đổi binary thì cập nhật cùng.
 	REC03_COLMAP_RUNTIME_IDENTITY=colmap-image-sha256:b8498ebecab11c3f9b9a25370e3fcfb6de9b6bcd4f3c85d5dc39a40229f40954
 	REC03_COLMAP_TIMEOUT_SECONDS=3600
-	REC04_BRUSH_COMMAND='["/home/lqaq/PROJECT/AI20K/P-087/data/rec04_runtime/brush/brush-app-x86_64-unknown-linux-gnu/brush_app"]'
+	REC04_BRUSH_COMMAND='["$(BRUSH)"]'
 	REC04_BRUSH_EXPECTED_VERSION=0.3.0
 	REC04_BRUSH_RUNTIME_IDENTITY=brush-v0.3.0-linux-archive-sha256:4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20
 	# Brush train qua Vulkan: chỉ định ICD NVIDIA để không rơi về GPU tích hợp/CPU.
 	REC04_BRUSH_ENVIRONMENT='{"RUST_LOG":"info,wgpu_core=warn","VK_ICD_FILENAMES":"/usr/share/vulkan/icd.d/nvidia_icd.json"}'
 	REC04_BRUSH_TIMEOUT_SECONDS=3600
-	REC04_SPLAT_MODULE_PATH=/home/lqaq/PROJECT/AI20K/P-087/data/rec04_runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
+	REC04_SPLAT_MODULE_PATH='$(SPLAT)'
 	REC04_SPLAT_DEVICE=gpu
 	# LLM_PROVIDER/OPENAI_API_KEY lấy từ .env ở root repo (Settings đọc .env); không ghi key vào đây.
 	EOF
@@ -173,3 +177,22 @@ status:
 	   if port_busy "$$port"; then echo "[status] $$label :$$port ĐANG CHẠY (PID $$(port_owner "$$port"))"; \
 	   else echo "[status] $$label :$$port trống"; fi; \
 	 done
+
+## Package dùng Python stdlib; không đọc credential từ .env và không đổi data nguồn.
+data-pack:
+	@"$(VENV_PY)" "$(ROOT)/scripts/studio/data_package.py" --root "$(ROOT)" pack $(if $(OUT),--out "$(OUT)",) $(if $(filter 1,$(KEEP_SEED_ACCOUNTS)),--keep-seed-accounts,) $(if $(COMPRESSION),--compression "$(COMPRESSION)",)
+
+data-verify:
+	@[ -n "$(DATA)" ] || { echo "Cần DATA=<file zip>"; exit 1; }
+	@"$(VENV_PY)" "$(ROOT)/scripts/studio/data_package.py" verify "$(DATA)" $(if $(filter 1,$(KEEP_SEED_ACCOUNTS)),--expect-seed-accounts,)
+
+data-unpack:
+	@[ -n "$(DATA)" ] || { echo "Cần DATA=<file zip>"; exit 1; }
+	@"$(VENV_PY)" "$(ROOT)/scripts/studio/data_package.py" --root "$(ROOT)" unpack "$(DATA)" $(if $(filter 1,$(FORCE)),--force,)
+
+## Docker Compose là entrypoint đa nền tảng; không bật native stack thêm một lần nữa.
+docker:
+	@docker compose --env-file "$(ROOT)/.env.studio" -f "$(ROOT)/docker-compose.yml" $(if $(filter 1,$(GPU)),-f "$(ROOT)/docker-compose.gpu.yml",) up --build -d --wait
+
+docker-down:
+	@docker compose --env-file "$(ROOT)/.env.studio" -f "$(ROOT)/docker-compose.yml" $(if $(filter 1,$(GPU)),-f "$(ROOT)/docker-compose.gpu.yml",) down

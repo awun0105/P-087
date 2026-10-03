@@ -3,6 +3,12 @@ title: "DevOps và Triển khai"
 weight: 7
 ---
 
+> **Lưu ý phạm vi:** Chương này dùng code block generic để dạy Docker/Compose
+> cho repo AI20K template. Các ví dụ `requirements.txt`, service `db`/`redis`
+> và image `my-agent-api` không phải topology hiện tại của Real2Sim Studio P-087.
+> P-087 dùng lockfiles, `Dockerfile` API và Compose root; xem mục lệnh Studio
+> dưới đây hoặc `docs/guide/studio-distribution.md`.
+
 ## 7.1 Docker — Container hóa ứng dụng
 
 Docker là một nền tảng (platform) cho phép bạn đóng gói ứng dụng cùng toàn bộ dependencies (thư viện, cấu hình, biến môi trường) vào một đơn vị gọi là **container**. Container đảm bảo ứng dụng chạy đồng nhất trên mọi máy — từ laptop của bạn đến server production. Trong AI20K, 100% BTC chấm điểm DevOps, và Docker là công cụ nền tảng để đạt điểm cao.
@@ -167,6 +173,24 @@ File `.dockerignore` giống `.gitignore` — ngăn các file không cần thi�
 Docker Compose là công cụ cho phép bạn định nghĩa và chạy nhiều container (nhiều dịch vụ) cùng lúc bằng một file YAML. Thay vì gõ 5-6 lệnh `docker run` dài dòng, bạn viết một file `docker-compose.yml` và chạy `docker compose up` — mọi thứ tự động khởi động, kết nối mạng, và quản lý vòng đời.
 
 Trong ứng dụng AI Agent điển hình, bạn cần ít nhất 3-4 dịch vụ chạy cùng nhau: API server, database (PostgreSQL), vector store (Chroma/PGVector), và có thể Redis cho caching. Docker Compose quản lý toàn bộ stack này.
+
+### Lệnh của Real2Sim Studio P-087
+
+Đây là stack canonical của checkout hiện tại, sau khi đã chuẩn bị `.env.studio`
+và data ZIP:
+
+```bash
+# CPU: restore package + API + web
+docker compose --env-file .env.studio -f docker-compose.yml up --build -d --wait
+
+# Linux/NVIDIA: thêm GPU worker và runtime preflight
+docker compose --env-file .env.studio -f docker-compose.yml \
+  -f docker-compose.gpu.yml up --build -d --wait
+```
+
+Linux có alias `make -f Makefile.studio docker` và `make -f Makefile.studio
+docker GPU=1`; Windows/macOS dùng Compose trực tiếp. Các service `db` và
+`redis` trong ví dụ generic dưới đây không thuộc stack Studio.
 
 Dưới đây là `docker-compose.yml` hoàn chỉnh cho dự án AI Agent:
 

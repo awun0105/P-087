@@ -18,6 +18,15 @@ Dependencies are grouped into logical, isolated environments. We do NOT use one 
 - Lockfiles: `requirements.lock.txt` and `requirements-dev.lock.txt`.
 - Workflow: Lock with `uv pip compile --generate-hashes --python-version 3.12.14`, sync with `uv pip sync`.
 
+### Offline Dataset Dependencies
+- Source/lock duy nhất: `requirements-offline.in` và `requirements-offline.lock.txt`.
+- REC-07 prefusion dùng Open3D **0.19.0** đã audit; không tự nâng phiên bản vượt
+  gate trong `scripts/torwic/prefusion_cloud.py` hoặc đổi checksum-bound evidence.
+- Pydantic/settings của CLI được khai báo trong profile offline; cài vào venv
+  riêng, không đưa Open3D vào API/core. File template `requirements.txt` và
+  `scripts/torwic/requirements-lidar.txt` đã được owner yêu cầu thay thế bằng
+  các profile canonical ngày 03/10/2026.
+
 ### External Provider Dependencies (e.g. 3DGS, Isaac, SAM2)
 - Must be isolated from the Core.
 - Permitted mechanisms: dedicated virtualenv, vendor containers, or separate processes.

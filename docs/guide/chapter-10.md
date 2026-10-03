@@ -3,6 +3,11 @@ title: "Tài nguyên học tập"
 weight: 10
 ---
 
+> **Lưu ý phạm vi:** Các project structure và lệnh trong chương này là ví dụ
+> học tập hoặc hướng dẫn của repository bên ngoài. Chúng có thể dùng
+> `requirements.txt` theo ngữ cảnh riêng; không dùng chúng để setup Real2Sim
+> Studio P-087. Checkout P-087 dùng `make setup` với lockfiles và Compose root.
+
 ## 10.1 Lộ trình học 6 tuần
 
 Lộ trình này thiết kế cho sinh viên VinUni tham gia AI20K Build Phase, với mục tiêu từ "chưa biết LangGraph" đến "có thể build và deploy AI Agent hoàn chỉnh" trong 6 tuần. Mỗi tuần có focus cụ thể, kết hợp lý thuyết và thực hành.

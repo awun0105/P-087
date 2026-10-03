@@ -4,6 +4,12 @@ description: "Setup Docker và GitHub Actions"
 weight: 1
 ---
 
+> **Phạm vi:** Các Dockerfile và service trong phần code block là ví dụ generic
+> cho template AI20K. Với Real2Sim Studio P-087, image API/control-plane là
+> `Dockerfile`, Compose canonical là `docker-compose.yml`, GPU override là
+> `docker-compose.gpu.yml`, và dependencies được cài từ lockfiles. Xem
+> `README.md`/`docs/guide/studio-distribution.md` trước khi chạy stack thật.
+
 ## Docker
 
 ### Multi-stage Dockerfile

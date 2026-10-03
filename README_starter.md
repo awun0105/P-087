@@ -6,6 +6,11 @@ code, test cho đến deploy và nộp bài Demo Day.
 
 Technical Guidebook: <https://phoenix.note.transformerlabs.ai/technical-book>
 
+> **Phạm vi của file:** Đây là README template AI20K; các placeholder org/team
+> được giữ để BTC sinh repo cho đội. Setup bên dưới dùng dependency lockfiles
+> hiện tại. Với Web Studio/data package P-087, xem thêm `README.md` và hướng dẫn
+> Docker Compose Studio.
+
 ## Template có sẵn những gì
 
 - **Cấu trúc thư mục tách lớp** — `agents/`, `api/`, `services/`, `models/` đã
@@ -49,7 +54,9 @@ của đội thì báo BTC — repo tự tạo nằm ngoài org sẽ không đư
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+python -m pip install uv==0.9.4
+uv pip sync requirements.lock.txt requirements-dev.lock.txt
+uv pip check
 ```
 
 ### 3. Cấu hình biến môi trường

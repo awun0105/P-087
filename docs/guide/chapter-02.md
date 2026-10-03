@@ -3,6 +3,13 @@ title: "Khởi tạo dự án từ Template"
 weight: 2
 ---
 
+> **Lưu ý phạm vi:** Chương này là tài liệu hướng dẫn từ AI20K template; các
+> tree và lệnh `requirements.txt` là ví dụ teaching/organizer và được giữ để
+> minh họa template. Repo Real2Sim Studio P-087 hiện dùng
+> `requirements.in`/`requirements.lock.txt`, `requirements-dev.lock.txt` và
+> `make setup`; phần Docker hiện dùng Compose Studio ở root. Xem `README.md`
+> và `docs/guide/studio-distribution.md` khi setup checkout P-087.
+
 ## Nhận repo của đội — Bắt đầu từ nền tảng đúng
 
 Một trong những sai lầm phổ biến nhất của sinh viên khi bắt đầu dự án mới là tạo mọi thứ từ con số không — tự setup cấu trúc thư mục, tự cấu hình linting, tự viết CI/CD file, tự tạo Dockerfile. Kết quả là mỗi đội có một cấu trúc khác nhau, thiếu những file quan trọng, và mất hàng ngày chỉ để setup thay vì viết logic chính. Template dự án giải quyết vấn đề này bằng cách cung cấp một nền tảng đã được chuẩn hóa, bao gồm tất cả best practices mà bạn cần.
@@ -484,7 +491,7 @@ Bây giờ bạn đã có template chạy được trên máy. Nhưng template c
 
 ### Những gì cần thay đổi ngay
 
-**1. Rà lại `requirements.txt`:** bỏ dấu `#` ở những dependency đội thật sự dùng, và thêm thư viện mới vào đây thay vì cài lẻ trên máy — CI dựng môi trường từ đầu bằng đúng file này, thư viện không được khai báo thì chạy trên máy bạn được nhưng hỏng trên CI.
+**1. Rà lại `requirements.txt` trong repo template:** bỏ dấu `#` ở những dependency đội thật sự dùng, và thêm thư viện mới vào đây thay vì cài lẻ trên máy — CI dựng môi trường từ đầu bằng đúng file này, thư viện không được khai báo thì chạy trên máy bạn được nhưng hỏng trên CI. Với P-087, cập nhật `requirements.in` rồi sinh lại lockfile bằng `make lock`; không tạo lại `requirements.txt` đã bỏ khỏi checkout.
 
 ```
 # Database — bỏ comment nếu đội dùng

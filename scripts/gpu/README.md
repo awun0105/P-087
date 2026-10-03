@@ -46,6 +46,30 @@ set -a; source scripts/gpu/studio.env; set +a
 .venv/bin/python -m scripts.gpu.make_runtime_manifest --out "$PRODUCT_RUNTIME_MANIFEST"
 ```
 
+### Cấu hình khi chạy trên máy teammate
+
+Phân phối ZIP và chạy API/web qua Docker Compose đa nền tảng: xem
+[`docs/guide/studio-distribution.md`](../../docs/guide/studio-distribution.md).
+Phần dưới mô tả cấu hình native trên Linux cho stack GPU hiện tại.
+
+Chạy `make -f Makefile.studio env` **từ root repo** để sinh `scripts/gpu/studio.env`
+với đường dẫn của checkout trên máy đó. Data khôi phục cần nằm tại
+`data/studio_local/runtime.db`, `data/studio_local/artifacts/` và `data/demo/library/`;
+asset preview và bản ghi Rerun dùng các thư mục mặc định trong `data/`.
+Có thể chọn thư viện mẫu khác bằng `make -f Makefile.studio env DEMO_DIR=/duong/dan/library`.
+
+Lệnh giữ nguyên env đã tồn tại. Với env copy từ máy khác, cập nhật đường dẫn trong
+file đó; nếu muốn dùng lại baseline mặc định, sao lưu cấu hình riêng trước rồi chạy
+`make -f Makefile.studio env FORCE_ENV=1`. File được sinh chỉ cấu hình đường dẫn,
+không cài runtime hoặc chứng minh máy mới đã chạy GPU thành công. Khi cài runtime
+tách vật thể, thêm các biến mà `setup_scene_runtime.sh` in ra vào env này.
+
+`make setup` cài Python dependencies từ lockfile; `npm ci` trong `frontend/` cài
+frontend dependencies. Docker trong stack local này dùng cho COLMAP qua launcher;
+Brush và splat-transform cần cài riêng theo mục 2 khi chạy native. Compose ở root
+khởi động API/web; thêm `docker-compose.gpu.yml` để cài runtime trong image GPU
+và khởi động worker NVIDIA cùng stack.
+
 ## 3. Thông số xử lý
 
 Mọi thông số (lấy mẫu frame, COLMAP, Brush) nằm trong **một file chung**

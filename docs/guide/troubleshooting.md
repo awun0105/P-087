@@ -7,6 +7,12 @@ weight: 99
 
 Phần này tổng hợp các lỗi phổ biến khi setup và chạy dự án AI Agent, kèm hướng dẫn sửa chi tiết. Nếu bạn gặp lỗi không có trong danh sách, hãy kiểm tra lại các bước trong chương tương ứng hoặc tìm trên GitHub Issues của template.
 
+> **Phạm vi:** Các lệnh Python/Docker generic trong phần này phục vụ AI20K
+> template và có thể nhắc tới `requirements.txt` hoặc service mẫu như `db`.
+> Với Real2Sim Studio P-087, dùng `make setup` để cài từ lockfiles và dùng
+> Compose root bên dưới; không dùng các tên service generic làm căn cứ cho stack
+> Studio.
+
 ---
 
 ## Python & Environment
@@ -183,6 +189,30 @@ graph.add_conditional_edges(
 ---
 
 ## Docker
+
+### Real2Sim Studio P-087 — stack hiện tại
+
+Sau khi chuẩn bị `.env.studio` và data ZIP theo
+[`studio-distribution.md`](studio-distribution.md), dùng các service root
+hiện tại:
+
+```bash
+# CPU: restore data package, khởi động API và web, chờ healthcheck
+docker compose --env-file .env.studio -f docker-compose.yml up --build -d --wait
+
+# Xem log của stack Studio
+docker compose --env-file .env.studio -f docker-compose.yml logs -f api web
+
+# NVIDIA GPU: thêm override sau khi máy có NVIDIA Container Toolkit
+docker compose --env-file .env.studio -f docker-compose.yml \
+  -f docker-compose.gpu.yml up --build -d --wait
+
+# Dừng stack nhưng giữ data bind mount
+docker compose --env-file .env.studio -f docker-compose.yml down
+```
+
+Trên Linux, `make -f Makefile.studio docker` là alias CPU và thêm `GPU=1` để
+bật override NVIDIA. Windows/macOS dùng Docker Compose trực tiếp như trên.
 
 ### `docker: command not found`
 
