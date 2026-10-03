@@ -1856,24 +1856,24 @@ Script thực thi: `python -m scripts.demo.organize_raw_dataset`. Script tự đ
 
 Chi tiết kế hoạch thực nghiệm phân bổ 15 video thành 16 lượt chạy:
 
-| Mã KB | Thư mục kịch bản | File Video | Cảm biến đi kèm | Loại hình xử lý (Modality) | Mục tiêu kỹ thuật & Ý nghĩa so sánh | Môi trường chạy |
-|:---:|---|---|:---:|---|---|:---:|
-| **SC-01** | `01_LoiDi_Kho_Thuan_Aisle_CW` | `video_left.mp4` | 🎥 Camera Trái | **Mono RGB (Video-Only)** | **[A/B Test - Baseline]**: Phục dựng 3DGS từ camera đơn, ước lượng hệ mét tự động qua mô hình AI MoGe. | Local / Colab |
-| **SC-02** | `01_LoiDi_Kho_Thuan_Aisle_CW` | `video_left.mp4` | 🎥 Camera Trái + 📡 LiDAR thô | **RGB + Unregistered LiDAR** | **[A/B Test - Fusion]**: Cùng video SC-01 nhưng nạp kèm scan LiDAR thô. Đối chiếu sai số kích thước (scale error < 1cm) và độ chi tiết hình học. | Colab GPU |
-| **SC-03** | `01_LoiDi_Kho_Thuan_Aisle_CW` | `video_right.mp4` | 🎥 Camera Phải | **Mono RGB (Right Camera)** | **Đổi góc nhìn**: Đánh giá độ phủ bề mặt kệ hàng từ góc nhìn lệch phải của robot. | Local / Colab |
-| **SC-04** | `01_LoiDi_Kho_Thuan_Aisle_CW` | `video_stereo.mp4` | 🎥🎥 Stereo kép (Trái + Phải) | **Stereo Multi-View** | **Trường nhìn mở rộng**: Tận dụng 2 camera song song để bao quát cả 2 dãy kệ hai bên đường đi robot AMR. | Colab GPU |
-| **SC-05** | `02_HanhLang_Thang_Hallway_Straight_CW` | `video_left.mp4` | 🎥 Camera Trái | **Mono RGB (Video-Only)** | **Thử thách tường trơn**: Đánh giá SfM/COLMAP trong môi trường ít hoa văn bề mặt (texture-poor), kiểm tra độ trôi pose. | Local / Colab |
-| **SC-06** | `02_HanhLang_Thang_Hallway_Straight_CW` | `video_right.mp4` | 🎥 Camera Phải + 📡 LiDAR thô | **Cross-Sensor Fusion** | **Ghép chéo cảm biến**: Camera phải kết hợp cảm biến LiDAR đặt ở tâm robot để bù đắp các mảng tường phẳng và cửa kính. | Colab GPU |
-| **SC-07** | `02_HanhLang_Thang_Hallway_Straight_CW` | `video_stereo.mp4` | 🎥🎥 Stereo kép | **Stereo Corridor Recon** | **Stereo hành lang dài**: Khắc phục góc nhìn hẹp trong không gian hành lang văn phòng dài và sâu. | Colab GPU |
-| **SC-08** | `03_LoiDi_Kho_Nguoc_Aisle_CCW` | `video_left.mp4` | 🎥 Camera Trái | **Mono RGB (Reverse Direction)** | **Đảo chiều chuyển động (180°)**: Robot chạy ngược chiều kim đồng hồ, kiểm tra tính ổn định khi hướng chiếu sáng và bóng đổ thay đổi. | Local / Colab |
-| **SC-09** | `03_LoiDi_Kho_Nguoc_Aisle_CCW` | `video_right.mp4` | 🎥 Camera Phải | **Symmetric Surface Validation** | **Đối xứng bề mặt**: Camera phải khi đi ngược chiều nhìn vào đúng dãy kệ mà camera trái ở chiều thuận đã nhìn. | Local / Colab |
-| **SC-10** | `03_LoiDi_Kho_Nguoc_Aisle_CCW` | `video_stereo.mp4` | 🎥🎥 Stereo kép + 📡 LiDAR thô | **Full Multi-Modal Fusion** | **Đa phương thức tối đa**: Kết hợp cả 2 camera stereo và LiDAR để đạt mật độ điểm 3D và độ phủ cao nhất. | Colab GPU |
-| **SC-11** | `04_HanhLang_ToanKhu_Hallway_Full_CW` | `video_left.mp4` | 🎥 Camera Trái | **Large Scale Mono (Loop Closure)** | **Vòng lặp kín quy mô lớn**: Video dài nhất (2.318 frames, ~77s), kiểm tra khả năng khép kín vòng lặp chống tích lũy trôi dạt (drift). | **Colab GPU 15GB** |
-| **SC-12** | `04_HanhLang_ToanKhu_Hallway_Full_CW` | `video_right.mp4` | 🎥 Camera Phải + 📡 LiDAR thô | **Full-Facility Digital Twin** | **Bản sao số toàn khu**: Dựng toàn bộ mặt bằng tầng nhà có tọa độ mét chuẩn xác tuyệt đối từ cảm biến LiDAR. | **Colab GPU 15GB** |
-| **SC-13** | `04_HanhLang_ToanKhu_Hallway_Full_CW` | `video_stereo.mp4` | 🎥🎥 Stereo kép | **High-Density Stereo Cloud Run** | **Xử lý khối lượng lớn**: Chạy toàn bộ dữ liệu stereo quy mô lớn trên Cloud GPU để kiểm tra năng lực tải. | **Colab GPU 15GB** |
-| **SC-14** | `05_LoiDi_Kho_Dot2_Aisle_CW_Run1` | `video_left.mp4` | 🎥 Camera Trái | **Temporal Change Detection** | **Phát hiện biến đổi môi trường**: So sánh với SC-01 để nhận diện các kiện hàng/pallet bị di dời sau thời gian quay khác nhau. | Local / Colab |
-| **SC-15** | `05_LoiDi_Kho_Dot2_Aisle_CW_Run1` | `video_right.mp4` | 🎥 Camera Phải | **Secondary View Change Check** | **Góc nhìn bổ sung đợt 2**: Quan sát các thay đổi ở phía phải lối đi giữa 2 lần quay. | Local / Colab |
-| **SC-16** | `05_LoiDi_Kho_Dot2_Aisle_CW_Run1` | `video_stereo.mp4` | 🎥🎥 Stereo kép + 📡 LiDAR thô | **Map Maintenance & Update** | **Bảo trì và cập nhật bản đồ**: Dựng bản sao số đợt 2 để làm đầu vào cho bài toán cập nhật môi trường mô phỏng theo chu kỳ. | Colab GPU |
+| Mã KB | Thư mục kịch bản | File Video | Cảm biến đi kèm | Mục đích & Ý nghĩa kỹ thuật | Nơi chạy phù hợp |
+|:---:|---|---|:---:|---|:---:|
+| **SC-01** | `01_LoiDi_Kho_Thuan_Aisle_CW` | `video_left.mp4` | 🎥 Chỉ Video | **[A/B Test - Bản A]**: Dựng 3DGS mono, ước lượng hệ mét bằng AI MoGe (để so sánh với #2). | Local / Colab |
+| **SC-02** | `01_LoiDi_Kho_Thuan_Aisle_CW` | `video_left.mp4` | 🎥 + 📡 LiDAR thô | **[A/B Test - Bản B]**: Cùng video #1 nhưng kèm LiDAR. So sánh trực tiếp để thấy độ chuẩn xác mét và mây điểm thực tế. | Colab GPU |
+| **SC-03** | `01_LoiDi_Kho_Thuan_Aisle_CW` | `video_right.mp4` | 🎥 Chỉ Video | **Đổi góc nhìn (Camera Phải)**: Đánh giá độ phủ bề mặt của kệ hàng từ góc nhìn chéo phải. | Local / Colab |
+| **SC-04** | `01_LoiDi_Kho_Thuan_Aisle_CW` | `video_stereo.mp4` | 🎥🎥 Stereo kép | **Trường nhìn mở rộng**: Tận dụng 2 camera song song để bao quát cả 2 dãy kệ hai bên đường đi. | Colab GPU |
+| **SC-05** | `02_HanhLang_Thang_Hallway_Straight_CW` | `video_left.mp4` | 🎥 Chỉ Video | **Thử thách bề mặt trơn**: Kiểm tra SfM trên tường trắng, ít vân bề mặt (texture-poor) xem có bị mất dấu pose không. | Local / Colab |
+| **SC-06** | `02_HanhLang_Thang_Hallway_Straight_CW` | `video_right.mp4` | 🎥 + 📡 LiDAR thô | **Ghép chéo cảm biến**: Camera phải kết hợp cảm biến LiDAR đặt ở giữa robot để bù đắp các mảng tường phẳng. | Colab GPU |
+| **SC-07** | `02_HanhLang_Thang_Hallway_Straight_CW` | `video_stereo.mp4` | 🎥🎥 Stereo kép | **Stereo hành lang hẹp**: Khắc phục hiện tượng góc nhìn hẹp trong không gian hành lang dài. | Colab GPU |
+| **SC-08** | `03_LoiDi_Kho_Nguoc_Aisle_CCW` | `video_left.mp4` | 🎥 Chỉ Video | **Đảo chiều chuyển động (180°)**: Robot đi ngược chiều kim đồng hồ, đánh giá độ ổn định khi hướng ánh sáng bị đổi. | Local / Colab |
+| **SC-09** | `03_LoiDi_Kho_Nguoc_Aisle_CCW` | `video_right.mp4` | 🎥 Chỉ Video | **Đối xứng bề mặt**: Khi đi ngược chiều, camera phải sẽ nhìn vào đúng dãy kệ mà camera trái ở chiều thuận đã nhìn. | Local / Colab |
+| **SC-10** | `03_LoiDi_Kho_Nguoc_Aisle_CCW` | `video_stereo.mp4` | 🎥🎥 + 📡 LiDAR thô | **Đa phương thức tối đa**: Kết hợp cả 2 camera stereo và LiDAR để đạt mật độ điểm 3D cao nhất. | Colab GPU |
+| **SC-11** | `04_HanhLang_ToanKhu_Hallway_Full_CW` | `video_left.mp4` | 🎥 Chỉ Video | **Vòng lặp lớn (Loop Closure)**: Video dài nhất (2.318 frames, ~77s), kiểm tra khép kín vòng lặp chống trôi tọa độ. | **Colab GPU 15GB** |
+| **SC-12** | `04_HanhLang_ToanKhu_Hallway_Full_CW` | `video_right.mp4` | 🎥 + 📡 LiDAR thô | **Bản sao số (Digital Twin) toàn khu**: Dựng toàn bộ mặt sàn khu nhà có tọa độ mét chuẩn xác từ LiDAR. | **Colab GPU 15GB** |
+| **SC-13** | `04_HanhLang_ToanKhu_Hallway_Full_CW` | `video_stereo.mp4` | 🎥🎥 Stereo kép | **Khối lượng dữ liệu lớn**: Xử lý dữ liệu stereo toàn khu nhà trên Colab GPU. | **Colab GPU 15GB** |
+| **SC-14** | `05_LoiDi_Kho_Dot2_Aisle_CW_Run1` | `video_left.mp4` | 🎥 Chỉ Video | **Phát hiện biến đổi môi trường (Change Detection)**: So sánh với Scene 01 để nhận diện kiện hàng/pallet bị dời vị trí. | Local / Colab |
+| **SC-15** | `05_LoiDi_Kho_Dot2_Aisle_CW_Run1` | `video_right.mp4` | 🎥 Chỉ Video | **Góc nhìn bổ sung đợt 2**: Quan sát các vật thể mới xuất hiện ở phía phải lối đi. | Local / Colab |
+| **SC-16** | `05_LoiDi_Kho_Dot2_Aisle_CW_Run1` | `video_stereo.mp4` | 🎥🎥 + 📡 LiDAR thô | **Cập nhật bản đồ kho**: Dựng bản sao số đợt 2 để làm bài toán bảo trì/cập nhật bản đồ mô phỏng theo thời gian. | Colab GPU |
 
 ---
 
