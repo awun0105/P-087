@@ -17,4 +17,4 @@ dùng nó như policy. `Proposed` decision không phải authority.
 - [0007: Pipeline v2 — video → scene 3D theo vật chỉnh sửa được → USD lai cho Isaac Sim](0007-object-centric-hybrid-usd-pipeline.md) — *Accepted* hướng kiến trúc; phương pháp chặng 5–7 chọn sau pha A (2026-09-30)
 - [0008: Dùng lại code nghiên cứu có giấy phép phi thương mại](0008-research-code-license-policy.md) — *Accepted* (2026-09-30)
 - [0009: LiDAR của người dùng — loại đầu vào và ba luồng xử lý](0009-user-lidar-input-and-routing.md) — mục 1–3 *Accepted*, mục 4–6 *Proposed* (2026-10-02)
-- [0010: Nhân vật 3D và vật lý trong trình duyệt cho scene tương tác](0010-interactive-character-and-browser-physics.md) — mục 1–2 *Accepted*, mục 3 (asset preview Isaac) *Open* (2026-10-03)
+- [0010: Nhân vật 3D và vật lý trong trình duyệt cho scene tương tác](0010-interactive-character-and-browser-physics.md) — mục 1–2 *Accepted*, mục 3 (asset preview Isaac) *Proposed* — bước 1 đã làm (2026-10-03)

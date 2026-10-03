@@ -149,7 +149,9 @@ def add_object(
 def get_scene_catalog() -> schemas.SceneCatalogResponse:
     """Danh mục nhãn + asset Isaac đặt được (ADR 0007); giá trị vật lý là mặc định tham khảo."""
     catalog = load_catalog()
-    previews = deps.settings().product_asset_preview_dir
+    settings = deps.settings()
+    previews = settings.product_asset_preview_dir
+    allowed = settings.isaac_asset_previews_enabled
     return schemas.SceneCatalogResponse(
         classes=catalog.classes(),
         entries=[
@@ -159,7 +161,7 @@ def get_scene_catalog() -> schemas.SceneCatalogResponse:
                 size_xyz_m=entry.size_xyz_m,
                 dynamic=bool(entry.physics.get("dynamic", True)),
                 default_mass_kg=entry.physics.get("mass_kg"),
-                has_preview=(previews / f"{entry.family}.glb").is_file(),
+                has_preview=allowed and (previews / f"{entry.family}.glb").is_file(),
             )
             for entry in catalog.placeable()
         ],
@@ -170,6 +172,9 @@ def get_scene_catalog() -> schemas.SceneCatalogResponse:
 @router.get("/scene/catalog/{family}/preview.glb", responses={404: {"model": schemas.ApiErrorResponse}})
 def get_catalog_preview(family: str) -> FileResponse:
     """Hình khối của một asset danh mục (GLB, mét, Z lên, tâm hộp bao tại gốc) để Studio vẽ thay cho hộp."""
+    if not deps.settings().isaac_asset_previews_enabled:
+        # Production: không phát bản chuyển đổi từ asset Isaac (ADR 0010 mục 3); Studio vẽ hộp đúng kích thước.
+        raise HTTPException(status_code=404, detail="bản xem trước asset Isaac không bật trên deployment này")
     entry = load_catalog().family(family)
     # Tên file lấy từ danh mục, không từ tham số đường dẫn: không đọc được file ngoài thư mục xem trước.
     path = deps.settings().product_asset_preview_dir / f"{entry.family}.glb" if entry is not None else None

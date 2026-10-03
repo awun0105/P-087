@@ -8,7 +8,8 @@ Date: 2026-10-03
   kết quả research ở mục Context cho thấy giấy phép không cho dùng trên web, nên dùng nhân vật CC0 thay thế (mục
   Decision 1). Owner xác nhận lại khi đọc ADR này.
 - **Mục 2 (vật lý): Accepted** — owner chốt ngày 03/10/2026 "ok hãy làm như bạn suggest": ammo.js cho H5.
-- **Mục 3 (asset preview của danh mục Isaac): Open** — rủi ro giấy phép cần owner quyết.
+- **Mục 3 (asset preview của danh mục Isaac): Proposed, bước 1 đã làm** (03/10/2026) — owner hỏi "nên giải quyết thế
+  nào"; Claude đề xuất và làm bước 1 (đảo lại được bằng một biến cấu hình), bước 2 chờ owner đồng ý.
 
 Liên quan: kế hoạch `docs/plans/active/2026-10-02-interactive-scene-and-metric-scale.md` (H4, H5).
 
@@ -49,10 +50,16 @@ gsplat, script (VERIFIED trong `dist/viewer.js`); không có `anim`, `collision`
    ma sát theo `physics` của SceneIR; người đi là con nhộng động học (bán kính 0,3 m, cao 1,6 m) bám vị trí người đi của
    viewer. Tương tác chỉ ở phía trình duyệt, không ghi SceneIR; nút "Đặt lại vị trí vật" và việc rời chế độ Đi bộ đưa
    vật về pose của SceneIR.
-3. **Câu hỏi mở cho owner:** `scripts/scene/build_asset_previews.py` chuyển asset Isaac trong danh mục vật thể sang GLB
-   và API phục vụ chúng cho trình duyệt (bản xem trước khi thêm vật từ thư viện). Theo đúng phân tích ở Context, việc này
-   có cùng rủi ro giấy phép. Phương án: (a) giữ cho demo nội bộ, tắt trên production; (b) thay bằng asset CC0; (c) hỏi
-   NVIDIA. Chưa đổi gì cho tới khi owner chọn.
+3. **Bản xem trước asset Isaac của danh mục vật thể:** `scripts/scene/build_asset_previews.py` chuyển asset Isaac sang
+   GLB và API phục vụ chúng cho trình duyệt khi người dùng thêm vật từ thư viện — cùng rủi ro giấy phép như ở Context.
+   Gói xuất cho Isaac Sim không có rủi ro này (USD chỉ trỏ tới asset gốc, người mở gói tự dùng Isaac theo giấy phép
+   của họ).
+   - **Bước 1 (đã làm):** `PRODUCT_ISAAC_ASSET_PREVIEWS` (mặc định: bật ở development/test, tắt ở staging/production).
+     Khi tắt, danh mục báo `has_preview=false` và route `/scene/catalog/{family}/preview.glb` trả 404, nên Studio vẽ hộp
+     đúng kích thước — kể cả khi gói dữ liệu của deployment có kèm `data/asset_previews`.
+   - **Bước 2 (đề xuất):** bản xem trước CC0 cho các loại vật hay dùng (pallet, thùng carton), ghi nguồn ở
+     `THIRD_PARTY_NOTICES.md`; hình trên web khi đó khác asset Isaac trong gói xuất.
+   - Hỏi NVIDIA xin phép dùng bản chuyển đổi trên web: làm song song nếu muốn, không chặn deploy.
 
 ## Consequences
 

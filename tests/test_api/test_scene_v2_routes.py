@@ -190,6 +190,32 @@ async def test_catalog_preview_served_only_for_known_family_with_file(client, tm
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("app_env", "explicit", "served"),
+    [("production", None, False), ("staging", None, False), ("production", True, True), ("development", False, False)],
+)
+async def test_isaac_previews_are_off_in_production_unless_enabled(
+    client, tmp_path, monkeypatch, app_env, explicit, served
+) -> None:
+    from src.api.product import deps as product_deps
+    from src.config import Settings
+
+    (tmp_path / "SM_PaletteA.glb").write_bytes(b"glTF-fake")
+    settings = Settings(
+        app_env=app_env,
+        artifact_root=tmp_path / "artifacts",
+        product_asset_preview_dir=tmp_path,
+        product_isaac_asset_previews=explicit,
+    )
+    monkeypatch.setattr(product_deps, "get_settings", lambda: settings)
+
+    entries = (await client.get("/api/v1/scene/catalog")).json()["entries"]
+    assert next(item for item in entries if item["family"] == "SM_PaletteA")["has_preview"] is served
+    response = await client.get("/api/v1/scene/catalog/SM_PaletteA/preview.glb")
+    assert response.status_code == (200 if served else 404)
+
+
+@pytest.mark.asyncio
 async def test_training_recording_is_optional_and_served_only_for_known_job(client, tmp_path, monkeypatch) -> None:
     from src.api.product import deps as product_deps
     from src.config import Settings

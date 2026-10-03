@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     product_objectify_remote_worker: bool = False
     #: GLB xem trước của asset danh mục (sinh bằng scripts/scene/build_asset_previews.py); thiếu thì Studio vẽ hộp.
     product_asset_preview_dir: Path = Path("./data/asset_previews")
+    #: Phục vụ bản xem trước chuyển từ asset Isaac Sim cho trình duyệt. Giấy phép asset Isaac không cho phân phối hay
+    #: tạo bản chuyển đổi (ADR 0010 mục 3), nên mặc định chỉ bật ở development/test; None = theo APP_ENV. Gói xuất cho
+    #: Isaac Sim không bị ảnh hưởng (chỉ trỏ tới asset gốc).
+    product_isaac_asset_previews: bool | None = None
     #: Bản ghi Rerun của quá trình train 3DGS (`<job_id>.rrd`, sinh bằng eval/visual/brush_quality.py --rerun-save).
     #: Là dữ liệu soi/đánh giá tuỳ chọn, không phải artifact của pipeline; thiếu thì Studio không hiện chế độ xem này.
     product_rerun_recording_dir: Path = Path("./data/rerun_recordings")
@@ -152,6 +156,13 @@ class Settings(BaseSettings):
         if self.product_fixture_mode and self.app_env in {"staging", "production"}:
             raise ValueError("PRODUCT_FIXTURE_MODE chỉ dùng cho development/test")
         return self
+
+    @property
+    def isaac_asset_previews_enabled(self) -> bool:
+        """Có phục vụ bản xem trước chuyển từ asset Isaac không: khai rõ thì theo khai báo, không thì chỉ ngoài production."""
+        if self.product_isaac_asset_previews is not None:
+            return self.product_isaac_asset_previews
+        return self.app_env not in {"staging", "production"}
 
 
 @lru_cache
