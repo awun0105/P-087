@@ -268,6 +268,112 @@ Phase 5 — Packaging GPU/SSH + demo run
 
 ## Result
 
+Checkpoint 2026-10-03 — owner yêu cầu commit/push và PR vào `develop` sau khi
+dừng Colab. Scope xuất bản: runner/setup, local transfer tests và các checkpoint
+trong plan này; giữ branch `feat/pipeline-v2`. Không chạy lại GPU/provider.
+
+- Review trước commit sửa lỗi thụt dòng trong Python recovery được gửi remote;
+  thêm test compile đoạn recovery và xác nhận import thất bại không báo success.
+- Validation local: `.venv/bin/ruff check scripts/colab/batch_colab_runner.py
+  scripts/kaggle/run_job.py tests/test_kaggle/test_colab_batch_runner.py` đạt;
+  `.venv/bin/ruff format --check scripts/colab/batch_colab_runner.py
+  tests/test_kaggle/test_colab_batch_runner.py` đạt;
+  `bash -n scripts/colab/setup_scene_runtime_colab.sh` đạt;
+  `.venv/bin/pytest tests/test_kaggle tests/test_orchestration/test_evaluation.py
+  -q`: 22 passed. `git diff --check` đạt.
+- Secrets/artifacts: env Studio và `data/colab_bundles` được Git ignore, không
+  đưa vào commit. Runtime/GPU completion vẫn chưa đạt như checkpoint bên dưới.
+
+Checkpoint 2026-10-03 22:00 ICT — DỪNG theo yêu cầu owner; thay thế next step
+của checkpoint Colab bên dưới. Lượt cài đặt/kết nối/chạy qua Google Colab CLI
+thất bại, chưa hoàn thành batch/demo. Không tự tiếp tục hoặc thuê provider khác.
+
+- VERIFIED: đã dừng process upload `53483`, batch `71854`/`71856`, collector
+  `89842`/`89844`, CLI exec `57644` và các child còn sống. Kiểm tra process
+  không còn upload/download/exec hoặc batch của lượt này.
+- VERIFIED: `colab stop -s p087-rec` exit 0, trả `Session terminated`;
+  VM T4 đã được giải phóng theo yêu cầu owner.
+- VERIFIED: chỉ SC-01 tạo job `job-cc1a56ecfd27`. Input validate, privacy và
+  frame extraction đã chạy; feature extraction/sequential matching COLMAP
+  xử lý 273 frame. Job FAILED tại `ST-CAMERA-POSE` lúc 21:21 ICT do COLMAP
+  3.9.1 báo `unrecognised option '--Mapper.random_seed'`. Chưa có 3DGS/SOG,
+  scene/USD hay demo hoàn chỉnh từ lượt này.
+- VERIFIED: Colab CLI nhiều lần lỗi reset/408/WebSocketClosed khi exec và
+  transfer. Đây là lỗi transport riêng với lỗi tương thích COLMAP; GPU T4 đã
+  vượt rasterization probe, không có evidence kết luận GPU không hoạt động.
+- Recovery runtime đã thử COLMAP 4.0.4 qua conda-forge nhưng thiếu shared
+  libraries (`libfaiss.so`, `libOpenImageIO.so.3.1`). Transaction cài 4.2.0
+  hoàn tất, nhưng capability/runtime của bản này chưa được xác nhận trước khi
+  owner dừng. Không có job chạy lại với runtime mới.
+- Artifact local được giữ: `data/colab_bundles/SC-01-diagnostics` (209 KB),
+  checkpoints/input inventory, batch log và
+  `data/colab_bundles/job-cc1a56ecfd27.transfer` (26 MB tải dở). Full failed
+  bundle chưa tải đủ, chưa import/evaluate. File chỉ nằm trên `/content` của
+  VM đã giải phóng không được coi là artifact local được bảo toàn.
+- Các thay đổi runner/setup/test của lượt này được giữ trong working tree,
+  chưa commit/push. Focused local checks mới nhất: 21 tests passed; Ruff và
+  shell syntax đạt. Những checks này không chứng minh GPU pipeline hoàn tất.
+- Next: chỉ tiếp tục khi owner giao lượt mới. Nếu chọn Vast.ai/SSH, cần pin
+  image/runtime và kiểm thử một reconstruction nhỏ thực sự đi qua mapper,
+  GPU producer và tải artifact trước khi chạy batch. SSH có thể bỏ lớp
+  transport Colab CLI, nhưng không tự khắc phục dependency/COLMAP incompatibility.
+
+Checkpoint 2026-10-03 (snapshot trước khi dừng; không còn là trạng thái hiện tại): transcript
+Antigravity xác nhận VM tạo lúc 18:17 trống, chưa xử lý video. Những lần bootstrap
+trước mất kết nối khi tải PyTorch/CUDA riêng; chưa chứng minh nguyên nhân VM mất
+kết nối/thu hồi. Recovery giữ `setup_colab.sh`/
+`setup_scene_runtime_colab.sh` làm owner runtime nhưng cho scene runtime tái sử
+dụng PyTorch/CUDA đã có sẵn trong image Colab khi GPU probe đạt, fallback về pin
+2.7.1/cu126 nếu probe không đạt. Bundle local dùng đúng
+`data/colab_bundles`, ánh xạ sang USB còn dung lượng; mỗi scenario chỉ được ghi
+LiDAR/stereo evidence khi runner thực sự attach đúng input contract.
+
+- VERIFIED: session `p087-rec` trên T4; GPU rasterization gsplat trả shape
+  `(1, 240, 320, 4)`, torch `2.11.0+cu130`. Runtime manifest checksum
+  `sha256:efdab8f4a4453087638fd66131863aa97347617686f312c776f41fd3b2444015`.
+- VERIFIED: preflight GPU, ffmpeg, COLMAP RGB, Vulkan T4, Brush 0.3.0,
+  splat-transform 3.6.6 GPU và scene runtime đều OK. COLMAP thiếu
+  `pose_prior_mapper`; LiDAR guided pipeline chưa đủ runtime. Runner chưa attach
+  LiDAR và chưa có stereo multi-camera adapter. Owner đã trả lời "cứ cho chạy,
+  mục đích là muốn chạy qua xem kết quả ra sao": chạy cả 16 như video-only
+  experiments qua pipeline hiện có, không coi đây là LiDAR/stereo acceptance.
+  `SC-xx-execution.json` ghi requested sensor và actual input; demo description
+  của case thiếu sensor nói rõ giới hạn thực tế.
+- VERIFIED 20:45 ICT: SC-01 upload đủ 15 phần, SHA-256 file ghép trùng nguồn;
+  detached job `job-cc1a56ecfd27` đã RUNNING ở `ST-INPUT-VALIDATE`. Remote log
+  `/content/p087-batch/SC-01/run.log`, PID/exit-code cùng thư mục; bundle output
+  `/content/bundles/SC-01`. Không tạo job SC-01 mới khi recovery: inspect PID,
+  log và exit-code trước. Chưa có bundle mới được tải/import.
+- Local import phải source `scripts/gpu/studio.env`: SQLite runtime hiện có
+  `data/studio_local/runtime.db` (schema 8), artifacts tương ứng; config shell
+  mặc định trỏ PostgreSQL role không tồn tại. Demo output `data/demo/library`.
+- Runner đã sửa cú pháp `colab exec`, retry transfer, xác nhận checksum trước
+  xóa chunks, thu bundle failed, chọn bundle từ output của đúng run, giữ lỗi
+  import/report/demo export và không báo cả batch thành công khi còn pending.
+  Process remote detached có PID/exit-code/log theo scenario; resume không tạo
+  lại job. Bundle tar tải bằng phần 5 MB, kiểm SHA từng phần/toàn archive và
+  `load_bundle`; bundle khác nội dung tại local bị từ chối ghi đè. Demo export
+  dùng bản RuntimeManifest của Colab, kiểm checksum khớp job trước khi gán GPU.
+- VERIFIED 21:20 ICT: batch local PID `71856` sống hơn 3 phút, command
+  `.venv/bin/python -u -m scripts.colab.batch_colab_runner --preparing-pid 53483
+  --video-only-experiments` (source `scripts/gpu/studio.env` trước); stdout/stderr
+  ở `data/colab_bundles/batch-20261003.log`. SC-01 đang dựng camera pose;
+  SC-03 input đã tải đủ/khớp checksum; process `53483` đang preload những RGB
+  input còn lại. Hai lần dùng nohup shell trước đó không duy trì process local;
+  đã chuyển sang foreground command trong managed exec session (`73120`).
+- VERIFIED: `input-inventory.json` checkpoint giữ ffprobe/checksum 16 inputs.
+  SC-01 MP4 thực tế 109,187607 s, gần 10 fps, khác metadata 36,4 s/30 fps của
+  manifest. Giữ video nguyên trạng; không dùng thời gian giả định từ metadata
+  cho LiDAR alignment. Log COLMAP xác nhận matching 273 frame.
+- Validation: `ruff check scripts/colab/batch_colab_runner.py` đạt;
+  `bash -n scripts/colab/setup_scene_runtime_colab.sh` đạt; focused bundle và
+  evaluation/transfer tests: 20 passed (gồm checksum hỏng, resume và từ chối
+  overwrite bundle khác). Đây chưa phải GPU pipeline completion proof.
+- Next: theo dõi SC-01, thu bundle + log, verify checksum/import bằng env Studio,
+  xuất report/demo rồi tiếp tục đủ 16 video tuần tự theo owner; giữ
+  failed/pending artifacts. Khi mất kết nối, inspect batch log/process và remote
+  PID/exit-code trước; chạy lại runner cùng session sẽ resume cùng process.
+
 Checkpoint 2026-09-29 (chưa DONE; còn GPU run chính thức và QA editor thật).
 Cập nhật sau Phase 6: `pytest tests -q` 885 passed, 22 skipped; ruff/eslint sạch;
 `npm run build` pass; vitest 96 passed + 4 fail cũ của UI legacy. QA CDP headless:

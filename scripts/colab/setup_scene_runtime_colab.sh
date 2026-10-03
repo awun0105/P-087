@@ -31,20 +31,35 @@ fetch() {
 }
 
 echo "[1/5] Khởi tạo venv scene_runtime..."
-[ -x "$RUNTIME/bin/python" ] || uv venv --python 3.12 "$RUNTIME"
+if [ ! -x "$RUNTIME/bin/python" ]; then
+  if [ "${P087_COLAB_USE_SYSTEM_TORCH:-1}" = "1" ] && python3 -c \
+    'import torch; assert torch.cuda.is_available()' >/dev/null 2>&1; then
+    echo "[runtime] Dùng PyTorch/CUDA có sẵn trong image Colab để tránh tải lại các wheel CUDA nhiều GB."
+    uv venv --system-site-packages --python "$(command -v python3)" "$RUNTIME"
+  else
+    uv venv --python 3.12 "$RUNTIME"
+  fi
+fi
 PY="$RUNTIME/bin/python"
+export PATH="$RUNTIME/bin:$PATH"
 
 echo "[2/5] Cài PyTorch (CUDA 12.6)..."
-uv pip install --python "$PY" --index-url https://download.pytorch.org/whl/cu126 \
-  torch==2.7.1 torchvision==0.22.1
+if "$PY" -c 'import torch; assert torch.cuda.is_available()' >/dev/null 2>&1; then
+  "$PY" -c 'import torch; print(f"[runtime] torch {torch.__version__} · CUDA {torch.version.cuda} · {torch.cuda.get_device_name(0)}")'
+else
+  uv pip install --python "$PY" --index-url https://download.pytorch.org/whl/cu126 \
+    torch==2.7.1 torchvision==0.22.1
+fi
 
 echo "[3/5] Cài SAM2, gsplat, CoACD, usd-core, lpips, Rerun..."
 export SAM2_BUILD_CUDA="0"
-uv pip install --python "$PY" --no-build-isolation \
+uv pip install --python "$PY" --no-build-isolation --no-deps \
   "sam-2 @ git+https://github.com/facebookresearch/sam2@${SAM2_COMMIT}"
+uv pip install --python "$PY" --no-deps gsplat==1.5.3 lpips==0.1.4
 uv pip install --python "$PY" \
-  gsplat==1.5.3 coacd==1.0.14 scikit-image==0.26.0 opencv-python-headless==5.0.0.93 \
-  trimesh==5.1.0 usd-core==26.8 lpips==0.1.4 rich==15.0.0 scipy==1.18.1 rerun-sdk huggingface_hub click
+  coacd==1.0.14 scikit-image==0.26.0 opencv-python-headless==5.0.0.93 \
+  trimesh==5.1.0 usd-core==26.8 rich==15.0.0 scipy==1.18.1 rerun-sdk huggingface_hub click \
+  hydra-core==1.3.2 iopath==0.1.10 jaxtyping ninja
 
 echo "[4/5] Cài MoGe-2 và utils3d..."
 uv pip install --python "$PY" --no-deps \
@@ -81,6 +96,7 @@ PY
 
 echo "[cập nhật] Ghi biến môi trường vào $ENV_FILE..."
 cat >> "$ENV_FILE" <<EOF
+PATH=$RUNTIME/bin:$PATH
 PRODUCT_SCENE_RUNTIME_PYTHON=$PY
 PRODUCT_SAM2_CHECKPOINT=$RUNTIME/checkpoints/sam2.1_hiera_tiny.pt
 PRODUCT_LAMA_CHECKPOINT=$RUNTIME/weights/big-lama.pt
