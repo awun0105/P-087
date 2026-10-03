@@ -116,3 +116,22 @@ def test_glb_without_triangle_mesh_is_rejected() -> None:
     )  # fmt: skip
     with pytest.raises(ValueError, match="không có lưới"):
         display_space_glb(payload)
+
+
+def test_carve_drops_triangles_inside_a_box_and_keeps_the_rest() -> None:
+    from src.services.orchestration.jobs.display_glb import CarveBox
+
+    # Tam giác 0 có trọng tâm (0,33; 0,67; 0) — trong hộp; tam giác 1 có trọng tâm (0; 0,67; 1) — ngoài hộp.
+    box = CarveBox(center=(0.3, 0.6, 0.0), rotation_xyzw=(0.0, 0.0, 0.0, 1.0), half_extents=(0.2, 0.2, 0.2))
+    document, _points, indices = parse(display_space_glb(build_glb(), [box]))
+    assert document["accessors"][1]["count"] == 3
+    assert indices[:3].tolist() == [0, 2, 3]
+
+
+def test_carve_box_respects_its_rotation() -> None:
+    from src.services.orchestration.jobs.display_glb import CarveBox
+
+    # Hộp dài theo X, quay 90° quanh Z → dài theo Y.
+    box = CarveBox(center=(0.0, 0.0, 0.0), rotation_xyzw=(0.0, 0.0, 2**-0.5, 2**-0.5), half_extents=(1.0, 0.1, 0.1))
+    inside = box.contains(np.array([[0.0, 0.9, 0.0], [0.9, 0.0, 0.0]]))
+    assert inside.tolist() == [True, False]

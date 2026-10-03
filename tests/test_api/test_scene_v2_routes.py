@@ -205,3 +205,39 @@ async def test_training_recording_is_optional_and_served_only_for_known_job(clie
     served = await client.get(f"{_JOB}/training-recording.rrd")
     assert served.status_code == 200 and served.content == b"RRF2-fake"
     assert (await client.get("/api/v1/jobs/job-khong-co/training-recording.rrd")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_dynamic_object_is_carved_at_its_original_place(client, isolated_registry) -> None:
+    from src.services.orchestration.scene.physics import CARVE_MARGIN_M, dynamic_carve_boxes
+
+    job = "job-fixture-001"
+    original = next(item for item in isolated_registry.scene.current(job).scene.objects if item.id == _PALLET)
+    # Vật tĩnh (chưa gán lớp có vật lý động) không bị khoét.
+    assert dynamic_carve_boxes(isolated_registry, job, [_PALLET, "no-such-object"]) == []
+    labelled = await client.post(
+        f"{_JOB}/scene/objects/{_PALLET}/label", json={"expected_scene_revision": "rev-001", "semantic_class": "pallet"}
+    )
+    assert _object(labelled.json(), _PALLET)["physics"]["dynamic"] is True
+    # Dời vật sang chỗ khác: vùng khoét vẫn là chỗ vật đứng lúc dựng lại scene (lưới tĩnh không đổi theo lần dời).
+    scene = isolated_registry.scene.current(job).scene
+    moved = scene.model_copy(
+        update={
+            "objects": [
+                item.model_copy(
+                    update={
+                        "transform": item.transform.model_copy(update={"translation_xyz": (9.0, 9.0, 0.0)}),
+                        "primitive_dimensions_xyz_m": (1.2, 0.8, 0.15),
+                    }
+                )
+                if item.id == _PALLET
+                else item
+                for item in scene.objects
+            ]
+        }
+    )
+    isolated_registry.scene.publish_next(job, scene.scene_revision, moved, "test_move")
+    [box] = dynamic_carve_boxes(isolated_registry, job, [_PALLET])
+    assert box.rotation_xyzw == original.transform.rotation_quaternion_xyzw
+    assert box.center != (9.0, 9.0, 0.0)
+    assert box.half_extents == pytest.approx((0.6 + CARVE_MARGIN_M, 0.4 + CARVE_MARGIN_M, 0.075 + CARVE_MARGIN_M))
