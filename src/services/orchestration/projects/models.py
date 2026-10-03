@@ -118,6 +118,21 @@ class InputVideoSummary(BaseModel):
     size_bytes: int = Field(gt=0)
 
 
+class DemoBaseline(BaseModel):
+    """Mốc "bản demo gốc" của một scene: revision SceneIR mà nút Khôi phục bản demo đưa scene trở về.
+
+    Scene demo vẫn chỉnh sửa và tương tác được như scene thường; khôi phục chỉ tạo revision mới mang nội dung của mốc
+    này (lịch sử revision chỉ tiến, không xoá), không chạy lại bước xử lý nào.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: Identifier
+    scene_revision: Identifier
+    marked_at: datetime
+    marked_by: Actor | None = None
+
+
 class ProjectRecord(BaseModel):
     """Trạng thái project mà API trả ra. Không phải shared contract."""
 
@@ -138,3 +153,5 @@ class ProjectRecord(BaseModel):
     created_at: datetime | None = None
     #: Người tạo scene; None với project cũ, fixture hoặc khi không bật đăng nhập.
     created_by: Actor | None = None
+    #: Scene được đánh dấu là bản demo; không ghi vào JSON khi None để bản ghi cũ giữ nguyên bytes (CAS so bytes).
+    demo_baseline: DemoBaseline | None = Field(default=None, exclude_if=lambda value: value is None)

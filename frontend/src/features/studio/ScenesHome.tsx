@@ -291,7 +291,10 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
         </Badge>
       </div>
       <div className="flex flex-1 flex-col p-5">
-        <h3 className="truncate text-base font-bold text-ink">{scene.project.name}</h3>
+        <h3 className="flex items-center gap-2 truncate text-base font-bold text-ink">
+          <span className="truncate">{scene.project.name}</span>
+          {scene.project.demo_baseline && <Badge tone="ember" className="shrink-0">Bản demo</Badge>}
+        </h3>
         <p className="mt-1 truncate text-sm text-ink-muted">
           {scene.project.input_video
             ? `${scene.project.input_video.original_name} · ${formatBytes(scene.project.input_video.size_bytes)}`

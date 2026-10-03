@@ -10,6 +10,7 @@ import { Badge } from "@/components/studio/primitives";
 import { usePageTitle } from "@/features/shell/Breadcrumbs";
 import type { SaveState } from "@/features/studio/ObjectReviewView";
 import { GeometryBadge, MetricBadge, ModeButton, SaveStatus } from "@/features/studio/scene/badges";
+import { DemoControls } from "@/features/studio/scene/DemoControls";
 import { SceneTabs, type SceneTabItem } from "@/features/studio/scene/SceneTabs";
 import { metricState, stageState, type Preview, type SceneInfo, type StudioMode, type Tab } from "@/features/studio/scene/state";
 import { progressSceneStatus } from "@/features/studio/sceneStatus";
@@ -170,6 +171,10 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
         {preview && <MetricBadge state={metric} />}
         <GeometryBadge state={geometry} />
         {save && <SaveStatus state={save} />}
+        <div className="ml-auto">
+          <DemoControls jobId={jobId} revision={save?.revision ?? null} sceneReady={sceneReady}
+            onRestored={(revision) => setSave({ status: "saved", revision })} />
+        </div>
       </div>
       <SceneTabs tabs={tabs} current={current} onChange={(next) => openTab(next)} />
       {locked && <p role="status" className="px-4 py-2 text-sm text-ink-muted">{locked}. Đang hiển thị Tiến trình.</p>}

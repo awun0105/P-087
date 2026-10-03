@@ -29,7 +29,7 @@ from src.models.contracts.scene import SceneIR
 from src.models.contracts.validation import ValidationReport
 from src.services.orchestration.auth.models import Actor
 from src.services.orchestration.jobs.models import JobAttemptRecord
-from src.services.orchestration.projects.models import InputVideoSummary, ProjectRecord
+from src.services.orchestration.projects.models import DemoBaseline, InputVideoSummary, ProjectRecord
 from src.services.orchestration.projects.privacy import project_block_reason
 from src.services.orchestration.review.lifecycle import has_isaac_runtime_proof
 from src.services.orchestration.scene.models import SceneEditResult, SceneRevision, VisualBinding
@@ -95,6 +95,8 @@ class ProjectResponse(ApiModel):
     input_video: InputVideoSummary | None = None
     created_at: datetime | None = None
     created_by: Actor | None = None
+    #: Mốc bản demo nếu scene được đánh dấu là bản demo (nút Khôi phục bản demo đưa scene về mốc này).
+    demo_baseline: DemoBaseline | None = None
 
 
 class ProjectListResponse(ApiModel):
@@ -326,6 +328,7 @@ def project_response(record: ProjectRecord) -> ProjectResponse:
         input_video=record.input_video,
         created_at=record.created_at,
         created_by=record.created_by,
+        demo_baseline=record.demo_baseline,
     )
 
 

@@ -93,6 +93,34 @@ export interface StudioProject {
   input_video: { original_name: string; media_type: VideoMediaType; size_bytes: number } | null;
   created_at: string | null;
   created_by?: Actor | null;
+  /** Mốc bản demo nếu scene được đánh dấu là bản demo. */
+  demo_baseline?: DemoBaseline | null;
+}
+
+/** Mốc "bản demo gốc" của scene: revision mà nút Khôi phục bản demo đưa scene trở về. Khớp `DemoBaseline`. */
+export interface DemoBaseline {
+  job_id: string;
+  scene_revision: string;
+  marked_at: string;
+  marked_by?: Actor | null;
+}
+
+/** Trạng thái bản demo của một job. Khớp `DemoState` backend. */
+export interface DemoState {
+  job_id: string;
+  baseline: DemoBaseline | null;
+  current_revision: string | null;
+  at_baseline: boolean;
+}
+
+/** Kiểm trạng thái bản demo ở biên API: thiếu field là lỗi, không đoán. */
+export function parseDemoState(value: unknown): DemoState {
+  const invalid = () => new Error("Trạng thái bản demo không hợp lệ");
+  if (!isRecord(value) || typeof value.job_id !== "string" || typeof value.at_baseline !== "boolean") throw invalid();
+  if (!(value.current_revision === null || typeof value.current_revision === "string")) throw invalid();
+  const baseline = value.baseline;
+  if (baseline !== null && !(isRecord(baseline) && typeof baseline.scene_revision === "string" && typeof baseline.job_id === "string")) throw invalid();
+  return value as unknown as DemoState;
 }
 
 export interface SceneSummary {

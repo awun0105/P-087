@@ -8,6 +8,7 @@ import { directUpload, xhrPutPart } from "@/lib/api/directUpload";
 import type { SceneEditResponse, SceneResponse } from "@/lib/contracts/api";
 import {
   parseDemoManifest,
+  parseDemoState,
   parseDemoSelection,
   parseMetricProposal,
   parseJobProgress,
@@ -17,6 +18,7 @@ import {
   parseStageViews,
   type DemoManifest,
   type DemoSelection,
+  type DemoState,
   type MetricProposal,
   type ImportedScene,
   type JobProgress,
@@ -36,6 +38,30 @@ import {
   type StageView,
   type UploadRecord,
 } from "@/lib/contracts/studio";
+
+/** Scene có phải bản demo không và có đang đúng mốc gốc không. */
+export async function getDemoState(jobId: string, signal?: AbortSignal): Promise<DemoState> {
+  return parseDemoState(await apiFetch<unknown>(`/api/v1/jobs/${encodeURIComponent(jobId)}/demo`, { signal }));
+}
+
+/** Reviewer lấy revision hiện tại làm bản demo gốc. */
+export async function markDemo(jobId: string): Promise<DemoState> {
+  return parseDemoState(await apiFetch<unknown>(`/api/v1/jobs/${encodeURIComponent(jobId)}/demo/baseline`, { method: "POST" }));
+}
+
+/** Reviewer bỏ đánh dấu bản demo; nội dung scene giữ nguyên. */
+export async function clearDemo(jobId: string): Promise<DemoState> {
+  return parseDemoState(await apiFetch<unknown>(`/api/v1/jobs/${encodeURIComponent(jobId)}/demo/baseline`, { method: "DELETE" }));
+}
+
+/** Đưa scene về bản demo gốc bằng một revision mới; `expectedRevision` là revision đang thấy trên màn hình. */
+export async function resetDemo(jobId: string, expectedRevision: string): Promise<DemoState> {
+  return parseDemoState(await apiFetch<unknown>(`/api/v1/jobs/${encodeURIComponent(jobId)}/demo/reset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_scene_revision: expectedRevision }),
+  }));
+}
 
 /** Kết quả xem được của từng bước (frame, camera, 3DGS, collision mesh). */
 export async function getStageViews(jobId: string, signal?: AbortSignal): Promise<StageView[]> {

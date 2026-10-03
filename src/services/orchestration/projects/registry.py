@@ -60,6 +60,7 @@ from src.services.orchestration.projects.errors import (
     ProjectNotFoundError,
 )
 from src.services.orchestration.projects.models import (
+    DemoBaseline,
     InputVideoSummary,
     JobCreateInput,
     ProjectCreateInput,
@@ -418,6 +419,16 @@ class ProjectRegistry:
         if report.report_checksum != canonical_content_checksum(report, "report_checksum"):
             raise ArtifactChecksumError("Privacy report canonical checksum không khớp")
         updated = current.model_copy(update={"privacy_report": report})
+        if self.persistence is not None:
+            self.persistence.save_project(updated, expected=current)
+        else:
+            self._projects[project_id] = updated
+        return updated
+
+    def set_demo_baseline(self, project_id: str, baseline: DemoBaseline | None) -> ProjectRecord:
+        """Đặt hoặc bỏ mốc bản demo của project (compare-and-swap như mọi cập nhật project)."""
+        current = self.get_project(project_id)
+        updated = current.model_copy(update={"demo_baseline": baseline})
         if self.persistence is not None:
             self.persistence.save_project(updated, expected=current)
         else:

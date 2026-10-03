@@ -49,6 +49,7 @@ export function SampleScene({ sampleId }: { sampleId: string }) {
       contentUrl={sampleFileUrl(sampleId, demo.splat.name)}
       filename={demo.splat.name}
       badges={<Badge tone="ember">Video mẫu · xử lý sẵn</Badge>}
+      resettable
     />
   );
 }
