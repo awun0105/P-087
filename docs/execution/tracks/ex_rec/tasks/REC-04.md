@@ -184,3 +184,11 @@ Expected evidence:
 ## Cập nhật 02/10/2026 (không đổi Goal/I/O/DoD đã khoá)
 
 Brush giữ lại mỗi ảnh thứ 8 không train (`brush.eval_split_every = 8`) và ghi PSNR/SSIM/LPIPS vào `BrushVisualArtifact.holdout_quality`; `training_frame_ids` chỉ còn ảnh thật sự train, thêm `held_out_frame_ids`. Câu "Chỉ đưa registered training frames vào workspace" vẫn đúng (Brush tự tách trong số ảnh đã đăng ký). Chi tiết: [plan đánh giá](../../../../plans/active/2026-10-02-evaluation-system.md).
+
+## Cập nhật 03/10/2026 — Fatal Log Interception & Hang Watchdog
+
+- Nâng cấp `VisualProcess._invoke` trong `src/services/reconstruction/adapters/brush_runtime.py`:
+  - Thêm `FATAL_LOG_PATTERNS` (`wgpu: requested wait timed out`, `CUDA out of memory`, `VK_ERROR_DEVICE_LOST`, `torch.cuda.OutOfMemoryError`) và đọc stream log realtime (chu kỳ 0.5s). Khi phát hiện lỗi driver deadlock hoặc tràn VRAM, gửi `SIGKILL` ngay lập tức giải phóng GPU (dưới 0.2s thay vì bị treo deadlock vô hạn hàng giờ).
+  - Thêm `hang_timeout_seconds` (mặc định 180s) cho `brush-train`: nếu tiến trình huấn luyện đứng im không ghi thêm log hoặc tiến độ, tự động hủy và raise `VISUAL_HANG_TIMEOUT`.
+  - Nâng cấp `src/services/reconstruction/preview_worker.py`: giữ nguyên `VisualError` code và human message chi tiết trong `ExecutionError` để giao diện Web hiển thị lý do chính xác cho người dùng.
+  - Bổ sung unit tests `test_real_process_fatal_log_interception` trong `tests/test_reconstruction/test_rec04_brush.py` (2/2 passed).

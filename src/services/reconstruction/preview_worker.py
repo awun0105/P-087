@@ -12,7 +12,7 @@ from src.models.contracts.manifests import ExecutionError, StageArtifact, StageI
 from src.models.contracts.preview import ReconstructionPreview
 from src.services.reconstruction.adapters.brush import BrushAdapter, BrushDependencies, BrushRequest
 from src.services.reconstruction.adapters.brush_input import BrushInputAdapter
-from src.services.reconstruction.adapters.brush_runtime import VisualProcess
+from src.services.reconstruction.adapters.brush_runtime import VisualError, VisualProcess
 from src.services.reconstruction.adapters.colmap import ColmapAdapter, ColmapDependencies, ColmapRequest
 from src.services.reconstruction.adapters.colmap_priors import PoseGuidance, PosePrior
 from src.services.reconstruction.adapters.colmap_runtime import ColmapError, ColmapProcess
@@ -229,12 +229,17 @@ class _PreviewExecution:
         lidar = isinstance(cause, CameraPriorError) or (
             isinstance(cause, ColmapError) and cause.code == "COLMAP_GUIDANCE_INVALID"
         )
+        visual = isinstance(cause, VisualError)
+        error_code = "LIDAR_ALIGNMENT_INVALID" if lidar else cause.code if visual else "RECONSTRUCTION_PREVIEW_FAILED"
+        human_message = (
+            str(cause)
+            if lidar or visual
+            else "Preview failed; inspect attempt logs and configured runtime before retrying"
+        )
         error = ExecutionError(
-            error_code="LIDAR_ALIGNMENT_INVALID" if lidar else "RECONSTRUCTION_PREVIEW_FAILED",
+            error_code=error_code,
             stage_id=self.publication.current_stage,
-            human_message=(
-                str(cause) if lidar else "Preview failed; inspect attempt logs and configured runtime before retrying"
-            ),
+            human_message=human_message,
             retryable=False,
             details={"exception_type": type(cause).__name__},
         )

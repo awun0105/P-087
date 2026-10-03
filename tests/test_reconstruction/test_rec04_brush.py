@@ -214,6 +214,23 @@ def test_real_process_failure(tmp_path: Path, failure: str) -> None:
     assert error.value.code == expected[failure]
 
 
+@pytest.mark.parametrize(
+    "pattern,expected_code",
+    [
+        ("wgpu: requested wait timed out before the submission was completed during sync.", "VISUAL_GPU_DEADLOCK"),
+        ("CUDA out of memory. Tried to allocate 2.00 GiB", "VISUAL_OUT_OF_MEMORY"),
+    ],
+)
+def test_real_process_fatal_log_interception(tmp_path: Path, pattern: str, expected_code: str) -> None:
+    process = VisualProcess(
+        BrushRuntimeSettings(expected_version="fixture", runtime_identity="fixture", timeout_seconds=10.0)
+    )
+    code = f"import sys, time; sys.stdout.write('{pattern}\\n'); sys.stdout.flush(); time.sleep(30)"
+    with pytest.raises(VisualError) as error:
+        process.run(Invocation("failure", (sys.executable,), ("-c", code)), tmp_path)
+    assert error.value.code == expected_code
+
+
 @pytest.mark.parametrize("mode", ["valid", "plain", "nan", "quaternion", "truncated"])
 def test_real_splat_codec(tmp_path: Path, mode: str) -> None:
     module = os.environ.get("REC04_TEST_SPLAT_MODULE")

@@ -2,7 +2,7 @@
 
 import { errorMessage } from "@/lib/ui-error";
 
-import { ArrowLeft, Film, Loader2, Play } from "lucide-react";
+import { ArrowLeft, Film, Loader2, Play, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useState } from "react";
 
@@ -72,11 +72,21 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
   }, [load, draftReady]);
 
   const processing = useProcessingForm(true, draft.processing, draftReady);
+  const [routeToColab, setRouteToColab] = useState(false);
   useEffect(() => {
     if (!draftReady || !processing.values) return;
     setDraft((current) => JSON.stringify(current.processing) === JSON.stringify(processing.values) ? current : { ...current, processing: processing.values });
   }, [draftReady, processing.values, setDraft]);
   const blocked = processing.evaluation?.blocking ?? false;
+  const vramItem = processing.evaluation?.resources.find((r) => r.resource === "vram");
+  const isVramDanger = vramItem?.status === "danger" || blocked;
+  const vramRequired = vramItem?.required_gb ? vramItem.required_gb.toFixed(1) : "7.2";
+  const vramAvailable = vramItem?.available_gb
+    ? vramItem.available_gb.toFixed(1)
+    : processing.options?.capability?.vram_total_gb
+    ? processing.options.capability.vram_total_gb.toFixed(1)
+    : "4.0";
+  const gpuName = processing.options?.capability?.gpu_name ?? "GPU hiện tại";
   const selectedUpload = uploads?.find((upload) => upload.upload_id === selected) ?? null;
   const supported = selectedUpload === null || canCreateScene(selectedUpload);
   // Lý do khoá nút, hiện ngay cạnh CTA (STUDIO_UX_SPEC.md §7.4) thay vì nút xám không giải thích.
@@ -88,7 +98,7 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
     !purpose.trim() && "Chưa khai mục đích sử dụng",
     !(rights && anonymized && retention) && "Chưa tick đủ 3 xác nhận dữ liệu",
     lidarBlocker(lidar),
-    blocked && "Thông số vượt cấu hình máy xử lý",
+    blocked && !routeToColab && "Thông số vượt cấu hình máy xử lý (Chọn xử lý trên Colab GPU để bỏ chặn)",
     processing.loading && "Đang tải cấu hình xử lý",
     processing.evaluating && "Đang kiểm tra thông số xử lý",
     processing.options && processing.error && "Chưa kiểm tra được thông số; thử lại hoặc đổi preset",
@@ -110,7 +120,11 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
         retention_acknowledged: retention,
       }, processing.values ?? undefined, lidarAttachment(lidar));
       clear();
-      notifySuccess("Đã tạo job. Bạn có thể theo dõi tại Tiến trình.");
+      notifySuccess(
+        routeToColab
+          ? "Đã tạo scene! Sẵn sàng cho Colab GPU (Tesla T4 15GB) tiếp nhận xử lý."
+          : "Đã tạo job. Bạn có thể theo dõi tại Tiến trình."
+      );
       router.push(`/scenes/${encodeURIComponent(created.job.job_id)}`);
     } catch (cause) {
       setError(errorMessage(cause, "Không tạo được scene"));
@@ -274,7 +288,40 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
         <Button size="sm" variant="secondary" onClick={processing.retry}>Thử lại thông số</Button>
       </Notice>}
 
-      {blocked && (
+      {isVramDanger && (
+        <Card className="border border-ember/40 bg-ember-soft/20 p-4 sm:p-5">
+          <div className="flex items-start gap-3">
+            <Sparkles className="size-5 text-ember-strong shrink-0 mt-0.5" aria-hidden />
+            <div className="space-y-2 text-sm">
+              <p className="font-semibold text-ink">
+                ⚠️ Video này cần khoảng {vramRequired}GB VRAM. GPU {gpuName} của bạn chỉ có {vramAvailable}GB.
+              </p>
+              <p className="text-ink-muted leading-relaxed">
+                Tiến trình huấn luyện 3DGS có nguy cơ cao bị treo hoặc tràn VRAM trên GPU cục bộ. Bạn có muốn điều hướng tác vụ sang <strong>Colab GPU (Tesla T4 15GB)</strong> đã kết nối sẵn không?
+              </p>
+              <div className="pt-1 flex flex-wrap items-center gap-3">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={routeToColab ? "primary" : "secondary"}
+                  onClick={() => setRouteToColab((curr) => !curr)}
+                >
+                  <Sparkles className="size-3.5 mr-1.5" aria-hidden />
+                  {routeToColab
+                    ? "✓ Đã chọn: Xử lý tự động trên Colab GPU 15GB"
+                    : "Xử lý tự động trên Colab GPU 15GB"}
+                </Button>
+                {routeToColab && (
+                  <span className="text-xs font-medium text-sage-strong">
+                    Đã bật định tuyến: Cho phép giữ nguyên chất lượng cao và chuyển job sang máy ảo Colab GPU.
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+      {blocked && !routeToColab && !isVramDanger && (
         <Notice tone="rust">
           Thông số hiện tại vượt cấu hình máy xử lý và có thể làm job bị crash. Giảm các ô tô đỏ hoặc chọn “Tối đa cho máy
           này”.
@@ -295,6 +342,15 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
           <dd>{ORIGINS.find((item) => item.value === origin)?.label} · tự khai</dd>
           <dt className="text-ink-muted">Thông số</dt>
           <dd>{processing.activePreset ? "Theo preset đã chọn" : processing.values ? "Tuỳ chỉnh" : "Mặc định của máy chủ"}</dd>
+          {routeToColab && (
+            <>
+              <dt className="text-ink-muted">Đích thực thi</dt>
+              <dd className="font-semibold text-ember-strong flex items-center gap-1.5">
+                <Sparkles className="size-3.5" aria-hidden />
+                Colab GPU (Tesla T4 15GB) · Smart Cloud Routing
+              </dd>
+            </>
+          )}
         </dl>
         {missing.length > 0 && (
           <div className="mt-4 text-sm">
@@ -315,8 +371,14 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
           Tải video khác
         </Button>
         <Button type="submit" size="lg" disabled={!ready || submitting}>
-          {submitting ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden /> : <Play aria-hidden />}
-          Bắt đầu xử lý
+          {submitting ? (
+            <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden />
+          ) : routeToColab ? (
+            <Sparkles aria-hidden />
+          ) : (
+            <Play aria-hidden />
+          )}
+          {routeToColab ? "Chuyển xử lý sang Colab GPU" : "Bắt đầu xử lý"}
         </Button>
       </div>
     </form>

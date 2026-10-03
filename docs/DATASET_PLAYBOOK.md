@@ -1824,6 +1824,57 @@ Và nguyên tắc methodology quan trọng nhất là:
 
 > **Ground truth chỉ được dùng để đánh giá hoặc cho preprocessing đã được khai báo rõ; không được vô tình đưa ground truth vào prediction pipeline rồi dùng lại chính ground truth đó để claim independent benchmark.**
 
+# 31. Tổ chức dữ liệu thô phục vụ Studio Demo và Benchmarking (`TorWIC_Raw_Scenes`)
+
+Để phục vụ thử nghiệm các luồng (Video-Only vs. Video + LiDAR), dữ liệu gốc từ TorWIC-SLAM được tổ chức tập trung vào một thư mục chuẩn `/media/usb/AI20K/TorWIC_Raw_Scenes/`, phân tách rõ ràng theo 5 kịch bản độc lập. Dữ liệu trong thư mục này là **dữ liệu thô nguyên bản chưa qua xử lý** (unprocessed raw sensor data).
+
+### 31.1 Cấu trúc chuẩn của mỗi kịch bản (gồm đầy đủ 3 góc quay video + cảm biến thô)
+```text
+TorWIC_Raw_Scenes/
+├── <Kịch bản>/
+│   ├── video.mp4 / video_left.mp4  # Video RGB camera trái (chuẩn hóa MP4, 30 FPS, đúng số frame gốc)
+│   ├── video_right.mp4             # Video RGB camera phải
+│   ├── video_stereo.mp4            # Video ghép đôi stereo cả hai camera
+│   ├── traj_gt.txt                 # Quỹ đạo thực tế robot (Ground Truth Trajectory từ TorWIC)
+│   ├── frame_times.txt             # Mốc thời gian từng khung hình camera (đồng bộ 1-1 với scan)
+│   ├── calibrations.txt            # Ma trận hiệu chuẩn camera & LiDAR (T_cam_os, T_os_cam)
+│   ├── lidar_scans/                # Thư mục chứa các file scan .pcd thô chưa đăng ký (unregistered)
+│   └── metadata.json               # Thông số kỹ thuật (số frame, độ dài giây, số scan LiDAR)
+```
+
+### 31.2 Danh mục 5 kịch bản thô (Tổng cộng 15 video)
+1. **`01_LoiDi_Kho_Thuan_Aisle_CW`**: Lối đi kho (chiều thuận), 1.092 frames (~36.4s), 1.092 scans LiDAR — 3 video (left, right, stereo).
+2. **`02_HanhLang_Thang_Hallway_Straight_CW`**: Hành lang thẳng khu văn phòng, 1.810 frames (~60.3s), 1.810 scans LiDAR — 3 video (left, right, stereo).
+3. **`03_LoiDi_Kho_Nguoc_Aisle_CCW`**: Lối đi kho (ngược chiều), 915 frames (~30.5s), 915 scans LiDAR — 3 video (left, right, stereo).
+4. **`04_HanhLang_ToanKhu_Hallway_Full_CW`**: Hành lang toàn khu văn phòng (vòng lặp kín), 2.318 frames (~77.3s), 2.318 scans LiDAR — 3 video (left, right, stereo).
+5. **`05_LoiDi_Kho_Dot2_Aisle_CW_Run1`**: Lối đi kho đợt quay 2 (2022-06-15), 1.114 frames (~37.1s), 1.114 scans LiDAR — 3 video (left, right, stereo).
+
+### 31.3 Công cụ tổ chức
+Script thực thi: `python -m scripts.demo.organize_raw_dataset`. Script tự động đọc metadata, tạo hardlink cho cả 15 video (left, right, stereo) và text annotations để không tốn dung lượng ổ đĩa, liên kết symlink tới kho scan `.pcd` và phát sinh `manifest.json`.
+
+# 32. Ma trận 16 Kịch bản Thực nghiệm (15 Video TorWIC-SLAM)
+
+Chi tiết kế hoạch thực nghiệm phân bổ 15 video thành 16 lượt chạy:
+
+| Mã KB | Thư mục kịch bản | File Video | Cảm biến đi kèm | Mục đích & Ý nghĩa kỹ thuật | Nơi chạy phù hợp |
+|:---:|---|---|:---:|---|:---:|
+| **SC-01** | `01_LoiDi_Kho_Thuan_Aisle_CW` | `video_left.mp4` | 🎥 Chỉ Video | **[A/B Test - Bản A]**: Dựng 3DGS mono, ước lượng hệ mét bằng AI MoGe (để so sánh với #2). | Local / Colab |
+| **SC-02** | `01_LoiDi_Kho_Thuan_Aisle_CW` | `video_left.mp4` | 🎥 + 📡 LiDAR thô | **[A/B Test - Bản B]**: Cùng video #1 nhưng kèm LiDAR. So sánh trực tiếp để thấy độ chuẩn xác mét và mây điểm thực tế. | Colab GPU |
+| **SC-03** | `01_LoiDi_Kho_Thuan_Aisle_CW` | `video_right.mp4` | 🎥 Chỉ Video | **Đổi góc nhìn (Camera Phải)**: Đánh giá độ phủ bề mặt của kệ hàng từ góc nhìn chéo phải. | Local / Colab |
+| **SC-04** | `01_LoiDi_Kho_Thuan_Aisle_CW` | `video_stereo.mp4` | 🎥🎥 Stereo kép | **Trường nhìn mở rộng**: Tận dụng 2 camera song song để bao quát cả 2 dãy kệ hai bên đường đi. | Colab GPU |
+| **SC-05** | `02_HanhLang_Thang_Hallway_Straight_CW` | `video_left.mp4` | 🎥 Chỉ Video | **Thử thách bề mặt trơn**: Kiểm tra SfM trên tường trắng, ít vân bề mặt (texture-poor) xem có bị mất dấu pose không. | Local / Colab |
+| **SC-06** | `02_HanhLang_Thang_Hallway_Straight_CW` | `video_right.mp4` | 🎥 + 📡 LiDAR thô | **Ghép chéo cảm biến**: Camera phải kết hợp cảm biến LiDAR đặt ở giữa robot để bù đắp các mảng tường phẳng. | Colab GPU |
+| **SC-07** | `02_HanhLang_Thang_Hallway_Straight_CW` | `video_stereo.mp4` | 🎥🎥 Stereo kép | **Stereo hành lang hẹp**: Khắc phục hiện tượng góc nhìn hẹp trong không gian hành lang dài. | Colab GPU |
+| **SC-08** | `03_LoiDi_Kho_Nguoc_Aisle_CCW` | `video_left.mp4` | 🎥 Chỉ Video | **Đảo chiều chuyển động (180°)**: Robot đi ngược chiều kim đồng hồ, đánh giá độ ổn định khi hướng ánh sáng bị đổi. | Local / Colab |
+| **SC-09** | `03_LoiDi_Kho_Nguoc_Aisle_CCW` | `video_right.mp4` | 🎥 Chỉ Video | **Đối xứng bề mặt**: Khi đi ngược chiều, camera phải sẽ nhìn vào đúng dãy kệ mà camera trái ở chiều thuận đã nhìn. | Local / Colab |
+| **SC-10** | `03_LoiDi_Kho_Nguoc_Aisle_CCW` | `video_stereo.mp4` | 🎥🎥 + 📡 LiDAR thô | **Đa phương thức tối đa**: Kết hợp cả 2 camera stereo và LiDAR để đạt mật độ điểm 3D cao nhất. | Colab GPU |
+| **SC-11** | `04_HanhLang_ToanKhu_Hallway_Full_CW` | `video_left.mp4` | 🎥 Chỉ Video | **Vòng lặp lớn (Loop Closure)**: Video dài nhất (2.318 frames, ~77s), kiểm tra khép kín vòng lặp chống trôi tọa độ. | **Colab GPU 15GB** |
+| **SC-12** | `04_HanhLang_ToanKhu_Hallway_Full_CW` | `video_right.mp4` | 🎥 + 📡 LiDAR thô | **Bản sao số (Digital Twin) toàn khu**: Dựng toàn bộ mặt sàn khu nhà có tọa độ mét chuẩn xác từ LiDAR. | **Colab GPU 15GB** |
+| **SC-13** | `04_HanhLang_ToanKhu_Hallway_Full_CW` | `video_stereo.mp4` | 🎥🎥 Stereo kép | **Khối lượng dữ liệu lớn**: Xử lý dữ liệu stereo toàn khu nhà trên Colab GPU. | **Colab GPU 15GB** |
+| **SC-14** | `05_LoiDi_Kho_Dot2_Aisle_CW_Run1` | `video_left.mp4` | 🎥 Chỉ Video | **Phát hiện biến đổi môi trường (Change Detection)**: So sánh với Scene 01 để nhận diện kiện hàng/pallet bị dời vị trí. | Local / Colab |
+| **SC-15** | `05_LoiDi_Kho_Dot2_Aisle_CW_Run1` | `video_right.mp4` | 🎥 Chỉ Video | **Góc nhìn bổ sung đợt 2**: Quan sát các vật thể mới xuất hiện ở phía phải lối đi. | Local / Colab |
+| **SC-16** | `05_LoiDi_Kho_Dot2_Aisle_CW_Run1` | `video_stereo.mp4` | 🎥🎥 + 📡 LiDAR thô | **Cập nhật bản đồ kho**: Dựng bản sao số đợt 2 để làm bài toán bảo trì/cập nhật bản đồ mô phỏng theo thời gian. | Colab GPU |
+
 ---
 
 ## Official links — quick access
@@ -1834,3 +1885,4 @@ Và nguyên tắc methodology quan trọng nhất là:
 - POV-SLAM RSS 2023: https://roboticsproceedings.org/rss19/p069.html
 - POV-SLAM arXiv: https://arxiv.org/abs/2307.00488
 - DOI: https://doi.org/10.15607/RSS.2023.XIX.069
+
