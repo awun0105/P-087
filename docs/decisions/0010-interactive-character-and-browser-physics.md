@@ -39,9 +39,16 @@ gsplat, script (VERIFIED trong `dist/viewer.js`); không có `anim`, `collision`
    `9c28614f465b7dc105f908c20c22fc045f4b07caf8c5ef0e9f8049eceb6dd38d`. Commit vào `frontend/public/characters/worker.glb`
    (CC0 cho phép), ghi ở `THIRD_PARTY_NOTICES.md`. Hoạt ảnh chạy qua hệ `anim` mà Studio thêm vào app của viewer. Không
    dùng asset người của Isaac Sim trong trình duyệt.
-2. **Vật lý trình duyệt (H5):** ammo.js (bản build WebAssembly của Bullet, giấy phép zlib) qua hệ `rigidbody` /
-   `collision` của PlayCanvas, thêm vào app của viewer lúc bật chế độ tương tác; chỉ tải khi người dùng bật. Tương tác
-   chỉ ở phía trình duyệt, không ghi SceneIR.
+2. **Vật lý trình duyệt (H5):** ammo.js (bản build WebAssembly chính thức của Bullet, giấy phép zlib; repo
+   `kripken/ammo.js`, commit `c8779e6`, `frontend/public/vendor/ammo/`), chỉ tải khi người dùng vào chế độ Đi bộ trong
+   scene có vật động. Gọi ammo.js trực tiếp với một thế giới vật lý riêng ở hệ canonical (Z lên) thay vì hệ
+   `rigidbody`/`collision` của PlayCanvas: vật của Studio nằm dưới một entity gốc đã xoay sang không gian hiển thị, còn
+   hệ rigidbody làm việc theo toạ độ thế giới của entity — tự chạy thế giới riêng thì pose đọc/ghi thẳng như SceneIR.
+   Thành phần: sàn z = 0; lưới va chạm của scene đã khoét vùng gốc của vật động (backend, cùng file với lưới đi bộ của
+   viewer), chỉ giữ phần trong 6 m quanh vật động; vật động là bao lồi của collider (≤ 256 đỉnh) hoặc hộp, khối lượng và
+   ma sát theo `physics` của SceneIR; người đi là con nhộng động học (bán kính 0,3 m, cao 1,6 m) bám vị trí người đi của
+   viewer. Tương tác chỉ ở phía trình duyệt, không ghi SceneIR; nút "Đặt lại vị trí vật" và việc rời chế độ Đi bộ đưa
+   vật về pose của SceneIR.
 3. **Câu hỏi mở cho owner:** `scripts/scene/build_asset_previews.py` chuyển asset Isaac trong danh mục vật thể sang GLB
    và API phục vụ chúng cho trình duyệt (bản xem trước khi thêm vật từ thư viện). Theo đúng phân tích ở Context, việc này
    có cùng rủi ro giấy phép. Phương án: (a) giữ cho demo nội bộ, tắt trên production; (b) thay bằng asset CC0; (c) hỏi
@@ -50,6 +57,8 @@ gsplat, script (VERIFIED trong `dist/viewer.js`); không có `anim`, `collision`
 ## Consequences
 
 - Nhân vật không phải người mẫu của Isaac: trên web và trong gói Isaac có thể khác hình (gói Isaac không chứa nhân vật).
-- Thêm hệ `anim` (và sau này `rigidbody`, `collision`) vào app của viewer phụ thuộc API nội bộ ổn định của engine
-  PlayCanvas 2.22; nâng viewer/engine thì kiểm lại.
+- Thêm hệ `anim` vào app của viewer phụ thuộc API nội bộ ổn định của engine PlayCanvas 2.22; nâng viewer/engine thì
+  kiểm lại.
+- Người đi của viewer chỉ va chạm với lưới tĩnh: vật bị đẩy không chặn lại người đi, và vùng gốc của vật động trong lưới
+  đi bộ là chỗ trống. Đổi tập vật động (gán/bỏ lớp có vật lý) tạo lại viewer vì lưới đi bộ đổi.
 - Nhân vật là lưới thường trong scene 3DGS: ánh sáng/bóng không hoà hoàn toàn.

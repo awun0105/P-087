@@ -480,6 +480,20 @@ export class SceneOverlay {
     this.redraw();
   }
 
+  /** Đặt pose (hệ canonical, như SceneIR) cho một vật đang vẽ — dùng khi vật lý phía trình duyệt dời vật. */
+  setObjectPose(id: string, position: Vec3, rotation_xyzw: [number, number, number, number]): void {
+    const record = this.alive ? this.objects.get(id) : undefined;
+    if (!record) return;
+    record.entity.setLocalPosition(...position);
+    record.entity.setLocalRotation(new Quat(...rotation_xyzw));
+    const outline = this.outlines.find((item) => item.id === id);
+    if (outline) {
+      outline.root.setLocalPosition(...position);
+      outline.root.setLocalRotation(new Quat(...rotation_xyzw));
+    }
+    this.redraw();
+  }
+
   private gizmoTarget: string | null = null;
 
   /** Gắn gizmo dịch/xoay vào một vật; `null` để gỡ. Kéo gizmo chỉ đổi entity, backend đổi khi `onEnd`. */

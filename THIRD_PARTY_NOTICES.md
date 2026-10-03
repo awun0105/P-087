@@ -100,6 +100,23 @@ https://poly.pizza/m/Yg2bQZO6Hj (tải từ `https://static.poly.pizza/3a5f3056-
 sha256 `9c28614f465b7dc105f908c20c22fc045f4b07caf8c5ef0e9f8049eceb6dd38d`). Không chỉnh sửa file. Dùng cho góc nhìn
 thứ ba trong viewer (ADR 0010).
 
+### ammo.js (Bullet Physics cho WebAssembly) — zlib
+
+`frontend/public/vendor/ammo/ammo.wasm.js` và `ammo.wasm.wasm`: bản build chính thức trong `builds/` của
+https://github.com/kripken/ammo.js (commit `c8779e60159d428f11ff1eb553dc9b6b6e2d317a`), không chỉnh sửa. sha256
+`8481c5250507d3f2c0cecff7cc55a34727f52f96590a2304556a43ca4cf4e0b3` (js) và
+`de36b300b25d244a79ae56ef0e7fee5efe2a3281f346a134945eef0b2fbaa5d8` (wasm). Dùng cho đẩy vật thể trong viewer (ADR 0010).
+
+Copyright (c) 2011 ammo.js contributors
+
+This software is provided 'as-is', without any express or implied warranty. In no event will the authors be held
+liable for any damages arising from the use of this software. Permission is granted to anyone to use this software for
+any purpose, including commercial applications, and to alter it and redistribute it freely, subject to the following
+restrictions: 1. The origin of this software must not be misrepresented; you must not claim that you wrote the original
+software. If you use this software in a product, an acknowledgment in the product documentation would be appreciated
+but is not required. 2. Altered source versions must be plainly marked as such, and must not be misrepresented as being
+the original software. 3. This notice may not be removed or altered from any source distribution.
+
 ### Vendored SuperSplat editor
 
 `frontend/vendor/supersplat/` là bản copy của `playcanvas/supersplat` v3.4.2 (commit

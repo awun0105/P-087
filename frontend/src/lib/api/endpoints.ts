@@ -68,22 +68,25 @@ export function jobArtifactContentUrl(
   });
 }
 
-/**
- * Lưới va chạm của job đã xoay sang không gian hiển thị, cho chế độ đi bộ của viewer. Đường dẫn
- * giữ đuôi `.glb` vì viewer chọn loader theo đuôi file.
- */
 /** Lớp LiDAR đã căn chỉnh của scene (float32 xyz, mét, Z-up); `key` đổi theo bản căn chỉnh để cache đúng bản. */
 export function jobLidarOverlayUrl(jobId: string, key: string): string {
   return apiUrl(`/api/v1/jobs/${encodeURIComponent(jobId)}/lidar-overlay`, { v: key });
 }
 
+/**
+ * Lưới va chạm của job đã xoay sang không gian hiển thị, cho chế độ đi bộ của viewer. Đường dẫn
+ * giữ đuôi `.glb` vì viewer chọn loader theo đuôi file. `dynamic`: id vật động — vùng gốc của chúng
+ * được khoét khỏi lưới để người đi chạm và đẩy được vật (ADR 0010).
+ */
 export function jobWalkCollisionUrl(
   jobId: string,
   ref: { artifact_uri: string; artifact_checksum: string },
+  dynamic: readonly string[] = [],
 ): string {
   const filename = ref.artifact_uri.split("/").pop();
   return apiUrl(`/api/v1/jobs/${encodeURIComponent(jobId)}/walk-collision/${encodeURIComponent(filename ?? "collision.glb")}`, {
     artifact_uri: ref.artifact_uri,
     artifact_checksum: ref.artifact_checksum,
+    ...(dynamic.length ? { dynamic: [...dynamic].sort() } : {}),
   });
 }

@@ -155,7 +155,7 @@ khi chỉ có test giả lập.
 - [~] H2 Chọn vật theo hình dáng — code + test xong; trình duyệt: 26 collider tải được, không lỗi console; chưa ai nhìn hình
 - [ ] H3 Tường ma của mesh va chạm — hoãn (owner, 02/10/2026)
 - [~] H4 Nhân vật 3D, góc nhìn thứ ba — code + test xong (03/10/2026): nhân vật CC0 "Worker" có hoạt ảnh đứng/đi/chạy (ADR 0010; asset Isaac không dùng được trên web theo giấy phép); chưa xem trên trình duyệt
-- [ ] H5 Đẩy vật thể
+- [~] H5 Đẩy vật thể — code + test xong (03/10/2026, ammo.js, ADR 0010); chưa xem trên trình duyệt
 - [~] H6 Đề xuất tỉ lệ mét tự động — code, test và chạy thật local xong (02/10/2026); bước 4 (đo sai số) xong 03/10/2026: −0,24% và −0,11% trên hai scene Aisle_CW (`eval/protocols/reference_torwic.md`); chưa kiểm trên trình duyệt
 - [ ] H7 Hàng đợi nhiều người dùng
 - [ ] H8 Việc đang kẹt / cần máy thuê
@@ -268,3 +268,15 @@ Owner chốt: chỉ MoGe-2, có tự đề xuất mặt sàn; làm theo bộ ba 
   sẵn có của PlayCanvas để khỏi tự viết va chạm; chưa kiểm kích thước tải và giấy phép.
 - Dữ liệu: người đi va chạm với `collision.glb` của cả scene. Nếu lưới này vẫn chứa hình của các vật đã tách thì người
   đi bị chính lưới tĩnh chặn trước khi chạm vật động — UNKNOWN, cần kiểm trên một scene pipeline v2 thật trước khi làm.
+
+### H5 — đẩy vật thể (03/10/2026) — VALIDATING
+
+- Kiểm trên scene thật: lưới va chạm chung (REC-05) **vẫn chứa** hình của vật đã tách → backend khoét vùng gốc của vật
+  động (revision sớm nhất có vật, nới 6 cm) khỏi lưới đi bộ khi client gửi `dynamic=<id>` (`scene/physics.py`,
+  `display_glb.py`). Vật người dùng thêm từ thư viện không nằm trong lưới nên không khoét (`job-1bb733ae40ad`: 2 vật
+  động đều thêm từ thư viện → 164.908 tam giác trước và sau, đúng).
+- Trình duyệt: `scene-physics.ts` (ammo.js, thế giới riêng ở hệ canonical), `usePhysicsPlay.ts` (bật khi Đi bộ và scene
+  có vật động), nút "Đặt lại vị trí vật"; rời chế độ Đi bộ thì vật về pose của SceneIR. Không ghi SceneIR.
+- Proof: vitest chạy chính bản ammo.js phục vụ cho trình duyệt (vật đứng yên trên sàn, bị đẩy theo hướng đi, bị tường
+  chặn, đặt lại đúng chỗ, bao lồi từ đỉnh collider); pytest cho khoét lưới (hộp có hướng, pose gốc sau khi dời vật, bỏ
+  qua vật tĩnh). **Chưa chạy trên trình duyệt.**

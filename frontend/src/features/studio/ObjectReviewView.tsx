@@ -12,6 +12,7 @@ import { Badge, Button, Notice } from "@/components/studio/primitives";
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
 import { ObjectifyNotice } from "@/features/studio/ObjectifyNotice";
 import type { GizmoMode, OverlayBox, OverlayObject } from "@/features/viewer/scene-overlay";
+import type { PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
 import { ApiError } from "@/lib/api/client";
 import { jobArtifactContentUrl } from "@/lib/api/endpoints";
 import {
@@ -141,6 +142,27 @@ export function ObjectReviewView({
         visible: isPlaced(object),
       })),
     [scene, jobId, previews],
+  );
+
+  // Vật động (vật lý của SceneIR) đang đặt trong scene: khi Đi bộ, người đi đẩy được chúng (ADR 0010).
+  const physicsObjects = useMemo<PhysicsObjectInput[]>(
+    () =>
+      (scene?.objects ?? [])
+        .filter((object) => object.physics?.dynamic && object.active && isPlaced(object))
+        .map((object) => ({
+          id: object.id,
+          position: object.transform.translation_xyz,
+          rotation_xyzw: object.transform.rotation_quaternion_xyzw,
+          colliderUrl:
+            object.collider?.geometry_ref && object.collider.geometry_ref.artifact_uri.endsWith(".glb")
+              ? jobArtifactContentUrl(jobId, object.collider.geometry_ref)
+              : null,
+          dimensions: object.primitive_dimensions_xyz_m ?? null,
+          mass_kg: object.physics!.mass_kg ?? 10,
+          friction: object.physics!.dynamic_friction,
+          restitution: object.physics!.restitution,
+        })),
+    [scene, jobId],
   );
 
   const counts = useMemo(
@@ -302,6 +324,7 @@ export function ObjectReviewView({
             onTransform={(id, position, rotation) => run((revision) => setObjectTransform(jobId, revision, id, position, rotation))}
             focus={focus}
             onPickBox={selectFromScene}
+            physicsObjects={physicsObjects}
           />
         ) : (
           // Scene không có visual 3DGS: chỉ còn collision mesh để định vị hộp.

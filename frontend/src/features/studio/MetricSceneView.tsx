@@ -15,6 +15,7 @@ import {
 } from "@/features/viewer/PlayCanvasScene";
 import { SceneOverlay, type GizmoMode, type OverlayBox, type OverlayObject } from "@/features/viewer/scene-overlay";
 import { ThirdPersonRig } from "@/features/viewer/third-person";
+import { usePhysicsPlay, type PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
 import {
   objectViewPose,
   recordingCameraPose,
@@ -25,6 +26,7 @@ import { jobArtifactContentUrl, jobLidarOverlayUrl, jobWalkCollisionUrl } from "
 import { cn } from "@/lib/cn";
 
 const EMPTY_OBJECTS: readonly OverlayObject[] = [];
+const NO_PHYSICS: readonly PhysicsObjectInput[] = [];
 
 interface Ref {
   artifact_uri: string;
@@ -46,6 +48,7 @@ export function MetricSceneView({
   onTransform,
   defaultLayers = { splat: true, collision: false, boxes: true },
   lidarOverlay = null,
+  physicsObjects = NO_PHYSICS,
   focus,
   onPickBox,
 }: {
@@ -63,6 +66,8 @@ export function MetricSceneView({
   defaultLayers?: { splat: boolean; collision: boolean; boxes: boolean };
   /** Khoá lớp LiDAR đã căn chỉnh của scene (từ `StageView.lidar_overlay`); null = scene không có LiDAR. */
   lidarOverlay?: string | null;
+  /** Vật động (SceneIR `physics.dynamic`): khi Đi bộ, người đi đẩy được chúng (vật lý chỉ ở trình duyệt). */
+  physicsObjects?: readonly PhysicsObjectInput[];
   /** Yêu cầu camera bay tới hộp `id`; `nonce` đổi để bay lại cùng vật. */
   focus?: { id: string; nonce: number };
   /** Người dùng bấm (không kéo) trúng một hộp trong 3D. */
@@ -79,7 +84,12 @@ export function MetricSceneView({
   const contentUrl = jobArtifactContentUrl(jobId, visual);
   const collisionUrl = collision ? jobArtifactContentUrl(jobId, collision) : null;
   // Viewer đọc toạ độ đỉnh thô của lưới va chạm, nên chế độ đi bộ dùng bản đã xoay sang không gian hiển thị.
-  const walkCollisionUrl = collision ? jobWalkCollisionUrl(jobId, collision) : null;
+  // Vùng gốc của vật động được khoét khỏi lưới đi bộ; khoá theo tập id để chỉ tạo lại viewer khi tập này đổi.
+  const dynamicKey = physicsObjects.map((item) => item.id).sort().join(",");
+  const walkCollisionUrl = useMemo(
+    () => (collision ? jobWalkCollisionUrl(jobId, collision, dynamicKey ? dynamicKey.split(",") : []) : null),
+    [jobId, collision, dynamicKey],
+  );
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
   const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
   const [wheelFactor, setWheelFactor] = useState(2);
@@ -90,7 +100,9 @@ export function MetricSceneView({
   const controls = useRef<ViewerControls | null>(null);
   const rigRef = useRef<ThirdPersonRig | null>(null);
   const [rig, setRig] = useState<ThirdPersonRig | null>(null);
+  const [viewerApp, setViewerApp] = useState<AppBase | null>(null);
   const onApp = useCallback((app: ViewerAppLike | null, next?: ViewerControls) => {
+    setViewerApp(app as unknown as AppBase | null);
     rigRef.current?.destroy();
     rigRef.current = app ? new ThirdPersonRig(app as unknown as AppBase) : null;
     setRig(rigRef.current);
@@ -160,6 +172,15 @@ export function MetricSceneView({
     rig.setActive(thirdPerson && walking);
     return () => rig.setActive(false);
   }, [rig, thirdPerson, walking]);
+
+  const physics = usePhysicsPlay({
+    app: viewerApp,
+    overlay,
+    walking,
+    collisionUrl: walkCollisionUrl,
+    objects: physicsObjects,
+    overlayObjects: objects,
+  });
 
   // Lớp LiDAR chỉ tải khi người dùng bật (vài MB); tắt thì giải phóng GPU, bật lại lấy từ cache của trình duyệt.
   const lidarWanted = layers.lidar && lidarUrl !== null;
@@ -262,6 +283,16 @@ export function MetricSceneView({
           {lidarUrl && toggle("lidar", "Đám mây LiDAR")}
         </div>
         <CameraToolbar runtime={runtime} controls={viewerControls} wheelFactor={wheelFactor} onWheelFactor={setWheelFactor} thirdPerson={thirdPerson} onThirdPerson={setThirdPerson} />
+        {walking && physics.status.state !== "off" && (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-line-dark bg-viewport-deep/85 px-3 py-1.5 text-xs text-on-dark/90" role="status">
+            {physics.status.state === "loading" && "Đang dựng vật lý cho vật động…"}
+            {physics.status.state === "ready" && `Đi vào vật để đẩy · ${physics.status.objects} vật động`}
+            {physics.status.state === "failed" && `Không bật được vật lý: ${physics.status.message}`}
+            {physics.status.state === "ready" && (
+              <button type="button" onClick={physics.reset} className="rounded px-2 py-0.5 hover:bg-on-dark/10">Đặt lại vị trí vật</button>
+            )}
+          </div>
+        )}
       </div>
       <p className="absolute bottom-3 left-3 rounded-md border border-line-dark bg-viewport-deep/85 px-2 py-1 text-xs text-on-dark/80">
         Hệ mét, sàn z = 0 · mở tại camera quay đầu tiên

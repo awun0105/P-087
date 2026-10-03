@@ -80,7 +80,10 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   return result.data;
 }
 
-export function apiUrl(path: string, params: Record<string, string>): string {
-  const query = new URLSearchParams(params).toString();
+export function apiUrl(path: string, params: Record<string, string | readonly string[]>): string {
+  // Mảng thành tham số lặp lại (`?dynamic=a&dynamic=b`), đúng cách FastAPI đọc `list[str]`.
+  const query = new URLSearchParams(
+    Object.entries(params).flatMap(([key, value]) => (typeof value === "string" ? [[key, value]] : value.map((item) => [key, item]))),
+  ).toString();
   return `${apiBase()}${path}?${query}`;
 }
