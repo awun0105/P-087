@@ -10,14 +10,10 @@ import {
   ChevronDown,
   ChevronUp,
   Crosshair,
-  Eye,
-  EyeOff,
   Library,
   Loader2,
-  Move3d,
   Pencil,
   Plus,
-  RotateCw,
   Tag,
   Undo2,
   X,
@@ -535,8 +531,6 @@ export function ObjectReviewView({
                   object={current}
                   busy={busy}
                   catalog={catalog}
-                  tool={tool}
-                  onTool={setTool}
                   onAct={(action, extra) => act(current, action, extra)}
                   onFlyTo={() => flyTo(current.id)}
                   onClose={() => setSelected(null)}
@@ -609,8 +603,6 @@ function Inspector({
   object,
   busy,
   catalog,
-  tool,
-  onTool,
   onAct,
   onFlyTo,
   onClose,
@@ -618,8 +610,6 @@ function Inspector({
   object: SceneObject;
   busy: boolean;
   catalog: SceneCatalog | null;
-  tool: GizmoMode | "none";
-  onTool: (tool: GizmoMode | "none") => void;
   onAct: (action: ObjectAction, extra?: ActionExtra) => void;
   onFlyTo: () => void;
   onClose: () => void;
@@ -632,7 +622,6 @@ function Inspector({
   const savedFamily = object.physics?.provenance?.asset_family;
   const [family, setFamily] = useState(typeof savedFamily === "string" ? savedFamily : "");
   const chosen = assets.find((item) => item.family === family) ?? assets.find((item) => item.semantic_class === label);
-  const placed = isPlaced(object);
   const removed = isIgnored(object);
   const massValue = mass.trim() === "" ? null : Number(mass);
   const massValid = massValue === null || (Number.isFinite(massValue) && massValue > 0);
@@ -684,31 +673,12 @@ function Inspector({
             </Button>
           </>
         )}
-        {object.state === "CONFIRMED" && !removed && (
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => onAct("hide", { active: !object.active })} className="text-on-dark/80 hover:text-on-dark hover:bg-on-dark/10">
-            {object.active ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
-            {object.active ? "Ẩn khỏi mô phỏng" : "Đưa lại vào mô phỏng"}
-          </Button>
-        )}
         {removed && (
           <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAct("restore")} className="border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep">
             <Undo2 aria-hidden /> Khôi phục
           </Button>
         )}
       </div>
-      {placed && (
-        <div className="space-y-1.5">
-          <p className="text-xs text-on-dark/70">Di chuyển trong 3D (thả chuột là lưu thành revision mới)</p>
-          <div className="flex gap-1.5" role="group" aria-label="Công cụ biến đổi">
-            <Button size="sm" variant={tool === "translate" ? "primary" : "secondary"} aria-pressed={tool === "translate"} onClick={() => onTool(tool === "translate" ? "none" : "translate")} className={tool !== "translate" ? "border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep" : undefined}>
-              <Move3d aria-hidden /> Dịch
-            </Button>
-            <Button size="sm" variant={tool === "rotate" ? "primary" : "secondary"} aria-pressed={tool === "rotate"} onClick={() => onTool(tool === "rotate" ? "none" : "rotate")} className={tool !== "rotate" ? "border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep" : undefined}>
-              <RotateCw aria-hidden /> Xoay
-            </Button>
-          </div>
-        </div>
-      )}
       {catalog && !removed && (
         <form
           className="space-y-2"
