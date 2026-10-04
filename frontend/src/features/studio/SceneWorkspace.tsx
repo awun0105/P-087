@@ -35,23 +35,26 @@ export function SceneWorkspace({
     }
   }
   return (
-    <main className="flex h-[calc(100dvh-3rem)] flex-col">
-      <div className="flex flex-wrap items-center gap-3 border-b border-line bg-paper-raised px-4 py-2.5 sm:px-6">
-        <h1 className="truncate text-base font-bold text-ink">{title}</h1>
-        <div className="flex flex-wrap items-center gap-2">{badges}</div>
-        <div className="hidden sm:block flex-1 text-xs text-ink-muted">
-          Chỉnh Gaussian trong phiên editor · File › Export để tải PLY/SOG · Không lưu SceneIR
-        </div>
-        {resettable && (
-          <Button size="sm" variant="secondary" className="ml-auto" onClick={reset}>
+    <main className="relative flex h-[calc(100dvh-3rem)] flex-col">
+      {resettable && (
+        <div className="absolute top-3 right-3 z-20">
+          <Button size="sm" variant="secondary" onClick={reset}>
             <RotateCcw aria-hidden />
             Khôi phục bản gốc
           </Button>
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="min-h-0 flex-1">
-        <EditorFrame key={session} contentUrl={contentUrl} filename={filename} homeHref={backHref} title={`Editor 3D: ${title}`} />
+        <EditorFrame
+          key={session}
+          contentUrl={contentUrl}
+          filename={filename}
+          homeHref={backHref}
+          title={`Editor 3D: ${title}`}
+          badges={badges}
+          description="Chỉnh Gaussian trong phiên editor · File › Export để tải PLY/SOG · Không lưu SceneIR"
+        />
       </div>
     </main>
   );

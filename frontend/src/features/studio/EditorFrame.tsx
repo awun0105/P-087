@@ -2,7 +2,7 @@
 
 import { Info, Loader2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/studio/primitives";
 import { INITIAL_RUNTIME, PlayCanvasScene, usePlayCanvasCapability } from "@/features/viewer/PlayCanvasScene";
@@ -43,11 +43,15 @@ export function EditorFrame({
   filename,
   homeHref,
   title,
+  badges,
+  description,
 }: {
   contentUrl: string;
   filename: string;
   homeHref: string;
   title: string;
+  badges?: ReactNode;
+  description?: ReactNode;
 }) {
   const router = useRouter();
   const { register, navigate } = useNavigationGuard();
@@ -100,7 +104,15 @@ export function EditorFrame({
   }, [loaded, mode, register]);
 
   if (mode === "viewer") {
-    return <WebGlViewer contentUrl={contentUrl} filename={filename} onTryEditor={() => setMode("editor")} />;
+    return (
+      <WebGlViewer
+        contentUrl={contentUrl}
+        filename={filename}
+        onTryEditor={() => setMode("editor")}
+        badges={badges}
+        description={description}
+      />
+    );
   }
 
   return (
@@ -129,7 +141,19 @@ export function EditorFrame({
 }
 
 /** Viewer WebGL2 (PlayCanvas + supersplat-viewer): xem, xoay, zoom — không có công cụ chỉnh sửa. */
-function WebGlViewer({ contentUrl, filename, onTryEditor }: { contentUrl: string; filename: string; onTryEditor: () => void }) {
+function WebGlViewer({
+  contentUrl,
+  filename,
+  onTryEditor,
+  badges,
+  description,
+}: {
+  contentUrl: string;
+  filename: string;
+  onTryEditor: () => void;
+  badges?: ReactNode;
+  description?: ReactNode;
+}) {
   const [capability, setCapability] = usePlayCanvasCapability();
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
   const [showNotice, setShowNotice] = useState(false);
@@ -149,6 +173,8 @@ function WebGlViewer({ contentUrl, filename, onTryEditor }: { contentUrl: string
                   <X className="size-4" aria-hidden />
                 </button>
               </div>
+              {badges && <div className="mt-2 flex flex-wrap items-center gap-2">{badges}</div>}
+              {description && <p className="mt-1.5 mb-2.5 text-xs text-ink-muted leading-relaxed">{description}</p>}
               <HelpDetails title="Vì sao chỉ xem?">
                 <p>Editor yêu cầu WebGPU để hoạt động. Vui lòng kiểm tra các cài đặt sau:</p>
                 <ul className="mt-2 ml-4 list-disc space-y-1">
