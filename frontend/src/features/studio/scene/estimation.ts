@@ -58,8 +58,8 @@ export function estimateRemainingTime(
   } else if (elapsed < currentBenchmark) {
     currentRemaining = currentBenchmark - elapsed;
   } else {
-    // Nếu đã chạy lâu hơn benchmark, ước lượng thêm ~10-20% theo thời gian trôi qua
-    currentRemaining = Math.max(15, Math.round(currentBenchmark * 0.15));
+    // Nếu đã chạy lâu hơn benchmark, ước lượng thêm ~15% theo thời gian đã trôi qua
+    currentRemaining = Math.max(15, Math.round(elapsed * 0.15));
   }
 
   // Cộng dồn các bước tự động kế tiếp đang ở trạng thái pending
