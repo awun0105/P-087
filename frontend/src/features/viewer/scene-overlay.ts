@@ -230,6 +230,7 @@ export class SceneOverlay {
   private pointsMaterial: StandardMaterial | null = null;
   private gizmoLayer: Layer | null = null;
   private gizmo: TranslateGizmo | RotateGizmo | null = null;
+  private gizmoCleanup: (() => void) | null = null;
   private destroyed = false;
 
   /**
@@ -524,10 +525,106 @@ export class SceneOverlay {
     gizmo.on("render:update", () => this.redraw());
     this.gizmo = gizmo;
     this.gizmoTarget = id;
+
+    // Cô lập cử chỉ kéo của Gizmo khỏi Camera Controller của supersplat-viewer:
+    // Mặc định PlayCanvas Gizmo nghe `pointerdown` ở pha bubbling trên canvas. Cùng lúc đó,
+    // KeyboardMouseSource của supersplat cũng nhận sự kiện và ghi nhận dịch chuyển chuột làm xoay/di
+    // chuyển camera.
+    // Bằng cách gỡ listener bubble mặc định và chặn ở pha CAPTURE:
+    // - Khi người dùng bấm trúng trục/mặt điều khiển của Gizmo: gọi `stopImmediatePropagation()` để
+    //   Camera Controller hoàn toàn không thấy sự kiện bắt đầu kéo, chỉ Gizmo xử lý biến đổi vật.
+    // - Khi bấm ngoài Gizmo: sự kiện lan truyền bình thường để xoay camera hoặc chọn vật.
+    const canvas = (gizmo as unknown as { _device?: { canvas?: HTMLCanvasElement } })._device?.canvas
+      ?? (this.app as unknown as { graphicsDevice?: { canvas?: HTMLCanvasElement } }).graphicsDevice?.canvas;
+
+    if (canvas) {
+      type GizmoInternal = {
+        _onPointerDown: (e: PointerEvent) => void;
+        _onPointerMove: (e: PointerEvent) => void;
+        _onPointerUp: (e: PointerEvent) => void;
+        _getSelection: (x: number, y: number) => unknown[];
+      };
+      const gizmoInternal = gizmo as unknown as GizmoInternal;
+      canvas.removeEventListener("pointerdown", gizmoInternal._onPointerDown);
+      canvas.removeEventListener("pointermove", gizmoInternal._onPointerMove);
+      canvas.removeEventListener("pointerup", gizmoInternal._onPointerUp);
+
+      let dragging = false;
+      let activePointerId: number | null = null;
+
+      const onCapturePointerDown = (e: PointerEvent) => {
+        if (e.target !== canvas || !gizmo.enabled) return;
+        if (typeof document !== "undefined" && document.pointerLockElement) return;
+        if (e.button !== 0) return;
+
+        const selection = gizmoInternal._getSelection?.(e.offsetX, e.offsetY);
+        if (selection && selection.length > 0) {
+          dragging = true;
+          activePointerId = e.pointerId;
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          gizmoInternal._onPointerDown(e);
+        }
+      };
+
+      const onCapturePointerMove = (e: PointerEvent) => {
+        if (dragging && e.pointerId === activePointerId) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          gizmoInternal._onPointerMove(e);
+        } else if (!dragging) {
+          gizmoInternal._onPointerMove(e);
+        }
+      };
+
+      const onCapturePointerUp = (e: PointerEvent) => {
+        if (dragging && (activePointerId === null || e.pointerId === activePointerId)) {
+          dragging = false;
+          activePointerId = null;
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          gizmoInternal._onPointerUp(e);
+        }
+      };
+
+      const onLostPointerCapture = (e: PointerEvent) => {
+        if (dragging && (activePointerId === null || e.pointerId === activePointerId)) {
+          dragging = false;
+          activePointerId = null;
+          gizmoInternal._onPointerUp(e);
+        }
+      };
+
+      canvas.addEventListener("pointerdown", onCapturePointerDown, { capture: true });
+      canvas.addEventListener("pointermove", onCapturePointerMove, { capture: true });
+      canvas.addEventListener("pointerup", onCapturePointerUp, { capture: true });
+      canvas.addEventListener("pointercancel", onCapturePointerUp, { capture: true });
+      canvas.addEventListener("lostpointercapture", onLostPointerCapture);
+
+      this.gizmoCleanup = () => {
+        if (activePointerId !== null) {
+          try {
+            if (canvas.hasPointerCapture?.(activePointerId)) {
+              canvas.releasePointerCapture(activePointerId);
+            }
+          } catch {
+            // Không lỗi nếu browser đã giải phóng trước
+          }
+        }
+        canvas.removeEventListener("pointerdown", onCapturePointerDown, { capture: true });
+        canvas.removeEventListener("pointermove", onCapturePointerMove, { capture: true });
+        canvas.removeEventListener("pointerup", onCapturePointerUp, { capture: true });
+        canvas.removeEventListener("pointercancel", onCapturePointerUp, { capture: true });
+        canvas.removeEventListener("lostpointercapture", onLostPointerCapture);
+      };
+    }
+
     this.redraw();
   }
 
   detachGizmo(): void {
+    this.gizmoCleanup?.();
+    this.gizmoCleanup = null;
     this.gizmo?.detach();
     this.gizmo?.destroy();
     this.gizmo = null;
@@ -541,6 +638,49 @@ export class SceneOverlay {
       this.app.assets?.remove(record.asset);
       record.asset.unload();
     }
+  }
+
+  private ghost: Entity | null = null;
+  private ghostMaterial: StandardMaterial | null = null;
+
+  /**
+   * Giao tia chuột với sàn canonical (z = 0, hệ Z-up mét). `x`, `y` là CSS pixel tính từ góc trên-trái canvas.
+   * Trả toạ độ [x, y, 0] trên sàn, hoặc null nếu tia không chạm sàn phía trước camera.
+   */
+  floorPoint(x: number, y: number): Vec3 | null {
+    if (!this.alive) return null;
+    const camera = this.app.root.findComponents("camera")[0] as CameraComponent | undefined;
+    if (!camera) return null;
+    const inverse = this.root.getWorldTransform().clone().invert();
+    const originWorld = camera.entity.getPosition().clone();
+    const farWorld = camera.screenToWorld(x, y, camera.farClip, new PcVec3());
+    const o = inverse.transformPoint(originWorld, new PcVec3());
+    const f = inverse.transformPoint(farWorld, new PcVec3());
+    const dz = f.z - o.z;
+    if (Math.abs(dz) < 1e-9) return null;
+    const t = -o.z / dz;
+    if (t <= 0 || t > 1) return null;
+    return [o.x + (f.x - o.x) * t, o.y + (f.y - o.y) * t, 0];
+  }
+
+  /** Hộp xem trước khi đặt vật bằng chuột: đáy nằm trên sàn tại `position`; `null` để ẩn. */
+  setGhost(dimensions: Vec3 | null, position: Vec3 | null = null): void {
+    if (!this.alive) return;
+    if (!dimensions || !position) {
+      if (this.ghost) this.ghost.enabled = false;
+      this.redraw();
+      return;
+    }
+    if (!this.ghost) {
+      this.ghostMaterial = material(themeColor("--studio-ember", "#e8743b"), 0.45, false);
+      this.ghost = new Entity("r2s-ghost", this.app);
+      this.ghost.addComponent("render", { type: "box", material: this.ghostMaterial });
+      this.root.addChild(this.ghost);
+    }
+    this.ghost.enabled = true;
+    this.ghost.setLocalScale(dimensions[0], dimensions[1], dimensions[2]);
+    this.ghost.setLocalPosition(position[0], position[1], position[2] + dimensions[2] / 2);
+    this.redraw();
   }
 
   /**
@@ -576,6 +716,9 @@ export class SceneOverlay {
   destroy(): void {
     this.detachGizmo();
     this.destroyed = true;
+    this.ghostMaterial?.destroy();
+    this.ghostMaterial = null;
+    this.ghost = null;
     for (const record of this.objects.values()) this.releaseObject(record);
     this.objects.clear();
     this.outlines = [];
