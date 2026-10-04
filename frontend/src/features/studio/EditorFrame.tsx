@@ -164,6 +164,9 @@ function WebGlViewer({
   const [wheelFactor, setWheelFactor] = useState(1);
   const [sourceFrame, setSourceFrame] = useState<SourceFrame>("colmap");
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
+  const handleApp = useCallback((_app: unknown, controls?: ViewerControls) => {
+    setViewerControls(controls ?? null);
+  }, []);
   const failed = capability === "failed" || capability === "unavailable";
   
   return (
@@ -221,7 +224,7 @@ function WebGlViewer({
             onRuntime={setRuntime}
             sourceFrame={sourceFrame}
             wheelFactor={wheelFactor}
-            onApp={(_app, controls) => setViewerControls(controls ?? null)}
+            onApp={handleApp}
           />
           <div className="absolute bottom-4 left-4 z-10 flex flex-wrap items-center gap-2">
             <CameraToolbar

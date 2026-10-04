@@ -214,6 +214,8 @@ export function PlayCanvasScene({
     return () => host.removeEventListener("wheel", rescale, { capture: true });
   }, []);
   const [runtime, setRuntime] = useState<PlayCanvasRuntime>(INITIAL_RUNTIME);
+  const onAppRef = useRef(onApp);
+  onAppRef.current = onApp;
 
   /** Đẩy trạng thái lên host; giữ identity ổn định vì nằm trong deps của effect khác. */
   const publish = useCallback(
@@ -283,7 +285,7 @@ export function PlayCanvasScene({
         }
         if (annotations?.length) viewer.state.showAnnotations = false;
         if (app) {
-          onApp?.(app, {
+          onAppRef.current?.(app, {
             select: (index) => {
               if (disposed || !viewer.state.loaded) return false;
               viewer.selectAnnotation(index);
@@ -300,13 +302,21 @@ export function PlayCanvasScene({
             },
             frameScene: () => {
               if (disposed || !viewer.state.loaded) return false;
-              viewer.frameScene();
-              return true;
+              try {
+                viewer.frameScene();
+                return true;
+              } catch {
+                return false;
+              }
             },
             resetCamera: () => {
               if (disposed || !viewer.state.loaded) return false;
-              viewer.resetCamera();
-              return true;
+              try {
+                viewer.resetCamera();
+                return true;
+              } catch {
+                return false;
+              }
             },
           });
         }
@@ -316,7 +326,11 @@ export function PlayCanvasScene({
             autoFramed = true;
             setTimeout(() => {
               if (!disposed && viewer.state.loaded) {
-                viewer.frameScene();
+                try {
+                  viewer.frameScene();
+                } catch (error) {
+                  console.warn("Auto frameScene failed", error);
+                }
               }
             }, 60);
           }
@@ -360,7 +374,7 @@ export function PlayCanvasScene({
       disposed = true;
       subscriptions.forEach((subscription) => subscription.off());
       if (orient && handle?.app) (handle.app as unknown as ViewerAppLike).off("update", orient);
-      onApp?.(null);
+      onAppRef.current?.(null);
       onInspectionReady?.(null);
       const activeHandle = handle;
       const release = () => {
@@ -377,7 +391,7 @@ export function PlayCanvasScene({
     };
   }, [capability, collisionUrl, contentUrl, contentFile, contentFilename, showControls, mode, onFailed, publish,
     enableInspection, inspectionMaxPoints, onInspectionReady, onInspectionState, renderer, sourceFrame, initialCamera,
-    annotations, onApp]);
+    annotations]);
 
   return (
     <div
