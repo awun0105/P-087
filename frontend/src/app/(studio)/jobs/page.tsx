@@ -1,5 +1,6 @@
-import { JobsPage } from "@/features/studio/JobsPage";
+import { redirect } from "next/navigation";
 
 export default function StudioJobsPage() {
-  return <JobsPage />;
+  redirect("/scenes");
 }
+

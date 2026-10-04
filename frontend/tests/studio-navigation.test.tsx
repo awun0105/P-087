@@ -27,8 +27,11 @@ describe("ngữ cảnh điều hướng", () => {
   it("Tổng quan tách khỏi Scenes; breadcrumb chi tiết quay lại thư viện", () => {
     expect(crumbsFor("/overview")).toEqual([{ label: "Tổng quan" }]);
     expect(crumbsFor("/trang-la")).toEqual([{ label: "Tổng quan", href: "/overview" }]);
-    expect(crumbsFor("/scenes")).toEqual([{ label: "Scenes" }]);
-    expect(crumbsFor("/scenes/job-a", "Kho A")).toEqual([{ label: "Scenes", href: "/scenes" }, { label: "Kho A" }]);
+    expect(crumbsFor("/scenes/job-a", "Kho A")).toEqual([
+      { label: "Scenes", href: "/scenes" },
+      { label: "Scene dựng từ video", href: "/scenes" },
+      { label: "Kho A" },
+    ]);
     expect(crumbsFor("/new")[0].href).toBe("/scenes");
     expect(crumbsFor("/imports/import-a")[0].href).toBe("/scenes");
     expect(crumbsFor("/imports/import-a", "Scene Nhập 1")).toEqual([

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Box, ChevronsUpDown, Clapperboard, LayoutDashboard, ListChecks, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, Trash2, Users, UserRound } from "lucide-react";
+import { ArrowLeft, Box, ChevronsUpDown, Clapperboard, LayoutDashboard, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, Trash2, Users, UserRound } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -49,7 +49,6 @@ const NAV = [
   ] },
   { heading: "Công việc", items: [
     { href: "/scenes", label: "Scenes", icon: Clapperboard, reviewerOnly: false },
-    { href: "/jobs", label: "Jobs", icon: ListChecks, reviewerOnly: false },
     { href: "/trash", label: "Thùng rác", icon: Trash2, reviewerOnly: false },
   ] },
   { heading: "Quản lý", items: [

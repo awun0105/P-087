@@ -60,7 +60,7 @@ export function crumbsFor(pathname: string, detailTitle?: string | null): Crumb[
   if (pathname.startsWith("/samples/")) return [scenes, { label: detailTitle ?? "Video mẫu" }];
   const inspection = /^\/scenes\/([^/]+)\/stages\/([^/]+)$/.exec(pathname);
   if (inspection) return [scenes, { label: detailTitle ?? "Scene", href: progressHref(decodeURIComponent(inspection[1])) }, { label: inspectionStage(inspection[2])?.title ?? "Giai đoạn" }];
-  if (pathname.startsWith("/scenes/")) return [scenes, { label: detailTitle ?? "Đang tải scene…" }];
+  if (pathname.startsWith("/scenes/")) return [scenes, { label: "Scene dựng từ video", href: "/scenes" }, { label: detailTitle ?? "Đang tải scene…" }];
   return [{ label: "Tổng quan", href: APP_HOME }];
 }
 
