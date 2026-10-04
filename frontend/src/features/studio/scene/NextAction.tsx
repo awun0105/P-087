@@ -13,8 +13,6 @@ import type { SceneIR } from "@/lib/contracts/api";
 import type { JobProgress } from "@/lib/contracts/studio";
 import type { Tab, StudioMode } from "@/features/studio/scene/state";
 
-import { progressSceneStatus } from "@/features/studio/sceneStatus";
-
 interface Detail { scene: SceneIR; pkg: SimulationPackageView | null; review: ReviewStateView | null }
 /** Bước tiếp theo đọc published state; không tạo lifecycle cạnh tranh với backend. */
 export function NextAction({ jobId, progress, current, mode, sceneReady, revision, busy, onOpen, onRetry }: {
@@ -43,9 +41,8 @@ export function NextAction({ jobId, progress, current, mode, sceneReady, revisio
   }, [revision, sceneReady, load]);
   usePolling(load, 10000, sceneReady);
   if (!progress) return null;
-  const stageStatus = progressSceneStatus(progress);
-  let title = stageStatus.active ? stageStatus.label : "Đang xử lý";
-  let description = "Có thể đóng trang; job tiếp tục chạy trên máy chủ.";
+  let title: string | null = null;
+  let description: string | null = null;
   let action: { label: string; tab: Tab; mode?: StudioMode } | null = null;
   if (progress.status === "FAILED") {
     title = "Xử lý chưa hoàn tất";
@@ -96,9 +93,10 @@ export function NextAction({ jobId, progress, current, mode, sceneReady, revisio
     }
   }
   const atTarget = action && current === action.tab && (!action.mode || mode === action.mode);
+  if (!title && !(sceneReady && error)) return null;
   return <section aria-label="Bước tiếp theo" className="border-b border-line bg-paper px-4 py-3 sm:px-6">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="min-w-0"><p className="text-sm font-bold">{title}</p><p className="mt-0.5 text-sm text-ink-muted">{description}</p></div>
+      {title && <div className="min-w-0"><p className="text-sm font-bold">{title}</p>{description && <p className="mt-0.5 text-sm text-ink-muted">{description}</p>}</div>}
       {progress.status === "FAILED" && progress.error?.retryable && <Button size="sm" disabled={busy} onClick={onRetry}>Thử lại</Button>}
       {action && !atTarget && <Button size="sm" onClick={() => onOpen(action!.tab, action!.mode)}>{action.label}</Button>}
     </div>

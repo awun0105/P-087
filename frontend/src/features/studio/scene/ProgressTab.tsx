@@ -30,7 +30,11 @@ export function ProgressTab({ jobId, progress, info, busy, onCancel }: {
         {progress.queue && <QueueStatus queue={progress.queue} />}
         {progress.waiting_for === "resources" && progress.resource_wait && <ResourceWaitDetail wait={progress.resource_wait} />}
       </div>}
-      {progress ? <PipelineTimeline stages={views} stageList={stagesFor(progress.stages.map((stage) => stage.stage_id))} jobId={jobId} timeNote={"Cập nhật lúc " + new Date(progress.updated_at).toLocaleTimeString("vi-VN")} /> : <p role="status" className="text-sm text-ink-muted">Đang tải tiến trình…</p>}
+      {progress ? (
+        <>
+          <PipelineTimeline stages={views} stageList={stagesFor(progress.stages.map((stage) => stage.stage_id))} jobId={jobId} timeNote={"Cập nhật lúc " + new Date(progress.updated_at).toLocaleTimeString("vi-VN") + (progress.status === "RUNNING" || progress.status === "QUEUED" ? " · Có thể đóng trang, job tiếp tục chạy trên máy chủ" : "")} />
+        </>
+      ) : <p role="status" className="text-sm text-ink-muted">Đang tải tiến trình…</p>}
       {(progress?.status === "RUNNING" || progress?.status === "QUEUED") && progress.waiting_for !== "metric_confirmation" && <div className="mt-4 flex justify-end"><Button variant="danger" size="sm" disabled={busy} onClick={onCancel}><Square aria-hidden />Huỷ xử lý</Button></div>}
     </Card>
     {progress && <AttemptHistory jobId={jobId} attempt={progress.attempt} status={progress.status} />}
