@@ -13,6 +13,8 @@ import type { SceneIR } from "@/lib/contracts/api";
 import type { JobProgress } from "@/lib/contracts/studio";
 import type { Tab, StudioMode } from "@/features/studio/scene/state";
 
+import { progressSceneStatus } from "@/features/studio/sceneStatus";
+
 interface Detail { scene: SceneIR; pkg: SimulationPackageView | null; review: ReviewStateView | null }
 /** Bước tiếp theo đọc published state; không tạo lifecycle cạnh tranh với backend. */
 export function NextAction({ jobId, progress, current, mode, sceneReady, revision, busy, onOpen, onRetry }: {
@@ -41,7 +43,8 @@ export function NextAction({ jobId, progress, current, mode, sceneReady, revisio
   }, [revision, sceneReady, load]);
   usePolling(load, 10000, sceneReady);
   if (!progress) return null;
-  let title = "Đang xử lý";
+  const stageStatus = progressSceneStatus(progress);
+  let title = stageStatus.active ? stageStatus.label : "Đang xử lý";
   let description = "Có thể đóng trang; job tiếp tục chạy trên máy chủ.";
   let action: { label: string; tab: Tab; mode?: StudioMode } | null = null;
   if (progress.status === "FAILED") {
