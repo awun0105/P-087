@@ -42,7 +42,7 @@ from src.models.contracts.manifests import (
 from src.models.contracts.preview import ReconstructionPreview
 from src.services.orchestration.artifacts import ArtifactResolver, FilesystemArtifactStore
 from src.services.orchestration.benchmark import build_benchmark, publish_benchmark
-from src.services.orchestration.jobs.admission import ResourceAdmission, job_drivers
+from src.services.orchestration.jobs.admission import ResourceAdmission, job_drivers, touch_job_reservation
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import (
     ResolvedProcessing,
@@ -157,9 +157,15 @@ def _run_tool(
                 command, stdout=output, stderr=errors, stdin=subprocess.DEVNULL, start_new_session=True
             )
             deadline = time.monotonic() + timeout
+            last_heartbeat = 0.0
             pause = Event()
             try:
                 while process.poll() is None:
+                    now_mono = time.monotonic()
+                    if now_mono - last_heartbeat >= 3.0:
+                        if attempt.registry.persistence is not None:
+                            touch_job_reservation(attempt.registry.persistence.database, attempt.job.job_id)
+                        last_heartbeat = now_mono
                     if progress is not None:
                         progress.poll()  # Tự cập nhật attempt.job trước khi so revision để phát hiện cancel.
                     current = attempt.registry.get_job(attempt.job.job_id)
@@ -330,7 +336,7 @@ def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:
                     stage_id=current.current_stage,
                     error_code="PREVIEW_RUNNER_FAILED",
                     human_message="Worker dừng trước checkpoint hợp lệ; kiểm log attempt và runtime trước khi retry",
-                    retryable=False,
+                    retryable=True,
                     details={"exception_type": type(error).__name__},
                 ),
             ),

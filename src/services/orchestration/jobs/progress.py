@@ -123,6 +123,7 @@ def job_progress(
     preview_ready: bool,
     resource_wait: ResourceWait | None = None,
     queue: QueuePosition | None = None,
+    heartbeat_at: datetime | None = None,
 ) -> JobProgress:
     """Chiếu JobManifest + journal thành tiến trình từng stage của attempt hiện tại."""
     events = _current_attempt(attempts)
@@ -196,13 +197,19 @@ def job_progress(
                 error=error,
             )
         )
+    base_updated = resources.checked_at if resources else (events[-1].recorded_at if events else job.started_at)
+    if heartbeat_at is not None and job.status == JobStatus.RUNNING:
+        updated_at = max(base_updated, heartbeat_at)
+    else:
+        updated_at = base_updated
+
     return JobProgress(
         job_id=job.job_id,
         status=job.status,
         current_stage=job.current_stage,
         attempt=events[-1].attempt if events else 1,
         started_at=job.started_at,
-        updated_at=resources.checked_at if resources else (events[-1].recorded_at if events else job.started_at),
+        updated_at=updated_at,
         completed_at=job.completed_at,
         stages=stages,
         preview_ready=preview_ready,

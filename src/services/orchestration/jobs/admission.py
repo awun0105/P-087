@@ -114,6 +114,42 @@ def resource_wait(database: RuntimeDatabase, job: JobManifest) -> ResourceWait |
     return wait
 
 
+def job_reservation(database: RuntimeDatabase, job_id: str) -> Reservation | None:
+    """Giữ chỗ còn hiệu lực (chưa stale) của worker đang phục vụ job_id này."""
+    with database.transaction() as tx:
+        rows = tx.execute("SELECT payload FROM r2s_resource_reservations").fetchall()
+    now = datetime.now(UTC)
+    for (payload,) in rows:
+        try:
+            reservation = Reservation.model_validate_json(payload)
+            if reservation.job_id == job_id and now - reservation.heartbeat_at <= STALE_AFTER:
+                return reservation
+        except Exception:
+            continue
+    return None
+
+
+def touch_job_reservation(database: RuntimeDatabase, job_id: str) -> None:
+    """Làm mới heartbeat_at cho reservation của job_id để updated_at luôn tươi mới."""
+    try:
+        with database.transaction(write=True) as tx:
+            rows = tx.execute("SELECT worker_id, payload FROM r2s_resource_reservations").fetchall()
+            now = datetime.now(UTC)
+            for worker_id, payload in rows:
+                try:
+                    reservation = Reservation.model_validate_json(payload)
+                    if reservation.job_id == job_id:
+                        updated = reservation.model_copy(update={"heartbeat_at": now})
+                        tx.execute(
+                            "UPDATE r2s_resource_reservations SET payload=? WHERE worker_id=?",
+                            (updated.model_dump_json(), worker_id),
+                        )
+                except Exception:
+                    continue
+    except Exception as error:  # noqa: BLE001 - ghi heartbeat không được làm gián đoạn worker
+        logger.debug("Không thể cập nhật heartbeat reservation cho job %s cause=%s", job_id, type(error).__name__)
+
+
 Phase = Literal["preview", "finalize"]
 #: Công cụ runner chạy trong mỗi lần nhận job; ngân sách đo được phải phủ hết các công cụ này.
 PHASE_TOOLS: dict[Phase, tuple[str, ...]] = {"preview": ("preview",), "finalize": ("finalize", "scene_extract")}

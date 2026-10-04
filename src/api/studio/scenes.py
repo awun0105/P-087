@@ -12,7 +12,7 @@ from src.api.studio import deps
 from src.models.contracts.manifests import JobManifest, JobStatus
 from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.auth import Actor, UserRecord, actor_of
-from src.services.orchestration.jobs.admission import resource_wait
+from src.services.orchestration.jobs.admission import job_reservation, resource_wait
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.lidar_overlay import lidar_overlay_file
 from src.services.orchestration.jobs.progress import JobProgress, awaiting_finalize, job_progress
@@ -181,9 +181,18 @@ def get_job_progress(job_id: str) -> JobProgress:
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     observation = resource_wait(registry.persistence.database, job) if registry.persistence is not None else None
+    reservation = job_reservation(registry.persistence.database, job_id) if registry.persistence is not None else None
+    heartbeat_at = reservation.heartbeat_at if reservation is not None else None
     # Vị trí hàng đợi chỉ tính cho job đang chờ worker (đọc journal của mọi job): job đang chạy không cần.
     position = queue_position(registry, job_id) if job.status == JobStatus.QUEUED or awaiting_finalize(job) else None
-    return job_progress(job, attempts, deps.preview_ready(registry, job_id), observation, position)
+    return job_progress(
+        job,
+        attempts,
+        deps.preview_ready(registry, job_id),
+        observation,
+        position,
+        heartbeat_at=heartbeat_at,
+    )
 
 
 @router.get("/jobs/{job_id}/stage-views", response_model=StageViewList)

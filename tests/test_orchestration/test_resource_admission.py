@@ -509,3 +509,24 @@ def test_legacy_job_without_estimate_still_marks_machine_busy(tmp_path: Path, mo
     assert gate(legacy)  # chưa có mô hình ước lượng: không bịa yêu cầu, không chờ
     reservation = _reservations(gate)[gate.worker_id]
     assert reservation.job_id == legacy.job_id and reservation.required_gb is None
+
+
+def test_job_reservation_and_touch_job_reservation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry, job, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+    assert gate(job)
+
+    # Tìm reservation qua job_id
+    res = admission.job_reservation(gate.database, job.job_id)
+    assert res is not None
+    assert res.job_id == job.job_id
+    old_heartbeat = res.heartbeat_at
+
+    # touch_job_reservation cập nhật heartbeat
+    admission.touch_job_reservation(gate.database, job.job_id)
+    res_touched = admission.job_reservation(gate.database, job.job_id)
+    assert res_touched is not None
+    assert res_touched.heartbeat_at > old_heartbeat
+
+    # Job không tồn tại trả None
+    assert admission.job_reservation(gate.database, "non-existent-job") is None
