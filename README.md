@@ -214,7 +214,7 @@ cấu hình tương ứng.
 
 ## Project Structure
 
-Bản đồ nhanh (kiểm theo checkout 2026-09-29). Placement/ownership chính thức:
+Bản đồ nhanh (kiểm theo checkout 2026-10-04). Placement/ownership chính thức:
 [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 | Đường dẫn | Nội dung | Nguồn |
@@ -275,6 +275,7 @@ Response mẫu:
 - [Product Brief](./docs/BRIEF.md)
 - [PRD](./docs/PRD.md)
 - [Dataset Playbook](./docs/DATASET_PLAYBOOK.md)
+- [Benchmark Report](./eval/results/BENCHMARK_REPORT.md)
 - [Architecture](./ARCHITECTURE.md)
 - [Agent Harness](./AGENTS.md) và [Repository Workflow](./docs/WORKFLOW.md)
 - [Integration Playbook](./docs/execution/INTEGRATION_PLAYBOOK.md)
@@ -302,9 +303,9 @@ Response mẫu:
 - [ ] Live URL / Deploy
 - [ ] Video Demo
 - [ ] Pitch Deck (`presentation/`)
-- [ ] Weekly Journal (`JOURNAL.md` đang cập nhật theo tuần)
+- [x] Weekly Journal ([`JOURNAL.md`](JOURNAL.md) — đã cập nhật)
 - [x] Worklog ([`WORKLOG.md`](WORKLOG.md) — cập nhật thường xuyên theo lịch sử commit của team)
-- [x] Evaluation Evidence (`eval/results/`)
+- [x] Evaluation Evidence ([`eval/results/BENCHMARK_REPORT.md`](eval/results/BENCHMARK_REPORT.md))
 
 ## Team
 
