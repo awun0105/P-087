@@ -56,7 +56,7 @@ export function crumbsFor(pathname: string, detailTitle?: string | null): Crumb[
   if (pathname.startsWith("/trash")) return [{ label: "Thùng rác" }];
   if (pathname.startsWith("/team")) return [{ label: "Nhóm" }];
   if (pathname === "/account") return [{ label: "Tài khoản" }];
-  if (pathname.startsWith("/imports/")) return [scenes, { label: detailTitle ?? "Scene import" }];
+  if (pathname.startsWith("/imports/")) return [scenes, { label: "Scene import", href: "/scenes" }, { label: detailTitle ?? "Đang tải scene…" }];
   if (pathname.startsWith("/samples/")) return [scenes, { label: detailTitle ?? "Video mẫu" }];
   const inspection = /^\/scenes\/([^/]+)\/stages\/([^/]+)$/.exec(pathname);
   if (inspection) return [scenes, { label: detailTitle ?? "Scene", href: progressHref(decodeURIComponent(inspection[1])) }, { label: inspectionStage(inspection[2])?.title ?? "Giai đoạn" }];

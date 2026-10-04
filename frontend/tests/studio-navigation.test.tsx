@@ -20,8 +20,8 @@ describe("ngữ cảnh điều hướng", () => {
     expect(isActive("/", "/scenes")).toBe(false);
     expect(isActive("/scenes-old", "/scenes")).toBe(false);
     expect(isActive("/overview-old", "/overview")).toBe(false);
-    expect(isActive("/jobs-old", "/jobs")).toBe(false);
-    expect(isActive("/jobs", "/jobs")).toBe(true);
+    expect(isActive("/trash-old", "/trash")).toBe(false);
+    expect(isActive("/trash", "/trash")).toBe(true);
   });
 
   it("Tổng quan tách khỏi Scenes; breadcrumb chi tiết quay lại thư viện", () => {
@@ -31,6 +31,11 @@ describe("ngữ cảnh điều hướng", () => {
     expect(crumbsFor("/scenes/job-a", "Kho A")).toEqual([{ label: "Scenes", href: "/scenes" }, { label: "Kho A" }]);
     expect(crumbsFor("/new")[0].href).toBe("/scenes");
     expect(crumbsFor("/imports/import-a")[0].href).toBe("/scenes");
+    expect(crumbsFor("/imports/import-a", "Scene Nhập 1")).toEqual([
+      { label: "Scenes", href: "/scenes" },
+      { label: "Scene import", href: "/scenes" },
+      { label: "Scene Nhập 1" },
+    ]);
   });
 
   it("nút Quay lại trỏ về cấp cha; trang cấp cao nhất không có nút", () => {
@@ -41,7 +46,7 @@ describe("ngữ cảnh điều hướng", () => {
     expect(backHref("/scenes/job-a/stages/frames")).toBe(crumbsFor("/scenes/job-a/stages/frames")[1].href);
     expect(backHref("/scenes/job-a/stages/frames")).not.toBe("/scenes");
     expect(backHref("/account")).toBe("/overview");
-    for (const top of ["/overview", "/scenes", "/jobs", "/team"]) expect(backHref(top)).toBeNull();
+    for (const top of ["/overview", "/scenes", "/trash", "/team"]) expect(backHref(top)).toBeNull();
   });
 
   it("breadcrumb lấy tên API và bỏ tên khi màn chi tiết rời đi", () => {
