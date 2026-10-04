@@ -140,7 +140,13 @@ function WebGlViewer({ contentUrl, filename, onTryEditor }: { contentUrl: string
         <Info className="mt-0.5 size-4 shrink-0 text-ochre" aria-hidden />
         <div className="min-w-0 flex-1">
           <p className="font-medium">Chế độ chỉ xem (WebGL2)</p>
-          <HelpDetails title="Vì sao chỉ xem?">Editor cần WebGPU. Bật hardware acceleration và kiểm tra GPU trong trình duyệt trước khi thử mở editor.</HelpDetails>
+          <HelpDetails title="Vì sao chỉ xem?">
+            <p>Editor yêu cầu WebGPU để hoạt động. Vui lòng kiểm tra các cài đặt sau:</p>
+            <ul className="mt-2 ml-4 list-disc space-y-1">
+              <li>Bật <b>Hardware Acceleration</b> trong cài đặt trình duyệt.</li>
+              <li>Trên Chrome/Edge, copy đoạn này dán vào thanh địa chỉ: <code className="bg-paper-sunken px-1 rounded font-mono select-all text-ember-strong">chrome://flags/#enable-unsafe-webgpu</code>, chuyển sang <b>Enabled</b> rồi khởi động lại.</li>
+            </ul>
+          </HelpDetails>
         </div>
         <Button variant="ghost" size="sm" onClick={onTryEditor}>
           Thử mở editor
