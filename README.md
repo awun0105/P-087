@@ -304,7 +304,7 @@ Response mẫu:
 - [ ] Pitch Deck (`presentation/`)
 - [ ] Weekly Journal (`JOURNAL.md` đang cập nhật theo tuần)
 - [x] Worklog ([`WORKLOG.md`](WORKLOG.md) — cập nhật thường xuyên theo lịch sử commit của team)
-- [ ] Evaluation Evidence (`eval/results/`)
+- [x] Evaluation Evidence (`eval/results/`)
 
 ## Team
 
