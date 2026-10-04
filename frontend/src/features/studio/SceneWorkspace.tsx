@@ -46,7 +46,9 @@ export function SceneWorkspace({
           </Button>
         )}
       </div>
-
+      <p className="border-b border-line bg-paper px-4 py-2 text-xs text-ink-muted sm:px-6">
+        Chỉnh Gaussian trong phiên editor · File › Export để tải PLY/SOG · thay đổi không lưu thành SceneIR revision.
+      </p>
       <div className="min-h-0 flex-1">
         <EditorFrame key={session} contentUrl={contentUrl} filename={filename} homeHref={backHref} title={`Editor 3D: ${title}`} />
       </div>
