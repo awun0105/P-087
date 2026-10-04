@@ -50,8 +50,8 @@ export function crumbsFor(pathname: string, detailTitle?: string | null): Crumb[
   if (pathname === APP_HOME) return [{ label: "Tổng quan" }];
   if (pathname === "/scenes") return [{ label: "Scenes" }];
   const start = NEW_SCENE_PAGES[pathname];
-  if (start) return [scenes, { label: "Scene mới", href: "/new" }, { label: start }];
-  if (pathname.startsWith("/new")) return [scenes, { label: "Scene mới" }];
+  if (start) return [{ label: "Tạo scene mới", href: "/new" }, { label: start }];
+  if (pathname === "/new" || pathname.startsWith("/new")) return [{ label: "Tạo scene mới" }];
   if (pathname.startsWith("/jobs")) return [{ label: "Jobs" }];
   if (pathname.startsWith("/trash")) return [{ label: "Thùng rác" }];
   if (pathname.startsWith("/team")) return [{ label: "Nhóm" }];

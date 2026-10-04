@@ -34,7 +34,11 @@ describe("ngữ cảnh điều hướng", () => {
       { label: "Scene dựng từ video", href: "/scenes" },
       { label: "Kho A" },
     ]);
-    expect(crumbsFor("/new")[0].href).toBe("/scenes");
+    expect(crumbsFor("/new")).toEqual([{ label: "Tạo scene mới" }]);
+    expect(crumbsFor("/new/import-video")).toEqual([
+      { label: "Tạo scene mới", href: "/new" },
+      { label: "Dựng từ video" },
+    ]);
     expect(crumbsFor("/imports/import-a")[0].href).toBe("/scenes");
     expect(crumbsFor("/imports/import-a", "Scene Nhập 1")).toEqual([
       { label: "Scenes", href: "/scenes" },
@@ -45,13 +49,13 @@ describe("ngữ cảnh điều hướng", () => {
 
   it("nút Quay lại trỏ về cấp cha; trang cấp cao nhất không có nút", () => {
     expect(backHref("/scenes/job-a")).toBe("/scenes");
-    expect(backHref("/new")).toBe("/scenes");
+    expect(backHref("/new/import-video")).toBe("/new");
     expect(backHref("/imports/import-a")).toBe("/scenes");
     expect(backHref("/samples/mau-1")).toBe("/scenes");
     expect(backHref("/scenes/job-a/stages/frames")).toBe(crumbsFor("/scenes/job-a/stages/frames")[1].href);
     expect(backHref("/scenes/job-a/stages/frames")).not.toBe("/scenes");
     expect(backHref("/account")).toBe("/overview");
-    for (const top of ["/overview", "/scenes", "/trash", "/team"]) expect(backHref(top)).toBeNull();
+    for (const top of ["/overview", "/scenes", "/new", "/trash", "/team"]) expect(backHref(top)).toBeNull();
   });
 
   it("breadcrumb lấy tên API và bỏ tên khi màn chi tiết rời đi", () => {

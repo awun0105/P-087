@@ -2,7 +2,7 @@
 
 import { errorMessage } from "@/lib/ui-error";
 
-import { ArrowRight, Film, LayoutGrid, List, LogIn, Plus, RefreshCw, Search } from "lucide-react";
+import { ArrowRight, Film, LayoutGrid, List, LogIn, RefreshCw, Search } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useCallback, useMemo, useState } from "react";
 
@@ -89,7 +89,6 @@ export function ScenesHome() {
             Tiếp tục scene đang làm, dựng từ video hoặc mở một file 3DGS đã có.
           </p>
         </div>
-        <Link href="/new" className={buttonVariants({ size: "lg" })}><Plus aria-hidden /> Scene mới</Link>
       </div>
 
       {!signedIn && me !== null && (
@@ -133,7 +132,7 @@ export function ScenesHome() {
             icon={<Film aria-hidden />}
             title="Chưa có scene nào"
           >
-            Chọn “Scene mới” ở đầu trang để dựng từ video hoặc mở file 3DGS. Bạn cũng có thể thử mẫu đã xử lý sẵn.
+            Chọn “Tạo scene mới” từ thanh điều hướng để dựng từ video hoặc mở file 3DGS. Bạn cũng có thể thử mẫu đã xử lý sẵn.
           </EmptyState>
         )}
         {signedIn && (
