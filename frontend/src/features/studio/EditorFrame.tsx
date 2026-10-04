@@ -1,6 +1,6 @@
 "use client";
 
-import { Info, Loader2 } from "lucide-react";
+import { Info, Loader2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -132,25 +132,40 @@ export function EditorFrame({
 function WebGlViewer({ contentUrl, filename, onTryEditor }: { contentUrl: string; filename: string; onTryEditor: () => void }) {
   const [capability, setCapability] = usePlayCanvasCapability();
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
+  const [showNotice, setShowNotice] = useState(false);
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
   const failed = capability === "failed" || capability === "unavailable";
+  
   return (
     <div className="relative size-full bg-viewport">
-      <div className="absolute top-3 left-1/2 z-10 flex w-[min(92%,44rem)] -translate-x-1/2 items-start gap-3 rounded-xl border border-ochre/40 bg-paper-raised/95 px-4 py-3 text-sm text-ink shadow-md">
-        <Info className="mt-0.5 size-4 shrink-0 text-ochre" aria-hidden />
-        <div className="min-w-0 flex-1">
-          <p className="font-medium">Chế độ chỉ xem (WebGL2)</p>
-          <HelpDetails title="Vì sao chỉ xem?">
-            <p>Editor yêu cầu WebGPU để hoạt động. Vui lòng kiểm tra các cài đặt sau:</p>
-            <ul className="mt-2 ml-4 list-disc space-y-1">
-              <li>Bật <b>Hardware Acceleration</b> trong cài đặt trình duyệt.</li>
-              <li>Trên Chrome/Edge, copy đoạn này dán vào thanh địa chỉ: <code className="bg-paper-sunken px-1 rounded font-mono select-all text-ember-strong">chrome://flags/#enable-unsafe-webgpu</code>, chuyển sang <b>Enabled</b> rồi khởi động lại.</li>
-            </ul>
-          </HelpDetails>
-        </div>
-        <Button variant="ghost" size="sm" onClick={onTryEditor}>
-          Thử mở editor
-        </Button>
+      <div className="absolute top-3 left-1/2 z-10 flex w-[min(92%,44rem)] -translate-x-1/2 flex-col items-center">
+        {showNotice ? (
+          <div className="flex w-full items-start gap-3 rounded-xl border border-ochre/40 bg-paper-raised/95 px-4 py-3 text-sm text-ink shadow-md">
+            <Info className="mt-0.5 size-4 shrink-0 text-ochre" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between">
+                <p className="font-bold">Chế độ chỉ xem (WebGL2)</p>
+                <button type="button" onClick={() => setShowNotice(false)} className="rounded p-1 text-ink-muted hover:bg-line-dark hover:text-ink focus-visible:outline-2 focus-visible:outline-ember" aria-label="Đóng thông báo">
+                  <X className="size-4" aria-hidden />
+                </button>
+              </div>
+              <HelpDetails title="Vì sao chỉ xem?">
+                <p>Editor yêu cầu WebGPU để hoạt động. Vui lòng kiểm tra các cài đặt sau:</p>
+                <ul className="mt-2 ml-4 list-disc space-y-1">
+                  <li>Bật <b>Hardware Acceleration</b> trong cài đặt trình duyệt.</li>
+                  <li>Trên Chrome/Edge, copy đoạn này dán vào thanh địa chỉ: <code className="bg-paper-sunken px-1 rounded font-mono select-all text-ember-strong">chrome://flags/#enable-unsafe-webgpu</code>, chuyển sang <b>Enabled</b> rồi khởi động lại.</li>
+                </ul>
+              </HelpDetails>
+            </div>
+            <Button variant="ghost" size="sm" onClick={onTryEditor}>
+              Mở editor
+            </Button>
+          </div>
+        ) : (
+          <button type="button" onClick={() => setShowNotice(true)} className="flex items-center gap-2 rounded-full border border-ochre/40 bg-paper-raised/95 px-3 py-1.5 text-sm font-medium text-ink shadow-sm transition-colors hover:bg-paper-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ember" aria-label="Hiện thông tin chế độ chỉ xem">
+            <Info className="size-4 text-ochre" aria-hidden /> Chế độ chỉ xem
+          </button>
+        )}
       </div>
       {failed ? (
         <div className="grid size-full place-items-center p-6 text-center text-sm text-on-dark/80" role="alert">

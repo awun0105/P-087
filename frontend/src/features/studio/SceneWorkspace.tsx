@@ -39,6 +39,9 @@ export function SceneWorkspace({
       <div className="flex flex-wrap items-center gap-3 border-b border-line bg-paper-raised px-4 py-2.5 sm:px-6">
         <h1 className="truncate text-base font-bold text-ink">{title}</h1>
         <div className="flex flex-wrap items-center gap-2">{badges}</div>
+        <div className="hidden sm:block flex-1 text-xs text-ink-muted">
+          Chỉnh Gaussian trong phiên editor · File › Export để tải PLY/SOG · Không lưu SceneIR
+        </div>
         {resettable && (
           <Button size="sm" variant="secondary" className="ml-auto" onClick={reset}>
             <RotateCcw aria-hidden />
@@ -46,9 +49,7 @@ export function SceneWorkspace({
           </Button>
         )}
       </div>
-      <p className="border-b border-line bg-paper px-4 py-2 text-xs text-ink-muted sm:px-6">
-        Chỉnh Gaussian trong phiên editor · File › Export để tải PLY/SOG · thay đổi không lưu thành SceneIR revision.
-      </p>
+
       <div className="min-h-0 flex-1">
         <EditorFrame key={session} contentUrl={contentUrl} filename={filename} homeHref={backHref} title={`Editor 3D: ${title}`} />
       </div>
