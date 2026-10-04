@@ -64,13 +64,11 @@ describe("Tổng quan và thư viện riêng", () => {
     expect(screen.queryByText(/Chưa tải đủ dữ liệu tổng hợp/)).toBeNull();
   });
 
-  it("Scenes rỗng vẫn chỉ có một nút tạo scene ở đầu trang", async () => {
+  it("Scenes rỗng hiển thị hướng dẫn tạo scene mới", async () => {
     vi.mocked(listScenes).mockResolvedValue({ ok: true, data: { scenes: [] } });
     render(<ScenesHome />);
     expect(await screen.findByText("Chưa có scene nào")).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Scene mới" })).toHaveLength(1);
-    expect(screen.getByRole("link", { name: "Scene mới" })).toHaveAttribute("href", "/new");
-    expect(document.querySelectorAll('a[href="/new"]')).toHaveLength(1);
+    expect(screen.getByText(/Chọn “Tạo scene mới” từ thanh điều hướng/)).toBeInTheDocument();
   });
 
   it("thẻ scene ghi rõ ai tạo và ai chạy lại gần nhất; không biết thì không ghi", async () => {

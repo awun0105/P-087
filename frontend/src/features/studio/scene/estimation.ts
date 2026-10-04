@@ -37,9 +37,10 @@ export interface PipelineEta {
  */
 export function estimateRemainingTime(
   stages: readonly StageView[],
+  isStale?: boolean,
 ): PipelineEta {
   const runningStage = stages.find((s) => s.state === "running");
-  if (!runningStage) {
+  if (!runningStage || isStale) {
     return {
       currentStageRemainingSeconds: null,
       totalRemainingSeconds: null,

@@ -4,7 +4,7 @@ import { Square } from "lucide-react";
 import { Button, Card, ProgressBar } from "@/components/studio/primitives";
 import { HelpDetails } from "@/components/studio/feedback";
 import { PipelineTimeline, type StageView } from "@/features/studio/PipelineTimeline";
-import { stageSeconds, useNow, type SceneInfo } from "@/features/studio/scene/state";
+import { isJobStale, stageSeconds, useNow, type SceneInfo } from "@/features/studio/scene/state";
 import { stagesFor } from "@/features/studio/stages";
 import { AttemptHistory } from "@/features/studio/scene/AttemptHistory";
 import { QueueStatus } from "@/features/studio/scene/QueueStatus";
@@ -17,6 +17,7 @@ export function ProgressTab({ jobId, progress, info, busy, onCancel }: {
   jobId: string; progress: JobProgress | null; info: SceneInfo | null; busy: boolean; onCancel: () => void;
 }) {
   const now = useNow(progress?.status === "RUNNING" || progress?.status === "QUEUED");
+  const stale = isJobStale(progress, now);
   const views: StageView[] = progress?.stages.map((stage) => ({
     stage_id: stage.stage_id, state: stage.state, error: stage.error, fraction: null,
     seconds: stage.stage_id === "ST-METRIC-CANONICALIZE" ? null : stageSeconds(stage.started_at, stage.completed_at, stage.state === "running" ? now : null),
@@ -32,7 +33,7 @@ export function ProgressTab({ jobId, progress, info, busy, onCancel }: {
       </div>}
       {progress ? (
         <>
-          <PipelineTimeline stages={views} stageList={stagesFor(progress.stages.map((stage) => stage.stage_id))} jobId={jobId} timeNote={"Cập nhật lúc " + new Date(progress.updated_at).toLocaleTimeString("vi-VN") + (progress.status === "RUNNING" || progress.status === "QUEUED" ? " · Có thể đóng trang, job tiếp tục chạy trên máy chủ" : "")} />
+          <PipelineTimeline stages={views} stageList={stagesFor(progress.stages.map((stage) => stage.stage_id))} jobId={jobId} isStale={stale} timeNote={"Cập nhật lúc " + new Date(progress.updated_at).toLocaleTimeString("vi-VN") + (stale ? " · Tiến trình mất kết nối" : progress.status === "RUNNING" || progress.status === "QUEUED" ? " · Có thể đóng trang, job tiếp tục chạy trên máy chủ" : "")} />
         </>
       ) : <p role="status" className="text-sm text-ink-muted">Đang tải tiến trình…</p>}
       {(progress?.status === "RUNNING" || progress?.status === "QUEUED") && progress.waiting_for !== "metric_confirmation" && <div className="mt-4 flex justify-end"><Button variant="danger" size="sm" disabled={busy} onClick={onCancel}><Square aria-hidden />Huỷ xử lý</Button></div>}
