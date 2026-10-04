@@ -51,28 +51,58 @@ chạy thử; xem [plan pipeline v2](./docs/plans/active/2026-09-30-pipeline-v2.
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind 4, SuperSplat 3.4.2 (vendored), PlayCanvas + supersplat-viewer | Studio chạy đủ luồng video → scene → gói mô phỏng → duyệt/phát hành (validation Isaac thật chưa có); UI P0 cũ đã xoá 02/10/2026 |
 | DevOps | Docker, Docker Compose, GitHub Actions | Scaffold backend và CI config; chưa chứng minh full product deployment |
 
-## Quick Start
+## Quick Start (Khởi chạy hệ thống End-to-End)
+
+Bạn có hai cách để khởi động toàn bộ WebApp (API, UI, Worker) tùy thuộc vào hệ điều hành và nhu cầu:
+
+### Lựa chọn 1: Chạy bằng Docker Compose (Đa nền tảng: Windows, macOS, Linux - Đề xuất cho Teammate)
+Đây là cách tiêu chuẩn để chạy hệ thống trên mọi hệ điều hành nếu bạn được nhận gói phân phối dữ liệu từ đồng đội.
+
+**Chuẩn bị:**
+1. Clone repository hoặc giải nén gói source code (`real2sim-studio-source.zip`).
+2. Cần cài đặt Docker + Docker Compose. Trên Windows/macOS dùng Docker Desktop (Windows chạy Linux containers).
+3. **Quan trọng:** Bạn cần có file dữ liệu `r2s-studio-data.zip` (Tải về tại [đây](https://drive.google.com/drive/folders/1NqZmn3iJO6UuA4YCPq295jwMNMXDdr-f?usp=drive_link) hoặc do đồng đội gửi) đặt tại thư mục gốc của project (cùng cấp với `docker-compose.yml`).
+4. Copy file cấu hình môi trường:
+   ```bash
+   cp .env.studio.example .env.studio
+   # Trên Windows PowerShell: Copy-Item .env.studio.example .env.studio
+   ```
+
+**Cấu hình (`.env.studio`):**
+- Mặc định, file đã cấu hình khởi chạy cả Worker GPU. Nếu máy của bạn (hoặc Mac) không có NVIDIA GPU, hãy mở `.env.studio`, comment dòng `# COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml` và mở comment dòng `COMPOSE_FILE=docker-compose.yml`.
+- Nếu bị lỗi DNS lúc build trên Linux, đổi `STUDIO_BUILD_NETWORK=host`. Windows/macOS giữ nguyên `default`.
+
+**Khởi chạy:**
+```bash
+docker compose --env-file .env.studio up --build -d --wait
+```
+Docker sẽ tự build, giải nén/khôi phục dữ liệu từ `r2s-studio-data.zip` (nếu chưa có sẵn database) và khởi động API + Web. Dữ liệu sau đó được lưu tại thư mục `./data`. Mở http://localhost:3010 để sử dụng.
+
+### Lựa chọn 2: Chạy Native (Chuyên sâu cho Linux + NVIDIA GPU)
+Cách này tối ưu hiệu năng để chạy worker dựng hình 3DGS trực tiếp trên máy chủ Linux như máy trạm hiện tại. Yêu cầu đã cài sẵn `python3.12`, `nodejs`, `ffmpeg`, và Docker (cho COLMAP).
 
 ```bash
-# 1. Clone repository
+# 1. Clone và chuẩn bị thư mục
 git clone https://github.com/AI20K-Build-Phase-Cohort-4/P-087.git
 cd P-087
 
-# 2. Setup Python 3.12 và dependencies từ lockfiles
+# 2. Cài đặt Python & Node.js dependencies
 make setup
 source .venv/bin/activate
+cd frontend && npm ci && cd ..
 
-# 3. make setup tạo .env nếu chưa có; chọn LLM_PROVIDER và điền API key
-# tương ứng (Settings bắt buộc key của provider đang chọn khi khởi động)
+# 3. Sinh file cấu hình môi trường Studio
+make -f Makefile.studio env
 
-# 4. Chạy backend
-make run
+# 4. Khởi động toàn bộ Stack (API + Worker + Web UI)
+make -f Makefile.studio up
 ```
 
-Swagger UI: <http://localhost:8000/docs>
+---
 
-Chạy cả Studio (API + queue worker + Next.js) với tool xử lý thật: xem runbook
-[`scripts/gpu/README.md`](scripts/gpu/README.md) (`scripts/gpu/run_stack.sh`).
+**Sau khi hệ thống khởi động (bằng bất kỳ cách nào), bạn có thể truy cập:**
+- **Web Studio (Giao diện chính):** http://localhost:3010
+- **API Swagger Docs:** http://localhost:8010/docs
 
 Kiến trúc cloud đã chốt nhưng chưa triển khai ([ADR 0003](docs/decisions/0003-cloud-architecture-roles-and-browser-budget.md),
 [plan](docs/plans/active/2026-09-29-cloud-studio.md)): Web UI trên Vercel, API trên Railway,
@@ -92,17 +122,6 @@ CI (`.github/workflows/ci.yml`) có job Python (ruff, pytest, foundation/contrac
 mirror check) và job frontend (lint, typecheck, vitest, build). Runner GitHub Actions
 do ban tổ chức quản lý đang bị chặn billing từ 26/09/2026 nên job không khởi động;
 nhóm chạy cùng các bước ở local trước mỗi lần merge và ghi kết quả trong PR.
-
-Chạy bằng Docker:
-
-```bash
-docker compose --env-file .env.studio up --build -d --wait
-```
-
-`docker-compose.yml` là stack **Web Studio** mặc định (restore data + API + web).
-Chuẩn bị ZIP và `.env.studio` theo [hướng dẫn Studio distribution](docs/guide/studio-distribution.md).
-Hướng dẫn bao gồm ZIP có checksum, restore an toàn, hai tài khoản seed của gói team,
-worker GPU và topology production theo ADR 0003.
 
 ## Environment Variables
 
@@ -285,7 +304,7 @@ Response mẫu:
 - [ ] Pitch Deck (`presentation/`)
 - [ ] Weekly Journal (`JOURNAL.md` đang cập nhật theo tuần)
 - [x] Worklog ([`WORKLOG.md`](WORKLOG.md) — cập nhật thường xuyên theo lịch sử commit của team)
-- [ ] Evaluation Evidence (`eval/results/`)
+- [x] Evaluation Evidence (`eval/results/`)
 
 ## Team
 
