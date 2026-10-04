@@ -55,23 +55,28 @@ chạy thử; xem [plan pipeline v2](./docs/plans/active/2026-09-30-pipeline-v2.
 
 Bạn có hai cách để khởi động toàn bộ WebApp (API, UI, Worker) tùy thuộc vào hệ điều hành và nhu cầu:
 
-### Lựa chọn 1: Chạy bằng Docker Compose (Đa nền tảng: Windows, macOS, Linux - Đề xuất)
-Cách này đơn giản nhất, chạy được trên mọi hệ điều hành mà không cần cài đặt dependencies cục bộ.
+### Lựa chọn 1: Chạy bằng Docker Compose (Đa nền tảng: Windows, macOS, Linux - Đề xuất cho Teammate)
+Đây là cách tiêu chuẩn để chạy hệ thống trên mọi hệ điều hành nếu bạn được nhận gói phân phối dữ liệu từ đồng đội.
 
+**Chuẩn bị:**
+1. Clone repository hoặc giải nén gói source code (`real2sim-studio-source.zip`).
+2. Cần cài đặt Docker + Docker Compose. Trên Windows/macOS dùng Docker Desktop (Windows chạy Linux containers).
+3. **Quan trọng:** Bạn cần có file dữ liệu `r2s-studio-data.zip` (do đồng đội đóng gói) đặt tại thư mục gốc của project (cùng cấp với `docker-compose.yml`).
+4. Copy file cấu hình môi trường:
+   ```bash
+   cp .env.studio.example .env.studio
+   # Trên Windows PowerShell: Copy-Item .env.studio.example .env.studio
+   ```
+
+**Cấu hình (`.env.studio`):**
+- Mặc định, file đã cấu hình khởi chạy cả Worker GPU. Nếu máy của bạn (hoặc Mac) không có NVIDIA GPU, hãy mở `.env.studio`, comment dòng `# COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml` và mở comment dòng `COMPOSE_FILE=docker-compose.yml`.
+- Nếu bị lỗi DNS lúc build trên Linux, đổi `STUDIO_BUILD_NETWORK=host`. Windows/macOS giữ nguyên `default`.
+
+**Khởi chạy:**
 ```bash
-# 1. Clone repository
-git clone https://github.com/AI20K-Build-Phase-Cohort-4/P-087.git
-cd P-087
-
-# 2. Tạo file cấu hình từ bản mẫu
-cp .env.studio.example .env.studio
-
-# (Tùy chọn) Chỉnh sửa .env.studio nếu muốn đổi port hoặc nếu bạn KHÔNG có GPU NVIDIA
-# (Tham khảo chú thích COMPOSE_FILE trong .env.studio để tắt worker GPU)
-
-# 3. Khởi động toàn bộ Stack bằng Docker Compose
 docker compose --env-file .env.studio up --build -d --wait
 ```
+Docker sẽ tự build, giải nén/khôi phục dữ liệu từ `r2s-studio-data.zip` (nếu chưa có sẵn database) và khởi động API + Web. Dữ liệu sau đó được lưu tại thư mục `./data`. Mở http://localhost:3010 để sử dụng.
 
 ### Lựa chọn 2: Chạy Native (Chuyên sâu cho Linux + NVIDIA GPU)
 Cách này tối ưu hiệu năng để chạy worker dựng hình 3DGS trực tiếp trên máy chủ Linux như máy trạm hiện tại. Yêu cầu đã cài sẵn `python3.12`, `nodejs`, `ffmpeg`, và Docker (cho COLMAP).
