@@ -50,8 +50,7 @@ export function NextAction({ jobId, progress, current, mode, sceneReady, revisio
     title = "Tiến trình bị gián đoạn";
     description = "Bấm thử lại để tiếp tục huấn luyện từ checkpoint đã lưu.";
   } else if (progress.status === "FAILED") {
-    title = "Xử lý chưa hoàn tất";
-    description = "Xem nguyên nhân và cách phục hồi tại giai đoạn lỗi trong Tiến trình.";
+    // Không hiển thị "Xử lý chưa hoàn tất. Xem nguyên nhân..." - các thông tin lỗi đã có ở stage trong Timeline
   } else if (progress.status === "CANCELLED") {
     title = "Đã huỷ xử lý";
     description = "Kết quả đã publish vẫn được giữ; mở giai đoạn hoàn tất để xem.";
@@ -98,11 +97,12 @@ export function NextAction({ jobId, progress, current, mode, sceneReady, revisio
     }
   }
   const atTarget = action && current === action.tab && (!action.mode || mode === action.mode);
-  if (!title && !(sceneReady && error)) return null;
+  const showRetry = Boolean(stale || (progress.status === "FAILED" && progress.error?.retryable));
+  if (!title && !showRetry && !(sceneReady && error)) return null;
   return <section aria-label="Bước tiếp theo" className="border-b border-line bg-paper px-4 py-3 sm:px-6">
     <div className="flex flex-wrap items-center justify-between gap-3">
       {title && <div className="min-w-0"><p className="text-sm font-bold">{title}</p>{description && <p className="mt-0.5 text-sm text-ink-muted">{description}</p>}</div>}
-      {(stale || (progress.status === "FAILED" && progress.error?.retryable)) && <Button size="sm" disabled={busy} onClick={onRetry}>Thử lại</Button>}
+      {showRetry && <Button size="sm" disabled={busy} onClick={onRetry}>Thử lại</Button>}
       {action && !atTarget && <Button size="sm" onClick={() => onOpen(action!.tab, action!.mode)}>{action.label}</Button>}
     </div>
     {sceneReady && error && <ErrorFeedback message={error} className="mt-2" retry={() => void load(new AbortController().signal)} />}

@@ -213,6 +213,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
             onCancel={() => {
               if (window.confirm("Huỷ xử lý scene này? Tiến trình trên GPU sẽ dừng.")) void act(() => cancelJob(jobId), "Đã gửi yêu cầu huỷ. Trạng thái được cập nhật từ máy chủ.");
             }}
+            onRetry={() => void navigate(() => { void act(() => retryJob(jobId), "Đã gửi yêu cầu thử lại. Theo dõi lần chạy mới ở Tiến trình."); }, undefined, true)}
           />
         )}
         {(current === "studio" || studioVisited) && preview && (
