@@ -47,8 +47,8 @@ export function NextAction({ jobId, progress, current, mode, sceneReady, revisio
   let description: string | null = null;
   let action: { label: string; tab: Tab; mode?: StudioMode } | null = null;
   if (stale) {
-    title = "Tiến trình có thể đã bị gián đoạn";
-    description = "Máy chủ hoặc worker không gửi cập nhật trong hơn 3 phút (có thể do tắt nguồn hoặc khởi động lại). Hãy kiểm tra worker hoặc thử lại.";
+    title = "Tiến trình bị gián đoạn";
+    description = "Bấm thử lại để tiếp tục huấn luyện từ checkpoint đã lưu.";
   } else if (progress.status === "FAILED") {
     title = "Xử lý chưa hoàn tất";
     description = "Xem nguyên nhân và cách phục hồi tại giai đoạn lỗi trong Tiến trình.";

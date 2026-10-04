@@ -130,7 +130,7 @@ export function PipelineTimeline({
                   </div>
                   {isCurrentStale && (
                     <p className="mt-1 text-sm text-amber-500">
-                      Không nhận được cập nhật từ worker trong hơn 3 phút. Tiến trình có thể đã bị dừng do máy chủ tắt nguồn hoặc khởi động lại.
+                      Tiến trình bị gián đoạn. Bấm thử lại để tiếp tục huấn luyện từ checkpoint đã lưu.
                     </p>
                   )}
                   {!isCurrentStale && (state === "running" || state === "failed" || state === "waiting") && (

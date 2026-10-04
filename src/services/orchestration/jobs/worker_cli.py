@@ -154,7 +154,7 @@ def recover_interrupted_jobs(registry: ProjectRegistry, settings: Settings) -> i
         error = ExecutionError(
             stage_id=job.current_stage,
             error_code="INTERRUPTED_SHUTDOWN",
-            human_message="Tiến trình bị gián đoạn do máy chủ tắt nguồn hoặc khởi động lại. Bạn có thể bấm Thử lại để tiếp tục từ checkpoint gần nhất.",
+            human_message="Tiến trình bị gián đoạn. Bấm thử lại để tiếp tục huấn luyện từ checkpoint đã lưu.",
             retryable=True,
             details={"job_id": job.job_id, "stage": job.current_stage},
         )
