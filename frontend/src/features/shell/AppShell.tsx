@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Box, ChevronsUpDown, Clapperboard, LayoutDashboard, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, Trash2, Users, UserRound } from "lucide-react";
+import { ArrowLeft, Box, ChevronsUpDown, Clapperboard, LayoutDashboard, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, PlusCircle, Trash2, Users, UserRound } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -42,12 +42,13 @@ import { useAuth } from "@/features/studio/AuthProvider";
 import { isReviewer } from "@/lib/api/auth";
 import { APP_HOME } from "@/lib/routes";
 
-/** IA Tổng quan/Scenes theo STUDIO_UX_SPEC.md §3.1; thao tác tạo scene nằm trong Scenes. */
+/** IA Tổng quan/Scenes theo STUDIO_UX_SPEC.md §3.1; mục tạo scene mới và quản lý scenes nằm trong Công việc. */
 const NAV = [
   { heading: "Ứng dụng", items: [
     { href: APP_HOME, label: "Tổng quan", icon: LayoutDashboard, reviewerOnly: false },
   ] },
   { heading: "Công việc", items: [
+    { href: "/new", label: "Tạo scene mới", icon: PlusCircle, reviewerOnly: false },
     { href: "/scenes", label: "Scenes", icon: Clapperboard, reviewerOnly: false },
     { href: "/trash", label: "Thùng rác", icon: Trash2, reviewerOnly: false },
   ] },
@@ -60,7 +61,8 @@ const NAV = [
 const BARE_ROUTES = ["/login", "/register"];
 
 export function isActive(pathname: string, href: string): boolean {
-  if (href === "/scenes") return pathname === "/scenes" || pathname === "/new" || pathname.startsWith("/new/") || ["/scenes/", "/imports/", "/samples/"].some((route) => pathname.startsWith(route));
+  if (href === "/new") return pathname === "/new" || pathname.startsWith("/new/");
+  if (href === "/scenes") return pathname === "/scenes" || ["/scenes/", "/imports/", "/samples/"].some((route) => pathname.startsWith(route));
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 

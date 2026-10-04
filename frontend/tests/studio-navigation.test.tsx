@@ -16,7 +16,9 @@ describe("ngữ cảnh điều hướng", () => {
     expect(isActive("/scenes", "/scenes")).toBe(true);
     expect(isActive("/scenes/job-a", "/scenes")).toBe(true);
     expect(isActive("/imports/import-a", "/scenes")).toBe(true);
-    expect(isActive("/new", "/scenes")).toBe(true);
+    expect(isActive("/new", "/new")).toBe(true);
+    expect(isActive("/new/import-video", "/new")).toBe(true);
+    expect(isActive("/new", "/scenes")).toBe(false);
     expect(isActive("/", "/scenes")).toBe(false);
     expect(isActive("/scenes-old", "/scenes")).toBe(false);
     expect(isActive("/overview-old", "/overview")).toBe(false);
