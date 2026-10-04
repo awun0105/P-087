@@ -11,7 +11,7 @@ from pathlib import Path
 from threading import Event, Thread
 from typing import Protocol
 
-from src.config import get_settings
+from src.config import Settings, get_settings
 from src.models.contracts.manifests import ExecutionError, JobManifest, JobStatus, StageId
 from src.services.orchestration.jobs.admission import ResourceAdmission
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
@@ -20,6 +20,7 @@ from src.services.orchestration.jobs.models import TransitionRequest
 from src.services.orchestration.jobs.progress import awaiting_finalize
 from src.services.orchestration.jobs.queue import fair_order, waiting_jobs
 from src.services.orchestration.jobs.runner import run_finalize_job, run_prepared_job, run_video_job
+from src.services.orchestration.jobs.workspace import attempt_in_use, job_attempts, job_root
 from src.services.orchestration.processing import is_presets_file, load_presets
 from src.services.orchestration.processing.capability import probe as probe_capability
 from src.services.orchestration.processing.capability import record as record_capability
@@ -98,6 +99,81 @@ def _record_dispatch_failure(registry: ProjectRegistry, job: JobManifest, cause:
         )
     except (RuntimeStateConflictError, PrivacyGateBlockedError):
         logger.info("Không ghi đè job hoặc privacy revision mới hơn khi ghi dispatch failure")
+
+
+def recover_interrupted_jobs(registry: ProjectRegistry, settings: Settings) -> int:
+    """Lúc worker khởi động: đánh dấu FAILED (retryable=True) các job RUNNING bị mồ côi trên host này.
+
+    Khi máy tắt đột ngột/hết pin, tiến trình chết và lock OS tự giải phóng (flock attempt.lock).
+    Nếu job đang ở RUNNING (và không phải đang chờ người xác nhận tỉ lệ ST-METRIC-CANONICALIZE)
+    nhưng attempt workspace trên máy này không còn ai sử dụng (attempt_in_use == False),
+    chuyển trạng thái sang FAILED với retryable=True để người dùng bấm 'Thử lại' / tiếp tục.
+    """
+    if registry.persistence is None:
+        return 0
+    database = registry.persistence.database
+    with database.transaction() as tx:
+        rows = tx.execute(
+            "SELECT e.job_id, e.payload FROM r2s_job_events e JOIN "
+            "(SELECT job_id, MAX(version) AS version FROM r2s_job_events GROUP BY job_id) latest "
+            "ON e.job_id=latest.job_id AND e.version=latest.version "
+            "WHERE json_extract(e.payload, '$.status') = 'RUNNING'"
+        ).fetchall()
+
+    recovered = 0
+    worker_root = settings.product_worker_root
+    for job_id, _ in rows:
+        try:
+            job = registry.get_job(job_id)
+        except Exception:  # noqa: BLE001
+            continue
+        if job.status != JobStatus.RUNNING:
+            continue
+        if awaiting_finalize(job):
+            # Nếu đang ở REC-06 chờ finalize, kiểm tra xem có workspace finalize đang chạy dở hay chưa
+            # Nếu chỉ đang chờ người dùng xác nhận metric (chưa có confirmation_stage) thì không coi là chết
+            pass
+        elif job.current_stage == StageId.METRIC_CANONICALIZE and not any(
+            s.stage_id == StageId.METRIC_CANONICALIZE for s in job.stage_artifacts
+        ):
+            # Job đang dừng ở REC-06 chờ người dùng xác nhận metric; không phải tiến trình đang chạy dở
+            continue
+
+        root = job_root(job.job_id, worker_root)
+        if root is None or not root.exists():
+            continue
+
+        attempts = job_attempts(root)
+        if not attempts:
+            continue
+
+        # Kiểm tra nếu bất kỳ attempt nào còn đang chạy (active process / flock)
+        if any(attempt_in_use(att) for att in attempts):
+            continue
+
+        error = ExecutionError(
+            stage_id=job.current_stage,
+            error_code="INTERRUPTED_SHUTDOWN",
+            human_message="Tiến trình bị gián đoạn do máy chủ tắt nguồn hoặc khởi động lại. Bạn có thể bấm Thử lại để tiếp tục từ checkpoint gần nhất.",
+            retryable=True,
+            details={"job_id": job.job_id, "stage": job.current_stage},
+        )
+        try:
+            registry.transition_job(
+                job.job_id,
+                TransitionRequest(target_status=JobStatus.FAILED, error=error),
+                expected_checksum=job.job_manifest_checksum,
+            )
+            recovered += 1
+            logger.info(
+                "Auto-recovered interrupted job %s (was in %s) to FAILED (retryable=True)",
+                job.job_id,
+                job.current_stage,
+            )
+        except (RuntimeStateConflictError, Exception) as exc:  # noqa: BLE001
+            logger.warning("Không thể auto-recover job %s: %s", job.job_id, exc)
+
+    return recovered
 
 
 def dispatch_next(
@@ -242,6 +318,7 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGTERM, interrupt)
     pause = Event()
     try:
+        recover_interrupted_jobs(registry, settings)
         recover_interrupted(settings)
         while True:
             # Job trong hàng đợi đi trước; rảnh mới nhận yêu cầu chạy lại tách theo vật (cùng dùng GPU).

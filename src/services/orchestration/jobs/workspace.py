@@ -170,7 +170,7 @@ def attempt_in_use(workspace: Path) -> bool:
     return inside is None or inside
 
 
-def _job_attempts(job_root: Path) -> list[Path]:
+def job_attempts(job_root: Path) -> list[Path]:
     try:
         return sorted(
             child
@@ -181,9 +181,12 @@ def _job_attempts(job_root: Path) -> list[Path]:
         return []
 
 
+_job_attempts = job_attempts
+
+
 def _cleanup_idle_attempts(job_root: Path, worker_root: Path, artifact_root: Path) -> CleanupResult:
     total = CleanupResult()
-    for workspace in _job_attempts(job_root):
+    for workspace in job_attempts(job_root):
         if attempt_in_use(workspace):
             continue
         try:
@@ -193,13 +196,16 @@ def _cleanup_idle_attempts(job_root: Path, worker_root: Path, artifact_root: Pat
     return total
 
 
-def _job_root(job_id: str, worker_root: Path) -> Path | None:
+def job_root(job_id: str, worker_root: Path) -> Path | None:
     """Thư mục của job ngay dưới worker root; None khi tên/đường dẫn không an toàn."""
     root = _resolved_root(worker_root)
-    job_root = root / job_id
-    if Path(job_id).name != job_id or job_root.parent != root or job_root.is_symlink() or not job_root.is_dir():
+    candidate = root / job_id
+    if Path(job_id).name != job_id or candidate.parent != root or candidate.is_symlink() or not candidate.is_dir():
         return None
-    return job_root
+    return candidate
+
+
+_job_root = job_root
 
 
 def cleanup_finished_job(job_id: str, *, worker_root: Path, artifact_root: Path) -> CleanupResult:
