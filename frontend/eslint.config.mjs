@@ -15,6 +15,7 @@ const eslintConfig = defineConfig([
     // SuperSplat vendor có lint/build riêng (rollup), không theo rule Next.
     "vendor/**",
     "public/editor/**",
+    "public/vendor/**",
   ]),
 ]);
 

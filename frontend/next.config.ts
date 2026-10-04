@@ -28,6 +28,8 @@ const nextConfig: NextConfig = {
       { source: "/demo/:path*", destination: "/new/try-demo", permanent: false },
       // Landing từng ở `/landing`; nay là trang đầu `/` (owner quyết 01/10/2026). Giữ link cũ còn dùng được.
       { source: "/landing", destination: "/", permanent: false },
+      // Trang Jobs đã gộp vào Scenes (chế độ Bảng) theo quyết định UX 04/10/2026.
+      { source: "/jobs", destination: "/scenes", permanent: false },
       ...["/legacy/:path*", "/projects/:path*", "/jobs/:path+", "/viewer/:path*", "/legacy", "/projects", "/viewer"].map(
         (source) => ({ source, destination: APP_HOME, permanent: false }),
       ),
