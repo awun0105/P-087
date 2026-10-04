@@ -51,28 +51,37 @@ chạy thử; xem [plan pipeline v2](./docs/plans/active/2026-09-30-pipeline-v2.
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind 4, SuperSplat 3.4.2 (vendored), PlayCanvas + supersplat-viewer | Studio chạy đủ luồng video → scene → gói mô phỏng → duyệt/phát hành (validation Isaac thật chưa có); UI P0 cũ đã xoá 02/10/2026 |
 | DevOps | Docker, Docker Compose, GitHub Actions | Scaffold backend và CI config; chưa chứng minh full product deployment |
 
-## Quick Start
+## Quick Start (Chạy toàn bộ WebApp End-to-End)
+
+Để khởi động toàn bộ hệ thống như trên máy hiện tại (bao gồm Backend API, Queue Worker xử lý 3D, và Web UI Next.js), bạn thực hiện theo các bước sau:
 
 ```bash
 # 1. Clone repository
 git clone https://github.com/AI20K-Build-Phase-Cohort-4/P-087.git
 cd P-087
 
-# 2. Setup Python 3.12 và dependencies từ lockfiles
+# 2. Setup môi trường Python (Backend)
 make setup
 source .venv/bin/activate
 
-# 3. make setup tạo .env nếu chưa có; chọn LLM_PROVIDER và điền API key
-# tương ứng (Settings bắt buộc key của provider đang chọn khi khởi động)
+# 3. Setup môi trường Node.js (Frontend UI)
+cd frontend
+npm ci
+cd ..
 
-# 4. Chạy backend
-make run
+# 4. Sinh file cấu hình môi trường Studio
+make -f Makefile.studio env
+
+# 5. Khởi động toàn bộ Stack (API + Worker + Web UI)
+make -f Makefile.studio up
 ```
 
-Swagger UI: <http://localhost:8000/docs>
+Sau khi hệ thống khởi động, bạn có thể truy cập:
+- **Web Studio (Giao diện chính):** http://localhost:3010
+- **API Swagger Docs:** http://localhost:8010/docs
+- Dừng toàn bộ hệ thống bằng cách bấm `Ctrl+C`.
 
-Chạy cả Studio (API + queue worker + Next.js) với tool xử lý thật: xem runbook
-[`scripts/gpu/README.md`](scripts/gpu/README.md) (`scripts/gpu/run_stack.sh`).
+*(Lưu ý: Môi trường này sử dụng Docker cho COLMAP và yêu cầu các công cụ dựng hình như Brush, splat-transform đã được cài sẵn. Xem chi tiết tại runbook [`scripts/gpu/README.md`](scripts/gpu/README.md))*
 
 Kiến trúc cloud đã chốt nhưng chưa triển khai ([ADR 0003](docs/decisions/0003-cloud-architecture-roles-and-browser-budget.md),
 [plan](docs/plans/active/2026-09-29-cloud-studio.md)): Web UI trên Vercel, API trên Railway,
