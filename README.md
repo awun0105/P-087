@@ -51,37 +51,53 @@ chạy thử; xem [plan pipeline v2](./docs/plans/active/2026-09-30-pipeline-v2.
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind 4, SuperSplat 3.4.2 (vendored), PlayCanvas + supersplat-viewer | Studio chạy đủ luồng video → scene → gói mô phỏng → duyệt/phát hành (validation Isaac thật chưa có); UI P0 cũ đã xoá 02/10/2026 |
 | DevOps | Docker, Docker Compose, GitHub Actions | Scaffold backend và CI config; chưa chứng minh full product deployment |
 
-## Quick Start (Chạy toàn bộ WebApp End-to-End)
+## Quick Start (Khởi chạy hệ thống End-to-End)
 
-Để khởi động toàn bộ hệ thống như trên máy hiện tại (bao gồm Backend API, Queue Worker xử lý 3D, và Web UI Next.js), bạn thực hiện theo các bước sau:
+Bạn có hai cách để khởi động toàn bộ WebApp (API, UI, Worker) tùy thuộc vào hệ điều hành và nhu cầu:
+
+### Lựa chọn 1: Chạy bằng Docker Compose (Đa nền tảng: Windows, macOS, Linux - Đề xuất)
+Cách này đơn giản nhất, chạy được trên mọi hệ điều hành mà không cần cài đặt dependencies cục bộ.
 
 ```bash
 # 1. Clone repository
 git clone https://github.com/AI20K-Build-Phase-Cohort-4/P-087.git
 cd P-087
 
-# 2. Setup môi trường Python (Backend)
+# 2. Tạo file cấu hình từ bản mẫu
+cp .env.studio.example .env.studio
+
+# (Tùy chọn) Chỉnh sửa .env.studio nếu muốn đổi port hoặc nếu bạn KHÔNG có GPU NVIDIA
+# (Tham khảo chú thích COMPOSE_FILE trong .env.studio để tắt worker GPU)
+
+# 3. Khởi động toàn bộ Stack bằng Docker Compose
+docker compose --env-file .env.studio up --build -d --wait
+```
+
+### Lựa chọn 2: Chạy Native (Chuyên sâu cho Linux + NVIDIA GPU)
+Cách này tối ưu hiệu năng để chạy worker dựng hình 3DGS trực tiếp trên máy chủ Linux như máy trạm hiện tại. Yêu cầu đã cài sẵn `python3.12`, `nodejs`, `ffmpeg`, và Docker (cho COLMAP).
+
+```bash
+# 1. Clone và chuẩn bị thư mục
+git clone https://github.com/AI20K-Build-Phase-Cohort-4/P-087.git
+cd P-087
+
+# 2. Cài đặt Python & Node.js dependencies
 make setup
 source .venv/bin/activate
+cd frontend && npm ci && cd ..
 
-# 3. Setup môi trường Node.js (Frontend UI)
-cd frontend
-npm ci
-cd ..
-
-# 4. Sinh file cấu hình môi trường Studio
+# 3. Sinh file cấu hình môi trường Studio
 make -f Makefile.studio env
 
-# 5. Khởi động toàn bộ Stack (API + Worker + Web UI)
+# 4. Khởi động toàn bộ Stack (API + Worker + Web UI)
 make -f Makefile.studio up
 ```
 
-Sau khi hệ thống khởi động, bạn có thể truy cập:
+---
+
+**Sau khi hệ thống khởi động (bằng bất kỳ cách nào), bạn có thể truy cập:**
 - **Web Studio (Giao diện chính):** http://localhost:3010
 - **API Swagger Docs:** http://localhost:8010/docs
-- Dừng toàn bộ hệ thống bằng cách bấm `Ctrl+C`.
-
-*(Lưu ý: Môi trường này sử dụng Docker cho COLMAP và yêu cầu các công cụ dựng hình như Brush, splat-transform đã được cài sẵn. Xem chi tiết tại runbook [`scripts/gpu/README.md`](scripts/gpu/README.md))*
 
 Kiến trúc cloud đã chốt nhưng chưa triển khai ([ADR 0003](docs/decisions/0003-cloud-architecture-roles-and-browser-budget.md),
 [plan](docs/plans/active/2026-09-29-cloud-studio.md)): Web UI trên Vercel, API trên Railway,
@@ -101,17 +117,6 @@ CI (`.github/workflows/ci.yml`) có job Python (ruff, pytest, foundation/contrac
 mirror check) và job frontend (lint, typecheck, vitest, build). Runner GitHub Actions
 do ban tổ chức quản lý đang bị chặn billing từ 26/09/2026 nên job không khởi động;
 nhóm chạy cùng các bước ở local trước mỗi lần merge và ghi kết quả trong PR.
-
-Chạy bằng Docker:
-
-```bash
-docker compose --env-file .env.studio up --build -d --wait
-```
-
-`docker-compose.yml` là stack **Web Studio** mặc định (restore data + API + web).
-Chuẩn bị ZIP và `.env.studio` theo [hướng dẫn Studio distribution](docs/guide/studio-distribution.md).
-Hướng dẫn bao gồm ZIP có checksum, restore an toàn, hai tài khoản seed của gói team,
-worker GPU và topology production theo ADR 0003.
 
 ## Environment Variables
 
