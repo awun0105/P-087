@@ -61,7 +61,7 @@ Bạn có hai cách để khởi động toàn bộ WebApp (API, UI, Worker) tù
 **Chuẩn bị:**
 1. Clone repository hoặc giải nén gói source code (`real2sim-studio-source.zip`).
 2. Cần cài đặt Docker + Docker Compose. Trên Windows/macOS dùng Docker Desktop (Windows chạy Linux containers).
-3. **Quan trọng:** Bạn cần có file dữ liệu `r2s-studio-data.zip` (do đồng đội đóng gói) đặt tại thư mục gốc của project (cùng cấp với `docker-compose.yml`).
+3. **Quan trọng:** Bạn cần có file dữ liệu `r2s-studio-data.zip` (Tải về tại [đây](https://drive.google.com/drive/folders/1NqZmn3iJO6UuA4YCPq295jwMNMXDdr-f?usp=drive_link) hoặc do đồng đội gửi) đặt tại thư mục gốc của project (cùng cấp với `docker-compose.yml`).
 4. Copy file cấu hình môi trường:
    ```bash
    cp .env.studio.example .env.studio
