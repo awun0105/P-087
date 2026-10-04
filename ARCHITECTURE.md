@@ -358,10 +358,10 @@ pha B, sau khi pha A chọn phương pháp):
 Các chặng 4–7 cần runtime GPU riêng (Python/CUDA, tách khỏi app như `data/scene_runtime`);
 image GPU worker chỉ được thêm khi runtime đó khoá ở pha B (xem quy tắc Dockerfile ở trên).
 
-### Trạng thái pipeline hiện hành (cập nhật 02/10/2026)
+### Trạng thái pipeline hiện hành (cập nhật 04/10/2026)
 
 Sơ đồ ở trên giữ ranh giới track. Bảng dưới ghi các bước Studio thật sự chạy và công cụ của từng bước sau các quyết
-định của owner tới 02/10/2026 ([ADR 0001](docs/decisions/0001-metric-scale-strategy-and-roadmap.md),
+định của owner tới 04/10/2026 ([ADR 0001](docs/decisions/0001-metric-scale-strategy-and-roadmap.md),
 [0004](docs/decisions/0004-input-kinds-and-routing.md), [0009](docs/decisions/0009-user-lidar-input-and-routing.md)).
 Ba luồng đầu vào: **A** chỉ video; **B** video + gói LiDAR đã đăng ký; **C** video + gói scan thô. Gói B/C luôn kèm quỹ
 đạo, calibration camera ↔ LiDAR và thời điểm frame.
@@ -547,12 +547,12 @@ driver/CUDA, Isaac/OpenUSD và tool versions phải ghi vào runtime manifest sa
 provisioning; hiện vẫn `UNVERIFIED/TBD`. Không suy ra đã có frontend/worker
 containers từ sơ đồ.
 
-**Deployment đã chốt (ADR 0003, 2026-09-29; chưa triển khai):** Web UI trên Vercel;
+**Deployment đã chốt (ADR 0003, cập nhật 04/10/2026; chưa triển khai production):** Web UI trên Vercel;
 server điều khiển (FastAPI) trên Railway, PostgreSQL trên Supabase; kho file Cloudflare R2 (S3 API,
 presigned upload/download, trình duyệt không tải file lớn qua UI/API); GPU worker
 trên Vast.ai (dự phòng RunPod, worker không phụ thuộc nhà cung cấp) tự bật khi có job và tự tắt khi rảnh. Trình duyệt chỉ nhận bản 3DGS
 nhẹ (LOD) theo khả năng thiết bị; xử lý nặng, export và ảnh/video xem trước chạy ở
-server. Hiện trạng chạy thật vẫn là một máy (`scripts/gpu/run_stack.sh`).
+server. Hiện trạng chạy thật MVP ở mức phân phối nội bộ thông qua `docker-compose.yml` (cho đa nền tảng) hoặc chạy native bằng `make -f Makefile.studio up` trên máy trạm Ubuntu có GPU.
 
 ## Security
 
