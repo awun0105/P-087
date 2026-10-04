@@ -262,7 +262,7 @@
 ### 1. Lâm Quang Anh Quân (`EX-REC` — Reconstruction)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Lâm Quang Anh Quân | Tích hợp Visual 3DGS qua PlayCanvas và supersplat-viewer vào hệ thống. Đảm bảo tính ổn định ranh giới renderer. | Đã hoàn thành | Commits ngày 27/09 | 4h |
+| Lâm Quang Anh Quân | Tích hợp Visual 3DGS qua PlayCanvas và supersplat-viewer vào hệ thống. Đảm bảo tính ổn định ranh giới renderer. | Đã hoàn thành | <details><summary>Xem 3 commits</summary><code>a79b850, 814f869, 6346547</code></details> | 4h |
 
 ### 2. Lê Mạnh Cường (`EX-PRODUCT` — Product/Orchestration)
 | Member | Task | Status | Output | Time |
@@ -288,7 +288,7 @@
 ### 1. Lâm Quang Anh Quân (`EX-REC` — Reconstruction)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Lâm Quang Anh Quân | Hoàn thiện lưu trữ bền vững (CAS) cho project/job, đồng bộ contract TS-Pydantic. Mở rộng tính năng viewer (đo đạc, load artifact). | Đã hoàn thành | Commits ngày 28/09 | 6h |
+| Lâm Quang Anh Quân | Hoàn thiện lưu trữ bền vững (CAS) cho project/job, đồng bộ contract TS-Pydantic. Mở rộng tính năng viewer (đo đạc, load artifact). | Đã hoàn thành | <details><summary>Xem 17 commits</summary><code>89e7410, cc07461, f011254, a77c8be, 708a592, e193515, 6440176, 4caa593, 53ea68f, fc9543e, 800d3f6, 06ee372, bb4f1f3, f6919fe, 1f43d15, 30aa078, 45b0a54</code></details> | 6h |
 
 ### 2. Lê Mạnh Cường (`EX-PRODUCT` — Product/Orchestration)
 | Member | Task | Status | Output | Time |
@@ -314,7 +314,7 @@
 ### 1. Lâm Quang Anh Quân (`EX-REC` — Reconstruction)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Lâm Quang Anh Quân | Phát triển toàn diện giao diện Web Studio UI mới, tích hợp Editor, luồng Upload video. Xây dựng luồng xử lý API/Worker Orchestration và khung cấu hình tài nguyên tự động. | Đã hoàn thành | Commits ngày 29/09 | 8h |
+| Lâm Quang Anh Quân | Phát triển toàn diện giao diện Web Studio UI mới, tích hợp Editor, luồng Upload video. Xây dựng luồng xử lý API/Worker Orchestration và khung cấu hình tài nguyên tự động. | Đã hoàn thành | <details><summary>Xem 201 commits</summary><code>14c21e2, 9b3d2d1, 2d35943, 24c7e73, 6b89ee8, f2a59bf, 350b1e1, d930196, 5fe2c99, 338f2bd, 6702f3c, ce2e5a5, 103b5fb, 722dcdf, 7298f46, d278d26, 95fa90d, b6c9b4f, a3d1322, c48ec4d, c3985a0, 521bb45, ad51c2d, f183133, 8306ae7, 66f3433, 99e92a3, 5856db6, 90ade37, 454c998, f9ad9b3, 5350813, 7a58880, 3af7c0d, 2dcf737, cad4b18, 1f3129c, 072b2d2, d43a277, c71a466, 4ad08e9, 4baed69, a14101b, 8f90ad4, bf584e4, b2d6131, 0c7041e, 4e9ceaa, b6302de, fbce922, 2b4f778, 575cb7d, d3d58f0, b4a5e33, 540566e, a04e6fa, 0dd92bf, 7a52c55, 7d1e16d, b3ccb3c, d54a125, 73357c4, 50f7027, 71b4d27, 83e740e, b29f18c, fbf9d50, 7bf0ea4, 0315f96, 601929a, 51291a8, d4e7409, 1933373, e624404, ca7f702, 975756f, 7468f08, 86d7767, ce92c58, efc539f, 3a48070, 10d02e5, ffeebcb, 75630bc, a41ef54, 88b0c07, acebdda, f4a4f61, c2ba8bf, be7fcc8, b5fefe2, 47a460d, c1de9e0, 31ab716, 9c1bee6, 9df7d7c, e1722b1, 902bbc0, afe4218, b3efc25, 0045a5e, 24bad50, 49f420d, 86ec278, 65ae866, 70dae21, 3a16561, f9d27e9, 6553258, 212ba07, d1543a5, 7a08465, ad1aaa0, 5fa3a51, 581f8d4, 00bf49e, e00ae60, 8b16f27, 1ad9024, 9a56ac1, 24a5585, 7a5ebaf, 7b787c1, 3f643a3, 94cbdee, a861d8b, e782b4b, 428fc5b, ebc0bd6, 06653ff, 8b5cf8e, 0530e0b, 8a87caa, 79c0428, 0faf942, c4a70b2, 6696535, 7de978b, d03a7f2, 8afc0d1, 020050a, e744840, 3b0e65a, 6b20292, 75a12f7, 197ef2a, 403fe2b, 601066e, de5ce26, eaf5dbe, a112f1e, 7b67e7c, b744c7f, 916312d, 2ec7ba0, e98f23d, 870aed5, e5654df, be74f35, 8871b3f, b6ec915, 77b38e7, 2b5a208, 201d53e, e251824, f77afff, 34e62fc, 8fbea46, 7ae8d37, 893756c, 0a6f8c6, 552790a, 8929a23, 107922c, fbdb147, 9ab074b, 7a33f27, 066448b, 9afcabf, 29bd650, 89ded01, 2d65ec5, 9facadb, 8dad63a, d9f0e38, 70bfd42, 5f0bf63, bd0543d, f8c0dca, e0a3dff, 1549ef2, 45de0c4, f26c675, 061a5cf, 09ab2ee, 0eec5b4, bbff601, bbd16d3, 4cdb801, 4220278, a1f4641</code></details> | 8h |
 
 ### 2. Lê Mạnh Cường (`EX-PRODUCT` — Product/Orchestration)
 | Member | Task | Status | Output | Time |
@@ -369,7 +369,7 @@
 ### 1. Lâm Quang Anh Quân (`EX-REC` — Reconstruction)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Lâm Quang Anh Quân | Triển khai Pipeline v2 (Object-centric 3DGS, vá nền LaMa, xuất USD lai). Nâng cấp hệ thống Cloud/GPU Worker, checkpoint/resume cho Brush. Hoàn thiện Landing Page và Dark mode Studio. | Đã hoàn thành | Commits ngày 01/10 | 12h |
+| Lâm Quang Anh Quân | Triển khai Pipeline v2 (Object-centric 3DGS, vá nền LaMa, xuất USD lai). Nâng cấp hệ thống Cloud/GPU Worker, checkpoint/resume cho Brush. Hoàn thiện Landing Page và Dark mode Studio. | Đã hoàn thành | <details><summary>Xem 36 commits</summary><code>600e47c, 33699aa, 9a11d7e, 43d38f1, 5428123, 70baabf, a0813c3, 14c294d, d89afe1, b635ff8, f785185, 872e4ba, 763349a, 5a902a1, 90b9698, 8c5b71f, 1937446, 0548d4c, 5634ea2, 4b18db9, ade5b41, 2535139, 2aa4a35, 6a184d3, 7a7c6fe, ea68053, 70446a2, 53460f0, c6abd0d, c71bb9e, 3e7a53a, f0c8698, a0f14c8, 5e9cc11, 4f42a65, 52ec61f</code></details> | 12h |
 
 ### 2. Lê Mạnh Cường (`EX-PRODUCT` — Product/Orchestration)
 | Member | Task | Status | Output | Time |
@@ -395,7 +395,7 @@
 ### 1. Lâm Quang Anh Quân (`EX-REC` — Reconstruction)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Lâm Quang Anh Quân | Refactor cấu trúc repo/API, dọn dẹp data và tài liệu UX. Tích hợp Rerun để xem trực tiếp quá trình huấn luyện 3DGS. | Đã hoàn thành | Commits ngày 02/10 | 6h |
+| Lâm Quang Anh Quân | Refactor cấu trúc repo/API, dọn dẹp data và tài liệu UX. Tích hợp Rerun để xem trực tiếp quá trình huấn luyện 3DGS. | Đã hoàn thành | <details><summary>Xem 98 commits</summary><code>f734d52, 7da38fe, b946f64, 5793d07, 9ef47e7, 23e1ff9, 6c824e3, 865b67b, 49d766b, 44405e2, 4238467, 33ef94f, c53f5d8, 3b05331, b320e46, 6a6b4dc, 0c6dfae, e843a38, d7ea71a, 29b1807, e93716e, 639faa8, ebf8c7d, d66c9b8, af041c8, 195eafe, 296f3d1, 4dea721, 140bece, 8ce6621, fd57b1c, 06340cb, 70fbcac, b820e9c, 45f278f, 52a8f8a, f17a86c, 251e45d, 41bccd3, 088dd86, b33b331, b758f68, 487054d, d9111d4, ba00cad, 5ff8861, 84006f1, 96e792f, 4621fc8, 8d7dcde, 912b373, 24328ec, b8d6691, eb1bd70, e4a1586, c15bb11, 61f9233, fd1ccbf, f11feef, d6b0690, caeed5e, 4cddd1c, 4917d12, 956c91d, 8606da7, a3f727c, f81bc90, b6436dc, b03a957, 0388019, 9303c02, f49da36, b0b1424, 08a7d2e, 6c1889a, 398ec25, 5c7f094, d09a3f5, 5ffd67a, 4de5845, f724254, 8c667e2, fe76a33, 6155db7, 530023d, 1fc79f4, d210d90, fae7bd4, d6d3ade, 84a95f2, e27fc2b, e5c5829, b65f94e, 38e474d, c3d2803, ebb7443, 2a8f424, c069a33</code></details> | 6h |
 
 ### 2. Lê Mạnh Cường (`EX-PRODUCT` — Product/Orchestration)
 | Member | Task | Status | Output | Time |
@@ -447,7 +447,7 @@
 ### 1. Lâm Quang Anh Quân (`EX-REC` — Reconstruction)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Lâm Quang Anh Quân | Nâng cấp giao diện Studio (CameraToolbar, ETA realtime, Auto-recover Job). Sửa lỗi 32-bit voxel grid. Cập nhật tài liệu ARCHITECTURE, Quick Start và Evaluation Benchmark. | Đã hoàn thành | Commits ngày 04/10 | 8h |
+| Lâm Quang Anh Quân | Nâng cấp giao diện Studio (CameraToolbar, ETA realtime, Auto-recover Job). Sửa lỗi 32-bit voxel grid. Cập nhật tài liệu ARCHITECTURE, Quick Start và Evaluation Benchmark. | Đã hoàn thành | <details><summary>Xem 47 commits</summary><code>9e251eb, b857dfc, 00f7f85, 695db96, b48aefd, 577ae32, 45d0e9e, 422d49e, 7d1ecf9, 7b8893c, 842a16c, 9ed4a03, 4e164af, 5ca0f0d, ab81373, 44fd867, 97d01c2, 87b7215, e9c82f5, b7cda51, 77c4a7c, 86b3b95, 3627d43, 6bb509d, 6791d16, b80eae4, 6742780, 0601136, 21db5d8, b2bf6aa, 94698af, 5db2f93, 93f85ca, 2ce4e91, fe97889, 9fe10e5, 1a1292a, 9c082dc, f67569a, f82ed8d, 3b80c96, e276cc2, f7be04d, 6d6c08c, 8dfac36, fa39591, 51a1ce8</code></details> | 8h |
 
 ### 2. Lê Mạnh Cường (`EX-PRODUCT` — Product/Orchestration)
 | Member | Task | Status | Output | Time |
