@@ -149,9 +149,6 @@ function WebGlViewer({ contentUrl, filename, onTryEditor }: { contentUrl: string
                   <X className="size-4" aria-hidden />
                 </button>
               </div>
-              <p className="mt-1 mb-3 text-ink-muted leading-relaxed">
-                Chỉnh Gaussian trong phiên editor · File › Export để tải PLY/SOG · thay đổi không lưu thành SceneIR revision.
-              </p>
               <HelpDetails title="Vì sao chỉ xem?">
                 <p>Editor yêu cầu WebGPU để hoạt động. Vui lòng kiểm tra các cài đặt sau:</p>
                 <ul className="mt-2 ml-4 list-disc space-y-1">

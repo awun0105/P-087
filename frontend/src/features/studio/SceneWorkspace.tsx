@@ -39,6 +39,9 @@ export function SceneWorkspace({
       <div className="flex flex-wrap items-center gap-3 border-b border-line bg-paper-raised px-4 py-2.5 sm:px-6">
         <h1 className="truncate text-base font-bold text-ink">{title}</h1>
         <div className="flex flex-wrap items-center gap-2">{badges}</div>
+        <div className="hidden sm:block flex-1 text-xs text-ink-muted">
+          Chỉnh Gaussian trong phiên editor · File › Export để tải PLY/SOG · Không lưu SceneIR
+        </div>
         {resettable && (
           <Button size="sm" variant="secondary" className="ml-auto" onClick={reset}>
             <RotateCcw aria-hidden />
