@@ -116,7 +116,7 @@ class ReconstructionWorker:
             error_code="RECONSTRUCTION_FAILED",
             stage_id=StageId.METRIC_CANONICALIZE,
             human_message="Bundle publication failed; check input identities, payloads and metric/alignment evidence",
-            retryable=False,
+            retryable=True,
             details={"exception_type": type(exc).__name__, "execution_scope": self.config.execution_scope},
         )
         stage_artifacts.append(

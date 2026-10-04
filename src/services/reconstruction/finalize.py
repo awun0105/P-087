@@ -215,7 +215,7 @@ class FinalizeWorker:
                         stage_id=StageId.RGB_GEOMETRY,
                         error_code="REC_FINALIZE_FAILED",
                         human_message=_human_message(error),
-                        retryable=False,
+                        retryable=True,
                         details={"exception_type": type(error).__name__},
                     )
                 }
@@ -276,11 +276,17 @@ class FinalizeWorker:
                 profile.crop_height_m,
             ),
         )
+        volume_m3 = (crop[1][0] - crop[0][0]) * (crop[1][1] - crop[0][1]) * (crop[1][2] - crop[0][2])
+        safe_resolution = profile.resolution_m
+        if volume_m3 > 0:
+            min_res = (volume_m3 / 1_500_000_000.0) ** (1 / 3)
+            safe_resolution = max(profile.resolution_m, float(min_res))
+
         cluster_seed = (seed[0], seed[1], profile.cluster_seed_height_m)
         config = VoxelConfig(
-            resolution_m=profile.resolution_m,
+            resolution_m=safe_resolution,
             opacity=profile.opacity,
-            cluster_resolution_m=profile.cluster_resolution_m,
+            cluster_resolution_m=max(profile.cluster_resolution_m, safe_resolution),
             cluster_opacity=profile.cluster_opacity,
             cluster_min_contribution=profile.cluster_min_contribution,
             cluster_seed_world=cluster_seed,

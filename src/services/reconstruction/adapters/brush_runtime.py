@@ -58,7 +58,7 @@ class VisualError(ValueError):
             error_code=self.code,
             stage_id=StageId.VISUAL_RECON,
             human_message=str(self),
-            retryable=False,
+            retryable=True,
             details={"action": "Inspect attempt logs and pinned runtime; retry in a fresh workspace"},
         )
         return StageArtifact(
