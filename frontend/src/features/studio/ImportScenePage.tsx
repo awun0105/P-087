@@ -44,12 +44,11 @@ export function ImportScenePage({ importId }: { importId: string }) {
     return (
       <SceneWorkspace
         title={scene.name}
-        backHref="/scenes"
         contentUrl={importContentUrl(importId)}
         filename="scene.sog"
         badges={
           <Badge tone="neutral" title="File 3DGS tải lên không có camera: không xác nhận tỉ lệ mét hay dựng collision">
-            Scene import · chỉ xem/chỉnh sửa
+            Scene import · bản xem 3DGS
           </Badge>
         }
       />
