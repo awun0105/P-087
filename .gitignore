@@ -79,3 +79,7 @@ scripts/bin/harness.exe
 
 # Studio runtime env (chứa đường dẫn máy, có thể chứa key)
 scripts/gpu/studio.env
+
+# Agent and CodeGraph tools
+.codegraph/
+.ua/
