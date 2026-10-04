@@ -25,11 +25,9 @@ def test_only_active_provider_api_key_is_required() -> None:
     )
 
     assert settings.llm_provider == "mistral"
-    assert settings.openai_api_key is None
+    assert settings.mistral_api_key == "test-key"
 
 
 def test_active_provider_api_key_is_required() -> None:
-    with pytest.raises(
-        ValidationError, match="Missing API key for LLM provider: anthropic"
-    ):
+    with pytest.raises(ValidationError, match="Missing API key for LLM provider: anthropic"):
         Settings(_env_file=None, llm_provider="anthropic")

@@ -1,0 +1,729 @@
+# Execution Plan: EX-REC track
+
+Date: 2026-09-24
+
+## Status
+
+### Patch integration theo audit — 2026-09-28
+
+Status: IN_PROGRESS. Owner giao sửa toàn bộ findings trên `feat/product-rec`
+(base `4caa593`), cho phép chỉnh docs cũ/sai theo semantics sản phẩm. Các giới hạn
+integration/branch của checkpoint 2026-09-27 bên dưới là lịch sử, không còn là
+lệnh chặn integration. Không sửa thay đổi `AGENTS.md` đang có của owner.
+
+Task capsule:
+- Outcome: sửa correctness REC-05 và kết nối REC/PRODUCT thật, không fake fixture
+  success; preview trước EX-SCENE, artifact portable cho downstream sau này.
+- Authority: yêu cầu owner 2026-09-28; PRD FR-00..06; meter/Z-up/right-handed;
+  immutable refs và exact checksum; không bỏ privacy/metric/provenance gates.
+- Dependencies: core adapters có sẵn; API còn fixture; pinned SplatTransform 3.6.6,
+  supersplat-viewer 1.35.2, PlayCanvas 2.22.4. Browser/GPU proof chưa có cho patch.
+- Inputs/outputs: source/config/decision refs -> immutable attempt artifacts,
+  worker events/result -> API -> viewer; không đọc private workspace từ UI.
+- Owned: reconstruction, shared contracts liên quan, orchestration/API, frontend,
+  tests và docs tương ứng. Không đổi SCENE/SIM algorithms, raw data hoặc vendor.
+- Proof: audit counterexamples thành regression; unit/contract/API/frontend;
+  published producer-consumer fixture; native/browser proof ghi riêng.
+- Unknown: real metric evidence/correspondence, cloud credentials và GPU acceptance;
+  không tự xác nhận hoặc thuê máy để bỏ qua những đầu vào này.
+
+Implementation plan / recovery checklist:
+- Tiếp tục sau `89e7410`: PRODUCT-03/08/09 — queue consumer cho prepared jobs,
+  exact-revision claim/failure, UI polling có cleanup và lịch sử lỗi đúng attempt.
+  Tái sử dụng durable job table, không tạo scheduler/state machine cạnh tranh.
+  Chưa nối raw upload/privacy approval; không auto-recover trainer sau hard kill.
+  Thêm regression nhưng chỉ chạy static checks theo yêu cầu owner.
+- Owner tiếp tục 2026-09-28: hoàn thiện backend→artifact→viewer trước, sau đó
+  ADAPT nhóm selection/edit/measure từ SuperSplat. Không hosted publishing/XR/
+  animation trong đợt này; không tests/handoff. Giữ plan hiện hữu duy nhất.
+- Nhóm đang triển khai: PRODUCT durable project/job/event state, explicit runtime
+  profile + fixture opt-in; tiếp theo preview không phụ thuộc SceneIR rồi tools.
+- Persistence patch: API factory dùng database; SQLite local không dependency mới,
+  PostgreSQL cần optional psycopg 3 (chưa install/qualify). Ruff check + format và
+  CRLF-aware diff check pass; regression restart/CAS/corruption/rollback **chưa chạy**.
+  Profile chỉ khóa identity, chưa tự dispatch hoặc chứng minh full input pipeline.
+- `a77c8be`: persistence commit. Nhóm tiếp theo thêm shared ReconstructionPreview,
+  producer publication + public REC verifier, PRODUCT CLI runner (prepared frames
+  đã nằm trong JobManifest, không raw upload), API allow-list và viewer trước SceneIR.
+  Static Ruff, tsc noEmit và ESLint changed files pass; regression producer→consumer
+  mới chưa chạy. API create job vẫn chưa tự queue raw input; metric confirmation UI,
+  full input preparation và worker recovery sau hard kill chưa hoàn chỉnh.
+- `f011254`: prepared worker/public consumer/preview API+UI đã commit. Rà sâu
+  process tree phát hiện Brush mở session riêng; patch kế tiếp chuyển SIGTERM
+  của REC CLI thành interrupt và hủy/reap tool group tại VisualProcess boundary.
+- Inspection group: REUSE PlayCanvas Picker, ADAPT FIFO/history + two-point UX
+  từ SuperSplat f76e676, giữ MIT notice. A/B được inverse-transform về tọa độ
+  nguồn (viewer hiện xoay Z=180°); scale input chỉ là proposal, không tự rescale
+  hay ghi CONFIRMED. Undo/redo chỉ cho điểm inspection; chưa chọn/xóa từng Gaussian,
+  crop/brush/lasso/gizmo hoặc lưu edited Gaussian revision. WebGPU ưu tiên và có
+  ép WebGL2; UI báo graphics backend thực tế. Browser/GPU picking chưa nghiệm thu.
+- `cc07461`: cancel cleanup + producer/stage preview guards đã commit. Inspection
+  patch qua `frontend/node_modules/.bin/tsc --noEmit --incremental false` và ESLint
+  changed source/new tests (exit 0). Existing viewer-panel test có một unused
+  `_options` warning từ trước; không có lint error. SSR capability dùng snapshot
+  unknown đồng nhất rồi mới probe client. Tests/browser/GPU vẫn không chạy.
+- Còn phải làm trước full integration acceptance: source upload/input + privacy
+  authority wiring → frame preparation → automatic dispatch; durable worker
+  recovery/progress; metric confirmation API; Gaussian selection/edit publication
+  + invalidation. Chưa có brush/lasso/crop/delete persisted Gaussian implementation.
+- [ ] REC-05: connectivity từ raw free air, Euclidean distance, accepted seed
+  đi vào carve, consumer replay từ config/occupancy.
+- [ ] Geometry contract: clearance cylinder khác physics capsule, canonical unit=1,
+  provenance không tự xóa lineage; publication namespace/config/manifest/binary.
+- [ ] Viewer: filename/loader, coordinates, readiness/errors/lifecycle, real mesh/
+  pointcloud loading và cache invalidation; tests không chỉ mock createViewer.
+- [ ] PRODUCT: runtime artifact store, durable dispatch/job recovery, input/preview/
+  metric boundary; không return fixture scene cho reconstruction thật.
+- [ ] UI: execution-aware timeline, input/preview flow, hide/disable unsupported
+  scene/review/release actions; DTO semantics và checksum handling.
+- [ ] Integration proof. Owner yêu cầu không chạy lại tests và không ghi handoff;
+  chỉ static checks trong lượt patch hiện tại, không claim runtime acceptance.
+
+Baseline audit: 693 reconstruction/contracts/orchestration passed, 22 skipped;
+46 API passed ngoài sandbox; 17 integration fixture passed; 86 frontend passed.
+Đây là baseline trước patch, không phải proof patch hoặc real GPU/browser E2E.
+
+### Owner khóa thứ tự completion / integration — 2026-09-27
+
+1. Tiếp tục hoàn thiện và kiểm thử toàn pipeline EX-REC trên
+   `feat/ex-rec-pipeline`; chưa chuyển sang implementation UI/backend integration.
+2. Chỉ sau khi EX-REC hoàn thành theo applicable evidence, merge
+   `feat/ex-rec-pipeline` vào `feat/ex-rec`.
+3. Xác minh toàn bộ commits/thay đổi đã được giữ trong `feat/ex-rec`, rồi mới
+   xóa nhánh `feat/ex-rec-pipeline`; không force-delete nhánh chưa merge.
+4. Tạo nhánh integration **từ `feat/ex-rec`**, không từ nhánh pipeline hiện tại;
+   tại đó mới ghép EX-PRODUCT. Tên nhánh integration chốt khi bắt đầu giai đoạn.
+5. Integration REC+PRODUCT chạy local trước; nếu local không đáp ứng thì owner
+   thuê Vast.ai và dùng SSH cho heavy worker. EX-SCENE/EX-SIM integration để sau,
+   nhưng artifacts/interfaces phải đúng shared contracts ngay từ EX-REC.
+
+Đây là trình tự tương lai có điều kiện, không phải lệnh merge/delete ngay hoặc
+cho phép push/force-push. Chưa merge/switch/delete hoặc sửa UI/backend.
+
+### Checkpoint tiếp tục 2026-09-27 — canonical visual / prepared preview / bundle metric
+
+- `04bdf63`: confirmation job identity guard; `2b2da87`: canonical visual
+  producer + native Gaussian/SOG proof; `427ab83`: REC-11 prepared frames→COLMAP
+  →Brush preview worker, immutable attempts/events/result + consumer reload.
+- `a6e40c8`: final RGB metric bridge đã commit: exact reviewed bundle candidate,
+  canonical visual/poses/geometry, source/frame inventory, independent distance
+  và caller-locked tolerance. `verify_bundle` dành cho REC-10; no default approval,
+  scope fixture không đi qua deployed product verifier. Không đổi shared schema.
+- Verified trước nhóm metric bridge: full EX-REC native CPU codec **399 passed,
+  2 GPU skipped**; preview focused regression **78 passed**, preview consumer
+  negatives cuối **16 passed**. Final bridge focused **19 passed** trước rerun
+  fixture helper refactor; rerun combined bridge/preview/REC-10/11 **64 passed**
+  (137.11s). Full EX-REC native CPU rerun còn đang chạy, chưa ghi pass.
+- Chưa DONE: strict capsule occupancy check (upstream silent seed relocation),
+  geometry occupancy publication/attempt namespace, reviewed REC-07→08 coordinate
+  bridge, final mixed/depth verifier, full input→preview→HITL→bundle dispatch,
+  authenticated PRODUCT ports và real-data/GPU acceptance.
+- UI/backend PRODUCT branch chưa merge; cached audit renderer vẫn ASCII PLY /
+  Three-R3F, chưa baseline PlayCanvas/SOG. Owner đã chốt local integration smoke
+  trước heavy Vast.ai nếu cần, nhưng chỉ bắt đầu integration sau EX-REC completion.
+  Chưa chạy training/provision cloud.
+  Quadro T2000 4GiB / NVIDIA 580.178.04 được xác nhận ngoài sandbox.
+- Resume từ task files và HANDOFF-2026-09-27-coordinate-audit.md checkpoint đầu (file đã xóa ngày 29/09, xem lịch sử git commit `6553258`),
+  không làm lại canonical visual hoặc dùng các historical DONE bên dưới làm proof.
+
+### Resume audit 2026-09-27 — HEAD 41ca8eb
+
+Current executable checkpoint after `84d93c5` + `d6883b4`:
+- Canonical camera derivative publication/reload implemented; metric diagnostic
+  report không còn false CONFIRMED. Required independent sample/tolerance và
+  full geometry payload/lineage checks có regression proof.
+- Full EX-REC with REC05 native/GPU opt-ins: **381 passed, 5 skipped**, 92.40s.
+  Command: `REC05_TEST_GPU=1 REC05_TEST_SPLAT_MODULE=data/rec04_runtime/node_modules/@playcanvas/splat-transform
+  REC05_VOXEL_CLI=data/rec04_runtime/node_modules/@playcanvas/splat-transform/bin/cli.mjs
+  REC05_VOXEL_MODULE_PATH=data/rec04_runtime/node_modules/@playcanvas/splat-transform
+  .venv/bin/pytest tests/test_reconstruction/ -q`.
+- `.venv/bin/ruff check src/services/reconstruction/ tests/test_reconstruction/`
+  and matching `ruff format --check`: pass, 91 files. Changed-code AST limits pass.
+- `.venv/bin/pytest tests/test_contracts/ tests/integration/ -q`: **94 passed,
+  2 failed** (existing SceneIR identity fixtures). `tests/ --collect-only -q`:
+  **522 collected, 1 error**, EX-SIM `ModuleNotFoundError: numpy`.
+- Do not mark whole repository green. Cached product branch lacks SceneObject
+  semantic_class/tags present here; shared-default/checksum compatibility needs
+  producer/consumer review at merge, not automatic golden replacement.
+- Next independent implementation: canonical visual derivative publication via
+  pinned SplatTransform codec, preserve raw master and publish actual payload/ref;
+  then production distance/derivative verifier and worker dispatch integration.
+  Reuse existing REC-06 scope, no new stage/shared schema or task ID.
+
+Task Capsule / implementation plan trước edit:
+- Outcome: audit handoff mới và sửa REC-06 false final confirmation; xuất bản
+  canonical camera poses thật qua artifact store, không chỉ tính trong memory.
+- Authority: PRD FR-06/AC-03; Contract §3.4/§4.1/§4.2; Integration §3.3/§4.1;
+  Track Guide REC-06; Architecture ownership; REC-06 §5/§6/§9.
+- Dependencies/current state: worktree sạch, branch `feat/ex-rec-pipeline`;
+  7 commits sau 45db57e chỉ sửa docs/evidence, không thêm pipeline code.
+  Raw pose/visual resolvers, similarity math và store có executable fixture proof.
+  Real anchor/frame correspondence, locked tolerance và canonical visual publication
+  chưa có. Không dùng estimate khoảng 0.67 từ thử nghiệm thất bại làm scale.
+- Inputs/outputs: exact confirmation + raw pose refs → immutable canonical pose
+  manifest; independent sample + explicit tolerance → scoped diagnostic report,
+  không phải final metric approval hay bundle authorization.
+- Owned: reconstruction/rgb, EX-REC tests, REC-06 và plan này. Do-not-modify:
+  shared contracts, EX-PRODUCT/SCENE/SIM code, reference repos, raw/GT data.
+- Proof: published pose roundtrip, nontrivial s/R/t, unchanged intrinsics/raw
+  bytes, checksum/lineage/semantic tamper negatives; missing independent sample,
+  tolerance, payload and incorrect transform rejection; full EX-REC regression.
+- Sequence: canonical pose producer/resolver → scoped verification hardening
+  → test/static checks → sequential commits and readiness handoff.
+- EX-PRODUCT read-only audit: cached `origin/feat/product` 012f349 có frontend và
+  backend thật, nhưng routes_product ghi mock-worker; MetricScalePanel chỉ đọc
+  SceneIR. Không suy dự án thiếu UI từ việc branch EX-REC chưa có frontend.
+  Chưa merge, chưa chạy UI branch, chưa xác minh live remote/CI.
+- Upstream SplatTransform 3.6.6 carve dùng radius trên XZ native (XY canonical)
+  và half-height trên Y nội bộ
+  (`ceil(height/(2*resolution))`), không enforce height >= 2*radius. Không áp quy
+  tắc capsule hình học của engine khác vào owner dimensions. Seed ngoài bounds
+  bị skip, seed blocked có thể được upstream dời: vẫn cần strict clearance gate.
+
+### Audit/rework 2026-09-27 — feat/ex-rec-pipeline
+
+User yêu cầu audit/sửa implementation Antigravity REC-07–11 cùng các phần REC-05/06
+liên quan, đối chiếu core repos local, giữ shared contracts và cross-track handoff.
+Bootstrap: current branch `feat/ex-rec-pipeline`, HEAD `0629a6e`, worktree clean;
+`11b7a4f` đã lưu REC-07 starter. Không có WIP cần stash/reset hoặc branch switch.
+Không tự merge/push hoặc gọi Antigravity/delegate thêm.
+
+Task Capsule:
+- Outcome: sửa behavior-level defects trước khi nghiệm thu, không dựa nhãn DONE.
+- Authority: AGENTS/Workflow; Architecture ownership; PRD FR-05/06, AC-03/04;
+  Dataset §13.4/15 và demo clarification ADR 0001; Contract §3.3.2–3.5, §4,
+  §9; Integration/Track Guide REC-05–11; từng task file.
+- Inputs/outputs: immutable product refs, declared offline raw inputs, explicit
+  metric/alignment evidence → verified canonical artifacts/bundle/worker result.
+- Owned: EX-REC source, `scripts/torwic`, EX-REC tests/tasks và plan này.
+  Không sửa shared schemas, EX-SCENE/SIM/PRODUCT internals, raw data hoặc reference
+  repo source. Consumer contract tests được chạy read-only ở boundary.
+- Baseline observed: Ruff check/format pass (173 files); EX-REC pytest **280
+  passed, 11 skipped** (57.83s). Đây không chứng minh correctness của happy-path
+  assumptions; cần targeted negative/runtime tests.
+- Source audit: Re3Sim `681da6f...` frame_tools dùng matrix composition/inverse
+  và tách similarity scale khỏi rigid rotation; chỉ REFERENCE concept, không kéo
+  Torch/Isaac hoặc vendored Gaussian license vào product. TorWICDataset
+  `5e1839f...` pose wrapper là old split sec/nsec ROS layout, **không** dùng thay
+  parser TUM SLAM hiện tại. Open3D local HEAD `b6c5e19` là v0.20.0; audited
+  runtime vẫn 0.19.0, inspect đúng source bằng `git show v0.19.0:...`, không đổi
+  reference checkout. Không assume latest checkout bằng runtime version.
+- Verified source defects: REC-08 hardcoded binary bounds và ASCII sample 1000
+  points; unchecked REC-07 manifest/UNVERIFIED frame được gắn canonical defaults;
+  REC-09 default CONFIRMED/true attestation, không resolve inputs/evidence,
+  sensor extrinsic bị relabel thành world; REC-05 chỉ scale, bỏ R/t và silent
+  unsupported-PLY copy; REC-06 kiểm provenance thay payload và independent sample
+  optional; REC-10 default confirmed metric, không resolve dependencies;
+  REC-11 CLI thiếu module main guard, empty request exit 0, không xác minh
+  bundle payload/lineage trước SUCCEEDED. Historical DONE reports phải được
+  đọc cùng audit này, không phải current acceptance.
+- Proof/order: targeted red regressions → alignment/frame guard → LiDAR native
+  payload/provenance → Gaussian full transform/seed → metric/bundle/worker
+  publication and consumer checks → broader tests/real available smoke. Mỗi
+  coherent fix commit riêng. Thiếu real confirmation/seed là pending acceptance,
+  không fake approval và không block toàn track implementation.
+
+Owner clarification 2026-09-26 supersedes ưu tiên shortcut anchor: phải chuẩn bị
+cả ba dataset demo modes (RGB+LiDAR fusion; RGB LiDAR-assisted scale; RGB chọn
+hai điểm có LiDAR gợi ý khoảng cách). "Ẩn" chỉ ở thao tác/layer, không ẩn provenance
+hoặc claim RGB-only independent/AI auto-scale. Bước hiện tại là measurement/demo
+preview adapter + tests; tiếp theo REC-07/08 preparation và REC-09 correspondence.
+Chưa có real prepared LiDAR/correspondence hoặc Web demo cho ba mode.
+Clarification tiếp theo: ba **system paths** vẫn là RGB + known-distance anchor,
+RGB + LiDAR và RGB + future auto-estimator. LiDAR assistance chỉ nằm trong
+dataset demo adapter, không inject fallback vào normal RGB runtime. Estimator
+chưa implement không được báo đã chạy qua demo proxy.
+
+Active — REC-01/02/02A/03/04 task gates complete. REC-04 real Brush GPU smoke,
+SOG roundtrip and render sample verified 2026-09-26. REC-05 IN_PROGRESS:
+SplatTransform adapter/unit tests and synthetic GPU smoke implemented; real
+metric-aware spike alone awaits REC-06 confirmation, locked capsule and walkable
+seed. REC-06 IN_PROGRESS: similarity/pose math, preview/authority gate, immutable
+internal confirmation records and fixture handoff implemented; real Aisle_CW
+confirmation and Gaussian metric derivative remain pending. Current evidence is
+recorded in REC-05/REC-06 task files. ADR 0001 was merged during implementation;
+owner clarified camera seed as a candidate requiring bounds/capsule validation.
+Typed proposal exists, actual clearance validation/binding remains pending.
+Post-merge full suite is not green: missing NumPy in EX-SIM tests and two SceneIR
+fixture checksum failures after shared-model defaults changed; see REC-06 evidence.
+
+## Outcome
+
+Checkpoint 2026-09-27 (mới nhất) — **đã giải được camera chain**, up-axis chốt,
+còn 1 câu hỏi handedness cho owner:
+
+**Phát hiện có tác động thật:** `image_left/*.png` **đã là ảnh undistorted**. Hệ số
+`Camera1.D` trong `calibrations.txt` **không được áp** lên các ảnh này. Chuỗi đúng
+là `T_cam_from_os = inverse(T_os_from_cam)` + OpenCV optical + **không distortion**.
+Bằng chứng: residual chân trời trên 11 frame rải khắp traversal giảm từ **57,8 px
+→ 5,9 px** (10×), nghiêng suy ra `+2,93°` khớp `3,27°` của extrinsic khai báo. Bất
+kỳ code chiếu/align LiDAR↔RGB nào áp `D` sẽ lệch hàng chục pixel; cần regression
+test khoá hành vi này.
+
+**Nguồn chính thức đã tra** (dataset repo local `private/TorWICDataset` @ `5e1839f`):
+- Figure `slam_sensor_frames.png`: Azure Kinect **xanh=phải, lục=xuống, đỏ=trước**
+  ⇒ optical/OpenCV; Ouster **xanh=lên** ⇒ Z-up. Copy vào
+  `data/rec07_axis_evidence_20260927/dataset_official_sensor_frames.png`.
+- README:235 — pose đến từ *"aligning the 3D scans against the ground-truth 3D map"*,
+  đây là nguồn gốc giả thuyết `os_sensor` mà DATASET_PLAYBOOK ghi.
+- README:219 — robot bắt đầu tại gốc map; đo được sàn ở `z ≈ -0,24 m` nên **z=0
+  của map không phải sàn**. Căn cứ để owner chốt quy tắc gốc.
+- `utils/calibration.py` là cho scenario **khác** (base_link + RealSense D435i +
+  Hokoyo, 640×360, `D=[0,0,0,0,0]`) — **không** phải bộ calibration của ta.
+
+**Up-axis chốt:** up = **+Z**, đơn vị = **mét**, bằng **ba nguồn độc lập**: lát cắn
+sàn của merged cloud (`-0,218 m`, 27,9%), của raw scan `000110` (`-0,468 m` sensor
+frame, 44,9%), và của `raw/global/groundtruth_map.ply` (1.065.059 điểm, `z ≈ -0,25 m`).
+Không cần xoay/đảo trục.
+
+**Khoảng cách tới GT map** (40.000 điểm scan `000110`, độc lập): chuỗi khai báo
+khớp nhất — median **0,0592 m**, **76,6%** điểm trong 10 cm; kém hơn mirror-z /
+180°-quanh-y tới **14×**. Test này có phân biệt được, xác nhận chuỗi đọc PCD +
+áp quaternion + frame là tự nhất quán.
+
+**Còn mở, cần owner:** handedness thuần/ngược tay của native frame. Đây là **quy ước
+ghi nhãn, không chứng minh được từ dữ liệu nội tại** (phản chiếu toàn cục pose+map
+là vô hình với mọi phép kiểm). Ouster datasheet chưa tra được (URL 404, không đoán
+URL); README/PDF không nêu; figure phối cảnh không phân định được. REC-07 giữ
+`VALIDATING`, REC-09 giữ `IN_PROGRESS`, `coordinate_status` vẫn `UNVERIFIED`.
+
+**Handedness — CHỐT (owner xác nhận 2026-09-27):** Ouster OS1-128 dùng
+`x` forward, `y` left, `z` up ⇒ **thuận tay**, trùng canonical convention của
+project. Không cần đảo trục nào khi chuyển native frame → canonical `world`; chỉ
+còn phép tịnh tiến để đặt gốc. **Mức độ tin cậy: owner attestation, KHÔNG phải
+agent verify** — agent thử nhiều URL datasheet đều 404 và không đoán URL; khi
+khóa `coordinate_status` phải ghi nguồn là owner decision, không ghi VERIFIED từ
+tài liệu.
+
+> **Cập nhật 2026-09-29 — các câu hỏi dưới đây ĐÃ CÓ QUYẾT ĐỊNH, đoạn này là lịch sử:**
+> gốc `world` = **dịch sàn về z=0** qua `translation_m` của REC-06, chỉ cho demo Aisle_CW,
+> không nhúng số vào `src/` (`REC-06.md`, commit `01305c9`); capsule robot = OTTO 100D,
+> **bán kính ngoại tiếp 0,4610 m** (`REC-05.md`, `01305c9`); `tolerance_m` tính từ baseline
+> thật của cặp A/B (`REC-06.md`); chuỗi camera: **`image_left` đã undistorted sẵn**
+> (commit `4078686`); handedness thuận tay (owner, `5713976`). Còn lại là việc code:
+> mở 3 chỗ `coordinate_status="UNVERIFIED"` với nguồn = owner decision, và thao tác chọn
+> A/B mỗi lần chạy (không phải quyết định chờ owner).
+
+**Còn lại cho coordinate bridge — chỉ còn quy tắc gốc `world`:** sàn đo được ở
+`z ≈ -0,24 m` (ba nguồn độc lập khớp nhau), z=0 của map frame không phải sàn
+(README:219 robot bắt đầu tại gốc map). Owner cần chốt mốc đặt gốc, ví dụ
+đặt sàn = z 0, hoặc giữ nguyên và khai báo rõ. Sau đó mở được promote
+`UNVERIFIED → VERIFIED` ở `build_registered_lidar.py:31`, `lidar/models.py:31`,
+`lidar/ingest.py:136`.
+
+Checkpoint 2026-09-27 — up-axis/handedness cho canonical coordinate:
+
+**Đã chốt:** up-axis = **Z**, đơn vị = **mét**. Bằng hai phép đo độc lập: lát cắn
+z đậm nhất của merged cloud (`-0,218 m`, 27,9% cloud) và của raw scan `000110.pcd`
+(`-0,468 m` trong sensor frame, 44,9% scan); cộng cao độ cảm biến `+0,23 m` cho
+sàn world `≈ -0,238 m` — hai frame khác nhau khớp trong 2 cm. Không cần xoay/đảo
+trục. Evidence: `data/rec07_axis_evidence_20260927/up_axis_proof.png`
+(`05c77d10…`).
+
+**Phát hiện mới, thuộc REC-09:** đường chiếu LiDAR→ảnh **không verify được**.
+Chiếu raw scan `000110` vào ảnh `000110` bằng `inverse(T_os_from_cam)` + distortion:
+mặt sàn phải hội tụ về chân trời ngang, nhưng fit cho `v_h = 470,6 px` (nghiêng
+ngầm −9,48°) trong khi extrinsic khai báo −3,27°, residual **60,7 px**; không-inverse
+tệ hơn (residual 164,2 px). Ảnh đúng 1280×720 nên không phải lỗi resize. **Không
+kết luận calibration sai** — còn sống các giả thuyết: ảnh đã undistorted sẵn,
+origin offset Ouster OS1-128, hoặc camera frame không phải OpenCV z-forward. Cần
+owner/source authority mới loại được. Evidence:
+`data/rec07_axis_evidence_20260927/scan110_hypotheses.png` (`bb0085a0…`).
+
+**Hệ quả:** handedness **chưa chốt** được, vì cách kiểm duy nhất định lập lại phụ
+thuộc camera chain chưa verify. REC-07 giữ `VALIDATING`, REC-09 giữ
+`IN_PROGRESS`; `coordinate_status` vẫn `UNVERIFIED`. Còn lại cho bridge: quy tắc
+gốc `world` (sàn ở `z ≈ -0,238 m`, không phải 0) và các câu hỏi camera ở trên.
+
+Checkpoint 2026-09-27 — REC-07 mở rộng lát cắt 5 → 20 scan:
+
+Owner cho phép chạy prefusion nhiều frame hơn để có dữ liệu làm canonical
+coordinate bridge. **Không sửa code** — chạy `rec07_smoke.py` với env
+`REC07_SMOKE_*` sẵn có, nên regression 5-frame cũ nguyên vẹn. Chọn frames
+100–119 vì REC-03/04 đã dựng COLMAP/Brush trên 100–200, cùng dải để REC-09
+same-scene dùng được; số lượng 20 theo khuyến nghị DATASET_PLAYBOOK.
+
+VERIFIED: **133.039 điểm** (gấp 2,42× bản 5-frame), PLY SHA-256
+`4d7cce29…6ded4c`, replay byte-identical cả PLY lẫn manifest. Đo thực nghiệm
+trên cloud mới: **trục Z là up** (mặt sàn 38.434 điểm = 28,9% tại z = −0,218 m,
+bề dày < 6 cm; dominant slab Z mỏng 1,75 cm so với X 6,7 cm / Y 15,1 cm) và
+**đơn vị mét**; cross-check 1092 pose nghiêng max 2,17°, cao độ cảm biến
+0,171–0,248 m. Chi tiết, command và checksum đầy đủ trong `tasks/REC-07.md`.
+
+Còn thiếu cho bridge: **handedness chưa kiểm** (đề xuất chiếu điểm 3D qua
+extrinsic/intrinsics xuống ảnh frame 500) và **quy tắc gốc `world`** chưa chốt
+(sàn đọc `z ≈ −0,22 m` ≠ 0). Code vẫn chặn ở `build_registered_lidar.py:31`,
+`lidar/models.py:31` (`Literal["UNVERIFIED"]`) và `lidar/ingest.py:136` — chưa
+đụng, REC-07 giữ `VALIDATING`, không tự nâng status. Validation: EX-REC **338
+passed / 20 skipped** (130,60s), Ruff check/format **186 files pass**, worktree
+sạch ngoài docs.
+
+Audit checkpoint 2026-09-27: REC-09 fail-closed authority/byte validation và
+sensor-frame correction implemented; 4 red regressions reproduced trước sửa.
+Focused 22 passed; EX-REC 293 passed/11 skipped; Ruff 177 files pass.
+Synthetic verifier không thay real alignment acceptance. Next: REC-08 full-payload
+validation, REC-07 provenance bridge, rồi metric/voxel/bundle/worker gates.
+
+REC-08 audit checkpoint: six red payload regressions fixed, strict full-cloud
+inspection + explicit declarations + immutable metadata refs; EX-REC now
+314 passed/11 skipped, Ruff 181 files pass. Open3D 0.19 real 54,957-point bounds
+match; REC-07 exact replay same PLY checksum under `rec07_audit_20260927`.
+Native preparation stays UNVERIFIED/GT-assisted. Auto-promotion disabled;
+reviewed coordinate conversion remains pending, not whole-track blocker.
+
+REC-10/11 checkpoint: fail-closed bundle readiness ports, exact dependency bytes,
+explicit metric/canonical selection, immutable proof refs/alignment reload;
+CLI now executable/request-required/config-bound/redacted/create-only. Scope
+`verified_bundle_publication` only; CLI production metric verifier not yet wired.
+Focused 31 pass; EX-REC 338 pass/11 skipped; consumer/store 10 pass; Ruff185 pass.
+Broader contracts/integration94 pass/2 existing SceneIR fixture failures; full
+suite cannot collect SIM without NumPy. No other-track files changed.
+Next executable step: replace REC-05 scalar-only PLY copier with full similarity
+transform via pinned SplatTransform; then REC-06 actual canonical derivatives,
+independent-distance proof and real verifier wiring. Capsule/seed validation and
+native LiDAR coordinate review remain explicit pending work, not fake acceptance.
+
+Latest checkpoint 2026-09-27: REC-05 full similarity replacement completed and
+wired into voxel working derivative. Pin splat3.6.6 afbc281 MIT; reuse public
+ChunkSource/Transform/writer (xyz/quaternion/log-scale/SH), no homemade PLY patch.
+Native CPU9 pass; transformed-room GPU1 pass on UHD630, 2703→2702splats,
+48vertices/88triangles with zero topology defects. Evidence snapshot ignored at
+`data/rec05_similarity_audit_20260927/`. Full EX-REC with REC05 native/GPU flags:
+353 passed/5 skipped (82.71s); Ruff186 + Node syntax/AST/diff pass.
+Product default rejects synthetic metric and needs injected seed/capsule verifier;
+fixture publication explicitly labelled. Remaining immediate work: REC-06 actual
+canonical pose/visual publication + independent-distance proof and production
+REC-10/11 verifier wiring. Native LiDAR coordinate evidence, real capsule/seed,
+full InputManifest/JobManifest dispatch and real consumer/Isaac proof still open.
+
+Owner mở rộng execution request 2026-09-26: implement toàn bộ EX-REC tasks còn
+lại, agent tự chọn dependency order và tận dụng core reference repos tương ứng.
+Commit tuần tự từng coherent implementation đã kiểm tra; không push/merge.
+Thực hiện source/license/version audit trước reuse; implementation complete
+khác task DONE khi real/handoff acceptance còn thiếu. Queue hiện tại: chốt demo
+adapter → REC-07/08 → REC-09/06 metric preparation → REC-05 real path → REC-10/11.
+
+Complete the locked EX-REC tasks one at a time, with independent source review,
+task-level proof, and a real `InputManifest` → `ReconstructionBundle` → EX-SCENE
+handoff that requires no manual artifact conversion.
+
+## Context and authority
+
+- Current checkout: `feat/ex-rec`; `git status --short` empty at onboarding.
+- `AGENTS.md` and `docs/WORKFLOW.md` are the current harness entrypoints.
+  `docs/harness/FEATURE_INTAKE.md`, `docs/harness/CONTEXT_RULES.md`, and a
+  harness query matrix do not exist in this checkout; user chose the current
+  harness on 2026-09-24. Do not invent those missing sources.
+- Scope/acceptance: `docs/PRD.md`; dataset/split/leakage:
+  `docs/DATASET_PLAYBOOK.md`; shared artifacts/runtime:
+  `docs/execution/TEAM_EXECUTION_CONTRACT.md`; placement: `ARCHITECTURE.md`;
+  tools/strategy: `docs/execution/INTEGRATION_PLAYBOOK.md`; task IDs/scope:
+  `docs/execution/TRACK_IMPLEMENTATION_GUIDE.md`; milestone/owner:
+  `docs/execution/TEAM_EXECUTION_PLAN.md`; track/task execution records:
+  `docs/execution/tracks/ex_rec/TRACK.md` and its `tasks/REC-*.md`.
+- Existing `2026-09-23-integration-foundation.md` is a separate Foundation
+  record. Synthetic fixture proof there is not real EX-REC acceptance.
+- Baseline: contracts and artifact-store fixtures exist; `src/services/reconstruction/`
+  and `tests/test_reconstruction/` have no task implementation, while
+  `scripts/torwic/` contains entrypoint placeholders. All 12 REC task files
+  currently say `TODO`.
+
+## Input, output, and invariants
+
+- RGB input: moving-camera video or validated frame set via `InputManifest`,
+  source-rights attestation, and `PrivacyValidationReport`.
+- LiDAR input: registered/fused PLY/PCD. Raw TorWIC scans are limited to offline
+  prefusion; product runtime must not read evaluation-only GT.
+- Outputs: normalized frames, poses, real Brush visual, voxel RGB geometry (OpenMVS fallback),
+  metric/canonical records, optional LiDAR/alignment, and a versioned published
+  `ReconstructionBundle` that EX-SCENE resolves directly.
+- Canonical: meter, Z-up, right-handed, `world`, `parent_from_local`, quaternion
+  `xyzw`, radian. Convert external conventions at adapter boundaries.
+- Product artifacts use logical `artifact://jobs/...` URIs, typed data classes,
+  atomic immutable publication, SHA-256 byte refs, and canonical-content
+  checksums for logical manifests/bundles. GT-assisted LiDAR provenance must
+  survive into mixed composition; alignment is a separate confirmed record.
+- Do not copy whole research repositories, mix their dependency graphs, change
+  shared contracts for convenience, import another track's internals, or claim
+  fixture/GPU/real acceptance from a different proof layer.
+
+## Dependency and acceptance map
+
+| Task | Dependency | Minimum task gate from task file |
+| --- | --- | --- |
+| REC-01 | locked `Aisle_CW` source | Reproducible immutable raw → normalized data, split/calibration/timestamps/checksums and real small preparation smoke. |
+| REC-02 | REC-01 for TorWIC; uploads may enter directly | Reject bad/static RGB, publish checksum-bound privacy report, enforce public/demo gate. |
+| REC-02A | REC-02 | Deterministic FFmpeg frame artifact with IDs/timestamps/SHA-256; REC-03 consumes it without manual conversion. |
+| REC-03 | REC-02A | Real COLMAP small-scene smoke, deterministic model selection, normalized pose/intrinsics with refs and provenance. |
+| REC-04 | REC-03 + Brush runtime | Real Brush GPU smoke and resolvable checksummed 3DGS visual artifact; never use it as collider. |
+| REC-05 | REC-04 + REC-06 anchor phase; REC-03 fallback | Metric voxel/capsule geometry and Aisle_CW resolution spike; OpenMVS fallback qualification. |
+| REC-06 | REC-03/04 + locked anchor for confirmation; REC-05 only for final verification | Confirm metric transform before real voxel/capsule generation; then propagate/verify all artifacts without double scaling. |
+| REC-07 | REC-01 + declared poses | Offline reproducible registered LiDAR PLY; preserve GT-assistance and checksums if `traj_gt` is used. |
+| REC-08 | registered LiDAR or REC-07 | Validate unit/frame/nonempty cloud; immutable resolvable LiDAR artifact and typed dependency provenance. |
+| REC-09 | REC-03/04 + REC-08 cho preparation; REC-06/05 cho final geometry-bound record | Verify same-scene/checksum binding; separate confirmed alignment; reject unconfirmed/different-scene inputs. |
+| REC-10 | REC-02A/03/04/05/06; REC-08/09 when mixed | Publish schema-valid bundle for RGB, optional depth, and mixed configurations; EX-SCENE consumes refs directly. |
+| REC-11 | REC-10 + job lifecycle | Stable worker command, structured failures/retry lineage, no false SUCCEEDED or manual path patch. |
+
+Dataset demo order: reuse REC-03/04 → REC-07/08 LiDAR preparation → REC-09
+same-scene correspondence/metric preparation → REC-06 confirmation → REC-05
+metric geometry → REC-09 final geometry-bound alignment when mixed → REC-06
+final verification → REC-10/11. REC-07/08 are independent of REC-06 completion.
+Real RGB-only uploads keep the known-distance path without requiring LiDAR.
+These are phases within existing tasks, not new stage IDs or shared schemas.
+
+## External source audit queue
+
+Audit only the source needed immediately before each task. Codex records
+upstream URL, exact local commit/tag, license, runtime requirements, exact
+source file/function I/O, REUSE/ADAPT/REFERENCE/REJECT decision, adapter
+boundary, and risks before implementation. Owner canceled Antigravity.
+
+1. REC-01: TorWIC source structure and local `TorWICDataset` utilities;
+   FFmpeg/Open3D only for primitives actually needed by preparation. No full
+   research-repo audit for unrelated reconstruction stages.
+2. REC-02/02A: installed FFmpeg/ffprobe command behavior and the relevant
+   `video_to_gsplat.sh` reference, then project-owned probe/extraction adapters.
+3. REC-03: pinned `colmap/colmap` CLI, model format, and the relevant
+   `colmap_undistorted_sfm_export.sh` reference. Prefer external process reuse.
+4. REC-04: pinned Brush training/export entrypoint, COLMAP input support,
+   visual payload/format, license, GPU limits. Prefer external process reuse.
+5. REC-05: splat-transform 3.6.6 GPU voxelization, capsule carving, collision GLB
+   and coordinate boundary; pinned OpenMVS import/densify/mesh fallback.
+   Prefer external process reuse.
+6. REC-07/08/09: pinned Open3D PCD/PLY I/O, transforms, filtering and
+   registration primitives only; project owns provenance/validation/alignment.
+7. REC-06/10/11: project contracts, artifact store, and worker conventions;
+   no external source by default unless the task proves a need.
+
+System references such as Re3Sim or `video-3d-reconstruction-gsplat` do not
+become runtime dependencies by default. SAM2/object extraction, OpenUSD and
+Isaac internals belong to other tracks and are not EX-REC source-audit targets.
+
+## Delegation and validation loop
+
+For each task: audit the generated task against PRD, Integration Playbook,
+Track Implementation Guide, Team Execution Contract, Team Execution Plan and
+the applicable dataset/track authority; amend task-local detail when those
+sources expose a gap, without changing higher-level contracts → bootstrap its
+Task Capsule and status/Implementation Plan → Codex directly audits relevant
+external source and chooses adapter strategy → implement only task-owned paths
+→ inspect diff/code, run focused static/unit/contract/integration and real
+small smoke as applicable → correct failures before advancing → update task
+Result/Evidence and status → create a task-scoped commit after checking diff,
+ignored secrets and Git state. Owner stopped Antigravity delegation on
+2026-09-24; do not invoke it again for this track.
+
+## Open decisions and risks
+
+- Owner selected all 1,092 `Aisle_CW` frames as the REC-01 source sequence on
+  2026-09-24. Owner then selected deterministic temporal block split of about
+  10% after timestamp ordering and fixed-rule invalid frame exclusion, with
+  blocks across the beginning/middle/end and the frozen split at
+  `derived/Aisle_CW/benchmark_split.json`. Proposed exact valid-sequence
+  intervals are `118-153`, `528-564`, `937-972` (109 frames), selected by
+  12.5%/50%/87.5% centers. No metric has been inspected. Full source integrity
+  check and split publication remain pending. The split artifact must remain
+  evaluation-only by data class even in `derived/`.
+  `docs/PRD.md` still says Primary Demo range TBD; sync this owner decision
+  through the appropriate document-owner review, not a task-local PRD rewrite.
+- RGB metric anchor and independent test distances are not supplied. REC-06
+  cannot claim confirmed scale or complete its DoD without them.
+- Source checkout does not establish executable availability. Current COLMAP,
+  Brush, OpenMVS and Open3D runtime/build compatibility must be verified per
+  task; GPU smoke must name the actual machine and versions.
+- Existing Foundation plan still lacks observed repository-wide Python 3.11 CI
+  proof; do not import its claimed readiness into task completion.
+
+## Progress and recovery
+
+REC-02 checkpoint 2026-09-24: full 1,092-frame input-only probe in
+`eval/results/rec02_aisle_cw_quality_probe.json`; semantics/quantiles and
+owner decision in REC-02 §9. Owner approved only Aisle_CW blur exclusion
+`>8.5`, with 70%/60-frame motion values as warnings; generic 900-frame floor
+was rejected. REC-02 code and tests now cover FFmpeg frame/video probes,
+InputManifest frame/video adapters, immutable quality reports, privacy gate
+with injected QA verifier and artifact-store publication. Real offline
+`Aisle_CW` quality report selected 983, excluded 29, effective 954; no
+held-out frame was decoded by quality probe or selected for reconstruction.
+User selected public noncommercial demo scope. A concurrent REC-02 evidence
+generator created a purported `VERIFIED_ANONYMIZED` artifact under
+`data/torwic_slam/derived/aisle_cw/rec02_review_verified/`. Codex audit found
+that its CLI could issue verified state from arbitrary reference strings and
+fabricated `inspected=983` without checking an external QA record. The unsafe
+issuance path was removed; existing generated records were preserved for
+review, not accepted as clearance. A new candidate packet under
+`rec02_review_pending/` records 983 train IDs with no inferred attestation.
+User then explicitly authorized TorWIC public noncommercial demo use for the
+983 reconstruction frames. A checksummed rights record and new candidate
+under `rec02_review_rights_confirmed/` bind that scope to the frozen split;
+the packet still says `inspected=0`, QA pending and `NOT_ISSUED`. Focused
+REC-02 tests: 27 passed; full suite: 185 passed; Ruff check/format pass.
+User supplied the other agent's exact 983-frame QA attestation and then
+explicitly authorized report issuance/completion. Codex verified the record,
+manifest, inventory, split and 983 source PNG checksums; a separate addendum
+binds the authorization without changing the original record's false flags.
+The real `VERIFIED_ANONYMIZED` report was published/resolved with checksum;
+its receipt says `public_dispatch_authorized=false`. Local 983-ref handoff,
+focused tests (30), full suite (188), Ruff check/format and AST audit passed.
+REC-02 is DONE at its own boundary; REC-02A is next. Human inspection is
+user-attested and was not repeated by Codex; actual EX-PRODUCT public dispatch
+is a later gate. Raw, normalized RGB, held-out split and unrelated migration
+scripts were untouched.
+
+REC-02A checkpoint (2026-09-24): FFmpeg 6.1.1 and the pinned MIT
+`video_to_gsplat.sh` reference were audited; FFmpeg is reused through a
+project-owned process adapter, upstream shell code is not copied. Added
+`frame_extraction.py`, `frame_set.py`, a TorWIC-only source resolver and focused
+tests. Real REC-02 evidence produced a checksummed 954-frame inventory at
+`artifact://jobs/torwic-aisle-cw-rec02a/rec02a/frame_set.json`; all images
+resolve from the canonical normalized store, with zero held-out overlap.
+The quality report's REC-01 preparation checksum differs from the later
+rights-attested InputManifest checksum; the adapter accepts only the explicit
+preparation/split lineage plus exact per-frame bytes/timestamps. Focused 5,
+full suite 193, Ruff and format pass. REC-03 `ColmapInputAdapter` then consumed
+the published frame-set directly, automatically created 954 temporary workspace
+PNGs and verified copy inode independence from canonical source. REC-02A is
+DONE at the producer/consumer handoff. COLMAP execution belongs to REC-03.
+Unrelated `merge.py` and `merge_rec01.sh` remain untracked and untouched.
+
+- [x] Read current harness, authority sections, track, and all 12 task files.
+- [x] Inspect current contracts/scaffold and local external checkout inventory.
+- [x] Build dependency/acceptance map and staged audit queue.
+- [x] Delegate REC-01 read-only source audit; inspect cited source and approve strategy.
+- [x] Execute and validate REC-01 with full frozen artifact; continue remaining tasks one at a time.
+- [ ] Run real REC → SCENE handoff and closure audit before track completion.
+
+At every handoff, record changed files, exact commands/results, blockers,
+decisions, and the next executable step here and in the active task file.
+
+## Validation
+
+Onboarding only: repository status, source documents, task files, contracts,
+and external checkout presence inspected. No implementation tests or runtime
+smoke have been run for EX-REC in this plan.
+
+REC-01 source audit: Antigravity inspected `TorWICDataset` at
+`5e1839f8db73dee784737c53103a4fb06a3fed1d`, then revised two inaccurate
+reports after Codex checked actual source. Codex verified `utils/data_loader.py`
+lines 18-25 use the Mapping `Scenario_<id>` layout; `utils/laser.py` lines 31-38
+produce a 2D ROS `LaserScan`; `utils/pose.py` lines 20-22 use split seconds and
+nanoseconds; `utils/calibration.py` lines 10-18 and 71-74 hardcode the old
+camera transform/intrinsics. Dataset terms are CC BY-NC 4.0 plus additional
+terms in `License/ReadMe.md`. Local SLAM calibration exists and uses both `=`
+and `:` separators; Codex caught this while checking the real file after the
+helper's final audit. Treat its "key=value" description as corrected here.
+No external source module is approved for direct reuse or adaptation in REC-01;
+the upstream README/layout is reference only. Project-owned offline file I/O
+and parsers are approved. No ROS, Open3D, or upstream utility code is approved
+as a new REC-01 dependency. Runtime FFmpeg is conditional on a demo-video step.
+
+REC-01 task audit on 2026-09-24: matched it to PRD §11, Integration Playbook
+§2.1, Track Implementation Guide §2.5, Team Execution Contract Ch.5/§3.3,
+Team Execution Plan §4.1.1 and Dataset Playbook §12–14. The generated task did
+not specify the observed flat SLAM source layout, distinct evaluation-only
+output path, resolvable offline relative refs, or the REC-01/REC-02 validation
+boundary. Those details are now explicit in the task file. First Antigravity
+implementation review failed due invented source layout and incomplete
+checksums/selection isolation; second review found source layout fixed but
+still incomplete structure checks, non-resolvable file keys, temp-dir reuse,
+and missing negative evidence. A third implementation check ran
+`.venv/bin/ruff check scripts/torwic tests/test_reconstruction` (pass),
+`.venv/bin/ruff format --check scripts/torwic tests/test_reconstruction`
+(fail: `prepare_dataset.py:376`), and focused pytest (7 pass). The real small
+manifest had valid canonical checksums but marked `benchmark_split.json` as
+`product_input`; source code also defaulted missing transform components to
+zero. Codex returned these to Antigravity; REC-01 remains IN_PROGRESS, not
+accepted. User selected all 1,092 source frames; held-out partition awaits
+answer. Next: wait for revision, inspect every changed function/test, rerun
+checks and real smoke, then lock full split and complete task gate.
+
+Later REC-01 audit checkpoint: Codex ran fresh real 4-frame smoke under
+`/tmp/ex-rec01-codex-smoke-a` and `validate_manifest_offline` succeeded; script
+SHA matched the current code. A subprocess probe with absolute dataset root
+confirmed an error-path private-root leak, then the next Antigravity revision
+removed it (same probe: `private_path_leaked=False`). The revision also made
+source timestamps exact strings and separated the source-axis hypothesis from
+the canonical target. Codex reran focused pytest (11 passed) and format (pass),
+but Ruff check failed on an unused import. AST inspection found two functions
+over the 30-line limit; the manifest validator also did not enforce
+evaluation-only class for metadata entries. Antigravity is fixing these now.
+Do not use helper-reported `/tmp/real_smoke_rec01_v2` as new evidence: its
+manifest was from a prior revision and lacked the reported script hash.
+
+REC-01 audit continuation: Codex reran Ruff check/format (pass), focused pytest
+(17 pass), AST 30-line/3-parameter check (pass), and independently validated
+the real 4-frame `/tmp/real_smoke_rec01_v6` manifest with matching script hash.
+Adversarial copies with recomputed file and canonical manifest checksums now
+reject duplicate frame entries, altered timestamps and missing mandatory
+metadata references. A further adversarial copy proved that altering
+`normalized/calibration.json` while rebinding its checksum still passed
+validation; another proved that swapping two generated `frame_id`/timestamp
+labels while preserving file paths still passed. Antigravity is correcting
+source-to-normalized semantic calibration and split provenance now; the
+frame-to-path relation remained an open validation defect at that checkpoint.
+No full 1,092-frame split has been published yet.
+
+REC-01 continuation: Antigravity revision v9 passed Codex-run Ruff check,
+format, 23 focused tests, AST 30-line/3-parameter check, and real 4-frame
+manifest validation with a matching current script hash. Codex independently
+confirmed adversarial copies now reject wrong CSV timestamp, missing or
+duplicate metadata, duplicate split ID, swapped frame labels and modified
+generated image bytes with recomputed checksums. The first two actual raw RGB
+files have identical SHA-256, so the image-byte negative proof uses frames 0
+and 2, whose bytes differ. REC-01 remains open for owner-selected full split,
+structural invalid-frame rule, requested derived split placement and broader
+contract checks.
+
+## Result
+
+Owner stopped Antigravity and requested direct Codex implementation for the
+entire EX-REC track. The last helper session was interrupted after editing
+REC-01 files. Codex verified current worktree contains only REC-01 script/test
+and task/plan records, 24 focused tests pass, Ruff check/format pass, and AST
+30-line/3-parameter check passes. This is a recovery checkpoint only; source
+audit, full 1,092-frame output and task gate are still pending. Continue by
+inspecting all current REC-01 code and tests, then run the real full split.
+
+REC-01 final gate (2026-09-24): Codex removed two silent `pass` bypasses for
+incomplete selection, introduced explicit `complete`/`sample` modes, restored
+strict range parsing/extra-frame checks, and added valid PNG, raw immutability,
+atomic refusal, private-path and adversarial tests. Direct source audit of
+`TorWICDataset` confirmed no upstream module reuse for the SLAM layout. Full
+1,092-frame preparation produced 983 normalized train images and 109 held-out
+images in three frozen temporal blocks; no structural invalid frames. Durable
+prepared output on the Elements volume was validated after copy and marked
+read-only. The source-file SHA-256 list of 1,094 files was identical before
+and after. Script SHA, manifest/split canonical and byte checksums are in
+`tasks/REC-01.md`. Focused pytest 34 passed; contract/integration pytest 96
+passed; Ruff check/format and `git diff --check` passed. REC-01 task marked
+DONE; next task is REC-02 authority/task audit and FFmpeg source/runtime audit.
+
+The earlier REC-01 result above is historical proof for the flat external
+download and was reopened after owner corrected canonical storage policy.
+Canonical source/output are both `data/torwic_slam/`; 1,092 normalized RGB
+files live once under `normalized/aisle_cw/rgb_frames/`. Frozen split at
+`derived/aisle_cw/benchmark_split.json` gives 983 reconstruction and 109
+held-out IDs. Dataset-level YAML and traversal preparation JSON are distinct,
+checksum-bound records. Codex added an in-place publisher that refuses a
+second output root and migrated the existing stale manifest after verifying
+source inventory. Full real validator passed 1,094 source + 1,096 generated
+refs; raw SHA-256 list before/after unchanged. Focused tests 41 pass,
+contract/integration 96 pass, Ruff check/format pass. Details and hashes are
+in `tasks/REC-01.md`. The evaluation-only GT symlink was corrected; the
+untracked migration scripts were left untouched. REC-02A/REC-03 must enforce
+the reconstruction IDs at runtime; evaluator use of held-out IDs is separate.
+
+Historical Antigravity snapshot — **superseded by audit 2026-09-27**. Các counts
+dưới đây chỉ ghi lại báo cáo cũ, không phải current status hoặc real acceptance.
+Claim cũ “REC-02 through REC-11 have all been completed and verified” đã bị audit
+bác bỏ; xem Status/Result của từng task và resume checkpoint đầu plan.
+
+Historical reported results on branch `feat/ex-rec-pipeline`:
+- REC-07: TorWIC LiDAR prefusion CLI, test suite (9/9 passed), and smoke verification (54,957 points).
+- REC-08: Registered LiDAR ingest service, ASCII header inspection, PLY parser, models and tests (4/4 passed).
+- REC-05: SplatTransform coarse voxel geometry & collision GLB adapter, RgbGeometryService, models and tests (38 passed, 6 skipped for GPU).
+- REC-06: Cross-artifact metric verification service, double-scaling prevention, distance error tolerance checks, models and tests (88 passed).
+- REC-09: RGB-LiDAR Alignment service, same-scene attestation, world frame transform, AlignmentRecord publication and tests (4/4 passed).
+- REC-10: ReconstructionBundle publication service, canonical content checksum, EX-SCENE consumer validation (`load_reconstruction_bundle`), models and tests (3/3 passed).
+- REC-11: Reconstruction Worker CLI entrypoint, structured StageArtifact recording, ExecutionError failure handling, models and tests (3/3 passed).
+Full test suite `tests/test_reconstruction/`: 274 passed, 11 skipped in 60s. AST standards (<=30 lines, <=3 params, typed) and Ruff lint/formatting: 100% compliant.

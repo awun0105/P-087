@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "job_id": "job-fixture-001",
+  "project_id": "project-fixture-001",
+  "scene_revision": "rev-001",
+  "status": "SUCCEEDED",
+  "input_manifest_checksum": "sha256:afe1bbad09183a1e732c4deb9b4f22b37753852c9275acbfb683f78c5ad65622",
+  "config_checksum": "sha256:f449812abbe1d33eadc1b983d61a0a81a625c8f1c1149ae4199b115eaf864fe7",
+  "runtime_manifest_checksum": "sha256:73562ba0ddf59881a00b72242ce9409137b30f7b3220627aeba2c9e6da02b520",
+  "seed": 7,
+  "started_at": "2026-09-22T00:00:00Z",
+  "completed_at": "2026-09-22T00:00:01Z",
+  "current_stage": "ST-INPUT-VALIDATE",
+  "stage_artifacts": [
+    {
+      "stage_id": "ST-INPUT-VALIDATE",
+      "status": "SUCCEEDED",
+      "artifact_type": "InputManifest",
+      "artifact_uri": "artifact://jobs/job-fixture-001/manifests/input_manifest.json",
+      "artifact_checksum": "sha256:61c9b7ebf77ed5d2fafdda6a19c2c412f7afe5742d320b759b56060dc089b7a5",
+      "data_class": "derived",
+      "started_at": "2026-09-22T00:00:00Z",
+      "completed_at": "2026-09-22T00:00:01Z"
+    }
+  ],
+  "job_manifest_checksum": "sha256:5cbda9ad91d774683bf565ef2e116578396e96a7ea0ffd00e8315c8d58f5bad2"
+}

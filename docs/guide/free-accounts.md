@@ -20,7 +20,7 @@ Trước khi đăng ký tài khoản, hãy hiểu bạn sẽ cần gì:
 
 | Thành phần | Công nghệ | Nền tảng | Mục đích |
 |------------|-----------|----------|----------|
-| Backend | FastAPI + Python 3.11 | Render / Railway | API server cho AI Agent |
+| Backend | FastAPI + Python 3.12 | Render / Railway | API server cho AI Agent |
 | AI Agent | LangGraph + LangChain | — | Xử lý logic & workflow của agent |
 | LLM | GPT-4o-mini / Gemini / Mistral | OpenAI / Google / Mistral API | Bộ não AI — xử lý ngôn ngữ |
 | Database | PostgreSQL + pgvector | Supabase | Lưu trữ dữ liệu & vector |

@@ -7,6 +7,12 @@ weight: 99
 
 Phần này tổng hợp các lỗi phổ biến khi setup và chạy dự án AI Agent, kèm hướng dẫn sửa chi tiết. Nếu bạn gặp lỗi không có trong danh sách, hãy kiểm tra lại các bước trong chương tương ứng hoặc tìm trên GitHub Issues của template.
 
+> **Phạm vi:** Các lệnh Python/Docker generic trong phần này phục vụ AI20K
+> template và có thể nhắc tới `requirements.txt` hoặc service mẫu như `db`.
+> Với Real2Sim Studio P-087, dùng `make setup` để cài từ lockfiles và dùng
+> Compose root bên dưới; không dùng các tên service generic làm căn cứ cho stack
+> Studio.
+
 ---
 
 ## Python & Environment
@@ -32,25 +38,25 @@ pip install -r requirements.txt
 ```bash
 # Xóa venv cũ và tạo lại
 rm -rf .venv
-python3.11 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### `python3.11: command not found`
+### `python3.12: command not found`
 
-**Nguyên nhân:** Chưa cài Python 3.11 hoặc không có trong PATH.
+**Nguyên nhân:** Chưa cài Python 3.12 hoặc không có trong PATH.
 
 **Cách sửa (macOS):**
 ```bash
-brew install python@3.11
+brew install python@3.12
 ```
 
 **Cách sửa (Ubuntu/WSL):**
 ```bash
 sudo add-apt-repository ppa:deadsnakes/ppa
 sudo apt update
-sudo apt install python3.11 python3.11-venv python3.11-dev
+sudo apt install python3.12 python3.12-venv python3.12-dev
 ```
 
 ### `pip install` chậm hoặc timeout
@@ -73,7 +79,7 @@ xcode-select --install
 
 **Cách sửa (Ubuntu/WSL):**
 ```bash
-sudo apt install build-essential python3.11-dev
+sudo apt install build-essential python3.12-dev
 ```
 
 ---
@@ -184,6 +190,30 @@ graph.add_conditional_edges(
 
 ## Docker
 
+### Real2Sim Studio P-087 — stack hiện tại
+
+Sau khi chuẩn bị `.env.studio` và data ZIP theo
+[`studio-distribution.md`](studio-distribution.md), dùng các service root
+hiện tại:
+
+```bash
+# CPU: restore data package, khởi động API và web, chờ healthcheck
+docker compose --env-file .env.studio -f docker-compose.yml up --build -d --wait
+
+# Xem log của stack Studio
+docker compose --env-file .env.studio -f docker-compose.yml logs -f api web
+
+# NVIDIA GPU: thêm override sau khi máy có NVIDIA Container Toolkit
+docker compose --env-file .env.studio -f docker-compose.yml \
+  -f docker-compose.gpu.yml up --build -d --wait
+
+# Dừng stack nhưng giữ data bind mount
+docker compose --env-file .env.studio -f docker-compose.yml down
+```
+
+Trên Linux, `make -f Makefile.studio docker` là alias CPU và thêm `GPU=1` để
+bật override NVIDIA. Windows/macOS dùng Docker Compose trực tiếp như trên.
+
 ### `docker: command not found`
 
 **Cách sửa (macOS):** Cài Docker Desktop từ https://docker.com/products/docker-desktop
@@ -279,7 +309,7 @@ Nếu CI không chạy sau khi push:
 **Cách sửa:**
 1. Kiểm tra build log chi tiết trên Render Dashboard
 2. Đảm bảo `Dockerfile` hoặc `requirements.txt` có trong repo
-3. Thêm `runtime.txt` với nội dung `3.11.x` nếu Render chọn sai Python version
+3. Thêm `runtime.txt` với nội dung `3.12.x` nếu Render chọn sai Python version
 
 ### Render free tier "sleeping" — response chậm
 
@@ -313,4 +343,4 @@ app.add_middleware(
 2. **Google lỗi** — Copy paste error message vào Google, thường có giải pháp trên StackOverflow
 3. **Check `.env`** — 80% lỗi production do biến môi trường thiếu hoặc sai
 4. **Chạy `make check`** — Lint + format + typecheck + test trong một lệnh
-5. **Xóa và tạo lại** — `rm -rf .venv && python3.11 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
+5. **Xóa và tạo lại** — `rm -rf .venv && python3.12 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`

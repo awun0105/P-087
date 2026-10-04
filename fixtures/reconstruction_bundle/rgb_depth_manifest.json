@@ -1,0 +1,65 @@
+{
+  "artifact_type": "ReconstructionBundle",
+  "schema_version": "1.0",
+  "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/rgb_depth_bundle.json",
+  "artifact_checksum": "sha256:bb2317f08684654256edd9bdfe54726bc264dd6b949abdd5c59f1c4614f446b1",
+  "producer_stage": "ST-METRIC-CANONICALIZE",
+  "job_id": "job-fixture-001",
+  "source_input_checksum": "sha256:afe1bbad09183a1e732c4deb9b4f22b37753852c9275acbfb683f78c5ad65622",
+  "input_configuration": {
+    "rgb_present": true,
+    "depth_present": true,
+    "registered_lidar_present": false
+  },
+  "coordinate_system": {"unit": "meter", "up_axis": "Z", "handedness": "right", "world_frame": "world"},
+  "metric_scale": {"status": "CONFIRMED", "meters_per_unit": 1.0},
+  "rgb_frame_refs": [{
+    "artifact_type": "RgbFrameSet", "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/rgb_frames.json",
+    "artifact_checksum": "sha256:53b96e85899d7104af39d934eab6b90a0949db5663e6317ba4377f287e991bf8",
+    "data_class": "derived",
+    "producer_stage": "ST-FRAME-EXTRACT", "job_id": "job-fixture-001"
+  }],
+  "depth_frame_set": {
+    "storage_dtype": "uint16",
+    "storage_format": "png",
+    "scale_to_meter": 0.001,
+    "frame_refs": [{
+      "artifact_type": "SensorDepthFrameSet", "schema_version": "1.0",
+      "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/depth_frames.json",
+      "artifact_checksum": "sha256:397150b03712722d6f9480a67d6afb40a65777d2c7548aab5c97aab51bfceee7",
+      "data_class": "derived",
+      "producer_stage": "ST-FRAME-EXTRACT", "job_id": "job-fixture-001"
+    }],
+    "provenance": {"fixture": true, "sensor_depth": true, "ground_truth": false}
+  },
+  "camera_pose_refs": [{
+    "artifact_type": "CameraPoseSet", "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/camera_poses.json",
+    "artifact_checksum": "sha256:8e8c2b8cf6678869fbf2621bd0359338222eb582cb45d8ba96e8fc056deb1aa3",
+    "data_class": "derived",
+    "producer_stage": "ST-CAMERA-POSE", "job_id": "job-fixture-001"
+  }],
+  "visual_artifact_ref": {
+    "artifact_type": "VisualArtifact", "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/mock_visual.json",
+    "artifact_checksum": "sha256:2aa87e90bbc2d516c244428ed931e357a1e56edf0c1c8b1f10e38ebc27dedaa0",
+    "data_class": "derived",
+    "producer_stage": "ST-VISUAL-RECON", "job_id": "job-fixture-001"
+  },
+  "rgb_geometry_ref": {
+    "artifact_type": "RgbGeometry", "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/rgb_geometry.ply",
+    "artifact_checksum": "sha256:489c4aec9889f735fa0ae8b0c58d5844f281bc209b2b356d4a46947d281044dc",
+    "data_class": "derived",
+    "producer_stage": "ST-RGB-GEOMETRY", "job_id": "job-fixture-001"
+  },
+  "canonical_geometry_ref": {
+    "artifact_type": "CanonicalGeometry", "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/canonical_geometry.ply",
+    "artifact_checksum": "sha256:109ee1d8e84367fae728c26c3b1353fc9507d93071f9a3db05194ef63d7415de",
+    "data_class": "derived",
+    "producer_stage": "ST-METRIC-CANONICALIZE", "job_id": "job-fixture-001"
+  },
+  "provenance": {"fixture": true, "proof_level": "synthetic_contract_integration", "sensor_depth": true}
+}

@@ -1,0 +1,194 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "product.processing_presets_v1",
+  "parameters": [
+    {
+      "key": "sampling.sample_fps",
+      "group": "sampling",
+      "label": "Khung hình lấy mỗi giây video",
+      "description": "Video được lấy mẫu theo thời lượng: số frame = thời lượng × giá trị này (chặn bởi số frame tối đa). Trong mỗi khoảng, hệ thống giữ frame nét nhất. Đi chậm quay 2–4 fps là đủ chồng lặp cho COLMAP.",
+      "kind": "number",
+      "unit": "fps",
+      "min": 0.5,
+      "max": 10,
+      "step": 0.5
+    },
+    {
+      "key": "sampling.max_frames",
+      "group": "sampling",
+      "label": "Số khung hình tối đa",
+      "description": "Trần số ảnh đưa vào COLMAP và huấn luyện. Nhiều ảnh phủ khu vực rộng hơn nhưng tăng thời gian, RAM và dung lượng đĩa.",
+      "kind": "integer",
+      "unit": "frame",
+      "min": 30,
+      "max": 2000,
+      "step": 10
+    },
+    {
+      "key": "colmap.camera_model",
+      "group": "colmap",
+      "label": "Mô hình camera",
+      "description": "SIMPLE_RADIAL hợp với điện thoại/camera thường. OPENCV mô tả méo ống kính kỹ hơn (camera góc rộng) nhưng cần nhiều ảnh tốt hơn để hội tụ.",
+      "kind": "choice",
+      "choices": [
+        {
+          "value": "SIMPLE_RADIAL",
+          "label": "SIMPLE_RADIAL · camera thường"
+        },
+        {
+          "value": "OPENCV",
+          "label": "OPENCV · ống kính góc rộng"
+        }
+      ]
+    },
+    {
+      "key": "colmap.max_image_size",
+      "group": "colmap",
+      "label": "Cạnh ảnh tối đa khi tìm đặc trưng",
+      "description": "COLMAP thu nhỏ ảnh về cạnh này trước khi trích xuất đặc trưng. Lớn hơn → vị trí camera chính xác hơn, chậm hơn và tốn RAM hơn.",
+      "kind": "integer",
+      "unit": "px",
+      "min": 640,
+      "max": 3200,
+      "step": 160
+    },
+    {
+      "key": "colmap.max_num_features",
+      "group": "colmap",
+      "label": "Số điểm đặc trưng mỗi ảnh",
+      "description": "Nhiều điểm đặc trưng giúp khớp ảnh ở cảnh ít chi tiết (tường trơn, kệ lặp lại) nhưng tăng thời gian khớp và RAM.",
+      "kind": "integer",
+      "unit": "điểm",
+      "min": 1024,
+      "max": 32768,
+      "step": 1024
+    },
+    {
+      "key": "colmap.sequential_overlap",
+      "group": "colmap",
+      "label": "Số ảnh lân cận để so khớp",
+      "description": "Mỗi ảnh được so với chừng này ảnh kế tiếp trong video. Tăng khi camera đi nhanh hoặc quay vòng.",
+      "kind": "integer",
+      "unit": "ảnh",
+      "min": 3,
+      "max": 30,
+      "step": 1
+    },
+    {
+      "key": "brush.total_train_iters",
+      "group": "brush",
+      "label": "Số bước huấn luyện 3DGS",
+      "description": "30.000 bước là mức chuẩn của 3D Gaussian Splatting. Nhiều bước hơn cải thiện chi tiết nhỏ nhưng thời gian tăng gần tuyến tính.",
+      "kind": "integer",
+      "unit": "bước",
+      "min": 1000,
+      "max": 60000,
+      "step": 1000
+    },
+    {
+      "key": "brush.max_resolution",
+      "group": "brush",
+      "label": "Độ phân giải huấn luyện",
+      "description": "Cạnh dài tối đa của ảnh khi huấn luyện. Cao hơn → scene sắc nét hơn, tốn VRAM GPU hơn.",
+      "kind": "integer",
+      "unit": "px",
+      "min": 480,
+      "max": 3840,
+      "step": 160
+    },
+    {
+      "key": "brush.max_splats",
+      "group": "brush",
+      "label": "Số Gaussian tối đa",
+      "description": "Giới hạn số điểm 3D Gaussian. Nhiều hơn → chi tiết hơn nhưng tốn VRAM khi huấn luyện và file scene nặng hơn khi xem trên trình duyệt.",
+      "kind": "integer",
+      "unit": "Gaussian",
+      "min": 100000,
+      "max": 8000000,
+      "step": 100000
+    },
+    {
+      "key": "brush.sh_degree",
+      "group": "brush",
+      "label": "Bậc spherical harmonics",
+      "description": "Bậc 3 tái hiện màu thay đổi theo góc nhìn (phản chiếu nhẹ). Bậc thấp nhẹ hơn nhưng màu phẳng hơn.",
+      "kind": "integer",
+      "unit": "bậc",
+      "min": 0,
+      "max": 3,
+      "step": 1
+    },
+    {
+      "key": "brush.sog_iterations",
+      "group": "brush",
+      "label": "Số vòng nén SOG",
+      "description": "Số vòng k-means khi nén scene sang SOG để xem trên web. Nén chạy trên GPU của máy xử lý (WebGPU); không có GPU thì lùi về CPU và chậm hơn rất nhiều. Nhiều vòng → nén đẹp hơn, xuất chậm hơn.",
+      "kind": "integer",
+      "unit": "vòng",
+      "min": 1,
+      "max": 20,
+      "step": 1
+    }
+  ],
+  "presets": {
+    "minimum_quality": {
+      "sampling.sample_fps": 3,
+      "sampling.max_frames": 300,
+      "colmap.camera_model": "SIMPLE_RADIAL",
+      "colmap.max_image_size": 1600,
+      "colmap.max_num_features": 8192,
+      "colmap.sequential_overlap": 10,
+      "brush.total_train_iters": 30000,
+      "brush.max_resolution": 1280,
+      "brush.max_splats": 1000000,
+      "brush.sh_degree": 3,
+      "brush.sog_iterations": 10
+    },
+    "maximum": {
+      "sampling.sample_fps": 6,
+      "sampling.max_frames": 1200,
+      "colmap.camera_model": "SIMPLE_RADIAL",
+      "colmap.max_image_size": 3200,
+      "colmap.max_num_features": 16384,
+      "colmap.sequential_overlap": 20,
+      "brush.total_train_iters": 60000,
+      "brush.max_resolution": 3840,
+      "brush.max_splats": 6000000,
+      "brush.sh_degree": 3,
+      "brush.sog_iterations": 20
+    }
+  },
+  "fixed": {
+    "colmap": {
+      "schema_version": "1.0",
+      "single_camera": true,
+      "use_gpu": false,
+      "random_seed": 0,
+      "min_registered_frames": 8,
+      "min_registered_ratio": 0.5
+    },
+    "brush": {
+      "schema_version": "1.0",
+      "seed": 0,
+      "refine_every": 200,
+      "eval_split_every": 8
+    },
+    "colmap_max_threads": 16
+  },
+  "resource_model": {
+    "note": "Ước lượng heuristic để cảnh báo trước khi chạy, không phải phép đo. Hệ số lấy từ kích thước tham số 3DGS (~1 KB/Gaussian khi train gồm Adam) và lần chạy local 2026-09-29 (51 frame 1280×720: ~1,5 MB/MP mỗi PNG, tổng job ~5,2× phần frame).",
+    "vram_base_gb": 0.8,
+    "vram_per_million_splats_gb": 1.1,
+    "vram_per_train_megapixel_gb": 0.35,
+    "ram_base_gb": 1.5,
+    "ram_per_decode_megapixel_gb": 0.012,
+    "ram_feature_bytes": 160,
+    "disk_per_frame_megapixel_gb": 0.0016,
+    "disk_workspace_factor": 5.5,
+    "disk_per_million_splats_gb": 0.5,
+    "assumed_video_megapixels": 2.07,
+    "viewer_heavy_splats": 3000000,
+    "warn_ratio": 0.75,
+    "danger_ratio": 0.92
+  }
+}

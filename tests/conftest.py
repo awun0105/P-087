@@ -1,10 +1,30 @@
+import os
+from collections.abc import Iterator
 from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+# Thiết lập dummy API key để Settings không báo lỗi khi chạy unit tests
+os.environ.setdefault("OPENAI_API_KEY", "sk-mock-testing-key")
+
 from src.main import app
+from src.services.orchestration.projects.registry import DEFAULT_RUNTIME_ROOT
+
+
+@pytest.fixture(autouse=True)
+def _no_writes_to_default_artifact_store() -> Iterator[None]:
+    """Test không được để lại job trong kho artifact mặc định của repo (`data/artifacts`).
+
+    Registry và Settings mặc định trỏ vào thư mục thật đó; test nào tạo job mà quên truyền `runtime_root`/
+    `artifact_root` tạm sẽ để rác tích lại sau mỗi lượt chạy. Kiểm theo từng test để lỗi chỉ đúng thủ phạm.
+    """
+    jobs = DEFAULT_RUNTIME_ROOT / "jobs"
+    before = {path.name for path in jobs.iterdir()} if jobs.is_dir() else set()
+    yield
+    leaked = sorted({path.name for path in jobs.iterdir()} - before) if jobs.is_dir() else []
+    assert not leaked, f"test ghi {leaked} vào {jobs}; dùng tmp_path cho runtime_root/artifact_root"
 
 
 @pytest_asyncio.fixture

@@ -1,0 +1,164 @@
+"""Kiểm máy GPU (Kaggle / GPU thuê) có đủ công cụ để chạy trọn pipeline không, trước khi tốn giờ GPU.
+
+    set -a; source <file env>; set +a
+    python -m scripts.kaggle.preflight
+
+Mỗi dòng là một thứ pipeline thật sự gọi tới, đọc từ đúng biến môi trường mà worker dùng. Thiếu mục
+"bắt buộc" → exit 1. Mục "tuỳ chọn" thiếu thì pipeline vẫn chạy nhưng lùi về đường kém hơn (ghi rõ).
+"""
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+from collections.abc import Callable
+from pathlib import Path
+
+
+def _run(command: list[str], timeout: float = 120.0, env: dict[str, str] | None = None) -> tuple[bool, str]:
+    """Chạy lệnh kiểm; trả (thành công, dòng cuối của output)."""
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False, env=env)
+    except (OSError, subprocess.SubprocessError) as error:
+        return False, type(error).__name__
+    # Ưu tiên stdout: stderr của các runtime Python thường chỉ là cảnh báo.
+    lines = [line for line in (done.stdout.strip() or done.stderr.strip()).splitlines() if line.strip()]
+    return done.returncode == 0, lines[-1][:120] if lines else ""
+
+
+def _command(variable: str) -> list[str] | None:
+    value = os.environ.get(variable)
+    return list(json.loads(value)) if value else None
+
+
+def gpu() -> tuple[bool, str]:
+    """Card NVIDIA và VRAM trống."""
+    return _run(["nvidia-smi", "--query-gpu=name,memory.total,memory.free", "--format=csv,noheader"])
+
+
+def ffmpeg() -> tuple[bool, str]:
+    """Tách frame từ video."""
+    ok, text = _run(["ffmpeg", "-version"])
+    return ok, text if not ok else "có"
+
+
+def colmap() -> tuple[bool, str]:
+    """Dựng pose camera (REC-03) qua đúng lệnh `REC03_COLMAP_COMMAND`."""
+    command = _command("REC03_COLMAP_COMMAND")
+    if command is None:
+        return False, "chưa đặt REC03_COLMAP_COMMAND"
+    ok, text = _run([*command, "help"])
+    return ok, "chạy được" if ok else text
+
+
+def colmap_guided() -> tuple[bool, str]:
+    """Luồng video + gói LiDAR (ADR 0009) cần `pose_prior_mapper` của COLMAP 4.x; bản 3.x chỉ chạy được luồng video."""
+    command = _command("REC03_COLMAP_COMMAND")
+    if command is None:
+        return False, "chưa đặt REC03_COLMAP_COMMAND"
+    # Cần cả phần trợ giúp (không chỉ dòng cuối như `_run`) để tìm đúng tuỳ chọn của chế độ bám quỹ đạo.
+    try:
+        done = subprocess.run(
+            [*command, "pose_prior_mapper", "-h"], capture_output=True, text=True, timeout=120.0, check=False
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return False, type(error).__name__
+    ok = "--prior_position_std_x" in done.stdout + done.stderr
+    return ok, "có pose_prior_mapper" if ok else "COLMAP này không có pose_prior_mapper (cần COLMAP ≥ 4.0)"
+
+
+def vulkan() -> tuple[bool, str]:
+    """Brush train 3DGS qua Vulkan; phải thấy đúng card NVIDIA, không phải llvmpipe (CPU)."""
+    ok, _ = _run(["vulkaninfo", "--summary"])
+    if not ok:
+        return False, "vulkaninfo lỗi hoặc chưa cài (apt install vulkan-tools)"
+    done = subprocess.run(["vulkaninfo", "--summary"], capture_output=True, text=True, check=False)
+    devices = [line.split("=", 1)[1].strip() for line in done.stdout.splitlines() if "deviceName" in line]
+    hardware = [name for name in devices if "llvmpipe" not in name.lower()]
+    return bool(hardware), ", ".join(devices) or "không có thiết bị Vulkan"
+
+
+def brush() -> tuple[bool, str]:
+    """Binary Brush đúng phiên bản ghim (`REC04_BRUSH_EXPECTED_VERSION`)."""
+    command = _command("REC04_BRUSH_COMMAND")
+    if command is None:
+        return False, "chưa đặt REC04_BRUSH_COMMAND"
+    extra = json.loads(os.environ.get("REC04_BRUSH_ENVIRONMENT", "{}") or "{}")
+    ok, text = _run([*command, "--version"], env={**os.environ, **extra})
+    expected = os.environ.get("REC04_BRUSH_EXPECTED_VERSION", "")
+    return ok and text.endswith(expected), text
+
+
+def splat_transform() -> tuple[bool, str]:
+    """Nén SOG cho web + dựng voxel collision (Node + splat-transform)."""
+    cli = os.environ.get("REC05_VOXEL_CLI")
+    if not cli or not Path(cli).is_file() or shutil.which("node") is None:
+        return False, "thiếu node hoặc REC05_VOXEL_CLI"
+    return _run(["node", cli, "--version"])
+
+
+def splat_gpu() -> tuple[bool, str]:
+    """GPU cho splat-transform (WebGPU/Dawn); không có thì đặt REC04_SPLAT_DEVICE=cpu (chậm hơn)."""
+    cli = os.environ.get("REC05_VOXEL_CLI")
+    if not cli or shutil.which("node") is None:
+        return False, "thiếu node hoặc REC05_VOXEL_CLI"
+    return _run(["node", cli, "--list-gpus"])
+
+
+def scene_runtime() -> tuple[bool, str]:
+    """Runtime tách theo vật: torch thấy GPU, kernel gsplat nạp được, usd-core có schema Gaussian."""
+    python = os.environ.get("PRODUCT_SCENE_RUNTIME_PYTHON")
+    weights = [os.environ.get("PRODUCT_SAM2_CHECKPOINT"), os.environ.get("PRODUCT_LAMA_CHECKPOINT")]
+    if not python or not Path(python).is_file() or any(not item or not Path(item).is_file() for item in weights):
+        return False, "thiếu PRODUCT_SCENE_RUNTIME_PYTHON hoặc checkpoint SAM2/LaMa"
+    probe = (
+        "import torch, coacd, cv2, skimage;"
+        "from gsplat.cuda._backend import _C;"
+        "from pxr import UsdVol;"
+        "from sam2.build_sam import build_sam2;"
+        "assert torch.cuda.is_available() and _C is not None;"
+        "assert hasattr(UsdVol, 'ParticleField3DGaussianSplat');"
+        "print(torch.__version__, torch.cuda.get_device_name(0))"
+    )
+    return _run([python, "-c", probe], timeout=1800.0)
+
+
+#: (tên, hàm kiểm, bắt buộc, hậu quả khi thiếu)
+CHECKS: list[tuple[str, Callable[[], tuple[bool, str]], bool, str]] = [
+    ("GPU NVIDIA", gpu, True, "không chạy được"),
+    ("ffmpeg", ffmpeg, True, "không tách được frame"),
+    ("COLMAP", colmap, True, "không dựng được pose camera"),
+    ("COLMAP dựng bám quỹ đạo", colmap_guided, False, "job video + gói LiDAR sẽ dừng ở bước dựng pose"),
+    ("Vulkan (GPU thật)", vulkan, True, "Brush không train được 3DGS"),
+    ("Brush", brush, True, "không train được 3DGS"),
+    ("splat-transform", splat_transform, True, "không nén SOG / dựng collision"),
+    ("splat-transform GPU", splat_gpu, False, "đặt REC04_SPLAT_DEVICE=cpu"),
+    ("Runtime tách theo vật", scene_runtime, False, "scene lùi về đường hộp"),
+]
+
+
+def main() -> int:
+    """In bảng kết quả; trả 1 nếu thiếu mục bắt buộc."""
+    blocked = False
+    for name, check, required, consequence in CHECKS:
+        ok, detail = check()
+        mark = "OK  " if ok else ("LỖI " if required else "THIẾU")
+        print(f"{mark} {name:<24} {detail}" + ("" if ok else f"  → {consequence}"))
+        blocked = blocked or (required and not ok)
+    try:
+        from scripts.gpu.gpu_plan import plan_for_machine
+
+        gpus, result = plan_for_machine(64)
+        print(f"\nChia GPU: {len(gpus)} GPU → {len(result.slots)} worker song song ({result.reason})")
+        for gpu in gpus:
+            vulkan = "ghép được" if gpu.wgpu_discrete_index is not None else "CHƯA ghép được (Brush dùng GPU mặc định)"
+            print(f"  GPU {gpu.index}: {gpu.name}, trống {gpu.free_gb:.1f}/{gpu.total_gb:.1f} GB, Vulkan {vulkan}")
+    except (ImportError, ValueError, OSError) as error:
+        print(f"\nChia GPU: không lập được kế hoạch ({error})")
+    print("\nKết luận:", "CHƯA chạy được pipeline trên máy này." if blocked else "đủ điều kiện chạy.")
+    return 1 if blocked else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

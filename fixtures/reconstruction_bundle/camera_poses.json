@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "coordinate_frame": "fixture_world",
+  "poses": [
+    {
+      "frame_id": "frame-000001",
+      "translation_xyz": [0.0, 0.0, 1.5],
+      "rotation_quaternion_xyzw": [0.0, 0.0, 0.0, 1.0]
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+# Core
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+pydantic>=2.10.0
+pydantic-settings>=2.7.0
+python-dotenv>=1.0.0
+
+# Numerics/geometry: src/services/simulation/colliders import ở runtime, không chỉ test.
+# numpy BSD-3-Clause, scipy BSD-3-Clause, trimesh MIT.
+numpy>=1.26.0
+scipy>=1.11.0
+trimesh>=4.0.0
+
+# AI / LangChain
+langchain>=0.3.0
+langchain-anthropic>=1.0.0
+langchain-google-genai>=4.0.0
+langchain-mistralai>=1.0.0
+langchain-openai>=0.3.0
+langgraph>=0.2.0
+
+# Database (uncomment as needed)
+# sqlalchemy>=2.0.0
+# alembic>=1.14.0
+# psycopg2-binary>=2.9.0
+# Runtime DB PostgreSQL (Supabase, ADR 0003): psycopg 3, LGPL-3.0, dùng như thư viện.
+psycopg[binary]>=3.2.0
+
+# Kho file S3-compatible (Cloudflare R2 / MinIO, ADR 0003): boto3 Apache-2.0.
+boto3>=1.35.0
+
+# Vector Store (uncomment as needed)
+# chromadb>=0.5.0

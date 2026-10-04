@@ -1,4 +1,4 @@
-.PHONY: run test lint format typecheck check clean
+.PHONY: run test lint format typecheck check clean setup lock doctor smoke
 
 run:
 	uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
@@ -21,3 +21,15 @@ clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +
 	find . -type d -name .pytest_cache -exec rm -rf {} +
 	find . -type d -name .ruff_cache -exec rm -rf {} +
+
+setup:
+	bash scripts/setup.sh
+
+lock:
+	bash scripts/lock_dependencies.sh
+
+doctor:
+	python -m scripts.doctor
+
+smoke:
+	python -m scripts.smoke_test

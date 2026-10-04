@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "dataset": "torwic_aisle_cw",
+  "rec07_target_frame": "world",
+  "source_frame": "torwic_map",
+  "unit": "meter",
+  "up_axis": "Z",
+  "handedness": "right",
+  "handedness_source": "owner_decision",
+  "up_axis_source": "measured",
+  "origin_rule": "floor_to_zero",
+  "origin_rule_source": "owner_decision",
+  "floor_z_in_source_m": -0.2345,
+  "decided_by": "EX-REC owner (@awun0105)",
+  "decision_ref": "REC-06.md 'Owner chốt quy tắc gốc world' + REC-07.md handedness (commits 01305c9, 5713976); camera chain: image_left undistorted (4078686)",
+  "evidence": [
+    {"name": "rec07_axis_evidence_20260927/up_axis_proof.png", "checksum": "sha256:05c77d10b9726147d014f5b0b335f078c282cdbf46da15cbe05a86d6c03e7d0b"},
+    {"name": "rec07_axis_evidence_20260927/camera_chain_final.png", "checksum": "sha256:97dcbf2e242cc5b64434fa36789470183a26e94c1c666e808c163369a123664c"}
+  ]
+}

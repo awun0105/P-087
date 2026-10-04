@@ -1,6 +1,19 @@
 .git
 .gitignore
 .env
+.env.*
+**/*.env
+**/*.env.*
+!**/*.env.example
+.agents
+.codex
+.ai-log
+deploy/
+r2s-studio-data*.zip
+r2s-studio-data*.tar.gz
+real2sim-studio-source*.zip
+*.sha256
+*.partial
 .venv
 __pycache__
 *.pyc
@@ -10,7 +23,12 @@ docs/
 presentation/
 eval/
 *.md
-!requirements.txt
 .dockerignore
 Dockerfile
 docker-compose.yml
+# Image API (ADR 0003 khối B): không mang dữ liệu/runtime cục bộ hay frontend (deploy riêng).
+data/
+frontend/
+scripts/gpu/studio.env
+.aws
+**/node_modules

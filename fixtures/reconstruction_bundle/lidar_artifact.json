@@ -1,0 +1,23 @@
+{
+  "artifact_type": "LiDARGeometryArtifact",
+  "schema_version": "1.0",
+  "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/lidar_geometry.ply",
+  "artifact_checksum": "sha256:714a1768b7d03dbd94f7fb4266c23237452886221b740b37f4bb8f2e4d6e27ae",
+  "producer_stage": "ST-LIDAR-INGEST",
+  "job_id": "job-fixture-001",
+  "source_modality": "registered_lidar",
+  "source_input_checksum": "sha256:afe1bbad09183a1e732c4deb9b4f22b37753852c9275acbfb683f78c5ad65622",
+  "geometry_format": "ply",
+  "coordinate_system": {"unit": "meter", "up_axis": "Z", "handedness": "right", "world_frame": "world"},
+  "source_frame": "registered_lidar",
+  "declared_transform_to_canonical": {
+    "parent_frame": "world", "local_frame": "registered_lidar",
+    "translation_xyz": [0.0, 0.0, 0.0],
+    "rotation_quaternion_xyzw": [0.0, 0.0, 0.0, 1.0]
+  },
+  "preprocessing_provenance": {
+    "dependencies": [],
+    "ground_truth_assisted": false,
+    "details": {"fixture": true, "source_profile": "pre_registered_input"}
+  }
+}
