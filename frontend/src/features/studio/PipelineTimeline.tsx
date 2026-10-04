@@ -11,6 +11,7 @@ import { cn } from "@/lib/cn";
 import type { StageId } from "@/lib/contracts/api";
 import type { StageState } from "@/lib/contracts/studio";
 import { formatDuration } from "@/lib/format";
+import { estimateRemainingTime, formatEtaDuration } from "@/features/studio/scene/estimation";
 
 export interface StageView {
   stage_id: StageId;
@@ -50,12 +51,21 @@ export function PipelineTimeline({
 }) {
   const [selected, setSelected] = useState<StageId | null>(null);
   const done = stages.filter((stage) => stage.state === "succeeded").length;
+  const eta = estimateRemainingTime(stages);
+
   return (
     <div>
-      <div className="mb-5 flex items-baseline justify-between gap-4">
-        <p className="text-sm font-medium text-ink">
-          {done}/{stageList.length} bước hoàn tất
-        </p>
+      <div className="mb-5 flex flex-wrap items-baseline justify-between gap-4">
+        <div className="flex items-baseline gap-3">
+          <p className="text-sm font-medium text-ink">
+            {done}/{stageList.length} bước hoàn tất
+          </p>
+          {eta.formattedRemaining && (
+            <span className="rounded-md bg-paper-sunken px-2 py-0.5 text-xs font-mono text-ink-muted">
+              Còn {eta.formattedRemaining}
+            </span>
+          )}
+        </div>
         {timeNote && <p className="text-xs text-ink-subtle">{timeNote}</p>}
       </div>
       <ProgressBar value={done / stageList.length} label="Tổng tiến trình" className="mb-6" />
@@ -96,7 +106,12 @@ export function PipelineTimeline({
                       </>}
                     </p>
                     {stage?.seconds != null && state !== "pending" && (
-                      <span className="shrink-0 text-xs value-tech text-ink-subtle">{formatDuration(stage.seconds)}</span>
+                      <span className="shrink-0 text-xs value-tech text-ink-subtle">
+                        {formatDuration(stage.seconds)}
+                        {state === "running" && eta.currentStageRemainingSeconds != null && (
+                          <span className="ml-1 text-ink-muted">· còn {formatEtaDuration(eta.currentStageRemainingSeconds)}</span>
+                        )}
+                      </span>
                     )}
                   </div>
                   {(state === "running" || state === "failed" || state === "waiting") && (
