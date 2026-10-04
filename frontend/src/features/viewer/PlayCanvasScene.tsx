@@ -310,10 +310,28 @@ export function PlayCanvasScene({
             },
           });
         }
+        let autoFramed = false;
+        const tryAutoFrame = () => {
+          if (!autoFramed && viewer.state.loaded && !initialCamera) {
+            autoFramed = true;
+            setTimeout(() => {
+              if (!disposed && viewer.state.loaded) {
+                viewer.frameScene();
+              }
+            }, 60);
+          }
+        };
+        tryAutoFrame();
+
         // EventHandler của PlayCanvas bắn `<key>:changed`; `on` trả EventHandle
         // để huỷ. Không tự poll `state` vì đó là nguồn thật của thư viện.
         for (const event of ["progress:changed", "loaded:changed", "hasCollision:changed", "walkAllowed:changed", "cameraMode:changed"]) {
-          subscriptions.push(viewer.events.on(event, () => { if (!disposed) publish(readRuntime(viewer)); }));
+          subscriptions.push(viewer.events.on(event, () => {
+            if (!disposed) {
+              if (event === "loaded:changed") tryAutoFrame();
+              publish(readRuntime(viewer));
+            }
+          }));
         }
         if (viewer.app?.assets) {
           subscriptions.push(viewer.app.assets.on("error", () => { if (!disposed) onFailed(); }));

@@ -5,10 +5,13 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/studio/primitives";
-import { INITIAL_RUNTIME, PlayCanvasScene, usePlayCanvasCapability } from "@/features/viewer/PlayCanvasScene";
+import { INITIAL_RUNTIME, PlayCanvasScene, usePlayCanvasCapability, type ViewerControls } from "@/features/viewer/PlayCanvasScene";
+import { CameraToolbar } from "@/features/viewer/CameraToolbar";
+import { type SourceFrame } from "@/features/viewer/source-frame";
 import { useNavigationGuard } from "@/features/shell/NavigationGuard";
 import { queryEditorDirty } from "@/features/studio/editor-dirty";
 import { HelpDetails } from "@/components/studio/feedback";
+import { cn } from "@/lib/cn";
 
 /**
  * Entry của SuperSplat editor đã build (`npm run build:editor` → public/editor).
@@ -157,6 +160,9 @@ function WebGlViewer({
   const [capability, setCapability] = usePlayCanvasCapability();
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
   const [showNotice, setShowNotice] = useState(false);
+  const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
+  const [wheelFactor, setWheelFactor] = useState(1);
+  const [sourceFrame, setSourceFrame] = useState<SourceFrame>("colmap");
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
   const failed = capability === "failed" || capability === "unavailable";
   
@@ -213,7 +219,45 @@ function WebGlViewer({
             capability={capability}
             onFailed={fail}
             onRuntime={setRuntime}
+            sourceFrame={sourceFrame}
+            wheelFactor={wheelFactor}
+            onApp={(_app, controls) => setViewerControls(controls ?? null)}
           />
+          <div className="absolute bottom-4 left-4 z-10 flex flex-wrap items-center gap-2">
+            <CameraToolbar
+              runtime={runtime}
+              controls={viewerControls}
+              wheelFactor={wheelFactor}
+              onWheelFactor={setWheelFactor}
+            />
+            <div className="flex items-center gap-1 rounded-md border border-line-dark bg-viewport-deep/85 px-2 py-1.5 text-xs text-on-dark/90">
+              <span className="text-on-dark/70">Hướng:</span>
+              <button
+                type="button"
+                className={cn("rounded px-1.5 py-0.5 transition-colors", sourceFrame === "colmap" ? "bg-on-dark/20 font-medium text-on-dark" : "text-on-dark/60 hover:text-on-dark")}
+                onClick={() => setSourceFrame("colmap")}
+                title="COLMAP / Brush (Y hướng xuống, xoay 180° quanh Z)"
+              >
+                COLMAP
+              </button>
+              <button
+                type="button"
+                className={cn("rounded px-1.5 py-0.5 transition-colors", sourceFrame === "z_up" ? "bg-on-dark/20 font-medium text-on-dark" : "text-on-dark/60 hover:text-on-dark")}
+                onClick={() => setSourceFrame("z_up")}
+                title="Chuẩn Z-up (Quay trục Z lên trên, sàn z=0)"
+              >
+                Z-up
+              </button>
+              <button
+                type="button"
+                className={cn("rounded px-1.5 py-0.5 transition-colors", sourceFrame === "identity" ? "bg-on-dark/20 font-medium text-on-dark" : "text-on-dark/60 hover:text-on-dark")}
+                onClick={() => setSourceFrame("identity")}
+                title="Gốc (Không xoay trục)"
+              >
+                Gốc
+              </button>
+            </div>
+          </div>
         </>
       )}
     </div>

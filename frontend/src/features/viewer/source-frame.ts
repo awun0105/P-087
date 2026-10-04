@@ -10,8 +10,8 @@
  * y xuống, z tới trước), đổi sang cùng không gian hiển thị, để mọi lớp mở ra cùng một góc nhìn.
  */
 
-/** `colmap`: world SfM của COLMAP/Brush (Y xuống). `z_up`: canonical REC-06, mét, sàn z = 0. */
-export type SourceFrame = "colmap" | "z_up";
+/** `colmap`: world SfM của COLMAP/Brush (Y xuống). `z_up`: canonical REC-06, mét, sàn z = 0. `identity`: toạ độ gốc không xoay. */
+export type SourceFrame = "colmap" | "z_up" | "identity";
 
 export type Vec3 = [number, number, number];
 
@@ -19,11 +19,14 @@ export type Vec3 = [number, number, number];
 export const DISPLAY_EULER: Record<SourceFrame, Vec3> = {
   colmap: [0, 0, 180], // giữ đúng mặc định upstream: (x, y, z) → (−x, −y, z)
   z_up: [-90, 0, 0], // (x, y, z) → (x, z, −y): Z-up thành Y-up, không soi gương
+  identity: [0, 0, 0], // gốc: không xoay
 };
 
 /** Điểm hệ nguồn → không gian hiển thị (cùng phép xoay với `DISPLAY_EULER`). */
 export function toDisplay(frame: SourceFrame, [x, y, z]: Vec3): Vec3 {
-  return frame === "colmap" ? [-x, -y, z] : [x, z, -y];
+  if (frame === "colmap") return [-x, -y, z];
+  if (frame === "z_up") return [x, z, -y];
+  return [x, y, z];
 }
 
 /** Xoay vector bằng quaternion xyzw. */
