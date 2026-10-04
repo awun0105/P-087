@@ -262,7 +262,7 @@
 ### 1. Lâm Quang Anh Quân (`EX-REC` — Reconstruction)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Lâm Quang Anh Quân | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Lâm Quang Anh Quân | Tích hợp Visual 3DGS qua PlayCanvas và supersplat-viewer vào hệ thống. Đảm bảo tính ổn định ranh giới renderer. | Đã hoàn thành | Commits ngày 27/09 | 4h |
 
 ### 2. Lê Mạnh Cường (`EX-PRODUCT` — Product/Orchestration)
 | Member | Task | Status | Output | Time |
@@ -288,7 +288,7 @@
 ### 1. Lâm Quang Anh Quân (`EX-REC` — Reconstruction)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Lâm Quang Anh Quân | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Lâm Quang Anh Quân | Hoàn thiện lưu trữ bền vững (CAS) cho project/job, đồng bộ contract TS-Pydantic. Mở rộng tính năng viewer (đo đạc, load artifact). | Đã hoàn thành | Commits ngày 28/09 | 6h |
 
 ### 2. Lê Mạnh Cường (`EX-PRODUCT` — Product/Orchestration)
 | Member | Task | Status | Output | Time |
@@ -314,7 +314,7 @@
 ### 1. Lâm Quang Anh Quân (`EX-REC` — Reconstruction)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Lâm Quang Anh Quân | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Lâm Quang Anh Quân | Phát triển toàn diện giao diện Web Studio UI mới, tích hợp Editor, luồng Upload video. Xây dựng luồng xử lý API/Worker Orchestration và khung cấu hình tài nguyên tự động. | Đã hoàn thành | Commits ngày 29/09 | 8h |
 
 ### 2. Lê Mạnh Cường (`EX-PRODUCT` — Product/Orchestration)
 | Member | Task | Status | Output | Time |

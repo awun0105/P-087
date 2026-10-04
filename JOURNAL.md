@@ -172,6 +172,11 @@
   - Tích hợp đầu-cuối trên `feat/studio-integration` (PR #16): tách vật SAMPro3D + SAM2, sửa SceneIR theo vật, gói mô phỏng USD + preflight (PASS 6/6 trên `job-123dfd4868d8`), duyệt/phát hành, refactor UI theo STUDIO_UX_SPEC.md.
   - Đo chất lượng 3DGS: `seg-5fps-cap600k` PSNR 28,80 / SSIM 0,927 / LPIPS 0,268.
   - Audit repo + tra cứu Isaac Sim → chốt pipeline v2 (ADR 0007): scene theo vật, xuất USD lai.
+
+  - Phát triển toàn diện Web Studio UI (theme beige/cam), timeline stage và luồng Upload Video.
+  - Tích hợp thành công PlayCanvas và supersplat-viewer (hiển thị và thao tác 3DGS trực tiếp).
+  - Hoàn thiện End-to-End API Orchestration, tự động hoá Job Queue, đánh giá tài nguyên worker.
+  - Đồng bộ Contract dữ liệu TypeScript-Pydantic, chuẩn hoá lưu trữ Artifacts bền vững (CAS).
 - **Khó khăn & Giải pháp:**
   | Khó khăn | Giải pháp | Kết quả |
   |----------|-----------|---------|
