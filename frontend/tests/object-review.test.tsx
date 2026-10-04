@@ -17,15 +17,18 @@ vi.mock("@/features/studio/MetricSceneView", () => ({
     boxes,
     objects = [],
     gizmo,
+    onDelete,
   }: {
     boxes: { id: string; color: string }[];
     objects?: { id: string; url: string | null; visible: boolean }[];
     gizmo?: { id: string; mode: string } | null;
+    onDelete?: () => void;
   }) => (
     <div data-testid="metric-scene">
       {boxes.map((box) => `${box.id}:${box.color}`).join(",")}
       <span data-testid="splats">{objects.map((item) => `${item.id}:${item.url ? "ply" : "none"}:${item.visible}`).join(",")}</span>
       <span data-testid="gizmo">{gizmo ? `${gizmo.id}:${gizmo.mode}` : "none"}</span>
+      {onDelete && <button type="button" onClick={onDelete}>Xoá</button>}
     </div>
   ),
 }));

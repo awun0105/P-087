@@ -9,7 +9,6 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
-  Copy,
   Crosshair,
   Eye,
   EyeOff,
@@ -20,7 +19,6 @@ import {
   Plus,
   RotateCw,
   Tag,
-  Trash2,
   Undo2,
   X,
 } from "lucide-react";
@@ -692,26 +690,10 @@ function Inspector({
             {object.active ? "Ẩn khỏi mô phỏng" : "Đưa lại vào mô phỏng"}
           </Button>
         )}
-        {removed ? (
+        {removed && (
           <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAct("restore")} className="border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep">
             <Undo2 aria-hidden /> Khôi phục
           </Button>
-        ) : (
-          <>
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => onAct("duplicate")} className="text-on-dark/80 hover:text-on-dark hover:bg-on-dark/10">
-              <Copy aria-hidden /> Nhân bản
-            </Button>
-            <Button
-              size="sm"
-              variant="danger"
-              disabled={busy}
-              onClick={() => {
-                if (window.confirm(`Xoá "${object.name}" khỏi scene? Hình và collider của vật không còn trong scene và gói mô phỏng.`)) onAct("delete");
-              }}
-            >
-              <Trash2 aria-hidden /> Xoá
-            </Button>
-          </>
         )}
       </div>
       {placed && (
