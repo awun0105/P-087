@@ -19,9 +19,22 @@ import { MoveToTrashButton } from "@/features/studio/trash/MoveToTrashButton";
 import { cn } from "@/lib/cn";
 import type { ImportedScene, SceneSummary } from "@/lib/contracts/studio";
 import { useListState, pageSlice, ListPagination, SortControl } from "@/features/studio/ListControls";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatDuration } from "@/lib/format";
+import { stageMeta } from "@/features/studio/stages";
+import { progressHref } from "@/features/studio/inspection";
 
 const DATE = new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeStyle: "short" });
+
+/**
+ * Thời gian xử lý = thời gian máy thật sự chạy các bước (backend cộng từ số đo của từng bước),
+ * không gồm lúc xếp hàng và lúc chờ người dùng thao tác.
+ */
+function processingTime(scene: SceneSummary): string {
+  const seconds = scene.processing_seconds;
+  const finished = scene.latest_job?.completed_at != null;
+  if (seconds == null) return finished ? "Chưa đo" : "—";
+  return formatDuration(seconds) + (finished ? "" : " (chưa xong)");
+}
 
 /** Màn hình Scenes: danh sách scene của người dùng (dữ liệu từ backend). Video mẫu nằm ở `/new/try-demo`. */
 export function ScenesHome() {
@@ -53,9 +66,11 @@ export function ScenesHome() {
   const shown = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return (scenes ?? []).filter(
-      (scene) =>
-        (!needle || scene.project.name.toLowerCase().includes(needle)) &&
-        (filter === "all" || sceneStatus(scene.latest_job, scene.preview_ready).group === filter),
+      (scene) => {
+        const group = sceneStatus(scene.latest_job, scene.preview_ready).group;
+        return (!needle || scene.project.name.toLowerCase().includes(needle)) &&
+               (filter === "all" || group === filter || (filter === "needs_action" && (group === "action" || group === "failed")));
+      }
     ).sort((a, b) => sort === "name" ? a.project.name.localeCompare(b.project.name, "vi") : Date.parse(b.project.created_at ?? b.latest_job?.started_at ?? "") - Date.parse(a.project.created_at ?? a.latest_job?.started_at ?? ""));
   }, [scenes, query, filter, sort]);
 
@@ -64,10 +79,6 @@ export function ScenesHome() {
   const importPage = pageSlice(filteredImports, params.get("importsPage"), 12);
   const anyActive = scenes?.some((scene) => sceneStatus(scene.latest_job, scene.preview_ready).active) ?? true;
   usePolling(load, signedIn && anyActive ? 4000 : 20000, true);
-  const continuing = (scenes ?? []).filter((scene) => {
-    const group = sceneStatus(scene.latest_job, scene.preview_ready).group;
-    return group === "action" || group === "running" || group === "failed";
-  }).slice(0, 3);
 
   return (
     <main className="mx-auto max-w-6xl px-4 pt-10 pb-20 sm:px-6">
@@ -86,27 +97,6 @@ export function ScenesHome() {
           Scene của nhóm chỉ hiện sau khi đăng nhập. Chưa có tài khoản vẫn xem được kết quả đã xử lý sẵn ở{" "}
           <Link href="/new/try-demo" className="font-medium text-ember-strong hover:underline">Thử mẫu</Link>.
         </Notice>
-      )}
-
-      {signedIn && continuing.length > 0 && (
-        <section aria-labelledby="continue-heading" className="mt-8 rounded-2xl border border-line bg-paper-raised p-5">
-          <div className="flex items-center justify-between gap-2">
-            <h2 id="continue-heading" className="font-bold">Tiếp tục công việc</h2>
-            <Link href="/jobs" className="text-sm font-medium text-ember-strong hover:underline">Xem Jobs</Link>
-          </div>
-          <ul className="mt-3 divide-y divide-line">
-            {continuing.map((scene) => {
-              const status = sceneStatus(scene.latest_job, scene.preview_ready);
-              return <li key={scene.project.project_id}>
-                <Link href={`/scenes/${encodeURIComponent(scene.latest_job!.job_id)}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg py-3 focus-visible:outline-2 focus-visible:outline-ember">
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{scene.project.name}</span>
-                  <Badge tone={status.tone}>{status.label}</Badge>
-                  <ArrowRight className="size-4 text-ember-strong" aria-hidden />
-                </Link>
-              </li>;
-            })}
-          </ul>
-        </section>
       )}
 
       <section aria-labelledby="scenes-heading" className="mt-12">
@@ -161,7 +151,7 @@ export function ScenesHome() {
             <ToggleGroup
               type="single"
               value={filter}
-              onValueChange={(value) => value && setFilter(value as SceneStatusGroup | "all")}
+              onValueChange={(value) => value && setFilter(value as SceneStatusGroup | "all" | "needs_action")}
               variant="outline"
               size="sm"
               aria-label="Lọc theo trạng thái"
@@ -327,7 +317,7 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
     </Link>
   );
 }
-/** Dạng danh sách: đọc nhanh trạng thái và mốc thời gian của nhiều scene. */
+/** Dạng danh sách: đọc nhanh trạng thái, giai đoạn và mốc thời gian của nhiều scene. */
 function SceneTable({ scenes, onChanged }: { scenes: SceneSummary[]; onChanged: () => void }) {
   return (
     <div className="overflow-hidden rounded-xl border border-line">
@@ -336,7 +326,9 @@ function SceneTable({ scenes, onChanged }: { scenes: SceneSummary[]; onChanged: 
           <TableRow>
             <TableHead>Scene</TableHead>
             <TableHead>Trạng thái</TableHead>
-            <TableHead className="hidden md:table-cell">Video</TableHead>
+            <TableHead className="hidden md:table-cell">Bước hiện tại</TableHead>
+            <TableHead className="hidden lg:table-cell">Video</TableHead>
+            <TableHead className="hidden xl:table-cell">Thời gian xử lý</TableHead>
             <TableHead className="hidden sm:table-cell">Tạo lúc</TableHead>
             <TableHead className="w-0" />
           </TableRow>
@@ -345,22 +337,58 @@ function SceneTable({ scenes, onChanged }: { scenes: SceneSummary[]; onChanged: 
           {scenes.map((scene) => {
             const status = sceneStatus(scene.latest_job, scene.preview_ready);
             const job = scene.latest_job;
+            const targetHref = job
+              ? scene.preview_ready
+                ? `/scenes/${encodeURIComponent(job.job_id)}`
+                : progressHref(job.job_id)
+              : null;
             return (
               <TableRow key={scene.project.project_id}>
-                <TableCell className="max-w-64 truncate font-medium">{scene.project.name}</TableCell>
+                <TableCell className="max-w-64">
+                  {targetHref ? (
+                    <Link
+                      href={targetHref}
+                      className="block truncate font-medium hover:text-ember-strong hover:underline"
+                    >
+                      {scene.project.name}
+                    </Link>
+                  ) : (
+                    <span className="block truncate font-medium">{scene.project.name}</span>
+                  )}
+                  {scene.project.created_by && (
+                    <p className="truncate text-xs text-ink-subtle">
+                      Tạo bởi {scene.project.created_by.display_name}
+                    </p>
+                  )}
+                </TableCell>
                 <TableCell>
                   <Badge tone={status.tone}>{status.label}</Badge>
                 </TableCell>
-                <TableCell className="hidden max-w-56 truncate text-ink-muted md:table-cell">
+                <TableCell className="hidden text-ink-muted md:table-cell">
+                  {job
+                    ? job.status === "SUCCEEDED"
+                      ? "Hoàn tất"
+                      : job.current_stage
+                        ? (stageMeta(job.current_stage)?.title ?? job.current_stage)
+                        : "—"
+                    : "—"}
+                </TableCell>
+                <TableCell className="hidden max-w-56 truncate text-ink-muted lg:table-cell">
                   {scene.project.input_video?.original_name ?? "—"}
                 </TableCell>
-                <TableCell className="hidden text-ink-muted sm:table-cell">
+                <TableCell className="hidden text-xs value-tech text-ink-muted xl:table-cell">
+                  {processingTime(scene)}
+                </TableCell>
+                <TableCell className="hidden text-xs value-tech text-ink-muted sm:table-cell">
                   {scene.project.created_at ? DATE.format(new Date(scene.project.created_at)) : "—"}
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center justify-end gap-3">
-                    {job && (
-                      <Link href={`/scenes/${encodeURIComponent(job.job_id)}`} className="font-medium whitespace-nowrap text-ember-strong hover:underline">
+                    {targetHref && (
+                      <Link
+                        href={targetHref}
+                        className="font-medium whitespace-nowrap text-ember-strong hover:underline"
+                      >
                         {scene.preview_ready ? "Mở scene" : "Xem tiến trình"}
                       </Link>
                     )}

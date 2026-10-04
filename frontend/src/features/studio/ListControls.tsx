@@ -6,14 +6,14 @@ import { STATUS_FILTERS, type SceneStatusGroup } from "@/features/studio/sceneSt
 export function useListState() {
   const { params, update } = useUrlState();
   const rawFilter = params.get("filter");
-  const filter = STATUS_FILTERS.some((item) => item.value === rawFilter) ? rawFilter as SceneStatusGroup | "all" : "all";
+  const filter = STATUS_FILTERS.some((item) => item.value === rawFilter) ? rawFilter as SceneStatusGroup | "all" | "needs_action" : "all";
   const resetPages = { page: null, importsPage: null, samplesPage: null };
   return {
     params, update, query: params.get("q") ?? "", filter,
     view: params.get("view") === "list" ? "list" as const : "grid" as const,
     sort: params.get("sort") === "name" ? "name" as const : "newest" as const,
     setQuery: (value: string) => update({ q: value, ...resetPages }, true),
-    setFilter: (value: SceneStatusGroup | "all") => update({ filter: value === "all" ? null : value, ...resetPages }),
+    setFilter: (value: SceneStatusGroup | "all" | "needs_action") => update({ filter: value === "all" ? null : value, ...resetPages }),
     setView: (value: "grid" | "list") => update({ view: value }),
     setSort: (value: string) => update({ sort: value, ...resetPages }),
     clear: () => update({ q: null, filter: null, ...resetPages }),
