@@ -240,7 +240,7 @@ class _PreviewExecution:
             error_code=error_code,
             stage_id=self.publication.current_stage,
             human_message=human_message,
-            retryable=False,
+            retryable=True,
             details={"exception_type": type(cause).__name__},
         )
         self._complete(

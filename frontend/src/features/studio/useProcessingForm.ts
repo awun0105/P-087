@@ -91,22 +91,34 @@ export function useProcessingForm(enabled: boolean, restored?: Record<string, Pa
 
   useEffect(() => () => pending.current?.abort(), []);
 
+  const [selectedPreset, setSelectedPreset] = useState<PresetKey | null>(null);
+
   const setValue = useCallback((key: string, value: ParamValue) => {
     setError(null);
+    setSelectedPreset(null);
     setValues((current) => (current ? { ...current, [key]: value } : current));
   }, []);
 
   const applyPreset = useCallback(
     (preset: PresetKey) => {
-      if (options) { setError(null); setValues({ ...options.presets[preset] }); }
+      if (options) { 
+        setError(null); 
+        setSelectedPreset(preset);
+        setValues({ ...options.presets[preset] }); 
+      }
     },
     [options],
   );
 
   let activePreset: PresetKey | null = null;
   if (options && values) {
-    if (samePreset(values, options.presets.minimum_quality)) activePreset = "minimum_quality";
-    else if (samePreset(values, options.presets.machine_maximum)) activePreset = "machine_maximum";
+    if (selectedPreset && samePreset(values, options.presets[selectedPreset])) {
+      activePreset = selectedPreset;
+    } else if (samePreset(values, options.presets.minimum_quality)) {
+      activePreset = "minimum_quality";
+    } else if (samePreset(values, options.presets.machine_maximum)) {
+      activePreset = "machine_maximum";
+    }
   }
 
   const retry = () => { setError(null); setRetryKey((key) => key + 1); };

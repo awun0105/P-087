@@ -17,15 +17,21 @@ vi.mock("@/features/studio/MetricSceneView", () => ({
     boxes,
     objects = [],
     gizmo,
+    onTool,
+    onDelete,
   }: {
     boxes: { id: string; color: string }[];
     objects?: { id: string; url: string | null; visible: boolean }[];
     gizmo?: { id: string; mode: string } | null;
+    onTool?: (tool: "translate" | "rotate" | "none") => void;
+    onDelete?: () => void;
   }) => (
     <div data-testid="metric-scene">
       {boxes.map((box) => `${box.id}:${box.color}`).join(",")}
       <span data-testid="splats">{objects.map((item) => `${item.id}:${item.url ? "ply" : "none"}:${item.visible}`).join(",")}</span>
       <span data-testid="gizmo">{gizmo ? `${gizmo.id}:${gizmo.mode}` : "none"}</span>
+      {onTool && <button type="button" onClick={() => onTool("translate")}>Dịch</button>}
+      {onDelete && <button type="button" onClick={onDelete}>Xoá</button>}
     </div>
   ),
 }));
@@ -304,5 +310,30 @@ describe("ObjectReviewView", () => {
     await screen.findByText("Vật thể 1");
     await waitFor(() => expect(calls("/scene/objectify")).toHaveLength(1));
     expect(screen.queryByText(/hộp ứng viên/)).toBeNull();
+  });
+
+  it("hỗ trợ thu gọn và xổ xuống 2 panel bên trong viewport", async () => {
+    routeFetch({ "/scene": [reply({ scene: scene("rev-001", "CANDIDATE") })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    expect(await screen.findByText("1 vật thể · 1 chờ xác nhận")).toBeInTheDocument();
+
+    // Thu gọn panel trái
+    fireEvent.click(screen.getByRole("button", { name: "Thu gọn danh sách vật thể" }));
+    expect(screen.queryByText("1 vật thể · 1 chờ xác nhận")).toBeNull();
+    const openLeft = screen.getByRole("button", { name: "Mở danh sách vật thể" });
+    expect(openLeft).toBeInTheDocument();
+
+    // Xổ xuống panel trái
+    fireEvent.click(openLeft);
+    expect(screen.getByText("1 vật thể · 1 chờ xác nhận")).toBeInTheDocument();
+
+    // Thu gọn panel phải
+    fireEvent.click(screen.getByRole("button", { name: "Thu gọn chi tiết vật thể" }));
+    const openRight = screen.getByRole("button", { name: "Mở chi tiết vật thể" });
+    expect(openRight).toBeInTheDocument();
+
+    // Xổ xuống panel phải
+    fireEvent.click(openRight);
+    expect(screen.getByText("Chọn một vật")).toBeInTheDocument();
   });
 });

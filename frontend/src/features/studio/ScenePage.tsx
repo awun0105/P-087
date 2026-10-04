@@ -53,6 +53,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
   const preview = loadedPreview?.attempt === progress?.attempt ? loadedPreview : null;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pollingKey, setPollingKey] = useState(0);
   const [tab, setTab] = useState<Tab | null>(initialTab ?? null);
   const { params, update } = useUrlState();
   const { navigate } = useNavigationGuard();
@@ -85,6 +86,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
   const poll = useCallback(
     async (signal: AbortSignal) => {
       const result = await getJobProgress(jobId, signal);
+      if (signal.aborted) return;
       if (!result.ok) {
         setError(result.error.status === 404 ? "Không tìm thấy scene này." : errorMessage(result.error));
         return;
@@ -112,7 +114,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
   const finished = progress?.status === "SUCCEEDED" || progress?.status === "FAILED" || progress?.status === "CANCELLED";
   const waitingMetric = progress?.waiting_for === "metric_confirmation";
   // Dừng poll khi job kết thúc hoặc đang chờ chính người dùng; tiếp tục khi worker còn làm.
-  usePolling(poll, 3000, !(finished || (preview !== null && waitingMetric)));
+  usePolling(poll, 3000, !(finished || (preview !== null && waitingMetric)), pollingKey);
 
   async function act(action: () => Promise<unknown>, success: string) {
     if (busy) return;
@@ -120,7 +122,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
     try {
       await action();
       notifySuccess(success);
-      await poll(new AbortController().signal);
+      setPollingKey((k) => k + 1);
     } catch (cause) {
       setError(errorMessage(cause, "Thao tác thất bại"));
     } finally {
@@ -164,7 +166,6 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-paper-raised px-4 py-3 sm:px-6">
         <div className="mr-2 min-w-0">
           <h1 className="truncate text-base font-bold">{info?.name ?? "Đang tải scene…"}</h1>
-          <details className="text-xs text-ink-muted"><summary className="cursor-pointer">Thông tin job</summary><p className="break-all font-mono">{jobId}</p></details>
         </div>
         {status && <Badge tone={status.tone}>{status.label}</Badge>}
         {progress && progress.attempt > 1 && <Badge tone="neutral">Lần chạy {progress.attempt}</Badge>}
@@ -214,6 +215,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
             onCancel={() => {
               if (window.confirm("Huỷ xử lý scene này? Tiến trình trên GPU sẽ dừng.")) void act(() => cancelJob(jobId), "Đã gửi yêu cầu huỷ. Trạng thái được cập nhật từ máy chủ.");
             }}
+            onRetry={() => void navigate(() => { void act(() => retryJob(jobId), "Đã gửi yêu cầu thử lại. Theo dõi lần chạy mới ở Tiến trình."); }, undefined, true)}
           />
         )}
         {(current === "studio" || studioVisited) && preview && (

@@ -16,32 +16,46 @@ describe("ngữ cảnh điều hướng", () => {
     expect(isActive("/scenes", "/scenes")).toBe(true);
     expect(isActive("/scenes/job-a", "/scenes")).toBe(true);
     expect(isActive("/imports/import-a", "/scenes")).toBe(true);
-    expect(isActive("/new", "/scenes")).toBe(true);
+    expect(isActive("/new", "/new")).toBe(true);
+    expect(isActive("/new/import-video", "/new")).toBe(true);
+    expect(isActive("/new", "/scenes")).toBe(false);
     expect(isActive("/", "/scenes")).toBe(false);
     expect(isActive("/scenes-old", "/scenes")).toBe(false);
     expect(isActive("/overview-old", "/overview")).toBe(false);
-    expect(isActive("/jobs-old", "/jobs")).toBe(false);
-    expect(isActive("/jobs", "/jobs")).toBe(true);
+    expect(isActive("/trash-old", "/trash")).toBe(false);
+    expect(isActive("/trash", "/trash")).toBe(true);
   });
 
   it("Tổng quan tách khỏi Scenes; breadcrumb chi tiết quay lại thư viện", () => {
     expect(crumbsFor("/overview")).toEqual([{ label: "Tổng quan" }]);
     expect(crumbsFor("/trang-la")).toEqual([{ label: "Tổng quan", href: "/overview" }]);
-    expect(crumbsFor("/scenes")).toEqual([{ label: "Scenes" }]);
-    expect(crumbsFor("/scenes/job-a", "Kho A")).toEqual([{ label: "Scenes", href: "/scenes" }, { label: "Kho A" }]);
-    expect(crumbsFor("/new")[0].href).toBe("/scenes");
+    expect(crumbsFor("/scenes/job-a", "Kho A")).toEqual([
+      { label: "Scenes", href: "/scenes" },
+      { label: "Scene dựng từ video", href: "/scenes" },
+      { label: "Kho A" },
+    ]);
+    expect(crumbsFor("/new")).toEqual([{ label: "Tạo scene mới" }]);
+    expect(crumbsFor("/new/import-video")).toEqual([
+      { label: "Tạo scene mới", href: "/new" },
+      { label: "Dựng từ video" },
+    ]);
     expect(crumbsFor("/imports/import-a")[0].href).toBe("/scenes");
+    expect(crumbsFor("/imports/import-a", "Scene Nhập 1")).toEqual([
+      { label: "Scenes", href: "/scenes" },
+      { label: "Scene import", href: "/scenes" },
+      { label: "Scene Nhập 1" },
+    ]);
   });
 
   it("nút Quay lại trỏ về cấp cha; trang cấp cao nhất không có nút", () => {
     expect(backHref("/scenes/job-a")).toBe("/scenes");
-    expect(backHref("/new")).toBe("/scenes");
+    expect(backHref("/new/import-video")).toBe("/new");
     expect(backHref("/imports/import-a")).toBe("/scenes");
     expect(backHref("/samples/mau-1")).toBe("/scenes");
     expect(backHref("/scenes/job-a/stages/frames")).toBe(crumbsFor("/scenes/job-a/stages/frames")[1].href);
     expect(backHref("/scenes/job-a/stages/frames")).not.toBe("/scenes");
     expect(backHref("/account")).toBe("/overview");
-    for (const top of ["/overview", "/scenes", "/jobs", "/team"]) expect(backHref(top)).toBeNull();
+    for (const top of ["/overview", "/scenes", "/new", "/trash", "/team"]) expect(backHref(top)).toBeNull();
   });
 
   it("breadcrumb lấy tên API và bỏ tên khi màn chi tiết rời đi", () => {

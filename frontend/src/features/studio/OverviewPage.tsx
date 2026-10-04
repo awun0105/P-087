@@ -2,7 +2,7 @@
 
 import { errorMessage } from "@/lib/ui-error";
 
-import { ArrowRight, Box, Clapperboard, Film, Layers3, ListChecks, ShieldCheck, Workflow } from "lucide-react";
+import { ArrowRight, Box, Clapperboard, Film, Layers3, ShieldCheck, Trash2, Workflow } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useCallback, useState, type ReactNode } from "react";
 
@@ -44,7 +44,7 @@ export function OverviewPage() {
             <h2 id="summary-heading" className="text-xl font-bold tracking-tight">Tổng hợp công việc</h2>
             <p className="mt-1 text-sm text-ink-muted">Scene và lần xử lý mới nhất, theo quyền truy cập của bạn.</p>
           </div>
-          <Link href="/jobs" className="inline-flex items-center gap-1 text-sm font-medium text-ember-strong hover:underline">Xem Jobs <ArrowRight className="size-4" aria-hidden /></Link>
+          <Link href="/scenes?view=list" className="inline-flex items-center gap-1 text-sm font-medium text-ember-strong hover:underline">Xem danh sách Scenes <ArrowRight className="size-4" aria-hidden /></Link>
         </div>
         {me === null ? <p role="status" className="text-sm text-ink-muted">Đang kiểm tra quyền truy cập…</p>
           : signedIn ? <WorkSummary key={me.user?.user_id ?? "local"} />
@@ -73,8 +73,8 @@ export function OverviewPage() {
       </section>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <AreaLink href="/scenes" icon={<Clapperboard aria-hidden />} title="Scenes" detail="Thư viện scene, mẫu và file import. Tạo scene mới hoặc tiếp tục scene đang làm." />
-        <AreaLink href="/jobs" icon={<ListChecks aria-hidden />} title="Jobs" detail="Theo dõi lần xử lý mới nhất của từng scene; mở scene để xem tiến trình và phục hồi lỗi." />
+        <AreaLink href="/scenes" icon={<Clapperboard aria-hidden />} title="Scenes" detail="Thư viện scene, mẫu và file import. Quản lý các scene hoặc theo dõi tiến trình." />
+        <AreaLink href="/trash" icon={<Trash2 aria-hidden />} title="Thùng rác" detail="Xem lại hoặc khôi phục các scene và file import đã xoá tạm thời." />
       </div>
     </main>
   );
@@ -118,7 +118,12 @@ function WorkSummary() {
       </dl>
       {scenes && scenes.length === 0 && <p className="text-sm text-ink-muted">Chưa có scene từ video. Vào Scenes để chọn mẫu, mở 3DGS hoặc tạo scene đầu tiên.</p>}
       {continuing.length > 0 && <Card className="p-5">
-        <h3 className="font-bold">Công việc cần tiếp tục</h3>
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="font-bold">Công việc cần tiếp tục</h3>
+          <Link href="/scenes?filter=needs_action" className="text-sm font-medium text-ember-strong hover:underline">
+            Cần xử lý
+          </Link>
+        </div>
         <ul className="mt-3 divide-y divide-line">{continuing.map((scene) => {
           const status = sceneStatus(scene.latest_job, scene.preview_ready);
           return <li key={scene.project.project_id}><Link href={`/scenes/${encodeURIComponent(scene.latest_job!.job_id)}`} className="flex flex-wrap items-center justify-between gap-2 rounded py-3 focus-visible:outline-2 focus-visible:outline-ember"><span className="min-w-0 flex-1 truncate text-sm font-medium">{scene.project.name}</span><Badge tone={status.tone}>{status.label}</Badge><ArrowRight className="size-4 text-ember-strong" aria-hidden /></Link></li>;

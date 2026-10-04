@@ -61,10 +61,9 @@ function deriveStatus(status: JobStatus, currentStage: StageId | null, waitingMe
   }
 }
 
-export const STATUS_FILTERS: { value: SceneStatusGroup | "all"; label: string }[] = [
+export const STATUS_FILTERS: { value: SceneStatusGroup | "all" | "needs_action"; label: string }[] = [
   { value: "all", label: "Tất cả" },
-  { value: "action", label: "Cần thao tác" },
+  { value: "needs_action", label: "Cần xử lý" },
   { value: "running", label: "Đang xử lý" },
   { value: "done", label: "Đã dựng" },
-  { value: "failed", label: "Lỗi" },
 ];

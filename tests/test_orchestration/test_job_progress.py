@@ -174,3 +174,20 @@ def test_preview_ready_job_waits_for_metric_confirmation(tmp_path: Path) -> None
     # Chưa có preview (vd đang dựng) → không báo chờ người.
     not_ready = job_progress(job, attempts, preview_ready=False)
     assert not_ready.waiting_for is None and not_ready.stages[-3].state == "running"
+
+
+def test_running_job_advances_updated_at_from_heartbeat(tmp_path: Path) -> None:
+    """Worker heartbeat giữ updated_at tươi mới trong suốt thời gian job đang chạy."""
+    job = _job(tmp_path, status=JobStatus.RUNNING, current_stage=StageId.VISUAL_RECON)
+    attempts = [
+        _event(1, JobStatus.QUEUED, StageId.INPUT_VALIDATE, 0),
+        _event(1, JobStatus.RUNNING, StageId.VISUAL_RECON, 2),
+    ]
+    # Khi không có heartbeat, updated_at lấy từ event gần nhất (phút 2)
+    progress_no_hb = job_progress(job, attempts, preview_ready=False)
+    assert progress_no_hb.updated_at == _T0 + timedelta(minutes=2)
+
+    # Khi có heartbeat (ví dụ phút 15), updated_at phải lấy theo heartbeat mới nhất
+    hb_time = _T0 + timedelta(minutes=15)
+    progress_with_hb = job_progress(job, attempts, preview_ready=False, heartbeat_at=hb_time)
+    assert progress_with_hb.updated_at == hb_time

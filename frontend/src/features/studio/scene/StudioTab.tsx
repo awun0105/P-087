@@ -61,7 +61,7 @@ export function StudioTab({
             : "Bản xem 3DGS (chưa quy đổi mét). Studio vật thể mở sau khi xác nhận tỉ lệ và dựng collision."}
       </Notice>
       <div className="min-h-0 flex-1">
-        <PreviewScene preview={preview} />
+        <PreviewScene contentUrl={preview.url} filename={preview.filename} title={`Viewer 3DGS: ${title}`} />
       </div>
     </div>
   );

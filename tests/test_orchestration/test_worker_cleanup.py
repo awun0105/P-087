@@ -428,3 +428,40 @@ def test_metric_proposal_step_never_blocks_the_preview(tmp_path: Path, monkeypat
     runner._propose_metric(attempt, reference)  # lỗi runtime: không ném ra ngoài
     assert propose.call_count == 1 and propose.call_args.args[:2] == (attempt.job.job_id, reference)
     assert propose.call_args.args[5] == workspace / "metric_proposal"
+
+
+def test_recover_interrupted_jobs_on_worker_startup(tmp_path: Path) -> None:
+    """Worker khởi động: job RUNNING có attempt lock đã nhả tự động chuyển FAILED (retryable=True)."""
+    from src.models.contracts.manifests import JobStatus, StageId
+    from src.services.orchestration.jobs.models import TransitionRequest
+    from src.services.orchestration.jobs.worker_cli import recover_interrupted_jobs
+    from src.services.orchestration.projects.models import JobCreateInput
+
+    registry = _registry(tmp_path / "runtime")
+    job = registry.create_job(JobCreateInput(project_id="project-fixture-001"))
+    # Chuyển QUEUED -> RUNNING ở VISUAL_RECON
+    claimed = registry.transition_job(
+        job.job_id,
+        TransitionRequest(target_status=JobStatus.RUNNING, current_stage=StageId.VISUAL_RECON),
+        expected_checksum=job.job_manifest_checksum,
+    )
+    assert claimed.status == JobStatus.RUNNING
+
+    # Tạo attempt workspace mồ côi (không ai giữ flock)
+    worker_root = tmp_path / "workers"
+    workspace = worker_root / job.job_id / ("attempt-" + "c" * 32)
+    workspace.mkdir(parents=True)
+    (workspace / "attempt.lock").write_text("")
+
+    settings = Settings(product_worker_root=worker_root)
+    recovered = recover_interrupted_jobs(registry, settings)
+    assert recovered == 1
+
+    current = registry.get_job(job.job_id)
+    assert current.status == JobStatus.FAILED
+    assert current.current_stage == StageId.VISUAL_RECON
+    history = registry.list_job_attempts(job.job_id)
+    latest_event = history[-1]
+    assert latest_event.error is not None
+    assert latest_event.error.error_code == "INTERRUPTED_SHUTDOWN"
+    assert latest_event.error.retryable is True

@@ -11,6 +11,7 @@ import { cn } from "@/lib/cn";
 import type { StageId } from "@/lib/contracts/api";
 import type { StageState } from "@/lib/contracts/studio";
 import { formatDuration } from "@/lib/format";
+import { estimateRemainingTime, formatEtaDuration } from "@/features/studio/scene/estimation";
 
 export interface StageView {
   stage_id: StageId;
@@ -40,6 +41,7 @@ export function PipelineTimeline({
   timeNote,
   stageList = MVP_STAGES,
   jobId,
+  isStale = false,
 }: {
   stages: readonly StageView[];
   timeNote?: string;
@@ -47,15 +49,31 @@ export function PipelineTimeline({
   stageList?: readonly StageMeta[];
   /** Mẫu replay không có job nên không tạo link Inspect job giả. */
   jobId?: string;
+  /** True nếu job đang RUNNING nhưng heartbeat đã quá hạn (mất kết nối hoặc worker chết). */
+  isStale?: boolean;
 }) {
   const [selected, setSelected] = useState<StageId | null>(null);
   const done = stages.filter((stage) => stage.state === "succeeded").length;
+  const eta = estimateRemainingTime(stages, isStale);
+
   return (
     <div>
-      <div className="mb-5 flex items-baseline justify-between gap-4">
-        <p className="text-sm font-medium text-ink">
-          {done}/{stageList.length} bước hoàn tất
-        </p>
+      <div className="mb-5 flex flex-wrap items-baseline justify-between gap-4">
+        <div className="flex items-baseline gap-3">
+          <p className="text-sm font-medium text-ink">
+            {done}/{stageList.length} bước hoàn tất
+          </p>
+          {isStale && (
+            <span className="rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-500">
+              Mất kết nối tiến trình
+            </span>
+          )}
+          {!isStale && eta.formattedRemaining && (
+            <span className="rounded-md bg-paper-sunken px-2 py-0.5 text-xs font-mono text-ink-muted">
+              Còn {eta.formattedRemaining}
+            </span>
+          )}
+        </div>
         {timeNote && <p className="text-xs text-ink-subtle">{timeNote}</p>}
       </div>
       <ProgressBar value={done / stageList.length} label="Tổng tiến trình" className="mb-6" />
@@ -63,13 +81,15 @@ export function PipelineTimeline({
         {stageList.map((meta) => {
           const stage = stages.find((item) => item.stage_id === meta.id);
           const state = stage?.state ?? "pending";
-          const Icon = ICONS[state];
+          const isCurrentStale = state === "running" && isStale;
+          const Icon = isCurrentStale ? AlertTriangle : ICONS[state];
           return (
             <li
               key={meta.id}
               className={cn(
                 "rounded-xl px-3 py-3 transition-colors duration-300",
-                state === "running" && "bg-ember-soft/60",
+                state === "running" && !isStale && "bg-ember-soft/60",
+                state === "running" && isStale && "bg-amber-500/10 ring-1 ring-amber-500/30",
                 state === "waiting" && "bg-ember-soft/40 ring-1 ring-ember/40",
                 state === "failed" && "bg-rust-soft",
               )}
@@ -79,33 +99,47 @@ export function PipelineTimeline({
                   className={cn(
                     "mt-0.5 grid size-6 shrink-0 place-items-center rounded-full",
                     state === "succeeded" && "bg-sage text-paper",
-                    state === "running" && "bg-primary text-primary-foreground",
+                    state === "running" && !isStale && "bg-primary text-primary-foreground",
+                    state === "running" && isStale && "bg-amber-500 text-on-accent",
                     state === "waiting" && "bg-paper-raised text-ember-strong ring-2 ring-ember",
                     state === "failed" && "bg-destructive-fill text-on-accent",
                     (state === "pending" || state === "cancelled") && "text-ink-subtle",
                   )}
                 >
-                  <Icon className={cn("size-3.5", state === "running" && "animate-spin motion-reduce:animate-none")} aria-hidden />
+                  <Icon className={cn("size-3.5", state === "running" && !isStale && "animate-spin motion-reduce:animate-none")} aria-hidden />
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-3">
                     <p className={cn("text-sm font-medium", state === "pending" ? "text-ink-subtle" : "text-ink")}>
                       {jobId && state === "succeeded" ? <button type="button" aria-expanded={selected === meta.id} aria-controls={`stage-detail-${meta.id}`} onClick={() => setSelected((value) => value === meta.id ? null : meta.id)} className="cursor-pointer text-left underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ember">{meta.title}<span className="sr-only"> — đã xong, xem chi tiết</span></button> : <>
                       {meta.title}
-                      <span className="sr-only"> — {STATE_LABEL[state]}</span>
+                      <span className="sr-only"> — {isCurrentStale ? "gián đoạn" : STATE_LABEL[state]}</span>
                       </>}
                     </p>
                     {stage?.seconds != null && state !== "pending" && (
-                      <span className="shrink-0 text-xs value-tech text-ink-subtle">{formatDuration(stage.seconds)}</span>
+                      <span className="shrink-0 text-xs value-tech text-ink-subtle">
+                        {formatDuration(stage.seconds)}
+                        {state === "running" && !isStale && eta.currentStageRemainingSeconds != null && (
+                          <span className="ml-1 text-ink-muted">· còn {formatEtaDuration(eta.currentStageRemainingSeconds)}</span>
+                        )}
+                        {isCurrentStale && (
+                          <span className="ml-1 font-medium text-amber-500">· gián đoạn</span>
+                        )}
+                      </span>
                     )}
                   </div>
-                  {(state === "running" || state === "failed" || state === "waiting") && (
+                  {isCurrentStale && (
+                    <p className="mt-1 text-sm text-amber-500">
+                      Tiến trình bị gián đoạn. Bấm thử lại để tiếp tục huấn luyện từ checkpoint đã lưu.
+                    </p>
+                  )}
+                  {!isCurrentStale && (state === "running" || state === "failed" || state === "waiting") && (
                     <p className="mt-1 text-sm leading-relaxed text-ink-muted">{meta.description}</p>
                   )}
                   {state === "waiting" && (
                     <p className="label-tech mt-2 text-ember-strong">Đang chờ bạn</p>
                   )}
-                  {state === "running" && (
+                  {state === "running" && !isStale && (
                     <ProgressBar value={stage?.fraction ?? null} label={`Tiến trình ${meta.title}`} className="mt-3" />
                   )}
                   {state === "failed" && stage?.error && (

@@ -20,7 +20,8 @@
  * xác nhận metric hoặc sửa canonical state qua PlayCanvas.
  */
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 import type { ViewMode } from "@/features/viewer/layers";
 import { DISPLAY_EULER, type DisplayCameraPose, type SourceFrame } from "@/features/viewer/source-frame";
@@ -148,6 +149,8 @@ export interface PlayCanvasSceneProps {
   onApp?: (app: ViewerAppLike | null, controls?: ViewerControls) => void;
   /** Hệ số nhân bước cuộn chuột (1 = mặc định của viewer). Đổi không tạo lại viewer. */
   wheelFactor?: number;
+  /** Nút điều khiển bổ sung muốn nhúng vào thanh công cụ đáy của viewer (nếu showControls = true). */
+  extraControls?: ReactNode;
 }
 
 export interface ViewerAnnotation {
@@ -193,8 +196,10 @@ export function PlayCanvasScene({
   annotations,
   onApp,
   wheelFactor = 1,
+  extraControls,
 }: PlayCanvasSceneProps) {
   const container = useRef<HTMLDivElement | null>(null);
+  const [controlsContainer, setControlsContainer] = useState<Element | null>(null);
   const wheel = useRef(wheelFactor);
   useEffect(() => {
     wheel.current = wheelFactor;
@@ -214,6 +219,16 @@ export function PlayCanvasScene({
     return () => host.removeEventListener("wheel", rescale, { capture: true });
   }, []);
   const [runtime, setRuntime] = useState<PlayCanvasRuntime>(INITIAL_RUNTIME);
+  const onAppRef = useRef(onApp);
+  useEffect(() => {
+    onAppRef.current = onApp;
+  }, [onApp]);
+  const annotationsRef = useRef(annotations);
+  const liveAnnotations = useRef<ViewerAnnotationSetting[] | null>(null);
+  useEffect(() => {
+    annotationsRef.current = annotations;
+    if (liveAnnotations.current) replaceAnnotations(liveAnnotations.current, annotations);
+  }, [annotations]);
 
   /** Đẩy trạng thái lên host; giữ identity ổn định vì nằm trong deps của effect khác. */
   const publish = useCallback(
@@ -237,20 +252,14 @@ export function PlayCanvasScene({
     const resolvedUrl = objectUrl ?? contentUrl!;
 
     let orient: (() => void) | null = null;
+    let hostModeRequest = false;
 
     void Promise.all([import("@playcanvas/supersplat-viewer/viewer"), import("@playcanvas/supersplat-viewer/settings")])
       .then(async ([module, settingsModule]) => {
         if (disposed) return;
         const settings = settingsModule.defaultSettings("environment");
-        if (initialCamera) settings.cameras = [{ initial: initialCamera }];
-        if (annotations?.length) {
-          settings.annotations = annotations.map((item) => ({
-            position: item.position,
-            title: item.title,
-            text: "",
-            camera: { initial: item.camera },
-          }));
-        }
+        settings.cameras = initialCamera ? [{ initial: initialCamera }] : [];
+        settings.annotations = toViewerAnnotations(annotationsRef.current);
         const viewer = await module.createViewer({
           container: host,
           contentUrl: resolvedUrl,
@@ -267,6 +276,10 @@ export function PlayCanvasScene({
           return;
         }
         handle = viewer;
+        if (showControls) {
+          const buttonsEl = host.querySelector(".sse-buttonsContainer");
+          if (buttonsEl) setControlsContainer(buttonsEl);
+        }
         // Upstream tạo entity `gsplat` khi asset nạp xong, với phép xoay COLMAP cố định. Đặt lại
         // phép xoay theo hệ nguồn ở frame đầu tiên có entity (trước khi render), rồi bỏ listener.
         const app = viewer.app as unknown as ViewerAppLike | undefined;
@@ -281,9 +294,33 @@ export function PlayCanvasScene({
           };
           app.on("update", orient);
         }
-        if (annotations?.length) viewer.state.showAnnotations = false;
+        // Hotspot mặc định của viewer luôn ẩn: host tự vẽ danh sách vật.
+        viewer.state.showAnnotations = false;
+        // `selectAnnotation(i)` đọc mảng này theo chỉ số mỗi lần gọi, nên host cập nhật tại chỗ thay vì
+        // tạo lại viewer (tạo lại = tải lại cả 3DGS) mỗi khi danh sách vật đổi.
+        liveAnnotations.current = viewer.annotations as unknown as ViewerAnnotationSetting[];
+        replaceAnnotations(liveAnnotations.current, annotationsRef.current);
+        // Sau khi phát lại animation camera (hết track hoặc người dùng ngắt), mặc định về Orbit thay vì
+        // fly/walk của upstream. Ghi trễ một microtask để không đổi state ngay trong handler `changed`.
+        subscriptions.push(
+          viewer.events.on("cameraMode:changed", (value: CameraMode, prev: CameraMode) => {
+            if (disposed || prev !== "anim" || value === "orbit" || hostModeRequest) return;
+            queueMicrotask(() => {
+              if (!disposed && viewer.state.cameraMode === value) viewer.state.cameraMode = "orbit";
+            });
+          }),
+          viewer.events.on("animationPaused:changed", (paused: boolean) => {
+            const state = viewer.state as unknown as { animationTime: number; animationDuration: number };
+            if (disposed || !paused || viewer.state.cameraMode !== "anim") return;
+            if (state.animationDuration > 0 && state.animationTime >= state.animationDuration - 1e-3) {
+              queueMicrotask(() => {
+                if (!disposed && viewer.state.cameraMode === "anim") viewer.state.cameraMode = "orbit";
+              });
+            }
+          }),
+        );
         if (app) {
-          onApp?.(app, {
+          onAppRef.current?.(app, {
             select: (index) => {
               if (disposed || !viewer.state.loaded) return false;
               viewer.selectAnnotation(index);
@@ -295,18 +332,31 @@ export function PlayCanvasScene({
             setCameraMode: (next) => {
               if (disposed || !viewer.state.loaded) return false;
               if (next === "walk" && !viewer.state.walkAllowed) return false;
-              viewer.state.cameraMode = next;
+              hostModeRequest = true;
+              try {
+                viewer.state.cameraMode = next;
+              } finally {
+                hostModeRequest = false;
+              }
               return true;
             },
             frameScene: () => {
               if (disposed || !viewer.state.loaded) return false;
-              viewer.frameScene();
-              return true;
+              try {
+                viewer.frameScene();
+                return true;
+              } catch {
+                return false;
+              }
             },
             resetCamera: () => {
               if (disposed || !viewer.state.loaded) return false;
-              viewer.resetCamera();
-              return true;
+              try {
+                viewer.resetCamera();
+                return true;
+              } catch {
+                return false;
+              }
             },
           });
         }
@@ -342,10 +392,11 @@ export function PlayCanvasScene({
       disposed = true;
       subscriptions.forEach((subscription) => subscription.off());
       if (orient && handle?.app) (handle.app as unknown as ViewerAppLike).off("update", orient);
-      onApp?.(null);
+      onAppRef.current?.(null);
       onInspectionReady?.(null);
       const activeHandle = handle;
       const release = () => {
+        setControlsContainer(null);
         activeHandle?.destroy();
         if (objectUrl) URL.revokeObjectURL(objectUrl);
       };
@@ -356,10 +407,10 @@ export function PlayCanvasScene({
       });
       else release();
       handle = null;
+      liveAnnotations.current = null;
     };
   }, [capability, collisionUrl, contentUrl, contentFile, contentFilename, showControls, mode, onFailed, publish,
-    enableInspection, inspectionMaxPoints, onInspectionReady, onInspectionState, renderer, sourceFrame, initialCamera,
-    annotations, onApp]);
+    enableInspection, inspectionMaxPoints, onInspectionReady, onInspectionState, renderer, sourceFrame, initialCamera]);
 
   return (
     <div
@@ -372,7 +423,11 @@ export function PlayCanvasScene({
       data-renderer={runtime.graphicsBackend}
       className="h-full w-full"
       data-engine={capability === "ready" ? "playcanvas" : undefined}
-    />
+    >
+      {controlsContainer && extraControls
+        ? createPortal(extraControls, controlsContainer)
+        : null}
+    </div>
   );
 }
 
@@ -383,6 +438,23 @@ export interface ViewerAppLike {
   };
   on(event: "update", handler: () => void): unknown;
   off(event: "update", handler: () => void): unknown;
+}
+
+/** Dạng annotation trong settings của supersplat-viewer (chỉ các field host ghi). */
+interface ViewerAnnotationSetting {
+  position: [number, number, number];
+  title: string;
+  text: string;
+  camera: { initial: DisplayCameraPose };
+}
+
+function toViewerAnnotations(items: readonly ViewerAnnotation[] | undefined): ViewerAnnotationSetting[] {
+  return (items ?? []).map((item) => ({ position: item.position, title: item.title, text: "", camera: { initial: item.camera } }));
+}
+
+/** Thay nội dung mảng annotation mà viewer đang giữ, giữ nguyên identity của mảng. */
+function replaceAnnotations(target: ViewerAnnotationSetting[], items: readonly ViewerAnnotation[] | undefined): void {
+  target.splice(0, target.length, ...toViewerAnnotations(items));
 }
 
 /** Chỉ những field host thật sự dùng, để không phụ thuộc shape đầy đủ của thư viện. */

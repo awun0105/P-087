@@ -11,7 +11,7 @@ import { ApiError } from "@/lib/api/client";
 import { errorMessage } from "@/lib/ui-error";
 import type { SceneIR } from "@/lib/contracts/api";
 import type { JobProgress } from "@/lib/contracts/studio";
-import type { Tab, StudioMode } from "@/features/studio/scene/state";
+import { isJobStale, useNow, type Tab, type StudioMode } from "@/features/studio/scene/state";
 
 interface Detail { scene: SceneIR; pkg: SimulationPackageView | null; review: ReviewStateView | null }
 /** Bước tiếp theo đọc published state; không tạo lifecycle cạnh tranh với backend. */
@@ -22,6 +22,8 @@ export function NextAction({ jobId, progress, current, mode, sceneReady, revisio
   const { me } = useAuth();
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const now = useNow(progress?.status === "RUNNING");
+  const stale = isJobStale(progress, now);
   const load = useCallback(async (signal: AbortSignal) => {
     const scene = await getJobScene(jobId, signal);
     if (signal.aborted) return;
@@ -41,12 +43,14 @@ export function NextAction({ jobId, progress, current, mode, sceneReady, revisio
   }, [revision, sceneReady, load]);
   usePolling(load, 10000, sceneReady);
   if (!progress) return null;
-  let title = "Đang xử lý";
-  let description = "Có thể đóng trang; job tiếp tục chạy trên máy chủ.";
+  let title: string | null = null;
+  let description: string | null = null;
   let action: { label: string; tab: Tab; mode?: StudioMode } | null = null;
-  if (progress.status === "FAILED") {
-    title = "Xử lý chưa hoàn tất";
-    description = "Xem nguyên nhân và cách phục hồi tại giai đoạn lỗi trong Tiến trình.";
+  if (stale) {
+    title = "Tiến trình bị gián đoạn";
+    description = "Bấm thử lại để tiếp tục huấn luyện từ checkpoint đã lưu.";
+  } else if (progress.status === "FAILED") {
+    // Không hiển thị "Xử lý chưa hoàn tất. Xem nguyên nhân..." - các thông tin lỗi đã có ở stage trong Timeline
   } else if (progress.status === "CANCELLED") {
     title = "Đã huỷ xử lý";
     description = "Kết quả đã publish vẫn được giữ; mở giai đoạn hoàn tất để xem.";
@@ -93,10 +97,12 @@ export function NextAction({ jobId, progress, current, mode, sceneReady, revisio
     }
   }
   const atTarget = action && current === action.tab && (!action.mode || mode === action.mode);
+  const showRetry = Boolean(stale || (progress.status === "FAILED" && progress.error?.retryable));
+  if (!title && !showRetry && !(sceneReady && error)) return null;
   return <section aria-label="Bước tiếp theo" className="border-b border-line bg-paper px-4 py-3 sm:px-6">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="min-w-0"><p className="text-sm font-bold">{title}</p><p className="mt-0.5 text-sm text-ink-muted">{description}</p></div>
-      {progress.status === "FAILED" && progress.error?.retryable && <Button size="sm" disabled={busy} onClick={onRetry}>Thử lại</Button>}
+      {title && <div className="min-w-0"><p className="text-sm font-bold">{title}</p>{description && <p className="mt-0.5 text-sm text-ink-muted">{description}</p>}</div>}
+      {showRetry && <Button size="sm" disabled={busy} onClick={onRetry}>Thử lại</Button>}
       {action && !atTarget && <Button size="sm" onClick={() => onOpen(action!.tab, action!.mode)}>{action.label}</Button>}
     </div>
     {sceneReady && error && <ErrorFeedback message={error} className="mt-2" retry={() => void load(new AbortController().signal)} />}

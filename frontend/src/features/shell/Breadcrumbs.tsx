@@ -50,17 +50,17 @@ export function crumbsFor(pathname: string, detailTitle?: string | null): Crumb[
   if (pathname === APP_HOME) return [{ label: "Tổng quan" }];
   if (pathname === "/scenes") return [{ label: "Scenes" }];
   const start = NEW_SCENE_PAGES[pathname];
-  if (start) return [scenes, { label: "Scene mới", href: "/new" }, { label: start }];
-  if (pathname.startsWith("/new")) return [scenes, { label: "Scene mới" }];
+  if (start) return [{ label: "Tạo scene mới", href: "/new" }, { label: start }];
+  if (pathname === "/new" || pathname.startsWith("/new")) return [{ label: "Tạo scene mới" }];
   if (pathname.startsWith("/jobs")) return [{ label: "Jobs" }];
   if (pathname.startsWith("/trash")) return [{ label: "Thùng rác" }];
   if (pathname.startsWith("/team")) return [{ label: "Nhóm" }];
   if (pathname === "/account") return [{ label: "Tài khoản" }];
-  if (pathname.startsWith("/imports/")) return [scenes, { label: detailTitle ?? "Scene import" }];
+  if (pathname.startsWith("/imports/")) return [scenes, { label: "Scene import", href: "/scenes" }, { label: detailTitle ?? "Đang tải scene…" }];
   if (pathname.startsWith("/samples/")) return [scenes, { label: detailTitle ?? "Video mẫu" }];
   const inspection = /^\/scenes\/([^/]+)\/stages\/([^/]+)$/.exec(pathname);
   if (inspection) return [scenes, { label: detailTitle ?? "Scene", href: progressHref(decodeURIComponent(inspection[1])) }, { label: inspectionStage(inspection[2])?.title ?? "Giai đoạn" }];
-  if (pathname.startsWith("/scenes/")) return [scenes, { label: detailTitle ?? "Đang tải scene…" }];
+  if (pathname.startsWith("/scenes/")) return [scenes, { label: "Scene dựng từ video", href: "/scenes" }, { label: detailTitle ?? "Đang tải scene…" }];
   return [{ label: "Tổng quan", href: APP_HOME }];
 }
 

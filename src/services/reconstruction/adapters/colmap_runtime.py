@@ -35,7 +35,7 @@ class ColmapError(ValueError):
             error_code=self.code,
             stage_id=StageId.CAMERA_POSE,
             human_message=str(self),
-            retryable=False,
+            retryable=True,
             details={"action": "Inspect attempt logs, input overlap and COLMAP runtime; retry with a new attempt"},
         )
         return StageArtifact(

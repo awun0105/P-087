@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 
 import { Button, Notice } from "@/components/studio/primitives";
-import { EditorFrame } from "@/features/studio/EditorFrame";
+import { PreviewScene } from "@/features/studio/scene/PreviewScene";
 import { useUrlState } from "@/features/studio/useUrlState";
 import { progressHref } from "@/features/studio/inspection";
 import { getPreview, jobArtifactContentUrl } from "@/lib/api/endpoints";
@@ -39,7 +39,7 @@ export function StageSceneWorkspace({ jobId, stageId, title }: { jobId: string; 
   return <div className="flex h-full min-h-[24rem] flex-col">
     <div className="flex flex-wrap items-center gap-3 border-b border-line bg-paper-raised px-4 py-2">
       <p className="min-w-0 flex-1 text-xs text-ink-muted">{mode === "training" ? "Bản ghi Rerun của một lượt train đánh giá (giữ lại 1/8 ảnh để so) · chỉ xem, không phải scene đang dùng"
-        : stageId === "ST-VISUAL-RECON" ? "Gaussian gốc · chưa quy đổi mét · chỉnh trong phiên, File › Export PLY/SOG"
+        : stageId === "ST-VISUAL-RECON" ? "Gaussian gốc · chưa quy đổi mét · bản xem 3DGS"
         : stageId === "ST-METRIC-CANONICALIZE" ? "Kết quả hệ mét · xác nhận đã publish, không đo lại hoặc ghi đè bản xác nhận"
           : stageId === "ST-RGB-GEOMETRY" ? "Scene hệ mét + collision · bật/tắt lớp để kiểm tra hình học"
             : "SceneObject hiện tại · chọn vật thể trong 3D, xác nhận/loại, chỉnh inspector; thao tác lưu revision mới"}</p>
@@ -71,5 +71,5 @@ function GaussianWorkspace({ jobId, title }: { jobId: string; title: string }) {
   }, [jobId, reload]);
   if (error) return <Notice tone="rust" className="m-4">Không mở được bản 3DGS: {error} <Button size="sm" variant="secondary" onClick={() => setReload((value) => value + 1)}>Thử lại</Button></Notice>;
   if (!preview) return <p role="status" className="p-6 text-sm text-ink-muted">Đang tải bản 3DGS…</p>;
-  return <EditorFrame contentUrl={jobArtifactContentUrl(jobId, preview.delivery_ref)} filename={preview.delivery_ref.artifact_uri.split("/").pop() ?? "scene.sog"} homeHref={progressHref(jobId)} title={`5. 3DGS: ${title}`} />;
+  return <PreviewScene contentUrl={jobArtifactContentUrl(jobId, preview.delivery_ref)} filename={preview.delivery_ref.artifact_uri.split("/").pop() ?? "scene.sog"} title={`5. 3DGS: ${title}`} />;
 }

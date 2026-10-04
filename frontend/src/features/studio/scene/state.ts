@@ -51,3 +51,14 @@ export function useNow(active: boolean): number {
   }, [active]);
   return now;
 }
+
+/** Kiểm tra job đang RUNNING nhưng heartbeat đã quá hạn (mất kết nối / worker chết). Ngưỡng mặc định: 3 phút (180.000ms). */
+export function isJobStale(progress: JobProgress | null, now: number, thresholdMs: number = 180_000): boolean {
+  if (!progress || progress.status !== "RUNNING") return false;
+  // Nếu đang chờ tương tác của người dùng thì không phải stale
+  if (progress.waiting_for === "metric_confirmation") return false;
+  const updated = Date.parse(progress.updated_at);
+  if (Number.isNaN(updated)) return false;
+  return now - updated > thresholdMs;
+}
+
