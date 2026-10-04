@@ -369,7 +369,7 @@
 ### 1. Lâm Quang Anh Quân (`EX-REC` — Reconstruction)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Lâm Quang Anh Quân | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Lâm Quang Anh Quân | Triển khai Pipeline v2 (Object-centric 3DGS, vá nền LaMa, xuất USD lai). Nâng cấp hệ thống Cloud/GPU Worker, checkpoint/resume cho Brush. Hoàn thiện Landing Page và Dark mode Studio. | Đã hoàn thành | Commits ngày 01/10 | 12h |
 
 ### 2. Lê Mạnh Cường (`EX-PRODUCT` — Product/Orchestration)
 | Member | Task | Status | Output | Time |
@@ -395,7 +395,7 @@
 ### 1. Lâm Quang Anh Quân (`EX-REC` — Reconstruction)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Lâm Quang Anh Quân | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Lâm Quang Anh Quân | Refactor cấu trúc repo/API, dọn dẹp data và tài liệu UX. Tích hợp Rerun để xem trực tiếp quá trình huấn luyện 3DGS. | Đã hoàn thành | Commits ngày 02/10 | 6h |
 
 ### 2. Lê Mạnh Cường (`EX-PRODUCT` — Product/Orchestration)
 | Member | Task | Status | Output | Time |
@@ -447,7 +447,7 @@
 ### 1. Lâm Quang Anh Quân (`EX-REC` — Reconstruction)
 | Member | Task | Status | Output | Time |
 |--------|------|--------|--------|------|
-| Lâm Quang Anh Quân | [Mô tả task] | [Chưa cập nhật] | [Link/kết quả có bằng chứng] | [Giờ thực tế] |
+| Lâm Quang Anh Quân | Nâng cấp giao diện Studio (CameraToolbar, ETA realtime, Auto-recover Job). Sửa lỗi 32-bit voxel grid. Cập nhật tài liệu ARCHITECTURE, Quick Start và Evaluation Benchmark. | Đã hoàn thành | Commits ngày 04/10 | 8h |
 
 ### 2. Lê Mạnh Cường (`EX-PRODUCT` — Product/Orchestration)
 | Member | Task | Status | Output | Time |

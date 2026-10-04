@@ -177,6 +177,13 @@
   - Tích hợp thành công PlayCanvas và supersplat-viewer (hiển thị và thao tác 3DGS trực tiếp).
   - Hoàn thiện End-to-End API Orchestration, tự động hoá Job Queue, đánh giá tài nguyên worker.
   - Đồng bộ Contract dữ liệu TypeScript-Pydantic, chuẩn hoá lưu trữ Artifacts bền vững (CAS).
+  - Triển khai Pipeline v2: Xử lý 3DGS theo vật thể (Object-centric), vá nền bằng LaMa, phân rã lưới vật lý lồi và xuất mô phỏng USD lai (Hybrid USD).
+  - Hoàn thiện Cloud/GPU Worker: Checkpoint/resume huấn luyện Brush, chia tải tự động qua Kaggle/Vast.ai, cơ chế theo dõi watchdog nhiệt.
+  - Tái cấu trúc UX/UI Studio: Landing page mới, chế độ Dark mode chuẩn hệ thống thiết kế, tích hợp xem quá trình train trực tiếp qua Rerun.
+  - Dọn dẹp repo và refactor API sang cấu trúc chuẩn.
+  - Nâng cấp trải nghiệm Studio: Tính năng ước tính thời gian ETA realtime, theo dõi và tự phục hồi (auto-recover) các Job bị gián đoạn, thêm công cụ Hand selection & Ghost placement.
+  - Sửa lỗi hệ thống: Xử lý triệt để giới hạn 32-bit voxel grid trong module Scene Reconstruction.
+  - Hoàn thiện Documentation: Cập nhật `ARCHITECTURE.md`, tài liệu Docker Compose/Quick Start và báo cáo `BENCHMARK_REPORT.md` với 5 bộ Test Case thủ công.
 - **Khó khăn & Giải pháp:**
   | Khó khăn | Giải pháp | Kết quả |
   |----------|-----------|---------|
