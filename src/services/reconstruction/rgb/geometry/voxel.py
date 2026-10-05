@@ -35,6 +35,8 @@ class VoxelConfig(ContractModel):
     #: dày). `floaters`: bỏ Gaussian không góp vào voxel đặc nào — hiệu chỉnh 2026-09-30 trên
     #: Aisle_CW: preview thưa (~98k Gaussian) vỡ thành hàng trăm cụm nên `cluster` xoá gần hết.
     cleanup: Literal["cluster", "floaters"] = "cluster"
+    #: Giới hạn log-scale tối đa của Gaussian để tránh floaters khổng lồ làm phình lưới voxel.
+    max_gaussian_scale_log: FiniteFloat | None = None
 
     @model_validator(mode="after")
     def _crop_order(self) -> Self:
@@ -81,6 +83,18 @@ def _crop_arguments(config: VoxelConfig) -> tuple[str, ...]:
 def cluster_command(config: VoxelConfig) -> tuple[str, ...]:
     """Input PLY raw xyz đã canonical; bỏ PLY flip rồi đổi sang native Y-up."""
     cluster = f"{config.cluster_resolution_m},{config.cluster_opacity},{config.cluster_min_contribution}"
+    scale_filters = (
+        (
+            "--filter-value",
+            f"scale_0,lte,{config.max_gaussian_scale_log}",
+            "--filter-value",
+            f"scale_1,lte,{config.max_gaussian_scale_log}",
+            "--filter-value",
+            f"scale_2,lte,{config.max_gaussian_scale_log}",
+        )
+        if config.max_gaussian_scale_log is not None
+        else ()
+    )
     return (
         "input.ply",
         "--gpu",
@@ -90,6 +104,7 @@ def cluster_command(config: VoxelConfig) -> tuple[str, ...]:
         "--rotate",
         "-90,0,0",
         *_crop_arguments(config),
+        *scale_filters,
         *(
             ("--filter-floaters", cluster)
             if config.cleanup == "floaters"

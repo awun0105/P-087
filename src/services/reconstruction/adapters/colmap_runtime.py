@@ -98,7 +98,7 @@ def reconstruction_commands(config: ColmapConfig, flags: tuple[str, str]) -> lis
     """Chuỗi Re3Sim/Nannigalaxy qua CLI; vocabulary tùy chọn đã verify trước."""
     feature, match = flags
     mapper = ["mapper", "--database_path", "database.db", "--image_path", "images", "--output_path", "sparse"]
-    mapper += ["--Mapper.num_threads", str(config.num_threads), "--Mapper.random_seed", str(config.random_seed)]
+    mapper += ["--Mapper.num_threads", str(config.num_threads), "--random_seed", str(config.random_seed)]
     return [_extraction_command(config, feature), _matching_command(config, match), mapper]
 
 
