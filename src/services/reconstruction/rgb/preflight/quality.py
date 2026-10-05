@@ -6,6 +6,7 @@ from pathlib import Path
 
 from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.manifests import ExecutionError, StageId
+from src.models.contracts.retryability import classify_retryability
 from src.services.reconstruction.rgb.preflight.ffmpeg_probe import FFmpegProbeError, FFmpegRGBProbe
 from src.services.reconstruction.rgb.preflight.quality_models import (
     RGBFrameAsset,
@@ -57,12 +58,13 @@ class RGBValidationError(ValueError):
 
     def to_execution_error(self) -> ExecutionError:
         """Map lỗi validation sang shared worker error contract."""
+        details = {"action": self.action}
         return ExecutionError(
             error_code=self.code,
             stage_id=StageId.INPUT_VALIDATE,
             human_message=str(self),
-            retryable=False,
-            details={"action": self.action},
+            retryable=classify_retryability(self.code, details),
+            details=details,
         )
 
 

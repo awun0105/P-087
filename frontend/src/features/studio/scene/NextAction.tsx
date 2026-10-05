@@ -15,9 +15,10 @@ import { isJobStale, useNow, type Tab, type StudioMode } from "@/features/studio
 
 interface Detail { scene: SceneIR; pkg: SimulationPackageView | null; review: ReviewStateView | null }
 /** Bước tiếp theo đọc published state; không tạo lifecycle cạnh tranh với backend. */
-export function NextAction({ jobId, progress, current, mode, sceneReady, revision, busy, onOpen, onRetry }: {
+export function NextAction({ jobId, progress, current, mode, sceneReady, revision, busy, onOpen, onRetry, retryState }: {
   jobId: string; progress: JobProgress | null; current: Tab; mode: StudioMode; sceneReady: boolean; revision: string | null;
   busy: boolean; onOpen: (tab: Tab, mode?: StudioMode) => void; onRetry: () => void;
+  retryState?: "submitting" | "accepted" | "rejected" | "uncertain" | null;
 }) {
   const { me } = useAuth();
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -46,11 +47,23 @@ export function NextAction({ jobId, progress, current, mode, sceneReady, revisio
   let title: string | null = null;
   let description: string | null = null;
   let action: { label: string; tab: Tab; mode?: StudioMode } | null = null;
-  if (stale) {
-    title = "Tiến trình bị gián đoạn";
-    description = "Bấm thử lại để tiếp tục huấn luyện từ checkpoint đã lưu.";
+  if (retryState) {
+    title = retryState === "submitting" ? "Đang gửi yêu cầu thử lại" : retryState === "rejected" ? "Đang kiểm tra phản hồi thử lại" : "Đang đồng bộ lần chạy mới";
+    description = retryState === "uncertain"
+      ? "Chưa xác nhận được máy chủ đã nhận yêu cầu. Trang đang đọc lại trạng thái job; nút thử lại tạm ẩn để tránh gửi trùng."
+      : retryState === "accepted"
+        ? "Máy chủ đã nhận yêu cầu. Nút thử lại chỉ hiện lại sau khi tiến trình xác nhận attempt mới hoặc lỗi từ chối rõ ràng."
+        : "Đang tải lại trạng thái máy chủ trước khi mở lại thao tác.";
+  } else if (stale) {
+    title = "Worker chưa cập nhật tiến trình";
+    description = "Backend vẫn ghi RUNNING nên chưa thể mở attempt mới. Trang đang tiếp tục đồng bộ; retry chỉ hiện khi backend ghi FAILED và lỗi cho phép thử lại.";
   } else if (progress.status === "FAILED") {
-    // Không hiển thị "Xử lý chưa hoàn tất. Xem nguyên nhân..." - các thông tin lỗi đã có ở stage trong Timeline
+    title = "Xử lý chưa hoàn tất";
+    description = progress.error?.retryable
+      ? "Xem nguyên nhân ở giai đoạn lỗi. Sau khi xử lý được nguyên nhân, có thể tạo attempt mới."
+      : progress.error
+        ? "Lỗi của attempt này cần được khắc phục trước; backend chưa cho phép tạo attempt mới."
+        : "Backend chưa ghi lỗi retryable cho attempt này. Tải lại trạng thái hoặc tạo job mới sau khi xử lý nguyên nhân.";
   } else if (progress.status === "CANCELLED") {
     title = "Đã huỷ xử lý";
     description = "Kết quả đã publish vẫn được giữ; mở giai đoạn hoàn tất để xem.";
@@ -97,7 +110,7 @@ export function NextAction({ jobId, progress, current, mode, sceneReady, revisio
     }
   }
   const atTarget = action && current === action.tab && (!action.mode || mode === action.mode);
-  const showRetry = Boolean(stale || (progress.status === "FAILED" && progress.error?.retryable));
+  const showRetry = Boolean(!retryState && progress.status === "FAILED" && progress.error?.retryable);
   if (!title && !showRetry && !(sceneReady && error)) return null;
   return <section aria-label="Bước tiếp theo" className="border-b border-line bg-paper px-4 py-3 sm:px-6">
     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -105,6 +118,6 @@ export function NextAction({ jobId, progress, current, mode, sceneReady, revisio
       {showRetry && <Button size="sm" disabled={busy} onClick={onRetry}>Thử lại</Button>}
       {action && !atTarget && <Button size="sm" onClick={() => onOpen(action!.tab, action!.mode)}>{action.label}</Button>}
     </div>
-    {sceneReady && error && <ErrorFeedback message={error} className="mt-2" retry={() => void load(new AbortController().signal)} />}
+    {sceneReady && error && <ErrorFeedback message={error} className="mt-2" retryLabel="Tải lại dữ liệu" retry={() => void load(new AbortController().signal)} />}
   </section>;
 }

@@ -15,6 +15,7 @@ from pydantic import Field, model_validator
 from src.models.contracts.artifacts import ArtifactDataClass, Checksum, ContractModel, ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
 from src.models.contracts.manifests import ExecutionError, InputFile, InputManifest, StageArtifact, StageId, StageStatus
+from src.models.contracts.retryability import classify_retryability
 from src.services.reconstruction.rgb.frames.frame_set import NormalizedRGBFrame, NormalizedRGBFrameSet, _sha256
 from src.services.reconstruction.rgb.preflight.privacy import PrivacyDispatchProof, RGBPrivacyGate
 from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
@@ -127,12 +128,15 @@ class FrameExtractionError(ValueError):
 
     def to_execution_error(self) -> ExecutionError:
         """Translate to shared stage failure contract."""
+        details: dict[str, str] = {"action": self.action}
+        if self.__cause__ is not None:
+            details["exception_type"] = type(self.__cause__).__name__
         return ExecutionError(
             error_code=self.code,
             stage_id=StageId.FRAME_EXTRACT,
             human_message=self.message,
-            retryable=False,
-            details={"action": self.action},
+            retryable=classify_retryability(self.code, details),
+            details=details,
         )
 
     def to_failed_stage(self) -> StageArtifact:

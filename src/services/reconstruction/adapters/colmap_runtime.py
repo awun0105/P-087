@@ -10,6 +10,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.models.contracts.manifests import ExecutionError, StageArtifact, StageId, StageStatus
+from src.models.contracts.retryability import classify_retryability
 from src.services.reconstruction.rgb.pose.camera_pose import ColmapConfig
 
 
@@ -31,12 +32,18 @@ class ColmapError(ValueError):
 
     def to_failed_stage(self) -> StageArtifact:
         """Worker ghi failed stage với log riêng của attempt để điều tra."""
+        details: dict[str, str] = {"action": "Inspect attempt logs, input overlap and the configured COLMAP runtime"}
+        if self.__cause__ is not None:
+            details["exception_type"] = type(self.__cause__).__name__
         error = ExecutionError(
             error_code=self.code,
             stage_id=StageId.CAMERA_POSE,
             human_message=str(self),
-            retryable=True,
-            details={"action": "Inspect attempt logs, input overlap and COLMAP runtime; retry with a new attempt"},
+            retryable=classify_retryability(
+                self.code,
+                details,
+            ),
+            details=details,
         )
         return StageArtifact(
             stage_id=StageId.CAMERA_POSE, status=StageStatus.FAILED, completed_at=datetime.now(UTC), error=error
@@ -98,7 +105,7 @@ def reconstruction_commands(config: ColmapConfig, flags: tuple[str, str]) -> lis
     """Chuỗi Re3Sim/Nannigalaxy qua CLI; vocabulary tùy chọn đã verify trước."""
     feature, match = flags
     mapper = ["mapper", "--database_path", "database.db", "--image_path", "images", "--output_path", "sparse"]
-    mapper += ["--Mapper.num_threads", str(config.num_threads), "--random_seed", str(config.random_seed)]
+    mapper += ["--Mapper.num_threads", str(config.num_threads), "--Mapper.random_seed", str(config.random_seed)]
     return [_extraction_command(config, feature), _matching_command(config, match), mapper]
 
 

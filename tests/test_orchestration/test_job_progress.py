@@ -79,7 +79,7 @@ def test_running_job_marks_done_running_and_pending_stages(tmp_path: Path) -> No
 
 
 def test_failed_stage_carries_error_and_retry_resets_to_new_attempt(tmp_path: Path) -> None:
-    error = ExecutionError(error_code="COLMAP_FAILED", stage_id=StageId.CAMERA_POSE, human_message="x", retryable=True)
+    error = ExecutionError(error_code="COLMAP_TIMEOUT", stage_id=StageId.CAMERA_POSE, human_message="x", retryable=True)
     job = _job(
         tmp_path,
         status=JobStatus.FAILED,
@@ -101,6 +101,32 @@ def test_failed_stage_carries_error_and_retry_resets_to_new_attempt(tmp_path: Pa
     assert fresh.attempt == 2 and fresh.error is None
     # Frame set của attempt 1 hoàn tất trước khi attempt 2 bắt đầu nên không tính lại.
     assert [stage.state for stage in fresh.stages] == ["pending"] * 8
+
+
+def test_progress_hides_legacy_retry_flag_for_input_error(tmp_path: Path) -> None:
+    error = ExecutionError(
+        error_code="FRAME_QUALITY_MISMATCH",
+        stage_id=StageId.CAMERA_POSE,
+        human_message="source identity mismatch",
+        retryable=True,
+    )
+    job = _job(
+        tmp_path,
+        status=JobStatus.FAILED,
+        current_stage=StageId.CAMERA_POSE,
+        completed_at=_T0 + timedelta(minutes=9),
+        stage_artifacts=[_succeeded(stage, 2) for stage in MVP_PIPELINE[:3]],
+    )
+    attempts = [
+        _event(1, JobStatus.QUEUED, StageId.INPUT_VALIDATE, 0),
+        _event(1, JobStatus.RUNNING, StageId.CAMERA_POSE, 3),
+        _event(1, JobStatus.FAILED, StageId.CAMERA_POSE, 9, error),
+    ]
+
+    failed = job_progress(job, attempts, preview_ready=False)
+
+    assert failed.error is not None and failed.error.retryable is False
+    assert failed.stages[3].error is not None and failed.stages[3].error.retryable is False
 
 
 def test_stage_progress_reader_advances_job_and_waits_for_complete_line(tmp_path: Path) -> None:

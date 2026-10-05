@@ -23,6 +23,7 @@ from src.models.contracts.manifests import (
     StageId,
     StageStatus,
 )
+from src.models.contracts.retryability import is_execution_error_retryable
 from src.services.orchestration.jobs.admission import ResourceWait
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.jobs.queue import QueuePosition
@@ -147,6 +148,9 @@ def job_progress(
         if event.status == JobStatus.RUNNING:
             stage_starts.setdefault(event.current_stage, event.recorded_at)
     failure = next((event.error for event in reversed(events) if event.error is not None), None)
+    if failure is not None and failure.retryable and not is_execution_error_retryable(failure):
+        # Project old broad retry flags through today's policy so the UI agrees with POST /retry.
+        failure = failure.model_copy(update={"retryable": False})
     # Pipeline chạy tuần tự: journal cho thấy đã sang stage sau → stage trước đã xong,
     # dù StageArtifact của nó chỉ được commit cùng receipt ở cuối attempt.
     advanced = {

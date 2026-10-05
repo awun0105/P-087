@@ -40,6 +40,7 @@ from src.models.contracts.manifests import (
     StageStatus,
 )
 from src.models.contracts.preview import ReconstructionPreview
+from src.models.contracts.retryability import classify_retryability
 from src.services.orchestration.artifacts import ArtifactResolver, FilesystemArtifactStore
 from src.services.orchestration.benchmark import build_benchmark, publish_benchmark
 from src.services.orchestration.jobs.admission import ResourceAdmission, job_drivers, touch_job_reservation
@@ -327,6 +328,7 @@ def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:
     current = attempt.registry.get_job(attempt.job.job_id)
     if current.job_manifest_checksum != attempt.job.job_manifest_checksum:
         return
+    details = {"exception_type": type(error).__name__}
     try:
         attempt.registry.transition_job(
             attempt.job.job_id,
@@ -335,9 +337,9 @@ def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:
                 error=ExecutionError(
                     stage_id=current.current_stage,
                     error_code="PREVIEW_RUNNER_FAILED",
-                    human_message="Worker dừng trước checkpoint hợp lệ; kiểm log attempt và runtime trước khi retry",
-                    retryable=True,
-                    details={"exception_type": type(error).__name__},
+                    human_message="Worker dừng trước checkpoint hợp lệ; kiểm log attempt và runtime",
+                    retryable=classify_retryability("PREVIEW_RUNNER_FAILED", details),
+                    details=details,
                 ),
             ),
             expected_checksum=attempt.job.job_manifest_checksum,
@@ -632,12 +634,13 @@ def _execute_lidar_ingest(attempt: _Attempt) -> JobManifest:
                 attempt.workspace / "lidar",
             )
     except LidarPackageError as error:
+        details = {"action": "Sửa gói LiDAR theo hướng dẫn rồi tạo scene mới"}
         failure = ExecutionError(
             error_code="LIDAR_PACKAGE_INVALID",
             stage_id=StageId.LIDAR_INGEST,
             human_message=str(error),
-            retryable=False,
-            details={"action": "Sửa gói LiDAR theo hướng dẫn rồi tạo scene mới"},
+            retryable=classify_retryability("LIDAR_PACKAGE_INVALID", details),
+            details=details,
         )
         stage = StageArtifact(
             stage_id=StageId.LIDAR_INGEST,

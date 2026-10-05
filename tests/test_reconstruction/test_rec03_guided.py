@@ -117,6 +117,7 @@ def test_guided_commands_replace_the_mapper() -> None:
     assert refine[0] == "pose_prior_mapper"
     assert refine[refine.index("--input_path") + 1] == "prior_sparse"
     assert refine[refine.index("--output_path") + 1] == "sparse/0"
+    assert refine[refine.index("--Mapper.random_seed") + 1] == str(config().random_seed)
     assert refine[refine.index("--prior_position_std_x") + 1] == "0.05"
     assert refine[refine.index("--Mapper.ba_refine_focal_length") + 1] == "0"
 

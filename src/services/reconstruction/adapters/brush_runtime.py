@@ -14,6 +14,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.models.contracts.manifests import ExecutionError, StageArtifact, StageId, StageStatus
+from src.models.contracts.retryability import classify_retryability
 from src.services.reconstruction.resume import CHECKPOINT_NAME
 from src.services.reconstruction.rgb.splat.visual import BrushConfig
 
@@ -54,12 +55,17 @@ class VisualError(ValueError):
 
     def to_failed_stage(self) -> StageArtifact:
         """Không biến partial PLY hoặc successful child exit thành stage success."""
+        details: dict[str, str] = {
+            "action": "Inspect attempt logs and the pinned runtime; fix the reported cause before continuing"
+        }
+        if self.__cause__ is not None:
+            details["exception_type"] = type(self.__cause__).__name__
         error = ExecutionError(
             error_code=self.code,
             stage_id=StageId.VISUAL_RECON,
             human_message=str(self),
-            retryable=True,
-            details={"action": "Inspect attempt logs and pinned runtime; retry in a fresh workspace"},
+            retryable=classify_retryability(self.code, details),
+            details=details,
         )
         return StageArtifact(
             stage_id=StageId.VISUAL_RECON, status=StageStatus.FAILED, completed_at=datetime.now(UTC), error=error

@@ -126,8 +126,18 @@ export function cancelJob(jobId: string): Promise<unknown> {
   });
 }
 
-export function retryJob(jobId: string): Promise<unknown> {
-  return apiFetch(`${API}/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
+export interface RetryJobReceipt {
+  job_id: string;
+  status: "QUEUED";
+  job_manifest_checksum: string;
+}
+
+export async function retryJob(jobId: string): Promise<RetryJobReceipt> {
+  const result = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
+  if (!isRecord(result) || result.job_id !== jobId || result.status !== "QUEUED" || typeof result.job_manifest_checksum !== "string") {
+    throw new ApiError(502, "Backend trả trạng thái chấp nhận retry không hợp lệ");
+  }
+  return result as unknown as RetryJobReceipt;
 }
 
 /** Video mẫu đã xử lý sẵn (thẻ ở bước tải video lên). */
