@@ -159,7 +159,7 @@ def guided_commands(config: ColmapConfig, guidance: PoseGuidance) -> list[list[s
     triangulate += ["--clear_points", "1", "--refine_intrinsics", "0"]
     refine = ["pose_prior_mapper", "--database_path", "database.db", "--image_path", "images"]
     refine += ["--input_path", TRIANGULATED_DIR, "--output_path", "sparse/0"]
-    refine += ["--Mapper.num_threads", str(config.num_threads), "--Mapper.random_seed", str(config.random_seed)]
+    refine += ["--Mapper.num_threads", str(config.num_threads), "--random_seed", str(config.random_seed)]
     if guidance.calibration is not None:
         # Nội tham số đến từ calibration của gói: giữ nguyên, không để bundle adjustment kéo lệch.
         refine += ["--Mapper.ba_refine_focal_length", "0", "--Mapper.ba_refine_extra_params", "0"]

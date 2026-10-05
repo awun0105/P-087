@@ -64,7 +64,10 @@ class VoxelProcess:
                 try:
                     return process.wait(timeout=self.settings.timeout_seconds)
                 except subprocess.TimeoutExpired as error:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    if hasattr(os, "killpg"):
+                        os.killpg(process.pid, signal.SIGKILL)
+                    else:
+                        process.kill()
                     process.wait()
                     log.write("\nGEOMETRY_TIMEOUT\n")
                     raise GeometryError("Geometry timeout; inspect attempt log and configured limits") from error

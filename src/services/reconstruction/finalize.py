@@ -90,6 +90,7 @@ class GeometryProfile(ContractModel):
     cluster_seed_height_m: FiniteFloat = Field(ge=0)
     cleanup: Literal["cluster", "floaters"]
     gpu_index: int = Field(ge=0, strict=True)
+    max_gaussian_scale_log: FiniteFloat | None = 1.0
 
 
 class FinalizeRequest(ContractModel):
@@ -297,6 +298,7 @@ class FinalizeWorker:
             gpu_index=profile.gpu_index,
             crop_box_world=crop,
             cleanup=profile.cleanup,
+            max_gaussian_scale_log=profile.max_gaussian_scale_log,
         )
         raw_visual = confirmation.preview.request.source_visual
         geometry = RgbGeometryService(
