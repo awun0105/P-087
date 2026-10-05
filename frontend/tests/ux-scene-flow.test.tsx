@@ -6,12 +6,18 @@ import { ScenePage } from "@/features/studio/ScenePage";
 import { PageTitleProvider } from "@/features/shell/Breadcrumbs";
 import { NextAction } from "@/features/studio/scene/NextAction";
 import { getJob, getPreview, listJobAttempts } from "@/lib/api/endpoints";
-import { getJobProgress, getJobScene, getSimulationPackage, getReviewState } from "@/lib/api/studio";
+import { getJobProgress, getJobScene, getSimulationPackage, getReviewState, retryJob } from "@/lib/api/studio";
 import { ApiError } from "@/lib/api/client";
 import type { JobProgress } from "@/lib/contracts/studio";
 import { parsePreview } from "@/lib/contracts/preview";
 import { buildFixtureScene } from "./fixtures/scene";
 import type { MetricDraft } from "@/features/studio/MetricConfirmView";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
+  return { promise, resolve };
+}
 
 vi.mock("next/dynamic", () => ({ default: (loader: () => Promise<ComponentType>) => {
   const Component = lazy(async () => ({ default: await loader() }));
@@ -22,12 +28,13 @@ vi.mock("@/features/studio/scene/ReviewTab", () => ({ ReviewTab: () => <p>Review
 vi.mock("@/features/studio/scene/ResultsTab", () => ({ ResultsTab: () => <p>Results stub</p> }));
 vi.mock("@/features/studio/scene/StudioTab", () => ({ StudioTab: ({ mode, metricDraft, onMetricDraft, onMetricClose }: { mode: string; metricDraft?: MetricDraft; onMetricDraft: (draft: MetricDraft) => void; onMetricClose: () => void }) => <section aria-label="Canvas stub"><p>{mode}</p><p>{metricDraft?.typed.anchor || "Chưa nhập số đo"}</p><button onClick={() => onMetricDraft({ points: [[1, 2, 3]], typed: { anchor: "2.5", check: "1" } })}>Chọn điểm stub</button><button onClick={onMetricClose}>Về Tiến trình</button></section> }));
 vi.mock("@/lib/api/endpoints", async (original) => ({ ...(await original<typeof import("@/lib/api/endpoints")>()), getJob: vi.fn(), getPreview: vi.fn(), listJobAttempts: vi.fn() }));
-vi.mock("@/lib/api/studio", async (original) => ({ ...(await original<typeof import("@/lib/api/studio")>()), getJobProgress: vi.fn(), getJobScene: vi.fn(), getSimulationPackage: vi.fn(), getReviewState: vi.fn() }));
+vi.mock("@/lib/api/studio", async (original) => ({ ...(await original<typeof import("@/lib/api/studio")>()), getJobProgress: vi.fn(), getJobScene: vi.fn(), getSimulationPackage: vi.fn(), getReviewState: vi.fn(), retryJob: vi.fn() }));
 const progress: JobProgress = { job_id: "job-1", status: "RUNNING", current_stage: "ST-METRIC-CANONICALIZE", attempt: 1, started_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z", completed_at: null, stages: [], preview_ready: true, waiting_for: "metric_confirmation", error: null };
 beforeEach(() => {
   vi.resetAllMocks(); history.replaceState({}, "", "/scenes/job-1?tab=progress");
   vi.mocked(getJob).mockResolvedValue({ ok: false, error: new ApiError(404, "fixture metadata unavailable") });
   vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: progress });
+  vi.mocked(retryJob).mockResolvedValue({ job_id: "job-1", status: "QUEUED", job_manifest_checksum: "sha256:" + "c".repeat(64) });
   vi.mocked(listJobAttempts).mockResolvedValue({ ok: true, data: { job_id: "job-1", attempts: [] } });
   const ref = (type: string, path: string, stage = "ST-VISUAL-RECON") => ({ artifact_type: type, schema_version: "1.0", job_id: "job-1", producer_stage: stage, artifact_uri: "artifact://jobs/job-1/attempts/a1/" + path, artifact_checksum: "sha256:" + "a".repeat(64), data_class: "derived" });
   vi.mocked(getPreview).mockResolvedValue({ ok: true, data: parsePreview({ schema_version: "1.0", artifact_type: "ReconstructionPreview", job_id: "job-1", attempt_id: "a1", source_input_checksum: "sha256:" + "b".repeat(64), format: "gaussian_sog", producer: "brush", producer_version: "fixture", metric_status: "UNCONFIRMED", coordinate_frame: "sfm_world", unit: "arbitrary", delivery_ref: ref("GaussianSOG", "scene.sog"), source_visual_ref: ref("BrushVisualArtifact", "visual.json"), camera_pose_ref: ref("CameraPoseArtifact", "poses.json", "ST-CAMERA-POSE") }, "job-1") });
@@ -55,8 +62,78 @@ describe("workflow scene", () => {
     expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
     view.rerender(<NextAction {...props} progress={{ ...failed, error: { ...failed.error!, retryable: true } }} />);
     fireEvent.click(screen.getByRole("button", { name: "Thử lại" })); expect(props.onRetry).toHaveBeenCalledOnce();
+    view.rerender(<NextAction {...props} progress={{ ...failed, error: { ...failed.error!, retryable: true } }} retryState="accepted" />);
+    expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
+    expect(screen.getByText(/Đang đồng bộ lần chạy mới/)).toBeInTheDocument();
     view.rerender(<NextAction {...props} progress={progress} current="studio" mode="metric" />);
     expect(screen.queryByRole("button", { name: "Xác nhận tỉ lệ mét" })).toBeNull();
+  });
+  it("không mở retry chỉ vì RUNNING cũ thiếu heartbeat", () => {
+    const props = { jobId: "job-1", current: "progress" as const, mode: "scene" as const, sceneReady: false, revision: null, busy: false, onOpen: vi.fn(), onRetry: vi.fn() };
+    const stale: JobProgress = { ...progress, status: "RUNNING", waiting_for: null, updated_at: "2000-01-01T00:00:00Z", error: null };
+    render(<NextAction {...props} progress={stale} />);
+    expect(screen.getByText("Worker chưa cập nhật tiến trình")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
+  });
+  it("đồng bộ retry nếu POST lỗi sau khi backend đã tạo attempt mới", async () => {
+    const failed: JobProgress = { ...progress, status: "FAILED", waiting_for: null, preview_ready: false, error: { stage_id: "ST-VISUAL-RECON", error_code: "VISUAL_TIMEOUT", human_message: "timeout", retryable: true } };
+    const queued: JobProgress = { ...failed, status: "QUEUED", attempt: 2, updated_at: "2026-10-05T00:00:00Z", error: null };
+    vi.mocked(getJobProgress).mockResolvedValueOnce({ ok: true, data: failed }).mockResolvedValue({ ok: true, data: queued });
+    vi.mocked(retryJob).mockRejectedValue(new ApiError(500, "Internal Server Error"));
+    render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
+    const button = await screen.findByRole("button", { name: "Thử lại" });
+    fireEvent.click(button);
+    await waitFor(() => expect(vi.mocked(retryJob)).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull());
+    expect(await screen.findAllByText("Đang chờ worker")).toHaveLength(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+  it("bỏ qua poll FAILED cũ nếu nó trả về sau khi attempt mới đã được xác nhận", async () => {
+    const failed: JobProgress = { ...progress, status: "FAILED", waiting_for: null, preview_ready: false, error: { stage_id: "ST-VISUAL-RECON", error_code: "VISUAL_TIMEOUT", human_message: "timeout", retryable: true } };
+    const queued: JobProgress = { ...failed, status: "QUEUED", attempt: 2, updated_at: "2026-10-05T00:00:00Z", error: null };
+    const retryReceipt = deferred<Awaited<ReturnType<typeof retryJob>>>();
+    const oldPoll = deferred<Awaited<ReturnType<typeof getJobProgress>>>();
+    vi.mocked(getJobProgress)
+      .mockResolvedValueOnce({ ok: true, data: failed })
+      .mockImplementationOnce(() => oldPoll.promise)
+      .mockResolvedValueOnce({ ok: true, data: queued });
+    vi.mocked(retryJob).mockReturnValue(retryReceipt.promise);
+    render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Thử lại" }));
+    await waitFor(() => expect(vi.mocked(getJobProgress)).toHaveBeenCalledTimes(2));
+    retryReceipt.resolve({ job_id: "job-1", status: "QUEUED", job_manifest_checksum: "sha256:" + "c".repeat(64) });
+    await waitFor(() => expect(vi.mocked(getJobProgress)).toHaveBeenCalledTimes(3));
+    expect(await screen.findAllByText("Đang chờ worker")).toHaveLength(2);
+    oldPoll.resolve({ ok: true, data: failed });
+    await waitFor(() => expect(screen.getByText("Lần chạy 2")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
+  });
+  it("giữ nút retry ẩn nếu POST đã được nhận nhưng poll mới vẫn trả attempt FAILED cũ", async () => {
+    const failed: JobProgress = { ...progress, status: "FAILED", waiting_for: null, preview_ready: false, error: { stage_id: "ST-VISUAL-RECON", error_code: "VISUAL_TIMEOUT", human_message: "timeout", retryable: true } };
+    vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: failed });
+    render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Thử lại" }));
+    await waitFor(() => expect(vi.mocked(retryJob)).toHaveBeenCalledOnce());
+    expect(await screen.findByText("Đang đồng bộ lần chạy mới")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
+  });
+  it("giữ retry khả dụng nếu POST bị từ chối và máy chủ xác nhận attempt FAILED", async () => {
+    const failed: JobProgress = { ...progress, status: "FAILED", waiting_for: null, preview_ready: false, error: { stage_id: "ST-VISUAL-RECON", error_code: "VISUAL_TIMEOUT", human_message: "timeout", retryable: true } };
+    vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: failed });
+    vi.mocked(retryJob).mockRejectedValue(new ApiError(409, "Job đã đổi trạng thái; tải lại tiến trình"));
+    render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Thử lại" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Job đã đổi trạng thái"));
+    expect(screen.getByRole("button", { name: "Thử lại" })).toBeInTheDocument();
+  });
+  it("mở lại retry khi POST gặp lỗi hạ tầng nhưng trạng thái hiện tại vẫn FAILED", async () => {
+    const failed: JobProgress = { ...progress, status: "FAILED", waiting_for: null, preview_ready: false, error: { stage_id: "ST-VISUAL-RECON", error_code: "VISUAL_TIMEOUT", human_message: "timeout", retryable: true } };
+    vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: failed });
+    vi.mocked(retryJob).mockRejectedValue(new ApiError(500, "gateway failed"));
+    render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Thử lại" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("trạng thái mới nhất vẫn là FAILED"));
+    expect(screen.getByRole("button", { name: "Thử lại" })).toBeInTheDocument();
   });
   it("lỗi đọc gói không bị diễn giải thành sẵn sàng tạo gói", async () => {
     const response = buildFixtureScene();

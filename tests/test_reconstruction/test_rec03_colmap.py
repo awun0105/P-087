@@ -207,7 +207,7 @@ def test_command_flags_and_explicit_config(prefixes: tuple[str, str]) -> None:
     assert f"--{prefixes[1]}.use_gpu" in commands[1]
     assert commands[1][commands[1].index("--SequentialMatching.loop_detection") + 1] == "0"
     assert "--SequentialMatching.vocab_tree_path" not in commands[1]
-    assert "--random_seed" in commands[2]
+    assert commands[2][commands[2].index("--Mapper.random_seed") + 1] == str(config().random_seed)
     with pytest.raises(ValueError):
         config(min_registered_ratio=0)
 

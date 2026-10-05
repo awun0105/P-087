@@ -20,6 +20,7 @@ from src.models.contracts.manifests import (
     StageStatus,
 )
 from src.models.contracts.reconstruction import ReconstructionBundle
+from src.models.contracts.retryability import classify_retryability
 from src.services.reconstruction.bundle import BundleBuildRequest, ReconstructionBundleService
 from src.services.reconstruction.bundle_validation import BundleDependencies
 from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
@@ -112,12 +113,13 @@ class ReconstructionWorker:
         self, exc: Exception, stage_artifacts: list[StageArtifact], started_at: datetime
     ) -> ExecutionError:
         logger.error("Bundle publication failed job=%s cause=%s", self.config.job_id, type(exc).__name__)
+        details = {"exception_type": type(exc).__name__, "execution_scope": self.config.execution_scope}
         err = ExecutionError(
             error_code="RECONSTRUCTION_FAILED",
             stage_id=StageId.METRIC_CANONICALIZE,
             human_message="Bundle publication failed; check input identities, payloads and metric/alignment evidence",
-            retryable=True,
-            details={"exception_type": type(exc).__name__, "execution_scope": self.config.execution_scope},
+            retryable=classify_retryability("RECONSTRUCTION_FAILED", details),
+            details=details,
         )
         stage_artifacts.append(
             StageArtifact(

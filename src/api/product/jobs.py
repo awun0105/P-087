@@ -6,6 +6,7 @@ from src.api import schemas
 from src.api.auth import enforce_gpu_quota, record_gpu_run, require_editor
 from src.api.product import deps
 from src.models.contracts.manifests import JobManifest, JobStatus
+from src.models.contracts.retryability import is_execution_error_retryable
 from src.services.orchestration.auth import UserRecord
 from src.services.orchestration.jobs import (
     InvalidTransitionError,
@@ -60,13 +61,39 @@ def transition_job(job_id: str, request: TransitionRequest) -> JobManifest:
 
 @router.post("/jobs/{job_id}/retry", response_model=JobManifest)
 def retry_job(job_id: str, user: UserRecord | None = Depends(require_editor)) -> JobManifest:
-    """Chạy lại một job FAILED. Attempt mới được nối thêm, không ghi đè attempt cũ.
+    """Chạy lại một job FAILED có structured error được policy cho phép.
 
-    Mỗi lần thử lại là một lần xử lý GPU nên tính vào hạn mức của Editor.
+    Attempt mới được nối thêm, không ghi đè attempt cũ. Mỗi retry tính vào hạn mức GPU của Editor.
     """
-    enforce_gpu_quota(user)
+    registry = deps.registry()
     try:
-        job = deps.registry().transition_job(job_id, TransitionRequest(target_status=JobStatus.QUEUED))
+        job = registry.get_job(job_id)
+        if job.status != JobStatus.FAILED:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Chỉ job FAILED mới có thể thử lại",
+            )
+        attempts = registry.list_job_attempts(job_id)
+        latest_attempt = max((event.attempt for event in attempts), default=None)
+        failure = next(
+            (
+                event.error
+                for event in reversed(attempts)
+                if event.attempt == latest_attempt and event.error is not None
+            ),
+            None,
+        )
+        if failure is None or not is_execution_error_retryable(failure):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Lỗi của lần chạy hiện tại chưa được phân loại là có thể thử lại",
+            )
+        enforce_gpu_quota(user)
+        job = registry.transition_job(
+            job_id,
+            TransitionRequest(target_status=JobStatus.QUEUED),
+            expected_checksum=job.job_manifest_checksum,
+        )
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except JobLifecycleError as error:

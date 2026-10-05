@@ -10,6 +10,7 @@ from pathlib import Path
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.manifests import ExecutionError, StageArtifact, StageId, StageStatus
 from src.models.contracts.preview import ReconstructionPreview
+from src.models.contracts.retryability import classify_retryability
 from src.services.reconstruction.adapters.brush import BrushAdapter, BrushDependencies, BrushRequest
 from src.services.reconstruction.adapters.brush_input import BrushInputAdapter
 from src.services.reconstruction.adapters.brush_runtime import VisualError, VisualProcess
@@ -236,12 +237,13 @@ class _PreviewExecution:
             if lidar or visual
             else "Preview failed; inspect attempt logs and configured runtime before retrying"
         )
+        details = {"exception_type": type(cause).__name__}
         error = ExecutionError(
             error_code=error_code,
             stage_id=self.publication.current_stage,
             human_message=human_message,
-            retryable=True,
-            details={"exception_type": type(cause).__name__},
+            retryable=classify_retryability(error_code, details),
+            details=details,
         )
         self._complete(
             StageArtifact(

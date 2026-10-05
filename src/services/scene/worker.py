@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from src.models.contracts.artifacts import ArtifactRef, JsonObject
 from src.models.contracts.manifests import ExecutionError, StageId
+from src.models.contracts.retryability import classify_retryability
 from src.models.contracts.scene import SceneIR
 from src.services.orchestration.artifacts.store import ArtifactResolver
 from src.services.scene.association.baseline import associate_masks
@@ -49,10 +50,12 @@ def _run_pipeline(reference: ArtifactRef, resolver: ArtifactResolver) -> SceneIR
 
 
 def _failed(message: str) -> SceneWorkerResult:
+    details = None
     error = ExecutionError(
         error_code="SCENE_WORKER_FAILED",
         stage_id=StageId.SCENE_DECOMPOSE,
         human_message=message,
-        retryable=True,
+        retryable=classify_retryability("SCENE_WORKER_FAILED", details),
+        details=details,
     )
     return SceneWorkerResult(status="FAILED", scene_ir=None, error=error, diagnostics={"mode": "deterministic_fixture"})

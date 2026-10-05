@@ -34,6 +34,7 @@ from src.models.contracts.manifests import (
     StageStatus,
 )
 from src.models.contracts.reconstruction import AlignmentRecord
+from src.models.contracts.retryability import classify_retryability
 from src.services.reconstruction.adapters.gaussian_scale import SplatTransformSimilarityAdapter
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor
 from src.services.reconstruction.adapters.voxel import SplatTransformVoxelAdapter
@@ -210,14 +211,15 @@ class FinalizeWorker:
         try:
             result = self._execute(request, workspace, result)
         except Exception as error:  # noqa: BLE001 - process boundary: ghi lỗi có cấu trúc, giữ type
+            details = {"exception_type": type(error).__name__}
             result = result.model_copy(
                 update={
                     "error": ExecutionError(
                         stage_id=StageId.RGB_GEOMETRY,
                         error_code="REC_FINALIZE_FAILED",
                         human_message=_human_message(error),
-                        retryable=True,
-                        details={"exception_type": type(error).__name__},
+                        retryable=classify_retryability("REC_FINALIZE_FAILED", details),
+                        details=details,
                     )
                 }
             )

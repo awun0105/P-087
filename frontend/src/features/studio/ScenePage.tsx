@@ -1,10 +1,11 @@
 "use client";
 
+import { ApiError } from "@/lib/api/client";
 import { errorMessage } from "@/lib/ui-error";
 
 import dynamic from "next/dynamic";
 import { Box, Package, Pencil, ShieldCheck, Workflow } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/studio/primitives";
 import { usePageTitle } from "@/features/shell/Breadcrumbs";
@@ -24,6 +25,16 @@ import { NextAction } from "@/features/studio/scene/NextAction";
 import { ErrorFeedback, notifySuccess } from "@/components/studio/feedback";
 import type { MetricDraft } from "@/features/studio/MetricConfirmView";
 import type { JobProgress } from "@/lib/contracts/studio";
+
+interface RetrySync {
+  jobId: string;
+  fromAttempt: number;
+  afterPollId: number;
+  status: "submitting" | "accepted" | "rejected" | "uncertain";
+  message?: string;
+}
+
+const PROGRESS_STATUS_ORDER = { QUEUED: 0, RUNNING: 1, SUCCEEDED: 2, FAILED: 2, CANCELLED: 2 } as const;
 
 /**
  * Mỗi tab là một chunk riêng: three.js (kết quả từng bước) và PlayCanvas (Studio) chỉ tải khi mở
@@ -54,6 +65,11 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [pollingKey, setPollingKey] = useState(0);
+  const [retrySync, setRetrySync] = useState<RetrySync | null>(null);
+  const retryInFlight = useRef(false);
+  const pollSequence = useRef(0);
+  const latestAppliedPoll = useRef<{ jobId: string; pollId: number; progress: JobProgress } | null>(null);
+  const retrySyncRef = useRef<RetrySync | null>(null);
   const [tab, setTab] = useState<Tab | null>(initialTab ?? null);
   const { params, update } = useUrlState();
   const { navigate } = useNavigationGuard();
@@ -85,14 +101,62 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
 
   const poll = useCallback(
     async (signal: AbortSignal) => {
+      const pollId = ++pollSequence.current;
       const result = await getJobProgress(jobId, signal);
       if (signal.aborted) return;
+      const latest = latestAppliedPoll.current;
+      if (latest?.jobId === jobId && pollId < latest.pollId) return;
       if (!result.ok) {
-        setError(result.error.status === 404 ? "Không tìm thấy scene này." : errorMessage(result.error));
+        if (result.error.status === 404) {
+          if (latest?.jobId === jobId) latestAppliedPoll.current = { ...latest, pollId };
+          retrySyncRef.current = null;
+          setRetrySync(null);
+          setProgress(null);
+          setError("Không tìm thấy scene này.");
+        } else {
+          setError(errorMessage(result.error));
+        }
         return;
+      }
+      if (latest?.jobId === jobId) {
+        const olderAttempt = result.data.attempt < latest.progress.attempt;
+        const terminalChanged = PROGRESS_STATUS_ORDER[latest.progress.status] === 2
+          && result.data.status !== latest.progress.status;
+        const sameAttemptRegressed = result.data.attempt === latest.progress.attempt && (
+          Date.parse(result.data.updated_at) < Date.parse(latest.progress.updated_at)
+          || PROGRESS_STATUS_ORDER[result.data.status] < PROGRESS_STATUS_ORDER[latest.progress.status]
+          || terminalChanged
+        );
+        if (olderAttempt || sameAttemptRegressed) return;
+      }
+      latestAppliedPoll.current = { jobId, pollId, progress: result.data };
+      const pendingRetry = retrySyncRef.current;
+      let retryNotice: string | null = null;
+      let acknowledgedAttempt: number | null = null;
+      if (
+        pendingRetry?.jobId === jobId
+        && pendingRetry.status !== "submitting"
+        && pollId >= pendingRetry.afterPollId
+      ) {
+        if (result.data.attempt > pendingRetry.fromAttempt) {
+          retrySyncRef.current = null;
+          setRetrySync(null);
+          acknowledgedAttempt = result.data.attempt;
+        } else if (result.data.status === "FAILED" && pendingRetry.status !== "accepted") {
+          retrySyncRef.current = null;
+          setRetrySync(null);
+          retryNotice = pendingRetry.status === "rejected"
+            ? pendingRetry.message ?? "Máy chủ từ chối yêu cầu thử lại; attempt FAILED hiện tại vẫn được giữ."
+            : "Chưa nhận được xác nhận từ yêu cầu thử lại; trạng thái mới nhất vẫn là FAILED nên bạn có thể thử lại.";
+        } else if (result.data.status === "SUCCEEDED" || result.data.status === "CANCELLED") {
+          retrySyncRef.current = null;
+          setRetrySync(null);
+        }
       }
       setError(null);
       setProgress(result.data);
+      if (acknowledgedAttempt !== null) notifySuccess(`Máy chủ đã ghi nhận lần chạy ${acknowledgedAttempt}.`);
+      if (retryNotice !== null) setError(retryNotice);
       // Chỉ chọn mặc định trên lần đọc đầu; preview xuất hiện sau đó không đẩy người đang xem tiến trình sang Studio.
       setTab((selected) => selected ?? (result.data.preview_ready ? "studio" : "progress"));
       if (result.data.preview_ready && loadedPreview?.attempt !== result.data.attempt) {
@@ -113,8 +177,9 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
 
   const finished = progress?.status === "SUCCEEDED" || progress?.status === "FAILED" || progress?.status === "CANCELLED";
   const waitingMetric = progress?.waiting_for === "metric_confirmation";
+  const retryPending = retrySync?.jobId === jobId;
   // Dừng poll khi job kết thúc hoặc đang chờ chính người dùng; tiếp tục khi worker còn làm.
-  usePolling(poll, 3000, !(finished || (preview !== null && waitingMetric)), pollingKey);
+  usePolling(async (signal) => { await poll(signal); }, 3000, retryPending || !(finished || (preview !== null && waitingMetric)), pollingKey);
 
   async function act(action: () => Promise<unknown>, success: string) {
     if (busy) return;
@@ -128,6 +193,45 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
     } finally {
       setBusy(false);
     }
+  }
+
+  async function requestRetry() {
+    if (busy || retryInFlight.current || retryPending) return;
+    const failed = progress;
+    if (!failed || failed.job_id !== jobId || failed.status !== "FAILED" || !failed.error?.retryable) {
+      await poll(new AbortController().signal);
+      return;
+    }
+
+    retryInFlight.current = true;
+    setBusy(true);
+    setError(null);
+    const submitting: RetrySync = { jobId, fromAttempt: failed.attempt, afterPollId: pollSequence.current + 1, status: "submitting" };
+    retrySyncRef.current = submitting;
+    setRetrySync(submitting);
+    let retryStatus: "accepted" | "rejected" | "uncertain" = "accepted";
+    let message: string | undefined;
+    try {
+      await retryJob(jobId);
+    } catch (cause) {
+      retryStatus = cause instanceof ApiError && cause.isClientError ? "rejected" : "uncertain";
+      message = errorMessage(cause, "Chưa xác nhận được yêu cầu thử lại.");
+    }
+
+    const afterPollId = pollSequence.current + 1;
+    const retrying: RetrySync = { jobId, fromAttempt: failed.attempt, afterPollId, status: retryStatus, message };
+    retrySyncRef.current = retrying;
+    setRetrySync(retrying);
+    try {
+      await poll(new AbortController().signal);
+    } finally {
+      retryInFlight.current = false;
+      setBusy(false);
+    }
+  }
+
+  function startRetry() {
+    void navigate(() => { void requestRetry(); }, undefined, true);
   }
 
   const metric = metricState(progress);
@@ -180,7 +284,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
       <SceneTabs tabs={tabs} current={current} onChange={(next) => openTab(next)} />
       {locked && <p role="status" className="px-4 py-2 text-sm text-ink-muted">{locked}. Đang hiển thị Tiến trình.</p>}
       {requestedTab && !["progress", "studio", "review", "results"].includes(requestedTab) && <p role="status" className="px-4 py-2 text-sm text-ink-muted">Tab không hợp lệ; đã mở vùng mặc định.</p>}
-      <NextAction jobId={jobId} progress={progress} current={current} mode={studioMode} sceneReady={sceneReady} revision={save?.revision ?? null} busy={busy} onOpen={openTab} onRetry={() => void navigate(() => { void act(() => retryJob(jobId), "Đã gửi yêu cầu thử lại. Theo dõi lần chạy mới ở Tiến trình."); }, undefined, true)} />
+      <NextAction jobId={jobId} progress={progress} current={current} mode={studioMode} sceneReady={sceneReady} revision={save?.revision ?? null} busy={busy} onOpen={openTab} onRetry={startRetry} retryState={retryPending ? retrySync?.status ?? null : null} />
       {current === "studio" && preview && (
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-paper-raised px-4 py-2 sm:px-6">
           <p className="text-xs text-ink-muted">
@@ -203,7 +307,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
           </div>
         </div>
       )}
-      {error && <ErrorFeedback message={error} className="m-3" retry={() => void poll(new AbortController().signal)} />}
+      {error && <ErrorFeedback message={error} className="m-3" retryLabel="Tải lại trạng thái" retry={() => void poll(new AbortController().signal)} />}
       <div id={`scene-panel-${current}`} role="tabpanel" aria-labelledby={`scene-tab-${current}`} className="relative min-h-0 flex-1 overflow-y-auto">
         {current === "studio" && !preview && <TabLoading />}
         {current === "progress" && (
@@ -215,7 +319,6 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
             onCancel={() => {
               if (window.confirm("Huỷ xử lý scene này? Tiến trình trên GPU sẽ dừng.")) void act(() => cancelJob(jobId), "Đã gửi yêu cầu huỷ. Trạng thái được cập nhật từ máy chủ.");
             }}
-            onRetry={() => void navigate(() => { void act(() => retryJob(jobId), "Đã gửi yêu cầu thử lại. Theo dõi lần chạy mới ở Tiến trình."); }, undefined, true)}
           />
         )}
         {(current === "studio" || studioVisited) && preview && (

@@ -13,6 +13,7 @@ from typing import Protocol
 
 from src.config import Settings, get_settings
 from src.models.contracts.manifests import ExecutionError, JobManifest, JobStatus, StageId
+from src.models.contracts.retryability import classify_retryability
 from src.services.orchestration.jobs.admission import ResourceAdmission
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import load_prepared_profile, prepared_frame_reference, require_profile
@@ -46,12 +47,13 @@ class VideoRunner(Protocol):
 
 def _record_finalize_failure(registry: ProjectRegistry, job: JobManifest, cause: Exception) -> None:
     """Lỗi trước khi runner hoàn tất claim được job: ghi FAILED ở bước hình học, không lặp vô hạn."""
+    details = {"exception_type": type(cause).__name__}
     error = ExecutionError(
         stage_id=StageId.RGB_GEOMETRY,
         error_code="REC_FINALIZE_DISPATCH_FAILED",
         human_message="Không bắt đầu được bước dựng hình học/bundle; kiểm cấu hình geometry và log worker rồi thử lại",
-        retryable=False,
-        details={"exception_type": type(cause).__name__},
+        retryable=classify_retryability("REC_FINALIZE_DISPATCH_FAILED", details),
+        details=details,
     )
     try:
         current = registry.get_job(job.job_id)
@@ -77,6 +79,7 @@ def _record_finalize_failure(registry: ProjectRegistry, job: JobManifest, cause:
 
 def _record_dispatch_failure(registry: ProjectRegistry, job: JobManifest, cause: Exception) -> None:
     """Lỗi trước claim phải hiện ở job; không đổi attempt đã bị cancel/retry."""
+    details = {"exception_type": type(cause).__name__}
     try:
         claimed = registry.transition_job(
             job.job_id,
@@ -91,8 +94,8 @@ def _record_dispatch_failure(registry: ProjectRegistry, job: JobManifest, cause:
                     stage_id=StageId.FRAME_EXTRACT,
                     error_code="PREPARED_DISPATCH_FAILED",
                     human_message="Không dispatch được prepared input; kiểm tra frame artifact, cấu hình và worker log trước khi retry",
-                    retryable=False,
-                    details={"exception_type": type(cause).__name__},
+                    retryable=classify_retryability("PREPARED_DISPATCH_FAILED", details),
+                    details=details,
                 ),
             ),
             expected_checksum=claimed.job_manifest_checksum,
@@ -151,12 +154,13 @@ def recover_interrupted_jobs(registry: ProjectRegistry, settings: Settings) -> i
         if any(attempt_in_use(att) for att in attempts):
             continue
 
+        details = {"job_id": job.job_id, "stage": job.current_stage}
         error = ExecutionError(
             stage_id=job.current_stage,
             error_code="INTERRUPTED_SHUTDOWN",
             human_message="Tiến trình bị gián đoạn. Bấm thử lại để tiếp tục huấn luyện từ checkpoint đã lưu.",
-            retryable=True,
-            details={"job_id": job.job_id, "stage": job.current_stage},
+            retryable=classify_retryability("INTERRUPTED_SHUTDOWN", details),
+            details=details,
         )
         try:
             registry.transition_job(

@@ -51,8 +51,8 @@ export function HelpDetails({ title = "Cách dùng", children }: { title?: strin
   </details>;
 }
 
-export function ErrorFeedback({ message, retry, className }: { message: string; retry?: () => void; className?: string }) {
-  return <Notice tone="rust" className={className}><p>{message}</p>{retry && <Button size="sm" variant="secondary" className="mt-2" onClick={retry}>Thử lại</Button>}</Notice>;
+export function ErrorFeedback({ message, retry, retryLabel = "Thử lại", className }: { message: string; retry?: () => void; retryLabel?: string; className?: string }) {
+  return <Notice tone="rust" className={className}><p>{message}</p>{retry && <Button size="sm" variant="secondary" className="mt-2" onClick={retry}>{retryLabel}</Button>}</Notice>;
 }
 
 export function FieldError({ id, message }: { id: string; message: string | null }) {

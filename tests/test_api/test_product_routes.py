@@ -247,12 +247,26 @@ async def test_retry_appends_attempt_over_http(client) -> None:
     created = await client.post("/api/v1/projects/project-fixture-001/jobs", json={})
     job_id = created.json()["job_id"]
     await client.post(f"/api/v1/jobs/{job_id}/transitions", json={"target_status": "RUNNING"})
-    await client.post(f"/api/v1/jobs/{job_id}/transitions", json={"target_status": "FAILED"})
+    failed = await client.post(
+        f"/api/v1/jobs/{job_id}/transitions",
+        json={
+            "target_status": "FAILED",
+            "error": {
+                "stage_id": "ST-CAMERA-POSE",
+                "error_code": "COLMAP_TIMEOUT",
+                "human_message": "COLMAP exceeded configured timeout",
+                "retryable": True,
+            },
+        },
+    )
+    assert failed.status_code == 200
 
     before = await client.get(f"/api/v1/jobs/{job_id}/attempts")
     retried = await client.post(f"/api/v1/jobs/{job_id}/retry")
     assert retried.status_code == 200
     assert retried.json()["status"] == "QUEUED"
+    duplicate = await client.post(f"/api/v1/jobs/{job_id}/retry")
+    assert duplicate.status_code == 422
 
     after = await client.get(f"/api/v1/jobs/{job_id}/attempts")
     assert len(after.json()["attempts"]) == len(before.json()["attempts"]) + 1
@@ -265,6 +279,41 @@ async def test_retry_on_non_failed_job_rejected(client) -> None:
     created = await client.post("/api/v1/projects/project-fixture-001/jobs", json={})
     r = await client.post(f"/api/v1/jobs/{created.json()['job_id']}/retry")
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_retry_rejects_nonretryable_input_error_even_if_legacy_flag_is_true(client) -> None:
+    created = await client.post("/api/v1/projects/project-fixture-001/jobs", json={})
+    job_id = created.json()["job_id"]
+    await client.post(f"/api/v1/jobs/{job_id}/transitions", json={"target_status": "RUNNING"})
+    await client.post(
+        f"/api/v1/jobs/{job_id}/transitions",
+        json={
+            "target_status": "FAILED",
+            "error": {
+                "stage_id": "ST-FRAME-EXTRACT",
+                "error_code": "FRAME_QUALITY_MISMATCH",
+                "human_message": "Quality mask belongs to another input",
+                "retryable": True,
+            },
+        },
+    )
+
+    retried = await client.post(f"/api/v1/jobs/{job_id}/retry")
+    assert retried.status_code == 409
+    attempts = await client.get(f"/api/v1/jobs/{job_id}/attempts")
+    assert [event["attempt"] for event in attempts.json()["attempts"]] == [1, 1, 1]
+
+
+@pytest.mark.asyncio
+async def test_retry_rejects_failed_job_without_structured_error(client) -> None:
+    created = await client.post("/api/v1/projects/project-fixture-001/jobs", json={})
+    job_id = created.json()["job_id"]
+    await client.post(f"/api/v1/jobs/{job_id}/transitions", json={"target_status": "RUNNING"})
+    await client.post(f"/api/v1/jobs/{job_id}/transitions", json={"target_status": "FAILED"})
+
+    retried = await client.post(f"/api/v1/jobs/{job_id}/retry")
+    assert retried.status_code == 409
 
 
 @pytest.mark.asyncio
