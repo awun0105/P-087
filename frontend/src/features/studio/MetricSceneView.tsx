@@ -604,13 +604,6 @@ export function MetricSceneView({
           </div>
         )}
       </div>
-      <p className="absolute bottom-3 left-3 rounded-md border border-line-dark bg-viewport-deep/85 px-2 py-1 text-xs text-on-dark/80">
-        Hệ mét, sàn z = 0 · mở tại camera quay đầu tiên
-        {collisionState?.triangles ? ` · collision ${Math.round(collisionState.triangles).toLocaleString("vi-VN")} tam giác` : ""}
-        {collisionState?.error ? ` · không nạp được collision: ${collisionState.error}` : ""}
-        {layers.lidar && lidarState?.points ? ` · LiDAR ${lidarState.points.toLocaleString("vi-VN")} điểm` : ""}
-        {layers.lidar && lidarState?.error ? ` · không nạp được LiDAR: ${lidarState.error}` : ""}
-      </p>
     </div>
   );
 }
