@@ -2,14 +2,16 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AccountPage } from "@/features/studio/auth/AccountPage";
 import { LoginForm, RegisterForm, safeNext } from "@/features/studio/auth/AuthForms";
+import { AppShell } from "@/features/shell/AppShell";
+import { TooltipProvider } from "@/components/shadcn/tooltip";
 import { login, register, type Me } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 
-const state = vi.hoisted(() => ({ me: null as Me | null, refresh: vi.fn(), logout: vi.fn(), push: vi.fn(), replace: vi.fn(), search: "" }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: state.push, replace: state.replace }), useSearchParams: () => new URLSearchParams(state.search) }));
+const state = vi.hoisted(() => ({ me: null as Me | null, refresh: vi.fn(), logout: vi.fn(), push: vi.fn(), replace: vi.fn(), search: "", pathname: "/overview" }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: state.push, replace: state.replace }), useSearchParams: () => new URLSearchParams(state.search), usePathname: () => state.pathname }));
 vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => state }));
 vi.mock("@/lib/api/auth", async (original) => ({ ...(await original<typeof import("@/lib/api/auth")>()), login: vi.fn(), register: vi.fn() }));
-beforeEach(() => { vi.clearAllMocks(); state.me = { auth_required: true, user: null }; state.search = "next=%2Fnew%3Fsource%3Dvideo%26step%3Dsetup"; state.refresh.mockResolvedValue(undefined); });
+beforeEach(() => { vi.clearAllMocks(); state.me = { auth_required: true, user: null }; state.search = "next=%2Fnew%3Fsource%3Dvideo%26step%3Dsetup"; state.pathname = "/overview"; state.refresh.mockResolvedValue(undefined); });
 describe("tài khoản và đích sau xác thực", () => {
   it("local không bịa profile; khách có link quay lại account", () => {
     state.me = { auth_required: false, user: null };
@@ -100,5 +102,30 @@ describe("tài khoản và đích sau xác thực", () => {
     expect(register).not.toHaveBeenCalled();
     expect(safeNext("/\\evil.example")).toBe("/overview");
     expect(safeNext("/path\n")).toBe("/overview");
+  });
+
+  it("AppShell: khách vào route workspace bị chuyển hướng về /login và không render nội dung", async () => {
+    state.me = { auth_required: true, user: null };
+    state.pathname = "/scenes";
+    render(<AppShell><div data-testid="protected-content">Secret Scenes</div></AppShell>);
+    expect(screen.queryByTestId("protected-content")).toBeNull();
+    expect(state.replace).toHaveBeenCalledWith("/login?next=%2Fscenes");
+  });
+
+  it("AppShell: khách vào /new/try-demo được xem và thanh bên chỉ hiện video mẫu, không hiện workspace", () => {
+    state.me = { auth_required: true, user: null };
+    state.pathname = "/new/try-demo";
+    render(<TooltipProvider><AppShell><div data-testid="demo-content">Demo Page</div></AppShell></TooltipProvider>);
+    expect(screen.getByTestId("demo-content")).toBeInTheDocument();
+    expect(state.replace).not.toHaveBeenCalled();
+    // Sidebar không lộ các mục workspace
+    expect(screen.queryByRole("link", { name: "Tổng quan" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Tạo scene mới" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Scenes" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Thùng rác" })).toBeNull();
+    // Sidebar chỉ hiện Thử video mẫu và Đăng nhập
+    const demoLinks = screen.getAllByRole("link", { name: "Thử video mẫu" });
+    expect(demoLinks.some((link) => link.getAttribute("href") === "/new/try-demo")).toBe(true);
+    expect(screen.getByRole("link", { name: "Đăng nhập" })).toHaveAttribute("href", "/login?next=%2Fnew%2Ftry-demo");
   });
 });

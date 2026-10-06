@@ -165,9 +165,15 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
       <PageHeader title={heading.title} description={heading.description} />
       {source ? (
         <div className="mt-8 space-y-4">
-          <Link href="/new" className="text-sm font-medium text-ember-strong hover:underline">
-            ← Đổi cách bắt đầu
-          </Link>
+          {canEdit(me) ? (
+            <Link href="/new" className="text-sm font-medium text-ember-strong hover:underline">
+              ← Đổi cách bắt đầu
+            </Link>
+          ) : (
+            <Link href="/login" className="text-sm font-medium text-ember-strong hover:underline">
+              ← Quay lại đăng nhập
+            </Link>
+          )}
           <FlowStepper steps={steps} current={step} />
         </div>
       ) : null}

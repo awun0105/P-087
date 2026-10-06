@@ -2,7 +2,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { isActive } from "@/features/shell/AppShell";
+import { isActive, isGuestAllowedRoute } from "@/features/shell/AppShell";
 import { backHref, Breadcrumbs, crumbsFor, PageTitleProvider, usePageTitle } from "@/features/shell/Breadcrumbs";
 import { SceneTabs, type SceneTabItem } from "@/features/studio/scene/SceneTabs";
 import { progressSceneStatus } from "@/features/studio/sceneStatus";
@@ -56,6 +56,32 @@ describe("ngữ cảnh điều hướng", () => {
     expect(backHref("/scenes/job-a/stages/frames")).not.toBe("/scenes");
     expect(backHref("/account")).toBe("/overview");
     for (const top of ["/overview", "/scenes", "/new", "/trash", "/team"]) expect(backHref(top)).toBeNull();
+  });
+
+  it("khách chưa đăng nhập: breadcrumb và nút Quay lại không lộ /new hay /scenes", () => {
+    // Thử mẫu của khách: không có cấp cha /new, nút Quay lại đưa về /login
+    expect(crumbsFor("/new/try-demo", null, false)).toEqual([{ label: "Thử video mẫu" }]);
+    expect(backHref("/new/try-demo", false)).toBe("/login");
+
+    // Màn scene mẫu của khách: cấp cha là /new/try-demo (không phải /scenes), nút Quay lại về /new/try-demo
+    expect(crumbsFor("/samples/mau-1", "Kho Mẫu A", false)).toEqual([
+      { label: "Thử video mẫu", href: "/new/try-demo" },
+      { label: "Kho Mẫu A" },
+    ]);
+    expect(backHref("/samples/mau-1", false)).toBe("/new/try-demo");
+  });
+
+  it("chỉ route demo và scene mẫu mở cho khách, các workspace khác đều yêu cầu đăng nhập", () => {
+    expect(isGuestAllowedRoute("/new/try-demo")).toBe(true);
+    expect(isGuestAllowedRoute("/new/try-demo?sample=aisle")).toBe(true);
+    expect(isGuestAllowedRoute("/samples/mau-1/scene")).toBe(true);
+    expect(isGuestAllowedRoute("/overview")).toBe(false);
+    expect(isGuestAllowedRoute("/scenes")).toBe(false);
+    expect(isGuestAllowedRoute("/new")).toBe(false);
+    expect(isGuestAllowedRoute("/new/import-video")).toBe(false);
+    expect(isGuestAllowedRoute("/trash")).toBe(false);
+    expect(isGuestAllowedRoute("/team")).toBe(false);
+    expect(isGuestAllowedRoute("/account")).toBe(false);
   });
 
   it("breadcrumb lấy tên API và bỏ tên khi màn chi tiết rời đi", () => {
