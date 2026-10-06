@@ -9,14 +9,14 @@ import {
 } from "@/features/viewer/PlayCanvasScene";
 import type { SourceFrame } from "@/features/viewer/source-frame";
 import { cn } from "@/lib/cn";
-import type { Preview } from "@/features/studio/scene/state";
 
 /** Bản xem SfM trung tính; chỉnh Gaussian chỉ mở khi người dùng chọn chế độ đó. */
-export function PreviewScene({ contentUrl, filename, title }: { contentUrl: string; filename: string; title?: string }) {
+export function PreviewScene({ contentUrl, filename }: { contentUrl: string; filename: string; title?: string }) {
   const [capability, setCapability] = usePlayCanvasCapability();
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
   const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
   const [sourceFrame, setSourceFrame] = useState<SourceFrame>("colmap");
+  const [wheelFactor, setWheelFactor] = useState(2);
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
   const handleApp = useCallback((_app: unknown, controls?: ViewerControls) => {
     setViewerControls(controls ?? null);
@@ -48,6 +48,7 @@ export function PreviewScene({ contentUrl, filename, title }: { contentUrl: stri
             onFailed={fail}
             onRuntime={setRuntime}
             sourceFrame={sourceFrame}
+            wheelFactor={wheelFactor}
             onApp={handleApp}
             extraControls={
               <div
@@ -124,6 +125,25 @@ export function PreviewScene({ contentUrl, filename, title }: { contentUrl: stri
                   >
                     Gốc
                   </button>
+                </div>
+                <div className="flex items-center gap-0.5 border-l border-line-dark px-1.5 text-xs text-on-dark/80">
+                  <span className="text-[11px] text-on-dark/60 select-none mr-0.5">Zoom:</span>
+                  {[1, 2, 4].map((factor) => (
+                    <button
+                      key={factor}
+                      type="button"
+                      onClick={() => setWheelFactor(factor)}
+                      className={cn(
+                        "rounded px-1.5 py-0.5 text-xs transition-colors",
+                        wheelFactor === factor
+                          ? "bg-ember-soft text-ember-strong font-medium"
+                          : "text-on-dark/70 hover:text-on-dark hover:bg-on-dark/10",
+                      )}
+                      title={`Tốc độ zoom ${factor === 1 ? "chuẩn (×1)" : `nhanh (×${factor})`}`}
+                    >
+                      {factor}×
+                    </button>
+                  ))}
                 </div>
               </div>
             }

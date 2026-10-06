@@ -21,6 +21,7 @@ import {
   recordingCameraPose,
   toDisplay,
   type CameraMarkerLike,
+  type SourceFrame,
 } from "@/features/viewer/source-frame";
 import { jobArtifactContentUrl, jobLidarOverlayUrl, jobWalkCollisionUrl } from "@/lib/api/endpoints";
 import { cn } from "@/lib/cn";
@@ -130,6 +131,7 @@ export function MetricSceneView({
   );
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
   const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
+  const [sourceFrame, setSourceFrame] = useState<SourceFrame>("z_up");
   const [wheelFactor, setWheelFactor] = useState(2);
   const [thirdPerson, setThirdPerson] = useState(false);
 
@@ -371,7 +373,7 @@ export function MetricSceneView({
         mode="VISUAL"
         capability={capability}
         onFailed={fail}
-        sourceFrame="z_up"
+        sourceFrame={sourceFrame}
         initialCamera={initialCamera}
         annotations={annotations}
         onApp={onApp}
@@ -447,6 +449,48 @@ export function MetricSceneView({
                 <Hand className={cn("size-4 transition-transform", selectMode && "drop-shadow-[0_0_6px_var(--color-ember)] scale-105")} aria-hidden />
               </button>
             )}
+            <div className="flex items-center gap-1 border-l border-line-dark px-2 text-xs text-on-dark/80">
+              <span className="text-[11px] text-on-dark/60 select-none">Trục:</span>
+              <button
+                type="button"
+                className={cn(
+                  "rounded px-1.5 py-0.5 text-xs transition-colors",
+                  sourceFrame === "colmap"
+                    ? "bg-ember-soft text-ember-strong font-medium"
+                    : "text-on-dark/70 hover:text-on-dark",
+                )}
+                onClick={() => setSourceFrame("colmap")}
+                title="COLMAP / Brush (Y hướng xuống, xoay 180° quanh Z)"
+              >
+                COLMAP
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "rounded px-1.5 py-0.5 text-xs transition-colors",
+                  sourceFrame === "z_up"
+                    ? "bg-ember-soft text-ember-strong font-medium"
+                    : "text-on-dark/70 hover:text-on-dark",
+                )}
+                onClick={() => setSourceFrame("z_up")}
+                title="Chuẩn Z-up (Quay trục Z lên trên, sàn z=0)"
+              >
+                Z-up
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "rounded px-1.5 py-0.5 text-xs transition-colors",
+                  sourceFrame === "identity"
+                    ? "bg-ember-soft text-ember-strong font-medium"
+                    : "text-on-dark/70 hover:text-on-dark",
+                )}
+                onClick={() => setSourceFrame("identity")}
+                title="Gốc (Không xoay trục)"
+              >
+                Gốc
+              </button>
+            </div>
             <div className="flex items-center gap-0.5 border-l border-line-dark px-1.5 text-xs text-on-dark/80">
               <span className="text-[11px] text-on-dark/60 select-none mr-0.5">Zoom:</span>
               {[1, 2, 4].map((factor) => (

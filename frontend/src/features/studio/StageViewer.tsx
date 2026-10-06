@@ -4,7 +4,7 @@ import { errorMessage } from "@/lib/ui-error";
 
 import { Canvas } from "@react-three/fiber";
 import { Grid, OrbitControls } from "@react-three/drei";
-import { Loader2 } from "lucide-react";
+import { Loader2, Maximize, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -12,8 +12,13 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { Notice } from "@/components/studio/primitives";
 import { requireEmbeddedGlb } from "@/features/viewer/GlbArtifact";
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
-import { PlayCanvasScene, usePlayCanvasCapability } from "@/features/viewer/PlayCanvasScene";
-import { recordingCameraPose } from "@/features/viewer/source-frame";
+import {
+  INITIAL_RUNTIME,
+  PlayCanvasScene,
+  usePlayCanvasCapability,
+  type ViewerControls,
+} from "@/features/viewer/PlayCanvasScene";
+import { recordingCameraPose, type SourceFrame } from "@/features/viewer/source-frame";
 import { themeColor } from "@/lib/theme";
 import { jobArtifactContentUrl } from "@/lib/api/endpoints";
 import { getStageViews } from "@/lib/api/studio";
@@ -170,9 +175,15 @@ function CamerasLayer({ view }: { view: StageView }) {
 
 function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageView; cameras: StageView["cameras"] }) {
   const [capability, setCapability] = usePlayCanvasCapability();
+  const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
+  const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
+  const [sourceFrame, setSourceFrame] = useState<SourceFrame>(view.unit === "meter" ? "z_up" : "colmap");
+  const [wheelFactor, setWheelFactor] = useState(2);
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
-  const frame = view.unit === "meter" ? "z_up" : "colmap";
-  const initialCamera = useMemo(() => recordingCameraPose(frame, cameras), [frame, cameras]);
+  const handleApp = useCallback((_app: unknown, controls?: ViewerControls) => {
+    setViewerControls(controls ?? null);
+  }, []);
+  const initialCamera = useMemo(() => recordingCameraPose(sourceFrame, cameras), [sourceFrame, cameras]);
   const ref = view.refs[0];
   if (!ref) return <Notice>Bước này chưa có file 3DGS.</Notice>;
   if (capability === "failed" || capability === "unavailable") {
@@ -187,8 +198,99 @@ function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageVie
       mode="VISUAL"
       capability={capability}
       onFailed={fail}
-      sourceFrame={frame}
+      onRuntime={setRuntime}
+      sourceFrame={sourceFrame}
+      wheelFactor={wheelFactor}
       initialCamera={initialCamera}
+      onApp={handleApp}
+      extraControls={
+        <div
+          className="sse-buttonGroup flex items-center shrink-0 border border-line-dark"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="sse-controlButton flex items-center justify-center text-on-dark/80 hover:text-on-dark transition-colors disabled:opacity-40"
+            onClick={() => viewerControls?.frameScene()}
+            disabled={!runtime.loaded}
+            title="Toàn cảnh (F)"
+            aria-label="Toàn cảnh"
+          >
+            <Maximize className="size-4" aria-hidden />
+          </button>
+          <button
+            type="button"
+            className="sse-controlButton flex items-center justify-center text-on-dark/80 hover:text-on-dark transition-colors disabled:opacity-40"
+            onClick={() => viewerControls?.resetCamera()}
+            disabled={!runtime.loaded}
+            title="Về vị trí ban đầu (R)"
+            aria-label="Về vị trí ban đầu"
+          >
+            <RotateCcw className="size-4" aria-hidden />
+          </button>
+          <div className="flex items-center gap-1 border-l border-line-dark px-2 text-xs text-on-dark/80">
+            <span className="text-[11px] text-on-dark/60 select-none">Trục:</span>
+            <button
+              type="button"
+              className={cn(
+                "rounded px-1.5 py-0.5 text-xs transition-colors",
+                sourceFrame === "colmap"
+                  ? "bg-ember-soft text-ember-strong font-medium"
+                  : "text-on-dark/70 hover:text-on-dark",
+              )}
+              onClick={() => setSourceFrame("colmap")}
+              title="COLMAP / Brush (Y hướng xuống, xoay 180° quanh Z)"
+            >
+              COLMAP
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "rounded px-1.5 py-0.5 text-xs transition-colors",
+                sourceFrame === "z_up"
+                  ? "bg-ember-soft text-ember-strong font-medium"
+                  : "text-on-dark/70 hover:text-on-dark",
+              )}
+              onClick={() => setSourceFrame("z_up")}
+              title="Chuẩn Z-up (Quay trục Z lên trên, sàn z=0)"
+            >
+              Z-up
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "rounded px-1.5 py-0.5 text-xs transition-colors",
+                sourceFrame === "identity"
+                  ? "bg-ember-soft text-ember-strong font-medium"
+                  : "text-on-dark/70 hover:text-on-dark",
+              )}
+              onClick={() => setSourceFrame("identity")}
+              title="Gốc (Không xoay trục)"
+            >
+              Gốc
+            </button>
+          </div>
+          <div className="flex items-center gap-0.5 border-l border-line-dark px-1.5 text-xs text-on-dark/80">
+            <span className="text-[11px] text-on-dark/60 select-none mr-0.5">Zoom:</span>
+            {[1, 2, 4].map((factor) => (
+              <button
+                key={factor}
+                type="button"
+                onClick={() => setWheelFactor(factor)}
+                className={cn(
+                  "rounded px-1.5 py-0.5 text-xs transition-colors",
+                  wheelFactor === factor
+                    ? "bg-ember-soft text-ember-strong font-medium"
+                    : "text-on-dark/70 hover:text-on-dark hover:bg-on-dark/10",
+                )}
+                title={`Tốc độ zoom ${factor === 1 ? "chuẩn (×1)" : `nhanh (×${factor})`}`}
+              >
+                {factor}×
+              </button>
+            ))}
+          </div>
+        </div>
+      }
     />
   );
 }
