@@ -42,6 +42,8 @@ export function PipelineTimeline({
   stageList = MVP_STAGES,
   jobId,
   isStale = false,
+  selectedStage,
+  onSelectStage,
 }: {
   stages: readonly StageView[];
   timeNote?: string;
@@ -51,8 +53,17 @@ export function PipelineTimeline({
   jobId?: string;
   /** True nếu job đang RUNNING nhưng heartbeat đã quá hạn (mất kết nối hoặc worker chết). */
   isStale?: boolean;
+  selectedStage?: StageId | null;
+  onSelectStage?: (stageId: StageId) => void;
 }) {
-  const [selected, setSelected] = useState<StageId | null>(null);
+  const [internalSelected, setInternalSelected] = useState<StageId | null>(null);
+  const selected = selectedStage !== undefined ? selectedStage : internalSelected;
+  const setSelected = onSelectStage
+    ? (fn: (prev: StageId | null) => StageId | null) => {
+        const next = fn(selected);
+        if (next) onSelectStage(next);
+      }
+    : setInternalSelected;
   const done = stages.filter((stage) => stage.state === "succeeded").length;
   const eta = estimateRemainingTime(stages, isStale);
 
@@ -111,10 +122,29 @@ export function PipelineTimeline({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-3">
                     <p className={cn("text-sm font-medium", state === "pending" ? "text-ink-subtle" : "text-ink")}>
-                      {jobId && state === "succeeded" ? <button type="button" aria-expanded={selected === meta.id} aria-controls={`stage-detail-${meta.id}`} onClick={() => setSelected((value) => value === meta.id ? null : meta.id)} className="cursor-pointer text-left underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ember">{meta.title}<span className="sr-only"> — đã xong, xem chi tiết</span></button> : <>
-                      {meta.title}
-                      <span className="sr-only"> — {isCurrentStale ? "gián đoạn" : STATE_LABEL[state]}</span>
-                      </>}
+                      {(jobId && state === "succeeded") || onSelectStage ? (
+                        <button
+                          type="button"
+                          aria-expanded={selected === meta.id}
+                          aria-controls={`stage-detail-${meta.id}`}
+                          onClick={() => {
+                            if (onSelectStage) {
+                              onSelectStage(meta.id);
+                            } else {
+                              setSelected((value) => (value === meta.id ? null : meta.id));
+                            }
+                          }}
+                          className="cursor-pointer text-left underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ember"
+                        >
+                          {meta.title}
+                          <span className="sr-only"> — xem chi tiết giai đoạn</span>
+                        </button>
+                      ) : (
+                        <>
+                          {meta.title}
+                          <span className="sr-only"> — {isCurrentStale ? "gián đoạn" : STATE_LABEL[state]}</span>
+                        </>
+                      )}
                     </p>
                     {stage?.seconds != null && state !== "pending" && (
                       <span className="shrink-0 text-xs value-tech text-ink-subtle">

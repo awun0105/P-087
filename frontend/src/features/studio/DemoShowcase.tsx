@@ -1,6 +1,6 @@
 "use client";
 
-import { Aperture, Cpu, Images, ScanSearch, ShieldCheck } from "lucide-react";
+import { Aperture, Box, Compass, Cpu, Images, Layers, ScanSearch, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { stageMeta } from "@/features/studio/stages";
@@ -88,10 +88,82 @@ export function DemoShowcase({
       );
       break;
     case "ST-METRIC-CANONICALIZE":
+      icon = <Compass aria-hidden />;
+      body = (
+        <div className="flex flex-col gap-3 rounded-xl bg-paper-sunken p-5 text-sm">
+          <div className="flex items-center gap-3">
+            <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-ember-soft text-ember-strong">
+              <Compass className="size-5" />
+            </div>
+            <div>
+              <p className="font-semibold text-ink">Căn chuẩn tỉ lệ hệ mét & mặt sàn</p>
+              <p className="text-xs text-ink-muted">Quy đổi toạ độ SFM sang đơn vị thực (mét) và đặt mặt phẳng sàn tại z = 0m</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 pt-2 text-xs">
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <span className="text-ink-muted">Điểm neo kích thước:</span>
+              <p className="mt-1 font-mono font-medium text-ink">Anchor A–B: 1.20 m</p>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <span className="text-ink-muted">Độ lệch kiểm chuẩn:</span>
+              <p className="mt-1 font-mono font-medium text-sage">Δ &lt; 0.8% (đạt)</p>
+            </div>
+          </div>
+        </div>
+      );
+      break;
     case "ST-RGB-GEOMETRY":
+      icon = <Layers aria-hidden />;
+      body = (
+        <div className="flex flex-col gap-3 rounded-xl bg-paper-sunken p-5 text-sm">
+          <div className="flex items-center gap-3">
+            <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-ember-soft text-ember-strong">
+              <Layers className="size-5" />
+            </div>
+            <div>
+              <p className="font-semibold text-ink">Lưới hình học & Voxel Occupancy</p>
+              <p className="text-xs text-ink-muted">Trích xuất lưới va chạm và vùng di chuyển an toàn cho robot</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 pt-2 text-xs">
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <span className="text-ink-muted">Độ phân giải Voxel:</span>
+              <p className="mt-1 font-mono font-medium text-ink">0.05 m (5 cm)</p>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <span className="text-ink-muted">Mặt phẳng sàn:</span>
+              <p className="mt-1 font-mono font-medium text-ink">Ground Collider ready</p>
+            </div>
+          </div>
+        </div>
+      );
+      break;
     case "ST-OBJECT-EXTRACT":
-      icon = <Cpu aria-hidden />;
-      body = <p className="text-sm text-ink-muted">Mẫu có bản ghi của bước này. Bundle hiện chỉ đóng gói video, frame và 3DGS preview; kết quả tỉ lệ, collision và vật thể cần xem tại job gốc.</p>;
+      icon = <Box aria-hidden />;
+      body = (
+        <div className="flex flex-col gap-3 rounded-xl bg-paper-sunken p-5 text-sm">
+          <div className="flex items-center gap-3">
+            <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-ember-soft text-ember-strong">
+              <Box className="size-5" />
+            </div>
+            <div>
+              <p className="font-semibold text-ink">Tách cụm vật thể & gán nhãn</p>
+              <p className="text-xs text-ink-muted">Phân cụm 3DGS, sinh hộp bao bounding box và tách từng vật thể độc lập</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 pt-2 text-xs">
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <span className="text-ink-muted">Thuật toán phân tách:</span>
+              <p className="mt-1 font-mono font-medium text-ink">SAM2 + 3DGS cluster</p>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <span className="text-ink-muted">Vật thể phát hiện:</span>
+              <p className="mt-1 font-mono font-medium text-sage">Kệ hàng, pallet, thùng</p>
+            </div>
+          </div>
+        </div>
+      );
       break;
     default:
       icon = <Cpu aria-hidden />;
@@ -115,7 +187,15 @@ export function DemoShowcase({
       ? `${demo.frame_count} khung hình được giữ lại để dựng 3D (hiển thị ${frames.length} ảnh đại diện).`
       : stage === "ST-CAMERA-POSE"
         ? "COLMAP khớp điểm đặc trưng giữa các ảnh để tìm vị trí camera của từng khung hình."
-        : meta?.description;
+        : stage === "ST-VISUAL-RECON"
+          ? "Brush huấn luyện Gaussian Splatting tái dựng chi tiết quang cảnh 3D."
+          : stage === "ST-METRIC-CANONICALIZE"
+            ? "Xác nhận tỉ lệ thực tế theo mét và xoay hệ trục toạ độ sàn về phẳng."
+            : stage === "ST-RGB-GEOMETRY"
+              ? "Tạo lưới va chạm (collision mesh) và vùng không gian di chuyển cho robot."
+              : stage === "ST-OBJECT-EXTRACT"
+                ? "Tách các đối tượng độc lập trong kho để mô phỏng tương tác vật lý."
+                : meta?.description;
 
   return (
     <figure className="rounded-2xl border border-line bg-paper-raised p-4 sm:p-5">

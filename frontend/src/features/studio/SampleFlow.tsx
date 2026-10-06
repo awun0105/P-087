@@ -2,6 +2,7 @@
 
 import { ArrowLeft, ArrowRight, Box, CheckCircle2, Clapperboard, Clock, FastForward, Info, Play } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
+import { useState } from "react";
 
 import { Badge, Button, Card, Notice, buttonVariants } from "@/components/studio/primitives";
 import { DemoShowcase } from "@/features/studio/DemoShowcase";
@@ -12,6 +13,7 @@ import { useDemoReplay } from "@/features/studio/useDemoReplay";
 import { useProcessingForm } from "@/features/studio/useProcessingForm";
 import { sampleFileUrl } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
+import type { StageId } from "@/lib/contracts/api";
 import type { DemoManifest, SampleSummary } from "@/lib/contracts/studio";
 import { formatBytes, formatDuration } from "@/lib/format";
 
@@ -187,8 +189,10 @@ export function SampleProcessStep({
   onDone: () => void;
 }) {
   const { views, finished, skip } = useDemoReplay(sample.stages, true);
+  const [manualStage, setManualStage] = useState<StageId | null>(null);
   const running = views.find((view) => view.state === "running");
-  const shown = running ?? views.findLast((view) => view.state === "succeeded") ?? views[0];
+  const activeStage = manualStage ?? running?.stage_id ?? views.findLast((view) => view.state === "succeeded")?.stage_id ?? views[0].stage_id;
+  const currentView = views.find((view) => view.stage_id === activeStage) ?? views[0];
   const recorded = sample.stages.filter((stage) => (stage.state ?? "succeeded") === "succeeded");
   const missing = STUDIO_STAGES.filter((meta) => !recorded.some((stage) => stage.stage_id === meta.id));
   const totalReal = recorded.length > 0 && recorded.every((stage) => stage.duration_seconds !== null)
@@ -199,8 +203,8 @@ export function SampleProcessStep({
       <div className="space-y-4">
         <DemoShowcase
           demo={sample}
-          stage={shown.stage_id}
-          fraction={shown.fraction ?? 1}
+          stage={activeStage}
+          fraction={currentView.fraction ?? 1}
           fileUrl={(name) => sampleFileUrl(sampleId, name)}
         />
         {finished ? (
@@ -212,14 +216,20 @@ export function SampleProcessStep({
           </Notice>
         ) : (
           <Notice icon={<Info aria-hidden />}>
-            Kết quả đã xử lý sẵn — đang phát lại {recorded.length} bước đã ghi trong pipeline {STUDIO_STAGES.length} bước.
+            Kết quả đã xử lý sẵn — đang phát lại {recorded.length} bước đã ghi trong pipeline {STUDIO_STAGES.length} bước. Bấm vào tên bước ở danh sách bên phải để xem tiến trình chi tiết của bước đó.
           </Notice>
         )}
         {missing.length > 0 && <Notice tone="ochre">Mẫu cũ chưa ghi kết quả: {missing.map((meta) => meta.title).join(", ")}.
           Các bước này vẫn hiện chưa có kết quả khi bỏ qua replay.</Notice>}
       </div>
       <Card className="h-fit p-5 sm:p-6">
-        <PipelineTimeline stages={views} stageList={STUDIO_STAGES} timeNote={totalReal ? `Các bước đã ghi: ${formatDuration(totalReal)}` : "Phát lại nhanh"} />
+        <PipelineTimeline
+          stages={views}
+          stageList={STUDIO_STAGES}
+          selectedStage={activeStage}
+          onSelectStage={(id) => setManualStage(id)}
+          timeNote={totalReal ? `Các bước đã ghi: ${formatDuration(totalReal)}` : "Phát lại nhanh"}
+        />
         <div className="mt-6 flex justify-end gap-2">
           {!finished ? (
             <Button variant="ghost" size="sm" onClick={skip}>
