@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { objectViewPose, recordingCameraPose, rotate, toDisplay } from "@/features/viewer/source-frame";
+import { interiorFallbackPose, objectViewPose, recordingCameraPose, rotate, toDisplay } from "@/features/viewer/source-frame";
 
 /** Bỏ −0 để so bằng giá trị. */
 const clean = (v: number[]) => v.map((x) => x + 0);
@@ -61,5 +61,24 @@ describe("objectViewPose", () => {
     const behind = [{ center: [10, 0, 0.4] as [number, number, number], rotation_xyzw: lookX }];
     const pose = objectViewPose([6, 0, 0.3], [1, 1, 0.6], behind);
     expect(pose.position[1]).toBeGreaterThan(0.3); // cao hơn tâm vật (trục y hiển thị = z canonical)
+  });
+});
+
+describe("interiorFallbackPose", () => {
+  it("định vị camera bên trong hộp không gian hệ z_up tại tầm mắt và nhìn dọc trục dài", () => {
+    const box = { min: [0, 0, 0] as [number, number, number], max: [20, 10, 3] as [number, number, number] };
+    const pose = interiorFallbackPose("z_up", box);
+    // position Y trong viewer là Z canonical (độ cao): 1.5m
+    expect(pose.position[1]).toBeCloseTo(1.5);
+    // Target nhìn dọc theo trục X (dài 20m > 10m)
+    expect(pose.target[0]).toBeGreaterThan(pose.position[0]);
+  });
+
+  it("định vị camera bên trong hộp không gian hệ colmap", () => {
+    const box = { min: [-5, -2, 0] as [number, number, number], max: [5, 2, 15] as [number, number, number] };
+    const pose = interiorFallbackPose("colmap", box);
+    expect(pose.position).toBeDefined();
+    expect(pose.target).toBeDefined();
+    expect(pose.fov).toBe(60);
   });
 });
