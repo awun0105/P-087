@@ -1,6 +1,5 @@
-"use client";
-
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Bell, X } from "lucide-react";
 import { Button } from "@/components/studio/primitives";
 import { ErrorFeedback } from "@/components/studio/feedback";
 import { getJobScene, getReviewState, getSimulationPackage, type ReviewStateView, type SimulationPackageView } from "@/lib/api/studio";
@@ -12,17 +11,58 @@ import { errorMessage } from "@/lib/ui-error";
 import type { SceneIR } from "@/lib/contracts/api";
 import type { JobProgress } from "@/lib/contracts/studio";
 import { isJobStale, useNow, type Tab, type StudioMode } from "@/features/studio/scene/state";
+import { cn } from "@/lib/cn";
 
 interface Detail { scene: SceneIR; pkg: SimulationPackageView | null; review: ReviewStateView | null }
 /** Bước tiếp theo đọc published state; không tạo lifecycle cạnh tranh với backend. */
-export function NextAction({ jobId, progress, current, mode, sceneReady, revision, busy, onOpen, onRetry, retryState }: {
-  jobId: string; progress: JobProgress | null; current: Tab; mode: StudioMode; sceneReady: boolean; revision: string | null;
-  busy: boolean; onOpen: (tab: Tab, mode?: StudioMode) => void; onRetry: () => void;
+export function NextAction({
+  jobId,
+  progress,
+  current,
+  mode,
+  sceneReady,
+  revision,
+  busy,
+  onOpen,
+  onRetry,
+  retryState,
+  variant = "banner",
+}: {
+  jobId: string;
+  progress: JobProgress | null;
+  current: Tab;
+  mode: StudioMode;
+  sceneReady: boolean;
+  revision: string | null;
+  busy: boolean;
+  onOpen: (tab: Tab, mode?: StudioMode) => void;
+  onRetry: () => void;
   retryState?: "submitting" | "accepted" | "rejected" | "uncertain" | null;
+  variant?: "banner" | "popover";
 }) {
   const { me } = useAuth();
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleDown = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsOpen(false);
+    };
+    document.addEventListener("mousedown", handleDown);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleDown);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [isOpen]);
   const now = useNow(progress?.status === "RUNNING");
   const stale = isJobStale(progress, now);
   const load = useCallback(async (signal: AbortSignal) => {
@@ -47,6 +87,7 @@ export function NextAction({ jobId, progress, current, mode, sceneReady, revisio
   let title: string | null = null;
   let description: string | null = null;
   let action: { label: string; tab: Tab; mode?: StudioMode } | null = null;
+  let pendingCount: number | null = null;
   if (retryState) {
     title = retryState === "submitting" ? "Đang gửi yêu cầu thử lại" : retryState === "rejected" ? "Đang kiểm tra phản hồi thử lại" : "Đang đồng bộ lần chạy mới";
     description = retryState === "uncertain"
@@ -85,6 +126,7 @@ export function NextAction({ jobId, progress, current, mode, sceneReady, revisio
       // với bộ lọc "Chờ xác nhận" của Studio), không theo cờ `active`.
       const review_of = (object: SceneIR["objects"][number]) => object.provenance.review;
       const pending = detail.scene.objects.filter((object) => object.state === "CANDIDATE" && review_of(object) !== "IGNORED" && review_of(object) !== "DELETED").length;
+      pendingCount = pending;
       const awaitingChoice = detail.scene.provenance.object_extraction === "objectify_failed_awaiting_choice";
       const pkg = detail.pkg?.scene_revision === detail.scene.scene_revision ? detail.pkg : null;
       const review = detail.review?.record.scene_revision === detail.scene.scene_revision ? detail.review : null;
@@ -112,12 +154,96 @@ export function NextAction({ jobId, progress, current, mode, sceneReady, revisio
   const atTarget = action && current === action.tab && (!action.mode || mode === action.mode);
   const showRetry = Boolean(!retryState && progress.status === "FAILED" && progress.error?.retryable);
   if (!title && !showRetry && !(sceneReady && error)) return null;
-  return <section aria-label="Bước tiếp theo" className="border-b border-line bg-paper px-4 py-3 sm:px-6">
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      {title && <div className="min-w-0"><p className="text-sm font-bold">{title}</p>{description && <p className="mt-0.5 text-sm text-ink-muted">{description}</p>}</div>}
-      {showRetry && <Button size="sm" disabled={busy} onClick={onRetry}>Thử lại</Button>}
-      {action && !atTarget && <Button size="sm" onClick={() => onOpen(action!.tab, action!.mode)}>{action.label}</Button>}
-    </div>
-    {sceneReady && error && <ErrorFeedback message={error} className="mt-2" retryLabel="Tải lại dữ liệu" retry={() => void load(new AbortController().signal)} />}
-  </section>;
+
+  if (variant === "popover") {
+    const hasAlert = Boolean(title || showRetry || (sceneReady && error));
+    return (
+      <div className="relative" ref={popoverRef}>
+        <button
+          type="button"
+          aria-label="Thông báo bước tiếp theo"
+          aria-expanded={isOpen}
+          onClick={() => setIsOpen((prev) => !prev)}
+          className={cn(
+            "relative flex h-8 w-8 items-center justify-center rounded-md border border-line bg-paper text-ink transition hover:bg-paper-raised hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-ember-strong",
+            isOpen && "border-line-strong bg-paper-raised"
+          )}
+        >
+          <Bell className="h-4 w-4" aria-hidden />
+          {pendingCount !== null && pendingCount > 0 ? (
+            <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-ember-strong px-1 text-[10px] font-bold leading-none text-on-accent shadow-sm">
+              {pendingCount > 99 ? "99+" : pendingCount}
+            </span>
+          ) : hasAlert ? (
+            <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-ember-strong ring-2 ring-paper" />
+          ) : null}
+        </button>
+
+        {isOpen && (
+          <div
+            role="dialog"
+            aria-label="Thông báo bước tiếp theo"
+            className="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border border-line-strong bg-paper p-4 shadow-xl sm:w-96"
+          >
+            <div className="mb-3 flex items-center justify-between border-b border-line pb-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                <Bell className="h-3.5 w-3.5" aria-hidden />
+                <span>Bước tiếp theo</span>
+              </div>
+              <button
+                type="button"
+                aria-label="Đóng"
+                onClick={() => setIsOpen(false)}
+                className="rounded p-1 text-ink-muted hover:bg-paper-raised hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-ember-strong"
+              >
+                <X className="h-4 w-4" aria-hidden />
+              </button>
+            </div>
+
+            {title && (
+              <div className="space-y-1">
+                <p className="text-sm font-bold text-ink">{title}</p>
+                {description && <p className="text-xs leading-relaxed text-ink-muted">{description}</p>}
+              </div>
+            )}
+
+            {(showRetry || (action && !atTarget)) && (
+              <div className="mt-3.5 flex items-center justify-end gap-2 border-t border-line/60 pt-2">
+                {showRetry && (
+                  <Button size="sm" disabled={busy} onClick={() => { setIsOpen(false); onRetry(); }}>
+                    Thử lại
+                  </Button>
+                )}
+                {action && !atTarget && (
+                  <Button size="sm" onClick={() => { setIsOpen(false); onOpen(action!.tab, action!.mode); }}>
+                    {action.label}
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {sceneReady && error && (
+              <ErrorFeedback
+                message={error}
+                className="mt-3"
+                retryLabel="Tải lại dữ liệu"
+                retry={() => void load(new AbortController().signal)}
+              />
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <section aria-label="Bước tiếp theo" className="border-b border-line bg-paper px-4 py-3 sm:px-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {title && <div className="min-w-0"><p className="text-sm font-bold">{title}</p>{description && <p className="mt-0.5 text-sm text-ink-muted">{description}</p>}</div>}
+        {showRetry && <Button size="sm" disabled={busy} onClick={onRetry}>Thử lại</Button>}
+        {action && !atTarget && <Button size="sm" onClick={() => onOpen(action!.tab, action!.mode)}>{action.label}</Button>}
+      </div>
+      {sceneReady && error && <ErrorFeedback message={error} className="mt-2" retryLabel="Tải lại dữ liệu" retry={() => void load(new AbortController().signal)} />}
+    </section>
+  );
 }

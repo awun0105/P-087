@@ -115,7 +115,7 @@ export function MetricSceneView({
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
   const [overlay, setOverlay] = useState<SceneOverlay | null>(null);
   const [layers, setLayers] = useState({ ...defaultLayers, lidar: false });
-  const [lidarState, setLidarState] = useState<{ points?: number; error?: string } | null>(null);
+  const [, setLidarState] = useState<{ points?: number; error?: string } | null>(null);
   const lidarUrl = lidarOverlay ? jobLidarOverlayUrl(jobId, lidarOverlay) : null;
   const [collisionState, setCollisionState] = useState<{ triangles?: number; error?: string } | null>(null);
   const initialCamera = useMemo(() => recordingCameraPose("z_up", cameras), [cameras]);
