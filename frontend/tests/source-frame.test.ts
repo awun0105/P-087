@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import { interiorFallbackPose, objectViewPose, recordingCameraPose, rotate, toDisplay } from "@/features/viewer/source-frame";
+import { playCanvasErrorMessage } from "@/features/viewer/PlayCanvasScene";
 
 /** Bỏ −0 để so bằng giá trị. */
 const clean = (v: number[]) => v.map((x) => x + 0);
@@ -80,5 +81,14 @@ describe("interiorFallbackPose", () => {
     expect(pose.position).toBeDefined();
     expect(pose.target).toBeDefined();
     expect(pose.fov).toBe(60);
+  });
+});
+
+describe("playCanvasErrorMessage", () => {
+  it("phân biệt rõ lỗi thiếu WebGL2/WebGPU và lỗi tải file/dữ liệu hỏng", () => {
+    expect(playCanvasErrorMessage("unavailable")).toBe("Trình duyệt không render được 3DGS (cần WebGL2/WebGPU).");
+    expect(playCanvasErrorMessage("failed")).toBe("Không thể tải hoặc hiển thị mô hình 3DGS (lỗi tải file hoặc dữ liệu không hợp lệ).");
+    expect(playCanvasErrorMessage("ready")).toBeNull();
+    expect(playCanvasErrorMessage("unknown")).toBeNull();
   });
 });

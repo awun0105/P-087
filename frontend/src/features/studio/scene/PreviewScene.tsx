@@ -5,6 +5,7 @@ import { useCallback, useMemo, useState } from "react";
 import { CameraModeControls } from "@/features/viewer/CameraModeControls";
 import {
   PlayCanvasScene,
+  playCanvasErrorMessage,
   usePlayCanvasCapability,
   INITIAL_RUNTIME,
   type CameraMode,
@@ -26,6 +27,7 @@ export function PreviewScene({
   initialCamera,
   initialCameraMode = "fly",
   cameras,
+  sourceFrame = "colmap",
 }: {
   contentUrl: string;
   filename: string;
@@ -33,11 +35,11 @@ export function PreviewScene({
   initialCamera?: DisplayCameraPose;
   initialCameraMode?: Exclude<CameraMode, "anim">;
   cameras?: readonly CameraMarkerLike[];
+  sourceFrame?: SourceFrame;
 }) {
   const [capability, setCapability] = usePlayCanvasCapability();
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
   const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
-  const [sourceFrame, setSourceFrame] = useState<SourceFrame>("colmap");
   const [wheelFactor, setWheelFactor] = useState(2);
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
   const handleApp = useCallback((_app: unknown, controls?: ViewerControls) => {
@@ -54,7 +56,7 @@ export function PreviewScene({
     <div className="relative size-full bg-viewport" aria-label={title}>
       {capability === "failed" || capability === "unavailable" ? (
         <p role="alert" className="grid size-full place-items-center p-6 text-sm text-on-dark">
-          Không mở được 3DGS. Trình duyệt cần WebGL2/WebGPU và đủ bộ nhớ GPU.
+          {playCanvasErrorMessage(capability)}
         </p>
       ) : (
         <>
@@ -119,48 +121,6 @@ export function PreviewScene({
                 >
                   <PersonStanding className="size-4" aria-hidden />
                 </button>
-                <div className="flex items-center gap-1 border-l border-line-dark px-2 text-xs text-on-dark/80">
-                  <span className="text-[11px] text-on-dark/60 select-none">Trục:</span>
-                  <button
-                    type="button"
-                    className={cn(
-                      "rounded px-1.5 py-0.5 text-xs transition-colors",
-                      sourceFrame === "colmap"
-                        ? "bg-ember-soft text-ember-strong font-medium"
-                        : "text-on-dark/70 hover:text-on-dark",
-                    )}
-                    onClick={() => setSourceFrame("colmap")}
-                    title="COLMAP / Brush (Y hướng xuống, xoay 180° quanh Z)"
-                  >
-                    COLMAP
-                  </button>
-                  <button
-                    type="button"
-                    className={cn(
-                      "rounded px-1.5 py-0.5 text-xs transition-colors",
-                      sourceFrame === "z_up"
-                        ? "bg-ember-soft text-ember-strong font-medium"
-                        : "text-on-dark/70 hover:text-on-dark",
-                    )}
-                    onClick={() => setSourceFrame("z_up")}
-                    title="Chuẩn Z-up (Quay trục Z lên trên, sàn z=0)"
-                  >
-                    Z-up
-                  </button>
-                  <button
-                    type="button"
-                    className={cn(
-                      "rounded px-1.5 py-0.5 text-xs transition-colors",
-                      sourceFrame === "identity"
-                        ? "bg-ember-soft text-ember-strong font-medium"
-                        : "text-on-dark/70 hover:text-on-dark",
-                    )}
-                    onClick={() => setSourceFrame("identity")}
-                    title="Gốc (Không xoay trục)"
-                  >
-                    Gốc
-                  </button>
-                </div>
                 <div className="flex items-center gap-0.5 border-l border-line-dark px-1.5 text-xs text-on-dark/80">
                   <span className="text-[11px] text-on-dark/60 select-none mr-0.5">Zoom:</span>
                   {[1, 2, 4].map((factor) => (

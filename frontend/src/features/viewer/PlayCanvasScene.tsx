@@ -98,6 +98,16 @@ export function detectPlayCanvasCapability(): PlayCanvasCapability {
 const subscribeCapability = () => () => undefined;
 const serverCapability = (): PlayCanvasCapability => "unknown";
 
+export function playCanvasErrorMessage(capability: PlayCanvasCapability): string | null {
+  if (capability === "unavailable") {
+    return "Trình duyệt không render được 3DGS (cần WebGL2/WebGPU).";
+  }
+  if (capability === "failed") {
+    return "Không thể tải hoặc hiển thị mô hình 3DGS (lỗi tải file hoặc dữ liệu không hợp lệ).";
+  }
+  return null;
+}
+
 /** SSR/hydration cùng snapshot unknown; chỉ probe GPU ở client, một lần mỗi host. */
 export function usePlayCanvasCapability() {
   const cache = useRef<PlayCanvasCapability | null>(null);
