@@ -51,7 +51,7 @@ export function PreviewScene({
   }, [initialCamera, cameras, sourceFrame]);
 
   return (
-    <div className="relative size-full bg-viewport">
+    <div className="relative size-full bg-viewport" aria-label={title}>
       {capability === "failed" || capability === "unavailable" ? (
         <p role="alert" className="grid size-full place-items-center p-6 text-sm text-on-dark">
           Không mở được 3DGS. Trình duyệt cần WebGL2/WebGPU và đủ bộ nhớ GPU.

@@ -27,7 +27,7 @@ export function SceneWorkspace({
 }) {
   return (
     <main className="relative flex h-[calc(100dvh-3rem)] flex-col">
-
+      {badges ? <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5">{badges}</div> : null}
       <div className="min-h-0 flex-1">
         <PreviewScene
           contentUrl={contentUrl}

@@ -8,7 +8,6 @@ import { useEffect, useState } from "react";
 import { Button, Notice } from "@/components/studio/primitives";
 import { PreviewScene } from "@/features/studio/scene/PreviewScene";
 import { useUrlState } from "@/features/studio/useUrlState";
-import { progressHref } from "@/features/studio/inspection";
 import { getPreview, jobArtifactContentUrl } from "@/lib/api/endpoints";
 import { getTrainingRecording } from "@/lib/api/studio";
 import type { StageId } from "@/lib/contracts/api";
