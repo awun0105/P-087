@@ -82,17 +82,23 @@ function Shell({
           <Link
             href="/"
             className="flex min-w-0 items-center gap-3 transition-opacity hover:opacity-90"
-            aria-label="Real2Sim Studio"
+            aria-label="Real2Sim Studio Trang chủ"
           >
-            <span
-              className="relative grid size-8 shrink-0 place-items-center rounded-md bg-foreground shadow-xs"
-              aria-hidden="true"
-            >
-              <span className="size-1.5 rounded-full bg-primary" />
-            </span>
-            <span className="truncate font-display text-[13px] font-semibold tracking-normal text-foreground">
-              REAL2SIM STUDIO
-            </span>
+            <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--studio-ink-muted)_20%,transparent)] bg-[var(--studio-viewport)] p-1.5 shadow-xs">
+              <svg viewBox="0 0 24 24" fill="none" className="size-full" aria-hidden="true">
+                <path d="M12 2L3 7L12 12L21 7L12 2Z" stroke="var(--studio-ember)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M3 17L12 22L21 17" stroke="var(--studio-geometry)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M3 12L12 17L21 12" stroke="var(--studio-ochre)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <div className="flex items-baseline gap-1.5">
+              <span className="font-display text-lg font-bold tracking-tight text-foreground">
+                Real2Sim
+              </span>
+              <span className="rounded border border-line bg-paper-sunken px-1.5 py-0.5 font-mono text-[11px] leading-none font-semibold tracking-widest text-ink-muted uppercase">
+                Studio
+              </span>
+            </div>
           </Link>
           <div className="flex items-center gap-1.5">
             <PaletteMenu />
@@ -100,20 +106,20 @@ function Shell({
           </div>
         </header>
 
-        <div className="flex w-full max-w-[390px] flex-1 items-start pt-[clamp(3.5rem,10vh,7rem)] lg:pt-[clamp(3rem,9vh,6rem)]">
-          <div className="w-full">
+        <div className="flex w-full flex-1 items-center justify-center py-10">
+          <div className="w-full max-w-[420px]">
             <h1 className="font-display text-[clamp(2.25rem,3.2vw,3rem)] font-semibold leading-none tracking-normal text-foreground">
               {title}
             </h1>
-            <p className="mt-4 max-w-[360px] font-ui text-[15px] leading-7 text-muted-foreground">
+            <p className="mt-4 font-ui text-[15px] leading-7 text-muted-foreground">
               {lead}
             </p>
 
-            <div className="mt-9">{children}</div>
+            <div className="mt-8">{children}</div>
 
             {mode === "login" ? (
               <>
-                <p className="mt-5 text-center font-ui text-sm text-muted-foreground">
+                <p className="mt-6 text-center font-ui text-sm text-muted-foreground">
                   Chưa có tài khoản?{" "}
                   <Link
                     href={"/register?next=" + encodeURIComponent(next)}
@@ -134,7 +140,7 @@ function Shell({
                 </p>
               </>
             ) : (
-              <p className="mt-5 text-center font-ui text-sm text-muted-foreground">
+              <p className="mt-6 text-center font-ui text-sm text-muted-foreground">
                 Đã có tài khoản?{" "}
                 <Link
                   href={"/login?next=" + encodeURIComponent(next)}
@@ -237,9 +243,9 @@ export function LoginForm() {
         onSubmit={submit}
         className="space-y-5"
       >
-        <div>
+        <div className="space-y-1.5">
           <label
-            className="mb-2 block font-ui text-xs font-semibold text-foreground"
+            className="block font-ui text-xs font-semibold text-foreground/90"
             htmlFor={ids.email}
           >
             Email
@@ -255,19 +261,19 @@ export function LoginForm() {
             placeholder="engineer@domain.com"
             aria-invalid={!!fieldErrors[ids.email]}
             aria-describedby={fieldErrors[ids.email] ? ids.email + "-error" : undefined}
-            className="h-12 w-full border-b border-input bg-transparent px-0 font-ui text-sm text-foreground outline-none transition-colors placeholder:text-placeholder focus:border-foreground"
+            className="h-11 w-full rounded-xl border border-line-strong/60 bg-paper-raised/70 px-3.5 font-ui text-sm text-foreground shadow-xs outline-none transition-all placeholder:text-foreground/40 hover:border-line-strong focus:border-primary focus:bg-background focus:ring-3 focus:ring-primary/20"
           />
           <FieldError id={ids.email + "-error"} message={fieldErrors[ids.email] ?? null} />
         </div>
 
-        <div>
+        <div className="space-y-1.5">
           <label
-            className="mb-2 block font-ui text-xs font-semibold text-foreground"
+            className="block font-ui text-xs font-semibold text-foreground/90"
             htmlFor={ids.password}
           >
             Mật khẩu
           </label>
-          <div className="grid h-12 grid-cols-[minmax(0,1fr)_auto] border-b border-input bg-transparent transition-colors focus-within:border-foreground">
+          <div className="relative flex h-11 w-full items-center rounded-xl border border-line-strong/60 bg-paper-raised/70 shadow-xs transition-all hover:border-line-strong focus-within:border-primary focus-within:bg-background focus-within:ring-3 focus-within:ring-primary/20">
             <input
               id={ids.password}
               name="password"
@@ -280,16 +286,16 @@ export function LoginForm() {
               placeholder="••••••••••••"
               aria-invalid={!!fieldErrors[ids.password]}
               aria-describedby={fieldErrors[ids.password] ? ids.password + "-error" : undefined}
-              className="min-w-0 bg-transparent px-0 font-ui text-sm text-foreground outline-none placeholder:text-placeholder"
+              className="h-full w-full rounded-xl bg-transparent pl-3.5 pr-10 font-ui text-sm text-foreground outline-none placeholder:text-foreground/40"
             />
             <button
               type="button"
               onClick={() => setShowPassword((prev) => !prev)}
               aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
               title={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
-              className="inline-flex size-10 items-center justify-center whitespace-nowrap font-ui text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-60"
+              className="absolute right-1 flex size-9 items-center justify-center rounded-lg text-foreground/50 transition-colors hover:text-foreground"
             >
-              {showPassword ? <EyeOff className="size-[18px]" aria-hidden /> : <Eye className="size-[18px]" aria-hidden />}
+              {showPassword ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
             </button>
           </div>
           <FieldError id={ids.password + "-error"} message={fieldErrors[ids.password] ?? null} />
@@ -300,7 +306,7 @@ export function LoginForm() {
         <button
           type="submit"
           disabled={busy}
-          className="mt-5 inline-flex h-13 w-full items-center justify-center gap-2 rounded-full bg-primary px-5 font-ui text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-60"
+          className="mt-6 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 font-ui text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary-hover hover:shadow focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-60"
         >
           {busy && <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />}
           <span>Đăng nhập</span>
@@ -358,9 +364,9 @@ export function RegisterForm() {
         onSubmit={submit}
         className="space-y-5"
       >
-        <div>
+        <div className="space-y-1.5">
           <label
-            className="mb-2 block font-ui text-xs font-semibold text-foreground"
+            className="block font-ui text-xs font-semibold text-foreground/90"
             htmlFor={ids.code}
           >
             Mã mời
@@ -375,14 +381,14 @@ export function RegisterForm() {
             placeholder="inv_..."
             aria-invalid={!!fieldErrors[ids.code]}
             aria-describedby={fieldErrors[ids.code] ? ids.code + "-error" : undefined}
-            className="h-12 w-full border-b border-input bg-transparent px-0 font-ui text-sm text-foreground outline-none transition-colors placeholder:text-placeholder focus:border-foreground"
+            className="h-11 w-full rounded-xl border border-line-strong/60 bg-paper-raised/70 px-3.5 font-ui text-sm text-foreground shadow-xs outline-none transition-all placeholder:text-foreground/40 hover:border-line-strong focus:border-primary focus:bg-background focus:ring-3 focus:ring-primary/20"
           />
           <FieldError id={ids.code + "-error"} message={fieldErrors[ids.code] ?? null} />
         </div>
 
-        <div>
+        <div className="space-y-1.5">
           <label
-            className="mb-2 block font-ui text-xs font-semibold text-foreground"
+            className="block font-ui text-xs font-semibold text-foreground/90"
             htmlFor={ids.name}
           >
             Tên hiển thị
@@ -398,14 +404,14 @@ export function RegisterForm() {
             placeholder="Robot Engineer"
             aria-invalid={!!fieldErrors[ids.name]}
             aria-describedby={fieldErrors[ids.name] ? ids.name + "-error" : undefined}
-            className="h-12 w-full border-b border-input bg-transparent px-0 font-ui text-sm text-foreground outline-none transition-colors placeholder:text-placeholder focus:border-foreground"
+            className="h-11 w-full rounded-xl border border-line-strong/60 bg-paper-raised/70 px-3.5 font-ui text-sm text-foreground shadow-xs outline-none transition-all placeholder:text-foreground/40 hover:border-line-strong focus:border-primary focus:bg-background focus:ring-3 focus:ring-primary/20"
           />
           <FieldError id={ids.name + "-error"} message={fieldErrors[ids.name] ?? null} />
         </div>
 
-        <div>
+        <div className="space-y-1.5">
           <label
-            className="mb-2 block font-ui text-xs font-semibold text-foreground"
+            className="block font-ui text-xs font-semibold text-foreground/90"
             htmlFor={ids.email}
           >
             Email
@@ -421,19 +427,19 @@ export function RegisterForm() {
             placeholder="engineer@domain.com"
             aria-invalid={!!fieldErrors[ids.email]}
             aria-describedby={fieldErrors[ids.email] ? ids.email + "-error" : undefined}
-            className="h-12 w-full border-b border-input bg-transparent px-0 font-ui text-sm text-foreground outline-none transition-colors placeholder:text-placeholder focus:border-foreground"
+            className="h-11 w-full rounded-xl border border-line-strong/60 bg-paper-raised/70 px-3.5 font-ui text-sm text-foreground shadow-xs outline-none transition-all placeholder:text-foreground/40 hover:border-line-strong focus:border-primary focus:bg-background focus:ring-3 focus:ring-primary/20"
           />
           <FieldError id={ids.email + "-error"} message={fieldErrors[ids.email] ?? null} />
         </div>
 
-        <div>
+        <div className="space-y-1.5">
           <label
-            className="mb-2 block font-ui text-xs font-semibold text-foreground"
+            className="block font-ui text-xs font-semibold text-foreground/90"
             htmlFor={ids.password}
           >
             Mật khẩu (ít nhất 10 ký tự)
           </label>
-          <div className="grid h-12 grid-cols-[minmax(0,1fr)_auto] border-b border-input bg-transparent transition-colors focus-within:border-foreground">
+          <div className="relative flex h-11 w-full items-center rounded-xl border border-line-strong/60 bg-paper-raised/70 shadow-xs transition-all hover:border-line-strong focus-within:border-primary focus-within:bg-background focus-within:ring-3 focus-within:ring-primary/20">
             <input
               id={ids.password}
               name="password"
@@ -446,16 +452,16 @@ export function RegisterForm() {
               placeholder="••••••••••••"
               aria-invalid={!!fieldErrors[ids.password]}
               aria-describedby={fieldErrors[ids.password] ? ids.password + "-error" : undefined}
-              className="min-w-0 bg-transparent px-0 font-ui text-sm text-foreground outline-none placeholder:text-placeholder"
+              className="h-full w-full rounded-xl bg-transparent pl-3.5 pr-10 font-ui text-sm text-foreground outline-none placeholder:text-foreground/40"
             />
             <button
               type="button"
               onClick={() => setShowPassword((prev) => !prev)}
               aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
               title={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
-              className="inline-flex size-10 items-center justify-center whitespace-nowrap font-ui text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-60"
+              className="absolute right-1 flex size-9 items-center justify-center rounded-lg text-foreground/50 transition-colors hover:text-foreground"
             >
-              {showPassword ? <EyeOff className="size-[18px]" aria-hidden /> : <Eye className="size-[18px]" aria-hidden />}
+              {showPassword ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
             </button>
           </div>
           <FieldError id={ids.password + "-error"} message={fieldErrors[ids.password] ?? null} />
@@ -466,7 +472,7 @@ export function RegisterForm() {
         <button
           type="submit"
           disabled={busy}
-          className="mt-5 inline-flex h-13 w-full items-center justify-center gap-2 rounded-full bg-primary px-5 font-ui text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-60"
+          className="mt-6 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 font-ui text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary-hover hover:shadow focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-60"
         >
           {busy && <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />}
           <span>Tạo tài khoản</span>

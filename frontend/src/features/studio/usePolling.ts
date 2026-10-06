@@ -6,7 +6,7 @@ import { useEffect, useRef } from "react";
  * Gọi `task` ngay rồi lặp lại sau mỗi `intervalMs` khi `active`; dừng hẳn khi
  * unmount hoặc tab ẩn để không bắn request vô ích. Request đang bay bị abort.
  */
-export function usePolling(task: (signal: AbortSignal) => Promise<void>, intervalMs: number, active: boolean, key?: any): void {
+export function usePolling(task: (signal: AbortSignal) => Promise<void>, intervalMs: number, active: boolean, key?: unknown): void {
   const latest = useRef(task);
   useEffect(() => {
     latest.current = task;

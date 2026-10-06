@@ -7,7 +7,11 @@ import { getStageViews } from "@/lib/api/studio";
 import type { StageView } from "@/lib/contracts/studio";
 
 vi.mock("@/lib/api/studio", () => ({ getStageViews: vi.fn() }));
-vi.mock("@/features/viewer/PlayCanvasScene", () => ({ usePlayCanvasCapability: () => ["available", vi.fn()], PlayCanvasScene: () => <div>Gaussian renderer</div> }));
+vi.mock("@/features/viewer/PlayCanvasScene", () => ({
+  usePlayCanvasCapability: () => ["available", vi.fn()],
+  PlayCanvasScene: () => <div>Gaussian renderer</div>,
+  INITIAL_RUNTIME: { loaded: false, progress: 0, graphicsBackend: "unknown", hasCollision: false, walkAllowed: false, cameraMode: "orbit" },
+}));
 vi.mock("@/features/studio/MetricSceneView", () => ({ MetricSceneView: () => <div>Metric renderer</div> }));
 const cameras: StageView = { stage_id: "ST-CAMERA-POSE", kind: "cameras", title: "Camera", note: "SfM", unit: "arbitrary", refs: [], cameras: [{ frame_id: 0, center: [0, 0, 0], rotation_xyzw: [0, 0, 0, 1] }] };
 const gaussian: StageView = { stage_id: "ST-VISUAL-RECON", kind: "gaussian", title: "Gaussian gốc", note: "Raw", unit: "arbitrary", refs: [{ artifact_type: "GaussianSOG", artifact_uri: "artifact://jobs/job-a/attempts/a1/scene.sog", artifact_checksum: `sha256:${"a".repeat(64)}` }], cameras: [] };

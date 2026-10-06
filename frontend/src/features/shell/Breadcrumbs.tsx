@@ -45,7 +45,19 @@ const NEW_SCENE_PAGES: Record<string, string> = {
   "/new/try-demo": "Thử mẫu",
 };
 
-export function crumbsFor(pathname: string, detailTitle?: string | null): Crumb[] {
+export function crumbsFor(pathname: string, detailTitle?: string | null, signedIn = true): Crumb[] {
+  if (!signedIn) {
+    if (pathname === "/new/try-demo" || pathname.startsWith("/new/try-demo")) {
+      return [{ label: "Thử video mẫu" }];
+    }
+    if (pathname.startsWith("/samples/")) {
+      return [
+        { label: "Thử video mẫu", href: "/new/try-demo" },
+        { label: detailTitle ?? "Video mẫu" },
+      ];
+    }
+  }
+
   const scenes: Crumb = { label: "Scenes", href: "/scenes" };
   if (pathname === APP_HOME) return [{ label: "Tổng quan" }];
   if (pathname === "/scenes") return [{ label: "Scenes" }];
@@ -68,16 +80,24 @@ export function crumbsFor(pathname: string, detailTitle?: string | null): Crumb[
  * Đích của nút "Quay lại" trên header: cấp cha gần nhất trong breadcrumb. Dùng đường dẫn xác định thay cho lịch sử trình
  * duyệt để mở trang con bằng link trực tiếp vẫn quay về đúng chỗ; trang cấp cao nhất trả null (không có nút).
  */
-export function backHref(pathname: string): string | null {
+export function backHref(pathname: string, signedIn = true): string | null {
+  if (!signedIn) {
+    if (pathname === "/new/try-demo" || pathname.startsWith("/new/try-demo")) {
+      return "/login";
+    }
+    if (pathname.startsWith("/samples/")) {
+      return "/new/try-demo";
+    }
+  }
   // Trang tài khoản mở từ menu người dùng, không có mục điều hướng riêng nên quay về trang chủ của app.
   if (pathname === "/account") return APP_HOME;
-  const parents = crumbsFor(pathname).slice(0, -1).filter((crumb) => crumb.href);
+  const parents = crumbsFor(pathname, null, signedIn).slice(0, -1).filter((crumb) => crumb.href);
   return parents.at(-1)?.href ?? null;
 }
 
-export function Breadcrumbs({ pathname }: { pathname: string }) {
+export function Breadcrumbs({ pathname, signedIn = true }: { pathname: string; signedIn?: boolean }) {
   const context = useContext(PageTitleContext);
-  const crumbs = crumbsFor(pathname, context?.title);
+  const crumbs = crumbsFor(pathname, context?.title, signedIn);
   return (
     <Breadcrumb className="min-w-0">
       <BreadcrumbList className="flex-nowrap">

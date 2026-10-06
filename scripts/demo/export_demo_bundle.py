@@ -23,6 +23,7 @@ from src.services.orchestration.jobs.dispatch import prepared_frame_reference
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.jobs.progress import MVP_PIPELINE, STUDIO_PIPELINE
 from src.services.orchestration.samples import DemoFile, DemoManifest, DemoSource, DemoStage
+from src.services.reconstruction import camera_markers
 
 _MEDIA = {".mp4": "video/mp4", ".mov": "video/quicktime", ".png": "image/png", ".jpg": "image/jpeg"}
 _MEDIA.update({".jpeg": "image/jpeg", ".sog": "application/octet-stream", ".ply": "application/octet-stream"})
@@ -153,6 +154,12 @@ def export_job(args: argparse.Namespace) -> None:
             row = rows[int(marker.name)]
             image = resolver.resolve(row["image"]["artifact_uri"])
             frames.append(_add(args.out, image, f"frame-{row['frame_id']:06d}.png"))
+    cameras = []
+    if preview.camera_pose_ref is not None:
+        try:
+            cameras = camera_markers(preview.camera_pose_ref, resolver.require)
+        except Exception:
+            cameras = []
     _write(
         args.out,
         DemoManifest(
@@ -177,6 +184,7 @@ def export_job(args: argparse.Namespace) -> None:
             frames=frames,
             frame_count=frame_count,
             splat=splat,
+            cameras=cameras,
         ),
     )
 
