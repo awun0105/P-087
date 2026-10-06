@@ -3,8 +3,8 @@ import { LandingPage } from "@/features/landing/LandingPage";
 import "@/features/landing/landing.css";
 
 export const metadata: Metadata = {
-  title: "Real2Sim Studio — From Reality to Simulation",
-  description: "Explore the Real2Sim workflow, then open Studio to work with your scenes.",
+  title: "Real2Sim Studio — Từ Hiện Thực Đến Mô Phỏng",
+  description: "Khám phá quy trình Real2Sim: tái tạo video và LiDAR thành scene 3D sẵn sàng mô phỏng cho Isaac Sim và robotics.",
 };
 
 /**
@@ -12,5 +12,5 @@ export const metadata: Metadata = {
  * các CTA của landing dẫn vào app qua đăng nhập (`STUDIO_ENTRY` trong `lib/routes.ts`).
  */
 export default function LandingRoute() {
-  return <div lang="en"><LandingPage /></div>;
+  return <div lang="vi"><LandingPage /></div>;
 }

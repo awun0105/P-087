@@ -94,6 +94,19 @@
 
 .landing-page section { scroll-margin-top: 7rem; }
 
+/* Micro-interactions & Card polish */
+.landing-page .card-hover-tech {
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.landing-page .card-hover-tech:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px -4px color-mix(in srgb, var(--studio-ink) 6%, transparent);
+}
+
+.landing-page .tech-badge-glow {
+  box-shadow: 0 0 12px -2px color-mix(in srgb, var(--studio-ember) 25%, transparent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .landing-page *, .landing-page *::before, .landing-page *::after { animation: none !important; transition: none !important; }
 }

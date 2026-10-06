@@ -184,7 +184,7 @@ describe("UI không viết cứng mã màu", () => {
   it("mọi màu đi qua biến của bảng màu", () => {
     const offenders: string[] = [];
     for (const file of files) {
-      const relative = file.slice(process.cwd().length + 1);
+      const relative = file.slice(process.cwd().length + 1).replace(/\\/g, "/");
       // Nơi định nghĩa bảng màu, ô màu mẫu của menu, và mặt nạ mờ (#000 là alpha của mask, không phải màu vẽ).
       if (relative === "src/app/globals.css" || relative === "src/features/shell/PaletteMenu.tsx" || relative === "src/styles/shadcn-variants.css") continue;
       readFileSync(file, "utf8").split("\n").forEach((line, index) => {
