@@ -4,9 +4,10 @@ Date: 2026-10-06
 
 ## Status
 
-Proposed — Đang trình duyệt kế hoạch kiến trúc cho hai cải tiến:
+Accepted / Implemented — Đã hoàn thành triển khai:
 1. Tự động đặt Camera ban đầu vào bên trong không gian (Initial Camera Pose).
 2. Tự động chuyển và thống nhất chế độ điều khiển First-Person (Fly / Walk) trên toàn hệ thống.
+3. Tự động định hướng hệ trục theo stage (z_up cho hệ mét, colmap cho SfM thô), loại bỏ nút chọn trục thủ công.
 
 ## Context
 
@@ -42,6 +43,12 @@ Proposed — Đang trình duyệt kế hoạch kiến trúc cho hai cải tiến
      - `StageViewer` (xem từng bước pipeline).
      - `MetricSceneView` (xem scene hệ mét).
    - Hiển thị gợi ý phím tắt điều khiển (WASD, chuột, Shift, Space) tương ứng với từng chế độ đang chọn.
+
+5. **Tự động định hướng hệ trục, loại bỏ thanh chuyển trục thủ công:**
+   - Thay vì bắt người dùng chọn thủ công giữa COLMAP / Z-up / Gốc, hệ thống tự động suy ra hệ quy chiếu hiển thị chính xác theo từng bước:
+     - Stage hệ mét (`unit === "meter"`) như `MetricSceneView`, kết quả bước REC-06: luôn hiển thị chuẩn Z-up (`DISPLAY_EULER = [-90, 0, 0]`, sàn `z = 0`).
+     - Stage SfM thô chưa quy đổi: hiển thị hệ COLMAP (`DISPLAY_EULER = [0, 0, 180]`).
+   - Loại bỏ hoàn toàn nhóm nút chuyển trục thủ công trên toàn bộ các thanh công cụ viewer để tránh nhầm lẫn và đảm bảo scene luôn ở đúng hướng tương tác.
 
 ## Alternatives Considered
 
