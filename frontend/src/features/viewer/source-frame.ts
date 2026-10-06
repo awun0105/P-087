@@ -121,3 +121,47 @@ export function objectViewPose(
   const eye: Vec3 = [center[0] + dx * distance, center[1] + dy * distance, center[2] + Math.max(0.8, size)];
   return { position: toDisplay("z_up", eye), target: toDisplay("z_up", center), fov };
 }
+
+export interface BoundingBoxLike {
+  min: Vec3;
+  max: Vec3;
+}
+
+/**
+ * Fallback góc nhìn bên trong không gian khi scene không có quỹ đạo camera COLMAP
+ * (ví dụ người dùng import file PLY/SOG từ ngoài vào). Đặt camera ở tầm mắt (1.5m),
+ * nhìn dọc trục dài của không gian thay vì lùi ra ngoài hư không.
+ */
+export function interiorFallbackPose(
+  frame: SourceFrame,
+  box: BoundingBoxLike,
+  fov = 60,
+): DisplayCameraPose {
+  const dx = box.max[0] - box.min[0];
+  const dy = box.max[1] - box.min[1];
+  const dz = box.max[2] - box.min[2];
+  const midX = (box.min[0] + box.max[0]) / 2;
+  const midY = (box.min[1] + box.max[1]) / 2;
+  const midZ = (box.min[2] + box.max[2]) / 2;
+
+  let eye: Vec3;
+  let target: Vec3;
+
+  if (frame === "z_up") {
+    const eyeZ = Math.min(box.min[2] + 1.5, midZ);
+    if (dx >= dy) {
+      eye = [box.min[0] + dx * 0.2, midY, eyeZ];
+      target = [box.max[0], midY, eyeZ];
+    } else {
+      eye = [midX, box.min[1] + dy * 0.2, eyeZ];
+      target = [midX, box.max[1], eyeZ];
+    }
+  } else {
+    // colmap: Y hướng xuống, Z hướng tới trước; X sang phải.
+    const eyeY = box.min[1] + dy * 0.5;
+    eye = [midX, eyeY, box.min[2] + dz * 0.2];
+    target = [midX, eyeY, box.max[2]];
+  }
+
+  return { position: toDisplay(frame, eye), target: toDisplay(frame, target), fov };
+}

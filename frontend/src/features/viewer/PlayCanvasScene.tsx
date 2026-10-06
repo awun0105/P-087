@@ -136,6 +136,8 @@ export interface PlayCanvasSceneProps {
   sourceFrame?: SourceFrame;
   /** Camera khởi đầu trong không gian hiển thị (vd camera quay đầu tiên); caller memo hoá. */
   initialCamera?: DisplayCameraPose;
+  /** Chế độ camera ban đầu khi viewer nạp xong; mặc định `fly` khi có `initialCamera`, hoặc `orbit`. */
+  initialCameraMode?: Exclude<CameraMode, "anim">;
   /**
    * Điểm đến của camera (không gian hiển thị), khai lúc tạo viewer; `ViewerControls.select(i)` bay
    * tới điểm thứ i bằng transition của viewer. Hotspot mặc định bị ẩn: host tự vẽ danh sách.
@@ -193,6 +195,7 @@ export function PlayCanvasScene({
   onInspectionState,
   sourceFrame = "colmap",
   initialCamera,
+  initialCameraMode,
   annotations,
   onApp,
   wheelFactor = 1,
@@ -260,6 +263,9 @@ export function PlayCanvasScene({
         const settings = settingsModule.defaultSettings("environment");
         settings.cameras = initialCamera ? [{ initial: initialCamera }] : [];
         settings.annotations = toViewerAnnotations(annotationsRef.current);
+        if (settings.background) {
+          settings.background.color = [0.08, 0.09, 0.1];
+        }
         const viewer = await module.createViewer({
           container: host,
           contentUrl: resolvedUrl,
@@ -362,9 +368,32 @@ export function PlayCanvasScene({
         }
         // EventHandler của PlayCanvas bắn `<key>:changed`; `on` trả EventHandle
         // để huỷ. Không tự poll `state` vì đó là nguồn thật của thư viện.
+        let activatedInitialMode = false;
+        const activateInitialMode = () => {
+          if (activatedInitialMode || disposed || !viewer.state.loaded) return;
+          const requested = initialCameraMode ?? (initialCamera ? "fly" : undefined);
+          if (!requested) return;
+          activatedInitialMode = true;
+          queueMicrotask(() => {
+            if (disposed || !viewer.state.loaded) return;
+            const targetMode = requested === "walk" && !viewer.state.walkAllowed ? "fly" : requested;
+            hostModeRequest = true;
+            try {
+              viewer.state.cameraMode = targetMode;
+            } finally {
+              hostModeRequest = false;
+            }
+          });
+        };
         for (const event of ["progress:changed", "loaded:changed", "hasCollision:changed", "walkAllowed:changed", "cameraMode:changed"]) {
-          subscriptions.push(viewer.events.on(event, () => { if (!disposed) publish(readRuntime(viewer)); }));
+          subscriptions.push(viewer.events.on(event, () => {
+            if (!disposed) {
+              if (event === "loaded:changed" && viewer.state.loaded) activateInitialMode();
+              publish(readRuntime(viewer));
+            }
+          }));
         }
+        if (viewer.state.loaded) activateInitialMode();
         if (viewer.app?.assets) {
           subscriptions.push(viewer.app.assets.on("error", () => { if (!disposed) onFailed(); }));
         }
@@ -410,7 +439,7 @@ export function PlayCanvasScene({
       liveAnnotations.current = null;
     };
   }, [capability, collisionUrl, contentUrl, contentFile, contentFilename, showControls, mode, onFailed, publish,
-    enableInspection, inspectionMaxPoints, onInspectionReady, onInspectionState, renderer, sourceFrame, initialCamera]);
+    enableInspection, inspectionMaxPoints, onInspectionReady, onInspectionState, renderer, sourceFrame, initialCamera, initialCameraMode]);
 
   return (
     <div
