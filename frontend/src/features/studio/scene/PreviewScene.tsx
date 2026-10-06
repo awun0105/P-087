@@ -1,17 +1,39 @@
 "use client";
+
 import { Maximize, RotateCcw, PersonStanding } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { CameraModeControls } from "@/features/viewer/CameraModeControls";
 import {
   PlayCanvasScene,
   usePlayCanvasCapability,
   INITIAL_RUNTIME,
+  type CameraMode,
   type ViewerControls,
 } from "@/features/viewer/PlayCanvasScene";
-import type { SourceFrame } from "@/features/viewer/source-frame";
+import {
+  recordingCameraPose,
+  type CameraMarkerLike,
+  type DisplayCameraPose,
+  type SourceFrame,
+} from "@/features/viewer/source-frame";
 import { cn } from "@/lib/cn";
 
-/** Bản xem SfM trung tính; chỉnh Gaussian chỉ mở khi người dùng chọn chế độ đó. */
-export function PreviewScene({ contentUrl, filename }: { contentUrl: string; filename: string; title?: string }) {
+/** Bản xem SfM trung tính; hỗ trợ góc nhìn camera ban đầu và điều hướng Fly/Walk/Orbit. */
+export function PreviewScene({
+  contentUrl,
+  filename,
+  title,
+  initialCamera,
+  initialCameraMode = "fly",
+  cameras,
+}: {
+  contentUrl: string;
+  filename: string;
+  title?: string;
+  initialCamera?: DisplayCameraPose;
+  initialCameraMode?: Exclude<CameraMode, "anim">;
+  cameras?: readonly CameraMarkerLike[];
+}) {
   const [capability, setCapability] = usePlayCanvasCapability();
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
   const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
@@ -21,6 +43,12 @@ export function PreviewScene({ contentUrl, filename }: { contentUrl: string; fil
   const handleApp = useCallback((_app: unknown, controls?: ViewerControls) => {
     setViewerControls(controls ?? null);
   }, []);
+
+  const resolvedCamera = useMemo(() => {
+    if (initialCamera) return initialCamera;
+    if (cameras && cameras.length > 0) return recordingCameraPose(sourceFrame, cameras);
+    return undefined;
+  }, [initialCamera, cameras, sourceFrame]);
 
   return (
     <div className="relative size-full bg-viewport">
@@ -49,12 +77,19 @@ export function PreviewScene({ contentUrl, filename }: { contentUrl: string; fil
             onRuntime={setRuntime}
             sourceFrame={sourceFrame}
             wheelFactor={wheelFactor}
+            initialCamera={resolvedCamera}
+            initialCameraMode={initialCameraMode}
             onApp={handleApp}
             extraControls={
               <div
                 className="sse-buttonGroup flex items-center shrink-0 border border-line-dark"
                 onPointerDown={(e) => e.stopPropagation()}
               >
+                <CameraModeControls
+                  runtime={runtime}
+                  controls={viewerControls}
+                  className="border-r border-line-dark pr-1.5 mr-1"
+                />
                 <button
                   type="button"
                   className="sse-controlButton flex items-center justify-center text-on-dark/80 hover:text-on-dark transition-colors disabled:opacity-40"

@@ -13,6 +13,7 @@ import {
   type ViewerAppLike,
   type ViewerControls,
 } from "@/features/viewer/PlayCanvasScene";
+import { CameraModeControls } from "@/features/viewer/CameraModeControls";
 import { SceneOverlay, type GizmoMode, type OverlayBox, type OverlayObject } from "@/features/viewer/scene-overlay";
 import { ThirdPersonRig } from "@/features/viewer/third-person";
 import { usePhysicsPlay, type PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
@@ -375,6 +376,7 @@ export function MetricSceneView({
         onFailed={fail}
         sourceFrame={sourceFrame}
         initialCamera={initialCamera}
+        initialCameraMode="fly"
         annotations={annotations}
         onApp={onApp}
         collisionUrl={walkCollisionUrl}
@@ -385,6 +387,11 @@ export function MetricSceneView({
             className="sse-buttonGroup flex items-center shrink-0 border border-line-dark"
             onPointerDown={(e) => e.stopPropagation()}
           >
+            <CameraModeControls
+              runtime={runtime}
+              controls={viewerControls}
+              className="border-r border-line-dark pr-1.5 mr-1"
+            />
             <button
               type="button"
               className="sse-controlButton flex items-center justify-center text-on-dark/80 hover:text-on-dark transition-colors disabled:opacity-40"
