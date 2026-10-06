@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from src.models.contracts.artifacts import Checksum
 from src.models.contracts.manifests import StageId
 from src.services.orchestration.jobs.progress import STUDIO_PIPELINE
+from src.services.reconstruction.views import CameraMarker
 
 _FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
@@ -76,6 +77,8 @@ class DemoManifest(BaseModel):
     frames: list[DemoFile] = Field(default_factory=list, max_length=48)
     frame_count: int | None = Field(default=None, ge=0)
     splat: DemoFile
+    #: Quỹ đạo camera từ COLMAP/canonical để viewer định vị camera ban đầu bên trong scene.
+    cameras: list[CameraMarker] = Field(default_factory=list)
     #: Thông số xử lý thật của job (theo file cấu hình chung); None với bundle cũ/smoke.
     processing: dict[str, int | float | str] | None = None
     #: Máy đã xử lý (từ RuntimeManifest), ví dụ {"gpu_model": "RTX 4090", "vram": "24564 MiB"}.
