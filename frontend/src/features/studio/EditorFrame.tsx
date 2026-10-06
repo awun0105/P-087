@@ -10,7 +10,6 @@ import { type SourceFrame } from "@/features/viewer/source-frame";
 import { useNavigationGuard } from "@/features/shell/NavigationGuard";
 import { queryEditorDirty } from "@/features/studio/editor-dirty";
 import { HelpDetails } from "@/components/studio/feedback";
-import { cn } from "@/lib/cn";
 
 /**
  * Entry của SuperSplat editor đã build (`npm run build:editor` → public/editor).

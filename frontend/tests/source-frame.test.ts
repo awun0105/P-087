@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { interiorFallbackPose, objectViewPose, recordingCameraPose, rotate, toDisplay } from "@/features/viewer/source-frame";
+import { buildTrajectoryAnimTrack, interiorFallbackPose, objectViewPose, recordingCameraPose, rotate, toDisplay } from "@/features/viewer/source-frame";
 import { playCanvasErrorMessage } from "@/features/viewer/PlayCanvasScene";
 
 /** Bỏ −0 để so bằng giá trị. */
@@ -90,5 +90,53 @@ describe("playCanvasErrorMessage", () => {
     expect(playCanvasErrorMessage("failed")).toBe("Không thể tải hoặc hiển thị mô hình 3DGS (lỗi tải file hoặc dữ liệu không hợp lệ).");
     expect(playCanvasErrorMessage("ready")).toBeNull();
     expect(playCanvasErrorMessage("unknown")).toBeNull();
+  });
+});
+
+describe("buildTrajectoryAnimTrack", () => {
+  const lookX: [number, number, number, number] = [0.5, -0.5, 0.5, -0.5];
+
+  it("trả về undefined khi có dưới 2 camera", () => {
+    expect(buildTrajectoryAnimTrack("z_up", [])).toBeUndefined();
+    expect(buildTrajectoryAnimTrack("z_up", [{ center: [0, 0, 0], rotation_xyzw: lookX }])).toBeUndefined();
+  });
+
+  it("sinh track spline hợp lệ từ mảng cameras", () => {
+    const cameras = [
+      { center: [0, 0, 1] as [number, number, number], rotation_xyzw: lookX },
+      { center: [1, 0, 1] as [number, number, number], rotation_xyzw: lookX },
+      { center: [2, 0, 1] as [number, number, number], rotation_xyzw: lookX },
+    ];
+    const track = buildTrajectoryAnimTrack("z_up", cameras, { frameRate: 30 })!;
+    expect(track).toBeDefined();
+    expect(track.interpolation).toBe("spline");
+    expect(track.frameRate).toBe(30);
+    expect(track.loopMode).toBe("none");
+    expect(track.keyframes.times).toEqual([0, 1, 2]);
+    expect(track.duration).toBe(0.1); // SuperSplat giới hạn tối thiểu 0.1s
+    expect(track.keyframes.values.position.length).toBe(3 * 3);
+    expect(track.keyframes.values.target.length).toBe(3 * 3);
+    expect(track.keyframes.values.fov).toEqual([60, 60, 60]);
+
+    // Tọa độ đầu tiên đã đổi sang không gian z_up: [x, z, -y]
+    expect(clean(track.keyframes.values.position.slice(0, 3))).toEqual([0, 1, 0]);
+  });
+
+  it("tự động subsample khi số camera vượt quá maxKeyframes", () => {
+    const cameras = Array.from({ length: 1200 }, (_, i) => ({
+      center: [i * 0.1, 0, 1] as [number, number, number],
+      rotation_xyzw: lookX,
+    }));
+    const track = buildTrajectoryAnimTrack("z_up", cameras, { maxKeyframes: 600 })!;
+    expect(track).toBeDefined();
+    expect(track.keyframes.times.length).toBeLessThanOrEqual(601);
+    expect(track.keyframes.times[0]).toBe(0);
+    expect(track.keyframes.times[track.keyframes.times.length - 1]).toBe(1199);
+    // Times phải tăng nghiêm ngặt (strictly ascending)
+    for (let i = 1; i < track.keyframes.times.length; i++) {
+      expect(track.keyframes.times[i]).toBeGreaterThan(track.keyframes.times[i - 1]);
+    }
+    // Duration dựa trên frame cuối cùng (1199 / 30 = 39.967s)
+    expect(track.duration).toBeCloseTo(1199 / 30);
   });
 });

@@ -19,7 +19,6 @@ import {
   usePlayCanvasCapability,
   type ViewerControls,
 } from "@/features/viewer/PlayCanvasScene";
-import { CameraModeControls } from "@/features/viewer/CameraModeControls";
 import { recordingCameraPose, type SourceFrame } from "@/features/viewer/source-frame";
 import { themeColor } from "@/lib/theme";
 import { jobArtifactContentUrl } from "@/lib/api/endpoints";
@@ -202,6 +201,7 @@ function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageVie
       onFailed={fail}
       onRuntime={setRuntime}
       sourceFrame={sourceFrame}
+      cameras={cameras}
       wheelFactor={wheelFactor}
       initialCamera={initialCamera}
       initialCameraMode="fly"
@@ -211,11 +211,6 @@ function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageVie
           className="sse-buttonGroup flex items-center shrink-0 border border-line-dark"
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <CameraModeControls
-            runtime={runtime}
-            controls={viewerControls}
-            className="border-r border-line-dark pr-1.5 mr-1"
-          />
           <button
             type="button"
             className="sse-controlButton flex items-center justify-center text-on-dark/80 hover:text-on-dark transition-colors disabled:opacity-40"

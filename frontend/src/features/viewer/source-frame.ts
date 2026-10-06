@@ -165,3 +165,100 @@ export function interiorFallbackPose(
 
   return { position: toDisplay(frame, eye), target: toDisplay(frame, target), fov };
 }
+
+/** Cấu trúc animation track camera theo format ExperienceSettings của supersplat-viewer. */
+export interface TrajectoryAnimTrack {
+  name: string;
+  duration: number;
+  frameRate: number;
+  loopMode: "none" | "repeat" | "pingpong";
+  interpolation: "step" | "spline";
+  smoothness: number;
+  keyframes: {
+    times: number[];
+    values: {
+      position: number[];
+      target: number[];
+      fov: number[];
+    };
+  };
+}
+
+/**
+ * Xây dựng spline animation track cho camera viewer theo đúng chuỗi camera quay gốc.
+ * Vị trí camera và điểm nhìn (target) được chuyển đổi đồng bộ sang hệ hiển thị Y-up.
+ */
+export function buildTrajectoryAnimTrack(
+  frame: SourceFrame,
+  cameras: readonly CameraMarkerLike[],
+  options?: {
+    frameRate?: number;
+    maxKeyframes?: number;
+    fov?: number;
+  },
+): TrajectoryAnimTrack | undefined {
+  if (!cameras || cameras.length < 2) return undefined;
+
+  const frameRate = Math.max(1, Math.min(120, Math.round(options?.frameRate ?? 30)));
+  const maxKeyframes = Math.min(options?.maxKeyframes ?? 600, 1000);
+  const fov = options?.fov ?? 60;
+
+  // Tính khoảng cách nhìn tới trước (lookDistance) từ bounding box của quỹ đạo
+  const low = [0, 1, 2].map((axis) => Math.min(...cameras.map((c) => c.center[axis])));
+  const high = [0, 1, 2].map((axis) => Math.max(...cameras.map((c) => c.center[axis])));
+  const diagonal = Math.hypot(high[0] - low[0], high[1] - low[1], high[2] - low[2]);
+  const lookDistance = Math.min(Math.max(diagonal * 0.35, 2), 15);
+
+  const total = cameras.length;
+  const stride = total > maxKeyframes ? Math.ceil(total / maxKeyframes) : 1;
+  const indices: number[] = [];
+  for (let i = 0; i < total; i += stride) {
+    indices.push(i);
+  }
+  if (indices[indices.length - 1] !== total - 1) {
+    indices.push(total - 1);
+  }
+
+  const times: number[] = [];
+  const positions: number[] = [];
+  const targets: number[] = [];
+  const fovs: number[] = [];
+
+  for (const idx of indices) {
+    const cam = cameras[idx];
+    const forward = rotate(cam.rotation_xyzw, [0, 0, 1]);
+    const targetPoint: Vec3 = [
+      cam.center[0] + forward[0] * lookDistance,
+      cam.center[1] + forward[1] * lookDistance,
+      cam.center[2] + forward[2] * lookDistance,
+    ];
+
+    const displayPos = toDisplay(frame, cam.center);
+    const displayTarget = toDisplay(frame, targetPoint);
+
+    times.push(idx);
+    positions.push(...displayPos);
+    targets.push(...displayTarget);
+    fovs.push(fov);
+  }
+
+  const lastTime = times[times.length - 1] ?? 0;
+  const duration = Math.max(0.1, lastTime / frameRate);
+
+  return {
+    name: "Video Trajectory",
+    duration,
+    frameRate,
+    loopMode: "none",
+    interpolation: "spline",
+    smoothness: 0,
+    keyframes: {
+      times,
+      values: {
+        position: positions,
+        target: targets,
+        fov: fovs,
+      },
+    },
+  };
+}

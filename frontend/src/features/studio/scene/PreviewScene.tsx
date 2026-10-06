@@ -2,7 +2,6 @@
 
 import { Maximize, RotateCcw, PersonStanding } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
-import { CameraModeControls } from "@/features/viewer/CameraModeControls";
 import {
   PlayCanvasScene,
   playCanvasErrorMessage,
@@ -78,6 +77,7 @@ export function PreviewScene({
             onFailed={fail}
             onRuntime={setRuntime}
             sourceFrame={sourceFrame}
+            cameras={cameras}
             wheelFactor={wheelFactor}
             initialCamera={resolvedCamera}
             initialCameraMode={initialCameraMode}
@@ -87,11 +87,6 @@ export function PreviewScene({
                 className="sse-buttonGroup flex items-center shrink-0 border border-line-dark"
                 onPointerDown={(e) => e.stopPropagation()}
               >
-                <CameraModeControls
-                  runtime={runtime}
-                  controls={viewerControls}
-                  className="border-r border-line-dark pr-1.5 mr-1"
-                />
                 <button
                   type="button"
                   className="sse-controlButton flex items-center justify-center text-on-dark/80 hover:text-on-dark transition-colors disabled:opacity-40"
