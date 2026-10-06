@@ -2,6 +2,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import Link from "next/link";
+
 import { StageSceneWorkspace } from "@/features/studio/inspection/StageSceneWorkspace";
 import { ApiError } from "@/lib/api/client";
 import { getPreview } from "@/lib/api/endpoints";
@@ -9,7 +11,7 @@ import type { ProductArtifactRef } from "@/lib/contracts/api";
 import type { ReconstructionPreview } from "@/lib/contracts/preview";
 
 vi.mock("@/lib/api/endpoints", async (original) => ({ ...(await original<typeof import("@/lib/api/endpoints")>()), getPreview: vi.fn() }));
-vi.mock("@/features/studio/EditorFrame", () => ({ EditorFrame: ({ contentUrl, homeHref, title }: { contentUrl: string; homeHref: string; title: string }) => <div aria-label={title}><a href={homeHref}>Về tiến trình editor</a><output>{contentUrl}</output></div> }));
+vi.mock("@/features/studio/scene/PreviewScene", () => ({ PreviewScene: ({ contentUrl, title }: { contentUrl: string; title: string }) => <div aria-label={title}><Link href="/scenes/job-a?tab=progress">Về tiến trình editor</Link><output>{contentUrl}</output></div> }));
 vi.mock("@/features/studio/StageViewer", () => ({ StageViewer: ({ stageId, fallbackStageId }: { stageId: string; fallbackStageId?: string }) => <div>Viewer: {stageId}<span>Fallback: {fallbackStageId ?? "none"}</span></div> }));
 vi.mock("@/features/studio/ObjectReviewView", () => ({ ObjectReviewView: ({ jobId }: { jobId: string }) => <div>Objects: {jobId}</div> }));
 vi.mock("@/features/studio/ModeComparisonView", () => ({ ModeComparisonView: ({ jobId }: { jobId: string }) => <div>Comparison: {jobId}</div> }));

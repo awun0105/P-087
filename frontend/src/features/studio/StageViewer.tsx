@@ -15,6 +15,7 @@ import { MetricSceneView } from "@/features/studio/MetricSceneView";
 import {
   INITIAL_RUNTIME,
   PlayCanvasScene,
+  playCanvasErrorMessage,
   usePlayCanvasCapability,
   type ViewerControls,
 } from "@/features/viewer/PlayCanvasScene";
@@ -177,7 +178,7 @@ function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageVie
   const [capability, setCapability] = usePlayCanvasCapability();
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
   const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
-  const [sourceFrame, setSourceFrame] = useState<SourceFrame>(view.unit === "meter" ? "z_up" : "colmap");
+  const sourceFrame: SourceFrame = view.unit === "meter" ? "z_up" : "colmap";
   const [wheelFactor, setWheelFactor] = useState(2);
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
   const handleApp = useCallback((_app: unknown, controls?: ViewerControls) => {
@@ -187,7 +188,7 @@ function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageVie
   const ref = view.refs[0];
   if (!ref) return <Notice>Bước này chưa có file 3DGS.</Notice>;
   if (capability === "failed" || capability === "unavailable") {
-    return <p className="grid size-full place-items-center text-sm text-on-dark/80">Trình duyệt không render được 3DGS (cần WebGL2).</p>;
+    return <p className="grid size-full place-items-center text-sm text-on-dark/80">{playCanvasErrorMessage(capability)}</p>;
   }
   return (
     <PlayCanvasScene
@@ -200,8 +201,10 @@ function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageVie
       onFailed={fail}
       onRuntime={setRuntime}
       sourceFrame={sourceFrame}
+      cameras={cameras}
       wheelFactor={wheelFactor}
       initialCamera={initialCamera}
+      initialCameraMode="fly"
       onApp={handleApp}
       extraControls={
         <div
@@ -228,48 +231,6 @@ function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageVie
           >
             <RotateCcw className="size-4" aria-hidden />
           </button>
-          <div className="flex items-center gap-1 border-l border-line-dark px-2 text-xs text-on-dark/80">
-            <span className="text-[11px] text-on-dark/60 select-none">Trục:</span>
-            <button
-              type="button"
-              className={cn(
-                "rounded px-1.5 py-0.5 text-xs transition-colors",
-                sourceFrame === "colmap"
-                  ? "bg-ember-soft text-ember-strong font-medium"
-                  : "text-on-dark/70 hover:text-on-dark",
-              )}
-              onClick={() => setSourceFrame("colmap")}
-              title="COLMAP / Brush (Y hướng xuống, xoay 180° quanh Z)"
-            >
-              COLMAP
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "rounded px-1.5 py-0.5 text-xs transition-colors",
-                sourceFrame === "z_up"
-                  ? "bg-ember-soft text-ember-strong font-medium"
-                  : "text-on-dark/70 hover:text-on-dark",
-              )}
-              onClick={() => setSourceFrame("z_up")}
-              title="Chuẩn Z-up (Quay trục Z lên trên, sàn z=0)"
-            >
-              Z-up
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "rounded px-1.5 py-0.5 text-xs transition-colors",
-                sourceFrame === "identity"
-                  ? "bg-ember-soft text-ember-strong font-medium"
-                  : "text-on-dark/70 hover:text-on-dark",
-              )}
-              onClick={() => setSourceFrame("identity")}
-              title="Gốc (Không xoay trục)"
-            >
-              Gốc
-            </button>
-          </div>
           <div className="flex items-center gap-0.5 border-l border-line-dark px-1.5 text-xs text-on-dark/80">
             <span className="text-[11px] text-on-dark/60 select-none mr-0.5">Zoom:</span>
             {[1, 2, 4].map((factor) => (

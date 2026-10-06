@@ -161,3 +161,29 @@ def test_export_includes_later_stages_with_real_state_and_timing() -> None:
     result = stage_durations(job.model_copy(update={"stage_artifacts": [geometry]}), [])
     assert len(result) == 8 and result[-2].state == "succeeded" and result[-2].duration_seconds == 12
     assert result[-1].state == "pending" and result[-1].duration_seconds is None
+
+
+def test_sample_manifest_carries_cameras_trajectory() -> None:
+    from src.services.reconstruction.views import CameraMarker
+
+    camera = CameraMarker(frame_id=1, center=(1.0, 2.0, 3.0), rotation_xyzw=(0.0, 0.0, 0.0, 1.0))
+    manifest = DemoManifest(
+        demo_id="cam_demo",
+        title="Demo With Cameras",
+        origin="pipeline_job",
+        source=DemoSource(dataset="TorWIC-SLAM", sequence="Aisle_CW"),
+        produced_at=datetime(2026, 9, 29, tzinfo=UTC),
+        stages=[],
+        splat=DemoFile(
+            name="scene.sog",
+            media_type="application/octet-stream",
+            size_bytes=100,
+            checksum="sha256:" + "0" * 64,
+        ),
+        cameras=[camera],
+    )
+    payload = manifest.model_dump_json()
+    reloaded = DemoManifest.model_validate_json(payload)
+    assert len(reloaded.cameras) == 1
+    assert reloaded.cameras[0].frame_id == 1
+    assert reloaded.cameras[0].center == (1.0, 2.0, 3.0)

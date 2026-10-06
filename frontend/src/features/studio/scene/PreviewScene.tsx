@@ -1,32 +1,61 @@
 "use client";
+
 import { Maximize, RotateCcw, PersonStanding } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   PlayCanvasScene,
+  playCanvasErrorMessage,
   usePlayCanvasCapability,
   INITIAL_RUNTIME,
+  type CameraMode,
   type ViewerControls,
 } from "@/features/viewer/PlayCanvasScene";
-import type { SourceFrame } from "@/features/viewer/source-frame";
+import {
+  recordingCameraPose,
+  type CameraMarkerLike,
+  type DisplayCameraPose,
+  type SourceFrame,
+} from "@/features/viewer/source-frame";
 import { cn } from "@/lib/cn";
 
-/** Bản xem SfM trung tính; chỉnh Gaussian chỉ mở khi người dùng chọn chế độ đó. */
-export function PreviewScene({ contentUrl, filename }: { contentUrl: string; filename: string; title?: string }) {
+/** Bản xem SfM trung tính; hỗ trợ góc nhìn camera ban đầu và điều hướng Fly/Walk/Orbit. */
+export function PreviewScene({
+  contentUrl,
+  filename,
+  title,
+  initialCamera,
+  initialCameraMode = "fly",
+  cameras,
+  sourceFrame = "colmap",
+}: {
+  contentUrl: string;
+  filename: string;
+  title?: string;
+  initialCamera?: DisplayCameraPose;
+  initialCameraMode?: Exclude<CameraMode, "anim">;
+  cameras?: readonly CameraMarkerLike[];
+  sourceFrame?: SourceFrame;
+}) {
   const [capability, setCapability] = usePlayCanvasCapability();
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
   const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
-  const [sourceFrame, setSourceFrame] = useState<SourceFrame>("colmap");
   const [wheelFactor, setWheelFactor] = useState(2);
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
   const handleApp = useCallback((_app: unknown, controls?: ViewerControls) => {
     setViewerControls(controls ?? null);
   }, []);
 
+  const resolvedCamera = useMemo(() => {
+    if (initialCamera) return initialCamera;
+    if (cameras && cameras.length > 0) return recordingCameraPose(sourceFrame, cameras);
+    return undefined;
+  }, [initialCamera, cameras, sourceFrame]);
+
   return (
-    <div className="relative size-full bg-viewport">
+    <div className="relative size-full bg-viewport" aria-label={title}>
       {capability === "failed" || capability === "unavailable" ? (
         <p role="alert" className="grid size-full place-items-center p-6 text-sm text-on-dark">
-          Không mở được 3DGS. Trình duyệt cần WebGL2/WebGPU và đủ bộ nhớ GPU.
+          {playCanvasErrorMessage(capability)}
         </p>
       ) : (
         <>
@@ -48,7 +77,10 @@ export function PreviewScene({ contentUrl, filename }: { contentUrl: string; fil
             onFailed={fail}
             onRuntime={setRuntime}
             sourceFrame={sourceFrame}
+            cameras={cameras}
             wheelFactor={wheelFactor}
+            initialCamera={resolvedCamera}
+            initialCameraMode={initialCameraMode}
             onApp={handleApp}
             extraControls={
               <div
@@ -84,48 +116,6 @@ export function PreviewScene({ contentUrl, filename }: { contentUrl: string; fil
                 >
                   <PersonStanding className="size-4" aria-hidden />
                 </button>
-                <div className="flex items-center gap-1 border-l border-line-dark px-2 text-xs text-on-dark/80">
-                  <span className="text-[11px] text-on-dark/60 select-none">Trục:</span>
-                  <button
-                    type="button"
-                    className={cn(
-                      "rounded px-1.5 py-0.5 text-xs transition-colors",
-                      sourceFrame === "colmap"
-                        ? "bg-ember-soft text-ember-strong font-medium"
-                        : "text-on-dark/70 hover:text-on-dark",
-                    )}
-                    onClick={() => setSourceFrame("colmap")}
-                    title="COLMAP / Brush (Y hướng xuống, xoay 180° quanh Z)"
-                  >
-                    COLMAP
-                  </button>
-                  <button
-                    type="button"
-                    className={cn(
-                      "rounded px-1.5 py-0.5 text-xs transition-colors",
-                      sourceFrame === "z_up"
-                        ? "bg-ember-soft text-ember-strong font-medium"
-                        : "text-on-dark/70 hover:text-on-dark",
-                    )}
-                    onClick={() => setSourceFrame("z_up")}
-                    title="Chuẩn Z-up (Quay trục Z lên trên, sàn z=0)"
-                  >
-                    Z-up
-                  </button>
-                  <button
-                    type="button"
-                    className={cn(
-                      "rounded px-1.5 py-0.5 text-xs transition-colors",
-                      sourceFrame === "identity"
-                        ? "bg-ember-soft text-ember-strong font-medium"
-                        : "text-on-dark/70 hover:text-on-dark",
-                    )}
-                    onClick={() => setSourceFrame("identity")}
-                    title="Gốc (Không xoay trục)"
-                  >
-                    Gốc
-                  </button>
-                </div>
                 <div className="flex items-center gap-0.5 border-l border-line-dark px-1.5 text-xs text-on-dark/80">
                   <span className="text-[11px] text-on-dark/60 select-none mr-0.5">Zoom:</span>
                   {[1, 2, 4].map((factor) => (

@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 
 import { PreviewScene } from "@/features/studio/scene/PreviewScene";
+import type { CameraMarkerLike, DisplayCameraPose } from "@/features/viewer/source-frame";
 
 /**
  * Workspace chỉ xem 3DGS cho scene không có pipeline hệ mét (video mẫu, file import):
@@ -14,20 +15,26 @@ export function SceneWorkspace({
   contentUrl,
   filename,
   badges,
+  cameras,
+  initialCamera,
 }: {
   title: string;
   contentUrl: string;
   filename: string;
   badges?: ReactNode;
+  cameras?: readonly CameraMarkerLike[];
+  initialCamera?: DisplayCameraPose;
 }) {
   return (
     <main className="relative flex h-[calc(100dvh-3rem)] flex-col">
-
+      {badges ? <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5">{badges}</div> : null}
       <div className="min-h-0 flex-1">
         <PreviewScene
           contentUrl={contentUrl}
           filename={filename}
           title={`Viewer 3DGS: ${title}`}
+          cameras={cameras}
+          initialCamera={initialCamera}
         />
       </div>
     </main>

@@ -206,7 +206,9 @@ export function MetricConfirmView({
         <div className="relative min-h-80 bg-viewport">
           {capability === "failed" || capability === "unavailable" ? (
             <p className="grid size-full place-items-center p-6 text-center text-sm text-on-dark/80" role="alert">
-              Không render được 3DGS: trình duyệt cần WebGL2 hoặc WebGPU. Bạn vẫn xác nhận được tỉ lệ ở bên cạnh.
+              {capability === "unavailable"
+                ? "Không render được 3DGS: trình duyệt cần WebGL2 hoặc WebGPU. Bạn vẫn xác nhận được tỉ lệ ở bên cạnh."
+                : "Không thể tải mô hình 3DGS (lỗi tải file). Bạn vẫn xác nhận được tỉ lệ ở bên cạnh."}
             </p>
           ) : (
             <PlayCanvasScene contentUrl={contentUrl} contentFilename={filename} renderer="webgl" mode="VISUAL" capability={capability} onFailed={fail} />
@@ -233,7 +235,9 @@ export function MetricConfirmView({
       <div className="relative min-h-80 bg-viewport">
         {capability === "failed" || capability === "unavailable" ? (
           <p className="grid size-full place-items-center p-6 text-center text-sm text-on-dark/80" role="alert">
-            Không render được 3DGS để chọn điểm: trình duyệt cần WebGL2 hoặc WebGPU.
+            {capability === "unavailable"
+              ? "Không render được 3DGS để chọn điểm: trình duyệt cần WebGL2 hoặc WebGPU."
+              : "Không thể tải mô hình 3DGS để chọn điểm (lỗi tải file hoặc dữ liệu không hợp lệ)."}
           </p>
         ) : (
           <PlayCanvasScene

@@ -402,6 +402,7 @@ export interface DemoManifest {
   splat: DemoFile;
   processing?: Record<string, ParamValue> | null;
   machine?: Record<string, string>;
+  cameras?: { frame_id: number; center: [number, number, number]; rotation_xyzw: [number, number, number, number] }[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -477,6 +478,11 @@ export function parseDemoManifest(value: unknown): DemoManifest {
       throw new Error("Stage demo từ backend không hợp lệ");
     }
     ids.add(stage.stage_id);
+  }
+  if (value.cameras !== undefined && value.cameras !== null) {
+    if (!Array.isArray(value.cameras) || !value.cameras.every((camera) => isRecord(camera) && Array.isArray(camera.center) && camera.center.every(isFiniteNumber))) {
+      throw new Error("Dữ liệu camera demo không hợp lệ");
+    }
   }
   return value as unknown as DemoManifest;
 }

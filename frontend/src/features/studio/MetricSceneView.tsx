@@ -8,6 +8,7 @@ import { Notice } from "@/components/studio/primitives";
 import {
   INITIAL_RUNTIME,
   PlayCanvasScene,
+  playCanvasErrorMessage,
   usePlayCanvasCapability,
   type ViewerAnnotation,
   type ViewerAppLike,
@@ -114,7 +115,7 @@ export function MetricSceneView({
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
   const [overlay, setOverlay] = useState<SceneOverlay | null>(null);
   const [layers, setLayers] = useState({ ...defaultLayers, lidar: false });
-  const [lidarState, setLidarState] = useState<{ points?: number; error?: string } | null>(null);
+  const [, setLidarState] = useState<{ points?: number; error?: string } | null>(null);
   const lidarUrl = lidarOverlay ? jobLidarOverlayUrl(jobId, lidarOverlay) : null;
   const [collisionState, setCollisionState] = useState<{ triangles?: number; error?: string } | null>(null);
   const initialCamera = useMemo(() => recordingCameraPose("z_up", cameras), [cameras]);
@@ -131,7 +132,7 @@ export function MetricSceneView({
   );
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
   const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
-  const [sourceFrame, setSourceFrame] = useState<SourceFrame>("z_up");
+  const sourceFrame: SourceFrame = "z_up";
   const [wheelFactor, setWheelFactor] = useState(2);
   const [thirdPerson, setThirdPerson] = useState(false);
 
@@ -326,7 +327,7 @@ export function MetricSceneView({
   }, [overlay, layers, boxes, collisionState]);
 
   if (capability === "failed" || capability === "unavailable") {
-    return <Notice tone="rust">Trình duyệt không render được 3DGS (cần WebGL2/WebGPU).</Notice>;
+    return <Notice tone="rust">{playCanvasErrorMessage(capability)}</Notice>;
   }
   const toggle = (key: keyof typeof layers, label: string, disabled = false) => (
     <label className={cn("flex items-center gap-1.5", disabled && "opacity-50")}>
@@ -374,7 +375,9 @@ export function MetricSceneView({
         capability={capability}
         onFailed={fail}
         sourceFrame={sourceFrame}
+        cameras={cameras}
         initialCamera={initialCamera}
+        initialCameraMode="fly"
         annotations={annotations}
         onApp={onApp}
         collisionUrl={walkCollisionUrl}
@@ -449,48 +452,6 @@ export function MetricSceneView({
                 <Hand className={cn("size-4 transition-transform", selectMode && "drop-shadow-[0_0_6px_var(--color-ember)] scale-105")} aria-hidden />
               </button>
             )}
-            <div className="flex items-center gap-1 border-l border-line-dark px-2 text-xs text-on-dark/80">
-              <span className="text-[11px] text-on-dark/60 select-none">Trục:</span>
-              <button
-                type="button"
-                className={cn(
-                  "rounded px-1.5 py-0.5 text-xs transition-colors",
-                  sourceFrame === "colmap"
-                    ? "bg-ember-soft text-ember-strong font-medium"
-                    : "text-on-dark/70 hover:text-on-dark",
-                )}
-                onClick={() => setSourceFrame("colmap")}
-                title="COLMAP / Brush (Y hướng xuống, xoay 180° quanh Z)"
-              >
-                COLMAP
-              </button>
-              <button
-                type="button"
-                className={cn(
-                  "rounded px-1.5 py-0.5 text-xs transition-colors",
-                  sourceFrame === "z_up"
-                    ? "bg-ember-soft text-ember-strong font-medium"
-                    : "text-on-dark/70 hover:text-on-dark",
-                )}
-                onClick={() => setSourceFrame("z_up")}
-                title="Chuẩn Z-up (Quay trục Z lên trên, sàn z=0)"
-              >
-                Z-up
-              </button>
-              <button
-                type="button"
-                className={cn(
-                  "rounded px-1.5 py-0.5 text-xs transition-colors",
-                  sourceFrame === "identity"
-                    ? "bg-ember-soft text-ember-strong font-medium"
-                    : "text-on-dark/70 hover:text-on-dark",
-                )}
-                onClick={() => setSourceFrame("identity")}
-                title="Gốc (Không xoay trục)"
-              >
-                Gốc
-              </button>
-            </div>
             <div className="flex items-center gap-0.5 border-l border-line-dark px-1.5 text-xs text-on-dark/80">
               <span className="text-[11px] text-on-dark/60 select-none mr-0.5">Zoom:</span>
               {[1, 2, 4].map((factor) => (
@@ -643,13 +604,6 @@ export function MetricSceneView({
           </div>
         )}
       </div>
-      <p className="absolute bottom-3 left-3 rounded-md border border-line-dark bg-viewport-deep/85 px-2 py-1 text-xs text-on-dark/80">
-        Hệ mét, sàn z = 0 · mở tại camera quay đầu tiên
-        {collisionState?.triangles ? ` · collision ${Math.round(collisionState.triangles).toLocaleString("vi-VN")} tam giác` : ""}
-        {collisionState?.error ? ` · không nạp được collision: ${collisionState.error}` : ""}
-        {layers.lidar && lidarState?.points ? ` · LiDAR ${lidarState.points.toLocaleString("vi-VN")} điểm` : ""}
-        {layers.lidar && lidarState?.error ? ` · không nạp được LiDAR: ${lidarState.error}` : ""}
-      </p>
     </div>
   );
 }

@@ -267,7 +267,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
 
   return (
     <main className="flex h-[calc(100dvh-3rem)] flex-col">
-      <div className="flex flex-wrap items-center gap-2 border-b border-line bg-paper-raised px-4 py-3 sm:px-6">
+      <div className="relative z-20 flex flex-wrap items-center gap-2 border-b border-line bg-paper-raised px-4 py-3 sm:px-6">
         <div className="mr-2 min-w-0">
           <h1 className="truncate text-base font-bold">{info?.name ?? "Đang tải scene…"}</h1>
         </div>
@@ -276,7 +276,22 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
         {preview && <MetricBadge state={metric} />}
         <GeometryBadge state={geometry} />
         {save && <SaveStatus state={save} />}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {current === "studio" && (
+            <NextAction
+              jobId={jobId}
+              progress={progress}
+              current={current}
+              mode={studioMode}
+              sceneReady={sceneReady}
+              revision={save?.revision ?? null}
+              busy={busy}
+              onOpen={openTab}
+              onRetry={startRetry}
+              retryState={retryPending ? retrySync?.status ?? null : null}
+              variant="popover"
+            />
+          )}
           <DemoControls jobId={jobId} revision={save?.revision ?? null} sceneReady={sceneReady}
             onRestored={(revision) => setSave({ status: "saved", revision })} />
         </div>
@@ -284,18 +299,27 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
       <SceneTabs tabs={tabs} current={current} onChange={(next) => openTab(next)} />
       {locked && <p role="status" className="px-4 py-2 text-sm text-ink-muted">{locked}. Đang hiển thị Tiến trình.</p>}
       {requestedTab && !["progress", "studio", "review", "results"].includes(requestedTab) && <p role="status" className="px-4 py-2 text-sm text-ink-muted">Tab không hợp lệ; đã mở vùng mặc định.</p>}
-      <NextAction jobId={jobId} progress={progress} current={current} mode={studioMode} sceneReady={sceneReady} revision={save?.revision ?? null} busy={busy} onOpen={openTab} onRetry={startRetry} retryState={retryPending ? retrySync?.status ?? null : null} />
+      {current !== "studio" && (
+        <NextAction
+          jobId={jobId}
+          progress={progress}
+          current={current}
+          mode={studioMode}
+          sceneReady={sceneReady}
+          revision={save?.revision ?? null}
+          busy={busy}
+          onOpen={openTab}
+          onRetry={startRetry}
+          retryState={retryPending ? retrySync?.status ?? null : null}
+          variant="banner"
+        />
+      )}
       {current === "studio" && preview && (
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-paper-raised px-4 py-2 sm:px-6">
-          <p className="text-xs text-ink-muted">
-            {studioMode === "gaussian" ? "Gaussian · File › Export PLY/SOG · không lưu vào SceneIR" : studioMode === "metric" ? "Tỉ lệ mét · đo tham chiếu để tiếp tục pipeline" : sceneReady ? "SceneObject · mỗi thao tác lưu một revision" : "Bản xem 3DGS · đơn vị SfM"}
-          </p>
+        <div className="flex items-center justify-end gap-2 border-b border-line bg-paper-raised px-4 py-1.5 sm:px-6">
           <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Chế độ Studio">
-            {(
-              <ModeButton active={studioMode === "scene"} onClick={() => setMode("scene")}>
-                {sceneReady ? "Vật thể" : "Scene 3D"}
-              </ModeButton>
-            )}
+            <ModeButton active={studioMode === "scene"} onClick={() => setMode("scene")}>
+              {sceneReady ? "Vật thể" : "Scene 3D"}
+            </ModeButton>
             {waitingMetric && (
               <ModeButton active={studioMode === "metric"} onClick={() => setMode("metric")}>
                 Tỉ lệ mét

@@ -4,7 +4,7 @@ import "@/features/landing/landing.css";
 
 export const metadata: Metadata = {
   title: "Real2Sim Studio — Từ Hiện Thực Đến Mô Phỏng",
-  description: "Khám phá quy trình Real2Sim: tái tạo video và LiDAR thành scene 3D sẵn sàng mô phỏng cho Isaac Sim và robotics.",
+  description: "Khám phá quy trình Real2Sim: tái tạo video và LiDAR thành scene 3D sẵn sàng mô phỏng cho Isaac Sim, có người kiểm duyệt từng bước.",
 };
 
 /**
