@@ -264,7 +264,7 @@ export function PlayCanvasScene({
         settings.cameras = initialCamera ? [{ initial: initialCamera }] : [];
         settings.annotations = toViewerAnnotations(annotationsRef.current);
         if (settings.background) {
-          settings.background.color = [0.08, 0.09, 0.1];
+          settings.background.color = [0, 0, 0];
         }
         const viewer = await module.createViewer({
           container: host,
