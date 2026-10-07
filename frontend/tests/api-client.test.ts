@@ -9,6 +9,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, fetchApi } from "@/lib/api/client";
+import { getSimulationPackage } from "@/lib/api/studio";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -88,5 +89,45 @@ describe("fetchApi", () => {
     if (!result.ok) {
       expect(result.error.isClientError).toBe(false);
     }
+  });
+});
+
+describe("getSimulationPackage", () => {
+  it("fail-closed rejects a download reference paired with a blocked capability", async () => {
+    const body = {
+      scene_revision: "rev-1",
+      source_scene_revision: "rev-0",
+      created_at: "2026-10-08T00:00:00Z",
+      confirmed_objects: 1,
+      environment_triangles: 0,
+      carved_triangles: 0,
+      preflight: { blocking_result: "PASS", rules: [] },
+      export_capability: {
+        scene_revision: "rev-1",
+        scene_ir_checksum: "sha256:scene",
+        status: "blocked",
+        requested_mode: "auto",
+        effective_mode: "hybrid",
+        builder_version: "usd-export-capabilities-v2",
+        runtime_qualification: "failed",
+        runtime_version: null,
+        requirements: {
+          collider_types: [],
+          static_physics: false,
+          dynamic_physics: false,
+          local_collider_offsets: false,
+          hybrid_visuals: true,
+          external_assets: false,
+        },
+        blockers: [{ code: "USD_RUNTIME_UNQUALIFIED", message: "runtime probe failed", affected_object_ids: [] }],
+      },
+      package_ref: { artifact_uri: "artifact://candidate", artifact_checksum: "sha256:candidate" },
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(body)));
+
+    await expect(getSimulationPackage("job-a")).rejects.toMatchObject({
+      status: 502,
+      detail: "Backend trả candidate dù capability USD đang bị chặn",
+    });
   });
 });

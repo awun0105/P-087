@@ -488,6 +488,26 @@ export interface PreflightRuleView {
   remediation: string | null;
 }
 
+export interface ExportCapabilityView {
+  scene_revision: string;
+  scene_ir_checksum: string;
+  status: "supported" | "blocked";
+  requested_mode: "auto";
+  effective_mode: "legacy_box" | "hybrid";
+  builder_version: string;
+  runtime_qualification: "not_required" | "qualified" | "failed";
+  runtime_version: string | null;
+  requirements: {
+    collider_types: string[];
+    static_physics: boolean;
+    dynamic_physics: boolean;
+    local_collider_offsets: boolean;
+    hybrid_visuals: boolean;
+    external_assets: boolean;
+  };
+  blockers: { code: string; message: string; affected_object_ids: string[] }[];
+}
+
 /** Tập con của `SimulationPackage` backend mà UI hiển thị; các field khác bỏ qua. */
 export interface SimulationPackageView {
   scene_revision: string;
@@ -497,7 +517,51 @@ export interface SimulationPackageView {
   environment_triangles: number;
   carved_triangles: number;
   preflight: { blocking_result: string; rules: PreflightRuleView[] };
+  export_capability: ExportCapabilityView | null;
   package_ref: { artifact_uri: string; artifact_checksum: string } | null;
+}
+
+function parseExportCapability(value: unknown): ExportCapabilityView | null {
+  if (value === null || value === undefined) return null;
+  if (!isObject(value)) throw new ApiError(502, "Backend trả capability USD sai contract");
+
+  const requirements = value.requirements;
+  const validRequirements =
+    isObject(requirements) &&
+    Array.isArray(requirements.collider_types) &&
+    requirements.collider_types.every((item) => typeof item === "string") &&
+    [
+      "static_physics",
+      "dynamic_physics",
+      "local_collider_offsets",
+      "hybrid_visuals",
+      "external_assets",
+    ].every((key) => typeof requirements[key] === "boolean");
+  const validBlockers =
+    Array.isArray(value.blockers) &&
+    value.blockers.every(
+      (item) =>
+        isObject(item) &&
+        typeof item.code === "string" &&
+        typeof item.message === "string" &&
+        Array.isArray(item.affected_object_ids) &&
+        item.affected_object_ids.every((id) => typeof id === "string"),
+    );
+  if (
+    typeof value.scene_revision !== "string" ||
+    typeof value.scene_ir_checksum !== "string" ||
+    !["supported", "blocked"].includes(String(value.status)) ||
+    value.requested_mode !== "auto" ||
+    !["legacy_box", "hybrid"].includes(String(value.effective_mode)) ||
+    typeof value.builder_version !== "string" ||
+    !["not_required", "qualified", "failed"].includes(String(value.runtime_qualification)) ||
+    !(value.runtime_version === null || typeof value.runtime_version === "string") ||
+    !validRequirements ||
+    !validBlockers
+  ) {
+    throw new ApiError(502, "Backend trả capability USD sai contract");
+  }
+  return value as unknown as ExportCapabilityView;
 }
 
 function parseSimulationPackage(value: unknown): SimulationPackageView | null {
@@ -511,7 +575,11 @@ function parseSimulationPackage(value: unknown): SimulationPackageView | null {
   ) {
     throw new ApiError(502, "Backend trả gói mô phỏng sai contract");
   }
-  return data as SimulationPackageView;
+  const exportCapability = parseExportCapability(data.export_capability);
+  if (exportCapability?.status === "blocked" && data.package_ref != null) {
+    throw new ApiError(502, "Backend trả candidate dù capability USD đang bị chặn");
+  }
+  return { ...data, export_capability: exportCapability } as SimulationPackageView;
 }
 
 /** Gói của revision scene hiện tại; null khi chưa tạo hoặc scene đã sửa sau lần tạo. */

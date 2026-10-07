@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- Status IN PROGRESS; AUD-02.S1–S2 complete, AUD-02.S3 pending; P0; EX-SIM builder, EX-PRODUCT dispatch/errors.
+- Status IMPLEMENTED; AUD-02.S1–S3 complete. DevTools visual acceptance is UNVERIFIED; real Isaac acceptance remains in AUD-05. P0; EX-SIM builder, EX-PRODUCT dispatch/errors.
 - Canonical tasks SIM-03/04/05, PRODUCT-08. Strategy REUSE pxr/hybrid runner,
   SELF-CODE capability gate; không thêm USD implementation framework.
 - Goal: candidate chỉ được publish khi exporter giữ đúng collider/physics đã yêu cầu.
@@ -102,8 +102,9 @@ hiện có, không chạy Isaac trong API. Kiểm ZIP inventory và stage load; 
 AUD-05 cho real Isaac. Không coi text chứa def Mesh là geometry pass.
 Tests: API blocker/permissions, Vitest ReviewPanel, USD open/reference checks,
 actual Isaac loader nếu đã có runtime; browser feedback/rollback khi UI thay đổi.
-**Exit:** [ ] user thấy capability cần thiết; [ ] no candidate on failed build;
-[ ] pxr vs Isaac evidence được tách riêng.
+**Exit:** [x] user thấy capability cần thiết; [x] no candidate on failed build;
+[x] pxr vs Isaac evidence được tách riêng. DevTools browser feedback vẫn
+UNVERIFIED do MCP không kết nối được Chrome session.
 
 ## Verification và DoD
 
@@ -111,7 +112,8 @@ actual Isaac loader nếu đã có runtime; browser feedback/rollback khi UI tha
 .venv/bin/pytest tests/test_simulation/test_usd.py tests/test_simulation/test_hybrid_usd.py tests/test_simulation/test_preflight.py tests/test_simulation/test_enrichment.py tests/test_simulation/test_usd_capabilities.py tests/test_simulation/test_collision_edit_composition.py tests/test_orchestration/test_simulation_package.py tests/test_orchestration/test_review_workflow.py tests/test_contracts/test_candidate_manifest.py tests/test_api/test_studio_routes.py -q
 ```
 
-Frontend focused: tests/review-panel.test.tsx và API client test trong frontend/.
+Frontend focused: tests/object-review.test.tsx, tests/review-panel.test.tsx,
+tests/studio-results.test.tsx và tests/api-client.test.ts trong frontend/.
 Ruff/frontend gates theo AGENT_GUIDE. DONE khi capability matrix có negative
 proof và emitted USD giữ đủ semantics; Isaac runtime acceptance vẫn ghi AUD-05.
 
@@ -226,3 +228,52 @@ proof và emitted USD giữ đủ semantics; Isaac runtime acceptance vẫn ghi 
   Minimal-code rung 2 reused `ArtifactResolver`, checksum utilities, `trimesh`,
   and the existing `pxr` runner; one shared topology validator closes the missing
   API/runtime contract. Browser DevTools is n/a because this is a UI-free service.
+
+### AUD-02.S3 — implementation complete; browser gate unverified
+
+- Commit base: `1aed466` (`AUD-01.S3`). No backend schema or persistence change.
+- Before: the API response already contained `export_capability`, but
+  `SimulationPackageView` dropped it. ReviewPanel therefore showed a generic
+  Preflight failure message when static Preflight passed and USD export was
+  blocked; users could not see the typed reason or distinguish OpenUSD builder
+  qualification from Isaac execution.
+- After: the frontend projection validates the typed capability fields and
+  blocker records. A blocked capability cannot be paired with a package download
+  reference at the client boundary. ReviewPanel shows status, effective mode,
+  builder/runtime version, blocker code/message/object IDs, says no candidate was
+  created, and offers a retry against the current scene requirements. Preflight
+  failures retain their own remediation message.
+- API/permission proof: the existing Studio router-level `require_editor`
+  dependency covers simulation package GET, POST and download. Regression tests
+  verify all three return 401 when auth is enabled without a session. The existing
+  blocker projection test verifies Preflight PASS + export BLOCKED returns the
+  typed report with `candidate` and `package_ref` null. Package tests also verify
+  failed USD builds do not publish a candidate or scene revision.
+- Consumer/runtime evidence: the focused AUD-02 suite → 98 passed. In those
+  tests, `data/scene_runtime/bin/python` opens the emitted composed stage using
+  OpenUSD `pxr` (`usd-core 0.26.8`) and verifies ZIP inventory and relative
+  references. This is OpenUSD authoring/composition evidence only. No Isaac Sim
+  runtime is installed in this checkout; real simulation/load acceptance stays
+  with AUD-05. The API candidate builder uses its configured OpenUSD subprocess;
+  this endpoint does not invoke Isaac in the FastAPI process.
+- Frontend: `npm run test -- tests/object-review.test.tsx tests/studio-results.test.tsx`
+  → 16 passed; `npm run test -- tests/review-panel.test.tsx tests/api-client.test.ts`
+  → 15 passed; combined focused Vitest run → 31 passed. `npm run typecheck`,
+  changed-file ESLint and `npm run build` passed.
+  `.venv/bin/ruff check src/ tests/` and `.venv/bin/ruff format --check src/ tests/`
+  passed; `git diff --check` was clean.
+- Browser gate: `UNVERIFIED: DevTools` — MCP reports the Chrome DevTools profile is
+  already running/locked, and CUA reports no browser surface. Restart `/mcp` to
+  obtain a DevTools session before claiming visual/browser acceptance.
+- Changed files: `frontend/src/lib/api/studio.ts`,
+  `frontend/src/features/studio/SimulationPackagePanel.tsx`, frontend API/UI tests,
+  `tests/test_api/test_studio_routes.py`, this task, ADR 0012 and the active plan.
+- Pre-flight: CodeGraph read `SimulationPackageView`,
+  `SimulationPackagePanel`, `create_simulation_package`, router dependencies and
+  their consumers/tests. Affected callers include `ReviewTab`, `ResultsTab`,
+  `NextAction`, the simulation API and `require_editor`; their relevant test paths
+  ran. `understand-anything` CLI/MCP is unavailable; flow was traced through
+  CodeGraph and the existing AUD-02 integration tests. Minimal-code rung 2 reused
+  the existing JSON object/string helpers, API error boundary, router-level auth
+  dependency and ReviewPanel. `ruff`, focused pytest, Vitest, typecheck, ESLint and
+  production build passed. DevTools visual acceptance remains UNVERIFIED as above.

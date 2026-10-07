@@ -281,7 +281,65 @@ describe("ObjectReviewView", () => {
     expect(await screen.findByText("Vật nằm trong kho, trên sàn")).toBeInTheDocument();
     expect(screen.getByText(/user-001/)).toBeInTheDocument();
     expect(screen.queryByText(/Tải gói/)).toBeNull();
-    expect(screen.getByText(/Chưa đạt kiểm tra/)).toBeInTheDocument();
+    expect(screen.getByText(/Chưa đạt Preflight/)).toBeInTheDocument();
+  });
+  it("hiện riêng blocker USD dù Preflight đạt và cho thử lại đúng scene", async () => {
+    const blocked = {
+      scene_revision: "rev-001",
+      source_scene_revision: "rev-001",
+      scene_ir_checksum: "sha256:scene",
+      created_at: "2026-10-08T00:00:00Z",
+      confirmed_objects: 1,
+      environment_triangles: 1000,
+      carved_triangles: 20,
+      preflight: { blocking_result: "PASS", rules: [] },
+      export_capability: {
+        schema_version: "1.0",
+        scene_revision: "rev-001",
+        scene_ir_checksum: "sha256:scene",
+        status: "blocked",
+        requested_mode: "auto",
+        effective_mode: "hybrid",
+        builder_version: "usd-export-capabilities-v2",
+        runtime_qualification: "failed",
+        runtime_version: null,
+        requirements: {
+          collider_types: ["convex_decomposition"],
+          static_physics: false,
+          dynamic_physics: true,
+          local_collider_offsets: false,
+          hybrid_visuals: true,
+          external_assets: false,
+        },
+        blockers: [
+          {
+            code: "USD_RUNTIME_UNQUALIFIED",
+            message: "The configured USD Python runtime did not pass the required API capability probe.",
+            affected_object_ids: ["object-1"],
+          },
+        ],
+      },
+      candidate: null,
+      package_ref: null,
+    };
+    routeFetch({});
+    render(<SimulationPackagePanel jobId="job-a" sceneRevision="rev-001" onSceneChanged={() => {}} />);
+
+    const retry = await screen.findByRole("button", { name: "Tạo gói mô phỏng" });
+    vi.mocked(global.fetch).mockImplementationOnce(async () => reply(blocked));
+    fireEvent.click(retry);
+
+    expect(await screen.findByText("USD_RUNTIME_UNQUALIFIED")).toBeInTheDocument();
+    expect(screen.getByText(/configured USD Python runtime/)).toBeInTheDocument();
+    expect(screen.getByText(/Khả năng xuất USD: Bị chặn · hybrid/)).toBeInTheDocument();
+    expect(screen.queryByText(/Chưa đạt Preflight/)).toBeNull();
+    expect(await screen.findByRole("button", { name: "Thử lại xuất USD" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Tải gói USD/ })).toBeNull();
+    expect(screen.getByText(/Candidate chưa được tạo/)).toBeInTheDocument();
+
+    const posts = calls("/simulation-package").filter(([, init]) => (init as RequestInit | undefined)?.method === "POST");
+    expect(posts).toHaveLength(1);
+    expect((posts[0][1] as RequestInit).body).toBeUndefined();
   });
   it("tách theo vật lỗi sau 3 lần: cho chọn chạy lại hoặc dùng hộp; chọn hộp gửi mode boxes", async () => {
     routeFetch({

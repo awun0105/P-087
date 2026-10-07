@@ -454,3 +454,27 @@ async def test_simulation_api_projects_export_block_separately_from_preflight(
     assert body["export_capability"]["status"] == ExportCapabilityStatus.BLOCKED
     assert body["export_capability"]["blockers"][0]["code"] == "USD_RUNTIME_UNQUALIFIED"
     assert body["candidate"] is None and body["package_ref"] is None
+
+
+@pytest.mark.asyncio
+async def test_simulation_read_build_and_download_require_editor_when_auth_is_enabled(
+    client: AsyncClient, studio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Studio router auth phải phủ đủ cả read, build và artifact download của gói mô phỏng."""
+    from src.api import auth
+
+    identity = SimpleNamespace(
+        database_url=studio.settings.database_url,
+        auth_required=True,
+        auth_session_days=7,
+        auth_invite_days=7,
+    )
+    monkeypatch.setattr(auth, "get_settings", lambda: identity)
+
+    responses = [
+        await client.get("/api/v1/jobs/job-private/simulation-package"),
+        await client.post("/api/v1/jobs/job-private/simulation-package"),
+        await client.get("/api/v1/jobs/job-private/simulation-package/download"),
+    ]
+
+    assert [response.status_code for response in responses] == [401, 401, 401]

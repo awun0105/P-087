@@ -86,7 +86,11 @@ export function SimulationPackagePanel({
         </p>
         <Button size="sm" variant={pkg?.package_ref ? "secondary" : "primary"} disabled={busy} onClick={create}>
           {busy && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden />}
-          {pkg?.package_ref ? "Kiểm tra lại" : "Tạo gói mô phỏng"}
+          {pkg?.package_ref
+            ? "Kiểm tra lại"
+            : pkg?.export_capability?.status === "blocked"
+              ? "Thử lại xuất USD"
+              : "Tạo gói mô phỏng"}
         </Button>
       </div>
       {error && <p role="alert" className="text-sm text-rust">{error}</p>}
@@ -123,15 +127,43 @@ export function SimulationPackagePanel({
             {pkg.confirmed_objects} vật · môi trường {pkg.environment_triangles.toLocaleString("vi-VN")} tam giác (khoét{" "}
             {pkg.carved_triangles.toLocaleString("vi-VN")}) · scene {pkg.scene_revision}
           </p>
-          {pkg.package_ref ? (
+          {pkg.export_capability && (
+            <div className="space-y-1 rounded-md border border-line p-3" aria-label="Khả năng xuất USD">
+              <p className={pkg.export_capability.status === "blocked" ? "font-medium text-rust" : "text-ink-muted"}>
+                Khả năng xuất USD: {pkg.export_capability.status === "blocked" ? "Bị chặn" : "Sẵn sàng"} ·{" "}
+                {pkg.export_capability.effective_mode} · builder {pkg.export_capability.builder_version}
+                {pkg.export_capability.runtime_version && ` · OpenUSD ${pkg.export_capability.runtime_version}`}
+              </p>
+              {pkg.export_capability.blockers.length > 0 && (
+                <ul className="space-y-1" role="alert">
+                  {pkg.export_capability.blockers.map((blocker, index) => (
+                    <li key={`${blocker.code}-${index}`}>
+                      <span className="font-medium">{blocker.code}</span>: {blocker.message}
+                      {blocker.affected_object_ids.length > 0 && (
+                        <span className="block text-ink-subtle">Vật liên quan: {blocker.affected_object_ids.join(", ")}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {pkg.export_capability.status === "blocked" && (
+                <p className="text-ink-muted">
+                  Candidate chưa được tạo. Khắc phục điều kiện trên rồi thử lại; lần thử lại đánh giá cùng các yêu cầu của scene hiện tại.
+                </p>
+              )}
+            </div>
+          )}
+          {pkg.package_ref && pkg.export_capability?.status !== "blocked" ? (
             <a
               href={simulationPackageDownloadUrl(jobId)}
               className={cn(buttonVariants({ size: "sm", variant: "secondary" }), "w-full")}
             >
               <Download aria-hidden /> Tải gói USD cho Isaac (.zip)
             </a>
+          ) : pkg.export_capability?.status === "blocked" ? null : pkg.preflight.blocking_result !== "PASS" ? (
+            <p className="text-rust">Chưa đạt Preflight; sửa theo các mục đỏ rồi tạo lại.</p>
           ) : (
-            <p className="text-rust">Chưa đạt kiểm tra; sửa theo các mục đỏ rồi tạo lại.</p>
+            <p className="text-rust">Chưa có gói tải xuống; kiểm tra lại capability rồi thử tạo gói.</p>
           )}
         </div>
       )}

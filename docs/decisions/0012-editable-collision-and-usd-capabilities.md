@@ -65,7 +65,23 @@ builder/runtime can preserve the SceneIR requirements. A package is publishable
 only when both pass. The operational contract is `usd-export-capabilities-v2` and
 is bound to SceneIR revision/checksum, effective mode, builder config, and runtime
 USD version in the candidate build identity. This contract evidence does not by
-itself mark this ADR Accepted; AUD-02.S3 and Isaac validation remain open.
+itself mark this ADR Accepted; real Isaac validation remains open in AUD-05.
+
+AUD-02.S3 projects the typed capability report into Studio separately from
+static Preflight. When export is blocked, the user sees the blocker code, message,
+affected objects, builder/runtime identity, and a retry action for the same
+current scene requirements; the UI does not offer a package download. The
+Studio router's existing `require_editor` dependency covers package read, build,
+and download routes. API regression tests verify that each route rejects an
+unauthenticated request when auth is enabled. This closes local API/UI wiring,
+not browser acceptance: DevTools was unavailable because its Chrome profile was
+locked, so visual browser evidence remains unverified.
+
+The package endpoint currently invokes USD candidate authoring through its
+configured OpenUSD subprocess; it does not load or run Isaac inside FastAPI.
+Durable, isolated Isaac execution and its observed evidence remain AUD-05 work,
+with operation admission in AUD-07. OpenUSD `pxr` stage composition does not
+prove Isaac physics behavior.
 
 The legacy path supports finite positive AABB/OBB boxes with exact dimensions and
 local transforms. It rejects authored `ObjectPhysics`, external assets, and

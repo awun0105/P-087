@@ -213,11 +213,15 @@ AUD-19 uses AUD-12.S1 quality fixtures; AUD-12 sensor-package path không đợi
 AUD-19. Static-map consumer chỉ enable sau registration QA, không bắt AUD-19
 đợi whole AUD-12 epic. Sensor calibration QA và map registration QA không tráo nhau.
 
-Progress hiện tại: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3 và AUD-02.S1–S2 đã
-được commit riêng theo sprint. AUD-01.S3 đã verify legacy ownership recovery,
-candidate ZIP/manifest, current rotated object pose, retained floor collision,
-relative USD asset composition, và bất biến bytes của artifact cũ bằng OpenUSD
-runtime. Tiếp tục AUD-02.S3. Isaac Sim acceptance vẫn thuộc AUD-05.
+Progress hiện tại: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3 và
+AUD-02.S1–S3 đã được commit riêng theo sprint. AUD-01.S3 verified legacy
+ownership recovery, candidate ZIP/manifest, current rotated object pose,
+retained floor collision, relative USD asset composition, và bất biến bytes của
+artifact cũ bằng OpenUSD runtime. AUD-02.S3 nối capability blocker qua typed
+API/UI, giữ Preflight riêng, ngăn tải candidate khi export bị block và kiểm tra
+quyền GET/POST/download. Automated checks pass; browser DevTools còn UNVERIFIED
+vì Chrome DevTools MCP không lấy được session đang khóa profile. Sprint kế tiếp
+theo dependency order là AUD-03.S1. Isaac Sim acceptance vẫn thuộc AUD-05.
 
 AUD-23 có client preparation identity trước AUD-15/16 cache consumers; supported
 sensor mapping chốt trước AUD-13 overlay QA. Không cần full odometry/registration
