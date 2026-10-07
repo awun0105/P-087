@@ -73,7 +73,7 @@ Real child sleep có start_new_session, capture PID do fixture tạo, bounded ti
 finally cleanup; không signal inherited shell group hoặc actual worker.
 Tests: KeyboardInterrupt, timeout, fatal GPU log marker, successful exit, subprocess
 already-exited race; real returncode/signal + reaped child on supported platform.
-**Exit:** [ ] cancellation suite pass; [ ] real cleanup evidence; [ ] no weakened polling behavior.
+**Exit:** [x] cancellation suite pass; [x] real cleanup evidence; [x] no weakened polling behavior.
 
 ## Verification và DoD
 
@@ -110,4 +110,27 @@ DONE khi corrected regressions và related suites pass; broader failures ghi đ�
 - Current valid roles are `editor` and `reviewer`, both permitted for retry;
   there is no lower authenticated role to deny in this contract. Anonymous
   access is denied here; Guest role boundaries will be covered by AUD-21.
-- Next: AUD-11.S2, subprocess polling fake and bounded child cleanup coverage.
+- S1 commit: `62f5b8c`.
+
+### AUD-11.S2 — Cover process polling and cleanup
+
+- Base: `62f5b8c`. Files changed: this task record and
+  `tests/test_reconstruction/test_preview_cancellation.py`. Schema delta: none;
+  reconstruction runtime unchanged.
+- Replaced the brittle wait-only fake with one implementing context-manager,
+  poll, wait and returncode behavior. Added polling-path interrupt, timeout,
+  fatal-log, successful-exit and already-exited process-group cases. Assertions
+  cover outcome/reap state rather than exact wait-call counts.
+- Added a fixture-owned Python sleeper using `start_new_session=True`. The test
+  verifies its own PID is a process-group leader, interrupts the runner, asserts
+  SIGKILL exit status, and calls bounded wait to confirm reap. A `finally` block
+  cleans only the captured child process group. This is local OS process proof,
+  not GPU/trainer acceptance.
+- Verification: `.venv/bin/pytest
+  tests/test_reconstruction/test_preview_cancellation.py -q` — 7 passed;
+  `.venv/bin/pytest tests/test_reconstruction/test_rec04_brush.py -q` — 33
+  passed, 5 skipped; combined API/cancellation/retryability suite — 31 passed;
+  `.venv/bin/pytest tests/ -q` — 1,532 passed, 40 skipped in 322.95s;
+  `.venv/bin/ruff check src/ tests/` — passed; `.venv/bin/ruff format --check
+  src/ tests/` — 452 files already formatted; `git diff --check` — passed.
+- No production polling or retry policy was weakened. Next: AUD-15.S1.
