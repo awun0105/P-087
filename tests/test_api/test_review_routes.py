@@ -7,8 +7,9 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from src.models.contracts.identity import canonical_content_checksum
 from src.services.orchestration.auth import UserRecord
-from src.services.orchestration.review.workflow import review_state
+from src.services.orchestration.review.workflow import record_validation_report, review_state
 from tests.test_orchestration.test_review_workflow import _install_worker_run, _packaged, _report
 
 
@@ -45,7 +46,16 @@ def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
         "validation_report_checksum": report.report_checksum,
         "accepted_warning_ids": [],
     }
-    return SimpleNamespace(client=TestClient(app), job=job.job_id, body=body, audits=audits, auth=auth)
+    return SimpleNamespace(
+        client=TestClient(app),
+        job=job.job_id,
+        body=body,
+        audits=audits,
+        auth=auth,
+        registry=registry,
+        candidate_checksum=candidate,
+        report=report,
+    )
 
 
 def test_decision_requires_logged_in_reviewer(setup, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
@@ -70,3 +80,36 @@ def test_reviewer_approves_and_downloads_release(setup, monkeypatch: pytest.Monk
     assert download.status_code == 200 and download.headers["content-type"] == "application/zip"
     again = setup.client.post(f"/api/v1/jobs/{setup.job}/review-decision", json=setup.body)
     assert again.status_code == 409
+
+
+def test_legacy_report_cannot_claim_isaac_version_or_enable_review_api(setup, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(setup.auth, "current_user", lambda request: _user("reviewer"))
+    database = setup.registry.persistence.database
+    with database.transaction(write=True) as tx:
+        tx.execute(
+            "DELETE FROM r2s_validation_selections WHERE job_id=? AND candidate_checksum=?",
+            (setup.job, setup.candidate_checksum),
+        )
+
+    draft = setup.report.model_copy(
+        update={"environment_versions": {"isaac_sim": "4.2.0"}, "report_checksum": "sha256:" + "0" * 64}
+    )
+    legacy = draft.model_copy(update={"report_checksum": canonical_content_checksum(draft, "report_checksum")})
+    record_validation_report(setup.registry, setup.job, legacy)
+
+    state = setup.client.get(f"/api/v1/jobs/{setup.job}/review-state").json()
+    assert state["record"]["status"] == "CANDIDATE_READY"
+    assert state["isaac_runtime_proof"] is False
+    assert state["validation"]["environment_versions"]["isaac_sim"] == "4.2.0"
+    assert state["blockers"]
+
+    body = {**setup.body, "validation_report_checksum": legacy.report_checksum}
+    response = setup.client.post(f"/api/v1/jobs/{setup.job}/review-decision", json=body)
+    assert response.status_code == 409
+
+
+def test_stale_candidate_decision_is_rejected_by_api(setup, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(setup.auth, "current_user", lambda request: _user("reviewer"))
+    body = {**setup.body, "candidate_checksum": "sha256:" + "0" * 64}
+    response = setup.client.post(f"/api/v1/jobs/{setup.job}/review-decision", json=body)
+    assert response.status_code == 409

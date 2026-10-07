@@ -25,9 +25,8 @@ function ResultBadge({ value }: { value: string }) {
  * Báo cáo validation của đúng gói thuộc revision hiện tại (STUDIO_UX_SPEC.md S10): từng check, từng cặp Start–Goal,
  * bằng chứng đi kèm và "Nguồn kết quả" để đối chiếu checksum. Chỉ đọc; quyết định duyệt nằm ở `ReviewPanel`.
  *
- * Báo cáo không có bằng chứng chạy Isaac Sim thật (cờ do backend suy từ `environment_versions`) phải mang cảnh báo:
- * một kết quả PASS của fixture hay của validator chạy không có simulator rất dễ bị đọc thành kết luận mô phỏng (D-05).
- * Cờ vắng mặt cũng coi như chưa có bằng chứng.
+ * Cờ proof chỉ do backend đặt khi selected worker run, report và RuntimeManifest đã xác minh khớp.
+ * Environment version chỉ để hiển thị; không thể tự cấp trust. Cờ vắng mặt cũng fail closed.
  */
 export function ValidationReportCard({ state }: { state: ReviewStateView }) {
   const report = state.validation;
@@ -68,7 +67,14 @@ export function ValidationReportCard({ state }: { state: ReviewStateView }) {
         ) : (
           <ul className="mt-2 divide-y divide-line rounded-lg border border-line">
             {report.path_results.map((path) => (
-              <ResultRow key={path.pair_id} id={path.pair_id} result={path.result} message={path.message} evidence={path.evidence_refs} needsAcceptance={false} />
+              <ResultRow
+                key={path.pair_id}
+                id={path.pair_id}
+                result={path.result}
+                message={path.message}
+                evidence={path.evidence_refs}
+                needsAcceptance={state.warning_ids.includes(`path:${path.pair_id}`)}
+              />
             ))}
           </ul>
         )}

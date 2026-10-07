@@ -91,12 +91,20 @@ describe("ValidationReportCard", () => {
     expect(screen.getByText("Chưa có bằng chứng chạy Isaac Sim thật.")).toBeInTheDocument();
   });
 
-  it("báo cáo không đạt: kết luận, check lỗi cần Reviewer chấp nhận và Start–Goal lỗi", async () => {
-    render(<ValidationReportCard state={await parsed(FAILED, { warning_ids: ["ROBOT_SPAWN"] })} />);
+  it("báo cáo không đạt: check lỗi vẫn là blocker, không hiển thị như warning có thể chấp nhận", async () => {
+    render(<ValidationReportCard state={await parsed(FAILED)} />);
     expect(screen.getAllByText("Không đạt · FAIL").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("ROBOT_SPAWN")).toBeInTheDocument();
-    expect(screen.getByText("Cần Reviewer chấp nhận")).toBeInTheDocument();
+    expect(screen.queryByText("Cần Reviewer chấp nhận")).toBeNull();
     expect(screen.getByText("Lỗi · ERROR")).toBeInTheDocument();
+  });
+
+  it("optional path warning is marked for Reviewer acceptance on its path row", async () => {
+    const state = await parsed(PASSED, { isaac_runtime_proof: true, warning_ids: ["path:fixture-pair-001"] });
+    render(<ValidationReportCard state={state} />);
+    const row = screen.getByText("fixture-pair-001").closest("li");
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLElement).getByText("Cần Reviewer chấp nhận")).toBeInTheDocument();
   });
 
   it("báo cáo của gói khác với gói hiện tại thì cảnh báo không khớp", async () => {

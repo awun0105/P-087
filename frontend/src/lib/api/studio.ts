@@ -677,8 +677,9 @@ export interface ReviewStateView {
     validation_report_checksum: string | null;
   };
   validation: ValidationReportView | null;
-  /** Báo cáo có bằng chứng chạy Isaac Sim thật không; null khi chưa có báo cáo hoặc backend không trả cờ. */
+  /** True chỉ khi backend xác minh selected worker run, candidate/config/report và RuntimeManifest cùng identity. */
   isaac_runtime_proof: boolean | null;
+  /** Warning IDs từ gate; optional path warning dùng `path:<pair_id>`. */
   warning_ids: string[];
   /** Tên hiển thị của người duyệt (backend điền từ tài khoản); null thì UI hiện id. */
   reviewer_name?: string | null;

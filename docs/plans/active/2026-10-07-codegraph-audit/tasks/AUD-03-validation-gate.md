@@ -115,8 +115,10 @@ asserting display-only proof. Giữ fixture/demo previews usable, không tạo o
 release. Kiểm reviewer roles, warning IDs và direct API calls.
 Tests: API/auth/stale POST, frontend render/pending/error; trusted fixture happy
 path; synthetic bypass negative; browser review screen theo GUIDE.
-**Exit:** [ ] gate applied everywhere; [ ] consumer/permissions tests pass;
-[ ] real Isaac proof chỉ được tick sau AUD-05.
+**Exit:** [x] API gate remains authoritative and Studio fails closed on missing,
+stale or mismatched proof; [x] API/auth/stale and UI consumer tests pass;
+[ ] GUIDE DevTools MCP review-screen gate (CLI harness is supplementary only);
+[ ] real Isaac proof, deferred to AUD-05.
 
 ## Verification và DoD
 
@@ -203,5 +205,52 @@ record/result phải nói fixture proof, chưa thay cho real-runtime acceptance.
   Repository rows are not authenticated worker output until AUD-05; package
   imports therefore cannot carry completed worker proof. Seal idempotency and
   atomic crash recovery remain AUD-04. Browser review remains AUD-03.S3.
-- Next: AUD-03.S3 projects blockers and proof state through the typed API/UI,
-  tests stale/direct requests and reviewer permissions, and performs browser QA.
+- Completed in AUD-03.S3: typed API/UI blockers and proof projection, stale/direct
+  request regressions and role checks. Browser MCP gate is recorded separately
+  in the S3 result because the required MCP session was unavailable.
+
+### AUD-03.S3 — API/UI projections and release regression
+
+- Base commit: `e16d47b` (`AUD-03.S2`). CodeGraph explored `ReviewPanel`,
+  `ValidationReportCard`, and `ReviewStateView` before editing; affected Studio
+  caller is `ReviewTab` (three render sites), with focused tests for the panel
+  and report card. Index is up to date at 747 files, 13,333 nodes, 37,750 edges.
+- Before: UI treated a PASS report as review-ready without requiring the trusted
+  worker proof and exact candidate/report identities; no-report blockers were
+  hidden, optional path warnings had no matching evidence row, and legacy API
+  reports that named an Isaac version needed an explicit regression.
+- After: review actions and progress steps require backend proof, PASS, matching
+  candidate/report checksums and no blockers; all blockers render even without a
+  report. Optional `path:<pair_id>` warnings show the corresponding message and
+  evidence on both review controls and the report card. Retry-seal is hidden
+  while blockers remain. Typed API comments document that environment version
+  strings do not establish trust. No DB/schema or API field change.
+- Added API regressions proving a legacy report with `isaac_sim=4.2.0` but no
+  selected worker run remains `CANDIDATE_READY` and returns 409 on direct review;
+  stale candidate identity also returns 409. Existing API tests cover anonymous
+  401, editor 403, and reviewer success. UI regressions cover missing blockers,
+  untrusted READY state, exact checksums, warning acknowledgement, editor
+  read-only behavior, stale revision, loading state, and read-error retry.
+- Files changed: `frontend/src/features/studio/ReviewPanel.tsx`,
+  `frontend/src/features/studio/ValidationReportCard.tsx`,
+  `frontend/src/lib/api/studio.ts`, `frontend/tests/review-panel.test.tsx`,
+  `frontend/tests/validation-report-card.test.tsx`,
+  `tests/test_api/test_review_routes.py`.
+- Verification: focused backend tests **33 passed**; focused frontend tests
+  **18 passed**; `ruff check src/ tests/` passed; `ruff format --check src/ tests/`
+  reported 463 files already formatted; frontend typecheck and lint passed;
+  `npm run build -- --webpack` passed; `git diff --check` passed.
+- Browser evidence: Chrome DevTools CLI rendered the component harness, accepted
+  the optional path warning, submitted the confirmation, and showed RELEASED.
+  API responses were mocked in the harness and no project DB was mutated. The
+  screenshot at `/tmp/r2s-aud03-s3/review-panel.png` shows the expected state,
+  but the harness omits application CSS. This CLI run supplements and does not
+  satisfy GUIDE.md's Chrome DevTools MCP gate. MCP was unavailable in this
+  session; user was asked to reconnect it. Record the MCP gate as UNVERIFIED
+  until that review runs against the application screen.
+- Limits: synthetic/worker-shaped evidence is not real Isaac execution.
+  Authenticated worker receipt and real Isaac acceptance remain AUD-05; release
+  seal atomic crash recovery remains AUD-04. The checks establish local API and
+  component behavior only, not deployment/cloud acceptance.
+- Next: complete the required MCP screen review, then implement AUD-04.S1
+  idempotent seal identity and crash-safe publication.
