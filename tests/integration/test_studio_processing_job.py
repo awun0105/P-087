@@ -130,12 +130,15 @@ def test_benchmark_record_from_real_prepare(world: SimpleNamespace) -> None:
     assert [stage.stage_id for stage in benchmark.stages][0] == "ST-INPUT-VALIDATE"
     measured = [stage.seconds for stage in benchmark.stages if stage.seconds is not None]
     assert measured and all(seconds >= 0 for seconds in measured)
-    if benchmark.total_seconds is not None:
-        assert benchmark.estimated_gpu_cost_usd == round(benchmark.total_seconds / 3600, 4)
+    assert benchmark.actual_frame_count == 10  # 30 is a cap; source fixture extracts ten frames.
+    assert benchmark.snapshot_phase == "partial"
+    assert benchmark.total_seconds is None
+    assert benchmark.estimated_gpu_cost_usd is None  # no measured GPU allocation interval
 
     reference = publish_benchmark(world.registry, benchmark)
-    assert reference.artifact_uri == f"artifact://jobs/{job.job_id}/benchmark/pipeline_runtime/attempt-1.json"
+    assert reference.artifact_uri == (f"artifact://jobs/{job.job_id}/benchmark/pipeline_runtime/attempt-1-partial.json")
     stored = PipelineRuntimeBenchmark.model_validate_json(
         world.registry.runtime_resolver.require(reference).read_bytes()
     )
+    assert reference.schema_version == "1.1"
     assert stored.label == "integration" and stored.benchmark_kind == "pipeline_runtime"

@@ -225,6 +225,9 @@ export interface JobAttemptRecord {
   recorded_at: string;
   job_manifest_uri: string | null;
   job_manifest_checksum: string | null;
+  actual_frame_count: number | null;
+  stage_started_at: string | null;
+  preview_verified_at: string | null;
 }
 
 export interface JobAttemptListResponse {

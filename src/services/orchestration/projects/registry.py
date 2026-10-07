@@ -536,7 +536,13 @@ class ProjectRegistry:
         self.get_job(job_id)
         return list(self._attempts.get(job_id, []))
 
-    def record_preview(self, expected: JobManifest, receipt: PreviewWorkerReceipt) -> JobManifest:
+    def record_preview(
+        self,
+        expected: JobManifest,
+        receipt: PreviewWorkerReceipt,
+        *,
+        verified_at: datetime | None = None,
+    ) -> JobManifest:
         """Worker-only reducer; receipt phải đi qua public REC consumer verifier."""
         if self.persistence is None:
             raise RuntimeStateConflictError("Real worker cần durable registry")
@@ -550,15 +556,17 @@ class ProjectRegistry:
             raise ValueError("Preview result reference khác job")
         self.runtime_resolver.require(receipt.result_ref)
         stages = list(receipt.stage_artifacts)
+        preview_verified_at = None
         if receipt.error is None:
             if receipt.preview_ref is None:
                 raise ValueError("Worker thiếu preview publication")
             self.runtime_resolver.require(receipt.preview_ref)
+            preview_verified_at = verified_at or datetime.now(UTC)
             stages.append(
                 StageArtifact(
                     stage_id=StageId.VISUAL_RECON,
                     status="SUCCEEDED",
-                    completed_at=datetime.now(UTC),
+                    completed_at=preview_verified_at,
                     artifact_type="ReconstructionPreview",
                     artifact_uri=receipt.preview_ref.artifact_uri,
                     artifact_checksum=receipt.preview_ref.artifact_checksum,
@@ -588,21 +596,29 @@ class ProjectRegistry:
             error=receipt.error,
             job_manifest_uri=reference.artifact_uri,
             job_manifest_checksum=reference.artifact_checksum,
+            preview_verified_at=preview_verified_at,
         )
         self.persistence.save_job(updated, reference, event, expected=expected)
         return updated
 
-    def record_stage_progress(self, expected: JobManifest, stage_id: StageId) -> JobManifest:
-        """Worker-only: job RUNNING chuyển sang stage đang chạy mới (không thêm artifact).
+    def record_stage_progress(
+        self,
+        expected: JobManifest,
+        stage_id: StageId,
+        *,
+        started_at: datetime | None = None,
+    ) -> JobManifest:
+        """Worker-only: ghi stage đang chạy và mốc start quan sát được (không thêm artifact).
 
         Dùng cho tiến trình quan sát được (REC stage event), không phải phần trăm
-        ước đoán; CAS bảo đảm không ghi đè cancel/retry xảy ra song song.
+        ước đoán; có thể cập nhật start chính xác cho stage đã claim. CAS bảo đảm
+        không ghi đè cancel/retry xảy ra song song.
         """
         if self.persistence is None:
             raise RuntimeStateConflictError("Real worker cần durable registry")
         if expected.status != JobStatus.RUNNING:
             raise ValueError("Chỉ job RUNNING mới đổi stage đang chạy")
-        if expected.current_stage == stage_id:
+        if expected.current_stage == stage_id and started_at is None:
             return expected
         updated = with_canonical_checksum(
             expected.model_copy(update={"current_stage": stage_id}), "job_manifest_checksum"
@@ -616,6 +632,7 @@ class ProjectRegistry:
             recorded_at=datetime.now(UTC),
             job_manifest_uri=reference.artifact_uri,
             job_manifest_checksum=reference.artifact_checksum,
+            stage_started_at=started_at,
         )
         self.persistence.save_job(updated, reference, event, expected=expected)
         return updated
@@ -759,6 +776,7 @@ class ProjectRegistry:
             error=receipt.error,
             job_manifest_uri=reference.artifact_uri,
             job_manifest_checksum=reference.artifact_checksum,
+            actual_frame_count=receipt.extracted_frame_count,
         )
         self.persistence.save_job(updated, reference, event, expected=expected)
         return updated

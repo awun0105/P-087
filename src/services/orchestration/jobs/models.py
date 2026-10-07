@@ -29,6 +29,9 @@ class JobAttemptRecord(BaseModel):
     job_manifest_uri: ArtifactUri | None = None
     job_manifest_checksum: Checksum | None = None
     error: ExecutionError | None = None
+    actual_frame_count: int | None = Field(default=None, ge=2)
+    stage_started_at: datetime | None = None
+    preview_verified_at: datetime | None = None
 
 
 class TransitionRequest(BaseModel):
@@ -53,8 +56,8 @@ class JobDetail(BaseModel):
 class PreparedInputReceipt(BaseModel):
     """Phần PRODUCT đọc từ kết quả `prepare` của EX-REC, chỉ qua shared contracts.
 
-    Field khác trong payload của REC (stride, số frame) bị bỏ qua: PRODUCT không
-    phụ thuộc model nội bộ của track khác.
+    PRODUCT chỉ nhận số frame thực tế cần cho benchmark; các chi tiết chuẩn bị
+    nội bộ khác như stride vẫn thuộc EX-REC.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -63,6 +66,7 @@ class PreparedInputReceipt(BaseModel):
     input_manifest_checksum: Checksum
     stage_artifacts: list[StageArtifact]
     frame_set_ref: ProductArtifactRef | None = None
+    extracted_frame_count: int | None = Field(default=None, ge=2)
     error: ExecutionError | None = None
 
     @model_validator(mode="after")

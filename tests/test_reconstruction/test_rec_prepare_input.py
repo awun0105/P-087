@@ -141,6 +141,7 @@ def test_video_prepares_quality_privacy_and_strided_frame_set(tmp_path: Path) ->
     )
     result = preparer.run(request)
     assert result.error is None and result.frame_set_ref is not None
+    assert result.extracted_frame_count == 4
     assert [stage.stage_id for stage in result.stage_artifacts] == [
         StageId.INPUT_VALIDATE,
         StageId.PRIVACY_GATE,
@@ -152,6 +153,8 @@ def test_video_prepares_quality_privacy_and_strided_frame_set(tmp_path: Path) ->
     frames = FrameSetResolver(resolver.require, resolver.require).load(result.frame_set_ref)
     ids = [frame.frame_id for frame in frames.frames]
     assert len(ids) == 4 and all(window * 3 <= frame_id < window * 3 + 3 for window, frame_id in enumerate(ids))
+    assert all(stage.started_at is not None and stage.completed_at is not None for stage in result.stage_artifacts)
+    assert all(stage.started_at <= stage.completed_at for stage in result.stage_artifacts if stage.started_at)
     # Retry cùng job publish lại đúng bytes → idempotent, không kẹt ArtifactAlreadyExists.
     again = preparer.run(request)
     assert again.frame_set_ref == result.frame_set_ref

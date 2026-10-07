@@ -47,6 +47,26 @@ def test_product_allows_safe_class_even_with_evaluation_word_in_uri(data_class: 
     assert ProductArtifactRef.model_validate(_reference(data_class, uri)).data_class == data_class
 
 
+def test_artifact_reference_accepts_pipeline_runtime_schema_11() -> None:
+    payload = _reference("derived", "artifact://jobs/job-123/benchmark/pipeline_runtime.json")
+    payload["artifact_type"] = "PipelineRuntimeBenchmark"
+    payload["schema_version"] = "1.1"
+
+    reference = ProductArtifactRef.model_validate(payload)
+
+    assert reference.schema_version == "1.1"
+
+
+@pytest.mark.parametrize("schema_version", ["1.2", "2.0"])
+def test_artifact_reference_rejects_unimplemented_schema_version(schema_version: str) -> None:
+    payload = _reference("derived", "artifact://jobs/job-123/benchmark/pipeline_runtime.json")
+    payload["artifact_type"] = "PipelineRuntimeBenchmark"
+    payload["schema_version"] = schema_version
+
+    with pytest.raises(ValidationError, match="schema_version"):
+        ProductArtifactRef.model_validate(payload)
+
+
 def test_unclassified_reference_fails_closed() -> None:
     """Old refs must migrate explicitly rather than receiving a safe default."""
     payload = _reference("derived", "artifact://jobs/job-123/input/map.ply")

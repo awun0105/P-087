@@ -184,6 +184,9 @@ def test_preview_cleanup_only_after_verified_commit(
             runner._execute_preview(attempt, reference, profile)
     else:
         assert runner._execute_preview(attempt, reference, profile) == job
+    if failure in {None, "receipt"}:
+        verified_at = fake.record_preview.call_args.kwargs["verified_at"]
+        assert (verified_at is not None) is (failure is None)
     assert (workspace / "rec" / "database.db").exists() == (failure is not None)
     assert registry.runtime_resolver.require(reference).is_file()
 

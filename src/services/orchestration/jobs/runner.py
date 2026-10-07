@@ -136,8 +136,10 @@ class _StageProgress:
         self.offset += len(complete)
         for line in complete.splitlines():
             stage = StageArtifact.model_validate_json(line)
-            if stage.status == StageStatus.RUNNING and stage.stage_id != self.attempt.job.current_stage:
-                self.attempt.job = self.attempt.registry.record_stage_progress(self.attempt.job, stage.stage_id)
+            if stage.status == StageStatus.RUNNING:
+                self.attempt.job = self.attempt.registry.record_stage_progress(
+                    self.attempt.job, stage.stage_id, started_at=stage.started_at
+                )
 
 
 def _run_tool(
@@ -327,10 +329,12 @@ def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:
     """Process boundary: ghi FAILED có redaction trên đúng revision runner đang giữ."""
     current = attempt.registry.get_job(attempt.job.job_id)
     if current.job_manifest_checksum != attempt.job.job_manifest_checksum:
+        if current.status == JobStatus.CANCELLED:
+            _record_benchmark(attempt)
         return
     details = {"exception_type": type(error).__name__}
     try:
-        attempt.registry.transition_job(
+        attempt.job = attempt.registry.transition_job(
             attempt.job.job_id,
             TransitionRequest(
                 target_status=JobStatus.FAILED,
@@ -344,6 +348,7 @@ def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:
             ),
             expected_checksum=attempt.job.job_manifest_checksum,
         )
+        _record_benchmark(attempt)
     except RuntimeStateConflictError:
         logger.info("Worker failure không ghi đè revision mới hơn")
 
@@ -450,10 +455,11 @@ def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: Res
     receipt = verify_prepared_preview(reference, attempt.registry.runtime_resolver.require)
     if receipt.attempt_id != attempt_id or (receipt.error is None) != (exit_code == 0):
         raise ValueError("Worker result khác attempt/exit status")
+    preview_verified_at = datetime.now(UTC) if receipt.error is None else None
     # Trước khi job chuyển sang chờ xác nhận tỉ lệ: khi người dùng mở bước đó thì đề xuất đã có (hoặc
     # chắc chắn không có), UI không phải đoán "đang tính" hay "không bật".
     _propose_metric(attempt, receipt.preview_ref)
-    job = attempt.registry.record_preview(attempt.job, receipt)
+    job = attempt.registry.record_preview(attempt.job, receipt, verified_at=preview_verified_at)
     _record_benchmark(attempt)
     if receipt.error is None:
         _cleanup_attempt_workspace(attempt)
@@ -603,7 +609,11 @@ def _execute_prepare(attempt: _Attempt, profile: ResolvedProcessing) -> JobManif
     receipt = PreparedInputReceipt.model_validate(payload["result"])
     if (receipt.error is None) != (exit_code == 0):
         raise ValueError("Prepare result khác exit status")
-    return attempt.registry.record_prepared_input(attempt.job, receipt)
+    job = attempt.registry.record_prepared_input(attempt.job, receipt)
+    attempt.job = job
+    if job.status == JobStatus.FAILED:
+        _record_benchmark(attempt)
+    return job
 
 
 def _execute_lidar_ingest(attempt: _Attempt) -> JobManifest:
@@ -828,6 +838,7 @@ def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> Jo
             if result.error is None:
                 extra = _extract_scene_stage(attempt, workspace, result.bundle_ref)
             completed = registry.record_finalize(attempt.job, result, reference, extra)
+            _record_benchmark(attempt)
             # Scene consumer đã chạy xong trước durable commit; lỗi extraction vẫn giữ scratch để debug.
             if result.error is None and extra:
                 _cleanup_attempt_workspace(attempt)

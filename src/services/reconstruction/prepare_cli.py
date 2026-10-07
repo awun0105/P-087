@@ -85,24 +85,27 @@ class VideoInputPreparer:
         manifest = self._manifest(request)
         stages: list[StageArtifact] = []
         publisher = RGBPreflightPublisher(self.deps.writer)
+        input_started_at = datetime.now(UTC)
         try:
             video = self._video(manifest, request.quality_profile)
             quality = self.deps.validator.validate_video(video)
             quality_ref = publisher.publish_quality(quality, request.job_id)
-            stages.append(_succeeded(StageId.INPUT_VALIDATE, quality_ref))
+            stages.append(_succeeded(StageId.INPUT_VALIDATE, quality_ref, input_started_at))
         except RGBValidationError as error:
-            return self._failed(request, manifest, stages, error.to_execution_error())
+            return self._failed(request, manifest, stages, error.to_execution_error(), input_started_at)
         gate = SelfAttestedPrivacyGate()
+        privacy_started_at = datetime.now(UTC)
         try:
             proof = gate.issue(manifest, len(quality.selected_frame_ids))
             privacy_ref = publisher.publish_privacy(proof.report, request.job_id)
-            stages.append(_succeeded(StageId.PRIVACY_GATE, privacy_ref))
+            stages.append(_succeeded(StageId.PRIVACY_GATE, privacy_ref, privacy_started_at))
         except RGBValidationError as error:
             failure = error.to_execution_error().model_copy(update={"stage_id": StageId.PRIVACY_GATE})
-            return self._failed(request, manifest, stages, failure)
+            return self._failed(request, manifest, stages, failure, privacy_started_at)
         extractor = RGBFrameExtractor(
             FrameExtractionDependencies(self.deps.writer, self.deps.resolve_uri, gate, self.deps.decoder)
         )
+        frame_started_at = datetime.now(UTC)
         try:
             # PTS thật của video → thời lượng; lỗi PTS là lỗi của stage tách frame.
             timestamps = [float(value) for value in self.deps.decoder.timestamps(video.path)]
@@ -113,9 +116,9 @@ class VideoInputPreparer:
                 FrameExtractionRequest(manifest, quality, proof, extraction_config(stride), request.job_id)
             )
         except FrameExtractionError as error:
-            stages.append(error.to_failed_stage())
+            stages.append(error.to_failed_stage().model_copy(update={"started_at": frame_started_at}))
             return self._failed(request, manifest, stages, error.to_execution_error())
-        stages.append(extracted.stage)
+        stages.append(extracted.stage.model_copy(update={"started_at": frame_started_at}))
         return PrepareInputResult(
             job_id=request.job_id,
             input_manifest_checksum=manifest.input_manifest_checksum,
@@ -158,12 +161,14 @@ class VideoInputPreparer:
         manifest: InputManifest,
         stages: list[StageArtifact],
         error: ExecutionError,
+        stage_started_at: datetime | None = None,
     ) -> PrepareInputResult:
         if not any(stage.stage_id == error.stage_id and stage.status == "FAILED" for stage in stages):
             stages.append(
                 StageArtifact(
                     stage_id=error.stage_id,
                     status=StageStatus.FAILED,
+                    started_at=stage_started_at,
                     completed_at=datetime.now(UTC),
                     error=error,
                 )
@@ -177,7 +182,7 @@ class VideoInputPreparer:
         )
 
 
-def _succeeded(stage_id: StageId, reference: ProductArtifactRef) -> StageArtifact:
+def _succeeded(stage_id: StageId, reference: ProductArtifactRef, started_at: datetime) -> StageArtifact:
     return StageArtifact(
         stage_id=stage_id,
         status=StageStatus.SUCCEEDED,
@@ -185,6 +190,7 @@ def _succeeded(stage_id: StageId, reference: ProductArtifactRef) -> StageArtifac
         artifact_uri=reference.artifact_uri,
         artifact_checksum=reference.artifact_checksum,
         data_class=ArtifactDataClass.DERIVED,
+        started_at=started_at,
         completed_at=datetime.now(UTC),
     )
 

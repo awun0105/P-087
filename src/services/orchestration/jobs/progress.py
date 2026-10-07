@@ -146,8 +146,19 @@ def job_progress(
     stage_starts: dict[StageId, datetime] = {}
     for event in events:
         if event.status == JobStatus.RUNNING:
-            stage_starts.setdefault(event.current_stage, event.recorded_at)
+            if event.stage_started_at is not None:
+                stage_starts[event.current_stage] = event.stage_started_at
+            else:
+                stage_starts.setdefault(event.current_stage, event.recorded_at)
     failure = next((event.error for event in reversed(events) if event.error is not None), None)
+    terminal_at = next(
+        (
+            event.recorded_at
+            for event in reversed(events)
+            if event.status in {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED}
+        ),
+        job.completed_at,
+    )
     if failure is not None and failure.retryable and not is_execution_error_retryable(failure):
         # Project old broad retry flags through today's policy so the UI agrees with POST /retry.
         failure = failure.model_copy(update={"retryable": False})
@@ -192,11 +203,13 @@ def job_progress(
                 state = "waiting"
             elif resources is not None and state == "running":
                 state = "pending"
+        if stage_id == job.current_stage and state in {"failed", "cancelled"} and completed_at is None:
+            completed_at = terminal_at
         stages.append(
             StageProgress(
                 stage_id=stage_id,
                 state=state,
-                started_at=stage_starts.get(stage_id),
+                started_at=(record.started_at if record is not None else None) or stage_starts.get(stage_id),
                 completed_at=completed_at,
                 error=error,
             )

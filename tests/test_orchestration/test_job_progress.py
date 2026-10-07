@@ -6,7 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 
+import src.services.orchestration.projects.registry as registry_module
+from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.manifests import ExecutionError, JobStatus, StageArtifact, StageId
+from src.models.contracts.preview import PreviewWorkerReceipt
+from src.services.orchestration.artifacts import FilesystemArtifactStore, sha256_bytes
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.models import JobAttemptRecord, TransitionRequest
 from src.services.orchestration.jobs.profile import ExecutionProfile
@@ -33,9 +37,22 @@ def _registry(root: Path) -> ProjectRegistry:
     return registry
 
 
-def _event(attempt: int, status: JobStatus, stage: StageId, minutes: int, error: ExecutionError | None = None):  # noqa: ANN202
+def _event(
+    attempt: int,
+    status: JobStatus,
+    stage: StageId,
+    minutes: int,
+    error: ExecutionError | None = None,
+    *,
+    stage_started_at: datetime | None = None,
+):  # noqa: ANN202
     return JobAttemptRecord(
-        attempt=attempt, status=status, current_stage=stage, recorded_at=_T0 + timedelta(minutes=minutes), error=error
+        attempt=attempt,
+        status=status,
+        current_stage=stage,
+        recorded_at=_T0 + timedelta(minutes=minutes),
+        error=error,
+        stage_started_at=stage_started_at,
     )
 
 
@@ -67,15 +84,50 @@ def test_running_job_marks_done_running_and_pending_stages(tmp_path: Path) -> No
     attempts = [
         _event(1, JobStatus.QUEUED, StageId.INPUT_VALIDATE, 0),
         _event(1, JobStatus.RUNNING, StageId.INPUT_VALIDATE, 1),
-        _event(1, JobStatus.RUNNING, StageId.CAMERA_POSE, 3),
+        _event(
+            1,
+            JobStatus.RUNNING,
+            StageId.CAMERA_POSE,
+            3,
+            stage_started_at=_T0 + timedelta(minutes=2, seconds=30),
+        ),
     ]
     progress = job_progress(job, attempts, preview_ready=False)
     assert [stage.state for stage in progress.stages] == [
         "succeeded", "succeeded", "succeeded", "running", "pending", "pending", "pending", "pending"
     ]  # fmt: skip
     camera = progress.stages[3]
-    assert camera.started_at == _T0 + timedelta(minutes=3) and camera.completed_at is None
+    assert camera.started_at == _T0 + timedelta(minutes=2, seconds=30) and camera.completed_at is None
     assert progress.updated_at == _T0 + timedelta(minutes=3) and progress.error is None
+
+
+def test_completed_stage_prefers_worker_artifact_start_over_claim_time(tmp_path: Path) -> None:
+    job = _job(
+        tmp_path,
+        status=JobStatus.RUNNING,
+        current_stage=StageId.CAMERA_POSE,
+        stage_artifacts=[
+            StageArtifact(
+                stage_id=StageId.INPUT_VALIDATE,
+                status="SUCCEEDED",
+                artifact_type="InputValidation",
+                artifact_uri="artifact://jobs/job-p/input/validation.json",
+                artifact_checksum="sha256:" + "a" * 64,
+                data_class="derived",
+                started_at=_T0 + timedelta(seconds=10),
+                completed_at=_T0 + timedelta(seconds=30),
+            )
+        ],
+    )
+    attempts = [
+        _event(1, JobStatus.QUEUED, StageId.INPUT_VALIDATE, 0),
+        _event(1, JobStatus.RUNNING, StageId.INPUT_VALIDATE, 0),
+        _event(1, JobStatus.RUNNING, StageId.CAMERA_POSE, 1),
+    ]
+
+    progress = job_progress(job, attempts, preview_ready=False)
+
+    assert progress.stages[0].started_at == _T0 + timedelta(seconds=10)
 
 
 def test_failed_stage_carries_error_and_retry_resets_to_new_attempt(tmp_path: Path) -> None:
@@ -139,7 +191,8 @@ def test_stage_progress_reader_advances_job_and_waits_for_complete_line(tmp_path
     progress_file = tmp_path / "preview.progress.jsonl"
     reader = _StageProgress(attempt, progress_file)
     reader.poll()  # Chưa có file: không làm gì.
-    started = StageArtifact(stage_id=StageId.VISUAL_RECON, status="RUNNING", started_at=_T0)
+    started_at = datetime.now(UTC)
+    started = StageArtifact(stage_id=StageId.VISUAL_RECON, status="RUNNING", started_at=started_at)
     line = started.model_dump_json()
     progress_file.write_text(line[:10])
     reader.poll()
@@ -148,10 +201,76 @@ def test_stage_progress_reader_advances_job_and_waits_for_complete_line(tmp_path
     reader.poll()
     assert attempt.job.current_stage == StageId.VISUAL_RECON
     assert registry.get_job(job.job_id) == attempt.job
+    visual_start = registry.list_job_attempts(job.job_id)[-1]
+    assert visual_start.stage_started_at == started_at
+    assert visual_start.recorded_at >= started_at
     # Cancel song song: revision mới → reducer từ chối, không ghi đè.
     registry.transition_job(job.job_id, TransitionRequest(target_status=JobStatus.CANCELLED))
     with pytest.raises(RuntimeStateConflictError):
         registry.record_stage_progress(attempt.job, StageId.CAMERA_POSE)
+
+
+def test_stage_progress_records_precise_start_when_stage_was_already_claimed(tmp_path: Path) -> None:
+    registry = _registry(tmp_path)
+    job = registry.create_job(JobCreateInput(project_id="project-fixture-001"))
+    running = registry.transition_job(
+        job.job_id, TransitionRequest(target_status=JobStatus.RUNNING, current_stage=StageId.CAMERA_POSE)
+    )
+    started_at = datetime.now(UTC)
+
+    updated = registry.record_stage_progress(running, StageId.CAMERA_POSE, started_at=started_at)
+
+    event = registry.list_job_attempts(job.job_id)[-1]
+    assert updated.current_stage == StageId.CAMERA_POSE
+    assert event.stage_started_at == started_at
+    assert event.recorded_at >= started_at
+
+
+def test_preview_commit_persists_consumer_verified_timestamp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = _registry(tmp_path)
+    queued = registry.create_job(JobCreateInput(project_id="project-fixture-001"))
+    running = registry.transition_job(
+        queued.job_id, TransitionRequest(target_status=JobStatus.RUNNING, current_stage=StageId.VISUAL_RECON)
+    )
+    store = FilesystemArtifactStore(registry.runtime_resolver)
+
+    def publish(name: str, artifact_type: str) -> ProductArtifactRef:
+        payload = name.encode()
+        reference = ProductArtifactRef(
+            artifact_type=artifact_type,
+            schema_version="1.0",
+            artifact_uri=f"artifact://jobs/{queued.job_id}/attempts/preview-1/{name}.json",
+            artifact_checksum=sha256_bytes(payload),
+            data_class=ArtifactDataClass.DERIVED,
+            producer_stage=StageId.VISUAL_RECON,
+            job_id=queued.job_id,
+        )
+        store.publish(reference, payload)
+        return reference
+
+    result_ref = publish("result", "PreparedPreviewResult")
+    preview_ref = publish("preview", "ReconstructionPreview")
+    receipt = PreviewWorkerReceipt(
+        job_id=queued.job_id,
+        attempt_id="preview-1",
+        source_input_checksum=running.input_manifest_checksum,
+        result_ref=result_ref,
+        stage_artifacts=[],
+        preview_ref=preview_ref,
+    )
+    monkeypatch.setattr(registry_module, "load_job_preview", lambda *_: None)
+    verified_at = datetime.now(UTC)
+
+    registry.record_preview(running, receipt, verified_at=verified_at)
+
+    event = registry.list_job_attempts(queued.job_id)[-1]
+    visual = next(
+        stage
+        for stage in registry.get_job(queued.job_id).stage_artifacts
+        if stage.artifact_type == "ReconstructionPreview"
+    )
+    assert event.preview_verified_at == verified_at
+    assert visual.completed_at == verified_at
 
 
 def test_stage_left_behind_in_journal_counts_as_done_before_receipt(tmp_path: Path) -> None:
