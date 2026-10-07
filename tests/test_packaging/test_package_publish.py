@@ -328,6 +328,72 @@ def test_validation_history_is_verified_and_imported_with_its_job(tmp_path: Path
         ]
 
 
+def test_completed_worker_validation_cannot_cross_package_without_authenticated_receipt(tmp_path: Path) -> None:
+    """A checksummed uploaded DB row alone cannot turn user-controlled bytes into worker proof."""
+    archive_path, _ = _make_package(tmp_path)
+    staging = tmp_path / "untrusted-worker-validation"
+    extract_package(archive_path, staging)
+    job_id = "job-a"
+
+    def reference(artifact_type: str, tail: str) -> ProductArtifactRef:
+        return ProductArtifactRef(
+            artifact_type=artifact_type,
+            schema_version="1.0",
+            artifact_uri=f"artifact://jobs/{job_id}/validation/untrusted/{tail}",
+            artifact_checksum="sha256:" + "a" * 64,
+            data_class="derived",
+            producer_stage="ST-ISAAC-VALIDATE",
+            job_id=job_id,
+        )
+
+    requested_at = datetime(2026, 10, 8, tzinfo=UTC)
+    draft = ValidationRunRecord(
+        schema_version="1.0",
+        run_id="run-forged-completed",
+        attempt=1,
+        job_id=job_id,
+        scene_revision="rev-001",
+        scene_ir_checksum="sha256:" + "1" * 64,
+        candidate_checksum="sha256:" + "2" * 64,
+        validation_config_checksum="sha256:" + "3" * 64,
+        validation_config_ref=reference("ValidationConfig", "config.json"),
+        origin=ValidationRunOrigin.WORKER,
+        status=ValidationRunStatus.COMPLETED,
+        requested_at=requested_at,
+        started_at=requested_at + timedelta(seconds=1),
+        completed_at=requested_at + timedelta(seconds=2),
+        worker_id="untrusted-package",
+        lease_id="forged-lease",
+        fencing_token=1,
+        runtime_manifest_ref=reference("RuntimeManifest", "runtime.json"),
+        report_ref=reference("ValidationReport", "report.json"),
+        report_checksum="sha256:" + "4" * 64,
+        execution_log_ref=reference("ValidationExecutionLog", "execution.log"),
+        run_checksum="sha256:" + "0" * 64,
+    )
+    run = draft.model_copy(update={"run_checksum": canonical_content_checksum(draft, "run_checksum")})
+    database_path = staging / "data/studio_local/runtime.db"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """INSERT INTO r2s_validation_runs
+               (run_id,job_id,candidate_checksum,config_checksum,attempt,status,run_checksum,payload)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                run.run_id,
+                run.job_id,
+                run.candidate_checksum,
+                run.validation_config_checksum,
+                run.attempt,
+                run.status.value,
+                run.run_checksum,
+                run.model_dump_json(),
+            ),
+        )
+
+    with pytest.raises(PackagePublishError, match="authenticated receipt"):
+        validate_staged_package(staging)
+
+
 def test_publisher_preserves_explicit_seed_accounts_without_sessions(tmp_path: Path) -> None:
     """The authorized two-account mode keeps login material while sessions stay empty."""
     archive_path, _ = _make_package(tmp_path, keep_seed_accounts=True)

@@ -171,19 +171,28 @@ class ValidationRunRepository:
 
         identity = (job_id, candidate_checksum, config_checksum)
         with self.database.transaction(write=True) as tx:
-            row = tx.execute(
+            # Production jobs persist in r2s_jobs. Lock the stable parent row so
+            # concurrent first selections with different policies cannot both win.
+            tx.execute("SELECT job_id FROM r2s_jobs WHERE job_id=?" + tx.lock_suffix(), (job_id,)).fetchone()
+            rows = tx.execute(
                 """SELECT job_id,candidate_checksum,config_checksum,run_id,report_checksum,generation,
                           selection_checksum,payload FROM r2s_validation_selections
-                   WHERE job_id=? AND candidate_checksum=? AND config_checksum=?"""
+                   WHERE job_id=? AND candidate_checksum=?"""
                 + tx.lock_suffix(),
-                identity,
-            ).fetchone()
-            current = self._parse_selection_row(row) if row is not None else None
+                (job_id, candidate_checksum),
+            ).fetchall()
+            if len(rows) > 1:
+                raise RuntimeStateConflictError("Có nhiều validation selection cho cùng một candidate")
+            current = self._parse_selection_row(rows[0]) if rows else None
             if current is None:
                 if expected_selected_run_id is not None:
                     raise RuntimeStateConflictError("Validation selection đã bị xóa hoặc thay đổi")
                 generation = 1
-            elif current.run_id == run_id and current.report_checksum == record.report_checksum:
+            elif (
+                current.validation_config_checksum == config_checksum
+                and current.run_id == run_id
+                and current.report_checksum == record.report_checksum
+            ):
                 return current
             else:
                 if expected_selected_run_id != current.run_id:
@@ -205,14 +214,7 @@ class ValidationRunRepository:
                 update={"selection_checksum": canonical_content_checksum(selection, "selection_checksum")}
             )
             payload = selection.model_dump_json()
-            if current is None:
-                changed = tx.execute(
-                    """INSERT INTO r2s_validation_selections
-                       (job_id,candidate_checksum,config_checksum,run_id,report_checksum,generation,selection_checksum,payload)
-                       VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING""",
-                    (*identity, run_id, record.report_checksum, generation, selection.selection_checksum, payload),
-                ).rowcount
-            else:
+            if current is not None and current.validation_config_checksum == config_checksum:
                 changed = tx.execute(
                     """UPDATE r2s_validation_selections SET run_id=?,report_checksum=?,generation=?,
                        selection_checksum=?,payload=? WHERE job_id=? AND candidate_checksum=? AND config_checksum=?
@@ -227,6 +229,29 @@ class ValidationRunRepository:
                         current.run_id,
                         current.generation,
                     ),
+                ).rowcount
+            else:
+                if current is not None:
+                    changed = tx.execute(
+                        """DELETE FROM r2s_validation_selections
+                           WHERE job_id=? AND candidate_checksum=? AND config_checksum=? AND run_id=?
+                           AND generation=? AND selection_checksum=?""",
+                        (
+                            current.job_id,
+                            current.candidate_checksum,
+                            current.validation_config_checksum,
+                            current.run_id,
+                            current.generation,
+                            current.selection_checksum,
+                        ),
+                    ).rowcount
+                    if changed != 1:
+                        raise RuntimeStateConflictError("Validation selection CAS thất bại")
+                changed = tx.execute(
+                    """INSERT INTO r2s_validation_selections
+                       (job_id,candidate_checksum,config_checksum,run_id,report_checksum,generation,selection_checksum,payload)
+                       VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING""",
+                    (*identity, run_id, record.report_checksum, generation, selection.selection_checksum, payload),
                 ).rowcount
             if changed != 1:
                 raise RuntimeStateConflictError("Validation selection CAS thất bại")
@@ -262,6 +287,22 @@ class ValidationRunRepository:
         ):
             raise ValidationRunError("Validation selection không trỏ tới completed worker report chính xác")
         return selection
+
+    def get_selection_for_candidate(self, job_id: str, candidate_checksum: str) -> ValidationRunSelection | None:
+        """Return the one active policy/run selection for a candidate, failing on ambiguity."""
+        with self.database.transaction() as tx:
+            rows = tx.execute(
+                """SELECT job_id,candidate_checksum,config_checksum,run_id,report_checksum,generation,
+                          selection_checksum,payload FROM r2s_validation_selections
+                   WHERE job_id=? AND candidate_checksum=?""",
+                (job_id, candidate_checksum),
+            ).fetchall()
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise ValidationRunError("Có nhiều validation selection cho cùng một candidate")
+        selection = self._parse_selection_row(rows[0])
+        return self.get_selection(job_id, candidate_checksum, selection.validation_config_checksum)
 
     def _verify_references(self, record: ValidationRunRecord) -> None:
         self._require_ref(

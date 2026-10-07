@@ -33,11 +33,11 @@ from src.models.contracts.release import (
     SceneRevisionRecord,
     SceneRevisionStatus,
 )
-from src.models.contracts.validation import RuleResult, ValidationReport
+from src.models.contracts.validation import ValidationReport
 from src.services.orchestration.artifacts import ArtifactAlreadyExistsError
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.orchestration.review.lifecycle import has_isaac_runtime_proof
 from src.services.orchestration.review.simulation_package import SimulationPackage, current_package
+from src.services.orchestration.review.validation_gate import evaluate_validation_eligibility
 
 SCHEMA_VERSION = "1.0"
 ZERO = "sha256:" + "0" * 64
@@ -60,7 +60,7 @@ class ReviewState(BaseModel):
     record: SceneRevisionRecord
     package: SimulationPackage | None = None
     validation: ValidationReport | None = None
-    #: Báo cáo có bằng chứng chạy Isaac thật không (`has_isaac_runtime_proof`); None khi chưa có báo cáo.
+    #: Chỉ True khi run worker, runtime manifest và report đã được xác minh cùng selection.
     isaac_runtime_proof: bool | None = None
     warning_ids: list[str] = []
     approval: ApprovalRecord | None = None
@@ -133,25 +133,58 @@ def review_state(registry: ProjectRegistry, job_id: str) -> ReviewState:
     candidate = package.candidate.candidate_checksum
     record = record.model_copy(update={"status": SceneRevisionStatus.CANDIDATE_READY, "candidate_checksum": candidate})
     state = ReviewState(job_id=job_id, record=record, package=package)
+
+    # Legacy report chỉ giữ để xem lại. Nó không cấp eligibility kể cả khi checksum hợp lệ
+    # hoặc environment_versions khai một phiên bản Isaac có vẻ thật.
     raw = _read(registry, validation_uri(job_id, candidate))
-    if raw is None:
-        state.blockers = ["Chưa có báo cáo validation Isaac cho gói này (SIM-06 cần máy RTX)"]
+    if raw is not None:
+        try:
+            legacy = ValidationReport.model_validate_json(raw)
+            verify_content_checksum(legacy, "report_checksum")
+            if legacy.candidate_checksum == candidate:
+                state.validation = legacy
+                state.record = state.record.model_copy(update={"validation_report_checksum": legacy.report_checksum})
+                state.isaac_runtime_proof = False
+        except (ValueError, OSError):
+            state.blockers = ["Legacy validation report không hợp lệ; không được dùng làm bằng chứng"]
+            return state
+
+    eligibility = evaluate_validation_eligibility(
+        registry,
+        job_id,
+        scene,
+        package.candidate,
+        package_scene_revision=package.scene_revision,
+        package_scene_ir_checksum=package.scene_ir_checksum,
+    )
+    if not eligibility.eligible:
+        if eligibility.report is not None or state.validation is not None:
+            state.isaac_runtime_proof = False
+        state.blockers = eligibility.blockers or ["Validation chưa đạt policy hiện tại"]
         return state
-    report = ValidationReport.model_validate_json(raw)
+    report = eligibility.report
+    assert report is not None
     state.validation = report
-    state.isaac_runtime_proof = has_isaac_runtime_proof(report)
-    state.warning_ids = [check.check_id for check in report.checks if check.result != RuleResult.PASS]
-    state.record = state.record.model_copy(update={"validation_report_checksum": report.report_checksum})
-    if report.overall_result != RuleResult.PASS:
-        # Validation chưa đạt: phải sửa scene (revision mới) rồi chạy lại.
-        state.record = state.record.model_copy(update={"status": SceneRevisionStatus.DRAFT})
-        state.blockers = [f"Validation {report.overall_result.value}: sửa scene rồi tạo gói và chạy lại"]
-        return state
-    state.record = state.record.model_copy(update={"status": SceneRevisionStatus.READY_FOR_REVIEW})
+    state.isaac_runtime_proof = True
+    state.warning_ids = eligibility.warning_ids
+    state.record = state.record.model_copy(
+        update={"validation_report_checksum": report.report_checksum, "status": SceneRevisionStatus.READY_FOR_REVIEW}
+    )
     raw = _read(registry, approval_uri(job_id, candidate))
     if raw is None:
         return state
-    approval = ApprovalRecord.model_validate_json(raw)
+    try:
+        approval = ApprovalRecord.model_validate_json(raw)
+        verify_content_checksum(approval, "record_checksum")
+    except (ValueError, OSError):
+        state.blockers = ["Approval record không hợp lệ"]
+        return state
+    if approval.candidate_checksum != candidate or approval.validation_report_checksum != report.report_checksum:
+        state.blockers = ["Approval record không khớp candidate/report validation hiện tại"]
+        return state
+    if approval.decision == ApprovalDecision.APPROVE and approval.accepted_warning_ids != sorted(state.warning_ids):
+        state.blockers = ["Approval record không chấp nhận đúng từng validation warning hiện tại"]
+        return state
     state.approval = approval
     decided = (
         SceneRevisionStatus.APPROVED if approval.decision == ApprovalDecision.APPROVE else SceneRevisionStatus.REJECTED
@@ -161,8 +194,25 @@ def review_state(registry: ProjectRegistry, job_id: str) -> ReviewState:
     )
     raw = _read(registry, release_uri(job_id, candidate))
     if raw is not None:
-        state.release = ReleaseManifest.model_validate_json(raw)
-        state.release_archive = _release_archive_ref(registry, job_id, state.release)
+        try:
+            release = ReleaseManifest.model_validate_json(raw)
+            verify_content_checksum(release, "release_manifest_checksum")
+        except (ValueError, OSError):
+            state.blockers = ["Release manifest không hợp lệ"]
+            return state
+        if (
+            release.candidate_checksum != candidate
+            or release.validation_report_checksum != report.report_checksum
+            or release.approval_record.record_checksum != approval.record_checksum
+        ):
+            state.blockers = ["Release manifest không khớp candidate/report/approval hiện tại"]
+            return state
+        archive_ref = _release_archive_ref(registry, job_id, release)
+        if archive_ref is None:
+            state.blockers = ["Release archive chưa có hoặc không thể xác minh"]
+            return state
+        state.release = release
+        state.release_archive = archive_ref
         state.record = state.record.model_copy(update={"status": SceneRevisionStatus.RELEASED})
     return state
 

@@ -221,6 +221,15 @@ def test_config_checksum_and_ids_are_stable_and_unique(tmp_path) -> None:
             path_pairs=[],
             config_checksum=ZERO,
         )
+    with pytest.raises(ValidationError):
+        ValidationConfig(
+            schema_version="1.0",
+            policy_id="empty-required-policy",
+            required_check_ids=[],
+            warning_check_ids=[],
+            path_pairs=[],
+            config_checksum=ZERO,
+        )
     assert repository.config_uri("job-a", config.config_checksum).endswith("validation_config.json")
 
 
@@ -250,6 +259,36 @@ def test_two_attempts_have_immutable_report_uris_and_selection_uses_exact_run(tm
     assert repository.get_selection("job-a", first.candidate_checksum, config.config_checksum) == updated
     with pytest.raises(RuntimeStateConflictError, match="đã thay đổi"):
         repository.select_run("job-a", first.candidate_checksum, config.config_checksum, first.run_id)
+
+
+def test_new_policy_replaces_the_single_active_candidate_selection_with_cas(tmp_path) -> None:
+    repository, _, store, config, config_ref = _world(tmp_path)
+    first = _complete(repository, store, config, config_ref, run_id="policy-run-a", attempt=1)
+    repository.select_run("job-a", first.candidate_checksum, config.config_checksum, first.run_id)
+
+    alternate_draft = config.model_copy(
+        update={"policy_id": "test-public-validation-policy-v2", "config_checksum": ZERO}
+    )
+    alternate = _sealed(alternate_draft, "config_checksum")
+    alternate_ref = _publish_json(
+        store,
+        job_id="job-a",
+        artifact_type="ValidationConfig",
+        uri=repository.config_uri("job-a", alternate.config_checksum),
+        model=alternate,
+    )
+    second = _complete(repository, store, alternate, alternate_ref, run_id="policy-run-b", attempt=1)
+    selected = repository.select_run(
+        "job-a",
+        second.candidate_checksum,
+        alternate.config_checksum,
+        second.run_id,
+        expected_selected_run_id=first.run_id,
+    )
+
+    assert selected.generation == 2
+    assert repository.get_selection("job-a", first.candidate_checksum, config.config_checksum) is None
+    assert repository.get_selection_for_candidate("job-a", first.candidate_checksum) == selected
 
 
 def test_synthetic_fixture_can_be_persisted_but_never_selected(tmp_path) -> None:

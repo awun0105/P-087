@@ -8,8 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.services.orchestration.auth import UserRecord
-from src.services.orchestration.review.workflow import record_validation_report
-from tests.test_orchestration.test_review_workflow import _packaged, _report
+from src.services.orchestration.review.workflow import review_state
+from tests.test_orchestration.test_review_workflow import _install_worker_run, _packaged, _report
 
 
 def _user(role: str) -> UserRecord:
@@ -31,7 +31,7 @@ def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
 
     registry, job, candidate = _packaged(tmp_path)
     report = _report(candidate)
-    record_validation_report(registry, job.job_id, report)
+    _install_worker_run(registry, job, review_state(registry, job.job_id).package, report)
     audits: list[tuple] = []
     monkeypatch.setattr(deps, "get_project_registry", lambda: registry)
     service = SimpleNamespace(

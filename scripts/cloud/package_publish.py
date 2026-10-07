@@ -591,6 +591,10 @@ def _validate_validation_rows(rows: Mapping[str, Sequence[tuple[Any, ...]]], art
                 record.run_checksum,
             ):
                 raise PackagePublishError("validation run columns do not match their checksummed payload")
+            if record.origin == ValidationRunOrigin.WORKER and record.status == ValidationRunStatus.COMPLETED:
+                raise PackagePublishError(
+                    "completed worker validation cannot cross a package boundary without an authenticated receipt"
+                )
             if record.status in {ValidationRunStatus.QUEUED, ValidationRunStatus.RUNNING}:
                 raise PackagePublishError(f"validation run {record.run_id!r} is still active")
             config_uri = (

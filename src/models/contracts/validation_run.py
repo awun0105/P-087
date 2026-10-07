@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Self
 
-from pydantic import FiniteFloat, PositiveInt, model_validator
+from pydantic import Field, FiniteFloat, PositiveInt, model_validator
 
 from src.models.contracts.artifacts import Checksum, ContractModel, Identifier, ProductArtifactRef, SchemaVersion
 
@@ -44,7 +44,7 @@ class ValidationConfig(ContractModel):
 
     schema_version: SchemaVersion
     policy_id: Identifier
-    required_check_ids: list[Identifier]
+    required_check_ids: list[Identifier] = Field(min_length=1)
     warning_check_ids: list[Identifier]
     path_pairs: list[ValidationPathPair]
     config_checksum: Checksum

@@ -32,16 +32,23 @@ execution_log_ref sau completion. Record do trusted worker/backend commit;
 report body hoặc client claim không tự tạo trusted status.
 
 Config có version, required_check_ids, warning_check_ids và public path pairs
-với pair_id/required. S1 khóa concrete IDs/schema cùng SIM producer. Normative
+với pair_id/required. ID catalog giữ theo public profile; AUD-05 chốt catalog
+production cùng validator. Normative
 ValidationReport vẫn dùng checks/path_results và content checksum hiện có.
 Không yêu cầu 5 paths cho mọi ORDINARY run; configured pairs có thể rỗng khi
-profile công khai cho phép. Required path BLOCKED/ERROR block; optional BLOCKED
-chỉ là observed result. Missing/duplicate/unknown checks/pairs phải được policy
-xử lý xác định; không tự ignore malformed IDs.
+profile công khai cho phép, nhưng phải có ít nhất một required check. Tất cả
+required checks phải xuất hiện đúng một lần và PASS; duplicate/unknown check
+hoặc pair block. Required path phải có kết quả; required BLOCKED, mọi ERROR và
+overall FAIL/ERROR block. Optional BLOCKED là warning có thể được chấp nhận từng
+pair; acknowledgment không thể vượt qua FAIL/ERROR check. Optional path chưa trả
+kết quả không tự block.
 
 Report refs theo run_id để retry cùng candidate không overwrite first report.
-Selection record trỏ một completed trusted run/report; legacy report chỉ đọc
-được nhưng thiếu proof thì không eligible. Capture issue không sửa physics result.
+Selection record trỏ đúng một completed worker run/report/config cho candidate;
+đổi policy thay active selection bằng CAS nhưng giữ attempt history. Legacy report
+chỉ đọc được nhưng thiếu proof thì không eligible. Package import từ nguồn ngoài
+không được nâng completed worker row thành trusted proof khi chưa có authenticated
+receipt (AUD-05). Capture issue không sửa physics result.
 
 ## Logic change và dependent updates
 
@@ -54,9 +61,10 @@ Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption
 
 ## Dependencies
 
-S1/S2 có thể dùng persisted trusted-run fixture với nhãn synthetic rõ ràng;
-không cần Isaac worker để kiểm gate. Real run producer là AUD-05. Seal atomicity
-ở AUD-04, nhưng seal entrypoint phải dùng cùng gate ngay khi AUD-03 hoàn thành.
+S2 dùng persisted worker-shaped fixture để kiểm positive gate, nhưng fixture
+không phải acceptance Isaac. Synthetic-origin run không thể được chọn. Real run
+producer/authentication là AUD-05. Seal atomicity ở AUD-04, nhưng seal entrypoint
+phải dùng cùng gate ngay khi AUD-03 hoàn thành.
 
 ## Sprint AUD-03.S1 — Chốt execution proof/config contract
 
@@ -90,8 +98,9 @@ itemized; không biến all optional warnings thành unconditional blockers.
 Tests: UNVERIFIED fixture; forged version; no run; wrong candidate; missing
 required check; optional BLOCKED vs required BLOCKED; ERROR; configured zero
 pairs; media capture warning; stale revision after validation.
-**Exit:** [ ] original repro blocked; [ ] valid trusted exact candidate can approve;
-[ ] direct seal cannot skip gate.
+**Exit:** [x] original repro blocked; [x] valid exact candidate/config worker-shaped
+record can approve; [x] direct seal cannot skip gate. S3 still owns API/UI projection
+and stale-command regression.
 
 ## Sprint AUD-03.S3 — API/UI projections và release regression
 
@@ -160,3 +169,39 @@ record/result phải nói fixture proof, chưa thay cho real-runtime acceptance.
 - Next: AUD-03.S2 must route review/approve/seal through one eligibility gate,
   validate policy completeness and exact current revision, and block synthetic
   or legacy reports from ORDINARY release.
+
+### AUD-03.S2 — one shared eligibility gate
+
+- CodeGraph traced `review_state → evaluate_validation_eligibility →
+  get_selection_for_candidate`; both `decide` and `seal_release` re-enter
+  `review_state`, so they consume the same backend gate.
+- Added one active CAS selection per job/candidate, including policy switches;
+  policy changes replace the active pointer and preserve immutable run attempts.
+  Eligibility binds the current scene revision/checksum, candidate, config,
+  selected run/report, byte/logical checksums, worker origin, and structured
+  `isaac_sim=VERIFIED` runtime component.
+- Required checks and required path pairs must be complete. Duplicate/unknown
+  checks or pairs, any check FAIL/ERROR, any path ERROR, required BLOCKED, or
+  report overall FAIL/ERROR block review. Optional BLOCKED paths become
+  itemized warnings; zero configured paths remains valid when required checks
+  pass. Legacy reports stay visible for diagnostics but never enable approval.
+- Direct release sealing now rechecks the same gate; persisted approval/release
+  checksums and candidate/report identities are validated before showing a
+  released state. Package publication rejects completed WORKER-origin rows until
+  AUD-05 supplies an authenticated receipt, while failed run history remains
+  transferable.
+- Related consumers updated together: workflow service, reviewer API tests,
+  repository selection CAS, cloud package publisher, contracts, and regression
+  tests. No frontend shape changed in S2; API/UI messaging is S3.
+- Verification: combined contracts/run/migration/review/API/package regression
+  reports 81 passed, 4 skipped. Skips are the optional PostgreSQL migration
+  cases; SQLite migrations were exercised. `ruff check src/ tests/` passed and
+  `ruff format --check src/ tests/` reports 463 files formatted. CodeGraph synced
+  and reports
+  747 files, 13,330 nodes, 37,732 edges, up to date.
+- Limits: test evidence uses a worker-shaped fixture, not a real Isaac run.
+  Repository rows are not authenticated worker output until AUD-05; package
+  imports therefore cannot carry completed worker proof. Seal idempotency and
+  atomic crash recovery remain AUD-04. Browser review remains AUD-03.S3.
+- Next: AUD-03.S3 projects blockers and proof state through the typed API/UI,
+  tests stale/direct requests and reviewer permissions, and performs browser QA.
