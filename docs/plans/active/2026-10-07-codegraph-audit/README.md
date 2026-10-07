@@ -9,9 +9,10 @@ Active — implementation đang diễn ra trên branch
 Đã commit: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3,
 AUD-03.S1–S3, AUD-04.S1–S3, AUD-10.S1–S3 và AUD-07.S1. AUD-07.S2 đã hoàn tất
 trong commit `5173750`; AUD-20.S1 trong `6fea33e`. AUD-21.S1 đã chốt ma trận quyền,
-identity owner và migration contract trong sprint commit hiện tại. Browser DevTools MCP gate của AUD-03.S3 vẫn
+identity owner và migration contract trong commit `31ffac2`. AUD-22.S1 calendar
+contract đã hoàn tất trong sprint này. Browser DevTools MCP gate của AUD-03.S3 vẫn
 UNVERIFIED; PostgreSQL proof của AUD-04.S3 chưa chạy vì thiếu
-`R2S_TEST_POSTGRES_URL`. Sprint kế tiếp theo dependency order là AUD-22.S1.
+`R2S_TEST_POSTGRES_URL`. Sprint kế tiếp sau AUD-22.S1 là AUD-20.S2.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -189,8 +190,9 @@ Thứ tự mặc định gồm đủ **80 active sprint, mỗi sprint một lầ
 | 10 — Input qualification và extensions | AUD-17.S1–S3 → AUD-24.S5 → AUD-18.S1–S3 | Estimated trajectory/input matrix R1–R6 và PLY/SOG view import; anonymizer opt-in có provenance/QA. |
 
 Execution order bắt đầu ở **AUD-11.S1**; các sprint AUD-11.S1–S2, AUD-15.S1,
-AUD-01–04, AUD-10.S1–S3, AUD-07.S1–S2, AUD-20.S1 và AUD-21.S1 đã hoàn tất.
-Sprint kế tiếp là AUD-22.S1 theo dependency order.
+AUD-01–04, AUD-10.S1–S3, AUD-07.S1–S2, AUD-20.S1, AUD-21.S1 và AUD-22.S1
+đã hoàn tất.
+Sprint kế tiếp là AUD-20.S2 theo dependency order.
 AUD-15.S1 được làm sớm để AUD-23.S5 có measurement protocol; optimization
 AUD-15.S2–S3 vẫn làm sau quality work.
 AUD-07.S3 làm sau AUD-06/AUD-05 để kiểm tra admission trên consumer thật;
@@ -352,7 +354,7 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [ ] Implementation AUD-19 và held-out independent-map/QA/browser acceptance.
 
 - [x] Implementation AUD-20.S1 identity/seed migration contract.
-- [ ] Remaining AUD-20.S2–S3, AUD-21.S2–S4, AUD-22.S1–S3 và three-role/quota/browser acceptance.
+- [ ] Remaining AUD-20.S2–S3, AUD-21.S2–S4, AUD-22.S2–S3 và three-role/quota/browser acceptance.
 
 - [ ] Implementation AUD-23 và client encode/upload/bandwidth/geometry acceptance.
 - [ ] Implementation AUD-24 và grouped upload/R1–R6 recipe/consumer/browser acceptance.
