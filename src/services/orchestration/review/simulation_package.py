@@ -5,8 +5,8 @@
 2. Vật: collider hộp từ kích thước primitive (SIM-02 qua `enrich_scene_physics`, SIM-03).
 3. Preflight tĩnh (SIM-04) trên đúng revision sẽ đóng gói; FAIL thì trả báo cáo, không tạo
    revision mới.
-4. PASS: publish revision SceneIR có physics, đóng gói CandidatePackage (SIM-05) và một file zip
-   tải về. Bản ghi gói khoá theo revision: sửa scene sau đó thì gói cũ không còn là gói hiện tại.
+4. Static Preflight PASS + export capability SUPPORTED: publish revision SceneIR có collider,
+   đóng gói CandidatePackage (SIM-05) và một file zip tải về. Bản ghi gói khoá theo revision.
 
 Scene theo vật (pipeline v2, ADR 0007 — có `environment.visual_master_ref`): entrypoint là **USD lai**
 do `usd/hybrid_runner.py` dựng trong runtime có usd-core: Gaussian (ParticleField) của nền + từng vật
@@ -43,12 +43,30 @@ from src.services.scene.collision_ownership import SourceCollisionOwnershipError
 from src.services.simulation.colliders.carve import CarveBox, carve_triangle_mask, triangle_mask_in_box
 from src.services.simulation.enrichment.service import enrich_scene_physics
 from src.services.simulation.preflight.engine import run_preflight
-from src.services.simulation.usd.builder import CandidateBuildRequest, build_candidate_package
+from src.services.simulation.usd.builder import (
+    CandidateBuildRequest,
+    _compute_config_checksum,
+    build_candidate_package,
+)
+from src.services.simulation.usd.capabilities import (
+    EffectiveExportMode,
+    ExportCapabilityReport,
+    ExportCapabilityStatus,
+    ExportRequirements,
+    RuntimeQualificationStatus,
+    assess_export_capabilities,
+    export_requirements,
+    select_export_mode,
+)
 from src.services.simulation.usd.usda import generate_mesh_layer_usda
 
 ENVIRONMENT_LAYER = "environment_collision.usda"
 BUILD_CONFIG = {
-    "builder": "real2sim-studio-simulation-package-v2-source-owned",
+    "builder": "real2sim-studio-simulation-package-v3-capability-gated",
+    "capability_contract": "usd-export-capabilities-v1",
+    "requested_mode": "auto",
+    "effective_mode": "legacy_box",
+    "runtime_usd_version": None,
     "environment": "rec05_collision_mesh_source_owned_triangle_mesh",
     "carve_margin_m": 0.05,
     "background_identity_algorithm": "source_geometry_checksum+removed_triangle_mask_v1",
@@ -56,7 +74,12 @@ BUILD_CONFIG = {
     "object_collider": "box_from_primitive_dimensions",
 }
 HYBRID_BUILD_CONFIG = {
-    "builder": "real2sim-studio-simulation-package-v3-hybrid-source-owned",
+    "builder": "real2sim-studio-simulation-package-v4-capability-gated-hybrid",
+    "capability_contract": "usd-export-capabilities-v1",
+    "requested_mode": "auto",
+    "effective_mode": "hybrid",
+    "runtime_probe": "hybrid-runner-probe-v1",
+    "runtime_usd_version": None,
     "environment": "inpainted_gaussians_particlefield+rec05_source_owned_collision_mesh",
     "carve_margin_m": 0.05,
     "background_identity_algorithm": "source_geometry_checksum+removed_triangle_mask_v1",
@@ -79,7 +102,7 @@ class CarvedBackground:
 
 
 class SimulationPackage(BaseModel):
-    """Kết quả tạo gói cho một revision SceneIR; `package_ref` chỉ có khi preflight PASS."""
+    """Kết quả build; `package_ref` chỉ có khi preflight và export capability đều đạt."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -92,6 +115,7 @@ class SimulationPackage(BaseModel):
     confirmed_objects: int
     environment_triangles: int
     carved_triangles: int
+    export_capability: ExportCapabilityReport | None = None
     candidate: CandidatePackage | None = None
     package_ref: ProductArtifactRef | None = None
 
@@ -123,9 +147,22 @@ def _publish(registry: ProjectRegistry, reference: ProductArtifactRef, payload: 
 
 def current_package(registry: ProjectRegistry, job_id: str) -> SimulationPackage | None:
     """Gói của revision SceneIR hiện tại, nếu đã tạo."""
-    revision = registry.scene.current(job_id).scene.scene_revision
-    path = registry.runtime_resolver.locate(record_uri(job_id, revision))
-    return SimulationPackage.model_validate_json(path.read_bytes()) if path is not None else None
+    scene = registry.scene.current(job_id).scene
+    path = registry.runtime_resolver.locate(record_uri(job_id, scene.scene_revision))
+    if path is None:
+        return None
+    package = SimulationPackage.model_validate_json(path.read_bytes())
+    capability = package.export_capability
+    background_identity = scene.provenance.get("collision_background_identity")
+    if capability is None or not isinstance(background_identity, str):
+        return None
+    mode = select_export_mode(export_requirements(scene))
+    build_config = _package_build_config(
+        mode,
+        background_identity,
+        capability.runtime_version if mode == EffectiveExportMode.HYBRID else None,
+    )
+    return package if _cache_matches(package, scene, build_config, export_requirements(scene)) else None
 
 
 def _source_region_removed(item: SceneObject) -> bool:
@@ -245,11 +282,11 @@ def _hybrid_layers(
     background: CarvedBackground,
     python: Path | None,
 ) -> dict[str, bytes] | None:
-    """Dựng USD lai cho scene theo vật; None nếu scene không phải v2 hoặc máy không có runtime usd-core.
+    """Dựng USD lai cho scene theo vật; None chỉ khi caller không chọn builder lai.
 
     Trả `{đường dẫn tương đối trong gói: bytes}` gồm `scene.usda`, `environment.usdc`, `objects/*.usdc`.
     """
-    if scene.environment.visual_master_ref is None or python is None:
+    if python is None:
         return None
     if not python.is_file():
         raise ValueError("USD runtime disappeared after hybrid package selection")
@@ -258,6 +295,8 @@ def _hybrid_layers(
     trimesh.Trimesh(background.vertices, background.faces, process=False).export(collision)
     objects, extra = [], []
     for item in scene.objects:
+        if not item.active:
+            continue
         gaussians = item.visual_ref if item.visual_ref and item.visual_ref.artifact_type == "ObjectGaussians" else None
         if _is_pending(item):
             if gaussians is not None:
@@ -291,7 +330,9 @@ def _hybrid_layers(
         "ground_plane": True,
         "collision_background_identity": background.identity,
         "environment": {
-            "gaussians_ply": str(resolve(scene.environment.visual_master_ref)),
+            "gaussians_ply": (
+                str(resolve(scene.environment.visual_master_ref)) if scene.environment.visual_master_ref else None
+            ),
             "extra_gaussians": extra,
             "collision_mesh": str(collision),
         },
@@ -329,32 +370,181 @@ def _environment_layer(
     return _publish(registry, reference, payload), int(len(background.faces)), background.carved_triangles
 
 
-def _hybrid_runtime_python(scene: SceneIR) -> Path | None:
-    """Return the pinned USD runtime only when this scene can use the hybrid builder."""
+def _hybrid_runtime_python() -> Path | None:
+    """Return the configured interpreter path; qualification is a separate subprocess probe."""
     python = get_settings().product_scene_runtime_python
-    if scene.environment.visual_master_ref is None or python is None or not python.is_file():
+    if python is None or not python.is_file():
         return None
     return python
 
 
-def _package_build_config(hybrid: bool, background: CarvedBackground) -> dict[str, Any]:
-    """Bind package identity to the exact source mesh and carved triangle mask."""
-    base = HYBRID_BUILD_CONFIG if hybrid else BUILD_CONFIG
-    return {**base, "collision_background_identity": background.identity}
+def _qualify_hybrid_runtime(python: Path | None) -> tuple[bool, str | None]:
+    """Verify the configured interpreter can exercise the actual USD APIs the runner uses."""
+    if python is None or not python.is_file() or not HYBRID_RUNNER.is_file():
+        return False, None
+    with tempfile.TemporaryDirectory(prefix="r2s_usd_probe_") as directory:
+        result_path = Path(directory) / "probe.json"
+        try:
+            completed = subprocess.run(
+                [str(python), str(HYBRID_RUNNER), "--probe", "--result", str(result_path)],
+                capture_output=True,
+                timeout=45,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False, None
+        if completed.returncode != 0 or not result_path.is_file():
+            return False, None
+        try:
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False, None
+    if not isinstance(result, dict):
+        return False, None
+    required = {
+        "triangle_mesh_collision",
+        "convex_mesh_collision",
+        "rigid_body_mass",
+        "physics_material",
+        "semantic_labels",
+        "gaussian_particle_field",
+        "meters_z_up",
+    }
+    capabilities = result.get("capabilities")
+    version = result.get("usd_version")
+    if (
+        result.get("qualified") is not True
+        or not isinstance(capabilities, list)
+        or not all(isinstance(capability, str) for capability in capabilities)
+        or not required.issubset(capabilities)
+        or not isinstance(version, str)
+    ):
+        return False, None
+    return True, version
+
+
+def _package_build_config(
+    mode: EffectiveExportMode,
+    background_identity: str,
+    runtime_version: str | None,
+) -> dict[str, Any]:
+    """Bind package identity to mode, builder/runtime contract, and carved source mesh."""
+    base = HYBRID_BUILD_CONFIG if mode == EffectiveExportMode.HYBRID else BUILD_CONFIG
+    return {
+        **base,
+        "runtime_usd_version": runtime_version if mode == EffectiveExportMode.HYBRID else None,
+        "collision_background_identity": background_identity,
+    }
+
+
+def _cache_matches(
+    package: SimulationPackage | None,
+    scene: SceneIR,
+    build_config: dict[str, Any],
+    requested_requirements: ExportRequirements,
+) -> bool:
+    """Reuse only a sealed package with exact SceneIR, builder version and requirements."""
+    if package is None or package.candidate is None or package.package_ref is None:
+        return False
+    capability = package.export_capability
+    if capability is None or capability.status != ExportCapabilityStatus.SUPPORTED:
+        return False
+    if capability.builder_version != "usd-export-capabilities-v1" or capability.blockers:
+        return False
+    if package.preflight.blocking_result != RuleResult.PASS:
+        return False
+    if capability.scene_revision != scene.scene_revision or capability.scene_ir_checksum != scene.scene_ir_checksum:
+        return False
+    if package.scene_revision != scene.scene_revision or package.scene_ir_checksum != scene.scene_ir_checksum:
+        return False
+    manifest = package.candidate.candidate_manifest
+    if manifest.scene_revision != scene.scene_revision or manifest.scene_ir_checksum != scene.scene_ir_checksum:
+        return False
+    if capability.requirements != requested_requirements:
+        return False
+    if capability.effective_mode.value != build_config.get("effective_mode"):
+        return False
+    if capability.effective_mode == EffectiveExportMode.HYBRID and (
+        capability.runtime_qualification != RuntimeQualificationStatus.QUALIFIED or not capability.runtime_version
+    ):
+        return False
+    return manifest.build_config_checksum == _compute_config_checksum(build_config)
 
 
 def build_simulation_package(registry: ProjectRegistry, job_id: str) -> SimulationPackage:
     """Tạo (hoặc trả lại) gói mô phỏng của revision SceneIR hiện tại."""
     current = registry.scene.current(job_id)
     scene = current.scene
-    existing = current_package(registry, job_id)
-    if existing is not None:
-        return existing
     job = registry.get_job(job_id)
     background = _carved_environment(registry, scene)
+
+    # A cache hit is valid only for the exact requested mode, capability contract,
+    # runtime version, source collision identity and current SceneIR requirements.
+    existing = current_package(registry, job_id)
+    current_requirements = export_requirements(scene)
+    current_mode = select_export_mode(current_requirements)
+    cached_capability = existing.export_capability if existing is not None else None
+    current_runtime_ok = (
+        cached_capability is not None
+        and cached_capability.runtime_qualification == RuntimeQualificationStatus.QUALIFIED
+    )
+    current_runtime_version = cached_capability.runtime_version if cached_capability is not None else None
+    current_build_config = _package_build_config(current_mode, background.identity, current_runtime_version)
+    current_capability = assess_export_capabilities(
+        scene,
+        runtime_qualified=current_runtime_ok,
+        runtime_version=current_runtime_version,
+        resolve_artifact=registry.runtime_resolver.require,
+    )
+    if current_capability.status == ExportCapabilityStatus.SUPPORTED and _cache_matches(
+        existing, scene, current_build_config, current_requirements
+    ):
+        return existing
+
+    # Prepare an in-memory revision first so generated box colliders are included
+    # in the requirements. It is not published and does not create a scene revision.
+    prepared = enrich_scene_physics(scene, environment_collider_ref=scene.environment.collider_ref)
+    requirements = export_requirements(prepared)
+    mode = select_export_mode(requirements)
+    hybrid_python = _hybrid_runtime_python() if mode == EffectiveExportMode.HYBRID else None
+    runtime_qualified, runtime_version = (
+        _qualify_hybrid_runtime(hybrid_python) if mode == EffectiveExportMode.HYBRID else (False, None)
+    )
+    build_config = _package_build_config(mode, background.identity, runtime_version)
+
+    enriched = enrich_scene_physics(
+        scene,
+        environment_collider_ref=scene.environment.collider_ref,
+        extra_provenance={
+            "simulation_package": build_config["builder"],
+            "collision_background_identity": background.identity,
+        },
+    )
+    root = registry.runtime_resolver.artifact_root
+    confirmed = sum(1 for item in scene.objects if item.active and item.state == SceneObjectState.CONFIRMED)
+    export_capability = assess_export_capabilities(
+        enriched,
+        runtime_qualified=runtime_qualified,
+        runtime_version=runtime_version,
+        resolve_artifact=registry.runtime_resolver.require,
+    )
+    if export_capability.status == ExportCapabilityStatus.BLOCKED:
+        # Static preflight and exporter support are separate results. No candidate
+        # or physics_enrich revision is published for an unsupported capability.
+        return SimulationPackage(
+            job_id=job_id,
+            source_scene_revision=scene.scene_revision,
+            scene_revision=enriched.scene_revision,
+            scene_ir_checksum=enriched.scene_ir_checksum,
+            created_at=datetime.now(UTC),
+            preflight=run_preflight(enriched),
+            confirmed_objects=confirmed,
+            environment_triangles=len(background.faces),
+            carved_triangles=background.carved_triangles,
+            export_capability=export_capability,
+        )
+
     layer_ref, triangles, carved = _environment_layer(registry, job_id, background)
-    hybrid_python = _hybrid_runtime_python(scene)
-    build_config = _package_build_config(hybrid_python is not None, background)
     enriched = enrich_scene_physics(
         scene,
         environment_collider_ref=layer_ref,
@@ -363,8 +553,26 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
             "collision_background_identity": background.identity,
         },
     )
-    root = registry.runtime_resolver.artifact_root
-    confirmed = sum(1 for item in scene.objects if item.active and item.state == SceneObjectState.CONFIRMED)
+    export_capability = assess_export_capabilities(
+        enriched,
+        runtime_qualified=runtime_qualified,
+        runtime_version=runtime_version,
+        resolve_artifact=registry.runtime_resolver.require,
+    )
+    if export_capability.status == ExportCapabilityStatus.BLOCKED:
+        return SimulationPackage(
+            job_id=job_id,
+            source_scene_revision=scene.scene_revision,
+            scene_revision=enriched.scene_revision,
+            scene_ir_checksum=enriched.scene_ir_checksum,
+            created_at=datetime.now(UTC),
+            preflight=run_preflight(enriched),
+            confirmed_objects=confirmed,
+            environment_triangles=triangles,
+            carved_triangles=carved,
+            export_capability=export_capability,
+        )
+
     report = run_preflight(enriched, artifact_store_root=root)
     if report.blocking_result != RuleResult.PASS:
         # Chưa đạt: không tạo revision; người dùng sửa theo báo cáo rồi tạo lại.
@@ -378,14 +586,32 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
             confirmed_objects=confirmed,
             environment_triangles=triangles,
             carved_triangles=carved,
+            export_capability=export_capability,
         )
     published = registry.scene.publish_next(job_id, scene.scene_revision, enriched, "physics_enrich").revision.scene
     report = run_preflight(published, artifact_store_root=root)
     if report.blocking_result != RuleResult.PASS:
         raise ValueError("preflight đổi kết quả sau khi publish revision; không đóng gói")
+    if export_capability.scene_revision != published.scene_revision or (
+        export_capability.scene_ir_checksum != published.scene_ir_checksum
+    ):
+        export_capability = assess_export_capabilities(
+            published,
+            runtime_qualified=runtime_qualified,
+            runtime_version=runtime_version,
+            resolve_artifact=registry.runtime_resolver.require,
+        )
+        if export_capability.status != ExportCapabilityStatus.SUPPORTED:
+            raise ValueError("export capability đổi kết quả sau khi publish revision; không đóng gói")
     with tempfile.TemporaryDirectory(prefix="r2s_candidate_") as directory:
         output = Path(directory)
-        hybrid = _hybrid_layers(registry, published, output, background, hybrid_python)
+        hybrid = (
+            _hybrid_layers(registry, published, output, background, hybrid_python)
+            if mode == EffectiveExportMode.HYBRID
+            else None
+        )
+        if mode == EffectiveExportMode.HYBRID and hybrid is None:
+            raise ValueError("hybrid USD capability đã chọn nhưng runner không tạo entrypoint")
         layers = {name: payload for name, payload in (hybrid or {}).items() if name != "scene.usda"}
         layer_refs = [
             _publish(
@@ -408,6 +634,8 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
                 environment_layer_ref=layer_ref,
                 entrypoint_bytes=hybrid["scene.usda"] if hybrid else None,
                 extra_assets=layer_refs,
+                export_mode=mode,
+                export_capability=export_capability,
             )
         )
         entrypoint = (output / "scene.usda").read_bytes()
@@ -420,6 +648,7 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
                 "candidate_manifest.json": (output / "candidate_manifest.json").read_bytes(),
                 "candidate_package.json": package.model_dump_json(indent=2).encode(),
                 "preflight_report.json": report.model_dump_json(indent=2).encode(),
+                "export_capability.json": export_capability.model_dump_json(indent=2).encode(),
                 "README.txt": _readme(published, package, hybrid is not None, build_config).encode(),
             }
         )
@@ -438,6 +667,7 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
         confirmed_objects=confirmed,
         environment_triangles=triangles,
         carved_triangles=carved,
+        export_capability=export_capability,
         candidate=package,
         package_ref=package_ref,
     )

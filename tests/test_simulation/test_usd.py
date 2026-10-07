@@ -6,11 +6,18 @@ from pathlib import Path
 import pytest
 
 from src.models.contracts.identity import verify_candidate_inventory, verify_content_checksum
-from src.models.contracts.scene import SceneIR
+from src.models.contracts.scene import ColliderType, ObjectPhysics, SceneIR
 from src.models.contracts.validation import PreflightReport, RuleResult
 from src.services.simulation.enrichment.service import enrich_scene_physics
 from src.services.simulation.preflight.engine import run_preflight
 from src.services.simulation.usd.builder import CandidateBuildRequest, build_candidate_package
+from src.services.simulation.usd.capabilities import (
+    EffectiveExportMode,
+    ExportCapabilityReport,
+    ExportCapabilityStatus,
+    RuntimeQualificationStatus,
+    export_requirements,
+)
 from src.services.simulation.usd.usda import generate_scene_usda
 
 FIXTURE_PATH = Path("fixtures/scene_ir/scene.json")
@@ -55,6 +62,46 @@ def test_generate_scene_usda_syntax(physics_scene: SceneIR) -> None:
     for obj in physics_scene.objects:
         assert f'def Xform "{obj.id.replace("-", "_")}"' in usda_text
         assert 'xformOpOrder = ["xformOp:translate", "xformOp:orient"]' in usda_text
+
+
+def test_legacy_usd_exporter_rejects_mesh_without_geometry(physics_scene: SceneIR) -> None:
+    """Unsupported mesh colliders must fail instead of becoming an empty USD Mesh prim."""
+    item = physics_scene.objects[0]
+    assert item.collider is not None
+    collider = item.collider.model_copy(update={"collider_type": ColliderType.CONVEX_HULL})
+    scene = physics_scene.model_copy(
+        update={"objects": [item.model_copy(update={"collider": collider}), *physics_scene.objects[1:]]}
+    )
+
+    with pytest.raises(ValueError, match="cannot preserve collider"):
+        generate_scene_usda(scene)
+
+
+def test_legacy_usd_exporter_rejects_dropped_physics_and_assets(physics_scene: SceneIR) -> None:
+    item = physics_scene.objects[0]
+    physics = ObjectPhysics(
+        dynamic=False,
+        static_friction=0.5,
+        dynamic_friction=0.4,
+        restitution=0.0,
+        provenance={},
+    )
+    with_physics = physics_scene.model_copy(
+        update={"objects": [item.model_copy(update={"physics": physics}), *physics_scene.objects[1:]]}
+    )
+    with_asset = physics_scene.model_copy(
+        update={
+            "objects": [
+                item.model_copy(update={"asset_ref": physics_scene.environment.geometry_ref}),
+                *physics_scene.objects[1:],
+            ]
+        }
+    )
+
+    with pytest.raises(ValueError, match="ObjectPhysics"):
+        generate_scene_usda(with_physics)
+    with pytest.raises(ValueError, match="asset dependencies"):
+        generate_scene_usda(with_asset)
 
 
 def test_build_candidate_package_success(
@@ -151,6 +198,16 @@ def test_hybrid_entrypoint_and_layers_are_sealed_by_candidate_checksum(
     )
 
     def build(entrypoint: bytes, layers: list) -> object:
+        capability = ExportCapabilityReport(
+            scene_revision=physics_scene.scene_revision,
+            scene_ir_checksum=physics_scene.scene_ir_checksum,
+            status=ExportCapabilityStatus.SUPPORTED,
+            effective_mode=EffectiveExportMode.HYBRID,
+            builder_version="usd-export-capabilities-v1",
+            runtime_qualification=RuntimeQualificationStatus.QUALIFIED,
+            runtime_version="test-runtime",
+            requirements=export_requirements(physics_scene),
+        )
         return build_candidate_package(
             CandidateBuildRequest(
                 scene=physics_scene,
@@ -159,6 +216,8 @@ def test_hybrid_entrypoint_and_layers_are_sealed_by_candidate_checksum(
                 output_dir=tmp_path,
                 entrypoint_bytes=entrypoint,
                 extra_assets=layers,
+                export_mode=EffectiveExportMode.HYBRID,
+                export_capability=capability,
             )
         )
 

@@ -43,6 +43,7 @@ from src.services.scene.editing.commands import (
     restore_object,
 )
 from src.services.simulation.colliders.carve import CarveBox, triangle_mask_in_box
+from src.services.simulation.usd.capabilities import EffectiveExportMode
 from tests.test_orchestration.test_simulation_package import _scene_job
 
 
@@ -478,5 +479,12 @@ def test_both_package_builders_share_background_and_current_hybrid_object_pose(
         captured["environment"]["collision_mesh"], file_type="ply", force="mesh", process=False
     )
     assert len(collision_mesh.faces) == len(background.faces)
-    assert _package_build_config(False, background)["collision_background_identity"] == background.identity
-    assert _package_build_config(True, background)["collision_background_identity"] == background.identity
+    assert (
+        _package_build_config(EffectiveExportMode.LEGACY_BOX, background.identity, None)[
+            "collision_background_identity"
+        ]
+        == background.identity
+    )
+    hybrid_config = _package_build_config(EffectiveExportMode.HYBRID, background.identity, "26.5.0")
+    assert hybrid_config["collision_background_identity"] == background.identity
+    assert hybrid_config["runtime_usd_version"] == "26.5.0"

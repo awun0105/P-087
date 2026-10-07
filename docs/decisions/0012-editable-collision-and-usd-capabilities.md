@@ -56,6 +56,29 @@ Capability check phải xảy ra trước publish physics_enrich revision. Artif
 mesh cần finite vertices, topology hợp lệ, correct local transform và resolver
 closure. USD stage phải dùng canonical units/axes; visual và physics cùng object ID.
 
+## Exporter capability contract (AUD-02.S1 implemented)
+
+The implementation exposes an additive `export_capability` result beside static
+Preflight. The two checks answer different questions: static Preflight validates
+scene geometry and required artifacts; export capability proves that the selected
+builder/runtime can preserve the SceneIR requirements. A package is publishable
+only when both pass. The internal contract is `usd-export-capabilities-v1` and is
+bound to SceneIR revision/checksum, effective mode, builder config, and runtime USD
+version in the candidate build identity.
+
+The legacy path is limited to finite positive AABB/OBB boxes with local transforms;
+it rejects authored ObjectPhysics, external assets, and unsupported collider types.
+The hybrid path is selected for Gaussian visuals, authored physics, external assets,
+or collider types beyond the legacy subset. It must pass an in-memory API probe in
+the configured USD interpreter before publication. Current hybrid support blocks
+non-identity collider offsets, unresolved/empty convex geometry, external asset
+closure, and collider forms the adapter does not author yet. A cache hit requires
+the exact builder config checksum and matching capability requirements.
+
+The automated runtime-probe tests use a fake subprocess response. They establish
+the contract and rejection behavior only; real `usd-core` stage acceptance and
+Isaac Sim behavior remain unverified until AUD-02.S2/AUD-05.
+
 ## Alternatives Considered
 
 1. Khoét bằng current transform: lỗi đã tái hiện khi move/delete.

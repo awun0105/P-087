@@ -6,7 +6,7 @@ với metadata chuẩn hóa: metersPerUnit = 1.0, upAxis = "Z" theo OpenReal2Sim
 
 import numpy as np
 
-from src.models.contracts.scene import ColliderSpec, ColliderType, SceneIR, SceneObject
+from src.models.contracts.scene import ColliderSpec, ColliderType, SceneIR, SceneObject, SceneObjectState
 
 
 def _format_prim_name(raw_id: str) -> str:
@@ -30,14 +30,17 @@ def _generate_ground_plane_usda() -> list[str]:
 
 
 def _generate_collider_usda(collider: ColliderSpec) -> list[str]:
-    """Sinh định nghĩa Prim cho ColliderSpec dạng Box."""
-    dims = collider.dimensions_xyz_m or (1.0, 1.0, 1.0)
+    """Sinh định nghĩa Prim cho ColliderSpec dạng hộp; không giả Mesh rỗng."""
+    if collider.collider_type not in (ColliderType.AABB, ColliderType.OBB):
+        raise ValueError(f"legacy USD exporter cannot preserve collider '{collider.collider_type}'")
+    dims = collider.dimensions_xyz_m
+    if dims is None or any(not np.isfinite(value) or value <= 0 for value in dims):
+        raise ValueError("legacy USD box colliders require finite positive dimensions")
     tx, ty, tz = collider.local_transform.translation_xyz
     qx, qy, qz, qw = collider.local_transform.rotation_quaternion_xyzw
 
-    prim_type = "Cube" if collider.collider_type in (ColliderType.AABB, ColliderType.OBB) else "Mesh"
     return [
-        f'            def {prim_type} "collider" (',
+        '            def Cube "collider" (',
         '                apiSchemas = ["PhysicsCollisionAPI"]',
         "            )",
         "            {",
@@ -52,6 +55,12 @@ def _generate_collider_usda(collider: ColliderSpec) -> list[str]:
 
 def _generate_object_usda(obj: SceneObject) -> list[str]:
     """Sinh định nghĩa Prim cho một SceneObject cùng toạ độ và collider."""
+    if obj.physics is not None:
+        raise ValueError(f"legacy USD exporter cannot preserve ObjectPhysics for '{obj.id}'")
+    if obj.asset_ref is not None or isinstance(obj.provenance.get("asset_url"), str):
+        raise ValueError(f"legacy USD exporter cannot preserve asset dependencies for '{obj.id}'")
+    if obj.state == SceneObjectState.CONFIRMED and obj.collider is None:
+        raise ValueError(f"legacy USD exporter requires a collider for confirmed object '{obj.id}'")
     prim_name = _format_prim_name(obj.id)
     tx, ty, tz = obj.transform.translation_xyz
     qx, qy, qz, qw = obj.transform.rotation_quaternion_xyzw

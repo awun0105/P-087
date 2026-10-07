@@ -36,7 +36,7 @@ def get_simulation_package(job_id: str) -> SimulationPackage | None:
 
 @router.post("/jobs/{job_id}/simulation-package", response_model=SimulationPackage)
 def create_simulation_package(job_id: str) -> SimulationPackage:
-    """Khoét môi trường, gắn collider, preflight; PASS thì đóng gói. FAIL trả báo cáo, không đổi scene."""
+    """Khoét nền, gắn collider và kiểm tra riêng preflight/capability trước khi đóng gói."""
     _guard(job_id)
     try:
         return build_simulation_package(deps.registry(), job_id)

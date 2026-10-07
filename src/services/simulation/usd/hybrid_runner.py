@@ -182,6 +182,43 @@ def new_layer(path: Path) -> Usd.Stage:
     return stage
 
 
+def probe_runtime() -> dict:
+    """Exercise every USD schema/API used by the hybrid writer in an in-memory stage."""
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdPhysics.SetStageKilogramsPerUnit(stage, 1.0)
+    mesh = UsdGeom.Mesh.Define(stage, "/Probe/Collision")
+    UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
+    UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr().Set(UsdPhysics.Tokens.none)
+    body = UsdGeom.Xform.Define(stage, "/Probe/Body").GetPrim()
+    UsdPhysics.RigidBodyAPI.Apply(body)
+    UsdPhysics.MassAPI.Apply(body).CreateMassAttr().Set(1.0)
+    material = UsdShade.Material.Define(stage, "/Probe/Material")
+    physics_material = UsdPhysics.MaterialAPI.Apply(material.GetPrim())
+    physics_material.CreateStaticFrictionAttr().Set(0.5)
+    physics_material.CreateDynamicFrictionAttr().Set(0.4)
+    physics_material.CreateRestitutionAttr().Set(0.0)
+    UsdShade.MaterialBindingAPI.Apply(body).Bind(material, UsdShade.Tokens.weakerThanDescendants, "physics")
+    UsdSemantics.LabelsAPI.Apply(body, "class").CreateLabelsAttr().Set(["probe"])
+    field = UsdVol.ParticleField3DGaussianSplat.Define(stage, "/Probe/Visual")
+    field.CreatePositionsAttr().Set(Vt.Vec3fArray())
+    stage.GetRootLayer().ExportToString()
+    return {
+        "qualified": True,
+        "usd_version": ".".join(str(part) for part in Usd.GetVersion()),
+        "capabilities": [
+            "triangle_mesh_collision",
+            "convex_mesh_collision",
+            "rigid_body_mass",
+            "physics_material",
+            "semantic_labels",
+            "gaussian_particle_field",
+            "meters_z_up",
+        ],
+    }
+
+
 def build(request: dict) -> dict:
     """Dựng toàn bộ stage; trả tóm tắt số Gaussian/collider để app ghi vào provenance."""
     out = Path(request["output_dir"])
@@ -263,11 +300,17 @@ def build(request: dict) -> dict:
 def main() -> int:
     """CLI: request JSON → stage USD + result JSON."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--request", type=Path, required=True)
+    parser.add_argument("--request", type=Path)
     parser.add_argument("--result", type=Path, required=True)
+    parser.add_argument("--probe", action="store_true")
     args = parser.parse_args()
-    summary = build(json.loads(args.request.read_text(encoding="utf-8")))
-    args.result.write_text(json.dumps(summary), encoding="utf-8")
+    if args.probe:
+        result = probe_runtime()
+    else:
+        if args.request is None:
+            parser.error("--request is required unless --probe is specified")
+        result = build(json.loads(args.request.read_text(encoding="utf-8")))
+    args.result.write_text(json.dumps(result), encoding="utf-8")
     return 0
 
 

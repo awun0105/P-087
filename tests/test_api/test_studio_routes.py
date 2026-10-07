@@ -8,9 +8,21 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from src.models.contracts.manifests import InputManifest, JobStatus
+from src.models.contracts.scene import SceneIR
+from src.models.contracts.validation import RuleResult
 from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.jobs.profile import ExecutionProfile
 from src.services.orchestration.projects.registry import ProjectRegistry
+from src.services.orchestration.review.simulation_package import SimulationPackage
+from src.services.simulation.preflight.engine import run_preflight
+from src.services.simulation.usd.capabilities import (
+    EffectiveExportMode,
+    ExportCapabilityBlocker,
+    ExportCapabilityReport,
+    ExportCapabilityStatus,
+    ExportRequirements,
+    RuntimeQualificationStatus,
+)
 
 _ATTESTATION = {
     "data_origin": "self_collected_no_pii",
@@ -391,3 +403,54 @@ async def test_actions_without_login_have_no_actor(client: AsyncClient, studio: 
     assert created.json()["project"]["created_by"] is None
     scene = (await client.get("/api/v1/scenes")).json()["scenes"][0]
     assert scene["requested_by"] is None
+
+
+@pytest.mark.asyncio
+async def test_simulation_api_projects_export_block_separately_from_preflight(
+    client: AsyncClient, studio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A static Preflight PASS must not hide an unsupported USD export capability."""
+    from datetime import UTC, datetime
+
+    from src.api.studio import simulation as simulation_api
+
+    scene = SceneIR.model_validate_json(Path("fixtures/scene_ir/scene.json").read_text(encoding="utf-8"))
+    preflight = run_preflight(scene)
+    blocked = SimulationPackage(
+        job_id="job-capability-blocked",
+        source_scene_revision=scene.scene_revision,
+        scene_revision=scene.scene_revision,
+        scene_ir_checksum=scene.scene_ir_checksum,
+        created_at=datetime.now(UTC),
+        preflight=preflight,
+        confirmed_objects=0,
+        environment_triangles=0,
+        carved_triangles=0,
+        export_capability=ExportCapabilityReport(
+            scene_revision=scene.scene_revision,
+            scene_ir_checksum=scene.scene_ir_checksum,
+            status=ExportCapabilityStatus.BLOCKED,
+            effective_mode=EffectiveExportMode.HYBRID,
+            builder_version="usd-export-capabilities-v1",
+            runtime_qualification=RuntimeQualificationStatus.FAILED,
+            requirements=ExportRequirements(hybrid_visuals=True),
+            blockers=[
+                ExportCapabilityBlocker(
+                    code="USD_RUNTIME_UNQUALIFIED",
+                    message="The configured USD runtime did not pass its capability probe.",
+                )
+            ],
+        ),
+    )
+    monkeypatch.setattr(simulation_api, "_guard", lambda _job_id: None)
+    monkeypatch.setattr(simulation_api.deps, "registry", lambda: studio.registry)
+    monkeypatch.setattr(simulation_api, "build_simulation_package", lambda _registry, _job_id: blocked)
+
+    response = await client.post("/api/v1/jobs/job-capability-blocked/simulation-package")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["preflight"]["blocking_result"] == RuleResult.PASS
+    assert body["export_capability"]["status"] == ExportCapabilityStatus.BLOCKED
+    assert body["export_capability"]["blockers"][0]["code"] == "USD_RUNTIME_UNQUALIFIED"
+    assert body["candidate"] is None and body["package_ref"] is None

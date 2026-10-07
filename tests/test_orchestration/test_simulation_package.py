@@ -8,13 +8,20 @@ import io
 import json
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from src.config import Settings
 from src.models.contracts.reconstruction import ReconstructionBundle
+from src.models.contracts.scene import ColliderType
 from src.models.contracts.validation import RuleResult
+from src.services.orchestration.review import simulation_package as simulation_package_service
 from src.services.orchestration.review.simulation_package import BUILD_CONFIG, build_simulation_package, current_package
 from src.services.orchestration.scene.extraction import extract_scene
 from src.services.orchestration.scene.objects import add_box_object, apply_object_action
+from src.services.simulation.enrichment.service import enrich_scene_physics
+from src.services.simulation.usd.capabilities import ExportCapabilityStatus
 from tests.test_orchestration.test_finalize_flow import _confirmed
 from tests.test_orchestration.test_scene_extraction import _FIXTURE, _collision
 
@@ -53,7 +60,16 @@ def test_confirmed_objects_become_a_sealed_package(tmp_path: Path) -> None:
     manifest = json.loads(archive.read("candidate_manifest.json"))
     assert manifest["build_config_checksum"] == expected_config_checksum
     names = set(archive.namelist())
-    assert {"scene.usda", "environment_collision.usda", "candidate_manifest.json", "preflight_report.json"} <= names
+    assert {
+        "scene.usda",
+        "environment_collision.usda",
+        "candidate_manifest.json",
+        "preflight_report.json",
+        "export_capability.json",
+    } <= names
+    capability = json.loads(archive.read("export_capability.json"))
+    assert capability["status"] == "supported" and capability["effective_mode"] == "legacy_box"
+    assert capability["builder_version"] == "usd-export-capabilities-v1"
     usda = archive.read("scene.usda").decode()
     assert "prepend references = @./environment_collision.usda@" in usda and "GroundPlane" in usda
     # Gọi lại trên cùng revision: trả gói cũ, không tạo revision mới.
@@ -77,3 +93,55 @@ def test_failed_preflight_reports_without_new_revision(tmp_path: Path) -> None:
     assert "OBJECT_OUT_OF_BOUNDS" in [str(rule) for rule in failed]
     assert registry.scene.current(job.job_id).scene.scene_revision == "rev-002"
     assert current_package(registry, job.job_id) is None
+
+
+def test_unsupported_convex_export_returns_capability_block_without_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, job = _scene_job(tmp_path)
+    scene = registry.scene.current(job.job_id).scene
+    enriched = enrich_scene_physics(scene)
+    item = enriched.objects[0]
+    collider = item.collider.model_copy(
+        update={"collider_type": ColliderType.CONVEX_DECOMPOSITION, "geometry_ref": None, "dimensions_xyz_m": None}
+    )
+    draft = enriched.model_copy(update={"objects": [item.model_copy(update={"active": True, "collider": collider})]})
+    registry.scene.publish_next(job.job_id, scene.scene_revision, draft, "test_unsupported_convex")
+    current_revision = registry.scene.current(job.job_id).scene.scene_revision
+    monkeypatch.setattr(
+        simulation_package_service,
+        "get_settings",
+        lambda: SimpleNamespace(product_scene_runtime_python=None),
+    )
+
+    package = build_simulation_package(registry, job.job_id)
+
+    assert package.export_capability is not None
+    assert package.export_capability.status == ExportCapabilityStatus.BLOCKED
+    assert {issue.code for issue in package.export_capability.blockers} >= {
+        "USD_RUNTIME_UNQUALIFIED",
+        "COLLIDER_GEOMETRY_REF_MISSING",
+    }
+    assert package.candidate is None and package.package_ref is None
+    assert registry.scene.current(job.job_id).scene.scene_revision == current_revision
+    assert current_package(registry, job.job_id) is None
+
+
+def test_cached_candidate_is_not_reused_after_builder_version_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, job = _scene_job(tmp_path)
+    scene = registry.scene.current(job.job_id).scene
+    (pallet,) = scene.objects
+    apply_object_action(registry.scene, job.job_id, pallet.id, "confirm", scene.scene_revision)
+    first = build_simulation_package(registry, job.job_id)
+
+    monkeypatch.setitem(BUILD_CONFIG, "builder", "test-builder-version-change")
+    assert current_package(registry, job.job_id) is None
+    second = build_simulation_package(registry, job.job_id)
+
+    assert first.package_ref is not None and second.package_ref is not None
+    assert second.package_ref != first.package_ref
+    assert second.source_scene_revision == first.scene_revision
+    assert second.scene_revision != first.scene_revision
+    assert registry.scene.current(job.job_id).scene.scene_revision == second.scene_revision

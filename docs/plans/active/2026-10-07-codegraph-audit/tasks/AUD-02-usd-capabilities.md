@@ -73,7 +73,7 @@ package cache return; cache không được trả package không đáp ứng req
 Giữ box-only path nếu có fidelity proof cho đúng subset.
 Tests: missing runtime, bad refs, mesh-without-topology, dynamic mass thiếu,
 cached package builder/version mismatch; API error projection không fake PASS.
-**Exit:** [ ] convex/hybrid không silently fallback; [ ] supported boxes còn chạy.
+**Exit:** [x] convex/hybrid không silently fallback; [x] supported boxes còn chạy.
 
 ## Sprint AUD-02.S2 — Export geometry/physics đúng cho supported paths
 
@@ -108,7 +108,7 @@ actual Isaac loader nếu đã có runtime; browser feedback/rollback khi UI tha
 ## Verification và DoD
 
 ```bash
-.venv/bin/pytest tests/test_simulation/test_usd.py tests/test_simulation/test_hybrid_usd.py tests/test_simulation/test_preflight.py tests/test_simulation/test_enrichment.py tests/test_orchestration/test_simulation_package.py tests/test_contracts/test_candidate_manifest.py -q
+.venv/bin/pytest tests/test_simulation/test_usd.py tests/test_simulation/test_hybrid_usd.py tests/test_simulation/test_preflight.py tests/test_simulation/test_enrichment.py tests/test_simulation/test_usd_capabilities.py tests/test_simulation/test_collision_edit_composition.py tests/test_orchestration/test_simulation_package.py tests/test_orchestration/test_review_workflow.py tests/test_contracts/test_candidate_manifest.py tests/test_api/test_studio_routes.py -q
 ```
 
 Frontend focused: tests/review-panel.test.tsx và API client test trong frontend/.
@@ -117,4 +117,44 @@ proof và emitted USD giữ đủ semantics; Isaac runtime acceptance vẫn ghi 
 
 ## Result / Evidence
 
-Pending — ghi builder/runtime versions, requirements, package refs và từng sprint exit.
+### AUD-02.S1 — complete
+
+- Commit base: `2634df9` (`AUD-01.S2`). Scope stayed within capability gating,
+  candidate packaging, API projection, focused regressions, and this task/ADR.
+- Before: hybrid selection depended on a configured Python file plus
+  `visual_master_ref`; other scenes silently used a legacy writer that emitted a
+  topology-free `Mesh` for non-box colliders. Candidate cache returned any record
+  for the current revision without checking builder/profile identity.
+- After: `ExportRequirements` selects `legacy_box` or `hybrid`; an additive
+  `export_capability` DTO distinguishes capability from static Preflight. The
+  legacy subset is finite positive AABB/OBB boxes without authored ObjectPhysics
+  or external assets. Mesh colliders, physics, or Gaussian visuals require hybrid
+  capability; the configured interpreter must pass an in-memory USD API probe.
+  Unsupported references, empty mesh topology, dynamic mass gaps, uncomposed
+  hybrid collider offsets, and unsealed external assets return blockers before
+  `physics_enrich` publication. Candidate cache requires the exact builder config
+  checksum, revision/checksum, effective mode, and requirements. `current_package`
+  applies the same gate to API GET/download and workflow readers, not just POST
+  rebuilds. Direct legacy generation now rejects fake Mesh prims, dropped
+  ObjectPhysics, and omitted asset dependencies.
+- Dependent updates: candidate builder validates the capability report against
+  SceneIR; `SimulationPackage` and the existing API response project the blocker
+  separately from static Preflight; the ZIP includes `export_capability.json`;
+  both legacy and hybrid builder config identities carry the capability contract,
+  effective mode, builder version, collision background identity, and hybrid USD
+  runtime version. `_hybrid_layers` now excludes inactive objects consistently
+  with the capability classifier.
+- API/consumer proof: `test_simulation_api_projects_export_block_separately_from_preflight`
+  verifies a static Preflight PASS can coexist with an explicit export blocker and
+  no candidate/package reference. The package-level regression verifies missing
+  hybrid runtime/convex geometry leaves the current SceneIR revision unchanged.
+- Focused checks: `.venv/bin/ruff check src/ tests/` → All checks passed;
+  `.venv/bin/ruff format --check src/ tests/` → 457 files already formatted;
+  task-focused pytest command → 85 passed. The suite covers direct fallback
+  rejection, box support, missing runtime, invalid/missing geometry references,
+  topology-free meshes, dynamic mass, uncomposed hybrid offsets, external asset
+  closure, cache builder-version mismatch, hybrid inventory binding, API response
+  projection, stale GET/workflow cache rejection, and collision-background consumers.
+- Runtime evidence: real `usd-core` and Isaac Sim execution were not available in
+  this sprint. The capability probe contract was tested with controlled subprocess
+  fixtures only; USD-runtime and Isaac acceptance remain unverified.
