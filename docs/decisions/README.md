@@ -30,3 +30,6 @@ dùng nó như policy. `Proposed` decision không phải authority.
 - [0020: Automatic RGB–LiDAR map registration với floor, BEV, constrained ICP và QA](0020-automatic-rgb-lidar-map-registration.md) — *Proposed* (2026-10-07)
 - [0021: Guest identity và resource ownership](0021-guest-identity-and-ownership.md) — *Proposed* (2026-10-07)
 - [0022: Guest calendar-day quota và accepted run identity](0022-guest-daily-job-quota.md) — *Proposed* (2026-10-07)
+- [0023: Nén video trước upload và geometry/time provenance](0023-client-video-normalization.md) — *Proposed* (2026-10-07)
+- [0024: Một khung upload và tự resolve input assembly/recipe](0024-unified-upload-and-input-resolution.md) — *Proposed* (2026-10-07)
+- [0025: Imported PLY/SOG continuation thành editable SceneIR và simulation candidate](0025-imported-3dgs-continuation.md) — *Deferred* theo yêu cầu owner (2026-10-07)

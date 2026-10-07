@@ -43,6 +43,15 @@ Report refs theo run_id để retry cùng candidate không overwrite first repor
 Selection record trỏ một completed trusted run/report; legacy report chỉ đọc
 được nhưng thiếu proof thì không eligible. Capture issue không sửa physics result.
 
+## Logic change và dependent updates
+
+Risk: **Cao** khi chỉ sửa một phần. Logic delta: Review/release eligibility dựa trusted run.
+Cần sửa đồng bộ: ValidationRun producer, report DTO/verifier, workflow eligibility, review/release endpoints/UI, sealing và stale-revision invalidation.
+Acceptance xuyên consumer: Thiếu/stale/synthetic proof không release; producer thật và report/candidate/config cùng identity.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 S1/S2 có thể dùng persisted trusted-run fixture với nhãn synthetic rõ ràng;

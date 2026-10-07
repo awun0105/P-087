@@ -78,3 +78,43 @@ Một prototype có dataset/reference độc lập, measured failure envelope v�
 downstream physics proof có thể tạo task/ADR mới. Ghi supported sensor/input
 conditions, uncertainty, fallback và acceptance. Không sửa limits note thành
 “Solved” chỉ vì một demo render tốt hoặc một traversal có 0 blocked positions.
+
+## Client video compression compatibility
+
+AUD-23 khả thi; codec/browser/device memory differences là support/qualification
+constraints, không bài toán công nghệ thế giới chưa giải. WebCodecs không require
+mọi codec. Capability check và bounded queues/storage, explicit unsupported input
+và measured browser acceptance cần trước rollout. Nén local không tự tạo server
+copy của original; higher-quality reconstruction có thể cần reselect source.
+Giảm FPS/rotation cần source-time/pixel mapping, không là blind calibration solver.
+
+## Unified input resolution
+
+AUD-24 nhận file rời/ZIP trong một khung và tự resolve supported recipe; detection
+và orchestration khả thi, không là giới hạn công nghệ. Không thể xác nhận mọi
+units/map frame/capture/clock relation chỉ bằng extension, file count hoặc bytes
+không chứa metadata đó. Resolver báo missing/ambiguous và hỏi ngay trong cùng UI.
+Một static cloud có thể geometric-register khi đủ evidence, không cung cấp cả
+trajectory đa scan. TUM có pose timestamps nhưng không tự là RGB clock offset.
+Nhiều metadata không tự bảo đảm accuracy; malformed inputs không silently bị bỏ.
+
+## Imported 3DGS continuation và SOG
+
+AUD-25/ADR0025 Deferred theo yêu cầu owner ngày 2026-10-07 vì độ phức tạp. Không
+implement continuation hoặc source adapter trong active scope; nội dung kỹ thuật
+bên dưới là tham khảo nếu owner mở lại. Import/view PLY/SOG ở AUD-06/24 vẫn active.
+
+Xử lý tiếp imported Gaussian PLY/SOG là khả thi: typed source adapter,
+metric/floor setup, coarse geometry, geometric/manual objects/colliders và shared
+SceneIR/export/validation. Real bound cameras/images hoặc LiDAR mở thêm capabilities.
+Bare source không tự có observed frames, metric units, floor, complete geometry
+hoặc physical properties; thiếu facts thì hỏi/ghi uncertainty, không tạo dummy receipts.
+
+SOG view import nằm trong active plan; processing continuation/profile qualification đã hoãn.
+[SOG specification](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/sog/)
+dùng lossy quantization; lossless WebP giữ quantized values, không khôi phục PLY
+trước nén. Decoded Gaussian/PLY cần source hash/decoder/version/field coverage;
+SH đã bỏ, splats đã xóa hoặc vùng chưa quan sát không thể khôi phục chính xác từ
+SOG đơn. Đây là giới hạn dữ liệu, không lý do từ chối mọi SOG continuation.
+Viewer-readable SOG khác qualified geometry decoder; unbundled/LOD/model dialect
+chưa hỗ trợ báo rõ. Mesh sạch hoặc ICP residual thấp không tự là industrial physics proof.

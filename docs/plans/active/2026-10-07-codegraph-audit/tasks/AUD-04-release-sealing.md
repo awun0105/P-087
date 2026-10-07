@@ -37,6 +37,15 @@ phải rõ: dùng manifest publication hiện có hoặc committed DB record the
 reader không suy RELEASED từ intent/presence ZIP. Existing artifact phải verify
 checksum và embedded manifest; mismatches block, không overwrite để chữa lệch.
 
+## Logic change và dependent updates
+
+Risk: **Cao** khi chỉ sửa một phần. Logic delta: Sealing identity qua retry/crash.
+Cần sửa đồng bộ: DB seal intent, archive/manifest writer, review workflow commit, API download/status và recovery.
+Acceptance xuyên consumer: Fault injection publish ZIP/manifest + concurrent seal trả cùng release identity, không đánh lại timestamp khi retry.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 S1 có thể dùng current eligibility để viết identity regression; final S3 tích

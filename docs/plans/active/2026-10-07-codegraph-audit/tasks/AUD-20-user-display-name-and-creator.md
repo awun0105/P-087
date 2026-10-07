@@ -35,6 +35,15 @@ Hai seed: Reviewer tên “Minh An”, Editor tên “Hà Linh”. Apply qua mig
 đúng hai seed thì báo blocker, không chọn account bất kỳ; giữ email, ID, password,
 active và role. Không lưu credential trong task/fixture hoặc tạo seed production mới.
 
+## Logic change và dependent updates
+
+Risk: **Vừa** khi chỉ sửa một phần. Logic delta: Identity/creator projection, role snapshot.
+Cần sửa đồng bộ: UserRecord/Actor/PublicUser, register/seed setup/migration, project/job/import creator producer, API/list/card/table và packaging.
+Acceptance xuyên consumer: Creator immutable khác run actor; snapshot role khác current auth; old payload/checksum và non-seed users không bị rewrite.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 S1 độc lập; S2 phối hợp AUD-21.S1 identity/owner matrix. S3 dùng S2 projection;

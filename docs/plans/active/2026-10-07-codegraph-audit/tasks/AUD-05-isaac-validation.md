@@ -43,6 +43,15 @@ PathResult không chứa expected label. Required BLOCKED block; optional BLOCKE
 được report trung thực. Video capture failures dùng operational diagnostics,
 không thay physics report hoặc tạo ref tới file không tồn tại.
 
+## Logic change và dependent updates
+
+Risk: **Cao** khi chỉ sửa một phần. Logic delta: Durable Isaac run và evidence lifecycle.
+Cần sửa đồng bộ: candidate inventory/config, operation queue/admission, Isaac adapter/report publication, audit/status/ReviewPanel và AUD-03 gate.
+Acceptance xuyên consumer: Queue/restart/cancel/stale lease và report identity pass; real Isaac proof được phân biệt local fake-run.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 - S1 cần contract AUD-03.S1, admission AUD-07.S1; local fake-run tests có thể làm trước GPU.

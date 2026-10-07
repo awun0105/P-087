@@ -6,6 +6,8 @@ Date: 2026-10-07
 
 Active — bộ kế hoạch đã tạo; implementation chưa bắt đầu. Branch:
 `docs/codegraph-audit-implementation-plan`, base `develop@ef3a421`.
+Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
+2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
 ## Outcome
 
@@ -16,7 +18,13 @@ qua retry. Import và reobjectify phải phục hồi được, dùng admission 
 LiDAR QA/adaptive floor, measured latency và Fast Preview có producer/consumer
 contract. Automatic map registration giảm manual landmarks và mở independent-map
 input có QA. LiDAR odometry và anonymizer là opt-in extensions có qualification.
-Coding agent nhận một task và một sprint cụ thể.
+Video nén trước upload với preset720p/1080p/480p, giữ aspect dọc/ngang và source
+time/pixel mapping. Coding agent nhận một task và một sprint cụ thể.
+Một khung upload nhận video/LiDAR/metadata rời hoặc ZIP; server tự resolve recipe
+khả thi và hiển thị missing/ambiguous facts trước accepted Run.
+Giữ luồng import 3DGS riêng: Gaussian PLY/SOG → import READY → Xem scene.
+Owner hoãn xử lý tiếp scene import; không thêm nút Xử lý tiếp, derived processing
+job hoặc source-aware geometry/object pipeline cho imported Gaussian trong active scope.
 
 ## Context
 
@@ -30,7 +38,10 @@ implementation tốt chỉ để khớp tài liệu cũ. Ghi quyết định và
 khi thay đổi được kiểm chứng. Quyền truy cập, integrity và quyền sở hữu dữ liệu
 vẫn là invariant; không tự thay chúng khi giải quyết khác biệt docs/code.
 
-Đọc [hướng dẫn coding agent](AGENT_GUIDE.md) trước khi nhận sprint. Các nhãn
+Đọc [hướng dẫn coding agent](AGENT_GUIDE.md) và
+[integration/risk map](INTEGRATION_MAP.md) trước khi nhận sprint. Owner chốt:
+cải tiến có đổi logic thì sửa đồng bộ code/tính năng phụ thuộc theo logic mới;
+source hiện tại là baseline để dò impact, không là constraint giữ mọi behavior cũ. Các nhãn
 `AUD-*` chỉ là work package của plan này; không thêm task ID vào foundation
 crosswalk. Mỗi package bên dưới ánh xạ tới task hiện có.
 
@@ -62,6 +73,8 @@ observability, runtime chưa qualified, research limits và tính năng khả th
 | Raw scans thiếu trajectory bị reject | LiDAR odometry khả thi; cần explicit mode/runtime/provenance/drift QA | AUD-17 |
 | Auto anonymizer producer thiếu | Self-attested flow có; strict QA gate có; detection/tracking/redaction integration chưa có | AUD-18 |
 | Automatic registration cho independent maps cần bổ sung | Trajectory-based no-point fit đã có; geometric BEV/ICP proposal/QA cho independent maps chưa có | AUD-19 |
+| Video chưa nén trước upload, rotation/time mapping chưa explicit | Source: upload giữ bytes, decode passthrough, quality probe640×360; LiDAR ghép frame_id gốc | AUD-23 |
+| SOG chưa accepted input; imported continuation chưa có | Source: ImportService chỉ package PLY/ZIP thành SOG viewer; Finalize/VisualResolver/objectify yêu cầu Brush/camera/frame lineage | AUD-06/24 cho view; AUD-25 Deferred |
 
 Các số test là kết quả audit trước khi viết plan, không phải kết quả chạy lại
 cho thay đổi docs này. Ruff check/format pass; frontend lint/typecheck/build
@@ -94,12 +107,15 @@ BEV/ICP implementation hoặc independent-map/browser acceptance.
 | [AUD-17: LiDAR odometry](tasks/AUD-17-lidar-odometry.md) | P2 — EX-REC + EX-PRODUCT; opt-in | REC-08/06, PRODUCT-02/08/09 | 3 |
 | [AUD-18: Privacy anonymizer](tasks/AUD-18-privacy-anonymizer.md) | P2 — EX-REC + EX-PRODUCT; opt-in | REC-02, PRODUCT-01/02/09 | 3 |
 | [AUD-19: Automatic RGB–LiDAR registration](tasks/AUD-19-automatic-rgb-lidar-registration.md) | P1 — EX-REC + EX-PRODUCT; SCENE/SIM consumers | REC-06/08/09, PRODUCT-04/08/09 | 4 |
-
 | [AUD-20: Tên và creator attribution](tasks/AUD-20-user-display-name-and-creator.md) | P1 — EX-PRODUCT | PRODUCT-01/02/06/09 | 3 |
 | [AUD-21: Guest signup và ownership](tasks/AUD-21-guest-signup-and-ownership.md) | P1 — EX-PRODUCT | PRODUCT-01/02/06/09 | 4 |
 | [AUD-22: Guest quota 3/ngày](tasks/AUD-22-guest-daily-job-quota.md) | P1 — EX-PRODUCT | PRODUCT-01/02/06/09 | 3 |
+| [AUD-23: Nén video trước upload](tasks/AUD-23-client-video-normalization.md) | P1 — EX-PRODUCT + EX-REC | REC-02/03/04/08/09, PRODUCT-02/04/08/09 | 5 |
+| [AUD-24: Unified upload và input resolution](tasks/AUD-24-unified-upload-and-input-resolution.md) | P1 — EX-PRODUCT + EX-REC | REC-02/03/06/08/09, PRODUCT-02/04/08/09 | 5 |
+| [AUD-25: Imported PLY/SOG continuation](tasks/AUD-25-imported-3dgs-continuation.md) | Deferred — không implement; EX-REC/SCENE/PRODUCT/SIM nếu mở lại | REC-04/05/06/09, SCENE-02/03/06/08, SIM-02/04/07, PRODUCT-02/04/06/08/09/10/11 | 6 |
 
-Tổng: **22 work packages / 70 sprint**. Mỗi sprint có Input, Output, Contract,
+Active: **24 work packages / 80 sprint**. AUD-25 có 6 sprint Deferred giữ để
+tham khảo; tổng tài liệu vẫn có 25 packages/86 sprint definitions. Mỗi sprint có Input, Output, Contract,
 implementation steps, Tests và Exit; mỗi task có dependencies, verification/DoD
 và Result/Evidence. P2 là extension triển khai sau nền tảng P0/P1, không là
 permanent exclusion do PRD cũ. Không mặc định enable odometry/anonymizer mọi job.
@@ -118,6 +134,9 @@ Guest chỉ mutate own resources, Editor/Reviewer giữ rights hiện có. Quota
 3 accepted runs/ngày gồm manual Retry, reset 00:00 Asia/Ho_Chi_Minh; automatic
 worker retry/duplicate không thêm lượt. Email verification để sau. Đây là yêu cầu
 owner mới, thay scope exclusion auth/roles/quota của bản plan trước.
+Owner hoãn AUD-25 ngày 2026-10-07 vì độ phức tạp. Import/view PLY/SOG ở AUD-06/24
+vẫn trong active scope; source continuation/G1–G3, metric/object/collision processing
+cho import và nút Xử lý tiếp không implement. Không tự mở lại từ task phụ thuộc.
 
 ## Architecture proposals
 
@@ -134,34 +153,53 @@ owner mới, thay scope exclusion auth/roles/quota của bản plan trước.
 - [ADR 0021: Guest identity và ownership](../../../decisions/0021-guest-identity-and-ownership.md).
 - [ADR 0022: Guest daily quota](../../../decisions/0022-guest-daily-job-quota.md).
 
-ADR mới có status Proposed; không giả lập owner acceptance. Bug fixes trên
+- [ADR 0023: Client video normalization](../../../decisions/0023-client-video-normalization.md).
+- [ADR 0024: Unified upload và input resolution](../../../decisions/0024-unified-upload-and-input-resolution.md).
+- [ADR 0025: Imported PLY/SOG continuation — Deferred](../../../decisions/0025-imported-3dgs-continuation.md).
+
+13 ADR active có status Proposed; ADR0025 Deferred, không dùng làm active policy.
+Không giả lập owner acceptance. Bug fixes trên
 invariant hiện có có thể làm độc lập. Sprint thiết kế phải ghi rõ phần mới cần
 producer/consumer review trước khi trở thành shared contract/policy.
 
 ## Approach và thứ tự thực hiện
 
-1. AUD-11: sửa baseline tests; không đổi logic production để chiều mock cũ.
-2. AUD-01.S1–S2, AUD-02.S1–S2: bảo vệ geometry và từ chối export không đủ capability.
-3. AUD-03.S1–S2, AUD-04: khóa release không có proof và làm retry nhất quán.
-4. AUD-10: CAS revision/head, làm nền cho publication của các task dài.
-5. AUD-07.S1–S2: admission cho heavy operation. AUD-06 và AUD-05.S1 dùng contract này.
-6. AUD-05.S2–S4: Isaac runtime → report/evidence → API/UI → review/release E2E.
-7. AUD-12.S1, AUD-13.S1, AUD-14.S1, AUD-15.S1: freeze quality/QA/floor/timing
-   contracts trước optimization hoặc LiDAR selection. Có thể bắt đầu design sớm.
-8. AUD-14.S2–S3, AUD-12.S2, AUD-13.S2–S3: qualified cleanup/floor/projection QA;
-   AUD-12.S3 sensor-package path cần confirmed alignment + AUD-13 QA;
-   static-map extension dùng AUD-19 QA. S4 cần AUD-01/02/05 và held-out proof.
-9. AUD-15.S2–S3, AUD-16: measured optimization và explicit preview/final flow.
-10. AUD-19: reuse trajectory fit, implement independent-map BEV/ICP/QA trước
-    qualified static-map collision selection; default automatic, manual fallback.
-11. AUD-08 và AUD-09: chỉnh object/collider; xuất và validation lại candidate mới.
-12. AUD-17 và AUD-18: opt-in extensions, qualify isolated adapters và reuse
-    admission/QA/lineage contracts; không đảo default supplied/self-attested flows.
-13. AUD-20–22: chốt identity/permission matrix, creator projection, Guest signup
-    và ownership guards; atomic quota trước enable public signup. Tích hợp với mọi
-    mutation/job-producing consumer, giữ Editor/Reviewer regressions.
-14. Chạy integration của các package đã hoàn thành; ghi acceptance thực tế và
-   cập nhật docs liên quan. Không gộp sprint pending GPU vào DONE CPU.
+Triển khai theo dependency của từng sprint. AUD number là identifier, không là
+execution order; không cần xong toàn bộ một task mới được chuyển sang task khác.
+Trong bảng, `S1–S3` là ba sprint liên tiếp, thực hiện theo thứ tự tăng dần.
+Thứ tự mặc định gồm đủ **80 active sprint, mỗi sprint một lần**; không có AUD-25:
+
+| Đợt | Thứ tự sprint | Kết quả cần đạt |
+|---|---|---|
+| 1 — Baseline và đo lường | AUD-11.S1–S2 → AUD-15.S1 | Fixtures/tests phản ánh đúng behavior; timing protocol và số đo nền trước cải tiến. |
+| 2 — P0 collision/export/release | AUD-01.S1–S2 → AUD-02.S1–S2 → AUD-01.S3 → AUD-02.S3 → AUD-03.S1–S3 → AUD-04.S1–S3 | Edit/export đúng geometry; validation gate và release identity không cho proof thiếu hoặc seal retry lệch. |
+| 3 — Revision và admission nền tảng | AUD-10.S1–S3 → AUD-07.S1–S2 | Durable revision head/CAS, operation reservation và stale-worker guards trước các consumer mới. |
+| 4 — Tên, Guest và quota | AUD-20.S1 → AUD-21.S1 → AUD-22.S1 → AUD-20.S2–S3 → AUD-21.S2–S3 → AUD-22.S2–S3 → AUD-21.S4 | Creator/ownership/quota hoàn tất trước mở public Guest signup. |
+| 5 — Nén video và input resolution | AUD-23.S1–S5 → AUD-24.S1 → AUD-06.S1 → AUD-24.S2 | Local compression/media mapping; grouped input/recipe và shared PLY/SOG format contracts trước deterministic resolver. |
+| 6 — Durable import, validator và unified UI | AUD-06.S2–S3 → AUD-05.S1–S4 → AUD-07.S3 → AUD-24.S3–S4 | Durable consumers/admission; grouped dispatch/UI và PLY/SOG view import. |
+| 7 — Object và collider editor | AUD-08.S1–S4 → AUD-09.S1–S3 | Merge/reassign/collider edit dùng shared publication; candidate mới phải validate lại. |
+| 8 — Collision quality, floor và LiDAR | AUD-12.S1 → AUD-13.S1 → AUD-14.S1 → AUD-19.S1 → AUD-14.S2–S3 → AUD-12.S2 → AUD-13.S2–S3 → AUD-19.S2–S4 → AUD-12.S3–S4 | Freeze quality/QA; adaptive floor, calibration QA, RGB–LiDAR map registration và qualified collision source. |
+| 9 — Latency và Fast Preview | AUD-15.S2–S3 → AUD-16.S1–S3 | Measured optimization và preview/final lifecycle giữ đúng preparation identity và quality gates. |
+| 10 — Input qualification và extensions | AUD-17.S1–S3 → AUD-24.S5 → AUD-18.S1–S3 | Estimated trajectory/input matrix R1–R6 và PLY/SOG view import; anonymizer opt-in có provenance/QA. |
+
+Sprint bắt đầu là **AUD-11.S1**. AUD-15.S1 được làm sớm để AUD-23.S5 có
+measurement protocol; optimization AUD-15.S2–S3 vẫn làm sau quality work.
+AUD-07.S3 làm sau AUD-06/AUD-05 để kiểm tra admission trên consumer thật;
+không đợi toàn bộ AUD-07 trước khi triển khai hai consumer này.
+
+Sau mỗi sprint: sửa đồng bộ producer/persistence/API/worker/UI/config/tests bị
+logic mới ảnh hưởng, chạy focused checks và integration scenario liên quan,
+ghi Result/Evidence trước khi chuyển sprint phụ thuộc. Cuối mỗi đợt chạy regression
+của các flows đã thay đổi; không dồn related-code updates hoặc integration tới cuối
+80 active sprint. Trước enable schema mới, kiểm tra forward migration/read compatibility
+và deployment order của producer/worker consumers theo integration map.
+
+Real Isaac proof ở AUD-05; fixtures ở đợt 2 chỉ chứng minh contracts/gates,
+không chứng minh physics runtime. Thiếu GPU/Isaac/browser proof thì phần acceptance
+đó giữ Pending, tiếp tục sprint độc lập khi có thể. Không đánh dấu DONE hoặc mở
+consumer đang chờ qualification. AUD-12 sensor-package path có thể làm sau
+AUD-13.S3 mà không đợi independent-map registration AUD-19.S3–S4; static-map path
+chỉ enable sau registration QA. Việc đổi thứ tự phải giữ prerequisites tương ứng.
 
 Dependencies không tạo cycle: AUD-03 tạo gate với persisted proof fixture;
 AUD-05 mới tạo proof thật. AUD-07 chuẩn hóa reservation trước worker consumers,
@@ -173,9 +211,30 @@ AUD-19 uses AUD-12.S1 quality fixtures; AUD-12 sensor-package path không đợi
 AUD-19. Static-map consumer chỉ enable sau registration QA, không bắt AUD-19
 đợi whole AUD-12 epic. Sensor calibration QA và map registration QA không tráo nhau.
 
+AUD-23 có client preparation identity trước AUD-15/16 cache consumers; supported
+sensor mapping chốt trước AUD-13 overlay QA. Không cần full odometry/registration
+để normalize RGB-only uploads; paired sensor mode giữ mapping/projection guards.
+AUD-24.S1–S2 chốt assembly/recipe ports trước AUD-17/19 implementations. S3–S4
+enable từng qualified recipe, không fake support cho missing runtime. R5 estimated
+raw mode chỉ nghiệm thu sau AUD-17.S3; qualification toàn matrix ở AUD-24.S5.
+AUD-06.S1 format/validation ports precede AUD-24.S2 SOG classifier. AUD-25 Deferred;
+AUD-06/19/24 không phụ thuộc source adapter hoặc sprint của task này. AUD-19 active
+target là reconstructed RGB geometry; imported PLY/SOG giữ view-only lifecycle.
+Import READY chỉ là view readiness, không là geometry/candidate/physics proof.
+
 Các package chạm chung scene.py, database.py, workflow.py hoặc TypeScript
 contracts phải được tích hợp tuần tự theo contract sprint. Không gán hai agent
 đồng thời ghi cùng file; task map không tự cấp quyền spawn agent.
+
+## Logic changes và integration
+
+Mỗi task đã có Logic change/dependent updates và consumer acceptance. Integration
+map có 24 active task và một row AUD-25 Deferred để tham khảo. AUD-10/21/22/23/24
+tác động broad publication, permissions/quota, media/time/calibration và grouped
+routing. Risk của AUD-25 không tạo active implementation work. Risk là technical assessment, chưa là
+regression do implementation mới. Khi contract thay đổi, update producer/persistence/
+API/worker/UI/config/tests cùng semantics và có migration/rollout cho old jobs.
+Không claim DONE từ module tests khi related consumers còn dùng rule cũ.
 
 ## Risks And Recovery
 
@@ -202,12 +261,32 @@ creator name; thiếu role badge và Guest ownership. api/auth.py quota hiện r
 24h audit count; Guest calendar quota cần atomic DB reservation. Các kết luận này
 là source inspection, chưa chạy acceptance của feature mới.
 
+## Video baseline bổ sung
+
+Source review 07/10/2026: upload/direct multipart chưa compress, sample_fps3/6
+là reconstruction setting, không encoded FPS. Không có16:9-only gate trong đường
+đã đọc;640×360 là measurement profile. Owner chọn local compression trước upload.
+Proposed cap30/preserve aspect cần record timeline/pixel transforms; camera_priors
+hiện dùng original frame_id. Không claim real portrait/browser encoding acceptance.
+
+## Unified upload và input resolution
+
+AUD-24: owner muốn một khung nhận mọi file; không bắt chọn technical mode trước.
+Sáu nhóm R1–R6 bao phủ RGB-only, registered map, single static cloud, raw scans
+có trajectory, raw scans cần estimate và calibrated/time-bound sensor package.
+Classifiers nhận diện content; resolver xác định missing/ambiguous bindings và
+compatible recipes. Units/cloud frame/clock không suy chắc từ tên/extension hoặc
+file count. Metadata sai không bị bỏ ngầm để chọn RGB-only. One accepted Run giữ
+immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
+
 ## Progress
 
 - [x] Tạo branch và đối chiếu source/contracts bằng CodeGraph.
 - [x] Đối chiếu audit Gemini với source/log, ghi technology/qualification limits.
-- [x] Viết 22 work packages, 70 sprint contracts và 11 ADR proposals.
+- [x] Viết 24 active packages/80 sprint contracts/13 ADR Proposed; giữ AUD-25 với
+  6 sprint và ADR0025 Deferred ngoài execution order.
 - [x] Kiểm tra cấu trúc sprint, links, canonical task bindings, test paths và docs-only scope.
+- [x] Bổ sung logic-change impact/dependent updates cho cả 25 task và integration map.
 - [ ] Implementation AUD-11.
 - [ ] Implementation AUD-01–04.
 - [ ] Implementation AUD-10, AUD-07, AUD-06.
@@ -220,17 +299,30 @@ là source inspection, chưa chạy acceptance của feature mới.
 
 - [ ] Implementation AUD-20–22 và three-role/quota/browser acceptance.
 
+- [ ] Implementation AUD-23 và client encode/upload/bandwidth/geometry acceptance.
+- [ ] Implementation AUD-24 và grouped upload/R1–R6 recipe/consumer/browser acceptance.
+- [x] Hoãn AUD-25/ADR0025 theo yêu cầu owner; gỡ khỏi execution order và active dependencies.
+
 ## Validation và handoff
 
 Mỗi sprint ghi command, exit code, counts, artifact refs/checksums, phạm vi proof
 và phần pending trong Result của task. Checklist không thay output thực tế.
 Đọc [AGENT_GUIDE.md](AGENT_GUIDE.md) để biết checks và mẫu prompt nhận task.
-Plan chỉ chuyển Completed khi tất cả acceptance thuộc scope được chứng minh.
+Plan chỉ chuyển Completed khi tất cả acceptance thuộc active scope được chứng minh.
+AUD-25 giữ Deferred, không đánh dấu Completed hoặc tự implement trong các task khác.
 
 ## Result
 
-Đã tạo 37 Markdown files và cập nhật 2 indexes, tổng 39 planning documents.
-Gồm 22 tasks, 70 sprints và 11 ADR Proposed. Read-only document validation exit 0: 151 local links, 95 existing pytest paths,
-102 canonical task bindings hợp lệ; sprint fields/sequence, ADR status, fences
-và exact docs scope đều pass. `git diff --check` exit 0; implementation/runtime acceptance chưa bắt đầu. Git delivery theo yêu cầu
-commit/push riêng của owner, không cấp quyền deploy hoặc implement toàn bộ plan.
+Plan lưu 46 Markdown documents, 25 task files và 86 sprint definitions. Active
+scope có 24 tasks/80 sprints/13 ADR Proposed; AUD-25 với 6 sprint và ADR0025 Deferred
+theo yêu cầu owner. AUD-06/24 vẫn nhận PLY/SOG cho view; AUD-19 không đợi hoặc
+implement imported-source adapter. Source/runtime chưa thay đổi.
+Document checks exit 0: 25 integration sections gồm một Deferred, 231 local links,
+121 existing pytest paths và 138 canonical bindings trong toàn bộ tài liệu lưu;
+đủ 80 active sprint không trùng, đúng internal order và 37 active cross-task
+prerequisite pairs; 6 deferred sprint không trong execution order/dependencies.
+`git diff --check` exit 0. Đây là kiểm tra
+kế hoạch, không là runtime acceptance. Current local additions gồm 34 Markdown
+files. Base plans đã commit/push ở e5597b0;
+video/integration/unified-upload/import-continuation additions chưa commit/push
+hoặc runtime acceptance.

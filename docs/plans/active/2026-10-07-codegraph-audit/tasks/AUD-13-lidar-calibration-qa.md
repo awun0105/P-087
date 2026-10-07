@@ -47,6 +47,15 @@ sensor-package collision source AUD-12. Independent static-map source có AUD-19
 registration QA riêng; không claim calibration/timing PASS từ map fit. Geometry
 alignment confirmation không tự là sensor QA PASS.
 
+## Logic change và dependent updates
+
+Risk: **Cao** khi chỉ sửa một phần. Logic delta: Sensor QA dùng exact calibration/timing/image convention.
+Cần sửa đồng bộ: LiDAR ingest, intrinsics/frame-map/pixel transforms AUD-23, projection overlay, sensor-source selection gate, diagnostics/UI và held-out evaluation.
+Acceptance xuyên consumer: Rotated/resized/downsampled RGB projection đúng, missing metadata INCONCLUSIVE; sensor QA không bị dùng để reject independent-map registration.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 S1 độc lập; S2 yêu cầu available sensor/calibration data hoặc synthetic rig known

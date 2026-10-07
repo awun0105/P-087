@@ -40,6 +40,15 @@ xóa low obstacle collision geometry. Source classification/selection bind AUD-0
 AUD-12 ownership. Small/thin object chưa thành candidate vẫn thuộc environment.
 Fallback known confirmed flat plane phải ghi explicit reason/profile; no silent new plane.
 
+## Logic change và dependent updates
+
+Risk: **Cao** khi chỉ sửa một phần. Logic delta: Fitted floor thay raw-z/static-clearance classification.
+Cần sửa đồng bộ: REC-06 floor prior port, object extraction/geometric clustering, background ownership, collision cleanup/source QA và classification thresholds.
+Acceptance xuyên consumer: Sloped/noisy floor, low/thin obstacles và canonical units/frame consistency pass; source ownership không suy từ edited collider.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 S1 độc lập runtime; S2 dùng AUD-01 ownership/AUD-12.S1 quality fixtures, không

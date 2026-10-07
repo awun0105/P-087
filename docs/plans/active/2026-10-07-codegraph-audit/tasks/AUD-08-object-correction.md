@@ -52,6 +52,15 @@ không thêm SceneObjectState mới. Membership IDs của secondary được map
 Geometry/local origin thay đổi phải regenerate collider, background source
 ownership và refs; confirmation reset CANDIDATE. Không kế thừa validation/approval.
 
+## Logic change và dependent updates
+
+Risk: **Cao** khi chỉ sửa một phần. Logic delta: Membership merge/reassign tạo revision mới.
+Cần sửa đồng bộ: extraction membership producer, object correction command/API/UI, visual/geometry/background rebuild, CAS publication và candidate invalidation.
+Acceptance xuyên consumer: Membership partition, source geometry và revision đồng bộ; merge/reassign không copy collider cũ, confirmed/moved unsupported case báo rõ.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 S1 cần source ownership AUD-01.S1. S2/S3 dùng artifact publication và atomic

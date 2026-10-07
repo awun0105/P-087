@@ -46,6 +46,15 @@ invalidate old QA/acceptance. Zero detections không tự VERIFIED_ANONYMIZED.
 Opt-in sanitized flow consumes approved copy trước training, thumbnails/public
 assets; raw input vẫn trong original access boundary, giữ rights attestation.
 
+## Logic change và dependent updates
+
+Risk: **Cao** khi chỉ sửa một phần. Logic delta: Sanitized source identity trước reconstruction.
+Cần sửa đồng bộ: privacy contracts/gate, detector/tracker/redaction producer, prepared InputManifest/frame set, cache/preview/train consumers, storage access và review diagnostics.
+Acceptance xuyên consumer: Train/cache không reuse raw source khi chọn anonymized; timeline/redaction coverage và approval refs match actual sanitized bytes.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 S1 độc lập để qualify model/contracts; S2 dùng AUD-07 durable admission pattern.

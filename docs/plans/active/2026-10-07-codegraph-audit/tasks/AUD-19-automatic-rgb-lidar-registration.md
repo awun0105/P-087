@@ -37,12 +37,18 @@ registered static cloud + reconstructed RGB geometry dùng map registration;
 raw scan sequence thiếu trajectory đi qua AUD-17 trước khi thành registered map.
 New static-map mode không bỏ validation của existing sensor-package mode.
 Map registration không tự tìm camera↔LiDAR rig extrinsic hoặc per-frame time sync.
+AUD-24 bổ sung one-dropzone assembly: một static scan có thể dùng map registration
+nếu đủ overlap/units/frame evidence; không gọi scan đó là registered whole map.
+Raw scans có supplied trajectory nhưng thiếu rig calibration/timing có thể fusion
+qua map adapter rồi vào mode này; không fake sensor package để thỏa schema cũ.
 
 ## Input / output / data contract
 
 Input: exact RGB source/geometry/metric/floor refs, LiDAR registered-cloud ref,
 declared units/source frame, selected profile/ROI, same-scene/capture-context
 evidence, optional trusted trajectory/correspondence prior và expected target revision.
+Active target là reconstructed RGB source/geometry. Imported PLY/SOG target và
+source-space proxy của AUD-25 đã Deferred; không implement hoặc đợi adapter đó.
 Static-map mode không bắt user fabricate calibration/timestamps; geometry overlap,
 units và scale/floor evidence vẫn phải đủ. Unknown layout changes/coverage báo uncertainty.
 
@@ -74,10 +80,23 @@ metric tạo artifacts/revision mới và invalidate candidate/validation/approv
 Initial scale-changing path trước user object edits, hoặc explicit new reconstruction
 run; không tự rescale scene đã chỉnh sửa khi registration hoàn tất ngầm.
 
+## Logic change và dependent updates
+
+Risk: **Cao** khi chỉ sửa một phần. Logic delta: Static-map registration mode và metric/floor correction.
+Cần sửa đồng bộ: input mode/ingest binding, trajectory fit/BEV/ICP, proposal/QA/confirmation, canonical scale/alignment record, CAS scene update và collision selection.
+Acceptance xuyên consumer: Final rigid transform đúng units/frame; scale correction creates new artifacts; ambiguity/stale target không auto publish và không rescale edited scene ngầm.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
-S1 độc lập; reuse current flat-floor/trajectory contract fixtures. S2 dùng
+S1 độc lập; reuse current flat-floor/trajectory contract fixtures. AUD-24.S1 cung cấp
+assembly/recipe ports khi bind loose files; review adapter/from-assembly lineage
+cùng task đó. Existing direct map request giữ supported compatibility. S2 dùng
 AUD-14.S1 khi cần adaptive floor evidence và AUD-12.S1 quality/coverage protocol.
+AUD-25 Deferred; không có dependency hoặc imported-source work từ task đó trong
+active S1–S4. RGB/LiDAR registration tiếp tục với existing target contracts.
 S3 không đợi toàn bộ AUD-12/13: static-map registration có QA riêng, sensor package
 có AUD-13 calibration/timing QA; thiếu rig metadata không tự block map-registration mode.
 S4 dùng AUD-07.S1 admission, AUD-10.S2 khi publish scene revision và AUD-03 gate.

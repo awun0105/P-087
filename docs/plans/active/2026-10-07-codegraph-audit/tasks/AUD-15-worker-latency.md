@@ -46,6 +46,15 @@ artifact không được đánh dấu hit. Existing retry cache là baseline đ�
 Observed estimator dùng measured supported profiles, không gán estimated time
 thành progress percent thật hoặc sửa user-selected config.
 
+## Logic change và dependent updates
+
+Risk: **Cao nếu sửa cache/stage reuse** khi chỉ sửa một phần. Logic delta: Latency optimization và reusable preparation identity.
+Cần sửa đồng bộ: source/preparation/sanitization refs, processing config/resource estimate, prepare/pose/train/package stages, retry/cache reader và telemetry.
+Acceptance xuyên consumer: Cache hit chỉ exact content/profile/tool/maps; fail/cancel không fake complete timing, held-out geometry/visual quality không bị silently degrade.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 S1 độc lập. S2 dùng resource invariants hiện có; operation admission extensions

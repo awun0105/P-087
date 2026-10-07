@@ -30,6 +30,15 @@ Output: meaningful quota/retry/process tests không phụ thuộc developer Post
 Test data giữ typed job/config/error contracts và transient exception eligibility.
 Tests không kết nối DB/store production, không tạo GPU work hoặc kill process ngoài fixture.
 
+## Logic change và dependent updates
+
+Risk: **Thấp** khi chỉ sửa một phần. Logic delta: Fixtures/tests đúng runtime và retry eligibility.
+Cần sửa đồng bộ: test auth/project registry fixtures, failed-job eligibility, subprocess fake poll/wait/returncode và focused test callers.
+Acceptance xuyên consumer: Không sửa production policy chỉ để pass mock; expected assertions của behavior mới phải có business reason/regression rõ.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 Hai sprints độc lập implementation AUD-01–10. Đây là baseline trước tích hợp.

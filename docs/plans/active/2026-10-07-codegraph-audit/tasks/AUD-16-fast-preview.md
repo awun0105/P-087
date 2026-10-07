@@ -46,6 +46,15 @@ Brush resume là capability phải qualify bằng pinned CLI/runtime và actual 
 checkpoint. PLY/SOG visual output không phải checkpoint đủ để resume training.
 Nếu chưa qualified, final rerun có lineage rõ; không claim continuation 7k→30k.
 
+## Logic change và dependent updates
+
+Risk: **Cao** khi chỉ sửa một phần. Logic delta: Preview/final lifecycle và lineage.
+Cần sửa đồng bộ: preset/config schema, worker stage routing, early SOG publication, frame/preparation cache, final create intent/quota, progress/viewer và candidate/review gating.
+Acceptance xuyên consumer: Renderable preview không đồng nghĩa final/SUCCEEDED/releasable; promotion creates exact final config/run và giữ preview history khi final fail.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 S1/S2 reuse existing admission; AUD-15.S1 timing contract trước final benchmark.

@@ -46,6 +46,15 @@ Long repair có paging/continuation, không scan toàn bộ trong HTTP current l
 Missing head lúc migration cần truthful recovery status/explicit repair, không
 trả nhầm revision cũ hoặc current head từ uncommitted artifact.
 
+## Logic change và dependent updates
+
+Risk: **Rất cao** khi chỉ sửa một phần. Logic delta: Committed head/CAS thay local recovery authority.
+Cần sửa đồng bộ: SceneEditor apply/publish_initial/publish_next/current/revision/restore, objectify/extraction, physics_enrich, object/collider mutations, package readers và packaging.
+Acceptance xuyên consumer: Mọi reader thấy committed head, mọi writer dùng cùng CAS; crash/concurrent/stale publication không overwrite user edit hoặc tạo orphan thành current.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 S1/S2 độc lập UI/object features. Consumers AUD-07/08/09 và physics_enrich phải

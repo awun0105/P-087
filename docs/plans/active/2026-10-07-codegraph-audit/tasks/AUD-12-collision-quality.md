@@ -53,6 +53,15 @@ Floor_band 0,15 là ablation parameter, không default universal. Low obstacles
 phải giữ. Requested/effective config rõ; không âm thầm tăng resolution khi vượt
 voxel capacity — chờ/block/explicit ROI/profile change theo khả năng runtime.
 
+## Logic change và dependent updates
+
+Risk: **Cao** khi chỉ sửa một phần. Logic delta: Collision source/quality selection.
+Cần sửa đồng bộ: RGB cleanup/LiDAR aligned producer, FloorModel/QA ports, finalize/bundle/SceneEnvironment, simulation_package/USD, viewer/source selection và Isaac validation.
+Acceptance xuyên consumer: Visual/canonical geometry khác collision source; cleanup retention/coverage và exact aligned refs được dùng ở export/validation.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 S1 độc lập; S2 dùng floor/noise contract AUD-14.S1. LiDAR sensor-package source S3

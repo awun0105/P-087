@@ -39,6 +39,15 @@ policy_id và role; 429 reason guest_daily_job_quota_exceeded + resets_at và re
 metadata, không bắt frontend parse text. Idempotency key scoped actor+operation,
 request fingerprint; same key khác payload conflict, duplicate original result.
 
+## Logic change và dependent updates
+
+Risk: **Rất cao** khi chỉ sửa một phần. Logic delta: Atomic Guest calendar quota và accepted intent.
+Cần sửa đồng bộ: create_scene_from_upload/retry_job/request_objectify policy inventory, auth helpers, UserRecord/Me quota projection, DB reservations/CAS queue, manual/auto retry và UI.
+Acceptance xuyên consumer: 3 accepted run intents across replicas; duplicate/manual/auto retry và midnight Vietnam đúng; giữ owner khác charged actor, Editor rolling24h/Reviewer unlimited theo role người chạy.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 S1 dùng AUD-21.S1 identity/action matrix; S2 dùng AUD-21.S2/S3 guards và current

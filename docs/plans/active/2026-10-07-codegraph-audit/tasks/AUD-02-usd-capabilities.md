@@ -46,6 +46,15 @@ Không lấy filesystem presence một file Python làm runtime qualification pr
 Preflight static và export capability là hai kết quả khác nhau. S1 chọn blocker
 mapping vào DTO hiện có hoặc additive DTO; không đổi shared enum tùy tiện.
 
+## Logic change và dependent updates
+
+Risk: **Cao** khi chỉ sửa một phần. Logic delta: USD requirements/capability và blocker thay false success.
+Cần sửa đồng bộ: physics_enrich, package builder, OpenUSD fallback/hybrid, candidate inventory/API/ReviewPanel và validation worker.
+Acceptance xuyên consumer: Unsupported capability không publish candidate/revision giả; supported export giữ mesh topology, local offsets/physics và exact refs.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 S1 độc lập; S2 dùng requirements S1. Background geometry dùng AUD-01. S3 pxr

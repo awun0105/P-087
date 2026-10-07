@@ -43,6 +43,15 @@ Base scene revision giữ từ request tới commit; result của stale base/lea
 Unknown resource estimate/headroom không được giả đủ; CPU boxes không đòi GPU
 nếu profile thực tế chỉ CPU nhưng vẫn kiểm RAM/disk.
 
+## Logic change và dependent updates
+
+Risk: **Cao** khi chỉ sửa một phần. Logic delta: Shared resource admission và operation fencing.
+Cần sửa đồng bộ: ResourceAdmission, job runner/worker_cli, objectify/import/validator commands, telemetry/status UI và cancellation.
+Acceptance xuyên consumer: Cạnh tranh job/operation không double reserve/overcommit; waiting giữ chosen config, stale worker không commit/release reservation của worker mới.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 S1 không phụ thuộc import/validator implementation. S2 dùng S1; atomic scene

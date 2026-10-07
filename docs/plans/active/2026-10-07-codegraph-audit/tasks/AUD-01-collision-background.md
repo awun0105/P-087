@@ -53,6 +53,15 @@ lấy current pose đã sửa làm source. Không đủ evidence thì block rebu
 giữ khả năng đọc/download artifact cũ. Vùng overlap phải có owner xác định;
 không trừ hộp mù khiến mất sàn/tường. Gaussian inpainting không chứng minh mesh vật lý.
 
+## Logic change và dependent updates
+
+Risk: **Cao** khi chỉ sửa một phần. Logic delta: Background source-region và object collision sau edit.
+Cần sửa đồng bộ: extraction/objectify provenance → SceneIR edits → legacy/hybrid simulation_package → USD/candidate → validation; không carve theo pose đã sửa.
+Acceptance xuyên consumer: Move/delete/ignore/restore giữ đúng background + active collider, exported candidate không còn collider gốc hoặc collision kép.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 S1 độc lập. S2 dùng contract S1. S3 tích hợp AUD-02 capability path; real Isaac

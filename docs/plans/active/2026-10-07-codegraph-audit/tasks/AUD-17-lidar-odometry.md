@@ -12,8 +12,9 @@
 ## Baseline và scope
 
 detect._detect_lidar_package yêu cầu trajectory/calibration/timestamps; chưa có
-odometry producer. Default supplied-trajectory mode phải giữ behavior. Estimate
-mode là explicit input/config choice cho ordered timestamped raw scans.
+odometry producer. Legacy supplied-trajectory APIs giữ behavior. Estimate mode là
+explicit resolved config cho ordered timestamped raw scans; AUD-24 có thể tự chọn
+recipe này và hiển thị trước Run, không bắt user chọn mode ở màn hình riêng.
 
 CodeGraph: _detect_lidar_package, LiDAR package/models/fusion/ingest,
 camera_priors/coordinate_bridge, metric/world_alignment, input kinds và job dispatch.
@@ -53,9 +54,21 @@ Không claim point-cloud deskew nếu sensor package thiếu per-point time/capa
 New estimated or user-supplied trajectory tạo new identity; downstream QA/alignment/
 collision phải invalidate evidence cũ và confirm lại theo existing workflow.
 
+## Logic change và dependent updates
+
+Risk: **Cao** khi chỉ sửa một phần. Logic delta: Estimated trajectory mode khác supplied trajectory.
+Cần sửa đồng bộ: input detection/routing, safe scan ingest, odometry worker/provider/version, trajectory/frame bindings, RGB priors/metric/alignment và QA consumers.
+Acceptance xuyên consumer: Explicit supplied/estimated modes, unsupported/drift diagnostics và timestamps giữ identity; estimated trajectory không tự tạo calibration PASS.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 S1 độc lập để qualify adapter/input contract. S2 dùng AUD-07 admission/lease pattern.
+AUD-24.S1 cung cấp grouped assembly/recipe port; reuse trong unified path, không
+đợi whole AUD-24 để implement odometry. Legacy missing-trajectory request khác
+valid assembly có accepted estimated recipe; không auto estimate từ file ambiguous.
 S3 dùng AUD-13 calibration/timing QA cho RGB integration; AUD-14.S1 khi cần fit
 floor/up normalization; AUD-12 cho collision selection, không auto-enable LiDAR
 collision từ trajectory vừa estimate.
@@ -71,7 +84,8 @@ Implement: extend detection/routing only khi explicit mode selected; validate sc
 order/timestamps/unit/frame and supported point attributes. Qualify KISS-ICP version,
 code/dependency licenses, runtime requirements, memory/performance and
 adapter request/result protocol. Document local odometry/no loop closure scope.
-Tests: missing trajectory default reject, estimate mode accepted only valid raw
+Tests: legacy missing trajectory reject; unified resolver chọn explicit estimate
+recipe only valid ordered/time-described scans; estimate mode accepted only valid raw
 sequence, unsafe ZIP, duplicated/non-monotonic times, invalid units, missing RGB calib.
 Include arbitrary sensor-map orientation/missing up prior in input support fixtures.
 **Exit:** [ ] mode/schema/runtime envelope agreed; [ ] no weakened input validation.

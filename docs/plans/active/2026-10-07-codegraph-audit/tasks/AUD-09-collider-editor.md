@@ -42,6 +42,15 @@ mass chỉ đổi nếu existing explicit volume policy yêu cầu và ghi prove
 không dùng collider override để giả object visual volume. Invalid legacy collider
 data báo diagnostic; không rewrite artifact cũ khi thêm command validation.
 
+## Logic change và dependent updates
+
+Risk: **Cao** khi chỉ sửa một phần. Logic delta: Collider dimensions/local offset khác object pose.
+Cần sửa đồng bộ: ColliderSpec/edit DTO, domain validation, API/TypeScript/UI, SceneIR CAS, legacy/hybrid exporter, candidate và validation.
+Acceptance xuyên consumer: World collider transform = object × local collider; export khớp editor, edit invalidates approval và source carve vùng gốc giữ đúng.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 S1 có thể làm độc lập; publication S2 dùng AUD-10 CAS. Export S3 cần AUD-02 local

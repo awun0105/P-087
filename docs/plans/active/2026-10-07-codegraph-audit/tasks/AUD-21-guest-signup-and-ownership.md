@@ -38,6 +38,15 @@ Reviewer user-management nhận Guest, không cho self-demote tới guest/editor
 self-disable; thay role có hiệu lực session request kế tiếp. Không cấp quyền qua
 client role, snapshot role hoặc numeric rank đơn lẻ.
 
+## Logic change và dependent updates
+
+Risk: **Rất cao** khi chỉ sửa một phần. Logic delta: Three-role ownership policy toàn bộ mutations.
+Cần sửa đồng bộ: auth role schemas/session/Team UI/invite/signup, contributor dependency, Studio/legacy API/service/worker mutation ingress, frontend capability và audit.
+Acceptance xuyên consumer: Guest own/foreign/unknown resources, anonymous/auth-disabled, Editor/Reviewer intervention và reviewer-only paths tested end-to-end; no global canEdit bypass.
+Mỗi sprint áp dụng [integration checklist](../INTEGRATION_MAP.md), ghi before/after,
+actual callers/fields/config/migrations và related-code updates vào Result/Evidence.
+Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption cũ bằng workaround.
+
 ## Dependencies
 
 S1 độc lập, phối hợp AUD-20.S1. S2/S3 trước rollout open signup; S4 dùng AUD-22.S2
