@@ -35,7 +35,14 @@ from pydantic import BaseModel, ConfigDict
 from src.config import get_settings
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.manifests import StageId
-from src.models.contracts.scene import ColliderType, SceneIR, SceneObject, SceneObjectOrigin, SceneObjectState
+from src.models.contracts.scene import (
+    ColliderType,
+    SceneIR,
+    SceneObject,
+    SceneObjectOrigin,
+    SceneObjectState,
+    SourceCollisionRegion,
+)
 from src.models.contracts.validation import CandidatePackage, PreflightReport, RuleResult
 from src.services.orchestration.artifacts.errors import ArtifactStoreError
 from src.services.orchestration.projects.registry import ProjectRegistry
@@ -175,6 +182,72 @@ def _source_region_removed(item: SceneObject) -> bool:
         return False
     review = item.provenance.get("review")
     return review == "DELETED" or (review != "IGNORED" and item.state == SceneObjectState.CONFIRMED)
+
+
+def _recover_legacy_source_ownership(
+    registry: ProjectRegistry, job_id: str, scene: SceneIR
+) -> tuple[SceneIR, dict[str, str]]:
+    """Recover omitted ownership only from checksum-validated earlier SceneIR revisions."""
+    missing = {
+        item.id
+        for item in scene.objects
+        if item.origin == SceneObjectOrigin.RECONSTRUCTED and item.source_collision is None
+    }
+    if not missing:
+        return scene, {}
+
+    recovered: dict[str, tuple[SourceCollisionRegion, str]] = {}
+    seen = {scene.scene_revision}
+    cursor = scene
+    while True:
+        previous_revision = cursor.provenance.get("edited_from")
+        if not isinstance(previous_revision, str):
+            previous_revision = cursor.provenance.get("previous_revision")
+        if not isinstance(previous_revision, str) or previous_revision in seen:
+            break
+        seen.add(previous_revision)
+        prior_record = registry.scene.revision(job_id, previous_revision)
+        if prior_record is None:
+            break
+        prior = prior_record.scene
+        if prior.scene_id != scene.scene_id or prior.environment.geometry_ref != scene.environment.geometry_ref:
+            break
+        prior_objects = {item.id: item for item in prior.objects}
+        for object_id in tuple(missing):
+            prior_object = prior_objects.get(object_id)
+            owner = prior_object.source_collision if prior_object is not None else None
+            if (
+                prior_object is not None
+                and prior_object.origin == SceneObjectOrigin.RECONSTRUCTED
+                and owner is not None
+                and owner.object_id == object_id
+                and owner.source_geometry_ref == scene.environment.geometry_ref
+            ):
+                recovered[object_id] = owner, previous_revision
+                missing.remove(object_id)
+        if not missing:
+            break
+        cursor = prior
+
+    if not recovered:
+        return scene, {}
+    owners = {object_id: entry[0] for object_id, entry in recovered.items()}
+    recovery_sources = {object_id: entry[1] for object_id, entry in sorted(recovered.items())}
+    objects = [
+        item.model_copy(update={"source_collision": owners[item.id]}, deep=True) if item.id in owners else item
+        for item in scene.objects
+    ]
+    recovered_scene = scene.model_copy(
+        update={
+            "objects": objects,
+            "provenance": {
+                **scene.provenance,
+                "source_collision_ownership_recovered": recovery_sources,
+            },
+        },
+        deep=True,
+    )
+    return recovered_scene, recovery_sources
 
 
 def _carved_environment(registry: ProjectRegistry, scene: SceneIR) -> CarvedBackground:
@@ -532,7 +605,7 @@ def _cache_matches(
 def build_simulation_package(registry: ProjectRegistry, job_id: str) -> SimulationPackage:
     """Tạo (hoặc trả lại) gói mô phỏng của revision SceneIR hiện tại."""
     current = registry.scene.current(job_id)
-    scene = current.scene
+    scene, recovered_ownership = _recover_legacy_source_ownership(registry, job_id, current.scene)
     job = registry.get_job(job_id)
     background = _carved_environment(registry, scene)
 
@@ -554,8 +627,10 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
         runtime_version=current_runtime_version,
         resolve_artifact=registry.runtime_resolver.require,
     )
-    if current_capability.status == ExportCapabilityStatus.SUPPORTED and _cache_matches(
-        existing, scene, current_build_config, current_requirements
+    if (
+        not recovered_ownership
+        and current_capability.status == ExportCapabilityStatus.SUPPORTED
+        and _cache_matches(existing, scene, current_build_config, current_requirements)
     ):
         return existing
 

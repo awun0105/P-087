@@ -11,6 +11,7 @@ import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from src.config import Settings
@@ -22,6 +23,7 @@ from src.services.orchestration.review import simulation_package as simulation_p
 from src.services.orchestration.review.simulation_package import BUILD_CONFIG, build_simulation_package, current_package
 from src.services.orchestration.scene.extraction import extract_scene
 from src.services.orchestration.scene.objects import add_box_object, apply_object_action
+from src.services.scene.editing.commands import move_object
 from src.services.simulation.enrichment.service import enrich_scene_physics
 from src.services.simulation.usd.capabilities import ExportCapabilityStatus
 from tests.test_orchestration.test_finalize_flow import _confirmed
@@ -258,6 +260,200 @@ def Xform "Asset"
     )
     stage = json.loads(inspection.stdout)
     assert stage == {"stage": True, "asset": True, "rigid": False, "mass": False}
+
+
+def test_candidate_zip_recovers_legacy_owner_and_exports_current_rotated_pose(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, job = _scene_job(tmp_path)
+    source_scene = registry.scene.current(job.job_id).scene
+    (source_object,) = source_scene.objects
+    source_owner = source_object.source_collision
+    assert source_owner is not None
+    source_scene_ref = registry.scene.revision(job.job_id, source_scene.scene_revision).scene_reference
+    source_scene_bytes = registry.runtime_resolver.require(source_scene_ref).read_bytes()
+    source_geometry_bytes = registry.runtime_resolver.require(source_scene.environment.geometry_ref).read_bytes()
+
+    legacy_object = source_object.model_copy(update={"source_collision": None}, deep=True)
+    legacy_scene = source_scene.model_copy(update={"objects": [legacy_object]}, deep=True)
+    legacy_revision = registry.scene.publish_next(
+        job.job_id, source_scene.scene_revision, legacy_scene, "test_legacy_without_source_collision"
+    ).revision.scene
+    rotated_transform = legacy_object.transform.model_copy(
+        update={
+            "translation_xyz": (3.0, 2.5, 0.3),
+            "rotation_quaternion_xyzw": (0.0, 0.0, 0.7071067811865476, 0.7071067811865476),
+        }
+    )
+    moved_scene = move_object(legacy_revision, legacy_object.id, rotated_transform)
+    moved_revision = registry.scene.publish_next(
+        job.job_id, legacy_revision.scene_revision, moved_scene, "test_move_and_rotate"
+    ).revision.scene
+    apply_object_action(registry.scene, job.job_id, legacy_object.id, "confirm", moved_revision.scene_revision)
+    confirmed_scene = registry.scene.current(job.job_id).scene
+    (confirmed_object,) = confirmed_scene.objects
+    asset_bytes = b"""#usda 1.0
+(
+    defaultPrim = "Asset"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+def Xform "Asset"
+{
+    def Cube "Body"
+    {
+        double size = 1
+    }
+}
+"""
+    asset_digest = hashlib.sha256(asset_bytes).hexdigest()
+    asset_ref = ProductArtifactRef(
+        artifact_type="UsdAsset",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{job.job_id}/assets/{asset_digest}.usda",
+        artifact_checksum=f"sha256:{asset_digest}",
+        data_class="derived",
+        producer_stage="ST-ASSET-IMPORT",
+        job_id=job.job_id,
+    )
+    registry.scene.store.publish(asset_ref, asset_bytes)
+    with_asset = confirmed_scene.model_copy(
+        update={"objects": [confirmed_object.model_copy(update={"asset_ref": asset_ref}, deep=True)]}, deep=True
+    )
+    registry.scene.publish_next(job.job_id, confirmed_scene.scene_revision, with_asset, "test_add_usd_asset")
+    current_legacy = registry.scene.current(job.job_id).scene
+    current_legacy_ref = registry.scene.revision(job.job_id, current_legacy.scene_revision).scene_reference
+    current_legacy_bytes = registry.runtime_resolver.require(current_legacy_ref).read_bytes()
+
+    runtime = Path("data/scene_runtime/bin/python")
+    monkeypatch.setattr(
+        simulation_package_service,
+        "get_settings",
+        lambda: Settings(product_scene_runtime_python=runtime, product_sam2_checkpoint=None),
+    )
+    package = build_simulation_package(registry, job.job_id)
+
+    assert package.candidate is not None and package.package_ref is not None
+    assert package.source_scene_revision == current_legacy.scene_revision
+    assert package.scene_revision != current_legacy.scene_revision
+    exported_scene = registry.scene.current(job.job_id).scene
+    (exported_object,) = exported_scene.objects
+    assert exported_object.source_collision == source_owner
+    assert exported_scene.provenance["source_collision_ownership_recovered"] == {
+        source_object.id: source_scene.scene_revision
+    }
+    assert registry.runtime_resolver.require(source_scene_ref).read_bytes() == source_scene_bytes
+    assert (
+        registry.runtime_resolver.require(source_scene.environment.geometry_ref).read_bytes() == source_geometry_bytes
+    )
+    assert registry.runtime_resolver.require(current_legacy_ref).read_bytes() == current_legacy_bytes
+
+    archive = zipfile.ZipFile(io.BytesIO(registry.runtime_resolver.require(package.package_ref).read_bytes()))
+    assert archive.testzip() is None
+    names = set(archive.namelist())
+    assert {"candidate_manifest.json", "scene.usda", "environment.usdc", "usd_export_summary.json"} <= names
+    manifest = json.loads(archive.read("candidate_manifest.json"))
+    assert manifest["scene_revision"] == package.scene_revision
+    assert manifest["scene_ir_checksum"] == package.scene_ir_checksum
+    extracted = tmp_path / "legacy-recovery-package"
+    archive.extractall(extracted)
+    inspect = """
+import json, sys
+import numpy as np
+from pxr import Gf, Usd, UsdGeom
+stage = Usd.Stage.Open(sys.argv[1])
+obj = stage.GetPrimAtPath(sys.argv[2])
+matrix = UsdGeom.XformCache().GetLocalToWorldTransform(obj)
+origin = matrix.Transform(Gf.Vec3d(0, 0, 0))
+axis_x = matrix.Transform(Gf.Vec3d(1, 0, 0)) - origin
+mesh = UsdGeom.Mesh(stage.GetPrimAtPath("/World/Environment/Collision"))
+points = np.asarray(mesh.GetPointsAttr().Get())
+faces = np.asarray(mesh.GetFaceVertexIndicesAttr().Get()).reshape(-1, 3)
+centroids = points[faces].mean(axis=1)
+print(json.dumps({
+    "object_origin": list(origin),
+    "object_axis_x": list(axis_x),
+    "environment_faces": len(faces),
+    "environment_centroid_z": centroids[:, 2].tolist(),
+    "asset_valid": stage.GetPrimAtPath(sys.argv[2] + "/Asset/Body").IsValid(),
+}))
+"""
+    inspected = subprocess.run(
+        [
+            str(runtime),
+            "-c",
+            inspect,
+            str(extracted / "scene.usda"),
+            f"/World/Objects/{source_object.id.replace('-', '_')}",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    stage = json.loads(inspected.stdout)
+    assert stage["environment_faces"] == package.environment_triangles == 12
+    assert package.carved_triangles > 0
+    assert np.all(np.abs(stage["environment_centroid_z"]) <= 0.02)
+    assert stage["object_origin"] == pytest.approx([3.0, 2.5, 0.3])
+    assert stage["object_axis_x"] == pytest.approx([0.0, 1.0, 0.0], abs=1e-6)
+    assert stage["asset_valid"] is True
+    repeated = build_simulation_package(registry, job.job_id)
+    assert repeated.package_ref == package.package_ref
+    assert registry.scene.current(job.job_id).scene.scene_revision == package.scene_revision
+
+
+def test_unavailable_legacy_owner_history_blocks_package_without_publishing_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, job = _scene_job(tmp_path)
+    source_scene = registry.scene.current(job.job_id).scene
+    (item,) = source_scene.objects
+    legacy = source_scene.model_copy(
+        update={"objects": [item.model_copy(update={"source_collision": None}, deep=True)]}, deep=True
+    )
+    legacy_revision = registry.scene.publish_next(
+        job.job_id, source_scene.scene_revision, legacy, "test_legacy_without_source_collision"
+    ).revision.scene
+    apply_object_action(registry.scene, job.job_id, item.id, "confirm", legacy_revision.scene_revision)
+    current = registry.scene.current(job.job_id).scene
+    monkeypatch.setattr(registry.scene, "revision", lambda _job_id, _revision: None)
+
+    with pytest.raises(ValueError, match="require source collision ownership"):
+        build_simulation_package(registry, job.job_id)
+
+    assert registry.scene.current(job.job_id).scene.scene_revision == current.scene_revision
+    assert current_package(registry, job.job_id) is None
+
+
+def test_legacy_owner_from_different_geometry_history_blocks_candidate(tmp_path: Path) -> None:
+    registry, job = _scene_job(tmp_path)
+    source_scene = registry.scene.current(job.job_id).scene
+    (item,) = source_scene.objects
+    source_geometry = registry.runtime_resolver.require(source_scene.environment.geometry_ref).read_bytes()
+    original_ref = source_scene.environment.geometry_ref
+    alternate_ref = original_ref.model_copy(
+        update={"artifact_uri": f"artifact://jobs/{job.job_id}/scene/collision-alias.glb"}
+    )
+    registry.scene.store.publish(alternate_ref, source_geometry)
+    legacy = source_scene.model_copy(
+        update={
+            "objects": [item.model_copy(update={"source_collision": None}, deep=True)],
+            "environment": source_scene.environment.model_copy(update={"geometry_ref": alternate_ref}),
+        },
+        deep=True,
+    )
+    legacy_revision = registry.scene.publish_next(
+        job.job_id, source_scene.scene_revision, legacy, "test_legacy_source_geometry_changed"
+    ).revision.scene
+    apply_object_action(registry.scene, job.job_id, item.id, "confirm", legacy_revision.scene_revision)
+    current = registry.scene.current(job.job_id).scene
+
+    with pytest.raises(ValueError, match="require source collision ownership"):
+        build_simulation_package(registry, job.job_id)
+
+    assert registry.scene.current(job.job_id).scene.scene_revision == current.scene_revision
+    assert current_package(registry, job.job_id) is None
 
 
 def test_cached_candidate_is_not_reused_after_builder_version_changes(

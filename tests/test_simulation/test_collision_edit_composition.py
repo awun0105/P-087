@@ -264,13 +264,22 @@ def test_source_owned_background_stays_at_source_pose_through_edits_and_keeps_fl
     moved = move_object(
         confirmed,
         pallet.id,
-        pallet.transform.model_copy(update={"translation_xyz": (4.0, 0.5, 0.3)}),
+        pallet.transform.model_copy(
+            update={
+                "translation_xyz": (4.0, 0.5, 0.3),
+                "rotation_quaternion_xyzw": (0.0, 0.0, 0.7071067811865476, 0.7071067811865476),
+            }
+        ),
     )
     moved_background = _carved_environment(registry, moved)
     deleted = delete_object(moved, pallet.id)
     deleted_background = _carved_environment(registry, deleted)
     restored = restore_object(deleted, pallet.id)
     restored_background = _carved_environment(registry, restored)
+    deleted_again = delete_object(restored, pallet.id)
+    deleted_again_background = _carved_environment(registry, deleted_again)
+    restored_again = restore_object(deleted_again, pallet.id)
+    restored_again_background = _carved_environment(registry, restored_again)
     ignored = ignore_object(scene, pallet.id)
     ignored_background = _carved_environment(registry, ignored)
     deleted_candidate = delete_object(scene, pallet.id)
@@ -288,18 +297,24 @@ def test_source_owned_background_stays_at_source_pose_through_edits_and_keeps_fl
     assert confirmed_background.carved_triangles == moved_background.carved_triangles
     assert moved_background.carved_triangles == deleted_background.carved_triangles
     assert deleted_background.carved_triangles == restored_background.carved_triangles
-    assert restored_background.carved_triangles == hidden_background.carved_triangles
+    assert restored_background.carved_triangles == deleted_again_background.carved_triangles
+    assert deleted_again_background.carved_triangles == restored_again_background.carved_triangles
+    assert restored_again_background.carved_triangles == hidden_background.carved_triangles
     assert duplicated_background.identity == confirmed_background.identity
     assert confirmed_background.identity == moved_background.identity
     assert moved_background.identity == deleted_background.identity == restored_background.identity
+    assert restored_background.identity == deleted_again_background.identity == restored_again_background.identity
     assert deleted_candidate_background.carved_triangles > 0
 
-    floor_centroids = restored_background.vertices[restored_background.faces].mean(axis=1)
-    assert len(restored_background.faces) == 12
+    floor_centroids = restored_again_background.vertices[restored_again_background.faces].mean(axis=1)
+    assert len(restored_again_background.faces) == 12
     assert np.all(np.abs(floor_centroids[:, 0]) <= 4.0)
     assert np.all(np.abs(floor_centroids[:, 1]) <= 4.0)
     assert np.all(np.abs(floor_centroids[:, 2]) <= 0.02)
-    assert restored.objects[0].transform.translation_xyz == (4.0, 0.5, 0.3)
+    assert restored_again.objects[0].transform.translation_xyz == (4.0, 0.5, 0.3)
+    assert restored_again.objects[0].transform.rotation_quaternion_xyzw == pytest.approx(
+        (0.0, 0.0, 0.7071067811865476, 0.7071067811865476)
+    )
     assert pallet.source_collision == ownership
     assert pallet.transform == ownership.source_transform
 

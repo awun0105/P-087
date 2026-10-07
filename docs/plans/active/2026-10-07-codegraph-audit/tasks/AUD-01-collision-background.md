@@ -2,7 +2,8 @@
 
 ## Metadata và goal
 
-- Status: IN PROGRESS; priority P0; boundary EX-SCENE → EX-SIM, PRODUCT publication.
+- Status: COMPLETE for AUD-01.S1–S3 CPU/OpenUSD evidence; real Isaac acceptance
+  remains in AUD-05. Priority P0; boundary EX-SCENE → EX-SIM, PRODUCT publication.
 - Canonical tasks: SCENE-06/07, SIM-02/05. Strategy SELF-CODE composition,
   REUSE trimesh/carve utilities. Không thay reconstruction algorithm.
 - Goal: move/delete/deactivate không để lại collision của object ở nguồn;
@@ -129,8 +130,8 @@ Implement: verify candidate inventory/ZIP; thêm negative recovery và overlap
 cases; kiểm transform quay/di chuyển và delete/restore nhiều lần. Ghi USD-stage
 proof riêng với Isaac acceptance pending; không thêm workflow mới.
 Tests: local real GLB/artifact consumer; pxr nếu runtime có; downstream regression.
-**Exit:** [ ] exported environment/object occupancy đúng; [ ] no old artifact rewrite;
-[ ] limitations của legacy OBB được ghi rõ.
+**Exit:** [x] exported environment/object occupancy đúng trong OpenUSD stage;
+[x] no old artifact rewrite; [x] limitations của legacy OBB được ghi rõ.
 
 ## Verification và Definition of Done
 
@@ -205,3 +206,76 @@ refs/checksums/legacy behavior được verify. Real Isaac proof ghi ở AUD-05.
   `pytest tests/test_api/test_review_routes.py -q` also passed (2 passed).
   `ruff check src/ tests/` passed; `ruff format --check src/ tests/` reported
   455 files already formatted.
+
+### AUD-01.S3 — Implemented
+
+- Commit base: `943fd46 feat(simulation): preserve collider and physics semantics (AUD-02.S2)`.
+- Changed files: `src/services/orchestration/review/simulation_package.py`,
+  `tests/test_orchestration/test_simulation_package.py`,
+  `tests/test_simulation/test_collision_edit_composition.py`, this task file,
+  the audit `README.md`, and ADR 0012.
+- Schema delta: no shared schema or DB migration; recovery provenance is an
+  additive JSON mapping on the successfully published SceneIR revision.
+- Legacy ownership recovery follows `edited_from`/`previous_revision` through
+  `SceneEditor.revision`, which reloads and validates each immutable SceneIR
+  artifact. Recovery is limited to the same `scene_id`, exact environment
+  geometry ref, reconstructed object ID, owner object ID, and source geometry
+  ref. A missing revision or changed source ref stops recovery; the normal
+  collision builder then raises before candidate or scene-revision publication.
+- Recovered ownership is applied to an in-memory SceneIR for the build. On a
+  successful export, the newly published physics-enriched revision records
+  `source_collision_ownership_recovered` with the historical revision used.
+  Existing SceneIR and source-geometry artifact bytes are not rewritten.
+- The real candidate ZIP is checked for CRC/readability and required inventory;
+  its manifest binds the exported revision and SceneIR checksum. The composed
+  stage was opened with `pxr` from `data/scene_runtime/bin/python` (OpenUSD
+  0.26.8): the environment retained 12 floor triangles after carving, the
+  object occupied its moved pose with a 90-degree yaw, and the relative USD
+  asset composed. A repeated build reused the exact package and revision.
+- Edit regressions now include rotation and two delete/restore cycles while
+  preserving source-owned carving and floor witnesses. Service-level negative
+  tests prove unavailable history and changed source geometry cannot produce a
+  candidate. Existing collision-composition tests prove the shared carve rejects
+  overlapping exact/OBB ownership; `build_simulation_package` invokes that carve
+  before package publication. The API maps the resulting `ValueError` subtype
+  to HTTP 422.
+- Legacy recovery preserves only the ownership evidence that already exists;
+  it does not convert source OBBs into exact triangle memberships. OBB ownership
+  remains approximate and ambiguous overlap still blocks. OpenUSD composition is
+  verified locally; Isaac Sim execution and physical behavior remain pending
+  AUD-05.
+- Verification:
+  ```bash
+  .venv/bin/pytest tests/test_simulation/test_carve.py tests/test_orchestration/test_scene_extraction.py tests/test_orchestration/test_simulation_package.py tests/test_scene/test_editing_review.py tests/test_scene/test_editing_v2.py tests/test_simulation/test_collision_edit_composition.py tests/test_orchestration/test_review_workflow.py tests/test_api/test_review_routes.py -q
+  # 49 passed in 13.43s
+  .venv/bin/ruff check src/ tests/ && .venv/bin/ruff format --check src/ tests/ && git diff --check
+  # Ruff clean; 458 files already formatted; diff clean
+  codegraph sync && codegraph status
+  # Already up to date; 742 files, 13,176 nodes, 37,108 edges
+  ```
+- Artifacts/checksums: no stable test artifact is retained. Tests verify the
+  byte-for-byte unchanged original SceneIR, source GLB, and current legacy
+  revision; CandidateManifest binds the exported `scene_revision` and
+  `scene_ir_checksum`, and the ZIP passes CRC and composed-stage reads.
+- Consumer proof: the package API uses the shared source carve before either
+  exporter can publish; the API preserves HTTP 422 for ownership failures. The
+  local OpenUSD consumer opened the produced ZIP stage and checked occupancy,
+  transform, floor, and the relative asset.
+- Next sprint: AUD-02.S3.
+- Pre-flight (GUIDE.md Rule 13):
+  - codegraph: `_recover_legacy_source_ownership`, `build_simulation_package`,
+    `_carved_environment`, `SceneEditor.revision`/`publish_next`, candidate
+    inventory and API route error mapping.
+  - impact: `build_simulation_package` has one public API call site in
+    `create_simulation_package`; `_recover_legacy_source_ownership` is private
+    with one internal caller. The API maps `ValueError` to HTTP 422; legacy and
+    hybrid exporters share `_carved_environment` before publication.
+  - understand: CodeGraph traced SceneIR history → source ownership → shared
+    carve → candidate ZIP/USD; `understand-anything` is unavailable in this
+    environment, so that gate is UNVERIFIED.
+  - minimal-code: rung 2 — reuse checksum-validated `SceneEditor.revision`,
+    existing immutable SceneIR provenance, and shared collision builder.
+  - checks: `pytest` AUD-01 regression + review routes: 49 passed; Ruff check
+    clean; Ruff format check: 458 files already formatted; `git diff --check`
+    clean.
+  - DevTools: n/a — no UI change.

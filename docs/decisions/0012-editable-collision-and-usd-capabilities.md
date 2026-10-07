@@ -96,6 +96,25 @@ attributes and metadata, relative asset composition, and missing-physics behavio
 This proves OpenUSD stage composition in the tested runtime. Isaac Sim execution
 and physical behavior remain unverified and are assigned to AUD-05.
 
+## AUD-01.S3 legacy recovery evidence
+
+The package builder can recover omitted legacy ownership only by following
+`edited_from`/`previous_revision` through checksum-validated `SceneEditor.revision`
+records. It requires the same scene ID, exact environment geometry ref,
+reconstructed object ID, ownership object ID, and source geometry ref. Missing
+history or a changed source ref stops recovery and blocks package creation before
+publishing a candidate or new SceneIR revision. Successful recovery is recorded
+in provenance on the newly published enriched revision; earlier SceneIR and
+source-geometry bytes remain immutable. The existing API maps this ownership
+failure to HTTP 422.
+
+AUD-01.S3 verified the actual candidate ZIP and composed OpenUSD stage with USD
+Core 0.26.8: the floor remained in the background, the object collider used its
+current rotated pose, and a checksum-bound relative asset resolved. This proves
+the local OpenUSD composition path, not Isaac Sim execution. Recovery preserves
+historical OBB metadata as-is; it does not infer exact triangle membership or
+upgrade OBB fidelity. Ambiguous OBB overlap continues to fail closed.
+
 ## Alternatives Considered
 
 1. Khoét bằng current transform: lỗi đã tái hiện khi move/delete.

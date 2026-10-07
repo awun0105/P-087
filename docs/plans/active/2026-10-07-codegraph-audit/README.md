@@ -6,8 +6,8 @@ Date: 2026-10-07
 
 Active — implementation đang diễn ra trên branch
 `docs/codegraph-audit-implementation-plan`, khởi tạo từ `develop@ef3a421`.
-Đã commit: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S2, AUD-02.S1–S2.
-Sprint kế tiếp theo dependency order: AUD-01.S3.
+Đã commit: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S2.
+Sprint kế tiếp theo dependency order: AUD-02.S3.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -213,9 +213,11 @@ AUD-19 uses AUD-12.S1 quality fixtures; AUD-12 sensor-package path không đợi
 AUD-19. Static-map consumer chỉ enable sau registration QA, không bắt AUD-19
 đợi whole AUD-12 epic. Sensor calibration QA và map registration QA không tráo nhau.
 
-Progress hiện tại: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S2 và AUD-02.S1–S2 đã
-được commit riêng theo sprint. Geometry/physics export đã được kiểm bằng OpenUSD
-runtime; tiếp tục AUD-01.S3 rồi AUD-02.S3. Isaac Sim acceptance vẫn thuộc AUD-05.
+Progress hiện tại: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3 và AUD-02.S1–S2 đã
+được commit riêng theo sprint. AUD-01.S3 đã verify legacy ownership recovery,
+candidate ZIP/manifest, current rotated object pose, retained floor collision,
+relative USD asset composition, và bất biến bytes của artifact cũ bằng OpenUSD
+runtime. Tiếp tục AUD-02.S3. Isaac Sim acceptance vẫn thuộc AUD-05.
 
 AUD-23 có client preparation identity trước AUD-15/16 cache consumers; supported
 sensor mapping chốt trước AUD-13 overlay QA. Không cần full odometry/registration
