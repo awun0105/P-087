@@ -2,16 +2,16 @@
 
 1. Môi trường: collision mesh REC-05 của scene, bỏ source region theo ownership bất biến của
    object được xác nhận/đã xoá, ghi thành layer USD Mesh tĩnh; sàn là ground plane.
-2. Vật: collider hộp từ kích thước primitive (SIM-02 qua `enrich_scene_physics`, SIM-03).
+2. Vật: collider theo ColliderSpec, đúng hình học/kích thước và frame cục bộ.
 3. Preflight tĩnh (SIM-04) trên đúng revision sẽ đóng gói; FAIL thì trả báo cáo, không tạo
    revision mới.
 4. Static Preflight PASS + export capability SUPPORTED: publish revision SceneIR có collider,
    đóng gói CandidatePackage (SIM-05) và một file zip tải về. Bản ghi gói khoá theo revision.
 
-Scene theo vật (pipeline v2, ADR 0007 — có `environment.visual_master_ref`): entrypoint là **USD lai**
-do `usd/hybrid_runner.py` dựng trong runtime có usd-core: Gaussian (ParticleField) của nền + từng vật
-đã xác nhận, collider phân rã lồi, RigidBody/khối lượng/vật liệu, nhãn. Ứng viên chưa xác nhận vẫn là
-một phần hình của nền; vật đã loại/xoá/ẩn không xuất. Các layer nằm trong inventory của candidate.
+Scene theo vật (pipeline v2, ADR 0007): entrypoint **USD lai** do `usd/hybrid_runner.py` dựng trong
+runtime có usd-core. Builder giữ Gaussian, collider AABB/OBB hoặc các mảnh lồi, local transform,
+ObjectPhysics đã lưu và USD assets đã checksum-verify rồi đóng gói bằng reference tương đối. Ứng viên
+chưa xác nhận vẫn là một phần hình của nền; vật đã loại/xoá/ẩn không xuất. Các layer nằm trong inventory.
 
 Physics trong Isaac (SIM-06+) chạy ở máy RTX, ngoài phạm vi bước này.
 """
@@ -19,12 +19,13 @@ Physics trong Isaac (SIM-06+) chạy ở máy RTX, ngoài phạm vi bước này
 import hashlib
 import io
 import json
+import logging
 import subprocess
 import tempfile
 import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import numpy as np
@@ -36,9 +37,8 @@ from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.manifests import StageId
 from src.models.contracts.scene import ColliderType, SceneIR, SceneObject, SceneObjectOrigin, SceneObjectState
 from src.models.contracts.validation import CandidatePackage, PreflightReport, RuleResult
+from src.services.orchestration.artifacts.errors import ArtifactStoreError
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.orchestration.scene.catalog import physics_for
-from src.services.orchestration.scene.objects import object_volume_m3
 from src.services.scene.collision_ownership import SourceCollisionOwnershipError, read_triangle_memberships
 from src.services.simulation.colliders.carve import CarveBox, carve_triangle_mask, triangle_mask_in_box
 from src.services.simulation.enrichment.service import enrich_scene_physics
@@ -50,6 +50,7 @@ from src.services.simulation.usd.builder import (
 )
 from src.services.simulation.usd.capabilities import (
     EffectiveExportMode,
+    ExportCapabilityBlocker,
     ExportCapabilityReport,
     ExportCapabilityStatus,
     ExportRequirements,
@@ -58,12 +59,14 @@ from src.services.simulation.usd.capabilities import (
     export_requirements,
     select_export_mode,
 )
-from src.services.simulation.usd.usda import generate_mesh_layer_usda
+from src.services.simulation.usd.usda import generate_mesh_layer_usda, generate_scene_usda
+
+logger = logging.getLogger(__name__)
 
 ENVIRONMENT_LAYER = "environment_collision.usda"
 BUILD_CONFIG = {
-    "builder": "real2sim-studio-simulation-package-v3-capability-gated",
-    "capability_contract": "usd-export-capabilities-v1",
+    "builder": "real2sim-studio-simulation-package-v4-capability-gated",
+    "capability_contract": "usd-export-capabilities-v2",
     "requested_mode": "auto",
     "effective_mode": "legacy_box",
     "runtime_usd_version": None,
@@ -71,22 +74,23 @@ BUILD_CONFIG = {
     "carve_margin_m": 0.05,
     "background_identity_algorithm": "source_geometry_checksum+removed_triangle_mask_v1",
     "ground_plane": True,
-    "object_collider": "box_from_primitive_dimensions",
+    "object_collider": "exact_box_collider_dimensions_and_local_transform",
 }
 HYBRID_BUILD_CONFIG = {
-    "builder": "real2sim-studio-simulation-package-v4-capability-gated-hybrid",
-    "capability_contract": "usd-export-capabilities-v1",
+    "builder": "real2sim-studio-simulation-package-v5-capability-gated-hybrid",
+    "capability_contract": "usd-export-capabilities-v2",
     "requested_mode": "auto",
     "effective_mode": "hybrid",
-    "runtime_probe": "hybrid-runner-probe-v1",
+    "runtime_probe": "hybrid-runner-probe-v2",
     "runtime_usd_version": None,
     "environment": "inpainted_gaussians_particlefield+rec05_source_owned_collision_mesh",
     "carve_margin_m": 0.05,
     "background_identity_algorithm": "source_geometry_checksum+removed_triangle_mask_v1",
     "ground_plane": True,
     "object_visual": "per_object_gaussians_particlefield",
-    "object_collider": "convex_decomposition_or_box",
-    "object_physics": "rigid_body_mass_material_labels",
+    "object_collider": "exact_aabb_obb_local_transform_or_validated_convex_parts",
+    "object_asset": "checksum_sealed_usd_asset_relative_reference",
+    "object_physics": "authored_object_physics_without_export_defaults",
 }
 HYBRID_RUNNER = Path(__file__).resolve().parents[3] / "services/simulation/usd/hybrid_runner.py"
 
@@ -304,10 +308,12 @@ def _hybrid_layers(
             continue
         if not (item.active and item.state == SceneObjectState.CONFIRMED):
             continue
-        convex = item.collider is not None and item.collider.collider_type == ColliderType.CONVEX_DECOMPOSITION
-        physics = item.physics or physics_for(item.semantic_class, object_volume_m3(item))
-        dimensions = item.primitive_dimensions_xyz_m
-        asset_url = item.provenance.get("asset_url")
+        collider = item.collider
+        if collider is None:
+            raise ValueError(f"confirmed object '{item.id}' has no collider for hybrid export")
+        convex = collider.collider_type == ColliderType.CONVEX_DECOMPOSITION
+        asset = item.asset_ref
+        asset_suffix = PurePosixPath(asset.artifact_uri).suffix.lower() if asset is not None else None
         objects.append(
             {
                 "prim": _prim_name(item.id),
@@ -315,14 +321,25 @@ def _hybrid_layers(
                 "translation": list(item.transform.translation_xyz),
                 "rotation_xyzw": list(item.transform.rotation_quaternion_xyzw),
                 "gaussians_ply": str(resolve(gaussians)) if gaussians is not None else None,
-                "collision_glb": str(resolve(item.collider.geometry_ref))
-                if convex and item.collider and item.collider.geometry_ref
-                else None,
-                "box_dims": list(dimensions) if dimensions else None,
+                "collider": {
+                    "type": collider.collider_type.value,
+                    "geometry_path": str(resolve(collider.geometry_ref)) if convex and collider.geometry_ref else None,
+                    "part_paths": [],
+                    "dimensions_xyz_m": list(collider.dimensions_xyz_m) if collider.dimensions_xyz_m else None,
+                    "local_transform": {
+                        "translation_xyz": list(collider.local_transform.translation_xyz),
+                        "rotation_quaternion_xyzw": list(collider.local_transform.rotation_quaternion_xyzw),
+                    },
+                },
                 "semantic_class": item.semantic_class,
-                "physics": physics.model_dump(mode="json"),
-                "asset_usd": asset_url if isinstance(asset_url, str) else None,
-                "asset_drop_m": dimensions[2] / 2 if dimensions else 0.0,
+                "physics": item.physics.model_dump(mode="json") if item.physics is not None else None,
+                "asset_source_path": str(resolve(asset)) if asset is not None else None,
+                "asset_package_path": (
+                    f"assets/{asset.artifact_checksum.removeprefix('sha256:')}{asset_suffix}"
+                    if asset is not None and asset_suffix is not None
+                    else None
+                ),
+                "asset_checksum": asset.artifact_checksum if asset is not None else None,
             }
         )
     request = {
@@ -357,7 +374,46 @@ def _hybrid_layers(
         raise ValueError("xuất USD lai quá thời gian cho phép") from error
     if completed.returncode != 0:
         raise ValueError(f"xuất USD lai lỗi: {completed.stderr.decode(errors='replace')[-400:]}")
+    result_path = output / "hybrid.result.json"
+    try:
+        summary = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("USD runner did not return a valid build summary") from error
+    if not isinstance(summary, dict) or summary.get("root") != "scene.usda":
+        raise ValueError("USD runner output does not identify the expected scene root")
+    summary_objects = summary.get("objects")
+    expected = {item["prim"]: item["collider"]["type"] for item in objects}
+    if (
+        not isinstance(summary_objects, list)
+        or len(summary_objects) != len(expected)
+        or any(not isinstance(item, dict) for item in summary_objects)
+    ):
+        raise ValueError("USD runner output has an invalid object summary")
+    actual = {item.get("prim"): item.get("collider_type") for item in summary_objects}
+    if actual != expected:
+        raise ValueError("USD runner output does not cover the requested objects and collider types")
+    expected_by_prim = {item["prim"]: item for item in objects}
+    for item in summary_objects:
+        requested = expected_by_prim[item["prim"]]
+        collision_parts = item.get("collision_parts")
+        if (
+            isinstance(collision_parts, bool)
+            or not isinstance(collision_parts, int)
+            or collision_parts < 1
+            or item.get("collider_local_transform") != requested["collider"]["local_transform"]
+        ):
+            raise ValueError("USD runner output did not preserve collider topology or local transforms")
+    expected_assets = [
+        {"prim": item["prim"], "path": item["asset_package_path"], "checksum": item["asset_checksum"]}
+        for item in objects
+        if item["asset_package_path"] is not None
+    ]
+    if summary.get("external_assets") != expected_assets:
+        raise ValueError("USD runner output does not match the resolved asset closure")
     root = output / "hybrid"
+    (root / "usd_export_summary.json").write_text(
+        json.dumps(summary, sort_keys=True, separators=(",", ":")), encoding="utf-8"
+    )
     return {str(path.relative_to(root)): path.read_bytes() for path in sorted(root.rglob("*")) if path.is_file()}
 
 
@@ -406,6 +462,8 @@ def _qualify_hybrid_runtime(python: Path | None) -> tuple[bool, str | None]:
         "convex_mesh_collision",
         "rigid_body_mass",
         "physics_material",
+        "collider_local_transform",
+        "physics_source_metadata",
         "semantic_labels",
         "gaussian_particle_field",
         "meters_z_up",
@@ -449,7 +507,7 @@ def _cache_matches(
     capability = package.export_capability
     if capability is None or capability.status != ExportCapabilityStatus.SUPPORTED:
         return False
-    if capability.builder_version != "usd-export-capabilities-v1" or capability.blockers:
+    if capability.builder_version != "usd-export-capabilities-v2" or capability.blockers:
         return False
     if package.preflight.blocking_result != RuleResult.PASS:
         return False
@@ -588,31 +646,70 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
             carved_triangles=carved,
             export_capability=export_capability,
         )
-    published = registry.scene.publish_next(job_id, scene.scene_revision, enriched, "physics_enrich").revision.scene
-    report = run_preflight(published, artifact_store_root=root)
-    if report.blocking_result != RuleResult.PASS:
-        raise ValueError("preflight đổi kết quả sau khi publish revision; không đóng gói")
-    if export_capability.scene_revision != published.scene_revision or (
-        export_capability.scene_ir_checksum != published.scene_ir_checksum
-    ):
-        export_capability = assess_export_capabilities(
-            published,
-            runtime_qualified=runtime_qualified,
-            runtime_version=runtime_version,
-            resolve_artifact=registry.runtime_resolver.require,
-        )
-        if export_capability.status != ExportCapabilityStatus.SUPPORTED:
-            raise ValueError("export capability đổi kết quả sau khi publish revision; không đóng gói")
     with tempfile.TemporaryDirectory(prefix="r2s_candidate_") as directory:
         output = Path(directory)
-        hybrid = (
-            _hybrid_layers(registry, published, output, background, hybrid_python)
-            if mode == EffectiveExportMode.HYBRID
-            else None
-        )
-        if mode == EffectiveExportMode.HYBRID and hybrid is None:
-            raise ValueError("hybrid USD capability đã chọn nhưng runner không tạo entrypoint")
-        layers = {name: payload for name, payload in (hybrid or {}).items() if name != "scene.usda"}
+        try:
+            hybrid = (
+                _hybrid_layers(registry, enriched, output, background, hybrid_python)
+                if mode == EffectiveExportMode.HYBRID
+                else None
+            )
+            if mode == EffectiveExportMode.HYBRID and hybrid is None:
+                raise ValueError("hybrid USD capability đã chọn nhưng runner không tạo entrypoint")
+            if mode == EffectiveExportMode.LEGACY_BOX:
+                generate_scene_usda(enriched, ENVIRONMENT_LAYER)
+        except (ArtifactStoreError, OSError, ValueError):
+            logger.exception("USD package build failed before SceneIR revision publication for job %s", job_id)
+            failed_capability = export_capability.model_copy(
+                update={
+                    "status": ExportCapabilityStatus.BLOCKED,
+                    "blockers": [
+                        ExportCapabilityBlocker(
+                            code="USD_EXPORT_FAILED",
+                            message="The USD builder rejected the requested geometry or dependency closure; no scene revision or candidate was published.",
+                            affected_object_ids=sorted(
+                                item.id
+                                for item in scene.objects
+                                if item.active and item.state == SceneObjectState.CONFIRMED
+                            ),
+                        )
+                    ],
+                }
+            )
+            return SimulationPackage(
+                job_id=job_id,
+                source_scene_revision=scene.scene_revision,
+                scene_revision=enriched.scene_revision,
+                scene_ir_checksum=enriched.scene_ir_checksum,
+                created_at=datetime.now(UTC),
+                preflight=report,
+                confirmed_objects=confirmed,
+                environment_triangles=triangles,
+                carved_triangles=carved,
+                export_capability=failed_capability,
+            )
+
+        published = registry.scene.publish_next(job_id, scene.scene_revision, enriched, "physics_enrich").revision.scene
+        report = run_preflight(published, artifact_store_root=root)
+        if report.blocking_result != RuleResult.PASS:
+            raise ValueError("preflight đổi kết quả sau khi publish revision; không đóng gói")
+        if export_capability.scene_revision != published.scene_revision or (
+            export_capability.scene_ir_checksum != published.scene_ir_checksum
+        ):
+            export_capability = assess_export_capabilities(
+                published,
+                runtime_qualified=runtime_qualified,
+                runtime_version=runtime_version,
+                resolve_artifact=registry.runtime_resolver.require,
+            )
+            if export_capability.status != ExportCapabilityStatus.SUPPORTED:
+                raise ValueError("export capability đổi kết quả sau khi publish revision; không đóng gói")
+
+        layers = {
+            name: payload
+            for name, payload in (hybrid or {}).items()
+            if name not in {"scene.usda", "usd_export_summary.json"} and not name.startswith("assets/")
+        }
         layer_refs = [
             _publish(
                 registry,
@@ -644,11 +741,17 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
             {
                 "scene.usda": entrypoint,
                 **layers,
+                **{name: payload for name, payload in (hybrid or {}).items() if name.startswith("assets/")},
                 ENVIRONMENT_LAYER: registry.runtime_resolver.require(layer_ref).read_bytes(),
                 "candidate_manifest.json": (output / "candidate_manifest.json").read_bytes(),
                 "candidate_package.json": package.model_dump_json(indent=2).encode(),
                 "preflight_report.json": report.model_dump_json(indent=2).encode(),
                 "export_capability.json": export_capability.model_dump_json(indent=2).encode(),
+                **(
+                    {"usd_export_summary.json": hybrid["usd_export_summary.json"]}
+                    if hybrid is not None and "usd_export_summary.json" in hybrid
+                    else {}
+                ),
                 "README.txt": _readme(published, package, hybrid is not None, build_config).encode(),
             }
         )
@@ -718,7 +821,8 @@ def _readme(
                 "Không mở file .usdc làm stage gốc; scene.usda tham chiếu environment.usdc và objects/*.usdc.",
                 "Hình ảnh: Gaussian (UsdVol ParticleField3DGaussianSplat) của nền đã vá và của từng vật đã xác nhận.",
                 "Va chạm: environment.usdc/Collision là triangle mesh tĩnh theo source ownership; GroundPlane ở z = 0;",
-                "mỗi vật có các khối lồi (convexHull) hoặc hộp, RigidBody + khối lượng + vật liệu vật lý nếu là vật động,",
+                "mỗi vật dùng đúng AABB/OBB hoặc các mảnh convexHull đã khai báo; không tự đổi collider khi thiếu hình học.",
+                "Local transform, khối lượng, RigidBody và vật liệu được ghi đúng theo ObjectPhysics; không tự đặt giá trị mặc định.",
                 "nhãn lớp qua UsdSemantics LabelsAPI. Ứng viên chưa xác nhận nằm trong hình của nền, không có collider riêng.",
                 "Vùng nền được vá là hình suy đoán (chưa từng được quay). Physics chưa được kiểm trong Isaac (SIM-06).",
                 f"{ENVIRONMENT_LAYER}: bản collision-only của môi trường (tham khảo, scene.usda không dùng).",

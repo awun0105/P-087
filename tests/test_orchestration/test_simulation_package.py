@@ -6,6 +6,7 @@ Fixture proof (bundle mẫu + collision mesh tổng hợp); không phải bằng
 import hashlib
 import io
 import json
+import subprocess
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.config import Settings
+from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.models.contracts.scene import ColliderType
 from src.models.contracts.validation import RuleResult
@@ -69,7 +71,7 @@ def test_confirmed_objects_become_a_sealed_package(tmp_path: Path) -> None:
     } <= names
     capability = json.loads(archive.read("export_capability.json"))
     assert capability["status"] == "supported" and capability["effective_mode"] == "legacy_box"
-    assert capability["builder_version"] == "usd-export-capabilities-v1"
+    assert capability["builder_version"] == "usd-export-capabilities-v2"
     usda = archive.read("scene.usda").decode()
     assert "prepend references = @./environment_collision.usda@" in usda and "GroundPlane" in usda
     # Gọi lại trên cùng revision: trả gói cũ, không tạo revision mới.
@@ -125,6 +127,137 @@ def test_unsupported_convex_export_returns_capability_block_without_revision(
     assert package.candidate is None and package.package_ref is None
     assert registry.scene.current(job.job_id).scene.scene_revision == current_revision
     assert current_package(registry, job.job_id) is None
+
+
+@pytest.mark.parametrize("failure_mode", ["runner_exception", "malformed_summary"])
+def test_runner_failure_blocks_before_scene_revision_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_mode: str
+) -> None:
+    registry, job = _scene_job(tmp_path)
+    scene = registry.scene.current(job.job_id).scene
+    enriched = enrich_scene_physics(scene)
+    item = enriched.objects[0]
+    collider = item.collider.model_copy(
+        update={
+            "collider_type": ColliderType.CONVEX_DECOMPOSITION,
+            "geometry_ref": scene.environment.geometry_ref,
+            "dimensions_xyz_m": None,
+        }
+    )
+    draft = enriched.model_copy(update={"objects": [item.model_copy(update={"active": True, "collider": collider})]})
+    registry.scene.publish_next(job.job_id, scene.scene_revision, draft, "test_hybrid_runner_failure")
+    edited = registry.scene.current(job.job_id).scene
+    apply_object_action(registry.scene, job.job_id, edited.objects[0].id, "confirm", edited.scene_revision)
+    source_scene = registry.scene.current(job.job_id).scene
+    assert source_scene.objects[0].collider is not None
+    assert source_scene.objects[0].collider.collider_type == ColliderType.CONVEX_DECOMPOSITION
+    runtime = tmp_path / "python"
+    runtime.touch()
+    monkeypatch.setattr(simulation_package_service, "_hybrid_runtime_python", lambda: runtime)
+    monkeypatch.setattr(simulation_package_service, "_qualify_hybrid_runtime", lambda _python: (True, "26.8.0"))
+
+    if failure_mode == "runner_exception":
+
+        def failed_export(*_args: object, **_kwargs: object) -> dict[str, bytes]:
+            raise ValueError("simulated invalid USD composition")
+
+        monkeypatch.setattr(simulation_package_service, "_hybrid_layers", failed_export)
+    else:
+
+        def malformed_summary(command: list[str], **_kwargs: object) -> SimpleNamespace:
+            result_path = Path(command[command.index("--result") + 1])
+            result_path.write_text("[]", encoding="utf-8")
+            return SimpleNamespace(returncode=0, stderr=b"")
+
+        monkeypatch.setattr(simulation_package_service.subprocess, "run", malformed_summary)
+
+    package = build_simulation_package(registry, job.job_id)
+
+    assert package.export_capability is not None
+    assert package.export_capability.status == ExportCapabilityStatus.BLOCKED
+    assert [issue.code for issue in package.export_capability.blockers] == ["USD_EXPORT_FAILED"]
+    assert package.candidate is None and package.package_ref is None
+    assert registry.scene.current(job.job_id).scene.scene_revision == source_scene.scene_revision
+
+
+def test_hybrid_zip_contains_verified_relative_asset_and_no_physics_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, job = _scene_job(tmp_path)
+    scene = registry.scene.current(job.job_id).scene
+    item = scene.objects[0]
+    apply_object_action(registry.scene, job.job_id, item.id, "confirm", scene.scene_revision)
+    scene = registry.scene.current(job.job_id).scene
+    (item,) = scene.objects
+    payload = b"""#usda 1.0
+(
+    defaultPrim = "Asset"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+def Xform "Asset"
+{
+    def Cube "Body"
+    {
+        double size = 1
+    }
+}
+"""
+    digest = hashlib.sha256(payload).hexdigest()
+    asset_ref = ProductArtifactRef(
+        artifact_type="UsdAsset",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{job.job_id}/assets/{digest}.usda",
+        artifact_checksum=f"sha256:{digest}",
+        data_class="derived",
+        producer_stage="ST-ASSET-IMPORT",
+        job_id=job.job_id,
+    )
+    registry.scene.store.publish(asset_ref, payload)
+    with_asset = scene.model_copy(update={"objects": [item.model_copy(update={"asset_ref": asset_ref})]})
+    registry.scene.publish_next(job.job_id, scene.scene_revision, with_asset, "test_add_usd_asset")
+    runtime = Path("data/scene_runtime/bin/python")
+    monkeypatch.setattr(
+        simulation_package_service,
+        "get_settings",
+        lambda: Settings(product_scene_runtime_python=runtime, product_sam2_checkpoint=None),
+    )
+
+    package = build_simulation_package(registry, job.job_id)
+
+    assert package.candidate is not None and package.package_ref is not None
+    assert asset_ref in package.candidate.assets
+    archive_bytes = registry.runtime_resolver.require(package.package_ref).read_bytes()
+    archive = zipfile.ZipFile(io.BytesIO(archive_bytes))
+    asset_path = f"assets/{digest}.usda"
+    assert archive.read(asset_path) == payload
+    assert "usd_export_summary.json" in archive.namelist()
+    summary = json.loads(archive.read("usd_export_summary.json"))
+    exported = next(obj for obj in summary["objects"] if obj["prim"] == item.id.replace("-", "_"))
+    assert "physics" not in exported
+    assert summary["external_assets"] == [
+        {"prim": item.id.replace("-", "_"), "path": asset_path, "checksum": asset_ref.artifact_checksum}
+    ]
+    object_layer = next(name for name in archive.namelist() if name.startswith("objects/") and name.endswith(".usdc"))
+    assert b"../assets/" in archive.read(object_layer)
+
+    extracted = tmp_path / "unpacked"
+    archive.extractall(extracted)
+    inspection = subprocess.run(
+        [
+            str(runtime),
+            "-c",
+            "import json,sys; from pxr import Usd,UsdPhysics; s=Usd.Stage.Open(sys.argv[1]); p=s.GetPrimAtPath(sys.argv[2]); print(json.dumps({'stage': bool(s), 'asset': s.GetPrimAtPath(sys.argv[2] + '/Asset/Body').IsValid(), 'rigid': p.HasAPI(UsdPhysics.RigidBodyAPI), 'mass': p.HasAPI(UsdPhysics.MassAPI)}))",
+            str(extracted / "scene.usda"),
+            f"/World/Objects/{item.id.replace('-', '_')}",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    stage = json.loads(inspection.stdout)
+    assert stage == {"stage": True, "asset": True, "rigid": False, "mass": False}
 
 
 def test_cached_candidate_is_not_reused_after_builder_version_changes(

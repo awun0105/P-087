@@ -5,15 +5,16 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from enum import StrEnum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
-import trimesh
 from pydantic import Field
 
 from src.models.contracts.artifacts import ContractModel, ProductArtifactRef
 from src.models.contracts.scene import ColliderType, SceneIR, SceneObject, SceneObjectState
+from src.services.orchestration.artifacts.checksum import verify_file_checksum
 from src.services.orchestration.artifacts.errors import ArtifactStoreError
+from src.services.simulation.mesh_geometry import MeshValidationError, load_mesh_parts
 
 
 class EffectiveExportMode(StrEnum):
@@ -74,6 +75,7 @@ class ExportCapabilityReport(ContractModel):
 
 
 ResolveArtifact = Callable[[ProductArtifactRef], Path]
+_USD_ASSET_SUFFIXES = {".usd", ".usda", ".usdc", ".usdz"}
 
 
 def _has_non_identity_offset(obj: SceneObject) -> bool:
@@ -90,6 +92,22 @@ def _has_non_identity_offset(obj: SceneObject) -> bool:
 
 def _uses_external_asset(obj: SceneObject) -> bool:
     return obj.asset_ref is not None or isinstance(obj.provenance.get("asset_url"), str)
+
+
+def _resolve_usd_asset(ref: ProductArtifactRef, resolve_artifact: ResolveArtifact | None) -> str | None:
+    """Accept only checksum-verified USD files that can be copied into the package."""
+    if PurePosixPath(ref.artifact_uri).suffix.lower() not in _USD_ASSET_SUFFIXES:
+        return "EXTERNAL_ASSET_FORMAT_UNSUPPORTED"
+    if resolve_artifact is None:
+        return "EXTERNAL_ASSET_RESOLVER_MISSING"
+    try:
+        path = resolve_artifact(ref)
+        if not path.is_file():
+            return "EXTERNAL_ASSET_REF_INVALID"
+        verify_file_checksum(path, ref.artifact_checksum)
+    except (ArtifactStoreError, OSError, ValueError):
+        return "EXTERNAL_ASSET_REF_INVALID"
+    return None
 
 
 def export_requirements(scene: SceneIR) -> ExportRequirements:
@@ -133,13 +151,11 @@ def _resolve_mesh(ref: ProductArtifactRef | None, resolve_artifact: ResolveArtif
         return "COLLIDER_GEOMETRY_RESOLVER_MISSING"
     try:
         path = resolve_artifact(ref)
-        loaded = trimesh.load(path, force="mesh", process=False)
+        load_mesh_parts(path)
+    except MeshValidationError as error:
+        return error.code
     except (ArtifactStoreError, OSError, ValueError, TypeError):
         return "COLLIDER_GEOMETRY_REF_INVALID"
-    if not isinstance(loaded, trimesh.Trimesh) or not len(loaded.vertices) or not len(loaded.faces):
-        return "COLLIDER_GEOMETRY_HAS_NO_TOPOLOGY"
-    if not all(math.isfinite(float(value)) for value in loaded.vertices.reshape(-1)):
-        return "COLLIDER_GEOMETRY_HAS_INVALID_VERTICES"
     return None
 
 
@@ -149,9 +165,12 @@ def _resolve_required_ref(ref: ProductArtifactRef, resolve_artifact: ResolveArti
         return False
     try:
         path = resolve_artifact(ref)
-    except (ArtifactStoreError, OSError):
+        if not path.is_file():
+            return False
+        verify_file_checksum(path, ref.artifact_checksum)
+    except (ArtifactStoreError, OSError, ValueError):
         return False
-    return path.is_file()
+    return True
 
 
 def assess_export_capabilities(
@@ -164,9 +183,9 @@ def assess_export_capabilities(
     """Compare exact scene requirements with implemented USD behavior.
 
     The legacy writer keeps only static AABB/OBB colliders without ObjectPhysics or
-    external asset requirements. The hybrid writer is qualified separately and its
-    currently supported geometry is deliberately limited to exact AABB boxes and
-    convex-decomposition meshes with resolved topology.
+    external asset requirements. The hybrid writer is qualified separately and
+    authors local-frame boxes, validated convex pieces, ObjectPhysics, and sealed
+    USD assets whose dependency paths remain inside the package.
     """
     requirements = export_requirements(scene)
     mode = select_export_mode(requirements)
@@ -242,22 +261,26 @@ def assess_export_capabilities(
                         "A required Gaussian artifact is missing or its bytes do not match the declared checksum.",
                     )
                 )
-        if requirements.external_assets:
+        raw_asset_urls = [item.id for item in exported if isinstance(item.provenance.get("asset_url"), str)]
+        if raw_asset_urls:
             blockers.append(
                 _blocker(
                     "EXTERNAL_ASSET_CLOSURE_UNSUPPORTED",
-                    "The hybrid package does not yet seal external asset bytes in its candidate inventory.",
-                    [item.id for item in exported if _uses_external_asset(item)],
+                    "Catalog asset URLs cannot be sealed because their bytes are not available as a ProductArtifactRef.",
+                    raw_asset_urls,
                 )
             )
-        if requirements.local_collider_offsets:
-            blockers.append(
-                _blocker(
-                    "HYBRID_COLLIDER_OFFSET_UNSUPPORTED",
-                    "The current hybrid adapter does not compose ColliderSpec.local_transform.",
-                    [item.id for item in exported if _has_non_identity_offset(item)],
+        for item in exported:
+            if item.asset_ref is None:
+                continue
+            issue = _resolve_usd_asset(item.asset_ref, resolve_artifact)
+            if issue:
+                message = (
+                    "The referenced asset must be a checksum-verified USD file with a supported package extension."
+                    if issue == "EXTERNAL_ASSET_FORMAT_UNSUPPORTED"
+                    else "The referenced USD asset is missing or its bytes do not match the declared checksum."
                 )
-            )
+                blockers.append(_blocker(issue, message, [item.id]))
         for item in exported:
             collider = item.collider
             if collider is None:
@@ -278,25 +301,20 @@ def assess_export_capabilities(
                             [item.id],
                         )
                     )
-            elif collider.collider_type == ColliderType.AABB:
-                if collider.dimensions_xyz_m is None or item.primitive_dimensions_xyz_m is None:
+            elif collider.collider_type in {ColliderType.AABB, ColliderType.OBB}:
+                if collider.dimensions_xyz_m is None:
                     blockers.append(
                         _blocker(
                             "COLLIDER_DIMENSIONS_INVALID",
-                            "The hybrid box exporter requires collider and primitive dimensions.",
+                            "The hybrid box exporter requires finite positive collider dimensions.",
                             [item.id],
                         )
                     )
-                elif any(
-                    not math.isfinite(float(actual))
-                    or float(actual) <= 0
-                    or abs(float(actual) - float(expected)) > 1e-6
-                    for actual, expected in zip(collider.dimensions_xyz_m, item.primitive_dimensions_xyz_m, strict=True)
-                ):
+                elif any(not math.isfinite(float(value)) or float(value) <= 0 for value in collider.dimensions_xyz_m):
                     blockers.append(
                         _blocker(
-                            "HYBRID_BOX_DIMENSIONS_UNSUPPORTED",
-                            "The current hybrid adapter authors primitive dimensions and cannot preserve differing collider dimensions.",
+                            "COLLIDER_DIMENSIONS_INVALID",
+                            "The hybrid box exporter requires finite positive collider dimensions.",
                             [item.id],
                         )
                     )
@@ -328,7 +346,7 @@ def assess_export_capabilities(
         scene_ir_checksum=scene.scene_ir_checksum,
         status=ExportCapabilityStatus.BLOCKED if blockers else ExportCapabilityStatus.SUPPORTED,
         effective_mode=mode,
-        builder_version="usd-export-capabilities-v1",
+        builder_version="usd-export-capabilities-v2",
         runtime_qualification=(
             RuntimeQualificationStatus.NOT_REQUIRED
             if mode == EffectiveExportMode.LEGACY_BOX

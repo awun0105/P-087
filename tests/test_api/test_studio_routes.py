@@ -431,7 +431,7 @@ async def test_simulation_api_projects_export_block_separately_from_preflight(
             scene_ir_checksum=scene.scene_ir_checksum,
             status=ExportCapabilityStatus.BLOCKED,
             effective_mode=EffectiveExportMode.HYBRID,
-            builder_version="usd-export-capabilities-v1",
+            builder_version="usd-export-capabilities-v2",
             runtime_qualification=RuntimeQualificationStatus.FAILED,
             requirements=ExportRequirements(hybrid_visuals=True),
             blockers=[

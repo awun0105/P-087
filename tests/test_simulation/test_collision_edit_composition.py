@@ -459,6 +459,7 @@ def test_both_package_builders_share_background_and_current_hybrid_object_pose(
         },
         deep=True,
     )
+    enriched_scene = simulation_package.enrich_scene_physics(visual_scene, environment_collider_ref=layer_ref)
     runtime_python = tmp_path / "fake-usd-python"
     runtime_python.write_text("fixture runtime marker", encoding="utf-8")
     output = tmp_path / "hybrid-output"
@@ -468,10 +469,30 @@ def test_both_package_builders_share_background_and_current_hybrid_object_pose(
     def fake_run(command: list[str], **_: object) -> SimpleNamespace:
         request_path = Path(command[command.index("--request") + 1])
         captured.update(json.loads(request_path.read_text(encoding="utf-8")))
+        result_path = Path(command[command.index("--result") + 1])
+        result_path.write_text(
+            json.dumps(
+                {
+                    "root": "scene.usda",
+                    "objects": [
+                        {
+                            "prim": item["prim"],
+                            "collider_type": item["collider"]["type"],
+                            "collision_parts": 1,
+                            "collider_local_transform": item["collider"]["local_transform"],
+                        }
+                        for item in captured["objects"]
+                    ],
+                    "external_assets": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        Path(captured["output_dir"]).mkdir(parents=True)
         return SimpleNamespace(returncode=0, stderr=b"")
 
     monkeypatch.setattr(simulation_package.subprocess, "run", fake_run)
-    _hybrid_layers(registry, visual_scene, output, background, runtime_python)
+    _hybrid_layers(registry, enriched_scene, output, background, runtime_python)
 
     assert captured["collision_background_identity"] == background.identity
     assert captured["objects"][0]["translation"] == [4.0, 0.5, 0.3]

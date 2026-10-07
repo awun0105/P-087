@@ -125,7 +125,7 @@ def build_candidate_package(req: CandidateBuildRequest) -> CandidatePackage:
             raise ValueError("Không thể build CandidatePackage khi export capability bị chặn")
         if capability.blockers:
             raise ValueError("export capability báo SUPPORTED nhưng vẫn chứa blocker")
-        if capability.builder_version != "usd-export-capabilities-v1":
+        if capability.builder_version != "usd-export-capabilities-v2":
             raise ValueError("export capability builder version không được hỗ trợ")
         if capability.scene_revision != req.scene.scene_revision:
             raise ValueError("export capability scene_revision không khớp với SceneIR")

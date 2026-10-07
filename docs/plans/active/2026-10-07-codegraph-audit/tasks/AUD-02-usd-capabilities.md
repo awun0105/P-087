@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- Status PLANNED; P0; EX-SIM builder, EX-PRODUCT dispatch/errors.
+- Status IN PROGRESS; AUD-02.S1–S2 complete, AUD-02.S3 pending; P0; EX-SIM builder, EX-PRODUCT dispatch/errors.
 - Canonical tasks SIM-03/04/05, PRODUCT-08. Strategy REUSE pxr/hybrid runner,
   SELF-CODE capability gate; không thêm USD implementation framework.
 - Goal: candidate chỉ được publish khi exporter giữ đúng collider/physics đã yêu cầu.
@@ -88,7 +88,7 @@ adapter; emit mass/material chỉ theo ObjectPhysics, không dùng default thay
 user choice. Chuẩn hóa relative refs, reject unresolved asset dependencies.
 Tests: geometry/topology, orientation/local offsets, convex pieces, dynamic/static
 semantics, relative asset closure, corrupt mesh; parse USD bằng pxr khi có.
-**Exit:** [ ] supported matrix có semantic stage proof; [ ] unsupported path block rõ.
+**Exit:** [x] supported matrix có semantic stage proof; [x] unsupported path block rõ.
 
 ## Sprint AUD-02.S3 — API/UI blocker và consumer acceptance
 
@@ -155,6 +155,74 @@ proof và emitted USD giữ đủ semantics; Isaac runtime acceptance vẫn ghi 
   topology-free meshes, dynamic mass, uncomposed hybrid offsets, external asset
   closure, cache builder-version mismatch, hybrid inventory binding, API response
   projection, stale GET/workflow cache rejection, and collision-background consumers.
-- Runtime evidence: real `usd-core` and Isaac Sim execution were not available in
-  this sprint. The capability probe contract was tested with controlled subprocess
-  fixtures only; USD-runtime and Isaac acceptance remain unverified.
+- Runtime evidence at S1: the capability probe contract used controlled subprocess
+  fixtures; real `usd-core` stage acceptance was added in S2. Isaac acceptance
+  remains pending AUD-05.
+
+### AUD-02.S2 — complete
+
+- Commit base: `45b0258` (`AUD-02.S1`). Scope: exact supported collider and
+  `ObjectPhysics` export, checked external USD assets, runtime stage validation,
+  package summary verification, and dependent tests/docs.
+- Before: the hybrid adapter discarded collider-local transforms and trusted
+  primitive dimensions instead of `ColliderSpec`; convex export could fall back
+  to an empty/box representation; GLB scene-node transforms were lost; physics
+  metadata omitted density/provenance; asset references could leave the package.
+- After: AABB/OBB export uses exact `dimensions_xyz_m` and local translation/
+  quaternion. Convex decomposition emits every validated mesh part with node
+  transforms baked in; missing/invalid geometry fails closed. Mesh vertices,
+  triangles, indices, finite values, float range, duplicate indices and zero-area
+  faces are checked by one shared loader used by the API capability gate and the
+  low-dependency USD runtime. No convex-to-box fallback remains.
+- `ObjectPhysics` is passed without synthesized defaults. The writer emits
+  `RigidBodyAPI` only for dynamic objects; it writes supplied mass and density,
+  friction, restitution, mass source and provenance, and leaves physics schemas
+  off when `physics` is absent. Invalid numeric values or missing dynamic mass
+  block the export.
+- External `asset_ref` inputs are accepted only for `.usd`, `.usda`, `.usdc`, or
+  `.usdz` artifact URIs whose
+  resolved source bytes match the declared SHA-256. Bytes are copied under
+  `assets/<sha256>.<ext>`, referenced relatively, then the composed root stage is
+  checked for unresolved composition and dependencies outside the package. Raw
+  catalog URLs, non-USD formats, missing refs, corrupt bytes and unsafe paths
+  remain blocked. A runtime failure is converted to `USD_EXPORT_FAILED` before
+  SceneIR revision/candidate publication.
+- Dependent consumers: `_hybrid_layers` now passes exact collider data, physics
+  and checksummed asset refs; validates runner summary against requested object
+  IDs, collider types, local transforms, topology presence and asset checksums;
+  includes the summary and dependency bytes in the ZIP. Runtime capability and
+  cache/build identities use contract v2. Legacy box export keeps its existing
+  exact box/local-transform path and does not receive default physics.
+- Runtime evidence: `data/scene_runtime/bin/python` uses `usd-core 0.26.8`.
+  The runner test creates USD layers, opens the composed `scene.usda` with `pxr`,
+  and verifies Gaussian data, convex piece/node transforms, OBB dimensions,
+  local and composed transforms, dynamic/static/no-physics cases, mass/density/
+  material/provenance, and a relative USD asset reference. This proves OpenUSD
+  stage composition in that runtime; Isaac Sim physics behavior remains pending
+  AUD-05.
+- Checks: the task-focused pytest command below → 94 passed; `.venv/bin/ruff check
+  src/ tests/` → All checks passed; `.venv/bin/ruff format --check src/ tests/`
+  → 458 files already formatted; `git diff --check` → clean. A first run exposed
+  that a composition test bypassed production enrichment and its fake runner did
+  not return the required summary; the test now uses enriched input and returns
+  the runner contract. A malformed success summary is also verified to block.
+  Final focused rerun passed.
+- Remaining bounds: arbitrary USD resolver/plugin dependencies and nested external
+  files are not accepted unless they resolve into the package closure; no blind
+  repair of malformed meshes; no Isaac Sim, GPU or browser acceptance in this
+  sprint. S3 remains responsible for end-user blocker/retry routing.
+- Changed source files: `src/services/orchestration/review/simulation_package.py`,
+  `src/services/simulation/mesh_geometry.py`, and
+  `src/services/simulation/usd/{builder,capabilities,hybrid_runner}.py`.
+  Changed tests: `tests/test_orchestration/test_simulation_package.py`,
+  `tests/test_simulation/test_{collision_edit_composition,hybrid_usd,usd,usd_capabilities}.py`,
+  and `tests/test_api/test_studio_routes.py`. Task, ADR 0012 and active plan
+  progress record the same contract/evidence.
+- Gate report: CodeGraph read capability/build/runtime symbols and callers;
+  affected entry points are `build_simulation_package` (Studio API/workflow and
+  package tests), `_hybrid_layers` (package and collision-edit tests), the USD
+  capability gate and hybrid runner. `understand-anything` CLI/MCP was unavailable;
+  the flow was manually traced through CodeGraph and focused integration tests.
+  Minimal-code rung 2 reused `ArtifactResolver`, checksum utilities, `trimesh`,
+  and the existing `pxr` runner; one shared topology validator closes the missing
+  API/runtime contract. Browser DevTools is n/a because this is a UI-free service.

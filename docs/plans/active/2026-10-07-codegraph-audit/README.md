@@ -4,8 +4,10 @@ Date: 2026-10-07
 
 ## Status
 
-Active — bộ kế hoạch đã tạo; implementation chưa bắt đầu. Branch:
-`docs/codegraph-audit-implementation-plan`, base `develop@ef3a421`.
+Active — implementation đang diễn ra trên branch
+`docs/codegraph-audit-implementation-plan`, khởi tạo từ `develop@ef3a421`.
+Đã commit: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S2, AUD-02.S1–S2.
+Sprint kế tiếp theo dependency order: AUD-01.S3.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -182,7 +184,7 @@ Thứ tự mặc định gồm đủ **80 active sprint, mỗi sprint một lầ
 | 9 — Latency và Fast Preview | AUD-15.S2–S3 → AUD-16.S1–S3 | Measured optimization và preview/final lifecycle giữ đúng preparation identity và quality gates. |
 | 10 — Input qualification và extensions | AUD-17.S1–S3 → AUD-24.S5 → AUD-18.S1–S3 | Estimated trajectory/input matrix R1–R6 và PLY/SOG view import; anonymizer opt-in có provenance/QA. |
 
-Sprint bắt đầu là **AUD-11.S1**. AUD-15.S1 được làm sớm để AUD-23.S5 có
+Execution bắt đầu ở **AUD-11.S1**. AUD-15.S1 được làm sớm để AUD-23.S5 có
 measurement protocol; optimization AUD-15.S2–S3 vẫn làm sau quality work.
 AUD-07.S3 làm sau AUD-06/AUD-05 để kiểm tra admission trên consumer thật;
 không đợi toàn bộ AUD-07 trước khi triển khai hai consumer này.
@@ -210,6 +212,10 @@ AUD-16; AUD-15.S3 có thể dùng current pipeline, không bắt Fast Preview ho
 AUD-19 uses AUD-12.S1 quality fixtures; AUD-12 sensor-package path không đợi
 AUD-19. Static-map consumer chỉ enable sau registration QA, không bắt AUD-19
 đợi whole AUD-12 epic. Sensor calibration QA và map registration QA không tráo nhau.
+
+Progress hiện tại: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S2 và AUD-02.S1–S2 đã
+được commit riêng theo sprint. Geometry/physics export đã được kiểm bằng OpenUSD
+runtime; tiếp tục AUD-01.S3 rồi AUD-02.S3. Isaac Sim acceptance vẫn thuộc AUD-05.
 
 AUD-23 có client preparation identity trước AUD-15/16 cache consumers; supported
 sensor mapping chốt trước AUD-13 overlay QA. Không cần full odometry/registration

@@ -21,12 +21,18 @@ sigmoid, scale sau exp, quaternion wxyz, hệ số SH xếp [hệ số][RGB] (PL
 """
 
 import argparse
+import hashlib
 import json
-from pathlib import Path
+import math
+import re
+import sys
+from pathlib import Path, PurePosixPath
 
 import numpy as np
-import trimesh
 from pxr import Gf, Usd, UsdGeom, UsdPhysics, UsdSemantics, UsdShade, UsdVol, Vt
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+from src.services.simulation.mesh_geometry import load_mesh_parts, validate_mesh_arrays
 
 _PLY_TYPES = {"float": "f4", "float32": "f4", "double": "f8", "uchar": "u1", "int": "i4", "uint": "u4"}
 
@@ -117,21 +123,24 @@ def write_particle_field(stage: Usd.Stage, path: str, gaussians: dict[str, np.nd
 
 def load_mesh(path: Path) -> tuple[np.ndarray, np.ndarray]:
     """Mesh tam giác (đỉnh, mặt) từ GLB/PLY/OBJ; gộp mọi node của GLB."""
-    mesh = trimesh.load(path, force="mesh", process=False)
-    return np.asarray(mesh.vertices, dtype=np.float32), np.asarray(mesh.faces, dtype=np.int32)
+    parts = load_mesh_parts(path)
+    vertices, faces = [], []
+    offset = 0
+    for points, triangles in parts:
+        vertices.append(points)
+        faces.append(triangles + offset)
+        offset += len(points)
+    return validate_mesh_arrays(np.concatenate(vertices), np.concatenate(faces))
 
 
 def load_parts(path: Path) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Các khối lồi trong một GLB collider (mỗi geometry một khối), theo thứ tự tên."""
-    loaded = trimesh.load(path, process=False)
-    meshes = (
-        [loaded] if isinstance(loaded, trimesh.Trimesh) else [loaded.geometry[name] for name in sorted(loaded.geometry)]
-    )
-    return [(np.asarray(m.vertices, dtype=np.float32), np.asarray(m.faces, dtype=np.int32)) for m in meshes]
+    """Các khối lồi trong một collider; giữ node transforms và thứ tự ổn định."""
+    return load_mesh_parts(path)
 
 
 def write_mesh(stage: Usd.Stage, path: str, vertices: np.ndarray, faces: np.ndarray, approximation: str) -> None:
     """Mesh collider (không hiển thị) với CollisionAPI + MeshCollisionAPI."""
+    vertices, faces = validate_mesh_arrays(vertices, faces)
     mesh = UsdGeom.Mesh.Define(stage, path)
     mesh.CreatePointsAttr().Set(Vt.Vec3fArray.FromNumpy(vertices))
     mesh.CreateFaceVertexCountsAttr().Set(Vt.IntArray.FromNumpy(np.full(len(faces), 3, dtype=np.int32)))
@@ -143,6 +152,8 @@ def write_mesh(stage: Usd.Stage, path: str, vertices: np.ndarray, faces: np.ndar
 
 def write_box_collider(stage: Usd.Stage, path: str, dims: list[float]) -> None:
     """Collider hộp khi vật chưa có mesh (vật cản người dùng thêm)."""
+    if len(dims) != 3 or any(not math.isfinite(float(value)) or float(value) <= 0 for value in dims):
+        raise ValueError("box collider requires three finite positive dimensions")
     cube = UsdGeom.Cube.Define(stage, path)
     cube.CreateSizeAttr().Set(1.0)
     cube.AddScaleOp().Set(Gf.Vec3f(*map(float, dims)))
@@ -151,18 +162,151 @@ def write_box_collider(stage: Usd.Stage, path: str, dims: list[float]) -> None:
 
 
 def apply_physics(stage: Usd.Stage, prim: Usd.Prim, physics: dict | None) -> None:
-    """RigidBody + Mass (vật động) và Physics Material gắn purpose `physics`."""
-    if not physics:
+    """Author only the mass and material values present in ObjectPhysics."""
+    if physics is None:
         return
-    if physics.get("dynamic"):
+    if not isinstance(physics, dict) or not isinstance(physics.get("dynamic"), bool):
+        raise ValueError("ObjectPhysics must declare a boolean dynamic field")
+    for key in ("static_friction", "dynamic_friction", "restitution"):
+        value = physics.get(key)
+        if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(float(value)):
+            raise ValueError(f"ObjectPhysics requires finite {key}")
+        if float(value) < 0 or (key == "restitution" and float(value) > 1):
+            raise ValueError(f"ObjectPhysics {key} is outside its contract range")
+    mass = physics.get("mass_kg")
+    if mass is not None and (
+        isinstance(mass, bool) or not isinstance(mass, int | float) or not math.isfinite(float(mass)) or mass <= 0
+    ):
+        raise ValueError("ObjectPhysics mass_kg must be finite and positive when present")
+    density = physics.get("density_kg_m3")
+    if density is not None and (
+        isinstance(density, bool)
+        or not isinstance(density, int | float)
+        or not math.isfinite(float(density))
+        or density <= 0
+    ):
+        raise ValueError("ObjectPhysics density_kg_m3 must be finite and positive when present")
+    mass_source = physics.get("mass_source")
+    if physics["dynamic"] and (mass is None or not isinstance(mass_source, str) or not mass_source):
+        raise ValueError("dynamic ObjectPhysics requires mass_kg and mass_source")
+    provenance = physics.get("provenance")
+    if not isinstance(provenance, dict):
+        raise ValueError("ObjectPhysics provenance must be an object")
+    if physics["dynamic"]:
         UsdPhysics.RigidBodyAPI.Apply(prim)
-        UsdPhysics.MassAPI.Apply(prim).CreateMassAttr().Set(float(physics["mass_kg"]))
+    if mass is not None or density is not None:
+        mass_api = UsdPhysics.MassAPI.Apply(prim)
+        if mass is not None:
+            mass_api.CreateMassAttr().Set(float(mass))
+        if density is not None:
+            mass_api.CreateDensityAttr().Set(float(density))
     material = UsdShade.Material.Define(stage, prim.GetPath().AppendChild("PhysicsMaterial"))
     api = UsdPhysics.MaterialAPI.Apply(material.GetPrim())
     api.CreateStaticFrictionAttr().Set(float(physics["static_friction"]))
     api.CreateDynamicFrictionAttr().Set(float(physics["dynamic_friction"]))
     api.CreateRestitutionAttr().Set(float(physics["restitution"]))
     UsdShade.MaterialBindingAPI.Apply(prim).Bind(material, UsdShade.Tokens.weakerThanDescendants, "physics")
+    metadata = {
+        key: physics[key]
+        for key in (
+            "dynamic",
+            "mass_kg",
+            "mass_source",
+            "density_kg_m3",
+            "static_friction",
+            "dynamic_friction",
+            "restitution",
+            "provenance",
+        )
+        if physics.get(key) is not None
+    }
+    prim.SetCustomDataByKey("real2sim", {"physics": metadata})
+
+
+def _collider_transform(stage: Usd.Stage, path: str, collider: dict) -> None:
+    local = collider.get("local_transform")
+    if not isinstance(local, dict):
+        raise ValueError("collider local_transform is required")
+    translation = local.get("translation_xyz")
+    rotation = local.get("rotation_quaternion_xyzw")
+    if (
+        not isinstance(translation, list | tuple)
+        or len(translation) != 3
+        or any(
+            isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(float(value))
+            for value in translation
+        )
+        or not isinstance(rotation, list | tuple)
+        or len(rotation) != 4
+        or any(
+            isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(float(value))
+            for value in rotation
+        )
+    ):
+        raise ValueError("collider local_transform must contain finite translation and quaternion values")
+    qx, qy, qz, qw = map(float, rotation)
+    if not math.isclose(math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw), 1.0, rel_tol=1e-5, abs_tol=1e-5):
+        raise ValueError("collider local_transform quaternion must be normalized")
+    frame = UsdGeom.Xform.Define(stage, path)
+    frame.AddTranslateOp().Set(Gf.Vec3d(*map(float, translation)))
+    frame.AddOrientOp().Set(Gf.Quatf(qw, qx, qy, qz))
+
+
+def _copy_asset(item: dict, output_dir: Path) -> str | None:
+    source_value = item.get("asset_source_path")
+    if source_value is None:
+        return None
+    source = Path(source_value)
+    relative = PurePosixPath(item.get("asset_package_path", ""))
+    checksum = item.get("asset_checksum")
+    if (
+        not source.is_file()
+        or relative.is_absolute()
+        or len(relative.parts) != 2
+        or relative.parts[0] != "assets"
+        or any(part in {"", ".", ".."} for part in relative.parts)
+        or source.suffix.lower() not in {".usd", ".usda", ".usdc", ".usdz"}
+        or source.suffix.lower() != Path(relative.name).suffix.lower()
+        or not isinstance(checksum, str)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", checksum) is None
+        or relative.name != checksum.removeprefix("sha256:") + source.suffix.lower()
+    ):
+        raise ValueError("USD asset path or checksum is outside the package contract")
+    destination = output_dir.joinpath(*relative.parts)
+    if not destination.resolve().is_relative_to(output_dir.resolve()):
+        raise ValueError("USD asset path escapes the package root")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256()
+    try:
+        with source.open("rb") as input_stream, destination.open("wb") as output_stream:
+            for chunk in iter(lambda: input_stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+                output_stream.write(chunk)
+    except OSError as error:
+        destination.unlink(missing_ok=True)
+        raise ValueError("USD asset bytes could not be copied into the package") from error
+    if "sha256:" + digest.hexdigest() != checksum:
+        destination.unlink(missing_ok=True)
+        raise ValueError("USD asset bytes do not match the declared checksum")
+    return relative.as_posix()
+
+
+def _validate_stage_closure(scene_path: Path, package_root: Path) -> None:
+    stage = Usd.Stage.Open(str(scene_path))
+    if stage is None:
+        raise ValueError("generated USD entrypoint cannot be opened")
+    if stage.GetCompositionErrors():
+        raise ValueError("generated USD entrypoint has unresolved composition dependencies")
+    root = package_root.resolve()
+    for layer in stage.GetUsedLayers():
+        if layer.anonymous:
+            continue
+        real_path = layer.realPath
+        if not real_path:
+            raise ValueError("generated USD entrypoint contains a non-file dependency")
+        packaged_path = Path(real_path.split("[", 1)[0]).resolve()
+        if not packaged_path.is_relative_to(root) or not packaged_path.is_file():
+            raise ValueError("generated USD entrypoint references bytes outside the package")
 
 
 def label(prim: Usd.Prim, semantic_class: str | None) -> None:
@@ -194,6 +338,10 @@ def probe_runtime() -> dict:
     body = UsdGeom.Xform.Define(stage, "/Probe/Body").GetPrim()
     UsdPhysics.RigidBodyAPI.Apply(body)
     UsdPhysics.MassAPI.Apply(body).CreateMassAttr().Set(1.0)
+    frame = UsdGeom.Xform.Define(stage, "/Probe/ColliderFrame")
+    frame.AddTranslateOp().Set(Gf.Vec3d(0.1, 0.2, 0.3))
+    frame.AddOrientOp().Set(Gf.Quatf(1.0, 0.0, 0.0, 0.0))
+    body.SetCustomDataByKey("real2sim", {"physics": {"dynamic": True, "mass_source": "probe"}})
     material = UsdShade.Material.Define(stage, "/Probe/Material")
     physics_material = UsdPhysics.MaterialAPI.Apply(material.GetPrim())
     physics_material.CreateStaticFrictionAttr().Set(0.5)
@@ -212,6 +360,8 @@ def probe_runtime() -> dict:
             "convex_mesh_collision",
             "rigid_body_mass",
             "physics_material",
+            "collider_local_transform",
+            "physics_source_metadata",
             "semantic_labels",
             "gaussian_particle_field",
             "meters_z_up",
@@ -223,7 +373,7 @@ def build(request: dict) -> dict:
     """Dựng toàn bộ stage; trả tóm tắt số Gaussian/collider để app ghi vào provenance."""
     out = Path(request["output_dir"])
     (out / "objects").mkdir(parents=True, exist_ok=True)
-    summary: dict = {"environment_gaussians": 0, "objects": []}
+    summary: dict = {"environment_gaussians": 0, "objects": [], "external_assets": []}
 
     env = request.get("environment") or {}
     env_stage = new_layer(out / "environment.usdc")
@@ -256,29 +406,63 @@ def build(request: dict) -> dict:
         layer_path = out / "objects" / f"{prim_name}.usdc"
         stage = new_layer(layer_path)
         prim = stage.GetPrimAtPath("/Root")
-        entry = {"prim": prim_name, "gaussians": 0, "collision_parts": 0}
+        collider = item.get("collider")
+        if not isinstance(collider, dict):
+            raise ValueError(f"confirmed object '{prim_name}' requires an explicit collider")
+        collider_type = collider.get("type")
+        if collider_type not in {"AABB", "OBB", "CONVEX_DECOMPOSITION"}:
+            raise ValueError(f"unsupported collider type for '{prim_name}'")
+        entry = {"prim": prim_name, "gaussians": 0, "collider_type": collider_type, "collision_parts": 0}
         if item.get("gaussians_ply"):
             entry["gaussians"] = write_particle_field(
                 stage, "/Root/Visual", gaussian_arrays(read_gaussian_ply(Path(item["gaussians_ply"])))
             )
-        if item.get("asset_usd"):
-            # Vật thêm từ danh mục: hình là asset Isaac (tham chiếu URL). Gốc asset ở đáy nên hạ nửa chiều cao
-            # để khớp transform của vật (đặt tại tâm hộp bao).
+        asset_package_path = _copy_asset(item, out)
+        if asset_package_path is not None:
             asset = UsdGeom.Xform.Define(stage, "/Root/Asset")
-            asset.GetPrim().GetReferences().AddReference(item["asset_usd"])
-            asset.AddTranslateOp().Set(Gf.Vec3d(0, 0, -float(item.get("asset_drop_m", 0.0))))
-            entry["asset"] = item["asset_usd"]
-        UsdGeom.Scope.Define(stage, "/Root/Collision")
-        parts = [load_mesh(Path(part)) for part in item.get("collision_parts") or []]
-        if item.get("collision_glb"):
-            parts += load_parts(Path(item["collision_glb"]))
-        for index, (vertices, faces) in enumerate(parts):
-            write_mesh(stage, f"/Root/Collision/part_{index:03d}", vertices, faces, UsdPhysics.Tokens.convexHull)
-            entry["collision_parts"] += 1
-        if not entry["collision_parts"] and item.get("box_dims"):
-            write_box_collider(stage, "/Root/Collision/box", item["box_dims"])
+            relative_reference = "../" + asset_package_path
+            asset.GetPrim().GetReferences().AddReference(relative_reference)
+            entry["asset"] = asset_package_path
+            summary["external_assets"].append(
+                {"prim": prim_name, "path": asset_package_path, "checksum": item["asset_checksum"]}
+            )
+        _collider_transform(stage, "/Root/Collision", collider)
+        if collider_type in {"AABB", "OBB"}:
+            if collider.get("geometry_path") or collider.get("part_paths"):
+                raise ValueError(f"box collider for '{prim_name}' cannot also declare mesh geometry")
+            dimensions = collider.get("dimensions_xyz_m")
+            if not isinstance(dimensions, list | tuple):
+                raise ValueError(f"box collider for '{prim_name}' requires collider dimensions")
+            write_box_collider(stage, "/Root/Collision/box", list(dimensions))
             entry["collision_parts"] = 1
+            entry["collider_dimensions_xyz_m"] = list(dimensions)
+        else:
+            if collider.get("dimensions_xyz_m") is not None:
+                raise ValueError(f"convex collider for '{prim_name}' cannot declare box dimensions")
+            parts = [load_mesh(Path(part)) for part in collider.get("part_paths") or []]
+            if collider.get("geometry_path"):
+                parts += load_parts(Path(collider["geometry_path"]))
+            if not parts:
+                raise ValueError(f"convex collider for '{prim_name}' requires at least one valid mesh part")
+            for index, (vertices, faces) in enumerate(parts):
+                write_mesh(stage, f"/Root/Collision/part_{index:03d}", vertices, faces, UsdPhysics.Tokens.convexHull)
+                entry["collision_parts"] += 1
+        entry["collider_local_transform"] = collider["local_transform"]
+        physics = item.get("physics")
         apply_physics(stage, prim, item.get("physics"))
+        if physics is not None:
+            entry["physics"] = {
+                key: physics.get(key)
+                for key in (
+                    "dynamic",
+                    "mass_kg",
+                    "mass_source",
+                    "density_kg_m3",
+                    "static_friction",
+                    "dynamic_friction",
+                    "restitution",
+                )
+            }
         label(prim, item.get("semantic_class"))
         stage.GetRootLayer().Save()
 
@@ -293,7 +477,9 @@ def build(request: dict) -> dict:
         summary["objects"].append(entry)
 
     root.GetRootLayer().Save()
+    _validate_stage_closure(out / "scene.usda", out)
     summary["root"] = "scene.usda"
+    summary["usd_version"] = ".".join(str(part) for part in Usd.GetVersion())
     return summary
 
 

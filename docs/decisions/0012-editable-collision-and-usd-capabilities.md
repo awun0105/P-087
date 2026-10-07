@@ -56,28 +56,45 @@ Capability check phải xảy ra trước publish physics_enrich revision. Artif
 mesh cần finite vertices, topology hợp lệ, correct local transform và resolver
 closure. USD stage phải dùng canonical units/axes; visual và physics cùng object ID.
 
-## Exporter capability contract (AUD-02.S1 implemented)
+## Exporter capability contract (AUD-02.S1–S2 implementation evidence)
 
 The implementation exposes an additive `export_capability` result beside static
 Preflight. The two checks answer different questions: static Preflight validates
 scene geometry and required artifacts; export capability proves that the selected
 builder/runtime can preserve the SceneIR requirements. A package is publishable
-only when both pass. The internal contract is `usd-export-capabilities-v1` and is
-bound to SceneIR revision/checksum, effective mode, builder config, and runtime USD
-version in the candidate build identity.
+only when both pass. The operational contract is `usd-export-capabilities-v2` and
+is bound to SceneIR revision/checksum, effective mode, builder config, and runtime
+USD version in the candidate build identity. This contract evidence does not by
+itself mark this ADR Accepted; AUD-02.S3 and Isaac validation remain open.
 
-The legacy path is limited to finite positive AABB/OBB boxes with local transforms;
-it rejects authored ObjectPhysics, external assets, and unsupported collider types.
-The hybrid path is selected for Gaussian visuals, authored physics, external assets,
-or collider types beyond the legacy subset. It must pass an in-memory API probe in
-the configured USD interpreter before publication. Current hybrid support blocks
-non-identity collider offsets, unresolved/empty convex geometry, external asset
-closure, and collider forms the adapter does not author yet. A cache hit requires
-the exact builder config checksum and matching capability requirements.
+The legacy path supports finite positive AABB/OBB boxes with exact dimensions and
+local transforms. It rejects authored `ObjectPhysics`, external assets, and
+unsupported collider types. The hybrid path is selected for Gaussian visuals,
+authored physics, external assets, or collider types beyond the legacy subset. It
+must pass an in-memory API probe in the configured USD interpreter before
+publication. AABB/OBB geometry and `ColliderSpec.local_transform` are authored
+directly. Convex decomposition emits validated triangle mesh parts and preserves
+scene-node transforms; missing topology, invalid indices, non-finite coordinates,
+degenerate faces, or absent geometry block instead of falling back to a box.
 
-The automated runtime-probe tests use a fake subprocess response. They establish
-the contract and rejection behavior only; real `usd-core` stage acceptance and
-Isaac Sim behavior remain unverified until AUD-02.S2/AUD-05.
+The writer authors `RigidBodyAPI` only for dynamic `ObjectPhysics`; supplied mass,
+density, friction, restitution, mass source, and provenance are preserved. If
+`ObjectPhysics` is absent, no mass/body/material defaults are authored. External
+assets are limited to checksum-verified `.usd`, `.usda`, `.usdc`, and `.usdz`
+artifacts. The exporter copies source bytes under a SHA-256 relative package path,
+references them relatively, and checks the composed stage for unresolved or
+out-of-package layer dependencies. Raw catalog URLs and non-USD formats remain
+unsupported because they do not provide a checksum-bound package dependency.
+Runtime build errors return a capability blocker before SceneIR revision or
+candidate publication; cache reuse requires the exact config checksum and
+matching requirements.
+
+AUD-02.S2 ran the actual hybrid writer and opened the composed stage with `pxr`
+from `data/scene_runtime/bin/python` (`usd-core 0.26.8`). Tests verified Gaussian
+data, collider topology and dimensions, local/composed transforms, physics
+attributes and metadata, relative asset composition, and missing-physics behavior.
+This proves OpenUSD stage composition in the tested runtime. Isaac Sim execution
+and physical behavior remain unverified and are assigned to AUD-05.
 
 ## Alternatives Considered
 
