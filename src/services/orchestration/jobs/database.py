@@ -165,6 +165,21 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
                     REFERENCES r2s_validation_runs(run_id, job_id, candidate_checksum, config_checksum))""",
         ),
     ),
+    (
+        # Frozen approval-bound release identity makes archive/manifest retry deterministic.
+        10,
+        (
+            """CREATE TABLE r2s_release_seals (
+                job_id TEXT NOT NULL,
+                candidate_checksum TEXT NOT NULL,
+                validation_report_checksum TEXT NOT NULL,
+                approval_record_checksum TEXT NOT NULL,
+                generation INTEGER NOT NULL CHECK(generation > 0),
+                intent_checksum TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                PRIMARY KEY(job_id, candidate_checksum, validation_report_checksum, approval_record_checksum))""",
+        ),
+    ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 

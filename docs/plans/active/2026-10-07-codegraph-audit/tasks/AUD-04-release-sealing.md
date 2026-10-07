@@ -65,7 +65,7 @@ test clock đổi giữa calls. Chọn deterministic ZIP member order/metadata h
 persist exact archive ref/bytes sau build; không generate archive identity tùy retry.
 Tests: repeated call, different clock, same/different approval, payload corruption,
 backward-compatible read of existing sealed releases.
-**Exit:** [ ] original partial-publish regression exists; [ ] identity frozen before publish.
+**Exit:** [x] original partial-publish regression exists; [x] identity frozen before publish.
 
 ## Sprint AUD-04.S2 — Resume publication và committed release
 
@@ -106,4 +106,53 @@ DONE khi fault matrix/concurrency/ZIP equality pass; old releases giữ checksum
 
 ## Result / Evidence
 
-Pending — ghi exact manifest/archive checksums và output ở từng failure boundary.
+### AUD-04.S1 — seal intent và deterministic identity
+
+- Base commit: `e77eebb` (`AUD-03.S3`). CodeGraph traced `seal_release` through
+  `decide` and `POST /release-seal`, `review_state` release projection,
+  `FilesystemArtifactStore.publish`, and RuntimeDatabase migrations. The seal
+  path has eight callers after adding the recovery regression. No API or public
+  contract fields changed.
+- Red reproduction before the fix: inject an `OSError` after `release.zip`
+  publication and before `ReleaseManifest`; advance the clock by one hour;
+  retry produced different embedded and API manifests. The new test failed at
+  the byte-equality assertion on the old implementation.
+- Added internal `ReleaseSealIntent` and `ReleaseSealRepository`, keyed by
+  `(job_id, candidate_checksum, validation_report_checksum,
+  approval_record_checksum)`. It stores a stable seal ID, timestamp, exact UTF-8
+  manifest payload, logical and byte checksums, archive ref, status, generation
+  and payload checksum. `get_or_create` persists the intent transactionally
+  before artifact publication; updates to archive ref and SEALED status use
+  checksum-guarded CAS. Same identity reuses one intent; different report or
+  approval identity gets a distinct row; malformed/tampered payload fails closed.
+- `seal_release` now publishes from the frozen manifest bytes. It persists the
+  expected archive reference before publishing ZIP bytes, resumes if publication
+  did not complete, checks an existing archive against the recorded checksum,
+  verifies the embedded manifest matches the frozen payload, then publishes the
+  API manifest and marks the intent SEALED. Older RELEASED records remain
+  readable without a seal-intent row. Full archive closure, mixed-version
+  recovery and committed-state verification remain S2.
+- Schema delta: additive RuntimeDatabase migration v10 creates
+  `r2s_release_seals`; v8→latest and v9→v10 SQLite fixtures preserve existing
+  project/job rows. Existing migration v1 records remain covered. No artifact is
+  overwritten and no prior checksum is rewritten.
+- Files changed: `src/services/orchestration/review/release_seals.py`,
+  `src/services/orchestration/review/workflow.py`,
+  `src/services/orchestration/jobs/database.py`,
+  `tests/test_orchestration/test_release_sealing_recovery.py`,
+  `tests/test_orchestration/test_runtime_migrations.py`,
+  `docs/decisions/0013-validation-evidence-and-release-identity.md`, plus this
+  task record and the execution-plan README.
+- CodeGraph after implementation: 749 files, 13,385 nodes, 37,945 edges; index
+  up to date. `seal_release` callers include the API, decision path, legacy
+  workflow tests and new partial-publication recovery test.
+- Verification: **44 passed, 4 skipped** across release sealing, review workflow,
+  review API, runtime migrations, artifact store and release contracts. All four
+  skips require unavailable `R2S_TEST_POSTGRES_URL`; SQLite migration and crash
+  recovery paths ran. `ruff check src/ tests/` passed; `ruff format --check src/
+  tests/` reported 465 files already formatted; `git diff --check` passed.
+- Limits: no live PostgreSQL/cloud artifact store was available. This sprint does
+  not yet prove concurrent seal calls or recover every missing/corrupt archive
+  boundary; those are S2/S3. No production release data or runtime DB was changed.
+- Next: AUD-04.S2 verifies every reused artifact and closes recovery behavior at
+  pre-ZIP, post-ZIP, post-manifest and pre-commit failure boundaries.

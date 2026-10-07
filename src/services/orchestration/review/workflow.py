@@ -36,6 +36,7 @@ from src.models.contracts.release import (
 from src.models.contracts.validation import ValidationReport
 from src.services.orchestration.artifacts import ArtifactAlreadyExistsError
 from src.services.orchestration.projects.registry import ProjectRegistry
+from src.services.orchestration.review.release_seals import ReleaseSealIntent, ReleaseSealRepository
 from src.services.orchestration.review.simulation_package import SimulationPackage, current_package
 from src.services.orchestration.review.validation_gate import evaluate_validation_eligibility
 
@@ -297,6 +298,9 @@ def seal_release(registry: ProjectRegistry, job_id: str) -> ReviewState:
     candidate = package.candidate
     assert candidate is not None and package.package_ref is not None  # đã kiểm ở review_state
     job = registry.get_job(job_id)
+    if registry.persistence is None:
+        raise ReviewError("Niêm phong release cần runtime database bền vững")
+    repository = ReleaseSealRepository(registry.persistence.database)
     candidate_refs = [candidate.entrypoint_usd, *candidate.assets, *candidate.geometry, *candidate.colliders]
     inventory = [
         ArtifactInventoryItem(
@@ -307,53 +311,103 @@ def seal_release(registry: ProjectRegistry, job_id: str) -> ReviewState:
         )
         for ref in [*candidate_refs, package.package_ref]
     ]
-    draft = ReleaseManifest(
-        schema_version=SCHEMA_VERSION,
-        run_type=ReleaseRunType.ORDINARY,
-        project_id=job.project_id,
-        scene_version=state.record.scene_revision,
-        input_manifest_checksum=job.input_manifest_checksum,
-        job_manifest_checksum=job.job_manifest_checksum,
-        candidate_checksum=candidate.candidate_checksum,
-        preflight_report_checksum=package.preflight.report_checksum,
-        validation_report_checksum=report.report_checksum,
-        processing_config_checksum=job.config_checksum,
-        software_versions={"validator": report.validator_version, **report.environment_versions},
-        artifact_inventory=inventory,
-        review_state="APPROVED",
-        approval_record=ReleaseApproval(
-            reviewer_id=approval.reviewer_id,
-            approved_at=approval.decided_at,
-            accepted_warning_ids=approval.accepted_warning_ids,
-            record_checksum=approval.record_checksum,
-        ),
-        release_timestamp=datetime.now(UTC),
-        release_manifest_checksum=ZERO,
-    )
-    manifest = draft.model_copy(
-        update={"release_manifest_checksum": canonical_content_checksum(draft, "release_manifest_checksum")}
-    )
-    manifest_bytes = manifest.model_dump_json(indent=2).encode()
-    # Gói phát hành = đúng byte các file của gói đã kiểm + bản ghi review/validation/manifest; không build lại.
-    archive = _release_archive(
-        registry.runtime_resolver.require(package.package_ref).read_bytes(),
-        {
-            "release_manifest.json": manifest_bytes,
-            "validation_report.json": report.model_dump_json(indent=2).encode(),
-            "approval_record.json": approval.model_dump_json(indent=2).encode(),
-        },
-    )
-    archive_ref = _ref(
+    archive_uri = f"artifact://jobs/{job_id}/release/{_hex(candidate.candidate_checksum)}/release.zip"
+
+    def create_intent() -> ReleaseSealIntent:
+        draft = ReleaseManifest(
+            schema_version=SCHEMA_VERSION,
+            run_type=ReleaseRunType.ORDINARY,
+            project_id=job.project_id,
+            scene_version=state.record.scene_revision,
+            input_manifest_checksum=job.input_manifest_checksum,
+            job_manifest_checksum=job.job_manifest_checksum,
+            candidate_checksum=candidate.candidate_checksum,
+            preflight_report_checksum=package.preflight.report_checksum,
+            validation_report_checksum=report.report_checksum,
+            processing_config_checksum=job.config_checksum,
+            software_versions={"validator": report.validator_version, **report.environment_versions},
+            artifact_inventory=inventory,
+            review_state="APPROVED",
+            approval_record=ReleaseApproval(
+                reviewer_id=approval.reviewer_id,
+                approved_at=approval.decided_at,
+                accepted_warning_ids=approval.accepted_warning_ids,
+                record_checksum=approval.record_checksum,
+            ),
+            release_timestamp=datetime.now(UTC),
+            release_manifest_checksum=ZERO,
+        )
+        manifest = draft.model_copy(
+            update={"release_manifest_checksum": canonical_content_checksum(draft, "release_manifest_checksum")}
+        )
+        return ReleaseSealIntent.freeze(
+            job_id=job_id,
+            candidate_checksum=candidate.candidate_checksum,
+            validation_report_checksum=report.report_checksum,
+            approval_record_checksum=approval.record_checksum,
+            manifest=manifest,
+        )
+
+    intent = repository.get_or_create(
         job_id,
-        f"artifact://jobs/{job_id}/release/{_hex(candidate.candidate_checksum)}/release.zip",
-        "ReleaseArchive",
-        StageId.RELEASE,
-        archive,
+        candidate.candidate_checksum,
+        report.report_checksum,
+        approval.record_checksum,
+        create_intent,
     )
-    if registry.runtime_resolver.locate(archive_ref.artifact_uri) is None:
+    manifest_bytes = intent.manifest_payload.encode("utf-8")
+    archive_path = registry.runtime_resolver.locate(archive_uri)
+    if intent.archive_ref is not None:
+        archive_ref = intent.archive_ref
+    else:
+        archive_ref = None
+
+    # The archive ref is frozen before publication so a crash after the store's
+    # atomic create still leaves enough identity to resume without changing bytes.
+    def build_archive() -> bytes:
+        return _release_archive(
+            registry.runtime_resolver.require(package.package_ref).read_bytes(),
+            {
+                "release_manifest.json": manifest_bytes,
+                "validation_report.json": report.model_dump_json(indent=2).encode("utf-8"),
+                "approval_record.json": approval.model_dump_json(indent=2).encode("utf-8"),
+            },
+        )
+
+    if archive_path is None:
+        archive = build_archive()
+        computed_ref = _ref(job_id, archive_uri, "ReleaseArchive", StageId.RELEASE, archive)
+        if archive_ref is None:
+            intent = repository.record_archive(intent, computed_ref)
+            archive_ref = intent.archive_ref
+        elif archive_ref != computed_ref:
+            raise ReviewError("Rebuilt release archive differs from the persisted seal intent", conflict=True)
+        assert archive_ref is not None
         registry.scene.store.publish(archive_ref, archive)
+    else:
+        archive = archive_path.read_bytes()
+        archive_checksum = "sha256:" + hashlib.sha256(archive).hexdigest()
+        if archive_ref is None:
+            computed_ref = _ref(job_id, archive_uri, "ReleaseArchive", StageId.RELEASE, build_archive())
+            if computed_ref.artifact_checksum != archive_checksum:
+                raise ReviewError("Existing release archive does not match the frozen seal intent", conflict=True)
+            intent = repository.record_archive(intent, computed_ref)
+            archive_ref = intent.archive_ref
+        elif archive_checksum != archive_ref.artifact_checksum:
+            raise ReviewError("Release archive differs from the persisted seal intent", conflict=True)
+        assert archive_ref is not None
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as sealed_archive:
+            embedded_manifest = sealed_archive.read("release_manifest.json")
+    except (OSError, KeyError, zipfile.BadZipFile) as error:
+        raise ReviewError("Release archive cannot be verified", conflict=True) from error
+    if embedded_manifest != manifest_bytes:
+        raise ReviewError("Release archive manifest does not match the persisted seal intent", conflict=True)
+
     uri = release_uri(job_id, candidate.candidate_checksum)
     _publish_once(registry, _ref(job_id, uri, "ReleaseManifest", StageId.RELEASE, manifest_bytes), manifest_bytes)
+    repository.mark_sealed(intent)
     return review_state(registry, job_id)
 
 

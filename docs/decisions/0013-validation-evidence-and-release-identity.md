@@ -67,11 +67,21 @@ queue/report history cần operational migration và selection rõ ràng.
 
 AUD-03.S1 added the operational config/run/selection contracts, append-only
 RuntimeDatabase v9 storage, per-attempt artifact identities, and package
-handoff validation. AUD-03.S2 now applies one eligibility gate in review,
-approval, and direct release sealing. It verifies exact current SceneIR,
-candidate, selected config/run/report, worker-origin record and structured
-runtime manifest; package import refuses completed worker rows until they carry
-an authenticated receipt. This ADR remains **Proposed** while AUD-03.S3 updates
-API/UI projections, AUD-04 supplies atomic seal recovery, and AUD-05 implements
-the real validator and worker authentication. Worker-shaped test records verify
-gate behavior only; they are not Isaac runtime acceptance.
+handoff validation. AUD-03.S2 applies one eligibility gate in review, approval,
+and direct release sealing. It verifies exact current SceneIR, candidate,
+selected config/run/report, worker-origin record and structured runtime
+manifest; package import refuses completed worker rows until they carry an
+authenticated receipt. AUD-03.S3 projects trusted proof, blockers and optional
+path warnings through the API/UI. Its automated checks pass; the required
+Chrome DevTools MCP screen gate remains unverified, and worker-shaped test
+records are not Isaac runtime acceptance.
+
+AUD-04.S1 added RuntimeDatabase v10 `r2s_release_seals` and persisted the exact
+approval-bound manifest payload, timestamp, byte/logical checksums, archive ref
+and CAS generation before publication. The ZIP-before-manifest regression now
+retries with the same embedded and API manifest bytes after the clock advances.
+The existing artifact-derived read path remains compatible with sealed releases
+that predate the intent table. AUD-04.S2/S3 still own full artifact recovery and
+concurrent seal acceptance; AUD-05 still owns worker authentication and real
+Isaac acceptance. This ADR remains **Proposed** until its dependent implementation
+and acceptance gates have all been reviewed.

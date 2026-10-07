@@ -7,8 +7,8 @@ Date: 2026-10-07
 Active — implementation đang diễn ra trên branch
 `docs/codegraph-audit-implementation-plan`, khởi tạo từ `develop@ef3a421`.
 Đã commit: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3,
-AUD-03.S1–S3. Browser DevTools MCP gate của AUD-03.S3 vẫn UNVERIFIED;
-sprint kế tiếp theo dependency order là AUD-04.S1.
+AUD-03.S1–S3, AUD-04.S1. Browser DevTools MCP gate của AUD-03.S3 vẫn
+UNVERIFIED; sprint kế tiếp theo dependency order là AUD-04.S2.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -214,8 +214,8 @@ AUD-19 uses AUD-12.S1 quality fixtures; AUD-12 sensor-package path không đợi
 AUD-19. Static-map consumer chỉ enable sau registration QA, không bắt AUD-19
 đợi whole AUD-12 epic. Sensor calibration QA và map registration QA không tráo nhau.
 
-Progress hiện tại: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3 và
-AUD-03.S1–S3 đã được commit riêng theo sprint. AUD-01.S3 verified legacy
+Progress hiện tại: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3,
+AUD-03.S1–S3 và AUD-04.S1 đã được commit riêng theo sprint. AUD-01.S3 verified legacy
 ownership recovery, candidate ZIP/manifest, current rotated object pose,
 retained floor collision, relative USD asset composition, và bất biến bytes của
 artifact cũ bằng OpenUSD runtime. AUD-02.S3 nối capability blocker qua typed
@@ -224,7 +224,9 @@ quyền GET/POST/download. Automated checks pass; browser DevTools còn UNVERIFI
 vì Chrome DevTools MCP không lấy được session đang khóa profile. AUD-03.S3 đã
 commit API/UI projection và stale request regressions; component harness QA
 passed qua CLI, còn MCP gate và real Isaac acceptance (AUD-05) chờ môi trường.
-Tiếp theo là AUD-04.S1 về idempotent release sealing.
+AUD-04.S1 đóng băng release timestamp/manifest theo approval identity trong DB;
+partial-publish regression qua local tests. PostgreSQL và crash/concurrency
+acceptance còn thuộc S2/S3. Tiếp theo là AUD-04.S2.
 
 AUD-23 có client preparation identity trước AUD-15/16 cache consumers; supported
 sensor mapping chốt trước AUD-13 overlay QA. Không cần full odometry/registration
