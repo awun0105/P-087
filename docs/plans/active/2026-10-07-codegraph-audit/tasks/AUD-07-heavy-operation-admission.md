@@ -70,7 +70,7 @@ primitive khỏi JobManifest dependence; keep job wrapper. Operational waiting
 projection dùng measured reasons, không fabricated percentage/queue ETA.
 Tests: old job admission suite, operation vs job reservation, GPU affinity,
 unknown/insufficient RAM/VRAM/disk, release idempotency, migration/old record.
-**Exit:** [ ] old jobs unchanged in tests; [ ] operation adapter no fake manifests.
+**Exit:** [x] old jobs unchanged in tests; [x] operation adapter no fake manifests.
 
 ## Sprint AUD-07.S2 — Reobjectify lease và commit theo requested revision
 
@@ -116,5 +116,50 @@ matrix và concrete consumer handoff pass; GPU smoke limitations phải được
 
 ## Result / Evidence
 
-Pending — demand/profile checksums, waiting reasons, lease generations,
-reservation lifecycle và publication/cancellation evidence theo từng sprint.
+### AUD-07.S1 — Admission primitive cho operation
+
+- Base commit: `0a0f11a` (`AUD-10.S3`). CodeGraph trước khi sửa đã index 753
+  files, 13,594 nodes, 38,967 edges; trace `ResourceAdmission`, `_reserve`,
+  `job_reservation`, `touch_job_reservation`, `_reclaim_disk` và callers trong
+  runner/worker. Direct consumers cần đồng bộ là job lookup, heartbeat và bảo vệ
+  scratch khi reclaim.
+- Thay đổi: thêm `OperationResourceProfile`, `OperationAdmissionRequest` và
+  `OperationAdmissionResult`; `admit_operation()` dùng chung `_assess()` với job,
+  giữ identity/input/config checksum trong request/result và reservation. Không
+  tạo `JobManifest` giả. Job và operation dùng cùng transaction/advisory lock;
+  duplicate operation không được nhận lần hai. Operation release compare-delete
+  theo identity và lặp lại an toàn.
+- Logic before/after: job dùng phép tính headroom cũ qua shared primitive và giữ
+  contract legacy (resource chưa có model vẫn chạy độc quyền GPU để đo); operation
+  fail-closed khi estimate/headroom không biết, kiểm GPU affinity và RAM/đĩa. CPU
+  operation bỏ qua VRAM nhưng vẫn reserve RAM/đĩa. Job disk reclaim bảo vệ parent
+  job của operation reservation. Wait result giữ nguyên checksums/profile, không
+  bịa ETA hoặc phần trăm.
+- Reservation serialization: không đổi DB schema hay migration; payload job mới
+  tiếp tục ghi shape cũ, reader mới đọc payload cũ với `gpu_required=True`; payload
+  operation thêm operation/parent/checksum identity. Không có artifact sinh ra.
+- Changed files: `src/services/orchestration/jobs/admission.py`,
+  `tests/test_orchestration/test_resource_admission.py`, task record và plan index.
+- Consumer proof: job admission và operation adapter cạnh tranh trong cùng SQLite
+  reservation table; operation chặn job dùng cùng GPU; job không ghi đè operation
+  reservation của cùng worker; CPU reservation không chiếm GPU nhưng giữ RAM/đĩa;
+  reclaim giữ scratch của parent job; old JSON payload đọc được. Non-job wait chưa
+  được persist/project vào queue hoặc UI — thuộc tích hợp AUD-07.S2/S3.
+- Focused checks: **101 passed, 4 skipped** trên ResourceAdmission, objectify
+  queue, SceneEditor, runtime migrations và preview cancellation. Bốn skip đều là
+  PostgreSQL migration/locking tests cần `R2S_TEST_POSTGRES_URL`, biến này không
+  được cấu hình. `.venv/bin/ruff check src/ tests/` passed;
+  `.venv/bin/ruff format --check src/ tests/` báo 468 files formatted;
+  `git diff --check` passed. Các cạnh tranh DB đã chạy trên SQLite; chưa có
+  PostgreSQL contention proof hoặc worker/GPU runtime smoke.
+- CodeGraph: trước sửa đã xác nhận callers và source hiện hành. Sau sửa MCP báo
+  auto-sync disabled do OS watch/file limit; `codegraph sync` bị lock bởi daemon
+  CodeGraph đang chạy. Không xóa lock; phần source thay đổi được đọc trực tiếp
+  sau cảnh báo stale. Post-edit reindex chưa được xác nhận.
+- Pre-flight (GUIDE.md Rule 13): CodeGraph/source caller map trước sửa; impact
+  gồm ResourceAdmission, job wrapper, reservation readers và scratch reclaim;
+  hiểu rõ transaction/advisory lock và old payload defaults; minimal-code dùng
+  bảng JSON/DB primitives sẵn có, không thêm migration/API/UI; checks nêu trên;
+  DevTools: n/a — không đổi UI.
+- Next: AUD-07.S2 nối reobjectify queue với admission lease và CAS của AUD-10.S2;
+  waiting phải giữ base revision/input/config, stale worker không được publish.

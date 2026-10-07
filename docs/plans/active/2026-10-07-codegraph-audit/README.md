@@ -7,9 +7,10 @@ Date: 2026-10-07
 Active — implementation đang diễn ra trên branch
 `docs/codegraph-audit-implementation-plan`, khởi tạo từ `develop@ef3a421`.
 Đã commit: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3,
-AUD-03.S1–S3, AUD-04.S1–S3 và AUD-10.S1–S3. Browser DevTools MCP gate của
-AUD-03.S3 vẫn UNVERIFIED; PostgreSQL proof của AUD-04.S3 chưa chạy vì thiếu
-`R2S_TEST_POSTGRES_URL`. Sprint kế tiếp theo dependency order là AUD-07.S1.
+AUD-03.S1–S3, AUD-04.S1–S3, AUD-10.S1–S3 và AUD-07.S1. Browser DevTools MCP
+gate của AUD-03.S3 vẫn UNVERIFIED; PostgreSQL proof của AUD-04.S3 chưa chạy vì thiếu
+`R2S_TEST_POSTGRES_URL`. AUD-07.S1 hiện hoàn thành, 100 passed/4 PostgreSQL
+skips; sprint kế tiếp theo dependency order là AUD-07.S2.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -246,7 +247,17 @@ calls at both rev-001 and rev-1005, checks independent DB/cache freshness and
 fail-closed remote checksum verification, then reads a validated SceneIR after
 package import and restores a checksummed head/repair history through trash. Its
 matrix passed 180 tests with one PostgreSQL skip. CodeGraph is current; live
-PostgreSQL locking and S3 provider proof remain pending. Tiếp theo là AUD-07.S1.
+PostgreSQL locking and S3 provider proof remain pending.
+
+AUD-07.S1 adds typed operation admission over the existing reservation table,
+shares resource assessment with job admission, keeps old job payloads readable,
+and rejects unknown/insufficient operation resources or wrong GPU affinity.
+CPU-only reservations hold RAM/disk without blocking GPU sharing; disk reclaim
+protects a reservation's parent job. Its SQLite matrix passed 101 tests with
+four PostgreSQL skips; Ruff and formatting pass. No DB migration or API/UI
+projection was needed yet. CodeGraph source/callers were inspected before edits;
+post-edit sync is pending because the active MCP daemon reported auto-sync
+disabled after the OS file-watch limit was reached. Tiếp theo là AUD-07.S2.
 
 AUD-23 có client preparation identity trước AUD-15/16 cache consumers; supported
 sensor mapping chốt trước AUD-13 overlay QA. Không cần full odometry/registration
