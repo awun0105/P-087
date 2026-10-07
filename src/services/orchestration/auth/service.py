@@ -91,7 +91,7 @@ class AuthService:
         return UserRecord.model_validate_json(row[0]) if row else None
 
     def actors(self) -> dict[str, Actor]:
-        """Mọi tài khoản dưới dạng Actor theo id, để hiện tên người thao tác từ các bản ghi chỉ lưu id."""
+        """Tên hiện tại cho ID legacy; không gán role hiện tại thành historical snapshot."""
         return {user.user_id: Actor(user_id=user.user_id, display_name=user.display_name) for user in self.list_users()}
 
     def list_users(self) -> list[UserRecord]:

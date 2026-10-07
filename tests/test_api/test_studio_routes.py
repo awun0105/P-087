@@ -376,8 +376,10 @@ async def test_uploads_and_scenes_show_who_did_what(
     monkeypatch.setitem(app.dependency_overrides, auth.require_editor, lambda: current["user"])
 
     upload = await _upload(client)
-    assert upload["uploaded_by"] == {"user_id": uploader.user_id, "display_name": "An"}
-    assert (await client.get("/api/v1/uploads")).json()["uploads"][0]["uploaded_by"]["display_name"] == "An"
+    assert upload["uploaded_by"] == {"user_id": uploader.user_id, "display_name": "An", "role": "editor"}
+    listed_upload = (await client.get("/api/v1/uploads")).json()["uploads"][0]
+    assert listed_upload["uploaded_by"]["display_name"] == "An"
+    assert listed_upload["uploaded_by"]["role"] == "editor"
 
     current["user"] = creator  # người khác trong nhóm tạo scene từ file An đã tải
     created = await client.post(
@@ -385,9 +387,15 @@ async def test_uploads_and_scenes_show_who_did_what(
         json={"upload_id": upload["upload_id"], "name": "Kho A", "attestation": _ATTESTATION},
     )
     assert created.status_code == 201, created.text
-    assert created.json()["project"]["created_by"] == {"user_id": creator.user_id, "display_name": "Bình"}
+    assert created.json()["project"]["created_by"] == {
+        "user_id": creator.user_id,
+        "display_name": "Bình",
+        "role": "reviewer",
+    }
     scene = (await client.get("/api/v1/scenes")).json()["scenes"][0]
     assert scene["project"]["created_by"]["display_name"] == "Bình"
+    # Run attribution is currently stored by user ID only; do not infer its historical role.
+    # AUD-20.S2 will persist the authenticated actor snapshot for new run events.
     assert scene["requested_by"] == {"user_id": creator.user_id, "display_name": "Bình"}
 
 

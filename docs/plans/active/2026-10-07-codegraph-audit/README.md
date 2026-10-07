@@ -8,10 +8,10 @@ Active — implementation đang diễn ra trên branch
 `docs/codegraph-audit-implementation-plan`, khởi tạo từ `develop@ef3a421`.
 Đã commit: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3,
 AUD-03.S1–S3, AUD-04.S1–S3, AUD-10.S1–S3 và AUD-07.S1. AUD-07.S2 đã hoàn tất
-và nằm trong sprint commit hiện tại. Browser DevTools MCP
-gate của AUD-03.S3 vẫn UNVERIFIED; PostgreSQL proof của AUD-04.S3 chưa chạy vì thiếu
-`R2S_TEST_POSTGRES_URL`. AUD-07.S1 đã hoàn thành; AUD-07.S2 proof đang ghi task
-record. Sprint kế tiếp theo dependency order là AUD-07.S3.
+trong commit `5173750`. AUD-20.S1 identity contract/migration đang được hoàn tất
+trong sprint commit hiện tại. Browser DevTools MCP gate của AUD-03.S3 vẫn
+UNVERIFIED; PostgreSQL proof của AUD-04.S3 chưa chạy vì thiếu
+`R2S_TEST_POSTGRES_URL`. Sprint kế tiếp theo dependency order là AUD-21.S1.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -188,8 +188,11 @@ Thứ tự mặc định gồm đủ **80 active sprint, mỗi sprint một lầ
 | 9 — Latency và Fast Preview | AUD-15.S2–S3 → AUD-16.S1–S3 | Measured optimization và preview/final lifecycle giữ đúng preparation identity và quality gates. |
 | 10 — Input qualification và extensions | AUD-17.S1–S3 → AUD-24.S5 → AUD-18.S1–S3 | Estimated trajectory/input matrix R1–R6 và PLY/SOG view import; anonymizer opt-in có provenance/QA. |
 
-Execution bắt đầu ở **AUD-11.S1**. AUD-15.S1 được làm sớm để AUD-23.S5 có
-measurement protocol; optimization AUD-15.S2–S3 vẫn làm sau quality work.
+Execution order bắt đầu ở **AUD-11.S1**; các sprint AUD-11.S1–S2, AUD-15.S1,
+AUD-01–04, AUD-10.S1–S3 và AUD-07.S1–S2 đã hoàn tất. Sprint identity hiện tại là
+AUD-20.S1; sau đó tiếp tục AUD-21.S1 rồi AUD-22.S1 theo dependency order.
+AUD-15.S1 được làm sớm để AUD-23.S5 có measurement protocol; optimization
+AUD-15.S2–S3 vẫn làm sau quality work.
 AUD-07.S3 làm sau AUD-06/AUD-05 để kiểm tra admission trên consumer thật;
 không đợi toàn bộ AUD-07 trước khi triển khai hai consumer này.
 
@@ -337,9 +340,10 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
   6 sprint và ADR0025 Deferred ngoài execution order.
 - [x] Kiểm tra cấu trúc sprint, links, canonical task bindings, test paths và docs-only scope.
 - [x] Bổ sung logic-change impact/dependent updates cho cả 25 task và integration map.
-- [ ] Implementation AUD-11.
+- [x] Implementation AUD-11 và AUD-15.S1 baseline.
 - [x] Implementation AUD-01–04.
-- [ ] Implementation AUD-10, AUD-07, AUD-06.
+- [x] Implementation AUD-10 và AUD-07.S1–S2.
+- [ ] Implementation AUD-06 và AUD-07.S3.
 - [ ] Implementation AUD-05 và real Isaac acceptance.
 - [ ] Implementation AUD-08–09 và browser acceptance.
 - [ ] Implementation AUD-12–14 và held-out collision/LiDAR/floor acceptance.
@@ -347,7 +351,8 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [ ] Implementation AUD-17–18 và qualified opt-in runtime/QA acceptance.
 - [ ] Implementation AUD-19 và held-out independent-map/QA/browser acceptance.
 
-- [ ] Implementation AUD-20–22 và three-role/quota/browser acceptance.
+- [x] Implementation AUD-20.S1 identity/seed migration contract.
+- [ ] Remaining AUD-20.S2–S3, AUD-21–22 và three-role/quota/browser acceptance.
 
 - [ ] Implementation AUD-23 và client encode/upload/bandwidth/geometry acceptance.
 - [ ] Implementation AUD-24 và grouped upload/R1–R6 recipe/consumer/browser acceptance.

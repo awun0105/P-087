@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.manifests import StageId
 from src.services.orchestration.artifacts import ArtifactResolver, FilesystemArtifactStore
+from src.services.orchestration.auth.models import DisplayName, Role
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.uploads.models import UploadRecord
 from src.services.reconstruction import extract_member, package_splat
@@ -41,7 +42,9 @@ class ImportedScene(BaseModel):
     created_at: datetime
     created_by: str | None = None
     #: Tên người tạo lúc import (chụp lại để vẫn hiện được khi tài khoản đổi tên); None với record cũ.
-    created_by_name: str | None = None
+    created_by_name: DisplayName | None = None
+    #: Optional creation-time snapshot; absent on legacy imports and never backfilled from current role.
+    created_by_role: Role | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class SceneImportError(ValueError):
