@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.models.contracts.artifacts import ArtifactUri, Checksum, Identifier, ProductArtifactRef
 from src.models.contracts.manifests import ExecutionError, JobStatus, StageArtifact, StageId, StageStatus
+from src.services.orchestration.auth.models import Actor
 
 
 class JobAttemptRecord(BaseModel):
@@ -32,6 +33,14 @@ class JobAttemptRecord(BaseModel):
     actual_frame_count: int | None = Field(default=None, ge=2)
     stage_started_at: datetime | None = None
     preview_verified_at: datetime | None = None
+    #: Person who accepted this run/retry; old events remain unknown and never infer today's role.
+    requested_by: Actor | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def _requester_only_on_queued_run(self) -> Self:
+        if self.requested_by is not None and self.status != JobStatus.QUEUED:
+            raise ValueError("requested_by chỉ được gắn với event bắt đầu lượt chạy QUEUED")
+        return self
 
 
 class TransitionRequest(BaseModel):

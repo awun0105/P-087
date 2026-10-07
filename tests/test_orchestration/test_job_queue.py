@@ -8,9 +8,16 @@ from uuid import uuid4
 import pytest
 
 from src.models.contracts.manifests import JobManifest, JobStatus, StageId
+from src.services.orchestration.auth.models import Actor
 from src.services.orchestration.jobs.models import TransitionRequest
 from src.services.orchestration.jobs.progress import job_progress
-from src.services.orchestration.jobs.queue import WaitingJob, fair_order, queue_position, waiting_jobs
+from src.services.orchestration.jobs.queue import (
+    WaitingJob,
+    fair_order,
+    job_requester_actors,
+    queue_position,
+    waiting_jobs,
+)
 from src.services.orchestration.jobs.worker_cli import dispatch_next
 from src.services.orchestration.projects.models import JobCreateInput
 from src.services.orchestration.projects.registry import ProjectRegistry
@@ -95,6 +102,20 @@ def test_waiting_jobs_come_from_the_journal_with_their_requesters(tmp_path: Path
     assert waiting_user.job_id not in found
     assert found[queued.job_id].phase == "preview" and found[queued.job_id].owner == "user-binh"
     assert found[confirmed.job_id].phase == "finalize" and found[confirmed.job_id].owner is None
+
+
+def test_legacy_requester_keeps_unknown_historical_role(tmp_path: Path) -> None:
+    registry = _registry(tmp_path / "runtime")
+    queued = _job(registry, "d")
+    _audit(registry, "user-an", queued.job_id, T0)
+
+    actors = job_requester_actors(
+        registry.persistence.database,
+        {"user-an": Actor(user_id="user-an", display_name="An")},
+    )
+
+    assert actors[queued.job_id].display_name == "An"
+    assert actors[queued.job_id].role is None
 
 
 def test_worker_takes_jobs_in_fair_order(tmp_path: Path) -> None:

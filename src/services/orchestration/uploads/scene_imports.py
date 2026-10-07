@@ -64,7 +64,12 @@ class ImportService:
         self.workspace_root = workspace_root
 
     def create(
-        self, upload: UploadRecord, name: str, created_by: str | None, created_by_name: str | None = None
+        self,
+        upload: UploadRecord,
+        name: str,
+        created_by: str | None,
+        created_by_name: str | None = None,
+        created_by_role: Role | None = None,
     ) -> ImportedScene:
         """Chỉ nhận upload đã nhận diện là 3DGS; bắt đầu ở PACKAGING."""
         if upload.input_kind not in {"gaussian_ply", "gaussian_ply_colmap"}:
@@ -78,6 +83,7 @@ class ImportService:
             created_at=datetime.now(UTC),
             created_by=created_by,
             created_by_name=created_by_name,
+            created_by_role=created_by_role,
         )
         with self.database.transaction(write=True) as tx:
             tx.execute(

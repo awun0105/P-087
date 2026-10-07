@@ -394,9 +394,22 @@ async def test_uploads_and_scenes_show_who_did_what(
     }
     scene = (await client.get("/api/v1/scenes")).json()["scenes"][0]
     assert scene["project"]["created_by"]["display_name"] == "Bình"
-    # Run attribution is currently stored by user ID only; do not infer its historical role.
-    # AUD-20.S2 will persist the authenticated actor snapshot for new run events.
-    assert scene["requested_by"] == {"user_id": creator.user_id, "display_name": "Bình"}
+    assert scene["requested_by"] == {"user_id": creator.user_id, "display_name": "Bình", "role": "reviewer"}
+
+    renamed = creator.model_copy(update={"display_name": "Bình mới", "role": "editor"})
+    with RuntimeDatabase(studio.settings.database_url).transaction(write=True) as tx:
+        tx.execute(
+            "UPDATE r2s_users SET payload=? WHERE user_id=?",
+            (renamed.model_dump_json(), creator.user_id),
+        )
+    historical_scene = (await client.get("/api/v1/scenes")).json()["scenes"][0]
+    assert historical_scene["requested_by"] == {
+        "user_id": creator.user_id,
+        "display_name": "Bình",
+        "role": "reviewer",
+    }
+    project_creator = historical_scene["project"]["created_by"]
+    assert project_creator == {"user_id": creator.user_id, "display_name": "Bình", "role": "reviewer"}
 
 
 @pytest.mark.asyncio

@@ -73,7 +73,11 @@ def create_import(
     try:
         upload = deps.uploads().get(request.upload_id)
         record = _service().create(
-            upload, request.name, user.user_id if user else None, user.display_name if user else None
+            upload,
+            request.name,
+            user.user_id if user else None,
+            user.display_name if user else None,
+            user.role if user else None,
         )
     except UploadNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error

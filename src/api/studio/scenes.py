@@ -16,7 +16,7 @@ from src.services.orchestration.jobs.admission import job_reservation, resource_
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.lidar_overlay import lidar_overlay_file
 from src.services.orchestration.jobs.progress import JobProgress, awaiting_finalize, job_progress
-from src.services.orchestration.jobs.queue import job_requesters, queue_position
+from src.services.orchestration.jobs.queue import job_requester_actors, job_requesters, queue_position
 from src.services.orchestration.jobs.stage_views import StageViewList, stage_views
 from src.services.orchestration.jobs.thumbnails import scene_thumbnail
 from src.services.orchestration.processing import build_job_config, evaluate, is_presets_file, preset_values
@@ -135,7 +135,9 @@ def create_scene_from_upload(
     if lidar is not None:
         uploads.link_project(lidar.upload_id, project.project_id)
     try:
-        job = registry.create_job(JobCreateInput(project_id=project.project_id), processing)
+        job = registry.create_job(
+            JobCreateInput(project_id=project.project_id), processing, requested_by=actor_of(user)
+        )
     except (PrivacyGateBlockedError, RuntimeStateConflictError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     record_gpu_run(user, job.job_id, {"kind": "scene.create", "project_id": project.project_id})
@@ -152,6 +154,9 @@ def list_scenes() -> SceneListResponse:
     )
     requesters = job_requesters(registry.persistence.database) if registry.persistence is not None else {}
     actors = auth_service().actors() if requesters else {}
+    requester_actors = (
+        job_requester_actors(registry.persistence.database, actors) if requesters and registry.persistence else {}
+    )
     for project in registry.list_projects():
         if project.input_manifest_ref is None:
             continue
@@ -163,7 +168,7 @@ def list_scenes() -> SceneListResponse:
                 latest_job=latest,
                 preview_ready=latest is not None and deps.preview_ready(registry, latest.job_id),
                 processing_seconds=None if latest is None else measured.get(latest.job_id),
-                requested_by=None if latest is None else actors.get(requesters.get(latest.job_id, "")),
+                requested_by=None if latest is None else requester_actors.get(latest.job_id),
             )
         )
     # Project upload luôn có created_at; mốc 0 chỉ là phòng hờ cho record cũ.

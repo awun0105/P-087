@@ -244,7 +244,7 @@ class ProjectRegistry:
 
     # --- projects ---------------------------------------------------------
 
-    def create_project(self, request: ProjectCreateInput) -> ProjectRecord:
+    def create_project(self, request: ProjectCreateInput, *, created_by: Actor | None = None) -> ProjectRecord:
         """Tạo project mới; input mới chỉ ở mức sàng lọc sơ bộ, chưa được dispatch."""
         project_id = f"project-{uuid4().hex[:12]}"
         attestation: JsonObject = request.attestation.model_dump(mode="json")
@@ -255,6 +255,7 @@ class ProjectRegistry:
             input_manifest_checksum=request.input_manifest_checksum,
             source_rights_attestation=attestation,
             privacy_report=self._preliminary_privacy_report(request.input_manifest_checksum),
+            created_by=created_by,
         )
         if self.persistence is not None:
             self.persistence.save_project(record)
@@ -442,7 +443,13 @@ class ProjectRegistry:
 
     # --- jobs -------------------------------------------------------------
 
-    def create_job(self, request: JobCreateInput, processing: JobProcessingConfig | None = None) -> JobManifest:
+    def create_job(
+        self,
+        request: JobCreateInput,
+        processing: JobProcessingConfig | None = None,
+        *,
+        requested_by: Actor | None = None,
+    ) -> JobManifest:
         """Tạo job QUEUED cho một project, sau khi qua privacy gate.
 
         `processing` (Studio) được publish thành `config/processing.json` của job và
@@ -468,6 +475,7 @@ class ProjectRegistry:
             recorded_at=job.started_at,
             job_manifest_uri=reference.artifact_uri,
             job_manifest_checksum=reference.artifact_checksum,
+            requested_by=requested_by,
         )
         if self.persistence is not None:
             self.persistence.save_job(job, reference, event)
@@ -478,7 +486,12 @@ class ProjectRegistry:
         return job
 
     def transition_job(
-        self, job_id: str, request: TransitionRequest, *, expected_checksum: Checksum | None = None
+        self,
+        job_id: str,
+        request: TransitionRequest,
+        *,
+        expected_checksum: Checksum | None = None,
+        requested_by: Actor | None = None,
     ) -> JobManifest:
         """Chuyển trạng thái job theo bảng chuyển, rồi publish revision mới."""
         current = self.get_job(job_id)
@@ -498,13 +511,14 @@ class ProjectRegistry:
                 job_manifest_uri=reference.artifact_uri,
                 job_manifest_checksum=reference.artifact_checksum,
                 error=request.error,
+                requested_by=requested_by,
             )
             self.persistence.save_job(updated, reference, event, expected=current)
             return updated
         sequence = len(self._attempts.get(job_id, [])) + 1
         updated, reference = self.lifecycle.apply(current, request, sequence)
         self._jobs[job_id] = updated
-        self._record_attempt(job_id, updated, request, reference)
+        self._record_attempt(job_id, updated, request, reference, requested_by=requested_by)
         return updated
 
     def _record_attempt(
@@ -513,6 +527,8 @@ class ProjectRegistry:
         job: JobManifest,
         request: TransitionRequest,
         reference: ArtifactRef,
+        *,
+        requested_by: Actor | None = None,
     ) -> None:
         """Nối thêm một attempt; không sửa attempt cũ.
 
@@ -531,6 +547,7 @@ class ProjectRegistry:
                 job_manifest_uri=reference.artifact_uri,
                 job_manifest_checksum=reference.artifact_checksum,
                 error=request.error,
+                requested_by=requested_by,
             )
         )
 

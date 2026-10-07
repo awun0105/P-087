@@ -7,7 +7,7 @@ from src.api.auth import enforce_gpu_quota, record_gpu_run, require_editor
 from src.api.product import deps
 from src.models.contracts.manifests import JobManifest, JobStatus
 from src.models.contracts.retryability import is_execution_error_retryable
-from src.services.orchestration.auth import UserRecord
+from src.services.orchestration.auth import UserRecord, actor_of
 from src.services.orchestration.jobs import (
     InvalidTransitionError,
     JobLifecycleError,
@@ -93,6 +93,7 @@ def retry_job(job_id: str, user: UserRecord | None = Depends(require_editor)) ->
             job_id,
             TransitionRequest(target_status=JobStatus.QUEUED),
             expected_checksum=job.job_manifest_checksum,
+            requested_by=actor_of(user),
         )
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error

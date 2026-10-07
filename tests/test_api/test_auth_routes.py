@@ -194,6 +194,23 @@ async def test_retry_counts_against_gpu_quota(
 
 
 @pytest.mark.asyncio
+async def test_product_job_creation_counts_against_gpu_quota(
+    client: AsyncClient, secured: AuthService, product_registry: ProjectRegistry
+) -> None:
+    reviewer = secured.create_user("lead@example.com", "Lead", PASSWORD, "reviewer")
+    editor = secured.create_user("e@example.com", "E", PASSWORD, "editor")
+    secured.update_user(reviewer, editor.user_id, daily_job_quota=0)
+    jobs_before = product_registry.list_jobs("project-fixture-001")
+    await _login(client, "e@example.com")
+
+    response = await client.post("/api/v1/projects/project-fixture-001/jobs", json={})
+
+    assert response.status_code == 429
+    assert product_registry.list_jobs("project-fixture-001") == jobs_before
+    assert _gpu_run_count(secured, editor.user_id) == 0
+
+
+@pytest.mark.asyncio
 async def test_retry_accepts_eligible_job_and_records_gpu_usage_once(
     client: AsyncClient, secured: AuthService, product_registry: ProjectRegistry
 ) -> None:
@@ -210,6 +227,12 @@ async def test_retry_accepts_eligible_job_and_records_gpu_usage_once(
     assert response.json()["job_id"] == job_id
     assert response.json()["status"] == JobStatus.QUEUED
     assert product_registry.list_job_attempts(job_id)[-1].status == JobStatus.QUEUED
+    attempts = await client.get(f"/api/v1/jobs/{job_id}/attempts")
+    assert attempts.json()["attempts"][-1]["requested_by"] == {
+        "user_id": editor.user_id,
+        "display_name": "E",
+        "role": "editor",
+    }
     assert _gpu_run_count(secured, editor.user_id) == 2
 
 

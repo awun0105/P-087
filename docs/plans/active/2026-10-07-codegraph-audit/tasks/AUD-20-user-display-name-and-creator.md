@@ -9,11 +9,13 @@
 
 ## Baseline và scope
 
-Display name đã có trong UserRecord/PublicUser, RegisterForm và CLI. Actor hiện
-snapshot user_id/display_name; ScenesHome đã render created_by và requested_by,
-imports có created_by_name. Còn thiếu role attribution và consistency giữa card,
-table/import/job. REUSE các fields này; không tạo subsystem identity thứ hai.
-Seed accounts được giữ qua studio data packaging; chưa đọc hoặc đổi live DB.
+Display name đã có trong UserRecord/PublicUser, RegisterForm và CLI. AUD-20.S1–S2
+đã đưa actor snapshot xuyên project/job/import producers và API: project giữ
+`created_by`, job event giữ `requested_by` theo lần QUEUED, import giữ
+`created_by_name`/`created_by_role`. ScenesHome đã render creator/requester nhưng
+badge và consistency card/table/import còn thuộc S3. REUSE các fields này; không
+tạo subsystem identity thứ hai. Seed accounts được giữ qua studio data packaging;
+chưa đọc hoặc đổi live DB.
 
 CodeGraph trước implementation đã lần Actor/actor_of → upload/project/demo và
 `AuthService.actors()` → legacy `requested_by`; project owner nằm ở
@@ -64,12 +66,21 @@ Tests: Unicode/blank/control text, old payload/checksum, missing creator, repeat
 ## Sprint AUD-20.S2 — Producer và API projection
 
 **Input:** S1 schema + authenticated creator.
-**Output:** Creator name/role trên create/list/detail responses.
-**Contract:** Creator immutable; Editor rerun Guest job không đổi owner.
+**Output:** Creator name/role trên create/list/detail responses và actor snapshot
+cho từng lượt tạo job/retry.
+**Contract:** Creator immutable; Editor rerun Guest job không đổi owner. Actor chỉ
+gắn với event bắt đầu lượt chạy `QUEUED`; worker status events không đổi người chạy.
 
-Implement: Capture creator ở transaction tạo record; requested_by ghi actor từng run. Batch-resolve legacy metadata nếu cần, không N+1 hoặc public email directory. Client không tự chọn creator/role. Phân biệt snapshot role và current role.
-Tests: Forged creator JSON, intervention, renamed/deactivated user, absent legacy role, imports/card/table projection.
-**Exit:** [ ] mọi supported scene/job input có attribution rõ.
+Implement: Capture `ProjectRecord.created_by` lúc tạo, role creator cho import,
+và `JobAttemptRecord.requested_by` trên lần tạo job/retry. Không thay đổi
+`JobManifest` đã checksum. Batch-resolve audit legacy theo user ID; legacy name có
+thể dùng tên hiện tại, role vẫn unknown. Không N+1 hoặc public email directory.
+Client không tự chọn creator/role. Product job-create route cũng áp dụng quota hiện
+có và ghi GPU-run audit để giữ cùng behavior với Studio upload/retry.
+Tests: Forged creator JSON, intervention/role đổi sau khi ghi, absent legacy role,
+project/job/import projection, quota guard trên product job-create route.
+**Exit:** [x] mọi supported scene/job producer lưu attribution; list/detail API
+trả snapshot hoặc trạng thái legacy unknown.
 
 ## Sprint AUD-20.S3 — Studio và seed acceptance
 
@@ -110,3 +121,14 @@ mock hoặc source review không chứng minh feature đã chạy.
   Result: **62 passed, 13 skipped**; all skips are PostgreSQL variants requiring `R2S_TEST_POSTGRES_URL`. `.venv/bin/ruff check src/ tests/ scripts/studio/rename_seed_accounts.py` — pass; `.venv/bin/ruff format --check src/ tests/ scripts/studio/rename_seed_accounts.py` — 472 files already formatted; `npm run lint` — pass; `npm run typecheck` — pass; CLI `--help` — pass; `git diff --check` — pass.
 - Gate: CodeGraph preflight and caller inventory complete. Minimal shared validator/optional snapshot fields and one explicit migration utility. Chrome DevTools browser gate N/A vì sprint này chỉ đổi backend/type contracts, không đổi rendered UI; `list_pages` vẫn báo profile Chrome đang chạy, cần xử lý trước browser acceptance ở AUD-20.S3.
 - Limitations: PostgreSQL execution và live seed IDs chưa được xác minh; không có DB access/migration receipt cho hai seed. S2 còn phải ghi actor snapshot cho accepted job-run events và project/import API projection; S3 còn UI/browser acceptance.
+
+### AUD-20.S2 — producer và API attribution
+
+- Logic delta: `JobAttemptRecord.requested_by` lưu actor bất biến ở event bắt đầu lượt QUEUED, bao gồm tạo job và manual retry; field optional/không serialize khi thiếu để payload cũ giữ tương thích. Validator từ chối actor trên event không phải QUEUED. Không đưa attribution vào `JobManifest`, nên checksum artifact không đổi.
+- Producer/API: `ProjectRegistry.create_project` nhận `created_by`; product project/job route và Studio upload route chụp `actor_of(user)` từ dependency server-side. Retry ghi snapshot cùng CAS journal. Import route/service ghi role creator vào `ImportedScene`. Product job-create hiện áp dụng quota Editor và ghi `gpu.run` audit giống các entrypoint xử lý khác.
+- Projection/legacy: Scenes list ưu tiên snapshot từ event journal; bản ghi cũ dùng audit ID + batch-loaded actor name, giữ `role=None`. Queue fairness tiếp tục dùng cùng requester và ưu tiên snapshot; không suy role lịch sử từ account hiện tại. Frontend `JobAttemptRecord` thêm optional actor contract; không đổi rendered UI trong sprint này.
+- Tests: project/job actor snapshot và forged creator body; Scene summary giữ name/role cũ sau khi user record đổi tên/role; legacy requester role unknown; import role persistence; product job quota rejection; retry actor snapshot.
+- CodeGraph: sync/status up-to-date, 759 files, 13,763 nodes, 39,527 edges. Callers đã truy từ product/studio create/retry routes đến Registry, persistence journal, SceneSummary, import service và frontend contract.
+- Verification: `.venv/bin/pytest tests/test_api/test_product_routes.py tests/test_api/test_auth_routes.py tests/test_api/test_studio_routes.py tests/test_orchestration/test_scene_imports.py tests/test_orchestration/test_job_queue.py tests/test_orchestration/test_job_lifecycle.py -q` — **78 passed**; `ruff check src/ tests/` — pass; `ruff format --check src/ tests/` — 473 files unchanged; `npm run typecheck` — pass; `npx eslint src/lib/contracts/api.ts` — pass; `npm test` — **42 files, 275 tests passed**; `.venv/bin/python -m scripts.check_contract_mirror` — pass; `git diff --check` — pass.
+- Gate: CodeGraph preflight/caller inventory and post-change sync pass. UI-only contract changed, no rendered component changed; browser gate N/A for S2. AUD-20.S3 still needs browser acceptance for badges and seed account acceptance.
+- Limitations: Tests used SQLite fixtures; PostgreSQL concurrency remains for AUD-22.S2 quota integration, and live seed IDs remain unverified for S3. User display-name mutation was simulated at stored-record level because no self-rename endpoint exists yet.

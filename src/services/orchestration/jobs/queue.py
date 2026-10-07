@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.models.contracts.manifests import JobStatus, StageId
+from src.services.orchestration.auth.models import Actor
 from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.jobs.models import JobAttemptRecord
 
@@ -67,18 +68,57 @@ class QueuePosition(BaseModel):
 
 
 def job_requesters(database: RuntimeDatabase) -> dict[str, str]:
-    """Người yêu cầu gần nhất của từng job, đọc từ nhật ký lần xử lý GPU."""
+    """ID người yêu cầu gần nhất, ưu tiên snapshot journal rồi fallback audit legacy."""
+    owners, _ = _job_requester_data(database)
+    return owners
+
+
+def job_requester_actors(database: RuntimeDatabase, legacy_actors: dict[str, Actor]) -> dict[str, Actor]:
+    """Actor của lượt chạy gần nhất; job cũ dùng tên hiện tại nhưng role vẫn để unknown."""
+    owners, snapshots = _job_requester_data(database)
+    return {
+        job_id: snapshots.get(job_id) or legacy_actors[user_id]
+        for job_id, user_id in owners.items()
+        if job_id in snapshots or user_id in legacy_actors
+    }
+
+
+def _job_requester_data(database: RuntimeDatabase) -> tuple[dict[str, str], dict[str, Actor]]:
+    """Batch-load legacy audit identities and immutable actor snapshots from job events."""
     with database.transaction() as tx:
-        rows = tx.execute(
-            "SELECT user_id, payload FROM r2s_audit_log WHERE action=? AND user_id IS NOT NULL ORDER BY at",
+        audit_rows = tx.execute(
+            "SELECT user_id, payload, at FROM r2s_audit_log WHERE action=? AND user_id IS NOT NULL ORDER BY at",
             (GPU_RUN_ACTION,),
         ).fetchall()
+        event_rows = tx.execute("SELECT job_id, payload FROM r2s_job_events ORDER BY job_id, version").fetchall()
     owners: dict[str, str] = {}
-    for user_id, payload in rows:
+    audit_times: dict[str, datetime] = {}
+    for user_id, payload, at in audit_rows:
         target = json.loads(payload).get("target")
         if isinstance(target, str):
-            owners[target] = user_id  # dòng sau ghi đè dòng trước: người bấm thử lại gần nhất
-    return owners
+            recorded_at = datetime.fromisoformat(at)
+            if recorded_at.tzinfo is None:
+                recorded_at = recorded_at.replace(tzinfo=UTC)
+            owners[target] = user_id
+            audit_times[target] = recorded_at
+    snapshots: dict[str, Actor] = {}
+    snapshot_times: dict[str, datetime] = {}
+    for job_id, payload in event_rows:
+        event = JobAttemptRecord.model_validate_json(payload)
+        actor = event.requested_by
+        if actor is not None:
+            recorded_at = event.recorded_at
+            if recorded_at.tzinfo is None:
+                recorded_at = recorded_at.replace(tzinfo=UTC)
+            snapshots[job_id] = actor
+            snapshot_times[job_id] = recorded_at
+    for job_id, actor in list(snapshots.items()):
+        audit_at = audit_times.get(job_id)
+        if owners.get(job_id) == actor.user_id or audit_at is None or snapshot_times[job_id] >= audit_at:
+            owners[job_id] = actor.user_id
+        else:
+            snapshots.pop(job_id)
+    return owners, snapshots
 
 
 def waiting_jobs(registry: ProjectRegistry) -> list[WaitingJob]:

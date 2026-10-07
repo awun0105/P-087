@@ -148,6 +148,40 @@ async def test_create_project_returns_201(client) -> None:
 
 
 @pytest.mark.asyncio
+async def test_project_and_job_routes_snapshot_authenticated_actor(client, tmp_path, monkeypatch) -> None:
+    from src.api import auth
+    from src.api.product import projects as project_routes
+    from src.main import app
+    from src.services.orchestration.auth import AuthService
+    from src.services.orchestration.jobs.database import RuntimeDatabase
+
+    service = AuthService(RuntimeDatabase(f"sqlite:///{tmp_path / 'actor.db'}"))
+    user = service.create_user("reviewer@example.com", "Minh An", "mat-khau-du-dai", "reviewer")
+    monkeypatch.setitem(app.dependency_overrides, auth.require_editor, lambda: user)
+    monkeypatch.setattr(project_routes, "record_gpu_run", lambda *_: None)
+
+    forged = await client.post("/api/v1/projects", json={**_CREATE_PROJECT_BODY, "created_by": {"user_id": "attacker"}})
+    assert forged.status_code == 422
+
+    project = await client.post("/api/v1/projects", json=_CREATE_PROJECT_BODY)
+    assert project.status_code == 201
+    assert project.json()["created_by"] == {
+        "user_id": user.user_id,
+        "display_name": "Minh An",
+        "role": "reviewer",
+    }
+
+    job = await client.post("/api/v1/projects/project-fixture-001/jobs", json={})
+    assert job.status_code == 201, job.text
+    attempts = await client.get(f"/api/v1/jobs/{job.json()['job_id']}/attempts")
+    assert attempts.json()["attempts"][0]["requested_by"] == {
+        "user_id": user.user_id,
+        "display_name": "Minh An",
+        "role": "reviewer",
+    }
+
+
+@pytest.mark.asyncio
 async def test_create_project_invalid_attestation_422(client) -> None:
     """Attestation with anonymization_confirmed=False must be rejected at 422."""
     bad = {**_CREATE_PROJECT_BODY, "attestation": {**_VALID_ATTESTATION, "anonymization_confirmed": False}}

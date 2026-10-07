@@ -44,8 +44,10 @@ def test_ply_import_packages_to_sog_and_becomes_ready(world, monkeypatch: pytest
 
     monkeypatch.setattr(imports_module, "package_splat", fake_package)
     upload = _upload(uploads, "scene.ply", _gaussian(count=4))
-    record = service.create(upload, "Scene thử", "user-1")
+    record = service.create(upload, "Scene thử", "user-1", "Minh An", "reviewer")
     assert record.status == "PACKAGING" and record.input_kind == "gaussian_ply"
+    assert record.created_by_name == "Minh An" and record.created_by_role == "reviewer"
+    assert service.get(record.import_id).created_by_role == "reviewer"
     ready = service.package(record.import_id, upload, None)
     assert ready.status == "READY" and ready.delivery_ref is not None
     assert ready.delivery_ref.source_provenance == {"visual_source": "user_import", "upload_checksum": upload.checksum}
