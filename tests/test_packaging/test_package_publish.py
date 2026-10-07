@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import zipfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -19,8 +21,15 @@ from scripts.cloud.package_publish import (
     validate_staged_package,
 )
 from scripts.studio.data_package import PackageError, pack
+from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum
-from src.services.orchestration.artifacts.checksum import sha256_file
+from src.models.contracts.validation_run import (
+    ValidationConfig,
+    ValidationRunOrigin,
+    ValidationRunRecord,
+    ValidationRunStatus,
+)
+from src.services.orchestration.artifacts.checksum import sha256_bytes, sha256_file
 from src.services.orchestration.artifacts.remote import RemoteObject
 from src.services.orchestration.jobs.database import RuntimeDatabase
 
@@ -221,6 +230,102 @@ def test_publish_is_idempotent_then_imports_rows_atomically(tmp_path: Path) -> N
         assert transaction.execute("SELECT COUNT(*) FROM r2s_sessions").fetchone() == (0,)
     with pytest.raises(PackagePublishError, match="not empty"):
         import_rows(target, package.rows)
+
+
+def test_validation_history_is_verified_and_imported_with_its_job(tmp_path: Path) -> None:
+    """Completed operational history follows the package while mutable attempts do not."""
+    archive_path, _ = _make_package(tmp_path)
+    staging = tmp_path / "validation-history"
+    extract_package(archive_path, staging)
+    job_id = "job-a"
+    config_draft = ValidationConfig(
+        schema_version="1.0",
+        policy_id="package-validation-policy-v1",
+        required_check_ids=["ISAAC_LOAD"],
+        warning_check_ids=[],
+        path_pairs=[],
+        config_checksum="sha256:" + "0" * 64,
+    )
+    config = config_draft.model_copy(
+        update={"config_checksum": canonical_content_checksum(config_draft, "config_checksum")}
+    )
+    config_uri = (
+        f"artifact://jobs/{job_id}/validation/configs/"
+        f"{config.config_checksum.removeprefix('sha256:')}/validation_config.json"
+    )
+    config_bytes = config.model_dump_json(indent=2).encode()
+    config_ref = ProductArtifactRef(
+        artifact_type="ValidationConfig",
+        schema_version="1.0",
+        artifact_uri=config_uri,
+        artifact_checksum=sha256_bytes(config_bytes),
+        data_class="derived",
+        producer_stage="ST-ISAAC-VALIDATE",
+        job_id=job_id,
+    )
+    config_path = staging / "data/studio_local/artifacts" / config_uri.removeprefix("artifact://")
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_bytes(config_bytes)
+    requested_at = datetime(2026, 10, 8, tzinfo=UTC)
+    draft = ValidationRunRecord(
+        schema_version="1.0",
+        run_id="run-failed-001",
+        attempt=1,
+        job_id=job_id,
+        scene_revision="rev-001",
+        scene_ir_checksum="sha256:" + "1" * 64,
+        candidate_checksum="sha256:" + "2" * 64,
+        validation_config_checksum=config.config_checksum,
+        validation_config_ref=config_ref,
+        origin=ValidationRunOrigin.WORKER,
+        status=ValidationRunStatus.FAILED,
+        requested_at=requested_at,
+        started_at=requested_at + timedelta(seconds=1),
+        completed_at=requested_at + timedelta(seconds=2),
+        worker_id="worker-package-test",
+        lease_id="lease-package-test",
+        fencing_token=1,
+        run_checksum="sha256:" + "0" * 64,
+    )
+    run = draft.model_copy(update={"run_checksum": canonical_content_checksum(draft, "run_checksum")})
+    database_path = staging / "data/studio_local/runtime.db"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """INSERT INTO r2s_validation_runs
+               (run_id,job_id,candidate_checksum,config_checksum,attempt,status,run_checksum,payload)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                run.run_id,
+                run.job_id,
+                run.candidate_checksum,
+                run.validation_config_checksum,
+                run.attempt,
+                run.status.value,
+                run.run_checksum,
+                run.model_dump_json(),
+            ),
+        )
+
+    package = validate_staged_package(staging)
+    assert package.rows["r2s_validation_runs"] == [
+        (
+            run.run_id,
+            run.job_id,
+            run.candidate_checksum,
+            run.validation_config_checksum,
+            run.attempt,
+            run.status.value,
+            run.run_checksum,
+            run.model_dump_json(),
+        )
+    ]
+    target = RuntimeDatabase(f"sqlite:///{tmp_path / 'validation-history-target.db'}")
+    imported = import_rows(target, package.rows)
+    assert imported["r2s_validation_runs"] == 1
+    with target.transaction() as transaction:
+        assert transaction.execute("SELECT run_id,status FROM r2s_validation_runs").fetchall() == [
+            (run.run_id, "FAILED")
+        ]
 
 
 def test_publisher_preserves_explicit_seed_accounts_without_sessions(tmp_path: Path) -> None:

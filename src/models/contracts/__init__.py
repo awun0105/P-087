@@ -45,6 +45,11 @@ from src.models.contracts.validation import (
     PreflightReport,
     ValidationReport,
 )
+from src.models.contracts.validation_run import (
+    ValidationConfig,
+    ValidationRunRecord,
+    ValidationRunSelection,
+)
 
 __all__ = [
     "AlignmentRecord",
@@ -84,6 +89,9 @@ __all__ = [
     "StageStatus",
     "Transform",
     "ValidationReport",
+    "ValidationConfig",
+    "ValidationRunRecord",
+    "ValidationRunSelection",
     "SeedDecision",
     "VoxelGridSummary",
     "VisualArtifact",

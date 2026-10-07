@@ -135,6 +135,36 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
             "CREATE INDEX r2s_resource_usage_job ON r2s_resource_usage(job_id)",
         ),
     ),
+    (
+        # Lịch sử validation bất biến theo attempt; selection CAS trỏ tới một run cụ thể.
+        9,
+        (
+            """CREATE TABLE r2s_validation_runs (
+                run_id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                candidate_checksum TEXT NOT NULL,
+                config_checksum TEXT NOT NULL,
+                attempt INTEGER NOT NULL CHECK(attempt > 0),
+                status TEXT NOT NULL,
+                run_checksum TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                UNIQUE(job_id, candidate_checksum, config_checksum, attempt),
+                UNIQUE(run_id, job_id, candidate_checksum, config_checksum))""",
+            "CREATE INDEX r2s_validation_runs_identity ON r2s_validation_runs(job_id, candidate_checksum, config_checksum, attempt)",
+            """CREATE TABLE r2s_validation_selections (
+                job_id TEXT NOT NULL,
+                candidate_checksum TEXT NOT NULL,
+                config_checksum TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                report_checksum TEXT NOT NULL,
+                generation INTEGER NOT NULL CHECK(generation > 0),
+                selection_checksum TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                PRIMARY KEY(job_id, candidate_checksum, config_checksum),
+                FOREIGN KEY(run_id, job_id, candidate_checksum, config_checksum)
+                    REFERENCES r2s_validation_runs(run_id, job_id, candidate_checksum, config_checksum))""",
+        ),
+    ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 

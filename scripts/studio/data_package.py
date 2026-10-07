@@ -768,6 +768,15 @@ def _active_work_gate(root: Path, database: Path) -> dict[str, int]:
                 )
                 if active:
                     raise PackageError(f"Không thể đóng gói khi có {active} objectify request đang chạy")
+        if "r2s_validation_runs" in tables:
+            terminal_statuses = {"COMPLETED", "FAILED", "CANCELLED"}
+            active_runs = [
+                (str(run_id), str(status))
+                for run_id, status in connection.execute("SELECT run_id, status FROM r2s_validation_runs")
+                if str(status).upper() not in terminal_statuses
+            ]
+            if active_runs:
+                raise PackageError(f"Không thể đóng gói khi có {len(active_runs)} validation run chưa kết thúc hợp lệ")
         if "r2s_jobs" not in tables or "r2s_job_events" not in tables:
             return {"human_metric_waiting_jobs": 0}
         job_columns = _table_columns(connection, "r2s_jobs")

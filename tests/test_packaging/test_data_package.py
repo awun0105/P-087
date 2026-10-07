@@ -42,6 +42,17 @@ def _create_schema(connection: sqlite3.Connection) -> None:
         CREATE TABLE r2s_resource_waits (wait_id TEXT PRIMARY KEY, payload TEXT NOT NULL);
         CREATE TABLE r2s_upload_sessions (session_id TEXT PRIMARY KEY, payload TEXT NOT NULL);
         CREATE TABLE r2s_scene_requests (job_id TEXT PRIMARY KEY, status TEXT NOT NULL, payload TEXT NOT NULL);
+        CREATE TABLE r2s_validation_runs (
+            run_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, candidate_checksum TEXT NOT NULL,
+            config_checksum TEXT NOT NULL, attempt INTEGER NOT NULL, status TEXT NOT NULL,
+            run_checksum TEXT NOT NULL, payload TEXT NOT NULL
+        );
+        CREATE TABLE r2s_validation_selections (
+            job_id TEXT NOT NULL, candidate_checksum TEXT NOT NULL, config_checksum TEXT NOT NULL,
+            run_id TEXT NOT NULL, report_checksum TEXT NOT NULL, generation INTEGER NOT NULL,
+            selection_checksum TEXT NOT NULL, payload TEXT NOT NULL,
+            PRIMARY KEY(job_id, candidate_checksum, config_checksum)
+        );
         CREATE TABLE r2s_audit_log (entry_id TEXT PRIMARY KEY, user_id TEXT, action TEXT, payload TEXT NOT NULL);
         CREATE TABLE r2s_trash (trash_id TEXT PRIMARY KEY, payload TEXT NOT NULL);
         """
@@ -336,6 +347,29 @@ def test_pack_allows_human_metric_wait_but_rejects_other_running_work(source_tre
     connection.close()
     with pytest.raises(data_package.PackageError, match="job"):
         data_package.pack(source_tree, tmp_path / "running.zip")
+
+
+def test_pack_rejects_queued_or_running_validation_attempt(source_tree: Path, tmp_path: Path) -> None:
+    """Mutable validation evidence cannot be snapshotted and resumed as if idle."""
+    database = source_tree / "data/studio_local/runtime.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """INSERT INTO r2s_validation_runs
+               (run_id,job_id,candidate_checksum,config_checksum,attempt,status,run_checksum,payload)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                "run-active",
+                "job-a",
+                "sha256:" + "a" * 64,
+                "sha256:" + "b" * 64,
+                1,
+                "RUNNING",
+                "sha256:" + "c" * 64,
+                "{}",
+            ),
+        )
+    with pytest.raises(data_package.PackageError, match="validation run"):
+        data_package.pack(source_tree, tmp_path / "active-validation.zip")
 
 
 def test_pack_rejects_verifying_upload_session(source_tree: Path, tmp_path: Path) -> None:

@@ -32,7 +32,15 @@ def _tables(database: RuntimeDatabase) -> set[str]:
 def test_fresh_database_reaches_latest_version(runtime_database_url: str) -> None:
     database = RuntimeDatabase(runtime_database_url)
     assert database.schema_version() == LATEST_SCHEMA_VERSION
-    assert {"r2s_projects", "r2s_jobs", "r2s_job_events", "r2s_uploads", "r2s_upload_sessions"} <= _tables(database)
+    assert {
+        "r2s_projects",
+        "r2s_jobs",
+        "r2s_job_events",
+        "r2s_uploads",
+        "r2s_upload_sessions",
+        "r2s_validation_runs",
+        "r2s_validation_selections",
+    } <= _tables(database)
     database.ping()
     # Khởi động lại (process khác) không chạy lại migration, không lỗi.
     assert RuntimeDatabase(runtime_database_url).schema_version() == LATEST_SCHEMA_VERSION
@@ -64,6 +72,31 @@ def test_legacy_v1_sqlite_upgrades_without_losing_rows(tmp_path: Path) -> None:
         assert tx.execute("SELECT project_id FROM r2s_projects").fetchall() == [("project-a",)]
         assert tx.execute("SELECT upload_id FROM r2s_uploads").fetchall() == [("upload-a",)]
     assert "r2s_upload_sessions" in _tables(database)
+
+
+def test_v8_database_adds_validation_history_without_losing_rows(tmp_path: Path) -> None:
+    """Migration 9 is additive and keeps pre-existing project/job state intact."""
+    path = tmp_path / "legacy-v8.db"
+    with sqlite3.connect(path) as legacy:
+        legacy.execute("CREATE TABLE r2s_schema (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL)")
+        legacy.execute("INSERT INTO r2s_schema VALUES (1, 0)")
+        for version, statements in database_module.MIGRATIONS:
+            if version > 8:
+                continue
+            for statement in statements:
+                legacy.execute(statement)
+            legacy.execute("UPDATE r2s_schema SET version=? WHERE id=1", (version,))
+        legacy.execute("INSERT INTO r2s_projects(project_id,payload) VALUES ('project-preserved','{}')")
+        legacy.execute(
+            "INSERT INTO r2s_jobs(job_id,project_id,version,manifest_ref) VALUES ('job-preserved','project-preserved',1,'artifact://jobs/job-preserved/manifest.json')"
+        )
+
+    database = RuntimeDatabase(f"sqlite:///{path}")
+    assert database.schema_version() == LATEST_SCHEMA_VERSION == 9
+    assert {"r2s_validation_runs", "r2s_validation_selections"} <= _tables(database)
+    with database.transaction() as tx:
+        assert tx.execute("SELECT project_id FROM r2s_projects").fetchall() == [("project-preserved",)]
+        assert tx.execute("SELECT job_id FROM r2s_jobs").fetchall() == [("job-preserved",)]
 
 
 def test_upload_records_and_row_locks_work(runtime_database_url: str, tmp_path: Path) -> None:

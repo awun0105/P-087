@@ -62,3 +62,12 @@ queue/report history cần operational migration và selection rõ ràng.
 - [AUD-04](../plans/active/2026-10-07-codegraph-audit/tasks/AUD-04-release-sealing.md).
 - [AUD-05](../plans/active/2026-10-07-codegraph-audit/tasks/AUD-05-isaac-validation.md).
 - Crash/concurrency tests và exact-candidate Isaac → review → release proof.
+
+## Implementation status
+
+AUD-03.S1 added the operational config/run/selection contracts, append-only
+RuntimeDatabase v9 storage, per-attempt artifact identities, and package
+handoff validation. This ADR remains **Proposed**: review/release consumers are
+not switched to the new selection protocol until AUD-03.S2/S3, and the real
+Isaac producer/worker authentication remains AUD-05. Synthetic fixtures prove
+local storage and checksum behavior only.

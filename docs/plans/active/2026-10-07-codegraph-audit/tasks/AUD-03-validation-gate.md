@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- PLANNED; P0; EX-PRODUCT + EX-SIM producer handoff.
+- IN PROGRESS; P0; EX-PRODUCT + EX-SIM producer handoff.
 - Canonical SIM-07/09, PRODUCT-10/11. SELF-CODE policy/record using current contracts.
 - Goal: report PASS tự khai báo hoặc fixture không thể seal ORDINARY release.
 - [Agent guide](../AGENT_GUIDE.md), [ADR 0013](../../../../decisions/0013-validation-evidence-and-release-identity.md).
@@ -66,12 +66,15 @@ explicit trusted vs synthetic distinction.
 **Contract:** all checksums bind candidate/config/run/report; runtime fingerprint
 không lấy từ arbitrary UI input; old report checksum giữ nguyên.
 
-Implement: inspect producer/consumer; choose minimal DB record + refs; stable
-check policy IDs; run-specific URI/selection protocol cho retries. Làm fixture
-trusted bằng backend test port, không thêm production bypass flag để tests pass.
+Implement: inspect producer/consumer; choose minimal DB record + refs; keep
+check IDs profile-owned and checksum-bound; add run-specific URI/selection
+protocol for retries. Current code has no production Isaac report producer, so
+do not freeze a guessed global check-ID enum; AUD-05 must finalize the production
+catalog with its validator. Use a backend test port, no production bypass flag.
 Tests: roundtrip/version/old report; wrong candidate/config/report/worker; missing
 log ref, corrupt checksum; two attempts/report selection; migration preserves history.
-**Exit:** [ ] producer/consumer schema review; [ ] backend-owned trust boundary tested.
+**Exit:** [x] producer/consumer schema review (no production producer exists yet);
+[x] backend-owned record/selection boundary tested; live worker authentication remains AUD-05.
 
 ## Sprint AUD-03.S2 — One shared eligibility gate
 
@@ -118,4 +121,42 @@ record/result phải nói fixture proof, chưa thay cho real-runtime acceptance.
 
 ## Result / Evidence
 
-Pending — lưu required-check config/version, rejected cases và trusted-run fixture refs.
+### AUD-03.S1 — execution proof/config contract
+
+- Base: `1f34976` (`AUD-02.S3`). Current code has no non-test caller of
+  `record_validation_report` and no production Isaac report producer. Existing
+  report fixtures expose `ISAAC_LOAD`, `ROBOT_SPAWN`, and `fixture-pair-001`; the
+  current review tests also use local-only IDs. S1 therefore keeps IDs as
+  checksum-bound public profile values; AUD-05 owns the production ID catalog.
+- Added `ValidationConfig`, `ValidationRunRecord`, and
+  `ValidationRunSelection` contracts. `ValidationReport` fields and canonical
+  checksum are unchanged. Config, report, runtime manifest, and log refs carry
+  exact byte checksums; report/run/selection carry logical checksums and bind
+  candidate, config, attempt, worker lease, and report identity.
+- Added run-specific immutable report/runtime/log URIs, append-only RuntimeDatabase
+  migration v9, one row per attempt, unique candidate/config/attempt identity,
+  immutable run transitions, and CAS selection generations. Synthetic records
+  persist with an explicit fixture ID and cannot be selected for review.
+- Updated Studio data packages and cloud package import to retain validation
+  history, verify payload/checksum/ref identity, preserve FK insertion order, and
+  refuse packages with queued/running/malformed validation state. Existing
+  project/job history survives v8→v9 migration.
+- Source changes: `database.py`, `validation_run.py`, contracts `__init__.py`,
+  `validation_runs.py`, `data_package.py`, `package_publish.py`.
+  Regression/contract changes: `test_validation_run.py`,
+  `test_validation_runs.py`, `test_runtime_migrations.py`,
+  `test_data_package.py`, `test_package_publish.py`.
+- CodeGraph was synced after implementation: 746 files, 13,292 nodes,
+  37,543 edges; index reports up to date. The final focused suite across
+  contracts, run repository, migration, review API/workflow, release contracts,
+  and Studio/cloud package handoff reports 70 passed, 4 skipped. Skips are the
+  existing optional PostgreSQL migration cases; SQLite v8→v9 and package import
+  were exercised locally. `ruff check src/ tests/` passes and
+  `ruff format --check src/ tests/` reports 462 files already formatted.
+- Limits: this commits the durable contract and internal repository, not a live
+  Isaac producer or worker-authentication path. The legacy report workflow still
+  exists until S2/S3 replace eligibility consumers. Fixtures validate storage and
+  identity logic; they are not Isaac runtime acceptance.
+- Next: AUD-03.S2 must route review/approve/seal through one eligibility gate,
+  validate policy completeness and exact current revision, and block synthetic
+  or legacy reports from ORDINARY release.

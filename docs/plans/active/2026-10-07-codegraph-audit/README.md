@@ -6,8 +6,9 @@ Date: 2026-10-07
 
 Active — implementation đang diễn ra trên branch
 `docs/codegraph-audit-implementation-plan`, khởi tạo từ `develop@ef3a421`.
-Đã commit: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S2.
-Sprint kế tiếp theo dependency order: AUD-02.S3.
+Đã commit: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3,
+AUD-03.S1.
+Sprint kế tiếp theo dependency order: AUD-03.S2.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
