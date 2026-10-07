@@ -1,0 +1,104 @@
+# AUD-06 — Import packaging durable và có recovery
+
+## Metadata và goal
+
+- PLANNED; P1; EX-PRODUCT; REC package_splat port.
+- Canonical PRODUCT-02/08/09. SELF-CODE durable operation, REUSE packaging adapter.
+- Goal: API crash không làm mất request; retry/cancel an toàn; READY chỉ khi SOG đã verify.
+- [Agent guide](../AGENT_GUIDE.md), [ADR 0014](../../../../decisions/0014-durable-heavy-operations.md).
+
+## Baseline và scope
+
+CodeGraph: `create_import`, `ImportService.create/package/_update`, `ImportedScene`,
+`package_splat`, `RuntimeDatabase._initialize`. Current API enqueue BackgroundTasks
+sau persist PACKAGING; no durable worker recovery. Publish exception sau packaging
+cũng cần terminal/recovery handling, không để PACKAGING vô hạn.
+
+Owned: src/services/orchestration/uploads/scene_imports.py và minimal import queue,
+src/api/studio/imports.py, worker_cli dispatch, DB migrations, frontend import
+status/client/contracts, tests/test_orchestration/test_scene_imports.py,
+tests/test_api/test_studio_routes.py, frontend/tests/studio-input-flows.test.tsx.
+Không tạo ReconstructionBundle, metric/collision/validation eligibility cho import.
+
+## Input / output / data contract
+
+Input: verified UploadRecord gaussian_ply/gaussian_ply_colmap, source checksum,
+selected packaging config/GPU requirement, import ID và requester.
+Output: ImportedScene READY + immutable delivery_ref hoặc explicit failed/
+cancelled/waiting operational status; upload bytes giữ nguyên.
+
+Public ImportedScene hiện PACKAGING/READY/FAILED. S1 chốt additive operation
+projection cho queued/waiting/running/attempt/error và CANCELLED khi có cancel;
+update TypeScript/consumers cùng change. Old records thiếu operation fields có
+default/omission semantics; không diễn giải PACKAGING cũ là lease đang sống.
+
+Operational record: version, operation_id/import_id, upload checksum, packaging
+config checksum, attempt, status, owner/fencing/lease/heartbeat, timestamps,
+delivery_ref/error. Enqueue atomically với import record. READY commit chỉ sau
+SOG publish/byte verify; complete bằng expected lease/attempt CAS, không chỉ
+compare old status. Retry tạo attempt mới, giữ history/logs và cùng config/input.
+
+## Dependencies
+
+S1 queue/schema có thể làm trước; S2/S3 dùng AUD-07 admission primitives. Actual
+GPU SOG smoke cần installed package_splat runtime; CPU fake-packager không thay proof.
+
+## Sprint AUD-06.S1 — Persist queue cùng import creation
+
+**Input:** upload verified và create-import request.
+**Output:** import record + durable queued operation cùng transaction, API status.
+**Contract:** no acknowledged import without durable scheduling; no BackgroundTasks
+as authoritative scheduler; import lifecycle không trở thành reconstruction job.
+
+Implement: inspect record/storage; add migration/typed queue; API validate+persist,
+worker discovers request sau restart. Existing PACKAGING records được bootstrap
+vào recovery nếu chưa có delivery/ref/live lease, không duplicate READY work.
+Tests: transaction rollback giữa two inserts; restart after API response;
+duplicate request/idempotency decision; old PACKAGING/READY records migration.
+**Exit:** [ ] new request survives restart; [ ] legacy status không stranded silently.
+
+## Sprint AUD-06.S2 — Leased worker, admission và publication
+
+**Input:** queued operation + source ref/config + AUD-07 reservation.
+**Output:** verified SOG delivery_ref và one committed terminal result.
+**Contract:** one live owner; stale worker can't mark READY; publish before CAS;
+unknown headroom waits without changing quality; input/config stable.
+
+Implement: claim/touch/fence, resolve source/extract valid member, call REC port
+in worker; catch typed packaging/publish failures into retryable diagnostics.
+Reuse immutable content URI; verify artifact tồn tại trước reuse. Release
+reservation sau process teardown; retain failed scratch for diagnosis.
+Tests: two independent workers, lease expiry, worker crash before/after SOG publish,
+bad ZIP member, checksum mismatch, publish failure, stale terminal CAS.
+**Exit:** [ ] no duplicate commit; [ ] READY refs resolve and byte checksum matches.
+
+## Sprint AUD-06.S3 — Retry/cancel và truthful UI
+
+**Input:** waiting/running/failed operations và user command.
+**Output:** persisted attempt/cancel state, readable status/error, recovery evidence.
+**Contract:** cancel queued prevents start; running cancel kills/reaps child before
+terminal; retry only known transient failures; no automatic scratch deletion.
+
+Implement: minimal role-guarded retry/cancel Studio routes; typed polling status,
+waiting reason and stale poll protection. No unsupported metric/physics CTAs.
+Tests: queued/running cancel, failed publish retry, bad input nonretryable;
+API permissions, Vitest status/loading/error, browser import/restart journey;
+real SOG consumer readability when runtime available.
+**Exit:** [ ] no permanent PACKAGING after interrupted operation; [ ] UI mirrors DB;
+[ ] local vs GPU packaging acceptance separated.
+
+## Verification và DoD
+
+```bash
+.venv/bin/pytest tests/test_orchestration/test_scene_imports.py tests/test_orchestration/test_upload_input_kinds.py tests/test_api/test_studio_routes.py tests/test_orchestration/test_runtime_migrations.py -q
+```
+
+Planned tests/test_orchestration/test_import_queue.py. Frontend focused
+tests/studio-input-flows.test.tsx và tests/input-kinds.test.ts; gates theo guide.
+DONE khi crash/retry/cancel/publication matrix pass và real SOG packaging/consumer
+proof available; không suy cloud restart acceptance từ local fixture.
+
+## Result / Evidence
+
+Pending — operation/attempt/lease IDs, old-record migration, SOG ref/checksum,
+process cancellation và API/browser evidence.
