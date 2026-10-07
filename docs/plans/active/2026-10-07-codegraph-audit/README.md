@@ -7,9 +7,9 @@ Date: 2026-10-07
 Active — implementation đang diễn ra trên branch
 `docs/codegraph-audit-implementation-plan`, khởi tạo từ `develop@ef3a421`.
 Đã commit: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3,
-AUD-03.S1–S3, AUD-04.S1–S3. Browser DevTools MCP gate của AUD-03.S3 vẫn
+AUD-03.S1–S3, AUD-04.S1–S3, AUD-10.S1–S2. Browser DevTools MCP gate của AUD-03.S3 vẫn
 UNVERIFIED; PostgreSQL proof của AUD-04.S3 chưa chạy vì thiếu
-`R2S_TEST_POSTGRES_URL`. Sprint kế tiếp theo dependency order là AUD-10.S1.
+`R2S_TEST_POSTGRES_URL`. Sprint kế tiếp theo dependency order là AUD-10.S3.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -233,11 +233,14 @@ build, Ruff và CodeGraph đều pass. AUD-04.S3 kiểm tra hai registry độc 
 SQLite, stale revision ngay trước seal marker và API ZIP/manifest byte equality;
 matrix pass 56 với 4 PostgreSQL skips do thiếu `R2S_TEST_POSTGRES_URL`. Browser
 MCP gate còn UNVERIFIED; frontend checks không thay thế browser review hay
-PostgreSQL proof. AUD-10.S1 adds migration v12, checksummed head/backfill records,
+PostgreSQL proof. AUD-10.S1 added migration v12, checksummed head/backfill records,
 bounded verify/recheck repair pages, a read-only/apply CLI, package import/export
-and trash/restore consumers. Its matrix passed 123 tests with 4 PostgreSQL skips;
-`SceneEditor.current()` remains on the legacy recovery path until AUD-10.S3.
-Tiếp theo là AUD-10.S2.
+and trash/restore consumers. Its matrix passed 123 tests with 4 PostgreSQL skips.
+AUD-10.S2 routes DB-backed SceneIR writes through reserve/publish/verify/CAS and
+reads through the committed head; legacy artifacts without a head require the
+verified repair CLI. The S2 regression matrix, package/deletion consumers and
+scene pipeline callers pass locally; PostgreSQL and live S3 proof remain pending.
+Tiếp theo là AUD-10.S3.
 
 AUD-23 có client preparation identity trước AUD-15/16 cache consumers; supported
 sensor mapping chốt trước AUD-13 overlay QA. Không cần full odometry/registration

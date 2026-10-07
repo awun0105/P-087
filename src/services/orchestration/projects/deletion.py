@@ -29,15 +29,17 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from src.config import Settings
 from src.models.contracts.artifacts import ArtifactRef, Identifier
+from src.models.contracts.identity import verify_content_checksum
 from src.models.contracts.manifests import JobManifest, JobStatus, StageId
 from src.services.orchestration.artifacts import ArtifactResolver, ArtifactStoreError
 from src.services.orchestration.auth.models import AuditEntry
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError, RuntimeTransaction
 from src.services.orchestration.jobs.progress import metric_confirmation_stage
+from src.services.orchestration.scene.heads import PendingScenePublication
 from src.services.orchestration.storage import runtime_resolver
 from src.services.orchestration.uploads.models import UploadRecord
 
@@ -314,7 +316,23 @@ class _Collector:
         repairs = self._select("r2s_scene_head_repairs", "job_id=?", (job_id,))
         backfill_items = self._select("r2s_scene_head_backfill_items", "job_id=?", (job_id,))
         publications = self._select("r2s_scene_publications", "job_id=?", (job_id,))
-        if publications:
+        active_publications = []
+        for row in publications:
+            try:
+                publication = PendingScenePublication.model_validate_json(str(row.values["payload"]))
+                verify_content_checksum(publication, "publication_checksum")
+                if (
+                    publication.job_id != row.values["job_id"]
+                    or publication.expected_generation != row.values["expected_generation"]
+                    or publication.target_scene_revision != row.values["target_revision"]
+                    or publication.lease_expires_at.isoformat() != row.values["lease_expires_at"]
+                ):
+                    raise ValueError("scene publication columns do not match checksummed payload")
+            except (TypeError, ValueError, ValidationError):
+                publication = None
+            if publication is None or publication.status != "ABORTED":
+                active_publications.append(row)
+        if active_publications:
             self.blockers.append(f"{job_id}: scene publication đang chờ commit hoặc cần phục hồi")
         repair_statuses = {str(row.values["status"]).upper() for row in repairs}
         if repair_statuses - {"COMPLETE", "BLOCKED"}:

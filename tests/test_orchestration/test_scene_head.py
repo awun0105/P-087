@@ -2,22 +2,34 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
 from scripts.studio import scene_head as scene_head_cli
 from src.config import Settings
-from src.services.orchestration.artifacts import ArtifactRemote, ArtifactResolver, InvalidArtifactUriError
-from src.services.orchestration.jobs.database import RuntimeDatabase
+from src.services.orchestration.artifacts import (
+    ArtifactRemote,
+    ArtifactResolver,
+    InvalidArtifactUriError,
+    with_canonical_checksum,
+)
+from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.scene.editor import SceneEditor, scene_artifact_uri
+from src.services.orchestration.scene.errors import SceneNotAvailableError, SceneRevisionConflictError
 from src.services.orchestration.scene.heads import (
     SceneHeadBackfill,
     SceneHeadBackfillError,
     SceneHeadRepository,
+    _seal_publication,
 )
 from src.services.orchestration.scene.models import SceneEditCommand, TransformEdit
 from tests.test_orchestration.memory_object_store import MemoryObjectStore
@@ -65,6 +77,14 @@ def _new_backfill(state: SimpleNamespace) -> SceneHeadBackfill:
     """Recreate the service boundary to model a process restart between pages."""
     editor = SceneEditor(_FIXTURE_ROOT, state.resolver)
     return SceneHeadBackfill(state.resolver, editor, SceneHeadRepository(state.database))
+
+
+def _head_editor(state: SimpleNamespace, database: RuntimeDatabase | None = None) -> SceneEditor:
+    return SceneEditor(_FIXTURE_ROOT, state.resolver, SceneHeadRepository(database or state.database))
+
+
+def _publish_root(editor: SceneEditor) -> None:
+    editor.publish_initial(_JOB_ID, editor._fixture_scene())
 
 
 def test_artifact_listing_merges_local_and_remote_and_rejects_symlink_prefix(tmp_path: Path) -> None:
@@ -220,3 +240,229 @@ def test_scene_head_cli_is_read_only_by_default_and_applies_bounded_pages(
     final_page = json.loads(capsys.readouterr().out)
     assert final_page["status"] == "COMPLETE" and final_page["head"]["scene_revision"] == "rev-002"
     assert scene_state.repository.get(_JOB_ID) is not None
+
+
+def test_database_backed_editor_commits_initial_and_next_head(scene_state: SimpleNamespace) -> None:
+    editor = _head_editor(scene_state)
+    _publish_root(editor)
+
+    first = scene_state.repository.get(_JOB_ID)
+    assert first is not None
+    assert first.scene_revision == "rev-001" and first.generation == first.allocation_sequence == 1
+    assert scene_state.repository.get_publication(_JOB_ID) is None
+
+    root = editor.current(_JOB_ID)
+    result = editor.publish_next(
+        _JOB_ID, root.scene.scene_revision, root.scene.model_copy(update={"objects": []}), "reject_object"
+    )
+    committed = scene_state.repository.get(_JOB_ID)
+    assert result.revision.scene.scene_revision == "rev-002"
+    assert committed is not None and committed.scene_revision == "rev-002" and committed.generation == 2
+    assert scene_state.repository.get_publication(_JOB_ID) is None
+    assert editor.current(_JOB_ID).scene.scene_revision == "rev-002"
+
+
+def test_two_independent_editors_cannot_commit_the_same_expected_head(scene_state: SimpleNamespace) -> None:
+    first = _head_editor(scene_state)
+    _publish_root(first)
+    second_database = RuntimeDatabase(scene_state.database_url)
+    second = _head_editor(scene_state, second_database)
+    first_scene = first.current(_JOB_ID).scene
+    second_scene = second.current(_JOB_ID).scene
+
+    def write(editor: SceneEditor, scene) -> str:  # noqa: ANN001 - concise concurrent test helper
+        try:
+            editor.publish_next(_JOB_ID, "rev-001", scene.model_copy(update={"objects": []}), "concurrent_edit")
+            return "committed"
+        except SceneRevisionConflictError:
+            return "conflict"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(lambda pair: write(*pair), [(first, first_scene), (second, second_scene)]))
+
+    assert sorted(outcomes) == ["committed", "conflict"]
+    head = scene_state.repository.get(_JOB_ID)
+    assert head is not None and head.scene_revision == "rev-002" and head.generation == 2
+    assert scene_state.repository.get_publication(_JOB_ID) is None
+    assert len(scene_state.resolver.list_uris(f"artifact://jobs/{_JOB_ID}/scene/")) == 2
+
+
+def test_pending_initial_artifact_is_not_visible_and_legacy_writes_require_backfill(
+    scene_state: SimpleNamespace,
+) -> None:
+    legacy_editor = SceneEditor(_FIXTURE_ROOT, scene_state.resolver)
+    legacy_editor.current(_JOB_ID)
+    pending = scene_state.repository.reserve_publication(_JOB_ID, None, "publish_initial", writer_id="initial-writer")
+    assert pending.target_scene_revision == "rev-001"
+
+    editor = _head_editor(scene_state)
+    with pytest.raises(SceneNotAvailableError, match="not committed"):
+        editor.current(_JOB_ID)
+    assert editor.artifact_references_for_job(_JOB_ID) == []
+
+    # Legacy artifacts stay hidden until the explicit, verified backfill establishes a DB head.
+    database = RuntimeDatabase(f"sqlite:///{scene_state.resolver.artifact_root.parent / 'legacy.db'}")
+    legacy_repo = SceneHeadRepository(database)
+    legacy_runtime_editor = SceneEditor(_FIXTURE_ROOT, scene_state.resolver, legacy_repo)
+    with pytest.raises(SceneNotAvailableError, match="no committed head"):
+        legacy_runtime_editor.apply(
+            _JOB_ID,
+            SceneEditCommand(
+                expected_scene_revision="rev-001",
+                edits=[TransformEdit(object_id="object-rack-001", translation_xyz=(3.0, 2.0, 0.0))],
+            ),
+        )
+    assert legacy_repo.get(_JOB_ID) is None
+
+
+def test_failed_after_artifact_publish_keeps_orphan_and_never_reuses_its_uri(
+    scene_state: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    editor = _head_editor(scene_state)
+    _publish_root(editor)
+    root = editor.current(_JOB_ID).scene
+
+    def fail_before_head_commit(_pending) -> None:  # noqa: ANN001 - injected failure point
+        raise RuntimeError("injected failure after immutable upload")
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(editor.head_repository, "mark_published", fail_before_head_commit)
+        with pytest.raises(RuntimeError, match="after immutable upload"):
+            editor.publish_next(_JOB_ID, "rev-001", root.model_copy(update={"objects": []}), "failed_edit")
+
+    pending = scene_state.repository.get_publication(_JOB_ID)
+    assert pending is not None and pending.status == "ABORTED" and pending.target_scene_revision == "rev-002"
+    assert scene_state.resolver.locate(scene_artifact_uri(_JOB_ID, "rev-002")) is not None
+    assert editor.current(_JOB_ID).scene.scene_revision == "rev-001"
+    assert editor.revision(_JOB_ID, "rev-002") is None
+
+    committed = editor.publish_next(_JOB_ID, "rev-001", root.model_copy(update={"objects": []}), "retry_edit")
+    assert committed.revision.scene.scene_revision == "rev-003"
+    head = scene_state.repository.get(_JOB_ID)
+    assert head is not None and head.scene_revision == "rev-003" and head.allocation_sequence == 3
+
+
+def test_cancelled_writer_is_aborted_without_advancing_the_head(
+    scene_state: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    editor = _head_editor(scene_state)
+    _publish_root(editor)
+    root = editor.current(_JOB_ID).scene
+
+    def cancel_before_publish(_reference, _payload) -> None:  # noqa: ANN001 - injected cancellation point
+        raise asyncio.CancelledError()
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(editor, "_publish_once", cancel_before_publish)
+        with pytest.raises(asyncio.CancelledError):
+            editor.publish_next(_JOB_ID, "rev-001", root.model_copy(update={"objects": []}), "cancelled_edit")
+
+    head = scene_state.repository.get(_JOB_ID)
+    pending = scene_state.repository.get_publication(_JOB_ID)
+    assert head is not None and head.scene_revision == "rev-001"
+    assert pending is not None and pending.status == "ABORTED"
+    assert editor.current(_JOB_ID).scene.scene_revision == "rev-001"
+
+
+def test_expired_writer_is_fenced_and_late_artifact_stays_orphaned(scene_state: SimpleNamespace) -> None:
+    editor = _head_editor(scene_state)
+    _publish_root(editor)
+    root = editor.current(_JOB_ID).scene
+    old = scene_state.repository.reserve_publication(_JOB_ID, "rev-001", "slow_edit", writer_id="slow-worker")
+    proposed = with_canonical_checksum(
+        root.model_copy(update={"scene_revision": old.target_scene_revision, "objects": []}), "scene_ir_checksum"
+    )
+    payload = proposed.model_dump_json(indent=2).encode("utf-8") + b"\n"
+    reference = editor._reference_for(
+        _JOB_ID, old.target_scene_revision, "sha256:" + hashlib.sha256(payload).hexdigest()
+    )
+    old = scene_state.repository.bind_publication(old, reference)
+
+    expired = _seal_publication(
+        old.model_copy(
+            update={
+                "lease_expires_at": datetime.now(UTC) - timedelta(seconds=1),
+                "publication_checksum": "sha256:" + "0" * 64,
+            }
+        )
+    )
+    with scene_state.database.transaction(write=True) as tx:
+        tx.execute(
+            "UPDATE r2s_scene_publications SET lease_expires_at=?,payload=? WHERE job_id=?",
+            (expired.lease_expires_at.isoformat(), expired.model_dump_json(), _JOB_ID),
+        )
+
+    replacement = scene_state.repository.reserve_publication(_JOB_ID, "rev-001", "fast_edit", writer_id="fast-worker")
+    assert replacement.target_scene_revision == "rev-003"
+    assert replacement.fencing_token != old.fencing_token
+    editor._publish_once(reference, payload)  # the old upload may finish after the lease takeover
+    with pytest.raises(RuntimeStateConflictError, match="fenced"):
+        scene_state.repository.mark_published(old)
+    assert editor.current(_JOB_ID).scene.scene_revision == "rev-001"
+    assert editor.revision(_JOB_ID, "rev-002") is None
+
+    assert scene_state.repository.abort_publication(replacement)
+    following = scene_state.repository.reserve_publication(_JOB_ID, "rev-001", "next_edit", writer_id="next-worker")
+    assert following.target_scene_revision == "rev-004"
+
+
+def test_response_loss_after_database_commit_keeps_exactly_one_winner(
+    scene_state: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    editor = _head_editor(scene_state)
+    _publish_root(editor)
+    root = editor.current(_JOB_ID).scene
+    commit = editor.head_repository.commit_publication
+
+    def commit_then_lose_response(pending, revision):  # noqa: ANN001 - injected DB response loss
+        commit(pending, revision)
+        raise RuntimeError("injected response loss after commit")
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(editor.head_repository, "commit_publication", commit_then_lose_response)
+        with pytest.raises(RuntimeError, match="after commit"):
+            editor.publish_next(_JOB_ID, "rev-001", root.model_copy(update={"objects": []}), "committed_edit")
+
+    head = scene_state.repository.get(_JOB_ID)
+    assert head is not None and head.scene_revision == "rev-002" and head.generation == 2
+    assert scene_state.repository.get_publication(_JOB_ID) is None
+    assert editor.current(_JOB_ID).scene.scene_revision == "rev-002"
+    with pytest.raises(SceneRevisionConflictError):
+        editor.publish_next(_JOB_ID, "rev-001", root, "duplicate_request")
+    assert scene_state.repository.get(_JOB_ID) == head
+
+
+def test_reservation_retry_is_idempotent_only_for_the_same_live_writer(scene_state: SimpleNamespace) -> None:
+    editor = _head_editor(scene_state)
+    _publish_root(editor)
+    writer_id = uuid4().hex
+    first = scene_state.repository.reserve_publication(_JOB_ID, "rev-001", "same_action", writer_id=writer_id)
+    repeated = scene_state.repository.reserve_publication(_JOB_ID, "rev-001", "same_action", writer_id=writer_id)
+    assert repeated == first
+    with pytest.raises(RuntimeStateConflictError, match="holds the writer lease"):
+        scene_state.repository.reserve_publication(_JOB_ID, "rev-001", "other_action", writer_id=uuid4().hex)
+
+
+@pytest.mark.skipif(not os.environ.get("R2S_TEST_POSTGRES_URL"), reason="R2S_TEST_POSTGRES_URL is not configured")
+def test_postgres_initial_reservation_has_one_winner() -> None:
+    database_url = os.environ["R2S_TEST_POSTGRES_URL"]
+    database = RuntimeDatabase(database_url)
+    repository = SceneHeadRepository(database)
+    job_id = f"scene-cas-{uuid4().hex}"
+
+    def reserve(writer_id: str) -> str:
+        try:
+            repository.reserve_publication(job_id, None, "publish_initial", writer_id=writer_id)
+            return "reserved"
+        except RuntimeStateConflictError:
+            return "conflict"
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(reserve, ["writer-a", "writer-b"]))
+        assert sorted(outcomes) == ["conflict", "reserved"]
+        pending = repository.get_publication(job_id)
+        assert pending is not None and pending.expected_generation == 1 and pending.target_scene_revision == "rev-001"
+    finally:
+        with database.transaction(write=True) as tx:
+            tx.execute("DELETE FROM r2s_scene_publications WHERE job_id=?", (job_id,))

@@ -79,7 +79,6 @@ SANITIZE_TABLES = (
     "r2s_resource_waits",
     "r2s_workers",
     "r2s_upload_sessions",
-    "r2s_scene_publications",
 )
 ACTIVE_JOB_STATUSES = {"QUEUED", "RUNNING"}
 ACTIVE_IMPORT_STATUSES = {"UPLOADING", "PACKAGING", "RUNNING", "PENDING", "PROCESSING", "VERIFYING"}
@@ -730,9 +729,18 @@ def _active_work_gate(root: Path, database: Path) -> dict[str, int]:
         tables = _table_names(connection)
         _reject_nonempty_trash(connection, "đóng gói")
         if "r2s_scene_publications" in tables:
-            count = int(connection.execute("SELECT COUNT(*) FROM r2s_scene_publications").fetchone()[0])
-            if count:
-                raise PackageError("Không thể đóng gói khi còn scene publication đang chờ commit hoặc cần phục hồi")
+            for job_id, raw_payload in connection.execute("SELECT job_id,payload FROM r2s_scene_publications"):
+                publication = _json_object(raw_payload, f"r2s_scene_publications[{job_id}]")
+                supplied = publication.get("publication_checksum")
+                content = {key: value for key, value in publication.items() if key != "publication_checksum"}
+                canonical = json.dumps(
+                    content, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+                ).encode("utf-8")
+                expected = "sha256:" + hashlib.sha256(canonical).hexdigest()
+                if supplied != expected:
+                    raise PackageError("Không thể đóng gói scene publication có checksum sai")
+                if publication.get("status") != "ABORTED":
+                    raise PackageError("Không thể đóng gói khi còn scene publication đang chạy hoặc cần phục hồi")
         if "r2s_resource_reservations" in tables:
             count = int(connection.execute("SELECT COUNT(*) FROM r2s_resource_reservations").fetchone()[0])
             if count:
@@ -844,6 +852,21 @@ def _snapshot_database_details(
             for table in SANITIZE_TABLES:
                 if table in tables:
                     copy.execute(f'DELETE FROM "{table}"')
+            if "r2s_scene_publications" in tables:
+                for job_id, payload in copy.execute("SELECT job_id,payload FROM r2s_scene_publications").fetchall():
+                    publication = _json_object(payload, f"r2s_scene_publications[{job_id}]")
+                    if publication.get("status") != "ABORTED":
+                        raise PackageError("Không thể snapshot scene publication chưa kết thúc")
+                    publication["fencing_token"] = "redacted"
+                    content = {key: value for key, value in publication.items() if key != "publication_checksum"}
+                    canonical = json.dumps(
+                        content, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+                    ).encode("utf-8")
+                    publication["publication_checksum"] = "sha256:" + hashlib.sha256(canonical).hexdigest()
+                    copy.execute(
+                        "UPDATE r2s_scene_publications SET payload=? WHERE job_id=?",
+                        (json.dumps(publication, ensure_ascii=False, separators=(",", ":")), job_id),
+                    )
             if "r2s_users" in tables:
                 columns = _table_columns(copy, "r2s_users")
                 required = {"user_id", "email", "payload"}

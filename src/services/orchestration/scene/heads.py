@@ -7,8 +7,9 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Literal, TypeVar
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Literal, TypeVar
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -16,13 +17,17 @@ from src.models.contracts.artifacts import ArtifactRef, Checksum
 from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
 from src.services.orchestration.artifacts import ArtifactResolver
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
-from src.services.orchestration.scene.editor import SceneEditor, scene_artifact_uri
+from src.services.orchestration.scene.identifiers import scene_artifact_uri
 from src.services.orchestration.scene.models import SceneRevision
+
+if TYPE_CHECKING:
+    from src.services.orchestration.scene.editor import SceneEditor
 
 _SCHEMA_VERSION = "1.0"
 _ZERO = "sha256:" + "0" * 64
 _REVISION_NUMBER = re.compile(r"^rev-(?P<number>[0-9]+)$")
 _REVISION_FILE = re.compile(r"^scene_ir\.(?P<revision>.+)\.json$")
+_ROOT_REVISION = "rev-001"
 _CursorItem = TypeVar("_CursorItem")
 
 
@@ -157,7 +162,7 @@ class SceneHeadRepairRecord(BaseModel):
 
 
 class PendingScenePublication(BaseModel):
-    """Schema contract for the single reserved scene writer slot used by AUD-10.S2."""
+    """Fenced writer reservation; expected_generation is the target head generation."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -166,13 +171,34 @@ class PendingScenePublication(BaseModel):
     writer_id: str = Field(min_length=1)
     fencing_token: str = Field(min_length=1)
     expected_generation: int = Field(ge=1)
-    expected_scene_revision: str = Field(min_length=1)
+    expected_scene_revision: str | None = Field(default=None, min_length=1)
     target_scene_revision: str = Field(min_length=1)
     operation: str = Field(min_length=1)
-    payload_checksum: Checksum
-    artifact_reference: ArtifactRef
+    payload_checksum: Checksum | None = None
+    artifact_reference: ArtifactRef | None = None
     lease_expires_at: datetime
-    status: Literal["RESERVED", "PUBLISHED"]
+    status: Literal["ALLOCATED", "RESERVED", "PUBLISHED", "ABORTED"]
+    publication_checksum: Checksum
+
+    @model_validator(mode="after")
+    def _validate_publication(self) -> PendingScenePublication:
+        if self.lease_expires_at.utcoffset() is None:
+            raise ValueError("scene publication lease must be timezone-aware")
+        if (self.payload_checksum is None) != (self.artifact_reference is None):
+            raise ValueError("scene publication payload checksum and artifact reference must be set together")
+        if self.status in {"RESERVED", "PUBLISHED"} and self.artifact_reference is None:
+            raise ValueError("bound scene publication must include its immutable artifact reference")
+        if self.status == "ALLOCATED" and self.artifact_reference is not None:
+            raise ValueError("unbound scene publication cannot include an artifact reference")
+        if self.expected_scene_revision is None and self.target_scene_revision != _ROOT_REVISION:
+            raise ValueError("an initial scene publication must reserve the root revision")
+        if self.artifact_reference is not None and (
+            self.artifact_reference.job_id != self.job_id
+            or self.artifact_reference.artifact_uri != scene_artifact_uri(self.job_id, self.target_scene_revision)
+            or self.artifact_reference.artifact_checksum != self.payload_checksum
+        ):
+            raise ValueError("scene publication artifact reference does not match its reservation")
+        return self
 
 
 @dataclass(frozen=True)
@@ -195,7 +221,7 @@ class SceneHeadBackfillError(RuntimeError):
 
 
 class SceneHeadRepository:
-    """Typed access to immutable head identity and resumable repair staging."""
+    """Typed access to committed heads, fenced publications, and repair staging."""
 
     def __init__(self, database: RuntimeDatabase) -> None:
         self.database = database
@@ -207,6 +233,331 @@ class SceneHeadRepository:
                 (job_id,),
             ).fetchone()
         return _parse_head_row(row) if row is not None else None
+
+    def get_publication(self, job_id: str) -> PendingScenePublication | None:
+        with self.database.transaction() as tx:
+            row = tx.execute(
+                "SELECT job_id,expected_generation,target_revision,lease_expires_at,payload "
+                "FROM r2s_scene_publications WHERE job_id=?",
+                (job_id,),
+            ).fetchone()
+        return _parse_publication_row(row) if row is not None else None
+
+    def reserve_publication(
+        self,
+        job_id: str,
+        expected_scene_revision: str | None,
+        operation: str,
+        *,
+        writer_id: str | None = None,
+        lease_seconds: int = 900,
+    ) -> PendingScenePublication:
+        """Reserve an immutable target without holding a transaction during artifact I/O.
+
+        `expected_generation` stores the target generation because migration v12
+        already requires it to be positive. A lease takeover gets a new fencing
+        token; edit retries skip abandoned numeric names, while an initial retry
+        may only reuse rev-001 and must later prove identical bytes.
+        """
+        if lease_seconds < 1:
+            raise ValueError("scene publication lease must be at least one second")
+        writer = writer_id or uuid4().hex
+        now = datetime.now(UTC)
+        expires = now + timedelta(seconds=lease_seconds)
+        with self.database.transaction(write=True) as tx:
+            head_row = tx.execute(
+                "SELECT job_id,generation,allocation_sequence,head_checksum,payload FROM r2s_scene_heads WHERE job_id=?"
+                + tx.lock_suffix(),
+                (job_id,),
+            ).fetchone()
+            head = _parse_head_row(head_row) if head_row is not None else None
+            if expected_scene_revision is None:
+                if head is not None:
+                    raise RuntimeStateConflictError("Scene head already exists; initial publication is stale")
+                target_generation = 1
+                allocation_sequence = 0
+            else:
+                if head is None or head.scene_revision != expected_scene_revision:
+                    observed = head.scene_revision if head is not None else "missing"
+                    raise RuntimeStateConflictError(
+                        f"Scene head changed: expected {expected_scene_revision}, observed {observed}"
+                    )
+                target_generation = head.generation + 1
+                allocation_sequence = head.allocation_sequence
+
+            repair_row = tx.execute(
+                "SELECT job_id,status,generation,repair_checksum,payload FROM r2s_scene_head_repairs WHERE job_id=?"
+                + tx.lock_suffix(),
+                (job_id,),
+            ).fetchone()
+            if repair_row is not None:
+                repair = _parse_repair_row(repair_row)
+                if repair.status != "COMPLETE":
+                    raise RuntimeStateConflictError(
+                        f"Scene head repair is {repair.status}; resolve the recorded repair before publishing"
+                    )
+
+            publication_row = tx.execute(
+                "SELECT job_id,expected_generation,target_revision,lease_expires_at,payload "
+                "FROM r2s_scene_publications WHERE job_id=?" + tx.lock_suffix(),
+                (job_id,),
+            ).fetchone()
+            existing = _parse_publication_row(publication_row) if publication_row is not None else None
+            if existing is not None:
+                if (
+                    existing.writer_id == writer
+                    and existing.expected_scene_revision == expected_scene_revision
+                    and existing.operation == operation
+                    and existing.status != "ABORTED"
+                    and existing.lease_expires_at > now
+                ):
+                    return existing
+                if existing.status != "ABORTED" and existing.lease_expires_at > now:
+                    raise RuntimeStateConflictError("Another scene publication currently holds the writer lease")
+                if expected_scene_revision is None:
+                    # A root artifact may already have been published. Reuse its URI only
+                    # if the new writer can prove the exact same bytes during publish.
+                    target_revision = existing.target_scene_revision
+                else:
+                    target_sequence = max(allocation_sequence, _revision_number(existing.target_scene_revision)) + 1
+                    target_revision = _revision_name(expected_scene_revision, target_sequence)
+            elif expected_scene_revision is None:
+                target_revision = _ROOT_REVISION
+            else:
+                target_revision = _revision_name(expected_scene_revision, allocation_sequence + 1)
+
+            pending = _seal_publication(
+                PendingScenePublication(
+                    schema_version=_SCHEMA_VERSION,
+                    job_id=job_id,
+                    writer_id=writer,
+                    fencing_token=uuid4().hex,
+                    expected_generation=target_generation,
+                    expected_scene_revision=expected_scene_revision,
+                    target_scene_revision=target_revision,
+                    operation=operation,
+                    payload_checksum=None,
+                    artifact_reference=None,
+                    lease_expires_at=expires,
+                    status="ALLOCATED",
+                    publication_checksum=_ZERO,
+                )
+            )
+            values = (
+                pending.job_id,
+                pending.expected_generation,
+                pending.target_scene_revision,
+                pending.lease_expires_at.isoformat(),
+                pending.model_dump_json(),
+            )
+            if existing is None:
+                tx.execute(
+                    "INSERT INTO r2s_scene_publications(job_id,expected_generation,target_revision,lease_expires_at,payload) "
+                    "VALUES (?,?,?,?,?) ON CONFLICT(job_id) DO NOTHING",
+                    values,
+                )
+                created_row = tx.execute(
+                    "SELECT job_id,expected_generation,target_revision,lease_expires_at,payload "
+                    "FROM r2s_scene_publications WHERE job_id=?" + tx.lock_suffix(),
+                    (job_id,),
+                ).fetchone()
+                created = _parse_publication_row(created_row) if created_row is not None else None
+                if created is None:
+                    raise RuntimeStateConflictError("Scene publication reservation insert was not visible")
+                if created.fencing_token != pending.fencing_token:
+                    raise RuntimeStateConflictError("Another scene writer reserved the initial revision")
+            else:
+                changed = tx.execute(
+                    "UPDATE r2s_scene_publications SET expected_generation=?,target_revision=?,lease_expires_at=?,payload=? "
+                    "WHERE job_id=? AND payload=?",
+                    (
+                        pending.expected_generation,
+                        pending.target_scene_revision,
+                        pending.lease_expires_at.isoformat(),
+                        pending.model_dump_json(),
+                        job_id,
+                        publication_row[4],
+                    ),
+                ).rowcount
+                if changed != 1:
+                    raise RuntimeStateConflictError("Scene publication reservation changed during lease takeover")
+        return pending
+
+    def bind_publication(
+        self, pending: PendingScenePublication, artifact_reference: ArtifactRef
+    ) -> PendingScenePublication:
+        """Bind exact expected bytes after the target revision is known."""
+        if artifact_reference.job_id != pending.job_id or artifact_reference.artifact_uri != scene_artifact_uri(
+            pending.job_id, pending.target_scene_revision
+        ):
+            raise RuntimeStateConflictError("Scene publication artifact does not match its reserved target")
+        with self.database.transaction(write=True) as tx:
+            row = tx.execute(
+                "SELECT job_id,expected_generation,target_revision,lease_expires_at,payload "
+                "FROM r2s_scene_publications WHERE job_id=?" + tx.lock_suffix(),
+                (pending.job_id,),
+            ).fetchone()
+            current = _parse_publication_row(row) if row is not None else None
+            self._require_writer(current, pending)
+            assert current is not None
+            if current.lease_expires_at <= datetime.now(UTC):
+                raise RuntimeStateConflictError("Scene publication lease expired before artifact binding")
+            if current.artifact_reference is not None:
+                if current.artifact_reference != artifact_reference:
+                    raise RuntimeStateConflictError("Writer retry proposed different bytes for its immutable target")
+                return current
+            updated = _seal_publication(
+                current.model_copy(
+                    update={
+                        "payload_checksum": artifact_reference.artifact_checksum,
+                        "artifact_reference": artifact_reference,
+                        "status": "RESERVED",
+                        "publication_checksum": _ZERO,
+                    }
+                )
+            )
+            tx.execute(
+                "UPDATE r2s_scene_publications SET payload=? WHERE job_id=?",
+                (updated.model_dump_json(), pending.job_id),
+            )
+        return updated
+
+    def mark_published(self, pending: PendingScenePublication) -> PendingScenePublication:
+        """Advance only after the caller verified the immutable artifact bytes."""
+        with self.database.transaction(write=True) as tx:
+            row = tx.execute(
+                "SELECT job_id,expected_generation,target_revision,lease_expires_at,payload "
+                "FROM r2s_scene_publications WHERE job_id=?" + tx.lock_suffix(),
+                (pending.job_id,),
+            ).fetchone()
+            current = _parse_publication_row(row) if row is not None else None
+            self._require_writer(current, pending)
+            assert current is not None
+            if current.lease_expires_at <= datetime.now(UTC):
+                raise RuntimeStateConflictError("Scene publication lease expired before commit")
+            if current.status == "PUBLISHED":
+                return current
+            if current.status != "RESERVED" or current.artifact_reference is None:
+                raise RuntimeStateConflictError("Scene publication has not bound a verified artifact")
+            updated = _seal_publication(
+                current.model_copy(update={"status": "PUBLISHED", "publication_checksum": _ZERO})
+            )
+            tx.execute(
+                "UPDATE r2s_scene_publications SET payload=? WHERE job_id=?",
+                (updated.model_dump_json(), pending.job_id),
+            )
+        return updated
+
+    def commit_publication(self, pending: PendingScenePublication, revision: SceneRevision) -> SceneHeadRecord:
+        """CAS the verified artifact into the committed head and remove its reservation."""
+        if revision.job_id != pending.job_id or revision.scene.scene_revision != pending.target_scene_revision:
+            raise RuntimeStateConflictError("Published SceneIR identity does not match its reservation")
+        item = SceneHeadBackfillItem.from_revision(revision)
+        allocation_sequence = _revision_number(pending.target_scene_revision)
+        head = SceneHeadRecord.freeze(
+            item,
+            generation=pending.expected_generation,
+            allocation_sequence=allocation_sequence,
+        )
+        with self.database.transaction(write=True) as tx:
+            row = tx.execute(
+                "SELECT job_id,expected_generation,target_revision,lease_expires_at,payload "
+                "FROM r2s_scene_publications WHERE job_id=?" + tx.lock_suffix(),
+                (pending.job_id,),
+            ).fetchone()
+            current = _parse_publication_row(row) if row is not None else None
+            self._require_writer(current, pending)
+            assert current is not None
+            if current.status != "PUBLISHED" or current.artifact_reference != revision.scene_reference:
+                raise RuntimeStateConflictError("Scene artifact is not the verified publication bound to this writer")
+            if current.lease_expires_at <= datetime.now(UTC):
+                raise RuntimeStateConflictError("Expired scene publication cannot commit")
+
+            old_row = tx.execute(
+                "SELECT job_id,generation,allocation_sequence,head_checksum,payload FROM r2s_scene_heads WHERE job_id=?"
+                + tx.lock_suffix(),
+                (pending.job_id,),
+            ).fetchone()
+            old_head = _parse_head_row(old_row) if old_row is not None else None
+            if pending.expected_scene_revision is None:
+                if old_head is not None or pending.expected_generation != 1:
+                    raise RuntimeStateConflictError("Initial scene publication lost its empty-head compare-and-swap")
+                tx.execute(
+                    "INSERT INTO r2s_scene_heads(job_id,generation,allocation_sequence,head_checksum,payload) "
+                    "VALUES (?,?,?,?,?)",
+                    (
+                        head.job_id,
+                        head.generation,
+                        head.allocation_sequence,
+                        head.head_checksum,
+                        head.model_dump_json(),
+                    ),
+                )
+            else:
+                if (
+                    old_head is None
+                    or old_head.scene_revision != pending.expected_scene_revision
+                    or old_head.generation + 1 != pending.expected_generation
+                    or old_head.allocation_sequence >= head.allocation_sequence
+                ):
+                    raise RuntimeStateConflictError("Scene head compare-and-swap lost to another writer")
+                changed = tx.execute(
+                    "UPDATE r2s_scene_heads SET generation=?,allocation_sequence=?,head_checksum=?,payload=? "
+                    "WHERE job_id=? AND generation=? AND head_checksum=?",
+                    (
+                        head.generation,
+                        head.allocation_sequence,
+                        head.head_checksum,
+                        head.model_dump_json(),
+                        old_head.job_id,
+                        old_head.generation,
+                        old_head.head_checksum,
+                    ),
+                ).rowcount
+                if changed != 1:
+                    raise RuntimeStateConflictError("Scene head compare-and-swap failed")
+            deleted = tx.execute(
+                "DELETE FROM r2s_scene_publications WHERE job_id=? AND payload=?",
+                (pending.job_id, row[4]),
+            ).rowcount
+            if deleted != 1:
+                raise RuntimeStateConflictError("Scene publication reservation changed before commit")
+        return head
+
+    def abort_publication(self, pending: PendingScenePublication) -> bool:
+        """Fence a failed/cancelled writer while retaining its allocated URI high-water."""
+        with self.database.transaction(write=True) as tx:
+            row = tx.execute(
+                "SELECT job_id,expected_generation,target_revision,lease_expires_at,payload "
+                "FROM r2s_scene_publications WHERE job_id=?" + tx.lock_suffix(),
+                (pending.job_id,),
+            ).fetchone()
+            current = _parse_publication_row(row) if row is not None else None
+            if current is None or current.fencing_token != pending.fencing_token:
+                return False
+            if current.status == "ABORTED":
+                return True
+            updated = _seal_publication(current.model_copy(update={"status": "ABORTED", "publication_checksum": _ZERO}))
+            changed = tx.execute(
+                "UPDATE r2s_scene_publications SET payload=? WHERE job_id=? AND payload=?",
+                (updated.model_dump_json(), pending.job_id, row[4]),
+            ).rowcount
+            if changed != 1:
+                raise RuntimeStateConflictError("Scene publication changed before abort could fence the writer")
+        return True
+
+    @staticmethod
+    def _require_writer(current: PendingScenePublication | None, supplied: PendingScenePublication) -> None:
+        if (
+            current is None
+            or current.fencing_token != supplied.fencing_token
+            or current.writer_id != supplied.writer_id
+            or current.expected_generation != supplied.expected_generation
+            or current.expected_scene_revision != supplied.expected_scene_revision
+            or current.target_scene_revision != supplied.target_scene_revision
+            or current.operation != supplied.operation
+        ):
+            raise RuntimeStateConflictError("Scene publication writer was fenced by a newer reservation")
 
     def get_repair(self, job_id: str) -> SceneHeadRepairRecord | None:
         with self.database.transaction() as tx:
@@ -614,6 +965,14 @@ def _revision_number(revision: str | None) -> int:
     return int(match.group("number"))
 
 
+def _revision_name(base_revision: str, number: int) -> str:
+    match = _REVISION_NUMBER.fullmatch(base_revision)
+    if match is None:
+        raise ValueError("scene revision name is not numeric")
+    digits = match.group("number")
+    return f"rev-{number:0{len(digits)}d}"
+
+
 def _head_from_chain(job_id: str, items: list[SceneHeadBackfillItem]) -> SceneHeadRecord:
     by_revision = {item.scene_revision: item for item in items}
     if len(by_revision) != len(items) or not by_revision:
@@ -692,6 +1051,12 @@ def _seal_repair(repair: SceneHeadRepairRecord) -> SceneHeadRepairRecord:
     return repair.model_copy(update={"repair_checksum": canonical_content_checksum(repair, "repair_checksum")})
 
 
+def _seal_publication(publication: PendingScenePublication) -> PendingScenePublication:
+    return publication.model_copy(
+        update={"publication_checksum": canonical_content_checksum(publication, "publication_checksum")}
+    )
+
+
 def _parse_head_row(row: tuple) -> SceneHeadRecord:
     try:
         head = SceneHeadRecord.model_validate_json(row[4])
@@ -733,3 +1098,19 @@ def _parse_item_row(row: tuple) -> SceneHeadBackfillItem:
     if (row[0], row[1], row[2]) != (item.job_id, item.scene_revision, item.item_checksum):
         raise RuntimeStateConflictError("Scene head backfill indexed columns do not match its payload")
     return item
+
+
+def _parse_publication_row(row: tuple) -> PendingScenePublication:
+    try:
+        publication = PendingScenePublication.model_validate_json(row[4])
+        verify_content_checksum(publication, "publication_checksum")
+    except (ValidationError, ValueError) as error:
+        raise RuntimeStateConflictError("Persisted scene publication record is invalid") from error
+    if (row[0], row[1], row[2], row[3]) != (
+        publication.job_id,
+        publication.expected_generation,
+        publication.target_scene_revision,
+        publication.lease_expires_at.isoformat(),
+    ):
+        raise RuntimeStateConflictError("Scene publication indexed columns do not match its payload")
+    return publication

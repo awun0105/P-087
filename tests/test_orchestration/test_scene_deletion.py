@@ -38,6 +38,7 @@ from src.services.orchestration.projects.models import (
     UploadProjectInput,
 )
 from src.services.orchestration.projects.registry import ProjectRegistry
+from src.services.orchestration.scene.heads import SceneHeadRepository
 from src.services.orchestration.uploads import UploadRecord, VideoUploadService
 from src.services.orchestration.uploads import scene_imports as imports_module
 from src.services.orchestration.uploads.scene_imports import ImportService
@@ -294,6 +295,23 @@ def test_scene_deletion_refuses_in_progress_backfill_and_pending_publication(wor
 
     with pytest.raises(DeletionRefusedError, match="publication"):
         _delete(world, project_ids=[project_id])
+
+
+def test_aborted_scene_publication_is_retained_but_does_not_block_trash_restore(world: SimpleNamespace) -> None:
+    project_id, job_id = _scene(world, _upload(world), "Aborted publication")
+    repository = SceneHeadRepository(world.database)
+    reservation = repository.reserve_publication(job_id, None, "publish_initial", writer_id="failed-writer")
+    assert repository.abort_publication(reservation)
+    before = _rows(world)
+
+    entry = _delete(world, project_ids=[project_id])
+    with world.database.transaction() as tx:
+        assert tx.execute("SELECT COUNT(*) FROM r2s_scene_publications WHERE job_id=?", (job_id,)).fetchone() == (0,)
+
+    restore_deletion(world.context, entry, "user-1")
+    assert _rows(world) == before
+    restored = repository.get_publication(job_id)
+    assert restored is not None and restored.status == "ABORTED"
 
 
 def test_restore_keeps_scenes_linked_to_the_upload_after_the_deletion(world: SimpleNamespace) -> None:

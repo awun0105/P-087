@@ -54,6 +54,7 @@ from src.services.orchestration.artifacts.checksum import sha256_file
 from src.services.orchestration.artifacts.remote import RemoteObject, S3ObjectStore
 from src.services.orchestration.jobs.database import LATEST_SCHEMA_VERSION, RuntimeDatabase
 from src.services.orchestration.scene.heads import (
+    PendingScenePublication,
     SceneHeadBackfillItem,
     SceneHeadRecord,
     SceneHeadRepairRecord,
@@ -85,6 +86,7 @@ IMPORT_COLUMNS: dict[str, tuple[str, ...]] = {
     "r2s_scene_heads": ("job_id", "generation", "allocation_sequence", "head_checksum", "payload"),
     "r2s_scene_head_repairs": ("job_id", "status", "generation", "repair_checksum", "payload"),
     "r2s_scene_head_backfill_items": ("job_id", "scene_revision", "item_checksum", "payload"),
+    "r2s_scene_publications": ("job_id", "expected_generation", "target_revision", "lease_expires_at", "payload"),
     "r2s_audit_log": ("entry_id", "at", "user_id", "action", "payload"),
     "r2s_resource_usage": ("usage_id", "job_id", "recorded_at", "payload"),
     "r2s_validation_runs": (
@@ -117,7 +119,6 @@ TRANSIENT_TABLES = (
     "r2s_workers",
     "r2s_resource_waits",
     "r2s_resource_reservations",
-    "r2s_scene_publications",
 )
 TARGET_EMPTY_TABLES = (*IMPORT_ORDER, *TRANSIENT_TABLES, "r2s_trash")
 BUSY_STATUSES = frozenset({"queued", "running", "uploading", "processing", "pending", "waiting"})
@@ -586,7 +587,7 @@ def _validate_row_payloads(rows: Mapping[str, Sequence[tuple[Any, ...]]]) -> lis
 
 
 def _validate_scene_head_rows(rows: Mapping[str, Sequence[tuple[Any, ...]]]) -> None:
-    """Validate typed scene-head state before a package can cross the database boundary."""
+    """Validate scene heads and retain only terminal orphan-publication diagnostics."""
     try:
         for row in rows["r2s_scene_heads"]:
             head = SceneHeadRecord.model_validate_json(row[4])
@@ -608,6 +609,18 @@ def _validate_scene_head_rows(rows: Mapping[str, Sequence[tuple[Any, ...]]]) -> 
             verify_backfill_item(item)
             if tuple(row[:3]) != (item.job_id, item.scene_revision, item.item_checksum):
                 raise PackagePublishError("scene head backfill columns do not match their checksummed payload")
+        for row in rows["r2s_scene_publications"]:
+            publication = PendingScenePublication.model_validate_json(row[4])
+            verify_content_checksum(publication, "publication_checksum")
+            if tuple(row[:4]) != (
+                publication.job_id,
+                publication.expected_generation,
+                publication.target_scene_revision,
+                publication.lease_expires_at.isoformat(),
+            ):
+                raise PackagePublishError("scene publication columns do not match their checksummed payload")
+            if publication.status != "ABORTED":
+                raise PackagePublishError("package contains an active scene publication")
     except PackagePublishError:
         raise
     except (ValidationError, ValueError) as error:

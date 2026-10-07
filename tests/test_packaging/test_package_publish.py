@@ -34,6 +34,7 @@ from src.services.orchestration.artifacts.remote import RemoteObject
 from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.scene.editor import scene_artifact_uri
 from src.services.orchestration.scene.heads import (
+    PendingScenePublication,
     SceneHeadBackfillItem,
     SceneHeadRecord,
     SceneHeadRepairRecord,
@@ -287,6 +288,36 @@ def test_scene_head_and_resumable_repair_cross_package_publish(tmp_path: Path) -
             "INSERT INTO r2s_scene_head_backfill_items(job_id,scene_revision,item_checksum,payload) VALUES (?,?,?,?)",
             (item.job_id, item.scene_revision, item.item_checksum, item.model_dump_json()),
         )
+    publication_draft = PendingScenePublication(
+        schema_version="1.0",
+        job_id="job-a",
+        writer_id="failed-writer",
+        fencing_token="fenced-token",
+        expected_generation=2,
+        expected_scene_revision="rev-001",
+        target_scene_revision="rev-002",
+        operation="test-aborted-publication",
+        payload_checksum=None,
+        artifact_reference=None,
+        lease_expires_at=datetime.now(UTC) + timedelta(minutes=15),
+        status="ABORTED",
+        publication_checksum="sha256:" + "0" * 64,
+    )
+    publication = publication_draft.model_copy(
+        update={"publication_checksum": canonical_content_checksum(publication_draft, "publication_checksum")}
+    )
+    with database.transaction(write=True) as transaction:
+        transaction.execute(
+            "INSERT INTO r2s_scene_publications(job_id,expected_generation,target_revision,lease_expires_at,payload) "
+            "VALUES (?,?,?,?,?)",
+            (
+                publication.job_id,
+                publication.expected_generation,
+                publication.target_scene_revision,
+                publication.lease_expires_at.isoformat(),
+                publication.model_dump_json(),
+            ),
+        )
     package_path = pack(source, tmp_path / "scene-head-publish.zip")
 
     staging = tmp_path / "scene-head-staging"
@@ -295,12 +326,14 @@ def test_scene_head_and_resumable_repair_cross_package_publish(tmp_path: Path) -
     assert len(package.rows["r2s_scene_heads"]) == 1
     assert len(package.rows["r2s_scene_head_repairs"]) == 1
     assert len(package.rows["r2s_scene_head_backfill_items"]) == 1
+    assert len(package.rows["r2s_scene_publications"]) == 1
 
     target = RuntimeDatabase(f"sqlite:///{tmp_path / 'scene-head-target.db'}")
     imported = import_rows(target, package.rows)
     assert imported["r2s_scene_heads"] == 1
     assert imported["r2s_scene_head_repairs"] == 1
     assert imported["r2s_scene_head_backfill_items"] == 1
+    assert imported["r2s_scene_publications"] == 1
     with target.transaction() as transaction:
         assert transaction.execute("SELECT head_checksum FROM r2s_scene_heads").fetchone() == (head.head_checksum,)
         assert transaction.execute("SELECT repair_checksum FROM r2s_scene_head_repairs").fetchone() == (
@@ -309,6 +342,11 @@ def test_scene_head_and_resumable_repair_cross_package_publish(tmp_path: Path) -
         assert transaction.execute("SELECT item_checksum FROM r2s_scene_head_backfill_items").fetchone() == (
             item.item_checksum,
         )
+        restored_publication = PendingScenePublication.model_validate_json(
+            transaction.execute("SELECT payload FROM r2s_scene_publications").fetchone()[0]
+        )
+        assert restored_publication.status == "ABORTED"
+        assert restored_publication.fencing_token == "redacted"
 
     invalid_rows = dict(package.rows)
     head_row = invalid_rows["r2s_scene_heads"][0]

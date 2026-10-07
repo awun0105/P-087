@@ -71,6 +71,7 @@ from src.services.orchestration.projects.persistence import ProjectPersistence
 from src.services.orchestration.projects.preview import load_job_preview
 from src.services.orchestration.projects.privacy import require_project_dispatch
 from src.services.orchestration.scene.editor import SceneEditor
+from src.services.orchestration.scene.heads import SceneHeadRepository
 from src.services.orchestration.storage import artifact_remote
 from src.services.orchestration.uploads.models import UploadRecord
 
@@ -120,7 +121,11 @@ class ProjectRegistry:
         self.execution_profile = execution_profile
         self.store = FilesystemArtifactStore(self.resolver)
         self.lifecycle = JobLifecycle(self.runtime_resolver, self.resolver)
-        self.scene = SceneEditor(fixture_root, self.runtime_resolver)
+        self.scene = SceneEditor(
+            fixture_root,
+            self.runtime_resolver,
+            SceneHeadRepository(database) if database is not None else None,
+        )
         self._fixture_job_id: str | None = None
         self._projects: dict[str, ProjectRecord] = {}
         self._jobs: dict[str, JobManifest] = {}

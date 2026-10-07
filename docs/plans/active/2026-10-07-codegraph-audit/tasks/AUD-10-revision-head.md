@@ -90,8 +90,8 @@ DB transaction across long GPU compute/remote upload. Cached editor state chỉ 
 Tests: two independent registries/processes, same expected head, fault injection
 before/after publish/commit, old writer finishes late, cancelled operation, duplicate
 retry; SQLite and available PostgreSQL locking separately.
-**Exit:** [ ] lost update prevented; [ ] artifact/DB partial failure recoverable;
-[ ] all writers use same commit boundary.
+**Exit:** [x] lost update prevented; [x] artifact/DB partial failure recoverable;
+[x] all SceneIR writers use the same commit boundary.
 
 ## Sprint AUD-10.S3 — O(1) current reads và recovery consumer proof
 
@@ -147,7 +147,76 @@ call-count/packaging matrix pass; PG/remote-provider proof được phân loại
   passed; `.venv/bin/ruff format --check src/ tests/` reported 470 files already
   formatted; `git diff --check` passed.
 - Limits: head/backfill verified locally and through `MemoryObjectStore`; no live
-  S3 provider or PostgreSQL locking proof. `SceneEditor.current()` vẫn dùng legacy
-  recovery đến AUD-10.S3; this sprint adds verified migration and repair state, but
-  does not switch readers/writers before AUD-10.S2.
+  S3 provider or PostgreSQL locking proof. At S1, readers and writers still used
+  the artifact-only path; AUD-10.S2 below replaces it for DB-backed jobs. The
+  standalone no-database seam retains bounded legacy recovery for tests/tools.
 - Next: AUD-10.S2 moves all scene writers to reserve/publish/verify/CAS.
+
+### AUD-10.S2 — Atomic publication protocol
+
+- Base commit: `e04f86c` (`AUD-10.S1`). CodeGraph refreshed after implementation:
+  753 files, 13,582 nodes, 38,871 edges; index up to date. Traced `apply`,
+  `publish_initial`, `publish_next`, `revision`, restore, extraction,
+  `use_boxes`, reobjectify, registry construction, package handoff and deletion.
+- No schema migration was needed: AUD-10.S1 already created
+  `r2s_scene_publications`. `expected_generation` stores the target generation to
+  satisfy the existing positive check. Pending payloads are checksummed and bind
+  base revision, target revision, operation, fencing token, expiry, exact byte
+  checksum/reference and lifecycle status.
+- `SceneHeadRepository` now reserves under a short DB transaction, publishes and
+  verifies artifact bytes outside that transaction, then commits the head and
+  removes the reservation in one CAS transaction. Active duplicate writers
+  conflict; an expired writer is fenced. Failed/cancelled writes leave ABORTED
+  records and immutable orphan bytes; edit retry advances the numeric high-water
+  instead of reusing the URI. A headless initial retry can reuse `rev-001` only
+  when immutable storage confirms exact bytes.
+- `SceneEditor` routes `publish_initial`, `apply`, and `publish_next` through this
+  protocol when a RuntimeDatabase is configured. Restore, object/collider edits,
+  extraction, box selection, reobjectify and physics-enrichment callers reach the
+  same shared methods. Heavy compute remains before reserve. DB-backed reads load
+  only the committed head; pending and headless legacy artifacts are not served.
+  Legacy scenes require the verified `scripts.studio.scene_head --apply` repair.
+- Package handoff preserves checksummed ABORTED publication diagnostics, redacts
+  their unusable fencing token, and rejects active/corrupt rows. Trash/restore
+  preserves ABORTED rows; active or invalid publication payloads still block
+  deletion. Existing artifact bytes and checksum contracts are unchanged.
+- Changed files: `src/services/orchestration/scene/heads.py`,
+  `src/services/orchestration/scene/editor.py`,
+  `src/services/orchestration/scene/identifiers.py`,
+  `src/services/orchestration/projects/registry.py`,
+  `src/services/orchestration/projects/deletion.py`,
+  `scripts/studio/data_package.py`, `scripts/cloud/package_publish.py`,
+  `tests/test_orchestration/test_scene_head.py`,
+  `tests/test_orchestration/test_scene_deletion.py`,
+  `tests/test_packaging/test_package_publish.py`, this task record and plan index.
+- Schema delta: none; AUD-10.S1 migration v12 already owns the publication table.
+  No external artifacts were generated; regression checks verify immutable
+  artifact bytes/references and the production package handoff path.
+- Consumer proof: CodeGraph found 3 `_publish_reserved` call paths and 15
+  `SceneEditor.apply` callers. Extraction, restore, box selection, reobjectify,
+  object/collider edits and physics enrichment publish through the shared editor
+  boundary. Package create/import and trash/restore tests verify publication-row
+  validation, retention and fencing-token redaction.
+- Focused checks: **179 passed, 1 skipped** across scene-head/editor/deletion,
+  package create/import, extraction, objectify queue, simulation package, project
+  registry and scene API tests. The skip is
+  `test_postgres_initial_reservation_has_one_winner`; `R2S_TEST_POSTGRES_URL` is
+  unset. `.venv/bin/ruff check src/ tests/ scripts/studio/scene_head.py
+  scripts/studio/data_package.py scripts/cloud/package_publish.py` passed;
+  `.venv/bin/ruff format --check` reported 471 files already formatted;
+  `git diff --check` passed.
+- CodeGraph after implementation: 753 files, 13,585 nodes, 38,888 edges; index
+  up to date. Final exploration verified `_publish_reserved`,
+  `commit_publication`, and `_scene_revision_uris` plus their callers.
+- Limits: PostgreSQL locking test skips when `R2S_TEST_POSTGRES_URL` is absent.
+  No live S3 provider proof. Publication lease is 15 minutes and has no heartbeat;
+  long artifact uploads can expire, leaving a safe orphan for a later retry.
+- Next: AUD-10.S3 proves bounded current lookup, cross-process freshness,
+  remote checksum failure and long-history recovery/packaging behavior.
+
+- Pre-flight (GUIDE.md Rule 13): CodeGraph read publication/head/editor symbols
+  and consumer callers; impact covers shared SceneEditor publication plus package
+  and deletion boundaries; understood reserve → bind → immutable publish/verify
+  → fenced CAS commit and pending-reader isolation; minimal-code reused the
+  existing v12 records, ArtifactResolver, RuntimeDatabase and SceneEditor; checks
+  are listed above; DevTools: n/a — no UI change.
