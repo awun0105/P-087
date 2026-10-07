@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from src.models.contracts.artifacts import ArtifactRef, Checksum
 from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
 from src.services.orchestration.artifacts import ArtifactResolver
-from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
+from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError, RuntimeTransaction
 from src.services.orchestration.scene.identifiers import scene_artifact_uri
 from src.services.orchestration.scene.models import SceneRevision
 
@@ -448,7 +448,13 @@ class SceneHeadRepository:
             )
         return updated
 
-    def commit_publication(self, pending: PendingScenePublication, revision: SceneRevision) -> SceneHeadRecord:
+    def commit_publication(
+        self,
+        pending: PendingScenePublication,
+        revision: SceneRevision,
+        *,
+        commit_guard: Callable[[RuntimeTransaction], bool] | None = None,
+    ) -> SceneHeadRecord:
         """CAS the verified artifact into the committed head and remove its reservation."""
         if revision.job_id != pending.job_id or revision.scene.scene_revision != pending.target_scene_revision:
             raise RuntimeStateConflictError("Published SceneIR identity does not match its reservation")
@@ -472,6 +478,8 @@ class SceneHeadRepository:
                 raise RuntimeStateConflictError("Scene artifact is not the verified publication bound to this writer")
             if current.lease_expires_at <= datetime.now(UTC):
                 raise RuntimeStateConflictError("Expired scene publication cannot commit")
+            if commit_guard is not None and not commit_guard(tx):
+                raise RuntimeStateConflictError("Operation lease is no longer current; SceneIR publication was fenced")
 
             old_row = tx.execute(
                 "SELECT job_id,generation,allocation_sequence,head_checksum,payload FROM r2s_scene_heads WHERE job_id=?"

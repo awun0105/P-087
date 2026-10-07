@@ -36,7 +36,9 @@ from src.models.contracts.scene import (
     SceneObjectOrigin,
     SceneObjectState,
 )
+from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.projects.registry import ProjectRegistry
+from src.services.orchestration.scene.errors import SceneRevisionConflictError
 from src.services.reconstruction import camera_views, metric_visual_master, package_splat
 from src.services.scene.decomposition import gaussian_split
 from src.services.scene.geometric import GeometricConfig, box_from_points
@@ -345,7 +347,15 @@ def objectify_with_retry(
     raise ObjectifyError(f"tách theo vật lỗi sau {attempts} lần: {last}") from last
 
 
-def reobjectify(registry: ProjectRegistry, job_id: str, settings: Settings, workspace: Path) -> str:
+def reobjectify(
+    registry: ProjectRegistry,
+    job_id: str,
+    settings: Settings,
+    workspace: Path,
+    *,
+    expected_revision: str | None = None,
+    commit_guard: Callable[[RuntimeTransaction], bool] | None = None,
+) -> str:
     """Chạy lại tách theo vật cho job đã có SceneIR; ghi **revision kế tiếp** (không sửa revision cũ).
 
     Dùng để nâng scene dựng bằng đường hộp (ADR 0006) lên scene theo vật mà không dựng lại từ video.
@@ -355,6 +365,13 @@ def reobjectify(registry: ProjectRegistry, job_id: str, settings: Settings, work
     from src.services.orchestration.jobs.stage_views import job_bundle
     from src.services.scene.publisher import with_scene_checksum
 
+    base_scene = registry.scene.current(job_id).scene
+    if expected_revision is None:
+        expected_revision = base_scene.scene_revision
+    if base_scene.scene_revision != expected_revision:
+        raise SceneRevisionConflictError(
+            f"scene đã đổi: yêu cầu đang giữ {expected_revision}, revision hiện tại là {base_scene.scene_revision}"
+        )
     job = registry.get_job(job_id)
     bundle = job_bundle(registry, job)
     if bundle is None:
@@ -367,14 +384,19 @@ def reobjectify(registry: ProjectRegistry, job_id: str, settings: Settings, work
         return store.publish(reference, payload)
 
     result = objectify_with_retry(registry, job, bundle, settings, workspace, publish)
-    current = registry.scene.current(job_id).scene
-    updated = current.model_copy(
+    updated = base_scene.model_copy(
         update={
             "environment": result.environment,
             "objects": result.objects,
-            "provenance": {**current.provenance, **result.provenance, "note": "chạy lại tách theo vật"},
+            "provenance": {**base_scene.provenance, **result.provenance, "note": "chạy lại tách theo vật"},
         }
     )
-    published = registry.scene.publish_next(job_id, current.scene_revision, with_scene_checksum(updated), "objectify")
+    published = registry.scene.publish_next(
+        job_id,
+        expected_revision,
+        with_scene_checksum(updated),
+        "objectify",
+        commit_guard=commit_guard,
+    )
     registry.runtime_resolver.sync_up(job_id)
     return published.revision.scene.scene_revision

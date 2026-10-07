@@ -8,6 +8,7 @@ lần mà vẫn lỗi thì **không tự lùi về hộp**: publish SceneIR ch�
 """
 
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -18,8 +19,10 @@ from src.models.contracts.manifests import JobManifest, StageArtifact, StageId, 
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.models.contracts.scene import SceneObject
 from src.services.orchestration.artifacts import FilesystemArtifactStore
+from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.jobs.progress import metric_confirmation_stage
 from src.services.orchestration.projects.registry import ProjectRegistry
+from src.services.orchestration.scene.errors import SceneRevisionConflictError
 from src.services.orchestration.scene.objectify import AWAITING_CHOICE, ObjectifyError, Publish, objectify_with_retry
 from src.services.orchestration.scene.objectify import METHOD as OBJECTIFY_METHOD
 from src.services.reconstruction import camera_views, confirmation_summary, metric_gaussian_points
@@ -72,6 +75,12 @@ def _sam2_runtime(settings: Settings) -> Sam2Runtime | None:
         settings.product_sam2_checkpoint,
         timeout_seconds=settings.product_scene_timeout_seconds,
     )
+
+
+def box_candidates_require_gpu(settings: Settings) -> bool:
+    """Whether the selected box-candidate path will actually enter SAMPro3D/SAM2."""
+    runtime = _sam2_runtime(settings)
+    return runtime is not None and runtime.available()
 
 
 def _idempotent_publish(registry: ProjectRegistry) -> Publish:
@@ -157,32 +166,52 @@ def extract_scene(
     )
 
 
-def use_boxes(registry: ProjectRegistry, job_id: str, settings: Settings, workspace: Path) -> str:
+def use_boxes(
+    registry: ProjectRegistry,
+    job_id: str,
+    settings: Settings,
+    workspace: Path,
+    *,
+    expected_revision: str | None = None,
+    commit_guard: Callable[[RuntimeTransaction], bool] | None = None,
+) -> str:
     """Người dùng chọn dùng hộp ứng viên: ghi **revision kế tiếp** với vật từ đường hộp, môi trường gốc của bundle.
 
     Vật của revision trước không mang sang (tập hộp mới là ứng viên mới); hoàn tác quay lại được.
     """
     from src.services.orchestration.jobs.stage_views import job_bundle
 
+    base_scene = registry.scene.current(job_id).scene
+    if expected_revision is None:
+        expected_revision = base_scene.scene_revision
+    if base_scene.scene_revision != expected_revision:
+        raise SceneRevisionConflictError(
+            f"scene đã đổi: yêu cầu đang giữ {expected_revision}, revision hiện tại là {base_scene.scene_revision}"
+        )
     job = registry.get_job(job_id)
     bundle = job_bundle(registry, job)
     if bundle is None:
         raise ValueError("job chưa có ReconstructionBundle hệ mét")
     objects, method, note = box_candidates(registry, job, bundle, settings, workspace, _idempotent_publish(registry))
-    current = registry.scene.current(job_id).scene
     fresh = scene_from_bundle(bundle, objects, {})
-    objects = bind_source_collision_ownership(objects, fresh.environment.geometry_ref, current.scene_revision)
-    updated = current.model_copy(
+    objects = bind_source_collision_ownership(objects, fresh.environment.geometry_ref, expected_revision)
+    updated = base_scene.model_copy(
         update={
             "environment": fresh.environment,
             "objects": objects,
             "provenance": {
-                "bundle_checksum": current.provenance.get("bundle_checksum"),
+                "bundle_checksum": base_scene.provenance.get("bundle_checksum"),
                 "object_extraction": method,
                 "note": f"người dùng chọn dùng hộp ứng viên. {note}".strip(),
             },
         }
     )
-    published = registry.scene.publish_next(job_id, current.scene_revision, with_scene_checksum(updated), "use_boxes")
+    published = registry.scene.publish_next(
+        job_id,
+        expected_revision,
+        with_scene_checksum(updated),
+        "use_boxes",
+        commit_guard=commit_guard,
+    )
     registry.runtime_resolver.sync_up(job_id)
     return published.revision.scene.scene_revision

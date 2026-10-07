@@ -7,6 +7,7 @@ Vì vậy editor không sửa `SceneIR` tại chỗ — nó dựng revision kế
 
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -23,7 +24,7 @@ from src.services.orchestration.artifacts import (
     sha256_file,
     with_canonical_checksum,
 )
-from src.services.orchestration.jobs.database import RuntimeStateConflictError
+from src.services.orchestration.jobs.database import RuntimeStateConflictError, RuntimeTransaction
 from src.services.orchestration.scene.errors import (
     SceneEditRejectedError,
     SceneNotAvailableError,
@@ -286,7 +287,15 @@ class SceneEditor:
                 return None
             revision = current.supersedes_revision
 
-    def publish_next(self, job_id: str, expected_revision: str, scene: SceneIR, operation: str) -> SceneEditResult:
+    def publish_next(
+        self,
+        job_id: str,
+        expected_revision: str,
+        scene: SceneIR,
+        operation: str,
+        *,
+        commit_guard: Callable[[RuntimeTransaction], bool] | None = None,
+    ) -> SceneEditResult:
         """Publish an EX-SCENE operation at the next reserved immutable revision.
 
         Optimistic concurrency rejects a stale client before it can publish an artifact.
@@ -312,8 +321,11 @@ class SceneEditor:
                 operation,
                 supersedes=current.scene_revision,
                 record_operation=True,
+                commit_guard=commit_guard,
             )
         else:
+            if commit_guard is not None:
+                raise SceneEditRejectedError("Fenced scene operations require a database-backed scene head")
             revision = self._publish(
                 job_id, with_canonical_checksum(draft, "scene_ir_checksum"), supersedes=current.scene_revision
             )
@@ -474,6 +486,7 @@ class SceneEditor:
         *,
         supersedes: str | None,
         record_operation: bool,
+        commit_guard: Callable[[RuntimeTransaction], bool] | None = None,
     ) -> SceneRevision:
         """Reserve, publish, verify, and atomically commit one immutable revision."""
         assert self.head_repository is not None
@@ -510,7 +523,10 @@ class SceneEditor:
             if revision is None or revision.scene_reference != reference:
                 raise SceneEditRejectedError("Published SceneIR failed exact-reference verification")
             published = self.head_repository.mark_published(pending)
-            self.head_repository.commit_publication(published, revision)
+            if commit_guard is None:
+                self.head_repository.commit_publication(published, revision)
+            else:
+                self.head_repository.commit_publication(published, revision, commit_guard=commit_guard)
             self._revisions[job_id] = revision
             return revision
         except BaseException as error:

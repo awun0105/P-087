@@ -86,7 +86,71 @@ recovery dựa token/expiry, không hủy healthy same-host worker do startup.
 Tests: user edits during compute; two workers same host; expired lease completes
 late; worker restart; insufficient resource waiting; no geometry publish commit
 on stale base; diagnostics retained.
-**Exit:** [ ] lost-update regression blocked; [ ] one valid current owner commits.
+**Exit:** [x] lost-update regression blocked; [x] one valid current owner commits.
+
+### Result / Evidence — AUD-07.S2
+
+- Base commit: `1882e7f` (`AUD-07.S1`). Before editing, CodeGraph traced
+  `process_next`/`_claim`/recovery, operation admission, job-bundle resolution,
+  `reobjectify`/`use_boxes`, and the `SceneEditor` → `SceneHeadRepository`
+  publication path. CLI `codegraph sync` completed with “Already up to date”; the
+  MCP still warns auto-sync is disabled because the OS file-watch limit is
+  exhausted. Final `codegraph_explore` returned the current changed source and
+  callers. No active lock was removed.
+- Behavior before/after: the worker claimed and ran objectify without shared
+  resource admission, recovery could fail a healthy same-host operation based on
+  age, and both objectify modes read the latest SceneIR after computation. Now
+  the worker freezes job/bundle/base-scene input and mode/runtime-config
+  checksums at request time, admits through the same reservation table as jobs,
+  and publishes only from the requested revision under both lease and
+  reservation fencing.
+- Queue contract: each attempt has a monotonic generation, random lease token,
+  owner process identity, heartbeat and a 90-second expiry refreshed every 20
+  seconds. New requests preserve the previous generation. Recovery uses expiry;
+  an expired but still-computing worker continues heartbeating its resource
+  reservation until it exits, while the atomic publication guard rejects its
+  expired queue token. Old JSON rows remain readable; legacy `running` rows use
+  the prior three-hour stale bound. There is no SQL schema migration.
+- Input/config binding: `input_checksum` includes job ID, requested base revision,
+  base `scene_ir_checksum`, and serialized `ReconstructionBundle`; it is
+  recomputed after worker sync-down and a mismatch fails closed. The config
+  checksum binds selected mode, job runtime-manifest checksum, objectify retry
+  count, and scene timeout without storing machine-local paths. Deployment
+  manifests must be updated when model/runtime identity changes; checkpoint
+  bytes are not independently hashed by this queue contract.
+- Admission/wait behavior: the operation adapter reuses the existing finalize
+  resource estimator. Unknown demand/headroom remains a resource wait. CPU-only
+  box extraction does not reserve VRAM; SAMPro3D/SAM2 boxes and reobjectify do.
+  A wait requeues the same operation with the same input/config checksum and
+  returns a redacted `resource_wait` snapshot through `ObjectifyState`; no lease
+  token or worker identity reaches the API. The TypeScript API contract was
+  updated; no visual component behavior changed.
+- Publication fencing: `reobjectify` and `use_boxes` capture the base scene
+  before geometry work and pass its revision through to `publish_next`. The
+  SceneHead CAS transaction also locks and validates the queue token/generation,
+  expiry and matching resource reservation before moving the committed head.
+  A user edit or stale lease therefore leaves the current head untouched;
+  already-published immutable geometry/scene artifacts remain available as
+  orphaned diagnostics and are not silently deleted.
+- Changed code/tests: `admission.py`, `objectify_queue.py`, `objectify.py`,
+  `extraction.py`, `editor.py`, `heads.py`, the `ObjectifyState` TypeScript
+  contract, and focused resource-admission/objectify-queue tests. Additive JSON
+  payload fields preserve old reservation and queue records; no artifact format
+  changed.
+- Focused checks: **123 passed, 5 skipped** across resource admission, objectify
+  queue, SceneEditor, scene-head, runtime-migration, and preview-cancellation
+  suites. `.venv/bin/ruff check src/ tests/` passed;
+  `.venv/bin/ruff format --check src/ tests/` passed for 468 files;
+  `npm run typecheck` passed; `git diff --check` passed. PostgreSQL contention,
+  GPU/resource smoke and real long-running worker recovery were not exercised.
+- PostgreSQL skips: one scene-head locking test and four runtime-migration tests;
+  all require `R2S_TEST_POSTGRES_URL`, which is not configured.
+- Browser gate: n/a under GUIDE.md Rule 13 because this sprint changed only the
+  frontend API type, not rendered UI. A Chrome DevTools MCP page-list probe
+  returned “browser is already running”; no visual/browser acceptance is claimed.
+- Next: AUD-07.S3 adds cancellation/process cleanup and validates real consumer
+  contention. Its multi-operation proof must include old-owner release after a
+  newer lease exists and kill/reap before resources are freed.
 
 ## Sprint AUD-07.S3 — Cancellation và multi-operation resource proof
 

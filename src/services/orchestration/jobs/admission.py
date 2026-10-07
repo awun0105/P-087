@@ -113,6 +113,8 @@ class Reservation(BaseModel):
     parent_id: str | None = Field(default=None, min_length=1)
     input_checksum: Checksum | None = None
     config_checksum: Checksum | None = None
+    lease_token: str | None = Field(default=None, min_length=1)
+    lease_generation: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def _identity(self) -> Reservation:
@@ -131,6 +133,10 @@ class Reservation(BaseModel):
             raise ValueError("operation reservation is missing identity or checksum fields")
         if not is_operation and any(value is not None for value in operation_fields):
             raise ValueError("job reservation cannot contain operation identity fields")
+        if (self.lease_token is None) != (self.lease_generation is None):
+            raise ValueError("operation lease token and generation must be provided together")
+        if not is_operation and (self.lease_token is not None or self.lease_generation is not None):
+            raise ValueError("job reservation cannot contain operation lease fields")
         return self
 
 
@@ -140,7 +146,7 @@ class OperationResourceProfile(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     required_gb: dict[Resource, float | None]
-    danger_ratio: float = Field(gt=0, le=1, allow_inf_nan=False)
+    danger_ratio: float | None = Field(default=None, gt=0, le=1, allow_inf_nan=False)
     measured: bool
     gpu_required: bool = True
 
@@ -168,6 +174,9 @@ class OperationAdmissionRequest(BaseModel):
     config_checksum: Checksum
     resources: OperationResourceProfile
     requested_gpu_uuid: str | None = None
+    #: Per-attempt fencing pair. None remains valid for legacy/direct callers.
+    lease_token: str | None = Field(default=None, min_length=1)
+    lease_generation: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def _request_contract(self) -> OperationAdmissionRequest:
@@ -177,6 +186,8 @@ class OperationAdmissionRequest(BaseModel):
             raise ValueError(f"{self.operation_kind} operation must bind {article} {expected_parent} parent")
         if self.requested_gpu_uuid is not None and not self.resources.gpu_required:
             raise ValueError("CPU-only operation cannot request GPU affinity")
+        if (self.lease_token is None) != (self.lease_generation is None):
+            raise ValueError("operation lease token and generation must be provided together")
         return self
 
 
@@ -360,6 +371,31 @@ class ResourceAdmission:
         }
         return Demand(required_gb=required, danger_ratio=presets.resource_model.danger_ratio, measured=True)
 
+    def operation_profile_for_job(self, job: JobManifest, *, gpu_required: bool) -> OperationResourceProfile:
+        """Use the job's existing finalize resource model for a heavy scene operation.
+
+        A missing estimate stays explicitly unknown. CPU-only operations keep their
+        RAM/disk checks while declaring zero VRAM demand.
+        """
+        gpu = bound_gpu()
+        demand = self._demand(job, "finalize", gpu.name if gpu is not None else None)
+        if demand is None:
+            return OperationResourceProfile(
+                required_gb={"vram": None if gpu_required else 0.0, "ram": None, "disk": None},
+                danger_ratio=None,
+                measured=False,
+                gpu_required=gpu_required,
+            )
+        required = dict(demand.required_gb)
+        if not gpu_required:
+            required["vram"] = 0.0
+        return OperationResourceProfile(
+            required_gb=required,
+            danger_ratio=demand.danger_ratio,
+            measured=demand.measured,
+            gpu_required=gpu_required,
+        )
+
     # --- Giữ chỗ -------------------------------------------------------------
 
     def _lock(self, tx: RuntimeTransaction) -> None:
@@ -438,6 +474,8 @@ class ResourceAdmission:
             parent_id=operation.parent_id if operation is not None else None,
             input_checksum=operation.input_checksum if operation is not None else None,
             config_checksum=operation.config_checksum if operation is not None else None,
+            lease_token=operation.lease_token if operation is not None else None,
+            lease_generation=operation.lease_generation if operation is not None else None,
         )
         tx.execute(
             "INSERT INTO r2s_resource_reservations(worker_id,payload) VALUES (?,?) "
@@ -453,6 +491,8 @@ class ResourceAdmission:
                         "parent_id",
                         "input_checksum",
                         "config_checksum",
+                        "lease_token",
+                        "lease_generation",
                     }
                     if job_id is not None
                     else None
@@ -487,6 +527,43 @@ class ResourceAdmission:
                 "UPDATE r2s_resource_reservations SET payload=? WHERE worker_id=?",
                 (reservation.model_dump_json(), self.worker_id),
             )
+
+    def touch_operation(self, request: OperationAdmissionRequest) -> bool:
+        """Heartbeat only the reservation owned by this exact operation lease."""
+        try:
+            with self.database.transaction(write=True) as tx:
+                row = tx.execute(
+                    "SELECT payload FROM r2s_resource_reservations WHERE worker_id=?", (self.worker_id,)
+                ).fetchone()
+                if row is None:
+                    return False
+                reservation = Reservation.model_validate_json(row[0])
+                if not self._same_operation_lease(reservation, request):
+                    return False
+                touched = reservation.model_copy(update={"heartbeat_at": datetime.now(UTC)})
+                tx.execute(
+                    "UPDATE r2s_resource_reservations SET payload=? WHERE worker_id=?",
+                    (touched.model_dump_json(), self.worker_id),
+                )
+                return True
+        except Exception as error:  # noqa: BLE001 - missed heartbeats are fenced by the lease and TTL
+            logger.warning(
+                "Operation reservation heartbeat lỗi operation=%s cause=%s",
+                request.operation_id,
+                type(error).__name__,
+            )
+            return False
+
+    def operation_lease_is_current(self, tx: RuntimeTransaction, request: OperationAdmissionRequest) -> bool:
+        """Check the exact reservation from the scene-head commit transaction."""
+        row = tx.execute(
+            "SELECT payload FROM r2s_resource_reservations WHERE worker_id=?" + tx.lock_suffix(),
+            (self.worker_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        reservation = Reservation.model_validate_json(row[0])
+        return self._same_operation_lease(reservation, request)
 
     def machine_idle(self) -> bool:
         """Pipeline không dùng máy này: worker không có tiến trình con, không ai giữ chỗ ở đây.
@@ -573,7 +650,8 @@ class ResourceAdmission:
                 continue
             have = available[name]
             need = demand.required_gb[name]
-            if need is None:
+            danger_ratio = demand.danger_ratio
+            if need is None or danger_ratio is None:
                 waiting.append(name)
                 reasons[name] = "unmeasured"
                 continue
@@ -586,12 +664,12 @@ class ResourceAdmission:
                     continue
                 if not strict_unknown:
                     continue
-            if have is not None and need < have * demand.danger_ratio:
+            if have is not None and need < have * danger_ratio:
                 continue
             waiting.append(name)
             if have is None:
                 reasons[name] = "unmeasured"
-            elif total[name] is not None and need >= total[name] * demand.danger_ratio:
+            elif total[name] is not None and need >= total[name] * danger_ratio:
                 reasons[name] = "exceeds_machine"
             else:
                 reasons[name] = "busy" if sharing[name] else "external"
@@ -657,6 +735,14 @@ class ResourceAdmission:
             and reservation.parent_id == request.parent_id
             and reservation.input_checksum == request.input_checksum
             and reservation.config_checksum == request.config_checksum
+        )
+
+    @staticmethod
+    def _same_operation_lease(reservation: Reservation, request: OperationAdmissionRequest) -> bool:
+        return (
+            ResourceAdmission._same_operation_identity(reservation, request)
+            and reservation.lease_token == request.lease_token
+            and reservation.lease_generation == request.lease_generation
         )
 
     @staticmethod
@@ -807,7 +893,7 @@ class ResourceAdmission:
                     self._reserved = False
                     return True
                 reservation = Reservation.model_validate_json(row[0])
-                if not self._same_operation_identity(reservation, request):
+                if not self._same_operation_lease(reservation, request):
                     return False
                 tx.execute("DELETE FROM r2s_resource_reservations WHERE worker_id=?", (self.worker_id,))
                 self._reserved = False

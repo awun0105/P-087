@@ -621,6 +621,25 @@ def test_duplicate_operation_admission_is_fenced_and_release_is_idempotent(
     assert _reservations(gate) == {}
 
 
+def test_expired_operation_lease_cannot_touch_or_release_new_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, _, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+    old = _operation_request().model_copy(update={"lease_token": "old-lease", "lease_generation": 1})
+    current = _operation_request().model_copy(update={"lease_token": "new-lease", "lease_generation": 2})
+
+    assert gate.admit_operation(old).status == "admitted"
+    assert gate.release_operation(old)
+    assert gate.admit_operation(current).status == "admitted"
+    assert not gate.touch_operation(old)
+    assert not gate.release_operation(old)
+    reservations = _reservations(gate)
+    assert len(reservations) == 1
+    assert next(iter(reservations.values())).lease_token == "new-lease"
+    assert gate.release_operation(current)
+
+
 def test_operation_waits_when_requested_gpu_affinity_does_not_match_worker(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

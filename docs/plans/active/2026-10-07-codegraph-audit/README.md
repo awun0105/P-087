@@ -7,10 +7,11 @@ Date: 2026-10-07
 Active — implementation đang diễn ra trên branch
 `docs/codegraph-audit-implementation-plan`, khởi tạo từ `develop@ef3a421`.
 Đã commit: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3,
-AUD-03.S1–S3, AUD-04.S1–S3, AUD-10.S1–S3 và AUD-07.S1. Browser DevTools MCP
+AUD-03.S1–S3, AUD-04.S1–S3, AUD-10.S1–S3 và AUD-07.S1. AUD-07.S2 đã hoàn tất
+và nằm trong sprint commit hiện tại. Browser DevTools MCP
 gate của AUD-03.S3 vẫn UNVERIFIED; PostgreSQL proof của AUD-04.S3 chưa chạy vì thiếu
-`R2S_TEST_POSTGRES_URL`. AUD-07.S1 hiện hoàn thành, 100 passed/4 PostgreSQL
-skips; sprint kế tiếp theo dependency order là AUD-07.S2.
+`R2S_TEST_POSTGRES_URL`. AUD-07.S1 đã hoàn thành; AUD-07.S2 proof đang ghi task
+record. Sprint kế tiếp theo dependency order là AUD-07.S3.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -217,7 +218,8 @@ AUD-19. Static-map consumer chỉ enable sau registration QA, không bắt AUD-1
 đợi whole AUD-12 epic. Sensor calibration QA và map registration QA không tráo nhau.
 
 Progress hiện tại: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3,
-AUD-03.S1–S3, AUD-04.S1–S3 và AUD-10.S1–S3 đã được commit riêng theo sprint.
+AUD-03.S1–S3, AUD-04.S1–S3, AUD-10.S1–S3 và AUD-07.S1–S2 đã được commit riêng
+theo sprint.
 AUD-01.S3 verified legacy
 ownership recovery, candidate ZIP/manifest, current rotated object pose,
 retained floor collision, relative USD asset composition, và bất biến bytes của

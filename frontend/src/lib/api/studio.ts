@@ -452,6 +452,19 @@ export function restoreSceneRevision(
 
 export type ObjectifyMode = "objectify" | "boxes";
 
+export type OperationResource = "vram" | "ram" | "disk";
+export type OperationWaitReason = "busy" | "external" | "exceeds_machine" | "unmeasured";
+
+export interface ObjectifyResourceWait {
+  status: "waiting_resources" | "waiting_gpu_affinity" | "worker_busy" | "identity_conflict";
+  required_gb: Record<OperationResource, number | null>;
+  available_gb: Record<OperationResource, number | null>;
+  capacity_gb: Record<OperationResource, number | null>;
+  waiting_on: OperationResource[];
+  reasons: Partial<Record<OperationResource, OperationWaitReason>>;
+  needs_exclusive_gpu: boolean;
+}
+
 /** Trạng thái tách theo vật của scene + yêu cầu dựng lại gần nhất (worker thực hiện). */
 export interface ObjectifyState {
   status: "idle" | "queued" | "running" | "done" | "failed";
@@ -465,6 +478,8 @@ export interface ObjectifyState {
   base_revision: string | null;
   result_revision: string | null;
   error: string | null;
+  /** Snapshot tài nguyên khiến request vẫn queued; không chứa worker identity/lease token. */
+  resource_wait: ObjectifyResourceWait | null;
 }
 
 export function getObjectifyState(jobId: string, signal?: AbortSignal): Promise<ObjectifyState> {

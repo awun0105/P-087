@@ -4,7 +4,9 @@ Fixture proof: provider GPU được thay bằng hàm giả; chỉ chứng minh 
 chất lượng tách vật.
 """
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -35,8 +37,33 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
         product_scene_runtime_python=python,
         product_sam2_checkpoint=checkpoint,
         product_worker_root=tmp_path / "workers",
-        database_url=f"sqlite:///{tmp_path / 'requests.db'}",
+        database_url=f"sqlite:///{tmp_path / 'runtime.db'}",
     )
+
+    def enough_resources(_self, _job, *, gpu_required):  # noqa: ANN001, ANN202
+        from src.services.orchestration.jobs.admission import OperationResourceProfile
+
+        return OperationResourceProfile(
+            required_gb={"vram": 0.1 if gpu_required else 0.0, "ram": 0.1, "disk": 0.1},
+            danger_ratio=0.9,
+            measured=True,
+            gpu_required=gpu_required,
+        )
+
+    monkeypatch.setattr(scene_objectify_queue.ResourceAdmission, "operation_profile_for_job", enough_resources)
+    monkeypatch.setattr(
+        scene_objectify_queue.ResourceAdmission,
+        "_resource_snapshot",
+        lambda _: (
+            {"vram": 8.0, "ram": 64.0, "disk": 1000.0},
+            {"vram": 8.0, "ram": 64.0, "disk": 1000.0},
+        ),
+    )
+    monkeypatch.setattr(
+        "src.services.orchestration.jobs.admission.bound_gpu",
+        lambda: SimpleNamespace(uuid="GPU-test", name="test GPU"),
+    )
+    monkeypatch.setattr(scene_objectify_queue, "box_candidates_require_gpu", lambda _: True)
     monkeypatch.setattr(scene_objectify_queue, "job_bundle", lambda *_: bundle)
     return registry, job, bundle, settings
 
@@ -146,14 +173,12 @@ def test_request_rejects_stale_revision_and_missing_runtime(world, monkeypatch, 
 
 
 def test_worker_restart_marks_only_orphaned_requests_failed(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
-    from datetime import timedelta
-
     registry, job, bundle, settings = world
     monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
     extract_scene(registry, job, bundle, settings, tmp_path / "work")
     scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "objectify")
 
-    def crash(*_: object) -> None:
+    def crash(*_: object, **__: object) -> None:
         raise KeyboardInterrupt
 
     monkeypatch.setattr(scene_objectify_queue, "reobjectify", crash)
@@ -161,11 +186,14 @@ def test_worker_restart_marks_only_orphaned_requests_failed(world, monkeypatch, 
         scene_objectify_queue.process_next(registry, settings)
     assert scene_objectify_queue.state(registry, settings, job.job_id).status == "running"
 
-    # Worker cùng nhóm khởi động lệch vài giây, hoặc worker ở máy khác: không được huỷ việc đang chạy.
+    # Worker lease còn hạn không bị scan cùng host huỷ.
     assert scene_objectify_queue.recover_interrupted(settings) == 0
-    monkeypatch.setattr(scene_objectify_queue, "_OWN_HOST_GRACE", timedelta(0))
-    assert scene_objectify_queue.recover_interrupted(settings, host="may-khac") == 0
-    # Chính máy đã nhận yêu cầu khởi động lại sau khi chết: yêu cầu mồ côi → lỗi, người dùng chạy lại được.
+    with scene_objectify_queue._database(settings).transaction(write=True) as tx:
+        record = scene_objectify_queue._read(tx, job.job_id, lock=True)
+        assert record is not None
+        expired = record.model_copy(update={"lease_expires_at": datetime.now(UTC) - timedelta(seconds=1)})
+        scene_objectify_queue._write(tx, job.job_id, expired)
+    # Recovery chỉ thu hồi lease đã hết hạn; token cũ sẽ bị fencing kể cả worker còn sống.
     assert scene_objectify_queue.recover_interrupted(settings) == 1
     assert scene_objectify_queue.state(registry, settings, job.job_id).status == "failed"
     assert scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "boxes").status == "queued"
@@ -179,6 +207,162 @@ def test_second_worker_cannot_claim_a_request_already_taken(world, monkeypatch, 
 
     assert scene_objectify_queue._claim(settings) is not None
     assert scene_objectify_queue._claim(settings) is None
+
+
+def test_two_workers_on_same_host_atomically_claim_only_once(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    from concurrent.futures import ThreadPoolExecutor
+
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "work")
+    scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "boxes")
+    worker_ids = iter(("same-host:worker-a", "same-host:worker-b"))
+    monkeypatch.setattr(
+        scene_objectify_queue,
+        "worker_identity",
+        lambda: (next(worker_ids), "same-host", 12345),
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        claims = list(pool.map(lambda _: scene_objectify_queue._claim(settings), range(2)))
+
+    assert sum(claim is not None for claim in claims) == 1
+
+
+def test_resource_wait_keeps_request_checksums_and_does_not_start_geometry(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    from src.services.orchestration.jobs.admission import OperationResourceProfile
+
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "work")
+    queued = scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "boxes")
+    with scene_objectify_queue._database(settings).transaction() as tx:
+        before = scene_objectify_queue._read(tx, job.job_id)
+    calls: list[str] = []
+    monkeypatch.setattr(scene_objectify_queue, "use_boxes", lambda *args, **kwargs: calls.append("boxes"))
+    monkeypatch.setattr(
+        scene_objectify_queue.ResourceAdmission,
+        "operation_profile_for_job",
+        lambda _self, _job, *, gpu_required: OperationResourceProfile(
+            required_gb={"vram": None, "ram": None, "disk": None},
+            danger_ratio=None,
+            measured=False,
+            gpu_required=gpu_required,
+        ),
+    )
+
+    assert scene_objectify_queue.process_next(registry, settings) is False
+
+    with scene_objectify_queue._database(settings).transaction() as tx:
+        after = scene_objectify_queue._read(tx, job.job_id)
+    assert before is not None and after is not None
+    assert after.status == "queued" and after.resource_wait is not None
+    assert after.resource_wait.status == "waiting_resources"
+    assert after.resource_wait.waiting_on == ["vram", "ram", "disk"]
+    assert (after.operation_id, after.input_checksum, after.config_checksum) == (
+        before.operation_id,
+        before.input_checksum,
+        before.config_checksum,
+    )
+    assert queued.base_revision == after.base_revision == "rev-001"
+    assert calls == []
+
+
+def test_worker_rejects_runtime_config_changed_after_request(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "work")
+    scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "boxes")
+    changed = settings.model_copy(update={"product_scene_timeout_seconds": settings.product_scene_timeout_seconds + 1})
+    calls: list[str] = []
+    monkeypatch.setattr(scene_objectify_queue, "use_boxes", lambda *args, **kwargs: calls.append("boxes"))
+
+    assert scene_objectify_queue.process_next(registry, changed) is True
+
+    result = scene_objectify_queue.state(registry, settings, job.job_id)
+    assert result.status == "failed"
+    assert "configuration changed" in (result.error or "")
+    assert registry.scene.current(job.job_id).scene.scene_revision == "rev-001"
+    assert calls == []
+
+
+def test_user_edit_while_boxes_compute_wins_over_stale_operation(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "work")
+    monkeypatch.setattr(scene_extraction, "_sam2_runtime", lambda _: None)
+    monkeypatch.setattr(scene_objectify_queue, "box_candidates_require_gpu", lambda _: False)
+    monkeypatch.setattr("src.services.orchestration.jobs.stage_views.job_bundle", lambda *_: bundle)
+    scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "boxes")
+
+    def edit_during_geometry(_registry, _job, _bundle, _settings, _workspace, _publish):  # noqa: ANN001, ANN202
+        current = registry.scene.current(job.job_id).scene
+        registry.scene.publish_next(
+            job.job_id,
+            "rev-001",
+            current.model_copy(update={"provenance": {**current.provenance, "user_edit": "kept"}}),
+            "user_edit",
+        )
+        return [], "geometric_voxel_components_v1", "mock geometry"
+
+    monkeypatch.setattr(scene_extraction, "box_candidates", edit_during_geometry)
+    assert scene_objectify_queue.process_next(registry, settings) is True
+
+    current = registry.scene.current(job.job_id).scene
+    result = scene_objectify_queue.state(registry, settings, job.job_id)
+    assert current.scene_revision == "rev-002"
+    assert current.provenance["user_edit"] == "kept"
+    assert result.status == "failed" and "đã đổi" in (result.error or "")
+
+
+def test_expired_lease_late_worker_cannot_commit_or_overwrite_new_attempt(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "work")
+    scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "boxes")
+    claimed = scene_objectify_queue._claim(settings)
+    assert claimed is not None
+    job_id, old_lease = claimed
+
+    with scene_objectify_queue._database(settings).transaction(write=True) as tx:
+        current = scene_objectify_queue._read(tx, job_id, lock=True)
+        assert current is not None
+        scene_objectify_queue._write(
+            tx,
+            job_id,
+            current.model_copy(update={"lease_expires_at": datetime.now(UTC) - timedelta(seconds=1)}),
+        )
+    assert scene_objectify_queue.recover_interrupted(settings) == 1
+
+    scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "boxes")
+    second_claim = scene_objectify_queue._claim(settings)
+    assert second_claim is not None
+    _, new_lease = second_claim
+    assert new_lease.lease_generation == old_lease.lease_generation + 1
+    assert new_lease.lease_token != old_lease.lease_token
+
+    old_guard = lambda tx: scene_objectify_queue._lease_is_current(  # noqa: E731
+        tx, job_id, old_lease.lease_token or "", old_lease.lease_generation
+    )
+    current_scene = registry.scene.current(job.job_id).scene
+    with pytest.raises(SceneRevisionConflictError):
+        registry.scene.publish_next(
+            job.job_id,
+            "rev-001",
+            current_scene.model_copy(update={"provenance": {**current_scene.provenance, "late": True}}),
+            "late_objectify",
+            commit_guard=old_guard,
+        )
+    assert not scene_objectify_queue._finish(
+        settings,
+        job_id,
+        old_lease,
+        {"status": "done", "result_revision": "rev-002"},
+    )
+    assert registry.scene.current(job.job_id).scene.scene_revision == "rev-001"
+    with scene_objectify_queue._database(settings).transaction() as tx:
+        latest = scene_objectify_queue._read(tx, job_id)
+    assert latest is not None and latest.status == "running" and latest.lease_token == new_lease.lease_token
 
 
 def test_api_and_worker_on_different_machines_share_requests_and_revisions(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
@@ -196,7 +380,10 @@ def test_api_and_worker_on_different_machines_share_requests_and_revisions(world
 
     # "Máy API": đĩa trống, không có runtime GPU, không thấy workspace của worker.
     api_resolver = ArtifactResolver(tmp_path / "api-disk", remote)
-    api_scene = SceneEditor(worker_registry.scene.fixture_scene_path.parents[1], api_resolver)
+    from src.services.orchestration.scene.heads import SceneHeadRepository
+
+    head_repository = SceneHeadRepository(worker_registry.persistence.database)
+    api_scene = SceneEditor(worker_registry.scene.fixture_scene_path.parents[1], api_resolver, head_repository)
     api_settings = settings.model_copy(
         update={
             "product_scene_runtime_python": None,
@@ -210,10 +397,13 @@ def test_api_and_worker_on_different_machines_share_requests_and_revisions(world
     assert queued.status == "queued" and queued.available
 
     # "Máy worker": nhận yêu cầu từ DB, dựng hộp, đẩy revision mới lên kho file.
-    worker_scene = SceneEditor(api_scene.fixture_scene_path.parents[1], worker_registry.runtime_resolver)
+    worker_scene = SceneEditor(
+        api_scene.fixture_scene_path.parents[1], worker_registry.runtime_resolver, head_repository
+    )
     monkeypatch.setattr(worker_registry, "scene", worker_scene)
     monkeypatch.setattr(scene_extraction, "_sam2_runtime", lambda _: None)
     monkeypatch.setattr("src.services.orchestration.jobs.stage_views.job_bundle", lambda *_: bundle)
+    monkeypatch.setattr(scene_objectify_queue, "box_candidates_require_gpu", lambda _: False)
     assert scene_objectify_queue.process_next(worker_registry, settings) is True
 
     # API thấy kết quả mà không cần chung đĩa hay khởi động lại.
