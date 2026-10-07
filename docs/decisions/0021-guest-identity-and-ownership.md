@@ -4,8 +4,8 @@ Date: 2026-10-07
 
 ## Status
 
-Proposed — product behavior được owner chỉ đạo; technical schema/migration cần
-chốt trong sprint S1. Chưa implement hoặc runtime-qualified.
+Proposed — owner đã chỉ đạo product behavior; AUD-21.S1 đã chốt ownership và
+migration contract từ source inventory. Chưa implement hoặc runtime-qualified.
 
 ## Context và Decision đề xuất
 
@@ -21,7 +21,24 @@ Legacy owner thiếu thì Guest không mutate. Backend guard toàn bộ mutation
 paths; frontend capabilities chỉ UX. Seed Reviewer “Minh An”, Editor “Hà Linh”
 được áp dụng có định danh, giữ credentials/IDs/roles và không tạo seed mới.
 
-Schema defaults/read compatibility phải chốt S1; không rewrite checksum artifacts cũ.
+Schema/default/read compatibility: `user_id` bất biến là owner; `Actor.role` và tên
+là snapshot hiển thị. Project owner nằm ở `ProjectRecord.created_by.user_id`, upload
+owner ở `uploaded_by.user_id`, import owner ở `created_by`; mỗi job lưu
+`owner_user_id` trên authoritative `r2s_jobs` row trong transaction tạo job, không
+đưa vào checksum-bound `JobManifest`. Job owner độc lập với project owner và actor
+của lần retry. Field nullable cho auth-disabled/legacy records; backfill chỉ từ
+creator ID đã lưu, không đoán bằng tên/email/parent/requester. Guest chỉ đọc được
+legacy resource có owner unknown; Editor/Reviewer giữ quyền can thiệp.
+
+Guest chỉ sửa resource mình sở hữu; parent và mọi source/descendant thực sự bị
+ghi/xóa cũng phải qua policy. Project cascade bị từ chối nguyên tử nếu Guest không
+sở hữu bất kỳ descendant nào. Derived artifacts giữ owner của root job/import;
+operator hoặc người đưa vào trash không nhận quyền sở hữu. Các API/service/worker
+guard dùng server user hiện tại và resource mapping; snapshot role/client claim
+không cấp quyền. Forward migration additive trên SQLite/PostgreSQL, không rewrite
+artifact checksum hoặc reset DB. Open signup chỉ enable sau khi S3 ownership
+guards đã phủ mọi mutation ingress.
+
 Self-demotion Reviewer tới Guest cũng phải bị chặn. Alternative chỉ thêm role rank
 hoặc ẩn button không bảo vệ ownership; invitation-only bỏ mất requested public signup.
 
@@ -34,4 +51,5 @@ Không reset DB, rewrite old artifacts hoặc triển khai SMTP trong scope này
 ## Follow-Up
 
 - [Task](../plans/active/2026-10-07-codegraph-audit/tasks/AUD-20-user-display-name-and-creator.md).
+- [Guest ownership task](../plans/active/2026-10-07-codegraph-audit/tasks/AUD-21-guest-signup-and-ownership.md).
 - [Master plan](../plans/active/2026-10-07-codegraph-audit/README.md).
