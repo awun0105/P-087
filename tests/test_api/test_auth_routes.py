@@ -1,5 +1,6 @@
 """Đăng nhập hai role khi bật AUTH_REQUIRED: khách / Editor / Reviewer (ADR 0003 §3)."""
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -7,8 +8,11 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from src.config import Settings
+from src.models.contracts.manifests import ExecutionError, JobStatus, StageId
 from src.services.orchestration.auth import AuthService
+from src.services.orchestration.jobs import TransitionRequest
 from src.services.orchestration.jobs.database import RuntimeDatabase
+from src.services.orchestration.projects.models import JobCreateInput
 from src.services.orchestration.projects.registry import ProjectRegistry
 
 PASSWORD = "mat-khau-du-dai"
@@ -42,6 +46,40 @@ def secured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AuthService:
     monkeypatch.setattr(auth, "login_limiter", auth._LoginLimiter(attempts=10))
     monkeypatch.setattr(auth, "client_limiter", auth._LoginLimiter(attempts=100))
     return AuthService(database)
+
+
+@pytest.fixture
+def product_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ProjectRegistry:
+    from src.api.product import deps
+
+    registry = ProjectRegistry(runtime_root=tmp_path / "product-artifacts")
+    registry.seed_from_fixtures()
+    monkeypatch.setattr(deps, "get_project_registry", lambda: registry)
+    assert deps.registry() is registry
+    return registry
+
+
+def _failed_job(registry: ProjectRegistry, *, retryable: bool = True) -> str:
+    job = registry.create_job(JobCreateInput(project_id="project-fixture-001"))
+    registry.transition_job(job.job_id, TransitionRequest(target_status=JobStatus.RUNNING))
+    registry.transition_job(
+        job.job_id,
+        TransitionRequest(
+            target_status=JobStatus.FAILED,
+            error=ExecutionError(
+                stage_id=StageId.INPUT_VALIDATE,
+                error_code="PREVIEW_RUNNER_FAILED",
+                human_message="Fixture failure",
+                retryable=retryable,
+                details={"exception_type": "TimeoutError"},
+            ),
+        ),
+    )
+    return job.job_id
+
+
+def _gpu_run_count(auth_service: AuthService, user_id: str) -> int:
+    return auth_service.count_actions(user_id, "gpu.run", datetime.now(UTC) - timedelta(days=1))
 
 
 @pytest_asyncio.fixture
@@ -137,14 +175,66 @@ async def test_reviewer_has_no_daily_quota(client: AsyncClient, secured: AuthSer
 
 
 @pytest.mark.asyncio
-async def test_retry_counts_against_gpu_quota(client: AsyncClient, secured: AuthService) -> None:
+async def test_retry_counts_against_gpu_quota(
+    client: AsyncClient, secured: AuthService, product_registry: ProjectRegistry
+) -> None:
     reviewer = secured.create_user("lead@example.com", "Lead", PASSWORD, "reviewer")
     editor = secured.create_user("e@example.com", "E", PASSWORD, "editor")
     secured.update_user(reviewer, editor.user_id, daily_job_quota=1)
     secured.audit(editor.user_id, "gpu.run", "job-old", {"kind": "scene.create"})  # đã dùng 1 lượt
+    job_id = _failed_job(product_registry)
+    attempts_before = product_registry.list_job_attempts(job_id)
     await _login(client, "e@example.com")
-    response = await client.post("/api/v1/jobs/job-x/retry")
+    response = await client.post(f"/api/v1/jobs/{job_id}/retry")
+
     assert response.status_code == 429 and "xử lý GPU" in response.json()["detail"]
+    assert product_registry.get_job(job_id).status == JobStatus.FAILED
+    assert product_registry.list_job_attempts(job_id) == attempts_before
+    assert _gpu_run_count(secured, editor.user_id) == 1
+
+
+@pytest.mark.asyncio
+async def test_retry_accepts_eligible_job_and_records_gpu_usage_once(
+    client: AsyncClient, secured: AuthService, product_registry: ProjectRegistry
+) -> None:
+    reviewer = secured.create_user("lead@example.com", "Lead", PASSWORD, "reviewer")
+    editor = secured.create_user("e@example.com", "E", PASSWORD, "editor")
+    secured.update_user(reviewer, editor.user_id, daily_job_quota=2)
+    secured.audit(editor.user_id, "gpu.run", "job-old", {"kind": "scene.create"})
+    job_id = _failed_job(product_registry)
+    await _login(client, "e@example.com")
+
+    response = await client.post(f"/api/v1/jobs/{job_id}/retry")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["job_id"] == job_id
+    assert response.json()["status"] == JobStatus.QUEUED
+    assert product_registry.list_job_attempts(job_id)[-1].status == JobStatus.QUEUED
+    assert _gpu_run_count(secured, editor.user_id) == 2
+
+
+@pytest.mark.asyncio
+async def test_retry_rejects_missing_and_non_retryable_jobs(
+    client: AsyncClient, secured: AuthService, product_registry: ProjectRegistry
+) -> None:
+    editor = secured.create_user("e@example.com", "E", PASSWORD, "editor")
+    non_retryable_job_id = _failed_job(product_registry, retryable=False)
+    await _login(client, "e@example.com")
+
+    missing = await client.post("/api/v1/jobs/job-missing/retry")
+    denied = await client.post(f"/api/v1/jobs/{non_retryable_job_id}/retry")
+
+    assert missing.status_code == 404
+    assert denied.status_code == 409
+    assert product_registry.get_job(non_retryable_job_id).status == JobStatus.FAILED
+    assert _gpu_run_count(secured, editor.user_id) == 0
+
+
+@pytest.mark.asyncio
+async def test_retry_requires_authenticated_user(client: AsyncClient, secured: AuthService) -> None:
+    response = await client.post("/api/v1/jobs/job-missing/retry")
+
+    assert response.status_code == 401
 
 
 @pytest.mark.asyncio

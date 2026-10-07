@@ -58,7 +58,7 @@ job-x; seed GPU usage ở fixture DB. Keep control case unknown/nonretryable job
 Tests: exhausted quota → 429 cho eligible retry; available quota → accepted retry
 và usage counted đúng một lần; unknown/ineligible job theo current error contract;
 unauthorized/role denial; no dependency access vào developer DB.
-**Exit:** [ ] failing test corrected; [ ] semantic quota/eligibility assertions pass.
+**Exit:** [x] failing test corrected; [x] semantic quota/eligibility assertions pass.
 
 ## Sprint AUD-11.S2 — Fake subprocess protocol và real cleanup regression
 
@@ -89,4 +89,25 @@ DONE khi corrected regressions và related suites pass; broader failures ghi đ�
 
 ## Result / Evidence
 
-Pending — commands/counts, isolated dependency proof, child PID/exit/reap evidence.
+### AUD-11.S1 — Isolate product retry fixture
+
+- Base: `1e8f2ec` (`add new tasks`). Files changed: this task record and
+  `tests/test_api/test_auth_routes.py`. Schema delta: none.
+- Replaced the nonexistent `job-x` request with a registry-seeded typed job
+  whose current failure is `PREVIEW_RUNNER_FAILED` / transient `TimeoutError`.
+  The fixture patches `src.api.product.deps.get_project_registry` and asserts
+  the product dependency resolves to the isolated fixture registry; quota state
+  remains in the fixture's temporary SQLite database.
+- Covered quota exhausted (429, FAILED state and attempts unchanged, usage
+  unchanged), quota available (QUEUED, one additional usage record), unknown
+  job (404), non-retryable job (409), and unauthenticated retry (401). Both
+  route-accepted and rejected paths leave GPU usage counts explicit.
+- Verification: `.venv/bin/pytest tests/test_api/test_auth_routes.py
+  tests/test_orchestration/test_retryability.py -q` — 24 passed;
+  `.venv/bin/ruff check tests/test_api/test_auth_routes.py` — passed;
+  `.venv/bin/ruff format --check tests/test_api/test_auth_routes.py` — passed;
+  `git diff --check` — passed.
+- Current valid roles are `editor` and `reviewer`, both permitted for retry;
+  there is no lower authenticated role to deny in this contract. Anonymous
+  access is denied here; Guest role boundaries will be covered by AUD-21.
+- Next: AUD-11.S2, subprocess polling fake and bounded child cleanup coverage.
