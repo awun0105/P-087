@@ -3,14 +3,16 @@
 Fixture proof (bundle mẫu + collision mesh tổng hợp); không phải bằng chứng physics Isaac.
 """
 
+import hashlib
 import io
+import json
 import zipfile
 from pathlib import Path
 
 from src.config import Settings
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.models.contracts.validation import RuleResult
-from src.services.orchestration.review.simulation_package import build_simulation_package, current_package
+from src.services.orchestration.review.simulation_package import BUILD_CONFIG, build_simulation_package, current_package
 from src.services.orchestration.scene.extraction import extract_scene
 from src.services.orchestration.scene.objects import add_box_object, apply_object_action
 from tests.test_orchestration.test_finalize_flow import _confirmed
@@ -41,6 +43,15 @@ def test_confirmed_objects_become_a_sealed_package(tmp_path: Path) -> None:
     physics = registry.scene.current(job.job_id).scene
     assert physics.objects[0].collider is not None and physics.environment.collider_ref is not None
     archive = zipfile.ZipFile(io.BytesIO(registry.runtime_resolver.require(package.package_ref).read_bytes()))
+    background_identity = physics.provenance["collision_background_identity"]
+    assert background_identity in archive.read("README.txt").decode()
+    build_config = {**BUILD_CONFIG, "collision_background_identity": background_identity}
+    expected_config_checksum = (
+        "sha256:"
+        + hashlib.sha256(json.dumps(build_config, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    )
+    manifest = json.loads(archive.read("candidate_manifest.json"))
+    assert manifest["build_config_checksum"] == expected_config_checksum
     names = set(archive.namelist())
     assert {"scene.usda", "environment_collision.usda", "candidate_manifest.json", "preflight_report.json"} <= names
     usda = archive.read("scene.usda").decode()

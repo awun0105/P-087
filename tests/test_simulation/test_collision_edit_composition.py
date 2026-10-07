@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import io
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
+import trimesh
 from pydantic import ValidationError
 
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
@@ -18,7 +23,13 @@ from src.models.contracts.scene import (
     SourceCollisionMembership,
     SourceCollisionRegion,
 )
-from src.services.orchestration.review.simulation_package import _carved_environment
+from src.services.orchestration.review import simulation_package
+from src.services.orchestration.review.simulation_package import (
+    _carved_environment,
+    _environment_layer,
+    _hybrid_layers,
+    _package_build_config,
+)
 from src.services.scene.collision_ownership import (
     SourceCollisionOwnershipError,
     read_triangle_memberships,
@@ -31,6 +42,7 @@ from src.services.scene.editing.commands import (
     move_object,
     restore_object,
 )
+from src.services.simulation.colliders.carve import CarveBox, triangle_mask_in_box
 from tests.test_orchestration.test_simulation_package import _scene_job
 
 
@@ -238,42 +250,65 @@ def test_source_pose_stays_immutable_through_move_delete_and_restore(tmp_path: P
     assert duplicated.objects[-1].source_collision is None
 
 
-def test_current_carver_reintroduces_source_collision_after_move_delete_and_restore(tmp_path: Path) -> None:
+def test_source_owned_background_stays_at_source_pose_through_edits_and_keeps_floor(tmp_path: Path) -> None:
     registry, job = _scene_job(tmp_path)
     scene = registry.scene.current(job.job_id).scene
     pallet = scene.objects[0]
+    ownership = pallet.source_collision
+    assert ownership is not None
 
-    _, original_faces, original_removed = _carved_environment(registry, scene)
+    original = _carved_environment(registry, scene)
     confirmed = confirm_object(scene, pallet.id)
-    _, confirmed_faces, confirmed_removed = _carved_environment(registry, confirmed)
+    confirmed_background = _carved_environment(registry, confirmed)
     moved = move_object(
         confirmed,
         pallet.id,
         pallet.transform.model_copy(update={"translation_xyz": (4.0, 0.5, 0.3)}),
     )
-    _, moved_faces, moved_removed = _carved_environment(registry, moved)
+    moved_background = _carved_environment(registry, moved)
     deleted = delete_object(moved, pallet.id)
-    _, deleted_faces, deleted_removed = _carved_environment(registry, deleted)
+    deleted_background = _carved_environment(registry, deleted)
     restored = restore_object(deleted, pallet.id)
-    _, restored_faces, restored_removed = _carved_environment(registry, restored)
+    restored_background = _carved_environment(registry, restored)
     ignored = ignore_object(scene, pallet.id)
-    _, ignored_faces, ignored_removed = _carved_environment(registry, ignored)
+    ignored_background = _carved_environment(registry, ignored)
+    deleted_candidate = delete_object(scene, pallet.id)
+    deleted_candidate_background = _carved_environment(registry, deleted_candidate)
+    hidden_confirmed = confirmed.model_copy(
+        update={"objects": [confirmed.objects[0].model_copy(update={"active": False}, deep=True)]}, deep=True
+    )
+    hidden_background = _carved_environment(registry, hidden_confirmed)
+    duplicated = duplicate_object(confirmed, pallet.id, "pallet-copy", (2.0, 0.0, 0.0))
+    duplicated_background = _carved_environment(registry, duplicated)
 
-    # Characterization: this is the current failure. The edited pose has no mesh underneath,
-    # so the original pallet triangles reappear after move/delete and remain after restore.
-    assert original_removed == ignored_removed == 0
-    assert len(ignored_faces) == len(original_faces)
-    assert confirmed_removed > 0 and len(confirmed_faces) < len(original_faces)
-    assert moved_removed == deleted_removed == restored_removed == 0
-    assert len(moved_faces) == len(deleted_faces) == len(restored_faces) == len(original_faces)
+    assert original.carved_triangles == ignored_background.carved_triangles == 0
+    assert len(original.faces) == len(ignored_background.faces)
+    assert confirmed_background.carved_triangles > 0
+    assert confirmed_background.carved_triangles == moved_background.carved_triangles
+    assert moved_background.carved_triangles == deleted_background.carved_triangles
+    assert deleted_background.carved_triangles == restored_background.carved_triangles
+    assert restored_background.carved_triangles == hidden_background.carved_triangles
+    assert duplicated_background.identity == confirmed_background.identity
+    assert confirmed_background.identity == moved_background.identity
+    assert moved_background.identity == deleted_background.identity == restored_background.identity
+    assert deleted_candidate_background.carved_triangles > 0
+
+    floor_centroids = restored_background.vertices[restored_background.faces].mean(axis=1)
+    assert len(restored_background.faces) == 12
+    assert np.all(np.abs(floor_centroids[:, 0]) <= 4.0)
+    assert np.all(np.abs(floor_centroids[:, 1]) <= 4.0)
+    assert np.all(np.abs(floor_centroids[:, 2]) <= 0.02)
+    assert restored.objects[0].transform.translation_xyz == (4.0, 0.5, 0.3)
+    assert pallet.source_collision == ownership
+    assert pallet.transform == ownership.source_transform
 
 
-def test_current_carver_blindly_claims_user_added_and_overlapping_source_regions(tmp_path: Path) -> None:
+def test_source_owned_background_does_not_carve_user_added_boxes_and_rejects_overlap(tmp_path: Path) -> None:
     registry, job = _scene_job(tmp_path)
     scene = registry.scene.current(job.job_id).scene
     pallet = scene.objects[0]
     confirmed = confirm_object(scene, pallet.id)
-    _, _, confirmed_removed = _carved_environment(registry, confirmed)
+    confirmed_background = _carved_environment(registry, confirmed)
 
     user_transform = pallet.transform.model_copy(
         update={"local_frame": "user-added", "translation_xyz": pallet.transform.translation_xyz}
@@ -292,7 +327,7 @@ def test_current_carver_blindly_claims_user_added_and_overlapping_source_regions
         }
     )
     user_scene = scene.model_copy(update={"objects": [user_added]}, deep=True)
-    _, _, user_added_removed = _carved_environment(registry, user_scene)
+    user_background = _carved_environment(registry, user_scene)
 
     overlap_transform = pallet.transform.model_copy(update={"local_frame": "overlap"})
     overlap_ownership = pallet.source_collision.model_copy(
@@ -311,9 +346,137 @@ def test_current_carver_blindly_claims_user_added_and_overlapping_source_regions
         }
     )
     overlap_scene = scene.model_copy(update={"objects": [confirmed.objects[0], overlap]}, deep=True)
-    _, _, overlap_removed = _carved_environment(registry, overlap_scene)
+    with pytest.raises(SourceCollisionOwnershipError, match="claimed by both"):
+        _carved_environment(registry, overlap_scene)
 
-    assert confirmed_removed > 0
-    assert user_added_removed == confirmed_removed
-    # Two source owners with coincident OBBs collapse to the same blind box carve; ownership is not used.
-    assert overlap_removed == confirmed_removed
+    assert confirmed_background.carved_triangles > 0
+    assert user_background.carved_triangles == 0
+
+
+def test_reconstructed_legacy_object_without_ownership_blocks_background_rebuild(tmp_path: Path) -> None:
+    registry, job = _scene_job(tmp_path)
+    scene = registry.scene.current(job.job_id).scene
+    pallet = scene.objects[0]
+    legacy = scene.model_copy(
+        update={"objects": [pallet.model_copy(update={"source_collision": None}, deep=True)]}, deep=True
+    )
+    confirmed = confirm_object(legacy, pallet.id)
+
+    with pytest.raises(SourceCollisionOwnershipError, match="require source collision ownership"):
+        _carved_environment(registry, confirmed)
+
+    assert registry.runtime_resolver.require(scene.environment.geometry_ref).is_file()
+
+
+def test_exact_membership_sidecar_is_consumed_by_background_builder(tmp_path: Path) -> None:
+    registry, job = _scene_job(tmp_path)
+    scene = registry.scene.current(job.job_id).scene
+    pallet = scene.objects[0]
+    ownership = pallet.source_collision
+    assert ownership is not None and ownership.source_obb_dimensions_xyz_m is not None
+    glb = registry.runtime_resolver.require(scene.environment.geometry_ref).read_bytes()
+    mesh = trimesh.load(io.BytesIO(glb), file_type="glb", force="mesh", process=False)
+    centroids = np.asarray(mesh.vertices)[np.asarray(mesh.faces)].mean(axis=1)
+    box = CarveBox.from_transform(ownership.source_transform, ownership.source_obb_dimensions_xyz_m)
+    source_indices = np.flatnonzero(triangle_mask_in_box(centroids, box, 0.05))
+    assert len(source_indices) > 0
+
+    membership = SourceCollisionMembership(
+        object_id=pallet.id,
+        source_geometry_ref=scene.environment.geometry_ref,
+        extraction_revision=ownership.extraction_revision,
+        triangle_indices=[int(source_indices[0])],
+    )
+    payload = membership.model_dump_json(indent=2).encode("utf-8") + b"\n"
+    reference = ProductArtifactRef(
+        artifact_type="SourceCollisionMembership",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{job.job_id}/scene/source_regions/{pallet.id}-exact.json",
+        artifact_checksum=_sha256(payload),
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.OBJECT_EXTRACT,
+        job_id=job.job_id,
+    )
+    registry.scene.store.publish(reference, payload)
+    exact_ownership = SourceCollisionRegion(
+        object_id=pallet.id,
+        source_geometry_ref=scene.environment.geometry_ref,
+        extraction_revision=ownership.extraction_revision,
+        source_transform=ownership.source_transform,
+        region_kind="triangle_indices",
+        region_ref=reference,
+    )
+    exact_scene = scene.model_copy(
+        update={"objects": [pallet.model_copy(update={"source_collision": exact_ownership}, deep=True)]}, deep=True
+    )
+
+    background = _carved_environment(registry, confirm_object(exact_scene, pallet.id))
+
+    assert background.carved_triangles == 1
+    assert len(background.faces) == len(mesh.faces) - 1
+
+    overlap_transform = pallet.transform.model_copy(update={"local_frame": "overlap"})
+    overlap_source_transform = ownership.source_transform.model_copy(update={"local_frame": "overlap"})
+    overlap_ownership = ownership.model_copy(
+        update={"object_id": "overlap", "source_transform": overlap_source_transform}, deep=True
+    )
+    overlap = pallet.model_copy(
+        update={
+            "id": "overlap",
+            "local_frame": "overlap",
+            "transform": overlap_transform,
+            "source_collision": overlap_ownership,
+        },
+        deep=True,
+    )
+    exact_overlap_scene = exact_scene.model_copy(update={"objects": [exact_scene.objects[0], overlap]}, deep=True)
+    with pytest.raises(SourceCollisionOwnershipError, match="claimed by both"):
+        _carved_environment(registry, exact_overlap_scene)
+
+
+def test_both_package_builders_share_background_and_current_hybrid_object_pose(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, job = _scene_job(tmp_path)
+    scene = registry.scene.current(job.job_id).scene
+    pallet = scene.objects[0]
+    moved = move_object(
+        confirm_object(scene, pallet.id),
+        pallet.id,
+        pallet.transform.model_copy(update={"translation_xyz": (4.0, 0.5, 0.3)}),
+    )
+    background = _carved_environment(registry, moved)
+    layer_ref, layer_triangles, layer_carved = _environment_layer(registry, job.job_id, background)
+    assert layer_triangles == len(background.faces) and layer_carved == background.carved_triangles
+    assert layer_ref.artifact_checksum.startswith("sha256:")
+
+    visual_scene = moved.model_copy(
+        update={
+            "environment": moved.environment.model_copy(
+                update={"visual_master_ref": moved.environment.geometry_ref}, deep=True
+            )
+        },
+        deep=True,
+    )
+    runtime_python = tmp_path / "fake-usd-python"
+    runtime_python.write_text("fixture runtime marker", encoding="utf-8")
+    output = tmp_path / "hybrid-output"
+    output.mkdir()
+    captured: dict = {}
+
+    def fake_run(command: list[str], **_: object) -> SimpleNamespace:
+        request_path = Path(command[command.index("--request") + 1])
+        captured.update(json.loads(request_path.read_text(encoding="utf-8")))
+        return SimpleNamespace(returncode=0, stderr=b"")
+
+    monkeypatch.setattr(simulation_package.subprocess, "run", fake_run)
+    _hybrid_layers(registry, visual_scene, output, background, runtime_python)
+
+    assert captured["collision_background_identity"] == background.identity
+    assert captured["objects"][0]["translation"] == [4.0, 0.5, 0.3]
+    collision_mesh = trimesh.load(
+        captured["environment"]["collision_mesh"], file_type="ply", force="mesh", process=False
+    )
+    assert len(collision_mesh.faces) == len(background.faces)
+    assert _package_build_config(False, background)["collision_background_identity"] == background.identity
+    assert _package_build_config(True, background)["collision_background_identity"] == background.identity

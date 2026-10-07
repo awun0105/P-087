@@ -116,7 +116,7 @@ Implement:
 
 Tests: source obstacle biến mất sau move/delete; object collider chỉ ở nơi mới;
 floor witness còn; ignored candidate giữ collision; user box không đục nền.
-**Exit:** [ ] matrix pass; [ ] cả hai builder consume cùng background identity.
+**Exit:** [x] matrix pass; [x] cả hai builder consume cùng background identity.
 
 ## Sprint AUD-01.S3 — Consumer/export regression và legacy recovery
 
@@ -175,3 +175,33 @@ refs/checksums/legacy behavior được verify. Real Isaac proof ghi ở AUD-05.
   extraction, simulation package, and edit commands passed. Full Ruff check and
   format check passed; the TypeScript/Pydantic mirror, frontend lint, and
   frontend typecheck passed.
+
+### AUD-01.S2 — Implemented
+
+- `_carved_environment` verifies source geometry bytes against the SceneIR ref,
+  loads the GLB without face processing, and resolves exact membership sidecars
+  before using source OBBs. Exact and OBB claims share one triangle-ownership
+  check; ambiguous overlaps fail with object/triangle diagnostics.
+- Confirmed objects carve their immutable source region whether active or hidden;
+  reconstructed deletions, including deleted candidates, also remove their
+  source region. Ignored and pending candidates retain background collision.
+  User-added objects do not carve. Duplicated objects remain independently
+  collidable without claiming or requiring source ownership.
+- Legacy reconstructed objects that need a source carve but have no ownership
+  fail closed before publishing a new revision; their source artifact remains
+  resolvable. Input SceneIR and mesh arrays are not mutated.
+- `_environment_layer` and `_hybrid_layers` now consume one `CarvedBackground`
+  value. Its deterministic identity binds the source byte checksum, source face
+  count, carve margin, algorithm, and packed removed-triangle mask. The identity
+  is recorded in SceneIR provenance, CandidateManifest build-config checksum,
+  the hybrid request, and package README.
+- Regression coverage checks move/delete/restore/hide/ignore/delete-candidate,
+  duplicate and user-added behavior, retained floor triangles, legacy missing
+  ownership, exact-membership use, OBB/OBB and exact/OBB overlap rejection, and
+  hybrid collider placement at the edited transform. This remains CPU fixture
+  evidence; Isaac runtime acceptance stays in AUD-05.
+- Verification: `pytest` over carve, collision-edit composition, extraction,
+  simulation package, scene editing, and review workflow passed (39 passed).
+  `pytest tests/test_api/test_review_routes.py -q` also passed (2 passed).
+  `ruff check src/ tests/` passed; `ruff format --check src/ tests/` reported
+  455 files already formatted.

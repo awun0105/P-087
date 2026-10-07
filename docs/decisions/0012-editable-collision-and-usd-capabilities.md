@@ -30,6 +30,10 @@ có topology cho các collider mesh, nhưng candidate có thể nhận preflight
    runtime không đáp ứng phải bị block hoặc được gửi worker phù hợp.
 5. Candidate build identity ghi effective builder/config. Không silently
    downgrade thành box, empty Mesh hoặc bỏ mass/material để tạo package.
+6. Legacy và hybrid builder consume cùng một source-owned background. Identity
+   là SHA-256 của algorithm, checksum mesh nguồn, face count, carve margin và packed
+   removed-triangle mask; CandidateManifest bind identity qua build-config
+   checksum. OBB claims có margin dùng chung và overlap mơ hồ bị reject.
 
 ## Data contract
 
