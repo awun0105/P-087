@@ -50,6 +50,10 @@ _TABLES = (
     "r2s_jobs",
     "r2s_job_events",
     "r2s_scene_requests",
+    "r2s_scene_heads",
+    "r2s_scene_head_repairs",
+    "r2s_scene_head_backfill_items",
+    "r2s_scene_publications",
     "r2s_uploads",
     "r2s_upload_sessions",
     "r2s_imports",
@@ -241,6 +245,55 @@ def test_restore_brings_back_exactly_what_was_removed(world: SimpleNamespace) ->
     }
     with pytest.raises(DeletionRefusedError, match="không có trong thùng rác"):
         restore_deletion(world.context, entry)
+
+
+def test_scene_head_and_repair_rows_roundtrip_through_trash(world: SimpleNamespace) -> None:
+    project_id, job_id = _scene(world, _upload(world), "Head restore")
+    checksum = "sha256:" + "a" * 64
+    with world.database.transaction(write=True) as tx:
+        tx.execute(
+            "INSERT INTO r2s_scene_heads(job_id,generation,allocation_sequence,head_checksum,payload) "
+            "VALUES (?,?,?,?,?)",
+            (job_id, 1, 3, checksum, json.dumps({"scene_revision": "rev-003"})),
+        )
+        tx.execute(
+            "INSERT INTO r2s_scene_head_repairs(job_id,status,generation,repair_checksum,payload) VALUES (?,?,?,?,?)",
+            (job_id, "COMPLETE", 5, checksum, json.dumps({"verified_count": 3})),
+        )
+        tx.execute(
+            "INSERT INTO r2s_scene_head_backfill_items(job_id,scene_revision,item_checksum,payload) VALUES (?,?,?,?)",
+            (job_id, "rev-003", checksum, json.dumps({"supersedes_revision": "rev-002"})),
+        )
+    before = _rows(world)
+
+    entry = _delete(world, project_ids=[project_id])
+    assert _rows(world) != before
+    restore_deletion(world.context, entry, "user-1")
+
+    assert _rows(world) == before
+
+
+def test_scene_deletion_refuses_in_progress_backfill_and_pending_publication(world: SimpleNamespace) -> None:
+    project_id, job_id = _scene(world, _upload(world), "Active head operation")
+    with world.database.transaction(write=True) as tx:
+        tx.execute(
+            "INSERT INTO r2s_scene_head_repairs(job_id,status,generation,repair_checksum,payload) VALUES (?,?,?,?,?)",
+            (job_id, "IN_PROGRESS", 1, "sha256:" + "a" * 64, "{}"),
+        )
+
+    with pytest.raises(DeletionRefusedError, match="backfill"):
+        _delete(world, project_ids=[project_id])
+
+    with world.database.transaction(write=True) as tx:
+        tx.execute("DELETE FROM r2s_scene_head_repairs WHERE job_id=?", (job_id,))
+        tx.execute(
+            "INSERT INTO r2s_scene_publications(job_id,expected_generation,target_revision,lease_expires_at,payload) "
+            "VALUES (?,?,?,?,?)",
+            (job_id, 1, "rev-002", "2026-10-08T00:00:00+00:00", "{}"),
+        )
+
+    with pytest.raises(DeletionRefusedError, match="publication"):
+        _delete(world, project_ids=[project_id])
 
 
 def test_restore_keeps_scenes_linked_to_the_upload_after_the_deletion(world: SimpleNamespace) -> None:

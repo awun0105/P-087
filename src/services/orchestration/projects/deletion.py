@@ -54,14 +54,22 @@ _TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
     "r2s_jobs": ("job_id", "project_id", "version", "manifest_ref"),
     "r2s_job_events": ("job_id", "version", "payload"),
     "r2s_scene_requests": ("job_id", "status", "payload"),
+    "r2s_scene_heads": ("job_id", "generation", "allocation_sequence", "head_checksum", "payload"),
+    "r2s_scene_head_repairs": ("job_id", "status", "generation", "repair_checksum", "payload"),
+    "r2s_scene_head_backfill_items": ("job_id", "scene_revision", "item_checksum", "payload"),
+    "r2s_scene_publications": ("job_id", "expected_generation", "target_revision", "lease_expires_at", "payload"),
     "r2s_uploads": ("upload_id", "payload"),
     "r2s_upload_sessions": ("upload_id", "payload"),
     "r2s_imports": ("import_id", "upload_id", "payload"),
 }
-_KEY_WIDTH = {"r2s_job_events": 2}
+_KEY_WIDTH = {"r2s_job_events": 2, "r2s_scene_head_backfill_items": 2}
 #: Con trước cha, theo khoá ngoại của schema runtime.
 _DELETE_ORDER = (
     "r2s_scene_requests",
+    "r2s_scene_publications",
+    "r2s_scene_head_backfill_items",
+    "r2s_scene_head_repairs",
+    "r2s_scene_heads",
     "r2s_job_events",
     "r2s_jobs",
     "r2s_projects",
@@ -302,7 +310,23 @@ class _Collector:
         requests = self._select("r2s_scene_requests", "job_id=?", (job_id,))
         if any(row.values["status"] in {"queued", "running"} for row in requests):
             self.blockers.append(f"{job_id}: yêu cầu dựng lại vật thể đang chờ hoặc đang chạy")
-        self.rows += requests + self._select("r2s_job_events", "job_id=? ORDER BY version", (job_id,))
+        heads = self._select("r2s_scene_heads", "job_id=?", (job_id,))
+        repairs = self._select("r2s_scene_head_repairs", "job_id=?", (job_id,))
+        backfill_items = self._select("r2s_scene_head_backfill_items", "job_id=?", (job_id,))
+        publications = self._select("r2s_scene_publications", "job_id=?", (job_id,))
+        if publications:
+            self.blockers.append(f"{job_id}: scene publication đang chờ commit hoặc cần phục hồi")
+        repair_statuses = {str(row.values["status"]).upper() for row in repairs}
+        if repair_statuses - {"COMPLETE", "BLOCKED"}:
+            self.blockers.append(f"{job_id}: scene revision head đang backfill hoặc có trạng thái repair chưa hỗ trợ")
+        self.rows += (
+            requests
+            + heads
+            + repairs
+            + backfill_items
+            + publications
+            + self._select("r2s_job_events", "job_id=? ORDER BY version", (job_id,))
+        )
         for kind in ("artifact", "worker", "rerun"):
             self._add_item(kind, job_id)
         try:

@@ -53,6 +53,13 @@ from src.models.contracts.validation_run import (
 from src.services.orchestration.artifacts.checksum import sha256_file
 from src.services.orchestration.artifacts.remote import RemoteObject, S3ObjectStore
 from src.services.orchestration.jobs.database import LATEST_SCHEMA_VERSION, RuntimeDatabase
+from src.services.orchestration.scene.heads import (
+    SceneHeadBackfillItem,
+    SceneHeadRecord,
+    SceneHeadRepairRecord,
+    verify_backfill_item,
+    verify_scene_head,
+)
 
 PACKAGE_METADATA = PurePosixPath("data/studio_local/DATA_PACKAGE.json")
 PACKAGE_DATABASE = PurePosixPath("data/studio_local/runtime.db")
@@ -75,6 +82,9 @@ IMPORT_COLUMNS: dict[str, tuple[str, ...]] = {
     "r2s_jobs": ("job_id", "project_id", "version", "manifest_ref"),
     "r2s_job_events": ("job_id", "version", "payload"),
     "r2s_scene_requests": ("job_id", "status", "payload"),
+    "r2s_scene_heads": ("job_id", "generation", "allocation_sequence", "head_checksum", "payload"),
+    "r2s_scene_head_repairs": ("job_id", "status", "generation", "repair_checksum", "payload"),
+    "r2s_scene_head_backfill_items": ("job_id", "scene_revision", "item_checksum", "payload"),
     "r2s_audit_log": ("entry_id", "at", "user_id", "action", "payload"),
     "r2s_resource_usage": ("usage_id", "job_id", "recorded_at", "payload"),
     "r2s_validation_runs": (
@@ -107,6 +117,7 @@ TRANSIENT_TABLES = (
     "r2s_workers",
     "r2s_resource_waits",
     "r2s_resource_reservations",
+    "r2s_scene_publications",
 )
 TARGET_EMPTY_TABLES = (*IMPORT_ORDER, *TRANSIENT_TABLES, "r2s_trash")
 BUSY_STATUSES = frozenset({"queued", "running", "uploading", "processing", "pending", "waiting"})
@@ -574,6 +585,35 @@ def _validate_row_payloads(rows: Mapping[str, Sequence[tuple[Any, ...]]]) -> lis
     return references
 
 
+def _validate_scene_head_rows(rows: Mapping[str, Sequence[tuple[Any, ...]]]) -> None:
+    """Validate typed scene-head state before a package can cross the database boundary."""
+    try:
+        for row in rows["r2s_scene_heads"]:
+            head = SceneHeadRecord.model_validate_json(row[4])
+            verify_scene_head(head)
+            if tuple(row[:4]) != (
+                head.job_id,
+                head.generation,
+                head.allocation_sequence,
+                head.head_checksum,
+            ):
+                raise PackagePublishError("scene head columns do not match their checksummed payload")
+        for row in rows["r2s_scene_head_repairs"]:
+            repair = SceneHeadRepairRecord.model_validate_json(row[4])
+            verify_content_checksum(repair, "repair_checksum")
+            if tuple(row[:4]) != (repair.job_id, repair.status, repair.generation, repair.repair_checksum):
+                raise PackagePublishError("scene head repair columns do not match their checksummed payload")
+        for row in rows["r2s_scene_head_backfill_items"]:
+            item = SceneHeadBackfillItem.model_validate_json(row[3])
+            verify_backfill_item(item)
+            if tuple(row[:3]) != (item.job_id, item.scene_revision, item.item_checksum):
+                raise PackagePublishError("scene head backfill columns do not match their checksummed payload")
+    except PackagePublishError:
+        raise
+    except (ValidationError, ValueError) as error:
+        raise PackagePublishError("package contains invalid checksummed scene-head state") from error
+
+
 def _validate_validation_rows(rows: Mapping[str, Sequence[tuple[Any, ...]]], artifacts: Path) -> None:
     """Validate validation run/selection identities before importing persistent history."""
     runs: dict[str, ValidationRunRecord] = {}
@@ -724,6 +764,7 @@ def validate_staged_package(root: Path) -> StagedPackage:
         rows = _load_rows(connection, tables)
         _validate_users(connection, tables, metadata)
         _validate_transient_tables(connection, tables, rows)
+        _validate_scene_head_rows(rows)
     files = _validate_artifact_tree(artifacts)
     _validate_validation_rows(rows, artifacts)
     _validate_job_manifests(rows, artifacts)
@@ -857,6 +898,7 @@ def assert_target_url_empty(database_url: str) -> None:
 
 def import_rows(database: RuntimeDatabase, rows: Mapping[str, Sequence[tuple[Any, ...]]]) -> dict[str, int]:
     """Insert verified rows in one transaction into an already-migrated empty DB."""
+    _validate_scene_head_rows(rows)
     assert_target_empty(database)
     with database.transaction(write=True) as transaction:
         for table in IMPORT_ORDER:

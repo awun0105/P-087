@@ -74,7 +74,7 @@ edited_from, không mtime/filename sorting; record incomplete repair và continu
 Update data-package manifest/export/restore/deletion schema consumers sau inspect.
 Tests: old DB migration, empty/new scene, 1.005 revisions, corruption/gap/orphan,
 repeat backfill idempotency, missing head, retained old ref/content checksums.
-**Exit:** [ ] verified legacy head; [ ] clear corruption/migration diagnostics.
+**Exit:** [x] verified legacy head; [x] clear corruption/migration diagnostics.
 
 ## Sprint AUD-10.S2 — Atomic publication protocol cho mọi writers
 
@@ -121,5 +121,33 @@ call-count/packaging matrix pass; PG/remote-provider proof được phân loại
 
 ## Result / Evidence
 
-Pending — migration version, head/byte checksums, resolver call counts,
-concurrency winners/conflicts và repair/restore evidence.
+### AUD-10.S1 — Persist head và legacy backfill
+
+- Base commit: `5eb88b3` (`AUD-04.S3`). CodeGraph traced `SceneEditor.revision` →
+  `_load_revision`, `ArtifactResolver` local/remote listing, `RuntimeDatabase`
+  migrations, package publisher allowlists, và trash/restore row allowlists.
+- Migration v12 thêm `r2s_scene_heads`, `r2s_scene_head_repairs`,
+  `r2s_scene_head_backfill_items`, và `r2s_scene_publications`. Typed head/repair/
+  item payloads bind canonical record checksums, indexed DB columns, identity,
+  immutable artifact URI/checksum, allocation sequence và resumable page cursors.
+- `SceneHeadBackfill.inspect` là dry-run chỉ đọc. Apply chạy hai lượt có giới hạn
+  trang: verify artifacts/lineage, rồi recheck bytes trước khi atomically lưu head.
+  `supersedes_revision` quyết định lineage; thiếu parent, orphan/branch, duplicate
+  revision number, corrupt bytes và thay đổi inventory không được promote.
+  `scripts.studio.scene_head` dùng `DATABASE_URL`, `ARTIFACT_ROOT`, và optional S3
+  settings; mỗi invocation mặc định chỉ apply một page và có thể resume.
+- Artifact bytes/checksums cũ được giữ nguyên. Data package và production importer
+  giữ/validate stable head, repair và backfill rows; pending publication chặn pack/
+  publish. Trash/restore giữ nguyên head/repair rows, chặn active repair/publication.
+- CodeGraph after implementation: 752 files, 13,536 nodes, 38,589 edges; index
+  up to date. Index hiển thị `SceneHeadBackfill`, CLI, typed records và các package/
+  deletion consumers.
+- Verification: focused matrix **123 passed, 4 skipped**; skips cần
+  `R2S_TEST_POSTGRES_URL`. `.venv/bin/ruff check src/ tests/` và changed scripts
+  passed; `.venv/bin/ruff format --check src/ tests/` reported 470 files already
+  formatted; `git diff --check` passed.
+- Limits: head/backfill verified locally and through `MemoryObjectStore`; no live
+  S3 provider or PostgreSQL locking proof. `SceneEditor.current()` vẫn dùng legacy
+  recovery đến AUD-10.S3; this sprint adds verified migration and repair state, but
+  does not switch readers/writers before AUD-10.S2.
+- Next: AUD-10.S2 moves all scene writers to reserve/publish/verify/CAS.

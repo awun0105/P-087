@@ -21,7 +21,7 @@ from scripts.cloud.package_publish import (
     validate_staged_package,
 )
 from scripts.studio.data_package import PackageError, pack
-from src.models.contracts.artifacts import ProductArtifactRef
+from src.models.contracts.artifacts import ArtifactDataClass, ArtifactRef, ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.validation_run import (
     ValidationConfig,
@@ -32,6 +32,12 @@ from src.models.contracts.validation_run import (
 from src.services.orchestration.artifacts.checksum import sha256_bytes, sha256_file
 from src.services.orchestration.artifacts.remote import RemoteObject
 from src.services.orchestration.jobs.database import RuntimeDatabase
+from src.services.orchestration.scene.editor import scene_artifact_uri
+from src.services.orchestration.scene.heads import (
+    SceneHeadBackfillItem,
+    SceneHeadRecord,
+    SceneHeadRepairRecord,
+)
 
 
 class MemoryStore:
@@ -230,6 +236,90 @@ def test_publish_is_idempotent_then_imports_rows_atomically(tmp_path: Path) -> N
         assert transaction.execute("SELECT COUNT(*) FROM r2s_sessions").fetchone() == (0,)
     with pytest.raises(PackagePublishError, match="not empty"):
         import_rows(target, package.rows)
+
+
+def test_scene_head_and_resumable_repair_cross_package_publish(tmp_path: Path) -> None:
+    """Typed scene state survives package verification and production row import."""
+    _make_package(tmp_path)
+    source = tmp_path / "source"
+    runtime_db = source / "data/studio_local/runtime.db"
+    scene_bytes = b"{}\n"
+    scene_path = source / "data/studio_local/artifacts/jobs/job-a/scene/scene_ir.rev-001.json"
+    scene_path.parent.mkdir(parents=True)
+    scene_path.write_bytes(scene_bytes)
+    reference = ArtifactRef(
+        artifact_type="SceneIR",
+        schema_version="1.0",
+        artifact_uri=scene_artifact_uri("job-a", "rev-001"),
+        artifact_checksum=sha256_bytes(scene_bytes),
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage="ST-SCENE-ASSEMBLE",
+        job_id="job-a",
+    )
+    checksum = "sha256:" + "d" * 64
+    item_draft = SceneHeadBackfillItem(
+        schema_version="1.0",
+        job_id="job-a",
+        scene_id="scene-a",
+        scene_revision="rev-001",
+        revision_number=1,
+        supersedes_revision=None,
+        scene_ir_checksum=checksum,
+        scene_reference=reference,
+        item_checksum="sha256:" + "0" * 64,
+    )
+    item = item_draft.model_copy(update={"item_checksum": canonical_content_checksum(item_draft, "item_checksum")})
+    head = SceneHeadRecord.freeze(item, generation=1, allocation_sequence=1)
+    inventory_checksum = sha256_bytes(json.dumps([reference.artifact_uri], separators=(",", ":")).encode())
+    repair = SceneHeadRepairRecord.start("job-a", inventory_checksum, 1)
+    database = RuntimeDatabase(f"sqlite:///{runtime_db}")
+    with database.transaction(write=True) as transaction:
+        transaction.execute(
+            "INSERT INTO r2s_scene_heads(job_id,generation,allocation_sequence,head_checksum,payload) "
+            "VALUES (?,?,?,?,?)",
+            (head.job_id, head.generation, head.allocation_sequence, head.head_checksum, head.model_dump_json()),
+        )
+        transaction.execute(
+            "INSERT INTO r2s_scene_head_repairs(job_id,status,generation,repair_checksum,payload) VALUES (?,?,?,?,?)",
+            (repair.job_id, repair.status, repair.generation, repair.repair_checksum, repair.model_dump_json()),
+        )
+        transaction.execute(
+            "INSERT INTO r2s_scene_head_backfill_items(job_id,scene_revision,item_checksum,payload) VALUES (?,?,?,?)",
+            (item.job_id, item.scene_revision, item.item_checksum, item.model_dump_json()),
+        )
+    package_path = pack(source, tmp_path / "scene-head-publish.zip")
+
+    staging = tmp_path / "scene-head-staging"
+    extract_package(package_path, staging)
+    package = validate_staged_package(staging)
+    assert len(package.rows["r2s_scene_heads"]) == 1
+    assert len(package.rows["r2s_scene_head_repairs"]) == 1
+    assert len(package.rows["r2s_scene_head_backfill_items"]) == 1
+
+    target = RuntimeDatabase(f"sqlite:///{tmp_path / 'scene-head-target.db'}")
+    imported = import_rows(target, package.rows)
+    assert imported["r2s_scene_heads"] == 1
+    assert imported["r2s_scene_head_repairs"] == 1
+    assert imported["r2s_scene_head_backfill_items"] == 1
+    with target.transaction() as transaction:
+        assert transaction.execute("SELECT head_checksum FROM r2s_scene_heads").fetchone() == (head.head_checksum,)
+        assert transaction.execute("SELECT repair_checksum FROM r2s_scene_head_repairs").fetchone() == (
+            repair.repair_checksum,
+        )
+        assert transaction.execute("SELECT item_checksum FROM r2s_scene_head_backfill_items").fetchone() == (
+            item.item_checksum,
+        )
+
+    invalid_rows = dict(package.rows)
+    head_row = invalid_rows["r2s_scene_heads"][0]
+    tampered_payload = json.loads(head_row[-1])
+    tampered_payload["scene_revision"] = "rev-002"
+    invalid_rows["r2s_scene_heads"] = [(*head_row[:-1], json.dumps(tampered_payload))]
+    rejected_target = RuntimeDatabase(f"sqlite:///{tmp_path / 'scene-head-rejected.db'}")
+    with pytest.raises(PackagePublishError, match="invalid checksummed scene-head state"):
+        import_rows(rejected_target, invalid_rows)
+    with rejected_target.transaction() as transaction:
+        assert transaction.execute("SELECT COUNT(*) FROM r2s_scene_heads").fetchone() == (0,)
 
 
 def test_validation_history_is_verified_and_imported_with_its_job(tmp_path: Path) -> None:

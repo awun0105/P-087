@@ -42,6 +42,10 @@ def test_fresh_database_reaches_latest_version(runtime_database_url: str) -> Non
         "r2s_validation_selections",
         "r2s_release_seals",
         "r2s_release_seal_failures",
+        "r2s_scene_heads",
+        "r2s_scene_head_repairs",
+        "r2s_scene_head_backfill_items",
+        "r2s_scene_publications",
     } <= _tables(database)
     database.ping()
     # Khởi động lại (process khác) không chạy lại migration, không lỗi.
@@ -76,8 +80,8 @@ def test_legacy_v1_sqlite_upgrades_without_losing_rows(tmp_path: Path) -> None:
     assert "r2s_upload_sessions" in _tables(database)
 
 
-def test_v8_database_adds_validation_history_without_losing_rows(tmp_path: Path) -> None:
-    """Migrations 9–11 are additive and keep pre-existing project/job state intact."""
+def test_v8_database_adds_validation_and_scene_head_tables_without_losing_rows(tmp_path: Path) -> None:
+    """Migrations 9–12 are additive and keep pre-existing project/job state intact."""
     path = tmp_path / "legacy-v8.db"
     with sqlite3.connect(path) as legacy:
         legacy.execute("CREATE TABLE r2s_schema (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL)")
@@ -94,12 +98,16 @@ def test_v8_database_adds_validation_history_without_losing_rows(tmp_path: Path)
         )
 
     database = RuntimeDatabase(f"sqlite:///{path}")
-    assert database.schema_version() == LATEST_SCHEMA_VERSION == 11
+    assert database.schema_version() == LATEST_SCHEMA_VERSION == 12
     assert {
         "r2s_validation_runs",
         "r2s_validation_selections",
         "r2s_release_seals",
         "r2s_release_seal_failures",
+        "r2s_scene_heads",
+        "r2s_scene_head_repairs",
+        "r2s_scene_head_backfill_items",
+        "r2s_scene_publications",
     } <= _tables(database)
     with database.transaction() as tx:
         assert tx.execute("SELECT project_id FROM r2s_projects").fetchall() == [("project-preserved",)]
@@ -125,7 +133,7 @@ def test_v9_database_adds_release_seals_without_losing_rows(tmp_path: Path) -> N
 
     database = RuntimeDatabase(f"sqlite:///{path}")
 
-    assert database.schema_version() == LATEST_SCHEMA_VERSION == 11
+    assert database.schema_version() == LATEST_SCHEMA_VERSION == 12
     assert {"r2s_release_seals", "r2s_release_seal_failures"} <= _tables(database)
     with database.transaction() as tx:
         assert tx.execute("SELECT project_id FROM r2s_projects").fetchall() == [("project-v9",)]
@@ -152,10 +160,41 @@ def test_v10_database_adds_release_seal_diagnostics_without_losing_intents(tmp_p
 
     database = RuntimeDatabase(f"sqlite:///{path}")
 
-    assert database.schema_version() == LATEST_SCHEMA_VERSION == 11
+    assert database.schema_version() == LATEST_SCHEMA_VERSION == 12
     assert {"r2s_release_seals", "r2s_release_seal_failures"} <= _tables(database)
     with database.transaction() as tx:
         assert tx.execute("SELECT job_id FROM r2s_release_seals").fetchall() == [("job-v10",)]
+
+
+def test_v11_database_adds_scene_head_tables_without_losing_release_rows(tmp_path: Path) -> None:
+    """Migration 12 adds scene head/backfill slots without rewriting release evidence."""
+    path = tmp_path / "legacy-v11.db"
+    with sqlite3.connect(path) as legacy:
+        legacy.execute("CREATE TABLE r2s_schema (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL)")
+        legacy.execute("INSERT INTO r2s_schema VALUES (1, 0)")
+        for version, statements in database_module.MIGRATIONS:
+            if version > 11:
+                continue
+            for statement in statements:
+                legacy.execute(statement)
+            legacy.execute("UPDATE r2s_schema SET version=? WHERE id=1", (version,))
+        legacy.execute(
+            """INSERT INTO r2s_release_seals
+               (job_id,candidate_checksum,validation_report_checksum,approval_record_checksum,generation,intent_checksum,payload)
+               VALUES ('job-v11','candidate','report','approval',1,'intent','{}')"""
+        )
+
+    database = RuntimeDatabase(f"sqlite:///{path}")
+
+    assert database.schema_version() == LATEST_SCHEMA_VERSION == 12
+    assert {
+        "r2s_scene_heads",
+        "r2s_scene_head_repairs",
+        "r2s_scene_head_backfill_items",
+        "r2s_scene_publications",
+    } <= _tables(database)
+    with database.transaction() as tx:
+        assert tx.execute("SELECT job_id FROM r2s_release_seals").fetchall() == [("job-v11",)]
 
 
 def test_upload_records_and_row_locks_work(runtime_database_url: str, tmp_path: Path) -> None:

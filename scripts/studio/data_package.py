@@ -79,6 +79,7 @@ SANITIZE_TABLES = (
     "r2s_resource_waits",
     "r2s_workers",
     "r2s_upload_sessions",
+    "r2s_scene_publications",
 )
 ACTIVE_JOB_STATUSES = {"QUEUED", "RUNNING"}
 ACTIVE_IMPORT_STATUSES = {"UPLOADING", "PACKAGING", "RUNNING", "PENDING", "PROCESSING", "VERIFYING"}
@@ -728,6 +729,10 @@ def _active_work_gate(root: Path, database: Path) -> dict[str, int]:
     try:
         tables = _table_names(connection)
         _reject_nonempty_trash(connection, "đóng gói")
+        if "r2s_scene_publications" in tables:
+            count = int(connection.execute("SELECT COUNT(*) FROM r2s_scene_publications").fetchone()[0])
+            if count:
+                raise PackageError("Không thể đóng gói khi còn scene publication đang chờ commit hoặc cần phục hồi")
         if "r2s_resource_reservations" in tables:
             count = int(connection.execute("SELECT COUNT(*) FROM r2s_resource_reservations").fetchone()[0])
             if count:

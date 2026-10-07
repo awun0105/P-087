@@ -89,6 +89,49 @@ class ArtifactResolver:
         """Key logical `jobs/<namespace>/<path>` dùng chung giữa filesystem và kho file."""
         return self._parse_relative_path(artifact_uri).as_posix()
 
+    def list_uris(self, artifact_uri_prefix: str) -> list[str]:
+        """Liệt kê URI dưới prefix cho công cụ repair tường minh, không dùng trong request lookup thông thường."""
+        if not artifact_uri_prefix.startswith(_URI_PREFIX) or not artifact_uri_prefix.endswith("/"):
+            raise InvalidArtifactUriError("artifact listing requires a directory URI prefix")
+        raw = artifact_uri_prefix.removeprefix(_URI_PREFIX).removesuffix("/")
+        parts = raw.split("/")
+        if not raw or any(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", part) is None for part in parts):
+            raise InvalidArtifactUriError("artifact listing prefix contains an unsafe path")
+        relative_prefix = (PurePosixPath("jobs") / PurePosixPath(*parts)).as_posix()
+        local_root = self.artifact_root
+        for part in PurePosixPath(relative_prefix).parts:
+            local_root /= part
+            if local_root.is_symlink():
+                raise InvalidArtifactUriError("artifact listing prefix traverses a symlink")
+        local_root = local_root.resolve()
+        if not local_root.is_relative_to(self.artifact_root):
+            raise InvalidArtifactUriError("artifact listing prefix escapes ARTIFACT_ROOT")
+
+        uris: set[str] = set()
+        if local_root.is_dir() and not local_root.is_symlink():
+            for path in local_root.rglob("*"):
+                if path.is_symlink():
+                    raise InvalidArtifactUriError("artifact listing contains a symlink")
+                if path.is_file():
+                    resolved = path.resolve()
+                    if not resolved.is_relative_to(self.artifact_root):
+                        raise InvalidArtifactUriError("artifact listing contains a path outside ARTIFACT_ROOT")
+                    relative = path.relative_to(self.artifact_root).as_posix()
+                    uris.add(f"artifact://{relative}")
+
+        if self.remote is not None:
+            key_prefix = f"{relative_prefix}/"
+            for item in self.remote.store.list_objects(self.remote.key(key_prefix)):
+                if not item.key.startswith(self.remote.prefix):
+                    continue
+                relative = item.key.removeprefix(self.remote.prefix)
+                if not relative.startswith(key_prefix):
+                    continue
+                uri = f"artifact://{relative}"
+                self._parse_relative_path(uri)
+                uris.add(uri)
+        return sorted(uris)
+
     def published(self, artifact_uri: str) -> None:
         """Hook sau khi publish cục bộ: đẩy artifact lên kho file nếu có."""
         if self.remote is not None:

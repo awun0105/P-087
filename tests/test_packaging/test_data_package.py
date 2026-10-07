@@ -42,6 +42,22 @@ def _create_schema(connection: sqlite3.Connection) -> None:
         CREATE TABLE r2s_resource_waits (wait_id TEXT PRIMARY KEY, payload TEXT NOT NULL);
         CREATE TABLE r2s_upload_sessions (session_id TEXT PRIMARY KEY, payload TEXT NOT NULL);
         CREATE TABLE r2s_scene_requests (job_id TEXT PRIMARY KEY, status TEXT NOT NULL, payload TEXT NOT NULL);
+        CREATE TABLE r2s_scene_heads (
+            job_id TEXT PRIMARY KEY, generation INTEGER NOT NULL,
+            allocation_sequence INTEGER NOT NULL, head_checksum TEXT NOT NULL, payload TEXT NOT NULL
+        );
+        CREATE TABLE r2s_scene_head_repairs (
+            job_id TEXT PRIMARY KEY, status TEXT NOT NULL, generation INTEGER NOT NULL,
+            repair_checksum TEXT NOT NULL, payload TEXT NOT NULL
+        );
+        CREATE TABLE r2s_scene_head_backfill_items (
+            job_id TEXT NOT NULL, scene_revision TEXT NOT NULL, item_checksum TEXT NOT NULL,
+            payload TEXT NOT NULL, PRIMARY KEY(job_id, scene_revision)
+        );
+        CREATE TABLE r2s_scene_publications (
+            job_id TEXT PRIMARY KEY, expected_generation INTEGER NOT NULL, target_revision TEXT NOT NULL,
+            lease_expires_at TEXT NOT NULL, payload TEXT NOT NULL
+        );
         CREATE TABLE r2s_validation_runs (
             run_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, candidate_checksum TEXT NOT NULL,
             config_checksum TEXT NOT NULL, attempt INTEGER NOT NULL, status TEXT NOT NULL,
@@ -225,6 +241,55 @@ def test_pack_rejects_nonempty_trash_table(source_tree: Path, tmp_path: Path) ->
         data_package.pack(source_tree, output)
     assert not output.exists()
     assert not Path(str(output) + ".partial").exists()
+
+
+def test_pack_preserves_scene_head_state_and_rejects_pending_publication(source_tree: Path, tmp_path: Path) -> None:
+    """Stable verified head/backfill rows survive; pending publication blocks handoff."""
+    database = source_tree / "data/studio_local/runtime.db"
+    expected = {
+        "r2s_scene_heads": [("job-a", 2, 7, "sha256:" + "a" * 64, '{"scene_revision":"rev-007"}')],
+        "r2s_scene_head_repairs": [("job-a", "COMPLETE", 9, "sha256:" + "b" * 64, '{"verified_count":7}')],
+        "r2s_scene_head_backfill_items": [
+            ("job-a", "rev-007", "sha256:" + "c" * 64, '{"supersedes_revision":"rev-006"}')
+        ],
+    }
+    connection = sqlite3.connect(database)
+    try:
+        for table, rows in expected.items():
+            columns = {
+                "r2s_scene_heads": "job_id,generation,allocation_sequence,head_checksum,payload",
+                "r2s_scene_head_repairs": "job_id,status,generation,repair_checksum,payload",
+                "r2s_scene_head_backfill_items": "job_id,scene_revision,item_checksum,payload",
+            }[table]
+            placeholders = ",".join("?" for _ in rows[0])
+            connection.execute(f"INSERT INTO {table}({columns}) VALUES ({placeholders})", rows[0])
+        connection.commit()
+    finally:
+        connection.close()
+
+    archive = data_package.pack(source_tree, tmp_path / "scene-head-state.zip")
+    with zipfile.ZipFile(archive) as package:
+        restored_db = tmp_path / "scene-head-snapshot.db"
+        restored_db.write_bytes(package.read(data_package.RUNTIME_DB_MEMBER))
+    restored = sqlite3.connect(restored_db)
+    try:
+        for table, rows in expected.items():
+            assert restored.execute(f"SELECT * FROM {table}").fetchall() == rows
+    finally:
+        restored.close()
+
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            "INSERT INTO r2s_scene_publications(job_id,expected_generation,target_revision,lease_expires_at,payload) "
+            "VALUES (?,?,?,?,?)",
+            ("job-a", 2, "rev-008", "2026-10-08T00:00:00+00:00", "{}"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    with pytest.raises(data_package.PackageError, match="scene publication"):
+        data_package.pack(source_tree, tmp_path / "pending-scene-publication.zip")
 
 
 def test_verify_rejects_nonempty_trash_table(source_tree: Path, tmp_path: Path) -> None:

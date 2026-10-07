@@ -195,6 +195,36 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
                 PRIMARY KEY(job_id, candidate_checksum, validation_report_checksum, approval_record_checksum))""",
         ),
     ),
+    (
+        # Durable scene head, resumable legacy backfill, and the pending writer slot used by AUD-10.
+        12,
+        (
+            """CREATE TABLE r2s_scene_heads (
+                job_id TEXT PRIMARY KEY,
+                generation INTEGER NOT NULL CHECK(generation > 0),
+                allocation_sequence INTEGER NOT NULL CHECK(allocation_sequence > 0),
+                head_checksum TEXT NOT NULL,
+                payload TEXT NOT NULL)""",
+            """CREATE TABLE r2s_scene_head_repairs (
+                job_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                generation INTEGER NOT NULL CHECK(generation > 0),
+                repair_checksum TEXT NOT NULL,
+                payload TEXT NOT NULL)""",
+            """CREATE TABLE r2s_scene_head_backfill_items (
+                job_id TEXT NOT NULL,
+                scene_revision TEXT NOT NULL,
+                item_checksum TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                PRIMARY KEY(job_id, scene_revision))""",
+            """CREATE TABLE r2s_scene_publications (
+                job_id TEXT PRIMARY KEY,
+                expected_generation INTEGER NOT NULL CHECK(expected_generation > 0),
+                target_revision TEXT NOT NULL,
+                lease_expires_at TEXT NOT NULL,
+                payload TEXT NOT NULL)""",
+        ),
+    ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 

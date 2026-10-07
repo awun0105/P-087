@@ -216,7 +216,7 @@ AUD-19. Static-map consumer chỉ enable sau registration QA, không bắt AUD-1
 đợi whole AUD-12 epic. Sensor calibration QA và map registration QA không tráo nhau.
 
 Progress hiện tại: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3,
-AUD-03.S1–S3 và AUD-04.S1–S3 đã được commit riêng theo sprint. AUD-01.S3 verified legacy
+AUD-03.S1–S3, AUD-04.S1–S3 và AUD-10.S1 đã được commit riêng theo sprint. AUD-01.S3 verified legacy
 ownership recovery, candidate ZIP/manifest, current rotated object pose,
 retained floor collision, relative USD asset composition, và bất biến bytes của
 artifact cũ bằng OpenUSD runtime. AUD-02.S3 nối capability blocker qua typed
@@ -233,7 +233,11 @@ build, Ruff và CodeGraph đều pass. AUD-04.S3 kiểm tra hai registry độc 
 SQLite, stale revision ngay trước seal marker và API ZIP/manifest byte equality;
 matrix pass 56 với 4 PostgreSQL skips do thiếu `R2S_TEST_POSTGRES_URL`. Browser
 MCP gate còn UNVERIFIED; frontend checks không thay thế browser review hay
-PostgreSQL proof. Tiếp theo là AUD-10.S1.
+PostgreSQL proof. AUD-10.S1 adds migration v12, checksummed head/backfill records,
+bounded verify/recheck repair pages, a read-only/apply CLI, package import/export
+and trash/restore consumers. Its matrix passed 123 tests with 4 PostgreSQL skips;
+`SceneEditor.current()` remains on the legacy recovery path until AUD-10.S3.
+Tiếp theo là AUD-10.S2.
 
 AUD-23 có client preparation identity trước AUD-15/16 cache consumers; supported
 sensor mapping chốt trước AUD-13 overlay QA. Không cần full odometry/registration
