@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
 from uuid import uuid4
@@ -22,6 +22,12 @@ ZERO = "sha256:" + "0" * 64
 class ReleaseSealStatus(StrEnum):
     PENDING = "PENDING"
     SEALED = "SEALED"
+
+
+class ReleaseSealFailureCode(StrEnum):
+    """Non-sensitive diagnostic stored for a release attempt that needs reviewer retry."""
+
+    SEAL_FAILED = "SEAL_FAILED"
 
 
 class ReleaseSealError(ValueError):
@@ -58,9 +64,17 @@ class ReleaseSealIntent(BaseModel):
         approval_record_checksum: str,
         manifest: ReleaseManifest,
         archive_ref: ProductArtifactRef | None = None,
+        manifest_payload_bytes: bytes | None = None,
     ) -> ReleaseSealIntent:
         """Serialize the manifest once and bind logical plus exact-byte identity."""
-        payload = manifest.model_dump_json(indent=2)
+        payload_bytes = (
+            manifest_payload_bytes
+            if manifest_payload_bytes is not None
+            else manifest.model_dump_json(indent=2).encode("utf-8")
+        )
+        payload = payload_bytes.decode("utf-8")
+        if ReleaseManifest.model_validate_json(payload) != manifest:
+            raise ReleaseSealError("Manifest payload bytes do not match the supplied manifest")
         draft = cls(
             schema_version="1.0",
             seal_id=uuid4().hex,
@@ -124,6 +138,58 @@ class ReleaseSealRepository:
         with self.database.transaction() as tx:
             row = self._select(tx, identity)
         return self._parse_row(row) if row is not None else None
+
+    def has_failure(
+        self, job_id: str, candidate_checksum: str, validation_report_checksum: str, approval_record_checksum: str
+    ) -> bool:
+        identity = (job_id, candidate_checksum, validation_report_checksum, approval_record_checksum)
+        with self.database.transaction() as tx:
+            row = tx.execute(
+                """SELECT 1 FROM r2s_release_seal_failures
+                   WHERE job_id=? AND candidate_checksum=? AND validation_report_checksum=?
+                     AND approval_record_checksum=?""",
+                identity,
+            ).fetchone()
+        return row is not None
+
+    def record_failure(
+        self,
+        job_id: str,
+        candidate_checksum: str,
+        validation_report_checksum: str,
+        approval_record_checksum: str,
+    ) -> None:
+        """Persist a safe failure code and attempt count; never store provider error text or secrets."""
+        with self.database.transaction(write=True) as tx:
+            tx.execute(
+                """INSERT INTO r2s_release_seal_failures
+                   (job_id,candidate_checksum,validation_report_checksum,approval_record_checksum,
+                    failure_code,attempts,updated_at)
+                   VALUES (?,?,?,?,?,1,?)
+                   ON CONFLICT(job_id,candidate_checksum,validation_report_checksum,approval_record_checksum)
+                   DO UPDATE SET failure_code=excluded.failure_code,attempts=r2s_release_seal_failures.attempts+1,
+                     updated_at=excluded.updated_at""",
+                (
+                    job_id,
+                    candidate_checksum,
+                    validation_report_checksum,
+                    approval_record_checksum,
+                    ReleaseSealFailureCode.SEAL_FAILED.value,
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
+
+    def clear_failure(
+        self, job_id: str, candidate_checksum: str, validation_report_checksum: str, approval_record_checksum: str
+    ) -> None:
+        identity = (job_id, candidate_checksum, validation_report_checksum, approval_record_checksum)
+        with self.database.transaction(write=True) as tx:
+            tx.execute(
+                """DELETE FROM r2s_release_seal_failures
+                   WHERE job_id=? AND candidate_checksum=? AND validation_report_checksum=?
+                     AND approval_record_checksum=?""",
+                identity,
+            )
 
     def record_archive(self, intent: ReleaseSealIntent, archive_ref: ProductArtifactRef) -> ReleaseSealIntent:
         if intent.archive_ref is not None:

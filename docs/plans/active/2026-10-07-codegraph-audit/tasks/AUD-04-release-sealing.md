@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- PLANNED; P0; EX-PRODUCT; canonical PRODUCT-11; SELF-CODE minimal seal protocol.
+- ACTIVE; P0; EX-PRODUCT; canonical PRODUCT-11; SELF-CODE minimal seal protocol.
 - Goal: manifest ZIP/API giữ cùng bytes/logical identity và checksum qua retry.
 - [Agent guide](../AGENT_GUIDE.md), [ADR 0013](../../../../decisions/0013-validation-evidence-and-release-identity.md).
 
@@ -31,11 +31,13 @@ archive_ref nếu đã publish, status và CAS generation. Persist exact seriali
 payload để timezone/format không tạo bytes khác trên retry. Không serialize
 credentials/local paths. Timestamp chỉ cấp một lần tại intent creation.
 
-Record status có thể pending/sealed/failed diagnostic; lifecycle API vẫn giữ
-APPROVED khi chưa commit và RELEASED sau verify cả archive/manifest. Final marker
-phải rõ: dùng manifest publication hiện có hoặc committed DB record theo S1;
-reader không suy RELEASED từ intent/presence ZIP. Existing artifact phải verify
-checksum và embedded manifest; mismatches block, không overwrite để chữa lệch.
+Intent status là PENDING/SEALED; bảng diagnostic riêng chỉ lưu failure code an
+toàn, attempt count và timestamp, không lưu provider exception hoặc secret.
+Lifecycle API vẫn giữ APPROVED khi chưa commit và RELEASED sau verify cả
+archive/manifest. SEALED là commit marker cho intent mới; release cũ không có
+intent vẫn đọc được nếu toàn bộ ZIP closure hợp lệ. Reader không suy RELEASED
+từ intent/presence ZIP. Existing artifact phải verify checksum và embedded
+manifest; mismatches block, không overwrite để chữa lệch.
 
 ## Logic change và dependent updates
 
@@ -80,7 +82,9 @@ diagnostic theo invariant, không claim RELEASED. Ghi lỗi thay vì silent swal
 automatic sealing vẫn cho explicit retry khi approval đã persist.
 Tests: failure trước ZIP, sau ZIP, sau manifest/trước record; remote store transient
 error; rerun after crash; wrong existing bytes; resolver closure/ZIP extraction.
-**Exit:** [ ] each boundary recovers same bytes; [ ] mismatch fails closed.
+**Exit:** [x] failure before ZIP, after ZIP, after manifest/before commit marker,
+missing ZIP và pre-intent partial ZIP recover mà không đổi manifest identity;
+[x] checksum/closure mismatch giữ APPROVED, không tải xuống và không overwrite.
 
 ## Sprint AUD-04.S3 — Concurrent seals và API consumer
 
@@ -156,3 +160,48 @@ DONE khi fault matrix/concurrency/ZIP equality pass; old releases giữ checksum
   boundary; those are S2/S3. No production release data or runtime DB was changed.
 - Next: AUD-04.S2 verifies every reused artifact and closes recovery behavior at
   pre-ZIP, post-ZIP, post-manifest and pre-commit failure boundaries.
+
+### AUD-04.S2 — publication recovery và committed release
+
+- Base commit: `6c1335e` (`AUD-04.S1`). CodeGraph re-traced `decide` →
+  `seal_release` → `review_state`, the release download route and `ReviewPanel`.
+  `review_state` has one API status consumer and feeds the download route; the
+  UI contract now carries an explicit safe seal diagnostic and exposes retry to
+  Reviewer while status is APPROVED.
+- `review_state` now requires a valid, current ReleaseManifest, a committed
+  SEALED intent for new releases, exact API/ZIP manifest bytes, intact ZIP CRCs,
+  exactly the package members plus the three release records, unchanged package
+  member bytes, and validation/approval records matching the selected trusted
+  evidence. Pre-intent legacy releases remain readable only after the same ZIP
+  closure check. A missing/corrupt/mismatched artifact remains APPROVED, has no
+  downloadable release reference, and projects a generic retry diagnostic.
+- `seal_release` verifies before reuse and publishes immutable release objects
+  idempotently. It adopts byte-identical manifest payloads from valid pre-intent
+  partial ZIPs, restores a missing ZIP only when its rebuilt checksum matches
+  the frozen ref, publishes/validates the API manifest, then writes SEALED last.
+  Existing wrong bytes are retained and fail closed. A migration v11 table stores
+  only a fixed safe failure code, attempt count and timestamp; success clears the
+  diagnostic. No raw provider error or credential is persisted or returned.
+- Updated `ReviewStateView`/`ReviewPanel` together with the backend API projection:
+  the retry action remains available to Reviewer for APPROVED releases even if
+  release integrity diagnostics are present. The API download route inherits
+  the stricter projection and returns 404 for an invalid archive.
+- Tests cover failure before ZIP, after ZIP, after manifest but before SEALED,
+  recovery of a missing archive, exact adoption of a pre-intent partial archive,
+  immutable wrong bytes, API download fail-closed behavior, and v10→v11 migration
+  without losing the v10 intent row.
+- CodeGraph after implementation: 749 files, 13,412 nodes, 38,084 edges; index
+  up to date. `codegraph explore` confirms the read/download flow uses the strict
+  `review_state` projection and UI retry reaches `POST /release-seal`.
+- Verification: **53 passed, 4 skipped** across release sealing, review workflow,
+  review API, artifact store, release contracts and runtime migrations. Four skips
+  require unavailable `R2S_TEST_POSTGRES_URL`; SQLite v10→v11 migration and
+  recovery cases ran. `.venv/bin/ruff check src/ tests/` passed;
+  `.venv/bin/ruff format --check src/ tests/` reported 465 files formatted.
+  Frontend: `npm run test` **42 files / 275 tests passed**, `npm run lint`,
+  `npm run typecheck` and `npm run build` passed. `git diff --check` passed.
+- Browser DevTools MCP was not exercised for this sprint; the earlier
+  AUD-03.S3 browser gate remains **UNVERIFIED**. No live PostgreSQL or remote
+  object store was available, and no production release/runtime data was changed.
+- Next: AUD-04.S3 covers concurrent seals/CAS losers and API equality under
+  multiple registry/process consumers.

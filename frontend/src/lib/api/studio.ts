@@ -700,6 +700,7 @@ export interface ReviewStateView {
     validation_report_checksum: string | null;
   } | null;
   release_archive: { artifact_uri: string } | null;
+  release_seal_error: string | null;
   blockers: string[];
 }
 
@@ -784,6 +785,7 @@ function parseReviewState(value: unknown): ReviewStateView {
       validation_report_checksum: text(release.validation_report_checksum),
     },
     release_archive: archive ? { artifact_uri: archive } : null,
+    release_seal_error: text(value.release_seal_error),
     blockers: strings(value.blockers),
   };
 }

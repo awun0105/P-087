@@ -36,8 +36,9 @@ Sealing retry sau lỗi publish manifest giữ ZIP cũ nhưng tạo timestamp/ma
 
 Giữ ValidationReport/ApprovalRecord/ReleaseManifest normative fields. Proposed
 ValidationRunRecord và SealIntent là backend operational records riêng, có
-version, exact checksum bindings và CAS/lease. AUD-03/AUD-04 S1 chốt storage,
-migration và corruption handling; mọi ref trong record phải kiểm byte checksum.
+version, exact checksum bindings và CAS/lease. AUD-03/AUD-04 S1–S2 chốt storage,
+migration, retry diagnostics và corruption handling; mọi ref trong record phải
+kiểm byte checksum.
 
 Result của worker cũ không attach vào current revision mới. Failed/retried runs
 có run_id/attempt riêng; immutable report URI phải cho phép lịch sử nhiều run
@@ -78,10 +79,14 @@ records are not Isaac runtime acceptance.
 
 AUD-04.S1 added RuntimeDatabase v10 `r2s_release_seals` and persisted the exact
 approval-bound manifest payload, timestamp, byte/logical checksums, archive ref
-and CAS generation before publication. The ZIP-before-manifest regression now
-retries with the same embedded and API manifest bytes after the clock advances.
-The existing artifact-derived read path remains compatible with sealed releases
-that predate the intent table. AUD-04.S2/S3 still own full artifact recovery and
+and CAS generation before publication. AUD-04.S2 adds migration v11 safe retry
+diagnostics; verifies exact manifest bytes, package ZIP closure, report and
+approval identities before reuse or RELEASED projection; retains APPROVED and
+blocks download on integrity failure; adopts valid pre-intent partial
+publications without changing embedded manifest bytes; and commits SEALED only
+after archive and API manifest verification. Component/API tests, frontend
+lint/typecheck/build and local SQLite checks pass. The browser DevTools MCP and
+PostgreSQL external-runtime gates remain unverified. AUD-04.S3 still owns
 concurrent seal acceptance; AUD-05 still owns worker authentication and real
 Isaac acceptance. This ADR remains **Proposed** until its dependent implementation
 and acceptance gates have all been reviewed.

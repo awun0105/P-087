@@ -82,6 +82,24 @@ def test_reviewer_approves_and_downloads_release(setup, monkeypatch: pytest.Monk
     assert again.status_code == 409
 
 
+def test_release_download_fails_closed_when_archive_bytes_change(setup, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(setup.auth, "current_user", lambda request: _user("reviewer"))
+    response = setup.client.post(f"/api/v1/jobs/{setup.job}/review-decision", json=setup.body)
+    assert response.status_code == 200 and response.json()["record"]["status"] == "RELEASED"
+    archive_uri = f"artifact://jobs/{setup.job}/release/{setup.candidate_checksum.removeprefix('sha256:')}/release.zip"
+    archive_path = setup.registry.runtime_resolver.locate(archive_uri)
+    assert archive_path is not None
+    archive_path.write_bytes(archive_path.read_bytes() + b"corrupt")
+
+    state = setup.client.get(f"/api/v1/jobs/{setup.job}/review-state")
+    download = setup.client.get(f"/api/v1/jobs/{setup.job}/release-download")
+
+    assert state.status_code == 200
+    assert state.json()["record"]["status"] == "APPROVED"
+    assert state.json()["release"] is None and state.json()["release_seal_error"]
+    assert download.status_code == 404
+
+
 def test_legacy_report_cannot_claim_isaac_version_or_enable_review_api(setup, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(setup.auth, "current_user", lambda request: _user("reviewer"))
     database = setup.registry.persistence.database

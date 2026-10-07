@@ -17,7 +17,14 @@ from src.services.orchestration.review.release_seals import (
     ReleaseSealRepository,
     ReleaseSealStatus,
 )
-from src.services.orchestration.review.workflow import decide, release_uri, review_state, seal_release
+from src.services.orchestration.review.workflow import (
+    ReviewError,
+    _verify_release_archive,
+    decide,
+    release_uri,
+    review_state,
+    seal_release,
+)
 from tests.test_orchestration.test_review_workflow import _install_worker_run, _packaged, _report
 
 
@@ -167,3 +174,202 @@ def test_existing_release_without_seal_intent_remains_readable(tmp_path: Path) -
 
     assert existing.record.status == SceneRevisionStatus.RELEASED
     assert existing.release is not None and existing.release_archive is not None
+
+
+def test_archive_publish_failure_is_persisted_and_retry_completes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, job, candidate = _packaged(tmp_path)
+    report = _report(candidate)
+    _install_worker_run(registry, job, review_state(registry, job.job_id).package, report)
+    store = registry.scene.store
+    publish = store.publish
+    failed = False
+
+    def fail_archive_once(reference, payload):  # noqa: ANN001
+        nonlocal failed
+        if reference.artifact_type == "ReleaseArchive" and not failed:
+            failed = True
+            raise OSError("remote store transient detail must not be persisted")
+        return publish(reference, payload)
+
+    monkeypatch.setattr(store, "publish", fail_archive_once)
+    approved = decide(
+        registry, job.job_id, "u-rev", ApprovalDecision.APPROVE, candidate, report.report_checksum, [], None
+    )
+
+    assert approved.record.status == SceneRevisionStatus.APPROVED
+    assert approved.release_seal_error is not None
+    assert "remote store transient detail" not in approved.release_seal_error
+    assert registry.persistence is not None
+    repository = ReleaseSealRepository(registry.persistence.database)
+    assert repository.has_failure(job.job_id, candidate, report.report_checksum, approved.approval.record_checksum)
+
+    released = seal_release(registry, job.job_id)
+
+    assert released.record.status == SceneRevisionStatus.RELEASED
+    assert released.release_seal_error is None
+    assert not repository.has_failure(job.job_id, candidate, report.report_checksum, approved.approval.record_checksum)
+
+
+def test_crash_after_manifest_before_seal_marker_reuses_all_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, job, candidate = _packaged(tmp_path)
+    report = _report(candidate)
+    _install_worker_run(registry, job, review_state(registry, job.job_id).package, report)
+    mark_sealed = ReleaseSealRepository.mark_sealed
+    failed = False
+
+    def fail_marker_once(repository, intent):  # noqa: ANN001
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise OSError("crash before commit marker")
+        return mark_sealed(repository, intent)
+
+    monkeypatch.setattr(ReleaseSealRepository, "mark_sealed", fail_marker_once)
+    approved = decide(
+        registry, job.job_id, "u-rev", ApprovalDecision.APPROVE, candidate, report.report_checksum, [], None
+    )
+    manifest_path = registry.runtime_resolver.locate(release_uri(job.job_id, candidate))
+    archive_uri = f"artifact://jobs/{job.job_id}/release/{candidate.removeprefix('sha256:')}/release.zip"
+    archive_path = registry.runtime_resolver.locate(archive_uri)
+    assert approved.record.status == SceneRevisionStatus.APPROVED
+    assert manifest_path is not None and archive_path is not None
+    manifest_bytes = manifest_path.read_bytes()
+    archive_bytes = archive_path.read_bytes()
+    assert review_state(registry, job.job_id).release is None
+
+    monkeypatch.setattr(ReleaseSealRepository, "mark_sealed", mark_sealed)
+    released = seal_release(registry, job.job_id)
+
+    assert released.record.status == SceneRevisionStatus.RELEASED
+    assert manifest_path.read_bytes() == manifest_bytes
+    assert archive_path.read_bytes() == archive_bytes
+    assert released.release_seal_error is None
+
+
+def test_missing_archive_is_rebuilt_from_frozen_identity(tmp_path: Path) -> None:
+    registry, job, candidate = _packaged(tmp_path)
+    report = _report(candidate)
+    _install_worker_run(registry, job, review_state(registry, job.job_id).package, report)
+    released = decide(
+        registry, job.job_id, "u-rev", ApprovalDecision.APPROVE, candidate, report.report_checksum, [], None
+    )
+    assert released.record.status == SceneRevisionStatus.RELEASED
+    archive_uri = f"artifact://jobs/{job.job_id}/release/{candidate.removeprefix('sha256:')}/release.zip"
+    archive_path = registry.runtime_resolver.locate(archive_uri)
+    assert archive_path is not None
+    archive_path.unlink()
+
+    damaged = review_state(registry, job.job_id)
+    assert damaged.record.status == SceneRevisionStatus.APPROVED
+    assert damaged.release is None and damaged.release_seal_error is not None
+
+    recovered = seal_release(registry, job.job_id)
+
+    assert recovered.record.status == SceneRevisionStatus.RELEASED
+    assert archive_path.is_file()
+
+
+def test_corrupt_existing_archive_fails_closed_and_is_never_overwritten(tmp_path: Path) -> None:
+    registry, job, candidate = _packaged(tmp_path)
+    report = _report(candidate)
+    _install_worker_run(registry, job, review_state(registry, job.job_id).package, report)
+    released = decide(
+        registry, job.job_id, "u-rev", ApprovalDecision.APPROVE, candidate, report.report_checksum, [], None
+    )
+    assert released.record.status == SceneRevisionStatus.RELEASED
+    archive_uri = f"artifact://jobs/{job.job_id}/release/{candidate.removeprefix('sha256:')}/release.zip"
+    archive_path = registry.runtime_resolver.locate(archive_uri)
+    assert archive_path is not None
+    corrupt = archive_path.read_bytes() + b"mutated immutable release"
+    archive_path.write_bytes(corrupt)
+
+    damaged = review_state(registry, job.job_id)
+
+    assert damaged.record.status == SceneRevisionStatus.APPROVED
+    assert damaged.release is None and damaged.release_archive is None
+    assert damaged.release_seal_error is not None
+    with pytest.raises(ReviewError):
+        seal_release(registry, job.job_id)
+    assert archive_path.read_bytes() == corrupt
+
+
+def test_api_manifest_bytes_must_match_the_frozen_zip_payload(tmp_path: Path) -> None:
+    registry, job, candidate = _packaged(tmp_path)
+    report = _report(candidate)
+    _install_worker_run(registry, job, review_state(registry, job.job_id).package, report)
+    released = decide(
+        registry, job.job_id, "u-rev", ApprovalDecision.APPROVE, candidate, report.report_checksum, [], None
+    )
+    assert released.record.status == SceneRevisionStatus.RELEASED
+    manifest_path = registry.runtime_resolver.locate(release_uri(job.job_id, candidate))
+    assert manifest_path is not None
+    changed_bytes = manifest_path.read_bytes() + b"\n"
+    manifest_path.write_bytes(changed_bytes)
+
+    changed = review_state(registry, job.job_id)
+
+    assert changed.record.status == SceneRevisionStatus.APPROVED
+    assert changed.release is None and changed.release_seal_error is not None
+    with pytest.raises(ReviewError):
+        seal_release(registry, job.job_id)
+    assert manifest_path.read_bytes() == changed_bytes
+
+
+def test_release_archive_rejects_unexpected_zip_members(tmp_path: Path) -> None:
+    registry, job, candidate = _packaged(tmp_path)
+    report = _report(candidate)
+    _install_worker_run(registry, job, review_state(registry, job.job_id).package, report)
+    released = decide(
+        registry, job.job_id, "u-rev", ApprovalDecision.APPROVE, candidate, report.report_checksum, [], None
+    )
+    assert released.record.status == SceneRevisionStatus.RELEASED
+    assert released.package is not None and released.package.package_ref is not None
+    assert released.release is not None and released.release_archive is not None
+    package_zip = registry.runtime_resolver.require(released.package.package_ref).read_bytes()
+    archive_path = registry.runtime_resolver.require(released.release_archive)
+    with ZipFile(archive_path) as source:
+        members = [(info, source.read(info.filename)) for info in source.infolist()]
+    tampered = BytesIO()
+    with ZipFile(tampered, "w") as destination:
+        for info, content in members:
+            destination.writestr(info, content)
+        destination.writestr("unexpected.txt", b"not in the candidate package")
+    manifest_path = registry.runtime_resolver.locate(release_uri(job.job_id, candidate))
+    assert manifest_path is not None
+
+    with pytest.raises(ValueError, match="missing or unexpected"):
+        _verify_release_archive(
+            package_zip,
+            tampered.getvalue(),
+            manifest_path.read_bytes(),
+            released.validation,
+            released.approval,
+        )
+
+
+def test_pre_intent_partial_archive_is_adopted_without_changing_manifest_bytes(tmp_path: Path) -> None:
+    registry, job, candidate = _packaged(tmp_path)
+    report = _report(candidate)
+    _install_worker_run(registry, job, review_state(registry, job.job_id).package, report)
+    released = decide(
+        registry, job.job_id, "u-rev", ApprovalDecision.APPROVE, candidate, report.report_checksum, [], None
+    )
+    assert released.record.status == SceneRevisionStatus.RELEASED
+    manifest_path = registry.runtime_resolver.locate(release_uri(job.job_id, candidate))
+    archive_uri = f"artifact://jobs/{job.job_id}/release/{candidate.removeprefix('sha256:')}/release.zip"
+    archive_path = registry.runtime_resolver.locate(archive_uri)
+    assert registry.persistence is not None and manifest_path is not None and archive_path is not None
+    with ZipFile(BytesIO(archive_path.read_bytes())) as archive:
+        embedded_manifest = archive.read("release_manifest.json")
+    manifest_path.unlink()
+    with registry.persistence.database.transaction(write=True) as tx:
+        tx.execute("DELETE FROM r2s_release_seals WHERE job_id=?", (job.job_id,))
+
+    recovered = seal_release(registry, job.job_id)
+
+    assert recovered.record.status == SceneRevisionStatus.RELEASED
+    assert manifest_path.read_bytes() == embedded_manifest

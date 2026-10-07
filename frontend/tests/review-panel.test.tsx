@@ -160,6 +160,33 @@ describe("ReviewPanel", () => {
     expect(screen.getByText(CANDIDATE)).toBeInTheDocument();
   });
 
+  it("hiện lỗi seal an toàn và cho Reviewer thử lại dù release đang ở APPROVED", async () => {
+    auth.me = {
+      auth_required: true,
+      user: { user_id: "u-rev", email: "reviewer@example.com", display_name: "Reviewer", role: "reviewer", active: true, daily_job_quota: 10 },
+    };
+    vi.mocked(global.fetch)
+      .mockResolvedValueOnce(
+        reply(state("APPROVED", {
+          approval: { reviewer_id: "u-rev", decision: "APPROVE", reason: null, decided_at: "2026-09-30T10:00:00Z", candidate_checksum: CANDIDATE, validation_report_checksum: REPORT, record_checksum: "sha256:" + "a".repeat(64), accepted_warning_ids: ["path:pair-1"] },
+          release_seal_error: "Bản phát hành chưa hoàn tất hoặc chưa vượt qua kiểm tra toàn vẹn; Reviewer có thể thử lại.",
+          blockers: ["Release archive chưa vượt qua kiểm tra toàn vẹn"],
+        })),
+      )
+      .mockResolvedValueOnce(reply(state("RELEASED", {
+        approval: { reviewer_id: "u-rev", decision: "APPROVE", reason: null, decided_at: "2026-09-30T10:00:00Z", candidate_checksum: CANDIDATE, validation_report_checksum: REPORT, record_checksum: "sha256:" + "a".repeat(64), accepted_warning_ids: ["path:pair-1"] },
+        release: { release_timestamp: "2026-09-30T10:00:01Z", release_manifest_checksum: "sha256:" + "e".repeat(64) },
+        release_archive: { artifact_uri: "artifact://x/release.zip" },
+      })));
+
+    render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" />);
+
+    expect(await screen.findByText(/Bản phát hành chưa hoàn tất/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Thử lại phát hành" }));
+    expect(await screen.findByText(/Tải bản phát hành/)).toBeInTheDocument();
+    expect(String(vi.mocked(global.fetch).mock.calls[1]?.[0])).toContain("/api/v1/jobs/job-a/release-seal");
+  });
+
   it("lỗi đọc trạng thái duyệt có đường thử lại", async () => {
     vi.mocked(global.fetch).mockRejectedValueOnce(new Error("Mất kết nối")).mockResolvedValueOnce(reply(state("READY_FOR_REVIEW")));
     render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" />);

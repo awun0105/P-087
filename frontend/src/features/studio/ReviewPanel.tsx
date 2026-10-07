@@ -137,6 +137,7 @@ export function ReviewPanel({ jobId, sceneRevision, onState }: {
           </ul>
         </Notice>
       )}
+      {state.release_seal_error && <Notice tone="ochre">{state.release_seal_error}</Notice>}
       {validation && (
         <p className="text-ink-muted">
           Validation <span className="font-medium text-ink">{validation.overall_result}</span> · {validation.validator_version} ·{" "}
@@ -240,7 +241,7 @@ export function ReviewPanel({ jobId, sceneRevision, onState }: {
           </div>
         </details>
       )}
-      {record.status === "APPROVED" && reviewer && state.blockers.length === 0 && (
+      {record.status === "APPROVED" && reviewer && (
         <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(() => retryReleaseSeal(jobId))}>
           Thử lại phát hành
         </Button>

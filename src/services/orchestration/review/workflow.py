@@ -15,7 +15,9 @@ Phát hành tự chạy ngay sau khi duyệt, không có thêm cổng người (
 
 import hashlib
 import io
+import logging
 import zipfile
+import zlib
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict
@@ -35,13 +37,21 @@ from src.models.contracts.release import (
 )
 from src.models.contracts.validation import ValidationReport
 from src.services.orchestration.artifacts import ArtifactAlreadyExistsError
+from src.services.orchestration.artifacts.errors import ArtifactStoreError
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.orchestration.review.release_seals import ReleaseSealIntent, ReleaseSealRepository
+from src.services.orchestration.review.release_seals import (
+    ReleaseSealError,
+    ReleaseSealIntent,
+    ReleaseSealRepository,
+    ReleaseSealStatus,
+)
 from src.services.orchestration.review.simulation_package import SimulationPackage, current_package
 from src.services.orchestration.review.validation_gate import evaluate_validation_eligibility
 
 SCHEMA_VERSION = "1.0"
 ZERO = "sha256:" + "0" * 64
+_RELEASE_RETRY_MESSAGE = "Bản phát hành chưa hoàn tất hoặc chưa vượt qua kiểm tra toàn vẹn; Reviewer có thể thử lại."
+logger = logging.getLogger(__name__)
 
 
 class ReviewError(ValueError):
@@ -69,6 +79,8 @@ class ReviewState(BaseModel):
     reviewer_name: str | None = None
     release: ReleaseManifest | None = None
     release_archive: ProductArtifactRef | None = None
+    #: Thông báo an toàn khi seal còn dở hoặc artifact release không vượt qua kiểm tra toàn vẹn.
+    release_seal_error: str | None = None
     #: Lý do chưa duyệt được (hiện nguyên văn trên UI).
     blockers: list[str] = []
 
@@ -193,29 +205,148 @@ def review_state(registry: ProjectRegistry, job_id: str) -> ReviewState:
     state.record = state.record.model_copy(
         update={"status": decided, "approval_record_checksum": approval.record_checksum}
     )
-    raw = _read(registry, release_uri(job_id, candidate))
-    if raw is not None:
+    repository = ReleaseSealRepository(registry.persistence.database) if registry.persistence else None
+    intent: ReleaseSealIntent | None = None
+    has_failure = False
+    if repository is not None:
         try:
-            release = ReleaseManifest.model_validate_json(raw)
-            verify_content_checksum(release, "release_manifest_checksum")
-        except (ValueError, OSError):
-            state.blockers = ["Release manifest không hợp lệ"]
+            intent = repository.get(job_id, candidate, report.report_checksum, approval.record_checksum)
+            has_failure = repository.has_failure(job_id, candidate, report.report_checksum, approval.record_checksum)
+        except (ReleaseSealError, OSError, ValueError):
+            state.release_seal_error = _RELEASE_RETRY_MESSAGE
             return state
-        if (
-            release.candidate_checksum != candidate
-            or release.validation_report_checksum != report.report_checksum
-            or release.approval_record.record_checksum != approval.record_checksum
-        ):
-            state.blockers = ["Release manifest không khớp candidate/report/approval hiện tại"]
+
+    uri = release_uri(job_id, candidate)
+    raw = _read(registry, uri)
+    archive_uri = f"artifact://jobs/{job_id}/release/{_hex(candidate)}/release.zip"
+    archive_path = registry.runtime_resolver.locate(archive_uri)
+    if raw is None:
+        if has_failure or intent is not None or archive_path is not None:
+            state.release_seal_error = _RELEASE_RETRY_MESSAGE
+        return state
+
+    try:
+        release = ReleaseManifest.model_validate_json(raw)
+        verify_content_checksum(release, "release_manifest_checksum")
+        _verify_release_manifest_identity(release, registry, state, package, report, approval)
+        if intent is not None:
+            if intent.status != ReleaseSealStatus.SEALED or intent.manifest_payload.encode("utf-8") != raw:
+                state.release_seal_error = _RELEASE_RETRY_MESSAGE
+                return state
+        if archive_path is None:
+            state.release_seal_error = _RELEASE_RETRY_MESSAGE
             return state
-        archive_ref = _release_archive_ref(registry, job_id, release)
-        if archive_ref is None:
-            state.blockers = ["Release archive chưa có hoặc không thể xác minh"]
+        archive_bytes = archive_path.read_bytes()
+        archive_ref = _ref(job_id, archive_uri, "ReleaseArchive", StageId.RELEASE, archive_bytes)
+        if intent is not None and intent.archive_ref != archive_ref:
+            state.release_seal_error = _RELEASE_RETRY_MESSAGE
             return state
-        state.release = release
-        state.release_archive = archive_ref
-        state.record = state.record.model_copy(update={"status": SceneRevisionStatus.RELEASED})
+        package_zip = registry.runtime_resolver.require(package.package_ref).read_bytes()
+        _verify_release_archive(package_zip, archive_bytes, raw, report, approval)
+    except (ArtifactStoreError, OSError, ValueError, zipfile.BadZipFile):
+        state.release_seal_error = _RELEASE_RETRY_MESSAGE
+        return state
+
+    state.release = release
+    state.release_archive = archive_ref
+    state.record = state.record.model_copy(update={"status": SceneRevisionStatus.RELEASED})
     return state
+
+
+def _release_inventory(package: SimulationPackage) -> list[ArtifactInventoryItem]:
+    candidate = package.candidate
+    if candidate is None or package.package_ref is None:
+        raise ValueError("Simulation package has no sealed candidate artifacts")
+    refs = [candidate.entrypoint_usd, *candidate.assets, *candidate.geometry, *candidate.colliders, package.package_ref]
+    return [
+        ArtifactInventoryItem(
+            artifact_type=ref.artifact_type,
+            artifact_uri=ref.artifact_uri,
+            artifact_checksum=ref.artifact_checksum,
+            data_class=ref.data_class,
+        )
+        for ref in refs
+    ]
+
+
+def _verify_release_manifest_identity(
+    manifest: ReleaseManifest,
+    registry: ProjectRegistry,
+    state: ReviewState,
+    package: SimulationPackage,
+    report: ValidationReport,
+    approval: ApprovalRecord,
+) -> None:
+    """Bind every manifest identity field to the current immutable package and decisions."""
+    candidate = package.candidate
+    if candidate is None:
+        raise ValueError("Release candidate is missing")
+    job = registry.get_job(state.job_id)
+    expected_approval = ReleaseApproval(
+        reviewer_id=approval.reviewer_id,
+        approved_at=approval.decided_at,
+        accepted_warning_ids=approval.accepted_warning_ids,
+        record_checksum=approval.record_checksum,
+    )
+    if (
+        manifest.run_type != ReleaseRunType.ORDINARY
+        or manifest.project_id != job.project_id
+        or manifest.scene_version != state.record.scene_revision
+        or manifest.input_manifest_checksum != job.input_manifest_checksum
+        or manifest.job_manifest_checksum != job.job_manifest_checksum
+        or manifest.candidate_checksum != candidate.candidate_checksum
+        or manifest.preflight_report_checksum != package.preflight.report_checksum
+        or manifest.validation_report_checksum != report.report_checksum
+        or manifest.processing_config_checksum != job.config_checksum
+        or manifest.software_versions != {"validator": report.validator_version, **report.environment_versions}
+        or manifest.artifact_inventory != _release_inventory(package)
+        or manifest.approval_record != expected_approval
+    ):
+        raise ValueError("Release manifest does not match current sealed inputs")
+
+
+def _zip_members(payload: bytes) -> dict[str, bytes]:
+    try:
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            infos = archive.infolist()
+            names = [info.filename for info in infos]
+            if len(names) != len(set(names)):
+                raise ValueError("ZIP contains duplicate member names")
+            bad_member = archive.testzip()
+            if bad_member is not None:
+                raise ValueError("ZIP CRC verification failed")
+            return {info.filename: archive.read(info.filename) for info in infos}
+    except (OSError, RuntimeError, KeyError, zipfile.BadZipFile, zlib.error) as error:
+        raise ValueError("ZIP payload failed integrity checks") from error
+
+
+def _verify_release_archive(
+    package_zip: bytes,
+    archive_bytes: bytes,
+    manifest_bytes: bytes,
+    report: ValidationReport,
+    approval: ApprovalRecord,
+) -> None:
+    """Check exact package closure and the three approval-bound records inside the ZIP."""
+    package_members = _zip_members(package_zip)
+    archive_members = _zip_members(archive_bytes)
+    extra_names = {"release_manifest.json", "validation_report.json", "approval_record.json"}
+    if extra_names.intersection(package_members):
+        raise ValueError("Simulation package collides with release record names")
+    if set(archive_members) != set(package_members).union(extra_names):
+        raise ValueError("Release archive contains missing or unexpected members")
+    if any(archive_members[name] != data for name, data in package_members.items()):
+        raise ValueError("Release archive changed simulation package bytes")
+    if archive_members["release_manifest.json"] != manifest_bytes:
+        raise ValueError("Release manifest bytes differ from archive")
+    embedded_report = ValidationReport.model_validate_json(archive_members["validation_report.json"])
+    verify_content_checksum(embedded_report, "report_checksum")
+    if embedded_report != report:
+        raise ValueError("Release archive validation report differs from approval evidence")
+    embedded_approval = ApprovalRecord.model_validate_json(archive_members["approval_record.json"])
+    verify_content_checksum(embedded_approval, "record_checksum")
+    if embedded_approval != approval:
+        raise ValueError("Release archive approval differs from decision record")
 
 
 def record_validation_report(registry: ProjectRegistry, job_id: str, report: ValidationReport) -> ProductArtifactRef:
@@ -279,9 +410,9 @@ def decide(
     if decision == ApprovalDecision.APPROVE:
         try:
             seal_release(registry, job_id)
-        except (ReviewError, OSError, ValueError):
-            # Giữ APPROVED; UI cho "Thử lại phát hành". Lỗi đã có trong trạng thái trả về.
-            pass
+        except ReviewError:
+            # Approval đã bền vững; seal_release lưu chẩn đoán an toàn để UI cho Reviewer retry.
+            logger.info("Reviewer approval recorded; release sealing remains retryable", extra={"job_id": job_id})
     return review_state(registry, job_id)
 
 
@@ -289,126 +420,210 @@ def seal_release(registry: ProjectRegistry, job_id: str) -> ReviewState:
     """Niêm phong ReleaseManifest cho gói đã duyệt (gọi lại được khi lần trước lỗi)."""
     state = review_state(registry, job_id)
     if state.record.status == SceneRevisionStatus.RELEASED:
+        if registry.persistence and state.approval and state.validation:
+            ReleaseSealRepository(registry.persistence.database).clear_failure(
+                job_id,
+                state.record.candidate_checksum or "",
+                state.validation.report_checksum,
+                state.approval.record_checksum,
+            )
         return state
     if state.record.status != SceneRevisionStatus.APPROVED or not (
         state.package and state.approval and state.validation
     ):
         raise ReviewError("Chỉ phát hành gói đã được duyệt", conflict=True)
-    package, approval, report = state.package, state.approval, state.validation
-    candidate = package.candidate
-    assert candidate is not None and package.package_ref is not None  # đã kiểm ở review_state
-    job = registry.get_job(job_id)
     if registry.persistence is None:
         raise ReviewError("Niêm phong release cần runtime database bền vững")
     repository = ReleaseSealRepository(registry.persistence.database)
-    candidate_refs = [candidate.entrypoint_usd, *candidate.assets, *candidate.geometry, *candidate.colliders]
-    inventory = [
-        ArtifactInventoryItem(
-            artifact_type=ref.artifact_type,
-            artifact_uri=ref.artifact_uri,
-            artifact_checksum=ref.artifact_checksum,
-            data_class=ref.data_class,
+    package, approval, report = state.package, state.approval, state.validation
+    candidate = package.candidate
+    assert candidate is not None and package.package_ref is not None
+    identity = (job_id, candidate.candidate_checksum, report.report_checksum, approval.record_checksum)
+    try:
+        result = _seal_release(registry, state, repository)
+    except Exception as error:
+        try:
+            repository.record_failure(*identity)
+        except Exception:
+            logger.warning(
+                "Release sealing failed and its retry diagnostic could not be persisted", extra={"job_id": job_id}
+            )
+        logger.warning("Release sealing failed; a safe retry diagnostic was recorded", extra={"job_id": job_id})
+        if isinstance(error, ReviewError):
+            raise
+        raise ReviewError("Niêm phong release chưa hoàn tất; Reviewer có thể thử lại") from error
+    if result.record.status != SceneRevisionStatus.RELEASED:
+        repository.record_failure(*identity)
+        raise ReviewError("Release chưa vượt qua kiểm tra toàn vẹn; Reviewer có thể thử lại")
+    repository.clear_failure(*identity)
+    return result
+
+
+def _seal_release(registry: ProjectRegistry, state: ReviewState, repository: ReleaseSealRepository) -> ReviewState:
+    package, approval, report = state.package, state.approval, state.validation
+    assert package is not None and approval is not None and report is not None
+    candidate = package.candidate
+    assert candidate is not None and package.package_ref is not None
+    job_id = state.job_id
+    job = registry.get_job(job_id)
+    candidate_checksum = candidate.candidate_checksum
+    report_checksum = report.report_checksum
+    approval_checksum = approval.record_checksum
+    artifact_uri = release_uri(job_id, candidate_checksum)
+    archive_uri = f"artifact://jobs/{job_id}/release/{_hex(candidate_checksum)}/release.zip"
+    package_zip = registry.runtime_resolver.require(package.package_ref).read_bytes()
+    report_bytes = report.model_dump_json(indent=2).encode("utf-8")
+    approval_bytes = approval.model_dump_json(indent=2).encode("utf-8")
+    inventory = _release_inventory(package)
+
+    existing_intent = repository.get(job_id, candidate_checksum, report_checksum, approval_checksum)
+    recovered_manifest_bytes: bytes | None = None
+    if existing_intent is None:
+        recovered_manifest_bytes = _recover_existing_manifest(
+            registry,
+            state,
+            package,
+            package_zip,
+            report,
+            approval,
+            artifact_uri,
+            archive_uri,
         )
-        for ref in [*candidate_refs, package.package_ref]
-    ]
-    archive_uri = f"artifact://jobs/{job_id}/release/{_hex(candidate.candidate_checksum)}/release.zip"
 
     def create_intent() -> ReleaseSealIntent:
-        draft = ReleaseManifest(
-            schema_version=SCHEMA_VERSION,
-            run_type=ReleaseRunType.ORDINARY,
-            project_id=job.project_id,
-            scene_version=state.record.scene_revision,
-            input_manifest_checksum=job.input_manifest_checksum,
-            job_manifest_checksum=job.job_manifest_checksum,
-            candidate_checksum=candidate.candidate_checksum,
-            preflight_report_checksum=package.preflight.report_checksum,
-            validation_report_checksum=report.report_checksum,
-            processing_config_checksum=job.config_checksum,
-            software_versions={"validator": report.validator_version, **report.environment_versions},
-            artifact_inventory=inventory,
-            review_state="APPROVED",
-            approval_record=ReleaseApproval(
-                reviewer_id=approval.reviewer_id,
-                approved_at=approval.decided_at,
-                accepted_warning_ids=approval.accepted_warning_ids,
-                record_checksum=approval.record_checksum,
-            ),
-            release_timestamp=datetime.now(UTC),
-            release_manifest_checksum=ZERO,
-        )
-        manifest = draft.model_copy(
-            update={"release_manifest_checksum": canonical_content_checksum(draft, "release_manifest_checksum")}
-        )
+        if recovered_manifest_bytes is None:
+            draft = ReleaseManifest(
+                schema_version=SCHEMA_VERSION,
+                run_type=ReleaseRunType.ORDINARY,
+                project_id=job.project_id,
+                scene_version=state.record.scene_revision,
+                input_manifest_checksum=job.input_manifest_checksum,
+                job_manifest_checksum=job.job_manifest_checksum,
+                candidate_checksum=candidate_checksum,
+                preflight_report_checksum=package.preflight.report_checksum,
+                validation_report_checksum=report_checksum,
+                processing_config_checksum=job.config_checksum,
+                software_versions={"validator": report.validator_version, **report.environment_versions},
+                artifact_inventory=inventory,
+                review_state="APPROVED",
+                approval_record=ReleaseApproval(
+                    reviewer_id=approval.reviewer_id,
+                    approved_at=approval.decided_at,
+                    accepted_warning_ids=approval.accepted_warning_ids,
+                    record_checksum=approval_checksum,
+                ),
+                release_timestamp=datetime.now(UTC),
+                release_manifest_checksum=ZERO,
+            )
+            manifest = draft.model_copy(
+                update={"release_manifest_checksum": canonical_content_checksum(draft, "release_manifest_checksum")}
+            )
+            payload_bytes = manifest.model_dump_json(indent=2).encode("utf-8")
+        else:
+            payload_bytes = recovered_manifest_bytes
+            manifest = ReleaseManifest.model_validate_json(payload_bytes)
+        verify_content_checksum(manifest, "release_manifest_checksum")
+        _verify_release_manifest_identity(manifest, registry, state, package, report, approval)
         return ReleaseSealIntent.freeze(
             job_id=job_id,
-            candidate_checksum=candidate.candidate_checksum,
-            validation_report_checksum=report.report_checksum,
-            approval_record_checksum=approval.record_checksum,
+            candidate_checksum=candidate_checksum,
+            validation_report_checksum=report_checksum,
+            approval_record_checksum=approval_checksum,
             manifest=manifest,
+            manifest_payload_bytes=payload_bytes,
         )
 
-    intent = repository.get_or_create(
-        job_id,
-        candidate.candidate_checksum,
-        report.report_checksum,
-        approval.record_checksum,
-        create_intent,
-    )
+    intent = repository.get_or_create(job_id, candidate_checksum, report_checksum, approval_checksum, create_intent)
     manifest_bytes = intent.manifest_payload.encode("utf-8")
-    archive_path = registry.runtime_resolver.locate(archive_uri)
-    if intent.archive_ref is not None:
-        archive_ref = intent.archive_ref
-    else:
-        archive_ref = None
+    manifest = ReleaseManifest.model_validate_json(manifest_bytes)
+    verify_content_checksum(manifest, "release_manifest_checksum")
+    _verify_release_manifest_identity(manifest, registry, state, package, report, approval)
 
-    # The archive ref is frozen before publication so a crash after the store's
-    # atomic create still leaves enough identity to resume without changing bytes.
     def build_archive() -> bytes:
         return _release_archive(
-            registry.runtime_resolver.require(package.package_ref).read_bytes(),
+            package_zip,
             {
                 "release_manifest.json": manifest_bytes,
-                "validation_report.json": report.model_dump_json(indent=2).encode("utf-8"),
-                "approval_record.json": approval.model_dump_json(indent=2).encode("utf-8"),
+                "validation_report.json": report_bytes,
+                "approval_record.json": approval_bytes,
             },
         )
 
+    archive_path = registry.runtime_resolver.locate(archive_uri)
     if archive_path is None:
         archive = build_archive()
         computed_ref = _ref(job_id, archive_uri, "ReleaseArchive", StageId.RELEASE, archive)
-        if archive_ref is None:
+        if intent.archive_ref is None:
             intent = repository.record_archive(intent, computed_ref)
-            archive_ref = intent.archive_ref
-        elif archive_ref != computed_ref:
+        elif intent.archive_ref != computed_ref:
             raise ReviewError("Rebuilt release archive differs from the persisted seal intent", conflict=True)
-        assert archive_ref is not None
-        registry.scene.store.publish(archive_ref, archive)
+        assert intent.archive_ref is not None
+        _publish_release_once(registry, intent.archive_ref, archive)
     else:
         archive = archive_path.read_bytes()
-        archive_checksum = "sha256:" + hashlib.sha256(archive).hexdigest()
-        if archive_ref is None:
-            computed_ref = _ref(job_id, archive_uri, "ReleaseArchive", StageId.RELEASE, build_archive())
-            if computed_ref.artifact_checksum != archive_checksum:
-                raise ReviewError("Existing release archive does not match the frozen seal intent", conflict=True)
-            intent = repository.record_archive(intent, computed_ref)
-            archive_ref = intent.archive_ref
-        elif archive_checksum != archive_ref.artifact_checksum:
+        archive_ref = _ref(job_id, archive_uri, "ReleaseArchive", StageId.RELEASE, archive)
+        if intent.archive_ref is None:
+            intent = repository.record_archive(intent, archive_ref)
+        elif intent.archive_ref != archive_ref:
             raise ReviewError("Release archive differs from the persisted seal intent", conflict=True)
-        assert archive_ref is not None
 
-    try:
-        with zipfile.ZipFile(io.BytesIO(archive)) as sealed_archive:
-            embedded_manifest = sealed_archive.read("release_manifest.json")
-    except (OSError, KeyError, zipfile.BadZipFile) as error:
-        raise ReviewError("Release archive cannot be verified", conflict=True) from error
-    if embedded_manifest != manifest_bytes:
-        raise ReviewError("Release archive manifest does not match the persisted seal intent", conflict=True)
-
-    uri = release_uri(job_id, candidate.candidate_checksum)
-    _publish_once(registry, _ref(job_id, uri, "ReleaseManifest", StageId.RELEASE, manifest_bytes), manifest_bytes)
+    _verify_release_archive(package_zip, archive, manifest_bytes, report, approval)
+    _publish_release_once(
+        registry,
+        _ref(job_id, artifact_uri, "ReleaseManifest", StageId.RELEASE, manifest_bytes),
+        manifest_bytes,
+    )
     repository.mark_sealed(intent)
     return review_state(registry, job_id)
+
+
+def _recover_existing_manifest(
+    registry: ProjectRegistry,
+    state: ReviewState,
+    package: SimulationPackage,
+    package_zip: bytes,
+    report: ValidationReport,
+    approval: ApprovalRecord,
+    manifest_uri: str,
+    archive_uri: str,
+) -> bytes | None:
+    """Adopt an exact manifest from a pre-intent partial publish without rewriting it."""
+    manifest_bytes = _read(registry, manifest_uri)
+    archive_path = registry.runtime_resolver.locate(archive_uri)
+    archive_bytes = archive_path.read_bytes() if archive_path is not None else None
+    embedded_manifest = None
+    if archive_bytes is not None:
+        members = _zip_members(archive_bytes)
+        embedded_manifest = members.get("release_manifest.json")
+        if embedded_manifest is None:
+            raise ReviewError("Existing release archive has no release manifest", conflict=True)
+    if manifest_bytes is not None and embedded_manifest is not None and manifest_bytes != embedded_manifest:
+        raise ReviewError("Published manifest differs from the existing release archive", conflict=True)
+    payload = manifest_bytes or embedded_manifest
+    if payload is None:
+        return None
+    manifest = ReleaseManifest.model_validate_json(payload)
+    verify_content_checksum(manifest, "release_manifest_checksum")
+    _verify_release_manifest_identity(manifest, registry, state, package, report, approval)
+    if archive_bytes is not None:
+        _verify_release_archive(package_zip, archive_bytes, payload, report, approval)
+    return payload
+
+
+def _publish_release_once(registry: ProjectRegistry, reference: ProductArtifactRef, payload: bytes) -> None:
+    """Reuse identical immutable bytes after a crash; reject mismatches and never overwrite."""
+    existing = _read(registry, reference.artifact_uri)
+    if existing is not None:
+        if existing != payload:
+            raise ReviewError("Existing release artifact differs from the frozen seal intent", conflict=True)
+        return
+    try:
+        registry.scene.store.publish(reference, payload)
+    except ArtifactAlreadyExistsError as error:
+        existing = _read(registry, reference.artifact_uri)
+        if existing == payload:
+            return
+        raise ReviewError("Existing release artifact differs from the frozen seal intent", conflict=True) from error
 
 
 def _release_archive(package_zip: bytes, extra: dict[str, bytes]) -> bytes:
@@ -422,13 +637,3 @@ def _release_archive(package_zip: bytes, extra: dict[str, bytes]) -> bytes:
             entry.compress_type = zipfile.ZIP_DEFLATED
             out.writestr(entry, extra[name])
     return buffer.getvalue()
-
-
-def _release_archive_ref(
-    registry: ProjectRegistry, job_id: str, manifest: ReleaseManifest
-) -> ProductArtifactRef | None:
-    uri = f"artifact://jobs/{job_id}/release/{_hex(manifest.candidate_checksum)}/release.zip"
-    path = registry.runtime_resolver.locate(uri)
-    if path is None:
-        return None
-    return _ref(job_id, uri, "ReleaseArchive", StageId.RELEASE, path.read_bytes())

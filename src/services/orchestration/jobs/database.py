@@ -180,6 +180,21 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
                 PRIMARY KEY(job_id, candidate_checksum, validation_report_checksum, approval_record_checksum))""",
         ),
     ),
+    (
+        # Keep a safe, durable diagnostic when immutable release publication needs reviewer retry.
+        11,
+        (
+            """CREATE TABLE r2s_release_seal_failures (
+                job_id TEXT NOT NULL,
+                candidate_checksum TEXT NOT NULL,
+                validation_report_checksum TEXT NOT NULL,
+                approval_record_checksum TEXT NOT NULL,
+                failure_code TEXT NOT NULL,
+                attempts INTEGER NOT NULL CHECK(attempts > 0),
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(job_id, candidate_checksum, validation_report_checksum, approval_record_checksum))""",
+        ),
+    ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
