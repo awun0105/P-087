@@ -17,13 +17,40 @@ import { canEdit } from "@/lib/api/auth";
 import { listImports, listScenes, moveImportToTrash, moveSceneToTrash } from "@/lib/api/studio";
 import { MoveToTrashButton } from "@/features/studio/trash/MoveToTrashButton";
 import { cn } from "@/lib/cn";
-import type { ImportedScene, SceneSummary } from "@/lib/contracts/studio";
+import type { Actor, ImportedScene, SceneSummary } from "@/lib/contracts/studio";
 import { useListState, pageSlice, ListPagination, SortControl } from "@/features/studio/ListControls";
 import { formatBytes, formatDuration } from "@/lib/format";
 import { stageMeta } from "@/features/studio/stages";
 import { progressHref } from "@/features/studio/inspection";
 
 const DATE = new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeStyle: "short" });
+
+const ROLE_LABELS: Record<string, string> = { editor: "Editor", reviewer: "Reviewer", guest: "Khách" };
+
+function ActorAttribution({
+  label,
+  name,
+  role,
+}: {
+  label: string;
+  name: string;
+  role?: string | null;
+}) {
+  return (
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-1 text-xs">
+      <span className="text-ink-subtle">{label}: </span>
+      <Badge tone="neutral" className="max-w-36 truncate normal-case">{name}</Badge>
+      {" "}
+      <Badge tone={role ? "neutral" : "ochre"}>
+        {role ? ROLE_LABELS[role] ?? "Vai trò chưa xác định" : "Vai trò chưa xác định"}
+      </Badge>
+    </span>
+  );
+}
+
+function actorAttribution(label: string, actor: Actor) {
+  return <ActorAttribution key={`${label}-${actor.user_id}`} label={label} name={actor.display_name} role={actor.role} />;
+}
 
 /**
  * Thời gian xử lý = thời gian máy thật sự chạy các bước (backend cộng từ số đo của từng bước),
@@ -226,7 +253,11 @@ export function ScenesHome() {
                 >
                   <span className="min-w-0">
                     <span className="block truncate font-medium text-ink">{item.name}</span>
-                    {item.created_by_name && <span className="block truncate text-xs text-ink-subtle">Tạo bởi {item.created_by_name}</span>}
+                    {item.created_by_name && (
+                      <span className="mt-1 block">
+                        <ActorAttribution label="Tạo bởi" name={item.created_by_name} role={item.created_by_role} />
+                      </span>
+                    )}
                   </span>
                   <span className="shrink-0 text-xs text-ink-subtle">
                     {item.status === "READY" ? "Mở xem/chỉnh" : item.status === "FAILED" ? "Lỗi" : "Đang nén…"}
@@ -289,13 +320,13 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
             ? `${scene.project.input_video.original_name} · ${formatBytes(scene.project.input_video.size_bytes)}`
             : "Không có video"}
         </p>
-        <div className="mt-auto flex items-center justify-between pt-5 text-xs text-ink-subtle">
-          <span className="min-w-0 truncate">
-            <span className="value-tech">{created}</span>
-            {/* Nhóm dùng chung một không gian: ghi rõ scene này do ai tạo (và ai chạy lại gần nhất nếu khác người). */}
-            {scene.project.created_by && <> · tạo bởi {scene.project.created_by.display_name}</>}
-            {scene.requested_by && scene.requested_by.user_id !== scene.project.created_by?.user_id && <> · chạy bởi {scene.requested_by.display_name}</>}
-          </span>
+        <div className="mt-auto flex items-end justify-between gap-3 pt-5">
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <span className="text-xs text-ink-subtle"><span className="value-tech">{created}</span></span>
+            {scene.project.created_by && actorAttribution("Tạo bởi", scene.project.created_by)}
+            {scene.requested_by && scene.requested_by.user_id !== scene.project.created_by?.user_id &&
+              actorAttribution("Chạy bởi", scene.requested_by)}
+          </div>
           {job && (
             <span className="flex items-center gap-1 font-medium text-ink-muted transition-colors group-hover:text-ember-strong">
               {scene.preview_ready ? "Mở scene" : "Xem tiến trình"}
@@ -343,22 +374,22 @@ function SceneTable({ scenes, onChanged }: { scenes: SceneSummary[]; onChanged: 
               : null;
             return (
               <TableRow key={scene.project.project_id}>
-                <TableCell className="max-w-64">
-                  {targetHref ? (
-                    <Link
-                      href={targetHref}
-                      className="block truncate font-medium hover:text-ember-strong hover:underline"
-                    >
-                      {scene.project.name}
-                    </Link>
-                  ) : (
-                    <span className="block truncate font-medium">{scene.project.name}</span>
-                  )}
-                  {scene.project.created_by && (
-                    <p className="truncate text-xs text-ink-subtle">
-                      Tạo bởi {scene.project.created_by.display_name}
-                    </p>
-                  )}
+                <TableCell className="max-w-64 whitespace-normal">
+                  <div className="min-w-0 space-y-1.5">
+                    {targetHref ? (
+                      <Link
+                        href={targetHref}
+                        className="block truncate font-medium hover:text-ember-strong hover:underline"
+                      >
+                        {scene.project.name}
+                      </Link>
+                    ) : (
+                      <span className="block truncate font-medium">{scene.project.name}</span>
+                    )}
+                    {scene.project.created_by && actorAttribution("Tạo bởi", scene.project.created_by)}
+                    {scene.requested_by && scene.requested_by.user_id !== scene.project.created_by?.user_id &&
+                      actorAttribution("Chạy bởi", scene.requested_by)}
+                  </div>
                 </TableCell>
                 <TableCell>
                   <Badge tone={status.tone}>{status.label}</Badge>

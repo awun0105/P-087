@@ -72,16 +72,67 @@ describe("Tổng quan và thư viện riêng", () => {
   });
 
   it("thẻ scene ghi rõ ai tạo và ai chạy lại gần nhất; không biết thì không ghi", async () => {
-    const mine = { ...scene("job-a", "RUNNING"), requested_by: { user_id: "u-2", display_name: "Bình" } };
-    mine.project = { ...mine.project, name: "Kho có chủ", created_by: { user_id: "u-1", display_name: "An" } };
+    const mine = {
+      ...scene("job-a", "RUNNING"),
+      requested_by: { user_id: "u-2", display_name: "Bình", role: "reviewer" as const },
+    };
+    mine.project = {
+      ...mine.project,
+      name: "Kho có chủ",
+      created_by: { user_id: "u-1", display_name: "An", role: "editor" },
+    };
     const anonymous = scene("job-b", "QUEUED");
     anonymous.project = { ...anonymous.project, name: "Kho không rõ" };
-    vi.mocked(listScenes).mockResolvedValue({ ok: true, data: { scenes: [mine, anonymous] } });
+    const legacy = scene("job-c", "FAILED");
+    legacy.project = {
+      ...legacy.project,
+      name: "Kho thiếu role",
+      created_by: { user_id: "u-3", display_name: "Chi" },
+    };
+    vi.mocked(listScenes).mockResolvedValue({ ok: true, data: { scenes: [mine, anonymous, legacy] } });
     render(<ScenesHome />);
     const owned = (await screen.findByRole("heading", { name: "Kho có chủ" })).closest("a")!;
-    expect(owned).toHaveTextContent("tạo bởi An");
-    expect(owned).toHaveTextContent("chạy bởi Bình");
+    expect(owned).toHaveTextContent(/Tạo bởi:\s*An/i);
+    expect(owned).toHaveTextContent(/Chạy bởi:\s*Bình/i);
+    expect(owned).toHaveTextContent("Editor");
+    expect(owned).toHaveTextContent("Reviewer");
     const unknown = screen.getByRole("heading", { name: "Kho không rõ" }).closest("a")!;
     expect(unknown).not.toHaveTextContent("tạo bởi");
+    const old = screen.getByRole("heading", { name: "Kho thiếu role" }).closest("a")!;
+    expect(old).toHaveTextContent("Vai trò chưa xác định");
+
+    fireEvent.click(screen.getByRole("radio", { name: "Danh sách" }));
+    const row = await screen.findByRole("row", { name: /Kho có chủ/ });
+    expect(row).toHaveTextContent("Editor");
+    expect(row).toHaveTextContent("Reviewer");
+    expect(row).toHaveTextContent(/Chạy bởi:\s*Bình/i);
+  });
+
+  it("scene import hiển thị creator và role dưới dạng text thuần", async () => {
+    const hostileName = '<img src="x" onerror="alert(1)">';
+    vi.mocked(listImports).mockResolvedValue({
+      ok: true,
+      data: {
+        imports: [{
+          import_id: "import-1",
+          upload_id: "upload-1",
+          name: "PLY nhập",
+          input_kind: "gaussian_ply",
+          status: "READY",
+          delivery_ref: null,
+          error: null,
+          created_at: "2026-10-01T00:00:00Z",
+          created_by_name: hostileName,
+          created_by_role: "reviewer",
+        }],
+      },
+    });
+
+    render(<ScenesHome />);
+
+    const imported = await screen.findByRole("link", { name: /PLY nhập/ });
+    expect(imported).toHaveTextContent(hostileName);
+    expect(imported).toHaveTextContent("Reviewer");
+    expect(imported.querySelector('img[src="x"]')).toBeNull();
   });
 });

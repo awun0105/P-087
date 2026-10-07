@@ -8,12 +8,14 @@ Active — implementation đang diễn ra trên branch
 `docs/codegraph-audit-implementation-plan`, khởi tạo từ `develop@ef3a421`.
 Đã commit: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3,
 AUD-03.S1–S3, AUD-04.S1–S3, AUD-10.S1–S3 và AUD-07.S1. AUD-07.S2 đã hoàn tất
-trong commit `5173750`; AUD-20.S1 trong `6fea33e`. AUD-20.S2 producer/API attribution
-đã hoàn tất trong sprint hiện tại. AUD-21.S1 đã chốt ma trận quyền,
+trong commit `5173750`; AUD-20.S1 trong `6fea33e`; AUD-20.S2 producer/API attribution
+trong `7d5fcac`. AUD-20.S3 đã có code badge creator/role ở Scenes và imports cùng
+test CLI; browser và live-seed acceptance đang chờ môi trường. AUD-21.S1 đã chốt ma trận quyền,
 identity owner và migration contract trong commit `31ffac2`. AUD-22.S1 calendar
 contract đã hoàn tất; browser DevTools MCP gate của AUD-03.S3 vẫn
 UNVERIFIED; PostgreSQL proof của AUD-04.S3 chưa chạy vì thiếu
-`R2S_TEST_POSTGRES_URL`. Sprint kế tiếp là AUD-20.S3.
+`R2S_TEST_POSTGRES_URL`. Sprint code kế tiếp là AUD-21.S2; trước rollout Guest cần
+quay lại hoàn tất browser và seed acceptance của AUD-20.S3.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -192,8 +194,8 @@ Thứ tự mặc định gồm đủ **80 active sprint, mỗi sprint một lầ
 
 Execution order bắt đầu ở **AUD-11.S1**; các sprint AUD-11.S1–S2, AUD-15.S1,
 AUD-01–04, AUD-10.S1–S3, AUD-07.S1–S2, AUD-20.S1–S2, AUD-21.S1 và AUD-22.S1
-đã hoàn tất.
-Sprint kế tiếp là AUD-20.S3 theo dependency order.
+đã hoàn tất. AUD-20.S3 UI implementation đã commit; chỉ còn browser/seed acceptance.
+Tiếp tục code với AUD-21.S2; browser acceptance vẫn là gate trước public Guest rollout.
 AUD-15.S1 được làm sớm để AUD-23.S5 có measurement protocol; optimization
 AUD-15.S2–S3 vẫn làm sau quality work.
 AUD-07.S3 làm sau AUD-06/AUD-05 để kiểm tra admission trên consumer thật;
@@ -355,7 +357,7 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [ ] Implementation AUD-19 và held-out independent-map/QA/browser acceptance.
 
 - [x] Implementation AUD-20.S1 identity/seed migration contract and AUD-20.S2 producer/API actor attribution.
-- [ ] Remaining AUD-20.S3, AUD-21.S2–S4, AUD-22.S2–S3 và three-role/quota/browser acceptance.
+- [ ] AUD-20.S3 browser/seed acceptance; AUD-21.S2–S4, AUD-22.S2–S3 và three-role/quota acceptance.
 
 - [ ] Implementation AUD-23 và client encode/upload/bandwidth/geometry acceptance.
 - [ ] Implementation AUD-24 và grouped upload/R1–R6 recipe/consumer/browser acceptance.

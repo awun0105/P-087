@@ -90,7 +90,8 @@ trả snapshot hoặc trạng thái legacy unknown.
 
 Implement: Reuse RegisterForm name input. Render tên người tạo job và role dễ đọc; separate chạy bởi khi actor khác creator. Update intended two seed names bằng migration đã review; add responsive/accessibility loading/error cases.
 Tests: Guest/Editor/Reviewer create, card/table/import, rename snapshot, unknown role, XSS plain text, seed rerun idempotence và real browser.
-**Exit:** [ ] browser attribution đúng và seed-name evidence không chứa secrets.
+**Exit:** UI implementation and CLI tests complete; [ ] browser attribution and
+live seed-name evidence verified without secrets.
 
 ## Verification và DoD
 
@@ -132,3 +133,13 @@ mock hoặc source review không chứng minh feature đã chạy.
 - Verification: `.venv/bin/pytest tests/test_api/test_product_routes.py tests/test_api/test_auth_routes.py tests/test_api/test_studio_routes.py tests/test_orchestration/test_scene_imports.py tests/test_orchestration/test_job_queue.py tests/test_orchestration/test_job_lifecycle.py -q` — **78 passed**; `ruff check src/ tests/` — pass; `ruff format --check src/ tests/` — 473 files unchanged; `npm run typecheck` — pass; `npx eslint src/lib/contracts/api.ts` — pass; `npm test` — **42 files, 275 tests passed**; `.venv/bin/python -m scripts.check_contract_mirror` — pass; `git diff --check` — pass.
 - Gate: CodeGraph preflight/caller inventory and post-change sync pass. UI-only contract changed, no rendered component changed; browser gate N/A for S2. AUD-20.S3 still needs browser acceptance for badges and seed account acceptance.
 - Limitations: Tests used SQLite fixtures; PostgreSQL concurrency remains for AUD-22.S2 quota integration, and live seed IDs remain unverified for S3. User display-name mutation was simulated at stored-record level because no self-rename endpoint exists yet.
+
+### AUD-20.S3 — role badges on scene and import listings
+
+- Implementation: Scene cards, list table, and imported-scene rows show creator name and role. A different `requested_by` is shown as “Chạy bởi”; a missing historical role is labeled “Vai trò chưa xác định”. The label map already has a Guest label for the later role extension. Badge text remains React text, including user-controlled names.
+- Layout/accessibility: Attribution rows wrap on narrow cards, scene table keeps its horizontal scroll container, and tests locate the list-mode control by accessible role/name. Existing load/error states are unchanged.
+- Tests: `npm test -- tests/studio-overview.test.tsx` — **6 passed**; coverage includes card, table, imported scene, changed creator role/name snapshots, unknown historical role, and markup-like display names. Full `npm test` — **42 files, 276 tests passed**; `npm run typecheck` — pass; `npx eslint src/features/studio/ScenesHome.tsx tests/studio-overview.test.tsx` — pass.
+- CodeGraph: sync/status up-to-date, 759 files, 13,766 nodes, 39,541 edges. `SceneCard` and `SceneTable` each have one caller in `ScenesHome`; their consumer test is `frontend/tests/studio-overview.test.tsx`. `ImportedScene` list consumer is also `ScenesHome`.
+- Gate: CodeGraph preflight and caller inventory complete. `UNVERIFIED: DevTools — list_pages reports the Chrome DevTools MCP profile is already running/locked; retry after the user's `/mcp` restart returned the same error. Did not stop the process or switch browsers.`
+- Seed acceptance: `UNVERIFIED: live seed names — stable seed IDs were not verified, so the rename migration was not run. The migration's SQLite idempotence/role guards were tested in AUD-20.S1; re-run it only with the two verified seed IDs before Guest rollout.`
+- Commit: this result is included in AUD-20.S3's per-sprint commit. Browser and live-seed acceptance remain open.
