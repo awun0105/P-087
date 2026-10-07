@@ -36,7 +36,14 @@ def _component(version: str | None, missing: str) -> dict[str, str]:
 def collect() -> dict[str, dict[str, str]]:
     """Đọc version từ tool thật theo cùng env mà worker dùng (REC03_/REC04_)."""
     ffmpeg = _run(["ffmpeg", "-version"])
-    brush_command = json.loads(os.environ.get("REC04_BRUSH_COMMAND", "null") or "null")
+    raw_brush = (os.environ.get("REC04_BRUSH_COMMAND") or "").strip()
+    brush_command = None
+    if raw_brush:
+        try:
+            parsed = json.loads(raw_brush)
+            brush_command = parsed if isinstance(parsed, list) else [str(parsed)]
+        except (json.JSONDecodeError, ValueError):
+            brush_command = [raw_brush]
     brush = _run([*brush_command, "--version"]) if brush_command else None
     splat_module = os.environ.get("REC04_SPLAT_MODULE_PATH")
     splat = None
