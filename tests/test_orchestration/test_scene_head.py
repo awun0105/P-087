@@ -17,6 +17,7 @@ import pytest
 from scripts.studio import scene_head as scene_head_cli
 from src.config import Settings
 from src.services.orchestration.artifacts import (
+    ArtifactChecksumError,
     ArtifactRemote,
     ArtifactResolver,
     InvalidArtifactUriError,
@@ -146,7 +147,45 @@ def test_backfill_resumes_across_pages_and_preserves_immutable_artifacts(scene_s
     assert _artifact_checksums(scene_state.resolver) == artifact_checksums
 
 
-def test_backfill_handles_more_than_one_thousand_numeric_revisions(scene_state: SimpleNamespace) -> None:
+def test_backfill_handles_long_history_and_current_reads_stay_bounded(
+    scene_state: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Backfill a 1,005-revision chain and compare DB/resolver calls at both sizes."""
+    short_reader = _head_editor(scene_state)
+    _publish_root(short_reader)
+
+    calls = {"head": 0, "locate": 0, "list": 0}
+    repository_get = SceneHeadRepository.get
+    resolver_locate = ArtifactResolver.locate
+    resolver_list = ArtifactResolver.list_uris
+
+    def counted_get(repository: SceneHeadRepository, job_id: str):
+        calls["head"] += 1
+        return repository_get(repository, job_id)
+
+    def counted_locate(resolver: ArtifactResolver, uri: str, *, fresh: bool = False):
+        calls["locate"] += 1
+        return resolver_locate(resolver, uri, fresh=fresh)
+
+    def counted_list(resolver: ArtifactResolver, prefix: str):
+        calls["list"] += 1
+        return resolver_list(resolver, prefix)
+
+    monkeypatch.setattr(SceneHeadRepository, "get", counted_get)
+    monkeypatch.setattr(ArtifactResolver, "locate", counted_locate)
+    monkeypatch.setattr(ArtifactResolver, "list_uris", counted_list)
+
+    def read_current(editor: SceneEditor) -> dict[str, int]:
+        calls.update(head=0, locate=0, list=0)
+        assert editor.current(_JOB_ID).scene.scene_revision in {"rev-001", "rev-1005"}
+        return calls.copy()
+
+    short_calls = read_current(short_reader)
+    assert short_calls == {"head": 1, "locate": 1, "list": 0}
+
+    # Rebuild the same job as a legacy artifact-only chain, then backfill its head.
+    with scene_state.database.transaction(write=True) as tx:
+        tx.execute("DELETE FROM r2s_scene_heads WHERE job_id=?", (_JOB_ID,))
     scene_state.editor.current(_JOB_ID)
     revision = "rev-001"
     for number in range(2, 1006):
@@ -154,16 +193,55 @@ def test_backfill_handles_more_than_one_thousand_numeric_revisions(scene_state: 
     assert revision == "rev-1005"
 
     result = _new_backfill(scene_state).backfill_page(_JOB_ID, page_size=250)
-    calls = 1
+    page_calls = 1
     while result.status != "COMPLETE":
         result = _new_backfill(scene_state).backfill_page(_JOB_ID, page_size=250)
-        calls += 1
-        assert calls < 20
+        page_calls += 1
+        assert page_calls < 20
 
     assert result.head is not None
     assert result.head.scene_revision == "rev-1005"
     assert result.head.allocation_sequence == 1005
     assert result.verified_count == 1005
+
+    long_reader = _head_editor(scene_state, RuntimeDatabase(scene_state.database_url))
+    long_calls = read_current(long_reader)
+    assert long_reader.current(_JOB_ID).scene.scene_revision == "rev-1005"
+    assert long_calls == short_calls
+
+
+def test_remote_head_freshness_and_bad_checksum_fail_closed(scene_state: SimpleNamespace, tmp_path: Path) -> None:
+    """Independent DB/cache clients observe new heads; remote byte corruption is rejected."""
+    store = MemoryObjectStore()
+    writer_resolver = ArtifactResolver(tmp_path / "writer-cache", ArtifactRemote(store))
+    writer = SceneEditor(_FIXTURE_ROOT, writer_resolver, SceneHeadRepository(scene_state.database))
+    _publish_root(writer)
+
+    reader_resolver = ArtifactResolver(tmp_path / "reader-cache", ArtifactRemote(store))
+    reader = SceneEditor(
+        _FIXTURE_ROOT,
+        reader_resolver,
+        SceneHeadRepository(RuntimeDatabase(scene_state.database_url)),
+    )
+    assert reader.current(_JOB_ID).scene.scene_revision == "rev-001"
+
+    root = writer.current(_JOB_ID).scene
+    writer.publish_next(_JOB_ID, "rev-001", root.model_copy(update={"objects": []}), "remote_freshness")
+    assert reader.current(_JOB_ID).scene.scene_revision == "rev-002"
+
+    uri = scene_artifact_uri(_JOB_ID, "rev-002")
+    key = writer_resolver.relative_key(uri)
+    payload, checksum = store.objects[key]
+    store.objects[key] = (payload + b"tampered", checksum)
+    corrupt_resolver = ArtifactResolver(tmp_path / "corrupt-reader-cache", ArtifactRemote(store))
+    corrupt_reader = SceneEditor(
+        _FIXTURE_ROOT,
+        corrupt_resolver,
+        SceneHeadRepository(RuntimeDatabase(scene_state.database_url)),
+    )
+    with pytest.raises(ArtifactChecksumError, match="checksum mismatch"):
+        corrupt_reader.current(_JOB_ID)
+    assert not corrupt_resolver.resolve(uri).exists()
 
 
 def test_corrupt_artifact_is_blocked_with_a_safe_diagnostic(scene_state: SimpleNamespace) -> None:

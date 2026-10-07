@@ -21,23 +21,26 @@ from scripts.cloud.package_publish import (
     validate_staged_package,
 )
 from scripts.studio.data_package import PackageError, pack
-from src.models.contracts.artifacts import ArtifactDataClass, ArtifactRef, ProductArtifactRef
+from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum
+from src.models.contracts.scene import SceneEnvironment, SceneIR
 from src.models.contracts.validation_run import (
     ValidationConfig,
     ValidationRunOrigin,
     ValidationRunRecord,
     ValidationRunStatus,
 )
+from src.services.orchestration.artifacts import ArtifactResolver
 from src.services.orchestration.artifacts.checksum import sha256_bytes, sha256_file
 from src.services.orchestration.artifacts.remote import RemoteObject
 from src.services.orchestration.jobs.database import RuntimeDatabase
-from src.services.orchestration.scene.editor import scene_artifact_uri
+from src.services.orchestration.scene.editor import SceneEditor
 from src.services.orchestration.scene.heads import (
     PendingScenePublication,
     SceneHeadBackfillItem,
     SceneHeadRecord,
     SceneHeadRepairRecord,
+    SceneHeadRepository,
 )
 
 
@@ -244,28 +247,46 @@ def test_scene_head_and_resumable_repair_cross_package_publish(tmp_path: Path) -
     _make_package(tmp_path)
     source = tmp_path / "source"
     runtime_db = source / "data/studio_local/runtime.db"
-    scene_bytes = b"{}\n"
-    scene_path = source / "data/studio_local/artifacts/jobs/job-a/scene/scene_ir.rev-001.json"
-    scene_path.parent.mkdir(parents=True)
-    scene_path.write_bytes(scene_bytes)
-    reference = ArtifactRef(
-        artifact_type="SceneIR",
+    fixture_root = Path(__file__).resolve().parents[2] / "fixtures"
+    scene = SceneIR.model_validate_json((fixture_root / "scene_ir/scene.json").read_bytes())
+    geometry_bytes = b"scene-geometry"
+    geometry_uri = "artifact://jobs/job-a/scene/environment.glb"
+    geometry_reference = ProductArtifactRef(
+        artifact_type="CollisionMesh",
         schema_version="1.0",
-        artifact_uri=scene_artifact_uri("job-a", "rev-001"),
-        artifact_checksum=sha256_bytes(scene_bytes),
+        artifact_uri=geometry_uri,
+        artifact_checksum=sha256_bytes(geometry_bytes),
         data_class=ArtifactDataClass.DERIVED,
         producer_stage="ST-SCENE-ASSEMBLE",
         job_id="job-a",
     )
-    checksum = "sha256:" + "d" * 64
+    geometry_path = source / "data/studio_local/artifacts" / geometry_uri.removeprefix("artifact://")
+    geometry_path.parent.mkdir(parents=True, exist_ok=True)
+    geometry_path.write_bytes(geometry_bytes)
+    scene_draft = scene.model_copy(
+        update={
+            "environment": SceneEnvironment(geometry_ref=geometry_reference),
+            "objects": [],
+            "provenance": {"source": "package-head-roundtrip-test"},
+            "scene_ir_checksum": "sha256:" + "0" * 64,
+        }
+    )
+    scene = scene_draft.model_copy(
+        update={"scene_ir_checksum": canonical_content_checksum(scene_draft, "scene_ir_checksum")}
+    )
+    scene_bytes = scene.model_dump_json(indent=2).encode("utf-8") + b"\n"
+    scene_path = source / "data/studio_local/artifacts/jobs/job-a/scene/scene_ir.rev-001.json"
+    scene_path.parent.mkdir(parents=True, exist_ok=True)
+    scene_path.write_bytes(scene_bytes)
+    reference = SceneEditor._reference_for("job-a", scene.scene_revision, sha256_bytes(scene_bytes))
     item_draft = SceneHeadBackfillItem(
         schema_version="1.0",
         job_id="job-a",
-        scene_id="scene-a",
-        scene_revision="rev-001",
+        scene_id=scene.scene_id,
+        scene_revision=scene.scene_revision,
         revision_number=1,
         supersedes_revision=None,
-        scene_ir_checksum=checksum,
+        scene_ir_checksum=scene.scene_ir_checksum,
         scene_reference=reference,
         item_checksum="sha256:" + "0" * 64,
     )
@@ -347,6 +368,15 @@ def test_scene_head_and_resumable_repair_cross_package_publish(tmp_path: Path) -
         )
         assert restored_publication.status == "ABORTED"
         assert restored_publication.fencing_token == "redacted"
+
+    restored_scene = SceneEditor(
+        fixture_root,
+        ArtifactResolver(staging / "data/studio_local/artifacts"),
+        SceneHeadRepository(target),
+    ).current("job-a")
+    assert restored_scene.scene.scene_revision == "rev-001"
+    assert restored_scene.scene_reference == reference
+    assert restored_scene.scene == scene
 
     invalid_rows = dict(package.rows)
     head_row = invalid_rows["r2s_scene_heads"][0]

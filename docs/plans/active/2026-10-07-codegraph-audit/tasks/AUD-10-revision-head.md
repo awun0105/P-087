@@ -107,8 +107,8 @@ Delete/trash/restore updates head ownership atomically without deleting history.
 Tests: compare resolver call counts 2 vs 1.005 revisions, restart/cache freshness,
 cross-process new head, remote checksum failure, packaging roundtrip, trash/restore.
 Use call-count assertions, không flaky wall-clock thresholds.
-**Exit:** [ ] bounded lookup proven; [ ] packaging/deletion consumers pass;
-[ ] no 1.000 ceiling in supported committed/repaired history.
+**Exit:** [x] bounded lookup proven; [x] packaging/deletion consumers pass;
+[x] no 1.000 ceiling in supported committed/repaired history.
 
 ## Verification và DoD
 
@@ -220,3 +220,45 @@ call-count/packaging matrix pass; PG/remote-provider proof được phân loại
   → fenced CAS commit and pending-reader isolation; minimal-code reused the
   existing v12 records, ArtifactResolver, RuntimeDatabase and SceneEditor; checks
   are listed above; DevTools: n/a — no UI change.
+
+### AUD-10.S3 — Bounded current reads and recovery consumer proof
+
+- Base commit: `5d717f9` (`AUD-10.S2`). CodeGraph reindexed after the proof tests:
+  753 files, 13,594 nodes, 38,967 edges; index up to date. Traced 31 callers of
+  `SceneEditor.current`, the backfill CLI, package row validation/import, and
+  trash/restore consumers.
+- No production-code or schema change was needed: S2 already routes DB-backed
+  `current()` through the committed head. Added deterministic call-count proof:
+  both a one-revision scene and a repaired 1,005-revision history perform exactly
+  one head query, one `ArtifactResolver.locate`, and zero revision-list calls.
+  The legacy no-database test seam retains its explicit 1,000-step ceiling;
+  persisted, committed/repaired histories do not use that recovery loop.
+- Independent editors with separate SQLite connections and artifact caches see
+  the newly committed revision via the shared object-store contract. When remote
+  bytes are altered but retain the old checksum metadata, the reader raises
+  `ArtifactChecksumError` and leaves no partial cache file.
+- Package proof now imports a typed head plus its actual validated SceneIR bytes,
+  then reads the restored revision through `SceneEditor.current()`. Trash/restore
+  proof uses checksummed head, repair and lineage rows and confirms the original
+  artifact checksum inventory is restored unchanged.
+- Changed files: `tests/test_orchestration/test_scene_head.py`,
+  `tests/test_orchestration/test_scene_deletion.py`,
+  `tests/test_packaging/test_package_publish.py`, this task record and plan index.
+- Schema delta: none. No generated artifact was retained; package/archive files
+  were temporary test outputs. The tests verify their contained SceneIR byte
+  checksum and the exact reference restored by the package importer.
+- Focused checks: **180 passed, 1 skipped** across the AUD-10.S2 integration
+  matrix. The skip is `test_postgres_initial_reservation_has_one_winner` because
+  `R2S_TEST_POSTGRES_URL` is unset. Ruff check passed; Ruff format reported 471
+  files already formatted; `git diff --check` passed.
+- Limitations: these checks use SQLite and `MemoryObjectStore`; no PostgreSQL
+  locking or live S3 provider acceptance is claimed. A healthy remote current
+  read resolves one exact head artifact, while a remote service outage remains a
+  visible read failure rather than a fallback to an older revision.
+- Next: AUD-07.S1–S2 add shared worker admission and stale-operation fencing.
+- Pre-flight (GUIDE.md Rule 13): CodeGraph indexed the changed test flows and
+  traced `current`, backfill, package import and deletion consumers; verified
+  one-head/one-artifact call behavior, independent-cache freshness and failure
+  paths; made no production abstraction or source-code change because S2 already
+  implemented the required head lookup; focused matrix and static checks are
+  listed above; DevTools: n/a — no UI change.

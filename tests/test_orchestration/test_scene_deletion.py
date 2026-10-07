@@ -10,8 +10,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.manifests import JobStatus, StageId
 from src.services.orchestration.artifacts import ArtifactRemote
+from src.services.orchestration.artifacts.checksum import sha256_bytes
 from src.services.orchestration.auth.service import AuthService
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.models import TransitionRequest
@@ -38,7 +40,11 @@ from src.services.orchestration.projects.models import (
     UploadProjectInput,
 )
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.orchestration.scene.heads import SceneHeadRepository
+from src.services.orchestration.scene.heads import (
+    SceneHeadBackfillItem,
+    SceneHeadRepairRecord,
+    SceneHeadRepository,
+)
 from src.services.orchestration.uploads import UploadRecord, VideoUploadService
 from src.services.orchestration.uploads import scene_imports as imports_module
 from src.services.orchestration.uploads.scene_imports import ImportService
@@ -250,28 +256,51 @@ def test_restore_brings_back_exactly_what_was_removed(world: SimpleNamespace) ->
 
 def test_scene_head_and_repair_rows_roundtrip_through_trash(world: SimpleNamespace) -> None:
     project_id, job_id = _scene(world, _upload(world), "Head restore")
-    checksum = "sha256:" + "a" * 64
+    revision = world.registry.scene.publish_initial(job_id, world.registry.scene._fixture_scene())
+    repository = SceneHeadRepository(world.database)
+    head = repository.get(job_id)
+    assert head is not None and head.scene_revision == "rev-001"
+    item = SceneHeadBackfillItem.from_revision(revision)
+    repair = SceneHeadRepairRecord.start(job_id, sha256_bytes(revision.scene_reference.artifact_uri.encode()), 1)
+    repair_draft = repair.model_copy(
+        update={
+            "status": "COMPLETE",
+            "phase": "RECHECK",
+            "verified_count": 1,
+            "rechecked_count": 1,
+            "repair_checksum": "sha256:" + "0" * 64,
+        }
+    )
+    completed_repair = repair_draft.model_copy(
+        update={"repair_checksum": canonical_content_checksum(repair_draft, "repair_checksum")}
+    )
     with world.database.transaction(write=True) as tx:
         tx.execute(
-            "INSERT INTO r2s_scene_heads(job_id,generation,allocation_sequence,head_checksum,payload) "
-            "VALUES (?,?,?,?,?)",
-            (job_id, 1, 3, checksum, json.dumps({"scene_revision": "rev-003"})),
-        )
-        tx.execute(
             "INSERT INTO r2s_scene_head_repairs(job_id,status,generation,repair_checksum,payload) VALUES (?,?,?,?,?)",
-            (job_id, "COMPLETE", 5, checksum, json.dumps({"verified_count": 3})),
+            (
+                job_id,
+                completed_repair.status,
+                completed_repair.generation,
+                completed_repair.repair_checksum,
+                completed_repair.model_dump_json(),
+            ),
         )
         tx.execute(
             "INSERT INTO r2s_scene_head_backfill_items(job_id,scene_revision,item_checksum,payload) VALUES (?,?,?,?)",
-            (job_id, "rev-003", checksum, json.dumps({"supersedes_revision": "rev-002"})),
+            (job_id, item.scene_revision, item.item_checksum, item.model_dump_json()),
         )
     before = _rows(world)
+    artifacts_before = _files(world)
 
     entry = _delete(world, project_ids=[project_id])
     assert _rows(world) != before
     restore_deletion(world.context, entry, "user-1")
 
     assert _rows(world) == before
+    assert _files(world) == artifacts_before
+    restored = repository.get(job_id)
+    assert restored == head
+    assert repository.get_repair(job_id) == completed_repair
 
 
 def test_scene_deletion_refuses_in_progress_backfill_and_pending_publication(world: SimpleNamespace) -> None:
