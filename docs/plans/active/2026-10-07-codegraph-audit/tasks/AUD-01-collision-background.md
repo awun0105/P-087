@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- Status: PLANNED; priority P0; boundary EX-SCENE → EX-SIM, PRODUCT publication.
+- Status: IN PROGRESS; priority P0; boundary EX-SCENE → EX-SIM, PRODUCT publication.
 - Canonical tasks: SCENE-06/07, SIM-02/05. Strategy SELF-CODE composition,
   REUSE trimesh/carve utilities. Không thay reconstruction algorithm.
 - Goal: move/delete/deactivate không để lại collision của object ở nguồn;
@@ -31,11 +31,22 @@ current SceneIR và source ownership của reconstructed objects.
 Output: background collision ref + active object colliders, provenance/checksum,
 được cả legacy và hybrid builder consume.
 
-Proposed SourceCollisionRegion có version, object_id, source_geometry_ref,
-extraction_revision, source_transform, region_kind và region_ref hoặc source
-OBB dimensions. Đây là extraction provenance bất biến, không phải editable
-world transform thứ hai. Membership indices bind đúng geometry checksum;
-region_ref phải resolve, indices trong bounds, dimensions dương/hữu hạn.
+`SceneObject.source_collision` dùng `SourceCollisionRegion` schema 1.0 với
+`object_id`, `source_geometry_ref`, `extraction_revision`, `source_transform`,
+`region_kind` và một trong hai representation: `region_ref` tới sidecar
+`SourceCollisionMembership` (triangle indices) hoặc `source_obb_dimensions_xyz_m`.
+Đây là extraction provenance bất biến, không phải editable world transform thứ
+hai. Cả hai `ProductArtifactRef.artifact_checksum` đều là checksum bytes; sidecar
+cũng lặp `source_geometry_ref` để ràng buộc indices vào đúng mesh. Reader xác
+minh ref bytes, object/revision/source ref, giới hạn indices và overlap trước khi
+dùng. OBB chỉ là representation có provenance; không được coi là membership
+chính xác, và overlap OBB không chứng minh quyền sở hữu vùng.
+
+`source_collision` là field optional và bị lược khỏi JSON khi vắng mặt; giữ
+SceneIR schema 1.0 để payload cũ parse/dump và giữ canonical checksum. Không tự
+suy ra ownership cũ từ transform hiện tại: chỉ recover từ artifact/extraction
+gốc; nếu không đủ evidence thì đọc/tải artifact cũ được nhưng rebuild cần edit
+phải block.
 
 | Object state/action | Collision yêu cầu |
 |---|---|
@@ -70,7 +81,7 @@ acceptance đi qua AUD-05, không phải điều kiện cho CPU regression pass.
 ## Sprint AUD-01.S1 — Regression và source ownership
 
 **Input:** fixture mesh sàn + vật cản, source extraction, SceneIR chưa edit.
-**Output:** regression failing ở current carve; typed ownership fixture và
+**Output:** regression thể hiện lỗi ở current carve; typed ownership fixture và
 serialization/version decision, kể cả legacy recovery case.
 **Contract:** source transform/geometry checksum không đổi qua move/delete;
 membership không chồng ownership trái phép; source data không là workflow state.
@@ -80,11 +91,13 @@ Implement:
 1. Dùng `_scene_job` fixture hiện có; đo faces/occupancy trong vùng vật nguồn
    và điểm witness trên sàn/tường, không chỉ assert active flag.
 2. Repro confirm → move, delete, restore, ignore, user-added và overlap.
-3. Chốt minimal metadata/sidecar và producer/consumer reader; preserve old JSON checksum.
+3. Chốt `SourceCollisionRegion`/`SourceCollisionMembership` schema 1.0, gắn
+   ownership vào reconstructed objects ở extraction producer, và thêm reader
+   fixture cho simulation consumer; preserve old JSON checksum.
 
 Tests: unit validation của refs/indices; content vs byte checksum; old payload
 roundtrip; negative wrong source checksum/source pose missing.
-**Exit:** [ ] regression chứng minh lỗi; [ ] contract/migration fixture có consumer proof.
+**Exit:** [x] regression chứng minh lỗi; [x] contract/migration fixture có consumer proof.
 
 ## Sprint AUD-01.S2 — Build background từ source, compose current objects
 
@@ -131,4 +144,34 @@ refs/checksums/legacy behavior được verify. Real Isaac proof ghi ở AUD-05.
 
 ## Result / Evidence
 
-Pending — ghi riêng evidence và exit checklist của S1, S2, S3 sau implementation.
+### AUD-01.S1 — Implemented
+
+- Added optional `SceneObject.source_collision` schema 1.0 and triangle-membership
+  sidecar contract. Old SceneIR payloads omit the absent field and keep the same
+  canonical checksum.
+- Extraction binds reconstructed candidates to the exact source environment
+  artifact and source transform. Edits keep that ownership immutable; duplicated
+  objects do not claim the source region.
+- Consumer fixture verifies source/sidecar byte checksums, reference identity,
+  bounds, and duplicate triangle claims. Legacy JSON remains readable without
+  synthesizing metadata; S2 must recover from the original extraction or block a
+  rebuild that needs ownership.
+- Before/after boundary: `_carved_environment` still consumes the current SceneIR
+  transform/status in S1; extraction now produces immutable source provenance for
+  the S2 builder. `extract_scene` and `use_boxes` are the production bind points;
+  `duplicate_object` explicitly clears source ownership. SceneIR parsing and the
+  triangle-sidecar reader are the S1 consumer proofs. No DB migration or runtime
+  config change is needed because the optional field is part of the immutable
+  SceneIR artifact; legacy metadata is never backfilled from edited state.
+- Reproduced baseline on the local pallet fixture: 9,228 environment triangles
+  before confirmation; confirmation removes 9,216 and leaves 12. Moving or
+  deleting the confirmed object restores all 9,228 triangles because the current
+  carver follows the edited pose/active flag. Restoring at the moved pose still
+  removes none. User-added boxes at the source pose and overlapping OBBs are also
+  blindly carved by the current builder, each removing the same 9,216 triangles.
+- Verification: `pytest tests/ -q` passed with 1,562 passed and 40 skipped
+  (329.83s). After adding the final duplicate-owner and nonfinite-dimension
+  negative cases, all 50 focused tests across ownership, SceneIR contracts,
+  extraction, simulation package, and edit commands passed. Full Ruff check and
+  format check passed; the TypeScript/Pydantic mirror, frontend lint, and
+  frontend typecheck passed.

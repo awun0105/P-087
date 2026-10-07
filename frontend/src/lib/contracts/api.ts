@@ -272,6 +272,20 @@ export interface SceneObject {
   provenance: Record<string, unknown>;
   /** Pipeline v2 (ADR 0007); backend không ghi field khi rỗng nên có thể vắng mặt. */
   physics?: ObjectPhysics | null;
+  /** Ownership collision bất biến của geometry nguồn; vắng mặt ở SceneIR legacy. */
+  source_collision?: SourceCollisionRegion | null;
+}
+
+/** Source pose/region gốc dùng để rebuild collision sau các thao tác edit. */
+export interface SourceCollisionRegion {
+  schema_version: "1.0";
+  object_id: string;
+  source_geometry_ref: ProductArtifactRef;
+  extraction_revision: string;
+  source_transform: Transform;
+  region_kind: "triangle_indices" | "source_obb";
+  region_ref?: ProductArtifactRef | null;
+  source_obb_dimensions_xyz_m?: [number, number, number] | null;
 }
 
 /** `src/models/contracts/scene.py` MassSource — số khối lượng đến từ đâu. */

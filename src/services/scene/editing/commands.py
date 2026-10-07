@@ -107,6 +107,8 @@ def duplicate_object(scene: SceneIR, object_id: str, new_id: str, offset_xyz: tu
             "local_frame": new_id,
             "transform": transform.model_dump(),
             "collider": collider.model_dump() if collider else None,
+            # A duplicate is placed independently and does not own the source region.
+            "source_collision": None,
             "state": SceneObjectState.CONFIRMED,
             "active": True,
             "provenance": {**source.provenance, "review": "CONFIRMED", "duplicated_from": object_id},

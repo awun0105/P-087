@@ -56,6 +56,51 @@ def _absent(value: object) -> bool:
     return value is None
 
 
+class SourceCollisionMembership(ContractModel):
+    """Triangle indices trong đúng bytes collision mesh do `source_geometry_ref` chỉ tới."""
+
+    artifact_type: Literal["SourceCollisionMembership"] = "SourceCollisionMembership"
+    schema_version: Literal["1.0"] = "1.0"
+    object_id: Identifier
+    source_geometry_ref: ProductArtifactRef
+    extraction_revision: Identifier
+    triangle_indices: list[Annotated[int, Field(ge=0, strict=True)]] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _require_unique_ordered_indices(self) -> Self:
+        if self.triangle_indices != sorted(set(self.triangle_indices)):
+            raise ValueError("triangle_indices must be unique and sorted")
+        return self
+
+
+class SourceCollisionRegion(ContractModel):
+    """Ownership bất biến của một object trên mesh collision tại lần extraction gốc."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    object_id: Identifier
+    source_geometry_ref: ProductArtifactRef
+    extraction_revision: Identifier
+    source_transform: Transform
+    region_kind: Literal["triangle_indices", "source_obb"]
+    region_ref: ProductArtifactRef | None = Field(default=None, exclude_if=_absent)
+    source_obb_dimensions_xyz_m: tuple[PositiveDimension, PositiveDimension, PositiveDimension] | None = Field(
+        default=None, exclude_if=_absent
+    )
+
+    @model_validator(mode="after")
+    def _validate_region_representation(self) -> Self:
+        if self.source_transform.parent_frame != "world" or self.source_transform.local_frame != self.object_id:
+            raise ValueError("source_transform must bind world to the owned object frame")
+        if self.region_kind == "triangle_indices":
+            if self.region_ref is None or self.region_ref.artifact_type != "SourceCollisionMembership":
+                raise ValueError("triangle_indices region requires a SourceCollisionMembership region_ref")
+            if self.source_obb_dimensions_xyz_m is not None:
+                raise ValueError("triangle_indices region cannot also declare OBB dimensions")
+        elif self.region_ref is not None or self.source_obb_dimensions_xyz_m is None:
+            raise ValueError("source_obb region requires dimensions and cannot declare a membership ref")
+        return self
+
+
 class ObjectPhysics(ContractModel):
     """Thuộc tính vật lý của một vật cho Isaac (RigidBody, Mass, Physics Material; ADR 0007).
 
@@ -111,6 +156,7 @@ class SceneObject(ContractModel):
     tags: list[str] = Field(default_factory=list)
     provenance: JsonObject
     physics: ObjectPhysics | None = Field(default=None, exclude_if=_absent)
+    source_collision: SourceCollisionRegion | None = Field(default=None, exclude_if=_absent)
 
     @model_validator(mode="after")
     def _validate_representation_binding(self) -> Self:
@@ -118,6 +164,11 @@ class SceneObject(ContractModel):
             raise ValueError("SceneObject.local_frame must match transform.local_frame")
         if self.collider is not None and self.collider.local_transform.parent_frame != self.local_frame:
             raise ValueError("collider local offset must be parented to SceneObject.local_frame")
+        if self.source_collision is not None:
+            if self.source_collision.object_id != self.id:
+                raise ValueError("source collision ownership object_id must match SceneObject.id")
+            if self.origin == SceneObjectOrigin.USER_ADDED:
+                raise ValueError("user-added objects cannot own reconstructed source collision regions")
         if self.origin == SceneObjectOrigin.USER_ADDED:
             if self.asset_ref is None and self.primitive_dimensions_xyz_m is None:
                 raise ValueError("user_added object requires asset_ref or primitive_dimensions_xyz_m")
@@ -155,4 +206,9 @@ class SceneIR(ContractModel):
             if item.id in seen:
                 raise ValueError(f"duplicate SceneObject.id in SceneIR: {item.id}")
             seen.add(item.id)
+            if (
+                item.source_collision is not None
+                and item.source_collision.source_geometry_ref != self.environment.geometry_ref
+            ):
+                raise ValueError("source collision ownership must reference the SceneIR environment geometry")
         return self

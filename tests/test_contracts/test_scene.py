@@ -7,7 +7,8 @@ import pytest
 from pydantic import ValidationError
 
 from src.models.contracts.identity import canonical_content_checksum
-from src.models.contracts.scene import ObjectPhysics, SceneIR
+from src.models.contracts.scene import ObjectPhysics, SceneIR, SourceCollisionRegion
+from src.services.scene.publisher import with_scene_checksum
 
 FIXTURES = Path(__file__).parents[2] / "fixtures"
 
@@ -110,8 +111,52 @@ def test_optional_v2_fields_do_not_change_legacy_scene_checksum() -> None:
     dumped = scene.model_dump(mode="json")
 
     assert "physics" not in dumped["objects"][0]
+    assert "source_collision" not in dumped["objects"][0]
     assert "visual_master_ref" not in dumped["environment"]
     assert canonical_content_checksum(scene, "scene_ir_checksum") == json.loads(raw)["scene_ir_checksum"]
+
+
+def test_source_collision_region_v1_round_trips_through_scene_ir() -> None:
+    """EX-SIM's existing SceneIR reader consumes typed source ownership without a side channel."""
+    scene = SceneIR.model_validate_json((FIXTURES / "scene_ir/scene.json").read_text(encoding="utf-8"))
+    ownership = SourceCollisionRegion.model_validate_json(
+        (FIXTURES / "scene_ir/source_collision_region_v1.json").read_text(encoding="utf-8")
+    )
+    pallet = scene.objects[0].model_copy(update={"source_collision": ownership}, deep=True)
+    scene_with_ownership = with_scene_checksum(
+        scene.model_copy(update={"objects": [pallet, *scene.objects[1:]]}, deep=True)
+    )
+
+    serialized = scene_with_ownership.model_dump_json()
+    consumed = SceneIR.model_validate_json(serialized)
+
+    assert consumed.objects[0].source_collision == ownership
+    assert consumed.objects[0].source_collision.source_transform == consumed.objects[0].transform
+    assert canonical_content_checksum(consumed, "scene_ir_checksum") == consumed.scene_ir_checksum
+
+
+@pytest.mark.parametrize("invalid_dimension", [0.0, -0.1, float("nan"), float("inf")])
+def test_source_collision_requires_source_pose_and_positive_finite_obb_dimensions(invalid_dimension: float) -> None:
+    payload = json.loads((FIXTURES / "scene_ir/source_collision_region_v1.json").read_text(encoding="utf-8"))
+    missing_pose = dict(payload)
+    missing_pose.pop("source_transform")
+    with pytest.raises(ValidationError, match="source_transform"):
+        SourceCollisionRegion.model_validate(missing_pose)
+
+    invalid_dimensions = json.loads(json.dumps(payload))
+    invalid_dimensions["source_obb_dimensions_xyz_m"][1] = invalid_dimension
+    with pytest.raises(ValidationError, match="source_obb_dimensions_xyz_m"):
+        SourceCollisionRegion.model_validate(invalid_dimensions)
+
+
+def test_source_collision_region_must_bind_scene_environment_geometry() -> None:
+    payload = json.loads((FIXTURES / "scene_ir/scene.json").read_text(encoding="utf-8"))
+    ownership = json.loads((FIXTURES / "scene_ir/source_collision_region_v1.json").read_text(encoding="utf-8"))
+    ownership["source_geometry_ref"]["artifact_checksum"] = "sha256:" + "0" * 64
+    payload["objects"][0]["source_collision"] = ownership
+
+    with pytest.raises(ValidationError, match="SceneIR environment geometry"):
+        SceneIR.model_validate(payload)
 
 
 def test_object_physics_round_trips_and_is_serialized_when_set() -> None:

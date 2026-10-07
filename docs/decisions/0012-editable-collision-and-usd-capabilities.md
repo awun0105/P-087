@@ -4,8 +4,9 @@ Date: 2026-10-07
 
 ## Status
 
-Proposed — khuyến nghị từ audit `develop@ef3a421`; chưa có owner acceptance hoặc
-implementation mới. Invariants hiện có về canonical transform và exact candidate vẫn áp dụng.
+Accepted for the AUD-01 source-ownership contract; implementation is in progress.
+Exporter capability/publication changes are tracked by AUD-02. Existing invariants
+for canonical transforms and exact candidates still apply.
 
 ## Context
 
@@ -32,11 +33,20 @@ có topology cho các collider mesh, nhưng candidate có thể nhận preflight
 
 ## Data contract
 
-Giữ SceneIR/ColliderSpec/CandidatePackage hiện có. Source ownership metadata
-hoặc sidecar phải bind source geometry checksum, extraction revision, object ID,
-source transform và representation. S1 của AUD-01 chốt typed format/placement;
-không serialize vùng/source pose dưới dạng world transform truth thứ hai.
-Legacy revision thiếu metadata phải recover từ artifact gốc hoặc báo blocker.
+`SceneObject.source_collision` is optional `SourceCollisionRegion` schema 1.0.
+It stores `source_geometry_ref`, `extraction_revision`, `object_id`, immutable
+`source_transform`, and either a `region_ref` to a typed triangle-membership
+sidecar or positive source OBB dimensions. The sidecar repeats the source
+geometry reference and binds sorted, unique triangle indices to that exact
+geometry. Both artifact references use byte checksums; consumers verify bytes,
+identity, bounds, and overlap before using membership.
+
+SceneIR remains schema 1.0. When ownership is absent it is omitted from JSON so
+legacy payloads retain their canonical checksum and remain readable. An editor
+must not infer missing source ownership from the current transform. It may
+recover only from the original extraction/artifact evidence; otherwise an edit
+requiring a rebuilt background is blocked. Source pose is provenance, not a
+second editable world transform.
 
 Capability check phải xảy ra trước publish physics_enrich revision. Artifact
 mesh cần finite vertices, topology hợp lệ, correct local transform và resolver

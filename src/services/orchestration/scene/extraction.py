@@ -24,6 +24,7 @@ from src.services.orchestration.scene.objectify import AWAITING_CHOICE, Objectif
 from src.services.orchestration.scene.objectify import METHOD as OBJECTIFY_METHOD
 from src.services.reconstruction import camera_views, confirmation_summary, metric_gaussian_points
 from src.services.scene.builder import scene_from_bundle
+from src.services.scene.collision_ownership import bind_source_collision_ownership
 from src.services.scene.geometric import GeometricConfig, candidate_objects, collision_vertices, objects_from_candidates
 from src.services.scene.publisher import with_scene_checksum
 from src.services.scene.sampro3d.pipeline import METHOD as SAMPRO3D_METHOD
@@ -139,6 +140,8 @@ def extract_scene(
             method, note = AWAITING_CHOICE, f"{error}; chọn chạy lại hoặc dùng hộp ứng viên"
     else:
         objects, method, note = box_candidates(registry, job, bundle, settings, workspace, publish)
+    source_geometry_ref = environment.geometry_ref if environment is not None else bundle.canonical_geometry_ref
+    objects = bind_source_collision_ownership(objects, source_geometry_ref, "rev-001")
     scene = scene_from_bundle(bundle, objects, {"object_extraction": method, "note": note, **extra}, environment)
     revision = registry.scene.publish_initial(job.job_id, scene)
     reference = revision.scene_reference
@@ -168,6 +171,7 @@ def use_boxes(registry: ProjectRegistry, job_id: str, settings: Settings, worksp
     objects, method, note = box_candidates(registry, job, bundle, settings, workspace, _idempotent_publish(registry))
     current = registry.scene.current(job_id).scene
     fresh = scene_from_bundle(bundle, objects, {})
+    objects = bind_source_collision_ownership(objects, fresh.environment.geometry_ref, current.scene_revision)
     updated = current.model_copy(
         update={
             "environment": fresh.environment,

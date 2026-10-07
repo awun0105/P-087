@@ -57,6 +57,10 @@ def test_without_sam2_runtime_falls_back_to_geometric_candidates(tmp_path: Path)
     assert scene.environment.geometry_ref == bundle.canonical_geometry_ref
     (pallet,) = scene.objects
     assert pallet.state == SceneObjectState.CANDIDATE and not pallet.active
+    assert pallet.source_collision is not None
+    assert pallet.source_collision.source_geometry_ref == bundle.canonical_geometry_ref
+    assert pallet.source_collision.extraction_revision == "rev-001"
+    assert pallet.source_collision.source_transform == pallet.transform
     assert abs(pallet.transform.translation_xyz[0] - 1.5) < 0.15
     # Chạy lại (retry) không ghi đè revision đã có.
     again = extract_scene(registry, job, bundle, settings, tmp_path / "work")

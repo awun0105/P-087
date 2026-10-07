@@ -32,7 +32,13 @@ from src.models.contracts.release import (
     ReleaseManifest,
     SceneRevisionRecord,
 )
-from src.models.contracts.scene import ColliderSpec, SceneIR, SceneObject
+from src.models.contracts.scene import (
+    ColliderSpec,
+    SceneIR,
+    SceneObject,
+    SourceCollisionMembership,
+    SourceCollisionRegion,
+)
 from src.models.contracts.validation import (
     CandidatePackage,
     EvaluationReport,
@@ -71,6 +77,8 @@ __all__ = [
     "RuntimeManifest",
     "SceneIR",
     "SceneObject",
+    "SourceCollisionMembership",
+    "SourceCollisionRegion",
     "SceneRevisionRecord",
     "StageId",
     "StageStatus",
