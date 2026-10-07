@@ -97,7 +97,7 @@ Implement: controlled barriers để tái hiện concurrency; test review_state 
 exposes committed valid release; integrate AUD-03 gate and error projection.
 Tests: two independent SQLite connections; PostgreSQL locking nếu có fixture
 runtime thật; concurrent publish; stale candidate; download ZIP vs API equality.
-**Exit:** [ ] idempotency/concurrency suite pass; [ ] PG proof ghi riêng nếu chưa chạy.
+**Exit:** [x] Hai registry độc lập cùng seal một identity trên SQLite và trả cùng release; [x] thay đổi candidate sau publish manifest nhưng trước commit marker giữ intent PENDING; [x] API ZIP chứa đúng manifest bytes đang publish; [x] ghi rõ PostgreSQL chưa chạy vì thiếu fixture.
 
 ## Verification và DoD
 
@@ -205,3 +205,45 @@ DONE khi fault matrix/concurrency/ZIP equality pass; old releases giữ checksum
   object store was available, and no production release/runtime data was changed.
 - Next: AUD-04.S3 covers concurrent seals/CAS losers and API equality under
   multiple registry/process consumers.
+
+### AUD-04.S3 — concurrent seals và API consumer
+
+- Base commit: `1a2471d` (`AUD-04.S2`). CodeGraph xác nhận `seal_release` có
+  16 callers gồm decision flow, API route và retry; `review_state` kiểm lại
+  eligibility hiện tại; `SceneEditor` publish revision bất biến qua artifact
+  store. Không đổi API schema hoặc database migration trong sprint này.
+- Thêm recheck candidate/report/approval/status sau khi publish manifest và
+  ngay trước CAS commit marker. Nếu revision hoặc trusted evidence đã đổi,
+  release không chuyển `SEALED`; diagnostic chỉ lưu failure code an toàn.
+- Hai `ProjectRegistry` độc lập dùng hai `RuntimeDatabase` objects và kết nối
+  SQLite riêng, cùng runtime DB/artifact root. Barrier đồng bộ trước khi vào
+  seal; cả hai callers nhận cùng release identity, archive ref và bytes, intent
+  cuối là `SEALED`.
+- Fault injection đổi scene revision sau khi API manifest được publish nhưng
+  trước commit marker. Test xác nhận seal bị từ chối, intent còn `PENDING`,
+  failure diagnostic được lưu, artifact immutable được giữ lại và current
+  `review_state` không project release cũ. API test so sánh SHA-256 của ZIP tải
+  với artifact ref và byte nội dung `release_manifest.json` với manifest API.
+- Files changed: `src/services/orchestration/review/workflow.py`,
+  `tests/test_orchestration/test_release_sealing_recovery.py`,
+  `tests/test_api/test_review_routes.py`, task record này và execution-plan
+  README.
+- CodeGraph after implementation: 749 files, 13,426 nodes, 38,153 edges; index
+  up to date. Truy vấn xác nhận call path và current source cho `review_state`,
+  `_seal_release`, `_require_current_release_identity`, `SceneEditor.current`,
+  `SceneEditor.publish_next` và API release test.
+- Verification: release/review/API/artifact/contract/migration matrix:
+  **56 passed, 4 skipped**. Bốn skip cần `R2S_TEST_POSTGRES_URL`; concurrency
+  được kiểm tra với SQLite, không phải PostgreSQL. Focused recovery/API rerun:
+  **17 passed**. `.venv/bin/ruff check src/ tests/` passed;
+  `.venv/bin/ruff format --check src/ tests/` reported 465 files formatted;
+  `git diff --check` passed.
+- Giới hạn: scene revision head hiện là chuỗi artifact bất biến, còn seal marker
+  nằm trong RuntimeDatabase; artifact store và SQLite không có transaction
+  chung. Eligibility được đọc lại ngay trước commit marker. Nếu revision đổi
+  sau lần đọc đó, `review_state` đọc lại head và không project release cũ; artifact
+  immutable được giữ để điều tra/recovery. PostgreSQL locking và browser DevTools
+  chưa được chứng minh trong sprint này. Chưa có live cloud store hoặc production
+  release data trong kiểm thử.
+- Next: AUD-10.S1 thiết kế/persist revision head dùng chung trước các sprint
+  admission/consumer tiếp theo.

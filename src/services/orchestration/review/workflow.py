@@ -573,6 +573,13 @@ def _seal_release(registry: ProjectRegistry, state: ReviewState, repository: Rel
         _ref(job_id, artifact_uri, "ReleaseManifest", StageId.RELEASE, manifest_bytes),
         manifest_bytes,
     )
+    _require_current_release_identity(
+        registry,
+        job_id,
+        candidate_checksum,
+        report_checksum,
+        approval_checksum,
+    )
     repository.mark_sealed(intent)
     return review_state(registry, job_id)
 
@@ -624,6 +631,26 @@ def _publish_release_once(registry: ProjectRegistry, reference: ProductArtifactR
         if existing == payload:
             return
         raise ReviewError("Existing release artifact differs from the frozen seal intent", conflict=True) from error
+
+
+def _require_current_release_identity(
+    registry: ProjectRegistry,
+    job_id: str,
+    candidate_checksum: str,
+    report_checksum: str,
+    approval_checksum: str,
+) -> None:
+    """Recheck the shared eligibility projection immediately before the final commit marker."""
+    current = review_state(registry, job_id)
+    if (
+        current.record.status not in {SceneRevisionStatus.APPROVED, SceneRevisionStatus.RELEASED}
+        or current.record.candidate_checksum != candidate_checksum
+        or current.validation is None
+        or current.validation.report_checksum != report_checksum
+        or current.approval is None
+        or current.approval.record_checksum != approval_checksum
+    ):
+        raise ReviewError("Candidate or trusted validation changed while release was sealing", conflict=True)
 
 
 def _release_archive(package_zip: bytes, extra: dict[str, bytes]) -> bytes:

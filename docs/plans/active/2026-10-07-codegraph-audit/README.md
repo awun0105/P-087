@@ -7,8 +7,9 @@ Date: 2026-10-07
 Active — implementation đang diễn ra trên branch
 `docs/codegraph-audit-implementation-plan`, khởi tạo từ `develop@ef3a421`.
 Đã commit: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3,
-AUD-03.S1–S3, AUD-04.S1–S2. Browser DevTools MCP gate của AUD-03.S3 vẫn
-UNVERIFIED; sprint kế tiếp theo dependency order là AUD-04.S3.
+AUD-03.S1–S3, AUD-04.S1–S3. Browser DevTools MCP gate của AUD-03.S3 vẫn
+UNVERIFIED; PostgreSQL proof của AUD-04.S3 chưa chạy vì thiếu
+`R2S_TEST_POSTGRES_URL`. Sprint kế tiếp theo dependency order là AUD-10.S1.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -215,7 +216,7 @@ AUD-19. Static-map consumer chỉ enable sau registration QA, không bắt AUD-1
 đợi whole AUD-12 epic. Sensor calibration QA và map registration QA không tráo nhau.
 
 Progress hiện tại: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3,
-AUD-03.S1–S3 và AUD-04.S1–S2 đã được commit riêng theo sprint. AUD-01.S3 verified legacy
+AUD-03.S1–S3 và AUD-04.S1–S3 đã được commit riêng theo sprint. AUD-01.S3 verified legacy
 ownership recovery, candidate ZIP/manifest, current rotated object pose,
 retained floor collision, relative USD asset composition, và bất biến bytes của
 artifact cũ bằng OpenUSD runtime. AUD-02.S3 nối capability blocker qua typed
@@ -228,8 +229,11 @@ AUD-04.S1 đóng băng release timestamp/manifest theo approval identity trong D
 AUD-04.S2 xác minh ZIP closure và commit marker, lưu diagnostics an toàn, phục hồi
 partial/missing artifacts, chặn download khi bytes sai; 53 backend tests (4 skip
 vì thiếu `R2S_TEST_POSTGRES_URL`), 275 frontend tests, ESLint, typecheck, production
-build, Ruff và CodeGraph đều pass. Browser MCP gate còn UNVERIFIED; frontend checks
-không thay thế browser review hay PostgreSQL proof. Tiếp theo là AUD-04.S3.
+build, Ruff và CodeGraph đều pass. AUD-04.S3 kiểm tra hai registry độc lập trên
+SQLite, stale revision ngay trước seal marker và API ZIP/manifest byte equality;
+matrix pass 56 với 4 PostgreSQL skips do thiếu `R2S_TEST_POSTGRES_URL`. Browser
+MCP gate còn UNVERIFIED; frontend checks không thay thế browser review hay
+PostgreSQL proof. Tiếp theo là AUD-10.S1.
 
 AUD-23 có client preparation identity trước AUD-15/16 cache consumers; supported
 sensor mapping chốt trước AUD-13 overlay QA. Không cần full odometry/registration
@@ -308,7 +312,7 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [x] Kiểm tra cấu trúc sprint, links, canonical task bindings, test paths và docs-only scope.
 - [x] Bổ sung logic-change impact/dependent updates cho cả 25 task và integration map.
 - [ ] Implementation AUD-11.
-- [ ] Implementation AUD-01–04.
+- [x] Implementation AUD-01–04.
 - [ ] Implementation AUD-10, AUD-07, AUD-06.
 - [ ] Implementation AUD-05 và real Isaac acceptance.
 - [ ] Implementation AUD-08–09 và browser acceptance.

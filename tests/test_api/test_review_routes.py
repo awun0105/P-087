@@ -1,15 +1,18 @@
 """API duyệt/phát hành: chỉ Reviewer đã đăng nhập (fail closed kể cả khi tắt AUTH_REQUIRED)."""
 
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
+from zipfile import ZipFile
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src.models.contracts.identity import canonical_content_checksum
+from src.services.orchestration.artifacts.checksum import sha256_bytes
 from src.services.orchestration.auth import UserRecord
-from src.services.orchestration.review.workflow import record_validation_report, review_state
+from src.services.orchestration.review.workflow import record_validation_report, release_uri, review_state
 from tests.test_orchestration.test_review_workflow import _install_worker_run, _packaged, _report
 
 
@@ -78,6 +81,11 @@ def test_reviewer_approves_and_downloads_release(setup, monkeypatch: pytest.Monk
     assert setup.audits and setup.audits[0][1] == "review.approve"
     download = setup.client.get(f"/api/v1/jobs/{setup.job}/release-download")
     assert download.status_code == 200 and download.headers["content-type"] == "application/zip"
+    assert sha256_bytes(download.content) == state["release_archive"]["artifact_checksum"]
+    manifest_path = setup.registry.runtime_resolver.locate(release_uri(setup.job, setup.candidate_checksum))
+    assert manifest_path is not None
+    with ZipFile(BytesIO(download.content)) as archive:
+        assert archive.read("release_manifest.json") == manifest_path.read_bytes()
     again = setup.client.post(f"/api/v1/jobs/{setup.job}/review-decision", json=setup.body)
     assert again.status_code == 409
 
