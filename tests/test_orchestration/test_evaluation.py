@@ -22,6 +22,7 @@ from src.services.orchestration.projects.registry import ProjectRegistry
 
 _ROOT = Path(__file__).resolve().parents[2]
 _GEOMETRY = _ROOT / "configs" / "product" / "geometry_v1.json"
+_EVALUATION_REFERENCE = _ROOT / "configs" / "product" / "evaluation_reference_v1.json"
 
 
 def _scene(reviews: list[tuple[str, str | None]]) -> SceneIR:
@@ -134,7 +135,14 @@ def _evaluation() -> JobEvaluation:
                         verdict="ok",
                         threshold="≥ 50%",
                     ),
-                    Metric(key="pose.error", label="Sai số", value=None, display="Chưa đo", meaning="Lệch pixel"),
+                    Metric(
+                        key="pose.error",
+                        label="Sai số",
+                        value=None,
+                        display="Chưa đo",
+                        meaning="Lệch pixel",
+                        reference="Các scene đã chạy: 25,35–30,00 dB (6 scene)",
+                    ),
                 ],
             ),
             StageEvaluation(
@@ -148,8 +156,9 @@ def test_markdown_report_carries_values_verdicts_and_unmeasured_steps() -> None:
     report = evaluation_markdown(_evaluation())
     assert report.startswith("# Đánh giá scene: Kho | A\n")
     assert "`job-1` · trạng thái SUCCEEDED · revision `rev-002`" in report
-    assert "| Ảnh dựng được | 96.0 % (48/50) | Đạt (≥ 50%) | Phần ảnh \\| có vị trí |" in report
-    assert "| Sai số | Chưa đo | — | Lệch pixel |" in report
+    assert "| Chỉ số | Giá trị | Tham chiếu | Kết luận | Ý nghĩa |" in report
+    assert "| Ảnh dựng được | 96.0 % (48/50) |  | Đạt (≥ 50%) | Phần ảnh \\| có vị trí |" in report
+    assert "| Sai số | Chưa đo | Các scene đã chạy: 25,35–30,00 dB (6 scene) | — | Lệch pixel |" in report
     assert "## Hình học\n\n_Chưa có kết quả._ Bước này chưa có kết quả." in report
     assert "không so với ground truth" in report
 
@@ -161,7 +170,10 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN2
     from src.main import app
 
     settings = SimpleNamespace(
-        auth_required=False, database_url=f"sqlite:///{tmp_path / 'runtime.db'}", product_geometry_config=_GEOMETRY
+        auth_required=False,
+        database_url=f"sqlite:///{tmp_path / 'runtime.db'}",
+        product_geometry_config=_GEOMETRY,
+        product_evaluation_reference=_EVALUATION_REFERENCE,
     )
     registry = ProjectRegistry(runtime_root=tmp_path / "artifacts")
     registry.seed_from_fixtures()
@@ -219,6 +231,54 @@ def test_held_out_quality_reports_scores_or_the_reason_it_is_missing() -> None:
     )
     assert with_lpips[2].value == pytest.approx(0.265, abs=1e-3)
     assert "VGG" in with_lpips[2].display
+    assert all(metric.reference is None and metric.verdict is None for metric in with_lpips)
+
+
+def test_held_out_reference_ranges_are_descriptive_and_never_verdicts() -> None:
+    from src.services.orchestration.evaluation.reference import describe, load_reference
+    from src.services.reconstruction import VisualQuality
+
+    reference = load_reference(_EVALUATION_REFERENCE)
+    assert reference is not None
+    assert describe([25.35, 25.49, 26.36, 28.45, 28.8, 30.0], "dB", 2) == (
+        "Các scene đã chạy: 25,35–30,00 dB (6 scene)"
+    )
+    assert describe([25.35], "dB", 2) is None
+    lpips = [scene.lpips for scene in reference.scenes if scene.lpips is not None]
+    assert describe(lpips, "", 3) == "Các scene đã chạy: 0,268–0,344 (5 scene)"
+
+    metrics = scorecard._held_out_metrics(
+        VisualQuality(
+            gaussians=1000,
+            nonfinite_values=0,
+            training_frames=44,
+            train_iterations=30000,
+            held_out_frames=6,
+            held_out_psnr=28.6165,
+            held_out_ssim=0.89637,
+            held_out_lpips=0.26495,
+        ),
+        reference,
+    )
+    by_key = {metric.key: metric for metric in metrics}
+    assert by_key["visual.novel_view_quality"].value == 28.62
+    assert by_key["visual.novel_view_quality"].reference == "Các scene đã chạy: 25,35–30,00 dB (6 scene)"
+    assert by_key["visual.novel_view_ssim"].reference == "Các scene đã chạy: 0,888–0,939 (6 scene)"
+    assert by_key["visual.novel_view_lpips"].reference == "Các scene đã chạy: 0,268–0,344 (5 scene)"
+    assert all(metric.verdict is None for metric in metrics)
+
+
+def test_invalid_or_missing_evaluation_reference_warns_and_falls_back(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    from src.services.orchestration.evaluation.reference import load_reference
+
+    assert load_reference(None) is None
+    assert load_reference(tmp_path / "missing.json") is None
+    invalid = tmp_path / "invalid.json"
+    invalid.write_text('{"schema_version":"2.0","note":"bad","scenes":[]}', encoding="utf-8")
+    assert load_reference(invalid) is None
+    assert "Không đọc được file tham chiếu đánh giá" in caplog.text
 
 
 def test_reference_group_appears_only_after_an_evaluator_recorded_results(tmp_path: Path) -> None:

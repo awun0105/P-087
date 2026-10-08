@@ -8,7 +8,7 @@ import { parseJobEvaluation } from "@/lib/api/studio";
 
 const EVALUATION = {
   job_id: "job-1", project_id: "project-1", scene_name: "Kho A", job_status: "SUCCEEDED", scene_revision: "rev-002",
-  generated_at: "2026-10-02T03:00:00Z", schema_version: "1.0",
+  generated_at: "2026-10-02T03:00:00Z", schema_version: "1.1", summary: [],
   groups: [
     {
       group_id: "ST-CAMERA-POSE", title: "Vị trí camera", status: "measured", note: null,
@@ -73,9 +73,24 @@ describe("StageMetrics", () => {
 describe("parseJobEvaluation", () => {
   it("giữ null cho chỉ số chưa đo và từ chối dữ liệu sai dạng", () => {
     const parsed = parseJobEvaluation(EVALUATION);
+    expect(parsed.summary).toEqual([]);
     expect(parsed.groups[1].metrics[0].value).toBeNull();
     expect(parsed.groups[0].metrics[0].verdict).toBe("ok");
     expect(() => parseJobEvaluation({ ...EVALUATION, groups: [{ group_id: "x", title: "X", status: "la", metrics: [] }] })).toThrow();
     expect(() => parseJobEvaluation({ job_id: "a" })).toThrow();
+  });
+
+  it("parses optional summary and metric references", () => {
+    const groups = EVALUATION.groups.map((group) => group.group_id === "ST-CAMERA-POSE"
+      ? { ...group, metrics: [...group.metrics, {
+          key: "reference.fixture", label: "Tham chiếu", value: 1, unit: null,
+          display: "1", meaning: "Chỉ để kiểm kiểu dữ liệu.", reference: "Khoảng đã quan sát",
+        }] }
+      : group);
+    const parsed = parseJobEvaluation({ ...EVALUATION, summary: ["Kiểm tra dữ liệu"], groups });
+    expect(parsed.summary).toEqual(["Kiểm tra dữ liệu"]);
+    expect(parsed.groups[0].metrics[2].reference).toBe("Khoảng đã quan sát");
+    expect(parsed.groups[0].metrics[0].reference).toBeNull();
+    expect(parseJobEvaluation({ ...EVALUATION, summary: undefined }).summary).toEqual([]);
   });
 });

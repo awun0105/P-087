@@ -17,13 +17,14 @@ def _group_lines(group: StageEvaluation) -> list[str]:
         return [*lines, f"_{_STATUS[group.status]}._ {group.note or ''}".strip(), ""]
     if group.note:
         lines += [f"_{group.note}_", ""]
-    lines += ["| Chỉ số | Giá trị | Kết luận | Ý nghĩa |", "|---|---|---|---|"]
+    lines += ["| Chỉ số | Giá trị | Tham chiếu | Kết luận | Ý nghĩa |", "|---|---|---|---|---|"]
     for metric in group.metrics:
         verdict = _VERDICT[metric.verdict] if metric.verdict else "—"
         if metric.threshold and metric.verdict:
             verdict = f"{verdict} ({metric.threshold})"
+        ref = _cell(metric.reference) if metric.reference else ""
         lines.append(
-            f"| {_cell(metric.label)} | {_cell(metric.display)} | {_cell(verdict)} | {_cell(metric.meaning)} |"
+            f"| {_cell(metric.label)} | {_cell(metric.display)} | {ref} | {_cell(verdict)} | {_cell(metric.meaning)} |"
         )
     return [*lines, ""]
 

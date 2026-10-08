@@ -16,7 +16,14 @@ _ERRORS = {404: {"model": schemas.ApiErrorResponse}}
 
 def _evaluation(job_id: str) -> JobEvaluation:
     try:
-        return evaluate_job(deps.registry(), job_id, deps.settings().product_geometry_config)
+        settings = deps.settings()
+        reference = getattr(settings, "product_evaluation_reference", None)
+        return evaluate_job(
+            deps.registry(),
+            job_id,
+            settings.product_geometry_config,
+            reference_config=reference,
+        )
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
 

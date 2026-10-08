@@ -154,8 +154,8 @@ Test (`tests/test_orchestration/test_evaluation.py`):
 - Báo cáo Markdown có cột "Tham chiếu".
 
 **Exit:**
-- [ ] Sáu nhóm test pass; test đánh giá hiện có chỉ đổi `schema_version`.
-- [ ] `npm run typecheck` pass sau khi sửa kiểu ở frontend.
+- [x] Sáu nhóm test pass; test đánh giá hiện có chỉ đổi `schema_version`.
+- [x] `npm run typecheck` pass sau khi sửa kiểu ở frontend.
 
 ---
 
@@ -272,5 +272,34 @@ DONE khi cả ba sprint tick đủ Exit.
 
 ## Result / Evidence
 
-Chưa triển khai. Mỗi sprint ghi: commit base, file thật sự sửa, schema delta, lệnh và
-output, JSON thật của một job (S2), giới hạn còn lại.
+### Sprint AUD-28.S1 — 2026-10-09
+
+- **Commit:** `3ef09b3` (base `f33f8fb`).
+- **Files:** `configs/product/evaluation_reference_v1.json`, this task file,
+  `frontend/src/lib/api/studio.ts`, `frontend/tests/evaluation-card.test.tsx`,
+  `src/api/studio/evaluation.py`, `src/config.py`,
+  `src/services/orchestration/evaluation/models.py`,
+  `src/services/orchestration/evaluation/reference.py`,
+  `src/services/orchestration/evaluation/report.py`,
+  `src/services/orchestration/evaluation/scorecard.py`,
+  `tests/test_orchestration/test_evaluation.py`.
+- **Schema:** `JobEvaluation.schema_version` is `1.1`; `summary` defaults to an empty
+  list and `Metric.reference` is optional. The frontend parser remains compatible with
+  responses that omit these fields.
+- **Behavior:** Six configured reference scenes provide descriptive min/max intervals.
+  LPIPS has five non-null samples. Held-out metrics retain `verdict=None`. Missing or
+  invalid reference configuration logs a warning and leaves evaluation usable without
+  reference values.
+- **Verification:** `.venv/bin/pytest tests/test_orchestration/test_evaluation.py -q`
+  (12 passed); `.venv/bin/ruff check src/ tests/ scripts/resources/` (passed);
+  `.venv/bin/ruff format --check src/ tests/ scripts/resources/` (537 files formatted);
+  `cd frontend && npm run typecheck` (passed); `npm run lint` (passed with two existing
+  warnings in `src/features/studio/inspection/LidarCalibrationQAStage.tsx`);
+  `npm exec -- vitest run tests/evaluation-card.test.tsx` (5 passed).
+- **Graph indexes:** CodeGraph was queried for the evaluation flow and current symbols;
+  Graphify was queried before the next sprint. The required post-edit Graphify refresh
+  was completed for S1.
+- **Limits:** Intervals describe the configured sample range; they do not define an
+  acceptance threshold or establish simulation readiness. No GPU claim is part of S1.
+
+S2 and S3 remain unimplemented.

@@ -17,6 +17,7 @@ from src.models.contracts.manifests import JobManifest, StageId, StageStatus
 from src.models.contracts.scene import SceneIR, SceneObjectOrigin, SceneObjectState
 from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.evaluation.models import JobEvaluation, Metric, StageEvaluation, Verdict
+from src.services.orchestration.evaluation.reference import ReferenceSet, describe, load_reference
 from src.services.orchestration.jobs.progress import job_progress
 from src.services.orchestration.jobs.stage_views import job_bundle
 from src.services.orchestration.projects.registry import ProjectRegistry
@@ -181,18 +182,21 @@ def _pose_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric] |
     ]
 
 
-def _visual_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric] | None:
+def _visual_metrics(
+    registry: ProjectRegistry, job: JobManifest, reference_config: Path | None = None
+) -> list[Metric] | None:
     visual = _reference(job, StageId.VISUAL_RECON, "BrushVisualArtifact")
     if visual is None:
         return None
     quality = visual_quality(visual, registry.runtime_resolver.require)
+    ref_set = load_reference(reference_config) if reference_config is not None else None
     return [
         *_visual_core(quality),
-        *_held_out_metrics(quality),
+        *_held_out_metrics(quality, ref_set),
     ]
 
 
-def _held_out_metrics(quality: VisualQuality) -> list[Metric]:
+def _held_out_metrics(quality: VisualQuality, ref_set: ReferenceSet | None = None) -> list[Metric]:
     """PSNR/SSIM/LPIPS trên ảnh giữ lại không train (giao thức: eval/protocols/recon_visual_quality.md)."""
     label = "PSNR trên ảnh không train"
     meaning = "Scene có tái hiện đúng góc nhìn chưa từng thấy không; đây là thước đo chính của chất lượng 3DGS."
@@ -204,6 +208,21 @@ def _held_out_metrics(quality: VisualQuality) -> list[Metric]:
         )
         return [Metric(key="visual.novel_view_quality", label=label, value=None, display=reason, meaning=meaning)]
     views = f"trên {quality.held_out_frames} ảnh giữ lại"
+    psnr_ref = (
+        describe([s.psnr for s in ref_set.scenes if s.psnr is not None], unit="dB", digits=2)
+        if ref_set is not None
+        else None
+    )
+    ssim_ref = (
+        describe([s.ssim for s in ref_set.scenes if s.ssim is not None], unit="", digits=3)
+        if ref_set is not None
+        else None
+    )
+    lpips_ref = (
+        describe([s.lpips for s in ref_set.scenes if s.lpips is not None], unit="", digits=3)
+        if ref_set is not None
+        else None
+    )
     return [
         Metric(
             key="visual.novel_view_quality",
@@ -212,6 +231,7 @@ def _held_out_metrics(quality: VisualQuality) -> list[Metric]:
             unit="dB",
             display=f"{quality.held_out_psnr:.2f} dB {views}",
             meaning=meaning + " Cao hơn là tốt hơn.",
+            reference=psnr_ref,
         ),
         Metric(
             key="visual.novel_view_ssim",
@@ -219,6 +239,7 @@ def _held_out_metrics(quality: VisualQuality) -> list[Metric]:
             value=None if quality.held_out_ssim is None else round(quality.held_out_ssim, 4),
             display="Chưa đo" if quality.held_out_ssim is None else f"{quality.held_out_ssim:.3f} {views}",
             meaning="Độ giống về cấu trúc ảnh (0–1). Cao hơn là tốt hơn.",
+            reference=ssim_ref if quality.held_out_ssim is not None else None,
         ),
         Metric(
             key="visual.novel_view_lpips",
@@ -230,6 +251,7 @@ def _held_out_metrics(quality: VisualQuality) -> list[Metric]:
                 else f"{quality.held_out_lpips:.3f} {views} (mạng VGG)"
             ),
             meaning="Khác biệt theo cảm nhận của mắt người. Thấp hơn là tốt hơn.",
+            reference=lpips_ref if quality.held_out_lpips is not None else None,
         ),
     ]
 
@@ -705,10 +727,16 @@ def _system_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric]
     ]
 
 
-def evaluate_job(registry: ProjectRegistry, job_id: str, geometry_config: Path) -> JobEvaluation:
+def evaluate_job(
+    registry: ProjectRegistry,
+    job_id: str,
+    geometry_config: Path,
+    reference_config: Path | None = None,
+) -> JobEvaluation:
     """Bảng đánh giá hiện tại của một job; nhóm nào chưa có dữ liệu thì ghi rõ trạng thái thay vì bỏ qua.
 
     `geometry_config`: file thông số REC-05 của deployment (`PRODUCT_GEOMETRY_CONFIG`), nguồn kích thước robot.
+    `reference_config`: file chứa khoảng tham chiếu PSNR/SSIM/LPIPS từ các scene đã chạy (`PRODUCT_EVALUATION_REFERENCE`).
     """
     job = registry.get_job(job_id)
     project = registry.get_project(job.project_id)
@@ -719,7 +747,7 @@ def evaluate_job(registry: ProjectRegistry, job_id: str, geometry_config: Path) 
     groups = [
         _group(StageId.INPUT_VALIDATE.value, "Video đầu vào", lambda: _input_metrics(registry, job)),
         _group(StageId.CAMERA_POSE.value, "Vị trí camera", lambda: _pose_metrics(registry, job)),
-        _group(StageId.VISUAL_RECON.value, "Scene 3DGS", lambda: _visual_metrics(registry, job)),
+        _group(StageId.VISUAL_RECON.value, "Scene 3DGS", lambda: _visual_metrics(registry, job, reference_config)),
         _group(StageId.METRIC_CANONICALIZE.value, "Tỉ lệ mét", lambda: _metric_metrics(registry, job)),
         _group(
             StageId.RGB_GEOMETRY.value, "Hình học và va chạm", lambda: _geometry_metrics(registry, job, geometry_config)

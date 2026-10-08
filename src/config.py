@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     product_preview_timeout_seconds: float = Field(default=21600, gt=0, allow_inf_nan=False)
     #: Thông số REC-05 (voxel/capsule) cho bước hoàn tất sau xác nhận tỉ lệ (owner chốt 2026-09-29).
     product_geometry_config: Path = Path("configs/product/geometry_v1.json")
+    product_evaluation_reference: Path = Path("configs/product/evaluation_reference_v1.json")
     product_finalize_timeout_seconds: float = Field(default=7200, gt=0, allow_inf_nan=False)
     #: GPU adapter cho splat-transform, theo từng máy (`--list-gpus`); None = dùng giá trị trong profile.
     product_geometry_gpu_index: int | None = Field(default=None, ge=0)

@@ -1177,6 +1177,7 @@ export interface EvaluationMetric {
   meaning: string;
   verdict: "ok" | "warn" | "fail" | null;
   threshold: string | null;
+  reference: string | null;
 }
 
 export interface EvaluationGroup {
@@ -1193,6 +1194,7 @@ export interface JobEvaluation {
   job_status: string;
   scene_revision: string | null;
   generated_at: string;
+  summary: string[];
   groups: EvaluationGroup[];
 }
 
@@ -1214,6 +1216,7 @@ export function parseJobEvaluation(data: unknown): JobEvaluation {
         unit: typeof metric.unit === "string" ? metric.unit : null,
         verdict: EVALUATION_VERDICT.find((item) => item === metric.verdict) ?? null,
         threshold: typeof metric.threshold === "string" ? metric.threshold : null,
+        reference: typeof metric.reference === "string" ? metric.reference : null,
       };
     });
     return { group_id: group.group_id, title: group.title, status, note: typeof group.note === "string" ? group.note : null, metrics };
@@ -1224,6 +1227,7 @@ export function parseJobEvaluation(data: unknown): JobEvaluation {
     job_status: typeof data.job_status === "string" ? data.job_status : "",
     scene_revision: typeof data.scene_revision === "string" ? data.scene_revision : null,
     generated_at: typeof data.generated_at === "string" ? data.generated_at : "",
+    summary: Array.isArray(data.summary) ? data.summary.filter((s): s is string => typeof s === "string") : [],
     groups,
   };
 }
