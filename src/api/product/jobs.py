@@ -13,6 +13,7 @@ from src.api.auth import (
 )
 from src.api.ownership import authorize_job_mutation
 from src.api.product import deps
+from src.api.studio.error_view import filter_job_attempt_errors, filter_manifest_errors
 from src.models.contracts.manifests import JobManifest, JobStatus
 from src.models.contracts.retryability import is_execution_error_retryable
 from src.services.orchestration.auth import UserRecord, actor_of
@@ -30,10 +31,10 @@ router = APIRouter()
 
 
 @router.get("/jobs/{job_id}", response_model=JobManifest)
-def get_job(job_id: str) -> JobManifest:
+def get_job(job_id: str, user: UserRecord | None = Depends(require_contributor)) -> JobManifest:
     """JobManifest đầy đủ: status, stage và artifact đã publish."""
     try:
-        return deps.registry().get_job(job_id)
+        return filter_manifest_errors(deps.registry().get_job(job_id), user)
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
 
@@ -62,7 +63,8 @@ def transition_job(
             raise HTTPException(
                 status_code=409, detail="Runtime progress do worker sở hữu; dùng cancel/retry, không tự báo SUCCESS"
             )
-        return registry.transition_job(job_id, request)
+        manifest = registry.transition_job(job_id, request)
+        return filter_manifest_errors(manifest, user)
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except InvalidTransitionError as error:
@@ -93,7 +95,7 @@ def retry_job(
                 )
             duplicate = registry.lookup_quota_job(quota_intent)
             if duplicate is not None:
-                return duplicate
+                return filter_manifest_errors(duplicate, user)
         job = registry.get_job(job_id)
         if job.status != JobStatus.FAILED:
             raise HTTPException(
@@ -134,14 +136,17 @@ def retry_job(
     except (RuntimeStateConflictError, PrivacyGateBlockedError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     record_gpu_run(user, job_id, {"kind": "job.retry"})
-    return job
+    return filter_manifest_errors(job, user)
 
 
 @router.get("/jobs/{job_id}/attempts", response_model=schemas.JobAttemptListResponse)
-def list_job_attempts(job_id: str) -> schemas.JobAttemptListResponse:
+def list_job_attempts(
+    job_id: str, user: UserRecord | None = Depends(require_contributor)
+) -> schemas.JobAttemptListResponse:
     """Lịch sử attempt của job, cũ nhất trước."""
     try:
         attempts = deps.registry().list_job_attempts(job_id)
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    return schemas.JobAttemptListResponse(job_id=job_id, attempts=attempts)
+    filtered_attempts = [filter_job_attempt_errors(att, user) for att in attempts]
+    return schemas.JobAttemptListResponse(job_id=job_id, attempts=filtered_attempts)

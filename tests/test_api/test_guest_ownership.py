@@ -290,6 +290,67 @@ async def test_progress_returns_actor_specific_job_capabilities(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("role", "excerpt_visible"),
+    [("guest", False), ("editor", False), ("reviewer", True), (None, True)],
+)
+async def test_progress_route_redacts_log_excerpt_by_actor(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    role: str | None,
+    excerpt_visible: bool,
+) -> None:
+    from src.models.contracts.manifests import ExecutionError, JobStatus
+    from src.services.orchestration.jobs.progress import JobProgress, StageProgress
+
+    registry = ProjectRegistry(
+        runtime_root=tmp_path / "artifacts",
+        database=RuntimeDatabase(f"sqlite:///{tmp_path / 'runtime.db'}"),
+    )
+    registry.seed_from_fixtures()
+    job = registry.get_job("job-fixture-001")
+    error = ExecutionError(
+        stage_id=job.current_stage,
+        error_code="COLMAP_NO_MODEL",
+        human_message="COLMAP produced no sparse model",
+        retryable=False,
+        details={"diagnostics": {"no_initial_pair": 2}, "log_excerpt": ["redacted process line"]},
+    )
+    progress = JobProgress(
+        job_id=job.job_id,
+        status=JobStatus.FAILED,
+        current_stage=job.current_stage,
+        attempt=1,
+        started_at=job.started_at,
+        updated_at=job.started_at,
+        completed_at=job.started_at,
+        stages=[StageProgress(stage_id=job.current_stage, state="failed", error=error)],
+        preview_ready=False,
+        error=error,
+    )
+    monkeypatch.setattr(studio_scenes_api.deps, "registry", lambda: registry)
+    monkeypatch.setattr(studio_scenes_api.deps, "preview_ready", lambda *_: False)
+    monkeypatch.setattr(studio_scenes_api, "resource_wait", lambda *_: None)
+    monkeypatch.setattr(studio_scenes_api, "job_reservation", lambda *_: None)
+    monkeypatch.setattr(studio_scenes_api, "job_progress", lambda *_args, **_kwargs: progress)
+
+    original_overrides = app.dependency_overrides.copy()
+    app.dependency_overrides[auth_api.require_contributor] = lambda: _user(role) if role is not None else None
+    try:
+        response = await client.get(f"/api/v1/jobs/{job.job_id}/progress")
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(original_overrides)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    for visible_error in [body["error"], body["stages"][0]["error"]]:
+        assert ("log_excerpt" in visible_error["details"]) is excerpt_visible
+        assert visible_error["details"]["diagnostics"] == {"no_initial_pair": 2}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     ("role", "expected_delete"),
     [
         ("guest", [True, False, True]),

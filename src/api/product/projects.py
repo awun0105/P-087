@@ -13,6 +13,7 @@ from src.api.auth import (
 )
 from src.api.ownership import authorize_project_mutation
 from src.api.product import deps
+from src.api.studio.error_view import filter_manifest_errors
 from src.models.contracts.manifests import JobManifest
 from src.services.orchestration.auth import UserRecord, actor_of
 from src.services.orchestration.auth.quota_ledger import GuestQuotaExceededError, GuestQuotaIdempotencyConflictError
@@ -93,7 +94,7 @@ def create_job(
                 )
             duplicate = registry.lookup_quota_job(quota_intent)
             if duplicate is not None:
-                return duplicate
+                return filter_manifest_errors(duplicate, user)
         enforce_gpu_quota(user)
         job = registry.create_job(
             JobCreateInput(project_id=project_id, scene_revision=request.scene_revision),
@@ -102,7 +103,7 @@ def create_job(
             quota_intent=quota_intent,
         )
         record_gpu_run(user, job.job_id, {"kind": "job.create", "project_id": project_id})
-        return job
+        return filter_manifest_errors(job, user)
     except ProjectNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except GuestQuotaExceededError as error:
@@ -114,10 +115,11 @@ def create_job(
 
 
 @router.get("/projects/{project_id}/jobs", response_model=schemas.JobListResponse)
-def list_jobs(project_id: str) -> schemas.JobListResponse:
+def list_jobs(project_id: str, user: UserRecord | None = Depends(require_contributor)) -> schemas.JobListResponse:
     """Job của một project."""
     try:
         jobs = deps.registry().list_jobs(project_id)
     except ProjectNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    return schemas.JobListResponse(project_id=project_id, jobs=jobs)
+    filtered_jobs = [filter_manifest_errors(j, user) for j in jobs]
+    return schemas.JobListResponse(project_id=project_id, jobs=filtered_jobs)

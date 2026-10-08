@@ -18,6 +18,7 @@ from src.api.auth import (
 )
 from src.api.ownership import authorize_upload_mutation, owner_mutation_allowed
 from src.api.studio import deps
+from src.api.studio.error_view import filter_job_progress_errors, filter_manifest_errors
 from src.models.contracts.manifests import JobManifest, JobStatus
 from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.auth import Actor, UserRecord, actor_of
@@ -231,7 +232,7 @@ def create_scene_from_upload(
     except (PrivacyGateBlockedError, RuntimeStateConflictError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     record_gpu_run(user, job.job_id, {"kind": "scene.create", "project_id": project.project_id})
-    return SceneFromUploadResponse(project=schemas.project_response(project), job=job)
+    return SceneFromUploadResponse(project=schemas.project_response(project), job=filter_manifest_errors(job, user))
 
 
 @router.get("/scenes", response_model=SceneListResponse)
@@ -252,6 +253,8 @@ def list_scenes(user: UserRecord | None = Depends(require_contributor)) -> Scene
             continue
         jobs = registry.list_jobs(project.project_id)
         latest = max(jobs, key=lambda job: job.started_at) if jobs else None
+        if latest is not None:
+            latest = filter_manifest_errors(latest, user)
         project_owner_id = project.created_by.user_id if project.created_by is not None else None
         can_delete_project = owner_mutation_allowed(user, project_owner_id)
         if can_delete_project and user is not None and user.role == "guest":
@@ -298,6 +301,7 @@ def get_job_progress(job_id: str, user: UserRecord | None = Depends(require_cont
         position,
         heartbeat_at=heartbeat_at,
     )
+    progress = filter_job_progress_errors(progress, user)
     allowed = owner_mutation_allowed(
         user,
         registry.get_job_owner_user_id(job_id) if user is not None and user.role == "guest" else None,

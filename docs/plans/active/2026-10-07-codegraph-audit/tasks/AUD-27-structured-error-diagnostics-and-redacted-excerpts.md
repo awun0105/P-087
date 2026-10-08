@@ -248,8 +248,8 @@ Test:
   trong hai câu theo `diagnostics`.
 
 **Exit:**
-- [ ] Test backend bốn vai trò pass; danh sách route đã áp dụng ghi trong Result.
-- [ ] Test frontend pass; `npm run lint`, `npm run typecheck`, `npm run build -- --webpack` pass.
+- [x] Test backend bốn vai trò pass; danh sách route đã áp dụng ghi trong Result.
+- [x] Test frontend pass; `npm run lint`, `npm run typecheck`, `npm run build -- --webpack` pass.
 - [ ] Kiểm bằng mắt trên Studio do owner thực hiện; agent không tự xác nhận phần này.
 
 ---
@@ -309,3 +309,28 @@ DONE khi S1 và S2 tick đủ Exit. S3 có thể hoàn tất sau.
     - `details["log_excerpt"]`: `list[str]` (tối đa 40 dòng, tối đa 4.096 byte, đường dẫn đã che `<workspace>` và `<path>`).
     - `details["diagnostics"]`: `dict[str, int]` (`no_initial_pair`, `insufficient_size` cho `COLMAP_NO_MODEL`).
     - `details["registered_frames"]`, `details["input_frames"]`, `details["min_registered_ratio"]`: `int`, `int`, `float` (cho `COLMAP_REGISTRATION_LOW`).
+
+- **AUD-27.S2 (Hoàn thành):**
+  - Files created/modified:
+    - `src/api/studio/error_view.py`: `visible_error`, `filter_stage_artifact_errors`, `filter_manifest_errors`, `filter_stage_progress_errors`, `filter_job_progress_errors`, `filter_job_attempt_errors`.
+    - `src/api/studio/scenes.py`: Lọc `log_excerpt` tại `GET /jobs/{job_id}/progress` và `GET /scenes`.
+    - `src/api/product/projects.py`: Lọc tại `POST /projects/{project_id}/jobs` và `GET /projects/{project_id}/jobs`.
+    - `src/api/product/jobs.py`: Lọc tại `GET /jobs/{job_id}`, `POST /jobs/{job_id}/transitions`, `POST /jobs/{job_id}/retry`, `GET /jobs/{job_id}/attempts`.
+    - `frontend/src/features/studio/errorGuidance.ts`: Bảng tra cứu và hàm `guidanceFor(error)` theo đúng nhãn của presets.
+    - `frontend/src/features/studio/PipelineTimeline.tsx`: Khối lỗi hiển thị cause, fix, nhãn thử lại và collapsible `<details>` cho `details.log_excerpt`.
+    - `frontend/src/lib/contracts/studio.ts`: Mở rộng `ExecutionErrorView.details`.
+    - `tests/test_api/test_error_view.py`: Unit test 4 vai trò và integration test route progress/jobs/attempts.
+    - `frontend/tests/pipeline-timeline.test.tsx`: Vitest tests kiểm tra cause/fix/retryable/log_excerpt collapsible.
+  - Danh sách route áp dụng `visible_error`:
+    - `GET /jobs/{job_id}/progress`
+    - `GET /scenes`
+    - `POST /projects/{project_id}/jobs`
+    - `GET /projects/{project_id}/jobs`
+    - `GET /jobs/{job_id}`
+    - `POST /jobs/{job_id}/transitions`
+    - `POST /jobs/{job_id}/retry`
+    - `GET /jobs/{job_id}/attempts`
+  - Verification:
+    - `.venv/bin/pytest tests/test_api/test_error_view.py -v`: 3/3 passed.
+    - `cd frontend && npm run lint && npm run typecheck && npm test -- tests/pipeline-timeline.test.tsx && npm run build -- --webpack`: 0 lint errors, 0 typecheck errors, 7/7 vitest passed, next webpack build 17/17 pages succeeded.
+

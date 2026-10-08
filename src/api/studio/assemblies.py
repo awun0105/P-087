@@ -24,6 +24,7 @@ from src.api.ownership import (
     authorize_upload_mutation,
 )
 from src.api.studio import deps
+from src.api.studio.error_view import filter_manifest_errors
 from src.models.contracts.artifacts import Checksum
 from src.models.contracts.input_assembly import (
     CandidateState,
@@ -366,7 +367,7 @@ def resolve_input_assembly(
 
 def _accepted_job_response(job: JobManifest, user: UserRecord | None) -> AssemblyRunResponse:
     project = deps.registry().get_project(job.project_id)
-    return AssemblyRunResponse(project=schemas.project_response(project), job=job)
+    return AssemblyRunResponse(project=schemas.project_response(project), job=filter_manifest_errors(job, user))
 
 
 @router.post(

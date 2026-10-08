@@ -7,8 +7,9 @@ import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { ProgressBar } from "@/components/studio/primitives";
 import { LIDAR_CALIBRATION_QA_STAGE, MVP_STAGES, type StageMeta } from "@/features/studio/stages";
 import { inspectHref, inspectionStage } from "@/features/studio/inspection";
+import { guidanceFor } from "@/features/studio/errorGuidance";
 import { cn } from "@/lib/cn";
-import type { StageId } from "@/lib/contracts/api";
+import type { ExecutionError, StageId } from "@/lib/contracts/api";
 import type { StageState } from "@/lib/contracts/studio";
 import { formatDuration } from "@/lib/format";
 import { estimateRemainingTime, formatEtaDuration } from "@/features/studio/scene/estimation";
@@ -20,7 +21,7 @@ export interface StageView {
   seconds: number | null;
   /** 0..1 chỉ khi đo được thật (vd. phát lại demo); null → dải chạy không số. */
   fraction: number | null;
-  error?: { human_message: string; error_code: string } | null;
+  error?: ExecutionError | null;
 }
 
 const ICONS: Record<StageState, typeof Check> = {
@@ -173,12 +174,36 @@ export function PipelineTimeline({
                   {state === "running" && !isStale && (
                     <ProgressBar value={stage?.fraction ?? null} label={`Tiến trình ${meta.title}`} className="mt-3" />
                   )}
-                  {state === "failed" && stage?.error && (
-                    <p className="mt-2 text-sm text-rust">
-                      {stage.error.human_message}{" "}
-                      <span className="font-mono text-xs opacity-80">({stage.error.error_code})</span>
-                    </p>
-                  )}
+                  {state === "failed" && stage?.error && (() => {
+                    const err = stage.error;
+                    const guidance = guidanceFor(err);
+                    const cause = guidance?.cause ?? err.human_message;
+                    const fix = guidance?.fix;
+                    const retryableLabel = err.retryable ? "Có thể thử lại" : "Cần sửa đầu vào trước khi chạy lại";
+                    const logExcerpt = Array.isArray(err.details?.log_excerpt)
+                      ? err.details.log_excerpt.filter((line): line is string => typeof line === "string")
+                      : [];
+
+                    return (
+                      <div className="mt-2 space-y-1 text-sm text-rust" role="alert">
+                        <p>
+                          {cause} <span className="font-mono text-xs opacity-80">({err.error_code})</span>
+                        </p>
+                        {fix && <p className="text-xs leading-relaxed text-ink-muted">{fix}</p>}
+                        <p className="text-xs font-medium text-ink-subtle">{retryableLabel}</p>
+                        {logExcerpt.length > 0 && (
+                          <details className="mt-2 rounded border border-line bg-paper-sunken p-2 text-xs text-ink">
+                            <summary className="cursor-pointer font-medium text-ink-muted hover:text-ink">
+                              Chi tiết kỹ thuật
+                            </summary>
+                            <pre className="mt-2 max-h-60 overflow-x-auto whitespace-pre-wrap font-mono text-xs text-ink-subtle">
+                              {logExcerpt.join("\n")}
+                            </pre>
+                          </details>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {jobId && inspectable && selected === meta.id && (
                     <div id={`stage-detail-${meta.id}`} className="mt-3 space-y-2 border-t border-line pt-3">
                       <p className="text-sm leading-relaxed text-ink-muted">{meta.description}</p>

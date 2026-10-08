@@ -152,6 +152,7 @@ export interface ExecutionErrorView {
   stage_id: StageId;
   human_message: string;
   retryable: boolean;
+  details?: Record<string, unknown> | null;
 }
 
 export interface StageProgress {
