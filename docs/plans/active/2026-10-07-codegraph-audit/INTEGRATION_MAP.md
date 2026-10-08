@@ -66,6 +66,13 @@ Không coi bảng này là inventory source hoàn chỉnh hoặc proof browser/G
 | [AUD-24](tasks/AUD-24-unified-upload-and-input-resolution.md) | Rất cao | Per-file classification khác executable assembly; automatic recipe/source intent selection | staged/direct/proxy upload, PLY/SOG/ZIP shared format registry, role/binding resolver, assembly/InputManifest DTOs, create-job ownership/quota/CAS, REC worker/fusion/priors, AUD-17/19 ports, media/cache identity và unified Studio UI | Loose/ZIP parity; SOG vs generic ZIP; unknown facts/ambiguous masters không fake ready; Gaussian chỉ view import; stale assembly không dispatch, one accepted reconstruction intent và retry giữ recipe/ref identity. |
 | [AUD-25](tasks/AUD-25-imported-3dgs-continuation.md) | Deferred; risk rất cao nếu mở lại | Thiết kế imported-source continuation giữ tham khảo | Không implement source adapter/geometry/object pipeline hoặc processing CTA trong active tasks; không là dependency | Không có active acceptance; chỉ mở lại khi owner yêu cầu. Import/view PLY/SOG của AUD-06/24 vẫn active. |
 
+AUD-24.S1 defines the shared staged-file, assembly, resolution, recipe and runtime
+qualification contract in `src/models/contracts/input_assembly.py`; it leaves the
+legacy `InputManifest` untouched. AUD-17 consumes explicit sensor-trajectory and
+ordered scan bindings; AUD-19 consumes explicit map/cloud refs with units/frame
+provenance; AUD-06 reuses the Gaussian source-format labels while owning SOG
+validation. No consumer or R1–R6 runtime is enabled by the S1 schema alone.
+
 ## Checklist logic change cho mỗi sprint
 
 1. Viết behavior trước/sau và lý do chọn hướng mới. Phân biệt intended behavior

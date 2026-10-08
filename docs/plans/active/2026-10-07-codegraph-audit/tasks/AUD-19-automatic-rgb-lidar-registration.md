@@ -93,7 +93,10 @@ Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption
 
 S1 độc lập; reuse current flat-floor/trajectory contract fixtures. AUD-24.S1 cung cấp
 assembly/recipe ports khi bind loose files; review adapter/from-assembly lineage
-cùng task đó. Existing direct map request giữ supported compatibility. S2 dùng
+cùng task đó. Port contract tách `registered_lidar_map`, `static_lidar_cloud` và
+`lidar_scan`; registration consumes exact checksummed map/cloud refs with declared
+units/frame/same-scene evidence. A registered map is not thereby RGB-aligned, and
+map registration does not require camera extrinsics. Existing direct map request giữ supported compatibility. S2 dùng
 AUD-14.S1 khi cần adaptive floor evidence và AUD-12.S1 quality/coverage protocol.
 AUD-25 Deferred; không có dependency hoặc imported-source work từ task đó trong
 active S1–S4. RGB/LiDAR registration tiếp tục với existing target contracts.

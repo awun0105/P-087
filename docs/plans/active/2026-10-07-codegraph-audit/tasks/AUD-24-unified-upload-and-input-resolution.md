@@ -154,7 +154,97 @@ Define Gaussian PLY/SOG view/import intents separately from R1–R6; shared form
 validation/version ports coordinated AUD-06. Không design active G1–G3 processing schema.
 Tests: seven owner-listed combinations mapped into R1–R6, single cloud vs sequence,
 camera vs sensor trajectory conventions, missing clocks/units, old payload checksums.
-**Exit:** [ ] no duplicated pipelines; [ ] producer/consumer contracts and recipe matrix agreed.
+**Exit:** [x] no duplicated pipelines; [x] producer/consumer contracts and recipe matrix agreed.
+
+### AUD-24.S1 decisions — version 1.0 contracts and binding matrix
+
+Shared Pydantic contracts live in `src/models/contracts/input_assembly.py` and are
+re-exported from `src/models/contracts/__init__.py`; matching frontend types live in
+`frontend/src/lib/contracts/inputAssembly.ts`. The machine-readable seven-row matrix is
+[`input_assembly_binding_matrix.json`](../../../../../fixtures/contracts/input_assembly_binding_matrix.json).
+This is a contract/fixture only: no resolver, upload route, runtime capability, or
+new recipe is enabled by S1.
+
+`StagedInputFile` binds the original upload ID, existing `InputFile` ref, observed
+content format, optional normalized archive-member path/checksum, and role evidence.
+`InputAssemblySnapshot` is an immutable `(assembly_id, revision)` snapshot with
+owner, exact refs, explicit bindings, typed declarations, optional existing server
+video-preparation verification, and canonical `assembly_checksum`. A file/member
+change or changed binding creates a new revision. Scan file order is retained only
+after an explicit sequence binding; filename, mtime, upload order, or count never
+proves capture pairing. `declared`, `observed`, `estimated`, and `verified` remain
+separate provenance values; verified evidence requires a checksum.
+
+`InputResolutionReport` binds the assembly checksum/revision, resolver version and
+runtime-registry checksum. Candidates are discriminated as a video recipe R1–R6 or
+a Gaussian view/import candidate. `ready` requires exactly one recommended
+candidate and a matching `qualified` runtime record; it means inputs and the route
+are executable, not that calibration, alignment, collision, or physics QA passed.
+`InputRecipe` binds the selected candidate, exact file bindings and exclusions,
+trajectory origin, producer/tool versions, configuration checksum and accepted
+timestamp. `GaussianViewImportIntent` binds the exact PLY/SOG source checksum and
+remains a view/import command; it is not an R1–R6 recipe or continuation request.
+All new identities use the existing canonical-content checksum helpers. Legacy
+`InputManifest` fields, serialization and checksums are unchanged; AUD-24.S3 will
+materialize new-mode producer outputs into compatible canonical artifacts.
+
+The seven owner-listed input combinations resolve as follows. The machine-readable
+fixture records the same conditions for contract tests:
+
+| Combination | Recipe candidates | Binding decision |
+|---|---|---|
+| RGB only | R1 | Existing RGB route; runtime still must be explicitly qualified. |
+| RGB + registered LiDAR map | R2 | Require declared units/frame/same scene and map overlap QA; calibration, TUM and RGB frame times are not prerequisites. |
+| RGB + one raw/static cloud | R3 | A single cloud is not a scan sequence; require units/frame and registration QA. |
+| RGB + LiDAR + calibration | R2, R3 or R5 | Ask for cloud state; calibration is neither registration evidence nor a trajectory. R5 additionally needs an ordered, timestamped scan sequence. |
+| RGB + LiDAR + calibration + TUM + RGB frame times | R6 | Require sensor trajectory convention, scan-to-pose and RGB frame/time bindings, clock relation and calibration/sensor QA. TUM time alone does not establish the RGB clock relation. |
+| RGB + LiDAR + calibration + RGB frame times, no TUM | R2, R3 or R5 | Ask for cloud state; R5 needs valid scan chronology/timestamps and an available odometry runtime. Frame times do not replace scan poses. |
+| RGB + LiDAR + calibration + TUM, no RGB frame times | R2, R3 or R4 | Ask for cloud state; R4 uses a supplied sensor trajectory to fuse a scan sequence. Calibration is explicitly excluded from map-only alternatives; without RGB timing this is not R6. |
+
+The legacy LiDAR package convention is `lidar_map_from_sensor`, metres, Z-up,
+quaternion `xyzw`; the TUM parser requires a strictly increasing timestamp and
+normalized pose row. The new contracts distinguish that sensor trajectory from a
+camera `world_from_camera` trajectory. RGB frame IDs bind by the verified
+video-preparation frame map; current `camera_priors` selects exact source-frame
+rows and does not interpolate timestamps. No calibration, clock offset, unit,
+registration state, or same-capture fact is inferred from a filename or extension.
+
+Current input envelopes are frozen from code, not promoted to new-mode acceptance:
+
+| Envelope | Current source limit/behavior |
+|---|---|
+| Upload | `product_upload_max_bytes` defaults to 2 GiB and is configurable; `/api/v1/uploads/config` returns the active value. |
+| Video | `.mp4` and `.mov` content is recognized by the legacy path. |
+| ZIP | At most 20,000 entries and expanded bytes at most 2× the configured upload limit; ZIP paths and member content are checked. |
+| LiDAR trajectory | TUM sidecar is bounded to 16 MiB. |
+| Point-cloud envelope | PLY scalar vertex-only ASCII/binary little-endian/big-endian and PCD v0.7 ASCII/binary are parsed; each header line is at most 8,192 bytes and total header at most 128 KiB. Compressed PCD and ambiguous/list-based PLY are rejected. |
+| Fusion | Current default cap is 2,000,000 points per scan and 20,000,000 merged points. |
+
+The legacy detector accepts RGB video, Gaussian PLY (optionally with COLMAP), and
+complete LiDAR ZIP packages. A loose point-cloud PLY/PCD can be parsed by the cloud
+envelope but is still rejected by legacy upload classification; S2 must add bounded
+assembly classification without weakening that legacy package contract. SOG is
+represented in the shared format enum for AUD-06 coordination, not claimed as
+accepted until its bounded validator/import path is implemented. Runtime registry
+statuses are `qualified`, `wired_unqualified`, `unavailable`, and `incompatible`;
+source wiring or synthetic contract tests alone cannot create a `qualified` entry.
+
+Producer/consumer ports agreed for dependent work:
+
+- AUD-17 consumes exact `lidar_scan` file refs plus a separate sensor-frame
+  trajectory binding, or emits an estimated `world_from_sensor` trajectory with
+  source scan refs, timestamps and provenance. Estimated poses never masquerade
+  as uploaded ground truth or calibration.
+- AUD-19 receives a checksummed registered map or normalized static cloud with
+  explicit units/frame/same-scene evidence. Map registration does not require
+  camera extrinsics and never means the map is already aligned to RGB.
+- AUD-06 shares `InputAssetFormat` / `GaussianViewFormat` labels and the exact
+  PLY/SOG view intent. Format labels are not proof of SOG decode/package support;
+  AUD-06.S1 owns its bounded format/version validation and durable import path.
+
+Only after those consumers produce/verify the bound artifacts may AUD-24.S3 adapt
+them into a canonical job manifest. R4/R5 do not fabricate calibration, identity
+poses, or `frame_times` to satisfy the legacy `LidarPackageRecord`.
 
 ## Sprint AUD-24.S2 — Content classifiers và deterministic input resolver
 
@@ -246,6 +336,26 @@ actual supported R1–R6 runs và binding/consumer receipts, không chỉ detect
 
 ## Result / Evidence
 
-Pending — inventory/assembly/recipe refs and versions, role/missing-data reports,
-loose/ZIP parity, job/quota/CAS/worker identity, real browser/geometry/sensor evidence.
-Task creation is docs-only; no pipeline mode implemented or enabled by this file.
+AUD-24.S1 contract/matrix completed from current CodeGraph source and direct callers;
+the task resumed at `daef01b`, and the commit parent is `8014077` after branch
+advancement during the sprint. Changed: `src/models/contracts/input_assembly.py`,
+contract exports, matching TypeScript definitions, shared seven-case fixture,
+Python/TypeScript contract tests, this task, AUD-06/17/19 port notes, integration
+map and execution checklist. Existing `InputManifest` was not changed. Checksums
+bind assembly, runtime registry, resolution, accepted recipe and Gaussian view
+intent. Focused tests prove the legacy manifest fixture checksum still verifies.
+
+Verification: `.venv/bin/pytest tests/test_contracts/test_input_assembly.py
+tests/test_contracts/test_input_manifest.py tests/test_contracts/test_identity.py -q`
+— 29 passed; `.venv/bin/ruff check src/ tests/` — pass;
+`.venv/bin/ruff format --check src/ tests/` — 484 files formatted;
+`npm exec vitest run -- tests/input-assembly-contract.test.ts` — 2 passed;
+`npm run typecheck` — pass; `npm run lint` — pass;
+`npm run build -- --webpack` — pass, 16 static pages generated. Browser gate is not
+applicable because S1 changes contracts/fixtures only and does not change UI.
+
+S1 does not implement content classification, durable staging, resolver persistence,
+job/worker dispatch, or enable R1–R6; no real sensor, browser, geometry, or runtime
+qualification is claimed. Remaining: S2 classifier/resolver; S3 durable intent and
+consumer adapters; S4 upload UI; S5 real recipe qualification. The S1 commit is
+recorded in repository history; branch and worktree state are in the sprint handoff.

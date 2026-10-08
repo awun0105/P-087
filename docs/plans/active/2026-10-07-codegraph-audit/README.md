@@ -445,6 +445,9 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
       acceptance. Local Chrome 153 upload/manifest/frame-map and candidate
       compression/SSIM measurements are recorded; representative device captures,
       held-out quality and real LiDAR/reconstruction evidence remain open.
+- [x] AUD-24.S1 typed staged-file/assembly/resolution/recipe contracts and seven-case
+      binding matrix; legacy InputManifest/checksum preserved. This does not enable
+      a new resolver or R1–R6 runtime.
 - [ ] Implementation AUD-24 và grouped upload/R1–R6 recipe/consumer/browser acceptance.
 - [x] Hoãn AUD-25/ADR0025 theo yêu cầu owner; gỡ khỏi execution order và active dependencies.
 

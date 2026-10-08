@@ -36,8 +36,11 @@ PLY packaging tạo derived SOG; uploaded SOG được bounded validate/read r�
 exact bytes cho delivery khi runtime hỗ trợ. Không bắt SOG→PLY→SOG để xem. Source
 ref luôn actual uploaded format, không rename SOG thành PLY hoặc bỏ lossy provenance.
 Archive containing SOG khác generic COLMAP/LiDAR ZIP; extension PK/ZIP không đủ.
-Shared version/model/SH/limits registry phục vụ AUD-24 detection và viewer validation;
-geometry continuation/source adapter không thuộc active scope.
+AUD-24.S1 chốt `InputAssetFormat`/`GaussianViewFormat` và Gaussian view intent;
+AUD-06.S1 dùng lại các enum này thay vì tạo format registry cạnh tranh. AUD-06.S1
+sở hữu bounded version/model/SH/limits validation thực tế và durable import;
+`gaussian_sog` trong contract chưa chứng minh decoder hoặc runtime support.
+Geometry continuation/source adapter không thuộc active scope.
 
 Public ImportedScene hiện PACKAGING/READY/FAILED. S1 chốt additive operation
 projection cho queued/waiting/running/attempt/error và CANCELLED khi có cancel;

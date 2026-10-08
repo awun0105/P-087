@@ -69,6 +69,12 @@ S1 độc lập để qualify adapter/input contract. S2 dùng AUD-07 admission/
 AUD-24.S1 cung cấp grouped assembly/recipe port; reuse trong unified path, không
 đợi whole AUD-24 để implement odometry. Legacy missing-trajectory request khác
 valid assembly có accepted estimated recipe; không auto estimate từ file ambiguous.
+Contract port: `sensor_trajectory` khác `camera_trajectory`; each supplied or
+estimated scan pose binds exact scan refs/timestamps and uses `world_from_sensor`
+in a declared world frame, metres, quaternion `xyzw`. Estimated output retains
+source scan refs and `estimated` provenance; it is never inserted as a supplied
+TUM upload. The existing TUM parser checks row ordering/pose shape but does not
+establish RGB clock synchronization.
 S3 dùng AUD-13 calibration/timing QA cho RGB integration; AUD-14.S1 khi cần fit
 floor/up normalization; AUD-12 cho collision selection, không auto-enable LiDAR
 collision từ trajectory vừa estimate.
