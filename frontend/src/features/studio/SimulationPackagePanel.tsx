@@ -159,6 +159,18 @@ export function SimulationPackagePanel({
                   ))}
                 </ul>
               )}
+              {pkg.export_capability.notices.length > 0 && (
+                <ul className="space-y-1 text-ink-muted" aria-label="Lưu ý khi xuất USD">
+                  {pkg.export_capability.notices.map((notice, index) => (
+                    <li key={`${notice.code}-${index}`}>
+                      {notice.message}
+                      {notice.affected_object_ids.length > 0 && (
+                        <span className="block text-ink-subtle">Vật liên quan: {notice.affected_object_ids.join(", ")}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
               {pkg.export_capability.status === "blocked" && (
                 <p className="text-ink-muted">
                   Candidate chưa được tạo. Khắc phục điều kiện trên rồi thử lại; lần thử lại đánh giá cùng các yêu cầu của scene hiện tại.

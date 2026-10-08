@@ -180,6 +180,70 @@ describe("getSimulationPackage shared-triangle report", () => {
   });
 });
 
+describe("getSimulationPackage export notices", () => {
+  const capability = (extra: Record<string, unknown>) => ({
+    scene_revision: "rev-1",
+    scene_ir_checksum: "sha256:scene",
+    status: "supported",
+    requested_mode: "auto",
+    effective_mode: "hybrid",
+    builder_version: "usd-export-capabilities-v2",
+    runtime_qualification: "qualified",
+    runtime_version: "0.25.5",
+    requirements: {
+      collider_types: [],
+      static_physics: false,
+      dynamic_physics: true,
+      local_collider_offsets: false,
+      hybrid_visuals: false,
+      external_assets: false,
+    },
+    blockers: [],
+    ...extra,
+  });
+  const body = (exportCapability: unknown) => ({
+    scene_revision: "rev-1",
+    source_scene_revision: "rev-0",
+    created_at: "2026-10-08T00:00:00Z",
+    confirmed_objects: 1,
+    environment_triangles: 100,
+    carved_triangles: 4,
+    preflight: { blocking_result: "PASS", rules: [] },
+    export_capability: exportCapability,
+    package_ref: null,
+  });
+
+  it("treats a capability that predates notices as having none", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(body(capability({})))));
+
+    const result = await getSimulationPackage("job-a");
+
+    expect(result?.export_capability?.notices).toEqual([]);
+  });
+
+  it("keeps the non-blocking notices the backend reports", async () => {
+    const notices = [{ code: "CATALOG_ASSET_EXPORTED_AS_BOX", message: "hộp", affected_object_ids: ["asset-001"] }];
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(body(capability({ notices })))));
+
+    const result = await getSimulationPackage("job-a");
+
+    expect(result?.export_capability?.notices).toEqual(notices);
+  });
+
+  it.each([
+    "text",
+    [{ code: "X", message: "m" }],
+    [{ code: "X", message: "m", affected_object_ids: [3] }],
+  ])("rejects malformed notices %j instead of showing them", async (notices) => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(body(capability({ notices })))));
+
+    await expect(getSimulationPackage("job-a")).rejects.toMatchObject({
+      status: 502,
+      detail: "Backend trả capability USD sai contract",
+    });
+  });
+});
+
 describe("run intent idempotency headers", () => {
   it("sends a stable-key header for scene creation and manual retry", async () => {
     const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(

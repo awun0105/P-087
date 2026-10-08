@@ -330,6 +330,56 @@ describe("ObjectReviewView", () => {
     expect(await screen.findByRole("link", { name: /Tải gói USD/ })).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "Tam giác nền được giữ lại" })).toBeNull();
   });
+  it("hiện lưu ý vật danh mục xuất bằng hộp nhưng không chặn tải gói", async () => {
+    const built = {
+      scene_revision: "rev-003",
+      source_scene_revision: "rev-002",
+      created_at: "2026-10-08T00:00:00Z",
+      confirmed_objects: 2,
+      environment_triangles: 1000,
+      carved_triangles: 20,
+      preflight: { blocking_result: "PASS", rules: [] },
+      export_capability: {
+        scene_revision: "rev-003",
+        scene_ir_checksum: "sha256:scene",
+        status: "supported",
+        requested_mode: "auto",
+        effective_mode: "hybrid",
+        builder_version: "usd-export-capabilities-v2",
+        runtime_qualification: "qualified",
+        runtime_version: "0.25.5",
+        requirements: {
+          collider_types: ["aabb"],
+          static_physics: false,
+          dynamic_physics: true,
+          local_collider_offsets: false,
+          hybrid_visuals: false,
+          external_assets: false,
+        },
+        blockers: [],
+        notices: [
+          {
+            code: "CATALOG_ASSET_EXPORTED_AS_BOX",
+            message: "Vật từ danh mục Isaac được xuất bằng collider hộp.",
+            affected_object_ids: ["asset-001", "asset-002"],
+          },
+        ],
+      },
+      package_ref: { artifact_uri: "artifact://candidate", artifact_checksum: "sha256:candidate" },
+    };
+    routeFetch({});
+    render(<SimulationPackagePanel jobId="job-a" sceneRevision="rev-003" onSceneChanged={() => {}} />);
+    const create = await screen.findByRole("button", { name: "Tạo gói mô phỏng" });
+    vi.mocked(global.fetch).mockImplementationOnce(async () => reply(built));
+    fireEvent.click(create);
+
+    const notices = await screen.findByRole("list", { name: "Lưu ý khi xuất USD" });
+    expect(notices).toHaveTextContent("Vật từ danh mục Isaac được xuất bằng collider hộp.");
+    expect(notices).toHaveTextContent("Vật liên quan: asset-001, asset-002");
+    expect(screen.getByText(/Khả năng xuất USD: Sẵn sàng/)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("link", { name: /Tải gói USD/ })).toBeInTheDocument();
+  });
   it("hiện riêng blocker USD dù Preflight đạt và cho thử lại đúng scene", async () => {
     const blocked = {
       scene_revision: "rev-001",

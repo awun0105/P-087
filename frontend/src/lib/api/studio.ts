@@ -661,6 +661,12 @@ export interface PreflightRuleView {
   remediation: string | null;
 }
 
+export interface ExportCapabilityIssueView {
+  code: string;
+  message: string;
+  affected_object_ids: string[];
+}
+
 export interface ExportCapabilityView {
   scene_revision: string;
   scene_ir_checksum: string;
@@ -678,7 +684,9 @@ export interface ExportCapabilityView {
     hybrid_visuals: boolean;
     external_assets: boolean;
   };
-  blockers: { code: string; message: string; affected_object_ids: string[] }[];
+  blockers: ExportCapabilityIssueView[];
+  /** Lưu ý không chặn xuất (vd. vật danh mục xuất bằng hộp); vắng ở backend cũ nên coi là rỗng. */
+  notices: ExportCapabilityIssueView[];
 }
 
 /** Tập con của `SimulationPackage` backend mà UI hiển thị; các field khác bỏ qua. */
@@ -713,9 +721,9 @@ function parseExportCapability(value: unknown): ExportCapabilityView | null {
       "hybrid_visuals",
       "external_assets",
     ].every((key) => typeof requirements[key] === "boolean");
-  const validBlockers =
-    Array.isArray(value.blockers) &&
-    value.blockers.every(
+  const validIssues = (items: unknown) =>
+    Array.isArray(items) &&
+    items.every(
       (item) =>
         isObject(item) &&
         typeof item.code === "string" &&
@@ -723,6 +731,7 @@ function parseExportCapability(value: unknown): ExportCapabilityView | null {
         Array.isArray(item.affected_object_ids) &&
         item.affected_object_ids.every((id) => typeof id === "string"),
     );
+  const notices = value.notices ?? [];
   if (
     typeof value.scene_revision !== "string" ||
     typeof value.scene_ir_checksum !== "string" ||
@@ -733,11 +742,12 @@ function parseExportCapability(value: unknown): ExportCapabilityView | null {
     !["not_required", "qualified", "failed"].includes(String(value.runtime_qualification)) ||
     !(value.runtime_version === null || typeof value.runtime_version === "string") ||
     !validRequirements ||
-    !validBlockers
+    !validIssues(value.blockers) ||
+    !validIssues(notices)
   ) {
     throw new ApiError(502, "Backend trả capability USD sai contract");
   }
-  return value as unknown as ExportCapabilityView;
+  return { ...value, notices } as unknown as ExportCapabilityView;
 }
 
 function parseSimulationPackage(value: unknown): SimulationPackageView | null {
