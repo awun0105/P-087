@@ -2,7 +2,8 @@
 
 ## Metadata và goal
 
-- PLANNED; P1; EX-REC QA, PRODUCT preflight/status consumer.
+- IN PROGRESS; P1; S1/S2 diagnostic implementation slices are present locally;
+  real-data qualification and the S3 PRODUCT consumer remain pending.
 - Canonical REC-08/09, PRODUCT-04/08. SELF-CODE typed QA; REUSE camera projection/
   transform/math ports, optional qualified OpenCV edge/depth checks.
 - Goal: structural checks + scored observation QA + remediation; reject strong
@@ -90,8 +91,10 @@ using training/qualification data; no optimizing on held-out acceptance.
 Tests: correct synthetic rig; ±1°/5°/5 cm perturbations across axes, timestamp shift,
 textureless/wall ambiguity, sparse returns/occlusion/dynamic confounder; real held-out
 calibrated sequence when available, detect regressions without absolute claim.
-**Exit:** [ ] known perturbations differentiated in supported fixtures;
-[ ] degenerate/confounded observations yield INCONCLUSIVE.
+**Exit:** [x] known perturbations are differentiated in the supported synthetic
+fixture; [x] degenerate observations yield INCONCLUSIVE; [ ] production profile
+thresholds are qualified on a held-out calibrated sequence; [ ] persisted RGB
+overlay artifact is rendered and inspected by the S3 consumer.
 
 ## Sprint AUD-13.S3 — Preflight, remediation UI và source consumer
 
@@ -158,3 +161,46 @@ qualification; general blind calibration remains noted as research/observability
   held-out sequence, production threshold qualification, API persistence or UI
   gate is included. Those belong to AUD-13.S2/S3; no production calibration PASS
   or sensor-source acceptance is claimed by S1.
+
+### AUD-13.S2 — diagnostic projection scorer implemented locally; field qualification pending
+
+- **Logic before → after:** S1 could establish structural readiness but deliberately
+  stopped at `PROJECTION_SCORING_PENDING`. S2 now projects paired sensor-frame
+  LiDAR points through the declared `T_lidar_sensor_from_camera` and camera model,
+  including the declared Brown–Conrady distortion terms. Projection uses the exact
+  declared RGB pixel basis; source-video intrinsics are mapped to prepared RGB only
+  through a server-verified video-preparation transform. Depth buffering keeps the
+  nearest return per image pixel before edge-distance scoring.
+- **Contract/output:** Added checksummed projection profile and evidence contracts
+  with source refs, the effective projection model, frame/scan/sample checksums,
+  timestamp residuals, front-facing/in-frame/visible/edge-overlap counts,
+  edge-distance distribution, orientation/span observability, diagnostics and a
+  bounded set of projected overlay samples. These samples are renderer-ready
+  coordinates, not a rendered/persisted image artifact. `SCORED` means the
+  diagnostic metrics meet the configured sample/observability requirements;
+  `qualification_status` is fixed to `diagnostic_only`. The scorer does not fit,
+  optimize or mutate calibration and never emits calibration PASS.
+- **Synthetic evidence:** The known-rig 320×240 fixture yields a zero-pixel
+  reference p90. Tests distinguish ±1° and ±5° rotations around all three axes and
+  ±5 cm translations on all three axes by more than 0.25 px in the p90 frame score.
+  Textureless, single-orientation/wall-like and sparse fixtures remain
+  INCONCLUSIVE. A farther duplicate on the same projected pixel is removed by the
+  depth buffer. Cross-frame score spread is reported as a confounder; it does not
+  identify moving objects or establish motion compensation.
+- **Pixel basis:** A verified source-video-to-prepared-RGB transform fixture checks
+  the mapped dimensions and transform checksum. Missing camera intrinsics now
+  report `CAMERA_INTRINSICS_MISSING` without incorrectly calling the pixel basis
+  unknown; unavailable transforms and mismatched frame bases remain inconclusive.
+- **Files changed:** `src/models/contracts/lidar_projection_qa.py`,
+  `src/models/contracts/__init__.py`,
+  `src/services/reconstruction/lidar/projection_qa.py`,
+  `tests/test_reconstruction/test_lidar_calibration_qa.py`, this task, the audit
+  index and ADR 0016.
+- **Verification:** 46 focused reconstruction/contract tests passed. Full-repo
+  Ruff, formatting, contract-mirror, CodeGraph and diff checks are recorded in the
+  sprint commit report.
+- **Pending:** No real held-out calibrated sequence or qualified production
+  threshold profile is available. RGB edge extraction/frame artifact loading,
+  report persistence/API preflight, rendered overlay and Studio remediation/source
+  gating remain AUD-13.S3. Synthetic perturbation separation does not prove real
+  calibration accuracy or a universal 1°/5 cm detection guarantee.

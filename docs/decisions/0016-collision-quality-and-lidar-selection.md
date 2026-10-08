@@ -114,3 +114,15 @@ The saved Aisle_CW source/final mesh lacks the intermediate cleanup artifacts an
 the old collision log lacks a bound profile, so ghost-block reduction and
 thin-obstacle retention remain **Pending**. Held-out collision and Isaac proof
 remain required by AUD-12.S4.
+
+## AUD-13.S2 implementation note — 2026-10-08
+
+The proposal remains **Proposed** and no collision-source selection is enabled.
+S2 adds source-bound RGB/LiDAR projection diagnostics with a declared pixel basis,
+verified video-preparation mapping, nearest-return z-buffering, edge support and
+bounded overlay samples. Its `SCORED` state only reports diagnostic metric
+availability; qualification is permanently `diagnostic_only`, with no calibration
+optimization or PASS path. Synthetic known-rig tests distinguish the specified
+rotation and translation perturbations, while textureless, wall-like and sparse
+observations remain inconclusive. Real held-out threshold qualification, persisted
+rendered overlays, API preflight and collision-source gating are still pending.

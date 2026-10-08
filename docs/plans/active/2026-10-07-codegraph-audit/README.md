@@ -77,9 +77,12 @@ AUD-13.S1 adds a checksum-bound calibration source ref to new LidarPackageRecord
 actually declared, and introduces a typed calibration-QA profile/report. Structural
 errors fail; missing units, intrinsics, timing or overlap remain INCONCLUSIVE. The
 consumer fixture proves an observable sample still cannot PASS before projection
-scoring. Verification: 61 focused tests, Ruff, formatting, contract mirror and
-current CodeGraph index pass. Projection scoring, held-out qualification and
-production source gating remain pending for AUD-13.S2/S3.
+scoring. AUD-13.S2 adds checksummed projection metrics, z-buffered overlay samples,
+exact pixel-basis binding, and synthetic 1°/5° plus 5 cm perturbation separation;
+all results remain `diagnostic_only`. Verification: 46 focused projection tests
+passed, alongside repository checks recorded in the sprint result. Real held-out
+threshold qualification, persisted/rendered overlays and production source gating
+remain pending for AUD-13.S3.
 AUD-14.S1 adds deterministic constrained floor fitting; AUD-14.S2 replaces fixed-Z
 filters in geometric fallback, SAMPro3D, objectify, Gaussian growth and source
 collision correction with plane-relative masks. Sparse support uses an explicit

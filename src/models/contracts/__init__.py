@@ -77,6 +77,16 @@ from src.models.contracts.lidar_calibration_qa import (
     seal_lidar_calibration_qa_config,
     seal_lidar_calibration_qa_report,
 )
+from src.models.contracts.lidar_projection_qa import (
+    LidarCalibrationProjectionConfig,
+    LidarCalibrationProjectionEvidence,
+    LidarCalibrationProjectionFrameEvidence,
+    LidarCalibrationProjectionModel,
+    LidarProjectionDiagnosticCode,
+    LidarProjectionOverlaySample,
+    seal_lidar_calibration_projection_config,
+    seal_lidar_calibration_projection_evidence,
+)
 from src.models.contracts.manifests import (
     ExecutionError,
     InputConfiguration,
@@ -308,6 +318,12 @@ __all__ = [
     "LidarCalibrationQAConfig",
     "LidarCalibrationQAReport",
     "LidarCalibrationQAResult",
+    "LidarCalibrationProjectionConfig",
+    "LidarCalibrationProjectionEvidence",
+    "LidarCalibrationProjectionFrameEvidence",
+    "LidarCalibrationProjectionModel",
+    "LidarProjectionDiagnosticCode",
+    "LidarProjectionOverlaySample",
     "MissingInputFact",
     "RecipeComponentVersion",
     "RecipeGroup",
@@ -325,6 +341,8 @@ __all__ = [
     "seal_collision_source_selection",
     "seal_lidar_calibration_qa_config",
     "seal_lidar_calibration_qa_report",
+    "seal_lidar_calibration_projection_config",
+    "seal_lidar_calibration_projection_evidence",
     "registration_preflight",
     "seal_registration_proposal",
     "seal_registration_profile",
