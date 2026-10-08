@@ -224,19 +224,16 @@ Test (`tests/test_orchestration/test_evaluation.py`):
   bỏ qua bản ghi của job khác; không có bản ghi → `value is None`.
 
 **Exit:**
-- [x] Sáu nhóm test pass.
-- [x] Gọi `GET /jobs/job-6bc02e5de4ed/evaluation` trên dữ liệu local, dán `summary` và
-  nhóm Hệ thống vào Result (kỳ vọng peak RAM 5,19 GB và peak VRAM 3,42 GB từ `scene_extract`).
+- [x] Test khuyến nghị, số đo tài nguyên, API fallback và observed budget pass.
+- [ ] Gọi GET qua API đang chạy từ checkout này để xác nhận `summary` và nhóm Hệ thống mới.
 
-**Kết quả kiểm tra dữ liệu local (`job-6bc02e5de4ed`):**
-- `summary`: `["Không có chỉ số tự kiểm nào dưới ngưỡng. 4 trên 4 chỉ số có ngưỡng; các chỉ số còn lại chỉ để tham khảo."]`
-- Nhóm Hệ thống (`system`):
-  - `system.processing_time` (Thời gian máy xử lý): `value=57488`, `display="958.1 phút"`
-  - `system.slowest_stage` (Bước lâu nhất): `value="ST-METRIC-CANONICALIZE"`, `display="ST-METRIC-CANONICALIZE (874.9 phút)"`
-  - `system.attempts` (Số lượt chạy): `value=1`, `display="1 lượt"`
-  - `system.peak_ram` (RAM tối đa): `value=5.19`, `display="5,2 GB (bước scene_extract)"`
-  - `system.peak_vram` (VRAM tối đa): `value=3.42`, `display="3,4 GB (bước scene_extract)"`
-  - `system.config` (Cấu hình xử lý): `value=None`, `display="tối đa 300 frame · 1.000.000 splat · 1.280 px"`
+**Kiểm tra runtime local (`job-6bc02e5de4ed`):**
+- GET trên phiên trình duyệt đã đăng nhập trả HTTP 200 và `job_status="SUCCEEDED"`, nhưng
+  không có `summary` và chỉ có ba metric hệ thống cũ (`processing_time`, `slowest_stage`,
+  `attempts`). Đây là API process cũ, không phải code S2 trong checkout.
+- Handler của checkout không hoàn tất: telemetry đọc báo `OperationalError`, sau đó registry
+  không khởi chạy vì role PostgreSQL được cấu hình trong shell không tồn tại trong DB local.
+- **UNVERIFIED:** chưa có response từ API của checkout này cho job local; Exit live GET còn mở.
 
 ---
 
@@ -266,7 +263,8 @@ Test (`frontend/tests/evaluation-card.test.tsx`):
 
 **Exit:**
 - [x] Test frontend pass; `npm run lint`, `npm run typecheck`, `npm run build -- --webpack` pass.
-- [ ] Kiểm bằng mắt trên Studio do owner thực hiện; agent không tự xác nhận phần này.
+- [x] Chrome DevTools xác nhận route review và `Bảng đánh giá` render; console không có lỗi/cảnh báo.
+- [ ] Owner xác nhận summary và reference rows mới trên API của checkout này; response hiện tại chưa có các field đó.
 
 ## Verification và DoD
 
@@ -286,7 +284,7 @@ DONE khi cả ba sprint tick đủ Exit.
 
 ### Sprint AUD-28.S1 — 2026-10-09
 
-- **Commit:** `3ef09b3` (base `f33f8fb`).
+- **Commit:** `a5c30a9` (base `f33f8fb`).
 - **Files:** `configs/product/evaluation_reference_v1.json`, this task file,
   `frontend/src/lib/api/studio.ts`, `frontend/tests/evaluation-card.test.tsx`,
   `src/api/studio/evaluation.py`, `src/config.py`,
@@ -314,4 +312,42 @@ DONE khi cả ba sprint tick đủ Exit.
 - **Limits:** Intervals describe the configured sample range; they do not define an
   acceptance threshold or establish simulation readiness. No GPU claim is part of S1.
 
-S2 and S3 remain unimplemented.
+### Sprint AUD-28.S2 — 2026-10-09
+
+- **Commit:** `c2cb6c3` (base `a5c30a9`); message
+  `feat(evaluation): rule-based advice and system telemetry metrics (AUD-28.S2)`.
+- **Files:** `src/api/studio/evaluation.py`,
+  `src/services/orchestration/evaluation/advice.py`,
+  `src/services/orchestration/evaluation/report.py`,
+  `src/services/orchestration/evaluation/scorecard.py`,
+  `src/services/orchestration/processing/observed.py`,
+  `tests/test_orchestration/test_evaluation.py`, this task file.
+- **Contract:** `evaluate_job` accepts optional `usages`; completed same-job records supply
+  peak RAM/VRAM and latest config; missing measurements return `value=None` and the defined
+  no-data display. Summary orders failures before warnings and never claims simulation readiness.
+- **Verification:** `.venv/bin/ruff check src/ tests/ scripts/resources/` (passed);
+  `.venv/bin/ruff format --check src/ tests/ scripts/resources/` (538 files formatted);
+  `.venv/bin/pytest tests/test_orchestration/test_evaluation.py tests/test_orchestration/test_observed_budget.py -q`
+  (27 passed); `graphify update .` completed.
+- **Runtime boundary:** the authenticated local GET returned the older response shape, while
+  the current checkout could not access the configured local PostgreSQL registry. Live job
+  evidence remains unverified.
+
+### Sprint AUD-28.S3 — 2026-10-09
+
+- **Commit:** `00511a4` (base `c2cb6c3`); message
+  `feat(studio): display evaluation advice and reference intervals on UI (AUD-28.S3)`.
+- **Files:** `frontend/src/features/studio/evaluation/EvaluationCard.tsx`,
+  `frontend/tests/evaluation-card.test.tsx`, this task file.
+- **Contract:** the review evaluation card renders the rule-based summary and configured
+  metric reference intervals when present; `StageMetrics` remains unchanged.
+- **Verification:** `npm exec -- vitest run tests/evaluation-card.test.tsx` (8 passed),
+  `npm run lint` (passed with two existing warnings in `LidarCalibrationQAStage.tsx`),
+  `npm run typecheck` (passed), and `npm run build -- --webpack` (passed).
+- **Browser evidence:** the authenticated Studio review page rendered the EvaluationCard.
+  Chrome DevTools reported no console errors or warnings. Its API response returned HTTP 200
+  and `job_status="SUCCEEDED"`, but lacked `summary` and `reference`; those visual states remain
+  **UNVERIFIED** until this checkout's API serves the S1/S2 contract.
+
+S2 and S3 code and automated checks are complete. S2 live-data and S3 non-empty
+summary/reference visual exits remain open until the local Studio API serves this checkout.
