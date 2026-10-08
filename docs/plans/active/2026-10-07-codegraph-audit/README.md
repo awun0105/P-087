@@ -433,6 +433,15 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
       authenticated receipt exists. After the API first migrates `runtime.db`, run
       `scripts.studio.scene_head --apply` per job or those 4 scenes return SceneNotAvailable.
 
+- [ ] Audit 2026-10-08 follow-ups for rounds 4–6. Fixed: AUD-23.S5's SDR color check raised
+      `AttributeError` (HTTP 500) when the output color reported no transfer. Open for AUD-24.S2
+      (not edited: the file has uncommitted work): `_validate_recipe_contract` accepts an R4
+      recipe (`SUPPLIED_TRAJECTORY`) with only RGB video + scan sequence; R4 must also bind
+      `InputRole.SENSOR_TRAJECTORY`, as the R6 supplied path and the binding matrix already do.
+      AUD-06.S1 moves import packaging from the API to the standalone worker, so imports stay
+      QUEUED when no `worker_cli` runs; a worker killed mid-package leaves the operation RUNNING
+      until AUD-06.S2 adds lease recovery.
+
 - [x] AUD-23.S1 versioned media/capability/preparation contracts, Python/TypeScript
       agreement, frame-map rules, preset dimension fitting and legacy checksum preservation.
 - [x] AUD-23.S2 bounded local Worker encode, OPFS/backpressure, PTS frame sampling,
