@@ -1,16 +1,11 @@
-import type { Metadata } from "next";
-import { LandingPage } from "@/features/landing/LandingPage";
-import "@/features/landing/landing.css";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = {
-  title: "Real2Sim Studio — Từ Hiện Thực Đến Mô Phỏng",
-  description: "Khám phá quy trình Real2Sim: tái tạo video và LiDAR thành scene 3D sẵn sàng mô phỏng cho Isaac Sim, có người kiểm duyệt từng bước.",
-};
+import { STUDIO_ENTRY } from "@/lib/routes";
 
 /**
- * Trang đầu tiên khi mở domain (owner quyết 01/10/2026): landing nằm ngoài AppShell; app Tổng quan ở `/overview` và
- * các CTA của landing dẫn vào app qua đăng nhập (`STUDIO_ENTRY` trong `lib/routes.ts`).
+ * Trang đầu của WebApp: Landing page đã được tách riêng và host độc lập tại c4-app-087.pages.dev.
+ * Khi truy cập vào WebApp chính, chuyển hướng trực tiếp tới màn đăng nhập (hoặc Tổng quan nếu đã đăng nhập).
  */
-export default function LandingRoute() {
-  return <div lang="vi"><LandingPage /></div>;
+export default function RootRoute() {
+  redirect(STUDIO_ENTRY);
 }

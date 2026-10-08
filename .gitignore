@@ -85,3 +85,4 @@ scripts/gpu/studio.env
 # Agent and CodeGraph tools
 .codegraph/
 .ua/
+.wrangler/
