@@ -72,6 +72,8 @@ class ExportCapabilityReport(ContractModel):
     runtime_version: str | None = None
     requirements: ExportRequirements
     blockers: list[ExportCapabilityBlocker] = Field(default_factory=list)
+    #: Non-blocking facts the user should know about; the export is valid with or without them.
+    notices: list[ExportCapabilityBlocker] = Field(default_factory=list)
 
 
 ResolveArtifact = Callable[[ProductArtifactRef], Path]
@@ -91,7 +93,17 @@ def _has_non_identity_offset(obj: SceneObject) -> bool:
 
 
 def _uses_external_asset(obj: SceneObject) -> bool:
-    return obj.asset_ref is not None or isinstance(obj.provenance.get("asset_url"), str)
+    """A sealed USD artifact the package must carry; a catalog `asset_url` is provenance, not a dependency."""
+    return obj.asset_ref is not None
+
+
+def catalog_asset_provenance(obj: SceneObject) -> dict[str, str] | None:
+    """Catalog family and public Isaac asset URL of an object that is exported as its box proxy."""
+    url = obj.provenance.get("asset_url")
+    if obj.asset_ref is not None or not isinstance(url, str):
+        return None
+    family = obj.provenance.get("catalog_family")
+    return {"family": family if isinstance(family, str) else "", "asset_url": url}
 
 
 def _resolve_usd_asset(ref: ProductArtifactRef, resolve_artifact: ResolveArtifact | None) -> str | None:
@@ -261,15 +273,6 @@ def assess_export_capabilities(
                         "A required Gaussian artifact is missing or its bytes do not match the declared checksum.",
                     )
                 )
-        raw_asset_urls = [item.id for item in exported if isinstance(item.provenance.get("asset_url"), str)]
-        if raw_asset_urls:
-            blockers.append(
-                _blocker(
-                    "EXTERNAL_ASSET_CLOSURE_UNSUPPORTED",
-                    "Catalog asset URLs cannot be sealed because their bytes are not available as a ProductArtifactRef.",
-                    raw_asset_urls,
-                )
-            )
         for item in exported:
             if item.asset_ref is None:
                 continue
@@ -341,6 +344,19 @@ def assess_export_capabilities(
     for issue in blockers:
         unique[(issue.code, tuple(issue.affected_object_ids))] = issue
     blockers = sorted(unique.values(), key=lambda item: (item.code, item.affected_object_ids))
+    catalog_ids = [item.id for item in exported if catalog_asset_provenance(item) is not None]
+    notices = (
+        [
+            _blocker(
+                "CATALOG_ASSET_EXPORTED_AS_BOX",
+                "Vật từ danh mục Isaac được xuất bằng collider hộp đúng kích thước và vật lý đã khai báo. Hình asset "
+                "không nhúng vào gói vì bytes không niêm phong được; nguồn asset ghi ở customData real2sim:catalog.",
+                catalog_ids,
+            )
+        ]
+        if catalog_ids
+        else []
+    )
     return ExportCapabilityReport(
         scene_revision=scene.scene_revision,
         scene_ir_checksum=scene.scene_ir_checksum,
@@ -357,6 +373,7 @@ def assess_export_capabilities(
         runtime_version=runtime_version,
         requirements=requirements,
         blockers=blockers,
+        notices=notices,
     )
 
 

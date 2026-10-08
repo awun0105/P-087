@@ -231,6 +231,21 @@ def apply_physics(stage: Usd.Stage, prim: Usd.Prim, physics: dict | None) -> Non
     prim.SetCustomDataByKey("real2sim", {"physics": metadata})
 
 
+def write_catalog_provenance(prim: Usd.Prim, catalog: dict | None) -> dict | None:
+    """Record which public catalog asset a box-proxy object stands for, without referencing its bytes."""
+    if catalog is None:
+        return None
+    if not isinstance(catalog, dict):
+        raise ValueError("catalog provenance must be an object")
+    family, url = catalog.get("family"), catalog.get("asset_url")
+    if not isinstance(family, str) or not isinstance(url, str) or not url:
+        raise ValueError("catalog provenance requires a family string and a non-empty asset_url string")
+    record = {"family": family, "asset_url": url}
+    existing = prim.GetCustomDataByKey("real2sim")
+    prim.SetCustomDataByKey("real2sim", {**(dict(existing) if existing else {}), "catalog": record})
+    return record
+
+
 def _collider_transform(stage: Usd.Stage, path: str, collider: dict) -> None:
     local = collider.get("local_transform")
     if not isinstance(local, dict):
@@ -457,6 +472,9 @@ def build(request: dict) -> dict:
         entry["collider_local_transform"] = collider["local_transform"]
         physics = item.get("physics")
         apply_physics(stage, prim, item.get("physics"))
+        catalog = write_catalog_provenance(prim, item.get("catalog"))
+        if catalog is not None:
+            entry["catalog"] = catalog
         if physics is not None:
             entry["physics"] = {
                 key: physics.get(key)

@@ -150,6 +150,61 @@ def test_hybrid_export_supports_local_collider_offset_and_obb_dimensions(box_sce
     assert not report.blockers
 
 
+def _catalog_object(box_scene: SceneIR):  # noqa: ANN202
+    """A user-added catalog object: its box proxy plus the public Isaac asset it stands for."""
+    item = box_scene.objects[0]
+    physics = ObjectPhysics(
+        dynamic=True,
+        mass_kg=25.0,
+        mass_source=MassSource.CATALOG_DEFAULT,
+        static_friction=0.6,
+        dynamic_friction=0.5,
+        restitution=0.1,
+        provenance={},
+    )
+    provenance = {
+        **item.provenance,
+        "catalog_family": "SM_PaletteA",
+        "asset_url": "https://example.test/Assets/Isaac/SM_PaletteA_01.usd",
+        "operation": "add_catalog_asset",
+    }
+    return item.model_copy(update={"physics": physics, "provenance": provenance})
+
+
+def test_catalog_asset_is_exported_as_its_box_with_a_notice_not_a_blocker(box_scene: SceneIR) -> None:
+    """The public asset URL is provenance: it cannot be sealed, and it must not make the whole export impossible."""
+    item = _catalog_object(box_scene)
+    scene = box_scene.model_copy(update={"objects": [item, *box_scene.objects[1:]]})
+
+    report = assess_export_capabilities(scene, runtime_qualified=True)
+
+    assert report.status == ExportCapabilityStatus.SUPPORTED and not report.blockers
+    assert report.requirements.external_assets is False
+    assert [(notice.code, notice.affected_object_ids) for notice in report.notices] == [
+        ("CATALOG_ASSET_EXPORTED_AS_BOX", [item.id])
+    ]
+
+
+def test_inactive_catalog_asset_is_not_reported(box_scene: SceneIR) -> None:
+    item = _catalog_object(box_scene).model_copy(update={"active": False})
+    scene = box_scene.model_copy(update={"objects": [item, *box_scene.objects[1:]]})
+
+    assert assess_export_capabilities(scene, runtime_qualified=True).notices == []
+
+
+def test_sealed_usd_asset_stays_an_external_dependency_even_with_catalog_provenance(
+    box_scene: SceneIR, tmp_path: Path
+) -> None:
+    item = _catalog_object(box_scene).model_copy(update={"asset_ref": box_scene.environment.geometry_ref})
+    scene = box_scene.model_copy(update={"objects": [item, *box_scene.objects[1:]]})
+
+    report = assess_export_capabilities(scene, runtime_qualified=True)
+
+    assert report.requirements.external_assets is True
+    assert report.notices == []
+    assert "EXTERNAL_ASSET_FORMAT_UNSUPPORTED" in {blocker.code for blocker in report.blockers}
+
+
 def test_hybrid_export_blocks_asset_with_unsupported_geometry_format(box_scene: SceneIR) -> None:
     item = box_scene.objects[0].model_copy(update={"asset_ref": box_scene.environment.geometry_ref})
     scene = box_scene.model_copy(update={"objects": [item, *box_scene.objects[1:]]})

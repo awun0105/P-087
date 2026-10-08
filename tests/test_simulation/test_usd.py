@@ -1,6 +1,9 @@
 """Unit và contract tests cho SIM-05 Candidate OpenUSD Build."""
 
 import json
+import os
+import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -102,6 +105,46 @@ def test_legacy_usd_exporter_rejects_dropped_physics_and_assets(physics_scene: S
         generate_scene_usda(with_physics)
     with pytest.raises(ValueError, match="asset dependencies"):
         generate_scene_usda(with_asset)
+
+
+def test_legacy_usd_exporter_keeps_catalog_provenance_instead_of_rejecting_the_object(physics_scene: SceneIR) -> None:
+    """A catalog object without physics is a plain box; its public asset URL is recorded, not referenced."""
+    item = physics_scene.objects[0]
+    provenance = {
+        **item.provenance,
+        "catalog_family": "SM_PaletteA",
+        "asset_url": 'https://example.test/Assets/Isaac/SM_Pallete "A".usd',
+    }
+    scene = physics_scene.model_copy(
+        update={"objects": [item.model_copy(update={"provenance": provenance}), *physics_scene.objects[1:]]}
+    )
+
+    usda_text = generate_scene_usda(scene)
+
+    assert 'string family = "SM_PaletteA"' in usda_text
+    assert 'string asset_url = "https://example.test/Assets/Isaac/SM_Pallete \\"A\\".usd"' in usda_text
+    assert "references" not in usda_text.lower()
+    runtime = Path(os.environ.get("R2S_SCENE_RUNTIME_PYTHON", "data/scene_runtime/bin/python"))
+    if runtime.is_file():
+        scene_file = Path(tempfile.mkdtemp()) / "scene.usda"
+        scene_file.write_text(usda_text, encoding="utf-8")
+        inspected = subprocess.run(
+            [
+                str(runtime),
+                "-c",
+                "import json,sys; from pxr import Usd; s=Usd.Stage.Open(sys.argv[1]); "
+                "p=s.GetPrimAtPath(sys.argv[2]); print(json.dumps(p.GetCustomDataByKey('real2sim')))",
+                str(scene_file),
+                f"/World/Objects/{item.id.replace('-', '_')}",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert json.loads(inspected.stdout) == {
+            "catalog": {"asset_url": 'https://example.test/Assets/Isaac/SM_Pallete "A".usd', "family": "SM_PaletteA"}
+        }
 
 
 def test_build_candidate_package_success(

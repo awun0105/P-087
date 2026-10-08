@@ -68,6 +68,7 @@ from src.services.simulation.usd.capabilities import (
     ExportRequirements,
     RuntimeQualificationStatus,
     assess_export_capabilities,
+    catalog_asset_provenance,
     export_requirements,
     select_export_mode,
 )
@@ -487,6 +488,7 @@ def _hybrid_layers(
                     else None
                 ),
                 "asset_checksum": asset.artifact_checksum if asset is not None else None,
+                "catalog": catalog_asset_provenance(item),
             }
         )
     request = {
@@ -550,6 +552,8 @@ def _hybrid_layers(
             or item.get("collider_local_transform") != requested["collider"]["local_transform"]
         ):
             raise ValueError("USD runner output did not preserve collider topology or local transforms")
+        if item.get("catalog") != requested["catalog"]:
+            raise ValueError("USD runner output did not preserve catalog asset provenance")
     expected_assets = [
         {"prim": item["prim"], "path": item["asset_package_path"], "checksum": item["asset_checksum"]}
         for item in objects
@@ -916,6 +920,7 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
                     build_config,
                     background.retained_shared_triangles,
                     background.retained_shared_object_ids,
+                    sorted(item.id for item in published.objects if item.active and catalog_asset_provenance(item)),
                 ).encode(),
             }
         )
@@ -967,6 +972,16 @@ def _zip_package(files: dict[str, bytes]) -> bytes:
     return buffer.getvalue()
 
 
+def _catalog_note(object_ids: Sequence[str]) -> list[str]:
+    """README line for catalog objects exported as their box proxy (the asset bytes cannot be sealed)."""
+    if not object_ids:
+        return []
+    return [
+        f"Vật từ danh mục Isaac ({', '.join(object_ids)}) chỉ có collider hộp và vật lý đã khai báo; hình asset không "
+        "nhúng vào gói. Nguồn asset nằm ở customData real2sim:catalog của từng vật."
+    ]
+
+
 def _retention_note(retained_triangles: int, object_ids: Sequence[str]) -> list[str]:
     """README line for background triangles kept because a carved and a kept source box share them."""
     if retained_triangles <= 0:
@@ -984,9 +999,13 @@ def _readme(
     build_config: dict[str, Any] | None = None,
     retained_shared_triangles: int = 0,
     retained_shared_object_ids: Sequence[str] = (),
+    catalog_object_ids: Sequence[str] = (),
 ) -> str:
     config = build_config or (HYBRID_BUILD_CONFIG if hybrid else BUILD_CONFIG)
-    retention = _retention_note(retained_shared_triangles, retained_shared_object_ids)
+    retention = [
+        *_retention_note(retained_shared_triangles, retained_shared_object_ids),
+        *_catalog_note(catalog_object_ids),
+    ]
     if hybrid:
         return "\n".join(
             [

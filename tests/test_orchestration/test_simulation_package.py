@@ -22,12 +22,14 @@ from src.models.contracts.validation import RuleResult
 from src.services.orchestration.review import simulation_package as simulation_package_service
 from src.services.orchestration.review.simulation_package import BUILD_CONFIG, build_simulation_package, current_package
 from src.services.orchestration.scene.extraction import extract_scene
-from src.services.orchestration.scene.objects import add_box_object, apply_object_action
+from src.services.orchestration.scene.objects import add_box_object, add_catalog_object, apply_object_action
 from src.services.scene.editing.commands import move_object
 from src.services.simulation.enrichment.service import enrich_scene_physics
 from src.services.simulation.usd.capabilities import ExportCapabilityStatus
 from tests.test_orchestration.test_finalize_flow import _confirmed
 from tests.test_orchestration.test_scene_extraction import _FIXTURE, _collision
+
+SCENE_RUNTIME = Path("data/scene_runtime/bin/python")
 
 
 def _scene_job(tmp_path: Path):  # noqa: ANN202
@@ -309,6 +311,63 @@ def Xform "Asset"
     )
     stage = json.loads(inspection.stdout)
     assert stage == {"stage": True, "asset": True, "rigid": False, "mass": False}
+
+
+@pytest.mark.skipif(not SCENE_RUNTIME.is_file(), reason="cần runtime usd-core (data/scene_runtime)")
+def test_catalog_asset_ships_as_its_box_with_provenance_instead_of_blocking_the_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A catalog asset's public URL cannot be sealed; the package keeps its box and says where the asset lives."""
+    registry, job = _scene_job(tmp_path)
+    scene = registry.scene.current(job.job_id).scene
+    (pallet,) = scene.objects
+    apply_object_action(registry.scene, job.job_id, pallet.id, "confirm", scene.scene_revision)
+    current = registry.scene.current(job.job_id).scene
+    add_catalog_object(registry.scene, job.job_id, current.scene_revision, "SM_BarelPlastic_A", (-1.5, -1.0, 0.0))
+    scene = registry.scene.current(job.job_id).scene
+    barrel = next(item for item in scene.objects if item.provenance.get("operation") == "add_catalog_asset")
+    apply_object_action(registry.scene, job.job_id, barrel.id, "confirm", scene.scene_revision)
+    monkeypatch.setattr(
+        simulation_package_service,
+        "get_settings",
+        lambda: Settings(product_scene_runtime_python=SCENE_RUNTIME, product_sam2_checkpoint=None),
+    )
+
+    package = build_simulation_package(registry, job.job_id)
+
+    assert package.preflight.blocking_result == RuleResult.PASS and package.package_ref is not None
+    archive = zipfile.ZipFile(io.BytesIO(registry.runtime_resolver.require(package.package_ref).read_bytes()))
+    capability = json.loads(archive.read("export_capability.json"))
+    assert capability["status"] == "supported" and capability["requirements"]["external_assets"] is False
+    assert [(notice["code"], notice["affected_object_ids"]) for notice in capability["notices"]] == [
+        ("CATALOG_ASSET_EXPORTED_AS_BOX", [barrel.id])
+    ]
+    assert (
+        barrel.id in archive.read("README.txt").decode() and "real2sim:catalog" in archive.read("README.txt").decode()
+    )
+    summary = json.loads(archive.read("usd_export_summary.json"))
+    exported = next(obj for obj in summary["objects"] if obj["prim"] == barrel.id.replace("-", "_"))
+    expected = {"family": "SM_BarelPlastic_A", "asset_url": barrel.provenance["asset_url"]}
+    assert exported["catalog"] == expected and summary["external_assets"] == []
+
+    extracted = tmp_path / "unpacked"
+    archive.extractall(extracted)
+    inspection = subprocess.run(
+        [
+            str(SCENE_RUNTIME),
+            "-c",
+            "import json,sys; from pxr import Usd,UsdPhysics; s=Usd.Stage.Open(sys.argv[1]); p=s.GetPrimAtPath(sys.argv[2]); print(json.dumps({'catalog': p.GetCustomDataByKey('real2sim')['catalog'], 'rigid': p.HasAPI(UsdPhysics.RigidBodyAPI), 'layers': [layer.identifier for layer in s.GetUsedLayers()]}))",
+            str(extracted / "scene.usda"),
+            f"/World/Objects/{barrel.id.replace('-', '_')}",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    stage = json.loads(inspection.stdout)
+    assert stage["catalog"] == expected and stage["rigid"] is True
+    assert not any(barrel.provenance["asset_url"] in layer for layer in stage["layers"])
 
 
 def test_candidate_zip_recovers_legacy_owner_and_exports_current_rotated_pose(

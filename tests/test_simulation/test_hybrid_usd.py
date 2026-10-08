@@ -457,3 +457,90 @@ def test_ground_plane_top_surface_is_at_z_zero(tmp_path: Path) -> None:
     assert box["max"][2] == pytest.approx(0.0, abs=1e-6)
     assert box["min"][2] == pytest.approx(-0.02, abs=1e-6)
     assert box["max"][0] - box["min"][0] == pytest.approx(200.0)
+
+
+CATALOG_INSPECT = """
+import json, sys
+from pxr import Usd
+stage = Usd.Stage.Open(sys.argv[1])
+prim = stage.GetPrimAtPath("/World/Objects/asset_001")
+print(json.dumps({"real2sim": prim.GetCustomDataByKey("real2sim"), "layers": [layer.identifier for layer in stage.GetUsedLayers()]}))
+"""
+
+
+def _catalog_request(tmp_path: Path, catalog: object) -> Path:
+    (tmp_path / "env.obj").write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n", encoding="utf-8")
+    request = {
+        "output_dir": str(tmp_path / "usd"),
+        "environment": {"collision_mesh": str(tmp_path / "env.obj")},
+        "objects": [
+            {
+                "prim": "asset_001",
+                "translation": [0, 0, 0.1],
+                "rotation_xyzw": [0, 0, 0, 1],
+                "collider": {
+                    "type": "AABB",
+                    "geometry_path": None,
+                    "part_paths": [],
+                    "dimensions_xyz_m": [1.2, 1.0, 0.2],
+                    "local_transform": {"translation_xyz": [0, 0, 0], "rotation_quaternion_xyzw": [0, 0, 0, 1]},
+                },
+                "physics": {
+                    "dynamic": True,
+                    "mass_kg": 25.0,
+                    "mass_source": "catalog_default",
+                    "static_friction": 0.6,
+                    "dynamic_friction": 0.5,
+                    "restitution": 0.1,
+                    "provenance": {},
+                },
+                "catalog": catalog,
+            }
+        ],
+    }
+    path = tmp_path / "request.json"
+    path.write_text(json.dumps(request), encoding="utf-8")
+    return path
+
+
+def test_catalog_provenance_is_recorded_next_to_physics_without_referencing_the_asset(tmp_path: Path) -> None:
+    """The public asset URL travels as metadata only: a composition arc would make the package non-hermetic."""
+    catalog = {"family": "SM_PaletteA", "asset_url": "https://example.test/Assets/Isaac/SM_PaletteA_01.usd"}
+    request_path = _catalog_request(tmp_path, catalog)
+    subprocess.run(
+        [str(RUNTIME), str(RUNNER), "--request", str(request_path), "--result", str(tmp_path / "r.json")],
+        check=True,
+        timeout=120,
+    )
+
+    summary = json.loads((tmp_path / "r.json").read_text())
+    assert summary["objects"][0]["catalog"] == catalog
+    assert summary["external_assets"] == []
+    inspected = subprocess.run(
+        [str(RUNTIME), "-c", CATALOG_INSPECT, str(tmp_path / "usd" / "scene.usda")],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    stage = json.loads(inspected.stdout)
+    assert stage["real2sim"]["catalog"] == catalog
+    assert stage["real2sim"]["physics"]["mass_source"] == "catalog_default"
+    assert all("example.test" not in layer for layer in stage["layers"])
+
+
+@pytest.mark.parametrize(
+    "catalog",
+    [{"family": "SM_PaletteA"}, {"family": "SM_PaletteA", "asset_url": ""}, {"family": 3, "asset_url": "x"}, "text"],
+)
+def test_malformed_catalog_provenance_is_rejected(tmp_path: Path, catalog: object) -> None:
+    request_path = _catalog_request(tmp_path, catalog)
+    completed = subprocess.run(
+        [str(RUNTIME), str(RUNNER), "--request", str(request_path), "--result", str(tmp_path / "r.json")],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+    assert completed.returncode != 0 and not (tmp_path / "r.json").exists()

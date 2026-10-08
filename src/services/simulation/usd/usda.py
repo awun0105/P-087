@@ -4,9 +4,12 @@ Xuất cấu trúc scene phân cấp (/World, /World/Environment, /World/Objects
 với metadata chuẩn hóa: metersPerUnit = 1.0, upAxis = "Z" theo OpenReal2Sim và Re3Sim.
 """
 
+import json
+
 import numpy as np
 
 from src.models.contracts.scene import ColliderSpec, ColliderType, SceneIR, SceneObject, SceneObjectState
+from src.services.simulation.usd.capabilities import catalog_asset_provenance
 
 
 def _format_prim_name(raw_id: str) -> str:
@@ -57,7 +60,7 @@ def _generate_object_usda(obj: SceneObject) -> list[str]:
     """Sinh định nghĩa Prim cho một SceneObject cùng toạ độ và collider."""
     if obj.physics is not None:
         raise ValueError(f"legacy USD exporter cannot preserve ObjectPhysics for '{obj.id}'")
-    if obj.asset_ref is not None or isinstance(obj.provenance.get("asset_url"), str):
+    if obj.asset_ref is not None:
         raise ValueError(f"legacy USD exporter cannot preserve asset dependencies for '{obj.id}'")
     if obj.state == SceneObjectState.CONFIRMED and obj.collider is None:
         raise ValueError(f"legacy USD exporter requires a collider for confirmed object '{obj.id}'")
@@ -65,8 +68,25 @@ def _generate_object_usda(obj: SceneObject) -> list[str]:
     tx, ty, tz = obj.transform.translation_xyz
     qx, qy, qz, qw = obj.transform.rotation_quaternion_xyzw
 
+    catalog = catalog_asset_provenance(obj)
     lines = [
         f'        def Xform "{prim_name}"',
+        *(
+            [
+                "        (",
+                "            customData = {",
+                "                dictionary real2sim = {",
+                "                    dictionary catalog = {",
+                f"                        string asset_url = {json.dumps(catalog['asset_url'], ensure_ascii=False)}",
+                f"                        string family = {json.dumps(catalog['family'], ensure_ascii=False)}",
+                "                    }",
+                "                }",
+                "            }",
+                "        )",
+            ]
+            if catalog is not None
+            else []
+        ),
         "        {",
         f"            double3 xformOp:translate = ({tx}, {ty}, {tz})",
         f"            quatf xformOp:orient = ({qw}, {qx}, {qy}, {qz})",
