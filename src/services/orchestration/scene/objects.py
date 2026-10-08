@@ -121,6 +121,13 @@ def edit_collider_scene(scene: SceneIR, command: ColliderEditCommand) -> SceneIR
         raise SceneEditRejectedError(str(error)) from error
 
 
+def edit_collider(editor: SceneEditor, job_id: str, command: ColliderEditCommand) -> SceneEditResult:
+    """Publish a validated collider override as the next canonical scene revision."""
+    current = editor.current(job_id).scene
+    updated = edit_collider_scene(current, command)
+    return editor.publish_next(job_id, command.expected_scene_revision, updated, "edit_collider")
+
+
 def _next_id(scene: SceneIR, prefix: str) -> str:
     """Id `prefix-NNN` chưa dùng trong revision."""
     taken = {item.id for item in scene.objects}

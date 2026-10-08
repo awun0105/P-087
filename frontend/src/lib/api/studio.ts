@@ -8,6 +8,7 @@ import { clearDirectUploadResume, directUpload, xhrPutPart } from "@/lib/api/dir
 import { verifyVideoPreparationChecksum } from "@/lib/contracts/videoPreparation";
 import type { VideoPreparedArtifact } from "@/lib/media/video-normalization";
 import type {
+  ColliderEditCommand,
   ObjectMembershipMergeCommand,
   ObjectMembershipReassignCommand,
   SceneEditResponse,
@@ -576,6 +577,14 @@ export function setObjectTransform(
       expected_scene_revision: expectedRevision,
       edits: [{ object_id: objectId, translation_xyz: translation, rotation_quaternion_xyzw: rotation }],
     }),
+  });
+}
+
+/** Ghi kích thước/local pose của box collider thành revision SceneIR kế tiếp. */
+export function editCollider(jobId: string, command: ColliderEditCommand): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/collider`, {
+    method: "POST",
+    body: JSON.stringify(command),
   });
 }
 

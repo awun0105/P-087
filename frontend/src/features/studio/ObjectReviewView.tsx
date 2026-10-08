@@ -34,6 +34,7 @@ import {
   addCatalogObject,
   applyObjectAction,
   catalogPreviewUrl,
+  editCollider,
   getJobScene,
   getSceneCatalog,
   getStageViews,
@@ -45,7 +46,7 @@ import {
   type SceneCatalog,
 } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
-import type { SceneIR, SceneObject } from "@/lib/contracts/api";
+import type { ColliderEditCommand, SceneIR, SceneObject } from "@/lib/contracts/api";
 import type { StageView } from "@/lib/contracts/studio";
 
 // Chỉ dùng khi scene không có 3DGS: tải three.js theo nhu cầu, không kéo vào mọi lần mở Studio.
@@ -59,8 +60,107 @@ function objectVisual(jobId: string, object: SceneObject, previews: ReadonlySet<
   return { url: null };
 }
 
-function objectColliderTransform(object: SceneObject) {
-  return object.collider ? composeColliderTransform(object, object.collider) : object.transform;
+type Vec3Tuple = [number, number, number];
+type QuaternionTuple = [number, number, number, number];
+type ColliderPreviewDraft = {
+  objectId: string;
+  sceneRevision: string;
+  dimensions: Vec3Tuple;
+  localTranslation: Vec3Tuple;
+  localRotation: QuaternionTuple;
+};
+type ColliderChanges = Pick<
+  ColliderEditCommand,
+  "dimensions_xyz_m" | "local_translation_xyz_m" | "local_rotation_quaternion_xyzw"
+>;
+type ColliderFormValues = { dimensions: [string, string, string]; translation: [string, string, string]; rotation: [string, string, string] };
+
+function colliderWithPreview(object: SceneObject, draft: ColliderPreviewDraft | null) {
+  if (!object.collider || draft?.objectId !== object.id) return object.collider;
+  return {
+    ...object.collider,
+    dimensions_xyz_m: draft.dimensions,
+    local_transform: {
+      ...object.collider.local_transform,
+      translation_xyz: draft.localTranslation,
+      rotation_quaternion_xyzw: draft.localRotation,
+    },
+  };
+}
+
+function colliderShapeUrl(jobId: string, collider: SceneObject["collider"]): string | null {
+  if (!collider?.geometry_ref || !collider.geometry_ref.artifact_uri.endsWith(".glb")) return null;
+  if ((collider.collider_type === "AABB" || collider.collider_type === "OBB") && collider.dimensions_xyz_m) return null;
+  return jobArtifactContentUrl(jobId, collider.geometry_ref);
+}
+
+function objectColliderTransform(object: SceneObject, draft: ColliderPreviewDraft | null = null) {
+  const collider = colliderWithPreview(object, draft);
+  return collider ? composeColliderTransform(object, collider) : object.transform;
+}
+
+function quaternionToEulerDegrees([x, y, z, w]: QuaternionTuple): Vec3Tuple {
+  const roll = Math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y));
+  const sinPitch = Math.max(-1, Math.min(1, 2 * (w * y - z * x)));
+  const pitch = Math.asin(sinPitch);
+  const yaw = Math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z));
+  return [roll, pitch, yaw].map((angle) => Number(((angle * 180) / Math.PI).toFixed(3))) as Vec3Tuple;
+}
+
+/** Build qZ × qY × qX from the user-facing local X/Y/Z angles in degrees. */
+function eulerDegreesToQuaternion([x, y, z]: Vec3Tuple): QuaternionTuple {
+  const half = (angle: number) => (angle * Math.PI) / 360;
+  const [sx, sy, sz] = [x, y, z].map(half).map(Math.sin);
+  const [cx, cy, cz] = [x, y, z].map(half).map(Math.cos);
+  return [
+    sx * cy * cz - cx * sy * sz,
+    cx * sy * cz + sx * cy * sz,
+    cx * cy * sz - sx * sy * cz,
+    cx * cy * cz + sx * sy * sz,
+  ];
+}
+
+function colliderFormValues(object: SceneObject): ColliderFormValues | null {
+  const collider = object.collider;
+  if (!collider?.dimensions_xyz_m) return null;
+  return {
+    dimensions: collider.dimensions_xyz_m.map(String) as ColliderFormValues["dimensions"],
+    translation: collider.local_transform.translation_xyz.map(String) as ColliderFormValues["translation"],
+    rotation: quaternionToEulerDegrees(collider.local_transform.rotation_quaternion_xyzw).map(String) as ColliderFormValues["rotation"],
+  };
+}
+
+function parseColliderForm(object: SceneObject, values: ColliderFormValues): { preview: Omit<ColliderPreviewDraft, "sceneRevision">; changes: ColliderChanges } | null {
+  const collider = object.collider;
+  if (!collider?.dimensions_xyz_m) return null;
+  const parse = (items: string[]): number[] | null => {
+    if (items.some((item) => item.trim() === "")) return null;
+    const parsed = items.map(Number);
+    return parsed.every(Number.isFinite) ? parsed : null;
+  };
+  const dimensions = parse(values.dimensions);
+  const translation = parse(values.translation);
+  const rotationDegrees = parse(values.rotation);
+  if (!dimensions || !translation || !rotationDegrees || dimensions.some((value) => value <= 0)) return null;
+
+  const nextDimensions = dimensions as Vec3Tuple;
+  const nextTranslation = translation as Vec3Tuple;
+  const baseDimensions = collider.dimensions_xyz_m;
+  const baseTranslation = collider.local_transform.translation_xyz;
+  const baseRotation = collider.local_transform.rotation_quaternion_xyzw;
+  const baseAngles = quaternionToEulerDegrees(baseRotation);
+  const changed = (a: readonly number[], b: readonly number[], tolerance = 1e-9) =>
+    a.some((value, index) => Math.abs(value - b[index]) > tolerance);
+  const rotationChanged = changed(rotationDegrees, baseAngles, 1e-3);
+  const nextRotation = rotationChanged ? eulerDegreesToQuaternion(rotationDegrees as Vec3Tuple) : baseRotation;
+  const changes: ColliderChanges = {};
+  if (changed(nextDimensions, baseDimensions)) changes.dimensions_xyz_m = nextDimensions;
+  if (changed(nextTranslation, baseTranslation)) changes.local_translation_xyz_m = nextTranslation;
+  if (rotationChanged) changes.local_rotation_quaternion_xyzw = nextRotation;
+  return {
+    preview: { objectId: object.id, dimensions: nextDimensions, localTranslation: nextTranslation, localRotation: nextRotation },
+    changes,
+  };
 }
 
 type ROIForm = { minX: string; minY: string; minZ: string; maxX: string; maxY: string; maxZ: string };
@@ -152,6 +252,9 @@ export function ObjectReviewView({
   const [reassignSourceId, setReassignSourceId] = useState<string | null>(null);
   const [reassignTargetId, setReassignTargetId] = useState<string | null>(null);
   const [roi, setRoi] = useState<ROIForm>(EMPTY_ROI);
+  const mutationInFlight = useRef(false);
+  const [colliderDraft, setColliderDraft] = useState<ColliderPreviewDraft | null>(null);
+  const [colliderFormReset, setColliderFormReset] = useState(0);
   const keepErrorAfterReload = useRef(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [cameras, setCameras] = useState<StageView["cameras"]>([]);
@@ -167,6 +270,11 @@ export function ObjectReviewView({
   const cancelPlacing = useCallback(() => setPlacing(null), []);
   const stale = Boolean(revision && scene && !busy && revision !== scene.scene_revision);
 
+  const selectObject = (id: string | null) => {
+    if (id !== selected) setColliderDraft(null);
+    setSelected(id);
+  };
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset ephemeral selection state when scene revision changes
     setMergeCandidateIds([]);
@@ -175,17 +283,18 @@ export function ObjectReviewView({
     setReassignSourceId(null);
     setReassignTargetId(null);
     setRoi(EMPTY_ROI);
+    setColliderDraft(null);
   }, [scene?.scene_revision]);
 
   /** Chọn và cho camera bay tới vật (từ danh sách hoặc nút trong inspector). */
   const flyTo = (id: string) => {
-    setSelected(id);
+    selectObject(id);
     setFocus((previous) => ({ id, nonce: (previous?.nonce ?? 0) + 1 }));
     setRightCollapsed(false);
   };
   /** Chọn bằng cách bấm hộp trong 3D: đánh dấu và cuộn danh sách tới vật đó. */
   const selectFromScene = (id: string) => {
-    setSelected(id);
+    selectObject(id);
     setRightCollapsed(false);
     document.getElementById(`object-${id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   };
@@ -244,23 +353,20 @@ export function ObjectReviewView({
       (scene?.objects ?? [])
         .filter((object) => object.physics?.dynamic && object.active && isPlaced(object))
         .map((object) => {
-          const colliderUrl =
-            object.collider?.geometry_ref && object.collider.geometry_ref.artifact_uri.endsWith(".glb")
-              ? jobArtifactContentUrl(jobId, object.collider.geometry_ref)
-              : null;
+          const collider = colliderWithPreview(object, colliderDraft?.sceneRevision === scene?.scene_revision ? colliderDraft : null);
           return {
             id: object.id,
             position: object.transform.translation_xyz,
             rotation_xyzw: object.transform.rotation_quaternion_xyzw,
-            colliderUrl,
-            colliderLocalTransform: object.collider?.local_transform ?? null,
-            dimensions: object.primitive_dimensions_xyz_m ?? null,
+            colliderUrl: colliderShapeUrl(jobId, collider),
+            colliderLocalTransform: collider?.local_transform ?? null,
+            dimensions: collider?.dimensions_xyz_m ?? object.primitive_dimensions_xyz_m ?? null,
             mass_kg: object.physics!.mass_kg ?? 10,
             friction: object.physics!.dynamic_friction,
             restitution: object.physics!.restitution,
           };
         }),
-    [scene, jobId],
+    [scene, jobId, colliderDraft],
   );
 
   const counts = useMemo(
@@ -272,34 +378,37 @@ export function ObjectReviewView({
     return scene?.objects.filter(match) ?? [];
   }, [scene, filter]);
   const theme = useSyncExternalStore(subscribeTheme, themeKey, () => "light:default");
+  const currentColliderDraft = colliderDraft?.sceneRevision === scene?.scene_revision ? colliderDraft : null;
   const boxes = useMemo<OverlayBox[]>(
     () =>
       visibleObjects
-        .filter((object) => object.primitive_dimensions_xyz_m)
-        .map((object) => {
-          const transform = objectColliderTransform(object);
+        .flatMap((object) => {
+          const collider = colliderWithPreview(object, currentColliderDraft);
+          const dimensions = collider?.dimensions_xyz_m ?? object.primitive_dimensions_xyz_m;
+          if (!dimensions) return [];
+          const transform = objectColliderTransform(object, currentColliderDraft);
           return {
             id: object.id,
             center: transform.translation_xyz,
             rotation_xyzw: transform.rotation_quaternion_xyzw,
-            dimensions: object.primitive_dimensions_xyz_m!,
+            dimensions,
             color: object.id === selected ? selectedColor() : stateColor(object),
             emphasized: object.id === selected,
             // Collider phân rã lồi bám theo hình vật; vật chỉ có hộp (thêm tay, asset thư viện) thì vẽ hộp.
-            shapeUrl:
-              object.collider?.geometry_ref && object.collider.geometry_ref.artifact_uri.endsWith(".glb")
-                ? jobArtifactContentUrl(jobId, object.collider.geometry_ref)
-                : null,
+            shapeUrl: colliderShapeUrl(jobId, collider),
           };
         }),
     // `theme` trong deps: đổi chế độ/bảng màu thì khung vật vẽ lại bằng màu mới.
-    [visibleObjects, selected, jobId, theme], // eslint-disable-line react-hooks/exhaustive-deps
+    [visibleObjects, selected, jobId, theme, currentColliderDraft], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   async function run(mutate: (revision: string) => Promise<{ scene: SceneIR }>) {
-    if (!scene) return;
+    if (!scene || mutationInFlight.current) return;
+    mutationInFlight.current = true;
     const revision = scene.scene_revision;
     setBusy(true);
+    setColliderDraft(null);
+    setColliderFormReset((value) => value + 1);
     setError(null);
     onSaveState?.({ status: "saving", revision });
     try {
@@ -324,6 +433,7 @@ export function ObjectReviewView({
         retry: conflict ? () => setReload((value) => value + 1) : () => void run(mutate),
       });
     } finally {
+      mutationInFlight.current = false;
       setBusy(false);
     }
   }
@@ -449,20 +559,26 @@ export function ObjectReviewView({
                 ? () => {
                     if (window.confirm(`Xoá "${current.name}" khỏi scene?`)) {
                       void act(current, "delete");
-                      setSelected(null);
+                      selectObject(null);
                     }
                   }
                 : undefined
             }
             onDeselect={() => {
-              setSelected(null);
+              selectObject(null);
               setTool("none");
             }}
           />
         ) : (
-          <CollisionMeshCanvas url={jobArtifactContentUrl(jobId, scene.environment.geometry_ref)}>
+            <CollisionMeshCanvas url={jobArtifactContentUrl(jobId, scene.environment.geometry_ref)}>
             {visibleObjects.map((object) => (
-              <ObjectBox key={object.id} object={object} selected={object.id === selected} onSelect={() => setSelected(object.id)} />
+              <ObjectBox
+                key={object.id}
+                object={object}
+                preview={currentColliderDraft}
+                selected={object.id === selected}
+                onSelect={() => selectObject(object.id)}
+              />
             ))}
           </CollisionMeshCanvas>
         )}
@@ -813,9 +929,23 @@ export function ObjectReviewView({
                   object={current}
                   busy={busy}
                   catalog={catalog}
+                  sceneRevision={scene.scene_revision}
+                  colliderFormReset={colliderFormReset}
+                  onColliderDraftChange={(draft) =>
+                    setColliderDraft(draft ? { ...draft, sceneRevision: scene.scene_revision } : null)
+                  }
+                  onColliderSave={(changes) =>
+                    void run((expectedRevision) =>
+                      editCollider(jobId, {
+                        expected_scene_revision: expectedRevision,
+                        object_id: current.id,
+                        ...changes,
+                      }),
+                    )
+                  }
                   onAct={(action, extra) => act(current, action, extra)}
                   onFlyTo={() => flyTo(current.id)}
-                  onClose={() => setSelected(null)}
+                  onClose={() => selectObject(null)}
                 />
               ) : (
                 <div className="space-y-2 px-4 py-4 text-xs text-on-dark/70">
@@ -885,6 +1015,10 @@ function Inspector({
   object,
   busy,
   catalog,
+  sceneRevision,
+  colliderFormReset,
+  onColliderDraftChange,
+  onColliderSave,
   onAct,
   onFlyTo,
   onClose,
@@ -892,6 +1026,10 @@ function Inspector({
   object: SceneObject;
   busy: boolean;
   catalog: SceneCatalog | null;
+  sceneRevision: string;
+  colliderFormReset: number;
+  onColliderDraftChange: (draft: Omit<ColliderPreviewDraft, "sceneRevision"> | null) => void;
+  onColliderSave: (changes: ColliderChanges) => void;
   onAct: (action: ObjectAction, extra?: ActionExtra) => void;
   onFlyTo: () => void;
   onClose: () => void;
@@ -938,11 +1076,18 @@ function Inspector({
         </dd>
         {size && (
           <>
-            <dt className="text-on-dark/60">Kích thước (m)</dt>
+            <dt className="text-on-dark/60">Kích thước hình học (m)</dt>
             <dd className="font-mono text-on-dark">{size.map((value) => value.toFixed(2)).join(" × ")}</dd>
           </>
         )}
       </dl>
+      <ColliderEditor
+        key={`${object.id}:${sceneRevision}:${colliderFormReset}`}
+        object={object}
+        busy={busy}
+        onDraftChange={onColliderDraftChange}
+        onSave={onColliderSave}
+      />
       <div className="flex flex-wrap gap-1.5">
         <Button size="sm" variant="secondary" onClick={onFlyTo} className="border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep">
           <Crosshair aria-hidden /> Bay tới
@@ -1049,6 +1194,135 @@ function Inspector({
         </Button>
       </form>}
     </div>
+  );
+}
+
+function ColliderEditor({
+  object,
+  busy,
+  onDraftChange,
+  onSave,
+}: {
+  object: SceneObject;
+  busy: boolean;
+  onDraftChange: (draft: Omit<ColliderPreviewDraft, "sceneRevision"> | null) => void;
+  onSave: (changes: ColliderChanges) => void;
+}) {
+  const collider = object.collider;
+  const baseValues = colliderFormValues(object) ?? {
+    dimensions: ["", "", ""] as [string, string, string],
+    translation: ["", "", ""] as [string, string, string],
+    rotation: ["", "", ""] as [string, string, string],
+  };
+  const [values, setValues] = useState<ColliderFormValues>(baseValues);
+  const supported = Boolean(
+    collider &&
+      (collider.collider_type === "AABB" || collider.collider_type === "OBB") &&
+      collider.dimensions_xyz_m,
+  );
+  const removed = isIgnored(object);
+  const merged = object.provenance.review === "MERGED";
+  const editable = supported && !removed && !merged;
+  const parsed = editable ? parseColliderForm(object, values) : null;
+  const changed = Boolean(parsed && Object.keys(parsed.changes).length > 0);
+  const formChanged = JSON.stringify(values) !== JSON.stringify(baseValues);
+
+  const update = (group: keyof ColliderFormValues, index: number, value: string) => {
+    const nextGroup = [...values[group]] as [string, string, string];
+    nextGroup[index] = value;
+    const next = { ...values, [group]: nextGroup };
+    setValues(next);
+    const result = parseColliderForm(object, next);
+    onDraftChange(result ? result.preview : null);
+  };
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!parsed || !changed || busy) return;
+    onSave(parsed.changes);
+  };
+
+  const discard = () => {
+    setValues(baseValues);
+    onDraftChange(null);
+  };
+
+  const fields = (
+    group: keyof ColliderFormValues,
+    title: string,
+    labels: readonly string[],
+    unit: string,
+    min?: string,
+  ) => (
+    <fieldset disabled={!editable || busy} className="space-y-1.5">
+      <legend className="text-xs font-medium text-on-dark/80">{title}</legend>
+      <div className="grid grid-cols-3 gap-2">
+        {labels.map((axis, index) => {
+          const label = `${title} ${axis} (${unit})`;
+          return (
+            <label key={axis} className="flex min-w-0 flex-col gap-0.5 text-[11px] text-on-dark/60">
+              {axis}
+              <input
+                aria-label={label}
+                className="h-8 min-w-0 rounded-md border border-line-dark bg-viewport-deep/70 px-2 text-xs text-on-dark focus:border-ember focus:outline-none disabled:opacity-50"
+                type="number"
+                inputMode="decimal"
+                step="any"
+                min={min}
+                value={values[group][index]}
+                onChange={(event) => update(group, index, event.target.value)}
+              />
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+
+  return (
+    <form className="space-y-3 rounded-md border border-line-dark bg-viewport-deep/50 p-3" onSubmit={submit} aria-label="Chỉnh collider">
+      <div>
+        <p className="text-xs font-semibold text-on-dark">Collider box</p>
+        <p className="mt-0.5 text-[11px] text-on-dark/60">Kích thước và pose trong frame local của vật · mét, Z-up.</p>
+      </div>
+      {!collider && <p className="text-xs text-on-dark/70">Vật này chưa có collider để chỉnh sửa.</p>}
+      {collider && !supported && (
+        <p className="text-xs text-on-dark/70">
+          Hiện chỉ chỉnh được AABB/OBB có kích thước. Collider {collider.collider_type} cần công cụ hình học riêng.
+        </p>
+      )}
+      {supported && removed && <p className="text-xs text-on-dark/70">Khôi phục vật trước khi chỉnh collider.</p>}
+      {editable && (
+        <>
+          {fields("dimensions", "Kích thước collider", ["X", "Y", "Z"], "m", "0")}
+          {fields("translation", "Tịnh tiến local", ["X", "Y", "Z"], "m")}
+          {fields("rotation", "Góc xoay local", ["X", "Y", "Z"], "°")}
+          <p className="text-[11px] text-on-dark/60">Góc được áp theo thứ tự local X → Y → Z.</p>
+          {formChanged && !parsed && (
+            <p className="text-xs text-rust" role="alert">
+              Kích thước phải là số dương; vị trí và góc phải là số hữu hạn.
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" type="submit" disabled={busy || !changed}>
+              Lưu collider
+            </Button>
+            {formChanged && (
+              <Button
+                size="sm"
+                variant="secondary"
+                type="button"
+                disabled={busy}
+                onClick={discard}
+                className="border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep"
+              >
+                Hủy chỉnh sửa
+              </Button>
+            )}
+          </div>
+        </>
+      )}
+    </form>
   );
 }
 
@@ -1190,11 +1464,17 @@ function StateBadge({ object }: { object: SceneObject }) {
 }
 
 /** Hộp khung dây trong khung Z-up của collision mesh; màu theo trạng thái review. */
-function ObjectBox({ object, selected, onSelect }: { object: SceneObject; selected: boolean; onSelect: () => void }) {
-  const dimensions = object.primitive_dimensions_xyz_m;
+function ObjectBox({ object, preview, selected, onSelect }: {
+  object: SceneObject;
+  preview: ColliderPreviewDraft | null;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const collider = colliderWithPreview(object, preview);
+  const dimensions = collider?.dimensions_xyz_m ?? object.primitive_dimensions_xyz_m;
   if (!dimensions) return null;
   const color = selected ? selectedColor() : stateColor(object);
-  const transform = objectColliderTransform(object);
+  const transform = objectColliderTransform(object, preview);
   return (
     <mesh
       position={transform.translation_xyz}

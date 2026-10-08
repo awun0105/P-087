@@ -15,7 +15,13 @@ from src.models.contracts.object_membership import ObjectMembershipMergeCommand,
 from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.auth import UserRecord
 from src.services.orchestration.jobs.stage_views import job_bundle
-from src.services.orchestration.scene import SceneEditCommand, SceneError, SceneRevisionConflictError, objectify_queue
+from src.services.orchestration.scene import (
+    ColliderEditCommand,
+    SceneEditCommand,
+    SceneError,
+    SceneRevisionConflictError,
+    objectify_queue,
+)
 from src.services.orchestration.scene.catalog import load_catalog, suggest_classes
 from src.services.orchestration.scene.errors import SceneNotAvailableError
 from src.services.orchestration.scene.object_correction import merge_object_candidates, reassign_object_membership
@@ -26,6 +32,7 @@ from src.services.orchestration.scene.objects import (
     add_box_object,
     add_catalog_object,
     apply_object_action,
+    edit_collider,
     restore_revision,
 )
 from src.services.reconstruction.views import camera_views
@@ -89,6 +96,28 @@ def edit_job_scene(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except SceneError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+
+
+@router.post(
+    "/jobs/{job_id}/scene/collider",
+    response_model=schemas.SceneEditResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"model": schemas.ApiErrorResponse},
+        409: {"model": schemas.ApiErrorResponse},
+        422: {"model": schemas.ApiErrorResponse},
+    },
+)
+def edit_job_collider(
+    job_id: str,
+    command: ColliderEditCommand,
+    user: UserRecord | None = Depends(require_contributor),
+) -> schemas.SceneEditResponse:
+    """Edit a supported box collider and publish one optimistic revision."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="sửa collider của")
+    deps.job_or_404(job_id)
+    return deps.scene_mutation(lambda editor: edit_collider(editor, job_id, command))
 
 
 # ── PRODUCT-07: object actions ───────────────────────────────────────────────

@@ -205,6 +205,49 @@ async def test_guest_can_edit_own_scene_when_daily_run_quota_is_exhausted(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("role", "owner_user_id", "expected_status"),
+    [
+        ("guest", "user-guest", 201),
+        ("guest", "user-editor", 403),
+        ("editor", "user-guest", 201),
+        ("reviewer", "user-guest", 201),
+    ],
+)
+async def test_collider_edit_route_enforces_guest_ownership_and_operator_roles(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    role: str,
+    owner_user_id: str,
+    expected_status: int,
+) -> None:
+    user = _user(role)
+    registry = ProjectRegistry(runtime_root=tmp_path / "artifacts")
+    registry.seed_from_fixtures()
+    monkeypatch.setattr(registry, "get_job_owner_user_id", lambda _job_id: owner_user_id)
+    monkeypatch.setattr(scene_api.deps, "registry", lambda: registry)
+    audit_service = AuthService(RuntimeDatabase(f"sqlite:///{tmp_path / 'scene-collider-audit.db'}"))
+    monkeypatch.setattr(auth_api, "auth_service", lambda: audit_service)
+    original_overrides = app.dependency_overrides.copy()
+    app.dependency_overrides[auth_api.require_contributor] = lambda: user
+    try:
+        response = await client.post(
+            "/api/v1/jobs/job-fixture-001/scene/collider",
+            json={
+                "expected_scene_revision": "rev-001",
+                "object_id": "object-pallet-001",
+                "dimensions_xyz_m": [1.25, 0.9, 0.7],
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(original_overrides)
+
+    assert response.status_code == expected_status, response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     ("role", "owner_user_id", "expected_mutate"),
     [
         ("guest", "user-guest", True),

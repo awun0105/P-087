@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- IN PROGRESS — AUD-09.S1 local implementation complete; S2/S3 remain planned; P1; EX-SIM domain + EX-PRODUCT API/UI.
+- IN PROGRESS — AUD-09.S1–S2 local implementation complete; S3 remains planned; P1; EX-SIM domain + EX-PRODUCT API/UI.
 - Canonical SIM-02/03, SCENE-08, PRODUCT-06/07. SELF-CODE typed command,
   REUSE SceneEditor/gizmo/export adapters.
 - Goal: sửa kích thước/local pose collider hiện có, giữ object visual/geometry
@@ -84,7 +84,9 @@ failed save to canonical state. Publish revision qua shared CAS; type/mesh contr
 chưa hỗ trợ phải explicit, không nhận command rồi bỏ qua.
 Tests: typed API payload/roles, rapid saves/stale revision, cancel/failed save,
 frontend component/gizmo/focus tests, browser local/world transform preview.
-**Exit:** [ ] saved canonical collider matches preview; [ ] failure rollback verified.
+**Exit:** [x] saved canonical collider matches preview; [x] failure rollback verified.
+Browser visual acceptance remains **UNVERIFIED** because the available Chrome
+session is at login without an authenticated Studio session.
 
 ## Sprint AUD-09.S3 — Export và simulation consumer
 
@@ -149,5 +151,44 @@ consumer proof; initial box-only scope được ghi rõ trong result.
   with an earlier-engine rebuild warning.
 - **Limitations:** S1 defines the API command contract but does not expose an HTTP
   route or UI yet. It does not publish a new revision or produce browser/world-pose
-  evidence. Those belong to S2/S3; real Isaac contact remains a separate
-  **UNVERIFIED** acceptance gate.
+  evidence. S2 adds the route/UI publication path; export and real Isaac contact
+  remain S3/separate **UNVERIFIED** acceptance gates.
+
+### AUD-09.S2 — Inspector, preview và canonical revision
+
+- **Base:** `e3e9fc5` (`AUD-09.S1`).
+- **Behavior before → after:** S1 defined and tested the domain command, but the
+  Web app had no collider route or controls. `POST /api/v1/jobs/{job_id}/scene/collider`
+  now accepts the revision-bound `ColliderEditCommand`, checks job ownership,
+  applies the pure edit, and publishes it through `SceneEditor.publish_next`.
+  The response is the canonical `SceneEditResponse` at the next SceneIR revision.
+- **UI and data contract:** Inspector exposes dimensions, local translation in
+  metres and local XYZ rotation angles in degrees for existing dimension-bearing
+  AABB/OBB only. The UI converts local XYZ angles using `qZ × qY × qX` to the
+  contract quaternion. Convex/mesh/no-collider cases state why editing is not
+  available. The preview remains local state and composes
+  `T_world_from_object × T_object_from_collider`; Gaussian/object transforms and
+  visual/geometry refs remain canonical and unchanged. Box dimensions/local pose
+  also feed browser physics preview. A pending write blocks concurrent mutations;
+  cancel, API failure, or stale revision discards the preview. 409 reloads the
+  latest canonical scene before further edits.
+- **Files:** `src/api/product/scene.py`,
+  `src/services/orchestration/scene/objects.py`,
+  `frontend/src/lib/api/studio.ts`,
+  `frontend/src/features/studio/ObjectReviewView.tsx`,
+  `frontend/tests/object-review.test.tsx`,
+  `tests/test_api/test_scene_v2_routes.py`,
+  `tests/test_api/test_guest_ownership.py`, and plan progress entries.
+- **Verification:**
+  - `.venv/bin/pytest tests/test_api/test_scene_v2_routes.py tests/test_api/test_guest_ownership.py tests/test_scene/test_collider_edit.py tests/test_orchestration/test_scene_editor.py -q` — **108 passed**.
+  - `.venv/bin/ruff check src/ tests/` — **passed**; `.venv/bin/ruff format --check src/ tests/` — **505 files already formatted**; `scripts/check_contract_mirror.py` — **PASS**.
+  - In `frontend/`, `npm run typecheck`, changed-file ESLint, and Vitest for
+    `object-review`, `layers`, and `stage-view-selection` — **56 tests passed**.
+  - CodeGraph fully indexed 833 files, 16,258 nodes and 47,606 edges. The graph
+    traces the route → domain edit → `publish_next` path and identifies the
+    Inspector/overlay/frontend regression tests.
+- **Acceptance boundary:** Chrome DevTools MCP reaches
+  `http://localhost:3010/login?next=%2Foverview`; no authenticated session was
+  available to inspect the actual PlayCanvas preview. Browser local/world-pose
+  acceptance is therefore **UNVERIFIED**. USD/export consumer fidelity and real
+  Isaac collision remain AUD-09.S3 gates; this sprint does not claim them.

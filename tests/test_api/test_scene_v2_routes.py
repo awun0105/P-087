@@ -124,6 +124,64 @@ async def test_merge_route_publishes_and_returns_canonical_scene_revision(
 
 
 @pytest.mark.asyncio
+async def test_collider_route_publishes_box_dimensions_and_local_pose(client, isolated_registry) -> None:
+    original = isolated_registry.scene.current("job-fixture-001").scene
+    original_object = next(item for item in original.objects if item.id == _PALLET)
+    response = await client.post(
+        f"{_JOB}/scene/collider",
+        json={
+            "expected_scene_revision": "rev-001",
+            "object_id": _PALLET,
+            "dimensions_xyz_m": [1.4, 0.8, 0.6],
+            "local_translation_xyz_m": [0.2, -0.1, 0.3],
+            "local_rotation_quaternion_xyzw": [0.0, 0.0, 0.7071067811865475, 0.7071067811865475],
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert (body["previous_scene_revision"], body["scene_revision"]) == ("rev-001", "rev-002")
+    edited = _object(body, _PALLET)
+    assert edited["collider"]["dimensions_xyz_m"] == pytest.approx([1.4, 0.8, 0.6])
+    assert edited["collider"]["local_transform"]["translation_xyz"] == pytest.approx([0.2, -0.1, 0.3])
+    assert edited["collider"]["local_transform"]["rotation_quaternion_xyzw"] == pytest.approx(
+        [0.0, 0.0, 0.7071067811865475, 0.7071067811865475]
+    )
+    assert edited["collider"]["provenance"]["manual_override"]["operation"] == "collider_edit"
+    assert body["scene"]["provenance"]["last_scene_operation"] == "edit_collider"
+    assert body["scene"]["provenance"]["invalidates_validation"] is True
+    assert edited["transform"] == original_object.transform.model_dump(mode="json")
+    assert edited["geometry_ref"] == original_object.geometry_ref.model_dump(mode="json")
+    assert edited["primitive_dimensions_xyz_m"] == original_object.primitive_dimensions_xyz_m
+    if original_object.physics is not None:
+        assert edited["physics"] == original_object.physics.model_dump(mode="json")
+    else:
+        assert "physics" not in edited
+    assert isolated_registry.scene.current("job-fixture-001").scene.scene_revision == "rev-002"
+    assert isolated_registry.scene.revision("job-fixture-001", "rev-001").scene == original
+
+
+@pytest.mark.asyncio
+async def test_collider_route_rejects_stale_and_empty_commands(client, isolated_registry) -> None:
+    stale = await client.post(
+        f"{_JOB}/scene/collider",
+        json={
+            "expected_scene_revision": "rev-009",
+            "object_id": _PALLET,
+            "dimensions_xyz_m": [1.2, 1.0, 0.8],
+        },
+    )
+    empty = await client.post(
+        f"{_JOB}/scene/collider",
+        json={"expected_scene_revision": "rev-001", "object_id": _PALLET},
+    )
+
+    assert stale.status_code == 409
+    assert empty.status_code == 422
+    assert isolated_registry.scene.current("job-fixture-001").scene.scene_revision == "rev-001"
+
+
+@pytest.mark.asyncio
 async def test_catalog_lists_classes_and_placeable_assets(client) -> None:
     body = (await client.get("/api/v1/scene/catalog")).json()
 

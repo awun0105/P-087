@@ -21,7 +21,13 @@ vi.mock("@/features/studio/MetricSceneView", () => ({
     onTool,
     onDelete,
   }: {
-    boxes: { id: string; color: string; center: [number, number, number]; rotation_xyzw: [number, number, number, number] }[];
+    boxes: {
+      id: string;
+      color: string;
+      center: [number, number, number];
+      rotation_xyzw: [number, number, number, number];
+      dimensions: [number, number, number];
+    }[];
     objects?: { id: string; url: string | null; visible: boolean }[];
     physicsObjects?: {
       id: string;
@@ -116,6 +122,46 @@ function scene(
       },
     ],
   };
+}
+
+function boxColliderScene(
+  revision = "rev-001",
+  dimensions: [number, number, number] = [1, 0.8, 0.6],
+  offset: [number, number, number] = [0, 0, 0],
+  localRotation: [number, number, number, number] = [0, 0, 0, 1],
+  objectRotation: [number, number, number, number] = [0, 0, 0, 1],
+) {
+  const result = scene(revision, "CONFIRMED", "CONFIRMED");
+  const object = result.objects[0] as unknown as Record<string, unknown>;
+  object.primitive_dimensions_xyz_m = [1.5, 1.2, 0.9];
+  (object.transform as Record<string, unknown>).rotation_quaternion_xyzw = objectRotation;
+  object.collider = {
+    collider_id: "collider-001",
+    collider_type: "AABB",
+    dimensions_xyz_m: dimensions,
+    local_transform: {
+      semantics: "parent_from_local",
+      parent_frame: "candidate-001",
+      local_frame: "collider-001",
+      translation_xyz: offset,
+      rotation_quaternion_xyzw: localRotation,
+      quaternion_order: "xyzw",
+      angle_unit: "radian",
+    },
+    geometry_ref: null,
+    parameters: {},
+    provenance: {},
+  };
+  object.physics = {
+    dynamic: true,
+    mass_kg: 10,
+    mass_source: "user",
+    static_friction: 0.6,
+    dynamic_friction: 0.5,
+    restitution: 0,
+    provenance: {},
+  };
+  return result;
 }
 
 function membershipScene(revision = "rev-001") {
@@ -651,6 +697,127 @@ describe("ObjectReviewView", () => {
     expect(boxes[0]?.center).toEqual([3, 1, 0.8]);
     expect(physicsObjects[0]?.position).toEqual([1, 2, 0.3]);
     expect(physicsObjects[0]?.colliderLocalTransform?.translation_xyz).toEqual([2, -1, 0.5]);
+  });
+
+  it("previews box dimensions and local pose, then saves them against the canonical revision", async () => {
+    const worldRotation: [number, number, number, number] = [0, 0, Math.SQRT1_2, Math.SQRT1_2];
+    const original = boxColliderScene("rev-001", [1, 0.8, 0.6], [0, 0, 0], [0, 0, 0, 1], worldRotation);
+    const saved = boxColliderScene("rev-002", [1.2, 0.8, 0.6], [0.25, 0, 0], [0, 0, Math.SQRT1_2, Math.SQRT1_2], worldRotation);
+    routeFetch({
+      "/scene/collider": [reply({ scene_revision: "rev-002", scene: saved })],
+      "/scene": [reply({ scene: original })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+
+    const metricScene = await screen.findByTestId("metric-scene");
+    const readBox = () => JSON.parse(metricScene.getAttribute("data-boxes") ?? "[]") as {
+      center: number[];
+      dimensions: number[];
+      rotation_xyzw: number[];
+    }[];
+    expect(readBox()[0]).toMatchObject({ center: [1, 2, 0.3], dimensions: [1, 0.8, 0.6] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Chọn Vật thể 1" }));
+    expect(screen.getByText("1.50 × 1.20 × 0.90")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Kích thước collider X (m)"), { target: { value: "1.2" } });
+    fireEvent.change(screen.getByLabelText("Tịnh tiến local X (m)"), { target: { value: "0.25" } });
+    fireEvent.change(screen.getByLabelText("Góc xoay local Z (°)"), { target: { value: "90" } });
+
+    expect(readBox()[0]?.center).toEqual([1, 2.25, 0.3]);
+    expect(readBox()[0]?.dimensions).toEqual([1.2, 0.8, 0.6]);
+    expect(readBox()[0]?.rotation_xyzw[2]).toBeCloseTo(1);
+    const physicsObjects = JSON.parse(metricScene.getAttribute("data-physics-objects") ?? "[]") as {
+      dimensions: number[];
+      colliderLocalTransform: { translation_xyz: number[] };
+    }[];
+    expect(physicsObjects[0]?.dimensions).toEqual([1.2, 0.8, 0.6]);
+    expect(physicsObjects[0]?.colliderLocalTransform.translation_xyz).toEqual([0.25, 0, 0]);
+
+    const save = screen.getByRole("button", { name: "Lưu collider" });
+    fireEvent.click(save);
+    fireEvent.click(save);
+    await waitFor(() => expect(calls("/scene/collider")).toHaveLength(1));
+    const [, init] = calls("/scene/collider")[0];
+    const payload = JSON.parse((init as RequestInit).body as string);
+    expect(payload).toMatchObject({
+      expected_scene_revision: "rev-001",
+      object_id: "candidate-001",
+      dimensions_xyz_m: [1.2, 0.8, 0.6],
+      local_translation_xyz_m: [0.25, 0, 0],
+    });
+    expect(payload.local_rotation_quaternion_xyzw[2]).toBeCloseTo(Math.SQRT1_2);
+    expect(await screen.findByLabelText("Kích thước collider X (m)")).toHaveValue(1.2);
+    expect(readBox()[0]?.dimensions).toEqual([1.2, 0.8, 0.6]);
+  });
+
+  it("cancel restores the canonical collider preview without sending a request", async () => {
+    routeFetch({ "/scene": [reply({ scene: boxColliderScene() })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    const metricScene = await screen.findByTestId("metric-scene");
+    const readBox = () => JSON.parse(metricScene.getAttribute("data-boxes") ?? "[]") as { center: number[]; dimensions: number[] }[];
+    fireEvent.click(screen.getByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.change(screen.getByLabelText("Tịnh tiến local X (m)"), { target: { value: "0.5" } });
+    expect(readBox()[0]?.center).toEqual([1.5, 2, 0.3]);
+    fireEvent.click(screen.getByRole("button", { name: "Hủy chỉnh sửa" }));
+    expect(readBox()[0]?.center).toEqual([1, 2, 0.3]);
+    expect(calls("/scene/collider")).toHaveLength(0);
+  });
+
+  it("rejects non-positive dimensions in the form and leaves the canonical preview intact", async () => {
+    routeFetch({ "/scene": [reply({ scene: boxColliderScene() })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    const metricScene = await screen.findByTestId("metric-scene");
+    fireEvent.click(screen.getByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.change(screen.getByLabelText("Kích thước collider X (m)"), { target: { value: "0" } });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Kích thước phải là số dương");
+    expect(JSON.parse(metricScene.getAttribute("data-boxes") ?? "[]")[0].dimensions).toEqual([1, 0.8, 0.6]);
+    expect(screen.getByRole("button", { name: "Lưu collider" })).toBeDisabled();
+    expect(calls("/scene/collider")).toHaveLength(0);
+  });
+
+  it("stale collider save reloads the newer canonical scene and drops the local preview", async () => {
+    routeFetch({
+      "/scene/collider": [reply({ detail: "stale revision" }, 409)],
+      "/scene": [reply({ scene: boxColliderScene() }), reply({ scene: boxColliderScene("rev-003", [2, 0.8, 0.6], [0.1, 0, 0]) })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    const metricScene = await screen.findByTestId("metric-scene");
+    fireEvent.click(screen.getByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.change(screen.getByLabelText("Tịnh tiến local X (m)"), { target: { value: "0.5" } });
+    expect(JSON.parse(metricScene.getAttribute("data-boxes") ?? "[]")[0].center).toEqual([1.5, 2, 0.3]);
+    fireEvent.click(screen.getByRole("button", { name: "Lưu collider" }));
+
+    expect(await screen.findByText(/Scene đã đổi ở lượt khác/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Kích thước collider X (m)")).toHaveValue(2));
+    expect(JSON.parse(metricScene.getAttribute("data-boxes") ?? "[]")[0].center).toEqual([1.1, 2, 0.3]);
+    expect(JSON.parse(metricScene.getAttribute("data-boxes") ?? "[]")[0].dimensions).toEqual([2, 0.8, 0.6]);
+  });
+
+  it("failed collider save rolls the form and preview back to canonical state", async () => {
+    routeFetch({
+      "/scene/collider": [reply({ detail: "artifact store unavailable" }, 500)],
+      "/scene": [reply({ scene: boxColliderScene() })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    const metricScene = await screen.findByTestId("metric-scene");
+    fireEvent.click(screen.getByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.change(screen.getByLabelText("Kích thước collider X (m)"), { target: { value: "2" } });
+    expect(JSON.parse(metricScene.getAttribute("data-boxes") ?? "[]")[0].dimensions).toEqual([2, 0.8, 0.6]);
+    fireEvent.click(screen.getByRole("button", { name: "Lưu collider" }));
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Kích thước collider X (m)")).toHaveValue(1));
+    expect(JSON.parse(metricScene.getAttribute("data-boxes") ?? "[]")[0].dimensions).toEqual([1, 0.8, 0.6]);
+  });
+
+  it("does not expose box edits for a convex-decomposition collider", async () => {
+    routeFetch({ "/scene": [reply({ scene: scene("rev-001", "CONFIRMED", "CONFIRMED", undefined, [0, 0, 0]) })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+
+    expect(await screen.findByText(/Hiện chỉ chỉnh được AABB\/OBB/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Kích thước collider X (m)")).toBeNull();
   });
 
   it("tách theo vật lỗi sau 3 lần: cho chọn chạy lại hoặc dùng hộp; chọn hộp gửi mode boxes", async () => {
