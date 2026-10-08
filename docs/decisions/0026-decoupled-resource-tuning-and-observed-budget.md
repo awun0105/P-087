@@ -82,6 +82,11 @@ song song có ích.
    lợi ích của chạy song song đến từ việc một job dùng CPU cho COLMAP trong khi job khác
    dùng GPU cho Brush; nhiều job cùng train trên một card chỉ chia nhau sức tính. Giá trị
    cuối cùng được chốt bằng phép đo thông lượng trên pod.
+10. **COLMAP dùng GPU cho trích đặc trưng và so khớp trên production** (owner chốt
+    2026-10-08, không làm phép so sánh CPU với GPU trước). Giá trị đặt theo deployment
+    bằng setting `PRODUCT_COLMAP_USE_GPU`, áp vào cấu hình job lúc tạo; file preset dùng
+    chung giữ `false` vì máy dev chạy COLMAP không có GPU. Bước `mapper` vẫn chạy trên
+    CPU. Không có cơ chế tự lùi về CPU.
 
 ## Hệ quả
 
@@ -95,6 +100,11 @@ song song có ích.
   vì 1,9 triệu và 1.760 px khi RAM là 16 GB.
 - Khi máy đông, job preset tối đa có thể chờ lâu vì cần khoảng 10,75 GB VRAM trống.
 - Trên máy không có giới hạn container, số đo RAM và số nhân không đổi.
+- Trong số đo local, trích đặc trưng và so khớp chiếm 51–64% thời gian COLMAP; phần này
+  chuyển sang GPU. Pose và điểm held-out của job mới sẽ lệch nhẹ so với các lượt chạy
+  CPU cũ vì SIFT trên GPU không cho đặc trưng giống hệt.
+- COLMAP dùng VRAM trong lúc job khác train Brush; lợi ích của chạy nhiều worker giảm
+  vì chỉ còn `mapper` chạy song song được mà không tranh GPU.
 
 ## Giới hạn đã biết
 
@@ -106,5 +116,8 @@ song song có ích.
   (một lượt đo: 5,19 GB RAM, 3,42 GB VRAM).
 - Chưa có số đo nào trên RTX 3090/4090 và chưa có số đo nào khi nhiều job chạy chung một
   card. Số worker ở quyết định 9 suy ra từ số đo trên laptop 12 nhân + T2000.
+- COLMAP chưa từng chạy với GPU trong dự án này, và image production chưa được build
+  thật. Chưa có số đo VRAM của COLMAP trên GPU nên ước lượng trước lượt chạy đầu chỉ
+  tính Brush.
 - Chưa kiểm trên pod RunPod thật việc `/proc/meminfo` và `os.cpu_count()` trả số của host.
   Cấu hình vCPU/RAM của pod lấy từ bảng giá RunPod đọc ngày 2026-10-08 và thay đổi theo host.

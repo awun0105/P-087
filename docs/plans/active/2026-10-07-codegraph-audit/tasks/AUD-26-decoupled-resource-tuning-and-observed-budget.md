@@ -120,6 +120,8 @@ Hai vấn đề đo máy trong container (đã kiểm trong source):
 `src/services/orchestration/processing/container_limits.py` (mới),
 `src/services/orchestration/processing/capability.py`, `scripts/gpu/gpu_plan.py`,
 `deploy/studio/worker.env.example`, `scripts/gpu/studio.env.example`,
+`src/services/orchestration/processing/config.py`, `src/config.py` (một setting),
+`scripts/kaggle/preflight.py`, `tests/test_reconstruction/test_rec03_colmap.py`,
 `tests/test_orchestration/test_container_limits.py` (mới), `tests/test_gpu/test_gpu_plan.py`,
 `src/api/studio/processing.py`, `src/api/studio/scenes.py`, `src/api/studio/assemblies.py`
 (chỉ dòng gọi `evaluate`), `src/services/orchestration/jobs/admission.py` (chỉ dòng import),
@@ -155,6 +157,7 @@ của người khác; nếu thấy cần sửa thì dừng và báo).
 | `warn_ratio`, `danger_ratio` | 0,75 / 0,92 | giữ nguyên, không thêm hệ số đệm nào |
 | RAM và số nhân worker báo cáo | theo `/proc/meminfo` và `os.cpu_count()` của host | lấy giá trị nhỏ nhất giữa host và giới hạn của container |
 | `STUDIO_WORKERS` trong file môi trường mẫu của production | `auto` | giá trị cụ thể theo loại pod (xem S4) |
+| `colmap.use_gpu` trong cấu hình job | luôn `false` (từ file preset) | theo setting `PRODUCT_COLMAP_USE_GPU` của deployment; production bật (xem S5) |
 
 Consumer phải kiểm lại vì ước lượng RAM giảm:
 
@@ -170,6 +173,9 @@ Consumer phải kiểm lại vì ước lượng RAM giảm:
   ghi timing. Script ở S1 đọc artifact của job để lấy frame thật; không sửa schema của AUD-15.
 - Xác nhận ngoại suy trên 546 frame cần owner chạy job thật trên pod 24 GB (xem Exit
   của S1). Việc này không chặn S2 và S3.
+- S5 độc lập về code với S1–S4; phép đo số worker của S4 phải chạy sau khi S5 đã bật.
+  Đoạn trích log khi COLMAP lỗi vì GPU dựa vào AUD-27.S1; chưa có AUD-27.S1 thì lỗi vẫn
+  hiện với mã `COLMAP_PROCESS_FAILED` như hiện tại.
 - S4 độc lập về code với S1–S3. Phần đo trên pod của S4 nên chạy cùng đợt thuê máy với
   phần đo của S1 để không thuê hai lần.
 
@@ -428,7 +434,7 @@ Giá trị đề xuất, suy ra từ số đo ở mục Baseline:
 
 | Pod | vCPU | RAM | `STUDIO_WORKERS` | Lý do |
 |---|---|---|---|---|
-| RTX 3090 | 16 | 125 GB | `3` | Một job train Brush trên GPU trong khi tối đa hai job khác chạy COLMAP trên CPU. Ba job ở bước nặng VRAM nhất (`scene_extract`, 3,42 GB) cộng lại khoảng 10 GB, còn chỗ cho một job preset tối đa. |
+| RTX 3090 | 16 | 125 GB | `3` | Một job train Brush trên GPU trong khi tối đa hai job khác chạy phần CPU của COLMAP (sau S5 là bước `mapper`). Ba job ở bước nặng VRAM nhất (`scene_extract`, 3,42 GB) cộng lại khoảng 10 GB, còn chỗ cho một job preset tối đa. |
 | RTX 4090 | 6 | 41 GB | `2` | Sáu vCPU chỉ đủ cho một job COLMAP chạy hết tốc lực; job thứ hai tận dụng GPU khi job đầu đang ở COLMAP. RAM 41 GB đủ cho hai job (mỗi job tối đa khoảng 5,2 GB đã đo). |
 
 Vì sao không dùng `auto`: `gpu_plan.plan` tính `auto` theo VRAM (4 worker trên card 24 GB
@@ -481,12 +487,93 @@ Tests: `tests/test_orchestration/test_container_limits.py`, `tests/test_gpu/test
 - [ ] (Owner, pod RunPod) Bảng bước 1 và kết quả bước 2 dán vào Result; số worker cuối
   cùng được ghi lại. Chưa có thì ghi UNVERIFIED, không tick.
 
+---
+
+## Sprint AUD-26.S5 — COLMAP dùng GPU cho trích đặc trưng và so khớp
+
+Quyết định của owner (2026-10-08): bật GPU cho hai bước đầu của COLMAP trên production,
+không làm phép so sánh CPU với GPU trước khi bật.
+
+**Input:** `processing/config.py` (`build_job_config`), `src/config.py`, hai nơi gọi ở
+lớp API, file môi trường mẫu của production, `scripts/kaggle/preflight.py`.
+**Output:** deployment production chạy `feature_extractor` và `sequential_matcher` trên
+GPU; máy dev giữ nguyên CPU; cấu hình của job ghi đúng giá trị đã dùng.
+**Contract:** giá trị `use_gpu` được quyết định lúc tạo job và nằm trong
+`JobProcessingConfig.colmap`, nên provenance và khóa resume phản ánh đúng thực tế.
+Worker không tự đổi giá trị này lúc chạy. Bước `mapper` không đổi.
+
+Vì sao không sửa thẳng file preset: `fixed.colmap.use_gpu` nằm trong
+`configs/product/processing_presets_v1.json`, file dùng chung cho mọi deployment. Máy dev
+chạy COLMAP trong container không có GPU (26 file log local đều có dòng
+"NVIDIA Driver was not detected"); bật ở đó sẽ làm COLMAP lỗi.
+
+Code đã có sẵn và không cần sửa: `_extraction_command` và `_matching_command` trong
+`colmap_runtime.py:112-145` đã truyền `--<prefix>.use_gpu` theo `config.use_gpu`;
+`capabilities()` đã kiểm cờ này tồn tại trong binary.
+
+Implement:
+
+1. `src/config.py`: thêm setting `product_colmap_use_gpu: bool = False`, đặt cạnh
+   `product_processing_config` (dòng 53). Biến môi trường tương ứng là `PRODUCT_COLMAP_USE_GPU`.
+2. `processing/config.py`, hàm `build_job_config`: thêm tham số chỉ nhận theo tên
+   `colmap_use_gpu: bool = False`. Trong dict `colmap=` của kết quả, đặt `"use_gpu": colmap_use_gpu`
+   sau `**presets.fixed.colmap` để ghi đè giá trị của file preset, giống cách `num_threads`
+   đang được ghi đè. Giữ nguyên `fixed.colmap.use_gpu: false` trong file preset.
+3. Hai nơi gọi `build_job_config` (`src/api/studio/scenes.py:181`,
+   `src/api/studio/assemblies.py:426`): truyền `colmap_use_gpu=deps.settings().product_colmap_use_gpu`.
+   Dùng CodeGraph kiểm còn nơi gọi nào khác; có thì truyền cùng cách.
+4. `deploy/studio/worker.env.example` và file môi trường mẫu của API production (nếu là
+   file riêng): thêm `PRODUCT_COLMAP_USE_GPU=true`. Giá trị này phải giống nhau ở API và
+   worker của cùng deployment; API là nơi tạo cấu hình job. `scripts/gpu/studio.env.example`
+   (local) thêm dòng đã comment `# PRODUCT_COLMAP_USE_GPU=false` kèm một câu giải thích.
+5. `scripts/kaggle/preflight.py`: thêm một bước kiểm không bắt buộc "COLMAP dùng GPU",
+   chỉ chạy khi `PRODUCT_COLMAP_USE_GPU` bật. Bước này chạy `feature_extractor` với
+   `use_gpu=1` trên vài ảnh nhỏ sinh tại chỗ trong thư mục tạm, và báo đạt khi mã thoát
+   là 0. Theo đúng khuôn của hàm `colmap()` ở dòng 46 và đăng ký vào danh sách ở dòng 131.
+6. Không thêm cơ chế tự lùi về CPU khi GPU lỗi. Nếu COLMAP lỗi vì GPU, job thất bại với
+   `COLMAP_PROCESS_FAILED` kèm đoạn trích log (AUD-27) để người vận hành thấy và sửa cấu hình.
+
+Ảnh hưởng tới các phần khác của task này:
+
+- **Ước lượng VRAM:** `estimate_gb` chỉ tính Brush; chưa có số đo VRAM của COLMAP trên
+  GPU nên không thêm hệ số. Sau lượt chạy đầu, peak VRAM của tool `preview` (gồm cả
+  COLMAP) tự đi vào `observed_budget`. Chạy script của S1 trên pod để ghi số này vào Result.
+- **Số worker (S4):** giữ giá trị khởi đầu 3 (pod 3090) và 2 (pod 4090). Sau khi bật GPU
+  cho COLMAP, chỉ còn `mapper` (6–8 phút trong số đo local) chạy song song được với Brush
+  của job khác mà không tranh GPU, nên lợi ích của nhiều worker giảm. Phép đo 1/2/3/4
+  worker ở S4 phải chạy với `PRODUCT_COLMAP_USE_GPU=true`.
+- **Kết quả khác bản CPU:** SIFT trên GPU cho đặc trưng không giống hệt bản CPU, nên pose
+  và điểm held-out của cùng một video sẽ lệch nhẹ so với các lượt cũ. Các job cũ không bị
+  ảnh hưởng. Khoảng tham chiếu của AUD-28 đang gồm toàn lượt chạy CPU; ghi chú điều này
+  khi thêm scene mới vào file tham chiếu.
+
+Không làm trong sprint này: không sửa `colmap_runtime.py`, không đổi file preset, không
+đổi `mapper`, không thêm thông số `use_gpu` vào bảng người dùng chỉnh được.
+
+Test:
+
+- `tests/test_orchestration/test_processing_config.py`: `build_job_config(...)` mặc định
+  cho `colmap["use_gpu"] is False`; với `colmap_use_gpu=True` cho `True`; hai kết quả có
+  checksum cấu hình khác nhau; `num_threads` không đổi giữa hai trường hợp.
+- `tests/test_reconstruction/test_rec03_colmap.py`: với `ColmapConfig(use_gpu=True)`, lệnh
+  `feature_extractor` và `sequential_matcher` có giá trị `1` ngay sau cờ `use_gpu`; lệnh
+  `mapper` không chứa cờ `use_gpu`.
+- `tests/test_api/test_studio_routes.py` hoặc `tests/integration/test_studio_processing_job.py`:
+  với setting bật, job tạo qua API có `colmap.use_gpu` là `True` trong cấu hình đã lưu.
+
+**Exit:**
+- [ ] Ba nhóm test pass; test COLMAP và test tạo job hiện có không đổi kỳ vọng.
+- [ ] Hai file môi trường mẫu đã cập nhật.
+- [ ] (Owner, pod RunPod) Preflight báo bước "COLMAP dùng GPU" đạt; một job hoàn tất với
+  `colmap.use_gpu = true`; thời gian ba bước COLMAP (từ `process.log`) và peak VRAM của
+  tool `preview` dán vào Result. Chưa có thì ghi UNVERIFIED, không tick.
+
 ## Verification và DoD
 
 ```bash
 .venv/bin/ruff check src/ tests/ scripts/resources/
 .venv/bin/ruff format --check src/ tests/ scripts/resources/
-.venv/bin/pytest tests/test_orchestration/test_container_limits.py tests/test_orchestration/test_resource_telemetry.py tests/test_orchestration/test_processing_config.py tests/test_orchestration/test_observed_budget.py tests/test_orchestration/test_resource_admission.py tests/test_gpu/test_gpu_plan.py tests/test_api/test_studio_routes.py tests/integration/test_studio_processing_job.py -q
+.venv/bin/pytest tests/test_orchestration/test_container_limits.py tests/test_orchestration/test_resource_telemetry.py tests/test_orchestration/test_processing_config.py tests/test_orchestration/test_observed_budget.py tests/test_orchestration/test_resource_admission.py tests/test_reconstruction/test_rec03_colmap.py tests/test_gpu/test_gpu_plan.py tests/test_api/test_studio_routes.py tests/integration/test_studio_processing_job.py -q
 .venv/bin/python scripts/resources/calibrate_resource_model.py
 ```
 
@@ -495,11 +582,11 @@ của script trên `runtime.db` là local integration; lượt chạy ≥ 1.000 
 đo số worker là GPU evidence do owner chạy trên pod. Mô phỏng phần cứng bằng
 `MachineCapability` giả và số đo trên T2000 không được ghi là nghiệm thu cho production.
 
-DONE khi cả bốn sprint tick đủ Exit. Các dòng "(Owner, pod RunPod)" của S1 và S4 được
+DONE khi cả năm sprint tick đủ Exit. Các dòng "(Owner, pod RunPod)" của S1, S4 và S5 được
 phép để UNVERIFIED kèm ghi chú cho tới đợt thuê máy đầu tiên.
 
 ## Result / Evidence
 
 Chưa triển khai. Mỗi sprint ghi: commit base, file thật sự sửa, lệnh và output, bảng
 của script (S1), bảng ma trận thực tế (S2), nguồn checksum (S3), output bước 0 và bảng
-đo số worker (S4), giới hạn còn lại.
+đo số worker (S4), thời gian COLMAP và peak VRAM khi bật GPU (S5), giới hạn còn lại.

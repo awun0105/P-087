@@ -116,7 +116,7 @@ canonical geometry. The existing sensor-package alignment path and REC-09 contra
 remain unchanged. Focused contracts plus REC-06/08/09 regressions, repo Ruff/format,
 contract mirror and CodeGraph pass. No BEV/ICP producer or held-out registration is
 qualified yet; those remain S2–S4 work.
-Active scope: 26 packages/87 sprints. AUD-16/ADR0017 (3 sprints) và AUD-25/ADR0025 (6 sprints) Deferred theo yêu cầu owner; không là dependency hoặc implementation work trong kế hoạch hiện tại.
+Active scope: 26 packages/88 sprints. AUD-16/ADR0017 (3 sprints) và AUD-25/ADR0025 (6 sprints) Deferred theo yêu cầu owner; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
 ## Outcome
 
@@ -222,12 +222,12 @@ BEV/ICP implementation hoặc independent-map/browser acceptance.
 | [AUD-23: Nén video trước upload](tasks/AUD-23-client-video-normalization.md) | P1 — EX-PRODUCT + EX-REC | REC-02/03/04/08/09, PRODUCT-02/04/08/09 | 5 |
 | [AUD-24: Unified upload và input resolution](tasks/AUD-24-unified-upload-and-input-resolution.md) | P1 — EX-PRODUCT + EX-REC | REC-02/03/06/08/09, PRODUCT-02/04/08/09 | 5 |
 | [AUD-25: Imported PLY/SOG continuation](tasks/AUD-25-imported-3dgs-continuation.md) | Deferred — không implement; EX-REC/SCENE/PRODUCT/SIM nếu mở lại | REC-04/05/06/09, SCENE-02/03/06/08, SIM-02/04/07, PRODUCT-02/04/06/08/09/10/11 | 6 |
-| [AUD-26: Decoupled resource tuning](tasks/AUD-26-decoupled-resource-tuning-and-observed-budget.md) | P1 — EX-PRODUCT + EX-REC; resource calibration, container limits, worker count | REC-02/03/04, PRODUCT-02/08/09 | 4 |
+| [AUD-26: Decoupled resource tuning](tasks/AUD-26-decoupled-resource-tuning-and-observed-budget.md) | P1 — EX-PRODUCT + EX-REC; resource calibration, container limits, worker count, COLMAP GPU | REC-02/03/04, PRODUCT-02/08/09 | 5 |
 | [AUD-27: Structured error diagnostics](tasks/AUD-27-structured-error-diagnostics-and-redacted-excerpts.md) | P1 — EX-REC + EX-PRODUCT; failure diagnostics | REC-02/03/04, PRODUCT-02/08/09 | 3 |
 | [AUD-28: Benchmark-derived verdicts](tasks/AUD-28-benchmark-derived-verdicts-and-rule-based-insights.md) | P2 — EX-PRODUCT + EX-REC; evaluation quality | REC-02/06, PRODUCT-02/08/09 | 3 |
 
-Active: **26 work packages / 87 sprint**. AUD-16 (3 sprints) và AUD-25 (6 sprints) Deferred giữ để
-tham khảo; tổng tài liệu có 28 packages/96 sprint definitions. Mỗi sprint có Input, Output, Contract,
+Active: **26 work packages / 88 sprint**. AUD-16 (3 sprints) và AUD-25 (6 sprints) Deferred giữ để
+tham khảo; tổng tài liệu có 28 packages/97 sprint definitions. Mỗi sprint có Input, Output, Contract,
 implementation steps, Tests và Exit; mỗi task có dependencies, verification/DoD
 và Result/Evidence. P2 là extension triển khai sau nền tảng P0/P1, không là
 permanent exclusion do PRD cũ. Không mặc định enable odometry/anonymizer mọi job.
@@ -286,9 +286,9 @@ Triển khai theo dependency của từng sprint. AUD number là identifier, kh�
 execution order; không cần xong toàn bộ một task mới được chuyển sang task khác.
 Trong bảng, `S1–S3` là ba sprint liên tiếp, thực hiện theo thứ tự tăng dần.
 Thứ tự mặc định gồm đủ **80 active sprint, mỗi sprint một lần**; không có AUD-25.
-AUD-26/27/28 (10 sprint, thêm ngày 2026-10-08) chưa nằm trong bảng; thứ tự của chúng:
-AUD-27.S1–S2 → AUD-26.S1–S4 → AUD-28.S1–S3 → AUD-27.S3 (S3 chờ `runner.py` hết thay đổi chưa commit).
-Phần đo trên pod RunPod của AUD-26.S1 và AUD-26.S4 làm trong cùng một đợt thuê máy:
+AUD-26/27/28 (11 sprint, thêm ngày 2026-10-08) chưa nằm trong bảng; thứ tự của chúng:
+AUD-27.S1–S2 → AUD-26.S1–S3 → AUD-26.S5 → AUD-26.S4 → AUD-28.S1–S3 → AUD-27.S3 (S3 chờ `runner.py` hết thay đổi chưa commit).
+Phần đo trên pod RunPod của AUD-26.S1, S4 và S5 làm trong cùng một đợt thuê máy:
 
 | Đợt | Thứ tự sprint | Kết quả cần đạt |
 |---|---|---|
