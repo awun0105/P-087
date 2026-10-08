@@ -14,6 +14,7 @@ import os
 import socket
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Event, Thread
 from typing import Literal
 from uuid import uuid4
 
@@ -23,10 +24,27 @@ from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.input_assembly import GaussianViewFormat
 from src.models.contracts.manifests import StageId
 from src.services.orchestration.artifacts import ArtifactResolver, StreamingPublication
+from src.services.orchestration.artifacts.errors import (
+    ArtifactAlreadyExistsError,
+    ArtifactChecksumError,
+    ArtifactNotFoundError,
+    ArtifactStoreError,
+)
 from src.services.orchestration.auth.models import DisplayName, Role
+from src.services.orchestration.jobs.admission import (
+    OperationAdmissionRequest,
+    OperationAdmissionResult,
+    ResourceAdmission,
+)
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.uploads.models import UploadRecord
-from src.services.reconstruction import extract_member, package_splat
+from src.services.reconstruction import extract_member, package_splat, validate_sog_runtime
+from src.services.reconstruction.adapters.voxel_runtime import GeometryError
+from src.services.reconstruction.inputs.detect import (
+    InputRejectedError,
+    detect_input,
+    validate_sog_bundle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +52,16 @@ ImportStatus = Literal["PACKAGING", "READY", "FAILED"]
 ImportOperationStatus = Literal["QUEUED", "WAITING", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"]
 _ANONYMOUS_REQUESTER = "__anonymous__"
 _IMPORT_LEASE_SECONDS = 300
+_IMPORT_HEARTBEAT_SECONDS = 20.0
+ImportFailureCode = Literal[
+    "invalid_source",
+    "source_unavailable",
+    "runtime_failure",
+    "publication_failure",
+    "packaging_failure",
+    "resource_conflict",
+    "resource_wait",
+]
 
 
 class ImportOperationRecord(BaseModel):
@@ -51,6 +79,7 @@ class ImportOperationRecord(BaseModel):
     status: ImportOperationStatus
     attempt: int = Field(ge=0)
     owner_id: str | None = None
+    lease_token: str | None = None
     fencing_token: int = Field(ge=0)
     lease_expires_at: datetime | None = None
     heartbeat_at: datetime | None = None
@@ -58,6 +87,8 @@ class ImportOperationRecord(BaseModel):
     updated_at: datetime
     delivery_ref: ProductArtifactRef | None = None
     error: str | None = None
+    failure_code: ImportFailureCode | None = None
+    retryable: bool | None = None
 
     def projection(self) -> ImportOperationProjection:
         return ImportOperationProjection(
@@ -65,6 +96,8 @@ class ImportOperationRecord(BaseModel):
             status=self.status,
             attempt=self.attempt,
             error=self.error,
+            failure_code=self.failure_code,
+            retryable=self.retryable,
             created_at=self.created_at,
             updated_at=self.updated_at,
         )
@@ -79,6 +112,8 @@ class ImportOperationProjection(BaseModel):
     status: ImportOperationStatus
     attempt: int = Field(ge=0)
     error: str | None = None
+    failure_code: ImportFailureCode | None = None
+    retryable: bool | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -115,10 +150,18 @@ class ImportNotFoundError(LookupError):
 class ImportService:
     """Mỗi request một instance; state nằm ở DB + artifact store."""
 
-    def __init__(self, database: RuntimeDatabase, resolver: ArtifactResolver, workspace_root: Path) -> None:
+    def __init__(
+        self,
+        database: RuntimeDatabase,
+        resolver: ArtifactResolver,
+        workspace_root: Path,
+        *,
+        max_uncompressed_bytes: int | None = None,
+    ) -> None:
         self.database = database
         self.resolver = resolver
         self.workspace_root = workspace_root
+        self.max_uncompressed_bytes = max_uncompressed_bytes
         self._legacy_recovery_done = False
 
     @staticmethod
@@ -315,6 +358,8 @@ class ImportService:
         status: Literal["READY", "FAILED"],
         delivery_ref: ProductArtifactRef | None = None,
         error: str | None = None,
+        failure_code: ImportFailureCode | None = None,
+        retryable: bool | None = None,
     ) -> ImportedScene:
         now = datetime.now(UTC)
         operation_status: ImportOperationStatus = "SUCCEEDED" if status == "READY" else "FAILED"
@@ -322,11 +367,14 @@ class ImportService:
             update={
                 "status": operation_status,
                 "owner_id": None,
+                "lease_token": None,
                 "lease_expires_at": None,
                 "heartbeat_at": now,
                 "updated_at": now,
                 "delivery_ref": delivery_ref,
                 "error": error,
+                "failure_code": failure_code,
+                "retryable": retryable,
             }
         )
         updated = record.model_copy(
@@ -352,7 +400,12 @@ class ImportService:
             if stored_import.status != record.status or (
                 stored_operation.operation_id != operation.operation_id
                 or stored_operation.fencing_token != operation.fencing_token
-                or stored_operation.status not in {"QUEUED", "RUNNING"}
+                or stored_operation.owner_id != operation.owner_id
+                or stored_operation.lease_token != operation.lease_token
+                or stored_operation.attempt != operation.attempt
+                or stored_operation.status != "RUNNING"
+                or stored_operation.lease_expires_at is None
+                or stored_operation.lease_expires_at <= now
             ):
                 raise RuntimeStateConflictError("scene import operation đã đổi revision")
             tx.execute(
@@ -374,6 +427,180 @@ class ImportService:
                 ),
             )
         return updated
+
+    @staticmethod
+    def _lease_matches(stored: ImportOperationRecord, claimed: ImportOperationRecord, now: datetime) -> bool:
+        return (
+            stored.operation_id == claimed.operation_id
+            and stored.fencing_token == claimed.fencing_token
+            and stored.owner_id == claimed.owner_id
+            and stored.lease_token == claimed.lease_token
+            and stored.status == "RUNNING"
+            and stored.lease_expires_at is not None
+            and stored.lease_expires_at > now
+        )
+
+    def _touch_lease(self, claimed: ImportOperationRecord) -> bool:
+        now = datetime.now(UTC)
+        with self.database.transaction(write=True) as tx:
+            row = tx.execute(
+                "SELECT payload FROM r2s_import_operations WHERE operation_id=?" + tx.lock_suffix(),
+                (claimed.operation_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            stored = ImportOperationRecord.model_validate_json(row[0])
+            if not self._lease_matches(stored, claimed, now):
+                return False
+            touched = stored.model_copy(
+                update={
+                    "heartbeat_at": now,
+                    "lease_expires_at": now + timedelta(seconds=_IMPORT_LEASE_SECONDS),
+                    "updated_at": now,
+                }
+            )
+            tx.execute(
+                "UPDATE r2s_import_operations SET updated_at=?, lease_expires_at=?, heartbeat_at=?, payload=? "
+                "WHERE operation_id=?",
+                (
+                    touched.updated_at.isoformat(),
+                    touched.lease_expires_at.isoformat() if touched.lease_expires_at else None,
+                    touched.heartbeat_at.isoformat() if touched.heartbeat_at else None,
+                    touched.model_dump_json(),
+                    claimed.operation_id,
+                ),
+            )
+        return True
+
+    def _fail_orphan(self, claimed: ImportOperationRecord) -> bool:
+        """Terminate a corrupt operation whose parent import row disappeared."""
+        now = datetime.now(UTC)
+        failed = claimed.model_copy(
+            update={
+                "status": "FAILED",
+                "owner_id": None,
+                "lease_token": None,
+                "lease_expires_at": None,
+                "heartbeat_at": now,
+                "updated_at": now,
+                "error": "Scene import record is missing.",
+                "failure_code": "invalid_source",
+                "retryable": False,
+            }
+        )
+        with self.database.transaction(write=True) as tx:
+            row = tx.execute(
+                "SELECT payload FROM r2s_import_operations WHERE operation_id=?" + tx.lock_suffix(),
+                (claimed.operation_id,),
+            ).fetchone()
+            if row is None or not self._lease_matches(ImportOperationRecord.model_validate_json(row[0]), claimed, now):
+                return False
+            tx.execute(
+                "UPDATE r2s_import_operations SET status=?, updated_at=?, owner_id=NULL, lease_expires_at=NULL, "
+                "heartbeat_at=?, payload=? WHERE operation_id=?",
+                (
+                    failed.status,
+                    failed.updated_at.isoformat(),
+                    failed.heartbeat_at.isoformat() if failed.heartbeat_at else None,
+                    failed.model_dump_json(),
+                    claimed.operation_id,
+                ),
+            )
+        return True
+
+    def _start_heartbeat(
+        self,
+        claimed: ImportOperationRecord,
+        admission: ResourceAdmission,
+        request_box: list[OperationAdmissionRequest | None],
+        lease_lost: Event,
+    ) -> tuple[Event, Thread]:
+        stop = Event()
+
+        def beat() -> None:
+            while not stop.wait(_IMPORT_HEARTBEAT_SECONDS):
+                if not self._touch_lease(claimed):
+                    lease_lost.set()
+                    logger.warning(
+                        "Import lease mất quyền import=%s fencing=%s", claimed.import_id, claimed.fencing_token
+                    )
+                    return
+                request = request_box[0]
+                if request is not None and not admission.touch_operation(request):
+                    lease_lost.set()
+                    logger.warning(
+                        "Import reservation mất quyền import=%s fencing=%s",
+                        claimed.import_id,
+                        claimed.fencing_token,
+                    )
+                    return
+
+        thread = Thread(target=beat, name=f"import-lease-{claimed.import_id[-8:]}", daemon=True)
+        thread.start()
+        return stop, thread
+
+    def _wait_for_resources(self, claimed: ImportOperationRecord, result: OperationAdmissionResult) -> bool:
+        now = datetime.now(UTC)
+        details = [f"{resource} ({result.reasons.get(resource, 'unmeasured')})" for resource in result.waiting_on]
+        error = (
+            "Worker đang chờ tài nguyên: " + ", ".join(details) + "."
+            if details
+            else "Worker đang chờ để nhận scene 3DGS."
+        )
+        waiting = claimed.model_copy(
+            update={
+                "status": "WAITING",
+                "owner_id": None,
+                "lease_token": None,
+                "lease_expires_at": None,
+                "heartbeat_at": now,
+                "updated_at": now,
+                "error": error,
+                "failure_code": "resource_wait",
+                "retryable": None,
+            }
+        )
+        with self.database.transaction(write=True) as tx:
+            row = tx.execute(
+                "SELECT payload FROM r2s_import_operations WHERE operation_id=?" + tx.lock_suffix(),
+                (claimed.operation_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            stored = ImportOperationRecord.model_validate_json(row[0])
+            if not self._lease_matches(stored, claimed, now):
+                return False
+            tx.execute(
+                "UPDATE r2s_import_operations SET status=?, updated_at=?, owner_id=NULL, lease_expires_at=NULL, "
+                "heartbeat_at=?, payload=? WHERE operation_id=?",
+                (
+                    waiting.status,
+                    waiting.updated_at.isoformat(),
+                    waiting.heartbeat_at.isoformat() if waiting.heartbeat_at else None,
+                    waiting.model_dump_json(),
+                    claimed.operation_id,
+                ),
+            )
+        return True
+
+    def _start_attempt(self, claimed: ImportOperationRecord) -> ImportOperationRecord | None:
+        now = datetime.now(UTC)
+        with self.database.transaction(write=True) as tx:
+            row = tx.execute(
+                "SELECT payload FROM r2s_import_operations WHERE operation_id=?" + tx.lock_suffix(),
+                (claimed.operation_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            stored = ImportOperationRecord.model_validate_json(row[0])
+            if not self._lease_matches(stored, claimed, now):
+                return None
+            started = stored.model_copy(update={"attempt": stored.attempt + 1, "updated_at": now, "error": None})
+            tx.execute(
+                "UPDATE r2s_import_operations SET attempt=?, updated_at=?, payload=? WHERE operation_id=?",
+                (started.attempt, started.updated_at.isoformat(), started.model_dump_json(), claimed.operation_id),
+            )
+        return started
 
     def recover_legacy_packaging(self) -> int:
         """Queue old PACKAGING records once; never enqueue READY or already-live operations."""
@@ -422,8 +649,8 @@ class ImportService:
         self._legacy_recovery_done = True
         return recovered
 
-    def process_next(self, gpu_index: int | None, worker_id: str | None = None) -> bool:
-        """Claim and process one durable import; called only by the standalone worker."""
+    def process_next(self, *, admission: ResourceAdmission, worker_id: str | None = None) -> bool:
+        """Claim one durable import, reserve its resources, then package and commit."""
         if not self._legacy_recovery_done:
             self.recover_legacy_packaging()
             self._legacy_recovery_done = True
@@ -432,7 +659,9 @@ class ImportService:
         with self.database.transaction(write=True) as tx:
             row = tx.execute(
                 "SELECT payload FROM r2s_import_operations WHERE status IN ('QUEUED','WAITING') "
-                "ORDER BY created_at, operation_id LIMIT 1" + tx.lock_suffix()
+                "OR (status='RUNNING' AND (lease_expires_at IS NULL OR lease_expires_at<=?)) "
+                "ORDER BY created_at, operation_id LIMIT 1" + tx.lock_suffix(),
+                (now.isoformat(),),
             ).fetchone()
             if row is None:
                 return False
@@ -440,20 +669,24 @@ class ImportService:
             claimed = operation.model_copy(
                 update={
                     "status": "RUNNING",
-                    "attempt": operation.attempt + 1,
                     "owner_id": worker_id,
+                    "lease_token": uuid4().hex,
                     "fencing_token": operation.fencing_token + 1,
                     "lease_expires_at": now + timedelta(seconds=_IMPORT_LEASE_SECONDS),
                     "heartbeat_at": now,
                     "updated_at": now,
+                    "error": None,
+                    "failure_code": None,
+                    "retryable": None,
                 }
             )
             cursor = tx.execute(
-                "UPDATE r2s_import_operations SET status=?, attempt=?, updated_at=?, owner_id=?, fencing_token=?, "
-                "lease_expires_at=?, heartbeat_at=?, payload=? WHERE operation_id=? AND status IN ('QUEUED','WAITING')",
+                "UPDATE r2s_import_operations SET status=?, updated_at=?, owner_id=?, fencing_token=?, "
+                "lease_expires_at=?, heartbeat_at=?, payload=? WHERE operation_id=? AND "
+                "(status IN ('QUEUED','WAITING') OR (status='RUNNING' AND "
+                "(lease_expires_at IS NULL OR lease_expires_at<=?)))",
                 (
                     claimed.status,
-                    claimed.attempt,
                     claimed.updated_at.isoformat(),
                     claimed.owner_id,
                     claimed.fencing_token,
@@ -461,6 +694,7 @@ class ImportService:
                     claimed.heartbeat_at.isoformat() if claimed.heartbeat_at else None,
                     claimed.model_dump_json(),
                     claimed.operation_id,
+                    now.isoformat(),
                 ),
             )
             if cursor.rowcount != 1:
@@ -471,44 +705,261 @@ class ImportService:
             upload_row = tx.execute(
                 "SELECT payload FROM r2s_uploads WHERE upload_id=?", (claimed.upload_id,)
             ).fetchone()
-        if import_row is None:
-            return True
-        record = ImportedScene.model_validate_json(import_row[0])
-        if record.status == "READY" and record.delivery_ref is not None:
-            self._finish(record, claimed, status="READY", delivery_ref=record.delivery_ref)
-            return True
-        if record.status == "FAILED":
-            self._finish(record, claimed, status="FAILED", error=record.error)
-            return True
-        if upload_row is None:
-            self._finish(record, claimed, status="FAILED", error="Không còn file nguồn; hãy tải lại scene 3DGS.")
-            return True
-        upload = UploadRecord.model_validate_json(upload_row[0])
-        if upload.checksum != claimed.upload_checksum or upload.upload_id != claimed.upload_id:
-            self._finish(record, claimed, status="FAILED", error="Checksum file nguồn đã thay đổi; cần tải lại scene.")
-            return True
-        self.package(claimed.import_id, upload, claimed.gpu_index if claimed.gpu_index is not None else gpu_index)
-        return True
 
-    def package(self, import_id: str, upload: UploadRecord, gpu_index: int | None) -> ImportedScene:
-        """Package PLY as SOG or preserve uploaded SOG bytes; publish before committing READY."""
+        request_box: list[OperationAdmissionRequest | None] = [None]
+        lease_lost = Event()
+        heartbeat_stop, heartbeat_thread = self._start_heartbeat(claimed, admission, request_box, lease_lost)
+        reserved = False
+        request: OperationAdmissionRequest | None = None
+        finish_operation = claimed
+        try:
+            if import_row is None:
+                self._fail_orphan(claimed)
+                return True
+            record = ImportedScene.model_validate_json(import_row[0])
+            if record.status == "READY" and record.delivery_ref is not None:
+                self.resolver.require(record.delivery_ref)
+                return self._finish(record, claimed, status="READY", delivery_ref=record.delivery_ref).status == "READY"
+            if record.status == "FAILED":
+                self._finish(
+                    record,
+                    claimed,
+                    status="FAILED",
+                    error=record.error,
+                    failure_code="packaging_failure",
+                    retryable=False,
+                )
+                return True
+            if upload_row is None:
+                self._finish(
+                    record,
+                    claimed,
+                    status="FAILED",
+                    error="Không còn file nguồn; hãy tải lại scene 3DGS.",
+                    failure_code="source_unavailable",
+                    retryable=False,
+                )
+                return True
+            upload = UploadRecord.model_validate_json(upload_row[0])
+            if upload.checksum != claimed.upload_checksum or upload.upload_id != claimed.upload_id:
+                self._finish(
+                    record,
+                    claimed,
+                    status="FAILED",
+                    error="Checksum file nguồn đã thay đổi; cần tải lại scene.",
+                    failure_code="invalid_source",
+                    retryable=False,
+                )
+                return True
+            if record.input_kind != upload.input_kind or claimed.packaging_config_checksum != self._config_checksum(
+                record.input_kind, claimed.gpu_index
+            ):
+                self._finish(
+                    record,
+                    claimed,
+                    status="FAILED",
+                    error="Cấu hình hoặc loại file import đã thay đổi; cần tạo yêu cầu mới.",
+                    failure_code="invalid_source",
+                    retryable=False,
+                )
+                return True
+            source = self.resolver.require_uri(upload.artifact_uri, upload.checksum)
+            detection = detect_input(source, self._uncompressed_limit(upload))
+            if detection.kind != record.input_kind.value:
+                self._finish(
+                    record,
+                    claimed,
+                    status="FAILED",
+                    error="Nội dung file nguồn không khớp với loại đã nhận diện; hãy tải lại scene.",
+                    failure_code="invalid_source",
+                    retryable=False,
+                )
+                return True
+            evidence = detection.gaussian or detection.sog
+            if evidence is None:
+                raise InputRejectedError("source has no validated Gaussian count")
+            gaussian_count = evidence.gaussian_count
+            gpu_required = record.input_kind != GaussianViewFormat.SOG and claimed.gpu_index is not None
+            profile = admission.operation_profile_for_import(
+                gaussian_count=gaussian_count,
+                source_size_bytes=upload.size_bytes,
+                gpu_required=gpu_required,
+            )
+            request = OperationAdmissionRequest(
+                operation_kind="import_package",
+                operation_id=claimed.operation_id,
+                parent_kind="import",
+                parent_id=claimed.import_id,
+                input_checksum=claimed.upload_checksum,
+                config_checksum=claimed.packaging_config_checksum,
+                resources=profile,
+                lease_token=claimed.lease_token,
+                lease_generation=claimed.fencing_token,
+            )
+            result = admission.admit_operation(request)
+            if result.status != "admitted":
+                if result.status == "identity_conflict":
+                    self._finish(
+                        record,
+                        claimed,
+                        status="FAILED",
+                        error="Operation admission phát hiện input/config không nhất quán.",
+                        failure_code="resource_conflict",
+                        retryable=False,
+                    )
+                    return True
+                self._wait_for_resources(claimed, result)
+                return False
+            request_box[0] = request
+            reserved = True
+            running = self._start_attempt(claimed)
+            if running is None:
+                return True
+            finish_operation = running
+            self.package(
+                claimed.import_id,
+                upload,
+                claimed.gpu_index,
+                operation=running,
+                lease_lost=lease_lost,
+            )
+            return True
+        except (ArtifactNotFoundError, ArtifactChecksumError) as error:
+            if import_row is None:
+                self._fail_orphan(claimed)
+                return True
+            logger.warning(
+                "Import source validation failed import=%s cause=%s", claimed.import_id, type(error).__name__
+            )
+            record = ImportedScene.model_validate_json(import_row[0])
+            self._finish(
+                record,
+                finish_operation,
+                status="FAILED",
+                error="File nguồn không còn khớp bản đã tải; hãy tải lại scene 3DGS.",
+                failure_code="invalid_source",
+                retryable=False,
+            )
+            return True
+        except InputRejectedError as error:
+            if import_row is None:
+                self._fail_orphan(claimed)
+                return True
+            logger.info("Import source rejected import=%s cause=%s", claimed.import_id, type(error).__name__)
+            record = ImportedScene.model_validate_json(import_row[0])
+            self._finish(
+                record,
+                finish_operation,
+                status="FAILED",
+                error="File nguồn bị hỏng hoặc vượt giới hạn; hãy kiểm tra file rồi tải lại.",
+                failure_code="invalid_source",
+                retryable=False,
+            )
+            return True
+        except RuntimeStateConflictError:
+            logger.info(
+                "Import result fenced after lease change import=%s fencing=%s",
+                claimed.import_id,
+                claimed.fencing_token,
+            )
+            return True
+        except Exception as error:  # noqa: BLE001 - operation boundary stores only safe typed diagnostics.
+            if import_row is None:
+                logger.warning("Import worker failed import=%s cause=%s", claimed.import_id, type(error).__name__)
+                self._fail_orphan(claimed)
+                return True
+            logger.warning("Import worker failed import=%s cause=%s", claimed.import_id, type(error).__name__)
+            record = ImportedScene.model_validate_json(import_row[0])
+            self._finish(
+                record,
+                finish_operation,
+                status="FAILED",
+                error="Không chuẩn bị được scene 3DGS; kiểm tra worker rồi thử lại.",
+                failure_code="source_unavailable" if isinstance(error, ArtifactStoreError) else "packaging_failure",
+                retryable=isinstance(error, ArtifactStoreError),
+            )
+            return True
+        finally:
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=_IMPORT_HEARTBEAT_SECONDS + 1)
+            if reserved and request is not None:
+                admission.release_operation(request)
+
+    def _uncompressed_limit(self, upload: UploadRecord) -> int:
+        return self.max_uncompressed_bytes or max(upload.size_bytes * 2, 1)
+
+    def package(
+        self,
+        import_id: str,
+        upload: UploadRecord,
+        gpu_index: int | None,
+        *,
+        operation: ImportOperationRecord,
+        lease_lost: Event,
+    ) -> ImportedScene:
+        """Package verified PLY/SOG to SOG and commit READY under the current lease."""
         record = self.get(import_id)
         if record.status != "PACKAGING":
             return record
-        operation = self._operation_record(import_id)
         workspace = self.workspace_root / import_id / uuid4().hex
         try:
             source = self.resolver.require_uri(upload.artifact_uri, upload.checksum)
+            workspace.mkdir(parents=True, exist_ok=False)
+            max_uncompressed_bytes = self._uncompressed_limit(upload)
+            source_detection = detect_input(source, max_uncompressed_bytes)
+            if source_detection.kind != record.input_kind.value:
+                raise InputRejectedError("source kind changed after admission")
             if record.input_kind == GaussianViewFormat.SOG:
-                sog = source
+                sog = workspace / "source.sog"
+                with source.open("rb") as source_stream, sog.open("xb") as target:
+                    while chunk := source_stream.read(1 << 20):
+                        target.write(chunk)
+                if self._checksum_file(sog) != upload.checksum:
+                    raise InputRejectedError("source SOG checksum changed while staging")
+                sog_detection = validate_sog_bundle(sog, max_uncompressed_bytes)
+                assert sog_detection.sog is not None
+                expected_count = sog_detection.sog.gaussian_count
+                expected_sh_bands = sog_detection.sog.sh_degree
             else:
-                workspace.mkdir(parents=True, exist_ok=False)
                 if record.input_kind == GaussianViewFormat.PLY_COLMAP:
-                    member = upload.detection.ply_member if upload.detection else None
+                    member = source_detection.ply_member
                     if member is None:
-                        raise SceneImportError("Upload ZIP thiếu thông tin file PLY đã nhận diện")
-                    source = extract_member(source, member, workspace / "input.ply")
-                sog = package_splat(source, workspace / "sog", gpu_index)
+                        raise InputRejectedError("ZIP source does not have one validated Gaussian PLY member")
+                    source_ply = extract_member(
+                        source,
+                        member,
+                        workspace / "input.ply",
+                        max_uncompressed_bytes=max_uncompressed_bytes,
+                    )
+                    if self._checksum_file(source) != upload.checksum:
+                        raise InputRejectedError("source ZIP checksum changed while extracting")
+                else:
+                    source_ply = workspace / "input.ply"
+                    with source.open("rb") as source_stream, source_ply.open("xb") as target:
+                        while chunk := source_stream.read(1 << 20):
+                            target.write(chunk)
+                if source_detection.gaussian is None:
+                    raise InputRejectedError("PLY source lacks validated Gaussian inventory")
+                if record.input_kind == GaussianViewFormat.PLY and self._checksum_file(source_ply) != upload.checksum:
+                    raise InputRejectedError("source PLY checksum changed while staging")
+                expected_count = source_detection.gaussian.gaussian_count
+                expected_sh_bands = source_detection.gaussian.sh_degree
+                sog = package_splat(source_ply, workspace / "sog", gpu_index)
+                sog_detection = validate_sog_bundle(sog, max_uncompressed_bytes)
+                if (
+                    sog_detection.sog is None
+                    or sog_detection.sog.gaussian_count != expected_count
+                    or sog_detection.sog.sh_degree != expected_sh_bands
+                ):
+                    raise InputRejectedError("Packaged SOG inventory differs from the PLY source")
+            validate_sog_runtime(
+                sog,
+                workspace / "runtime-validation",
+                expected_count=expected_count,
+                expected_sh_bands=expected_sh_bands,
+            )
+            if lease_lost.is_set():
+                raise RuntimeStateConflictError("scene import lease or resource reservation expired")
             checksum = self._checksum_file(sog)
             digest = checksum.removeprefix("sha256:")
             uri = f"artifact://jobs/{import_id}/import/{digest}.sog"
@@ -526,27 +977,78 @@ class ImportService:
                     "upload_checksum": upload.checksum,
                 },
             )
-            publication = StreamingPublication(self.resolver, uri, max_bytes=max(1, sog.stat().st_size))
-            try:
-                with sog.open("rb") as source_stream:
-                    while chunk := source_stream.read(1 << 20):
-                        publication.write(chunk)
-                if publication.commit() != checksum:
-                    raise ValueError("Published SOG checksum changed while copying")
-            except Exception:
-                publication.abort()
-                raise
+            self._publish_or_reuse(sog, uri, checksum, max_uncompressed_bytes)
         except RuntimeStateConflictError:
             raise
-        except Exception as error:  # noqa: BLE001 - process boundary includes conversion and remote publication failures.
+        except GeometryError as error:
+            logger.warning("Import %s runtime failed cause=%s", import_id, type(error).__name__)
+            return self._finish(
+                record,
+                operation,
+                status="FAILED",
+                error="Worker không thể đọc hoặc nén scene 3DGS; kiểm tra runtime rồi thử lại.",
+                failure_code="runtime_failure",
+                retryable=True,
+            )
+        except (InputRejectedError, ValueError) as error:
+            logger.warning("Import %s input/package validation failed cause=%s", import_id, type(error).__name__)
+            return self._finish(
+                record,
+                operation,
+                status="FAILED",
+                error="File nguồn hoặc SOG kết quả không hợp lệ; hãy kiểm tra file và thử lại.",
+                failure_code="invalid_source" if isinstance(error, InputRejectedError) else "packaging_failure",
+                retryable=False,
+            )
+        except ArtifactStoreError as error:
+            logger.warning("Import %s publication failed cause=%s", import_id, type(error).__name__)
+            return self._finish(
+                record,
+                operation,
+                status="FAILED",
+                error="Chưa lưu được bản xem scene; có thể thử lại sau.",
+                failure_code="publication_failure",
+                retryable=True,
+            )
+        except Exception as error:  # noqa: BLE001 - external runtime and publication boundaries are typed below.
             logger.warning("Import %s packaging failed cause=%s", import_id, type(error).__name__)
             return self._finish(
                 record,
                 operation,
                 status="FAILED",
-                error="Không chuẩn bị được scene 3DGS; kiểm file nguồn và cấu hình worker rồi thử lại.",
+                error="Không chuẩn bị được scene 3DGS; kiểm tra worker rồi thử lại.",
+                failure_code="runtime_failure",
+                retryable=True,
             )
+        if lease_lost.is_set():
+            raise RuntimeStateConflictError("scene import lease or resource reservation expired before READY")
         return self._finish(record, operation, status="READY", delivery_ref=reference, error=None)
+
+    def _publish_or_reuse(self, sog: Path, uri: str, checksum: str, max_bytes: int) -> None:
+        existing = self.resolver.locate(uri, fresh=True)
+        if existing is not None:
+            if self._checksum_file(existing) != checksum:
+                raise ArtifactChecksumError("existing immutable SOG artifact has a different checksum")
+            self.resolver.require_uri(uri, checksum)
+            self.resolver.published(uri)
+            return
+        try:
+            publication = StreamingPublication(self.resolver, uri, max_bytes=max(1, max_bytes))
+        except ArtifactAlreadyExistsError:
+            self.resolver.require_uri(uri, checksum)
+            return
+        try:
+            with sog.open("rb") as source_stream:
+                while chunk := source_stream.read(1 << 20):
+                    publication.write(chunk)
+            if publication.commit() != checksum:
+                raise ArtifactChecksumError("published SOG checksum changed while copying")
+        except ArtifactAlreadyExistsError:
+            publication.abort()
+            self.resolver.require_uri(uri, checksum)
+        except Exception:
+            publication.abort()
+            raise
 
     def content_path(self, import_id: str) -> Path:
         """Đường dẫn cục bộ SOG đã kiểm checksum (kéo từ kho file nếu cần)."""

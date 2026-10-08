@@ -621,6 +621,25 @@ def test_duplicate_operation_admission_is_fenced_and_release_is_idempotent(
     assert _reservations(gate) == {}
 
 
+def test_import_profile_scales_with_gaussian_count_and_marks_heuristic(tmp_path: Path) -> None:
+    _, _, gate = _queued(tmp_path)
+
+    gpu_profile = gate.operation_profile_for_import(
+        gaussian_count=1_000_000,
+        source_size_bytes=1_000_000_000,
+        gpu_required=True,
+    )
+    assert gpu_profile.required_gb == {"vram": 1.9, "ram": 2.6, "disk": 2.0}
+    assert gpu_profile.danger_ratio == 0.92 and gpu_profile.measured is False and gpu_profile.gpu_required
+
+    cpu_profile = gate.operation_profile_for_import(
+        gaussian_count=1_000_000,
+        source_size_bytes=1_000_000_000,
+        gpu_required=False,
+    )
+    assert cpu_profile.required_gb["vram"] == 0.0 and not cpu_profile.gpu_required
+
+
 def test_expired_operation_lease_cannot_touch_or_release_new_generation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -30,6 +30,8 @@ _SH_REST = {0: 0, 9: 1, 24: 2, 45: 3}
 _QUICKTIME_ATOMS = {b"ftyp", b"moov", b"mdat", b"wide", b"free", b"skip"}
 _COLMAP_FILES = ("cameras", "images", "points3D")
 _MAX_ZIP_ENTRIES = 20000
+_MAX_SOG_TEXTURE_PIXELS = 64 * 1024 * 1024
+_MAX_SOG_TEXTURE_BYTES = 256 * 1024 * 1024
 # Only bundled SOG v2 is accepted. Limits are applied before reading texture contents.
 SOG_FORMAT_REGISTRY = {
     2: {
@@ -561,3 +563,86 @@ def detect_input(path: Path, max_uncompressed_bytes: int) -> InputDetection:
     """Nhận diện file cục bộ theo bytes: video, PLY 3DGS, ZIP (3DGS + COLMAP), hoặc gói LiDAR .zip."""
     with path.open("rb") as stream:
         return detect_stream(stream, path.stat().st_size, max_uncompressed_bytes)
+
+
+def validate_sog_bundle(path: Path, max_uncompressed_bytes: int) -> InputDetection:
+    """Decode every bounded SOG WebP texture before a worker publishes the bundle."""
+    detection = detect_input(path, max_uncompressed_bytes)
+    if detection.kind != "gaussian_sog" or detection.sog is None:
+        raise InputRejectedError("File nguồn không phải SOG v2 được hỗ trợ")
+    try:
+        with zipfile.ZipFile(path) as archive:
+            meta = json.loads(archive.read("meta.json"))
+            if not isinstance(meta, dict):
+                raise InputRejectedError("Metadata SOG không hợp lệ")
+            files: list[str] = []
+            for key, count in (("means", 2), ("scales", 1), ("quats", 1), ("sh0", 1)):
+                files.extend(_sog_files(meta, key, count))
+            if meta.get("shN") is not None:
+                files.extend(_sog_files(meta, "shN", 2))
+            pixel_budget = min(
+                _MAX_SOG_TEXTURE_PIXELS,
+                max(1_000_000, detection.sog.gaussian_count * 12),
+            )
+            decoded_pixels = 0
+            for filename in files:
+                info = archive.getinfo(filename)
+                if info.file_size > _MAX_SOG_TEXTURE_BYTES:
+                    raise InputRejectedError(f"Texture SOG vượt giới hạn bytes: {filename}")
+                encoded = archive.read(info)
+                width, height, channels = _webp_dimensions_and_channels(encoded)
+                pixels = width * height
+                if (
+                    width > 16_384
+                    or height > 16_384
+                    or pixels > pixel_budget
+                    or decoded_pixels + pixels > pixel_budget
+                    or channels not in {3, 4}
+                ):
+                    raise InputRejectedError(f"Kích thước hoặc số kênh texture SOG không hợp lệ: {filename}")
+                decoded_pixels += pixels
+    except (OSError, zipfile.BadZipFile, KeyError, json.JSONDecodeError) as error:
+        raise InputRejectedError("Gói SOG không giải mã được") from error
+    return detection
+
+
+def _webp_dimensions_and_channels(payload: bytes) -> tuple[int, int, int]:
+    """Read bounded WebP container dimensions/channels; the pinned runtime decodes pixels."""
+    if len(payload) < 26 or payload[:4] != b"RIFF" or payload[8:12] != b"WEBP":
+        raise InputRejectedError("Texture SOG không phải WebP hoàn chỉnh")
+    if int.from_bytes(payload[4:8], "little") + 8 != len(payload):
+        raise InputRejectedError("Kích thước RIFF/WebP không khớp bytes texture")
+    offset = 12
+    dimensions: tuple[int, int] | None = None
+    channels: int | None = None
+    while offset + 8 <= len(payload):
+        chunk = payload[offset : offset + 4]
+        size = int.from_bytes(payload[offset + 4 : offset + 8], "little")
+        start = offset + 8
+        end = start + size
+        if end > len(payload):
+            raise InputRejectedError("Chunk WebP vượt kích thước texture")
+        data = payload[start:end]
+        if chunk == b"VP8X" and size >= 10:
+            dimensions = (
+                1 + int.from_bytes(data[4:7], "little"),
+                1 + int.from_bytes(data[7:10], "little"),
+            )
+            channels = 4 if data[0] & 0x10 else 3
+        elif chunk == b"VP8 " and size >= 10 and data[3:6] == b"\x9d\x01\x2a":
+            dimensions = (
+                int.from_bytes(data[6:8], "little") & 0x3FFF,
+                int.from_bytes(data[8:10], "little") & 0x3FFF,
+            )
+            channels = 3
+        elif chunk == b"VP8L" and size >= 5 and data[0] == 0x2F:
+            bits = int.from_bytes(data[1:5], "little")
+            dimensions = (1 + (bits & 0x3FFF), 1 + ((bits >> 14) & 0x3FFF))
+            channels = 4 if (bits >> 28) & 0x1 else 3
+        offset = end + (size & 1)
+    if offset != len(payload) or dimensions is None or channels is None:
+        raise InputRejectedError("Texture SOG thiếu chunk WebP có kích thước giải mã")
+    width, height = dimensions
+    if width < 1 or height < 1:
+        raise InputRejectedError("Texture SOG có kích thước rỗng")
+    return width, height, channels

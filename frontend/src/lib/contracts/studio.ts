@@ -651,6 +651,16 @@ export interface ImportedScene {
     status: "QUEUED" | "WAITING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
     attempt: number;
     error: string | null;
+    failure_code?:
+      | "invalid_source"
+      | "source_unavailable"
+      | "runtime_failure"
+      | "publication_failure"
+      | "packaging_failure"
+      | "resource_conflict"
+      | "resource_wait"
+      | null;
+    retryable?: boolean | null;
     created_at: string;
     updated_at: string;
   } | null;

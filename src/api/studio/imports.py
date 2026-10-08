@@ -65,6 +65,7 @@ def _service() -> ImportService:
         RuntimeDatabase(current.database_url),
         runtime_resolver(current),
         current.product_worker_root.expanduser().resolve() / "imports",
+        max_uncompressed_bytes=current.product_upload_max_bytes * 2,
     )
 
 

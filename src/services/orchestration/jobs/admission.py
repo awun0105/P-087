@@ -396,6 +396,56 @@ class ResourceAdmission:
             gpu_required=gpu_required,
         )
 
+    def operation_profile_for_import(
+        self, *, gaussian_count: int, source_size_bytes: int, gpu_required: bool
+    ) -> OperationResourceProfile:
+        """Estimate bounded 3DGS packaging demand from the configured resource model.
+
+        The import estimate is deliberately marked heuristic, so GPU work receives
+        an exclusive reservation until a matching measured profile exists. Missing
+        model/config remains unknown and fails closed in ``admit_operation``.
+        """
+        if gaussian_count < 1 or source_size_bytes < 1:
+            raise ValueError("import resource estimate needs positive Gaussian count and source size")
+        path = self.settings.product_processing_config
+        if path is None or not is_presets_file(path):
+            return OperationResourceProfile(
+                required_gb={"vram": None if gpu_required else 0.0, "ram": None, "disk": None},
+                danger_ratio=None,
+                measured=False,
+                gpu_required=gpu_required,
+            )
+        try:
+            presets, _ = load_presets(path)
+        except (OSError, ValueError) as error:
+            logger.warning("Không đọc được resource model cho scene import cause=%s", type(error).__name__)
+            return OperationResourceProfile(
+                required_gb={"vram": None if gpu_required else 0.0, "ram": None, "disk": None},
+                danger_ratio=None,
+                measured=False,
+                gpu_required=gpu_required,
+            )
+
+        model = presets.resource_model
+        splats_millions = gaussian_count / 1_000_000
+        # The existing per-million-splat coefficient includes a training buffer;
+        # use it as a conservative ceiling for the decoder/encoder's resident arrays.
+        gaussian_working_gb = splats_millions * model.vram_per_million_splats_gb
+        vram = model.vram_base_gb + gaussian_working_gb if gpu_required else 0.0
+        ram = model.ram_base_gb + gaussian_working_gb
+        source_gb = source_size_bytes / 1_000_000_000
+        scratch_gb = max(source_gb, splats_millions * model.disk_per_million_splats_gb)
+        return OperationResourceProfile(
+            required_gb={
+                "vram": round(vram, 2),
+                "ram": round(ram, 2),
+                "disk": round(source_gb + scratch_gb, 2),
+            },
+            danger_ratio=model.danger_ratio,
+            measured=False,
+            gpu_required=gpu_required,
+        )
+
     # --- Giữ chỗ -------------------------------------------------------------
 
     def _lock(self, tx: RuntimeTransaction) -> None:

@@ -92,7 +92,7 @@ def __getattr__(name: str) -> object:
         from src.services.reconstruction import quality
 
         return getattr(quality, name)
-    if name in {"extract_member", "package_splat"}:
+    if name in {"extract_member", "package_splat", "validate_sog_runtime"}:
         from src.services.reconstruction import imports
 
         return getattr(imports, name)

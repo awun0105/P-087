@@ -318,6 +318,7 @@ def main(argv: list[str] | None = None) -> int:
         RuntimeDatabase(settings.database_url),
         runtime_resolver(settings),
         settings.product_worker_root.expanduser().resolve() / "imports",
+        max_uncompressed_bytes=settings.product_upload_max_bytes * 2,
     )
     if admission.discard_leftover_reservation():
         logger.warning("Đã xoá giữ chỗ tài nguyên còn sót của lần chạy trước worker=%s", admission.worker_id)
@@ -339,7 +340,7 @@ def main(argv: list[str] | None = None) -> int:
             handled = (
                 dispatch_next(registry, admission=admission)
                 or process_next(registry, settings)
-                or import_service.process_next(settings.product_geometry_gpu_index)
+                or import_service.process_next(admission=admission)
             )
             if args.once:
                 return 0

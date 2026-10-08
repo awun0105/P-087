@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- IN PROGRESS (S1 complete; S2/S3 open); P1; EX-PRODUCT; REC package_splat port.
+- IN PROGRESS (S1 complete; S2 implementation complete with runtime smoke pending; S3 open); P1; EX-PRODUCT; REC package_splat port.
 - Canonical PRODUCT-02/08/09. SELF-CODE durable operation, REUSE packaging adapter.
 - Goal: PLY/SOG view import durable; API crash không mất request; retry/cancel an
   toàn; READY chỉ khi SOG delivery đã verify.
@@ -73,7 +73,7 @@ GPU SOG smoke cần installed package_splat runtime; CPU fake-packager không th
 
 ## Sprint AUD-06.S1 — Persist queue cùng import creation
 
-**Status:** Complete on this branch; worker lease recovery/admission and retry/cancel remain S2/S3.
+**Status:** Complete on this branch; worker lease recovery/admission is AUD-06.S2, retry/cancel is AUD-06.S3.
 
 **Input:** upload verified và create-import request.
 **Output:** import record + durable queued operation cùng transaction, API status.
@@ -93,6 +93,8 @@ new SOG kind across direct/proxy/import parsers and unsupported version/model.
 
 ## Sprint AUD-06.S2 — Leased worker, admission và publication
 
+**Status:** Implementation and local contract tests complete; pinned-runtime smoke remains unverified because this checkout has no configured REC-05 CLI/module path.
+
 **Input:** queued operation + source ref/config + AUD-07 reservation.
 **Output:** verified SOG delivery_ref và one committed terminal result.
 **Contract:** one live owner; stale worker can't mark READY; publish before CAS;
@@ -109,7 +111,7 @@ Tests: two independent workers, lease expiry, worker crash before/after SOG publ
 bad ZIP member, corrupt/missing SOG textures/meta, duplicate/traversal/truncated
 archive, source checksum mismatch, decode bounds, publish failure, stale terminal
 CAS; real PLY packaging and uploaded SOG reuse with original byte identity.
-**Exit:** [ ] no duplicate commit; [ ] READY refs resolve and byte checksum matches.
+**Exit:** [x] worker race/fencing tests prevent duplicate terminal commit; [x] local READY refs resolve and byte checksum matches. Real runtime-backed packaging remains an external acceptance gate.
 
 ## Sprint AUD-06.S3 — Retry/cancel và truthful UI
 
@@ -169,9 +171,19 @@ production build rendered `/new/import-scene`; visible copy names PLY/SOG/ZIP,
 the file input accepts `.ply,.sog,.zip,application/zip,application/x-sog`, and
 the page had no console errors or warnings.
 
-Still open by design: a worker crash after claiming `RUNNING` is not reclaimed
-in S1; lease heartbeat/recovery, shared GPU admission, retry/cancel, and full
-texture decode/dimension/runtime validation are S2/S3 acceptance. No GPU or
-cloud-restart claim is inferred from these local checks. Browser verification
-proves the rendered upload surface and allowlist only; it does not prove a real
-SOG decoder or production upload/worker run.
+Still open: AUD-06.S3 retry/cancel and the retry UI. S2 implements lease recovery,
+admission, bounded SOG checks and pinned-runtime decoding, but the real runtime
+smoke could not run in this environment. No GPU or cloud-restart claim is inferred
+from local contract tests. Earlier browser verification proves the rendered upload
+surface and allowlist only; it does not prove a real SOG decoder or production
+upload/worker run.
+
+### AUD-06.S2 — implementation complete; runtime smoke unverified
+
+- **Base:** `4fb4dd6` (`AUD-06.S1`). CodeGraph was synchronized and explored before source edits; the import worker blast radius includes `worker_cli`, Studio import APIs, admission, the REC packaging/runtime adapter, and import/SOG tests.
+- **Before:** S1 persisted the operation but a worker could not reclaim an expired claim safely, reserve shared resources, or distinguish transient publication/runtime failures. ZIP member extraction did not enforce archive-wide entry/expanded-byte bounds, and SOG validation stopped before the pinned reader consumed every texture.
+- **After:** `process_next` claims queued/waiting or expired-running records with an owner, random lease token and increasing fencing token. A heartbeat renews both operation lease and admission reservation. Admission binds source/config checksums; resource waits retain the request identity and do not increment attempt. The worker rechecks upload identity, source bytes and input kind, stages only bounded members, validates SOG v2 metadata/texture inventory and bounded WebP headers, then calls the pinned `splat-transform` reader to check decoded Gaussian count/SH bands before publication. Uploaded SOG is copied byte-for-byte. Content-addressed output is checksum-verified and resolved before reuse; READY commits only under the current unexpired lease/attempt CAS. Failures have typed retryability, and attempt scratch is retained.
+- **Dependent consumers:** `ResourceAdmission.operation_profile_for_import` estimates RAM/disk/optional VRAM or waits fail-closed when headroom is unknown; `worker_cli` supplies that admission instance and upload expansion limit; Studio import construction uses the same bound; the operation projection and TypeScript contract expose typed failure/retry facts. The Scene Viewer presentation and black canvas are unchanged.
+- **Local evidence:** task-focused API/orchestration/reconstruction tests → **184 passed, 4 skipped**; directly affected Vitest files → **38 passed**; `npm run typecheck`, `npm run lint -- --quiet`, `ruff check src/ tests/`, `ruff format --check src/ tests/` (490 files) and `git diff --check` passed. Regression coverage includes resource wait without attempt/config drift, simulated crash after publish and immutable reuse, expired-worker fencing, source checksum mismatch, publish failure, ZIP traversal/expansion/duplicate/truncated CRC rejection, SOG metadata/WebP bounds, and exact uploaded-SOG byte identity. The malformed runtime-report guard is covered.
+- **Unverified acceptance:** this environment has no configured `REC05_VOXEL_CLI`/`REC05_VOXEL_MODULE_PATH` runtime settings, so no real PLY→SOG conversion or real SOG decode/consumer smoke could run. The worker tests replace the codec boundary; the fixture WebP bytes exercise bounded header validation, not independent image-decoder acceptance. GPU execution, multi-process deployment restart and browser import/retry journey remain unproven. These do not change the local contract-test result.
+- **Changed source/tests:** `scene_imports.py`, `jobs/admission.py`, `jobs/worker_cli.py`, `api/studio/imports.py`, `reconstruction/{imports.py,inputs/detect.py,adapters/voxel_inspect.mjs,__init__.py}`, import/SOG tests, and the additive `ImportedScene.operation` TypeScript fields.

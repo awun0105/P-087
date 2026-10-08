@@ -15,7 +15,7 @@ def sog_archive(
     means_mins: Any = (-1.0, -1.0, -1.0),
     means_maxs: Any = (1.0, 1.0, 1.0),
 ) -> bytes:
-    """Return an archive with valid SOG metadata and tiny WebP-signature fixtures."""
+    """Return an archive with valid metadata and bounded one-pixel WebP header fixtures."""
     meta: dict[str, Any] = {
         "version": version,
         "count": count,
@@ -39,5 +39,5 @@ def sog_archive(
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as archive:
         archive.writestr("meta.json", json.dumps(meta, separators=(",", ":")))
         for filename in files:
-            archive.writestr(filename, b"RIFF\x04\x00\x00\x00WEBPVP8 " + b"\x00" * 4)
+            archive.writestr(filename, b"RIFF\x12\x00\x00\x00WEBPVP8L\x05\x00\x00\x00\x2f\x00\x00\x00\x00\x00")
     return output.getvalue()

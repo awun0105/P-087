@@ -51,6 +51,7 @@ from src.services.orchestration.uploads import UploadRecord, VideoUploadService
 from src.services.orchestration.uploads import scene_imports as imports_module
 from src.services.orchestration.uploads.scene_imports import ImportService
 from tests.test_orchestration.memory_object_store import MemoryObjectStore
+from tests.test_reconstruction.support.sog_fixtures import sog_archive
 from tests.test_reconstruction.test_input_detection import _gaussian
 
 MP4 = b"\x00\x00\x00\x18ftypmp42"
@@ -84,10 +85,11 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
     def fake_package(source: Path, workspace: Path, gpu_index: int | None) -> Path:
         workspace.mkdir(parents=True)
-        (workspace / "scene.sog").write_bytes(b"sog:" + source.read_bytes()[:16])
+        (workspace / "scene.sog").write_bytes(sog_archive(sh_bands=3, count=4))
         return workspace / "scene.sog"
 
     monkeypatch.setattr(imports_module, "package_splat", fake_package)
+    monkeypatch.setattr(imports_module, "validate_sog_runtime", lambda *args, **kwargs: None)
     return SimpleNamespace(
         root=tmp_path,
         database=database,
@@ -148,9 +150,32 @@ def _scene(
     return project.project_id, job.job_id
 
 
+class _FakeImportAdmission:
+    def operation_profile_for_import(self, **kwargs: object):
+        from src.services.orchestration.jobs.admission import OperationResourceProfile
+
+        gpu_required = bool(kwargs["gpu_required"])
+        return OperationResourceProfile(
+            required_gb={"vram": 1.0 if gpu_required else 0.0, "ram": 2.0, "disk": 1.0},
+            danger_ratio=0.9,
+            measured=False,
+            gpu_required=gpu_required,
+        )
+
+    def admit_operation(self, request):  # noqa: ANN001
+        return SimpleNamespace(status="admitted")
+
+    def touch_operation(self, request):  # noqa: ANN001
+        return True
+
+    def release_operation(self, request):  # noqa: ANN001
+        return True
+
+
 def _import(world: SimpleNamespace, upload: UploadRecord, name: str) -> str:
     record = world.imports.create(upload, name, None)
-    return world.imports.package(record.import_id, upload, None).import_id
+    assert world.imports.process_next(admission=_FakeImportAdmission(), worker_id="deletion-test-worker")
+    return record.import_id
 
 
 def _rows(world: SimpleNamespace) -> dict[str, list[tuple]]:
