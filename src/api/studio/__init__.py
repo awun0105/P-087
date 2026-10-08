@@ -6,7 +6,7 @@ registry, upload service, file thông số chung) để test chỉ cần patch m
 
 from fastapi import APIRouter, Depends
 
-from src.api.auth import require_editor
+from src.api.auth import require_contributor
 from src.api.studio import (
     demo,
     evaluation,
@@ -22,10 +22,10 @@ from src.api.studio import (
 )
 
 router = APIRouter(tags=["studio"])
-# Upload và scene tốn GPU/lưu trữ → cần Editor khi bật đăng nhập (ADR 0003 §3).
-# Video mẫu và bảng thông số không có tác dụng phụ → khách dùng được.
+# Protected Studio routes require an authenticated contributor; each mutation must
+# additionally check resource ownership. Reviewer-only handlers keep their own gate.
 for module in (uploads, scenes, metric, imports, simulation, review, trash, evaluation, demo):
-    router.include_router(module.router, dependencies=[Depends(require_editor)])
+    router.include_router(module.router, dependencies=[Depends(require_contributor)])
 for module in (samples, processing):
     router.include_router(module.router)
 

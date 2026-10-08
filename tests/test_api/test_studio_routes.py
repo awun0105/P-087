@@ -374,6 +374,7 @@ async def test_uploads_and_scenes_show_who_did_what(
     creator = service.create_user("binh@example.com", "Bình", "mat-khau-du-dai-2", "reviewer")
     current = {"user": uploader}
     monkeypatch.setitem(app.dependency_overrides, auth.require_editor, lambda: current["user"])
+    monkeypatch.setitem(app.dependency_overrides, auth.require_contributor, lambda: current["user"])
 
     upload = await _upload(client)
     assert upload["uploaded_by"] == {"user_id": uploader.user_id, "display_name": "An", "role": "editor"}

@@ -3,7 +3,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api import schemas
-from src.api.auth import enforce_gpu_quota, record_gpu_run, require_editor
+from src.api.auth import enforce_gpu_quota, record_gpu_run, require_contributor, require_editor
+from src.api.ownership import authorize_job_mutation
 from src.api.product import deps
 from src.models.contracts.manifests import JobManifest, JobStatus
 from src.models.contracts.retryability import is_execution_error_retryable
@@ -34,7 +35,9 @@ def get_job(job_id: str) -> JobManifest:
     response_model=JobManifest,
     responses={409: {"model": schemas.ApiErrorResponse}, 422: {"model": schemas.ApiErrorResponse}},
 )
-def transition_job(job_id: str, request: TransitionRequest) -> JobManifest:
+def transition_job(
+    job_id: str, request: TransitionRequest, user: UserRecord | None = Depends(require_contributor)
+) -> JobManifest:
     """Chuyển trạng thái job theo bảng chuyển hợp lệ (PRODUCT-02).
 
     Runtime HTTP chỉ nhận cancel; progress do worker ghi qua durable registry.
@@ -42,6 +45,7 @@ def transition_job(job_id: str, request: TransitionRequest) -> JobManifest:
     """
     try:
         registry = deps.registry()
+        authorize_job_mutation(user, registry, job_id, operation="hủy job")
         if registry.persistence is not None and (
             request.target_status != JobStatus.CANCELLED
             or request.current_stage is not None
@@ -67,6 +71,7 @@ def retry_job(job_id: str, user: UserRecord | None = Depends(require_editor)) ->
     """
     registry = deps.registry()
     try:
+        authorize_job_mutation(user, registry, job_id, operation="thử lại job")
         job = registry.get_job(job_id)
         if job.status != JobStatus.FAILED:
             raise HTTPException(

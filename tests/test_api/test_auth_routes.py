@@ -155,8 +155,12 @@ async def test_guest_signup_is_disabled_by_default(client: AsyncClient, secured:
 
 
 @pytest.mark.asyncio
-async def test_guest_signup_uses_server_role_and_keeps_editor_routes_closed(
-    client: AsyncClient, secured: AuthService, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+async def test_guest_signup_uses_server_role_with_shared_reads_and_reviewer_routes_closed(
+    client: AsyncClient,
+    secured: AuthService,
+    product_registry: ProjectRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     from src.api import auth
 
@@ -181,7 +185,23 @@ async def test_guest_signup_uses_server_role_and_keeps_editor_routes_closed(
     assert "httponly" in cookie and "samesite=lax" in cookie
     me = (await client.get("/api/v1/auth/me")).json()
     assert me["guest_signup_enabled"] is True and me["user"]["role"] == "guest"
-    assert (await client.get("/api/v1/scenes")).status_code == 403
+    assert (await client.get("/api/v1/scenes")).status_code == 200
+    assert product_registry.list_projects()
+    assert (await client.get("/api/v1/projects")).status_code == 200
+    created_project = await client.post(
+        "/api/v1/projects",
+        json={
+            "name": "Guest project",
+            "source_type": "upload",
+            "input_manifest_checksum": "sha256:" + "a" * 64,
+            "attestation": ATTESTATION,
+        },
+    )
+    assert created_project.status_code == 201, created_project.text
+    assert created_project.json()["created_by"]["user_id"] == response.json()["user_id"]
+    assert created_project.json()["created_by"]["role"] == "guest"
+    invite = await client.post("/api/v1/auth/invites", json={"role": "editor"})
+    assert invite.status_code == 403
 
     forged_role = await client.post(
         "/api/v1/auth/register/guest",

@@ -11,9 +11,10 @@ from types import SimpleNamespace
 import pytest
 
 from src.models.contracts.identity import canonical_content_checksum
-from src.models.contracts.manifests import JobStatus, StageId
+from src.models.contracts.manifests import ExecutionError, JobStatus, StageId
 from src.services.orchestration.artifacts import ArtifactRemote
 from src.services.orchestration.artifacts.checksum import sha256_bytes
+from src.services.orchestration.auth.models import Actor
 from src.services.orchestration.auth.service import AuthService
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.models import TransitionRequest
@@ -24,6 +25,7 @@ from src.services.orchestration.projects.deletion import (
     DeletionContext,
     DeletionRefusedError,
     DeletionRequest,
+    GuestOwnershipError,
     apply_deletion,
     get_trash_entry,
     import_legacy_entry,
@@ -98,13 +100,26 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     )
 
 
-def _upload(world: SimpleNamespace, name: str = "walk.mp4", payload: bytes = MP4 + b"video") -> UploadRecord:
+def _upload(
+    world: SimpleNamespace,
+    name: str = "walk.mp4",
+    payload: bytes = MP4 + b"video",
+    uploaded_by: Actor | None = None,
+) -> UploadRecord:
     pending = world.uploads.begin(name)
     pending.publication.write(payload)
-    return world.uploads.finish(pending)
+    return world.uploads.finish(pending, uploaded_by)
 
 
-def _scene(world: SimpleNamespace, upload: UploadRecord, name: str, *, stopped: bool = True) -> tuple[str, str]:
+def _scene(
+    world: SimpleNamespace,
+    upload: UploadRecord,
+    name: str,
+    *,
+    stopped: bool = True,
+    created_by: Actor | None = None,
+    owner_user_id: str | None = None,
+) -> tuple[str, str]:
     """Scene tạo như API `/scenes/from-upload`; `stopped` huỷ job để scene ở trạng thái gỡ được."""
     attestation = SourceRightsAttestation(
         data_origin=DataOrigin.SELF_COLLECTED_NO_PII,
@@ -115,9 +130,13 @@ def _scene(world: SimpleNamespace, upload: UploadRecord, name: str, *, stopped: 
         retention_acknowledged=True,
     )
     request = UploadProjectInput(upload_id=upload.upload_id, name=name, attestation=attestation)
-    project = world.registry.create_project_from_upload(upload, request, "self_attested")
+    project = world.registry.create_project_from_upload(upload, request, "self_attested", created_by=created_by)
     world.uploads.link_project(upload.upload_id, project.project_id)
-    job = world.registry.create_job(JobCreateInput(project_id=project.project_id))
+    job = world.registry.create_job(
+        JobCreateInput(project_id=project.project_id),
+        requested_by=created_by if owner_user_id is not None else None,
+        owner_user_id=owner_user_id,
+    )
     if stopped:
         world.registry.transition_job(job.job_id, TransitionRequest(target_status=JobStatus.CANCELLED))
     workspace = world.root / "workers" / job.job_id / "attempt-1"
@@ -183,6 +202,103 @@ def test_plan_lists_what_would_go_and_changes_nothing(world: SimpleNamespace) ->
     }
     assert plan.size_bytes > 0
     assert (_rows(world), _files(world)) == (rows, files)
+
+
+def test_job_owner_survives_operator_attempt_update_and_trash_restore(world: SimpleNamespace) -> None:
+    guest = Actor(user_id="guest-1", display_name="Guest One", role="guest")
+    editor = Actor(user_id="editor-1", display_name="Editor One", role="editor")
+    upload = _upload(world, uploaded_by=guest)
+    project_id, job_id = _scene(
+        world, upload, "Owned scene", stopped=False, created_by=guest, owner_user_id=guest.user_id
+    )
+
+    assert world.registry.get_job_owner_user_id(job_id) == guest.user_id
+    world.registry.transition_job(job_id, TransitionRequest(target_status=JobStatus.RUNNING))
+    world.registry.transition_job(
+        job_id,
+        TransitionRequest(
+            target_status=JobStatus.FAILED,
+            error=ExecutionError(
+                stage_id=StageId.INPUT_VALIDATE,
+                error_code="PREVIEW_RUNNER_FAILED",
+                human_message="Fixture failure",
+                retryable=True,
+                details={"exception_type": "TimeoutError"},
+            ),
+        ),
+    )
+    world.registry.transition_job(
+        job_id,
+        TransitionRequest(target_status=JobStatus.QUEUED),
+        requested_by=editor,
+    )
+    world.registry.transition_job(job_id, TransitionRequest(target_status=JobStatus.CANCELLED))
+    assert world.registry.get_job_owner_user_id(job_id) == guest.user_id
+
+    entry = apply_deletion(
+        world.context,
+        DeletionRequest(project_ids=[project_id]),
+        guest_owner_user_id=guest.user_id,
+    ).entry_id
+    restore_deletion(world.context, entry, guest_owner_user_id=guest.user_id)
+
+    assert world.registry.get_project(project_id).created_by == guest
+    assert world.registry.get_job_owner_user_id(job_id) == guest.user_id
+
+
+def test_guest_cannot_delete_owned_project_with_foreign_upload_without_side_effects(world: SimpleNamespace) -> None:
+    guest = Actor(user_id="guest-1", display_name="Guest One", role="guest")
+    editor = Actor(user_id="editor-1", display_name="Editor One", role="editor")
+    upload = _upload(world, uploaded_by=editor)
+    project_id, _ = _scene(world, upload, "Guest project", created_by=guest, owner_user_id=guest.user_id)
+    before_rows, before_files = _rows(world), _files(world)
+
+    with pytest.raises(GuestOwnershipError, match="owner không khớp"):
+        apply_deletion(
+            world.context,
+            DeletionRequest(project_ids=[project_id]),
+            guest_owner_user_id=guest.user_id,
+        )
+
+    assert (_rows(world), _files(world)) == (before_rows, before_files)
+    assert _in_trash(world) == []
+
+
+def test_project_owner_cannot_change_during_persistence_cas(world: SimpleNamespace) -> None:
+    guest = Actor(user_id="guest-1", display_name="Guest One", role="guest")
+    editor = Actor(user_id="editor-1", display_name="Editor One", role="editor")
+    upload = _upload(world, uploaded_by=guest)
+    project_id, _ = _scene(world, upload, "Guest project", created_by=guest, owner_user_id=guest.user_id)
+    project = world.registry.get_project(project_id)
+    changed_owner = project.model_copy(update={"created_by": editor})
+    assert world.registry.persistence is not None
+
+    with pytest.raises(ValueError, match="creator"):
+        world.registry.persistence.save_project(changed_owner, expected=project)
+
+    assert world.registry.get_project(project_id).created_by == guest
+
+
+def test_guest_cannot_delete_foreign_job_in_their_project(world: SimpleNamespace) -> None:
+    guest = Actor(user_id="guest-1", display_name="Guest One", role="guest")
+    upload = _upload(world, uploaded_by=guest)
+    project_id, _ = _scene(world, upload, "Guest project", created_by=guest, owner_user_id=guest.user_id)
+    editor = Actor(user_id="editor-1", display_name="Editor One", role="editor")
+    foreign_job = world.registry.create_job(
+        JobCreateInput(project_id=project_id), requested_by=editor, owner_user_id=editor.user_id
+    )
+    world.registry.transition_job(foreign_job.job_id, TransitionRequest(target_status=JobStatus.CANCELLED))
+    before_rows, before_files = _rows(world), _files(world)
+
+    with pytest.raises(GuestOwnershipError, match="owner không khớp"):
+        apply_deletion(
+            world.context,
+            DeletionRequest(project_ids=[project_id]),
+            guest_owner_user_id=guest.user_id,
+        )
+
+    assert (_rows(world), _files(world)) == (before_rows, before_files)
+    assert _in_trash(world) == []
 
 
 def test_delete_removes_the_scene_everywhere_and_leaves_other_scenes_alone(world: SimpleNamespace) -> None:

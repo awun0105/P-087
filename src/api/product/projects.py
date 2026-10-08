@@ -3,7 +3,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api import schemas
-from src.api.auth import enforce_gpu_quota, record_gpu_run, require_editor
+from src.api.auth import enforce_gpu_quota, record_gpu_run, require_contributor, require_editor
+from src.api.ownership import authorize_project_mutation
 from src.api.product import deps
 from src.models.contracts.manifests import JobManifest
 from src.services.orchestration.auth import UserRecord, actor_of
@@ -20,7 +21,7 @@ router = APIRouter()
 
 @router.post("/projects", response_model=schemas.ProjectResponse, status_code=status.HTTP_201_CREATED)
 def create_project(
-    request: ProjectCreateInput, user: UserRecord | None = Depends(require_editor)
+    request: ProjectCreateInput, user: UserRecord | None = Depends(require_contributor)
 ) -> schemas.ProjectResponse:
     """Tạo project và ghi nhận source-rights attestation.
 
@@ -68,9 +69,12 @@ def create_job(
     enforce_gpu_quota(user)
     registry = deps.registry()
     try:
+        project = registry.get_project(project_id)
+        authorize_project_mutation(user, project, operation="tạo job trong")
         job = registry.create_job(
             JobCreateInput(project_id=project_id, scene_revision=request.scene_revision),
             requested_by=actor_of(user),
+            owner_user_id=user.user_id if user is not None else None,
         )
         record_gpu_run(user, job.job_id, {"kind": "job.create", "project_id": project_id})
         return job

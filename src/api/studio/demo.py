@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict
 
 from src.api import auth
+from src.api.auth import require_contributor
+from src.api.ownership import authorize_job_mutation
 from src.api.studio import deps
 from src.services.orchestration.auth import UserRecord, actor_of
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
@@ -76,9 +78,10 @@ def delete_demo_baseline(job_id: str, user: UserRecord | None = Depends(auth.req
 
 @router.post("/jobs/{job_id}/demo/reset", response_model=DemoState)
 def post_demo_reset(
-    job_id: str, request: DemoResetRequest, user: UserRecord | None = Depends(auth.require_editor)
+    job_id: str, request: DemoResetRequest, user: UserRecord | None = Depends(require_contributor)
 ) -> DemoState:
     """Khôi phục scene về bản demo gốc bằng một revision mới."""
+    authorize_job_mutation(user, deps.registry(), job_id, operation="khôi phục bản demo của")
     state = _run(
         job_id, "khôi phục bản demo", lambda registry, job: reset_demo(registry, job, request.expected_scene_revision)
     )

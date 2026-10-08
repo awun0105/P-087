@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 from src.api import schemas
 from src.api.auth import auth_service, enforce_gpu_quota, record_gpu_run, require_editor
+from src.api.ownership import authorize_upload_mutation
 from src.api.studio import deps
 from src.models.contracts.manifests import JobManifest, JobStatus
 from src.services.orchestration.artifacts import ArtifactStoreError
@@ -93,6 +94,7 @@ def create_scene_from_upload(
         upload = uploads.get(request.upload_id)
     except UploadNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    authorize_upload_mutation(user, upload, operation="tạo scene từ")
     if upload.input_kind != "rgb_video":
         # Luồng import 3DGS (ADR 0004 §3) chưa có worker; không tạo job video từ file PLY/ZIP.
         raise HTTPException(
@@ -125,6 +127,7 @@ def create_scene_from_upload(
             lidar = uploads.get(request.lidar.upload_id)
         except UploadNotFoundError as error:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+        authorize_upload_mutation(user, lidar, operation="đính kèm LiDAR vào scene từ")
         if lidar.input_kind not in {"registered_lidar", "lidar_scan_sequence"}:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -136,7 +139,10 @@ def create_scene_from_upload(
         uploads.link_project(lidar.upload_id, project.project_id)
     try:
         job = registry.create_job(
-            JobCreateInput(project_id=project.project_id), processing, requested_by=actor_of(user)
+            JobCreateInput(project_id=project.project_id),
+            processing,
+            requested_by=actor_of(user),
+            owner_user_id=user.user_id if user is not None else None,
         )
     except (PrivacyGateBlockedError, RuntimeStateConflictError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error

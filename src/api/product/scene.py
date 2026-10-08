@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 
 from src.api import schemas
-from src.api.auth import enforce_gpu_quota, record_gpu_run, require_editor
+from src.api.auth import enforce_gpu_quota, record_gpu_run, require_contributor, require_editor
+from src.api.ownership import authorize_job_mutation
 from src.api.product import deps
 from src.config import Settings
 from src.services.orchestration.artifacts import ArtifactStoreError
@@ -52,7 +53,11 @@ def get_job_scene(job_id: str) -> schemas.SceneResponse:
     status_code=status.HTTP_201_CREATED,
     responses={404: {"model": schemas.ApiErrorResponse}, 409: {"model": schemas.ApiErrorResponse}},
 )
-def edit_job_scene(job_id: str, command: SceneEditCommand) -> schemas.SceneEditResponse:
+def edit_job_scene(
+    job_id: str,
+    command: SceneEditCommand,
+    user: UserRecord | None = Depends(require_contributor),
+) -> schemas.SceneEditResponse:
     """Áp transform edit và persist thành revision mới (PRODUCT-06).
 
     `expected_scene_revision` là khoá optimistic: client sửa trên revision đã cũ
@@ -62,9 +67,11 @@ def edit_job_scene(job_id: str, command: SceneEditCommand) -> schemas.SceneEditR
     `/review`: nó nổi lên khi bytes của một revision đã niêm phong không còn khớp
     ref, tức là xung đột bất biến artifact — không phải lỗi command của client.
     """
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="sửa scene của")
     deps.job_or_404(job_id)
     try:
-        return schemas.scene_edit_response(deps.registry().scene.apply(job_id, command))
+        return schemas.scene_edit_response(registry.scene.apply(job_id, command))
     except SceneRevisionConflictError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except ArtifactStoreError as error:
@@ -91,8 +98,11 @@ def object_action(
     object_id: str,
     action: str,
     request: schemas.ObjectActionRequest,
+    user: UserRecord | None = Depends(require_contributor),
 ) -> schemas.SceneEditResponse:
     """confirm/ignore ứng viên, hide/delete/rename vật thể — lệnh domain EX-SCENE, revision mới."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="sửa vật thể của")
     deps.job_or_404(job_id)
     if action not in OBJECT_ACTIONS:
         raise HTTPException(
@@ -128,8 +138,11 @@ def object_action(
 def add_object(
     job_id: str,
     request: schemas.AddObjectRequest,
+    user: UserRecord | None = Depends(require_contributor),
 ) -> schemas.SceneEditResponse:
     """Thêm vật cản hộp do người dùng đặt (PRODUCT-07A); `position_xyz` là tâm hộp (mét, world)."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="thêm vật thể vào")
     deps.job_or_404(job_id)
     if request.collider_type != "AABB" or request.origin != "user_added":
         raise HTTPException(
@@ -221,11 +234,13 @@ def request_objectify(
     Tập vật mới là ứng viên mới: xác nhận/nhãn của revision hiện tại không mang sang (vẫn hoàn tác được).
     Đây là một lần xử lý GPU nên tính vào hạn mức của Editor.
     """
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="tách lại vật thể của")
     deps.job_or_404(job_id)
     enforce_gpu_quota(user)
     try:
         result = objectify_queue.request(
-            deps.registry(), deps.settings(), job_id, request.expected_scene_revision, request.mode
+            registry, deps.settings(), job_id, request.expected_scene_revision, request.mode
         )
     except SceneNotAvailableError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -270,8 +285,14 @@ def get_label_suggestions(job_id: str, object_id: str) -> schemas.LabelSuggestio
         422: {"model": schemas.ApiErrorResponse},
     },
 )
-def add_catalog_scene_object(job_id: str, request: schemas.AddCatalogObjectRequest) -> schemas.SceneEditResponse:
+def add_catalog_scene_object(
+    job_id: str,
+    request: schemas.AddCatalogObjectRequest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> schemas.SceneEditResponse:
     """Thêm một vật từ danh mục asset Isaac: nhãn + vật lý mặc định, revision mới."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="thêm asset vào")
     deps.job_or_404(job_id)
     return deps.scene_mutation(
         lambda editor: add_catalog_object(
@@ -290,8 +311,14 @@ def add_catalog_scene_object(job_id: str, request: schemas.AddCatalogObjectReque
         422: {"model": schemas.ApiErrorResponse},
     },
 )
-def restore_scene_revision(job_id: str, request: schemas.RestoreRevisionRequest) -> schemas.SceneEditResponse:
+def restore_scene_revision(
+    job_id: str,
+    request: schemas.RestoreRevisionRequest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> schemas.SceneEditResponse:
     """Hoàn tác: nội dung revision cũ thành revision kế tiếp; lịch sử không bị xoá."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="khôi phục revision của")
     deps.job_or_404(job_id)
     return deps.scene_mutation(
         lambda editor: restore_revision(editor, job_id, request.expected_scene_revision, request.target_revision)

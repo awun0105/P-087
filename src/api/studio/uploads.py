@@ -11,7 +11,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.api.auth import require_editor
+from src.api.auth import require_contributor
+from src.api.ownership import authorize_upload_session_mutation
 from src.api.studio import deps
 from src.services.orchestration.artifacts import ArtifactAlreadyExistsError, ArtifactTooLargeError
 from src.services.orchestration.auth import UserRecord, actor_of
@@ -41,7 +42,7 @@ class UploadListResponse(BaseModel):
 async def upload_video(
     request: Request,
     filename: str = Query(..., min_length=1, max_length=255),
-    user: UserRecord | None = Depends(require_editor),
+    user: UserRecord | None = Depends(require_contributor),
 ) -> UploadRecord:
     """Nhận bytes video trong body; bytes gốc được giữ nguyên, checksum tính khi ghi."""
     service = deps.uploads()
@@ -151,7 +152,7 @@ def upload_config() -> UploadConfig:
 
 @router.post("/uploads/direct", response_model=DirectUploadState, status_code=status.HTTP_201_CREATED)
 def begin_direct_upload(
-    request: DirectUploadRequest, user: UserRecord | None = Depends(require_editor)
+    request: DirectUploadRequest, user: UserRecord | None = Depends(require_contributor)
 ) -> DirectUploadState:
     """Mở phiên upload thẳng; client xin link từng nhóm phần qua `/urls`."""
     try:
@@ -172,11 +173,18 @@ def get_direct_upload(upload_id: str) -> DirectUploadState:
 
 
 @router.post("/uploads/direct/{upload_id}/urls", response_model=PartUrlsResponse)
-def direct_upload_urls(upload_id: str, request: PartUrlsRequest) -> PartUrlsResponse:
+def direct_upload_urls(
+    upload_id: str,
+    request: PartUrlsRequest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> PartUrlsResponse:
     """Link PUT có hạn cho tối đa 50 phần mỗi lần."""
     expires = deps.settings().artifact_presign_seconds
     try:
-        urls = deps.direct_uploads().part_urls(upload_id, request.part_numbers, expires)
+        service = deps.direct_uploads()
+        session = service.get(upload_id)
+        authorize_upload_session_mutation(user, session, operation="tạo link upload cho")
+        urls = service.part_urls(upload_id, request.part_numbers, expires)
     except (UploadError, UploadNotFoundError, RuntimeStateConflictError) as error:
         raise _upload_errors(error) from error
     return PartUrlsResponse(urls=urls, expires_in=expires)
@@ -196,7 +204,11 @@ def _verify_in_background(upload_id: str) -> None:
 
 
 @router.post("/uploads/direct/{upload_id}/complete", response_model=DirectUploadState)
-def complete_direct_upload(upload_id: str, background: BackgroundTasks) -> DirectUploadState:
+def complete_direct_upload(
+    upload_id: str,
+    background: BackgroundTasks,
+    user: UserRecord | None = Depends(require_contributor),
+) -> DirectUploadState:
     """Ghép các phần; server tự tính checksum trong nền, client poll tới READY/FAILED.
 
     Gọi lại khi phiên đang VERIFYING sẽ lên lịch kiểm tra lại: tác vụ nền mất khi API
@@ -208,6 +220,7 @@ def complete_direct_upload(upload_id: str, background: BackgroundTasks) -> Direc
         current = service.get(upload_id)
     except UploadNotFoundError as error:
         raise _upload_errors(error) from error
+    authorize_upload_session_mutation(user, current, operation="hoàn tất upload của")
     if current.status == "VERIFYING":
         background.add_task(_verify_in_background, upload_id)
         return _state(current)
@@ -220,9 +233,12 @@ def complete_direct_upload(upload_id: str, background: BackgroundTasks) -> Direc
 
 
 @router.post("/uploads/direct/{upload_id}/abort", response_model=DirectUploadState)
-def abort_direct_upload(upload_id: str) -> DirectUploadState:
+def abort_direct_upload(upload_id: str, user: UserRecord | None = Depends(require_contributor)) -> DirectUploadState:
     """Hủy upload dở, xóa các phần trên kho file."""
     try:
-        return _state(deps.direct_uploads().abort(upload_id))
+        service = deps.direct_uploads()
+        session = service.get(upload_id)
+        authorize_upload_session_mutation(user, session, operation="hủy upload của")
+        return _state(service.abort(upload_id))
     except (UploadNotFoundError, RuntimeStateConflictError) as error:
         raise _upload_errors(error) from error

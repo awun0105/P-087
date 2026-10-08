@@ -16,9 +16,10 @@ contract đã hoàn tất; browser DevTools MCP gate của AUD-03.S3 vẫn
 UNVERIFIED; PostgreSQL proof của AUD-04.S3 chưa chạy vì thiếu
 `R2S_TEST_POSTGRES_URL`. AUD-21.S2 đã implement Guest signup và role lifecycle,
 nhưng `AUTH_GUEST_SIGNUP_ENABLED` đang mặc định `false`; browser gate của form
-còn UNVERIFIED và ownership/quota cần hoàn tất trước rollout. Sprint code kế tiếp
-là AUD-21.S3; trước rollout Guest cũng cần hoàn tất browser và seed acceptance
-của AUD-20.S3.
+còn UNVERIFIED. AUD-21.S3 đã thêm owner guards, immutable job owner và audited
+operator intervention; browser DevTools gate còn UNVERIFIED do Chrome profile lock.
+Tiếp theo là AUD-22.S2 atomic quota/admission. Guest rollout vẫn đợi AUD-22.S3,
+AUD-21.S4, browser acceptance và AUD-20.S3 seed acceptance.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -199,9 +200,10 @@ Thứ tự mặc định gồm đủ **80 active sprint, mỗi sprint một lầ
 
 Execution order bắt đầu ở **AUD-11.S1**; các sprint AUD-11.S1–S2, AUD-15.S1,
 AUD-01–04, AUD-10.S1–S3, AUD-07.S1–S2, AUD-20.S1–S2, AUD-21.S1–S2 và AUD-22.S1
-đã hoàn tất ở mức code/task của từng sprint. AUD-20.S3 và AUD-21.S2 còn browser
-acceptance; AUD-20.S3 còn live-seed acceptance. Tiếp tục code với AUD-21.S3;
-ownership, quota và browser acceptance vẫn là gates trước public Guest rollout.
+đã hoàn tất ở mức code/task của từng sprint. AUD-21.S3 đã thêm backend ownership
+guards; AUD-20.S3 và AUD-21.S2 còn browser acceptance, AUD-20.S3 còn live-seed
+acceptance. Tiếp tục code với AUD-22.S2; quota, AUD-21.S4 và các acceptance gates
+vẫn phải hoàn tất trước public Guest rollout.
 AUD-15.S1 được làm sớm để AUD-23.S5 có measurement protocol; optimization
 AUD-15.S2–S3 vẫn làm sau quality work.
 AUD-07.S3 làm sau AUD-06/AUD-05 để kiểm tra admission trên consumer thật;
@@ -264,6 +266,15 @@ fail-closed remote checksum verification, then reads a validated SceneIR after
 package import and restores a checksummed head/repair history through trash. Its
 matrix passed 180 tests with one PostgreSQL skip. CodeGraph is current; live
 PostgreSQL locking and S3 provider proof remain pending.
+
+AUD-21.S3 adds contributor-level shared read access and resource-level Guest
+ownership guards across Product and Studio mutations. Job ownership is an
+immutable nullable column outside the checksum-bound manifest; deletion checks
+the entire cascade; Editor/Reviewer cross-owner actions are audited. The API suite
+passed 138 tests, orchestration passed 578 with 20 skips, and processing/upload
+integration passed 9. Four migration tests skipped without `R2S_TEST_POSTGRES_URL`;
+Chrome DevTools remains UNVERIFIED because MCP cannot attach to its locked profile.
+`AUTH_GUEST_SIGNUP_ENABLED` remains false. Continue with AUD-22.S2.
 
 AUD-07.S1 adds typed operation admission over the existing reservation table,
 shares resource assessment with job admission, keeps old job payloads readable,

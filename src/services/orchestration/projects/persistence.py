@@ -36,6 +36,10 @@ class ProjectPersistence:
             if expected is not None:
                 if row is None or row[0] != expected.model_dump_json():
                     raise RuntimeStateConflictError("Project đã thay đổi; đọc lại trước khi cập nhật")
+                old_owner = expected.created_by.user_id if expected.created_by is not None else None
+                new_owner = project.created_by.user_id if project.created_by is not None else None
+                if old_owner != new_owner:
+                    raise ValueError("Project creator không được thay đổi sau khi tạo")
                 tx.execute(
                     "UPDATE r2s_projects SET payload=? WHERE project_id=?",
                     (project.model_dump_json(), project.project_id),
@@ -85,6 +89,7 @@ class ProjectPersistence:
         *,
         expected: JobManifest | None = None,
         seed: bool = False,
+        owner_user_id: str | None = None,
     ) -> None:
         """CAS job pointer và append event atomically; không tự retry command stale."""
         if self._job(reference.model_dump_json()) != manifest:
@@ -108,11 +113,14 @@ class ProjectPersistence:
             if manifest.status in {JobStatus.QUEUED, JobStatus.RUNNING}:
                 require_project_dispatch(project)
             row = tx.execute(
-                "SELECT version, manifest_ref FROM r2s_jobs WHERE job_id=?" + tx.lock_suffix(), (manifest.job_id,)
+                "SELECT version, manifest_ref, owner_user_id FROM r2s_jobs WHERE job_id=?" + tx.lock_suffix(),
+                (manifest.job_id,),
             ).fetchone()
             if row is not None:
                 if seed:
                     return
+                if owner_user_id is not None and row[2] != owner_user_id:
+                    raise RuntimeStateConflictError("Job owner không được thay đổi sau khi tạo")
                 current = self._job(row[1])
                 if (
                     expected is None
@@ -153,8 +161,9 @@ class ProjectPersistence:
                     raise ValueError("Job mới phải bắt đầu ở attempt 1")
                 version = 1
                 changed = tx.execute(
-                    "INSERT INTO r2s_jobs(job_id,project_id,version,manifest_ref) VALUES (?,?,?,?) ON CONFLICT(job_id) DO NOTHING",
-                    (manifest.job_id, manifest.project_id, version, reference.model_dump_json()),
+                    "INSERT INTO r2s_jobs(job_id,project_id,version,manifest_ref,owner_user_id) "
+                    "VALUES (?,?,?,?,?) ON CONFLICT(job_id) DO NOTHING",
+                    (manifest.job_id, manifest.project_id, version, reference.model_dump_json(), owner_user_id),
                 ).rowcount
                 if not changed:
                     if seed:
@@ -164,6 +173,14 @@ class ProjectPersistence:
                 "INSERT INTO r2s_job_events(job_id,version,payload) VALUES (?,?,?)",
                 (manifest.job_id, version, event.model_dump_json()),
             )
+
+    def get_job_owner_user_id(self, job_id: str) -> str | None:
+        """Return the immutable owner of a job, or None for legacy/anonymous jobs."""
+        with self.database.transaction() as tx:
+            row = tx.execute("SELECT owner_user_id FROM r2s_jobs WHERE job_id=?", (job_id,)).fetchone()
+        if row is None:
+            raise JobNotFoundError("Không tìm thấy job")
+        return str(row[0]) if row[0] is not None else None
 
     def get_job(self, job_id: str) -> JobManifest:
         """Đọc manifest được DB commit và verify exact bytes trước khi phục vụ UI."""

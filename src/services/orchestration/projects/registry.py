@@ -129,6 +129,7 @@ class ProjectRegistry:
         self._fixture_job_id: str | None = None
         self._projects: dict[str, ProjectRecord] = {}
         self._jobs: dict[str, JobManifest] = {}
+        self._job_owners: dict[str, str | None] = {}
         self._project_jobs: dict[str, list[str]] = {}
         self._attempts: dict[str, list[JobAttemptRecord]] = {}
 
@@ -177,6 +178,7 @@ class ProjectRegistry:
                 self.persistence.save_job(job, reference, event, seed=True)
             self._projects.clear()
             self._jobs.clear()
+            self._job_owners.clear()
             self._project_jobs.clear()
             self._attempts.clear()
 
@@ -449,12 +451,15 @@ class ProjectRegistry:
         processing: JobProcessingConfig | None = None,
         *,
         requested_by: Actor | None = None,
+        owner_user_id: str | None = None,
     ) -> JobManifest:
         """Tạo job QUEUED cho một project, sau khi qua privacy gate.
 
         `processing` (Studio) được publish thành `config/processing.json` của job và
         checksum bytes của nó là `config_checksum`; không có thì dùng profile chung.
         """
+        if owner_user_id is not None and (requested_by is None or requested_by.user_id != owner_user_id):
+            raise ValueError("Job owner phải khớp tài khoản đã xác thực tạo job")
         project = self.get_project(request.project_id)
         require_project_dispatch(project)
         job_id = f"job-{uuid4().hex[:12]}"
@@ -478,12 +483,20 @@ class ProjectRegistry:
             requested_by=requested_by,
         )
         if self.persistence is not None:
-            self.persistence.save_job(job, reference, event)
+            self.persistence.save_job(job, reference, event, owner_user_id=owner_user_id)
         else:
             self._jobs[job.job_id] = job
+            self._job_owners[job.job_id] = owner_user_id
             self._project_jobs.setdefault(project.project_id, []).append(job.job_id)
             self._attempts[job.job_id] = [event]
         return job
+
+    def get_job_owner_user_id(self, job_id: str) -> str | None:
+        """Read the immutable runtime owner separately from checksum-bound JobManifest bytes."""
+        if self.persistence is not None:
+            return self.persistence.get_job_owner_user_id(job_id)
+        self.get_job(job_id)
+        return self._job_owners.get(job_id)
 
     def transition_job(
         self,

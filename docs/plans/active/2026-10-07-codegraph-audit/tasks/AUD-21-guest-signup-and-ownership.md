@@ -2,9 +2,9 @@
 
 ## Metadata và goal
 
-- IN PROGRESS — AUD-21.S1 complete; S2 is next. P1; EX-PRODUCT identity/API/Studio/runtime DB.
+- IN PROGRESS — AUD-21.S1–S3 complete; S4 follows AUD-22.S2–S3. P1; EX-PRODUCT identity/API/Studio/runtime DB.
 - Canonical PRODUCT-01/02/06/09; task-local extension, không đổi crosswalk.
-- Owner yêu cầu ngày 07/10/2026. Chỉ lập kế hoạch; chưa sửa source hoặc tài khoản.
+- Owner yêu cầu ngày 07/10/2026. S2 adds Guest signup behind a closed rollout flag; S3 adds backend ownership guards. No production account or rollout flag was changed.
 - [Agent guide](../AGENT_GUIDE.md), [ADR 0021](../../../../decisions/0021-guest-identity-and-ownership.md), [ADR 0022](../../../../decisions/0022-guest-daily-job-quota.md).
 
 ## Baseline và scope
@@ -160,9 +160,9 @@ Tests: No invite Guest success, invited roles regression, invalid/used invite, d
 **Output:** Resource guard trên mọi supported mutation; audited operator intervention.
 **Contract:** Editor/Reviewer can operate Guest jobs; Guest chỉ own.
 
-Implement: Reuse shared guard trong API/service boundaries; do not blanket downgrade require_editor globally. Check direct legacy endpoints, foreign object/artifact refs, cancel/retry/delete/restore và background publish paths. Preserve revision CAS and denied request no side effects.
+Implement: Reuse shared guard trong API/service boundaries; do not blanket downgrade require_editor on quota-gated operations. Product and Studio shared-read roots admit contributors; every supported mutation checks owner before write/queue/artifact work. Check legacy endpoints, foreign object/artifact refs, cancel/retry/delete/restore and background publish paths. Preserve revision CAS and denied request no side effects. Job creation, Retry, scene-from-upload and objectify retain explicit Editor gates until AUD-22.S2 integrates their run/admission policies.
 Tests: Direct HTTP bypass, forged owner/resource IDs, foreign cancel/delete/retry, same-parent foreign job, inactive/demoted actor, denied no enqueue/artifact write, cross-user higher roles.
-**Exit:** [ ] negative API tests bảo vệ foreign jobs và existing privileges.
+**Exit:** [x] direct API tests deny Guest mutations of foreign/unknown resources before side effects; own-job cancellation, Editor/Reviewer intervention and Reviewer-only routes remain covered.
 
 ## Sprint AUD-21.S4 — Studio permissions và rollout acceptance
 
@@ -254,3 +254,40 @@ mock hoặc source review không chứng minh feature đã chạy.
   enforcement are complete. Run the browser form gate and PostgreSQL concurrency
   variants when those runtimes are available. AUD-21.S3 must add ownership checks;
   this sprint intentionally leaves the existing Editor-only product gates intact.
+
+### AUD-21.S3 — backend ownership và interference
+
+- **Base:** `ee1f078` (`AUD-21.S2`).
+- **Implementation:** Added `require_contributor` at product/Studio shared roots so
+  Guest can use Editor-level reads and chat. Added a shared resource-owner guard
+  and wired it before project/job/scene/import/upload/metric/simulation/demo/trash
+  mutations. Guest is denied for foreign or unknown owners before queue, revision,
+  signed-URL, artifact or delete/restore side effects. Project cascades validate
+  every descendant. Jobs persist nullable immutable `owner_user_id` in migration
+  13 outside checksum-bound `JobManifest`; old jobs remain owner-unknown. Upload,
+  project and job creators survive worker/retry/trash transitions. Editor/Reviewer
+  cross-owner actions write `operator.intervention` audit rows. Reviewer-only
+  review, release, baseline and purge routes keep their explicit guards.
+- **Tests:** Added direct HTTP coverage for foreign/unknown cancel, owned database
+  job cancellation, foreign scene edit, direct-upload URL presigning, foreign
+  import, and Editor/Reviewer intervention. Added DB tests for owner immutability,
+  retry/operator actor separation, cascade denial without side effects, trash
+  restore and migration from legacy schemas. Updated the Guest shared-read/project
+  creation and reviewer-route assertions.
+- **CodeGraph evidence:** Explored auth dependencies and all product/Studio mutation
+  callers before edits; post-edit `codegraph sync` is current at 761 files,
+  13,859 nodes and 39,881 edges.
+- **Verification:** `ruff check src/ tests/` PASS; `ruff format --check src/ tests/`
+  PASS; `pytest tests/test_api -q` — 138 passed; `pytest tests/test_orchestration
+  -q` — 578 passed, 20 skipped; Studio processing/upload integration — 9 passed;
+  runtime migration tests — 10 passed, 4 skipped; `git diff --check` PASS.
+  PostgreSQL-only variants skip because `R2S_TEST_POSTGRES_URL` is unset.
+- **Gate report:** CodeGraph PASS; shared callers updated and tests cover direct
+  API access; minimal scope PASS; backend checks PASS. Browser DevTools is
+  **UNVERIFIED**: MCP reports that the Chrome profile is already running and
+  cannot attach. No rendered UI changed in S3, but the runtime permission flow has
+  not received browser acceptance.
+- **Pending:** `AUTH_GUEST_SIGNUP_ENABLED` remains false. Job creation, Retry,
+  scene-from-upload and objectify stay explicitly Editor-gated until AUD-22.S2
+  supplies the quota contract; Guest rollout also awaits AUD-22.S3, AUD-21.S4,
+  browser acceptance and PostgreSQL-specific proof.

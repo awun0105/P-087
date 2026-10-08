@@ -62,7 +62,8 @@ def _require(role: Role):  # noqa: ANN202 - trả dependency FastAPI
     return dependency
 
 
-#: Dependency cho route cần quyền Editor (Reviewer cũng qua) / chỉ Reviewer.
+#: Dependency cho routes có quyền Editor features; resource mutation cần thêm ownership guard.
+require_contributor = _require("guest")
 require_editor = _require("editor")
 require_reviewer = _require("reviewer")
 

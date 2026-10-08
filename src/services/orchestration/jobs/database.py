@@ -225,6 +225,11 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
                 payload TEXT NOT NULL)""",
         ),
     ),
+    (
+        # Immutable creator for each job; legacy jobs remain NULL until a real saved creator exists.
+        13,
+        ("ALTER TABLE r2s_jobs ADD COLUMN owner_user_id TEXT",),
+    ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 

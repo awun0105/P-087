@@ -6,7 +6,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.api.auth import require_editor
+from src.api.auth import require_contributor
+from src.api.ownership import authorize_upload_mutation
 from src.api.studio import deps
 from src.services.orchestration.auth import UserRecord
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
@@ -67,11 +68,12 @@ def _package_in_background(import_id: str, upload_id: str) -> None:
 
 @router.post("/imports", response_model=ImportedScene, status_code=status.HTTP_201_CREATED)
 def create_import(
-    request: ImportRequest, background: BackgroundTasks, user: UserRecord | None = Depends(require_editor)
+    request: ImportRequest, background: BackgroundTasks, user: UserRecord | None = Depends(require_contributor)
 ) -> ImportedScene:
     """Tạo scene import và nén PLY → SOG trong nền; client poll tới READY/FAILED."""
     try:
         upload = deps.uploads().get(request.upload_id)
+        authorize_upload_mutation(user, upload, operation="tạo scene import từ")
         record = _service().create(
             upload,
             request.name,

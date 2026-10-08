@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, FiniteFloat
 
 from src.api import schemas
-from src.api.auth import require_editor
+from src.api.auth import require_contributor
+from src.api.ownership import authorize_job_mutation
 from src.api.studio import deps
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.services.orchestration.auth import Role, UserRecord
@@ -135,12 +136,18 @@ def preview_metric(job_id: str, request: UserMetricInput) -> MetricPreviewView:
 
 @router.post("/jobs/{job_id}/metric/confirm", response_model=MetricConfirmResponse, responses=_ERRORS)
 def confirm_metric(
-    job_id: str, request: MetricConfirmRequest, user: UserRecord | None = Depends(require_editor)
+    job_id: str, request: MetricConfirmRequest, user: UserRecord | None = Depends(require_contributor)
 ) -> MetricConfirmResponse:
     """Xác nhận đúng bản xem trước; job tiếp tục sang dựng hình học ở worker."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="xác nhận hệ mét của")
+    try:
+        registry.get_job(job_id)
+    except JobNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     role: Role | None = user.role if user is not None else None
     try:
-        reference = _service(job_id).confirm(
+        reference = MetricConfirmationService(registry).confirm(
             job_id,
             request.input,
             request.preview_checksum,
