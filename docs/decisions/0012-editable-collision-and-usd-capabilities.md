@@ -99,8 +99,9 @@ density, friction, restitution, mass source, and provenance are preserved. If
 assets are limited to checksum-verified `.usd`, `.usda`, `.usdc`, and `.usdz`
 artifacts. The exporter copies source bytes under a SHA-256 relative package path,
 references them relatively, and checks the composed stage for unresolved or
-out-of-package layer dependencies. Raw catalog URLs and non-USD formats remain
-unsupported because they do not provide a checksum-bound package dependency.
+out-of-package layer dependencies. Non-USD formats remain unsupported because
+they do not provide a checksum-bound package dependency. A catalog `asset_url` is
+provenance, not a dependency (see Audit amendments).
 Runtime build errors return a capability blocker before SceneIR revision or
 candidate publication; cache reuse requires the exact config checksum and
 matching requirements.
@@ -129,7 +130,44 @@ Core 0.26.8: the floor remained in the background, the object collider used its
 current rotated pose, and a checksum-bound relative asset resolved. This proves
 the local OpenUSD composition path, not Isaac Sim execution. Recovery preserves
 historical OBB metadata as-is; it does not infer exact triangle membership or
-upgrade OBB fidelity. Ambiguous OBB overlap continues to fail closed.
+upgrade OBB fidelity. Ambiguous OBB overlap was fail-closed here; the audit
+amendments below replace that with keep-and-report.
+
+## Audit amendments (2026-10-08)
+
+A run of the exporter on a real 122-revision scene found three policies that
+blocked a correct scene. They are changed as follows.
+
+- **Overlap.** `triangle_indices` membership is authoritative over a
+  `source_obb` approximation: an OBB never reclaims a triangle that another
+  region owns exactly. Triangles still shared between a region being carved and
+  a region that stays (an unconfirmed or inactive neighbour) are kept in the
+  background and reported, not carved and not a blocker. The package records
+  `retained_shared_triangles` and `retained_shared_object_ids`; the README and the
+  Studio panel show them with the advice to confirm or delete the neighbours and
+  rebuild. Dropping a neighbour's triangles silently would be a guess; refusing
+  the export made a scene with adjacent candidates unexportable.
+- **Catalog assets.** A user-added catalog object (`provenance.asset_url`, no
+  `asset_ref`) exports as its box collider with the declared physics. The URL and
+  family are written to prim `customData real2sim:catalog` by both writers and
+  checked in the runner summary; the asset is not referenced, so the package stays
+  hermetic. The capability report carries a non-blocking
+  `CATALOG_ASSET_EXPORTED_AS_BOX` notice (`notices`, default empty so older
+  stored reports still load) and the README names the objects. A sealed
+  `asset_ref` USD artifact is unchanged and remains an external dependency.
+- **Legacy ownership recovery.** Ownership is derived from the revision that
+  extracted the object (root revision, or the first revision of a re-extraction
+  with `objectify`/`use_boxes`), not from a later moved pose. Recovery follows
+  `restored_from`, matches the earlier object by id and `geometry_ref`, and skips
+  duplicates, which share a source with their original. `SceneEditor.revision`
+  walks the committed lineage once per head and caches it, which took a 122-revision
+  scene from 94 s to 3.2 s.
+
+The hybrid ground plane now places its top face at z = 0 (translate before
+scale); it was 9.8 mm above the floor. `reobjectify` binds source ownership so a
+re-extracted object does not need legacy recovery. These changes keep the
+`usd-export-capabilities-v2` identity: the capability schema only gained an
+optional field and no stored candidate is invalidated.
 
 ## Alternatives Considered
 

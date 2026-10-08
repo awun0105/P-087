@@ -413,25 +413,30 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [ ] AUD-22.S2 shared-PostgreSQL concurrency/restart qualification; AUD-22.S3
       DevTools browser acceptance.
 - [x] Audit 2026-10-08 of rounds 1–3 (AUD-01/02/03/04/07/10/11/15), local evidence only.
-      Fixed and committed: background carve now rejects only overlaps between a carved and a
-      kept source region; legacy ownership recovery skips duplicates, matches by geometry
-      artifact, follows `restored_from`, and derives ownership from the extraction revision
-      (previously recovered nothing, so every pre-AUD-01 scene with a confirmed object could not
-      export); `reobjectify` now binds ownership to its new objects; `SceneEditor.revision()`
-      reuses the proven lineage (122-revision walk 94 s → 3 s); hybrid `GroundPlane` top was
-      +9.8 mm above z=0; a restarted worker with the same `host:pid` no longer deadlocks on its
-      leftover operation reservation. Evidence: full backend suite 1782 passed / 52 skipped;
-      `tests/test_orchestration` + `tests/test_api` on Postgres 16 779 passed, 0 skipped
-      (single process; multi-process/restart and the deployment database remain pending).
-      Real-data probes on copies of the local DB/artifacts: head backfill for the 4 scene jobs
-      (including the 122-revision chain) completes, and a real scene exported end to end to a
-      hybrid package that opens in OpenUSD. Open product decisions: (1) with OBB-only ownership,
-      a confirmed object whose box overlaps a kept candidate blocks export (5 such pairs in the
-      122-revision scene) until AUD-08 exact membership or an explicit rule exists; (2) catalog
-      assets (`asset_url`) can no longer be exported because they cannot be sealed as artifacts;
-      (3) completed worker validation runs make a data package unpublishable until an
-      authenticated receipt exists. After the API first migrates `runtime.db`, run
-      `scripts.studio.scene_head --apply` per job or those 4 scenes return SceneNotAvailable.
+      Fixed and committed: the background carve keeps and reports triangles shared between a
+      carved and an unresolved source region (exact `triangle_indices` membership wins over an
+      OBB), so adjacent candidates neither block export nor lose triangles silently; catalog
+      assets (`asset_url`) export as their box collider with `real2sim:catalog` provenance and a
+      non-blocking `CATALOG_ASSET_EXPORTED_AS_BOX` notice (ADR 0012, Audit amendments); legacy
+      ownership recovery skips duplicates, matches by geometry artifact, follows `restored_from`,
+      and derives ownership from the extraction revision (previously recovered nothing, so every
+      pre-AUD-01 scene with a confirmed object could not export); `reobjectify` now binds
+      ownership to its new objects; `SceneEditor.revision()` reuses the proven lineage
+      (122-revision walk 94 s → 3 s); hybrid `GroundPlane` top was +9.8 mm above z=0; a restarted
+      worker with the same `host:pid` no longer deadlocks on its leftover operation reservation.
+      Evidence: full backend suite 1842 passed / 52 skipped (clean worktree); frontend 351
+      passed; `tests/test_orchestration` + `tests/test_api` on Postgres 16 779 passed, 0
+      skipped before the catalog change (single process; multi-process/restart and the
+      deployment database remain pending). Real-data probes on copies of the local DB/artifacts:
+      head backfill for the 4 scene jobs (including the 122-revision chain) completes; the
+      122-revision scene, with its 4 buried objects lifted onto the floor, exports 11 catalog
+      objects as boxes to a hybrid package (preflight PASS, capability supported, 19 objects,
+      11 with `real2sim:catalog`, no remote layers) that opens in OpenUSD. Open product
+      decision: completed worker validation runs make a data package unpublishable until an
+      authenticated receipt exists. Objects placed below the floor still fail
+      `OBJECT_OUT_OF_BOUNDS` by design; the user moves them. After the API first migrates
+      `runtime.db`, run `scripts.studio.scene_head --apply` per job or those 4 scenes return
+      SceneNotAvailable.
 
 - [ ] Audit 2026-10-08 follow-ups for rounds 4–6. Fixed: AUD-23.S5's SDR color check raised
       `AttributeError` (HTTP 500) when the output color reported no transfer. AUD-24.S2 now
