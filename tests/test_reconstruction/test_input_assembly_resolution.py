@@ -273,7 +273,9 @@ def test_sog_validator_rejects_unsupported_versions(tmp_path: Path) -> None:
 
 def test_text_probes_detect_trajectory_times_and_ambiguous_calibration(tmp_path: Path) -> None:
     frame_times = _upload(_write(tmp_path, "anything.dat", b"0.0\n0.1\n0.2\n"))
-    assert frame_times.files[0].observed_format.value == "rgb_frame_times"
+    assert frame_times.files[0].observed_format.value == "timestamp_rows"
+    assert set(frame_times.probes[0].candidate_roles) == {InputRole.RGB_FRAME_TIMES, InputRole.LIDAR_SCAN_TIMES}
+    assert frame_times.probes[0].observed_roles == ()
     assert frame_times.probes[0].record_count == 3
 
     tum_text = b"0 0 0 0 0 0 0 1\n1 1 0 0 0 0 0 1\n"
@@ -282,7 +284,7 @@ def test_text_probes_detect_trajectory_times_and_ambiguous_calibration(tmp_path:
     assert len(tum.files[0].role_evidence) == 0  # sensor/camera convention is not visible in TUM syntax
 
     invalid_times = _upload(_write(tmp_path, "times.txt", b"0\n2\n1\n"))
-    assert invalid_times.probes[0].diagnostics[0][0] == "invalid_frame_times"
+    assert invalid_times.probes[0].diagnostics[0][0] == "invalid_timestamp_rows"
 
     invalid_trajectory = _upload(_write(tmp_path, "poses.txt", b"0 0 0 0 0 0 0 1\n2 0 0 0 0 0 0 1\n1 0 0 0 0 0 0 1\n"))
     assert invalid_trajectory.probes[0].diagnostics[0][0] == "invalid_tum_trajectory"
@@ -418,7 +420,155 @@ def test_raw_scan_order_is_never_inferred_from_member_names(tmp_path: Path) -> N
     assert report.state == InputResolutionState.NEEDS_INPUT
     assert report.candidates[0].recipe_group == RecipeGroup.ESTIMATED_TRAJECTORY
     assert report.candidates[0].state == CandidateState.NEEDS_INPUT
-    assert "SCAN_SEQUENCE_ORDER_REQUIRED" in {fact.code for fact in report.missing_facts}
+    assert {"SCAN_SEQUENCE_ORDER_REQUIRED", "LIDAR_SCAN_TIMESTAMPS_REQUIRED"}.issubset(
+        {fact.code for fact in report.missing_facts}
+    )
+
+
+def test_single_scan_cannot_enter_raw_scan_odometry_recipe(tmp_path: Path) -> None:
+    video = _upload(_write(tmp_path, "video.mp4", _video()), upload_id="video-upload", file_id="video-file")
+    scan = _upload(
+        _write(
+            tmp_path,
+            "scan.pcd",
+            b"# .PCD v0.7\nVERSION 0.7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nWIDTH 1\nHEIGHT 1\nPOINTS 1\nDATA ascii\n0 0 0\n",
+        ),
+        upload_id="scan-upload",
+        file_id="scan-file",
+    )
+    assembly, probes = _assembly(
+        [video, scan],
+        declarations={
+            "cloud_state": EvidenceValue(
+                value=CloudObservationState.RAW_SCAN_SEQUENCE, provenance="declared"
+            ).model_dump(mode="json")
+        },
+    )
+
+    report = resolve_input_assembly(assembly, _registry(_wired(RuntimeCapabilityKey.R5)), probes)
+
+    assert "SCAN_SEQUENCE_NEEDS_MULTIPLE_FILES" in {fact.code for fact in report.missing_facts}
+    assert not any(candidate.recipe_group == RecipeGroup.ESTIMATED_TRAJECTORY for candidate in report.candidates)
+
+
+def test_one_timestamp_file_cannot_bind_both_rgb_and_lidar_roles(tmp_path: Path) -> None:
+    video = _upload(_write(tmp_path, "video.mp4", _video()), upload_id="video-upload", file_id="video-file")
+    scan = b"# .PCD v0.7\nVERSION 0.7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nWIDTH 1\nHEIGHT 1\nPOINTS 1\nDATA ascii\n0 0 0\n"
+    scans = _upload(
+        _zip(tmp_path / "scans.zip", {"scan_001.pcd": scan, "scan_002.pcd": scan}),
+        upload_id="scan-upload",
+        file_id="scan-archive",
+    )
+    timestamps = _upload(
+        _write(tmp_path, "timestamps.txt", b"0.0\n0.1\n"),
+        upload_id="timestamps-upload",
+        file_id="timestamps-file",
+    )
+    scan_ids = sorted(item.file_id for item in scans.files)
+    assembly, probes = _assembly(
+        [video, scans, timestamps],
+        bindings=[
+            InputBinding(binding_id="ordered-scans", role=InputRole.LIDAR_SCAN, file_ids=scan_ids),
+            InputBinding(binding_id="rgb-times", role=InputRole.RGB_FRAME_TIMES, file_ids=["timestamps-file"]),
+            InputBinding(binding_id="lidar-times", role=InputRole.LIDAR_SCAN_TIMES, file_ids=["timestamps-file"]),
+        ],
+        declarations={
+            "cloud_state": EvidenceValue(
+                value=CloudObservationState.RAW_SCAN_SEQUENCE, provenance="declared"
+            ).model_dump(mode="json"),
+        },
+    )
+
+    report = resolve_input_assembly(assembly, _registry(_wired(RuntimeCapabilityKey.R5)), probes)
+
+    conflict = next(item for item in report.diagnostics if item.code == "TIMESTAMP_FILE_ROLE_CONFLICT")
+    assert conflict.severity == "error"
+    assert conflict.related_file_ids == ["timestamps-file"]
+
+
+def test_r5_requires_exact_ordered_lidar_timestamps_and_stays_unqualified(tmp_path: Path) -> None:
+    video = _upload(_write(tmp_path, "video.mp4", _video()), upload_id="video-upload", file_id="video-file")
+    scan = b"# .PCD v0.7\nVERSION 0.7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nWIDTH 1\nHEIGHT 1\nPOINTS 1\nDATA ascii\n0 0 0\n"
+    scans = _upload(
+        _zip(tmp_path / "scans.zip", {"scan_001.pcd": scan, "scan_002.pcd": scan}),
+        upload_id="scan-upload",
+        file_id="scan-archive",
+    )
+    scan_ids = sorted(item.file_id for item in scans.files)
+    scan_times = _upload(
+        _write(tmp_path, "sensor_times.txt", b"0.0\n0.1\n"),
+        upload_id="times-upload",
+        file_id="times-file",
+    )
+    declarations = {
+        "cloud_state": EvidenceValue(value=CloudObservationState.RAW_SCAN_SEQUENCE, provenance="declared").model_dump(
+            mode="json"
+        ),
+        "same_scene": EvidenceValue(value=True, provenance="declared").model_dump(mode="json"),
+        "coordinate_unit": EvidenceValue(value="m", provenance="declared").model_dump(mode="json"),
+        "lidar_frame_id": EvidenceValue(value="lidar", provenance="declared").model_dump(mode="json"),
+        "lidar_timestamp_unit": EvidenceValue(value="seconds", provenance="declared").model_dump(mode="json"),
+    }
+    assembly, probes = _assembly(
+        [video, scans, scan_times],
+        bindings=[
+            InputBinding(binding_id="ordered-scans", role=InputRole.LIDAR_SCAN, file_ids=scan_ids),
+            InputBinding(binding_id="lidar-times", role=InputRole.LIDAR_SCAN_TIMES, file_ids=["times-file"]),
+        ],
+        declarations=declarations,
+    )
+
+    report = resolve_input_assembly(assembly, _registry(_wired(RuntimeCapabilityKey.R5)), probes)
+    r5 = next(
+        candidate for candidate in report.candidates if candidate.recipe_group == RecipeGroup.ESTIMATED_TRAJECTORY
+    )
+
+    assert report.state == InputResolutionState.PENDING_VERIFICATION
+    assert r5.state == CandidateState.PENDING_VERIFICATION
+    assert [binding.role for binding in r5.bindings] == [
+        InputRole.RGB_VIDEO,
+        InputRole.LIDAR_SCAN,
+        InputRole.LIDAR_SCAN_TIMES,
+    ]
+    assert r5.runtime.status == RuntimeQualificationStatus.WIRED_UNQUALIFIED
+    assert not r5.required_facts
+
+
+def test_r5_timestamp_count_mismatch_blocks_the_estimated_recipe(tmp_path: Path) -> None:
+    video = _upload(_write(tmp_path, "video.mp4", _video()), upload_id="video-upload", file_id="video-file")
+    scan = b"# .PCD v0.7\nVERSION 0.7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nWIDTH 1\nHEIGHT 1\nPOINTS 1\nDATA ascii\n0 0 0\n"
+    scans = _upload(
+        _zip(tmp_path / "scans.zip", {"scan_001.pcd": scan, "scan_002.pcd": scan}),
+        upload_id="scan-upload",
+        file_id="scan-archive",
+    )
+    scan_ids = sorted(item.file_id for item in scans.files)
+    scan_times = _upload(_write(tmp_path, "sensor_times.txt", b"0.0\n"), upload_id="times-upload", file_id="times-file")
+    assembly, probes = _assembly(
+        [video, scans, scan_times],
+        bindings=[
+            InputBinding(binding_id="ordered-scans", role=InputRole.LIDAR_SCAN, file_ids=scan_ids),
+            InputBinding(binding_id="lidar-times", role=InputRole.LIDAR_SCAN_TIMES, file_ids=["times-file"]),
+        ],
+        declarations={
+            "cloud_state": EvidenceValue(
+                value=CloudObservationState.RAW_SCAN_SEQUENCE, provenance="declared"
+            ).model_dump(mode="json"),
+            "same_scene": EvidenceValue(value=True, provenance="declared").model_dump(mode="json"),
+            "coordinate_unit": EvidenceValue(value="m", provenance="declared").model_dump(mode="json"),
+            "lidar_frame_id": EvidenceValue(value="lidar", provenance="declared").model_dump(mode="json"),
+            "lidar_timestamp_unit": EvidenceValue(value="seconds", provenance="declared").model_dump(mode="json"),
+        },
+    )
+
+    report = resolve_input_assembly(assembly, _registry(_qualified(RuntimeCapabilityKey.R5)), probes)
+    r5 = next(
+        candidate for candidate in report.candidates if candidate.recipe_group == RecipeGroup.ESTIMATED_TRAJECTORY
+    )
+
+    assert report.state == InputResolutionState.NEEDS_INPUT
+    assert r5.state == CandidateState.NEEDS_INPUT
+    assert "LIDAR_SCAN_TIMESTAMPS_COUNT_MISMATCH" in {fact.code for fact in r5.required_facts}
 
 
 def test_r6_blocks_supplied_trajectory_with_mismatched_scan_count(tmp_path: Path) -> None:

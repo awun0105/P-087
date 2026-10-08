@@ -76,6 +76,8 @@ interface StoredInputDraft {
   account_id: string;
   uploads: { upload_id: string; original_name: string; included: boolean; preset: VideoResolutionPreset }[];
   scan_order: string[];
+  rgb_frame_times_file_id?: string;
+  lidar_scan_times_file_id?: string;
   intent: InputWorkflowIntent | null;
   cloud_state: DeclarationChoice<CloudObservationState>;
   same_scene: "" | "yes" | "no";
@@ -84,7 +86,9 @@ interface StoredInputDraft {
   trajectory_convention: DeclarationChoice<TrajectoryConvention>;
   clock_relation: DeclarationChoice<"same_clock" | "known_offset" | "unknown">;
   clock_offset: string;
-  timestamp_unit: DeclarationChoice<"seconds" | "milliseconds" | "microseconds" | "nanoseconds">;
+  timestamp_unit?: DeclarationChoice<"seconds" | "milliseconds" | "microseconds" | "nanoseconds">;
+  rgb_timestamp_unit?: DeclarationChoice<"seconds" | "milliseconds" | "microseconds" | "nanoseconds">;
+  lidar_timestamp_unit?: DeclarationChoice<"seconds" | "milliseconds" | "microseconds" | "nanoseconds">;
   scene_name: string;
   data_origin: DataOrigin | "";
   data_owner: string;
@@ -124,11 +128,14 @@ function parseInputDraft(raw: string, accountId: string): StoredInputDraft | nul
       Boolean(item && typeof item.upload_id === "string" && item.upload_id && typeof item.original_name === "string" &&
         typeof item.included === "boolean" && ["1080p", "720p", "480p"].includes(item.preset))
     );
+    const legacyTimestampUnit = choiceValue(draft.timestamp_unit, ["seconds", "milliseconds", "microseconds", "nanoseconds"]);
     return {
       schema_version: 1,
       account_id: accountId,
       uploads,
       scan_order: draft.scan_order.filter((item): item is string => typeof item === "string"),
+      rgb_frame_times_file_id: typeof draft.rgb_frame_times_file_id === "string" ? draft.rgb_frame_times_file_id : "",
+      lidar_scan_times_file_id: typeof draft.lidar_scan_times_file_id === "string" ? draft.lidar_scan_times_file_id : "",
       intent: draft.intent === "video_reconstruction" || draft.intent === "gaussian_view_import" ? draft.intent : null,
       cloud_state: choiceValue(draft.cloud_state, ["registered_map", "single_static_cloud", "raw_scan_sequence"]),
       same_scene: choiceValue(draft.same_scene, ["yes", "no"]),
@@ -137,7 +144,9 @@ function parseInputDraft(raw: string, accountId: string): StoredInputDraft | nul
       trajectory_convention: choiceValue(draft.trajectory_convention, ["world_from_sensor", "world_from_camera", "unknown"]),
       clock_relation: choiceValue(draft.clock_relation, ["same_clock", "known_offset", "unknown"]),
       clock_offset: typeof draft.clock_offset === "string" ? draft.clock_offset.slice(0, 64) : "",
-      timestamp_unit: choiceValue(draft.timestamp_unit, ["seconds", "milliseconds", "microseconds", "nanoseconds"]),
+      timestamp_unit: legacyTimestampUnit,
+      rgb_timestamp_unit: choiceValue(draft.rgb_timestamp_unit, ["seconds", "milliseconds", "microseconds", "nanoseconds"]) || legacyTimestampUnit,
+      lidar_timestamp_unit: choiceValue(draft.lidar_timestamp_unit, ["seconds", "milliseconds", "microseconds", "nanoseconds"]) || legacyTimestampUnit,
       scene_name: typeof draft.scene_name === "string" ? draft.scene_name.slice(0, 200) : "",
       data_origin: choiceValue(draft.data_origin, ["public_or_synthetic", "self_collected_no_pii", "anonymized"]),
       data_owner: typeof draft.data_owner === "string" ? draft.data_owner.slice(0, 200) : "",
@@ -204,7 +213,8 @@ function formatLabel(format: string): string {
     calibration_json: "Calibration JSON",
     calibration_torwic_text: "Calibration text",
     tum_trajectory: "Trajectory TUM",
-    rgb_frame_times: "RGB frame times",
+    rgb_frame_times: "RGB frame times (legacy)",
+    timestamp_rows: "Timestamp rows (chưa gán vai trò)",
     zip_unknown: "ZIP cần kiểm tra thành phần",
     unknown: "Định dạng chưa nhận diện",
   };
@@ -252,12 +262,14 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   const pathname = usePathname();
   const params = useSearchParams();
   const { me, refresh } = useAuth();
-  const ids = { upload: useId(), intent: useId(), name: useId(), owner: useId(), origin: useId(), purpose: useId() };
+  const ids = { upload: useId(), intent: useId(), name: useId(), owner: useId(), origin: useId(), purpose: useId(), rgbTimes: useId(), lidarTimes: useId() };
   const draftKey = inputDraftKey(accountId);
   const [entries, setEntries] = useState<InputEntry[]>([]);
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [scanOrder, setScanOrder] = useState<string[]>([]);
   const [scanOrderConfirmed, setScanOrderConfirmed] = useState(false);
+  const [rgbFrameTimesFileId, setRgbFrameTimesFileId] = useState("");
+  const [lidarScanTimesFileId, setLidarScanTimesFileId] = useState("");
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -275,7 +287,8 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   const [trajectoryConvention, setTrajectoryConvention] = useState<DeclarationChoice<TrajectoryConvention>>("");
   const [clockRelation, setClockRelation] = useState<DeclarationChoice<"same_clock" | "known_offset" | "unknown">>("");
   const [clockOffset, setClockOffset] = useState("");
-  const [timestampUnit, setTimestampUnit] = useState<DeclarationChoice<"seconds" | "milliseconds" | "microseconds" | "nanoseconds">>("");
+  const [rgbTimestampUnit, setRgbTimestampUnit] = useState<DeclarationChoice<"seconds" | "milliseconds" | "microseconds" | "nanoseconds">>("");
+  const [lidarTimestampUnit, setLidarTimestampUnit] = useState<DeclarationChoice<"seconds" | "milliseconds" | "microseconds" | "nanoseconds">>("");
   const [sceneName, setSceneName] = useState("");
   const [dataOrigin, setDataOrigin] = useState<DataOrigin | "">("");
   const [dataOwner, setDataOwner] = useState("");
@@ -303,6 +316,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   const observedVideos = stagedFiles.filter((item) => VIDEO_FORMATS.has(item.observed_format));
   const observedGaussians = stagedFiles.filter((item) => GAUSSIAN_FORMATS.has(item.observed_format));
   const observedClouds = stagedFiles.filter((item) => CLOUD_FORMATS.has(item.observed_format));
+  const timestampFiles = stagedFiles.filter((item) => item.observed_format === "timestamp_rows" || item.observed_format === "rgb_frame_times");
   const hasMixedSceneKinds = observedVideos.length > 0 && observedGaussians.length > 0;
   const activeCandidate = report?.candidates.find((item) => item.candidate_id === selectedCandidateId) ??
     report?.candidates.find((item) => item.candidate_id === report.recommended_candidate_id) ?? null;
@@ -401,6 +415,11 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         .filter((item) => CLOUD_FORMATS.has(item.observed_format)).map((item) => item.file_id) ?? []);
       const ordered = draft.scan_order.filter((id) => cloudIds.includes(id));
       setScanOrder([...ordered, ...cloudIds.filter((id) => !ordered.includes(id))]);
+      const timestampIds = new Set(restored.filter((entry) => entry.included).flatMap((entry) => entry.staged?.staged_files
+        .filter((item) => item.observed_format === "timestamp_rows" || item.observed_format === "rgb_frame_times")
+        .map((item) => item.file_id) ?? []));
+      setRgbFrameTimesFileId(timestampIds.has(draft.rgb_frame_times_file_id ?? "") ? draft.rgb_frame_times_file_id! : "");
+      setLidarScanTimesFileId(timestampIds.has(draft.lidar_scan_times_file_id ?? "") ? draft.lidar_scan_times_file_id! : "");
       setIntent(draft.intent);
       setCloudState(draft.cloud_state);
       setSameScene(draft.same_scene);
@@ -409,7 +428,8 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       setTrajectoryConvention(draft.trajectory_convention);
       setClockRelation(draft.clock_relation);
       setClockOffset(draft.clock_offset);
-      setTimestampUnit(draft.timestamp_unit);
+      setRgbTimestampUnit(draft.rgb_timestamp_unit ?? "");
+      setLidarTimestampUnit(draft.lidar_timestamp_unit ?? "");
       setSceneName(draft.scene_name);
       setDataOrigin(draft.data_origin);
       setDataOwner(draft.data_owner);
@@ -437,11 +457,16 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       }
       const liveCloudIds = new Set(entries.flatMap((entry) => entry.staged?.staged_files
         .filter((item) => CLOUD_FORMATS.has(item.observed_format)).map((item) => item.file_id) ?? []));
+      const liveTimestampIds = new Set(entries.filter((entry) => entry.included).flatMap((entry) => entry.staged?.staged_files
+        .filter((item) => item.observed_format === "timestamp_rows" || item.observed_format === "rgb_frame_times")
+        .map((item) => item.file_id) ?? []));
       const draft: StoredInputDraft = {
         schema_version: 1,
         account_id: accountId,
         uploads,
         scan_order: scanOrder.filter((id) => liveCloudIds.has(id)),
+        rgb_frame_times_file_id: liveTimestampIds.has(rgbFrameTimesFileId) ? rgbFrameTimesFileId : "",
+        lidar_scan_times_file_id: liveTimestampIds.has(lidarScanTimesFileId) ? lidarScanTimesFileId : "",
         intent,
         cloud_state: cloudState,
         same_scene: sameScene,
@@ -450,7 +475,8 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         trajectory_convention: trajectoryConvention,
         clock_relation: clockRelation,
         clock_offset: clockOffset,
-        timestamp_unit: timestampUnit,
+        rgb_timestamp_unit: rgbTimestampUnit,
+        lidar_timestamp_unit: lidarTimestampUnit,
         scene_name: sceneName,
         data_origin: dataOrigin,
         data_owner: dataOwner,
@@ -460,7 +486,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     } catch {
       // Tab-scoped recovery is best-effort when the browser disables session storage.
     }
-  }, [accountId, cloudState, clockOffset, clockRelation, coordinateUnit, dataOrigin, dataOwner, dataPurpose, draftKey, draftLoaded, entries, intent, lidarFrameId, sameScene, scanOrder, sceneName, timestampUnit, trajectoryConvention]);
+  }, [accountId, cloudState, clockOffset, clockRelation, coordinateUnit, dataOrigin, dataOwner, dataPurpose, draftKey, draftLoaded, entries, intent, lidarFrameId, lidarScanTimesFileId, rgbFrameTimesFileId, lidarTimestampUnit, rgbTimestampUnit, sameScene, scanOrder, sceneName, trajectoryConvention]);
 
   useEffect(() => {
     const legacyUploadId = params.get("upload");
@@ -624,6 +650,14 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     if (prepared) void prepared.dispose().catch(() => undefined);
     setEntries((current) => current.filter((item) => item.id !== entryId));
     setScanOrder((current) => current.filter((id) => !removedFileIds.has(id)));
+    setRgbFrameTimesFileId((current) => removedFileIds.has(current) ? "" : current);
+    setLidarScanTimesFileId((current) => removedFileIds.has(current) ? "" : current);
+    if (removedFileIds.has(rgbFrameTimesFileId)) setRgbTimestampUnit("");
+    if (removedFileIds.has(lidarScanTimesFileId)) setLidarTimestampUnit("");
+    setBindings((current) => current.filter((item) =>
+      !["rgb_frame_times", "lidar_scan_times"].includes(item.role) ||
+      !item.file_ids.some((fileId) => removedFileIds.has(fileId)),
+    ));
     setScanOrderConfirmed(false);
     if (removed?.staged && removed.staged.staged_files.some((item) => VIDEO_FORMATS.has(item.observed_format))) {
       setRights(false);
@@ -634,7 +668,19 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   }
 
   function setIncluded(entryId: string, included: boolean) {
+    const entry = entries.find((item) => item.id === entryId);
+    const excludedFileIds = new Set(included ? [] : entry?.staged?.staged_files.map((item) => item.file_id) ?? []);
     setEntries((current) => current.map((item) => item.id === entryId ? { ...item, included } : item));
+    setRgbFrameTimesFileId((current) => excludedFileIds.has(current) ? "" : current);
+    setLidarScanTimesFileId((current) => excludedFileIds.has(current) ? "" : current);
+    if (excludedFileIds.has(rgbFrameTimesFileId)) setRgbTimestampUnit("");
+    if (excludedFileIds.has(lidarScanTimesFileId)) setLidarTimestampUnit("");
+    if (!included) {
+      setBindings((current) => current.filter((item) => ![
+        ...(excludedFileIds.has(rgbFrameTimesFileId) ? ["rgb_frame_times"] : []),
+        ...(excludedFileIds.has(lidarScanTimesFileId) ? ["lidar_scan_times"] : []),
+      ].includes(item.role)));
+    }
     setScanOrderConfirmed(false);
     invalidateResolution();
   }
@@ -650,7 +696,9 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       trajectory_convention: evidence(trajectoryConvention || null),
       clock_relation: evidence(clockRelation || null),
       clock_offset_seconds: Number.isFinite(offset) && offset !== null ? evidence(offset) : null,
-      timestamp_unit: evidence(timestampUnit || null),
+      timestamp_unit: null,
+      rgb_timestamp_unit: evidence(rgbTimestampUnit || null),
+      lidar_timestamp_unit: evidence(lidarTimestampUnit || null),
     };
   }
 
@@ -658,11 +706,19 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     nextIntent: InputWorkflowIntent | null = intent,
     nextBindings: InputBinding[] = bindings,
     cloudOverride?: CloudObservationState | null,
+    includeTimeSelections = true,
   ): InputAssemblyWriteRequest {
+    const timeBindings: InputBinding[] = [];
+    if (includeTimeSelections && timestampFiles.some((item) => item.file_id === rgbFrameTimesFileId)) {
+      timeBindings.push({ binding_id: "binding-rgb-frame-times", role: "rgb_frame_times", file_ids: [rgbFrameTimesFileId] });
+    }
+    if (includeTimeSelections && timestampFiles.some((item) => item.file_id === lidarScanTimesFileId)) {
+      timeBindings.push({ binding_id: "binding-lidar-scan-times", role: "lidar_scan_times", file_ids: [lidarScanTimesFileId] });
+    }
     return {
       upload_ids: [...new Set(stagedEntries.map((item) => item.staged!.upload_id))],
       declarations: buildDeclarations(cloudOverride),
-      bindings: nextBindings,
+      bindings: mergeBindings(nextBindings, timeBindings),
       requested_intent: nextIntent,
     };
   }
@@ -671,6 +727,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     nextIntent: InputWorkflowIntent | null = intent,
     nextBindings: InputBinding[] = bindings,
     cloudOverride?: CloudObservationState | null,
+    includeTimeSelections = true,
   ) {
     if (busy || adding) return;
     if (includedEntries.some((item) => item.status !== "ready" || !item.staged)) {
@@ -691,7 +748,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     setReport(null);
     setSnapshot(null);
     try {
-      const request = writeRequest(nextIntent, nextBindings, cloudOverride);
+      const request = writeRequest(nextIntent, nextBindings, cloudOverride, includeTimeSelections);
       const next = snapshot
         ? await reviseInputAssembly(snapshot.assembly_id, snapshot.revision, request)
         : await createInputAssembly(request);
@@ -700,7 +757,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       setReport(resolved.report);
       setSelectedCandidateId(resolved.report.recommended_candidate_id);
       setIntent(nextIntent);
-      setBindings(nextBindings);
+      setBindings(request.bindings);
       if (cloudOverride !== undefined) setCloudState(cloudOverride ?? "");
     } catch (cause: unknown) {
       setError(errorMessage(cause, "Không phân tích được tập input."));
@@ -730,7 +787,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     }
     const nextCloud = cloudStateFrom(candidate);
     setSelectedCandidateId(candidate.candidate_id);
-    await analyze(nextIntent, nextBindings, nextCloud === null ? undefined : nextCloud);
+    await analyze(nextIntent, nextBindings, nextCloud === null ? undefined : nextCloud, false);
   }
 
   async function submitReadyRoute(event: React.FormEvent) {
@@ -852,7 +909,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
           <label htmlFor={ids.upload} className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl px-4 py-8 text-center outline-none focus-within:ring-3 focus-within:ring-ember/30">
             <FileUp className="size-8 text-ember-strong" aria-hidden />
             <span className="font-semibold text-ink">Thả tất cả file vào đây hoặc chọn từ máy</span>
-            <span className="max-w-2xl text-sm text-ink-muted">Hỗ trợ video MP4/MOV, point cloud PLY/PCD, calibration, trajectory TUM, RGB frame times, Gaussian PLY/SOG và ZIP. Hệ thống xác định vai trò theo nội dung.</span>
+            <span className="max-w-2xl text-sm text-ink-muted">Hỗ trợ video MP4/MOV, point cloud PLY/PCD, calibration, trajectory TUM, timestamp RGB/LiDAR, Gaussian PLY/SOG và ZIP. Hệ thống xác định vai trò theo nội dung.</span>
           </label>
           {adding && <p className="text-center text-sm text-ink-muted" role="status">Đang đọc danh sách file…</p>}
         </Card>
@@ -943,13 +1000,64 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         </Card>
       )}
 
+      {timestampFiles.length > 0 && (
+        <Card className="mt-5 p-5 sm:p-6">
+          <h2 className="text-base font-bold">Gán vai trò cho file timestamp</h2>
+          <p className="mt-1 text-sm text-ink-muted">Các dòng số không tự cho biết là thời gian camera hay LiDAR. Chọn đúng file cho từng cảm biến; resolver sẽ kiểm tra thứ tự và số dòng.</p>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <label htmlFor={ids.rgbTimes} className="text-sm">File timestamp của frame RGB
+              <select id={ids.rgbTimes} value={rgbFrameTimesFileId} onChange={(event) => { const fileId = event.target.value; setRgbFrameTimesFileId(fileId); if (fileId !== rgbFrameTimesFileId) setRgbTimestampUnit(""); if (fileId && fileId === lidarScanTimesFileId) { setLidarScanTimesFileId(""); setLidarTimestampUnit(""); } setBindings((current) => current.filter((item) => item.role !== "rgb_frame_times" && !(fileId && fileId === lidarScanTimesFileId && item.role === "lidar_scan_times"))); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
+                <option value="">Chưa gán</option>
+                {timestampFiles.map((file) => <option key={file.file_id} value={file.file_id} disabled={file.file_id === lidarScanTimesFileId}>{fileNamesById.get(file.file_id) ?? file.file_id}</option>)}
+              </select>
+            </label>
+            {rgbFrameTimesFileId && (
+              <label className="text-sm">Đơn vị timestamp RGB
+                <select value={rgbTimestampUnit} onChange={(event) => { setRgbTimestampUnit(event.target.value as DeclarationChoice<"seconds" | "milliseconds" | "microseconds" | "nanoseconds">); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
+                  <option value="">Chưa xác nhận</option><option value="seconds">Giây (s)</option><option value="milliseconds">Mili giây (ms)</option><option value="microseconds">Micro giây (µs)</option><option value="nanoseconds">Nano giây (ns)</option>
+                </select>
+              </label>
+            )}
+            {cloudState === "raw_scan_sequence" && (
+              <>
+                <label htmlFor={ids.lidarTimes} className="text-sm">File có một timestamp cho mỗi scan LiDAR
+                  <select id={ids.lidarTimes} value={lidarScanTimesFileId} onChange={(event) => { const fileId = event.target.value; setLidarScanTimesFileId(fileId); if (fileId !== lidarScanTimesFileId) setLidarTimestampUnit(""); if (fileId && fileId === rgbFrameTimesFileId) { setRgbFrameTimesFileId(""); setRgbTimestampUnit(""); } setBindings((current) => current.filter((item) => item.role !== "lidar_scan_times" && !(fileId && fileId === rgbFrameTimesFileId && item.role === "rgb_frame_times"))); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
+                    <option value="">Chưa gán</option>
+                    {timestampFiles.map((file) => <option key={file.file_id} value={file.file_id} disabled={file.file_id === rgbFrameTimesFileId}>{fileNamesById.get(file.file_id) ?? file.file_id}</option>)}
+                  </select>
+                </label>
+                {lidarScanTimesFileId && (
+                  <label className="text-sm">Đơn vị timestamp LiDAR
+                    <select value={lidarTimestampUnit} onChange={(event) => { setLidarTimestampUnit(event.target.value as DeclarationChoice<"seconds" | "milliseconds" | "microseconds" | "nanoseconds">); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
+                      <option value="">Chưa xác nhận</option><option value="seconds">Giây (s)</option><option value="milliseconds">Mili giây (ms)</option><option value="microseconds">Micro giây (µs)</option><option value="nanoseconds">Nano giây (ns)</option>
+                    </select>
+                  </label>
+                )}
+              </>
+            )}
+          </div>
+          {rgbFrameTimesFileId && (lidarScanTimesFileId || stagedFiles.some((item) => item.observed_format === "tum_trajectory")) && (
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <label className="text-sm">Quan hệ đồng hồ giữa video và LiDAR
+                <select value={clockRelation} onChange={(event) => { setClockRelation(event.target.value as DeclarationChoice<"same_clock" | "known_offset" | "unknown">); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
+                  <option value="">Chưa xác nhận</option><option value="same_clock">Cùng đồng hồ</option><option value="known_offset">Biết độ lệch</option><option value="unknown">Không biết</option>
+                </select>
+              </label>
+              {clockRelation === "known_offset" && <label className="text-sm">Độ lệch đồng hồ (giây)
+                <input type="number" step="any" value={clockOffset} onChange={(event) => { setClockOffset(event.target.value); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3" />
+              </label>}
+            </div>
+          )}
+        </Card>
+      )}
+
       {observedClouds.length > 0 && (
         <Card className="mt-5 p-5 sm:p-6">
           <h2 className="text-base font-bold">Thông tin LiDAR cần khai báo</h2>
           <p className="mt-1 text-sm text-ink-muted">Các giá trị này do bạn khai báo; hệ thống không suy ra đơn vị, scene hoặc frame từ tên file.</p>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <label className="text-sm">Trạng thái cloud
-              <select value={cloudState} onChange={(event) => { setCloudState(event.target.value as DeclarationChoice<CloudObservationState>); setBindings((current) => current.filter((item) => !["registered_lidar_map", "static_lidar_cloud", "lidar_scan"].includes(item.role))); setScanOrderConfirmed(false); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
+              <select value={cloudState} onChange={(event) => { const nextCloudState = event.target.value as DeclarationChoice<CloudObservationState>; setCloudState(nextCloudState); if (nextCloudState !== "raw_scan_sequence") { setLidarScanTimesFileId(""); setLidarTimestampUnit(""); } setBindings((current) => current.filter((item) => !["registered_lidar_map", "static_lidar_cloud", "lidar_scan"].includes(item.role) && (nextCloudState === "raw_scan_sequence" || item.role !== "lidar_scan_times"))); setScanOrderConfirmed(false); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
                 <option value="">Chọn trạng thái</option><option value="registered_map">Map đã đăng ký</option><option value="single_static_cloud">Một cloud quan sát tĩnh</option><option value="raw_scan_sequence">Chuỗi scan thô theo thời gian</option>
               </select>
             </label>
@@ -973,23 +1081,6 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
                 <option value="">Chọn quy ước</option><option value="world_from_sensor">world_from_sensor (LiDAR)</option><option value="world_from_camera">world_from_camera (camera)</option><option value="unknown">Chưa biết</option>
               </select>
             </label>
-          )}
-          {stagedFiles.some((item) => item.observed_format === "tum_trajectory") && stagedFiles.some((item) => item.observed_format === "rgb_frame_times") && (
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <label className="text-sm">Đơn vị timestamp của video và LiDAR
-                <select value={timestampUnit} onChange={(event) => { setTimestampUnit(event.target.value as DeclarationChoice<"seconds" | "milliseconds" | "microseconds" | "nanoseconds">); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
-                  <option value="">Chưa xác nhận</option><option value="seconds">Giây (s)</option><option value="milliseconds">Mili giây (ms)</option><option value="microseconds">Micro giây (µs)</option><option value="nanoseconds">Nano giây (ns)</option>
-                </select>
-              </label>
-              <label className="text-sm">Quan hệ đồng hồ giữa video và LiDAR
-                <select value={clockRelation} onChange={(event) => { setClockRelation(event.target.value as DeclarationChoice<"same_clock" | "known_offset" | "unknown">); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
-                  <option value="">Chưa xác nhận</option><option value="same_clock">Cùng đồng hồ</option><option value="known_offset">Biết độ lệch</option><option value="unknown">Không biết</option>
-                </select>
-              </label>
-              {clockRelation === "known_offset" && <label className="text-sm">Độ lệch đồng hồ (giây)
-                <input type="number" step="any" value={clockOffset} onChange={(event) => { setClockOffset(event.target.value); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3" />
-              </label>}
-            </div>
           )}
           {cloudState === "raw_scan_sequence" && scanFileNames.length > 1 && (
             <fieldset className="mt-5 rounded-xl border border-line p-4">

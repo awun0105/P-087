@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- PLANNED; P2 extension theo yêu cầu owner; EX-REC + EX-PRODUCT.
+- IN PROGRESS — S1 typed contract/resolver/UI implemented; provider qualification and S2 worker remain open. P2 extension theo yêu cầu owner; EX-REC + EX-PRODUCT.
 - Canonical REC-08/06, PRODUCT-02/08/09; bổ sung task-local scope, không đổi crosswalk.
 - ADAPT qualified process-isolated KISS-ICP adapter; REUSE LiDAR ingest/metric/
   alignment contracts và durable admission. Technically feasible, không loại trừ
@@ -32,10 +32,13 @@ và intrinsics đúng contract; scan-only estimation không tự tạo chúng.
 Output proposed EstimatedTrajectoryArtifact + diagnostics, optional fused cloud
 qua existing ingest và metric/alignment proposal cho user confirm.
 
-Trajectory contract: schema/provider/runtime version, raw scan/package checksum,
-config checksum, per-scan timestamp/index, map_from_sensor SE(3), unit=meter,
-right-handed/source-map declaration, origin=estimated, finite poses, coverage/gaps,
-convergence/degeneracy/drift diagnostics. Chốt DTO placement/serialization S1.
+Trajectory contract: schema/provider/runtime version, exact assembly/revision/recipe
+checksums, timestamp-file checksum, per-scan source file ID/checksum and timestamp
+in seconds, ordered `map_from_sensor` SE(3) poses in meters, origin=estimated,
+coverage/gap and optional convergence/degeneracy diagnostics. Absolute drift is
+`not_measured` unless a separate reference evaluator proves it. `world_from_map` is
+optional and must be confirmed before canonical world/Z-up ingestion. S1 stores
+this derived artifact contract without claiming that a producer is installed.
 Never tag ground_truth, create identity poses on failure hoặc modify original ZIP.
 Missing ground truth nghĩa absolute drift unknown, không là zero.
 
@@ -82,19 +85,36 @@ collision từ trajectory vừa estimate.
 ## Sprint AUD-17.S1 — Input mode và runtime qualification
 
 **Input:** current package detector/schema + timestamped scan fixtures/real sensor sample.
-**Output:** explicit supplied/estimate modes, derived trajectory contract và pinned adapter envelope.
+**Output:** explicit supplied/estimate modes, derived trajectory contract, neutral timestamp role/unit declarations and a pinned adapter candidate envelope.
 **Contract:** supplied mode unchanged; ZIP/header/path/count checks preserved;
 unsupported sensor/timestamps báo reason; estimated output không là upload/ground truth.
 
-Implement: extend detection/routing only khi explicit mode selected; validate scan
-order/timestamps/unit/frame and supported point attributes. Qualify KISS-ICP version,
-code/dependency licenses, runtime requirements, memory/performance and
-adapter request/result protocol. Document local odometry/no loop closure scope.
-Tests: legacy missing trajectory reject; unified resolver chọn explicit estimate
-recipe only valid ordered/time-described scans; estimate mode accepted only valid raw
-sequence, unsafe ZIP, duplicated/non-monotonic times, invalid units, missing RGB calib.
-Include arbitrary sensor-map orientation/missing up prior in input support fixtures.
-**Exit:** [ ] mode/schema/runtime envelope agreed; [ ] no weakened input validation.
+Implement: preserve supplied trajectory behavior; classify one-column numeric time
+rows as role-ambiguous until the user assigns RGB or LiDAR; keep separate timestamp
+units while reading legacy shared `timestamp_unit`. An explicit R5 estimate candidate
+requires one ordered scan timestamp per scan, matching row count, declared time unit,
+declared scan order, metric unit and sensor frame. Bind the exact scan/time refs and
+checksum them in `EstimatedTrajectoryArtifact`; incomplete inputs stay `NEEDS_INPUT`
+and wired-unqualified runtime stays pending. Normalize derived pose translations to
+meters; do not treat the local odometry map as canonical world.
+
+Adapter candidate: pin `kiss-icp==1.3.0` in the future isolated worker image and use
+its Python `KissICP.register_frame` API. Upstream release is MIT. The API consumes
+per-point relative timestamps for deskew; the sidecar accepted here contains per-scan
+timestamps only and must never be passed off as per-point timing. S2 must disable
+deskew or reject inputs without verified per-point timing, then test this behavior.
+The provider package is not installed in the Studio runtime; the transitive license
+inventory, worker image, supported point attributes, real-sensor sample, and memory/
+performance envelope remain unqualified. R5 stays `WIRED_UNQUALIFIED`.
+
+Tests: legacy shared-unit payload/checksum compatibility; ambiguous timestamp probe;
+explicit R5 binding, scan-count mismatch, invalid ordering, artifact pose/frame/lineage
+invariants; UI requires explicit role selection, preserves distinct RGB/LiDAR units,
+and clears stale bindings when the selected input changes. Keep unsafe ZIP/header
+checks and supplied trajectory paths unchanged.
+**Exit:** [x] mode/schema/runtime candidate envelope agreed; [x] validation not weakened;
+[ ] isolated provider/dependency license qualification; [ ] supported sensor sample,
+memory/performance and per-point timing behavior qualified.
 
 ## Sprint AUD-17.S2 — Durable odometry worker và trajectory publication
 
@@ -143,5 +163,27 @@ không claim drift-free SLAM. Primary: [KISS-ICP](https://github.com/PRBonn/kiss
 
 ## Result / Evidence
 
-Pending — sensor/data/runtime/config identity, estimated poses, timing mapping,
-drift/degeneracy/coverage, resource/cancel proof, calibration/metric QA và limits.
+Partial — S1 code implements neutral timestamp roles and separate units, exact ordered
+scan/time bindings, resolver prerequisites, and immutable estimated-pose lineage. It
+also rejects non-finite pose/map translations; the existing raw-sequence resolver gate
+requires at least two scans. R5 remains `WIRED_UNQUALIFIED`; no estimated trajectory
+is dispatchable.
+
+Verification before commit:
+- Backend focused regression command (input detection/package/fusion/ingest/metric,
+  resolver/contracts, upload API paths): 153 passed. Resolver rejects a timestamp
+  file bound to both RGB and LiDAR roles.
+- `.venv/bin/ruff check src/ tests/` and `.venv/bin/ruff format --check src/ tests/`:
+  passed; 537 files already formatted.
+- Frontend `unified-input-flow` and `studio-inspection` tests: 21 passed; TypeScript
+  typecheck and focused ESLint: passed.
+- Chrome DevTools Reviewer session: `/new` and `/api/v1/auth/me` returned 200 with no
+  console warnings/errors; mocked upload interaction covered explicit timestamp-role
+  selection, separate units, duplicate-role prevention and clearing stale selections.
+  No upload/job was created. The separate QA stage URL was also inspected: its old job
+  is RUNNING at metric confirmation and has no `ST-LIDAR-CALIBRATION-QA` stage, so the
+  page correctly shows the incomplete-stage state. This does not verify rendering a
+  completed QA report.
+
+Runtime execution, transitive license inventory, real-sensor timing/memory/performance,
+S2 worker publication and S3 drift/consumer QA remain pending.

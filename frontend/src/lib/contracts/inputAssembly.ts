@@ -12,6 +12,7 @@ export type InputRole =
   | "sensor_trajectory"
   | "camera_trajectory"
   | "rgb_frame_times"
+  | "lidar_scan_times"
   | "gaussian_scene";
 
 export type InputAssetFormat =
@@ -27,6 +28,7 @@ export type InputAssetFormat =
   | "calibration_torwic_text"
   | "tum_trajectory"
   | "rgb_frame_times"
+  | "timestamp_rows"
   | "unknown";
 
 export type GaussianViewFormat = "gaussian_ply" | "gaussian_ply_colmap" | "gaussian_sog";
@@ -113,7 +115,10 @@ export interface InputAssemblyDeclarations {
   trajectory_convention: EvidenceValue<TrajectoryConvention> | null;
   clock_relation: EvidenceValue<ClockRelation> | null;
   clock_offset_seconds: EvidenceValue<number> | null;
+  /** Legacy shared time unit; new assemblies declare RGB and LiDAR units separately. */
   timestamp_unit?: EvidenceValue<TimestampUnit> | null;
+  rgb_timestamp_unit?: EvidenceValue<TimestampUnit> | null;
+  lidar_timestamp_unit?: EvidenceValue<TimestampUnit> | null;
 }
 
 export interface InputBinding {

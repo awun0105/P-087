@@ -24,6 +24,7 @@ from src.models.contracts.input_assembly import (
     InputResolutionState,
     InputRole,
     InputRoleEvidence,
+    MissingInputFact,
     RecipeComponentVersion,
     RecipeGroup,
     RuntimeCapabilityKey,
@@ -144,6 +145,8 @@ def test_sealed_assembly_binds_files_bindings_and_declared_evidence() -> None:
 def test_optional_timestamp_unit_preserves_legacy_snapshot_checksums() -> None:
     assembly = _assembly()
     assert "timestamp_unit" not in assembly.declarations.model_dump(mode="json")
+    assert "rgb_timestamp_unit" not in assembly.declarations.model_dump(mode="json")
+    assert "lidar_timestamp_unit" not in assembly.declarations.model_dump(mode="json")
     verify_input_assembly_checksum(assembly)
 
     updated = assembly.model_copy(
@@ -270,6 +273,42 @@ def test_supplied_trajectory_recipe_requires_sensor_trajectory_binding() -> None
         ],
     )
     assert candidate.recipe_group == RecipeGroup.SUPPLIED_TRAJECTORY
+
+
+def test_estimated_trajectory_candidate_requires_lidar_timestamp_binding() -> None:
+    common = {
+        "candidate_kind": "video_recipe",
+        "candidate_id": "candidate-r5",
+        "recipe_group": RecipeGroup.ESTIMATED_TRAJECTORY,
+        "trajectory_origin": TrajectoryOrigin.ESTIMATED,
+        "runtime": _runtime(RuntimeCapabilityKey.R5),
+    }
+    base_bindings = [
+        _binding(InputRole.RGB_VIDEO, "rgb-1"),
+        _binding(InputRole.LIDAR_SCAN, "scan-1"),
+    ]
+    with pytest.raises(ValidationError, match="missing required role bindings"):
+        VideoRecipeCandidate(state=CandidateState.PENDING_VERIFICATION, bindings=base_bindings, **common)
+
+    needs_timestamp = VideoRecipeCandidate(
+        state=CandidateState.NEEDS_INPUT,
+        bindings=base_bindings,
+        required_facts=[
+            MissingInputFact(
+                code="LIDAR_SCAN_TIMESTAMPS_REQUIRED",
+                description="Bind one timestamp row per scan.",
+            )
+        ],
+        **common,
+    )
+    assert needs_timestamp.state == CandidateState.NEEDS_INPUT
+
+    candidate = VideoRecipeCandidate(
+        state=CandidateState.PENDING_VERIFICATION,
+        bindings=[*base_bindings, _binding(InputRole.LIDAR_SCAN_TIMES, "scan-times")],
+        **common,
+    )
+    assert candidate.recipe_group == RecipeGroup.ESTIMATED_TRAJECTORY
 
 
 def test_ready_resolution_requires_qualified_runtime_and_exact_candidate() -> None:

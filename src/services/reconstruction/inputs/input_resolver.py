@@ -118,6 +118,8 @@ def resolve_input_assembly(
         for file_id in by_format.get(fmt, [])
     )
     frame_time_ids = explicit.get(InputRole.RGB_FRAME_TIMES) or by_format.get(InputAssetFormat.RGB_FRAME_TIMES, [])
+    lidar_scan_time_ids = explicit.get(InputRole.LIDAR_SCAN_TIMES) or []
+    timestamp_row_ids = by_format.get(InputAssetFormat.TIMESTAMP_ROWS, [])
     camera_trajectory_ids = explicit.get(InputRole.CAMERA_TRAJECTORY) or []
     trajectory_ids = explicit.get(InputRole.SENSOR_TRAJECTORY) or sorted(
         set(by_format.get(InputAssetFormat.TUM_TRAJECTORY, [])) - set(camera_trajectory_ids)
@@ -224,6 +226,8 @@ def resolve_input_assembly(
                         calibration_ids,
                         trajectory_ids,
                         frame_time_ids,
+                        lidar_scan_time_ids,
+                        timestamp_row_ids,
                         probes=probe_map,
                         trajectory_estimated=False,
                         base_required=variant["required_facts"],
@@ -263,6 +267,8 @@ def resolve_input_assembly(
                                 calibration_ids,
                                 [trajectory_id],
                                 frame_time_ids,
+                                lidar_scan_time_ids,
+                                timestamp_row_ids,
                                 probes=probe_map,
                                 trajectory_estimated=False,
                                 base_required=variant["required_facts"],
@@ -270,14 +276,49 @@ def resolve_input_assembly(
                                 video_fact=video_fact if len(videos) > 1 else None,
                             )
                 else:
+                    estimated_bindings = list(variant_bindings)
+                    estimated_required = [
+                        *required,
+                        *_scan_facts(assembly, list(variant["cloud_ids"]), supplied=False),
+                    ]
+                    if len(lidar_scan_time_ids) == 1:
+                        scan_time_id = lidar_scan_time_ids[0]
+                        estimated_bindings.append(_binding(InputRole.LIDAR_SCAN_TIMES, [scan_time_id]))
+                        if probe_map[scan_time_id].record_count != len(variant["cloud_ids"]):
+                            estimated_required.append(
+                                _fact(
+                                    "LIDAR_SCAN_TIMESTAMPS_COUNT_MISMATCH",
+                                    "The LiDAR timestamp row count must match the selected ordered scan sequence.",
+                                    [*variant["cloud_ids"], scan_time_id],
+                                )
+                            )
+                        if (
+                            assembly.declarations.lidar_timestamp_unit is None
+                            and assembly.declarations.timestamp_unit is None
+                        ):
+                            estimated_required.append(
+                                _fact(
+                                    "LIDAR_TIMESTAMP_UNIT_REQUIRED",
+                                    "Declare the unit used by the LiDAR scan timestamps.",
+                                    [scan_time_id],
+                                )
+                            )
+                    else:
+                        estimated_required.append(
+                            _fact(
+                                "LIDAR_SCAN_TIMESTAMPS_REQUIRED",
+                                "Bind one strictly increasing timestamp row per ordered LiDAR scan; file names do not provide scan times.",
+                                [*variant["cloud_ids"], *timestamp_row_ids],
+                            )
+                        )
                     _add_candidate(
                         drafts,
                         assembly,
                         runtime_registry,
                         RecipeGroup.ESTIMATED_TRAJECTORY,
-                        variant_bindings,
+                        estimated_bindings,
                         TrajectoryOrigin.ESTIMATED,
-                        required,
+                        estimated_required,
                     )
                     if calibration_ids and frame_time_ids:
                         _add_r6_candidates(
@@ -289,6 +330,8 @@ def resolve_input_assembly(
                             calibration_ids,
                             [],
                             frame_time_ids,
+                            lidar_scan_time_ids,
+                            timestamp_row_ids,
                             probes=probe_map,
                             trajectory_estimated=True,
                             base_required=variant["required_facts"],
@@ -508,7 +551,8 @@ def _validate_explicit_bindings(
         },
         InputRole.SENSOR_TRAJECTORY: {InputAssetFormat.TUM_TRAJECTORY},
         InputRole.CAMERA_TRAJECTORY: {InputAssetFormat.TUM_TRAJECTORY},
-        InputRole.RGB_FRAME_TIMES: {InputAssetFormat.RGB_FRAME_TIMES},
+        InputRole.RGB_FRAME_TIMES: {InputAssetFormat.RGB_FRAME_TIMES, InputAssetFormat.TIMESTAMP_ROWS},
+        InputRole.LIDAR_SCAN_TIMES: {InputAssetFormat.RGB_FRAME_TIMES, InputAssetFormat.TIMESTAMP_ROWS},
         InputRole.GAUSSIAN_SCENE: {
             InputAssetFormat.GAUSSIAN_PLY,
             InputAssetFormat.GAUSSIAN_PLY_COLMAP,
@@ -516,6 +560,28 @@ def _validate_explicit_bindings(
         },
     }
     diagnostics: list[ResolutionDiagnostic] = []
+    rgb_timestamp_ids = {
+        file_id
+        for binding in assembly.bindings
+        if binding.role == InputRole.RGB_FRAME_TIMES
+        for file_id in binding.file_ids
+    }
+    lidar_timestamp_ids = {
+        file_id
+        for binding in assembly.bindings
+        if binding.role == InputRole.LIDAR_SCAN_TIMES
+        for file_id in binding.file_ids
+    }
+    dual_bound_timestamp_ids = sorted(rgb_timestamp_ids & lidar_timestamp_ids)
+    if dual_bound_timestamp_ids:
+        diagnostics.append(
+            _diagnostic(
+                "TIMESTAMP_FILE_ROLE_CONFLICT",
+                "error",
+                "One timestamp file cannot be bound as both RGB frame times and LiDAR scan times.",
+                dual_bound_timestamp_ids,
+            )
+        )
     cloud_roles = [
         binding.role
         for binding in assembly.bindings
@@ -979,6 +1045,8 @@ def _add_r6_candidates(
     calibration_ids: list[str],
     trajectory_ids: list[str],
     frame_time_ids: list[str],
+    lidar_scan_time_ids: list[str],
+    timestamp_row_ids: list[str],
     *,
     probes: dict[str, InputProbe],
     trajectory_estimated: bool,
@@ -1006,6 +1074,49 @@ def _add_r6_candidates(
             *base_required,
             *_map_facts(assembly, [file_id for binding in cloud_bindings for file_id in binding.file_ids]),
         ]
+        if trajectory_estimated:
+            scan_ids = [
+                file_id
+                for binding in cloud_bindings
+                if binding.role == InputRole.LIDAR_SCAN
+                for file_id in binding.file_ids
+            ]
+            required.extend(_scan_facts(assembly, scan_ids, supplied=False))
+            if len(lidar_scan_time_ids) == 1:
+                scan_time_id = lidar_scan_time_ids[0]
+                bindings.append(_binding(InputRole.LIDAR_SCAN_TIMES, [scan_time_id]))
+                if probes[scan_time_id].record_count != len(scan_ids):
+                    required.append(
+                        _fact(
+                            "LIDAR_SCAN_TIMESTAMPS_COUNT_MISMATCH",
+                            "The LiDAR timestamp row count must match the selected ordered scan sequence.",
+                            [*scan_ids, scan_time_id],
+                        )
+                    )
+                if assembly.declarations.lidar_timestamp_unit is None and assembly.declarations.timestamp_unit is None:
+                    required.append(
+                        _fact(
+                            "LIDAR_TIMESTAMP_UNIT_REQUIRED",
+                            "Declare the unit used by the LiDAR scan timestamps.",
+                            [scan_time_id],
+                        )
+                    )
+            else:
+                required.append(
+                    _fact(
+                        "LIDAR_SCAN_TIMESTAMPS_REQUIRED",
+                        "Bind one strictly increasing timestamp row per ordered LiDAR scan; file names do not provide scan times.",
+                        [*scan_ids, *timestamp_row_ids],
+                    )
+                )
+        if assembly.declarations.rgb_timestamp_unit is None and assembly.declarations.timestamp_unit is None:
+            required.append(
+                _fact(
+                    "RGB_TIMESTAMP_UNIT_REQUIRED",
+                    "Declare the unit used by the RGB frame timestamp rows.",
+                    [frame_time_id],
+                )
+            )
         if trajectory_id is not None:
             scan_ids = [
                 file_id

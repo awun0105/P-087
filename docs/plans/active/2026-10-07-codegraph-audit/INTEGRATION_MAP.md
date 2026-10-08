@@ -76,6 +76,14 @@ ordered scan bindings; AUD-19 consumes explicit map/cloud refs with units/frame
 provenance; AUD-06 reuses the Gaussian source-format labels while owning SOG
 validation. No consumer or R1–R6 runtime is enabled by the S1 schema alone.
 
+AUD-17.S1 adds the explicit LiDAR scan-time role and a neutral timestamp-row probe;
+numeric rows are no longer presumed to belong to RGB. The UI and resolver preserve
+separate RGB/LiDAR time units, exact per-scan scan/time bindings, and checksum-bound
+estimated-pose contracts. R5 remains pending under `WIRED_UNQUALIFIED`; this port does
+not install or dispatch an odometry provider. KISS-ICP v1.3.0 is the isolated worker
+candidate, while per-point deskew semantics, dependencies and real-sensor resource
+qualification remain open for S2.
+
 ## Checklist logic change cho mỗi sprint
 
 1. Viết behavior trước/sau và lý do chọn hướng mới. Phân biệt intended behavior

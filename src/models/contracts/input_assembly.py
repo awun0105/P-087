@@ -30,6 +30,7 @@ class InputRole(StrEnum):
     SENSOR_TRAJECTORY = "sensor_trajectory"
     CAMERA_TRAJECTORY = "camera_trajectory"
     RGB_FRAME_TIMES = "rgb_frame_times"
+    LIDAR_SCAN_TIMES = "lidar_scan_times"
     GAUSSIAN_SCENE = "gaussian_scene"
 
 
@@ -48,6 +49,7 @@ class InputAssetFormat(StrEnum):
     CALIBRATION_TORWIC_TEXT = "calibration_torwic_text"
     TUM_TRAJECTORY = "tum_trajectory"
     RGB_FRAME_TIMES = "rgb_frame_times"
+    TIMESTAMP_ROWS = "timestamp_rows"
     UNKNOWN = "unknown"
 
 
@@ -241,6 +243,12 @@ class InputAssemblyDeclarations(ContractModel):
     clock_relation: EvidenceValue[ClockRelation] | None = None
     clock_offset_seconds: EvidenceValue[FiniteFloat] | None = None
     timestamp_unit: EvidenceValue[TimestampUnit] | None = Field(default=None, exclude_if=lambda value: value is None)
+    rgb_timestamp_unit: EvidenceValue[TimestampUnit] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    lidar_timestamp_unit: EvidenceValue[TimestampUnit] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 _SINGLE_FILE_ROLES = {
@@ -251,6 +259,7 @@ _SINGLE_FILE_ROLES = {
     InputRole.SENSOR_TRAJECTORY,
     InputRole.CAMERA_TRAJECTORY,
     InputRole.RGB_FRAME_TIMES,
+    InputRole.LIDAR_SCAN_TIMES,
     InputRole.GAUSSIAN_SCENE,
 }
 
@@ -373,7 +382,12 @@ class VideoRecipeCandidate(ContractModel):
 
     @model_validator(mode="after")
     def _validate_recipe_bindings(self) -> VideoRecipeCandidate:
-        _validate_recipe_contract(self.recipe_group, self.bindings, self.trajectory_origin)
+        _validate_recipe_contract(
+            self.recipe_group,
+            self.bindings,
+            self.trajectory_origin,
+            required_facts=self.required_facts,
+        )
         if self.runtime.capability_key.value != self.recipe_group.value:
             raise ValueError("runtime capability must match the selected recipe group")
         _validate_candidate_state(self.state, self.required_facts, self.diagnostics, self.runtime)
@@ -542,8 +556,11 @@ def _validate_recipe_contract(
     recipe_group: RecipeGroup,
     bindings: list[InputBinding],
     trajectory_origin: TrajectoryOrigin,
+    *,
+    required_facts: list[MissingInputFact] | None = None,
 ) -> None:
     roles = {binding.role for binding in bindings}
+    missing_fact_codes = {fact.code for fact in required_facts or []}
     required = {InputRole.RGB_VIDEO}
     if recipe_group == RecipeGroup.REGISTERED_MAP:
         required.add(InputRole.REGISTERED_LIDAR_MAP)
@@ -553,6 +570,9 @@ def _validate_recipe_contract(
         required.add(InputRole.LIDAR_SCAN)
         if recipe_group == RecipeGroup.SUPPLIED_TRAJECTORY:
             required.add(InputRole.SENSOR_TRAJECTORY)
+        elif InputRole.LIDAR_SCAN_TIMES not in roles:
+            if "LIDAR_SCAN_TIMESTAMPS_REQUIRED" not in missing_fact_codes:
+                required.add(InputRole.LIDAR_SCAN_TIMES)
     elif recipe_group == RecipeGroup.SENSOR_GUIDED:
         required.update({InputRole.CAMERA_LIDAR_CALIBRATION, InputRole.RGB_FRAME_TIMES})
         if not roles.intersection({InputRole.REGISTERED_LIDAR_MAP, InputRole.STATIC_LIDAR_CLOUD, InputRole.LIDAR_SCAN}):
@@ -561,6 +581,9 @@ def _validate_recipe_contract(
             required.add(InputRole.SENSOR_TRAJECTORY)
         elif trajectory_origin == TrajectoryOrigin.ESTIMATED:
             required.add(InputRole.LIDAR_SCAN)
+            if InputRole.LIDAR_SCAN_TIMES not in roles:
+                if "LIDAR_SCAN_TIMESTAMPS_REQUIRED" not in missing_fact_codes:
+                    required.add(InputRole.LIDAR_SCAN_TIMES)
     if not required.issubset(roles):
         raise ValueError(f"{recipe_group.value} candidate is missing required role bindings")
     expected_origin = {

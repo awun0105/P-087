@@ -119,6 +119,21 @@ function staged(uploadId: string, name: string): AssemblyUploadResponse {
   };
 }
 
+function stagedTimestamp(uploadId: string, name: string): AssemblyUploadResponse {
+  const result = staged(uploadId, name);
+  const source = { ...result.source_file, media_type: "text/plain" };
+  return {
+    ...result,
+    source_file: source,
+    staged_files: result.staged_files.map((item) => ({
+      ...item,
+      source_file: source,
+      observed_format: "timestamp_rows",
+      role_evidence: [],
+    })),
+  };
+}
+
 function stagedGaussian(uploadId: string, name: string): AssemblyUploadResponse {
   const result = staged(uploadId, name);
   return {
@@ -224,6 +239,43 @@ describe("unified input flow", () => {
     })));
     expect(mocks.push).toHaveBeenCalledWith("/scenes/job-1");
     expect(window.sessionStorage.getItem("r2s:input-assembly:v1:user-1")).toBeNull();
+  });
+
+  it("requires explicit timestamp sensor roles and preserves separate RGB and LiDAR units", async () => {
+    mocks.resolve.mockReset().mockResolvedValue({ report: report("needs_input", [], null) });
+    mocks.uploadAssembly.mockReturnValue({
+      promise: Promise.resolve(stagedTimestamp("upload-times", "sensor-times.txt")),
+      abort: vi.fn(),
+    });
+
+    const { container } = render(<UnifiedInputFlow />);
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+    fireEvent.change(fileInput!, { target: { files: [
+      new File(["video"], "warehouse.mp4", { type: "video/mp4" }),
+      new File(["0\n0.1\n"], "sensor-times.txt", { type: "text/plain" }),
+    ] } });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
+    expect(await screen.findAllByText("Đã xác minh")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Phân tích input" }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalled());
+    expect(mocks.create.mock.calls[0][0].bindings).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ role: "rgb_frame_times" })]),
+    );
+
+    fireEvent.change(screen.getByLabelText("File timestamp của frame RGB"), { target: { value: "file-upload-times" } });
+    fireEvent.change(screen.getByLabelText("Đơn vị timestamp RGB"), { target: { value: "milliseconds" } });
+    fireEvent.click(screen.getByRole("button", { name: "Phân tích input" }));
+
+    await waitFor(() => expect(mocks.revise).toHaveBeenCalledWith("assembly-1", 1, expect.objectContaining({
+      bindings: [expect.objectContaining({ role: "rgb_frame_times", file_ids: ["file-upload-times"] })],
+      declarations: expect.objectContaining({
+        timestamp_unit: null,
+        rgb_timestamp_unit: expect.objectContaining({ value: "milliseconds", provenance: "declared" }),
+        lidar_timestamp_unit: null,
+      }),
+    })));
   });
 
   it("restores and revalidates upload refs only for the authenticated account", async () => {

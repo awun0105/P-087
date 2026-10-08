@@ -502,12 +502,11 @@ def _probe_text(data: bytes) -> _ContentResult:
     if times is not None:
         count, first, last, invalid = times
         if invalid is not None:
-            return _invalid_content(InputAssetFormat.UNKNOWN, "invalid_frame_times", invalid)
-        role = InputRole.RGB_FRAME_TIMES
+            return _invalid_content(InputAssetFormat.UNKNOWN, "invalid_timestamp_rows", invalid)
         return _ContentResult(
-            InputAssetFormat.RGB_FRAME_TIMES,
-            (role,),
-            ((role, "strictly_increasing_timestamp_rows"),),
+            InputAssetFormat.TIMESTAMP_ROWS,
+            (InputRole.RGB_FRAME_TIMES, InputRole.LIDAR_SCAN_TIMES),
+            (),
             count,
             first,
             last,
@@ -565,9 +564,9 @@ def _parse_timestamp_rows(text: str) -> tuple[int, float | None, float | None, s
         except ValueError:
             return None
         if not math.isfinite(value):
-            return 0, None, None, "Frame timestamps must be finite."
+            return 0, None, None, "Timestamp rows must contain finite values."
         if value <= previous:
-            return 0, None, None, "Frame timestamps must be strictly increasing."
+            return 0, None, None, "Timestamp rows must be strictly increasing."
         values.append(value)
         previous = value
     if not values:

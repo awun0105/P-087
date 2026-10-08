@@ -88,6 +88,121 @@ class LiDARGeometryArtifact(ContractModel):
     preprocessing_provenance: PreprocessingProvenance
 
 
+class EstimatedTrajectoryPose(ContractModel):
+    """One estimated sensor pose bound to the exact source scan and timestamp row."""
+
+    scan_index: int = Field(ge=0)
+    source_scan_file_id: Identifier
+    source_scan_checksum: Checksum
+    timestamp_seconds: FiniteFloat
+    map_from_sensor: Transform
+
+    @model_validator(mode="after")
+    def _require_finite_translation(self) -> Self:
+        if not all(math.isfinite(component) for component in self.map_from_sensor.translation_xyz):
+            raise ValueError("trajectory pose translation must be finite")
+        return self
+
+
+class EstimatedTrajectoryDiagnostics(ContractModel):
+    """Observed odometry diagnostics; absolute drift remains unknown without a reference."""
+
+    scan_count: int = Field(ge=2)
+    valid_pose_count: int = Field(ge=0)
+    coverage_ratio: FiniteFloat = Field(ge=0, le=1)
+    timestamp_gap_threshold_seconds: FiniteFloat = Field(gt=0)
+    timestamp_gap_count: int = Field(ge=0)
+    maximum_timestamp_gap_seconds: FiniteFloat = Field(ge=0)
+    converged_scan_count: int | None = Field(default=None, ge=0)
+    convergence_method: Identifier | None = None
+    degenerate_scan_count: int | None = Field(default=None, ge=0)
+    degeneracy_method: Identifier | None = None
+    absolute_drift_status: Literal["not_measured"] = "not_measured"
+
+    @model_validator(mode="after")
+    def _validate_diagnostic_counts(self) -> Self:
+        expected_coverage = self.valid_pose_count / self.scan_count
+        if self.valid_pose_count > self.scan_count or not math.isclose(
+            self.coverage_ratio, expected_coverage, rel_tol=1e-6, abs_tol=1e-6
+        ):
+            raise ValueError("trajectory coverage must match the valid pose count")
+        if self.timestamp_gap_count > self.scan_count - 1:
+            raise ValueError("timestamp gap count cannot exceed the scan interval count")
+        if self.timestamp_gap_count == 0 and self.maximum_timestamp_gap_seconds > self.timestamp_gap_threshold_seconds:
+            raise ValueError("maximum timestamp gap exceeds the threshold but is not counted")
+        if self.timestamp_gap_count > 0 and self.maximum_timestamp_gap_seconds <= self.timestamp_gap_threshold_seconds:
+            raise ValueError("timestamp gap count requires a maximum gap above the threshold")
+        if (self.converged_scan_count is None) != (self.convergence_method is None):
+            raise ValueError("convergence count and method must be reported together")
+        if self.converged_scan_count is not None and self.converged_scan_count > self.scan_count:
+            raise ValueError("converged scan count cannot exceed the scan count")
+        if (self.degenerate_scan_count is None) != (self.degeneracy_method is None):
+            raise ValueError("degeneracy count and method must be reported together")
+        if self.degenerate_scan_count is not None and self.degenerate_scan_count > self.scan_count:
+            raise ValueError("degenerate scan count cannot exceed the scan count")
+        return self
+
+
+class EstimatedTrajectoryArtifact(ContractModel):
+    """Immutable local LiDAR odometry result, never equivalent to supplied or GT poses."""
+
+    artifact_type: Literal["EstimatedTrajectoryArtifact"]
+    schema_version: Literal["1.0"]
+    artifact_uri: ArtifactUri
+    artifact_checksum: Checksum
+    job_id: Identifier
+    assembly_id: Identifier
+    assembly_revision: int = Field(gt=0)
+    assembly_checksum: Checksum
+    recipe_checksum: Checksum
+    provider_id: Identifier
+    provider_version: Identifier
+    adapter_protocol_version: Identifier
+    runtime_qualification_checksum: Checksum
+    config_checksum: Checksum
+    timestamp_file_checksum: Checksum
+    coordinate_unit: Literal["meter"]
+    sensor_frame_id: Identifier
+    odometry_map_frame_id: Identifier
+    world_from_map: Transform | None = None
+    trajectory_origin: Literal["estimated"] = "estimated"
+    poses: list[EstimatedTrajectoryPose] = Field(min_length=2)
+    diagnostics: EstimatedTrajectoryDiagnostics
+
+    @model_validator(mode="after")
+    def _bind_poses_to_scan_sequence(self) -> Self:
+        if self.sensor_frame_id == self.odometry_map_frame_id:
+            raise ValueError("sensor and odometry map frame IDs must differ")
+        if self.diagnostics.scan_count != len(self.poses):
+            raise ValueError("trajectory artifact must contain one pose per source scan")
+        if self.diagnostics.valid_pose_count != len(self.poses) or self.diagnostics.coverage_ratio != 1.0:
+            raise ValueError("incomplete trajectories cannot be published as complete artifacts")
+        scan_ids = [pose.source_scan_file_id for pose in self.poses]
+        if len(scan_ids) != len(set(scan_ids)):
+            raise ValueError("trajectory source scans must be unique")
+        previous_timestamp = -math.inf
+        for index, pose in enumerate(self.poses):
+            if pose.scan_index != index:
+                raise ValueError("trajectory pose order must match the selected scan order")
+            if pose.timestamp_seconds <= previous_timestamp:
+                raise ValueError("trajectory timestamps must increase strictly")
+            previous_timestamp = pose.timestamp_seconds
+            if (
+                pose.map_from_sensor.parent_frame != self.odometry_map_frame_id
+                or pose.map_from_sensor.local_frame != self.sensor_frame_id
+            ):
+                raise ValueError("trajectory pose transform must be map_from_sensor in the declared frames")
+        if self.world_from_map is not None and (
+            self.world_from_map.parent_frame != "world" or self.world_from_map.local_frame != self.odometry_map_frame_id
+        ):
+            raise ValueError("world_from_map must map the declared odometry map into canonical world")
+        if self.world_from_map is not None and not all(
+            math.isfinite(component) for component in self.world_from_map.translation_xyz
+        ):
+            raise ValueError("world_from_map translation must be finite")
+        return self
+
+
 class VoxelGridSummary(ContractModel):
     """Lưới voxel đã dùng, đủ để EX-SIM kiểm clearance mà không cần payload upstream.
 
