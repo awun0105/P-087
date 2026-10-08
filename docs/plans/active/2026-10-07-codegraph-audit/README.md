@@ -9,8 +9,10 @@ Active — implementation đang diễn ra trên branch
 Đã commit: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3,
 AUD-03.S1–S3, AUD-04.S1–S3, AUD-10.S1–S3 và AUD-07.S1. AUD-07.S2 đã hoàn tất
 trong commit `5173750`; AUD-20.S1 trong `6fea33e`; AUD-20.S2 producer/API attribution
-trong `7d5fcac`. AUD-20.S3 đã có code badge creator/role ở Scenes và imports cùng
-test CLI; browser và live-seed acceptance đang chờ môi trường. AUD-21.S1 đã chốt ma trận quyền,
+trong `7d5fcac`. AUD-20.S3 đã có badge creator/role ở Scenes và imports cùng test CLI;
+authenticated Chrome DevTools xác nhận grid/list và seed display names/roles. Import
+legacy hiện thiếu creator snapshot; stable seed IDs và migration receipt còn pending.
+AUD-21.S1 đã chốt ma trận quyền,
 identity owner và migration contract trong commit `31ffac2`. AUD-22.S1 calendar
 contract đã hoàn tất; browser DevTools MCP gate của AUD-03.S3 vẫn
 UNVERIFIED. PostgreSQL qualification đã hoàn tất trên PostgreSQL 16 container
@@ -24,9 +26,9 @@ AUD-22.S2 đã implement quota Guest atomic và enforcement trên các API tạo
 AUD-22.S3 đã thêm quota/reset UI, refresh sau accepted run và stale-tab 429 recovery.
 AUD-21.S4 đã áp dụng server capability cho các thao tác Studio và quyền theo
 ownership. Local verification: API 152 pass, frontend 300 pass, typecheck/lint,
-Ruff check/format đều pass; PostgreSQL proof pass 100%. DevTools visual gate
-**UNVERIFIED** do Chrome profile lock. Guest rollout vẫn đợi browser
-acceptance và AUD-20.S3 seed acceptance.
+Ruff check/format đều pass; PostgreSQL proof pass 100%. Reviewer-session DevTools
+verification does not cover the three-role Guest flows. Guest rollout vẫn đợi browser
+acceptance, PostgreSQL concurrency qualification và AUD-20 stable-ID/migration evidence.
 AUD-06.S2 lease recovery/admission và AUD-06.S3 retry/cancel đã hoàn tất trong
 `b149974` và `2b0a1b6`. AUD-05.S1 local implementation đã thêm durable validation
 operation, idempotency, worker lease/fencing/recovery, candidate/profile binding,
@@ -287,7 +289,8 @@ execution order; không cần xong toàn bộ một task mới được chuyển
 Trong bảng, `S1–S3` là ba sprint liên tiếp, thực hiện theo thứ tự tăng dần.
 Thứ tự mặc định gồm đủ **80 active sprint, mỗi sprint một lần**; không có AUD-25.
 AUD-26/27/28 (11 sprint, thêm ngày 2026-10-08) chưa nằm trong bảng; thứ tự của chúng:
-AUD-27.S1–S2 → AUD-26.S1–S3 → AUD-26.S5 → AUD-26.S4 → AUD-28.S1–S3 → AUD-27.S3 (S3 chờ `runner.py` hết thay đổi chưa commit).
+AUD-27.S1–S2 → AUD-26.S1–S3 → AUD-26.S5 → AUD-26.S4 → AUD-28.S1–S3 → AUD-27.S3
+(đã implement; log của một worker attempt thật vẫn là acceptance evidence còn thiếu).
 Phần đo trên pod RunPod của AUD-26.S1, S4 và S5 làm trong cùng một đợt thuê máy:
 
 | Đợt | Thứ tự sprint | Kết quả cần đạt |
@@ -306,8 +309,9 @@ Phần đo trên pod RunPod của AUD-26.S1, S4 và S5 làm trong cùng một đ
 Execution order bắt đầu ở **AUD-11.S1**; các sprint AUD-11.S1–S2, AUD-15.S1,
 AUD-01–04, AUD-10.S1–S3, AUD-07.S1–S2, AUD-20.S1–S2, AUD-21.S1–S2 và AUD-22.S1
 đã hoàn tất ở mức code/task của từng sprint. AUD-21.S3 đã thêm backend ownership
-guards; AUD-20.S3 và AUD-21.S2 còn browser acceptance, AUD-20.S3 còn live-seed
-acceptance. AUD-22.S2 code/API acceptance đã hoàn tất trên SQLite; AUD-22.S3 local
+guards; AUD-20.S3 grid/list and Team rendering have authenticated browser evidence,
+while legacy-import attribution and stable-ID/migration evidence remain open. AUD-21.S2
+and S4 still need browser acceptance. AUD-22.S2 code/API acceptance đã hoàn tất trên SQLite; AUD-22.S3 local
 UX/API regression đã hoàn tất. PostgreSQL multi-process qualification và DevTools
 browser acceptance còn pending. AUD-21.S4 caller-specific Studio capability/API
 coverage is locally verified (152 API tests, 300 frontend tests, typecheck and
@@ -499,7 +503,8 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 
 - [x] Implementation AUD-20.S1 identity/seed migration contract and AUD-20.S2 producer/API actor attribution.
 - [x] AUD-21.S4 local Studio capability/API implementation and UI regression.
-- [ ] AUD-20.S3 browser/seed acceptance; AUD-21.S2/S4 browser gates; AUD-21.S3–S4
+- [x] AUD-20.S3 authenticated browser rendering for scene grid/list and Team seed names/roles.
+- [ ] AUD-20.S3 browser verification with a snapshot-bearing imported scene and stable-ID/migration evidence; AUD-21.S2/S4 browser gates; AUD-21.S3–S4
       full browser/API acceptance before opening Guest signup.
 - [x] Implementation AUD-22.S2 durable Guest quota ledger/API enforcement and
       AUD-22.S3 local quota UX; SQLite/API/frontend checks.
