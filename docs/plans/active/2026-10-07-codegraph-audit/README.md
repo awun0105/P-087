@@ -85,6 +85,15 @@ checks. Missing or ambiguous evidence remains uncertain and classifies no points
 floor. Verification: 30 focused tests, repo Ruff/format, contract mirror and current
 CodeGraph index pass. Existing fixed-Z geometric/Gaussian consumers remain unchanged
 until AUD-14.S2; no real production sloped-floor artifact is qualified yet.
+AUD-19.S1 adds checksum-sealed registration input/profile/request/proposal/QA
+contracts and binding/state guards. Independent maps bind exact PCD/PLY file and
+parsed-header identity, m/cm/mm units, frame, assembly revision, project context,
+metric/floor evidence and bounded ROI/search budgets; raw scans remain routed through
+AUD-17. Unknown scale may produce a bounded proposal but cannot pass QA or alter
+canonical geometry. The existing sensor-package alignment path and REC-09 contracts
+remain unchanged. Focused contracts plus REC-06/08/09 regressions, repo Ruff/format,
+contract mirror and CodeGraph pass. No BEV/ICP producer or held-out registration is
+qualified yet; those remain S2–S4 work.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -453,7 +462,8 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [ ] Implementation AUD-12–14 và held-out collision/LiDAR/floor acceptance.
 - [ ] Implementation AUD-15–16 và real latency/preview/browser acceptance.
 - [ ] Implementation AUD-17–18 và qualified opt-in runtime/QA acceptance.
-- [ ] Implementation AUD-19 và held-out independent-map/QA/browser acceptance.
+- [x] AUD-19.S1 typed contract and REC-06/08/09 regression work; no solver/API/UI enabled.
+- [ ] AUD-19.S2–S4 independent-map producer, held-out QA, operation/API/UI and browser acceptance.
 
 - [x] Implementation AUD-20.S1 identity/seed migration contract and AUD-20.S2 producer/API actor attribution.
 - [x] AUD-21.S4 local Studio capability/API implementation and UI regression.
@@ -528,13 +538,13 @@ AUD-25 giữ Deferred, không đánh dấu Completed hoặc tự implement trong
 Plan lưu 46 Markdown documents, 25 task files và 86 sprint definitions. Active
 scope có 24 tasks/80 sprints/12 ADR Proposed and ADR 0022 Accepted; AUD-25 với 6 sprint và ADR0025 Deferred
 theo yêu cầu owner. AUD-06/24 vẫn nhận PLY/SOG cho view; AUD-19 không đợi hoặc
-implement imported-source adapter. Source/runtime chưa thay đổi.
+implement imported-source adapter. Subsequent sprint work has changed source code:
+AUD-19.S1 adds registration contracts only; it does not enable BEV/ICP processing,
+durable operations, API/UI, runtime qualification or production consumers.
 Document checks exit 0: 25 integration sections gồm một Deferred, 231 local links,
 121 existing pytest paths và 138 canonical bindings trong toàn bộ tài liệu lưu;
 đủ 80 active sprint không trùng, đúng internal order và 37 active cross-task
 prerequisite pairs; 6 deferred sprint không trong execution order/dependencies.
-`git diff --check` exit 0. Đây là kiểm tra
-kế hoạch, không là runtime acceptance. Current local additions gồm 34 Markdown
-files. Base plans đã commit/push ở e5597b0;
-video/integration/unified-upload/import-continuation additions chưa commit/push
-hoặc runtime acceptance.
+`git diff --check` exit 0. Đây là kiểm tra kế hoạch, không là runtime acceptance.
+Các số liệu cấu trúc tài liệu là snapshot của lần tạo plan; Result/Evidence ở từng
+task mới là nguồn hiện trạng sau từng sprint.

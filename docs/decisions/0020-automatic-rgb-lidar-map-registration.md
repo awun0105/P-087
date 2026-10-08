@@ -45,11 +45,34 @@ refinement, thấp residual không tự là true transform hoặc safe collision
 
 ## Data contract
 
-AUD-19.S1 chốt proposed RegistrationProposalArtifact/RegistrationQAReport và
-input mode/profile. Reuse AlignmentRequest/AlignmentRecord, ArtifactResolver,
-REC-06 confirmation và existing derived geometry. Report phải ghi source/target/
-config/tool/floor/metric checksums, frame direction, overlap/coverage, ambiguity,
-observed consistency vs independent reference error. Old refs/checksums read-compatible.
+AUD-19.S1 defines `RegistrationProposalArtifact`/`RegistrationQAReport`, four
+input modes and a content-sealed search profile. The request checksum binds the
+exact target geometry/revision, source mode and assembly/package lineage, metric
+confirmation, floor refs, ROI and profile. Proposal and QA bind their source/target
+checksums, frame direction, tool/profile identity, observed coverage/overlap,
+bidirectional/per-region residuals, floor consistency, observability and ambiguity.
+Independent reference error is a separate evaluation-only value. QA evidence refs
+must include the exact proposal, source/target geometry, metric confirmation, floor
+models and profile qualification. `PASS` also requires unique measured regions,
+nonzero correspondences, per-region coverage and residual thresholds. Old
+`AlignmentRequest`/`AlignmentRecord`
+payloads and checksums remain unchanged; final publication reuses that rigid
+same-job contract through `ArtifactResolver` and REC-06 confirmation.
+
+### AUD-19.S1 outcome (2026-10-08)
+
+The typed contracts and preflight are implemented in
+`src/models/contracts/rgb_lidar_registration.py`. Independent map requests bind one
+exact PCD/PLY staged file, parsed-header checksum, declared `m`/`cm`/`mm` unit,
+source frame, point count, assembly revision/checksum, role and server-resolved
+same-scene context. Sensor-package requests retain the same-job `LidarPackageRecord`
+and meter-only validation. Raw scan sequences retain ordered file IDs but are
+preflight-blocked until AUD-17 supplies a trajectory. Default provisional budgets
+and thresholds are recorded in the AUD-19 task; none are claimed as production
+qualified. A bounded RGB scale hypothesis may rank a proposal, but QA `PASS` waits
+for confirmed REC-06 metric geometry. No BEV/ICP solver, ingest adapter, operation,
+API, UI or registration consumer is enabled by this contract sprint; the ADR
+remains Proposed pending S2/S3 evidence and S4 consumer acceptance.
 
 ## Alternatives Considered
 

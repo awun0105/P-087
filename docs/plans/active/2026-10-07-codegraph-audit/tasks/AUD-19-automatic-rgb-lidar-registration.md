@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- PLANNED; P1; EX-REC registration/geometry; EX-PRODUCT operation/API/UX;
+- IN PROGRESS; P1; EX-REC registration/geometry; EX-PRODUCT operation/API/UX;
   SCENE/SIM consumers. Owner đồng ý bổ sung hướng cải tiến ngày 07/10/2026.
 - Canonical REC-06/08/09, PRODUCT-04/08/09; bổ sung task-local scope, không đổi crosswalk.
 - REUSE trajectory camera-center fitting, REC-06 scale/floor proposal, REC-09
@@ -112,15 +112,60 @@ chỉ qualified sau S3/S4. Không tạo cycle giữa hai whole epics.
 **Output:** typed mode/profile/request/proposal/report contract, binding và state matrix.
 **Contract:** independent maps khác blind sensor calibration; old package path giữ
 validation; metric uncertainty không tự thành accuracy; pure rigid final Transform.
+`RegistrationSourceBinding` distinguishes sensor package, registered map, one static
+cloud and raw scan sequence. Map inputs bind an exact input-assembly ID/revision/
+checksum, role and file IDs. Independent map files are PCD/PLY with parsed-header
+checksum, explicit m/cm/mm units, source frame and observed point count; one map file
+is selected per request. The source frame must be distinct from canonical `world`.
+Point count must be nonzero and at most 20,000,000 before downsampling. Missing
+format/header/units/frame/count/same-scene context and a
+negative same-scene declaration remain `INSUFFICIENT`; malformed units/roles are
+rejected. Raw scan sequences preserve their ordered file IDs but remain blocked for
+AUD-17 trajectory estimation. Sensor-package requests bind a same-job
+`LidarPackageRecord` and meter units, leaving the existing calibration/trajectory
+alignment service unchanged. S1 only records and validates source units; the S2
+ingester must convert cm/mm to canonical meters before publishing any
+`LiDARGeometryArtifact`.
 
-Implement: define static-cloud unit/frame/header/point limits và source ownership;
-inspect target-job ingest binding. Freeze scale/floor admissibility, ROI/search
-budget, QA metrics/threshold qualification protocol và supported scene conditions.
-State: requested/queued/running → proposed or ambiguous/insufficient/failed →
-review/confirm → committed; user checkbox không forge QA PASS. Preserve old payloads.
-Tests: old artifacts/checksums, missing/invalid units, input mode separation,
-cross-job/project refs, unknown scale, unsupported floor, bad/empty cloud, stale target.
-**Exit:** [ ] producer/consumer schema agreed; [ ] feature scope and supported input explicit.
+The request binds canonical same-job `RgbGeometry`, target scene revision, metric
+confirmation, supported floor refs, source binding and optional world-frame ROI.
+Independent maps require an ROI in meters; each dimension is bounded by the profile
+(default 100 m). Default search budgets are 180 yaw hypotheses, 2,500 translation
+hypotheses, top-8 candidates, 50 ICP iterations, 300 s, 20M source points and 250k
+points/map. Profile maxima are bounded at 720 yaw hypotheses, 100k translations,
+32 candidates, 200 iterations, 3,600 s and 1M points/map. Known confirmed scale is
+the default policy. A bounded RGB scale hypothesis may produce a proposal while
+metric scale is unknown, but cannot pass QA or become final geometry; REC-06 must
+confirm and republish canonical geometry first. Final transform remains rigid SE(3).
+
+QA reports source/target coverage, overlap, bidirectional p95 residual, floor
+difference, observable degrees of freedom, candidate margin and per-region residuals.
+Provisional defaults require 10% source/target coverage, 20% overlap, <=0.10 m
+bidirectional p95 residual, <=0.10 m floor difference, 3 observable DOF and 0.05
+candidate margin. These are a frozen proposal profile, not production qualification:
+`PASS` requires a profile with an exact server-owned qualification record, confirmed
+metric scale, supported floor, exact proposal/source/target evidence and the selected
+unambiguous candidate. It also requires at least one unique, measured region; each
+region must have nonzero correspondences, at least 10% source/target coverage and
+P95 residual at or below the profile limit. Qualification remains held-out-data work in S3. Independent
+map requests also require server-resolved same-scene context from the exact assembly;
+the boolean in a request is not authorization or proof by itself. The API must
+authorize the actor/project, verify assembly ownership/checksum/bindings and resolve
+source bytes before worker admission.
+
+Implement: typed source/profile/request/proposal/QA contracts; exact package/map
+mode bindings; preflight findings; checksum-sealed request/proposal/report; immutable
+state transition guard. Reuse existing same-job `AlignmentRequest`/
+`AlignmentRecord`; independent map source must be re-ingested into the target job
+with original input lineage. No legacy alignment model or checksum is changed. No
+solver, durable operation, API or UI is enabled in S1.
+
+Tests: old REC-09 artifacts/checksums and focused alignment consumers; missing/invalid
+units, formats and headers; input-role separation; cross-job/project bindings;
+unknown scale; unsupported/uncertain floor; empty/over-budget cloud; stale scene
+revision; qualification/evidence guards; and terminal/invalid state transitions.
+**Exit:** [x] typed schema and state/binding rules exist; [x] supported input and
+qualification limits are explicit; [ ] independent-map runtime is implemented or qualified.
 
 ## Sprint AUD-19.S2 — Trajectory prior hoặc BEV multi-candidate initialization
 
@@ -187,7 +232,7 @@ stale polling/revision, aligned-cloud/SceneIR consumer and real browser/register
 ## Verification và DoD
 
 ```bash
-.venv/bin/pytest tests/test_reconstruction/test_rec06_lidar_metric.py tests/test_reconstruction/test_lidar_world_alignment.py tests/test_reconstruction/test_rec06_auto_scale.py tests/test_reconstruction/test_lidar_package.py tests/test_reconstruction/test_rec09_alignment.py tests/test_reconstruction/test_rec09_guards.py tests/test_reconstruction/test_lidar_overlay.py tests/test_reconstruction/test_finalize_lidar_binding.py -q
+.venv/bin/pytest tests/test_contracts/test_rgb_lidar_registration.py tests/test_reconstruction/test_rec06_lidar_metric.py tests/test_reconstruction/test_lidar_world_alignment.py tests/test_reconstruction/test_rec06_auto_scale.py tests/test_reconstruction/test_lidar_package.py tests/test_reconstruction/test_rec09_alignment.py tests/test_reconstruction/test_rec09_guards.py tests/test_reconstruction/test_rec10_bundle.py tests/test_reconstruction/test_lidar_overlay.py tests/test_reconstruction/test_finalize_lidar_binding.py -q
 ```
 
 Planned tests/test_reconstruction/test_bev_registration.py,
@@ -198,6 +243,20 @@ Collision/Isaac safety còn nghiệm thu qua AUD-12.S4/AUD-05; no registration-s
 
 ## Result / Evidence
 
-Pending — source/target/config/tool refs, scale/floor identity, candidate transforms,
-coverage/ambiguity/region metrics, known-reference errors vs consistency scores,
-runtime/resource/search budget, no-point browser flow, manual fallback và limitations.
+AUD-19.S1 delivered checksum-sealed Python contracts in
+`src/models/contracts/rgb_lidar_registration.py`, exported through the shared
+contracts package, with 29 new contract test cases. Source bindings preserve the four
+input modes, exact package/assembly/file lineage, explicit units/frame/parsed header,
+point limits and scene context. Requests/proposals/reports bind exact job, project,
+source, target revision, profile, metric/floor evidence and selected candidate;
+unknown scale can only propose under bounded search, and `PASS` requires a qualified
+profile plus exact QA evidence. The old REC-09 alignment contract/service remains
+unchanged.
+
+Verification: `.venv/bin/ruff check src/ tests/` PASS; `.venv/bin/ruff format --check
+src/ tests/` PASS (517 files); focused registration plus existing REC-06/08/09 tests
+PASS (85 tests); `scripts/check_contract_mirror.py` PASS (5 enums, 5 models);
+CodeGraph current (847 files, 16,607 nodes, 48,652 edges). These are local contract
+and compatibility checks only. No BEV/ICP producer, original-file ingest adapter,
+durable operation, UI flow, held-out registration qualification, real map, or
+browser/consumer acceptance is implemented in S1; all remain for S2–S4.
