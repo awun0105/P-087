@@ -265,7 +265,7 @@ Test (`frontend/tests/evaluation-card.test.tsx`):
 - Ba chỉ số hệ thống mới hiển thị `display` như mọi chỉ số khác.
 
 **Exit:**
-- [ ] Test frontend pass; `npm run lint`, `npm run typecheck`, `npm run build -- --webpack` pass.
+- [x] Test frontend pass; `npm run lint`, `npm run typecheck`, `npm run build -- --webpack` pass.
 - [ ] Kiểm bằng mắt trên Studio do owner thực hiện; agent không tự xác nhận phần này.
 
 ## Verification và DoD

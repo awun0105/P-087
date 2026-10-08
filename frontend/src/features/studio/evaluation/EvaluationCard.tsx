@@ -4,7 +4,7 @@ import { Download } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ErrorFeedback } from "@/components/studio/feedback";
-import { Badge, Button, buttonVariants } from "@/components/studio/primitives";
+import { Badge, Button, buttonVariants, Notice } from "@/components/studio/primitives";
 import { evaluationReportUrl, getJobEvaluation, type EvaluationGroup, type EvaluationMetric, type JobEvaluation } from "@/lib/api/studio";
 import { errorMessage } from "@/lib/ui-error";
 
@@ -40,6 +40,11 @@ function MetricRow({ metric }: { metric: EvaluationMetric }) {
         {metric.meaning}
         {metric.verdict && metric.threshold ? ` Ngưỡng: ${metric.threshold}.` : ""}
       </p>
+      {metric.reference && (
+        <p className="mt-1 text-xs text-ink-muted">
+          {metric.reference}
+        </p>
+      )}
     </div>
   );
 }
@@ -86,6 +91,12 @@ export function EvaluationCard({ jobId, revision }: { jobId: string; revision: s
     URL.revokeObjectURL(url);
   }
 
+  const hasWarnings = Boolean(
+    data?.groups.some((group) =>
+      group.metrics.some((metric) => metric.verdict === "warn" || metric.verdict === "fail")
+    )
+  );
+
   return (
     <section aria-labelledby="evaluation-heading" className="p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -104,6 +115,15 @@ export function EvaluationCard({ jobId, revision }: { jobId: string; revision: s
       </div>
       {error && <ErrorFeedback className="mt-4" message={`Không tải được bảng đánh giá: ${error}`} retry={retry} />}
       {!data && !error && <p role="status" className="mt-4 text-sm text-ink-muted">Đang tính bảng đánh giá…</p>}
+      {data && data.summary.length > 0 && (
+        <Notice tone={hasWarnings ? "ochre" : "neutral"} className="mt-4">
+          <div className="space-y-1">
+            {data.summary.map((line, idx) => (
+              <p key={idx}>{line}</p>
+            ))}
+          </div>
+        </Notice>
+      )}
       {data && (
         <div className="mt-4 grid gap-x-8 gap-y-6 md:grid-cols-2">
           {data.groups.map((group) => (
