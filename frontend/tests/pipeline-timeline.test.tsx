@@ -18,6 +18,29 @@ function stageWithError(error: ExecutionError, stageId: StageId = "ST-CAMERA-POS
 }
 
 describe("PipelineTimeline error guidance rendering", () => {
+  it("hiển thị ETA chưa xác định cho job chạy khi không có số đo hỗ trợ", () => {
+    render(
+      <PipelineTimeline
+        jobId="job-running"
+        stages={[{ stage_id: "ST-VISUAL-RECON", state: "running", seconds: 900, fraction: null }]}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("Thời gian còn lại chưa xác định");
+    expect(screen.queryByText(/Còn ~\d/)).not.toBeInTheDocument();
+  });
+
+  it("không gắn ETA của job vào replay demo", () => {
+    render(
+      <PipelineTimeline
+        stages={[{ stage_id: "ST-VISUAL-RECON", state: "running", seconds: null, fraction: 0.5 }]}
+      />,
+    );
+
+    expect(screen.queryByText("Thời gian còn lại chưa xác định")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Còn ~\d/)).not.toBeInTheDocument();
+  });
+
   it("hiển thị cause và fix cho mã lỗi đã có guidance", () => {
     const error: ExecutionError = {
       stage_id: "ST-CAMERA-POSE",

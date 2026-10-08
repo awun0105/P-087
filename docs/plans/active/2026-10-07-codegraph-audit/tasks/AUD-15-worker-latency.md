@@ -233,3 +233,38 @@ minh latency thực. Hardware-bound compute cost phải có số đo và support
   and evaluate existing visual, pose, metric, collision and scene quality gates.
   Software fixtures prove the warm path skips COLMAP commands; they do not prove
   a T2000 latency improvement or real reconstruction quality.
+
+### AUD-15.S3 — ETA software correction implemented; hardware acceptance pending
+
+- Removed the hard-coded per-stage durations and elapsed-time extrapolation. The
+  current unpaired T2000 baseline is a 50-frame job with 5.046,05 seconds of
+  recorded worker process time; it is not a supported profile and does not justify
+  ETA constants for different inputs, configurations or stages.
+- A job ETA is now shown only when the running stage has both elapsed time and a
+  measured fraction. The current API does not provide a real-job fraction, so live
+  job screens state that remaining time is unknown. The UI may show a current-stage
+  estimate only when those measurements exist; the total remains unknown while any
+  future stage is unfinished. Sample replay no longer presents a job ETA.
+- Software checks: `frontend/tests/studio-pipeline-eta.test.ts` and
+  `frontend/tests/pipeline-timeline.test.tsx` cover missing/incomplete timing,
+  measured fraction, unfinished future work and replay; the resource-wait and scene
+  flow suites also pass. `npm run typecheck`, changed-file ESLint and
+  `git diff --check` pass.
+- Browser gate: authenticated Chrome DevTools opened an existing job waiting for
+  metric confirmation. It showed the human-wait state without an ETA and had no
+  console errors. No active compute-stage job was available for a browser render of
+  the running/unknown-ETA message; that state is covered by the focused UI test.
+- Paired GPU and quality acceptance is not run. At inspection time two jobs were
+  still in `RUNNING` status at metric confirmation in the shared local stack; no
+  paired workload was added alongside them. The prior pinned-runtime
+  preflight did not leave a result that can be used as evidence. Do not treat this
+  software slice as a measured latency improvement or quality acceptance.
+- Remaining: run at least three matched baseline/optimized pairs on the frozen
+  50-frame input/config/runtime and T2000, record power/thermal state, compare the
+  existing visual/pose/metric/collision/scene quality gates, then decide whether an
+  observed hardware-profile ETA can be enabled. S3 exit criteria remain unchecked.
+- Pre-flight (GUIDE.md Rule 13): CodeGraph traced `estimateRemainingTime`,
+  `PipelineTimeline`, `ProgressTab`, sample replay and their test callers; Graphify
+  queried the job progress/timing path. Minimal change removes unsupported defaults
+  and exposes uncertainty without changing the API contract. Focused frontend tests,
+  typecheck, ESLint, Chrome DevTools and graph refresh are recorded for this slice.

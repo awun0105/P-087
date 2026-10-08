@@ -13,8 +13,8 @@ trong `7d5fcac`. AUD-20.S3 đã có badge creator/role ở Scenes và imports c�
 authenticated Chrome DevTools xác nhận grid/list và seed display names/roles. Import
 legacy hiện thiếu creator snapshot; stable seed IDs và migration receipt còn pending.
 AUD-15.S2 đã commit: resume-cache integrity và cold/warm recovery
-được kiểm tra bằng software integration tests; AUD-15.S3 vẫn chờ paired GPU latency
-và quality acceptance.
+được kiểm tra bằng software integration tests. AUD-15.S3 đã bỏ ETA tĩnh không có
+profile hỗ trợ; paired GPU latency và quality acceptance vẫn pending.
 AUD-21.S1 đã chốt ma trận quyền,
 identity owner và migration contract trong commit `31ffac2`. AUD-22.S1 calendar
 contract đã hoàn tất; AUD-03.S3 review-screen gate đã xác nhận bằng Chrome DevTools
@@ -322,8 +322,9 @@ coverage is locally verified (152 API tests, 300 frontend tests, typecheck and
 changed-file lint); browser three-role acceptance, shared-PostgreSQL qualification
 and seed acceptance still block public Guest rollout.
 AUD-15.S1 được làm sớm để AUD-23.S5 có measurement protocol; sau quality work,
-AUD-15.S2 đã hoàn tất ở mức software cache/warm-path verification. AUD-15.S3 còn
-paired GPU measurements và quality acceptance; không suy kết quả từ fixtures.
+AUD-15.S2 đã hoàn tất ở mức software cache/warm-path verification. AUD-15.S3 đã
+điều chỉnh ETA để thiếu profile thì báo chưa xác định; paired GPU measurements và
+quality acceptance vẫn pending, không suy kết quả từ fixtures.
 AUD-07.S3 làm sau AUD-06/AUD-05 để kiểm tra admission trên consumer thật;
 không đợi toàn bộ AUD-07 trước khi triển khai hai consumer này.
 

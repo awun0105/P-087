@@ -66,7 +66,8 @@ export function PipelineTimeline({
       }
     : setInternalSelected;
   const done = stages.filter((stage) => stage.state === "succeeded").length;
-  const eta = estimateRemainingTime(stages, isStale);
+  const eta = jobId ? estimateRemainingTime(stages, isStale) : null;
+  const hasRunningStage = stages.some((stage) => stage.state === "running");
 
   return (
     <div>
@@ -80,10 +81,16 @@ export function PipelineTimeline({
               Mất kết nối tiến trình
             </span>
           )}
-          {!isStale && eta.formattedRemaining && (
-            <span className="rounded-md bg-paper-sunken px-2 py-0.5 text-xs font-mono text-ink-muted">
-              Còn {eta.formattedRemaining}
-            </span>
+          {!isStale && jobId && hasRunningStage && (
+            eta?.formattedRemaining ? (
+              <span className="rounded-md bg-paper-sunken px-2 py-0.5 text-xs font-mono text-ink-muted">
+                Còn {eta.formattedRemaining}
+              </span>
+            ) : (
+              <span role="status" className="text-xs text-ink-muted">
+                Thời gian còn lại chưa xác định
+              </span>
+            )
           )}
         </div>
         {timeNote && <p className="text-xs text-ink-subtle">{timeNote}</p>}
@@ -151,7 +158,7 @@ export function PipelineTimeline({
                     {stage?.seconds != null && state !== "pending" && (
                       <span className="shrink-0 text-xs value-tech text-ink-subtle">
                         {formatDuration(stage.seconds)}
-                        {state === "running" && !isStale && eta.currentStageRemainingSeconds != null && (
+                        {state === "running" && !isStale && eta?.currentStageRemainingSeconds != null && (
                           <span className="ml-1 text-ink-muted">· còn {formatEtaDuration(eta.currentStageRemainingSeconds)}</span>
                         )}
                         {isCurrentStale && (
