@@ -6,7 +6,7 @@ commit chỉ để lại artifact mồ côi, không tạo job thành công giả
 
 from datetime import UTC, datetime
 
-from src.models.contracts.artifacts import ArtifactRef
+from src.models.contracts.artifacts import ArtifactRef, ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.input_assembly import (
     CandidateState,
@@ -412,6 +412,34 @@ class ProjectPersistence:
         if record.job_id != row[1] or record.project_id != row[2]:
             raise ArtifactChecksumError("Input run key không khớp durable record identity")
         return InputAssemblyRunResult(job_id=record.job_id, project_id=record.project_id, replayed=True)
+
+    def input_run_for_job(self, job_id: str) -> InputAssemblyRunRecord | None:
+        """Resolve the immutable input lineage accepted for one exact job, if any."""
+        with self.database.transaction() as tx:
+            row = tx.execute(
+                "SELECT requester_id,idempotency_key,request_fingerprint,job_id,project_id,assembly_id,revision,"
+                "report_checksum,recipe_checksum,recipe_ref,payload "
+                "FROM r2s_input_runs WHERE job_id=?",
+                (job_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        record = InputAssemblyRunRecord.model_validate_json(row[10])
+        recipe_ref = ProductArtifactRef.model_validate_json(row[9])
+        expected = (
+            record.requester_id,
+            record.idempotency_key,
+            record.request_fingerprint,
+            record.job_id,
+            record.project_id,
+            record.assembly_id,
+            record.assembly_revision,
+            record.resolution_checksum,
+            record.recipe_checksum,
+        )
+        if tuple(row[:9]) != expected or recipe_ref != record.recipe_ref or record.job_id != job_id:
+            raise ArtifactChecksumError("Input run columns differ from the durable job-lineage record")
+        return record
 
     def _commit_input_assembly_run(
         self,

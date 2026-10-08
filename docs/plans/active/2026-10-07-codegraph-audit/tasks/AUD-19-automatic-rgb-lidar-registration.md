@@ -360,7 +360,8 @@ expired lease and stale-worker rejection; row/payload drift and cross-job output
 are rejected. The new queue-specific concurrency and migration proof uses SQLite.
 **Exit:** [x] migration and queue-state persistence are tested locally;
 [ ] admission/resource reservations and worker dispatch;
-[ ] authorized source ingestion and same-scene evidence resolution;
+[x] exact staged-source/header verification and job-lineage resolver delivered in S4b;
+[ ] API authorization for actor/project/source assembly before worker dispatch;
 [ ] API, confirmation CAS, artifact publication, consumers and Studio UI;
 [ ] held-out registration qualification and real browser/registered-map acceptance.
 
@@ -396,6 +397,77 @@ Pre-flight (GUIDE.md Rule 13)
   registration state transitions and checksum verification; `ValidationQueue` is
   tied to Isaac runs/configuration and is not interchangeable; no new dependency.
 - checks: `ruff check src/ tests/` PASS; `ruff format --check src/ tests/` PASS
-  (545 files); focused pytest PASS (60 tests).
+  (545 files); focused pytest PASS (61 tests).
 - DevTools: n/a — no UI change. The existing authenticated QA route was inspected
   read-only; its sample job remains waiting for metric confirmation.
+
+### AUD-19.S4b — Exact staged-source verification and job-lineage resolution
+
+**Input:** sealed map-registration request, exact input assembly revision, selected
+registered-map/static-cloud file, target job/project and worker workspace.
+**Output:** ephemeral `VerifiedRegistrationSource` with a verified local PCD/PLY
+path, source/header checksums, parsed format/count, declared units/frame and a
+same-scene lineage flag.
+**Data contract:** verify the request and immutable assembly checksums, role/file-ID
+binding, server upload probe, exact whole-upload checksum, selected member checksum
+for ZIP inputs, cloud-state/unit/frame declarations, parsed PCD/PLY header checksum,
+format and point count against the sealed profile. ZIP members are copied to a
+server-named worker path and checked against the staged member size/hash. Sensor
+package and raw-scan modes stay on their existing/AUD-17 routes. `same_scene_lineage_verified`
+is true only when the same declared assembly revision is the accepted target-job
+run, its exact recipe selects both the requested LiDAR file/role and RGB video, and
+the project still references that recipe. This verifies the stored evidence chain;
+it cannot establish that two sensors actually viewed the same physical place.
+
+`ProjectPersistence.input_run_for_job` reads the durable row and rejects drift in
+duplicated requester/key/job/project/assembly/revision/report/recipe columns and
+the exact recipe reference. The resolver only checks the PCD/PLY header at this
+stage; complete point-payload validation, unit conversion, actor/project/source
+authorization, resource admission, queue dispatch and API wiring remain worker/API
+work in later S4 slices. It does not expose a user-facing command by itself.
+
+**Tests:** direct PLY resolution (including a false lineage result without an
+accepted job run); exact ZIP member extraction; forged-header rejection; positive
+same-job RGB+LiDAR lineage; durable input-run row/payload drift.
+The suite uses local artifact files and SQLite. It does not prove registered-map
+accuracy, production storage, real-scene identity or collision safety.
+**Exit:** [x] exact source assembly/bytes/header and stored job-recipe lineage are
+resolved fail-closed; [ ] API authorizes target and source before enqueue; [ ] worker
+validates full point payload, converts declared units and consumes the resolver.
+
+#### AUD-19.S4b Result / Evidence
+
+Added `src/services/orchestration/jobs/registration_sources.py` and the read-only
+`ProjectPersistence.input_run_for_job` lookup. The resolver re-reads the exact
+assembly, verifies its upload records and artifact bytes, checks selected role,
+units/frame/cloud-state, and parses the supported scalar PCD/PLY header. For ZIPs
+it materializes only the selected checksum-bound member under a generated worker
+filename. Same-scene lineage requires an accepted recipe for the target job that
+includes both exact RGB and LiDAR bindings; absent or separate lineage remains
+unverified. The flag documents byte/recipe lineage only, not physical co-location.
+
+Verification: focused source, operation, contract, assembly-resolution and input-run
+integration suite — 59 passed; repository Ruff check passed; Ruff format check passed
+(547 Python files); CodeGraph reported current; Graphify rebuilt 20,848 nodes,
+61,352 edges and 704 communities. No schema migration or user-visible API/UI change
+was needed. The resolver is not yet wired into queue dispatch. Full payload decoding,
+unit conversion, authorization/admission, API/UI, real held-out qualification,
+browser flow and consumer publication remain open.
+
+Pre-flight (GUIDE.md Rule 13)
+- codegraph: explored `RegistrationSourceBinding`, `InputAssemblyService`, staged
+  upload probes, `ArtifactResolver`, `CloudHeader`, accepted input-run persistence,
+  RGB recipe bindings and operation-store callers before edits; re-explored the new
+  resolver and `input_run_for_job` after indexing.
+- impact: no database migration; a new `ProjectPersistence` read path is exercised
+  against the existing v18 schema. New source verification has tests but no API or
+  worker callers yet.
+- understand: request → exact assembly revision → role/file binding → source bytes
+  and header → optional accepted RGB+LiDAR recipe lineage. Same-scene lineage does
+  not prove physical scene identity; source declarations remain declarations.
+- minimal-code: reused `InputAssemblyService.verify_upload_sources`, `ArtifactResolver`,
+  `CloudHeader`, existing checksummed `InputRecipe` and the existing runtime DB;
+  no new parser, dependency or queue.
+- checks: focused pytest PASS (59 tests); `.venv/bin/ruff check src/ tests/` PASS;
+  `.venv/bin/ruff format --check src/ tests/` PASS (547 files).
+- DevTools: n/a — no UI/runtime behavior changed.
