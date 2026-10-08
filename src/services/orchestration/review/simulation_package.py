@@ -188,10 +188,13 @@ def _recover_legacy_source_ownership(
     registry: ProjectRegistry, job_id: str, scene: SceneIR
 ) -> tuple[SceneIR, dict[str, str]]:
     """Recover omitted ownership only from checksum-validated earlier SceneIR revisions."""
+    # A duplicate never owns a source region, so it must not send recovery through the whole history.
     missing = {
         item.id
         for item in scene.objects
-        if item.origin == SceneObjectOrigin.RECONSTRUCTED and item.source_collision is None
+        if item.origin == SceneObjectOrigin.RECONSTRUCTED
+        and item.source_collision is None
+        and item.provenance.get("duplicated_from") is None
     }
     if not missing:
         return scene, {}

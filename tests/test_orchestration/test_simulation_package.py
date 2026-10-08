@@ -426,6 +426,30 @@ def test_unavailable_legacy_owner_history_blocks_package_without_publishing_revi
     assert current_package(registry, job.job_id) is None
 
 
+def test_duplicate_object_does_not_trigger_history_walk_for_ownership_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A duplicate owns no source region; walking every revision for it makes each export O(n²)."""
+    registry, job = _scene_job(tmp_path)
+    scene = registry.scene.current(job.job_id).scene
+    (item,) = scene.objects
+    apply_object_action(registry.scene, job.job_id, item.id, "confirm", scene.scene_revision)
+    confirmed = registry.scene.current(job.job_id).scene
+    apply_object_action(registry.scene, job.job_id, item.id, "duplicate", confirmed.scene_revision)
+    current = registry.scene.current(job.job_id).scene
+    assert any(candidate.provenance.get("duplicated_from") for candidate in current.objects)
+    calls: list[str] = []
+    original = registry.scene.revision
+    monkeypatch.setattr(
+        registry.scene, "revision", lambda job_id, revision: calls.append(revision) or original(job_id, revision)
+    )
+
+    recovered, sources = simulation_package_service._recover_legacy_source_ownership(registry, job.job_id, current)
+
+    assert recovered is current and sources == {}
+    assert calls == []
+
+
 def test_legacy_owner_from_different_geometry_history_blocks_candidate(tmp_path: Path) -> None:
     registry, job = _scene_job(tmp_path)
     source_scene = registry.scene.current(job.job_id).scene
