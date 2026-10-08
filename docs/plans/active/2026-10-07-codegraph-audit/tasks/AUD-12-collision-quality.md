@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- PLANNED; P0; EX-REC geometry, EX-SIM collision QA, PRODUCT selection/publication.
+- IN PROGRESS; P0; EX-REC geometry, EX-SIM collision QA, PRODUCT selection/publication.
 - Canonical REC-05/08/09, SIM-02/04/06, PRODUCT-08/12. REUSE existing voxel/
   clearance tools; ADAPT radius/statistical filters theo qualified source.
 - Goal: giảm ghost blocking nhưng giữ obstacle/support thật, có source/quality
@@ -36,13 +36,16 @@ Output: immutable collision artifact + CollisionQualityReport/source selection,
 SceneEnvironment binding và candidate inventory, hoặc blocker.
 
 Proposed CollisionSourceSelection: version, mode rgb_cleaned/lidar_derived,
-source refs/checksums, input/registration mode, alignment/QA refs, config checksum, effective resolution/
-filters, output collision ref, supported coverage. CollisionQualityReport:
-source/config/output identity, floor/support evidence, free-space consistency,
-obstacle retention tests, observed/unsupported region refs, motion-suspicion
-signals/source và limitations. Region evidence ghi source/frame/time/coverage;
-absence of measurements không là free space. Report metrics không tạo GT accuracy
-claim nếu reference là input trajectory hoặc cùng LiDAR nguồn.
+source refs/checksums, input/registration mode, mode-specific alignment QA kind/ref,
+config/profile checksums, effective resolution và output collision ref.
+CollisionQualityReport: selection/source/config/output identity, hardware/robot
+profile refs, effective resolution, robot envelope, frozen acceptance profile
+and result, floor/support retention, free-space proxy, independent obstacle
+reference, observed/unsupported region refs, motion diagnostics và Isaac contact
+ref. Region evidence ghi source, observation IDs và coverage; absence of
+measurements không là free space. Free-space proxy không
+thể thay independent obstacle recall; report không tạo GT accuracy claim nếu
+reference là input trajectory hoặc cùng LiDAR nguồn.
 
 Keep existing canonical RGB artifacts unchanged; explicit scale correction AUD-19
 tạo new canonical target trước source selection. Collision ref
@@ -75,8 +78,9 @@ S4 phối hợp AUD-01 composition, AUD-02 export, AUD-05 Isaac và held-out dat
 **Input:** saved clearance logs/protocol + same source refs nếu available.
 **Output:** baseline parser/regressions, tuning/held-out matrix, proposed typed
 quality/source contracts và collision-source consumer fixtures.
-**Contract:** record exact source/config/hardware/robot envelope; label GT-assisted;
-free-space proxy tách independent obstacle recall; acceptance thresholds freeze trước test.
+**Contract:** record exact source/config/hardware/robot profile and envelope; label
+GT-assisted; free-space proxy tách independent obstacle recall; synthetic fixture
+acceptance thresholds freeze trước test.
 
 Implement: reproduce metrics khi data/runtime có; otherwise preserve saved
 evidence label. Build thin obstacle/floor fixtures: shelf legs/pallet feet/cable,
@@ -87,7 +91,7 @@ unknown, inferred or motion-suspected geometry cannot claim verified physics.
 Tests: benchmark parser/units/envelope, known clear vs real blocked, negative
 "delete all geometry" must fail retention/support, source checksum mismatch,
 moving/ghosted or unobserved-region fixture flagged rather than verified clear.
-**Exit:** [ ] baseline conditions pinned; [ ] QA cannot pass empty-world solution.
+**Exit:** [x] baseline conditions pinned; [x] QA cannot pass empty-world solution.
 
 ## Sprint AUD-12.S2 — Qualified cleanup cho RGB collision
 
@@ -158,5 +162,60 @@ Isaac contact handoff; CPU regression không đóng real acceptance.
 
 ## Result / Evidence
 
-Pending — source/profile/report/candidate identity, removals, proxy vs independent
-metrics, supported sensors/coverage và GPU/Isaac limitations theo từng sprint.
+### AUD-12.S1 — local contract/protocol complete
+
+- **Base:** `d0df32d` (`AUD-09.S3`).
+- **Logic before → after:** saved JSONL rows were manually interpreted and only
+  carried clearance counts; now a parser validates units/count consistency,
+  computes a file SHA-256 and preserves GT-assisted/proxy labels and missing
+  provenance. New typed source/report contracts bind exact source/config/output,
+  hardware/robot profiles, support/obstacle retention, region coverage, a frozen
+  acceptance-profile result and Isaac evidence. `SceneEnvironment.collider_ref` remains the selected consumer ref;
+  a fixture-level validator rejects any URI/checksum/report mismatch.
+- **CodeGraph impact:** audited `FinalizeWorker._execute/_bundle`,
+  `RgbGeometryService`, `SplatTransformVoxelAdapter`, LiDAR fusion/alignment,
+  `eval.path.path_clearance`, `eval.path.lidar_clearance`,
+  `SceneEnvironment`, and collision package consumers. S1 has no live producer,
+  persistence, API, viewer, USD or Isaac source-selection caller; therefore it
+  adds a versioned internal contract and consumer fixture without changing
+  SceneIR or legacy artifact serialization. AUD-12.S2–S4 will wire actual
+  producers/consumers with the selected source.
+- **Changed files:** `eval/path/collision_quality.py`,
+  `eval/fixtures/collision_quality.py`,
+  `eval/protocols/collision_path_clearance.md`,
+  `src/models/contracts/collision_quality.py`,
+  `src/models/contracts/__init__.py`,
+  `tests/test_contracts/test_collision_quality.py`,
+  `tests/test_reconstruction/test_collision_quality.py`, this task, ADR 0016,
+  and the plan README.
+- **Saved evidence parsed:** `aisle-cw-local-t2000.jsonl` SHA-256
+  `b7779a0bdbbfe75977f16a25f73b7f37256de3dc82788faaffd7f71e5344b39c`;
+  33/50 at 0.05 m. `aisle-cw-100-lidar-job.jsonl` SHA-256
+  `e8a4d1bf129ee1eef2cb573eaa61dcfb7a3cbfbcc32636850742bc3253e40716`;
+  0/100 at min-range 2 m + floor-band 0.15 m, explicitly GT-assisted. Both are
+  free-space proxies; neither contains independent obstacle-recall evidence.
+- **Acceptance freeze:** deterministic synthetic cases use 100% expected
+  obstacle/support sample retention, empty output always fails, known-clear is
+  0/1 blocked and known-blocked is 1/1 blocked. Matrix includes shelf legs,
+  pallet feet, cable, wall, ramp, low box, 0.90/1.05 m passages, 0.05 m camera
+  offset sensitivity and unsupported/motion-suspected regions. These are fixture
+  thresholds only; production thresholds and an independent held-out capture are
+  not available yet and must be frozen on tuning data before AUD-12.S4 holdout.
+- **Schema/config/migration:** added version 1.0 internal Pydantic contracts only.
+  No SceneIR/API/TypeScript payload, DB migration or persisted artifact changed;
+  old SceneIR and saved JSONL bytes remain readable and immutable.
+- **Verification:** `pytest tests/test_contracts/test_collision_quality.py
+  tests/test_reconstruction/test_collision_quality.py -q` — 31 passed;
+  combined with `tests/test_contracts/test_scene.py` and
+  `tests/test_packaging/test_package_publish.py` — 73 passed;
+  Ruff check passed for `src/`, `tests/` and the two new evaluation modules;
+  `ruff format --check src/ tests/` — 508 files formatted;
+  `.venv/bin/python scripts/check_contract_mirror.py` — pass; the parser CLI
+  read both saved JSONL files and verified their SHA-256/check counts.
+- **Gate report:** CodeGraph used before source edits and after contract creation;
+  scope limited to source contracts/evaluation fixtures/docs; focused checks pass.
+  No GPU, Isaac Sim, production capture, independent obstacle reference or real
+  held-out proof was available. These remain explicitly **UNVERIFIED**.
+- **Next:** AUD-13.S1 calibration package projection/overlay QA, per default plan
+  order. AUD-12.S2/S3 remain blocked on floor/noise and calibration/alignment
+  contracts; AUD-12.S4 still requires held-out and exact-candidate Isaac evidence.

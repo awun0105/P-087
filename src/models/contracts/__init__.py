@@ -1,6 +1,24 @@
 """Shared Real2Sim artifact contracts for every execution track."""
 
 from src.models.contracts.artifacts import ArtifactDataClass, ArtifactRef, ContractModel, ProductArtifactRef
+from src.models.contracts.collision_quality import (
+    ClearanceProxyEvidence,
+    CollisionAlignmentQAKind,
+    CollisionInputMode,
+    CollisionObservationState,
+    CollisionPhysicsClaim,
+    CollisionQualityReport,
+    CollisionQualityResult,
+    CollisionReferenceKind,
+    CollisionRegionEvidence,
+    CollisionSourceMode,
+    CollisionSourceSelection,
+    CollisionSupportEvidence,
+    ObstacleRetentionEvidence,
+    seal_collision_quality_report,
+    seal_collision_source_selection,
+    validate_collision_source_binding,
+)
 from src.models.contracts.coordinates import CoordinateSystem, MetricScale, Transform
 from src.models.contracts.input_assembly import (
     ArchiveMemberRef,
@@ -129,7 +147,19 @@ __all__ = [
     "ArtifactRef",
     "ArtifactDataClass",
     "CandidatePackage",
+    "ClearanceProxyEvidence",
+    "CollisionAlignmentQAKind",
     "CapsuleFootprint",
+    "CollisionInputMode",
+    "CollisionObservationState",
+    "CollisionPhysicsClaim",
+    "CollisionQualityResult",
+    "CollisionQualityReport",
+    "CollisionReferenceKind",
+    "CollisionRegionEvidence",
+    "CollisionSourceMode",
+    "CollisionSourceSelection",
+    "CollisionSupportEvidence",
     "ColliderSpec",
     "ContractModel",
     "ClientVideoFingerprint",
@@ -162,6 +192,7 @@ __all__ = [
     "RuntimeManifest",
     "SceneIR",
     "SceneObject",
+    "ObstacleRetentionEvidence",
     "SourceCollisionMembership",
     "SourceCollisionRegion",
     "SceneRevisionRecord",
@@ -222,6 +253,8 @@ __all__ = [
     "TrajectoryOrigin",
     "VideoRecipeCandidate",
     "seal_gaussian_view_intent",
+    "seal_collision_quality_report",
+    "seal_collision_source_selection",
     "seal_input_assembly",
     "seal_input_recipe",
     "seal_input_resolution",
@@ -231,4 +264,5 @@ __all__ = [
     "verify_input_recipe_checksum",
     "verify_input_resolution_checksum",
     "verify_runtime_registry_checksum",
+    "validate_collision_source_binding",
 ]

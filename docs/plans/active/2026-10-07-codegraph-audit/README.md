@@ -62,6 +62,15 @@ there is no in-flight status/cancel operation, and “Hủy chọn” clears sta
 selection only. Real runtime COACD/GPU/inpaint/SOG and Isaac qualification are
 **UNVERIFIED**. Chrome DevTools reached the local login page, but no authenticated
 Studio session was available, so browser acceptance is **UNVERIFIED**.
+AUD-09.S3 committed as `d0df32d`; collider preflight now uses edited local bounds
+and the focused package/candidate regressions passed. AUD-12.S1 is locally
+complete: saved collision logs parse with immutable file checksums and evidence
+labels, typed source/quality contracts bind exact refs, and synthetic fixtures
+reject empty-world and unsupported-region physics claims; verified claims also
+require a frozen acceptance profile with PASS. Verification: 31 focused tests,
+Ruff, format and contract mirror pass. No production collision producer,
+held-out capture, independent obstacle recall or Isaac proof is enabled by S1;
+those remain **UNVERIFIED** for later sprints.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 

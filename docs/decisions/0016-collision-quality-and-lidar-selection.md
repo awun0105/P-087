@@ -61,3 +61,24 @@ data; initial opt-in rollout cần ghi supported conditions.
   [AUD-13](../plans/active/2026-10-07-codegraph-audit/tasks/AUD-13-lidar-calibration-qa.md),
   [AUD-14](../plans/active/2026-10-07-codegraph-audit/tasks/AUD-14-adaptive-floor.md).
 - [Evidence/caveats](../plans/active/2026-10-07-codegraph-audit/GEMINI_FINDINGS.md).
+
+## AUD-12.S1 implementation note — 2026-10-08
+
+The ADR remains **Proposed**; this note does not accept or enable the source
+selection in production. S1 added internal version 1.0 Pydantic contracts for
+`CollisionSourceSelection` and `CollisionQualityReport`. They bind source,
+profile/config, mode-specific QA kind, effective resolution, output collision,
+hardware/robot profiles, support retention, independent obstacle evidence,
+coverage states, a frozen acceptance-profile result and simulator contact
+evidence. A physics claim requires a PASS under that exact profile. The selected
+output is checked against the existing
+`SceneEnvironment.collider_ref`; no competing reconstruction bundle or SceneIR
+field was added.
+
+Saved JSONL rows are parsed as free-space proxies with source provenance gaps
+preserved. LiDAR rows that declare `trajectory_origin=ground_truth` remain
+GT-assisted. Synthetic fixture thresholds are pinned in
+`eval/protocols/collision_path_clearance.md`; no production threshold was inferred
+from the single traversal. Actual producer/API/USD/Isaac consumers, held-out
+capture, independent obstacle recall and exact-candidate contact validation
+remain follow-up implementation/qualification work.
