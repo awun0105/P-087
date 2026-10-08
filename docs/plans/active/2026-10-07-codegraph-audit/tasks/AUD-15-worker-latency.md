@@ -75,7 +75,7 @@ Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption
 
 S1 độc lập. S2 dùng resource invariants hiện có; operation admission extensions
 theo AUD-07 nếu optimization chạm heavy operations. S3 phối hợp AUD-12 quality
-protocol và AUD-16 preview timings; không đợi full Fast Preview để đo pipeline cũ.
+protocol trên pipeline thực; AUD-16 đã Deferred theo yêu cầu owner và không còn là dependency.
 
 ## Sprint AUD-15.S1 — Complete timing và frozen benchmark protocol
 

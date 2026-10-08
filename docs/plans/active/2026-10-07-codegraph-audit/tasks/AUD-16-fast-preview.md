@@ -2,11 +2,12 @@
 
 ## Metadata và goal
 
-- PLANNED; P1; EX-PRODUCT + EX-REC; SCENE/SIM consumers.
-- Canonical REC-04/05, PRODUCT-02/08/09. REUSE training parameter registry,
-  JobProcessingConfig, preview SOG artifacts, admission và upstream stage cache.
-- Goal: user chủ động chọn preview nhanh, inspect visual sớm và chạy final
-  profile rõ ràng với identity/history riêng.
+- DEFERRED theo yêu cầu owner 2026-10-08; không implement trong kế hoạch hiện tại.
+- Lý do bác bỏ:
+  1. 7.000 iterations chỉ mới là giai đoạn đầu của 3DGS training (densification/pruning thô), tạo ra các đám điểm mờ (blobs/floaters) không có hình dạng rõ ràng, không đủ chất lượng để đánh giá thị giác chính xác.
+  2. Thiếu cơ chế checkpoint resume đã được nghiệm thu (continuation 7k → 30k). Nếu phải dừng ở 7k rồi train lại từ đầu 30k, tổng thời gian bị đội lên thành 7k + 30k = 37k iterations, làm chậm trễ pipeline thay vì tăng tốc.
+  3. Lệch trọng tâm mục tiêu cốt lõi của Real2Sim: Studio cần cảnh có mesh, collider và thuộc tính vật lý cho robot trong simulation (Isaac Sim), một bản preview 7k không giải quyết được khâu trích xuất hình học hay vật lý. Thay vào đó, tập trung tối ưu pipeline thời gian thực (AUD-15).
+- Ba sprint bên dưới chỉ giữ làm thiết kế tham khảo; không là dependency của active tasks.
 - [Agent guide](../AGENT_GUIDE.md), [ADR 0017](../../../../decisions/0017-fast-preview-and-final-artifacts.md).
 
 ## Baseline và scope

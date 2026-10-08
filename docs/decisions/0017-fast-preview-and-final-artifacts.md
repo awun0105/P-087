@@ -4,8 +4,16 @@ Date: 2026-10-07
 
 ## Status
 
-Proposed — current training iteration knob đã có; first-class preview lifecycle
-và config/consumer extensions chưa implement.
+REJECTED / DEFERRED theo quyết định của owner ngày 2026-10-08. Không triển khai trong kế hoạch hiện tại.
+
+## Lý do bác bỏ / Defer (Owner Rationale 2026-10-08)
+
+1. **Chất lượng hình ảnh 7.000 iterations không có giá trị đánh giá thực tế:**
+   Trong 3D Gaussian Splatting (3DGS), 7.000 vòng lặp chỉ mới bắt đầu chu trình densification/pruning thô. Kết quả tái tạo ở mốc này chỉ là các đám điểm mờ (blobs/floaters) không có biên dạng hình học rõ ràng, không đủ độ nét để người dùng đánh giá chất lượng scene hoặc quyết định quay lại video.
+2. **Nguy cơ làm chậm toàn bộ pipeline thay vì tăng tốc:**
+   Bộ huấn luyện Brush chưa nghiệm thu năng lực checkpoint resume (continuation 7k → 30k). Nếu dừng ở 7k rồi chạy tiếp bản Final mà không resume được, hệ thống buộc phải huấn luyện lại từ đầu 30k. Tổng số vòng lặp bị đội lên 7k + 30k = 37k iterations, làm lãng phí GPU và kéo dài thời gian chờ đợi.
+3. **Lệch mục tiêu cốt lõi của Real2Sim:**
+   Real2Sim Studio cần cảnh có mesh, collider và vật lý chính xác cho robot mô phỏng (Isaac Sim). Bản 7k hoàn toàn không có mesh/collider và không thể dùng để trích xuất vật thể. Việc tối ưu thời gian xử lý thực sự sẽ được giải quyết trực tiếp qua AUD-15 (loại bỏ thao tác thừa trong worker pipeline) thay vì cắt giảm số vòng lặp huấn luyện.
 
 ## Context
 

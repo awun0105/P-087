@@ -116,8 +116,7 @@ canonical geometry. The existing sensor-package alignment path and REC-09 contra
 remain unchanged. Focused contracts plus REC-06/08/09 regressions, repo Ruff/format,
 contract mirror and CodeGraph pass. No BEV/ICP producer or held-out registration is
 qualified yet; those remain S2–S4 work.
-Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
-2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
+Active scope: 23 packages/77 sprints. AUD-16/ADR0017 (3 sprints) và AUD-25/ADR0025 (6 sprints) Deferred theo yêu cầu owner; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
 ## Outcome
 
@@ -125,8 +124,8 @@ Scene sau chỉnh sửa phải xuất đúng collision/physics. Candidate phải
 validation trên đúng runtime trước review. Release phải giữ cùng một identity
 qua retry. Import và reobjectify phải phục hồi được, dùng admission và không ghi
 đè chỉnh sửa của người dùng. Collision quality được đo cùng obstacle retention;
-LiDAR QA/adaptive floor, measured latency và Fast Preview có producer/consumer
-contract. Automatic map registration giảm manual landmarks và mở independent-map
+LiDAR QA/adaptive floor và measured latency có producer/consumer
+contract; Fast Preview (AUD-16) đã hoãn vì bản 7k thiếu độ nét hình học và thiếu checkpoint resume. Automatic map registration giảm manual landmarks và mở independent-map
 input có QA. LiDAR odometry và anonymizer là opt-in extensions có qualification.
 Video nén trước upload với preset720p/1080p/480p, giữ aspect dọc/ngang và source
 time/pixel mapping. Coding agent nhận một task và một sprint cụ thể.
@@ -179,7 +178,7 @@ observability, runtime chưa qualified, research limits và tính năng khả th
 | LiDAR projection QA thiếu | Package syntax checks và world-cloud overlay có; chưa có scored calibration/timing QA | AUD-13 |
 | Floor extraction chưa adaptive | Default clearance 0,06 m và raw-z mask; chưa có fitted floor/noise evidence | AUD-14 |
 | Worker latency cần đo đủ và tối ưu | Brush 42,6–45 phút ở partial attempts; chưa là complete job latency | AUD-15 |
-| Fast Preview lifecycle chưa có | Knob 7k iterations đã hợp lệ; preset/tier/lineage/promotion/UX chưa có | AUD-16 |
+| Fast Preview lifecycle (AUD-16) | Deferred theo yêu cầu owner 2026-10-08 vì 7k iters thiếu độ nét/hình học và nguy cơ chậm pipeline | AUD-16 |
 | Raw scans thiếu trajectory bị reject | LiDAR odometry khả thi; cần explicit mode/runtime/provenance/drift QA | AUD-17 |
 | Auto anonymizer producer thiếu | Self-attested flow có; strict QA gate có; detection/tracking/redaction integration chưa có | AUD-18 |
 | Automatic registration cho independent maps cần bổ sung | Trajectory-based no-point fit đã có; geometric BEV/ICP proposal/QA cho independent maps chưa có | AUD-19 |
@@ -213,7 +212,7 @@ BEV/ICP implementation hoặc independent-map/browser acceptance.
 | [AUD-13: LiDAR calibration QA](tasks/AUD-13-lidar-calibration-qa.md) | P1 — EX-REC; PRODUCT diagnostics | REC-08/09, PRODUCT-04/08 | 3 |
 | [AUD-14: Adaptive floor](tasks/AUD-14-adaptive-floor.md) | P1 — EX-SCENE; REC/SIM consumers | SCENE-02/03/06, REC-06, SIM-02 | 3 |
 | [AUD-15: Worker latency](tasks/AUD-15-worker-latency.md) | P1 — EX-PRODUCT + EX-REC | PRODUCT-02/08/09, REC-02/03/04/11 | 3 |
-| [AUD-16: Fast Preview](tasks/AUD-16-fast-preview.md) | P1 — EX-PRODUCT + EX-REC | REC-04/05, PRODUCT-02/08/09 | 3 |
+| [AUD-16: Fast Preview](tasks/AUD-16-fast-preview.md) | Deferred — không implement; EX-PRODUCT + EX-REC nếu mở lại | REC-04/05, PRODUCT-02/08/09 | 3 |
 | [AUD-17: LiDAR odometry](tasks/AUD-17-lidar-odometry.md) | P2 — EX-REC + EX-PRODUCT; opt-in | REC-08/06, PRODUCT-02/08/09 | 3 |
 | [AUD-18: Privacy anonymizer](tasks/AUD-18-privacy-anonymizer.md) | P2 — EX-REC + EX-PRODUCT; opt-in | REC-02, PRODUCT-01/02/09 | 3 |
 | [AUD-19: Automatic RGB–LiDAR registration](tasks/AUD-19-automatic-rgb-lidar-registration.md) | P1 — EX-REC + EX-PRODUCT; SCENE/SIM consumers | REC-06/08/09, PRODUCT-04/08/09 | 4 |
@@ -224,7 +223,7 @@ BEV/ICP implementation hoặc independent-map/browser acceptance.
 | [AUD-24: Unified upload và input resolution](tasks/AUD-24-unified-upload-and-input-resolution.md) | P1 — EX-PRODUCT + EX-REC | REC-02/03/06/08/09, PRODUCT-02/04/08/09 | 5 |
 | [AUD-25: Imported PLY/SOG continuation](tasks/AUD-25-imported-3dgs-continuation.md) | Deferred — không implement; EX-REC/SCENE/PRODUCT/SIM nếu mở lại | REC-04/05/06/09, SCENE-02/03/06/08, SIM-02/04/07, PRODUCT-02/04/06/08/09/10/11 | 6 |
 
-Active: **24 work packages / 80 sprint**. AUD-25 có 6 sprint Deferred giữ để
+Active: **23 work packages / 77 sprint**. AUD-16 (3 sprints) và AUD-25 (6 sprints) Deferred giữ để
 tham khảo; tổng tài liệu vẫn có 25 packages/86 sprint definitions. Mỗi sprint có Input, Output, Contract,
 implementation steps, Tests và Exit; mỗi task có dependencies, verification/DoD
 và Result/Evidence. P2 là extension triển khai sau nền tảng P0/P1, không là
@@ -292,7 +291,7 @@ Thứ tự mặc định gồm đủ **80 active sprint, mỗi sprint một lầ
 | 6 — Durable import, validator và unified UI | AUD-06.S2–S3 → AUD-05.S1–S4 → AUD-07.S3 → AUD-24.S3–S4 | Durable consumers/admission; grouped dispatch/UI và PLY/SOG view import. |
 | 7 — Object và collider editor | AUD-08.S1–S4 → AUD-09.S1–S3 | Merge/reassign/collider edit dùng shared publication; candidate mới phải validate lại. |
 | 8 — Collision quality, floor và LiDAR | AUD-12.S1 → AUD-13.S1 → AUD-14.S1 → AUD-19.S1 → AUD-14.S2–S3 → AUD-12.S2 → AUD-13.S2–S3 → AUD-19.S2–S4 → AUD-12.S3–S4 | Freeze quality/QA; adaptive floor, calibration QA, RGB–LiDAR map registration và qualified collision source. |
-| 9 — Latency và Fast Preview | AUD-15.S2–S3 → AUD-16.S1–S3 | Measured optimization và preview/final lifecycle giữ đúng preparation identity và quality gates. |
+| 9 — Latency (AUD-15) | AUD-15.S2–S3 (AUD-16 Deferred) | Measured optimization giữ đúng preparation identity và quality gates; AUD-16 đã hoãn theo yêu cầu owner. |
 | 10 — Input qualification và extensions | AUD-17.S1–S3 → AUD-24.S5 → AUD-18.S1–S3 | Estimated trajectory/input matrix R1–R6 và PLY/SOG view import; anonymizer opt-in có provenance/QA. |
 
 Execution order bắt đầu ở **AUD-11.S1**; các sprint AUD-11.S1–S2, AUD-15.S1,
@@ -314,7 +313,7 @@ Sau mỗi sprint: sửa đồng bộ producer/persistence/API/worker/UI/config/t
 logic mới ảnh hưởng, chạy focused checks và integration scenario liên quan,
 ghi Result/Evidence trước khi chuyển sprint phụ thuộc. Cuối mỗi đợt chạy regression
 của các flows đã thay đổi; không dồn related-code updates hoặc integration tới cuối
-80 active sprint. Trước enable schema mới, kiểm tra forward migration/read compatibility
+77 active sprint. Trước enable schema mới, kiểm tra forward migration/read compatibility
 và deployment order của producer/worker consumers theo integration map.
 
 Real Isaac proof ở AUD-05; fixtures ở đợt 2 chỉ chứng minh contracts/gates,
@@ -328,8 +327,8 @@ Dependencies không tạo cycle: AUD-03 tạo gate với persisted proof fixture
 AUD-05 mới tạo proof thật. AUD-07 chuẩn hóa reservation trước worker consumers,
 không đợi các consumer hoàn thành. AUD-10 không phụ thuộc UI mới.
 AUD-12.S1 đặt benchmark protocol trước AUD-14, AUD-14.S1 fit model trước cleanup;
-hai package không đợi toàn bộ epic của nhau. AUD-15.S1 tạo timing protocol cho
-AUD-16; AUD-15.S3 có thể dùng current pipeline, không bắt Fast Preview hoàn tất.
+hai package không đợi toàn bộ epic của nhau. AUD-15.S3 dùng current pipeline,
+không phụ thuộc Fast Preview (AUD-16 đã Deferred).
 AUD-19 uses AUD-12.S1 quality fixtures; AUD-12 sensor-package path không đợi
 AUD-19. Static-map consumer chỉ enable sau registration QA, không bắt AUD-19
 đợi whole AUD-12 epic. Sensor calibration QA và map registration QA không tráo nhau.
