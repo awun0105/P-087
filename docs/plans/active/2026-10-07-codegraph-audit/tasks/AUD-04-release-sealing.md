@@ -200,8 +200,9 @@ DONE khi fault matrix/concurrency/ZIP equality pass; old releases giữ checksum
   `.venv/bin/ruff format --check src/ tests/` reported 465 files formatted.
   Frontend: `npm run test` **42 files / 275 tests passed**, `npm run lint`,
   `npm run typecheck` and `npm run build` passed. `git diff --check` passed.
-- Browser DevTools MCP was not exercised for this sprint; the earlier
-  AUD-03.S3 browser gate remains **UNVERIFIED**. No live PostgreSQL or remote
+- Browser DevTools MCP was not exercised for this sprint. AUD-03.S3's review-screen
+  gate was verified later in an authenticated Reviewer session on 2026-10-09;
+  details are recorded in that task's S3 result. No live PostgreSQL or remote
   object store was available, and no production release/runtime data was changed.
 - Next: AUD-04.S3 covers concurrent seals/CAS losers and API equality under
   multiple registry/process consumers.

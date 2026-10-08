@@ -14,8 +14,8 @@ authenticated Chrome DevTools xác nhận grid/list và seed display names/roles
 legacy hiện thiếu creator snapshot; stable seed IDs và migration receipt còn pending.
 AUD-21.S1 đã chốt ma trận quyền,
 identity owner và migration contract trong commit `31ffac2`. AUD-22.S1 calendar
-contract đã hoàn tất; browser DevTools MCP gate của AUD-03.S3 vẫn
-UNVERIFIED. PostgreSQL qualification đã hoàn tất trên PostgreSQL 16 container
+contract đã hoàn tất; AUD-03.S3 review-screen gate đã xác nhận bằng Chrome DevTools
+MCP trong phiên Reviewer. Real Isaac proof vẫn thuộc AUD-05. PostgreSQL qualification đã hoàn tất trên PostgreSQL 16 container
 (`R2S_TEST_POSTGRES_URL`): toàn bộ suite orchestration 667 passed (0 skipped)
 gồm migration v1→v16, row locking, release sealing, scene head CAS và guest quota
 ledger. AUD-21.S2 đã implement Guest signup và role lifecycle,
@@ -362,10 +362,11 @@ ownership recovery, candidate ZIP/manifest, current rotated object pose,
 retained floor collision, relative USD asset composition, và bất biến bytes của
 artifact cũ bằng OpenUSD runtime. AUD-02.S3 nối capability blocker qua typed
 API/UI, giữ Preflight riêng, ngăn tải candidate khi export bị block và kiểm tra
-quyền GET/POST/download. Automated checks pass; browser DevTools còn UNVERIFIED
-vì Chrome DevTools MCP không lấy được session đang khóa profile. AUD-03.S3 đã
-commit API/UI projection và stale request regressions; component harness QA
-passed qua CLI, còn MCP gate và real Isaac acceptance (AUD-05) chờ môi trường.
+quyền GET/POST/download. Automated checks pass; browser DevTools của AUD-02.S3
+còn UNVERIFIED vì Chrome DevTools MCP chưa kiểm tra luồng download block. AUD-03.S3
+đã commit API/UI projection và stale request regressions; Chrome DevTools MCP xác
+nhận application review screen chặn release khi revision chưa có simulation package.
+Trusted worker proof và real Isaac acceptance vẫn thuộc AUD-05.
 AUD-04.S1 đóng băng release timestamp/manifest theo approval identity trong DB.
 AUD-04.S2 xác minh ZIP closure và commit marker, lưu diagnostics an toàn, phục hồi
 partial/missing artifacts, chặn download khi bytes sai; 53 backend tests (PostgreSQL

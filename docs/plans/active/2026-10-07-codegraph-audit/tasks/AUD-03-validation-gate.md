@@ -117,7 +117,7 @@ Tests: API/auth/stale POST, frontend render/pending/error; trusted fixture happy
 path; synthetic bypass negative; browser review screen theo GUIDE.
 **Exit:** [x] API gate remains authoritative and Studio fails closed on missing,
 stale or mismatched proof; [x] API/auth/stale and UI consumer tests pass;
-[ ] GUIDE DevTools MCP review-screen gate (CLI harness is supplementary only);
+[x] GUIDE DevTools MCP review-screen gate (application screen inspected in an authenticated Reviewer session);
 [ ] real Isaac proof, deferred to AUD-05.
 
 ## Verification và DoD
@@ -206,8 +206,9 @@ record/result phải nói fixture proof, chưa thay cho real-runtime acceptance.
   imports therefore cannot carry completed worker proof. Seal idempotency and
   atomic crash recovery remain AUD-04. Browser review remains AUD-03.S3.
 - Completed in AUD-03.S3: typed API/UI blockers and proof projection, stale/direct
-  request regressions and role checks. Browser MCP gate is recorded separately
-  in the S3 result because the required MCP session was unavailable.
+  request regressions and role checks. Browser MCP was unavailable during the code
+  implementation; its later application-screen verification is recorded in the S3
+  result below.
 
 ### AUD-03.S3 — API/UI projections and release regression
 
@@ -240,17 +241,19 @@ record/result phải nói fixture proof, chưa thay cho real-runtime acceptance.
   **18 passed**; `ruff check src/ tests/` passed; `ruff format --check src/ tests/`
   reported 463 files already formatted; frontend typecheck and lint passed;
   `npm run build -- --webpack` passed; `git diff --check` passed.
-- Browser evidence: Chrome DevTools CLI rendered the component harness, accepted
-  the optional path warning, submitted the confirmation, and showed RELEASED.
-  API responses were mocked in the harness and no project DB was mutated. The
-  screenshot at `/tmp/r2s-aud03-s3/review-panel.png` shows the expected state,
-  but the harness omits application CSS. This CLI run supplements and does not
-  satisfy GUIDE.md's Chrome DevTools MCP gate. MCP was unavailable in this
-  session; user was asked to reconnect it. Record the MCP gate as UNVERIFIED
-  until that review runs against the application screen.
+- Browser evidence: on 2026-10-09 Chrome DevTools MCP opened the application
+  review tab for an existing job in the authenticated Reviewer session. The
+  screen showed “Chưa đủ điều kiện duyệt”, “Chưa thể phát hành”, and the explicit
+  blocker that this revision has no simulation package. `GET .../review-state`
+  returned 200 with that blocker; the disclosure explaining revision-bound
+  package/report/approval was readable. No package or approval command was
+  created. Console had no errors or warnings. This verifies the real application
+  screen's fail-closed no-package projection; a package without trusted worker
+  proof was unavailable for browser observation, while API/UI regression tests
+  cover that state.
 - Limits: synthetic/worker-shaped evidence is not real Isaac execution.
   Authenticated worker receipt and real Isaac acceptance remain AUD-05; release
   seal atomic crash recovery remains AUD-04. The checks establish local API and
   component behavior only, not deployment/cloud acceptance.
-- Next: complete the required MCP screen review, then implement AUD-04.S1
-  idempotent seal identity and crash-safe publication.
+- Next: authenticated worker receipt and real Isaac acceptance remain with AUD-05;
+  AUD-04 owns release-seal atomicity and crash-safe publication.
