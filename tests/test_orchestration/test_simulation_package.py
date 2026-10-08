@@ -472,6 +472,73 @@ def test_legacy_recovery_does_not_assign_ownership_of_a_different_object_that_re
     assert registry.scene.current(job.job_id).scene.scene_revision == current.scene_revision
 
 
+def _legacy_job_without_ownership(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN202
+    """A job extracted before ownership existed: rev-001 has reconstructed objects without source_collision."""
+    from src.services.orchestration.scene import extraction as scene_extraction
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(scene_extraction, "bind_source_collision_ownership", lambda objects, _ref, _revision: objects)
+        registry, job = _scene_job(tmp_path)
+    assert registry.scene.current(job.job_id).scene.objects[0].source_collision is None
+    return registry, job
+
+
+def test_legacy_scene_recovers_ownership_from_the_extraction_revision_not_the_moved_pose(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Existing scenes predate ownership; the original artifact still holds the pose the object was extracted at."""
+    registry, job = _legacy_job_without_ownership(tmp_path / "legacy", monkeypatch)
+    root = registry.scene.current(job.job_id).scene
+    (item,) = root.objects
+    apply_object_action(registry.scene, job.job_id, item.id, "confirm", root.scene_revision)
+    confirmed = registry.scene.current(job.job_id).scene
+    moved = move_object(confirmed, item.id, item.transform.model_copy(update={"translation_xyz": (4.0, 0.5, 0.3)}))
+    registry.scene.publish_next(job.job_id, confirmed.scene_revision, moved, "test_move")
+    current = registry.scene.current(job.job_id).scene
+
+    recovered, sources = simulation_package_service._recover_legacy_source_ownership(registry, job.job_id, current)
+
+    (owned,) = recovered.objects
+    assert sources == {item.id: "rev-001"}
+    assert owned.source_collision is not None and owned.source_collision.extraction_revision == "rev-001"
+    assert owned.source_collision.source_transform == item.transform
+    assert owned.transform.translation_xyz == (4.0, 0.5, 0.3)
+
+    reference_registry, reference_job = _scene_job(tmp_path / "reference")
+    reference = reference_registry.scene.current(reference_job.job_id).scene
+    apply_object_action(reference_registry.scene, reference_job.job_id, item.id, "confirm", reference.scene_revision)
+    expected = simulation_package_service._carved_environment(
+        reference_registry, reference_registry.scene.current(reference_job.job_id).scene
+    )
+    background = simulation_package_service._carved_environment(registry, recovered)
+    assert background.carved_triangles == expected.carved_triangles > 0
+    assert background.identity == expected.identity
+
+
+def test_legacy_recovery_accepts_the_first_revision_of_a_reextraction_but_not_other_operations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, job = _legacy_job_without_ownership(tmp_path, monkeypatch)
+    root = registry.scene.current(job.job_id).scene
+    (item,) = root.objects
+    other_geometry = item.geometry_ref.model_copy(
+        update={"artifact_uri": f"artifact://jobs/{job.job_id}/scene/reextracted-geometry.glb"}
+    )
+    registry.scene.store.publish(other_geometry, registry.runtime_resolver.require(item.geometry_ref).read_bytes())
+    reextracted = root.model_copy(
+        update={"objects": [item.model_copy(update={"geometry_ref": other_geometry}, deep=True)]}, deep=True
+    )
+    published = registry.scene.publish_next(job.job_id, root.scene_revision, reextracted, "objectify")
+    revision = published.revision.scene
+    moved = move_object(revision, item.id, item.transform.model_copy(update={"translation_xyz": (1.5, 1.5, 0.3)}))
+    registry.scene.publish_next(job.job_id, revision.scene_revision, moved, "test_move")
+    current = registry.scene.current(job.job_id).scene
+
+    _, sources = simulation_package_service._recover_legacy_source_ownership(registry, job.job_id, current)
+
+    assert sources == {item.id: "rev-002"}
+
+
 def test_legacy_owner_from_different_geometry_history_blocks_candidate(tmp_path: Path) -> None:
     registry, job = _scene_job(tmp_path)
     source_scene = registry.scene.current(job.job_id).scene

@@ -46,7 +46,11 @@ from src.models.contracts.scene import (
 from src.models.contracts.validation import CandidatePackage, PreflightReport, RuleResult
 from src.services.orchestration.artifacts.errors import ArtifactStoreError
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.scene.collision_ownership import SourceCollisionOwnershipError, read_triangle_memberships
+from src.services.scene.collision_ownership import (
+    SourceCollisionOwnershipError,
+    bind_source_collision_ownership,
+    read_triangle_memberships,
+)
 from src.services.simulation.colliders.carve import CarveBox, carve_triangle_mask, triangle_mask_in_box
 from src.services.simulation.enrichment.service import enrich_scene_physics
 from src.services.simulation.preflight.engine import run_preflight
@@ -184,10 +188,24 @@ def _source_region_removed(item: SceneObject) -> bool:
     return review == "DELETED" or (review != "IGNORED" and item.state == SceneObjectState.CONFIRMED)
 
 
+#: Operations that replace the whole reconstructed object set. Their revision still holds each object at
+#: the pose it was extracted with, so it is the original artifact ownership can be recovered from.
+_EXTRACTION_OPERATIONS = frozenset({"objectify", "use_boxes"})
+
+
 def _recover_legacy_source_ownership(
     registry: ProjectRegistry, job_id: str, scene: SceneIR
 ) -> tuple[SceneIR, dict[str, str]]:
-    """Recover omitted ownership only from checksum-validated earlier SceneIR revisions."""
+    """Recover omitted ownership without ever using an edited pose.
+
+    1. An earlier checksum-validated revision of the same object (same id and geometry artifact) that
+       already carries ownership wins.
+    2. Otherwise the object's unbroken run of revisions must start at an extraction output: the root
+       revision, or the first revision of a re-extraction. That revision still has the pose the object
+       was extracted with, which is exactly what `bind_source_collision_ownership` records.
+    Anything else stays unrecovered and the carve fails closed.
+    """
+    current_objects = {item.id: item for item in scene.objects}
     # A duplicate never owns a source region, so it must not send recovery through the whole history.
     missing = {
         item.id
@@ -200,9 +218,11 @@ def _recover_legacy_source_ownership(
         return scene, {}
 
     recovered: dict[str, tuple[SourceCollisionRegion, str]] = {}
+    run_start: dict[str, SceneIR] = {object_id: scene for object_id in missing}
+    open_runs, introduced = set(missing), set[str]()
     seen = {scene.scene_revision}
     cursor = scene
-    while True:
+    while missing:
         previous_revision = cursor.provenance.get("edited_from")
         if not isinstance(previous_revision, str):
             previous_revision = cursor.provenance.get("previous_revision")
@@ -216,25 +236,46 @@ def _recover_legacy_source_ownership(
         if prior.scene_id != scene.scene_id or prior.environment.geometry_ref != scene.environment.geometry_ref:
             break
         prior_objects = {item.id: item for item in prior.objects}
-        current_objects = {item.id: item for item in scene.objects}
         for object_id in tuple(missing):
             prior_object = prior_objects.get(object_id)
-            owner = prior_object.source_collision if prior_object is not None else None
-            if (
+            # A re-extraction reuses ids (candidate-001...) for different objects; only the same
+            # immutable geometry artifact proves an earlier revision describes this object.
+            same_object = (
                 prior_object is not None
                 and prior_object.origin == SceneObjectOrigin.RECONSTRUCTED
-                # A re-extraction reuses ids (candidate-001...) for different objects; only the same
-                # immutable geometry artifact proves the earlier ownership belongs to this object.
                 and prior_object.geometry_ref == current_objects[object_id].geometry_ref
-                and owner is not None
+            )
+            owner = prior_object.source_collision if same_object and prior_object is not None else None
+            if (
+                owner is not None
                 and owner.object_id == object_id
                 and owner.source_geometry_ref == scene.environment.geometry_ref
             ):
                 recovered[object_id] = owner, previous_revision
                 missing.remove(object_id)
-        if not missing:
-            break
+            elif object_id in open_runs:
+                if same_object:
+                    run_start[object_id] = prior
+                else:
+                    open_runs.discard(object_id)
+                    introduced.add(object_id)
         cursor = prior
+
+    for object_id in tuple(missing):
+        start = run_start[object_id]
+        is_root = start.provenance.get("edited_from") is None and start.provenance.get("previous_revision") is None
+        extracted_here = object_id in introduced and start.provenance.get("operation") in _EXTRACTION_OPERATIONS
+        if not (is_root or extracted_here) or start.environment.geometry_ref != scene.environment.geometry_ref:
+            continue
+        start_object = next(item for item in start.objects if item.id == object_id)
+        try:
+            (bound,) = bind_source_collision_ownership(
+                [start_object], start.environment.geometry_ref, start.scene_revision
+            )
+        except ValueError:
+            continue
+        if bound.source_collision is not None:
+            recovered[object_id] = bound.source_collision, start.scene_revision
 
     if not recovered:
         return scene, {}
@@ -318,11 +359,9 @@ def _carved_environment(registry: ProjectRegistry, scene: SceneIR) -> CarvedBack
             indices = np.flatnonzero(triangle_mask_in_box(centroids, box, BUILD_CONFIG["carve_margin_m"]))
 
         previous = owner_indices[indices]
-        claimed = previous >= 0
-        if not removes_region[owner_index]:
-            # Two regions that both stay in the background cannot change the output, so only a
-            # claim against a region that is carved away is an ownership ambiguity.
-            claimed &= removes_region[np.maximum(previous, 0)]
+        # Triangles claimed by regions that are all carved away, or all kept, come out the same whoever
+        # owns them. Only a claim shared between a carved and a kept region is a real ambiguity.
+        claimed = (previous >= 0) & (removes_region[np.maximum(previous, 0)] != removes_region[owner_index])
         overlaps = np.flatnonzero(claimed)
         if len(overlaps):
             triangle_index = int(indices[overlaps[0]])

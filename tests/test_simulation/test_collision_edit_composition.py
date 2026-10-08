@@ -361,14 +361,22 @@ def test_source_owned_background_does_not_carve_user_added_boxes_and_rejects_ove
             "source_collision": overlap_ownership.model_dump(mode="json"),
         }
     )
-    overlap_scene = scene.model_copy(update={"objects": [confirmed.objects[0], overlap]}, deep=True)
-    with pytest.raises(SourceCollisionOwnershipError, match="claimed by both"):
-        _carved_environment(registry, overlap_scene)
+    # Both carved away: whoever owns the shared triangles, the same ones leave the background.
+    both_carved = scene.model_copy(update={"objects": [confirmed.objects[0], overlap]}, deep=True)
+    assert _carved_environment(registry, both_carved).identity == confirmed_background.identity
 
-    # Overlapping regions that both stay in the background cannot change the output.
+    # Both kept: nothing is carved, so there is nothing to disambiguate.
     kept_overlap = overlap.model_copy(update={"state": SceneObjectState.CANDIDATE}, deep=True)
-    kept_scene = scene.model_copy(update={"objects": [pallet, kept_overlap]}, deep=True)
-    assert _carved_environment(registry, kept_scene).carved_triangles == 0
+    both_kept = scene.model_copy(update={"objects": [pallet, kept_overlap]}, deep=True)
+    assert _carved_environment(registry, both_kept).carved_triangles == 0
+
+    # One carved, one kept: the shared triangles may belong to the kept object, so the build must not guess.
+    mixed = scene.model_copy(update={"objects": [confirmed.objects[0], kept_overlap]}, deep=True)
+    with pytest.raises(SourceCollisionOwnershipError, match="claimed by both"):
+        _carved_environment(registry, mixed)
+    mixed_reversed = scene.model_copy(update={"objects": [kept_overlap, confirmed.objects[0]]}, deep=True)
+    with pytest.raises(SourceCollisionOwnershipError, match="claimed by both"):
+        _carved_environment(registry, mixed_reversed)
 
     assert confirmed_background.carved_triangles > 0
     assert user_background.carved_triangles == 0
