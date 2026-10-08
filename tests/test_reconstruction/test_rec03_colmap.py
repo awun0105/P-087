@@ -20,6 +20,7 @@ from src.services.reconstruction.adapters.colmap_runtime import (
     ColmapRuntimeSettings,
     reconstruction_commands,
 )
+from src.services.reconstruction.resume import ResumeCache
 from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver
 from src.services.reconstruction.rgb.pose.camera_pose import CameraPoseArtifact, ColmapConfig
 from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
@@ -127,21 +128,25 @@ class FixtureProcess(ColmapProcess):
             raise ColmapError("COLMAP_PROCESS_FAILED", "fixture process failure")
         if arguments[0] == "mapper" and self.mode != "empty":
             for model in ("0", "2", "10"):
-                (workspace / "sparse" / model).mkdir()
+                directory = workspace / "sparse" / model
+                directory.mkdir()
+                (directory / "points3D.bin").write_bytes(f"fixture sparse model {model}".encode())
         if arguments[0] == "model_converter":
             directory = workspace / arguments[arguments.index("--output_path") + 1]
             sparse(directory, (0, 1) if directory.name == "0" else (0, 1, 2))
         return ""
 
 
-def adapter(root: Path, mode: str = "success") -> tuple[ColmapAdapter, ColmapRequest, CameraPoseResolver]:
+def adapter(
+    root: Path, mode: str = "success", resume: ResumeCache | None = None, attempt_id: str | None = None
+) -> tuple[ColmapAdapter, ColmapRequest, CameraPoseResolver]:
     """Full internal boundary với published fixture input."""
     frames, ref = frame_source(root / "source")
     resolver = ArtifactResolver(root / "store")
-    deps = ColmapDependencies(frames, FixtureProcess(mode), FilesystemArtifactStore(resolver), resolver.require)
+    deps = ColmapDependencies(frames, FixtureProcess(mode), FilesystemArtifactStore(resolver), resolver.require, resume)
     return (
         ColmapAdapter(deps),
-        ColmapRequest(ref, config(), root / "work", "rec03-fixture"),
+        ColmapRequest(ref, config(), root / "work", "rec03-fixture", attempt_id),
         CameraPoseResolver(resolver.require, frames),
     )
 
@@ -248,6 +253,72 @@ def test_published_handoff_and_immutable_sources(tmp_path: Path) -> None:
     resolver.require(artifact.sparse_files["images.txt"]).write_text("tampered")
     with pytest.raises(ArtifactChecksumError):
         resolver.load(result.reference)
+
+
+def test_resume_cache_reuses_verified_colmap_and_recovers_from_corruption(tmp_path: Path) -> None:
+    resume = ResumeCache(tmp_path / "resume")
+    cold, cold_request, _ = adapter(tmp_path / "cold", resume=resume, attempt_id="cold")
+    cold_result = cold.execute(cold_request)
+    cold_checksums = {name: ref.artifact_checksum for name, ref in cold_result.artifact.sparse_files.items()}
+    assert any(command[0] == "mapper" for command in cold.deps.process.commands)
+
+    warm, warm_request, _ = adapter(tmp_path / "warm", resume=ResumeCache(tmp_path / "resume"), attempt_id="warm")
+    warm_result = warm.execute(warm_request)
+    assert not any(
+        command[0] in {"feature_extractor", "sequential_matcher", "mapper"} for command in warm.deps.process.commands
+    )
+    assert warm_result.artifact.poses == cold_result.artifact.poses
+    assert {name: ref.artifact_checksum for name, ref in warm_result.artifact.sparse_files.items()} == cold_checksums
+
+    assert cold_result.resume_key is not None
+    cached_points = resume._colmap(cold_result.resume_key) / "sparse/2/points3D.bin"
+    original = cached_points.read_bytes()
+    cached_points.write_bytes(bytes([original[0] ^ 1]) + original[1:])
+
+    recovered, recovered_request, _ = adapter(tmp_path / "recovered", resume=resume, attempt_id="recovered")
+    recovered_result = recovered.execute(recovered_request)
+    assert any(command[0] == "mapper" for command in recovered.deps.process.commands)
+    assert recovered_result.artifact.poses == cold_result.artifact.poses
+    assert {
+        name: ref.artifact_checksum for name, ref in recovered_result.artifact.sparse_files.items()
+    } == cold_checksums
+    assert list((tmp_path / "resume").glob(f".invalid-colmap-{cold_result.resume_key}-*"))
+
+    repaired, repaired_request, _ = adapter(tmp_path / "repaired", resume=resume, attempt_id="repaired")
+    repaired.execute(repaired_request)
+    assert not any(
+        command[0] in {"feature_extractor", "sequential_matcher", "mapper"}
+        for command in repaired.deps.process.commands
+    )
+
+
+def test_resume_store_failure_does_not_discard_verified_pose(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    resume = ResumeCache(tmp_path / "resume")
+
+    def fail_store(key: str, workspace: Path) -> None:
+        raise OSError("cache disk unavailable")
+
+    monkeypatch.setattr(resume, "store_colmap", fail_store)
+    service, request, resolver = adapter(tmp_path, resume=resume)
+    result = service.execute(request)
+
+    assert result.stage.status.value == "SUCCEEDED"
+    assert resolver.load(result.reference) == result.artifact
+
+
+def test_resume_restore_failure_falls_back_to_cold_colmap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    resume = ResumeCache(tmp_path / "resume")
+
+    def fail_restore(_key: str, _workspace: Path) -> bool:
+        raise OSError("cache disk unavailable")
+
+    monkeypatch.setattr(resume, "restore_colmap", fail_restore)
+    service, request, resolver = adapter(tmp_path, resume=resume)
+    result = service.execute(request)
+
+    assert any(command[0] == "mapper" for command in service.deps.process.commands)
+    assert result.stage.status.value == "SUCCEEDED"
+    assert resolver.load(result.reference) == result.artifact
 
 
 @pytest.mark.parametrize("mode", ["failed", "empty", "threshold"])

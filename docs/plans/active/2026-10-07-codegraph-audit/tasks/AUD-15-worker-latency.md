@@ -111,7 +111,10 @@ MoGe/SAM hoặc voxel memory workloads đồng thời trên T2000 chỉ vì dùn
 Cache miss chạy normal path có diagnostics; deterministic failure không retry loop.
 Tests: cold/warm equivalence, changed input/config/tool invalidation, corrupt cache,
 restart/cancel, lease conflict, bounded memory và output/checksum consistency.
-**Exit:** [ ] eliminated work measured; [ ] quality/resource/recovery guards hold.
+**Exit:** [x] redundant-work elimination verified at the warm-path integration boundary;
+[x] identity, corruption, cold-run, and child-failure recovery guards hold in software
+tests. Paired hardware latency and quality acceptance remain S3 gates; S2 does not
+claim a measured GPU speedup.
 
 ## Sprint AUD-15.S3 — Paired benchmarks và product ETA
 
@@ -171,3 +174,62 @@ minh latency thực. Hardware-bound compute cost phải có số đo và support
 - Remaining for S3: repeat the baseline under recorded power/thermal conditions,
   run paired optimized trials, and evaluate quality gates. No quality or latency
   acceptance is claimed from unit fixtures.
+
+### AUD-15.S2 — Implemented; paired hardware acceptance pending
+
+- Reused the existing `ResumeCache` and content keys. COLMAP cache manifests bind
+  the key and schema to a checksummed inventory of every sparse-model file and
+  `process.log`; restore verifies the full inventory before copying it into the
+  attempt workspace. Restore publication uses a temporary directory, and an
+  invalid cache is a miss that follows the normal COLMAP path. A corrupt entry is
+  preserved in quarantine when a successful cold run replaces it. Failure to
+  store an acceleration cache does not fail an already published and verified
+  pose artifact; a restore I/O failure is logged and falls back to ordinary
+  COLMAP execution.
+- Brush checkpoint reuse now uses a versioned cache namespace so legacy files
+  without integrity receipts remain untouched and are not trusted. A checkpoint
+  must have a complete PLY payload and a matching SHA-256 receipt; receipts are
+  written only after Brush exits and only for files created or changed by that
+  attempt. Same-size tampering is therefore a cache miss. If resume storage is
+  unavailable before training, Brush runs its regular cold command with the
+  original `init.ply`; a failure to write an integrity receipt cannot replace the
+  child process error.
+- Integration evidence: COLMAP cold/warm/corrupt-repair tests verify a warm hit
+  skips feature extraction, matching and mapping, preserves pose and sparse-file
+  checksums, and repairs a corrupt entry before the next warm hit. Resume tests
+  cover identity changes, same-size corruption, preserved legacy checkpoints and
+  storage failure. Brush tests cover post-failure checkpoint recovery, cold
+  fallback when resume storage is unavailable, and preservation of the original
+  child failure when checkpoint attestation fails. A COLMAP restore-I/O failure
+  regression confirms the mapper runs and the pose consumer still verifies.
+- Commit base: `83bf26e` (`fix(evaluation): exclude waits and reused stages from
+  timing (AUD-28.S2)`). Files changed: `src/services/reconstruction/resume.py`,
+  `src/services/reconstruction/adapters/brush.py`,
+  `src/services/reconstruction/adapters/colmap.py`,
+  `tests/test_reconstruction/test_resume_cache.py`,
+  `tests/test_reconstruction/test_rec03_colmap.py`,
+  `tests/test_reconstruction/test_rec04_brush.py`, and this task file. No public
+  artifact or API schema changed; the new manifest/receipt versions are private
+  worker-cache formats.
+- Checks: `.venv/bin/pytest tests/test_reconstruction/test_resume_cache.py
+  tests/test_reconstruction/test_rec03_colmap.py
+  tests/test_reconstruction/test_rec04_brush.py
+  tests/test_reconstruction/test_preview_cancellation.py
+  tests/test_orchestration/test_worker_cleanup.py
+  tests/test_orchestration/test_resource_admission.py -q` — 160 passed, 5
+  skipped; Ruff check passed and all six changed Python files are formatted.
+  `graphify update .` and `codegraph sync` completed. `graphify-out/` remains a
+  local generated/untracked index and is not part of the sprint commit.
+- Pre-flight (GUIDE.md Rule 13): CodeGraph read the retry/preparation flow,
+  `ResumeCache`, `BrushAdapter._train`, `ColmapAdapter._execute`, and callers/tests;
+  blast radius includes the reconstruction preview worker and both adapters, with
+  existing resume-cache tests updated. Business flow: valid prepared frame sets
+  already bypass full video preparation on retry, so no duplicate frame cache was
+  added. Minimal-code rung 2: extended the existing cache and content-key path.
+  Checks: focused Ruff and pytest above. DevTools: n/a — backend/cache behavior,
+  no UI change.
+- Remaining for S3: collect at least three paired baseline/optimized runs on the
+  fixed input/config/runtime and 50-frame inventory, record power/thermal state,
+  and evaluate existing visual, pose, metric, collision and scene quality gates.
+  Software fixtures prove the warm path skips COLMAP commands; they do not prove
+  a T2000 latency improvement or real reconstruction quality.

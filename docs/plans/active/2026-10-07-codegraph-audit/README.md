@@ -12,6 +12,9 @@ trong commit `5173750`; AUD-20.S1 trong `6fea33e`; AUD-20.S2 producer/API attrib
 trong `7d5fcac`. AUD-20.S3 đã có badge creator/role ở Scenes và imports cùng test CLI;
 authenticated Chrome DevTools xác nhận grid/list và seed display names/roles. Import
 legacy hiện thiếu creator snapshot; stable seed IDs và migration receipt còn pending.
+AUD-15.S2 đã commit: resume-cache integrity và cold/warm recovery
+được kiểm tra bằng software integration tests; AUD-15.S3 vẫn chờ paired GPU latency
+và quality acceptance.
 AUD-21.S1 đã chốt ma trận quyền,
 identity owner và migration contract trong commit `31ffac2`. AUD-22.S1 calendar
 contract đã hoàn tất; AUD-03.S3 review-screen gate đã xác nhận bằng Chrome DevTools
@@ -318,8 +321,9 @@ browser acceptance còn pending. AUD-21.S4 caller-specific Studio capability/API
 coverage is locally verified (152 API tests, 300 frontend tests, typecheck and
 changed-file lint); browser three-role acceptance, shared-PostgreSQL qualification
 and seed acceptance still block public Guest rollout.
-AUD-15.S1 được làm sớm để AUD-23.S5 có measurement protocol; optimization
-AUD-15.S2–S3 vẫn làm sau quality work.
+AUD-15.S1 được làm sớm để AUD-23.S5 có measurement protocol; sau quality work,
+AUD-15.S2 đã hoàn tất ở mức software cache/warm-path verification. AUD-15.S3 còn
+paired GPU measurements và quality acceptance; không suy kết quả từ fixtures.
 AUD-07.S3 làm sau AUD-06/AUD-05 để kiểm tra admission trên consumer thật;
 không đợi toàn bộ AUD-07 trước khi triển khai hai consumer này.
 
@@ -500,7 +504,8 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [x] Local implementation AUD-09.S1–S3; focused API/domain/frontend/export regressions.
 - [ ] AUD-08 browser/Isaac acceptance; AUD-09 browser visual and real Isaac contact acceptance.
 - [ ] Implementation AUD-12–14 và held-out collision/LiDAR/floor acceptance.
-- [ ] Implementation AUD-15–16 và real latency/preview/browser acceptance.
+- [x] AUD-15.S2 resume-cache integrity, cold/warm recovery, and software integration verification.
+- [ ] AUD-15.S3 paired latency/quality acceptance; AUD-16 remains Deferred.
 - [ ] Implementation AUD-17–18 và qualified opt-in runtime/QA acceptance.
 - [x] AUD-19.S1 typed contract and REC-06/08/09 regression work; no solver/API/UI enabled.
 - [ ] AUD-19.S2–S4 independent-map producer, held-out QA, operation/API/UI and browser acceptance.

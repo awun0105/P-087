@@ -25,6 +25,7 @@ from src.services.reconstruction.adapters.brush_runtime import (
 )
 from src.services.reconstruction.adapters.colmap import ColmapAdapter, ColmapDependencies, ColmapRequest
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor, SplatRuntimeSettings
+from src.services.reconstruction.resume import ResumeCache, content_key
 from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
 from src.services.reconstruction.rgb.splat.visual import BrushConfig, BrushVisualArtifact, SplatInspection
 from src.services.reconstruction.rgb.splat.visual_publication import VisualPublisher, VisualResolver
@@ -135,7 +136,7 @@ class FixtureProcessor(SplatArtifactProcessor):
         )
 
 
-def adapter(root: Path) -> tuple[BrushAdapter, BrushRequest]:
+def adapter(root: Path, resume: ResumeCache | None = None) -> tuple[BrushAdapter, BrushRequest]:
     """Published REC-03 fixture đi qua real REC-04 input validation."""
     frames, ref = png_frames(root / "source")
     store = ArtifactResolver(root / "store")
@@ -151,8 +152,72 @@ def adapter(root: Path) -> tuple[BrushAdapter, BrushRequest]:
         processor,
         VisualPublisher(writer, "rec04-fixture"),
         VisualResolver(store.require, poses),
+        resume,
     )
-    return BrushAdapter(deps), BrushRequest(poses_ref, config(), root / "brush")
+    resume_key = "fixture-sparse-model" if resume is not None else None
+    return BrushAdapter(deps), BrushRequest(poses_ref, config(), root / "brush", resume_key)
+
+
+def test_train_attests_complete_checkpoints_after_child_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = ResumeCache(tmp_path / "resume")
+    service, request = adapter(tmp_path, cache)
+    checkpoint_key = content_key(
+        request.resume_key or "", request.config.checksum(), service.deps.process.settings.runtime_identity
+    )
+
+    def fail_after_checkpoint(invocation: Invocation, workspace: Path) -> str:
+        export_path = Path(invocation.arguments[invocation.arguments.index("--export-path") + 1])
+        gaussian_ply(export_path / "ckpt_00005.ply")
+        raise VisualError("VISUAL_PROCESS_FAILED", "fixture child failed after a checkpoint")
+
+    monkeypatch.setattr(service.deps.process, "run", fail_after_checkpoint)
+    with pytest.raises(VisualError):
+        service._train(request)
+
+    assert cache.latest_checkpoint(checkpoint_key, request.config.total_train_iters) == (
+        5,
+        cache.checkpoint_dir(checkpoint_key) / "ckpt_00005.ply",
+    )
+
+
+def test_train_falls_back_to_cold_run_when_resume_storage_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = ResumeCache(tmp_path / "resume")
+    service, request = adapter(tmp_path, cache)
+
+    def unavailable(_key: str) -> Path:
+        raise OSError("resume storage unavailable")
+
+    def cold_run(invocation: Invocation, _workspace: Path) -> str:
+        assert "--checkpoint-dir" not in invocation.arguments
+        return "cold run"
+
+    monkeypatch.setattr(cache, "checkpoint_dir", unavailable)
+    monkeypatch.setattr(service.deps.process, "run", cold_run)
+
+    assert service._train(request) == "cold run"
+
+
+def test_checkpoint_attestation_failure_does_not_mask_child_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = ResumeCache(tmp_path / "resume")
+    service, request = adapter(tmp_path, cache)
+
+    def fail_after_attestation(_key: str, _before: dict[str, tuple[int, int]]) -> None:
+        raise OSError("resume storage unavailable")
+
+    def fail_child(_invocation: Invocation, _workspace: Path) -> str:
+        raise VisualError("VISUAL_PROCESS_FAILED", "fixture child failed")
+
+    monkeypatch.setattr(cache, "attest_checkpoints", fail_after_attestation)
+    monkeypatch.setattr(service.deps.process, "run", fail_child)
+
+    with pytest.raises(VisualError, match="fixture child failed"):
+        service._train(request)
 
 
 def test_published_consumer_and_registered_only(tmp_path: Path) -> None:

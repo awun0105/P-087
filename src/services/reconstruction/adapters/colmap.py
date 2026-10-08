@@ -106,7 +106,13 @@ class ColmapAdapter:
             version,
             *([request.guidance.checksum()] if request.guidance is not None else []),
         )
-        reused = resume is not None and resume.restore_colmap(key, request.workspace)
+        reused = False
+        if resume is not None:
+            try:
+                reused = resume.restore_colmap(key, request.workspace)
+            except (OSError, shutil.Error) as error:
+                # A failed cache read/restore is a miss; COLMAP still takes the ordinary cold path.
+                logging.getLogger(__name__).warning("REC-03 không phục hồi resume cache cause=%s", type(error).__name__)
         if not reused:
             (request.workspace / "sparse").mkdir()
             commands = reconstruction_commands(request.config, (feature, match))
@@ -164,7 +170,11 @@ class ColmapAdapter:
         )
         if resume is not None and not reused:
             # Chỉ giữ sau khi artifact đã publish và consumer đọc lại được: kho không chứa kết quả hỏng.
-            resume.store_colmap(key, request.workspace)
+            try:
+                resume.store_colmap(key, request.workspace)
+            except (OSError, ValueError) as error:
+                # Cache chỉ tăng tốc retry; cache I/O lỗi không được biến pose đã verify thành job failure.
+                logging.getLogger(__name__).warning("REC-03 không lưu resume cache cause=%s", type(error).__name__)
         guidance_ref = self._guidance_record(request, artifact, reference) if request.guidance is not None else None
         return ColmapResult(artifact, reference, stage, key if resume is not None else None, guidance_ref)
 
