@@ -79,6 +79,12 @@ consumer fixture proves an observable sample still cannot PASS before projection
 scoring. Verification: 61 focused tests, Ruff, formatting, contract mirror and
 current CodeGraph index pass. Projection scoring, held-out qualification and
 production source gating remain pending for AUD-13.S2/S3.
+AUD-14.S1 adds a versioned floor prior/profile/model and deterministic constrained
+RANSAC with slope, prior-distance, robust-noise, support, coverage and competing-plane
+checks. Missing or ambiguous evidence remains uncertain and classifies no points as
+floor. Verification: 30 focused tests, repo Ruff/format, contract mirror and current
+CodeGraph index pass. Existing fixed-Z geometric/Gaussian consumers remain unchanged
+until AUD-14.S2; no real production sloped-floor artifact is qualified yet.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 

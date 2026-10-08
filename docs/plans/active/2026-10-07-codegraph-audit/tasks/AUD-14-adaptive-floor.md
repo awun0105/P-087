@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- PLANNED; P1; EX-SCENE; REC floor prior và SIM quality consumers.
+- IN PROGRESS; P1; EX-SCENE; REC floor prior và SIM quality consumers.
 - Canonical SCENE-02/03/06, REC-06, SIM-02. REUSE NumPy/SciPy clustering;
   ADAPT bounded RANSAC plane fitting, optional worker-only Open3D đã qualified.
 - Goal: floor separation thích ứng slope/noise, giữ low obstacles và canonical frame.
@@ -67,7 +67,7 @@ scale, bounded thresholds, evaluate fit support. Reuse existing linear algebra/
 spatial functions; freeze profile units/seed and serialize measured evidence.
 Tests: flat, slope, noisy, vertical-wall-dominant, missing floor, degenerate/NaN
 input, ramp/multiple levels, outlier robustness and uncertain fallback.
-**Exit:** [ ] correct supported fit; [ ] degenerate scene not fake floor success.
+**Exit:** [x] correct supported fit; [x] degenerate scene not fake floor success.
 
 ## Sprint AUD-14.S2 — Extraction/clustering và Gaussian consumers
 
@@ -104,11 +104,50 @@ supported real sloped/noisy sample, candidate/collision consumer parity.
 .venv/bin/pytest tests/test_scene/test_geometric_candidates.py tests/test_scene/test_gaussian_split.py tests/test_scene/test_sampro3d_consolidate.py tests/test_orchestration/test_scene_extraction.py tests/test_reconstruction/test_rec06_floor_frame.py -q
 ```
 
-Planned tests/test_scene/test_adaptive_floor.py. DONE khi fit/degeneracy/extraction/
-retention/consumer tests và real supported sample proof pass; floor fitting không
-được coi là solved multi-level unseen geometry.
+`tests/test_scene/test_adaptive_floor.py` covers S1 fit/degeneracy. Task DONE khi
+fit/extraction/retention/consumer tests và real supported sample proof pass; floor
+fitting không được coi là solved multi-level unseen geometry.
 
 ## Result / Evidence
 
-Pending — source/fit/profile identity, plane/noise metrics, candidate/obstacle
-witnesses và supported/uncertain cases theo sprint.
+### AUD-14.S1 — Floor model và fitted-plane classification
+
+- Base commit: `35eab16` (`AUD-13.S1`).
+- Logic delta: trước đây floor evidence chưa có trong EX-SCENE; geometric fallback
+  và Gaussian label growth dùng các ngưỡng world-Z riêng. S1 thêm constrained
+  deterministic RANSAC trên point cloud mét, ràng buộc bằng up vector và điểm sàn
+  đã xác nhận; scene points không bị xoay hoặc dịch.
+- Contract v1.0: `FloorPrior`, `FloorFitProfile`, `FloorModel` và compact point
+  labels. Model lưu source checksum, embedded profile và checksum, seed, unit/frame,
+  plane, support ratio, coverage, residual/noise, effective floor band và reason.
+  `uncertain` không được dùng để phân loại floor; mọi point trả `UNKNOWN`.
+- Algorithm: seed cố định; sample count có giới hạn; normal hướng theo up; giới hạn
+  slope và khoảng cách tới prior; robust residual scale; floor band bị chặn trong
+  profile; convex-hull coverage; plane hypotheses cạnh tranh trả `uncertain`.
+- Impact: `find_candidates` vẫn lọc fixed world-Z và `label_gaussians` vẫn có
+  `floor_clearance_m`. Hai consumer này chưa đổi trong S1 vì AUD-14.S2 thay chúng
+  đồng bộ bằng FloorModel. `REC-06 FloorEstimate/floor_frame` tiếp tục là prior,
+  không dùng trực tiếp internal REC code trong EX-SCENE. Không có production caller
+  cho fitter mới; consumer integration là phần tiếp theo.
+- Files: `src/models/contracts/floor_model.py`,
+  `src/models/contracts/__init__.py`, `src/services/scene/floor_model.py`,
+  `tests/test_scene/test_adaptive_floor.py`, task và plan README.
+- Verification: `.venv/bin/ruff check src/ tests/` PASS; `.venv/bin/ruff format
+  --check src/ tests/` PASS (515 files); focused suites PASS (30 tests);
+  `scripts/check_contract_mirror.py` PASS (5 enums, 5 models); CodeGraph current
+  (845 files, 16,518 nodes, 48,329 edges). Focused suites covered sloped/noisy
+  planes, outliers, wall dominance, missing prior/floor, nonfinite/degenerate input,
+  multiple levels, narrow support, existing extraction and REC-06 floor frame.
+- Limits: source checksum hiện do caller cung cấp; S3 phải bind nó vào exact
+  canonical geometry artifact trước khi persistence/consumer gate. Chưa nối vào
+  object extraction, Gaussian growth, collision cleanup hoặc quality report; chưa có
+  supported production sloped/noisy artifact. Multi-level detection chỉ đánh dấu
+  ambiguity khi các hypotheses cùng thỏa prior/profile.
+  S2/S3 và real floor/obstacle-retention evidence còn pending.
+- Pre-flight (GUIDE.md Rule 13): codegraph đọc `GeometricConfig/find_candidates`,
+  `candidate_objects/box_candidates`, `SplitConfig/label_gaussians`, REC-06 floor
+  prior/frame và callers; fitter mới chỉ có test callers. Understand flow được
+  truy vết qua CodeGraph; `understand-anything`/`understand-domain` CLI không có trong
+  môi trường (**UNVERIFIED**). Minimal-code rung 2: dùng Pydantic ContractModel,
+  canonical JSON checksum, NumPy và SciPy đã có trong scene pipeline. UI không đổi,
+  DevTools n/a.
