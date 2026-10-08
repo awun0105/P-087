@@ -51,6 +51,7 @@ def test_fresh_database_reaches_latest_version(runtime_database_url: str) -> Non
         "r2s_quota_intents",
         "r2s_import_operations",
         "r2s_validation_operations",
+        "r2s_registration_operations",
     } <= _tables(database)
     database.ping()
     # Khởi động lại (process khác) không chạy lại migration, không lỗi.
@@ -202,7 +203,7 @@ def test_v11_database_adds_scene_head_tables_without_losing_release_rows(tmp_pat
 
     database = RuntimeDatabase(f"sqlite:///{path}")
 
-    assert database.schema_version() == LATEST_SCHEMA_VERSION == 17
+    assert database.schema_version() == LATEST_SCHEMA_VERSION == 18
     assert {
         "r2s_scene_heads",
         "r2s_scene_head_repairs",
@@ -238,7 +239,7 @@ def test_v12_database_adds_nullable_job_owner_without_backfill(tmp_path: Path) -
 
     database = RuntimeDatabase(f"sqlite:///{path}")
 
-    assert database.schema_version() == LATEST_SCHEMA_VERSION == 17
+    assert database.schema_version() == LATEST_SCHEMA_VERSION == 18
     with database.transaction() as tx:
         assert tx.execute("SELECT owner_user_id FROM r2s_jobs WHERE job_id='job-v12'").fetchone() == (None,)
     assert {"r2s_guest_quota_windows", "r2s_quota_intents"} <= _tables(database)

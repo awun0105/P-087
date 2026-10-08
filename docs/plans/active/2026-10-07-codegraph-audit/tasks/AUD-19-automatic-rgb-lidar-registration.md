@@ -334,8 +334,68 @@ qualified profile are `FAIL`.
 untrusted client qualification claims, missing same-scene context, measured residual/
 overlap failure, exact-evidence PASS construction and candidate-binding rejection.
 Focused verification passed 50 tests across registration QA, registration contracts
-and constrained ICP. This is only the QA producer slice: S4 durable admission/leases,
-source ingestion, API, Studio proposal/status/overlay, confirmation CAS, consumer
-publication and browser/registered-map flow remain unimplemented and unchecked. The
+and constrained ICP. At that commit, this was only the QA producer slice. Worker-integrated
+admission/reservation and dispatch, source ingestion, API, Studio proposal/status/overlay,
+confirmation CAS, consumer publication and browser/registered-map flow remained open. The
 real held-out qualification evidence described above is also still missing; no live
 alignment is enabled by this slice.
+
+### AUD-19.S4a — Durable operation envelope and lease persistence
+
+**Input:** checksum-sealed `RegistrationRequest` after a future API caller has
+authorized the user, project, source assembly and expected target revision.
+**Output:** idempotent durable queue record with claim, heartbeat and fenced producer
+completion operations. This slice adds persistence only; it does not expose or run
+registration in the product.
+**Data contract:** schema v18 stores the immutable request payload, request checksum,
+canonical operation checksum, requester/idempotency identity, target job, queue state
+and lease/fencing columns. The store verifies payload checksum and duplicated row
+columns, rejects key reuse with a different request checksum, and requires
+proposal/report refs for proposed or ambiguous results. A worker lease expiry fails
+that request; retry uses a new request ID because the registration state machine does
+not permit silently requeueing the same request.
+**Tests:** additive upgrade from v17 with old row preservation; idempotency replay
+and conflict; two concurrent SQLite claimers; heartbeat, terminal output binding,
+expired lease and stale-worker rejection; row/payload drift and cross-job output refs
+are rejected. The new queue-specific concurrency and migration proof uses SQLite.
+**Exit:** [x] migration and queue-state persistence are tested locally;
+[ ] admission/resource reservations and worker dispatch;
+[ ] authorized source ingestion and same-scene evidence resolution;
+[ ] API, confirmation CAS, artifact publication, consumers and Studio UI;
+[ ] held-out registration qualification and real browser/registered-map acceptance.
+
+#### AUD-19.S4a Result / Evidence
+
+Commit base: `0da7b21`. Added `src/services/orchestration/jobs/registration_operations.py`
+and additive RuntimeDatabase migration v18 in `src/services/orchestration/jobs/database.py`.
+The store persists only checksum-verified requests, seals mutable state with a
+canonical operation checksum, deduplicates by requester and idempotency key, claims
+queued work transactionally, renews only the active lease, and rejects stale
+completion by checksum, lease token and fencing generation. Proposal and QA
+references are constrained to the target job. Migration tests now expect v18.
+
+Verification: focused registration/migration suite — 61 passed; repository Ruff
+check passed; Ruff format check passed for 545 Python files; `codegraph sync` reported
+up to date; `graphify update .` rebuilt 20,802 nodes, 61,089 edges and 690 communities. Concurrency
+evidence uses local SQLite. The operation store has test callers only; it is not
+connected to API or worker dispatch. Admission, cancellation, server-side source
+binding, artifact resolver verification at publication, scene CAS and Studio remain
+open. No real registration accuracy, GPU, collision-safety or browser feature proof
+is claimed.
+
+Pre-flight (GUIDE.md Rule 13)
+- codegraph: `RuntimeDatabase` migration, registration request/state transitions,
+  import queue and input-run persistence patterns were explored before edits; the
+  new operation store currently has test callers only.
+- impact: schema version advances from 17 to 18; `RuntimeDatabase` applies the
+  additive migration, and migration tests plus schema-version consumers were checked.
+- understand: sealed request → durable queued record → fenced worker lease → terminal
+  proposal state; understand-anything tool was unavailable, so task/architecture docs
+  and executable CodeGraph call paths were used.
+- minimal-code: reused `RuntimeDatabase`, `RuntimeTransaction.lock_suffix`, existing
+  registration state transitions and checksum verification; `ValidationQueue` is
+  tied to Isaac runs/configuration and is not interchangeable; no new dependency.
+- checks: `ruff check src/ tests/` PASS; `ruff format --check src/ tests/` PASS
+  (545 files); focused pytest PASS (60 tests).
+- DevTools: n/a — no UI change. The existing authenticated QA route was inspected
+  read-only; its sample job remains waiting for metric confirmation.

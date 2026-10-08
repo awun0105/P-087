@@ -355,6 +355,30 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
             "CREATE INDEX r2s_input_runs_by_assembly ON r2s_input_runs(assembly_id, revision)",
         ),
     ),
+    (
+        18,
+        (
+            """CREATE TABLE r2s_registration_operations (
+                operation_id TEXT PRIMARY KEY,
+                requester_id TEXT NOT NULL REFERENCES r2s_users(user_id),
+                idempotency_key TEXT NOT NULL,
+                target_job_id TEXT NOT NULL REFERENCES r2s_jobs(job_id),
+                request_checksum TEXT NOT NULL,
+                state TEXT NOT NULL,
+                worker_id TEXT,
+                lease_token TEXT,
+                fencing_token INTEGER NOT NULL,
+                lease_expires_at TEXT,
+                heartbeat_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                operation_checksum TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                UNIQUE(requester_id, idempotency_key))""",
+            "CREATE INDEX r2s_registration_operations_by_queue ON r2s_registration_operations(state, created_at, operation_id)",
+            "CREATE INDEX r2s_registration_operations_by_job ON r2s_registration_operations(target_job_id, created_at)",
+        ),
+    ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
