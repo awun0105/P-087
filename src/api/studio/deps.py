@@ -110,6 +110,8 @@ def observed_resource_budget(
     project_registry: ProjectRegistry,
     params: dict[str, ParamValue],
     gpu_name: str | None,
+    *,
+    colmap_use_gpu: bool = False,
 ) -> dict[Literal["vram", "ram"], float] | None:
     """Số đo job cùng GPU/runtime; checksum lấy từ profile mà create_job sẽ gắn."""
     profile = project_registry.execution_profile
@@ -125,6 +127,7 @@ def observed_resource_budget(
         params=params,
         gpu_name=gpu_name,
         runtime_manifest_checksum=profile.runtime_manifest_checksum,
+        colmap_use_gpu=colmap_use_gpu,
     )
 
 

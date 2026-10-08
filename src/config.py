@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     database_url: str = Field(default="sqlite:///./data/app.db", repr=False)
     product_fixture_mode: bool = False
     product_processing_config: Path | None = None
+    product_colmap_use_gpu: bool = False
     product_runtime_manifest: Path | None = None
     #: Runtime qualification registry for grouped input recipes; absent means no new recipe dispatch is enabled.
     product_input_runtime_registry: Path | None = None

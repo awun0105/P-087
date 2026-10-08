@@ -44,8 +44,8 @@ from src.services.orchestration.processing.observed import (
     Phase,
     exhausted_before,
     load_usages,
-    numeric_params,
     observed_budget,
+    resource_observation_params,
 )
 from src.services.orchestration.processing.procfs import process_alive, process_table, process_tree
 from src.services.orchestration.processing.resources import estimate_gb
@@ -290,7 +290,11 @@ def job_drivers(registry: ProjectRegistry, settings: Settings, job: JobManifest)
         presets, _ = load_presets(path)
         config_path = registry.runtime_resolver.require(job_config_reference(job.job_id, job.config_checksum))
         config = JobProcessingConfig.model_validate_json(config_path.read_bytes())
-        return numeric_params(presets.validate_params(config.params))
+        params = presets.validate_params(config.params)
+        colmap_use_gpu = config.colmap.get("use_gpu", False)
+        if not isinstance(colmap_use_gpu, bool):
+            return None
+        return resource_observation_params(params, colmap_use_gpu=colmap_use_gpu)
     except (ArtifactStoreError, OSError, ValueError):
         return None
 
@@ -348,12 +352,13 @@ class ResourceAdmission:
             return None
         usages = load_usages(self.database)
         budget = None
-        if not exhausted_before(usages, job.job_id):
+        colmap_use_gpu = config.colmap.get("use_gpu", False)
+        if not exhausted_before(usages, job.job_id) and isinstance(colmap_use_gpu, bool):
             budget = observed_budget(
                 usages,
                 tools=PHASE_TOOLS[phase],
                 optional_tools=PHASE_OPTIONAL_TOOLS[phase],
-                params=numeric_params(params),
+                params=resource_observation_params(params, colmap_use_gpu=colmap_use_gpu),
                 gpu_name=gpu_name,
                 runtime_manifest_checksum=job.runtime_manifest_checksum,
             )

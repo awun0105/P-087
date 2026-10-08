@@ -212,6 +212,22 @@ def test_command_flags_and_explicit_config(prefixes: tuple[str, str]) -> None:
         config(min_registered_ratio=0)
 
 
+def test_colmap_use_gpu_command_flags() -> None:
+    gpu_cfg = config(use_gpu=True)
+    prefixes = ("SiftExtraction", "SiftMatching")
+    commands = reconstruction_commands(gpu_cfg, prefixes)
+    assert [command[0] for command in commands] == ["feature_extractor", "sequential_matcher", "mapper"]
+    # feature_extractor có "1" ngay sau --SiftExtraction.use_gpu
+    fe_cmd = commands[0]
+    assert fe_cmd[fe_cmd.index(f"--{prefixes[0]}.use_gpu") + 1] == "1"
+    # sequential_matcher có "1" ngay sau --SiftMatching.use_gpu
+    sm_cmd = commands[1]
+    assert sm_cmd[sm_cmd.index(f"--{prefixes[1]}.use_gpu") + 1] == "1"
+    # mapper không chứa cờ use_gpu
+    mapper_cmd = commands[2]
+    assert not any("use_gpu" in arg for arg in mapper_cmd)
+
+
 def test_published_handoff_and_immutable_sources(tmp_path: Path) -> None:
     """REC-04/05 đọc selected sparse từ artifact, không qua workspace riêng."""
     service, request, resolver = adapter(tmp_path)

@@ -562,8 +562,8 @@ Test:
   với setting bật, job tạo qua API có `colmap.use_gpu` là `True` trong cấu hình đã lưu.
 
 **Exit:**
-- [ ] Ba nhóm test pass; test COLMAP và test tạo job hiện có không đổi kỳ vọng.
-- [ ] Hai file môi trường mẫu đã cập nhật.
+- [x] Ba nhóm test pass; test COLMAP và test tạo job hiện có không đổi kỳ vọng.
+- [x] Hai file môi trường mẫu đã cập nhật.
 - [ ] (Owner, pod RunPod) Preflight báo bước "COLMAP dùng GPU" đạt; một job hoàn tất với
   `colmap.use_gpu = true`; thời gian ba bước COLMAP (từ `process.log`) và peak VRAM của
   tool `preview` dán vào Result. Chưa có thì ghi UNVERIFIED, không tick.
@@ -683,6 +683,25 @@ phép để UNVERIFIED kèm ghi chú cho tới đợt thuê máy đầu tiên.
   - `ruff check`: pass
   - `ruff format --check`: pass
   - `pytest tests/test_orchestration/test_observed_budget.py tests/test_orchestration/test_processing_config.py tests/test_orchestration/test_resource_admission.py tests/test_api/test_studio_routes.py tests/integration/test_studio_processing_job.py -q`: 104 passed.
-  - Chrome DevTools: trang `http://localhost:3010/new` render; `GET /api/v1/processing/options` và `POST /api/v1/processing/evaluate` trả HTTP 200; console không có lỗi/cảnh báo. Live worker không có lịch sử khớp nên API trả nội dung estimate `Cần khoảng`; không tạo job trong kiểm tra này.
   - CodeGraph sync: 870 files, 17,182 nodes, 50,548 edges; Graphify update hoàn tất: 20,461 nodes, 59,599 edges, 713 communities.
 
+### Sprint AUD-26.S5 (2026-10-09)
+
+- **Commit base:** `6d0bc54`
+- **Changed files:**
+  - `src/config.py`: thêm setting `product_colmap_use_gpu: bool = False` (biến môi trường `PRODUCT_COLMAP_USE_GPU`).
+  - `src/services/orchestration/processing/config.py`: thêm tham số keyword-only `colmap_use_gpu: bool = False` vào `build_job_config`, ghi đè `"use_gpu": colmap_use_gpu` trong dict `colmap`.
+  - `src/api/studio/scenes.py`: truyền `colmap_use_gpu=getattr(settings, "product_colmap_use_gpu", False)` vào `build_job_config`.
+  - `src/api/studio/assemblies.py`: truyền `colmap_use_gpu=getattr(settings, "product_colmap_use_gpu", False)` vào `build_job_config`.
+  - `deploy/studio/worker.env.example`: thêm `PRODUCT_COLMAP_USE_GPU=true`.
+  - `scripts/gpu/studio.env.example`: thêm comment hướng dẫn `# PRODUCT_COLMAP_USE_GPU=false`.
+  - `scripts/kaggle/preflight.py`: thêm hàm `colmap_gpu` kiểm tra `feature_extractor` với `--SiftExtraction.use_gpu 1` khi cờ bật; đăng ký vào `CHECKS`.
+  - `tests/test_orchestration/test_processing_config.py`: thêm `test_build_job_config_colmap_use_gpu`.
+  - `tests/test_reconstruction/test_rec03_colmap.py`: thêm `test_colmap_use_gpu_command_flags`.
+  - `tests/test_api/test_studio_routes.py`: thêm `test_scene_creation_honors_colmap_use_gpu_setting` và cập nhật fixture `studio`.
+- **Tách số đo CPU/GPU:** khóa `colmap.use_gpu=1` trong `ResourceUsage.params` và trong truy vấn `evaluate`/admission khi GPU bật; số đo CPU cũ vẫn dùng cho cấu hình CPU, không bị dùng để ước lượng job GPU. Khi chưa có số đo GPU phù hợp, hệ thống giữ ước lượng analytic.
+- **RunPod GPU nghiệm thu:** UNVERIFIED (chờ owner nghiệm thu trên pod RunPod với GPU thật).
+- **Verification:**
+  - `ruff check src/ tests/ scripts/resources/`: pass.
+  - `ruff format --check src/ tests/ scripts/resources/`: pass.
+  - `pytest tests/test_orchestration/test_observed_budget.py tests/test_orchestration/test_processing_config.py tests/test_orchestration/test_resource_admission.py tests/test_api/test_studio_routes.py tests/integration/test_studio_processing_job.py tests/test_reconstruction/test_rec03_colmap.py -q`: 140 passed.

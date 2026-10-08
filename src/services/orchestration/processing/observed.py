@@ -36,6 +36,11 @@ def numeric_params(params: dict[str, ParamValue]) -> dict[str, float]:
     return {key: float(value) for key, value in params.items() if isinstance(value, int | float) and value is not True}
 
 
+def resource_observation_params(params: dict[str, ParamValue], *, colmap_use_gpu: bool) -> dict[str, float]:
+    """Khóa observation theo cờ COLMAP GPU; cờ false giữ tương thích số đo CPU lịch sử."""
+    return numeric_params(params) | ({"colmap.use_gpu": 1.0} if colmap_use_gpu else {})
+
+
 def dominates(run: dict[str, float], job: dict[str, float]) -> bool:
     """Lượt chạy `run` nặng ít nhất bằng `job` ở mọi thông số (cùng bộ thông số)."""
     return set(run) == set(job) and all(run[key] >= job[key] for key in job)
@@ -138,10 +143,11 @@ def observed_for_config(
     params: dict[str, ParamValue],
     gpu_name: str | None,
     runtime_manifest_checksum: str,
+    colmap_use_gpu: bool = False,
 ) -> dict[Measured, float] | None:
     """Ngân sách VRAM/RAM (GiB) cao nhất giữa các phase nếu mọi phase đều đã đo; None nếu thiếu bất kỳ phase nào."""
     usage_list = list(usages)
-    num_params = numeric_params(params)
+    num_params = resource_observation_params(params, colmap_use_gpu=colmap_use_gpu)
     vram_max = 0.0
     ram_max = 0.0
     for phase in PHASE_TOOLS:

@@ -47,6 +47,8 @@ def build_job_config(
     presets_checksum: str,
     params: dict[str, ParamValue],
     capability: MachineCapability | None,
+    *,
+    colmap_use_gpu: bool = False,
 ) -> JobProcessingConfig:
     """Validate thông số người dùng rồi ghép với giá trị cố định thành config của tool.
 
@@ -67,7 +69,7 @@ def build_job_config(
         presets_checksum=presets_checksum,
         params=values,
         sampling={key: value for key, value in grouped["sampling"].items() if not isinstance(value, str)},
-        colmap={**presets.fixed.colmap, **grouped["colmap"], "num_threads": threads},
+        colmap={**presets.fixed.colmap, **grouped["colmap"], "num_threads": threads, "use_gpu": colmap_use_gpu},
         brush={**presets.fixed.brush, **grouped["brush"]},
     )
 

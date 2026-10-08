@@ -48,6 +48,7 @@ def studio(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         product_upload_max_bytes=64,
         product_privacy_mode="self_attested",
         product_processing_config=Path(__file__).resolve().parents[2] / "configs/product/processing_presets_v1.json",
+        product_colmap_use_gpu=False,
         product_input_runtime_registry=None,
     )
     probe = ProjectRegistry(runtime_root=tmp_path / "artifacts")
@@ -671,6 +672,26 @@ async def test_scene_uses_chosen_processing_and_server_blocks_red(client: AsyncC
     path = studio.registry.runtime_resolver.require(job_config_reference(job["job_id"], job["config_checksum"]))
     stored = json.loads(path.read_text())
     assert stored["brush"]["total_train_iters"] == 12000 and stored["colmap"]["num_threads"] == 8
+    assert stored["colmap"]["use_gpu"] is False
+
+
+@pytest.mark.asyncio
+async def test_scene_creation_honors_colmap_use_gpu_setting(client: AsyncClient, studio: SimpleNamespace) -> None:
+    import json
+
+    from src.services.orchestration.processing import job_config_reference
+
+    studio.settings.product_colmap_use_gpu = True
+    upload = await _upload(client)
+    created = await client.post(
+        "/api/v1/scenes/from-upload",
+        json={"upload_id": upload["upload_id"], "name": "GPU Scene", "attestation": _ATTESTATION},
+    )
+    assert created.status_code == 201, created.text
+    job = created.json()["job"]
+    path = studio.registry.runtime_resolver.require(job_config_reference(job["job_id"], job["config_checksum"]))
+    stored = json.loads(path.read_text())
+    assert stored["colmap"]["use_gpu"] is True
 
 
 @pytest.mark.asyncio

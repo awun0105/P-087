@@ -385,15 +385,16 @@ def test_evaluate_uses_observed_budget_for_vram_and_ram() -> None:
     assert "Đã đo ở lượt chạy trước 5.2 GB" in ram_est.message
 
 
+@pytest.mark.parametrize("colmap_use_gpu", [False, True])
 def test_integration_evaluate_and_admission_agree_on_observed_budget(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, colmap_use_gpu: bool
 ) -> None:
     """Cùng DB có lịch sử, API evaluate và ResourceAdmission._demand cho cùng required RAM/VRAM."""
     from src.api.studio import deps
     from src.api.studio.processing import EvaluateRequest, evaluate_processing
     from src.config import Settings
-    from src.services.orchestration.jobs.admission import ResourceAdmission
-    from src.services.orchestration.processing.observed import numeric_params
+    from src.services.orchestration.jobs.admission import ResourceAdmission, job_drivers
+    from src.services.orchestration.processing.observed import resource_observation_params
     from src.services.orchestration.processing.telemetry import ResourceUsage
     from src.services.orchestration.projects.models import JobCreateInput
     from tests.test_orchestration.test_prepared_queue import _attach_frames, _frame_stage, _registry
@@ -401,12 +402,12 @@ def test_integration_evaluate_and_admission_agree_on_observed_budget(
     registry = _registry(tmp_path / "runtime")
     presets, checksum = load_presets(PRESETS)
     min_params = preset_values(presets, "minimum_quality")
-    config = build_job_config(presets, checksum, min_params, None)
+    config = build_job_config(presets, checksum, min_params, None, colmap_use_gpu=colmap_use_gpu)
     job = registry.create_job(JobCreateInput(project_id="project-fixture-001"), config)
     job = _attach_frames(registry, job, _frame_stage(job.job_id))
 
     # Ghi log đo đạc cho preview và cả hai công cụ của phase finalize.
-    num_p = numeric_params(min_params)
+    num_p = resource_observation_params(min_params, colmap_use_gpu=colmap_use_gpu)
     db = registry.persistence.database
     now = datetime.now(UTC)
 
@@ -466,9 +467,11 @@ def test_integration_evaluate_and_admission_agree_on_observed_budget(
         product_processing_config=PRESETS,
         product_runtime_manifest=PRESETS.parents[2] / "fixtures/mock_job/runtime_manifest.json",
         product_worker_root=tmp_path / "workers",
+        product_colmap_use_gpu=colmap_use_gpu,
     )
     monkeypatch.setattr(deps, "settings", lambda: settings)
     monkeypatch.setattr(deps, "registry", lambda: registry)
+    assert job_drivers(registry, settings, job) == num_p
 
     eval_res = evaluate_processing(EvaluateRequest(params=min_params))
     vram_api = next(r for r in eval_res.resources if r.resource == "vram").required_gb
@@ -485,3 +488,18 @@ def test_integration_evaluate_and_admission_agree_on_observed_budget(
 
     assert vram_api == max_demand_vram == 3.5
     assert ram_api == max_demand_ram == 5.5
+
+
+def test_build_job_config_colmap_use_gpu() -> None:
+    presets, checksum = load_presets(PRESETS)
+    params = preset_values(presets, "minimum_quality")
+    cfg_default = build_job_config(presets, checksum, params, _machine())
+    assert cfg_default.colmap["use_gpu"] is False
+
+    cfg_gpu = build_job_config(presets, checksum, params, _machine(), colmap_use_gpu=True)
+    assert cfg_gpu.colmap["use_gpu"] is True
+
+    # Hai kết quả có checksum cấu hình khác nhau
+    assert config_bytes(cfg_default) != config_bytes(cfg_gpu)
+    # num_threads không đổi giữa hai trường hợp
+    assert cfg_default.colmap["num_threads"] == cfg_gpu.colmap["num_threads"]

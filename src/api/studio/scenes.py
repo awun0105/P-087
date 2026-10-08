@@ -182,9 +182,16 @@ def create_scene_from_upload(
                 registry,
                 params,
                 capability.gpu_name if capability is not None else None,
+                colmap_use_gpu=settings.product_colmap_use_gpu,
             )
             evaluation = evaluate(presets, params, capability, observed=observed)
-            processing = build_job_config(presets, presets_checksum, params, capability)
+            processing = build_job_config(
+                presets,
+                presets_checksum,
+                params,
+                capability,
+                colmap_use_gpu=getattr(settings, "product_colmap_use_gpu", False),
+            )
         except ValueError as error:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
         if evaluation.blocking:
