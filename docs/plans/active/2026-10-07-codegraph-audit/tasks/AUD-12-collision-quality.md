@@ -135,6 +135,37 @@ low obstacle, data gaps, region ownership/source mismatch, unavailable source.
 Include independent-map binding and wrong/missing QA-kind negatives when AUD-19 lands.
 **Exit:** [ ] opt-in path exported đúng refs/frames; [ ] low-obstacle retention proof.
 
+### Sprint AUD-12.S3a — Bounded LiDAR collision candidate adapter
+
+**Input:** ordered `(N, 3)` LiDAR coordinates already expressed in metric world
+space, an exact-checksum-bound supported `FloorModel`, a versioned voxel/resource
+profile, and optionally a boolean self-mask plus its `ProductArtifactRef`.
+**Output:** deterministic embedded GLB candidate and `LidarCollisionBuildReport`
+with source/floor-model/floor-profile/profile/output checksums, profile ID and
+effective voxel size, input/retained/masked/floor counts, occupied voxel and mesh
+counts, and explicit unverified physics/calibration status.
+**Contract:** this is a geometry adapter, not a source-selection or QA gate. The
+caller must resolve and validate the self-mask artifact, sensor/world registration,
+units and selected alignment QA before supplying the array. The adapter checks the
+mask shape/type and records a source-bound mask digest/ref; it cannot resolve an
+artifact ref or prove the world transform. No floor-height, fixed-band or range
+deletion is applied: all unmasked points, including below-floor points, contribute
+to occupied voxels. Mesh vertices are separated across disconnected six-neighbor
+components so edge/corner-only fixture contacts do not merge shells; the floor
+model is diagnostic only.
+
+Implement: deterministic six-neighbor voxel boundary extraction; bound point,
+voxel-grid and triangle counts before mesh construction; encode/read using the
+strict collision GLB boundary. Do not connect this candidate to `FinalizeWorker`,
+`SceneEnvironment`, USD, API or viewer until S3 QA/source contracts are qualified.
+Tests: source checksum and floor support, stale/uncertain floor, missing or
+misaligned self-mask evidence, exact retained/voxel counts, low/below-floor
+retention, invalid input, each resource limit, deterministic bytes and closed
+topology on edge/corner-touching fixture cells.
+**Exit:** [x] bounded local candidate/report contract; [x] focused synthetic tests.
+QA-qualified mode selection, artifact-store resolution, production publication,
+held-out retention and Isaac acceptance remain S3/S4 work.
+
 ## Sprint AUD-12.S4 — Held-out quality và Isaac consumer
 
 **Input:** frozen profile/source selection + held-out traversal/reference + candidate.
@@ -275,3 +306,40 @@ Isaac contact handoff; CPU regression không đóng real acceptance.
   this session; execution order was confirmed from CodeGraph and current tests.
   GPU cleanup qualification, pre-collision floor/noise input, independent obstacle
   retention and held-out path improvement remain **UNVERIFIED**.
+
+### AUD-12.S3a — bounded candidate adapter
+
+- **Base:** current branch after `AUD-19.S4d`; committed as one implementation
+  slice while the parent AUD-12.S3 remains in progress.
+- **Logic before → after:** collision GLB accepted only the pinned
+  `splat-transform` producer; it now also accepts the explicitly named internal
+  LiDAR candidate producer. The new adapter bins every unmasked source point into
+  a metric voxel and emits deterministic boundary faces, retaining floor,
+  low-obstacle and below-floor voxels. Edge/corner-only contacts are separate
+  mesh components so the regression fixture remains a closed topology. Reported
+  floor counts are diagnostics; they do not filter geometry or qualify physics.
+- **Contract:** the floor model must be `supported` and bind the exact ordered
+  point-cloud checksum. Optional self-mask input must be a boolean vector of the
+  exact point count and carry a `ProductArtifactRef`; the report stores that ref
+  and a binding digest bound to the source checksum and point count. The caller still owns
+  artifact resolution and calibration/registration QA. The report always states
+  `physics_claim=unverified` and
+  `calibration_eligibility=not_evaluated_by_mesh_builder`.
+- **Changed files:** `src/services/reconstruction/adapters/collision_glb.py`,
+  new `src/services/reconstruction/adapters/lidar_collision.py`, new
+  `tests/test_reconstruction/test_lidar_collision.py`, and this task.
+- **Related-code scope:** CodeGraph shows no `FinalizeWorker`, product artifact
+  publisher, SceneEnvironment, USD, API or viewer caller for the candidate. The
+  adapter intentionally remains opt-in and is not wired into a live pipeline.
+  Adding the producer name does not relax GLB node/accessor/topology validation.
+- **Verification:** focused `pytest` for
+  `test_lidar_collision.py`, `test_rec05_collision.py` and
+  `test_adaptive_floor.py` — 29 passed;
+  `ruff check src/ tests/` — pass; `ruff format --check src/ tests/` — 552 files
+  formatted; CodeGraph explore before/after and `codegraph sync`;
+  `graphify query` and `graphify update .`; `git diff --check` — pass.
+- **Gate report:** the browser DevTools surface remained unavailable in this
+  session, but no UI changed in this slice. No production LiDAR capture, qualified
+  calibration/map QA, artifact-store resolution, held-out obstacle-retention
+  evidence, GPU run or Isaac contact proof was produced. AUD-12.S3 source selection
+  and AUD-12.S4 acceptance remain **UNVERIFIED** and unchecked.
