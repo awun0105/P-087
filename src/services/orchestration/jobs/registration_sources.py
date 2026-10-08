@@ -8,7 +8,10 @@ import zipfile
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
+
+import numpy as np
 
 from src.models.contracts.identity import verify_content_checksum
 from src.models.contracts.input_assembly import (
@@ -20,11 +23,12 @@ from src.models.contracts.input_assembly import (
     verify_input_assembly_checksum,
     verify_input_recipe_checksum,
 )
-from src.models.contracts.rgb_lidar_registration import RegistrationInputMode, RegistrationRequest
+from src.models.contracts.rgb_lidar_registration import RegistrationInputMode, RegistrationProfile, RegistrationRequest
 from src.services.orchestration.artifacts import ArtifactChecksumError
 from src.services.orchestration.inputs.assembly import InputAssemblyService, StoredInputAssembly
 from src.services.orchestration.projects.persistence import ProjectPersistence
 from src.services.reconstruction.lidar.cloud_header import CloudHeader, read_header
+from src.services.reconstruction.lidar.cloud_payload import load_registration_xyz_points
 
 
 class RegistrationSourceResolutionError(ValueError):
@@ -43,10 +47,23 @@ class VerifiedRegistrationSource:
     source_checksum: str
     header_checksum: str
     point_count: int
-    geometry_format: str
-    distance_unit: str
+    geometry_format: Literal["pcd", "ply"]
+    distance_unit: Literal["m", "cm", "mm"]
     source_frame: str
     same_scene_lineage_verified: bool
+
+
+def load_registration_source_points(source: VerifiedRegistrationSource, profile: RegistrationProfile) -> np.ndarray:
+    """Load the exact verified payload, recheck its checksums, and normalize coordinates to meters."""
+    return load_registration_xyz_points(
+        source.path,
+        max_points=profile.max_source_points,
+        distance_unit=source.distance_unit,
+        expected_source_checksum=source.source_checksum,
+        expected_header_checksum=source.header_checksum,
+        expected_point_count=source.point_count,
+        expected_geometry_format=source.geometry_format,
+    )
 
 
 class RegistrationSourceResolver:

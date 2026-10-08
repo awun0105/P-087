@@ -42,6 +42,7 @@ from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.jobs.registration_sources import (
     RegistrationSourceResolutionError,
     RegistrationSourceResolver,
+    load_registration_source_points,
 )
 from src.services.orchestration.projects.persistence import ProjectPersistence
 from src.services.reconstruction.inputs.input_probe import InputProbe
@@ -123,6 +124,8 @@ def _fixture(
     *,
     archived: bool = False,
     include_video: bool = False,
+    payload: bytes = _PLY_BYTES,
+    distance_unit: DistanceUnit = DistanceUnit.METER,
 ) -> tuple[StoredInputAssembly, ArtifactResolver, RegistrationRequest]:
     root = tmp_path / "artifacts"
     cloud_uri = "artifact://jobs/source-uploads/map.zip" if archived else "artifact://jobs/source-uploads/map.ply"
@@ -130,23 +133,23 @@ def _fixture(
         archive_path = root / "jobs/source-uploads/map.zip"
         archive_path.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr("maps/static/map.ply", _PLY_BYTES)
+            archive.writestr("maps/static/map.ply", payload)
         cloud_container = archive_path.read_bytes()
-        cloud_checksum = _checksum(_PLY_BYTES)
+        cloud_checksum = _checksum(payload)
         source_checksum = _checksum(cloud_container)
         member = ArchiveMemberRef(
             container_checksum=source_checksum,
             member_path="maps/static/map.ply",
             member_checksum=cloud_checksum,
-            uncompressed_size_bytes=len(_PLY_BYTES),
+            uncompressed_size_bytes=len(payload),
         )
         probe_member_checksum = cloud_checksum
         source_format = InputAssetFormat.POINT_CLOUD_PLY
     else:
         cloud_path = root / "jobs/source-uploads/map.ply"
         cloud_path.parent.mkdir(parents=True, exist_ok=True)
-        cloud_path.write_bytes(_PLY_BYTES)
-        cloud_checksum = _checksum(_PLY_BYTES)
+        cloud_path.write_bytes(payload)
+        cloud_checksum = _checksum(payload)
         source_checksum = cloud_checksum
         member = None
         probe_member_checksum = None
@@ -155,7 +158,7 @@ def _fixture(
     source_file = InputFile(
         original_name="map.zip" if archived else "map.ply",
         media_type="application/octet-stream",
-        size_bytes=len(cloud_container) if archived else len(_PLY_BYTES),
+        size_bytes=len(cloud_container) if archived else len(payload),
         checksum=source_checksum,
         artifact_uri=cloud_uri,
         data_class="product_input",
@@ -217,7 +220,7 @@ def _fixture(
                     "value": CloudObservationState.SINGLE_STATIC_CLOUD,
                     "provenance": EvidenceProvenance.DECLARED,
                 },
-                "coordinate_unit": {"value": DistanceUnit.METER, "provenance": EvidenceProvenance.DECLARED},
+                "coordinate_unit": {"value": distance_unit, "provenance": EvidenceProvenance.DECLARED},
                 "lidar_frame_id": {"value": "lidar-map-frame", "provenance": EvidenceProvenance.DECLARED},
             },
             assembly_checksum=_ZERO,
@@ -231,7 +234,7 @@ def _fixture(
         authorized_project_id="project-registration-1",
         source_input_checksum=cloud_checksum,
         source_frame="lidar-map-frame",
-        source_distance_unit=DistanceUnit.METER,
+        source_distance_unit=distance_unit,
         source_point_count=1,
         source_format=source_format,
         source_header_checksum=_checksum(_PLY_HEADER),
@@ -286,6 +289,29 @@ def test_resolve_checks_exact_assembly_source_and_header(tmp_path: Path) -> None
     assert resolved.geometry_format == "ply"
     assert resolved.same_scene_lineage_verified is False
     assert assemblies.verified_upload_ids == {"map-upload-1"}
+
+
+def test_load_registration_source_points_converts_declared_units_to_meters(tmp_path: Path) -> None:
+    payload = _PLY_HEADER + b"100 250 -300\n"
+    stored, artifacts, request = _fixture(tmp_path, payload=payload, distance_unit=DistanceUnit.CENTIMETER)
+    source = RegistrationSourceResolver(_Assemblies(stored), _Projects(_Resolver(artifacts))).resolve(
+        request, tmp_path / "worker"
+    )
+
+    points = load_registration_source_points(source, request.profile)
+
+    assert points.tolist() == [[1.0, 2.5, -3.0]]
+
+
+def test_load_registration_source_points_rejects_bytes_changed_after_resolution(tmp_path: Path) -> None:
+    stored, artifacts, request = _fixture(tmp_path)
+    source = RegistrationSourceResolver(_Assemblies(stored), _Projects(_Resolver(artifacts))).resolve(
+        request, tmp_path / "worker"
+    )
+    source.path.write_bytes(_PLY_HEADER + b"1 2 3\n")
+
+    with pytest.raises(ValueError, match="source checksum"):
+        load_registration_source_points(source, request.profile)
 
 
 def test_resolve_materializes_only_the_checksum_bound_archive_member(tmp_path: Path) -> None:

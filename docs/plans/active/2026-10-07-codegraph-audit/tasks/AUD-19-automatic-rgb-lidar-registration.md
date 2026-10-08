@@ -471,3 +471,57 @@ Pre-flight (GUIDE.md Rule 13)
 - checks: focused pytest PASS (59 tests); `.venv/bin/ruff check src/ tests/` PASS;
   `.venv/bin/ruff format --check src/ tests/` PASS (547 files).
 - DevTools: n/a — no UI/runtime behavior changed.
+
+### AUD-19.S4c — Exact payload decode and metric XYZ normalization
+
+**Input:** `VerifiedRegistrationSource` from S4b and the sealed registration
+profile. **Output:** finite `(N, 3)` XYZ coordinates in canonical meters for the
+source frame. **Data contract:** re-read only scalar PCD/PLY payloads already
+accepted by `CloudHeader`; verify header checksum, full source checksum, format,
+declared point count and profile point budget while decoding. Resolve XYZ by field
+name, reject malformed/truncated/extra records and non-finite coordinates, then
+convert declared `m`/`cm`/`mm` coordinates to meters. The source frame remains
+attached to `VerifiedRegistrationSource`; this helper does not transform frames.
+Odometry's PCD-only `load_xyz_points` behavior remains unchanged. PCD
+`binary_compressed` and PLY list/mesh layouts remain outside the current accepted
+file contract; the existing header gate rejects them before decoding.
+
+**Tests:** PLY ASCII/little-endian/big-endian and PCD ASCII/uncompressed binary;
+reordered XYZ fields and unit conversion; exact source/header checksum drift;
+count and profile-budget mismatch; truncated/non-finite payloads; and source-byte
+mutation between resolve and decode. Existing odometry and payload-guard tests must
+continue to pass. This slice does not load target RGB geometry, run BEV/ICP, dispatch
+workers or expose an API.
+**Exit:** [x] the worker-facing source loader returns only exact, finite XYZ meters
+under the sealed point budget; [ ] target geometry and floor evidence are resolved;
+[ ] proposal/QA producer and durable worker dispatch are connected.
+
+#### AUD-19.S4c Result / Evidence
+
+`load_registration_source_points` now delegates to the existing bounded PCD/PLY
+record decoder, rechecks header and complete-file checksums while consuming payload,
+binds the observed format/count to S4b metadata, enforces `profile.max_source_points`,
+and converts the declared unit to meters. The existing odometry loader still accepts
+only PCD and keeps its prior 5M-point default.
+
+Verification: focused source, registration, payload-guard, odometry, assembly and
+integration suite — 106 passed, 1 skipped (the isolated KISS-ICP known-motion test
+requires `REC17_LIDAR_ODOMETRY_PYTHON`, which was not set); repository Ruff check
+passed; Ruff format check passed (548 Python files); CodeGraph is current; Graphify
+rebuilt 20,870 nodes, 61,451 edges and 689 communities. No API, worker queue, GPU
+solver, target geometry loader or UI behavior changed in this slice.
+
+Pre-flight (GUIDE.md Rule 13)
+- codegraph: explored `CloudHeader`/`read_header`, `_ascii_records`, `_binary_records`,
+  `inspect_point_cloud`, `load_xyz_points`, the four odometry callers, and S4b's
+  `VerifiedRegistrationSource` before editing; re-explored the new source loader.
+- impact: four existing odometry callers retain the PCD-only function and behavior;
+  registration uses a new checked loader with focused tests. No schema migration.
+- understand: AUD-19 S4 input contract plus CodeGraph's payload/odometry call graph;
+  understand-anything is not installed in this environment.
+- minimal-code: reused the existing strict header and streaming record decoders;
+  preserved the existing odometry contract; added no dependency or native parser.
+- checks: focused pytest PASS (106 passed, 1 skipped: KISS-ICP known-motion test
+  requires `REC17_LIDAR_ODOMETRY_PYTHON`); `.venv/bin/ruff check src/ tests/` PASS;
+  `.venv/bin/ruff format --check src/ tests/` PASS (548 files).
+- DevTools: n/a — no UI/runtime behavior changed.
