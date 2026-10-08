@@ -1,6 +1,7 @@
 "use client";
 
 import { ApiError } from "@/lib/api/client";
+import { isGuestQuotaExceededError } from "@/lib/api/auth";
 import { errorMessage } from "@/lib/ui-error";
 
 import dynamic from "next/dynamic";
@@ -21,6 +22,7 @@ import { cancelJob, getJobProgress, retryJob } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import { useUrlState } from "@/features/studio/useUrlState";
 import { useNavigationGuard } from "@/features/shell/NavigationGuard";
+import { useAuth } from "@/features/studio/AuthProvider";
 import { NextAction } from "@/features/studio/scene/NextAction";
 import { ErrorFeedback, notifySuccess } from "@/components/studio/feedback";
 import type { MetricDraft } from "@/features/studio/MetricConfirmView";
@@ -73,6 +75,8 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
   const [tab, setTab] = useState<Tab | null>(initialTab ?? null);
   const { params, update } = useUrlState();
   const { navigate } = useNavigationGuard();
+  const { me, refresh } = useAuth();
+  const isGuest = me?.user?.role === "guest";
   const requestedMode = params.get("mode");
   const mode: StudioMode = requestedMode === "metric" || requestedMode === "gaussian" ? requestedMode : "scene";
   const [save, setSave] = useState<SaveState | null>(null);
@@ -213,9 +217,15 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
     let message: string | undefined;
     try {
       await retryJob(jobId);
+      if (isGuest) void refresh();
     } catch (cause) {
       retryStatus = cause instanceof ApiError && cause.isClientError ? "rejected" : "uncertain";
-      message = errorMessage(cause, "Chưa xác nhận được yêu cầu thử lại.");
+      if (isGuest && isGuestQuotaExceededError(cause)) {
+        await refresh();
+        message = "Máy chủ báo đã hết lượt Guest ở thời điểm gửi. Hạn mức hiện tại đã được tải lại.";
+      } else {
+        message = errorMessage(cause, "Chưa xác nhận được yêu cầu thử lại.");
+      }
     }
 
     const afterPollId = pollSequence.current + 1;

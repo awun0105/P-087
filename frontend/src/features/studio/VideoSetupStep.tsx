@@ -12,9 +12,11 @@ import { LidarPackageSection, NO_LIDAR, lidarAttachment, lidarBlocker, type Lida
 import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
 import { useProcessingForm } from "@/features/studio/useProcessingForm";
 import { createSceneFromUpload, listUploads } from "@/lib/api/studio";
+import { isGuestQuotaExceededError } from "@/lib/api/auth";
 import { cn } from "@/lib/cn";
 import type { DataOrigin, UploadRecord } from "@/lib/contracts/studio";
 import { useAuth } from "@/features/studio/AuthProvider";
+import { GuestQuotaStatus } from "@/features/studio/auth/GuestQuotaStatus";
 import { useSessionDraft } from "@/features/studio/drafts";
 import { EMPTY_SETUP, parseSetupDraft, type SetupDraft } from "@/features/studio/setup-draft";
 import { notifySuccess, FieldError } from "@/components/studio/feedback";
@@ -35,7 +37,10 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
   // Mọi upload (gồm gói LiDAR) và lựa chọn LiDAR của scene này; LiDAR là tuỳ chọn nên mặc định không dùng.
   const [allUploads, setAllUploads] = useState<UploadRecord[]>([]);
   const [lidar, setLidar] = useState<LidarChoice>(NO_LIDAR);
-  const { me } = useAuth();
+  const { me, refresh } = useAuth();
+  const isGuest = me?.user?.role === "guest";
+  const guestQuota = isGuest ? me.quota : null;
+  const guestQuotaExhausted = guestQuota?.remaining === 0;
   const actor = me?.user?.user_id ?? (me?.auth_required ? "guest" : "local");
   const { value: draft, setValue: setDraft, ready: draftReady, clear } = useSessionDraft("video:v1:" + actor, { ...EMPTY_SETUP, selected: preselect }, parseSetupDraft);
   const { selected, name, owner, origin, purpose, rights, anonymized, retention } = draft;
@@ -102,6 +107,7 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
     processing.loading && "Đang tải cấu hình xử lý",
     processing.evaluating && "Đang kiểm tra thông số xử lý",
     processing.options && processing.error && "Chưa kiểm tra được thông số; thử lại hoặc đổi preset",
+    guestQuotaExhausted && "Đã dùng hết 3 lượt Guest hôm nay",
   ].filter((reason): reason is string => Boolean(reason));
   const ready = missing.length === 0;
 
@@ -119,6 +125,7 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
         anonymization_confirmed: anonymized,
         retention_acknowledged: retention,
       }, processing.values ?? undefined, lidarAttachment(lidar));
+      if (isGuest) void refresh();
       clear();
       notifySuccess(
         routeToColab
@@ -127,7 +134,12 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
       );
       router.push(`/scenes/${encodeURIComponent(created.job.job_id)}`);
     } catch (cause) {
-      setError(errorMessage(cause, "Không tạo được scene"));
+      if (isGuest && isGuestQuotaExceededError(cause)) {
+        await refresh();
+        setError("Máy chủ báo đã hết lượt Guest ở thời điểm gửi. Hạn mức hiện tại đã được tải lại.");
+      } else {
+        setError(errorMessage(cause, "Không tạo được scene"));
+      }
       setSubmitting(false);
     }
   }
@@ -328,6 +340,7 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
         </Notice>
       )}
       {error && <Notice tone="rust">{error}</Notice>}
+      {isGuest && <GuestQuotaStatus quota={guestQuota} />}
 
       <Card className="p-5 sm:p-6">
         <h2 className="text-base font-bold">Tóm tắt trước khi xử lý</h2>
@@ -370,7 +383,7 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
           <ArrowLeft aria-hidden />
           Tải video khác
         </Button>
-        <Button type="submit" size="lg" disabled={!ready || submitting}>
+        <Button type="submit" size="lg" disabled={!ready || submitting || guestQuotaExhausted}>
           {submitting ? (
             <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden />
           ) : routeToColab ? (

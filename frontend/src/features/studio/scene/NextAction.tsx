@@ -5,6 +5,7 @@ import { ErrorFeedback } from "@/components/studio/feedback";
 import { getJobScene, getReviewState, getSimulationPackage, type ReviewStateView, type SimulationPackageView } from "@/lib/api/studio";
 import { usePolling } from "@/features/studio/usePolling";
 import { useAuth } from "@/features/studio/AuthProvider";
+import { GuestQuotaStatus } from "@/features/studio/auth/GuestQuotaStatus";
 import { isReviewer } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { errorMessage } from "@/lib/ui-error";
@@ -41,6 +42,9 @@ export function NextAction({
   variant?: "banner" | "popover";
 }) {
   const { me } = useAuth();
+  const isGuest = me?.user?.role === "guest";
+  const guestQuota = isGuest ? me.quota : null;
+  const guestQuotaExhausted = guestQuota?.remaining === 0;
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(false);
@@ -210,9 +214,17 @@ export function NextAction({
             {(showRetry || (action && !atTarget)) && (
               <div className="mt-3.5 flex items-center justify-end gap-2 border-t border-line/60 pt-2">
                 {showRetry && (
-                  <Button size="sm" disabled={busy} onClick={() => { setIsOpen(false); onRetry(); }}>
-                    Thử lại
-                  </Button>
+                  <div className="space-y-2 text-right">
+                    {isGuest && (
+                      <>
+                        <p className="text-xs text-ink-muted">Retry thủ công dùng 1 lượt Guest khi máy chủ chấp nhận.</p>
+                        <GuestQuotaStatus quota={guestQuota} />
+                      </>
+                    )}
+                    <Button size="sm" disabled={busy || guestQuotaExhausted} onClick={() => { setIsOpen(false); onRetry(); }}>
+                      Thử lại
+                    </Button>
+                  </div>
                 )}
                 {action && !atTarget && (
                   <Button size="sm" onClick={() => { setIsOpen(false); onOpen(action!.tab, action!.mode); }}>
@@ -240,7 +252,17 @@ export function NextAction({
     <section aria-label="Bước tiếp theo" className="border-b border-line bg-paper px-4 py-3 sm:px-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {title && <div className="min-w-0"><p className="text-sm font-bold">{title}</p>{description && <p className="mt-0.5 text-sm text-ink-muted">{description}</p>}</div>}
-        {showRetry && <Button size="sm" disabled={busy} onClick={onRetry}>Thử lại</Button>}
+        {showRetry && (
+          <div className="space-y-2 text-right">
+            {isGuest && (
+              <>
+                <p className="text-xs text-ink-muted">Retry thủ công dùng 1 lượt Guest khi máy chủ chấp nhận.</p>
+                <GuestQuotaStatus quota={guestQuota} />
+              </>
+            )}
+            <Button size="sm" disabled={busy || guestQuotaExhausted} onClick={onRetry}>Thử lại</Button>
+          </div>
+        )}
         {action && !atTarget && <Button size="sm" onClick={() => onOpen(action!.tab, action!.mode)}>{action.label}</Button>}
       </div>
       {sceneReady && error && <ErrorFeedback message={error} className="mt-2" retryLabel="Tải lại dữ liệu" retry={() => void load(new AbortController().signal)} />}

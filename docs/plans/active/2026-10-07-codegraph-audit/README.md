@@ -19,9 +19,10 @@ nhưng `AUTH_GUEST_SIGNUP_ENABLED` đang mặc định `false`; browser gate c�
 còn UNVERIFIED. AUD-21.S3 đã thêm owner guards, immutable job owner và audited
 operator intervention; browser DevTools gate còn UNVERIFIED do Chrome profile lock.
 AUD-22.S2 đã implement quota Guest atomic và enforcement trên các API tạo job/Retry.
-PostgreSQL multi-process race/restart proof đang pending vì
-`R2S_TEST_POSTGRES_URL` chưa được cấu hình. AUD-22.S3 UX có thể tiếp tục trên
-S2 contract; Guest rollout vẫn đợi database qualification,
+AUD-22.S3 đã thêm quota/reset UI, refresh sau accepted run và stale-tab 429 recovery;
+full local frontend/API checks pass. PostgreSQL multi-process race/restart đang
+pending vì `R2S_TEST_POSTGRES_URL` chưa được cấu hình, còn DevTools visual gate
+UNVERIFIED do Chrome profile lock. Guest rollout vẫn đợi database qualification,
 AUD-21.S4, browser acceptance và AUD-20.S3 seed acceptance.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
@@ -206,10 +207,10 @@ Execution order bắt đầu ở **AUD-11.S1**; các sprint AUD-11.S1–S2, AUD-
 AUD-01–04, AUD-10.S1–S3, AUD-07.S1–S2, AUD-20.S1–S2, AUD-21.S1–S2 và AUD-22.S1
 đã hoàn tất ở mức code/task của từng sprint. AUD-21.S3 đã thêm backend ownership
 guards; AUD-20.S3 và AUD-21.S2 còn browser acceptance, AUD-20.S3 còn live-seed
-acceptance. AUD-22.S2 code/API acceptance đã hoàn tất trên SQLite; PostgreSQL
-multi-process qualification còn pending. Có thể tiếp tục implement AUD-22.S3 trên
-S2 contract trong lúc database gate vẫn mở; quota, AUD-21.S4 và các acceptance
-gates vẫn cần xong trước public Guest rollout.
+acceptance. AUD-22.S2 code/API acceptance đã hoàn tất trên SQLite; AUD-22.S3 local
+UX/API regression đã hoàn tất. PostgreSQL multi-process qualification và DevTools
+browser acceptance còn pending; quota, AUD-21.S4 và các acceptance gates vẫn cần
+xong trước public Guest rollout.
 AUD-15.S1 được làm sớm để AUD-23.S5 có measurement protocol; optimization
 AUD-15.S2–S3 vẫn làm sau quality work.
 AUD-07.S3 làm sau AUD-06/AUD-05 để kiểm tra admission trên consumer thật;
@@ -281,7 +282,9 @@ passed 138 tests, orchestration passed 578 with 20 skips, and processing/upload
 integration passed 9. Four migration tests skipped without `R2S_TEST_POSTGRES_URL`;
 Chrome DevTools remains UNVERIFIED because MCP cannot attach to its locked profile.
 `AUTH_GUEST_SIGNUP_ENABLED` remains false. AUD-22.S2 implements the durable
-Guest quota ledger; PostgreSQL qualification remains pending.
+Guest quota ledger; AUD-22.S3 implements local quota/reset UX and stale-tab refresh.
+Frontend/API checks pass; DevTools browser acceptance and PostgreSQL qualification
+remain pending.
 
 AUD-07.S1 adds typed operation admission over the existing reservation table,
 shares resource assessment with job admission, keeps old job payloads readable,
@@ -382,10 +385,10 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 
 - [x] Implementation AUD-20.S1 identity/seed migration contract and AUD-20.S2 producer/API actor attribution.
 - [ ] AUD-20.S3 browser/seed acceptance; AUD-21.S2 browser gate; AUD-21.S3–S4.
-- [x] Implementation AUD-22.S2 durable Guest quota ledger and API enforcement;
-      local SQLite/API acceptance.
+- [x] Implementation AUD-22.S2 durable Guest quota ledger/API enforcement and
+      AUD-22.S3 local quota UX; SQLite/API/frontend checks.
 - [ ] AUD-22.S2 shared-PostgreSQL concurrency/restart qualification; AUD-22.S3
-      quota UX and browser acceptance.
+      DevTools browser acceptance.
 
 - [ ] Implementation AUD-23 và client encode/upload/bandwidth/geometry acceptance.
 - [ ] Implementation AUD-24 và grouped upload/R1–R6 recipe/consumer/browser acceptance.

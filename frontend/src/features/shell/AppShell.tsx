@@ -39,6 +39,7 @@ import { backHref, Breadcrumbs, PageTitleProvider } from "@/features/shell/Bread
 import { PaletteMenu } from "@/features/shell/PaletteMenu";
 import { ThemeToggle } from "@/features/shell/ThemeToggle";
 import { useAuth } from "@/features/studio/AuthProvider";
+import { GuestQuotaStatus } from "@/features/studio/auth/GuestQuotaStatus";
 import { canEdit, isReviewer } from "@/lib/api/auth";
 import { APP_HOME } from "@/lib/routes";
 
@@ -272,7 +273,7 @@ function AccountMenu({ pathname }: { pathname: string }) {
     );
   }
   const user = me.user;
-  const role = user.role === "reviewer" ? "Reviewer" : "Editor";
+  const role = user.role === "reviewer" ? "Reviewer" : user.role === "editor" ? "Editor" : "Guest";
   return (
     <SidebarMenu>
       <SidebarMenuItem>
@@ -295,8 +296,13 @@ function AccountMenu({ pathname }: { pathname: string }) {
               <p className="text-xs text-muted-foreground">{user.email}</p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {role}
-                {user.role === "editor" ? ` · hạn mức ${user.daily_job_quota} lần xử lý/ngày` : " · không giới hạn lần xử lý"}
+                {user.role === "guest"
+                  ? " · tối đa 3 lượt chạy/ngày"
+                  : user.role === "editor"
+                    ? ` · hạn mức ${user.daily_job_quota} lần xử lý/ngày`
+                    : " · không giới hạn lần xử lý"}
               </p>
+              {user.role === "guest" && <GuestQuotaStatus quota={me.quota} className="mt-2" />}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild><Link href="/account"><UserRound aria-hidden />Tài khoản của tôi</Link></DropdownMenuItem>

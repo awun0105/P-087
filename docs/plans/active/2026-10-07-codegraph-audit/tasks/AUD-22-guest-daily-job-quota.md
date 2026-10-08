@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- IN PROGRESS — S1 contract and S2 enforcement are implemented; shared-PostgreSQL concurrency evidence remains pending because `R2S_TEST_POSTGRES_URL` is unset. S3 UX/operations is next. Owner confirmed objectify is excluded from Guest's 3/day quota on 2026-10-08. P1; EX-PRODUCT identity/API/Studio/runtime DB.
+- IN PROGRESS — S1 contract, S2 enforcement and S3 local quota UX/regressions are implemented. Shared-PostgreSQL and browser acceptance remain pending. Owner confirmed objectify is excluded from Guest's 3/day quota on 2026-10-08. P1; EX-PRODUCT identity/API/Studio/runtime DB.
 - Canonical PRODUCT-01/02/06/09; task-local extension, không đổi crosswalk.
 - Owner yêu cầu ngày 07/10/2026. S1 thêm pure calendar/DTO contract và tests; chưa bật quota route hoặc sửa tài khoản. Ngày 08/10/2026, owner xác nhận objectify không trừ quota 3 lượt/ngày của Guest.
 - [Agent guide](../AGENT_GUIDE.md), [ADR 0021](../../../../decisions/0021-guest-identity-and-ownership.md), [ADR 0022](../../../../decisions/0022-guest-daily-job-quota.md).
@@ -154,9 +154,9 @@ shared-PostgreSQL concurrency/restart proof and deployment qualification.
 **Output:** Remaining/reset UI và complete role/quota acceptance.
 **Contract:** Exhaustion chỉ block new run, own edit/cancel/delete vẫn allowed.
 
-Implement: Render 3/day remaining and Vietnam reset, refresh after run, handle stale multi-tab429, no localStorage authority. Show manual Retry cost before accepted run; maintain queue waiting config. Add minimal usage diagnostics without secrets; apply forward schema migration and update docs.
-Tests: Browser fourth run blocked, own editing at cap, midnight new window, operator rerun Guest, duplicate network retry, promotion/demotion, frozen clock APIs và persistent restart.
-**Exit:** [ ] quota đúng sau restart/multiple tabs và browser evidence.
+Implement: Render `used/3`, remaining and Vietnam reset from `/auth/me` in Account, scene creation and manual Retry views. Refresh after accepted runs and after the stable `guest_daily_job_quota_exceeded` response so a stale tab updates from the server. Disable only new scene creation and manual Retry when the current summary is exhausted; edits, cancel and delete keep their existing ownership rules. Explain that a manual Retry uses one Guest run only when accepted. Do not use localStorage as quota authority. Keep usage diagnostics in the durable counter and `/auth/me`; do not add identity or request data to logs. Migration v14 was delivered in S2; S3 adds no schema because the UI uses the existing summary and error contract.
+Tests: S2 API/ledger tests cover the fourth accepted run, midnight, operator rerun, idempotent replay, promotion/demotion, persistent SQLite state and rollback. S3 adds frontend coverage for the exhausted create form, refresh after accepted create/Retry, stale-tab 429, exhausted Retry, timezone display and Guest role copy; API ownership coverage verifies the Guest can edit an owned scene at quota cap. Full browser acceptance and shared-PostgreSQL concurrency/restart remain separate gates.
+**Exit:** [x] local UI/API behavior and regression checks; [ ] browser DevTools acceptance and shared-PostgreSQL qualification.
 
 ## Verification và DoD
 
@@ -227,5 +227,13 @@ mock hoặc source review không chứng minh feature đã chạy.
   (request headers are covered by Vitest). PostgreSQL variants skipped because
   `R2S_TEST_POSTGRES_URL` is unset; no shared-database race/restart or deployment
   qualification is claimed.
-- **Pending:** shared PostgreSQL concurrency/restart verification and AUD-22.S3
-  remaining/reset UX plus browser acceptance.
+- **Pending:** shared PostgreSQL concurrency/restart qualification and S3 browser acceptance.
+
+### AUD-22.S3 — Guest quota UX and stale-tab recovery
+
+- **CodeGraph evidence:** read current `/auth/me` DTO/error consumers, `VideoSetupStep`, `NextAction`/`ScenePage`, `AppShell`/`AccountPage`, callers and related tests before edits. Refreshed index: 765 files, 13,970 nodes, 40,261 edges. `codegraph affected` identified 22 frontend test files for the changed source.
+- **Behavior:** one shared Guest quota status formats `resets_at_utc` with the contract's `Asia/Ho_Chi_Minh` timezone. Account, scene creation and Retry show usage/reset. Accepted create/Retry refreshes the summary. A stale-tab 429 is recognized by the stable code, then `/auth/me` refreshes and the Retry CTA follows the current remaining count. The Guest role is explicit in the shell and account page; quota exhaustion does not gate scene edits or other existing job controls. No localStorage authority or new usage logs were added.
+- **Migration decision:** no S3 migration; S2 migration v14 already stores the durable counter and accepted intent. S3 changes only consumers of the existing `/auth/me` and 429 contracts.
+- **Verification:** `cd frontend && npm test` — 284 passed in 42 files; `npm run typecheck` and changed-file ESLint passed. `.venv/bin/pytest tests/test_api/test_guest_ownership.py tests/test_api/test_guest_quota.py -q` — 14 passed, including edit-at-cap. `.venv/bin/ruff check src/ tests/` and `ruff format --check src/ tests/` passed. `git diff --check` passed. PostgreSQL remains unverified because `R2S_TEST_POSTGRES_URL` is unset.
+- **Gate report:** CodeGraph PASS; minimal scope PASS; frontend, API, Ruff and format checks PASS. DevTools is UNVERIFIED because the Chrome profile is locked. Mocked UI tests do not establish rendered browser acceptance.
+- **Pending:** live browser UX proof and shared-PostgreSQL multi-process/restart qualification.

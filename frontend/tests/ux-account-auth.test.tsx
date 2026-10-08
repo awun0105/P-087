@@ -31,15 +31,39 @@ describe("tài khoản và đích sau xác thực", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Không đăng xuất được");
     expect(screen.getByRole("button", { name: "Đăng xuất" })).toBeEnabled();
   });
-  it("hiện Guest riêng với quota hiện chưa mở, không nhầm thành Editor", () => {
+  it("hiện Guest riêng, không nhầm thành Editor khi /me chưa trả quota", () => {
     state.me = {
       auth_required: true,
       user: { user_id: "guest-1", email: "guest@example.com", display_name: "Guest", role: "guest", active: true, daily_job_quota: 10 },
     };
     render(<AccountPage />);
     expect(screen.getByRole("heading", { name: "Guest" })).toBeInTheDocument();
-    expect(screen.getByText("Hạn mức Guest chưa mở")).toBeInTheDocument();
+    expect(screen.getByText("Chưa tải được số lượt Guest còn lại.")).toBeInTheDocument();
+    expect(screen.getByText(/Guest có thể tạo job và thao tác trên job mình tạo/)).toBeInTheDocument();
     expect(screen.queryByText("10 lần / 24 giờ")).toBeNull();
+  });
+  it("AppShell phân biệt role Guest và hiển thị quota/reset từ backend", async () => {
+    state.me = {
+      auth_required: true,
+      user: { user_id: "guest-1", email: "guest@example.com", display_name: "Guest Test", role: "guest", active: true, daily_job_quota: 10 },
+      quota: {
+        policy_id: "guest_calendar_day_v1",
+        limit: 3,
+        used: 1,
+        remaining: 2,
+        window_start_utc: "2026-10-07T17:00:00Z",
+        resets_at_utc: "2026-10-08T17:00:00Z",
+        timezone: "Asia/Ho_Chi_Minh",
+      },
+    };
+    state.pathname = "/overview";
+    render(<TooltipProvider><AppShell><div>Overview</div></AppShell></TooltipProvider>);
+    fireEvent.pointerDown(screen.getByRole("button", { name: /Guest Test/ }), { button: 0, ctrlKey: false });
+    expect(screen.getByText("Guest", { selector: "span" })).toBeInTheDocument();
+    expect(await screen.findByText("Guest còn 2/3 lượt hôm nay.")).toBeInTheDocument();
+    const reset = screen.getByText(/Đã dùng 1\/3; đặt lại lúc/);
+    expect(reset).toHaveTextContent("00:00");
+    expect(reset).toHaveTextContent("09/10/2026");
   });
   it("đăng nhập giữ đích tạo scene, link đăng ký và mẫu phân biệt rõ", async () => {
     vi.mocked(login).mockResolvedValue({ user_id: "fixture", email: "fixture@example.com", display_name: "Fixture", role: "editor", active: true, daily_job_quota: 10 });

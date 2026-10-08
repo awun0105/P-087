@@ -36,6 +36,17 @@ export interface Me {
   quota?: GuestQuotaSummary | null;
 }
 
+/** Branch only on the stable quota code; never infer exhaustion from localized message text. */
+export function isGuestQuotaExceededError(error: unknown): error is ApiError {
+  if (!(error instanceof ApiError) || error.status !== 429) return false;
+  try {
+    const detail: unknown = JSON.parse(error.detail);
+    return typeof detail === "object" && detail !== null && "code" in detail && detail.code === "guest_daily_job_quota_exceeded";
+  } catch {
+    return false;
+  }
+}
+
 const API = "/api/v1/auth";
 
 export function getMe(): Promise<ApiResult<Me>> {

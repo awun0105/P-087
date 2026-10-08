@@ -7,11 +7,13 @@ import { NewSceneFlow } from "@/features/studio/NewSceneFlow";
 import { UploadDropzone } from "@/features/studio/UploadDropzone";
 import { VideoSetupStep } from "@/features/studio/VideoSetupStep";
 import { createImport, createSceneFromUpload, listSamples, listUploads, uploadVideo } from "@/lib/api/studio";
+import type { Me } from "@/lib/api/auth";
 import type { UploadRecord } from "@/lib/contracts/studio";
 
 const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
+const authState = vi.hoisted(() => ({ me: { auth_required: false, user: null } as Me, refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => navigation, useSearchParams: () => new URLSearchParams() }));
-vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => ({ me: { auth_required: false, user: null } }) }));
+vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => authState }));
 vi.mock("@/features/studio/useProcessingForm", () => ({ useProcessingForm: () => ({ options: null, values: null, evaluation: null, error: null, activePreset: null }) }));
 vi.mock("@/lib/api/studio", async (original) => ({
   ...(await original<typeof import("@/lib/api/studio")>()),
@@ -20,9 +22,26 @@ vi.mock("@/lib/api/studio", async (original) => ({
 
 const video: UploadRecord = { upload_id: "video-1", original_name: "warehouse.mp4", media_type: "video/mp4", size_bytes: 100, checksum: "sha256:test", artifact_uri: "artifact://test/video", received_at: "2026-10-01T00:00:00Z", project_ids: [], input_kind: "rgb_video" };
 const gaussian: UploadRecord = { ...video, upload_id: "ply-1", original_name: "warehouse.ply", media_type: "application/x-ply", input_kind: "gaussian_ply" };
+function guestMe(remaining: number): Me {
+  return {
+    auth_required: true,
+    user: { user_id: "guest-1", email: "guest@example.test", display_name: "Guest Test", role: "guest", active: true, daily_job_quota: 10 },
+    quota: {
+      policy_id: "guest_calendar_day_v1",
+      limit: 3,
+      used: 3 - remaining,
+      remaining,
+      window_start_utc: "2026-10-07T17:00:00Z",
+      resets_at_utc: "2026-10-08T17:00:00Z",
+      timezone: "Asia/Ho_Chi_Minh",
+    },
+  };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
+  authState.me = { auth_required: false, user: null };
+  authState.refresh.mockResolvedValue(undefined);
   sessionStorage.clear();
   history.replaceState({}, "", "/new");
   vi.mocked(listUploads).mockResolvedValue({ ok: true, data: { uploads: [video, gaussian] } });
@@ -113,6 +132,29 @@ describe("ba cửa vào", () => {
     expect(name).toHaveValue("Kho video");
     expect(createSceneFromUpload).toHaveBeenCalledWith("video-1", "Kho video", expect.objectContaining({ rights_to_use_confirmed: true, anonymization_confirmed: true, retention_acknowledged: true, declared_owner: "Nhóm thử nghiệm" }), undefined, undefined);
     expect(createImport).not.toHaveBeenCalled();
+  });
+  it("quota Guest hiển thị reset, chặn job mới khi hết lượt và refresh sau lần được chấp nhận", async () => {
+    authState.me = guestMe(0);
+    const capped = render(<VideoSetupStep preselect="video-1" onBack={vi.fn()} />);
+    await screen.findByLabelText("Tên scene");
+    expect(screen.getByText("Guest còn 0/3 lượt hôm nay.")).toBeInTheDocument();
+    expect(screen.getByText(/Đã dùng 3\/3; đặt lại lúc/)).toHaveTextContent("09/10/2026");
+    fireEvent.change(screen.getByLabelText("Người/đơn vị sở hữu dữ liệu"), { target: { value: "Nhóm thử nghiệm" } });
+    screen.getAllByRole("checkbox").forEach((checkbox) => fireEvent.click(checkbox));
+    expect(screen.getByRole("button", { name: "Bắt đầu xử lý" })).toBeDisabled();
+    expect(createSceneFromUpload).not.toHaveBeenCalled();
+    capped.unmount();
+
+    sessionStorage.clear();
+    authState.me = guestMe(1);
+    vi.mocked(createSceneFromUpload).mockResolvedValue({ job: { job_id: "job-1" } } as never);
+    render(<VideoSetupStep preselect="video-1" onBack={vi.fn()} />);
+    await screen.findByLabelText("Tên scene");
+    fireEvent.change(screen.getByLabelText("Người/đơn vị sở hữu dữ liệu"), { target: { value: "Nhóm thử nghiệm" } });
+    screen.getAllByRole("checkbox").forEach((checkbox) => fireEvent.click(checkbox));
+    fireEvent.click(screen.getByRole("button", { name: "Bắt đầu xử lý" }));
+    await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/scenes/job-1"));
+    expect(authState.refresh).toHaveBeenCalledOnce();
   });
 });
 

@@ -4,10 +4,10 @@ Date: 2026-10-07
 
 ## Status
 
-Accepted — owner-confirmed policy is implemented through AUD-22.S2, including
-migration v14 and API enforcement. Local SQLite/API checks pass; shared-PostgreSQL
-concurrency and deployment qualification remain pending because
-`R2S_TEST_POSTGRES_URL` is unset.
+Accepted — owner-confirmed policy and local UX are implemented through AUD-22.S3,
+including migration v14 and API enforcement. Local SQLite/API/frontend checks
+pass; browser acceptance and shared-PostgreSQL concurrency qualification remain
+pending because the Chrome profile is locked and `R2S_TEST_POSTGRES_URL` is unset.
 
 ## Implementation status
 
@@ -16,7 +16,10 @@ The durable ledger is enforced for `scene.create`, `job.create`, and `job.retry`
 immutable job manifest by its stored artifact reference. The three routes fail
 closed when their required persistent runtime database is unavailable. Objectify
 is explicitly excluded from Guest's daily counter and continues through existing
-worker/resource admission. The UI remaining/reset display is AUD-22.S3.
+worker/resource admission. AUD-22.S3 renders the `/auth/me` summary in Account,
+scene creation and Retry;
+accepted runs refresh that summary, and a stable quota 429 refreshes stale tabs.
+The browser remains the final visual acceptance gate.
 
 ## Context và decision
 
@@ -83,8 +86,24 @@ và browser midnight/reset UX; GPU runtime không cần cho quota proof.
 
 Mở Guest onboarding với giới hạn rõ và giữ quyền hiện tại của team.
 Forward migration, typed contracts and local permission/quota regression are
-implemented; shared PostgreSQL proof and quota UX/browser acceptance remain open.
+implemented. Local quota UX and Guest edit-at-cap behavior are covered; browser
+acceptance and shared PostgreSQL proof remain open.
 Không reset DB, rewrite old artifacts hoặc triển khai SMTP trong scope này.
+
+## AUD-22.S3 implementation evidence
+
+- Guest usage and reset time are read from `/auth/me`; the UI uses the server's
+  `Asia/Ho_Chi_Minh` timezone and does not use localStorage as quota authority.
+- Quota exhaustion disables only new scene creation and manual Retry. Existing
+  ownership-checked edit/cancel/delete actions remain available. A Retry rejected
+  with `guest_daily_job_quota_exceeded` refreshes the current summary for stale tabs.
+- No migration was needed in S3: migration v14 already persists the counter and
+  accepted intent. `/auth/me` and the stable 429 response remain the diagnostic
+  contract; no personal data or idempotency keys are logged.
+- Local verification: 284 frontend tests across 42 files, typecheck, ESLint,
+  14 Guest quota/ownership API tests, repo Ruff check and format check passed.
+- Pending: Chrome DevTools visual acceptance (profile locked) and shared-PostgreSQL
+  concurrency/restart proof (`R2S_TEST_POSTGRES_URL` unset).
 
 ## Follow-Up
 

@@ -11,7 +11,9 @@ from src.api.product import scene as scene_api
 from src.api.studio import imports as imports_api
 from src.api.studio import uploads as uploads_api
 from src.main import app
-from src.services.orchestration.auth import Actor, UserRecord
+from src.services.orchestration.auth import Actor, AuthService, UserRecord
+from src.services.orchestration.auth.quota import guest_quota_window
+from src.services.orchestration.auth.quota_ledger import guest_quota_summary
 from src.services.orchestration.jobs import InvalidTransitionError
 from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.projects import ProjectRegistry
@@ -122,6 +124,48 @@ async def test_guest_direct_scene_edit_rejects_foreign_job_before_revision_write
 
     assert response.status_code == 403
     assert owner_lookups == ["job-foreign"]
+
+
+@pytest.mark.asyncio
+async def test_guest_can_edit_own_scene_when_daily_run_quota_is_exhausted(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    database = RuntimeDatabase(f"sqlite:///{tmp_path / 'quota-at-cap.db'}")
+    user = AuthService(database).create_user("guest-cap@example.com", "Guest Cap", "test-password-long", "guest")
+    window = guest_quota_window(datetime.now(UTC))
+    with database.transaction(write=True) as tx:
+        tx.execute(
+            "INSERT INTO r2s_guest_quota_windows "
+            "(actor_user_id, policy_id, window_start_utc, resets_at_utc, policy_limit, used_count) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                user.user_id,
+                window.policy_id,
+                window.window_start_utc.isoformat(),
+                window.resets_at_utc.isoformat(),
+                window.limit,
+                window.limit,
+            ),
+        )
+    registry = ProjectRegistry(runtime_root=tmp_path / "artifacts", database=database)
+    registry.seed_from_fixtures()
+    monkeypatch.setattr(registry, "get_job_owner_user_id", lambda job_id: user.user_id)
+    original_overrides = app.dependency_overrides.copy()
+    app.dependency_overrides[auth_api.require_contributor] = lambda: user
+    monkeypatch.setattr(scene_api.deps, "registry", lambda: registry)
+    try:
+        response = await client.post(
+            "/api/v1/jobs/job-fixture-001/scene/objects/object-pallet-001/hide",
+            json={"expected_scene_revision": "rev-001", "active": False},
+        )
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(original_overrides)
+
+    assert response.status_code == 201, response.text
+    assert response.json()["scene_revision"] == "rev-002"
+    quota = guest_quota_summary(database, user.user_id)
+    assert quota.used == 3 and quota.remaining == 0
 
 
 @pytest.mark.asyncio
