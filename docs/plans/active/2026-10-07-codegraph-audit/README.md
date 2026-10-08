@@ -26,6 +26,13 @@ Ruff check/format đều pass. PostgreSQL qualification pending vì
 `R2S_TEST_POSTGRES_URL` chưa được cấu hình; DevTools visual gate **UNVERIFIED** do
 Chrome profile lock. Guest rollout vẫn đợi database qualification, browser
 acceptance và AUD-20.S3 seed acceptance.
+AUD-06.S2 lease recovery/admission và AUD-06.S3 retry/cancel đã hoàn tất trong
+`b149974` và `2b0a1b6`. AUD-05.S1 local implementation đã thêm durable validation
+operation, idempotency, worker lease/fencing/recovery, candidate/profile binding,
+status APIs và owner checks. Focused local verification: 52 passed, 4 skipped;
+Ruff check/format pass. Isaac Sim/Isaac Lab và server validation config/profile
+không có trong môi trường hiện tại, nên runtime qualification và S2 real-simulator
+acceptance vẫn **UNVERIFIED**; không lấy test fixture làm bằng chứng runtime.
 AUD-23.S1 đã thêm profile/media contracts dùng chung Python–TypeScript, input-
 specific capability blockers, dimension fitting cho portrait/landscape và
 checksum compatibility cho `InputManifest` cũ. AUD-23.S2 đã thêm local Worker
@@ -442,8 +449,9 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
       `AttributeError` (HTTP 500) when the output color reported no transfer. AUD-24.S2 now
       requires R4's `InputRole.SENSOR_TRAJECTORY` in the shared contract, alongside its ordered
       scan binding. AUD-06.S1 moves import packaging from the API to the standalone worker, so
-      imports stay QUEUED when no `worker_cli` runs; a worker killed mid-package leaves the
-      operation RUNNING until AUD-06.S2 adds lease recovery.
+      imports stay QUEUED when no `worker_cli` runs; AUD-06.S2 now recovers expired import leases
+      and AUD-06.S3 provides retry/cancel controls. Validation queue coverage is in AUD-05.S1;
+      Isaac runtime execution/report publication remains for S2/S3.
 
 - [x] AUD-23.S1 versioned media/capability/preparation contracts, Python/TypeScript
       agreement, frame-map rules, preset dimension fitting and legacy checksum preservation.

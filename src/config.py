@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     product_fixture_mode: bool = False
     product_processing_config: Path | None = None
     product_runtime_manifest: Path | None = None
+    #: Server-owned policy/profile for durable Isaac validation; not accepted from request payloads.
+    product_isaac_validation_config: Path | None = None
+    product_isaac_validation_profile: Path | None = None
     product_seed: int | None = None
     product_worker_root: Path = Path("./data/product_workers")
     #: Giữ scratch để chẩn đoán; mặc định chỉ dọn attempt đã publish và commit thành công.
@@ -155,6 +158,10 @@ class Settings(BaseSettings):
             raise ValueError("ARTIFACT_ROOT must be absolute outside development/test")
         if (self.product_processing_config is None) != (self.product_runtime_manifest is None):
             raise ValueError("PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST phải khai báo cùng nhau")
+        if (self.product_isaac_validation_config is None) != (self.product_isaac_validation_profile is None):
+            raise ValueError(
+                "PRODUCT_ISAAC_VALIDATION_CONFIG và PRODUCT_ISAAC_VALIDATION_PROFILE phải khai báo cùng nhau"
+            )
         if self.artifact_s3_bucket and not (self.artifact_s3_access_key_id and self.artifact_s3_secret_access_key):
             raise ValueError("ARTIFACT_S3_BUCKET cần ARTIFACT_S3_ACCESS_KEY_ID và ARTIFACT_S3_SECRET_ACCESS_KEY")
         if self.product_fixture_mode and self.app_env in {"staging", "production"}:

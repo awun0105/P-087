@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- PLANNED; P0; EX-SIM runtime/report, EX-PRODUCT queue/API/UI.
+- IN PROGRESS; P0; EX-SIM runtime/report, EX-PRODUCT queue/API/UI.
 - Canonical SIM-01/06/07/09, PRODUCT-08/10/12. ADAPT Isaac process-isolation
   patterns; REUSE qualified Isaac runtime và existing artifact/DB ports.
 - Goal: exact candidate được chạy Isaac thật, report/evidence publish, rồi đi
@@ -74,7 +74,15 @@ wait/cancel khi unavailable. Publish result selection bằng CAS; scene mới kh
 attach report cũ, nhưng giữ run history/artifacts.
 Tests: request permissions, duplicate submit, same candidate new attempt, restart,
 two workers, stale lease/candidate; fake executable chỉ là local queue proof.
-**Exit:** [ ] durable request/selection tests pass; [ ] config profile cụ thể được ghi.
+**Exit (local implementation):** [x] durable request, replay, lease recovery,
+worker fencing, candidate-staleness, ownership and exact-run selection regression
+tests pass; [x] server-owned config/profile contracts bind immutable checksummed
+runtime identity to a validation attempt.
+
+**Deployment gate:** [ ] a concrete supported Isaac runtime/config profile is
+published and qualified. The current checkout has no Isaac Sim/Isaac Lab install
+or server validation config/profile, so this gate is **UNVERIFIED**. A test-only
+manifest is not qualification evidence; do not claim AUD-05.S2 runtime acceptance.
 
 ## Sprint AUD-05.S2 — Headless Isaac thin path và observed checks
 
@@ -138,5 +146,42 @@ real Isaac observations + artifact publication + Studio review/release handoff.
 
 ## Result / Evidence
 
-Pending — từng sprint lưu run_id, attempt, candidate/config/report checksums,
-runtime fingerprint, commands, evidence refs và coverage/limitations.
+### AUD-05.S1 — Durable validation request and report selection
+
+Implemented the persisted `r2s_validation_operations` queue (schema v16),
+checksummed request/run/operation identities, idempotent submit/replay, immutable
+candidate/config/profile binding, worker claim leases with fencing, heartbeat,
+resource wait/requeue, stale-candidate cancellation, retryability checks, cancel
+acknowledgement, expired-lease recovery, and owner-guarded Studio list/read/submit/
+cancel/retry APIs. Server-owned settings load the policy and runtime profile; API
+requests cannot provide or override them. Existing validation selection continues
+to bind a completed trusted run to its exact candidate/config.
+
+An initial focused run found that `_request_fingerprint` prepended `sha256:` to a
+digest that already included the prefix, causing new submissions to fail model
+validation. The helper now returns the canonical digest unchanged. Two migration
+tests also still expected schema v15 and were advanced to v16.
+
+Verification:
+
+- `.venv/bin/pytest tests/test_orchestration/test_validation_queue.py tests/test_api/test_validation_routes.py tests/test_orchestration/test_validation_runs.py tests/test_orchestration/test_review_workflow.py tests/test_orchestration/test_runtime_migrations.py tests/test_contracts/test_validation_run.py tests/test_api/test_review_routes.py -q -rs --tb=short` — 52 passed, 4 skipped; all skips require `R2S_TEST_POSTGRES_URL`.
+- `.venv/bin/pytest tests/test_api -q --tb=short` — 166 passed.
+- `ruff check src/ tests/` — passed.
+- `ruff format --check src/ tests/` — passed (493 files already formatted).
+- CodeGraph index — 801 files, 15,382 nodes, 44,628 edges; up to date before docs-only edits.
+- Environment probe — `isaaclab` and `isaacsim` modules absent; server validation config/profile not configured. Runtime qualification is therefore UNVERIFIED and is a deployment/S2 gate.
+
+Changed files: `src/services/orchestration/jobs/database.py`,
+`src/services/orchestration/review/validation_queue.py`,
+`src/services/orchestration/review/validation_runs.py`,
+`src/api/studio/review.py`, `src/config.py`,
+`src/models/contracts/validation_run.py`, `src/models/contracts/__init__.py`,
+`tests/test_orchestration/test_runtime_migrations.py`,
+`tests/test_orchestration/test_validation_queue.py`,
+`tests/test_api/test_validation_routes.py`, and this task/plan documentation.
+
+Limitations: these tests prove the durable queue/API contract only. They do not
+prove that Isaac Sim starts, executes physics checks, publishes a real report, or
+passes browser/GPU/release acceptance. No real `run_id`, report checksum, runtime
+fingerprint or evidence artifact exists yet; capture these in S2/S3 rather than
+inventing values here.

@@ -6,7 +6,7 @@ to the candidate, public policy, worker lease and immutable execution artifacts.
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import Field, FiniteFloat, PositiveInt, model_validator
 
@@ -47,6 +47,8 @@ class ValidationConfig(ContractModel):
     required_check_ids: list[Identifier] = Field(min_length=1)
     warning_check_ids: list[Identifier]
     path_pairs: list[ValidationPathPair]
+    #: Optional on legacy records; new worker requests bind the qualified runtime/robot profile here.
+    runtime_profile_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
     config_checksum: Checksum
 
     @model_validator(mode="after")
@@ -60,6 +62,35 @@ class ValidationConfig(ContractModel):
             raise ValueError("a validation check cannot be both required and warning-only")
         if len(pairs) != len(set(pairs)):
             raise ValueError("validation path pair IDs must be unique")
+        return self
+
+
+class IsaacValidationRuntimeProfile(ContractModel):
+    """Public, versioned simulation inputs; machine-local launcher paths stay in deployment settings."""
+
+    schema_version: SchemaVersion
+    profile_id: Identifier
+    runtime_identity: Identifier
+    runtime_manifest_ref: ProductArtifactRef
+    robot_asset_ref: ProductArtifactRef
+    robot_footprint_m: tuple[FiniteFloat, FiniteFloat]
+    spawn_position_xyz_m: tuple[FiniteFloat, FiniteFloat, FiniteFloat]
+    spawn_orientation_xyzw: tuple[FiniteFloat, FiniteFloat, FiniteFloat, FiniteFloat]
+    units: Literal["m"] = "m"
+    up_axis: Literal["Z"] = "Z"
+    physics_timestep_seconds: FiniteFloat = Field(gt=0)
+    timeout_seconds: FiniteFloat = Field(gt=0)
+    collision_tolerance_m: FiniteFloat = Field(ge=0)
+    penetration_limit_m: FiniteFloat = Field(ge=0)
+    profile_checksum: Checksum
+
+    @model_validator(mode="after")
+    def _validate_profile(self) -> Self:
+        if min(self.robot_footprint_m) <= 0:
+            raise ValueError("robot footprint dimensions must be positive metres")
+        norm_squared = sum(value * value for value in self.spawn_orientation_xyzw)
+        if abs(norm_squared - 1.0) > 1e-4:
+            raise ValueError("spawn orientation quaternion must be normalized xyzw")
         return self
 
 
@@ -114,10 +145,16 @@ class ValidationRunRecord(ContractModel):
             ValidationRunStatus.RUNNING,
             ValidationRunStatus.COMPLETED,
             ValidationRunStatus.FAILED,
-            ValidationRunStatus.CANCELLED,
         }:
             if not all(value is not None for value in assigned):
                 raise ValueError("worker run requires its assigned worker lease")
+        if (
+            self.origin == ValidationRunOrigin.WORKER
+            and self.status == ValidationRunStatus.CANCELLED
+            and self.started_at
+        ):
+            if not all(value is not None for value in assigned):
+                raise ValueError("cancelled worker run requires its assigned worker lease after start")
         if self.status == ValidationRunStatus.QUEUED and (self.started_at is not None or any(assigned)):
             raise ValueError("queued validation run cannot have a worker assignment or start time")
         if self.status == ValidationRunStatus.RUNNING and (self.started_at is None or self.completed_at is not None):

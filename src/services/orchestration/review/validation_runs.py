@@ -11,6 +11,7 @@ from src.models.contracts.identity import canonical_content_checksum, verify_con
 from src.models.contracts.manifests import RuntimeManifest
 from src.models.contracts.validation import ValidationReport
 from src.models.contracts.validation_run import (
+    IsaacValidationRuntimeProfile,
     ValidationConfig,
     ValidationRunOrigin,
     ValidationRunRecord,
@@ -18,7 +19,7 @@ from src.models.contracts.validation_run import (
     ValidationRunStatus,
 )
 from src.services.orchestration.artifacts import ArtifactResolver
-from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
+from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError, RuntimeTransaction
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 SCHEMA_VERSION = "1.0"
@@ -38,6 +39,10 @@ class ValidationRunRepository:
     @staticmethod
     def config_uri(job_id: str, config_checksum: str) -> str:
         return _uri(job_id, "validation", "configs", _hex(config_checksum), "validation_config.json")
+
+    @staticmethod
+    def profile_uri(job_id: str, profile_checksum: str) -> str:
+        return _uri(job_id, "validation", "profiles", _hex(profile_checksum), "isaac_validation_profile.json")
 
     @staticmethod
     def report_uri(job_id: str, candidate_checksum: str, config_checksum: str, run_id: str) -> str:
@@ -76,49 +81,61 @@ class ValidationRunRepository:
         """Insert a queued attempt or CAS-update it through its one-way lifecycle."""
         self._verify_model_checksum(record, "run_checksum")
         self._verify_references(record)
-        payload = record.model_dump_json()
         with self.database.transaction(write=True) as tx:
-            row = tx.execute(
-                """SELECT run_id,job_id,candidate_checksum,config_checksum,attempt,status,run_checksum,payload
-                   FROM r2s_validation_runs WHERE run_id=?"""
-                + tx.lock_suffix(),
-                (record.run_id,),
-            ).fetchone()
-            if row is None:
-                if expected_run_checksum is not None:
-                    raise RuntimeStateConflictError("Validation run không tồn tại để cập nhật")
-                if record.status != ValidationRunStatus.QUEUED:
-                    raise RuntimeStateConflictError("Validation run phải được tạo ở trạng thái QUEUED")
-                changed = tx.execute(
-                    """INSERT INTO r2s_validation_runs
-                       (run_id,job_id,candidate_checksum,config_checksum,attempt,status,run_checksum,payload)
-                       VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING""",
-                    (
-                        record.run_id,
-                        record.job_id,
-                        record.candidate_checksum,
-                        record.validation_config_checksum,
-                        record.attempt,
-                        record.status.value,
-                        record.run_checksum,
-                        payload,
-                    ),
-                ).rowcount
-                if not changed:
-                    raise RuntimeStateConflictError("Validation run ID hoặc attempt đã tồn tại")
-                return
+            self.save_run_in_transaction(tx, record, expected_run_checksum=expected_run_checksum)
 
-            previous = self._parse_run_row(row)
-            if expected_run_checksum != previous.run_checksum:
-                raise RuntimeStateConflictError("Validation run đã thay đổi; đọc lại trước khi cập nhật")
-            self._validate_transition(previous, record)
+    def save_run_in_transaction(
+        self,
+        tx: RuntimeTransaction,
+        record: ValidationRunRecord,
+        *,
+        expected_run_checksum: str | None = None,
+    ) -> None:
+        """Save a run inside its caller's transaction so queue and run state commit together."""
+        self._verify_model_checksum(record, "run_checksum")
+        self._verify_references(record)
+        payload = record.model_dump_json()
+        row = tx.execute(
+            """SELECT run_id,job_id,candidate_checksum,config_checksum,attempt,status,run_checksum,payload
+               FROM r2s_validation_runs WHERE run_id=?"""
+            + tx.lock_suffix(),
+            (record.run_id,),
+        ).fetchone()
+        if row is None:
+            if expected_run_checksum is not None:
+                raise RuntimeStateConflictError("Validation run không tồn tại để cập nhật")
+            if record.status != ValidationRunStatus.QUEUED:
+                raise RuntimeStateConflictError("Validation run phải được tạo ở trạng thái QUEUED")
             changed = tx.execute(
-                """UPDATE r2s_validation_runs
-                   SET status=?,run_checksum=?,payload=? WHERE run_id=? AND run_checksum=?""",
-                (record.status.value, record.run_checksum, payload, record.run_id, previous.run_checksum),
+                """INSERT INTO r2s_validation_runs
+                   (run_id,job_id,candidate_checksum,config_checksum,attempt,status,run_checksum,payload)
+                   VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING""",
+                (
+                    record.run_id,
+                    record.job_id,
+                    record.candidate_checksum,
+                    record.validation_config_checksum,
+                    record.attempt,
+                    record.status.value,
+                    record.run_checksum,
+                    payload,
+                ),
             ).rowcount
-            if changed != 1:
-                raise RuntimeStateConflictError("Validation run CAS thất bại")
+            if not changed:
+                raise RuntimeStateConflictError("Validation run ID hoặc attempt đã tồn tại")
+            return
+
+        previous = self._parse_run_row(row)
+        if expected_run_checksum != previous.run_checksum:
+            raise RuntimeStateConflictError("Validation run đã thay đổi; đọc lại trước khi cập nhật")
+        self._validate_transition(previous, record)
+        changed = tx.execute(
+            """UPDATE r2s_validation_runs
+               SET status=?,run_checksum=?,payload=? WHERE run_id=? AND run_checksum=?""",
+            (record.status.value, record.run_checksum, payload, record.run_id, previous.run_checksum),
+        ).rowcount
+        if changed != 1:
+            raise RuntimeStateConflictError("Validation run CAS thất bại")
 
     def get_run(self, run_id: str) -> ValidationRunRecord:
         with self.database.transaction() as tx:
@@ -313,6 +330,27 @@ class ValidationRunRepository:
         config = self._load_model(record.validation_config_ref, ValidationConfig, "config_checksum")
         if config.config_checksum != record.validation_config_checksum:
             raise ValidationRunError("Validation config ref/checksum không khớp run")
+        if config.runtime_profile_ref is not None:
+            profile_ref = config.runtime_profile_ref
+            self._require_ref(
+                profile_ref,
+                artifact_type="IsaacValidationRuntimeProfile",
+                uri=profile_ref.artifact_uri,
+            )
+            profile = self._load_model(profile_ref, IsaacValidationRuntimeProfile, "profile_checksum")
+            if profile_ref.artifact_uri != self.profile_uri(record.job_id, profile.profile_checksum):
+                raise ValidationRunError("Isaac runtime profile ref/checksum không khớp job/profile")
+            if profile.runtime_manifest_ref.artifact_type != "RuntimeManifest":
+                raise ValidationRunError("Isaac runtime profile must reference a RuntimeManifest")
+            runtime = self._load_model(profile.runtime_manifest_ref, RuntimeManifest, "runtime_manifest_checksum")
+            simulator = runtime.components.get("isaac_sim")
+            if (
+                simulator is None
+                or simulator.status.value != "VERIFIED"
+                or simulator.version != profile.runtime_identity
+            ):
+                raise ValidationRunError("Isaac runtime profile identity does not match a VERIFIED runtime manifest")
+            self.resolver.require(profile.robot_asset_ref)
         if record.status != ValidationRunStatus.COMPLETED:
             return
         report_ref = record.report_ref

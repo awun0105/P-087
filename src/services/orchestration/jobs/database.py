@@ -281,6 +281,35 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
             "CREATE UNIQUE INDEX r2s_import_operations_idempotency ON r2s_import_operations(requester_id, idempotency_key) WHERE idempotency_key IS NOT NULL",
         ),
     ),
+    (
+        # Durable Isaac validation request, idempotency, claim lease and retry state.
+        16,
+        (
+            """CREATE TABLE r2s_validation_operations (
+                run_id TEXT PRIMARY KEY REFERENCES r2s_validation_runs(run_id),
+                job_id TEXT NOT NULL,
+                requester_id TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_fingerprint TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN (
+                    'QUEUED','WAITING_RESOURCES','CLAIMED','RUNNING','CANCEL_REQUESTED',
+                    'COMPLETED','FAILED','CANCELLED')),
+                worker_id TEXT,
+                lease_id TEXT,
+                fencing_token INTEGER NOT NULL CHECK(fencing_token >= 0),
+                lease_expires_at TEXT,
+                heartbeat_at TEXT,
+                cancel_requested_at TEXT,
+                retryable INTEGER NOT NULL CHECK(retryable IN (0,1)),
+                error_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                operation_checksum TEXT NOT NULL,
+                payload TEXT NOT NULL)""",
+            "CREATE UNIQUE INDEX r2s_validation_operations_idempotency ON r2s_validation_operations(requester_id, idempotency_key)",
+            "CREATE INDEX r2s_validation_operations_by_status ON r2s_validation_operations(status, created_at)",
+        ),
+    ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 

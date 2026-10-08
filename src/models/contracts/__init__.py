@@ -91,6 +91,7 @@ from src.models.contracts.validation import (
     ValidationReport,
 )
 from src.models.contracts.validation_run import (
+    IsaacValidationRuntimeProfile,
     ValidationConfig,
     ValidationRunRecord,
     ValidationRunSelection,
@@ -159,6 +160,7 @@ __all__ = [
     "Transform",
     "ValidationReport",
     "ValidationConfig",
+    "IsaacValidationRuntimeProfile",
     "ValidationRunRecord",
     "ValidationRunSelection",
     "VideoFrameBinding",
