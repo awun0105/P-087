@@ -539,6 +539,42 @@ def test_legacy_recovery_accepts_the_first_revision_of_a_reextraction_but_not_ot
     assert sources == {item.id: "rev-002"}
 
 
+def test_legacy_recovery_follows_restored_from_to_the_revision_that_extracted_the_object(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A restore republishes an older object set; its origin is the restored revision, not the one before it."""
+    from src.services.orchestration.scene.objects import restore_revision
+
+    registry, job = _legacy_job_without_ownership(tmp_path, monkeypatch)
+    root = registry.scene.current(job.job_id).scene
+    (item,) = root.objects
+    other_geometry = item.geometry_ref.model_copy(
+        update={"artifact_uri": f"artifact://jobs/{job.job_id}/scene/second-extraction.glb"}
+    )
+    registry.scene.store.publish(other_geometry, registry.runtime_resolver.require(item.geometry_ref).read_bytes())
+    second_pose = item.transform.model_copy(update={"translation_xyz": (2.0, 2.0, 0.3)})
+    second_set = root.model_copy(
+        update={
+            "objects": [item.model_copy(update={"geometry_ref": other_geometry, "transform": second_pose}, deep=True)]
+        },
+        deep=True,
+    )
+    registry.scene.publish_next(job.job_id, "rev-001", second_set, "objectify")  # rev-002
+    registry.scene.publish_next(job.job_id, "rev-002", root, "use_boxes")  # rev-003: the first set again
+    restore_revision(registry.scene, job.job_id, "rev-003", "rev-002")  # rev-004
+    restored = registry.scene.current(job.job_id).scene
+    assert restored.provenance["restored_from"] == "rev-002"
+    moved = move_object(restored, item.id, second_pose.model_copy(update={"translation_xyz": (7.0, 7.0, 0.3)}))
+    registry.scene.publish_next(job.job_id, "rev-004", moved, "test_move")
+    current = registry.scene.current(job.job_id).scene
+
+    recovered, sources = simulation_package_service._recover_legacy_source_ownership(registry, job.job_id, current)
+
+    (owned,) = recovered.objects
+    assert sources == {item.id: "rev-002"}
+    assert owned.source_collision is not None and owned.source_collision.source_transform == second_pose
+
+
 def test_legacy_owner_from_different_geometry_history_blocks_candidate(tmp_path: Path) -> None:
     registry, job = _scene_job(tmp_path)
     source_scene = registry.scene.current(job.job_id).scene

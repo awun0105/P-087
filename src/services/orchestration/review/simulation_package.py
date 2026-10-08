@@ -223,7 +223,12 @@ def _recover_legacy_source_ownership(
     seen = {scene.scene_revision}
     cursor = scene
     while missing:
-        previous_revision = cursor.provenance.get("edited_from")
+        # A restore republishes the objects of `restored_from` verbatim, so their history continues there
+        # rather than in the revision that happened to be current when the restore was requested.
+        restored_from = cursor.provenance.get("restored_from")
+        previous_revision = restored_from if cursor.provenance.get("operation") == "restore_revision" else None
+        if not isinstance(previous_revision, str):
+            previous_revision = cursor.provenance.get("edited_from")
         if not isinstance(previous_revision, str):
             previous_revision = cursor.provenance.get("previous_revision")
         if not isinstance(previous_revision, str) or previous_revision in seen:
