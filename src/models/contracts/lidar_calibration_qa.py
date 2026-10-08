@@ -46,6 +46,7 @@ class LidarCalibrationFindingCode(StrEnum):
     INSUFFICIENT_PROJECTED_POINTS = "INSUFFICIENT_PROJECTED_POINTS"
     INSUFFICIENT_OVERLAP = "INSUFFICIENT_OVERLAP"
     PROJECTION_SCORING_PENDING = "PROJECTION_SCORING_PENDING"
+    PRODUCTION_QUALIFICATION_PENDING = "PRODUCTION_QUALIFICATION_PENDING"
 
 
 class LidarCalibrationQAFinding(ContractModel):
@@ -132,6 +133,7 @@ class LidarCalibrationQAReport(ContractModel):
     result: LidarCalibrationQAResult
     findings: list[LidarCalibrationQAFinding] = Field(default_factory=list)
     overlay_refs: list[ProductArtifactRef] = Field(default_factory=list)
+    diagnostic_projection_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
     projection_evidence_ref: ProductArtifactRef | None = None
     report_checksum: Checksum
 
@@ -147,6 +149,21 @@ class LidarCalibrationQAReport(ContractModel):
             raise ValueError("intrinsics_checksum must match intrinsics_ref")
         if self.profile.config_checksum != self.config_checksum:
             raise ValueError("config_checksum must match the embedded qualification profile")
+        if self.diagnostic_projection_ref is not None and (
+            self.diagnostic_projection_ref.artifact_type != "LidarCalibrationProjectionEvidence"
+            or self.diagnostic_projection_ref.job_id != self.package_ref.job_id
+            or self.diagnostic_projection_ref.producer_stage != "ST-LIDAR-CALIBRATION-QA"
+            or not self.diagnostic_projection_ref.artifact_uri.startswith(f"artifact://jobs/{self.package_ref.job_id}/")
+        ):
+            raise ValueError("diagnostic projection reference must be a same-job QA artifact")
+        if any(
+            reference.artifact_type != "LidarCalibrationQAOverlay"
+            or reference.job_id != self.package_ref.job_id
+            or reference.producer_stage != "ST-LIDAR-CALIBRATION-QA"
+            or not reference.artifact_uri.startswith(f"artifact://jobs/{self.package_ref.job_id}/")
+            for reference in self.overlay_refs
+        ):
+            raise ValueError("overlay references must be same-job QA artifacts")
         if self.sampled_frame_count != len(self.sampled_rgb_frame_ids):
             raise ValueError("sampled_frame_count must match sampled_rgb_frame_ids")
         if self.matched_frame_count != len(self.matched_lidar_pose_ids):

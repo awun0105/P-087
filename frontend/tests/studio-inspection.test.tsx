@@ -1,16 +1,17 @@
 /** Proof component theo fixture; không thay browser/GPU hoặc real worker acceptance. */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PageTitleProvider, crumbsFor } from "@/features/shell/Breadcrumbs";
 import { canInspect, inspectionStage } from "@/features/studio/inspection";
+import { LidarCalibrationQAStage } from "@/features/studio/inspection/LidarCalibrationQAStage";
 import { StageInspectionPage } from "@/features/studio/inspection/StageInspectionPage";
 import { PipelineTimeline } from "@/features/studio/PipelineTimeline";
-import { STUDIO_STAGES } from "@/features/studio/stages";
+import { LIDAR_CALIBRATION_QA_STAGE, STUDIO_STAGES, stagesFor } from "@/features/studio/stages";
 import { ApiError } from "@/lib/api/client";
 import { getJob, getProject, listJobArtifacts } from "@/lib/api/endpoints";
 import { getJobProgress } from "@/lib/api/studio";
-import type { JobManifest, Project } from "@/lib/contracts/api";
+import type { JobManifest, ProductArtifactRef, Project } from "@/lib/contracts/api";
 import type { JobProgress } from "@/lib/contracts/studio";
 
 vi.mock("@/lib/api/endpoints", async (original) => ({ ...(await original<typeof import("@/lib/api/endpoints")>()), getJob: vi.fn(), getProject: vi.fn(), listJobArtifacts: vi.fn() }));
@@ -34,6 +35,7 @@ beforeEach(() => {
   vi.mocked(getProject).mockResolvedValue({ ok: true, data: project });
   vi.mocked(listJobArtifacts).mockResolvedValue({ ok: true, data: { job_id: "job-a", artifacts: [], excluded_artifact_count: 0 } });
 });
+afterEach(() => vi.unstubAllGlobals());
 function show(stageId: string) { return render(<PageTitleProvider><StageInspectionPage jobId="job-a" stageId={stageId} /></PageTitleProvider>); }
 
 describe("Inspect theo giai đoạn", () => {
@@ -48,12 +50,137 @@ describe("Inspect theo giai đoạn", () => {
     expect(screen.queryByRole("link", { name: "Xem giai đoạn" })).toBeNull();
   });
 
+  it("timeline cho mở report QA dù structural check làm job dừng", () => {
+    const stage = LIDAR_CALIBRATION_QA_STAGE;
+    const stages = [{ stage_id: stage.id, state: "failed" as const, seconds: null, fraction: null }];
+    render(<PipelineTimeline stages={stages} stageList={[stage]} jobId="job-a" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /QA calibration LiDAR/ }));
+    expect(screen.getByRole("link", { name: "Xem giai đoạn" })).toHaveAttribute(
+      "href",
+      "/scenes/job-a/stages/ST-LIDAR-CALIBRATION-QA",
+    );
+  });
+
   it("tám giai đoạn đều có mapping; waiting metric không được Inspect", () => {
     for (const stage of STUDIO_STAGES) expect(inspectionStage(stage.id)).toBe(stage);
     expect(inspectionStage("ST-ISAAC-VALIDATE")).toBeUndefined();
     const waiting: JobProgress = { ...progress, status: "RUNNING", waiting_for: "metric_confirmation", stages: progress.stages.map((stage) => stage.stage_id === "ST-METRIC-CANONICALIZE" ? { ...stage, state: "waiting" } : stage) };
     expect(canInspect(waiting, "ST-METRIC-CANONICALIZE")).toBe(false);
     expect(canInspect(waiting, "ST-VISUAL-RECON")).toBe(true);
+    expect(inspectionStage("ST-LIDAR-CALIBRATION-QA")?.title).toBe("QA calibration LiDAR");
+    const lidarStages = stagesFor(["ST-LIDAR-INGEST", "ST-LIDAR-CALIBRATION-QA"]);
+    expect(lidarStages.map((stage) => stage.id).slice(3, 5)).toEqual([
+      "ST-LIDAR-INGEST", "ST-LIDAR-CALIBRATION-QA",
+    ]);
+  });
+
+  it("báo trạng thái chẩn đoán, hiển thị overlay nhưng không cấp collision eligibility", async () => {
+    const reference = (artifact_type: string, name: string): ProductArtifactRef => ({
+      artifact_type, schema_version: "1.0", artifact_uri: `artifact://jobs/job-a/lidar-calibration-qa/${name}`,
+      artifact_checksum: sha, data_class: "derived", producer_stage: "ST-LIDAR-CALIBRATION-QA", job_id: "job-a",
+    });
+    const report = {
+      schema_version: "1.0", package_ref: reference("LidarPackageRecord", "package.json"), result: "INCONCLUSIVE",
+      observability: "INSUFFICIENT", sampled_frame_count: 3, matched_frame_count: 2, observable_frame_count: 0,
+      projected_point_count: 0, overlap_point_count: 0, overlap_fraction: null, maximum_timestamp_residual_sec: null,
+      findings: [{ code: "INSUFFICIENT_MATCHED_FRAMES", severity: "inconclusive", detail: "Thiếu pose ghép được.", remediation: "Kiểm tra timing." }],
+      overlay_refs: [reference("LidarCalibrationQAOverlay", "overlay.svg")],
+      diagnostic_projection_ref: reference("LidarCalibrationProjectionEvidence", "projection-evidence.json"),
+      report_checksum: sha,
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => report }));
+    render(<LidarCalibrationQAStage jobId="job-a" artifacts={[reference("LidarCalibrationQAReport", "report.json")]} />);
+
+    expect(await screen.findByText("Tóm tắt phép chiếu")).toBeInTheDocument();
+    expect(screen.getByText("Collision eligibility: không")).toBeInTheDocument();
+    expect(screen.getByAltText("Frame RGB với các điểm chiếu LiDAR màu cyan")).toBeInTheDocument();
+    expect(screen.getByText("Thiếu pose ghép được.")).toBeInTheDocument();
+  });
+
+  it("cho inspect report structural FAIL để người dùng thấy cách sửa trước khi chạy lại", async () => {
+    const stageId = LIDAR_CALIBRATION_QA_STAGE.id;
+    const stageError = {
+      stage_id: stageId,
+      error_code: "LIDAR_CALIBRATION_QA_FAILED",
+      human_message: "LiDAR calibration QA found structural input inconsistencies; correct the source and create a new job.",
+      retryable: false,
+      details: { action: "Correct coordinate units and create a new job" },
+    };
+    const qaProgress = {
+      ...progress,
+      status: "FAILED" as const,
+      current_stage: stageId,
+      stages: [
+        ...progress.stages,
+        {
+          ...progress.stages[0],
+          stage_id: stageId,
+          state: "failed" as const,
+          completed_at: "2026-10-01T00:05:00Z",
+          error: stageError,
+        },
+      ],
+    };
+    const reference = (artifact_type: string, name: string): ProductArtifactRef => ({
+      artifact_type, schema_version: "1.0", artifact_uri: `artifact://jobs/job-a/lidar-calibration-qa/${name}`,
+      artifact_checksum: sha, data_class: "derived", producer_stage: stageId, job_id: "job-a",
+    });
+    const reportRef = reference("LidarCalibrationQAReport", "report.json");
+    const report = {
+      schema_version: "1.0", package_ref: reference("LidarPackageRecord", "package.json"), result: "FAIL",
+      observability: "UNAVAILABLE", sampled_frame_count: 0, matched_frame_count: 0, observable_frame_count: 0,
+      projected_point_count: 0, overlap_point_count: 0, overlap_fraction: null, maximum_timestamp_residual_sec: null,
+      findings: [{ code: "COORDINATE_UNIT_UNSUPPORTED", severity: "fail", detail: "Đơn vị tọa độ là mm.", remediation: "Khai báo lại đơn vị mét rồi tạo job mới." }],
+      overlay_refs: [], diagnostic_projection_ref: null, report_checksum: sha,
+    };
+    vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: qaProgress });
+    vi.mocked(getJob).mockResolvedValue({
+      ok: true,
+      data: {
+        ...job,
+        status: "FAILED",
+        current_stage: stageId,
+        stage_artifacts: [{
+          stage_id: stageId, status: "FAILED", artifact_type: reportRef.artifact_type,
+          artifact_uri: reportRef.artifact_uri, artifact_checksum: reportRef.artifact_checksum,
+          data_class: "derived", started_at: "2026-10-01T00:04:00Z", completed_at: "2026-10-01T00:05:00Z",
+          error: stageError,
+        }],
+      },
+    });
+    vi.mocked(listJobArtifacts).mockResolvedValue({
+      ok: true,
+      data: { job_id: "job-a", artifacts: [reportRef], excluded_artifact_count: 0 },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => report }));
+    show(stageId);
+
+    expect(await screen.findByText("Tóm tắt phép chiếu")).toBeInTheDocument();
+    expect(screen.getByText("QA thất bại")).toBeInTheDocument();
+    expect(screen.getByText("Có lỗi cấu trúc")).toBeInTheDocument();
+    expect(screen.getByText("Đơn vị tọa độ là mm.")).toBeInTheDocument();
+    expect(screen.getByText("Collision eligibility: không")).toBeInTheDocument();
+  });
+
+  it("từ chối report QA tham chiếu package thuộc job khác", async () => {
+    const reference = (artifact_type: string, jobId: string): ProductArtifactRef => ({
+      artifact_type, schema_version: "1.0", artifact_uri: `artifact://jobs/${jobId}/lidar-calibration-qa/report.json`,
+      artifact_checksum: sha, data_class: "derived", producer_stage: "ST-LIDAR-CALIBRATION-QA", job_id: jobId,
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        schema_version: "1.0", package_ref: reference("LidarPackageRecord", "job-other"), result: "INCONCLUSIVE",
+        observability: "UNAVAILABLE", sampled_frame_count: 0, matched_frame_count: 0, observable_frame_count: 0,
+        projected_point_count: 0, overlap_point_count: 0, overlap_fraction: null, maximum_timestamp_residual_sec: null,
+        findings: [], overlay_refs: [], diagnostic_projection_ref: null, report_checksum: sha,
+      }),
+    }));
+    render(<LidarCalibrationQAStage jobId="job-a" artifacts={[reference("LidarCalibrationQAReport", "job-a")]} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/không đúng contract hoặc thuộc job khác/);
+    expect(screen.queryByText("Collision eligibility: không")).toBeNull();
   });
 
   it("link trực tiếp tới bước chưa xong không tải output hoặc mount viewer", async () => {

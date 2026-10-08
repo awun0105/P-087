@@ -64,7 +64,8 @@ def evaluate_lidar_calibration_qa(
 ) -> LidarCalibrationQAReport:
     """Reject malformed source facts and report observability without claiming projection accuracy.
 
-    A report cannot PASS in this sprint. Projection metrics and qualification belong to AUD-13.S2.
+    This structural consumer never grants production qualification; the projection scorer
+    and worker bind diagnostic evidence separately, and field qualification remains external.
     """
     failures: list[LidarCalibrationQAFinding] = []
     uncertainties: list[LidarCalibrationQAFinding] = []
@@ -197,13 +198,16 @@ def evaluate_lidar_calibration_qa(
             "Camera and LiDAR clock relation is absent or unknown.",
             "Declare a shared clock or provide a measured clock offset with its evidence source.",
         )
-    if offset is None:
+    # A declared shared clock is explicit evidence for a zero offset. Missing offset
+    # under any other clock relation remains unknown and is never silently assumed.
+    effective_offset = 0.0 if relation == ClockRelation.SAME_CLOCK and offset is None else offset
+    if effective_offset is None:
         inconclusive(
             LidarCalibrationFindingCode.CLOCK_OFFSET_MISSING,
             "No explicit camera-to-LiDAR time offset is available.",
             "Provide a measured offset; do not treat an absent offset as zero.",
         )
-    elif relation == ClockRelation.SAME_CLOCK and not math.isclose(offset, 0.0, abs_tol=1e-9):
+    elif relation == ClockRelation.SAME_CLOCK and not math.isclose(effective_offset, 0.0, abs_tol=1e-9):
         fail(
             LidarCalibrationFindingCode.CLOCK_OFFSET_CONFLICT,
             "A non-zero offset conflicts with the declared same-clock relation.",
@@ -236,9 +240,9 @@ def evaluate_lidar_calibration_qa(
         )
 
     timestamp_residuals: list[float] = []
-    if offset is not None and inputs.timestamp_unit == "seconds":
+    if effective_offset is not None and inputs.timestamp_unit == "seconds":
         timestamp_residuals = [
-            abs(float(row.rgb_timestamp_sec) - float(row.lidar_timestamp_sec) - offset)
+            abs(float(row.rgb_timestamp_sec) - float(row.lidar_timestamp_sec) - effective_offset)
             for row in matched
             if row.lidar_timestamp_sec is not None
         ]
@@ -294,7 +298,7 @@ def evaluate_lidar_calibration_qa(
             inputs.coordinate_unit is not None,
             inputs.timestamp_unit == "seconds",
             inputs.clock_relation is not None and relation != ClockRelation.UNKNOWN,
-            offset is not None,
+            effective_offset is not None,
         )
     )
     enough_observation = (
@@ -313,7 +317,7 @@ def evaluate_lidar_calibration_qa(
         inconclusive(
             LidarCalibrationFindingCode.PROJECTION_SCORING_PENDING,
             "Structural checks and availability checks do not measure image-to-cloud calibration consistency.",
-            "Run AUD-13.S2 projection scoring before treating this package as sensor-QA qualified.",
+            "Run diagnostic projection scoring; qualify its thresholds on held-out real data before collision use.",
         )
 
     findings = list({finding.code: finding for finding in [*failures, *uncertainties]}.values())
@@ -335,7 +339,7 @@ def evaluate_lidar_calibration_qa(
         coordinate_unit=coordinate_unit.value if coordinate_unit else None,
         timestamp_unit=inputs.timestamp_unit,
         clock_relation=relation.value if relation else None,
-        clock_offset_seconds=offset,
+        clock_offset_seconds=effective_offset,
         sampled_rgb_frame_ids=rgb_ids,
         matched_lidar_pose_ids=[int(pose_id) for pose_id in lidar_pose_ids],
         sampled_frame_count=len(observations),

@@ -10,13 +10,14 @@ import { useEffect, useState } from "react";
 import { Badge, Button, Card, Notice } from "@/components/studio/primitives";
 import { usePageTitle } from "@/features/shell/Breadcrumbs";
 import { canInspect, inspectHref, inspectionStage, progressHref } from "@/features/studio/inspection";
-import { STUDIO_STAGES } from "@/features/studio/stages";
+import { LIDAR_CALIBRATION_QA_STAGE, LIDAR_STAGE, STUDIO_STAGES, stagesFor } from "@/features/studio/stages";
 import { getJob, getProject, jobArtifactContentUrl, listJobArtifacts } from "@/lib/api/endpoints";
 import { StageMetrics } from "@/features/studio/evaluation/EvaluationCard";
 import { getJobProgress } from "@/lib/api/studio";
 import type { JobManifest, ProductArtifactRef, Project, StageId } from "@/lib/contracts/api";
 import type { JobProgress } from "@/lib/contracts/studio";
 import { formatBytes } from "@/lib/format";
+import { LidarCalibrationQAStage } from "@/features/studio/inspection/LidarCalibrationQAStage";
 
 const SceneWorkspace = dynamic(() => import("@/features/studio/inspection/StageSceneWorkspace").then((m) => m.StageSceneWorkspace), { ssr: false, loading: () => <Loading /> });
 const StageViewer = dynamic(() => import("@/features/studio/StageViewer").then((m) => m.StageViewer), { ssr: false, loading: () => <Loading /> });
@@ -75,19 +76,23 @@ export function StageInspectionPage({ jobId, stageId }: { jobId: string; stageId
   }
 
   if (!meta) return <Notice tone="rust" className="m-6">Giai đoạn không thuộc pipeline Studio.</Notice>;
-  const index = STUDIO_STAGES.findIndex((stage) => stage.id === meta.id);
+  const pageStages = snapshot ? stagesFor(snapshot.progress.stages.map((stage) => stage.stage_id)) : STUDIO_STAGES;
+  const index = Math.max(0, pageStages.findIndex((stage) => stage.id === meta.id));
   const ready = snapshot && canInspect(snapshot.progress, meta.id);
+  const failedQA = meta.id === LIDAR_CALIBRATION_QA_STAGE.id && (snapshot?.progress.stages.some(
+    (stage) => stage.stage_id === LIDAR_CALIBRATION_QA_STAGE.id && stage.state === "failed",
+  ) ?? false);
   return (
     <main className="flex h-[calc(100dvh-3rem)] min-h-0 flex-col">
       <header className="flex flex-wrap items-center gap-3 border-b border-line bg-paper-raised px-4 py-3">
         <Link href={progressHref(jobId)} className="inline-flex items-center gap-1 text-sm text-ember-strong hover:underline"><ArrowLeft className="size-4" aria-hidden /> Về Tiến trình</Link>
         <div className="min-w-0 flex-1"><h1 className="truncate font-bold">{index + 1}. {meta.title}</h1><p className="truncate text-xs text-ink-muted">{snapshot?.project?.name ?? jobId}</p></div>
-        {ready && <Badge tone="sage">Đã xử lý xong</Badge>}
+        {ready && (failedQA ? <Badge tone="rust">QA thất bại</Badge> : <Badge tone="sage">Đã xử lý xong</Badge>)}
         {snapshot && <Badge tone="neutral">Lần chạy {snapshot.progress.attempt}</Badge>}
         {ready && <Button variant="ghost" size="sm" aria-expanded={details} aria-controls="stage-output-info" onClick={() => setDetails((value) => !value)}><Info aria-hidden /> Thông tin đầu ra</Button>}
       </header>
       <nav aria-label="Giai đoạn của scene" className="flex shrink-0 gap-1 overflow-x-auto border-b border-line bg-paper px-4 py-2">
-        {STUDIO_STAGES.map((stage, n) => {
+        {pageStages.map((stage, n) => {
           const label = `${n + 1}. ${stage.short}`;
           return snapshot && canInspect(snapshot.progress, stage.id)
             ? <Link key={stage.id} href={inspectHref(jobId, stage.id)} aria-current={stage.id === meta.id ? "page" : undefined} className={`shrink-0 rounded-lg px-3 py-2 text-sm ${stage.id === meta.id ? "bg-ember-soft font-medium text-ember-strong" : "text-ink-muted hover:bg-paper-sunken"}`}>{label}</Link>
@@ -101,9 +106,13 @@ export function StageInspectionPage({ jobId, stageId }: { jobId: string; stageId
               {snapshot.warnings.length > 0 && <Notice tone="rust" className="m-3">Chưa đọc đủ dữ liệu: {snapshot.warnings.join(" · ")} <Button size="sm" variant="secondary" onClick={retry}>Thử lại</Button></Notice>}
               <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
                 <section aria-label={`Nội dung ${meta.title}`} className="relative min-h-0 min-w-0 flex-1 overflow-auto">
-                  {index < 2 ? <InputStage stageId={meta.id} snapshot={snapshot} />
-                    : index < 4 ? <StageViewer jobId={jobId} stageId={meta.id} />
-                      : <SceneWorkspace jobId={jobId} stageId={meta.id} title={snapshot.project?.name ?? "Scene"} />}
+                  {meta.id === LIDAR_CALIBRATION_QA_STAGE.id
+                    ? <LidarCalibrationQAStage jobId={jobId} artifacts={snapshot.artifacts} />
+                    : meta.id === "ST-INPUT-VALIDATE" || meta.id === "ST-PRIVACY-GATE"
+                      ? <InputStage stageId={meta.id} snapshot={snapshot} />
+                      : meta.id === LIDAR_STAGE.id || meta.id === "ST-FRAME-EXTRACT" || meta.id === "ST-CAMERA-POSE"
+                        ? <StageViewer jobId={jobId} stageId={meta.id} />
+                        : <SceneWorkspace jobId={jobId} stageId={meta.id} title={snapshot.project?.name ?? "Scene"} />}
                 </section>
                 {details && <aside id="stage-output-info" aria-label="Thông tin đầu ra" className="max-h-[40vh] shrink-0 overflow-y-auto border-t border-line bg-paper-raised p-4 lg:max-h-none lg:w-80 lg:border-t-0 lg:border-l">
                   <StageMetrics jobId={jobId} groupId={meta.id} />

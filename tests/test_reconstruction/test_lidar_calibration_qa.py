@@ -217,12 +217,21 @@ def test_corrupt_transform_is_reported_as_structural_failure(translation, quater
 
 def test_missing_camera_distortion_and_clock_offset_are_inconclusive() -> None:
     camera = CameraCalibration(width=640, height=480, fx=500, fy=500, cx=320, cy=240, distortion_status="missing")
-    report = _report(camera=camera, offset=None)
+    report = _report(camera=camera, offset=None, clock_relation=ClockRelation.KNOWN_OFFSET)
     findings = {finding.code for finding in report.findings}
 
     assert report.result == LidarCalibrationQAResult.INCONCLUSIVE
     assert LidarCalibrationFindingCode.DISTORTION_UNAVAILABLE in findings
     assert LidarCalibrationFindingCode.CLOCK_OFFSET_MISSING in findings
+    assert not is_sensor_package_collision_eligible(report)
+
+
+def test_explicit_same_clock_relation_means_zero_without_offset_payload() -> None:
+    report = _report(offset=None, clock_relation=ClockRelation.SAME_CLOCK)
+    findings = {finding.code for finding in report.findings}
+
+    assert report.clock_offset_seconds == 0.0
+    assert LidarCalibrationFindingCode.CLOCK_OFFSET_MISSING not in findings
     assert not is_sensor_package_collision_eligible(report)
 
 

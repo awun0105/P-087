@@ -126,3 +126,19 @@ optimization or PASS path. Synthetic known-rig tests distinguish the specified
 rotation and translation perturbations, while textureless, wall-like and sparse
 observations remain inconclusive. Real held-out threshold qualification, persisted
 rendered overlays, API preflight and collision-source gating are still pending.
+
+## AUD-13.S3 implementation note — 2026-10-08
+
+The proposal remains **Proposed** and no collision-source selection is enabled.
+The worker now persists a job-bound QA report before COLMAP. A structural `FAIL`
+ends the job at the QA stage with a non-retryable remediation error and stops
+before COLMAP/Brush. `INCONCLUSIVE` continues the RGB reconstruction path, but
+never enables the LiDAR package as a collision source. The report and verified
+nested diagnostic artifacts stay inspectable after failure; report/stage result
+mismatches, cross-job refs, corrupt checksums, `PASS`, and production evidence are
+rejected. Studio exposes the failed QA stage from the timeline and shows the
+finding/remediation with collision eligibility set to `no`.
+
+The exercised failure and browser fixture are synthetic/local. No held-out real
+calibration sequence or production threshold profile is qualified, and S3 does not
+establish universal 1°/5 cm detection accuracy or authorize collision-source use.

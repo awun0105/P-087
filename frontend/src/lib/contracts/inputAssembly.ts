@@ -38,6 +38,7 @@ export type CloudObservationState = "registered_map" | "single_static_cloud" | "
 export type DistanceUnit = "m" | "cm" | "mm";
 export type TrajectoryConvention = "world_from_sensor" | "world_from_camera" | "unknown";
 export type ClockRelation = "same_clock" | "known_offset" | "unknown";
+export type TimestampUnit = "seconds" | "milliseconds" | "microseconds" | "nanoseconds";
 export type TrajectoryOrigin = "not_required" | "supplied" | "estimated";
 export type RuntimeCapabilityKey = RecipeGroup | "gaussian_ply_view" | "gaussian_sog_view";
 export type RuntimeQualificationStatus = "qualified" | "wired_unqualified" | "unavailable" | "incompatible";
@@ -112,6 +113,7 @@ export interface InputAssemblyDeclarations {
   trajectory_convention: EvidenceValue<TrajectoryConvention> | null;
   clock_relation: EvidenceValue<ClockRelation> | null;
   clock_offset_seconds: EvidenceValue<number> | null;
+  timestamp_unit?: EvidenceValue<TimestampUnit> | null;
 }
 
 export interface InputBinding {

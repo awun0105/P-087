@@ -48,17 +48,21 @@ STUDIO_PIPELINE: tuple[StageId, ...] = (
 
 
 def studio_pipeline(job: JobManifest) -> tuple[StageId, ...]:
-    """Các stage của một job Studio. Job có gói LiDAR (ADR 0009) có thêm `ST-LIDAR-INGEST` sau bước tách frame.
+    """Job LiDAR thêm ingest và, với job mới, QA calibration sau bước tách frame.
 
-    Chỉ JobManifest biết job có LiDAR hay không, và chỉ sau khi bước nhận LiDAR đã ghi kết quả (đạt hoặc lỗi); trước
-    đó timeline giống job chỉ có video.
+    Job cũ có artifact ingest nhưng chưa có report QA vẫn giữ nguyên timeline; job đang hoặc đã chạy QA hiển thị cả hai.
     """
-    if job.current_stage != StageId.LIDAR_INGEST and not any(
-        stage.stage_id == StageId.LIDAR_INGEST for stage in job.stage_artifacts
-    ):
+    has_ingest = any(stage.stage_id == StageId.LIDAR_INGEST for stage in job.stage_artifacts)
+    has_qa = job.current_stage == StageId.LIDAR_CALIBRATION_QA or any(
+        stage.stage_id == StageId.LIDAR_CALIBRATION_QA for stage in job.stage_artifacts
+    )
+    if job.current_stage == StageId.LIDAR_INGEST:
+        has_ingest = True
+    if not has_ingest and not has_qa:
         return STUDIO_PIPELINE
     index = STUDIO_PIPELINE.index(StageId.FRAME_EXTRACT) + 1
-    return (*STUDIO_PIPELINE[:index], StageId.LIDAR_INGEST, *STUDIO_PIPELINE[index:])
+    lidar_stages = (StageId.LIDAR_INGEST, StageId.LIDAR_CALIBRATION_QA) if has_qa else (StageId.LIDAR_INGEST,)
+    return (*STUDIO_PIPELINE[:index], *lidar_stages, *STUDIO_PIPELINE[index:])
 
 
 StageState = Literal["pending", "running", "waiting", "succeeded", "failed", "cancelled"]

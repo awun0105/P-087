@@ -4,6 +4,7 @@ API dùng database + immutable manifest. Constructor không DB được giữ nh
 unit/fixture cũ, không phải đường persistence của deployed API.
 """
 
+import logging
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -57,6 +58,7 @@ from src.services.orchestration.artifacts import (
     ArtifactNotFoundError,
     ArtifactRemote,
     ArtifactResolver,
+    ArtifactStoreError,
     FilesystemArtifactStore,
     sha256_bytes,
     sha256_file,
@@ -102,6 +104,7 @@ DEFAULT_FIXTURE_ROOT = REPO_ROOT / "fixtures"
 #: Nơi ghi revision JobManifest lúc chạy; khớp mặc định của `Settings.artifact_root`
 #: và đã nằm trong `.gitignore`. Fixture là read-only, không ghi vào đó.
 DEFAULT_RUNTIME_ROOT = REPO_ROOT / "data" / "artifacts"
+logger = logging.getLogger(__name__)
 
 #: Chỉ hai data class được phép qua ranh giới product.
 PRODUCT_VISIBLE_DATA_CLASSES: frozenset[ArtifactDataClass] = frozenset(
@@ -1048,7 +1051,7 @@ class ProjectRegistry:
     def record_lidar_ingest(self, expected: JobManifest, stage: StageArtifact) -> JobManifest:
         """Worker-only reducer cho `ST-LIDAR-INGEST` (ADR 0009); CAS trên revision RUNNING đã claim.
 
-        Thành công: job đi tiếp sang dựng pose camera. Gói LiDAR lỗi: attempt kết thúc FAILED với lý do của REC —
+        Thành công: job đi tiếp sang QA calibration LiDAR. Gói LiDAR lỗi: attempt kết thúc FAILED với lý do của REC —
         không lặng lẽ bỏ LiDAR để chạy như job chỉ có video (PRD §5.2).
         """
         if self.persistence is None:
@@ -1065,7 +1068,7 @@ class ProjectRegistry:
                 update={
                     "stage_artifacts": [*expected.stage_artifacts, stage],
                     "status": JobStatus.FAILED if failed else JobStatus.RUNNING,
-                    "current_stage": StageId.LIDAR_INGEST if failed else StageId.CAMERA_POSE,
+                    "current_stage": StageId.LIDAR_INGEST if failed else StageId.LIDAR_CALIBRATION_QA,
                     "completed_at": datetime.now(UTC) if failed else None,
                 }
             ),
@@ -1078,6 +1081,79 @@ class ProjectRegistry:
             status=updated.status,
             current_stage=updated.current_stage,
             recorded_at=datetime.now(UTC),
+            error=stage.error,
+            job_manifest_uri=reference.artifact_uri,
+            job_manifest_checksum=reference.artifact_checksum,
+        )
+        self.persistence.save_job(updated, reference, event, expected=expected)
+        return updated
+
+    def record_lidar_calibration_qa(self, expected: JobManifest, stage: StageArtifact) -> JobManifest:
+        """Persist the report; stop on structural FAIL and continue only on INCONCLUSIVE."""
+        from src.models.contracts.lidar_calibration_qa import LidarCalibrationQAReport, LidarCalibrationQAResult
+
+        if self.persistence is None:
+            raise RuntimeStateConflictError("Real worker cần durable registry")
+        if (
+            expected.status != JobStatus.RUNNING
+            or expected.current_stage != StageId.LIDAR_CALIBRATION_QA
+            or stage.stage_id != StageId.LIDAR_CALIBRATION_QA
+            or stage.artifact_type != "LidarCalibrationQAReport"
+            or stage.artifact_uri is None
+            or stage.artifact_checksum is None
+            or stage.data_class not in PRODUCT_VISIBLE_DATA_CLASSES
+        ):
+            raise ValueError("LiDAR calibration QA receipt differs from the running job/stage")
+        if not stage.artifact_uri.startswith(f"artifact://jobs/{expected.job_id}/"):
+            raise ValueError("LiDAR calibration QA artifact must belong to the job namespace")
+        report_ref = self._to_product_ref(expected.job_id, stage)
+        report = LidarCalibrationQAReport.model_validate_json(self.runtime_resolver.require(report_ref).read_bytes())
+        lidar_stage = next(
+            (
+                item
+                for item in reversed(expected.stage_artifacts)
+                if item.stage_id == StageId.LIDAR_INGEST and item.status == StageStatus.SUCCEEDED
+            ),
+            None,
+        )
+        if (
+            lidar_stage is None
+            or report.package_ref.artifact_uri != lidar_stage.artifact_uri
+            or report.package_ref.artifact_checksum != lidar_stage.artifact_checksum
+            or report.package_ref.job_id != expected.job_id
+            or report.result == LidarCalibrationQAResult.PASS
+            or report.projection_evidence_ref is not None
+        ):
+            raise ValueError("LiDAR QA report is stale, cross-job, or claims unsupported production qualification")
+        qa_failed = report.result == LidarCalibrationQAResult.FAIL
+        expected_stage_status = StageStatus.FAILED if qa_failed else StageStatus.SUCCEEDED
+        if stage.status != expected_stage_status:
+            raise ValueError("LiDAR QA report result must agree with its stage status")
+        if qa_failed and (
+            stage.error is None or stage.error.error_code != "LIDAR_CALIBRATION_QA_FAILED" or stage.error.retryable
+        ):
+            raise ValueError("Structural LiDAR QA failure requires a non-retryable remediation error")
+        if not qa_failed and stage.error is not None:
+            raise ValueError("Inconclusive LiDAR QA cannot fail the stage")
+        now = stage.completed_at or datetime.now(UTC)
+        updated = with_canonical_checksum(
+            expected.model_copy(
+                update={
+                    "stage_artifacts": [*expected.stage_artifacts, stage],
+                    "status": JobStatus.FAILED if qa_failed else JobStatus.RUNNING,
+                    "current_stage": StageId.LIDAR_CALIBRATION_QA if qa_failed else StageId.CAMERA_POSE,
+                    "completed_at": now if qa_failed else None,
+                }
+            ),
+            "job_manifest_checksum",
+        )
+        reference = self.lifecycle.store.publish_manifest(updated)
+        history = self.persistence.list_attempts(expected.job_id)
+        event = JobAttemptRecord(
+            attempt=history[-1].attempt,
+            status=updated.status,
+            current_stage=updated.current_stage,
+            recorded_at=now,
             error=stage.error,
             job_manifest_uri=reference.artifact_uri,
             job_manifest_checksum=reference.artifact_checksum,
@@ -1216,7 +1292,71 @@ class ProjectRegistry:
             # Lớp xem từng bước (ADR 0005): ảnh frame và ref trong ReconstructionBundle.
             from src.services.orchestration.jobs.stage_views import view_references
 
-            references.extend(view_references(self, self.get_job(job_id)))
+            manifest = self.get_job(job_id)
+            references.extend(view_references(self, manifest))
+            from src.models.contracts.lidar_calibration_qa import LidarCalibrationQAReport, LidarCalibrationQAResult
+
+            lidar_package = next(
+                (
+                    stage
+                    for stage in reversed(manifest.stage_artifacts)
+                    if stage.stage_id == StageId.LIDAR_INGEST and stage.status == StageStatus.SUCCEEDED
+                ),
+                None,
+            )
+            if lidar_package is not None:
+                for stage in manifest.stage_artifacts:
+                    if (
+                        stage.stage_id != StageId.LIDAR_CALIBRATION_QA
+                        or stage.status not in {StageStatus.SUCCEEDED, StageStatus.FAILED}
+                        or stage.artifact_type != "LidarCalibrationQAReport"
+                        or stage.artifact_uri is None
+                        or stage.artifact_checksum is None
+                    ):
+                        continue
+                    try:
+                        report_ref = self._to_product_ref(job_id, stage)
+                        report = LidarCalibrationQAReport.model_validate_json(
+                            self.runtime_resolver.require(report_ref).read_bytes()
+                        )
+                        if (
+                            report.package_ref.job_id != job_id
+                            or report.package_ref.artifact_uri != lidar_package.artifact_uri
+                            or report.package_ref.artifact_checksum != lidar_package.artifact_checksum
+                            or report.result == LidarCalibrationQAResult.PASS
+                            or report.projection_evidence_ref is not None
+                            or (
+                                (report.result == LidarCalibrationQAResult.FAIL) != (stage.status == StageStatus.FAILED)
+                            )
+                            or (
+                                report.result == LidarCalibrationQAResult.FAIL
+                                and (
+                                    stage.error is None
+                                    or stage.error.error_code != "LIDAR_CALIBRATION_QA_FAILED"
+                                    or stage.error.retryable
+                                )
+                            )
+                            or (report.result != LidarCalibrationQAResult.FAIL and stage.error is not None)
+                        ):
+                            raise ValueError("LiDAR QA report is stale or claims unsupported qualification")
+                        nested_references = [report.diagnostic_projection_ref, *report.overlay_refs]
+                        verified_nested: list[ProductArtifactRef] = []
+                        for reference in nested_references:
+                            if (
+                                reference is None
+                                or reference.job_id != job_id
+                                or reference.data_class not in PRODUCT_VISIBLE_DATA_CLASSES
+                            ):
+                                continue
+                            self.runtime_resolver.require(reference)
+                            verified_nested.append(reference)
+                        references.extend(verified_nested)
+                    except (ArtifactStoreError, ValueError) as error:
+                        logger.warning(
+                            "Skipping nested LiDAR QA artifacts for job %s because its report is invalid: %s",
+                            job_id,
+                            error,
+                        )
         if job_id == self._fixture_job_id:
             visual = self.scene.visual_binding(job_id)
             if visual.reference is not None:

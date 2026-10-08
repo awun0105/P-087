@@ -58,7 +58,7 @@ from src.models.contracts.manifests import (
 )
 from src.models.contracts.preview import ReconstructionPreview
 from src.models.contracts.retryability import classify_retryability
-from src.services.orchestration.artifacts import ArtifactResolver, FilesystemArtifactStore
+from src.services.orchestration.artifacts import ArtifactResolver, ArtifactStoreError, FilesystemArtifactStore
 from src.services.orchestration.benchmark import build_benchmark, publish_benchmark
 from src.services.orchestration.inputs import InputAssemblyService
 from src.services.orchestration.jobs.admission import ResourceAdmission, job_drivers, touch_job_reservation
@@ -771,11 +771,11 @@ def _execute_prepare(attempt: _Attempt, profile: ResolvedProcessing) -> JobManif
     return job
 
 
-def _execute_lidar_ingest(attempt: _Attempt) -> JobManifest:
+def _execute_lidar_ingest(attempt: _Attempt, rgb_frame_set_ref: ProductArtifactRef) -> JobManifest:
     """`ST-LIDAR-INGEST` cho job có gói LiDAR (ADR 0009): giải gói, ghép scan nếu cần, publish đám mây + bản ghi gói.
 
     Job chỉ có video trả nguyên job. Bằng chứng nhận diện lấy từ InputManifest (đã lưu lúc tạo scene), không nhận
-    diện lại từ tên file. Chạy ngay trong worker (CPU + RAM, không dùng GPU) và được đo như một công cụ riêng.
+    diện lại từ tên file. Sau ingest, QA calibration chiếu các scan gốc theo pose lên RGB trước khi chạy COLMAP.
     """
     from src.services.reconstruction import LidarEvidence, LidarPackageError, LidarPackageIngest
 
@@ -827,7 +827,62 @@ def _execute_lidar_ingest(attempt: _Attempt) -> JobManifest:
         started_at=started,
         completed_at=datetime.now(UTC),
     )
-    return attempt.registry.record_lidar_ingest(attempt.job, stage)
+    attempt.job = attempt.registry.record_lidar_ingest(attempt.job, stage)
+    attempt.job = attempt.registry.record_stage_progress(attempt.job, StageId.LIDAR_CALIBRATION_QA)
+    qa_started = datetime.now(UTC)
+    project = attempt.registry.get_project(attempt.job.project_id)
+    declarations = None
+    if project.input_assembly_ref is not None:
+        try:
+            assembly = InputAssemblySnapshot.model_validate_json(
+                resolver.require(project.input_assembly_ref).read_bytes()
+            )
+            declarations = assembly.declarations
+        except (ArtifactStoreError, ValueError) as error:
+            logger.warning(
+                "LiDAR QA declarations unavailable for job %s; continuing as inconclusive cause=%s",
+                attempt.job.job_id,
+                type(error).__name__,
+            )
+    from src.models.contracts.lidar_calibration_qa import LidarCalibrationQAResult
+    from src.services.reconstruction.lidar.calibration_qa_worker import run_lidar_calibration_qa
+
+    with _sampled(attempt, "lidar_calibration_qa"):
+        qa = run_lidar_calibration_qa(
+            resolver=resolver,
+            writer=FilesystemArtifactStore(resolver),
+            job_id=attempt.job.job_id,
+            package_ref=result.reference,
+            package=result.record,
+            input_manifest=manifest,
+            rgb_frame_set_ref=rgb_frame_set_ref,
+            declarations=declarations,
+        )
+    resolver.sync_up(attempt.job.job_id)
+    qa_failed = qa.report.result == LidarCalibrationQAResult.FAIL
+    qa_error = (
+        ExecutionError(
+            error_code="LIDAR_CALIBRATION_QA_FAILED",
+            stage_id=StageId.LIDAR_CALIBRATION_QA,
+            human_message="LiDAR calibration QA found structural input inconsistencies; correct the source and create a new job.",
+            retryable=False,
+            details={"action": "Correct calibration, units, timestamps, or source bindings and create a new job"},
+        )
+        if qa_failed
+        else None
+    )
+    qa_stage = StageArtifact(
+        stage_id=StageId.LIDAR_CALIBRATION_QA,
+        status=StageStatus.FAILED if qa_failed else StageStatus.SUCCEEDED,
+        artifact_type=qa.report_ref.artifact_type,
+        artifact_uri=qa.report_ref.artifact_uri,
+        artifact_checksum=qa.report_ref.artifact_checksum,
+        data_class=qa.report_ref.data_class,
+        started_at=qa_started,
+        completed_at=datetime.now(UTC),
+        error=qa_error,
+    )
+    return attempt.registry.record_lidar_calibration_qa(attempt.job, qa_stage)
 
 
 def run_prepared_job(job_id: str, frame_set_uri: str, *, expected_checksum: str | None = None) -> JobManifest:
@@ -865,9 +920,9 @@ def run_video_job(job_id: str, *, expected_checksum: str | None = None) -> JobMa
             frames = prepared_frame_reference(attempt.job)
             if frames is None:
                 raise ValueError("Prepare thành công nhưng thiếu frame set")
-            attempt.job = _execute_lidar_ingest(attempt)
+            attempt.job = _execute_lidar_ingest(attempt, frames)
             if attempt.job.status != JobStatus.RUNNING:
-                _record_benchmark(attempt)  # gói LiDAR hỏng: dừng trước khi tốn GPU cho COLMAP/Brush
+                _record_benchmark(attempt)  # LiDAR ingest hoặc structural QA lỗi: dừng trước COLMAP/Brush
                 return attempt.job
             job = _execute_preview(attempt, frames, profile)
         return _requeue_if_exhausted(attempt) or job

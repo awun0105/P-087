@@ -5,7 +5,7 @@ import { useState } from "react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 
 import { ProgressBar } from "@/components/studio/primitives";
-import { MVP_STAGES, type StageMeta } from "@/features/studio/stages";
+import { LIDAR_CALIBRATION_QA_STAGE, MVP_STAGES, type StageMeta } from "@/features/studio/stages";
 import { inspectHref, inspectionStage } from "@/features/studio/inspection";
 import { cn } from "@/lib/cn";
 import type { StageId } from "@/lib/contracts/api";
@@ -93,6 +93,7 @@ export function PipelineTimeline({
           const stage = stages.find((item) => item.stage_id === meta.id);
           const state = stage?.state ?? "pending";
           const isCurrentStale = state === "running" && isStale;
+          const inspectable = state === "succeeded" || (meta.id === LIDAR_CALIBRATION_QA_STAGE.id && state === "failed");
           const Icon = isCurrentStale ? AlertTriangle : ICONS[state];
           return (
             <li
@@ -122,7 +123,7 @@ export function PipelineTimeline({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-3">
                     <p className={cn("text-sm font-medium", state === "pending" ? "text-ink-subtle" : "text-ink")}>
-                      {(jobId && state === "succeeded") || onSelectStage ? (
+                      {(jobId && inspectable) || onSelectStage ? (
                         <button
                           type="button"
                           aria-expanded={selected === meta.id}
@@ -178,7 +179,7 @@ export function PipelineTimeline({
                       <span className="font-mono text-xs opacity-80">({stage.error.error_code})</span>
                     </p>
                   )}
-                  {jobId && state === "succeeded" && selected === meta.id && (
+                  {jobId && inspectable && selected === meta.id && (
                     <div id={`stage-detail-${meta.id}`} className="mt-3 space-y-2 border-t border-line pt-3">
                       <p className="text-sm leading-relaxed text-ink-muted">{meta.description}</p>
                       {inspectionStage(meta.id) && <Link href={inspectHref(jobId, meta.id)} className="inline-flex rounded-lg bg-ember-soft px-3 py-2 text-sm font-medium text-ember-strong focus-visible:outline-2 focus-visible:outline-ember">Xem giai đoạn</Link>}

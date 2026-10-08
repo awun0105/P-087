@@ -31,6 +31,7 @@ from src.models.contracts.input_assembly import (
     RuntimeQualificationRegistry,
     RuntimeQualificationStatus,
     StagedInputFile,
+    TimestampUnit,
     TrajectoryOrigin,
     VideoRecipeCandidate,
     seal_gaussian_view_intent,
@@ -138,6 +139,28 @@ def test_sealed_assembly_binds_files_bindings_and_declared_evidence() -> None:
     tampered = assembly.model_copy(update={"owner_id": "user-2"})
     with pytest.raises(ValueError, match="checksum"):
         verify_input_assembly_checksum(tampered)
+
+
+def test_optional_timestamp_unit_preserves_legacy_snapshot_checksums() -> None:
+    assembly = _assembly()
+    assert "timestamp_unit" not in assembly.declarations.model_dump(mode="json")
+    verify_input_assembly_checksum(assembly)
+
+    updated = assembly.model_copy(
+        update={
+            "declarations": assembly.declarations.model_copy(
+                update={
+                    "timestamp_unit": EvidenceValue[TimestampUnit](
+                        value=TimestampUnit.MILLISECONDS, provenance=EvidenceProvenance.DECLARED
+                    )
+                }
+            ),
+            "assembly_checksum": ZERO_CHECKSUM,
+        }
+    )
+    sealed = seal_input_assembly(updated)
+    assert sealed.declarations.timestamp_unit is not None
+    assert sealed.declarations.timestamp_unit.value == TimestampUnit.MILLISECONDS
 
 
 def test_assembly_rejects_unknown_file_bindings_and_ambiguous_duplicate_roles() -> None:

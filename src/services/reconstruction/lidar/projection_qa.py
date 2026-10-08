@@ -13,7 +13,6 @@ from scipy.spatial import cKDTree
 from src.models.contracts.identity import canonical_json_bytes
 from src.models.contracts.input_assembly import ClockRelation
 from src.models.contracts.lidar_calibration_qa import (
-    LidarCalibrationObservability,
     LidarCalibrationQAConfig,
     LidarCalibrationQAResult,
 )
@@ -422,8 +421,11 @@ def score_lidar_calibration_projection(
     reasons: list[LidarProjectionDiagnosticCode] = []
     if preflight.result == LidarCalibrationQAResult.FAIL:
         reasons.append(LidarProjectionDiagnosticCode.STRUCTURAL_QA_FAILED)
-    if preflight.observability != LidarCalibrationObservability.READY_FOR_SCORING:
-        reasons.append(LidarProjectionDiagnosticCode.INSUFFICIENT_SAMPLE_COUNT)
+    # This scorer produces projected-point and overlap metrics. Requiring the
+    # structural preflight to already contain those metrics would prevent the
+    # first projection pass from running. Source completeness and sample counts
+    # are checked independently below; the final worker report evaluates the
+    # completed metrics after this scorer returns.
     package = inputs.package
     if package.calibration_ref is None:
         reasons.append(LidarProjectionDiagnosticCode.CALIBRATION_EVIDENCE_MISSING)

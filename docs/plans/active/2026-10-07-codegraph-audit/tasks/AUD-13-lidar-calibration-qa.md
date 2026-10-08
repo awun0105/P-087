@@ -2,8 +2,8 @@
 
 ## Metadata và goal
 
-- IN PROGRESS; P1; S1/S2 diagnostic implementation slices are present locally;
-  real-data qualification and the S3 PRODUCT consumer remain pending.
+- IN PROGRESS; P1; S1/S2/S3 diagnostic implementation slices are present locally;
+  real-data qualification and collision-source use remain pending.
 - Canonical REC-08/09, PRODUCT-04/08. SELF-CODE typed QA; REUSE camera projection/
   transform/math ports, optional qualified OpenCV edge/depth checks.
 - Goal: structural checks + scored observation QA + remediation; reject strong
@@ -109,7 +109,9 @@ QA when heavy. AUD-12 only consumes qualified alignment/QA source. Preserve
 unrelated RGB-only path; no user checkbox that forges sensor QA PASS.
 Tests: API stale refs/permissions, missing/corrupt report, UI pending/failure/uncertain,
 replacement calibration invalidates derived alignment/collision; browser overlay QA.
-**Exit:** [ ] source gate consumes report correctly; [ ] real versus synthetic QA proof recorded.
+**Exit:** [x] structural FAIL stops before COLMAP/Brush and preserves an inspectable report;
+[x] INCONCLUSIVE continues RGB reconstruction without collision eligibility;
+[x] synthetic worker/API/UI path recorded; [ ] held-out real QA qualification.
 
 ## Verification và DoD
 
@@ -204,3 +206,44 @@ qualification; general blind calibration remains noted as research/observability
   report persistence/API preflight, rendered overlay and Studio remediation/source
   gating remain AUD-13.S3. Synthetic perturbation separation does not prove real
   calibration accuracy or a universal 1°/5 cm detection guarantee.
+
+### AUD-13.S3 — QA preflight consumer and failure handling implemented locally
+
+- **Logic before → after:** Every persisted QA report was treated as a successful
+  stage and advanced to camera reconstruction, including structural `FAIL`. Now
+  only `INCONCLUSIVE` advances to the RGB/COLMAP path. Structural `FAIL` records a
+  non-retryable remediation error, ends the job at `ST-LIDAR-CALIBRATION-QA`, and
+  stops before COLMAP/Brush. A new job is required after correcting source units,
+  calibration, timing, or bindings; immutable artifacts from the failed job remain.
+- **Artifact/API contract:** The job-bound report remains visible after a failed
+  stage. Nested projection evidence and overlays are admitted only when the report
+  checksum/source identity is valid, its result agrees with the stage state, the
+  refs belong to the same job, and the artifacts resolve with their declared
+  checksums. `PASS` and production projection evidence remain rejected. A corrupt
+  nested artifact is omitted from the allow-list.
+- **Product behavior:** The QA failure can be selected from the job timeline and
+  opened in Stage Inspection. The page labels the QA stage as failed, shows the
+  finding/remediation and keeps collision eligibility at `no`. Non-QA failed stages
+  remain unavailable to this inspection route; earlier successful stages remain
+  inspectable.
+- **Integration evidence:** The real worker runs against a generated upload and
+  LiDAR package while the test declares millimeter coordinates. The persisted
+  report is `FAIL`, job progress is failed at the QA stage, the report and
+  diagnostic evidence remain readable, the non-retryable error is attached to
+  both the failed stage and attempt history, and the preview hook is never called.
+  Normal registered-map `INCONCLUSIVE` still advances to camera pose and remains
+  ineligible as a sensor-package collision source.
+- **Verification:** 53 focused backend integration/QA tests passed; 20 related
+  frontend tests passed; repo-wide Ruff check and format check passed; TypeScript
+  check and focused ESLint passed; contract mirror passed (5 enums, 6 models);
+  `git diff --check` passed. CodeGraph was queried for worker, reducer, artifact
+  allow-list, and UI callers. Graphify query was run and `graphify update .`
+  refreshed 20,236 nodes / 58,534 edges / 701 communities.
+- **Browser gate:** Chrome DevTools showed the logged-in QA failure inspection
+  screen using an injected local API fixture because `job-floor-ui` is absent from
+  the active application database. The console had only React DevTools and HMR
+  informational messages. This confirms screen rendering, not a live LiDAR job or
+  production browser acceptance.
+- **Pending:** No held-out real calibration sequence or production threshold
+  profile is qualified. Diagnostic projection/overlay does not authorize a
+  LiDAR collision source or establish a universal 1°/5 cm accuracy guarantee.

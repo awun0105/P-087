@@ -112,6 +112,15 @@ class ClockRelation(StrEnum):
     UNKNOWN = "unknown"
 
 
+class TimestampUnit(StrEnum):
+    """Units accepted for user supplied camera/LiDAR timestamp inventories."""
+
+    SECONDS = "seconds"
+    MILLISECONDS = "milliseconds"
+    MICROSECONDS = "microseconds"
+    NANOSECONDS = "nanoseconds"
+
+
 class TrajectoryOrigin(StrEnum):
     NOT_REQUIRED = "not_required"
     SUPPLIED = "supplied"
@@ -231,6 +240,7 @@ class InputAssemblyDeclarations(ContractModel):
     trajectory_convention: EvidenceValue[TrajectoryConvention] | None = None
     clock_relation: EvidenceValue[ClockRelation] | None = None
     clock_offset_seconds: EvidenceValue[FiniteFloat] | None = None
+    timestamp_unit: EvidenceValue[TimestampUnit] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 _SINGLE_FILE_ROLES = {

@@ -189,26 +189,45 @@ def _queued_lidar_job(world: SimpleNamespace, package: bytes) -> str:
 
 
 def test_worker_ingests_the_lidar_package_before_camera_pose(world: SimpleNamespace) -> None:
+    from src.models.contracts.lidar_calibration_qa import LidarCalibrationQAReport, LidarCalibrationQAResult
     from src.services.orchestration.jobs.progress import job_progress
     from src.services.reconstruction import LidarPackageRecord
+    from src.services.reconstruction.lidar.calibration_qa import is_sensor_package_collision_eligible
 
     job_id = _queued_lidar_job(world, _lidar_package(world.root))
     assert worker_cli.dispatch_next(world.registry) is True
     job = world.registry.get_job(job_id)
     assert job.status == JobStatus.RUNNING and job.current_stage == StageId.CAMERA_POSE
-    assert [(stage.stage_id, stage.status) for stage in job.stage_artifacts][-1] == (StageId.LIDAR_INGEST, "SUCCEEDED")
-    stage = job.stage_artifacts[-1]
+    assert [(stage.stage_id, stage.status) for stage in job.stage_artifacts][-2:] == [
+        (StageId.LIDAR_INGEST, "SUCCEEDED"),
+        (StageId.LIDAR_CALIBRATION_QA, "SUCCEEDED"),
+    ]
+    stage = job.stage_artifacts[-2]
     resolver = world.registry.runtime_resolver
     record = LidarPackageRecord.model_validate_json(
         resolver.require_uri(stage.artifact_uri, stage.artifact_checksum).read_bytes()
     )
     assert record.kind == "registered_lidar" and record.trajectory_origin == "estimated"
     assert record.floor_z_m == pytest.approx(0.0, abs=0.02) and record.pose_count == 16
+    qa_stage = job.stage_artifacts[-1]
+    report_ref = world.registry._to_product_ref(job_id, qa_stage)
+    report = LidarCalibrationQAReport.model_validate_json(resolver.require(report_ref).read_bytes())
+    assert report.result == LidarCalibrationQAResult.INCONCLUSIVE
+    assert report.projection_evidence_ref is None
+    assert report.diagnostic_projection_ref is not None
+    assert not is_sensor_package_collision_eligible(report)
+    allow_list = world.registry._product_visible_references(job_id)
+    assert report.diagnostic_projection_ref.artifact_uri in allow_list
+    diagnostic_path = resolver.require(report.diagnostic_projection_ref)
+    diagnostic_path.write_bytes(b"corrupt projection evidence")
+    assert report.diagnostic_projection_ref.artifact_uri not in world.registry._product_visible_references(job_id)
     assert len(world.previews) == 1  # LiDAR xong mới sang dựng pose camera
     progress = job_progress(job, world.registry.list_job_attempts(job_id), preview_ready=False)
     ids = [item.stage_id for item in progress.stages]
     assert ids.index(StageId.LIDAR_INGEST) == ids.index(StageId.FRAME_EXTRACT) + 1
+    assert ids.index(StageId.LIDAR_CALIBRATION_QA) == ids.index(StageId.LIDAR_INGEST) + 1
     assert next(item for item in progress.stages if item.stage_id == StageId.LIDAR_INGEST).state == "succeeded"
+    assert next(item for item in progress.stages if item.stage_id == StageId.LIDAR_CALIBRATION_QA).state == "succeeded"
 
 
 def test_broken_lidar_package_stops_the_job_before_gpu_work(world: SimpleNamespace) -> None:
@@ -220,6 +239,59 @@ def test_broken_lidar_package_stops_the_job_before_gpu_work(world: SimpleNamespa
     failed = job.stage_artifacts[-1]
     assert failed.error is not None and failed.error.error_code == "LIDAR_PACKAGE_INVALID"
     assert "Không tìm thấy mặt sàn dưới quỹ đạo" in failed.error.human_message
+    assert world.previews == []
+
+
+def test_structural_lidar_qa_failure_stops_before_colmap_and_keeps_report(
+    world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from collections.abc import Callable
+    from typing import cast
+
+    from src.models.contracts.input_assembly import (
+        DistanceUnit,
+        EvidenceProvenance,
+        EvidenceValue,
+        InputAssemblyDeclarations,
+    )
+    from src.models.contracts.lidar_calibration_qa import LidarCalibrationQAReport, LidarCalibrationQAResult
+    from src.services.orchestration.jobs.progress import job_progress
+    from src.services.reconstruction.lidar import calibration_qa_worker
+    from src.services.reconstruction.lidar.calibration_qa_worker import LidarCalibrationQAWorkerResult
+
+    original = cast(Callable[..., LidarCalibrationQAWorkerResult], calibration_qa_worker.run_lidar_calibration_qa)
+    bad_declarations = InputAssemblyDeclarations(
+        coordinate_unit=EvidenceValue(value=DistanceUnit.MILLIMETER, provenance=EvidenceProvenance.DECLARED)
+    )
+
+    def run_with_wrong_units(**kwargs: object) -> LidarCalibrationQAWorkerResult:
+        return original(**{**kwargs, "declarations": bad_declarations})
+
+    monkeypatch.setattr(calibration_qa_worker, "run_lidar_calibration_qa", run_with_wrong_units)
+    job_id = _queued_lidar_job(world, _lidar_package(world.root))
+
+    assert worker_cli.dispatch_next(world.registry) is True
+    job = world.registry.get_job(job_id)
+    assert job.status == JobStatus.FAILED and job.current_stage == StageId.LIDAR_CALIBRATION_QA
+    assert job.completed_at is not None
+    qa_stage = job.stage_artifacts[-1]
+    assert qa_stage.status == "FAILED" and qa_stage.artifact_uri is not None
+    assert qa_stage.error is not None
+    assert qa_stage.error.error_code == "LIDAR_CALIBRATION_QA_FAILED" and not qa_stage.error.retryable
+
+    resolver = world.registry.runtime_resolver
+    report_ref = world.registry._to_product_ref(job_id, qa_stage)
+    report = LidarCalibrationQAReport.model_validate_json(resolver.require(report_ref).read_bytes())
+    assert report.result == LidarCalibrationQAResult.FAIL
+    assert report.diagnostic_projection_ref is not None
+    assert report.diagnostic_projection_ref.artifact_uri in world.registry._product_visible_references(job_id)
+    artifacts, _ = world.registry.list_job_artifacts(job_id)
+    assert report_ref.artifact_uri in {reference.artifact_uri for reference in artifacts}
+
+    progress = job_progress(job, world.registry.list_job_attempts(job_id), preview_ready=False)
+    qa_progress = next(item for item in progress.stages if item.stage_id == StageId.LIDAR_CALIBRATION_QA)
+    assert qa_progress.state == "failed" and qa_progress.error == qa_stage.error
+    assert progress.error == qa_stage.error
     assert world.previews == []
 
 

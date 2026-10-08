@@ -84,6 +84,7 @@ interface StoredInputDraft {
   trajectory_convention: DeclarationChoice<TrajectoryConvention>;
   clock_relation: DeclarationChoice<"same_clock" | "known_offset" | "unknown">;
   clock_offset: string;
+  timestamp_unit: DeclarationChoice<"seconds" | "milliseconds" | "microseconds" | "nanoseconds">;
   scene_name: string;
   data_origin: DataOrigin | "";
   data_owner: string;
@@ -136,6 +137,7 @@ function parseInputDraft(raw: string, accountId: string): StoredInputDraft | nul
       trajectory_convention: choiceValue(draft.trajectory_convention, ["world_from_sensor", "world_from_camera", "unknown"]),
       clock_relation: choiceValue(draft.clock_relation, ["same_clock", "known_offset", "unknown"]),
       clock_offset: typeof draft.clock_offset === "string" ? draft.clock_offset.slice(0, 64) : "",
+      timestamp_unit: choiceValue(draft.timestamp_unit, ["seconds", "milliseconds", "microseconds", "nanoseconds"]),
       scene_name: typeof draft.scene_name === "string" ? draft.scene_name.slice(0, 200) : "",
       data_origin: choiceValue(draft.data_origin, ["public_or_synthetic", "self_collected_no_pii", "anonymized"]),
       data_owner: typeof draft.data_owner === "string" ? draft.data_owner.slice(0, 200) : "",
@@ -273,6 +275,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   const [trajectoryConvention, setTrajectoryConvention] = useState<DeclarationChoice<TrajectoryConvention>>("");
   const [clockRelation, setClockRelation] = useState<DeclarationChoice<"same_clock" | "known_offset" | "unknown">>("");
   const [clockOffset, setClockOffset] = useState("");
+  const [timestampUnit, setTimestampUnit] = useState<DeclarationChoice<"seconds" | "milliseconds" | "microseconds" | "nanoseconds">>("");
   const [sceneName, setSceneName] = useState("");
   const [dataOrigin, setDataOrigin] = useState<DataOrigin | "">("");
   const [dataOwner, setDataOwner] = useState("");
@@ -406,6 +409,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       setTrajectoryConvention(draft.trajectory_convention);
       setClockRelation(draft.clock_relation);
       setClockOffset(draft.clock_offset);
+      setTimestampUnit(draft.timestamp_unit);
       setSceneName(draft.scene_name);
       setDataOrigin(draft.data_origin);
       setDataOwner(draft.data_owner);
@@ -446,6 +450,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         trajectory_convention: trajectoryConvention,
         clock_relation: clockRelation,
         clock_offset: clockOffset,
+        timestamp_unit: timestampUnit,
         scene_name: sceneName,
         data_origin: dataOrigin,
         data_owner: dataOwner,
@@ -455,7 +460,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     } catch {
       // Tab-scoped recovery is best-effort when the browser disables session storage.
     }
-  }, [accountId, cloudState, clockOffset, clockRelation, coordinateUnit, dataOrigin, dataOwner, dataPurpose, draftKey, draftLoaded, entries, intent, lidarFrameId, sameScene, scanOrder, sceneName, trajectoryConvention]);
+  }, [accountId, cloudState, clockOffset, clockRelation, coordinateUnit, dataOrigin, dataOwner, dataPurpose, draftKey, draftLoaded, entries, intent, lidarFrameId, sameScene, scanOrder, sceneName, timestampUnit, trajectoryConvention]);
 
   useEffect(() => {
     const legacyUploadId = params.get("upload");
@@ -645,6 +650,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       trajectory_convention: evidence(trajectoryConvention || null),
       clock_relation: evidence(clockRelation || null),
       clock_offset_seconds: Number.isFinite(offset) && offset !== null ? evidence(offset) : null,
+      timestamp_unit: evidence(timestampUnit || null),
     };
   }
 
@@ -970,6 +976,11 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
           )}
           {stagedFiles.some((item) => item.observed_format === "tum_trajectory") && stagedFiles.some((item) => item.observed_format === "rgb_frame_times") && (
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <label className="text-sm">Đơn vị timestamp của video và LiDAR
+                <select value={timestampUnit} onChange={(event) => { setTimestampUnit(event.target.value as DeclarationChoice<"seconds" | "milliseconds" | "microseconds" | "nanoseconds">); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
+                  <option value="">Chưa xác nhận</option><option value="seconds">Giây (s)</option><option value="milliseconds">Mili giây (ms)</option><option value="microseconds">Micro giây (µs)</option><option value="nanoseconds">Nano giây (ns)</option>
+                </select>
+              </label>
               <label className="text-sm">Quan hệ đồng hồ giữa video và LiDAR
                 <select value={clockRelation} onChange={(event) => { setClockRelation(event.target.value as DeclarationChoice<"same_clock" | "known_offset" | "unknown">); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
                   <option value="">Chưa xác nhận</option><option value="same_clock">Cùng đồng hồ</option><option value="known_offset">Biết độ lệch</option><option value="unknown">Không biết</option>
