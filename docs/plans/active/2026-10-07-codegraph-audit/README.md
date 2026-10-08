@@ -508,7 +508,9 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [x] AUD-15.S2 resume-cache integrity, cold/warm recovery, and software integration verification.
 - [ ] AUD-15.S3 paired latency/quality acceptance; AUD-16 remains Deferred.
 - [x] AUD-17.S1–S2 typed timestamp roles/units, resolver prerequisites, immutable trajectory contract, and isolated synthetic provider path; R5 dispatch remains disabled.
-- [ ] AUD-17.S3 drift/consumer QA and real-sensor qualification; AUD-18.
+- [ ] AUD-17.S3 drift/consumer QA and real-sensor qualification; current code has a
+      diagnostic-only RGB-PTS to estimated-pose mapper, not wired into product
+      consumers or R5 dispatch; AUD-18.
 - [x] AUD-19.S1 typed contract and REC-06/08/09 regression work; no solver/API/UI enabled.
 - [ ] AUD-19.S2–S4 independent-map producer, held-out QA, operation/API/UI and browser acceptance.
 

@@ -13,8 +13,10 @@ import pytest
 from pydantic import ValidationError
 
 from src.models.contracts.artifacts import ArtifactDataClass, ArtifactRef
+from src.models.contracts.coordinates import Transform
 from src.models.contracts.identity import verify_content_checksum
-from src.models.contracts.input_assembly import TimestampUnit
+from src.models.contracts.input_assembly import ClockRelation, TimestampUnit
+from src.models.contracts.reconstruction import EstimatedTrajectoryArtifact
 from src.models.contracts.retryability import classify_retryability
 from src.services.orchestration.artifacts.store import ArtifactResolver, FilesystemArtifactStore
 from src.services.reconstruction.inputs.timestamps import (
@@ -34,6 +36,10 @@ from src.services.reconstruction.lidar.odometry import (
     LidarOdometryTimeoutError,
     LidarOdometryWorker,
     LidarOdometryWorkerRequest,
+)
+from src.services.reconstruction.lidar.trajectory_mapping import (
+    RGBFrameTimestamp,
+    map_estimated_trajectory_to_rgb_frames,
 )
 
 
@@ -220,6 +226,208 @@ def test_worker_publishes_byte_verified_scan_native_unqualified_trajectory(
     assert result.artifact_ref.artifact_checksum != result.trajectory.artifact_checksum
     with pytest.raises(FileExistsError):
         worker.run(request)
+
+
+def _diagnostic_trajectory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, with_world_frame: bool = True
+) -> EstimatedTrajectoryArtifact:
+    resolver = ArtifactResolver(tmp_path / "mapping-artifacts")
+    store = FilesystemArtifactStore(resolver)
+    request = _worker_request(store, np.random.default_rng(17).uniform(1, 5, size=(40, 3)))
+    worker = LidarOdometryWorker(
+        resolver,
+        store,
+        LidarOdometryRuntimeSettings(
+            python=Path("/tmp/r2s-lidar-runtime/bin/python"),
+            work_root=tmp_path / "mapping-attempts",
+        ),
+    )
+
+    def fake_run(
+        manifest: Path, output: Path, log: Path, profile: LidarOdometryProfile, **_: object
+    ) -> dict[str, object]:
+        del manifest, log
+        return _fake_process_output(output, profile)
+
+    monkeypatch.setattr(worker.process, "run", fake_run)
+    trajectory = worker.run(request).trajectory
+    if not with_world_frame:
+        return trajectory
+    values = trajectory.model_dump(mode="python")
+    values["world_from_map"] = Transform(
+        parent_frame="world",
+        local_frame="odom-map",
+        translation_xyz=(10.0, 20.0, 1.0),
+        rotation_quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
+    )
+    return type(trajectory).model_validate(values)
+
+
+def test_estimated_camera_mapping_interpolates_with_confirmed_frames_and_time_offset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trajectory = _diagnostic_trajectory(tmp_path, monkeypatch)
+    sensor_from_camera = Transform(
+        parent_frame="lidar",
+        local_frame="camera",
+        translation_xyz=(0.0, 1.0, 0.0),
+        rotation_quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
+    )
+
+    result = map_estimated_trajectory_to_rgb_frames(
+        trajectory,
+        (RGBFrameTimestamp(4, 12, 0.2),),
+        sensor_from_camera,
+        clock_relation=ClockRelation.KNOWN_OFFSET,
+        clock_offset_seconds=0.05,
+        maximum_interpolation_gap_seconds=0.15,
+    )
+
+    assert result.status == "diagnostic_only"
+    assert result.complete_for_consumer
+    assert result.reason_codes == ()
+    pose = result.poses[0]
+    assert (pose.output_frame_id, pose.source_frame_id) == (4, 12)
+    assert (pose.left_scan_index, pose.right_scan_index) == (1, 2)
+    assert pose.interpolation_fraction == pytest.approx(0.5)
+    assert pose.lidar_timestamp_seconds == pytest.approx(0.15)
+    assert pose.world_from_camera.translation_xyz == pytest.approx((10.15, 21.0, 1.0))
+
+
+def test_estimated_camera_mapping_slerps_orientation_between_scan_poses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trajectory = _diagnostic_trajectory(tmp_path, monkeypatch)
+    values = trajectory.model_dump(mode="python")
+    values["poses"][2]["map_from_sensor"]["rotation_quaternion_xyzw"] = (
+        0.0,
+        0.0,
+        0.7071067811865475,
+        0.7071067811865476,
+    )
+    rotated_trajectory = EstimatedTrajectoryArtifact.model_validate(values)
+    calibration = Transform(
+        parent_frame="lidar",
+        local_frame="camera",
+        translation_xyz=(0.0, 0.0, 0.0),
+        rotation_quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
+    )
+
+    result = map_estimated_trajectory_to_rgb_frames(
+        rotated_trajectory,
+        (RGBFrameTimestamp(0, 0, 0.15),),
+        calibration,
+        clock_relation=ClockRelation.SAME_CLOCK,
+        clock_offset_seconds=None,
+        maximum_interpolation_gap_seconds=0.15,
+    )
+
+    assert result.complete_for_consumer
+    assert result.poses[0].world_from_camera.rotation_quaternion_xyzw == pytest.approx(
+        (0.0, 0.0, 0.3826834323650898, 0.9238795325112867)
+    )
+
+
+def test_estimated_camera_mapping_blocks_unknown_clock_and_unconfirmed_world_frame(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frames = (RGBFrameTimestamp(0, 0, 0.05),)
+    calibration = Transform(
+        parent_frame="lidar",
+        local_frame="camera",
+        translation_xyz=(0.0, 0.0, 0.0),
+        rotation_quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
+    )
+    trajectory = _diagnostic_trajectory(tmp_path / "clock", monkeypatch)
+    unknown_clock = map_estimated_trajectory_to_rgb_frames(
+        trajectory,
+        frames,
+        calibration,
+        clock_relation=ClockRelation.UNKNOWN,
+        clock_offset_seconds=None,
+        maximum_interpolation_gap_seconds=0.2,
+    )
+    assert not unknown_clock.complete_for_consumer
+    assert unknown_clock.poses == ()
+    assert unknown_clock.reason_codes == ("CLOCK_RELATION_REQUIRED",)
+    with pytest.raises(ValueError, match="same-clock declaration"):
+        map_estimated_trajectory_to_rgb_frames(
+            trajectory,
+            frames,
+            calibration,
+            clock_relation=ClockRelation.SAME_CLOCK,
+            clock_offset_seconds=0.01,
+            maximum_interpolation_gap_seconds=0.2,
+        )
+
+    local_trajectory = _diagnostic_trajectory(tmp_path / "world", monkeypatch, with_world_frame=False)
+    unconfirmed_world = map_estimated_trajectory_to_rgb_frames(
+        local_trajectory,
+        frames,
+        calibration,
+        clock_relation=ClockRelation.SAME_CLOCK,
+        clock_offset_seconds=None,
+        maximum_interpolation_gap_seconds=0.2,
+    )
+    assert not unconfirmed_world.complete_for_consumer
+    assert unconfirmed_world.reason_codes == ("WORLD_FROM_MAP_CONFIRMATION_REQUIRED",)
+    assert len(unconfirmed_world.poses) == 1
+    assert unconfirmed_world.poses[0].map_from_camera.local_frame == "camera"
+    assert unconfirmed_world.poses[0].map_from_camera.translation_xyz == pytest.approx((0.05, 0.0, 0.0))
+    assert unconfirmed_world.poses[0].world_from_camera is None
+
+    bad_world_frame = trajectory.model_copy(
+        update={
+            "world_from_map": Transform(
+                parent_frame="world",
+                local_frame="other-map",
+                translation_xyz=(10.0, 20.0, 1.0),
+                rotation_quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="does not match the estimated odometry frame"):
+        map_estimated_trajectory_to_rgb_frames(
+            bad_world_frame,
+            frames,
+            calibration,
+            clock_relation=ClockRelation.SAME_CLOCK,
+            clock_offset_seconds=None,
+            maximum_interpolation_gap_seconds=0.2,
+        )
+
+
+def test_estimated_camera_mapping_never_extrapolates_or_crosses_large_scan_gaps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trajectory = _diagnostic_trajectory(tmp_path, monkeypatch)
+    calibration = Transform(
+        parent_frame="lidar",
+        local_frame="camera",
+        translation_xyz=(0.0, 0.0, 0.0),
+        rotation_quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
+    )
+
+    result = map_estimated_trajectory_to_rgb_frames(
+        trajectory,
+        (
+            RGBFrameTimestamp(0, 0, -0.01),
+            RGBFrameTimestamp(1, 1, 0.05),
+            RGBFrameTimestamp(2, 2, 0.21),
+        ),
+        calibration,
+        clock_relation=ClockRelation.SAME_CLOCK,
+        clock_offset_seconds=None,
+        maximum_interpolation_gap_seconds=0.05,
+    )
+
+    assert not result.complete_for_consumer
+    assert [pose.output_frame_id for pose in result.poses] == []
+    assert [item.reason_code for item in result.unmapped_frames] == [
+        "RGB_TIMESTAMP_OUTSIDE_LIDAR_TRAJECTORY",
+        "LIDAR_TIMESTAMP_GAP_EXCEEDS_LIMIT",
+        "RGB_TIMESTAMP_OUTSIDE_LIDAR_TRAJECTORY",
+    ]
 
 
 def test_worker_reports_timestamp_gaps_after_unit_normalization(

@@ -251,3 +251,56 @@ S2 verification:
   incomplete-stage state for the current job. No completed calibration artifact/report
   was available; the browser console had no runtime errors. This does not verify a
   completed QA report.
+
+S3 implementation progress — not complete:
+- Added a diagnostic-only mapping function from verified RGB output/source-frame PTS
+  to interpolated LiDAR odometry poses. It requires a camera-to-sensor transform with
+  matching frame identity and a known clock relation; known offsets follow the AUD-13
+  residual sign convention. If `world_from_map` is absent, it still returns poses in
+  the local odometry frame but marks the mapping incomplete and leaves
+  `world_from_camera` unset. When present, the world transform must match the odometry
+  frame. Translation is interpolated linearly and rotation with quaternion SLERP; the
+  mapper rejects contradictory same-clock offsets, never extrapolates, and reports
+  frames outside the trajectory or beyond the configured scan-gap limit. Every result
+  remains `diagnostic_only`; partial or map-local mappings cannot be consumed as
+  canonical results.
+- This utility is not wired into `ProjectRegistry`, `LidarPackageIngest`, `camera_priors`,
+  or an alignment consumer. It does not create an estimated `LidarPackageRecord`,
+  canonical floor/world bridge, calibration QA, drift/coverage quality report, UI,
+  or supplied-trajectory fallback. R5 dispatch remains disabled. Those S3 requirements
+  and real held-out traversals remain open; synthetic transform tests prove only the
+  mapping behavior and frame/clock guards.
+- The module deliberately does not infer `world_from_map` from the first scan or assume
+  Z-up. S2 trajectories remain in their local odometry frame until a separate, evidenced
+  map-to-world and floor/up-axis decision exists.
+- Chrome DevTools read-only inspection of the current QA route returned HTTP 200. Its
+  progress API reported a RUNNING attempt waiting for metric confirmation, and the stage
+  list contained no `ST-LIDAR-CALIBRATION-QA`; the page correctly rendered its incomplete
+  stage state. No browser console errors appeared. This verifies only the incomplete
+  state, not a completed QA report, and no job was created or changed.
+
+Focused S3 mapping verification:
+- `REC17_LIDAR_ODOMETRY_PYTHON=/tmp/r2s-lidar-locked-runtime/bin/python .venv/bin/pytest tests/test_reconstruction/test_lidar_odometry.py -q`: 21 passed.
+- Mapping tests cover a nonzero clock offset, translation interpolation, quaternion
+  SLERP, exact frame lineage, required calibration/clock evidence, map-local output
+  without a world bridge, frame-mismatched world transforms, contradictory clock
+  declarations, no extrapolation, and maximum-gap rejection.
+- Implementation base: `71d338c` (`AUD-17.S2`). Changed files: the new
+  `src/services/reconstruction/lidar/trajectory_mapping.py`,
+  `tests/test_reconstruction/test_lidar_odometry.py`, this task record, and the active
+  plan checklist in `README.md`. No persisted schema/artifact changed; no artifact was
+  published. Synthetic consumer proof is limited to the mapping function's returned
+  camera transforms and blocker diagnostics.
+- Gate report: CodeGraph explore/callers completed; minimal change adds one isolated
+  mapper and focused negative/positive tests. Focused regression: 125 passed; repository
+  Ruff check/format: passed, 541 files formatted; `git diff --check`: passed. Graphify
+  updated after source changes. Browser evidence above covers only the existing
+  incomplete-stage state. The sprint remains open for actual consumer wiring, drift QA,
+  fallback, UI, and held-out traversal qualification.
+- CodeGraph explored `EstimatedTrajectoryArtifact`, `LidarPackageIngest`, `camera_priors`
+  and `compose_transforms`; its caller list confirms the new mapper has tests only and
+  no product consumer yet. Index status: 879 files, 17,484 nodes and 51,601 edges,
+  up to date. `graphify update .` rebuilt the graph to 20,732 nodes and 60,708 edges.
+- Related-code impact: no shared consumer contract changed; legacy ingest, camera-prior
+  callers, and R5 dispatch remain unchanged. Remaining S3 work must add and test the
+  consumer path before this sprint can be marked complete.
