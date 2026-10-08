@@ -2,7 +2,8 @@
 
 ## Metadata và goal
 
-- PLANNED; P1; EX-REC adapters + EX-PRODUCT Studio API/UI.
+- IN PROGRESS; P1; EX-REC adapters + EX-PRODUCT Studio API/UI.
+- S1 and S2 implementation are committed; S2 owner visual signoff and S3 live worker-log evidence remain open.
 - Canonical PRODUCT-02/08/09, REC-03/04.
 - Goal: khi một stage lỗi, người dùng đọc được nguyên nhân và việc cần làm bằng tiếng
   Việt ngay tại stage đó; reviewer xem được đoạn cuối log đã che đường dẫn; lỗi COLMAP
@@ -63,16 +64,21 @@ sau khi kết quả đã cho thấy thất bại. Chưa có file log COLMAP th�
 `src/services/reconstruction/adapters/colmap.py`,
 `src/services/reconstruction/adapters/log_excerpt.py` (mới),
 `src/models/contracts/retryability.py`,
-`src/api/studio/scenes.py` (chỉ route progress), `src/api/product/projects.py` (chỉ hai route trả job),
+`src/api/studio/scenes.py` (`GET /scenes`, `POST /scenes/from-upload`, `GET /jobs/{job_id}/progress`),
+`src/api/studio/assemblies.py` (`POST /input-assemblies/{assembly_id}/run`),
+`src/api/product/projects.py` (hai route tạo và liệt kê job),
+`src/api/product/jobs.py` (manifest, transition, retry và attempt routes),
 `src/api/studio/error_view.py` (mới),
 `frontend/src/features/studio/PipelineTimeline.tsx`,
 `frontend/src/features/studio/errorGuidance.ts` (mới),
-`tests/test_reconstruction/test_rec03_colmap.py`, `frontend/tests/pipeline-timeline.test.tsx` (mới).
+`src/services/orchestration/jobs/log_context.py` (mới), `src/services/orchestration/jobs/worker_cli.py`,
+`src/services/orchestration/jobs/runner.py`, `tests/test_api/test_error_view.py`,
+`tests/test_orchestration/test_job_log_context.py` (mới), `tests/test_reconstruction/test_rec03_colmap.py`,
+`frontend/tests/pipeline-timeline.test.tsx` (mới).
 
-Không sửa trong task này: `brush_runtime.py`, `frontend/src/features/studio/inspection/StageInspectionPage.tsx`,
-`frontend/src/features/studio/scene/ProgressTab.tsx`, `src/services/orchestration/jobs/progress.py`,
-`src/services/orchestration/jobs/runner.py`. Ba file cuối cùng và `StageInspectionPage.tsx`
-đang có thay đổi chưa commit của người khác.
+S1/S2 không sửa `brush_runtime.py`, `frontend/src/features/studio/inspection/StageInspectionPage.tsx`,
+`frontend/src/features/studio/scene/ProgressTab.tsx` hoặc `src/services/orchestration/jobs/progress.py`.
+S3 được phép sửa `worker_cli.py` và `runner.py` theo phạm vi log context bên dưới.
 
 ## Input / output / data contract
 
@@ -278,7 +284,8 @@ Test: `tests/test_orchestration/` thêm một test: trong context, record có đ
 trị; ngoài context là `"-"`; hai luồng với hai context khác nhau không lẫn giá trị.
 
 **Exit:**
-- [ ] Test pass; một đoạn log thật của worker dán vào Result.
+- [x] Test context pass; formatter smoke tạo được dòng log có đủ hai ID và dòng idle dùng `-`.
+- [ ] Cần thêm log từ một attempt worker thật; formatter smoke bên dưới không được xem là bằng chứng chạy pipeline.
 
 ## Verification và DoD
 
@@ -310,10 +317,11 @@ DONE khi S1 và S2 tick đủ Exit. S3 có thể hoàn tất sau.
     - `details["diagnostics"]`: `dict[str, int]` (`no_initial_pair`, `insufficient_size` cho `COLMAP_NO_MODEL`).
     - `details["registered_frames"]`, `details["input_frames"]`, `details["min_registered_ratio"]`: `int`, `int`, `float` (cho `COLMAP_REGISTRATION_LOW`).
 
-- **AUD-27.S2 (Hoàn thành):**
+- **AUD-27.S2 (Implementation hoàn thành; owner visual signoff còn mở):**
   - Files created/modified:
     - `src/api/studio/error_view.py`: `visible_error`, `filter_stage_artifact_errors`, `filter_manifest_errors`, `filter_stage_progress_errors`, `filter_job_progress_errors`, `filter_job_attempt_errors`.
-    - `src/api/studio/scenes.py`: Lọc `log_excerpt` tại `GET /jobs/{job_id}/progress` và `GET /scenes`.
+    - `src/api/studio/scenes.py`: Lọc tại `GET /jobs/{job_id}/progress`, `GET /scenes` và nested job trong `POST /scenes/from-upload`.
+    - `src/api/studio/assemblies.py`: Lọc nested job trong `POST /input-assemblies/{assembly_id}/run`.
     - `src/api/product/projects.py`: Lọc tại `POST /projects/{project_id}/jobs` và `GET /projects/{project_id}/jobs`.
     - `src/api/product/jobs.py`: Lọc tại `GET /jobs/{job_id}`, `POST /jobs/{job_id}/transitions`, `POST /jobs/{job_id}/retry`, `GET /jobs/{job_id}/attempts`.
     - `frontend/src/features/studio/errorGuidance.ts`: Bảng tra cứu và hàm `guidanceFor(error)` theo đúng nhãn của presets.
@@ -331,6 +339,26 @@ DONE khi S1 và S2 tick đủ Exit. S3 có thể hoàn tất sau.
     - `POST /jobs/{job_id}/retry`
     - `GET /jobs/{job_id}/attempts`
   - Verification:
-    - `.venv/bin/pytest tests/test_api/test_error_view.py -v`: 3/3 passed.
+    - `.venv/bin/pytest tests/test_api/test_error_view.py -q`: 3 passed.
+    - `.venv/bin/pytest tests/test_api/test_error_view.py tests/test_api/test_guest_ownership.py -q`: 38 passed.
     - `cd frontend && npm run lint && npm run typecheck && npm test -- tests/pipeline-timeline.test.tsx && npm run build -- --webpack`: 0 lint errors, 0 typecheck errors, 7/7 vitest passed, next webpack build 17/17 pages succeeded.
+    - Chrome DevTools: job lỗi thật `job-d1296a4dc969` hiển thị fallback message, error code và nhãn retry; console chỉ có thông báo React DevTools/HMR; progress request trả `200`.
+    - Chưa có job nào chứa stage/báo cáo LiDAR calibration QA trong 10 scene hiện có. Checkbox owner visual signoff ở Exit vẫn để mở; snapshot do agent thu không thay cho signoff này.
 
+- **AUD-27.S3 (Implementation xong; runtime acceptance còn mở):**
+  - Files created/modified:
+    - `src/services/orchestration/jobs/log_context.py`: Hai `ContextVar` mặc định `-`, `JobLogContextFilter`, `job_log_context()` có reset token và `configure_worker_logging()` idempotent trên root handlers.
+    - `src/services/orchestration/jobs/runner.py`: Bọc prepared, upload-video và finalize attempts trong context; `attempt_id` là số `JobAttemptRecord.attempt` dạng chuỗi.
+    - `src/services/orchestration/jobs/worker_cli.py`: Áp dụng cùng format/filter và giữ context quanh dispatch/error handling của từng job.
+    - `tests/test_orchestration/test_job_log_context.py`: Kiểm tra mặc định, nested restore, thread isolation và dòng log đã format.
+  - Verification:
+    - `.venv/bin/pytest tests/test_orchestration/test_job_log_context.py tests/test_orchestration/test_worker_cleanup.py tests/test_orchestration/test_resource_telemetry.py tests/test_orchestration/test_job_progress.py tests/test_orchestration/test_observed_budget.py tests/test_orchestration/test_prepared_queue.py tests/test_orchestration/test_resource_admission.py tests/test_orchestration/test_finalize_flow.py tests/integration/test_upload_to_prepared_job.py -q -k 'not test_import_profile_scales_with_gaussian_count_and_marks_heuristic'`: 142 passed, 1 deselected.
+    - Toàn bộ lệnh trên không lọc có 142 passed và một failure ở assertion cấu hình resource: test đòi `vram_base_gb=0.8`, `ram_base_gb=1.5`, trong khi file preset đang sửa trong worktree dùng số đo mới `1.25`/`0.9`. Không sửa hoặc stage cấu hình này.
+    - `.venv/bin/ruff check src/ tests/`: pass; `.venv/bin/ruff format --check src/ tests/`: 533 files formatted.
+    - Formatter smoke qua `configure_worker_logging()` và `job_log_context()` đã phát ra:
+
+      ```text
+      2026-10-09 00:27:18,000 INFO job=job-42 attempt=3 real2sim.worker: stage completed
+      ```
+
+    - Chưa dispatch attempt pipeline thật; dòng trên kiểm tra formatter/filter bằng context tổng hợp, không phải runtime worker evidence. Không có LiDAR QA stage trong dữ liệu browser hiện tại để kiểm tra màn hình QA mới.

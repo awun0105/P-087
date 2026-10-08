@@ -69,6 +69,7 @@ from src.services.orchestration.jobs.dispatch import (
     require_profile,
     resolve_job_processing,
 )
+from src.services.orchestration.jobs.log_context import configure_worker_logging, job_log_context
 from src.services.orchestration.jobs.models import PreparedInputReceipt, TransitionRequest
 from src.services.orchestration.jobs.progress import awaiting_finalize, metric_confirmation_stage
 from src.services.orchestration.jobs.workspace import attempt_lease, cleanup_attempt_workspace, cleanup_finished_job
@@ -98,6 +99,12 @@ logger = logging.getLogger(__name__)
 
 _MAX_TOOL_RESPONSE_BYTES = 1048576
 _JOB_ID_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+
+
+def _attempt_log_id(registry: ProjectRegistry, job_id: str) -> str:
+    """Use the durable attempt sequence as the stable log correlation ID."""
+    history = registry.list_job_attempts(job_id)
+    return str(history[-1].attempt) if history else "-"
 
 
 class PreviewCancelledError(RuntimeError):
@@ -892,44 +899,46 @@ def run_prepared_job(job_id: str, frame_set_uri: str, *, expected_checksum: str 
     if frames is None or frames.artifact_uri != frame_set_uri:
         raise ValueError("Frame set không phải output thành công duy nhất trong JobManifest")
     attempt, profile = _start_attempt(job_id, expected_checksum, StageId.CAMERA_POSE)
-    try:
-        with attempt_lease(attempt.workspace):
-            project = attempt.registry.get_project(attempt.job.project_id)
-            if project.input_recipe_ref is not None:
-                if project.input_manifest_ref is None:
-                    raise ValueError("Grouped input project has no InputManifest")
-                manifest = _pull_input(attempt.registry.runtime_resolver, project.input_manifest_ref)
-                _validate_project_input_recipe(attempt, project, manifest)
-            job = _execute_preview(attempt, frames, profile)
-        return _requeue_if_exhausted(attempt) or job
-    except BaseException as error:
-        _record_runner_failure(attempt, error)
-        _requeue_if_exhausted(attempt)
-        raise
+    with job_log_context(attempt.job.job_id, _attempt_log_id(attempt.registry, attempt.job.job_id)):
+        try:
+            with attempt_lease(attempt.workspace):
+                project = attempt.registry.get_project(attempt.job.project_id)
+                if project.input_recipe_ref is not None:
+                    if project.input_manifest_ref is None:
+                        raise ValueError("Grouped input project has no InputManifest")
+                    manifest = _pull_input(attempt.registry.runtime_resolver, project.input_manifest_ref)
+                    _validate_project_input_recipe(attempt, project, manifest)
+                job = _execute_preview(attempt, frames, profile)
+            return _requeue_if_exhausted(attempt) or job
+        except BaseException as error:
+            _record_runner_failure(attempt, error)
+            _requeue_if_exhausted(attempt)
+            raise
 
 
 def run_video_job(job_id: str, *, expected_checksum: str | None = None) -> JobManifest:
     """Upload video → frame set → preview trong một attempt; dừng ngay ở stage lỗi."""
     attempt, profile = _start_attempt(job_id, expected_checksum, StageId.INPUT_VALIDATE)
-    try:
-        with attempt_lease(attempt.workspace):
-            attempt.job = _execute_prepare(attempt, profile)
-            if attempt.job.status != JobStatus.RUNNING:
-                _record_benchmark(attempt)  # job dừng ở bước chuẩn bị (vd video lỗi) vẫn có số đo
-                return attempt.job
-            frames = prepared_frame_reference(attempt.job)
-            if frames is None:
-                raise ValueError("Prepare thành công nhưng thiếu frame set")
-            attempt.job = _execute_lidar_ingest(attempt, frames)
-            if attempt.job.status != JobStatus.RUNNING:
-                _record_benchmark(attempt)  # LiDAR ingest hoặc structural QA lỗi: dừng trước COLMAP/Brush
-                return attempt.job
-            job = _execute_preview(attempt, frames, profile)
-        return _requeue_if_exhausted(attempt) or job
-    except BaseException as error:
-        _record_runner_failure(attempt, error)
-        _requeue_if_exhausted(attempt)
-        raise
+    with job_log_context(attempt.job.job_id, _attempt_log_id(attempt.registry, attempt.job.job_id)):
+        try:
+            with attempt_lease(attempt.workspace):
+                attempt.job = _execute_prepare(attempt, profile)
+                if attempt.job.status != JobStatus.RUNNING:
+                    _record_benchmark(attempt)  # job dừng ở bước chuẩn bị (vd video lỗi) vẫn có số đo
+                    return attempt.job
+                frames = prepared_frame_reference(attempt.job)
+                if frames is None:
+                    raise ValueError("Prepare thành công nhưng thiếu frame set")
+                attempt.job = _execute_lidar_ingest(attempt, frames)
+                if attempt.job.status != JobStatus.RUNNING:
+                    _record_benchmark(attempt)  # LiDAR ingest hoặc structural QA lỗi: dừng trước COLMAP/Brush
+                    return attempt.job
+                job = _execute_preview(attempt, frames, profile)
+            return _requeue_if_exhausted(attempt) or job
+        except BaseException as error:
+            _record_runner_failure(attempt, error)
+            _requeue_if_exhausted(attempt)
+            raise
 
 
 def _authorized_decision(attempt_registry: ProjectRegistry, job: JobManifest) -> tuple[ProductArtifactRef, str]:
@@ -1011,60 +1020,61 @@ def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> Jo
     workspace = settings.product_worker_root.expanduser().resolve() / job_id / attempt_id
     workspace.mkdir(parents=True, exist_ok=False)
     attempt = _Attempt(registry, settings, job, workspace)
-    try:
-        with attempt_lease(workspace):
-            request = {
-                "schema_version": "1.0",
-                "execution_scope": "product_finalize",
-                "job_id": job_id,
-                "attempt_id": attempt_id,
-                "confirmation_ref": confirmation.model_dump(mode="json"),
-                "authorized_decision_checksum": decision_checksum,
-                "geometry": profile.model_dump(mode="json"),
-            }
-            # Job có gói LiDAR (ADR 0009): bước hoàn tất gắn đám mây LiDAR vào bundle bằng căn chỉnh đã xác nhận.
-            lidar = _lidar_package_ref(registry.get_job(job_id))
-            if lidar is not None:
-                request["lidar_package_ref"] = lidar.model_dump(mode="json")
-            request_path = workspace / "finalize.request.json"
-            with request_path.open("x", encoding="utf-8") as stream:
-                json.dump(request, stream)
-            command = [
-                sys.executable,
-                "-m",
-                "src.services.reconstruction.finalize_cli",
-                "--request",
-                str(request_path),
-                "--store-root",
-                str(registry.runtime_resolver.artifact_root),
-                "--workspace",
-                str(workspace / "rec"),
-                "--progress-file",
-                str(workspace / "finalize.progress.jsonl"),
-            ]
-            exit_code, payload = _run_tool(attempt, "finalize", command, settings.product_finalize_timeout_seconds)
-            registry.runtime_resolver.sync_up(job_id)
-            if exit_code not in {0, 1}:
-                raise RuntimeError("Finalize worker không trả result hợp lệ")
-            reference = ProductArtifactRef.model_validate(payload.get("result_ref"))
-            result = load_finalize_result(reference, registry.runtime_resolver.require)
-            if result.attempt_id != attempt_id or (result.error is None) != (exit_code == 0):
-                raise ValueError("Finalize result khác attempt/exit status")
-            extra: list[StageArtifact] = []
-            if result.error is None:
-                extra = _extract_scene_stage(attempt, workspace, result.bundle_ref)
-            completed = registry.record_finalize(attempt.job, result, reference, extra)
-            _record_benchmark(attempt)
-            # Scene consumer đã chạy xong trước durable commit; lỗi extraction vẫn giữ scratch để debug.
-            if result.error is None and extra:
-                _cleanup_attempt_workspace(attempt)
-            if completed.status == JobStatus.SUCCEEDED:
-                _cleanup_finished_job(attempt)
-        return _requeue_if_exhausted(attempt) or completed
-    except BaseException as error:
-        _record_runner_failure(attempt, error)
-        _requeue_if_exhausted(attempt)
-        raise
+    with job_log_context(job_id, _attempt_log_id(registry, job_id)):
+        try:
+            with attempt_lease(workspace):
+                request = {
+                    "schema_version": "1.0",
+                    "execution_scope": "product_finalize",
+                    "job_id": job_id,
+                    "attempt_id": attempt_id,
+                    "confirmation_ref": confirmation.model_dump(mode="json"),
+                    "authorized_decision_checksum": decision_checksum,
+                    "geometry": profile.model_dump(mode="json"),
+                }
+                # Job có gói LiDAR (ADR 0009): bước hoàn tất gắn đám mây LiDAR vào bundle bằng căn chỉnh đã xác nhận.
+                lidar = _lidar_package_ref(registry.get_job(job_id))
+                if lidar is not None:
+                    request["lidar_package_ref"] = lidar.model_dump(mode="json")
+                request_path = workspace / "finalize.request.json"
+                with request_path.open("x", encoding="utf-8") as stream:
+                    json.dump(request, stream)
+                command = [
+                    sys.executable,
+                    "-m",
+                    "src.services.reconstruction.finalize_cli",
+                    "--request",
+                    str(request_path),
+                    "--store-root",
+                    str(registry.runtime_resolver.artifact_root),
+                    "--workspace",
+                    str(workspace / "rec"),
+                    "--progress-file",
+                    str(workspace / "finalize.progress.jsonl"),
+                ]
+                exit_code, payload = _run_tool(attempt, "finalize", command, settings.product_finalize_timeout_seconds)
+                registry.runtime_resolver.sync_up(job_id)
+                if exit_code not in {0, 1}:
+                    raise RuntimeError("Finalize worker không trả result hợp lệ")
+                reference = ProductArtifactRef.model_validate(payload.get("result_ref"))
+                result = load_finalize_result(reference, registry.runtime_resolver.require)
+                if result.attempt_id != attempt_id or (result.error is None) != (exit_code == 0):
+                    raise ValueError("Finalize result khác attempt/exit status")
+                extra: list[StageArtifact] = []
+                if result.error is None:
+                    extra = _extract_scene_stage(attempt, workspace, result.bundle_ref)
+                completed = registry.record_finalize(attempt.job, result, reference, extra)
+                _record_benchmark(attempt)
+                # Scene consumer đã chạy xong trước durable commit; lỗi extraction vẫn giữ scratch để debug.
+                if result.error is None and extra:
+                    _cleanup_attempt_workspace(attempt)
+                if completed.status == JobStatus.SUCCEEDED:
+                    _cleanup_finished_job(attempt)
+            return _requeue_if_exhausted(attempt) or completed
+        except BaseException as error:
+            _record_runner_failure(attempt, error)
+            _requeue_if_exhausted(attempt)
+            raise
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1073,7 +1083,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--job-id", required=True)
     parser.add_argument("--frame-set-uri", required=True)
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO)
+    configure_worker_logging()
     previous_handler = signal.getsignal(signal.SIGTERM)
 
     def interrupt(signum: int, frame: object) -> None:
