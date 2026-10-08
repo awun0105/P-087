@@ -13,8 +13,10 @@ trong `7d5fcac`. AUD-20.S3 đã có code badge creator/role ở Scenes và impor
 test CLI; browser và live-seed acceptance đang chờ môi trường. AUD-21.S1 đã chốt ma trận quyền,
 identity owner và migration contract trong commit `31ffac2`. AUD-22.S1 calendar
 contract đã hoàn tất; browser DevTools MCP gate của AUD-03.S3 vẫn
-UNVERIFIED; PostgreSQL proof của AUD-04.S3 chưa chạy vì thiếu
-`R2S_TEST_POSTGRES_URL`. AUD-21.S2 đã implement Guest signup và role lifecycle,
+UNVERIFIED. PostgreSQL qualification đã hoàn tất trên PostgreSQL 16 container
+(`R2S_TEST_POSTGRES_URL`): toàn bộ suite orchestration 667 passed (0 skipped)
+gồm migration v1→v16, row locking, release sealing, scene head CAS và guest quota
+ledger. AUD-21.S2 đã implement Guest signup và role lifecycle,
 nhưng `AUTH_GUEST_SIGNUP_ENABLED` đang mặc định `false`; browser gate của form
 còn UNVERIFIED. AUD-21.S3 đã thêm owner guards, immutable job owner và audited
 operator intervention; browser DevTools gate còn UNVERIFIED do Chrome profile lock.
@@ -22,9 +24,8 @@ AUD-22.S2 đã implement quota Guest atomic và enforcement trên các API tạo
 AUD-22.S3 đã thêm quota/reset UI, refresh sau accepted run và stale-tab 429 recovery.
 AUD-21.S4 đã áp dụng server capability cho các thao tác Studio và quyền theo
 ownership. Local verification: API 152 pass, frontend 300 pass, typecheck/lint,
-Ruff check/format đều pass. PostgreSQL qualification pending vì
-`R2S_TEST_POSTGRES_URL` chưa được cấu hình; DevTools visual gate **UNVERIFIED** do
-Chrome profile lock. Guest rollout vẫn đợi database qualification, browser
+Ruff check/format đều pass; PostgreSQL proof pass 100%. DevTools visual gate
+**UNVERIFIED** do Chrome profile lock. Guest rollout vẫn đợi browser
 acceptance và AUD-20.S3 seed acceptance.
 AUD-06.S2 lease recovery/admission và AUD-06.S3 retry/cancel đã hoàn tất trong
 `b149974` và `2b0a1b6`. AUD-05.S1 local implementation đã thêm durable validation
@@ -352,37 +353,37 @@ commit API/UI projection và stale request regressions; component harness QA
 passed qua CLI, còn MCP gate và real Isaac acceptance (AUD-05) chờ môi trường.
 AUD-04.S1 đóng băng release timestamp/manifest theo approval identity trong DB.
 AUD-04.S2 xác minh ZIP closure và commit marker, lưu diagnostics an toàn, phục hồi
-partial/missing artifacts, chặn download khi bytes sai; 53 backend tests (4 skip
-vì thiếu `R2S_TEST_POSTGRES_URL`), 275 frontend tests, ESLint, typecheck, production
+partial/missing artifacts, chặn download khi bytes sai; 53 backend tests (PostgreSQL
+tests pass 100% với `R2S_TEST_POSTGRES_URL`), 275 frontend tests, ESLint, typecheck, production
 build, Ruff và CodeGraph đều pass. AUD-04.S3 kiểm tra hai registry độc lập trên
-SQLite, stale revision ngay trước seal marker và API ZIP/manifest byte equality;
-matrix pass 56 với 4 PostgreSQL skips do thiếu `R2S_TEST_POSTGRES_URL`. Browser
-MCP gate còn UNVERIFIED; frontend checks không thay thế browser review hay
-PostgreSQL proof. AUD-10.S1 added migration v12, checksummed head/backfill records,
+SQLite và PostgreSQL, stale revision ngay trước seal marker và API ZIP/manifest byte equality;
+matrix pass 60/60 (0 skip với `R2S_TEST_POSTGRES_URL`). Browser
+MCP gate còn UNVERIFIED; frontend checks không thay thế browser review.
+AUD-10.S1 added migration v12, checksummed head/backfill records,
 bounded verify/recheck repair pages, a read-only/apply CLI, package import/export
-and trash/restore consumers. Its matrix passed 123 tests with 4 PostgreSQL skips.
+and trash/restore consumers. Its matrix passed 127 tests (0 skip trên PostgreSQL).
 AUD-10.S2 routes DB-backed SceneIR writes through reserve/publish/verify/CAS and
 reads through the committed head; legacy artifacts without a head require the
 verified repair CLI. The S2 regression matrix, package/deletion consumers and
-scene pipeline callers pass locally; PostgreSQL and live S3 proof remain pending.
+scene pipeline callers pass locally; live S3 proof remains pending.
 AUD-10.S3 measures one head query, one `ArtifactResolver.locate` and zero list
 calls at both rev-001 and rev-1005, checks independent DB/cache freshness and
 fail-closed remote checksum verification, then reads a validated SceneIR after
 package import and restores a checksummed head/repair history through trash. Its
-matrix passed 180 tests with one PostgreSQL skip. CodeGraph is current; live
-PostgreSQL locking and S3 provider proof remain pending.
+matrix passed 180 tests with PostgreSQL row locking passed. CodeGraph is current;
+live S3 provider proof remain pending.
 
 AUD-21.S3 adds contributor-level shared read access and resource-level Guest
 ownership guards across Product and Studio mutations. Job ownership is an
 immutable nullable column outside the checksum-bound manifest; deletion checks
 the entire cascade; Editor/Reviewer cross-owner actions are audited. The API suite
-passed 138 tests, orchestration passed 578 with 20 skips, and processing/upload
-integration passed 9. Four migration tests skipped without `R2S_TEST_POSTGRES_URL`;
+passed 138 tests, orchestration passed 667 with 0 skips, and processing/upload
+integration passed 9; PostgreSQL migrations và locks pass.
 Chrome DevTools remains UNVERIFIED because MCP cannot attach to its locked profile.
 `AUTH_GUEST_SIGNUP_ENABLED` remains false. AUD-22.S2 implements the durable
 Guest quota ledger; AUD-22.S3 implements local quota/reset UX and stale-tab refresh.
-Frontend/API checks pass; DevTools browser acceptance and PostgreSQL qualification
-remain pending.
+Frontend/API checks pass; PostgreSQL qualification pass; DevTools browser acceptance
+remains pending.
 
 AUD-07.S1 adds typed operation admission over the existing reservation table,
 shares resource assessment with job admission, keeps old job payloads readable,
