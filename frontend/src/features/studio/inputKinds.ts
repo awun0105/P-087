@@ -49,9 +49,9 @@ export function isGaussian(record: UploadRecord): boolean {
   return kind === "gaussian_ply" || kind === "gaussian_ply_colmap";
 }
 
-/** Hiện chỉ video có luồng dựng scene; import 3DGS là gói 5 của plan tổng thể. */
+/** Chỉ video RGB được dựng scene; chờ server xác minh receipt nếu upload đã chuẩn hóa. */
 export function canCreateScene(record: UploadRecord): boolean {
-  return inputKind(record) === "rgb_video";
+  return inputKind(record) === "rgb_video" && record.video_preparation_status !== "pending";
 }
 
 /** Tóm tắt bằng chứng nhận diện để người dùng thấy máy chủ đã hiểu file thế nào. */

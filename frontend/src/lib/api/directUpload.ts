@@ -3,8 +3,9 @@
  *
  * - Web UI/API không cõng bytes: API chỉ mở phiên và cấp link PUT có hạn theo nhóm phần.
  * - Chạy song song vài phần, thử lại phần lỗi, xin link mới khi link hết hạn.
- * - Nối lại được: id phiên lưu trong localStorage theo tên + kích thước + ngày sửa file;
- *   mở lại đúng file thì chỉ upload các phần còn thiếu.
+ * - Upload legacy nối lại theo tên + kích thước + ngày sửa file. Video chuẩn hóa truyền khóa theo
+ *   account + checksum nội dung để tránh nối nhầm phiên khi đổi encoding.
+ * - Phần đã nhận được server giữ lại; lần sau chỉ upload các phần còn thiếu.
  * - Server tự ghép và tính checksum; client chỉ poll tới READY/FAILED.
  */
 
@@ -35,6 +36,10 @@ export interface DirectUploadOptions {
   onProgress: (fraction: number) => void;
   onVerifying?: () => void;
   signal: AbortSignal;
+  /** Content/account identity for normalized media; omitting keeps the legacy filename key. */
+  resumeIdentity?: string;
+  /** Keep a READY session until the caller completes a later verification stage. */
+  keepResumeKey?: boolean;
   concurrency?: number;
   maxAttempts?: number;
   pollMs?: number;
@@ -43,7 +48,8 @@ export interface DirectUploadOptions {
 const API = "/api/v1/uploads/direct";
 const URL_BATCH = 20;
 
-function resumeKey(file: File): string {
+function resumeKey(file: File, identity?: string): string {
+  if (identity) return `r2s-upload:v2:${encodeURIComponent(identity)}`;
   return `r2s-upload:${file.name}:${file.size}:${file.lastModified}`;
 }
 
@@ -69,13 +75,16 @@ function aborted(signal: AbortSignal): void {
 }
 
 /** Phiên đang UPLOADING của đúng file này (nếu còn), không thì mở phiên mới. */
-async function openSession(file: File, deps: DirectUploadDeps): Promise<DirectUploadState> {
-  const key = resumeKey(file);
+async function openSession(file: File, options: DirectUploadOptions, deps: DirectUploadDeps): Promise<DirectUploadState> {
+  const key = resumeKey(file, options.resumeIdentity);
   const saved = readSaved(deps.storage, key);
   if (saved) {
     try {
       const state = await deps.api<DirectUploadState>(`${API}/${encodeURIComponent(saved)}`);
-      if (state.status === "UPLOADING" && state.size_bytes === file.size) return state;
+      if (
+        state.size_bytes === file.size &&
+        (state.status === "UPLOADING" || (options.keepResumeKey && state.status === "READY"))
+      ) return state;
     } catch {
       // Phiên cũ không còn: mở phiên mới bên dưới.
     }
@@ -92,7 +101,13 @@ export async function directUpload(file: File, options: DirectUploadOptions, dep
   const { signal } = options;
   const concurrency = options.concurrency ?? 4;
   const maxAttempts = options.maxAttempts ?? 4;
-  const session = await openSession(file, deps);
+  const session = await openSession(file, options, deps);
+  const key = resumeKey(file, options.resumeIdentity);
+  if (session.status === "READY") {
+    options.onProgress(1);
+    if (!options.keepResumeKey) writeSaved(deps.storage, key, null);
+    return session;
+  }
   const { upload_id: uploadId, part_size: partSize, part_count: partCount } = session;
   const partBytes = (n: number) => Math.min(partSize, file.size - (n - 1) * partSize);
 
@@ -170,9 +185,17 @@ export async function directUpload(file: File, options: DirectUploadOptions, dep
       poll % nudgeEvery === 0 ? { method: "POST" } : undefined,
     );
   }
-  writeSaved(deps.storage, resumeKey(file), null);
+  if (!options.keepResumeKey) writeSaved(deps.storage, key, null);
   if (state.status !== "READY") throw new ApiError(422, state.error ?? "Video không qua được bước kiểm tra");
   return state;
+}
+
+export function clearDirectUploadResume(
+  file: File,
+  resumeIdentity: string | undefined,
+  storage: DirectUploadDeps["storage"],
+): void {
+  writeSaved(storage, resumeKey(file, resumeIdentity), null);
 }
 
 /** PUT bằng XHR để có tiến độ upload (fetch chưa báo tiến độ gửi). */

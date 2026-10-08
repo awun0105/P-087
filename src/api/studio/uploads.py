@@ -8,6 +8,7 @@ store qua API (local/không có kho file). File I/O đồng bộ chạy qua thre
 import logging
 import tempfile
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
@@ -44,12 +45,21 @@ router = APIRouter()
 class UploadResponse(UploadRecord):
     """Public shape; local source fingerprints and verification internals stay server-side."""
 
+    video_preparation_status: Literal["pending", "verified"] | None = None
     video_preparation_manifest: ClientVideoPreparationManifest | None = Field(default=None, exclude=True)
     video_preparation: ServerVideoPreparationVerification | None = Field(default=None, exclude=True)
 
     @classmethod
     def from_record(cls, record: UploadRecord) -> "UploadResponse":
-        return cls.model_validate(record.model_dump(mode="python"))
+        payload = record.model_dump(mode="python")
+        payload["video_preparation_status"] = (
+            "verified"
+            if record.video_preparation is not None
+            else "pending"
+            if record.video_preparation_manifest is not None
+            else None
+        )
+        return cls.model_validate(payload)
 
 
 class UploadListResponse(BaseModel):

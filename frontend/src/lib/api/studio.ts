@@ -4,7 +4,9 @@
  */
 
 import { ApiError, apiFetch, apiUrl, fetchApi, type ApiResult } from "@/lib/api/client";
-import { directUpload, xhrPutPart } from "@/lib/api/directUpload";
+import { clearDirectUploadResume, directUpload, xhrPutPart } from "@/lib/api/directUpload";
+import { verifyVideoPreparationChecksum } from "@/lib/contracts/videoPreparation";
+import type { VideoPreparedArtifact } from "@/lib/media/video-normalization";
 import type { SceneEditResponse, SceneResponse } from "@/lib/contracts/api";
 import {
   parseDemoManifest,
@@ -174,6 +176,11 @@ export interface UploadHandle {
   abort: () => void;
 }
 
+export interface UploadVideoOptions {
+  resumeIdentity?: string;
+  keepResumeKey?: boolean;
+}
+
 /**
  * Tải video lên: có kho file (ADR 0003) thì upload thẳng theo từng phần, không thì
  * stream qua API. `onProgress` nhận tỉ lệ bytes đã gửi (đo thật, 0..1); `onVerifying`
@@ -183,6 +190,7 @@ export function uploadVideo(
   file: File,
   onProgress: (fraction: number) => void,
   onVerifying?: () => void,
+  options: UploadVideoOptions = {},
 ): UploadHandle {
   const controller = new AbortController();
   let proxy: UploadHandle | null = null;
@@ -198,7 +206,13 @@ export function uploadVideo(
     }
     const state = await directUpload(
       file,
-      { onProgress, onVerifying, signal: controller.signal },
+      {
+        onProgress,
+        onVerifying,
+        signal: controller.signal,
+        resumeIdentity: options.resumeIdentity,
+        keepResumeKey: options.keepResumeKey,
+      },
       { api: apiFetch, putPart: xhrPutPart, sleep: (ms) => new Promise((r) => setTimeout(r, ms)), storage: browserStorage() },
     );
     const uploads = await apiFetch<{ uploads: UploadRecord[] }>(`${API}/uploads`);
@@ -213,6 +227,138 @@ export function uploadVideo(
       proxy?.abort();
     },
   };
+}
+
+export interface PreparedVideoUploadOptions {
+  accountId: string;
+  onProgress: (fraction: number) => void;
+  onVerifying?: () => void;
+  onUploadedRecord?: (record: UploadRecord) => void;
+  existingRecord?: UploadRecord | null;
+}
+
+interface PreparedVideoUploadDependencies {
+  upload: typeof uploadVideo;
+  api: <T>(path: string, init?: RequestInit) => Promise<T>;
+  storage: () => Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
+}
+
+const preparedVideoUploadDependencies: PreparedVideoUploadDependencies = {
+  upload: uploadVideo,
+  api: apiFetch,
+  storage: browserStorage,
+};
+
+function readStoredUploadId(storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null, key: string): string | null {
+  try {
+    return storage?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function storeUploadId(
+  storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null,
+  key: string,
+  uploadId: string | null,
+): void {
+  try {
+    if (uploadId === null) storage?.removeItem(key);
+    else storage?.setItem(key, uploadId);
+  } catch {
+    // Upload remains usable in this tab; a denied storage only disables reload recovery.
+  }
+}
+
+function belongsToAccount(record: UploadRecord, accountId: string): boolean {
+  return accountId === "local" || accountId === "anonymous"
+    ? record.uploaded_by == null
+    : record.uploaded_by?.user_id === accountId;
+}
+
+function matchesPreparedUpload(record: UploadRecord, accountId: string, prepared: VideoPreparedArtifact): boolean {
+  return belongsToAccount(record, accountId) && record.input_kind === "rgb_video" &&
+    record.media_type === "video/mp4" && record.size_bytes === prepared.file.size &&
+    record.checksum === prepared.manifest.prepared_file.checksum;
+}
+
+async function findPreparedUpload(
+  storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null,
+  key: string,
+  accountId: string,
+  prepared: VideoPreparedArtifact,
+  api: PreparedVideoUploadDependencies["api"],
+  signal: AbortSignal,
+): Promise<UploadRecord | null> {
+  const savedId = readStoredUploadId(storage, key);
+  if (!savedId) return null;
+  const uploads = await api<{ uploads: UploadRecord[] }>(`${API}/uploads`, { signal });
+  const record = uploads.uploads.find((item) => item.upload_id === savedId) ?? null;
+  const matches = record !== null && matchesPreparedUpload(record, accountId, prepared);
+  if (!matches) storeUploadId(storage, key, null);
+  return matches ? record : null;
+}
+
+/** Upload finalized bytes, then bind and verify the preparation receipt and source-frame map. */
+export function uploadPreparedVideo(
+  prepared: VideoPreparedArtifact,
+  options: PreparedVideoUploadOptions,
+  dependencies: PreparedVideoUploadDependencies = preparedVideoUploadDependencies,
+): UploadHandle {
+  const controller = new AbortController();
+  let activeUpload: UploadHandle | null = null;
+  const identity = `${options.accountId}:${prepared.manifest.prepared_file.checksum}:${prepared.manifest.preparation_checksum}`;
+  const storageKey = `r2s-prepared-upload:v1:${encodeURIComponent(identity)}`;
+  const directStorage = dependencies.storage();
+  const promise = (async () => {
+    if (prepared.file.size !== prepared.manifest.prepared_file.size_bytes ||
+        prepared.frameMapFile.size !== prepared.manifest.frame_map.size_bytes) {
+      throw new ApiError(422, "Bản video hoặc frame map không khớp kích thước trong manifest.");
+    }
+    await verifyVideoPreparationChecksum(prepared.manifest);
+    let record = options.existingRecord && matchesPreparedUpload(options.existingRecord, options.accountId, prepared)
+      ? options.existingRecord
+      : null;
+    record ??= await findPreparedUpload(
+      directStorage, storageKey, options.accountId, prepared, dependencies.api, controller.signal,
+    );
+    if (!record) {
+      activeUpload = dependencies.upload(
+        prepared.file,
+        options.onProgress,
+        options.onVerifying,
+        { resumeIdentity: identity, keepResumeKey: true },
+      );
+      if (controller.signal.aborted) activeUpload.abort();
+      record = await activeUpload.promise;
+      storeUploadId(directStorage, storageKey, record.upload_id);
+    }
+    options.onUploadedRecord?.(record);
+    if (controller.signal.aborted) throw new ApiError(499, "Đã hủy xác minh video.");
+
+    const uploadId = encodeURIComponent(record.upload_id);
+    await dependencies.api<UploadRecord>(`${API}/uploads/${uploadId}/video-preparation/manifest`, {
+      method: "PUT",
+      body: JSON.stringify(prepared.manifest),
+      signal: controller.signal,
+    });
+    options.onVerifying?.();
+    const verified = await dependencies.api<UploadRecord>(`${API}/uploads/${uploadId}/video-preparation/frame-map`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/x-ndjson" },
+      body: prepared.frameMapFile,
+      signal: controller.signal,
+    });
+    storeUploadId(directStorage, storageKey, null);
+    clearDirectUploadResume(prepared.file, identity, directStorage);
+    return verified;
+  })();
+
+  const abort = () => {
+    controller.abort();
+    activeUpload?.abort();
+  };
+  return { promise, abort };
 }
 
 function browserStorage(): Storage | null {

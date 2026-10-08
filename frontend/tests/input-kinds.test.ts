@@ -26,6 +26,13 @@ describe("input kinds", () => {
     expect(canCreateScene(legacy)).toBe(true);
   });
 
+  it("blocks scene creation until normalized media upload has server verification", () => {
+    const pending = { ...BASE, media_type: "video/mp4" as const, input_kind: "rgb_video" as const, video_preparation_status: "pending" as const };
+    const verified = { ...pending, video_preparation_status: "verified" as const };
+    expect(canCreateScene(pending)).toBe(false);
+    expect(canCreateScene(verified)).toBe(true);
+  });
+
   it("describes detected 3DGS and blocks scene creation until import exists", () => {
     const ply: UploadRecord = {
       ...BASE,

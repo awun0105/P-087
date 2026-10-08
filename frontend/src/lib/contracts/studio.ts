@@ -67,6 +67,8 @@ export interface UploadRecord {
   input_kind?: InputKind;
   detection?: InputDetection | null;
   uploaded_by?: Actor | null;
+  /** Safe status only; preparation source fingerprint and verification evidence stay private. */
+  video_preparation_status?: "pending" | "verified" | null;
 }
 
 export type DataOrigin = "public_or_synthetic" | "self_collected_no_pii" | "anonymized";

@@ -50,6 +50,7 @@
   --color-viewport: var(--studio-viewport);
   --color-viewport-deep: var(--studio-viewport-deep); /* thanh tiêu đề/đáy của khung tối, như khung viewport trên landing */
   --color-viewport-raised: var(--studio-viewport-raised); /* viền/ô nổi bên trong khung tối */
+  --color-media-preview-surface: var(--studio-media-preview-surface);
 
   --color-sage: var(--studio-sage);
   --color-sage-soft: var(--studio-sage-soft);
@@ -163,6 +164,7 @@
   --studio-geometry: #2f7ea8;
   --studio-viewport: #1f1b17;
   --studio-viewport-deep: #171412;
+  --studio-media-preview-surface: #000000; /* letterbox preview video luôn đen ở mọi bảng màu */
   --studio-sage: #5e8c61;
   --studio-sage-soft: #e3ede0;
   --studio-ochre: #b7862a;
@@ -208,6 +210,7 @@
   --studio-geometry: #5aa9d1;
   --studio-viewport: #110f0d;
   --studio-viewport-deep: #0b0a09;
+  --studio-media-preview-surface: #000000;
   --studio-sage: #8fb891;
   --studio-sage-soft: #1f2b20;
   --studio-ochre: #d9a94a;
@@ -276,6 +279,7 @@
   --studio-geometry: #076678;
   --studio-viewport: #1d2021;
   --studio-viewport-deep: #141617;
+  --studio-media-preview-surface: #000000;
   --studio-viewport-raised: #3c3836;
   --studio-sage: #79740e;
   --studio-sage-soft: #dee2b6;
@@ -339,6 +343,7 @@
   --studio-geometry: #83a598;
   --studio-viewport: #1d2021;
   --studio-viewport-deep: #141617;
+  --studio-media-preview-surface: #000000;
   --studio-viewport-raised: #3c3836;
   --studio-sage: #b8bb26;
   --studio-sage-soft: #3b4439;

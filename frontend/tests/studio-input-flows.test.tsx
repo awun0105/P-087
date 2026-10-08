@@ -6,9 +6,12 @@ import { ImportSetupStep } from "@/features/studio/ImportSetupStep";
 import { NewSceneFlow } from "@/features/studio/NewSceneFlow";
 import { UploadDropzone } from "@/features/studio/UploadDropzone";
 import { VideoSetupStep } from "@/features/studio/VideoSetupStep";
-import { createImport, createSceneFromUpload, listSamples, listUploads, uploadVideo } from "@/lib/api/studio";
+import { createImport, createSceneFromUpload, listSamples, listUploads, uploadPreparedVideo, uploadVideo } from "@/lib/api/studio";
 import type { Me } from "@/lib/api/auth";
 import type { UploadRecord } from "@/lib/contracts/studio";
+import { prepareVideoForUpload } from "@/lib/media/video-normalization";
+import type { VideoPreparedArtifact } from "@/lib/media/video-normalization";
+import { VideoPreparationError } from "@/lib/media/video-normalization-core";
 
 const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 const authState = vi.hoisted(() => ({ me: { auth_required: false, user: null } as Me, refresh: vi.fn() }));
@@ -17,7 +20,11 @@ vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => authState }));
 vi.mock("@/features/studio/useProcessingForm", () => ({ useProcessingForm: () => ({ options: null, values: null, evaluation: null, error: null, activePreset: null }) }));
 vi.mock("@/lib/api/studio", async (original) => ({
   ...(await original<typeof import("@/lib/api/studio")>()),
-  listUploads: vi.fn(), listSamples: vi.fn(), createImport: vi.fn(), createSceneFromUpload: vi.fn(), uploadVideo: vi.fn(),
+  listUploads: vi.fn(), listSamples: vi.fn(), createImport: vi.fn(), createSceneFromUpload: vi.fn(), uploadVideo: vi.fn(), uploadPreparedVideo: vi.fn(),
+}));
+vi.mock("@/lib/media/video-normalization", async (original) => ({
+  ...(await original<typeof import("@/lib/media/video-normalization")>()),
+  prepareVideoForUpload: vi.fn(),
 }));
 
 const video: UploadRecord = { upload_id: "video-1", original_name: "warehouse.mp4", media_type: "video/mp4", size_bytes: 100, checksum: "sha256:test", artifact_uri: "artifact://test/video", received_at: "2026-10-01T00:00:00Z", project_ids: [], input_kind: "rgb_video" };
@@ -37,9 +44,27 @@ function guestMe(remaining: number): Me {
     },
   };
 }
+function preparedArtifact(bytes = "prepared-video-bytes"): VideoPreparedArtifact {
+  const file = new File([bytes], "prepared.mp4", { type: "video/mp4" });
+  const frameMapFile = new File(['{"source_frame_id":0}\n'], "frames.jsonl", { type: "application/x-ndjson" });
+  return {
+    file,
+    frameMapFile,
+    manifest: {
+      prepared_file: { checksum: "sha256:prepared", size_bytes: file.size },
+      frame_map: { size_bytes: frameMapFile.size },
+      source_video: { display_width: 1080, display_height: 1920, frame_rate: { numerator: 60, denominator: 1 } },
+      prepared_video: { display_width: 720, display_height: 1280, frame_rate: { numerator: 30, denominator: 1 } },
+      audio_disposition: "preserved",
+    },
+    dispose: vi.fn().mockResolvedValue(undefined),
+  } as unknown as VideoPreparedArtifact;
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:prepared-video") });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
   authState.me = { auth_required: false, user: null };
   authState.refresh.mockResolvedValue(undefined);
   sessionStorage.clear();
@@ -47,7 +72,6 @@ beforeEach(() => {
   vi.mocked(listUploads).mockResolvedValue({ ok: true, data: { uploads: [video, gaussian] } });
   vi.mocked(listSamples).mockResolvedValue({ ok: true, data: { samples: [] } });
 });
-
 describe("ba cửa vào", () => {
   it("remount giữ form; chuyển video bỏ xác nhận của đầu vào cũ", async () => {
     const second = { ...video, upload_id: "video-2", original_name: "room.mp4" };
@@ -205,21 +229,94 @@ describe("gói LiDAR ở trang dựng từ video", () => {
 });
 
 describe("upload lifecycle", () => {
-  it("chặn đuôi sai nhánh trước khi gửi; unmount abort và bỏ response muộn", async () => {
+  it("chặn đuôi sai nhánh; chỉ chuẩn bị và xem trước, rồi mới upload theo lựa chọn rõ ràng", async () => {
+    const artifact = preparedArtifact();
+    vi.mocked(prepareVideoForUpload).mockResolvedValue(artifact);
     let resolve!: (value: UploadRecord) => void;
     const abort = vi.fn();
-    vi.mocked(uploadVideo).mockReturnValue({ abort, promise: new Promise((done) => { resolve = done; }) });
+    vi.mocked(uploadPreparedVideo).mockReturnValue({ abort, promise: new Promise((done) => { resolve = done; }) });
     const uploaded = vi.fn();
     const view = render(<UploadDropzone kind="video" onUploaded={uploaded} />);
     const input = screen.getByLabelText(/Kéo video/);
     fireEvent.change(input, { target: { files: [new File(["ply"], "wrong.ply")] } });
     expect(uploadVideo).not.toHaveBeenCalled();
     expect(screen.getByText(/Dựng từ video chỉ nhận/)).toBeInTheDocument();
-    fireEvent.change(input, { target: { files: [new File(["video"], "valid.mp4")] } });
-    expect(uploadVideo).toHaveBeenCalledTimes(1);
+    const source = new File(["source-video"], "valid.mp4", { type: "video/mp4" });
+    fireEvent.change(input, { target: { files: [source] } });
+    expect(uploadVideo).not.toHaveBeenCalled();
+    expect(screen.getByRole("radio", { name: /720p/ })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Chuẩn bị để xem trước" }));
+    const preview = await screen.findByLabelText("Xem trước video đã chuẩn bị");
+    expect(preview).toHaveAttribute("src", "blob:prepared-video");
+    expect(preview).toHaveClass("bg-media-preview-surface");
+    expect(prepareVideoForUpload).toHaveBeenCalledWith(expect.objectContaining({ source, preset: "720p", omitAudioWithConsent: false }));
+    expect(uploadPreparedVideo).not.toHaveBeenCalled();
+    expect(screen.getByText(/Bản đã chuẩn bị lớn hơn video gốc/)).toBeInTheDocument();
+    expect(screen.getByText(/Nguồn: 1080 × 1920 \(dọc\)/)).toBeInTheDocument();
+    expect(screen.getByText(/720 × 1280 \(dọc\).*tối đa 30 FPS/)).toBeInTheDocument();
+    expect(screen.getByText("Âm thanh: đã giữ nguyên âm thanh.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Tải bản đã xem trước lên" }));
+    expect(uploadPreparedVideo).toHaveBeenCalledWith(artifact, expect.objectContaining({ accountId: "local", existingRecord: null }));
     view.unmount();
     expect(abort).toHaveBeenCalledTimes(1);
     resolve(video);
     await waitFor(() => expect(uploaded).not.toHaveBeenCalled());
+    expect(artifact.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("chỉ gửi video gốc nếu người dùng chọn rõ khi bản đã chuẩn bị lớn hơn", async () => {
+    vi.mocked(prepareVideoForUpload).mockResolvedValue(preparedArtifact());
+    const abort = vi.fn();
+    vi.mocked(uploadVideo).mockReturnValue({ abort, promise: Promise.resolve(video) });
+    render(<UploadDropzone kind="video" onUploaded={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(/Kéo video/), { target: { files: [new File(["source"], "source.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "Chuẩn bị để xem trước" }));
+    await screen.findByLabelText("Xem trước video đã chuẩn bị");
+    expect(uploadVideo).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Tải video gốc không nén" }));
+    await waitFor(() => expect(uploadVideo).toHaveBeenCalledOnce());
+    expect(uploadPreparedVideo).not.toHaveBeenCalled();
+  });
+
+  it("chỉ bỏ âm thanh sau khi có đồng ý rõ ràng", async () => {
+    const artifact = preparedArtifact();
+    artifact.manifest.audio_disposition = "omitted_with_user_consent";
+    vi.mocked(prepareVideoForUpload)
+      .mockRejectedValueOnce(new VideoPreparationError("audio_omission_required", "Audio is unsupported."))
+      .mockResolvedValueOnce(artifact);
+    render(<UploadDropzone kind="video" onUploaded={vi.fn()} />);
+    const source = new File(["source"], "source.mp4", { type: "video/mp4" });
+    fireEvent.change(screen.getByLabelText(/Kéo video/), { target: { files: [source] } });
+    fireEvent.click(screen.getByRole("button", { name: "Chuẩn bị để xem trước" }));
+
+    const consent = await screen.findByLabelText(/đồng ý bỏ toàn bộ âm thanh/);
+    expect(screen.getByRole("button", { name: "Chuẩn bị để xem trước" })).toBeDisabled();
+    expect(uploadVideo).not.toHaveBeenCalled();
+    fireEvent.click(consent);
+    fireEvent.click(screen.getByRole("button", { name: "Chuẩn bị và bỏ âm thanh" }));
+    await screen.findByLabelText("Xem trước video đã chuẩn bị");
+    expect(prepareVideoForUpload).toHaveBeenLastCalledWith(expect.objectContaining({ source, omitAudioWithConsent: true }));
+    expect(screen.getByText("Âm thanh: đã bỏ âm thanh theo lựa chọn của bạn.")).toBeInTheDocument();
+    expect(uploadVideo).not.toHaveBeenCalled();
+  });
+
+  it("hiện pha xử lý và hủy chuẩn bị mà không gửi video lên", async () => {
+    let rejectPreparation!: (cause: unknown) => void;
+    let preparationSignal: AbortSignal | undefined;
+    vi.mocked(prepareVideoForUpload).mockImplementation((request) => {
+      preparationSignal = request.signal;
+      return new Promise<VideoPreparedArtifact>((_resolve, reject) => { rejectPreparation = reject; });
+    });
+    render(<UploadDropzone kind="video" onUploaded={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(/Kéo video/), { target: { files: [new File(["source"], "source.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "Chuẩn bị để xem trước" }));
+
+    expect(await screen.findByText("Đang đọc và kiểm tra video gốc")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Hủy chuẩn bị" }));
+    expect(preparationSignal?.aborted).toBe(true);
+    rejectPreparation(new VideoPreparationError("cancelled", "Video preparation cancelled."));
+    expect(await screen.findByText("Đã hủy chuẩn bị; video gốc chưa được tải lên.")).toBeInTheDocument();
+    expect(uploadVideo).not.toHaveBeenCalled();
+    expect(uploadPreparedVideo).not.toHaveBeenCalled();
   });
 });

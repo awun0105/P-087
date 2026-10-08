@@ -238,8 +238,13 @@ Tests: full/reloaded/resumed uploads, same filename/size different bytes, accoun
 switch, changed preset, storage denied/eviction, network retry, cap/unsupported codec,
 slow mobile encoding, cancel during each phase, output larger and original-upload
 explicit fallback. Existing direct/proxy routes and source selection regression.
-**Exit:** [ ] browser uploads chosen finalized bytes and preserves consistent resume;
-[ ] orientation/preset/progress/errors usable and permission boundaries unchanged.
+**Exit:** [x] component/API contract uploads only the prepared file after explicit action,
+and the direct multipart session is bound to account + output digest + preparation identity;
+[x] local component tests cover portrait display, preset/progress/error choices, audio
+consent, explicit larger-output/raw choices, cancellation and post-upload state;
+[x] pending preparation cannot create a scene before server verification;
+[ ] actual target-browser codec, storage, upload, reload and permission behavior remain
+unverified and must be accepted in S5/browser qualification.
 
 ## Sprint AUD-23.S5 — Measured bandwidth, quality và browser acceptance
 
@@ -282,10 +287,9 @@ only proves orchestration; do not label browser encoding or real bandwidth accep
 
 ## Result / Evidence
 
-AUD-23.S1–S3 local implementation is recorded below. Upload UI/resume and
-real-browser, bandwidth, reconstruction-quality and paired-sensor acceptance
-remain for S4–S5. Local tests do not prove that a target browser can encode or
-play a real capture.
+AUD-23.S1–S4 local implementation is recorded below. Real-browser codec/runtime,
+bandwidth, reconstruction-quality and paired-sensor acceptance remain open. Local
+tests do not prove that a target browser can encode or play a real capture.
 
 ### S1 changes and verification
 
@@ -478,3 +482,75 @@ play a real capture.
   established by these local checks.
 - DevTools: **UNVERIFIED** — Chrome DevTools MCP could not list pages because the
   existing browser profile is locked; no logged-in page snapshot or console check ran.
+
+### S4 changes and verification
+
+- Reworked `UploadDropzone` video handling to stage selection → choose 1080p/720p/480p
+  (720p default) → prepare → preview → explicit upload. PLY/Gaussian and LiDAR retain
+  their existing upload paths. The preview uses `object-fit: contain` and the semantic
+  `bg-media-preview-surface` token, which remains black in all four theme variants; the summary
+  shows source/output dimensions and orientation, source/output FPS, audio disposition,
+  actual byte size/saving, and the exact percentage increase when output is larger.
+- Compression shows hashing/probing/encoding/output-verification phases and allows
+  cancellation. Unsupported input or a larger prepared file never triggers raw upload
+  automatically. Unsupported audio first asks for explicit omission consent; the raw
+  original remains an explicit user choice. The video preview URL and OPFS artifacts
+  are cleaned up on replacement or unmount.
+- `uploadPreparedVideo` uses the existing direct/proxy upload route, attaches the
+  preparation manifest and frame map only after media upload, and reports success
+  only after the server returns verified status. Direct multipart resume identity is
+  account + prepared-file digest + preparation checksum; a READY multipart session is
+  retained until the verification stage completes. Reload recovery verifies the
+  server upload belongs to the same account and matches type, size and digest before
+  reusing it. Existing-record retry also checks these fields. New encodes with changed
+  identity use a new session. Legacy upload keys keep their previous behavior.
+- Public upload responses expose only `video_preparation_status` (`pending` or
+  `verified`); internal manifests and verification reports remain excluded. Scene
+  creation filters pending records and the backend already rejects pending records.
+  Legacy, original-byte uploads remain eligible without a preparation map.
+- Added UI tests for default 720p and portrait preview, black preview-token behavior
+  across all palettes, no upload before explicit selection, actual size increase,
+  user-selected original bytes, explicit audio omission, retry/abort behavior and
+  cleanup. API helper tests cover manifest-before-
+  frame-map ordering, invalid sizes, same-account recovery without re-upload and
+  refusing another account's upload. Direct-upload tests cover retained READY session
+  keyed by content identity. Input-kind tests cover pending/verified status.
+- CodeGraph was synced and explored `UploadDropzone`, `NewSceneFlow`, `uploadPreparedVideo`,
+  `directUpload`, the verification routes and their callers. The uploader still has
+  five component callers; the new staged path is limited to `kind="video"`.
+- Verification commands and results:
+  - `cd frontend && npm test -- tests/direct-upload.test.ts tests/prepared-video-upload.test.ts tests/studio-input-flows.test.tsx tests/input-kinds.test.ts tests/video-normalization-service.test.ts tests/video-preparation-contract.test.ts tests/palette.test.tsx` — **52 passed**.
+  - `cd frontend && npm test` — **330 passed across 47 test files**.
+  - `cd frontend && npm run typecheck` — **pass**.
+  - `cd frontend && npx eslint ...` on changed TS/TSX implementation and tests — **pass**.
+  - `npm run build -- --webpack` in an isolated source copy, leaving the existing
+    `.next/dev` server untouched — **pass**, 16 routes generated. The default Turbopack
+    attempt rejected the copy's external `node_modules` symlink; the Webpack build
+    avoids that sandbox-specific path and compiles the same copied sources.
+  - `.venv/bin/pytest -q tests/test_orchestration/test_video_preparation_verification.py tests/test_contracts/test_video_preparation.py tests/test_orchestration/test_upload_input_kinds.py tests/test_api/test_studio_routes.py tests/integration/test_upload_to_prepared_job.py` — **54 passed**.
+  - `.venv/bin/ruff check src/ tests/` — **pass**; `.venv/bin/ruff format --check src/ tests/` — **482 files formatted**.
+- Browser gate: **UNVERIFIED**. Chrome DevTools MCP is connected, but its current
+  browser inventory contains only a Google sign-in page and no authenticated Studio
+  session. An earlier local `/new/import-video` attempt remained at “Đang kiểm tra quyền
+  truy cập…” while FastAPI at `127.0.0.1:8000` was unavailable; no upload interaction,
+  WebCodecs, OPFS, network transfer or user-role boundary was exercised in the browser. Do not
+  treat mocked component tests as browser/media acceptance. S5 still requires actual
+  codec, memory, bandwidth, held-out reconstruction and paired-sensor evidence.
+
+### S4 pre-flight gate report (GUIDE.md Rule 13)
+
+- codegraph: synced after the final source edits; explored UI, upload helper, direct
+  uploader, pending/verified response and callers before updates.
+- impact: `UploadDropzone` has five callers; video mode now stages before upload,
+  while Gaussian/LiDAR retain their existing paths. The pending-status gate connects
+  upload response, input selection and backend project creation.
+- understand: local file → selected preset → worker artifact/preview → direct/proxy
+  bytes → manifest declaration → server frame-map/PTS verification → selectable upload.
+- minimal-code: reused the existing normalizer, upload routes, multipart machinery,
+  UploadRecord and server verifier; added only content identity and recovery metadata
+  needed to complete the preparation stage.
+- checks: local frontend 330 tests (52 focused), typecheck, changed-file ESLint and
+  isolated Webpack build pass; backend 54 tests and full Ruff check/format pass. No
+  browser or hardware acceptance is claimed.
+- DevTools: **UNVERIFIED** — Chrome DevTools MCP has no authenticated Studio session;
+  no video interaction or media codec behavior was observed.

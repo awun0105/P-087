@@ -88,6 +88,28 @@ describe("directUpload", () => {
     expect(progress[0]).toBeCloseTo(0.4); // phần 1 đã có sẵn trước khi gửi tiếp
   });
 
+  it("video đã chuẩn hóa giữ phiên READY để retry bước gắn receipt bằng đúng identity nội dung", async () => {
+    const server = fakeServer({ size: 10 });
+    const resumeIdentity = "user-7:sha256:prepared:sha256:manifest";
+    const key = `r2s-upload:v2:${encodeURIComponent(resumeIdentity)}`;
+    const options = {
+      onProgress: () => {},
+      signal: new AbortController().signal,
+      resumeIdentity,
+      keepResumeKey: true,
+    };
+
+    await directUpload(file(10), options, server.deps);
+    expect(server.memory.get(key)).toBe("upload-1");
+    const uploadedParts = server.putPart.mock.calls.length;
+
+    const resumed = await directUpload(file(10), options, server.deps);
+    expect(resumed.status).toBe("READY");
+    expect(server.putPart).toHaveBeenCalledTimes(uploadedParts);
+    expect(server.memory.get(key)).toBe("upload-1");
+    expect(server.memory.has("r2s-upload:kho.mp4:10:1")).toBe(false);
+  });
+
   it("thử lại phần lỗi với link mới", async () => {
     const server = fakeServer({ size: 10 });
     const original = server.putPart.getMockImplementation()!;

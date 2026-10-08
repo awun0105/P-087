@@ -7,9 +7,10 @@ Date: 2026-10-07
 Proposed — owner đã chọn nén trước upload, default720p/options1080p/720p/480p,
 portrait/landscape. AUD-23.S1 hiện có versioned Python/TypeScript contracts,
 checksum-bound profile và synthetic contract fixtures. S3 đã nối server verification
-và frame/camera consumers. ADR vẫn Proposed: browser support, bitrate quality, real
-upload saving và paired sensor/reconstruction behavior chưa được qualified; không
-đánh dấu Accepted từ local tests.
+và frame/camera consumers; S4 đã nối UI chuẩn bị/xem trước, upload receipt/map,
+pending gate và content-bound recovery. ADR vẫn Proposed: target-browser
+codec/runtime, bitrate quality, real upload saving và paired sensor/reconstruction
+behavior chưa được qualified; không đánh dấu Accepted từ local tests hoặc mocked UI.
 
 ## Context
 
@@ -93,9 +94,17 @@ finalization. Camera intrinsics/extrinsics now follow supported resize, SAR and
 right-angle rotation transforms; unsupported transforms fail closed. Product quality
 measurement uses a new aspect-preserving v2 profile while retaining v1 compatibility.
 These results are local-code and synthetic/FFmpeg-fixture evidence. The local original
-and its source-frame association remain client-declared. S4 upload/resume integration
-and S5 browser, bandwidth, held-out quality and paired-sensor acceptance remain open.
-Keep this ADR **Proposed** until those gates pass.
+and its source-frame association remain client-declared. S4 adds the resolution picker
+and preview before upload, reports source/output dimensions, orientation, frame rate,
+audio disposition and measured byte change, and lets the user explicitly choose original
+bytes if preparation is unsupported or larger. The client reports completion only after
+manifest + frame-map server verification; pending prepared uploads cannot create a scene.
+Direct multipart recovery uses account + prepared digest + preparation checksum, and
+checks the recovered record owner/type/size/digest. S4 behavior is covered by local
+mocked component/API tests. Chrome DevTools loaded the local route but remained at the
+access-check spinner because the FastAPI runtime was unavailable; no real browser codec,
+OPFS, upload, bandwidth, held-out quality or paired-sensor acceptance was run. Keep this
+ADR **Proposed** until those gates pass.
 
 ## Alternatives Considered
 

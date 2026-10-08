@@ -125,3 +125,9 @@ def test_upload_response_metadata_remains_server_private(tmp_path: Path) -> None
     response = UploadResponse.from_record(internal).model_dump(mode="json")
     assert "video_preparation_manifest" not in response
     assert "video_preparation" not in response
+    assert response["video_preparation_status"] == "verified"
+
+    pending = UploadResponse.from_record(upload.model_copy(update={"video_preparation_manifest": manifest})).model_dump(
+        mode="json"
+    )
+    assert pending["video_preparation_status"] == "pending"

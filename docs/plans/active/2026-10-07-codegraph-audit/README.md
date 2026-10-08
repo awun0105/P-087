@@ -33,8 +33,15 @@ decode/resize/downselect/AVC encode/MP4 mux, bounded OPFS artifacts, incremental
 hash và output-frame/source-PTS map verification. AUD-23.S3 đã thêm server-side
 byte/PTS verification, source-frame mapping qua REC/LiDAR consumers, calibration
 transform và quality profile v2 giữ tỉ lệ. S3 local verification: backend focused
-tests, Ruff và real FFmpeg filter fixtures pass. Upload UI/resume, browser codec/runtime,
-actual bandwidth, held-out quality and paired-sensor reconstruction remain S4–S5 gates.
+tests, Ruff và real FFmpeg filter fixtures pass. AUD-23.S4 đã nối picker 1080/720/480,
+720p mặc định, chuẩn bị/xem trước trước upload, lựa chọn rõ khi output lớn hơn hoặc
+audio cần bỏ, cùng resume theo account + digest + preparation identity và gate chờ
+server verification. Nền video preview dùng token `bg-media-preview-surface`, giữ màu
+đen ở cả bốn biến thể palette. S4 local verification: 330 Vitest pass (including 52
+focused), typecheck, changed-file ESLint, isolated Next.js Webpack build (16 routes),
+54 backend tests và Ruff pass. Chrome DevTools MCP hiện không có phiên Studio đăng nhập;
+browser flow được ghi **UNVERIFIED**. Browser codec/runtime, actual bandwidth,
+held-out quality and paired-sensor reconstruction remain S5 acceptance gates.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -413,8 +420,9 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
       tests/typecheck/changed ESLint/webpack build pass.
 - [x] AUD-23.S3 server byte/PTS verification, REC source-frame and calibration mapping,
       aspect-preserving quality profile; synthetic and local FFmpeg checks only.
-- [ ] AUD-23.S4 upload UI/content-bound recovery; AUD-23.S5 browser, bandwidth,
-      held-out quality and paired-sensor geometry acceptance.
+- [x] AUD-23.S4 local upload UI/content-bound recovery and regression tests.
+- [ ] AUD-23.S5 browser, bandwidth, held-out quality and paired-sensor geometry
+      acceptance.
 - [ ] Implementation AUD-24 và grouped upload/R1–R6 recipe/consumer/browser acceptance.
 - [x] Hoãn AUD-25/ADR0025 theo yêu cầu owner; gỡ khỏi execution order và active dependencies.
 
