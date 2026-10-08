@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "deploy": "next build && wrangler pages deploy --branch develop"
+    "deploy": "next build && wrangler pages deploy --branch develop --commit-dirty=true"
   },
   "dependencies": {
     "clsx": "^2.1.1",
