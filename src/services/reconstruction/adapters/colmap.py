@@ -19,6 +19,7 @@ from src.services.reconstruction.adapters.colmap_priors import (
     prepare_guidance,
 )
 from src.services.reconstruction.adapters.colmap_runtime import ColmapError, ColmapProcess, reconstruction_commands
+from src.services.reconstruction.adapters.log_excerpt import redacted_excerpt
 from src.services.reconstruction.resume import ResumeCache, content_key
 from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver, _sha256
 from src.services.reconstruction.rgb.pose.camera_pose import CameraPoseArtifact, ColmapConfig
@@ -119,10 +120,35 @@ class ColmapAdapter:
             for command in commands:
                 self.deps.process.run(command, request.workspace)
         models = self._models(request.workspace, images.frame_ids)
+        if not models:
+            log_path = request.workspace / "process.log"
+            log_text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
+            no_initial_pair = log_text.count("Discarding reconstruction due to no initial pair")
+            insufficient_size = log_text.count("Discarding reconstruction due to insufficient size")
+            excerpt = redacted_excerpt(log_text, request.workspace)
+            raise ColmapError(
+                "COLMAP_NO_MODEL",
+                "COLMAP produced no sparse model",
+                details={
+                    "diagnostics": {
+                        "no_initial_pair": no_initial_pair,
+                        "insufficient_size": insufficient_size,
+                    },
+                    "log_excerpt": excerpt,
+                },
+            )
         best = select_sparse_model(models)
         ratio = len(best.poses) / len(images.frame_ids)
         if len(best.poses) < request.config.min_registered_frames or ratio < request.config.min_registered_ratio:
-            raise ColmapError("COLMAP_REGISTRATION_LOW", "Best COLMAP model is below configured registration threshold")
+            raise ColmapError(
+                "COLMAP_REGISTRATION_LOW",
+                "Best COLMAP model is below configured registration threshold",
+                details={
+                    "registered_frames": len(best.poses),
+                    "input_frames": len(images.frame_ids),
+                    "min_registered_ratio": request.config.min_registered_ratio,
+                },
+            )
         payload = self._payload(request, images, best)
         payload.update(colmap_version=version, models=[model.stats.model_dump() for model in models])
         artifact, reference = PosePublisher(self.deps.writer, request.job_id, request.attempt_id).manifest(payload)

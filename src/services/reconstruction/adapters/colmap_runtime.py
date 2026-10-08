@@ -5,12 +5,14 @@ import subprocess
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.models.contracts.manifests import ExecutionError, StageArtifact, StageId, StageStatus
 from src.models.contracts.retryability import classify_retryability
+from src.services.reconstruction.adapters.log_excerpt import redacted_excerpt
 from src.services.reconstruction.rgb.pose.camera_pose import ColmapConfig
 
 
@@ -26,15 +28,18 @@ class ColmapRuntimeSettings(BaseSettings):
 class ColmapError(ValueError):
     """Lỗi có remediation, không serialize private process path/stderr ra UI."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, *, details: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.code = code
+        self.details = details or {}
 
     def to_failed_stage(self) -> StageArtifact:
         """Worker ghi failed stage với log riêng của attempt để điều tra."""
-        details: dict[str, str] = {"action": "Inspect attempt logs, input overlap and the configured COLMAP runtime"}
+        details: dict[str, Any] = {"action": "Inspect attempt logs, input overlap and the configured COLMAP runtime"}
         if self.__cause__ is not None:
             details["exception_type"] = type(self.__cause__).__name__
+        if self.details:
+            details.update(self.details)
         error = ExecutionError(
             error_code=self.code,
             stage_id=StageId.CAMERA_POSE,
@@ -62,6 +67,7 @@ class ColmapProcess:
         """Dùng argv và cwd, không shell interpolation; giữ failure evidence tại workspace."""
         start = time.monotonic()
         log_path = workspace / "process.log"
+        log_offset = log_path.stat().st_size if log_path.exists() else 0
         with log_path.open("a") as log:
             log.write(json.dumps({"command": ["colmap", *arguments]}) + "\n")
             log.flush()
@@ -77,13 +83,33 @@ class ColmapProcess:
                 )
             except subprocess.TimeoutExpired as error:
                 log.write("\nCOLMAP_TIMEOUT\n")
-                raise ColmapError("COLMAP_TIMEOUT", "COLMAP exceeded configured timeout") from error
+                new_log = (
+                    log_path.read_text(encoding="utf-8", errors="replace")[log_offset:] if log_path.exists() else ""
+                )
+                excerpt = redacted_excerpt(new_log, workspace)
+                raise ColmapError(
+                    "COLMAP_TIMEOUT",
+                    "COLMAP exceeded configured timeout",
+                    details={"log_excerpt": excerpt},
+                ) from error
             except OSError as error:
                 log.write("\nCOLMAP_UNAVAILABLE\n")
                 raise ColmapError("COLMAP_UNAVAILABLE", "Cannot start configured COLMAP runtime") from error
             log.write(json.dumps({"returncode": result.returncode, "elapsed_seconds": time.monotonic() - start}) + "\n")
         if result.returncode:
-            raise ColmapError("COLMAP_PROCESS_FAILED", f"COLMAP {arguments[0]} failed (exit {result.returncode})")
+            new_log = log_path.read_text(encoding="utf-8", errors="replace")[log_offset:] if log_path.exists() else ""
+            excerpt = redacted_excerpt(new_log, workspace)
+            if result.returncode in {-9, 137} or "std::bad_alloc" in new_log:
+                raise ColmapError(
+                    "COLMAP_OUT_OF_MEMORY",
+                    "COLMAP ran out of memory (OOM)",
+                    details={"log_excerpt": excerpt},
+                )
+            raise ColmapError(
+                "COLMAP_PROCESS_FAILED",
+                f"COLMAP {arguments[0]} failed (exit {result.returncode})",
+                details={"log_excerpt": excerpt},
+            )
         return log_path.read_text()
 
     def capabilities(self, workspace: Path) -> tuple[str, str, str]:

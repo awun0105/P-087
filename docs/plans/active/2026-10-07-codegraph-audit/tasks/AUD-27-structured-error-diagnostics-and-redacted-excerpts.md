@@ -173,8 +173,8 @@ Tests: `tests/test_reconstruction/test_rec03_colmap.py`, `tests/test_reconstruct
 `tests/test_contracts/` (file test của retryability nếu có).
 
 **Exit:**
-- [ ] Bảy nhóm test trên pass; test COLMAP hiện có không đổi kỳ vọng ngoài hai mã mới.
-- [ ] Result ghi schema delta của `details` đúng như mục contract.
+- [x] Bảy nhóm test trên pass; test COLMAP hiện có không đổi kỳ vọng ngoài hai mã mới.
+- [x] Result ghi schema delta của `details` đúng như mục contract.
 
 ---
 
@@ -296,6 +296,16 @@ là UNVERIFIED trên runtime thật cho tới khi có một lượt lỗi thật
 DONE khi S1 và S2 tick đủ Exit. S3 có thể hoàn tất sau.
 
 ## Result / Evidence
-
-Chưa triển khai. Mỗi sprint ghi: commit base, file thật sự sửa, schema delta của `details`,
-lệnh và output, danh sách route đã che `log_excerpt`, giới hạn còn lại.
+ 
+- **AUD-27.S1 (Hoàn thành):**
+  - Files created/modified:
+    - `src/services/reconstruction/adapters/log_excerpt.py`: Hàm `redacted_excerpt(text, workspace, max_lines=40, max_bytes=4096)`.
+    - `src/services/reconstruction/adapters/colmap_runtime.py`: `ColmapError` nhận `details`, `ColmapProcess.run` ghi nhớ offset và phân loại exit code `-9`/`137`/`std::bad_alloc` thành `COLMAP_OUT_OF_MEMORY`.
+    - `src/services/reconstruction/adapters/colmap.py`: Thêm kiểm tra `if not models` ném `COLMAP_NO_MODEL` kèm `diagnostics`, thêm `registered_frames`, `input_frames`, `min_registered_ratio` vào `COLMAP_REGISTRATION_LOW`.
+    - `src/models/contracts/retryability.py`: Thêm `COLMAP_OUT_OF_MEMORY` vào `_RETRYABLE_ERROR_CODES`.
+    - `tests/test_reconstruction/test_rec03_colmap.py`: Bổ sung 4 unit test kiểm tra redact path, sequential log slice, OOM, no model và registration low.
+  - Verification: `.venv/bin/pytest tests/test_reconstruction/test_rec03_colmap.py tests/test_reconstruction/test_rec03_guided.py -v` (42/42 passed).
+  - Schema delta of `ExecutionError.details`:
+    - `details["log_excerpt"]`: `list[str]` (tối đa 40 dòng, tối đa 4.096 byte, đường dẫn đã che `<workspace>` và `<path>`).
+    - `details["diagnostics"]`: `dict[str, int]` (`no_initial_pair`, `insufficient_size` cho `COLMAP_NO_MODEL`).
+    - `details["registered_frames"]`, `details["input_frames"]`, `details["min_registered_ratio"]`: `int`, `int`, `float` (cho `COLMAP_REGISTRATION_LOW`).

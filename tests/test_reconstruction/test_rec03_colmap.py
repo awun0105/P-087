@@ -330,3 +330,136 @@ def test_missing_registration_policy_is_rejected() -> None:
     del payload["min_registered_ratio"]
     with pytest.raises(ValueError, match="min_registered_ratio"):
         ColmapConfig.model_validate(payload)
+
+
+def test_redacted_excerpt(tmp_path: Path) -> None:
+    from src.services.reconstruction.adapters.log_excerpt import redacted_excerpt
+
+    ws = tmp_path / "work"
+    ws.mkdir()
+    raw = f"Processing in {ws}/input\nError calling /usr/bin/colmap at /opt/tools/bin\nDone\n"
+    res = redacted_excerpt(raw, ws)
+    assert res == ["Processing in <workspace>/input", "Error calling <path> at <path>", "Done"]
+    assert redacted_excerpt("", ws) == []
+
+    # Test max_lines and max_bytes
+    many_lines = "\n".join(f"line {i}" for i in range(100))
+    res_lines = redacted_excerpt(many_lines, ws, max_lines=5)
+    assert len(res_lines) == 5
+    assert res_lines[-1] == "line 99"
+
+    res_bytes = redacted_excerpt(many_lines, ws, max_lines=5, max_bytes=20)
+    assert sum(len(line.encode("utf-8")) for line in res_bytes) <= 20
+
+
+def test_colmap_process_exit_codes_and_oom(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.models.contracts.retryability import classify_retryability
+
+    # 1. Sequential commands: log_excerpt only contains second command log
+    process = ColmapProcess(ColmapRuntimeSettings(runtime_identity="fixture"))
+    log_file = tmp_path / "process.log"
+
+    def run_first(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
+        with log_file.open("a") as f:
+            f.write("first command output\n")
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(subprocess, "run", run_first)
+    process.run(["feature_extractor"], tmp_path)
+
+    def run_second(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
+        with log_file.open("a") as f:
+            f.write(f"second command failed in {tmp_path}/data\n")
+        return subprocess.CompletedProcess(args, 7)
+
+    monkeypatch.setattr(subprocess, "run", run_second)
+    with pytest.raises(ColmapError) as exc_info:
+        process.run(["exhaustive_matcher"], tmp_path)
+
+    err = exc_info.value
+    assert err.code == "COLMAP_PROCESS_FAILED"
+    stage = err.to_failed_stage()
+    assert stage.error is not None
+    assert "log_excerpt" in stage.error.details
+    excerpt = stage.error.details["log_excerpt"]
+    assert any("second command failed in <workspace>/data" in line for line in excerpt)
+    assert not any("first command output" in line for line in excerpt)
+    assert str(tmp_path) not in str(stage.error.details)
+
+    # 2. Exit -9 and 137 -> COLMAP_OUT_OF_MEMORY
+    for code in (-9, 137):
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args, code),
+        )
+        with pytest.raises(ColmapError) as oom_info:
+            process.run(["mapper"], tmp_path)
+        assert oom_info.value.code == "COLMAP_OUT_OF_MEMORY"
+        failed = oom_info.value.to_failed_stage()
+        assert failed.error is not None
+        assert failed.error.retryable is True
+        assert classify_retryability("COLMAP_OUT_OF_MEMORY") is True
+
+    # 3. std::bad_alloc with exit 1 -> COLMAP_OUT_OF_MEMORY
+    def run_bad_alloc(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
+        with log_file.open("a") as f:
+            f.write("terminate called after throwing an instance of 'std::bad_alloc'\n")
+        return subprocess.CompletedProcess(args, 1)
+
+    monkeypatch.setattr(subprocess, "run", run_bad_alloc)
+    with pytest.raises(ColmapError) as alloc_info:
+        process.run(["mapper"], tmp_path)
+    assert alloc_info.value.code == "COLMAP_OUT_OF_MEMORY"
+
+
+def test_colmap_no_model_diagnostics(tmp_path: Path) -> None:
+    service, request, _ = adapter(tmp_path)
+    orig_run = service.deps.process.run
+
+    def mock_run(arguments: list[str], workspace: Path) -> str:
+        if arguments[0] == "mapper":
+            with (workspace / "process.log").open("a") as f:
+                f.write(
+                    "Discarding reconstruction due to no initial pair\n"
+                    "Discarding reconstruction due to no initial pair\n"
+                    "Discarding reconstruction due to insufficient size\n"
+                )
+        return orig_run(arguments, workspace)
+
+    service.deps.process.run = mock_run  # type: ignore[method-assign]
+    service._models = lambda ws, ids: []  # type: ignore[assignment]
+
+    with pytest.raises(ColmapError) as no_model_info:
+        service.execute(request)
+
+    err = no_model_info.value
+    assert err.code == "COLMAP_NO_MODEL"
+    stage = err.to_failed_stage()
+    assert stage.error is not None
+    assert stage.error.retryable is False
+    assert stage.error.details["diagnostics"] == {"no_initial_pair": 2, "insufficient_size": 1}
+    assert "log_excerpt" in stage.error.details
+    assert str(tmp_path) not in str(stage.error.details)
+
+
+def test_colmap_registration_low_details(tmp_path: Path) -> None:
+    service, request, _ = adapter(tmp_path)
+    request = ColmapRequest(
+        request.frame_set,
+        config(min_registered_ratio=1.0, min_registered_frames=100),
+        request.workspace,
+        request.job_id,
+    )
+    with pytest.raises(ColmapError) as low_info:
+        service.execute(request)
+
+    assert low_info.value.code == "COLMAP_REGISTRATION_LOW"
+    stage = low_info.value.to_failed_stage()
+    assert stage.error is not None
+    assert "registered_frames" in stage.error.details
+    assert "input_frames" in stage.error.details
+    assert "min_registered_ratio" in stage.error.details
+    assert stage.error.details["registered_frames"] == 3
+    assert stage.error.details["input_frames"] == 4
+    assert stage.error.details["min_registered_ratio"] == 1.0
