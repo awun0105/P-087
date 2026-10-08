@@ -629,7 +629,8 @@ def test_import_profile_scales_with_gaussian_count_and_marks_heuristic(tmp_path:
         source_size_bytes=1_000_000_000,
         gpu_required=True,
     )
-    assert gpu_profile.required_gb == {"vram": 1.9, "ram": 2.6, "disk": 2.0}
+    # Cập nhật kỳ vọng theo hệ số đã hiệu chuẩn (vram_base_gb 1.25, ram_base_gb 0.9, AUD-26.S1)
+    assert gpu_profile.required_gb == {"vram": 2.35, "ram": 2.0, "disk": 2.0}
     assert gpu_profile.danger_ratio == 0.92 and gpu_profile.measured is False and gpu_profile.gpu_required
 
     cpu_profile = gate.operation_profile_for_import(

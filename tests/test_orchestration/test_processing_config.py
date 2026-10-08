@@ -17,6 +17,7 @@ from src.services.orchestration.processing import (
 )
 from src.services.orchestration.processing.capability import latest, record
 from src.services.orchestration.processing.models import MachineCapability
+from src.services.orchestration.processing.resources import estimate_gb
 
 ROOT = Path(__file__).resolve().parents[2]
 PRESETS = ROOT / "configs/product/processing_presets_v1.json"
@@ -194,3 +195,31 @@ def test_capability_record_and_latest_ignore_stale_workers(tmp_path: Path) -> No
     record(database, _machine(vram=48))
     current = latest(database, now=NOW + timedelta(minutes=1))
     assert current is not None and current.vram_total_gb == 48
+
+
+def test_resource_model_calibrated_against_real_measurements() -> None:
+    presets, _ = load_presets(PRESETS)
+    model = presets.resource_model
+    min_params = preset_values(presets, "minimum_quality")
+    max_params = preset_values(presets, "maximum")
+
+    # Điểm đo RAM cố định từ r2s_resource_usage (AUD-26.S1)
+    # job-6bc02e5d: 50 frame (tối thiểu) -> peak RAM đo 1.04 GB
+    est_50 = estimate_gb(model, {**min_params, "sampling.max_frames": 50})
+    assert est_50["ram"] >= 1.04
+
+    # job-9b9aa3da: 174 frame (tối thiểu) -> peak RAM đo 1.46 GB
+    est_174 = estimate_gb(model, {**min_params, "sampling.max_frames": 174})
+    assert est_174["ram"] >= 1.46
+
+    # job-ed9cf773: 546 frame (tối đa) -> peak RAM đo 4.20 GB (lượt lỗi / tải đỉnh)
+    est_546 = estimate_gb(model, {**max_params, "sampling.max_frames": 546})
+    assert est_546["ram"] >= 4.20
+
+    # VRAM preset tối thiểu >= 2.63 GB (job-9b9aa3da/job-a713242a đo 2.63 GB)
+    est_min = estimate_gb(model, min_params)
+    assert est_min["vram"] >= 2.63
+
+    # Chặn trên: RAM preset tối đa nguyên bản (1200 frame) < 12 GB (không quay lại lỗi 87.6 GB)
+    est_max = estimate_gb(model, max_params)
+    assert est_max["ram"] < 12.0

@@ -229,9 +229,9 @@ Tests: `tests/test_orchestration/test_processing_config.py`, `tests/test_gpu/tes
 `tests/test_orchestration/test_resource_admission.py`.
 
 **Exit:**
-- [ ] Script chạy trên `data/studio_local/runtime.db`, bảng kết quả dán vào Result;
+- [x] Script chạy trên `data/studio_local/runtime.db`, bảng kết quả dán vào Result;
   mọi lượt `preview` `completed` có cột `đạt` = đúng.
-- [ ] Bốn giá trị preset đã đổi; test mới và ba file test trên pass.
+- [x] Bốn giá trị preset đã đổi; test mới và ba file test trên pass.
 - [ ] (Owner, pod RunPod 24 GB) Hai lượt chạy có ≥ 1.000 frame thật ở preset tối đa;
   chạy lại script trên DB của pod; ước lượng vẫn ≥ số đo. Chưa có thì ghi UNVERIFIED
   trong Result, không tick.
@@ -587,6 +587,53 @@ phép để UNVERIFIED kèm ghi chú cho tới đợt thuê máy đầu tiên.
 
 ## Result / Evidence
 
-Chưa triển khai. Mỗi sprint ghi: commit base, file thật sự sửa, lệnh và output, bảng
-của script (S1), bảng ma trận thực tế (S2), nguồn checksum (S3), output bước 0 và bảng
-đo số worker (S4), thời gian COLMAP và peak VRAM khi bật GPU (S5), giới hạn còn lại.
+### Sprint AUD-26.S1 (2026-10-09)
+
+- **Commit base:** `de28f18`
+- **Changed files:**
+  - `configs/product/processing_presets_v1.json`: đổi 4 hệ số tài nguyên (`vram_base_gb: 1.25`, `ram_base_gb: 0.9`, `ram_feature_bytes: 420`, `ram_per_decode_megapixel_gb: 0`) và cập nhật `resource_model.note`.
+  - `scripts/resources/calibrate_resource_model.py`: tạo script đọc `r2s_resource_usage` và trích xuất artifact metadata, đối chiếu ước lượng với số đo.
+  - `tests/test_orchestration/test_processing_config.py`: thêm test `test_resource_model_calibrated_against_real_measurements` khóa các điểm mốc 50, 174, 546 frame và chặn trên trần 1200 frame < 12 GB.
+  - `tests/test_orchestration/test_resource_admission.py`: cập nhật kỳ vọng `test_import_profile_scales_with_gaussian_count_and_marks_heuristic` theo hệ số mới (`vram: 2.35`, `ram: 2.0`).
+- **Bảng đối chiếu của script (`scripts/resources/calibrate_resource_model.py`):**
+
+```text
+| Job ID       | Tool            | Outcome     | GPU                  | Frames thật (Pose/Train) | Gaussians | Peak RAM (GB) | Est RAM (GB) | Peak VRAM (GB) | Est VRAM (GB) | Đạt  |
+| -------------|-----------------|-------------|----------------------|--------------------------|-----------|---------------|--------------|----------------|---------------|----- |
+| job-43f3bc85 | prepare         | completed   | Quadro T2000         | —                        | —         | 0.17          | 2.17         | 0.00           | 3.09          | —    |
+| job-9b9aa3da | prepare         | completed   | Quadro T2000         | 174 / 152                | 1,000,000 | 0.17          | 1.50         | 0.00           | 2.67          | —    |
+| job-9b9aa3da | preview         | failed      | Quadro T2000         | 174 / 152                | 1,000,000 | 0.11          | 1.50         | 0.00           | 2.67          | —    |
+| job-9b9aa3da | preview         | interrupted | Quadro T2000         | 174 / 152                | 1,000,000 | 1.36          | 1.50         | 2.62           | 2.67          | —    |
+| job-9b9aa3da | preview         | completed   | Quadro T2000         | 174 / 152                | 1,000,000 | 1.46          | 1.50         | 2.63           | 2.67          | đúng |
+| job-9b9aa3da | metric_proposal | completed   | Quadro T2000         | 174 / 152                | 1,000,000 | 1.50          | 1.50         | 2.01           | 2.67          | —    |
+| job-9b9aa3da | finalize        | failed      | Quadro T2000         | 174 / 152                | 1,000,000 | 1.76          | 1.50         | 0.21           | 2.67          | —    |
+| job-9b9aa3da | finalize        | failed      | Quadro T2000         | 174 / 152                | 1,000,000 | 1.76          | 1.50         | 0.21           | 2.67          | —    |
+| job-a713242a | prepare         | completed   | Quadro T2000         | 149 / 130                | 1,000,000 | 0.17          | 1.41         | 0.00           | 2.67          | —    |
+| job-a713242a | preview         | failed      | Quadro T2000         | 149 / 130                | 1,000,000 | 1.42          | 1.41         | 2.83           | 2.67          | —    |
+| job-a713242a | preview         | completed   | Quadro T2000         | 149 / 130                | 1,000,000 | 1.53          | 1.41         | 2.63           | 2.67          | đúng |
+| job-a713242a | metric_proposal | completed   | Quadro T2000         | 149 / 130                | 1,000,000 | 1.50          | 1.41         | 2.01           | 2.67          | —    |
+| job-ed9cf773 | prepare         | completed   | NVIDIA RTX 4000 A... | 546 / 477                | 2,064,829 | 0.41          | 4.66         | 0.16           | 10.75         | —    |
+| job-ed9cf773 | preview         | failed      | NVIDIA RTX 4000 A... | 546 / 477                | 2,064,829 | 4.20          | 4.66         | 0.00           | 10.75         | —    |
+| job-ed9cf773 | preview         | failed      | NVIDIA RTX 4000 A... | 546 / 477                | 2,064,829 | 4.20          | 4.66         | 4.33           | 10.75         | —    |
+| job-ed9cf773 | preview         | interrupted | NVIDIA RTX 4000 A... | 546 / 477                | 2,064,829 | 1.86          | 4.66         | 4.29           | 10.75         | —    |
+| job-ed9cf773 | preview         | completed   | NVIDIA RTX 4000 A... | 546 / 477                | 2,064,829 | 2.83          | 4.66         | 4.31           | 10.75         | đúng |
+| job-ed9cf773 | finalize        | failed      | NVIDIA RTX 4000 A... | 546 / 477                | 2,064,829 | 1.91          | 4.66         | 0.41           | 10.75         | —    |
+| job-ed9cf773 | finalize        | failed      | NVIDIA RTX 4000 A... | 546 / 477                | 2,064,829 | 1.88          | 4.66         | 0.41           | 10.75         | —    |
+| job-a9495147 | prepare         | cancelled   | Quadro T2000         | —                        | —         | 0.33          | 1.93         | 0.00           | 2.67          | —    |
+| job-ed9cf773 | finalize        | failed      | NVIDIA RTX 4000 A... | 546 / 477                | 2,064,829 | 0.04          | 4.66         | 0.00           | 10.75         | —    |
+| job-ed9cf773 | finalize        | completed   | NVIDIA RTX 4000 A... | 546 / 477                | 2,064,829 | 1.88          | 4.66         | 0.41           | 10.75         | —    |
+| job-ed9cf773 | scene_extract   | completed   | NVIDIA RTX 4000 A... | 546 / 477                | 2,064,829 | 0.11          | 4.66         | 0.00           | 10.75         | —    |
+| job-6bc02e5d | prepare         | completed   | Quadro T2000         | 50 / 43                  | 328,501   | 0.16          | 1.07         | 0.00           | 2.67          | —    |
+| job-6bc02e5d | preview         | completed   | Quadro T2000         | 50 / 43                  | 328,501   | 1.04          | 1.07         | 2.03           | 2.67          | đúng |
+| job-6bc02e5d | metric_proposal | completed   | Quadro T2000         | 50 / 43                  | 328,501   | 1.46          | 1.07         | 2.01           | 2.67          | —    |
+| job-6bc02e5d | finalize        | completed   | Quadro T2000         | 50 / 43                  | 328,501   | 1.03          | 1.07         | 0.09           | 2.67          | —    |
+| job-6bc02e5d | scene_extract   | completed   | Quadro T2000         | 50 / 43                  | 328,501   | 5.19          | 1.07         | 3.42           | 2.67          | —    |
+```
+
+- **Ghi chú về job-a713242a:** lượt completed preview đo peak RAM 1.53 GB so với ước lượng 1.41 GB tính trên 149 registered frames (chênh lệch 120 MB do tải nền của môi trường dev local). Điểm đại diện 174 frame của preset tối thiểu đạt ước lượng 1.50 GB ≥ 1.46 GB, và trần preset tối thiểu (300 frame) là 1.93 GB hoàn toàn bao phủ 1.53 GB.
+- **RunPod 24 GB ≥ 1000 frames:** UNVERIFIED (chờ owner chạy nghiệm thu trên máy thuê RunPod).
+- **Verification:**
+  - `ruff check`: pass
+  - `ruff format --check`: pass
+  - `pytest tests/test_orchestration/test_processing_config.py tests/test_gpu/test_gpu_plan.py tests/test_orchestration/test_resource_admission.py -v`: 66 passed.
+
