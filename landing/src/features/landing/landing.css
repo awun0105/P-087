@@ -1,0 +1,112 @@
+
+    /* Màu của landing lấy từ bảng màu chung (globals.css, bản sáng của bảng đang chọn); tên biến cũ giữ làm bí danh. */
+    .landing-page {
+      --paper: var(--studio-paper);
+      --paper-raised: var(--studio-paper-raised);
+      --paper-sunken: var(--studio-paper-sunken);
+      --ink: var(--studio-ink);
+      --ink-muted: var(--studio-ink-muted);
+      --ember-strong: var(--studio-ember-strong);
+      --ember: var(--studio-ember);
+      --ember-soft: var(--studio-ember-soft);
+      --viewport: var(--studio-viewport);
+      --geometry: var(--studio-geometry);
+      --collider: var(--studio-ochre);
+      --success: var(--studio-sage);
+      --warning: var(--studio-ochre);
+      --error: var(--studio-rust);
+      --border-subtle: var(--studio-line);
+      --border-dark: var(--studio-line-dark);
+      color-scheme: light;
+    }
+
+    .landing-page {
+      background-color: var(--paper);
+      color: var(--ink);
+      /* Font nạp một lần ở root layout và dùng chung với app (globals.css: --font-sans / --font-mono). */
+      font-family: var(--font-sans);
+      /* Clip ngang để header sticky vẫn bám viewport, không tạo scroll container mới. */
+      overflow-x: clip;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .landing-page .font-mono-tech {
+      font-family: var(--font-mono);
+    }
+
+    /* Subtle grid pattern */
+    .landing-page .bg-grid-tech {
+      background-size: 32px 32px;
+      background-image:
+        linear-gradient(to right, color-mix(in srgb, var(--studio-ink-muted) 5%, transparent) 1px, transparent 1px),
+        linear-gradient(to bottom, color-mix(in srgb, var(--studio-ink-muted) 5%, transparent) 1px, transparent 1px);
+    }
+
+    .landing-page .bg-grid-dark {
+      background-size: 24px 24px;
+      background-image:
+        linear-gradient(to right, color-mix(in srgb, var(--studio-on-dark) 4%, transparent) 1px, transparent 1px),
+        linear-gradient(to bottom, color-mix(in srgb, var(--studio-on-dark) 4%, transparent) 1px, transparent 1px);
+    }
+
+    /* Animated pulse dots */
+    @keyframes landing-pulse-subtle {
+      0%, 100% { opacity: 0.4; transform: scale(1); }
+      50% { opacity: 0.9; transform: scale(1.08); }
+    }
+    .landing-page .animate-landing-pulse-subtle {
+      animation: landing-pulse-subtle 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+
+    @keyframes landing-beam-flow {
+      0% { stroke-dashoffset: 60; }
+      100% { stroke-dashoffset: 0; }
+    }
+    .landing-page .flow-line {
+      stroke-dasharray: 6 6;
+      animation: landing-beam-flow 2.5s linear infinite;
+    }
+
+    /* Perspective 3D rotation */
+    .landing-page .viewport-scene {
+      transform: perspective(1000px) rotateX(16deg) rotateY(-12deg) rotateZ(2deg);
+      transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .landing-page .viewport-container:hover .viewport-scene {
+      transform: perspective(1000px) rotateX(12deg) rotateY(-8deg) rotateZ(1deg);
+    }
+
+    /* Custom smooth scrollbar */
+    .landing-page ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    .landing-page ::-webkit-scrollbar-track {
+      background: var(--paper-sunken);
+    }
+    .landing-page ::-webkit-scrollbar-thumb {
+      background: var(--studio-scrollbar);
+      border-radius: 4px;
+    }
+    .landing-page ::-webkit-scrollbar-thumb:hover {
+      background: var(--studio-scrollbar-hover);
+    }
+
+.landing-page section { scroll-margin-top: 7rem; }
+
+/* Micro-interactions & Card polish */
+.landing-page .card-hover-tech {
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.landing-page .card-hover-tech:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px -4px color-mix(in srgb, var(--studio-ink) 6%, transparent);
+}
+
+.landing-page .tech-badge-glow {
+  box-shadow: 0 0 12px -2px color-mix(in srgb, var(--studio-ember) 25%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-page *, .landing-page *::before, .landing-page *::after { animation: none !important; transition: none !important; }
+}
