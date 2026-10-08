@@ -778,3 +778,25 @@ def test_old_job_reservation_payload_remains_readable_without_schema_migration()
     reservation = admission.Reservation.model_validate_json(json.dumps(old_payload))
     assert reservation.job_id == "job-old"
     assert reservation.operation_id is None and reservation.gpu_required
+
+
+def test_restarted_worker_with_same_identity_discards_its_leftover_operation_reservation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Container restarts reuse host:pid; a killed objectify must not block the new process forever."""
+    _, job, crashed = _queued(tmp_path)
+    _machine(monkeypatch)
+    assert crashed.admit_operation(_operation_request(operation_id="operation-before-crash")).status == "admitted"
+    other = _second_worker(crashed, "same-host:other-live-worker")
+    small = _operation_request(operation_id="operation-other", required_gb={"vram": 0.1, "ram": 1.0, "disk": 1.0})
+    assert other.admit_operation(small).status == "admitted"
+
+    restarted = _second_worker(crashed, crashed.worker_id)
+    retry = _operation_request(operation_id="operation-after-restart")
+    assert restarted.admit_operation(retry).status == "worker_busy"
+    assert not restarted(job)
+
+    assert restarted.discard_leftover_reservation()
+    assert not restarted.discard_leftover_reservation()
+    assert set(_reservations(crashed)) == {other.worker_id}
+    assert restarted.admit_operation(retry).status == "admitted"

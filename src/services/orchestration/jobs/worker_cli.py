@@ -312,6 +312,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         load_prepared_profile(settings.product_processing_config, registry.execution_profile)
     admission = ResourceAdmission(registry, settings)
+    if admission.discard_leftover_reservation():
+        logger.warning("Đã xoá giữ chỗ tài nguyên còn sót của lần chạy trước worker=%s", admission.worker_id)
     heartbeat = _start_capability_heartbeat(registry, settings.product_worker_root, admission)
     previous = signal.getsignal(signal.SIGTERM)
 

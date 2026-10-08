@@ -501,6 +501,20 @@ class ResourceAdmission:
         )
         self._reserved = True
 
+    def discard_leftover_reservation(self) -> bool:
+        """Xoá dòng giữ chỗ còn sót của lần chạy trước có cùng worker_id.
+
+        Container restart giữ nguyên hostname và PID nên worker_id không đổi. Tại thời điểm worker
+        khởi động nó chưa giữ gì, nên dòng này chỉ có thể do lần chạy trước bị kill để lại; nếu là
+        giữ chỗ của một operation thì nó chặn mọi job và operation của chính worker này vĩnh viễn
+        (`_others` không bao giờ xét dòng của chính mình là stale).
+        """
+        with self.database.transaction(write=True) as tx:
+            self._lock(tx)
+            deleted = tx.execute("DELETE FROM r2s_resource_reservations WHERE worker_id=?", (self.worker_id,)).rowcount
+        self._reserved = False
+        return bool(deleted)
+
     def release(self) -> None:
         """Nhả giữ chỗ của worker này; lỗi DB chỉ log (dòng sẽ tự hết hạn)."""
         if not self._reserved:
