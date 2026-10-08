@@ -299,6 +299,7 @@ def _carved_environment(registry: ProjectRegistry, scene: SceneIR) -> CarvedBack
     centroids = vertices[faces].mean(axis=1)
     owner_indices = np.full(len(faces), -1, dtype=np.int32)
     remove_mask = np.zeros(len(faces), dtype=bool)
+    removes_region = np.array([_source_region_removed(item) for item in owned], dtype=bool)
     for owner_index, (item, owner) in enumerate(zip(owned, owners, strict=True)):
         if owner.region_kind == "triangle_indices":
             indices = np.asarray(memberships[owner.object_id], dtype=np.intp)
@@ -310,7 +311,12 @@ def _carved_environment(registry: ProjectRegistry, scene: SceneIR) -> CarvedBack
             indices = np.flatnonzero(triangle_mask_in_box(centroids, box, BUILD_CONFIG["carve_margin_m"]))
 
         previous = owner_indices[indices]
-        overlaps = np.flatnonzero(previous >= 0)
+        claimed = previous >= 0
+        if not removes_region[owner_index]:
+            # Two regions that both stay in the background cannot change the output, so only a
+            # claim against a region that is carved away is an ownership ambiguity.
+            claimed &= removes_region[np.maximum(previous, 0)]
+        overlaps = np.flatnonzero(claimed)
         if len(overlaps):
             triangle_index = int(indices[overlaps[0]])
             previous_owner = owned[int(previous[overlaps[0]])].id
@@ -318,7 +324,7 @@ def _carved_environment(registry: ProjectRegistry, scene: SceneIR) -> CarvedBack
                 f"source triangle {triangle_index} is claimed by both {previous_owner} and {owner.object_id}"
             )
         owner_indices[indices] = owner_index
-        if _source_region_removed(item):
+        if removes_region[owner_index]:
             remove_mask[indices] = True
 
     background_hash = hashlib.sha256()

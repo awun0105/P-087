@@ -365,6 +365,11 @@ def test_source_owned_background_does_not_carve_user_added_boxes_and_rejects_ove
     with pytest.raises(SourceCollisionOwnershipError, match="claimed by both"):
         _carved_environment(registry, overlap_scene)
 
+    # Overlapping regions that both stay in the background cannot change the output.
+    kept_overlap = overlap.model_copy(update={"state": SceneObjectState.CANDIDATE}, deep=True)
+    kept_scene = scene.model_copy(update={"objects": [pallet, kept_overlap]}, deep=True)
+    assert _carved_environment(registry, kept_scene).carved_triangles == 0
+
     assert confirmed_background.carved_triangles > 0
     assert user_background.carved_triangles == 0
 
@@ -447,7 +452,7 @@ def test_exact_membership_sidecar_is_consumed_by_background_builder(tmp_path: Pa
     )
     exact_overlap_scene = exact_scene.model_copy(update={"objects": [exact_scene.objects[0], overlap]}, deep=True)
     with pytest.raises(SourceCollisionOwnershipError, match="claimed by both"):
-        _carved_environment(registry, exact_overlap_scene)
+        _carved_environment(registry, confirm_object(exact_overlap_scene, pallet.id))
 
 
 def test_both_package_builders_share_background_and_current_hybrid_object_pose(
