@@ -9,10 +9,10 @@ import type { JobManifest, StageId } from "@/lib/contracts/api";
 
 export type VideoMediaType = "video/mp4" | "video/quicktime";
 
-export type UploadMediaType = VideoMediaType | "application/x-ply" | "application/x-pcd" | "application/zip";
+export type UploadMediaType = VideoMediaType | "application/x-ply" | "application/x-sog" | "application/x-pcd" | "application/zip";
 
 /** Loại đầu vào máy chủ nhận diện theo nội dung (ADR 0004; LiDAR theo ADR 0009). */
-export type InputKind = "rgb_video" | "gaussian_ply" | "gaussian_ply_colmap" | "registered_lidar" | "lidar_scan_sequence";
+export type InputKind = "rgb_video" | "gaussian_ply" | "gaussian_ply_colmap" | "gaussian_sog" | "registered_lidar" | "lidar_scan_sequence";
 
 /**
  * Bằng chứng gói LiDAR (ADR 0009). Gói luôn có quỹ đạo, calibration và thời điểm frame; đám mây đã đăng ký có
@@ -41,6 +41,7 @@ export interface LidarAttachment {
 export interface InputDetection {
   kind: InputKind;
   gaussian: { gaussian_count: number; sh_degree: number; encoding: string } | null;
+  sog?: { format_version: 2; gaussian_count: number; sh_degree: number; model: "antialiased" | "2dgs" | null } | null;
   ply_member: string | null;
   colmap_dir: string | null;
   colmap_format: "bin" | "txt" | null;
@@ -643,8 +644,16 @@ export interface ImportedScene {
   import_id: string;
   upload_id: string;
   name: string;
-  input_kind: "gaussian_ply" | "gaussian_ply_colmap";
+  input_kind: "gaussian_ply" | "gaussian_ply_colmap" | "gaussian_sog";
   status: "PACKAGING" | "READY" | "FAILED";
+  operation?: {
+    operation_id: string;
+    status: "QUEUED" | "WAITING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+    attempt: number;
+    error: string | null;
+    created_at: string;
+    updated_at: string;
+  } | null;
   delivery_ref: { artifact_uri: string; artifact_checksum: string } | null;
   error: string | null;
   created_at: string;

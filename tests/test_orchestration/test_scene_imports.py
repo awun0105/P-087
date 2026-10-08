@@ -9,6 +9,7 @@ from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.uploads import VideoUploadService
 from src.services.orchestration.uploads import scene_imports as imports_module
 from src.services.orchestration.uploads.scene_imports import ImportService, SceneImportError
+from tests.test_reconstruction.support.sog_fixtures import sog_archive
 from tests.test_reconstruction.test_input_detection import _gaussian
 
 MP4 = b"\x00\x00\x00\x18ftypmp42"
@@ -50,7 +51,12 @@ def test_ply_import_packages_to_sog_and_becomes_ready(world, monkeypatch: pytest
     assert service.get(record.import_id).created_by_role == "reviewer"
     ready = service.package(record.import_id, upload, None)
     assert ready.status == "READY" and ready.delivery_ref is not None
-    assert ready.delivery_ref.source_provenance == {"visual_source": "user_import", "upload_checksum": upload.checksum}
+    assert ready.delivery_ref.source_provenance == {
+        "visual_source": "user_import",
+        "source_format": "gaussian_ply",
+        "upload_checksum": upload.checksum,
+    }
+    assert ready.operation is not None and ready.operation.status == "SUCCEEDED"
     assert service.content_path(record.import_id).read_bytes().startswith(b"sog:")
     assert [item.import_id for item in service.list()] == [record.import_id]
 
@@ -68,3 +74,22 @@ def test_packaging_failure_is_recorded(world, monkeypatch: pytest.MonkeyPatch) -
     assert failed.status == "FAILED" and failed.error and failed.delivery_ref is None
     with pytest.raises(SceneImportError):
         service.content_path(record.import_id)
+
+
+def test_imported_sog_is_copied_byte_for_byte_without_recompression(world, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    uploads, service = world
+    payload = sog_archive(model="2dgs")
+    upload = _upload(uploads, "export.sog", payload)
+    source = service.resolver.require_uri(upload.artifact_uri, upload.checksum)
+
+    def should_not_recompress(*_: object) -> Path:
+        raise AssertionError("uploaded SOG must not be round-tripped through PLY")
+
+    monkeypatch.setattr(imports_module, "package_splat", should_not_recompress)
+    record = service.create(upload, "External SOG", "user-1")
+    ready = service.package(record.import_id, upload, None)
+
+    assert ready.status == "READY" and ready.input_kind == "gaussian_sog"
+    assert ready.delivery_ref is not None
+    assert ready.delivery_ref.source_provenance["source_format"] == "gaussian_sog"
+    assert service.content_path(record.import_id).read_bytes() == source.read_bytes() == payload

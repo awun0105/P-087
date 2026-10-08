@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- PLANNED; P1; EX-PRODUCT; REC package_splat port.
+- IN PROGRESS (S1 complete; S2/S3 open); P1; EX-PRODUCT; REC package_splat port.
 - Canonical PRODUCT-02/08/09. SELF-CODE durable operation, REUSE packaging adapter.
 - Goal: PLY/SOG view import durable; API crash không mất request; retry/cancel an
   toàn; READY chỉ khi SOG delivery đã verify.
@@ -73,6 +73,8 @@ GPU SOG smoke cần installed package_splat runtime; CPU fake-packager không th
 
 ## Sprint AUD-06.S1 — Persist queue cùng import creation
 
+**Status:** Complete on this branch; worker lease recovery/admission and retry/cancel remain S2/S3.
+
 **Input:** upload verified và create-import request.
 **Output:** import record + durable queued operation cùng transaction, API status.
 **Contract:** no acknowledged import without durable scheduling; no BackgroundTasks
@@ -87,7 +89,7 @@ remain readable. Don't overload gaussian_ply or infer source kind from delivery_
 Tests: transaction rollback giữa two inserts; restart after API response;
 duplicate request/idempotency decision; old PACKAGING/READY records migration;
 new SOG kind across direct/proxy/import parsers and unsupported version/model.
-**Exit:** [ ] new request survives restart; [ ] legacy status không stranded silently.
+**Exit:** [x] new request survives API restart; [x] legacy PACKAGING is queued or failed explicitly, and READY remains unchanged.
 
 ## Sprint AUD-06.S2 — Leased worker, admission và publication
 
@@ -128,15 +130,48 @@ real SOG consumer readability when runtime available.
 ## Verification và DoD
 
 ```bash
-.venv/bin/pytest tests/test_orchestration/test_scene_imports.py tests/test_orchestration/test_upload_input_kinds.py tests/test_api/test_studio_routes.py tests/test_orchestration/test_runtime_migrations.py -q
+./.venv/bin/pytest -q \
+  tests/test_api/test_studio_routes.py tests/test_api/test_guest_ownership.py \
+  tests/test_orchestration/test_runtime_migrations.py tests/test_orchestration/test_scene_deletion.py \
+  tests/test_orchestration/test_scene_imports.py tests/test_orchestration/test_upload_input_kinds.py \
+  tests/test_orchestration/test_import_queue.py tests/test_orchestration/test_direct_upload.py \
+  tests/test_reconstruction/test_input_detection.py tests/test_reconstruction/test_sog_input.py
 ```
 
-Planned tests/test_orchestration/test_import_queue.py. Frontend focused
+Added `tests/test_orchestration/test_import_queue.py`. Frontend focused
 tests/studio-input-flows.test.tsx và tests/input-kinds.test.ts; gates theo guide.
 DONE khi crash/retry/cancel/publication matrix pass và real SOG packaging/consumer
 proof available; không suy cloud restart acceptance từ local fixture.
 
 ## Result / Evidence
 
-Pending — operation/attempt/lease IDs, old-record migration, SOG ref/checksum,
-process cancellation và API/browser evidence.
+AUD-06.S1 now stores an import operation atomically with its imported-scene row,
+removes HTTP `BackgroundTasks` from the authoritative path, and lets the
+standalone worker recover legacy `PACKAGING` records and process queued work
+after API restart. Requester-scoped `Idempotency-Key` replay returns the same
+import only for an identical upload/name fingerprint. Import deletion/trash
+stores the operation row too; active queued/running operations block trash, and
+restore recreates the exact operation with the import.
+
+SOG input uses the shared `GaussianViewFormat` contract and bounded bundled-v2
+metadata checks. PLY/ZIP produce SOG through the REC packaging port; SOG delivery
+copies source bytes and verifies the published checksum. Old `READY` rows remain
+readable and are not reprocessed. UI copy, accepted suffix/MIME, contracts, and
+status copy now include SOG and the queued worker lifecycle.
+
+Local evidence: selected backend integration suites **130 passed, 4 skipped**;
+full frontend suite **336 passed across 48 files**; `ruff check src/ tests/`,
+`ruff format --check src/ tests/`, and `git diff --check` passed. Frontend ESLint,
+TypeScript typecheck, and production Webpack build passed. After the final SOG
+copy/test update, the 3 directly affected Vitest files passed again (**26 tests**).
+Chrome DevTools on the
+production build rendered `/new/import-scene`; visible copy names PLY/SOG/ZIP,
+the file input accepts `.ply,.sog,.zip,application/zip,application/x-sog`, and
+the page had no console errors or warnings.
+
+Still open by design: a worker crash after claiming `RUNNING` is not reclaimed
+in S1; lease heartbeat/recovery, shared GPU admission, retry/cancel, and full
+texture decode/dimension/runtime validation are S2/S3 acceptance. No GPU or
+cloud-restart claim is inferred from these local checks. Browser verification
+proves the rendered upload surface and allowlist only; it does not prove a real
+SOG decoder or production upload/worker run.

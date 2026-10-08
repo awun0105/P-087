@@ -1,8 +1,6 @@
-"""Scene import từ file 3DGS (.ply / .zip PLY + COLMAP): chỉ xem/chỉnh sửa (ADR 0004 §3)."""
+"""Scene import từ 3DGS PLY/SOG/ZIP: chỉ xem/chỉnh sửa; xử lý qua durable worker (ADR 0004 §3)."""
 
-import logging
-
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -10,7 +8,7 @@ from src.api.auth import require_contributor
 from src.api.ownership import authorize_upload_mutation, owner_mutation_allowed
 from src.api.studio import deps
 from src.services.orchestration.auth import UserRecord
-from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
+from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.storage import runtime_resolver
 from src.services.orchestration.uploads import UploadNotFoundError
 from src.services.orchestration.uploads.scene_imports import (
@@ -20,7 +18,6 @@ from src.services.orchestration.uploads.scene_imports import (
     SceneImportError,
 )
 
-logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -71,42 +68,30 @@ def _service() -> ImportService:
     )
 
 
-def _package_in_background(import_id: str, upload_id: str) -> None:
-    """Process boundary của tác vụ nền: lỗi bất ngờ → FAILED, có log kèm cause."""
-    service = _service()
-    try:
-        upload = deps.uploads().get(upload_id)
-        service.package(import_id, upload, deps.settings().product_geometry_gpu_index)
-    except Exception:
-        logger.exception("Import %s thất bại", import_id)
-        try:
-            record = service.get(import_id)
-            if record.status == "PACKAGING":
-                service._update(record, status="FAILED", error="Không nén được scene 3DGS; thử lại sau")
-        except (ImportNotFoundError, RuntimeStateConflictError):
-            logger.info("Import %s đã đổi trạng thái trước khi ghi lỗi", import_id)
-
-
 @router.post("/imports", response_model=ImportedSceneResponse, status_code=status.HTTP_201_CREATED)
 def create_import(
-    request: ImportRequest, background: BackgroundTasks, user: UserRecord | None = Depends(require_contributor)
+    request: ImportRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", min_length=1, max_length=128),
+    user: UserRecord | None = Depends(require_contributor),
 ) -> ImportedSceneResponse:
-    """Tạo scene import và nén PLY → SOG trong nền; client poll tới READY/FAILED."""
+    """Tạo scene cùng durable operation; standalone worker xử lý tới READY/FAILED."""
     try:
         upload = deps.uploads().get(request.upload_id)
         authorize_upload_mutation(user, upload, operation="tạo scene import từ")
+        settings = deps.settings()
         record = _service().create(
             upload,
             request.name,
             user.user_id if user else None,
             user.display_name if user else None,
             user.role if user else None,
+            idempotency_key=idempotency_key,
+            gpu_index=settings.product_geometry_gpu_index,
         )
     except UploadNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except SceneImportError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    background.add_task(_package_in_background, record.import_id, upload.upload_id)
     return _view(record, user)
 
 

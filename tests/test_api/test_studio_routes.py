@@ -23,6 +23,7 @@ from src.services.simulation.usd.capabilities import (
     ExportRequirements,
     RuntimeQualificationStatus,
 )
+from tests.test_reconstruction.support.sog_fixtures import sog_archive
 
 _ATTESTATION = {
     "data_origin": "self_collected_no_pii",
@@ -42,6 +43,8 @@ def studio(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         artifact_s3_bucket=None,
         database_url=f"sqlite:///{tmp_path / 'runtime.db'}",
         artifact_root=tmp_path / "artifacts",
+        product_worker_root=tmp_path / "worker",
+        product_geometry_gpu_index=None,
         product_upload_max_bytes=64,
         product_privacy_mode="self_attested",
         product_processing_config=Path(__file__).resolve().parents[2] / "configs/product/processing_presets_v1.json",
@@ -87,6 +90,32 @@ async def test_upload_streams_video_and_lists_it(client: AsyncClient, studio: Si
     listed = (await client.get("/api/v1/uploads")).json()["uploads"]
     assert [item["upload_id"] for item in listed] == [record["upload_id"]]
     assert "artifacts" not in str(listed)
+
+
+@pytest.mark.asyncio
+async def test_sog_import_is_durably_queued_and_idempotent(client: AsyncClient, studio: SimpleNamespace) -> None:
+    from src.services.orchestration.uploads import VideoUploadService
+
+    uploads = VideoUploadService(
+        studio.registry.persistence.database, studio.registry.runtime_resolver, 8 * 1024 * 1024
+    )
+    pending = uploads.begin("external.sog")
+    pending.publication.write(sog_archive(model="2dgs"))
+    upload_record = uploads.finish(pending)
+    upload = upload_record.model_dump(mode="json")
+    assert upload["input_kind"] == "gaussian_sog" and upload["media_type"] == "application/x-sog"
+
+    request = {"upload_id": upload["upload_id"], "name": "External SOG"}
+    first = await client.post("/api/v1/imports", json=request, headers={"Idempotency-Key": "sog-import-1"})
+    replay = await client.post("/api/v1/imports", json=request, headers={"Idempotency-Key": "sog-import-1"})
+
+    assert first.status_code == 201, first.text
+    assert replay.status_code == 201, replay.text
+    assert first.json()["import_id"] == replay.json()["import_id"]
+    assert first.json()["input_kind"] == "gaussian_sog"
+    assert first.json()["status"] == "PACKAGING"
+    assert first.json()["operation"]["status"] == "QUEUED"
+    assert first.json()["operation"]["attempt"] == 0
 
 
 @pytest.mark.asyncio

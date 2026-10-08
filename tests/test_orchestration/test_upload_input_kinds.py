@@ -11,6 +11,7 @@ from src.services.orchestration.artifacts.remote import RangedObjectReader
 from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.uploads import DirectUploadService, UploadError, VideoUploadService
 from tests.test_orchestration.memory_object_store import MemoryObjectStore
+from tests.test_reconstruction.support.sog_fixtures import sog_archive
 from tests.test_reconstruction.test_input_detection import COLMAP, _gaussian, _ply
 
 MIB = 1024 * 1024
@@ -46,6 +47,9 @@ def test_stream_upload_records_kind_and_evidence(streaming: VideoUploadService) 
     assert ply.detection is not None and ply.detection.gaussian.gaussian_count == 4  # type: ignore[union-attr]
     bundle = _stream_upload(streaming, "scene.zip", _zip_bytes({"s/point_cloud.ply": _gaussian(), **COLMAP}))
     assert bundle.input_kind == "gaussian_ply_colmap" and bundle.detection.colmap_dir == "scene/sparse/0"  # type: ignore[union-attr]
+    sog = _stream_upload(streaming, "scene.sog", sog_archive(model="2dgs", sh_bands=2))
+    assert sog.input_kind == "gaussian_sog" and sog.media_type == "application/x-sog"
+    assert sog.detection is not None and sog.detection.sog is not None and sog.detection.sog.sh_degree == 2
     video = _stream_upload(streaming, "kho.mp4", MP4 + b"payload")
     assert video.input_kind == "rgb_video"
 
@@ -56,6 +60,8 @@ def test_stream_upload_records_kind_and_evidence(streaming: VideoUploadService) 
         ("scene.mp4", _gaussian(), "không khớp nội dung"),
         ("cloud.ply", _ply(("x", "y", "z")), "nộp riêng lẻ"),
         ("notes.ply", b"hello world, not a ply", "Không nhận diện"),
+        ("wrong.zip", sog_archive(), "Đuôi file không khớp nội dung"),
+        ("unsupported.sog", sog_archive(version=99), "version 2"),
     ],
 )
 def test_stream_upload_rejects_without_storing(
@@ -98,6 +104,19 @@ def test_direct_upload_detects_zip_and_rejects_wrong_content(
     failed = _direct_upload(store, direct, "fake.ply", MP4 + b"not a scene")
     assert failed.status == "FAILED" and "không khớp nội dung" in (failed.error or "")
     assert not any(key.endswith("source.ply") for key in store.objects)
+
+
+def test_direct_upload_accepts_sog_only_with_sog_extension(
+    store: MemoryObjectStore, direct: DirectUploadService
+) -> None:
+    ready = _direct_upload(store, direct, "scene.sog", sog_archive())
+    assert ready.status == "READY"
+    record = VideoUploadService(direct.database, direct.resolver, direct.max_bytes).get(ready.upload_id)
+    assert record.input_kind == "gaussian_sog" and record.media_type == "application/x-sog"
+    assert record.detection is not None and record.detection.sog is not None
+
+    rejected = _direct_upload(store, direct, "unsupported.sog", sog_archive(model="other"))
+    assert rejected.status == "FAILED" and "Model SOG không được hỗ trợ" in (rejected.error or "")
 
 
 def test_direct_video_detection_reads_only_one_block(

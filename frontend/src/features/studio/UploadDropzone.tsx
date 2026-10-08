@@ -50,7 +50,7 @@ function audioPolicyLabel(disposition: VideoPreparedArtifact["manifest"]["audio_
   }
 }
 
-/** Video được chuẩn bị và xem trước trước khi gửi; PLY/LiDAR giữ nguyên đường upload hiện tại. */
+/** Video được chuẩn bị và xem trước trước khi gửi; PLY/SOG/LiDAR giữ nguyên đường upload hiện tại. */
 export function UploadDropzone({
   kind,
   onUploaded,
@@ -271,7 +271,7 @@ export function UploadDropzone({
             ? "MP4/MOV · chọn độ phân giải, xem trước rồi mới tải lên · giữ nguyên tỉ lệ dọc/ngang"
             : kind === "lidar"
               ? "ZIP gồm quỹ đạo + calibration + thời điểm frame, cùng các scan .pcd hoặc một đám mây đã đăng ký"
-              : "PLY hoặc ZIP gồm PLY + COLMAP · chỉ xem/chỉnh Gaussian và xuất file; không dựng collision hay phát hành"}
+              : "PLY/SOG hoặc ZIP gồm PLY + COLMAP · chỉ xem/chỉnh Gaussian và xuất file; không dựng collision hay phát hành"}
         </span>
         <input
           id={inputId}

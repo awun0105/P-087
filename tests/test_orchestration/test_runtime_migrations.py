@@ -48,6 +48,7 @@ def test_fresh_database_reaches_latest_version(runtime_database_url: str) -> Non
         "r2s_scene_publications",
         "r2s_guest_quota_windows",
         "r2s_quota_intents",
+        "r2s_import_operations",
     } <= _tables(database)
     database.ping()
     # Khởi động lại (process khác) không chạy lại migration, không lỗi.
@@ -111,7 +112,7 @@ def test_v8_database_adds_validation_and_scene_head_tables_without_losing_rows(t
         )
 
     database = RuntimeDatabase(f"sqlite:///{path}")
-    assert database.schema_version() == LATEST_SCHEMA_VERSION == 14
+    assert database.schema_version() == LATEST_SCHEMA_VERSION == 15
     assert {
         "r2s_validation_runs",
         "r2s_validation_selections",
@@ -146,7 +147,7 @@ def test_v9_database_adds_release_seals_without_losing_rows(tmp_path: Path) -> N
 
     database = RuntimeDatabase(f"sqlite:///{path}")
 
-    assert database.schema_version() == LATEST_SCHEMA_VERSION == 14
+    assert database.schema_version() == LATEST_SCHEMA_VERSION == 15
     assert {"r2s_release_seals", "r2s_release_seal_failures"} <= _tables(database)
     with database.transaction() as tx:
         assert tx.execute("SELECT project_id FROM r2s_projects").fetchall() == [("project-v9",)]
@@ -173,7 +174,7 @@ def test_v10_database_adds_release_seal_diagnostics_without_losing_intents(tmp_p
 
     database = RuntimeDatabase(f"sqlite:///{path}")
 
-    assert database.schema_version() == LATEST_SCHEMA_VERSION == 14
+    assert database.schema_version() == LATEST_SCHEMA_VERSION == 15
     assert {"r2s_release_seals", "r2s_release_seal_failures"} <= _tables(database)
     with database.transaction() as tx:
         assert tx.execute("SELECT job_id FROM r2s_release_seals").fetchall() == [("job-v10",)]
@@ -199,7 +200,7 @@ def test_v11_database_adds_scene_head_tables_without_losing_release_rows(tmp_pat
 
     database = RuntimeDatabase(f"sqlite:///{path}")
 
-    assert database.schema_version() == LATEST_SCHEMA_VERSION == 14
+    assert database.schema_version() == LATEST_SCHEMA_VERSION == 15
     assert {
         "r2s_scene_heads",
         "r2s_scene_head_repairs",
@@ -230,7 +231,7 @@ def test_v12_database_adds_nullable_job_owner_without_backfill(tmp_path: Path) -
 
     database = RuntimeDatabase(f"sqlite:///{path}")
 
-    assert database.schema_version() == LATEST_SCHEMA_VERSION == 14
+    assert database.schema_version() == LATEST_SCHEMA_VERSION == 15
     with database.transaction() as tx:
         assert tx.execute("SELECT owner_user_id FROM r2s_jobs WHERE job_id='job-v12'").fetchone() == (None,)
     assert {"r2s_guest_quota_windows", "r2s_quota_intents"} <= _tables(database)

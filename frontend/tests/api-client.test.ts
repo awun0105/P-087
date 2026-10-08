@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, fetchApi } from "@/lib/api/client";
-import { createSceneFromUpload, getSimulationPackage, retryJob } from "@/lib/api/studio";
+import { createImport, createSceneFromUpload, getSimulationPackage, retryJob } from "@/lib/api/studio";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -153,9 +153,12 @@ describe("run intent idempotency headers", () => {
       retention_acknowledged: true,
     });
     await retryJob("job-1");
+    await createImport("upload-sog", "Imported scene", "import-key");
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("Idempotency-Key")).toBe("scene-key");
     expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get("Idempotency-Key")).toBe("retry-key");
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/v1/imports");
+    expect(new Headers(fetchMock.mock.calls[2]?.[1]?.headers).get("Idempotency-Key")).toBe("import-key");
   });
 });

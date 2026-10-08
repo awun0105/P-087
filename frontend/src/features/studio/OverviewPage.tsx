@@ -16,7 +16,7 @@ import { STUDIO_ENTRY } from "@/lib/routes";
 import type { ImportedScene, SceneSummary } from "@/lib/contracts/studio";
 
 const JOURNEY = [
-  { label: "Nhập dữ liệu", detail: "Video để dựng scene; PLY/ZIP để mở 3DGS đã có.", icon: Film },
+  { label: "Nhập dữ liệu", detail: "Video để dựng scene; PLY/SOG/ZIP để mở 3DGS đã có.", icon: Film },
   { label: "Dựng & theo dõi", detail: "Job xử lý video, publish bản xem và chờ xác nhận tỉ lệ mét.", icon: Workflow },
   { label: "Chuẩn bị scene", detail: "Xác nhận vật thể, chỉnh scene và tạo gói mô phỏng.", icon: Layers3 },
   { label: "Kiểm tra & xuất", detail: "Lấy đúng bản làm việc, candidate hoặc release của revision.", icon: ShieldCheck },

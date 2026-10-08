@@ -98,3 +98,24 @@ nguồn số đo ở `measurement_ref`, không ghi là người dùng đo.
 3. Import `gaussian_ply_colmap`.
 4. Demo ba hướng trên Aisle_CW (RGB only là mock).
 5. Thông báo EX-SCENE/EX-SIM về phần 4 (không đổi contract).
+
+## Implementation update — 2026-10-08
+
+AUD-06.S1 cập nhật behavior của Studio import theo runtime hiện tại:
+
+- `gaussian_sog` nhận bundled PlayCanvas SOG v2 (`meta.json` ở root và WebP
+  textures được metadata khai báo), qua registry có giới hạn version, model,
+  Gaussian count, metadata bytes, member count và tổng bytes giải nén.
+- PLY và ZIP PLY + COLMAP đều được đóng gói thành SOG để xem; SOG đầu vào hợp
+  lệ được đưa vào delivery dưới đúng bytes nguồn. Mọi loại import hiện chỉ mở
+  Gaussian viewer/editor; COLMAP có trong ZIP không tự bật continuation vào
+  REC-04/05/06 hoặc tạo reconstruction bundle. Behavior này thay thế mô tả cũ
+  ở bảng §1/§4 rằng `gaussian_ply_colmap` đi tiếp như video.
+- API ghi `r2s_imports` và `r2s_import_operations` trong cùng transaction;
+  worker nhận operation bền vững sau API restart. Legacy `PACKAGING` được đưa
+  vào queue khi worker khởi động, còn legacy `READY` không bị enqueue lại.
+  Worker lease recovery, shared GPU admission, retry và cancel thuộc AUD-06.S2/S3.
+
+Scope này chỉ bảo đảm nhận diện/metadata validation và delivery identity; chưa
+chứng minh real GPU packaging hoặc giải mã mọi texture SOG trong runtime browser.
+Imported-scene continuation giữ Deferred theo AUD-25.

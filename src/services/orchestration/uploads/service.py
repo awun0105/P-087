@@ -63,7 +63,9 @@ def classify_upload(stream: BinaryIO, size_bytes: int, media_type: str, max_byte
     except InputRejectedError as error:
         raise UploadError(str(error)) from error
     if media_type not in KIND_MEDIA_TYPES[detection.kind]:
-        raise UploadError("Đuôi file không khớp nội dung; đổi đúng đuôi (.mp4/.mov, .ply, .pcd hoặc .zip) rồi tải lại")
+        raise UploadError(
+            "Đuôi file không khớp nội dung; đổi đúng đuôi (.mp4/.mov, .ply, .sog, .pcd hoặc .zip) rồi tải lại"
+        )
     return detection
 
 

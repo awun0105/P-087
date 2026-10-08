@@ -66,6 +66,7 @@ _TABLES = (
     "r2s_uploads",
     "r2s_upload_sessions",
     "r2s_imports",
+    "r2s_import_operations",
 )
 
 
@@ -576,10 +577,44 @@ def test_imports_are_removed_and_share_uploads_like_scenes(world: SimpleNamespac
     assert world.imports.list() == [] and world.uploads.list() == []
 
 
+def test_import_operation_survives_trash_and_restore(world: SimpleNamespace) -> None:
+    upload = _upload(world, "scene.ply", _gaussian(count=4))
+    import_id = _import(world, upload, "Bản nhập khôi phục")
+    before_rows = _rows(world)
+    before_files = _files(world)
+
+    entry = _delete(world, import_ids=[import_id])
+    with world.database.transaction() as tx:
+        assert tx.execute("SELECT COUNT(*) FROM r2s_import_operations WHERE import_id=?", (import_id,)).fetchone() == (
+            0,
+        )
+
+    restore_deletion(world.context, entry)
+
+    assert _rows(world) == before_rows
+    assert _files(world) == before_files
+    restored = world.imports.get(import_id)
+    assert restored.status == "READY"
+    assert restored.operation is not None and restored.operation.status == "SUCCEEDED"
+
+
 def test_import_being_packaged_is_refused(world: SimpleNamespace) -> None:
     upload = _upload(world, "scene.ply", _gaussian(count=4))
     record = world.imports.create(upload, "Đang đóng gói", None)
     _refused(world, "đang được đóng gói", import_ids=[record.import_id])
+
+
+def test_queued_import_is_refused_from_trash(world: SimpleNamespace) -> None:
+    upload = _upload(world, "scene.ply", _gaussian(count=4))
+    record = world.imports.create(upload, "Đang chờ", None)
+
+    with world.database.transaction(write=True) as tx:
+        tx.execute(
+            "UPDATE r2s_imports SET payload=? WHERE import_id=?",
+            (record.model_copy(update={"status": "FAILED"}).model_dump_json(), record.import_id),
+        )
+
+    _refused(world, "chờ worker", import_ids=[record.import_id])
 
 
 def test_remote_file_store_objects_survive_delete_and_go_on_purge(world: SimpleNamespace) -> None:

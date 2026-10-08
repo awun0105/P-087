@@ -464,9 +464,13 @@ export async function getModeComparison(jobId: string, signal?: AbortSignal): Pr
   return parseModeComparison(data);
 }
 
-/** Tạo scene import từ upload 3DGS; máy chủ nén PLY → SOG trong nền. */
-export function createImport(uploadId: string, name: string): Promise<ImportedScene> {
-  return apiFetch<ImportedScene>(`${API}/imports`, { method: "POST", body: JSON.stringify({ upload_id: uploadId, name }) });
+/** Tạo scene import từ upload PLY/COLMAP hoặc SOG; standalone worker publish bản xem. */
+export function createImport(uploadId: string, name: string, idempotencyKey = newRunIdempotencyKey()): Promise<ImportedScene> {
+  return apiFetch<ImportedScene>(`${API}/imports`, {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ upload_id: uploadId, name }),
+  });
 }
 
 export function getImport(importId: string, signal?: AbortSignal): Promise<ApiResult<ImportedScene>> {

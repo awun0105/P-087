@@ -15,7 +15,7 @@ from src.config import Settings, get_settings
 from src.models.contracts.manifests import ExecutionError, JobManifest, JobStatus, StageId
 from src.models.contracts.retryability import classify_retryability
 from src.services.orchestration.jobs.admission import ResourceAdmission
-from src.services.orchestration.jobs.database import RuntimeStateConflictError
+from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import load_prepared_profile, prepared_frame_reference, require_profile
 from src.services.orchestration.jobs.models import TransitionRequest
 from src.services.orchestration.jobs.progress import awaiting_finalize
@@ -29,6 +29,8 @@ from src.services.orchestration.projects.errors import PrivacyGateBlockedError
 from src.services.orchestration.projects.privacy import require_project_dispatch
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
 from src.services.orchestration.scene.objectify_queue import process_next, recover_interrupted
+from src.services.orchestration.storage import runtime_resolver
+from src.services.orchestration.uploads.scene_imports import ImportService
 
 logger = logging.getLogger(__name__)
 
@@ -312,6 +314,11 @@ def main(argv: list[str] | None = None) -> int:
     else:
         load_prepared_profile(settings.product_processing_config, registry.execution_profile)
     admission = ResourceAdmission(registry, settings)
+    import_service = ImportService(
+        RuntimeDatabase(settings.database_url),
+        runtime_resolver(settings),
+        settings.product_worker_root.expanduser().resolve() / "imports",
+    )
     if admission.discard_leftover_reservation():
         logger.warning("Đã xoá giữ chỗ tài nguyên còn sót của lần chạy trước worker=%s", admission.worker_id)
     heartbeat = _start_capability_heartbeat(registry, settings.product_worker_root, admission)
@@ -326,9 +333,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         recover_interrupted_jobs(registry, settings)
         recover_interrupted(settings)
+        import_service.recover_legacy_packaging()
         while True:
             # Job trong hàng đợi đi trước; rảnh mới nhận yêu cầu chạy lại tách theo vật (cùng dùng GPU).
-            handled = dispatch_next(registry, admission=admission) or process_next(registry, settings)
+            handled = (
+                dispatch_next(registry, admission=admission)
+                or process_next(registry, settings)
+                or import_service.process_next(settings.product_geometry_gpu_index)
+            )
             if args.once:
                 return 0
             if not handled:

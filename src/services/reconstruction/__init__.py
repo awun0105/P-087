@@ -104,7 +104,15 @@ def __getattr__(name: str) -> object:
         from src.services.reconstruction.rgb.canonical.lidar_assist import support_uri
 
         return support_uri
-    if name in {"detect_input", "detect_stream", "InputDetection", "InputKind", "InputRejectedError", "LidarEvidence"}:
+    if name in {
+        "detect_input",
+        "detect_stream",
+        "GaussianSogEvidence",
+        "InputDetection",
+        "InputKind",
+        "InputRejectedError",
+        "LidarEvidence",
+    }:
         from src.services.reconstruction.inputs import detect
 
         return getattr(detect, name)
@@ -144,6 +152,7 @@ __all__ = [
     "load_finalize_result",
     "load_geometry_profile",
     "DemoSelection",
+    "GaussianSogEvidence",
     "InputDetection",
     "InputKind",
     "InputRejectedError",

@@ -110,7 +110,7 @@ observability, runtime chưa qualified, research limits và tính năng khả th
 | Auto anonymizer producer thiếu | Self-attested flow có; strict QA gate có; detection/tracking/redaction integration chưa có | AUD-18 |
 | Automatic registration cho independent maps cần bổ sung | Trajectory-based no-point fit đã có; geometric BEV/ICP proposal/QA cho independent maps chưa có | AUD-19 |
 | Video chưa nén trước upload, rotation/time mapping chưa explicit | Source: upload giữ bytes, decode passthrough, quality probe640×360; LiDAR ghép frame_id gốc | AUD-23 |
-| SOG chưa accepted input; imported continuation chưa có | Source: ImportService chỉ package PLY/ZIP thành SOG viewer; Finalize/VisualResolver/objectify yêu cầu Brush/camera/frame lineage | AUD-06/24 cho view; AUD-25 Deferred |
+| SOG input và durable view import | AUD-06.S1 nhận bundled SOG v2, queue import bền và đồng bộ UI; S2/S3 vẫn giữ lease recovery/admission, retry/cancel và runtime decode validation. Finalize/VisualResolver/objectify vẫn yêu cầu Brush/camera/frame lineage | AUD-06.S1 implemented; AUD-25 continuation Deferred |
 
 Các số test là kết quả audit trước khi viết plan, không phải kết quả chạy lại
 cho thay đổi docs này. Ruff check/format pass; frontend lint/typecheck/build

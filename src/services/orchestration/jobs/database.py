@@ -258,6 +258,29 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
             "CREATE INDEX r2s_quota_intents_by_result ON r2s_quota_intents(result_kind, result_id)",
         ),
     ),
+    (
+        # Import view packaging is a durable product operation, independent of reconstruction jobs.
+        15,
+        (
+            """CREATE TABLE r2s_import_operations (
+                operation_id TEXT PRIMARY KEY,
+                import_id TEXT NOT NULL UNIQUE REFERENCES r2s_imports(import_id) ON DELETE CASCADE,
+                status TEXT NOT NULL CHECK(status IN ('QUEUED','WAITING','RUNNING','SUCCEEDED','FAILED','CANCELLED')),
+                attempt INTEGER NOT NULL CHECK(attempt >= 0),
+                requester_id TEXT NOT NULL,
+                idempotency_key TEXT,
+                request_fingerprint TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                owner_id TEXT,
+                fencing_token INTEGER NOT NULL CHECK(fencing_token >= 0),
+                lease_expires_at TEXT,
+                heartbeat_at TEXT,
+                payload TEXT NOT NULL)""",
+            "CREATE INDEX r2s_import_operations_by_status ON r2s_import_operations(status, created_at)",
+            "CREATE UNIQUE INDEX r2s_import_operations_idempotency ON r2s_import_operations(requester_id, idempotency_key) WHERE idempotency_key IS NOT NULL",
+        ),
+    ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 

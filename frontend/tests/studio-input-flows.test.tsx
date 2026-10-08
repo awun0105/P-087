@@ -29,6 +29,7 @@ vi.mock("@/lib/media/video-normalization", async (original) => ({
 
 const video: UploadRecord = { upload_id: "video-1", original_name: "warehouse.mp4", media_type: "video/mp4", size_bytes: 100, checksum: "sha256:test", artifact_uri: "artifact://test/video", received_at: "2026-10-01T00:00:00Z", project_ids: [], input_kind: "rgb_video" };
 const gaussian: UploadRecord = { ...video, upload_id: "ply-1", original_name: "warehouse.ply", media_type: "application/x-ply", input_kind: "gaussian_ply" };
+const sog: UploadRecord = { ...video, upload_id: "sog-1", original_name: "external.sog", media_type: "application/x-sog", input_kind: "gaussian_sog" };
 function guestMe(remaining: number): Me {
   return {
     auth_required: true,
@@ -105,7 +106,11 @@ describe("ba cửa vào", () => {
     demo.unmount();
 
     const scene = render(<NewSceneFlow source="gaussian" />);
-    expect(screen.getByLabelText(/Kéo file 3DGS/)).toHaveAttribute("accept", ".ply,.zip,application/zip");
+    expect(screen.getByLabelText(/Kéo file 3DGS/)).toHaveAttribute(
+      "accept",
+      ".ply,.sog,.zip,application/zip,application/x-sog",
+    );
+    expect(screen.getByText(/PLY\/SOG hoặc ZIP gồm PLY \+ COLMAP/)).toBeInTheDocument();
     expect(screen.queryByLabelText(/Kéo video/)).toBeNull();
     scene.unmount();
 
@@ -135,9 +140,23 @@ describe("ba cửa vào", () => {
     fireEvent.click(screen.getByRole("button", { name: "Mở scene import" }));
     expect(await screen.findByText("Không chuyển đổi được")).toBeInTheDocument();
     expect(name).toHaveValue("Kho import");
-    expect(createImport).toHaveBeenCalledWith("ply-1", "Kho import");
+    const firstCall = vi.mocked(createImport).mock.calls[0];
+    expect(firstCall?.slice(0, 2)).toEqual(["ply-1", "Kho import"]);
+    expect(firstCall?.[2]).toEqual(expect.any(String));
+    fireEvent.click(screen.getByRole("button", { name: "Mở scene import" }));
+    await waitFor(() => expect(createImport).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(createImport).mock.calls[1]?.[2]).toBe(firstCall?.[2]);
     expect(createSceneFromUpload).not.toHaveBeenCalled();
     expect(navigation.push).not.toHaveBeenCalled();
+  });
+
+  it("cho phép chọn SOG đã upload ở luồng mở scene", async () => {
+    vi.mocked(listUploads).mockResolvedValue({ ok: true, data: { uploads: [sog] } });
+    render(<ImportSetupStep preselect="sog-1" onBack={vi.fn()} />);
+    expect(await screen.findByRole("radio", { name: /external\.sog/ })).toBeInTheDocument();
+    expect(screen.getByRole("radio")).toBeChecked();
+    expect(screen.getByRole("radio")).toHaveAttribute("value", "sog-1");
+    expect(screen.getByRole("button", { name: "Mở scene import" })).toBeEnabled();
   });
 
   it("video loại PLY khỏi lựa chọn; chỉ submit sau đủ khai báo và giữ dữ liệu khi lỗi", async () => {

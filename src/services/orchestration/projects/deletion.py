@@ -63,6 +63,22 @@ _TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
     "r2s_uploads": ("upload_id", "payload"),
     "r2s_upload_sessions": ("upload_id", "payload"),
     "r2s_imports": ("import_id", "upload_id", "payload"),
+    "r2s_import_operations": (
+        "operation_id",
+        "import_id",
+        "status",
+        "attempt",
+        "requester_id",
+        "idempotency_key",
+        "request_fingerprint",
+        "created_at",
+        "updated_at",
+        "owner_id",
+        "fencing_token",
+        "lease_expires_at",
+        "heartbeat_at",
+        "payload",
+    ),
 }
 _KEY_WIDTH = {"r2s_job_events": 2, "r2s_scene_head_backfill_items": 2}
 #: Con trước cha, theo khoá ngoại của schema runtime.
@@ -75,6 +91,7 @@ _DELETE_ORDER = (
     "r2s_job_events",
     "r2s_jobs",
     "r2s_projects",
+    "r2s_import_operations",
     "r2s_imports",
     "r2s_upload_sessions",
     "r2s_uploads",
@@ -370,9 +387,13 @@ class _Collector:
             self.blockers.append(f"{import_id}: không tìm thấy scene nhập")
             return
         payload = json.loads(str(found[0].values["payload"]))
-        if payload.get("status") == "PACKAGING":
+        operations = self._select("r2s_import_operations", "import_id=?", (import_id,))
+        active_operations = [row for row in operations if row.values["status"] in {"QUEUED", "WAITING", "RUNNING"}]
+        if active_operations:
+            self.blockers.append(f"{import_id}: scene import đang được đóng gói (chờ worker hoặc worker đang xử lý)")
+        elif payload.get("status") == "PACKAGING":
             self.blockers.append(f"{import_id}: scene nhập đang được đóng gói")
-        self.rows += found
+        self.rows += found + operations
         self._add_item("artifact", import_id)
         self._add_item("import_worker", import_id)
         detail = f"{payload.get('status', '?')}, từ {found[0].values['upload_id']}"

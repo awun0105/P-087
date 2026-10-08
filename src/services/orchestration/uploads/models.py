@@ -11,7 +11,9 @@ from src.services.orchestration.auth.models import Actor
 from src.services.reconstruction import InputDetection, InputKind
 
 VideoMediaType = Literal["video/mp4", "video/quicktime"]
-UploadMediaType = Literal["video/mp4", "video/quicktime", "application/x-ply", "application/x-pcd", "application/zip"]
+UploadMediaType = Literal[
+    "video/mp4", "video/quicktime", "application/x-ply", "application/x-sog", "application/x-pcd", "application/zip"
+]
 
 #: Đuôi file video → media type ghi vào InputManifest (PRD FR-01, Playbook §2.1).
 VIDEO_EXTENSIONS: dict[str, VideoMediaType] = {".mp4": "video/mp4", ".mov": "video/quicktime"}
@@ -20,6 +22,7 @@ VIDEO_EXTENSIONS: dict[str, VideoMediaType] = {".mp4": "video/mp4", ".mov": "vid
 UPLOAD_EXTENSIONS: dict[str, UploadMediaType] = {
     **VIDEO_EXTENSIONS,
     ".ply": "application/x-ply",
+    ".sog": "application/x-sog",
     ".pcd": "application/x-pcd",
     ".zip": "application/zip",
 }
@@ -27,12 +30,13 @@ KIND_MEDIA_TYPES: dict[str, frozenset[str]] = {
     "rgb_video": frozenset({"video/mp4", "video/quicktime"}),
     "gaussian_ply": frozenset({"application/x-ply"}),
     "gaussian_ply_colmap": frozenset({"application/zip"}),
+    "gaussian_sog": frozenset({"application/x-sog"}),
     # ADR 0009: LiDAR đi kèm video — luôn là gói ZIP có quỹ đạo + calibration + thời điểm frame.
     "registered_lidar": frozenset({"application/zip"}),
     "lidar_scan_sequence": frozenset({"application/zip"}),
 }
 UNSUPPORTED_EXTENSION = (
-    "Hỗ trợ video .mp4/.mov; scene 3DGS .ply hoặc .zip (PLY 3DGS + model COLMAP); "
+    "Hỗ trợ video .mp4/.mov; scene 3DGS .ply, .sog hoặc .zip (PLY 3DGS + model COLMAP); "
     "gói LiDAR .zip (scan .pcd hoặc đám mây đã đăng ký, kèm quỹ đạo + calibration + thời điểm frame)"
 )
 
