@@ -24,6 +24,7 @@ import { subscribeTheme, themeColor, themeKey } from "@/lib/theme";
 import { Badge, Button, Notice } from "@/components/studio/primitives";
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
 import { ObjectifyNotice } from "@/features/studio/ObjectifyNotice";
+import { composeColliderTransform } from "@/features/viewer/layers";
 import type { GizmoMode, OverlayBox, OverlayObject } from "@/features/viewer/scene-overlay";
 import type { PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
 import { ApiError } from "@/lib/api/client";
@@ -56,6 +57,10 @@ function objectVisual(jobId: string, object: SceneObject, previews: ReadonlySet<
   return { url: null };
 }
 
+function objectColliderTransform(object: SceneObject) {
+  return object.collider ? composeColliderTransform(object, object.collider) : object.transform;
+}
+
 /** Trạng thái lưu SceneObject cho header scene (STUDIO_UX_SPEC.md Q5: mỗi thao tác là một revision). */
 export type SaveState =
   | { status: "saved"; revision: string }
@@ -68,7 +73,7 @@ const FILTERS: { value: Filter; label: string; match: (object: SceneObject) => b
   { value: "all", label: "Chưa loại", match: (object) => !isIgnored(object) },
   { value: "pending", label: "Chờ xác nhận", match: (object) => object.state === "CANDIDATE" && !isIgnored(object) },
   { value: "confirmed", label: "Đã xác nhận", match: (object) => object.state === "CONFIRMED" },
-  { value: "ignored", label: "Đã loại/xoá", match: isIgnored },
+  { value: "ignored", label: "Đã loại/xoá/gộp", match: isIgnored },
 ];
 
 /**
@@ -170,19 +175,23 @@ export function ObjectReviewView({
     () =>
       (scene?.objects ?? [])
         .filter((object) => object.physics?.dynamic && object.active && isPlaced(object))
-        .map((object) => ({
-          id: object.id,
-          position: object.transform.translation_xyz,
-          rotation_xyzw: object.transform.rotation_quaternion_xyzw,
-          colliderUrl:
+        .map((object) => {
+          const colliderUrl =
             object.collider?.geometry_ref && object.collider.geometry_ref.artifact_uri.endsWith(".glb")
               ? jobArtifactContentUrl(jobId, object.collider.geometry_ref)
-              : null,
-          dimensions: object.primitive_dimensions_xyz_m ?? null,
-          mass_kg: object.physics!.mass_kg ?? 10,
-          friction: object.physics!.dynamic_friction,
-          restitution: object.physics!.restitution,
-        })),
+              : null;
+          return {
+            id: object.id,
+            position: object.transform.translation_xyz,
+            rotation_xyzw: object.transform.rotation_quaternion_xyzw,
+            colliderUrl,
+            colliderLocalTransform: object.collider?.local_transform ?? null,
+            dimensions: object.primitive_dimensions_xyz_m ?? null,
+            mass_kg: object.physics!.mass_kg ?? 10,
+            friction: object.physics!.dynamic_friction,
+            restitution: object.physics!.restitution,
+          };
+        }),
     [scene, jobId],
   );
 
@@ -199,19 +208,22 @@ export function ObjectReviewView({
     () =>
       visibleObjects
         .filter((object) => object.primitive_dimensions_xyz_m)
-        .map((object) => ({
-          id: object.id,
-          center: object.transform.translation_xyz,
-          rotation_xyzw: object.transform.rotation_quaternion_xyzw,
-          dimensions: object.primitive_dimensions_xyz_m!,
-          color: object.id === selected ? selectedColor() : stateColor(object),
-          emphasized: object.id === selected,
-          // Collider phân rã lồi bám theo hình vật; vật chỉ có hộp (thêm tay, asset thư viện) thì vẽ hộp.
-          shapeUrl:
-            object.collider?.geometry_ref && object.collider.geometry_ref.artifact_uri.endsWith(".glb")
-              ? jobArtifactContentUrl(jobId, object.collider.geometry_ref)
-              : null,
-        })),
+        .map((object) => {
+          const transform = objectColliderTransform(object);
+          return {
+            id: object.id,
+            center: transform.translation_xyz,
+            rotation_xyzw: transform.rotation_quaternion_xyzw,
+            dimensions: object.primitive_dimensions_xyz_m!,
+            color: object.id === selected ? selectedColor() : stateColor(object),
+            emphasized: object.id === selected,
+            // Collider phân rã lồi bám theo hình vật; vật chỉ có hộp (thêm tay, asset thư viện) thì vẽ hộp.
+            shapeUrl:
+              object.collider?.geometry_ref && object.collider.geometry_ref.artifact_uri.endsWith(".glb")
+                ? jobArtifactContentUrl(jobId, object.collider.geometry_ref)
+                : null,
+          };
+        }),
     // `theme` trong deps: đổi chế độ/bảng màu thì khung vật vẽ lại bằng màu mới.
     [visibleObjects, selected, jobId, theme], // eslint-disable-line react-hooks/exhaustive-deps
   );
@@ -623,6 +635,8 @@ function Inspector({
   const [family, setFamily] = useState(typeof savedFamily === "string" ? savedFamily : "");
   const chosen = assets.find((item) => item.family === family) ?? assets.find((item) => item.semantic_class === label);
   const removed = isIgnored(object);
+  const merged = object.provenance.review === "MERGED";
+  const mergedInto = typeof object.provenance.merged_into === "string" ? object.provenance.merged_into : null;
   const massValue = mass.trim() === "" ? null : Number(mass);
   const massValid = massValue === null || (Number.isFinite(massValue) && massValue > 0);
   const [x, y, z] = object.transform.translation_xyz;
@@ -673,12 +687,17 @@ function Inspector({
             </Button>
           </>
         )}
-        {removed && (
+        {removed && !merged && (
           <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAct("restore")} className="border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep">
             <Undo2 aria-hidden /> Khôi phục
           </Button>
         )}
       </div>
+      {merged && (
+        <Notice>
+          Vật này đã được gộp vào {mergedInto ?? "một vật khác"}. Để hoàn tác, hãy khôi phục revision trước khi gộp.
+        </Notice>
+      )}
       {catalog && !removed && (
         <form
           className="space-y-2"
@@ -745,7 +764,7 @@ function Inspector({
           </Button>
         </form>
       )}
-      <form className="flex items-end gap-2" onSubmit={rename}>
+      {!merged && <form className="flex items-end gap-2" onSubmit={rename}>
         <label className="flex min-w-0 flex-1 flex-col gap-0.5 text-xs text-on-dark/70">
           Tên
           <input
@@ -758,7 +777,7 @@ function Inspector({
         <Button size="sm" variant="secondary" type="submit" disabled={busy || !name.trim() || name.trim() === object.name} className="border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep">
           <Pencil aria-hidden /> Đổi tên
         </Button>
-      </form>
+      </form>}
     </div>
   );
 }
@@ -886,10 +905,14 @@ function stateColor(object: SceneObject): string {
 }
 
 function isIgnored(object: SceneObject): boolean {
-  return object.provenance.review === "IGNORED" || object.provenance.review === "DELETED";
+  return object.provenance.review === "IGNORED" || object.provenance.review === "DELETED" || object.provenance.review === "MERGED";
 }
 
 function StateBadge({ object }: { object: SceneObject }) {
+  if (object.provenance.review === "MERGED") {
+    const mergedInto = typeof object.provenance.merged_into === "string" ? object.provenance.merged_into : "vật khác";
+    return <Badge>Đã gộp vào {mergedInto}</Badge>;
+  }
   if (object.provenance.review === "DELETED") return <Badge>Đã xoá</Badge>;
   if (isIgnored(object)) return <Badge>Đã loại</Badge>;
   if (object.state === "CANDIDATE") return <Badge tone="ochre">Ứng viên</Badge>;
@@ -901,10 +924,11 @@ function ObjectBox({ object, selected, onSelect }: { object: SceneObject; select
   const dimensions = object.primitive_dimensions_xyz_m;
   if (!dimensions) return null;
   const color = selected ? selectedColor() : stateColor(object);
+  const transform = objectColliderTransform(object);
   return (
     <mesh
-      position={object.transform.translation_xyz}
-      quaternion={object.transform.rotation_quaternion_xyzw}
+      position={transform.translation_xyz}
+      quaternion={transform.rotation_quaternion_xyzw}
       onClick={(event) => {
         event.stopPropagation();
         onSelect();

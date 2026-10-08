@@ -54,9 +54,13 @@ focused), typecheck, changed-file ESLint, isolated Next.js Webpack build (16 rou
 54 backend tests và Ruff pass. Chrome DevTools MCP hiện không có phiên Studio đăng nhập;
 browser flow được ghi **UNVERIFIED**. Browser codec/runtime, actual bandwidth,
 held-out quality and paired-sensor reconstruction remain S5 acceptance gates.
-AUD-08.S1 now persists versioned Gaussian membership labels and validates
-revision/source-bound correction commands; focused local checks pass. AUD-08.S2–S4
-remain open, and a real SAM2/3DGS/GPU producer run is still unverified.
+AUD-08.S1–S2 now persist revision/source-bound Gaussian membership and implement
+the merge domain with regenerated local visual/collider artifacts, preserved
+source collision ownership, read-only tombstones, and composed collider poses in
+the Studio overlay and interactive physics preview. Focused local checks pass.
+AUD-08.S3 reassign and S4 API/UI command wiring remain open. Real COACD/GPU/Isaac
+qualification and the browser gate are **UNVERIFIED**; the connected DevTools MCP
+has no logged-in Studio session.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 

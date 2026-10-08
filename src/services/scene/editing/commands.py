@@ -139,6 +139,8 @@ def add_primitive_object(scene: SceneIR, command: "PrimitiveObjectCommand") -> S
 def _find_object(scene: SceneIR, object_id: str) -> SceneObject:
     for item in scene.objects:
         if item.id == object_id:
+            if item.provenance.get("review") == "MERGED":
+                raise ValueError("merged object is an audit tombstone; restore a revision before the merge to undo it")
             return item
     raise ValueError(f"unknown SceneObject.id: {object_id}")
 

@@ -404,10 +404,15 @@ class SceneEditor:
 
     def require_known_objects(self, scene: SceneIR, command: SceneEditCommand) -> None:
         """Từ chối cả command nếu có object id không tồn tại trong revision."""
-        known = {item.id for item in scene.objects}
+        objects = {item.id: item for item in scene.objects}
         for edit in command.edits:
-            if edit.object_id not in known:
+            item = objects.get(edit.object_id)
+            if item is None:
                 raise SceneObjectNotFoundError(f"không tìm thấy scene object: {edit.object_id}")
+            if item.provenance.get("review") == "MERGED":
+                raise SceneEditRejectedError(
+                    "merged object is an audit tombstone; restore a revision before the merge to undo it"
+                )
 
     # --- recovery ---------------------------------------------------------
 

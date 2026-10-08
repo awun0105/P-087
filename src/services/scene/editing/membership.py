@@ -106,11 +106,19 @@ def validate_object_membership_command(scene: SceneIR, command: MembershipComman
     if not selected_ids <= mapped_ids:
         raise ObjectMembershipValidationError("correction command must target objects in the current membership map")
 
+    if isinstance(command, ObjectMembershipMergeCommand):
+        semantic_classes = {scene_objects[object_id].semantic_class for object_id in selected_ids}
+        if len(semantic_classes) > 1 and command.semantic_class_source_object_id is None:
+            raise ObjectMembershipValidationError(
+                "merged candidates have conflicting semantic classes; choose semantic_class_source_object_id"
+            )
+
     for object_id in selected_ids:
         item = scene_objects[object_id]
         ownership = item.source_collision
         if (
             item.state != SceneObjectState.CANDIDATE
+            or item.provenance.get("review") in {"IGNORED", "DELETED", "MERGED"}
             or item.origin != SceneObjectOrigin.RECONSTRUCTED
             or item.asset_ref is not None
             or ownership is None

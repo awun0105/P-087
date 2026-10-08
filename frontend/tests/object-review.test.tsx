@@ -16,17 +16,24 @@ vi.mock("@/features/studio/MetricSceneView", () => ({
   MetricSceneView: ({
     boxes,
     objects = [],
+    physicsObjects = [],
     gizmo,
     onTool,
     onDelete,
   }: {
-    boxes: { id: string; color: string }[];
+    boxes: { id: string; color: string; center: [number, number, number]; rotation_xyzw: [number, number, number, number] }[];
     objects?: { id: string; url: string | null; visible: boolean }[];
+    physicsObjects?: {
+      id: string;
+      position: [number, number, number];
+      rotation_xyzw: [number, number, number, number];
+      colliderLocalTransform: { translation_xyz: [number, number, number] } | null;
+    }[];
     gizmo?: { id: string; mode: string } | null;
     onTool?: (tool: "translate" | "rotate" | "none") => void;
     onDelete?: () => void;
   }) => (
-    <div data-testid="metric-scene">
+    <div data-testid="metric-scene" data-boxes={JSON.stringify(boxes)} data-physics-objects={JSON.stringify(physicsObjects)}>
       {boxes.map((box) => `${box.id}:${box.color}`).join(",")}
       <span data-testid="splats">{objects.map((item) => `${item.id}:${item.url ? "ply" : "none"}:${item.visible}`).join(",")}</span>
       <span data-testid="gizmo">{gizmo ? `${gizmo.id}:${gizmo.mode}` : "none"}</span>
@@ -50,7 +57,13 @@ const ref = {
   job_id: "job-a",
 };
 
-function scene(revision: string, state: "CANDIDATE" | "CONFIRMED", review?: string) {
+function scene(
+  revision: string,
+  state: "CANDIDATE" | "CONFIRMED",
+  review?: string,
+  mergedInto?: string,
+  colliderOffset?: [number, number, number],
+) {
   return {
     scene_revision: revision,
     environment: {
@@ -65,10 +78,41 @@ function scene(revision: string, state: "CANDIDATE" | "CONFIRMED", review?: stri
         state,
         active: state === "CONFIRMED",
         origin: "reconstructed",
+        local_frame: "candidate-001",
         transform: { translation_xyz: [1, 2, 0.3], rotation_quaternion_xyzw: [0, 0, 0, 1] },
         primitive_dimensions_xyz_m: [1, 0.8, 0.6],
         geometry_ref: ref,
-        provenance: review ? { review } : {},
+        collider: colliderOffset
+          ? {
+              collider_id: "collider-001",
+              collider_type: "CONVEX_DECOMPOSITION",
+              dimensions_xyz_m: null,
+              local_transform: {
+                semantics: "parent_from_local",
+                parent_frame: "candidate-001",
+                local_frame: "collider-001",
+                translation_xyz: colliderOffset,
+                rotation_quaternion_xyzw: [0, 0, 0, 1],
+                quaternion_order: "xyzw",
+                angle_unit: "radian",
+              },
+              geometry_ref: { ...ref, artifact_uri: "artifact://jobs/job-a/scene/objects/collider.glb" },
+              parameters: {},
+              provenance: {},
+            }
+          : null,
+        physics: colliderOffset
+          ? {
+              dynamic: true,
+              mass_kg: 10,
+              mass_source: "user",
+              static_friction: 0.6,
+              dynamic_friction: 0.5,
+              restitution: 0,
+              provenance: {},
+            }
+          : null,
+        provenance: review ? { review, ...(mergedInto ? { merged_into: mergedInto } : {}) } : {},
       },
     ],
   };
@@ -149,7 +193,7 @@ describe("ObjectReviewView", () => {
     render(<ObjectReviewView jobId="job-a" />);
     expect(await screen.findByText("1 vật thể · 0 chờ xác nhận")).toBeInTheDocument();
     expect(screen.queryByText("Vật thể 1")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Đã loại/xoá · 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Đã loại/xoá/gộp · 1" }));
     expect(screen.getByText("Vật thể 1")).toBeInTheDocument();
     expect(screen.getByText("Đã loại")).toBeInTheDocument();
   });
@@ -442,6 +486,38 @@ describe("ObjectReviewView", () => {
     expect(posts).toHaveLength(1);
     expect((posts[0][1] as RequestInit).body).toBeUndefined();
   });
+  it("giữ object đã gộp trong nhóm audit và không cho sửa tombstone", async () => {
+    routeFetch({
+      "/scene": [reply({ scene: scene("rev-003", "CANDIDATE", "MERGED", "candidate-002") })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+
+    expect(await screen.findByText("1 vật thể · 0 chờ xác nhận")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Đã loại/xoá/gộp · 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chọn Vật thể 1" }));
+
+    expect(screen.getAllByText("Đã gộp vào candidate-002").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Khôi phục Vật thể 1" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Đổi tên" })).toBeNull();
+  });
+
+  it("dùng collider local transform cho preview và physics pose", async () => {
+    routeFetch({
+      "/scene": [reply({ scene: scene("rev-004", "CONFIRMED", "CONFIRMED", undefined, [2, -1, 0.5]) })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+
+    const metricScene = await screen.findByTestId("metric-scene");
+    const boxes = JSON.parse(metricScene.getAttribute("data-boxes") ?? "[]") as { center: number[] }[];
+    const physicsObjects = JSON.parse(metricScene.getAttribute("data-physics-objects") ?? "[]") as {
+      position: number[];
+      colliderLocalTransform: { translation_xyz: number[] } | null;
+    }[];
+    expect(boxes[0]?.center).toEqual([3, 1, 0.8]);
+    expect(physicsObjects[0]?.position).toEqual([1, 2, 0.3]);
+    expect(physicsObjects[0]?.colliderLocalTransform?.translation_xyz).toEqual([2, -1, 0.5]);
+  });
+
   it("tách theo vật lỗi sau 3 lần: cho chọn chạy lại hoặc dùng hộp; chọn hộp gửi mode boxes", async () => {
     routeFetch({
       "/scene/objectify": [

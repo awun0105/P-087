@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- IN PROGRESS — AUD-08.S1 locally complete; S2–S4 remain planned; P1; EX-SCENE domain, EX-PRODUCT commands/UI.
+- IN PROGRESS — AUD-08.S1–S2 locally complete; S3–S4 remain planned; P1; EX-SCENE domain, EX-PRODUCT commands/UI.
 - Canonical SCENE-03/06/07/08, PRODUCT-06/07. REUSE gaussian_split/association;
   SELF-CODE revision-bound commands và ownership update.
 - Goal: sửa segmentation/grouping trước confirmation, tạo artifact đồng bộ
@@ -30,8 +30,8 @@ merge catalog assets hoặc generic mesh sculpting.
 Input: expected_scene_revision, source membership ref/checksum, reconstructed
 CANDIDATE IDs và command. Initial scope chỉ candidates chưa có pose edit;
 confirmed/moved/asset/legacy-without-membership phải reject rõ, không fake merge.
-Output: one new DRAFT SceneIR revision + changed visual/geometry/background
-refs + audit event; secondary tombstone; old revisions/artifacts giữ nguyên.
+Output: one new immutable SceneIR revision + changed visual/geometry/collider
+refs + audit event; secondary tombstones; old revisions/artifacts giữ nguyên.
 
 Proposed ObjectMembershipArtifact header: version, source_visual_ref,
 source_geometry_ref, extraction_revision, coordinate_system, gaussian_count,
@@ -40,17 +40,21 @@ Binary labels/indices không dùng pickle; bind source row count/byte checksum.
 Collision source regions dùng contract AUD-01, không suy Gaussian index = mesh face index.
 
 Merge command: expected_scene_revision, primary_object_id, secondary_object_ids,
-membership_checksum. Reassign command: same revision/checksum, source region
+membership_checksum, and semantic_class_source_object_id when selected semantic
+classes conflict. Reassign command: same revision/checksum, source region
 selection (bounded ROI trong source canonical frame hoặc verified selection ref),
-source_object_id/background, target_object_id/background. S1 chốt DTO/routes;
-server validate selection ownership, bounds, count, target và identity.
+source_object_id/background, target_object_id/background. S1 chốt DTO/domain
+validation; API/UI command wiring thuộc S4. Server validates selection ownership,
+bounds, count, target và identity.
 
 Each Gaussian có tối đa một owner; merge union deduplicate; reassign chuyển
 ownership không clone điểm. Không thất thoát/nhân đôi source rows. Primary ID
 giữ ổn định; secondary inactive + review MERGED/merged_into audit provenance,
 không thêm SceneObjectState mới. Membership IDs của secondary được map primary.
-Geometry/local origin thay đổi phải regenerate collider, background source
-ownership và refs; confirmation reset CANDIDATE. Không kế thừa validation/approval.
+Merge regenerates local visual/collider artifacts while preserving each original
+source_collision region independently; downstream background carving follows the
+merged primary's review state through the tombstone link. Confirmation reset
+CANDIDATE. Không kế thừa physics, validation hoặc approval.
 
 ## Logic change và dependent updates
 
@@ -88,22 +92,27 @@ stale revision, missing source refs, NaN ROI, floor/background selection semanti
 **Input:** validated merge S1 với unedited candidates.
 **Output:** primary merged candidate, secondary audit tombstones, new artifacts/revision.
 **Contract:** union không duplicate/loss; keep primary ID; local frame/SH semantics
-correct; source collision regions hợp nhất theo ownership, không current OBB mù.
+correct; giữ source collision regions riêng theo ownership thay vì suy va chạm từ
+Gaussian membership hoặc gộp mesh theo OBB hiện tại.
 
 Implement: complete domain result thay vì gọi merge_candidates rồi chỉ đổi JSON;
 regenerate local PLY/geometry/delivery/collider-required state qua existing ports.
-Primary semantic selection phải explicit khi labels xung đột; mass/physics không
-blind sum hoặc kế thừa collider cũ. Publish refs trước CAS revision commit.
-Tests: two/three candidates, self/duplicate IDs, overlap, primary choice conflicts,
-membership counts, source world witness vs new local transform, publication failure,
-stale user edit during worker rebuild; secondary restore behavior ghi rõ.
-**Exit:** [ ] visual/geometry/membership đồng bộ; [ ] no half-applied merge revision.
+Primary semantic selection phải explicit khi semantic classes xung đột;
+mass/physics không blind sum hoặc kế thừa collider cũ. Publish refs trước CAS
+revision commit. Gaussian transform của primary vẫn identity để giữ SH; collider
+được đặt tại tâm union bằng local transform riêng. Tombstone không được sửa/restore
+trực tiếp; hoàn tác bằng cách khôi phục revision trước merge.
+Tests: two/three candidates, self/duplicate IDs, nhiều label cùng một owner,
+semantic conflicts, membership counts, source world witness vs new local transform,
+source collision ownership, publication failure, stale user edit during worker
+rebuild; secondary restore behavior ghi rõ.
+**Exit:** [x] visual/geometry/membership đồng bộ; [x] no half-applied merge revision.
 
 ## Sprint AUD-08.S3 — Reassign region ownership
 
 **Input:** validated region selection + existing candidate/background target.
 **Output:** updated exclusive membership, affected object/background artifacts,
-new DRAFT revision và audit trail.
+new immutable SceneIR revision và audit trail; candidate review remains pending.
 **Contract:** selected rows chuyển owner đúng một lần; unselected rows unchanged;
 empty candidate/degenerate geometry có policy explicit, không auto-delete audit.
 
@@ -133,14 +142,75 @@ cancel/error, API permission/stale calls, exported object/collider correspondenc
 ## Verification và DoD
 
 ```bash
-.venv/bin/pytest tests/test_scene/test_gaussian_split.py tests/test_scene/test_editing_review.py tests/test_scene/test_editing_v2.py tests/test_orchestration/test_scene_editor.py tests/test_api/test_scene_v2_routes.py -q
+.venv/bin/pytest tests/test_scene/test_object_correction.py tests/test_scene/test_object_membership.py tests/test_scene/test_gaussian_split.py tests/test_scene/test_editing_review.py tests/test_orchestration/test_scene_editor.py tests/test_orchestration/test_simulation_package.py tests/test_simulation/test_collision_edit_composition.py -q
 ```
 
-Planned tests/test_scene/test_object_correction.py. Frontend
-tests/object-review.test.tsx, tests/ux-scene-flow.test.tsx. DONE cần persisted
-membership → command → artifacts → revision → consumer proof, không chỉ unit merge helper.
+Frontend verification uses `tests/layers.test.ts`,
+`tests/object-review.test.tsx`, `tests/scene-physics.test.ts`, and
+`tests/ux-scene-flow.test.tsx`. DONE cần persisted membership → command →
+artifacts → revision → consumer proof, không chỉ unit merge helper.
 
 ## Result / Evidence
+
+### AUD-08.S2 — Merge domain và regenerate artifacts
+
+- **Base:** `8510186` (`AUD-08.S1`).
+- **Behavior before → after:** correction validation existed but no operation
+  applied a membership union to the primary, regenerated its visual/collider,
+  retired secondary candidates, or published a new SceneIR revision. The new
+  domain operation selects source PLY rows from the checksummed membership map,
+  publishes primary-local Gaussian and regenerated collider artifacts, maps all
+  selected labels to the stable primary ID, records inactive `MERGED` tombstones,
+  and commits with `SceneEditor.publish_next` CAS.
+- **Contract decision:** only current, unmoved reconstructed candidates with
+  matching source collision ownership can merge. Primary transform and ID stay
+  stable; Gaussian rotations stay identity, so SH is retained without an
+  unimplemented SH rotation. Conflicting semantic classes require an explicit
+  `semantic_class_source_object_id`. Physics is cleared and marked for
+  reconfirmation; validation/approval is not copied. Each source collision region
+  remains independently owned by its source object, and the simulation package
+  follows a merged tombstone to the primary review state when deciding whether
+  its source region can be carved. Label bytes/row order stay immutable; multiple
+  labels may map to one primary and no Gaussian row is duplicated or dropped.
+- **Publication and recovery:** visual and collider refs are published and read
+  back before the SceneIR CAS. Publication failure leaves the current revision
+  unchanged; a concurrent scene edit makes the merge CAS fail, leaving the other
+  edit intact. Immutable content-addressed artifacts published before a failed
+  CAS may remain unreferenced; this sprint does not add artifact cleanup.
+- **Files:** `src/models/contracts/object_membership.py`,
+  `src/services/scene/editing/{membership,commands}.py`,
+  `src/services/orchestration/scene/{editor,object_correction}.py`,
+  `src/services/orchestration/review/simulation_package.py`,
+  `frontend/src/lib/contracts/api.ts`,
+  `frontend/src/features/studio/ObjectReviewView.tsx`,
+  `frontend/src/features/viewer/usePhysicsPlay.ts`,
+  `tests/test_scene/test_object_correction.py`,
+  `frontend/tests/object-review.test.tsx`, and
+  `frontend/tests/scene-physics.test.ts`.
+- **Consumer closure:** merged tombstones no longer accept object commands or
+  transform edits. The scene review hides them from active views, shows the
+  primary link in the audit filter, and omits rename/restore controls. Collider
+  preview composes the collider's child-local transform. Interactive physics
+  keeps the body on the SceneObject pose and transforms GLB/fallback hull vertices
+  from the collider child frame into that object frame, so walking does not move
+  the visual splat by the collider offset. API/UI merge submission remains
+  intentionally scheduled for S4; S2 provides the domain operation and read-only
+  review representation.
+- **Verification:**
+  - `.venv/bin/pytest tests/test_scene/test_object_correction.py tests/test_scene/test_object_membership.py tests/test_scene/test_gaussian_split.py tests/test_scene/test_editing_review.py tests/test_orchestration/test_scene_editor.py tests/test_orchestration/test_simulation_package.py tests/test_simulation/test_collision_edit_composition.py -q` — **96 passed**.
+  - `.venv/bin/ruff check src/ tests/` — **passed**;
+    `.venv/bin/ruff format --check src/ tests/` — **504 files already formatted**.
+  - `.venv/bin/python scripts/check_contract_mirror.py` — **PASS**, 5 enum and
+    5 model projections match.
+  - `npm test -- --run tests/layers.test.ts tests/object-review.test.tsx tests/scene-physics.test.ts tests/ux-scene-flow.test.tsx`
+    — **67 passed**; `npm run typecheck` and `npm run lint` — **passed**;
+    `npm run build -- --webpack` — **passed**, 16 static pages generated.
+- **CodeGraph gate:** indexed the modified source and verified merge, membership,
+  tombstone, collider-preview and simulation-package caller paths before commit.
+- **Limitations:** tests use synthetic Gaussian rows and a fake convex runner;
+  real COACD, GPU, Isaac export/simulation, and a browser session are not proven.
+  `UNVERIFIED: DevTools — no logged-in session` (MCP is connected; available page
+  is `about:blank`). API/UI merge submission is S4 scope.
 
 ### AUD-08.S1 — Persist membership và validate correction commands
 

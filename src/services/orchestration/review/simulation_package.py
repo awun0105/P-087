@@ -189,8 +189,17 @@ def current_package(registry: ProjectRegistry, job_id: str) -> SimulationPackage
     return package if _cache_matches(package, scene, build_config, export_requirements(scene)) else None
 
 
-def _source_region_removed(item: SceneObject) -> bool:
-    """Whether this reconstructed object's immutable source region leaves the background."""
+def _source_region_removed(item: SceneObject, objects_by_id: dict[str, SceneObject]) -> bool:
+    """Whether this immutable source region leaves the background after review/merge."""
+    visited: set[str] = set()
+    while item.provenance.get("review") == "MERGED":
+        if item.id in visited:
+            return False
+        visited.add(item.id)
+        merged_into = item.provenance.get("merged_into")
+        if not isinstance(merged_into, str) or merged_into not in objects_by_id:
+            return False
+        item = objects_by_id[merged_into]
     if item.provenance.get("duplicated_from") is not None:
         return False
     review = item.provenance.get("review")
@@ -326,11 +335,12 @@ def _carved_environment(registry: ProjectRegistry, scene: SceneIR) -> CarvedBack
         raise SourceCollisionOwnershipError("source collision mesh has no triangles")
 
     reconstructed = [item for item in scene.objects if item.origin == SceneObjectOrigin.RECONSTRUCTED]
+    objects_by_id = {item.id: item for item in reconstructed}
     missing = [
         item.id
         for item in reconstructed
         if item.provenance.get("duplicated_from") is None
-        and _source_region_removed(item)
+        and _source_region_removed(item, objects_by_id)
         and item.source_collision is None
     ]
     if missing:
@@ -382,7 +392,7 @@ def _carved_environment(registry: ProjectRegistry, scene: SceneIR) -> CarvedBack
         if not exact:
             # Exact triangle membership is authoritative: an approximate box never takes a triangle from it.
             indices = indices[~exact_claim[indices]]
-        if _source_region_removed(item):
+        if _source_region_removed(item, objects_by_id):
             carve_claim[indices] = True
         else:
             keep_claim[indices] = True
@@ -424,7 +434,11 @@ def _prim_name(object_id: str) -> str:
 
 def _is_pending(item: SceneObject) -> bool:
     """Ứng viên chưa được xác nhận/loại/xoá: vẫn là một phần hình của nền khi xuất."""
-    return item.state == SceneObjectState.CANDIDATE and item.provenance.get("review") not in {"IGNORED", "DELETED"}
+    return item.state == SceneObjectState.CANDIDATE and item.provenance.get("review") not in {
+        "IGNORED",
+        "DELETED",
+        "MERGED",
+    }
 
 
 def _hybrid_layers(

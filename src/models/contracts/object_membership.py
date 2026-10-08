@@ -56,6 +56,7 @@ class ObjectMembershipMergeCommand(MembershipCommandBase):
 
     primary_object_id: Identifier
     secondary_object_ids: list[Identifier] = Field(min_length=1, max_length=60)
+    semantic_class_source_object_id: Identifier | None = None
 
     @model_validator(mode="after")
     def _require_unique_secondary_objects(self) -> Self:
@@ -63,6 +64,12 @@ class ObjectMembershipMergeCommand(MembershipCommandBase):
             raise ValueError("secondary_object_ids must be unique")
         if self.primary_object_id in self.secondary_object_ids:
             raise ValueError("primary object cannot also be secondary")
+        selected_ids = {self.primary_object_id, *self.secondary_object_ids}
+        if (
+            self.semantic_class_source_object_id is not None
+            and self.semantic_class_source_object_id not in selected_ids
+        ):
+            raise ValueError("semantic class source must be one of the merged objects")
         return self
 
 

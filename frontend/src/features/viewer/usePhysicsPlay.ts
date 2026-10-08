@@ -23,6 +23,11 @@ export interface PhysicsObjectInput {
   position: Vec3;
   rotation_xyzw: [number, number, number, number];
   colliderUrl: string | null;
+  /** Child collider frame relative to the SceneObject; applied to hull vertices before simulation. */
+  colliderLocalTransform: {
+    translation_xyz: Vec3;
+    rotation_quaternion_xyzw: [number, number, number, number];
+  } | null;
   dimensions: Vec3 | null;
   mass_kg: number;
   friction: number;
@@ -51,6 +56,53 @@ function toCanonical(mesh: TriangleMesh): TriangleMesh {
     positions[i + 2] = z;
   }
   return { positions, indices: mesh.indices };
+}
+
+export function transformColliderHullToObjectFrame(
+  points: Float32Array,
+  transform: PhysicsObjectInput["colliderLocalTransform"],
+): Float32Array {
+  if (!transform) return points;
+  const result = new Float32Array(points.length);
+  const [offsetX, offsetY, offsetZ] = transform.translation_xyz;
+  const [qx, qy, qz, qw] = transform.rotation_quaternion_xyzw;
+  for (let index = 0; index < points.length; index += 3) {
+    const x = points[index];
+    const y = points[index + 1];
+    const z = points[index + 2];
+    const uvx = qy * z - qz * y;
+    const uvy = qz * x - qx * z;
+    const uvz = qx * y - qy * x;
+    const uuvx = qy * uvz - qz * uvy;
+    const uuvy = qz * uvx - qx * uvz;
+    const uuvz = qx * uvy - qy * uvx;
+    result[index] = x + 2 * (qw * uvx + uuvx) + offsetX;
+    result[index + 1] = y + 2 * (qw * uvy + uuvy) + offsetY;
+    result[index + 2] = z + 2 * (qw * uvz + uuvz) + offsetZ;
+  }
+  return result;
+}
+
+export function fallbackColliderHull(
+  dimensions: Vec3 | null,
+  transform: PhysicsObjectInput["colliderLocalTransform"],
+): Float32Array | null {
+  if (!dimensions || !transform) return null;
+  const [qx, qy, qz, qw] = transform.rotation_quaternion_xyzw;
+  const identity =
+    transform.translation_xyz.every((value) => Math.abs(value) < 1e-8) &&
+    Math.abs(qx) < 1e-8 &&
+    Math.abs(qy) < 1e-8 &&
+    Math.abs(qz) < 1e-8 &&
+    Math.abs(Math.abs(qw) - 1) < 1e-8;
+  if (identity) return null;
+  const points: number[] = [];
+  for (const x of [-dimensions[0] / 2, dimensions[0] / 2]) {
+    for (const y of [-dimensions[1] / 2, dimensions[1] / 2]) {
+      for (const z of [-dimensions[2] / 2, dimensions[2] / 2]) points.push(x, y, z);
+    }
+  }
+  return transformColliderHullToObjectFrame(new Float32Array(points), transform);
 }
 
 export function usePhysicsPlay({
@@ -101,11 +153,15 @@ export function usePhysicsPlay({
           loadAmmo(),
           fetchMesh(collisionUrl, controller.signal).then(toCanonical),
           Promise.all(
-            specs.map((item) =>
-              item.colliderUrl
-                ? fetchMesh(item.colliderUrl, controller.signal).then((mesh) => mesh.positions, () => null)
-                : Promise.resolve(null),
-            ),
+            specs.map((item) => {
+              const fallback = fallbackColliderHull(item.dimensions, item.colliderLocalTransform);
+              return item.colliderUrl
+                ? fetchMesh(item.colliderUrl, controller.signal).then(
+                    (mesh) => transformColliderHullToObjectFrame(toCanonical(mesh).positions, item.colliderLocalTransform),
+                    () => fallback,
+                  )
+                : Promise.resolve(fallback);
+            }),
           ),
         ]);
         if (controller.signal.aborted) return;

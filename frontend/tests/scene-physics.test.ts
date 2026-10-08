@@ -7,6 +7,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { ScenePhysics, displayToCanonical, nearbyTriangles, sampleHull, type AmmoModule, type PhysicsObjectSpec } from "@/features/viewer/scene-physics";
 import type { TriangleMesh } from "@/features/viewer/glb-mesh";
+import { fallbackColliderHull, transformColliderHullToObjectFrame } from "@/features/viewer/usePhysicsPlay";
 
 const vendor = path.resolve(__dirname, "../public/vendor/ammo");
 let Ammo: AmmoModule;
@@ -80,6 +81,38 @@ describe("vật lý của scene tương tác", () => {
 describe("dữ liệu cho vật lý", () => {
   it("đổi không gian hiển thị Y-up về hệ canonical Z-up", () => {
     expect(displayToCanonical([1, 2, 3])).toEqual([1, -3, 2]);
+  });
+
+  it("đặt đỉnh collider vào khung object trước khi mô phỏng", () => {
+    const halfTurn = Math.SQRT1_2;
+    const points = transformColliderHullToObjectFrame(new Float32Array([1, 0, 0, -1, 0, 0]), {
+      translation_xyz: [2, -1, 0.5],
+      rotation_quaternion_xyzw: [0, 0, halfTurn, halfTurn],
+    });
+
+    expect(points[0]).toBeCloseTo(2);
+    expect(points[1]).toBeCloseTo(0);
+    expect(points[2]).toBeCloseTo(0.5);
+    expect(points[3]).toBeCloseTo(2);
+    expect(points[4]).toBeCloseTo(-2);
+    expect(points[5]).toBeCloseTo(0.5);
+  });
+
+  it("fallback collider dạng hộp cũng giữ offset của collider con", () => {
+    const points = fallbackColliderHull([2, 2, 2], {
+      translation_xyz: [2, -1, 0.5],
+      rotation_quaternion_xyzw: [0, 0, 0, 1],
+    });
+    expect(points).not.toBeNull();
+    if (!points) throw new Error("expected transformed fallback hull");
+    const centroid = [0, 1, 2].map((axis) => {
+      let total = 0;
+      for (let index = axis; index < points.length; index += 3) total += points[index];
+      return total / 8;
+    });
+    expect(centroid[0]).toBeCloseTo(2);
+    expect(centroid[1]).toBeCloseTo(-1);
+    expect(centroid[2]).toBeCloseTo(0.5);
   });
 
   it("lấy mẫu đều khi bao lồi quá nhiều đỉnh", () => {

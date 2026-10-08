@@ -122,6 +122,7 @@ export interface ObjectMembershipMergeCommand {
   membership_checksum: string;
   primary_object_id: string;
   secondary_object_ids: string[];
+  semantic_class_source_object_id?: string | null;
 }
 
 export interface SourceGaussianROI {
