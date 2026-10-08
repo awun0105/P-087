@@ -4,10 +4,10 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.api.auth import require_contributor
+from src.api.auth import auth_service, require_contributor
 from src.api.ownership import authorize_upload_mutation, owner_mutation_allowed
 from src.api.studio import deps
-from src.services.orchestration.auth import UserRecord
+from src.services.orchestration.auth import Actor, UserRecord
 from src.services.orchestration.uploads import UploadNotFoundError
 from src.services.orchestration.uploads.scene_imports import (
     ImportedScene,
@@ -52,7 +52,35 @@ class ImportListResponse(BaseModel):
     imports: list[ImportedSceneResponse]
 
 
-def _view(record: ImportedScene, user: UserRecord | None) -> ImportedSceneResponse:
+def _legacy_creator_names(records: list[ImportedScene]) -> dict[str, Actor]:
+    """Batch-resolve current names for legacy rows without inventing a role snapshot."""
+    user_ids = {
+        record.created_by for record in records if record.created_by is not None and record.created_by_name is None
+    }
+    if not user_ids:
+        return {}
+    actors = auth_service().actors()
+    return {user_id: actors[user_id] for user_id in user_ids if user_id in actors}
+
+
+def _with_legacy_creator_name(record: ImportedScene, actors: dict[str, Actor]) -> ImportedScene:
+    if record.created_by_name is not None or record.created_by is None:
+        return record
+    actor = actors.get(record.created_by)
+    if actor is None:
+        return record
+    payload = record.model_dump(mode="python")
+    payload["created_by_name"] = actor.display_name
+    return ImportedScene.model_validate(payload)
+
+
+def _view(
+    record: ImportedScene,
+    user: UserRecord | None,
+    legacy_actors: dict[str, Actor] | None = None,
+) -> ImportedSceneResponse:
+    if legacy_actors is not None:
+        record = _with_legacy_creator_name(record, legacy_actors)
     owner_mutation = owner_mutation_allowed(user, record.created_by)
     operation = record.operation
     retryable_codes = {"runtime_failure", "publication_failure", "source_unavailable", "worker_interrupted"}
@@ -105,20 +133,23 @@ def create_import(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except SceneImportError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    return _view(record, user)
+    return _view(record, user, _legacy_creator_names([record]))
 
 
 @router.get("/imports", response_model=ImportListResponse)
 def list_imports(user: UserRecord | None = Depends(require_contributor)) -> ImportListResponse:
     """Danh sách scene import."""
-    return ImportListResponse(imports=[_view(record, user) for record in _service().list()])
+    records = _service().list()
+    legacy_actors = _legacy_creator_names(records)
+    return ImportListResponse(imports=[_view(record, user, legacy_actors) for record in records])
 
 
 @router.get("/imports/{import_id}", response_model=ImportedSceneResponse)
 def get_import(import_id: str, user: UserRecord | None = Depends(require_contributor)) -> ImportedSceneResponse:
     """Trạng thái một scene import."""
     try:
-        return _view(_service().get(import_id), user)
+        record = _service().get(import_id)
+        return _view(record, user, _legacy_creator_names([record]))
     except ImportNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
 
@@ -131,7 +162,8 @@ def retry_import(import_id: str, user: UserRecord | None = Depends(require_contr
         record = service.get(import_id)
         if not owner_mutation_allowed(user, record.created_by):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Không có quyền retry scene import này")
-        return _view(service.retry(import_id), user)
+        updated = service.retry(import_id)
+        return _view(updated, user, _legacy_creator_names([updated]))
     except ImportNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except SceneImportError as error:
@@ -146,7 +178,8 @@ def cancel_import(import_id: str, user: UserRecord | None = Depends(require_cont
         record = service.get(import_id)
         if not owner_mutation_allowed(user, record.created_by):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Không có quyền hủy scene import này")
-        return _view(service.cancel(import_id), user)
+        updated = service.cancel(import_id)
+        return _view(updated, user, _legacy_creator_names([updated]))
     except ImportNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except SceneImportError as error:

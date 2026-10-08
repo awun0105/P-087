@@ -365,6 +365,7 @@ async def test_import_list_returns_capability_for_guest_owner_and_higher_roles(
     expected_delete: list[bool],
 ) -> None:
     user = _user(role)
+    monkeypatch.setattr(imports_api, "auth_service", lambda: SimpleNamespace(actors=lambda: {}))
     records = [
         ImportedScene(
             import_id="import-guest",
@@ -451,6 +452,78 @@ async def test_import_list_returns_capability_for_guest_owner_and_higher_roles(
 
 
 @pytest.mark.asyncio
+async def test_import_list_resolves_legacy_creator_name_without_inventing_role(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime.now(UTC)
+    records = [
+        ImportedScene(
+            import_id="import-legacy",
+            upload_id="upload-legacy",
+            name="Legacy import",
+            input_kind="gaussian_ply",
+            status="READY",
+            created_at=now,
+            created_by="user-editor",
+        ),
+        ImportedScene(
+            import_id="import-snapshot",
+            upload_id="upload-snapshot",
+            name="Snapshot import",
+            input_kind="gaussian_ply",
+            status="READY",
+            created_at=now,
+            created_by="user-editor",
+            created_by_name="Name at import",
+            created_by_role="guest",
+        ),
+        ImportedScene(
+            import_id="import-deleted-user",
+            upload_id="upload-deleted-user",
+            name="Deleted creator import",
+            input_kind="gaussian_ply",
+            status="READY",
+            created_at=now,
+            created_by="user-deleted",
+        ),
+    ]
+
+    class ImportList:
+        def list(self) -> list[ImportedScene]:
+            return records
+
+    actor_calls = 0
+
+    class LegacyActors:
+        def actors(self) -> dict[str, Actor]:
+            nonlocal actor_calls
+            actor_calls += 1
+            return {"user-editor": Actor(user_id="user-editor", display_name="Current name", role="reviewer")}
+
+    monkeypatch.setattr(imports_api, "_service", lambda: ImportList())
+    monkeypatch.setattr(imports_api, "auth_service", lambda: LegacyActors())
+    user = _user("guest")
+    original_overrides = app.dependency_overrides.copy()
+    app.dependency_overrides[auth_api.require_contributor] = lambda: user
+    try:
+        response = await client.get("/api/v1/imports")
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(original_overrides)
+
+    assert response.status_code == 200, response.text
+    listed = {item["import_id"]: item for item in response.json()["imports"]}
+    legacy = listed["import-legacy"]
+    assert legacy["created_by_name"] == "Current name"
+    assert legacy.get("created_by_role") is None
+    assert legacy["capabilities"]["can_delete"] is False
+    assert listed["import-snapshot"]["created_by_name"] == "Name at import"
+    assert listed["import-snapshot"]["created_by_role"] == "guest"
+    assert listed["import-deleted-user"].get("created_by_name") is None
+    assert actor_calls == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("role", "owner_user_id", "expected_status"),
     [
@@ -470,6 +543,7 @@ async def test_import_retry_and_cancel_routes_enforce_owner_and_operator_roles(
     action: str,
 ) -> None:
     user = _user(role)
+    monkeypatch.setattr(imports_api, "auth_service", lambda: SimpleNamespace(actors=lambda: {}))
     now = datetime.now(UTC)
     queued = action == "cancel"
     record = ImportedScene(

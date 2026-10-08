@@ -93,10 +93,28 @@ Tests: Guest/Editor/Reviewer create, card/table/import, rename snapshot, unknown
 **Exit:** UI implementation and CLI tests complete; [ ] browser attribution and
 live seed-name evidence verified without secrets.
 
+### AUD-20.S3a — Legacy import creator-name projection
+
+**Input:** imported-scene rows with `created_by` but no creation-time name/role
+snapshot, plus the existing batch actor lookup by user ID.
+**Output:** list/detail/action responses can display the current account name for
+legacy imports while keeping the historical role unknown.
+**Contract:** projection only; never update the stored import or infer historical
+role from the current account. Existing snapshots always take precedence. Unknown
+or deleted creator IDs remain unresolved. Ownership and capabilities continue to
+use the immutable `created_by` ID.
+
+Implement: resolve only IDs that need a fallback, once per list response; apply the
+same projection to single-import responses. Do not return email or mutate checksummed
+artifacts. Tests cover legacy, snapshot, deleted-user, batch-call and ownership cases.
+**Exit:** [x] API projection preserves the identity/authorization contract and
+all focused tests pass; [ ] authenticated browser confirms the legacy import badge.
+
 ## Verification và DoD
 
 ```bash
 .venv/bin/pytest tests/test_orchestration/test_auth_service.py tests/test_api/test_auth_routes.py tests/test_api/test_studio_routes.py tests/test_packaging/test_data_package.py -q
+.venv/bin/pytest tests/test_api/test_guest_ownership.py -q
 ```
 
 Thêm tests mới theo sprint rồi bổ sung command. Chạy ruff; frontend lint/typecheck,
@@ -144,3 +162,14 @@ mock hoặc source review không chứng minh feature đã chạy.
 - Import evidence: the visible legacy import has `created_by`, but no `created_by_name` or `created_by_role` in its API response, so its list row correctly has no creator badge. Automated UI coverage verifies the badge when an import has a creation-time snapshot; a snapshot-bearing import was not available for browser verification.
 - Seed acceptance: displayed seed names and roles are confirmed in the authenticated Team page. The expected names were already present, so no rename migration was run. Exact stable-ID verification and a migration receipt remain open; do not infer them from visible names.
 - Commit: the UI implementation is in AUD-20.S3's per-sprint commit. This browser/data evidence is a follow-up acceptance update; import snapshot and stable-ID/migration evidence remain open.
+
+### AUD-20.S3a — Legacy import creator-name projection
+
+- Logic delta: import API list/detail/retry/cancel responses now resolve `created_by_name` from the current account only when the stored legacy row has an owner ID but no name snapshot. `created_by_role` remains unknown, current identity is not persisted, and stored creation-time snapshots are never replaced. Creator permissions still use the immutable owner ID.
+- Impact: the existing `ScenesHome` import attribution row receives the legacy creator name through its current API contract; no frontend component or import payload/migration changed.
+- Changed files: `src/api/studio/imports.py`, `tests/test_api/test_guest_ownership.py`, this task, and the audit README.
+- Verification: `.venv/bin/pytest tests/test_api/test_guest_ownership.py -q --tb=short` — **36 passed**; `npm test -- tests/studio-overview.test.tsx` — **13 passed**; `.venv/bin/ruff check src/ tests/` — pass; `.venv/bin/ruff format --check src/ tests/` — **552 files already formatted**; `git diff --check` — pass.
+- CodeGraph: read `ImportedScene`, `ImportService.list/get`, `list_imports/get_import/retry_import/cancel_import`, `AuthService.actors`, `owner_mutation_allowed`, and the `ScenesHome` consumer/tests before editing; `codegraph sync`/`status` — up to date (890 files, 17,786 nodes, 52,706 edges).
+- Graphify: `graphify update .` completed; 20,964 nodes, 61,903 edges, 709 communities. The generated `graphify-out/` files remain uncommitted.
+- Browser gate: **UNVERIFIED**. Chrome DevTools returned no available browsers or tabs in this session, so the updated legacy-import badge was not inspected live.
+- Limitation: legacy imports still have no immutable creation-time name/role snapshot. The API uses the current name as a compatibility display fallback and leaves historical role unknown; exact seed IDs and migration receipt remain pending.

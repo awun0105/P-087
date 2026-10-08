@@ -10,8 +10,9 @@ Active — implementation đang diễn ra trên branch
 AUD-03.S1–S3, AUD-04.S1–S3, AUD-10.S1–S3 và AUD-07.S1. AUD-07.S2 đã hoàn tất
 trong commit `5173750`; AUD-20.S1 trong `6fea33e`; AUD-20.S2 producer/API attribution
 trong `7d5fcac`. AUD-20.S3 đã có badge creator/role ở Scenes và imports cùng test CLI;
-authenticated Chrome DevTools xác nhận grid/list và seed display names/roles. Import
-legacy hiện thiếu creator snapshot; stable seed IDs và migration receipt còn pending.
+authenticated Chrome DevTools xác nhận grid/list và seed display names/roles. AUD-20.S3a
+bổ sung API fallback tên hiện tại cho import legacy; bản ghi vẫn thiếu snapshot bất biến
+và role lịch sử giữ unknown. Browser check mới, stable seed IDs và migration receipt còn pending.
 AUD-15.S2 đã commit: resume-cache integrity và cold/warm recovery
 được kiểm tra bằng software integration tests. AUD-15.S3 đã bỏ ETA tĩnh không có
 profile hỗ trợ; paired GPU latency và quality acceptance vẫn pending.
@@ -517,6 +518,7 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [x] Implementation AUD-20.S1 identity/seed migration contract and AUD-20.S2 producer/API actor attribution.
 - [x] AUD-21.S4 local Studio capability/API implementation and UI regression.
 - [x] AUD-20.S3 authenticated browser rendering for scene grid/list and Team seed names/roles.
+- [x] AUD-20.S3a local API projection resolves current names for legacy import IDs, leaves historical roles unknown, and preserves stored snapshots/ownership.
 - [ ] AUD-20.S3 browser verification with a snapshot-bearing imported scene and stable-ID/migration evidence; AUD-21.S2/S4 browser gates; AUD-21.S3–S4
       full browser/API acceptance before opening Guest signup.
 - [x] AUD-21.S2 browser verification of Guest signup's fail-closed state with the rollout field absent; enabled signup remains unverified.
