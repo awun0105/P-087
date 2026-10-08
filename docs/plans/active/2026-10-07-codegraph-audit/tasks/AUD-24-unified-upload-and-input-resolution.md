@@ -264,7 +264,7 @@ Tests: reorder files, misleading extensions, TXT/JSON multi-role ambiguity, unsa
 truncated ZIP, SOG vs LiDAR/COLMAP ZIP, corrupt/unsupported SOG, ambiguous PLY+SOG
 master or video+3DGS intent, unrelated meta.json/WebP files, contradictory timestamps,
 unsupported format. No geometry decode in cheap API probes; worker re-verifies.
-**Exit:** [ ] deterministic report; [ ] missing facts identified without guessed values.
+**Exit:** [x] deterministic report; [x] missing facts identified without guessed values.
 
 ## Sprint AUD-24.S3 — Durable assembly và job/worker dispatch
 
@@ -359,3 +359,43 @@ job/worker dispatch, or enable R1–R6; no real sensor, browser, geometry, or ru
 qualification is claimed. Remaining: S2 classifier/resolver; S3 durable intent and
 consumer adapters; S4 upload UI; S5 real recipe qualification. The S1 commit is
 recorded in repository history; branch and worktree state are in the sprint handoff.
+
+### AUD-24.S2 — content probes and deterministic resolution
+
+Implemented `src/services/reconstruction/inputs/input_probe.py` and
+`input_resolver.py`. Probes classify supported video headers, Gaussian and point
+cloud PLY/PCD, calibration JSON/TorWIC text, TUM trajectories, one-column RGB frame
+times, validated SOG v2, and Gaussian PLY+COLMAP ZIPs. ZIP inventory applies the
+entry/decompressed-size caps and rejects unsafe paths, duplicate names, symlinks,
+encrypted entries, corrupt content, and unsupported SOG packages. Member checksums
+and IDs are stable; unrelated files remain visible as unknown members and require
+an explicit disposition. Legacy `detect_stream` still rejects bare point clouds.
+The top-level COLMAP case is covered so its model files are not misreported as
+unrelated extras.
+
+The resolver verifies assembly, runtime-registry, probe inventory, source/member
+checksums, observed formats, and explicit bindings before producing a sealed
+versioned report. It creates R1–R6 and Gaussian view candidates, asks for typed
+missing facts where scene/cloud state, units, frames, ordering, trajectory
+convention, clock relation, requested source, or file selection is unknown, and
+never treats a structurally detected input or candidate as geometry/QA proof. R6 with a supplied
+TUM trajectory over ordered raw scans now also blocks when pose and scan counts do
+not match. The shared contract requires an R4 sensor-trajectory binding as well as
+its ordered scans; estimated R5 stays distinct from supplied R4. Runtime readiness
+comes only from the supplied qualification registry.
+The matching TypeScript enum includes the source-supported TorWIC text calibration
+format. No API dispatch, durable staging, UI, or runtime qualification was added;
+those remain S3/S4/S5 work.
+
+Verification: `.venv/bin/pytest
+tests/test_reconstruction/test_input_assembly_resolution.py
+tests/test_contracts/test_input_assembly.py
+tests/test_reconstruction/test_input_detection.py
+tests/test_reconstruction/test_sog_input.py -q` — 56 passed;
+`.venv/bin/ruff check src/ tests/` — pass;
+`.venv/bin/ruff format --check src/ tests/` — 490 files already formatted;
+`npm exec vitest run -- tests/input-assembly-contract.test.ts` — 2 passed;
+`npm run typecheck` and `npm run lint` — pass; `codegraph sync` — already up to
+date. Browser interaction gate is not applicable: only the frontend contract type
+changed, with no rendered UI change. No real sensor/geometry run or R1–R6 runtime
+acceptance is claimed.

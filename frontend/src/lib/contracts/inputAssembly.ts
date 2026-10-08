@@ -24,6 +24,7 @@ export type InputAssetFormat =
   | "gaussian_sog"
   | "zip_unknown"
   | "calibration_json"
+  | "calibration_torwic_text"
   | "tum_trajectory"
   | "rgb_frame_times"
   | "unknown";

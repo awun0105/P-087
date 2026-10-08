@@ -220,6 +220,35 @@ def test_calibration_cannot_substitute_for_sensor_trajectory_or_rgb_frame_times(
         )
 
 
+def test_supplied_trajectory_recipe_requires_sensor_trajectory_binding() -> None:
+    common = {
+        "candidate_kind": "video_recipe",
+        "candidate_id": "candidate-r4",
+        "recipe_group": RecipeGroup.SUPPLIED_TRAJECTORY,
+        "state": CandidateState.PENDING_VERIFICATION,
+        "trajectory_origin": TrajectoryOrigin.SUPPLIED,
+        "runtime": _runtime(RuntimeCapabilityKey.R4),
+    }
+    with pytest.raises(ValidationError, match="missing required role bindings"):
+        VideoRecipeCandidate(
+            **common,
+            bindings=[
+                _binding(InputRole.RGB_VIDEO, "rgb-1"),
+                _binding(InputRole.LIDAR_SCAN, "scan-1"),
+            ],
+        )
+
+    candidate = VideoRecipeCandidate(
+        **common,
+        bindings=[
+            _binding(InputRole.RGB_VIDEO, "rgb-1"),
+            _binding(InputRole.LIDAR_SCAN, "scan-1"),
+            _binding(InputRole.SENSOR_TRAJECTORY, "sensor-tum"),
+        ],
+    )
+    assert candidate.recipe_group == RecipeGroup.SUPPLIED_TRAJECTORY
+
+
 def test_ready_resolution_requires_qualified_runtime_and_exact_candidate() -> None:
     candidate = VideoRecipeCandidate(
         candidate_kind="video_recipe",

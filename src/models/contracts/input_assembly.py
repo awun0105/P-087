@@ -45,6 +45,7 @@ class InputAssetFormat(StrEnum):
     GAUSSIAN_SOG = "gaussian_sog"
     ZIP_UNKNOWN = "zip_unknown"
     CALIBRATION_JSON = "calibration_json"
+    CALIBRATION_TORWIC_TEXT = "calibration_torwic_text"
     TUM_TRAJECTORY = "tum_trajectory"
     RGB_FRAME_TIMES = "rgb_frame_times"
     UNKNOWN = "unknown"
@@ -437,9 +438,10 @@ class InputResolutionReport(ContractModel):
         ):
             raise ValueError("pending_verification resolution requires a pending candidate")
         if self.state == InputResolutionState.UNSUPPORTED and (
-            not self.candidates or any(item.state != CandidateState.UNSUPPORTED for item in self.candidates)
+            any(item.state != CandidateState.UNSUPPORTED for item in self.candidates)
+            or not any(item.severity in {"warning", "error"} for item in self.diagnostics)
         ):
-            raise ValueError("unsupported resolution requires only unsupported candidates")
+            raise ValueError("unsupported resolution requires an unsupported diagnostic and no runnable candidates")
         if self.state == InputResolutionState.INVALID and not any(
             item.severity == "error" for item in self.diagnostics
         ):
@@ -539,10 +541,16 @@ def _validate_recipe_contract(
         required.add(InputRole.STATIC_LIDAR_CLOUD)
     elif recipe_group in {RecipeGroup.SUPPLIED_TRAJECTORY, RecipeGroup.ESTIMATED_TRAJECTORY}:
         required.add(InputRole.LIDAR_SCAN)
+        if recipe_group == RecipeGroup.SUPPLIED_TRAJECTORY:
+            required.add(InputRole.SENSOR_TRAJECTORY)
     elif recipe_group == RecipeGroup.SENSOR_GUIDED:
-        required.update({InputRole.CAMERA_LIDAR_CALIBRATION, InputRole.SENSOR_TRAJECTORY, InputRole.RGB_FRAME_TIMES})
+        required.update({InputRole.CAMERA_LIDAR_CALIBRATION, InputRole.RGB_FRAME_TIMES})
         if not roles.intersection({InputRole.REGISTERED_LIDAR_MAP, InputRole.STATIC_LIDAR_CLOUD, InputRole.LIDAR_SCAN}):
             raise ValueError("R6 requires a registered map, one cloud, or a scan sequence")
+        if trajectory_origin == TrajectoryOrigin.SUPPLIED:
+            required.add(InputRole.SENSOR_TRAJECTORY)
+        elif trajectory_origin == TrajectoryOrigin.ESTIMATED:
+            required.add(InputRole.LIDAR_SCAN)
     if not required.issubset(roles):
         raise ValueError(f"{recipe_group.value} candidate is missing required role bindings")
     expected_origin = {
