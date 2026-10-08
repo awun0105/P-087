@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     product_fixture_mode: bool = False
     product_processing_config: Path | None = None
     product_runtime_manifest: Path | None = None
+    #: Runtime qualification registry for grouped input recipes; absent means no new recipe dispatch is enabled.
+    product_input_runtime_registry: Path | None = None
     #: Server-owned policy/profile for durable Isaac validation; not accepted from request payloads.
     product_isaac_validation_config: Path | None = None
     product_isaac_validation_profile: Path | None = None

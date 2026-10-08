@@ -5,6 +5,7 @@ file người dùng chỉ để hiển thị; đường dẫn lưu trữ do hệ
 (video, PLY 3DGS, ZIP PLY + COLMAP) nhận diện theo bytes trước khi ghi record (ADR 0004).
 """
 
+import hashlib
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -12,17 +13,22 @@ from pathlib import PurePosixPath
 from typing import BinaryIO
 from uuid import uuid4
 
+from src.models.contracts.artifacts import ArtifactDataClass
+from src.models.contracts.manifests import InputFile
 from src.models.contracts.video_preparation import ClientVideoPreparationManifest, ServerVideoPreparationVerification
 from src.services.orchestration.artifacts import ArtifactResolver, StreamingPublication
 from src.services.orchestration.auth.models import Actor
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
+from src.services.orchestration.uploads.assembly_models import StagedInputUploadRecord
 from src.services.orchestration.uploads.models import (
+    ASSEMBLY_UPLOAD_EXTENSIONS,
     KIND_MEDIA_TYPES,
     UNSUPPORTED_EXTENSION,
     UPLOAD_EXTENSIONS,
     UploadRecord,
 )
 from src.services.reconstruction import InputDetection, InputRejectedError, detect_stream
+from src.services.reconstruction.inputs.input_probe import classify_upload as probe_input_upload
 
 #: ZIP giải nén tối đa gấp đôi giới hạn upload: PLY/ảnh nén kém nên file thật không
 #: vượt; chặn zip bomb mà không cần đọc hết nội dung.
@@ -88,6 +94,15 @@ class VideoUploadService:
         uri = f"artifact://jobs/{upload_id}/input/source{suffix}"
         return PendingUpload(upload_id, name, media_type, StreamingPublication(self.resolver, uri, self.max_bytes))
 
+    def begin_assembly(self, filename: str) -> PendingUpload:
+        """Begin a generic file upload for content-probed input assemblies."""
+        name = display_name(filename)
+        suffix = PurePosixPath(name).suffix.lower()
+        media_type = ASSEMBLY_UPLOAD_EXTENSIONS.get(suffix, "application/octet-stream")
+        upload_id = f"upload-{uuid4().hex[:12]}"
+        uri = f"artifact://jobs/{upload_id}/input/source{suffix or '.bin'}"
+        return PendingUpload(upload_id, name, media_type, StreamingPublication(self.resolver, uri, self.max_bytes))
+
     def finish(self, pending: PendingUpload, uploaded_by: Actor | None = None) -> UploadRecord:
         """Nhận diện loại, commit bytes rồi ghi record (kèm người tải lên); file sai loại không được lưu."""
         publication = pending.publication
@@ -112,6 +127,73 @@ class VideoUploadService:
                 (record.upload_id, record.model_dump_json()),
             )
         return record
+
+    def finish_assembly(self, pending: PendingUpload, uploaded_by: Actor | None = None) -> StagedInputUploadRecord:
+        """Probe and store generic assembly bytes without weakening legacy upload rules."""
+        publication = pending.publication
+        path = publication.staged_path()
+        size_bytes = publication.size_bytes
+        digest = hashlib.sha256()
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        checksum = f"sha256:{digest.hexdigest()}"
+        source_file = InputFile(
+            original_name=pending.original_name,
+            media_type=pending.media_type,
+            size_bytes=size_bytes,
+            checksum=checksum,
+            artifact_uri=publication.artifact_uri,
+            data_class=ArtifactDataClass.PRODUCT_INPUT,
+        )
+        classified = probe_input_upload(
+            source_file,
+            pending.upload_id,
+            pending.upload_id,
+            path,
+            max_uncompressed_bytes=self.max_bytes * ZIP_EXPANSION_LIMIT,
+        )
+        legacy: UploadRecord | None = None
+        try:
+            with path.open("rb") as source:
+                detection = classify_upload(source, size_bytes, pending.media_type, self.max_bytes)
+        except UploadError:
+            detection = None
+        else:
+            legacy = UploadRecord(
+                upload_id=pending.upload_id,
+                original_name=pending.original_name,
+                media_type=pending.media_type,
+                size_bytes=size_bytes,
+                checksum=checksum,
+                artifact_uri=publication.artifact_uri,
+                received_at=datetime.now(UTC),
+                input_kind=detection.kind,
+                detection=detection,
+                uploaded_by=uploaded_by,
+            )
+        committed_checksum = publication.commit()
+        if committed_checksum != checksum:
+            raise RuntimeStateConflictError("Upload bytes changed between assembly probe and publication")
+        staged = StagedInputUploadRecord(
+            upload_id=pending.upload_id,
+            source_file=source_file,
+            staged_files=list(classified.files),
+            probes=list(classified.probes),
+            uploaded_by=uploaded_by,
+            received_at=datetime.now(UTC),
+        )
+        with self.database.transaction(write=True) as tx:
+            if legacy is not None:
+                tx.execute(
+                    "INSERT INTO r2s_uploads(upload_id,payload) VALUES (?,?)",
+                    (legacy.upload_id, legacy.model_dump_json()),
+                )
+            tx.execute(
+                "INSERT INTO r2s_input_uploads(upload_id,payload) VALUES (?,?)",
+                (staged.upload_id, staged.model_dump_json()),
+            )
+        return staged
 
     def list(self) -> list[UploadRecord]:
         """Mới nhất trước để màn hình chọn video hiện upload vừa xong ở đầu."""

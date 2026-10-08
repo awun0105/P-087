@@ -22,7 +22,11 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
-from src.models.contracts.input_assembly import GaussianViewFormat
+from src.models.contracts.input_assembly import (
+    GaussianViewFormat,
+    GaussianViewImportIntent,
+    verify_gaussian_view_intent_checksum,
+)
 from src.models.contracts.manifests import StageId
 from src.services.orchestration.artifacts import ArtifactResolver, StreamingPublication
 from src.services.orchestration.artifacts.errors import (
@@ -160,6 +164,8 @@ class ImportedScene(BaseModel):
     created_by_name: DisplayName | None = None
     #: Optional creation-time snapshot; absent on legacy imports and never backfilled from current role.
     created_by_role: Role | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: Exact unified-upload selection; omitted for imports created through the legacy separate form.
+    input_intent: GaussianViewImportIntent | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class SceneImportError(ValueError):
@@ -201,8 +207,14 @@ class ImportService:
         return f"sha256:{digest}"
 
     @staticmethod
-    def _request_fingerprint(upload_id: str, name: str) -> str:
-        encoded = json.dumps({"upload_id": upload_id, "name": name}, sort_keys=True, separators=(",", ":")).encode()
+    def _request_fingerprint(upload_id: str, name: str, input_intent: GaussianViewImportIntent | None = None) -> str:
+        payload: dict[str, object] = {"upload_id": upload_id, "name": name}
+        if input_intent is not None:
+            payload["input_intent"] = input_intent.model_dump(
+                mode="json",
+                exclude={"intent_id", "selected_at", "intent_checksum"},
+            )
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
     @staticmethod
@@ -246,6 +258,7 @@ class ImportService:
         *,
         idempotency_key: str | None = None,
         gpu_index: int | None = None,
+        input_intent: GaussianViewImportIntent | None = None,
     ) -> ImportedScene:
         """Ghi scene và operation QUEUED trong cùng transaction; chỉ nhận nguồn 3DGS đã nhận diện."""
         try:
@@ -256,10 +269,14 @@ class ImportService:
             ) from error
         if input_kind == GaussianViewFormat.SOG and (upload.detection is None or upload.detection.sog is None):
             raise SceneImportError("Upload SOG thiếu bằng chứng metadata đã xác minh")
+        if input_intent is not None:
+            verify_gaussian_view_intent_checksum(input_intent)
+            if input_intent.source_checksum != upload.checksum or input_intent.source_format != input_kind:
+                raise SceneImportError("Gaussian view intent khác source upload đã nhận diện")
         if idempotency_key is not None and (not idempotency_key.strip() or len(idempotency_key) > 128):
             raise SceneImportError("Idempotency-Key phải dài 1..128 ký tự")
         normalized_name = name.strip() or upload.original_name
-        fingerprint = self._request_fingerprint(upload.upload_id, normalized_name)
+        fingerprint = self._request_fingerprint(upload.upload_id, normalized_name, input_intent)
         requester_id = created_by or _ANONYMOUS_REQUESTER
         record = ImportedScene(
             import_id=f"import-{uuid4().hex[:12]}",
@@ -271,6 +288,7 @@ class ImportService:
             created_by=created_by,
             created_by_name=created_by_name,
             created_by_role=created_by_role,
+            input_intent=input_intent,
         )
         operation = self._new_operation(record, upload, gpu_index)
         with self.database.transaction(write=True) as tx:

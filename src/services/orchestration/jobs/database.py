@@ -310,6 +310,51 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
             "CREATE INDEX r2s_validation_operations_by_status ON r2s_validation_operations(status, created_at)",
         ),
     ),
+    (
+        # Durable grouped uploads, immutable assembly revisions, resolver evidence and accepted runs.
+        17,
+        (
+            "CREATE TABLE r2s_input_uploads (upload_id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
+            """CREATE TABLE r2s_input_assemblies (
+                assembly_id TEXT NOT NULL,
+                revision INTEGER NOT NULL CHECK(revision > 0),
+                owner_id TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                PRIMARY KEY(assembly_id, revision))""",
+            """CREATE TABLE r2s_input_assembly_heads (
+                assembly_id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                revision INTEGER NOT NULL CHECK(revision > 0),
+                FOREIGN KEY(assembly_id, revision)
+                    REFERENCES r2s_input_assemblies(assembly_id, revision))""",
+            "CREATE INDEX r2s_input_assemblies_by_owner ON r2s_input_assemblies(owner_id, assembly_id, revision)",
+            """CREATE TABLE r2s_input_resolutions (
+                report_checksum TEXT PRIMARY KEY,
+                assembly_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                owner_id TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                FOREIGN KEY(assembly_id, revision)
+                    REFERENCES r2s_input_assemblies(assembly_id, revision))""",
+            "CREATE INDEX r2s_input_resolutions_by_assembly ON r2s_input_resolutions(assembly_id, revision)",
+            """CREATE TABLE r2s_input_runs (
+                requester_id TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_fingerprint TEXT NOT NULL,
+                job_id TEXT NOT NULL UNIQUE REFERENCES r2s_jobs(job_id),
+                project_id TEXT NOT NULL REFERENCES r2s_projects(project_id),
+                assembly_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                report_checksum TEXT NOT NULL REFERENCES r2s_input_resolutions(report_checksum),
+                recipe_checksum TEXT NOT NULL,
+                recipe_ref TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                PRIMARY KEY(requester_id, idempotency_key),
+                FOREIGN KEY(assembly_id, revision)
+                    REFERENCES r2s_input_assemblies(assembly_id, revision))""",
+            "CREATE INDEX r2s_input_runs_by_assembly ON r2s_input_runs(assembly_id, revision)",
+        ),
+    ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 

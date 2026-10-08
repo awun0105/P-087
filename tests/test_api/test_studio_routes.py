@@ -48,6 +48,7 @@ def studio(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         product_upload_max_bytes=64,
         product_privacy_mode="self_attested",
         product_processing_config=Path(__file__).resolve().parents[2] / "configs/product/processing_presets_v1.json",
+        product_input_runtime_registry=None,
     )
     probe = ProjectRegistry(runtime_root=tmp_path / "artifacts")
     registry = ProjectRegistry(
@@ -119,6 +120,101 @@ async def test_sog_import_is_durably_queued_and_idempotent(client: AsyncClient, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("source_format", ["gaussian_sog", "gaussian_ply"])
+async def test_input_assembly_gaussian_import_replays_the_stored_intent(
+    source_format: str, client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    from src.models.contracts.input_assembly import (
+        RuntimeCapabilityKey,
+        RuntimeCapabilityRecord,
+        RuntimeQualificationRegistry,
+        RuntimeQualificationStatus,
+        seal_runtime_registry,
+    )
+
+    studio.settings.product_upload_max_bytes = 8 * 1024 * 1024
+    runtime_path = studio.root / "input-runtime-sog.json"
+    capability_key = (
+        RuntimeCapabilityKey.GAUSSIAN_SOG_VIEW
+        if source_format == "gaussian_sog"
+        else RuntimeCapabilityKey.GAUSSIAN_PLY_VIEW
+    )
+    runtime_path.write_text(
+        seal_runtime_registry(
+            RuntimeQualificationRegistry(
+                schema_version="1.0",
+                registry_version=f"test-{source_format}-v1",
+                capabilities=[
+                    RuntimeCapabilityRecord(
+                        capability_key=capability_key,
+                        status=RuntimeQualificationStatus.QUALIFIED,
+                        runtime_id=f"qualified-{source_format}-importer",
+                        runtime_version="1.0.0",
+                        qualification_evidence_checksum="sha256:" + "5" * 64,
+                    )
+                ],
+                registry_checksum="sha256:" + "0" * 64,
+            )
+        ).model_dump_json()
+    )
+    studio.settings.product_input_runtime_registry = runtime_path
+
+    if source_format == "gaussian_sog":
+        payload = sog_archive(model="2dgs")
+    else:
+        from tests.test_reconstruction.test_input_detection import _gaussian
+
+        payload = _gaussian()
+    uploaded = await client.post(
+        "/api/v1/input-assemblies/uploads",
+        params={"filename": f"external.{source_format.removeprefix('gaussian_')}"},
+        content=payload,
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    assembly_response = await client.post(
+        "/api/v1/input-assemblies",
+        json={"upload_ids": [uploaded.json()["upload_id"]], "requested_intent": "gaussian_view_import"},
+    )
+    assert assembly_response.status_code == 201, assembly_response.text
+    assembly = assembly_response.json()
+    resolution = await client.post(
+        f"/api/v1/input-assemblies/{assembly['assembly_id']}/resolve", json={"revision": assembly["revision"]}
+    )
+    assert resolution.status_code == 200, resolution.text
+    report = resolution.json()["report"]
+    candidate = next(item for item in report["candidates"] if item["candidate_kind"] == "gaussian_view_import")
+    assert candidate["state"] == "ready"
+    body = {
+        "revision": assembly["revision"],
+        "resolution_checksum": report["report_checksum"],
+        "candidate_id": candidate["candidate_id"],
+        "name": "Imported SOG",
+    }
+    first = await client.post(
+        f"/api/v1/input-assemblies/{assembly['assembly_id']}/import",
+        json=body,
+        headers={"Idempotency-Key": f"assembly-{source_format}-import-1"},
+    )
+    replay = await client.post(
+        f"/api/v1/input-assemblies/{assembly['assembly_id']}/import",
+        json=body,
+        headers={"Idempotency-Key": f"assembly-{source_format}-import-1"},
+    )
+
+    assert first.status_code == replay.status_code == 201, (first.text, replay.text)
+    assert first.json()["imported_scene"]["import_id"] == replay.json()["imported_scene"]["import_id"]
+    assert first.json()["intent_checksum"] == replay.json()["intent_checksum"]
+    assert first.json()["imported_scene"]["input_intent"]["intent_checksum"] == replay.json()["intent_checksum"]
+    assert first.json()["imported_scene"]["input_kind"] == source_format
+    conflicting = await client.post(
+        f"/api/v1/input-assemblies/{assembly['assembly_id']}/import",
+        json={**body, "name": "Different request"},
+        headers={"Idempotency-Key": f"assembly-{source_format}-import-1"},
+    )
+    assert conflicting.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_upload_rejects_wrong_type_and_oversize(client: AsyncClient, studio: SimpleNamespace) -> None:
     wrong = await client.post("/api/v1/uploads", params={"filename": "scan.ply"}, content=b"x")
     assert wrong.status_code == 422
@@ -157,6 +253,263 @@ async def test_scene_from_upload_publishes_manifest_and_queues_job(
     assert manifest.source_rights_attestation["attested"] is True
     listed = (await client.get("/api/v1/uploads")).json()["uploads"]
     assert listed[0]["project_ids"] == [project["project_id"]]
+
+
+@pytest.mark.asyncio
+async def test_input_assembly_run_is_durable_idempotent_and_worker_revalidates_runtime(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    from types import SimpleNamespace
+
+    from src.api.studio import deps
+    from src.models.contracts.input_assembly import (
+        RuntimeCapabilityKey,
+        RuntimeCapabilityRecord,
+        RuntimeQualificationRegistry,
+        RuntimeQualificationStatus,
+        seal_runtime_registry,
+    )
+    from src.services.orchestration.jobs.runner import _validate_project_input_recipe
+
+    runtime_path = studio.root / "input-runtime.json"
+    runtime_path.write_text(
+        seal_runtime_registry(
+            RuntimeQualificationRegistry(
+                schema_version="1.0",
+                registry_version="test-r1-v1",
+                capabilities=[
+                    RuntimeCapabilityRecord(
+                        capability_key=RuntimeCapabilityKey.R1,
+                        status=RuntimeQualificationStatus.QUALIFIED,
+                        runtime_id="qualified-r1-worker",
+                        runtime_version="1.2.3",
+                        qualification_evidence_checksum="sha256:" + "1" * 64,
+                    )
+                ],
+                registry_checksum="sha256:" + "0" * 64,
+            )
+        ).model_dump_json()
+    )
+    studio.settings.product_input_runtime_registry = runtime_path
+
+    uploaded = await client.post(
+        "/api/v1/input-assemblies/uploads",
+        params={"filename": "walk.mp4"},
+        content=b"\x00\x00\x00\x14ftypqt  fake-mp4",
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    created = await client.post("/api/v1/input-assemblies", json={"upload_ids": [uploaded.json()["upload_id"]]})
+    assert created.status_code == 201, created.text
+    assembly = created.json()
+    resolved = await client.post(
+        f"/api/v1/input-assemblies/{assembly['assembly_id']}/resolve", json={"revision": assembly["revision"]}
+    )
+    assert resolved.status_code == 200, resolved.text
+    report = resolved.json()["report"]
+    candidate_id = report["recommended_candidate_id"]
+
+    body = {
+        "revision": assembly["revision"],
+        "resolution_checksum": report["report_checksum"],
+        "candidate_id": candidate_id,
+        "name": "Input assembly R1",
+        "attestation": _ATTESTATION,
+    }
+    first = await client.post(
+        f"/api/v1/input-assemblies/{assembly['assembly_id']}/run",
+        json=body,
+        headers={"Idempotency-Key": "assembly-r1-run-1"},
+    )
+    replay = await client.post(
+        f"/api/v1/input-assemblies/{assembly['assembly_id']}/run",
+        json=body,
+        headers={"Idempotency-Key": "assembly-r1-run-1"},
+    )
+    assert first.status_code == replay.status_code == 201, (first.text, replay.text)
+    assert first.json()["job"]["job_id"] == replay.json()["job"]["job_id"]
+    assert first.json()["project"]["project_id"] == replay.json()["project"]["project_id"]
+    conflicting = await client.post(
+        f"/api/v1/input-assemblies/{assembly['assembly_id']}/run",
+        json={**body, "name": "Different request"},
+        headers={"Idempotency-Key": "assembly-r1-run-1"},
+    )
+    assert conflicting.status_code == 409
+
+    job = studio.registry.get_job(first.json()["job"]["job_id"])
+    project = studio.registry.get_project(job.project_id)
+    assert project.input_assembly_ref is not None and project.input_recipe_ref is not None
+    manifest = InputManifest.model_validate_json(
+        studio.registry.runtime_resolver.require(project.input_manifest_ref).read_bytes()
+    )
+    attempt = SimpleNamespace(
+        registry=studio.registry,
+        settings=SimpleNamespace(
+            database_url=studio.settings.database_url,
+            product_input_runtime_registry=runtime_path,
+        ),
+        job=job,
+    )
+    _validate_project_input_recipe(attempt, project, manifest)
+    with studio.registry.persistence.database.transaction() as tx:
+        assert tx.execute("SELECT COUNT(*) FROM r2s_input_runs").fetchone() == (1,)
+    assert deps.input_assemblies().get_upload(uploaded.json()["upload_id"]).project_ids == [project.project_id]
+
+    runtime_path.write_text(
+        seal_runtime_registry(
+            RuntimeQualificationRegistry(
+                schema_version="1.0",
+                registry_version="test-r1-revoked",
+                capabilities=[
+                    RuntimeCapabilityRecord(
+                        capability_key=RuntimeCapabilityKey.R1,
+                        status=RuntimeQualificationStatus.UNAVAILABLE,
+                        reason_codes=["runtime_revoked"],
+                    )
+                ],
+                registry_checksum="sha256:" + "0" * 64,
+            )
+        ).model_dump_json()
+    )
+    with pytest.raises(ValueError, match="runtime or input resolver version differs"):
+        _validate_project_input_recipe(attempt, project, manifest)
+
+
+@pytest.mark.asyncio
+async def test_input_assembly_dispatches_supplied_trajectory_only_from_exact_lidar_package(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    from types import SimpleNamespace
+
+    from src.models.contracts.input_assembly import (
+        RuntimeCapabilityKey,
+        RuntimeCapabilityRecord,
+        RuntimeQualificationRegistry,
+        RuntimeQualificationStatus,
+        seal_runtime_registry,
+    )
+    from src.services.orchestration.jobs.runner import _validate_project_input_recipe
+    from tests.test_reconstruction.test_lidar_package import POSES, _companions, _pcd, _scan, _zip
+
+    studio.settings.product_upload_max_bytes = 16 * 1024 * 1024
+    runtime_path = studio.root / "input-runtime-r4.json"
+    runtime_path.write_text(
+        seal_runtime_registry(
+            RuntimeQualificationRegistry(
+                schema_version="1.0",
+                registry_version="test-r4-v1",
+                capabilities=[
+                    RuntimeCapabilityRecord(
+                        capability_key=RuntimeCapabilityKey.R4,
+                        status=RuntimeQualificationStatus.QUALIFIED,
+                        runtime_id="qualified-r4-worker",
+                        runtime_version="4.0.0",
+                        qualification_evidence_checksum="sha256:" + "4" * 64,
+                    )
+                ],
+                registry_checksum="sha256:" + "0" * 64,
+            )
+        ).model_dump_json()
+    )
+    studio.settings.product_input_runtime_registry = runtime_path
+
+    video = await client.post(
+        "/api/v1/input-assemblies/uploads",
+        params={"filename": "walk.mp4"},
+        content=b"\x00\x00\x00\x14ftypqt  fake-mp4",
+    )
+    package_path = _zip(
+        studio.root / "lidar.zip",
+        {
+            **_companions(),
+            **{f"lidar/{index:06d}.pcd": _pcd(_scan()) for index in range(POSES)},
+        },
+    )
+    lidar = await client.post(
+        "/api/v1/input-assemblies/uploads",
+        params={"filename": "lidar.zip"},
+        content=package_path.read_bytes(),
+    )
+    assert video.status_code == lidar.status_code == 201, (video.text, lidar.text)
+    package_files = lidar.json()["staged_files"]
+    member_ids = {item["archive_member"]["member_path"]: item["file_id"] for item in package_files}
+    scan_ids = [member_ids[f"lidar/{index:06d}.pcd"] for index in range(POSES)]
+    created = await client.post(
+        "/api/v1/input-assemblies",
+        json={
+            "upload_ids": [video.json()["upload_id"], lidar.json()["upload_id"]],
+            "requested_intent": "video_reconstruction",
+            "declarations": {
+                "same_scene": {"value": True, "provenance": "declared"},
+                "cloud_state": {"value": "raw_scan_sequence", "provenance": "declared"},
+                "coordinate_unit": {"value": "m", "provenance": "declared"},
+                "lidar_frame_id": {"value": "lidar_sensor", "provenance": "declared"},
+                "trajectory_convention": {"value": "world_from_sensor", "provenance": "declared"},
+            },
+            "bindings": [
+                {"binding_id": "rgb", "role": "rgb_video", "file_ids": [video.json()["staged_files"][0]["file_id"]]},
+                {"binding_id": "scans", "role": "lidar_scan", "file_ids": scan_ids},
+                {"binding_id": "trajectory", "role": "sensor_trajectory", "file_ids": [member_ids["traj.txt"]]},
+                {
+                    "binding_id": "calibration",
+                    "role": "camera_lidar_calibration",
+                    "file_ids": [member_ids["calibrations.txt"]],
+                },
+                {"binding_id": "frame-times", "role": "rgb_frame_times", "file_ids": [member_ids["frame_times.txt"]]},
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    assembly = created.json()
+    resolved = await client.post(
+        f"/api/v1/input-assemblies/{assembly['assembly_id']}/resolve", json={"revision": assembly["revision"]}
+    )
+    assert resolved.status_code == 200, resolved.text
+    report = resolved.json()["report"]
+    candidate = next(
+        item
+        for item in report["candidates"]
+        if item["candidate_kind"] == "video_recipe" and item["recipe_group"] == "R4"
+    )
+    assert candidate["recipe_group"] == "R4" and candidate["state"] == "ready"
+    assert report["recommended_candidate_id"] == candidate["candidate_id"], {
+        "state": report["state"],
+        "recommended_candidate_id": report["recommended_candidate_id"],
+        "candidates": [
+            (item.get("recipe_group"), item["state"], [fact["code"] for fact in item["required_facts"]])
+            for item in report["candidates"]
+        ],
+        "missing_facts": [fact["code"] for fact in report["missing_facts"]],
+    }
+
+    accepted = await client.post(
+        f"/api/v1/input-assemblies/{assembly['assembly_id']}/run",
+        json={
+            "revision": assembly["revision"],
+            "resolution_checksum": report["report_checksum"],
+            "candidate_id": candidate["candidate_id"],
+            "name": "Supplied trajectory assembly",
+            "attestation": _ATTESTATION,
+        },
+        headers={"Idempotency-Key": "assembly-r4-run-1"},
+    )
+    assert accepted.status_code == 201, accepted.text
+    job = studio.registry.get_job(accepted.json()["job"]["job_id"])
+    project = studio.registry.get_project(job.project_id)
+    manifest = InputManifest.model_validate_json(
+        studio.registry.runtime_resolver.require(project.input_manifest_ref).read_bytes()
+    )
+    attempt = SimpleNamespace(
+        registry=studio.registry,
+        settings=SimpleNamespace(
+            database_url=studio.settings.database_url,
+            product_input_runtime_registry=runtime_path,
+        ),
+        job=job,
+    )
+    _validate_project_input_recipe(attempt, project, manifest)
+    provenance = manifest.preparation_provenance["lidar"]
+    assert provenance["trajectory_origin"] == "supplied"
+    assert provenance["evidence"]["scan_count"] == POSES
 
 
 @pytest.mark.asyncio

@@ -30,6 +30,23 @@ from uuid import uuid4
 
 from src.config import Settings, get_settings
 from src.models.contracts.artifacts import ProductArtifactRef
+from src.models.contracts.input_assembly import (
+    CandidateState,
+    InputAssemblySnapshot,
+    InputRecipe,
+    InputResolutionReport,
+    InputResolutionState,
+    InputRole,
+    RecipeGroup,
+    RuntimeQualificationRegistry,
+    RuntimeQualificationStatus,
+    TrajectoryOrigin,
+    VideoRecipeCandidate,
+    verify_input_assembly_checksum,
+    verify_input_recipe_checksum,
+    verify_input_resolution_checksum,
+    verify_runtime_registry_checksum,
+)
 from src.models.contracts.manifests import (
     ExecutionError,
     InputManifest,
@@ -43,6 +60,7 @@ from src.models.contracts.preview import ReconstructionPreview
 from src.models.contracts.retryability import classify_retryability
 from src.services.orchestration.artifacts import ArtifactResolver, FilesystemArtifactStore
 from src.services.orchestration.benchmark import build_benchmark, publish_benchmark
+from src.services.orchestration.inputs import InputAssemblyService
 from src.services.orchestration.jobs.admission import ResourceAdmission, job_drivers, touch_job_reservation
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import (
@@ -65,6 +83,7 @@ from src.services.orchestration.processing.telemetry import (
     ResourceUsage,
     sampled_section,
 )
+from src.services.orchestration.projects.models import ProjectRecord
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
 from src.services.reconstruction import (
     MogeSettings,
@@ -566,11 +585,146 @@ def _record_benchmark(attempt: _Attempt) -> None:
         logger.exception("Không ghi được benchmark cho job %s", attempt.job.job_id)
 
 
-def _pull_input(resolver: ArtifactResolver, manifest_ref: ProductArtifactRef) -> None:
-    """Đưa InputManifest và video gốc vào cache cục bộ, kiểm đúng checksum trong manifest."""
+def _pull_input(resolver: ArtifactResolver, manifest_ref: ProductArtifactRef) -> InputManifest:
+    """Đưa InputManifest và input gốc vào cache cục bộ, kiểm đúng checksum trong manifest."""
     manifest = InputManifest.model_validate_json(resolver.require(manifest_ref).read_bytes())
     for item in manifest.files:
         resolver.require_uri(item.artifact_uri, item.checksum)
+    return manifest
+
+
+def _validate_project_input_recipe(
+    attempt: _Attempt,
+    project: ProjectRecord,
+    manifest: InputManifest,
+) -> None:
+    """Recheck the accepted recipe, worker qualification, and bound source bytes before reconstruction resumes."""
+    assembly_ref = project.input_assembly_ref
+    if assembly_ref is None:
+        return
+    resolution_ref = project.input_resolution_ref
+    recipe_ref = project.input_recipe_ref
+    runtime_ref = project.input_runtime_registry_ref
+    references = (assembly_ref, resolution_ref, recipe_ref, runtime_ref)
+    if any(reference is None for reference in references):
+        raise ValueError("Grouped input project is missing an immutable evidence reference")
+    if any(reference.job_id != project.project_id for reference in references if reference is not None):
+        raise ValueError("Grouped input evidence points outside the project namespace")
+    resolver = attempt.registry.runtime_resolver
+    assembly = InputAssemblySnapshot.model_validate_json(resolver.require(assembly_ref).read_bytes())
+    report = InputResolutionReport.model_validate_json(resolver.require(resolution_ref).read_bytes())
+    recipe = InputRecipe.model_validate_json(resolver.require(recipe_ref).read_bytes())
+    runtime_registry = RuntimeQualificationRegistry.model_validate_json(resolver.require(runtime_ref).read_bytes())
+    verify_input_assembly_checksum(assembly)
+    verify_input_resolution_checksum(report)
+    verify_input_recipe_checksum(recipe)
+    verify_runtime_registry_checksum(runtime_registry)
+    if (
+        recipe.assembly_id != assembly.assembly_id
+        or recipe.assembly_revision != assembly.revision
+        or recipe.assembly_checksum != assembly.assembly_checksum
+        or report.assembly_id != assembly.assembly_id
+        or report.assembly_revision != assembly.revision
+        or report.assembly_checksum != assembly.assembly_checksum
+        or report.report_checksum != recipe.resolution_checksum
+        or report.runtime_registry_checksum != runtime_registry.registry_checksum
+        or recipe.config_checksum != attempt.job.config_checksum
+        or manifest.input_manifest_checksum != attempt.job.input_manifest_checksum
+    ):
+        raise ValueError("Grouped input recipe, report, runtime, and job checksums do not form one exact chain")
+    if report.state != InputResolutionState.READY or report.recommended_candidate_id != recipe.candidate_id:
+        raise ValueError("Accepted grouped input recipe is no longer the unique ready resolution")
+    candidate = next((item for item in report.candidates if item.candidate_id == recipe.candidate_id), None)
+    if (
+        not isinstance(candidate, VideoRecipeCandidate)
+        or candidate.state != CandidateState.READY
+        or candidate.runtime.status != RuntimeQualificationStatus.QUALIFIED
+        or candidate.recipe_group not in {RecipeGroup.RGB_ONLY, RecipeGroup.SUPPLIED_TRAJECTORY}
+        or recipe.recipe_group != candidate.recipe_group
+        or recipe.bindings != candidate.bindings
+        or recipe.excluded_file_ids != candidate.excluded_file_ids
+        or recipe.trajectory_origin != candidate.trajectory_origin
+    ):
+        raise ValueError("Accepted recipe has no current qualified reconstruction adapter")
+    versions = {item.component_id: item for item in recipe.component_versions}
+    runtime_version = versions.get(f"runtime-{candidate.runtime.runtime_id}")
+    resolver_version = versions.get("input-resolver")
+    if (
+        runtime_version is None
+        or runtime_version.version != candidate.runtime.runtime_version
+        or runtime_version.config_checksum != candidate.runtime.qualification_evidence_checksum
+        or resolver_version is None
+        or resolver_version.version != report.resolver_version
+        or resolver_version.config_checksum != runtime_registry.registry_checksum
+    ):
+        raise ValueError("Accepted recipe component versions do not match the qualified runtime evidence")
+    bindings = {binding.role: binding.file_ids for binding in candidate.bindings}
+    video_ids = bindings.get(InputRole.RGB_VIDEO, [])
+    if len(video_ids) != 1:
+        raise ValueError("Accepted recipe must bind exactly one RGB video")
+    by_id = {item.file_id: item for item in assembly.files}
+    video = by_id[video_ids[0]]
+    video_manifest = [item for item in manifest.files if item.media_type in {"video/mp4", "video/quicktime"}]
+    if (
+        len(video_manifest) != 1
+        or video.archive_member is not None
+        or video.source_file.checksum != video_manifest[0].checksum
+        or video.source_file.artifact_uri != video_manifest[0].artifact_uri
+    ):
+        raise ValueError("Accepted RGB binding does not match the worker InputManifest video")
+    if candidate.recipe_group == RecipeGroup.RGB_ONLY:
+        if manifest.input_configuration.registered_lidar_present or len(manifest.files) != 1:
+            raise ValueError("R1 recipe must dispatch the video-only worker path")
+        selected_upload_ids = {video.upload_id}
+    else:
+        if not manifest.input_configuration.registered_lidar_present or manifest.lidar_metadata is None:
+            raise ValueError("R4 recipe requires the existing LiDAR package worker stage")
+        role_ids = [
+            file_id
+            for role in (
+                InputRole.LIDAR_SCAN,
+                InputRole.SENSOR_TRAJECTORY,
+                InputRole.CAMERA_LIDAR_CALIBRATION,
+                InputRole.RGB_FRAME_TIMES,
+            )
+            for file_id in bindings.get(role, [])
+        ]
+        if not role_ids:
+            raise ValueError("R4 recipe has no LiDAR package members")
+        package_upload_ids = {by_id[file_id].upload_id for file_id in role_ids}
+        package_checksums = {
+            by_id[file_id].archive_member.container_checksum
+            for file_id in role_ids
+            if by_id[file_id].archive_member is not None
+        }
+        lidar_files = [item for item in manifest.files if item.media_type == "application/zip"]
+        lidar_provenance = (manifest.preparation_provenance or {}).get("lidar")
+        if (
+            len(package_upload_ids) != 1
+            or any(by_id[file_id].archive_member is None for file_id in role_ids)
+            or len(package_checksums) != 1
+            or len(lidar_files) != 1
+            or next(iter(package_checksums)) != lidar_files[0].checksum
+            or not isinstance(lidar_provenance, dict)
+            or lidar_provenance.get("trajectory_origin") != "supplied"
+            or candidate.trajectory_origin != TrajectoryOrigin.SUPPLIED
+        ):
+            raise ValueError("R4 recipe does not match the supplied-trajectory LiDAR package in InputManifest")
+        selected_upload_ids = {video.upload_id, *package_upload_ids}
+    service = InputAssemblyService(
+        RuntimeDatabase(attempt.settings.database_url),
+        str(attempt.settings.product_input_runtime_registry)
+        if attempt.settings.product_input_runtime_registry is not None
+        else None,
+        resolver,
+    )
+    stored = service.get_assembly(assembly.assembly_id, assembly.revision)
+    if stored.snapshot != assembly:
+        raise ValueError("Published input assembly differs from the durable assembly revision")
+    service.verify_upload_sources(stored, upload_ids=selected_upload_ids)
+    current_resolution = service.resolve(assembly.assembly_id, assembly.revision)
+    if current_resolution.report != report or current_resolution.runtime_registry != runtime_registry:
+        raise ValueError("Worker runtime or input resolver version differs from the accepted recipe")
 
 
 def _execute_prepare(attempt: _Attempt, profile: ResolvedProcessing) -> JobManifest:
@@ -578,7 +732,8 @@ def _execute_prepare(attempt: _Attempt, profile: ResolvedProcessing) -> JobManif
     project = attempt.registry.get_project(attempt.job.project_id)
     if project.input_manifest_ref is None:
         raise ValueError("Project không có InputManifest đã publish")
-    _pull_input(attempt.registry.runtime_resolver, project.input_manifest_ref)
+    manifest = _pull_input(attempt.registry.runtime_resolver, project.input_manifest_ref)
+    _validate_project_input_recipe(attempt, project, manifest)
     quality_profile = json.loads(attempt.settings.product_upload_quality_profile.read_bytes())
     request = {
         "schema_version": "1.0",
@@ -684,6 +839,12 @@ def run_prepared_job(job_id: str, frame_set_uri: str, *, expected_checksum: str 
     attempt, profile = _start_attempt(job_id, expected_checksum, StageId.CAMERA_POSE)
     try:
         with attempt_lease(attempt.workspace):
+            project = attempt.registry.get_project(attempt.job.project_id)
+            if project.input_recipe_ref is not None:
+                if project.input_manifest_ref is None:
+                    raise ValueError("Grouped input project has no InputManifest")
+                manifest = _pull_input(attempt.registry.runtime_resolver, project.input_manifest_ref)
+                _validate_project_input_recipe(attempt, project, manifest)
             job = _execute_preview(attempt, frames, profile)
         return _requeue_if_exhausted(attempt) or job
     except BaseException as error:

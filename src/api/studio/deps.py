@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 
 from src.config import Settings, get_settings
 from src.services.orchestration.artifacts import ArtifactStoreError
+from src.services.orchestration.inputs import InputAssemblyService
 from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.processing import (
     MachineCapability,
@@ -21,6 +22,7 @@ from src.services.orchestration.projects import ProjectRegistry, get_project_reg
 from src.services.orchestration.samples import DemoLibrary
 from src.services.orchestration.storage import runtime_resolver
 from src.services.orchestration.uploads import DirectUploadService, VideoUploadService
+from src.services.orchestration.uploads.scene_imports import ImportService
 
 
 def settings() -> Settings:
@@ -40,6 +42,27 @@ def uploads() -> VideoUploadService:
         RuntimeDatabase(current.database_url),
         runtime_resolver(current),
         current.product_upload_max_bytes,
+    )
+
+
+def input_assemblies() -> InputAssemblyService:
+    """Shared durable assembly store and its optional deployment qualification registry."""
+    current = settings()
+    return InputAssemblyService(
+        RuntimeDatabase(current.database_url),
+        str(current.product_input_runtime_registry) if current.product_input_runtime_registry is not None else None,
+        runtime_resolver(current),
+    )
+
+
+def imports() -> ImportService:
+    """Durable PLY/SOG import command used by both standalone and unified upload routes."""
+    current = settings()
+    return ImportService(
+        RuntimeDatabase(current.database_url),
+        runtime_resolver(current),
+        current.product_worker_root.expanduser().resolve() / "imports",
+        max_uncompressed_bytes=current.product_upload_max_bytes * 2,
     )
 
 

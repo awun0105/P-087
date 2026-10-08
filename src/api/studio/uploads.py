@@ -194,6 +194,7 @@ class DirectUploadRequest(BaseModel):
 
     filename: str = Field(min_length=1, max_length=255)
     size_bytes: int = Field(gt=0)
+    purpose: Literal["product", "input_assembly"] = "product"
 
 
 class DirectUploadState(BaseModel):
@@ -262,7 +263,14 @@ def begin_direct_upload(
 ) -> DirectUploadState:
     """Mở phiên upload thẳng; client xin link từng nhóm phần qua `/urls`."""
     try:
-        return _state(deps.direct_uploads().begin(request.filename, request.size_bytes, actor_of(user)))
+        return _state(
+            deps.direct_uploads().begin(
+                request.filename,
+                request.size_bytes,
+                actor_of(user),
+                purpose=request.purpose,
+            )
+        )
     except (UploadError, ArtifactAlreadyExistsError) as error:
         raise _upload_errors(error) from error
 

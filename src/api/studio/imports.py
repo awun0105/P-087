@@ -8,8 +8,6 @@ from src.api.auth import require_contributor
 from src.api.ownership import authorize_upload_mutation, owner_mutation_allowed
 from src.api.studio import deps
 from src.services.orchestration.auth import UserRecord
-from src.services.orchestration.jobs.database import RuntimeDatabase
-from src.services.orchestration.storage import runtime_resolver
 from src.services.orchestration.uploads import UploadNotFoundError
 from src.services.orchestration.uploads.scene_imports import (
     ImportedScene,
@@ -80,13 +78,7 @@ def _view(record: ImportedScene, user: UserRecord | None) -> ImportedSceneRespon
 
 
 def _service() -> ImportService:
-    current = deps.settings()
-    return ImportService(
-        RuntimeDatabase(current.database_url),
-        runtime_resolver(current),
-        current.product_worker_root.expanduser().resolve() / "imports",
-        max_uncompressed_bytes=current.product_upload_max_bytes * 2,
-    )
+    return deps.imports()
 
 
 @router.post("/imports", response_model=ImportedSceneResponse, status_code=status.HTTP_201_CREATED)

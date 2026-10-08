@@ -100,6 +100,19 @@ def test_registered_package_keeps_the_submitted_cloud_bytes(tmp_path: Path) -> N
     assert record.trajectory_origin == "ground_truth"
 
 
+def test_supplied_trajectory_is_sensor_input_not_ground_truth(tmp_path: Path) -> None:
+    from src.models.contracts.reconstruction import DependencyOrigin
+
+    scans = {f"lidar/{index:06d}.pcd": _pcd(_scan()) for index in range(POSES)}
+    record, resolver = _ingest(tmp_path, _zip(tmp_path / "supplied.zip", {**_companions(), **scans}), "supplied")
+    metadata = LiDARGeometryArtifact.model_validate_json(resolver.require(record.lidar_metadata_ref).read_bytes())
+
+    assert record.trajectory_origin == "supplied"
+    assert metadata.preprocessing_provenance.ground_truth_assisted is False
+    pose = next(item for item in metadata.preprocessing_provenance.dependencies if item.role == "pose")
+    assert pose.origin == DependencyOrigin.SENSOR_INPUT
+
+
 def test_package_without_floor_under_trajectory_is_rejected(tmp_path: Path) -> None:
     """Quỹ đạo không thuộc đám mây (hoặc trục lên không phải Z): dừng với lý do rõ, không đoán sàn."""
     far = _scan() + np.array([500.0, 500.0, 0.0])

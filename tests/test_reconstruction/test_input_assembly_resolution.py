@@ -488,6 +488,9 @@ def test_r6_blocks_supplied_trajectory_with_mismatched_scan_count(tmp_path: Path
     assert report.state == InputResolutionState.NEEDS_INPUT
     assert r6.state == CandidateState.NEEDS_INPUT
     assert "SCAN_POSE_PAIRING_REQUIRED" in {fact.code for fact in r6.required_facts}
+    r4 = next(candidate for candidate in report.candidates if candidate.recipe_group == RecipeGroup.SUPPLIED_TRAJECTORY)
+    assert r4.state == CandidateState.NEEDS_INPUT
+    assert "LIDAR_PACKAGE_REQUIRED" in {fact.code for fact in r4.required_facts}
 
 
 def test_probe_identity_mismatch_is_invalid_and_unknown_content_is_unsupported(tmp_path: Path) -> None:

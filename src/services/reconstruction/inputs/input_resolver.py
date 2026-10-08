@@ -36,7 +36,7 @@ from src.models.contracts.input_assembly import (
 )
 from src.services.reconstruction.inputs.input_probe import InputProbe
 
-_RESOLVER_VERSION = "assembly-input-resolver-v1"
+_RESOLVER_VERSION = "assembly-input-resolver-v2"
 _MAX_MASTER_CHOICES = 12
 
 
@@ -233,18 +233,26 @@ def resolve_input_assembly(
             elif group == RecipeGroup.SUPPLIED_TRAJECTORY:
                 if trajectory_ids:
                     for trajectory_id in _bounded_choices(trajectory_ids):
-                        _add_supplied_scan_candidate(
-                            drafts,
-                            assembly,
-                            runtime_registry,
-                            video_id,
-                            variant,
-                            trajectory_id,
-                            probe_map,
-                            required,
-                            intent_fact if both_workflows else None,
-                            video_fact if len(videos) > 1 else None,
-                        )
+                        for calibration_id, frame_time_id in product(
+                            _bounded_choices(calibration_ids) if calibration_ids else [None],
+                            _bounded_choices(frame_time_ids) if frame_time_ids else [None],
+                        ):
+                            _add_supplied_scan_candidate(
+                                drafts,
+                                assembly,
+                                runtime_registry,
+                                video_id,
+                                variant,
+                                trajectory_id,
+                                calibration_id,
+                                frame_time_id,
+                                calibration_ids,
+                                frame_time_ids,
+                                probe_map,
+                                required,
+                                intent_fact if both_workflows else None,
+                                video_fact if len(videos) > 1 else None,
+                            )
                         if calibration_ids and frame_time_ids:
                             _add_r6_candidates(
                                 drafts,
@@ -360,8 +368,9 @@ def resolve_input_assembly(
         )
         return _report(assembly, runtime_registry, InputResolutionState.UNSUPPORTED, [], [], diagnostics)
 
-    # A recipe is only directly ready when it is the sole complete route. Equal-quality
-    # routes stay explicit choices; the resolver never ranks metadata volume as accuracy.
+    # A uniquely complete route may proceed while other alternatives stay blocked on
+    # their own missing facts. Equal complete routes remain explicit choices; the
+    # resolver never ranks metadata volume as accuracy.
     preliminary = [_materialize(draft, assembly) for draft in drafts]
     ready_indices = [
         index for index, candidate in enumerate(preliminary) if _candidate_state(candidate) == CandidateState.READY
@@ -387,14 +396,7 @@ def resolve_input_assembly(
         return _report(assembly, runtime_registry, state, [], all_facts, diagnostics)
 
     ready = [candidate for candidate in candidates if _candidate_state(candidate) == CandidateState.READY]
-    if (
-        len(ready) == 1
-        and not all_facts
-        and all(
-            _candidate_state(candidate) in {CandidateState.READY, CandidateState.UNSUPPORTED}
-            for candidate in candidates
-        )
-    ):
+    if len(ready) == 1 and not facts:
         return _report(
             assembly,
             runtime_registry,
@@ -871,6 +873,10 @@ def _add_supplied_scan_candidate(
     video_id: str,
     variant: dict[str, object],
     trajectory_id: str,
+    calibration_id: str | None,
+    frame_time_id: str | None,
+    calibration_ids: list[str],
+    frame_time_ids: list[str],
     probes: dict[str, InputProbe],
     base_required: list[MissingInputFact],
     workflow_fact: MissingInputFact | None,
@@ -879,6 +885,59 @@ def _add_supplied_scan_candidate(
     scan_ids = list(variant["cloud_ids"])
     trajectory_probe = probes[trajectory_id]
     required = [*base_required, *_scan_facts(assembly, scan_ids, supplied=True)]
+    if calibration_id is None:
+        required.append(
+            _fact(
+                "CAMERA_LIDAR_CALIBRATION_REQUIRED",
+                "The current R4 worker adapter requires the exact camera-to-LiDAR calibration file.",
+            )
+        )
+    elif len(calibration_ids) > 1 and not any(
+        binding.role == InputRole.CAMERA_LIDAR_CALIBRATION for binding in assembly.bindings
+    ):
+        required.append(
+            _fact(
+                "CALIBRATION_SELECTION_REQUIRED",
+                "Choose one exact camera-to-LiDAR calibration for the R4 package.",
+                calibration_ids,
+            )
+        )
+    if frame_time_id is None:
+        required.append(
+            _fact(
+                "RGB_FRAME_TIMES_REQUIRED",
+                "The current R4 worker adapter requires the exact frame-time file.",
+            )
+        )
+    elif len(frame_time_ids) > 1 and not any(
+        binding.role == InputRole.RGB_FRAME_TIMES for binding in assembly.bindings
+    ):
+        required.append(
+            _fact(
+                "FRAME_TIMES_SELECTION_REQUIRED",
+                "Choose one exact frame-time file for the R4 package.",
+                frame_time_ids,
+            )
+        )
+    if calibration_id is not None and frame_time_id is not None:
+        selected = [*scan_ids, trajectory_id, calibration_id, frame_time_id]
+        by_id = {item.file_id: item for item in assembly.files}
+        package_uploads = {by_id[item].upload_id for item in selected}
+        archive_checksums = {
+            by_id[item].archive_member.container_checksum for item in selected if by_id[item].archive_member is not None
+        }
+        if (
+            len(package_uploads) != 1
+            or any(by_id[item].archive_member is None for item in selected)
+            or len(archive_checksums) != 1
+        ):
+            required.append(
+                _fact(
+                    "LIDAR_PACKAGE_REQUIRED",
+                    "The current R4 worker adapter accepts these bound LiDAR members only inside one verified ZIP package.",
+                    selected,
+                )
+            )
     if trajectory_probe.record_count != len(scan_ids):
         required.append(
             _fact(
@@ -896,6 +955,10 @@ def _add_supplied_scan_candidate(
         *list(variant["bindings"]),
         _binding(InputRole.SENSOR_TRAJECTORY, [trajectory_id]),
     ]
+    if calibration_id is not None:
+        bindings.append(_binding(InputRole.CAMERA_LIDAR_CALIBRATION, [calibration_id]))
+    if frame_time_id is not None:
+        bindings.append(_binding(InputRole.RGB_FRAME_TIMES, [frame_time_id]))
     _add_candidate(
         drafts,
         assembly,

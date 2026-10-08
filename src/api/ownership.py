@@ -10,6 +10,7 @@ from src.services.orchestration.projects.errors import JobNotFoundError
 from src.services.orchestration.projects.models import ProjectRecord
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.uploads import UploadRecord, UploadSession
+from src.services.orchestration.uploads.assembly_models import StagedInputUploadRecord
 
 
 def owner_mutation_allowed(user: UserRecord | None, owner_user_id: str | None) -> bool:
@@ -103,5 +104,30 @@ def authorize_upload_session_mutation(user: UserRecord | None, session: UploadSe
         owner_user_id,
         resource_type="upload_session",
         resource_id=session.upload_id,
+        operation=operation,
+    )
+
+
+def authorize_staged_input_upload_mutation(
+    user: UserRecord | None, upload: StagedInputUploadRecord, *, operation: str
+) -> None:
+    owner_user_id = upload.uploaded_by.user_id if upload.uploaded_by is not None else None
+    _authorize_owner(
+        user,
+        owner_user_id,
+        resource_type="input_upload",
+        resource_id=upload.upload_id,
+        operation=operation,
+    )
+
+
+def authorize_input_assembly_access(
+    user: UserRecord | None, assembly_id: str, owner_user_id: str, *, operation: str = "đọc assembly"
+) -> None:
+    _authorize_owner(
+        user,
+        owner_user_id,
+        resource_type="input_assembly",
+        resource_id=assembly_id,
         operation=operation,
     )

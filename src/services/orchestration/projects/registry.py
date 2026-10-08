@@ -21,6 +21,19 @@ from src.models.contracts.artifacts import (
     ProductArtifactRef,
 )
 from src.models.contracts.identity import canonical_content_checksum
+from src.models.contracts.input_assembly import (
+    CandidateState,
+    InputAssemblySnapshot,
+    InputRecipe,
+    InputRole,
+    RecipeGroup,
+    RuntimeQualificationStatus,
+    VideoRecipeCandidate,
+    verify_input_assembly_checksum,
+    verify_input_recipe_checksum,
+    verify_input_resolution_checksum,
+    verify_runtime_registry_checksum,
+)
 from src.models.contracts.manifests import (
     InputConfiguration,
     InputFile,
@@ -51,6 +64,8 @@ from src.services.orchestration.artifacts import (
 )
 from src.services.orchestration.auth.models import Actor
 from src.services.orchestration.auth.quota_ledger import GuestQuotaIntent, GuestQuotaIntentResult
+from src.services.orchestration.inputs.assembly import InputResolutionRecord
+from src.services.orchestration.inputs.runs import InputAssemblyRunCommit, InputAssemblyRunResult
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.models import JobAttemptRecord, PreparedInputReceipt, TransitionRequest
 from src.services.orchestration.jobs.profile import ExecutionProfile
@@ -394,6 +409,155 @@ class ProjectRegistry:
             self._project_jobs[project_id] = []
         return record
 
+    def create_project_from_input_assembly(
+        self,
+        upload: UploadRecord,
+        request: UploadProjectInput,
+        privacy_mode: Literal["qa_verified", "self_attested"],
+        resolution: InputResolutionRecord,
+        recipe: InputRecipe,
+        config_checksum: Checksum,
+        *,
+        assembly: InputAssemblySnapshot,
+        lidar: UploadRecord | None = None,
+        created_by: Actor | None = None,
+        defer_persistence: bool = False,
+    ) -> ProjectRecord:
+        """Build a legacy-compatible worker manifest plus exact accepted recipe references."""
+        verify_input_assembly_checksum(assembly)
+        verify_input_resolution_checksum(resolution.report)
+        verify_runtime_registry_checksum(resolution.runtime_registry)
+        verify_input_recipe_checksum(recipe)
+        report = resolution.report
+        candidate = next((item for item in report.candidates if item.candidate_id == recipe.candidate_id), None)
+        if not isinstance(candidate, VideoRecipeCandidate) or candidate.state != CandidateState.READY:
+            raise ValueError("Only an exact ready video recipe candidate may create a reconstruction job")
+        if candidate.runtime.status != RuntimeQualificationStatus.QUALIFIED:
+            raise ValueError("The selected worker runtime is not qualified")
+        if candidate.recipe_group not in {RecipeGroup.RGB_ONLY, RecipeGroup.SUPPLIED_TRAJECTORY}:
+            raise ValueError("No worker stage adapter exists for this input recipe")
+        if (
+            report.state.value != "ready"
+            or report.assembly_id != assembly.assembly_id
+            or report.assembly_revision != assembly.revision
+            or report.assembly_checksum != assembly.assembly_checksum
+            or recipe.assembly_id != assembly.assembly_id
+            or recipe.assembly_revision != assembly.revision
+            or recipe.assembly_checksum != assembly.assembly_checksum
+            or recipe.resolution_checksum != report.report_checksum
+            or recipe.recipe_group != candidate.recipe_group
+            or recipe.bindings != candidate.bindings
+            or recipe.excluded_file_ids != candidate.excluded_file_ids
+            or recipe.trajectory_origin != candidate.trajectory_origin
+            or recipe.config_checksum != config_checksum
+        ):
+            raise ValueError("Accepted recipe does not bind the exact assembly, ready report, and job config")
+        role_bindings = {binding.role: binding.file_ids for binding in candidate.bindings}
+        rgb = role_bindings.get(InputRole.RGB_VIDEO)
+        if rgb is None or len(rgb) != 1:
+            raise ValueError("Input recipe must bind exactly one RGB video")
+        by_file_id = {item.file_id: item for item in assembly.files}
+        video_file = by_file_id[rgb[0]]
+        if (
+            video_file.archive_member is not None
+            or video_file.upload_id != upload.upload_id
+            or video_file.source_file.checksum != upload.checksum
+            or video_file.source_file.artifact_uri != upload.artifact_uri
+            or upload.input_kind != "rgb_video"
+        ):
+            raise ValueError("The selected RGB video must be one directly uploaded, legacy-verified video file")
+        if candidate.recipe_group == RecipeGroup.RGB_ONLY:
+            if lidar is not None or request.lidar is not None:
+                raise ValueError("R1 cannot attach a LiDAR upload")
+        else:
+            if (
+                lidar is None
+                or request.lidar is None
+                or request.lidar.upload_id != lidar.upload_id
+                or request.lidar.trajectory_origin != "supplied"
+                or role_bindings.get(InputRole.LIDAR_SCAN) is None
+                or role_bindings.get(InputRole.SENSOR_TRAJECTORY) is None
+                or role_bindings.get(InputRole.CAMERA_LIDAR_CALIBRATION) is None
+                or role_bindings.get(InputRole.RGB_FRAME_TIMES) is None
+            ):
+                raise ValueError(
+                    "R4 requires one verified supplied-trajectory LiDAR package with calibration and times"
+                )
+            evidence = lidar.detection.lidar if lidar.detection is not None else None
+            scan_ids = role_bindings[InputRole.LIDAR_SCAN]
+            trajectory_ids = role_bindings[InputRole.SENSOR_TRAJECTORY]
+            calibration_ids = role_bindings[InputRole.CAMERA_LIDAR_CALIBRATION]
+            frame_time_ids = role_bindings[InputRole.RGB_FRAME_TIMES]
+            selected_ids = [*scan_ids, *trajectory_ids, *calibration_ids, *frame_time_ids]
+            members = [by_file_id[file_id] for file_id in selected_ids]
+            pcd_paths = sorted(
+                item.archive_member.member_path
+                for item in assembly.files
+                if item.upload_id == lidar.upload_id
+                and item.archive_member is not None
+                and item.archive_member.member_path.lower().endswith(".pcd")
+            )
+            if (
+                lidar.input_kind != "lidar_scan_sequence"
+                or evidence is None
+                or any(item.upload_id != lidar.upload_id or item.archive_member is None for item in members)
+                or any(item.archive_member.container_checksum != lidar.checksum for item in members)
+                or len(trajectory_ids) != 1
+                or len(calibration_ids) != 1
+                or len(frame_time_ids) != 1
+                or sorted(by_file_id[file_id].archive_member.member_path for file_id in scan_ids) != pcd_paths
+                or by_file_id[trajectory_ids[0]].archive_member.member_path != evidence.trajectory_member
+                or by_file_id[calibration_ids[0]].archive_member.member_path != evidence.calibration_member
+                or by_file_id[frame_time_ids[0]].archive_member.member_path != evidence.frame_times_member
+                or len(scan_ids) != evidence.scan_count
+            ):
+                raise ValueError("R4 recipe members do not match the verified LiDAR package inventory")
+        record = self.create_project_from_upload(
+            upload,
+            request,
+            privacy_mode,
+            lidar,
+            created_by,
+            defer_persistence=True,
+        )
+        references: dict[str, ProductArtifactRef] = {}
+        artifacts: tuple[tuple[str, BaseModel, ArtifactDataClass], ...] = (
+            ("input_assembly.json", assembly, ArtifactDataClass.PRODUCT_INPUT),
+            ("input_resolution.json", report, ArtifactDataClass.DERIVED),
+            ("input_runtime_registry.json", resolution.runtime_registry, ArtifactDataClass.DERIVED),
+            ("input_recipe.json", recipe, ArtifactDataClass.DERIVED),
+        )
+        for filename, value, data_class in artifacts:
+            payload = value.model_dump_json(indent=2).encode("utf-8") + b"\n"
+            reference = ProductArtifactRef(
+                artifact_type=type(value).__name__,
+                schema_version="1.0",
+                artifact_uri=f"artifact://jobs/{record.project_id}/input/{filename}",
+                artifact_checksum=sha256_bytes(payload),
+                data_class=data_class,
+                producer_stage=StageId.INPUT_VALIDATE,
+                job_id=record.project_id,
+            )
+            FilesystemArtifactStore(self.runtime_resolver).publish(reference, payload)
+            references[filename] = reference
+        record = ProjectRecord.model_validate(
+            {
+                **record.model_dump(mode="python"),
+                "input_assembly_ref": references["input_assembly.json"],
+                "input_resolution_ref": references["input_resolution.json"],
+                "input_runtime_registry_ref": references["input_runtime_registry.json"],
+                "input_recipe_ref": references["input_recipe.json"],
+            }
+        )
+        if defer_persistence:
+            return record
+        if self.persistence is not None:
+            self.persistence.save_project(record)
+        else:
+            self._projects[record.project_id] = record
+            self._project_jobs[record.project_id] = []
+        return record
+
     def _preliminary_privacy_report(self, input_manifest_checksum: Checksum) -> PrivacyValidationReport:
         """Trạng thái mặc định của input mới: chưa QA xác nhận ẩn danh."""
         draft = PrivacyValidationReport(
@@ -463,6 +627,7 @@ class ProjectRegistry:
         quota_intent: GuestQuotaIntent | None = None,
         project_record: ProjectRecord | None = None,
         upload_ids_to_link: tuple[str, ...] = (),
+        input_assembly_run: InputAssemblyRunCommit | None = None,
     ) -> JobManifest:
         """Tạo job QUEUED cho một project, sau khi qua privacy gate.
 
@@ -506,7 +671,10 @@ class ProjectRegistry:
                 quota_intent=quota_intent,
                 project_to_create=project_record,
                 upload_ids_to_link=upload_ids_to_link,
+                input_assembly_run=input_assembly_run,
             )
+            if isinstance(quota_result, InputAssemblyRunResult):
+                return self.get_job(quota_result.job_id)
             if quota_result is not None and quota_result.replayed:
                 return self._job_from_quota_result(quota_result)
         else:
@@ -529,6 +697,14 @@ class ProjectRegistry:
         """Return the exact immutable queued revision for a duplicate accepted request."""
         result = self.lookup_quota_intent(intent)
         return self._job_from_quota_result(result) if result is not None else None
+
+    def lookup_input_run(
+        self, requester_id: str, idempotency_key: str, request_fingerprint: str
+    ) -> InputAssemblyRunResult | None:
+        """Resolve an accepted grouped-input run before checking mutable upload state."""
+        if self.persistence is None:
+            raise RuntimeStateConflictError("Grouped input Run requires the shared persistent runtime database")
+        return self.persistence.lookup_input_run(requester_id, idempotency_key, request_fingerprint)
 
     def _job_from_quota_result(self, result: GuestQuotaIntentResult) -> JobManifest:
         reference = ArtifactRef.model_validate_json(result.result_reference)

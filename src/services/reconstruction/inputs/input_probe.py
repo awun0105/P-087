@@ -14,6 +14,9 @@ import stat
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import BinaryIO
+
+from pydantic import BaseModel, ConfigDict
 
 from src.models.contracts.input_assembly import (
     ArchiveMemberRef,
@@ -33,8 +36,7 @@ _CHUNK_BYTES = 1024 * 1024
 _QUATERNION_TOLERANCE = 1e-3
 
 
-@dataclass(frozen=True)
-class InputProbe:
+class InputProbe(BaseModel):
     """Ephemeral evidence for one exact staged reference; never substitutes for worker verification."""
 
     file_id: str
@@ -47,6 +49,8 @@ class InputProbe:
     first_timestamp: float | None = None
     last_timestamp: float | None = None
     diagnostics: tuple[tuple[str, str, str], ...] = ()
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
 
 @dataclass(frozen=True)
@@ -90,15 +94,56 @@ def classify_upload(
                 "Uploaded bytes do not match the recorded size.",
             )
         with path.open("rb") as stream:
-            head = stream.read(16)
+            return classify_upload_reader(
+                source_file,
+                upload_id,
+                file_id,
+                stream,
+                suffix=path.suffix,
+                max_uncompressed_bytes=max_uncompressed_bytes,
+            )
+    except (OSError, zipfile.BadZipFile, EOFError, NotImplementedError) as error:
+        return _invalid_upload(
+            source_file,
+            upload_id,
+            file_id,
+            "unreadable_upload",
+            f"Upload content could not be read ({type(error).__name__}).",
+        )
+
+
+def classify_upload_reader(
+    source_file: InputFile,
+    upload_id: str,
+    file_id: str,
+    stream: BinaryIO,
+    *,
+    suffix: str,
+    max_uncompressed_bytes: int,
+) -> ClassifiedUpload:
+    """Classify a seekable verified source, including a remote range reader.
+
+    This lets multipart uploads be probed from their immutable object without
+    downloading a large video or point cloud into the API process.
+    """
+    if max_uncompressed_bytes < 1:
+        raise ValueError("max_uncompressed_bytes must be positive")
+    try:
+        stream.seek(0)
+        head = stream.read(16)
         if head.startswith(b"PK\x03\x04"):
-            return _classify_zip(source_file, upload_id, file_id, path, max_uncompressed_bytes)
-        if path.suffix.lower() == ".sog":
+            stream.seek(0)
+            return _classify_zip(source_file, upload_id, file_id, stream, suffix, max_uncompressed_bytes)
+        if suffix.lower() == ".sog":
             return _invalid_upload(
                 source_file, upload_id, file_id, "invalid_sog", "A SOG upload must be a validated SOG v2 ZIP archive."
             )
-        content = _read_probe_content(path, actual_size)
-        result = _probe_content(content, actual_size, text_probe_complete=actual_size <= _MAX_TEXT_BYTES)
+        content = _read_probe_content(stream, source_file.size_bytes)
+        result = _probe_content(
+            content,
+            source_file.size_bytes,
+            text_probe_complete=source_file.size_bytes <= _MAX_TEXT_BYTES,
+        )
         staged, probe = _make_staged(
             source_file,
             upload_id,
@@ -123,20 +168,21 @@ def _classify_zip(
     source_file: InputFile,
     upload_id: str,
     file_id: str,
-    path: Path,
+    stream: BinaryIO,
+    suffix: str,
     max_uncompressed_bytes: int,
 ) -> ClassifiedUpload:
-    with zipfile.ZipFile(path) as archive:
+    with zipfile.ZipFile(stream) as archive:
         infos = _safe_inventory(archive, max_uncompressed_bytes)
         names = [info.filename for info in infos]
         root_meta = next((info for info in infos if info.filename == "meta.json"), None)
-        sog_intent = path.suffix.lower() == ".sog"
+        sog_intent = suffix.lower() == ".sog"
         if root_meta is not None:
             sog_intent = sog_intent or _looks_like_sog(archive, root_meta)
         if sog_intent:
             try:
-                with path.open("rb") as stream:
-                    detection = detect.detect_stream(stream, source_file.size_bytes, max_uncompressed_bytes)
+                stream.seek(0)
+                detection = detect.detect_stream(stream, source_file.size_bytes, max_uncompressed_bytes)
             except detect.InputRejectedError as error:
                 return _invalid_upload(source_file, upload_id, file_id, "invalid_sog", str(error))
             if detection.kind != "gaussian_sog":
@@ -327,13 +373,13 @@ def _hash_member(
     return f"sha256:{digest.hexdigest()}", bytes(prefix), full_text
 
 
-def _read_probe_content(path: Path, size_bytes: int) -> bytes:
-    with path.open("rb") as stream:
-        prefix = stream.read(_MAX_HEADER_BYTES)
-        if _text_prefix(prefix) and size_bytes <= _MAX_TEXT_BYTES:
-            stream.seek(0)
-            return stream.read(_MAX_TEXT_BYTES + 1)
-        return prefix
+def _read_probe_content(stream: BinaryIO, size_bytes: int) -> bytes:
+    stream.seek(0)
+    prefix = stream.read(_MAX_HEADER_BYTES)
+    if _text_prefix(prefix) and size_bytes <= _MAX_TEXT_BYTES:
+        stream.seek(0)
+        return stream.read(_MAX_TEXT_BYTES + 1)
+    return prefix
 
 
 def _probe_content(data: bytes, size_bytes: int, *, text_probe_complete: bool = True) -> _ContentResult:

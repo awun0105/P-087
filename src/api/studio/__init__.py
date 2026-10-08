@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 
 from src.api.auth import require_contributor
 from src.api.studio import (
+    assemblies,
     demo,
     evaluation,
     imports,
@@ -24,7 +25,7 @@ from src.api.studio import (
 router = APIRouter(tags=["studio"])
 # Protected Studio routes require an authenticated contributor; each mutation must
 # additionally check resource ownership. Reviewer-only handlers keep their own gate.
-for module in (uploads, scenes, metric, imports, simulation, review, trash, evaluation, demo):
+for module in (uploads, assemblies, scenes, metric, imports, simulation, review, trash, evaluation, demo):
     router.include_router(module.router, dependencies=[Depends(require_contributor)])
 for module in (samples, processing):
     router.include_router(module.router)

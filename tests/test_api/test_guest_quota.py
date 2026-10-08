@@ -239,6 +239,91 @@ async def test_guest_scene_from_upload_commits_project_link_job_and_quota_togeth
 
 
 @pytest.mark.asyncio
+async def test_guest_input_assembly_run_commits_quota_once_and_replays_idempotently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.models.contracts.input_assembly import (
+        RuntimeCapabilityKey,
+        RuntimeCapabilityRecord,
+        RuntimeQualificationRegistry,
+        RuntimeQualificationStatus,
+        seal_runtime_registry,
+    )
+
+    system = _system(tmp_path, monkeypatch, worker_profile=True)
+    runtime_path = tmp_path / "input-runtime.json"
+    runtime_path.write_text(
+        seal_runtime_registry(
+            RuntimeQualificationRegistry(
+                schema_version="1.0",
+                registry_version="test-guest-r1-v1",
+                capabilities=[
+                    RuntimeCapabilityRecord(
+                        capability_key=RuntimeCapabilityKey.R1,
+                        status=RuntimeQualificationStatus.QUALIFIED,
+                        runtime_id="qualified-guest-r1-worker",
+                        runtime_version="1.0.0",
+                        qualification_evidence_checksum="sha256:" + "6" * 64,
+                    )
+                ],
+                registry_checksum="sha256:" + "0" * 64,
+            )
+        ).model_dump_json()
+    )
+    system.settings.product_input_runtime_registry = runtime_path
+    token, _ = system.service.login(system.user.email, "mat-khau-du-dai")
+
+    async with AsyncClient(
+        transport=ASGITransport(app=system.app), base_url="http://test", cookies={"r2s_session": token}
+    ) as client:
+        uploaded = await client.post(
+            "/api/v1/input-assemblies/uploads",
+            params={"filename": "guest.mp4"},
+            content=VIDEO,
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        created = await client.post(
+            "/api/v1/input-assemblies",
+            json={"upload_ids": [uploaded.json()["upload_id"]]},
+        )
+        assert created.status_code == 201, created.text
+        assembly = created.json()
+        resolved = await client.post(
+            f"/api/v1/input-assemblies/{assembly['assembly_id']}/resolve",
+            json={"revision": assembly["revision"]},
+        )
+        assert resolved.status_code == 200, resolved.text
+        report = resolved.json()["report"]
+        request = {
+            "revision": assembly["revision"],
+            "resolution_checksum": report["report_checksum"],
+            "candidate_id": report["recommended_candidate_id"],
+            "name": "Guest unified upload",
+            "attestation": ATTESTATION,
+        }
+        first = await client.post(
+            f"/api/v1/input-assemblies/{assembly['assembly_id']}/run",
+            json=request,
+            headers={"Idempotency-Key": "guest-assembly-run-1"},
+        )
+        assert first.status_code == 201, first.text
+        assert (await client.get("/api/v1/auth/me")).json()["quota"]["used"] == 1
+
+        replay = await client.post(
+            f"/api/v1/input-assemblies/{assembly['assembly_id']}/run",
+            json=request,
+            headers={"Idempotency-Key": "guest-assembly-run-1"},
+        )
+        assert replay.status_code == 201, replay.text
+        assert replay.json()["job"]["job_id"] == first.json()["job"]["job_id"]
+        assert (await client.get("/api/v1/auth/me")).json()["quota"]["used"] == 1
+
+    with system.database.transaction() as tx:
+        assert tx.execute("SELECT used_count FROM r2s_guest_quota_windows").fetchone() == (1,)
+        assert tx.execute("SELECT COUNT(*) FROM r2s_input_runs").fetchone() == (1,)
+
+
+@pytest.mark.asyncio
 async def test_guest_manual_retry_counts_once_and_replays_accepted_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

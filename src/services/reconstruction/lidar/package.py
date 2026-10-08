@@ -46,7 +46,7 @@ from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
 MAP_FRAME = "lidar_map"
 SENSOR_FRAME = "lidar_sensor"
 CAMERA_FRAME = "camera"
-TrajectoryOrigin = Literal["estimated", "ground_truth"]
+TrajectoryOrigin = Literal["estimated", "ground_truth", "supplied"]
 
 _FLOOR_RADIUS_M = 3.0
 _FLOOR_BIN_M = 0.02
@@ -231,7 +231,11 @@ class LidarPackageIngest:
         floor_z, support = estimate_floor(points, poses)
         cloud_path = workspace / f"registered_lidar.{fmt}"
         cloud_path.write_bytes(payload)
-        origin = DependencyOrigin.GROUND_TRUTH if trajectory_origin == "ground_truth" else DependencyOrigin.ESTIMATED
+        origin = {
+            "ground_truth": DependencyOrigin.GROUND_TRUTH,
+            "estimated": DependencyOrigin.ESTIMATED,
+            "supplied": DependencyOrigin.SENSOR_INPUT,
+        }[trajectory_origin]
         dependencies = [
             PreprocessingDependency(role="pose", origin=origin, source_checksum=_sha256(trajectory_bytes)),
             PreprocessingDependency(

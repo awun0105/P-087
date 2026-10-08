@@ -12,7 +12,16 @@ from src.services.reconstruction import InputDetection, InputKind
 
 VideoMediaType = Literal["video/mp4", "video/quicktime"]
 UploadMediaType = Literal[
-    "video/mp4", "video/quicktime", "application/x-ply", "application/x-sog", "application/x-pcd", "application/zip"
+    "video/mp4",
+    "video/quicktime",
+    "application/x-ply",
+    "application/x-sog",
+    "application/x-pcd",
+    "application/zip",
+    "application/json",
+    "text/plain",
+    "text/csv",
+    "application/octet-stream",
 ]
 
 #: Đuôi file video → media type ghi vào InputManifest (PRD FR-01, Playbook §2.1).
@@ -25,6 +34,15 @@ UPLOAD_EXTENSIONS: dict[str, UploadMediaType] = {
     ".sog": "application/x-sog",
     ".pcd": "application/x-pcd",
     ".zip": "application/zip",
+}
+# The unified assembly accepts unknown sidecars by bytes, but keeps their declared
+# media type separate from the legacy detector's supported upload kinds.
+ASSEMBLY_UPLOAD_EXTENSIONS: dict[str, UploadMediaType] = {
+    **UPLOAD_EXTENSIONS,
+    ".json": "application/json",
+    ".txt": "text/plain",
+    ".tum": "text/plain",
+    ".csv": "text/csv",
 }
 KIND_MEDIA_TYPES: dict[str, frozenset[str]] = {
     "rgb_video": frozenset({"video/mp4", "video/quicktime"}),
@@ -90,3 +108,6 @@ class UploadSession(BaseModel):
     error: str | None = None
     created_at: datetime
     uploaded_by: Actor | None = None
+    purpose: Literal["product", "input_assembly"] = Field(
+        default="product", exclude_if=lambda value: value == "product"
+    )

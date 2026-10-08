@@ -73,8 +73,8 @@ class LidarAttachment(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     upload_id: Identifier
-    #: Quỹ đạo trong gói do SLAM/odometry tự tính, hay là quỹ đạo chuẩn (ground truth) của dataset.
-    trajectory_origin: Literal["estimated", "ground_truth"]
+    #: Nguồn pose có thể là đoán, chuẩn dataset hoặc TUM được người dùng cung cấp.
+    trajectory_origin: Literal["estimated", "ground_truth", "supplied"]
     #: Video và LiDAR cùng một không gian, cùng lượt quay; đơn vị mét, trục Z hướng lên.
     same_scene_confirmed: bool
 
@@ -149,9 +149,31 @@ class ProjectRecord(BaseModel):
     privacy_mode: Literal["qa_verified", "self_attested"] = "qa_verified"
     #: InputManifest đã publish (bytes checksum) để worker chuẩn bị input video.
     input_manifest_ref: ProductArtifactRef | None = None
+    #: New grouped-input evidence is omitted for legacy projects to preserve old JSON/CAS bytes.
+    input_assembly_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    input_resolution_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    input_recipe_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    input_runtime_registry_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
     input_video: InputVideoSummary | None = None
     created_at: datetime | None = None
     #: Người tạo scene; None với project cũ, fixture hoặc khi không bật đăng nhập.
     created_by: Actor | None = None
     #: Scene được đánh dấu là bản demo; không ghi vào JSON khi None để bản ghi cũ giữ nguyên bytes (CAS so bytes).
     demo_baseline: DemoBaseline | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def _bind_input_assembly_evidence(self) -> "ProjectRecord":
+        references = (
+            self.input_assembly_ref,
+            self.input_resolution_ref,
+            self.input_recipe_ref,
+            self.input_runtime_registry_ref,
+        )
+        if any(reference is not None for reference in references) and any(
+            reference is None for reference in references
+        ):
+            raise ValueError("grouped input evidence refs must be present as one complete set")
+        for reference in references:
+            if reference is not None and reference.job_id != self.project_id:
+                raise ValueError("grouped input evidence must belong to the project namespace")
+        return self

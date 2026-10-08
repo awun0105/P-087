@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- PLANNED; P1; EX-PRODUCT upload/Studio/dispatch; EX-REC input adapters.
+- IN PROGRESS; P1; S1–S3 complete, S4–S5 outstanding; EX-PRODUCT upload/Studio/dispatch; EX-REC input adapters.
 - Canonical REC-02/03/06/08/09, PRODUCT-02/04/08/09; task-local extension.
 - Owner yêu cầu: thả tất cả file vào một khung; hệ thống xác định các file dùng
   được cho luồng nào. Không bắt chọn RGB-only/sensor/map/odometry trước upload.
@@ -283,7 +283,8 @@ import flow. After READY chỉ xem bằng viewer; không tạo Gaussian processi
 hoặc Xử lý tiếp CTA vì AUD-25 Deferred. Import/view/probes không spend Guest processing quota.
 Tests: cross-user refs, duplicate Run, change/delete file during submit, restart,
 partial upload, incompatible worker, no calibration spoof, retry immutable recipe.
-**Exit:** [ ] compatible supported recipes dispatch once; [ ] unsupported/new recipes stay explicit.
+**Exit:** [x] Compatible supported recipes create one durable accepted job and the worker validates its frozen recipe;
+[x] recipes without a consumer adapter remain incompatible and cannot dispatch.
 
 ## Sprint AUD-24.S4 — Một upload UI và input remediation
 
@@ -399,3 +400,72 @@ tests/test_reconstruction/test_sog_input.py -q` — 56 passed;
 date. Browser interaction gate is not applicable: only the frontend contract type
 changed, with no rendered UI change. No real sensor/geometry run or R1–R6 runtime
 acceptance is claimed.
+
+### AUD-24.S3 — durable assembly and qualified dispatch
+
+Implemented the shared assembly upload path in `src/api/studio/assemblies.py` and
+`src/services/orchestration/inputs/`, backed by runtime database migration v17.
+Uploads are content-probed and checksummed before publication; assembly revisions,
+archive members, probe evidence, resolutions, and accepted run identities are
+persisted separately. Revisions are immutable, owner checks apply to referenced
+uploads, stale resolutions are rejected, and file/member source bytes are checked
+again before acceptance and when the worker resumes.
+`PRODUCT_INPUT_RUNTIME_REGISTRY` is optional and must point to the same sealed,
+checksummed registry in API and worker deployments; if absent, new dispatch remains
+unavailable.
+
+The `/api/v1/input-assemblies` API now supports generic upload, create/revise,
+resolve, and an explicit `Idempotency-Key` Run. Run checks privacy attestation,
+processing config and GPU quota, freezes the report/runtime/config/recipe into
+project artifacts, and commits the project, job, quota intent, upload links, and
+run idempotency record atomically. The worker verifies the assembly → resolution →
+recipe → runtime registry checksum chain, selected source bytes, adapter version,
+and current qualified runtime before proceeding. Duplicate Run replays the same
+job; a changed request under the same key conflicts.
+
+Only R1 (RGB-only) and R4 (raw scan sequence with an exact supplied trajectory
+inside one verified LiDAR ZIP) are reconstruction dispatch adapters. R4 preserves
+the declared metre/world-from-sensor facts and `trajectory_origin=supplied` and
+reuses the existing LiDAR package worker stage; it does not synthesize calibration
+or timing. R2, R3, R5 and R6 remain visible to the resolver but cannot be enabled
+by a registry claim alone: until their consumer adapters exist, the service marks
+those capabilities incompatible. R1 and R4 dispatch and worker-side revalidation
+are covered by API tests with synthetic qualified registry records.
+
+Gaussian PLY/SOG selections use the unified upload inventory and then call AUD-06's
+existing durable view/import command. The import record retains a sealed exact
+selection intent; replay fingerprints ignore only server-generated intent ID,
+timestamp, and derived checksum, and responses return the first persisted intent.
+Tests cover both PLY and SOG replay, stable response identity, and conflicting
+requests. Import and viewing do not spend Guest reconstruction quota. No
+post-import reconstruction intent, processing CTA, or imported-scene continuation
+was introduced; AUD-25 remains Deferred.
+
+Verification: `.venv/bin/pytest
+tests/test_reconstruction/test_input_detection.py
+tests/test_contracts/test_input_manifest.py
+tests/test_reconstruction/test_lidar_fusion.py
+tests/test_reconstruction/test_lidar_package.py
+tests/test_orchestration/test_upload_input_kinds.py
+tests/test_orchestration/test_direct_upload.py
+tests/test_api/test_studio_routes.py
+tests/integration/test_upload_to_prepared_job.py
+tests/test_orchestration/test_project_registry.py
+tests/test_orchestration/test_scene_imports.py
+tests/test_orchestration/test_runtime_migrations.py
+tests/test_reconstruction/test_input_assembly_resolution.py
+tests/test_contracts/test_input_assembly.py
+tests/test_api/test_guest_ownership.py
+tests/test_api/test_guest_quota.py -q` — 179 passed, 4 skipped;
+`.venv/bin/ruff check src/ tests/` — pass; `.venv/bin/ruff format --check
+src/ tests/` — 499 files already formatted. CodeGraph impact identified 87
+related test files; focused suites covering assembly, worker, ownership, quota,
+imports, migrations, and upload-to-prepared-job passed. No frontend rendering
+changed, so the browser UI gate does not apply in S3.
+
+S3 acceptance is queue/contract evidence with synthetic runtime qualification,
+not a real GPU reconstruction, real sensor-capture result, production deployment,
+or browser workflow. Enabled worker capability is limited to R1/R4; SOG/PLY
+worker packaging still depends on the AUD-06 runtime and its own acceptance. The
+one-dropzone frontend and browser behavior remain in S4, and real R1–R6 recipe
+qualification remains in S5.
