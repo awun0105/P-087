@@ -1,14 +1,22 @@
 """Vòng đời job (PRODUCT-02): manifest, chuyển trạng thái, chạy lại, lịch sử attempt."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 
 from src.api import schemas
-from src.api.auth import enforce_gpu_quota, record_gpu_run, require_contributor, require_editor
+from src.api.auth import (
+    enforce_gpu_quota,
+    guest_run_intent,
+    idempotency_conflict_http,
+    quota_exceeded_http,
+    record_gpu_run,
+    require_contributor,
+)
 from src.api.ownership import authorize_job_mutation
 from src.api.product import deps
 from src.models.contracts.manifests import JobManifest, JobStatus
 from src.models.contracts.retryability import is_execution_error_retryable
 from src.services.orchestration.auth import UserRecord, actor_of
+from src.services.orchestration.auth.quota_ledger import GuestQuotaExceededError, GuestQuotaIdempotencyConflictError
 from src.services.orchestration.jobs import (
     InvalidTransitionError,
     JobLifecycleError,
@@ -64,7 +72,11 @@ def transition_job(
 
 
 @router.post("/jobs/{job_id}/retry", response_model=JobManifest)
-def retry_job(job_id: str, user: UserRecord | None = Depends(require_editor)) -> JobManifest:
+def retry_job(
+    job_id: str,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    user: UserRecord | None = Depends(require_contributor),
+) -> JobManifest:
     """Chạy lại một job FAILED có structured error được policy cho phép.
 
     Attempt mới được nối thêm, không ghi đè attempt cũ. Mỗi retry tính vào hạn mức GPU của Editor.
@@ -72,6 +84,16 @@ def retry_job(job_id: str, user: UserRecord | None = Depends(require_editor)) ->
     registry = deps.registry()
     try:
         authorize_job_mutation(user, registry, job_id, operation="thử lại job")
+        quota_intent = guest_run_intent(user, "job.retry", idempotency_key, {"job_id": job_id})
+        if quota_intent is not None:
+            if registry.persistence is None:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Guest quota requires the shared persistent runtime database",
+                )
+            duplicate = registry.lookup_quota_job(quota_intent)
+            if duplicate is not None:
+                return duplicate
         job = registry.get_job(job_id)
         if job.status != JobStatus.FAILED:
             raise HTTPException(
@@ -99,11 +121,16 @@ def retry_job(job_id: str, user: UserRecord | None = Depends(require_editor)) ->
             TransitionRequest(target_status=JobStatus.QUEUED),
             expected_checksum=job.job_manifest_checksum,
             requested_by=actor_of(user),
+            quota_intent=quota_intent,
         )
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except JobLifecycleError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+    except GuestQuotaExceededError as error:
+        raise quota_exceeded_http(error) from error
+    except GuestQuotaIdempotencyConflictError as error:
+        raise idempotency_conflict_http(error) from error
     except (RuntimeStateConflictError, PrivacyGateBlockedError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     record_gpu_run(user, job_id, {"kind": "job.retry"})

@@ -71,6 +71,10 @@ export async function getStageViews(jobId: string, signal?: AbortSignal): Promis
 
 const API = "/api/v1";
 
+function newRunIdempotencyKey(): string {
+  return globalThis.crypto.randomUUID();
+}
+
 export function listScenes(): Promise<ApiResult<{ scenes: SceneSummary[] }>> {
   return fetchApi<{ scenes: SceneSummary[] }>(`${API}/scenes`);
 }
@@ -88,6 +92,7 @@ export function createSceneFromUpload(
 ): Promise<SceneFromUpload> {
   return apiFetch<SceneFromUpload>(`${API}/scenes/from-upload`, {
     method: "POST",
+    headers: { "Idempotency-Key": newRunIdempotencyKey() },
     body: JSON.stringify({ upload_id: uploadId, name, attestation, processing, lidar }),
   });
 }
@@ -133,7 +138,10 @@ export interface RetryJobReceipt {
 }
 
 export async function retryJob(jobId: string): Promise<RetryJobReceipt> {
-  const result = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
+  const result = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/retry`, {
+    method: "POST",
+    headers: { "Idempotency-Key": newRunIdempotencyKey() },
+  });
   if (!isRecord(result) || result.job_id !== jobId || result.status !== "QUEUED" || typeof result.job_manifest_checksum !== "string") {
     throw new ApiError(502, "Backend trả trạng thái chấp nhận retry không hợp lệ");
   }

@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, fetchApi } from "@/lib/api/client";
-import { getSimulationPackage } from "@/lib/api/studio";
+import { createSceneFromUpload, getSimulationPackage, retryJob } from "@/lib/api/studio";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -129,5 +129,33 @@ describe("getSimulationPackage", () => {
       status: 502,
       detail: "Backend trả candidate dù capability USD đang bị chặn",
     });
+  });
+});
+
+describe("run intent idempotency headers", () => {
+  it("sends a stable-key header for scene creation and manual retry", async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async () => jsonResponse({
+        job_id: "job-1",
+        status: "QUEUED",
+        job_manifest_checksum: "sha256:job",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValueOnce("scene-key").mockReturnValueOnce("retry-key") });
+
+    await createSceneFromUpload("upload-1", "Kho", {
+      data_origin: "self_collected_no_pii",
+      declared_owner: "QA",
+      declared_purpose: "Test",
+      rights_to_use_confirmed: true,
+      anonymization_confirmed: true,
+      retention_acknowledged: true,
+    });
+    await retryJob("job-1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("Idempotency-Key")).toBe("scene-key");
+    expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get("Idempotency-Key")).toBe("retry-key");
   });
 });

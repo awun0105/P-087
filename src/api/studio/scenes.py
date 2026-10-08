@@ -2,17 +2,26 @@
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
 from src.api import schemas
-from src.api.auth import auth_service, enforce_gpu_quota, record_gpu_run, require_editor
+from src.api.auth import (
+    auth_service,
+    enforce_gpu_quota,
+    guest_run_intent,
+    idempotency_conflict_http,
+    quota_exceeded_http,
+    record_gpu_run,
+    require_contributor,
+)
 from src.api.ownership import authorize_upload_mutation
 from src.api.studio import deps
 from src.models.contracts.manifests import JobManifest, JobStatus
 from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.auth import Actor, UserRecord, actor_of
+from src.services.orchestration.auth.quota_ledger import GuestQuotaExceededError, GuestQuotaIdempotencyConflictError
 from src.services.orchestration.jobs.admission import job_reservation, resource_wait
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.lidar_overlay import lidar_overlay_file
@@ -22,7 +31,12 @@ from src.services.orchestration.jobs.stage_views import StageViewList, stage_vie
 from src.services.orchestration.jobs.thumbnails import scene_thumbnail
 from src.services.orchestration.processing import build_job_config, evaluate, is_presets_file, preset_values
 from src.services.orchestration.processing.observed import load_usages, processing_seconds
-from src.services.orchestration.projects import JobCreateInput, JobNotFoundError, PrivacyGateBlockedError
+from src.services.orchestration.projects import (
+    JobCreateInput,
+    JobNotFoundError,
+    PrivacyGateBlockedError,
+    ProjectNotFoundError,
+)
 from src.services.orchestration.projects.models import UploadProjectInput
 from src.services.orchestration.uploads import UploadNotFoundError
 
@@ -68,27 +82,18 @@ class SceneFromUploadResponse(BaseModel):
     responses={409: {"model": schemas.ApiErrorResponse}},
 )
 def create_scene_from_upload(
-    request: UploadProjectInput, user: UserRecord | None = Depends(require_editor)
+    request: UploadProjectInput,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    user: UserRecord | None = Depends(require_contributor),
 ) -> SceneFromUploadResponse:
     """Tạo scene từ video đã upload và xếp hàng job xử lý (worker chạy ngoài API).
 
-    Kiểm execution profile trước khi tạo project để không sinh scene mồ côi khi
-    deployment chưa cấu hình worker. Khi bật đăng nhập: kiểm hạn mức scene/24 giờ của
-    Editor (Reviewer không giới hạn) theo số lần xử lý GPU/24 giờ và ghi nhật ký.
+    Kiểm input và execution profile trước khi chấp nhận intent. Guest dùng quota
+    calendar-day atomic; Editor giữ rolling-24-hour quota, Reviewer không giới hạn.
     """
     enforce_gpu_quota(user)
     settings = deps.settings()
-    if settings.product_privacy_mode != "self_attested":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Video upload cần QA xác nhận ẩn danh; đặt PRODUCT_PRIVACY_MODE=self_attested cho MVP",
-        )
     registry = deps.registry()
-    if registry.execution_profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Chưa cấu hình worker: cần PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST",
-        )
     uploads = deps.uploads()
     try:
         upload = uploads.get(request.upload_id)
@@ -100,6 +105,46 @@ def create_scene_from_upload(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Đã nhận file 3DGS nhưng luồng dựng scene từ PLY/ZIP chưa được bật trên máy chủ",
+        )
+    lidar = None
+    if request.lidar is not None:
+        try:
+            lidar = uploads.get(request.lidar.upload_id)
+        except UploadNotFoundError as error:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+        authorize_upload_mutation(user, lidar, operation="đính kèm LiDAR vào scene từ")
+        if lidar.input_kind not in {"registered_lidar", "lidar_scan_sequence"}:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="File đính kèm không phải gói LiDAR (.zip gồm đám mây hoặc scan, quỹ đạo, calibration, thời điểm frame)",
+            )
+    quota_intent = guest_run_intent(user, "scene.create", idempotency_key, request.model_dump(mode="json"))
+    if quota_intent is not None:
+        if registry.persistence is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Guest quota requires the shared persistent runtime database",
+            )
+        try:
+            duplicate = registry.lookup_quota_job(quota_intent)
+        except GuestQuotaIdempotencyConflictError as error:
+            raise idempotency_conflict_http(error) from error
+        if duplicate is not None:
+            try:
+                project = registry.get_project(duplicate.project_id)
+            except ProjectNotFoundError as error:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+            return SceneFromUploadResponse(project=schemas.project_response(project), job=duplicate)
+
+    if settings.product_privacy_mode != "self_attested":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Video upload cần QA xác nhận ẩn danh; đặt PRODUCT_PRIVACY_MODE=self_attested cho MVP",
+        )
+    if registry.execution_profile is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Chưa cấu hình worker: cần PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST",
         )
     processing = None
     if settings.product_processing_config is not None and is_presets_file(settings.product_processing_config):
@@ -121,29 +166,43 @@ def create_scene_from_upload(
             status_code=status.HTTP_409_CONFLICT,
             detail="Worker chưa dùng file thông số chung; không nhận thông số tùy chỉnh",
         )
-    lidar = None
-    if request.lidar is not None:
-        try:
-            lidar = uploads.get(request.lidar.upload_id)
-        except UploadNotFoundError as error:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-        authorize_upload_mutation(user, lidar, operation="đính kèm LiDAR vào scene từ")
-        if lidar.input_kind not in {"registered_lidar", "lidar_scan_sequence"}:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="File đính kèm không phải gói LiDAR (.zip gồm đám mây hoặc scan, quỹ đạo, calibration, thời điểm frame)",
-            )
-    project = registry.create_project_from_upload(upload, request, settings.product_privacy_mode, lidar, actor_of(user))
-    uploads.link_project(upload.upload_id, project.project_id)
-    if lidar is not None:
-        uploads.link_project(lidar.upload_id, project.project_id)
     try:
+        project = registry.create_project_from_upload(
+            upload,
+            request,
+            settings.product_privacy_mode,
+            lidar,
+            actor_of(user),
+            defer_persistence=registry.persistence is not None,
+        )
+        if registry.persistence is None:
+            if quota_intent is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Guest quota requires the shared persistent runtime database",
+                )
+            uploads.link_project(upload.upload_id, project.project_id)
+            if lidar is not None:
+                uploads.link_project(lidar.upload_id, project.project_id)
         job = registry.create_job(
             JobCreateInput(project_id=project.project_id),
             processing,
             requested_by=actor_of(user),
             owner_user_id=user.user_id if user is not None else None,
+            quota_intent=quota_intent,
+            project_record=project if registry.persistence is not None else None,
+            upload_ids_to_link=tuple(
+                upload_id
+                for upload_id in (upload.upload_id, lidar.upload_id if lidar is not None else None)
+                if upload_id
+            )
+            if registry.persistence is not None
+            else (),
         )
+    except GuestQuotaExceededError as error:
+        raise quota_exceeded_http(error) from error
+    except GuestQuotaIdempotencyConflictError as error:
+        raise idempotency_conflict_http(error) from error
     except (PrivacyGateBlockedError, RuntimeStateConflictError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     record_gpu_run(user, job.job_id, {"kind": "scene.create", "project_id": project.project_id})

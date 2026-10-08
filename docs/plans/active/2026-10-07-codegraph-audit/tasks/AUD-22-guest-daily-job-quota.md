@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- IN PROGRESS — S1 calendar contract implemented; owner confirmed objectify is excluded from Guest's 3/day quota on 2026-10-08. P1; EX-PRODUCT identity/API/Studio/runtime DB.
+- IN PROGRESS — S1 contract and S2 enforcement are implemented; shared-PostgreSQL concurrency evidence remains pending because `R2S_TEST_POSTGRES_URL` is unset. S3 UX/operations is next. Owner confirmed objectify is excluded from Guest's 3/day quota on 2026-10-08. P1; EX-PRODUCT identity/API/Studio/runtime DB.
 - Canonical PRODUCT-01/02/06/09; task-local extension, không đổi crosswalk.
 - Owner yêu cầu ngày 07/10/2026. S1 thêm pure calendar/DTO contract và tests; chưa bật quota route hoặc sửa tài khoản. Ngày 08/10/2026, owner xác nhận objectify không trừ quota 3 lượt/ngày của Guest.
 - [Agent guide](../AGENT_GUIDE.md), [ADR 0021](../../../../decisions/0021-guest-identity-and-ownership.md), [ADR 0022](../../../../decisions/0022-guest-daily-job-quota.md).
@@ -22,8 +22,10 @@ atomic nor idempotent for Guest.
 CodeGraph callers were refreshed for quota helper, `MeResponse`, `AuthService`
 audit/count, scene creation, retry, objectify and `RuntimeDatabase` migrations.
 Current role policy must remain split: Editor rolling 24h stays as-is; Guest uses
-fixed daily calendar ledger; Reviewer remains unlimited. This S1 adds the calendar
-helper/DTO contract only; enforcement and quota API projection begin later.
+fixed daily calendar ledger; Reviewer remains unlimited. At the audit baseline,
+Guest had no calendar ledger. S1 added the calendar helper/DTO contract. AUD-22.S2
+now enforces the ledger on the three accepted run paths and exposes Guest quota
+state in `/auth/me`; S3 owns quota display and operations UX.
 
 ## Input / output / data contract
 
@@ -47,9 +49,10 @@ operations stay excluded.
 `GuestQuotaSummary`: `policy_id`, fixed `limit`, `used`, `remaining`, UTC
 `window_start_utc`/`resets_at_utc`, and `timezone`. HTTP 429 uses stable code
 `guest_daily_job_quota_exceeded` with the summary; clients do not parse message
-text. `Idempotency-Key` is scoped to actor+operation and binds a canonical request
-fingerprint; same key with different payload conflicts, identical duplicate returns
-the original accepted intent.
+text. Guest run requests require `Idempotency-Key`, scoped to actor+operation and
+bound to a canonical request fingerprint; the same key with a different payload
+conflicts, while an identical duplicate returns the original immutable accepted
+job manifest.
 
 ### Quota transaction design selected in S1
 
@@ -60,7 +63,8 @@ the original accepted intent.
   rewrite historical windows.
 - Add `r2s_quota_intents` as accepted-intent/idempotency ledger, unique on
   `(actor_user_id, operation_kind, idempotency_key)` across windows/role changes. Persist request
-  fingerprint, original UTC window, accepted timestamp, and result kind/id. This
+  fingerprint, original UTC window, accepted timestamp, result kind/id and the
+  immutable manifest reference needed to replay the exact acceptance. This
   ledger, not audit rows or UI state, is Guest quota authority.
 - In PostgreSQL, upsert the window row then `SELECT ... FOR UPDATE`; in SQLite,
   rely on existing `BEGIN IMMEDIATE` writer serialization. Lock order is quota
@@ -95,8 +99,9 @@ Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption
 ## Dependencies
 
 S1 dùng AUD-21.S1 identity/action matrix; S2 dùng AUD-21.S2/S3 guards và current
-RuntimeDatabase/job transitions. S3 dùng S2, không cần GPU để verify quota; actual
-accepted-run/browser proof separate from worker runtime acceptance.
+RuntimeDatabase/job transitions. S3 builds on the S2 quota summary and errors; it
+does not need GPU proof. Shared-PostgreSQL concurrency qualification remains a
+deployment gate separate from worker runtime acceptance.
 
 ## Sprint AUD-22.S1 — Quota policy và window contract
 
@@ -111,12 +116,37 @@ Tests: Vietnam midnight UTC conversion, exact boundary/previous day, aware-vs-na
 ## Sprint AUD-22.S2 — Atomic admission và durable job intent
 
 **Input:** S1 contracts + permission-checked run requests.
-**Output:** At most3 accepted Guest runs across API replicas.
-**Contract:** Quota reservation và queued job/CAS cùng transaction hoặc recoverable atomic DB intent.
+**Output:** Migration v14 and an authoritative Guest ledger on job creation,
+scene-from-upload and manual Retry. Guest receives no more than 3 accepted run
+intents per Vietnam calendar day; objectify remains excluded.
+**Contract:** Quota acceptance and queued job/project/upload linkage or Retry CAS
+commit in one database transaction. Same actor/operation/key/fingerprint replays
+the original immutable accepted manifest; conflicting payload returns 409.
 
-Implement: Use locked counter or conditional update with unique reservation. Bind accepted job/attempt and idempotent response; move expensive dispatch after commit. Failed retry eligibility trước charge; duplicate never recharges. Crash rollback/replay does not leak count or leave uncharged runnable jobs. Enforce all job-producing APIs; quota không thay resource admission.
-Tests: Concurrent 4 requests: exactly3 accepted, fourth429; same key across workers one charge; queue/CAS failure rollback, crash before/after commit, manual Retry, auto attempts and Editor/Reviewer regression on real DB.
-**Exit:** [ ] multi-process DB tests chứng minh cap/idempotency và recovery.
+Implement: migration v14 adds `r2s_guest_quota_windows` and `r2s_quota_intents`.
+The locked calendar counter, accepted intent, job row/event, and scene upload
+linkage share one write transaction; Retry quota and status CAS share one write
+transaction. The intent keeps the immutable manifest reference for replay. Validate
+worker profile/input before scene mutation; return 503 before mutation if the
+shared persistent runtime DB is unavailable. Apply Guest quota only to
+`scene.create`, `job.create`, and `job.retry`; objectify remains outside the daily
+counter and continues through durable worker/resource admission. Keep Editor's
+rolling 24-hour quota and Reviewer unlimited. Expose `GuestQuotaSummary` in
+`/auth/me`, stable 429 code and 409 idempotency conflict. Dispatch/recovery after
+acceptance reuses the same intent; do not charge worker retries or duplicate
+requests.
+
+Tests: concurrent four create requests accept exactly three and reject the
+fourth; same key replays the same manifest; conflicting fingerprint does not
+charge; transaction rollback and Vietnam midnight are tested at the ledger/API
+boundary; manual Retry consumes one run and exact replay returns its original
+QUEUED manifest even after worker progress; quota exhaustion does not block
+objectify; missing persistent runtime DB fails closed with 503. SQLite shared-file
+concurrency is covered. PostgreSQL variants are present but require
+`R2S_TEST_POSTGRES_URL`; without it, multi-process/shared-database qualification is
+pending. Editor/Reviewer behavior is covered by API regression.
+**Exit:** [x] implementation and local SQLite/API acceptance complete; [ ]
+shared-PostgreSQL concurrency/restart proof and deployment qualification.
 
 ## Sprint AUD-22.S3 — Quota UX, operations và end-to-end
 
@@ -164,5 +194,38 @@ mock hoặc source review không chứng minh feature đã chạy.
   13,751 nodes, 39,470 edges); `git diff --check` PASS; relative Markdown links PASS.
 - **Gate report:** CodeGraph PASS; minimum scope PASS (window contract only); source
   checks PASS; browser N/A (no UI changes); API behavior is not enabled.
-- **Pending:** no DB schema migration, reservation, auth role or route behavior has
-  been implemented in S1. Multi-process DB/API and browser proof remain S2/S3.
+- **Pending at S1:** no DB schema migration, reservation or route enforcement had
+  been implemented yet. AUD-22.S2 added them; shared-PostgreSQL proof remains
+  pending, and browser quota UX is S3.
+
+### AUD-22.S2 — atomic Guest admission and durable run intent
+
+- **Base:** AUD-22.S1 and AUD-21.S3 commits in the active branch.
+- **Files:** migration v14, quota ledger/service, Guest `/auth/me` summary,
+  scene/job creation and Retry API, runtime transaction/persistence/registry,
+  frontend run idempotency headers and quota type, API/orchestration tests, task
+  and ADR 0022.
+- **CodeGraph evidence:** inspected callers for `create_job`,
+  `create_scene_from_upload`, `retry_job`, `request_objectify`, registry
+  persistence/CAS and frontend run-intent calls before edits. `codegraph sync`
+  completed; status is up to date at 764 files, 13,951 nodes and 40,192 edges.
+- **Contract implemented:** only accepted Guest reconstruction-job intents from
+  scene creation, project job creation and manual Retry count. Guest objectify is
+  excluded and remains under worker/resource admission. Retry and duplicate
+  semantics follow the owner decisions; Editor rolling-24-hour behavior and
+  Reviewer unlimited behavior are preserved. Run routes fail closed with 503 if
+  the persistent runtime DB required for atomic Guest quota is unavailable.
+- **Verification:** `.venv/bin/pytest tests/test_api -q` — 142 passed;
+  `.venv/bin/pytest tests/test_orchestration -q` — 583 passed, 25 skipped;
+  `.venv/bin/pytest tests/integration/test_studio_processing_job.py tests/integration/test_upload_to_prepared_job.py -q`
+  — 9 passed; quota-specific ledger/migration matrix — 15 passed, 9 skipped;
+  frontend full Vitest — 279 passed in 42 files; frontend typecheck and changed-file
+  ESLint passed; backend `ruff check src/ tests/`,
+  `ruff format --check src/ tests/`, and `git diff --check` passed.
+- **Gate report:** CodeGraph PASS; minimal scope PASS; backend/API/integration and
+  frontend checks PASS; browser visual gate N/A because no rendered UI changed
+  (request headers are covered by Vitest). PostgreSQL variants skipped because
+  `R2S_TEST_POSTGRES_URL` is unset; no shared-database race/restart or deployment
+  qualification is claimed.
+- **Pending:** shared PostgreSQL concurrency/restart verification and AUD-22.S3
+  remaining/reset UX plus browser acceptance.

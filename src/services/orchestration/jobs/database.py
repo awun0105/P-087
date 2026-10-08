@@ -230,6 +230,34 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
         13,
         ("ALTER TABLE r2s_jobs ADD COLUMN owner_user_id TEXT",),
     ),
+    (
+        14,
+        (
+            """CREATE TABLE r2s_guest_quota_windows (
+                actor_user_id TEXT NOT NULL REFERENCES r2s_users(user_id),
+                policy_id TEXT NOT NULL,
+                window_start_utc TEXT NOT NULL,
+                resets_at_utc TEXT NOT NULL,
+                policy_limit INTEGER NOT NULL CHECK(policy_limit > 0),
+                used_count INTEGER NOT NULL CHECK(used_count >= 0 AND used_count <= policy_limit),
+                PRIMARY KEY(actor_user_id, policy_id, window_start_utc))""",
+            """CREATE TABLE r2s_quota_intents (
+                actor_user_id TEXT NOT NULL REFERENCES r2s_users(user_id),
+                operation_kind TEXT NOT NULL CHECK(operation_kind IN ('job.create', 'scene.create', 'job.retry')),
+                idempotency_key TEXT NOT NULL,
+                policy_id TEXT NOT NULL,
+                window_start_utc TEXT NOT NULL,
+                request_fingerprint TEXT NOT NULL,
+                accepted_at_utc TEXT NOT NULL,
+                result_kind TEXT NOT NULL CHECK(result_kind = 'job'),
+                result_id TEXT NOT NULL,
+                result_reference TEXT NOT NULL,
+                PRIMARY KEY(actor_user_id, operation_kind, idempotency_key),
+                FOREIGN KEY(actor_user_id, policy_id, window_start_utc)
+                    REFERENCES r2s_guest_quota_windows(actor_user_id, policy_id, window_start_utc))""",
+            "CREATE INDEX r2s_quota_intents_by_result ON r2s_quota_intents(result_kind, result_id)",
+        ),
+    ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 

@@ -50,6 +50,7 @@ from src.services.orchestration.artifacts import (
     with_canonical_checksum,
 )
 from src.services.orchestration.auth.models import Actor
+from src.services.orchestration.auth.quota_ledger import GuestQuotaIntent, GuestQuotaIntentResult
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.models import JobAttemptRecord, PreparedInputReceipt, TransitionRequest
 from src.services.orchestration.jobs.profile import ExecutionProfile
@@ -273,6 +274,8 @@ class ProjectRegistry:
         privacy_mode: Literal["qa_verified", "self_attested"],
         lidar: UploadRecord | None = None,
         created_by: Actor | None = None,
+        *,
+        defer_persistence: bool = False,
     ) -> ProjectRecord:
         """Dựng InputManifest cho video đã upload, publish nó rồi tạo project.
 
@@ -379,6 +382,8 @@ class ProjectRegistry:
             created_at=datetime.now(UTC),
             created_by=created_by,
         )
+        if defer_persistence:
+            return record
         if self.persistence is not None:
             self.persistence.save_project(record)
         else:
@@ -452,6 +457,9 @@ class ProjectRegistry:
         *,
         requested_by: Actor | None = None,
         owner_user_id: str | None = None,
+        quota_intent: GuestQuotaIntent | None = None,
+        project_record: ProjectRecord | None = None,
+        upload_ids_to_link: tuple[str, ...] = (),
     ) -> JobManifest:
         """Tạo job QUEUED cho một project, sau khi qua privacy gate.
 
@@ -460,7 +468,11 @@ class ProjectRegistry:
         """
         if owner_user_id is not None and (requested_by is None or requested_by.user_id != owner_user_id):
             raise ValueError("Job owner phải khớp tài khoản đã xác thực tạo job")
-        project = self.get_project(request.project_id)
+        if quota_intent is not None and self.persistence is None:
+            raise RuntimeError("Guest quota requires the shared persistent runtime database")
+        if project_record is not None and project_record.project_id != request.project_id:
+            raise ValueError("New project identity must match the job request")
+        project = project_record or self.get_project(request.project_id)
         require_project_dispatch(project)
         job_id = f"job-{uuid4().hex[:12]}"
         config_checksum = None
@@ -483,13 +495,44 @@ class ProjectRegistry:
             requested_by=requested_by,
         )
         if self.persistence is not None:
-            self.persistence.save_job(job, reference, event, owner_user_id=owner_user_id)
+            quota_result = self.persistence.save_job(
+                job,
+                reference,
+                event,
+                owner_user_id=owner_user_id,
+                quota_intent=quota_intent,
+                project_to_create=project_record,
+                upload_ids_to_link=upload_ids_to_link,
+            )
+            if quota_result is not None and quota_result.replayed:
+                return self._job_from_quota_result(quota_result)
         else:
+            if project_record is not None:
+                self._projects[project_record.project_id] = project_record
+                self._project_jobs.setdefault(project_record.project_id, [])
             self._jobs[job.job_id] = job
             self._job_owners[job.job_id] = owner_user_id
             self._project_jobs.setdefault(project.project_id, []).append(job.job_id)
             self._attempts[job.job_id] = [event]
         return job
+
+    def lookup_quota_intent(self, intent: GuestQuotaIntent) -> GuestQuotaIntentResult | None:
+        """Resolve an earlier Guest acceptance before validating mutable target state."""
+        if self.persistence is None:
+            raise RuntimeError("Guest quota requires the shared persistent runtime database")
+        return self.persistence.lookup_quota_intent(intent)
+
+    def lookup_quota_job(self, intent: GuestQuotaIntent) -> JobManifest | None:
+        """Return the exact immutable queued revision for a duplicate accepted request."""
+        result = self.lookup_quota_intent(intent)
+        return self._job_from_quota_result(result) if result is not None else None
+
+    def _job_from_quota_result(self, result: GuestQuotaIntentResult) -> JobManifest:
+        reference = ArtifactRef.model_validate_json(result.result_reference)
+        manifest = self.lifecycle.store.load_manifest(reference)
+        if manifest.job_id != result.result_id:
+            raise ArtifactChecksumError("Quota intent points to a different accepted job")
+        return manifest
 
     def get_job_owner_user_id(self, job_id: str) -> str | None:
         """Read the immutable runtime owner separately from checksum-bound JobManifest bytes."""
@@ -505,8 +548,11 @@ class ProjectRegistry:
         *,
         expected_checksum: Checksum | None = None,
         requested_by: Actor | None = None,
+        quota_intent: GuestQuotaIntent | None = None,
     ) -> JobManifest:
         """Chuyển trạng thái job theo bảng chuyển, rồi publish revision mới."""
+        if quota_intent is not None and self.persistence is None:
+            raise RuntimeError("Guest quota requires the shared persistent runtime database")
         current = self.get_job(job_id)
         if expected_checksum is not None and current.job_manifest_checksum != expected_checksum:
             raise RuntimeStateConflictError("Job revision khác command đang thực hiện; đọc lại trước khi thử lại")
@@ -526,7 +572,11 @@ class ProjectRegistry:
                 error=request.error,
                 requested_by=requested_by,
             )
-            self.persistence.save_job(updated, reference, event, expected=current)
+            quota_result = self.persistence.save_job(
+                updated, reference, event, expected=current, quota_intent=quota_intent
+            )
+            if quota_result is not None and quota_result.replayed:
+                return self._job_from_quota_result(quota_result)
             return updated
         sequence = len(self._attempts.get(job_id, [])) + 1
         updated, reference = self.lifecycle.apply(current, request, sequence)

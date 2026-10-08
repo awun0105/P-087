@@ -8,6 +8,12 @@ from src.models.contracts.artifacts import ArtifactRef
 from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.manifests import JobManifest, JobStatus
 from src.services.orchestration.artifacts import ArtifactChecksumError, ArtifactResolver
+from src.services.orchestration.auth.quota_ledger import (
+    GuestQuotaIntent,
+    GuestQuotaIntentResult,
+    accept_guest_quota_intent,
+    lookup_guest_quota_intent,
+)
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.projects.errors import JobNotFoundError, ProjectNotFoundError
@@ -90,8 +96,11 @@ class ProjectPersistence:
         expected: JobManifest | None = None,
         seed: bool = False,
         owner_user_id: str | None = None,
-    ) -> None:
-        """CAS job pointer và append event atomically; không tự retry command stale."""
+        quota_intent: GuestQuotaIntent | None = None,
+        project_to_create: ProjectRecord | None = None,
+        upload_ids_to_link: tuple[str, ...] = (),
+    ) -> GuestQuotaIntentResult | None:
+        """Commit quota, accepted job/CAS, and optional upload project atomically."""
         if self._job(reference.model_dump_json()) != manifest:
             raise ArtifactChecksumError("Published JobManifest khác state đang commit")
         if (
@@ -101,13 +110,56 @@ class ProjectPersistence:
             or event.current_stage != manifest.current_stage
         ):
             raise ValueError("Job event phải bind đúng revision đã publish")
+        if project_to_create is not None and project_to_create.project_id != manifest.project_id:
+            raise ValueError("New project identity must match the job")
+        if upload_ids_to_link and project_to_create is None:
+            raise ValueError("Upload links may only be committed with their new project")
+        quota_result: GuestQuotaIntentResult | None = None
         with self.database.transaction(write=True) as tx:
-            project_row = tx.execute(
-                "SELECT payload FROM r2s_projects WHERE project_id=?" + tx.lock_suffix(), (manifest.project_id,)
-            ).fetchone()
-            if project_row is None:
-                raise ProjectNotFoundError("Không tìm thấy project của job")
-            project = self._project(project_row[0])
+            if quota_intent is not None:
+                quota_result = accept_guest_quota_intent(
+                    tx,
+                    quota_intent,
+                    result_kind="job",
+                    result_id=manifest.job_id,
+                    result_reference=reference.model_dump_json(),
+                )
+                if quota_result.replayed:
+                    return quota_result
+
+            if project_to_create is not None:
+                self._project(project_to_create.model_dump_json())
+                inserted_project = tx.execute(
+                    "INSERT INTO r2s_projects(project_id,payload) VALUES (?,?) ON CONFLICT(project_id) DO NOTHING",
+                    (project_to_create.project_id, project_to_create.model_dump_json()),
+                )
+                if inserted_project.rowcount != 1:
+                    raise RuntimeStateConflictError("Project ID đã được process khác tạo")
+                project = project_to_create
+                if upload_ids_to_link:
+                    from src.services.orchestration.uploads.models import UploadRecord
+
+                    for upload_id in sorted(set(upload_ids_to_link)):
+                        upload_row = tx.execute(
+                            "SELECT payload FROM r2s_uploads WHERE upload_id=?" + tx.lock_suffix(), (upload_id,)
+                        ).fetchone()
+                        if upload_row is None:
+                            raise ProjectNotFoundError(f"Không tìm thấy upload cần gắn project: {upload_id}")
+                        upload = UploadRecord.model_validate_json(upload_row[0])
+                        if project.project_id in upload.project_ids:
+                            raise RuntimeStateConflictError("project đã được gắn với upload này")
+                        linked = upload.model_copy(update={"project_ids": [*upload.project_ids, project.project_id]})
+                        tx.execute(
+                            "UPDATE r2s_uploads SET payload=? WHERE upload_id=?",
+                            (linked.model_dump_json(), upload_id),
+                        )
+            else:
+                project_row = tx.execute(
+                    "SELECT payload FROM r2s_projects WHERE project_id=?" + tx.lock_suffix(), (manifest.project_id,)
+                ).fetchone()
+                if project_row is None:
+                    raise ProjectNotFoundError("Không tìm thấy project của job")
+                project = self._project(project_row[0])
             if manifest.input_manifest_checksum != project.input_manifest_checksum:
                 raise ValueError("Job không thuộc input của project")
             if manifest.status in {JobStatus.QUEUED, JobStatus.RUNNING}:
@@ -173,6 +225,11 @@ class ProjectPersistence:
                 "INSERT INTO r2s_job_events(job_id,version,payload) VALUES (?,?,?)",
                 (manifest.job_id, version, event.model_dump_json()),
             )
+        return quota_result
+
+    def lookup_quota_intent(self, intent: GuestQuotaIntent) -> GuestQuotaIntentResult | None:
+        """Resolve an accepted Guest submission before revalidating current job state."""
+        return lookup_guest_quota_intent(self.database, intent)
 
     def get_job_owner_user_id(self, job_id: str) -> str | None:
         """Return the immutable owner of a job, or None for legacy/anonymous jobs."""

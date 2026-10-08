@@ -17,11 +17,23 @@ export interface PublicUser {
   daily_job_quota: number;
 }
 
+export interface GuestQuotaSummary {
+  policy_id: "guest_calendar_day_v1";
+  limit: 3;
+  used: number;
+  remaining: number;
+  window_start_utc: string;
+  resets_at_utc: string;
+  timezone: "Asia/Ho_Chi_Minh";
+}
+
 export interface Me {
   auth_required: boolean;
   /** Missing on older API deployments; unknown is treated as closed by the UI. */
   guest_signup_enabled?: boolean;
   user: PublicUser | null;
+  /** Present for Guest sessions on quota-aware API deployments. */
+  quota?: GuestQuotaSummary | null;
 }
 
 const API = "/api/v1/auth";

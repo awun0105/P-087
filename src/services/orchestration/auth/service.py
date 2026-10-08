@@ -20,6 +20,8 @@ from src.services.orchestration.auth.models import (
     UserRecord,
 )
 from src.services.orchestration.auth.passwords import hash_password, token_digest, verify_password
+from src.services.orchestration.auth.quota import GuestQuotaSummary
+from src.services.orchestration.auth.quota_ledger import guest_quota_summary
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError, RuntimeTransaction
 
 
@@ -270,3 +272,7 @@ class AuthService:
                 (user_id, action, since.isoformat()),
             ).fetchone()
         return int(row[0]) if row else 0
+
+    def guest_quota_summary(self, user_id: str, now: datetime | None = None) -> GuestQuotaSummary:
+        """Current fixed Guest calendar-day usage; audit rows are not quota authority."""
+        return guest_quota_summary(self.database, user_id, now)

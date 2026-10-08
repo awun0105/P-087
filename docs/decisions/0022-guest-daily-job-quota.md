@@ -4,11 +4,21 @@ Date: 2026-10-07
 
 ## Status
 
-Proposed — product behavior được owner chỉ đạo; AUD-22.S1 đã chốt calendar,
-idempotency và transaction design. Migration/enforcement chưa implement hoặc
-runtime-qualified.
+Accepted — owner-confirmed policy is implemented through AUD-22.S2, including
+migration v14 and API enforcement. Local SQLite/API checks pass; shared-PostgreSQL
+concurrency and deployment qualification remain pending because
+`R2S_TEST_POSTGRES_URL` is unset.
 
-## Context và Decision đề xuất
+## Implementation status
+
+The durable ledger is enforced for `scene.create`, `job.create`, and `job.retry`.
+`/auth/me` returns a Guest-only summary; accepted responses replay the exact
+immutable job manifest by its stored artifact reference. The three routes fail
+closed when their required persistent runtime database is unavailable. Objectify
+is explicitly excluded from Guest's daily counter and continues through existing
+worker/resource admission. The UI remaining/reset display is AUD-22.S3.
+
+## Context và decision
 
 Owner đã chốt 3 accepted runs mỗi ngày, tính manual Retry; reset 00:00
 Asia/Ho_Chi_Minh. Worker automatic retry, admission wait và duplicate request cùng
@@ -29,7 +39,7 @@ Guest policy `guest_calendar_day_v1` có fixed limit 3. Window là nửa mở
 `Asia/Ho_Chi_Minh`, rồi lưu/trả về bằng UTC. Không cộng cố định 24 giờ hoặc dựa
 vào timezone máy chủ. Pure helper `guest_quota_window()` và immutable Pydantic
 contracts `GuestQuotaWindow`, `GuestQuotaSummary`, `GuestQuotaExceededDetail` đã
-được thêm; `/auth/me` và API 429 bắt đầu dùng chúng ở sprint sau.
+được thêm; AUD-22.S2 now uses them in `/auth/me` and API 429 responses.
 
 Quota unit là một user-initiated run được durable queue/job nhận: tạo
 reconstruction job qua cả `/scenes/from-upload` và `/projects/{project_id}/jobs`,
@@ -72,7 +82,8 @@ và browser midnight/reset UX; GPU runtime không cần cho quota proof.
 ## Consequences
 
 Mở Guest onboarding với giới hạn rõ và giữ quyền hiện tại của team.
-Cần forward migration, typed contracts, permission/quota regression và browser proof.
+Forward migration, typed contracts and local permission/quota regression are
+implemented; shared PostgreSQL proof and quota UX/browser acceptance remain open.
 Không reset DB, rewrite old artifacts hoặc triển khai SMTP trong scope này.
 
 ## Follow-Up

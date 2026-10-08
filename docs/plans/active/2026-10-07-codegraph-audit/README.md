@@ -18,7 +18,10 @@ UNVERIFIED; PostgreSQL proof của AUD-04.S3 chưa chạy vì thiếu
 nhưng `AUTH_GUEST_SIGNUP_ENABLED` đang mặc định `false`; browser gate của form
 còn UNVERIFIED. AUD-21.S3 đã thêm owner guards, immutable job owner và audited
 operator intervention; browser DevTools gate còn UNVERIFIED do Chrome profile lock.
-Tiếp theo là AUD-22.S2 atomic quota/admission. Guest rollout vẫn đợi AUD-22.S3,
+AUD-22.S2 đã implement quota Guest atomic và enforcement trên các API tạo job/Retry.
+PostgreSQL multi-process race/restart proof đang pending vì
+`R2S_TEST_POSTGRES_URL` chưa được cấu hình. AUD-22.S3 UX có thể tiếp tục trên
+S2 contract; Guest rollout vẫn đợi database qualification,
 AUD-21.S4, browser acceptance và AUD-20.S3 seed acceptance.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
@@ -173,7 +176,8 @@ cho import và nút Xử lý tiếp không implement. Không tự mở lại t�
 - [ADR 0024: Unified upload và input resolution](../../../decisions/0024-unified-upload-and-input-resolution.md).
 - [ADR 0025: Imported PLY/SOG continuation — Deferred](../../../decisions/0025-imported-3dgs-continuation.md).
 
-13 ADR active có status Proposed; ADR0025 Deferred, không dùng làm active policy.
+12 active ADRs remain Proposed and ADR 0022 is Accepted; ADR0025 is Deferred and
+does not define active policy.
 Không giả lập owner acceptance. Bug fixes trên
 invariant hiện có có thể làm độc lập. Sprint thiết kế phải ghi rõ phần mới cần
 producer/consumer review trước khi trở thành shared contract/policy.
@@ -202,8 +206,10 @@ Execution order bắt đầu ở **AUD-11.S1**; các sprint AUD-11.S1–S2, AUD-
 AUD-01–04, AUD-10.S1–S3, AUD-07.S1–S2, AUD-20.S1–S2, AUD-21.S1–S2 và AUD-22.S1
 đã hoàn tất ở mức code/task của từng sprint. AUD-21.S3 đã thêm backend ownership
 guards; AUD-20.S3 và AUD-21.S2 còn browser acceptance, AUD-20.S3 còn live-seed
-acceptance. Tiếp tục code với AUD-22.S2; quota, AUD-21.S4 và các acceptance gates
-vẫn phải hoàn tất trước public Guest rollout.
+acceptance. AUD-22.S2 code/API acceptance đã hoàn tất trên SQLite; PostgreSQL
+multi-process qualification còn pending. Có thể tiếp tục implement AUD-22.S3 trên
+S2 contract trong lúc database gate vẫn mở; quota, AUD-21.S4 và các acceptance
+gates vẫn cần xong trước public Guest rollout.
 AUD-15.S1 được làm sớm để AUD-23.S5 có measurement protocol; optimization
 AUD-15.S2–S3 vẫn làm sau quality work.
 AUD-07.S3 làm sau AUD-06/AUD-05 để kiểm tra admission trên consumer thật;
@@ -274,7 +280,8 @@ the entire cascade; Editor/Reviewer cross-owner actions are audited. The API sui
 passed 138 tests, orchestration passed 578 with 20 skips, and processing/upload
 integration passed 9. Four migration tests skipped without `R2S_TEST_POSTGRES_URL`;
 Chrome DevTools remains UNVERIFIED because MCP cannot attach to its locked profile.
-`AUTH_GUEST_SIGNUP_ENABLED` remains false. Continue with AUD-22.S2.
+`AUTH_GUEST_SIGNUP_ENABLED` remains false. AUD-22.S2 implements the durable
+Guest quota ledger; PostgreSQL qualification remains pending.
 
 AUD-07.S1 adds typed operation admission over the existing reservation table,
 shares resource assessment with job admission, keeps old job payloads readable,
@@ -374,8 +381,11 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [ ] Implementation AUD-19 và held-out independent-map/QA/browser acceptance.
 
 - [x] Implementation AUD-20.S1 identity/seed migration contract and AUD-20.S2 producer/API actor attribution.
-- [ ] AUD-20.S3 browser/seed acceptance; AUD-21.S2 browser gate; AUD-21.S3–S4,
-      AUD-22.S2–S3 và three-role/quota acceptance.
+- [ ] AUD-20.S3 browser/seed acceptance; AUD-21.S2 browser gate; AUD-21.S3–S4.
+- [x] Implementation AUD-22.S2 durable Guest quota ledger and API enforcement;
+      local SQLite/API acceptance.
+- [ ] AUD-22.S2 shared-PostgreSQL concurrency/restart qualification; AUD-22.S3
+      quota UX and browser acceptance.
 
 - [ ] Implementation AUD-23 và client encode/upload/bandwidth/geometry acceptance.
 - [ ] Implementation AUD-24 và grouped upload/R1–R6 recipe/consumer/browser acceptance.
@@ -392,7 +402,7 @@ AUD-25 giữ Deferred, không đánh dấu Completed hoặc tự implement trong
 ## Result
 
 Plan lưu 46 Markdown documents, 25 task files và 86 sprint definitions. Active
-scope có 24 tasks/80 sprints/13 ADR Proposed; AUD-25 với 6 sprint và ADR0025 Deferred
+scope có 24 tasks/80 sprints/12 ADR Proposed and ADR 0022 Accepted; AUD-25 với 6 sprint và ADR0025 Deferred
 theo yêu cầu owner. AUD-06/24 vẫn nhận PLY/SOG cho view; AUD-19 không đợi hoặc
 implement imported-source adapter. Source/runtime chưa thay đổi.
 Document checks exit 0: 25 integration sections gồm một Deferred, 231 local links,

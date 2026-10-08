@@ -5,6 +5,8 @@ chặn như cookie bên thứ ba). SameSite=Lax chặn request POST từ site kh
 Khi `AUTH_REQUIRED=false` (local dev/test), các dependency quyền cho qua.
 """
 
+import hashlib
+import json
 import time
 from collections import deque
 from datetime import UTC, datetime, timedelta
@@ -23,8 +25,14 @@ from src.services.orchestration.auth import (
     Role,
     UserRecord,
     has_role,
-    has_unlimited_quota,
     public,
+)
+from src.services.orchestration.auth.quota import GuestQuotaExceededDetail, GuestQuotaSummary
+from src.services.orchestration.auth.quota_ledger import (
+    GuestQuotaExceededError,
+    GuestQuotaIdempotencyConflictError,
+    GuestQuotaIntent,
+    QuotaOperation,
 )
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 
@@ -72,8 +80,8 @@ GPU_RUN_ACTION = "gpu.run"
 
 
 def enforce_gpu_quota(user: UserRecord | None) -> None:
-    """Chặn khi Editor đã dùng hết số lần xử lý GPU trong 24 giờ; Reviewer không giới hạn."""
-    if user is None or has_unlimited_quota(user):
+    """Giữ rolling 24h quota hiện tại riêng cho Editor; Guest dùng calendar ledger."""
+    if user is None or user.role != "editor":
         return
     since = datetime.now(UTC) - timedelta(days=1)
     if auth_service().count_actions(user.user_id, GPU_RUN_ACTION, since) >= user.daily_job_quota:
@@ -81,6 +89,46 @@ def enforce_gpu_quota(user: UserRecord | None) -> None:
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"Đã dùng hết {user.daily_job_quota} lần xử lý GPU trong 24 giờ; nhờ Reviewer nâng hạn mức",
         )
+
+
+def guest_run_intent(
+    user: UserRecord | None,
+    operation: QuotaOperation,
+    idempotency_key: str | None,
+    payload: dict[str, object],
+) -> GuestQuotaIntent | None:
+    """Build the server-owned Guest acceptance identity for a run-producing route."""
+    if user is None or user.role != "guest":
+        return None
+    key = (idempotency_key or "").strip()
+    if not key or len(key) > 200 or any(ord(char) < 0x21 or ord(char) > 0x7E for char in key):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "idempotency_key_required", "message": "Guest run cần Idempotency-Key hợp lệ"},
+        )
+    fingerprint_payload = json.dumps(
+        {"operation": operation, "payload": payload}, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return GuestQuotaIntent(
+        actor_user_id=user.user_id,
+        operation_kind=operation,
+        idempotency_key=key,
+        request_fingerprint=hashlib.sha256(fingerprint_payload).hexdigest(),
+    )
+
+
+def quota_exceeded_http(error: GuestQuotaExceededError) -> HTTPException:
+    """Expose the stable quota code/summary instead of a message clients must parse."""
+    detail = GuestQuotaExceededDetail(quota=error.summary)
+    return HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=detail.model_dump(mode="json"))
+
+
+def idempotency_conflict_http(error: GuestQuotaIdempotencyConflictError) -> HTTPException:
+    """Stable conflict for key reuse with a different request body."""
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"code": "idempotency_key_conflict", "message": str(error)},
+    )
 
 
 def record_gpu_run(user: UserRecord | None, target: str, details: dict[str, str]) -> None:
@@ -136,6 +184,7 @@ class MeResponse(BaseModel):
     auth_required: bool
     guest_signup_enabled: bool
     user: PublicUser | None
+    quota: GuestQuotaSummary | None = None
 
 
 class LoginRequest(BaseModel):
@@ -231,6 +280,7 @@ def me(request: Request) -> MeResponse:
         auth_required=current.auth_required,
         guest_signup_enabled=current.auth_required and current.auth_guest_signup_enabled,
         user=public(user) if user else None,
+        quota=auth_service().guest_quota_summary(user.user_id) if user is not None and user.role == "guest" else None,
     )
 
 

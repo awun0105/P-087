@@ -98,7 +98,7 @@ async def _login(client: AsyncClient, email: str) -> None:
 @pytest.mark.asyncio
 async def test_guest_sees_samples_but_not_team_data(client: AsyncClient, secured: AuthService) -> None:
     me = (await client.get("/api/v1/auth/me")).json()
-    assert me == {"auth_required": True, "guest_signup_enabled": False, "user": None}
+    assert me == {"auth_required": True, "guest_signup_enabled": False, "user": None, "quota": None}
     assert (await client.get("/api/v1/samples")).status_code == 200
     for method, path in [
         ("GET", "/api/v1/scenes"),

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 
 from src.api import schemas
-from src.api.auth import enforce_gpu_quota, record_gpu_run, require_contributor, require_editor
+from src.api.auth import enforce_gpu_quota, record_gpu_run, require_contributor
 from src.api.ownership import authorize_job_mutation
 from src.api.product import deps
 from src.config import Settings
@@ -227,12 +227,13 @@ def get_objectify_state(job_id: str) -> ObjectifyState:
     responses={404: {"model": schemas.ApiErrorResponse}, 409: {"model": schemas.ApiErrorResponse}},
 )
 def request_objectify(
-    job_id: str, request: schemas.ObjectifyRequest, user: UserRecord | None = Depends(require_editor)
+    job_id: str, request: schemas.ObjectifyRequest, user: UserRecord | None = Depends(require_contributor)
 ) -> ObjectifyState:
     """Xếp hàng chạy lại tách theo vật (hoặc dùng hộp ứng viên); worker thực hiện, ghi revision SceneIR kế tiếp.
 
     Tập vật mới là ứng viên mới: xác nhận/nhãn của revision hiện tại không mang sang (vẫn hoàn tác được).
-    Đây là một lần xử lý GPU nên tính vào hạn mức của Editor.
+    Thao tác này vẫn chịu worker/resource admission. Guest objectify không trừ
+    quota ba job dựng scene mỗi ngày; Editor giữ rolling quota 24 giờ hiện tại.
     """
     registry = deps.registry()
     authorize_job_mutation(user, registry, job_id, operation="tách lại vật thể của")
