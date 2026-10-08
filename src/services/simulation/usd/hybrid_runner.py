@@ -150,12 +150,20 @@ def write_mesh(stage: Usd.Stage, path: str, vertices: np.ndarray, faces: np.ndar
     UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr().Set(approximation)
 
 
-def write_box_collider(stage: Usd.Stage, path: str, dims: list[float]) -> None:
-    """Collider hộp khi vật chưa có mesh (vật cản người dùng thêm)."""
+def write_box_collider(
+    stage: Usd.Stage, path: str, dims: list[float], translation: tuple[float, float, float] | None = None
+) -> None:
+    """Collider hộp khi vật chưa có mesh (vật cản người dùng thêm).
+
+    `translation` đặt tâm hộp trong khung cha; op translate phải đứng trước op scale trong
+    xformOpOrder để không bị scale nhân theo.
+    """
     if len(dims) != 3 or any(not math.isfinite(float(value)) or float(value) <= 0 for value in dims):
         raise ValueError("box collider requires three finite positive dimensions")
     cube = UsdGeom.Cube.Define(stage, path)
     cube.CreateSizeAttr().Set(1.0)
+    if translation is not None:
+        cube.AddTranslateOp().Set(Gf.Vec3d(*map(float, translation)))
     cube.AddScaleOp().Set(Gf.Vec3f(*map(float, dims)))
     cube.CreatePurposeAttr().Set(UsdGeom.Tokens.guide)
     UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
@@ -396,8 +404,7 @@ def build(request: dict) -> dict:
     root.SetDefaultPrim(world.GetPrim())
     UsdPhysics.Scene.Define(root, "/World/PhysicsScene")
     if request.get("ground_plane", True):
-        write_box_collider(root, "/World/GroundPlane", [200.0, 200.0, 0.02])
-        UsdGeom.Xformable(root.GetPrimAtPath("/World/GroundPlane")).AddTranslateOp().Set(Gf.Vec3d(0, 0, -0.01))
+        write_box_collider(root, "/World/GroundPlane", [200.0, 200.0, 0.02], translation=(0.0, 0.0, -0.01))
     UsdGeom.Xform.Define(root, "/World/Environment").GetPrim().GetReferences().AddReference("./environment.usdc")
     UsdGeom.Scope.Define(root, "/World/Objects")
 

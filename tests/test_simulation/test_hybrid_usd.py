@@ -424,3 +424,36 @@ def test_asset_checksum_mismatch_is_rejected(tmp_path: Path) -> None:
 
     assert completed.returncode != 0
     assert not (tmp_path / "r.json").exists()
+
+
+GROUND_INSPECT = """
+import json, sys
+from pxr import Usd, UsdGeom
+stage = Usd.Stage.Open(sys.argv[1])
+cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.guide])
+box = cache.ComputeWorldBound(stage.GetPrimAtPath("/World/GroundPlane")).ComputeAlignedRange()
+print(json.dumps({"min": list(box.GetMin()), "max": list(box.GetMax())}))
+"""
+
+
+def test_ground_plane_top_surface_is_at_z_zero(tmp_path: Path) -> None:
+    """Translate must precede scale in xformOpOrder, otherwise the 2 cm slab is offset by 0.0098 m."""
+    request = {"output_dir": str(tmp_path / "usd"), "ground_plane": True, "environment": {}, "objects": []}
+    (tmp_path / "request.json").write_text(json.dumps(request))
+    subprocess.run(
+        [str(RUNTIME), str(RUNNER), "--request", str(tmp_path / "request.json"), "--result", str(tmp_path / "r.json")],
+        check=True,
+        timeout=120,
+    )
+
+    inspected = subprocess.run(
+        [str(RUNTIME), "-c", GROUND_INSPECT, str(tmp_path / "usd" / "scene.usda")],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    box = json.loads(inspected.stdout)
+    assert box["max"][2] == pytest.approx(0.0, abs=1e-6)
+    assert box["min"][2] == pytest.approx(-0.02, abs=1e-6)
+    assert box["max"][0] - box["min"][0] == pytest.approx(200.0)
