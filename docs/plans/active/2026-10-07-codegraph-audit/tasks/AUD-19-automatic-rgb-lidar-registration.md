@@ -316,3 +316,26 @@ tracked PLY artifacts are fixtures; neither provides a held-out registration poi
 pair with independent reference transforms. S3's real-data threshold freeze and
 qualification exit therefore remain unchecked. No profile was promoted to qualified,
 and synthetic recovery does not establish a supported warehouse failure envelope.
+
+### AUD-19.S4 progress — source-bound QA report producer
+
+`src/services/reconstruction/alignment/registration_qa.py` now builds and seals a
+`RegistrationQAReport` from one exact request, proposal artifact reference, selected
+ICP candidate, measured profile metrics, floor comparison and server-resolved
+same-scene evidence. It rejects stale/mismatched candidate bindings, carries the exact
+proposal/source/target/metric/floor/qualification refs, and validates the finished report
+with `validate_registration_qa_binding`. A qualified profile is still insufficient by
+itself: the caller must affirm that the server resolved and verified its exact
+qualification record; this gate defaults closed. Missing same-scene, floor or
+qualification evidence remains `INCONCLUSIVE`; measured threshold violations under a
+qualified profile are `FAIL`.
+
+`tests/test_reconstruction/test_registration_qa.py` covers provisional profiles,
+untrusted client qualification claims, missing same-scene context, measured residual/
+overlap failure, exact-evidence PASS construction and candidate-binding rejection.
+Focused verification passed 50 tests across registration QA, registration contracts
+and constrained ICP. This is only the QA producer slice: S4 durable admission/leases,
+source ingestion, API, Studio proposal/status/overlay, confirmation CAS, consumer
+publication and browser/registered-map flow remain unimplemented and unchecked. The
+real held-out qualification evidence described above is also still missing; no live
+alignment is enabled by this slice.
