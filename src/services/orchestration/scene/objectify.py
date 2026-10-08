@@ -41,6 +41,7 @@ from src.models.contracts.scene import (
 from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneRevisionConflictError
+from src.services.orchestration.scene.floor_evidence import publish_floor_fit_evidence, scene_floor_fit_summary
 from src.services.process_control import ProcessCancelledError, ProcessTimeoutError, run_cancellable_process
 from src.services.reconstruction import camera_views, metric_visual_master, package_splat
 from src.services.scene.collision_ownership import bind_source_collision_ownership
@@ -429,6 +430,8 @@ def objectify(
         "floor_fallback_reason": floor_model.fallback_reason,
         "floor_profile_checksum": floor_model.profile_checksum,
     }
+    floor_evidence_ref, floor_evidence = publish_floor_fit_evidence(job.job_id, source_visual_ref, floor_model, publish)
+    provenance["floor_fit"] = scene_floor_fit_summary(floor_evidence_ref, floor_evidence)
     environment = SceneEnvironment(
         visual_ref=visual_ref,
         geometry_ref=bundle.canonical_geometry_ref,

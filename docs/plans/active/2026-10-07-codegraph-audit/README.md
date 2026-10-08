@@ -83,9 +83,15 @@ AUD-14.S1 adds deterministic constrained floor fitting; AUD-14.S2 replaces fixed
 filters in geometric fallback, SAMPro3D, objectify, Gaussian growth and source
 collision correction with plane-relative masks. Sparse support uses an explicit
 schema-1.1 REC-06 prior fallback; high-noise and competing planes remain uncertain.
-Verification: 81 focused tests, repository Ruff/format, contract mirror and current
-CodeGraph index pass. No production sloped-floor artifact or collision-retention
-benchmark is qualified; AUD-14.S3 must persist exact source-bound fit evidence.
+AUD-14.S3 persists content-addressed `FloorFitEvidence` bound to the source artifact,
+point checksum and fit profile; SceneIR carries a compatibility-safe summary and the
+Review tab shows actionable fallback/uncertain states. Verification: 84 backend
+tests across focused floor/object-extraction regressions (including REC-06 floor
+frame), 3 frontend tests, typecheck/lint, repository Ruff/format, contract
+mirror and current CodeGraph index pass. Chrome DevTools verified the notice on a
+local mocked job fixture; authenticated API/browser acceptance is **UNVERIFIED**.
+No production sloped-floor artifact or collision-retention benchmark is qualified,
+so empirical floor/obstacle quality remains pending.
 AUD-19.S1 adds checksum-sealed registration input/profile/request/proposal/QA
 contracts and binding/state guards. Independent maps bind exact PCD/PLY file and
 parsed-header identity, m/cm/mm units, frame, assembly revision, project context,
@@ -315,8 +321,9 @@ AUD-19. Static-map consumer chỉ enable sau registration QA, không bắt AUD-1
 
 Progress hiện tại: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3,
 AUD-03.S1–S3, AUD-04.S1–S3, AUD-10.S1–S3 và AUD-07.S1–S2 đã được commit riêng
-theo sprint. AUD-08.S4, AUD-09.S1, AUD-14.S1–S2 và AUD-19.S1 cũng đã được commit
-riêng.
+theo sprint. AUD-08.S4, AUD-09.S1, AUD-14.S1–S3 và AUD-19.S1 cũng đã được commit
+riêng. AUD-14.S3 software gates pass; production sloped/noisy sample and obstacle-
+retention benchmark remain pending and are not inferred from synthetic fixtures.
 AUD-09.S2 đã nối Inspector/API và preview collider với publication revision CAS;
 AUD-09.S3 đã xác nhận legacy/hybrid USD local-pose fidelity, cập nhật preflight
 world bounds và kiểm tra candidate/report invalidation. Focused API/domain/frontend

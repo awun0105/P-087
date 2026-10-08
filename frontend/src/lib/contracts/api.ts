@@ -101,6 +101,16 @@ export interface ProductArtifactRef extends ArtifactRef {
   data_class: ProductDataClass;
 }
 
+/** `src/models/contracts/floor_model.py` FloorFitEvidence. */
+export interface FloorFitEvidence {
+  schema_version: "1.0";
+  artifact_type: "FloorFitEvidence";
+  job_id: string;
+  source_artifact_ref: ProductArtifactRef;
+  point_cloud_checksum: string;
+  floor_model: Record<string, unknown>;
+}
+
 /** `src/models/contracts/object_membership.py` ObjectMembershipArtifact. */
 export interface ObjectMembershipArtifact {
   artifact_type: "ObjectMembershipArtifact";

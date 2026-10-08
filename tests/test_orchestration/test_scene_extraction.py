@@ -11,11 +11,13 @@ import trimesh
 
 from src.config import Settings
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
+from src.models.contracts.floor_model import FloorFitEvidence
 from src.models.contracts.manifests import StageId, StageStatus
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.models.contracts.scene import SceneObjectState
 from src.services.orchestration.artifacts import FilesystemArtifactStore, sha256_bytes
 from src.services.orchestration.scene.extraction import extract_scene
+from src.services.orchestration.scene.floor_evidence import load_floor_fit_evidence
 from tests.test_orchestration.test_finalize_flow import _confirmed
 
 _FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "reconstruction_bundle" / "manifest.json"
@@ -54,6 +56,16 @@ def test_without_sam2_runtime_falls_back_to_geometric_candidates(tmp_path: Path)
     scene = registry.scene.current(job.job_id).scene
     assert scene.scene_revision == "rev-001" and stage.artifact_uri.endswith("scene_ir.rev-001.json")
     assert scene.provenance["object_extraction"] == "geometric_voxel_components_v1"
+    floor_fit = scene.provenance["floor_fit"]
+    floor_fit_ref = ProductArtifactRef.model_validate(floor_fit["artifact_ref"])
+    floor_evidence = load_floor_fit_evidence(
+        floor_fit_ref,
+        registry.runtime_resolver.require,
+        expected_source_artifact_ref=bundle.canonical_geometry_ref,
+        expected_profile_checksum=floor_fit["profile_checksum"],
+    )
+    assert isinstance(floor_evidence, FloorFitEvidence)
+    assert floor_evidence.point_cloud_checksum == floor_fit["point_cloud_checksum"]
     assert scene.environment.geometry_ref == bundle.canonical_geometry_ref
     (pallet,) = scene.objects
     assert pallet.state == SceneObjectState.CANDIDATE and not pallet.active

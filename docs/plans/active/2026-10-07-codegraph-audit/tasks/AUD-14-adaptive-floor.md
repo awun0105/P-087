@@ -104,7 +104,10 @@ as actionable metadata without arbitrary expert knobs on core user flow. Integra
 AUD-12 floor/obstacle retention benchmark; don't infer model accuracy from candidate count.
 Tests: source/profile checksum mismatch, old JSON, failed fit/report API,
 supported real sloped/noisy sample, candidate/collision consumer parity.
-**Exit:** [ ] floor model used consistently; [ ] measured quality/limitations recorded.
+**Exit:** [x] producer/consumer fit evidence is source/profile-bound, read-compatible,
+and actionable in the Review UI; [ ] measured quality on a supported production
+sloped/noisy sample plus collision-retention benchmark is recorded. Synthetic
+fixtures establish contract behavior only and do not close the empirical gate.
 
 ## Verification và DoD
 
@@ -211,3 +214,51 @@ fitting không được coi là solved multi-level unseen geometry.
   the optional `understand-anything` CLI is unavailable (**UNVERIFIED**).
   Minimal-code rung 2 reuses FloorModel, NumPy/SciPy and voxel components. No UI
   changed; DevTools n/a.
+
+### AUD-14.S3 — Product config/provenance và quality handoff
+
+- Base commit: `1aa710d` (`AUD-14.S2`).
+- Logic delta: floor-fit results are no longer transient. The object extraction,
+  user-selected box fallback and objectify paths publish a content-addressed
+  `FloorFitEvidence` artifact. The evidence binds the job, exact input artifact ref,
+  transformed point-cloud checksum and the embedded frozen `FloorFitProfile` /
+  checksum. `SceneIR.provenance.floor_fit` carries the evidence ref, fit status,
+  fallback reason, effective band and source/profile checksums for older clients.
+- Failure behavior: evidence byte/ref/source/profile mismatch is rejected. Existing
+  `FloorModel` schema 1.0 remains readable. A confirmed-prior fallback is shown as
+  an ochre advisory with the effective band; an uncertain fit is shown as a
+  fail-closed warning and asks the user to check geometry/scale before simulation.
+  Supported fits and legacy scenes stay quiet. No candidate-count proxy is reported
+  as a quality score.
+- Files: `src/models/contracts/floor_model.py`,
+  `src/models/contracts/__init__.py`, `src/services/orchestration/scene/floor_evidence.py`,
+  `src/services/orchestration/scene/extraction.py`,
+  `src/services/orchestration/scene/objectify.py`,
+  `scripts/check_contract_mirror.py`, `frontend/src/lib/contracts/api.ts`,
+  `frontend/src/features/studio/scene/floorFitDiagnostic.ts`,
+  `frontend/src/features/studio/scene/ReviewTab.tsx`,
+  `tests/test_orchestration/test_floor_evidence.py`,
+  `tests/test_orchestration/test_scene_extraction.py`,
+  `tests/test_orchestration/test_scene_objectify_queue.py`,
+  `frontend/tests/floor-fit-diagnostics.test.tsx`, this task and the plan README.
+- Verification: 84 focused backend tests passed including the REC-06 floor-frame
+  regression; 3 focused frontend tests passed;
+  frontend typecheck, changed-file ESLint, repository Ruff check/format, contract
+  mirror and `git diff --check` passed. CodeGraph index is current (851 files,
+  16,704 nodes, 48,960 edges). Chrome DevTools displayed the fallback notice on a
+  local API-mocked job fixture and confirmed the Review tab gate requires completed
+  geometry and object-extraction stages. The browser fixture is a visual check, not
+  authenticated API/E2E acceptance.
+- Limits: no supported production sloped/noisy sample, SAM2/GPU execution or
+  collision-retention benchmark is available. The empirical quality gate remains
+  **UNVERIFIED**; a confirmed-prior fallback records the bounded band and reason,
+  but does not claim a measured plane or validated obstacle recall. Full browser
+  acceptance also remains **UNVERIFIED** because the backend/authenticated Studio
+  API was not running in this environment.
+- Pre-flight (GUIDE.md Rule 13): CodeGraph traced `FloorFitEvidence`, both
+  extraction paths, direct objectify/reobjectify consumers, `SceneIR` provenance,
+  ReviewTab and their tests before editing. Understand flow was traced from the
+  metric input through fit publication and Review UI; optional `understand-anything`
+  CLI remains **UNVERIFIED**. Minimal-code rung 2 reuses `FloorModel`, existing
+  artifact publication/resolution, and palette-token `Notice`; no dependency or
+  expert threshold control was added.

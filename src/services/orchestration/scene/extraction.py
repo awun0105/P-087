@@ -16,6 +16,7 @@ from threading import Event
 import numpy as np
 
 from src.config import Settings
+from src.models.contracts.artifacts import JsonObject, ProductArtifactRef
 from src.models.contracts.floor_model import FloorModel
 from src.models.contracts.manifests import JobManifest, StageArtifact, StageId, StageStatus
 from src.models.contracts.reconstruction import ReconstructionBundle
@@ -25,6 +26,7 @@ from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.jobs.progress import metric_confirmation_stage
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneRevisionConflictError
+from src.services.orchestration.scene.floor_evidence import publish_floor_fit_evidence, scene_floor_fit_summary
 from src.services.orchestration.scene.objectify import AWAITING_CHOICE, ObjectifyError, Publish, objectify_with_retry
 from src.services.orchestration.scene.objectify import METHOD as OBJECTIFY_METHOD
 from src.services.process_control import ProcessCancelledError
@@ -46,7 +48,7 @@ _CROP_Z = (-0.5, 4.0)
 
 def _points_and_frames(
     registry: ProjectRegistry, job: JobManifest, bundle: ReconstructionBundle
-) -> tuple[np.ndarray, list[CameraFrame], FloorModel]:
+) -> tuple[np.ndarray, list[CameraFrame], FloorModel, ProductArtifactRef]:
     resolve = registry.runtime_resolver.require
     stage = metric_confirmation_stage(job)
     if stage is None or stage.artifact_uri is None or stage.artifact_checksum is None:
@@ -69,7 +71,7 @@ def _points_and_frames(
         CameraFrame(view=view.model_dump(mode="json", exclude={"image"}), image_path=resolve(view.image))
         for view in views
     ]
-    return points[inside], frames, floor_model
+    return points[inside], frames, floor_model, confirmation
 
 
 def _sam2_runtime(settings: Settings) -> Sam2Runtime | None:
@@ -108,16 +110,17 @@ def box_candidates(
     publish: Publish,
     *,
     cancel_event: Event | None = None,
-) -> tuple[list[SceneObject], str, str]:
-    """Đường hộp (ADR 0006): SAMPro3D + SAM2, lỗi/thiếu runtime thì tách hình học. Trả (vật, phương pháp, ghi chú)."""
+) -> tuple[list[SceneObject], str, str, JsonObject | None]:
+    """Đường hộp (ADR 0006): SAMPro3D + SAM2, lỗi/thiếu runtime thì tách hình học."""
     objects: list[SceneObject] = []
     method, note = "none", ""
+    floor_fit: JsonObject | None = None
     runtime = _sam2_runtime(settings)
     if runtime is not None and runtime.available():
         try:
             if cancel_event is not None and cancel_event.is_set():
                 raise ProcessCancelledError("Objectify operation was cancelled")
-            points, frames, floor_model = _points_and_frames(registry, job, bundle)
+            points, frames, floor_model, source_ref = _points_and_frames(registry, job, bundle)
             candidates = extract(
                 points,
                 frames,
@@ -133,6 +136,10 @@ def box_candidates(
                 {"method": SAMPRO3D_METHOD, "floor_profile_checksum": floor_model.profile_checksum},
             )
             method = SAMPRO3D_METHOD
+            evidence_ref, evidence = publish_floor_fit_evidence(job.job_id, source_ref, floor_model, publish)
+            floor_fit = scene_floor_fit_summary(evidence_ref, evidence)
+            if floor_model.status != "supported":
+                note = f"SAMPro3D dùng trạng thái sàn {floor_model.status} ({floor_model.fallback_reason})"
         except ProcessCancelledError:
             raise
         except (ValueError, OSError) as error:
@@ -151,12 +158,16 @@ def box_candidates(
             floor_model = fit_canonical_floor_model(vertices, point_cloud_checksum(vertices))
             objects = candidate_objects(job.job_id, vertices, publish, floor_model, GeometricConfig())
             method = "geometric_voxel_components_v1"
-            if floor_model.status == "uncertain":
-                note = f"{note}; floor fit uncertain ({floor_model.fallback_reason}), no floor-relative candidates"
+            evidence_ref, evidence = publish_floor_fit_evidence(
+                job.job_id, bundle.canonical_geometry_ref, floor_model, publish
+            )
+            floor_fit = scene_floor_fit_summary(evidence_ref, evidence)
+            if floor_model.status != "supported":
+                note = f"{note}; floor fit {floor_model.status} ({floor_model.fallback_reason})"
         except (ValueError, OSError) as error:
             logger.warning("Tách hình học thất bại job=%s cause=%s", job.job_id, type(error).__name__)
             note = f"{note}; tách hình học lỗi ({type(error).__name__}), scene chỉ có môi trường"
-    return objects, method, note
+    return objects, method, note, floor_fit
 
 
 def extract_scene(
@@ -177,7 +188,9 @@ def extract_scene(
             # Không tự lùi về hộp (owner quyết 2026-10-01): scene chỉ có môi trường, chờ người dùng chọn.
             method, note = AWAITING_CHOICE, f"{error}; chọn chạy lại hoặc dùng hộp ứng viên"
     else:
-        objects, method, note = box_candidates(registry, job, bundle, settings, workspace, publish)
+        objects, method, note, floor_fit = box_candidates(registry, job, bundle, settings, workspace, publish)
+        if floor_fit is not None:
+            extra["floor_fit"] = floor_fit
     source_geometry_ref = environment.geometry_ref if environment is not None else bundle.canonical_geometry_ref
     objects = bind_source_collision_ownership(objects, source_geometry_ref, "rev-001")
     scene = scene_from_bundle(bundle, objects, {"object_extraction": method, "note": note, **extra}, environment)
@@ -222,7 +235,7 @@ def use_boxes(
     bundle = job_bundle(registry, job)
     if bundle is None:
         raise ValueError("job chưa có ReconstructionBundle hệ mét")
-    objects, method, note = box_candidates(
+    objects, method, note, floor_fit = box_candidates(
         registry,
         job,
         bundle,
@@ -243,6 +256,7 @@ def use_boxes(
                 "bundle_checksum": base_scene.provenance.get("bundle_checksum"),
                 "object_extraction": method,
                 "note": f"người dùng chọn dùng hộp ứng viên. {note}".strip(),
+                "floor_fit": floor_fit,
             },
         }
     )

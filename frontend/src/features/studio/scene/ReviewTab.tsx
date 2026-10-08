@@ -9,6 +9,7 @@ import type { SaveState } from "@/features/studio/ObjectReviewView";
 import { ReviewPanel } from "@/features/studio/ReviewPanel";
 import { SimulationPackagePanel } from "@/features/studio/SimulationPackagePanel";
 import { HelpDetails } from "@/components/studio/feedback";
+import { floorFitDiagnostic } from "@/features/studio/scene/floorFitDiagnostic";
 import { EvaluationCard } from "@/features/studio/evaluation/EvaluationCard";
 import { ValidationReportCard } from "@/features/studio/ValidationReportCard";
 import { getJobScene, type ReviewStateView } from "@/lib/api/studio";
@@ -17,6 +18,7 @@ export function ReviewTab({ jobId, canMutateJob, onSaveState }: { jobId: string;
   const [revision, setRevision] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [floorFit, setFloorFit] = useState<ReturnType<typeof floorFitDiagnostic>>(null);
   // Trạng thái duyệt do ReviewPanel tải; ở đây chỉ dùng lại để vẽ báo cáo chi tiết của đúng revision.
   const [review, setReview] = useState<ReviewStateView | null>(null);
   useEffect(() => {
@@ -26,9 +28,13 @@ export function ReviewTab({ jobId, canMutateJob, onSaveState }: { jobId: string;
       if (result.ok) {
         setError(null);
         setRevision(result.data.scene.scene_revision);
+        setFloorFit(floorFitDiagnostic(result.data.scene.provenance));
         // Tạo gói ghi một revision mới (collider vật đã xác nhận) → header phải theo revision đó.
         onSaveState({ status: "saved", revision: result.data.scene.scene_revision });
-      } else setError(errorMessage(result.error));
+      } else {
+        setFloorFit(null);
+        setError(errorMessage(result.error));
+      }
     });
     return () => controller.abort();
   }, [jobId, reload, onSaveState]);
@@ -40,6 +46,18 @@ export function ReviewTab({ jobId, canMutateJob, onSaveState }: { jobId: string;
         <h2 className="flex flex-wrap items-center gap-2 text-xl font-bold tracking-tight">Kiểm tra & duyệt <Badge tone="neutral">{revision}</Badge></h2>
         <p className="mt-1 text-sm text-ink-muted">Tạo gói và đọc preflight trước; validation cùng quyết định Reviewer áp dụng cho đúng gói của revision này.</p>
       </div>
+      {floorFit && <div className="lg:col-span-2">
+        <Notice tone={floorFit.tone}>
+          <div className="space-y-1">
+            <p className="font-semibold">{floorFit.title}</p>
+            <p>{floorFit.message}</p>
+            {floorFit.evidenceArtifactUri && <details className="pt-1 text-xs">
+              <summary className="cursor-pointer font-medium">Mã báo cáo floor fit</summary>
+              <code className="mt-1 block break-all font-mono">{floorFit.evidenceArtifactUri}</code>
+            </details>}
+          </div>
+        </Notice>
+      </div>}
       <Card className="overflow-hidden">
         <SimulationPackagePanel jobId={jobId} sceneRevision={revision} canCreate={canMutateJob} onSceneChanged={() => setReload((value) => value + 1)} />
       </Card>

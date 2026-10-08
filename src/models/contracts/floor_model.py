@@ -9,7 +9,7 @@ from typing import Literal, Self
 
 from pydantic import Field, FiniteFloat, model_validator
 
-from src.models.contracts.artifacts import Checksum, ContractModel
+from src.models.contracts.artifacts import Checksum, ContractModel, Identifier, ProductArtifactRef
 from src.models.contracts.identity import canonical_json_bytes
 
 Vector3 = tuple[FiniteFloat, FiniteFloat, FiniteFloat]
@@ -184,4 +184,23 @@ class FloorModel(ContractModel):
                 raise ValueError("confirmed prior fallback plane must pass through the confirmed floor point")
         elif self.fallback_reason is None:
             raise ValueError("uncertain floor model requires an explicit fallback reason")
+        return self
+
+
+class FloorFitEvidence(ContractModel):
+    """Persisted floor fit tied to the exact job artifact and transformed point checksum."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    artifact_type: Literal["FloorFitEvidence"] = "FloorFitEvidence"
+    job_id: Identifier
+    source_artifact_ref: ProductArtifactRef
+    point_cloud_checksum: Checksum
+    floor_model: FloorModel
+
+    @model_validator(mode="after")
+    def _check_source_binding(self) -> Self:
+        if self.source_artifact_ref.job_id != self.job_id:
+            raise ValueError("floor fit source artifact must belong to the same job")
+        if self.floor_model.source_checksum != self.point_cloud_checksum:
+            raise ValueError("floor fit model checksum must match the recorded point cloud checksum")
         return self

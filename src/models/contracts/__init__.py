@@ -20,7 +20,7 @@ from src.models.contracts.collision_quality import (
     validate_collision_source_binding,
 )
 from src.models.contracts.coordinates import CoordinateSystem, MetricScale, Transform
-from src.models.contracts.floor_model import FloorFitProfile, FloorModel, FloorPointClass, FloorPrior
+from src.models.contracts.floor_model import FloorFitEvidence, FloorFitProfile, FloorModel, FloorPointClass, FloorPrior
 from src.models.contracts.input_assembly import (
     ArchiveMemberRef,
     CandidateState,
@@ -207,6 +207,7 @@ __all__ = [
     "DepthFrameSet",
     "EvaluationReport",
     "ExecutionError",
+    "FloorFitEvidence",
     "FloorFitProfile",
     "FloorModel",
     "FloorPointClass",

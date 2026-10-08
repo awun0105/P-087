@@ -308,7 +308,7 @@ def test_user_edit_while_boxes_compute_wins_over_stale_operation(world, monkeypa
             current.model_copy(update={"provenance": {**current.provenance, "user_edit": "kept"}}),
             "user_edit",
         )
-        return [], "geometric_voxel_components_v1", "mock geometry"
+        return [], "geometric_voxel_components_v1", "mock geometry", None
 
     monkeypatch.setattr(scene_extraction, "box_candidates", edit_during_geometry)
     assert scene_objectify_queue.process_next(registry, settings) is True
