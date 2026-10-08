@@ -362,8 +362,9 @@ ownership recovery, candidate ZIP/manifest, current rotated object pose,
 retained floor collision, relative USD asset composition, và bất biến bytes của
 artifact cũ bằng OpenUSD runtime. AUD-02.S3 nối capability blocker qua typed
 API/UI, giữ Preflight riêng, ngăn tải candidate khi export bị block và kiểm tra
-quyền GET/POST/download. Automated checks pass; browser DevTools của AUD-02.S3
-còn UNVERIFIED vì Chrome DevTools MCP chưa kiểm tra luồng download block. AUD-03.S3
+quyền GET/POST/download. Automated checks pass. Chrome DevTools MCP đã mở Results
+tab; các scene hiện có chưa có candidate/export-capability blocker, nên đúng luồng
+download-block vẫn UNVERIFIED. AUD-03.S3
 đã commit API/UI projection và stale request regressions; Chrome DevTools MCP xác
 nhận application review screen chặn release khi revision chưa có simulation package.
 Trusted worker proof và real Isaac acceptance vẫn thuộc AUD-05.

@@ -229,7 +229,7 @@ proof và emitted USD giữ đủ semantics; Isaac runtime acceptance vẫn ghi 
   and the existing `pxr` runner; one shared topology validator closes the missing
   API/runtime contract. Browser DevTools is n/a because this is a UI-free service.
 
-### AUD-02.S3 — implementation complete; browser gate unverified
+### AUD-02.S3 — implemented; capability-blocked browser state unavailable
 
 - Commit base: `1aed466` (`AUD-01.S3`). No backend schema or persistence change.
 - Before: the API response already contained `export_capability`, but
@@ -262,9 +262,14 @@ proof và emitted USD giữ đủ semantics; Isaac runtime acceptance vẫn ghi 
   changed-file ESLint and `npm run build` passed.
   `.venv/bin/ruff check src/ tests/` and `.venv/bin/ruff format --check src/ tests/`
   passed; `git diff --check` was clean.
-- Browser gate: `UNVERIFIED: DevTools` — MCP reports the Chrome DevTools profile is
-  already running/locked, and CUA reports no browser surface. Restart `/mcp` to
-  obtain a DevTools session before claiming visual/browser acceptance.
+- Browser evidence (2026-10-09): Chrome DevTools MCP opened the existing job's
+  Results tab in the authenticated Reviewer session. It rendered “Gói mô phỏng
+  (candidate): CHƯA CÓ” and “Bản phát hành: CHƯA PHÁT HÀNH”. The API returned
+  `null` for the selected job's simulation package; across the 10 visible latest
+  jobs, four requests returned 200 with `null` and six returned 404. No current
+  scene exposed an export-capability blocker with a candidate absent, so the
+  specific typed-blocker/download state remains **UNVERIFIED**. No package was
+  created and no project data was changed.
 - Changed files: `frontend/src/lib/api/studio.ts`,
   `frontend/src/features/studio/SimulationPackagePanel.tsx`, frontend API/UI tests,
   `tests/test_api/test_studio_routes.py`, this task, ADR 0012 and the active plan.
@@ -276,4 +281,5 @@ proof và emitted USD giữ đủ semantics; Isaac runtime acceptance vẫn ghi 
   CodeGraph and the existing AUD-02 integration tests. Minimal-code rung 2 reused
   the existing JSON object/string helpers, API error boundary, router-level auth
   dependency and ReviewPanel. `ruff`, focused pytest, Vitest, typecheck, ESLint and
-  production build passed. DevTools visual acceptance remains UNVERIFIED as above.
+  production build passed. The DevTools MCP session works; the needed
+  capability-blocked sample is unavailable in the current local data.
