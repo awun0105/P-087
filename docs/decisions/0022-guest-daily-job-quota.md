@@ -31,13 +31,14 @@ vào timezone máy chủ. Pure helper `guest_quota_window()` và immutable Pydan
 contracts `GuestQuotaWindow`, `GuestQuotaSummary`, `GuestQuotaExceededDetail` đã
 được thêm; `/auth/me` và API 429 bắt đầu dùng chúng ở sprint sau.
 
-Quota unit là một user-initiated run/operation được durable queue/job nhận: tạo
+Quota unit là một user-initiated run được durable queue/job nhận: tạo
 reconstruction job qua cả `/scenes/from-upload` và `/projects/{project_id}/jobs`,
-manual Retry được chấp nhận, và manual objectify request được chấp nhận. Objectify
-là suy luận theo source chứ chưa được owner nêu đích danh: code hiện đã tính thao
-tác GPU này vào Editor quota; loại nó khỏi Guest sẽ để Guest queue GPU không giới
-hạn. Một lần worker resume/automatic continuation, admission wait, duplicate với
-cùng `Idempotency-Key` và fingerprint không thêm unit. Validation/permission/CAS
+hoặc manual Retry được chấp nhận. Theo xác nhận của owner ngày 2026-10-08,
+objectify/tách vật không trừ quota 3 lượt/ngày của Guest, kể cả khi worker nhận yêu
+cầu. Thao tác này vẫn đi qua worker/resource admission; behavior quota rolling24h
+hiện có của Editor không đổi. Một lần worker resume/automatic continuation,
+admission wait, duplicate với cùng `Idempotency-Key` và fingerprint không thêm
+unit. Validation/permission/CAS
 failure trước durable acceptance không charge; accepted intent vẫn charge nếu job
 sau đó fail hoặc bị cancel. Các thao tác edit/delete/cancel/view/metric preview/
 simulation-package không bị tính thêm quota unit.
@@ -63,6 +64,8 @@ summary; frontend không parse message. Editor giữ rolling24h configurable và
 Reviewer unlimited.
 
 Alternatives rolling24h cho Guest hoặc quota frontend không đúng requested policy.
+Counting objectify against Guest's daily counter was an earlier source-based
+assumption; the owner's explicit clarification supersedes it.
 Global Editor quota rewrite ngoài scope. Need multi-process real DB race/crash tests
 và browser midnight/reset UX; GPU runtime không cần cho quota proof.
 

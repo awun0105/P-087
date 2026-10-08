@@ -2,9 +2,9 @@
 
 ## Metadata và goal
 
-- IN PROGRESS — S1 calendar contract implemented; charge-unit edge classification pending. P1; EX-PRODUCT identity/API/Studio/runtime DB.
+- IN PROGRESS — S1 calendar contract implemented; owner confirmed objectify is excluded from Guest's 3/day quota on 2026-10-08. P1; EX-PRODUCT identity/API/Studio/runtime DB.
 - Canonical PRODUCT-01/02/06/09; task-local extension, không đổi crosswalk.
-- Owner yêu cầu ngày 07/10/2026. S1 thêm pure calendar/DTO contract và tests; chưa bật quota route hoặc sửa tài khoản.
+- Owner yêu cầu ngày 07/10/2026. S1 thêm pure calendar/DTO contract và tests; chưa bật quota route hoặc sửa tài khoản. Ngày 08/10/2026, owner xác nhận objectify không trừ quota 3 lượt/ngày của Guest.
 - [Agent guide](../AGENT_GUIDE.md), [ADR 0021](../../../../decisions/0021-guest-identity-and-ownership.md), [ADR 0022](../../../../decisions/0022-guest-daily-job-quota.md).
 
 ## Baseline và scope
@@ -28,7 +28,7 @@ helper/DTO contract only; enforcement and quota API projection begin later.
 ## Input / output / data contract
 
 Owner chốt: Guest 3 accepted manual run intents/ngày, bao gồm tạo job và Retry
-thủ công; reset 00:00 Asia/Ho_Chi_Minh. Persist UTC window [start,end) từ calendar
+thủ công; objectify/tách vật không trừ vào 3 lượt này; reset 00:00 Asia/Ho_Chi_Minh. Persist UTC window [start,end) từ calendar
 Vietnam. Automatic worker retries, duplicate idempotent requests, admission waits
 không tính thêm. Accepted durable queue intent tính một lượt dù sau đó fail/cancel;
 validation/permission/commit failure trước accepted intent không tính.
@@ -39,11 +39,11 @@ bằng daily_job_quota; role promotion/demotion đọc current role, reservation
 New Preview hoặc final reconstruction job là run mới; không tính UI viewing,
 sample playback, edit/delete/cancel hoặc worker resume cùng intent. Inventory all
 job-producing paths; heavy non-job operations không tự biến thành một lượt job.
-S1 applies the same fixed Guest unit to an explicitly requested `request_objectify`
-accepted by the durable queue. This is an inference from current source: Editors
-already pay the GPU quota for this manual operation, and excluding it would leave
-Guest able to enqueue unlimited GPU work. Duplicate submissions and worker resume
-remain the same intent and do not add units. Other non-job operations stay excluded.
+An explicitly requested `request_objectify` is excluded from the Guest daily count,
+even when accepted by the durable queue. It remains subject to worker/resource
+admission. Existing Editor rolling-24-hour quota behavior is unchanged. Duplicate
+submissions and worker resume do not create a Guest quota unit. Other non-job
+operations stay excluded.
 `GuestQuotaSummary`: `policy_id`, fixed `limit`, `used`, `remaining`, UTC
 `window_start_utc`/`resets_at_utc`, and `timezone`. HTTP 429 uses stable code
 `guest_daily_job_quota_exceeded` with the summary; clients do not parse message
@@ -106,7 +106,7 @@ accepted-run/browser proof separate from worker runtime acceptance.
 
 Implement: `guest_quota_window()` uses server UTC clock + `ZoneInfo`, injected aware clock in tests, and outputs half-open Vietnam calendar windows as UTC. Add typed `GuestQuotaWindow`, `GuestQuotaSummary` and `GuestQuotaExceededDetail`; keep `/auth/me`/429 consumers for S2/S3. Record DB constraints, actor/idempotency semantics, accepted queue transaction boundary, concurrent PostgreSQL/SQLite behavior, no-side-effect denial and retry eligibility ordering above. Audit remains diagnostic for Guest.
 Tests: Vietnam midnight UTC conversion, exact boundary/previous day, aware-vs-naive clock, stable typed summary/error and invalid model values. Later S2/S3 tests cover manual vs auto retry, operator role and duplicate fingerprint.
-**Exit:** [x] policy/window/DTO/DB contract clear; preserve Editor policy. Guest objectify charge is a source-based inference: one unit per accepted manual queue request; auto-resume is free.
+**Exit:** [x] policy/window/DTO/DB contract clear; preserve Editor policy. Owner decision (2026-10-08): Guest objectify does not consume the daily quota; worker/resource admission still applies.
 
 ## Sprint AUD-22.S2 — Atomic admission và durable job intent
 
@@ -154,9 +154,10 @@ mock hoặc source review không chứng minh feature đã chạy.
 - **Decision:** Guest windows are half-open local calendar days in
   Asia/Ho_Chi_Minh, stored/serialized in UTC. Added immutable typed window/summary/
   429 contracts. Selected per-actor day counter + idempotent accepted-intent ledger;
-  audit stays diagnostic. One manual objectify request is counted as a source-based
-  inference because current Editor quota already charges it; automatic resume is
-  free. Atomic queue + quota transaction and migration are S2.
+  audit stays diagnostic. The earlier source-based assumption that manual objectify
+  consumes a Guest run was superseded by the owner's explicit 2026-10-08 decision:
+  Guest objectify is excluded from the 3/day counter; Editor quota behavior is
+  unchanged. Atomic queue + quota transaction and migration are S2.
 - **Verification:** `.venv/bin/pytest tests/test_orchestration/test_guest_quota_policy.py -q`
   — 6 passed; targeted `ruff check` PASS; `ruff format --check` PASS;
   `codegraph sync` up-to-date; `codegraph status` up-to-date (759 files,

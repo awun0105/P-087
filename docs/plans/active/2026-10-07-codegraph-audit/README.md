@@ -144,8 +144,10 @@ không dùng exclusion đó để bắt independent maps phải có camera extri
 
 Owner bổ sung AUD-20–22: Guest signup không invite, có email/name/password;
 Guest chỉ mutate own resources, Editor/Reviewer giữ rights hiện có. Quota Guest
-3 accepted runs/ngày gồm manual Retry, reset 00:00 Asia/Ho_Chi_Minh; automatic
-worker retry/duplicate không thêm lượt. Email verification để sau. Đây là yêu cầu
+3 accepted runs/ngày gồm manual Retry, không tính objectify/tách vật, reset 00:00
+Asia/Ho_Chi_Minh; automatic worker retry/duplicate không thêm lượt. Objectify vẫn
+chịu worker/resource admission; quota Editor hiện có không đổi. Email verification
+để sau. Đây là yêu cầu
 owner mới, thay scope exclusion auth/roles/quota của bản plan trước.
 Owner hoãn AUD-25 ngày 2026-10-07 vì độ phức tạp. Import/view PLY/SOG ở AUD-06/24
 vẫn trong active scope; source continuation/G1–G3, metric/object/collision processing
