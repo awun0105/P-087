@@ -129,12 +129,14 @@ def _request(
     profile: RegistrationProfile | None = None,
     metric_state: str = "confirmed",
     floor_state: str = "supported",
+    floor_artifact_type: str = "FloorFitEvidence",
     expected_scene_revision: str = "scene-rev-1",
 ) -> RegistrationRequest:
     source = source or _source()
     profile = profile or _profile()
     metric_ref = _ref("RGBMetricConfirmation", StageId.METRIC_CANONICALIZE) if metric_state == "confirmed" else None
-    floor_refs = [_ref("FloorModel", StageId.RGB_GEOMETRY)] if floor_state == "supported" else []
+    floor_stage = StageId.OBJECT_EXTRACT if floor_artifact_type == "FloorFitEvidence" else StageId.RGB_GEOMETRY
+    floor_refs = [_ref(floor_artifact_type, floor_stage)] if floor_state == "supported" else []
     return seal_registration_request(
         {
             "schema_version": "1.0",
@@ -365,6 +367,15 @@ def test_uncertain_or_unsupported_floor_blocks_automatic_qa(floor_state: str) ->
     )
     assert result.state == RegistrationPreflightState.INSUFFICIENT
     assert expected in result.findings
+
+
+def test_legacy_unbound_floor_model_ref_is_readable_but_blocks_map_preflight() -> None:
+    request = _request(floor_artifact_type="FloorModel")
+
+    result = registration_preflight(request)
+
+    assert result.state == RegistrationPreflightState.INSUFFICIENT
+    assert RegistrationFindingCode.TARGET_FLOOR_EVIDENCE_REQUIRED in result.findings
 
 
 def test_sensor_package_mode_preserves_existing_metric_ingest_binding() -> None:

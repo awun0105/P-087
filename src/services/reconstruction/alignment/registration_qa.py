@@ -23,6 +23,7 @@ _INCONCLUSIVE_FINDINGS = frozenset(
         RegistrationFindingCode.FLOOR_UNSUPPORTED,
         RegistrationFindingCode.METRIC_CONFIRMATION_REQUIRED,
         RegistrationFindingCode.SAME_SCENE_CONTEXT_MISSING,
+        RegistrationFindingCode.TARGET_FLOOR_EVIDENCE_REQUIRED,
         RegistrationFindingCode.UNQUALIFIED_PROFILE,
     }
 )
@@ -155,7 +156,7 @@ def build_registration_qa_report(
         proposal_ref,
         proposal.source_geometry_ref,
         proposal.target_rgb_geometry_ref,
-        *request.floor_model_refs,
+        *request.floor_evidence_refs,
         *evidence_refs,
     ]
     if request.metric_confirmation_ref is not None:

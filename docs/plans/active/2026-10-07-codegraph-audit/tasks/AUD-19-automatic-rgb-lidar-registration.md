@@ -128,7 +128,10 @@ ingester must convert cm/mm to canonical meters before publishing any
 `LiDARGeometryArtifact`.
 
 The request binds canonical same-job `RgbGeometry`, target scene revision, metric
-confirmation, supported floor refs, source binding and optional world-frame ROI.
+confirmation, supported floor-fit evidence, source binding and optional world-frame ROI.
+For schema-1.0 wire compatibility, floor evidence refs remain serialized in
+`floor_model_refs`; new map requests must place one `FloorFitEvidence` ref there.
+Legacy bare `FloorModel` refs remain readable but map preflight rejects them.
 Independent maps require an ROI in meters; each dimension is bounded by the profile
 (default 100 m). Default search budgets are 180 yaw hypotheses, 2,500 translation
 hypotheses, top-8 candidates, 50 ICP iterations, 300 s, 20M source points and 250k
@@ -493,7 +496,7 @@ mutation between resolve and decode. Existing odometry and payload-guard tests m
 continue to pass. This slice does not load target RGB geometry, run BEV/ICP, dispatch
 workers or expose an API.
 **Exit:** [x] the worker-facing source loader returns only exact, finite XYZ meters
-under the sealed point budget; [ ] target geometry and floor evidence are resolved;
+under the sealed point budget; [x] target geometry and floor evidence are resolved;
 [ ] proposal/QA producer and durable worker dispatch are connected.
 
 #### AUD-19.S4c Result / Evidence
@@ -524,4 +527,81 @@ Pre-flight (GUIDE.md Rule 13)
 - checks: focused pytest PASS (106 passed, 1 skipped: KISS-ICP known-motion test
   requires `REC17_LIDAR_ODOMETRY_PYTHON`); `.venv/bin/ruff check src/ tests/` PASS;
   `.venv/bin/ruff format --check src/ tests/` PASS (548 files).
+- DevTools: n/a — no UI/runtime behavior changed.
+
+### AUD-19.S4d — Canonical target geometry and measured floor resolution
+
+**Input:** sealed registered-map/static-cloud request, exact same-job `RgbGeometry`
+and one `FloorFitEvidence` ref, profile, and a worker-supplied maximum GLB byte size.
+**Output:** checksum-verified collision-surface samples/normals in canonical world
+meters and the matching measured target floor plane.
+**Data contract:** recheck the request/profile checksums and target ref type, stage,
+job and URI. Accept only independent-map modes. Resolve exact GLB and floor bytes
+through `ArtifactResolver`; reject meshes above the worker byte cap or sealed point
+budget. The strict collision GLB parser supplies canonical mesh triangles. Sample
+triangle centroids deterministically from the sealed seed, capped by
+`max_points_per_map`, and derive a unit face normal for each sample. `FloorFitEvidence`
+is the published artifact envelope; its `FloorModel` is embedded rather than stored
+as a standalone artifact. Accept evidence only when its exact source ref matches
+the target `RgbGeometry`, its metric-confirmation ref, or its Gaussian master ref
+from that geometry's provenance. Bind the floor normal, offset and confirmed up
+direction only from exactly one embedded `FloorModel` whose status is `supported`;
+uncertain and prior-fallback models, unbound evidence, and ambiguous refs remain
+unresolved. This adapter does not infer source-map floor or prove that two sensors
+observed the same physical space.
+
+**Tests:** both independent-map modes and each supported floor-evidence source;
+exact surface coordinates and normalized normals; seeded sample stability and
+profile cap; missing/ambiguous/non-measured floor; malformed and over-budget mesh;
+worker byte cap; exact geometry/floor checksum rejection; and rejection of floor
+evidence bound to another same-job artifact. No worker/API/Studio integration is
+included.
+**Exit:** [x] the target loader returns exact canonical surface/floor evidence or
+fails closed; [ ] source-map floor estimation, proposal/QA execution and durable
+worker dispatch are connected.
+
+#### AUD-19.S4d Result / Evidence
+
+Added `RegistrationTargetResolver` and `VerifiedRegistrationTarget` in
+`src/services/orchestration/jobs/registration_targets.py`. It accepts only registered
+maps and static clouds, rechecks the sealed request/profile and exact same-job
+geometry/floor references, uses the strict collision GLB reader, and requires a
+caller-provided worker byte limit. It samples triangle centroids deterministically
+under `max_points_per_map`, derives normalized face normals, and constructs the
+world-frame floor plane from the `FloorModel` embedded in one checksum-bound
+`FloorFitEvidence` artifact. The evidence must bind to the geometry or its exact
+metric-confirmation/Gaussian-master lineage. It rejects uncertain or prior-fallback
+floor models and does not choose among multiple floor refs. The schema-1.0 field
+`floor_model_refs` is retained on the wire, while new map preflight requires a
+`FloorFitEvidence` artifact there and stops legacy bare `FloorModel` refs before
+worker admission. There are no production callers yet; API authorization,
+target-revision CAS, source floor fitting, proposal/QA production and durable worker
+dispatch remain open.
+
+Verification: focused registration, source, target, GLB, BEV, ICP, QA, contract,
+floor-evidence and durable-operation suite passed (104 tests); target-resolver tests
+passed separately after import formatting (17 tests). `.venv/bin/ruff check src/ tests/`
+passed; `.venv/bin/ruff format --check src/ tests/` passed (550 Python files);
+`git diff --check` passed. CodeGraph sync reported up to date and the final resolver/
+preflight call graph was explored. `graphify update .` rebuilt 20,919 nodes,
+61,720 edges and 728 communities. These are local artifact and synthetic mesh tests;
+no real map accuracy, worker resource behavior, browser flow or collision safety is
+claimed.
+
+Pre-flight (GUIDE.md Rule 13)
+- codegraph: explored `RegistrationRequest`, `FloorModel`, `ArtifactResolver`,
+  `read_collision_glb` and its callers, BEV target-point/floor contracts, and the
+  existing registration source resolver before edits; re-explored the new resolver.
+- impact: no production caller yet; the resolver is exercised by its focused tests.
+  Existing GLB parser callers and their contracts are unchanged.
+- understand: S4 input-binding flow plus the actual producer contract:
+  `FloorFitEvidence` embeds `FloorModel` and binds it to an exact source ref;
+  understand-anything is not installed in this environment.
+- minimal-code: reused `ArtifactResolver.require_uri`, `read_collision_glb`,
+  `FloorFitEvidence`, `FloorModel` and `RegistrationFloorPlane`; added no dependency
+  or parser format.
+- checks: focused pytest PASS (104 tests; 17 target-resolver tests after the
+  import-only lint fix); `.venv/bin/ruff check src/ tests/` PASS;
+  `.venv/bin/ruff format --check src/ tests/` PASS (550 files);
+  `git diff --check` PASS.
 - DevTools: n/a — no UI/runtime behavior changed.

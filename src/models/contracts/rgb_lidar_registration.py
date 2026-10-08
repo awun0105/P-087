@@ -77,6 +77,7 @@ class RegistrationFindingCode(StrEnum):
     METRIC_SCALE_UNKNOWN = "METRIC_SCALE_UNKNOWN"
     FLOOR_UNSUPPORTED = "FLOOR_UNSUPPORTED"
     FLOOR_UNCERTAIN = "FLOOR_UNCERTAIN"
+    TARGET_FLOOR_EVIDENCE_REQUIRED = "TARGET_FLOOR_EVIDENCE_REQUIRED"
     LOW_OVERLAP = "LOW_OVERLAP"
     LOW_COVERAGE = "LOW_COVERAGE"
     HIGH_RESIDUAL = "HIGH_RESIDUAL"
@@ -288,6 +289,7 @@ class RegistrationRequest(ContractModel):
     metric_state: Literal["confirmed", "unknown"]
     metric_confirmation_ref: ProductArtifactRef | None = None
     floor_state: Literal["supported", "uncertain", "unsupported"]
+    # Keep the schema-1.0 wire name; new refs point to the published FloorFitEvidence envelope.
     floor_model_refs: list[ProductArtifactRef] = Field(default_factory=list)
     target_roi_world: RegistrationROI | None = None
     profile: RegistrationProfile
@@ -332,17 +334,24 @@ class RegistrationRequest(ContractModel):
         elif self.metric_confirmation_ref is not None:
             raise ValueError("unknown metric state cannot carry a confirmation reference")
         if self.floor_state == "supported" and not self.floor_model_refs:
-            raise ValueError("supported floor state requires exact floor-model references")
+            raise ValueError("supported floor state requires exact floor-evidence references")
         if self.floor_state == "unsupported" and self.floor_model_refs:
-            raise ValueError("unsupported floor state cannot bind a supported floor model")
+            raise ValueError("unsupported floor state cannot bind supported floor evidence")
         for reference in self.floor_model_refs:
             if (
-                reference.artifact_type != "FloorModel"
+                reference.artifact_type not in {"FloorFitEvidence", "FloorModel"}
                 or reference.job_id != self.target_job_id
                 or not reference.artifact_uri.startswith(f"artifact://jobs/{self.target_job_id}/")
             ):
-                raise ValueError("floor model reference must belong to the target job")
+                raise ValueError("floor evidence reference must belong to the target job")
+            if reference.artifact_type == "FloorFitEvidence" and reference.producer_stage != StageId.OBJECT_EXTRACT:
+                raise ValueError("floor-fit evidence must come from the object-extraction stage")
         return self
+
+    @property
+    def floor_evidence_refs(self) -> list[ProductArtifactRef]:
+        """FloorFitEvidence refs under the schema-1.0 field name retained for compatibility."""
+        return self.floor_model_refs
 
 
 class RegistrationPreflight(ContractModel):
@@ -389,6 +398,11 @@ def registration_preflight(request: RegistrationRequest) -> RegistrationPrefligh
         findings.append(RegistrationFindingCode.POINT_BUDGET_EXCEEDED)
     if request.metric_state == "unknown" and request.profile.scale_policy == "confirmed_metric_only":
         findings.append(RegistrationFindingCode.METRIC_SCALE_UNKNOWN)
+    if request.source.mode in {RegistrationInputMode.REGISTERED_MAP, RegistrationInputMode.STATIC_CLOUD} and (
+        len(request.floor_evidence_refs) != 1
+        or any(reference.artifact_type != "FloorFitEvidence" for reference in request.floor_evidence_refs)
+    ):
+        findings.append(RegistrationFindingCode.TARGET_FLOOR_EVIDENCE_REQUIRED)
     if request.floor_state == "unsupported":
         findings.append(RegistrationFindingCode.FLOOR_UNSUPPORTED)
     elif request.floor_state == "uncertain":
@@ -687,7 +701,7 @@ def validate_registration_qa_binding(
         required_refs = [proposal.source_geometry_ref, proposal.target_rgb_geometry_ref]
         if request.metric_confirmation_ref is not None:
             required_refs.append(request.metric_confirmation_ref)
-        required_refs.extend(request.floor_model_refs)
+        required_refs.extend(request.floor_evidence_refs)
         if request.profile.qualification_record_ref is not None:
             required_refs.append(request.profile.qualification_record_ref)
         if any(reference not in report.evidence_refs for reference in required_refs):

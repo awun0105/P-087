@@ -46,7 +46,7 @@ def _ref(job_id: str, artifact_type: str) -> ProductArtifactRef:
         artifact_uri=f"artifact://jobs/{job_id}/registration/{artifact_type.lower()}.json",
         artifact_checksum=_checksum(artifact_type),
         data_class="derived",
-        producer_stage=StageId.RGB_LIDAR_ALIGN,
+        producer_stage=(StageId.OBJECT_EXTRACT if artifact_type == "FloorFitEvidence" else StageId.RGB_LIDAR_ALIGN),
         job_id=job_id,
     )
 
@@ -106,7 +106,7 @@ def _request(request_id: str = "registration-request-1", requester_id: str = "us
                 job_id=job_id,
             ),
             "floor_state": "supported",
-            "floor_model_refs": [_ref(job_id, "FloorModel")],
+            "floor_model_refs": [_ref(job_id, "FloorFitEvidence")],
             "target_roi_world": RegistrationROI(min_xyz_m=(-20, -20, -2), max_xyz_m=(20, 20, 8)),
             "profile": profile,
             "profile_checksum": profile.profile_checksum,

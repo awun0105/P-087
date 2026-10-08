@@ -91,7 +91,7 @@ def _request(*, qualified: bool, same_scene: bool = True) -> RegistrationRequest
             "metric_state": "confirmed",
             "metric_confirmation_ref": _ref("RGBMetricConfirmation", StageId.METRIC_CANONICALIZE),
             "floor_state": "supported",
-            "floor_model_refs": [_ref("FloorModel", StageId.RGB_GEOMETRY)],
+            "floor_model_refs": [_ref("FloorFitEvidence", StageId.OBJECT_EXTRACT)],
             "target_roi_world": RegistrationROI(min_xyz_m=(-20, -20, -2), max_xyz_m=(20, 20, 8)),
             "profile": profile,
             "profile_checksum": profile.profile_checksum,

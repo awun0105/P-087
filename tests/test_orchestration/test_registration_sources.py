@@ -66,7 +66,7 @@ def _ref(job_id: str, artifact_type: str, checksum: str | None = None) -> Produc
         artifact_uri=f"artifact://jobs/{job_id}/registration/{artifact_type.lower()}.json",
         artifact_checksum=checksum or _checksum(artifact_type),
         data_class="derived",
-        producer_stage=StageId.RGB_LIDAR_ALIGN,
+        producer_stage=(StageId.OBJECT_EXTRACT if artifact_type == "FloorFitEvidence" else StageId.RGB_LIDAR_ALIGN),
         job_id=job_id,
     )
 
@@ -265,7 +265,7 @@ def _fixture(
             "metric_state": "confirmed",
             "metric_confirmation_ref": _ref("job-registration-1", "RGBMetricConfirmation"),
             "floor_state": "supported",
-            "floor_model_refs": [_ref("job-registration-1", "FloorModel")],
+            "floor_model_refs": [_ref("job-registration-1", "FloorFitEvidence")],
             "target_roi_world": RegistrationROI(min_xyz_m=(-20, -20, -2), max_xyz_m=(20, 20, 8)),
             "profile": profile,
             "profile_checksum": profile.profile_checksum,
