@@ -18,10 +18,11 @@ contract đã hoàn tất; AUD-03.S3 review-screen gate đã xác nhận bằng 
 MCP trong phiên Reviewer. Real Isaac proof vẫn thuộc AUD-05. PostgreSQL qualification đã hoàn tất trên PostgreSQL 16 container
 (`R2S_TEST_POSTGRES_URL`): toàn bộ suite orchestration 667 passed (0 skipped)
 gồm migration v1→v16, row locking, release sealing, scene head CAS và guest quota
-ledger. AUD-21.S2 đã implement Guest signup và role lifecycle,
-nhưng `AUTH_GUEST_SIGNUP_ENABLED` đang mặc định `false`; browser gate của form
-còn UNVERIFIED. AUD-21.S3 đã thêm owner guards, immutable job owner và audited
-operator intervention; browser DevTools gate còn UNVERIFIED do Chrome profile lock.
+ledger. AUD-21.S2 đã implement Guest signup và role lifecycle; Chrome DevTools
+xác nhận trang Guest signup đóng fail-closed khi response `/auth/me` thiếu flag.
+Enabled-form/API submission vẫn UNVERIFIED vì process hiện tại không expose flag.
+AUD-21.S3 đã thêm owner guards, immutable job owner và audited operator intervention;
+three-role browser acceptance vẫn pending vì chưa có phiên Guest.
 AUD-22.S2 đã implement quota Guest atomic và enforcement trên các API tạo job/Retry.
 AUD-22.S3 đã thêm quota/reset UI, refresh sau accepted run và stale-tab 429 recovery.
 AUD-21.S4 đã áp dụng server capability cho các thao tác Studio và quyền theo
@@ -396,8 +397,9 @@ immutable nullable column outside the checksum-bound manifest; deletion checks
 the entire cascade; Editor/Reviewer cross-owner actions are audited. The API suite
 passed 138 tests, orchestration passed 667 with 0 skips, and processing/upload
 integration passed 9; PostgreSQL migrations và locks pass.
-Chrome DevTools remains UNVERIFIED because MCP cannot attach to its locked profile.
-`AUTH_GUEST_SIGNUP_ENABLED` remains false. AUD-22.S2 implements the durable
+Chrome DevTools confirmed the Guest signup closed state; enabled Guest/API and
+three-role owner/quota flows remain UNVERIFIED. `AUTH_GUEST_SIGNUP_ENABLED`
+remains false. AUD-22.S2 implements the durable
 Guest quota ledger; AUD-22.S3 implements local quota/reset UX and stale-tab refresh.
 Frontend/API checks pass; PostgreSQL qualification pass; DevTools browser acceptance
 remains pending.
@@ -508,6 +510,7 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [x] AUD-20.S3 authenticated browser rendering for scene grid/list and Team seed names/roles.
 - [ ] AUD-20.S3 browser verification with a snapshot-bearing imported scene and stable-ID/migration evidence; AUD-21.S2/S4 browser gates; AUD-21.S3–S4
       full browser/API acceptance before opening Guest signup.
+- [x] AUD-21.S2 browser verification of Guest signup's fail-closed state with the rollout field absent; enabled signup remains unverified.
 - [x] Implementation AUD-22.S2 durable Guest quota ledger/API enforcement and
       AUD-22.S3 local quota UX; SQLite/API/frontend checks.
 - [ ] AUD-22.S2 shared-PostgreSQL concurrency/restart qualification; AUD-22.S3

@@ -246,15 +246,18 @@ mock hoặc source review không chứng minh feature đã chạy.
   `.env.example`; CLI help lists `{guest,editor,reviewer}`. `git diff --check` passed.
 - **Gate report:** CodeGraph PASS; minimal scope PASS; backend lint/format/tests
   PASS; frontend typecheck/lint/tests PASS; Compose validation PASS; no schema
-  migration required. Browser rendered-UI gate is **UNVERIFIED**: Chrome DevTools
-  MCP still reports the profile lock
-  (`/home/lqaq/.cache/chrome-devtools-mcp/chrome-profile` already running), so
-  CLI tests are not claimed as browser proof.
+  migration required. Chrome DevTools MCP verified `/register?mode=guest` in an
+  isolated unauthenticated context. The page shows the closed-rollout message;
+  `GET /api/v1/auth/me` returned 200 with no `guest_signup_enabled` field, so the
+  UI stayed closed by its documented fail-closed default. The enabled form and
+  submission remain **UNVERIFIED** because this running API does not expose the
+  rollout field; no account was created.
 - **Pending:** Signup remains disabled by default. Do not enable
   `AUTH_GUEST_SIGNUP_ENABLED` before AUD-21.S3 ownership guards and AUD-22 quota
-  enforcement are complete. Run the browser form gate and PostgreSQL concurrency
-  variants when those runtimes are available. AUD-21.S3 must add ownership checks;
-  this sprint intentionally leaves the existing Editor-only product gates intact.
+  enforcement are qualified. Run the enabled-form browser/API gate and PostgreSQL
+  concurrency variants when the matching API/runtime is available. AUD-21.S3 adds
+  ownership checks; this sprint intentionally leaves existing Editor-only product
+  gates intact.
 
 ### AUD-21.S3 — backend ownership và interference
 
