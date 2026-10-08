@@ -26,6 +26,7 @@ import trimesh
 from src.config import Settings
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.coordinates import CoordinateSystem, Transform
+from src.models.contracts.floor_model import FloorModel
 from src.models.contracts.manifests import JobManifest, StageId
 from src.models.contracts.object_membership import ObjectMembershipArtifact
 from src.models.contracts.reconstruction import ReconstructionBundle
@@ -48,6 +49,7 @@ from src.services.scene.editing.membership import (
     encode_gaussian_membership_labels,
     membership_labels_for_parts,
 )
+from src.services.scene.floor_model import fit_canonical_floor_model, point_cloud_checksum
 from src.services.scene.geometric import GeometricConfig, box_from_points
 from src.services.scene.sampro3d.consolidate import Sampro3dConfig, segment
 from src.services.scene.sampro3d.pipeline import CameraFrame, Sam2Runtime, run_sam2
@@ -140,6 +142,7 @@ def _seeds(
     centers: np.ndarray,
     runtime: Sam2Runtime,
     workspace: Path,
+    floor_model: FloorModel,
     cancel_event: Event | None = None,
 ) -> list[np.ndarray]:
     """Hạt giống từng vật (chỉ số vào `rows`) từ SAMPro3D; bỏ khối không phải vật (kệ dài, mảnh vụn)."""
@@ -148,8 +151,16 @@ def _seeds(
     points = gaussian_split.positions(rows)[work]
     try:
         instances = segment(
-            run_sam2(points, frames, runtime, workspace / "sampro3d", cancel_event=cancel_event),
+            run_sam2(
+                points,
+                frames,
+                runtime,
+                workspace / "sampro3d",
+                floor_model=floor_model,
+                cancel_event=cancel_event,
+            ),
             points,
+            floor_model,
             Sampro3dConfig(),
         )
     except ValueError as error:
@@ -192,6 +203,8 @@ def objectify(
     source_visual_ref = metric_visual_master(bundle, resolve)
     master = resolve(source_visual_ref)
     rows = gaussian_split.read_gaussian_ply(master.read_bytes())
+    source_points = gaussian_split.positions(rows)
+    floor_model = fit_canonical_floor_model(source_points, point_cloud_checksum(source_points))
     views = camera_views(bundle.camera_pose_refs[0], bundle.rgb_frame_refs, resolve)
     frames = [
         CameraFrame(view=view.model_dump(mode="json", exclude={"image"}), image_path=resolve(view.image))
@@ -199,7 +212,15 @@ def objectify(
     ]
     view_requests = [{**frame.view, "image_path": str(frame.image_path)} for frame in frames]
     _ensure_not_cancelled(cancel_event)
-    seeds = _seeds(rows, frames, np.array([view.center for view in views]), runtime, workspace, cancel_event)
+    seeds = _seeds(
+        rows,
+        frames,
+        np.array([view.center for view in views]),
+        runtime,
+        workspace,
+        floor_model,
+        cancel_event,
+    )
     if not seeds:
         raise ObjectifyError("không tìm thấy vật nào để tách")
 
@@ -225,6 +246,7 @@ def objectify(
         cancel_event=cancel_event,
     )
     labels = np.load(workspace / "labels.npz")["labels"]
+    labels = gaussian_split.assign_floor_gaussians_to_background(rows, labels, floor_model)
     background, parts = gaussian_split.split(rows, labels)
     if not parts:
         raise ObjectifyError("gán nhãn không cho ra vật nào đủ lớn")
@@ -403,6 +425,9 @@ def objectify(
         "inpaint_method": inpaint["method"],
         "inpaint_note": "Gaussian vá nằm cuối file nền; là hình suy đoán cho vùng chưa từng được quay",
         "lift_views": int(lift["views"]),
+        "floor_model_status": floor_model.status,
+        "floor_fallback_reason": floor_model.fallback_reason,
+        "floor_profile_checksum": floor_model.profile_checksum,
     }
     environment = SceneEnvironment(
         visual_ref=visual_ref,

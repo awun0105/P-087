@@ -79,12 +79,13 @@ consumer fixture proves an observable sample still cannot PASS before projection
 scoring. Verification: 61 focused tests, Ruff, formatting, contract mirror and
 current CodeGraph index pass. Projection scoring, held-out qualification and
 production source gating remain pending for AUD-13.S2/S3.
-AUD-14.S1 adds a versioned floor prior/profile/model and deterministic constrained
-RANSAC with slope, prior-distance, robust-noise, support, coverage and competing-plane
-checks. Missing or ambiguous evidence remains uncertain and classifies no points as
-floor. Verification: 30 focused tests, repo Ruff/format, contract mirror and current
-CodeGraph index pass. Existing fixed-Z geometric/Gaussian consumers remain unchanged
-until AUD-14.S2; no real production sloped-floor artifact is qualified yet.
+AUD-14.S1 adds deterministic constrained floor fitting; AUD-14.S2 replaces fixed-Z
+filters in geometric fallback, SAMPro3D, objectify, Gaussian growth and source
+collision correction with plane-relative masks. Sparse support uses an explicit
+schema-1.1 REC-06 prior fallback; high-noise and competing planes remain uncertain.
+Verification: 81 focused tests, repository Ruff/format, contract mirror and current
+CodeGraph index pass. No production sloped-floor artifact or collision-retention
+benchmark is qualified; AUD-14.S3 must persist exact source-bound fit evidence.
 AUD-19.S1 adds checksum-sealed registration input/profile/request/proposal/QA
 contracts and binding/state guards. Independent maps bind exact PCD/PLY file and
 parsed-header identity, m/cm/mm units, frame, assembly revision, project context,
@@ -314,7 +315,8 @@ AUD-19. Static-map consumer chỉ enable sau registration QA, không bắt AUD-1
 
 Progress hiện tại: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3,
 AUD-03.S1–S3, AUD-04.S1–S3, AUD-10.S1–S3 và AUD-07.S1–S2 đã được commit riêng
-theo sprint. AUD-08.S4 và AUD-09.S1 cũng đã được commit riêng.
+theo sprint. AUD-08.S4, AUD-09.S1, AUD-14.S1–S2 và AUD-19.S1 cũng đã được commit
+riêng.
 AUD-09.S2 đã nối Inspector/API và preview collider với publication revision CAS;
 AUD-09.S3 đã xác nhận legacy/hybrid USD local-pose fidelity, cập nhật preflight
 world bounds và kiểm tra candidate/report invalidation. Focused API/domain/frontend

@@ -11,6 +11,7 @@ from threading import Event
 
 import numpy as np
 
+from src.models.contracts.floor_model import FloorModel
 from src.services.process_control import ProcessTimeoutError, run_cancellable_process
 from src.services.scene.geometric import Candidate, GeometricConfig, box_from_points
 from src.services.scene.sampro3d.consolidate import Proposal, Sampro3dConfig, segment, select_prompts
@@ -47,11 +48,12 @@ def run_sam2(
     runtime: Sam2Runtime,
     workspace: Path,
     *,
+    floor_model: FloorModel,
     cancel_event: Event | None = None,
 ) -> Proposal:
     """Gọi runtime SAM2 trên toàn bộ frame; lỗi/timeout → ValueError có ngữ cảnh."""
     workspace.mkdir(parents=True, exist_ok=True)
-    prompts = select_prompts(points)
+    prompts = select_prompts(points, floor_model)
     if not len(prompts):
         raise ValueError("không có điểm nào trên sàn để đặt prompt")
     np.savez(workspace / "points.npz", points=points.astype(np.float32), prompts=prompts)
@@ -111,8 +113,9 @@ def extract(
     runtime: Sam2Runtime,
     workspace: Path,
     *,
+    floor_model: FloorModel,
     cancel_event: Event | None = None,
 ) -> list[Candidate]:
     """Toàn bộ SAMPro3D: prompt → SAM2 → lọc/bỏ phiếu/gộp → hộp ứng viên."""
-    proposal = run_sam2(points, frames, runtime, workspace, cancel_event=cancel_event)
-    return candidates_from_instances(points, segment(proposal, points, Sampro3dConfig()))
+    proposal = run_sam2(points, frames, runtime, workspace, floor_model=floor_model, cancel_event=cancel_event)
+    return candidates_from_instances(points, segment(proposal, points, floor_model, Sampro3dConfig()))

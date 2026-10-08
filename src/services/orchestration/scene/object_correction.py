@@ -31,10 +31,10 @@ from src.services.scene.editing.membership import (
     encode_gaussian_membership_labels,
     validate_object_membership_command,
 )
+from src.services.scene.floor_model import above_floor_mask, fit_canonical_floor_model, point_cloud_checksum
 
 _IDENTITY = (0.0, 0.0, 0.0, 1.0)
 _MIN_OBJECT_GAUSSIANS = 50
-_FLOOR_CLEARANCE_M = SplitConfig().floor_clearance_m
 _ROI_EPSILON_M = 1e-6
 
 
@@ -285,6 +285,8 @@ def reassign_object_membership(
     positions = gaussian_split.positions(source_rows)
     if not np.isfinite(positions).all():
         raise ObjectMembershipValidationError("source Gaussian positions must be finite")
+    gaussian_floor = fit_canonical_floor_model(positions, point_cloud_checksum(positions))
+    gaussian_above_floor = above_floor_mask(positions, gaussian_floor)
     labels = decode_gaussian_membership_labels(editor.resolver.require(manifest.labels_ref).read_bytes(), manifest)
     if len(labels) != len(source_rows):
         raise ObjectMembershipValidationError("membership rows do not match source PLY rows")
@@ -299,6 +301,8 @@ def reassign_object_membership(
         labels == gaussian_split.BACKGROUND if command.source_object_id is None else np.isin(labels, source_labels)
     )
     selected_rows = in_region & source_rows_mask
+    if command.target_object_id is not None:
+        selected_rows &= gaussian_above_floor
     moved_gaussian_count = int(np.count_nonzero(selected_rows))
     if moved_gaussian_count == 0:
         raise ObjectMembershipValidationError("source ROI contains no Gaussian rows owned by the requested source")
@@ -331,16 +335,16 @@ def reassign_object_membership(
     collision_roi = np.all(
         (collision.centroids >= low - _ROI_EPSILON_M) & (collision.centroids <= high + _ROI_EPSILON_M), axis=1
     )
-    protected_floor = collision_roi & (collision.centroids[:, 2] <= _FLOOR_CLEARANCE_M)
-    selected_triangles = (
-        collision_roi
-        & (collision.centroids[:, 2] > _FLOOR_CLEARANCE_M)
-        & (collision.owner_labels == collision_source_label)
-    )
+    collision_floor = fit_canonical_floor_model(collision.centroids, point_cloud_checksum(collision.centroids))
+    collision_above_floor = above_floor_mask(collision.centroids, collision_floor)
+    protected_floor = collision_roi & ~collision_above_floor
+    selected_triangles = collision_roi & (collision.owner_labels == collision_source_label)
+    if command.target_object_id is not None:
+        selected_triangles &= collision_above_floor
     moved_triangle_count = int(np.count_nonzero(selected_triangles))
     if command.target_object_id is not None and moved_triangle_count == 0:
         raise ObjectMembershipValidationError(
-            "source ROI contains Gaussian rows but no unambiguous collision triangles above the ground plane"
+            "source ROI contains Gaussian rows but no unambiguous collision triangles above the fitted floor plane"
         )
 
     updated_labels = labels.copy()
@@ -677,7 +681,7 @@ def reassign_object_membership(
         "membership_checksum_after": updated_label_ref.artifact_checksum,
         "moved_gaussians": moved_gaussian_count,
         "collision_triangles": moved_triangle_count,
-        "floor_triangles_preserved": int(np.count_nonzero(protected_floor)),
+        "floor_triangles_preserved": int(np.count_nonzero(protected_floor & ~selected_triangles)),
         "ambiguous_collision_triangles_preserved_as_background": collision.ambiguous_triangle_count,
         "background_gaussians": background_count,
         "inpainted_gaussians": inpainted_count,

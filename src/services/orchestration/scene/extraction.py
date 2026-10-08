@@ -16,6 +16,7 @@ from threading import Event
 import numpy as np
 
 from src.config import Settings
+from src.models.contracts.floor_model import FloorModel
 from src.models.contracts.manifests import JobManifest, StageArtifact, StageId, StageStatus
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.models.contracts.scene import SceneObject
@@ -30,6 +31,7 @@ from src.services.process_control import ProcessCancelledError
 from src.services.reconstruction import camera_views, confirmation_summary, metric_gaussian_points
 from src.services.scene.builder import scene_from_bundle
 from src.services.scene.collision_ownership import bind_source_collision_ownership
+from src.services.scene.floor_model import fit_canonical_floor_model, point_cloud_checksum
 from src.services.scene.geometric import GeometricConfig, candidate_objects, collision_vertices, objects_from_candidates
 from src.services.scene.publisher import with_scene_checksum
 from src.services.scene.sampro3d.pipeline import METHOD as SAMPRO3D_METHOD
@@ -44,13 +46,14 @@ _CROP_Z = (-0.5, 4.0)
 
 def _points_and_frames(
     registry: ProjectRegistry, job: JobManifest, bundle: ReconstructionBundle
-) -> tuple[np.ndarray, list[CameraFrame]]:
+) -> tuple[np.ndarray, list[CameraFrame], FloorModel]:
     resolve = registry.runtime_resolver.require
     stage = metric_confirmation_stage(job)
     if stage is None or stage.artifact_uri is None or stage.artifact_checksum is None:
         raise ValueError("job chưa có xác nhận tỉ lệ mét")
     confirmation = confirmation_summary(stage.artifact_uri, stage.artifact_checksum, job.job_id, resolve).reference
     points = metric_gaussian_points(confirmation, resolve)
+    floor_model = fit_canonical_floor_model(points, point_cloud_checksum(points))
     views = camera_views(bundle.camera_pose_refs[0], bundle.rgb_frame_refs, resolve)
     centers = np.array([view.center for view in views])
     low, high = centers.min(axis=0)[:2] - _CROP_MARGIN_M, centers.max(axis=0)[:2] + _CROP_MARGIN_M
@@ -66,7 +69,7 @@ def _points_and_frames(
         CameraFrame(view=view.model_dump(mode="json", exclude={"image"}), image_path=resolve(view.image))
         for view in views
     ]
-    return points[inside], frames
+    return points[inside], frames, floor_model
 
 
 def _sam2_runtime(settings: Settings) -> Sam2Runtime | None:
@@ -114,9 +117,21 @@ def box_candidates(
         try:
             if cancel_event is not None and cancel_event.is_set():
                 raise ProcessCancelledError("Objectify operation was cancelled")
-            points, frames = _points_and_frames(registry, job, bundle)
-            candidates = extract(points, frames, runtime, workspace / "sampro3d", cancel_event=cancel_event)
-            objects = objects_from_candidates(job.job_id, candidates, publish, {"method": SAMPRO3D_METHOD})
+            points, frames, floor_model = _points_and_frames(registry, job, bundle)
+            candidates = extract(
+                points,
+                frames,
+                runtime,
+                workspace / "sampro3d",
+                floor_model=floor_model,
+                cancel_event=cancel_event,
+            )
+            objects = objects_from_candidates(
+                job.job_id,
+                candidates,
+                publish,
+                {"method": SAMPRO3D_METHOD, "floor_profile_checksum": floor_model.profile_checksum},
+            )
             method = SAMPRO3D_METHOD
         except ProcessCancelledError:
             raise
@@ -132,8 +147,12 @@ def box_candidates(
             if cancel_event is not None and cancel_event.is_set():
                 raise ProcessCancelledError("Objectify operation was cancelled")
             mesh = registry.runtime_resolver.require(bundle.canonical_geometry_ref).read_bytes()
-            objects = candidate_objects(job.job_id, collision_vertices(mesh), publish, GeometricConfig())
+            vertices = collision_vertices(mesh)
+            floor_model = fit_canonical_floor_model(vertices, point_cloud_checksum(vertices))
+            objects = candidate_objects(job.job_id, vertices, publish, floor_model, GeometricConfig())
             method = "geometric_voxel_components_v1"
+            if floor_model.status == "uncertain":
+                note = f"{note}; floor fit uncertain ({floor_model.fallback_reason}), no floor-relative candidates"
         except (ValueError, OSError) as error:
             logger.warning("Tách hình học thất bại job=%s cause=%s", job.job_id, type(error).__name__)
             note = f"{note}; tách hình học lỗi ({type(error).__name__}), scene chỉ có môi trường"

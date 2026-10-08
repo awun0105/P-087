@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 from dataclasses import dataclass
 from typing import cast
@@ -20,6 +21,14 @@ from src.models.contracts.floor_model import (
 )
 
 _CLASSIFY_CHUNK_SIZE = 250_000
+_CONFIRMED_PRIOR_FALLBACK_REASONS = {
+    "insufficient_points",
+    "degenerate_points",
+    "no_floor_near_prior",
+    "insufficient_inliers",
+    "low_inlier_ratio",
+    "insufficient_coverage",
+}
 
 
 @dataclass(frozen=True)
@@ -343,6 +352,77 @@ def fit_floor_model(
     )
 
 
+def point_cloud_checksum(points_world_m: np.ndarray) -> Checksum:
+    """Hash the exact ordered point coordinates used by an in-memory floor fit."""
+    points = np.asarray(points_world_m)
+    if points.ndim != 2 or points.shape[1] != 3:
+        raise ValueError("floor checksum expects an (N, 3) point array")
+    if not (np.issubdtype(points.dtype, np.integer) or np.issubdtype(points.dtype, np.floating)):
+        raise ValueError("floor checksum expects real-valued points")
+    canonical = np.ascontiguousarray(points.astype("<f8", copy=False))
+    digest = hashlib.sha256()
+    digest.update(np.asarray(canonical.shape, dtype="<i8").tobytes())
+    digest.update(canonical.tobytes())
+    return f"sha256:{digest.hexdigest()}"
+
+
+def fit_canonical_floor_model(
+    points_world_m: np.ndarray,
+    source_checksum: Checksum,
+    profile: FloorFitProfile = FloorFitProfile(),
+) -> FloorModel:
+    """Fit the REC-06 canonical floor, with a bounded prior fallback for sparse support."""
+    prior = FloorPrior(up_direction_world=(0.0, 0.0, 1.0), point_on_floor_world=(0.0, 0.0, 0.0))
+    fitted = fit_floor_model(points_world_m, source_checksum, prior, profile)
+    if fitted.status != "uncertain" or fitted.fallback_reason not in _CONFIRMED_PRIOR_FALLBACK_REASONS:
+        return fitted
+    values = fitted.model_dump(mode="json")
+    values.update(
+        schema_version="1.1",
+        status="confirmed_prior_fallback",
+        floor_band_m=profile.max_floor_band_m,
+        plane_normal_world=prior.up_direction_world,
+        plane_offset_m=0.0,
+    )
+    return FloorModel.model_validate(values)
+
+
+def above_floor_mask(
+    points_world_m: np.ndarray,
+    model: FloorModel,
+    *,
+    max_height_m: float | None = None,
+) -> np.ndarray:
+    """Select points above a supported plane or explicit confirmed-prior fallback."""
+    points = np.asarray(points_world_m)
+    if points.ndim != 2 or points.shape[1] != 3:
+        raise ValueError("floor classification expects an (N, 3) point array")
+    if not (np.issubdtype(points.dtype, np.integer) or np.issubdtype(points.dtype, np.floating)):
+        raise ValueError("floor classification expects real-valued points")
+    if max_height_m is not None and (not math.isfinite(max_height_m) or max_height_m <= 0):
+        raise ValueError("maximum floor-relative height must be positive and finite")
+    keep = np.zeros(len(points), dtype=bool)
+    if (
+        model.status not in {"supported", "confirmed_prior_fallback"}
+        or model.plane_normal_world is None
+        or model.plane_offset_m is None
+        or model.floor_band_m is None
+    ):
+        return keep
+    normal = np.asarray(model.plane_normal_world)
+    for start in range(0, len(points), _CLASSIFY_CHUNK_SIZE):
+        stop = min(start + _CLASSIFY_CHUNK_SIZE, len(points))
+        chunk = np.asarray(points[start:stop], dtype=np.float64)
+        finite = np.isfinite(chunk).all(axis=1)
+        signed_distance = np.zeros(len(chunk), dtype=np.float64)
+        signed_distance[finite] = chunk[finite] @ normal + model.plane_offset_m
+        above = finite & (signed_distance > model.floor_band_m)
+        if max_height_m is not None:
+            above &= signed_distance < max_height_m
+        keep[start:stop] = above
+    return keep
+
+
 def classify_floor_points(points_world_m: np.ndarray, model: FloorModel) -> np.ndarray:
     """Return compact labels; uncertain fits classify every point as UNKNOWN."""
     points = np.asarray(points_world_m)
@@ -351,7 +431,11 @@ def classify_floor_points(points_world_m: np.ndarray, model: FloorModel) -> np.n
     if not (np.issubdtype(points.dtype, np.integer) or np.issubdtype(points.dtype, np.floating)):
         raise ValueError("floor classification expects real-valued points")
     labels = np.full(len(points), FloorPointClass.UNKNOWN, dtype=np.uint8)
-    if model.status != "supported" or model.plane_normal_world is None or model.plane_offset_m is None:
+    if (
+        model.status not in {"supported", "confirmed_prior_fallback"}
+        or model.plane_normal_world is None
+        or model.plane_offset_m is None
+    ):
         return labels
     band = model.floor_band_m
     if band is None:

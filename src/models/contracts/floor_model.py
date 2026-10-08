@@ -13,7 +13,7 @@ from src.models.contracts.artifacts import Checksum, ContractModel
 from src.models.contracts.identity import canonical_json_bytes
 
 Vector3 = tuple[FiniteFloat, FiniteFloat, FiniteFloat]
-FloorFitStatus = Literal["supported", "uncertain"]
+FloorFitStatus = Literal["supported", "confirmed_prior_fallback", "uncertain"]
 FloorFitFallbackReason = Literal[
     "missing_floor_prior",
     "invalid_point_shape",
@@ -93,9 +93,9 @@ class FloorFitProfile(ContractModel):
 
 
 class FloorModel(ContractModel):
-    """Measured plane and evidence; an uncertain fit is never safe for filtering."""
+    """Measured plane or explicit canonical-prior fallback; uncertain fits cannot filter points."""
 
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.0", "1.1"] = "1.0"
     artifact_type: Literal["FloorModel"] = "FloorModel"
     algorithm: Literal["constrained_ransac_plane_v1"] = "constrained_ransac_plane_v1"
     frame: Literal["world"] = "world"
@@ -162,6 +162,26 @@ class FloorModel(ContractModel):
             )
             if abs(signed_prior_distance) > self.profile.prior_band_m:
                 raise ValueError("supported floor model exceeds the embedded prior distance")
+        elif self.status == "confirmed_prior_fallback":
+            if self.schema_version != "1.1":
+                raise ValueError("confirmed prior fallback requires FloorModel schema 1.1")
+            if self.fallback_reason is None or self.prior is None or self.plane_normal_world is None:
+                raise ValueError("confirmed prior fallback requires its prior, plane, and fit reason")
+            if self.floor_band_m is None or self.robust_noise_sigma_m is not None:
+                raise ValueError("confirmed prior fallback requires a bounded band without claiming measured noise")
+            if not self.profile.min_floor_band_m <= self.floor_band_m <= self.profile.max_floor_band_m:
+                raise ValueError("confirmed prior fallback band exceeds the embedded profile")
+            if any(
+                not math.isclose(normal, up, rel_tol=0.0, abs_tol=1e-6)
+                for normal, up in zip(self.plane_normal_world, self.prior.up_direction_world, strict=True)
+            ):
+                raise ValueError("confirmed prior fallback plane must use the confirmed up direction")
+            prior_distance = (
+                sum(a * b for a, b in zip(self.plane_normal_world, self.prior.point_on_floor_world, strict=True))
+                + self.plane_offset_m
+            )
+            if not math.isclose(prior_distance, 0.0, rel_tol=0.0, abs_tol=1e-6):
+                raise ValueError("confirmed prior fallback plane must pass through the confirmed floor point")
         elif self.fallback_reason is None:
             raise ValueError("uncertain floor model requires an explicit fallback reason")
         return self

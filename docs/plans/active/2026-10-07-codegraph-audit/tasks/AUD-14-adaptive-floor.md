@@ -28,10 +28,15 @@ Input: canonical metric geometry/points, confirmed floor/up prior, noise/fit
 profile và source refs. Output proposed FloorModel/fit evidence + per-point
 floor classification, candidates/background segmentation và provenance.
 
-FloorModel: version, frame=world, unit=meter, plane normal+offset, normal hướng
-canonical up, source/config checksum, inlier count/coverage, residual/noise scale,
-status supported/uncertain/fallback reason. Plane distance dùng signed n·p+d,
-threshold theo measured noise + bounded profile; không dùng raw z cho mọi slope.
+FloorModel v1.0 records a supported fit or explicit uncertainty. FloorModel v1.1
+also records `confirmed_prior_fallback`: the REC-06 canonical plane and a bounded
+profile band are used only for sparse/degenerate support reasons; it carries the
+fit failure reason and does not claim measured noise. High noise, ambiguous planes,
+invalid shape and non-finite points remain uncertain and cannot classify points.
+Every usable plane records frame=world, unit=meter, normal, offset, source/profile
+checksum, support, coverage and residual/noise when measured. Plane distance uses
+signed `n·p+d` with measured or explicit bounded thresholds; fixed world-Z masks
+are not used for floor separation.
 Local/multiple floor surfaces hoặc ramp outside single-plane support phải báo
 unsupported/uncertain, không force dominant wall thành floor.
 
@@ -77,12 +82,15 @@ input, ramp/multiple levels, outlier robustness and uncertain fallback.
 low obstacles/wall/support preserved in environment/physics.
 
 Implement: replace relevant fixed-z masks with plane/noise policy; keep existing
-connected-component clustering if adequate. Qualify DBSCAN/cKDTree radius clustering
-only for documented failure case, with memory bounds and unit-aware parameters.
-Adapt Gaussian growth floor guard without deleting arbitrary raw Gaussian records.
+connected-component clustering when it meets the current candidate contract.
+Use the confirmed REC-06 plane as an explicit v1.1 fallback only for sparse or
+degenerate fit evidence; do not use it to hide excessive noise or competing planes.
+Adapt Gaussian seeds, growth, lifted labels and collision membership without
+deleting arbitrary raw Gaussian rows. Add no DBSCAN dependency unless a measured
+failure shows radius clustering can solve it within bounded memory and metric units.
 Tests: pallet/shelf legs/low boxes above tilted floor, floor floaters, touching
 objects, sparse clouds, varying density, stable labels/source conservation.
-**Exit:** [ ] extraction improvement on supported cases; [ ] no low-obstacle erasure.
+**Exit:** [x] extraction uses plane-relative classification on supported and explicit fallback cases; [x] floor rows stay background and low obstacles above the measured band remain eligible.
 
 ## Sprint AUD-14.S3 — Product config/provenance và quality handoff
 
@@ -101,7 +109,7 @@ supported real sloped/noisy sample, candidate/collision consumer parity.
 ## Verification và DoD
 
 ```bash
-.venv/bin/pytest tests/test_scene/test_geometric_candidates.py tests/test_scene/test_gaussian_split.py tests/test_scene/test_sampro3d_consolidate.py tests/test_orchestration/test_scene_extraction.py tests/test_reconstruction/test_rec06_floor_frame.py -q
+.venv/bin/pytest tests/test_scene/test_adaptive_floor.py tests/test_scene/test_geometric_candidates.py tests/test_scene/test_gaussian_split.py tests/test_scene/test_sampro3d_consolidate.py tests/test_scene/test_object_correction.py tests/test_scene/test_object_membership.py tests/test_orchestration/test_scene_extraction.py tests/test_orchestration/test_scene_objectify_queue.py tests/test_reconstruction/test_rec06_floor_frame.py -q
 ```
 
 `tests/test_scene/test_adaptive_floor.py` covers S1 fit/degeneracy. Task DONE khi
@@ -151,3 +159,55 @@ fitting không được coi là solved multi-level unseen geometry.
   môi trường (**UNVERIFIED**). Minimal-code rung 2: dùng Pydantic ContractModel,
   canonical JSON checksum, NumPy và SciPy đã có trong scene pipeline. UI không đổi,
   DevTools n/a.
+
+### AUD-14.S2 — Extraction/clustering và Gaussian consumers
+
+- Base commit: `a90500f` (`AUD-19.S1`).
+- Logic delta: geometric fallback, SAMPro3D prompts/instances, objectify lift labels,
+  Gaussian label growth and collision membership now use signed distance to a floor
+  plane. Geometric height limits use plane distance. World transforms and source
+  Gaussian rows stay unchanged.
+- Contract delta: `FloorModel` schema 1.1 adds `confirmed_prior_fallback`. When fit
+  support or coverage is sparse, the adapter uses the REC-06 canonical prior
+  `(0,0,0), +Z` with the profile maximum band `0.09 m`, recording the fit failure
+  reason and leaving `robust_noise_sigma_m=None`. High noise, competing planes,
+  invalid shape and non-finite inputs remain uncertain and classify no points.
+  `point_cloud_checksum` binds the exact ordered world-meter coordinates used by
+  an in-memory fit.
+- Consumers: geometric fallback keeps voxel connected components; SAMPro3D filters
+  prompts and instances with the floor model; objectify returns floor rows to
+  background after lift; Gaussian growth excludes floor seeds and neighbors;
+  object correction only moves source collision/Gaussian rows onto an object when
+  above the plane. Removing an object may still return floor ownership to the
+  environment/background.
+- Clustering decision: no DBSCAN dependency was added. Synthetic tests preserve a
+  low obstacle on a sloped floor and floor rows remain background. Radius clustering
+  has no evidence that it can split two touching surfaces; geometric fallback keeps
+  that limitation, while SAMPro3D has instance masks.
+- Files: `src/models/contracts/floor_model.py`, `src/services/scene/floor_model.py`,
+  `src/services/scene/geometric.py`, `src/services/scene/decomposition/gaussian_split.py`,
+  `src/services/scene/sampro3d/consolidate.py`, `src/services/scene/sampro3d/pipeline.py`,
+  `src/services/orchestration/scene/extraction.py`,
+  `src/services/orchestration/scene/objectify.py`,
+  `src/services/orchestration/scene/object_correction.py`,
+  `tests/test_scene/test_adaptive_floor.py`,
+  `tests/test_scene/test_geometric_candidates.py`,
+  `tests/test_scene/test_gaussian_split.py`,
+  `tests/test_scene/test_sampro3d_consolidate.py`, this task and the plan README.
+- Verification: focused adaptive-floor, geometric, Gaussian, SAMPro3D,
+  object-correction, object-membership, extraction, objectify and REC-06 floor-frame
+  tests: 81 passed. `.venv/bin/ruff check src/ tests/` passed;
+  `.venv/bin/ruff format --check src/ tests/` passed (517 files);
+  `python scripts/check_contract_mirror.py` passed (5 enum, 5 models). CodeGraph is
+  current at 847 files, 16,638 nodes and 48,788 edges.
+- Limits: tests use synthetic clouds and local/mocked orchestration. No production
+  sloped-floor artifact, SAM2/GPU run, or collision-retention benchmark was available.
+  Full fit evidence is still in-memory; S3 must persist the model and bind it to exact
+  source artifact refs. High-noise and multiple-plane inputs remain uncertain.
+- Pre-flight (GUIDE.md Rule 13): CodeGraph read the floor contract and callers for
+  geometric fallback, SAMPro3D, objectify, Gaussian growth and collision correction;
+  focused tests cover the affected consumers. Understand flow was traced from
+  metric source points through the floor model to candidate and ownership outputs;
+  the optional `understand-anything` CLI is unavailable (**UNVERIFIED**).
+  Minimal-code rung 2 reuses FloorModel, NumPy/SciPy and voxel components. No UI
+  changed; DevTools n/a.

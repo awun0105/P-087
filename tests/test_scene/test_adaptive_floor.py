@@ -4,7 +4,13 @@ import numpy as np
 import pytest
 
 from src.models.contracts.floor_model import FloorFitProfile, FloorModel, FloorPointClass, FloorPrior
-from src.services.scene.floor_model import classify_floor_points, fit_floor_model
+from src.services.scene.floor_model import (
+    above_floor_mask,
+    classify_floor_points,
+    fit_canonical_floor_model,
+    fit_floor_model,
+    point_cloud_checksum,
+)
 
 SOURCE_CHECKSUM = "sha256:" + "a" * 64
 
@@ -61,6 +67,29 @@ def test_excessive_floor_noise_is_not_reported_as_supported() -> None:
     assert model.status == "uncertain"
     assert model.fallback_reason == "excessive_noise"
     assert model.robust_noise_sigma_m is not None and model.robust_noise_sigma_m > 0.03
+    assert not above_floor_mask(noisy_floor, model).any()
+
+
+def test_sparse_fit_uses_explicit_confirmed_prior_fallback() -> None:
+    line = np.column_stack((np.linspace(-1, 1, 12), np.zeros(12), np.zeros(12)))
+    model = fit_canonical_floor_model(line, point_cloud_checksum(line))
+
+    assert model.schema_version == "1.1"
+    assert model.status == "confirmed_prior_fallback"
+    assert model.fallback_reason == "insufficient_points"
+    assert model.robust_noise_sigma_m is None
+    assert model.floor_band_m == model.profile.max_floor_band_m
+    samples = np.array([[0.0, 0.0, 0.05], [0.0, 0.0, 0.12], [0.0, 0.0, -0.1]])
+    assert classify_floor_points(samples, model).tolist() == [
+        FloorPointClass.FLOOR,
+        FloorPointClass.ABOVE_FLOOR,
+        FloorPointClass.BELOW_FLOOR,
+    ]
+    assert above_floor_mask(samples, model).tolist() == [False, True, False]
+    legacy = model.model_dump(mode="json")
+    legacy["schema_version"] = "1.0"
+    with pytest.raises(ValueError, match="requires FloorModel schema 1.1"):
+        FloorModel.model_validate(legacy)
 
 
 def test_vertical_wall_does_not_override_confirmed_floor_prior() -> None:

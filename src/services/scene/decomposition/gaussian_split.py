@@ -14,6 +14,9 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.spatial import cKDTree
 
+from src.models.contracts.floor_model import FloorModel
+from src.services.scene.floor_model import above_floor_mask
+
 _PLY_TYPES = {"float": "f4", "float32": "f4", "double": "f8", "uchar": "u1", "int": "i4", "uint": "u4"}
 _NUMPY_TO_PLY = {"f4": "float", "f8": "double", "u1": "uchar", "i4": "int", "u4": "uint"}
 BACKGROUND = -1
@@ -25,8 +28,6 @@ class SplitConfig:
 
     grow_radius_m: float = 0.06
     """Gaussian chưa gán cách hạt giống gần nhất không quá chừng này thì theo vật đó."""
-    floor_clearance_m: float = 0.04
-    """Dưới độ cao này là sàn: không lan nhãn xuống (hạt giống vẫn giữ)."""
     max_scale_m: float = 0.5
     """Gaussian lớn hơn cỡ này là mảng nền (tường, sàn) — không lan nhãn tới."""
     grow_iterations: int = 2
@@ -72,6 +73,21 @@ def positions(rows: np.ndarray) -> np.ndarray:
     return np.stack([rows["x"], rows["y"], rows["z"]], axis=1).astype(np.float64)
 
 
+def assign_floor_gaussians_to_background(rows: np.ndarray, labels: np.ndarray, floor_model: FloorModel) -> np.ndarray:
+    """Return floor or unclassified source Gaussians to background without dropping rows."""
+    source_labels = np.asarray(labels)
+    if source_labels.ndim != 1 or len(source_labels) != len(rows):
+        raise ValueError("Gaussian labels must contain one value per source row")
+    if not np.issubdtype(source_labels.dtype, np.integer):
+        raise ValueError("Gaussian labels must be integers")
+    limits = np.iinfo(np.int32)
+    if source_labels.size and (source_labels.min() < limits.min or source_labels.max() > limits.max):
+        raise ValueError("Gaussian labels exceed the signed 32-bit membership range")
+    result = source_labels.astype(np.int32, copy=True)
+    result[~above_floor_mask(positions(rows), floor_model)] = BACKGROUND
+    return result
+
+
 def opacities(rows: np.ndarray) -> np.ndarray:
     """Độ đục sau sigmoid."""
     return 1.0 / (1.0 + np.exp(-rows["opacity"].astype(np.float64)))
@@ -94,21 +110,28 @@ def working_set(
     return np.nonzero(keep)[0]
 
 
-def label_gaussians(rows: np.ndarray, seeds: list[np.ndarray], config: SplitConfig = SplitConfig()) -> np.ndarray:
+def label_gaussians(
+    rows: np.ndarray,
+    seeds: list[np.ndarray],
+    floor_model: FloorModel,
+    config: SplitConfig = SplitConfig(),
+) -> np.ndarray:
     """Nhãn vật cho mọi Gaussian (`BACKGROUND` = nền): hạt giống + lan sang lân cận chưa gán.
 
     `seeds[i]` là chỉ số (vào `rows`) của các Gaussian thuộc vật i. Hạt giống trùng giữa hai vật
     thuộc về vật đứng trước (bước tách vật đã sắp theo độ tin cậy).
     """
     labels = np.full(len(rows), BACKGROUND, dtype=np.int32)
+    xyz = positions(rows)
+    above_floor = above_floor_mask(xyz, floor_model)
     for index in reversed(range(len(seeds))):
-        labels[seeds[index]] = index
+        seed_indices = seeds[index]
+        labels[seed_indices[above_floor[seed_indices]]] = index
     seeded = np.nonzero(labels != BACKGROUND)[0]
     if not len(seeded):
         return labels
-    xyz = positions(rows)
     scale = np.exp(np.stack([rows["scale_0"], rows["scale_1"], rows["scale_2"]], axis=1).astype(np.float64)).max(axis=1)
-    eligible = (xyz[:, 2] > config.floor_clearance_m) & (scale <= config.max_scale_m)
+    eligible = above_floor & (scale <= config.max_scale_m)
     for _ in range(config.grow_iterations):
         free = np.nonzero((labels == BACKGROUND) & eligible)[0]
         if not len(free) or config.grow_radius_m <= 0:
