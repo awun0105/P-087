@@ -33,3 +33,6 @@ dùng nó như policy. `Proposed` decision không phải authority.
 - [0023: Nén video trước upload và geometry/time provenance](0023-client-video-normalization.md) — *Proposed* (2026-10-07)
 - [0024: Một khung upload và tự resolve input assembly/recipe](0024-unified-upload-and-input-resolution.md) — *Proposed* (2026-10-07)
 - [0025: Imported PLY/SOG continuation thành editable SceneIR và simulation candidate](0025-imported-3dgs-continuation.md) — *Deferred* theo yêu cầu owner (2026-10-07)
+- [0026: Hiệu chỉnh ước lượng tài nguyên theo số đo và tách auto-tune RAM/VRAM](0026-decoupled-resource-tuning-and-observed-budget.md) — *Proposed* (2026-10-08)
+- [0027: Chẩn đoán lỗi COLMAP theo kết quả, đoạn trích log đã che và hướng khắc phục trên UI](0027-structured-error-diagnostics-and-redacted-excerpts.md) — *Proposed* (2026-10-08)
+- [0028: Khoảng tham chiếu chất lượng, khuyến nghị theo quy tắc và số đo tài nguyên trong bảng đánh giá](0028-benchmark-derived-verdicts-and-rule-based-insights.md) — *Proposed* (2026-10-08)
