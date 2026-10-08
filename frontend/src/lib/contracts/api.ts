@@ -229,7 +229,7 @@ export interface JobAttemptRecord {
   stage_started_at: string | null;
   preview_verified_at: string | null;
   /** Actor snapshot for the manual run/retry; absent on legacy events or worker-only updates. */
-  requested_by?: { user_id: string; display_name: string; role?: "editor" | "reviewer" | null } | null;
+  requested_by?: { user_id: string; display_name: string; role?: "guest" | "editor" | "reviewer" | null } | null;
 }
 
 export interface JobAttemptListResponse {

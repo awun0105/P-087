@@ -152,7 +152,7 @@ data migration contract đã chốt từ source inventory.
 
 Implement: Separate explicit guest/invited mode; reject forged role, reuse email/password/name validation, transactional duplicate handling và current limiter. Extend role schemas/Team UI/CLI where supported; invite roles vẫn Editor/Reviewer. Giữ secure cookies/session and audit; không thêm SMTP hoặc verified claim.
 Tests: No invite Guest success, invited roles regression, invalid/used invite, duplicate normalized email concurrent, role injection, inactive users, promotion/demotion/self-demotion.
-**Exit:** [ ] signup/role changes server-enforced; public rollout remains gated until ownership/quota checks pass.
+**Exit:** [x] signup/role changes server-enforced; public rollout remains gated until ownership/quota checks pass. Browser acceptance is separately tracked below.
 
 ## Sprint AUD-21.S3 — Backend ownership và interference
 
@@ -211,3 +211,46 @@ mock hoặc source review không chứng minh feature đã chạy.
   checks N/A; browser N/A (no UI changes); docs diff/link checks PASS.
 - **Pending:** S1 adds no schema/source implementation. S2–S4 own API/worker
   enforcement, migration execution, browser/API tests and rollout enablement.
+
+### AUD-21.S2 — Guest signup API/UI và role lifecycle
+
+- **Base:** `948c4ba` (`AUD-20.S3` UI code; its browser/seed gates remain open).
+- **Implementation:** Added `guest` to account/session/actor role contracts and a
+  separate `InviteRole` limited to Editor/Reviewer. Added transactional
+  `AuthService.register_guest`, `/auth/register/guest`, `/auth/me` rollout flag,
+  `AUTH_GUEST_SIGNUP_ENABLED=false` defaults in Settings and Compose, and a
+  distinct Guest form at `/register?mode=guest`. Guest role comes only from the
+  server; extra `role` or `invite_code` fields are rejected. Invite signup remains
+  one-time and role-bound. The new account receives the existing httpOnly session
+  cookie and an audit event; no email-verification claim or mail sender was added.
+- **Role lifecycle:** Reviewer-only updates can promote/demote Guest; role checks
+  use Guest < Editor < Reviewer. Self-demotion is rejected by rank, inactive users
+  remain unable to authenticate, and sessions read the current role on each
+  request. Team management can assign Guest but still only issues Editor/Reviewer
+  invitations. CLI role choices and metric/import/job actor snapshots accept Guest.
+- **UI contracts:** `/account` shows Guest as a distinct role and does not display
+  the Editor 24-hour quota as if it were Guest's limit. The team page distinguishes
+  the not-yet-open Guest processing limit; AUD-22 owns its enforcement/display.
+- **Duplicate handling:** SQLite's `BEGIN IMMEDIATE`, the existing unique email
+  constraint, and a PostgreSQL transaction advisory lock serialize normalized
+  duplicate email creation. The duplicate remains a `409` domain conflict.
+- **Verification:** `codegraph sync` and focused `codegraph explore` report the
+  current signup/role call path; CodeGraph is up to date. Ruff check passed for
+  all `src/` and `tests/`; Ruff format check passed. Backend regression command
+  across auth service/routes, metric routes/records, Studio routes, auth identity,
+  Compose and settings: **71 passed, 13 skipped**. Skips are PostgreSQL variants
+  because `R2S_TEST_POSTGRES_URL` is not configured. Frontend: `npm run typecheck`
+  passed; `npx eslint` on changed auth/contracts files passed; `npx vitest run`
+  passed **42 files / 278 tests**. Compose base and merged GPU configs passed with
+  `.env.example`; CLI help lists `{guest,editor,reviewer}`. `git diff --check` passed.
+- **Gate report:** CodeGraph PASS; minimal scope PASS; backend lint/format/tests
+  PASS; frontend typecheck/lint/tests PASS; Compose validation PASS; no schema
+  migration required. Browser rendered-UI gate is **UNVERIFIED**: Chrome DevTools
+  MCP still reports the profile lock
+  (`/home/lqaq/.cache/chrome-devtools-mcp/chrome-profile` already running), so
+  CLI tests are not claimed as browser proof.
+- **Pending:** Signup remains disabled by default. Do not enable
+  `AUTH_GUEST_SIGNUP_ENABLED` before AUD-21.S3 ownership guards and AUD-22 quota
+  enforcement are complete. Run the browser form gate and PostgreSQL concurrency
+  variants when those runtimes are available. AUD-21.S3 must add ownership checks;
+  this sprint intentionally leaves the existing Editor-only product gates intact.

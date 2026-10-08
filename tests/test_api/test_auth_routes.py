@@ -1,4 +1,4 @@
-"""Đăng nhập hai role khi bật AUTH_REQUIRED: khách / Editor / Reviewer (ADR 0003 §3)."""
+"""Đăng nhập ba role khi bật AUTH_REQUIRED: Guest / Editor / Reviewer."""
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -98,7 +98,7 @@ async def _login(client: AsyncClient, email: str) -> None:
 @pytest.mark.asyncio
 async def test_guest_sees_samples_but_not_team_data(client: AsyncClient, secured: AuthService) -> None:
     me = (await client.get("/api/v1/auth/me")).json()
-    assert me == {"auth_required": True, "user": None}
+    assert me == {"auth_required": True, "guest_signup_enabled": False, "user": None}
     assert (await client.get("/api/v1/samples")).status_code == 200
     for method, path in [
         ("GET", "/api/v1/scenes"),
@@ -120,6 +120,7 @@ async def test_invite_flow_and_role_boundaries(client: AsyncClient, secured: Aut
     assert cookie
     invite = await client.post("/api/v1/auth/invites", json={"role": "editor"})
     assert invite.status_code == 201
+    assert (await client.post("/api/v1/auth/invites", json={"role": "guest"})).status_code == 422
     code = invite.json()["code"]
     assert (await client.get("/api/v1/auth/users")).status_code == 200
 
@@ -139,6 +140,69 @@ async def test_invite_flow_and_role_boundaries(client: AsyncClient, secured: Aut
     assert (await client.post("/api/v1/auth/invites", json={"role": "editor"})).status_code == 403
     review = await client.post("/api/v1/jobs/job-x/review/approve", json={})
     assert review.status_code == 403  # chỉ Reviewer được duyệt
+
+
+@pytest.mark.asyncio
+async def test_guest_signup_is_disabled_by_default(client: AsyncClient, secured: AuthService) -> None:
+    response = await client.post(
+        "/api/v1/auth/register/guest",
+        json={"email": "guest@example.com", "display_name": "Guest", "password": PASSWORD},
+    )
+
+    assert response.status_code == 404
+    assert (await client.get("/api/v1/auth/me")).json()["guest_signup_enabled"] is False
+    assert secured.list_users() == []
+
+
+@pytest.mark.asyncio
+async def test_guest_signup_uses_server_role_and_keeps_editor_routes_closed(
+    client: AsyncClient, secured: AuthService, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from src.api import auth
+
+    enabled = Settings(
+        database_url=secured.database._url,
+        artifact_root=tmp_path / "artifacts",
+        auth_required=True,
+        auth_guest_signup_enabled=True,
+    )
+    monkeypatch.setattr(auth, "get_settings", lambda: enabled)
+
+    response = await client.post(
+        "/api/v1/auth/register/guest",
+        json={"email": " Guest@Example.com ", "display_name": " Hà Linh ", "password": PASSWORD},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["role"] == "guest"
+    assert response.json()["email"] == "guest@example.com"
+    assert response.json()["display_name"] == "Hà Linh"
+    cookie = response.headers["set-cookie"].lower()
+    assert "httponly" in cookie and "samesite=lax" in cookie
+    me = (await client.get("/api/v1/auth/me")).json()
+    assert me["guest_signup_enabled"] is True and me["user"]["role"] == "guest"
+    assert (await client.get("/api/v1/scenes")).status_code == 403
+
+    forged_role = await client.post(
+        "/api/v1/auth/register/guest",
+        json={"email": "forged@example.com", "display_name": "Guest", "password": PASSWORD, "role": "reviewer"},
+    )
+    supplied_invite = await client.post(
+        "/api/v1/auth/register/guest",
+        json={
+            "email": "invite@example.com",
+            "display_name": "Guest",
+            "password": PASSWORD,
+            "invite_code": "not-valid",
+        },
+    )
+    duplicate = await client.post(
+        "/api/v1/auth/register/guest",
+        json={"email": "GUEST@example.com", "display_name": "Duplicate", "password": PASSWORD},
+    )
+    assert forged_role.status_code == supplied_invite.status_code == 422
+    assert duplicate.status_code == 409
+    assert [user.email for user in secured.list_users()] == ["guest@example.com"]
 
 
 @pytest.mark.asyncio

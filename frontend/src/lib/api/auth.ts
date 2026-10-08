@@ -1,11 +1,12 @@
 /**
- * Client đăng nhập hai role (ADR 0003 §3). Cookie phiên httpOnly do backend đặt qua
+ * Client đăng nhập và quản lý role. Cookie phiên httpOnly do backend đặt qua
  * proxy `/api/v1` cùng domain — JavaScript không đọc được token.
  */
 
 import { apiFetch, fetchApi, ApiError, type ApiResult } from "@/lib/api/client";
 
-export type Role = "editor" | "reviewer";
+export type Role = "guest" | "editor" | "reviewer";
+export type InviteRole = "editor" | "reviewer";
 
 export interface PublicUser {
   user_id: string;
@@ -18,6 +19,8 @@ export interface PublicUser {
 
 export interface Me {
   auth_required: boolean;
+  /** Missing on older API deployments; unknown is treated as closed by the UI. */
+  guest_signup_enabled?: boolean;
   user: PublicUser | null;
 }
 
@@ -45,7 +48,11 @@ export function register(input: {
   return apiFetch<PublicUser>(`${API}/register`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function createInvite(role: Role): Promise<{ code: string; role: Role; expires_at: string }> {
+export function registerGuest(input: { email: string; display_name: string; password: string }): Promise<PublicUser> {
+  return apiFetch<PublicUser>(`${API}/register/guest`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function createInvite(role: InviteRole): Promise<{ code: string; role: InviteRole; expires_at: string }> {
   return apiFetch(`${API}/invites`, { method: "POST", body: JSON.stringify({ role }) });
 }
 

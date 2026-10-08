@@ -16,6 +16,7 @@ from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.manifests import JobManifest, StageId
 from src.models.contracts.preview import ReconstructionPreview
 from src.services.orchestration.artifacts import ArtifactStoreError, FilesystemArtifactStore, sha256_file
+from src.services.orchestration.auth.models import Role
 from src.services.orchestration.jobs.progress import awaiting_metric_confirmation, metric_confirmation_stage
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.reconstruction import (
@@ -48,7 +49,7 @@ class MetricDecision(BaseModel):
     job_id: str
     preview_checksum: str
     decided_by: str | None
-    decided_role: Literal["editor", "reviewer"] | None
+    decided_role: Role | None
     decided_at: datetime
 
 
@@ -204,7 +205,7 @@ class MetricConfirmationService:
         data: UserMetricInput,
         preview_checksum: str,
         decided_by: str | None,
-        decided_role: Literal["editor", "reviewer"] | None,
+        decided_role: Role | None,
         require_identity: bool,
     ) -> ProductArtifactRef:
         """Xác nhận đúng preview người dùng đã xem; publish bản ghi và ghi vào job."""

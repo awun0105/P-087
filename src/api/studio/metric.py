@@ -4,8 +4,6 @@
 nhận lấy từ phiên đăng nhập, không nhận từ body.
 """
 
-from typing import Literal
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, FiniteFloat
 
@@ -13,7 +11,7 @@ from src.api import schemas
 from src.api.auth import require_editor
 from src.api.studio import deps
 from src.models.contracts.artifacts import ProductArtifactRef
-from src.services.orchestration.auth import UserRecord
+from src.services.orchestration.auth import Role, UserRecord
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.metric import (
     MetricConfirmationError,
@@ -140,7 +138,7 @@ def confirm_metric(
     job_id: str, request: MetricConfirmRequest, user: UserRecord | None = Depends(require_editor)
 ) -> MetricConfirmResponse:
     """Xác nhận đúng bản xem trước; job tiếp tục sang dựng hình học ở worker."""
-    role: Literal["editor", "reviewer"] | None = user.role if user is not None else None
+    role: Role | None = user.role if user is not None else None
     try:
         reference = _service(job_id).confirm(
             job_id,

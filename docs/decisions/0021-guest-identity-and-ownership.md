@@ -5,7 +5,9 @@ Date: 2026-10-07
 ## Status
 
 Proposed — owner đã chỉ đạo product behavior; AUD-21.S1 đã chốt ownership và
-migration contract từ source inventory. Chưa implement hoặc runtime-qualified.
+migration contract từ source inventory. AUD-21.S2 đã thêm signup/role lifecycle
+đằng sau `AUTH_GUEST_SIGNUP_ENABLED=false`; ownership, quota và rollout chưa
+runtime-qualified, nên ADR chưa được xem là hoàn tất.
 
 ## Context và Decision đề xuất
 

@@ -4,13 +4,13 @@ import { AccountPage } from "@/features/studio/auth/AccountPage";
 import { LoginForm, RegisterForm, safeNext } from "@/features/studio/auth/AuthForms";
 import { AppShell } from "@/features/shell/AppShell";
 import { TooltipProvider } from "@/components/shadcn/tooltip";
-import { login, register, type Me } from "@/lib/api/auth";
+import { login, register, registerGuest, type Me } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 
 const state = vi.hoisted(() => ({ me: null as Me | null, refresh: vi.fn(), logout: vi.fn(), push: vi.fn(), replace: vi.fn(), search: "", pathname: "/overview" }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: state.push, replace: state.replace }), useSearchParams: () => new URLSearchParams(state.search), usePathname: () => state.pathname }));
 vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => state }));
-vi.mock("@/lib/api/auth", async (original) => ({ ...(await original<typeof import("@/lib/api/auth")>()), login: vi.fn(), register: vi.fn() }));
+vi.mock("@/lib/api/auth", async (original) => ({ ...(await original<typeof import("@/lib/api/auth")>()), login: vi.fn(), register: vi.fn(), registerGuest: vi.fn() }));
 beforeEach(() => { vi.clearAllMocks(); state.me = { auth_required: true, user: null }; state.search = "next=%2Fnew%3Fsource%3Dvideo%26step%3Dsetup"; state.pathname = "/overview"; state.refresh.mockResolvedValue(undefined); });
 describe("tài khoản và đích sau xác thực", () => {
   it("local không bịa profile; khách có link quay lại account", () => {
@@ -30,6 +30,16 @@ describe("tài khoản và đích sau xác thực", () => {
     fireEvent.click(screen.getByRole("button", { name: "Đăng xuất" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Không đăng xuất được");
     expect(screen.getByRole("button", { name: "Đăng xuất" })).toBeEnabled();
+  });
+  it("hiện Guest riêng với quota hiện chưa mở, không nhầm thành Editor", () => {
+    state.me = {
+      auth_required: true,
+      user: { user_id: "guest-1", email: "guest@example.com", display_name: "Guest", role: "guest", active: true, daily_job_quota: 10 },
+    };
+    render(<AccountPage />);
+    expect(screen.getByRole("heading", { name: "Guest" })).toBeInTheDocument();
+    expect(screen.getByText("Hạn mức Guest chưa mở")).toBeInTheDocument();
+    expect(screen.queryByText("10 lần / 24 giờ")).toBeNull();
   });
   it("đăng nhập giữ đích tạo scene, link đăng ký và mẫu phân biệt rõ", async () => {
     vi.mocked(login).mockResolvedValue({ user_id: "fixture", email: "fixture@example.com", display_name: "Fixture", role: "editor", active: true, daily_job_quota: 10 });
@@ -102,6 +112,41 @@ describe("tài khoản và đích sau xác thực", () => {
     expect(register).not.toHaveBeenCalled();
     expect(safeNext("/\\evil.example")).toBe("/overview");
     expect(safeNext("/path\n")).toBe("/overview");
+  });
+
+  it("Guest đăng ký theo endpoint riêng, không gửi invite hoặc role và chỉ hiện khi deployment bật", async () => {
+    state.me = { auth_required: true, user: null, guest_signup_enabled: true };
+    state.search = "mode=guest&next=%2Fscenes";
+    vi.mocked(registerGuest).mockResolvedValue({
+      user_id: "guest-1",
+      email: "guest@example.com",
+      display_name: "Guest",
+      role: "guest",
+      active: true,
+      daily_job_quota: 10,
+    });
+
+    const view = render(<RegisterForm />);
+    expect(screen.getByRole("heading", { name: "Tạo tài khoản Guest" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Mã mời")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Tên hiển thị"), { target: { value: "Guest" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "guest@example.com" } });
+    fireEvent.change(screen.getByLabelText(/Mật khẩu/), { target: { value: "fixture-password" } });
+    fireEvent.submit(screen.getByLabelText("Email").closest("form")!);
+    await waitFor(() => expect(registerGuest).toHaveBeenCalledWith({
+      email: "guest@example.com",
+      display_name: "Guest",
+      password: "fixture-password",
+    }));
+    expect(register).not.toHaveBeenCalled();
+    expect(state.replace).toHaveBeenCalledWith("/scenes");
+    view.unmount();
+
+    state.me = { auth_required: true, user: null, guest_signup_enabled: false };
+    render(<RegisterForm />);
+    expect(screen.getByText("Đăng ký Guest hiện chưa được mở trên deployment này.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Email")).toBeNull();
+    expect(registerGuest).toHaveBeenCalledTimes(1);
   });
 
   it("AppShell: khách vào route workspace bị chuyển hướng về /login và không render nội dung", async () => {

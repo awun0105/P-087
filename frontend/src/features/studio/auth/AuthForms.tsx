@@ -12,7 +12,7 @@ import { PaletteMenu } from "@/features/shell/PaletteMenu";
 import { ThemeToggle } from "@/features/shell/ThemeToggle";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { notifySuccess, FieldError } from "@/components/studio/feedback";
-import { login, register } from "@/lib/api/auth";
+import { login, register, registerGuest } from "@/lib/api/auth";
 import { APP_HOME } from "@/lib/routes";
 
 /** Chỉ cho quay lại đường dẫn nội bộ (tránh open redirect qua `?next=`); thiếu/không hợp lệ thì về Tổng quan của app. */
@@ -319,7 +319,8 @@ export function LoginForm() {
 export function RegisterForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const { refresh } = useAuth();
+  const { me, refresh } = useAuth();
+  const guestMode = params.get("mode") === "guest";
   const next = safeNext(params.get("next"));
   const gate = useEntryGate(next);
   const { fieldErrors, validate } = useFieldValidation();
@@ -338,10 +339,14 @@ export function RegisterForm() {
     setBusy(true);
     setError(null);
     try {
-      await register({ invite_code: code.trim(), email, display_name: name.trim(), password });
+      if (guestMode) {
+        await registerGuest({ email, display_name: name.trim(), password });
+      } else {
+        await register({ invite_code: code.trim(), email, display_name: name.trim(), password });
+      }
       gate.markNavigated();
       await refresh();
-      notifySuccess("Đã tạo tài khoản và đăng nhập.");
+      notifySuccess(guestMode ? "Đã tạo tài khoản Guest và đăng nhập." : "Đã tạo tài khoản và đăng nhập.");
       router.replace(next);
     } catch (cause) {
       setError(authErrorMessage(cause, "Không tạo được tài khoản"));
@@ -350,10 +355,32 @@ export function RegisterForm() {
   }
 
   if (gate.pending && !busy) return <EntryPending />;
+  if (guestMode && me?.guest_signup_enabled !== true) {
+    return (
+      <Shell
+        title="Đăng ký Guest"
+        lead="Đăng ký Guest hiện chưa được mở trên deployment này."
+        mode="register"
+        next={next}
+      >
+        <Notice tone="ochre">Khi được mở, Guest sẽ tạo tài khoản không cần mã mời. Luồng này không xác minh email qua thư.</Notice>
+        <p className="mt-5 text-center text-sm text-muted-foreground">
+          Có mã mời?{" "}
+          <Link href={`/register?next=${encodeURIComponent(next)}`} className="font-semibold text-foreground underline underline-offset-4">
+            Đăng ký bằng mã mời
+          </Link>
+        </p>
+      </Shell>
+    );
+  }
   return (
     <Shell
-      title="Tạo tài khoản"
-      lead="Nhập mã mời do Reviewer của nhóm gửi. Mã chỉ dùng được một lần."
+      title={guestMode ? "Tạo tài khoản Guest" : "Tạo tài khoản"}
+      lead={
+        guestMode
+          ? "Nhập email, tên hiển thị và mật khẩu. Email chưa được xác minh qua thư."
+          : "Nhập mã mời do Reviewer của nhóm gửi. Mã chỉ dùng được một lần."
+      }
       mode="register"
       next={next}
     >
@@ -364,7 +391,7 @@ export function RegisterForm() {
         onSubmit={submit}
         className="space-y-5"
       >
-        <div className="space-y-1.5">
+        {!guestMode && <div className="space-y-1.5">
           <label
             className="block font-ui text-xs font-semibold text-foreground/90"
             htmlFor={ids.code}
@@ -384,7 +411,7 @@ export function RegisterForm() {
             className="h-11 w-full rounded-xl border border-line-strong/60 bg-paper-raised/70 px-3.5 font-ui text-sm text-foreground shadow-xs outline-none transition-all placeholder:text-foreground/40 hover:border-line-strong focus:border-primary focus:bg-background focus:ring-3 focus:ring-primary/20"
           />
           <FieldError id={ids.code + "-error"} message={fieldErrors[ids.code] ?? null} />
-        </div>
+        </div>}
 
         <div className="space-y-1.5">
           <label
@@ -475,9 +502,28 @@ export function RegisterForm() {
           className="mt-6 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 font-ui text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary-hover hover:shadow focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-60"
         >
           {busy && <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />}
-          <span>Tạo tài khoản</span>
+          <span>{guestMode ? "Tạo tài khoản Guest" : "Tạo tài khoản"}</span>
         </button>
       </form>
+      {!guestMode && me?.guest_signup_enabled === true && (
+        <p className="mt-5 text-center text-sm text-muted-foreground">
+          Không có mã mời?{" "}
+          <Link
+            href={`/register?mode=guest&next=${encodeURIComponent(next)}`}
+            className="font-semibold text-foreground underline underline-offset-4"
+          >
+            Đăng ký Guest
+          </Link>
+        </p>
+      )}
+      {guestMode && (
+        <p className="mt-5 text-center text-sm text-muted-foreground">
+          Có mã mời?{" "}
+          <Link href={`/register?next=${encodeURIComponent(next)}`} className="font-semibold text-foreground underline underline-offset-4">
+            Dùng luồng đăng ký mời
+          </Link>
+        </p>
+      )}
     </Shell>
   );
 }

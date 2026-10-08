@@ -1,4 +1,4 @@
-"""Tài khoản, mã mời, phiên đăng nhập và nhật ký thao tác (ADR 0003 §3, PRD §3.4)."""
+"""Tài khoản Guest/Editor/Reviewer, mã mời, phiên đăng nhập và nhật ký thao tác."""
 
 import unicodedata
 from datetime import datetime
@@ -6,9 +6,10 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field
 
-#: Chỉ hai role theo PRD §3.4; Reviewer có mọi quyền của Editor.
-Role = Literal["editor", "reviewer"]
-ROLE_RANK: dict[Role, int] = {"editor": 1, "reviewer": 2}
+# Reviewer > Editor > Guest. Ownership remains a separate authorization check.
+Role = Literal["guest", "editor", "reviewer"]
+InviteRole = Literal["editor", "reviewer"]
+ROLE_RANK: dict[Role, int] = {"guest": 1, "editor": 2, "reviewer": 3}
 
 
 def _normalize_email(value: str) -> str:
@@ -90,7 +91,7 @@ class InviteRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     code_hash: str
-    role: Role
+    role: InviteRole
     created_by: str
     created_at: datetime
     expires_at: datetime

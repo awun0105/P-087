@@ -52,7 +52,7 @@ export interface Actor {
   user_id: string;
   display_name: string;
   /** Role lúc snapshot được tạo; không suy ra từ role hiện tại của user. */
-  role?: "editor" | "reviewer" | null;
+  role?: "guest" | "editor" | "reviewer" | null;
 }
 
 export interface UploadRecord {
@@ -637,5 +637,5 @@ export interface ImportedScene {
   error: string | null;
   created_at: string;
   created_by_name?: string | null;
-  created_by_role?: "editor" | "reviewer" | null;
+  created_by_role?: "guest" | "editor" | "reviewer" | null;
 }

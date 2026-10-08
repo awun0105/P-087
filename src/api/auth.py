@@ -1,4 +1,4 @@
-"""Đăng nhập hai role (ADR 0003 §3): phiên cookie httpOnly, mã mời, quản lý tài khoản.
+"""Auth API: Guest signup, Editor/Reviewer invitation, phiên cookie và quản lý tài khoản.
 
 Cookie đi qua proxy `/api/v1` của Web UI nên là cookie cùng domain với UI (không bị
 chặn như cookie bên thứ ba). SameSite=Lax chặn request POST từ site khác mang cookie.
@@ -9,7 +9,6 @@ import time
 from collections import deque
 from datetime import UTC, datetime, timedelta
 from threading import Lock
-from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,6 +18,7 @@ from src.services.orchestration.auth import (
     AuditEntry,
     AuthError,
     AuthService,
+    InviteRole,
     PublicUser,
     Role,
     UserRecord,
@@ -133,6 +133,7 @@ class MeResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     auth_required: bool
+    guest_signup_enabled: bool
     user: PublicUser | None
 
 
@@ -156,12 +157,22 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=1, max_length=200)
 
 
+class GuestRegisterRequest(BaseModel):
+    """Guest signup accepts identity fields only; role and invitation are server-controlled."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(min_length=3, max_length=254)
+    display_name: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=200)
+
+
 class InviteRequest(BaseModel):
     """Role gắn cho mã mời."""
 
     model_config = ConfigDict(extra="forbid")
 
-    role: Literal["editor", "reviewer"]
+    role: InviteRole
 
 
 class InviteResponse(BaseModel):
@@ -170,7 +181,7 @@ class InviteResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     code: str
-    role: Role
+    role: InviteRole
     expires_at: str
 
 
@@ -179,7 +190,7 @@ class UserUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    role: Literal["editor", "reviewer"] | None = None
+    role: Role | None = None
     active: bool | None = None
     daily_job_quota: int | None = Field(default=None, ge=0, le=1000)
 
@@ -213,8 +224,13 @@ def _auth_errors(error: Exception) -> HTTPException:
 @router.get("/me", response_model=MeResponse)
 def me(request: Request) -> MeResponse:
     """UI hỏi đang đăng nhập với ai và deployment có bắt đăng nhập không."""
+    current = settings()
     user = current_user(request)
-    return MeResponse(auth_required=settings().auth_required, user=public(user) if user else None)
+    return MeResponse(
+        auth_required=current.auth_required,
+        guest_signup_enabled=current.auth_required and current.auth_guest_signup_enabled,
+        user=public(user) if user else None,
+    )
 
 
 @router.post("/login", response_model=PublicUser)
@@ -244,6 +260,23 @@ def register(request: RegisterRequest, raw: Request, response: Response) -> Publ
     service = auth_service()
     try:
         user = service.register(request.invite_code, request.email, request.display_name, request.password)
+        token, user = service.login(user.email, request.password)
+    except (AuthError, RuntimeStateConflictError, ValueError) as error:
+        raise _auth_errors(error) from error
+    _set_session_cookie(response, token)
+    return public(user)
+
+
+@router.post("/register/guest", response_model=PublicUser, status_code=status.HTTP_201_CREATED)
+def register_guest(request: GuestRegisterRequest, raw: Request, response: Response) -> PublicUser:
+    """Public signup creates only a Guest and stays closed until explicitly enabled."""
+    current = settings()
+    if not current.auth_required or not current.auth_guest_signup_enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Đăng ký Guest hiện chưa được mở")
+    client_limiter.check(_client_key(raw))
+    service = auth_service()
+    try:
+        user = service.register_guest(request.email, request.display_name, request.password)
         token, user = service.login(user.email, request.password)
     except (AuthError, RuntimeStateConflictError, ValueError) as error:
         raise _auth_errors(error) from error
