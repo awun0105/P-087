@@ -7,6 +7,8 @@ import pytest
 
 from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.processing import (
+    SFM_KEYS,
+    SPLAT_KEYS,
     ProcessingConfigError,
     build_job_config,
     config_bytes,
@@ -178,13 +180,142 @@ def test_maximum_for_machine_stays_below_warning_and_valid(machine: MachineCapab
     assert set(statuses.values()) <= {"ok"}, statuses
 
 
-def test_big_gpu_gets_full_maximum_and_small_gpu_scales_everything_down_together() -> None:
+def test_parameter_groups_partition_all_preset_parameters() -> None:
     presets, _ = load_presets(PRESETS)
-    assert maximum_for_machine(presets, _machine()) == preset_values(presets, "maximum")
-    small = maximum_for_machine(presets, _machine(vram=4, ram=31, disk=12))
-    minimum = preset_values(presets, "minimum_quality")
-    for key in ("brush.max_splats", "brush.max_resolution", "sampling.max_frames"):
-        assert float(small[key]) >= float(minimum[key])
+    all_keys = {spec.key for spec in presets.parameters}
+    sfm_set = set(SFM_KEYS)
+    splat_set = set(SPLAT_KEYS)
+
+    assert sfm_set.isdisjoint(splat_set), f"Trùng lặp giữa SFM và SPLAT: {sfm_set & splat_set}"
+    assert sfm_set | splat_set == all_keys, f"Thiếu hoặc thừa key: {all_keys ^ (sfm_set | splat_set)}"
+
+
+@pytest.mark.parametrize(
+    ("vram", "ram", "expected"),
+    [
+        (
+            4,
+            16,
+            {
+                "sampling.max_frames": 1200,
+                "colmap.max_image_size": 3200,
+                "colmap.max_num_features": 16384,
+                "brush.max_resolution": 1280,
+                "brush.max_splats": 1_200_000,
+                "brush.total_train_iters": 31000,
+            },
+        ),
+        (
+            6,
+            16,
+            {
+                "sampling.max_frames": 1200,
+                "colmap.max_image_size": 3200,
+                "colmap.max_num_features": 16384,
+                "brush.max_resolution": 1920,
+                "brush.max_splats": 2_200_000,
+                "brush.total_train_iters": 37000,
+            },
+        ),
+        (
+            8,
+            16,
+            {
+                "sampling.max_frames": 1200,
+                "colmap.max_image_size": 3200,
+                "colmap.max_num_features": 16384,
+                "brush.max_resolution": 2400,
+                "brush.max_splats": 3_200_000,
+                "brush.total_train_iters": 43000,
+            },
+        ),
+        (
+            12,
+            32,
+            {
+                "sampling.max_frames": 1200,
+                "colmap.max_image_size": 3200,
+                "colmap.max_num_features": 16384,
+                "brush.max_resolution": 3360,
+                "brush.max_splats": 5_000_000,
+                "brush.total_train_iters": 54000,
+            },
+        ),
+        (
+            24,
+            16,
+            {
+                "sampling.max_frames": 1200,
+                "colmap.max_image_size": 3200,
+                "colmap.max_num_features": 16384,
+                "brush.max_resolution": 3840,
+                "brush.max_splats": 6_000_000,
+                "brush.total_train_iters": 60000,
+            },
+        ),
+        (
+            24,
+            8,
+            {
+                "sampling.max_frames": 910,
+                "colmap.max_image_size": 2560,
+                "colmap.max_num_features": 13312,
+                "brush.max_resolution": 3840,
+                "brush.max_splats": 6_000_000,
+                "brush.total_train_iters": 60000,
+            },
+        ),
+        (
+            4,
+            4,
+            {
+                "sampling.max_frames": 520,
+                "colmap.max_image_size": 1920,
+                "colmap.max_num_features": 9216,
+                "brush.max_resolution": 1280,
+                "brush.max_splats": 1_200_000,
+                "brush.total_train_iters": 31000,
+            },
+        ),
+    ],
+)
+def test_maximum_for_machine_two_axis_matrix(vram: float, ram: float, expected: dict[str, int]) -> None:
+    presets, _ = load_presets(PRESETS)
+    machine = _machine(vram=vram, ram=ram, disk=500)
+    best = maximum_for_machine(presets, machine)
+    presets.validate_params(best)
+
+    for key, value in expected.items():
+        assert best[key] == value, f"Lệch {key} trên máy VRAM {vram} / RAM {ram}: {best[key]} != {value}"
+
+    statuses = {item.resource: item.status for item in evaluate(presets, best, machine).resources}
+    assert set(statuses.values()) <= {"ok"}, statuses
+
+
+def test_maximum_for_machine_decoupled_properties() -> None:
+    presets, _ = load_presets(PRESETS)
+
+    # Cùng RAM 16, VRAM tăng dần (4 -> 6 -> 8 -> 24):
+    # Nhóm SFM bằng nhau ở mọi máy; brush.max_splats và brush.max_resolution không giảm
+    results_16 = [maximum_for_machine(presets, _machine(vram=v, ram=16, disk=500)) for v in (4, 6, 8, 24)]
+    base_sfm = {k: results_16[0][k] for k in SFM_KEYS}
+    for res in results_16[1:]:
+        sfm = {k: res[k] for k in SFM_KEYS}
+        assert sfm == base_sfm
+    for prev, nxt in zip(results_16[:-1], results_16[1:], strict=True):
+        assert float(nxt["brush.max_splats"]) >= float(prev["brush.max_splats"])
+        assert float(nxt["brush.max_resolution"]) >= float(prev["brush.max_resolution"])
+
+    # Cùng VRAM 24, RAM 8 so với 16:
+    # Nhóm SPLAT bằng nhau; nhóm SFM của máy 8 GB thấp hơn
+    m_16 = maximum_for_machine(presets, _machine(vram=24, ram=16, disk=500))
+    m_8 = maximum_for_machine(presets, _machine(vram=24, ram=8, disk=500))
+    splat_16 = {k: m_16[k] for k in SPLAT_KEYS}
+    splat_8 = {k: m_8[k] for k in SPLAT_KEYS}
+    assert splat_16 == splat_8
+    assert int(m_8["sampling.max_frames"]) < int(m_16["sampling.max_frames"])
+    assert int(m_8["colmap.max_image_size"]) < int(m_16["colmap.max_image_size"])
+    assert int(m_8["colmap.max_num_features"]) < int(m_16["colmap.max_num_features"])
 
 
 def test_capability_record_and_latest_ignore_stale_workers(tmp_path: Path) -> None:

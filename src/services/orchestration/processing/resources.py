@@ -27,6 +27,24 @@ DRIVERS: dict[Resource, tuple[str, ...]] = {
     "disk": ("sampling.max_frames", "brush.max_splats"),
 }
 
+#: Nhóm thông số phục hồi tư thế camera và SfM (chủ yếu quyết định RAM và đĩa).
+SFM_KEYS: tuple[str, ...] = (
+    "sampling.sample_fps",
+    "sampling.max_frames",
+    "colmap.max_image_size",
+    "colmap.max_num_features",
+    "colmap.sequential_overlap",
+    "colmap.camera_model",
+)
+#: Nhóm thông số huấn luyện 3D Gaussian Splatting (chủ yếu quyết định VRAM).
+SPLAT_KEYS: tuple[str, ...] = (
+    "brush.total_train_iters",
+    "brush.max_resolution",
+    "brush.max_splats",
+    "brush.sh_degree",
+    "brush.sog_iterations",
+)
+
 
 class ResourceEstimate(BaseModel):
     """Một tài nguyên: cần bao nhiêu (ước lượng) so với máy có bao nhiêu."""
@@ -204,11 +222,7 @@ def _snap(value: float, minimum: float, step: float) -> float:
 def interpolate(
     presets: ProcessingPresets, low: dict[str, ParamValue], high: dict[str, ParamValue], t: float
 ) -> dict[str, ParamValue]:
-    """Điểm giữa hai bộ thông số (t=0 → low, t=1 → high), làm tròn xuống theo step.
-
-    Mọi thông số số tăng cùng nhịp nên không có chuyện một thông số bị ép cực thấp
-    trong khi thông số khác vẫn cực cao. Thông số choice giữ theo `low`.
-    """
+    """Nội suy tuyến tính các thông số số giữa hai bộ giá trị và làm tròn theo step. Thông số choice giữ theo `low`."""
     values: dict[str, ParamValue] = {}
     for spec in presets.parameters:
         a, b = low[spec.key], high[spec.key]
@@ -221,26 +235,35 @@ def interpolate(
     return values
 
 
-def _fits(model: ResourceModel, values: dict[str, ParamValue], available: dict[Resource, float | None]) -> bool:
+def _fits(
+    model: ResourceModel,
+    values: dict[str, ParamValue],
+    available: dict[Resource, float | None],
+    resources: tuple[Resource, ...] | None = None,
+) -> bool:
     required = estimate_gb(model, values)
-    return all(have is None or required[name] < have * model.warn_ratio for name, have in available.items())
+    checked = resources if resources is not None else ("vram", "ram", "disk")
+    return all(available.get(name) is None or required[name] < available[name] * model.warn_ratio for name in checked)
 
 
 def maximum_for_machine(presets: ProcessingPresets, capability: MachineCapability | None) -> dict[str, ParamValue]:
     """Bộ thông số cao nhất giữa preset tối thiểu và tối đa mà mọi tài nguyên dưới ngưỡng vàng.
+
+    Tìm riêng hai nhóm nối tiếp: nhóm SFM (theo RAM và đĩa) trước, sau đó giữ nguyên kết quả
+    đó và tìm nhóm SPLAT (theo cả VRAM, RAM và đĩa). Cách tách hai trục này giúp VRAM lớn
+    không bị kéo tụt thông số train chỉ vì RAM máy thấp.
 
     Tính theo mốc "máy rảnh" worker ghi lại, không theo phần đang trống tức thời: lúc
     worker đang chạy job khác, phần trống đã bị chính job đó chiếm và sẽ được trả lại
     trước khi job mới chạy (job mới chờ trong hàng đợi với nguyên cấu hình). Worker chưa
     từng đo lúc rảnh thì dùng tổng năng lực máy.
 
-    Tìm nhị phân hệ số nội suy t. Máy yếu tới mức preset tối thiểu cũng không vừa
-    thì nội suy tiếp xuống phía min của từng thông số. Không có số đo máy → preset
-    tối thiểu (không đoán).
+    Không có số đo máy → preset tối thiểu (không đoán).
     """
     minimum = dict(presets.presets["minimum_quality"])
     if capability is None:
         return minimum
+    maximum = dict(presets.presets["maximum"])
     model = presets.resource_model
     idle = _idle(capability)
     available: dict[Resource, float | None] = idle or {
@@ -251,18 +274,43 @@ def maximum_for_machine(presets: ProcessingPresets, capability: MachineCapabilit
     if idle is not None and any(value is None for value in idle.values()):
         return minimum  # Không suy maximum từ mốc rảnh thiếu số đo RAM/VRAM.
     floor = {spec.key: (spec.min if spec.kind != "choice" else minimum[spec.key]) for spec in presets.parameters}
-    if _fits(model, minimum, available):
-        low, high = minimum, dict(presets.presets["maximum"])
-    else:
-        low, high = floor, minimum  # type: ignore[assignment]
-    best, lo, hi = interpolate(presets, low, high, 0.0), 0.0, 1.0
-    for _ in range(24):
-        mid = (lo + hi) / 2
-        candidate = interpolate(presets, low, high, mid)
-        if _fits(model, candidate, available):
-            best, lo = candidate, mid
-        else:
-            hi = mid
-    if _fits(model, interpolate(presets, low, high, 1.0), available):
-        best = interpolate(presets, low, high, 1.0)
+
+    def _search(
+        keys: tuple[str, ...],
+        fixed: dict[str, ParamValue],
+        resources: tuple[Resource, ...],
+    ) -> dict[str, ParamValue]:
+        def _candidate(
+            low_cand: dict[str, ParamValue], high_cand: dict[str, ParamValue], t: float
+        ) -> dict[str, ParamValue]:
+            interp = interpolate(presets, low_cand, high_cand, t)
+            res = dict(fixed)
+            for k in keys:
+                res[k] = interp[k]
+            return res
+
+        for low_range, high_range in ((minimum, maximum), (floor, minimum)):
+            c0 = _candidate(low_range, high_range, 0.0)
+            if not _fits(model, c0, available, resources):
+                continue
+            c1 = _candidate(low_range, high_range, 1.0)
+            if _fits(model, c1, available, resources):
+                return c1
+            best_cand, lo, hi = c0, 0.0, 1.0
+            for _ in range(24):
+                mid = (lo + hi) / 2
+                cmid = _candidate(low_range, high_range, mid)
+                if _fits(model, cmid, available, resources):
+                    best_cand, lo = cmid, mid
+                else:
+                    hi = mid
+            return best_cand
+
+        floor_result = dict(fixed)
+        for k in keys:
+            floor_result[k] = floor[k]
+        return floor_result
+
+    sfm = _search(SFM_KEYS, fixed=minimum, resources=("ram", "disk"))
+    best = _search(SPLAT_KEYS, fixed=sfm, resources=("vram", "ram", "disk"))
     return presets.validate_params(best)

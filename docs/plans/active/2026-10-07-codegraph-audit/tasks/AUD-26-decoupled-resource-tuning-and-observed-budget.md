@@ -318,9 +318,9 @@ Không làm trong sprint này: không đổi `evaluate`, không đổi API, khô
 Tests: `tests/test_orchestration/test_processing_config.py`, `tests/test_api/test_studio_routes.py`.
 
 **Exit:**
-- [ ] Ma trận khớp; ba test bất biến ở trên pass.
-- [ ] Test phủ nhóm (mọi key thuộc đúng một nhóm) pass.
-- [ ] `GET /processing/options` trả `machine_maximum` hợp lệ (test route hiện có pass).
+- [x] Ma trận khớp; ba test bất biến ở trên pass.
+- [x] Test phủ nhóm (mọi key thuộc đúng một nhóm) pass.
+- [x] `GET /processing/options` trả `machine_maximum` hợp lệ (test route hiện có pass).
 
 ---
 
@@ -636,4 +636,31 @@ phép để UNVERIFIED kèm ghi chú cho tới đợt thuê máy đầu tiên.
   - `ruff check`: pass
   - `ruff format --check`: pass
   - `pytest tests/test_orchestration/test_processing_config.py tests/test_gpu/test_gpu_plan.py tests/test_orchestration/test_resource_admission.py -v`: 66 passed.
+
+### Sprint AUD-26.S2 (2026-10-09)
+
+- **Commit base:** `deb9780`
+- **Changed files:**
+  - `src/services/orchestration/processing/resources.py`: định nghĩa `SFM_KEYS` và `SPLAT_KEYS`, mở rộng `_fits` hỗ trợ lọc `resources`, triển khai tìm kiếm hai trục độc lập trong `maximum_for_machine` và cập nhật docstring.
+  - `src/services/orchestration/processing/__init__.py`: re-export `SFM_KEYS` và `SPLAT_KEYS`.
+  - `tests/test_orchestration/test_processing_config.py`: thêm `test_parameter_groups_partition_all_preset_parameters`, thay thế test cũ bằng ma trận `test_maximum_for_machine_two_axis_matrix` (7 cấu hình) và kiểm tra tính chất phân tách `test_maximum_for_machine_decoupled_properties`.
+- **Bảng ma trận thực tế:**
+
+```text
+| VRAM / RAM | max_frames | max_image_size | max_num_features | max_resolution | max_splats | total_train_iters |
+|---|---|---|---|---|---|---|
+| 4 / 16 GB | 1200 | 3200 | 16384 | 1280 | 1.200.000 | 31000 |
+| 6 / 16 GB | 1200 | 3200 | 16384 | 1920 | 2.200.000 | 37000 |
+| 8 / 16 GB | 1200 | 3200 | 16384 | 2400 | 3.200.000 | 43000 |
+| 12 / 32 GB | 1200 | 3200 | 16384 | 3360 | 5.000.000 | 54000 |
+| 24 / 16 GB | 1200 | 3200 | 16384 | 3840 | 6.000.000 | 60000 |
+| 24 / 8 GB | 910 | 2560 | 13312 | 3840 | 6.000.000 | 60000 |
+| 4 / 4 GB | 520 | 1920 | 9216 | 1280 | 1.200.000 | 31000 |
+```
+
+- **Verification:**
+  - `ruff check`: pass
+  - `ruff format --check`: pass
+  - `pytest tests/test_orchestration/test_processing_config.py tests/test_api/test_studio_routes.py -v`: 43 passed.
+
 
