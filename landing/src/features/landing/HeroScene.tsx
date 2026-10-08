@@ -42,7 +42,7 @@ export function HeroScene() {
   return (
     <figure className="lp-viewport">
       <div className="flex items-center justify-between gap-3 border-b border-line-dark px-4 py-2.5">
-        <span className="font-mono text-[12px] text-on-dark/70">scene · lối đi kho, nhìn từ trên</span>
+        <span className="font-mono text-[12px] text-on-dark/70">ví dụ: lối đi trong kho, nhìn từ trên</span>
         <span className="hidden gap-1.5 sm:flex" aria-hidden>
           {HERO.pillars.map((p) => (
             <span key={p} className="rounded border border-line-dark px-1.5 py-0.5 font-mono text-[11px] text-on-dark/60">

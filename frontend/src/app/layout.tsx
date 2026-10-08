@@ -20,8 +20,9 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Real2Sim Studio",
-  description: "Dựng scene 3D Gaussian Splatting từ video để chỉnh sửa và đưa vào mô phỏng.",
+  title: "Real2Sim Studio — Từ video thật đến scene mô phỏng",
+  description:
+    "Biến video quay môi trường thật thành scene 3D đúng tỉ lệ mét, tách được vật thể, có collider và xuất OpenUSD. Lát cắt đầu tiên: nhà kho trong nhà và NVIDIA Isaac Sim.",
 };
 
 /**

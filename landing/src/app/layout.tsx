@@ -19,9 +19,9 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Real2Sim Studio — Từ Hiện Thực Đến Mô Phỏng",
+  title: "Real2Sim Studio — Từ video thật đến scene mô phỏng",
   description:
-    "Khám phá quy trình Real2Sim: tái tạo video và LiDAR thành scene 3D sẵn sàng mô phỏng cho Isaac Sim, có người kiểm duyệt từng bước.",
+    "Biến video quay môi trường thật thành scene 3D đúng tỉ lệ mét, tách được vật thể, có collider và xuất OpenUSD. Lát cắt đầu tiên: nhà kho trong nhà và NVIDIA Isaac Sim.",
 };
 
 export default function RootLayout({

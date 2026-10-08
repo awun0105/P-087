@@ -19,16 +19,17 @@ export const NAV = [
   { href: "#solution", label: "Giải pháp" },
   { href: "#workflow", label: "Quy trình" },
   { href: "#progress", label: "Tiến độ" },
+  { href: "#roadmap", label: "Dùng ở đâu" },
   { href: "#start", label: "Bắt đầu" },
 ] as const;
 
 export const HERO = {
-  eyebrow: "Real2Sim cho Warehouse / Indoor AMR",
-  titleLead: "Từ video nhà kho",
-  titleEmphasis: "đến scene robot dùng được.",
+  eyebrow: "Real2Sim cho robotics và mô phỏng",
+  titleLead: "Từ video thật",
+  titleEmphasis: "đến scene mô phỏng dùng được.",
   lead:
-    "Real2Sim Studio biến video quay kho bằng camera di chuyển thành scene 3D đúng tỉ lệ mét, tách được từng vật thể, có collider và xuất OpenUSD cho NVIDIA Isaac Sim.",
-  note: "Máy làm phần lặp lại. Kỹ sư xác nhận ở các bước then chốt, Reviewer duyệt trước khi phát hành.",
+    "Real2Sim Studio biến video quay môi trường thật bằng camera di chuyển thành scene 3D đúng tỉ lệ mét, tách được từng vật thể và có collider, sẵn sàng đưa vào trình mô phỏng.",
+  note: "Lát cắt đầu tiên đang chạy: nhà kho trong nhà và NVIDIA Isaac Sim. Kỹ sư xác nhận ở các bước then chốt, Reviewer duyệt trước khi phát hành.",
   benefits: ["Tỉ lệ theo đơn vị mét", "Vật thể tách riêng, có collider", "Có người duyệt trước khi phát hành"],
   pillars: ["Visual", "Geometry", "Physics"],
 };
@@ -47,7 +48,7 @@ export const PROBLEM = {
   titleLead: "Scene nhìn giống thật.",
   titleEmphasis: "Robot vẫn chưa dùng được.",
   lead:
-    "Video hay LiDAR của nhà kho chưa thể đưa thẳng vào Isaac Sim. Ba người cùng làm trên một scene, và mỗi người vướng ở một chỗ.",
+    "Video hay LiDAR của một môi trường thật chưa thể đưa thẳng vào trình mô phỏng. Ba người cùng làm trên một scene, và mỗi người vướng ở một chỗ.",
   personas: [
     {
       role: "Kỹ sư mô phỏng",
@@ -57,19 +58,19 @@ export const PROBLEM = {
       pains: [
         "Dựng lại hình học và chỉnh tỉ lệ mét bằng tay",
         "Tách vật thể, tạo vùng va chạm qua nhiều công cụ",
-        "Dời một pallet là phải làm lại nhiều bước",
+        "Môi trường đổi một chút là phải làm lại nhiều bước",
       ],
-      handoff: "Giao scene cho kỹ sư AMR",
+      handoff: "Giao scene cho kỹ sư robot",
     },
     {
-      role: "Kỹ sư tích hợp AMR",
+      role: "Kỹ sư tích hợp robot",
       tag: "Người chạy robot",
       highlight: "Nhìn đúng ≠ chạy đúng",
       highlightNote: "scene đẹp vẫn có thể sai đơn vị hoặc thiếu vật cản",
       pains: [
         "Robot kẹt hoặc đi xuyên vật vì collider sai",
         "Kích thước chưa theo mét nên đường đi không đáng tin",
-        "Khó thử layout mới trước khi đổi kho thật",
+        "Khó thử bố trí mới trước khi thay đổi ngoài thực tế",
       ],
       handoff: "Gửi scene cho Reviewer",
     },
@@ -88,7 +89,7 @@ export const PROBLEM = {
   ],
   rootCauses: [
     { title: "Không có tỉ lệ mét", body: "Video cho thấy môi trường nhưng không cho biết kích thước thật." },
-    { title: "Không có cấu trúc vật thể", body: "Bản tái tạo là một khối liền, không tách được pallet hay kệ." },
+    { title: "Không có cấu trúc vật thể", body: "Bản tái tạo là một khối liền, không tách được từng vật để di chuyển hay xoá." },
     { title: "Không có lớp vật lý", body: "Simulator cần collider, không chỉ cần hình đẹp." },
     { title: "Không có truy vết", body: "Không gắn được kết quả kiểm tra với đúng phiên bản scene." },
   ],
@@ -115,7 +116,7 @@ export const SOLUTION = {
       outcome: "Ít công cụ hơn · Không dựng lại từ đầu",
     },
     {
-      for: "Cho kỹ sư tích hợp AMR",
+      for: "Cho kỹ sư tích hợp robot",
       title: "Scene có vật lý tối thiểu",
       points: [
         "Vật được tách khỏi mặt sàn và có collider riêng",
@@ -271,29 +272,36 @@ export const PROGRESS = {
 };
 
 export const ROADMAP = {
-  index: "05 / Định hướng",
+  index: "05 / Dùng ở đâu",
   titleLead: "Một lõi Real2Sim.",
-  titleEmphasis: "Mở rộng theo từng miền.",
+  titleEmphasis: "Nhiều nơi dùng scene.",
   lead:
-    "Lõi xử lý được tách khỏi miền ứng dụng và trình mô phỏng. MVP 4 tuần chỉ cam kết một lát cắt: nhà kho trong nhà và Isaac Sim.",
+    "Lõi xử lý được tách khỏi miền ứng dụng và trình mô phỏng. MVP 4 tuần chỉ cam kết một lát cắt; các hướng còn lại dùng chung lõi đó.",
   core: "Universal Real2Sim Core",
   adapters: ["DomainAdapter", "SimulatorAdapter"],
   tracks: [
     {
+      state: "current",
       tag: "MVP · đang triển khai",
-      domain: "Warehouse / Indoor AMR",
+      domain: "Robot trong nhà kho",
       simulator: "NVIDIA Isaac Sim",
-      body: "Một lát cắt hoàn chỉnh từ video kho đến gói scene được duyệt.",
-      current: true,
+      body: "Lát cắt hoàn chỉnh từ video kho đến gói scene được duyệt.",
     },
     {
+      state: "partial",
+      tag: "Đã có một phần",
+      domain: "Công cụ 3D khác",
+      simulator: "3DGS (PLY / SOG) · OpenUSD",
+      body: "Tải file 3DGS hoặc gói OpenUSD để mở ở công cụ khác. Nhóm chưa kiểm thử với từng phần mềm cụ thể.",
+    },
+    {
+      state: "later",
       tag: "Sau MVP",
       domain: "Đường bộ",
       simulator: "CARLA và simulator khác",
       body: "Tái sử dụng cùng lõi xử lý, chỉ thay adapter của miền và simulator.",
-      current: false,
     },
-  ],
+  ] as const,
 };
 
 export const START = {
@@ -308,7 +316,7 @@ export const START = {
 };
 
 export const FOOTER = {
-  tagline: "Chuyển dữ liệu kho thật thành scene mô phỏng có cấu trúc, có người duyệt.",
+  tagline: "Chuyển dữ liệu từ môi trường thật thành scene mô phỏng có cấu trúc, có người duyệt.",
   team: "Team P-087 · VinUni AI20K Build Phase, Cohort 4",
   github: "https://github.com/AI20K-Build-Phase-Cohort-4/P-087",
   license: "MIT License",

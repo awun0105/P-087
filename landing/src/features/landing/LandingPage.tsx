@@ -228,7 +228,7 @@ export function LandingPage() {
         </div>
       </section>
 
-      {/* ── 05 ĐỊNH HƯỚNG ── */}
+      {/* ── 05 DÙNG Ở ĐÂU ── */}
       <section id="roadmap" className="lp-section">
         <div className="lp-wrap">
           <SectionHead index={ROADMAP.index} lead={ROADMAP.titleLead} emphasis={ROADMAP.titleEmphasis} body={ROADMAP.lead} />
@@ -244,18 +244,32 @@ export function LandingPage() {
                 ))}
               </ul>
             </div>
-            <div className="grid gap-6 md:grid-cols-2">
-              {ROADMAP.tracks.map((t) => (
-                <div
-                  key={t.domain}
-                  className={`rounded-xl p-6 sm:p-7 ${t.current ? "border-2 border-ember-strong bg-paper-raised" : "border border-dashed border-line-strong"}`}
-                >
-                  <p className={`text-[13px] font-semibold ${t.current ? "text-ember-strong" : "text-ink-muted"}`}>{t.tag}</p>
-                  <p className="mt-3 text-xl font-bold tracking-tight text-ink">{t.domain}</p>
-                  <p className="mt-1 font-mono text-[13px] text-ink-muted">↳ {t.simulator}</p>
-                  <p className="mt-4 text-[15px] leading-relaxed text-ink-muted">{t.body}</p>
-                </div>
-              ))}
+            <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+              {ROADMAP.tracks.map((t) => {
+                const borderBg =
+                  t.state === "current"
+                    ? "border-2 border-ember-strong bg-paper-raised"
+                    : t.state === "partial"
+                      ? "border border-line-strong bg-paper-raised"
+                      : "border border-dashed border-line-strong";
+                const tagColor =
+                  t.state === "current"
+                    ? "text-ember-strong"
+                    : t.state === "partial"
+                      ? "text-ink"
+                      : "text-ink-muted";
+                return (
+                  <div
+                    key={t.domain}
+                    className={`rounded-xl p-6 sm:p-7 ${borderBg}`}
+                  >
+                    <p className={`text-[13px] font-semibold ${tagColor}`}>{t.tag}</p>
+                    <p className="mt-3 text-xl font-bold tracking-tight text-ink">{t.domain}</p>
+                    <p className="mt-1 font-mono text-[13px] text-ink-muted">↳ {t.simulator}</p>
+                    <p className="mt-4 text-[15px] leading-relaxed text-ink-muted">{t.body}</p>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
