@@ -557,8 +557,8 @@ worker byte cap; exact geometry/floor checksum rejection; and rejection of floor
 evidence bound to another same-job artifact. No worker/API/Studio integration is
 included.
 **Exit:** [x] the target loader returns exact canonical surface/floor evidence or
-fails closed; [ ] source-map floor estimation, proposal/QA execution and durable
-worker dispatch are connected.
+fails closed; [ ] source-map floor estimation from gravity/reference evidence,
+proposal/QA execution and durable worker dispatch are connected.
 
 #### AUD-19.S4d Result / Evidence
 
@@ -604,4 +604,73 @@ Pre-flight (GUIDE.md Rule 13)
   import-only lint fix); `.venv/bin/ruff check src/ tests/` PASS;
   `.venv/bin/ruff format --check src/ tests/` PASS (550 files);
   `git diff --check` PASS.
+- DevTools: n/a — no UI/runtime behavior changed.
+
+### AUD-19.S4e — Bounded source-plane hypotheses without guessing the floor
+
+**Input:** exact decoded source-map points in meters, exact source checksum, declared
+non-world source frame and a bounded hypothesis profile.
+**Output:** deterministic report of zero or more checksum-bound, unoriented plane
+hypotheses with support, residual and two-dimensional span evidence.
+**Data contract:** `status="hypotheses"` means only that broad planes were found;
+`reason="orientation_unclassified"` remains set even when there is exactly one
+candidate. Results contain no `is_floor`, `up_direction`, selected-candidate or PASS
+field and cannot be passed as `RegistrationFloorPlane`. The report binds source and
+profile checksums but does not independently re-read source bytes. Sampling is capped
+at 50,000 points, RANSAC at 256 iterations per hypothesis, and output at eight
+hypotheses. The support ratio, residuals and projected spans are descriptive
+measurements; they are not floor probability or registration qualification.
+
+Implement: deterministically sample oversized clouds; fit and refine separated planes
+with seeded RANSAC/PCA; reject narrow or under-supported planes; order retained
+hypotheses by measured support and span. Invalid coordinates, missing source identity,
+world-frame input, and maps without supported planes return explicit `insufficient`
+reasons. Do not classify a largest/dominant plane as floor and do not connect this
+diagnostic result to BEV/ICP, target publication, API, worker or collision consumers.
+The next producer slice must either receive a verified up/gravity prior or score
+multiple orientation hypotheses under held-out registration QA while preserving
+ambiguity.
+
+**Tests:** two broad orthogonal planes plus outliers are both surfaced; a single
+horizontal plane remains unclassified; random volumetric points return insufficient;
+point capping and evidence are deterministic/checksum-bound; malformed, non-finite,
+world-frame and invalid-checksum inputs fail closed.
+**Exit:** [x] bounded, deterministic diagnostic algorithm and explicit unknown-axis
+behavior are tested; [ ] source-floor selection, BEV/ICP execution and held-out QA
+remain separate, unqualified work.
+
+#### AUD-19.S4e Result / Evidence
+
+Added `src/services/reconstruction/alignment/source_planes.py` with a fixed bounded
+profile and a pure diagnostic producer. It returns checksum-bound plane geometry,
+support counts/ratios, residuals and projected spans. Even a single supported plane
+stays `orientation_unclassified`; the result has no floor or up-axis field and has no
+production caller. Invalid input and point-budget sampling remain explicit and
+deterministic. No scene, alignment or collision artifact is produced.
+
+Verification: the focused hypothesis suite passed (5 tests); BEV, constrained ICP,
+registration source and target regressions passed with it (48 tests total). Full
+`.venv/bin/ruff check src/ tests/` passed; `.venv/bin/ruff format --check src/
+tests/` reported 554 files formatted; `git diff --check` passed. CodeGraph reports
+892 files, 17,821 nodes and 52,787 edges, and its exploration shows the new producer
+has test callers only. `graphify update .` rebuilt 20,995 nodes, 61,995 edges and
+702 communities. Real source-map floor identity, gravity metadata, BEV/ICP
+integration, held-out qualification, worker/API/browser behavior and safety remain
+**UNVERIFIED**.
+
+Pre-flight (GUIDE.md Rule 13)
+- codegraph: explored the registration input binding, verified source loader,
+  measured target-floor resolver, floor-fit prior and BEV floor contract. The source
+  map contract has units/frame but no up/gravity declaration; BEV requires a separate
+  measured floor/up direction.
+- impact: the new function currently has test callers only. It does not alter source
+  bindings, request/profile checksums, existing trajectory alignment, scene revisions
+  or any production consumer.
+- understand: independent-map source points are verified and converted to meters;
+  target floor evidence is measured. Source orientation is missing, so hypotheses
+  cannot be promoted into the existing `RegistrationFloorPlane` contract.
+- minimal-code: added one bounded pure-NumPy diagnostic module and focused tests; no
+  dependency, schema migration, persistence, worker, API or UI changes.
+- checks: 48 focused registration tests passed; full repository Ruff check/format
+  passed; `git diff --check` passed. CodeGraph and Graphify indexes were refreshed.
 - DevTools: n/a — no UI/runtime behavior changed.

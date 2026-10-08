@@ -121,9 +121,17 @@ metric/floor evidence and bounded ROI/search budgets; raw scans remain routed th
 AUD-17. Unknown scale may produce a bounded proposal but cannot pass QA or alter
 canonical geometry. The existing sensor-package alignment path and REC-09 contracts
 remain unchanged. Focused contracts plus REC-06/08/09 regressions, repo Ruff/format,
-contract mirror and CodeGraph pass. No BEV/ICP producer or held-out registration is
-qualified yet; those remain S2–S4 work.
-Active scope: 26 packages/88 sprints. AUD-16/ADR0017 (3 sprints) và AUD-25/ADR0025 (6 sprints) Deferred theo yêu cầu owner; không là dependency hoặc implementation work trong kế hoạch hiện tại.
+contract mirror and CodeGraph pass. These contract checks alone do not qualify
+independent-map runtime behavior; later local algorithm work and open gates are
+recorded below.
+AUD-19.S2 has bounded synthetic BEV candidate search and S3 has constrained ICP
+refinement; S4a–S4d add durable operation/source/target preparation; and S4e reports
+bounded source-plane hypotheses. These modules have local test coverage but are not
+connected as a production registration flow. The assembly contract still has no
+gravity/up declaration, so even one source plane remains unclassified. Held-out map
+qualification and worker/API/scene/collision integration stay open.
+Active scope: 26 packages/89 sprint slices, including the AUD-19.S4e follow-up.
+AUD-16/ADR0017 (3 sprints) và AUD-25/ADR0025 (6 sprints) Deferred theo yêu cầu owner; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
 ## Outcome
 
@@ -188,7 +196,7 @@ observability, runtime chưa qualified, research limits và tính năng khả th
 | Fast Preview lifecycle (AUD-16) | Deferred theo yêu cầu owner 2026-10-08 vì 7k iters thiếu độ nét/hình học và nguy cơ chậm pipeline | AUD-16 |
 | Raw scans thiếu trajectory bị reject | LiDAR odometry khả thi; cần explicit mode/runtime/provenance/drift QA | AUD-17 |
 | Auto anonymizer producer thiếu | Self-attested flow có; strict QA gate có; detection/tracking/redaction integration chưa có | AUD-18 |
-| Automatic registration cho independent maps cần bổ sung | Trajectory-based no-point fit đã có; geometric BEV/ICP proposal/QA cho independent maps chưa có | AUD-19 |
+| Automatic registration cho independent maps cần bổ sung | Trajectory-based no-point fit đã có; synthetic BEV/ICP components exist, but source-floor selection, integrated proposal/QA and held-out qualification are incomplete | AUD-19 |
 | Video chưa nén trước upload, rotation/time mapping chưa explicit | Source: upload giữ bytes, decode passthrough, quality probe640×360; LiDAR ghép frame_id gốc | AUD-23 |
 | SOG input và durable view import | AUD-06.S1 nhận bundled SOG v2, queue import bền và đồng bộ UI; S2/S3 vẫn giữ lease recovery/admission, retry/cancel và runtime decode validation. Finalize/VisualResolver/objectify vẫn yêu cầu Brush/camera/frame lineage | AUD-06.S1 implemented; AUD-25 continuation Deferred |
 
@@ -222,7 +230,7 @@ BEV/ICP implementation hoặc independent-map/browser acceptance.
 | [AUD-16: Fast Preview](tasks/AUD-16-fast-preview.md) | Deferred — không implement; EX-PRODUCT + EX-REC nếu mở lại | REC-04/05, PRODUCT-02/08/09 | 3 |
 | [AUD-17: LiDAR odometry](tasks/AUD-17-lidar-odometry.md) | P2 — EX-REC + EX-PRODUCT; opt-in | REC-08/06, PRODUCT-02/08/09 | 3 |
 | [AUD-18: Privacy anonymizer](tasks/AUD-18-privacy-anonymizer.md) | P2 — EX-REC + EX-PRODUCT; opt-in | REC-02, PRODUCT-01/02/09 | 3 |
-| [AUD-19: Automatic RGB–LiDAR registration](tasks/AUD-19-automatic-rgb-lidar-registration.md) | P1 — EX-REC + EX-PRODUCT; SCENE/SIM consumers | REC-06/08/09, PRODUCT-04/08/09 | 4 |
+| [AUD-19: Automatic RGB–LiDAR registration](tasks/AUD-19-automatic-rgb-lidar-registration.md) | P1 — EX-REC + EX-PRODUCT; SCENE/SIM consumers | REC-06/08/09, PRODUCT-04/08/09 | 4 + S4e follow-up |
 | [AUD-20: Tên và creator attribution](tasks/AUD-20-user-display-name-and-creator.md) | P1 — EX-PRODUCT | PRODUCT-01/02/06/09 | 3 |
 | [AUD-21: Guest signup và ownership](tasks/AUD-21-guest-signup-and-ownership.md) | P1 — EX-PRODUCT | PRODUCT-01/02/06/09 | 4 |
 | [AUD-22: Guest quota 3/ngày](tasks/AUD-22-guest-daily-job-quota.md) | P1 — EX-PRODUCT | PRODUCT-01/02/06/09 | 3 |
@@ -512,8 +520,11 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [ ] AUD-17.S3 drift/consumer QA and real-sensor qualification; current code has a
       diagnostic-only RGB-PTS to estimated-pose mapper, not wired into product
       consumers or R5 dispatch; AUD-18.
-- [x] AUD-19.S1 typed contract and REC-06/08/09 regression work; no solver/API/UI enabled.
-- [ ] AUD-19.S2–S4 independent-map producer, held-out QA, operation/API/UI and browser acceptance.
+- [x] AUD-19.S1 contracts; local S2 BEV/S3 constrained-ICP algorithms; S4a–S4e
+      durable envelope, exact source/target resolution and diagnostic source-plane
+      hypotheses. The latter still cannot identify a floor without orientation evidence.
+- [ ] AUD-19 held-out map QA, source-floor selection, producer/worker/API/consumer
+      integration and browser acceptance.
 
 - [x] Implementation AUD-20.S1 identity/seed migration contract and AUD-20.S2 producer/API actor attribution.
 - [x] AUD-21.S4 local Studio capability/API implementation and UI regression.
@@ -592,8 +603,10 @@ Plan lưu 46 Markdown documents, 25 task files và 86 sprint definitions. Active
 scope có 24 tasks/80 sprints/12 ADR Proposed and ADR 0022 Accepted; AUD-25 với 6 sprint và ADR0025 Deferred
 theo yêu cầu owner. AUD-06/24 vẫn nhận PLY/SOG cho view; AUD-19 không đợi hoặc
 implement imported-source adapter. Subsequent sprint work has changed source code:
-AUD-19.S1 adds registration contracts only; it does not enable BEV/ICP processing,
-durable operations, API/UI, runtime qualification or production consumers.
+AUD-19.S1 adds registration contracts; S2/S3 add local BEV/ICP algorithm components;
+S4a–S4e add durable operation/source/target preparation and diagnostic plane
+hypotheses. No end-to-end producer, API/UI path or production consumer is connected,
+and runtime/held-out qualification remains open.
 Document checks exit 0: 25 integration sections gồm một Deferred, 231 local links,
 121 existing pytest paths và 138 canonical bindings trong toàn bộ tài liệu lưu;
 đủ 80 active sprint không trùng, đúng internal order và 37 active cross-task
