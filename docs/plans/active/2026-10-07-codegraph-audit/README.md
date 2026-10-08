@@ -26,6 +26,12 @@ Ruff check/format đều pass. PostgreSQL qualification pending vì
 `R2S_TEST_POSTGRES_URL` chưa được cấu hình; DevTools visual gate **UNVERIFIED** do
 Chrome profile lock. Guest rollout vẫn đợi database qualification, browser
 acceptance và AUD-20.S3 seed acceptance.
+AUD-23.S1 đã thêm profile/media contracts dùng chung Python–TypeScript, input-
+specific capability blockers, dimension fitting cho portrait/landscape và
+checksum compatibility cho `InputManifest` cũ. Local verification: 148 backend-
+related tests, 8 focused Vitest tests, Ruff, typecheck, changed-file
+ESLint và production build đều pass. WebCodecs/runtime support, actual upload,
+bitrate quality và sensor consumers vẫn thuộc AUD-23.S2–S5.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -300,8 +306,9 @@ projection was needed yet. CodeGraph source/callers were inspected before edits;
 post-edit sync is pending because the active MCP daemon reported auto-sync
 disabled after the OS file-watch limit was reached. Tiếp theo là AUD-07.S2.
 
-AUD-23 có client preparation identity trước AUD-15/16 cache consumers; supported
-sensor mapping chốt trước AUD-13 overlay QA. Không cần full odometry/registration
+AUD-23.S1 đã chốt client preparation identity trước AUD-15/16 cache consumers;
+supported sensor mapping chốt trước AUD-13 overlay QA ở S3. Không cần full
+odometry/registration
 để normalize RGB-only uploads; paired sensor mode giữ mapping/projection guards.
 AUD-24.S1–S2 chốt assembly/recipe ports trước AUD-17/19 implementations. S3–S4
 enable từng qualified recipe, không fake support cho missing runtime. R5 estimated
@@ -396,7 +403,10 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [ ] AUD-22.S2 shared-PostgreSQL concurrency/restart qualification; AUD-22.S3
       DevTools browser acceptance.
 
-- [ ] Implementation AUD-23 và client encode/upload/bandwidth/geometry acceptance.
+- [x] AUD-23.S1 versioned media/capability/preparation contracts, Python/TypeScript
+      agreement, frame-map rules, preset dimension fitting and legacy checksum preservation.
+- [ ] AUD-23.S2–S4 client encode, server/REC integration, upload UI and recovery;
+      AUD-23.S5 real browser, bandwidth, quality and geometry acceptance.
 - [ ] Implementation AUD-24 và grouped upload/R1–R6 recipe/consumer/browser acceptance.
 - [x] Hoãn AUD-25/ADR0025 theo yêu cầu owner; gỡ khỏi execution order và active dependencies.
 

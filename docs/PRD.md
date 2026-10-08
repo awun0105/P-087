@@ -35,6 +35,7 @@
 | v1.16 | 30/09/2026 | Owner chốt pipeline v2 ([ADR 0007](./decisions/0007-object-centric-hybrid-usd-pipeline.md)): scene theo vật chỉnh sửa được, xuất USD lai (Gaussian để hiển thị, collider để va chạm) cho Isaac Sim. Kéo vào phạm vi hiện tại: xoá vật kèm vá nền, gợi ý nhãn, thay vật bằng asset (mục 4.3.1). FR-11 bổ sung yêu cầu USD lai, khối lượng, vật liệu vật lý, nhãn ngữ nghĩa. Acceptance định lượng của các mục mới khoá sau pha chạy thử. |
 | v1.17 | 02/10/2026 | LiDAR của người dùng đi kèm video (ADR 0009): nhận gói đám mây đã đăng ký hoặc scan thô, bắt buộc kèm quỹ đạo + calibration + thời điểm frame; ghép scan theo quỹ đạo và căn chỉnh RGB ↔ LiDAR vào phạm vi làm. LiDAR odometry/SLAM và job chỉ-LiDAR giữ nguyên ngoài phạm vi |
 | v1.18 | 08/10/2026 | Owner adds Guest as the third fixed role: public invite-free account creation with email/name/password (email verification deferred), shared reads, Editor workflows on owned resources, 3 accepted job runs/day reset at 00:00 Asia/Ho_Chi_Minh; objectify excluded. Editor/Reviewer retain cross-user intervention; Reviewer remains highest. Public signup stays feature-flagged until ownership, quota, browser and database acceptance. See [ADR 0021](./decisions/0021-guest-identity-and-ownership.md) and [AUD-21/AUD-22](./plans/active/2026-10-07-codegraph-audit/README.md). |
+| v1.19 | 08/10/2026 | Owner chốt chuẩn bị/nén video ngay trên thiết bị trước upload để giảm băng thông: mặc định720p, tùy chọn1080p/720p/480p, nhận video dọc/ngang và giữ nguyên display aspect/orientation. FPS cap30 và bitrate là candidate cần qualify; không force30CFR. Raw local file không được coi là server-verified source. Chi tiết ở [ADR 0023](./decisions/0023-client-video-normalization.md) và AUD-23; chưa có browser encode/quality acceptance. |
 
 ### 0.2 Chủ sở hữu và người phê duyệt (Owners and Approvers)
 
@@ -416,6 +417,19 @@ Ví dụ nguồn phù hợp:
 
 Camera giám sát cố định không được coi là input hợp lệ để tái dựng toàn bộ scene.
 
+Video được chuẩn bị cục bộ trước upload theo preset user chọn: mặc định720p,
+có thể chọn1080p hoặc480p. Portrait, landscape, 4:3, 1:1 và ultrawide không bị
+ép thành16:9; giữ display aspect, áp dụng rotation đúng một lần, không crop hoặc
+upscale. Candidate v1 giới hạn tối đa30FPS bằng source presentation timeline;
+giữ nguyên media time và mapping frame nguồn, không tạo CFR bằng cách lặp frame.
+Bitrate hiện là giá trị khởi đầu để đo, không là bảo đảm chất lượng hoặc tiết kiệm
+dung lượng. Browser phải xác nhận codec, Worker, MP4 muxer và storage thực tế.
+HDR chưa thuộc profile chuẩn hóa v1; audio tương thích được giữ, còn trường hợp
+không tương thích cần remediation hoặc user chủ động bỏ audio. Nếu không hỗ trợ,
+hệ thống phải báo rõ và không tự upload raw input. File gốc vẫn ở thiết bị user;
+server chỉ xác minh bytes đã được upload. AUD-23 đang triển khai; đây là product
+target, chưa phải browser/quality acceptance.
+
 ### 5.2 Luồng RGB kết hợp LiDAR (RGB + LiDAR Path)
 
 Hệ thống nhận:
@@ -588,9 +602,13 @@ Hệ thống bắt buộc:
 - tạo được project và reconstruction job;
 - ghi loại input, tên tệp, kích thước, checksum và thời điểm tiếp nhận;
 - giải mã video và đọc metadata cơ bản;
+- chuẩn bị video cục bộ trước upload theo preset 1080p/720p/480p và lưu media
+  đã nhận làm source-of-record; client khai báo hash của file gốc không là proof
+  server đã nhận hoặc xác minh file đó;
 - đọc point cloud PLY/PCD không rỗng;
 - từ chối định dạng không hỗ trợ với thông báo rõ ràng;
-- không làm mất input gốc khi job xử lý thất bại.
+- không làm mất bytes đã nhận khi job xử lý thất bại; nếu cần chạy lại với preset
+  cao hơn, user có thể phải chọn lại file gốc đang giữ trên thiết bị.
 
 ### FR-02 — Kiểm tra trước xử lý (Pre-flight Validation)
 

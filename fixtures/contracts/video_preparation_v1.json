@@ -1,0 +1,211 @@
+{
+  "profile": {
+    "schema_version": "1.0",
+    "profile_id": "real2sim_client_video",
+    "profile_version": "1",
+    "default_preset": "720p",
+    "presets": [
+      {
+        "preset": "1080p",
+        "max_long_edge_px": 1920,
+        "max_short_edge_px": 1080,
+        "target_bitrate_bps": 8000000
+      },
+      {
+        "preset": "720p",
+        "max_long_edge_px": 1280,
+        "max_short_edge_px": 720,
+        "target_bitrate_bps": 4000000
+      },
+      {
+        "preset": "480p",
+        "max_long_edge_px": 854,
+        "max_short_edge_px": 480,
+        "target_bitrate_bps": 2000000
+      }
+    ],
+    "max_frame_rate": {
+      "numerator": 30,
+      "denominator": 1
+    },
+    "frame_rate_policy": "presentation_time_nearest_no_duplicate",
+    "container": "video/mp4",
+    "video_codec_family": "avc",
+    "bitrate_mode": "variable",
+    "allow_upscale": false,
+    "preserve_display_aspect": true,
+    "crop_policy": "none",
+    "orientation_policy": "apply_once_to_pixels",
+    "dimension_rounding": "even_down",
+    "max_duration_error_frames": 1,
+    "max_frame_map_bytes": 33554432,
+    "audio_policy": "preserve_compatible_or_explicit_omit",
+    "color_policy": "preserve_sdr_metadata_reject_hdr",
+    "profile_checksum": "sha256:b09fdfdea2c66d347387fcf3a21df107cb12e5a163fcc367a9bd53ec9e5a6ca7"
+  },
+  "capability_supported": {
+    "schema_version": "1.0",
+    "profile_checksum": "sha256:b09fdfdea2c66d347387fcf3a21df107cb12e5a163fcc367a9bd53ec9e5a6ca7",
+    "requested_preset": "720p",
+    "secure_context": true,
+    "worker_available": true,
+    "decoder_supported": true,
+    "encoder_supported": true,
+    "mp4_muxer_available": true,
+    "video_metadata_supported": true,
+    "hdr_supported": true,
+    "audio_policy_satisfied": true,
+    "available_storage_bytes": 67108864,
+    "required_storage_bytes": 16777216,
+    "blockers": [],
+    "status": "supported"
+  },
+  "capability_unsupported": {
+    "schema_version": "1.0",
+    "profile_checksum": "sha256:b09fdfdea2c66d347387fcf3a21df107cb12e5a163fcc367a9bd53ec9e5a6ca7",
+    "requested_preset": "720p",
+    "secure_context": true,
+    "worker_available": true,
+    "decoder_supported": true,
+    "encoder_supported": true,
+    "mp4_muxer_available": true,
+    "video_metadata_supported": true,
+    "hdr_supported": false,
+    "audio_policy_satisfied": true,
+    "available_storage_bytes": 67108864,
+    "required_storage_bytes": 16777216,
+    "blockers": [
+      "hdr_unsupported"
+    ],
+    "status": "unsupported"
+  },
+  "preparation_manifest": {
+    "schema_version": "1.0",
+    "profile_checksum": "sha256:b09fdfdea2c66d347387fcf3a21df107cb12e5a163fcc367a9bd53ec9e5a6ca7",
+    "selected_preset": "720p",
+    "implementation_id": "contract-fixture",
+    "implementation_version": "1.0",
+    "source": {
+      "original_name": "warehouse.mp4",
+      "size_bytes": 123456,
+      "last_modified_ms": 1720000000000,
+      "declared_source_checksum": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "prepared_file": {
+      "content_type": "video/mp4",
+      "size_bytes": 45678,
+      "checksum": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "source_video": {
+      "codec": "h264",
+      "coded_width": 1920,
+      "coded_height": 1080,
+      "display_width": 1920,
+      "display_height": 1080,
+      "sample_aspect_ratio": {
+        "numerator": 1,
+        "denominator": 1
+      },
+      "rotation_degrees": 0,
+      "start_pts": 0,
+      "duration_ticks": 500,
+      "time_base": {
+        "numerator": 1,
+        "denominator": 6000
+      },
+      "frame_rate": {
+        "numerator": 60,
+        "denominator": 1
+      },
+      "frame_count": 5,
+      "color": {
+        "primaries": "bt709",
+        "transfer": "bt709",
+        "matrix": "bt709",
+        "range": "tv"
+      },
+      "audio_track_count": 1
+    },
+    "prepared_video": {
+      "codec": "avc1.640028",
+      "coded_width": 1280,
+      "coded_height": 720,
+      "display_width": 1280,
+      "display_height": 720,
+      "sample_aspect_ratio": {
+        "numerator": 1,
+        "denominator": 1
+      },
+      "rotation_degrees": 0,
+      "start_pts": 0,
+      "duration_ticks": 500,
+      "time_base": {
+        "numerator": 1,
+        "denominator": 6000
+      },
+      "frame_rate": {
+        "numerator": 30,
+        "denominator": 1
+      },
+      "frame_count": 3,
+      "color": {
+        "primaries": "bt709",
+        "transfer": "bt709",
+        "matrix": "bt709",
+        "range": "tv"
+      },
+      "audio_track_count": 1
+    },
+    "pixel_transform": {
+      "matrix": [
+        [
+          0.6666666666666666,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.6666666666666666,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    },
+    "frame_map": {
+      "format": "r2s_video_frame_map_jsonl_v1",
+      "checksum": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "size_bytes": 256,
+      "entry_count": 3,
+      "source_frame_count": 5
+    },
+    "audio_disposition": "preserved",
+    "preparation_checksum": "sha256:f35ec929d260beca28c7f67f0db2ad3120984e5f4ec422eede4a30acd361d726"
+  },
+  "frame_map_rows": [
+    {
+      "schema_version": "1.0",
+      "output_frame_index": 0,
+      "output_pts": 0,
+      "source_frame_index": 0,
+      "source_pts": 0
+    },
+    {
+      "schema_version": "1.0",
+      "output_frame_index": 1,
+      "output_pts": 200,
+      "source_frame_index": 2,
+      "source_pts": 200
+    },
+    {
+      "schema_version": "1.0",
+      "output_frame_index": 2,
+      "output_pts": 400,
+      "source_frame_index": 4,
+      "source_pts": 400
+    }
+  ]
+}

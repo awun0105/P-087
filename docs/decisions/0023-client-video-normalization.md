@@ -4,9 +4,11 @@ Date: 2026-10-07
 
 ## Status
 
-Proposed — owner chọn nén trước upload, default720p/options1080p/720p/480p.
-FPS cap30, codec/runtime/quality settings và schema là đề xuất cần chốt S1/qualifyS5;
-chưa implement hoặc chứng minh acceptance.
+Proposed — owner đã chọn nén trước upload, default720p/options1080p/720p/480p,
+portrait/landscape. AUD-23.S1 hiện có versioned Python/TypeScript contracts,
+checksum-bound profile và synthetic contract fixtures. ADR vẫn Proposed: encoder,
+browser support, bitrate quality, real upload saving và sensor consumers chưa được
+qualified; không đánh dấu Accepted từ contract tests.
 
 ## Context
 
@@ -19,24 +21,36 @@ mapping. Client encode sẽ mất backend access tới raw original nếu nó kh
 ## Decision đề xuất
 
 1. Preset choice trước upload; client compress bằng capability-checked Worker,
-   finalized media mới upload. Default720p, options1080p/720p/480p. Actual digest/
-   bytes là resume identity. Server compression không thay requested bandwidth goal.
+   finalized media mới upload. Default720p, options1080p/720p/480p. Profile v1
+   là `real2sim_client_video` với checksum
+   `sha256:b09fdfdea2c66d347387fcf3a21df107cb12e5a163fcc367a9bd53ec9e5a6ca7`.
+   Maximum long/short edge lần lượt là1920/1080,1280/720,854/480; bitrate
+   8/4/2Mbps là **candidate khởi đầu**, chưa đo/qualify. Actual digest/bytes là
+   resume identity. Server compression không thay requested bandwidth goal.
 2. Preserve display aspect và orientation; portrait9:16, landscape16:9, square/4:3
-   fit oriented bounds. No crop/stretch/padding/upscale; even rounding và actual
-   SAR/rotation/pixel transform recorded. Không bắt buộc landscape để simplify UI.
-3. Max30FPS, native low FPS giữ nguyên; không force exact CFR, duplicate/interpolate
-   hoặc change playback speed. Use source presentation timeline, mapping to source
-   IDs/PTS; reconstruction sampling independent. Changing FPS requires sensor remap.
+   fit orientation-independent bounds. No crop/stretch/padding/upscale; even
+   rounding và actual SAR/rotation/pixel transform recorded. Không bắt buộc
+   landscape để simplify UI. Pixel matrix maps source coded pixels to encoded
+   output pixels, applying source display rotation and sample-aspect correction
+   once. Intrinsics/extrinsics must use that same pixel/camera convention.
+3. Candidate maximum30FPS, native low FPS giữ nguyên; không force exact CFR,
+   duplicate/interpolate hoặc change playback speed. Use source presentation
+   timeline, mapping each output presentation frame to original frame ID/PTS;
+   reconstruction sampling independent. Changing FPS requires sensor remap.
+   JSONL sidecar is separately checksummed and capped at32MiB in profile v1.
 4. Prefer WebCodecs + bounded demux/mux with license/version review. Codecs not
    universally supported; actual isConfigSupported and resource budgets mandatory.
    No whole large video/decoded frame collection in RAM. WASM only qualified
    bounded fallback. Do not silently upload original or select smaller preset.
 5. Preparation manifest binds actual upload + profile, timeline/pixel/color/audio
-   transforms. Server verifies actual received metadata/checksums; client-local
+   transforms. Python and TypeScript share profile/capability/manifest fixtures;
+   client manifest checksum uses sorted-key canonical JSON with finite-float matrix
+   values. Server independently verifies actual received metadata/checksums; client-local
    source hash is declared provenance, cannot become server source-byte proof.
    Store received compressed file immutable; raw original stays user's device.
-6. Preserve compatible audio through mux. Unsupported audio needs remediation or
-   explicit user selection to omit; không strip/trim ngầm. Camera calibration/projection
+6. Preserve all compatible audio tracks through mux. Unsupported audio needs remediation or
+   explicit user selection to omit; không strip/trim ngầm. v1 preserves SDR color
+   metadata and rejects HDR. Camera calibration/projection
    uses updated image/camera frame
    conventions, not just scaled focal values after rotation. Sensor data insufficient
    blocks paired mode with remediation; original uncompressed path remains available.
@@ -45,7 +59,26 @@ mapping. Client encode sẽ mất backend access tới raw original nếu nó kh
    new upload session. Config/profile participates preview/cache/quality identities.
 8. Qualify byte savings and reconstruction tradeoff per preset/browser/input.
   720p default is convenience, not universal accuracy/speed claim.480p cannot be
-   forced when user chose1080p, and uploaded720p cannot recover lost detail later.
+  forced when user chose1080p, and uploaded720p cannot recover lost detail later.
+
+### Supported input and capability envelope
+
+S1 defines a per-input capability result. A preparation is supported only when the
+page is a secure context, Worker/decoder/AVC encoder/MP4 muxer are available, video
+metadata is understood, storage is known and sufficient, HDR policy is satisfied,
+and audio is preservable or explicitly omitted. Landscape and portrait are both
+valid; aspect ratios are fit into the selected long/short edge bounds without
+upscaling. Source codec support depends on the detected browser decoder, so this ADR
+does not claim universal MOV/HEVC support. HDR is not normalized in profile v1.
+Unsupported audio or metadata must produce an explicit remediation state. A user
+may choose to upload original bytes only through an explicit path; no hidden raw
+fallback is allowed.
+
+Profile and preparation fixtures currently pass local Python/TypeScript contract
+tests. They do not establish WebCodecs availability, playable output, memory bounds,
+actual bandwidth savings, calibration projection, LiDAR pose association, or
+reconstruction quality. AUD-23.S2–S5 must provide that evidence before accepting
+this ADR.
 
 ## Alternatives Considered
 

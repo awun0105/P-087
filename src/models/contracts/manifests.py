@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
 from src.models.contracts.artifacts import (
     ArtifactUri,
@@ -83,6 +83,14 @@ class InputManifest(ContractModel):
         if not self.input_configuration.registered_lidar_present and self.lidar_metadata is not None:
             raise ValueError("lidar_metadata requires registered_lidar_present")
         return self
+
+    @model_serializer(mode="wrap")
+    def _preserve_legacy_optional_provenance(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        """Keep omitted preparation provenance absent so old logical checksums remain valid."""
+        data = handler(self)
+        if "preparation_provenance" not in self.model_fields_set:
+            data.pop("preparation_provenance", None)
+        return data
 
 
 class PrivacyInspectionScope(StrEnum):

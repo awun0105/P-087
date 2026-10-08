@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- PLANNED; P1; EX-PRODUCT browser/upload/config; EX-REC frames/camera consumers.
+- IN PROGRESS; P1; EX-PRODUCT browser/upload/config; EX-REC frames/camera consumers.
 - Canonical REC-02/03/04/08/09, PRODUCT-02/04/08/09; task-local extension.
 - Owner yêu cầu 07/10/2026: default 720p, chọn 1080p/720p/480p và **nén trước
   upload để giảm băng thông**. FPS cap 30 và preserve aspect là hướng đề xuất;
@@ -72,6 +72,21 @@ checksummed sidecar, không unlimited JSON body. Server validates schema/counts,
 bounds/monotonicity/actual output PTS and transform metadata. Original local hash
 là client-declared provenance, không server-verified source byte evidence.
 
+S1 profile expresses dimensions as orientation-independent `max_long_edge_px` /
+`max_short_edge_px`; 1080p is1920/1080, 720p1280/720, 480p854/480. Initial
+target bitrates8/4/2Mbps are tuning candidates only, not quality or size guarantees.
+The pixel transform maps source coded pixels into output encoded pixels, applying
+rotation and sample-aspect correction exactly once. The frame-map sidecar is JSONL,
+SHA256-bound and limited to32MiB. Client source fingerprint remains untrusted; the
+received prepared media checksum is the server-verifiable source identity.
+
+Capability result includes secure-context, Worker, decoder, AVC encoder, MP4 muxer,
+metadata, HDR, audio-policy and storage checks. It is input-specific and fails
+closed when storage is unknown or required media operations are unavailable. V1
+keeps all compatible audio tracks, requires explicit omission for incompatible
+audio, preserves SDR color tags and rejects HDR. S1 only defines this envelope;
+real browser codec support is qualified in S5.
+
 InputManifest/file checksum source-of-record là actual bytes uploaded. Client
 metadata không được forge quality/privacy/calibration PASS. Add compatible
 preparation ref/version in job/frame artifacts; original client IDs khác uploaded
@@ -118,8 +133,8 @@ AUD-23 có thể implement/upload độc lập trước one-dropzone rollout, kh
 **Contract:** user chọn trước upload; upload compressed bytes, local original khác server source;
 proposed30FPS cap không exact CFR, aspect preserve và no upscaling.
 
-Implement: chốt enum/default/config checksum, bitrates/quality tuning protocol,
-HDR/color và audio policy. Giữ audio có sẵn qua compatible mux; audio codec không
+Implement: chốt enum/default/config checksum, candidate bitrate/quality tuning protocol,
+HDR/color và audio policy. Giữ tất cả audio track qua compatible mux; audio codec không
 hỗ trợ phải báo remediation hoặc cho user chọn bỏ audio, không strip ngầm. Không
 trim/change video time để fit audio. Primary candidate WebCodecs in DedicatedWorker
 với container demux/mux dependency nhỏ, reviewed license/pinned version. Feature
@@ -129,11 +144,27 @@ khi measured safe file/memory budget; không require full huge file in JS/WASM R
 Unsupported case cho explicit local compression instructions hoặc user-selected
 original upload; không tự đổi sang server compression hay raw upload. Scope keys
 và local storage theo account; shared browser không leak output của user trước.
-Tests: presets/default, low-resolution no upscale, aspect formulas, rotation180/90/
-270/mirror, non-square pixels, untrusted fields, legacy checksums, codec unsupported,
-policy identities, color/audio and size limits.
-**Exit:** [ ] producer/consumer agree schema, policy và browser support envelope;
-[ ] source retention/quality/reset semantics rõ trong UI contract.
+Tests: presets/default, landscape/portrait and4:3 dimension formulas, low-resolution
+no-upscale, rotated-source metadata/pixel matrix, non-square output rejection,
+untrusted capability fields, legacy InputManifest checksum, unsupported capability,
+policy identity, HDR/audio behavior and bounded frame-map cases.
+**Exit:** [x] shared Python/TypeScript schema, policy and capability blockers agree
+through the same fixture; actual browser support remains S5 qualification.
+[x] source-local versus uploaded-source identity, preset reset and quality-loss
+semantics are recorded for the S4 UI.
+
+### S1 supported-input matrix
+
+| Input condition | S1 contract outcome |
+|---|---|
+| Landscape or portrait, SDR, supported decoder/metadata, enough storage | Supported when Worker, AVC encoder, MP4 muxer and the selected preset are available; fit long/short edge, no upscale. |
+| 4:3, square, ultrawide, non-square source pixels or rotation metadata | Supported when metadata is understood; display transform records coded-pixel to output-pixel rotation/SAR/scale. Do not force16:9. |
+| Native rate at or below30FPS | Preserve source presentation frames/timestamps. |
+| Source rate above30FPS | Candidate policy selects source presentation frames without duplication; output→source frame/PTS sidecar is required. |
+| HDR transfer function | Block under profile v1; no silent tone-map or SDR relabel. |
+| Compatible audio tracks | Preserve every source track. |
+| Unsupported audio | Block until explicit user omission; never strip tracks silently. |
+| Unsupported decoder/metadata, missing secure context/Worker/muxer, unknown or low storage | Return explicit capability blocker; no implicit raw upload or smaller preset. |
 
 ## Sprint AUD-23.S2 — Bounded local decode, resize, downselect, encode và mux
 
@@ -244,14 +275,66 @@ In frontend/ run existing focused suites:
 npm test -- tests/direct-upload.test.ts tests/upload-route.test.ts tests/studio-input-flows.test.tsx tests/ux-processing-form.test.tsx
 ```
 
-Planned frontend/tests/video-normalization.test.ts, real-browser codec fixtures and
-backend normalization/mapping tests; create first rồi add focused command. Ruff,
+Planned real-browser codec fixtures and backend normalization/mapping integration
+tests; create before adding their focused commands. Ruff,
 frontend lint/typecheck/build and DevTools gate apply implementation. Mock WebCodecs
 only proves orchestration; do not label browser encoding or real bandwidth acceptance.
 
 ## Result / Evidence
 
-Pending — source/output hashes and byte counts, profile/codec/browser versions,
-metadata/PTS/frame-map/pixel transforms, original retained local vs uploaded source,
-client peak memory, phase timings, real upload traffic, pose/projection/quality
-consumer proof, recovery and support limitations. Task creation is docs-only.
+AUD-23.S1 contract implementation — details and exact check output are recorded
+below. Encoder/upload/browser/bandwidth/geometry acceptance remains for S2–S5;
+the presence of a capability DTO is not evidence that a browser can encode a file.
+
+### S1 changes and verification
+
+- Added the versioned Python/TypeScript profile, media metadata, capability,
+  preparation manifest, pixel transform and checksummed frame-map contracts; both
+  languages load [the same fixture](../../../../../../fixtures/contracts/video_preparation_v1.json).
+- Added `fitVideoDimensions` for orientation-independent, even-dimension bounds,
+  without crop or upscale. The supported input contract accepts portrait and
+  landscape; actual decode/encode is not implemented in S1.
+- Capability blockers now explicitly cover secure context, Worker, decoder,
+  encoder, muxer, storage, metadata, HDR and the audio decision. The manifest binds
+  to the candidate profile, limits sidecar size, requires square-pixel/orientation-
+  baked AVC output, preserves SDR tags and all audio tracks or validates explicit
+  user omission.
+- Preserved legacy logical checksums when an older `InputManifest` omits optional
+  `preparation_provenance`; non-null current provenance is unchanged.
+- CodeGraph was run on `VideoNormalizationProfile`,
+  `ClientVideoPreparationManifest`, `VideoFrameMapDescriptor`,
+  `validate_video_frame_map_rows`, checksum utilities and `InputManifest` callers.
+  `InputManifest` has 30 indexed callers (20 listed by the CLI); the source update
+  is serializer-only and retains current non-null serialization. Upload, frame
+  extraction and camera-pose consumers remain S3 work.
+- Tests: shared Python profile/capability/manifest fixture, 60→30 source mapping
+  `[0, 2, 4]`, strict PTS/frame-index monotonicity, sidecar bounds, unsupported
+  HDR/audio/rotation/upscale cases, Python/TypeScript canonical manifest checksum,
+  portrait/landscape/4:3 and low-resolution no-upscale.
+- Verification commands and results:
+  - `.venv/bin/pytest tests/test_contracts/test_video_preparation.py tests/test_contracts/test_input_manifest.py tests/test_contracts/test_identity.py tests/test_contracts/test_artifacts.py tests/test_api/test_studio_routes.py tests/test_orchestration/test_upload_input_kinds.py tests/test_orchestration/test_direct_upload.py tests/test_orchestration/test_processing_config.py tests/test_reconstruction/test_rec02_quality.py tests/test_reconstruction/test_rec02a_frame_extraction.py tests/test_reconstruction/test_rec_prepare_input.py tests/test_reconstruction/test_lidar_world_alignment.py tests/test_reconstruction/test_lidar_overlay.py tests/integration/test_upload_to_prepared_job.py -q` — **148 passed**.
+  - `.venv/bin/ruff check src/ tests/` and `.venv/bin/ruff format --check src/ tests/` — pass; **480 files** checked for formatting.
+  - `cd frontend && npm run typecheck` — pass; changed-file ESLint — pass; `npm test -- --run tests/video-preparation-contract.test.ts` — **8 passed**; `npm run build -- --webpack` — pass.
+- Synthetic contract tests are local evidence only. No browser encoder, actual
+  upload savings, GPU reconstruction, LiDAR calibration projection or pose
+  association is claimed from this sprint.
+
+### Pre-flight gate report (GUIDE.md Rule 13)
+
+- codegraph: `VideoNormalizationProfile`, `ClientVideoPreparationManifest`,
+  `VideoFrameMapDescriptor`, `validate_video_frame_map_rows`, identity helpers,
+  `InputManifest` and its indexed callers.
+- impact: 30 indexed `InputManifest` callers; omission-only serialization preserves
+  historical shape, explicit `null` and non-null provenance retain their identity.
+- understand: upload → `InputManifest` → prepare/frame extraction → camera-prior
+  consumers; only contract/checksum boundaries changed in S1, frame consumers are
+  scheduled for S3.
+- minimal-code: reused `ContractModel`, canonical checksum utilities, shared
+  contract exports and the current Vitest/Pytest setups; added only the new v1 DTOs,
+  dimensions helper, and regression/contract tests.
+- checks: backend-related Pytest **148 passed**; full `ruff check src/ tests/` and
+  `ruff format --check src/ tests/` pass (480 files); frontend typecheck and changed-
+  file ESLint pass; focused Vitest **8 passed**; production Next.js webpack build
+  passes and generates all 16 static pages.
+- DevTools: n/a — no rendered UI or runtime behavior changed; actual browser media
+  capability and encode remain unverified until S5.
