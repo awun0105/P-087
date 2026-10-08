@@ -244,6 +244,15 @@ qualification; general blind calibration remains noted as research/observability
   the active application database. The console had only React DevTools and HMR
   informational messages. This confirms screen rendering, not a live LiDAR job or
   production browser acceptance.
+- **Live browser follow-up (2026-10-09):** Chrome DevTools opened the authenticated
+  Reviewer session at `localhost:3010` and inspected
+  `/scenes/job-a713242a38be/stages/ST-LIDAR-CALIBRATION-QA` (run 2). The job has no
+  completed QA stage, so the page correctly shows its fail-closed “stage chưa hoàn
+  tất” notice; no report metrics or overlay were available to inspect. The Scenes
+  view showed 10 video jobs and one PLY import, with no completed LiDAR QA report
+  exposed in that runtime. The page console contained only React DevTools and HMR
+  informational messages, with no errors. This verifies the unavailable-stage
+  behavior only; live result/overlay rendering remains **UNVERIFIED**.
 - **Pending:** No held-out real calibration sequence or production threshold
   profile is qualified. Diagnostic projection/overlay does not authorize a
   LiDAR collision source or establish a universal 1°/5 cm accuracy guarantee.
