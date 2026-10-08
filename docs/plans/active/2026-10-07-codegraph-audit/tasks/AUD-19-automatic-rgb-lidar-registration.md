@@ -190,7 +190,8 @@ coverage, qualification and producer integration remain open for S3/S4.
 
 ## Sprint AUD-19.S3 — Constrained robust ICP và alignment qualification
 
-**Input:** coarse candidates S2 + surface points/normals + frozen quality profile.
+**Input:** S2 coarse candidates + LiDAR map points already in meters + RGB collision
+surface points/normals + frozen quality profile.
 **Output:** refined proposals, per-region QA and measured supported failure envelope.
 **Contract:** floor/scale constraints maintained; enough independent structure;
 low residual alone không PASS, no universal cm/mm guarantee.
@@ -206,8 +207,11 @@ registered maps with reference transforms where available and explicit no-refere
 Tests: poor initialization/local wrong minima, sparse/thin obstacles, floor-only
 point-to-plane ambiguity, density differences, drift/nonrigid mismatch, incorrect
 scale, missing normals, held-out transform errors and false-auto-accept cases.
-**Exit:** [ ] frozen acceptance and ambiguity rejection measured on supported data;
-[ ] proposal confidence separated from absolute pose/geometry accuracy.
+**Exit:** [ ] frozen acceptance and ambiguity rejection measured on held-out warehouse data;
+[x] proposal confidence separated from absolute pose/geometry accuracy. Qualification remains
+open because this checkout has summary benchmark JSONL and fixture PLYs, but no paired
+held-out source/target maps with reference transforms. This is missing qualification
+evidence, not a technology limitation.
 
 ## Sprint AUD-19.S4 — Durable operation, Studio confirmation và consumers
 
@@ -233,11 +237,12 @@ stale polling/revision, aligned-cloud/SceneIR consumer and real browser/register
 ## Verification và DoD
 
 ```bash
-.venv/bin/pytest tests/test_contracts/test_rgb_lidar_registration.py tests/test_reconstruction/test_bev_registration.py tests/test_reconstruction/test_rec06_lidar_metric.py tests/test_reconstruction/test_lidar_world_alignment.py tests/test_reconstruction/test_rec06_auto_scale.py tests/test_reconstruction/test_lidar_package.py tests/test_reconstruction/test_rec09_alignment.py tests/test_reconstruction/test_rec09_guards.py tests/test_reconstruction/test_rec10_bundle.py tests/test_reconstruction/test_lidar_overlay.py tests/test_reconstruction/test_finalize_lidar_binding.py -q
+.venv/bin/pytest tests/test_contracts/test_rgb_lidar_registration.py tests/test_reconstruction/test_bev_registration.py tests/test_reconstruction/test_constrained_icp.py tests/test_reconstruction/test_rec06_lidar_metric.py tests/test_reconstruction/test_lidar_world_alignment.py tests/test_reconstruction/test_rec06_auto_scale.py tests/test_reconstruction/test_lidar_package.py tests/test_reconstruction/test_rec09_alignment.py tests/test_reconstruction/test_rec09_guards.py tests/test_reconstruction/test_rec10_bundle.py tests/test_reconstruction/test_lidar_overlay.py tests/test_reconstruction/test_finalize_lidar_binding.py -q
 ```
 
-Planned tests/test_reconstruction/test_bev_registration.py,
-tests/test_reconstruction/test_registration_qa.py và operation/API/frontend tests.
+The synthetic BEV and constrained ICP solver tests are implemented. The planned
+`tests/test_reconstruction/test_registration_qa.py` and operation/API/frontend tests
+remain for S4.
 DONE cần supported independent-map runs + held-out QA + browser/consumer evidence;
 19 baseline tests hoặc synthetic transform recovery không thay real acceptance.
 Collision/Isaac safety còn nghiệm thu qua AUD-12.S4/AUD-05; no registration-score safety claim.
@@ -280,5 +285,34 @@ bounded scale, repeating/180-degree symmetry, a straight corridor, floor-only ma
 unit conversion and trajectory outliers beyond/within the bound. Profile checksum
 tests bind BEV resolution/height/search seed/refinement budgets. These are synthetic algorithm tests.
 The coarse solver still requires S3/S4 artifact loading, worker integration and
-constrained ICP; no held-out warehouse qualification, production accuracy, browser,
-or collision-safety claim follows from this sprint.
+S4 artifact loading and worker integration; S2 synthetic results alone do not establish
+held-out warehouse qualification, production accuracy, browser acceptance, or collision
+safety.
+
+AUD-19.S3 adds `src/services/reconstruction/alignment/constrained_icp.py`. It refines
+bounded BEV candidates with deterministic multi-resolution point-to-plane ICP, a
+Huber-weighted trimmed solve, bounded correspondence/step/iteration/point budgets and
+floor-local yaw/x/y updates. It rejects invalid normals and insufficient Jacobian rank,
+keeps ambiguous candidates unresolved, and reports bidirectional Euclidean p95/max,
+point-to-plane p95, coverage, rejected support, convergence and up to four floor regions. RGB
+scale candidates are applied about the verified floor origin; ICP does not estimate
+scale. All ICP schedules and thresholds are included in the sealed profile checksum.
+QA `PASS` requires a qualified profile, convergence, regional/global coverage, residual
+limits and an unambiguous candidate decision. The default provisional profile can never PASS.
+
+S3 synthetic coverage: 11 tests exercise yaw/translation recovery, a tilted floor with
+fixed floor height and pitch/roll, floor-only unobservability, duplicate-density changes,
+bounded scale and wrong-scale rejection, outlier residual accounting, ambiguous and
+truncated candidate sets, sparse support, invalid normals and source-frame mismatch.
+The complete focused verification command above PASSed (110 tests). Ruff check on the five
+changed Python files, `.venv/bin/ruff format --check src/ tests/` (529 files), and
+`.venv/bin/python -m scripts.check_contract_mirror` PASSed (5 enums, 6 models mirrored).
+The repository-wide `.venv/bin/ruff check src/ tests/` is currently blocked by an unrelated
+worktree edit in `src/services/reconstruction/adapters/colmap_runtime.py` (`I001` import order);
+that file is outside S3 and remains unstaged.
+
+The repository's `eval/results` JSONL files provide aggregate measurements, and the
+tracked PLY artifacts are fixtures; neither provides a held-out registration point-cloud
+pair with independent reference transforms. S3's real-data threshold freeze and
+qualification exit therefore remain unchecked. No profile was promoted to qualified,
+and synthetic recovery does not establish a supported warehouse failure envelope.

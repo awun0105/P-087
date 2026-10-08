@@ -41,6 +41,10 @@ class RegistrationFloorPlane:
     up_direction_xyz: tuple[float, float, float]
     evidence_checksum: str
 
+    def frame_to_floor_matrix(self) -> np.ndarray:
+        """Rigid transform from metric frame coordinates into floor-local Z-up coordinates."""
+        return _floor_to_local(self)
+
 
 @dataclass(frozen=True)
 class CoarseRegistrationCandidate:

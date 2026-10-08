@@ -574,3 +574,29 @@ def test_profile_rejects_unordered_height_bands() -> None:
     payload["bev_height_edges_m"] = [0.15, 0.6, 0.5, 3.0, 6.0]
     with pytest.raises(ValidationError, match="height edges"):
         seal_registration_profile(payload)
+
+
+def test_profile_checksum_binds_constrained_icp_limits() -> None:
+    profile = _profile()
+    changed = seal_registration_profile(
+        {
+            **profile.model_dump(mode="json"),
+            "icp_voxel_sizes_m": [1.0, 0.5, 0.1],
+            "icp_trim_fraction": 0.6,
+            "icp_max_correspondence_distance_m": 0.75,
+        }
+    )
+
+    assert changed.profile_checksum != profile.profile_checksum
+    assert changed.icp_voxel_sizes_m == (1.0, 0.5, 0.1)
+    assert changed.icp_trim_fraction == 0.6
+    assert changed.icp_max_correspondence_distance_m == 0.75
+
+
+def test_profile_rejects_non_descending_icp_voxel_schedule() -> None:
+    profile = _profile()
+    payload = profile.model_dump(mode="json")
+    payload["icp_voxel_sizes_m"] = [0.2, 0.4]
+
+    with pytest.raises(ValidationError, match="strictly decreasing"):
+        seal_registration_profile(payload)

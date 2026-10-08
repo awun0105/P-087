@@ -83,6 +83,7 @@ class RegistrationFindingCode(StrEnum):
     AMBIGUOUS_CANDIDATES = "AMBIGUOUS_CANDIDATES"
     UNOBSERVABLE = "UNOBSERVABLE"
     SEARCH_BUDGET_EXCEEDED = "SEARCH_BUDGET_EXCEEDED"
+    ICP_NOT_CONVERGED = "ICP_NOT_CONVERGED"
     STALE_TARGET = "STALE_TARGET"
     UNQUALIFIED_PROFILE = "UNQUALIFIED_PROFILE"
     METRIC_CONFIRMATION_REQUIRED = "METRIC_CONFIRMATION_REQUIRED"
@@ -135,6 +136,15 @@ class RegistrationProfile(ContractModel):
     max_refinement_candidates: int = Field(default=8, ge=1, le=32, strict=True)
     top_k_candidates: int = Field(default=8, ge=1, le=32, strict=True)
     icp_iterations: int = Field(default=50, ge=1, le=200, strict=True)
+    icp_voxel_sizes_m: tuple[FiniteFloat, ...] = (0.8, 0.4, 0.2)
+    icp_max_correspondence_distance_m: FiniteFloat = Field(default=1.0, gt=0, le=10)
+    icp_trim_fraction: FiniteFloat = Field(default=0.7, ge=0.1, le=1.0)
+    icp_min_correspondences: int = Field(default=24, ge=6, le=100_000, strict=True)
+    icp_max_translation_step_m: FiniteFloat = Field(default=0.5, gt=0, le=5)
+    icp_max_yaw_step_rad: FiniteFloat = Field(default=0.174533, gt=0, le=0.785398)
+    icp_convergence_translation_m: FiniteFloat = Field(default=0.002, gt=0, le=0.1)
+    icp_convergence_yaw_rad: FiniteFloat = Field(default=0.002, gt=0, le=0.1)
+    icp_min_singular_ratio: FiniteFloat = Field(default=0.001, gt=0, le=0.1)
     runtime_budget_seconds: PositiveInt = Field(default=300, le=3_600)
     minimum_source_coverage_ratio: FiniteFloat = Field(default=0.1, gt=0, le=1)
     minimum_target_coverage_ratio: FiniteFloat = Field(default=0.1, gt=0, le=1)
@@ -151,6 +161,10 @@ class RegistrationProfile(ContractModel):
             lower >= upper for lower, upper in zip(self.bev_height_edges_m, self.bev_height_edges_m[1:])
         ):
             raise ValueError("BEV height edges must be strictly increasing")
+        if not 1 <= len(self.icp_voxel_sizes_m) <= 4 or any(size <= 0 for size in self.icp_voxel_sizes_m):
+            raise ValueError("ICP voxel sizes must contain one to four positive meter values")
+        if any(coarse <= fine for coarse, fine in zip(self.icp_voxel_sizes_m, self.icp_voxel_sizes_m[1:])):
+            raise ValueError("ICP voxel sizes must be strictly decreasing from coarse to fine")
         if self.qualification_state == "qualified":
             if (
                 self.qualification_record_ref is None
