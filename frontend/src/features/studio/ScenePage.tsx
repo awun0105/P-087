@@ -1,7 +1,7 @@
 "use client";
 
 import { ApiError } from "@/lib/api/client";
-import { isGuestQuotaExceededError } from "@/lib/api/auth";
+import { isGuestQuotaExceededError, resourceCapabilityAllowed } from "@/lib/api/auth";
 import { errorMessage } from "@/lib/ui-error";
 
 import dynamic from "next/dynamic";
@@ -77,6 +77,11 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
   const { navigate } = useNavigationGuard();
   const { me, refresh } = useAuth();
   const isGuest = me?.user?.role === "guest";
+  const canMutateJob = resourceCapabilityAllowed(me, progress?.capabilities?.can_mutate);
+  const canRetryJob = resourceCapabilityAllowed(me, progress?.capabilities?.can_retry);
+  const canCancelJob = resourceCapabilityAllowed(me, progress?.capabilities?.can_cancel)
+    && (progress?.status === "RUNNING" || progress?.status === "QUEUED")
+    && progress.waiting_for !== "metric_confirmation";
   const requestedMode = params.get("mode");
   const mode: StudioMode = requestedMode === "metric" || requestedMode === "gaussian" ? requestedMode : "scene";
   const [save, setSave] = useState<SaveState | null>(null);
@@ -200,7 +205,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
   }
 
   async function requestRetry() {
-    if (busy || retryInFlight.current || retryPending) return;
+    if (!canRetryJob || busy || retryInFlight.current || retryPending) return;
     const failed = progress;
     if (!failed || failed.job_id !== jobId || failed.status !== "FAILED" || !failed.error?.retryable) {
       await poll(new AbortController().signal);
@@ -299,11 +304,13 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
               onOpen={openTab}
               onRetry={startRetry}
               retryState={retryPending ? retrySync?.status ?? null : null}
+              canMutateJob={canMutateJob}
+              canRetryJob={canRetryJob}
               variant="popover"
             />
           )}
-          <DemoControls jobId={jobId} revision={save?.revision ?? null} sceneReady={sceneReady}
-            onRestored={(revision) => setSave({ status: "saved", revision })} />
+          {canMutateJob && <DemoControls jobId={jobId} revision={save?.revision ?? null} sceneReady={sceneReady}
+            onRestored={(revision) => setSave({ status: "saved", revision })} />}
         </div>
       </div>
       <SceneTabs tabs={tabs} current={current} onChange={(next) => openTab(next)} />
@@ -321,24 +328,28 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
           onOpen={openTab}
           onRetry={startRetry}
           retryState={retryPending ? retrySync?.status ?? null : null}
+          canMutateJob={canMutateJob}
+          canRetryJob={canRetryJob}
           variant="banner"
         />
       )}
       {current === "studio" && preview && (
         <div className="flex items-center justify-end gap-2 border-b border-line bg-paper-raised px-4 py-1.5 sm:px-6">
-          <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Chế độ Studio">
-            <ModeButton active={studioMode === "scene"} onClick={() => setMode("scene")}>
-              {sceneReady ? "Vật thể" : "Scene 3D"}
-            </ModeButton>
-            {waitingMetric && (
-              <ModeButton active={studioMode === "metric"} onClick={() => setMode("metric")}>
-                Tỉ lệ mét
+          {canMutateJob ? (
+            <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Chế độ Studio">
+              <ModeButton active={studioMode === "scene"} onClick={() => setMode("scene")}>
+                {sceneReady ? "Vật thể" : "Scene 3D"}
               </ModeButton>
-            )}
-            <ModeButton active={studioMode === "gaussian"} onClick={() => setMode("gaussian")}>
-              <Pencil aria-hidden /> Chỉnh Gaussian
-            </ModeButton>
-          </div>
+              {waitingMetric && (
+                <ModeButton active={studioMode === "metric"} onClick={() => setMode("metric")}>
+                  Tỉ lệ mét
+                </ModeButton>
+              )}
+              <ModeButton active={studioMode === "gaussian"} onClick={() => setMode("gaussian")}>
+                <Pencil aria-hidden /> Chỉnh Gaussian
+              </ModeButton>
+            </div>
+          ) : <p className="text-xs text-ink-muted">Quyền chỉ xem</p>}
         </div>
       )}
       {error && <ErrorFeedback message={error} className="m-3" retryLabel="Tải lại trạng thái" retry={() => void poll(new AbortController().signal)} />}
@@ -350,6 +361,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
             progress={progress}
             info={info}
             busy={busy}
+            canCancel={canCancelJob}
             onCancel={() => {
               if (window.confirm("Huỷ xử lý scene này? Tiến trình trên GPU sẽ dừng.")) void act(() => cancelJob(jobId), "Đã gửi yêu cầu huỷ. Trạng thái được cập nhật từ máy chủ.");
             }}
@@ -364,6 +376,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
             key={metricScope}
             jobId={jobId}
             title={info?.name ?? "Scene"}
+            canMutate={canMutateJob}
             preview={preview}
             mode={studioMode}
             geometry={geometry}
@@ -380,9 +393,9 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
           />
           </div>
         )}
-        {current === "review" && <ReviewTab jobId={jobId} onSaveState={setSave} />}
+        {current === "review" && <ReviewTab jobId={jobId} canMutateJob={canMutateJob} onSaveState={setSave} />}
         {current === "results" && preview && <ResultsTab jobId={jobId} preview={preview} revision={save?.revision ?? null}
-          onOpenGaussian={() => openTab("studio", "gaussian")}
+          onOpenGaussian={canMutateJob ? () => openTab("studio", "gaussian") : undefined}
           onOpenReview={sceneReady ? () => openTab("review") : undefined}
         />}
       </div>

@@ -6,7 +6,7 @@ import { getJobScene, getReviewState, getSimulationPackage, type ReviewStateView
 import { usePolling } from "@/features/studio/usePolling";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { GuestQuotaStatus } from "@/features/studio/auth/GuestQuotaStatus";
-import { isReviewer } from "@/lib/api/auth";
+import { isReviewer, resourceCapabilityAllowed } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { errorMessage } from "@/lib/ui-error";
 import type { SceneIR } from "@/lib/contracts/api";
@@ -27,6 +27,8 @@ export function NextAction({
   onOpen,
   onRetry,
   retryState,
+  canMutateJob: suppliedCanMutateJob,
+  canRetryJob: suppliedCanRetryJob,
   variant = "banner",
 }: {
   jobId: string;
@@ -39,12 +41,16 @@ export function NextAction({
   onOpen: (tab: Tab, mode?: StudioMode) => void;
   onRetry: () => void;
   retryState?: "submitting" | "accepted" | "rejected" | "uncertain" | null;
+  canMutateJob?: boolean;
+  canRetryJob?: boolean;
   variant?: "banner" | "popover";
 }) {
   const { me } = useAuth();
   const isGuest = me?.user?.role === "guest";
   const guestQuota = isGuest ? me.quota : null;
   const guestQuotaExhausted = guestQuota?.remaining === 0;
+  const canMutateJob = suppliedCanMutateJob ?? resourceCapabilityAllowed(me, progress?.capabilities?.can_mutate);
+  const canRetryJob = suppliedCanRetryJob ?? resourceCapabilityAllowed(me, progress?.capabilities?.can_retry);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(false);
@@ -155,8 +161,9 @@ export function NextAction({
       }
     }
   }
+  if (action?.tab === "studio" && !canMutateJob) action = null;
   const atTarget = action && current === action.tab && (!action.mode || mode === action.mode);
-  const showRetry = Boolean(!retryState && progress.status === "FAILED" && progress.error?.retryable);
+  const showRetry = Boolean(!retryState && canRetryJob && progress.status === "FAILED" && progress.error?.retryable);
   if (!title && !showRetry && !(sceneReady && error)) return null;
 
   if (variant === "popover") {

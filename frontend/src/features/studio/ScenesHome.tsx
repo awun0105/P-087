@@ -13,7 +13,7 @@ import { Badge, Card, EmptyState, Notice, buttonVariants } from "@/components/st
 import { useAuth } from "@/features/studio/AuthProvider";
 import { STATUS_FILTERS, sceneStatus, type SceneStatusGroup } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
-import { canEdit } from "@/lib/api/auth";
+import { canEdit, resourceCapabilityAllowed, type Me } from "@/lib/api/auth";
 import { listImports, listScenes, moveImportToTrash, moveSceneToTrash } from "@/lib/api/studio";
 import { MoveToTrashButton } from "@/features/studio/trash/MoveToTrashButton";
 import { cn } from "@/lib/cn";
@@ -25,7 +25,7 @@ import { progressHref } from "@/features/studio/inspection";
 
 const DATE = new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeStyle: "short" });
 
-const ROLE_LABELS: Record<string, string> = { editor: "Editor", reviewer: "Reviewer", guest: "Khách" };
+const ROLE_LABELS: Record<string, string> = { editor: "Editor", reviewer: "Reviewer", guest: "Guest" };
 
 function ActorAttribution({
   label,
@@ -120,7 +120,7 @@ export function ScenesHome() {
 
       {!signedIn && me !== null && (
         <Notice className="mt-8">
-          Scene của nhóm chỉ hiện sau khi đăng nhập. Chưa có tài khoản vẫn xem được kết quả đã xử lý sẵn ở{" "}
+            Scene của nhóm chỉ hiện sau khi đăng nhập. Người xem chưa đăng nhập vẫn có thể mở kết quả mẫu ở{" "}
           <Link href="/new/try-demo" className="font-medium text-ember-strong hover:underline">Thử mẫu</Link>.
         </Notice>
       )}
@@ -149,7 +149,7 @@ export function ScenesHome() {
               </Link>
             }
           >
-            Khách có thể thử với mẫu đã xử lý sẵn.
+            Người xem chưa đăng nhập có thể thử với mẫu đã xử lý sẵn.
           </EmptyState>
         )}
         {me === null && <p role="status" className="text-sm text-ink-muted">Đang kiểm tra quyền truy cập…</p>}
@@ -224,17 +224,19 @@ export function ScenesHome() {
               <li key={scene.project.project_id} className="relative">
                 <SceneCard scene={scene} />
                 {/* Nằm ngoài thẻ link của card: nút trong link là HTML không hợp lệ và bấm sẽ điều hướng. */}
-                <MoveToTrashButton
-                  name={scene.project.name}
-                  move={() => moveSceneToTrash(scene.project.project_id)}
-                  onMoved={() => void load()}
-                  className="absolute top-3 left-3 shadow-sm"
-                />
+                {resourceCapabilityAllowed(me, scene.capabilities?.can_delete_project) && (
+                  <MoveToTrashButton
+                    name={scene.project.name}
+                    move={() => moveSceneToTrash(scene.project.project_id)}
+                    onMoved={() => void load()}
+                    className="absolute top-3 left-3 shadow-sm"
+                  />
+                )}
               </li>
             ))}
           </ul>
         )}
-        {signedIn && shown.length > 0 && view === "list" && <SceneTable scenes={pagination.items} onChanged={() => void load()} />}
+        {signedIn && shown.length > 0 && view === "list" && <SceneTable scenes={pagination.items} me={me} onChanged={() => void load()} />}
         {signedIn && <ListPagination {...pagination} total={shown.length} onChange={(page) => update({ page: String(page) })} />}
       </section>
 
@@ -263,7 +265,9 @@ export function ScenesHome() {
                     {item.status === "READY" ? "Mở xem/chỉnh" : item.status === "FAILED" ? "Lỗi" : "Đang nén…"}
                   </span>
                 </Link>
-                <MoveToTrashButton name={item.name} move={() => moveImportToTrash(item.import_id)} onMoved={() => void load()} />
+                {resourceCapabilityAllowed(me, item.capabilities?.can_delete) && (
+                  <MoveToTrashButton name={item.name} move={() => moveImportToTrash(item.import_id)} onMoved={() => void load()} />
+                )}
               </li>
             ))}
           </ul>
@@ -348,7 +352,7 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
   );
 }
 /** Dạng danh sách: đọc nhanh trạng thái, giai đoạn và mốc thời gian của nhiều scene. */
-function SceneTable({ scenes, onChanged }: { scenes: SceneSummary[]; onChanged: () => void }) {
+function SceneTable({ scenes, me, onChanged }: { scenes: SceneSummary[]; me: Me | null; onChanged: () => void }) {
   return (
     <div className="overflow-hidden rounded-xl border border-line">
       <Table>
@@ -422,7 +426,9 @@ function SceneTable({ scenes, onChanged }: { scenes: SceneSummary[]; onChanged: 
                         {scene.preview_ready ? "Mở scene" : "Xem tiến trình"}
                       </Link>
                     )}
-                    <MoveToTrashButton name={scene.project.name} move={() => moveSceneToTrash(scene.project.project_id)} onMoved={onChanged} />
+                    {resourceCapabilityAllowed(me, scene.capabilities?.can_delete_project) && (
+                      <MoveToTrashButton name={scene.project.name} move={() => moveSceneToTrash(scene.project.project_id)} onMoved={onChanged} />
+                    )}
                   </div>
                 </TableCell>
               </TableRow>

@@ -9,6 +9,7 @@ from src.api import auth as auth_api
 from src.api.product import jobs as jobs_api
 from src.api.product import scene as scene_api
 from src.api.studio import imports as imports_api
+from src.api.studio import scenes as studio_scenes_api
 from src.api.studio import uploads as uploads_api
 from src.main import app
 from src.services.orchestration.auth import Actor, AuthService, UserRecord
@@ -18,6 +19,7 @@ from src.services.orchestration.jobs import InvalidTransitionError
 from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.projects import ProjectRegistry
 from src.services.orchestration.projects.models import JobCreateInput
+from src.services.orchestration.uploads.scene_imports import ImportedScene
 
 
 def _user(role: str) -> UserRecord:
@@ -166,6 +168,99 @@ async def test_guest_can_edit_own_scene_when_daily_run_quota_is_exhausted(
     assert response.json()["scene_revision"] == "rev-002"
     quota = guest_quota_summary(database, user.user_id)
     assert quota.used == 3 and quota.remaining == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("role", "owner_user_id", "expected_mutate"),
+    [
+        ("guest", "user-guest", True),
+        ("guest", "user-editor", False),
+        ("guest", None, False),
+        ("editor", "user-guest", True),
+        ("reviewer", "user-guest", True),
+    ],
+)
+async def test_progress_returns_actor_specific_job_capabilities(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    role: str,
+    owner_user_id: str | None,
+    expected_mutate: bool,
+) -> None:
+    user = _user(role)
+    registry = ProjectRegistry(
+        runtime_root=tmp_path / "artifacts",
+        database=RuntimeDatabase(f"sqlite:///{tmp_path / 'runtime.db'}"),
+    )
+    registry.seed_from_fixtures()
+    monkeypatch.setattr(registry, "get_job_owner_user_id", lambda job_id: owner_user_id)
+    monkeypatch.setattr(studio_scenes_api.deps, "registry", lambda: registry)
+    original_overrides = app.dependency_overrides.copy()
+    app.dependency_overrides[auth_api.require_contributor] = lambda: user
+    try:
+        response = await client.get("/api/v1/jobs/job-fixture-001/progress")
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(original_overrides)
+
+    assert response.status_code == 200, response.text
+    capabilities = response.json()["capabilities"]
+    assert capabilities["can_mutate"] is expected_mutate
+    assert capabilities["can_cancel"] is False
+    assert capabilities["can_retry"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("role", "expected_delete"),
+    [("guest", [True, False]), ("editor", [True, True]), ("reviewer", [True, True])],
+)
+async def test_import_list_returns_capability_for_guest_owner_and_higher_roles(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    role: str,
+    expected_delete: list[bool],
+) -> None:
+    user = _user(role)
+    records = [
+        ImportedScene(
+            import_id="import-guest",
+            upload_id="upload-guest",
+            name="Guest import",
+            input_kind="gaussian_ply",
+            status="READY",
+            created_at=datetime.now(UTC),
+            created_by="user-guest",
+        ),
+        ImportedScene(
+            import_id="import-editor",
+            upload_id="upload-editor",
+            name="Editor import",
+            input_kind="gaussian_ply",
+            status="READY",
+            created_at=datetime.now(UTC),
+            created_by="user-editor",
+        ),
+    ]
+
+    class ImportList:
+        def list(self) -> list[ImportedScene]:
+            return records
+
+    monkeypatch.setattr(imports_api, "_service", lambda: ImportList())
+    original_overrides = app.dependency_overrides.copy()
+    app.dependency_overrides[auth_api.require_contributor] = lambda: user
+    try:
+        response = await client.get("/api/v1/imports")
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(original_overrides)
+
+    assert response.status_code == 200, response.text
+    imports = response.json()["imports"]
+    assert [item["capabilities"]["can_delete"] for item in imports] == expected_delete
 
 
 @pytest.mark.asyncio

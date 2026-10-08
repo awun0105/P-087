@@ -6,13 +6,15 @@
 
 **Cập nhật 30/09/2026 — chuyển sang đặc tả triển khai.** Tech Lead (Quân) giao audit tài liệu, chốt các câu hỏi mở và **implement** UX này trong `frontend/` dùng dashboard donor làm nền. Các quyết định mới gắn nhãn **DECISION (Tech Lead uỷ quyền, 30/09/2026)**; phần hiện trạng mới ở §2.2a; câu hỏi mở đã chốt ở §11; kế hoạch triển khai ở §13. Những gì trước đây là "prototype minh họa" nay áp dụng quy tắc của app thật (§11.2 D-05): không hiển thị dữ liệu minh họa như kết quả.
 
+**Cập nhật 08/10/2026 — role và ownership:** Các mô tả dưới đây từ 30/09–02/10 về hai role và invite-only signup đã lỗi thời. Theo owner decision, role hiện tại gồm Guest/Editor/Reviewer; Guest có shared read và quyền sửa resource mình sở hữu, còn Editor/Reviewer giữ cross-user intervention. Public Guest signup vẫn đóng cho tới khi rollout acceptance xong. PRD v1.18, [ADR 0021](decisions/0021-guest-identity-and-ownership.md) và [AUD-21](plans/active/2026-10-07-codegraph-audit/tasks/AUD-21-guest-signup-and-ownership.md) là cập nhật hiện hành.
+
 Quy ước đọc:
 
 - **REQUIREMENT:** ràng buộc trong PRD/contract hoặc chỉ dẫn trực tiếp của người dùng.
 - **VERIFIED — source / image:** quan sát trực tiếp từ source hoặc ảnh; không đồng nghĩa chức năng đã được kiểm thử trên browser.
 - **PROPOSAL:** quyết định UX đề xuất cho prototype này; không tự thay đổi product policy.
 - **UNKNOWN:** thiếu evidence hoặc cần owner quyết định. Không điền giá trị giả để khép kín flow.
-- **DECISION:** quyết định đã chốt khi audit 30/09/2026, có lý do và phạm vi; không sửa PRD/contract.
+- **DECISION:** quyết định product/UX đã chốt và có ngày; khi owner đổi policy cũ thì cập nhật PRD/spec/contract liên quan thay vì giữ mô tả lỗi thời.
 
 ## 1. Purpose
 
@@ -26,11 +28,12 @@ Vấn đề UX chính là khoảng cách giữa Studio hiện tại và quy trì
 
 | Người dùng | Công việc trong hành trình | Ràng buộc |
 | --- | --- | --- |
-| Khách | Xem/thử video mẫu và scene đã xử lý | Không upload/chạy GPU; chỉnh mẫu không lưu thành scene của nhóm |
-| Editor | Tạo scene, theo dõi job, xác nhận tỉ lệ, chỉnh scene, gửi validation | Không phê duyệt phát hành |
-| Reviewer | Xem bằng chứng, duyệt/từ chối, phát hành; quản lý tài khoản nhóm | Sửa scene cũng tạo revision mới và phải validation lại; tự duyệt phải có nhãn |
+| Visitor chưa đăng nhập | Xem/thử video mẫu và scene đã xử lý | Không upload/chạy job; mẫu không lưu thành scene của nhóm |
+| Guest | Dùng workflow Editor trên resource mình tạo; xem workspace chung | Signup không cần invite, nhập email/tên/mật khẩu; 3 job create/manual Retry được chấp nhận mỗi ngày Việt Nam; objectify không trừ quota |
+| Editor | Tạo scene, theo dõi job, xác nhận tỉ lệ, chỉnh scene, gửi validation | Giữ quyền can thiệp cross-user; không phê duyệt phát hành |
+| Reviewer | Xem bằng chứng, duyệt/từ chối, phát hành; quản lý tài khoản nhóm | Role cao nhất; can thiệp cross-user, purge; sửa scene tạo revision và validation lại |
 
-**REQUIREMENT:** chỉ hai role Editor/Reviewer; tài khoản được tạo bằng mã mời gắn role. “Engineer” trong ảnh mô tả nghề nghiệp, không tạo role thứ ba. Nguồn: [PRD §3.4][prd], [ADR 0003 §3][adr3].
+**REQUIREMENT hiện hành:** account roles cố định là Guest < Editor < Reviewer; Visitor chưa đăng nhập không phải role. Public Guest signup không cần invite nhưng đang sau rollout flag; email verification được hoãn. Invite vẫn cấp Editor/Reviewer và không cho payload tự chọn role. “Engineer” trong ảnh mô tả nghề nghiệp, không tạo role tùy biến. Nguồn: [PRD v1.18 §3.4][prd], [ADR 0021](decisions/0021-guest-identity-and-ownership.md).
 
 | Thuật ngữ | Nghĩa người dùng cần hiểu |
 | --- | --- |
@@ -50,7 +53,7 @@ Vấn đề UX chính là khoảng cách giữa Studio hiện tại và quy trì
 
 | Surface hiện có | Entry / nội dung / hành vi quan sát được | Giới hạn cần giữ rõ |
 | --- | --- | --- |
-| `/` — Scenes | Video mẫu, scene của nhóm, trạng thái, CTA “Scene mới” | Không có dashboard KPI vận hành hay cây project nhiều tầng |
+| `/` — Scenes | Video mẫu, scene của nhóm, creator/role, trạng thái, CTA “Scene mới”; Guest chỉ thấy mutation control khi server capability cho phép | Không có dashboard KPI vận hành hay cây project nhiều tầng; capability UI không thay API ownership guard |
 | `/new` | Trang chọn cách bắt đầu, dẫn tới ba trang riêng (**owner yêu cầu 02/10/2026**; link cũ `/new?source=…` tự chuyển) | Không có form ở trang này |
 | `/new/import-video` | Upload hoặc dùng video đã tải; đặt tên scene; khai báo quyền/dữ liệu; thông số xử lý. **Ô LiDAR tuỳ chọn** (ADR 0009): trang giải thích ba luồng và dữ liệu từng luồng cần — (A) chỉ video: tỉ lệ mét là ước lượng hoặc số đo tay; (B) video + gói LiDAR đã đăng ký; (C) video + gói scan thô. Gói B/C bắt buộc có quỹ đạo, calibration camera ↔ LiDAR và thời điểm frame; thiếu thì từ chối kèm hướng dẫn. Có bộ mẫu TorWIC cho cả B và C, ghi rõ quỹ đạo mẫu là quỹ đạo chuẩn của dataset. Sau khi tải lên hiện loại nhận diện được (số điểm, hoặc số scan + số pose) và luồng sẽ chạy | Video tạo project + job reconstruction; luồng B/C thêm bước nhận LiDAR và căn chỉnh. Ở luồng B/C bước tỉ lệ mét **không chọn điểm**: hiện tỉ lệ, sai số căn chỉnh, số frame khớp và một nút xác nhận |
 | `/new/import-scene` | Upload hoặc dùng file PLY/ZIP 3DGS đã tải; đặt tên | Tạo scene import, không chạy job GPU |
@@ -59,7 +62,7 @@ Vấn đề UX chính là khoảng cách giữa Studio hiện tại và quy trì
 | Xác nhận tỉ lệ | Chọn A/B, C/D và ba điểm sàn; xem trước rồi xác nhận | C/D kiểm độc lập; đổi điểm/số đo làm preview cũ mất hiệu lực |
 | Workspace 3DGS | Editor nhúng; chỉ dẫn File → Export PLY/SOG; fallback chỉ xem | Edit Gaussian cục bộ chưa tương đương lưu SceneObject revision |
 | `/new/try-demo`, `/new/try-demo?sample=…`, `/samples/[sampleId]/scene` | Cấu hình mẫu chỉ đọc; phát lại tiến trình đã ghi; có bỏ qua để mở scene | Không phải job GPU mới, không dùng thời gian replay làm ETA |
-| `/login`, `/register`, `/team` | Đăng nhập, mã mời; Reviewer quản lý nhóm | Không có đăng nhập bằng cách chọn role tùy ý |
+| `/login`, `/register`, `/team` | Đăng nhập; Guest signup bằng email/tên/mật khẩu sau feature flag; invite cấp Editor/Reviewer; Reviewer quản lý nhóm | Email verification deferred; không có form tự chọn role hoặc SSO; signup flag mặc định đóng |
 | `/projects/…`, `/jobs/…/{viewer,validation,review,release}` | UI legacy có project/job, viewer và báo cáo — **đã xoá 02/10/2026** (D-10) | URL cũ chuyển hướng về `/overview`; phần validation/duyệt/phát hành nằm ở tab `Kiểm tra & duyệt` và `Kết quả` của scene |
 
 Nguồn: [ScenesHome][r-home], [NewSceneFlow][r-new], [inputKinds][r-input], [ImportScenePage][r-import], [ScenePage][r-scene], [MetricConfirmView][r-metric], [SampleFlow][r-sample], [EditorFrame][r-editor], [StudioHeader][r-header], [route visibility][r-routes].
@@ -71,7 +74,8 @@ Scenes → Scene mới → upload/chọn file → khai báo + cấu hình → t�
        → chờ/xử lý → preview 3DGS → xác nhận tỉ lệ khi được yêu cầu
        → xem/chỉnh Gaussian trong editor → export file PLY/SOG
 
-Khách → chọn video mẫu → xem cấu hình chỉ đọc → replay hoặc bỏ qua → scene mẫu
+Visitor → chọn video mẫu → xem cấu hình chỉ đọc → replay hoặc bỏ qua → scene mẫu
+Guest account → upload/chạy job → chỉ sửa resource sở hữu; có thể đọc workspace chung
 
 File 3DGS đã upload → Mở scene 3DGS → nén bản xem → workspace chỉ xem/chỉnh
                    → export bản làm việc; chưa có đường metric/collision/release
@@ -131,7 +135,8 @@ Người dùng mở ứng dụng để tiếp tục một scene hoặc tạo sce
 quyết định bên dưới):** landing là **trang đầu tiên khi mở domain**, ở `/`, ngoài
 AppShell. Trang chính của ứng dụng là **Tổng quan** ở `/overview`. Các CTA
 `Open Studio` của landing dẫn vào app **qua màn đăng nhập** (`/login?next=/overview`;
-màn đăng nhập có lối sang đăng ký bằng mã mời và lối thử video mẫu cho khách).
+màn đăng nhập có lối đăng ký Guest, đăng ký Editor/Reviewer bằng mã mời và thử
+video mẫu cho Visitor).
 Người đã đăng nhập bấm CTA thì được chuyển thẳng tới Tổng quan; deployment không
 bật đăng nhập (chế độ local, không có tài khoản) cũng được chuyển thẳng. Sau đăng
 nhập/đăng ký không có đích cụ thể thì về `/overview`, không về landing. `/landing`
@@ -194,8 +199,8 @@ không bịa profile. Backend profile/password không thuộc đợt frontend n�
 | Tasks | **ADAPT** | Thành Jobs: tên scene, stage, trạng thái, lần chạy, cập nhật gần nhất; lọc theo trạng thái. Không cho kéo đổi job status hay tạo task công việc |
 | Infrastructure | **ADAPT có chọn lọc** | Lấy phân nhóm trạng thái và thông tin chi tiết cho trang Tiến trình. Không tạo trang quản trị GPU/server, deploy hoặc billing |
 | Users | **ADAPT** | Thành Nhóm: thành viên, role, hoạt động, hạn mức và mã mời theo khả năng Real2Sim hiện có |
-| Roles | **REJECT trang riêng** | Chỉ hai role đã khóa; giải thích quyền trong Nhóm. Không có role builder hay permission matrix tùy biến |
-| Auth v2 login/register | **ADAPT** | Một layout đăng nhập/mã mời có form rõ và hình hỗ trợ nhỏ. Bỏ Google/SSO, đăng ký tự do, chọn role, promise “remember 30 days” và toast dữ liệu form |
+| Roles | **REJECT trang riêng** | Ba role cố định Guest/Editor/Reviewer; giải thích quyền trong Nhóm. Không có role builder hay permission matrix tùy biến |
+| Auth v2 login/register | **ADAPT** | Một layout đăng nhập và Guest signup không invite (feature flag), cùng invite signup Editor/Reviewer. Bỏ Google/SSO, chọn role tùy ý, promise “remember 30 days” và toast dữ liệu form |
 | Auth v1 | **REJECT bản song song** | Không để người dùng lựa chọn hai phiên bản giao diện cùng chức năng |
 | Profile | **REJECT trang đầy đủ** | Chỉ giữ thông tin tài khoản và đăng xuất trong menu; không thêm social profile, activity feed hay sửa hồ sơ chưa được yêu cầu |
 | Unauthorized / not-found | **ADAPT** | Màn không đủ quyền/không tìm thấy có đường về Scenes hoặc đăng nhập, giữ ngữ cảnh phù hợp |
@@ -264,9 +269,9 @@ Hai nhánh tải kết quả khác nhau:
 
 **Trigger:** mở Scenes hoặc đường dẫn một scene.
 
-**Steps:** (1) Hiện scene liên quan theo quyền và khu vực video mẫu. (2) Khách chọn mẫu, xem thông tin nguồn/cấu hình chỉ đọc. (3) Xem replay hoặc bỏ qua để mở kết quả. (4) Muốn dùng dữ liệu riêng thì đăng nhập/tạo tài khoản bằng mã mời và trở lại bước tạo scene.
+**Steps:** (1) Hiện scene liên quan theo quyền và khu vực video mẫu. (2) Visitor chọn mẫu, xem thông tin nguồn/cấu hình chỉ đọc. (3) Xem replay hoặc bỏ qua để mở kết quả. (4) Dùng dữ liệu riêng thì đăng nhập hoặc tạo Guest account không cần invite; invited signup vẫn cấp Editor/Reviewer. Guest chỉ thao tác resource sở hữu, còn scene khác giữ shared-read.
 
-**Decision points:** khách/thành viên; dùng mẫu/dữ liệu riêng; scene cần hành động/scene chỉ xem.
+**Decision points:** Visitor/Guest/Editor/Reviewer; dùng mẫu/dữ liệu riêng; scene cần hành động/scene chỉ xem theo server capability.
 
 **Exit conditions:** workspace mẫu, scene đang làm hoặc form tạo scene. **Failure / recovery:** không tìm thấy mẫu/scene có lời giải thích và về danh sách; đăng nhập lỗi giữ email, không đổi role; hết phiên yêu cầu đăng nhập lại trước thao tác có quyền. **Basis:** REQUIREMENT về quyền; PROPOSAL về bố trí entry. [PRD §3.4][prd], [SampleFlow][r-sample].
 
@@ -342,15 +347,15 @@ Hai nhánh tải kết quả khác nhau:
 
 **Exit conditions:** file tải về hoặc release đã được tạo. **Failure / recovery:** sealing lỗi giữ “đã duyệt, chưa phát hành”; Reviewer có thể `Thử lại phát hành` nếu trạng thái còn hợp lệ, không tạo approval mới. Tải lỗi không hủy approval/release; cho xin lại thao tác tải. Sửa sau release tạo draft mới. Không gom nút download PLY với thao tác release. **Basis:** [PRD FR-10/11/13][prd], [ReleasePanel][r-release]; presentation của từng bước và retry là PROPOSAL, không thay lifecycle.
 
-### Flow F9 — Mã mời và quyền nhóm
+### Flow F9 — Guest signup, mã mời và quyền nhóm
 
-**Trigger:** Reviewer mở `Nhóm`; người được mời mở đăng ký.
+**Trigger:** Reviewer mở `Nhóm`; người có invite mở đăng ký Editor/Reviewer; người dùng mới chọn đăng ký Guest.
 
-**Steps:** (1) Reviewer chọn một trong hai role và tạo mã mời. (2) Người nhận nhập mã cùng thông tin tài khoản. (3) Role hiển thị theo mã, không tự chọn. (4) Reviewer quản lý trạng thái/hạn mức trong danh sách thành viên.
+**Steps:** (1) Guest nhập email, tên hiển thị và password; không cần invite. Xác thực email được hoãn. (2) Invite flow vẫn gắn role Editor/Reviewer cho mã, người nhận không tự chọn role. (3) Reviewer quản lý trạng thái, role và hạn mức trong danh sách thành viên. (4) Guest xem quota 3/3 và reset 00:00 giờ Việt Nam; chỉ job create và manual Retry được chấp nhận mới tính lượt; objectify không trừ quota.
 
-**Decision points:** mã hợp lệ; quyền Reviewer; thay đổi có được phép với chính tài khoản đang dùng không.
+**Decision points:** signup flag có mở không; email/password hợp lệ; mã mời hợp lệ nếu đăng ký Editor/Reviewer; quyền Reviewer; thay đổi có được phép với chính tài khoản đang dùng không.
 
-**Exit conditions:** tạo tài khoản hoặc cập nhật thành viên thành công. **Failure / recovery:** mã sai/hết hiệu lực có hướng dẫn xin mã mới; 403 giữ thông báo và đường về Scenes; không tự tăng quyền. Tài liệu không mở rộng sang quản trị nhiều tổ chức. **Basis:** [ADR 0003][adr3], [AuthForms][r-auth], [TeamPage][r-team].
+**Exit conditions:** tạo Guest account, tạo account qua invite, hoặc cập nhật thành viên thành công. **Failure / recovery:** signup Guest khi flag đóng hiện hướng dẫn liên hệ nhóm; mã invite sai/hết hiệu lực có hướng dẫn xin mã mới; 403 giữ thông báo và đường về Scenes; không tự tăng quyền. Tài liệu không mở rộng sang quản trị nhiều tổ chức. **Basis:** [ADR 0021](decisions/0021-guest-identity-and-ownership.md), [AuthForms][r-auth], [TeamPage][r-team].
 
 ### Flow F10 — Mở file 3DGS đã có
 
@@ -378,9 +383,9 @@ S01–S14 là mã **màn hình UX**, không phải task ID. Một số là tab/p
 ### S02 — Đăng nhập / nhận mã mời
 
 - **Purpose / entry:** mở luồng có quyền hoặc link mời; dùng một visual layout nhất quán.
-- **Required information:** email, mật khẩu; màn đăng ký thêm tên và mã mời; giải thích khách vẫn thử mẫu được.
-- **Primary action:** `Đăng nhập` hoặc `Tạo tài khoản bằng mã mời`.
-- **Secondary actions:** chuyển giữa hai màn, quay lại video mẫu; không có role toggle hoặc SSO.
+- **Required information:** email, mật khẩu; đăng ký Guest thêm tên hiển thị, không cần invite; đăng ký Editor/Reviewer thêm mã mời; giải thích Visitor vẫn thử mẫu được.
+- **Primary action:** `Đăng nhập`, `Tạo tài khoản Guest` hoặc `Tạo tài khoản bằng mã mời`.
+- **Secondary actions:** chuyển giữa login và hai signup mode, quay lại video mẫu; không có role tùy chọn hoặc SSO.
 - **States:** nhập, validation field, đang gửi, sai thông tin/mã mời, tài khoản không hoạt động, thành công; không hiển thị mật khẩu trong phản hồi.
 - **Exit / transition:** trở lại entry hợp lệ đã yêu cầu, mặc định là Tổng quan `/overview` (§3.1); người đã có phiên — hoặc deployment không bật đăng nhập — không thấy form mà được chuyển thẳng tới đích. Illustration phụ không đẩy form/feedback xuống dưới màn hình.
 
@@ -512,7 +517,7 @@ thể từ việc bundle đã có bản xem 3DGS.
 ### S13 — Nhóm
 
 - **Purpose / entry:** mục Nhóm của Reviewer; hỗ trợ việc cấp quyền cho hành trình chính.
-- **Required information:** tên/email, hai role, trạng thái tài khoản, hạn mức khi áp dụng, mã mời vừa tạo và điều kiện của mã.
+- **Required information:** tên/email, ba role cố định, trạng thái tài khoản, hạn mức Guest khi áp dụng, mã mời vừa tạo và điều kiện của mã.
 - **Primary action:** `Tạo mã mời`.
 - **Secondary actions:** đổi role, chỉnh hạn mức/trạng thái trong phạm vi thao tác hiện có; copy mã vừa tạo.
 - **States:** loading, chỉ có thành viên đầu tiên, không đủ quyền, tạo/cập nhật pending, lỗi, thành công; tự thay đổi không được phép thì khóa và giải thích.
@@ -636,7 +641,7 @@ U1/U2 là ảnh người dùng, đã được mô tả tại §2.4; không có c
 | S10 Report/evidence | U1 Simulation Validation; U2 phần C; [Validation hiện tại][r-validation] | Report cạnh replay/evidence list, drill-down check | ADAPT; không dùng 5/5 hoặc PASS minh họa như fact |
 | S11 Review | U2 phần C; [ReviewLifecycle][r-review] | Action và lý do gần evidence | ADAPT; role/readiness/stale state và rejection reason |
 | S12 Kết quả | [ReleasePanel][r-release], [File Manager list][d-files] | Danh tính gói, trạng thái, download | ADAPT; phân biệt export làm việc/candidate/release |
-| S13 Nhóm | [Users][d-users], [TeamPage][r-team] | Member row, role, trạng thái, thao tác có giới hạn | ADAPT; hai role, mã mời, không custom-role builder |
+| S13 Nhóm | [Users][d-users], [TeamPage][r-team] | Member row, role, trạng thái, thao tác có giới hạn | ADAPT; Guest/Editor/Reviewer, invite cho Editor/Reviewer, không custom-role builder |
 | S14 Import 3DGS | [ImportScenePage][r-import], [File Manager][d-files] | Tên nguồn, chờ nén, lỗi, mở kết quả | ADAPT; không biến import thành reconstruction job |
 | Empty/error/dialog | [Donor UI library][d-ui], [Real2Sim states][r-states] | Nội dung lỗi, hành động phục hồi, modal focus | ADAPT; nội dung theo đúng tình huống, cần QA tương tác |
 
@@ -715,7 +720,7 @@ Mỗi quyết định chỉ chốt cách **UI thể hiện**; không đổi PRD,
 | D-12 | Tên nhãn trạng thái scene | Một bảng nhãn duy nhất suy từ JobManifest + progress + SceneIR, dùng chung cho Scenes, Jobs, header: `Đang chờ worker` · `Đang chạy · <stage>` · `Cần xác nhận tỉ lệ` · `Đang dựng collision` · `Cần xác nhận vật thể` (có ứng viên chưa xử lý) · `Sẵn sàng tạo gói` · `Đã có gói mô phỏng` · `Lỗi · <stage>` · `Đã huỷ`. Không có nhãn "Sẵn sàng" chung | §3 Clarity; tránh nhầm preview với sẵn sàng mô phỏng |
 | D-13 | Kiểu chữ và nét kẻ theo landing | **Owner quyết 01/10/2026:** app dùng bộ chữ của landing — **Plus Jakarta Sans** cho chữ giao diện, **IBM Plex Mono** cho nhãn kỹ thuật (utility `label-tech`: mono, chữ hoa, 12px) và giá trị kỹ thuật (ID, revision, số liệu); tiêu đề đậm (`font-extrabold`/`font-bold` + `tracking-tight`), nút `font-semibold`. Palette giữ D-04 (trùng landing); viền đổi sang mực ấm pha loãng của landing (`line` 0,16 · `line-strong` 0,36 · `line-dark` cho nền tối) và viền không khai báo màu của component donor mặc định theo `--border`; bôi chọn chữ, thanh cuộn và tên sản phẩm ("Real2Sim" + nhãn mono "Studio") theo landing. Font nạp một lần ở root layout bằng `next/font` với subset `vietnamese` | Owner muốn app cùng bộ nhận diện với landing; landing không đổi. UI legacy (D-10) giữ palette tối riêng, chỉ nhận font chung. Nhãn kỹ thuật trung tính dùng `ink-muted` (5,43:1 trên paper) vì `ink-subtle` (3,47:1) không đạt AA ở cỡ chữ nhỏ; overline màu `ember-strong` giữ như landing dù chỉ 3,98:1 trên paper — đổi màu này cần owner quyết. **Bổ sung 02/10/2026 (owner: app chưa dùng chữ như landing):** lớp “kỹ thuật” của landing áp cho cả app ở mức nền — nhãn trường `dt` và tiêu đề cột `th` là mono 11px chữ hoa; giá trị `dd`, `code`, `time` và utility `value-tech` (thời lượng, dung lượng, ngày giờ, toạ độ) là mono chữ số đều cột; `Badge` theo thẻ nhãn của landing (mono 11px, chữ hoa, bo góc nhỏ thay cho viên thuốc); nhãn nhóm của sidebar và menu là mono chữ hoa; số thứ tự bước là mono. Chữ thường, tiêu đề và nút vẫn là Plus Jakarta Sans |
 | D-14 | Theme sáng/tối | **Owner quyết 01/10/2026 (thay câu "không có theme switcher" của D-04):** Studio có nút đổi theme ở header và trang đăng nhập. Theme sáng là bản hiện tại và là mặc định; theme tối dùng nâu than ấm lấy từ khung viewport của landing (nền `#1b1714`, thẻ `#25201c`, chữ `#f5efe6`), màu nhấn/trạng thái dùng bản sáng hơn, nút chính giữ cam đậm. Lựa chọn lưu ở localStorage của trình duyệt (`r2s-theme`), không lưu ở backend và không theo cài đặt hệ điều hành. Token Studio thành biến CSS ở `:root`/`.dark` trong `globals.css` | Sở thích hiển thị là state tạm của trình duyệt (AGENTS §8). Palette tối Deep Navy/Jade ở §7.5 vẫn bị bỏ; bản tối mới cùng tông với theme sáng. Landing và UI legacy không đổi theo theme. Tương phản chữ nhỏ trên nền tối ≥ 5:1 (đo bằng công thức WCAG) |
-| D-15 | Thùng rác scene | **Owner yêu cầu 02/10/2026:** xoá scene (hoặc scene nhập) từ trang Scenes là chuyển vào **Thùng rác** (`/trash`, mục điều hướng nhóm Công việc), có bước xác nhận. Ở Thùng rác: khôi phục hoặc xoá hẳn từng mục, nhiều mục đã chọn, hoặc tất cả. Khôi phục đưa scene về đúng trạng thái lúc gỡ. Xoá hẳn xoá cả file trên kho lưu trữ, không khôi phục được và luôn qua hộp thoại xác nhận. Scene đang được worker xử lý hoặc đã có bản phát hành (PRD US-06) không gỡ được. **PROPOSAL chờ owner xác nhận:** gỡ và khôi phục cho Editor, xoá hẳn chỉ Reviewer. **Owner chốt 02/10/2026:** mục nằm trong thùng rác quá **7 ngày** tự bị xoá hẳn (`PRODUCT_TRASH_RETENTION_DAYS`, 0 = tắt); mỗi dòng hiện số ngày còn lại | `features/studio/trash/`, `src/api/studio/trash.py`, `orchestration/projects/deletion.py` |
+| D-15 | Thùng rác scene | Owner yêu cầu 02/10/2026: xoá scene/import từ Scenes vào **Thùng rác** (`/trash`) sau xác nhận; khôi phục đúng trạng thái; xoá hẳn mọi file không hoàn tác và luôn hỏi xác nhận. Scene đang chạy hoặc đã phát hành không gỡ được. Retention 7 ngày (`PRODUCT_TRASH_RETENTION_DAYS`, 0 = tắt). Owner decision 08/10/2026: Guest chỉ gỡ/khôi phục resource mình sở hữu; Editor và Reviewer giữ khả năng cross-user như hiện tại; purge chỉ Reviewer. UI đọc typed per-entry capabilities, nhưng API guard vẫn là authority. | `features/studio/trash/`, `src/api/studio/trash.py`, `orchestration/projects/deletion.py` |
 | D-16 | Bảng đánh giá scene | **Owner yêu cầu 02/10/2026:** mỗi scene có bảng chỉ số **tự kiểm** theo từng bước (video đầu vào, vị trí camera, 3DGS, tỉ lệ mét, hình học & va chạm, tách vật thể, hệ thống), đo từ chính artifact của scene nên có cho mọi dữ liệu người dùng. Hiện ở hai nơi: panel “Thông tin đầu ra” của màn xem từng bước (chỉ số của bước đó) và thẻ “Bảng đánh giá” ở tab Kiểm tra & duyệt (tổng hợp, tải báo cáo `.md` / dữ liệu `.json`). Mỗi chỉ số kèm một câu nêu ý nghĩa. Nhãn Đạt / Cần xem / Không đạt **chỉ** gán khi ngưỡng đã có trong cấu hình hoặc tài liệu (tỉ lệ ảnh COLMAP đăng ký, sai lệch đoạn kiểm C–D theo REC-06, giá trị hỏng trong file 3DGS, cảnh báo kiểm video); chỉ số chưa đo ghi “Chưa đo” kèm lý do, không điền số ước lượng (D-05). Chỉ số so với ground truth (pose, hình học, PSNR trên ảnh giữ lại) thuộc benchmark dataset ở `eval/`, chưa nối vào bảng này | `features/studio/evaluation/`, `src/api/studio/evaluation.py`, `orchestration/evaluation/`, `reconstruction/quality.py` |
 | D-17 | Bảng màu Gruvbox | **Owner yêu cầu 02/10/2026:** giữ nguyên bảng màu hiện tại (be + cam) và thêm lựa chọn bảng màu **Gruvbox**; mỗi bảng có bản sáng và bản tối, nên có bốn biến thể. Chọn ở menu “Chọn giao diện” (header và trang đăng nhập), cạnh nút sáng/tối của D-14; lưu ở localStorage (`r2s-palette`), class `theme-gruvbox` trên `<html>`. **Mọi** màu của UI đi qua biến trong `globals.css` — kể cả landing (trước đây viết cứng mã màu), lớp phủ 3D (khung vật, lưới va chạm), bóng, lớp phủ sau dialog và giao diện của trình xem 3D nhúng (ghi đè biến `--sse-*`). Vai trò màu giữ nguyên, chỉ đổi giá trị. **Owner yêu cầu làm lại 02/10/2026 theo hai repo tham chiếu** (`gruvbox` của morhetz và `gruvbox-material` của sainnhe): mọi giá trị lấy nguyên từ bảng tham chiếu, không tự pha — nền/viền/nền nhạt của trạng thái theo gruvbox-material nền “medium” (trang = bg0, sidebar = bg_dim, thẻ = bg1, vùng lõm = bg4 sáng / bg3 tối, menu/popover = bg3 với mục đang trỏ bg5, viền = bg5 sáng / statusline3 tối, nền trạng thái = bg_visual_green/yellow/red); chữ và màu nhấn theo gruvbox gốc (lựa chọn `foreground = original`: bản sáng nhóm “faded”, bản tối nhóm “bright”): nhấn = orange, hình học = blue, đạt = green, cảnh báo/collider = yellow, lỗi = red. Ngoại lệ duy nhất là nền cam nhạt (orange pha 16–20% vào bg0) vì bảng tham chiếu không có sẵn. Điểm đo trong khung 3D cũng theo bảng màu (`--studio-marker-*`). Giữ màu gốc nên vài cặp chữ màu trên nền nhạt chỉ đạt 3–4:1 (vd. badge cảnh báo bản sáng); chữ thường và chữ trên nút vẫn đạt mức test. Landing luôn dùng bản **sáng** của bảng đang chọn (như D-14: landing không theo chế độ tối). Font giữ nguyên (D-13); đặt thêm ở `<body>` và ở trình xem 3D nhúng (trước đó dùng Arial) để mọi thứ cùng một bộ chữ | `lib/theme.ts`, `features/shell/PaletteMenu.tsx`, `app/globals.css`, `features/landing/`. Test `tests/palette.test.tsx` kiểm tương phản WCAG của cả bốn biến thể (chữ chính ≥ 7:1, chữ phụ và chữ trên nút ≥ 4,5:1), Gruvbox định nghĩa đủ mọi biến, và không còn mã màu viết cứng trong `src/`. Test cũng kiểm mọi giá trị của hai khối Gruvbox thuộc bảng tham chiếu. Ngoài phạm vi: SuperSplat editor nhúng (iframe build riêng) và viewer Rerun giữ giao diện của chúng |
 | D-18 | Ai làm gì trong nhóm dùng chung | **Owner yêu cầu 02/10/2026:** Studio vẫn là không gian chung của nhóm (ADR 0003, không tách dữ liệu theo người), nhưng phải hiện **người tải từng file**, **người tạo scene/tiến trình** và **người duyệt scene**. Danh sách file ở `/new/import-video` và `/new/import-scene` ghi "tải lên bởi …"; thẻ scene ở S01 ghi "tạo bởi …" và "chạy bởi …" khi người chạy lại gần nhất khác người tạo; S04 có cột "Người chạy"; S05 ghi người tạo scene; S11/S12 hiện tên người duyệt thay cho id. Không có thông tin (bản ghi cũ, deployment không bật đăng nhập) thì để trống, không điền tên giả | `UploadRecord.uploaded_by`, `ProjectRecord.created_by` (id + tên lúc thao tác); người chạy job lấy từ nhật ký `gpu.run`; tên người duyệt tra từ `ApprovalRecord.reviewer_id` (contract không đổi). Test: `tests/test_api/test_studio_routes.py`, `tests/test_api/test_review_routes.py`, `frontend/tests/studio-overview.test.tsx` |
@@ -739,7 +744,7 @@ Không có quyết định architecture/schema/acceptance nào được sửa đ
 - ~~Implement UI, copy donor code~~ — **đã đổi 30/09/2026:** implement UI trong `frontend/` và copy có chọn lọc code UI donor (MIT, ghi nguồn) nay **trong phạm vi** (§13). Vẫn ngoài phạm vi: sửa backend/schema/contract chỉ để phục vụ UI, đổi production architecture, sửa task/authority documents.
 - Tạo `DESIGN.md`, dựng prototype riêng trong OpenDesign hoặc dùng Impeccable — thay bằng implement trực tiếp trong app (§13).
 - Tạo generic PRD, pricing, billing, CRM, project-management suite hay hệ thống analytics mới. Landing từ export Stitch đã được user yêu cầu riêng (§3.1).
-- Thêm custom role, SSO, chia sẻ công khai, nhiều tổ chức, cộng tác realtime hoặc workflow approval mới.
+- Thêm custom role, SSO, chia sẻ công khai, nhiều tổ chức, cộng tác realtime hoặc workflow approval mới. Ba roles cố định Guest/Editor/Reviewer và Guest signup không invite (sau rollout gates) là product scope đã chốt, không thuộc nhóm non-goals này.
 - Thiết kế thuật toán reconstruction/physics, tự đặt ngưỡng đánh giá, dùng hình minh họa làm benchmark hoặc cam kết an toàn robot thật.
 - Bắt buộc hỗ trợ mọi import/thiết bị, editor mobile đầy đủ, AI auto-scale hay segmentation nâng cao ngoài P0.
 - Xây design-token system đầy đủ hoặc theme playground; chỉ có bộ token palette §7.5 (D-04). Không dùng toàn bộ chức năng trong ảnh/template như product requirements.

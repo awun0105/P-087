@@ -16,7 +16,7 @@ from src.api.auth import (
     record_gpu_run,
     require_contributor,
 )
-from src.api.ownership import authorize_upload_mutation
+from src.api.ownership import authorize_upload_mutation, owner_mutation_allowed
 from src.api.studio import deps
 from src.models.contracts.manifests import JobManifest, JobStatus
 from src.services.orchestration.artifacts import ArtifactStoreError
@@ -43,6 +43,24 @@ from src.services.orchestration.uploads import UploadNotFoundError
 router = APIRouter()
 
 
+class SceneCapabilities(BaseModel):
+    """Caller-specific authorization hints for actions on this scene card."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    can_delete_project: bool
+
+
+class JobMutationCapabilities(BaseModel):
+    """Caller-specific permissions on a job; quota remains a separate run policy."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    can_mutate: bool
+    can_cancel: bool
+    can_retry: bool
+
+
 class SceneSummary(BaseModel):
     """Một scene trên màn hình Scenes: project upload + job mới nhất."""
 
@@ -56,6 +74,13 @@ class SceneSummary(BaseModel):
     processing_seconds: float | None = None
     #: Người bấm chạy job mới nhất (tạo scene hoặc thử lại), theo nhật ký lượt xử lý; None khi không bật đăng nhập.
     requested_by: Actor | None = None
+    capabilities: SceneCapabilities
+
+
+class JobProgressResponse(JobProgress):
+    """Job progress plus current actor's resource capabilities."""
+
+    capabilities: JobMutationCapabilities
 
 
 class SceneListResponse(BaseModel):
@@ -210,7 +235,7 @@ def create_scene_from_upload(
 
 
 @router.get("/scenes", response_model=SceneListResponse)
-def list_scenes() -> SceneListResponse:
+def list_scenes(user: UserRecord | None = Depends(require_contributor)) -> SceneListResponse:
     """Scene của Studio (project tạo từ upload); project fixture/dataset không hiện ở đây."""
     registry = deps.registry()
     scenes: list[SceneSummary] = []
@@ -227,6 +252,15 @@ def list_scenes() -> SceneListResponse:
             continue
         jobs = registry.list_jobs(project.project_id)
         latest = max(jobs, key=lambda job: job.started_at) if jobs else None
+        project_owner_id = project.created_by.user_id if project.created_by is not None else None
+        can_delete_project = owner_mutation_allowed(user, project_owner_id)
+        if can_delete_project and user is not None and user.role == "guest":
+            # Project deletion cascades to every job; show the control only if each
+            # affected job has the same known owner. Upload creation already guards
+            # ownership, and upload owner IDs are immutable after creation.
+            can_delete_project = all(
+                owner_mutation_allowed(user, registry.get_job_owner_user_id(job.job_id)) for job in jobs
+            )
         scenes.append(
             SceneSummary(
                 project=schemas.project_response(project),
@@ -234,6 +268,7 @@ def list_scenes() -> SceneListResponse:
                 preview_ready=latest is not None and deps.preview_ready(registry, latest.job_id),
                 processing_seconds=None if latest is None else measured.get(latest.job_id),
                 requested_by=None if latest is None else requester_actors.get(latest.job_id),
+                capabilities=SceneCapabilities(can_delete_project=can_delete_project),
             )
         )
     # Project upload luôn có created_at; mốc 0 chỉ là phòng hờ cho record cũ.
@@ -241,8 +276,8 @@ def list_scenes() -> SceneListResponse:
     return SceneListResponse(scenes=scenes)
 
 
-@router.get("/jobs/{job_id}/progress", response_model=JobProgress)
-def get_job_progress(job_id: str) -> JobProgress:
+@router.get("/jobs/{job_id}/progress", response_model=JobProgressResponse)
+def get_job_progress(job_id: str, user: UserRecord | None = Depends(require_contributor)) -> JobProgressResponse:
     """Tiến trình từng stage của attempt hiện tại; UI poll endpoint này."""
     registry = deps.registry()
     try:
@@ -255,13 +290,30 @@ def get_job_progress(job_id: str) -> JobProgress:
     heartbeat_at = reservation.heartbeat_at if reservation is not None else None
     # Vị trí hàng đợi chỉ tính cho job đang chờ worker (đọc journal của mọi job): job đang chạy không cần.
     position = queue_position(registry, job_id) if job.status == JobStatus.QUEUED or awaiting_finalize(job) else None
-    return job_progress(
+    progress = job_progress(
         job,
         attempts,
         deps.preview_ready(registry, job_id),
         observation,
         position,
         heartbeat_at=heartbeat_at,
+    )
+    allowed = owner_mutation_allowed(
+        user,
+        registry.get_job_owner_user_id(job_id) if user is not None and user.role == "guest" else None,
+    )
+    return JobProgressResponse(
+        **progress.model_dump(),
+        capabilities=JobMutationCapabilities(
+            can_mutate=allowed,
+            can_cancel=allowed
+            and progress.status in {JobStatus.QUEUED, JobStatus.RUNNING}
+            and progress.waiting_for != "metric_confirmation",
+            can_retry=allowed
+            and progress.status == JobStatus.FAILED
+            and progress.error is not None
+            and progress.error.retryable,
+        ),
     )
 
 

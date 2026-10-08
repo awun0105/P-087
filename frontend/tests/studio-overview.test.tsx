@@ -23,6 +23,7 @@ function scene(id: string, status: JobManifest["status"], waiting = false): Scen
     project: { project_id: `project-${id}`, name: `Kho ${id}`, source_type: "upload", privacy: { result: "VERIFIED_ANONYMIZED", dispatch_allowed: true, block_reason: null, privacy_mode: "qa_verified" }, input_video: null, created_at: "2026-10-01T00:00:00Z" },
     latest_job: { schema_version: "1.0", job_id: id, project_id: `project-${id}`, status, current_stage: waiting ? "ST-METRIC-CANONICALIZE" : "ST-VISUAL-RECON", seed: 1, scene_revision: "rev-001", stage_artifacts: [], input_manifest_checksum: sha, config_checksum: sha, runtime_manifest_checksum: sha, job_manifest_checksum: sha, started_at: "2026-10-01T00:00:00Z", completed_at: null },
     preview_ready: waiting,
+    capabilities: { can_delete_project: true },
   };
 }
 beforeEach(() => {
@@ -108,6 +109,67 @@ describe("Tổng quan và thư viện riêng", () => {
     expect(row).toHaveTextContent(/Chạy bởi:\s*Bình/i);
   });
 
+  it.each([
+    { role: "guest" as const, own: true, foreign: false },
+    { role: "editor" as const, own: true, foreign: true },
+    { role: "reviewer" as const, own: true, foreign: true },
+  ])("$role chỉ hiện thao tác xoá theo capability của server ở cả lưới và danh sách", async ({ role, own, foreign }) => {
+    auth.me = { auth_required: true, user: { user_id: "user-guest", email: "guest@example.test", display_name: "Guest Test", role, active: true, daily_job_quota: 10 } };
+    const mine = {
+      ...scene("mine", "SUCCEEDED"),
+      project: { ...scene("mine", "SUCCEEDED").project, name: "Scene của tôi", created_by: { user_id: "user-guest", display_name: "Guest Test", role } },
+      capabilities: { can_delete_project: own },
+    };
+    const other = {
+      ...scene("other", "SUCCEEDED"),
+      project: { ...scene("other", "SUCCEEDED").project, name: "Scene của nhóm" },
+      capabilities: { can_delete_project: foreign },
+    };
+    vi.mocked(listScenes).mockResolvedValue({ ok: true, data: { scenes: [mine, other] } });
+    vi.mocked(listImports).mockResolvedValue({
+      ok: true,
+      data: {
+        imports: [
+          { import_id: "import-mine", upload_id: "upload-mine", name: "PLY của tôi", input_kind: "gaussian_ply", status: "READY", delivery_ref: null, error: null, created_at: "2026-10-01T00:00:00Z", capabilities: { can_delete: own } },
+          { import_id: "import-other", upload_id: "upload-other", name: "PLY của nhóm", input_kind: "gaussian_ply", status: "READY", delivery_ref: null, error: null, created_at: "2026-10-01T00:00:00Z", capabilities: { can_delete: foreign } },
+        ],
+      },
+    });
+    render(<ScenesHome />);
+
+    await screen.findByText("Scene của tôi");
+    expect(screen.getByText(role === "guest" ? "Guest" : role === "editor" ? "Editor" : "Reviewer")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Chuyển Scene của tôi vào thùng rác" }) !== null).toBe(own);
+    expect(screen.queryByRole("button", { name: "Chuyển Scene của nhóm vào thùng rác" }) !== null).toBe(foreign);
+    expect(screen.queryByRole("button", { name: "Chuyển PLY của tôi vào thùng rác" }) !== null).toBe(own);
+    expect(screen.queryByRole("button", { name: "Chuyển PLY của nhóm vào thùng rác" }) !== null).toBe(foreign);
+
+    fireEvent.click(screen.getByRole("radio", { name: "Danh sách" }));
+    const ownRow = await screen.findByRole("row", { name: /Scene của tôi/ });
+    const foreignRow = screen.getByRole("row", { name: /Scene của nhóm/ });
+    expect(within(ownRow).queryByRole("button", { name: "Chuyển Scene của tôi vào thùng rác" }) !== null).toBe(own);
+    expect(within(foreignRow).queryByRole("button", { name: "Chuyển Scene của nhóm vào thùng rác" }) !== null).toBe(foreign);
+  });
+
+  it.each(["guest", "editor", "reviewer"] as const)("legacy Scenes/import response fails closed for Guest and preserves %s access", async (role) => {
+    auth.me = { auth_required: true, user: { user_id: "user-guest", email: "guest@example.test", display_name: "Guest Test", role, active: true, daily_job_quota: 10 } };
+    const legacyScene = scene("legacy", "SUCCEEDED");
+    Reflect.deleteProperty(legacyScene, "capabilities");
+    vi.mocked(listScenes).mockResolvedValue({ ok: true, data: { scenes: [legacyScene] } });
+    vi.mocked(listImports).mockResolvedValue({
+      ok: true,
+      data: {
+        imports: [{ import_id: "legacy-import", upload_id: "upload-1", name: "PLY cũ", input_kind: "gaussian_ply", status: "READY", delivery_ref: null, error: null, created_at: "2026-10-01T00:00:00Z" }],
+      },
+    });
+    render(<ScenesHome />);
+
+    await screen.findByText("Kho legacy");
+    const allowed = role !== "guest";
+    expect(screen.queryByRole("button", { name: "Chuyển Kho legacy vào thùng rác" }) !== null).toBe(allowed);
+    expect(screen.queryByRole("button", { name: "Chuyển PLY cũ vào thùng rác" }) !== null).toBe(allowed);
+  });
+
   it("scene import hiển thị creator và role dưới dạng text thuần", async () => {
     const hostileName = '<img src="x" onerror="alert(1)">';
     vi.mocked(listImports).mockResolvedValue({
@@ -124,6 +186,7 @@ describe("Tổng quan và thư viện riêng", () => {
           created_at: "2026-10-01T00:00:00Z",
           created_by_name: hostileName,
           created_by_role: "reviewer",
+          capabilities: { can_delete: true },
         }],
       },
     });

@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- IN PROGRESS — AUD-21.S1–S3 complete; S4 follows AUD-22.S2–S3. P1; EX-PRODUCT identity/API/Studio/runtime DB.
+- IN PROGRESS — S1–S4 code implementation is complete; S4 browser acceptance and rollout gates remain pending. P1; EX-PRODUCT identity/API/Studio/runtime DB.
 - Canonical PRODUCT-01/02/06/09; task-local extension, không đổi crosswalk.
 - Owner yêu cầu ngày 07/10/2026. S2 adds Guest signup behind a closed rollout flag; S3 adds backend ownership guards. No production account or rollout flag was changed.
 - [Agent guide](../AGENT_GUIDE.md), [ADR 0021](../../../../decisions/0021-guest-identity-and-ownership.md), [ADR 0022](../../../../decisions/0022-guest-daily-job-quota.md).
@@ -170,14 +170,15 @@ Tests: Direct HTTP bypass, forged owner/resource IDs, foreign cancel/delete/retr
 **Output:** Guest experience và regression evidence.
 **Contract:** Frontend capabilities không thay server authorization.
 
-Implement: Replace global canEdit for resource actions with typed server capability. Hide/disable foreign mutation, giữ shared viewing và own cancel/edit at exhausted quota. Distinguish Visitor/Guest, show role names; update auth/UX docs theo approved feature, forward migration/rollback feature flag không reset DB.
+Implement: Replace global canEdit for resource actions with typed server capability. Hide/disable foreign mutation, giữ shared viewing và own cancel/edit at exhausted quota. Distinguish Visitor/Guest, show role names; update auth/UX docs theo approved feature, forward migration/rollback feature flag không reset DB. Keep the public Guest signup flag closed until browser/API matrix and rollout prerequisites pass.
 Tests: Real browser three roles, own/foreign card/detail/trash, direct API denied, reviewer/editor Guest intervention, auth-disabled dev regression.
-**Exit:** [ ] browser/API matrix pass trước public signup enable.
+**Exit:** [ ] browser/API matrix pass trước public signup enable. Local focused API/frontend coverage is implementation evidence, not rendered browser acceptance.
 
 ## Verification và DoD
 
 ```bash
 .venv/bin/pytest tests/test_orchestration/test_auth_service.py tests/test_api/test_auth_routes.py tests/test_api/test_studio_routes.py tests/test_api/test_scene_routes.py -q
+.venv/bin/pytest tests/test_api/test_guest_ownership.py tests/test_api/test_trash_routes.py -q
 ```
 
 Thêm tests mới theo sprint rồi bổ sung command. Chạy ruff; frontend lint/typecheck,
@@ -287,7 +288,42 @@ mock hoặc source review không chứng minh feature đã chạy.
   **UNVERIFIED**: MCP reports that the Chrome profile is already running and
   cannot attach. No rendered UI changed in S3, but the runtime permission flow has
   not received browser acceptance.
-- **Pending:** `AUTH_GUEST_SIGNUP_ENABLED` remains false. Job creation, Retry,
-  scene-from-upload and objectify stay explicitly Editor-gated until AUD-22.S2
-  supplies the quota contract; Guest rollout also awaits AUD-22.S3, AUD-21.S4,
-  browser acceptance and PostgreSQL-specific proof.
+- **Pending:** `AUTH_GUEST_SIGNUP_ENABLED` remains false. AUD-22.S2 now admits
+  Guest job creation, scene-from-upload and manual Retry under the daily quota;
+  objectify remains outside that counter. Guest rollout still awaits AUD-22.S3,
+  AUD-21.S4, browser acceptance and PostgreSQL-specific proof.
+
+### AUD-21.S4 — Studio permissions và rollout acceptance
+
+- **Base:** `69e82dc` (`AUD-22.S3`); no migration required.
+- **Implementation:** Added typed per-caller capabilities to `/scenes`, job
+  `/progress`, `/imports` and `/trash`. Guest sees own-resource edit/cancel/retry,
+  project-delete, import-delete and trash-restore affordances only when server
+  capability allows them; Guest remains able to view shared scenes and edit an
+  owned scene when daily run quota is exhausted. Editor and Reviewer receive
+  cross-user mutation capabilities as before; purge stays Reviewer-only. The
+  server mutation guards remain authoritative. Scene/import cards show Guest as a
+  role distinct from anonymous Visitor. Updated ADR 0021, PRD v1.18 and this UX
+  spec to replace stale two-role/invite-only statements. Signup flag remains false.
+- **Quota clarification:** Guest quota counts accepted scene/job creation and
+  manual Retry only. Objectify/tách vật is excluded and continues to use resource
+  admission; see AUD-22.
+- **Tests:** Added API matrix for Guest-owned/foreign/unknown and Editor/Reviewer
+  job capabilities; import list capability by role; HTTP scene/trash ownership
+  coverage with Guest-only restore and Reviewer purge. Frontend tests cover card,
+  import, job detail/read-only editor, retry, trash selection/bulk restore, role
+  labels and owner edits at quota cap.
+- **Verification:** `.venv/bin/ruff check src/ tests/` PASS; `.venv/bin/ruff
+  format --check src/ tests/` PASS (478 files); `.venv/bin/pytest
+  tests/test_api -q` PASS (152); `cd frontend && npm run typecheck` PASS,
+  changed-file `npm run lint -- ...` PASS, and `npm test -- --run` PASS
+  (43 files, 300 tests); `git diff --check` PASS. The focused permission/deletion
+  subset also passed (56 tests).
+- **Gate report:** CodeGraph was used before editing and final index sync passed.
+  Browser DevTools remains **UNVERIFIED** because the Chrome
+  profile lock prevents attachment; local tests are not browser proof. PostgreSQL
+  qualification was not run because `R2S_TEST_POSTGRES_URL` is unset. AUD-20
+  live-seed acceptance remains a separate rollout gate.
+- **Pending:** Keep `AUTH_GUEST_SIGNUP_ENABLED=false`; do not claim public Guest
+  rollout until browser three-role acceptance, PostgreSQL qualification and seed
+  acceptance are recorded.

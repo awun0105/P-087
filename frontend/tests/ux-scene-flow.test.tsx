@@ -28,10 +28,20 @@ const authState = vi.hoisted(() => ({ me: { auth_required: false, user: null } a
 vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => authState }));
 vi.mock("@/features/studio/scene/ReviewTab", () => ({ ReviewTab: () => <p>Review stub</p> }));
 vi.mock("@/features/studio/scene/ResultsTab", () => ({ ResultsTab: () => <p>Results stub</p> }));
-vi.mock("@/features/studio/scene/StudioTab", () => ({ StudioTab: ({ mode, metricDraft, onMetricDraft, onMetricClose }: { mode: string; metricDraft?: MetricDraft; onMetricDraft: (draft: MetricDraft) => void; onMetricClose: () => void }) => <section aria-label="Canvas stub"><p>{mode}</p><p>{metricDraft?.typed.anchor || "Chưa nhập số đo"}</p><button onClick={() => onMetricDraft({ points: [[1, 2, 3]], typed: { anchor: "2.5", check: "1" } })}>Chọn điểm stub</button><button onClick={onMetricClose}>Về Tiến trình</button></section> }));
+vi.mock("@/features/studio/scene/StudioTab", () => ({ StudioTab: ({ mode, canMutate, metricDraft, onMetricDraft, onMetricClose }: { mode: string; canMutate: boolean; metricDraft?: MetricDraft; onMetricDraft: (draft: MetricDraft) => void; onMetricClose: () => void }) => <section aria-label="Canvas stub"><p>{mode}</p>{!canMutate && <p>Quyền chỉ xem</p>}<p>{metricDraft?.typed.anchor || "Chưa nhập số đo"}</p>{canMutate && <button onClick={() => onMetricDraft({ points: [[1, 2, 3]], typed: { anchor: "2.5", check: "1" } })}>Chọn điểm stub</button>}<button onClick={onMetricClose}>Về Tiến trình</button></section> }));
 vi.mock("@/lib/api/endpoints", async (original) => ({ ...(await original<typeof import("@/lib/api/endpoints")>()), getJob: vi.fn(), getPreview: vi.fn(), listJobAttempts: vi.fn() }));
 vi.mock("@/lib/api/studio", async (original) => ({ ...(await original<typeof import("@/lib/api/studio")>()), getJobProgress: vi.fn(), getJobScene: vi.fn(), getSimulationPackage: vi.fn(), getReviewState: vi.fn(), retryJob: vi.fn() }));
-const progress: JobProgress = { job_id: "job-1", status: "RUNNING", current_stage: "ST-METRIC-CANONICALIZE", attempt: 1, started_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z", completed_at: null, stages: [], preview_ready: true, waiting_for: "metric_confirmation", error: null };
+const progress: JobProgress = { job_id: "job-1", status: "RUNNING", current_stage: "ST-METRIC-CANONICALIZE", attempt: 1, started_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z", completed_at: null, stages: [], preview_ready: true, waiting_for: "metric_confirmation", error: null, capabilities: { can_mutate: true, can_cancel: false, can_retry: false } };
+function failedProgress(retryable: boolean, previewReady = false): JobProgress {
+  return {
+    ...progress,
+    status: "FAILED",
+    waiting_for: null,
+    preview_ready: previewReady,
+    capabilities: { can_mutate: true, can_cancel: false, can_retry: retryable },
+    error: { stage_id: "ST-VISUAL-RECON", error_code: "VISUAL_TIMEOUT", human_message: "timeout", retryable },
+  };
+}
 function guestMe(remaining: number): Me {
   return {
     auth_required: true,
@@ -76,12 +86,12 @@ describe("workflow scene", () => {
   });
   it("chỉ cho retry khi backend cho phép, không lặp CTA ở đúng panel", () => {
     const props = { jobId: "job-1", current: "progress" as const, mode: "scene" as const, sceneReady: false, revision: null, busy: false, onOpen: vi.fn(), onRetry: vi.fn() };
-    const failed: JobProgress = { ...progress, status: "FAILED", waiting_for: null, error: { stage_id: "ST-VISUAL-RECON", error_code: "fixture", human_message: "fixture", retryable: false } };
+    const failed = failedProgress(false);
     const view = render(<NextAction {...props} progress={failed} />);
     expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
-    view.rerender(<NextAction {...props} progress={{ ...failed, error: { ...failed.error!, retryable: true } }} />);
+    view.rerender(<NextAction {...props} progress={failedProgress(true)} />);
     fireEvent.click(screen.getByRole("button", { name: "Thử lại" })); expect(props.onRetry).toHaveBeenCalledOnce();
-    view.rerender(<NextAction {...props} progress={{ ...failed, error: { ...failed.error!, retryable: true } }} retryState="accepted" />);
+    view.rerender(<NextAction {...props} progress={failedProgress(true)} retryState="accepted" />);
     expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
     expect(screen.getByText(/Đang đồng bộ lần chạy mới/)).toBeInTheDocument();
     view.rerender(<NextAction {...props} progress={progress} current="studio" mode="metric" />);
@@ -90,7 +100,7 @@ describe("workflow scene", () => {
   it("Guest thấy số lượt và giờ reset theo Việt Nam; nút retry bị khoá khi hết quota", () => {
     authState.me = guestMe(0);
     const props = { jobId: "job-1", current: "progress" as const, mode: "scene" as const, sceneReady: false, revision: null, busy: false, onOpen: vi.fn(), onRetry: vi.fn() };
-    const failed: JobProgress = { ...progress, status: "FAILED", waiting_for: null, error: { stage_id: "ST-VISUAL-RECON", error_code: "fixture", human_message: "fixture", retryable: true } };
+    const failed = failedProgress(true);
     render(<NextAction {...props} progress={failed} />);
     expect(screen.getByText("Retry thủ công dùng 1 lượt Guest khi máy chủ chấp nhận.")).toBeInTheDocument();
     expect(screen.getByText("Guest còn 0/3 lượt hôm nay.")).toBeInTheDocument();
@@ -98,6 +108,37 @@ describe("workflow scene", () => {
     expect(reset).toHaveTextContent("00:00");
     expect(reset).toHaveTextContent("09/10/2026");
     expect(screen.getByRole("button", { name: "Thử lại" })).toBeDisabled();
+  });
+  it("Guest vẫn sửa scene mình sở hữu khi quota tạo job đã hết", () => {
+    authState.me = guestMe(0);
+    render(<NextAction jobId="job-1" progress={progress} current="progress" mode="scene" sceneReady={false} revision={null} busy={false} onOpen={vi.fn()} onRetry={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Xác nhận tỉ lệ mét" })).toBeEnabled();
+  });
+  it("Guest không thấy retry hoặc mutation CTA trên job foreign theo capability server", () => {
+    authState.me = guestMe(3);
+    const foreignFailed: JobProgress = {
+      ...progress,
+      status: "FAILED",
+      waiting_for: null,
+      capabilities: { can_mutate: false, can_cancel: false, can_retry: false },
+      error: { stage_id: "ST-VISUAL-RECON", error_code: "fixture", human_message: "fixture", retryable: true },
+    };
+    render(<NextAction jobId="job-1" progress={foreignFailed} current="progress" mode="scene" sceneReady={false} revision={null} busy={false} onOpen={vi.fn()} onRetry={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Xác nhận tỉ lệ mét" })).toBeNull();
+  });
+  it("Scene detail dùng capability server để giữ foreign job ở chế độ chỉ xem", async () => {
+    authState.me = guestMe(3);
+    history.replaceState({}, "", "/scenes/job-1?tab=studio");
+    const foreignProgress = { ...progress, capabilities: { can_mutate: false, can_cancel: false, can_retry: false } };
+    vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: foreignProgress });
+    render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
+    await screen.findAllByText("Quyền chỉ xem");
+    expect(screen.getAllByText("Quyền chỉ xem")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Chọn điểm stub" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Xác nhận tỉ lệ mét" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Huỷ xử lý" })).toBeNull();
+    expect(retryJob).not.toHaveBeenCalled();
   });
   it("không mở retry chỉ vì RUNNING cũ thiếu heartbeat", () => {
     const props = { jobId: "job-1", current: "progress" as const, mode: "scene" as const, sceneReady: false, revision: null, busy: false, onOpen: vi.fn(), onRetry: vi.fn() };
@@ -107,7 +148,7 @@ describe("workflow scene", () => {
     expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
   });
   it("đồng bộ retry nếu POST lỗi sau khi backend đã tạo attempt mới", async () => {
-    const failed: JobProgress = { ...progress, status: "FAILED", waiting_for: null, preview_ready: false, error: { stage_id: "ST-VISUAL-RECON", error_code: "VISUAL_TIMEOUT", human_message: "timeout", retryable: true } };
+    const failed = failedProgress(true);
     const queued: JobProgress = { ...failed, status: "QUEUED", attempt: 2, updated_at: "2026-10-05T00:00:00Z", error: null };
     vi.mocked(getJobProgress).mockResolvedValueOnce({ ok: true, data: failed }).mockResolvedValue({ ok: true, data: queued });
     vi.mocked(retryJob).mockRejectedValue(new ApiError(500, "Internal Server Error"));
@@ -120,7 +161,7 @@ describe("workflow scene", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
   it("bỏ qua poll FAILED cũ nếu nó trả về sau khi attempt mới đã được xác nhận", async () => {
-    const failed: JobProgress = { ...progress, status: "FAILED", waiting_for: null, preview_ready: false, error: { stage_id: "ST-VISUAL-RECON", error_code: "VISUAL_TIMEOUT", human_message: "timeout", retryable: true } };
+    const failed = failedProgress(true);
     const queued: JobProgress = { ...failed, status: "QUEUED", attempt: 2, updated_at: "2026-10-05T00:00:00Z", error: null };
     const retryReceipt = deferred<Awaited<ReturnType<typeof retryJob>>>();
     const oldPoll = deferred<Awaited<ReturnType<typeof getJobProgress>>>();
@@ -140,7 +181,7 @@ describe("workflow scene", () => {
     expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
   });
   it("giữ nút retry ẩn nếu POST đã được nhận nhưng poll mới vẫn trả attempt FAILED cũ", async () => {
-    const failed: JobProgress = { ...progress, status: "FAILED", waiting_for: null, preview_ready: false, error: { stage_id: "ST-VISUAL-RECON", error_code: "VISUAL_TIMEOUT", human_message: "timeout", retryable: true } };
+    const failed = failedProgress(true);
     vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: failed });
     render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
     fireEvent.click(await screen.findByRole("button", { name: "Thử lại" }));
@@ -149,7 +190,7 @@ describe("workflow scene", () => {
     expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
   });
   it("giữ retry khả dụng nếu POST bị từ chối và máy chủ xác nhận attempt FAILED", async () => {
-    const failed: JobProgress = { ...progress, status: "FAILED", waiting_for: null, preview_ready: false, error: { stage_id: "ST-VISUAL-RECON", error_code: "VISUAL_TIMEOUT", human_message: "timeout", retryable: true } };
+    const failed = failedProgress(true);
     vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: failed });
     vi.mocked(retryJob).mockRejectedValue(new ApiError(409, "Job đã đổi trạng thái; tải lại tiến trình"));
     render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
@@ -160,7 +201,7 @@ describe("workflow scene", () => {
   it("refresh quota sau 429 từ tab khác và khoá retry theo /auth/me mới", async () => {
     authState.me = guestMe(1);
     authState.refresh.mockImplementation(async () => { authState.me = guestMe(0); });
-    const failed: JobProgress = { ...progress, status: "FAILED", waiting_for: null, preview_ready: false, error: { stage_id: "ST-VISUAL-RECON", error_code: "VISUAL_TIMEOUT", human_message: "timeout", retryable: true } };
+    const failed = failedProgress(true);
     vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: failed });
     vi.mocked(retryJob).mockRejectedValue(new ApiError(429, JSON.stringify({ code: "guest_daily_job_quota_exceeded" })));
     render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
@@ -172,7 +213,7 @@ describe("workflow scene", () => {
   });
   it("refresh quota sau khi máy chủ chấp nhận manual Retry của Guest", async () => {
     authState.me = guestMe(1);
-    const failed: JobProgress = { ...progress, status: "FAILED", waiting_for: null, preview_ready: false, error: { stage_id: "ST-VISUAL-RECON", error_code: "VISUAL_TIMEOUT", human_message: "timeout", retryable: true } };
+    const failed = failedProgress(true);
     const queued: JobProgress = { ...failed, status: "QUEUED", attempt: 2, updated_at: "2026-10-05T00:00:00Z", error: null };
     vi.mocked(getJobProgress).mockResolvedValueOnce({ ok: true, data: failed }).mockResolvedValue({ ok: true, data: queued });
     render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
@@ -181,7 +222,7 @@ describe("workflow scene", () => {
     expect(vi.mocked(retryJob)).toHaveBeenCalledOnce();
   });
   it("mở lại retry khi POST gặp lỗi hạ tầng nhưng trạng thái hiện tại vẫn FAILED", async () => {
-    const failed: JobProgress = { ...progress, status: "FAILED", waiting_for: null, preview_ready: false, error: { stage_id: "ST-VISUAL-RECON", error_code: "VISUAL_TIMEOUT", human_message: "timeout", retryable: true } };
+    const failed = failedProgress(true);
     vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: failed });
     vi.mocked(retryJob).mockRejectedValue(new ApiError(500, "gateway failed"));
     render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);

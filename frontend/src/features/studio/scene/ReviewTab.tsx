@@ -13,7 +13,7 @@ import { EvaluationCard } from "@/features/studio/evaluation/EvaluationCard";
 import { ValidationReportCard } from "@/features/studio/ValidationReportCard";
 import { getJobScene, type ReviewStateView } from "@/lib/api/studio";
 
-export function ReviewTab({ jobId, onSaveState }: { jobId: string; onSaveState: (state: SaveState) => void }) {
+export function ReviewTab({ jobId, canMutateJob, onSaveState }: { jobId: string; canMutateJob: boolean; onSaveState: (state: SaveState) => void }) {
   const [revision, setRevision] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +41,7 @@ export function ReviewTab({ jobId, onSaveState }: { jobId: string; onSaveState: 
         <p className="mt-1 text-sm text-ink-muted">Tạo gói và đọc preflight trước; validation cùng quyết định Reviewer áp dụng cho đúng gói của revision này.</p>
       </div>
       <Card className="overflow-hidden">
-        <SimulationPackagePanel jobId={jobId} sceneRevision={revision} onSceneChanged={() => setReload((value) => value + 1)} />
+        <SimulationPackagePanel jobId={jobId} sceneRevision={revision} canCreate={canMutateJob} onSceneChanged={() => setReload((value) => value + 1)} />
       </Card>
       <Card className="overflow-hidden">
         <ReviewPanel jobId={jobId} sceneRevision={revision} onState={setReview} />

@@ -98,6 +98,12 @@ export function canEdit(me: Me | null): boolean {
   return me !== null && (!me.auth_required || me.user !== null);
 }
 
+/** Resource mutation uses the server's explicit owner capability; older APIs fail closed for Guest. */
+export function resourceCapabilityAllowed(me: Me | null, serverAllowed?: boolean): boolean {
+  if (serverAllowed !== undefined) return serverAllowed;
+  return canEdit(me) && me?.user?.role !== "guest";
+}
+
 export function isReviewer(me: Me | null): boolean {
   return me !== null && (!me.auth_required || me.user?.role === "reviewer");
 }

@@ -24,6 +24,7 @@ from src.services.orchestration.projects.deletion import (
     SummaryLine,
     apply_deletion,
     context_from_settings,
+    guest_owns_deletion_plan,
     list_trash,
     purge_deletion,
     purge_expired,
@@ -32,6 +33,15 @@ from src.services.orchestration.projects.deletion import (
 
 router = APIRouter()
 _ERRORS = {404: {"model": schemas.ApiErrorResponse}, 409: {"model": schemas.ApiErrorResponse}}
+
+
+class TrashCapabilities(BaseModel):
+    """Caller-specific restore/purge hints; mutation endpoints still enforce policy."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    can_restore: bool
+    can_purge: bool
 
 
 class TrashEntry(BaseModel):
@@ -47,6 +57,7 @@ class TrashEntry(BaseModel):
     deleted_by: str | None
     size_bytes: int
     items: list[SummaryLine]
+    capabilities: TrashCapabilities
 
 
 class TrashListResponse(BaseModel):
@@ -87,7 +98,7 @@ def _context() -> DeletionContext:
     return context_from_settings(deps.settings())
 
 
-def _entry(context: DeletionContext, record: DeletionRecord) -> TrashEntry:
+def _entry(context: DeletionContext, record: DeletionRecord, user: UserRecord | None) -> TrashEntry:
     primary = next((line for line in record.plan.summary if line.kind != "upload"), record.plan.summary[0])
     return TrashEntry(
         entry_id=record.entry_id,
@@ -97,6 +108,10 @@ def _entry(context: DeletionContext, record: DeletionRecord) -> TrashEntry:
         deleted_by=record.deleted_by,
         size_bytes=record.plan.size_bytes,
         items=record.plan.summary,
+        capabilities=TrashCapabilities(
+            can_restore=(user is None or user.role != "guest" or guest_owns_deletion_plan(record.plan, user.user_id)),
+            can_purge=user is None or user.role == "reviewer",
+        ),
     )
 
 
@@ -111,6 +126,7 @@ def _move_to_trash(request: DeletionRequest, user: UserRecord | None) -> TrashEn
                 user.user_id if user else None,
                 guest_owner_user_id=user.user_id if user is not None and user.role == "guest" else None,
             ),
+            user,
         )
         purge_expired(context)
         return result
@@ -137,11 +153,11 @@ def delete_import(import_id: str, user: UserRecord | None = Depends(require_cont
 
 
 @router.get("/trash", response_model=TrashListResponse)
-def get_trash() -> TrashListResponse:
+def get_trash(user: UserRecord | None = Depends(require_contributor)) -> TrashListResponse:
     """Các mục đang nằm trong thùng rác; mục quá hạn bị xoá hẳn trước khi trả danh sách."""
     context = _context()
     purge_expired(context)
-    return TrashListResponse(entries=[_entry(context, record) for record in list_trash(context.database)])
+    return TrashListResponse(entries=[_entry(context, record, user) for record in list_trash(context.database)])
 
 
 def _each(

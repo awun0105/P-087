@@ -129,6 +129,8 @@ export interface SceneSummary {
   project: StudioProject;
   latest_job: JobManifest | null;
   preview_ready: boolean;
+  /** Caller-specific ownership decision; absent on older APIs is treated as denied. */
+  capabilities?: { can_delete_project: boolean };
   /** Thời gian máy đã xử lý (tổng các bước đã chạy xong), không gồm lúc xếp hàng và lúc chờ người dùng; null = chưa đo. */
   processing_seconds?: number | null;
   /** Người bấm chạy job mới nhất (tạo scene hoặc thử lại). */
@@ -205,6 +207,8 @@ export interface JobProgress {
   /** Vị trí trong hàng đợi khi job đang chờ máy xử lý; null khi đang chạy, đã xong hoặc chờ người dùng. */
   queue?: QueuePositionView | null;
   error: ExecutionErrorView | null;
+  /** Per-job permissions supplied by the server; quota remains a separate policy. */
+  capabilities?: { can_mutate: boolean; can_cancel: boolean; can_retry: boolean };
 }
 
 /** Nguồn số đo: người dùng đo ngoài đời, hoặc LiDAR của dataset mẫu (ADR 0004 §6). */
@@ -458,6 +462,12 @@ export function parseJobProgress(value: unknown): JobProgress {
       throw new Error("Vị trí hàng đợi từ backend không hợp lệ");
     }
   }
+  if (value.capabilities !== undefined && value.capabilities !== null) {
+    const capabilities = value.capabilities;
+    if (!isRecord(capabilities) || !["can_mutate", "can_cancel", "can_retry"].every((key) => typeof capabilities[key] === "boolean")) {
+      throw new Error("Quyền thao tác job từ backend không hợp lệ");
+    }
+  }
   return value as unknown as JobProgress;
 }
 
@@ -638,4 +648,6 @@ export interface ImportedScene {
   created_at: string;
   created_by_name?: string | null;
   created_by_role?: "guest" | "editor" | "reviewer" | null;
+  /** Missing capability data from an older API falls back to role; Guests fail closed. */
+  capabilities?: { can_delete: boolean };
 }

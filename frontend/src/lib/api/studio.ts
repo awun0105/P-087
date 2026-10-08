@@ -864,6 +864,7 @@ export interface TrashEntry {
   deleted_by: string | null;
   size_bytes: number;
   items: TrashItem[];
+  capabilities?: { can_restore: boolean; can_purge: boolean };
 }
 
 /** Kết quả theo từng mục: mục lỗi không chặn các mục còn lại. */
@@ -893,6 +894,14 @@ export function parseTrashEntries(data: unknown): TrashEntry[] {
       }
       return { kind, identifier: item.identifier, name: item.name, detail: typeof item.detail === "string" ? item.detail : "" };
     });
+    let capabilities: TrashEntry["capabilities"];
+    if (entry.capabilities !== undefined) {
+      if (
+        !isRecord(entry.capabilities) || typeof entry.capabilities.can_restore !== "boolean" ||
+        typeof entry.capabilities.can_purge !== "boolean"
+      ) throw new ApiError(502, "Quyền thùng rác không hợp lệ");
+      capabilities = { can_restore: entry.capabilities.can_restore, can_purge: entry.capabilities.can_purge };
+    }
     return {
       entry_id: entry.entry_id,
       title: entry.title,
@@ -901,6 +910,7 @@ export function parseTrashEntries(data: unknown): TrashEntry[] {
       deleted_by: typeof entry.deleted_by === "string" ? entry.deleted_by : null,
       size_bytes: entry.size_bytes,
       items,
+      capabilities,
     };
   });
 }

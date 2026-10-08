@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.auth import require_contributor
-from src.api.ownership import authorize_upload_mutation
+from src.api.ownership import authorize_upload_mutation, owner_mutation_allowed
 from src.api.studio import deps
 from src.services.orchestration.auth import UserRecord
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
@@ -33,12 +33,33 @@ class ImportRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
 
 
+class ImportCapabilities(BaseModel):
+    """Caller-specific actions available for an imported scene."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    can_delete: bool
+
+
+class ImportedSceneResponse(ImportedScene):
+    """Imported scene plus a non-authoritative UI permission hint."""
+
+    capabilities: ImportCapabilities
+
+
 class ImportListResponse(BaseModel):
     """Scene import, mới nhất trước."""
 
     model_config = ConfigDict(extra="forbid")
 
-    imports: list[ImportedScene]
+    imports: list[ImportedSceneResponse]
+
+
+def _view(record: ImportedScene, user: UserRecord | None) -> ImportedSceneResponse:
+    return ImportedSceneResponse(
+        **record.model_dump(),
+        capabilities=ImportCapabilities(can_delete=owner_mutation_allowed(user, record.created_by)),
+    )
 
 
 def _service() -> ImportService:
@@ -66,10 +87,10 @@ def _package_in_background(import_id: str, upload_id: str) -> None:
             logger.info("Import %s đã đổi trạng thái trước khi ghi lỗi", import_id)
 
 
-@router.post("/imports", response_model=ImportedScene, status_code=status.HTTP_201_CREATED)
+@router.post("/imports", response_model=ImportedSceneResponse, status_code=status.HTTP_201_CREATED)
 def create_import(
     request: ImportRequest, background: BackgroundTasks, user: UserRecord | None = Depends(require_contributor)
-) -> ImportedScene:
+) -> ImportedSceneResponse:
     """Tạo scene import và nén PLY → SOG trong nền; client poll tới READY/FAILED."""
     try:
         upload = deps.uploads().get(request.upload_id)
@@ -86,20 +107,20 @@ def create_import(
     except SceneImportError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     background.add_task(_package_in_background, record.import_id, upload.upload_id)
-    return record
+    return _view(record, user)
 
 
 @router.get("/imports", response_model=ImportListResponse)
-def list_imports() -> ImportListResponse:
+def list_imports(user: UserRecord | None = Depends(require_contributor)) -> ImportListResponse:
     """Danh sách scene import."""
-    return ImportListResponse(imports=_service().list())
+    return ImportListResponse(imports=[_view(record, user) for record in _service().list()])
 
 
-@router.get("/imports/{import_id}", response_model=ImportedScene)
-def get_import(import_id: str) -> ImportedScene:
+@router.get("/imports/{import_id}", response_model=ImportedSceneResponse)
+def get_import(import_id: str, user: UserRecord | None = Depends(require_contributor)) -> ImportedSceneResponse:
     """Trạng thái một scene import."""
     try:
-        return _service().get(import_id)
+        return _view(_service().get(import_id), user)
     except ImportNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
 

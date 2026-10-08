@@ -12,6 +12,16 @@ from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.uploads import UploadRecord, UploadSession
 
 
+def owner_mutation_allowed(user: UserRecord | None, owner_user_id: str | None) -> bool:
+    """Return the owner-policy decision used by both HTTP guards and UI hints.
+
+    A missing user means authentication is disabled for this local deployment. Editors
+    and Reviewers retain shared-workspace mutation rights; Guests require a known,
+    matching owner ID.
+    """
+    return user is None or user.role != "guest" or owner_user_id == user.user_id
+
+
 def _authorize_owner(
     user: UserRecord | None,
     owner_user_id: str | None,
@@ -28,12 +38,12 @@ def _authorize_owner(
     """
     if user is None:
         return
+    if not owner_mutation_allowed(user, owner_user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Guest chỉ được {operation} resource do mình tạo",
+        )
     if user.role == "guest":
-        if owner_user_id != user.user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Guest chỉ được {operation} resource do mình tạo",
-            )
         return
     if owner_user_id != user.user_id:
         auth.auth_service().audit(

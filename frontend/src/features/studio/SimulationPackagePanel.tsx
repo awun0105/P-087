@@ -34,10 +34,12 @@ const RULE_LABEL: Record<string, string> = {
 export function SimulationPackagePanel({
   jobId,
   sceneRevision,
+  canCreate = true,
   onSceneChanged,
 }: {
   jobId: string;
   sceneRevision: string;
+  canCreate?: boolean;
   onSceneChanged: () => void;
 }) {
   const [result, setResult] = useState<{ revision: string; value: SimulationPackageView | null } | null>(null);
@@ -60,6 +62,7 @@ export function SimulationPackagePanel({
   }, [jobId, sceneRevision]);
 
   async function create() {
+    if (!canCreate) return;
     setBusy(true);
     setError(null);
     try {
@@ -84,15 +87,18 @@ export function SimulationPackagePanel({
         <p className="flex items-center gap-1.5 text-sm font-semibold text-ink">
           <PackageOpen className="size-4" aria-hidden /> Gói mô phỏng Isaac
         </p>
-        <Button size="sm" variant={pkg?.package_ref ? "secondary" : "primary"} disabled={busy} onClick={create}>
-          {busy && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden />}
-          {pkg?.package_ref
-            ? "Kiểm tra lại"
-            : pkg?.export_capability?.status === "blocked"
-              ? "Thử lại xuất USD"
-              : "Tạo gói mô phỏng"}
-        </Button>
+        {canCreate && (
+          <Button size="sm" variant={pkg?.package_ref ? "secondary" : "primary"} disabled={busy} onClick={create}>
+            {busy && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden />}
+            {pkg?.package_ref
+              ? "Kiểm tra lại"
+              : pkg?.export_capability?.status === "blocked"
+                ? "Thử lại xuất USD"
+                : "Tạo gói mô phỏng"}
+          </Button>
+        )}
       </div>
+      {!canCreate && <p className="text-xs text-ink-muted">Chỉ chủ sở hữu Guest, Editor hoặc Reviewer mới được tạo gói cho job này.</p>}
       {error && <p role="alert" className="text-sm text-rust">{error}</p>}
       {!pkg && !error && (
         <p className="text-sm text-ink-muted">

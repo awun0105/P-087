@@ -19,11 +19,13 @@ nhưng `AUTH_GUEST_SIGNUP_ENABLED` đang mặc định `false`; browser gate c�
 còn UNVERIFIED. AUD-21.S3 đã thêm owner guards, immutable job owner và audited
 operator intervention; browser DevTools gate còn UNVERIFIED do Chrome profile lock.
 AUD-22.S2 đã implement quota Guest atomic và enforcement trên các API tạo job/Retry.
-AUD-22.S3 đã thêm quota/reset UI, refresh sau accepted run và stale-tab 429 recovery;
-full local frontend/API checks pass. PostgreSQL multi-process race/restart đang
-pending vì `R2S_TEST_POSTGRES_URL` chưa được cấu hình, còn DevTools visual gate
-UNVERIFIED do Chrome profile lock. Guest rollout vẫn đợi database qualification,
-AUD-21.S4, browser acceptance và AUD-20.S3 seed acceptance.
+AUD-22.S3 đã thêm quota/reset UI, refresh sau accepted run và stale-tab 429 recovery.
+AUD-21.S4 đã áp dụng server capability cho các thao tác Studio và quyền theo
+ownership. Local verification: API 152 pass, frontend 300 pass, typecheck/lint,
+Ruff check/format đều pass. PostgreSQL qualification pending vì
+`R2S_TEST_POSTGRES_URL` chưa được cấu hình; DevTools visual gate **UNVERIFIED** do
+Chrome profile lock. Guest rollout vẫn đợi database qualification, browser
+acceptance và AUD-20.S3 seed acceptance.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -209,8 +211,10 @@ AUD-01–04, AUD-10.S1–S3, AUD-07.S1–S2, AUD-20.S1–S2, AUD-21.S1–S2 và 
 guards; AUD-20.S3 và AUD-21.S2 còn browser acceptance, AUD-20.S3 còn live-seed
 acceptance. AUD-22.S2 code/API acceptance đã hoàn tất trên SQLite; AUD-22.S3 local
 UX/API regression đã hoàn tất. PostgreSQL multi-process qualification và DevTools
-browser acceptance còn pending; quota, AUD-21.S4 và các acceptance gates vẫn cần
-xong trước public Guest rollout.
+browser acceptance còn pending. AUD-21.S4 caller-specific Studio capability/API
+coverage is locally verified (152 API tests, 300 frontend tests, typecheck and
+changed-file lint); browser three-role acceptance, shared-PostgreSQL qualification
+and seed acceptance still block public Guest rollout.
 AUD-15.S1 được làm sớm để AUD-23.S5 có measurement protocol; optimization
 AUD-15.S2–S3 vẫn làm sau quality work.
 AUD-07.S3 làm sau AUD-06/AUD-05 để kiểm tra admission trên consumer thật;
@@ -384,7 +388,9 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [ ] Implementation AUD-19 và held-out independent-map/QA/browser acceptance.
 
 - [x] Implementation AUD-20.S1 identity/seed migration contract and AUD-20.S2 producer/API actor attribution.
-- [ ] AUD-20.S3 browser/seed acceptance; AUD-21.S2 browser gate; AUD-21.S3–S4.
+- [x] AUD-21.S4 local Studio capability/API implementation and UI regression.
+- [ ] AUD-20.S3 browser/seed acceptance; AUD-21.S2/S4 browser gates; AUD-21.S3–S4
+      full browser/API acceptance before opening Guest signup.
 - [x] Implementation AUD-22.S2 durable Guest quota ledger/API enforcement and
       AUD-22.S3 local quota UX; SQLite/API/frontend checks.
 - [ ] AUD-22.S2 shared-PostgreSQL concurrency/restart qualification; AUD-22.S3

@@ -11,6 +11,7 @@ import type { MetricDraft } from "@/features/studio/MetricConfirmView";
 export function StudioTab({
   jobId,
   title,
+  canMutate,
   preview,
   mode,
   geometry,
@@ -24,6 +25,7 @@ export function StudioTab({
 }: {
   jobId: string;
   title: string;
+  canMutate: boolean;
   preview: Preview;
   mode: StudioMode;
   geometry: StageState;
@@ -36,6 +38,16 @@ export function StudioTab({
   metricDraft?: MetricDraft;
   onMetricDraft?: (draft: MetricDraft) => void;
 }) {
+  if (!canMutate) {
+    return (
+      <div className="flex h-full flex-col">
+        <Notice className="m-3">Bạn đang xem scene của người khác. Scene này ở chế độ chỉ xem.</Notice>
+        <div className="min-h-0 flex-1">
+          <PreviewScene contentUrl={preview.url} filename={preview.filename} title={`Viewer 3DGS: ${title}`} />
+        </div>
+      </div>
+    );
+  }
   if (mode === "metric") {
     return (
       <MetricConfirmView jobId={jobId} contentUrl={preview.url} filename={preview.filename} onClose={onMetricClose} onConfirmed={onMetricConfirmed} draft={metricDraft} onDraft={onMetricDraft} />

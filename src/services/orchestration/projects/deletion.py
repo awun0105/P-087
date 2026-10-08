@@ -571,6 +571,15 @@ def _assert_guest_owns_plan(plan: DeletionPlan, guest_owner_user_id: str) -> Non
             raise GuestOwnershipError(f"Guest không thể thay đổi liên kết upload {unlink.upload_id} của tài khoản khác")
 
 
+def guest_owns_deletion_plan(plan: DeletionPlan, guest_owner_user_id: str) -> bool:
+    """Return the same all-resources ownership decision used by restore/delete guards."""
+    try:
+        _assert_guest_owns_plan(plan, guest_owner_user_id)
+    except GuestOwnershipError:
+        return False
+    return True
+
+
 def apply_deletion(
     context: DeletionContext,
     request: DeletionRequest,

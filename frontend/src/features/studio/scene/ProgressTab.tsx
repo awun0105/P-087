@@ -13,8 +13,8 @@ import type { JobProgress } from "@/lib/contracts/studio";
 import { formatBytes } from "@/lib/format";
 
 /** Tiến trình chỉ quản lý trạng thái; viewer mở qua route giai đoạn riêng. */
-export function ProgressTab({ jobId, progress, info, busy, onCancel }: {
-  jobId: string; progress: JobProgress | null; info: SceneInfo | null; busy: boolean; onCancel: () => void;
+export function ProgressTab({ jobId, progress, info, busy, canCancel, onCancel }: {
+  jobId: string; progress: JobProgress | null; info: SceneInfo | null; busy: boolean; canCancel: boolean; onCancel: () => void;
 }) {
   const now = useNow(progress?.status === "RUNNING" || progress?.status === "QUEUED");
   const stale = isJobStale(progress, now);
@@ -22,8 +22,6 @@ export function ProgressTab({ jobId, progress, info, busy, onCancel }: {
     stage_id: stage.stage_id, state: stage.state, error: stage.error, fraction: null,
     seconds: stage.stage_id === "ST-METRIC-CANONICALIZE" ? null : stageSeconds(stage.started_at, stage.completed_at, stage.state === "running" ? now : null),
   })) ?? [];
-  const canCancel = (progress?.status === "RUNNING" || progress?.status === "QUEUED") && progress.waiting_for !== "metric_confirmation";
-
   return <div className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6">
     <div><h2 className="text-xl font-bold tracking-tight">Tiến trình xử lý</h2><p className="mt-1 text-sm text-ink-muted">Chọn giai đoạn đã hoàn tất để mở view kết quả.</p></div>
     <Card className="p-5 sm:p-6">
