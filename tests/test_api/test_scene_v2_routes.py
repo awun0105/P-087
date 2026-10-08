@@ -32,6 +32,98 @@ def _object(body: dict, object_id: str) -> dict:
 
 
 @pytest.mark.asyncio
+async def test_membership_correction_routes_fail_closed_for_legacy_scene(client) -> None:
+    merge = await client.post(
+        f"{_JOB}/scene/corrections/merge",
+        json={
+            "expected_scene_revision": "rev-001",
+            "membership_checksum": "sha256:" + "a" * 64,
+            "primary_object_id": _PALLET,
+            "secondary_object_ids": ["object-second"],
+        },
+    )
+    reassign = await client.post(
+        f"{_JOB}/scene/corrections/reassign",
+        json={
+            "expected_scene_revision": "rev-001",
+            "membership_checksum": "sha256:" + "a" * 64,
+            "region": {"min_xyz_m": [0, 0, 0], "max_xyz_m": [1, 1, 1]},
+            "source_object_id": None,
+            "target_object_id": _PALLET,
+        },
+    )
+
+    assert merge.status_code == 422
+    assert "no persisted Gaussian membership" in merge.json()["detail"]
+    assert reassign.status_code == 422
+    assert "no persisted Gaussian membership" in reassign.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_membership_correction_rejects_stale_revision_before_dispatch(client) -> None:
+    response = await client.post(
+        f"{_JOB}/scene/corrections/merge",
+        json={
+            "expected_scene_revision": "rev-stale",
+            "membership_checksum": "sha256:" + "a" * 64,
+            "primary_object_id": _PALLET,
+            "secondary_object_ids": ["object-second"],
+        },
+    )
+
+    assert response.status_code == 409
+    assert "current SceneIR is rev-001" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_merge_route_publishes_and_returns_canonical_scene_revision(
+    client, isolated_registry, monkeypatch, tmp_path
+) -> None:
+    from src.api.product import scene as scene_api
+    from src.config import Settings
+
+    runtime_python = tmp_path / "runtime-python"
+    runtime_python.touch()
+    monkeypatch.setattr(
+        scene_api.deps,
+        "settings",
+        lambda: Settings(
+            openai_api_key="test-only", product_scene_runtime_python=runtime_python, product_worker_root=tmp_path
+        ),
+    )
+    monkeypatch.setattr(scene_api, "validate_object_membership_command", lambda _scene, _command: object())
+    calls: list[dict[str, object]] = []
+
+    def publish_correction(editor, job_id, command, **kwargs):  # noqa: ANN001, ANN202
+        calls.append(kwargs)
+        current = editor.current(job_id).scene
+        updated = current.model_copy(
+            update={"provenance": {**current.provenance, "membership_correction_test": command.primary_object_id}},
+            deep=True,
+        )
+        return editor.publish_next(job_id, command.expected_scene_revision, updated, "membership_correction_test")
+
+    monkeypatch.setattr(scene_api, "merge_object_candidates", publish_correction)
+
+    response = await client.post(
+        f"{_JOB}/scene/corrections/merge",
+        json={
+            "expected_scene_revision": "rev-001",
+            "membership_checksum": "sha256:" + "a" * 64,
+            "primary_object_id": _PALLET,
+            "secondary_object_ids": ["object-second"],
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["scene_revision"] == "rev-002"
+    assert response.json()["scene"]["provenance"]["membership_correction_test"] == _PALLET
+    assert (await client.get(f"{_JOB}/scene")).json()["scene_revision"] == "rev-002"
+    assert calls[0]["actor_id"] == "local"
+    assert calls[0]["runtime_python"] == runtime_python.resolve()
+
+
+@pytest.mark.asyncio
 async def test_catalog_lists_classes_and_placeable_assets(client) -> None:
     body = (await client.get("/api/v1/scene/catalog")).json()
 

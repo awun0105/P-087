@@ -18,7 +18,7 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type FormEvent, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, useSyncExternalStore } from "react";
 import { subscribeTheme, themeColor, themeKey } from "@/lib/theme";
 
 import { Badge, Button, Notice } from "@/components/studio/primitives";
@@ -37,6 +37,8 @@ import {
   getJobScene,
   getSceneCatalog,
   getStageViews,
+  mergeObjectCandidates,
+  reassignObjectMembership,
   restoreSceneRevision,
   setObjectTransform,
   type ObjectAction,
@@ -59,6 +61,52 @@ function objectVisual(jobId: string, object: SceneObject, previews: ReadonlySet<
 
 function objectColliderTransform(object: SceneObject) {
   return object.collider ? composeColliderTransform(object, object.collider) : object.transform;
+}
+
+type ROIForm = { minX: string; minY: string; minZ: string; maxX: string; maxY: string; maxZ: string };
+
+const EMPTY_ROI: ROIForm = { minX: "", minY: "", minZ: "", maxX: "", maxY: "", maxZ: "" };
+const ROI_FIELDS: { key: keyof ROIForm; label: string }[] = [
+  { key: "minX", label: "X nhỏ nhất (m)" },
+  { key: "maxX", label: "X lớn nhất (m)" },
+  { key: "minY", label: "Y nhỏ nhất (m)" },
+  { key: "maxY", label: "Y lớn nhất (m)" },
+  { key: "minZ", label: "Z nhỏ nhất (m)" },
+  { key: "maxZ", label: "Z lớn nhất (m)" },
+];
+
+function correctionUnavailableReason(scene: SceneIR, object: SceneObject): string | null {
+  const membership = scene.environment.membership;
+  if (!membership) return "Scene này chưa lưu Gaussian membership.";
+  if (!Object.values(membership.label_to_object_id).includes(object.id)) return "Vật không có trong membership hiện tại.";
+  if (object.state !== "CANDIDATE") return "Chỉ hỗ trợ ứng viên chưa xác nhận.";
+  if (object.origin !== "reconstructed" || object.asset_ref) return "Asset hoặc vật thêm tay không được hỗ trợ.";
+  const ownership = object.source_collision;
+  if (!ownership) return "Thiếu ownership collision nguồn.";
+  if (
+    ownership.object_id !== object.id ||
+    ownership.source_geometry_ref.artifact_checksum !== scene.environment.geometry_ref.artifact_checksum ||
+    ownership.source_geometry_ref.artifact_uri !== scene.environment.geometry_ref.artifact_uri ||
+    ownership.extraction_revision !== membership.extraction_revision ||
+    JSON.stringify(ownership.source_transform) !== JSON.stringify(object.transform)
+  ) {
+    return "Pose hoặc ownership collision không còn khớp dữ liệu nguồn.";
+  }
+  const rotation = object.transform.rotation_quaternion_xyzw;
+  if (Math.abs(rotation[0]) > 1e-6 || Math.abs(rotation[1]) > 1e-6 || Math.abs(rotation[2]) > 1e-6 || Math.abs(rotation[3] - 1) > 1e-6) {
+    return "Hiệu chỉnh hiện chỉ hỗ trợ vật chưa xoay.";
+  }
+  return null;
+}
+
+function parseROI(form: ROIForm): { min_xyz_m: [number, number, number]; max_xyz_m: [number, number, number] } | null {
+  const values = [form.minX, form.minY, form.minZ, form.maxX, form.maxY, form.maxZ];
+  if (values.some((value) => value.trim() === "")) return null;
+  const numbers = values.map(Number);
+  if (numbers.some((value) => !Number.isFinite(value) || Math.abs(value) > 1_000_000)) return null;
+  const [minX, minY, minZ, maxX, maxY, maxZ] = numbers;
+  if (minX >= maxX || minY >= maxY || minZ >= maxZ) return null;
+  return { min_xyz_m: [minX, minY, minZ], max_xyz_m: [maxX, maxY, maxZ] };
 }
 
 /** Trạng thái lưu SceneObject cho header scene (STUDIO_UX_SPEC.md Q5: mỗi thao tác là một revision). */
@@ -97,6 +145,14 @@ export function ObjectReviewView({
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  const [correctionPanelOpen, setCorrectionPanelOpen] = useState(false);
+  const [mergeCandidateIds, setMergeCandidateIds] = useState<string[]>([]);
+  const [mergePrimaryId, setMergePrimaryId] = useState("");
+  const [semanticSourceId, setSemanticSourceId] = useState("");
+  const [reassignSourceId, setReassignSourceId] = useState<string | null>(null);
+  const [reassignTargetId, setReassignTargetId] = useState<string | null>(null);
+  const [roi, setRoi] = useState<ROIForm>(EMPTY_ROI);
+  const keepErrorAfterReload = useRef(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [cameras, setCameras] = useState<StageView["cameras"]>([]);
   const [focus, setFocus] = useState<{ id: string; nonce: number } | undefined>();
@@ -110,6 +166,16 @@ export function ObjectReviewView({
   const [placing, setPlacing] = useState<{ label: string; dimensions: [number, number, number]; commit: (point: [number, number, number]) => void } | null>(null);
   const cancelPlacing = useCallback(() => setPlacing(null), []);
   const stale = Boolean(revision && scene && !busy && revision !== scene.scene_revision);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset ephemeral selection state when scene revision changes
+    setMergeCandidateIds([]);
+    setMergePrimaryId("");
+    setSemanticSourceId("");
+    setReassignSourceId(null);
+    setReassignTargetId(null);
+    setRoi(EMPTY_ROI);
+  }, [scene?.scene_revision]);
 
   /** Chọn và cho camera bay tới vật (từ danh sách hoặc nút trong inspector). */
   const flyTo = (id: string) => {
@@ -130,7 +196,9 @@ export function ObjectReviewView({
       if (controller.signal.aborted) return;
       if (result.ok) {
         setScene(result.data.scene);
-        setError(null);
+        if (keepErrorAfterReload.current) keepErrorAfterReload.current = false;
+        else setError(null);
+        setMissing(false);
         onSaveState?.({ status: "saved", revision: result.data.scene.scene_revision });
       } else if (result.error.status === 404) setMissing(true);
       else setError(errorMessage(result.error));
@@ -245,6 +313,10 @@ export function ObjectReviewView({
         ? "Scene đã đổi ở lượt khác. Tải bản mới rồi thao tác lại."
         : errorMessage(cause, "Thao tác thất bại");
       setError(message);
+      if (conflict) {
+        keepErrorAfterReload.current = true;
+        setReload((value) => value + 1);
+      }
       onSaveState?.({
         status: "error",
         revision,
@@ -258,6 +330,25 @@ export function ObjectReviewView({
 
   const act = (object: SceneObject, action: ObjectAction, extra?: ActionExtra) =>
     run((revision) => applyObjectAction(jobId, object.id, action, revision, extra));
+
+  function toggleMergeCandidate(objectId: string) {
+    const nextIds = mergeCandidateIds.includes(objectId)
+      ? mergeCandidateIds.filter((id) => id !== objectId)
+      : [...mergeCandidateIds, objectId];
+    setMergeCandidateIds(nextIds);
+    if (!nextIds.includes(mergePrimaryId)) setMergePrimaryId(nextIds[0] ?? "");
+    setSemanticSourceId("");
+  }
+
+  function cancelCorrectionSelection() {
+    setMergeCandidateIds([]);
+    setMergePrimaryId("");
+    setSemanticSourceId("");
+    setReassignSourceId(null);
+    setReassignTargetId(null);
+    setRoi(EMPTY_ROI);
+    setError(null);
+  }
 
   if (missing) {
     return <Notice className="m-4">Chưa có vật thể: bước tách vật thể chạy sau khi dựng collision xong.</Notice>;
@@ -275,6 +366,38 @@ export function ObjectReviewView({
   }
   const current = scene.objects.find((object) => object.id === selected) ?? null;
   const previous = typeof scene.provenance.edited_from === "string" ? scene.provenance.edited_from : null;
+  const membership = scene.environment.membership ?? null;
+  const candidateCorrections = scene.objects
+    .filter((object) => object.state === "CANDIDATE")
+    .map((object) => ({ object, reason: correctionUnavailableReason(scene, object) }));
+  const eligibleCorrections = candidateCorrections.filter(({ reason }) => reason === null).map(({ object }) => object);
+  const selectedMergeCandidates = eligibleCorrections.filter((object) => mergeCandidateIds.includes(object.id));
+  const mergePrimary = selectedMergeCandidates.find((object) => object.id === mergePrimaryId) ?? null;
+  const mergeSemanticClasses = new Set(selectedMergeCandidates.map((object) => object.semantic_class));
+  const hasSemanticConflict = mergeSemanticClasses.size > 1;
+  const parsedROI = parseROI(roi);
+  const canMerge = Boolean(
+    !busy && membership && selectedMergeCandidates.length >= 2 && mergePrimary &&
+    (!hasSemanticConflict || selectedMergeCandidates.some((object) => object.id === semanticSourceId)),
+  );
+  const canReassign = Boolean(
+    !busy && membership && parsedROI && reassignSourceId !== reassignTargetId && eligibleCorrections.length > 0,
+  );
+
+  const submitReassignment = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!canReassign || !membership || !parsedROI) return;
+    void run((revision) =>
+      reassignObjectMembership(jobId, {
+        expected_scene_revision: revision,
+        membership_checksum: membership.labels_ref.artifact_checksum,
+        region: parsedROI,
+        source_object_id: reassignSourceId,
+        target_object_id: reassignTargetId,
+      }),
+    );
+  };
+
   return (
     <div className="relative size-full overflow-hidden bg-viewport">
       {/* Viewport 3D chiếm toàn bộ không gian khung nhìn */}
@@ -421,6 +544,153 @@ export function ObjectReviewView({
                   </button>
                 ))}
               </div>
+            </div>
+            <div className="border-b border-line-dark px-3 py-2">
+              <button
+                type="button"
+                aria-expanded={correctionPanelOpen}
+                aria-controls="membership-correction-panel"
+                disabled={busy}
+                onClick={() => setCorrectionPanelOpen((open) => !open)}
+                className="flex w-full items-center justify-between rounded px-1 py-1 text-left text-xs font-semibold text-on-dark hover:bg-on-dark/10 disabled:opacity-50"
+              >
+                <span>Sửa nhóm Gaussian</span>
+                <span className="font-normal text-on-dark/60">{membership ? `${eligibleCorrections.length} ứng viên khả dụng` : "chưa có membership"}</span>
+              </button>
+              {correctionPanelOpen && (
+                <div id="membership-correction-panel" className="mt-2 max-h-80 space-y-3 overflow-y-auto rounded-md border border-line-dark bg-viewport-deep/60 p-2 text-xs">
+                  {!membership ? (
+                    <p className="text-on-dark/70" role="status">
+                      Scene này chưa lưu Gaussian membership; hãy chạy tách vật để tạo membership trước khi hiệu chỉnh.
+                    </p>
+                  ) : (
+                    <>
+                      <p className="text-on-dark/70">
+                        Lệnh gắn với revision {scene.scene_revision}. Vùng nhập theo tọa độ canonical world, đơn vị mét.
+                      </p>
+                      <fieldset className="space-y-1.5" disabled={busy}>
+                        <legend className="font-semibold text-on-dark">Ứng viên để gộp</legend>
+                        {candidateCorrections.length === 0 ? (
+                          <p className="text-on-dark/60">Không có ứng viên đang chờ hiệu chỉnh.</p>
+                        ) : (
+                          candidateCorrections.map(({ object, reason }) => (
+                            <div key={object.id}>
+                              <label className={cn("flex items-center gap-2 rounded px-1 py-1", reason ? "text-on-dark/50" : "text-on-dark")}>
+                                <input
+                                  type="checkbox"
+                                  aria-label={`Chọn để gộp ${object.name}`}
+                                  checked={mergeCandidateIds.includes(object.id)}
+                                  disabled={Boolean(reason)}
+                                  title={reason ?? undefined}
+                                  onChange={() => toggleMergeCandidate(object.id)}
+                                  className="accent-ember"
+                                />
+                                <span className="min-w-0 truncate">{object.name}</span>
+                                {object.semantic_class && <span className="ml-auto text-on-dark/50">{object.semantic_class}</span>}
+                              </label>
+                              {reason && <p className="pl-6 text-[11px] text-on-dark/50">{reason}</p>}
+                            </div>
+                          ))
+                        )}
+                      </fieldset>
+                      <label className="block space-y-1 text-on-dark/80">
+                        <span>Ứng viên chính (giữ ID)</span>
+                        <select
+                          aria-label="Ứng viên chính để gộp"
+                          value={mergePrimaryId}
+                          onChange={(event) => setMergePrimaryId(event.target.value)}
+                          disabled={busy || selectedMergeCandidates.length < 2}
+                          className="w-full rounded border border-line-dark bg-viewport-deep px-2 py-1.5 text-on-dark disabled:opacity-50"
+                        >
+                          <option value="">Chọn ứng viên</option>
+                          {selectedMergeCandidates.map((object) => <option key={object.id} value={object.id}>{object.name}</option>)}
+                        </select>
+                      </label>
+                      {hasSemanticConflict && (
+                        <label className="block space-y-1 text-on-dark/80">
+                          <span>Nhãn ngữ nghĩa cần giữ</span>
+                          <select
+                            aria-label="Nguồn nhãn ngữ nghĩa"
+                            value={semanticSourceId}
+                            onChange={(event) => setSemanticSourceId(event.target.value)}
+                            disabled={busy}
+                            className="w-full rounded border border-line-dark bg-viewport-deep px-2 py-1.5 text-on-dark"
+                          >
+                            <option value="">Chọn nhãn từ ứng viên</option>
+                            {selectedMergeCandidates.map((object) => <option key={object.id} value={object.id}>{object.name} · {object.semantic_class ?? "chưa gán nhãn"}</option>)}
+                          </select>
+                        </label>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={!canMerge}
+                          onClick={() => {
+                            if (!membership || !mergePrimaryId) return;
+                            void run((revision) => mergeObjectCandidates(jobId, {
+                              expected_scene_revision: revision,
+                              membership_checksum: membership.labels_ref.artifact_checksum,
+                              primary_object_id: mergePrimaryId,
+                              secondary_object_ids: selectedMergeCandidates.filter((object) => object.id !== mergePrimaryId).map((object) => object.id),
+                              ...(hasSemanticConflict ? { semantic_class_source_object_id: semanticSourceId } : {}),
+                            }));
+                          }}
+                        >
+                          Gộp ứng viên
+                        </Button>
+                        <Button size="sm" variant="ghost" disabled={busy} onClick={cancelCorrectionSelection}>
+                          Hủy chọn
+                        </Button>
+                      </div>
+
+                      <form onSubmit={submitReassignment} className="space-y-2 border-t border-line-dark pt-3">
+                        <h3 className="font-semibold text-on-dark">Chuyển vùng giữa các chủ sở hữu</h3>
+                        <p className="text-[11px] leading-relaxed text-on-dark/60">
+                          Nhập hộp giới hạn theo dữ liệu nguồn. Pose đã chỉnh trong viewer không được dùng để chọn Gaussian.
+                        </p>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <label className="space-y-1 text-on-dark/70">
+                            <span>Nguồn</span>
+                            <select aria-label="Chủ sở hữu nguồn" value={reassignSourceId ?? ""} onChange={(event) => setReassignSourceId(event.target.value || null)} disabled={busy} className="w-full rounded border border-line-dark bg-viewport-deep px-1.5 py-1 text-on-dark">
+                              <option value="">Nền (background)</option>
+                              {eligibleCorrections.map((object) => <option key={object.id} value={object.id}>{object.name}</option>)}
+                            </select>
+                          </label>
+                          <label className="space-y-1 text-on-dark/70">
+                            <span>Đích</span>
+                            <select aria-label="Chủ sở hữu đích" value={reassignTargetId ?? ""} onChange={(event) => setReassignTargetId(event.target.value || null)} disabled={busy} className="w-full rounded border border-line-dark bg-viewport-deep px-1.5 py-1 text-on-dark">
+                              <option value="">Nền (background)</option>
+                              {eligibleCorrections.map((object) => <option key={object.id} value={object.id}>{object.name}</option>)}
+                            </select>
+                          </label>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {ROI_FIELDS.map((field) => (
+                            <label key={field.key} className="space-y-1 text-on-dark/70">
+                              <span>{field.label}</span>
+                              <input
+                                type="number"
+                                step="any"
+                                aria-label={field.label}
+                                value={roi[field.key]}
+                                onChange={(event) => setRoi((currentROI) => ({ ...currentROI, [field.key]: event.target.value }))}
+                                disabled={busy}
+                                className="w-full rounded border border-line-dark bg-viewport-deep px-1.5 py-1 text-on-dark"
+                              />
+                            </label>
+                          ))}
+                        </div>
+                        {!parsedROI && <p className="text-[11px] text-on-dark/55">Nhập đủ 6 giới hạn; mỗi giới hạn nhỏ phải thấp hơn giới hạn lớn.</p>}
+                        {busy && <p className="text-on-dark/70" role="status">Đang dựng và lưu artifact mới…</p>}
+                        <Button size="sm" variant="secondary" type="submit" disabled={!canReassign}>
+                          Chuyển vùng Gaussian
+                        </Button>
+                      </form>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
             <ul className="min-h-0 flex-1 divide-y divide-line-dark overflow-y-auto">
               {visibleObjects.length === 0 && (

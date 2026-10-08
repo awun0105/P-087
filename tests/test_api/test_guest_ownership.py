@@ -129,6 +129,39 @@ async def test_guest_direct_scene_edit_rejects_foreign_job_before_revision_write
 
 
 @pytest.mark.asyncio
+async def test_guest_membership_correction_rejects_foreign_job_before_scene_read(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = _user("guest")
+    owner_lookups: list[str] = []
+
+    class Registry:
+        def get_job_owner_user_id(self, job_id: str) -> str:
+            owner_lookups.append(job_id)
+            return "user-someone-else"
+
+    original_overrides = app.dependency_overrides.copy()
+    app.dependency_overrides[auth_api.require_contributor] = lambda: user
+    monkeypatch.setattr(scene_api.deps, "registry", Registry)
+    try:
+        response = await client.post(
+            "/api/v1/jobs/job-foreign/scene/corrections/merge",
+            json={
+                "expected_scene_revision": "rev-001",
+                "membership_checksum": "sha256:" + "a" * 64,
+                "primary_object_id": "candidate-001",
+                "secondary_object_ids": ["candidate-002"],
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(original_overrides)
+
+    assert response.status_code == 403
+    assert owner_lookups == ["job-foreign"]
+
+
+@pytest.mark.asyncio
 async def test_guest_can_edit_own_scene_when_daily_run_quota_is_exhausted(
     client: AsyncClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

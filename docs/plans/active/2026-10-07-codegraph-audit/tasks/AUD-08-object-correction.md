@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- IN PROGRESS — AUD-08.S1–S3 locally complete; S4 remains planned; P1; EX-SCENE domain, EX-PRODUCT commands/UI.
+- IN PROGRESS — AUD-08.S1–S4 local implementation complete; browser/Isaac acceptance remains unverified; P1; EX-SCENE domain, EX-PRODUCT commands/UI.
 - Canonical SCENE-03/06/07/08, PRODUCT-06/07. REUSE gaussian_split/association;
   SELF-CODE revision-bound commands và ownership update.
 - Goal: sửa segmentation/grouping trước confirmation, tạo artifact đồng bộ
@@ -136,8 +136,9 @@ show unsupported/missing-membership reason. Wire actual domain commands, không
 local visual merge only. Candidate confirm → export → validation dùng regenerated refs.
 Tests: Vitest interaction/typed payload/failure rollback, browser selection/keyboard/
 cancel/error, API permission/stale calls, exported object/collider correspondence.
-**Exit:** [ ] user action changes canonical artifact; [ ] downstream preflight/export pass;
-[ ] browser/Isaac coverage ghi riêng.
+**Exit:** [x] API action publishes a new canonical SceneIR revision; [x] domain
+consumer preflight/export regressions pass; [x] browser/Isaac coverage ghi riêng
+(both remain explicitly **UNVERIFIED**).
 
 ## Verification và DoD
 
@@ -151,6 +152,50 @@ Frontend verification uses `tests/layers.test.ts`,
 artifacts → revision → consumer proof, không chỉ unit merge helper.
 
 ## Result / Evidence
+
+### AUD-08.S4 — API/UI command wiring and canonical handoff
+
+- **Base:** `e5b5ea6` (`AUD-08.S3`).
+- **Behavior before → after:** merge/reassign had domain operations but no Studio
+  command path. The API now exposes revision- and membership-checksum-bound merge
+  and reassign routes, checks job ownership and candidate eligibility, applies the
+  existing GPU quota/audit accounting, dispatches the domain command, and returns
+  the newly published SceneIR. `ObjectReviewView` now supports candidate
+  multi-select/primary selection, explicit semantic source, bounded world-space
+  ROI transfer, clear rejection reasons, pending/error state, staged-selection
+  cancellation, and canonical reload after a 409. It does not optimistically
+  change scene truth. The frontend `SceneEditResponse` now matches the backend
+  response contract and no longer requires a `visual` field the API does not send.
+- **Conflict and recovery:** Guest foreign-job correction is rejected before
+  reading the scene. Unsupported or legacy scenes fail closed; stale revisions
+  return 409 and trigger a canonical scene reload with the conflict message kept
+  visible. The API route test verifies revision publication through the real
+  `SceneEditor.publish_next`; its domain worker is stubbed, while the separate
+  S2/S3 domain tests exercise regenerated outputs and downstream collision
+  consumers. These are layered local checks, not a real runtime end-to-end run.
+- **Files:** `src/api/product/scene.py`, `frontend/src/features/studio/ObjectReviewView.tsx`,
+  `frontend/src/lib/api/studio.ts`, `frontend/src/lib/contracts/api.ts`,
+  `tests/test_api/test_scene_v2_routes.py`,
+  `tests/test_api/test_guest_ownership.py`,
+  `frontend/tests/object-review.test.tsx`, and this task/plan progress entry.
+- **Verification:**
+  - `.venv/bin/pytest tests/test_api/test_scene_v2_routes.py tests/test_api/test_guest_ownership.py -q` — **50 passed**.
+  - `.venv/bin/pytest tests/test_scene/test_object_correction.py tests/test_scene/test_object_membership.py tests/test_scene/test_gaussian_split.py tests/test_scene/test_editing_review.py tests/test_orchestration/test_scene_editor.py tests/test_orchestration/test_simulation_package.py tests/test_simulation/test_collision_edit_composition.py -q` — **103 passed**.
+  - `npx vitest run tests/layers.test.ts tests/object-review.test.tsx tests/scene-physics.test.ts tests/ux-scene-flow.test.tsx` — **71 passed**.
+  - `npx eslint src/features/studio/ObjectReviewView.tsx src/lib/api/studio.ts src/lib/contracts/api.ts tests/object-review.test.tsx` and `npm run typecheck` — **passed**.
+  - `.venv/bin/ruff check src/ tests/` — **passed**; `.venv/bin/ruff format --check src/ tests/` — **504 files already formatted**; `.venv/bin/python scripts/check_contract_mirror.py` — **PASS**, 5 enum and 5 model projections.
+- **CodeGraph gate:** explored API route callers, auth/ownership checks, request and
+  response contracts, ObjectReviewView and its API helpers before editing. Current
+  `codegraph status`: 832 files, 16,177 nodes, 47,262 edges; index reports up to
+  date, with a warning that it was built by an earlier engine and can be rebuilt
+  to pick up engine improvements.
+- **Limitations:** correction routes execute synchronously. S4 does not add
+  in-flight job status or worker cancellation; “Hủy chọn” clears only the staged
+  UI selection and does not stop a submitted operation. Chrome DevTools reached
+  the local login page but no authenticated Studio session was available, so the
+  browser interaction gate is **UNVERIFIED**. Real GPU/COACD/inpaint/SOG behavior
+  and Isaac export/simulation are also **UNVERIFIED**; route integration uses a
+  stubbed domain worker and domain tests use synthetic artifacts/fake runners.
 
 ### AUD-08.S3 — Reassign region ownership
 

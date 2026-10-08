@@ -412,7 +412,6 @@ export interface SceneEditResponse {
   scene_uri: string;
   scene_checksum: string;
   scene: SceneIR;
-  visual: VisualBinding;
 }
 
 /** `src/models/contracts/validation.py` ValidationCheck / PathResult. */

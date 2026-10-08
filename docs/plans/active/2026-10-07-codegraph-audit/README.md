@@ -54,12 +54,14 @@ focused), typecheck, changed-file ESLint, isolated Next.js Webpack build (16 rou
 54 backend tests và Ruff pass. Chrome DevTools MCP hiện không có phiên Studio đăng nhập;
 browser flow được ghi **UNVERIFIED**. Browser codec/runtime, actual bandwidth,
 held-out quality and paired-sensor reconstruction remain S5 acceptance gates.
-AUD-08.S1–S3 now persist revision/source-bound Gaussian membership, merge and
-reassign candidates with regenerated visual/collider/background artifacts, and
-preserve exclusive source collision ownership through simulation packaging.
-S4 API/UI command wiring remains open. Real COACD/GPU/Isaac
-qualification and the browser gate are **UNVERIFIED**; the connected DevTools MCP
-has no logged-in Studio session.
+AUD-08.S1–S4 now persist revision/source-bound Gaussian membership, regenerate
+artifacts on merge/reassign, preserve exclusive source collision ownership, and
+wire revision-bound API/UI commands to canonical SceneIR publication. Focused API,
+domain-consumer, and frontend regressions pass. Correction routes run synchronously;
+there is no in-flight status/cancel operation, and “Hủy chọn” clears staged UI
+selection only. Real runtime COACD/GPU/inpaint/SOG and Isaac qualification are
+**UNVERIFIED**. Chrome DevTools reached the local login page, but no authenticated
+Studio session was available, so browser acceptance is **UNVERIFIED**.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -418,7 +420,8 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [x] Implementation AUD-10 và AUD-07.S1–S2.
 - [ ] Implementation AUD-06 và AUD-07.S3.
 - [ ] Implementation AUD-05 và real Isaac acceptance.
-- [ ] Implementation AUD-08–09 và browser acceptance.
+- [x] Local implementation AUD-08.S1–S4; focused API/domain/frontend regressions.
+- [ ] AUD-08 browser/Isaac acceptance và AUD-09.S1–S3 implementation.
 - [ ] Implementation AUD-12–14 và held-out collision/LiDAR/floor acceptance.
 - [ ] Implementation AUD-15–16 và real latency/preview/browser acceptance.
 - [ ] Implementation AUD-17–18 và qualified opt-in runtime/QA acceptance.

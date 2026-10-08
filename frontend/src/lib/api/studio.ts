@@ -7,7 +7,12 @@ import { ApiError, apiFetch, apiUrl, fetchApi, type ApiResult } from "@/lib/api/
 import { clearDirectUploadResume, directUpload, xhrPutPart } from "@/lib/api/directUpload";
 import { verifyVideoPreparationChecksum } from "@/lib/contracts/videoPreparation";
 import type { VideoPreparedArtifact } from "@/lib/media/video-normalization";
-import type { SceneEditResponse, SceneResponse } from "@/lib/contracts/api";
+import type {
+  ObjectMembershipMergeCommand,
+  ObjectMembershipReassignCommand,
+  SceneEditResponse,
+  SceneResponse,
+} from "@/lib/contracts/api";
 import {
   parseDemoManifest,
   parseDemoState,
@@ -515,6 +520,25 @@ export function applyObjectAction(
     `${API}/jobs/${encodeURIComponent(jobId)}/scene/objects/${encodeURIComponent(objectId)}/${action}`,
     { method: "POST", body: JSON.stringify({ expected_scene_revision: expectedRevision, ...extra }) },
   );
+}
+
+/** Merge persisted Gaussian ownership and return the canonical regenerated scene revision. */
+export function mergeObjectCandidates(jobId: string, command: ObjectMembershipMergeCommand): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/corrections/merge`, {
+    method: "POST",
+    body: JSON.stringify(command),
+  });
+}
+
+/** Reassign a bounded source-frame ROI and return the canonical regenerated scene revision. */
+export function reassignObjectMembership(
+  jobId: string,
+  command: ObjectMembershipReassignCommand,
+): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/corrections/reassign`, {
+    method: "POST",
+    body: JSON.stringify(command),
+  });
 }
 
 /** Thêm vật cản hộp; `center` là tâm hộp theo mét trong khung world (sàn z = 0). */

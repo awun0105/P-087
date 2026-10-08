@@ -3,7 +3,7 @@
  * thị revision backend trả về. Canvas 3D được thay bằng stub (jsdom không có WebGL).
  */
 
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ObjectReviewView, type SaveState } from "@/features/studio/ObjectReviewView";
@@ -118,6 +118,53 @@ function scene(
   };
 }
 
+function membershipScene(revision = "rev-001") {
+  const result = scene(revision, "CANDIDATE") as ReturnType<typeof scene> & { environment: Record<string, unknown> };
+  const first = result.objects[0] as Record<string, unknown>;
+  const sourceGeometry = result.environment.geometry_ref;
+  const addOwnership = (object: Record<string, unknown>) => ({
+    ...object,
+    source_collision: {
+      schema_version: "1.0",
+      object_id: object.id,
+      source_geometry_ref: sourceGeometry,
+      extraction_revision: "extract-001",
+      source_transform: object.transform,
+      region_kind: "source_obb",
+      source_obb_dimensions_xyz_m: [1, 0.8, 0.6],
+    },
+  });
+  const firstCandidate = addOwnership({ ...first, semantic_class: "box" });
+  const secondCandidate = addOwnership({
+    ...first,
+    id: "candidate-002",
+    name: "Vật thể 2",
+    local_frame: "candidate-002",
+    semantic_class: "pallet",
+    transform: first.transform,
+  });
+  return {
+    ...result,
+    environment: {
+      ...result.environment,
+      membership: {
+        artifact_type: "ObjectMembershipArtifact",
+        schema_version: "1.0",
+        source_visual_ref: ref,
+        source_geometry_ref: sourceGeometry,
+        extraction_revision: "extract-001",
+        coordinate_system: { unit: "meter", up_axis: "Z", handedness: "right", world_frame: "world" },
+        gaussian_count: 200,
+        labels_ref: { ...ref, artifact_type: "GaussianMembershipLabels", artifact_checksum: `sha256:${"b".repeat(64)}` },
+        labels_encoding: "little-endian-int32",
+        background_label: -1,
+        label_to_object_id: { "0": "candidate-001", "1": "candidate-002" },
+      },
+    },
+    objects: [firstCandidate, secondCandidate],
+  };
+}
+
 function reply(body: unknown, status = 200): Response {
   return { ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) } as Response;
 }
@@ -188,6 +235,94 @@ describe("ObjectReviewView", () => {
     expect(JSON.parse((init as RequestInit).body as string).expected_scene_revision).toBe("rev-001");
   });
 
+  it("gộp nhiều ứng viên bằng membership checksum và semantic source đã chọn", async () => {
+    routeFetch({
+      "/scene/corrections/merge": [reply({ scene: membershipScene("rev-002") })],
+      "/scene": [reply({ scene: membershipScene() })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    await screen.findByText("2 vật thể · 2 chờ xác nhận");
+    fireEvent.click(screen.getByRole("button", { name: /Sửa nhóm Gaussian/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Chọn để gộp Vật thể 1" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Chọn để gộp Vật thể 2" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Ứng viên chính để gộp" }), { target: { value: "candidate-001" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Nguồn nhãn ngữ nghĩa" }), { target: { value: "candidate-002" } });
+    fireEvent.click(screen.getByRole("button", { name: "Gộp ứng viên" }));
+
+    await waitFor(() => expect(calls("/scene/corrections/merge")).toHaveLength(1));
+    const [, init] = calls("/scene/corrections/merge")[0];
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      expected_scene_revision: "rev-001",
+      membership_checksum: `sha256:${"b".repeat(64)}`,
+      primary_object_id: "candidate-001",
+      secondary_object_ids: ["candidate-002"],
+      semantic_class_source_object_id: "candidate-002",
+    });
+    expect(await screen.findByText(/Lệnh gắn với revision rev-002/)).toBeInTheDocument();
+  });
+
+  it("reassign ROI gửi bounds canonical theo mét và reload scene mới", async () => {
+    routeFetch({
+      "/scene/corrections/reassign": [reply({ scene: membershipScene("rev-002") })],
+      "/scene": [reply({ scene: membershipScene() })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    await screen.findByText("2 vật thể · 2 chờ xác nhận");
+    fireEvent.click(screen.getByRole("button", { name: /Sửa nhóm Gaussian/ }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Chủ sở hữu nguồn" }), { target: { value: "candidate-001" } });
+    fireEvent.change(screen.getByLabelText("X nhỏ nhất (m)"), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText("X lớn nhất (m)"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Y nhỏ nhất (m)"), { target: { value: "-1" } });
+    fireEvent.change(screen.getByLabelText("Y lớn nhất (m)"), { target: { value: "3" } });
+    fireEvent.change(screen.getByLabelText("Z nhỏ nhất (m)"), { target: { value: "0.1" } });
+    fireEvent.change(screen.getByLabelText("Z lớn nhất (m)"), { target: { value: "1.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Chuyển vùng Gaussian" }));
+
+    await waitFor(() => expect(calls("/scene/corrections/reassign")).toHaveLength(1));
+    const [, init] = calls("/scene/corrections/reassign")[0];
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      expected_scene_revision: "rev-001",
+      membership_checksum: `sha256:${"b".repeat(64)}`,
+      region: { min_xyz_m: [0, -1, 0.1], max_xyz_m: [2, 3, 1.5] },
+      source_object_id: "candidate-001",
+      target_object_id: null,
+    });
+    expect(await screen.findByText(/Lệnh gắn với revision rev-002/)).toBeInTheDocument();
+  });
+
+  it("hủy selection và giữ canonical scene sau conflict 409", async () => {
+    routeFetch({
+      "/scene/corrections/merge": [reply({ detail: "stale scene" }, 409)],
+      "/scene": [reply({ scene: membershipScene() }), reply({ scene: membershipScene() })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    await screen.findByText("2 vật thể · 2 chờ xác nhận");
+    fireEvent.click(screen.getByRole("button", { name: /Sửa nhóm Gaussian/ }));
+    const firstCandidate = screen.getByRole("checkbox", { name: "Chọn để gộp Vật thể 1" });
+    fireEvent.click(firstCandidate);
+    expect(firstCandidate).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Hủy chọn" }));
+    expect(firstCandidate).not.toBeChecked();
+
+    fireEvent.click(firstCandidate);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Chọn để gộp Vật thể 2" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Nguồn nhãn ngữ nghĩa" }), { target: { value: "candidate-001" } });
+    fireEvent.click(screen.getByRole("button", { name: "Gộp ứng viên" }));
+
+    expect(await screen.findByText(/Scene đã đổi ở lượt khác/)).toBeInTheDocument();
+    expect(screen.getByText(/Lệnh gắn với revision rev-001/)).toBeInTheDocument();
+    expect(calls("/scene").filter(([url]) => String(url).endsWith("/scene"))).toHaveLength(2);
+  });
+
+  it("nói rõ khi scene cũ chưa có membership và khóa correction commands", async () => {
+    routeFetch({ "/scene": [reply({ scene: scene("rev-001", "CANDIDATE") })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    await screen.findByText("1 vật thể · 1 chờ xác nhận");
+    fireEvent.click(screen.getByRole("button", { name: /Sửa nhóm Gaussian/ }));
+    expect(await screen.findByText(/chưa lưu Gaussian membership/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Gộp ứng viên" })).toBeNull();
+  });
+
   it("ẩn ứng viên đã loại trừ khi bật hiển thị", async () => {
     routeFetch({ "/scene": [reply({ scene: scene("rev-003", "CANDIDATE", "IGNORED") })] });
     render(<ObjectReviewView jobId="job-a" />);
@@ -221,18 +356,18 @@ describe("ObjectReviewView", () => {
     expect(JSON.parse((init as RequestInit).body as string)).toMatchObject({ expected_scene_revision: "rev-001", name: "Pallet A" });
   });
 
-  it("409 (scene đổi ở lượt khác): báo lỗi lưu, thử lại là tải bản mới", async () => {
+  it("409 (scene đổi ở lượt khác): tự tải bản mới và giữ thông báo xung đột", async () => {
     routeFetch({
       "/objects/candidate-001/confirm": [reply({ detail: "scene đã đổi" }, 409)],
       "/scene": [reply({ scene: scene("rev-001", "CANDIDATE") }), reply({ scene: scene("rev-004", "CANDIDATE") })],
     });
     let last: SaveState | null = null;
-    render(<ObjectReviewView jobId="job-a" onSaveState={(state) => (last = state)} />);
+    const states: SaveState[] = [];
+    render(<ObjectReviewView jobId="job-a" onSaveState={(state) => { last = state; states.push(state); }} />);
     fireEvent.click(await screen.findByRole("button", { name: "Xác nhận Vật thể 1" }));
     expect(await screen.findByText(/Scene đã đổi ở lượt khác/)).toBeInTheDocument();
-    expect(last).toMatchObject({ status: "error", revision: "rev-001" });
-    act(() => (last as unknown as { retry: () => void }).retry());
     await waitFor(() => expect(last).toMatchObject({ status: "saved", revision: "rev-004" }));
+    expect(states.some((state) => state.status === "error" && state.revision === "rev-001")).toBe(true);
   });
 
   it("scene theo vật: Gaussian riêng của vật tới viewer; vật đã xoá không vẽ; gizmo theo công cụ đang chọn", async () => {
