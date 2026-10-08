@@ -81,7 +81,7 @@ def test_retry_succeeds_on_third_attempt_with_separate_workspaces(world, monkeyp
     registry, job, bundle, settings = world
     seen: list[str] = []
 
-    def flaky(_registry, _job, _bundle, _settings, workspace, _publish):  # noqa: ANN001, ANN202
+    def flaky(_registry, _job, _bundle, _settings, workspace, _publish, **_kwargs):  # noqa: ANN001, ANN202
         seen.append(workspace.name)
         if len(seen) < 3:
             raise ObjectifyError("hết VRAM")
@@ -97,7 +97,7 @@ def test_retry_gives_up_after_configured_attempts(world, monkeypatch, tmp_path) 
     registry, job, bundle, settings = world
     calls: list[int] = []
 
-    def fail(*_: object) -> None:
+    def fail(*_: object, **__: object) -> None:
         calls.append(1)
         raise ObjectifyError("hết VRAM")
 
@@ -627,7 +627,9 @@ def test_reobjectify_binds_source_collision_ownership_to_the_new_objects(world, 
     monkeypatch.setattr(
         scene_objectify,
         "objectify_with_retry",
-        lambda *_: scene_objectify.ObjectifyResult(first.environment, [replaced], {"object_extraction": "sampro3d"}),
+        lambda *_, **__: scene_objectify.ObjectifyResult(
+            first.environment, [replaced], {"object_extraction": "sampro3d"}
+        ),
     )
 
     revision = scene_objectify.reobjectify(

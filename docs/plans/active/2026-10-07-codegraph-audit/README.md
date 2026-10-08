@@ -54,6 +54,9 @@ focused), typecheck, changed-file ESLint, isolated Next.js Webpack build (16 rou
 54 backend tests và Ruff pass. Chrome DevTools MCP hiện không có phiên Studio đăng nhập;
 browser flow được ghi **UNVERIFIED**. Browser codec/runtime, actual bandwidth,
 held-out quality and paired-sensor reconstruction remain S5 acceptance gates.
+AUD-08.S1 now persists versioned Gaussian membership labels and validates
+revision/source-bound correction commands; focused local checks pass. AUD-08.S2–S4
+remain open, and a real SAM2/3DGS/GPU producer run is still unverified.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 

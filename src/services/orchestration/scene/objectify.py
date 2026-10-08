@@ -25,8 +25,9 @@ import trimesh
 
 from src.config import Settings
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
-from src.models.contracts.coordinates import Transform
+from src.models.contracts.coordinates import CoordinateSystem, Transform
 from src.models.contracts.manifests import JobManifest, StageId
+from src.models.contracts.object_membership import ObjectMembershipArtifact
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.models.contracts.scene import (
     ColliderSpec,
@@ -43,6 +44,10 @@ from src.services.process_control import ProcessCancelledError, ProcessTimeoutEr
 from src.services.reconstruction import camera_views, metric_visual_master, package_splat
 from src.services.scene.collision_ownership import bind_source_collision_ownership
 from src.services.scene.decomposition import gaussian_split
+from src.services.scene.editing.membership import (
+    encode_gaussian_membership_labels,
+    membership_labels_for_parts,
+)
 from src.services.scene.geometric import GeometricConfig, box_from_points
 from src.services.scene.sampro3d.consolidate import Sampro3dConfig, segment
 from src.services.scene.sampro3d.pipeline import CameraFrame, Sam2Runtime, run_sam2
@@ -170,6 +175,7 @@ def objectify(
     workspace: Path,
     publish: Publish,
     *,
+    extraction_revision: str = "rev-001",
     cancel_event: Event | None = None,
 ) -> ObjectifyResult:
     """Chạy toàn bộ chặng 4–7 cho một bundle hệ mét; publish artifact và trả phần SceneIR."""
@@ -183,7 +189,8 @@ def objectify(
     timeout = settings.product_scene_timeout_seconds
     workspace.mkdir(parents=True, exist_ok=True)
 
-    master = resolve(metric_visual_master(bundle, resolve))
+    source_visual_ref = metric_visual_master(bundle, resolve)
+    master = resolve(source_visual_ref)
     rows = gaussian_split.read_gaussian_ply(master.read_bytes())
     views = camera_views(bundle.camera_pose_refs[0], bundle.rgb_frame_refs, resolve)
     frames = [
@@ -281,6 +288,32 @@ def objectify(
         raise ObjectifyError(f"nén SOG nền lỗi: {error}") from error
 
     job_id = job.job_id
+    label_to_object_id = {str(part.index): f"candidate-{number:03d}" for number, part in enumerate(parts, start=1)}
+    membership_labels = membership_labels_for_parts(labels, [part.index for part in parts])
+    membership_payload = encode_gaussian_membership_labels(
+        membership_labels,
+        gaussian_count=len(rows),
+        label_to_object_id=label_to_object_id,
+    )
+    membership_labels_ref = publish(
+        _reference(
+            job_id,
+            "objects/membership/{digest}.i32le",
+            "ObjectMembershipLabels",
+            StageId.SCENE_DECOMPOSE,
+            membership_payload,
+        ),
+        membership_payload,
+    )
+    membership = ObjectMembershipArtifact(
+        source_visual_ref=source_visual_ref,
+        source_geometry_ref=bundle.canonical_geometry_ref,
+        extraction_revision=extraction_revision,
+        coordinate_system=CoordinateSystem(),
+        gaussian_count=len(rows),
+        labels_ref=membership_labels_ref,
+        label_to_object_id=label_to_object_id,
+    )
     _ensure_not_cancelled(cancel_event)
     background_payload = (workspace / "background_inpainted.ply").read_bytes()
     master_ref = publish(
@@ -372,7 +405,10 @@ def objectify(
         "lift_views": int(lift["views"]),
     }
     environment = SceneEnvironment(
-        visual_ref=visual_ref, geometry_ref=bundle.canonical_geometry_ref, visual_master_ref=master_ref
+        visual_ref=visual_ref,
+        geometry_ref=bundle.canonical_geometry_ref,
+        visual_master_ref=master_ref,
+        membership=membership,
     )
     return ObjectifyResult(environment=environment, objects=objects, provenance=provenance)
 
@@ -385,6 +421,7 @@ def objectify_with_retry(
     workspace: Path,
     publish: Publish,
     *,
+    extraction_revision: str = "rev-001",
     cancel_event: Event | None = None,
 ) -> ObjectifyResult:
     """Thử `objectify` tối đa `product_objectify_attempts` lần, mỗi lần một workspace riêng (giữ log từng lần).
@@ -397,7 +434,16 @@ def objectify_with_retry(
     for number in range(1, attempts + 1):
         try:
             arguments = {"cancel_event": cancel_event} if cancel_event is not None else {}
-            return objectify(registry, job, bundle, settings, workspace / f"attempt-{number}", publish, **arguments)
+            return objectify(
+                registry,
+                job,
+                bundle,
+                settings,
+                workspace / f"attempt-{number}",
+                publish,
+                extraction_revision=extraction_revision,
+                **arguments,
+            )
         except ProcessCancelledError:
             raise
         except (ObjectifyError, ValueError, OSError) as error:
@@ -444,7 +490,16 @@ def reobjectify(
         return store.publish(reference, payload)
 
     arguments = {"cancel_event": cancel_event} if cancel_event is not None else {}
-    result = objectify_with_retry(registry, job, bundle, settings, workspace, publish, **arguments)
+    result = objectify_with_retry(
+        registry,
+        job,
+        bundle,
+        settings,
+        workspace,
+        publish,
+        extraction_revision=expected_revision,
+        **arguments,
+    )
     # The new candidates replace the old set, so they own regions of the collision mesh just like extraction's.
     objects = bind_source_collision_ownership(result.objects, result.environment.geometry_ref, expected_revision)
     updated = base_scene.model_copy(

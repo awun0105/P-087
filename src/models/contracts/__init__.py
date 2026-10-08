@@ -58,6 +58,12 @@ from src.models.contracts.manifests import (
     StageId,
     StageStatus,
 )
+from src.models.contracts.object_membership import (
+    ObjectMembershipArtifact,
+    ObjectMembershipMergeCommand,
+    ObjectMembershipReassignCommand,
+    SourceGaussianROI,
+)
 from src.models.contracts.reconstruction import (
     AlignmentRecord,
     CapsuleFootprint,
@@ -135,6 +141,10 @@ __all__ = [
     "ExecutionError",
     "InputConfiguration",
     "InputManifest",
+    "ObjectMembershipArtifact",
+    "ObjectMembershipMergeCommand",
+    "ObjectMembershipReassignCommand",
+    "SourceGaussianROI",
     "JobManifest",
     "JobStatus",
     "GeometryArtifact",

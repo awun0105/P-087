@@ -195,6 +195,16 @@ class SceneEditor:
             references.append(scene.environment.collider_ref)
         if scene.environment.visual_ref is not None:
             references.append(scene.environment.visual_ref)
+        if scene.environment.visual_master_ref is not None:
+            references.append(scene.environment.visual_master_ref)
+        if scene.environment.membership is not None:
+            for reference in (
+                scene.environment.membership.source_visual_ref,
+                scene.environment.membership.source_geometry_ref,
+                scene.environment.membership.labels_ref,
+            ):
+                if reference not in references:
+                    references.append(reference)
         for item in scene.objects:
             references.append(item.geometry_ref)
             # Scene theo vật (pipeline v2): Gaussian riêng của từng vật cho viewer.

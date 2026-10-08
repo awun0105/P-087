@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- PLANNED; P1; EX-SCENE domain, EX-PRODUCT commands/UI.
+- IN PROGRESS — AUD-08.S1 locally complete; S2–S4 remain planned; P1; EX-SCENE domain, EX-PRODUCT commands/UI.
 - Canonical SCENE-03/06/07/08, PRODUCT-06/07. REUSE gaussian_split/association;
   SELF-CODE revision-bound commands và ownership update.
 - Goal: sửa segmentation/grouping trước confirmation, tạo artifact đồng bộ
@@ -80,7 +80,8 @@ split; source provenance consumer; DTO/parser và producer/consumer fixtures.
 Guard transformed/confirmed/asset candidates trong initial scope.
 Tests: source checksum mismatch, duplicate owners, invalid index/count/labels,
 stale revision, missing source refs, NaN ROI, floor/background selection semantics.
-**Exit:** [ ] source/membership roundtrip; [ ] unsupported correction rejected.
+**Exit:** [x] source/membership roundtrip (including small-object fallback);
+[x] unsupported correction rejected by revision, checksum, source identity, and candidate guards.
 
 ## Sprint AUD-08.S2 — Merge domain và regenerate artifacts
 
@@ -141,5 +142,52 @@ membership → command → artifacts → revision → consumer proof, không ch�
 
 ## Result / Evidence
 
-Pending — source/membership checksums, before/after ownership counts, refs,
-stale/corruption negatives và browser proof theo từng sprint.
+### AUD-08.S1 — Persist membership và validate correction commands
+
+- **Base:** `d0571eb` (`AUD-24.S4`).
+- **Behavior before → after:** objectify published per-object/background outputs but
+  discarded the row-level label map, and correction DTOs had no server-side
+  revision/source/eligibility validator. It now publishes immutable little-endian
+  int32 labels, binds them to source visual + collision geometry + extraction
+  revision in `SceneEnvironment.membership`, and validates command identity before
+  a later sprint can expose merge/reassign routes.
+- **Contract decision:** `SceneEnvironment.membership` is an optional embedded
+  manifest (schema `1.0`) so each immutable SceneIR revision binds its own map;
+  legacy scenes omit the field from serialization and retain their canonical
+  checksum. Label bytes are a separate `ObjectMembershipLabels` artifact with
+  exact `gaussian_count`, row-order preservation, canonical non-negative label
+  keys, and `-1` background. A label survives only if `gaussian_split.split`
+  emitted that part; too-small labels are persisted as background. `extraction_revision`
+  identifies the SceneIR revision used to create source ownership (`rev-001` for
+  initial extraction; the expected base revision for reobjectify). Multiple
+  labels may map to one object after merge; each row still stores exactly one
+  label, so ownership remains exclusive without blocking S2's many-to-one merge.
+  `source_visual_ref` identifies the full input PLY. It is intentionally distinct
+  from `SceneEnvironment.visual_master_ref`, which objectify publishes as the
+  split/inpainted background PLY.
+- **Files:** `src/models/contracts/object_membership.py`,
+  `src/models/contracts/scene.py`, `src/models/contracts/__init__.py`,
+  `src/services/scene/editing/membership.py`,
+  `src/services/orchestration/scene/objectify.py`,
+  `src/services/orchestration/scene/editor.py`,
+  `frontend/src/lib/contracts/api.ts`,
+  `tests/test_scene/test_object_membership.py`, and
+  `tests/test_orchestration/test_scene_objectify_queue.py`.
+- **Consumer closure:** Scene artifact allowlisting now includes the source PLY,
+  split background master PLY, and labels artifact without duplicating the
+  collision geometry ref. Existing
+  objectify retry/reobjectify callers and test doubles pass the extraction revision.
+  The frontend receives typed manifest/command DTOs; no correction API or UI is
+  wired in S1.
+- **Verification:**
+  - `.venv/bin/pytest tests/test_scene/test_object_membership.py tests/test_scene/test_gaussian_split.py tests/test_orchestration/test_scene_objectify_queue.py tests/test_orchestration/test_scene_editor.py tests/test_orchestration/test_scene_extraction.py tests/test_orchestration/test_simulation_package.py tests/test_api/test_scene_v2_routes.py -q` — **113 passed**.
+  - `.venv/bin/ruff check src/ tests/` — **passed**; `.venv/bin/ruff format --check src/ tests/` — **502 files formatted**.
+  - `.venv/bin/python scripts/check_contract_mirror.py` — **PASS**, 5 enum and 5 model projections match.
+  - `npm run lint`, `npm run typecheck`, `npm test -- tests/layers.test.ts tests/object-review.test.tsx` — **40 passed**, and `npm run build -- --webpack` — **passed**, 16 static pages generated.
+- **CodeGraph gate:** explored objectify → split/output → SceneIR → artifact allowlist
+  and correction validation callers; index was synced after implementation and
+  is current before commit.
+- **Limitations:** label fallback/serialization was exercised with deterministic
+  synthetic rows and consumer fixtures. A real SAM2/3DGS/GPU objectify run and
+  browser/API correction flow were not exercised; correction commands remain
+  intentionally unwired until S2–S4.

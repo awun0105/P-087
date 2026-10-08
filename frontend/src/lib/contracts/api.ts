@@ -101,6 +101,44 @@ export interface ProductArtifactRef extends ArtifactRef {
   data_class: ProductDataClass;
 }
 
+/** `src/models/contracts/object_membership.py` ObjectMembershipArtifact. */
+export interface ObjectMembershipArtifact {
+  artifact_type: "ObjectMembershipArtifact";
+  schema_version: "1.0";
+  source_visual_ref: ProductArtifactRef;
+  source_geometry_ref: ProductArtifactRef;
+  extraction_revision: string;
+  coordinate_system: CoordinateSystemInfo;
+  gaussian_count: number;
+  labels_ref: ProductArtifactRef;
+  labels_encoding: "little-endian-int32";
+  background_label: -1;
+  label_to_object_id: Record<string, string>;
+}
+
+/** Command contracts are version- and membership-bound before later API wiring. */
+export interface ObjectMembershipMergeCommand {
+  expected_scene_revision: string;
+  membership_checksum: string;
+  primary_object_id: string;
+  secondary_object_ids: string[];
+}
+
+export interface SourceGaussianROI {
+  min_xyz_m: [number, number, number];
+  max_xyz_m: [number, number, number];
+}
+
+export interface ObjectMembershipReassignCommand {
+  expected_scene_revision: string;
+  membership_checksum: string;
+  region: SourceGaussianROI;
+  /** `null` means background. */
+  source_object_id: string | null;
+  /** `null` means background. */
+  target_object_id: string | null;
+}
+
 /** `src/models/contracts/coordinates.py` Transform. */
 export interface Transform {
   semantics: "parent_from_local";
@@ -312,6 +350,8 @@ export interface SceneEnvironment {
   collider_ref: ArtifactRef | null;
   /** Bản 3DGS gốc (PLY) cho bộ xuất USD; vắng mặt ở SceneIR cũ. */
   visual_master_ref?: ArtifactRef | null;
+  /** Membership is absent in legacy scenes; present only when objectify persisted the row map. */
+  membership?: ObjectMembershipArtifact | null;
 }
 
 export interface SceneIR {

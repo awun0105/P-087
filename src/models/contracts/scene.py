@@ -14,6 +14,7 @@ from src.models.contracts.artifacts import (
     SchemaVersion,
 )
 from src.models.contracts.coordinates import CoordinateSystem, MetricScale, Transform
+from src.models.contracts.object_membership import ObjectMembershipArtifact
 
 PositiveDimension = Annotated[FiniteFloat, Field(gt=0)]
 
@@ -183,6 +184,8 @@ class SceneEnvironment(ContractModel):
     collider_ref: ProductArtifactRef | None = None
     # Bản 3DGS gốc (PLY) của nền cho bộ xuất USD; `visual_ref` là bản nén cho trình duyệt (SOG).
     visual_master_ref: ProductArtifactRef | None = Field(default=None, exclude_if=_absent)
+    # Row ownership is optional for legacy scenes and embedded so each SceneIR revision binds its exact map.
+    membership: ObjectMembershipArtifact | None = Field(default=None, exclude_if=_absent)
 
 
 class SceneIR(ContractModel):
