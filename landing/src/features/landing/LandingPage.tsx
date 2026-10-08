@@ -1,9 +1,11 @@
 import { LandingAnchors } from "@/features/landing/LandingAnchors";
 import { LandingHeader } from "@/features/landing/LandingHeader";
 import { LandingSamples } from "@/features/landing/LandingSamples";
+import { CompareScene } from "@/features/landing/CompareScene";
 import { HeroScene } from "@/features/landing/HeroScene";
 import { StatusTag } from "@/features/landing/StatusTag";
 import {
+  CONTEXT,
   FOOTER,
   HERO,
   PROBLEM,
@@ -12,15 +14,27 @@ import {
   SOLUTION,
   START,
   WORKFLOW,
+  type TrackState,
 } from "@/features/landing/content";
 import { STUDIO_LOGIN_URL, STUDIO_URL } from "@/lib/api";
 
 const LOGIN_HREF = STUDIO_LOGIN_URL;
+
+const TRACK_CARD: Record<TrackState, string> = {
+  current: "border-2 border-ember-strong bg-paper-raised",
+  partial: "border border-line-strong bg-paper-raised",
+  later: "border border-dashed border-line-strong",
+};
+const TRACK_TAG: Record<TrackState, string> = {
+  current: "text-ember-strong",
+  partial: "text-ink",
+  later: "text-ink-muted",
+};
 const TRY_DEMO_HREF = `${STUDIO_URL}/new/try-demo`;
 
 /**
  * Landing Real2Sim Studio, theo mạch Homematch:
- * Bài toán → Giải pháp → Quy trình → Tiến độ (bằng chứng) → Định hướng → Bắt đầu.
+ * Bối cảnh → Bài toán → Giải pháp → Quy trình → Tiến độ (bằng chứng) → Dùng ở đâu → Bắt đầu.
  * Chữ nằm ở `content.ts`. Trang render phía server; chỉ header (menu mobile)
  * và danh sách scene mẫu (gọi API) là client component.
  */
@@ -65,16 +79,67 @@ export function LandingPage() {
         </div>
       </section>
 
-      {/* ── 01 BÀI TOÁN ── */}
+      {/* ── 01 BỐI CẢNH ── */}
+      <section id="context" className="lp-section bg-paper-sunken">
+        <div className="lp-wrap">
+          <SectionHead index={CONTEXT.index} lead={CONTEXT.titleLead} emphasis={CONTEXT.titleEmphasis} body={CONTEXT.lead} />
+
+          <ol className="lp-flow mt-12">
+            {CONTEXT.steps.map((s, i) => (
+              <li key={s.title} className="lp-flow-step">
+                <span className="font-mono text-[12px] font-semibold text-ember-strong">{String(i + 1).padStart(2, "0")}</span>
+                <h3 className="mt-1 text-[17px] font-bold text-ink">{s.title}</h3>
+                <p className="mt-1.5 text-[15px] leading-relaxed text-ink-muted">{s.body}</p>
+              </li>
+            ))}
+          </ol>
+
+          <h3 className="mt-14 text-lg font-bold text-ink">{CONTEXT.waysTitle}</h3>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            {CONTEXT.ways.map((w, i) => (
+              <div key={w.name} className={`rounded-xl p-6 ${i === 1 ? "border-2 border-ember-strong bg-paper-raised" : "border border-line-strong bg-paper-raised"}`}>
+                <p className="text-[17px] font-bold text-ink">{w.name}</p>
+                <p className={`mt-1 text-[14px] font-semibold ${i === 1 ? "text-ember-strong" : "text-ink-muted"}`}>{w.verdict}</p>
+                <p className="mt-3 text-[15px] leading-relaxed text-ink-muted">{w.body}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── 02 BÀI TOÁN ── */}
       <section id="problem" className="lp-section">
         <div className="lp-wrap">
           <SectionHead index={PROBLEM.index} lead={PROBLEM.titleLead} emphasis={PROBLEM.titleEmphasis} body={PROBLEM.lead} />
 
-          <ol className="mt-14 grid gap-px overflow-hidden rounded-xl border border-line bg-line lg:grid-cols-3">
+          <h3 className="mt-14 text-lg font-bold text-ink">{PROBLEM.analogy.title}</h3>
+          <div className="mt-4">
+            <CompareScene />
+          </div>
+
+          <h3 className="mt-14 text-lg font-bold text-ink">{PROBLEM.issuesTitle}</h3>
+          <ol className="mt-5 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+            {PROBLEM.issues.map((c, i) => (
+              <li key={c.title} className="border-l-2 border-rust pl-4">
+                <span className="font-mono text-[12px] font-semibold text-rust">{String(i + 1).padStart(2, "0")}</span>
+                <h4 className="mt-1 text-[16px] font-bold text-ink">{c.title}</h4>
+                <p className="mt-1.5 text-[14px] leading-relaxed text-ink-muted">{c.body}</p>
+                <p className="mt-3 text-[14px] leading-snug text-ink">
+                  <span className="text-ink-muted">Hậu quả: </span>
+                  {c.effect}
+                </p>
+              </li>
+            ))}
+          </ol>
+
+          <p className="lp-consequence mt-12">{PROBLEM.consequence}</p>
+
+          <h3 className="mt-16 text-lg font-bold text-ink">{PROBLEM.personasTitle}</h3>
+          <ol className="mt-5 grid gap-px overflow-hidden rounded-xl border border-line bg-line lg:grid-cols-3">
             {PROBLEM.personas.map((p) => (
               <li key={p.role} className="relative flex flex-col bg-paper-raised p-7 sm:p-8">
                 <p className="lp-label">{p.tag}</p>
-                <h3 className="mt-1 text-xl font-bold tracking-tight text-ink">{p.role}</h3>
+                <h4 className="mt-1 text-xl font-bold tracking-tight text-ink">{p.role}</h4>
                 <p className="mt-6 text-[1.75rem] font-extrabold leading-none tracking-tight text-ember-strong">{p.highlight}</p>
                 <p className="mt-2 text-[14px] leading-snug text-ink-muted">{p.highlightNote}</p>
                 <ul className="mt-6 space-y-2.5 border-t border-line pt-5">
@@ -93,29 +158,53 @@ export function LandingPage() {
             ))}
           </ol>
 
-          <div className="mt-12 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
-            {PROBLEM.rootCauses.map((c) => (
-              <div key={c.title} className="border-l-2 border-rust pl-4">
-                <h3 className="text-[15px] font-bold text-ink">{c.title}</h3>
-                <p className="mt-1.5 text-[14px] leading-relaxed text-ink-muted">{c.body}</p>
-              </div>
-            ))}
-          </div>
-
           <p className="mt-10 max-w-3xl text-[13px] leading-relaxed text-ink-muted">{PROBLEM.footnote}</p>
         </div>
       </section>
 
-      {/* ── 02 GIẢI PHÁP ── */}
+      {/* ── 03 GIẢI PHÁP ── */}
       <section id="solution" className="lp-section bg-paper-sunken">
         <div className="lp-wrap">
           <SectionHead index={SOLUTION.index} lead={SOLUTION.titleLead} emphasis={SOLUTION.titleEmphasis} body={SOLUTION.lead} />
 
-          <div className="mt-14 grid gap-10 lg:grid-cols-3 lg:gap-8">
+          <h3 className="mt-14 text-lg font-bold text-ink">{SOLUTION.mapTitle}</h3>
+          <ol className="lp-map mt-5">
+            {SOLUTION.map.map((m) => (
+              <li key={m.problem} className="lp-map-row">
+                <p className="text-[15px] font-semibold text-ink-muted">
+                  <span aria-hidden className="mr-2 inline-block h-2 w-2 rounded-full bg-rust align-middle" />
+                  {m.problem}
+                </p>
+                <span aria-hidden className="lp-map-arrow" />
+                <p className="text-[15px] leading-snug text-ink">{m.answer}</p>
+                <div className="lp-map-status">
+                  <StatusTag status={m.status} />
+                </div>
+              </li>
+            ))}
+          </ol>
+          <div className="mt-6 max-w-3xl rounded-xl border border-line-strong bg-paper-raised p-5">
+            <p className="text-[15px] font-bold text-ink">{SOLUTION.extra.title}</p>
+            <p className="mt-1.5 text-[15px] leading-relaxed text-ink-muted">{SOLUTION.extra.body}</p>
+          </div>
+
+          <div className="mt-14 grid gap-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+            <div className="rounded-xl border border-dashed border-line-strong p-6">
+              <p className="text-[13px] font-semibold text-ink-muted">{SOLUTION.contribution.notTitle}</p>
+              <p className="mt-2 text-[15px] leading-relaxed text-ink-muted">{SOLUTION.contribution.not}</p>
+            </div>
+            <div className="rounded-xl border-2 border-ember-strong bg-paper-raised p-6">
+              <p className="text-[13px] font-semibold text-ember-strong">{SOLUTION.contribution.isTitle}</p>
+              <p className="mt-2 text-[17px] font-semibold leading-snug text-ink">{SOLUTION.contribution.is}</p>
+            </div>
+          </div>
+
+          <h3 className="mt-16 text-lg font-bold text-ink">{SOLUTION.columnsTitle}</h3>
+          <div className="mt-5 grid gap-10 lg:grid-cols-3 lg:gap-8">
             {SOLUTION.columns.map((c) => (
               <article key={c.title} className="flex flex-col">
                 <p className="lp-label">{c.for}</p>
-                <h3 className="mt-1 text-xl font-bold tracking-tight text-ink">{c.title}</h3>
+                <h4 className="mt-1 text-xl font-bold tracking-tight text-ink">{c.title}</h4>
                 <ul className="mt-5 space-y-3">
                   {c.points.map((pt) => (
                     <li key={pt} className="flex gap-3 text-[15px] leading-snug text-ink">
@@ -156,7 +245,7 @@ export function LandingPage() {
         </div>
       </section>
 
-      {/* ── 03 QUY TRÌNH ── */}
+      {/* ── 04 QUY TRÌNH ── */}
       <section id="workflow" className="lp-section">
         <div className="lp-wrap">
           <SectionHead index={WORKFLOW.index} lead={WORKFLOW.titleLead} emphasis={WORKFLOW.titleEmphasis} body={WORKFLOW.lead} />
@@ -189,7 +278,7 @@ export function LandingPage() {
         </div>
       </section>
 
-      {/* ── 04 TIẾN ĐỘ ── */}
+      {/* ── 05 TIẾN ĐỘ ── */}
       <section id="progress" className="lp-section bg-paper-sunken">
         <div className="lp-wrap">
           <SectionHead index={PROGRESS.index} lead={PROGRESS.titleLead} emphasis={PROGRESS.titleEmphasis} body={PROGRESS.lead} />
@@ -228,7 +317,7 @@ export function LandingPage() {
         </div>
       </section>
 
-      {/* ── 05 DÙNG Ở ĐÂU ── */}
+      {/* ── 06 DÙNG Ở ĐÂU ── */}
       <section id="roadmap" className="lp-section">
         <div className="lp-wrap">
           <SectionHead index={ROADMAP.index} lead={ROADMAP.titleLead} emphasis={ROADMAP.titleEmphasis} body={ROADMAP.lead} />
@@ -245,31 +334,14 @@ export function LandingPage() {
               </ul>
             </div>
             <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-              {ROADMAP.tracks.map((t) => {
-                const borderBg =
-                  t.state === "current"
-                    ? "border-2 border-ember-strong bg-paper-raised"
-                    : t.state === "partial"
-                      ? "border border-line-strong bg-paper-raised"
-                      : "border border-dashed border-line-strong";
-                const tagColor =
-                  t.state === "current"
-                    ? "text-ember-strong"
-                    : t.state === "partial"
-                      ? "text-ink"
-                      : "text-ink-muted";
-                return (
-                  <div
-                    key={t.domain}
-                    className={`rounded-xl p-6 sm:p-7 ${borderBg}`}
-                  >
-                    <p className={`text-[13px] font-semibold ${tagColor}`}>{t.tag}</p>
-                    <p className="mt-3 text-xl font-bold tracking-tight text-ink">{t.domain}</p>
-                    <p className="mt-1 font-mono text-[13px] text-ink-muted">↳ {t.simulator}</p>
-                    <p className="mt-4 text-[15px] leading-relaxed text-ink-muted">{t.body}</p>
-                  </div>
-                );
-              })}
+              {ROADMAP.tracks.map((t) => (
+                <div key={t.domain} className={`rounded-xl p-6 sm:p-7 ${TRACK_CARD[t.state]}`}>
+                  <p className={`text-[13px] font-semibold ${TRACK_TAG[t.state]}`}>{t.tag}</p>
+                  <p className="mt-3 text-xl font-bold tracking-tight text-ink">{t.domain}</p>
+                  <p className="mt-1 font-mono text-[13px] text-ink-muted">↳ {t.simulator}</p>
+                  <p className="mt-4 text-[15px] leading-relaxed text-ink-muted">{t.body}</p>
+                </div>
+              ))}
             </div>
           </div>
         </div>

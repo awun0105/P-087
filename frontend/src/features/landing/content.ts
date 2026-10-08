@@ -1,9 +1,11 @@
 /**
  * Toàn bộ chữ của landing nằm ở đây để sửa nội dung không phải đụng vào bố cục.
  *
- * Nguồn: README, BRIEF, PRD và STUDIO_UX_SPEC của repo P-087 (cập nhật 08/10/2026).
+ * Nguồn: README, BRIEF, PRD và STUDIO_UX_SPEC của repo P-087 (cập nhật 08/10/2026),
+ * cùng phần rà soát thị trường ngày 08/10/2026 (NVIDIA NuRec, World Labs Marble,
+ * Niantic Scaniverse, Parallax Worlds, bài ϕ-RIE). Trang không nêu tên đối thủ.
  * Quy tắc theo UX spec §8 P8 và D-05: không đưa số liệu, logo hay claim chưa có bằng chứng.
- * Khi một hạng mục đổi trạng thái (ví dụ Isaac Sim chạy thật), chỉ cần đổi `status` ở đây.
+ * Khi một hạng mục đổi trạng thái (ví dụ kiểm tra đường đi chạy thật), chỉ cần đổi `status` ở đây.
  */
 
 export type Status = "done" | "building" | "later";
@@ -32,6 +34,7 @@ export const HERO = {
   note: "Lát cắt đầu tiên đang chạy: nhà kho trong nhà và NVIDIA Isaac Sim. Kỹ sư xác nhận ở các bước then chốt, Reviewer duyệt trước khi phát hành.",
   benefits: ["Tỉ lệ theo đơn vị mét", "Vật thể tách riêng, có collider", "Có người duyệt trước khi phát hành"],
   pillars: ["Visual", "Geometry", "Physics"],
+  sceneLabel: "ví dụ: lối đi trong kho, nhìn từ trên",
 };
 
 /** Sơ đồ ở Hero: chuỗi biến đổi dữ liệu (UX spec P8). Là sơ đồ, không phải ảnh chụp kết quả. */
@@ -43,12 +46,78 @@ export const HERO_CHAIN = [
   { label: "Gói OpenUSD", detail: "scene.usda + manifest", tone: "sage" },
 ] as const;
 
+/** 01 · Bối cảnh: vì sao cần bản sao ảo, và hai cách làm nó. */
+export const CONTEXT = {
+  index: "01 / Bối cảnh",
+  titleLead: "Robot chạy thử trong máy",
+  titleEmphasis: "trước khi ra kho thật.",
+  lead:
+    "Thả robot vào kho thật ngay thì rủi ro: đâm vào hàng, kẹt giữa lối, làm hỏng đồ. Nên các nhóm robotics dựng một bản sao ảo của môi trường và cho robot chạy thử trong đó trước.",
+  steps: [
+    { title: "Dựng bản sao ảo", body: "Tái hiện kho trên máy tính: kệ, pallet, lối đi, đúng kích thước." },
+    { title: "Robot chạy thử", body: "Cho robot ảo chạy hàng nghìn lần trong trình mô phỏng như Isaac Sim." },
+    { title: "Ổn mới ra thật", body: "Chỉ triển khai robot vào kho thật khi đã chạy ổn trong máy." },
+  ],
+  waysTitle: "Có hai cách làm bản sao ảo",
+  ways: [
+    {
+      name: "Dựng tay",
+      verdict: "Chính xác, nhưng chậm",
+      body: "Kỹ sư đo đạc rồi vẽ lại từng kệ, từng pallet. Mỗi lần kho thay đổi lại phải vẽ lại.",
+    },
+    {
+      name: "Quay video, để máy dựng 3D",
+      verdict: "Nhanh, nhưng chưa đủ",
+      body: "Nhiều công cụ đã làm được việc này. Bản dựng trông rất giống thật, nhưng robot chưa dùng được ngay. Phần dưới giải thích vì sao.",
+    },
+  ],
+};
+
 export const PROBLEM = {
-  index: "01 / Bài toán",
+  index: "02 / Bài toán",
   titleLead: "Scene nhìn giống thật.",
   titleEmphasis: "Robot vẫn chưa dùng được.",
   lead:
-    "Video hay LiDAR của một môi trường thật chưa thể đưa thẳng vào trình mô phỏng. Ba người cùng làm trên một scene, và mỗi người vướng ở một chỗ.",
+    "Dựng 3D từ video và đưa vào simulator giờ đã làm được. Nhưng bản dựng đó là một khối liền, chưa có va chạm cho từng vật và chưa chắc đúng kích thước.",
+  analogy: {
+    title: "Giống khác biệt giữa bản scan và bản soạn thảo",
+    have: {
+      label: "Bản 3D từ video",
+      like: "giống một file PDF scan",
+      body: "Nhìn y như thật, nhưng cả trang chỉ là một tấm ảnh. Không chọn hay sửa riêng được phần nào.",
+    },
+    need: {
+      label: "Thứ robot cần",
+      like: "giống một file soạn thảo",
+      body: "Từng vật là một phần riêng: biết nó là gì, nằm ở đâu, to bao nhiêu, đụng vào thì dừng lại.",
+    },
+  },
+  issuesTitle: "Bốn chỗ còn vướng",
+  issues: [
+    {
+      title: "Dính liền một khối",
+      body: "Không chọn, dời hay xoá riêng được một pallet hay một kệ.",
+      effect: "Muốn đổi một vật là phải sửa cả scene.",
+    },
+    {
+      title: "Thiếu va chạm cho từng vật",
+      body: "Bản dựng chỉ có hình. Simulator cần collider đúng hình từng vật.",
+      effect: "Robot ảo đi xuyên qua kệ như không có gì.",
+    },
+    {
+      title: "Chưa chắc đúng kích thước",
+      body: "Tỉ lệ thường phải căn tay, không có đoạn đo để kiểm lại.",
+      effect: "Vừa lối trong máy, kẹt lối ngoài đời.",
+    },
+    {
+      title: "Cũ khi kho đổi bố trí",
+      body: "Dời vài pallet là bản scan không còn đúng.",
+      effect: "Phải quay và dựng lại, hoặc ngồi sửa tay.",
+    },
+  ],
+  consequence:
+    "Kết quả: kỹ sư vẫn phải sửa tay rất nhiều mới dùng được, và sửa lại mỗi lần môi trường thay đổi.",
+  personasTitle: "Ai đang chịu nỗi đau này",
   personas: [
     {
       role: "Kỹ sư mô phỏng",
@@ -87,22 +156,51 @@ export const PROBLEM = {
       handoff: "Phát hành cho cả nhóm",
     },
   ],
-  rootCauses: [
-    { title: "Không có tỉ lệ mét", body: "Video cho thấy môi trường nhưng không cho biết kích thước thật." },
-    { title: "Không có cấu trúc vật thể", body: "Bản tái tạo là một khối liền, không tách được từng vật để di chuyển hay xoá." },
-    { title: "Không có lớp vật lý", body: "Simulator cần collider, không chỉ cần hình đẹp." },
-    { title: "Không có truy vết", body: "Không gắn được kết quả kiểm tra với đúng phiên bản scene." },
-  ],
   footnote:
     "Nhóm đang đo thời gian của quy trình thủ công trên cùng một scene để làm mốc so sánh. Tỉ lệ cải thiện sẽ chỉ công bố sau khi có số đo.",
 };
 
 export const SOLUTION = {
-  index: "02 / Giải pháp",
-  titleLead: "Một workflow.",
-  titleEmphasis: "Ba lớp biểu diễn luôn khớp nhau.",
+  index: "03 / Giải pháp",
+  titleLead: "Từ bản scan",
+  titleEmphasis: "thành bản soạn thảo của nhà kho.",
   lead:
-    "Real2Sim Studio gom các bước rời rạc vào một Web App. Scene được giữ dưới dạng có cấu trúc, mỗi thay đổi là một revision mới.",
+    "Dựng 3D từ video thì nhiều công cụ đã làm được. Real2Sim tập trung vào phần sau đó: tách scene thành từng vật, gắn collider, đúng tỉ lệ mét, rồi kiểm tra và duyệt trước khi dùng.",
+  mapTitle: "Mỗi chỗ vướng, một cách gỡ",
+  map: [
+    {
+      problem: "Dính liền một khối",
+      answer: "Tách thành từng vật riêng: pallet, kệ, thùng. Máy đề xuất, người xác nhận.",
+      status: "done" as Status,
+    },
+    {
+      problem: "Thiếu va chạm cho từng vật",
+      answer: "Gắn collider cho từng vật và tách vật khỏi mặt sàn.",
+      status: "done" as Status,
+    },
+    {
+      problem: "Chưa chắc đúng kích thước",
+      answer: "Căn tỉ lệ bằng một khoảng cách đo thật, có đoạn đo thứ hai để kiểm lại.",
+      status: "done" as Status,
+    },
+    {
+      problem: "Cũ khi kho đổi bố trí",
+      answer: "Sửa ngay trong scene: đã thêm được vật cản và ẩn vật; dời, xoay vật đang làm.",
+      status: "building" as Status,
+    },
+  ],
+  extra: {
+    title: "Rồi kiểm tra trước khi dùng",
+    body: "Cho robot ảo chạy thử từ điểm Start tới Goal để biết lối có đi được không (đang làm). Reviewer xem bằng chứng rồi mới duyệt cho cả nhóm dùng.",
+  },
+  contribution: {
+    title: "Đóng góp của Real2Sim",
+    notTitle: "Không làm lại",
+    not: "Phần dựng 3D từ video. Nhóm dùng công cụ có sẵn cho bước này.",
+    isTitle: "Nối phần còn thiếu",
+    is: "Biến bản dựng thành scene tách được từng vật, có vật cản, đúng kích thước, chỉnh được và được kiểm tra, trong một trang web có người xác nhận ở các bước quan trọng.",
+  },
+  columnsTitle: "Mỗi người nhận được gì",
   columns: [
     {
       for: "Cho kỹ sư mô phỏng",
@@ -154,12 +252,12 @@ export type WorkflowStep = {
   body: string;
   output: string;
   status: Status;
-  /** Đường dẫn ảnh chụp Studio, ví dụ "/landing/step-02.webp". Để trống thì hiện sơ đồ. */
+  /** Đường dẫn ảnh chụp Studio, ví dụ "/landing/step-02.webp". Để trống thì chỉ hiện chữ. */
   image?: string;
 };
 
 export const WORKFLOW = {
-  index: "03 / Quy trình",
+  index: "04 / Quy trình",
   titleLead: "Từ một video",
   titleEmphasis: "đến một gói đã được duyệt.",
   lead:
@@ -225,7 +323,7 @@ export const WORKFLOW = {
 };
 
 export const PROGRESS = {
-  index: "04 / Tiến độ",
+  index: "05 / Tiến độ",
   titleLead: "Đã chạy thật.",
   titleEmphasis: "Và nói rõ phần chưa xong.",
   lead:
@@ -245,7 +343,7 @@ export const PROGRESS = {
       title: "Kiểm chứng mô phỏng",
       items: [
         "Chạy kiểm tra trong NVIDIA Isaac Sim, va chạm và đường đi Start–Goal",
-        "Màn xác nhận tỉ lệ cho luồng video + LiDAR",
+        "Dời, xoay vật trong scene; màn xác nhận tỉ lệ cho luồng video + LiDAR",
         "Pipeline v2: scene theo vật, nền vá sẵn, xuất USD lai",
       ],
     },
@@ -271,8 +369,10 @@ export const PROGRESS = {
   samplesLead: "Mở xem ngay, không cần đăng nhập và không chạy GPU mới.",
 };
 
+export type TrackState = "current" | "partial" | "later";
+
 export const ROADMAP = {
-  index: "05 / Dùng ở đâu",
+  index: "06 / Dùng ở đâu",
   titleLead: "Một lõi Real2Sim.",
   titleEmphasis: "Nhiều nơi dùng scene.",
   lead:
@@ -281,36 +381,35 @@ export const ROADMAP = {
   adapters: ["DomainAdapter", "SimulatorAdapter"],
   tracks: [
     {
-      state: "current",
+      state: "current" as TrackState,
       tag: "MVP · đang triển khai",
       domain: "Robot trong nhà kho",
       simulator: "NVIDIA Isaac Sim",
       body: "Lát cắt hoàn chỉnh từ video kho đến gói scene được duyệt.",
     },
     {
-      state: "partial",
+      state: "partial" as TrackState,
       tag: "Đã có một phần",
       domain: "Công cụ 3D khác",
       simulator: "3DGS (PLY / SOG) · OpenUSD",
       body: "Tải file 3DGS hoặc gói OpenUSD để mở ở công cụ khác. Nhóm chưa kiểm thử với từng phần mềm cụ thể.",
     },
     {
-      state: "later",
+      state: "later" as TrackState,
       tag: "Sau MVP",
       domain: "Đường bộ",
       simulator: "CARLA và simulator khác",
       body: "Tái sử dụng cùng lõi xử lý, chỉ thay adapter của miền và simulator.",
     },
-  ] as const,
+  ],
 };
 
 export const START = {
-  index: "Bắt đầu",
   titleLead: "Bắt đầu nhỏ.",
   titleEmphasis: "Thử một scene mẫu trước.",
   steps: [
     { title: "Thử scene mẫu", body: "Xem lại tiến trình đã ghi và mở scene đã xử lý sẵn. Không cần đăng nhập." },
-    { title: "Đăng nhập và tải video kho", body: "Tạo scene, theo dõi từng bước và xác nhận ở các điểm then chốt." },
+    { title: "Đăng nhập và tải video", body: "Tạo scene, theo dõi từng bước và xác nhận ở các điểm then chốt." },
     { title: "Tải gói mô phỏng", body: "Nhận gói OpenUSD gắn đúng revision, kèm bảng đánh giá." },
   ],
 };
