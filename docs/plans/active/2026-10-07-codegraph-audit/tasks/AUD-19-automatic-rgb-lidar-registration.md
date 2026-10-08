@@ -184,8 +184,9 @@ one FFT solves arbitrary rotation/partial overlap. Keep floor/coverage provenanc
 Gaussian centers alone không là verified surfaces. Freeze seed/profile/search limits.
 Tests: known yaw/translation, scale perturbation, partial overlap, repetitive racks,
 180° symmetry, straight corridor, floor-only clouds, noisy/ghosted RGB and trajectory outliers.
-**Exit:** [ ] supported ground-truth candidate retained in bounded search;
-[ ] ambiguous/degenerate scenes not fabricated unique alignment.
+**Exit:** [x] supported synthetic ground-truth candidate retained in bounded search;
+[x] ambiguous/degenerate synthetic scenes do not receive a unique proposal. Real map
+coverage, qualification and producer integration remain open for S3/S4.
 
 ## Sprint AUD-19.S3 — Constrained robust ICP và alignment qualification
 
@@ -232,7 +233,7 @@ stale polling/revision, aligned-cloud/SceneIR consumer and real browser/register
 ## Verification và DoD
 
 ```bash
-.venv/bin/pytest tests/test_contracts/test_rgb_lidar_registration.py tests/test_reconstruction/test_rec06_lidar_metric.py tests/test_reconstruction/test_lidar_world_alignment.py tests/test_reconstruction/test_rec06_auto_scale.py tests/test_reconstruction/test_lidar_package.py tests/test_reconstruction/test_rec09_alignment.py tests/test_reconstruction/test_rec09_guards.py tests/test_reconstruction/test_rec10_bundle.py tests/test_reconstruction/test_lidar_overlay.py tests/test_reconstruction/test_finalize_lidar_binding.py -q
+.venv/bin/pytest tests/test_contracts/test_rgb_lidar_registration.py tests/test_reconstruction/test_bev_registration.py tests/test_reconstruction/test_rec06_lidar_metric.py tests/test_reconstruction/test_lidar_world_alignment.py tests/test_reconstruction/test_rec06_auto_scale.py tests/test_reconstruction/test_lidar_package.py tests/test_reconstruction/test_rec09_alignment.py tests/test_reconstruction/test_rec09_guards.py tests/test_reconstruction/test_rec10_bundle.py tests/test_reconstruction/test_lidar_overlay.py tests/test_reconstruction/test_finalize_lidar_binding.py -q
 ```
 
 Planned tests/test_reconstruction/test_bev_registration.py,
@@ -256,7 +257,28 @@ unchanged.
 Verification: `.venv/bin/ruff check src/ tests/` PASS; `.venv/bin/ruff format --check
 src/ tests/` PASS (517 files); focused registration plus existing REC-06/08/09 tests
 PASS (85 tests); `scripts/check_contract_mirror.py` PASS (5 enums, 5 models);
-CodeGraph current (847 files, 16,607 nodes, 48,652 edges). These are local contract
-and compatibility checks only. No BEV/ICP producer, original-file ingest adapter,
-durable operation, UI flow, held-out registration qualification, real map, or
-browser/consumer acceptance is implemented in S1; all remain for S2–S4.
+CodeGraph current (847 files, 16,607 nodes, 48,652 edges). These were local contract
+and compatibility checks only at S1 delivery.
+
+AUD-19.S2 now implements the bounded coarse-to-fine search slice in
+`src/services/reconstruction/alignment/bev_search.py`: floor-normalized multi-height
+BEV support, meter-aware cells, explicit source units/floor checksums, deterministic
+sampling, FFT translation correlation at tested yaw hypotheses, bounded local yaw/
+translation refinement, bounded scale search, top-K transform candidates, and
+coverage/search diagnostics with explicit ambiguous or insufficient outcomes. The
+profile checksum binds cell size, height bands, seed and refinement budgets. Empty
+cells are treated as unknown; the target parameter is
+limited to supported collision-surface points, not Gaussian centers. The existing
+camera-center fit now uses deterministic bounded consensus with rank/outlier
+diagnostics, and finalize evidence records its actual thresholds, seed, support,
+rejections and prior assumptions.
+
+Verification: focused registration/BEV/trajectory/finalize/REC-06/REC-09 tests PASS
+(97 tests); cases cover known yaw/translation including a source map cropped at yaw
+zero but supported after rotation, partial overlap with added RGB ghost points,
+bounded scale, repeating/180-degree symmetry, a straight corridor, floor-only maps,
+unit conversion and trajectory outliers beyond/within the bound. Profile checksum
+tests bind BEV resolution/height/search seed/refinement budgets. These are synthetic algorithm tests.
+The coarse solver still requires S3/S4 artifact loading, worker integration and
+constrained ICP; no held-out warehouse qualification, production accuracy, browser,
+or collision-safety claim follows from this sprint.

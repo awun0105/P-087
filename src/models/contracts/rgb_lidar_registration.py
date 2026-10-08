@@ -82,6 +82,7 @@ class RegistrationFindingCode(StrEnum):
     HIGH_RESIDUAL = "HIGH_RESIDUAL"
     AMBIGUOUS_CANDIDATES = "AMBIGUOUS_CANDIDATES"
     UNOBSERVABLE = "UNOBSERVABLE"
+    SEARCH_BUDGET_EXCEEDED = "SEARCH_BUDGET_EXCEEDED"
     STALE_TARGET = "STALE_TARGET"
     UNQUALIFIED_PROFILE = "UNQUALIFIED_PROFILE"
     METRIC_CONFIRMATION_REQUIRED = "METRIC_CONFIRMATION_REQUIRED"
@@ -117,8 +118,21 @@ class RegistrationProfile(ContractModel):
     max_source_points: int = Field(default=20_000_000, ge=1, le=20_000_000, strict=True)
     max_points_per_map: int = Field(default=250_000, ge=1_000, le=1_000_000, strict=True)
     max_roi_extent_m: FiniteFloat = Field(default=100.0, gt=0, le=1_000)
+    bev_cell_resolution_m: FiniteFloat = Field(default=0.25, ge=0.025, le=2.0)
+    max_bev_grid_cells: int = Field(default=65_536, ge=1_024, le=262_144, strict=True)
+    bev_height_edges_m: tuple[FiniteFloat, FiniteFloat, FiniteFloat, FiniteFloat, FiniteFloat] = (
+        0.15,
+        0.6,
+        1.5,
+        3.0,
+        6.0,
+    )
+    search_seed: int = Field(default=0, ge=0, le=4_294_967_295, strict=True)
+    rgb_scale_hypotheses: int = Field(default=5, ge=2, le=9, strict=True)
     yaw_hypotheses: int = Field(default=180, ge=1, le=720, strict=True)
     translation_hypotheses: int = Field(default=2_500, ge=1, le=100_000, strict=True)
+    max_refinement_points: int = Field(default=50_000, ge=1_000, le=250_000, strict=True)
+    max_refinement_candidates: int = Field(default=8, ge=1, le=32, strict=True)
     top_k_candidates: int = Field(default=8, ge=1, le=32, strict=True)
     icp_iterations: int = Field(default=50, ge=1, le=200, strict=True)
     runtime_budget_seconds: PositiveInt = Field(default=300, le=3_600)
@@ -133,6 +147,10 @@ class RegistrationProfile(ContractModel):
 
     @model_validator(mode="after")
     def _profile_policy(self) -> Self:
+        if self.bev_height_edges_m[0] <= 0 or any(
+            lower >= upper for lower, upper in zip(self.bev_height_edges_m, self.bev_height_edges_m[1:])
+        ):
+            raise ValueError("BEV height edges must be strictly increasing")
         if self.qualification_state == "qualified":
             if (
                 self.qualification_record_ref is None

@@ -547,3 +547,30 @@ def test_mutating_a_sealed_request_is_detected_before_preflight() -> None:
 
     with pytest.raises(ValueError, match="does not match canonical content"):
         registration_preflight(mutated)
+
+
+def test_profile_checksum_binds_bev_search_limits() -> None:
+    profile = _profile()
+    changed = seal_registration_profile(
+        {
+            **profile.model_dump(mode="json"),
+            "bev_cell_resolution_m": 0.4,
+            "search_seed": profile.search_seed + 1,
+            "max_refinement_points": 40_000,
+            "max_refinement_candidates": 4,
+        }
+    )
+
+    assert changed.profile_checksum != profile.profile_checksum
+    assert changed.bev_cell_resolution_m == 0.4
+    assert changed.search_seed == profile.search_seed + 1
+    assert changed.max_refinement_points == 40_000
+    assert changed.max_refinement_candidates == 4
+
+
+def test_profile_rejects_unordered_height_bands() -> None:
+    profile = _profile()
+    payload = profile.model_dump(mode="json")
+    payload["bev_height_edges_m"] = [0.15, 0.6, 0.5, 3.0, 6.0]
+    with pytest.raises(ValidationError, match="height edges"):
+        seal_registration_profile(payload)
