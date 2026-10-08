@@ -15,6 +15,7 @@ from src.services.reconstruction.lidar.package import (
     LidarPackageIngest,
     LidarPackageRecord,
     parse_calibration,
+    parse_camera,
 )
 
 LIMIT = 10**9
@@ -66,6 +67,7 @@ def _ingest(tmp_path: Path, package: Path, origin: str = "estimated") -> tuple[L
         origin,  # type: ignore[arg-type]
         tmp_path / "work",
     )
+    assert result.reference.schema_version == result.record.schema_version
     assert LidarPackageRecord.model_validate_json(resolver.require(result.reference).read_bytes()) == result.record
     return result.record, resolver
 
@@ -85,6 +87,17 @@ def test_scan_package_is_fused_and_floor_goes_to_zero(tmp_path: Path) -> None:
     assert sum(1 for item in provenance.dependencies if item.role == "scan") == POSES
     assert record.sensor_from_camera.translation_xyz == (0.1, 0.0, -0.1)
     assert resolver.require(record.trajectory_ref).read_bytes() == _companions()["traj.txt"]
+    assert record.calibration_ref is not None
+    assert resolver.require(record.calibration_ref).read_bytes() == CALIBRATION.encode()
+    assert record.schema_version == "1.1"
+
+    # Old immutable record payloads did not include the calibration ref or distortion provenance.
+    old_payload = record.model_dump(mode="json", exclude={"calibration_ref"})
+    old_payload["schema_version"] = "1.0"
+    if old_payload["camera"] is not None:
+        old_payload["camera"].pop("distortion_status", None)
+    old_record = LidarPackageRecord.model_validate(old_payload)
+    assert old_record.calibration_ref is None
 
 
 def test_registered_package_keeps_the_submitted_cloud_bytes(tmp_path: Path) -> None:
@@ -129,3 +142,22 @@ def test_calibration_formats_and_bad_values() -> None:
         parse_calibration(CALIBRATION.replace("qw: 1", "qw: 3"), "torwic_txt")
     with pytest.raises(LidarPackageError, match="Calibration"):
         parse_calibration('{"lidar_from_camera": {"translation_xyz": [0, 0]}}', "json")
+
+
+def test_camera_parser_preserves_distortion_availability_without_changing_legacy_values() -> None:
+    intrinsics = (
+        "Camera1.width: 640\nCamera1.height: 480\nCamera1.fx: 500\nCamera1.fy: 500\nCamera1.cx: 320\nCamera1.cy: 240\n"
+    )
+    missing = parse_camera(intrinsics, "torwic_txt")
+    declared = parse_camera(intrinsics + "Camera1.D: [0, 0, 0, 0]\n", "torwic_txt")
+    partial = parse_camera(intrinsics + "Camera1.D: [0.1, -0.02]\n", "torwic_txt")
+    json_missing = parse_camera(
+        '{"camera": {"width": 640, "height": 480, "fx": 500, "fy": 500, "cx": 320, "cy": 240}}',
+        "json",
+    )
+
+    assert missing is not None and missing.distortion == (0.0, 0.0, 0.0, 0.0)
+    assert missing.distortion_status == "missing"
+    assert declared is not None and declared.distortion_status == "declared"
+    assert partial is not None and partial.distortion_status == "partial"
+    assert json_missing is not None and json_missing.distortion_status == "missing"

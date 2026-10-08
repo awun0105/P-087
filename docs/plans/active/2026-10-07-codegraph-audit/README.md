@@ -71,6 +71,14 @@ require a frozen acceptance profile with PASS. Verification: 31 focused tests,
 Ruff, format and contract mirror pass. No production collision producer,
 held-out capture, independent obstacle recall or Isaac proof is enabled by S1;
 those remain **UNVERIFIED** for later sprints.
+AUD-13.S1 adds a checksum-bound calibration source ref to new LidarPackageRecord
+1.1 artifacts while retaining 1.0 reads, preserves whether camera distortion was
+actually declared, and introduces a typed calibration-QA profile/report. Structural
+errors fail; missing units, intrinsics, timing or overlap remain INCONCLUSIVE. The
+consumer fixture proves an observable sample still cannot PASS before projection
+scoring. Verification: 61 focused tests, Ruff, formatting, contract mirror and
+current CodeGraph index pass. Projection scoring, held-out qualification and
+production source gating remain pending for AUD-13.S2/S3.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 

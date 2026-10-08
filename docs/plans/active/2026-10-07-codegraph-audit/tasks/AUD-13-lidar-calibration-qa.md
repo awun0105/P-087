@@ -75,7 +75,7 @@ conventions, distortion, scan/frame matching and timestamp bounds. Define suppor
 sampling/overlap minimums từ QA profile, không hardcode angle-error guarantee.
 Tests: wrong transform direction, meters vs millimeters, bad rotation/determinant,
 NaN, missing K/distortion/time offset, unsorted times, sparse/no-overlap frames.
-**Exit:** [ ] schema/consumer fixtures; [ ] QA never fake-pass missing observations.
+**Exit:** [x] schema/consumer fixtures; [x] QA never fake-pass missing observations.
 
 ## Sprint AUD-13.S2 — Projection metrics và perturbation qualification
 
@@ -119,5 +119,42 @@ qualification; general blind calibration remains noted as research/observability
 
 ## Result / Evidence
 
-Pending — calibration/input/config/report refs, sampling/coverage, scored metrics,
-perturbation labels, uncertain cases và real-data supported envelope.
+### AUD-13.S1 — complete locally; projection qualification pending
+
+- **Commit base:** `7e28539` (`AUD-12.S1`).
+- **Logic before → after:** LidarPackageRecord retained the parsed transform but not
+  the exact calibration bytes; missing distortion was represented as zero with no
+  provenance. New records use schema 1.1 with a checksum-bound calibration artifact
+  ref and distortion availability (`declared`, `partial`, `missing`). The reader
+  still accepts schema 1.0; its absent calibration ref and distortion source remain
+  unknown, never upgraded to QA evidence. Existing ingest and COLMAP fallback stay
+  usable; the QA result separately says INCONCLUSIVE when evidence is insufficient.
+- **Contract:** Added explicit profile thresholds, sampled RGB/LiDAR frame/time
+  pairs, unit/clock declarations, source checksums, observability and findings to
+  the version 1.0 QA config/report. The transform must be
+  `T_lidar_sensor_from_camera` in meters with a proper normalized xyzw rotation.
+  Timestamp comparison uses `rgb_time = lidar_time + offset`. Matched IDs and
+  timestamps must be ordered, unique and within the trajectory inventory.
+- **Consumer behavior:** Structural direction/unit/SE(3)/timestamp errors produce
+  FAIL. Missing calibration ref, K, declared distortion, clock relation/offset,
+  mapped samples or overlap produce INCONCLUSIVE. Enough observations produce
+  READY_FOR_SCORING but still INCONCLUSIVE with `PROJECTION_SCORING_PENDING`;
+  this sprint has no path that emits PASS. The serialized consumer fixture rejects
+  use of that report as a sensor-package collision source.
+- **Files changed:** `src/services/reconstruction/lidar/package.py`,
+  `src/services/reconstruction/lidar/calibration_qa.py`,
+  `src/models/contracts/lidar_calibration_qa.py`,
+  `src/models/contracts/__init__.py`,
+  `tests/test_reconstruction/test_lidar_package.py`,
+  `tests/test_reconstruction/test_lidar_calibration_qa.py`,
+  `tests/test_contracts/test_lidar_calibration_qa.py`,
+  `tests/fixtures/contracts/lidar_calibration_qa_v1.json`, this task, README and
+  ADR 0016.
+- **Verification:** 61 focused reconstruction/contract/finalize consumer tests
+  passed; `ruff check src/ tests/` passed; `ruff format --check src/ tests/`
+  reported 512 files formatted; contract mirror passed (5 enum, 5 model); CodeGraph
+  index is current at 842 files, 16,463 nodes and 48,175 edges.
+- **Pending:** No projection metric, calibrated rig perturbation scoring, real
+  held-out sequence, production threshold qualification, API persistence or UI
+  gate is included. Those belong to AUD-13.S2/S3; no production calibration PASS
+  or sensor-source acceptance is claimed by S1.

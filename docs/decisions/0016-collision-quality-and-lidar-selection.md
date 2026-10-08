@@ -82,3 +82,17 @@ GT-assisted. Synthetic fixture thresholds are pinned in
 from the single traversal. Actual producer/API/USD/Isaac consumers, held-out
 capture, independent obstacle recall and exact-candidate contact validation
 remain follow-up implementation/qualification work.
+
+## AUD-13.S1 implementation note — 2026-10-08
+
+The ADR remains **Proposed** and no collision-source selection is enabled by this
+note. New LiDAR package records use schema 1.1 and retain the extracted
+calibration bytes by artifact ref/checksum; the reader continues to accept 1.0
+records, whose missing calibration/distortion provenance stays unknown. The
+calibration QA profile/report makes transform direction, metric unit, clock
+relation/offset, intrinsics, sampled frame map and overlap availability explicit.
+Structural mismatches fail and unavailable evidence is inconclusive. S1 cannot
+produce PASS: enough observations only means ready for projection scoring. The
+existing reconstruction/alignment flow is not yet gated by this report.
+Projection scoring, perturbation qualification and the product source gate remain
+AUD-13.S2/S3 work; real calibration data and supported thresholds are unqualified.
