@@ -16,6 +16,7 @@ BundleMetricVerifier đo lại, không tự tin số.
 
 import hashlib
 import json
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -92,6 +93,44 @@ class GeometryProfile(ContractModel):
     cleanup: Literal["cluster", "floaters"]
     gpu_index: int = Field(ge=0, strict=True)
     max_gaussian_scale_log: FiniteFloat | None = 1.0
+
+
+_MAX_VOXEL_CELLS = 1_500_000_000.0
+
+
+def build_voxel_config(
+    profile: GeometryProfile,
+    crop: tuple[Vector3, Vector3],
+    seed: Vector3,
+) -> VoxelConfig:
+    """Keep the requested cleanup profile intact; reject crops that require coarser voxels."""
+    low, high = crop
+    volume_m3 = math.prod(upper - lower for lower, upper in zip(low, high, strict=True))
+    minimum_resolution_m = (volume_m3 / _MAX_VOXEL_CELLS) ** (1 / 3) if volume_m3 > 0 else 0.0
+    if minimum_resolution_m > profile.resolution_m:
+        raise ValueError(
+            f"requested voxel resolution {profile.resolution_m:g} m exceeds voxel capacity; "
+            f"minimum feasible resolution is {minimum_resolution_m:g} m. "
+            "Reduce the crop or explicitly select a coarser geometry profile."
+        )
+
+    cluster_seed = (seed[0], seed[1], profile.cluster_seed_height_m)
+    return VoxelConfig(
+        resolution_m=profile.resolution_m,
+        opacity=profile.opacity,
+        cluster_resolution_m=profile.cluster_resolution_m,
+        cluster_opacity=profile.cluster_opacity,
+        cluster_min_contribution=profile.cluster_min_contribution,
+        cluster_seed_world=cluster_seed,
+        navigation_seed_world=seed,
+        capsule_height_m=profile.capsule_height_m,
+        capsule_radius_m=profile.capsule_radius_m,
+        max_seed_relocation_m=profile.max_seed_relocation_m,
+        gpu_index=profile.gpu_index,
+        crop_box_world=crop,
+        cleanup=profile.cleanup,
+        max_gaussian_scale_log=profile.max_gaussian_scale_log,
+    )
 
 
 class FinalizeRequest(ContractModel):
@@ -279,29 +318,7 @@ class FinalizeWorker:
                 profile.crop_height_m,
             ),
         )
-        volume_m3 = (crop[1][0] - crop[0][0]) * (crop[1][1] - crop[0][1]) * (crop[1][2] - crop[0][2])
-        safe_resolution = profile.resolution_m
-        if volume_m3 > 0:
-            min_res = (volume_m3 / 1_500_000_000.0) ** (1 / 3)
-            safe_resolution = max(profile.resolution_m, float(min_res))
-
-        cluster_seed = (seed[0], seed[1], profile.cluster_seed_height_m)
-        config = VoxelConfig(
-            resolution_m=safe_resolution,
-            opacity=profile.opacity,
-            cluster_resolution_m=max(profile.cluster_resolution_m, safe_resolution),
-            cluster_opacity=profile.cluster_opacity,
-            cluster_min_contribution=profile.cluster_min_contribution,
-            cluster_seed_world=cluster_seed,
-            navigation_seed_world=seed,
-            capsule_height_m=profile.capsule_height_m,
-            capsule_radius_m=profile.capsule_radius_m,
-            max_seed_relocation_m=profile.max_seed_relocation_m,
-            gpu_index=profile.gpu_index,
-            crop_box_world=crop,
-            cleanup=profile.cleanup,
-            max_gaussian_scale_log=profile.max_gaussian_scale_log,
-        )
+        config = build_voxel_config(profile, crop, seed)
         raw_visual = confirmation.preview.request.source_visual
         geometry = RgbGeometryService(
             GeometryDependencies(
@@ -565,6 +582,8 @@ def _human_message(error: Exception) -> str:
         return "Đoạn kiểm C–D đo lại trên scene đã quy đổi mét vượt ngưỡng; xác nhận lại tỉ lệ"
     if "seed" in text or "clearance" in text:
         return "Không tìm được chỗ trống cho robot quanh camera đầu; cần chọn điểm robot đứng"
+    if "voxel capacity" in text:
+        return "Vùng dựng vượt giới hạn voxel ở độ phân giải đã chọn; thu hẹp vùng làm việc hoặc xác nhận profile khác"
     return "Dựng hình học/collision hoặc đóng gói bundle thất bại; xem log attempt rồi thử lại"
 
 

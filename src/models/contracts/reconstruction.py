@@ -1,5 +1,6 @@
 """Reconstruction artifacts published by EX-REC."""
 
+import hashlib
 import math
 from enum import StrEnum
 from typing import Literal, Self
@@ -16,6 +17,7 @@ from src.models.contracts.artifacts import (
     SchemaVersion,
 )
 from src.models.contracts.coordinates import CoordinateSystem, MetricScale, MetricScaleStatus, Transform
+from src.models.contracts.identity import canonical_json_bytes
 from src.models.contracts.manifests import InputConfiguration, StageId
 
 
@@ -156,6 +158,35 @@ class CapsuleFootprint(ContractModel):
         return self
 
 
+class GeometryCleanupEvidence(ContractModel):
+    """Measured Gaussian removal and exact cleanup configuration for one RGB collision mesh."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    job_id: Identifier
+    mode: Literal["cluster", "floaters"]
+    source_checksum: Checksum
+    metric_input_checksum: Checksum
+    retained_gaussian_checksum: Checksum
+    collision_mesh_checksum: Checksum
+    effective_config: JsonObject
+    config_checksum: Checksum
+    input_gaussian_count: int = Field(gt=0)
+    retained_gaussian_count: int = Field(gt=0)
+    removed_gaussian_count: int = Field(ge=0)
+    qualification_status: Literal["diagnostic_only"] = "diagnostic_only"
+
+    @model_validator(mode="after")
+    def _bind_counts_and_config(self) -> Self:
+        if self.input_gaussian_count != self.retained_gaussian_count + self.removed_gaussian_count:
+            raise ValueError("cleanup Gaussian counts must conserve input records")
+        if self.effective_config.get("cleanup") != self.mode:
+            raise ValueError("cleanup mode differs from effective configuration")
+        digest = hashlib.sha256(canonical_json_bytes(self.effective_config)).hexdigest()
+        if self.config_checksum != f"sha256:{digest}":
+            raise ValueError("cleanup configuration checksum mismatch")
+        return self
+
+
 class GeometryArtifact(ContractModel):
     """Collision mesh canonical từ RGB 3DGS; EX-REC produce, EX-SIM consume làm collider.
 
@@ -164,7 +195,7 @@ class GeometryArtifact(ContractModel):
     """
 
     artifact_type: Literal["GeometryArtifact"]
-    schema_version: Literal["1.0", "1.1"]
+    schema_version: Literal["1.0", "1.1", "1.2"]
     artifact_uri: ArtifactUri
     artifact_checksum: Checksum
     producer_stage: Literal[StageId.RGB_GEOMETRY]
@@ -181,6 +212,7 @@ class GeometryArtifact(ContractModel):
     seed: SeedDecision
     capsule: CapsuleFootprint
     provenance: PreprocessingProvenance
+    cleanup_evidence: GeometryCleanupEvidence | None = None
 
     @model_validator(mode="after")
     def _require_confirmed_metric_scale(self) -> Self:
@@ -190,6 +222,17 @@ class GeometryArtifact(ContractModel):
             raise ValueError("canonical collision geometry must use meters_per_unit=1")
         if any(item.origin == DependencyOrigin.GROUND_TRUTH for item in self.provenance.dependencies):
             raise ValueError("product collision geometry must not depend on evaluation ground truth")
+        if self.schema_version == "1.2" and self.cleanup_evidence is None:
+            raise ValueError("GeometryArtifact 1.2 requires cleanup evidence")
+        if self.cleanup_evidence is not None:
+            if self.schema_version != "1.2":
+                raise ValueError("cleanup evidence requires GeometryArtifact 1.2")
+            if self.cleanup_evidence.job_id != self.job_id:
+                raise ValueError("cleanup evidence belongs to a different job")
+            if self.cleanup_evidence.source_checksum != self.source_master_checksum:
+                raise ValueError("cleanup evidence source differs from geometry source")
+            if self.cleanup_evidence.collision_mesh_checksum != self.artifact_checksum:
+                raise ValueError("cleanup evidence mesh differs from geometry artifact")
         return self
 
 

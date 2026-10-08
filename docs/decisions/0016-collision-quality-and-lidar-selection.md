@@ -96,3 +96,21 @@ produce PASS: enough observations only means ready for projection scoring. The
 existing reconstruction/alignment flow is not yet gated by this report.
 Projection scoring, perturbation qualification and the product source gate remain
 AUD-13.S2/S3 work; real calibration data and supported thresholds are unqualified.
+
+## AUD-12.S2 implementation note — 2026-10-08
+
+The ADR remains **Proposed**; RGB cleanup is not qualified for physics use. New
+`GeometryArtifact` 1.2 records the exact cleanup config/checksum, raw source hash,
+metric input and filtered PLY hashes, collision mesh hash, and Gaussian counts
+before/after cleanup. The contract checks checksum identity and count conservation
+and labels this evidence `diagnostic_only`. Legacy 1.0/1.1 artifacts remain readable.
+
+The finalizer no longer increases requested voxel or cleanup resolution to fit a
+large crop. It preserves the selected profile or fails with a capacity diagnostic.
+The initial finalizer has no source-bound floor/noise model; current
+`FloorFitEvidence` is produced later in scene extraction/objectify. No plane-based
+point deletion or new SOR filter was enabled without obstacle-retention evidence.
+The saved Aisle_CW source/final mesh lacks the intermediate cleanup artifacts and
+the old collision log lacks a bound profile, so ghost-block reduction and
+thin-obstacle retention remain **Pending**. Held-out collision and Isaac proof
+remain required by AUD-12.S4.

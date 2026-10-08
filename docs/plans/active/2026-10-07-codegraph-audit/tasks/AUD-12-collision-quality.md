@@ -109,6 +109,13 @@ Tests: synthetic floaters + sparse true obstacles, varying density/noise/slopes,
 outlier aggressive-filter negative, effective config identity, source conservation.
 **Exit:** [ ] ghost blocking improves on tuning data; [ ] retention/support matrix pass.
 
+Current code boundary: `FloorFitEvidence` is persisted by scene extraction/objectify
+after the initial `FinalizeWorker` RGB collision stage. The current finalize request
+has no supported pre-collision floor/noise model input. Do not treat that later
+evidence as an input to the earlier stage or remove points by floor height. The
+cleanup report must remain diagnostic-only until a source-bound model is produced
+before collision generation and retention is qualified.
+
 ## Sprint AUD-12.S3 — Opt-in LiDAR-derived collision
 
 **Input:** mode-specific QA-qualified LiDAR/alignment + explicit selected collision mode.
@@ -217,5 +224,54 @@ Isaac contact handoff; CPU regression không đóng real acceptance.
   No GPU, Isaac Sim, production capture, independent obstacle reference or real
   held-out proof was available. These remain explicitly **UNVERIFIED**.
 - **Next:** AUD-13.S1 calibration package projection/overlay QA, per default plan
-  order. AUD-12.S2/S3 remain blocked on floor/noise and calibration/alignment
-  contracts; AUD-12.S4 still requires held-out and exact-candidate Isaac evidence.
+  order. The AUD-12.S2 software slice is implemented, but collision-quality exits
+  remain pending a pre-collision floor/noise model and independent obstacle
+  retention evidence. AUD-12.S3 still needs qualified LiDAR/alignment inputs;
+  AUD-12.S4 requires held-out and exact-candidate Isaac evidence.
+
+### AUD-12.S2 — cleanup evidence and requested-resolution preservation
+
+- **Base:** `f0d92db` (`AUD-14.S3`).
+- **Logic before → after:** the adapter already measured input/retained Gaussian
+  counts and file checksums, but they were attempt-local. `GeometryArtifact` 1.2
+  now persists cleanup evidence in the geometry manifest: source, metric input,
+  filtered Gaussian and collision checksums; exact effective config and checksum;
+  input, retained and removed counts. Validators enforce config hash, count
+  conservation, job/source binding and collision checksum binding. Status is
+  `diagnostic_only`, not a physics-quality claim. `FinalizeWorker` also used to
+  raise requested voxel and cleanup resolutions to fit a large crop; it now keeps
+  both selected values or fails with an actionable capacity error.
+- **Scope kept pending:** no new radius/SOR or floor clipping was enabled. The
+  Aisle_CW runtime job has a source and final mesh but lacks saved filtered PLY and
+  inspection intermediates, and its old collision log is not bound to the exact
+  profile. No before/after ghost-blocking or obstacle-retention result can be
+  recomputed from those files. Initial finalization also has no source-bound floor
+  model, so output evidence remains diagnostic-only and both S2 exit checks remain
+  unchecked.
+- **Related test repair:** the pinned geometry runtime test's CLI mock now accepts
+  the existing `cancel_event` keyword used by `VoxelProcess.qualify`.
+- **Changed files:** `src/models/contracts/reconstruction.py`,
+  `src/models/contracts/__init__.py`,
+  `src/services/reconstruction/rgb/geometry/geometry_artifact.py`,
+  `src/services/reconstruction/finalize.py`,
+  `tests/test_contracts/test_geometry_artifact.py`,
+  `tests/test_reconstruction/test_rec05_product_pipeline.py`,
+  `tests/test_reconstruction/test_rec05_finalize_quality.py`,
+  `tests/test_reconstruction/test_rec05_voxel.py`, this task, ADR 0016 and the
+  plan README.
+- **Schema/config/migration:** new geometry outputs use `GeometryArtifact` 1.2;
+  1.0/1.1 artifacts remain readable with no cleanup evidence. No API, SceneIR,
+  database migration or frontend payload changed.
+- **Verification:** `pytest tests/test_contracts/test_geometry_artifact.py
+  tests/test_reconstruction/test_rec05_product_pipeline.py
+  tests/test_reconstruction/test_rec05_finalize_quality.py
+  tests/test_reconstruction/test_rec05_voxel.py -v` — 48 passed;
+  `ruff check src/ tests/` passed; `ruff format --check src/ tests/` reports 520
+  files already formatted; contract mirror passed (5 enums, 6 models); `git diff
+  --check` passed.
+- **Gate report:** CodeGraph traces `FinalizeWorker → RgbGeometryService →
+  SplatTransformVoxelAdapter → GeometryArtifactManifest`; the shared artifact has
+  five direct callers and no new UI caller. `understand-anything` is unavailable in
+  this session; execution order was confirmed from CodeGraph and current tests.
+  GPU cleanup qualification, pre-collision floor/noise input, independent obstacle
+  retention and held-out path improvement remain **UNVERIFIED**.

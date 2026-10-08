@@ -4,6 +4,7 @@ Contract này là hợp đồng giữa EX-REC (produce) và EX-SIM (consume), n�
 vào các invariant mà validator phải chặn được, không chỉ kiểm field tồn tại.
 """
 
+import hashlib
 import math
 from pathlib import Path
 
@@ -11,10 +12,12 @@ import pytest
 from pydantic import ValidationError
 
 from src.models.contracts.coordinates import CoordinateSystem, MetricScale, MetricScaleStatus, Transform
+from src.models.contracts.identity import canonical_json_bytes
 from src.models.contracts.reconstruction import (
     CapsuleFootprint,
     DependencyOrigin,
     GeometryArtifact,
+    GeometryCleanupEvidence,
     PreprocessingDependency,
     PreprocessingProvenance,
     SeedDecision,
@@ -152,6 +155,8 @@ def test_capsule_length_must_be_height_minus_two_radii(length: float) -> None:
 
 def test_builder_converts_native_bounds_and_similarity() -> None:
     """Builder phải quy đổi native Y-up và tách scale khỏi phần rigid."""
+    cleanup_config = {"cleanup": "floaters", "capsule_height_m": 0.4, "capsule_radius_m": 0.1}
+    cleanup_config_checksum = "sha256:" + hashlib.sha256(canonical_json_bytes(cleanup_config)).hexdigest()
     payload = GeometryArtifactInput(
         job_id="j2",
         artifact_uri="artifact://jobs/j2/rec05/collision.glb",
@@ -169,7 +174,11 @@ def test_builder_converts_native_bounds_and_similarity() -> None:
                 "rotation_xyzw": [0.0, 0.0, 0.0, 1.0],
                 "translation_m": [1.0, 2.0, 3.0],
             },
-            "config": {"capsule_height_m": 0.4, "capsule_radius_m": 0.1},
+            "config": cleanup_config,
+            "config_checksum": cleanup_config_checksum,
+            "source_checksum": OTHER_SHA,
+            "gaussian_counts": {"input": 10, "cluster": 8},
+            "files": {"input.ply": OTHER_SHA, "cluster.ply": SHA, "collision.glb": SHA},
             "native_voxel_metadata": {
                 "gridBounds": {"min": [0.0, 0.0, -4.0], "max": [2.0, 2.0, 0.0]},
                 "sceneBounds": {"min": [0.0, 0.0, -4.0], "max": [2.0, 2.0, 0.0]},
@@ -194,10 +203,46 @@ def test_builder_converts_native_bounds_and_similarity() -> None:
     assert artifact.applied_transform.translation_xyz == (1.0, 2.0, 3.0)
     assert artifact.capsule.shape == "clearance_cylinder"
     assert artifact.capsule.length_m == pytest.approx(0.4)
+    assert artifact.cleanup_evidence is not None
+    assert artifact.cleanup_evidence.removed_gaussian_count == 2
+    assert artifact.cleanup_evidence.qualification_status == "diagnostic_only"
+
+
+def test_cleanup_evidence_rejects_changed_config_or_nonconserving_counts() -> None:
+    """Cleanup evidence must bind the exact profile and account for every removed splat."""
+    effective_config = {"cleanup": "floaters"}
+    checksum = "sha256:" + hashlib.sha256(canonical_json_bytes(effective_config)).hexdigest()
+    evidence = GeometryCleanupEvidence(
+        job_id="j1",
+        mode="floaters",
+        source_checksum=OTHER_SHA,
+        metric_input_checksum=SHA,
+        retained_gaussian_checksum=OTHER_SHA,
+        collision_mesh_checksum=SHA,
+        effective_config=effective_config,
+        config_checksum=checksum,
+        input_gaussian_count=10,
+        retained_gaussian_count=8,
+        removed_gaussian_count=2,
+    )
+    with pytest.raises(ValidationError, match="checksum"):
+        GeometryCleanupEvidence.model_validate(
+            evidence.model_dump() | {"effective_config": {"cleanup": "floaters", "threshold": 0.2}}
+        )
+    with pytest.raises(ValidationError, match="conserve"):
+        GeometryCleanupEvidence.model_validate(evidence.model_dump() | {"removed_gaussian_count": 1})
+
+
+def test_geometry_artifact_v1_2_requires_cleanup_evidence() -> None:
+    """New RGB collision outputs cannot omit their cleanup report."""
+    with pytest.raises(ValidationError, match="requires cleanup evidence"):
+        _artifact(schema_version="1.2")
 
 
 def test_builder_keeps_relocation_visible_in_the_contract(tmp_path: Path) -> None:
     """Relocation không được biến mất khi đi qua contract."""
+    cleanup_config = {"cleanup": "floaters", "capsule_height_m": 1.2, "capsule_radius_m": 0.35}
+    cleanup_config_checksum = "sha256:" + hashlib.sha256(canonical_json_bytes(cleanup_config)).hexdigest()
     payload = GeometryArtifactInput(
         job_id="j3",
         artifact_uri="artifact://jobs/j3/rec05/collision.glb",
@@ -215,7 +260,11 @@ def test_builder_keeps_relocation_visible_in_the_contract(tmp_path: Path) -> Non
                 "rotation_xyzw": [0.0, 0.0, 0.0, 1.0],
                 "translation_m": [0.0, 0.0, 0.0],
             },
-            "config": {"capsule_height_m": 1.2, "capsule_radius_m": 0.35},
+            "config": cleanup_config,
+            "config_checksum": cleanup_config_checksum,
+            "source_checksum": OTHER_SHA,
+            "gaussian_counts": {"input": 10, "cluster": 8},
+            "files": {"input.ply": OTHER_SHA, "cluster.ply": SHA, "collision.glb": SHA},
             "native_voxel_metadata": {
                 "gridBounds": {"min": [-1.0, -1.0, -1.0], "max": [1.0, 1.0, 1.0]},
                 "sceneBounds": {"min": [-1.0, -1.0, -1.0], "max": [1.0, 1.0, 1.0]},

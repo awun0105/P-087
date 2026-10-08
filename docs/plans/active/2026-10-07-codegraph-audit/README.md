@@ -92,6 +92,17 @@ mirror and current CodeGraph index pass. Chrome DevTools verified the notice on 
 local mocked job fixture; authenticated API/browser acceptance is **UNVERIFIED**.
 No production sloped-floor artifact or collision-retention benchmark is qualified,
 so empirical floor/obstacle quality remains pending.
+AUD-12.S2 adds persisted RGB cleanup counts/config/source/output checksums to
+`GeometryArtifact` 1.2 and rejects crops that would silently coarsen the selected
+voxel profile. The output is diagnostic-only: the initial finalize stage has no
+source-bound floor/noise model, and available Aisle_CW artifacts do not contain the
+filtered PLY/inspection intermediates needed to reproduce cleanup. Ghost-block
+improvement and thin-obstacle retention remain pending; no new floor clipping or
+radius/SOR filter is enabled.
+Focused verification passed: 48 reconstruction/contract tests, Ruff check and
+format, contract mirror, and `git diff --check`. CodeGraph is current. The
+`understand-anything` gate is unavailable in this session; no UI changed, so the
+browser DevTools gate does not apply.
 AUD-19.S1 adds checksum-sealed registration input/profile/request/proposal/QA
 contracts and binding/state guards. Independent maps bind exact PCD/PLY file and
 parsed-header identity, m/cm/mm units, frame, assembly revision, project context,
