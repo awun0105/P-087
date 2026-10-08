@@ -480,8 +480,8 @@ Tests: `tests/test_orchestration/test_container_limits.py`, `tests/test_gpu/test
 `tests/test_orchestration/test_resource_telemetry.py`, `tests/test_orchestration/test_resource_admission.py`.
 
 **Exit:**
-- [ ] Sáu nhóm test của phần A pass; các test capability/telemetry/admission hiện có không đổi kỳ vọng.
-- [ ] Hai file môi trường mẫu đã cập nhật.
+- [x] Sáu nhóm test của phần A pass; các test capability/telemetry/admission hiện có không đổi kỳ vọng.
+- [x] Hai file môi trường mẫu đã cập nhật.
 - [ ] (Owner, pod RunPod) Output bước 0 dán vào Result; `MachineCapability` do worker
   báo trên pod khớp với giới hạn cgroup.
 - [ ] (Owner, pod RunPod) Bảng bước 1 và kết quả bước 2 dán vào Result; số worker cuối
@@ -705,3 +705,22 @@ phép để UNVERIFIED kèm ghi chú cho tới đợt thuê máy đầu tiên.
   - `ruff check src/ tests/ scripts/resources/`: pass.
   - `ruff format --check src/ tests/ scripts/resources/`: pass.
   - `pytest tests/test_orchestration/test_observed_budget.py tests/test_orchestration/test_processing_config.py tests/test_orchestration/test_resource_admission.py tests/test_api/test_studio_routes.py tests/integration/test_studio_processing_job.py tests/test_reconstruction/test_rec03_colmap.py -q`: 140 passed.
+
+### Sprint AUD-26.S4 (2026-10-09)
+
+- **Commit base:** `8617667`
+- **Changed files:**
+  - `src/services/orchestration/processing/container_limits.py` (mới): đọc `memory_limit_gb` (cgroup v2 `memory.max`, v1 `memory.limit_in_bytes`), `memory_usage_gb` (v2 `memory.current`, v1 `memory.usage_in_bytes`), `cpu_limit` (v2 `cpu.max`, v1 CFS quota/period), và `effective_cpu_count` (min giữa CPU count, affinity, cgroup quota và RUNPOD_CPU_COUNT).
+  - `src/services/orchestration/processing/capability.py`: cập nhật `_ram_gb()` và `_live_ram_gb()` tôn trọng giới hạn cgroup; cập nhật `probe()` dùng `effective_cpu_count()`.
+  - `scripts/gpu/gpu_plan.py`: `plan_for_machine()` tính `ram_gb` theo `min(RAM vật lý, memory_limit_gb)` và `cores` theo `effective_cpu_count()`.
+  - `deploy/studio/worker.env.example`: đổi `STUDIO_WORKERS=auto` thành `STUDIO_WORKERS=3` kèm chú thích cho pod RTX 3090 (3 worker) và RTX 4090 (2 worker).
+  - `scripts/gpu/studio.env.example`: cập nhật chú thích hướng dẫn số worker tương ứng cho pod RunPod, giữ mặc định 1 cho local dev.
+  - `tests/test_orchestration/test_container_limits.py` (mới): bộ 6 test phủ cgroup v1/v2, missing dir, env fallback, và tích hợp `_ram_gb`/`_live_ram_gb`.
+- **RunPod container nghiệm thu:**
+  - Output bước 0: UNVERIFIED (chờ owner chạy ba lệnh kiểm tra trên pod RunPod).
+  - Bảng bước 1 & kết quả bước 2: UNVERIFIED (chờ owner đo thông lượng và tải hỗn hợp).
+- **Verification:**
+  - `ruff check`: pass
+  - `ruff format --check`: pass
+  - `pytest tests/test_orchestration/test_container_limits.py tests/test_gpu/test_gpu_plan.py tests/test_orchestration/test_resource_telemetry.py tests/test_orchestration/test_resource_admission.py -v`: 86 passed.
+
