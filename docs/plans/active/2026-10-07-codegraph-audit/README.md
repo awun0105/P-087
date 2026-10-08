@@ -282,7 +282,7 @@ AUD-19. Static-map consumer chỉ enable sau registration QA, không bắt AUD-1
 
 Progress hiện tại: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3,
 AUD-03.S1–S3, AUD-04.S1–S3, AUD-10.S1–S3 và AUD-07.S1–S2 đã được commit riêng
-theo sprint.
+theo sprint. AUD-08.S4 và AUD-09.S1 cũng đã được commit riêng.
 AUD-07.S3 đã thêm objectify cancellation, child-process cleanup và terminal
 outcome handling; browser/GPU qualification còn UNVERIFIED.
 AUD-01.S3 verified legacy
@@ -421,7 +421,8 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [ ] Implementation AUD-06 và AUD-07.S3.
 - [ ] Implementation AUD-05 và real Isaac acceptance.
 - [x] Local implementation AUD-08.S1–S4; focused API/domain/frontend regressions.
-- [ ] AUD-08 browser/Isaac acceptance và AUD-09.S1–S3 implementation.
+- [x] AUD-09.S1 typed contract/domain invariants and enrichment override protection.
+- [ ] AUD-08 browser/Isaac acceptance và AUD-09.S2–S3 implementation.
 - [ ] Implementation AUD-12–14 và held-out collision/LiDAR/floor acceptance.
 - [ ] Implementation AUD-15–16 và real latency/preview/browser acceptance.
 - [ ] Implementation AUD-17–18 và qualified opt-in runtime/QA acceptance.

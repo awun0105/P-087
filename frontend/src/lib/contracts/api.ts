@@ -405,6 +405,15 @@ export interface SceneEditCommand {
   edits: SceneObjectCommand[];
 }
 
+/** `src/services/orchestration/scene/models.py` ColliderEditCommand. */
+export interface ColliderEditCommand {
+  expected_scene_revision: string;
+  object_id: string;
+  dimensions_xyz_m?: [number, number, number] | null;
+  local_translation_xyz_m?: [number, number, number] | null;
+  local_rotation_quaternion_xyzw?: [number, number, number, number] | null;
+}
+
 export interface SceneEditResponse {
   job_id: string;
   previous_scene_revision: string;

@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- PLANNED; P1; EX-SIM domain + EX-PRODUCT API/UI.
+- IN PROGRESS — AUD-09.S1 local implementation complete; S2/S3 remain planned; P1; EX-SIM domain + EX-PRODUCT API/UI.
 - Canonical SIM-02/03, SCENE-08, PRODUCT-06/07. SELF-CODE typed command,
   REUSE SceneEditor/gizmo/export adapters.
 - Goal: sửa kích thước/local pose collider hiện có, giữ object visual/geometry
@@ -69,7 +69,7 @@ validation. Keep parent-frame IDs server owned; define no-op policy theo nearby
 scene command convention; inspect every enrichment caller for override behavior.
 Tests: zero/negative/NaN/Inf dimensions, invalid quaternion, no-op/empty command,
 missing object/collider, mesh edit reject, wrong frame, user mass preservation.
-**Exit:** [ ] command contract producer/consumer agree; [ ] domain negative matrix pass.
+**Exit:** [x] command contract producer/consumer agree; [x] domain negative matrix pass.
 
 ## Sprint AUD-09.S2 — Inspector/gizmo và canonical revision
 
@@ -108,11 +108,46 @@ smoke phối hợp AUD-05, không claim từ snapshot/text search.
 .venv/bin/pytest tests/test_contracts/test_scene.py tests/test_simulation/test_colliders.py tests/test_simulation/test_enrichment.py tests/test_simulation/test_usd.py tests/test_simulation/test_hybrid_usd.py tests/test_api/test_scene_v2_routes.py -q
 ```
 
-Planned tests/test_scene/test_collider_edit.py. Frontend tests/object-review.test.tsx,
+tests/test_scene/test_collider_edit.py covers the pure edit command and validation.
+Frontend tests/object-review.test.tsx,
 tests/scene-overlay-gizmo.test.ts và gates theo guide. DONE cần command/UI/export
 consumer proof; initial box-only scope được ghi rõ trong result.
 
 ## Result / Evidence
 
-Pending — before/after collider/scene/candidate checksums, manual-override proof,
-local/world pose witnesses và browser/runtime limitations.
+### AUD-09.S1 — Typed edit command và invariants
+
+- **Base:** `75075b4` (`AUD-08.S4`).
+- **Behavior before → after:** SceneIR had an existing collider model and
+  enrichment could replace an object's collider from the explicit/generated map,
+  but there was no revision-bound collider-edit command. `ColliderEditCommand`
+  now accepts positive finite dimensions and finite local translation plus a
+  normalized local quaternion. Empty input fails; a supplied value equal to the
+  current value is accepted, matching the nearby `TransformEdit` policy.
+- **Domain contract:** only existing AABB/OBB colliders with dimensions can be
+  edited. Object/collider frame IDs, collider type and refs stay server-owned.
+  The pure operation edits only collider dimensions/local pose, preserves the
+  object transform, visual/geometry refs, primitive dimensions, collider params
+  and physics, records manual-override provenance, refreshes the SceneIR checksum,
+  and marks validation stale. It returns the same SceneIR revision; S2 owns
+  publishing it through the shared revision CAS. Physics enrichment now preserves
+  a manual override even when a generated or explicit collider is available.
+- **Files:** `src/services/orchestration/scene/{models.py,objects.py,__init__.py}`,
+  `src/services/scene/editing/commands.py`,
+  `src/services/simulation/enrichment/service.py`,
+  `frontend/src/lib/contracts/api.ts`, `tests/test_scene/test_collider_edit.py`,
+  and this task/plan progress entry.
+- **Verification:**
+  - `.venv/bin/pytest tests/test_contracts/test_scene.py tests/test_simulation/test_colliders.py tests/test_simulation/test_enrichment.py tests/test_simulation/test_usd.py tests/test_simulation/test_hybrid_usd.py tests/test_simulation/test_usd_capabilities.py tests/test_api/test_scene_v2_routes.py tests/test_scene/test_collider_edit.py tests/test_orchestration/test_scene_editor.py tests/test_orchestration/test_simulation_package.py -q` — **176 passed**.
+  - `.venv/bin/ruff check src/ tests/` — **passed**; `.venv/bin/ruff format --check src/ tests/` — **505 files already formatted**.
+  - `.venv/bin/python scripts/check_contract_mirror.py` — **PASS**, 5 enum and 5 model projections.
+  - In `frontend/`, `npm run typecheck`, `npx eslint src/lib/contracts/api.ts`, and `npx vitest run tests/layers.test.ts tests/object-review.test.tsx` — **46 tests passed**.
+- **CodeGraph gate:** explored `ColliderSpec`, `TransformEdit`, object edit
+  commands, enrichment and its `build_simulation_package` caller before editing;
+  verified callers for the new command and pure edit operation after editing.
+  `codegraph status`: 833 files, 16,219 nodes, 47,392 edges; index up to date,
+  with an earlier-engine rebuild warning.
+- **Limitations:** S1 defines the API command contract but does not expose an HTTP
+  route or UI yet. It does not publish a new revision or produce browser/world-pose
+  evidence. Those belong to S2/S3; real Isaac contact remains a separate
+  **UNVERIFIED** acceptance gate.
