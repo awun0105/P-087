@@ -90,7 +90,7 @@ def test_group_distinguishes_not_run_from_unreadable() -> None:
     assert measured.status == "measured" and len(measured.metrics) == 1
 
 
-def test_job_without_results_reports_every_group_as_pending(tmp_path: Path) -> None:
+def test_job_without_results_keeps_stages_pending_and_reports_missing_resource_data(tmp_path: Path) -> None:
     registry = ProjectRegistry(runtime_root=tmp_path / "artifacts")
     registry.seed_from_fixtures()
     job = registry.create_job(SimpleNamespace(project_id="project-fixture-001", scene_revision="rev-001"))
@@ -107,8 +107,17 @@ def test_job_without_results_reports_every_group_as_pending(tmp_path: Path) -> N
         "ST-OBJECT-EXTRACT",
         "system",
     ]
-    assert {group.status for group in evaluation.groups} == {"pending"}
-    assert all(group.metrics == [] for group in evaluation.groups)
+    system = next(group for group in evaluation.groups if group.group_id == "system")
+    other_groups = [group for group in evaluation.groups if group.group_id != "system"]
+    assert {group.status for group in other_groups} == {"pending"}
+    assert all(group.metrics == [] for group in other_groups)
+    assert system.status == "measured"
+    assert {metric.key for metric in system.metrics} == {"system.peak_ram", "system.peak_vram", "system.config"}
+    assert all(metric.value is None for metric in system.metrics)
+    assert all(metric.display == "Chưa đo — job này không có bản ghi tài nguyên" for metric in system.metrics)
+    assert evaluation.summary == [
+        "Không có chỉ số tự kiểm nào dưới ngưỡng. 0 trên 0 chỉ số có ngưỡng; các chỉ số còn lại chỉ để tham khảo."
+    ]
 
 
 def _evaluation() -> JobEvaluation:
@@ -119,6 +128,7 @@ def _evaluation() -> JobEvaluation:
         job_status="SUCCEEDED",
         scene_revision="rev-002",
         generated_at=datetime(2026, 10, 2, 3, 0, tzinfo=UTC),
+        summary=["Đề xuất thứ nhất", "Cảnh báo | dòng\n2"],
         groups=[
             StageEvaluation(
                 group_id="ST-CAMERA-POSE",
@@ -161,6 +171,8 @@ def test_markdown_report_carries_values_verdicts_and_unmeasured_steps() -> None:
     assert "| Sai số | Chưa đo | Các scene đã chạy: 25,35–30,00 dB (6 scene) | — | Lệch pixel |" in report
     assert "## Hình học\n\n_Chưa có kết quả._ Bước này chưa có kết quả." in report
     assert "không so với ground truth" in report
+    assert report.index("- Đề xuất thứ nhất") < report.index("## Vị trí camera")
+    assert "- Cảnh báo \\| dòng 2" in report
 
 
 @pytest_asyncio.fixture
@@ -199,6 +211,32 @@ async def test_evaluation_routes_return_scorecard_and_downloadable_report(client
     assert report.status_code == 200 and report.headers["content-type"].startswith("text/markdown")
     assert report.headers["content-disposition"] == 'attachment; filename="evaluation-job-fixture-001.md"'
     assert report.text.startswith("# Đánh giá scene:")
+    system = next(group for group in body["groups"] if group["group_id"] == "system")
+    assert {metric["key"] for metric in system["metrics"]} >= {
+        "system.peak_ram",
+        "system.peak_vram",
+        "system.config",
+    }
+
+
+@pytest.mark.asyncio
+async def test_evaluation_route_survives_resource_database_read_failure(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import sqlite3
+
+    from src.api.studio import evaluation as evaluation_api
+
+    def unreadable(_database: object) -> list[object]:
+        raise sqlite3.OperationalError("database is unavailable")
+
+    monkeypatch.setattr(evaluation_api, "load_usages", unreadable)
+    response = await client.get("/api/v1/jobs/job-fixture-001/evaluation")
+
+    assert response.status_code == 200
+    system = next(group for group in response.json()["groups"] if group["group_id"] == "system")
+    assert all(metric["value"] is None for metric in system["metrics"] if metric["key"].startswith("system.peak_"))
+    assert "Không đọc được bản ghi tài nguyên của job" in caplog.text
 
 
 def test_held_out_quality_reports_scores_or_the_reason_it_is_missing() -> None:
@@ -355,3 +393,236 @@ def test_lidar_group_reports_the_ingested_package(monkeypatch: pytest.MonkeyPatc
     record.kind = "registered_lidar"
     registered = _values(scorecard._lidar_metrics(registry, SimpleNamespace()))  # type: ignore[arg-type]
     assert "lidar.scans" not in registered and registered["lidar.kind"] == "registered_lidar"
+
+
+def test_advice_summary_rules_and_ordering() -> None:
+    from src.services.orchestration.evaluation.advice import summarize
+
+    g_input = StageEvaluation(
+        group_id="input",
+        title="Input",
+        status="measured",
+        metrics=[
+            Metric(
+                key="input.warnings",
+                label="Cảnh báo chuyển động",
+                value=2,
+                display="đứng yên lâu",
+                meaning="m",
+                verdict="warn",
+                threshold="upload_quality_v2.json",
+            )
+        ],
+    )
+    g_pose = StageEvaluation(
+        group_id="pose",
+        title="Pose",
+        status="measured",
+        metrics=[
+            Metric(
+                key="pose.registered_ratio",
+                label="Tỷ lệ",
+                value=30.0,
+                display="30%",
+                meaning="m",
+                verdict="fail",
+                threshold="≥ 50%",
+            )
+        ],
+    )
+    g_visual = StageEvaluation(
+        group_id="visual",
+        title="Visual",
+        status="measured",
+        metrics=[
+            Metric(
+                key="visual.nonfinite_values",
+                label="Giá trị hỏng",
+                value=5,
+                display="5",
+                meaning="m",
+                verdict="fail",
+                threshold="0",
+            )
+        ],
+    )
+    g_metric = StageEvaluation(
+        group_id="metric",
+        title="Metric",
+        status="measured",
+        metrics=[
+            Metric(
+                key="metric.check_error",
+                label="Sai số đoạn kiểm",
+                value=8.0,
+                display="8,0%",
+                meaning="m",
+                verdict="warn",
+                threshold="≤ 5%",
+            )
+        ],
+    )
+    summary = summarize([g_input, g_pose, g_visual, g_metric])
+    assert len(summary) == 4
+    assert (
+        summary[0]
+        == "COLMAP chỉ dựng được vị trí cho 30% ảnh, dưới ngưỡng ≥ 50%. Quay chậm hơn và để các khung hình liên tiếp chồng lấn nhiều hơn."
+    )
+    assert summary[1] == "File 3DGS có giá trị hỏng. Chạy lại bước dựng hình; không duyệt scene này."
+    assert (
+        summary[2]
+        == "Video có cảnh báo chuyển động: đứng yên lâu. Lần quay sau hãy di chuyển đều tay, tránh đứng yên lâu hoặc lia máy nhanh."
+    )
+    assert (
+        summary[3] == "Đoạn kiểm C–D lệch 8,0%, ngoài ngưỡng ≤ 5%. Đo lại hai đoạn A–B và C–D rồi xác nhận lại tỉ lệ."
+    )
+
+    g_metric_fail = StageEvaluation(
+        group_id="metric",
+        title="Metric",
+        status="measured",
+        metrics=[
+            Metric(
+                key="metric.check_error",
+                label="Sai số đoạn kiểm",
+                value=15.0,
+                display="15,0%",
+                meaning="m",
+                verdict="fail",
+                threshold="≤ 5%",
+            )
+        ],
+    )
+    assert summarize([g_metric_fail]) == [
+        "Đoạn kiểm C–D lệch 15,0%, ngoài ngưỡng ≤ 5%. Đo lại hai đoạn A–B và C–D rồi xác nhận lại tỉ lệ."
+    ]
+
+    g_custom = StageEvaluation(
+        group_id="custom",
+        title="Custom",
+        status="measured",
+        metrics=[
+            Metric(
+                key="custom.metric",
+                label="Chỉ số tùy chỉnh",
+                value=10,
+                display="10 điểm",
+                meaning="m",
+                verdict="warn",
+                threshold="≤ 5 điểm",
+            )
+        ],
+    )
+    assert summarize([g_custom]) == ["Chỉ số tùy chỉnh: 10 điểm (ngưỡng: ≤ 5 điểm)"]
+
+    g_ok = StageEvaluation(
+        group_id="ok_group",
+        title="OK",
+        status="measured",
+        metrics=[
+            Metric(key="m1", label="M1", value=1, display="1", meaning="m", verdict="ok", threshold="> 0"),
+            Metric(key="m2", label="M2", value=2, display="2", meaning="m"),
+        ],
+    )
+    ok_summary = summarize([g_ok])
+    assert ok_summary == [
+        "Không có chỉ số tự kiểm nào dưới ngưỡng. 1 trên 1 chỉ số có ngưỡng; các chỉ số còn lại chỉ để tham khảo."
+    ]
+
+    g_unknown_without_threshold = StageEvaluation(
+        group_id="unknown",
+        title="Unknown",
+        status="measured",
+        metrics=[Metric(key="custom.metric", label="Chỉ số", value=1, display="1", meaning="m", verdict="warn")],
+    )
+    assert summarize([g_unknown_without_threshold]) == ["Chỉ số: 1 (ngưỡng: chưa ghi ngưỡng)"]
+
+    for s in [*summary, *ok_summary]:
+        assert "sẵn sàng" not in s.lower()
+
+
+def test_system_resource_metrics(tmp_path: Path) -> None:
+    from src.services.orchestration.processing.telemetry import ResourceUsage
+
+    registry = ProjectRegistry(runtime_root=tmp_path / "artifacts")
+    registry.seed_from_fixtures()
+    job = registry.create_job(SimpleNamespace(project_id="project-fixture-001", scene_revision="rev-001"))
+    now = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
+
+    def make_usage(
+        tool: str,
+        ram: float | None,
+        vram: float | None,
+        job_id: str | None = None,
+        outcome: str = "completed",
+        completed_at: datetime = now,
+        params: dict[str, float] | None = None,
+        shared_gpu: bool | None = None,
+        gpu_used_before_gb: float | None = None,
+        peak_gpu_used_gb: float | None = None,
+    ) -> ResourceUsage:
+        return ResourceUsage(
+            schema_version="1.2",
+            job_id=job_id or job.job_id,
+            attempt_id="att1",
+            tool=tool,
+            config_checksum="c",
+            runtime_manifest_checksum="r",
+            params=params,
+            started_at=now,
+            completed_at=completed_at,
+            outcome=outcome,
+            exit_code=0 if outcome == "completed" else 1,
+            duration_seconds=10.0,
+            sample_count=1,
+            ram_sample_count=1,
+            vram_sample_count=1,
+            gpu_sample_count=1,
+            scratch_sample_count=1,
+            peak_ram_gb=ram,
+            peak_vram_gb=vram,
+            shared_gpu=shared_gpu,
+            gpu_used_before_gb=gpu_used_before_gb,
+            peak_gpu_used_gb=peak_gpu_used_gb,
+            headroom_before={},
+        )
+
+    u_preview = make_usage(
+        "preview",
+        1.5,
+        2.0,
+        params={"sampling.max_frames": 300.0, "brush.max_splats": 1000000.0, "brush.max_resolution": 1280.0},
+    )
+    u_scene_extract = make_usage(
+        "scene_extract",
+        5.1937,
+        None,
+        completed_at=datetime(2026, 10, 5, 12, 10, tzinfo=UTC),
+        params={"sampling.max_frames": 1200.0, "brush.max_splats": 6000000.0, "brush.max_resolution": 3840.0},
+        shared_gpu=False,
+        gpu_used_before_gb=1.0,
+        peak_gpu_used_gb=4.4179,
+    )
+    u_failed = make_usage("scene_extract", 10.0, 10.0, outcome="failed")
+    u_other_job = make_usage("scene_extract", 20.0, 20.0, job_id="job-other")
+
+    usages = [u_preview, u_scene_extract, u_failed, u_other_job]
+    metrics = scorecard._system_metrics(registry, job, usages)
+    by_key = {metric.key: metric for metric in metrics}
+
+    ram_m = by_key["system.peak_ram"]
+    assert ram_m.value == 5.19
+    assert ram_m.display == "5,2 GB (bước scene_extract)"
+
+    vram_m = by_key["system.peak_vram"]
+    assert vram_m.value == 3.42
+    assert vram_m.display == "3,4 GB (bước scene_extract)"
+
+    config_m = by_key["system.config"]
+    assert config_m.value is None
+    assert config_m.display == "tối đa 1.200 frame · 6.000.000 splat · 3.840 px"
+
+    no_measurement = scorecard._system_metrics(registry, job)
+    assert {metric.key for metric in no_measurement} == {"system.peak_ram", "system.peak_vram", "system.config"}
+    assert all(metric.value is None for metric in no_measurement)
+    assert all(metric.display == "Chưa đo — job này không có bản ghi tài nguyên" for metric in no_measurement)

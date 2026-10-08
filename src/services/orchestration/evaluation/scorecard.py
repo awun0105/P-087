@@ -16,10 +16,13 @@ from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.manifests import JobManifest, StageId, StageStatus
 from src.models.contracts.scene import SceneIR, SceneObjectOrigin, SceneObjectState
 from src.services.orchestration.artifacts import ArtifactStoreError
+from src.services.orchestration.evaluation.advice import summarize
 from src.services.orchestration.evaluation.models import JobEvaluation, Metric, StageEvaluation, Verdict
 from src.services.orchestration.evaluation.reference import ReferenceSet, describe, load_reference
 from src.services.orchestration.jobs.progress import job_progress
 from src.services.orchestration.jobs.stage_views import job_bundle
+from src.services.orchestration.processing.observed import usage_vram
+from src.services.orchestration.processing.telemetry import ResourceUsage
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneError
 from src.services.reconstruction import (
@@ -688,7 +691,96 @@ def _object_metrics(scene: SceneIR | None) -> list[Metric] | None:
     ]
 
 
-def _system_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric] | None:
+def _ram_metric(completed: list[ResourceUsage]) -> Metric:
+    ram_records = [(usage, usage.peak_ram_gb) for usage in completed if usage.peak_ram_gb is not None]
+    if not ram_records:
+        return Metric(
+            key="system.peak_ram",
+            label="RAM tối đa",
+            value=None,
+            unit="GB",
+            display="Chưa đo — job này không có bản ghi tài nguyên",
+            meaning="Lượng RAM lớn nhất tiến trình hệ thống đã sử dụng trong suốt quá trình chạy.",
+        )
+    best, peak_ram = max(ram_records, key=lambda item: item[1])
+    val = round(peak_ram, 2)
+    display = f"{val:.1f}".replace(".", ",") + f" GB (bước {best.tool})"
+    return Metric(
+        key="system.peak_ram",
+        label="RAM tối đa",
+        value=val,
+        unit="GB",
+        display=display,
+        meaning="Lượng RAM lớn nhất tiến trình hệ thống đã sử dụng trong suốt quá trình chạy.",
+    )
+
+
+def _vram_metric(completed: list[ResourceUsage]) -> Metric:
+    vram_records = [(u, usage_vram(u)) for u in completed]
+    valid = [(u, v) for u, v in vram_records if v is not None]
+    if not valid:
+        return Metric(
+            key="system.peak_vram",
+            label="VRAM tối đa",
+            value=None,
+            unit="GB",
+            display="Chưa đo — job này không có bản ghi tài nguyên",
+            meaning="Lượng VRAM lớn nhất GPU đã sử dụng trong suốt quá trình chạy.",
+        )
+    best, vram_num = max(valid, key=lambda item: item[1])
+    val = round(vram_num, 2)
+    display = f"{val:.1f}".replace(".", ",") + f" GB (bước {best.tool})"
+    return Metric(
+        key="system.peak_vram",
+        label="VRAM tối đa",
+        value=val,
+        unit="GB",
+        display=display,
+        meaning="Lượng VRAM lớn nhất GPU đã sử dụng trong suốt quá trình chạy.",
+    )
+
+
+def _config_metric(completed: list[ResourceUsage]) -> Metric:
+    if not completed:
+        return Metric(
+            key="system.config",
+            label="Cấu hình xử lý",
+            value=None,
+            display="Chưa đo — job này không có bản ghi tài nguyên",
+            meaning="Thông số cấu hình giới hạn số frame, số splat và độ phân giải đã áp dụng cho job.",
+        )
+    latest = max(completed, key=lambda u: u.completed_at)
+    if latest.params is None:
+        return Metric(
+            key="system.config",
+            label="Cấu hình xử lý",
+            value=None,
+            display="Chưa đo — job này không có bản ghi tài nguyên",
+            meaning="Thông số cấu hình giới hạn số frame, số splat và độ phân giải đã áp dụng cho job.",
+        )
+    params = latest.params or {}
+
+    def formatted(key: str) -> str:
+        value = params.get(key)
+        return "—" if value is None else f"{int(value):,}".replace(",", ".")
+
+    display = (
+        f"tối đa {formatted('sampling.max_frames')} frame · "
+        f"{formatted('brush.max_splats')} splat · "
+        f"{formatted('brush.max_resolution')} px"
+    )
+    return Metric(
+        key="system.config",
+        label="Cấu hình xử lý",
+        value=None,
+        display=display,
+        meaning="Thông số cấu hình giới hạn số frame, số splat và độ phân giải đã áp dụng cho job.",
+    )
+
+
+def _system_metrics(
+    registry: ProjectRegistry, job: JobManifest, usages: list[ResourceUsage] | None = None
+) -> list[Metric]:
     attempts = registry.list_job_attempts(job.job_id)
     progress = job_progress(job, attempts, preview_ready=True)
     seconds = {
@@ -696,35 +788,40 @@ def _system_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric]
         for stage in progress.stages
         if stage.started_at and stage.completed_at
     }
-    if not seconds:
-        return None
-    slowest = max(seconds, key=lambda stage_id: seconds[stage_id])
-    total = sum(seconds.values())
-    return [
-        Metric(
-            key="system.processing_time",
-            label="Thời gian máy xử lý",
-            value=round(total),
-            unit="giây",
-            display=f"{total / 60:,.1f} phút",
-            meaning="Tổng thời gian các bước đã chạy trong lượt hiện tại, không tính lúc chờ người dùng.",
-        ),
-        Metric(
-            key="system.slowest_stage",
-            label="Bước lâu nhất",
-            value=slowest,
-            display=f"{slowest} ({seconds[slowest] / 60:,.1f} phút)",
-            meaning="Nơi tốn thời gian nhất, tức nơi đáng tối ưu hoặc cần GPU mạnh hơn.",
-        ),
-        Metric(
-            key="system.attempts",
-            label="Số lượt chạy",
-            value=progress.attempt,
-            unit="lượt",
-            display=_number(progress.attempt, 0, "lượt"),
-            meaning="Lớn hơn 1 nghĩa là job từng lỗi và phải chạy lại.",
-        ),
-    ]
+    completed = [u for u in (usages or []) if u.job_id == job.job_id and u.outcome == "completed"]
+    metrics: list[Metric] = []
+    if seconds:
+        slowest = max(seconds, key=lambda stage_id: seconds[stage_id])
+        total = sum(seconds.values())
+        metrics.extend(
+            [
+                Metric(
+                    key="system.processing_time",
+                    label="Thời gian máy xử lý",
+                    value=round(total),
+                    unit="giây",
+                    display=f"{total / 60:,.1f} phút",
+                    meaning="Tổng thời gian các bước đã chạy trong lượt hiện tại, không tính lúc chờ người dùng.",
+                ),
+                Metric(
+                    key="system.slowest_stage",
+                    label="Bước lâu nhất",
+                    value=slowest,
+                    display=f"{slowest} ({seconds[slowest] / 60:,.1f} phút)",
+                    meaning="Nơi tốn thời gian nhất, tức nơi đáng tối ưu hoặc cần GPU mạnh hơn.",
+                ),
+                Metric(
+                    key="system.attempts",
+                    label="Số lượt chạy",
+                    value=progress.attempt,
+                    unit="lượt",
+                    display=_number(progress.attempt, 0, "lượt"),
+                    meaning="Lớn hơn 1 nghĩa là job từng lỗi và phải chạy lại.",
+                ),
+            ]
+        )
+    metrics.extend([_ram_metric(completed), _vram_metric(completed), _config_metric(completed)])
+    return metrics
 
 
 def evaluate_job(
@@ -732,11 +829,13 @@ def evaluate_job(
     job_id: str,
     geometry_config: Path,
     reference_config: Path | None = None,
+    usages: list[ResourceUsage] | None = None,
 ) -> JobEvaluation:
     """Bảng đánh giá hiện tại của một job; nhóm nào chưa có dữ liệu thì ghi rõ trạng thái thay vì bỏ qua.
 
     `geometry_config`: file thông số REC-05 của deployment (`PRODUCT_GEOMETRY_CONFIG`), nguồn kích thước robot.
     `reference_config`: file chứa khoảng tham chiếu PSNR/SSIM/LPIPS từ các scene đã chạy (`PRODUCT_EVALUATION_REFERENCE`).
+    `usages`: danh sách bản ghi đo đạc tài nguyên từ database để đưa vào nhóm Hệ thống.
     """
     job = registry.get_job(job_id)
     project = registry.get_project(job.project_id)
@@ -753,7 +852,7 @@ def evaluate_job(
             StageId.RGB_GEOMETRY.value, "Hình học và va chạm", lambda: _geometry_metrics(registry, job, geometry_config)
         ),
         _group(StageId.OBJECT_EXTRACT.value, "Tách vật thể", lambda: _object_metrics(scene)),
-        _group("system", "Hệ thống", lambda: _system_metrics(registry, job)),
+        _group("system", "Hệ thống", lambda: _system_metrics(registry, job, usages)),
     ]
     # Bước nhận LiDAR chỉ có ở job có gói LiDAR; job chỉ có video không hiện một nhóm "chưa có kết quả" thừa.
     if any(stage.stage_id == StageId.LIDAR_INGEST for stage in job.stage_artifacts):
@@ -770,6 +869,7 @@ def evaluate_job(
             if reference.status == "measured"
             else reference
         )
+    summary = summarize(groups)
     return JobEvaluation(
         job_id=job.job_id,
         project_id=job.project_id,
@@ -777,5 +877,6 @@ def evaluate_job(
         job_status=job.status.value,
         scene_revision=scene.scene_revision if scene else None,
         generated_at=datetime.now(UTC),
+        summary=summary,
         groups=groups,
     )

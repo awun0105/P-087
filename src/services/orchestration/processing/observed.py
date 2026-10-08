@@ -46,7 +46,7 @@ def dominates(run: dict[str, float], job: dict[str, float]) -> bool:
     return set(run) == set(job) and all(run[key] >= job[key] for key in job)
 
 
-def _vram(usage: ResourceUsage) -> float | None:
+def usage_vram(usage: ResourceUsage) -> float | None:
     """VRAM lượt chạy đã dùng: theo PID nếu driver báo; nếu không, mức tăng của cả GPU khi nó chạy một mình."""
     if usage.peak_vram_gb is not None:
         return usage.peak_vram_gb
@@ -118,7 +118,7 @@ def observed_budget(
     for tool in [*tools, *optional_tools]:
         groups: dict[tuple[tuple[str, float], ...], dict[Measured, float]] = {}
         for usage in relevant:
-            vram = _vram(usage)
+            vram = usage_vram(usage)
             if usage.tool != tool or vram is None or usage.peak_ram_gb is None:
                 continue
             group = groups.setdefault(tuple(sorted(usage.params.items())), {"vram": 0.0, "ram": 0.0})  # type: ignore[union-attr]

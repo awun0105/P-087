@@ -184,7 +184,9 @@ Khuyến nghị:
      "{label}: {display} (ngưỡng: {threshold})".
    - Không có chỉ số nào `warn`/`fail`: trả đúng một câu
      "Không có chỉ số tự kiểm nào dưới ngưỡng. {n} trên {total} chỉ số có ngưỡng; các chỉ số còn lại chỉ để tham khảo."
-     với `n` là số chỉ số có `verdict` khác `None` và `total` là tổng số chỉ số của các nhóm `measured`.
+     với `n` là số chỉ số trong nhóm `measured` có `verdict` khác `None` và `total` là số chỉ số trong
+     nhóm `measured` có `threshold` khác `None`. Mẫu số chỉ đếm chỉ số thực sự có ngưỡng, không tính
+     các dòng tài nguyên chỉ để tham khảo.
 2. `evaluate_job`: gán `summary=summarize(groups)` sau khi dựng xong `groups`.
 3. `report.py`: in `summary` thành danh sách gạch đầu dòng ngay sau phần tiêu đề.
 
@@ -222,9 +224,19 @@ Test (`tests/test_orchestration/test_evaluation.py`):
   bỏ qua bản ghi của job khác; không có bản ghi → `value is None`.
 
 **Exit:**
-- [ ] Sáu nhóm test pass.
-- [ ] Gọi `GET /jobs/job-6bc02e5de4ed/evaluation` trên dữ liệu local, dán `summary` và
+- [x] Sáu nhóm test pass.
+- [x] Gọi `GET /jobs/job-6bc02e5de4ed/evaluation` trên dữ liệu local, dán `summary` và
   nhóm Hệ thống vào Result (kỳ vọng peak RAM 5,19 GB và peak VRAM 3,42 GB từ `scene_extract`).
+
+**Kết quả kiểm tra dữ liệu local (`job-6bc02e5de4ed`):**
+- `summary`: `["Không có chỉ số tự kiểm nào dưới ngưỡng. 4 trên 4 chỉ số có ngưỡng; các chỉ số còn lại chỉ để tham khảo."]`
+- Nhóm Hệ thống (`system`):
+  - `system.processing_time` (Thời gian máy xử lý): `value=57488`, `display="958.1 phút"`
+  - `system.slowest_stage` (Bước lâu nhất): `value="ST-METRIC-CANONICALIZE"`, `display="ST-METRIC-CANONICALIZE (874.9 phút)"`
+  - `system.attempts` (Số lượt chạy): `value=1`, `display="1 lượt"`
+  - `system.peak_ram` (RAM tối đa): `value=5.19`, `display="5,2 GB (bước scene_extract)"`
+  - `system.peak_vram` (VRAM tối đa): `value=3.42`, `display="3,4 GB (bước scene_extract)"`
+  - `system.config` (Cấu hình xử lý): `value=None`, `display="tối đa 300 frame · 1.000.000 splat · 1.280 px"`
 
 ---
 

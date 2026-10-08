@@ -42,6 +42,10 @@ def evaluation_markdown(evaluation: JobEvaluation) -> str:
         "hình hoặc tài liệu của dự án; ô “—” nghĩa là chưa có ngưỡng.",
         "",
     ]
+    if evaluation.summary:
+        for item in evaluation.summary:
+            lines.append(f"- {_cell(item)}")
+        lines.append("")
     for group in evaluation.groups:
         lines += _group_lines(group)
     return "\n".join(lines).rstrip() + "\n"
