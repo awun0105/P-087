@@ -47,6 +47,8 @@ _SCHEMA_VERSION = "1.0"
 _MAX_RECOVERY_STEPS = 1000
 #: Revision gốc của mọi job (fixture và scene dựng từ bundle đều bắt đầu từ đây).
 _ROOT_REVISION = "rev-001"
+#: Số job tối đa giữ lineage đã chứng minh trong bộ nhớ một process.
+_LINEAGE_CACHE_JOBS = 8
 
 
 class SceneEditor:
@@ -64,6 +66,9 @@ class SceneEditor:
         self.store = FilesystemArtifactStore(resolver)
         self.head_repository = head_repository
         self._revisions: dict[str, SceneRevision] = {}
+        #: job_id → (head revision, revisions already proven to be in its lineage, next revision to prove).
+        #: Revisions are immutable, so a walk from one head is reused until that job's head moves.
+        self._lineage: dict[str, tuple[str, dict[str, SceneRevision], str | None]] = {}
 
     # --- reading ----------------------------------------------------------
 
@@ -274,18 +279,25 @@ class SceneEditor:
         head = self.head_repository.get(job_id)
         if head is None:
             return None
-        revision = head.scene_revision
-        visited: set[str] = set()
-        while True:
-            if revision in visited:
-                return None
-            visited.add(revision)
-            if revision == scene_revision:
-                return candidate
-            current = self._load_revision(job_id, revision, fresh=True)
-            if current is None or current.supersedes_revision is None:
-                return None
-            revision = current.supersedes_revision
+        known_head, known, cursor = self._lineage.get(job_id, (head.scene_revision, {}, head.scene_revision))
+        if known_head != head.scene_revision:
+            known, cursor = {}, head.scene_revision
+        else:
+            known = dict(known)
+        # Walk the committed lineage lazily and remember it: callers such as ownership recovery ask for
+        # every ancestor in turn, which would otherwise re-walk from the head each time (O(n²) loads).
+        while scene_revision not in known and cursor is not None and cursor not in known:
+            current = self._load_revision(job_id, cursor, fresh=True)
+            if current is None:
+                cursor = None
+                break
+            known[cursor] = current
+            cursor = current.supersedes_revision
+        self._lineage.pop(job_id, None)
+        self._lineage[job_id] = (head.scene_revision, known, cursor)
+        while len(self._lineage) > _LINEAGE_CACHE_JOBS:
+            self._lineage.pop(next(iter(self._lineage)))
+        return candidate if scene_revision in known else None
 
     def publish_next(
         self,

@@ -544,3 +544,39 @@ def test_postgres_initial_reservation_has_one_winner() -> None:
     finally:
         with database.transaction(write=True) as tx:
             tx.execute("DELETE FROM r2s_scene_publications WHERE job_id=?", (job_id,))
+
+
+def test_walking_every_ancestor_loads_each_revision_once_and_follows_a_moving_head(
+    scene_state: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ownership recovery asks revision() for each ancestor in turn; that must stay linear, not quadratic."""
+    editor = _head_editor(scene_state)
+    _publish_root(editor)
+    current = "rev-001"
+    for index in range(12):
+        current = _edit(editor, current, float(index))
+    lineage_loads: list[str] = []
+    original = editor._load_revision
+
+    def counting(job_id: str, revision: str, *, fresh: bool = False):  # noqa: ANN202
+        if fresh:
+            lineage_loads.append(revision)
+        return original(job_id, revision, fresh=fresh)
+
+    monkeypatch.setattr(editor, "_load_revision", counting)
+
+    walked = []
+    revision: str | None = current
+    while revision is not None:
+        record = editor.revision(_JOB_ID, revision)
+        assert record is not None
+        walked.append(revision)
+        revision = record.supersedes_revision
+
+    assert len(walked) == 13 and len(lineage_loads) == 13 and len(set(lineage_loads)) == 13
+
+    newest = _edit(editor, current, 99.0)
+    lineage_loads.clear()
+    assert editor.revision(_JOB_ID, "rev-001") is not None
+    assert editor.revision(_JOB_ID, newest) is not None
+    assert len(lineage_loads) == 14
