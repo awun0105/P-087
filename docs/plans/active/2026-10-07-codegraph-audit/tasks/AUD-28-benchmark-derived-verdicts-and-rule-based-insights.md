@@ -212,6 +212,9 @@ Số đo tài nguyên:
      và `display="Chưa đo — job này không có bản ghi tài nguyên"`. Đây là quy ước hiện có
      của `Metric` (xem ghi chú ở `models.py` cho `value`).
    - Ba chỉ số này không có `verdict`.
+   - `system.processing_time` và `system.slowest_stage` chỉ tính các stage worker thuộc attempt hiện tại;
+     loại `ST-METRIC-CANONICALIZE` vì thời lượng của nó chứa thời gian chờ người dùng, đồng thời loại
+     stage được tái sử dụng từ attempt trước.
 
 Test (`tests/test_orchestration/test_evaluation.py`):
 
@@ -222,6 +225,8 @@ Test (`tests/test_orchestration/test_evaluation.py`):
 - Không câu nào trong `summary` chứa "sẵn sàng".
 - Peak RAM/VRAM: chọn đúng giá trị lớn nhất và đúng tên tool; bỏ qua lượt `failed`;
   bỏ qua bản ghi của job khác; không có bản ghi → `value is None`.
+- `system.processing_time` loại thời gian chờ xác nhận metric và stage tái sử dụng khi retry;
+  `system.slowest_stage` chỉ chọn trong các stage worker của attempt hiện tại.
 
 **Exit:**
 - [x] Test khuyến nghị, số đo tài nguyên, API fallback và observed budget pass.
@@ -332,6 +337,28 @@ DONE khi cả ba sprint tick đủ Exit.
 - **Runtime boundary:** the authenticated local GET returned the older response shape, while
   the current checkout could not access the configured local PostgreSQL registry. Live job
   evidence remains unverified.
+
+### AUD-28.S2 timing correction — 2026-10-09
+
+- **Reason:** live review exposed `system.processing_time=57,488` seconds and
+  `system.slowest_stage=ST-METRIC-CANONICALIZE (874.9 minutes)`. That interval includes the
+  user's metric-confirmation wait. The old scorecard also counted stage artifacts carried into
+  a retry.
+- **Change:** `current_attempt_stage_timings` is now shared by the benchmark and scorecard.
+  The scorecard totals measured worker stages from the current attempt and chooses the slowest
+  from the same set. Metric confirmation remains represented as user wait in the benchmark.
+- **Regression:** before the fix, tests measured 870.7 minutes instead of 40 seconds for a
+  14.5-hour confirmation wait, and 175.5 minutes instead of 30 seconds after a retry. Both
+  tests pass with the shared timing rules.
+- **Verification:** `.venv/bin/pytest tests/test_orchestration/test_evaluation.py
+  tests/test_orchestration/test_pipeline_timing.py -q` (27 passed);
+  `.venv/bin/ruff check src/ tests/` (passed);
+  `.venv/bin/ruff format --check src/ tests/` (537 files formatted); CodeGraph sync reports
+  up to date; `graphify update .` completed.
+- **Browser:** authenticated DevTools review rendered the existing page with HTTP 200 and no
+  console errors or warnings. Its evaluation endpoint still serves schema `1.0`, without
+  `summary`, and the old 958.1-minute value. The running API is not serving this checkout, so
+  the corrected live response remains **UNVERIFIED**.
 
 ### Sprint AUD-28.S3 — 2026-10-09
 

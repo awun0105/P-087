@@ -16,6 +16,7 @@ from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.manifests import JobManifest, StageId, StageStatus
 from src.models.contracts.scene import SceneIR, SceneObjectOrigin, SceneObjectState
 from src.services.orchestration.artifacts import ArtifactStoreError
+from src.services.orchestration.benchmark import current_attempt_stage_timings
 from src.services.orchestration.evaluation.advice import summarize
 from src.services.orchestration.evaluation.models import JobEvaluation, Metric, StageEvaluation, Verdict
 from src.services.orchestration.evaluation.reference import ReferenceSet, describe, load_reference
@@ -784,9 +785,9 @@ def _system_metrics(
     attempts = registry.list_job_attempts(job.job_id)
     progress = job_progress(job, attempts, preview_ready=True)
     seconds = {
-        stage.stage_id.value: (stage.completed_at - stage.started_at).total_seconds()
-        for stage in progress.stages
-        if stage.started_at and stage.completed_at
+        stage.stage_id: stage.seconds
+        for stage in current_attempt_stage_timings(job, attempts, progress)
+        if stage.seconds is not None
     }
     completed = [u for u in (usages or []) if u.job_id == job.job_id and u.outcome == "completed"]
     metrics: list[Metric] = []

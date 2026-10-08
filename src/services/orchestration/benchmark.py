@@ -199,6 +199,66 @@ def _stage_scope(
     return "unknown"
 
 
+def current_attempt_stage_timings(
+    job: JobManifest,
+    attempts: Sequence[JobAttemptRecord],
+    progress: JobProgress,
+    *,
+    observed_at: datetime | None = None,
+) -> list[StageTiming]:
+    """Wall timings for worker stages in the projected attempt, excluding user confirmation wait."""
+    observed_at = observed_at or datetime.now(UTC)
+    attempt_events = [event for event in attempts if event.attempt == progress.attempt]
+    attempt_started_at = next(
+        (event.recorded_at for event in attempt_events if event.status == JobStatus.RUNNING), None
+    )
+    current_attempt_stage_ids = {event.current_stage for event in attempt_events if event.status == JobStatus.RUNNING}
+    has_verified_preview_time = any(event.preview_verified_at is not None for event in attempt_events)
+
+    stages: list[StageTiming] = []
+    for stage in progress.stages:
+        started_at, completed_at = stage.started_at, stage.completed_at
+        # Legacy records end visual timing after metric proposal; use Brush's published visual stage
+        # artifact as the closest direct observation when no product-verified preview timestamp exists.
+        if stage.stage_id == StageId.VISUAL_RECON and not has_verified_preview_time and attempt_started_at is not None:
+            visual_outputs = [
+                item.completed_at
+                for item in job.stage_artifacts
+                if item.stage_id == StageId.VISUAL_RECON
+                and item.artifact_type == "BrushVisualArtifact"
+                and item.completed_at is not None
+                and item.completed_at >= attempt_started_at
+            ]
+            if visual_outputs:
+                completed_at = max(visual_outputs)
+        scope = _stage_scope(stage.stage_id, started_at, completed_at, attempt_started_at, current_attempt_stage_ids)
+        duration = (
+            _seconds(started_at, completed_at)
+            if scope == "attempt" and stage.stage_id != StageId.METRIC_CANONICALIZE
+            else None
+        )
+        wait_end = completed_at
+        if stage.stage_id == StageId.METRIC_CANONICALIZE and stage.state == "waiting":
+            wait_end = observed_at
+        wait_duration = (
+            _seconds(started_at, wait_end)
+            if scope == "attempt" and stage.stage_id == StageId.METRIC_CANONICALIZE
+            else None
+        )
+        stages.append(
+            StageTiming(
+                stage_id=stage.stage_id.value,
+                state=stage.state,
+                seconds=duration,
+                started_at=started_at,
+                completed_at=completed_at,
+                scope=scope,
+                waiting_seconds=wait_duration,
+            )
+        )
+    return stages
+
+
 def _tool_timings(
     registry: ProjectRegistry,
     job_id: str,
@@ -289,50 +349,7 @@ def build_benchmark(
     terminal_event = next((event for event in reversed(attempt_events) if event.status in TERMINAL_STATUSES), None)
     is_terminal = job.status in TERMINAL_STATUSES and job.completed_at is not None
     attempt_completed_at = terminal_event.recorded_at if terminal_event else job.completed_at if is_terminal else None
-    current_attempt_stage_ids = {event.current_stage for event in attempt_events if event.status == JobStatus.RUNNING}
-
-    stages: list[StageTiming] = []
-    for stage in progress.stages:
-        started_at, completed_at = stage.started_at, stage.completed_at
-        # Legacy records end visual timing after metric proposal; use Brush's published visual stage
-        # artifact as the closest direct observation when no product-verified preview timestamp exists.
-        has_verified_preview_time = any(event.preview_verified_at is not None for event in attempt_events)
-        if stage.stage_id == StageId.VISUAL_RECON and not has_verified_preview_time and attempt_started_at is not None:
-            visual_outputs = [
-                item.completed_at
-                for item in job.stage_artifacts
-                if item.stage_id == StageId.VISUAL_RECON
-                and item.artifact_type == "BrushVisualArtifact"
-                and item.completed_at is not None
-                and item.completed_at >= attempt_started_at
-            ]
-            if visual_outputs:
-                completed_at = max(visual_outputs)
-        scope = _stage_scope(stage.stage_id, started_at, completed_at, attempt_started_at, current_attempt_stage_ids)
-        duration = (
-            _seconds(started_at, completed_at)
-            if scope == "attempt" and stage.stage_id != StageId.METRIC_CANONICALIZE
-            else None
-        )
-        wait_end = completed_at
-        if stage.stage_id == StageId.METRIC_CANONICALIZE and stage.state == "waiting":
-            wait_end = observed_at
-        wait_duration = (
-            _seconds(started_at, wait_end)
-            if scope == "attempt" and stage.stage_id == StageId.METRIC_CANONICALIZE
-            else None
-        )
-        stages.append(
-            StageTiming(
-                stage_id=stage.stage_id.value,
-                state=stage.state,
-                seconds=duration,
-                started_at=started_at,
-                completed_at=completed_at,
-                scope=scope,
-                waiting_seconds=wait_duration,
-            )
-        )
+    stages = current_attempt_stage_timings(job, attempts, progress, observed_at=observed_at)
 
     active_worker_stages = [
         stage

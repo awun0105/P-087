@@ -1,6 +1,6 @@
 """Bảng đánh giá: chỉ số lấy đúng từ dữ liệu, bước chưa có kết quả không bị bịa số, báo cáo xuất đúng nội dung."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,6 +8,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from src.models.contracts.manifests import JobStatus, StageArtifact, StageId
 from src.models.contracts.scene import SceneIR, SceneObjectOrigin, SceneObjectState
 from src.services.orchestration.artifacts import ArtifactNotFoundError
 from src.services.orchestration.evaluation import (
@@ -18,6 +19,7 @@ from src.services.orchestration.evaluation import (
     evaluation_markdown,
     scorecard,
 )
+from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.projects.registry import ProjectRegistry
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -626,3 +628,113 @@ def test_system_resource_metrics(tmp_path: Path) -> None:
     assert {metric.key for metric in no_measurement} == {"system.peak_ram", "system.peak_vram", "system.config"}
     assert all(metric.value is None for metric in no_measurement)
     assert all(metric.display == "Chưa đo — job này không có bản ghi tài nguyên" for metric in no_measurement)
+
+
+def _timed_stage(stage_id: StageId, started_at: datetime, completed_at: datetime) -> StageArtifact:
+    return StageArtifact(
+        stage_id=stage_id,
+        status="SUCCEEDED",
+        artifact_type="TimingFixture",
+        artifact_uri=f"artifact://jobs/job-timing/{stage_id.value.lower()}.json",
+        artifact_checksum="sha256:" + "a" * 64,
+        data_class="derived",
+        started_at=started_at,
+        completed_at=completed_at,
+    )
+
+
+def _timing_event(
+    attempt: int,
+    status: JobStatus,
+    stage_id: StageId,
+    recorded_at: datetime,
+    *,
+    stage_started_at: datetime | None = None,
+) -> JobAttemptRecord:
+    return JobAttemptRecord(
+        attempt=attempt,
+        status=status,
+        current_stage=stage_id,
+        recorded_at=recorded_at,
+        stage_started_at=stage_started_at,
+    )
+
+
+def test_system_processing_time_excludes_metric_confirmation_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry = ProjectRegistry(runtime_root=tmp_path / "artifacts")
+    registry.seed_from_fixtures()
+    job = registry.create_job(SimpleNamespace(project_id="project-fixture-001", scene_revision="rev-001"))
+    start = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
+    visual_start = start + timedelta(seconds=1)
+    visual_end = visual_start + timedelta(seconds=10)
+    metric_start = visual_end
+    metric_end = metric_start + timedelta(hours=14, minutes=30)
+    geometry_start = metric_end + timedelta(seconds=5)
+    geometry_end = geometry_start + timedelta(seconds=30)
+    stages = [
+        _timed_stage(StageId.VISUAL_RECON, visual_start, visual_end),
+        _timed_stage(StageId.METRIC_CANONICALIZE, metric_start, metric_end),
+        _timed_stage(StageId.RGB_GEOMETRY, geometry_start, geometry_end),
+    ]
+    attempts = [
+        _timing_event(1, JobStatus.QUEUED, StageId.INPUT_VALIDATE, start),
+        _timing_event(1, JobStatus.RUNNING, StageId.VISUAL_RECON, visual_start, stage_started_at=visual_start),
+        _timing_event(1, JobStatus.RUNNING, StageId.METRIC_CANONICALIZE, metric_start, stage_started_at=metric_start),
+        _timing_event(1, JobStatus.RUNNING, StageId.RGB_GEOMETRY, geometry_start, stage_started_at=geometry_start),
+        _timing_event(1, JobStatus.SUCCEEDED, StageId.RGB_GEOMETRY, geometry_end),
+    ]
+    job = job.model_copy(
+        update={
+            "status": JobStatus.SUCCEEDED,
+            "current_stage": StageId.RGB_GEOMETRY,
+            "completed_at": geometry_end,
+            "stage_artifacts": stages,
+        }
+    )
+    monkeypatch.setattr(registry, "list_job_attempts", lambda _job_id: attempts)
+
+    metrics = scorecard._system_metrics(registry, job)
+    by_key = {metric.key: metric for metric in metrics}
+
+    assert by_key["system.processing_time"].value == 40
+    assert by_key["system.slowest_stage"].value == StageId.RGB_GEOMETRY.value
+
+
+def test_system_processing_time_ignores_stages_reused_from_prior_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry = ProjectRegistry(runtime_root=tmp_path / "artifacts")
+    registry.seed_from_fixtures()
+    job = registry.create_job(SimpleNamespace(project_id="project-fixture-001", scene_revision="rev-001"))
+    retry_at = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
+    old_start = retry_at - timedelta(hours=3)
+    old_visual_start = retry_at - timedelta(hours=1)
+    geometry_start = retry_at + timedelta(seconds=10)
+    geometry_end = geometry_start + timedelta(seconds=30)
+    stages = [
+        _timed_stage(StageId.CAMERA_POSE, old_start, old_visual_start),
+        _timed_stage(StageId.VISUAL_RECON, old_visual_start, retry_at - timedelta(minutes=5)),
+        _timed_stage(StageId.RGB_GEOMETRY, geometry_start, geometry_end),
+    ]
+    attempts = [
+        _timing_event(2, JobStatus.QUEUED, StageId.RGB_GEOMETRY, retry_at),
+        _timing_event(2, JobStatus.RUNNING, StageId.RGB_GEOMETRY, geometry_start, stage_started_at=geometry_start),
+        _timing_event(2, JobStatus.SUCCEEDED, StageId.RGB_GEOMETRY, geometry_end),
+    ]
+    job = job.model_copy(
+        update={
+            "status": JobStatus.SUCCEEDED,
+            "current_stage": StageId.RGB_GEOMETRY,
+            "completed_at": geometry_end,
+            "stage_artifacts": stages,
+        }
+    )
+    monkeypatch.setattr(registry, "list_job_attempts", lambda _job_id: attempts)
+
+    metrics = scorecard._system_metrics(registry, job)
+    by_key = {metric.key: metric for metric in metrics}
+
+    assert by_key["system.processing_time"].value == 30
+    assert by_key["system.slowest_stage"].value == StageId.RGB_GEOMETRY.value
