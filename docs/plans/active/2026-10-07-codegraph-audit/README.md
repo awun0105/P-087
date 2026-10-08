@@ -28,10 +28,12 @@ Chrome profile lock. Guest rollout vẫn đợi database qualification, browser
 acceptance và AUD-20.S3 seed acceptance.
 AUD-23.S1 đã thêm profile/media contracts dùng chung Python–TypeScript, input-
 specific capability blockers, dimension fitting cho portrait/landscape và
-checksum compatibility cho `InputManifest` cũ. Local verification: 148 backend-
-related tests, 8 focused Vitest tests, Ruff, typecheck, changed-file
-ESLint và production build đều pass. WebCodecs/runtime support, actual upload,
-bitrate quality và sensor consumers vẫn thuộc AUD-23.S2–S5.
+checksum compatibility cho `InputManifest` cũ. AUD-23.S2 đã thêm local Worker
+decode/resize/downselect/AVC encode/MP4 mux, bounded OPFS artifacts, incremental
+hash và output-frame/source-PTS map verification. Local verification: S1 backend
+148 tests; S1/S2 focused frontend 20 tests, typecheck, changed-file ESLint và
+production build pass. Browser codec/runtime support, actual upload, measured
+memory/bitrate quality and sensor consumers remain unverified and belong to S3–S5.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -405,7 +407,10 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 
 - [x] AUD-23.S1 versioned media/capability/preparation contracts, Python/TypeScript
       agreement, frame-map rules, preset dimension fitting and legacy checksum preservation.
-- [ ] AUD-23.S2–S4 client encode, server/REC integration, upload UI and recovery;
+- [x] AUD-23.S2 bounded local Worker encode, OPFS/backpressure, PTS frame sampling,
+      checksummed mapping, output verification and cancellation cleanup; 20 focused
+      tests/typecheck/changed ESLint/webpack build pass.
+- [ ] AUD-23.S3–S4 server/REC integration, upload UI and content-bound recovery;
       AUD-23.S5 real browser, bandwidth, quality and geometry acceptance.
 - [ ] Implementation AUD-24 và grouped upload/R1–R6 recipe/consumer/browser acceptance.
 - [x] Hoãn AUD-25/ADR0025 theo yêu cầu owner; gỡ khỏi execution order và active dependencies.

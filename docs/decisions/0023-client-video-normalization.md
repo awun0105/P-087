@@ -74,11 +74,17 @@ Unsupported audio or metadata must produce an explicit remediation state. A user
 may choose to upload original bytes only through an explicit path; no hidden raw
 fallback is allowed.
 
-Profile and preparation fixtures currently pass local Python/TypeScript contract
-tests. They do not establish WebCodecs availability, playable output, memory bounds,
-actual bandwidth savings, calibration projection, LiDAR pose association, or
-reconstruction quality. AUD-23.S2–S5 must provide that evidence before accepting
-this ADR.
+AUD-23.S2 now implements a Worker-local conversion using `mediabunny@1.61.3`
+(MPL-2.0), `@noble/hashes@2.4.0` (MIT), OPFS-backed streams and output re-decode
+for PTS/frame-map checks. It caps presentation sampling at 30 FPS without frame
+duplication, preserves compatible audio or requires explicit omission, and fails
+closed on unsupported browser/media/storage conditions. The dependency versions
+are pinned in `frontend/package.json` and `frontend/package-lock.json`. This is
+implementation evidence, not browser qualification. Profile/contract and
+orchestration tests do not establish real WebCodecs availability, playable output,
+measured memory bounds, actual bandwidth savings, calibration projection, LiDAR
+pose association or reconstruction quality. Upload/REC consumers and real browser
+acceptance remain AUD-23.S3–S5; keep this ADR **Proposed** until those gates pass.
 
 ## Alternatives Considered
 
@@ -99,6 +105,10 @@ all phones/browsers support every codec or bandwidth always falls by a fixed fac
 ## Follow-Up
 
 - [AUD-23](../plans/active/2026-10-07-codegraph-audit/tasks/AUD-23-client-video-normalization.md).
+- [Mediabunny writing files](https://mediabunny.dev/guide/writing-media-files) —
+  stream targets and backpressure; target-browser behavior still needs qualification.
+- [Mediabunny codec support](https://mediabunny.dev/guide/supported-formats-and-codecs) —
+  runtime codec availability varies by browser and platform.
 - [W3C WebCodecs](https://www.w3.org/TR/webcodecs/) — codec support/config/resource contracts.
 - [Chrome WebCodecs guide](https://developer.chrome.com/docs/web-platform/best-practices/webcodecs) — capability detection, queueing và explicit resource release.
 - [FFmpeg rotation](https://ffmpeg.org/ffmpeg.html#Video-Options) và

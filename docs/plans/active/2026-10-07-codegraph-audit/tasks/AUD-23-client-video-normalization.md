@@ -282,9 +282,10 @@ only proves orchestration; do not label browser encoding or real bandwidth accep
 
 ## Result / Evidence
 
-AUD-23.S1 contract implementation — details and exact check output are recorded
-below. Encoder/upload/browser/bandwidth/geometry acceptance remains for S2–S5;
-the presence of a capability DTO is not evidence that a browser can encode a file.
+AUD-23.S1 contracts and AUD-23.S2 local encoder implementation are recorded
+below. Upload/consumer integration and real-browser/bandwidth/geometry acceptance
+remain for S3–S5; local unit tests are not evidence that a target browser can encode
+or play a real capture.
 
 ### S1 changes and verification
 
@@ -338,3 +339,76 @@ the presence of a capability DTO is not evidence that a browser can encode a fil
   passes and generates all 16 static pages.
 - DevTools: n/a — no rendered UI or runtime behavior changed; actual browser media
   capability and encode remain unverified until S5.
+
+### S2 changes and verification
+
+- Added `prepareVideoForUpload` and a dedicated module Worker using pinned
+  `mediabunny@1.61.3` (MPL-2.0) plus `@noble/hashes@2.4.0` (MIT) for incremental
+  SHA-256. The input is read and hashed incrementally; encoded MP4, temporary
+  selection rows and final JSONL frame map are written through OPFS. MP4 output
+  uses a backpressure-aware `WritableStream` with a one-chunk high-water mark.
+  The original `File` is never modified and this sprint does not call an upload endpoint.
+- The conversion callback selects source presentation frames on integer PTS at a
+  maximum interval of 30 FPS, drops without duplicating, and records source frame
+  index/PTS. It intentionally does not set MediaBunny's `frameRate` option because
+  the pinned package's CFR path fills presentation gaps with duplicate frames.
+  Output is decoded again in presentation order; its actual PTS is paired with the
+  selection sidecar, then written as bounded, checksummed JSONL.
+- The Worker verifies one readable AVC video track, output frame count and source
+  mapping, monotonic presentation timestamps, source/output duration tolerance,
+  baked rotation/SAR and dimensions, SDR color tags, actual output digest/size,
+  and every preserved audio track. Unsupported audio requires explicit omission;
+  HDR, negative start PTS, multi-video/subtitle/attachment inputs, unsupported
+  codec/transform, duration over two hours, decoded area over 12,582,912 pixels,
+  unknown/insufficient OPFS quota, and a frame map over 32 MiB fail with typed
+  errors. Cancellation terminates the Worker and attempts removal of all temporary
+  files. The 64 MiB storage reserve and bitrate estimate are conservative gates,
+  not a measured memory or output-size guarantee.
+- CodeGraph was run on `prepareVideoForUpload`, the Worker conversion/output
+  verification, `PresentationFrameSelector`, and callers. The service has no
+  upload or UI consumer yet; only its focused test calls it. `directUpload.ts`,
+  server ingest, frame extraction, camera priors and calibration consumers are
+  unchanged and remain S3/S4 work.
+- Tests cover 24/25/29.97/30 FPS preservation, 60→30 source indices, VFR gaps,
+  nonzero PTS, strict order, rotation/SAR/flip pixel matrix, incremental hash,
+  safe file name, finalized-file service contract, worker termination and OPFS
+  cleanup. They do not exercise a real browser codec or the Worker against a
+  playable media fixture.
+- Verification commands and results:
+  - `cd frontend && npx vitest run tests/video-preparation-contract.test.ts tests/video-normalization-core.test.ts tests/video-normalization-service.test.ts` — **20 passed**.
+  - `cd frontend && npm run typecheck` — pass.
+  - `cd frontend && npx eslint src/lib/media/video-normalization-core.ts src/lib/media/video-normalization.ts src/lib/media/video-normalization.worker.ts tests/video-normalization-core.test.ts tests/video-normalization-service.test.ts` — pass.
+  - `cd frontend && npx esbuild src/lib/media/video-normalization.worker.ts --bundle --format=esm --platform=browser --target=es2022 --alias:@=./src --outfile=/tmp/aud23-s2-video-normalization.worker.js` — pass; generated a **1,251,089-byte** standalone Worker bundle.
+  - `cd frontend && npm run build -- --webpack` — **exit 0**, all 16 static pages generated.
+  - `cd frontend && npm ci --dry-run --ignore-scripts --no-audit` — **exit 0**;
+    npm emitted existing `EBADENGINE` warnings because this checkout runs Node
+    24.11.1 while jsdom/css-color dependencies request Node 24.15 or newer.
+  - `git diff --check` — pass.
+- Browser codec support, real playable bytes, memory bounds, upload savings, paired
+  LiDAR projection/pose association, reconstruction quality and full UI lifecycle
+  remain **UNVERIFIED** until their later sprint gates. The standalone Worker
+  bundle and types pass static checks; the bundle is about 1.2 MiB before
+  transfer compression. This is not device qualification or a measured browser
+  memory result.
+
+### S2 pre-flight gate report (GUIDE.md Rule 13)
+
+- codegraph: explored `prepareVideoForUpload`, `video-normalization.worker.ts`,
+  `Conversion`, `PresentationFrameSelector`, output validation and callers; `codegraph
+  sync` reports 775 files, 14,376 nodes and 41,335 edges. The normalizer has no
+  product caller; its only indexed caller is the focused service test.
+- impact: the normalizer is currently called only by its focused test; upload,
+  server and reconstruction consumers are not changed in S2. S3/S4 must bind actual
+  uploaded bytes and map identity before using the media output.
+- understand: local File → lazy demux/decode → PTS selection → resize/orientation
+  and SAR correction → AVC/MP4 → output re-decode and map verification → finalized
+  local artifact. Audio is copied only when supported or omitted by explicit choice.
+- minimal-code: reused MediaBunny's demux/decode/encode/mux and OPFS streams;
+  added a focused PTS selector, bounded temporary map writer, Worker service and
+  lifecycle tests. No realtime canvas recorder, whole-file array buffer, or UI
+  surface was introduced.
+- checks: typecheck, changed-file ESLint, 20 focused Vitest tests, production
+  webpack build, standalone Worker bundle and npm lockfile dry-run pass; see exact
+  commands above.
+- DevTools: n/a — S2 adds no rendered UI or browser upload flow. Real browser media
+  behavior and UI acceptance are explicitly pending S5.
