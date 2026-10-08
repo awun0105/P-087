@@ -220,6 +220,18 @@ def test_preparation_manifest_allows_sdr_defaults_for_unreported_source_color() 
         ClientVideoPreparationManifest.model_validate(hdr_output)
 
 
+def test_preparation_manifest_accepts_output_color_that_reports_only_some_fields() -> None:
+    """A real encoder may write only matrix/range; a missing transfer must not crash validation (HTTP 500)."""
+    payload = copy.deepcopy(_fixtures()["preparation_manifest"])
+    payload["source_video"]["color"] = None
+    payload["prepared_video"]["color"] = {"primaries": None, "transfer": None, "matrix": "bt709", "range": "tv"}
+    _resign_manifest(payload)
+
+    manifest = ClientVideoPreparationManifest.model_validate(payload)
+
+    assert manifest.prepared_video.color is not None and manifest.prepared_video.color.transfer is None
+
+
 def test_portrait_rotation_is_valid_when_geometry_is_explicit() -> None:
     payload = copy.deepcopy(_fixtures()["preparation_manifest"])
     payload["source_video"].update(display_width=1080, display_height=1920, rotation_degrees=90)

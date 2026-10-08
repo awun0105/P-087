@@ -386,7 +386,7 @@ def _preserves_sdr_color_metadata(
     prepared: VideoColorMetadata | None,
 ) -> bool:
     """Preserve observed source colorimetry while allowing standard SDR defaults for unknown fields."""
-    if prepared is not None and _is_hdr_transfer(prepared.transfer):
+    if prepared is not None and _is_hdr_transfer(prepared.transfer or ""):
         return False
     if source is None:
         return True
