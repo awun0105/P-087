@@ -6,7 +6,10 @@
 - Canonical PRODUCT-02/08/09, REC-03/04.
 - Goal: ước lượng RAM/VRAM không còn thấp hơn số đã đo và không còn cao gấp
   nhiều lần số đã đo; "tối đa cho máy này" không để RAM kéo tụt thông số GPU;
-  bảng thông số trên UI dùng số đã đo khi có, giống hàng đợi admission.
+  bảng thông số trên UI dùng số đã đo khi có, giống hàng đợi admission; worker đo
+  đúng RAM/CPU được cấp trong container và chạy đúng số worker trên pod production.
+- Máy đích production: một pod RunPod có một GPU 24 GB (RTX 3090 hoặc RTX 4090).
+  Quadro T2000 4 GB là máy dev; không tối ưu riêng cho nó.
 - [Agent guide](../AGENT_GUIDE.md), [ADR 0026](../../../../decisions/0026-decoupled-resource-tuning-and-observed-budget.md).
 
 ## Baseline và scope
@@ -56,6 +59,48 @@ Kết luận từ số đo:
    chạy cũ phù hợp, nhưng `evaluate` (UI và điều kiện chặn tạo job) thì không. Hai
    nơi có thể cho hai kết luận khác nhau về cùng một cấu hình.
 
+### Máy đích và nguyên tắc phục vụ nhiều người dùng (owner chốt 2026-10-08)
+
+- Production chạy trên pod RunPod một GPU 24 GB. Bảng giá RunPod (đọc 2026-10-08, cần
+  kiểm lại trên console khi thuê) liệt kê pod RTX 3090 với 16 vCPU và 125 GB RAM, pod
+  RTX 4090 với 6 vCPU và 41 GB RAM. Cấu hình CPU/RAM thay đổi theo host.
+- Khi nhiều người dùng cùng gửi job, chất lượng không được giảm: job giữ nguyên cấu
+  hình đã chọn và chờ trong hàng đợi. Chấp nhận thời gian chờ dài hơn.
+- Vì vậy `maximum_for_machine` tính theo cả card, không chia cho số worker; và không
+  thêm trần thông số theo vai trò. Chi phí của guest đã được chặn bằng quota 3 lượt mỗi
+  ngày (AUD-22).
+- Cơ chế đã có và giữ nguyên: hàng đợi xoay vòng theo người dùng (`jobs/queue.py`,
+  `fair_order`), admission chỉ cho job chạy khi đủ VRAM/RAM, vị trí và thời gian chờ ước
+  tính hiển thị cho người dùng.
+
+### Số đo thời gian theo pha (bằng chứng cho số worker)
+
+Lấy từ `process.log` và `brush-train.log` của các job local trên laptop 12 nhân + T2000:
+
+| Job | Frame thật | COLMAP (CPU): extractor + matcher + mapper | Brush (GPU) |
+|---|---|---|---|
+| `job-a713242a38be` | 149 | 3,2 + 3,5 + 6,4 = 13,1 phút | 28,5 phút |
+| `job-9b9aa3dac9f1` | 174 | 5,2 + 5,5 + 5,9 = 16,6 phút | không lấy được (nhiều lượt chạy lại) |
+| `job-43f3bc853742` | chưa rõ | 7,5 + 5,7 + 8,4 = 21,6 phút | không có |
+
+Hai điều rút ra:
+
+1. COLMAP chạy hoàn toàn trên CPU (`use_gpu: false`) và chiếm một phần lớn thời gian
+   job. Trên GPU 24 GB, Brush nhanh hơn nhiều so với T2000 trong khi COLMAP phụ thuộc
+   CPU của pod, nên tỉ trọng COLMAP ở production sẽ còn cao hơn. Đây là suy luận, chưa đo trên pod.
+2. Hai job cùng train Brush trên một card phải chia nhau sức tính của GPU. Lợi ích của
+   việc chạy song song đến từ chỗ job này dùng CPU (COLMAP) trong khi job kia dùng GPU
+   (Brush), không đến từ việc nhiều job cùng train.
+
+Hai vấn đề đo máy trong container (đã kiểm trong source):
+
+- RAM đọc từ `/proc/meminfo` (`capability.py:105`, `:160`) và `SC_PHYS_PAGES`
+  (`gpu_plan.py:192`). Trong container, các nguồn này thường trả về RAM của máy chủ chứ
+  không phải phần pod được cấp. Chưa kiểm trên pod RunPod thật.
+- Số nhân lấy từ `os.cpu_count()` (`capability.py:208`), và COLMAP dùng
+  `min(16, cpu_count)` luồng (`processing/config.py:64`). Trên pod 6 vCPU nằm trên host
+  nhiều nhân, mỗi job COLMAP sẽ mở 16 luồng.
+
 ### Những điều chưa biết (không được coi là sự thật)
 
 - Chưa có lượt chạy nào trên 546 frame thật. Hệ số RAM ở S1 là ngoại suy cho
@@ -63,6 +108,8 @@ Kết luận từ số đo:
 - Chưa biết số Gaussian cuối cùng của từng lượt, nên chưa tách được phần VRAM do
   số splat và phần do số ảnh. S1 chỉ nâng hằng số nền của VRAM, không đổi hai hệ số còn lại.
 - Chỉ có một lượt đo `scene_extract`.
+- Chưa có số đo nào trên RTX 3090/4090, và chưa có số đo nào khi nhiều job chạy chung
+  một card. Số worker ở S4 là giá trị khởi đầu suy ra từ số đo local, phải xác nhận trên pod.
 
 ### Owned
 
@@ -70,6 +117,10 @@ Kết luận từ số đo:
 `src/services/orchestration/processing/observed.py`,
 `configs/product/processing_presets_v1.json`,
 `scripts/resources/calibrate_resource_model.py` (mới),
+`src/services/orchestration/processing/container_limits.py` (mới),
+`src/services/orchestration/processing/capability.py`, `scripts/gpu/gpu_plan.py`,
+`deploy/studio/worker.env.example`, `scripts/gpu/studio.env.example`,
+`tests/test_orchestration/test_container_limits.py` (mới), `tests/test_gpu/test_gpu_plan.py`,
 `src/api/studio/processing.py`, `src/api/studio/scenes.py`, `src/api/studio/assemblies.py`
 (chỉ dòng gọi `evaluate`), `src/services/orchestration/jobs/admission.py` (chỉ dòng import),
 `tests/test_orchestration/test_processing_config.py`,
@@ -102,6 +153,8 @@ của người khác; nếu thấy cần sửa thì dừng và báo).
 | `maximum_for_machine` | một `t` cho mọi thông số | hai lần tìm kiếm nối tiếp: nhóm SFM rồi nhóm SPLAT |
 | `evaluate` | luôn dùng `estimate_gb` | dùng số đã đo cho RAM/VRAM khi nơi gọi truyền vào |
 | `warn_ratio`, `danger_ratio` | 0,75 / 0,92 | giữ nguyên, không thêm hệ số đệm nào |
+| RAM và số nhân worker báo cáo | theo `/proc/meminfo` và `os.cpu_count()` của host | lấy giá trị nhỏ nhất giữa host và giới hạn của container |
+| `STUDIO_WORKERS` trong file môi trường mẫu của production | `auto` | giá trị cụ thể theo loại pod (xem S4) |
 
 Consumer phải kiểm lại vì ước lượng RAM giảm:
 
@@ -115,8 +168,10 @@ Consumer phải kiểm lại vì ước lượng RAM giảm:
 - S1 độc lập. S2 cần S1 (bảng kỳ vọng tính theo hệ số của S1). S3 cần S1.
 - Liên quan AUD-15 (đo latency theo stage): AUD-15 đã ghi số frame thật vào bản
   ghi timing. Script ở S1 đọc artifact của job để lấy frame thật; không sửa schema của AUD-15.
-- Xác nhận ngoại suy trên 546 frame cần owner chạy job thật (xem Exit của S1).
-  Việc này không chặn S2 và S3.
+- Xác nhận ngoại suy trên 546 frame cần owner chạy job thật trên pod 24 GB (xem Exit
+  của S1). Việc này không chặn S2 và S3.
+- S4 độc lập về code với S1–S3. Phần đo trên pod của S4 nên chạy cùng đợt thuê máy với
+  phần đo của S1 để không thuê hai lần.
 
 ---
 
@@ -171,8 +226,9 @@ Tests: `tests/test_orchestration/test_processing_config.py`, `tests/test_gpu/tes
 - [ ] Script chạy trên `data/studio_local/runtime.db`, bảng kết quả dán vào Result;
   mọi lượt `preview` `completed` có cột `đạt` = đúng.
 - [ ] Bốn giá trị preset đã đổi; test mới và ba file test trên pass.
-- [ ] (Owner, phần cứng thật) Hai lượt chạy có ≥ 1.000 frame thật; chạy lại script; ước
-  lượng vẫn ≥ số đo. Chưa có thì ghi UNVERIFIED trong Result, không tick.
+- [ ] (Owner, pod RunPod 24 GB) Hai lượt chạy có ≥ 1.000 frame thật ở preset tối đa;
+  chạy lại script trên DB của pod; ước lượng vẫn ≥ số đo. Chưa có thì ghi UNVERIFIED
+  trong Result, không tick.
 
 ---
 
@@ -227,8 +283,10 @@ Việc đi kèm:
    `test_maximum_uses_idle_baseline_not_what_a_running_job_left_free`,
    `test_unknown_machine_is_not_reported_as_safe`.
 
-Bảng kỳ vọng (đĩa trống 500 GB, không có mốc rảnh, hệ số của S1). Tôi đã mô phỏng
-thuật toán trên bằng `interpolate` và `estimate_gb` thật để ra các số này:
+Bảng kỳ vọng (đĩa trống 500 GB, không có mốc rảnh, hệ số của S1). Các số này ra từ
+việc mô phỏng thuật toán trên bằng `interpolate` và `estimate_gb` thật. Dòng 24 GB là
+cấu hình production. Các dòng 4–12 GB là test của thuật toán (và là trường hợp card
+24 GB đang bị job khác chiếm một phần), không phải cấu hình được hỗ trợ:
 
 | VRAM / RAM | max_frames | max_image_size | max_num_features | max_resolution | max_splats | total_train_iters |
 |---|---|---|---|---|---|---|
@@ -317,23 +375,131 @@ Tests: `tests/test_orchestration/test_observed_budget.py`,
 - [ ] Năm test trên pass; các test hiện có của admission không đổi kỳ vọng.
 - [ ] Result ghi rõ `runtime_manifest_checksum` lấy từ đâu ở từng nơi gọi.
 
+---
+
+## Sprint AUD-26.S4 — Giới hạn container và số worker trên pod 24 GB
+
+**Input:** `capability.py`, `gpu_plan.py`, `processing/config.py`, hai file môi trường mẫu.
+**Output:** worker báo đúng RAM và số nhân được cấp trong container; file môi trường mẫu
+của production có số worker cụ thể; một quy trình đo để xác nhận số worker trên pod.
+**Contract:** trên máy không có giới hạn container (laptop dev), mọi số đo giữ nguyên
+như trước sprint. Không đổi schema `MachineCapability`.
+
+Phần A — đọc giới hạn container:
+
+1. Tạo `src/services/orchestration/processing/container_limits.py`, gồm các hàm thuần
+   nhận thư mục gốc làm tham số để test được bằng thư mục tạm (theo cách `procfs.py`
+   dùng `PROC_ROOT`):
+   - `memory_limit_gb(cgroup_root) -> float | None`: đọc `memory.max` (cgroup v2), nếu
+     không có thì `memory/memory.limit_in_bytes` (cgroup v1). Giá trị `max`, giá trị
+     không phải số, hoặc số lớn hơn 2^60 nghĩa là không giới hạn → trả `None`.
+   - `memory_usage_gb(cgroup_root) -> float | None`: đọc `memory.current` (v2) hoặc
+     `memory/memory.usage_in_bytes` (v1).
+   - `cpu_limit(cgroup_root) -> float | None`: đọc `cpu.max` (v2, dạng `quota period`;
+     `max` → `None`) hoặc `cpu/cpu.cfs_quota_us` chia `cpu/cpu.cfs_period_us` (v1; quota
+     âm → `None`).
+   - `effective_cpu_count() -> int`: giá trị nhỏ nhất, làm tròn xuống và tối thiểu 1, của
+     `os.cpu_count()`, `len(os.sched_getaffinity(0))`, `cpu_limit(...)` nếu có, và biến
+     môi trường `RUNPOD_CPU_COUNT` nếu có và là số nguyên dương.
+   - Mọi lỗi đọc file trả `None` cho nguồn đó; không ném lỗi ra ngoài.
+2. `capability.py`:
+   - `_ram_gb()`: trả `min(MemTotal, memory_limit_gb)` khi có giới hạn.
+   - `_live_ram_gb()`: trả `min(MemAvailable, memory_limit_gb - memory_usage_gb)` khi có
+     đủ hai số của cgroup; kết quả âm thì trả 0.
+   - Dòng 208: thay `os.cpu_count() or 1` bằng `effective_cpu_count()`.
+   - `telemetry.py` gọi `ram_available_gb()` nên tự nhận giá trị mới; không sửa file đó.
+3. `scripts/gpu/gpu_plan.py`, hàm `plan_for_machine`: `ram_gb` dùng
+   `min(RAM vật lý, memory_limit_gb)` và `cores` dùng `effective_cpu_count()`.
+4. Không sửa `processing/config.py`: `num_threads = min(colmap_max_threads, capability.cpu_count)`
+   tự đúng khi `cpu_count` đã đúng.
+
+Test phần A (`tests/test_orchestration/test_container_limits.py`, dùng thư mục tạm):
+
+- cgroup v2 có `memory.max = 44023414784` → 41,0 GB; `memory.max = max` → `None`.
+- cgroup v1 có `memory.limit_in_bytes` → đúng giá trị; giá trị 9223372036854771712 → `None`.
+- `cpu.max = "600000 100000"` → 6,0; `cpu.max = "max 100000"` → `None`.
+- Không có thư mục cgroup → mọi hàm trả `None`, `effective_cpu_count()` bằng số nhân của máy.
+- `RUNPOD_CPU_COUNT=6` trên máy 12 nhân → 6; `RUNPOD_CPU_COUNT=abc` → bỏ qua.
+- `_ram_gb()` với host 125 GB và giới hạn 41 GB → 41; không có giới hạn → 125.
+
+Phần B — số worker khởi đầu:
+
+Giá trị đề xuất, suy ra từ số đo ở mục Baseline:
+
+| Pod | vCPU | RAM | `STUDIO_WORKERS` | Lý do |
+|---|---|---|---|---|
+| RTX 3090 | 16 | 125 GB | `3` | Một job train Brush trên GPU trong khi tối đa hai job khác chạy COLMAP trên CPU. Ba job ở bước nặng VRAM nhất (`scene_extract`, 3,42 GB) cộng lại khoảng 10 GB, còn chỗ cho một job preset tối đa. |
+| RTX 4090 | 6 | 41 GB | `2` | Sáu vCPU chỉ đủ cho một job COLMAP chạy hết tốc lực; job thứ hai tận dụng GPU khi job đầu đang ở COLMAP. RAM 41 GB đủ cho hai job (mỗi job tối đa khoảng 5,2 GB đã đo). |
+
+Vì sao không dùng `auto`: `gpu_plan.plan` tính `auto` theo VRAM (4 worker trên card 24 GB
+ở preset tối thiểu) và `CORES_PER_JOB = 2`. Nó không biết COLMAP dùng hết mọi nhân, nên
+cho số worker cao hơn mức CPU của pod phục vụ được.
+
+5. `deploy/studio/worker.env.example`: đổi `STUDIO_WORKERS=auto` thành `STUDIO_WORKERS=3`
+   và thêm chú thích ba dòng: giá trị 3 cho pod RTX 3090 16 vCPU, giá trị 2 cho pod
+   RTX 4090 6 vCPU, và tham chiếu tới task này cho quy trình đo.
+6. `scripts/gpu/studio.env.example` (dòng 88): cập nhật chú thích cho cùng nội dung;
+   giữ giá trị mặc định local là 1.
+7. Không đổi hằng số `CORES_PER_JOB`, `VRAM_HEADROOM`, `OBJECTIFY_VRAM_GB` trong `gpu_plan.py`.
+8. Không đổi admission và hàng đợi. Số worker chỉ là số job tối đa chạy cùng lúc; job
+   lớn vẫn chờ tới khi đủ VRAM và giữ nguyên cấu hình.
+
+Phần C — quy trình đo trên pod (owner chạy, agent không tự xác nhận):
+
+Bước 0, trước khi chạy job nào, ghi vào Result output của ba lệnh trong pod:
+
+```bash
+env | grep RUNPOD
+grep -E "MemTotal|MemAvailable" /proc/meminfo; nproc
+cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/cpu.max 2>/dev/null || cat /sys/fs/cgroup/memory/memory.limit_in_bytes /sys/fs/cgroup/cpu/cpu.cfs_quota_us
+```
+
+Bước 1, đo thông lượng: dùng cùng một video, preset tối thiểu, gửi 6 job giống nhau từ
+6 tài khoản khác nhau (để hàng đợi xoay vòng không ảnh hưởng). Lặp lại với
+`STUDIO_WORKERS` = 1, 2, 3, 4. Mỗi lần ghi:
+
+- Tổng thời gian từ lúc job đầu bắt đầu tới lúc job cuối hoàn tất.
+- Thời gian của từng job (lấy từ nhóm "Hệ thống" của bảng đánh giá).
+- Peak VRAM và RAM của từng job (chạy `scripts/resources/calibrate_resource_model.py`).
+
+Bước 2, đo tải hỗn hợp: với số worker đã chọn, gửi một job preset tối đa cùng ba job
+preset tối thiểu. Xác nhận không job nào lỗi vì hết bộ nhớ và job tối đa không chờ quá
+thời gian của ba job nhỏ cộng lại.
+
+Quy tắc chọn: lấy số worker cho tổng thời gian ở bước 1 ngắn nhất. Nếu hai giá trị
+chênh nhau dưới 10% thì chọn giá trị nhỏ hơn, vì mỗi job riêng lẻ xong nhanh hơn.
+Cập nhật `deploy/studio/worker.env.example` nếu kết quả khác giá trị khởi đầu.
+
+Tests: `tests/test_orchestration/test_container_limits.py`, `tests/test_gpu/test_gpu_plan.py`,
+`tests/test_orchestration/test_resource_telemetry.py`, `tests/test_orchestration/test_resource_admission.py`.
+
+**Exit:**
+- [ ] Sáu nhóm test của phần A pass; các test capability/telemetry/admission hiện có không đổi kỳ vọng.
+- [ ] Hai file môi trường mẫu đã cập nhật.
+- [ ] (Owner, pod RunPod) Output bước 0 dán vào Result; `MachineCapability` do worker
+  báo trên pod khớp với giới hạn cgroup.
+- [ ] (Owner, pod RunPod) Bảng bước 1 và kết quả bước 2 dán vào Result; số worker cuối
+  cùng được ghi lại. Chưa có thì ghi UNVERIFIED, không tick.
+
 ## Verification và DoD
 
 ```bash
 .venv/bin/ruff check src/ tests/ scripts/resources/
 .venv/bin/ruff format --check src/ tests/ scripts/resources/
-.venv/bin/pytest tests/test_orchestration/test_processing_config.py tests/test_orchestration/test_observed_budget.py tests/test_orchestration/test_resource_admission.py tests/test_gpu/test_gpu_plan.py tests/test_api/test_studio_routes.py tests/integration/test_studio_processing_job.py -q
+.venv/bin/pytest tests/test_orchestration/test_container_limits.py tests/test_orchestration/test_resource_telemetry.py tests/test_orchestration/test_processing_config.py tests/test_orchestration/test_observed_budget.py tests/test_orchestration/test_resource_admission.py tests/test_gpu/test_gpu_plan.py tests/test_api/test_studio_routes.py tests/integration/test_studio_processing_job.py -q
 .venv/bin/python scripts/resources/calibrate_resource_model.py
 ```
 
-Phân loại evidence: test ma trận và test hệ số là unit; bảng của script trên
-`runtime.db` là local integration; lượt chạy ≥ 1.000 frame là GPU evidence do owner
-chạy. Mô phỏng phần cứng bằng `MachineCapability` giả không được ghi là nghiệm thu GPU.
+Phân loại evidence: test ma trận, test hệ số và test giới hạn container là unit; bảng
+của script trên `runtime.db` là local integration; lượt chạy ≥ 1.000 frame và các phép
+đo số worker là GPU evidence do owner chạy trên pod. Mô phỏng phần cứng bằng
+`MachineCapability` giả và số đo trên T2000 không được ghi là nghiệm thu cho production.
 
-DONE khi cả ba sprint tick đủ Exit, trừ dòng phần cứng của S1 được phép để UNVERIFIED
-kèm ghi chú.
+DONE khi cả bốn sprint tick đủ Exit. Các dòng "(Owner, pod RunPod)" của S1 và S4 được
+phép để UNVERIFIED kèm ghi chú cho tới đợt thuê máy đầu tiên.
 
 ## Result / Evidence
 
 Chưa triển khai. Mỗi sprint ghi: commit base, file thật sự sửa, lệnh và output, bảng
-của script (S1), bảng ma trận thực tế (S2), nguồn checksum (S3), giới hạn còn lại.
+của script (S1), bảng ma trận thực tế (S2), nguồn checksum (S3), output bước 0 và bảng
+đo số worker (S4), giới hạn còn lại.

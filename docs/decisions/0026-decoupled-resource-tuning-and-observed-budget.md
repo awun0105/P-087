@@ -40,6 +40,17 @@ khác nhau về cùng một cấu hình.
 `_fits` đã yêu cầu `required < available * warn_ratio` với `warn_ratio = 0,75`, tức đã
 có khoảng đệm 1,33 lần.
 
+Bối cảnh triển khai (owner chốt 2026-10-08): production chạy trên pod RunPod một GPU
+24 GB (RTX 3090 hoặc RTX 4090), phục vụ nhiều người dùng thử cùng lúc. Owner ưu tiên
+chất lượng hơn thời gian chờ: job không bị giảm cấu hình vì máy đông, chỉ chờ lâu hơn.
+Quadro T2000 4 GB là máy dev.
+
+Hai vấn đề đo máy xuất hiện khi chạy trong container: worker đọc RAM từ `/proc/meminfo`
+và số nhân từ `os.cpu_count()`, là các nguồn thường phản ánh máy chủ chứ không phải phần
+container được cấp. COLMAP chạy trên CPU với `min(16, cpu_count)` luồng và chiếm 13–22
+phút trong các job đã đo, nên CPU của pod, không phải VRAM, là thứ giới hạn số job chạy
+song song có ích.
+
 ## Quyết định đề xuất
 
 1. **Giữ nguyên dạng công thức của `estimate_gb`, chỉ đổi giá trị hệ số theo số đo.**
@@ -60,6 +71,17 @@ có khoảng đệm 1,33 lần.
 5. **Giữ `warn_ratio = 0,75` và `danger_ratio = 0,92`.** Không thêm hệ số đệm nào khác.
 6. **Không thêm mức sàn cho `scene_extract` vào mô hình.** Số đo của bước này đi vào
    `evaluate` qua quyết định 4 khi máy đã có lịch sử.
+7. **"Tối đa cho máy này" tính theo cả card, không chia cho số worker.** Nhiều người
+   dùng cùng lúc được xử lý bằng hàng đợi xoay vòng và admission đã có; cấu hình của job
+   không bị hạ. Không thêm trần thông số theo vai trò; chi phí của guest do quota số lượt
+   mỗi ngày (ADR 0022) chặn.
+8. **Worker đo RAM và số nhân theo giới hạn của container.** Lấy giá trị nhỏ nhất giữa
+   số của host và giới hạn cgroup (và `RUNPOD_CPU_COUNT` khi có).
+9. **Số worker đặt cụ thể theo loại pod, không dùng `auto` ở production.** Giá trị khởi
+   đầu: 3 worker cho pod RTX 3090 (16 vCPU), 2 worker cho pod RTX 4090 (6 vCPU). Lý do:
+   lợi ích của chạy song song đến từ việc một job dùng CPU cho COLMAP trong khi job khác
+   dùng GPU cho Brush; nhiều job cùng train trên một card chỉ chia nhau sức tính. Giá trị
+   cuối cùng được chốt bằng phép đo thông lượng trên pod.
 
 ## Hệ quả
 
@@ -69,7 +91,10 @@ có khoảng đệm 1,33 lần.
 - Điều kiện chặn tạo job (`evaluation.blocking`) sẽ chặn ít hơn vì ước lượng RAM giảm.
 - `scripts/gpu/gpu_plan.py` chia worker theo `estimate_gb`; ước lượng RAM giảm sẽ cho
   phép nhiều worker song song hơn trên máy thuê.
-- Máy 24 GB VRAM / 16 GB RAM nhận 6 triệu splat và 3.840 px thay vì 1,9 triệu và 1.760 px.
+- Card 24 GB nhận 6 triệu splat và 3.840 px bất kể RAM của pod là 16 hay 125 GB, thay
+  vì 1,9 triệu và 1.760 px khi RAM là 16 GB.
+- Khi máy đông, job preset tối đa có thể chờ lâu vì cần khoảng 10,75 GB VRAM trống.
+- Trên máy không có giới hạn container, số đo RAM và số nhân không đổi.
 
 ## Giới hạn đã biết
 
@@ -79,3 +104,7 @@ có khoảng đệm 1,33 lần.
   theo megapixel chưa được hiệu chỉnh.
 - Máy chưa có lịch sử chạy thì UI chưa cảnh báo được nhu cầu của `scene_extract`
   (một lượt đo: 5,19 GB RAM, 3,42 GB VRAM).
+- Chưa có số đo nào trên RTX 3090/4090 và chưa có số đo nào khi nhiều job chạy chung một
+  card. Số worker ở quyết định 9 suy ra từ số đo trên laptop 12 nhân + T2000.
+- Chưa kiểm trên pod RunPod thật việc `/proc/meminfo` và `os.cpu_count()` trả số của host.
+  Cấu hình vCPU/RAM của pod lấy từ bảng giá RunPod đọc ngày 2026-10-08 và thay đổi theo host.
