@@ -319,7 +319,7 @@ def test_source_owned_background_stays_at_source_pose_through_edits_and_keeps_fl
     assert pallet.transform == ownership.source_transform
 
 
-def test_source_owned_background_does_not_carve_user_added_boxes_and_rejects_overlap(tmp_path: Path) -> None:
+def test_source_owned_background_keeps_shared_triangles_instead_of_guessing_or_blocking(tmp_path: Path) -> None:
     registry, job = _scene_job(tmp_path)
     scene = registry.scene.current(job.job_id).scene
     pallet = scene.objects[0]
@@ -370,13 +370,25 @@ def test_source_owned_background_does_not_carve_user_added_boxes_and_rejects_ove
     both_kept = scene.model_copy(update={"objects": [pallet, kept_overlap]}, deep=True)
     assert _carved_environment(registry, both_kept).carved_triangles == 0
 
-    # One carved, one kept: the shared triangles may belong to the kept object, so the build must not guess.
+    # One carved, one kept: the shared triangles may belong to the kept object, so they stay in the background
+    # (never delete collision of something that stays) and the build reports them instead of blocking the export.
     mixed = scene.model_copy(update={"objects": [confirmed.objects[0], kept_overlap]}, deep=True)
-    with pytest.raises(SourceCollisionOwnershipError, match="claimed by both"):
-        _carved_environment(registry, mixed)
+    shared_background = _carved_environment(registry, mixed)
+    assert shared_background.retained_shared_triangles == confirmed_background.carved_triangles > 0
+    assert shared_background.retained_shared_object_ids == ("overlap",)
+    assert shared_background.carved_triangles == 0
+    assert shared_background.identity == _carved_environment(registry, both_kept).identity
+    assert shared_background.identity != confirmed_background.identity
     mixed_reversed = scene.model_copy(update={"objects": [kept_overlap, confirmed.objects[0]]}, deep=True)
-    with pytest.raises(SourceCollisionOwnershipError, match="claimed by both"):
-        _carved_environment(registry, mixed_reversed)
+    reversed_background = _carved_environment(registry, mixed_reversed)
+    assert reversed_background.identity == shared_background.identity
+    assert reversed_background.retained_shared_object_ids == ("overlap",)
+
+    # Resolving the neighbour (confirming it) carves the region again and nothing is retained.
+    resolved = _carved_environment(registry, both_carved)
+    assert (
+        resolved.retained_shared_triangles == 0 and resolved.carved_triangles == confirmed_background.carved_triangles
+    )
 
     assert confirmed_background.carved_triangles > 0
     assert user_background.carved_triangles == 0
@@ -458,9 +470,20 @@ def test_exact_membership_sidecar_is_consumed_by_background_builder(tmp_path: Pa
         },
         deep=True,
     )
-    exact_overlap_scene = exact_scene.model_copy(update={"objects": [exact_scene.objects[0], overlap]}, deep=True)
-    with pytest.raises(SourceCollisionOwnershipError, match="claimed by both"):
-        _carved_environment(registry, confirm_object(exact_overlap_scene, pallet.id))
+    # Exact membership is authoritative: a kept approximate box that contains the exact triangle cannot take it,
+    # so the confirmed object still loses exactly its own triangle and nothing is reported as shared.
+    exact_carved_scene = exact_scene.model_copy(update={"objects": [exact_scene.objects[0], overlap]}, deep=True)
+    exact_carved = _carved_environment(registry, confirm_object(exact_carved_scene, pallet.id))
+    assert exact_carved.carved_triangles == 1 and exact_carved.retained_shared_triangles == 0
+
+    # The reverse also holds: a confirmed approximate box never carves a triangle an exact kept region owns.
+    confirmed_overlap = overlap.model_copy(update={"state": SceneObjectState.CONFIRMED, "active": True}, deep=True)
+    exact_kept_scene = exact_scene.model_copy(
+        update={"objects": [exact_scene.objects[0], confirmed_overlap]}, deep=True
+    )
+    exact_kept = _carved_environment(registry, exact_kept_scene)
+    assert exact_kept.carved_triangles == len(source_indices) - 1
+    assert exact_kept.retained_shared_triangles == 0
 
 
 def test_both_package_builders_share_background_and_current_hybrid_object_pose(

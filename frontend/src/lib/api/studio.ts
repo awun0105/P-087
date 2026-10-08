@@ -689,6 +689,9 @@ export interface SimulationPackageView {
   confirmed_objects: number;
   environment_triangles: number;
   carved_triangles: number;
+  /** Tam giác nền được giữ vì hộp nguồn chung với vật không bị khoét; vắng ở backend cũ nên coi là 0. */
+  retained_shared_triangles: number;
+  retained_shared_object_ids: string[];
   preflight: { blocking_result: string; rules: PreflightRuleView[] };
   export_capability: ExportCapabilityView | null;
   package_ref: { artifact_uri: string; artifact_checksum: string } | null;
@@ -752,7 +755,19 @@ function parseSimulationPackage(value: unknown): SimulationPackageView | null {
   if (exportCapability?.status === "blocked" && data.package_ref != null) {
     throw new ApiError(502, "Backend trả candidate dù capability USD đang bị chặn");
   }
-  return { ...data, export_capability: exportCapability } as SimulationPackageView;
+  const { retained_shared_triangles: retained = 0, retained_shared_object_ids: retainedIds = [] } = data;
+  if (
+    !Number.isSafeInteger(retained) || retained < 0 ||
+    !Array.isArray(retainedIds) || !retainedIds.every((id) => typeof id === "string")
+  ) {
+    throw new ApiError(502, "Backend trả số tam giác dùng chung sai contract");
+  }
+  return {
+    ...data,
+    retained_shared_triangles: retained,
+    retained_shared_object_ids: retainedIds,
+    export_capability: exportCapability,
+  } as SimulationPackageView;
 }
 
 /** Gói của revision scene hiện tại; null khi chưa tạo hoặc scene đã sửa sau lần tạo. */

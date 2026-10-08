@@ -283,6 +283,53 @@ describe("ObjectReviewView", () => {
     expect(screen.queryByText(/Tải gói/)).toBeNull();
     expect(screen.getByText(/Chưa đạt Preflight/)).toBeInTheDocument();
   });
+  it("báo số tam giác nền được giữ lại vì chung hộp với ứng viên chưa xử lý, không chặn tải gói", async () => {
+    const built = {
+      scene_revision: "rev-003",
+      source_scene_revision: "rev-002",
+      created_at: "2026-10-08T00:00:00Z",
+      confirmed_objects: 1,
+      environment_triangles: 1000,
+      carved_triangles: 20,
+      retained_shared_triangles: 246,
+      retained_shared_object_ids: ["candidate-023", "candidate-009"],
+      preflight: { blocking_result: "PASS", rules: [] },
+      export_capability: null,
+      package_ref: { artifact_uri: "artifact://candidate", artifact_checksum: "sha256:candidate" },
+    };
+    routeFetch({});
+    render(<SimulationPackagePanel jobId="job-a" sceneRevision="rev-003" onSceneChanged={() => {}} />);
+    const create = await screen.findByRole("button", { name: "Tạo gói mô phỏng" });
+    vi.mocked(global.fetch).mockImplementationOnce(async () => reply(built));
+    fireEvent.click(create);
+
+    const notice = await screen.findByRole("status", { name: "Tam giác nền được giữ lại" });
+    expect(notice).toHaveTextContent("246");
+    expect(notice).toHaveTextContent("candidate-023, candidate-009");
+    expect(notice).toHaveTextContent("Xác nhận hoặc xoá các ứng viên đó");
+    expect(screen.getByRole("link", { name: /Tải gói USD/ })).toBeInTheDocument();
+  });
+  it("không hiện thông báo giữ lại khi không có tam giác dùng chung", async () => {
+    const built = {
+      scene_revision: "rev-003",
+      source_scene_revision: "rev-002",
+      created_at: "2026-10-08T00:00:00Z",
+      confirmed_objects: 1,
+      environment_triangles: 1000,
+      carved_triangles: 20,
+      preflight: { blocking_result: "PASS", rules: [] },
+      export_capability: null,
+      package_ref: { artifact_uri: "artifact://candidate", artifact_checksum: "sha256:candidate" },
+    };
+    routeFetch({});
+    render(<SimulationPackagePanel jobId="job-a" sceneRevision="rev-003" onSceneChanged={() => {}} />);
+    const create = await screen.findByRole("button", { name: "Tạo gói mô phỏng" });
+    vi.mocked(global.fetch).mockImplementationOnce(async () => reply(built));
+    fireEvent.click(create);
+
+    expect(await screen.findByRole("link", { name: /Tải gói USD/ })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Tam giác nền được giữ lại" })).toBeNull();
+  });
   it("hiện riêng blocker USD dù Preflight đạt và cho thử lại đúng scene", async () => {
     const blocked = {
       scene_revision: "rev-001",

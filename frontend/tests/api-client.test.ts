@@ -132,6 +132,54 @@ describe("getSimulationPackage", () => {
   });
 });
 
+describe("getSimulationPackage shared-triangle report", () => {
+  const body = (extra: Record<string, unknown>) => ({
+    scene_revision: "rev-1",
+    source_scene_revision: "rev-0",
+    created_at: "2026-10-08T00:00:00Z",
+    confirmed_objects: 1,
+    environment_triangles: 100,
+    carved_triangles: 4,
+    preflight: { blocking_result: "PASS", rules: [] },
+    export_capability: null,
+    package_ref: null,
+    ...extra,
+  });
+
+  it("treats a backend that predates the report as having nothing retained", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(body({}))));
+
+    await expect(getSimulationPackage("job-a")).resolves.toMatchObject({
+      retained_shared_triangles: 0,
+      retained_shared_object_ids: [],
+    });
+  });
+
+  it("keeps the reported count and object ids", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(body({ retained_shared_triangles: 246, retained_shared_object_ids: ["candidate-023"] }))),
+    );
+
+    await expect(getSimulationPackage("job-a")).resolves.toMatchObject({
+      retained_shared_triangles: 246,
+      retained_shared_object_ids: ["candidate-023"],
+    });
+  });
+
+  it.each([
+    { retained_shared_triangles: -1 },
+    { retained_shared_triangles: 1.5 },
+    { retained_shared_triangles: "246" },
+    { retained_shared_object_ids: "candidate-023" },
+    { retained_shared_object_ids: [7] },
+  ])("rejects a malformed report %j instead of showing it", async (extra) => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(body(extra))));
+
+    await expect(getSimulationPackage("job-a")).rejects.toMatchObject({ status: 502 });
+  });
+});
+
 describe("run intent idempotency headers", () => {
   it("sends a stable-key header for scene creation and manual retry", async () => {
     const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(

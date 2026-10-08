@@ -133,6 +133,13 @@ export function SimulationPackagePanel({
             {pkg.confirmed_objects} vật · môi trường {pkg.environment_triangles.toLocaleString("vi-VN")} tam giác (khoét{" "}
             {pkg.carved_triangles.toLocaleString("vi-VN")}) · scene {pkg.scene_revision}
           </p>
+          {pkg.retained_shared_triangles > 0 && (
+            <p role="status" className="rounded-md border border-line p-3 text-ink-muted" aria-label="Tam giác nền được giữ lại">
+              Giữ lại {pkg.retained_shared_triangles.toLocaleString("vi-VN")} tam giác nền nằm trong vùng chồng giữa vật
+              bị khoét và ứng viên chưa xử lý ({pkg.retained_shared_object_ids.join(", ")}) vì chưa biết chúng thuộc vật nào.
+              Xác nhận hoặc xoá các ứng viên đó rồi tạo lại gói nếu muốn khoét hết.
+            </p>
+          )}
           {pkg.export_capability && (
             <div className="space-y-1 rounded-md border border-line p-3" aria-label="Khả năng xuất USD">
               <p className={pkg.export_capability.status === "blocked" ? "font-medium text-rust" : "text-ink-muted"}>

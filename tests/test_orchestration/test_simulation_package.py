@@ -83,6 +83,55 @@ def test_confirmed_objects_become_a_sealed_package(tmp_path: Path) -> None:
     assert current_package(registry, job.job_id) == package
 
 
+def _neighbour_candidate(item, new_id: str):  # noqa: ANN001, ANN202
+    """A pending candidate whose source box coincides with `item`'s (as adjacent extracted objects often overlap)."""
+    assert item.source_collision is not None
+    source = item.source_collision.model_copy(
+        update={
+            "object_id": new_id,
+            "source_transform": item.source_collision.source_transform.model_copy(update={"local_frame": new_id}),
+        }
+    )
+    return item.model_copy(
+        update={
+            "id": new_id,
+            "name": new_id,
+            "local_frame": new_id,
+            "transform": item.transform.model_copy(update={"local_frame": new_id}),
+            "collider": None,
+            "source_collision": source,
+        },
+        deep=True,
+    )
+
+
+def test_overlap_with_a_pending_candidate_no_longer_blocks_export_and_is_reported(tmp_path: Path) -> None:
+    """Adjacent extracted objects overlap; confirming one must not fail the export or silently drop a neighbour."""
+    registry, job = _scene_job(tmp_path)
+    scene = registry.scene.current(job.job_id).scene
+    (pallet,) = scene.objects
+    with_neighbour = scene.model_copy(update={"objects": [pallet, _neighbour_candidate(pallet, "candidate-neighbour")]})
+    published = registry.scene.publish_next(job.job_id, scene.scene_revision, with_neighbour, "test_add_neighbour")
+    apply_object_action(registry.scene, job.job_id, pallet.id, "confirm", published.revision.scene.scene_revision)
+
+    package = build_simulation_package(registry, job.job_id)
+
+    assert package.preflight.blocking_result == RuleResult.PASS and package.package_ref is not None
+    assert package.retained_shared_object_ids == ["candidate-neighbour"]
+    assert package.retained_shared_triangles > 0 and package.carved_triangles == 0
+    assert current_package(registry, job.job_id) == package
+    archive = zipfile.ZipFile(io.BytesIO(registry.runtime_resolver.require(package.package_ref).read_bytes()))
+    readme = archive.read("README.txt").decode()
+    assert "candidate-neighbour" in readme and f"{package.retained_shared_triangles:,}" in readme
+
+    # Confirming the neighbour as well resolves the ambiguity: both regions leave the background.
+    current = registry.scene.current(job.job_id).scene
+    apply_object_action(registry.scene, job.job_id, "candidate-neighbour", "confirm", current.scene_revision)
+    resolved = build_simulation_package(registry, job.job_id)
+    assert resolved.retained_shared_triangles == 0 and resolved.retained_shared_object_ids == []
+    assert resolved.carved_triangles > 0
+
+
 def test_failed_preflight_reports_without_new_revision(tmp_path: Path) -> None:
     registry, job = _scene_job(tmp_path)
     scene = registry.scene.current(job.job_id).scene

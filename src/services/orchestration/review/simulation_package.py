@@ -23,6 +23,7 @@ import logging
 import subprocess
 import tempfile
 import zipfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -30,7 +31,7 @@ from typing import Any
 
 import numpy as np
 import trimesh
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.config import get_settings
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
@@ -114,6 +115,10 @@ class CarvedBackground:
     faces: np.ndarray
     carved_triangles: int
     identity: str
+    #: Triangles claimed by both a carved and a kept source region; they stay in the background.
+    retained_shared_triangles: int = 0
+    #: Kept objects whose region shares triangles with a carved one (the user can resolve them).
+    retained_shared_object_ids: tuple[str, ...] = ()
 
 
 class SimulationPackage(BaseModel):
@@ -130,6 +135,9 @@ class SimulationPackage(BaseModel):
     confirmed_objects: int
     environment_triangles: int
     carved_triangles: int
+    #: Background triangles kept because an approximate source box is shared with an object that stays.
+    retained_shared_triangles: int = 0
+    retained_shared_object_ids: list[str] = Field(default_factory=list)
     export_capability: ExportCapabilityReport | None = None
     candidate: CandidatePackage | None = None
     package_ref: ProductArtifactRef | None = None
@@ -350,33 +358,40 @@ def _carved_environment(registry: ProjectRegistry, scene: SceneIR) -> CarvedBack
     )
 
     centroids = vertices[faces].mean(axis=1)
-    owner_indices = np.full(len(faces), -1, dtype=np.int32)
-    remove_mask = np.zeros(len(faces), dtype=bool)
-    removes_region = np.array([_source_region_removed(item) for item in owned], dtype=bool)
-    for owner_index, (item, owner) in enumerate(zip(owned, owners, strict=True)):
+    triangle_count = len(faces)
+    regions: list[tuple[SceneObject, np.ndarray, bool]] = []
+    exact_claim = np.zeros(triangle_count, dtype=bool)
+    for item, owner in zip(owned, owners, strict=True):
         if owner.region_kind == "triangle_indices":
             indices = np.asarray(memberships[owner.object_id], dtype=np.intp)
-        else:
-            dimensions = owner.source_obb_dimensions_xyz_m
-            if dimensions is None:
-                raise SourceCollisionOwnershipError(f"{owner.object_id}: source OBB dimensions are missing")
-            box = CarveBox.from_transform(owner.source_transform, dimensions)
-            indices = np.flatnonzero(triangle_mask_in_box(centroids, box, BUILD_CONFIG["carve_margin_m"]))
+            exact_claim[indices] = True
+            regions.append((item, indices, True))
+            continue
+        dimensions = owner.source_obb_dimensions_xyz_m
+        if dimensions is None:
+            raise SourceCollisionOwnershipError(f"{owner.object_id}: source OBB dimensions are missing")
+        box = CarveBox.from_transform(owner.source_transform, dimensions)
+        indices = np.flatnonzero(triangle_mask_in_box(centroids, box, BUILD_CONFIG["carve_margin_m"]))
+        regions.append((item, indices, False))
 
-        previous = owner_indices[indices]
-        # Triangles claimed by regions that are all carved away, or all kept, come out the same whoever
-        # owns them. Only a claim shared between a carved and a kept region is a real ambiguity.
-        claimed = (previous >= 0) & (removes_region[np.maximum(previous, 0)] != removes_region[owner_index])
-        overlaps = np.flatnonzero(claimed)
-        if len(overlaps):
-            triangle_index = int(indices[overlaps[0]])
-            previous_owner = owned[int(previous[overlaps[0]])].id
-            raise SourceCollisionOwnershipError(
-                f"source triangle {triangle_index} is claimed by both {previous_owner} and {owner.object_id}"
-            )
-        owner_indices[indices] = owner_index
-        if removes_region[owner_index]:
-            remove_mask[indices] = True
+    carve_claim = np.zeros(triangle_count, dtype=bool)
+    keep_claim = np.zeros(triangle_count, dtype=bool)
+    kept_regions: list[tuple[str, np.ndarray]] = []
+    for item, indices, exact in regions:
+        if not exact:
+            # Exact triangle membership is authoritative: an approximate box never takes a triangle from it.
+            indices = indices[~exact_claim[indices]]
+        if _source_region_removed(item):
+            carve_claim[indices] = True
+        else:
+            keep_claim[indices] = True
+            kept_regions.append((item.id, indices))
+    # Whoever owns a triangle claimed only by carved regions (or only by kept ones), the result is the same.
+    # A triangle shared by a carved box and a kept box cannot be attributed: carving it could delete collision
+    # of an object that stays, keeping it leaves at most that shared sliver. Keep it, never guess, and report it.
+    shared = carve_claim & keep_claim
+    remove_mask = carve_claim & ~keep_claim
+    shared_object_ids = tuple(sorted(object_id for object_id, indices in kept_regions if shared[indices].any()))
 
     background_hash = hashlib.sha256()
     identity_header = json.dumps(
@@ -397,6 +412,8 @@ def _carved_environment(registry: ProjectRegistry, scene: SceneIR) -> CarvedBack
         carved_faces,
         carved,
         f"sha256:{background_hash.hexdigest()}",
+        retained_shared_triangles=int(np.count_nonzero(shared)),
+        retained_shared_object_ids=shared_object_ids,
     )
 
 
@@ -731,6 +748,8 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
             confirmed_objects=confirmed,
             environment_triangles=len(background.faces),
             carved_triangles=background.carved_triangles,
+            retained_shared_triangles=background.retained_shared_triangles,
+            retained_shared_object_ids=list(background.retained_shared_object_ids),
             export_capability=export_capability,
         )
 
@@ -760,6 +779,8 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
             confirmed_objects=confirmed,
             environment_triangles=triangles,
             carved_triangles=carved,
+            retained_shared_triangles=background.retained_shared_triangles,
+            retained_shared_object_ids=list(background.retained_shared_object_ids),
             export_capability=export_capability,
         )
 
@@ -776,6 +797,8 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
             confirmed_objects=confirmed,
             environment_triangles=triangles,
             carved_triangles=carved,
+            retained_shared_triangles=background.retained_shared_triangles,
+            retained_shared_object_ids=list(background.retained_shared_object_ids),
             export_capability=export_capability,
         )
     with tempfile.TemporaryDirectory(prefix="r2s_candidate_") as directory:
@@ -818,6 +841,8 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
                 confirmed_objects=confirmed,
                 environment_triangles=triangles,
                 carved_triangles=carved,
+                retained_shared_triangles=background.retained_shared_triangles,
+                retained_shared_object_ids=list(background.retained_shared_object_ids),
                 export_capability=failed_capability,
             )
 
@@ -884,7 +909,14 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
                     if hybrid is not None and "usd_export_summary.json" in hybrid
                     else {}
                 ),
-                "README.txt": _readme(published, package, hybrid is not None, build_config).encode(),
+                "README.txt": _readme(
+                    published,
+                    package,
+                    hybrid is not None,
+                    build_config,
+                    background.retained_shared_triangles,
+                    background.retained_shared_object_ids,
+                ).encode(),
             }
         )
     package_ref = _publish(
@@ -902,6 +934,8 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
         confirmed_objects=confirmed,
         environment_triangles=triangles,
         carved_triangles=carved,
+        retained_shared_triangles=background.retained_shared_triangles,
+        retained_shared_object_ids=list(background.retained_shared_object_ids),
         export_capability=export_capability,
         candidate=package,
         package_ref=package_ref,
@@ -933,13 +967,26 @@ def _zip_package(files: dict[str, bytes]) -> bytes:
     return buffer.getvalue()
 
 
+def _retention_note(retained_triangles: int, object_ids: Sequence[str]) -> list[str]:
+    """README line for background triangles kept because a carved and a kept source box share them."""
+    if retained_triangles <= 0:
+        return []
+    return [
+        f"Nền giữ lại {retained_triangles:,} tam giác nằm trong vùng chồng giữa vật bị khoét và ứng viên chưa xử lý "
+        f"({', '.join(object_ids) or 'không rõ'}); xác nhận hoặc xoá các ứng viên đó rồi tạo lại gói để khoét hết."
+    ]
+
+
 def _readme(
     scene: SceneIR,
     package: CandidatePackage,
     hybrid: bool = False,
     build_config: dict[str, Any] | None = None,
+    retained_shared_triangles: int = 0,
+    retained_shared_object_ids: Sequence[str] = (),
 ) -> str:
     config = build_config or (HYBRID_BUILD_CONFIG if hybrid else BUILD_CONFIG)
+    retention = _retention_note(retained_shared_triangles, retained_shared_object_ids)
     if hybrid:
         return "\n".join(
             [
@@ -957,6 +1004,7 @@ def _readme(
                 "Local transform, khối lượng, RigidBody và vật liệu được ghi đúng theo ObjectPhysics; không tự đặt giá trị mặc định.",
                 "nhãn lớp qua UsdSemantics LabelsAPI. Ứng viên chưa xác nhận nằm trong hình của nền, không có collider riêng.",
                 "Vùng nền được vá là hình suy đoán (chưa từng được quay). Physics chưa được kiểm trong Isaac (SIM-06).",
+                *retention,
                 f"{ENVIRONMENT_LAYER}: bản collision-only của môi trường (tham khảo, scene.usda không dùng).",
                 json.dumps(config, ensure_ascii=False),
                 "",
@@ -974,6 +1022,7 @@ def _readme(
             f"{ENVIRONMENT_LAYER}: collision mesh REC-05 đã bỏ source region của vật được xác nhận/đã xoá;",
             "sàn là GroundPlane ở z = 0; mỗi vật đã xác nhận có collider hộp riêng.",
             "Visual 3DGS không nằm trong gói; physics chưa được kiểm trong Isaac (SIM-06).",
+            *retention,
             json.dumps(config, ensure_ascii=False),
             "",
         ]
