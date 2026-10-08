@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from threading import Event, Thread
@@ -37,13 +38,15 @@ from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneError, SceneRevisionConflictError
 from src.services.orchestration.scene.extraction import box_candidates_require_gpu, use_boxes
 from src.services.orchestration.scene.objectify import AWAITING_CHOICE, METHOD, ObjectifyError, reobjectify
+from src.services.process_control import ProcessCancelledError
 
 logger = logging.getLogger(__name__)
 
-ObjectifyStatus = Literal["idle", "queued", "running", "done", "failed"]
+ObjectifyStatus = Literal["idle", "queued", "running", "done", "failed", "cancelled"]
 ObjectifyMode = Literal["objectify", "boxes"]
 _LEASE_TTL = timedelta(seconds=90)
 _LEASE_HEARTBEAT_SECONDS = 20.0
+_CANCEL_POLL_SECONDS = 0.5
 # Legacy queue rows predate owner tokens. Keep their prior conservative recovery
 # behavior until they have either completed or been explicitly retried.
 _LEGACY_STALE_AFTER = timedelta(hours=3)
@@ -99,6 +102,7 @@ class ObjectifyState(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     resource_wait: ObjectifyResourceWait | None = None
+    cancellation_requested: bool = False
 
 
 class _Record(BaseModel):
@@ -125,6 +129,7 @@ class _Record(BaseModel):
     worker_id: str | None = None
     worker_host: str | None = None
     worker_pid: int | None = None
+    cancellation_requested: bool = False
 
 
 def _database(settings: Settings) -> RuntimeDatabase:
@@ -193,6 +198,7 @@ def _public_record(record: _Record) -> dict[str, object]:
         "started_at",
         "finished_at",
         "resource_wait",
+        "cancellation_requested",
     )
     return {name: getattr(record, name) for name in names}
 
@@ -243,6 +249,36 @@ def request(
         if previous is not None:
             record = record.model_copy(update={"lease_generation": previous.lease_generation})
         _write(tx, job_id, record)
+    return state(registry, settings, job_id)
+
+
+def cancel(registry: ProjectRegistry, settings: Settings, job_id: str) -> ObjectifyState:
+    """Request cancellation; queued work stops immediately and running work waits for child reap."""
+    now = datetime.now(UTC)
+    with _database(settings).transaction(write=True) as tx:
+        record = _read(tx, job_id, lock=True)
+        if record is None:
+            raise ObjectifyRequestError("Không có yêu cầu dựng lại tập vật để hủy")
+        if record.status == "queued":
+            _write(
+                tx,
+                job_id,
+                record.model_copy(
+                    update={
+                        "status": "cancelled",
+                        "cancellation_requested": True,
+                        "error": "Đã hủy trước khi worker bắt đầu.",
+                        "finished_at": now,
+                        "resource_wait": None,
+                    }
+                ),
+            )
+        elif record.status == "running" and not record.cancellation_requested:
+            _write(
+                tx,
+                job_id,
+                record.model_copy(update={"cancellation_requested": True, "error": "Đang dừng tiến trình…"}),
+            )
     return state(registry, settings, job_id)
 
 
@@ -313,8 +349,12 @@ def recover_interrupted(settings: Settings) -> int:
             if not recoverable:
                 continue
             update = {
-                "status": "failed",
-                "error": "Worker lease expired; bấm chạy lại để thử tiếp.",
+                "status": "cancelled" if record.cancellation_requested else "failed",
+                "error": (
+                    "Đã hủy sau khi worker mất lease."
+                    if record.cancellation_requested
+                    else "Worker lease expired; bấm chạy lại để thử tiếp."
+                ),
                 "finished_at": now,
             }
             _write(tx, job_id, record.model_copy(update=update))
@@ -372,29 +412,59 @@ def _heartbeat(settings: Settings, job_id: str, token: str, generation: int) -> 
     return True
 
 
+def _cancel_reason(settings: Settings, job_id: str, token: str, generation: int) -> str | None:
+    with _database(settings).transaction() as tx:
+        record = _read(tx, job_id)
+    if not _active_lease(record, token, generation, datetime.now(UTC)):
+        return "lease_lost"
+    return "user_cancel" if record is not None and record.cancellation_requested else None
+
+
 def _start_heartbeat(
     settings: Settings,
     job_id: str,
     record: _Record,
     admission: ResourceAdmission,
     operation_request: list[OperationAdmissionRequest | None],
+    cancel_event: Event,
+    abort_reason: list[str | None],
 ) -> tuple[Event, Thread]:
     stop = Event()
 
     def beat() -> None:
-        while not stop.wait(_LEASE_HEARTBEAT_SECONDS):
+        last_heartbeat = time.monotonic()
+        while not stop.wait(_CANCEL_POLL_SECONDS):
             try:
-                queue_owned = _heartbeat(settings, job_id, record.lease_token or "", record.lease_generation)
-                if not queue_owned:
+                reason = _cancel_reason(settings, job_id, record.lease_token or "", record.lease_generation)
+                if reason is not None:
+                    abort_reason[0] = reason
+                    cancel_event.set()
+                    if reason == "lease_lost":
+                        logger.warning(
+                            "Objectify lease mất quyền job=%s generation=%s", job_id, record.lease_generation
+                        )
+                    return
+                if time.monotonic() - last_heartbeat < _LEASE_HEARTBEAT_SECONDS:
+                    continue
+                if not _heartbeat(settings, job_id, record.lease_token or "", record.lease_generation):
+                    abort_reason[0] = "lease_lost"
+                    cancel_event.set()
                     logger.warning("Objectify lease mất quyền job=%s generation=%s", job_id, record.lease_generation)
+                    return
                 request = operation_request[0]
                 if request is not None and not admission.touch_operation(request):
+                    abort_reason[0] = "reservation_lost"
+                    cancel_event.set()
                     logger.warning(
                         "Objectify reservation mất quyền job=%s generation=%s", job_id, record.lease_generation
                     )
                     return
+                last_heartbeat = time.monotonic()
             except Exception as error:  # noqa: BLE001 - expiry plus commit fencing handles DB outages
                 logger.warning("Objectify heartbeat lỗi job=%s cause=%s", job_id, type(error).__name__)
+                abort_reason[0] = "lease_lost"
+                cancel_event.set()
+                return
 
     thread = Thread(target=beat, name=f"objectify-lease-{job_id[:8]}", daemon=True)
     thread.start()
@@ -433,6 +503,21 @@ def _requeue_wait(
         if not _active_lease(current, running.lease_token or "", running.lease_generation, datetime.now(UTC)):
             return False
         assert current is not None
+        if current.cancellation_requested:
+            _write(
+                tx,
+                job_id,
+                current.model_copy(
+                    update={
+                        "status": "cancelled",
+                        "error": "Đã hủy theo yêu cầu.",
+                        "finished_at": datetime.now(UTC),
+                        "lease_expires_at": datetime.now(UTC),
+                        "resource_wait": None,
+                    }
+                ),
+            )
+            return True
         _write(
             tx,
             job_id,
@@ -459,7 +544,12 @@ def _finish(settings: Settings, job_id: str, running: _Record, outcome: dict[str
         if not _lease_is_current(tx, job_id, running.lease_token or "", running.lease_generation):
             return False
         assert current is not None
-        _write(tx, job_id, current.model_copy(update={**outcome, "finished_at": now, "lease_expires_at": now}))
+        final = dict(outcome)
+        if current.cancellation_requested and final.get("status") != "done":
+            final.update(status="cancelled", error="Đã hủy theo yêu cầu.", result_revision=None, resource_wait=None)
+        elif final.get("status") == "done":
+            final["cancellation_requested"] = False
+        _write(tx, job_id, current.model_copy(update={**final, "finished_at": now, "lease_expires_at": now}))
     return True
 
 
@@ -470,9 +560,13 @@ def _commit_guard(
     request: OperationAdmissionRequest,
 ) -> Callable[[RuntimeTransaction], bool]:
     def guard(tx: RuntimeTransaction) -> bool:
-        return _lease_is_current(
-            tx, job_id, running.lease_token or "", running.lease_generation, request
-        ) and admission.operation_lease_is_current(tx, request)
+        current = _read(tx, job_id, lock=True)
+        return bool(
+            current is not None
+            and not current.cancellation_requested
+            and _lease_is_current(tx, job_id, running.lease_token or "", running.lease_generation, request)
+            and admission.operation_lease_is_current(tx, request)
+        )
 
     return guard
 
@@ -487,12 +581,18 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
         return False
     job_id, running = claimed
     operation_request: list[OperationAdmissionRequest | None] = [None]
-    heartbeat_stop, heartbeat_thread = _start_heartbeat(settings, job_id, running, admission, operation_request)
+    cancel_event = Event()
+    abort_reason: list[str | None] = [None]
+    heartbeat_stop, heartbeat_thread = _start_heartbeat(
+        settings, job_id, running, admission, operation_request, cancel_event, abort_reason
+    )
     outcome: dict[str, object] | None = None
     reserved = False
     try:
         # The remote resolver may update local artifacts, but it cannot change the captured base revision.
         registry.runtime_resolver.sync_down(job_id)
+        if cancel_event.is_set():
+            raise ProcessCancelledError("Objectify operation was cancelled")
         current = registry.scene.current(job_id).scene
         if current.scene_revision != running.base_revision:
             raise SceneRevisionConflictError(
@@ -530,6 +630,8 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
             return False
         operation_request[0] = request
         reserved = True
+        if cancel_event.is_set():
+            raise ProcessCancelledError("Objectify operation was cancelled")
 
         root = settings.product_worker_root.expanduser().resolve() / job_id
         workspace = root / f"{running.mode}-{uuid4().hex}"
@@ -541,10 +643,26 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
             workspace,
             expected_revision=running.base_revision,
             commit_guard=_commit_guard(job_id, running, admission, request),
+            cancel_event=cancel_event,
         )
         outcome = {"status": "done", "result_revision": revision, "error": None, "resource_wait": None}
+    except ProcessCancelledError:
+        if abort_reason[0] == "lease_lost":
+            logger.warning("Objectify cancellation after lease loss job=%s", job_id)
+            outcome = {"status": "failed", "error": "Worker lease expired; result was fenced.", "result_revision": None}
+        elif abort_reason[0] == "reservation_lost":
+            outcome = {
+                "status": "failed",
+                "error": "Resource reservation expired; result was fenced.",
+                "result_revision": None,
+            }
+        else:
+            outcome = {"status": "cancelled", "error": "Đã hủy theo yêu cầu.", "result_revision": None}
     except (ObjectifyError, ArtifactStoreError, SceneError, ValueError, OSError) as error:
         logger.warning("Dựng lại tập vật (%s) lỗi job=%s cause=%s", running.mode, job_id, error)
+        outcome = {"status": "failed", "error": str(error)[:500], "result_revision": None}
+    except Exception as error:  # noqa: BLE001 - durable operation boundary must record unexpected failure
+        logger.exception("Dựng lại tập vật (%s) lỗi ngoài dự kiến job=%s", running.mode, job_id)
         outcome = {"status": "failed", "error": str(error)[:500], "result_revision": None}
     finally:
         heartbeat_stop.set()

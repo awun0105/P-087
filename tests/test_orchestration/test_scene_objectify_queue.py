@@ -4,8 +4,12 @@ Fixture proof: provider GPU được thay bằng hàm giả; chỉ chứng minh 
 chất lượng tách vật.
 """
 
+import os
+import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Event, Thread
 from types import SimpleNamespace
 
 import pytest
@@ -19,6 +23,7 @@ from src.services.orchestration.scene.errors import SceneRevisionConflictError
 from src.services.orchestration.scene.extraction import extract_scene
 from src.services.orchestration.scene.objectify import AWAITING_CHOICE, ObjectifyError, objectify_with_retry
 from src.services.orchestration.scene.objectify_queue import ObjectifyRequestError
+from src.services.process_control import run_cancellable_process
 from tests.test_orchestration.test_finalize_flow import _confirmed
 from tests.test_orchestration.test_scene_extraction import _FIXTURE, _collision
 
@@ -295,7 +300,7 @@ def test_user_edit_while_boxes_compute_wins_over_stale_operation(world, monkeypa
     monkeypatch.setattr("src.services.orchestration.jobs.stage_views.job_bundle", lambda *_: bundle)
     scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "boxes")
 
-    def edit_during_geometry(_registry, _job, _bundle, _settings, _workspace, _publish):  # noqa: ANN001, ANN202
+    def edit_during_geometry(_registry, _job, _bundle, _settings, _workspace, _publish, **_kwargs):  # noqa: ANN001, ANN202
         current = registry.scene.current(job.job_id).scene
         registry.scene.publish_next(
             job.job_id,
@@ -313,6 +318,175 @@ def test_user_edit_while_boxes_compute_wins_over_stale_operation(world, monkeypa
     assert current.scene_revision == "rev-002"
     assert current.provenance["user_edit"] == "kept"
     assert result.status == "failed" and "đã đổi" in (result.error or "")
+
+
+def test_queued_cancel_prevents_objectify_worker_start(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "work")
+    monkeypatch.setattr(
+        scene_objectify_queue,
+        "reobjectify",
+        lambda *_args, **_kwargs: pytest.fail("cancelled queued operation must not start geometry"),
+    )
+
+    scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "objectify")
+    cancelled = scene_objectify_queue.cancel(registry, settings, job.job_id)
+
+    assert cancelled.status == "cancelled" and cancelled.cancellation_requested
+    assert cancelled.finished_at is not None
+    assert scene_objectify_queue.process_next(registry, settings) is False
+
+
+def test_running_cancel_kills_child_before_releasing_operation(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "initial")
+    child_pid_path = tmp_path / "objectify-child.pid"
+    entered = Event()
+    releases: list[str] = []
+
+    def blocking_reobjectify(
+        _registry,
+        _job_id,
+        _settings,
+        _workspace,
+        *,
+        expected_revision,
+        commit_guard,
+        cancel_event,
+    ):  # noqa: ANN001, ANN202
+        script = "import os, pathlib, sys, time; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
+        with (tmp_path / "objectify-child.log").open("w") as output:
+            entered.set()
+            run_cancellable_process(
+                [sys.executable, "-c", script, str(child_pid_path)],
+                cwd=tmp_path,
+                timeout_seconds=30,
+                output=output,
+                cancel_event=cancel_event,
+            )
+        pytest.fail("cancelled child must not return a completed scene")
+
+    monkeypatch.setattr(scene_objectify_queue, "reobjectify", blocking_reobjectify)
+    admission_type = scene_objectify_queue.ResourceAdmission
+    release = admission_type.release_operation
+
+    def verify_child_reaped(self, request):  # noqa: ANN001, ANN202
+        assert child_pid_path.is_file()
+        child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+        with pytest.raises(ProcessLookupError):
+            os.kill(child_pid, 0)
+        releases.append(request.operation_id)
+        return release(self, request)
+
+    monkeypatch.setattr(admission_type, "release_operation", verify_child_reaped)
+    errors: list[Exception] = []
+
+    def worker() -> None:
+        try:
+            scene_objectify_queue.process_next(registry, settings)
+        except Exception as error:  # noqa: BLE001 - thread errors are asserted below.
+            errors.append(error)
+
+    scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "objectify")
+    thread = Thread(target=worker)
+    thread.start()
+    assert entered.wait(timeout=5)
+    deadline = time.monotonic() + 5
+    while not child_pid_path.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert child_pid_path.exists(), "objectify subprocess did not start"
+
+    requested = scene_objectify_queue.cancel(registry, settings, job.job_id)
+    assert requested.status == "running" and requested.cancellation_requested
+    thread.join(timeout=8)
+
+    assert not thread.is_alive() and errors == []
+    assert len(releases) == 1
+    final = scene_objectify_queue.state(registry, settings, job.job_id)
+    assert final.status == "cancelled" and final.result_revision is None
+    assert registry.scene.current(job.job_id).scene.scene_revision == "rev-001"
+
+
+def test_committed_scene_wins_over_late_cancel_request(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "initial")
+    published = Event()
+    return_from_operation = Event()
+
+    def publish_then_wait(
+        _registry,
+        job_id,
+        _settings,
+        _workspace,
+        *,
+        expected_revision,
+        commit_guard,
+        cancel_event,
+    ):  # noqa: ANN001, ANN202
+        current = registry.scene.current(job_id).scene
+        result = registry.scene.publish_next(
+            job_id,
+            expected_revision,
+            current.model_copy(update={"provenance": {**current.provenance, "objectify": "committed"}}),
+            "objectify",
+            commit_guard=commit_guard,
+        )
+        published.set()
+        assert return_from_operation.wait(timeout=5)
+        return result.revision.scene.scene_revision
+
+    monkeypatch.setattr(scene_objectify_queue, "reobjectify", publish_then_wait)
+    errors: list[Exception] = []
+
+    def worker() -> None:
+        try:
+            scene_objectify_queue.process_next(registry, settings)
+        except Exception as error:  # noqa: BLE001 - thread errors are asserted below.
+            errors.append(error)
+
+    scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "objectify")
+    thread = Thread(target=worker)
+    thread.start()
+    assert published.wait(timeout=5)
+    requested = scene_objectify_queue.cancel(registry, settings, job.job_id)
+    assert requested.status == "running" and requested.cancellation_requested
+    return_from_operation.set()
+    thread.join(timeout=8)
+
+    assert not thread.is_alive() and errors == []
+    final = scene_objectify_queue.state(registry, settings, job.job_id)
+    assert final.status == "done" and not final.cancellation_requested
+    assert final.result_revision == "rev-002"
+
+
+def test_unexpected_operation_exception_is_terminal_and_releases_reservation(world, monkeypatch, tmp_path) -> None:
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "initial")
+
+    def fail_unexpectedly(*_args, **_kwargs):  # noqa: ANN002, ANN003, ANN202
+        raise RuntimeError("unexpected operation failure")
+
+    monkeypatch.setattr(scene_objectify_queue, "reobjectify", fail_unexpectedly)
+    admission_type = scene_objectify_queue.ResourceAdmission
+    release = admission_type.release_operation
+    released: list[str] = []
+
+    def tracked_release(self, request):  # noqa: ANN001, ANN202
+        released.append(request.operation_id)
+        return release(self, request)
+
+    monkeypatch.setattr(admission_type, "release_operation", tracked_release)
+    scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "objectify")
+
+    assert scene_objectify_queue.process_next(registry, settings) is True
+
+    final = scene_objectify_queue.state(registry, settings, job.job_id)
+    assert final.status == "failed" and "unexpected operation failure" in (final.error or "")
+    assert len(released) == 1
 
 
 def test_expired_lease_late_worker_cannot_commit_or_overwrite_new_attempt(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001

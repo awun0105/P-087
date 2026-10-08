@@ -11,6 +11,7 @@ import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Event
 
 import numpy as np
 
@@ -25,6 +26,7 @@ from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneRevisionConflictError
 from src.services.orchestration.scene.objectify import AWAITING_CHOICE, ObjectifyError, Publish, objectify_with_retry
 from src.services.orchestration.scene.objectify import METHOD as OBJECTIFY_METHOD
+from src.services.process_control import ProcessCancelledError
 from src.services.reconstruction import camera_views, confirmation_summary, metric_gaussian_points
 from src.services.scene.builder import scene_from_bundle
 from src.services.scene.collision_ownership import bind_source_collision_ownership
@@ -101,6 +103,8 @@ def box_candidates(
     settings: Settings,
     workspace: Path,
     publish: Publish,
+    *,
+    cancel_event: Event | None = None,
 ) -> tuple[list[SceneObject], str, str]:
     """Đường hộp (ADR 0006): SAMPro3D + SAM2, lỗi/thiếu runtime thì tách hình học. Trả (vật, phương pháp, ghi chú)."""
     objects: list[SceneObject] = []
@@ -108,10 +112,14 @@ def box_candidates(
     runtime = _sam2_runtime(settings)
     if runtime is not None and runtime.available():
         try:
+            if cancel_event is not None and cancel_event.is_set():
+                raise ProcessCancelledError("Objectify operation was cancelled")
             points, frames = _points_and_frames(registry, job, bundle)
-            candidates = extract(points, frames, runtime, workspace / "sampro3d")
+            candidates = extract(points, frames, runtime, workspace / "sampro3d", cancel_event=cancel_event)
             objects = objects_from_candidates(job.job_id, candidates, publish, {"method": SAMPRO3D_METHOD})
             method = SAMPRO3D_METHOD
+        except ProcessCancelledError:
+            raise
         except (ValueError, OSError) as error:
             logger.warning(
                 "SAMPro3D thất bại job=%s cause=%s; dùng fallback hình học", job.job_id, type(error).__name__
@@ -121,6 +129,8 @@ def box_candidates(
         note = "chưa cấu hình runtime SAM2; dùng tách hình học"
     if method == "none":
         try:
+            if cancel_event is not None and cancel_event.is_set():
+                raise ProcessCancelledError("Objectify operation was cancelled")
             mesh = registry.runtime_resolver.require(bundle.canonical_geometry_ref).read_bytes()
             objects = candidate_objects(job.job_id, collision_vertices(mesh), publish, GeometricConfig())
             method = "geometric_voxel_components_v1"
@@ -174,6 +184,7 @@ def use_boxes(
     *,
     expected_revision: str | None = None,
     commit_guard: Callable[[RuntimeTransaction], bool] | None = None,
+    cancel_event: Event | None = None,
 ) -> str:
     """Người dùng chọn dùng hộp ứng viên: ghi **revision kế tiếp** với vật từ đường hộp, môi trường gốc của bundle.
 
@@ -192,7 +203,17 @@ def use_boxes(
     bundle = job_bundle(registry, job)
     if bundle is None:
         raise ValueError("job chưa có ReconstructionBundle hệ mét")
-    objects, method, note = box_candidates(registry, job, bundle, settings, workspace, _idempotent_publish(registry))
+    objects, method, note = box_candidates(
+        registry,
+        job,
+        bundle,
+        settings,
+        workspace,
+        _idempotent_publish(registry),
+        cancel_event=cancel_event,
+    )
+    if cancel_event is not None and cancel_event.is_set():
+        raise ProcessCancelledError("Objectify operation was cancelled")
     fresh = scene_from_bundle(bundle, objects, {})
     objects = bind_source_collision_ownership(objects, fresh.environment.geometry_ref, expected_revision)
     updated = base_scene.model_copy(

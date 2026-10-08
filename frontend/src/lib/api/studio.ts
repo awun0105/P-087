@@ -633,7 +633,7 @@ export interface ObjectifyResourceWait {
 
 /** Trạng thái tách theo vật của scene + yêu cầu dựng lại gần nhất (worker thực hiện). */
 export interface ObjectifyState {
-  status: "idle" | "queued" | "running" | "done" | "failed";
+  status: "idle" | "queued" | "running" | "done" | "failed" | "cancelled";
   mode: ObjectifyMode | null;
   /** Tách theo vật lỗi hết số lần thử; scene chỉ có môi trường, chờ người dùng chọn. */
   awaiting_choice: boolean;
@@ -646,6 +646,8 @@ export interface ObjectifyState {
   error: string | null;
   /** Snapshot tài nguyên khiến request vẫn queued; không chứa worker identity/lease token. */
   resource_wait: ObjectifyResourceWait | null;
+  /** Running operation has received a cancel request and is stopping/reaping its child. */
+  cancellation_requested: boolean;
 }
 
 export function getObjectifyState(jobId: string, signal?: AbortSignal): Promise<ObjectifyState> {
@@ -657,6 +659,13 @@ export function requestObjectify(jobId: string, expectedRevision: string, mode: 
   return apiFetch<ObjectifyState>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/objectify`, {
     method: "POST",
     body: JSON.stringify({ expected_scene_revision: expectedRevision, mode }),
+  });
+}
+
+/** Cancel queued work or request a running objectify worker to stop its child process. */
+export function cancelObjectify(jobId: string): Promise<ObjectifyState> {
+  return apiFetch<ObjectifyState>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/objectify/cancel`, {
+    method: "POST",
   });
 }
 

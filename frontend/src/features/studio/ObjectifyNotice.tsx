@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Button, Notice } from "@/components/studio/primitives";
 import { ApiError } from "@/lib/api/client";
-import { getObjectifyState, requestObjectify, type ObjectifyMode, type ObjectifyState } from "@/lib/api/studio";
+import { cancelObjectify, getObjectifyState, requestObjectify, type ObjectifyMode, type ObjectifyState } from "@/lib/api/studio";
 
 const POLL_MS = 5000;
 
@@ -57,15 +57,39 @@ export function ObjectifyNotice({ jobId, revision, onRevision }: { jobId: string
     }
   };
 
+  const cancel = async () => {
+    setSending(true);
+    setError(null);
+    try {
+      setState(await cancelObjectify(jobId));
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.detail : "Không hủy được yêu cầu.");
+    } finally {
+      setSending(false);
+    }
+  };
+
   if (pending) {
     return (
       <Notice tone="ember" className="m-3" icon={<Loader2 className="size-4 animate-spin" aria-hidden />}>
-        {state.mode === "boxes" ? "Đang dựng hộp ứng viên…" : "Đang chạy lại tách theo vật (tự thử lại tối đa 3 lần, mỗi lần vài phút)…"}
-        {state.status === "queued" && " Đang chờ máy xử lý rảnh."}
+        {state.cancellation_requested
+          ? "Đang dừng tiến trình và giải phóng tài nguyên…"
+          : state.mode === "boxes"
+            ? "Đang dựng hộp ứng viên…"
+            : "Đang chạy lại tách theo vật (tự thử lại tối đa 3 lần, mỗi lần vài phút)…"}
+        {state.status === "queued" && !state.cancellation_requested && " Đang chờ máy xử lý rảnh."}
+        {!state.cancellation_requested && (
+          <span className="mt-2 block">
+            <Button size="sm" variant="ghost" disabled={sending} onClick={() => void cancel()}>
+              Hủy yêu cầu
+            </Button>
+          </span>
+        )}
+        {error && <span className="mt-1 block text-xs">{error}</span>}
       </Notice>
     );
   }
-  if (state.object_centric) return null;
+  if (state.object_centric && state.status !== "cancelled") return null;
 
   const failed = state.status === "failed";
   const actions = (
@@ -85,7 +109,9 @@ export function ObjectifyNotice({ jobId, revision, onRevision }: { jobId: string
   if (!state.awaiting_choice && !failed && !state.available) return null;
   return (
     <Notice tone={state.awaiting_choice || failed ? "rust" : "ochre"} className="m-3">
-      {state.awaiting_choice || failed ? (
+      {state.status === "cancelled" ? (
+        <>Yêu cầu đã hủy. Scene vẫn giữ revision hiện tại.</>
+      ) : state.awaiting_choice || failed ? (
         <>
           <strong className="font-medium">Tách theo vật không thành công sau 3 lần thử.</strong> Scene hiện chỉ có môi trường. Bạn có thể chạy lại, hoặc
           dùng hộp ứng viên (mỗi vật là một hộp đánh dấu vị trí, hình 3DGS không tách rời theo vật).

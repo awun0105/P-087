@@ -2,7 +2,8 @@
 
 ## Metadata và goal
 
-- PLANNED; P1; EX-PRODUCT; canonical PRODUCT-02/08/09, SCENE-10.
+- AUD-07.S1–S3 locally implemented; browser/GPU qualification pending; P1;
+  EX-PRODUCT; canonical PRODUCT-02/08/09, SCENE-10.
 - SELF-CODE thin adapter; REUSE ResourceAdmission/DB/subprocess primitives.
 - Goal: reobjectify/import/validation cạnh tranh tài nguyên theo một cơ chế;
   không vượt user edits hoặc terminal state khi stale worker hoàn tất.
@@ -165,8 +166,9 @@ avoid parallel scheduler abstraction. Test process death/lease recovery and fair
 using persisted order existing policy, không tự thay scheduling policy.
 Tests: real child kill/reap, cancel-vs-complete race, all exception paths release,
 stale lease cannot release new owner's reservation; two-worker GPU smoke khi có.
-**Exit:** [ ] process/resource lifecycle tested; [ ] public wait/cancel truthful;
-[ ] GPU contention proof ghi riêng, không lấy mocked headroom làm empirical evidence.
+**Exit:** [x] process/resource lifecycle tested; [x] public wait/cancel truthful;
+UNVERIFIED: GPU contention smoke — no qualified GPU workload is available;
+mocked headroom is contract coverage only, not empirical evidence.
 
 ## Verification và DoD
 
@@ -179,6 +181,53 @@ nếu status UI đổi. DONE khi operation/job competition, lease/cancel/stale r
 matrix và concrete consumer handoff pass; GPU smoke limitations phải được ghi.
 
 ## Result / Evidence
+
+### AUD-07.S3 — Cancellation và multi-operation resource proof
+
+- Base commit: `2488062` (`AUD-05.S1`). Before editing, CodeGraph traced
+  `process_next`, cancellation/finish/commit guards, operation reservation release,
+  subprocess callers, API authorization, `ObjectifyNotice`, and their tests. The
+  edited-source caller map includes the worker CLI, `reobjectify`/`use_boxes`,
+  ResourceAdmission, and ObjectReviewView.
+- Behavior before/after: queued/running objectify requests could not be cancelled
+  through Studio and external geometry children did not observe the operation
+  cancellation token. The API now cancels queued requests immediately and persists
+  a cancellation flag for running requests. A heartbeat polls it and passes an
+  event through objectify, SAM2, LIFT, CONVEX, inpaint, and box-extraction process
+  calls. Child processes run in a private process group; cancellation kills the
+  group and waits for the direct child before `release_operation` is called.
+- Completion race: SceneHead publication checks the durable cancellation flag in
+  its commit transaction. A cancellation that wins before commit prevents publish;
+  a commit that wins first remains `done` if the cancel request arrives before the
+  worker records its terminal status. Unexpected exceptions are recorded as
+  terminal `failed` outcomes after reservation cleanup instead of leaving the
+  durable row in `running`.
+- Public contract: `POST /jobs/{job_id}/scene/objectify/cancel` uses the existing
+  job mutation ownership guard and returns `ObjectifyState`. `cancelled` and
+  `cancellation_requested` are additive JSON fields, so old queue records remain
+  readable. The UI keeps showing shutdown progress until the worker acknowledges,
+  then reports cancellation and preserves the current scene revision. No quota or
+  scene artifact contract changed.
+- Changed code/tests: added `process_control.py`; updated the objectify queue,
+  objectify/SAMPro3D/box subprocess wiring, cancellation API and API client; added
+  cancellation/progress UI; extended objectify API and queue tests. The new queue
+  tests cover queued cancellation, real child kill/reap before resource release,
+  cancel-after-commit ordering, and unexpected-exception cleanup. Existing
+  admission tests cover stale generations being unable to release a newer owner.
+- Verification: focused admission/revision/migration/cancellation suite **115
+  passed, 4 skipped**; import/extraction/API integration suite **55 passed**;
+  complete `tests/test_api` suite **167 passed**. Frontend `tests/object-review.test.tsx`
+  **16 passed**, `npm run typecheck` and changed-file ESLint passed. `.venv/bin/ruff
+  check src/ tests/` and `.venv/bin/ruff format --check src/ tests/` passed.
+- PostgreSQL: four migration/locking checks require `R2S_TEST_POSTGRES_URL`, which
+  is unset. GPU contention and real SAMPro3D/Isaac runtime behavior were not
+  exercised; local process tests prove kill/reap and release ordering only.
+- Browser: **UNVERIFIED**. Chrome DevTools MCP was connected and used to inspect
+  the Studio page, but navigating to `/scenes` returned `ERR_CONNECTION_REFUSED`
+  from `127.0.0.1:3100`, so the updated component could not be rendered. The
+  required DevTools screen/console gate remains open.
+- CodeGraph: pre-edit source/caller exploration completed. Post-edit
+  `codegraph sync` and the current index status are recorded with the sprint commit.
 
 ### AUD-07.S1 — Admission primitive cho operation
 

@@ -156,6 +156,27 @@ async def test_objectify_state_and_request_without_reconstruction_bundle(client,
 
 
 @pytest.mark.asyncio
+async def test_cancel_objectify_returns_the_worker_cancellation_state(client, monkeypatch) -> None:
+    from src.api.product import scene as scene_routes
+    from src.services.orchestration.scene.objectify_queue import ObjectifyState
+
+    state = ObjectifyState(status="running", mode="boxes", cancellation_requested=True)
+    calls: list[tuple[str, str]] = []
+
+    def cancel(registry, settings, job_id):  # noqa: ANN001, ANN202
+        calls.append((job_id, settings.database_url))
+        return state
+
+    monkeypatch.setattr(scene_routes.objectify_queue, "cancel", cancel)
+    response = await client.post(f"{_JOB}/scene/objectify/cancel")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "running"
+    assert response.json()["cancellation_requested"] is True
+    assert calls and calls[0][0] == "job-fixture-001"
+
+
+@pytest.mark.asyncio
 async def test_label_remembers_chosen_asset_and_rejects_asset_of_other_class(client) -> None:
     labelled = await client.post(
         f"{_JOB}/scene/objects/{_PALLET}/label",

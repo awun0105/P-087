@@ -251,6 +251,22 @@ def request_objectify(
     return result
 
 
+@router.post(
+    "/jobs/{job_id}/scene/objectify/cancel",
+    response_model=ObjectifyState,
+    responses={404: {"model": schemas.ApiErrorResponse}, 409: {"model": schemas.ApiErrorResponse}},
+)
+def cancel_objectify(job_id: str, user: UserRecord | None = Depends(require_contributor)) -> ObjectifyState:
+    """Cancel queued objectify immediately or request child-process shutdown for a running attempt."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="hủy yêu cầu dựng lại vật thể của")
+    deps.job_or_404(job_id)
+    try:
+        return objectify_queue.cancel(registry, deps.settings(), job_id)
+    except (ObjectifyRequestError, SceneNotAvailableError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
 @router.get(
     "/jobs/{job_id}/scene/objects/{object_id}/label-suggestions",
     response_model=schemas.LabelSuggestionResponse,

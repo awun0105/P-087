@@ -93,6 +93,10 @@ function routeFetch(routes: Record<string, Response[]>) {
         physics_note: "",
       });
     // Trạng thái tách theo vật: mặc định scene đã là scene theo vật (không hiện thông báo), trừ khi test tự cấp.
+    if (url.includes("/scene/objectify/cancel")) {
+      const cancelled = routes["/scene/objectify/cancel"];
+      return cancelled?.length ? cancelled.shift()! : reply(objectify({ status: "cancelled", cancellation_requested: true }));
+    }
     if (url.includes("/scene/objectify")) {
       const queued = routes["/scene/objectify"];
       return queued?.length ? queued.shift()! : reply(objectify({ object_centric: true }));
@@ -108,7 +112,7 @@ function routeFetch(routes: Record<string, Response[]>) {
 }
 
 function objectify(overrides: Record<string, unknown>) {
-  return { status: "idle", mode: null, awaiting_choice: false, object_centric: false, available: true, note: null, base_revision: null, result_revision: null, error: null, ...overrides };
+  return { status: "idle", mode: null, awaiting_choice: false, object_centric: false, available: true, note: null, base_revision: null, result_revision: null, error: null, resource_wait: null, cancellation_requested: false, ...overrides };
 }
 
 function calls(pattern: string) {
@@ -457,6 +461,27 @@ describe("ObjectReviewView", () => {
     await waitFor(() => expect(posts()).toHaveLength(1));
     expect(JSON.parse((posts()[0][1] as RequestInit).body as string)).toEqual({ expected_scene_revision: "rev-002", mode: "boxes" });
     expect(await screen.findByText(/Đang dựng hộp ứng viên/)).toBeTruthy();
+  });
+
+  it("hủy objectify đang chạy và giữ trạng thái dừng cho đến worker acknowledgement", async () => {
+    routeFetch({
+      "/scene/objectify": [reply(objectify({ status: "running", mode: "objectify" }))],
+      "/scene/objectify/cancel": [
+        reply(objectify({ status: "running", mode: "objectify", cancellation_requested: true })),
+      ],
+      "/scene": [reply({ scene: scene("rev-001", "CANDIDATE") })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+
+    expect(await screen.findByText(/Đang chạy lại tách theo vật/)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Hủy yêu cầu" }));
+
+    expect(await screen.findByText(/Đang dừng tiến trình và giải phóng tài nguyên/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Hủy yêu cầu" })).toBeNull();
+    const cancellations = calls("/scene/objectify/cancel").filter(
+      ([, init]) => (init as RequestInit | undefined)?.method === "POST",
+    );
+    expect(cancellations).toHaveLength(1);
   });
 
   it("scene theo vật: không hiện thông báo tách vật", async () => {

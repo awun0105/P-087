@@ -33,6 +33,11 @@ status APIs và owner checks. Focused local verification: 52 passed, 4 skipped;
 Ruff check/format pass. Isaac Sim/Isaac Lab và server validation config/profile
 không có trong môi trường hiện tại, nên runtime qualification và S2 real-simulator
 acceptance vẫn **UNVERIFIED**; không lấy test fixture làm bằng chứng runtime.
+AUD-07.S3 đã nối queued/running cancellation từ API tới process-group kill/reap,
+đảm bảo reservation chỉ nhả sau khi child chết và giữ quy tắc thắng/thua rõ ràng
+ở cancel-vs-commit race. Local focused tests và API/UI checks pass; GPU contention
+smoke và Chrome DevTools screen gate còn **UNVERIFIED** vì không có qualified GPU
+workload và Studio tại `127.0.0.1:3100` trả `ERR_CONNECTION_REFUSED`.
 AUD-23.S1 đã thêm profile/media contracts dùng chung Python–TypeScript, input-
 specific capability blockers, dimension fitting cho portrait/landscape và
 checksum compatibility cho `InputManifest` cũ. AUD-23.S2 đã thêm local Worker
@@ -270,6 +275,8 @@ AUD-19. Static-map consumer chỉ enable sau registration QA, không bắt AUD-1
 Progress hiện tại: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3,
 AUD-03.S1–S3, AUD-04.S1–S3, AUD-10.S1–S3 và AUD-07.S1–S2 đã được commit riêng
 theo sprint.
+AUD-07.S3 đã thêm objectify cancellation, child-process cleanup và terminal
+outcome handling; browser/GPU qualification còn UNVERIFIED.
 AUD-01.S3 verified legacy
 ownership recovery, candidate ZIP/manifest, current rotated object pose,
 retained floor collision, relative USD asset composition, và bất biến bytes của

@@ -14,11 +14,11 @@ chạy lại cho job cũ). Thiếu runtime hoặc một provider lỗi → ném 
 import hashlib
 import json
 import logging
-import subprocess
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Event
 
 import numpy as np
 import trimesh
@@ -39,6 +39,7 @@ from src.models.contracts.scene import (
 from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneRevisionConflictError
+from src.services.process_control import ProcessCancelledError, ProcessTimeoutError, run_cancellable_process
 from src.services.reconstruction import camera_views, metric_visual_master, package_splat
 from src.services.scene.collision_ownership import bind_source_collision_ownership
 from src.services.scene.decomposition import gaussian_split
@@ -78,25 +79,40 @@ class ObjectifyResult:
     provenance: dict
 
 
-def _run(python: Path, script: Path, request: dict, workspace: Path, name: str, timeout: float) -> dict:
+def _ensure_not_cancelled(cancel_event: Event | None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise ProcessCancelledError("Objectify operation was cancelled")
+
+
+def _run(
+    python: Path,
+    script: Path,
+    request: dict,
+    workspace: Path,
+    name: str,
+    timeout: float,
+    *,
+    cancel_event: Event | None = None,
+) -> dict:
     """Chạy một provider trong runtime; lỗi/timeout → ObjectifyError có ngữ cảnh, log nằm trong workspace."""
+    _ensure_not_cancelled(cancel_event)
     workspace.mkdir(parents=True, exist_ok=True)
     request_path, result_path = workspace / f"{name}.request.json", workspace / f"{name}.result.json"
     request_path.write_text(json.dumps(request), encoding="utf-8")
     result_path.unlink(missing_ok=True)
     with (workspace / f"{name}.log").open("w") as log:
         try:
-            completed = subprocess.run(
+            returncode = run_cancellable_process(
                 [str(python), str(script), "--request", str(request_path), "--result", str(result_path)],
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                timeout=timeout,
-                check=False,
+                cwd=workspace,
+                timeout_seconds=timeout,
+                output=log,
+                cancel_event=cancel_event,
             )
-        except subprocess.TimeoutExpired as error:
+        except ProcessTimeoutError as error:
             raise ObjectifyError(f"{name} quá thời gian cho phép") from error
-    if completed.returncode != 0 or not result_path.is_file():
-        raise ObjectifyError(f"{name} lỗi (exit {completed.returncode}); xem {name}.log")
+    if returncode != 0 or not result_path.is_file():
+        raise ObjectifyError(f"{name} lỗi (exit {returncode}); xem {name}.log")
     return json.loads(result_path.read_text(encoding="utf-8"))
 
 
@@ -114,14 +130,23 @@ def _reference(job_id: str, tail: str, artifact_type: str, stage: StageId, paylo
 
 
 def _seeds(
-    rows: np.ndarray, frames: list[CameraFrame], centers: np.ndarray, runtime: Sam2Runtime, workspace: Path
+    rows: np.ndarray,
+    frames: list[CameraFrame],
+    centers: np.ndarray,
+    runtime: Sam2Runtime,
+    workspace: Path,
+    cancel_event: Event | None = None,
 ) -> list[np.ndarray]:
     """Hạt giống từng vật (chỉ số vào `rows`) từ SAMPro3D; bỏ khối không phải vật (kệ dài, mảnh vụn)."""
     low, high = centers.min(axis=0)[:2] - _CROP_MARGIN_M, centers.max(axis=0)[:2] + _CROP_MARGIN_M
     work = gaussian_split.working_set(rows, low, high, _CROP_Z)
     points = gaussian_split.positions(rows)[work]
     try:
-        instances = segment(run_sam2(points, frames, runtime, workspace / "sampro3d"), points, Sampro3dConfig())
+        instances = segment(
+            run_sam2(points, frames, runtime, workspace / "sampro3d", cancel_event=cancel_event),
+            points,
+            Sampro3dConfig(),
+        )
     except ValueError as error:
         raise ObjectifyError(f"SAMPro3D lỗi: {error}") from error
     limits = GeometricConfig()
@@ -144,6 +169,8 @@ def objectify(
     settings: Settings,
     workspace: Path,
     publish: Publish,
+    *,
+    cancel_event: Event | None = None,
 ) -> ObjectifyResult:
     """Chạy toàn bộ chặng 4–7 cho một bundle hệ mét; publish artifact và trả phần SceneIR."""
     python, checkpoint = settings.product_scene_runtime_python, settings.product_sam2_checkpoint
@@ -164,7 +191,8 @@ def objectify(
         for view in views
     ]
     view_requests = [{**frame.view, "image_path": str(frame.image_path)} for frame in frames]
-    seeds = _seeds(rows, frames, np.array([view.center for view in views]), runtime, workspace)
+    _ensure_not_cancelled(cancel_event)
+    seeds = _seeds(rows, frames, np.array([view.center for view in views]), runtime, workspace, cancel_event)
     if not seeds:
         raise ObjectifyError("không tìm thấy vật nào để tách")
 
@@ -187,12 +215,14 @@ def objectify(
         workspace,
         "lift",
         timeout,
+        cancel_event=cancel_event,
     )
     labels = np.load(workspace / "labels.npz")["labels"]
     background, parts = gaussian_split.split(rows, labels)
     if not parts:
         raise ObjectifyError("gán nhãn không cho ra vật nào đủ lớn")
 
+    _ensure_not_cancelled(cancel_event)
     kept = np.isin(labels, [part.index for part in parts])
     (workspace / "objects_world.ply").write_bytes(gaussian_split.write_gaussian_ply(rows[kept]))
     (workspace / "background.ply").write_bytes(gaussian_split.write_gaussian_ply(background))
@@ -218,18 +248,40 @@ def objectify(
         "views": view_requests,
     }
     with ThreadPoolExecutor(max_workers=2) as pool:
-        convex_job = pool.submit(_run, python, CONVEX_RUNNER, convex_request, workspace, "convex", timeout)
-        inpaint_job = pool.submit(_run, python, INPAINT_RUNNER, inpaint_request, workspace, "inpaint", timeout)
+        convex_job = pool.submit(
+            _run,
+            python,
+            CONVEX_RUNNER,
+            convex_request,
+            workspace,
+            "convex",
+            timeout,
+            cancel_event=cancel_event,
+        )
+        inpaint_job = pool.submit(
+            _run,
+            python,
+            INPAINT_RUNNER,
+            inpaint_request,
+            workspace,
+            "inpaint",
+            timeout,
+            cancel_event=cancel_event,
+        )
         convex, inpaint = convex_job.result(), inpaint_job.result()
     colliders = {int(item["id"]): item for item in convex["objects"]}
     try:
         sog = package_splat(
-            workspace / "background_inpainted.ply", workspace / "sog", settings.product_geometry_gpu_index
+            workspace / "background_inpainted.ply",
+            workspace / "sog",
+            settings.product_geometry_gpu_index,
+            cancel_event=cancel_event,
         )
     except (ValueError, OSError) as error:
         raise ObjectifyError(f"nén SOG nền lỗi: {error}") from error
 
     job_id = job.job_id
+    _ensure_not_cancelled(cancel_event)
     background_payload = (workspace / "background_inpainted.ply").read_bytes()
     master_ref = publish(
         _reference(
@@ -247,6 +299,7 @@ def objectify(
 
     objects: list[SceneObject] = []
     for number, part in enumerate(parts, start=1):
+        _ensure_not_cancelled(cancel_event)
         object_id = f"candidate-{number:03d}"
         gaussians = gaussian_split.write_gaussian_ply(part.rows)
         visual = publish(
@@ -331,6 +384,8 @@ def objectify_with_retry(
     settings: Settings,
     workspace: Path,
     publish: Publish,
+    *,
+    cancel_event: Event | None = None,
 ) -> ObjectifyResult:
     """Thử `objectify` tối đa `product_objectify_attempts` lần, mỗi lần một workspace riêng (giữ log từng lần).
 
@@ -341,7 +396,10 @@ def objectify_with_retry(
     last: Exception | None = None
     for number in range(1, attempts + 1):
         try:
-            return objectify(registry, job, bundle, settings, workspace / f"attempt-{number}", publish)
+            arguments = {"cancel_event": cancel_event} if cancel_event is not None else {}
+            return objectify(registry, job, bundle, settings, workspace / f"attempt-{number}", publish, **arguments)
+        except ProcessCancelledError:
+            raise
         except (ObjectifyError, ValueError, OSError) as error:
             logger.warning("Tách theo vật lỗi job=%s lần %d/%d: %s", job.job_id, number, attempts, error)
             last = error
@@ -356,6 +414,7 @@ def reobjectify(
     *,
     expected_revision: str | None = None,
     commit_guard: Callable[[RuntimeTransaction], bool] | None = None,
+    cancel_event: Event | None = None,
 ) -> str:
     """Chạy lại tách theo vật cho job đã có SceneIR; ghi **revision kế tiếp** (không sửa revision cũ).
 
@@ -384,7 +443,8 @@ def reobjectify(
             return reference
         return store.publish(reference, payload)
 
-    result = objectify_with_retry(registry, job, bundle, settings, workspace, publish)
+    arguments = {"cancel_event": cancel_event} if cancel_event is not None else {}
+    result = objectify_with_retry(registry, job, bundle, settings, workspace, publish, **arguments)
     # The new candidates replace the old set, so they own regions of the collision mesh just like extraction's.
     objects = bind_source_collision_ownership(result.objects, result.environment.geometry_ref, expected_revision)
     updated = base_scene.model_copy(
