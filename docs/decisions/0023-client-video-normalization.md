@@ -6,9 +6,10 @@ Date: 2026-10-07
 
 Proposed — owner đã chọn nén trước upload, default720p/options1080p/720p/480p,
 portrait/landscape. AUD-23.S1 hiện có versioned Python/TypeScript contracts,
-checksum-bound profile và synthetic contract fixtures. ADR vẫn Proposed: encoder,
-browser support, bitrate quality, real upload saving và sensor consumers chưa được
-qualified; không đánh dấu Accepted từ contract tests.
+checksum-bound profile và synthetic contract fixtures. S3 đã nối server verification
+và frame/camera consumers. ADR vẫn Proposed: browser support, bitrate quality, real
+upload saving và paired sensor/reconstruction behavior chưa được qualified; không
+đánh dấu Accepted từ local tests.
 
 ## Context
 
@@ -83,8 +84,18 @@ are pinned in `frontend/package.json` and `frontend/package-lock.json`. This is
 implementation evidence, not browser qualification. Profile/contract and
 orchestration tests do not establish real WebCodecs availability, playable output,
 measured memory bounds, actual bandwidth savings, calibration projection, LiDAR
-pose association or reconstruction quality. Upload/REC consumers and real browser
-acceptance remain AUD-23.S3–S5; keep this ADR **Proposed** until those gates pass.
+pose association or reconstruction quality.
+
+AUD-23.S3 adds separate pending-manifest and server-verification endpoints, checks
+received MP4 bytes and decoded output PTS with ffprobe, publishes the bounded map, and
+propagates source frame IDs through frame extraction, preview, metric proposal and
+finalization. Camera intrinsics/extrinsics now follow supported resize, SAR and
+right-angle rotation transforms; unsupported transforms fail closed. Product quality
+measurement uses a new aspect-preserving v2 profile while retaining v1 compatibility.
+These results are local-code and synthetic/FFmpeg-fixture evidence. The local original
+and its source-frame association remain client-declared. S4 upload/resume integration
+and S5 browser, bandwidth, held-out quality and paired-sensor acceptance remain open.
+Keep this ADR **Proposed** until those gates pass.
 
 ## Alternatives Considered
 

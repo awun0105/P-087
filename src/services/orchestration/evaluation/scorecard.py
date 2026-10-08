@@ -131,7 +131,7 @@ def _input_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric] 
             display="Không có" if not quality.warnings else "; ".join(quality.warnings),
             meaning="Cảnh báo của bước kiểm video (đứng yên lâu, chuyển động quá nhanh).",
             verdict="ok" if not quality.warnings else "warn",
-            threshold="Hồ sơ kiểm video `configs/product/upload_quality_v1.json`",
+            threshold="Hồ sơ kiểm video `configs/product/upload_quality_v2.json`",
         ),
     ]
 

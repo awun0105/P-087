@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.models.contracts.artifacts import ArtifactUri, Checksum, Identifier
+from src.models.contracts.video_preparation import ClientVideoPreparationManifest, ServerVideoPreparationVerification
 from src.services.orchestration.auth.models import Actor
 from src.services.reconstruction import InputDetection, InputKind
 
@@ -56,6 +57,9 @@ class UploadRecord(BaseModel):
     detection: InputDetection | None = None
     #: Người tải file lên; None với record cũ hoặc khi không bật đăng nhập.
     uploaded_by: Actor | None = None
+    #: Client declaration is untrusted until a server verification report is attached.
+    video_preparation_manifest: ClientVideoPreparationManifest | None = None
+    video_preparation: ServerVideoPreparationVerification | None = None
 
 
 UploadSessionStatus = Literal["UPLOADING", "VERIFYING", "READY", "FAILED"]

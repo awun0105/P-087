@@ -10,6 +10,7 @@ from pydantic import Field, model_validator
 
 from src.models.contracts.artifacts import Checksum, ContractModel, ProductArtifactRef, SchemaVersion
 from src.models.contracts.identity import canonical_content_checksum
+from src.models.contracts.video_preparation import ServerVideoPreparationVerification
 
 
 class NormalizedRGBFrame(ContractModel):
@@ -19,6 +20,7 @@ class NormalizedRGBFrame(ContractModel):
     timestamp_sec: str
     image: ProductArtifactRef
     source_checksum: Checksum
+    source_frame_id: int | None = Field(default=None, ge=0, exclude_if=lambda value: value is None)
 
 
 class NormalizedRGBFrameSet(ContractModel):
@@ -33,6 +35,9 @@ class NormalizedRGBFrameSet(ContractModel):
     extraction_config_checksum: Checksum
     ffmpeg_version: str
     frames: list[NormalizedRGBFrame]
+    video_preparation: ServerVideoPreparationVerification | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     frame_set_checksum: Checksum
 
     @model_validator(mode="after")

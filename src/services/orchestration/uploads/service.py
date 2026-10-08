@@ -12,6 +12,7 @@ from pathlib import PurePosixPath
 from typing import BinaryIO
 from uuid import uuid4
 
+from src.models.contracts.video_preparation import ClientVideoPreparationManifest, ServerVideoPreparationVerification
 from src.services.orchestration.artifacts import ArtifactResolver, StreamingPublication
 from src.services.orchestration.auth.models import Actor
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
@@ -124,6 +125,53 @@ class VideoUploadService:
         if row is None:
             raise UploadNotFoundError(f"không tìm thấy upload: {upload_id}")
         return UploadRecord.model_validate_json(row[0])
+
+    def save_video_preparation_manifest(self, upload_id: str, manifest: ClientVideoPreparationManifest) -> UploadRecord:
+        """Store a client declaration as pending only; it is not server evidence."""
+        with self.database.transaction(write=True) as tx:
+            row = tx.execute(
+                "SELECT payload FROM r2s_uploads WHERE upload_id=?" + tx.lock_suffix(), (upload_id,)
+            ).fetchone()
+            if row is None:
+                raise UploadNotFoundError(f"không tìm thấy upload: {upload_id}")
+            current = UploadRecord.model_validate_json(row[0])
+            if current.input_kind != "rgb_video" or current.media_type != "video/mp4":
+                raise UploadError("Nén video chỉ áp dụng cho file MP4 đã nhận diện là video RGB")
+            if current.project_ids:
+                raise RuntimeStateConflictError("Không thể đổi provenance sau khi upload đã gắn với scene")
+            if current.video_preparation is not None and current.video_preparation.client_manifest != manifest:
+                raise RuntimeStateConflictError("Video preparation đã được xác minh và không thể thay đổi")
+            updated = current.model_copy(update={"video_preparation_manifest": manifest})
+            tx.execute("UPDATE r2s_uploads SET payload=? WHERE upload_id=?", (updated.model_dump_json(), upload_id))
+        return updated
+
+    def save_video_preparation_verification(
+        self, upload_id: str, verification: ServerVideoPreparationVerification
+    ) -> UploadRecord:
+        """Persist immutable verification only if the uploaded bytes and declaration still match."""
+        with self.database.transaction(write=True) as tx:
+            row = tx.execute(
+                "SELECT payload FROM r2s_uploads WHERE upload_id=?" + tx.lock_suffix(), (upload_id,)
+            ).fetchone()
+            if row is None:
+                raise UploadNotFoundError(f"không tìm thấy upload: {upload_id}")
+            current = UploadRecord.model_validate_json(row[0])
+            if current.video_preparation_manifest != verification.client_manifest:
+                raise RuntimeStateConflictError("Video preparation declaration changed during verification")
+            if (
+                current.checksum != verification.uploaded_checksum
+                or current.size_bytes != verification.uploaded_size_bytes
+            ):
+                raise UploadError("Video preparation identity differs from the server upload record")
+            if verification.frame_map_ref.job_id != upload_id:
+                raise UploadError("Video frame map belongs to another upload")
+            if current.video_preparation is not None:
+                if current.video_preparation != verification:
+                    raise RuntimeStateConflictError("Upload đã có một frame map khác được xác minh")
+                return current
+            updated = current.model_copy(update={"video_preparation": verification})
+            tx.execute("UPDATE r2s_uploads SET payload=? WHERE upload_id=?", (updated.model_dump_json(), upload_id))
+        return updated
 
     def link_project(self, upload_id: str, project_id: str) -> UploadRecord:
         """Ghi project đã tạo từ upload (một video có thể dựng nhiều scene)."""

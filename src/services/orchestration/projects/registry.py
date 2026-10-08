@@ -286,6 +286,8 @@ class ProjectRegistry:
         """
         if upload.upload_id != request.upload_id:
             raise ValueError("upload không khớp request")
+        if upload.video_preparation_manifest is not None and upload.video_preparation is None:
+            raise ValueError("Video preparation chưa được máy chủ xác minh; hoàn tất bước kiểm tra frame map trước")
         if (lidar is None) != (request.lidar is None) or (lidar and lidar.upload_id != request.lidar.upload_id):  # type: ignore[union-attr]
             raise ValueError("gói LiDAR không khớp request")
         if lidar is not None and (lidar.detection is None or lidar.detection.lidar is None):
@@ -338,6 +340,7 @@ class ProjectRegistry:
                 )
             ),
             source_rights_attestation=attestation,
+            video_preparation=upload.video_preparation,
             preparation_provenance={
                 "upload_id": upload.upload_id,
                 **(

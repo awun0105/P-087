@@ -98,7 +98,21 @@ def propose_metric_from_lidar(
     poses = pose_resolver.load(visual.source_camera_poses)
     trajectory = parse_trajectory(resolve(record.trajectory_ref).read_text(encoding="utf-8"))
     registered = sorted(poses.poses, key=lambda pose: pose.frame_id)
-    priors = camera_priors(trajectory, record.sensor_from_camera, tuple(pose.frame_id for pose in registered))
+    frame_set = pose_resolver.frames.load(poses.source_frame_set)
+    mapped_frames = {frame.frame_id: frame.source_frame_id for frame in frame_set.frames}
+    has_mapping = any(source_id is not None for source_id in mapped_frames.values())
+    if has_mapping and any(source_id is None for source_id in mapped_frames.values()):
+        raise ValueError("prepared RGB frame set contains a partial source-frame map")
+    frame_ids = tuple(pose.frame_id for pose in registered)
+    source_frame_ids = tuple(mapped_frames[frame_id] for frame_id in frame_ids) if has_mapping else None
+    source_frame_count = (
+        frame_set.video_preparation.client_manifest.source_video.frame_count
+        if frame_set.video_preparation is not None
+        else None
+    )
+    if frame_set.video_preparation is not None and not has_mapping:
+        raise ValueError("prepared RGB frame set is missing its verified source-frame map")
+    priors = camera_priors(trajectory, record.sensor_from_camera, frame_ids, source_frame_ids, source_frame_count)
     final = [tuple(pose.translation) for pose in registered]
     target = [prior.translation for prior in priors]
     fit = _fit(final, target)  # type: ignore[arg-type]

@@ -6,14 +6,21 @@ store qua API (local/không có kho file). File I/O đồng bộ chạy qua thre
 """
 
 import logging
+import tempfile
+from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.auth import require_contributor
-from src.api.ownership import authorize_upload_session_mutation
+from src.api.ownership import authorize_upload_mutation, authorize_upload_session_mutation
 from src.api.studio import deps
+from src.models.contracts.video_preparation import (
+    ClientVideoPreparationManifest,
+    ServerVideoPreparationVerification,
+    default_video_normalization_profile,
+)
 from src.services.orchestration.artifacts import ArtifactAlreadyExistsError, ArtifactTooLargeError
 from src.services.orchestration.auth import UserRecord, actor_of
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
@@ -24,10 +31,25 @@ from src.services.orchestration.uploads import (
     UploadRecord,
     UploadSession,
 )
+from src.services.orchestration.uploads.video_preparation import (
+    ServerVideoPreparationVerifier,
+    VideoPreparationVerificationError,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class UploadResponse(UploadRecord):
+    """Public shape; local source fingerprints and verification internals stay server-side."""
+
+    video_preparation_manifest: ClientVideoPreparationManifest | None = Field(default=None, exclude=True)
+    video_preparation: ServerVideoPreparationVerification | None = Field(default=None, exclude=True)
+
+    @classmethod
+    def from_record(cls, record: UploadRecord) -> "UploadResponse":
+        return cls.model_validate(record.model_dump(mode="python"))
 
 
 class UploadListResponse(BaseModel):
@@ -35,15 +57,15 @@ class UploadListResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    uploads: list[UploadRecord]
+    uploads: list[UploadResponse]
 
 
-@router.post("/uploads", response_model=UploadRecord, status_code=status.HTTP_201_CREATED)
+@router.post("/uploads", response_model=UploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_video(
     request: Request,
     filename: str = Query(..., min_length=1, max_length=255),
     user: UserRecord | None = Depends(require_contributor),
-) -> UploadRecord:
+) -> UploadResponse:
     """Nhận bytes video trong body; bytes gốc được giữ nguyên, checksum tính khi ghi."""
     service = deps.uploads()
     try:
@@ -54,7 +76,8 @@ async def upload_video(
         async for chunk in request.stream():
             if chunk:
                 await run_in_threadpool(pending.publication.write, chunk)
-        return await run_in_threadpool(service.finish, pending, actor_of(user))
+        record = await run_in_threadpool(service.finish, pending, actor_of(user))
+        return UploadResponse.from_record(record)
     except ArtifactTooLargeError as error:
         raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(error)) from error
     except ValueError as error:
@@ -69,7 +92,80 @@ async def upload_video(
 @router.get("/uploads", response_model=UploadListResponse)
 def list_uploads() -> UploadListResponse:
     """Danh sách video đã upload để người dùng chọn."""
-    return UploadListResponse(uploads=deps.uploads().list())
+    return UploadListResponse(uploads=[UploadResponse.from_record(item) for item in deps.uploads().list()])
+
+
+@router.put("/uploads/{upload_id}/video-preparation/manifest", response_model=UploadResponse)
+def save_video_preparation_manifest(
+    upload_id: str,
+    manifest: ClientVideoPreparationManifest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> UploadResponse:
+    """Store the client declaration as pending; server verification is a separate request."""
+    service = deps.uploads()
+    try:
+        current = service.get(upload_id)
+        authorize_upload_mutation(user, current, operation="cập nhật metadata upload")
+        return UploadResponse.from_record(service.save_video_preparation_manifest(upload_id, manifest))
+    except (UploadError, UploadNotFoundError, RuntimeStateConflictError) as error:
+        raise _upload_errors(error) from error
+
+
+@router.put("/uploads/{upload_id}/video-preparation/frame-map", response_model=UploadResponse)
+async def upload_video_frame_map(
+    upload_id: str,
+    request: Request,
+    user: UserRecord | None = Depends(require_contributor),
+) -> UploadResponse:
+    """Stream a bounded JSONL frame map, then verify it against the received MP4 with ffprobe."""
+    service = deps.uploads()
+    try:
+        current = service.get(upload_id)
+        authorize_upload_mutation(user, current, operation="xác minh frame map upload")
+    except (UploadError, UploadNotFoundError, RuntimeStateConflictError) as error:
+        raise _upload_errors(error) from error
+    if current.video_preparation_manifest is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cần gửi video preparation manifest trước frame map",
+        )
+    limit = default_video_normalization_profile().max_frame_map_bytes
+    length = request.headers.get("content-length")
+    if length and length.isdecimal() and int(length) > limit:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="Video frame map vượt giới hạn 32 MiB"
+        )
+
+    path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix="r2s_video_frame_map_", suffix=".jsonl", delete=False) as frame_map:
+            path = Path(frame_map.name)
+            size = 0
+            async for chunk in request.stream():
+                if not chunk:
+                    continue
+                size += len(chunk)
+                if size > limit:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                        detail="Video frame map vượt giới hạn 32 MiB",
+                    )
+                await run_in_threadpool(frame_map.write, chunk)
+        verification = await run_in_threadpool(
+            ServerVideoPreparationVerifier(service.resolver).verify_and_publish,
+            current,
+            current.video_preparation_manifest,
+            path,
+        )
+        record = await run_in_threadpool(service.save_video_preparation_verification, upload_id, verification)
+        return UploadResponse.from_record(record)
+    except VideoPreparationVerificationError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+    except (UploadError, UploadNotFoundError, RuntimeStateConflictError, ValueError) as error:
+        raise _upload_errors(error) from error
+    finally:
+        if path is not None:
+            path.unlink(missing_ok=True)
 
 
 class UploadConfig(BaseModel):

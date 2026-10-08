@@ -30,10 +30,11 @@ AUD-23.S1 đã thêm profile/media contracts dùng chung Python–TypeScript, in
 specific capability blockers, dimension fitting cho portrait/landscape và
 checksum compatibility cho `InputManifest` cũ. AUD-23.S2 đã thêm local Worker
 decode/resize/downselect/AVC encode/MP4 mux, bounded OPFS artifacts, incremental
-hash và output-frame/source-PTS map verification. Local verification: S1 backend
-148 tests; S1/S2 focused frontend 20 tests, typecheck, changed-file ESLint và
-production build pass. Browser codec/runtime support, actual upload, measured
-memory/bitrate quality and sensor consumers remain unverified and belong to S3–S5.
+hash và output-frame/source-PTS map verification. AUD-23.S3 đã thêm server-side
+byte/PTS verification, source-frame mapping qua REC/LiDAR consumers, calibration
+transform và quality profile v2 giữ tỉ lệ. S3 local verification: backend focused
+tests, Ruff và real FFmpeg filter fixtures pass. Upload UI/resume, browser codec/runtime,
+actual bandwidth, held-out quality and paired-sensor reconstruction remain S4–S5 gates.
 Active scope: 24 packages/80 sprints. AUD-25/ADR0025 Deferred theo yêu cầu owner
 2026-10-07; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -410,8 +411,10 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [x] AUD-23.S2 bounded local Worker encode, OPFS/backpressure, PTS frame sampling,
       checksummed mapping, output verification and cancellation cleanup; 20 focused
       tests/typecheck/changed ESLint/webpack build pass.
-- [ ] AUD-23.S3–S4 server/REC integration, upload UI and content-bound recovery;
-      AUD-23.S5 real browser, bandwidth, quality and geometry acceptance.
+- [x] AUD-23.S3 server byte/PTS verification, REC source-frame and calibration mapping,
+      aspect-preserving quality profile; synthetic and local FFmpeg checks only.
+- [ ] AUD-23.S4 upload UI/content-bound recovery; AUD-23.S5 browser, bandwidth,
+      held-out quality and paired-sensor geometry acceptance.
 - [ ] Implementation AUD-24 và grouped upload/R1–R6 recipe/consumer/browser acceptance.
 - [x] Hoãn AUD-25/ADR0025 theo yêu cầu owner; gỡ khỏi execution order và active dependencies.
 

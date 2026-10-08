@@ -14,7 +14,7 @@ from typing import Literal, Self
 
 from pydantic import Field, FiniteFloat, model_validator
 
-from src.models.contracts.artifacts import Checksum, ContractModel
+from src.models.contracts.artifacts import Checksum, ContractModel, ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
 
 
@@ -325,6 +325,55 @@ class ClientVideoPreparationManifest(ContractModel):
             raise ValueError("explicit audio omission requires source audio and an output without audio")
         verify_content_checksum(self, "preparation_checksum")
         return self
+
+
+class ServerVideoPreparationVerification(ContractModel):
+    """Server evidence for received prepared bytes; local-original metadata stays unverified."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    status: Literal["server_verified"] = "server_verified"
+    uploaded_checksum: Checksum
+    uploaded_size_bytes: int = Field(gt=0, strict=True)
+    client_manifest: ClientVideoPreparationManifest
+    observed_video: VideoStreamMetadata
+    frame_map_ref: ProductArtifactRef
+    original_source_status: Literal["client_declared_unverified"] = "client_declared_unverified"
+    verification_checksum: Checksum
+
+    @model_validator(mode="after")
+    def _validate_verification(self) -> Self:
+        if (
+            self.uploaded_checksum != self.client_manifest.prepared_file.checksum
+            or self.uploaded_size_bytes != self.client_manifest.prepared_file.size_bytes
+        ):
+            raise ValueError("verified upload identity differs from the client preparation declaration")
+        if self.frame_map_ref.artifact_checksum != self.client_manifest.frame_map.checksum:
+            raise ValueError("verified frame-map reference differs from the declared sidecar checksum")
+        if (
+            self.frame_map_ref.artifact_type != "VideoFrameMap"
+            or self.frame_map_ref.data_class.value != "product_input"
+        ):
+            raise ValueError("frame-map reference must identify a product-input VideoFrameMap")
+        if self.frame_map_ref.job_id is None:
+            raise ValueError("frame-map reference must belong to an upload namespace")
+        if not _same_prepared_stream(self.observed_video, self.client_manifest.prepared_video):
+            raise ValueError("server-observed prepared video differs from the client declaration")
+        verify_content_checksum(self, "verification_checksum")
+        return self
+
+
+def _same_prepared_stream(observed: VideoStreamMetadata, declared: VideoStreamMetadata) -> bool:
+    """Compare server-observable values, allowing codec labels from equivalent AVC parsers."""
+    observed_codec = observed.codec.casefold()
+    declared_codec = declared.codec.casefold()
+    observed_avc = observed_codec in {"avc", "h264"} or observed_codec.startswith("avc1.")
+    declared_avc = declared_codec in {"avc", "h264"} or declared_codec.startswith("avc1.")
+    actual = observed.model_dump(mode="json")
+    expected = declared.model_dump(mode="json")
+    actual.pop("frame_rate", None)
+    expected.pop("frame_rate", None)
+    actual["codec"] = expected["codec"]
+    return observed_avc and declared_avc and actual == expected
 
 
 def _is_hdr_transfer(value: str) -> bool:

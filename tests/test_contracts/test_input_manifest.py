@@ -84,9 +84,11 @@ def test_explicit_null_preparation_provenance_remains_part_of_identity() -> None
     """A producer that explicitly hashes null keeps the same serialized content."""
     payload = InputManifest.model_validate(_input_payload()).model_dump(mode="json")
     payload["preparation_provenance"] = None
+    payload["video_preparation"] = None
     payload["input_manifest_checksum"] = canonical_content_checksum(payload, "input_manifest_checksum")
 
     manifest = InputManifest.model_validate(payload)
     verify_content_checksum(manifest, "input_manifest_checksum")
 
     assert "preparation_provenance" in manifest.model_dump(mode="json")
+    assert "video_preparation" in manifest.model_dump(mode="json")

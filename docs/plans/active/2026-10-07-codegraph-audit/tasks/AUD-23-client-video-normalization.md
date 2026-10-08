@@ -282,10 +282,10 @@ only proves orchestration; do not label browser encoding or real bandwidth accep
 
 ## Result / Evidence
 
-AUD-23.S1 contracts and AUD-23.S2 local encoder implementation are recorded
-below. Upload/consumer integration and real-browser/bandwidth/geometry acceptance
-remain for S3–S5; local unit tests are not evidence that a target browser can encode
-or play a real capture.
+AUD-23.S1–S3 local implementation is recorded below. Upload UI/resume and
+real-browser, bandwidth, reconstruction-quality and paired-sensor acceptance
+remain for S4–S5. Local tests do not prove that a target browser can encode or
+play a real capture.
 
 ### S1 changes and verification
 
@@ -412,3 +412,69 @@ or play a real capture.
   commands above.
 - DevTools: n/a — S2 adds no rendered UI or browser upload flow. Real browser media
   behavior and UI acceptance are explicitly pending S5.
+
+### S3 changes and verification
+
+- Added separate upload-manifest and bounded frame-map verification endpoints.
+  The client declaration remains pending until the server hashes the received MP4,
+  checks its byte count and ffprobe-observed stream metadata, and compares every
+  declared output PTS with ffprobe's decoded presentation timestamps. The map is
+  capped at 32 MiB, checksum-bound and published as an immutable product artifact.
+  Project creation stops while a preparation declaration is pending. Upload API
+  responses omit the local-source fingerprint and server verification payload.
+- Added server verification provenance to `InputManifest` and
+  `NormalizedRGBFrameSet`. Frame extraction rechecks the published map and decoded
+  prepared-video PTS, then records each selected prepared frame's original source
+  index. Preview, metric proposal and finalization map those indices to the original
+  LiDAR trajectory rows; mismatched counts or partial maps fail closed. Legacy RGB
+  frame sets without the optional mapping keep their prior serialization and behavior.
+- Added `prepared_camera_calibration` for scale, sample-aspect and right-angle
+  rotation transforms. It rotates the camera basis with the image, transforms the
+  intrinsics and tangential distortion, and rejects reflection, shear, or calibration
+  aspect mismatch. Synthetic projection tests cover resize + non-square pixels +
+  90-degree rotation; this is not an actual calibrated sensor acceptance run.
+- Added `upload_quality_v2.json` with a new profile ID/checksum. Its FFmpeg filter
+  fits portrait and landscape into orientation-aware 640/360 long/short-edge bounds,
+  preserves aspect and avoids measurement upscaling. The v1 profile and checksum
+  remain readable. Existing numeric motion thresholds remain candidate values and
+  still require S5 held-out capture qualification.
+- Fixed the server's one-tick tolerance in the 30 FPS cap check and added a 60 FPS
+  rejection regression. The source map remains client-declared: the server cannot
+  prove the original local video bytes or source-frame association without receiving
+  that original media.
+- CodeGraph was synced after edits and explored `ServerVideoPreparationVerifier`,
+  upload routes, `camera_priors`, `prepared_camera_calibration`, frame extraction,
+  preview, metric and finalization callers. The pose-prior function has 12 indexed
+  callers; legacy callers retain identity mapping while prepared-video consumers pass
+  explicit source indices and source frame counts.
+- Tests exercise verified map publication, byte/PTS mismatch rejection, the 30 FPS
+  cap, public response redaction, selected-frame mapping, 60→30 pose rows and known
+  projection under resize/SAR/rotation. Real FFmpeg filter tests cover landscape,
+  portrait, 4:3 and below-preset input dimensions.
+- Verification commands and results:
+  - `.venv/bin/pytest -q tests/test_orchestration/test_video_preparation_verification.py tests/test_contracts/test_video_preparation.py tests/test_contracts/test_input_manifest.py tests/test_orchestration/test_upload_input_kinds.py tests/test_orchestration/test_direct_upload.py tests/test_orchestration/test_project_registry.py tests/test_reconstruction/test_rec02a_frame_extraction.py tests/test_reconstruction/test_rec_prepare_input.py tests/test_reconstruction/test_rec03_guided.py tests/test_reconstruction/test_lidar_world_alignment.py tests/integration/test_upload_to_prepared_job.py tests/test_api/test_studio_routes.py tests/test_api/test_guest_ownership.py tests/test_orchestration/test_runtime_migrations.py tests/test_reconstruction/test_rec02_quality.py` — **175 passed, 4 skipped**.
+  - `.venv/bin/ruff check src/ tests/` — **All checks passed**.
+  - `.venv/bin/ruff format --check src/ tests/` — **482 files already formatted**.
+  - `git diff --check` — **pass**.
+- No target-browser upload flow, upload-byte savings, hardware media matrix, paired
+  RGB/LiDAR capture, COLMAP/Brush reconstruction quality or GPU acceptance was run.
+  These remain S4/S5 gates; S3 tests validate local services and synthetic contracts.
+
+### S3 pre-flight gate report (GUIDE.md Rule 13)
+
+- codegraph: synced the changed index; explored the upload verifier/routes, manifest
+  and frame-set contracts, `camera_priors`, its callers and product quality profile.
+- impact: changed upload API/record, project creation, InputManifest, frame set,
+  extraction, preview, metric proposal and finalization. All 12 indexed pose-prior
+  callers were reviewed; legacy paths keep default identity mapping.
+- understand: upload → server byte/stream verification → InputManifest → privacy and
+  quality validation → frame extraction/source map → LiDAR pose/calibration consumers.
+- minimal-code: reused existing artifact resolver/publication, canonical checksums,
+  ContractModel, ffprobe boundary and frame-set resolver; added the verified report,
+  bounded server check and optional source mapping at those boundaries.
+- checks: focused Pytest **175 passed, 4 skipped**; full Ruff check passes; format
+  check reports **482 files already formatted**; `git diff --check` passes; CodeGraph
+  sync reports the index is up to date. Real media/browser/sensor acceptance is not
+  established by these local checks.
+- DevTools: **UNVERIFIED** — Chrome DevTools MCP could not list pages because the
+  existing browser profile is locked; no logged-in page snapshot or console check ran.

@@ -95,7 +95,7 @@ class Settings(BaseSettings):
     # không có khuôn mặt/biển số; mặc định giữ cổng QA `VERIFIED_ANONYMIZED`.
     product_privacy_mode: Literal["qa_verified", "self_attested"] = "qa_verified"
     product_upload_max_bytes: int = Field(default=2 * 1024**3, ge=1024)
-    product_upload_quality_profile: Path = Path("./configs/product/upload_quality_v1.json")
+    product_upload_quality_profile: Path = Path("./configs/product/upload_quality_v2.json")
     product_target_frame_count: int = Field(default=240, ge=2, le=5000)
     product_prepare_timeout_seconds: float = Field(default=3600, gt=0, allow_inf_nan=False)
     # Thư viện video mẫu đã xử lý sẵn: mỗi thư mục con là một bundle export từ job

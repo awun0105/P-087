@@ -363,12 +363,32 @@ class FinalizeWorker:
         record = LidarPackageRecord.model_validate_json(self.visuals.require(request.lidar_package_ref).read_bytes())
         if record.job_id != request.job_id or result.canonical_pose_ref is None or result.geometry_ref is None:
             raise ValueError("gói LiDAR không thuộc job này hoặc scene chưa có pose/hình học canonical")
-        poses = sorted(
-            json.loads(self.visuals.require(result.canonical_pose_ref).read_text())["poses"],
-            key=lambda pose: pose["frame_id"],
-        )
+        canonical_pose_path = self.visuals.require(result.canonical_pose_ref)
+        canonical_pose_payload = json.loads(canonical_pose_path.read_text())
+        poses = sorted(canonical_pose_payload["poses"], key=lambda pose: pose["frame_id"])
         trajectory = parse_trajectory(self.visuals.require(record.trajectory_ref).read_text(encoding="utf-8"))
-        priors = camera_priors(trajectory, record.sensor_from_camera, tuple(pose["frame_id"] for pose in poses))
+        source_frame_ids = None
+        source_frame_count = None
+        from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver
+
+        source_frame_set = ProductArtifactRef.model_validate(canonical_pose_payload["source_frame_set"])
+        frames = FrameSetResolver(self.deps.resolve, self.deps.resolve).load(source_frame_set)
+        mapped = [frame.source_frame_id is not None for frame in frames.frames]
+        if any(mapped) and not all(mapped):
+            raise ValueError("canonical RGB frame set contains a partial source-frame map")
+        if frames.video_preparation is not None:
+            if not all(mapped):
+                raise ValueError("canonical RGB frame set is missing its verified source-frame map")
+            source_by_frame = {frame.frame_id: frame.source_frame_id for frame in frames.frames}
+            source_frame_ids = tuple(source_by_frame[pose["frame_id"]] for pose in poses)
+            source_frame_count = frames.video_preparation.client_manifest.source_video.frame_count
+        priors = camera_priors(
+            trajectory,
+            record.sensor_from_camera,
+            tuple(pose["frame_id"] for pose in poses),
+            source_frame_ids,
+            source_frame_count,
+        )
         fit = fit_world_from_lidar_map(
             [prior.translation for prior in priors], [tuple(pose["translation"]) for pose in poses]
         )

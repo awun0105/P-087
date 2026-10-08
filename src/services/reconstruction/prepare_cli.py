@@ -103,7 +103,9 @@ class VideoInputPreparer:
             failure = error.to_execution_error().model_copy(update={"stage_id": StageId.PRIVACY_GATE})
             return self._failed(request, manifest, stages, failure, privacy_started_at)
         extractor = RGBFrameExtractor(
-            FrameExtractionDependencies(self.deps.writer, self.deps.resolve_uri, gate, self.deps.decoder)
+            FrameExtractionDependencies(
+                self.deps.writer, self.deps.resolve_uri, gate, self.deps.decoder, self.deps.require
+            )
         )
         frame_started_at = datetime.now(UTC)
         try:
@@ -113,7 +115,14 @@ class VideoInputPreparer:
             wanted = target_frames(duration, request.sample_fps, request.max_frames)
             stride = frame_stride(len(quality.effective_reconstruction_frame_ids), wanted)
             extracted = extractor.execute(
-                FrameExtractionRequest(manifest, quality, proof, extraction_config(stride), request.job_id)
+                FrameExtractionRequest(
+                    manifest,
+                    quality,
+                    proof,
+                    extraction_config(stride),
+                    request.job_id,
+                    video_preparation=manifest.video_preparation,
+                )
             )
         except FrameExtractionError as error:
             stages.append(error.to_failed_stage().model_copy(update={"started_at": frame_started_at}))

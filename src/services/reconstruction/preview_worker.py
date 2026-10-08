@@ -19,7 +19,7 @@ from src.services.reconstruction.adapters.colmap_priors import PoseGuidance, Pos
 from src.services.reconstruction.adapters.colmap_runtime import ColmapError, ColmapProcess
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor
 from src.services.reconstruction.attempt import PublicationNamespace
-from src.services.reconstruction.lidar.camera_priors import CameraPriorError, camera_priors
+from src.services.reconstruction.lidar.camera_priors import CameraPriorError, camera_priors, prepared_camera_calibration
 from src.services.reconstruction.lidar.fusion import parse_trajectory
 from src.services.reconstruction.lidar.package import LidarPackageRecord
 from src.services.reconstruction.preview_models import PreparedPreviewRequest, PreparedPreviewResult
@@ -157,13 +157,34 @@ class _PreviewExecution:
         poses = parse_trajectory(self.deps.resolve(record.trajectory_ref).read_text(encoding="utf-8"))
         frames = self.deps.frames.load(self.request.frame_set_ref)
         frame_ids = tuple(frame.frame_id for frame in frames.frames)
-        priors = camera_priors(poses, record.sensor_from_camera, frame_ids)
-        camera = record.camera
+        mapped = [frame.source_frame_id is not None for frame in frames.frames]
+        if any(mapped) and not all(mapped):
+            raise CameraPriorError("Prepared RGB frame set contains a partial source-frame map")
+        source_frame_ids = tuple(frame.source_frame_id for frame in frames.frames) if all(mapped) else None
+        source_frame_count = (
+            frames.video_preparation.client_manifest.source_video.frame_count
+            if frames.video_preparation is not None
+            else None
+        )
+        if frames.video_preparation is None:
+            sensor_from_camera = record.sensor_from_camera
+            calibration = (
+                None
+                if record.camera is None
+                else (
+                    record.camera.width,
+                    record.camera.height,
+                    (record.camera.fx, record.camera.fy, record.camera.cx, record.camera.cy, *record.camera.distortion),
+                )
+            )
+        else:
+            sensor_from_camera, calibration = prepared_camera_calibration(
+                record.sensor_from_camera, record.camera, frames.video_preparation
+            )
+        priors = camera_priors(poses, sensor_from_camera, frame_ids, source_frame_ids, source_frame_count)
         return PoseGuidance(
             tuple(PosePrior(f"{prior.frame_id:06d}.png", prior.translation, prior.rotation_xyzw) for prior in priors),
-            None
-            if camera is None
-            else (camera.width, camera.height, (camera.fx, camera.fy, camera.cx, camera.cy, *camera.distortion)),
+            calibration,
         )
 
     def _validate_source(self) -> None:

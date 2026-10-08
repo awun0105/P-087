@@ -56,7 +56,7 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         artifact_s3_bucket=None,
         product_processing_config=config,
         product_worker_root=tmp_path / "workers",
-        product_upload_quality_profile=ROOT / "configs/product/upload_quality_v1.json",
+        product_upload_quality_profile=ROOT / "configs/product/upload_quality_v2.json",
         product_target_frame_count=5,
         product_prepare_timeout_seconds=120,
         product_preview_timeout_seconds=120,
