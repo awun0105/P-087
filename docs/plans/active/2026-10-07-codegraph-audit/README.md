@@ -412,17 +412,26 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
       AUD-22.S3 local quota UX; SQLite/API/frontend checks.
 - [ ] AUD-22.S2 shared-PostgreSQL concurrency/restart qualification; AUD-22.S3
       DevTools browser acceptance.
-- [x] Audit 2026-10-08 of commits through AUD-23.S4 (local; no code defect found).
-      Full backend suite passes (skips only where PostgreSQL/GPU are absent); frontend
-      typecheck and 330 Vitest tests pass. On a throwaway Postgres 16
-      (`R2S_TEST_POSTGRES_URL`), `tests/test_orchestration`, `tests/test_api` and
-      `tests/test_packaging` pass 821 with 0 skips, so the PostgreSQL variants of
-      migrations v9–v14, scene-head reservation and the Guest quota ledger now have
-      single-process proof. Multi-process/restart proof and the deployment database
-      remain pending. `scripts.studio.scene_head` dry-run on a copy of the local
-      `runtime.db` verified the 4 jobs that have scenes (6 others have none); run
-      `--apply` per job after the API first migrates that database, or those 4 scenes
-      return SceneNotAvailable.
+- [x] Audit 2026-10-08 of rounds 1–3 (AUD-01/02/03/04/07/10/11/15), local evidence only.
+      Fixed and committed: background carve now rejects only overlaps between a carved and a
+      kept source region; legacy ownership recovery skips duplicates, matches by geometry
+      artifact, follows `restored_from`, and derives ownership from the extraction revision
+      (previously recovered nothing, so every pre-AUD-01 scene with a confirmed object could not
+      export); `reobjectify` now binds ownership to its new objects; `SceneEditor.revision()`
+      reuses the proven lineage (122-revision walk 94 s → 3 s); hybrid `GroundPlane` top was
+      +9.8 mm above z=0; a restarted worker with the same `host:pid` no longer deadlocks on its
+      leftover operation reservation. Evidence: full backend suite 1782 passed / 52 skipped;
+      `tests/test_orchestration` + `tests/test_api` on Postgres 16 779 passed, 0 skipped
+      (single process; multi-process/restart and the deployment database remain pending).
+      Real-data probes on copies of the local DB/artifacts: head backfill for the 4 scene jobs
+      (including the 122-revision chain) completes, and a real scene exported end to end to a
+      hybrid package that opens in OpenUSD. Open product decisions: (1) with OBB-only ownership,
+      a confirmed object whose box overlaps a kept candidate blocks export (5 such pairs in the
+      122-revision scene) until AUD-08 exact membership or an explicit rule exists; (2) catalog
+      assets (`asset_url`) can no longer be exported because they cannot be sealed as artifacts;
+      (3) completed worker validation runs make a data package unpublishable until an
+      authenticated receipt exists. After the API first migrates `runtime.db`, run
+      `scripts.studio.scene_head --apply` per job or those 4 scenes return SceneNotAvailable.
 
 - [x] AUD-23.S1 versioned media/capability/preparation contracts, Python/TypeScript
       agreement, frame-map rules, preset dimension fitting and legacy checksum preservation.
