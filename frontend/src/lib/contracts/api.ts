@@ -313,7 +313,7 @@ export interface SceneObject {
   provenance: Record<string, unknown>;
   /** Pipeline v2 (ADR 0007); backend không ghi field khi rỗng nên có thể vắng mặt. */
   physics?: ObjectPhysics | null;
-  /** Ownership collision bất biến của geometry nguồn; vắng mặt ở SceneIR legacy. */
+  /** Quyền sở hữu collision trên geometry nguồn tại revision này; vắng mặt ở SceneIR legacy. */
   source_collision?: SourceCollisionRegion | null;
 }
 

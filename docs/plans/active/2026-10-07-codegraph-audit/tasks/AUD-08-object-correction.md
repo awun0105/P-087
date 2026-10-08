@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- IN PROGRESS — AUD-08.S1–S2 locally complete; S3–S4 remain planned; P1; EX-SCENE domain, EX-PRODUCT commands/UI.
+- IN PROGRESS — AUD-08.S1–S3 locally complete; S4 remains planned; P1; EX-SCENE domain, EX-PRODUCT commands/UI.
 - Canonical SCENE-03/06/07/08, PRODUCT-06/07. REUSE gaussian_split/association;
   SELF-CODE revision-bound commands và ownership update.
 - Goal: sửa segmentation/grouping trước confirmation, tạo artifact đồng bộ
@@ -122,7 +122,7 @@ empty/tiny part bằng explicit candidate state/blocker; không đổi source ro
 Tests: object→object, object→background, background→existing object, out-of-range,
 empty selection, full-object selection, ground-plane preservation, corrupt refs,
 cancel/stale publication; conservation of source row ownership.
-**Exit:** [ ] reassign count/geometry proof; [ ] old revision recoverable.
+**Exit:** [x] reassign count/geometry proof; [x] old revision recoverable.
 
 ## Sprint AUD-08.S4 — UI commands, preview và downstream handoff
 
@@ -151,6 +151,60 @@ Frontend verification uses `tests/layers.test.ts`,
 artifacts → revision → consumer proof, không chỉ unit merge helper.
 
 ## Result / Evidence
+
+### AUD-08.S3 — Reassign region ownership
+
+- **Base:** `5fb86c2` (`AUD-08.S2`).
+- **Behavior before → after:** S2 could merge candidates but had no domain operation
+  to transfer a selected source region. Reassign now validates the current SceneIR,
+  membership checksum and eligible source/target candidates; selects rows from the
+  immutable source PLY in canonical world coordinates; moves their labels without
+  reordering or copying rows; rebuilds affected object-local PLY/collider artifacts,
+  background PLY/SOG and collision ownership; then publishes one revision with an
+  actor-attributed correction record.
+- **Contract decisions:** region membership comes from source PLY positions, never
+  an edited object pose. Gaussian SH is retained by rejecting affected objects with
+  non-identity orientation. Source collision OBB/exact regions are materialized as
+  exclusive source-triangle owners; overlaps that cannot be attributed stay in the
+  background. Reassignment preserves triangles at/below the current 4 cm canonical
+  floor threshold. Object counts below the review threshold stay auditable but are
+  blocked from confirmation; empty objects become inactive candidates with an
+  empty exact sidecar instead of being deleted. The shared 5 cm collision carve
+  margin now has one source used by ownership materialization and both simulation
+  package builders.
+- **Publication and recovery:** generated artifacts are published and read back
+  before `SceneEditor.publish_next` performs the revision compare-and-swap. A stale
+  command, corruption, cancellation or concurrent edit cannot replace the current
+  SceneIR. Earlier revisions and their ownership sidecars remain immutable and
+  readable; content-addressed artifacts written before a failed CAS may remain
+  unreferenced.
+- **Files:** `src/models/contracts/{object_membership,scene}.py`,
+  `src/services/scene/{collision_ownership.py,editing/commands.py}`,
+  `src/services/simulation/colliders/carve.py`,
+  `src/services/orchestration/{scene/object_correction.py,review/simulation_package.py}`,
+  `frontend/src/lib/contracts/api.ts`,
+  `tests/test_scene/test_object_correction.py`,
+  `tests/test_simulation/test_collision_edit_composition.py`, and this task/plan
+  progress entry.
+- **Verification:**
+  - `.venv/bin/pytest tests/test_scene/test_object_correction.py tests/test_scene/test_object_membership.py tests/test_scene/test_gaussian_split.py tests/test_scene/test_editing_review.py tests/test_orchestration/test_scene_editor.py tests/test_orchestration/test_simulation_package.py tests/test_simulation/test_collision_edit_composition.py -q` — **103 passed**.
+  - `.venv/bin/ruff check src/ tests/` — **passed**; `.venv/bin/ruff format --check src/ tests/` — **504 files already formatted**.
+  - `.venv/bin/python scripts/check_contract_mirror.py` — **PASS**, 5 enum and 5 model projections match.
+  - `npm run typecheck` — **passed**.
+  - Coverage includes object→object, object→background, background→object,
+    empty/out-of-range ROI, floor preservation, corrupt refs, cancellation, stale
+    publication, row-count conservation, confirmation blockers, and consumption of
+    exact collision sidecars by `_carved_environment`.
+- **CodeGraph gate:** live CodeGraph exploration re-served the changed modules
+  and verified the reassign, source collision ownership, shared carving policy
+  and simulation package consumer paths. `codegraph status` reports the file
+  index current at 832 files, 16,141 nodes and 47,123 edges. The installed engine
+  recommends a full rebuild, but CLI `index`/`sync` could not acquire the database
+  lock held by the active MCP server; no lock was forcibly removed.
+- **Limitations:** reconstruction rows and GLBs are synthetic; COACD, inpaint/SOG
+  and package runtime runners are fakes in these tests. Real COACD/GPU quality,
+  production inpaint/SOG output and Isaac simulation remain **UNVERIFIED**. S4
+  still owns HTTP/API and Studio UI command wiring.
 
 ### AUD-08.S2 — Merge domain và regenerate artifacts
 

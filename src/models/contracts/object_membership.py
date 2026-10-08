@@ -99,6 +99,8 @@ class ObjectMembershipReassignCommand(MembershipCommandBase):
 
     @model_validator(mode="after")
     def _require_distinct_owners(self) -> Self:
+        if self.source_object_id is None and self.target_object_id is None:
+            raise ValueError("a Gaussian region cannot move from background back to background")
         if self.source_object_id == self.target_object_id:
             raise ValueError("source and target owners must differ; null denotes background")
         return self

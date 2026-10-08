@@ -58,14 +58,17 @@ def _absent(value: object) -> bool:
 
 
 class SourceCollisionMembership(ContractModel):
-    """Triangle indices trong đúng bytes collision mesh do `source_geometry_ref` chỉ tới."""
+    """Triangle indices trong đúng bytes collision mesh do `source_geometry_ref` chỉ tới.
+
+    An empty list is a valid audited ownership state after every source triangle moved elsewhere.
+    """
 
     artifact_type: Literal["SourceCollisionMembership"] = "SourceCollisionMembership"
     schema_version: Literal["1.0"] = "1.0"
     object_id: Identifier
     source_geometry_ref: ProductArtifactRef
     extraction_revision: Identifier
-    triangle_indices: list[Annotated[int, Field(ge=0, strict=True)]] = Field(min_length=1)
+    triangle_indices: list[Annotated[int, Field(ge=0, strict=True)]]
 
     @model_validator(mode="after")
     def _require_unique_ordered_indices(self) -> Self:
@@ -75,7 +78,7 @@ class SourceCollisionMembership(ContractModel):
 
 
 class SourceCollisionRegion(ContractModel):
-    """Ownership bất biến của một object trên mesh collision tại lần extraction gốc."""
+    """Ownership của object trên mesh collision nguồn, bound vào pose extraction và scene revision."""
 
     schema_version: Literal["1.0"] = "1.0"
     object_id: Identifier

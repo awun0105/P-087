@@ -52,7 +52,12 @@ from src.services.scene.collision_ownership import (
     bind_source_collision_ownership,
     read_triangle_memberships,
 )
-from src.services.simulation.colliders.carve import CarveBox, carve_triangle_mask, triangle_mask_in_box
+from src.services.simulation.colliders.carve import (
+    COLLISION_CARVE_MARGIN_M,
+    CarveBox,
+    carve_triangle_mask,
+    triangle_mask_in_box,
+)
 from src.services.simulation.enrichment.service import enrich_scene_physics
 from src.services.simulation.preflight.engine import run_preflight
 from src.services.simulation.usd.builder import (
@@ -84,7 +89,7 @@ BUILD_CONFIG = {
     "effective_mode": "legacy_box",
     "runtime_usd_version": None,
     "environment": "rec05_collision_mesh_source_owned_triangle_mesh",
-    "carve_margin_m": 0.05,
+    "carve_margin_m": COLLISION_CARVE_MARGIN_M,
     "background_identity_algorithm": "source_geometry_checksum+removed_triangle_mask_v1",
     "ground_plane": True,
     "object_collider": "exact_box_collider_dimensions_and_local_transform",
@@ -97,7 +102,7 @@ HYBRID_BUILD_CONFIG = {
     "runtime_probe": "hybrid-runner-probe-v2",
     "runtime_usd_version": None,
     "environment": "inpainted_gaussians_particlefield+rec05_source_owned_collision_mesh",
-    "carve_margin_m": 0.05,
+    "carve_margin_m": COLLISION_CARVE_MARGIN_M,
     "background_identity_algorithm": "source_geometry_checksum+removed_triangle_mask_v1",
     "ground_plane": True,
     "object_visual": "per_object_gaussians_particlefield",

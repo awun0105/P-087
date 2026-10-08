@@ -42,7 +42,7 @@ from src.services.scene.editing.commands import (
     move_object,
     restore_object,
 )
-from src.services.simulation.colliders.carve import CarveBox, triangle_mask_in_box
+from src.services.simulation.colliders.carve import COLLISION_CARVE_MARGIN_M, CarveBox, triangle_mask_in_box
 from src.services.simulation.usd.capabilities import EffectiveExportMode
 from tests.test_orchestration.test_simulation_package import _scene_job
 
@@ -214,8 +214,8 @@ def test_triangle_membership_requires_region_ref_and_obb_requires_positive_dimen
         SourceCollisionRegion.model_validate(obb)
 
 
-@pytest.mark.parametrize("indices", [[-1], [1, 1], [2, 1], []])
-def test_membership_indices_must_be_nonnegative_unique_sorted_and_nonempty(indices: list[int]) -> None:
+@pytest.mark.parametrize("indices", [[-1], [1, 1], [2, 1]])
+def test_membership_indices_must_be_nonnegative_unique_and_sorted(indices: list[int]) -> None:
     source_ref = _source_ref("job-ownership-invalid", b"fixture-source-collision-mesh")
 
     with pytest.raises(ValidationError):
@@ -225,6 +225,19 @@ def test_membership_indices_must_be_nonnegative_unique_sorted_and_nonempty(indic
             extraction_revision="rev-001",
             triangle_indices=indices,
         )
+
+
+def test_empty_collision_membership_is_a_valid_audit_state() -> None:
+    source_ref = _source_ref("job-ownership-empty", b"fixture-source-collision-mesh")
+
+    membership = SourceCollisionMembership(
+        object_id="pallet",
+        source_geometry_ref=source_ref,
+        extraction_revision="rev-001",
+        triangle_indices=[],
+    )
+
+    assert membership.triangle_indices == []
 
 
 def test_source_pose_stays_immutable_through_move_delete_and_restore(tmp_path: Path) -> None:
@@ -317,6 +330,11 @@ def test_source_owned_background_stays_at_source_pose_through_edits_and_keeps_fl
     )
     assert pallet.source_collision == ownership
     assert pallet.transform == ownership.source_transform
+
+
+def test_source_ownership_and_package_builders_share_the_carve_margin() -> None:
+    assert simulation_package.BUILD_CONFIG["carve_margin_m"] == COLLISION_CARVE_MARGIN_M
+    assert simulation_package.HYBRID_BUILD_CONFIG["carve_margin_m"] == COLLISION_CARVE_MARGIN_M
 
 
 def test_source_owned_background_keeps_shared_triangles_instead_of_guessing_or_blocking(tmp_path: Path) -> None:

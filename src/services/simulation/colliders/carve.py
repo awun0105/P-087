@@ -12,6 +12,8 @@ import numpy as np
 
 from src.models.contracts.coordinates import Transform
 
+COLLISION_CARVE_MARGIN_M = 0.05
+
 
 @dataclass(frozen=True)
 class CarveBox:
@@ -38,7 +40,9 @@ def _rotation(quaternion: tuple[float, float, float, float]) -> np.ndarray:
     )
 
 
-def triangle_mask_in_box(centroids: np.ndarray, box: CarveBox, margin_m: float = 0.05) -> np.ndarray:
+def triangle_mask_in_box(
+    centroids: np.ndarray, box: CarveBox, margin_m: float = COLLISION_CARVE_MARGIN_M
+) -> np.ndarray:
     """Return source-mesh triangle centroids inside a box in the box's local frame."""
     if margin_m < 0:
         raise ValueError("carve margin must be non-negative")

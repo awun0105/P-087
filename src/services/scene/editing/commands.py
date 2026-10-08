@@ -35,6 +35,9 @@ def set_object_active(scene: SceneIR, object_id: str, active: bool) -> SceneIR:
 def confirm_object(scene: SceneIR, object_id: str) -> SceneIR:
     """Người dùng xác nhận ứng viên là vật thể thật: CONFIRMED và active cho mô phỏng."""
     target = _find_object(scene, object_id)
+    blocker = target.provenance.get("membership_reassign_blocker")
+    if isinstance(blocker, str) and blocker:
+        raise ValueError(f"object {object_id} cannot be confirmed: {blocker}")
     review = {**target.provenance, "review": "CONFIRMED"}
     updated = target.model_copy(
         update={"state": SceneObjectState.CONFIRMED, "active": True, "provenance": review}, deep=True

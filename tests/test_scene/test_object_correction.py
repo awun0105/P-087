@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Event
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -12,7 +14,12 @@ from pydantic import ValidationError
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.coordinates import CoordinateSystem, Transform
 from src.models.contracts.manifests import StageId
-from src.models.contracts.object_membership import ObjectMembershipArtifact, ObjectMembershipMergeCommand
+from src.models.contracts.object_membership import (
+    ObjectMembershipArtifact,
+    ObjectMembershipMergeCommand,
+    ObjectMembershipReassignCommand,
+    SourceGaussianROI,
+)
 from src.models.contracts.scene import (
     ColliderType,
     MassSource,
@@ -21,17 +28,24 @@ from src.models.contracts.scene import (
     SceneObject,
     SceneObjectOrigin,
     SceneObjectState,
+    SourceCollisionMembership,
     SourceCollisionRegion,
 )
 from src.services.orchestration.artifacts import ArtifactResolver
 from src.services.orchestration.artifacts.checksum import with_canonical_checksum
 from src.services.orchestration.artifacts.errors import ArtifactStoreError
 from src.services.orchestration.projects.registry import DEFAULT_FIXTURE_ROOT
-from src.services.orchestration.review.simulation_package import _is_pending, _source_region_removed
+from src.services.orchestration.review.simulation_package import (
+    _carved_environment,
+    _is_pending,
+    _source_region_removed,
+)
 from src.services.orchestration.scene.editor import SceneEditor
 from src.services.orchestration.scene.errors import SceneEditRejectedError, SceneRevisionConflictError
 from src.services.orchestration.scene.models import SceneEditCommand, TransformEdit
-from src.services.orchestration.scene.object_correction import merge_object_candidates
+from src.services.orchestration.scene.object_correction import merge_object_candidates, reassign_object_membership
+from src.services.process_control import ProcessCancelledError
+from src.services.scene.collision_ownership import source_triangle_ownership
 from src.services.scene.decomposition import gaussian_split
 from src.services.scene.editing.commands import confirm_object, restore_object
 from src.services.scene.editing.membership import ObjectMembershipValidationError, encode_gaussian_membership_labels
@@ -127,10 +141,31 @@ def _candidate(
     )
 
 
-def _fixture(tmp_path: Path) -> CorrectionFixture:
+def _fixture(
+    tmp_path: Path,
+    *,
+    source_rows: np.ndarray | None = None,
+    source_labels: np.ndarray | None = None,
+) -> CorrectionFixture:
     scene = SceneIR.model_validate_json((DEFAULT_FIXTURE_ROOT / "scene_ir" / "scene.json").read_bytes())
-    source_rows = _source_rows()
-    source_labels = np.array([0, 0, 1, 1, 2, 2, 3, 3, -1], dtype=np.int32)
+    floor = trimesh.creation.box(extents=(12.0, 12.0, 0.02))
+    floor.apply_translation((3.5, 0.0, -0.01))
+    collision_boxes = []
+    for center in ((1.5, 0.1, 1.1), (4.5, 0.1, 1.1), (6.5, 0.1, 1.1)):
+        box = trimesh.creation.box(extents=(1.5, 0.5, 0.5))
+        box.apply_translation(center)
+        collision_boxes.append(box)
+    unowned_box = trimesh.creation.box(extents=(1.0, 1.0, 1.0))
+    unowned_box.apply_translation((9.0, 0.0, 1.0))
+    collision_boxes.append(unowned_box)
+    geometry_payload = trimesh.util.concatenate([floor, *collision_boxes]).export(file_type="glb")
+    geometry_ref = _artifact_ref("CanonicalGeometry", geometry_payload, "environment.glb")
+    scene = scene.model_copy(
+        update={"environment": scene.environment.model_copy(update={"geometry_ref": geometry_ref}, deep=True)},
+        deep=True,
+    )
+    source_rows = _source_rows() if source_rows is None else source_rows
+    source_labels = np.array([0, 0, 1, 1, 2, 2, 3, 3, -1], dtype=np.int32) if source_labels is None else source_labels
     mapping = {
         "0": "candidate-001",
         "1": "candidate-001",  # A prior merge may map several labels to the same object.
@@ -147,7 +182,7 @@ def _fixture(tmp_path: Path) -> CorrectionFixture:
     labels_ref = _artifact_ref("ObjectMembershipLabels", labels_payload, "labels.i32le")
     membership = ObjectMembershipArtifact(
         source_visual_ref=source_visual_ref,
-        source_geometry_ref=scene.environment.geometry_ref,
+        source_geometry_ref=geometry_ref,
         extraction_revision="rev-001",
         coordinate_system=CoordinateSystem(),
         gaussian_count=len(source_rows),
@@ -175,6 +210,7 @@ def _fixture(tmp_path: Path) -> CorrectionFixture:
     )
 
     editor = SceneEditor(DEFAULT_FIXTURE_ROOT, ArtifactResolver(tmp_path / "artifacts"))
+    editor.store.publish(geometry_ref, geometry_payload)
     editor.store.publish(source_visual_ref, source_payload)
     editor.store.publish(labels_ref, labels_payload)
     editor.publish_initial(_JOB_ID, scene)
@@ -194,6 +230,57 @@ def _command(
         secondary_object_ids=secondary_ids,
         semantic_class_source_object_id=semantic_source,
     )
+
+
+def _reassign_command(
+    fixture: CorrectionFixture,
+    bounds: tuple[tuple[float, float, float], tuple[float, float, float]],
+    source_object_id: str | None,
+    target_object_id: str | None,
+) -> ObjectMembershipReassignCommand:
+    return ObjectMembershipReassignCommand(
+        expected_scene_revision=fixture.scene.scene_revision,
+        membership_checksum=fixture.membership.labels_ref.artifact_checksum,
+        region=SourceGaussianROI(min_xyz_m=bounds[0], max_xyz_m=bounds[1]),
+        source_object_id=source_object_id,
+        target_object_id=target_object_id,
+    )
+
+
+def _fake_reassign_runtimes(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    editor: SceneEditor | None = None,
+    concurrent_edit: bool = False,
+) -> None:
+    def publish_concurrent_edit() -> None:
+        if not concurrent_edit:
+            return
+        assert editor is not None
+        current = editor.current(_JOB_ID).scene
+        changed = current.model_copy(update={"provenance": {**current.provenance, "concurrent_edit": True}})
+        editor.publish_next(_JOB_ID, current.scene_revision, changed, "concurrent_edit")
+
+    def run(python, script, request, workspace, name, timeout, *, cancel_event=None):  # noqa: ANN001, ANN202
+        if "background_ply" in request:
+            output = Path(request["output_ply"])
+            output.write_bytes(Path(request["background_ply"]).read_bytes())
+            publish_concurrent_edit()
+            return {"method": "fixture-copy", "inpainted_gaussians": 0}
+        records = []
+        for item in request.get("objects", []):
+            Path(item["output_glb"]).write_bytes(trimesh.creation.box().export(file_type="glb"))
+            records.append({"id": item["id"], "parts": 1, "volume_m3": 1.0})
+        return {"objects": records}
+
+    def package(source_ply, workspace, gpu_index=None, *, cancel_event=None):  # noqa: ANN001
+        workspace.mkdir(parents=True, exist_ok=True)
+        output = workspace / "scene.sog"
+        output.write_bytes(b"fixture-sog:" + Path(source_ply).read_bytes()[:32])
+        return output
+
+    monkeypatch.setattr("src.services.orchestration.scene.object_correction._run", run)
+    monkeypatch.setattr("src.services.orchestration.scene.object_correction.package_splat", package)
 
 
 def _fake_collider_runner(
@@ -400,3 +487,292 @@ def test_source_collision_region_for_merged_tombstone_follows_primary_review_sta
 
     malformed = secondary.model_copy(update={"provenance": {"review": "MERGED", "merged_into": "missing"}})
     assert _source_region_removed(malformed, {malformed.id: malformed}) is False
+
+
+def test_reassign_object_to_object_preserves_rows_and_rebuilds_visual_collision_and_background(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _fixture(tmp_path)
+    _fake_reassign_runtimes(monkeypatch)
+    result = reassign_object_membership(
+        fixture.editor,
+        _JOB_ID,
+        _reassign_command(fixture, ((0.75, -3.0, 0.0), (1.9, 3.0, 1.35)), "candidate-001", "candidate-002"),
+        actor_id="reviewer-001",
+        runtime_python=Path("/runtime/python"),
+        workspace=tmp_path / "reassign-worker",
+        timeout_seconds=30,
+        view_requests=[{"image_path": "frame.png"}],
+        lama_checkpoint=None,
+    )
+
+    scene = result.revision.scene
+    manifest = scene.environment.membership
+    assert manifest is not None
+    updated_labels = np.frombuffer(fixture.editor.resolver.require(manifest.labels_ref).read_bytes(), dtype="<i4")
+    assert len(updated_labels) == len(fixture.source_rows)
+    low = np.asarray((0.75, -3.0, 0.0))
+    high = np.asarray((1.9, 3.0, 1.35))
+    positions = gaussian_split.positions(fixture.source_rows)
+    selected = np.all((positions >= low) & (positions <= high), axis=1) & np.isin(
+        fixture.source_labels,
+        [
+            int(label)
+            for label, object_id in fixture.membership.label_to_object_id.items()
+            if object_id == "candidate-001"
+        ],
+    )
+    expected_labels = fixture.source_labels.copy()
+    expected_labels[selected] = min(
+        int(label) for label, object_id in fixture.membership.label_to_object_id.items() if object_id == "candidate-002"
+    )
+    np.testing.assert_array_equal(updated_labels, expected_labels)
+    owner_ids = np.full(len(updated_labels), None, dtype=object)
+    for label, object_id in manifest.label_to_object_id.items():
+        owner_ids[updated_labels == int(label)] = object_id
+    assert np.count_nonzero(owner_ids == "candidate-001") == 3
+    assert np.count_nonzero(owner_ids == "candidate-002") == 3
+    assert np.count_nonzero(owner_ids == "candidate-003") == 2
+    assert np.count_nonzero(updated_labels == -1) == 1
+
+    objects = {item.id: item for item in scene.objects}
+    source = objects["candidate-001"]
+    target = objects["candidate-002"]
+    assert source.visual_ref is not None and target.visual_ref is not None
+    assert source.physics is None and target.physics is None
+    assert source.provenance["membership_reassign_blocker"] == "TOO_FEW_GAUSSIANS"
+    assert target.provenance["membership_reassign_blocker"] == "TOO_FEW_GAUSSIANS"
+    assert len(gaussian_split.read_gaussian_ply(fixture.editor.resolver.require(source.visual_ref).read_bytes())) == 3
+    assert len(gaussian_split.read_gaussian_ply(fixture.editor.resolver.require(target.visual_ref).read_bytes())) == 3
+    assert scene.environment.visual_master_ref is not None and scene.environment.visual_ref is not None
+    assert (
+        len(
+            gaussian_split.read_gaussian_ply(
+                fixture.editor.resolver.require(scene.environment.visual_master_ref).read_bytes()
+            )
+        )
+        == 1
+    )
+    assert fixture.editor.resolver.require(scene.environment.visual_ref).read_bytes().startswith(b"fixture-sog:")
+
+    source_region = source.source_collision
+    target_region = target.source_collision
+    assert source_region is not None and source_region.region_kind == "triangle_indices"
+    assert target_region is not None and target_region.region_kind == "triangle_indices"
+    assert source_region.region_ref is not None and target_region.region_ref is not None
+    source_membership = fixture.editor.resolver.require(source_region.region_ref).read_bytes()
+    target_membership = fixture.editor.resolver.require(target_region.region_ref).read_bytes()
+    assert source_membership and target_membership
+    with pytest.raises(ValueError, match="TOO_FEW_GAUSSIANS"):
+        confirm_object(scene, target.id)
+
+    snapshot = source_triangle_ownership(
+        scene.objects,
+        manifest.source_geometry_ref,
+        fixture.editor.resolver.require(manifest.source_geometry_ref).read_bytes(),
+        lambda reference: fixture.editor.resolver.require(reference).read_bytes(),
+    )
+    roi_floor = np.all(
+        (snapshot.centroids >= np.array((0.75, -3.0, 0.0))) & (snapshot.centroids <= np.array((1.9, 3.0, 1.35))),
+        axis=1,
+    ) & (snapshot.centroids[:, 2] <= 0.04)
+    assert scene.provenance["membership_correction"]["collision_triangles"] > 0
+    assert scene.provenance["membership_correction"]["floor_triangles_preserved"] > 0
+    assert np.all(snapshot.owner_labels[roi_floor] == -1)
+
+    target_indices = SourceCollisionMembership.model_validate_json(
+        fixture.editor.resolver.require(target_region.region_ref).read_bytes()
+    ).triangle_indices
+    confirmed_target = target.model_copy(
+        update={"state": SceneObjectState.CONFIRMED, "active": True, "provenance": {"review": "CONFIRMED"}},
+        deep=True,
+    )
+    confirmed_scene = scene.model_copy(
+        update={
+            "objects": [confirmed_target if item.id == target.id else item for item in scene.objects],
+        },
+        deep=True,
+    )
+    carved = _carved_environment(SimpleNamespace(runtime_resolver=fixture.editor.resolver), confirmed_scene)
+    assert carved.carved_triangles == len(target_indices)
+    assert np.any(np.isclose(carved.vertices[:, 2], 0.0))
+
+
+def test_reassign_full_object_to_background_keeps_a_blocked_audit_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _fixture(tmp_path)
+    _fake_reassign_runtimes(monkeypatch)
+    result = reassign_object_membership(
+        fixture.editor,
+        _JOB_ID,
+        _reassign_command(fixture, ((-0.1, -3.0, 0.0), (3.1, 3.0, 1.35)), "candidate-001", None),
+        actor_id="reviewer-001",
+        runtime_python=Path("/runtime/python"),
+        workspace=tmp_path / "reassign-worker",
+        timeout_seconds=30,
+        view_requests=[{"image_path": "frame.png"}],
+        lama_checkpoint=None,
+    )
+
+    scene = result.revision.scene
+    empty = next(item for item in scene.objects if item.id == "candidate-001")
+    assert empty.state == SceneObjectState.CANDIDATE
+    assert empty.active is False
+    assert empty.visual_ref is None and empty.collider is None and empty.primitive_dimensions_xyz_m is None
+    assert empty.provenance["membership_reassign_blocker"] == "NO_SOURCE_GAUSSIANS"
+    assert empty.source_collision is not None and empty.source_collision.region_ref is not None
+    sidecar = SourceCollisionMembership.model_validate_json(
+        fixture.editor.resolver.require(empty.source_collision.region_ref).read_bytes()
+    )
+    assert sidecar.triangle_indices == []
+    assert scene.environment.visual_master_ref is not None
+    background_rows = gaussian_split.read_gaussian_ply(
+        fixture.editor.resolver.require(scene.environment.visual_master_ref).read_bytes()
+    )
+    assert len(background_rows) == 5
+    with pytest.raises(ValueError, match="NO_SOURCE_GAUSSIANS"):
+        confirm_object(scene, empty.id)
+
+
+def test_reassign_background_to_object_claims_only_unowned_non_floor_triangles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_rows = np.concatenate((_source_rows(), _source_rows()[-1:].copy()))
+    source_rows[-1]["x"], source_rows[-1]["y"], source_rows[-1]["z"] = 9.0, 0.0, 1.0
+    source_labels = np.array([0, 0, 1, 1, 2, 2, 3, 3, -1, -1], dtype=np.int32)
+    fixture = _fixture(tmp_path, source_rows=source_rows, source_labels=source_labels)
+    _fake_reassign_runtimes(monkeypatch)
+    result = reassign_object_membership(
+        fixture.editor,
+        _JOB_ID,
+        _reassign_command(fixture, ((8.4, -0.6, 0.4), (9.6, 0.6, 1.6)), None, "candidate-002"),
+        actor_id="reviewer-001",
+        runtime_python=Path("/runtime/python"),
+        workspace=tmp_path / "reassign-worker",
+        timeout_seconds=30,
+        view_requests=[{"image_path": "frame.png"}],
+        lama_checkpoint=None,
+    )
+
+    scene = result.revision.scene
+    manifest = scene.environment.membership
+    assert manifest is not None
+    labels = np.frombuffer(fixture.editor.resolver.require(manifest.labels_ref).read_bytes(), dtype="<i4")
+    target_labels = [int(label) for label, owner in manifest.label_to_object_id.items() if owner == "candidate-002"]
+    assert np.count_nonzero(np.isin(labels, target_labels)) == 3
+    target = next(item for item in scene.objects if item.id == "candidate-002")
+    assert target.source_collision is not None and target.source_collision.region_ref is not None
+    target_membership = SourceCollisionMembership.model_validate_json(
+        fixture.editor.resolver.require(target.source_collision.region_ref).read_bytes()
+    )
+    assert len(target_membership.triangle_indices) > 12
+    assert scene.provenance["membership_correction"]["collision_triangles"] > 0
+
+
+def test_reassign_rejects_empty_or_stale_inputs_without_advancing_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _fixture(tmp_path)
+    _fake_reassign_runtimes(monkeypatch)
+    command = _reassign_command(
+        fixture,
+        ((20.0, 20.0, 20.0), (21.0, 21.0, 21.0)),
+        "candidate-001",
+        "candidate-002",
+    )
+    with pytest.raises(ObjectMembershipValidationError, match="contains no Gaussian rows"):
+        reassign_object_membership(
+            fixture.editor,
+            _JOB_ID,
+            command,
+            actor_id="reviewer-001",
+            runtime_python=Path("/runtime/python"),
+            workspace=tmp_path / "empty-worker",
+            timeout_seconds=30,
+            view_requests=[{"image_path": "frame.png"}],
+            lama_checkpoint=None,
+        )
+    with pytest.raises(ValidationError):
+        SourceGaussianROI(min_xyz_m=(0.0, 0.0, 0.0), max_xyz_m=(1_000_001.0, 1.0, 1.0))
+    stale = command.model_copy(update={"expected_scene_revision": "rev-000"})
+    with pytest.raises(ObjectMembershipValidationError, match="targets rev-000"):
+        reassign_object_membership(
+            fixture.editor,
+            _JOB_ID,
+            stale,
+            actor_id="reviewer-001",
+            runtime_python=Path("/runtime/python"),
+            workspace=tmp_path / "stale-worker",
+            timeout_seconds=30,
+            view_requests=[{"image_path": "frame.png"}],
+            lama_checkpoint=None,
+        )
+    assert fixture.editor.current(_JOB_ID).scene.scene_revision == fixture.scene.scene_revision
+
+
+def test_reassign_checks_artifact_bytes_and_stale_publication_cannot_replace_another_edit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _fixture(tmp_path)
+    label_path = fixture.editor.resolver.require(fixture.membership.labels_ref)
+    label_path.write_bytes(label_path.read_bytes() + b"corrupt")
+    command = _reassign_command(
+        fixture,
+        ((0.75, -3.0, 0.0), (2.25, 3.0, 1.35)),
+        "candidate-001",
+        "candidate-002",
+    )
+    with pytest.raises((ArtifactStoreError, ObjectMembershipValidationError)):
+        reassign_object_membership(
+            fixture.editor,
+            _JOB_ID,
+            command,
+            actor_id="reviewer-001",
+            runtime_python=Path("/runtime/python"),
+            workspace=tmp_path / "corrupt-worker",
+            timeout_seconds=30,
+            view_requests=[{"image_path": "frame.png"}],
+            lama_checkpoint=None,
+        )
+    assert fixture.editor.current(_JOB_ID).scene.scene_revision == fixture.scene.scene_revision
+
+    fixture = _fixture(tmp_path / "stale")
+    _fake_reassign_runtimes(monkeypatch, editor=fixture.editor, concurrent_edit=True)
+    with pytest.raises(SceneRevisionConflictError):
+        reassign_object_membership(
+            fixture.editor,
+            _JOB_ID,
+            _reassign_command(fixture, ((0.75, -3.0, 0.0), (1.9, 3.0, 1.35)), "candidate-001", "candidate-002"),
+            actor_id="reviewer-001",
+            runtime_python=Path("/runtime/python"),
+            workspace=tmp_path / "stale-publication-worker",
+            timeout_seconds=30,
+            view_requests=[{"image_path": "frame.png"}],
+            lama_checkpoint=None,
+        )
+    current = fixture.editor.current(_JOB_ID).scene
+    assert current.provenance["concurrent_edit"] is True
+    assert current.environment.membership is not None
+    assert current.environment.membership.labels_ref == fixture.membership.labels_ref
+
+
+def test_reassign_stops_when_cancelled_before_publication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture = _fixture(tmp_path)
+    _fake_reassign_runtimes(monkeypatch)
+    cancel = Event()
+    cancel.set()
+    with pytest.raises(ProcessCancelledError, match="cancelled"):
+        reassign_object_membership(
+            fixture.editor,
+            _JOB_ID,
+            _reassign_command(fixture, ((0.75, -3.0, 0.0), (1.9, 3.0, 1.35)), "candidate-001", "candidate-002"),
+            actor_id="reviewer-001",
+            runtime_python=Path("/runtime/python"),
+            workspace=tmp_path / "cancelled-worker",
+            timeout_seconds=30,
+            view_requests=[{"image_path": "frame.png"}],
+            lama_checkpoint=None,
+            cancel_event=cancel,
+        )
+    assert fixture.editor.current(_JOB_ID).scene.scene_revision == fixture.scene.scene_revision
