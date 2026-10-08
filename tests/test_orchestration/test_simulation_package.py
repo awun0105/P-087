@@ -450,6 +450,28 @@ def test_duplicate_object_does_not_trigger_history_walk_for_ownership_recovery(
     assert calls == []
 
 
+def test_legacy_recovery_does_not_assign_ownership_of_a_different_object_that_reuses_the_id(tmp_path: Path) -> None:
+    """Re-extraction reuses candidate-001 for another object; its ownership must not come from the old one."""
+    registry, job = _scene_job(tmp_path)
+    source_scene = registry.scene.current(job.job_id).scene
+    (item,) = source_scene.objects
+    assert item.source_collision is not None
+    other_geometry = item.geometry_ref.model_copy(
+        update={"artifact_uri": f"artifact://jobs/{job.job_id}/scene/other-object-geometry.glb"}
+    )
+    registry.scene.store.publish(other_geometry, registry.runtime_resolver.require(item.geometry_ref).read_bytes())
+    replaced = item.model_copy(update={"source_collision": None, "geometry_ref": other_geometry}, deep=True)
+    reextracted = source_scene.model_copy(update={"objects": [replaced]}, deep=True)
+    published = registry.scene.publish_next(job.job_id, source_scene.scene_revision, reextracted, "test_reextract")
+    apply_object_action(registry.scene, job.job_id, item.id, "confirm", published.revision.scene.scene_revision)
+    current = registry.scene.current(job.job_id).scene
+
+    with pytest.raises(ValueError, match="require source collision ownership"):
+        build_simulation_package(registry, job.job_id)
+
+    assert registry.scene.current(job.job_id).scene.scene_revision == current.scene_revision
+
+
 def test_legacy_owner_from_different_geometry_history_blocks_candidate(tmp_path: Path) -> None:
     registry, job = _scene_job(tmp_path)
     source_scene = registry.scene.current(job.job_id).scene

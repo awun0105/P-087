@@ -40,6 +40,7 @@ from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneRevisionConflictError
 from src.services.reconstruction import camera_views, metric_visual_master, package_splat
+from src.services.scene.collision_ownership import bind_source_collision_ownership
 from src.services.scene.decomposition import gaussian_split
 from src.services.scene.geometric import GeometricConfig, box_from_points
 from src.services.scene.sampro3d.consolidate import Sampro3dConfig, segment
@@ -384,10 +385,12 @@ def reobjectify(
         return store.publish(reference, payload)
 
     result = objectify_with_retry(registry, job, bundle, settings, workspace, publish)
+    # The new candidates replace the old set, so they own regions of the collision mesh just like extraction's.
+    objects = bind_source_collision_ownership(result.objects, result.environment.geometry_ref, expected_revision)
     updated = base_scene.model_copy(
         update={
             "environment": result.environment,
-            "objects": result.objects,
+            "objects": objects,
             "provenance": {**base_scene.provenance, **result.provenance, "note": "chạy lại tách theo vật"},
         }
     )

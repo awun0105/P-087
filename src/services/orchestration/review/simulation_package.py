@@ -216,12 +216,16 @@ def _recover_legacy_source_ownership(
         if prior.scene_id != scene.scene_id or prior.environment.geometry_ref != scene.environment.geometry_ref:
             break
         prior_objects = {item.id: item for item in prior.objects}
+        current_objects = {item.id: item for item in scene.objects}
         for object_id in tuple(missing):
             prior_object = prior_objects.get(object_id)
             owner = prior_object.source_collision if prior_object is not None else None
             if (
                 prior_object is not None
                 and prior_object.origin == SceneObjectOrigin.RECONSTRUCTED
+                # A re-extraction reuses ids (candidate-001...) for different objects; only the same
+                # immutable geometry artifact proves the earlier ownership belongs to this object.
+                and prior_object.geometry_ref == current_objects[object_id].geometry_ref
                 and owner is not None
                 and owner.object_id == object_id
                 and owner.source_geometry_ref == scene.environment.geometry_ref

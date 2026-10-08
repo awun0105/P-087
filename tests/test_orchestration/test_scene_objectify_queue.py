@@ -429,3 +429,41 @@ def test_api_process_sees_revision_published_by_another_process(world, monkeypat
 
     # `other` đã giữ rev-001 trong bộ nhớ; lần đọc kế tiếp phải thấy rev-002 trên đĩa.
     assert other.current(job.job_id).scene.scene_revision == "rev-002"
+
+
+def test_reobjectify_binds_source_collision_ownership_to_the_new_objects(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    """New object-centric candidates must own their source region, or confirming them breaks the export."""
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "_sam2_runtime", lambda _: None)
+    monkeypatch.setattr("src.services.orchestration.jobs.stage_views.job_bundle", lambda *_: bundle)
+    extract_scene(registry, job, bundle, settings, tmp_path / "work")
+    first = registry.scene.current(job.job_id).scene
+    (box_object,) = first.objects
+    assert box_object.source_collision is not None
+    replaced = box_object.model_copy(
+        update={
+            "id": "candidate-007",
+            "local_frame": "candidate-007",
+            "transform": box_object.transform.model_copy(update={"local_frame": "candidate-007"}),
+            "source_collision": None,
+            "collider": None,
+        },
+        deep=True,
+    )
+    monkeypatch.setattr(
+        scene_objectify,
+        "objectify_with_retry",
+        lambda *_: scene_objectify.ObjectifyResult(first.environment, [replaced], {"object_extraction": "sampro3d"}),
+    )
+
+    revision = scene_objectify.reobjectify(
+        registry, job.job_id, settings, tmp_path / "again", expected_revision="rev-001"
+    )
+
+    scene = registry.scene.revision(job.job_id, revision).scene
+    (new_object,) = scene.objects
+    ownership = new_object.source_collision
+    assert ownership is not None and ownership.object_id == "candidate-007"
+    assert ownership.extraction_revision == "rev-001"
+    assert ownership.source_geometry_ref == scene.environment.geometry_ref
+    assert ownership.source_transform.translation_xyz == new_object.transform.translation_xyz
