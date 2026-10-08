@@ -17,6 +17,7 @@ export const STATUS_LABEL: Record<Status, string> = {
 };
 
 export const NAV = [
+  { href: "#context", label: "Bối cảnh" },
   { href: "#problem", label: "Bài toán" },
   { href: "#solution", label: "Giải pháp" },
   { href: "#workflow", label: "Quy trình" },
