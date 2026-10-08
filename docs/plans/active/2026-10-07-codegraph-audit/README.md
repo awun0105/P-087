@@ -412,6 +412,17 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
       AUD-22.S3 local quota UX; SQLite/API/frontend checks.
 - [ ] AUD-22.S2 shared-PostgreSQL concurrency/restart qualification; AUD-22.S3
       DevTools browser acceptance.
+- [x] Audit 2026-10-08 of commits through AUD-23.S4 (local; no code defect found).
+      Full backend suite passes (skips only where PostgreSQL/GPU are absent); frontend
+      typecheck and 330 Vitest tests pass. On a throwaway Postgres 16
+      (`R2S_TEST_POSTGRES_URL`), `tests/test_orchestration`, `tests/test_api` and
+      `tests/test_packaging` pass 821 with 0 skips, so the PostgreSQL variants of
+      migrations v9–v14, scene-head reservation and the Guest quota ledger now have
+      single-process proof. Multi-process/restart proof and the deployment database
+      remain pending. `scripts.studio.scene_head` dry-run on a copy of the local
+      `runtime.db` verified the 4 jobs that have scenes (6 others have none); run
+      `--apply` per job after the API first migrates that database, or those 4 scenes
+      return SceneNotAvailable.
 
 - [x] AUD-23.S1 versioned media/capability/preparation contracts, Python/TypeScript
       agreement, frame-map rules, preset dimension fitting and legacy checksum preservation.
