@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- IN PROGRESS — AUD-09.S1–S2 local implementation complete; S3 remains planned; P1; EX-SIM domain + EX-PRODUCT API/UI.
+- IN PROGRESS — AUD-09.S1–S3 local implementation complete; browser visual and real Isaac contact acceptance remain unverified; P1; EX-SIM domain + EX-PRODUCT API/UI.
 - Canonical SIM-02/03, SCENE-08, PRODUCT-06/07. SELF-CODE typed command,
   REUSE SceneEditor/gizmo/export adapters.
 - Goal: sửa kích thước/local pose collider hiện có, giữ object visual/geometry
@@ -101,8 +101,8 @@ candidate identity; old report không review new candidate.
 Tests: rotated parent + rotated/translated collider; nonuniform sizes; out-of-bounds;
 build/enrich preservation; exported collision witness vs visual witness; Isaac contact
 smoke phối hợp AUD-05, không claim từ snapshot/text search.
-**Exit:** [ ] exported collider semantically correct; [ ] revision/gate invalidation pass;
-[ ] real contact evidence ghi riêng.
+**Exit:** [x] exported collider semantically correct in legacy and hybrid USD;
+ [x] revision/gate invalidation pass; [ ] real Isaac contact evidence ghi riêng.
 
 ## Verification và DoD
 
@@ -192,3 +192,42 @@ consumer proof; initial box-only scope được ghi rõ trong result.
   available to inspect the actual PlayCanvas preview. Browser local/world-pose
   acceptance is therefore **UNVERIFIED**. USD/export consumer fidelity and real
   Isaac collision remain AUD-09.S3 gates; this sprint does not claim them.
+
+### AUD-09.S3 — Export, preflight bounds và candidate identity
+
+- **Base:** `732da47` (`AUD-09.S2`).
+- **Behavior before → after:** The deterministic preflight checked object origins
+  as points, so a collider could exceed the warehouse XY boundary after a local
+  offset or rotation. Preflight now composes `T_world_from_object ×
+  T_object_from_collider`, computes the rotated box's world AABB from its
+  non-uniform dimensions, and checks those bounds. It also validates the local
+  collider frame, finite translation and normalized quaternion. Manual collider
+  overrides use their actual lower Z bound; older non-manual scenes retain the
+  established object-height anchor check so existing scene artifacts are not
+  reinterpreted by this editor change.
+- **Export and dependent consumers:** CodeGraph confirmed the legacy writer
+  already exports box dimensions, local translation and local quaternion. The
+  hybrid runner already places the box beneath a local collision Xform and then
+  the unchanged object Xform; the runtime probe verifies that composed result.
+  Capability routing continues to select `legacy_box` for a static AABB/OBB with
+  local offsets because this writer can represent them; no USD runtime is needed
+  for that path. Source-owned environment carving remains based on the extraction
+  region, not the edited collider.
+- **Revision and review identity:** `build_simulation_package` and `review_state`
+  already bind candidates and reports to exact scene/candidate checksums. A new
+  regression edits the collider, rebuilds, confirms a different candidate, keeps
+  source carve counts unchanged, and proves the prior candidate's validation
+  report is not presented for the new candidate. No contract schema, DB migration
+  or legacy artifact rewrite was needed.
+- **Files:** `src/services/simulation/preflight/rules.py`,
+  `tests/test_simulation/test_preflight.py`,
+  `tests/test_simulation/test_usd.py`,
+  `tests/test_simulation/test_usd_capabilities.py`,
+  `tests/test_simulation/test_hybrid_usd.py`,
+  `tests/test_orchestration/test_review_workflow.py`, and this task/plan evidence.
+- **Verification:**
+  - `.venv/bin/pytest tests/test_contracts/test_scene.py tests/test_simulation/test_colliders.py tests/test_simulation/test_enrichment.py tests/test_simulation/test_preflight.py tests/test_simulation/test_usd.py tests/test_simulation/test_usd_capabilities.py tests/test_simulation/test_hybrid_usd.py tests/test_simulation/test_collision_edit_composition.py tests/test_scene/test_collider_edit.py tests/test_api/test_scene_v2_routes.py tests/test_api/test_guest_ownership.py tests/test_orchestration/test_scene_editor.py tests/test_orchestration/test_simulation_package.py tests/test_orchestration/test_review_workflow.py -q` — **265 passed**.
+  - `.venv/bin/ruff check src/ tests/` — **passed**; `.venv/bin/ruff format --check src/ tests/` — **505 files already formatted**; `scripts/check_contract_mirror.py` — **PASS**.
+  - `data/scene_runtime/bin/python` opened the generated hybrid USD stage using OpenUSD **0.26.8**. The test measured parent+local rotation, translated collider origin and non-uniform dimensions; the Gaussian visual witness stayed at the object origin.
+  - CodeGraph sync/status: **833 files, 16,269 nodes, 47,647 edges; index up to date**. Explored `check_object_bounds`, `_box_world_bounds`, their engine callers, and focused tests after the change.
+- **Acceptance boundary:** The configured scene runtime contains `usd-core` but no `omni` package, so the Isaac Sim/PhysX contact smoke test is **UNVERIFIED**. OpenUSD stage inspection is not evidence of a live Isaac contact result. AUD-09.S2 browser visual acceptance also remains **UNVERIFIED** because no authenticated Studio session was available.

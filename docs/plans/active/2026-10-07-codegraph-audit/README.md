@@ -118,7 +118,7 @@ observability, runtime chưa qualified, research limits và tính năng khả th
 | Import dùng process API | Source: PACKAGING + BackgroundTasks; crash deployment chưa thử | AUD-06 |
 | Reobjectify thiếu admission và có race revision | Source: process_next chạy trực tiếp; reobjectify đọc lại current trước publish | AUD-07 |
 | Merge/reassign chưa nối UI/API | Source: merge_candidates 0 callers; chưa có reassign flow | AUD-08 |
-| Collider editor chưa có | Source: dimensions chỉ hiển thị; transform edit chỉ position/rotation object | AUD-09 |
+| Collider editor và export/preflight gates | API/UI/editor, local pose export và revision invalidation đã implement; browser/Isaac acceptance chưa có | AUD-09 |
 | Recovery revision tuyến tính, giới hạn 1.000 | Source: SceneEditor._recover; chưa có probe 1.000 revision | AUD-10 |
 | Hai test không khớp fixture/runtime hiện tại | Backend suite: 1.522 pass, 2 fail, 40 skip; real child cancellation kill/reap thành công | AUD-11 |
 | Collision clearance kém trên traversal được đo | 3DGS 0,05 m: 33/50; LiDAR 0/100 cần refusion min_range 2/3 m + floor_band 0,15 m; chưa đo obstacle recall | AUD-12 |
@@ -284,8 +284,9 @@ Progress hiện tại: AUD-11.S1–S2, AUD-15.S1, AUD-01.S1–S3, AUD-02.S1–S3
 AUD-03.S1–S3, AUD-04.S1–S3, AUD-10.S1–S3 và AUD-07.S1–S2 đã được commit riêng
 theo sprint. AUD-08.S4 và AUD-09.S1 cũng đã được commit riêng.
 AUD-09.S2 đã nối Inspector/API và preview collider với publication revision CAS;
-local API/domain/frontend checks pass, còn browser visual và Isaac/export acceptance
-để UNVERIFIED cho tới khi có phiên Studio đăng nhập và hoàn thành S3.
+AUD-09.S3 đã xác nhận legacy/hybrid USD local-pose fidelity, cập nhật preflight
+world bounds và kiểm tra candidate/report invalidation. Focused API/domain/frontend
+và OpenUSD tests pass; browser visual và real Isaac contact vẫn UNVERIFIED.
 AUD-07.S3 đã thêm objectify cancellation, child-process cleanup và terminal
 outcome handling; browser/GPU qualification còn UNVERIFIED.
 AUD-01.S3 verified legacy
@@ -424,8 +425,8 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [ ] Implementation AUD-06 và AUD-07.S3.
 - [ ] Implementation AUD-05 và real Isaac acceptance.
 - [x] Local implementation AUD-08.S1–S4; focused API/domain/frontend regressions.
-- [x] Local implementation AUD-09.S1–S2; focused API/domain/frontend regressions.
-- [ ] AUD-08 browser/Isaac acceptance, AUD-09 browser visual/Isaac acceptance và S3 export implementation.
+- [x] Local implementation AUD-09.S1–S3; focused API/domain/frontend/export regressions.
+- [ ] AUD-08 browser/Isaac acceptance; AUD-09 browser visual and real Isaac contact acceptance.
 - [ ] Implementation AUD-12–14 và held-out collision/LiDAR/floor acceptance.
 - [ ] Implementation AUD-15–16 và real latency/preview/browser acceptance.
 - [ ] Implementation AUD-17–18 và qualified opt-in runtime/QA acceptance.

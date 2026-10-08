@@ -52,6 +52,29 @@ def test_box_only_scene_uses_legacy_mode_without_usd_runtime(box_scene: SceneIR)
     assert report.runtime_qualification == RuntimeQualificationStatus.NOT_REQUIRED
 
 
+def test_offset_box_scene_keeps_legacy_export_without_usd_runtime(box_scene: SceneIR) -> None:
+    item = box_scene.objects[0]
+    assert item.collider is not None
+    local_transform = item.collider.local_transform.model_copy(
+        update={
+            "translation_xyz": (0.2, -0.1, 0.05),
+            "rotation_quaternion_xyzw": (0.0, 0.0, 0.7071067811865476, 0.7071067811865476),
+        }
+    )
+    collider = item.collider.model_copy(update={"local_transform": local_transform})
+    scene = box_scene.model_copy(
+        update={"objects": [item.model_copy(update={"collider": collider}), *box_scene.objects[1:]]}
+    )
+
+    requirements = export_requirements(scene)
+    report = assess_export_capabilities(scene, runtime_qualified=False)
+
+    assert requirements.local_collider_offsets
+    assert select_export_mode(requirements) == EffectiveExportMode.LEGACY_BOX
+    assert report.status == ExportCapabilityStatus.SUPPORTED
+    assert report.runtime_qualification == RuntimeQualificationStatus.NOT_REQUIRED
+
+
 def test_convex_scene_without_runtime_is_blocked(box_scene: SceneIR) -> None:
     scene = _with_collider(box_scene, ColliderType.CONVEX_DECOMPOSITION, None)
 

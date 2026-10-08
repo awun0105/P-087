@@ -274,6 +274,86 @@ def Xform "Asset"
     assert stage["asset_body_valid"]
 
 
+def test_hybrid_box_collider_composes_object_and_local_pose_without_moving_visual(tmp_path: Path) -> None:
+    _write_ply(tmp_path / "visual.ply")
+    (tmp_path / "env.obj").write_text("v 0 0 0\nv 5 0 0\nv 0 5 0\nf 1 2 3\n", encoding="utf-8")
+    quarter_turn = 0.7071067811865476
+    request = {
+        "output_dir": str(tmp_path / "usd"),
+        "environment": {"collision_mesh": str(tmp_path / "env.obj")},
+        "objects": [
+            {
+                "prim": "box",
+                "translation": [10.0, 20.0, 0.5],
+                "rotation_xyzw": [0.0, 0.0, quarter_turn, quarter_turn],
+                "gaussians_ply": str(tmp_path / "visual.ply"),
+                "collider": {
+                    "type": "OBB",
+                    "geometry_path": None,
+                    "part_paths": [],
+                    "dimensions_xyz_m": [2.0, 0.2, 0.4],
+                    "local_transform": {
+                        "translation_xyz": [0.5, 0.0, 0.0],
+                        "rotation_quaternion_xyzw": [0.0, 0.0, quarter_turn, quarter_turn],
+                    },
+                },
+                "physics": None,
+            }
+        ],
+    }
+    request_path = tmp_path / "request.json"
+    result_path = tmp_path / "result.json"
+    request_path.write_text(json.dumps(request), encoding="utf-8")
+
+    built = subprocess.run(
+        [str(RUNTIME), str(RUNNER), "--request", str(request_path), "--result", str(result_path)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+    assert built.returncode == 0, built.stderr
+    inspect = """
+import json, sys
+from pxr import Gf, Usd, UsdGeom, UsdVol
+stage = Usd.Stage.Open(sys.argv[1])
+cache = UsdGeom.XformCache()
+object_prim = stage.GetPrimAtPath('/World/Objects/box')
+visual = stage.GetPrimAtPath('/World/Objects/box/Visual')
+box = stage.GetPrimAtPath('/World/Objects/box/Collision/box')
+visual_field = UsdVol.ParticleField3DGaussianSplat(visual)
+local_particle = visual_field.GetPositionsAttr().Get()[0]
+box_world = cache.GetLocalToWorldTransform(box)
+box_origin = box_world.Transform(Gf.Vec3d(0, 0, 0))
+box_x = box_world.Transform(Gf.Vec3d(1, 0, 0)) - box_origin
+box_y = box_world.Transform(Gf.Vec3d(0, 1, 0)) - box_origin
+box_z = box_world.Transform(Gf.Vec3d(0, 0, 1)) - box_origin
+visual_origin = cache.GetLocalToWorldTransform(visual).Transform(Gf.Vec3d(*map(float, local_particle)))
+object_origin = cache.GetLocalToWorldTransform(object_prim).Transform(Gf.Vec3d(0, 0, 0))
+print(json.dumps({'object_origin': list(object_origin), 'visual_origin': list(visual_origin), 'box_origin': list(box_origin),
+                  'box_x': list(box_x), 'box_y': list(box_y), 'box_z': list(box_z),
+                  'dimensions': list(box.GetAttribute('xformOp:scale').Get())}))
+"""
+    inspected = subprocess.run(
+        [str(RUNTIME), "-c", inspect, str(tmp_path / "usd" / "scene.usda")],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+    assert inspected.returncode == 0, inspected.stderr
+    stage = json.loads(inspected.stdout)
+    assert stage["dimensions"] == pytest.approx([2.0, 0.2, 0.4])
+    assert stage["object_origin"] == pytest.approx([10.0, 20.0, 0.5])
+    assert stage["visual_origin"] == pytest.approx(stage["object_origin"])
+    assert stage["box_origin"] == pytest.approx([10.0, 20.5, 0.5])
+    assert stage["box_x"] == pytest.approx([-2.0, 0.0, 0.0], abs=1e-5)
+    assert stage["box_y"] == pytest.approx([0.0, -0.2, 0.0], abs=1e-5)
+    assert stage["box_z"] == pytest.approx([0.0, 0.0, 0.4], abs=1e-5)
+
+
 def test_convex_collider_does_not_fall_back_to_box(tmp_path: Path) -> None:
     request = {
         "output_dir": str(tmp_path / "usd"),

@@ -1,6 +1,7 @@
 """Unit tests cho SIM-04 Deterministic Preflight rules và engine."""
 
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from src.models.contracts.identity import verify_content_checksum
 from src.models.contracts.scene import SceneIR, SceneObjectState
 from src.models.contracts.validation import PreflightRuleId, RuleResult
 from src.services.simulation.preflight import run_preflight
+from src.services.simulation.preflight.rules import check_object_bounds, check_transforms
 
 FIXTURES = Path(__file__).parents[2] / "fixtures"
 
@@ -96,6 +98,74 @@ def test_preflight_fails_when_object_out_of_bounds(valid_scene: SceneIR) -> None
     rule = next(r for r in report.rules if r.rule_id == PreflightRuleId.OBJECT_OUT_OF_BOUNDS)
     assert rule.result == RuleResult.FAIL
     assert corrupt.objects[0].id in rule.affected_object_ids
+
+
+@pytest.mark.parametrize(
+    ("dimensions", "expected"),
+    [
+        ((2.0, 0.2, 0.4), RuleResult.FAIL),
+        ((0.2, 0.2, 0.4), RuleResult.PASS),
+    ],
+)
+def test_preflight_bounds_use_composed_rotated_box_collider(
+    valid_scene: SceneIR, dimensions: tuple[float, float, float], expected: RuleResult
+) -> None:
+    scene = valid_scene.model_copy(deep=True)
+    obj = scene.objects[0]
+    quarter_turn = (0.0, 0.0, math.sqrt(0.5), math.sqrt(0.5))
+    obj.transform = obj.transform.model_copy(
+        update={
+            "translation_xyz": (49.2, 0.0, 0.5),
+            "rotation_quaternion_xyzw": quarter_turn,
+        }
+    )
+    assert obj.collider is not None
+    local_transform = obj.collider.local_transform.model_copy(
+        update={
+            "translation_xyz": (0.5, 0.0, 0.0),
+            "rotation_quaternion_xyzw": quarter_turn,
+        }
+    )
+    obj.collider = obj.collider.model_copy(update={"dimensions_xyz_m": dimensions, "local_transform": local_transform})
+
+    rule = check_object_bounds(scene)
+
+    assert rule.result == expected
+    assert (obj.id in rule.affected_object_ids) is (expected == RuleResult.FAIL)
+
+
+def test_preflight_transform_rule_checks_local_collider_pose(valid_scene: SceneIR) -> None:
+    scene = valid_scene.model_copy(deep=True)
+    obj = scene.objects[0]
+    assert obj.collider is not None
+    local_transform = obj.collider.local_transform.model_copy(update={"rotation_quaternion_xyzw": (0.0, 0.0, 0.0, 0.5)})
+    obj.collider = obj.collider.model_copy(update={"local_transform": local_transform})
+
+    rule = check_transforms(scene)
+
+    assert rule.result == RuleResult.FAIL
+    assert obj.id in rule.affected_object_ids
+
+
+def test_preflight_manual_collider_override_checks_vertical_extent(valid_scene: SceneIR) -> None:
+    scene = valid_scene.model_copy(deep=True)
+    obj = scene.objects[0]
+    obj.transform = obj.transform.model_copy(update={"translation_xyz": (1.0, 2.0, 0.2)})
+    assert obj.collider is not None
+    local_transform = obj.collider.local_transform.model_copy(update={"translation_xyz": (0.0, 0.0, -0.11)})
+    collider = obj.collider.model_copy(
+        update={
+            "dimensions_xyz_m": (0.2, 0.2, 0.4),
+            "local_transform": local_transform,
+            "provenance": {**obj.collider.provenance, "manual_override": {"operation": "collider_edit"}},
+        }
+    )
+    obj.collider = collider
+
+    rule = check_object_bounds(scene)
+
+    assert rule.result == RuleResult.FAIL
+    assert obj.id in rule.affected_object_ids
 
 
 def test_preflight_fails_when_object_confirmation_incomplete(valid_scene: SceneIR) -> None:

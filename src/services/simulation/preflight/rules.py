@@ -4,7 +4,7 @@ import math
 from pathlib import Path
 
 from src.models.contracts.artifacts import Identifier, ProductArtifactRef
-from src.models.contracts.scene import SceneIR, SceneObject, SceneObjectState
+from src.models.contracts.scene import ColliderType, SceneIR, SceneObject, SceneObjectState
 from src.models.contracts.validation import PreflightRule, PreflightRuleId, RuleResult
 
 SEVERITY_BLOCKING: Identifier = "blocking"
@@ -131,14 +131,79 @@ def _is_valid_quaternion(q: tuple[float, float, float, float]) -> bool:
     return 0.98 <= norm_sq <= 1.02
 
 
+def _rotation_matrix(q: tuple[float, float, float, float]) -> tuple[tuple[float, float, float], ...]:
+    """Return the rotation matrix for a finite, near-unit xyzw quaternion."""
+    magnitude = math.sqrt(sum(value * value for value in q))
+    x, y, z, w = (value / magnitude for value in q)
+    return (
+        (1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)),
+        (2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)),
+        (2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)),
+    )
+
+
+def _box_world_bounds(obj: SceneObject) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    """Compute edited box bounds after composing object and collider transforms."""
+    center = list(obj.transform.translation_xyz)
+    object_rotation = (
+        _rotation_matrix(obj.transform.rotation_quaternion_xyzw)
+        if _is_valid_quaternion(obj.transform.rotation_quaternion_xyzw)
+        else None
+    )
+    collider = obj.collider
+    if collider is None:
+        return tuple(center), tuple(center)
+
+    local = collider.local_transform
+    local_translation = local.translation_xyz
+    if object_rotation is not None and all(math.isfinite(value) for value in local_translation):
+        for row in range(3):
+            center[row] += sum(object_rotation[row][axis] * local_translation[axis] for axis in range(3))
+
+    dimensions = collider.dimensions_xyz_m
+    local_quaternion = local.rotation_quaternion_xyzw
+    if (
+        collider.collider_type not in {ColliderType.AABB, ColliderType.OBB}
+        or dimensions is None
+        or len(dimensions) != 3
+        or any(not math.isfinite(value) or value <= 0.0 for value in dimensions)
+        or object_rotation is None
+        or not _is_valid_quaternion(local_quaternion)
+    ):
+        return tuple(center), tuple(center)
+
+    local_rotation = _rotation_matrix(local_quaternion)
+    world_rotation = tuple(
+        tuple(
+            sum(object_rotation[row][axis] * local_rotation[axis][column] for axis in range(3)) for column in range(3)
+        )
+        for row in range(3)
+    )
+    half_extents = tuple(
+        sum(abs(world_rotation[row][axis]) * dimensions[axis] / 2.0 for axis in range(3)) for row in range(3)
+    )
+    return (
+        tuple(center[axis] - half_extents[axis] for axis in range(3)),
+        tuple(center[axis] + half_extents[axis] for axis in range(3)),
+    )
+
+
 def check_transforms(scene: SceneIR) -> PreflightRule:
-    """Kiểm tra các ma trận vị trí và góc quay quaternion của từng object."""
+    """Kiểm tra pose của object và local collider transform."""
     invalid_ids: list[Identifier] = []
     for obj in scene.objects:
         t = obj.transform
         trans_invalid = any(math.isnan(v) or math.isinf(v) for v in t.translation_xyz)
         rot_invalid = not _is_valid_quaternion(t.rotation_quaternion_xyzw)
-        if trans_invalid or rot_invalid:
+        collider_invalid = False
+        if obj.collider is not None:
+            local = obj.collider.local_transform
+            collider_invalid = (
+                local.parent_frame != obj.local_frame
+                or any(not math.isfinite(value) for value in local.translation_xyz)
+                or not _is_valid_quaternion(local.rotation_quaternion_xyzw)
+            )
+        if trans_invalid or rot_invalid or collider_invalid:
             invalid_ids.append(obj.id)
 
     if invalid_ids:
@@ -148,7 +213,7 @@ def check_transforms(scene: SceneIR) -> PreflightRule:
             result=RuleResult.FAIL,
             affected_object_ids=invalid_ids,
             evidence_refs=[],
-            remediation="Hiệu chỉnh translation và quaternion hữu hạn cho các vật thể lỗi.",
+            remediation="Hiệu chỉnh pose của vật thể và local collider transform hữu hạn, đúng frame.",
         )
     return PreflightRule(
         rule_id=PreflightRuleId.TRANSFORM_INVALID,
@@ -169,11 +234,20 @@ def check_object_bounds(
     for obj in scene.objects:
         if not obj.active:
             continue
-        x, y, z = obj.transform.translation_xyz
+        low, high = _box_world_bounds(obj)
         is_outside_xy = (
-            x < workspace_min_xy[0] or x > workspace_max_xy[0] or y < workspace_min_xy[1] or y > workspace_max_xy[1]
+            low[0] < workspace_min_xy[0]
+            or high[0] > workspace_max_xy[0]
+            or low[1] < workspace_min_xy[1]
+            or high[1] > workspace_max_xy[1]
         )
-        is_subsurface = z < -0.1
+        manual_collider_override = obj.collider is not None and isinstance(
+            obj.collider.provenance.get("manual_override"), dict
+        )
+        # Existing scenes use object z as their legacy anchor. Edited colliders
+        # have explicit size/pose overrides, so check their actual lower bound.
+        collider_center_z = (low[2] + high[2]) / 2.0
+        is_subsurface = low[2] < -0.1 if manual_collider_override else collider_center_z < -0.1
         if is_outside_xy or is_subsurface:
             out_ids.append(obj.id)
 

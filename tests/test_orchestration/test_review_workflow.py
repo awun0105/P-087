@@ -40,7 +40,8 @@ from src.services.orchestration.review.workflow import (
     review_state,
     seal_release,
 )
-from src.services.orchestration.scene.objects import add_box_object, apply_object_action
+from src.services.orchestration.scene.models import ColliderEditCommand
+from src.services.orchestration.scene.objects import add_box_object, apply_object_action, edit_collider
 from tests.test_orchestration.test_simulation_package import _scene_job
 
 ZERO = "sha256:" + "0" * 64
@@ -321,6 +322,44 @@ def test_edit_after_release_starts_new_draft(tmp_path: Path) -> None:
     add_box_object(registry.scene, job.job_id, scene.scene_revision, "Thùng mới", (0.5, 0.5, 0.5), (2, 2, 0.25))
     state = review_state(registry, job.job_id)
     assert state.record.status == SceneRevisionStatus.DRAFT and state.release is None and state.approval is None
+
+
+def test_collider_edit_builds_new_candidate_and_does_not_reuse_old_validation(tmp_path: Path) -> None:
+    registry, job, old_candidate = _packaged(tmp_path)
+    stale_report = _report(old_candidate)
+    record_validation_report(registry, job.job_id, stale_report)
+    old_state = review_state(registry, job.job_id)
+    assert old_state.package is not None
+    assert old_state.validation == stale_report
+
+    scene = registry.scene.current(job.job_id).scene
+    item = scene.objects[0]
+    assert item.collider is not None and item.collider.dimensions_xyz_m is not None
+    x, y, z = item.collider.dimensions_xyz_m
+    edit_collider(
+        registry.scene,
+        job.job_id,
+        ColliderEditCommand(
+            expected_scene_revision=scene.scene_revision,
+            object_id=item.id,
+            dimensions_xyz_m=(x * 1.1, y * 1.1, z * 1.1),
+            local_translation_xyz_m=(0.05, 0.0, 0.6),
+        ),
+    )
+    new_package = build_simulation_package(registry, job.job_id)
+    assert new_package.candidate is not None
+    new_candidate = new_package.candidate.candidate_checksum
+    assert new_candidate != old_candidate
+    assert new_package.carved_triangles == old_state.package.carved_triangles
+    assert new_package.retained_shared_triangles == old_state.package.retained_shared_triangles
+    assert new_package.retained_shared_object_ids == old_state.package.retained_shared_object_ids
+
+    new_state = review_state(registry, job.job_id)
+
+    assert new_state.record.scene_revision == new_package.scene_revision
+    assert new_state.record.candidate_checksum == new_candidate
+    assert new_state.validation is None
+    assert new_state.approval is None
 
 
 def test_reject_needs_reason_and_blocks_release(tmp_path: Path) -> None:

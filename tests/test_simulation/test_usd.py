@@ -67,6 +67,37 @@ def test_generate_scene_usda_syntax(physics_scene: SceneIR) -> None:
         assert 'xformOpOrder = ["xformOp:translate", "xformOp:orient"]' in usda_text
 
 
+def test_legacy_box_export_preserves_dimensions_and_collider_local_pose(physics_scene: SceneIR) -> None:
+    item = physics_scene.objects[0]
+    assert item.collider is not None
+    quarter_turn = 0.7071067811865476
+    object_transform = item.transform.model_copy(
+        update={
+            "translation_xyz": (3.0, 4.0, 0.5),
+            "rotation_quaternion_xyzw": (0.0, 0.0, quarter_turn, quarter_turn),
+        }
+    )
+    local_transform = item.collider.local_transform.model_copy(
+        update={
+            "translation_xyz": (0.25, -0.5, 0.3),
+            "rotation_quaternion_xyzw": (0.0, 0.0, quarter_turn, quarter_turn),
+        }
+    )
+    collider = item.collider.model_copy(
+        update={"dimensions_xyz_m": (2.0, 0.2, 0.4), "local_transform": local_transform}
+    )
+    edited_item = item.model_copy(update={"transform": object_transform, "collider": collider})
+    scene = physics_scene.model_copy(update={"objects": [edited_item, *physics_scene.objects[1:]]})
+
+    usda_text = generate_scene_usda(scene)
+
+    assert "double3 xformOp:scale = (2.0, 0.2, 0.4)" in usda_text
+    assert "double3 xformOp:translate = (0.25, -0.5, 0.3)" in usda_text
+    assert "quatf xformOp:orient = (0.7071067811865476, 0.0, 0.0, 0.7071067811865476)" in usda_text
+    assert 'xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]' in usda_text
+    assert "double3 xformOp:translate = (3.0, 4.0, 0.5)" in usda_text
+
+
 def test_legacy_usd_exporter_rejects_mesh_without_geometry(physics_scene: SceneIR) -> None:
     """Unsupported mesh colliders must fail instead of becoming an empty USD Mesh prim."""
     item = physics_scene.objects[0]
