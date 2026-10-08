@@ -90,7 +90,12 @@ def _job_requester_data(database: RuntimeDatabase) -> tuple[dict[str, str], dict
             "SELECT user_id, payload, at FROM r2s_audit_log WHERE action=? AND user_id IS NOT NULL ORDER BY at",
             (GPU_RUN_ACTION,),
         ).fetchall()
-        event_rows = tx.execute("SELECT job_id, payload FROM r2s_job_events ORDER BY job_id, version").fetchall()
+        # Only run-starting events carry an actor; the key is omitted otherwise, so skip every other event
+        # instead of parsing the whole journal on each Scenes poll.
+        event_rows = tx.execute(
+            "SELECT job_id, payload FROM r2s_job_events WHERE payload LIKE ? ORDER BY job_id, version",
+            ('%"requested_by"%',),
+        ).fetchall()
     owners: dict[str, str] = {}
     audit_times: dict[str, datetime] = {}
     for user_id, payload, at in audit_rows:
