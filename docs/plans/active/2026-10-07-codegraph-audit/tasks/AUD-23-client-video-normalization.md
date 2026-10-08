@@ -264,9 +264,13 @@ exact multipart digest and cleanup. Paired LiDAR projection/time test and actual
 COLMAP/Brush consumer run required; feature support missing hardware stays pending.
 Tests: independent held-out/frame sampling/projection cases; real browser memory,
 restart, unsupported capability remediation and pixel/timing identity across consumers.
-**Exit:** [ ] byte saving and latency measured by preset/condition; [ ] supported
-portrait/landscape RGB flow evidenced; [ ] paired sensor path mapping verified;
-[ ] unsupported cases and retained-source semantics documented without fake PASS.
+**Exit:** [ ] byte saving and latency measured by preset/condition across the
+representative and held-out capture matrix (partial local candidates recorded below);
+[ ] supported portrait/landscape RGB flow evidenced with representative device
+captures (local landscape demo and synthetic portrait are partial evidence);
+[ ] paired sensor path mapping verified; [x] unsupported cases and retained-source
+semantics documented without fake PASS. S5 remains open until the unchecked gates
+have representative data and consumer evidence.
 
 ## Verification và DoD
 
@@ -287,9 +291,11 @@ only proves orchestration; do not label browser encoding or real bandwidth accep
 
 ## Result / Evidence
 
-AUD-23.S1–S4 local implementation is recorded below. Real-browser codec/runtime,
-bandwidth, reconstruction-quality and paired-sensor acceptance remain open. Local
-tests do not prove that a target browser can encode or play a real capture.
+AUD-23.S1–S4 implementation and local checks are recorded below. S5 now has
+local Chrome 153 evidence for real browser encoding, prepared-file upload and API
+verification on one repository landscape demo and one synthetic portrait derivative.
+The evidence does not qualify representative device captures, held-out quality,
+reconstruction quality or paired-sensor behavior; those gates remain open.
 
 ### S1 changes and verification
 
@@ -323,6 +329,105 @@ tests do not prove that a target browser can encode or play a real capture.
 - Synthetic contract tests are local evidence only. No browser encoder, actual
   upload savings, GPU reconstruction, LiDAR calibration projection or pose
   association is claimed from this sprint.
+
+### S5 changes and current evidence
+
+- **Commit base:** `4094f0f` (branch HEAD before the S5 commit).
+- Fixed browser and API verification mismatches found by the integrated path:
+  MediaBunny now prefers compatible audio copy while transcoding video; worker
+  cleanup awaits output cancellation before removing the OPFS entry and preserves
+  the original failure if cleanup also fails; source colorimetry may be unspecified
+  while prepared output is tagged SDR BT.709; SDR BT.2020 primaries are not
+  misclassified as HDR; backend ffprobe color-range aliases
+  `tv`/`mpeg` and `pc`/`jpeg` normalize to the browser contract's `limited`/`full`.
+  Audio with a negative starting timestamp now raises the existing
+  `audio_omission_required` error so the UI asks for explicit consent instead of
+  offering only an uncompressed original upload.
+- Browser gate: Chrome 153 on the local machine, with an isolated production
+  frontend build on port 3012 and temporary local FastAPI/SQLite/artifact storage.
+  No user development server or deployed environment was used. On each successful
+  prepared path, the browser sent the prepared MP4 bytes (`POST /api/v1/uploads`
+  HTTP 201), then verified the preparation manifest and frame map (HTTP 200); the
+  UI reported that upload and frame-map verification succeeded. Selecting the
+  prepared option did not send the original file. Raw-original choice remains an
+  explicit UI option. Upload storage was confined to `/tmp`; no job was created.
+- Candidate compression measurements (single local runs; worker time includes
+  browser-side processing, not upload or server prep):
+
+  | Capture and selection | Input → prepared bytes | Prepared dimensions / frames | Worker time | Reduction |
+  | --- | ---: | --- | ---: | ---: |
+  | `aisle-cw-quick`, 20 s landscape, 200 frames, 720p default | 14,994,298 → 3,303,327 | 1280×720 / 200 | 2,582 ms | 77.97% |
+  | Same capture, 480p | 14,994,298 → 1,652,416 | 852×480 / 200 | 16,693 ms | 88.98% |
+  | Same 720p source, 1080p preset (no upscaling) | 14,994,298 → 6,588,116 | 1280×720 / 200 | 3,020 ms | 56.07% |
+  | Synthetic rotated portrait derivative, 720×1280, 101 frames | 1,359,549 → 1,678,460 | 720×1280 / 101 | 1,454 ms | −23.46% (larger) |
+  | `torwic_scene_01`, 109.19 s landscape, 1092 frames, 720p default | 74,549,237 → 17,793,400 | 1280×720 / 1092 | 13,943 ms | 76.14% |
+
+- Upload body byte counts matched the prepared sizes above for the 720p, 480p,
+  1080p-preset and 1092-frame landscape cases; manifest and frame-map verification
+  succeeded for all four. The synthetic portrait case also completed server-side
+  verification after the user explicitly selected the larger prepared file. This
+  demonstrates the intended warning/choice path, not a bandwidth benefit for every
+  input. The 1080p preset did not upscale a 720p source; its higher target bitrate
+  still made a larger file than the 720p preset.
+- Synthetic audio browser checks (not device captures): a 5 s 640×360/30 FPS
+  H.264+AAC source with a negative AAC start timestamp first showed the explicit
+  audio-removal consent checkbox. After consent, the preview stated that audio was
+  omitted, and upload `upload-6cd73da0954c` returned POST 201 plus manifest/frame-map
+  PUT 200; input/output were 1,282,516/1,654,737 bytes, so the user saw and accepted
+  a 29% larger prepared file. A second 5 s H.264+AAC source with AAC starting at
+  0.978 s was prepared with audio preserved; its upload `upload-c8c0ed7cf616` also
+  returned POST 201 and both verification PUTs 200. ffprobe confirmed H.264 video
+  and AAC audio remained, with the original 5 s video timeline. This exercises one
+  synthetic supported AAC case and one explicit-omission case; it does not qualify
+  audio behavior across real phones, containers or codecs.
+- Frame-order FFmpeg quality comparison, with both files decoded at matching
+  dimensions and timestamps reset before comparison (visual codec similarity only):
+
+  | Capture / preset | SSIM (All) | PSNR (average) |
+  | --- | ---: | ---: |
+  | `aisle-cw-quick`, 480p | 0.848800 | 25.306662 dB |
+  | `aisle-cw-quick`, 720p | 0.861961 | 25.254048 dB |
+  | `aisle-cw-quick`, 1080p preset / no upscale | 0.871481 | 25.319463 dB |
+  | Synthetic portrait, 720p preset | 0.870420 | 24.975947 dB |
+  | `torwic_scene_01`, 720p, 1092 frames | 0.879606 | 25.012570 dB |
+
+- These runs are not a held-out study. The portrait source is a synthetic rotated
+  derivative; available repository data does not include representative phone
+  portrait, 1080p, 60 fps, VFR/high-motion or matched RGB+LiDAR capture sets. No
+  client peak-memory or server preparation latency was measured. Frame SSIM/PSNR
+  cannot stand in for camera pose, coverage, LiDAR projection, COLMAP/Brush
+  acceptance or reconstructed geometry. `/api/v1/processing/options` returned 409
+  in this isolated environment, so no scene setup or reconstruction job was run.
+- S5 status: **partial, not accepted**. Local browser, byte-count, and API contract
+  behavior now have executable evidence. Representative-capture latency/quality,
+  held-out evaluation, true-device portrait/high-frame-rate/VFR qualification,
+  peak-memory measurements, paired LiDAR projection/time mapping and actual
+  COLMAP/Brush consumer validation remain pending.
+- Verification after S5 implementation:
+  - `cd frontend && npm exec vitest run -- tests/video-preparation-contract.test.ts tests/video-normalization-service.test.ts tests/video-normalization-core.test.ts` — **22 passed**.
+  - After correcting the audio omission error mapping: `cd frontend && npm exec vitest run -- tests/studio-input-flows.test.tsx tests/video-preparation-contract.test.ts tests/video-normalization-service.test.ts tests/video-normalization-core.test.ts` — **34 passed**; `npm exec tsc -- --noEmit` and changed-file ESLint — pass.
+  - Isolated production `npm run build` from the final S5 frontend source — pass; **16 routes generated**.
+  - `.venv/bin/pytest tests/test_contracts/test_video_preparation.py tests/test_orchestration/test_video_preparation_verification.py -q` — **34 passed**.
+  - `.venv/bin/ruff check src/ tests/` — pass; `.venv/bin/ruff format --check src/ tests/` — **482 files already formatted**.
+
+#### S5 pre-flight gate report (GUIDE.md Rule 13)
+
+- **CodeGraph:** explored `ClientVideoPreparationManifest`, frontend
+  `parseVideoPreparationManifest`, `uploadPreparedVideo`, the normalization worker,
+  `ServerVideoPreparationVerifier`, `_probe`, `_color_range_value`, and
+  `UploadDropzone` callers. The changed shared SDR check is used by both manifest
+  validation and worker output verification; affected upload, frame-map, UI consent
+  and contract tests were included in the focused checks.
+- **Minimal code:** reused the existing SDR metadata helper, Worker lifecycle,
+  audio consent state and ffprobe verifier; no new subsystem or profile version was
+  introduced.
+- **Checks:** full Python Ruff lint/format passed; focused Python tests **34 passed**;
+  focused frontend tests **34 passed**, TypeScript, changed-file ESLint and isolated
+  production build passed.
+- **DevTools:** Chrome 153 snapshot showed the upload preparation and verified-upload
+  states. Network requests for prepared uploads returned POST 201 and manifest/frame
+  map PUT 200. The isolated page also logged four HTTP 409 responses from
+  `/api/v1/processing/options`; therefore no scene job or reconstruction was tested.
 
 ### Pre-flight gate report (GUIDE.md Rule 13)
 

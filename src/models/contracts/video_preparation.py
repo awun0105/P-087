@@ -307,11 +307,11 @@ class ClientVideoPreparationManifest(ContractModel):
         codec = self.prepared_video.codec.casefold()
         if codec not in {"avc", "h264"} and not codec.startswith("avc1."):
             raise ValueError("prepared video codec must match the v1 AVC profile")
-        if self.source_video.color != self.prepared_video.color:
-            raise ValueError("prepared video must preserve the observed SDR color metadata")
         source_transfer = (self.source_video.color.transfer if self.source_video.color is not None else None) or ""
         if _is_hdr_transfer(source_transfer):
             raise ValueError("HDR source video is outside the v1 normalization profile")
+        if not _preserves_sdr_color_metadata(self.source_video.color, self.prepared_video.color):
+            raise ValueError("prepared video must preserve the observed SDR color metadata")
         if self.audio_disposition == AudioDisposition.SOURCE_HAS_NO_AUDIO:
             if self.source_video.audio_track_count != 0 or self.prepared_video.audio_track_count != 0:
                 raise ValueError("no-audio disposition requires both source and output to have no audio")
@@ -379,6 +379,25 @@ def _same_prepared_stream(observed: VideoStreamMetadata, declared: VideoStreamMe
 def _is_hdr_transfer(value: str) -> bool:
     normalized = value.casefold().replace("_", "-").replace(" ", "-")
     return "2084" in normalized or "arib-std-b67" in normalized or normalized in {"pq", "hlg"}
+
+
+def _preserves_sdr_color_metadata(
+    source: VideoColorMetadata | None,
+    prepared: VideoColorMetadata | None,
+) -> bool:
+    """Preserve observed source colorimetry while allowing standard SDR defaults for unknown fields."""
+    if prepared is not None and _is_hdr_transfer(prepared.transfer):
+        return False
+    if source is None:
+        return True
+    if prepared is None:
+        return all(value is None for value in source.model_dump().values())
+    return (
+        (source.primaries is None or source.primaries == prepared.primaries)
+        and (source.transfer is None or source.transfer == prepared.transfer)
+        and (source.matrix is None or source.matrix == prepared.matrix)
+        and (source.range is None or source.range == prepared.range)
+    )
 
 
 def default_video_normalization_profile() -> VideoNormalizationProfile:

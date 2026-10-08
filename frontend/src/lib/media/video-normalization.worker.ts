@@ -15,6 +15,7 @@ import {
 } from "mediabunny";
 import {
   fitVideoDimensions,
+  preservesSdrColorMetadata,
   VIDEO_NORMALIZATION_PROFILE_V1,
   type VideoColorMetadata,
   type VideoResolutionPreset,
@@ -89,12 +90,6 @@ function colorMetadata(color: VideoColorSpaceInit): VideoColorMetadata | null {
     range: color.fullRange === true ? "full" : color.fullRange === false ? "limited" : null,
   };
   return Object.values(value).every((part) => part === null) ? null : value;
-}
-
-function sameColor(left: VideoColorMetadata | null, right: VideoColorMetadata | null): boolean {
-  return left === null ? right === null : right !== null &&
-    left.primaries === right.primaries && left.transfer === right.transfer &&
-    left.matrix === right.matrix && left.range === right.range;
 }
 
 function safeCodec(value: string | number | Uint8Array | null): string {
@@ -418,7 +413,7 @@ async function verifyAndWriteFrameMap(options: {
     }
     if (preparedVideo.rotation_degrees !== 0 || preparedVideo.sample_aspect_ratio.numerator !== preparedVideo.sample_aspect_ratio.denominator ||
         preparedVideo.coded_width !== preparedVideo.display_width || preparedVideo.coded_height !== preparedVideo.display_height ||
-        !sameColor(sourceVideo.color, preparedVideo.color)) {
+        !preservesSdrColorMetadata(sourceVideo.color, preparedVideo.color)) {
       throw new VideoPreparationError("verification_failed", "Rotation, pixel aspect ratio, dimensions, or SDR color metadata was not baked and preserved.");
     }
 
@@ -496,7 +491,10 @@ async function runPreparation(message: VideoPreparationStart): Promise<VideoPrep
     if (!message.omit_audio_with_consent && audioTracks.length > 0) {
       const audioStarts = await Promise.all(audioTracks.map((track) => track.getFirstTimestamp()));
       if (audioStarts.some((timestamp) => timestamp < 0)) {
-        throw new VideoPreparationError("unsupported_audio", "Audio tracks with negative starting timestamps cannot be preserved by this profile.");
+        throw new VideoPreparationError(
+          "audio_omission_required",
+          "Audio tracks with negative starting timestamps cannot be preserved by this profile. Choose explicitly to omit audio or use a compatible source.",
+        );
       }
     }
 
@@ -550,7 +548,8 @@ async function runPreparation(message: VideoPreparationStart): Promise<VideoPrep
       output,
       tracks: "all",
       trim: { start: 0 },
-      copy: { mode: "forced", shiftTolerance: 0 },
+      // The video callback always transcodes; keep copying preferred so compatible audio can pass through.
+      copy: { mode: "preferred", shiftTolerance: 0 },
       showWarnings: false,
       video: (track) => track.id === videoTrack.id ? {
         width: dimensions.width,
@@ -672,7 +671,8 @@ async function runPreparation(message: VideoPreparationStart): Promise<VideoPrep
     outputInput?.dispose();
     if (selectionWriter) await selectionWriter.abort("video preparation ended before frame mapping completed").catch(() => undefined);
     if (!completed) {
-      await Promise.allSettled([output?.cancel(), directory.removeEntry(outputName), directory.removeEntry(mapName), directory.removeEntry(selectionName)]);
+      await output?.cancel().catch(() => undefined);
+      await Promise.allSettled([directory.removeEntry(outputName), directory.removeEntry(mapName), directory.removeEntry(selectionName)]);
     } else {
       await directory.removeEntry(selectionName).catch(() => undefined);
     }

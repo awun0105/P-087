@@ -77,6 +77,14 @@ class FixtureVideoVerifier(ServerVideoPreparationVerifier):
         return iter(self.pts)
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("tv", "limited"), ("mpeg", "limited"), ("pc", "full"), ("jpeg", "full"), ("unknown", None), (None, None)],
+)
+def test_ffprobe_color_range_uses_contract_values(raw: str | None, expected: str | None) -> None:
+    assert ServerVideoPreparationVerifier._color_range_value(raw) == expected
+
+
 def test_server_verifies_actual_video_and_output_pts_then_publishes_map(tmp_path: Path) -> None:
     resolver, upload, manifest, sidecar, observed, pts = _prepared_input(tmp_path)
     verification = FixtureVideoVerifier(resolver, observed, pts).verify_and_publish(upload, manifest, sidecar)

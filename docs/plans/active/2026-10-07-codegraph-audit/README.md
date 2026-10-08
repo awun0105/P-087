@@ -433,7 +433,9 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
       aspect-preserving quality profile; synthetic and local FFmpeg checks only.
 - [x] AUD-23.S4 local upload UI/content-bound recovery and regression tests.
 - [ ] AUD-23.S5 browser, bandwidth, held-out quality and paired-sensor geometry
-      acceptance.
+      acceptance. Local Chrome 153 upload/manifest/frame-map and candidate
+      compression/SSIM measurements are recorded; representative device captures,
+      held-out quality and real LiDAR/reconstruction evidence remain open.
 - [ ] Implementation AUD-24 và grouped upload/R1–R6 recipe/consumer/browser acceptance.
 - [x] Hoãn AUD-25/ADR0025 theo yêu cầu owner; gỡ khỏi execution order và active dependencies.
 

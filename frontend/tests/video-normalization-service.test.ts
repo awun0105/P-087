@@ -44,6 +44,7 @@ function streamMetadata(overrides: Partial<{
 class FakeDirectory {
   readonly files = new Map<string, File>();
   readonly removed: string[] = [];
+  removeFailure: DOMException | null = null;
 
   async getFileHandle(name: string) {
     const file = this.files.get(name);
@@ -53,6 +54,7 @@ class FakeDirectory {
 
   async removeEntry(name: string) {
     this.removed.push(name);
+    if (this.removeFailure) throw this.removeFailure;
     if (!this.files.delete(name)) throw new DOMException("No file", "NotFoundError");
   }
 }
@@ -63,7 +65,11 @@ class FakeWorker implements VideoNormalizerWorkerPort {
   onmessageerror: ((event: MessageEvent) => void) | null = null;
   terminated = false;
 
-  constructor(private readonly directory: FakeDirectory, private readonly complete: boolean) {}
+  constructor(
+    private readonly directory: FakeDirectory,
+    private readonly complete: boolean,
+    private readonly failure?: Extract<VideoPreparationWorkerResponse, { type: "failure" }>,
+  ) {}
 
   postMessage(message: FakeWorkerMessage) {
     if (message.type === "cancel") {
@@ -73,6 +79,10 @@ class FakeWorker implements VideoNormalizerWorkerPort {
         code: "cancelled",
         message: "Video preparation was cancelled; no upload was started.",
       } } as MessageEvent<VideoPreparationWorkerResponse>);
+      return;
+    }
+    if (this.failure) {
+      this.onmessage?.({ data: { ...this.failure, request_id: message.request_id } } as MessageEvent<VideoPreparationWorkerResponse>);
       return;
     }
     if (!this.complete) return;
@@ -158,5 +168,25 @@ describe("local video preparation service lifecycle", () => {
     expect(worker.terminated).toBe(true);
     expect(directory.removed).toHaveLength(3);
     expect(directory.files.size).toBe(0);
+  });
+
+  it("preserves the worker failure when temporary files cannot be removed", async () => {
+    const directory = new FakeDirectory();
+    directory.removeFailure = new DOMException("The file is still open", "NoModificationAllowedError");
+    const worker = new FakeWorker(directory, false, {
+      type: "failure",
+      request_id: "",
+      code: "unsupported_codec",
+      message: "The browser cannot encode this video into the required AVC profile.",
+    });
+    const source = new File(["original"], "capture.mp4", { type: "video/mp4" });
+
+    await expect(prepareVideoForUpload({ source }, {
+      createWorker: () => worker,
+      openDirectory: async () => directory as unknown as FileSystemDirectoryHandle,
+    })).rejects.toThrow(
+      "The browser cannot encode this video into the required AVC profile. Temporary video files could not be removed.",
+    );
+    expect(directory.removed).toHaveLength(3);
   });
 });

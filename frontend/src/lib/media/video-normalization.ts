@@ -259,7 +259,10 @@ export async function prepareVideoForUpload(
     try {
       await removeFiles(directory, temporaryNames);
     } catch (cleanupError) {
-      throw new AggregateError([error, cleanupError], "Video preparation failed and temporary files could not be removed.");
+      const message = error instanceof VideoPreparationError
+        ? `${error.message} Temporary video files could not be removed.`
+        : "Video preparation failed and temporary files could not be removed.";
+      throw new AggregateError([error, cleanupError], message);
     }
     throw error;
   }

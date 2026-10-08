@@ -346,10 +346,18 @@ function isHdrTransfer(transfer: string | null): boolean {
   return normalized.includes("2084") || normalized.includes("arib-std-b67") || normalized === "pq" || normalized === "hlg";
 }
 
-function sameColor(left: VideoColorMetadata | null, right: VideoColorMetadata | null): boolean {
-  return left === null ? right === null : right !== null &&
-    left.primaries === right.primaries && left.transfer === right.transfer &&
-    left.matrix === right.matrix && left.range === right.range;
+/** Keep known source colorimetry and reject output that signals HDR. */
+export function preservesSdrColorMetadata(
+  source: VideoColorMetadata | null,
+  prepared: VideoColorMetadata | null,
+): boolean {
+  if (prepared && isHdrTransfer(prepared.transfer)) return false;
+  if (source === null) return true;
+  if (prepared === null) return Object.values(source).every((value) => value === null);
+  return (source.primaries === null || source.primaries === prepared.primaries) &&
+    (source.transfer === null || source.transfer === prepared.transfer) &&
+    (source.matrix === null || source.matrix === prepared.matrix) &&
+    (source.range === null || source.range === prepared.range);
 }
 
 export function parseVideoPreparationManifest(value: unknown): ClientVideoPreparationManifest {
@@ -399,7 +407,7 @@ export function parseVideoPreparationManifest(value: unknown): ClientVideoPrepar
       prepared.coded_width !== prepared.display_width || prepared.coded_height !== prepared.display_height ||
       outputLong > selected.max_long_edge_px || outputShort > selected.max_short_edge_px ||
       prepared.display_width > source.display_width || prepared.display_height > source.display_height ||
-      !isAvcCodec(prepared.codec) || !sameColor(source.color, prepared.color) ||
+      !isAvcCodec(prepared.codec) || !preservesSdrColorMetadata(source.color, prepared.color) ||
       isHdrTransfer(source.color?.transfer ?? null)) {
     throw new Error("Video preparation metadata and frame map disagree with the active profile");
   }

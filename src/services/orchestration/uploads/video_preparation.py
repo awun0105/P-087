@@ -168,7 +168,7 @@ class ServerVideoPreparationVerifier:
                 "primaries": self._color_value(video_stream.get("color_primaries")),
                 "transfer": self._color_value(video_stream.get("color_transfer")),
                 "matrix": self._color_value(video_stream.get("color_space")),
-                "range": self._color_value(video_stream.get("color_range")),
+                "range": self._color_range_value(video_stream.get("color_range")),
             }
             color = VideoColorMetadata(**color_values) if any(color_values.values()) else None
             rate = self._optional_rational(video_stream.get("avg_frame_rate"), "/")
@@ -293,6 +293,18 @@ class ServerVideoPreparationVerifier:
     @staticmethod
     def _color_value(raw: str | None) -> str | None:
         return raw if raw and raw.casefold() not in {"unknown", "unspecified", "n/a"} else None
+
+    @classmethod
+    def _color_range_value(cls, raw: str | None) -> str | None:
+        value = cls._color_value(raw)
+        if value is None:
+            return None
+        normalized = value.casefold()
+        if normalized in {"tv", "mpeg", "limited"}:
+            return "limited"
+        if normalized in {"pc", "jpeg", "full"}:
+            return "full"
+        return value
 
     @staticmethod
     def _sha256_file(path: Path) -> str:

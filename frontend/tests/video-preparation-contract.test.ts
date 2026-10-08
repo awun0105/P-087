@@ -7,6 +7,7 @@ import {
   parseVideoNormalizationCapability,
   parseVideoNormalizationProfile,
   parseVideoPreparationManifest,
+  preservesSdrColorMetadata,
   verifyVideoPreparationChecksum,
   VIDEO_NORMALIZATION_PROFILE_V1,
 } from "../src/lib/contracts/videoPreparation";
@@ -69,6 +70,18 @@ describe("video normalization contract v1", () => {
     (manifest.pixel_transform as Record<string, unknown>).matrix = [[8 / 9, 0, 0], [0, 2 / 3, 0], [0, 0, 1]];
 
     expect(parseVideoPreparationManifest(manifest).source_video.sample_aspect_ratio).toEqual({ numerator: 4, denominator: 3 });
+  });
+
+  it("allows standard SDR defaults when source colorimetry is absent and rejects HDR output", () => {
+    const bt709 = { primaries: "bt709", transfer: "bt709", matrix: "bt709", range: "limited" };
+    expect(preservesSdrColorMetadata(null, bt709)).toBe(true);
+    expect(preservesSdrColorMetadata(null, {
+      primaries: "bt2020", transfer: "bt709", matrix: "bt2020-ncl", range: "limited",
+    })).toBe(true);
+    expect(preservesSdrColorMetadata({ ...bt709, range: null }, bt709)).toBe(true);
+    expect(preservesSdrColorMetadata(bt709, { ...bt709, transfer: "pq" })).toBe(false);
+    expect(preservesSdrColorMetadata(null, { ...bt709, transfer: "hlg" })).toBe(false);
+    expect(preservesSdrColorMetadata(bt709, null)).toBe(false);
   });
 
   it("fits landscape, portrait, 4:3 and low-resolution media without upscaling", () => {

@@ -198,6 +198,28 @@ def test_preparation_manifest_rejects_unsafe_media_claims(
         ClientVideoPreparationManifest.model_validate(payload)
 
 
+def test_preparation_manifest_allows_sdr_defaults_for_unreported_source_color() -> None:
+    payload = copy.deepcopy(_fixtures()["preparation_manifest"])
+    payload["source_video"]["color"].update(primaries=None, transfer=None, matrix=None)
+    _resign_manifest(payload)
+
+    manifest = ClientVideoPreparationManifest.model_validate(payload)
+
+    assert manifest.prepared_video.color.primaries == "bt709"
+    assert manifest.prepared_video.color.transfer == "bt709"
+
+    sdr_bt2020 = copy.deepcopy(payload)
+    sdr_bt2020["prepared_video"]["color"].update(primaries="bt2020", transfer="bt709", matrix="bt2020-ncl")
+    _resign_manifest(sdr_bt2020)
+    assert ClientVideoPreparationManifest.model_validate(sdr_bt2020).prepared_video.color.primaries == "bt2020"
+
+    hdr_output = copy.deepcopy(payload)
+    hdr_output["prepared_video"]["color"].update(transfer="smpte2084")
+    _resign_manifest(hdr_output)
+    with pytest.raises(ValidationError, match="preserve the observed SDR color metadata"):
+        ClientVideoPreparationManifest.model_validate(hdr_output)
+
+
 def test_portrait_rotation_is_valid_when_geometry_is_explicit() -> None:
     payload = copy.deepcopy(_fixtures()["preparation_manifest"])
     payload["source_video"].update(display_width=1080, display_height=1920, rotation_degrees=90)
