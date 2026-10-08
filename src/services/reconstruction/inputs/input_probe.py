@@ -27,6 +27,11 @@ from src.models.contracts.input_assembly import (
 )
 from src.models.contracts.manifests import InputFile
 from src.services.reconstruction.inputs import detect
+from src.services.reconstruction.inputs.timestamps import (
+    TimestampRowFormatError,
+    TimestampRowValueError,
+    parse_timestamp_rows,
+)
 from src.services.reconstruction.lidar.cloud_header import read_header
 
 _MAX_ZIP_ENTRIES = 20_000
@@ -550,27 +555,12 @@ def _parse_tum_rows(
 
 
 def _parse_timestamp_rows(text: str) -> tuple[int, float | None, float | None, str | None] | None:
-    values: list[float] = []
-    previous = -math.inf
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = line.replace(",", " ").split()
-        if len(parts) != 1:
-            return None
-        try:
-            value = float(parts[0])
-        except ValueError:
-            return None
-        if not math.isfinite(value):
-            return 0, None, None, "Timestamp rows must contain finite values."
-        if value <= previous:
-            return 0, None, None, "Timestamp rows must be strictly increasing."
-        values.append(value)
-        previous = value
-    if not values:
+    try:
+        values = parse_timestamp_rows(text)
+    except TimestampRowFormatError:
         return None
+    except TimestampRowValueError as error:
+        return 0, None, None, str(error)
     return len(values), values[0], values[-1], None
 
 

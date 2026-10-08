@@ -33,6 +33,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     NVIDIA_DRIVER_CAPABILITIES=all \
     R2S_RUNTIME=/opt/real2sim/runtime \
     R2S_SCENE_RUNTIME=/opt/real2sim/scene_runtime \
+    R2S_LIDAR_RUNTIME=/opt/real2sim/lidar_runtime \
     R2S_STATE=/data \
     R2S_COLMAP_IMAGE=${COLMAP_IMAGE} \
     TORCH_EXTENSIONS_DIR=/opt/real2sim/torch_extensions \
@@ -72,8 +73,10 @@ RUN mkdir -p "$R2S_RUNTIME/brush" "$R2S_RUNTIME/node" \
 WORKDIR /opt/real2sim/app
 
 # Dependency của app theo lockfile (lớp cache riêng: đổi code không cài lại).
-COPY requirements.lock.txt ./
+COPY requirements.lock.txt requirements-lidar-odometry.lock.txt ./
 RUN uv venv --python 3.12 .venv && uv pip sync --python .venv/bin/python requirements.lock.txt
+RUN uv venv --python 3.12 "$R2S_LIDAR_RUNTIME" \
+    && uv pip sync --python "$R2S_LIDAR_RUNTIME/bin/python" requirements-lidar-odometry.lock.txt
 
 # Runtime tách theo vật; kernel CUDA của gsplat được biên dịch sẵn (không cần GPU lúc build).
 COPY scripts/gpu/setup_scene_runtime.sh scripts/gpu/setup_scene_runtime.sh

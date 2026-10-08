@@ -8,6 +8,8 @@ from typing import Literal, Self
 from pydantic import Field, FiniteFloat, model_validator
 
 from src.models.contracts.artifacts import (
+    ArtifactDataClass,
+    ArtifactRef,
     ArtifactUri,
     Checksum,
     ContractModel,
@@ -104,6 +106,22 @@ class EstimatedTrajectoryPose(ContractModel):
         return self
 
 
+class EstimatedTrajectoryExecutionMetrics(ContractModel):
+    """Measured per-attempt resource use; metrics describe only the provider child."""
+
+    process_elapsed_seconds: FiniteFloat = Field(ge=0)
+    provider_elapsed_seconds: FiniteFloat = Field(ge=0)
+    provider_cpu_seconds: FiniteFloat = Field(ge=0)
+    provider_peak_rss_bytes: int = Field(gt=0)
+    scan_point_counts: list[int] = Field(min_length=2)
+
+    @model_validator(mode="after")
+    def _validate_point_counts(self) -> Self:
+        if any(count < 1 for count in self.scan_point_counts):
+            raise ValueError("odometry point counts must be positive")
+        return self
+
+
 class EstimatedTrajectoryDiagnostics(ContractModel):
     """Observed odometry diagnostics; absolute drift remains unknown without a reference."""
 
@@ -117,6 +135,7 @@ class EstimatedTrajectoryDiagnostics(ContractModel):
     convergence_method: Identifier | None = None
     degenerate_scan_count: int | None = Field(default=None, ge=0)
     degeneracy_method: Identifier | None = None
+    execution_metrics: EstimatedTrajectoryExecutionMetrics | None = None
     absolute_drift_status: Literal["not_measured"] = "not_measured"
 
     @model_validator(mode="after")
@@ -140,6 +159,8 @@ class EstimatedTrajectoryDiagnostics(ContractModel):
             raise ValueError("degeneracy count and method must be reported together")
         if self.degenerate_scan_count is not None and self.degenerate_scan_count > self.scan_count:
             raise ValueError("degenerate scan count cannot exceed the scan count")
+        if self.execution_metrics is not None and len(self.execution_metrics.scan_point_counts) != self.scan_count:
+            raise ValueError("execution point counts must match the trajectory scan count")
         return self
 
 
@@ -166,6 +187,7 @@ class EstimatedTrajectoryArtifact(ContractModel):
     odometry_map_frame_id: Identifier
     world_from_map: Transform | None = None
     trajectory_origin: Literal["estimated"] = "estimated"
+    runtime_qualification_status: Literal["wired_unqualified"] = "wired_unqualified"
     poses: list[EstimatedTrajectoryPose] = Field(min_length=2)
     diagnostics: EstimatedTrajectoryDiagnostics
 
@@ -200,6 +222,44 @@ class EstimatedTrajectoryArtifact(ContractModel):
             math.isfinite(component) for component in self.world_from_map.translation_xyz
         ):
             raise ValueError("world_from_map translation must be finite")
+        return self
+
+
+class EstimatedTrajectoryIngestBinding(ContractModel):
+    """Verified scan-to-pose lineage awaiting an explicit world-frame bridge."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    trajectory_ref: ArtifactRef
+    timestamp_file_ref: ArtifactRef
+    assembly_checksum: Checksum
+    recipe_checksum: Checksum
+    source_scan_file_ids: list[Identifier] = Field(min_length=2)
+    source_scan_checksums: list[Checksum] = Field(min_length=2)
+    sensor_frame_id: Identifier
+    odometry_map_frame_id: Identifier
+    world_frame_status: Literal["pending_world_from_map_confirmation"] = "pending_world_from_map_confirmation"
+
+    @model_validator(mode="after")
+    def _validate_ingest_binding(self) -> Self:
+        if self.trajectory_ref.artifact_type != "EstimatedTrajectoryArtifact":
+            raise ValueError("ingest binding must reference an estimated trajectory artifact")
+        if self.trajectory_ref.data_class != ArtifactDataClass.DERIVED:
+            raise ValueError("estimated trajectory reference must be derived data")
+        if self.timestamp_file_ref.data_class != ArtifactDataClass.PRODUCT_INPUT:
+            raise ValueError("ingest binding timestamp reference must be a product input")
+        provenance = self.trajectory_ref.source_provenance or {}
+        if (
+            provenance.get("assembly_checksum") != self.assembly_checksum
+            or provenance.get("recipe_checksum") != self.recipe_checksum
+            or provenance.get("timestamp_file_checksum") != self.timestamp_file_ref.artifact_checksum
+        ):
+            raise ValueError("ingest binding checksums must match the trajectory reference")
+        if len(self.source_scan_file_ids) != len(self.source_scan_checksums):
+            raise ValueError("scan file IDs and checksums must have equal lengths")
+        if len(self.source_scan_file_ids) != len(set(self.source_scan_file_ids)):
+            raise ValueError("ingest binding scan file IDs must be unique")
+        if self.sensor_frame_id == self.odometry_map_frame_id:
+            raise ValueError("sensor and odometry map frame IDs must differ")
         return self
 
 

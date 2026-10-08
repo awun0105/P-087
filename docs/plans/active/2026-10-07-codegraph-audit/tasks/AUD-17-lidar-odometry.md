@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- IN PROGRESS — S1 typed contract/resolver/UI implemented; provider qualification and S2 worker remain open. P2 extension theo yêu cầu owner; EX-REC + EX-PRODUCT.
+- IN PROGRESS — S1 input contract/resolver và S2 isolated producer đã triển khai; R5 integration, runtime qualification và quality evidence còn mở. P2 extension theo yêu cầu owner; EX-REC + EX-PRODUCT.
 - Canonical REC-08/06, PRODUCT-02/08/09; bổ sung task-local scope, không đổi crosswalk.
 - ADAPT qualified process-isolated KISS-ICP adapter; REUSE LiDAR ingest/metric/
   alignment contracts và durable admission. Technically feasible, không loại trừ
@@ -123,14 +123,16 @@ memory/performance and per-point timing behavior qualified.
 **Contract:** subprocess isolated/cancellable; lease fences publication; finite
 SE(3)/monotonic time/coverage checked; degeneracy not fabricated success.
 
-Implement: decode supported scans, run pinned adapter, classify convergence/input/
-runtime failures, validate output and publish through resolver. Build explicit
-scan-native mapping, bounded RGB interpolation only when timing contract supports
-it; preserve scan and frame identities. Use actual resource measurement and retry
-policy; partial artifacts retained for diagnosis, not consumed as complete trajectory.
-Tests: known-motion fixture, static/low-overlap/sparse/degenerate sequence, timestamp
-gap/boundary/rotation interpolation, restart/cancel/timeout, stale lease, corrupt output.
-**Exit:** [ ] valid estimated producer path; [ ] failed/cancelled results remain truthful.
+Implement: decode supported scans, run pinned adapter, classify input/runtime failures,
+validate output and publish through resolver. Build scan-native mapping only; preserve
+scan identities and timestamp rows without RGB interpolation. Use bounded point counts,
+actual resource measurement and retry policy; failed attempt files/logs remain available
+for diagnosis and are never consumed as complete trajectories. S3 owns RGB-time mapping.
+Tests: known-motion and static sequences, sparse/over-budget scans, invalid SE(3),
+timestamp unit/count/gap handling, same-attempt immutability, cancel/timeout, stale
+lease and corrupt output. KISS-ICP exposes no qualified convergence/degeneracy signal;
+low-overlap quality classification stays in S3, and S2 must not invent confidence.
+**Exit:** [x] valid estimated producer path for the pinned synthetic fixture; [x] failed/cancelled results remain truthful. This is not R5 product acceptance or real-sensor qualification.
 
 ## Sprint AUD-17.S3 — Integration, drift QA và product diagnostics
 
@@ -139,8 +141,9 @@ gap/boundary/rotation interpolation, restart/cancel/timeout, stale lease, corrup
 **Contract:** user sees estimated provenance/uncertainty; no automatic GT status;
 supplied replacement or timing/calib change invalidates dependent evidence.
 
-Implement: connect existing ingest/fusion/metric ports; display actionable quality
-diagnostics and allow explicit supplied trajectory fallback with new identity.
+Implement: connect existing ingest/fusion/metric ports; add bounded RGB pose mapping
+only when timestamp/clock evidence supports it; display actionable quality diagnostics
+and allow explicit supplied trajectory fallback with new identity.
 Evaluate supported sensor conditions over separate traversals; independent reference
 trajectory chỉ dùng evaluator, không leak vào product solver. Record relative/absolute
 pose error where reference exists, degeneracy/coverage and downstream obstacle retention.
@@ -152,11 +155,8 @@ UI mode/failure/fallback, real odometry benchmark và held-out quality.
 
 ## Verification và DoD
 
-```bash
-.venv/bin/pytest tests/test_reconstruction/test_input_detection.py tests/test_reconstruction/test_lidar_package.py tests/test_reconstruction/test_lidar_fusion.py tests/test_reconstruction/test_rec08_lidar_ingest.py tests/test_reconstruction/test_rec06_lidar_metric.py tests/test_reconstruction/test_lidar_world_alignment.py tests/test_orchestration/test_upload_input_kinds.py -q
-```
-
-Planned tests/test_reconstruction/test_lidar_odometry.py và opt-in API/UI tests.
+Focused verification command is recorded below with the sprint result. S2 adds the
+odometry producer tests; opt-in API/UI tests remain for S3 integration.
 DONE cần actual adapter runs/quality envelope/integration, không chỉ mocked poses;
 không claim drift-free SLAM. Primary: [KISS-ICP](https://github.com/PRBonn/kiss-icp),
 [FAST-LIO](https://github.com/hku-mars/FAST_LIO).
@@ -185,5 +185,69 @@ Verification before commit:
   page correctly shows the incomplete-stage state. This does not verify rendering a
   completed QA report.
 
-Runtime execution, transitive license inventory, real-sensor timing/memory/performance,
-S2 worker publication and S3 drift/consumer QA remain pending.
+At S1 close, runtime execution, dependency inventory, real-sensor resource/quality
+evidence, worker publication and S3 consumer QA were still pending. S2 updates that
+state below; real-sensor qualification and S3 integration remain open.
+
+S2 implementation:
+- Added the isolated `kiss-icp==1.3.0` CPU runtime lock and GPU-worker interpreter path;
+  the API and scene runtimes do not acquire the provider dependency. PCD input is
+  limited to bounded ASCII/uncompressed-binary scans with finite XYZ coordinates;
+  default point budgets are 5M per scan and 25M across the sequence.
+- The worker binds each scan ID/checksum to exactly one timestamp row, converts the
+  declared unit to seconds, preserves scan-native poses, measures adapter-process/provider
+  elapsed time, provider CPU time and peak RSS, and publishes a separate byte-checksummed
+  artifact plus logical trajectory checksum. Read-back verification creates a typed
+  ingest binding that remains pending world-frame confirmation.
+- KISS-ICP's per-point deskew is explicitly disabled and an empty relative-point-time
+  array is passed; the per-scan clock sidecar is never used as fabricated point timing.
+  The worker checks cancellation and lease currency while the subprocess runs and before
+  and after immutable publication. A lease loss in the narrow publication race may
+  leave an attempt-scoped orphan artifact, but no ingest binding is returned and no
+  JobManifest pointer is committed. S3 must perform the durable lease-guarded commit.
+- The provider API does not expose a qualified per-scan convergence/degeneracy or drift
+  estimate. Those fields remain absent, absolute drift remains `not_measured`, and every
+  result stays `wired_unqualified`; no output from this sprint is dispatchable through
+  R5. Synthetic known-motion and static runs validate adapter direction and truthful
+  uncertainty reporting, not warehouse sensor accuracy. A world-frame bridge and
+  real-sensor envelope remain pending. The isolated lock was installed from the exact
+  generated lockfile and exercised successfully; the full GPU image was not built.
+- A metadata scan covered all 19 pinned distributions. KISS-ICP declares the MIT
+  license; `tqdm` and `python-dotenv` provide no license expression/classifier in their
+  installed metadata. Complete transitive license review remains open before image
+  release.
+
+S2 verification:
+- Focused regression command:
+
+  ```bash
+  REC17_LIDAR_ODOMETRY_PYTHON=/tmp/r2s-lidar-locked-runtime/bin/python .venv/bin/pytest \
+    tests/test_reconstruction/test_lidar_odometry.py \
+    tests/test_contracts/test_reconstruction.py \
+    tests/test_contracts/test_input_assembly.py \
+    tests/test_reconstruction/test_input_detection.py \
+    tests/test_reconstruction/test_lidar_package.py \
+    tests/test_reconstruction/test_lidar_fusion.py \
+    tests/test_reconstruction/test_rec08_lidar_ingest.py \
+    tests/test_reconstruction/test_rec06_lidar_metric.py \
+    tests/test_reconstruction/test_lidar_world_alignment.py \
+    tests/test_orchestration/test_upload_input_kinds.py -q
+  ```
+
+  Result: 121 passed. The opt-in case exercises known-motion and static scans through
+  the complete worker with the exact lock-installed KISS-ICP 1.3.0 runtime.
+- `.venv/bin/ruff check src/ tests/ scripts/gpu/lidar_odometry_runner.py` and
+  `.venv/bin/ruff format --check src/ tests/ scripts/gpu/lidar_odometry_runner.py`:
+  passed; 541 files formatted.
+- The expected +0.10 m sensor displacement is recovered within 0.04 m tolerance; the
+  static sequence remains explicitly unqualified with convergence and degeneracy absent.
+- Cancellation, timeout and stale-lease tests verify the process group is killed and
+  reaped. Invalid SE(3), sparse scans, timestamp row-count mismatch and corrupted output
+  are rejected before publishing a consumable trajectory. Retry policy is limited to
+  runtime-unavailable, timeout and OS out-of-memory errors; deterministic,
+  incompatible-runtime, cancelled and stale-lease failures remain non-retryable.
+- Chrome DevTools was not a mandatory S2 gate because no UI code changed. An optional
+  check with the existing Reviewer session confirmed that the QA route renders its
+  incomplete-stage state for the current job. No completed calibration artifact/report
+  was available; the browser console had no runtime errors. This does not verify a
+  completed QA report.

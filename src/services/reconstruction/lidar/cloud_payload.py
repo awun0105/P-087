@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import BinaryIO, Literal
 
+import numpy as np
 from pydantic import Field, FiniteFloat
 
 from src.models.contracts.artifacts import ContractModel
@@ -49,6 +50,25 @@ def inspect_point_cloud_header(path: Path) -> int:
     """Header-only count; không phải bằng chứng payload đã hợp lệ."""
     with path.open("rb") as stream:
         return read_header(stream).point_count
+
+
+def load_xyz_points(path: Path, max_points: int = 5_000_000) -> np.ndarray:
+    """Decode a bounded ASCII/binary PCD into finite XYZ metres for odometry."""
+    if not path.is_file():
+        raise ValueError("point cloud file does not exist")
+    with path.open("rb") as stream:
+        header = read_header(stream)
+        if header.geometry_format != "pcd" or header.encoding not in {"ascii", "binary"}:
+            raise ValueError("odometry supports PCD ascii and uncompressed binary scans only")
+        if header.point_count > max_points:
+            raise ValueError("point cloud exceeds per-scan point budget")
+        points = np.empty((header.point_count, 3), dtype=np.float64)
+        records = _ascii_records(stream, header) if header.encoding == "ascii" else _binary_records(stream, header)
+        for row, record in enumerate(records):
+            points[row] = [record[index] for index in header.xyz]
+    if not np.isfinite(points).all():
+        raise ValueError("point cloud contains non-finite points (NaN or Inf)")
+    return points
 
 
 def _ascii_records(stream: BinaryIO, header: CloudHeader) -> Iterator[tuple[float, ...]]:

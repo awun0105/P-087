@@ -87,6 +87,7 @@ services:
       - ${STUDIO_ENV_FILE:-.env.studio}
     environment:
       APP_ENV: development
+      REC17_LIDAR_ODOMETRY_PYTHON: /opt/real2sim/lidar_runtime/bin/python
       AUTH_REQUIRED: "true"
       AUTH_GUEST_SIGNUP_ENABLED: "${AUTH_GUEST_SIGNUP_ENABLED:-false}"
       AUTH_COOKIE_SECURE: "false"
