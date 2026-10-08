@@ -94,6 +94,31 @@ async def test_upload_streams_video_and_lists_it(client: AsyncClient, studio: Si
 
 
 @pytest.mark.asyncio
+async def test_existing_verified_upload_can_be_staged_for_unified_input_without_copying_bytes(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    from src.services.orchestration.uploads import VideoUploadService
+
+    uploads = VideoUploadService(
+        studio.registry.persistence.database, studio.registry.runtime_resolver, studio.settings.product_upload_max_bytes
+    )
+    pending = uploads.begin("prepared.mp4")
+    original_bytes = b"\x00\x00\x00\x14ftypqt  fake-mp4"
+    pending.publication.write(original_bytes)
+    uploaded = uploads.finish(pending)
+
+    staged = await client.post(f"/api/v1/input-assemblies/uploads/{uploaded.upload_id}/stage")
+    repeated = await client.post(f"/api/v1/input-assemblies/uploads/{uploaded.upload_id}/stage")
+    fetched = await client.get(f"/api/v1/input-assemblies/uploads/{uploaded.upload_id}")
+
+    assert staged.status_code == repeated.status_code == fetched.status_code == 200
+    assert staged.json() == repeated.json() == fetched.json()
+    assert staged.json()["source_file"]["checksum"] == uploaded.checksum
+    assert staged.json()["staged_files"][0]["observed_format"] == "video_mov"
+    assert studio.registry.runtime_resolver.resolve(uploaded.artifact_uri).read_bytes() == original_bytes
+
+
+@pytest.mark.asyncio
 async def test_sog_import_is_durably_queued_and_idempotent(client: AsyncClient, studio: SimpleNamespace) -> None:
     from src.services.orchestration.uploads import VideoUploadService
 

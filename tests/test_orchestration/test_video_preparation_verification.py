@@ -28,7 +28,7 @@ def _sha(payload: bytes) -> str:
 
 def _prepared_input(tmp_path: Path, *, pts: tuple[int, ...] = (0, 200, 400)):
     fixture = json.loads((ROOT / "fixtures/contracts/video_preparation_v1.json").read_text())
-    prepared_bytes = b"server-observed prepared mp4 fixture"
+    prepared_bytes = b"\x00\x00\x00\x14ftypmp42" + b"prepared-video-fixture"
     rows = fixture["frame_map_rows"]
     for row, output_pts in zip(rows, pts, strict=True):
         row["output_pts"] = output_pts
@@ -95,6 +95,33 @@ def test_server_verifies_actual_video_and_output_pts_then_publishes_map(tmp_path
     assert verification.original_source_status == "client_declared_unverified"
     assert resolver.require(verification.frame_map_ref).read_bytes() == sidecar.read_bytes()
     assert ServerVideoPreparationVerification.model_validate(verification.model_dump()) == verification
+
+
+def test_staging_existing_prepared_upload_carries_the_verified_frame_map(tmp_path: Path) -> None:
+    from src.models.contracts.input_assembly import InputAssemblyDeclarations
+    from src.services.orchestration.inputs import InputAssemblyService
+    from src.services.orchestration.jobs.database import RuntimeDatabase
+    from src.services.orchestration.uploads import VideoUploadService
+
+    resolver, upload, manifest, sidecar, observed, pts = _prepared_input(tmp_path)
+    verification = FixtureVideoVerifier(resolver, observed, pts).verify_and_publish(upload, manifest, sidecar)
+    database = RuntimeDatabase(f"sqlite:///{tmp_path / 'runtime.db'}")
+    with database.transaction(write=True) as tx:
+        tx.execute(
+            "INSERT INTO r2s_uploads(upload_id,payload) VALUES (?,?)", (upload.upload_id, upload.model_dump_json())
+        )
+    uploads = VideoUploadService(database, resolver, 10_000_000)
+    uploads.save_video_preparation_manifest(upload.upload_id, manifest)
+    uploads.save_video_preparation_verification(upload.upload_id, verification)
+
+    staged = uploads.stage_for_assembly(upload.upload_id)
+    assembly = InputAssemblyService(database, resolver=resolver).create(
+        "user-1", [upload.upload_id], InputAssemblyDeclarations(), [], None
+    )
+
+    assert staged.source_file.checksum == upload.checksum
+    assert assembly.snapshot.video_preparation_verification == verification
+    assert assembly.probes[0].observed_format.value == "video_mp4"
 
 
 def test_server_rejects_forged_output_pts_even_when_sidecar_digest_is_updated(tmp_path: Path) -> None:

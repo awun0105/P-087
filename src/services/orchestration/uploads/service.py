@@ -195,6 +195,54 @@ class VideoUploadService:
             )
         return staged
 
+    def stage_for_assembly(self, upload_id: str) -> StagedInputUploadRecord:
+        """Adopt an existing verified upload without copying its bytes into a second artifact."""
+        upload = self.get(upload_id)
+        source_file = InputFile(
+            original_name=upload.original_name,
+            media_type=upload.media_type,
+            size_bytes=upload.size_bytes,
+            checksum=upload.checksum,
+            artifact_uri=upload.artifact_uri,
+            data_class=ArtifactDataClass.PRODUCT_INPUT,
+        )
+        path = self.resolver.require_uri(source_file.artifact_uri, source_file.checksum)
+        classified = probe_input_upload(
+            source_file,
+            upload.upload_id,
+            upload.upload_id,
+            path,
+            max_uncompressed_bytes=self.max_bytes * ZIP_EXPANSION_LIMIT,
+        )
+        candidate = StagedInputUploadRecord(
+            upload_id=upload.upload_id,
+            source_file=source_file,
+            staged_files=list(classified.files),
+            probes=list(classified.probes),
+            uploaded_by=upload.uploaded_by,
+            received_at=upload.received_at,
+            project_ids=upload.project_ids,
+        )
+        with self.database.transaction(write=True) as tx:
+            row = tx.execute(
+                "SELECT payload FROM r2s_input_uploads WHERE upload_id=?" + tx.lock_suffix(), (upload_id,)
+            ).fetchone()
+            if row is not None:
+                existing = StagedInputUploadRecord.model_validate_json(row[0])
+                if (
+                    existing.source_file != candidate.source_file
+                    or existing.staged_files != candidate.staged_files
+                    or existing.probes != candidate.probes
+                    or existing.uploaded_by != candidate.uploaded_by
+                ):
+                    raise RuntimeStateConflictError("Staged input upload differs from its verified source upload")
+                return existing
+            tx.execute(
+                "INSERT INTO r2s_input_uploads(upload_id,payload) VALUES (?,?)",
+                (candidate.upload_id, candidate.model_dump_json()),
+            )
+        return candidate
+
     def list(self) -> list[UploadRecord]:
         """Mới nhất trước để màn hình chọn video hiện upload vừa xong ở đầu."""
         with self.database.transaction() as tx:

@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- IN PROGRESS; P1; S1–S3 complete, S4–S5 outstanding; EX-PRODUCT upload/Studio/dispatch; EX-REC input adapters.
+- IN PROGRESS; P1; S1–S4 complete, S5 outstanding; EX-PRODUCT upload/Studio/dispatch; EX-REC input adapters.
 - Canonical REC-02/03/06/08/09, PRODUCT-02/04/08/09; task-local extension.
 - Owner yêu cầu: thả tất cả file vào một khung; hệ thống xác định các file dùng
   được cho luồng nào. Không bắt chọn RGB-only/sensor/map/odometry trước upload.
@@ -305,7 +305,7 @@ PLY/SOG selection routes to import, giữ staged refs không yêu cầu upload l
 Sau READY hiện Xem scene; không có processing CTA hoặc auto-spend processing quota.
 Tests: multi-file drag/drop/keyboard, video+loose sidecars/ZIP, ambiguous picks,
 account switch, cancel/resume, stale polling, guest limits, existing import flow.
-**Exit:** [ ] one dropzone covers current qualified modes; [ ] browser decisions/actions match server.
+**Exit:** [x] one dropzone covers the current qualified upload/import modes; [x] browser decisions/actions match the server for verified combinations.
 
 ## Sprint AUD-24.S5 — R1–R6 qualification và integration acceptance
 
@@ -469,3 +469,82 @@ or browser workflow. Enabled worker capability is limited to R1/R4; SOG/PLY
 worker packaging still depends on the AUD-06 runtime and its own acceptance. The
 one-dropzone frontend and browser behavior remain in S4, and real R1–R6 recipe
 qualification remains in S5.
+
+### AUD-24.S4 — one upload UI and input remediation
+
+Implemented the shared multi-file flow in `/new` and `/new/import-video`. Both
+routes now use the same inventory/resolver; `/new/import-scene` and the sample
+replay route remain separate and unchanged. The UI keeps each source filename,
+shows server-observed formats, permits explicit include/exclude and scan ordering,
+and displays the source files attached to each candidate. A newly selected or
+removed file invalidates the prior report. Uploads run sequentially with per-file
+progress, cancel, retry, and the existing direct-upload resume mechanism. Video
+is normalized before upload with a 720p maximum default, selectable 1080p/720p/
+480p presets, preserved orientation/aspect ratio, and a 30 FPS cap. A verified
+prepared video is attached to the assembly through the existing upload ID; its
+bytes are not copied into a second upload.
+
+The session draft is keyed by authenticated account ID. It stores server upload
+IDs, source names, inclusion choices, scan order, intent, declarations, and
+scene metadata; on reload each upload ID is fetched again under server ownership
+checks before it re-enters the inventory. Accepted job/import clears the draft.
+Privacy/rights checkboxes are deliberately not persisted and must be affirmed at
+the moment of submission. Resolver reports/candidate readiness are not persisted,
+so a reload requires a fresh analysis against the current server inventory.
+If a raw file is still uploading at reload, the browser cannot restore its
+selected `File` handle: the user must select the same source again. A direct
+multipart upload can then resume from its saved server session when the file
+identity matches; the API-proxy fallback starts over. Fully uploaded/staged
+refs restore without reselecting the source.
+
+PLY/SOG view import uses the same staged refs and AUD-06 durable import endpoint.
+The UI does not offer a continuation action after import. Candidate cards show
+the file names actually bound to the recipe and the names explicitly excluded.
+The frontend direct-upload request distinguishes `input_assembly` purpose and
+uses a separate resume namespace from legacy product video uploads. The proxy
+fallback and existing verified-video staging bridge are both retained.
+
+Verification:
+
+- `.venv/bin/pytest tests/test_reconstruction/test_input_detection.py
+  tests/test_reconstruction/test_input_assembly_resolution.py
+  tests/test_contracts/test_input_assembly.py tests/test_api/test_studio_routes.py
+  tests/test_orchestration/test_video_preparation_verification.py
+  tests/test_orchestration/test_direct_upload.py -q` — 89 passed.
+- `.venv/bin/ruff check src/ tests/` — pass; `.venv/bin/ruff format --check
+  src/ tests/` — 499 files already formatted.
+- In `frontend/`, `npm run lint` and `npm run typecheck` — pass;
+  focused Vitest set covering the unified flow, direct upload, existing input
+  flows, prepared-video upload, and upload proxy — 31 tests passed;
+  `REAL2SIM_API_URL=http://127.0.0.1:8011 npm run build -- --webpack` — pass,
+  16 static pages generated.
+- Chrome DevTools MCP against a temporary local API/SQLite/artifact root:
+  `/new` and `/new/import-video` both rendered the shared flow. Multi-file PCD
+  and TUM uploads were classified and staged (201); reload restored the same
+  account's upload refs and declarations through two server GETs (200). A 320×240
+  H.264 sample was normalized using the selected 720p maximum preset, uploaded,
+  and passed server manifest/frame-map verification (201/200/200) before staging
+  (200). The server resolver accepted the assembly (201), then reported the R3
+  candidate, its exact RGB/cloud bindings, the explicitly excluded TUM file, and
+  `runtime_not_registered` (resolve 200). No job was submitted. Browser console
+  had no warnings/errors.
+
+Changed in S4: `frontend/src/app/(studio)/new/page.tsx`,
+`frontend/src/app/(studio)/new/import-video/page.tsx`,
+`frontend/src/features/studio/UnifiedInputFlow.tsx`,
+`frontend/src/lib/api/directUpload.ts`, `frontend/src/lib/api/inputAssemblies.ts`,
+`frontend/src/lib/contracts/inputAssembly.ts`,
+`frontend/tests/direct-upload.test.ts`,
+`frontend/tests/unified-input-flow.test.tsx`, `src/api/studio/assemblies.py`,
+`src/services/orchestration/uploads/service.py`,
+`tests/test_api/test_studio_routes.py`,
+`tests/test_orchestration/test_video_preparation_verification.py`, and this task.
+The backend bridge adds no new manifest schema: it validates and stages the
+existing owner-authorized, checksum-verified upload record without copying bytes.
+
+S4 proves the product upload/resolver interaction for these local browser inputs;
+it does not qualify geometry, registration, collision safety, GPU execution, or
+production object-store direct upload. R3 remained unavailable in the temporary
+runtime registry and correctly did not dispatch. PLY/SOG import routing is
+covered by a focused mocked UI test and existing durable-import backend tests;
+S5 still owns real capture qualification and complete R1–R6 consumer receipts.

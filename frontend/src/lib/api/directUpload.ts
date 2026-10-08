@@ -40,6 +40,8 @@ export interface DirectUploadOptions {
   resumeIdentity?: string;
   /** Keep a READY session until the caller completes a later verification stage. */
   keepResumeKey?: boolean;
+  /** Store a verified file in the grouped-input inventory rather than the legacy product path. */
+  purpose?: "product" | "input_assembly";
   concurrency?: number;
   maxAttempts?: number;
   pollMs?: number;
@@ -48,8 +50,10 @@ export interface DirectUploadOptions {
 const API = "/api/v1/uploads/direct";
 const URL_BATCH = 20;
 
-function resumeKey(file: File, identity?: string): string {
-  if (identity) return `r2s-upload:v2:${encodeURIComponent(identity)}`;
+function resumeKey(file: File, identity?: string, purpose: DirectUploadOptions["purpose"] = "product"): string {
+  const purposeKey = purpose === "input_assembly" ? ":input-assembly" : "";
+  if (identity) return `r2s-upload:v2${purposeKey}:${encodeURIComponent(identity)}`;
+  if (purpose === "input_assembly") return `r2s-upload:input-assembly:${file.name}:${file.size}:${file.lastModified}`;
   return `r2s-upload:${file.name}:${file.size}:${file.lastModified}`;
 }
 
@@ -76,7 +80,7 @@ function aborted(signal: AbortSignal): void {
 
 /** Phiên đang UPLOADING của đúng file này (nếu còn), không thì mở phiên mới. */
 async function openSession(file: File, options: DirectUploadOptions, deps: DirectUploadDeps): Promise<DirectUploadState> {
-  const key = resumeKey(file, options.resumeIdentity);
+  const key = resumeKey(file, options.resumeIdentity, options.purpose);
   const saved = readSaved(deps.storage, key);
   if (saved) {
     try {
@@ -91,7 +95,11 @@ async function openSession(file: File, options: DirectUploadOptions, deps: Direc
   }
   const state = await deps.api<DirectUploadState>(API, {
     method: "POST",
-    body: JSON.stringify({ filename: file.name, size_bytes: file.size }),
+    body: JSON.stringify({
+      filename: file.name,
+      size_bytes: file.size,
+      ...(options.purpose === "input_assembly" ? { purpose: options.purpose } : {}),
+    }),
   });
   writeSaved(deps.storage, key, state.upload_id);
   return state;
@@ -102,7 +110,7 @@ export async function directUpload(file: File, options: DirectUploadOptions, dep
   const concurrency = options.concurrency ?? 4;
   const maxAttempts = options.maxAttempts ?? 4;
   const session = await openSession(file, options, deps);
-  const key = resumeKey(file, options.resumeIdentity);
+  const key = resumeKey(file, options.resumeIdentity, options.purpose);
   if (session.status === "READY") {
     options.onProgress(1);
     if (!options.keepResumeKey) writeSaved(deps.storage, key, null);
@@ -194,8 +202,9 @@ export function clearDirectUploadResume(
   file: File,
   resumeIdentity: string | undefined,
   storage: DirectUploadDeps["storage"],
+  purpose: DirectUploadOptions["purpose"] = "product",
 ): void {
-  writeSaved(storage, resumeKey(file, resumeIdentity), null);
+  writeSaved(storage, resumeKey(file, resumeIdentity, purpose), null);
 }
 
 /** PUT bằng XHR để có tiến độ upload (fetch chưa báo tiến độ gửi). */

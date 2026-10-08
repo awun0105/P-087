@@ -241,6 +241,37 @@ async def upload_assembly_input(
             pending.publication.abort()
 
 
+@router.get("/input-assemblies/uploads/{upload_id}", response_model=AssemblyUploadResponse)
+def get_input_assembly_upload(
+    upload_id: str,
+    user: UserRecord | None = Depends(require_contributor),
+) -> AssemblyUploadResponse:
+    service = _service()
+    try:
+        record = service.get_upload(upload_id)
+        authorize_staged_input_upload_mutation(user, record, operation="đọc staged input upload")
+        return _response(record)
+    except InputAssemblyNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+
+
+@router.post("/input-assemblies/uploads/{upload_id}/stage", response_model=AssemblyUploadResponse)
+def stage_existing_input_upload(
+    upload_id: str,
+    user: UserRecord | None = Depends(require_contributor),
+) -> AssemblyUploadResponse:
+    """Attach a verified legacy upload to assembly inventory without copying its source bytes."""
+    try:
+        uploads = deps.uploads()
+        legacy = uploads.get(upload_id)
+        authorize_upload_mutation(user, legacy, operation="thêm upload hiện có vào assembly")
+        return _response(uploads.stage_for_assembly(upload_id))
+    except UploadNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except (UploadError, RuntimeStateConflictError, ValueError) as error:
+        raise _handle_assembly_error(error) from error
+
+
 @router.post("/input-assemblies", response_model=InputAssemblySnapshot, status_code=status.HTTP_201_CREATED)
 def create_input_assembly(
     request: AssemblyWriteRequest,

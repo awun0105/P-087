@@ -75,6 +75,27 @@ export interface StagedInputFile {
   role_evidence: InputRoleEvidence[];
 }
 
+export interface InputProbe {
+  file_id: string;
+  source_checksum: string;
+  member_checksum: string | null;
+  observed_format: InputAssetFormat;
+  candidate_roles: InputRole[];
+  observed_roles: [InputRole, string][];
+  record_count: number | null;
+  first_timestamp: number | null;
+  last_timestamp: number | null;
+  diagnostics: [string, string, string][];
+}
+
+export interface AssemblyUploadResponse {
+  upload_id: string;
+  source_file: InputSourceFile;
+  staged_files: StagedInputFile[];
+  probes: InputProbe[];
+  received_at: string;
+}
+
 export interface EvidenceValue<T> {
   value: T;
   provenance: EvidenceProvenance;
@@ -124,6 +145,13 @@ export interface InputAssemblySnapshot {
   declarations: InputAssemblyDeclarations;
   video_preparation_verification: ServerVideoPreparationVerification | null;
   assembly_checksum: string;
+}
+
+export interface InputAssemblyWriteRequest {
+  upload_ids: string[];
+  declarations: InputAssemblyDeclarations;
+  bindings: InputBinding[];
+  requested_intent: InputWorkflowIntent | null;
 }
 
 export interface RuntimeCapabilityRecord {
