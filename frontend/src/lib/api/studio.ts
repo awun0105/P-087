@@ -477,6 +477,14 @@ export function getImport(importId: string, signal?: AbortSignal): Promise<ApiRe
   return fetchApi<ImportedScene>(`${API}/imports/${encodeURIComponent(importId)}`, { signal });
 }
 
+export function retryImport(importId: string): Promise<ImportedScene> {
+  return apiFetch<ImportedScene>(`${API}/imports/${encodeURIComponent(importId)}/retry`, { method: "POST" });
+}
+
+export function cancelImport(importId: string): Promise<ImportedScene> {
+  return apiFetch<ImportedScene>(`${API}/imports/${encodeURIComponent(importId)}/cancel`, { method: "POST" });
+}
+
 export function listImports(): Promise<ApiResult<{ imports: ImportedScene[] }>> {
   return fetchApi<{ imports: ImportedScene[] }>(`${API}/imports`);
 }

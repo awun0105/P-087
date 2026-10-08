@@ -9,11 +9,23 @@ import json
 import stat
 import zipfile
 from pathlib import Path, PurePosixPath
+from threading import Event
 
-from src.services.reconstruction.adapters.voxel_runtime import VoxelProcess, VoxelRuntimeSettings
+from src.services.reconstruction.adapters.voxel_runtime import (
+    GeometryCancelledError,
+    VoxelProcess,
+    VoxelRuntimeSettings,
+)
 
 
-def extract_member(archive: Path, member: str, destination: Path, *, max_uncompressed_bytes: int = 4 * 1024**3) -> Path:
+def extract_member(
+    archive: Path,
+    member: str,
+    destination: Path,
+    *,
+    max_uncompressed_bytes: int = 4 * 1024**3,
+    cancel_event: Event | None = None,
+) -> Path:
     """Chép đúng một PLY đã nhận diện trong ZIP ra workspace (không giải nén cả file)."""
     name = PurePosixPath(member)
     if max_uncompressed_bytes < 1:
@@ -34,6 +46,8 @@ def extract_member(archive: Path, member: str, destination: Path, *, max_uncompr
         written = 0
         with bundle.open(info) as source, destination.open("xb") as target:
             while chunk := source.read(1 << 20):
+                if cancel_event is not None and cancel_event.is_set():
+                    raise GeometryCancelledError("Geometry operation was cancelled during ZIP extraction")
                 written += len(chunk)
                 if written > info.file_size or written > max_uncompressed_bytes:
                     raise ValueError("thành viên PLY vượt kích thước đã khai báo")
@@ -43,37 +57,62 @@ def extract_member(archive: Path, member: str, destination: Path, *, max_uncompr
     return destination
 
 
-def package_splat(source_ply: Path, workspace: Path, gpu_index: int | None = None) -> Path:
+def package_splat(
+    source_ply: Path,
+    workspace: Path,
+    gpu_index: int | None = None,
+    *,
+    cancel_event: Event | None = None,
+) -> Path:
     """PLY 3DGS → `scene.sog` trong workspace; kiểm runtime đúng bản đã qualify trước khi chạy."""
+    if cancel_event is not None and cancel_event.is_set():
+        raise GeometryCancelledError("Geometry operation was cancelled before PLY packaging")
     process = VoxelProcess(VoxelRuntimeSettings())
     workspace.mkdir(parents=True, exist_ok=True)
-    process.qualify(workspace)
+    if cancel_event is None:
+        process.qualify(workspace)
+    else:
+        process.qualify(workspace, cancel_event=cancel_event)
     output = workspace / "scene.sog"
     gpu = ("-g", str(gpu_index)) if gpu_index is not None else ()
-    process.cli(("-w", *gpu, str(source_ply.resolve()), str(output)), (workspace, "import-sog"))
+    arguments = ("-w", *gpu, str(source_ply.resolve()), str(output))
+    if cancel_event is None:
+        process.cli(arguments, (workspace, "import-sog"))
+    else:
+        process.cli(arguments, (workspace, "import-sog"), cancel_event=cancel_event)
     if not output.is_file() or output.stat().st_size == 0:
         raise ValueError("splat-transform không tạo được scene.sog")
     return output
 
 
-def validate_sog_runtime(source_sog: Path, workspace: Path, *, expected_count: int, expected_sh_bands: int) -> None:
+def validate_sog_runtime(
+    source_sog: Path,
+    workspace: Path,
+    *,
+    expected_count: int,
+    expected_sh_bands: int,
+    cancel_event: Event | None = None,
+) -> None:
     """Decode a SOG through the pinned splat-transform reader before publication."""
     if expected_count < 1 or expected_sh_bands not in {0, 1, 2, 3}:
         raise ValueError("SOG expected Gaussian inventory is invalid")
+    if cancel_event is not None and cancel_event.is_set():
+        raise GeometryCancelledError("Geometry operation was cancelled before SOG validation")
     workspace.mkdir(parents=True, exist_ok=True)
     process = VoxelProcess(VoxelRuntimeSettings())
     script = Path(__file__).with_name("adapters") / "voxel_inspect.mjs"
     inspection = workspace / "sog-inspection.json"
-    process.run(
-        (
-            str(script.resolve()),
-            str(process.settings.module_path.resolve()),
-            str(source_sog.resolve()),
-            str(inspection),
-            "sog",
-        ),
-        (workspace, "validate-sog"),
+    arguments = (
+        str(script.resolve()),
+        str(process.settings.module_path.resolve()),
+        str(source_sog.resolve()),
+        str(inspection),
+        "sog",
     )
+    if cancel_event is None:
+        process.run(arguments, (workspace, "validate-sog"))
+    else:
+        process.run(arguments, (workspace, "validate-sog"), cancel_event=cancel_event)
     report = json.loads(inspection.read_text(encoding="utf-8"))
     if not isinstance(report, dict):
         raise ValueError("splat-transform SOG decoder returned an invalid inspection report")

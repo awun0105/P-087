@@ -55,7 +55,7 @@ class _Admission:
         return True
 
 
-def _fake_package(source: Path, workspace: Path, gpu_index: int | None) -> Path:
+def _fake_package(source: Path, workspace: Path, gpu_index: int | None, **_: object) -> Path:
     workspace.mkdir(parents=True)
     output = workspace / "scene.sog"
     output.write_bytes(sog_archive(sh_bands=3, count=4))
@@ -97,7 +97,7 @@ def test_ply_import_packages_to_sog_and_becomes_ready(world, monkeypatch: pytest
 def test_packaging_failure_is_recorded(world, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
     uploads, service = world
 
-    def broken(*_: object) -> Path:
+    def broken(*_: object, **__: object) -> Path:
         raise ValueError("splat-transform lỗi")
 
     monkeypatch.setattr(imports_module, "package_splat", broken)

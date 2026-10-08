@@ -1,6 +1,8 @@
 """Durable scene-import queue transactions and restart recovery."""
 
+import os
 import sqlite3
+import sys
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -15,6 +17,7 @@ from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeSta
 from src.services.orchestration.uploads import VideoUploadService
 from src.services.orchestration.uploads import scene_imports as import_module
 from src.services.orchestration.uploads.scene_imports import ImportedScene, ImportService, SceneImportError
+from src.services.reconstruction.adapters.voxel_runtime import VoxelProcess, VoxelRuntimeSettings
 from tests.test_reconstruction.support.sog_fixtures import sog_archive
 from tests.test_reconstruction.test_input_detection import _gaussian
 
@@ -37,7 +40,7 @@ def _upload(uploads: VideoUploadService):
     return uploads.finish(pending)
 
 
-def _fake_package(source: Path, workspace: Path, gpu_index: int | None) -> Path:
+def _fake_package(source: Path, workspace: Path, gpu_index: int | None, **_: object) -> Path:
     workspace.mkdir(parents=True)
     output = workspace / "scene.sog"
     output.write_bytes(sog_archive(sh_bands=3, count=4))
@@ -162,6 +165,142 @@ def test_resource_wait_preserves_config_and_does_not_start_packaging(import_worl
     assert ready.status == "READY" and ready.operation is not None and ready.operation.attempt == 1
 
 
+def test_cancel_during_resource_wait_is_not_overwritten_by_waiting_state(import_world) -> None:  # noqa: ANN001
+    _, _, _, uploads, service = import_world
+    upload = _upload(uploads)
+    record = service.create(upload, "Warehouse", "user-1")
+
+    class CancelDuringAdmission(_Admission):
+        def admit_operation(self, request):  # noqa: ANN001
+            service.cancel(record.import_id)
+            return super().admit_operation(request)
+
+    assert service.process_next(admission=CancelDuringAdmission("waiting"), worker_id="cancel-race") is False
+    cancelled = service.get(record.import_id)
+    assert cancelled.status == "CANCELLED"
+    assert cancelled.operation is not None
+    assert cancelled.operation.status == "CANCELLED"
+    assert cancelled.operation.cancel_requested is True
+
+
+def test_queued_cancel_prevents_worker_start(import_world) -> None:  # noqa: ANN001
+    _, _, _, uploads, service = import_world
+    upload = _upload(uploads)
+    record = service.create(upload, "Warehouse", "user-1")
+
+    cancelled = service.cancel(record.import_id)
+
+    assert cancelled.status == "CANCELLED"
+    assert cancelled.operation is not None and cancelled.operation.status == "CANCELLED"
+    assert service.process_next(admission=_Admission(), worker_id="after-cancel") is False
+
+
+def test_retryable_publish_failure_keeps_attempt_history(import_world, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, resolver, uploads, service = import_world
+    upload = _upload(uploads)
+    record = service.create(upload, "Warehouse", "user-1")
+    _enable_fake_runtime(monkeypatch)
+    original_publish = service._publish_or_reuse
+    failures = 0
+
+    def fail_once(*args: object, **kwargs: object) -> None:
+        nonlocal failures
+        failures += 1
+        if failures == 1:
+            raise ArtifactStoreError("remote unavailable")
+        original_publish(*args, **kwargs)
+
+    monkeypatch.setattr(service, "_publish_or_reuse", fail_once)
+    assert service.process_next(admission=_Admission(), worker_id="first-attempt") is True
+    failed = service.get(record.import_id)
+    assert failed.status == "FAILED" and failed.operation is not None
+    assert failed.operation.retryable is True
+    assert [attempt.status for attempt in failed.operation.attempt_history] == ["FAILED"]
+    assert resolver.require_uri(upload.artifact_uri, upload.checksum).is_file()
+
+    queued = service.retry(record.import_id)
+    assert queued.status == "PACKAGING" and queued.operation is not None
+    assert queued.operation.status == "QUEUED" and queued.operation.attempt == 1
+    assert service.process_next(admission=_Admission(), worker_id="second-attempt") is True
+    ready = service.get(record.import_id)
+    assert ready.status == "READY" and ready.operation is not None
+    assert ready.operation.attempt == 2
+    assert [attempt.status for attempt in ready.operation.attempt_history] == ["FAILED", "SUCCEEDED"]
+
+
+def test_invalid_source_failure_cannot_be_retried(import_world) -> None:  # noqa: ANN001
+    _, _, _, uploads, service = import_world
+    upload = _upload(uploads)
+    record = service.create(upload, "Warehouse", "user-1")
+    changed_upload = upload.model_copy(update={"checksum": f"sha256:{'a' * 64}"})
+    with service.database.transaction(write=True) as tx:
+        tx.execute(
+            "UPDATE r2s_uploads SET payload=? WHERE upload_id=?",
+            (changed_upload.model_dump_json(), upload.upload_id),
+        )
+
+    assert service.process_next(admission=_Admission(), worker_id="invalid-source") is True
+    failed = service.get(record.import_id)
+    assert failed.operation is not None and failed.operation.failure_code == "invalid_source"
+    assert failed.operation.retryable is False
+    with pytest.raises(SceneImportError, match="không cho phép thử lại"):
+        service.retry(record.import_id)
+
+
+def test_running_cancel_kills_and_reaps_geometry_child(
+    import_world, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, _, _, uploads, service = import_world
+    upload = _upload(uploads)
+    record = service.create(upload, "Warehouse", "user-1")
+    _enable_fake_runtime(monkeypatch)
+    child_pid_path = tmp_path / "geometry-child.pid"
+    entered = Event()
+
+    def blocking_package(source: Path, workspace: Path, gpu_index: int | None, **kwargs: object) -> Path:
+        workspace.mkdir(parents=True, exist_ok=True)
+        script = (
+            "import os, pathlib, time; "
+            f"pathlib.Path({str(child_pid_path)!r}).write_text(str(os.getpid())); "
+            "time.sleep(30)"
+        )
+        entered.set()
+        process = VoxelProcess(
+            VoxelRuntimeSettings(cli=Path(sys.executable), module_path=tmp_path, node_command=(sys.executable,))
+        )
+        process.run(("-c", script), (workspace, "blocking-test"), cancel_event=kwargs["cancel_event"])
+        return _fake_package(source, workspace, gpu_index)
+
+    monkeypatch.setattr(import_module, "package_splat", blocking_package)
+    errors: list[Exception] = []
+
+    def worker() -> None:
+        try:
+            service.process_next(admission=_Admission(), worker_id="cancel-worker")
+        except Exception as error:  # noqa: BLE001 - thread errors are asserted below.
+            errors.append(error)
+
+    thread = Thread(target=worker)
+    thread.start()
+    assert entered.wait(timeout=5)
+    deadline = time.monotonic() + 5
+    while not child_pid_path.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert child_pid_path.exists(), "geometry subprocess did not start"
+    child_pid = int(child_pid_path.read_text())
+
+    requested = service.cancel(record.import_id)
+    assert requested.status == "PACKAGING"
+    thread.join(timeout=5)
+
+    assert not thread.is_alive() and errors == []
+    cancelled = service.get(record.import_id)
+    assert cancelled.status == "CANCELLED" and cancelled.operation is not None
+    assert [attempt.status for attempt in cancelled.operation.attempt_history] == ["CANCELLED"]
+    with pytest.raises(ProcessLookupError):
+        os.kill(child_pid, 0)
+
+
 def test_source_checksum_mismatch_fails_before_admission(import_world) -> None:  # noqa: ANN001
     _, _, resolver, uploads, service = import_world
     upload = _upload(uploads)
@@ -233,7 +372,7 @@ def test_expired_worker_cannot_publish_ready_after_new_fenced_owner(
     resume = Event()
     calls = 0
 
-    def blocking_package(source: Path, workspace: Path, gpu_index: int | None) -> Path:
+    def blocking_package(source: Path, workspace: Path, gpu_index: int | None, **_: object) -> Path:
         nonlocal calls
         calls += 1
         if calls == 1:

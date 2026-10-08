@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- IN PROGRESS (S1 complete; S2 implementation complete with runtime smoke pending; S3 open); P1; EX-PRODUCT; REC package_splat port.
+- IN PROGRESS (S1/S2/S3 implementation and local contract checks complete; REC-05 runtime acceptance pending); P1; EX-PRODUCT; REC package_splat port.
 - Canonical PRODUCT-02/08/09. SELF-CODE durable operation, REUSE packaging adapter.
 - Goal: PLY/SOG view import durable; API crash không mất request; retry/cancel an
   toàn; READY chỉ khi SOG delivery đã verify.
@@ -115,6 +115,8 @@ CAS; real PLY packaging and uploaded SOG reuse with original byte identity.
 
 ## Sprint AUD-06.S3 — Retry/cancel và truthful UI
 
+**Status:** Implementation complete; authenticated browser and pinned REC-05 runtime acceptance remain unverified.
+
 **Input:** waiting/running/failed operations và user command.
 **Output:** persisted attempt/cancel state, readable status/error, recovery evidence.
 **Contract:** cancel queued prevents start; running cancel kills/reaps child before
@@ -126,8 +128,8 @@ projection; không expose Xử lý tiếp vì AUD-25 Deferred.
 Tests: queued/running cancel, failed publish retry, bad input nonretryable;
 API permissions, Vitest status/loading/error, browser import/restart journey;
 real SOG consumer readability when runtime available.
-**Exit:** [ ] no permanent PACKAGING after interrupted operation; [ ] UI mirrors DB;
-[ ] local vs GPU packaging acceptance separated.
+**Exit:** [x] expired attempts recover under a new fenced owner and cancellation reaches a terminal state;
+[x] UI mirrors stored state and capabilities; [x] local contract proof is separated from REC-05 runtime acceptance.
 
 ## Verification và DoD
 
@@ -171,12 +173,11 @@ production build rendered `/new/import-scene`; visible copy names PLY/SOG/ZIP,
 the file input accepts `.ply,.sog,.zip,application/zip,application/x-sog`, and
 the page had no console errors or warnings.
 
-Still open: AUD-06.S3 retry/cancel and the retry UI. S2 implements lease recovery,
-admission, bounded SOG checks and pinned-runtime decoding, but the real runtime
-smoke could not run in this environment. No GPU or cloud-restart claim is inferred
-from local contract tests. Earlier browser verification proves the rendered upload
-surface and allowlist only; it does not prove a real SOG decoder or production
-upload/worker run.
+AUD-06.S3 implements persisted retry/cancel, attempt history, worker child
+termination/reaping, owner/operator capabilities, and status projections in both
+the import detail and Scenes list. Local checks do not establish authenticated
+browser behavior or a real REC-05 runtime conversion. No GPU or production worker
+restart claim is inferred from these local contract tests.
 
 ### AUD-06.S2 — implementation complete; runtime smoke unverified
 
@@ -187,3 +188,13 @@ upload/worker run.
 - **Local evidence:** task-focused API/orchestration/reconstruction tests → **184 passed, 4 skipped**; directly affected Vitest files → **38 passed**; `npm run typecheck`, `npm run lint -- --quiet`, `ruff check src/ tests/`, `ruff format --check src/ tests/` (490 files) and `git diff --check` passed. Regression coverage includes resource wait without attempt/config drift, simulated crash after publish and immutable reuse, expired-worker fencing, source checksum mismatch, publish failure, ZIP traversal/expansion/duplicate/truncated CRC rejection, SOG metadata/WebP bounds, and exact uploaded-SOG byte identity. The malformed runtime-report guard is covered.
 - **Unverified acceptance:** this environment has no configured `REC05_VOXEL_CLI`/`REC05_VOXEL_MODULE_PATH` runtime settings, so no real PLY→SOG conversion or real SOG decode/consumer smoke could run. The worker tests replace the codec boundary; the fixture WebP bytes exercise bounded header validation, not independent image-decoder acceptance. GPU execution, multi-process deployment restart and browser import/retry journey remain unproven. These do not change the local contract-test result.
 - **Changed source/tests:** `scene_imports.py`, `jobs/admission.py`, `jobs/worker_cli.py`, `api/studio/imports.py`, `reconstruction/{imports.py,inputs/detect.py,adapters/voxel_inspect.mjs,__init__.py}`, import/SOG tests, and the additive `ImportedScene.operation` TypeScript fields.
+
+### AUD-06.S3 — retry/cancel and truthful status
+
+- **Base:** `c9fc9e4`. CodeGraph was synchronized before edits. The explored flow covered `ImportService.process_next/retry/cancel/_finish`, admission and worker callers, `package_splat`/`extract_member`/`validate_sog_runtime`, `VoxelProcess.run`, Studio import routes, `ImportScenePage`, and the Scenes-list import projection. `package_splat` also has an objectify caller; its cancellation argument is optional and the no-cancel call shape remains unchanged.
+- **Before:** import operations had no stored retry/cancel command state or attempt history, a Guest could not see retry/cancel actions, and the detail page could show stale poll results. The Scenes list rendered every non-READY/non-FAILED state as “Đang nén…”, including cancellation, and polled only from reconstruction job status.
+- **After:** retry is idempotent while active and only requeues allowlisted transient failures while preserving history/source/config identity. Queued and waiting cancellation become terminal atomically; running cancellation persists the request and the worker marks `CANCELLED` only after the geometry child is killed and reaped. A heartbeat polls the persisted request and lease fence; file staging, ZIP extraction, runtime conversion, SOG validation, and publication observe cancellation. API endpoints enforce the existing ownership policy: Guest may act on own imports; Editor/Reviewer may intervene. Detail polling rejects older responses, shows wait reason/history/action errors, and offers only server-projected actions. Scenes list shows PLY/PLY+COLMAP/SOG, “Đã hủy”, waiting/queued labels, and polls every four seconds while imports remain PACKAGING. Scene Viewer canvas styling was not changed.
+- **Local evidence:** focused API/orchestration/reconstruction suite **153 passed, 4 skipped**; `ruff check src/ tests/`, `ruff format --check src/ tests/` (**490 files**) and `git diff --check` passed. Frontend `npm run typecheck`, changed-file ESLint, and CodeGraph-related Vitest suite **183 passed across 24 files** passed. New queue tests verify queued cancel exclusion, the cancel-vs-WAITING race, retry after publish failure with both attempts recorded, rejection of non-retryable source failure, and cancellation of a real local subprocess with PID-reap verification. Frontend tests cover wait reason, retry/cancel controls and errors, stale poll ordering, source badges, cancellation status, and Scenes-list refresh labels.
+- **Unverified acceptance:** Chrome DevTools was connected but no logged-in browser session was available; the visible tab was in local no-login mode and the dev server then refused a new connection. The authenticated import/retry/cancel journey is therefore `UNVERIFIED: DevTools — no logged-in session`. REC-05 CLI/module settings are not configured in this environment, so real PLY→SOG conversion, real SOG decode, GPU execution and production worker restart remain unverified.
+- **Changed source/tests:** `src/services/orchestration/uploads/scene_imports.py`, `src/services/reconstruction/{imports.py,adapters/voxel_runtime.py}`, `src/api/studio/imports.py`, `frontend/src/{features/studio/ImportScenePage.tsx,features/studio/ScenesHome.tsx,lib/api/studio.ts,lib/contracts/studio.ts}`, and focused queue/API/frontend tests.
+- **Pre-flight (GUIDE.md Rule 13):** CodeGraph — import worker, adapter, API, and UI symbols/callers read; impact — `worker_cli`, resource admission, import CRUD/trash, objectify's packaging adapter caller, Scenes list and detail UI; understand — durable import/create→admit→package→publish→fenced terminal flow; minimal-code — reused the existing operation record, admission, ownership helper, and polling hook; checks — **153 passed/4 skipped**, ruff and formatting clean; typecheck and ESLint clean; **183 Vitest tests passed**; DevTools — `UNVERIFIED: no logged-in session`.

@@ -104,7 +104,8 @@ export function ScenesHome() {
   const pagination = pageSlice(shown, params.get("page"), 12);
   const filteredImports = imports.filter((item) => item.name.toLowerCase().includes(query.trim().toLowerCase())).sort((a, b) => sort === "name" ? a.name.localeCompare(b.name, "vi") : Date.parse(b.created_at) - Date.parse(a.created_at));
   const importPage = pageSlice(filteredImports, params.get("importsPage"), 12);
-  const anyActive = scenes?.some((scene) => sceneStatus(scene.latest_job, scene.preview_ready).active) ?? true;
+  const anyActive = (scenes?.some((scene) => sceneStatus(scene.latest_job, scene.preview_ready).active) ?? true)
+    || imports.some((item) => item.status === "PACKAGING");
   usePolling(load, signedIn && anyActive ? 4000 : 20000, true);
 
   return (
@@ -247,29 +248,46 @@ export function ScenesHome() {
             Scene import · chỉ xem/chỉnh Gaussian
           </h2>
           <ul className={view === "list" ? "space-y-2" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-3"}>
-            {importPage.items.map((item) => (
-              <li key={item.import_id} className="flex items-center gap-2">
-                <Link
-                  href={`/imports/${item.import_id}`}
-                  className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-xl border border-line bg-paper-raised p-4 text-sm transition-colors hover:border-line-strong"
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate font-medium text-ink">{item.name}</span>
-                    {item.created_by_name && (
-                      <span className="mt-1 block">
-                        <ActorAttribution label="Tạo bởi" name={item.created_by_name} role={item.created_by_role} />
+            {importPage.items.map((item) => {
+              const sourceLabel = item.input_kind === "gaussian_sog"
+                ? "SOG"
+                : item.input_kind === "gaussian_ply_colmap" ? "PLY + COLMAP" : "PLY";
+              const statusLabel = item.status === "READY"
+                ? "Mở xem/chỉnh"
+                : item.status === "FAILED"
+                  ? "Lỗi"
+                  : item.status === "CANCELLED"
+                    ? "Đã hủy"
+                    : item.operation?.status === "WAITING"
+                      ? "Đang chờ tài nguyên"
+                      : item.operation?.status === "QUEUED"
+                        ? "Đang chờ worker"
+                        : "Đang nén…";
+              return (
+                <li key={item.import_id} className="flex items-center gap-2">
+                  <Link
+                    href={`/imports/${item.import_id}`}
+                    className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-xl border border-line bg-paper-raised p-4 text-sm transition-colors hover:border-line-strong"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium text-ink">{item.name}</span>
+                      <span className="mt-1 flex flex-wrap items-center gap-2">
+                        <Badge tone="neutral">{sourceLabel}</Badge>
+                        {item.created_by_name && (
+                          <ActorAttribution label="Tạo bởi" name={item.created_by_name} role={item.created_by_role} />
+                        )}
                       </span>
-                    )}
-                  </span>
-                  <span className="shrink-0 text-xs text-ink-subtle">
-                    {item.status === "READY" ? "Mở xem/chỉnh" : item.status === "FAILED" ? "Lỗi" : "Đang nén…"}
-                  </span>
-                </Link>
-                {resourceCapabilityAllowed(me, item.capabilities?.can_delete) && (
-                  <MoveToTrashButton name={item.name} move={() => moveImportToTrash(item.import_id)} onMoved={() => void load()} />
-                )}
-              </li>
-            ))}
+                    </span>
+                    <span className="shrink-0 text-xs text-ink-subtle" title={item.operation?.error ?? undefined}>
+                      {statusLabel}
+                    </span>
+                  </Link>
+                  {resourceCapabilityAllowed(me, item.capabilities?.can_delete) && (
+                    <MoveToTrashButton name={item.name} move={() => moveImportToTrash(item.import_id)} onMoved={() => void load()} />
+                  )}
+                </li>
+              );
+            })}
           </ul>
           <ListPagination {...importPage} total={filteredImports.length} onChange={(page) => update({ importsPage: String(page) })} />
           {filteredImports.length === 0 && <p className="text-sm text-ink-muted">Không có scene import khớp tên tìm kiếm.</p>}

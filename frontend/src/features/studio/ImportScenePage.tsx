@@ -4,43 +4,127 @@ import { errorMessage } from "@/lib/ui-error";
 
 import { Loader2 } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { Badge, Button, Card, Notice, buttonVariants } from "@/components/studio/primitives";
 import { usePageTitle } from "@/features/shell/Breadcrumbs";
 import { SceneWorkspace } from "@/features/studio/SceneWorkspace";
 import { usePolling } from "@/features/studio/usePolling";
-import { getImport, importContentUrl } from "@/lib/api/studio";
+import { cancelImport, getImport, importContentUrl, retryImport } from "@/lib/api/studio";
 import type { ImportedScene } from "@/lib/contracts/studio";
+
+function lifecycleStatus(scene: ImportedScene): string {
+  return scene.operation?.status ?? scene.status;
+}
+
+function terminal(scene: ImportedScene): boolean {
+  return scene.status === "READY" || scene.status === "FAILED" || scene.status === "CANCELLED";
+}
+
+function progressLabel(scene: ImportedScene | null): string {
+  const operation = scene?.operation;
+  if (operation?.cancel_requested) return "Đang dừng worker an toàn trước khi xác nhận hủy…";
+  if (operation?.status === "QUEUED") return "Đang chờ worker nhận scene…";
+  if (operation?.status === "WAITING") return operation.error ?? "Worker đang chờ tài nguyên…";
+  if (operation?.status === "RUNNING") return "Máy chủ đang chuẩn bị bản xem SOG…";
+  return "Đang kiểm tra trạng thái import…";
+}
+
+function attemptStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    RUNNING: "đang chạy",
+    SUCCEEDED: "hoàn tất",
+    FAILED: "thất bại",
+    CANCELLED: "đã hủy",
+    INTERRUPTED: "worker bị gián đoạn",
+  };
+  return labels[status] ?? status;
+}
 
 /**
  * Scene import từ file 3DGS: chờ worker publish bản xem SOG, rồi mở editor. Chỉ xem/chỉnh sửa
  * (ADR 0004 §3): không có camera nên không qua xác nhận tỉ lệ hay dựng collision.
  */
 export function ImportScenePage({ importId }: { importId: string }) {
+  return <ImportScenePageContent key={importId} importId={importId} />;
+}
+
+function ImportScenePageContent({ importId }: { importId: string }) {
   const [scene, setScene] = useState<ImportedScene | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"retry" | "cancel" | null>(null);
+  const pollSequence = useRef(0);
+  const latestApplied = useRef<{
+    importId: string;
+    sequence: number;
+    attempt: number;
+    status: string;
+    parentStatus: ImportedScene["status"];
+  } | null>(null);
   usePageTitle(scene?.name ?? null);
+
+  const apply = useCallback((next: ImportedScene, sequence: number) => {
+    latestApplied.current = {
+      importId,
+      sequence,
+      attempt: next.operation?.attempt ?? 0,
+      status: lifecycleStatus(next),
+      parentStatus: next.status,
+    };
+    setError(null);
+    setScene(next);
+  }, [importId]);
 
   const poll = useCallback(
     async (signal: AbortSignal) => {
+      const sequence = ++pollSequence.current;
       const result = await getImport(importId, signal);
+      if (signal.aborted) return;
+      const latest = latestApplied.current;
+      if (latest?.importId === importId && sequence < latest.sequence) return;
       if (!result.ok) {
         setError(result.error.status === 404 ? "Không tìm thấy scene import này." : errorMessage(result.error));
         return;
       }
-      setError(null);
-      setScene(result.data);
+      const next = result.data;
+      if (latest?.importId === importId) {
+        const nextAttempt = next.operation?.attempt ?? 0;
+        const latestTerminal = ["READY", "SUCCEEDED", "FAILED", "CANCELLED"].includes(latest.status)
+          || ["READY", "FAILED", "CANCELLED"].includes(latest.parentStatus);
+        const nextTerminal = terminal(next);
+        if (nextAttempt < latest.attempt || (latestTerminal && !nextTerminal)) return;
+      }
+      apply(next, sequence);
     },
-    [importId],
+    [apply, importId],
   );
-  usePolling(poll, 2000, scene?.status !== "READY" && scene?.status !== "FAILED");
+  const active = scene === null || !terminal(scene);
+  usePolling(poll, 2000, active, importId);
+
+  async function runAction(action: "retry" | "cancel") {
+    setBusy(action);
+    setActionError(null);
+    try {
+      const next = action === "retry" ? await retryImport(importId) : await cancelImport(importId);
+      apply(next, ++pollSequence.current);
+    } catch (cause) {
+      setActionError(errorMessage(cause));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   if (error) return <main className="mx-auto max-w-3xl space-y-4 px-4 py-10">
     <Notice tone="rust">{error}</Notice>
     <div className="flex gap-2"><Button size="sm" onClick={() => void poll(new AbortController().signal)}>Thử tải lại</Button><Link href="/scenes" className={buttonVariants({ variant: "secondary", size: "sm" })}>Về Scenes</Link></div>
   </main>;
   if (scene?.status === "READY") {
+    const sourceLabel = scene.input_kind === "gaussian_sog"
+      ? "SOG tải lên · giữ nguyên bytes"
+      : scene.input_kind === "gaussian_ply_colmap"
+        ? "PLY + COLMAP → SOG"
+        : "PLY → SOG";
     return (
       <SceneWorkspace
         title={scene.name}
@@ -48,18 +132,43 @@ export function ImportScenePage({ importId }: { importId: string }) {
         filename="scene.sog"
         badges={
           <Badge tone="neutral" title="File 3DGS tải lên không có camera: không xác nhận tỉ lệ mét hay dựng collision">
-            Scene import · bản xem 3DGS
+            Scene import · {sourceLabel}
           </Badge>
         }
       />
     );
   }
-  if (scene?.status === "FAILED") {
+  if (scene?.status === "FAILED" || scene?.status === "CANCELLED") {
     return (
       <main className="mx-auto max-w-3xl space-y-4 px-4 py-10">
         <h1 className="text-2xl font-extrabold tracking-tight">{scene.name}</h1>
-        <Notice tone="rust">{scene.error ?? "Không nén được scene 3DGS."}</Notice>
-        <Link href="/new" className={buttonVariants({ variant: "secondary" })}>Chọn file khác</Link>
+        {scene.status === "FAILED" ? (
+          <Notice tone="rust">{scene.operation?.error ?? scene.error ?? "Không nén được scene 3DGS."}</Notice>
+        ) : (
+          <Notice tone="neutral">{scene.operation?.error ?? scene.error ?? "Scene import đã được hủy."}</Notice>
+        )}
+        {scene.operation?.attempt_history && scene.operation.attempt_history.length > 0 && (
+          <details className="rounded-xl border border-line bg-paper-raised p-4 text-sm">
+            <summary className="cursor-pointer font-medium">Lịch sử xử lý · {scene.operation.attempt_history.length} lượt</summary>
+            <ol className="mt-3 space-y-2 text-ink-muted">
+              {scene.operation.attempt_history.map((attempt) => (
+                <li key={attempt.attempt}>
+                  Lượt {attempt.attempt} · {attemptStatusLabel(attempt.status)}{attempt.error ? ` · ${attempt.error}` : ""}
+                </li>
+              ))}
+            </ol>
+          </details>
+        )}
+        {actionError && <Notice tone="rust">{actionError}</Notice>}
+        <div className="flex flex-wrap gap-2">
+          {scene.capabilities?.can_retry && (
+            <Button disabled={busy !== null} onClick={() => void runAction("retry")}>
+              {busy === "retry" ? "Đang xếp lại…" : "Thử lại scene import"}
+            </Button>
+          )}
+          <Link href="/new" className={buttonVariants({ variant: "secondary" })}>Chọn file khác</Link>
+          <Link href="/scenes" className={buttonVariants({ variant: "secondary" })}>Về Scenes</Link>
+        </div>
       </main>
     );
   }
@@ -67,8 +176,17 @@ export function ImportScenePage({ importId }: { importId: string }) {
     <main className="mx-auto max-w-3xl space-y-5 px-4 py-10">
       <h1 className="text-2xl font-extrabold tracking-tight">{scene?.name ?? "Đang mở scene import…"}</h1>
       <Card className="space-y-3 p-6">
-        <p className="flex items-center gap-2 text-sm" role="status"><Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />{scene?.operation?.status === "QUEUED" || scene?.operation?.status === "WAITING" ? "Đang chờ worker nhận scene…" : "Máy chủ đang chuẩn bị bản xem SOG…"}</p>
+        <p className="flex items-center gap-2 text-sm" role="status">
+          <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
+          {progressLabel(scene)}
+        </p>
         <p className="text-sm text-ink-muted">PLY được chuyển sang SOG; SOG đã tải lên được giữ nguyên bytes. Cả hai chỉ vào scene viewer, không chạy reconstruction. Có thể rời trang và mở lại từ Scenes khi xong.</p>
+        {actionError && <Notice tone="rust">{actionError}</Notice>}
+        {scene?.capabilities?.can_cancel && (
+          <Button variant="secondary" disabled={busy !== null} onClick={() => void runAction("cancel")}>
+            {busy === "cancel" ? "Đang yêu cầu hủy…" : "Hủy import"}
+          </Button>
+        )}
       </Card>
       <Link href="/scenes" className={buttonVariants({ variant: "secondary" })}>Về Scenes</Link>
     </main>

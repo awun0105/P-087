@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import socket
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event, Thread
@@ -39,7 +40,7 @@ from src.services.orchestration.jobs.admission import (
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.uploads.models import UploadRecord
 from src.services.reconstruction import extract_member, package_splat, validate_sog_runtime
-from src.services.reconstruction.adapters.voxel_runtime import GeometryError
+from src.services.reconstruction.adapters.voxel_runtime import GeometryCancelledError, GeometryError
 from src.services.reconstruction.inputs.detect import (
     InputRejectedError,
     detect_input,
@@ -48,11 +49,13 @@ from src.services.reconstruction.inputs.detect import (
 
 logger = logging.getLogger(__name__)
 
-ImportStatus = Literal["PACKAGING", "READY", "FAILED"]
+ImportStatus = Literal["PACKAGING", "READY", "FAILED", "CANCELLED"]
 ImportOperationStatus = Literal["QUEUED", "WAITING", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"]
+ImportAttemptStatus = Literal["RUNNING", "SUCCEEDED", "FAILED", "CANCELLED", "INTERRUPTED"]
 _ANONYMOUS_REQUESTER = "__anonymous__"
 _IMPORT_LEASE_SECONDS = 300
 _IMPORT_HEARTBEAT_SECONDS = 20.0
+_IMPORT_CANCEL_POLL_SECONDS = 0.5
 ImportFailureCode = Literal[
     "invalid_source",
     "source_unavailable",
@@ -61,7 +64,18 @@ ImportFailureCode = Literal[
     "packaging_failure",
     "resource_conflict",
     "resource_wait",
+    "worker_interrupted",
 ]
+
+
+class ImportAttemptRecord(BaseModel):
+    attempt: int = Field(ge=1)
+    status: ImportAttemptStatus
+    started_at: datetime
+    finished_at: datetime | None = None
+    failure_code: ImportFailureCode | None = None
+    retryable: bool | None = None
+    error: str | None = None
 
 
 class ImportOperationRecord(BaseModel):
@@ -78,6 +92,7 @@ class ImportOperationRecord(BaseModel):
     gpu_index: int | None = None
     status: ImportOperationStatus
     attempt: int = Field(ge=0)
+    attempt_history: list[ImportAttemptRecord] = Field(default_factory=list)
     owner_id: str | None = None
     lease_token: str | None = None
     fencing_token: int = Field(ge=0)
@@ -89,15 +104,20 @@ class ImportOperationRecord(BaseModel):
     error: str | None = None
     failure_code: ImportFailureCode | None = None
     retryable: bool | None = None
+    cancel_requested: bool = False
+    cancel_requested_at: datetime | None = None
 
     def projection(self) -> ImportOperationProjection:
         return ImportOperationProjection(
             operation_id=self.operation_id,
             status=self.status,
             attempt=self.attempt,
+            attempt_history=self.attempt_history,
             error=self.error,
             failure_code=self.failure_code,
             retryable=self.retryable,
+            cancel_requested=self.cancel_requested,
+            cancel_requested_at=self.cancel_requested_at,
             created_at=self.created_at,
             updated_at=self.updated_at,
         )
@@ -111,9 +131,12 @@ class ImportOperationProjection(BaseModel):
     operation_id: str
     status: ImportOperationStatus
     attempt: int = Field(ge=0)
+    attempt_history: list[ImportAttemptRecord] = Field(default_factory=list)
     error: str | None = None
     failure_code: ImportFailureCode | None = None
     retryable: bool | None = None
+    cancel_requested: bool = False
+    cancel_requested_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -350,41 +373,159 @@ class ImportService:
             raise RuntimeStateConflictError("scene import chưa có durable operation")
         return ImportOperationRecord.model_validate_json(row[0])
 
+    def retry(self, import_id: str) -> ImportedScene:
+        """Atomically queue one new attempt only for known transient failures."""
+        now = datetime.now(UTC)
+        retryable_codes = {"runtime_failure", "publication_failure", "source_unavailable", "worker_interrupted"}
+        with self.database.transaction(write=True) as tx:
+            import_row = tx.execute(
+                "SELECT payload FROM r2s_imports WHERE import_id=?" + tx.lock_suffix(), (import_id,)
+            ).fetchone()
+            operation_row = tx.execute(
+                "SELECT payload FROM r2s_import_operations WHERE import_id=?" + tx.lock_suffix(), (import_id,)
+            ).fetchone()
+            if import_row is None or operation_row is None:
+                raise ImportNotFoundError(f"không tìm thấy scene import: {import_id}")
+            record = ImportedScene.model_validate_json(import_row[0])
+            operation = ImportOperationRecord.model_validate_json(operation_row[0])
+            if operation.status in {"QUEUED", "WAITING", "RUNNING"}:
+                return record.model_copy(update={"operation": operation.projection()})
+            if (
+                operation.status != "FAILED"
+                or operation.retryable is not True
+                or operation.failure_code not in retryable_codes
+            ):
+                raise SceneImportError("Lỗi hiện tại không cho phép thử lại; scene và chẩn đoán được giữ nguyên.")
+            queued = operation.model_copy(
+                update={
+                    "status": "QUEUED",
+                    "owner_id": None,
+                    "lease_token": None,
+                    "fencing_token": operation.fencing_token + 1,
+                    "lease_expires_at": None,
+                    "heartbeat_at": None,
+                    "updated_at": now,
+                    "delivery_ref": None,
+                    "error": None,
+                    "failure_code": None,
+                    "retryable": None,
+                    "cancel_requested": False,
+                    "cancel_requested_at": None,
+                }
+            )
+            queued_record = record.model_copy(
+                update={
+                    "status": "PACKAGING",
+                    "delivery_ref": None,
+                    "error": None,
+                    "operation": queued.projection(),
+                }
+            )
+            tx.execute(
+                "UPDATE r2s_imports SET payload=? WHERE import_id=?", (queued_record.model_dump_json(), import_id)
+            )
+            tx.execute(
+                "UPDATE r2s_import_operations SET status=?, attempt=?, updated_at=?, owner_id=NULL, fencing_token=?, "
+                "lease_expires_at=NULL, heartbeat_at=NULL, payload=? WHERE import_id=?",
+                (
+                    queued.status,
+                    queued.attempt,
+                    queued.updated_at.isoformat(),
+                    queued.fencing_token,
+                    queued.model_dump_json(),
+                    import_id,
+                ),
+            )
+        return self.get(import_id)
+
+    def cancel(self, import_id: str) -> ImportedScene:
+        """Persist cancellation; a live worker acknowledges only after its child exits."""
+        now = datetime.now(UTC)
+        with self.database.transaction(write=True) as tx:
+            import_row = tx.execute(
+                "SELECT payload FROM r2s_imports WHERE import_id=?" + tx.lock_suffix(), (import_id,)
+            ).fetchone()
+            operation_row = tx.execute(
+                "SELECT payload FROM r2s_import_operations WHERE import_id=?" + tx.lock_suffix(), (import_id,)
+            ).fetchone()
+            if import_row is None or operation_row is None:
+                raise ImportNotFoundError(f"không tìm thấy scene import: {import_id}")
+            record = ImportedScene.model_validate_json(import_row[0])
+            operation = ImportOperationRecord.model_validate_json(operation_row[0])
+            if operation.status == "CANCELLED":
+                return record.model_copy(update={"operation": operation.projection()})
+            if operation.status not in {"QUEUED", "WAITING", "RUNNING"}:
+                raise SceneImportError("Không thể hủy scene import đã kết thúc.")
+            if operation.status == "RUNNING":
+                if not operation.cancel_requested:
+                    requested = operation.model_copy(
+                        update={
+                            "cancel_requested": True,
+                            "cancel_requested_at": now,
+                            "error": "Đang dừng worker an toàn trước khi xác nhận hủy…",
+                            "updated_at": now,
+                        }
+                    )
+                    tx.execute(
+                        "UPDATE r2s_import_operations SET updated_at=?, payload=? WHERE import_id=?",
+                        (now.isoformat(), requested.model_dump_json(), import_id),
+                    )
+                else:
+                    requested = operation
+                return record.model_copy(update={"operation": requested.projection()})
+
+            error = "Đã hủy theo yêu cầu."
+            cancelled = operation.model_copy(
+                update={
+                    "status": "CANCELLED",
+                    "owner_id": None,
+                    "lease_token": None,
+                    "lease_expires_at": None,
+                    "heartbeat_at": now,
+                    "updated_at": now,
+                    "error": error,
+                    "failure_code": None,
+                    "retryable": False,
+                    "cancel_requested": True,
+                    "cancel_requested_at": now,
+                }
+            )
+            cancelled_record = record.model_copy(
+                update={
+                    "status": "CANCELLED",
+                    "delivery_ref": None,
+                    "error": error,
+                    "operation": cancelled.projection(),
+                }
+            )
+            tx.execute(
+                "UPDATE r2s_imports SET payload=? WHERE import_id=?", (cancelled_record.model_dump_json(), import_id)
+            )
+            tx.execute(
+                "UPDATE r2s_import_operations SET status=?, updated_at=?, owner_id=NULL, lease_expires_at=NULL, "
+                "heartbeat_at=?, payload=? WHERE import_id=?",
+                (
+                    cancelled.status,
+                    now.isoformat(),
+                    now.isoformat(),
+                    cancelled.model_dump_json(),
+                    import_id,
+                ),
+            )
+        return self.get(import_id)
+
     def _finish(
         self,
         record: ImportedScene,
         operation: ImportOperationRecord,
         *,
-        status: Literal["READY", "FAILED"],
+        status: Literal["READY", "FAILED", "CANCELLED"],
         delivery_ref: ProductArtifactRef | None = None,
         error: str | None = None,
         failure_code: ImportFailureCode | None = None,
         retryable: bool | None = None,
     ) -> ImportedScene:
         now = datetime.now(UTC)
-        operation_status: ImportOperationStatus = "SUCCEEDED" if status == "READY" else "FAILED"
-        updated_operation = operation.model_copy(
-            update={
-                "status": operation_status,
-                "owner_id": None,
-                "lease_token": None,
-                "lease_expires_at": None,
-                "heartbeat_at": now,
-                "updated_at": now,
-                "delivery_ref": delivery_ref,
-                "error": error,
-                "failure_code": failure_code,
-                "retryable": retryable,
-            }
-        )
-        updated = record.model_copy(
-            update={
-                "status": status,
-                "delivery_ref": delivery_ref,
-                "error": error,
-                "operation": updated_operation.projection(),
-            }
-        )
         with self.database.transaction(write=True) as tx:
             current_import = tx.execute(
                 "SELECT payload FROM r2s_imports WHERE import_id=?" + tx.lock_suffix(), (record.import_id,)
@@ -408,6 +549,55 @@ class ImportService:
                 or stored_operation.lease_expires_at <= now
             ):
                 raise RuntimeStateConflictError("scene import operation đã đổi revision")
+            if stored_operation.cancel_requested:
+                status = "CANCELLED"
+                delivery_ref = None
+                error = "Đã hủy theo yêu cầu."
+                failure_code = None
+                retryable = False
+            operation_status: ImportOperationStatus = {
+                "READY": "SUCCEEDED",
+                "FAILED": "FAILED",
+                "CANCELLED": "CANCELLED",
+            }[status]
+            history = list(stored_operation.attempt_history)
+            for index in range(len(history) - 1, -1, -1):
+                previous = history[index]
+                if previous.attempt == stored_operation.attempt:
+                    if previous.status == "RUNNING":
+                        history[index] = previous.model_copy(
+                            update={
+                                "status": operation_status,
+                                "finished_at": now,
+                                "failure_code": failure_code,
+                                "retryable": retryable,
+                                "error": error,
+                            }
+                        )
+                    break
+            updated_operation = stored_operation.model_copy(
+                update={
+                    "status": operation_status,
+                    "attempt_history": history,
+                    "owner_id": None,
+                    "lease_token": None,
+                    "lease_expires_at": None,
+                    "heartbeat_at": now,
+                    "updated_at": now,
+                    "delivery_ref": delivery_ref,
+                    "error": error,
+                    "failure_code": failure_code,
+                    "retryable": retryable,
+                }
+            )
+            updated = stored_import.model_copy(
+                update={
+                    "status": status,
+                    "delivery_ref": delivery_ref,
+                    "error": error,
+                    "operation": updated_operation.projection(),
+                }
+            )
             tx.execute(
                 "UPDATE r2s_imports SET payload=? WHERE import_id=?", (updated.model_dump_json(), record.import_id)
             )
@@ -472,6 +662,20 @@ class ImportService:
             )
         return True
 
+    def _cancellation_state(self, claimed: ImportOperationRecord) -> tuple[bool, bool]:
+        """Return (cancel requested, lease lost) for this exact worker fence."""
+        now = datetime.now(UTC)
+        with self.database.transaction() as tx:
+            row = tx.execute(
+                "SELECT payload FROM r2s_import_operations WHERE operation_id=?", (claimed.operation_id,)
+            ).fetchone()
+        if row is None:
+            return False, True
+        stored = ImportOperationRecord.model_validate_json(row[0])
+        if not self._lease_matches(stored, claimed, now):
+            return False, True
+        return stored.cancel_requested, False
+
     def _fail_orphan(self, claimed: ImportOperationRecord) -> bool:
         """Terminate a corrupt operation whose parent import row disappeared."""
         now = datetime.now(UTC)
@@ -514,20 +718,38 @@ class ImportService:
         admission: ResourceAdmission,
         request_box: list[OperationAdmissionRequest | None],
         lease_lost: Event,
+        cancel_requested: Event,
     ) -> tuple[Event, Thread]:
         stop = Event()
 
         def beat() -> None:
-            while not stop.wait(_IMPORT_HEARTBEAT_SECONDS):
-                if not self._touch_lease(claimed):
+            last_touch = time.monotonic()
+            while not stop.wait(_IMPORT_CANCEL_POLL_SECONDS):
+                requested, lease_is_lost = self._cancellation_state(claimed)
+                if lease_is_lost:
                     lease_lost.set()
+                    cancel_requested.set()
                     logger.warning(
                         "Import lease mất quyền import=%s fencing=%s", claimed.import_id, claimed.fencing_token
                     )
                     return
+                if requested:
+                    cancel_requested.set()
+                    return
+                if time.monotonic() - last_touch < _IMPORT_HEARTBEAT_SECONDS:
+                    continue
+                if not self._touch_lease(claimed):
+                    lease_lost.set()
+                    cancel_requested.set()
+                    logger.warning(
+                        "Import lease mất quyền import=%s fencing=%s", claimed.import_id, claimed.fencing_token
+                    )
+                    return
+                last_touch = time.monotonic()
                 request = request_box[0]
                 if request is not None and not admission.touch_operation(request):
                     lease_lost.set()
+                    cancel_requested.set()
                     logger.warning(
                         "Import reservation mất quyền import=%s fencing=%s",
                         claimed.import_id,
@@ -547,19 +769,6 @@ class ImportService:
             if details
             else "Worker đang chờ để nhận scene 3DGS."
         )
-        waiting = claimed.model_copy(
-            update={
-                "status": "WAITING",
-                "owner_id": None,
-                "lease_token": None,
-                "lease_expires_at": None,
-                "heartbeat_at": now,
-                "updated_at": now,
-                "error": error,
-                "failure_code": "resource_wait",
-                "retryable": None,
-            }
-        )
         with self.database.transaction(write=True) as tx:
             row = tx.execute(
                 "SELECT payload FROM r2s_import_operations WHERE operation_id=?" + tx.lock_suffix(),
@@ -570,6 +779,63 @@ class ImportService:
             stored = ImportOperationRecord.model_validate_json(row[0])
             if not self._lease_matches(stored, claimed, now):
                 return False
+            if stored.cancel_requested:
+                cancelled = stored.model_copy(
+                    update={
+                        "status": "CANCELLED",
+                        "owner_id": None,
+                        "lease_token": None,
+                        "lease_expires_at": None,
+                        "heartbeat_at": now,
+                        "updated_at": now,
+                        "error": "Đã hủy theo yêu cầu.",
+                        "failure_code": None,
+                        "retryable": False,
+                    }
+                )
+                import_row = tx.execute(
+                    "SELECT payload FROM r2s_imports WHERE import_id=?" + tx.lock_suffix(),
+                    (claimed.import_id,),
+                ).fetchone()
+                if import_row is not None:
+                    record = ImportedScene.model_validate_json(import_row[0])
+                    cancelled_record = record.model_copy(
+                        update={
+                            "status": "CANCELLED",
+                            "delivery_ref": None,
+                            "error": cancelled.error,
+                            "operation": cancelled.projection(),
+                        }
+                    )
+                    tx.execute(
+                        "UPDATE r2s_imports SET payload=? WHERE import_id=?",
+                        (cancelled_record.model_dump_json(), claimed.import_id),
+                    )
+                tx.execute(
+                    "UPDATE r2s_import_operations SET status=?, updated_at=?, owner_id=NULL, "
+                    "lease_expires_at=NULL, heartbeat_at=?, payload=? WHERE operation_id=?",
+                    (
+                        cancelled.status,
+                        cancelled.updated_at.isoformat(),
+                        cancelled.heartbeat_at.isoformat() if cancelled.heartbeat_at else None,
+                        cancelled.model_dump_json(),
+                        claimed.operation_id,
+                    ),
+                )
+                return True
+            waiting = stored.model_copy(
+                update={
+                    "status": "WAITING",
+                    "owner_id": None,
+                    "lease_token": None,
+                    "lease_expires_at": None,
+                    "heartbeat_at": now,
+                    "updated_at": now,
+                    "error": error,
+                    "failure_code": "resource_wait",
+                    "retryable": None,
+                }
+            )
             tx.execute(
                 "UPDATE r2s_import_operations SET status=?, updated_at=?, owner_id=NULL, lease_expires_at=NULL, "
                 "heartbeat_at=?, payload=? WHERE operation_id=?",
@@ -593,9 +859,23 @@ class ImportService:
             if row is None:
                 return None
             stored = ImportOperationRecord.model_validate_json(row[0])
-            if not self._lease_matches(stored, claimed, now):
+            if not self._lease_matches(stored, claimed, now) or stored.cancel_requested:
                 return None
-            started = stored.model_copy(update={"attempt": stored.attempt + 1, "updated_at": now, "error": None})
+            attempt = stored.attempt + 1
+            history = [
+                *stored.attempt_history,
+                ImportAttemptRecord(attempt=attempt, status="RUNNING", started_at=now),
+            ]
+            started = stored.model_copy(
+                update={
+                    "attempt": attempt,
+                    "attempt_history": history,
+                    "updated_at": now,
+                    "error": None,
+                    "failure_code": None,
+                    "retryable": None,
+                }
+            )
             tx.execute(
                 "UPDATE r2s_import_operations SET attempt=?, updated_at=?, payload=? WHERE operation_id=?",
                 (started.attempt, started.updated_at.isoformat(), started.model_dump_json(), claimed.operation_id),
@@ -666,9 +946,25 @@ class ImportService:
             if row is None:
                 return False
             operation = ImportOperationRecord.model_validate_json(row[0])
+            attempt_history = list(operation.attempt_history)
+            if operation.status == "RUNNING":
+                for index in range(len(attempt_history) - 1, -1, -1):
+                    previous = attempt_history[index]
+                    if previous.attempt == operation.attempt and previous.status == "RUNNING":
+                        attempt_history[index] = previous.model_copy(
+                            update={
+                                "status": "INTERRUPTED",
+                                "finished_at": now,
+                                "failure_code": "worker_interrupted",
+                                "retryable": True,
+                                "error": "Worker lease expired before the attempt completed.",
+                            }
+                        )
+                        break
             claimed = operation.model_copy(
                 update={
                     "status": "RUNNING",
+                    "attempt_history": attempt_history,
                     "owner_id": worker_id,
                     "lease_token": uuid4().hex,
                     "fencing_token": operation.fencing_token + 1,
@@ -708,7 +1004,10 @@ class ImportService:
 
         request_box: list[OperationAdmissionRequest | None] = [None]
         lease_lost = Event()
-        heartbeat_stop, heartbeat_thread = self._start_heartbeat(claimed, admission, request_box, lease_lost)
+        cancel_requested = Event()
+        heartbeat_stop, heartbeat_thread = self._start_heartbeat(
+            claimed, admission, request_box, lease_lost, cancel_requested
+        )
         reserved = False
         request: OperationAdmissionRequest | None = None
         finish_operation = claimed
@@ -727,6 +1026,16 @@ class ImportService:
                     status="FAILED",
                     error=record.error,
                     failure_code="packaging_failure",
+                    retryable=False,
+                )
+                return True
+            if claimed.cancel_requested:
+                cancel_requested.set()
+                self._finish(
+                    record,
+                    claimed,
+                    status="CANCELLED",
+                    error="Đã hủy theo yêu cầu.",
                     retryable=False,
                 )
                 return True
@@ -810,10 +1119,29 @@ class ImportService:
                     return True
                 self._wait_for_resources(claimed, result)
                 return False
+            if cancel_requested.is_set():
+                self._finish(
+                    record,
+                    claimed,
+                    status="CANCELLED",
+                    error="Đã hủy theo yêu cầu.",
+                    retryable=False,
+                )
+                return True
             request_box[0] = request
             reserved = True
             running = self._start_attempt(claimed)
             if running is None:
+                requested, _lease_is_lost = self._cancellation_state(claimed)
+                if requested:
+                    cancel_requested.set()
+                    self._finish(
+                        record,
+                        claimed,
+                        status="CANCELLED",
+                        error="Đã hủy theo yêu cầu.",
+                        retryable=False,
+                    )
                 return True
             finish_operation = running
             self.package(
@@ -822,6 +1150,7 @@ class ImportService:
                 claimed.gpu_index,
                 operation=running,
                 lease_lost=lease_lost,
+                cancel_requested=cancel_requested,
             )
             return True
         except (ArtifactNotFoundError, ArtifactChecksumError) as error:
@@ -896,6 +1225,7 @@ class ImportService:
         *,
         operation: ImportOperationRecord,
         lease_lost: Event,
+        cancel_requested: Event,
     ) -> ImportedScene:
         """Package verified PLY/SOG to SOG and commit READY under the current lease."""
         record = self.get(import_id)
@@ -903,6 +1233,8 @@ class ImportService:
             return record
         workspace = self.workspace_root / import_id / uuid4().hex
         try:
+            if cancel_requested.is_set():
+                raise GeometryCancelledError("Scene import was cancelled before packaging started")
             source = self.resolver.require_uri(upload.artifact_uri, upload.checksum)
             workspace.mkdir(parents=True, exist_ok=False)
             max_uncompressed_bytes = self._uncompressed_limit(upload)
@@ -913,6 +1245,8 @@ class ImportService:
                 sog = workspace / "source.sog"
                 with source.open("rb") as source_stream, sog.open("xb") as target:
                     while chunk := source_stream.read(1 << 20):
+                        if cancel_requested.is_set():
+                            raise GeometryCancelledError("Scene import was cancelled while staging SOG")
                         target.write(chunk)
                 if self._checksum_file(sog) != upload.checksum:
                     raise InputRejectedError("source SOG checksum changed while staging")
@@ -930,6 +1264,7 @@ class ImportService:
                         member,
                         workspace / "input.ply",
                         max_uncompressed_bytes=max_uncompressed_bytes,
+                        cancel_event=cancel_requested,
                     )
                     if self._checksum_file(source) != upload.checksum:
                         raise InputRejectedError("source ZIP checksum changed while extracting")
@@ -937,6 +1272,8 @@ class ImportService:
                     source_ply = workspace / "input.ply"
                     with source.open("rb") as source_stream, source_ply.open("xb") as target:
                         while chunk := source_stream.read(1 << 20):
+                            if cancel_requested.is_set():
+                                raise GeometryCancelledError("Scene import was cancelled while staging PLY")
                             target.write(chunk)
                 if source_detection.gaussian is None:
                     raise InputRejectedError("PLY source lacks validated Gaussian inventory")
@@ -944,7 +1281,7 @@ class ImportService:
                     raise InputRejectedError("source PLY checksum changed while staging")
                 expected_count = source_detection.gaussian.gaussian_count
                 expected_sh_bands = source_detection.gaussian.sh_degree
-                sog = package_splat(source_ply, workspace / "sog", gpu_index)
+                sog = package_splat(source_ply, workspace / "sog", gpu_index, cancel_event=cancel_requested)
                 sog_detection = validate_sog_bundle(sog, max_uncompressed_bytes)
                 if (
                     sog_detection.sog is None
@@ -952,14 +1289,19 @@ class ImportService:
                     or sog_detection.sog.sh_degree != expected_sh_bands
                 ):
                     raise InputRejectedError("Packaged SOG inventory differs from the PLY source")
+            if cancel_requested.is_set():
+                raise GeometryCancelledError("Scene import was cancelled before SOG validation")
             validate_sog_runtime(
                 sog,
                 workspace / "runtime-validation",
                 expected_count=expected_count,
                 expected_sh_bands=expected_sh_bands,
+                cancel_event=cancel_requested,
             )
             if lease_lost.is_set():
                 raise RuntimeStateConflictError("scene import lease or resource reservation expired")
+            if cancel_requested.is_set():
+                raise GeometryCancelledError("Scene import was cancelled before publication")
             checksum = self._checksum_file(sog)
             digest = checksum.removeprefix("sha256:")
             uri = f"artifact://jobs/{import_id}/import/{digest}.sog"
@@ -977,9 +1319,17 @@ class ImportService:
                     "upload_checksum": upload.checksum,
                 },
             )
-            self._publish_or_reuse(sog, uri, checksum, max_uncompressed_bytes)
+            self._publish_or_reuse(sog, uri, checksum, max_uncompressed_bytes, cancel_requested)
         except RuntimeStateConflictError:
             raise
+        except GeometryCancelledError:
+            return self._finish(
+                record,
+                operation,
+                status="CANCELLED",
+                error="Đã hủy theo yêu cầu.",
+                retryable=False,
+            )
         except GeometryError as error:
             logger.warning("Import %s runtime failed cause=%s", import_id, type(error).__name__)
             return self._finish(
@@ -1024,7 +1374,14 @@ class ImportService:
             raise RuntimeStateConflictError("scene import lease or resource reservation expired before READY")
         return self._finish(record, operation, status="READY", delivery_ref=reference, error=None)
 
-    def _publish_or_reuse(self, sog: Path, uri: str, checksum: str, max_bytes: int) -> None:
+    def _publish_or_reuse(
+        self,
+        sog: Path,
+        uri: str,
+        checksum: str,
+        max_bytes: int,
+        cancel_requested: Event | None = None,
+    ) -> None:
         existing = self.resolver.locate(uri, fresh=True)
         if existing is not None:
             if self._checksum_file(existing) != checksum:
@@ -1040,6 +1397,8 @@ class ImportService:
         try:
             with sog.open("rb") as source_stream:
                 while chunk := source_stream.read(1 << 20):
+                    if cancel_requested is not None and cancel_requested.is_set():
+                        raise GeometryCancelledError("Scene import was cancelled during publication")
                     publication.write(chunk)
             if publication.commit() != checksum:
                 raise ArtifactChecksumError("published SOG checksum changed while copying")

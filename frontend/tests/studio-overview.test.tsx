@@ -8,7 +8,7 @@ import { ApiError } from "@/lib/api/client";
 import type { Me } from "@/lib/api/auth";
 import { listImports, listSamples, listScenes } from "@/lib/api/studio";
 import type { JobManifest } from "@/lib/contracts/api";
-import type { SceneSummary } from "@/lib/contracts/studio";
+import type { ImportedScene, SceneSummary } from "@/lib/contracts/studio";
 
 const auth = vi.hoisted(() => ({ me: { auth_required: false, user: null } as Me | null }));
 vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => auth }));
@@ -197,5 +197,77 @@ describe("Tổng quan và thư viện riêng", () => {
     expect(imported).toHaveTextContent(hostileName);
     expect(imported).toHaveTextContent("Reviewer");
     expect(imported.querySelector('img[src="x"]')).toBeNull();
+  });
+
+  it("scene import hiển thị đúng nguồn và trạng thái persisted, kể cả cancellation", async () => {
+    auth.me = {
+      auth_required: true,
+      user: {
+        user_id: "user-editor",
+        email: "editor@example.test",
+        display_name: "Editor Test",
+        role: "editor",
+        active: true,
+        daily_job_quota: 10,
+      },
+    };
+    const imported = (overrides: Partial<ImportedScene>): ImportedScene => ({
+      import_id: "import-default",
+      upload_id: "upload-1",
+      name: "Default import",
+      input_kind: "gaussian_ply",
+      status: "PACKAGING",
+      operation: {
+        operation_id: "operation-default",
+        status: "QUEUED",
+        attempt: 0,
+        attempt_history: [],
+        error: null,
+        created_at: "2026-10-08T00:00:00Z",
+        updated_at: "2026-10-08T00:00:00Z",
+      },
+      delivery_ref: null,
+      error: null,
+      created_at: "2026-10-08T00:00:00Z",
+      ...overrides,
+    });
+    vi.mocked(listImports).mockResolvedValue({
+      ok: true,
+      data: {
+        imports: [
+          imported({ import_id: "sog-ready", name: "SOG import", input_kind: "gaussian_sog", status: "READY" }),
+          imported({ import_id: "ply-waiting", name: "PLY waiting", operation: {
+            operation_id: "operation-waiting",
+            status: "WAITING",
+            attempt: 0,
+            attempt_history: [],
+            error: "Worker đang chờ RAM",
+            created_at: "2026-10-08T00:00:00Z",
+            updated_at: "2026-10-08T00:00:00Z",
+          } }),
+          imported({ import_id: "ply-cancelled", name: "PLY cancelled", status: "CANCELLED", operation: {
+            operation_id: "operation-cancelled",
+            status: "CANCELLED",
+            attempt: 0,
+            attempt_history: [],
+            error: "Đã hủy theo yêu cầu.",
+            created_at: "2026-10-08T00:00:00Z",
+            updated_at: "2026-10-08T00:00:00Z",
+          } }),
+        ],
+      },
+    });
+
+    render(<ScenesHome />);
+
+    const sog = await screen.findByRole("link", { name: /SOG import/ });
+    const waiting = screen.getByRole("link", { name: /PLY waiting/ });
+    const cancelled = screen.getByRole("link", { name: /PLY cancelled/ });
+    expect(sog).toHaveTextContent("SOG");
+    expect(sog).toHaveTextContent("Mở xem/chỉnh");
+    expect(waiting).toHaveTextContent("PLY");
+    expect(waiting).toHaveTextContent("Đang chờ tài nguyên");
+    expect(cancelled).toHaveTextContent("Đã hủy");
+    expect(cancelled).not.toHaveTextContent("Đang nén");
   });
 });

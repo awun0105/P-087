@@ -36,6 +36,8 @@ class ImportCapabilities(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     can_delete: bool
+    can_retry: bool
+    can_cancel: bool
 
 
 class ImportedSceneResponse(ImportedScene):
@@ -53,9 +55,27 @@ class ImportListResponse(BaseModel):
 
 
 def _view(record: ImportedScene, user: UserRecord | None) -> ImportedSceneResponse:
+    owner_mutation = owner_mutation_allowed(user, record.created_by)
+    operation = record.operation
+    retryable_codes = {"runtime_failure", "publication_failure", "source_unavailable", "worker_interrupted"}
     return ImportedSceneResponse(
         **record.model_dump(),
-        capabilities=ImportCapabilities(can_delete=owner_mutation_allowed(user, record.created_by)),
+        capabilities=ImportCapabilities(
+            can_delete=owner_mutation,
+            can_retry=bool(
+                owner_mutation
+                and operation is not None
+                and operation.status == "FAILED"
+                and operation.retryable is True
+                and operation.failure_code in retryable_codes
+            ),
+            can_cancel=bool(
+                owner_mutation
+                and operation is not None
+                and operation.status in {"QUEUED", "WAITING", "RUNNING"}
+                and not operation.cancel_requested
+            ),
+        ),
     )
 
 
@@ -109,6 +129,36 @@ def get_import(import_id: str, user: UserRecord | None = Depends(require_contrib
         return _view(_service().get(import_id), user)
     except ImportNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+
+
+@router.post("/imports/{import_id}/retry", response_model=ImportedSceneResponse)
+def retry_import(import_id: str, user: UserRecord | None = Depends(require_contributor)) -> ImportedSceneResponse:
+    """Retry only a stored transient failure, preserving the same source/config identity."""
+    service = _service()
+    try:
+        record = service.get(import_id)
+        if not owner_mutation_allowed(user, record.created_by):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Không có quyền retry scene import này")
+        return _view(service.retry(import_id), user)
+    except ImportNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except SceneImportError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+@router.post("/imports/{import_id}/cancel", response_model=ImportedSceneResponse)
+def cancel_import(import_id: str, user: UserRecord | None = Depends(require_contributor)) -> ImportedSceneResponse:
+    """Cancel a queued request or ask its live worker to reap the current child before finishing."""
+    service = _service()
+    try:
+        record = service.get(import_id)
+        if not owner_mutation_allowed(user, record.created_by):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Không có quyền hủy scene import này")
+        return _view(service.cancel(import_id), user)
+    except ImportNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except SceneImportError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 
 
 @router.get("/imports/{import_id}/content/{filename}")

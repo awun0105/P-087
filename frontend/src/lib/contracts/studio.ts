@@ -645,11 +645,29 @@ export interface ImportedScene {
   upload_id: string;
   name: string;
   input_kind: "gaussian_ply" | "gaussian_ply_colmap" | "gaussian_sog";
-  status: "PACKAGING" | "READY" | "FAILED";
+  status: "PACKAGING" | "READY" | "FAILED" | "CANCELLED";
   operation?: {
     operation_id: string;
     status: "QUEUED" | "WAITING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
     attempt: number;
+    attempt_history?: {
+      attempt: number;
+      status: "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "INTERRUPTED";
+      started_at: string;
+      finished_at?: string | null;
+      failure_code?:
+        | "invalid_source"
+        | "source_unavailable"
+        | "runtime_failure"
+        | "publication_failure"
+        | "packaging_failure"
+        | "resource_conflict"
+        | "resource_wait"
+        | "worker_interrupted"
+        | null;
+      retryable?: boolean | null;
+      error?: string | null;
+    }[];
     error: string | null;
     failure_code?:
       | "invalid_source"
@@ -659,8 +677,11 @@ export interface ImportedScene {
       | "packaging_failure"
       | "resource_conflict"
       | "resource_wait"
+      | "worker_interrupted"
       | null;
     retryable?: boolean | null;
+    cancel_requested?: boolean;
+    cancel_requested_at?: string | null;
     created_at: string;
     updated_at: string;
   } | null;
@@ -670,5 +691,5 @@ export interface ImportedScene {
   created_by_name?: string | null;
   created_by_role?: "guest" | "editor" | "reviewer" | null;
   /** Missing capability data from an older API falls back to role; Guests fail closed. */
-  capabilities?: { can_delete: boolean };
+  capabilities?: { can_delete: boolean; can_retry?: boolean; can_cancel?: boolean };
 }

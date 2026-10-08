@@ -83,7 +83,7 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     database = RuntimeDatabase(f"sqlite:///{tmp_path / 'runtime.db'}")
     registry = ProjectRegistry(runtime_root=tmp_path / "artifacts", database=database, execution_profile=profile)
 
-    def fake_package(source: Path, workspace: Path, gpu_index: int | None) -> Path:
+    def fake_package(source: Path, workspace: Path, gpu_index: int | None, **_: object) -> Path:
         workspace.mkdir(parents=True)
         (workspace / "scene.sog").write_bytes(sog_archive(sh_bands=3, count=4))
         return workspace / "scene.sog"

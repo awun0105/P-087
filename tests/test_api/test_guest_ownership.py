@@ -215,7 +215,11 @@ async def test_progress_returns_actor_specific_job_capabilities(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("role", "expected_delete"),
-    [("guest", [True, False]), ("editor", [True, True]), ("reviewer", [True, True])],
+    [
+        ("guest", [True, False, True]),
+        ("editor", [True, True, True]),
+        ("reviewer", [True, True, True]),
+    ],
 )
 async def test_import_list_returns_capability_for_guest_owner_and_higher_roles(
     client: AsyncClient,
@@ -230,7 +234,18 @@ async def test_import_list_returns_capability_for_guest_owner_and_higher_roles(
             upload_id="upload-guest",
             name="Guest import",
             input_kind="gaussian_ply",
-            status="READY",
+            status="FAILED",
+            operation={
+                "operation_id": "operation-guest-failed",
+                "status": "FAILED",
+                "attempt": 1,
+                "attempt_history": [],
+                "error": "temporary failure",
+                "failure_code": "runtime_failure",
+                "retryable": True,
+                "created_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),
+            },
             created_at=datetime.now(UTC),
             created_by="user-guest",
         ),
@@ -239,9 +254,38 @@ async def test_import_list_returns_capability_for_guest_owner_and_higher_roles(
             upload_id="upload-editor",
             name="Editor import",
             input_kind="gaussian_ply",
-            status="READY",
+            status="FAILED",
+            operation={
+                "operation_id": "operation-editor-failed",
+                "status": "FAILED",
+                "attempt": 1,
+                "attempt_history": [],
+                "error": "temporary failure",
+                "failure_code": "publication_failure",
+                "retryable": True,
+                "created_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),
+            },
             created_at=datetime.now(UTC),
             created_by="user-editor",
+        ),
+        ImportedScene(
+            import_id="import-guest-queued",
+            upload_id="upload-queued",
+            name="Guest queued import",
+            input_kind="gaussian_ply",
+            status="PACKAGING",
+            operation={
+                "operation_id": "operation-guest-queued",
+                "status": "QUEUED",
+                "attempt": 0,
+                "attempt_history": [],
+                "error": None,
+                "created_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),
+            },
+            created_at=datetime.now(UTC),
+            created_by="user-guest",
         ),
     ]
 
@@ -261,6 +305,82 @@ async def test_import_list_returns_capability_for_guest_owner_and_higher_roles(
     assert response.status_code == 200, response.text
     imports = response.json()["imports"]
     assert [item["capabilities"]["can_delete"] for item in imports] == expected_delete
+    assert [item["capabilities"]["can_retry"] for item in imports] == (
+        [True, False, False] if role == "guest" else [True, True, False]
+    )
+    assert [item["capabilities"]["can_cancel"] for item in imports] == (
+        [False, False, True] if role == "guest" else [False, False, True]
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("role", "owner_user_id", "expected_status"),
+    [
+        ("guest", "user-guest", 200),
+        ("guest", "user-editor", 403),
+        ("editor", "user-guest", 200),
+        ("reviewer", "user-guest", 200),
+    ],
+)
+@pytest.mark.parametrize("action", ["retry", "cancel"])
+async def test_import_retry_and_cancel_routes_enforce_owner_and_operator_roles(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    role: str,
+    owner_user_id: str,
+    expected_status: int,
+    action: str,
+) -> None:
+    user = _user(role)
+    now = datetime.now(UTC)
+    queued = action == "cancel"
+    record = ImportedScene(
+        import_id="import-target",
+        upload_id="upload-target",
+        name="Target import",
+        input_kind="gaussian_ply",
+        status="PACKAGING" if queued else "FAILED",
+        operation={
+            "operation_id": "operation-target",
+            "status": "QUEUED" if queued else "FAILED",
+            "attempt": 0 if queued else 1,
+            "attempt_history": [],
+            "error": None if queued else "temporary failure",
+            "failure_code": None if queued else "runtime_failure",
+            "retryable": None if queued else True,
+            "created_at": now,
+            "updated_at": now,
+        },
+        created_at=now,
+        created_by=owner_user_id,
+    )
+    calls: list[str] = []
+
+    class ImportCommands:
+        def get(self, import_id: str) -> ImportedScene:
+            assert import_id == record.import_id
+            return record
+
+        def retry(self, import_id: str) -> ImportedScene:
+            calls.append("retry")
+            return record
+
+        def cancel(self, import_id: str) -> ImportedScene:
+            calls.append("cancel")
+            return record
+
+    monkeypatch.setattr(imports_api, "_service", lambda: ImportCommands())
+    original_overrides = app.dependency_overrides.copy()
+    app.dependency_overrides[auth_api.require_contributor] = lambda: user
+    try:
+        response = await client.post(f"/api/v1/imports/{record.import_id}/{action}")
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(original_overrides)
+
+    assert response.status_code == expected_status, response.text
+    assert calls == ([action] if expected_status == 200 else [])
 
 
 @pytest.mark.asyncio
