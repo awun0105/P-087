@@ -423,11 +423,16 @@ def run_input_assembly(
         presets, presets_checksum = deps.presets()
         capability = deps.capability()
         params = request.processing or preset_values(presets, "minimum_quality")
+        observed = deps.observed_resource_budget(
+            registry,
+            params,
+            capability.gpu_name if capability is not None else None,
+        )
         try:
             processing = build_job_config(presets, presets_checksum, params, capability)
         except ValueError as error:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
-        if evaluate(presets, params, capability).blocking:
+        if evaluate(presets, params, capability, observed=observed).blocking:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Thông số vượt cấu hình máy xử lý và có thể crash; giảm các ô được tô đỏ",

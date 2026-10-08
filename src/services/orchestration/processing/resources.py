@@ -141,12 +141,20 @@ _LABEL: dict[Resource, str] = {"vram": "VRAM GPU", "ram": "RAM", "disk": "Ổ đ
 
 
 def evaluate(
-    presets: ProcessingPresets, params: dict[str, ParamValue], capability: MachineCapability | None
+    presets: ProcessingPresets,
+    params: dict[str, ParamValue],
+    capability: MachineCapability | None,
+    observed: dict[Literal["vram", "ram"], float] | None = None,
 ) -> Evaluation:
     """So ước lượng với máy worker; ô thông số gây đỏ/vàng được đánh dấu tương ứng."""
     model = presets.resource_model
     values = presets.validate_params(params)
     required = estimate_gb(model, values)
+    if observed is not None:
+        if "vram" in observed:
+            required["vram"] = observed["vram"]
+        if "ram" in observed:
+            required["ram"] = observed["ram"]
     available = _available(capability)
     capacity: dict[Resource, float | None] = {
         "vram": capability.vram_total_gb if capability else None,
@@ -168,7 +176,8 @@ def evaluate(
         if status == "unknown":
             message = f"Chưa đo được {_LABEL[resource]} của máy xử lý"
         else:
-            message = f"Cần khoảng {required[resource]:.1f} GB / máy có {have:.1f} GB {_LABEL[resource]}"
+            prefix = "Đã đo ở lượt chạy trước" if (observed is not None and resource in observed) else "Cần khoảng"
+            message = f"{prefix} {required[resource]:.1f} GB / máy có {have:.1f} GB {_LABEL[resource]}"
             if status == "danger":
                 if (
                     capability

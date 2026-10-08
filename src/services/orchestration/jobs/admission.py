@@ -39,6 +39,9 @@ from src.services.orchestration.processing.capability import (
     worker_identity,
 )
 from src.services.orchestration.processing.observed import (
+    PHASE_OPTIONAL_TOOLS,
+    PHASE_TOOLS,
+    Phase,
     exhausted_before,
     load_usages,
     numeric_params,
@@ -262,13 +265,6 @@ def touch_job_reservation(database: RuntimeDatabase, job_id: str) -> None:
                     continue
     except Exception as error:  # noqa: BLE001 - ghi heartbeat không được làm gián đoạn worker
         logger.debug("Không thể cập nhật heartbeat reservation cho job %s cause=%s", job_id, type(error).__name__)
-
-
-Phase = Literal["preview", "finalize"]
-#: Công cụ runner chạy trong mỗi lần nhận job; ngân sách đo được phải phủ hết các công cụ này.
-PHASE_TOOLS: dict[Phase, tuple[str, ...]] = {"preview": ("preview",), "finalize": ("finalize", "scene_extract")}
-#: Bước phụ trợ chạy cùng lần nhận job nhưng chỉ khi deployment bật (đề xuất tỉ lệ bằng MoGe-2).
-PHASE_OPTIONAL_TOOLS: dict[Phase, tuple[str, ...]] = {"preview": ("metric_proposal",), "finalize": ()}
 
 
 class Demand(BaseModel):

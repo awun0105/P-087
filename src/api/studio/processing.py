@@ -43,6 +43,12 @@ def get_processing_options() -> ProcessingOptions:
     presets, _ = deps.presets()
     capability = deps.capability()
     minimum = preset_values(presets, "minimum_quality")
+    registry = deps.registry()
+    observed = deps.observed_resource_budget(
+        registry,
+        minimum,
+        capability.gpu_name if capability is not None else None,
+    )
     return ProcessingOptions(
         profile_id=presets.profile_id,
         parameters=presets.parameters,
@@ -52,7 +58,7 @@ def get_processing_options() -> ProcessingOptions:
             "machine_maximum": maximum_for_machine(presets, capability),
         },
         capability=capability,
-        default_evaluation=evaluate(presets, minimum, capability),
+        default_evaluation=evaluate(presets, minimum, capability, observed=observed),
         resource_note=presets.resource_model.note,
     )
 
@@ -61,7 +67,14 @@ def get_processing_options() -> ProcessingOptions:
 def evaluate_processing(request: EvaluateRequest) -> Evaluation:
     """Ước lượng tài nguyên của bộ thông số so với máy worker (đỏ = có thể crash)."""
     presets, _ = deps.presets()
+    capability = deps.capability()
+    registry = deps.registry()
+    observed = deps.observed_resource_budget(
+        registry,
+        request.params,
+        capability.gpu_name if capability is not None else None,
+    )
     try:
-        return evaluate(presets, request.params, deps.capability())
+        return evaluate(presets, request.params, capability, observed=observed)
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error

@@ -179,3 +179,36 @@ def test_processing_seconds_counts_machine_time_only() -> None:
         _usage("preview", 1.0, 1.0, duration_seconds=5.0, job_id="job-c", outcome="failed", exit_code=1),
     ]
     assert processing_seconds(usages) == {"job-a": 60.0 + 300.0 + 90.0, "job-b": 10.0}
+
+
+def test_observed_for_config_returns_none_when_a_required_tool_is_unmeasured() -> None:
+    from src.services.orchestration.processing.observed import observed_for_config
+
+    preview = _usage("preview", 1.5, 2.0)
+    # Chỉ có preview (thiếu finalize và scene_extract) -> None
+    assert (
+        observed_for_config(
+            [preview],
+            params=JOB,
+            gpu_name="T4",
+            runtime_manifest_checksum="runtime-1",
+        )
+        is None
+    )
+
+
+def test_observed_for_config_uses_resource_maxima_across_phases() -> None:
+    from src.services.orchestration.processing.observed import observed_for_config
+
+    preview = _usage("preview", 1.5, 2.0)
+    finalize = _usage("finalize", 0.5, 1.0)
+    extract = _usage("scene_extract", 2.2, 4.5)
+    # Đủ cả preview, finalize, scene_extract -> max(preview, finalize/extract)
+    # vram: max(1.5, 2.2) = 2.2
+    # ram: max(2.0, 4.5) = 4.5
+    assert observed_for_config(
+        [preview, finalize, extract],
+        params=JOB,
+        gpu_name="T4",
+        runtime_manifest_checksum="runtime-1",
+    ) == {"vram": 2.2, "ram": 4.5}

@@ -178,7 +178,12 @@ def create_scene_from_upload(
         capability = deps.capability()
         params = request.processing or preset_values(presets, "minimum_quality")
         try:
-            evaluation = evaluate(presets, params, capability)
+            observed = deps.observed_resource_budget(
+                registry,
+                params,
+                capability.gpu_name if capability is not None else None,
+            )
+            evaluation = evaluate(presets, params, capability, observed=observed)
             processing = build_job_config(presets, presets_checksum, params, capability)
         except ValueError as error:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error

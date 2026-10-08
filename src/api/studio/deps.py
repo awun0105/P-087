@@ -4,6 +4,8 @@ Route gọi hàm trong module này (không import thẳng `get_settings`) nên t
 `deps.get_settings` / `deps.get_project_registry` là đủ cho mọi route.
 """
 
+from typing import Literal
+
 from fastapi import HTTPException, status
 
 from src.config import Settings, get_settings
@@ -18,6 +20,8 @@ from src.services.orchestration.processing import (
     load_presets,
 )
 from src.services.orchestration.processing.capability import latest as latest_capability
+from src.services.orchestration.processing.models import ParamValue
+from src.services.orchestration.processing.observed import load_usages, observed_for_config
 from src.services.orchestration.projects import ProjectRegistry, get_project_registry
 from src.services.orchestration.samples import DemoLibrary
 from src.services.orchestration.storage import runtime_resolver
@@ -100,6 +104,28 @@ def presets() -> tuple[ProcessingPresets, str]:
 def capability() -> MachineCapability | None:
     """Lần đo máy worker gần nhất còn hạn (None nếu worker chưa báo)."""
     return latest_capability(RuntimeDatabase(settings().database_url))
+
+
+def observed_resource_budget(
+    project_registry: ProjectRegistry,
+    params: dict[str, ParamValue],
+    gpu_name: str | None,
+) -> dict[Literal["vram", "ram"], float] | None:
+    """Số đo job cùng GPU/runtime; checksum lấy từ profile mà create_job sẽ gắn."""
+    profile = project_registry.execution_profile
+    if profile is None:
+        return None
+    database = (
+        project_registry.persistence.database
+        if project_registry.persistence is not None
+        else RuntimeDatabase(settings().database_url)
+    )
+    return observed_for_config(
+        load_usages(database),
+        params=params,
+        gpu_name=gpu_name,
+        runtime_manifest_checksum=profile.runtime_manifest_checksum,
+    )
 
 
 def preview_ready(project_registry: ProjectRegistry, job_id: str) -> bool:

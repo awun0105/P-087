@@ -378,8 +378,8 @@ Tests: `tests/test_orchestration/test_observed_budget.py`,
 `tests/integration/test_studio_processing_job.py`.
 
 **Exit:**
-- [ ] Năm test trên pass; các test hiện có của admission không đổi kỳ vọng.
-- [ ] Result ghi rõ `runtime_manifest_checksum` lấy từ đâu ở từng nơi gọi.
+- [x] Năm test trên pass; các test hiện có của admission không đổi kỳ vọng.
+- [x] Result ghi rõ `runtime_manifest_checksum` lấy từ đâu ở từng nơi gọi.
 
 ---
 
@@ -663,4 +663,26 @@ phép để UNVERIFIED kèm ghi chú cho tới đợt thuê máy đầu tiên.
   - `ruff format --check`: pass
   - `pytest tests/test_orchestration/test_processing_config.py tests/test_api/test_studio_routes.py -v`: 43 passed.
 
+### Sprint AUD-26.S3 (2026-10-09)
+
+- **Commit base:** `1ad03e2`
+- **Changed files:**
+  - `src/services/orchestration/processing/observed.py`: định nghĩa `Phase`, `PHASE_TOOLS`, `PHASE_OPTIONAL_TOOLS`, thêm hàm `observed_for_config`.
+  - `src/services/orchestration/jobs/admission.py`: import `Phase`, `PHASE_TOOLS`, `PHASE_OPTIONAL_TOOLS` từ `observed.py`, xóa định nghĩa trùng.
+  - `src/services/orchestration/processing/resources.py`: cập nhật chữ ký `evaluate` nhận `observed: dict[Literal["vram", "ram"], float] | None = None`, dùng số đo cho RAM/VRAM và cập nhật prefix message thành "Đã đo ở lượt chạy trước".
+  - `src/api/studio/deps.py`: thêm helper lấy số đo theo GPU và runtime từ cùng DB runtime, dùng `execution_profile` làm nguồn checksum.
+  - `src/api/studio/scenes.py` và `assemblies.py`: dùng helper chung trước khi đánh giá cấu hình tạo job.
+  - `src/api/studio/processing.py`: dùng helper cho đánh giá mặc định trong `get_processing_options` và cấu hình gửi tới `evaluate_processing`; `machine_maximum` vẫn không dùng số đo.
+  - `tests/test_orchestration/test_observed_budget.py`: kiểm tra thiếu tool bắt buộc trả `None` và ngân sách đủ hai phase lấy max theo từng tài nguyên.
+  - `tests/test_orchestration/test_processing_config.py`: kiểm tra giữ nguyên kết quả khi `observed=None`, đánh giá số đo, và so sánh API evaluate với admission trên cùng DB.
+- **Nguồn `runtime_manifest_checksum` ở từng nơi gọi:**
+  - Ba route `scenes.py`, `assemblies.py`, và `processing.py` truyền registry vào `deps.observed_resource_budget`. Helper lấy `registry.execution_profile.runtime_manifest_checksum`, đúng cùng profile mà `ProjectRegistry._build_queued_job` chép vào manifest của job mới.
+  - Nếu `execution_profile` chưa có ở các route evaluate thì helper trả `None`; `evaluate` giữ estimate heuristic. Hai route tạo job đã chặn thiếu execution profile trước điểm này.
+- **Giới hạn còn lại:** khi lịch sử không khớp GPU/runtime hoặc thiếu phép đo preview/finalize (gồm `scene_extract`), UI giữ ước lượng heuristic; không có số đo đủ thì không suy diễn.
+- **Verification:**
+  - `ruff check`: pass
+  - `ruff format --check`: pass
+  - `pytest tests/test_orchestration/test_observed_budget.py tests/test_orchestration/test_processing_config.py tests/test_orchestration/test_resource_admission.py tests/test_api/test_studio_routes.py tests/integration/test_studio_processing_job.py -q`: 104 passed.
+  - Chrome DevTools: trang `http://localhost:3010/new` render; `GET /api/v1/processing/options` và `POST /api/v1/processing/evaluate` trả HTTP 200; console không có lỗi/cảnh báo. Live worker không có lịch sử khớp nên API trả nội dung estimate `Cần khoảng`; không tạo job trong kiểm tra này.
+  - CodeGraph sync: 870 files, 17,182 nodes, 50,548 edges; Graphify update hoàn tất: 20,461 nodes, 59,599 edges, 713 communities.
 

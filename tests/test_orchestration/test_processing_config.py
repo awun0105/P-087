@@ -354,3 +354,134 @@ def test_resource_model_calibrated_against_real_measurements() -> None:
     # Chặn trên: RAM preset tối đa nguyên bản (1200 frame) < 12 GB (không quay lại lỗi 87.6 GB)
     est_max = estimate_gb(model, max_params)
     assert est_max["ram"] < 12.0
+
+
+def test_evaluate_without_observations_preserves_estimated_result() -> None:
+    presets, _ = load_presets(PRESETS)
+    params = preset_values(presets, "minimum_quality")
+    machine = _machine(vram=4, ram=8, disk=100)
+
+    # evaluate(..., observed=None) cho kết quả bằng đúng kết quả trước sprint (so cả object)
+    eval_default = evaluate(presets, params, machine)
+    eval_none = evaluate(presets, params, machine, observed=None)
+    assert eval_none == eval_default
+
+
+def test_evaluate_uses_observed_budget_for_vram_and_ram() -> None:
+    presets, _ = load_presets(PRESETS)
+    params = preset_values(presets, "minimum_quality")
+    machine = _machine(vram=4, ram=8, disk=100)
+
+    # evaluate(..., observed={"vram": 3.42, "ram": 5.19}) trên máy 4 GB VRAM:
+    # tài nguyên VRAM ở trạng thái warn (3.42 / 4 = 0.855), không blocking
+    eval_observed = evaluate(presets, params, machine, observed={"vram": 3.42, "ram": 5.19})
+    assert not eval_observed.blocking
+    vram_est = next(r for r in eval_observed.resources if r.resource == "vram")
+    ram_est = next(r for r in eval_observed.resources if r.resource == "ram")
+    assert vram_est.status == "warn"
+    assert vram_est.required_gb == 3.42
+    assert "Đã đo ở lượt chạy trước 3.4 GB" in vram_est.message
+    assert ram_est.required_gb == 5.19
+    assert "Đã đo ở lượt chạy trước 5.2 GB" in ram_est.message
+
+
+def test_integration_evaluate_and_admission_agree_on_observed_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cùng DB có lịch sử, API evaluate và ResourceAdmission._demand cho cùng required RAM/VRAM."""
+    from src.api.studio import deps
+    from src.api.studio.processing import EvaluateRequest, evaluate_processing
+    from src.config import Settings
+    from src.services.orchestration.jobs.admission import ResourceAdmission
+    from src.services.orchestration.processing.observed import numeric_params
+    from src.services.orchestration.processing.telemetry import ResourceUsage
+    from src.services.orchestration.projects.models import JobCreateInput
+    from tests.test_orchestration.test_prepared_queue import _attach_frames, _frame_stage, _registry
+
+    registry = _registry(tmp_path / "runtime")
+    presets, checksum = load_presets(PRESETS)
+    min_params = preset_values(presets, "minimum_quality")
+    config = build_job_config(presets, checksum, min_params, None)
+    job = registry.create_job(JobCreateInput(project_id="project-fixture-001"), config)
+    job = _attach_frames(registry, job, _frame_stage(job.job_id))
+
+    # Ghi log đo đạc cho preview và cả hai công cụ của phase finalize.
+    num_p = numeric_params(min_params)
+    db = registry.persistence.database
+    now = datetime.now(UTC)
+
+    def _make_usage(tool: str, vram: float, ram: float) -> ResourceUsage:
+        return ResourceUsage(
+            job_id="job-hist",
+            attempt_id="att-hist",
+            tool=tool,
+            config_checksum=job.config_checksum,
+            runtime_manifest_checksum=job.runtime_manifest_checksum,
+            params=num_p,
+            gpu_name="NVIDIA GeForce RTX 4090",
+            shared_gpu=False,
+            started_at=now,
+            completed_at=now,
+            outcome="completed",
+            exit_code=0,
+            duration_seconds=10.0,
+            sample_count=1,
+            ram_sample_count=1,
+            vram_sample_count=1,
+            gpu_sample_count=1,
+            scratch_sample_count=1,
+            peak_ram_gb=ram,
+            peak_vram_gb=vram,
+            headroom_before={},
+        )
+
+    usages = [
+        _make_usage("preview", 3.5, 4.0),
+        _make_usage("finalize", 2.0, 3.0),
+        _make_usage("scene_extract", 3.0, 5.5),
+    ]
+    with db.transaction(write=True) as tx:
+        for idx, u in enumerate(usages):
+            tx.execute(
+                "INSERT INTO r2s_resource_usage(usage_id,job_id,recorded_at,payload) VALUES (?,?,?,?)",
+                (f"u-{idx}", u.job_id, now.isoformat(), u.model_dump_json()),
+            )
+
+    record(
+        db,
+        MachineCapability(
+            worker_id="worker-1",
+            measured_at=now,
+            gpu_name="NVIDIA GeForce RTX 4090",
+            vram_total_gb=24.0,
+            cpu_count=16,
+            ram_total_gb=32.0,
+            disk_free_gb=500.0,
+        ),
+    )
+
+    settings = Settings(
+        _env_file=None,
+        database_url=f"sqlite:///{tmp_path / 'runtime' / 'runtime.db'}",
+        product_processing_config=PRESETS,
+        product_runtime_manifest=PRESETS.parents[2] / "fixtures/mock_job/runtime_manifest.json",
+        product_worker_root=tmp_path / "workers",
+    )
+    monkeypatch.setattr(deps, "settings", lambda: settings)
+    monkeypatch.setattr(deps, "registry", lambda: registry)
+
+    eval_res = evaluate_processing(EvaluateRequest(params=min_params))
+    vram_api = next(r for r in eval_res.resources if r.resource == "vram").required_gb
+    ram_api = next(r for r in eval_res.resources if r.resource == "ram").required_gb
+
+    gate = ResourceAdmission(registry, settings)
+    demand_preview = gate._demand(job, "preview", "NVIDIA GeForce RTX 4090")
+    demand_finalize = gate._demand(job, "finalize", "NVIDIA GeForce RTX 4090")
+    assert demand_preview is not None and demand_preview.measured
+    assert demand_finalize is not None and demand_finalize.measured
+
+    max_demand_vram = max(demand_preview.required_gb["vram"], demand_finalize.required_gb["vram"])
+    max_demand_ram = max(demand_preview.required_gb["ram"], demand_finalize.required_gb["ram"])
+
+    assert vram_api == max_demand_vram == 3.5
+    assert ram_api == max_demand_ram == 5.5
