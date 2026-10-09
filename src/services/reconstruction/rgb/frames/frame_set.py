@@ -38,6 +38,8 @@ class NormalizedRGBFrameSet(ContractModel):
     video_preparation: ServerVideoPreparationVerification | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    #: Có khi các ảnh của frame set là bản đã che khuôn mặt/biển số (AUD-18): checksum của SanitizationManifest.
+    sanitization_manifest_checksum: Checksum | None = Field(default=None, exclude_if=lambda value: value is None)
     frame_set_checksum: Checksum
 
     @model_validator(mode="after")

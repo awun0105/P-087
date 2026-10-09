@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     product_geometry_gpu_index: int | None = Field(default=None, ge=0)
     #: Runtime SAM2 cho tách vật thể (ADR 0006); thiếu thì dùng fallback hình học.
     product_scene_runtime_python: Path | None = None
+    #: Che khuôn mặt/biển số trên frame trước khi dựng 3D (AUD-18). Cần `product_scene_runtime_python` và
+    #: `product_egoblur_weights`; bật mà thiếu thì job lỗi ở bước tách frame, không chạy trên frame gốc.
+    product_anonymize_input: bool = False
+    #: Thư mục chứa `ego_blur_face_gen2.jit` và `ego_blur_lp_gen2.jit`.
+    product_egoblur_weights: Path | None = None
     product_sam2_checkpoint: Path | None = None
     product_scene_timeout_seconds: float = Field(default=1800, gt=0, allow_inf_nan=False)
     #: Pipeline v2 (ADR 0007): trọng số LaMa TorchScript cho vá nền; thiếu thì dùng cv2.inpaint.
