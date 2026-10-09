@@ -144,14 +144,29 @@ def anonymizer_available() -> bool:
     )
 
 
+def anonymize_enforced() -> bool:
+    """Deployment bắt buộc che cho mọi video: chế độ `qa_verified`, hoặc PRODUCT_ANONYMIZE_INPUT khi có bộ che."""
+    current = settings()
+    if getattr(current, "product_privacy_mode", None) == "qa_verified":
+        return True
+    return anonymizer_available() and getattr(current, "product_anonymize_input", False)
+
+
 def require_anonymize(requested: bool) -> bool:
     """Giá trị `anonymize` ghi vào cấu hình job; yêu cầu che trên deployment không có anonymizer bị từ chối."""
-    if requested and not anonymizer_available():
+    if anonymizer_available():
+        return requested or anonymize_enforced()
+    if getattr(settings(), "product_privacy_mode", None) == "qa_verified":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Hệ thống yêu cầu che khuôn mặt/biển số cho mọi video nhưng máy xử lý chưa có bộ che; báo quản trị viên",
+        )
+    if requested:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Máy xử lý chưa cấu hình bộ che khuôn mặt/biển số; bỏ chọn tự động che hoặc báo quản trị viên",
         )
-    return requested or (anonymizer_available() and getattr(settings(), "product_anonymize_input", False))
+    return False
 
 
 def preview_ready(project_registry: ProjectRegistry, job_id: str) -> bool:

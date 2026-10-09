@@ -67,7 +67,7 @@ def get_processing_options() -> ProcessingOptions:
         default_evaluation=evaluate(presets, minimum, capability, observed=observed),
         resource_note=presets.resource_model.note,
         anonymize_available=deps.anonymizer_available(),
-        anonymize_enforced=deps.anonymizer_available() and getattr(settings, "product_anonymize_input", False),
+        anonymize_enforced=deps.anonymize_enforced(),
     )
 
 

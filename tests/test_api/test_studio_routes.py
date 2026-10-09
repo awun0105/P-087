@@ -973,6 +973,18 @@ async def test_anonymize_option_is_offered_and_recorded_only_with_a_configured_a
     assert (await client.get("/api/v1/processing/options")).json()["anonymize_available"] is True
     assert stored(await create("Che qua worker từ xa", anonymize=True))["anonymize"] is True
 
+    # `qa_verified`: mọi video bị che dù người dùng không chọn, và form hiện ô chọn ở trạng thái bắt buộc.
+    studio.settings.product_privacy_mode = "qa_verified"
+    assert (await client.get("/api/v1/processing/options")).json()["anonymize_enforced"] is True
+    forced = await create("Bắt buộc che theo chế độ")
+    assert forced.status_code == 201 and stored(forced)["anonymize"] is True
+    assert studio.registry.get_project(forced.json()["project"]["project_id"]).privacy_mode == "qa_verified"
+    # Thiếu bộ che thì chế độ này không tạo được scene, kèm lý do nói rõ cho người dùng.
+    studio.settings.product_anonymize_remote_worker = False
+    blocked = await create("Không có bộ che")
+    assert blocked.status_code == 409 and "bộ che" in blocked.json()["detail"]
+    studio.settings.product_privacy_mode, studio.settings.product_anonymize_remote_worker = "self_attested", True
+
     # Deployment bắt buộc: job không chọn vẫn được ghi là có che.
     studio.settings.product_anonymize_input = True
     assert (await client.get("/api/v1/processing/options")).json()["anonymize_enforced"] is True

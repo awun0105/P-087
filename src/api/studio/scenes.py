@@ -162,11 +162,8 @@ def create_scene_from_upload(
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
             return SceneFromUploadResponse(project=schemas.project_response(project), job=duplicate)
 
-    if settings.product_privacy_mode != "self_attested":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Video upload cần QA xác nhận ẩn danh; đặt PRODUCT_PRIVACY_MODE=self_attested cho MVP",
-        )
+    # `qa_verified`: mọi video phải qua bộ che và được người upload chấp nhận; thiếu bộ che thì từ chối ngay.
+    deps.require_anonymize(request.anonymize)
     if registry.execution_profile is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
