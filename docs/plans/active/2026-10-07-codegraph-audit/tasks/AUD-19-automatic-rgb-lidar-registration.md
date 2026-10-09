@@ -1417,7 +1417,8 @@ qualification and Isaac/collision acceptance remain open.
 
 ### AUD-19.S4o — Publish a confirmed registration into the reconstruction bundle
 
-**Status:** Planned; not implemented. This is the consumer sprint after S4n.
+**Status:** Local implementation complete. Browser, held-out registration quality,
+and Isaac/collision acceptance remain open gates.
 
 **Input:** a `CONFIRMED` operation plus its exact source operation checksum,
 selected candidate, immutable scene revision, QA `PASS`, verified proposal/overlay,
@@ -1452,17 +1453,17 @@ manifest CAS; exercise duplicate and concurrent publication; prove SceneIR's
 canonical RGB ref and collision selection are unchanged; retain existing
 sensor-package REC-09/REC-10 regressions.
 
-**Exit:** [ ] operation reaches `COMMITTED` only after exact alignment and bundle
-publication; [ ] retries resolve to identical artifact identities; [ ] stale or
-tampered inputs leave manifest and bundle head unchanged; [ ] canonical RGB and
-collision source are unchanged; [ ] bundle consumers reload the exact alignment
+**Exit:** [x] operation reaches `COMMITTED` only after exact alignment and bundle
+publication; [x] replay and concurrent immutable artifact publication converge on
+the same identities; [x] stale scene/manifest and tampered alignment evidence are
+rejected without advancing the current manifest head; [x] canonical RGB and
+collision source are unchanged; [x] bundle consumers reload the exact alignment
 evidence. Held-out map/browser and Isaac collision acceptance remain separate gates.
 
 ### Result / Evidence — AUD-19.S4n
 
-- **State:** Local implementation complete; commit pending. S4o consumer
-  publication, registered-map quality qualification and production evidence remain
-  open.
+- **State:** Committed as `a4dbe647`. S4o consumer publication is complete locally;
+  registered-map quality qualification and production evidence remain open.
 - **Base:** `c3c9b244` (AUD-23 real-capture audit record already on the branch).
 - **Implementation:** durable operation checksum CAS, checksum-compatible optional
   confirmation fields, authorized confirm API, and selected-overlay UI. Confirmation
@@ -1477,3 +1478,32 @@ evidence. Held-out map/browser and Isaac collision acceptance remain separate ga
   scene's Review tab, but its `/api/v1/jobs/job-6bc02e5de4ed/scene` request returned
   HTTP 404, so no committed-scene confirmation rendering could be exercised.
   Held-out registration quality and Isaac/collision acceptance were not claimed.
+
+### Result / Evidence — AUD-19.S4o
+
+- **State:** Local implementation complete. DevTools, held-out registration quality,
+  and Isaac/collision acceptance remain unverified.
+- **Implementation:** the committer revalidates the confirmed operation, QA,
+  proposal, overlay, source, metric bundle proof, scene revision, and exact artifact
+  bytes; publishes metric LiDAR geometry, a REC-09 `AlignmentRecord`, and a mixed
+  `ReconstructionBundle`; advances the completed job manifest with manifest and
+  scene-head CAS; then records `COMMITTED` with exact output refs/checksums.
+  Replay recovers the same publication. The RGB canonical geometry and current
+  SceneIR/collision selection remain unchanged. Bundle consumers verify the exact
+  published REC-09 request and its embedded record binding.
+- **Verification:** focused registration/REC-09/REC-10 backend suites: **127
+  passed**; frontend registration API/panel tests: **20 passed**; `ruff check
+  src/ tests/`, `ruff format --check src/ tests/`, changed-file ESLint, frontend
+  typecheck, `PYTHONPATH=. python scripts/check_foundation.py`, and `git diff
+  --check` passed. CodeGraph is current (**935 files, 19,261 nodes, 58,373
+  edges**). `graphify update .` completed (**22,013 nodes, 67,506 edges, 738
+  communities**).
+- **Concurrency/CAS regressions:** identical concurrent artifact writes converge
+  to one byte/ref identity; stale job-manifest publication is rejected while the
+  current job manifest and scene revision remain unchanged; commit replay returns
+  the exact committed refs.
+- **Chrome DevTools:** **UNVERIFIED**. MCP is connected, but its tab was blank and
+  `http://localhost:3010/login` returned `ERR_CONNECTION_REFUSED`; local runtime
+  data has no registration operations to display. No browser claim is made.
+  Held-out map/source-floor quality, GPU production behavior, and Isaac collision
+  acceptance remain outside this local synthetic verification.

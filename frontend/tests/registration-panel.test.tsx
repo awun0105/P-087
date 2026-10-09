@@ -281,7 +281,7 @@ describe("registration panel", () => {
       expected_scene_revision: "rev-001",
       candidate_id: "candidate-1",
     });
-    expect(screen.getByText(/chưa được ghi vào SceneIR hoặc collision mesh/)).toBeInTheDocument();
+    expect(screen.getByText(/đang công bố bản bundle đã căn chỉnh/)).toBeInTheDocument();
   });
 
   it("does not enqueue when the server reports insufficient preflight", async () => {

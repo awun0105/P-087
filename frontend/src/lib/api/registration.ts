@@ -79,6 +79,9 @@ export interface RegistrationOperation {
   confirmed_candidate_id?: string | null;
   confirmed_by_user_id?: string | null;
   confirmed_at?: string | null;
+  committed_bundle_ref?: JsonObject | null;
+  committed_alignment_ref?: JsonObject | null;
+  committed_manifest_checksum?: string | null;
 }
 
 export interface RegistrationConfirmationPayload {
@@ -206,11 +209,21 @@ export function parseRegistrationOperation(value: unknown, jobId: string): Regis
     || (value.confirmed_by_user_id !== undefined && value.confirmed_by_user_id !== null
       && typeof value.confirmed_by_user_id !== "string")
     || (value.confirmed_at !== undefined && value.confirmed_at !== null && typeof value.confirmed_at !== "string")
+    || (value.committed_bundle_ref !== undefined && value.committed_bundle_ref !== null
+      && !isRecord(value.committed_bundle_ref))
+    || (value.committed_alignment_ref !== undefined && value.committed_alignment_ref !== null
+      && !isRecord(value.committed_alignment_ref))
+    || (value.committed_manifest_checksum !== undefined && value.committed_manifest_checksum !== null
+      && (typeof value.committed_manifest_checksum !== "string" || !CHECKSUM.test(value.committed_manifest_checksum)))
     || ((value.state === "CONFIRMED" || value.state === "COMMITTED")
       && (typeof value.operation_checksum !== "string" || !CHECKSUM.test(value.operation_checksum)
         || typeof value.confirmed_candidate_id !== "string"
         || typeof value.confirmed_by_user_id !== "string"
         || typeof value.confirmed_at !== "string"))
+    || (value.state === "COMMITTED"
+      && (!isRecord(value.committed_bundle_ref) || !isRecord(value.committed_alignment_ref)
+        || typeof value.committed_manifest_checksum !== "string"
+        || !CHECKSUM.test(value.committed_manifest_checksum)))
     || (value.proposal_ref !== null && !isRecord(value.proposal_ref))
     || (value.qa_report_ref !== null && !isRecord(value.qa_report_ref))
   ) {

@@ -16,8 +16,15 @@ import numpy as np
 
 from src.config import Settings
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
+from src.models.contracts.coordinates import CoordinateSystem
 from src.models.contracts.identity import artifact_model_payload, canonical_content_checksum
 from src.models.contracts.manifests import StageId
+from src.models.contracts.reconstruction import (
+    DependencyOrigin,
+    LiDARGeometryArtifact,
+    PreprocessingDependency,
+    PreprocessingProvenance,
+)
 from src.models.contracts.rgb_lidar_registration import (
     RegistrationFindingCode,
     RegistrationInputMode,
@@ -81,6 +88,7 @@ from src.services.reconstruction.alignment.source_planes import (
     SourcePlaneHypothesisReport,
     discover_source_plane_hypotheses,
 )
+from src.services.reconstruction.lidar.models import LiDARIngestRequest
 
 logger = logging.getLogger(__name__)
 
@@ -303,6 +311,18 @@ class RegistrationOperationWorker:
                     [item.refined.candidate for item in measured],
                 )
                 proposal_ref = self._publish_model_artifact(operation, proposal, "proposal.json")
+                metric_lidar_refs: list[ProductArtifactRef] = []
+                if proposal_state == RegistrationProposalState.PROPOSED:
+                    metric_lidar_ref, metric_lidar_metadata_ref = self._publish_metric_lidar(
+                        operation,
+                        verified_source,
+                        source_points,
+                        source_ref,
+                        source_manifest_ref,
+                        proposal_ref,
+                        workspace,
+                    )
+                    metric_lidar_refs.extend((metric_lidar_ref, metric_lidar_metadata_ref))
                 overlay_refs: list[ProductArtifactRef] = []
                 for candidate in proposal.candidates:
                     self._check_cancelled(heartbeat)
@@ -348,7 +368,13 @@ class RegistrationOperationWorker:
                     same_scene_verified=same_scene_verified,
                     # Qualification records are not yet loaded by this worker; fail closed.
                     server_qualification_verified=False,
-                    evidence_refs=[source_manifest_ref, source_planes_ref, worker_diagnostics_ref, *overlay_refs],
+                    evidence_refs=[
+                        source_manifest_ref,
+                        source_planes_ref,
+                        worker_diagnostics_ref,
+                        *metric_lidar_refs,
+                        *overlay_refs,
+                    ],
                 )
                 qa_ref = self._publish_model_artifact(operation, qa_report, "qa-report.json")
                 self._check_cancelled(heartbeat)
@@ -392,7 +418,7 @@ class RegistrationOperationWorker:
         baseline = self.admission.operation_profile_for_job(job, gpu_required=False)
         points = max(source.point_count, 1)
         ram_floor = 0.5 + points * _METER_BYTES_PER_SOURCE_POINT / _GIB + target_size * _TARGET_RAM_MULTIPLIER / _GIB
-        disk_floor = 0.1 + 2.0 * source_size / _GIB
+        disk_floor = 0.1 + (2.0 * source_size + source.point_count * 12) / _GIB
         ram = self._rounded_gb(max(ram_floor, baseline.required_gb["ram"] or 0.0))
         disk = self._rounded_gb(max(disk_floor, baseline.required_gb["disk"] or 0.0))
         measured = bool(
@@ -523,6 +549,128 @@ class RegistrationOperationWorker:
         )
         self._publish_immutable(manifest_ref, manifest_payload)
         return cloud_ref, manifest_ref
+
+    def _publish_metric_lidar(
+        self,
+        operation: RegistrationOperationRecord,
+        source: VerifiedRegistrationSource,
+        points_m: np.ndarray,
+        source_ref: ProductArtifactRef,
+        source_manifest_ref: ProductArtifactRef,
+        proposal_ref: ProductArtifactRef,
+        workspace: Path,
+    ) -> tuple[ProductArtifactRef, ProductArtifactRef]:
+        """Publish the exact source map normalized to metres for REC-09/REC-10."""
+        if points_m.ndim != 2 or points_m.shape[1] != 3 or not len(points_m):
+            raise RegistrationSourceResolutionError("normalized registration cloud has an invalid XYZ shape")
+        if len(points_m) != source.point_count or not np.isfinite(points_m).all():
+            raise RegistrationSourceResolutionError("normalized registration cloud differs from its verified source")
+        path = workspace / "registered_lidar_metric.ply"
+        header = (
+            "ply\nformat binary_little_endian 1.0\n"
+            f"element vertex {len(points_m)}\n"
+            "property float x\nproperty float y\nproperty float z\nend_header\n"
+        ).encode("ascii")
+        try:
+            with path.open("xb") as stream:
+                stream.write(header)
+                chunk_size = 131_072
+                for start in range(0, len(points_m), chunk_size):
+                    block = np.asarray(points_m[start : start + chunk_size], dtype="<f4")
+                    if not np.isfinite(block).all():
+                        raise RegistrationSourceResolutionError("normalized LiDAR coordinates exceed the metric format")
+                    stream.write(block.tobytes(order="C"))
+        except OSError as error:
+            raise RegistrationSourceResolutionError("could not stage the metric LiDAR artifact") from error
+
+        payload = path.read_bytes()
+        checksum = sha256_bytes(payload)
+        provenance = PreprocessingProvenance(
+            ground_truth_assisted=False,
+            dependencies=[
+                PreprocessingDependency(
+                    role="registration_source_cloud",
+                    origin=DependencyOrigin.EXTERNAL,
+                    source_checksum=source_ref.artifact_checksum,
+                ),
+                PreprocessingDependency(
+                    role="registration_source_manifest",
+                    origin=DependencyOrigin.EXTERNAL,
+                    source_checksum=source_manifest_ref.artifact_checksum,
+                ),
+                PreprocessingDependency(
+                    role="registration_proposal",
+                    origin=DependencyOrigin.ESTIMATED,
+                    source_checksum=proposal_ref.artifact_checksum,
+                ),
+            ],
+            details={
+                "registration_operation_id": operation.operation_id,
+                "registration_request_checksum": operation.request_checksum,
+                "source_distance_unit": source.distance_unit,
+                "normalized_distance_unit": "m",
+                "source_frame": source.source_frame,
+                "coordinate_semantics": "local_map_unaligned",
+                "serialization": "binary_little_endian_float32_xyz_v1",
+            },
+        )
+        ingest_request = LiDARIngestRequest(
+            job_id=operation.target_job_id,
+            lidar_file=path,
+            source_input_checksum=checksum,
+            geometry_format="ply",
+            coordinate_system=CoordinateSystem(),
+            source_frame=source.source_frame,
+            preprocessing_provenance=provenance,
+            max_points=operation.request.profile.max_source_points,
+        )
+        stats = ingest_request.validate_payload()
+        if stats.point_count != len(points_m):
+            raise RegistrationSourceResolutionError("metric LiDAR artifact point count changed during publication")
+
+        prefix = (
+            f"artifact://jobs/{operation.target_job_id}/rec08/registration/"
+            f"{operation.operation_id}/{checksum.removeprefix('sha256:')}"
+        )
+        geometry_ref = ProductArtifactRef(
+            artifact_type="LiDARGeometryArtifact",
+            schema_version="1.0",
+            artifact_uri=f"{prefix}/lidar.ply",
+            artifact_checksum=checksum,
+            data_class=ArtifactDataClass.DERIVED,
+            producer_stage=StageId.LIDAR_INGEST,
+            job_id=operation.target_job_id,
+            source_provenance=provenance.model_dump(mode="json"),
+        )
+        artifact = LiDARGeometryArtifact(
+            artifact_type="LiDARGeometryArtifact",
+            schema_version="1.0",
+            artifact_uri=geometry_ref.artifact_uri,
+            artifact_checksum=geometry_ref.artifact_checksum,
+            producer_stage=StageId.LIDAR_INGEST,
+            job_id=operation.target_job_id,
+            source_modality="registered_lidar",
+            source_input_checksum=checksum,
+            geometry_format="ply",
+            coordinate_system=CoordinateSystem(),
+            source_frame=source.source_frame,
+            declared_transform_to_canonical=None,
+            preprocessing_provenance=provenance,
+        )
+        metadata_payload = artifact.model_dump_json(indent=2).encode("utf-8") + b"\n"
+        metadata_ref = ProductArtifactRef(
+            artifact_type="LiDARGeometryMetadata",
+            schema_version="1.0",
+            artifact_uri=f"{prefix}/lidar_geometry.json",
+            artifact_checksum=sha256_bytes(metadata_payload),
+            data_class=ArtifactDataClass.DERIVED,
+            producer_stage=StageId.LIDAR_INGEST,
+            job_id=operation.target_job_id,
+            source_provenance=provenance.model_dump(mode="json"),
+        )
+        self._publish_immutable(geometry_ref, payload)
+        self._publish_immutable(metadata_ref, metadata_payload)
+        return geometry_ref, metadata_ref
 
     def _copy_exact_source(self, source_path: Path, reference: ProductArtifactRef, cancel_event: Event) -> None:
         try:

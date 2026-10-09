@@ -138,6 +138,7 @@ from src.models.contracts.release import (
 )
 from src.models.contracts.rgb_lidar_registration import (
     RegistrationCandidate,
+    RegistrationConfirmationRecord,
     RegistrationFindingCode,
     RegistrationInputMode,
     RegistrationOperationState,
@@ -155,6 +156,7 @@ from src.models.contracts.rgb_lidar_registration import (
     RegistrationSourceBinding,
     RegistrationSourceCloudManifest,
     registration_preflight,
+    seal_registration_confirmation,
     seal_registration_profile,
     seal_registration_proposal,
     seal_registration_qa_report,
@@ -268,6 +270,7 @@ __all__ = [
     "PreflightReport",
     "PrivacyValidationReport",
     "RegistrationCandidate",
+    "RegistrationConfirmationRecord",
     "RegistrationFindingCode",
     "RegistrationInputMode",
     "RegistrationOperationState",
@@ -380,6 +383,7 @@ __all__ = [
     "seal_registration_proposal",
     "seal_registration_profile",
     "seal_registration_qa_report",
+    "seal_registration_confirmation",
     "seal_registration_request",
     "seal_registration_source_cloud_manifest",
     "seal_input_assembly",

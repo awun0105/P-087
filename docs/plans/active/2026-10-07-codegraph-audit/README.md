@@ -144,11 +144,13 @@ server-sealed request from the accepted R2/R3 recipe and current scene, with sou
 bytes/header rechecked by the worker. S4k adds Studio preflight/start/status/cancel
 with idempotent recovery. S4l adds read-only proposal/QA inspection; S4m adds
 bounded diagnostic BEV overlays; S4n adds QA-qualified candidate confirmation with
-durable operation CAS and retry idempotency. Confirmation is not yet published to
-`AlignmentRecord`/SceneIR or collision consumers. The assembly contract still has no
-gravity/up declaration. Held-out registration qualification, source-floor
-qualification, consumer publication, browser acceptance and Isaac/collision
-evidence remain open.
+durable operation CAS and retry idempotency. S4o now publishes a verified REC-09
+`AlignmentRecord` and mixed `ReconstructionBundle` using job-manifest and scene-head
+CAS; bundle consumers bind the exact confirmed evidence. The canonical RGB geometry,
+SceneIR and collision selection remain unchanged. The assembly contract still has no
+gravity/up declaration. Held-out registration and source-floor qualification,
+committed-scene browser acceptance and Isaac/collision evidence remain open; the
+local browser gate was unavailable because `localhost:3010` refused the connection.
 AUD-12.S3b adds compatibility-safe SceneIR refs for the selected collision candidate
 and selection record, includes them in artifact closure, and makes simulation
 packaging refuse an unconsumed selection instead of falling back to RGB. Sensor QA is
@@ -574,7 +576,7 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
       only provisional registration and remains blocked from execution while odometry
       is wired-unqualified. World/floor confirmation, canonical LiDAR ingest/alignment,
       real traversal quality and R5 dispatch remain open; AUD-18 is owner work.
-- [x] AUD-19.S1 contracts; local S2 BEV/S3 constrained-ICP algorithms; S4a–S4n
+- [x] AUD-19.S1 contracts; local S2 BEV/S3 constrained-ICP algorithms; S4a–S4o
       durable envelope, exact source/target resolution, diagnostic source-plane
       hypotheses, cancellation/resource-wait persistence, shared admission, and a
       bounded worker that publishes provisional proposal/QA artifacts, authorized
@@ -582,10 +584,13 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
       preflight/start/status/cancel with idempotent recovery, and read-only proposal/QA
       inspection bound to exact operation artifacts and scene revisions; S4m adds
       a checksum-bound, diagnostic-only BEV overlay for each candidate; S4n adds
-      qualified confirmation with durable CAS. S4o consumer publication is planned.
-- [ ] AUD-19.S4o alignment/bundle consumer integration, held-out map QA and
-      source-floor qualification, browser acceptance, and separate collision/Isaac
-      acceptance.
+      qualified confirmation with durable CAS; S4o publishes the REC-09 alignment
+      and mixed bundle with manifest/scene-head CAS and exact consumer evidence.
+      Local verification: 127 focused backend and 20 frontend tests passed.
+- [ ] AUD-19 held-out map QA and source-floor qualification, committed-scene browser
+      acceptance, and separate collision/Isaac acceptance. Browser is UNVERIFIED:
+      `localhost:3010` refused the connection; synthetic local tests do not close
+      these acceptance gates.
 
 - [x] Implementation AUD-20.S1 identity/seed migration contract and AUD-20.S2 producer/API actor attribution.
 - [x] AUD-21.S4 local Studio capability/API implementation and UI regression.
@@ -674,9 +679,10 @@ enqueue/status/cancel routes with job/project/revision binding and safe status v
 S4j adds server-sealed request preparation from accepted R2/R3 recipes and the current
 scene; S4k adds Studio preflight/start/status/cancel with idempotent recovery; S4l adds
 read-only proposal/QA inspection bound to exact artifacts and scene revisions; S4m adds
-diagnostic overlays and S4n adds qualified confirmation with durable CAS. Bundle
-consumer publication in S4o, browser acceptance, and held-out/Isaac qualification remain
-open.
+diagnostic overlays and S4n adds qualified confirmation with durable CAS. S4o now
+publishes the REC-09 alignment and mixed bundle locally with CAS-bound job manifest
+and scene head. Browser acceptance, held-out/source-floor qualification, and
+Isaac/collision acceptance remain open.
 Validation at initial plan creation exited 0: 25 integration sections gồm một
 Deferred, 231 local links, 121 existing pytest paths và 138 canonical bindings;
 88 non-deferred base sprints đúng internal order, 37 cross-task prerequisite pairs và 6

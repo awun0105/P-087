@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 from typing import Literal, Self, TypeVar
 
@@ -71,6 +72,32 @@ class RegistrationQAStatus(StrEnum):
     PASS = "PASS"
     FAIL = "FAIL"
     INCONCLUSIVE = "INCONCLUSIVE"
+
+
+class RegistrationConfirmationRecord(ContractModel):
+    """Immutable evidence of the exact user decision consumed by REC-09."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    artifact_type: Literal["RegistrationConfirmation"] = "RegistrationConfirmation"
+    producer_stage: Literal[StageId.RGB_LIDAR_ALIGN] = StageId.RGB_LIDAR_ALIGN
+    job_id: Identifier
+    operation_id: Identifier
+    operation_checksum: Checksum
+    request_checksum: Checksum
+    expected_scene_revision: Identifier
+    candidate_id: Identifier
+    confirmed_by_user_id: Identifier
+    confirmed_at: datetime
+    confirmed_from_checksum: Checksum
+    confirmation_checksum: Checksum
+
+    @model_validator(mode="after")
+    def _identity(self) -> Self:
+        if self.confirmed_at.tzinfo is None or self.confirmed_at.utcoffset() is None:
+            raise ValueError("registration confirmation time must include a timezone")
+        if canonical_content_checksum(self, "confirmation_checksum") != self.confirmation_checksum:
+            raise ValueError("registration confirmation checksum mismatch")
+        return self
 
 
 class RegistrationPreflightState(StrEnum):
@@ -868,6 +895,16 @@ def seal_registration_source_cloud_manifest(
 
 def seal_registration_qa_report(value: RegistrationQAReport | dict[str, object]) -> RegistrationQAReport:
     return _seal_contract(value, RegistrationQAReport, "report_checksum")
+
+
+def seal_registration_confirmation(
+    value: RegistrationConfirmationRecord | dict[str, object],
+) -> RegistrationConfirmationRecord:
+    payload = value.model_dump(mode="json") if isinstance(value, ContractModel) else dict(value)
+    payload["confirmation_checksum"] = _CHECKSUM_PLACEHOLDER
+    normalized = RegistrationConfirmationRecord.model_construct(**payload).model_dump(mode="json")
+    normalized["confirmation_checksum"] = canonical_content_checksum(normalized, "confirmation_checksum")
+    return RegistrationConfirmationRecord.model_validate(normalized)
 
 
 def validate_registration_proposal_binding(request: RegistrationRequest, proposal: RegistrationProposal) -> None:

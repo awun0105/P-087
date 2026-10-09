@@ -461,7 +461,12 @@ export function RegistrationPanel({
             )}
             {operation.state === "CONFIRMED" && (
               <p className="mt-2 text-sm">
-                Đã xác nhận {operation.confirmed_candidate_id ?? "candidate"}; transform chưa được ghi vào SceneIR hoặc collision mesh.
+                Đã xác nhận {operation.confirmed_candidate_id ?? "candidate"}; đang công bố bản bundle đã căn chỉnh.
+              </p>
+            )}
+            {operation.state === "COMMITTED" && (
+              <p className="mt-2 text-sm">
+                Alignment đã được lưu vào ReconstructionBundle. SceneIR và collision mesh chưa thay đổi.
               </p>
             )}
             {operation.state === "AMBIGUOUS" && <p className="mt-2 text-sm">Cần xem các phương án và bằng chứng trước khi chọn.</p>}
@@ -585,8 +590,10 @@ export function RegistrationPanel({
                 </div>
               )}
               <p className="text-xs text-ink-muted">
-                {operation.state === "CONFIRMED"
-                  ? "Xác nhận đã được lưu bền vững. Việc này chưa áp dụng transform vào SceneIR hoặc collision mesh."
+                {operation.state === "COMMITTED"
+                  ? "Đã công bố AlignmentRecord và ReconstructionBundle theo manifest revision mới. SceneIR và collision mesh vẫn giữ nguyên."
+                  : operation.state === "CONFIRMED"
+                    ? "Xác nhận đã được lưu bền vững; bundle đang được công bố. SceneIR và collision mesh vẫn giữ nguyên."
                   : "Thông tin này chỉ để kiểm tra. Chưa xác nhận hoặc áp dụng transform."}
               </p>
             </div>

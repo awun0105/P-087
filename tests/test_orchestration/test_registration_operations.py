@@ -54,6 +54,18 @@ def _ref(job_id: str, artifact_type: str) -> ProductArtifactRef:
     )
 
 
+def _publication_ref(job_id: str, artifact_type: str, stage_id: StageId) -> ProductArtifactRef:
+    return ProductArtifactRef(
+        artifact_type=artifact_type,
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{job_id}/registration/{artifact_type.lower()}.json",
+        artifact_checksum=_checksum(artifact_type),
+        data_class="derived",
+        producer_stage=stage_id,
+        job_id=job_id,
+    )
+
+
 def _request(request_id: str = "registration-request-1", requester_id: str = "user-a") -> RegistrationRequest:
     job_id, project_id = "job-registration-1", "project-registration-1"
     profile: RegistrationProfile = seal_registration_profile(
@@ -236,6 +248,70 @@ def test_confirmation_persists_exact_decision_and_replays_after_reload(tmp_path:
     assert store.get(proposed.operation_id) == confirmed
     assert store.get(proposed.operation_id).request.expected_scene_revision == request.expected_scene_revision
     assert database.schema_version() == LATEST_SCHEMA_VERSION
+
+
+def test_confirmed_operation_commits_exact_bundle_and_alignment_once(tmp_path: Path) -> None:
+    _, store = _store(tmp_path)
+    request = _request()
+    store.enqueue(request, "request-key-commit")
+    now = datetime(2026, 10, 9, tzinfo=UTC)
+    claimed = store.claim_next("worker-a", lease_seconds=60, now=now)
+    assert claimed is not None and claimed.lease_token is not None
+    proposed = store.finish(
+        claimed.operation_id,
+        lease_token=claimed.lease_token,
+        fencing_token=claimed.fencing_token,
+        state=RegistrationOperationState.PROPOSED,
+        proposal_ref=_ref(claimed.target_job_id, "RegistrationProposalArtifact"),
+        qa_report_ref=_ref(claimed.target_job_id, "RegistrationQAReport"),
+        now=now + timedelta(seconds=1),
+    )
+    confirmed = store.confirm(
+        proposed.operation_id,
+        expected_operation_checksum=proposed.operation_checksum,
+        expected_scene_revision=request.expected_scene_revision,
+        candidate_id="candidate-qualified-1",
+        user_id="user-a",
+        now=now + timedelta(seconds=2),
+    )
+    bundle_ref = _publication_ref(request.target_job_id, "ReconstructionBundle", StageId.METRIC_CANONICALIZE)
+    alignment_ref = _publication_ref(request.target_job_id, "AlignmentRecord", StageId.RGB_LIDAR_ALIGN)
+    manifest_checksum = _checksum("published-job-manifest")
+
+    committed = store.commit(
+        confirmed.operation_id,
+        expected_operation_checksum=confirmed.operation_checksum,
+        expected_scene_revision=request.expected_scene_revision,
+        bundle_ref=bundle_ref,
+        alignment_ref=alignment_ref,
+        manifest_checksum=manifest_checksum,
+        now=now + timedelta(seconds=3),
+    )
+    replay = store.commit(
+        confirmed.operation_id,
+        expected_operation_checksum=confirmed.operation_checksum,
+        expected_scene_revision=request.expected_scene_revision,
+        bundle_ref=bundle_ref,
+        alignment_ref=alignment_ref,
+        manifest_checksum=manifest_checksum,
+        now=now + timedelta(seconds=4),
+    )
+
+    assert committed.state == RegistrationOperationState.COMMITTED
+    assert committed.committed_bundle_ref == bundle_ref
+    assert committed.committed_alignment_ref == alignment_ref
+    assert committed.committed_manifest_checksum == manifest_checksum
+    assert replay == committed
+    assert store.get(confirmed.operation_id) == committed
+    with pytest.raises(RuntimeStateConflictError, match="different outputs"):
+        store.commit(
+            confirmed.operation_id,
+            expected_operation_checksum=confirmed.operation_checksum,
+            expected_scene_revision=request.expected_scene_revision,
+            bundle_ref=bundle_ref,
+            alignment_ref=alignment_ref,
+            manifest_checksum=_checksum("different-job-manifest"),
+        )
 
 
 def test_confirmation_rejects_stale_checksum_and_conflicting_replay(tmp_path: Path) -> None:

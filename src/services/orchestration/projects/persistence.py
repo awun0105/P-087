@@ -129,6 +129,7 @@ class ProjectPersistence:
         project_to_create: ProjectRecord | None = None,
         upload_ids_to_link: tuple[str, ...] = (),
         input_assembly_run: InputAssemblyRunCommit | None = None,
+        expected_scene_revision: str | None = None,
     ) -> GuestQuotaIntentResult | InputAssemblyRunResult | None:
         """Commit quota, accepted job/CAS, and optional upload project atomically."""
         if self._job(reference.model_dump_json()) != manifest:
@@ -178,6 +179,20 @@ class ProjectPersistence:
         quota_result: GuestQuotaIntentResult | None = None
         try:
             with self.database.transaction(write=True) as tx:
+                if expected_scene_revision is not None:
+                    from src.services.orchestration.scene.heads import _parse_head_row
+
+                    head_row = tx.execute(
+                        "SELECT job_id,generation,allocation_sequence,head_checksum,payload "
+                        "FROM r2s_scene_heads WHERE job_id=?" + tx.lock_suffix(),
+                        (manifest.job_id,),
+                    ).fetchone()
+                    if head_row is None:
+                        raise RuntimeStateConflictError("Scene head disappeared before registration bundle commit")
+                    scene_head = _parse_head_row(head_row)
+                    if scene_head.scene_revision != expected_scene_revision:
+                        raise RuntimeStateConflictError("Scene revision changed before registration bundle commit")
+
                 if quota_intent is not None:
                     quota_result = accept_guest_quota_intent(
                         tx,

@@ -953,6 +953,81 @@ class ProjectRegistry:
         self.persistence.save_job(updated, reference, event, expected=expected)
         return updated
 
+    def record_registration_bundle(
+        self,
+        expected: JobManifest,
+        *,
+        alignment_ref: ProductArtifactRef,
+        bundle_ref: ProductArtifactRef,
+        expected_scene_revision: str,
+    ) -> JobManifest:
+        """Append a verified registration/bundle pair without mutating SceneIR or job outcome."""
+        if self.persistence is None:
+            raise RuntimeStateConflictError("Registration bundle publication requires durable project persistence")
+        if expected.status != JobStatus.SUCCEEDED:
+            raise RuntimeStateConflictError("Registration bundle publication requires a completed job")
+        for reference, artifact_type, stage_id in (
+            (alignment_ref, "AlignmentRecord", StageId.RGB_LIDAR_ALIGN),
+            (bundle_ref, "ReconstructionBundle", StageId.METRIC_CANONICALIZE),
+        ):
+            if (
+                reference.job_id != expected.job_id
+                or reference.artifact_type != artifact_type
+                or reference.producer_stage != stage_id
+                or reference.data_class != ArtifactDataClass.DERIVED
+                or not reference.artifact_uri.startswith(f"artifact://jobs/{expected.job_id}/")
+            ):
+                raise ValueError("Registration publication reference does not match the completed job")
+            self.runtime_resolver.require(reference)
+
+        published_at = datetime.now(UTC)
+        stages = [
+            StageArtifact(
+                stage_id=StageId.RGB_LIDAR_ALIGN,
+                status=StageStatus.SUCCEEDED,
+                artifact_type=alignment_ref.artifact_type,
+                artifact_uri=alignment_ref.artifact_uri,
+                artifact_checksum=alignment_ref.artifact_checksum,
+                data_class=alignment_ref.data_class,
+                started_at=published_at,
+                completed_at=published_at,
+            ),
+            StageArtifact(
+                stage_id=StageId.METRIC_CANONICALIZE,
+                status=StageStatus.SUCCEEDED,
+                artifact_type=bundle_ref.artifact_type,
+                artifact_uri=bundle_ref.artifact_uri,
+                artifact_checksum=bundle_ref.artifact_checksum,
+                data_class=bundle_ref.data_class,
+                started_at=published_at,
+                completed_at=published_at,
+            ),
+        ]
+        updated = with_canonical_checksum(
+            expected.model_copy(update={"stage_artifacts": [*expected.stage_artifacts, *stages]}),
+            "job_manifest_checksum",
+        )
+        manifest_ref = self.lifecycle.store.publish_manifest(updated)
+        history = self.persistence.list_attempts(expected.job_id)
+        if not history:
+            raise RuntimeStateConflictError("Completed job has no durable attempt history")
+        event = JobAttemptRecord(
+            attempt=history[-1].attempt,
+            status=updated.status,
+            current_stage=updated.current_stage,
+            recorded_at=published_at,
+            job_manifest_uri=manifest_ref.artifact_uri,
+            job_manifest_checksum=manifest_ref.artifact_checksum,
+        )
+        self.persistence.save_job(
+            updated,
+            manifest_ref,
+            event,
+            expected=expected,
+            expected_scene_revision=expected_scene_revision,
+        )
+        return updated
+
     def record_metric_confirmation(self, expected: JobManifest, reference: ProductArtifactRef) -> JobManifest:
         """Ghi xác nhận tỉ lệ mét (REC-06 anchor + frame) vào job đang chờ; CAS theo revision.
 

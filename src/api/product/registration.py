@@ -66,6 +66,9 @@ class RegistrationOperationResponse(ApiModel):
     confirmed_candidate_id: Identifier | None = None
     confirmed_by_user_id: Identifier | None = None
     confirmed_at: datetime | None = None
+    committed_bundle_ref: ProductArtifactRef | None = None
+    committed_alignment_ref: ProductArtifactRef | None = None
+    committed_manifest_checksum: Checksum | None = None
 
 
 class RegistrationOperationInspectionResponse(ApiModel):
@@ -140,6 +143,9 @@ def _public_operation(record: RegistrationOperationRecord) -> RegistrationOperat
         confirmed_candidate_id=record.confirmed_candidate_id,
         confirmed_by_user_id=record.confirmed_by_user_id,
         confirmed_at=record.confirmed_at,
+        committed_bundle_ref=record.committed_bundle_ref,
+        committed_alignment_ref=record.committed_alignment_ref,
+        committed_manifest_checksum=record.committed_manifest_checksum,
     )
 
 
@@ -430,13 +436,14 @@ def confirm_registration_operation(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="registration operation not found")
 
     if record.state in {RegistrationOperationState.CONFIRMED, RegistrationOperationState.COMMITTED}:
-        return _confirm_or_conflict(
+        confirmed = _confirm_or_conflict(
             store,
             record,
             body,
             candidate_id=body.candidate_id,
             user_id=user.user_id,
         )
+        return _commit_or_conflict(registry, store, confirmed)
     if record.state != RegistrationOperationState.PROPOSED:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Only a proposed registration can be confirmed"
@@ -474,7 +481,8 @@ def confirm_registration_operation(
             status_code=status.HTTP_409_CONFLICT,
             detail="A scale-changing candidate requires a separate metric-correction reconstruction",
         )
-    return _confirm_or_conflict(store, record, body, candidate_id=body.candidate_id, user_id=user.user_id)
+    confirmed = _confirm_or_conflict(store, record, body, candidate_id=body.candidate_id, user_id=user.user_id)
+    return _commit_or_conflict(registry, store, confirmed)
 
 
 def _confirm_or_conflict(
@@ -484,7 +492,7 @@ def _confirm_or_conflict(
     *,
     candidate_id: str,
     user_id: str,
-) -> RegistrationOperationResponse:
+) -> RegistrationOperationRecord:
     try:
         confirmed = store.confirm(
             record.operation_id,
@@ -497,7 +505,23 @@ def _confirm_or_conflict(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="registration operation not found") from error
     except (RuntimeStateConflictError, RegistrationOperationLeaseLostError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    return _public_operation(confirmed)
+    return confirmed
+
+
+def _commit_or_conflict(
+    registry: ProjectRegistry,
+    store: RegistrationOperationStore,
+    confirmed: RegistrationOperationRecord,
+) -> RegistrationOperationResponse:
+    from src.services.orchestration.jobs.registration_commit import RegistrationBundleCommitter
+
+    try:
+        committed = RegistrationBundleCommitter(registry, store).commit(confirmed)
+    except RegistrationOperationNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="registration operation not found") from error
+    except (RuntimeStateConflictError, ArtifactStoreError, ValueError) as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    return _public_operation(committed)
 
 
 def _validate_inspection_reference(

@@ -14,10 +14,11 @@ from src.api import auth as auth_api
 from src.api.product import registration as registration_api
 from src.main import app
 from src.models.contracts.artifacts import ProductArtifactRef
-from src.models.contracts.coordinates import Transform
-from src.models.contracts.identity import artifact_model_checksum, artifact_model_payload
+from src.models.contracts.coordinates import MetricScale, Transform
+from src.models.contracts.identity import artifact_model_checksum, artifact_model_payload, canonical_content_checksum
 from src.models.contracts.input_assembly import DistanceUnit, InputAssetFormat, InputRole
-from src.models.contracts.manifests import StageId
+from src.models.contracts.manifests import InputConfiguration, StageId
+from src.models.contracts.reconstruction import PreprocessingProvenance, ReconstructionBundle
 from src.models.contracts.rgb_lidar_registration import (
     RegistrationCandidate,
     RegistrationFindingCode,
@@ -39,10 +40,21 @@ from src.models.contracts.rgb_lidar_registration import (
     seal_registration_qa_report,
     seal_registration_request,
 )
+from src.services.orchestration.artifacts import FilesystemArtifactStore, sha256_bytes
 from src.services.orchestration.auth.models import UserRecord
-from src.services.orchestration.jobs.database import RuntimeDatabase
+from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.registration_operations import RegistrationOperationStore
 from src.services.orchestration.projects import ProjectRegistry
+from src.services.reconstruction.bundle import BundleBuildRequest, ReconstructionBundleService
+from src.services.reconstruction.bundle_validation import BundleDependencies
+from src.services.reconstruction.rgb.canonical.bundle_metric import _reference as metric_verification_reference
+from src.services.reconstruction.rgb.canonical.bundle_metric_models import (
+    BundleMetricAcceptance,
+    BundleMetricRecord,
+    BundleMetricRequest,
+)
+from src.services.reconstruction.rgb.canonical.metric_models import DistanceAnchor
+from src.services.scene.bundle_consumer import load_reconstruction_bundle
 
 _ZERO = "sha256:" + "0" * 64
 _JOB_ID = "job-fixture-001"
@@ -411,6 +423,13 @@ async def test_confirm_persists_only_the_exact_qa_candidate_without_mutating_sce
         registration_api,
         "_verified_registration_inspection",
         lambda _registry, _record: _confirmation_inspection(revision),
+    )
+    # This test owns the S4n confirmation contract; consumer publication has its
+    # own integration test below.
+    monkeypatch.setattr(
+        registration_api,
+        "_commit_or_conflict",
+        lambda _registry, _store, record: registration_api._public_operation(record),
     )
     before_scene = registry.scene.current(_JOB_ID).scene
     payload = {
@@ -1136,3 +1155,284 @@ async def test_enqueue_keeps_sensor_package_on_existing_finalize_path(
     assert response.status_code == 422, response.text
     with database.transaction() as tx:
         assert tx.execute("SELECT COUNT(*) FROM r2s_registration_operations").fetchone()[0] == 0
+
+
+def test_confirmed_registration_publishes_and_reloads_exact_mixed_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Synthetic publication exercises REC-09/10, manifest CAS and replay, not field QA."""
+    from src.services.orchestration.jobs import registration_commit as commit_module
+    from src.services.orchestration.jobs.registration_commit import RegistrationBundleCommitter
+
+    registry, database, revision, _ = _runtime(tmp_path, monkeypatch)
+    assert database is not None
+    _seed_user(database, "user-guest")
+    writer = FilesystemArtifactStore(registry.runtime_resolver)
+    request = _request(registry, revision, "user-guest", request_id="registration-commit-test")
+
+    def publish_ref(
+        artifact_type: str,
+        stage: StageId,
+        path: str,
+        payload: bytes,
+        source_provenance: dict[str, object] | None = None,
+    ) -> ProductArtifactRef:
+        reference = ProductArtifactRef(
+            artifact_type=artifact_type,
+            schema_version="1.0",
+            artifact_uri=f"artifact://jobs/{_JOB_ID}/{path}",
+            artifact_checksum=sha256_bytes(payload),
+            data_class="derived",
+            producer_stage=stage,
+            job_id=_JOB_ID,
+            source_provenance=source_provenance,
+        )
+        writer.publish(reference, payload)
+        return reference
+
+    writer.publish(request.target_rgb_geometry_ref, b"rgb-geometry")
+    frame_ref = publish_ref("RGBFrame", StageId.FRAME_EXTRACT, "rec02/frame.bin", b"frame")
+    pose_ref = publish_ref("CameraPoseArtifact", StageId.CAMERA_POSE, "rec03/pose.json", b"pose")
+    visual_ref = publish_ref("VisualArtifact", StageId.VISUAL_RECON, "rec04/visual.json", b"visual")
+    base_request = BundleBuildRequest(
+        job_id=_JOB_ID,
+        source_input_checksum=request.source.source_input_checksum,
+        input_configuration=InputConfiguration(
+            rgb_present=True,
+            registered_lidar_present=False,
+            declared_same_scene=True,
+        ),
+        metric_scale=MetricScale(status="CONFIRMED", meters_per_unit=1.0),
+        rgb_frame_refs=[frame_ref],
+        camera_pose_refs=[pose_ref],
+        visual_artifact_ref=visual_ref,
+        rgb_geometry_ref=request.target_rgb_geometry_ref,
+        canonical_geometry_ref=request.target_rgb_geometry_ref,
+        provenance={"evidence_kind": "synthetic_fixture"},
+    )
+
+    writer.publish(request.metric_confirmation_ref, b"metric-confirmation")
+    decision_ref = publish_ref("SyntheticMetricEvidence", StageId.METRIC_CANONICALIZE, "metric/review.json", b"review")
+    metric_request = BundleMetricRequest(
+        execution_scope="synthetic_fixture",
+        bundle=base_request,
+        confirmation_ref=request.metric_confirmation_ref,
+        canonical_visual_ref=visual_ref,
+        independent_sample=DistanceAnchor(
+            anchor_id="synthetic-independent-distance",
+            source_master=visual_ref,
+            point_a=(0.0, 0.0, 0.0),
+            point_b=(0.0, 0.0, 1.0),
+            distance_m=1.0,
+            measurement_ref=visual_ref,
+        ),
+        tolerance_m=0.02,
+    )
+    acceptance = BundleMetricAcceptance(
+        request_checksum=metric_request.checksum(),
+        evidence_kind="synthetic_fixture",
+        decision_ref=decision_ref,
+    )
+    metric_record_data = {
+        "schema_version": "1.0",
+        "artifact_type": "ReconstructionMetricVerification",
+        "scope": "canonical_rgb_bundle_metric",
+        "status": "VERIFIED",
+        "request": metric_request.model_dump(mode="json"),
+        "acceptance": acceptance.model_dump(mode="json"),
+        "independent_distance_error_m": 0.0,
+        "record_checksum": _ZERO,
+    }
+    metric_record_data["record_checksum"] = canonical_content_checksum(metric_record_data, "record_checksum")
+    metric_record = BundleMetricRecord.model_validate(metric_record_data)
+    metric_payload = metric_record.model_dump_json(indent=2).encode() + b"\n"
+    proof_ref = metric_verification_reference(metric_record, metric_payload)
+    writer.publish(proof_ref, metric_payload)
+    base_request_with_proof = base_request.model_copy(update={"verification_ref": proof_ref})
+    base_dependencies = BundleDependencies(
+        resolve=registry.runtime_resolver.require,
+        verify_metric=lambda candidate: (
+            candidate.verification_ref == proof_ref
+            and candidate.model_copy(update={"verification_ref": None}) == base_request
+        ),
+    )
+    base_bundle, _ = ReconstructionBundleService(writer, base_dependencies).build_and_publish(base_request_with_proof)
+    monkeypatch.setattr(commit_module, "job_bundle", lambda _registry, _job: base_bundle)
+
+    outputs, _ = _inspection_outputs(registry, request, include_overlay=True)
+    store, proposed = _persist_proposed_operation(database, request, outputs.proposal_ref, outputs.qa_report_ref)
+    confirmed = store.confirm(
+        request.request_id,
+        expected_operation_checksum=proposed.operation_checksum,
+        expected_scene_revision=revision,
+        candidate_id="candidate-inspection-1",
+        user_id="user-editor",
+    )
+    proposal = registry.runtime_resolver.load_model(confirmed.proposal_ref, RegistrationProposal)
+    report = registry.runtime_resolver.load_model(confirmed.qa_report_ref, RegistrationQAReport)
+    overlay_ref = report.evidence_refs[0]
+    overlay = registry.runtime_resolver.load_model(overlay_ref, RegistrationOverlayPreview)
+    source_ref = proposal.source_geometry_ref
+    writer.publish(source_ref, b"lidar-geometry")
+    writer.publish(request.floor_evidence_refs[0], b"floor-evidence")
+    lidar_payload = b"ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nend_header\n0 0 0\n"
+    lidar_lineage = PreprocessingProvenance(dependencies=[], ground_truth_assisted=False, details={"fixture": True})
+    lidar_geometry_ref = publish_ref(
+        "LiDARGeometryArtifact",
+        StageId.LIDAR_INGEST,
+        "registration/meter-cloud.ply",
+        lidar_payload,
+        source_provenance=lidar_lineage.model_dump(mode="json"),
+    )
+    lidar_metadata_ref = publish_ref(
+        "LiDARGeometryMetadata", StageId.LIDAR_INGEST, "registration/meter-cloud.json", b"{}"
+    )
+    source_manifest = SimpleNamespace(
+        source_geometry_ref=source_ref,
+        estimated_trajectory_product_ref=None,
+        estimated_map_cloud_ref=None,
+    )
+    committer = RegistrationBundleCommitter(registry, store)
+    verified_fixture = (proposal, report, overlay, overlay_ref, source_manifest, lidar_geometry_ref, lidar_metadata_ref)
+    monkeypatch.setattr(committer, "_verified_inputs", lambda _operation: verified_fixture)
+
+    before_scene = registry.scene.current(_JOB_ID).scene
+    committed = committer.commit(confirmed)
+
+    assert committed.state == RegistrationOperationState.COMMITTED
+    assert committed.confirmed_by_user_id == "user-editor"
+    assert committed.committed_bundle_ref is not None
+    assert committed.committed_alignment_ref is not None
+    bundle_view = registry.runtime_resolver.load_model(committed.committed_bundle_ref, ReconstructionBundle)
+    assert bundle_view.canonical_geometry_ref == request.target_rgb_geometry_ref
+    assert bundle_view.lidar_geometry_ref == lidar_geometry_ref
+    assert bundle_view.alignment_record is not None
+    assert (
+        bundle_view.alignment_record.transform_target_from_source == proposal.candidates[0].transform_target_from_source
+    )
+    assert load_reconstruction_bundle(committed.committed_bundle_ref, registry.runtime_resolver).bundle == bundle_view
+    assert registry.scene.current(_JOB_ID).scene == before_scene
+    assert registry.get_job(_JOB_ID).job_manifest_checksum == committed.committed_manifest_checksum
+
+    replay = committer.commit(confirmed)
+    assert replay == committed
+    assert store.get(request.request_id) == committed
+
+
+def test_registration_commit_rejects_stale_scene_without_advancing_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A confirmation for an old SceneIR revision cannot publish artifacts or mutate the manifest."""
+    from src.services.orchestration.jobs.registration_commit import RegistrationBundleCommitter
+
+    registry, database, _, _ = _runtime(tmp_path, monkeypatch)
+    assert database is not None
+    _seed_user(database, "user-guest")
+    current_revision = registry.scene.current(_JOB_ID).scene.scene_revision
+    stale_revision = "rev-000"
+    request = _request(registry, stale_revision, "user-guest", request_id="stale-registration-commit")
+    outputs, _ = _inspection_outputs(registry, request)
+    store, proposed = _persist_proposed_operation(database, request, outputs.proposal_ref, outputs.qa_report_ref)
+    confirmed = store.confirm(
+        request.request_id,
+        expected_operation_checksum=proposed.operation_checksum,
+        expected_scene_revision=stale_revision,
+        candidate_id="candidate-inspection-1",
+        user_id="user-editor",
+    )
+    before_job = registry.get_job(_JOB_ID)
+
+    with pytest.raises(
+        RuntimeStateConflictError, match="Scene revision changed before registration bundle publication"
+    ):
+        RegistrationBundleCommitter(registry, store).commit(confirmed)
+
+    after = store.get(request.request_id)
+    assert after.state == RegistrationOperationState.CONFIRMED
+    assert after.committed_bundle_ref is None and after.committed_alignment_ref is None
+    assert registry.get_job(_JOB_ID) == before_job
+    assert registry.scene.current(_JOB_ID).scene.scene_revision == current_revision
+    assert registry.runtime_resolver.list_uris(f"artifact://jobs/{_JOB_ID}/rec09/registration-confirmations/") == []
+
+
+def test_registration_commit_artifact_writer_accepts_concurrent_identical_publication(tmp_path: Path) -> None:
+    """Racing publishers converge on the same immutable bytes and ref."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from src.services.orchestration.artifacts import ArtifactResolver
+    from src.services.orchestration.jobs.registration_commit import _IdempotentArtifactWriter
+
+    resolver = ArtifactResolver(tmp_path)
+    writer = _IdempotentArtifactWriter(resolver)
+    payload = b"same immutable payload"
+    reference = ProductArtifactRef(
+        artifact_type="AlignmentRecord",
+        schema_version="1.0",
+        artifact_uri="artifact://jobs/writer-race/rec09/alignment.json",
+        artifact_checksum=sha256_bytes(payload),
+        data_class="derived",
+        producer_stage=StageId.RGB_LIDAR_ALIGN,
+        job_id="writer-race",
+    )
+    barrier = Barrier(2)
+    publish = writer.store.publish
+
+    def start_together(current_ref: ProductArtifactRef, current_payload: bytes) -> ProductArtifactRef:
+        barrier.wait(timeout=5)
+        return publish(current_ref, current_payload)
+
+    writer.store.publish = start_together  # type: ignore[method-assign]
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(writer.publish, reference, payload) for _ in range(2)]
+        results = [future.result(timeout=10) for future in futures]
+
+    assert results == [reference, reference]
+    assert resolver.require(reference).read_bytes() == payload
+
+
+def test_registration_bundle_manifest_cas_rejects_stale_writer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the first publication from a captured job manifest can advance the head."""
+    registry, _, scene_revision, _ = _runtime(tmp_path, monkeypatch)
+    job = registry.get_job(_JOB_ID)
+    assert job.status.value == "SUCCEEDED"
+    writer = FilesystemArtifactStore(registry.runtime_resolver)
+    alignment_payload = b"alignment evidence"
+    alignment_ref = ProductArtifactRef(
+        artifact_type="AlignmentRecord",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{_JOB_ID}/cas/alignment.json",
+        artifact_checksum=sha256_bytes(alignment_payload),
+        data_class="derived",
+        producer_stage=StageId.RGB_LIDAR_ALIGN,
+        job_id=_JOB_ID,
+    )
+    bundle_payload = b"registered reconstruction bundle"
+    bundle_ref = ProductArtifactRef(
+        artifact_type="ReconstructionBundle",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{_JOB_ID}/cas/bundle.json",
+        artifact_checksum=sha256_bytes(bundle_payload),
+        data_class="derived",
+        producer_stage=StageId.METRIC_CANONICALIZE,
+        job_id=_JOB_ID,
+    )
+    writer.publish(alignment_ref, alignment_payload)
+    writer.publish(bundle_ref, bundle_payload)
+
+    published = registry.record_registration_bundle(
+        job,
+        alignment_ref=alignment_ref,
+        bundle_ref=bundle_ref,
+        expected_scene_revision=scene_revision,
+    )
+    with pytest.raises(RuntimeStateConflictError, match="Job đã thay đổi"):
+        registry.record_registration_bundle(
+            job,
+            alignment_ref=alignment_ref,
+            bundle_ref=bundle_ref,
+            expected_scene_revision=scene_revision,
+        )
+
+    assert registry.get_job(_JOB_ID) == published
+    assert registry.scene.current(_JOB_ID).scene.scene_revision == scene_revision

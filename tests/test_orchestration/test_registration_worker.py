@@ -12,6 +12,7 @@ import pytest
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.coordinates import Transform
 from src.models.contracts.manifests import StageId
+from src.models.contracts.reconstruction import LiDARGeometryArtifact
 from src.models.contracts.rgb_lidar_registration import (
     RegistrationCandidate,
     RegistrationFindingCode,
@@ -199,6 +200,91 @@ def test_registration_worker_publishes_model_using_exact_artifact_bytes_checksum
     assert reference.artifact_checksum != proposal.proposal_checksum
     published = resolver.require_uri(reference.artifact_uri, reference.artifact_checksum)
     assert published.read_bytes() == payload
+
+
+def test_registration_worker_publishes_meter_cloud_with_source_lineage(tmp_path: Path) -> None:
+    resolver = ArtifactResolver(tmp_path / "artifacts")
+    worker = _worker()
+    worker.resolver = resolver
+    worker.writer = FilesystemArtifactStore(resolver)
+    operation = SimpleNamespace(
+        operation_id="registration-1",
+        target_job_id="job-1",
+        request_checksum=_checksum(b"request"),
+        request=SimpleNamespace(profile=SimpleNamespace(max_source_points=100)),
+    )
+    source = VerifiedRegistrationSource(
+        path=tmp_path / "input.pcd",
+        file_id="file-1",
+        input_assembly_id="assembly-1",
+        input_assembly_revision=1,
+        input_assembly_checksum=_checksum(b"assembly"),
+        source_checksum=_checksum(b"original-cloud"),
+        header_checksum=_checksum(b"header"),
+        point_count=3,
+        geometry_format="pcd",
+        distance_unit="cm",
+        source_frame="lidar-map-frame",
+        same_scene_lineage_verified=True,
+    )
+    source_ref = ProductArtifactRef(
+        artifact_type="RegistrationSourcePointCloud",
+        schema_version="1.0",
+        artifact_uri="artifact://jobs/job-1/rec08/registration-source/input.pcd",
+        artifact_checksum=source.source_checksum,
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.LIDAR_INGEST,
+        job_id="job-1",
+    )
+    source_manifest_ref = ProductArtifactRef(
+        artifact_type="RegistrationSourceCloudManifest",
+        schema_version="1.0",
+        artifact_uri="artifact://jobs/job-1/rec08/registration-source/input.json",
+        artifact_checksum=_checksum(b"source-manifest"),
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.LIDAR_INGEST,
+        job_id="job-1",
+    )
+    proposal_ref = ProductArtifactRef(
+        artifact_type="RegistrationProposalArtifact",
+        schema_version="1.0",
+        artifact_uri="artifact://jobs/job-1/rec09/registration/proposal.json",
+        artifact_checksum=_checksum(b"proposal"),
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.RGB_LIDAR_ALIGN,
+        job_id="job-1",
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    points = np.array([[1.25, -2.5, 0.125], [2.0, 3.0, 4.0], [-1.0, 0.0, 2.0]], dtype=np.float64)
+
+    geometry_ref, metadata_ref = worker._publish_metric_lidar(
+        operation,
+        source,
+        points,
+        source_ref,
+        source_manifest_ref,
+        proposal_ref,
+        workspace,
+    )
+
+    payload = resolver.require(geometry_ref).read_bytes()
+    metadata = resolver.load_model(metadata_ref, LiDARGeometryArtifact)
+    assert b"format binary_little_endian 1.0" in payload
+    assert geometry_ref.artifact_checksum == _checksum(payload)
+    assert metadata.source_input_checksum == geometry_ref.artifact_checksum
+    assert metadata.coordinate_system.unit == "meter"
+    assert metadata.source_frame == "lidar-map-frame"
+    assert metadata.declared_transform_to_canonical is None
+    assert metadata.preprocessing_provenance.details == {
+        "registration_operation_id": "registration-1",
+        "registration_request_checksum": operation.request_checksum,
+        "source_distance_unit": "cm",
+        "normalized_distance_unit": "m",
+        "source_frame": "lidar-map-frame",
+        "coordinate_semantics": "local_map_unaligned",
+        "serialization": "binary_little_endian_float32_xyz_v1",
+    }
 
 
 def test_registration_worker_publishes_overlay_as_operation_bound_evidence(tmp_path: Path) -> None:

@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.models.contracts.artifacts import Checksum, Identifier, ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
+from src.models.contracts.manifests import StageId
 from src.models.contracts.rgb_lidar_registration import (
     RegistrationOperationState,
     RegistrationRequest,
@@ -72,6 +73,9 @@ class RegistrationOperationRecord(BaseModel):
     confirmed_by_user_id: Identifier | None = None
     confirmed_at: datetime | None = None
     confirmed_from_checksum: Checksum | None = None
+    committed_bundle_ref: ProductArtifactRef | None = None
+    committed_alignment_ref: ProductArtifactRef | None = None
+    committed_manifest_checksum: Checksum | None = None
     error: str | None = None
     cancellation_requested: bool = False
     resource_wait_reason: str | None = Field(default=None, max_length=500)
@@ -134,6 +138,23 @@ class RegistrationOperationRecord(BaseModel):
             RegistrationOperationState.CANCELLED,
         }:
             raise ValueError("registration confirmation fields require a post-confirmation state")
+        committed_refs = (self.committed_bundle_ref, self.committed_alignment_ref, self.committed_manifest_checksum)
+        has_committed_output = all(value is not None for value in committed_refs)
+        if any(value is not None for value in committed_refs) and not has_committed_output:
+            raise ValueError("registration commit outputs must be stored together")
+        if (self.state == RegistrationOperationState.COMMITTED) != has_committed_output:
+            raise ValueError("committed registration state requires its exact published outputs")
+        for reference, expected_type, expected_stage in (
+            (self.committed_bundle_ref, "ReconstructionBundle", StageId.METRIC_CANONICALIZE),
+            (self.committed_alignment_ref, "AlignmentRecord", StageId.RGB_LIDAR_ALIGN),
+        ):
+            if reference is not None and (
+                reference.artifact_type != expected_type
+                or reference.producer_stage != expected_stage
+                or reference.job_id != self.target_job_id
+                or not reference.artifact_uri.startswith(f"artifact://jobs/{self.target_job_id}/")
+            ):
+                raise ValueError("registration commit output must bind the target job and artifact type")
         if self.state == RegistrationOperationState.WAITING_RESOURCES:
             if not self.resource_wait_reason or not self.resource_wait_reason.strip():
                 raise ValueError("resource-waiting registration operation requires a wait reason")
@@ -167,6 +188,9 @@ def _operation_checksum(record: RegistrationOperationRecord) -> str:
         "confirmed_by_user_id",
         "confirmed_at",
         "confirmed_from_checksum",
+        "committed_bundle_ref",
+        "committed_alignment_ref",
+        "committed_manifest_checksum",
     ):
         if payload.get(field_name) is None:
             payload.pop(field_name)
@@ -385,6 +409,53 @@ class RegistrationOperationStore:
             )
             self._write(tx, record, confirmed)
             return confirmed
+
+    def commit(
+        self,
+        operation_id: str,
+        *,
+        expected_operation_checksum: str,
+        expected_scene_revision: str,
+        bundle_ref: ProductArtifactRef,
+        alignment_ref: ProductArtifactRef,
+        manifest_checksum: str,
+        now: datetime | None = None,
+    ) -> RegistrationOperationRecord:
+        """CAS the exact bundle/alignment publication after its manifest is durable."""
+        current = _utc_now(now)
+        with self.database.transaction(write=True) as tx:
+            record = self._read_by_id(tx, operation_id, lock=True)
+            if record is None:
+                raise RegistrationOperationNotFoundError(f"registration operation not found: {operation_id}")
+            outputs = (bundle_ref, alignment_ref, manifest_checksum)
+            if record.state == RegistrationOperationState.COMMITTED:
+                if (
+                    record.request.expected_scene_revision == expected_scene_revision
+                    and record.committed_bundle_ref == bundle_ref
+                    and record.committed_alignment_ref == alignment_ref
+                    and record.committed_manifest_checksum == manifest_checksum
+                ):
+                    return record
+                raise RuntimeStateConflictError("registration operation already committed different outputs")
+            if record.state != RegistrationOperationState.CONFIRMED:
+                raise RuntimeStateConflictError("only a confirmed registration can publish a bundle")
+            if record.operation_checksum != expected_operation_checksum:
+                raise RuntimeStateConflictError("registration confirmation changed before bundle publication")
+            if record.request.expected_scene_revision != expected_scene_revision:
+                raise RuntimeStateConflictError("registration bundle targets a different scene revision")
+            if any(value is None for value in outputs):
+                raise ValueError("registration bundle publication references are required")
+            validate_registration_transition(record.state, RegistrationOperationState.COMMITTED)
+            committed = _replace_record(
+                record,
+                state=RegistrationOperationState.COMMITTED,
+                committed_bundle_ref=bundle_ref,
+                committed_alignment_ref=alignment_ref,
+                committed_manifest_checksum=manifest_checksum,
+                updated_at=current,
+            )
+            self._write(tx, record, committed)
+            return committed
 
     def cancel(self, operation_id: str, *, now: datetime | None = None) -> RegistrationOperationRecord:
         """Cancel queued work or persist a request for a running worker to acknowledge."""

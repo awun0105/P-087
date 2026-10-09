@@ -1,12 +1,14 @@
 """Đọc handoff EX-REC từ immutable artifact refs cho EX-SCENE."""
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
 from src.models.contracts.artifacts import ArtifactRef, ProductArtifactRef
 from src.models.contracts.identity import verify_content_checksum
-from src.models.contracts.reconstruction import ReconstructionBundle
+from src.models.contracts.reconstruction import AlignmentRecord, AlignmentStatus, ReconstructionBundle
 from src.services.orchestration.artifacts.store import ArtifactResolver
+from src.services.reconstruction.alignment.models import AlignmentRequest
 
 
 @dataclass(frozen=True)
@@ -58,10 +60,49 @@ def load_reconstruction_bundle(reference: ArtifactRef, resolver: ArtifactResolve
             data_class="derived",
             producer_stage=alignment.producer_stage,
             job_id=alignment.job_id,
+            source_provenance=alignment.provenance,
         )
-        _require_ref(alignment_ref, resolver, job_id)
+        alignment_path = _require_ref(alignment_ref, resolver, job_id)
         for item in alignment.evidence_refs:
             _require_ref(item, resolver, job_id)
+        payload = json.loads(alignment_path.read_bytes())
+        if (
+            not isinstance(payload, dict)
+            or set(payload) != {"schema_version", "request"}
+            or payload["schema_version"] != "1.0"
+        ):
+            raise ValueError("invalid published alignment evidence payload")
+        request = AlignmentRequest.model_validate(payload["request"])
+        if (
+            request.status != AlignmentStatus.CONFIRMED
+            or not request.same_scene_attestation
+            or not request.evidence_refs
+        ):
+            raise ValueError("published alignment evidence lacks confirmation or same-scene proof")
+        if (
+            request.job_id != job_id
+            or request.rgb_geometry_ref != bundle.rgb_geometry_ref
+            or request.lidar_geometry_ref != bundle.lidar_geometry_ref
+            or alignment.transform_target_from_source != request.transform_target_from_source
+        ):
+            raise ValueError("published alignment evidence differs from ReconstructionBundle bindings")
+        published_alignment = AlignmentRecord(
+            artifact_type=alignment_ref.artifact_type,
+            schema_version=alignment_ref.schema_version,
+            artifact_uri=alignment_ref.artifact_uri,
+            artifact_checksum=alignment_ref.artifact_checksum,
+            producer_stage=alignment_ref.producer_stage,
+            job_id=request.job_id,
+            source_lidar_checksum=request.lidar_geometry_ref.artifact_checksum,
+            target_rgb_geometry_checksum=request.rgb_geometry_ref.artifact_checksum,
+            transform_target_from_source=request.transform_target_from_source,
+            status=request.status,
+            method=request.method,
+            evidence_refs=request.evidence_refs,
+            provenance=request.provenance,
+        )
+        if published_alignment != alignment:
+            raise ValueError("embedded AlignmentRecord differs from its published evidence bytes")
     return ValidatedBundleView(
         bundle=bundle,
         rgb_frames=frames,
