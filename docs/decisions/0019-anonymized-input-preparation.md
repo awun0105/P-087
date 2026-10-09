@@ -26,9 +26,10 @@ thêm detection/tracking/redaction nhưng zero detections không chứng minh an
 5. License code/model weights/data và detector quality envelope phải qualified
    trước runtime adoption. Không xem “YOLOv8-Face” là default miễn điều kiện.
 
-6. (Owner chốt 2026-10-09) Job chọn che dừng chờ reviewer sau bước che frame; reconstruction chỉ chạy trên
-   bản đã che mà reviewer chấp nhận theo checksum. Vùng sót được che thêm và duyệt lại trước khi dựng 3D.
-   Job không chọn che giữ chế độ tự cam kết và chạy thẳng.
+6. (Owner chốt 2026-10-09) Không có bước duyệt của reviewer: job chọn che chạy thẳng từ frame đã che sang dựng
+   3D để giữ thời gian xử lý ngắn nhất. Vì không ai kiểm bản đã che, không có đường nào cấp
+   `VERIFIED_ANONYMIZED`; job giữ trạng thái tự cam kết. Phần "manual correction/QA" ở mục 2 và 3 không được
+   triển khai.
 
 ## Data contract
 

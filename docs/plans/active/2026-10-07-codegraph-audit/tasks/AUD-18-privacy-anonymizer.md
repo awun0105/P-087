@@ -168,17 +168,20 @@ and consumer proof; synthetic zero findings không chứng minh anonymity.
   `test_anonymize_option_is_offered_and_recorded_only_with_a_configured_anonymizer`; `tests/test_api` và
   `tests/test_orchestration` (978 test) pass.
 
-### Quyết định của owner (2026-10-09): job chọn che dừng chờ reviewer duyệt trước khi dựng 3D
+### Quyết định cuối của owner (2026-10-09): không có bước duyệt, ưu tiên thời gian xử lý
 
-Owner ban đầu chọn "không chờ", rồi đổi lại trong cùng ngày sau khi thấy hệ quả (bản train chưa có người
-kiểm, sửa sót phải dựng lại). Quyết định có hiệu lực:
+Owner cân nhắc hai phương án (chờ reviewer / không chờ) rồi chốt: **không có bước duyệt của reviewer**. Job chọn
+che chạy thẳng từ frame đã che sang dựng 3D.
 
-- Job chọn che dừng sau bước che frame, ở trạng thái chờ duyệt. COLMAP và Brush chỉ chạy sau khi reviewer
-  chấp nhận đúng bản đã che (theo checksum). Đây là contract gốc của S3, giữ nguyên.
-- Reviewer thấy sót thì che thêm rồi duyệt lại trước khi dựng 3D, nên không phải dựng lại scene.
-- Sau khi reviewer chấp nhận, privacy report của job được nâng lên `VERIFIED_ANONYMIZED` qua cổng privacy sẵn
-  có (`PrivacyInspectionEvidence` với `approved_copy_checksum`).
-- Job không chọn che không đổi: vẫn chạy thẳng theo chế độ tự cam kết.
-- Code hiện tại (đến commit `ef9b081`) chưa có trạng thái chờ này: job chọn che đang chạy thẳng sang dựng 3D.
-  Đây là việc phải làm tiếp ở S3.
+- S3 của plan gốc (màn hình reviewer, sửa tay, chấp nhận theo checksum, chặn dispatch) **không làm**. Đây là
+  thay đổi phạm vi so với ADR 0019 mục 3; ADR đã ghi lại.
+- Hệ quả giữ nguyên trong code: privacy report của job vẫn là tự cam kết / `PRELIMINARY_SCREENED`. Không có
+  đường nào cấp `VERIFIED_ANONYMIZED`, vì không ai kiểm bản đã che. Bước che là lớp bảo vệ thêm, không phải
+  bảo đảm; lời khai của người upload vẫn bắt buộc.
+- Tối ưu thời gian đã làm: frame không có vùng bị che không bị ghi, băm và publish lại, mà dùng tiếp artifact
+  gốc (thường là phần lớn frame). Suy luận theo lô đã đo trên T2000 và không nhanh hơn rõ (0,64 so với 0,57 giây
+  mỗi frame, kết quả giống hệt), nên không thêm.
+- Lan theo thời gian tắt mặc định (`propagate_radius = 0`); lý do ghi ở `DEFAULT_CONFIG`.
+- Đã thấy một phát hiện nhầm trên frame thật: nhãn trắng trên thùng nhựa xanh bị coi là biển số (điểm 0,839).
+  Phát hiện nhầm làm xuất hiện mảng đen trong ảnh train; chưa có dữ liệu để chỉnh ngưỡng.
 
