@@ -166,8 +166,8 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
       setProgress(result.data);
       if (acknowledgedAttempt !== null) notifySuccess(`Máy chủ đã ghi nhận lần chạy ${acknowledgedAttempt}.`);
       if (retryNotice !== null) setError(retryNotice);
-      // Chỉ chọn mặc định trên lần đọc đầu; preview xuất hiện sau đó không đẩy người đang xem tiến trình sang Studio.
-      setTab((selected) => selected ?? (result.data.preview_ready ? "studio" : "progress"));
+      // Mặc định luôn là Tiến trình (trạng thái, lỗi, bước tiếp theo); chỉ áp trên lần đọc đầu, không giật tab người đang xem.
+      setTab((selected) => selected ?? "progress");
       if (result.data.preview_ready && loadedPreview?.attempt !== result.data.attempt) {
         const loaded = await getPreview(jobId);
         if (loaded.ok) {

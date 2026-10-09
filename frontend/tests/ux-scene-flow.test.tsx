@@ -69,6 +69,17 @@ const ref = (type: string, path: string, stage = "ST-VISUAL-RECON") => ({ artifa
   vi.mocked(getPreview).mockResolvedValue({ ok: true, data: parsePreview({ schema_version: "1.0", artifact_type: "ReconstructionPreview", job_id: "job-1", attempt_id: "a1", source_input_checksum: "sha256:" + "b".repeat(64), format: "gaussian_sog", producer: "brush", producer_version: "fixture", metric_status: "UNCONFIRMED", coordinate_frame: "sfm_world", unit: "arbitrary", delivery_ref: ref("GaussianSOG", "scene.sog"), source_visual_ref: ref("BrushVisualArtifact", "visual.json"), camera_pose_ref: ref("CameraPoseArtifact", "poses.json", "ST-CAMERA-POSE") }, "job-1") });
 });
 describe("workflow scene", () => {
+  it("không có ?tab= thì luôn mở Tiến trình, kể cả khi preview đã sẵn sàng hoặc job lỗi", async () => {
+    for (const data of [{ ...progress, preview_ready: true }, failedProgress(true, true)]) {
+      history.replaceState({}, "", "/scenes/job-1");
+      vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data });
+      const view = render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
+      await screen.findByRole("heading", { name: "Tiến trình xử lý" }, { timeout: 3000 });
+      expect(screen.getByRole("tab", { name: /Tiến trình/ })).toHaveAttribute("aria-selected", "true");
+      expect(screen.queryByRole("region", { name: "Canvas stub" })).toBeNull();
+      view.unmount();
+    }
+  });
   it("Progress không mount canvas; đóng metric thực sự về timeline, mở lại giữ draft", async () => {
     render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
     await screen.findByRole("heading", { name: "Tiến trình xử lý" }, { timeout: 3000 });
