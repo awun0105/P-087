@@ -64,6 +64,8 @@ class InputAssemblyService:
     _IMPLEMENTED_ADAPTERS = frozenset(
         {
             RuntimeCapabilityKey.R1,
+            RuntimeCapabilityKey.R2,
+            RuntimeCapabilityKey.R3,
             RuntimeCapabilityKey.R4,
             RuntimeCapabilityKey.R5,
             RuntimeCapabilityKey.R6,

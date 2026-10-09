@@ -423,14 +423,20 @@ recipe → runtime registry checksum chain, selected source bytes, adapter versi
 and current qualified runtime before proceeding. Duplicate Run replays the same
 job; a changed request under the same key conflicts.
 
-Only R1 (RGB-only) and R4 (raw scan sequence with an exact supplied trajectory
-inside one verified LiDAR ZIP) are reconstruction dispatch adapters. R4 preserves
+R1 (RGB-only), R4 (supplied trajectory), R5 (estimated trajectory) and R6
+(sensor-guided) use their corresponding reconstruction worker stages. R4 preserves
 the declared metre/world-from-sensor facts and `trajectory_origin=supplied` and
 reuses the existing LiDAR package worker stage; it does not synthesize calibration
-or timing. R2, R3, R5 and R6 remain visible to the resolver but cannot be enabled
-by a registry claim alone: until their consumer adapters exist, the service marks
-those capabilities incompatible. R1 and R4 dispatch and worker-side revalidation
-are covered by API tests with synthetic qualified registry records.
+or timing. R2/R3 are now wired as lineage-bearing Run recipes: the accepted
+reconstruction manifest remains video-only, while one exact registered map or
+static cloud stays bound in the immutable recipe and staged upload lineage for
+AUD-19's later registration operation. Runtime revalidation checks those source
+bytes and declarations; registration preparation resolves the same accepted role
+and file ID. No LiDAR geometry is silently attached to the RGB manifest and no
+alignment is claimed by input detection. Synthetic API tests cover R2/R3 Run,
+persistence, worker revalidation and preparer source selection. Real qualification
+still depends on the explicit deployment registry and held-out capture evidence;
+a synthetic `qualified` record is wiring evidence only.
 
 Gaussian PLY/SOG selections use the unified upload inventory and then call AUD-06's
 existing durable view/import command. The import record retains a sealed exact
@@ -463,11 +469,13 @@ related test files; focused suites covering assembly, worker, ownership, quota,
 imports, migrations, and upload-to-prepared-job passed. No frontend rendering
 changed, so the browser UI gate does not apply in S3.
 
-S3 acceptance is queue/contract evidence with synthetic runtime qualification,
+S3 acceptance was queue/contract evidence with synthetic runtime qualification,
 not a real GPU reconstruction, real sensor-capture result, production deployment,
-or browser workflow. Enabled worker capability is limited to R1/R4; SOG/PLY
+or browser workflow. At that sprint, enabled worker capability was limited to
+R1/R4; AUD-17 later wired R5/R6, and the S5 local adapter integration below wires
+R2/R3 recipe lineage. These wiring tests do not qualify real input quality. SOG/PLY
 worker packaging still depends on the AUD-06 runtime and its own acceptance. The
-one-dropzone frontend and browser behavior remain in S4, and real R1–R6 recipe
+one-dropzone frontend and browser behavior were handled in S4; real R1–R6 recipe
 qualification remains in S5.
 
 ### AUD-24.S4 — one upload UI and input remediation
@@ -548,3 +556,18 @@ production object-store direct upload. R3 remained unavailable in the temporary
 runtime registry and correctly did not dispatch. PLY/SOG import routing is
 covered by a focused mocked UI test and existing durable-import backend tests;
 S5 still owns real capture qualification and complete R1–R6 consumer receipts.
+
+### AUD-24.S5 local adapter integration — 2026-10-09
+
+CodeGraph review found that AUD-19's server-owned registration preparer already
+consumes accepted R2/R3 recipes, but Run, project creation, persistence and worker
+revalidation still rejected those groups. The integration now shares one runnable
+recipe policy across those consumers and marks the R2/R3 registration-lineage
+adapter as wired. Project creation requires exactly one correctly-role-bound
+PCD/PLY source plus explicit cloud state, same-scene, unit and frame declarations.
+The immutable accepted recipe retains that source; the reconstruction
+`InputManifest` remains video-only. Worker resume rechecks both the video and map
+source bytes, and registration preparation resolves the accepted role/file ID.
+No alignment is inferred or attached to the RGB manifest.
+
+Local verification: `.venv/bin/pytest tests/test_api/test_studio_routes.py tests/test_api/test_guest_quota.py tests/test_orchestration/test_registration_preparation.py tests/test_reconstruction/test_input_assembly_resolution.py tests/test_orchestration/test_project_registry.py -q` — 73 passed; `ruff check src/ tests/` and `ruff format --check src/ tests/` passed; `git diff --check` passed. CodeGraph sync is current (944 files, 19,554 nodes); Graphify updated to 22,205 nodes. The API tests use synthetic qualified R2/R3 registry entries to prove resolver → Run → persistence → worker revalidation → registration-source selection. This proves wiring only. S5 remains open for real supported captures, measured registration quality, and browser/worker/scene acceptance; a production runtime must not qualify R2/R3 without that evidence.

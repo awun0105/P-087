@@ -401,6 +401,137 @@ async def test_input_assembly_run_is_durable_idempotent_and_worker_revalidates_r
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("runtime_key", "cloud_state", "cloud_role", "recipe_group"),
+    [
+        ("R2", "registered_map", "registered_lidar_map", "R2"),
+        ("R3", "single_static_cloud", "static_lidar_cloud", "R3"),
+    ],
+)
+async def test_input_assembly_accepts_registration_map_recipes_end_to_end(
+    client: AsyncClient,
+    studio: SimpleNamespace,
+    runtime_key: str,
+    cloud_state: str,
+    cloud_role: str,
+    recipe_group: str,
+) -> None:
+    from types import SimpleNamespace
+
+    from src.models.contracts.input_assembly import (
+        InputRecipe,
+        RuntimeCapabilityKey,
+        RuntimeCapabilityRecord,
+        RuntimeQualificationRegistry,
+        RuntimeQualificationStatus,
+        seal_runtime_registry,
+    )
+    from src.services.orchestration.jobs.registration_preparation import RegistrationRequestPreparer
+    from src.services.orchestration.jobs.runner import _validate_project_input_recipe
+
+    studio.settings.product_upload_max_bytes = 1024
+    runtime_path = studio.root / f"input-runtime-{runtime_key.lower()}.json"
+    runtime_path.write_text(
+        seal_runtime_registry(
+            RuntimeQualificationRegistry(
+                schema_version="1.0",
+                registry_version=f"test-{runtime_key.lower()}-v1",
+                capabilities=[
+                    RuntimeCapabilityRecord(
+                        capability_key=RuntimeCapabilityKey(runtime_key),
+                        status=RuntimeQualificationStatus.QUALIFIED,
+                        runtime_id=f"qualified-{runtime_key.lower()}-registration",
+                        runtime_version="1.2.3",
+                        qualification_evidence_checksum="sha256:" + "2" * 64,
+                    )
+                ],
+                registry_checksum="sha256:" + "0" * 64,
+            )
+        ).model_dump_json()
+    )
+    studio.settings.product_input_runtime_registry = runtime_path
+
+    video = await _upload(client, f"{runtime_key.lower()}-walk.mp4")
+    staged_video = await client.post(f"/api/v1/input-assemblies/uploads/{video['upload_id']}/stage")
+    assert staged_video.status_code == 200, staged_video.text
+    cloud = await client.post(
+        "/api/v1/input-assemblies/uploads",
+        params={"filename": f"{runtime_key.lower()}-map.pcd"},
+        content=(
+            b"# .PCD v0.7\nVERSION 0.7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\n"
+            b"WIDTH 1\nHEIGHT 1\nPOINTS 1\nDATA ascii\n0 0 0\n"
+        ),
+    )
+    assert cloud.status_code == 201, cloud.text
+    cloud_file_id = cloud.json()["staged_files"][0]["file_id"]
+
+    created = await client.post(
+        "/api/v1/input-assemblies",
+        json={
+            "upload_ids": [staged_video.json()["upload_id"], cloud.json()["upload_id"]],
+            "requested_intent": "video_reconstruction",
+            "declarations": {
+                "same_scene": {"value": True, "provenance": "declared"},
+                "cloud_state": {"value": cloud_state, "provenance": "declared"},
+                "coordinate_unit": {"value": "m", "provenance": "declared"},
+                "lidar_frame_id": {"value": "lidar-map", "provenance": "declared"},
+            },
+            "bindings": [{"binding_id": "selected-map", "role": cloud_role, "file_ids": [cloud_file_id]}],
+        },
+    )
+    assert created.status_code == 201, created.text
+    assembly = created.json()
+    resolved = await client.post(
+        f"/api/v1/input-assemblies/{assembly['assembly_id']}/resolve", json={"revision": assembly["revision"]}
+    )
+    assert resolved.status_code == 200, resolved.text
+    report = resolved.json()["report"]
+    assert report["state"] == "ready", report
+    candidate_id = report["recommended_candidate_id"]
+
+    accepted = await client.post(
+        f"/api/v1/input-assemblies/{assembly['assembly_id']}/run",
+        json={
+            "revision": assembly["revision"],
+            "resolution_checksum": report["report_checksum"],
+            "candidate_id": candidate_id,
+            "name": f"{recipe_group} registration input",
+            "attestation": _ATTESTATION,
+        },
+        headers={"Idempotency-Key": f"assembly-{recipe_group.lower()}-registration-run"},
+    )
+    assert accepted.status_code == 201, accepted.text
+
+    job = studio.registry.get_job(accepted.json()["job"]["job_id"])
+    project = studio.registry.get_project(job.project_id)
+    assert project.input_recipe_ref is not None
+    recipe = studio.registry.runtime_resolver.load_model(project.input_recipe_ref, InputRecipe)
+    assert recipe.recipe_group.value == recipe_group
+    assert any(binding.role.value == cloud_role and binding.file_ids == [cloud_file_id] for binding in recipe.bindings)
+    mode, source_role, source_file_ids = RegistrationRequestPreparer._accepted_map_source(recipe)
+    assert mode.value == ("registered_map" if recipe_group == "R2" else "static_cloud")
+    assert source_role.value == cloud_role
+    assert source_file_ids == [cloud_file_id]
+    manifest = InputManifest.model_validate_json(
+        studio.registry.runtime_resolver.require(project.input_manifest_ref).read_bytes()
+    )
+    assert len(manifest.files) == 1
+    assert manifest.input_configuration.registered_lidar_present is False
+
+    attempt = SimpleNamespace(
+        registry=studio.registry,
+        settings=SimpleNamespace(
+            database_url=studio.settings.database_url,
+            product_input_runtime_registry=runtime_path,
+        ),
+        job=job,
+    )
+    evidence = _validate_project_input_recipe(attempt, project, manifest)
+    assert evidence is not None
+    assert evidence.recipe.recipe_group.value == recipe_group
+
+
+@pytest.mark.asyncio
 async def test_input_assembly_dispatches_supplied_trajectory_only_from_exact_lidar_package(
     client: AsyncClient, studio: SimpleNamespace
 ) -> None:

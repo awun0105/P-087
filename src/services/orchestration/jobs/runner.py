@@ -36,6 +36,7 @@ from src.models.contracts.artifacts import ArtifactDataClass, ArtifactRef, Produ
 from src.models.contracts.input_assembly import (
     CandidateState,
     ClockRelation,
+    CloudObservationState,
     DistanceUnit,
     InputAssemblySnapshot,
     InputAssetFormat,
@@ -76,6 +77,7 @@ from src.services.orchestration.artifacts import (
 )
 from src.services.orchestration.benchmark import build_benchmark, publish_benchmark
 from src.services.orchestration.inputs import InputAssemblyService
+from src.services.orchestration.inputs.compatibility import INPUT_ASSEMBLY_RUNNABLE_RECIPE_GROUPS
 from src.services.orchestration.jobs.admission import ResourceAdmission, job_drivers, touch_job_reservation
 from src.services.orchestration.jobs.anonymization_review import accept_when_nothing_redacted
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
@@ -675,13 +677,7 @@ def _validate_project_input_recipe(
         not isinstance(candidate, VideoRecipeCandidate)
         or candidate.state != CandidateState.READY
         or candidate.runtime.status != RuntimeQualificationStatus.QUALIFIED
-        or candidate.recipe_group
-        not in {
-            RecipeGroup.RGB_ONLY,
-            RecipeGroup.SUPPLIED_TRAJECTORY,
-            RecipeGroup.ESTIMATED_TRAJECTORY,
-            RecipeGroup.SENSOR_GUIDED,
-        }
+        or candidate.recipe_group not in INPUT_ASSEMBLY_RUNNABLE_RECIPE_GROUPS
         or recipe.recipe_group != candidate.recipe_group
         or recipe.bindings != candidate.bindings
         or recipe.excluded_file_ids != candidate.excluded_file_ids
@@ -718,6 +714,35 @@ def _validate_project_input_recipe(
         if manifest.input_configuration.registered_lidar_present or len(manifest.files) != 1:
             raise ValueError("R1 recipe must dispatch the video-only worker path")
         selected_upload_ids = {video.upload_id}
+    elif candidate.recipe_group in {RecipeGroup.REGISTERED_MAP, RecipeGroup.SINGLE_STATIC_CLOUD}:
+        source_role = (
+            InputRole.REGISTERED_LIDAR_MAP
+            if candidate.recipe_group == RecipeGroup.REGISTERED_MAP
+            else InputRole.STATIC_LIDAR_CLOUD
+        )
+        source_ids = bindings.get(source_role, [])
+        declarations = assembly.declarations
+        source = by_id[source_ids[0]] if len(source_ids) == 1 else None
+        expected_cloud_state = (
+            CloudObservationState.REGISTERED_MAP
+            if candidate.recipe_group == RecipeGroup.REGISTERED_MAP
+            else CloudObservationState.SINGLE_STATIC_CLOUD
+        )
+        if (
+            manifest.input_configuration.registered_lidar_present
+            or manifest.lidar_metadata is not None
+            or len(manifest.files) != 1
+            or source is None
+            or source.observed_format not in {InputAssetFormat.POINT_CLOUD_PCD, InputAssetFormat.POINT_CLOUD_PLY}
+            or declarations.cloud_state is None
+            or declarations.cloud_state.value != expected_cloud_state
+            or declarations.same_scene is None
+            or declarations.same_scene.value is not True
+            or declarations.coordinate_unit is None
+            or declarations.lidar_frame_id is None
+        ):
+            raise ValueError("R2/R3 recipe must bind one exact map/cloud source and a video-only worker manifest")
+        selected_upload_ids = {video.upload_id, source.upload_id}
     elif candidate.recipe_group == RecipeGroup.SUPPLIED_TRAJECTORY:
         if not manifest.input_configuration.registered_lidar_present or manifest.lidar_metadata is None:
             raise ValueError("R4 recipe requires the existing LiDAR package worker stage")

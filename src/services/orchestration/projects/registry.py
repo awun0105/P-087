@@ -24,6 +24,7 @@ from src.models.contracts.artifacts import (
 from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
 from src.models.contracts.input_assembly import (
     CandidateState,
+    CloudObservationState,
     DistanceUnit,
     InputAssemblySnapshot,
     InputAssetFormat,
@@ -70,6 +71,7 @@ from src.services.orchestration.artifacts import (
 from src.services.orchestration.auth.models import Actor
 from src.services.orchestration.auth.quota_ledger import GuestQuotaIntent, GuestQuotaIntentResult
 from src.services.orchestration.inputs.assembly import InputResolutionRecord
+from src.services.orchestration.inputs.compatibility import INPUT_ASSEMBLY_RUNNABLE_RECIPE_GROUPS
 from src.services.orchestration.inputs.runs import InputAssemblyRunCommit, InputAssemblyRunResult
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.models import JobAttemptRecord, PreparedInputReceipt, TransitionRequest
@@ -440,13 +442,8 @@ class ProjectRegistry:
             raise ValueError("Only an exact ready video recipe candidate may create a reconstruction job")
         if candidate.runtime.status != RuntimeQualificationStatus.QUALIFIED:
             raise ValueError("The selected worker runtime is not qualified")
-        if candidate.recipe_group not in {
-            RecipeGroup.RGB_ONLY,
-            RecipeGroup.SUPPLIED_TRAJECTORY,
-            RecipeGroup.ESTIMATED_TRAJECTORY,
-            RecipeGroup.SENSOR_GUIDED,
-        }:
-            raise ValueError("No worker stage adapter exists for this input recipe")
+        if candidate.recipe_group not in INPUT_ASSEMBLY_RUNNABLE_RECIPE_GROUPS:
+            raise ValueError("No compatible input workflow adapter exists for this recipe")
         if (
             report.state.value != "ready"
             or report.assembly_id != assembly.assembly_id
@@ -480,6 +477,30 @@ class ProjectRegistry:
         if candidate.recipe_group == RecipeGroup.RGB_ONLY:
             if lidar is not None or request.lidar is not None:
                 raise ValueError("R1 cannot attach a LiDAR upload")
+        elif candidate.recipe_group in {RecipeGroup.REGISTERED_MAP, RecipeGroup.SINGLE_STATIC_CLOUD}:
+            source_role, expected_cloud_state = {
+                RecipeGroup.REGISTERED_MAP: (InputRole.REGISTERED_LIDAR_MAP, CloudObservationState.REGISTERED_MAP),
+                RecipeGroup.SINGLE_STATIC_CLOUD: (
+                    InputRole.STATIC_LIDAR_CLOUD,
+                    CloudObservationState.SINGLE_STATIC_CLOUD,
+                ),
+            }[candidate.recipe_group]
+            source_ids = role_bindings.get(source_role, [])
+            declarations = assembly.declarations
+            source = by_file_id[source_ids[0]] if len(source_ids) == 1 else None
+            if (
+                lidar is not None
+                or request.lidar is not None
+                or source is None
+                or source.observed_format not in {InputAssetFormat.POINT_CLOUD_PCD, InputAssetFormat.POINT_CLOUD_PLY}
+                or declarations.cloud_state is None
+                or declarations.cloud_state.value != expected_cloud_state
+                or declarations.same_scene is None
+                or declarations.same_scene.value is not True
+                or declarations.coordinate_unit is None
+                or declarations.lidar_frame_id is None
+            ):
+                raise ValueError("R2/R3 requires one exact map/cloud source and registration-ready declarations")
         elif candidate.recipe_group == RecipeGroup.SUPPLIED_TRAJECTORY:
             if (
                 lidar is None

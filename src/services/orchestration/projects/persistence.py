@@ -29,6 +29,7 @@ from src.services.orchestration.auth.quota_ledger import (
     lookup_guest_quota_intent,
 )
 from src.services.orchestration.inputs.assembly import InputResolutionRecord, StoredInputAssembly
+from src.services.orchestration.inputs.compatibility import INPUT_ASSEMBLY_RUNNABLE_RECIPE_GROUPS
 from src.services.orchestration.inputs.runs import (
     InputAssemblyRunCommit,
     InputAssemblyRunRecord,
@@ -382,13 +383,7 @@ class ProjectPersistence:
         if not isinstance(selected, VideoRecipeCandidate) or selected.state != CandidateState.READY:
             raise ValueError("Input run requires one exact ready video recipe candidate")
         if (
-            selected.recipe_group
-            not in {
-                RecipeGroup.RGB_ONLY,
-                RecipeGroup.SUPPLIED_TRAJECTORY,
-                RecipeGroup.ESTIMATED_TRAJECTORY,
-                RecipeGroup.SENSOR_GUIDED,
-            }
+            selected.recipe_group not in INPUT_ASSEMBLY_RUNNABLE_RECIPE_GROUPS
             or selected.runtime.status != RuntimeQualificationStatus.QUALIFIED
         ):
             raise ValueError("Input recipe has no qualified worker adapter")

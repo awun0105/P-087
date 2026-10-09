@@ -70,6 +70,7 @@ from src.services.orchestration.inputs import (
     StoredInputAssembly,
 )
 from src.services.orchestration.inputs.assembly import InputAssemblyRuntimeConfigError
+from src.services.orchestration.inputs.compatibility import INPUT_ASSEMBLY_RUNNABLE_RECIPE_GROUPS
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.processing.config import build_job_config, config_bytes, is_presets_file, preset_values
 from src.services.orchestration.processing.resources import evaluate
@@ -471,12 +472,7 @@ def run_input_assembly(
             raise InputAssemblyConflictError("Selected candidate is not a ready video reconstruction recipe")
         if candidate.runtime.status != RuntimeQualificationStatus.QUALIFIED:
             raise InputAssemblyConflictError("Selected worker capability is not qualified")
-        if candidate.recipe_group not in {
-            RecipeGroup.RGB_ONLY,
-            RecipeGroup.SUPPLIED_TRAJECTORY,
-            RecipeGroup.ESTIMATED_TRAJECTORY,
-            RecipeGroup.SENSOR_GUIDED,
-        }:
+        if candidate.recipe_group not in INPUT_ASSEMBLY_RUNNABLE_RECIPE_GROUPS:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Recipe {candidate.recipe_group.value} has no compatible dispatch adapter yet",
