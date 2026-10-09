@@ -283,3 +283,12 @@ def test_worker_keeps_going_only_when_no_frame_was_redacted(tmp_path: Path) -> N
         registry.runtime_resolver.require_uri(stage.artifact_uri, stage.artifact_checksum).read_bytes()
     )
     assert record.accepted_by is None and record.redacted_frame_count == 0
+
+
+def test_worker_masks_every_qa_verified_video_whatever_the_job_config_says() -> None:
+    from src.services.orchestration.jobs.runner import must_anonymize
+
+    plain, enforced = SimpleNamespace(), SimpleNamespace(product_anonymize_input=True)
+    assert must_anonymize(False, plain, "qa_verified"), "job thiếu cờ anonymize vẫn phải bị che ở qa_verified"
+    assert not must_anonymize(False, plain, "self_attested")
+    assert must_anonymize(True, plain, "self_attested") and must_anonymize(False, enforced, "self_attested")

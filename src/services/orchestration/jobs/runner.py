@@ -740,6 +740,15 @@ def _validate_project_input_recipe(
         raise ValueError("Worker runtime or input resolver version differs from the accepted recipe")
 
 
+def must_anonymize(job_choice: bool, settings: object, privacy_mode: str) -> bool:
+    """Job tự chọn, deployment bắt buộc cho mọi job, hoặc project ở chế độ `qa_verified`.
+
+    Worker tự quyết theo chế độ của project, không tin cấu hình job do API ghi: một job `qa_verified` thiếu cờ
+    `anonymize` vẫn bị che. Settings giả trong test có thể không có trường `product_anonymize_input`.
+    """
+    return job_choice or bool(getattr(settings, "product_anonymize_input", False)) or privacy_mode == "qa_verified"
+
+
 def _execute_prepare(attempt: _Attempt, profile: ResolvedProcessing) -> JobManifest:
     """Chuẩn bị input video qua REC CLI và ghi các stage vào JobManifest."""
     project = attempt.registry.get_project(attempt.job.project_id)
@@ -757,11 +766,7 @@ def _execute_prepare(attempt: _Attempt, profile: ResolvedProcessing) -> JobManif
         "privacy_mode": "self_attested",
         "sample_fps": profile.sample_fps,
         "max_frames": profile.max_frames,
-        # Job tự chọn, deployment bắt buộc cho mọi job, hoặc project ở chế độ `qa_verified` (worker tự áp, không
-        # tin cấu hình job do API ghi). Settings giả trong test không có trường này.
-        "anonymize": profile.anonymize
-        or getattr(attempt.settings, "product_anonymize_input", False)
-        or project.privacy_mode == "qa_verified",
+        "anonymize": must_anonymize(profile.anonymize, attempt.settings, project.privacy_mode),
     }
     request_path = attempt.workspace / "prepare.request.json"
     with request_path.open("x", encoding="utf-8") as stream:
