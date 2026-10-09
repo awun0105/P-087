@@ -21,7 +21,7 @@ from src.models.contracts.manifests import InputManifest, JobManifest, JobStatus
 from src.services.orchestration.artifacts import ArtifactStoreError, sha256_file
 from src.services.orchestration.jobs.dispatch import prepared_frame_reference
 from src.services.orchestration.jobs.models import JobAttemptRecord
-from src.services.orchestration.jobs.progress import MVP_PIPELINE
+from src.services.orchestration.jobs.progress import MVP_PIPELINE, sanitized_frame_stage
 from src.services.orchestration.samples.bundle import DemoLibrary, DemoUnavailableError
 from src.services.orchestration.samples.models import (
     DemoFact,
@@ -251,7 +251,8 @@ def _export_job_bundle(
     splat = add_file(out, resolver.require(preview.delivery_ref), "scene.sog")
     project = registry.get_project(job.project_id)
     video = None
-    if project.input_manifest_ref is not None:
+    # Job đã che khuôn mặt/biển số: frame trong bundle là bản đã che, nên không đưa video gốc chưa che ra thư viện công khai.
+    if project.input_manifest_ref is not None and sanitized_frame_stage(job) is None:
         manifest = InputManifest.model_validate_json(resolver.require(project.input_manifest_ref).read_bytes())
         first = manifest.files[0]
         path = resolver.resolve(first.artifact_uri)
@@ -324,6 +325,9 @@ def export_job_bundle(
     bao giờ ghi ra bundle mà thư viện không đọc được. Thất bại thì dọn `files/` và `manifest.json` đã tạo, để chạy lại
     được; mọi lỗi dữ liệu đều là `SampleExportError`.
     """
+    if out.exists() and any(out.iterdir()):
+        # Từ chối trước mọi việc khác và không dọn gì: thư mục này không phải do lần chạy này tạo.
+        raise SampleExportError(f"{out} đã có dữ liệu; chọn thư mục mới (không ghi đè bundle cũ)")
     try:
         demo = _export_job_bundle(
             registry,
@@ -364,7 +368,11 @@ def _acquire_publish_lock(library_root: Path, job_id: str) -> Path:
             lock.mkdir()
             return lock
         except FileExistsError:
-            if time.time() - lock.stat().st_mtime < _LOCK_STALE_SECONDS:
+            try:
+                age = time.time() - lock.stat().st_mtime
+            except FileNotFoundError:
+                continue  # người giữ khoá vừa nhả: thử lại ngay
+            if age < _LOCK_STALE_SECONDS:
                 raise SampleExportError("Job này đang được xuất bởi người khác; thử lại sau ít phút") from None
             shutil.rmtree(lock, ignore_errors=True)  # khoá bỏ lại sau sự cố
     raise SampleExportError("Không lấy được khoá xuất bản demo")

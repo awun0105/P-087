@@ -69,7 +69,7 @@ export const STAGE_PRESENTERS: Partial<Record<StageId, StagePresenter>> = {
         <div className="max-w-sm">
           <ShieldCheck className="mx-auto size-10 text-sage" aria-hidden />
           <p className="mt-3 text-sm font-medium text-ink">Nguồn dữ liệu: {demo.source.dataset}</p>
-          <p className="mt-1 text-sm text-ink-muted">Xác nhận về quyền sử dụng và ẩn danh được ghi lại cùng scene.</p>
+          <p className="mt-1 text-sm text-ink-muted">{demo.source.sequence}</p>
         </div>
       </div>
     ),
@@ -162,8 +162,8 @@ export const ASSET_RENDERERS: Record<DemoStageAsset["kind"], AssetRenderer> = {
   facts: (asset) =>
     asset.facts && asset.facts.length > 0 ? (
       <dl className="grid grid-cols-2 gap-2 text-xs">
-        {asset.facts.map((fact) => (
-          <div key={fact.label} className="rounded-lg border border-line bg-paper p-3">
+        {asset.facts.map((fact, index) => (
+          <div key={`${fact.label}-${index}`} className="rounded-lg border border-line bg-paper p-3">
             <dt className="text-ink-muted">{fact.label}</dt>
             <dd className="mt-1 font-mono font-medium text-ink">{fact.value}</dd>
           </div>

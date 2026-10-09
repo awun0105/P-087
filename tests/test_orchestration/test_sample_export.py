@@ -31,10 +31,12 @@ class _Resolver:
     def require(self, reference: object) -> Path:
         if reference == "DELIVERY":
             return self.splat
+        if reference == "RAW_VIDEO_MANIFEST":
+            raise AssertionError("video gốc chưa che không được đọc để đưa vào thư viện công khai")
         raise ArtifactStoreError("không có artifact này")
 
 
-def _registry(tmp_path: Path, *, preview_ok: bool = True):  # noqa: ANN202
+def _registry(tmp_path: Path, *, preview_ok: bool = True, raw_video: bool = False):  # noqa: ANN202
     real = ProjectRegistry(runtime_root=tmp_path / "artifacts")
     real.seed_from_fixtures()
     splat = tmp_path / "preview.sog"
@@ -52,7 +54,7 @@ def _registry(tmp_path: Path, *, preview_ok: bool = True):  # noqa: ANN202
         get_job=real.get_job,
         get_preview=get_preview,
         runtime_resolver=_Resolver(splat),
-        get_project=lambda project_id: SimpleNamespace(input_manifest_ref=None),
+        get_project=lambda project_id: SimpleNamespace(input_manifest_ref="RAW_VIDEO_MANIFEST" if raw_video else None),
         list_job_attempts=lambda job_id: [],
     ), splat
 
@@ -271,3 +273,32 @@ def test_a_lidar_job_keeps_its_lidar_stages_when_exported(tmp_path: Path) -> Non
     assert StageId.LIDAR_ODOMETRY not in ids
     # Job không LiDAR thì pipeline giữ nguyên 8 bước.
     assert len(stage_durations(job, [])) == 8
+
+
+def test_a_failed_export_never_touches_an_existing_bundle(tmp_path: Path) -> None:
+    registry, _ = _registry(tmp_path)
+    out = tmp_path / "published"
+    (out / "files").mkdir(parents=True)
+    (out / "files" / "scene.sog").write_bytes(b"da-xuat-ban")
+    (out / "manifest.json").write_text("{}")
+    with pytest.raises(SampleExportError, match="không ghi đè"):
+        export_job_bundle(registry, JOB_ID, out, demo_id="x", title="x", description="", source=SOURCE)
+    # Lỗi xảy ra trước khi lần chạy này tạo bất cứ thứ gì: các lỗi khác (frame, preview) cũng không được xoá bundle cũ.
+    with pytest.raises(SampleExportError):
+        export_job_bundle(registry, JOB_ID, out, demo_id="x", title="x", description="", source=SOURCE, frames=1)
+    assert (out / "files" / "scene.sog").read_bytes() == b"da-xuat-ban" and (out / "manifest.json").read_text() == "{}"
+
+
+def test_the_raw_video_is_not_published_when_the_job_masked_faces_and_plates(tmp_path: Path, monkeypatch) -> None:
+    from src.services.orchestration.samples import export as export_module
+
+    registry, _ = _registry(tmp_path, raw_video=True)
+    monkeypatch.setattr(export_module, "sanitized_frame_stage", lambda job: object())
+    manifest = export_job_bundle(
+        registry, JOB_ID, tmp_path / "masked", demo_id="x", title="Đã che", description="", source=SOURCE
+    )
+    assert manifest.video is None
+    # Không che thì vẫn cố đọc video gốc (resolver giả báo lỗi để chứng minh đường đó được đi).
+    monkeypatch.setattr(export_module, "sanitized_frame_stage", lambda job: None)
+    with pytest.raises(AssertionError, match="video gốc"):
+        export_job_bundle(registry, JOB_ID, tmp_path / "plain", demo_id="y", title="Gốc", description="", source=SOURCE)

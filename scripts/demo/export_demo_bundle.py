@@ -48,8 +48,8 @@ def export_job(args: argparse.Namespace) -> None:
     """Bundle từ job thật: video gốc, frame đại diện, SOG preview, thời lượng từ journal."""
     from src.services.orchestration.projects.registry import get_project_registry
 
-    assets = load_stage_assets(args.stage_assets) if args.stage_assets else None
     try:
+        assets = load_stage_assets(args.stage_assets) if args.stage_assets else None
         manifest = export_job_bundle(
             get_project_registry(),
             args.job_id,
