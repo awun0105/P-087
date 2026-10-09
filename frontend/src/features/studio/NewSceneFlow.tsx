@@ -1,7 +1,7 @@
 "use client";
 
 import { errorMessage } from "@/lib/ui-error";
-import { GAUSSIAN_EDIT_ENABLED } from "@/features/studio/scene/state";
+import { SOURCE_ROUTES, SOURCE_TITLES, type Source } from "@/features/studio/newSceneSources";
 
 import { ArrowLeft, ArrowRight, Box, Clapperboard, Film, Loader2, LogIn } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
@@ -23,18 +23,6 @@ import { PageHeader } from "@/components/studio/feedback";
 import { cn } from "@/lib/cn";
 import type { DemoManifest, SampleSummary, UploadRecord } from "@/lib/contracts/studio";
 
-export type Source = "video" | "gaussian" | "sample";
-/** Mỗi cách bắt đầu là một trang riêng dưới `/new`; `/new` chỉ là trang chọn. */
-export const SOURCE_ROUTES: Record<Source, string> = {
-  video: "/new/import-video",
-  gaussian: "/new/import-scene",
-  sample: "/new/try-demo",
-};
-const SOURCE_TITLES: Record<Source, { title: string; description: string }> = {
-  video: { title: "Dựng từ video", description: "Tải video MP4/MOV, khai báo dữ liệu rồi bắt đầu dựng scene 3D." },
-  gaussian: { title: "Mở 3DGS có sẵn", description: (GAUSSIAN_EDIT_ENABLED ? "Tải file PLY/SOG/ZIP đã dựng để xem, chỉnh Gaussian và xuất file." : "Tải file PLY/SOG/ZIP đã dựng để xem.") + " Không có tỉ lệ mét, collision hay duyệt." },
-  sample: { title: "Thử mẫu", description: "Xem tiến trình và kết quả đã xử lý sẵn; không tạo scene mới." },
-};
 const VIDEO_STEPS = [{ key: "video", label: "Chọn video" }, { key: "settings", label: "Khai báo & tạo job" }];
 const IMPORT_STEPS = [{ key: "gaussian", label: "Chọn file 3DGS" }, { key: "import", label: "Mở scene import" }];
 const SAMPLE_STEPS = [
@@ -182,7 +170,7 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
         {!source && (
           <div className="space-y-4">
             <SourceCard primary icon={<Film aria-hidden />} title={SOURCE_TITLES.video.title} detail={SOURCE_TITLES.video.description} href={SOURCE_ROUTES.video} />
-            <p id="no-build-label" className="label-tech pt-2 text-ink-muted">Không dựng mới</p>
+            <p id="no-build-label" className="label-tech pt-2 text-ink-muted">Dùng kết quả đã dựng sẵn</p>
             <div role="group" aria-labelledby="no-build-label" className="grid gap-4 md:grid-cols-2">
               <SourceCard icon={<Box aria-hidden />} title={SOURCE_TITLES.gaussian.title} detail={SOURCE_TITLES.gaussian.description} href={SOURCE_ROUTES.gaussian} />
               <SourceCard icon={<Clapperboard aria-hidden />} title={SOURCE_TITLES.sample.title} detail={SOURCE_TITLES.sample.description} href={SOURCE_ROUTES.sample} />

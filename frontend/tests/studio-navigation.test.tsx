@@ -127,3 +127,13 @@ describe("scene tabs", () => {
     expect(screen.getByRole("tab", { name: "Kết quả" })).toHaveFocus();
   });
 });
+
+describe("tên ba trang bắt đầu dùng chung một nguồn", () => {
+  it("breadcrumb của /new/* trùng tiêu đề trang trong SOURCE_TITLES", async () => {
+    const { SOURCE_ROUTES, SOURCE_TITLES } = await import("@/features/studio/newSceneSources");
+    for (const source of ["video", "gaussian", "sample"] as const) {
+      const crumbs = crumbsFor(SOURCE_ROUTES[source], null, true);
+      expect(crumbs.at(-1)?.label).toBe(SOURCE_TITLES[source].title);
+    }
+  });
+});

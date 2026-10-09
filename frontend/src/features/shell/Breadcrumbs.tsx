@@ -1,6 +1,7 @@
 "use client";
 
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
+import { SOURCE_ROUTES, SOURCE_TITLES } from "@/features/studio/newSceneSources";
 import { createContext, Fragment, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import {
@@ -38,11 +39,11 @@ export function usePageTitle(title: string | null): void {
   }, [setTitle, title]);
 }
 
-/** Ba trang bắt đầu dưới `/new` (features/studio/NewSceneFlow.tsx `SOURCE_ROUTES`). */
+/** Tên ba trang bắt đầu dưới `/new` lấy từ cùng nguồn với tiêu đề trang (features/studio/newSceneSources.ts). */
 const NEW_SCENE_PAGES: Record<string, string> = {
-  "/new/import-video": "Dựng từ video",
-  "/new/import-scene": "Mở 3DGS có sẵn",
-  "/new/try-demo": "Thử mẫu",
+  [SOURCE_ROUTES.video]: SOURCE_TITLES.video.title,
+  [SOURCE_ROUTES.gaussian]: SOURCE_TITLES.gaussian.title,
+  [SOURCE_ROUTES.sample]: SOURCE_TITLES.sample.title,
 };
 
 export function crumbsFor(pathname: string, detailTitle?: string | null, signedIn = true): Crumb[] {
