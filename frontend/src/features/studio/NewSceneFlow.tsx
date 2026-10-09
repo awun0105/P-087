@@ -13,7 +13,7 @@ import { useAuth } from "@/features/studio/AuthProvider";
 import { FlowStepper } from "@/features/studio/FlowStepper";
 import { canCreateScene, describeDetection, isLidar } from "@/features/studio/inputKinds";
 import { ImportSetupStep } from "@/features/studio/ImportSetupStep";
-import { SamplePicker, SampleProcessStep, SampleReadyStep, SampleSelectStep } from "@/features/studio/SampleFlow";
+import { SamplePicker, SampleProcessStep, SampleSelectStep } from "@/features/studio/SampleFlow";
 import { UploadDropzone } from "@/features/studio/UploadDropzone";
 import { VideoSetupStep } from "@/features/studio/VideoSetupStep";
 import { canEdit } from "@/lib/api/auth";
@@ -27,9 +27,8 @@ const VIDEO_STEPS = [{ key: "video", label: "Chọn video" }, { key: "settings",
 const IMPORT_STEPS = [{ key: "gaussian", label: "Chọn file 3DGS" }, { key: "import", label: "Mở scene import" }];
 const SAMPLE_STEPS = [
   { key: "sample", label: "Chọn mẫu" },
-  { key: "inspect", label: "Xem mẫu" },
-  { key: "replay", label: "Tiến trình đã ghi" },
-  { key: "open", label: "Mở scene mẫu" },
+  { key: "inspect", label: "Xem thông tin" },
+  { key: "replay", label: "Xem tiến trình" },
 ];
 
 /**
@@ -60,7 +59,8 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
           router.replace(SOURCE_ROUTES[target] + (route.size ? "?" + route.toString() : ""));
         }
       } else if (source === "sample") {
-        setStep(route.get("sample") ? route.get("step") === "replay" ? 2 : route.get("step") === "ready" ? 3 : 1 : 0);
+        // `step=ready` là URL cũ của bước mở scene đã bỏ: quay về bước xem tiến trình.
+        setStep(route.get("sample") ? route.get("step") === "replay" || route.get("step") === "ready" ? 2 : 1 : 0);
       } else {
         setStep(route.get("step") === "setup" ? 1 : 0);
         setPreselect(route.get("upload"));
@@ -103,7 +103,7 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
     setSample(null);
     setSampleError(null);
     const routeStep = new URLSearchParams(window.location.search).get("step");
-    setStep(routeStep === "replay" ? 2 : routeStep === "ready" ? 3 : 1);
+    setStep(routeStep === "replay" || routeStep === "ready" ? 2 : 1);
     void getSample(id).then((result) => {
       if (latestPick.current !== id) return;
       if (result.ok) setSample(result.data);
@@ -217,10 +217,8 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
             </p>
           ) : step === 1 ? (
             <SampleSelectStep sampleId={sampleId} sample={sample} onBack={backToSample} onStart={() => { setStep(2); update({ step: "replay" }); }} />
-          ) : step === 2 ? (
-            <SampleProcessStep sampleId={sampleId} sample={sample} onDone={() => { setStep(3); update({ step: "ready" }); }} />
           ) : (
-            <SampleReadyStep sampleId={sampleId} sample={sample} />
+            <SampleProcessStep sampleId={sampleId} sample={sample} onDone={() => router.push(`/samples/${encodeURIComponent(sampleId)}/scene`)} />
           )
         ) : null}
         {source !== "sample" && source && step === 1 && (

@@ -1,13 +1,14 @@
 "use client";
 
 import { Square } from "lucide-react";
-import { Button, Card, ProgressBar } from "@/components/studio/primitives";
+import { Button, ProgressBar } from "@/components/studio/primitives";
 import { HelpDetails } from "@/components/studio/feedback";
 import { PipelineTimeline, type StageAction, type StageView } from "@/features/studio/PipelineTimeline";
 import { isJobStale, stageSeconds, useNow, type SceneInfo } from "@/features/studio/scene/state";
 import { stagesFor } from "@/features/studio/stages";
 import { AnonymizationReviewPanel } from "@/features/studio/scene/AnonymizationReviewPanel";
 import { AttemptHistory } from "@/features/studio/scene/AttemptHistory";
+import { ProgressFrame } from "@/features/studio/scene/ProgressFrame";
 import { QueueStatus } from "@/features/studio/scene/QueueStatus";
 import { ResourceWaitDetail } from "@/features/studio/scene/ResourceWaitDetail";
 import type { JobProgress } from "@/lib/contracts/studio";
@@ -48,8 +49,7 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
     });
   }
   return <div className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6">
-    <div><h2 className="text-xl font-bold tracking-tight">Tiến trình xử lý</h2><p className="mt-1 text-sm text-ink-muted">Bấm tên bước đã xong để mở Xem giai đoạn; bước lỗi hoặc cần bạn thao tác có nút ngay tại bước đó.</p></div>
-    <Card className="p-5 sm:p-6">
+    <ProgressFrame hint="Bấm tên bước đã xong để mở Xem giai đoạn; bước lỗi hoặc cần bạn thao tác có nút ngay tại bước đó.">
       {reviewing && <div id={ANONYMIZATION_PANEL_ID} className="scroll-mt-4"><AnonymizationReviewPanel key={jobId + ":" + progress.attempt} jobId={jobId} canAccept={canAccept} onAccepted={() => onChanged?.()} /></div>}
       {!reviewing && (progress?.status === "QUEUED" || progress?.waiting_for === "resources" || progress?.queue) && <div role="status" className="mb-5 space-y-2 text-sm text-ink-muted">
         <p>{progress.waiting_for === "resources" ? "Đang chờ đủ tài nguyên trên máy xử lý." : "Job đã vào hàng đợi, đang chờ máy xử lý."} Cấu hình đã chọn được giữ nguyên; job tự chạy tiếp khi đến lượt và đủ tài nguyên.</p>
@@ -65,7 +65,7 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
       {canCancel && <div className="mt-4 flex justify-end gap-3">
         <Button variant="danger" size="sm" disabled={busy} onClick={onCancel}><Square aria-hidden />Huỷ xử lý</Button>
       </div>}
-    </Card>
+    </ProgressFrame>
     {progress && <AttemptHistory jobId={jobId} attempt={progress.attempt} status={progress.status} />}
     <HelpDetails title="Đầu vào và cách theo dõi">
       {info?.videoName && <p>Video gốc: {info.videoName}{info.videoSize !== null ? " · " + formatBytes(info.videoSize) : ""}</p>}

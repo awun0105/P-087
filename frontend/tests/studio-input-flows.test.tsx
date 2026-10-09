@@ -207,6 +207,17 @@ describe("ba cửa vào", () => {
   });
 });
 
+describe("trình hướng dẫn mẫu", () => {
+  it("có 3 bước như luồng video, không còn bước mở scene riêng", async () => {
+    vi.mocked(listSamples).mockResolvedValue({ ok: true, data: { samples: [] } });
+    render(<NewSceneFlow source="sample" />);
+    expect(screen.getByText("Chọn mẫu")).toBeInTheDocument();
+    expect(screen.getByText("Xem thông tin")).toBeInTheDocument();
+    expect(screen.getByText("Xem tiến trình")).toBeInTheDocument();
+    expect(screen.queryByText("Mở scene mẫu")).toBeNull();
+  });
+});
+
 describe("cảnh báo tài nguyên ở trang dựng từ video", () => {
   const vram = (status: "ok" | "danger") => ({ resource: "vram", required_gb: 9, available_gb: 4, status, message: "" });
   async function open(evaluation: unknown) {

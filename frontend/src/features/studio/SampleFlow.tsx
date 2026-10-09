@@ -1,14 +1,14 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Box, CheckCircle2, Clapperboard, Clock, FastForward, Info, Play } from "lucide-react";
-import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
+import { ArrowLeft, ArrowRight, CheckCircle2, Clapperboard, Clock, FastForward, Info, Play } from "lucide-react";
 import { useState } from "react";
 
-import { Badge, Button, Card, Notice, buttonVariants } from "@/components/studio/primitives";
+import { Badge, Button, Card, Notice } from "@/components/studio/primitives";
 import { DemoShowcase } from "@/features/studio/DemoShowcase";
 import { PipelineTimeline } from "@/features/studio/PipelineTimeline";
 import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
-import { STUDIO_STAGES } from "@/features/studio/stages";
+import { ProgressFrame } from "@/features/studio/scene/ProgressFrame";
+import { stagesFor } from "@/features/studio/stages";
 import { useDemoReplay } from "@/features/studio/useDemoReplay";
 import { useProcessingForm } from "@/features/studio/useProcessingForm";
 import { sampleFileUrl } from "@/lib/api/studio";
@@ -150,7 +150,7 @@ export function SampleSelectStep({
         </Button>
         <Button size="lg" onClick={onStart}>
           <Play aria-hidden />
-          Xem phát lại
+          Xem quá trình đã ghi
         </Button>
       </div>
     </div>
@@ -178,7 +178,13 @@ function SampleProcessing({ sample }: { sample: DemoManifest }) {
   return <ProcessingSettings parameters={form.options.parameters} values={sample.processing} editable={false} machineLabel={machineLabel} />;
 }
 
-/** Bước "Xử lý" của video mẫu: phát lại tiến trình theo tỉ lệ thời lượng thật đã ghi. */
+/**
+ * Bước "Xem tiến trình" của video mẫu: phát lại tiến trình đã ghi theo tỉ lệ thời lượng thật.
+ *
+ * Cùng khung `ProgressFrame` và cùng danh sách bước (`stagesFor`, có bước LiDAR nếu bundle có) với tab Tiến trình của
+ * scene thật; khác ở chỗ bên trái có khung xem trước kết quả của bước, vì mẫu không phải job nên không có trang giai
+ * đoạn riêng để mở.
+ */
 export function SampleProcessStep({
   sampleId,
   sample,
@@ -188,13 +194,14 @@ export function SampleProcessStep({
   sample: DemoManifest;
   onDone: () => void;
 }) {
-  const { views, finished, skip } = useDemoReplay(sample.stages, true);
+  const stageList = stagesFor(sample.stages.map((stage) => stage.stage_id));
+  const { views, finished, skip } = useDemoReplay(sample.stages, true, stageList);
   const [manualStage, setManualStage] = useState<StageId | null>(null);
   const running = views.find((view) => view.state === "running");
   const activeStage = manualStage ?? running?.stage_id ?? views.findLast((view) => view.state === "succeeded")?.stage_id ?? views[0].stage_id;
   const currentView = views.find((view) => view.stage_id === activeStage) ?? views[0];
   const recorded = sample.stages.filter((stage) => (stage.state ?? "succeeded") === "succeeded");
-  const missing = STUDIO_STAGES.filter((meta) => !recorded.some((stage) => stage.stage_id === meta.id));
+  const missing = stageList.filter((meta) => !recorded.some((stage) => stage.stage_id === meta.id));
   const totalReal = recorded.length > 0 && recorded.every((stage) => stage.duration_seconds !== null)
     ? recorded.reduce((sum, stage) => sum + (stage.duration_seconds ?? 0), 0)
     : null;
@@ -216,16 +223,16 @@ export function SampleProcessStep({
           </Notice>
         ) : (
           <Notice icon={<Info aria-hidden />}>
-            Kết quả đã xử lý sẵn — đang phát lại {recorded.length} bước đã ghi trong pipeline {STUDIO_STAGES.length} bước. Bấm vào tên bước ở danh sách bên phải để xem tiến trình chi tiết của bước đó.
+            Đây là bản phát lại, không phải job đang chạy: kết quả đã xử lý sẵn, đang phát lại {recorded.length} bước đã ghi trong pipeline {stageList.length} bước.
           </Notice>
         )}
         {missing.length > 0 && <Notice tone="ochre">Mẫu cũ chưa ghi kết quả: {missing.map((meta) => meta.title).join(", ")}.
           Các bước này vẫn hiện chưa có kết quả khi bỏ qua replay.</Notice>}
       </div>
-      <Card className="h-fit p-5 sm:p-6">
+      <ProgressFrame hint="Bấm tên một bước để xem kết quả của bước đó ở khung bên trái.">
         <PipelineTimeline
           stages={views}
-          stageList={STUDIO_STAGES}
+          stageList={stageList}
           selectedStage={activeStage}
           onSelectStage={(id) => setManualStage(id)}
           timeNote={totalReal ? `Các bước đã ghi: ${formatDuration(totalReal)}` : "Phát lại nhanh"}
@@ -243,32 +250,7 @@ export function SampleProcessStep({
             </Button>
           )}
         </div>
-      </Card>
+      </ProgressFrame>
     </div>
-  );
-}
-
-/** Bước "Mở scene" của video mẫu. */
-export function SampleReadyStep({ sampleId, sample }: { sampleId: string; sample: DemoManifest }) {
-  const cover = sample.frames[Math.floor(sample.frames.length / 2)];
-  return (
-    <Card className="overflow-hidden">
-      <div className="relative aspect-[16/7] bg-viewport">
-        {cover && (
-          // eslint-disable-next-line @next/next/no-img-element -- ảnh mẫu từ API
-          <img src={sampleFileUrl(sampleId, cover.name)} alt="" className="size-full object-cover opacity-80" />
-        )}
-        <div className="absolute inset-0 grid place-items-center">
-          <Link href={`/samples/${encodeURIComponent(sampleId)}/scene`} className={buttonVariants({ size: "lg" })}>
-            <Box aria-hidden />
-            Mở scene 3D
-          </Link>
-        </div>
-      </div>
-      <p className="p-5 text-sm text-ink-muted">
-        File 3DGS <span className="font-mono text-xs">{sample.splat.name}</span> · {formatBytes(sample.splat.size_bytes)}. Trong
-        editor: xoay/zoom để xem, chọn vùng Gaussian để xóa hoặc di chuyển, đo khoảng cách và xuất PLY/SOG.
-      </p>
-    </Card>
   );
 }
