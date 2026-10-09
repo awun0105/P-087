@@ -37,6 +37,7 @@ from src.services.reconstruction import (
     pose_quality,
     visual_quality,
 )
+from src.services.reconstruction.quality import GeometryProfileMismatchError
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,14 @@ def _group(group_id: str, title: str, build: Callable[[], list[Metric] | None]) 
     """Chạy `build` của một nhóm; None = bước chưa có kết quả, lỗi đọc artifact = không khả dụng."""
     try:
         metrics = build()
+    except GeometryProfileMismatchError:
+        logger.warning("Thông số hình học của deployment không khớp mesh của job; nhóm %s bị từ chối đo", group_id)
+        return StageEvaluation(
+            group_id=group_id,
+            title=title,
+            status="unavailable",
+            note="Thông số hình học đã đổi so với lúc dựng mesh. Cần dựng lại bước này để đo.",
+        )
     except _READ_ERRORS as error:
         logger.warning("Không đọc được chỉ số nhóm %s: %s", group_id, type(error).__name__)
         return StageEvaluation(

@@ -187,6 +187,14 @@ def metric_quality(confirmation: ProductArtifactRef, resolve: Resolve) -> Metric
     )
 
 
+class GeometryProfileMismatchError(ValueError):
+    """Thông số REC-05 hiện tại của deployment không phải bản đã dựng mesh của job.
+
+    Không phải artifact hỏng: mesh vẫn đọc được, nhưng số đo sẽ không đúng với robot/cấu hình đã dùng, nên từ chối.
+    Muốn đo thì phải dựng lại bước hình học của job.
+    """
+
+
 def geometry_quality(
     collision_mesh: ProductArtifactRef, metric_poses: ProductArtifactRef, profile: tuple[Path, str], resolve: Resolve
 ) -> GeometryQuality:
@@ -214,7 +222,7 @@ def geometry_quality(
         "sha256:" + hashlib.sha256(candidate.model_dump_json().encode()).hexdigest() == expected_checksum
         for candidate in candidates
     ):
-        raise ValueError("thông số hình học của deployment khác bản đã dùng để dựng mesh của job")
+        raise GeometryProfileMismatchError("thông số hình học của deployment khác bản đã dùng để dựng mesh của job")
     radius, height = geometry.capsule_radius_m, geometry.capsule_height_m
     mesh = read_collision_glb(resolve(collision_mesh))
     vertices = np.asarray(mesh.positions, dtype=float).reshape(-1, 3)

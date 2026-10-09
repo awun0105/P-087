@@ -21,6 +21,7 @@ from src.services.orchestration.evaluation import (
 )
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.projects.registry import ProjectRegistry
+from src.services.reconstruction.quality import GeometryProfileMismatchError
 
 _ROOT = Path(__file__).resolve().parents[2]
 _GEOMETRY = _ROOT / "configs" / "product" / "geometry_v1.json"
@@ -88,6 +89,14 @@ def test_group_distinguishes_not_run_from_unreadable() -> None:
     assert scorecard._group("g", "Nhóm", lambda: None).status == "pending"
     unreadable = scorecard._group("g", "Nhóm", broken)
     assert unreadable.status == "unavailable" and unreadable.metrics == []
+
+    def stale_profile() -> list[Metric]:
+        raise GeometryProfileMismatchError("thông số hình học của deployment khác bản đã dùng để dựng mesh của job")
+
+    # Mesh vẫn đọc được: lý do phải nói đúng là thông số đã đổi, không phải artifact hỏng.
+    stale = scorecard._group("g", "Nhóm", stale_profile)
+    assert stale.status == "unavailable" and stale.metrics == []
+    assert stale.note != unreadable.note and "dựng lại" in stale.note
     measured = scorecard._group("g", "Nhóm", lambda: [Metric(key="k", label="L", value=1, display="1", meaning="m")])
     assert measured.status == "measured" and len(measured.metrics) == 1
 
