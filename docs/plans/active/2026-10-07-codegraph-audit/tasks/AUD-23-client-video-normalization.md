@@ -188,7 +188,8 @@ Tests: real codec fixtures CFR24/25/29.97/60, VFR gaps, B-frame order/nonzero PT
 rotation-coded1920×1080 display1080×1920, square/4:3, already-small video, input
 immutable, bounded queues, cancellation and decode/encode/mux failure.
 **Exit:** [ ] playable bytes + exact mapped frames/PTS; [ ] measured memory stays in
-supported budget; [ ] errors/cancel never trigger upload automatically.
+supported budget; [x] errors/cancel never trigger upload automatically (component tests,
+same evidence as the S4 exit).
 
 ## Sprint AUD-23.S3 — Server verification và reconstruction/sensor consumers
 
@@ -212,7 +213,8 @@ missing/forged/nonmonotonic map, known3D projection across resize/rotation/SAR,
 legacy InputManifest/FrameSetResolver equality, privacy gate/owner checks, cross-job
 refs, quality-profile identity, config/source mismatch and restart of prepare stage.
 **Exit:** [ ] source→frame→pose/projection consumer consistency proved;
-[ ] old RGB/sensor path works; [ ] no claim server verified local-original bytes.
+[x] old RGB/sensor path works (legacy suites, 2026-10-09 run below); [x] no claim server verified
+local-original bytes (`original_source_status = client_declared_unverified`, asserted on a real video).
 
 ## Sprint AUD-23.S4 — Upload UI, content-bound resume và recovery
 
@@ -659,3 +661,25 @@ reconstruction quality or paired-sensor behavior; those gates remain open.
   browser or hardware acceptance is claimed.
 - DevTools: **UNVERIFIED** — Chrome DevTools MCP has no authenticated Studio session;
   no video interaction or media codec behavior was observed.
+
+### 2026-10-09 logic review (after S1–S5 partial)
+
+- **Bug fixed — 30 FPS cap bypass on coarse time bases.** `_checked_rows` compared floats with
+  `interval < 1/30 − one tick`, which accepts the boundary case: a 60 FPS stream with time base 1/60 has
+  interval = exactly `1/30 − 1/60` and passed; at 1/45 any per-frame check passes. The check is now integer
+  arithmetic with a strict bound (`_faster_than_cap`) applied to each interval **and** to the span from the
+  first frame, so a sustained rate above 30 FPS is rejected at any time base while 30 FPS rounded to
+  milliseconds (33/33/34 ms) and 29.97 FPS still pass. Impact before the fix: a hand-crafted upload could
+  exceed the frame cap; the browser normalizer itself never produced such a file.
+- **Gap closed — the verifier had never run against real `ffprobe` in tests** (`_probe` and
+  `_presentation_pts` were always replaced by a fixture). New tests encode a real H.264 MP4 with B-frames via
+  ffmpeg and run the unmodified verifier: PTS come back in presentation order, colour range `tv` normalizes
+  to `limited`, the full verify-and-publish path succeeds at 30 FPS and a real 60 FPS file is rejected.
+- Reviewed without finding a defect: `PresentationFrameSelector`, `validate_video_frame_map_rows`,
+  `FrameExtractor._source_frame_ids`, `camera_priors` source-index mapping, `prepared_camera_calibration`.
+  Redacted frame sets (AUD-18) keep `source_frame_id`, so LiDAR pose mapping survives masking.
+- Verification: `tests/test_orchestration/test_video_preparation_verification.py` — 22 passed; the S3 legacy
+  and consumer suites listed above — 130 passed; frontend focused suites — 53 passed.
+- Still open, and not closable without new data or hardware: client peak memory (S2), representative phone
+  portrait / 60 FPS / VFR captures and held-out quality (S5), a matched RGB+LiDAR capture for real projection
+  and time mapping (S3, S5), and a COLMAP/Brush run on a prepared video.
