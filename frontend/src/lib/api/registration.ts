@@ -3,7 +3,7 @@ import { ApiError, apiFetch, fetchApi, type ApiResult } from "@/lib/api/client";
 export type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
 export interface JsonObject { [key: string]: JsonValue }
 
-export type RegistrationMode = "registered_map" | "static_cloud";
+export type RegistrationMode = "registered_map" | "static_cloud" | "estimated_trajectory_map";
 export type RegistrationFinding =
   | "SOURCE_FORMAT_REQUIRED"
   | "SOURCE_HEADER_REQUIRED"
@@ -126,7 +126,7 @@ export function parseRegistrationRequest(value: unknown): RegistrationRequestPay
     || typeof value.requested_by !== "string" || typeof value.target_project_id !== "string"
     || typeof value.target_job_id !== "string" || typeof value.expected_scene_revision !== "string"
     || typeof value.request_checksum !== "string" || !isRecord(source)
-    || (source.mode !== "registered_map" && source.mode !== "static_cloud")
+    || (source.mode !== "registered_map" && source.mode !== "static_cloud" && source.mode !== "estimated_trajectory_map")
     || source.target_job_id !== value.target_job_id
   ) {
     throw new Error("request không khớp registration contract");

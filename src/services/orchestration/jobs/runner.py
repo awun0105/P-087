@@ -1169,7 +1169,12 @@ def _preview_start_stage(registry: ProjectRegistry, job: JobManifest) -> StageId
 
 def _execute_lidar_odometry(attempt: _Attempt) -> JobManifest:
     """Run accepted R5/R6 scan odometry and persist source evidence before RGB preview."""
-    from src.models.contracts.reconstruction import EstimatedTrajectoryConsumerEvidence
+    from src.models.contracts.reconstruction import (
+        EstimatedTrajectoryConsumerEvidence,
+        EstimatedTrajectoryMapEvidence,
+        EstimatedTrajectoryMapStats,
+        EstimatedTrajectoryProductEvidence,
+    )
     from src.services.reconstruction.lidar.odometry import (
         LidarOdometryRuntimeSettings,
         LidarOdometryScanInput,
@@ -1212,9 +1217,14 @@ def _execute_lidar_odometry(attempt: _Attempt) -> JobManifest:
             producer_stage=previous.stage_id,
             job_id=attempt.job.job_id,
         )
-        previous_evidence = EstimatedTrajectoryConsumerEvidence.model_validate_json(
-            attempt.registry.runtime_resolver.require(previous_ref).read_bytes()
-        )
+        previous_payload = attempt.registry.runtime_resolver.require(previous_ref).read_bytes()
+        previous_document = json.loads(previous_payload)
+        if previous_document.get("artifact_type") == "EstimatedTrajectoryProductEvidence":
+            previous_evidence = EstimatedTrajectoryProductEvidence.model_validate_json(
+                previous_payload
+            ).consumer_evidence
+        else:
+            previous_evidence = EstimatedTrajectoryConsumerEvidence.model_validate_json(previous_payload)
         accepted_refs = (
             project.input_assembly_ref,
             project.input_resolution_ref,
@@ -1354,12 +1364,33 @@ def _execute_lidar_odometry(attempt: _Attempt) -> JobManifest:
             sensor_runtime.qualification_evidence_checksum if sensor_runtime is not None else None
         ),
     )
-    payload = evidence.model_dump_json(indent=2).encode("utf-8") + b"\n"
+    map_evidence = EstimatedTrajectoryMapEvidence(
+        job_id=attempt.job.job_id,
+        trajectory_ref=result.artifact_ref,
+        ingest_binding=result.ingest_binding,
+        map_cloud_ref=result.map_cloud_ref,
+        map_frame_id=result.ingest_binding.odometry_map_frame_id,
+        map_status="ready" if result.map_cloud_ref is not None else "blocked",
+        point_count=result.map_fusion_stats.point_count if result.map_fusion_stats is not None else None,
+        fusion_profile_checksum=result.map_fusion_profile_checksum,
+        fusion_stats=(
+            EstimatedTrajectoryMapStats.model_validate(result.map_fusion_stats.model_dump(mode="python"))
+            if result.map_fusion_stats is not None
+            else None
+        ),
+        diagnostic_code=result.map_diagnostic_code,
+    )
+    product_evidence = EstimatedTrajectoryProductEvidence(
+        job_id=attempt.job.job_id,
+        consumer_evidence=evidence,
+        map_evidence=map_evidence,
+    )
+    payload = product_evidence.model_dump_json(indent=2).encode("utf-8") + b"\n"
     evidence_ref = ProductArtifactRef(
-        artifact_type="EstimatedTrajectoryConsumerEvidence",
-        schema_version="1.0",
+        artifact_type=product_evidence.artifact_type,
+        schema_version=product_evidence.schema_version,
         artifact_uri=(
-            f"artifact://jobs/{attempt.job.job_id}/attempts/{attempt.workspace.name}/lidar-odometry/consumer-evidence.json"
+            f"artifact://jobs/{attempt.job.job_id}/attempts/{attempt.workspace.name}/lidar-odometry/product-evidence.json"
         ),
         artifact_checksum=sha256_bytes(payload),
         data_class=ArtifactDataClass.DERIVED,
@@ -1372,13 +1403,17 @@ def _execute_lidar_odometry(attempt: _Attempt) -> JobManifest:
             "world_frame_status": evidence.world_frame_status,
             "floor_status": evidence.floor_status,
             "alignment_status": evidence.alignment_status,
+            "map_status": map_evidence.map_status,
+            "map_cloud_checksum": map_evidence.map_cloud_ref.artifact_checksum
+            if map_evidence.map_cloud_ref is not None
+            else None,
         },
     )
     if writer.publish(evidence_ref, payload) != evidence_ref:
         raise ArtifactStoreError("Odometry consumer evidence publication changed its identity")
-    stored = EstimatedTrajectoryConsumerEvidence.model_validate_json(resolver.require(evidence_ref).read_bytes())
-    if stored.model_dump(mode="json") != evidence.model_dump(mode="json"):
-        raise ArtifactStoreError("Odometry consumer evidence failed read-back verification")
+    stored = EstimatedTrajectoryProductEvidence.model_validate_json(resolver.require(evidence_ref).read_bytes())
+    if stored.model_dump(mode="json") != product_evidence.model_dump(mode="json"):
+        raise ArtifactStoreError("Odometry product evidence failed read-back verification")
     resolver.sync_up(attempt.job.job_id)
     stage = StageArtifact(
         stage_id=StageId.LIDAR_ODOMETRY,

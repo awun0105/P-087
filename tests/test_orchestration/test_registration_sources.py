@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.models.contracts.artifacts import ProductArtifactRef
+from src.models.contracts.artifacts import ArtifactDataClass, ArtifactRef, ProductArtifactRef
 from src.models.contracts.input_assembly import (
     ArchiveMemberRef,
     CloudObservationState,
@@ -27,6 +27,13 @@ from src.models.contracts.input_assembly import (
     seal_input_recipe,
 )
 from src.models.contracts.manifests import InputFile, StageId
+from src.models.contracts.reconstruction import (
+    EstimatedTrajectoryConsumerEvidence,
+    EstimatedTrajectoryIngestBinding,
+    EstimatedTrajectoryMapEvidence,
+    EstimatedTrajectoryMapStats,
+    EstimatedTrajectoryProductEvidence,
+)
 from src.models.contracts.rgb_lidar_registration import (
     RegistrationInputMode,
     RegistrationRequest,
@@ -35,7 +42,7 @@ from src.models.contracts.rgb_lidar_registration import (
     seal_registration_profile,
     seal_registration_request,
 )
-from src.services.orchestration.artifacts import ArtifactChecksumError, ArtifactResolver
+from src.services.orchestration.artifacts import ArtifactChecksumError, ArtifactResolver, FilesystemArtifactStore
 from src.services.orchestration.inputs.assembly import StoredInputAssembly
 from src.services.orchestration.inputs.runs import InputAssemblyRunRecord
 from src.services.orchestration.jobs.database import RuntimeDatabase
@@ -273,6 +280,442 @@ def _fixture(
         }
     )
     return stored, ArtifactResolver(root), request
+
+
+def _estimated_map_source_fixture(
+    root: Path,
+) -> tuple[
+    RegistrationSourceResolver,
+    _Assemblies,
+    InputAssemblySnapshot,
+    ProductArtifactRef,
+    ProductArtifactRef,
+    list[str],
+    list[str],
+]:
+    job_id = "job-registration-1"
+    project_id = "project-registration-1"
+    source_scan_file_ids = ["scan-2", "scan-1"]
+    scan_checksums = [_checksum("scan-2-bytes"), _checksum("scan-1-bytes")]
+    auxiliary = [
+        ("rgb-file", "capture.mp4", InputRole.RGB_VIDEO, InputAssetFormat.VIDEO_MP4, b"rgb-video"),
+        (
+            "calibration-file",
+            "calibration.json",
+            InputRole.CAMERA_LIDAR_CALIBRATION,
+            InputAssetFormat.CALIBRATION_JSON,
+            b"calibration",
+        ),
+        (
+            "rgb-times-file",
+            "rgb-frame-times.txt",
+            InputRole.RGB_FRAME_TIMES,
+            InputAssetFormat.RGB_FRAME_TIMES,
+            b"0.0\n0.1\n",
+        ),
+        (
+            "lidar-times-file",
+            "lidar-scan-times.txt",
+            InputRole.LIDAR_SCAN_TIMES,
+            InputAssetFormat.TIMESTAMP_ROWS,
+            b"0.0\n0.1\n",
+        ),
+    ]
+    staged: list[StagedInputFile] = []
+    for index, file_id in enumerate(source_scan_file_ids):
+        payload = f"{file_id}-bytes".encode()
+        source_file = InputFile(
+            original_name=f"scan-{index}.ply",
+            media_type="application/octet-stream",
+            size_bytes=len(payload),
+            checksum=scan_checksums[index],
+            artifact_uri=f"artifact://jobs/source-uploads/scan-{index}.ply",
+            data_class=ArtifactDataClass.PRODUCT_INPUT,
+        )
+        staged.append(
+            StagedInputFile(
+                file_id=file_id,
+                upload_id="scan-archive-upload",
+                source_file=source_file,
+                observed_format=InputAssetFormat.POINT_CLOUD_PLY,
+            )
+        )
+    for file_id, filename, role, observed_format, payload in auxiliary:
+        source_file = InputFile(
+            original_name=filename,
+            media_type="video/mp4" if role == InputRole.RGB_VIDEO else "text/plain",
+            size_bytes=len(payload),
+            checksum=_checksum(payload),
+            artifact_uri=f"artifact://jobs/source-uploads/{filename}",
+            data_class=ArtifactDataClass.PRODUCT_INPUT,
+        )
+        staged.append(
+            StagedInputFile(
+                file_id=file_id,
+                upload_id="video-upload" if role == InputRole.RGB_VIDEO else "scan-archive-upload",
+                source_file=source_file,
+                observed_format=observed_format,
+            )
+        )
+    bindings = [
+        InputBinding(binding_id="ordered-scans", role=InputRole.LIDAR_SCAN, file_ids=source_scan_file_ids),
+        InputBinding(binding_id="rgb", role=InputRole.RGB_VIDEO, file_ids=["rgb-file"]),
+        InputBinding(binding_id="calibration", role=InputRole.CAMERA_LIDAR_CALIBRATION, file_ids=["calibration-file"]),
+        InputBinding(binding_id="rgb-times", role=InputRole.RGB_FRAME_TIMES, file_ids=["rgb-times-file"]),
+        InputBinding(binding_id="lidar-times", role=InputRole.LIDAR_SCAN_TIMES, file_ids=["lidar-times-file"]),
+    ]
+    snapshot = seal_input_assembly(
+        InputAssemblySnapshot(
+            schema_version="1.0",
+            assembly_id="assembly-estimated-map",
+            revision=1,
+            owner_id="reviewer-a",
+            created_at=datetime(2026, 10, 9, tzinfo=UTC),
+            files=staged,
+            bindings=bindings,
+            declarations={
+                "same_scene": {"value": True, "provenance": EvidenceProvenance.DECLARED},
+                "cloud_state": {
+                    "value": CloudObservationState.RAW_SCAN_SEQUENCE,
+                    "provenance": EvidenceProvenance.DECLARED,
+                },
+                "coordinate_unit": {"value": DistanceUnit.METER, "provenance": EvidenceProvenance.DECLARED},
+                "lidar_frame_id": {"value": "lidar-sensor", "provenance": EvidenceProvenance.DECLARED},
+                "lidar_timestamp_unit": {"value": "seconds", "provenance": EvidenceProvenance.DECLARED},
+                "clock_relation": {"value": "same_clock", "provenance": EvidenceProvenance.DECLARED},
+                "rgb_timestamp_unit": {"value": "seconds", "provenance": EvidenceProvenance.DECLARED},
+            },
+            assembly_checksum=_ZERO,
+        )
+    )
+    stored = StoredInputAssembly(
+        snapshot=snapshot,
+        probes=tuple(
+            InputProbe(
+                file_id=item.file_id,
+                source_checksum=item.source_file.checksum,
+                member_checksum=None,
+                observed_format=item.observed_format,
+            )
+            for item in staged
+        ),
+    )
+    recipe = seal_input_recipe(
+        {
+            "schema_version": "1.0",
+            "recipe_id": "recipe-estimated-map",
+            "assembly_id": snapshot.assembly_id,
+            "assembly_revision": snapshot.revision,
+            "assembly_checksum": snapshot.assembly_checksum,
+            "resolution_checksum": _checksum("resolution"),
+            "candidate_id": "candidate-r6-estimated",
+            "recipe_group": RecipeGroup.SENSOR_GUIDED,
+            "selected_by": "reviewer-a",
+            "accepted_at": datetime(2026, 10, 9, tzinfo=UTC),
+            "bindings": bindings,
+            "trajectory_origin": TrajectoryOrigin.ESTIMATED,
+            "component_versions": [RecipeComponentVersion(component_id="test-r6", version="1.0")],
+            "config_checksum": _checksum("recipe-config"),
+            "recipe_checksum": _ZERO,
+        }
+    )
+    recipe_payload = recipe.model_dump_json(indent=2).encode("utf-8") + b"\n"
+    resolver = ArtifactResolver(root / "artifacts")
+    writer = FilesystemArtifactStore(resolver)
+    recipe_ref = ProductArtifactRef(
+        artifact_type="InputRecipe",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{project_id}/input/recipe.json",
+        artifact_checksum=_checksum(recipe_payload),
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.INPUT_VALIDATE,
+        job_id=project_id,
+    )
+    writer.publish(recipe_ref, recipe_payload)
+
+    resolution_checksum = recipe.resolution_checksum
+    runtime_registry_checksum = _checksum("runtime-registry")
+    accepted_assembly_ref = ProductArtifactRef(
+        artifact_type="InputAssemblySnapshot",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{project_id}/input/assembly.json",
+        artifact_checksum=snapshot.assembly_checksum,
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.INPUT_VALIDATE,
+        job_id=project_id,
+    )
+    accepted_resolution_ref = ProductArtifactRef(
+        artifact_type="InputResolutionReport",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{project_id}/input/resolution.json",
+        artifact_checksum=resolution_checksum,
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.INPUT_VALIDATE,
+        job_id=project_id,
+    )
+    accepted_runtime_ref = ProductArtifactRef(
+        artifact_type="RuntimeQualificationRegistry",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{project_id}/input/runtime.json",
+        artifact_checksum=runtime_registry_checksum,
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.INPUT_VALIDATE,
+        job_id=project_id,
+    )
+    project = SimpleNamespace(
+        input_assembly_ref=accepted_assembly_ref,
+        input_resolution_ref=accepted_resolution_ref,
+        input_runtime_registry_ref=accepted_runtime_ref,
+        input_recipe_ref=recipe_ref,
+    )
+    run = InputAssemblyRunRecord(
+        requester_id="reviewer-a",
+        idempotency_key="r6-run",
+        request_fingerprint=_checksum("request"),
+        job_id=job_id,
+        project_id=project_id,
+        assembly_id=snapshot.assembly_id,
+        assembly_revision=snapshot.revision,
+        assembly_checksum=snapshot.assembly_checksum,
+        resolution_checksum=recipe.resolution_checksum,
+        candidate_id=recipe.candidate_id,
+        recipe_checksum=recipe.recipe_checksum,
+        recipe_ref=recipe_ref,
+        accepted_at=datetime(2026, 10, 9, tzinfo=UTC),
+    )
+
+    attempt_prefix = f"artifact://jobs/{job_id}/attempts/attempt-1/lidar-odometry"
+    timestamp_ref = ArtifactRef(
+        artifact_type="InputAssemblyMember",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{job_id}/attempts/attempt-1/inputs/lidar-scan-times.txt",
+        artifact_checksum=_checksum("lidar-timestamp-member"),
+        data_class=ArtifactDataClass.PRODUCT_INPUT,
+        producer_stage=StageId.LIDAR_ODOMETRY,
+        job_id=job_id,
+    )
+    trajectory_ref = ArtifactRef(
+        artifact_type="EstimatedTrajectoryArtifact",
+        schema_version="1.0",
+        artifact_uri=f"{attempt_prefix}/trajectory.json",
+        artifact_checksum=_checksum("trajectory"),
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.LIDAR_ODOMETRY,
+        job_id=job_id,
+        source_provenance={
+            "assembly_checksum": snapshot.assembly_checksum,
+            "recipe_checksum": recipe.recipe_checksum,
+            "timestamp_file_checksum": timestamp_ref.artifact_checksum,
+        },
+    )
+    ingest_binding = EstimatedTrajectoryIngestBinding(
+        trajectory_ref=trajectory_ref,
+        timestamp_file_ref=timestamp_ref,
+        assembly_checksum=snapshot.assembly_checksum,
+        recipe_checksum=recipe.recipe_checksum,
+        source_scan_file_ids=source_scan_file_ids,
+        source_scan_checksums=scan_checksums,
+        sensor_frame_id="lidar-sensor",
+        odometry_map_frame_id="odometry-map",
+    )
+    fusion_profile_checksum = _checksum("fusion-profile")
+    map_checksum = _checksum(_PLY_BYTES)
+    map_ref = ProductArtifactRef(
+        artifact_type="EstimatedTrajectoryMapCloud",
+        schema_version="1.0",
+        artifact_uri=f"{attempt_prefix}/estimated-map.ply",
+        artifact_checksum=map_checksum,
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.LIDAR_ODOMETRY,
+        job_id=job_id,
+        source_provenance={
+            "assembly_checksum": snapshot.assembly_checksum,
+            "recipe_checksum": recipe.recipe_checksum,
+            "trajectory_checksum": trajectory_ref.artifact_checksum,
+            "timestamp_file_checksum": timestamp_ref.artifact_checksum,
+            "map_frame_id": "odometry-map",
+            "fusion_profile_checksum": fusion_profile_checksum,
+            "source_scan_file_ids": source_scan_file_ids,
+            "source_scan_checksums": scan_checksums,
+        },
+    )
+    evidence_refs = [
+        ArtifactRef(
+            artifact_type=reference.artifact_type,
+            schema_version="1.0",
+            artifact_uri=f"artifact://jobs/{job_id}/attempts/attempt-1/input/{reference.artifact_type}.json",
+            artifact_checksum=reference.artifact_checksum,
+            data_class=ArtifactDataClass.DERIVED,
+            producer_stage=StageId.LIDAR_ODOMETRY,
+            job_id=job_id,
+        )
+        for reference in (
+            accepted_assembly_ref,
+            accepted_resolution_ref,
+            accepted_runtime_ref,
+            recipe_ref,
+        )
+    ]
+    consumer = EstimatedTrajectoryConsumerEvidence(
+        job_id=job_id,
+        recipe_group="R6",
+        assembly_ref=evidence_refs[0],
+        resolution_ref=evidence_refs[1],
+        runtime_registry_ref=evidence_refs[2],
+        recipe_ref=evidence_refs[3],
+        trajectory_ref=trajectory_ref,
+        ingest_binding=ingest_binding,
+        lidar_scan_times_ref=timestamp_ref,
+        camera_lidar_calibration_ref=ArtifactRef(
+            artifact_type="InputAssemblyMember",
+            schema_version="1.0",
+            artifact_uri=f"artifact://jobs/{job_id}/attempts/attempt-1/inputs/calibration.json",
+            artifact_checksum=_checksum("calibration"),
+            data_class=ArtifactDataClass.PRODUCT_INPUT,
+            producer_stage=StageId.LIDAR_ODOMETRY,
+            job_id=job_id,
+        ),
+        rgb_frame_times_ref=ArtifactRef(
+            artifact_type="InputAssemblyMember",
+            schema_version="1.0",
+            artifact_uri=f"artifact://jobs/{job_id}/attempts/attempt-1/inputs/rgb-frame-times.txt",
+            artifact_checksum=_checksum("rgb-times"),
+            data_class=ArtifactDataClass.PRODUCT_INPUT,
+            producer_stage=StageId.LIDAR_ODOMETRY,
+            job_id=job_id,
+        ),
+        odometry_runtime_id="kiss-icp-python",
+        odometry_runtime_version="1.3.0",
+        odometry_profile_checksum=_checksum("odometry-profile"),
+        runtime_qualification_status="wired_unqualified",
+        sensor_guided_runtime_id="qualified-r6",
+        sensor_guided_runtime_version="1.0",
+        sensor_guided_runtime_evidence_checksum=_checksum("sensor-guided-runtime"),
+    )
+    map_evidence = EstimatedTrajectoryMapEvidence(
+        job_id=job_id,
+        trajectory_ref=trajectory_ref,
+        ingest_binding=ingest_binding,
+        map_cloud_ref=map_ref,
+        map_frame_id="odometry-map",
+        map_status="ready",
+        point_count=1,
+        fusion_profile_checksum=fusion_profile_checksum,
+        fusion_stats=EstimatedTrajectoryMapStats(
+            scan_count=2,
+            input_points=2,
+            removed_points=1,
+            point_count=1,
+            bounds_min=(0.0, 0.0, 0.0),
+            bounds_max=(1.0, 1.0, 1.0),
+        ),
+    )
+    product = EstimatedTrajectoryProductEvidence(
+        job_id=job_id,
+        consumer_evidence=consumer,
+        map_evidence=map_evidence,
+    )
+    product_payload = product.model_dump_json(indent=2).encode("utf-8") + b"\n"
+    product_ref = ProductArtifactRef(
+        artifact_type="EstimatedTrajectoryProductEvidence",
+        schema_version="1.0",
+        artifact_uri=f"{attempt_prefix}/product-evidence.json",
+        artifact_checksum=_checksum(product_payload),
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.LIDAR_ODOMETRY,
+        job_id=job_id,
+    )
+    writer.publish(map_ref, _PLY_BYTES)
+    writer.publish(product_ref, product_payload)
+    projects = SimpleNamespace(
+        resolver=resolver,
+        input_run_for_job=lambda requested_job_id: run if requested_job_id == job_id else None,
+        get_project=lambda requested_project_id: project if requested_project_id == project_id else None,
+    )
+    assemblies = _Assemblies(stored)
+    return (
+        RegistrationSourceResolver(assemblies, projects),
+        assemblies,
+        snapshot,
+        product_ref,
+        map_ref,
+        source_scan_file_ids,
+        scan_checksums,
+    )
+
+
+def test_inspect_estimated_map_verifies_receipt_and_exact_ordered_recipe_binding(tmp_path: Path) -> None:
+    (
+        source_resolver,
+        assemblies,
+        snapshot,
+        product_ref,
+        map_ref,
+        scan_file_ids,
+        _scan_checksums,
+    ) = _estimated_map_source_fixture(tmp_path)
+    inspection = source_resolver.inspect_estimated_trajectory_map(
+        job_id="job-registration-1",
+        project_id="project-registration-1",
+        assembly_id=snapshot.assembly_id,
+        assembly_revision=snapshot.revision,
+        assembly_checksum=snapshot.assembly_checksum,
+        source_scan_file_ids=scan_file_ids,
+        source_distance_unit=DistanceUnit.METER,
+        source_frame="odometry-map",
+        same_scene_attestation=True,
+        estimated_trajectory_product_ref=product_ref,
+        estimated_map_cloud_ref=map_ref,
+        odometry_runtime_qualification_status="wired_unqualified",
+        workspace=tmp_path / "registration-workspace",
+        max_source_points=100,
+    )
+
+    assert inspection.path.read_bytes() == _PLY_BYTES
+    assert inspection.source_scan_file_ids == tuple(scan_file_ids)
+    assert inspection.source_checksum == map_ref.artifact_checksum
+    assert inspection.source_frame == "odometry-map"
+    assert inspection.odometry_runtime_qualification_status == "wired_unqualified"
+    assert assemblies.verified_upload_ids == {"scan-archive-upload"}
+
+    with pytest.raises(RegistrationSourceResolutionError, match="scan order differs"):
+        source_resolver.inspect_estimated_trajectory_map(
+            job_id="job-registration-1",
+            project_id="project-registration-1",
+            assembly_id=snapshot.assembly_id,
+            assembly_revision=snapshot.revision,
+            assembly_checksum=snapshot.assembly_checksum,
+            source_scan_file_ids=list(reversed(scan_file_ids)),
+            source_distance_unit=DistanceUnit.METER,
+            source_frame="odometry-map",
+            same_scene_attestation=True,
+            estimated_trajectory_product_ref=product_ref,
+            estimated_map_cloud_ref=map_ref,
+            odometry_runtime_qualification_status="wired_unqualified",
+            workspace=tmp_path / "reversed-scan-workspace",
+            max_source_points=100,
+        )
+
+    map_from_other_attempt = map_ref.model_copy(
+        update={"artifact_uri": map_ref.artifact_uri.replace("attempt-1", "attempt-2")}
+    )
+    with pytest.raises(RegistrationSourceResolutionError, match="does not describe this pending R6 map"):
+        source_resolver.inspect_estimated_trajectory_map(
+            job_id="job-registration-1",
+            project_id="project-registration-1",
+            assembly_id=snapshot.assembly_id,
+            assembly_revision=snapshot.revision,
+            assembly_checksum=snapshot.assembly_checksum,
+            source_scan_file_ids=scan_file_ids,
+            source_distance_unit=DistanceUnit.METER,
+            source_frame="odometry-map",
+            same_scene_attestation=True,
+            estimated_trajectory_product_ref=product_ref,
+            estimated_map_cloud_ref=map_from_other_attempt,
+            odometry_runtime_qualification_status="wired_unqualified",
+            workspace=tmp_path / "wrong-attempt-workspace",
+            max_source_points=100,
+        )
 
 
 def test_resolve_checks_exact_assembly_source_and_header(tmp_path: Path) -> None:

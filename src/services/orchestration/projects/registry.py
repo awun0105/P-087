@@ -1203,7 +1203,13 @@ class ProjectRegistry:
             verify_input_resolution_checksum,
             verify_runtime_registry_checksum,
         )
-        from src.models.contracts.reconstruction import EstimatedTrajectoryArtifact, EstimatedTrajectoryConsumerEvidence
+        from src.models.contracts.reconstruction import (
+            EstimatedTrajectoryArtifact,
+            EstimatedTrajectoryConsumerEvidence,
+            EstimatedTrajectoryMapEvidence,
+            EstimatedTrajectoryProductEvidence,
+        )
+        from src.services.reconstruction.lidar.cloud_payload import inspect_point_cloud
         from src.services.reconstruction.lidar.odometry import (
             DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION,
             lidar_odometry_profile_checksum,
@@ -1217,7 +1223,7 @@ class ProjectRegistry:
             or stage.stage_id != StageId.LIDAR_ODOMETRY
             or stage.status != StageStatus.SUCCEEDED
             or stage.error is not None
-            or stage.artifact_type != "EstimatedTrajectoryConsumerEvidence"
+            or stage.artifact_type not in {"EstimatedTrajectoryConsumerEvidence", "EstimatedTrajectoryProductEvidence"}
             or stage.artifact_uri is None
             or stage.artifact_checksum is None
             or stage.data_class != ArtifactDataClass.DERIVED
@@ -1232,9 +1238,20 @@ class ProjectRegistry:
             raise ValueError("LiDAR odometry evidence must be attempt-scoped inside the job namespace")
 
         evidence_ref = self._to_product_ref(expected.job_id, stage)
-        evidence = EstimatedTrajectoryConsumerEvidence.model_validate_json(
-            self.runtime_resolver.require(evidence_ref).read_bytes()
-        )
+        evidence_payload = self.runtime_resolver.require(evidence_ref).read_bytes()
+        map_evidence: EstimatedTrajectoryMapEvidence | None = None
+        if stage.artifact_type == "EstimatedTrajectoryProductEvidence":
+            if not stage.artifact_uri.endswith("/product-evidence.json"):
+                raise ValueError("Odometry product evidence URI is missing its attempt-scoped filename")
+            product_evidence = EstimatedTrajectoryProductEvidence.model_validate_json(evidence_payload)
+            evidence = product_evidence.consumer_evidence
+            map_evidence = product_evidence.map_evidence
+            evidence_root = stage.artifact_uri.removesuffix("/product-evidence.json")
+        else:
+            if not stage.artifact_uri.endswith("/consumer-evidence.json"):
+                raise ValueError("Odometry consumer evidence URI is missing its attempt-scoped filename")
+            evidence = EstimatedTrajectoryConsumerEvidence.model_validate_json(evidence_payload)
+            evidence_root = stage.artifact_uri.removesuffix("/consumer-evidence.json")
         project = self.get_project(expected.project_id)
         accepted_refs = (
             project.input_assembly_ref,
@@ -1259,9 +1276,6 @@ class ProjectRegistry:
             "input_runtime_registry.json",
             "input_recipe.json",
         )
-        evidence_root = stage.artifact_uri.removesuffix("/consumer-evidence.json")
-        if evidence_root == stage.artifact_uri:
-            raise ValueError("Odometry consumer evidence URI is missing its attempt-scoped filename")
         for evidence_input, source_input, filename in zip(evidence_refs, source_refs, evidence_names, strict=True):
             provenance = evidence_input.source_provenance or {}
             if (
@@ -1436,6 +1450,19 @@ class ProjectRegistry:
             or [pose.source_scan_checksum for pose in trajectory.poses] != evidence.ingest_binding.source_scan_checksums
         ):
             raise ValueError("Estimated trajectory artifact differs from its durable source binding")
+
+        if map_evidence is not None and map_evidence.map_status == "ready":
+            map_cloud_ref = map_evidence.map_cloud_ref
+            if map_cloud_ref is None:
+                raise ValueError("Ready estimated LiDAR map is missing its cloud reference")
+            expected_map_uri = f"{evidence_root}/estimated-map.ply"
+            if map_cloud_ref.artifact_uri != expected_map_uri:
+                raise ValueError("Estimated LiDAR map must belong to the same attempt as its product evidence")
+            map_cloud_path = self.runtime_resolver.require(map_cloud_ref)
+            cloud_stats = inspect_point_cloud(map_cloud_path, max_points=20_000_000)
+            if cloud_stats.geometry_format != "ply" or cloud_stats.point_count != map_evidence.point_count:
+                raise ValueError("Estimated LiDAR map bytes differ from their source-bound PLY point count")
+
         completed_at = stage.completed_at or datetime.now(UTC)
         updated = with_canonical_checksum(
             expected.model_copy(

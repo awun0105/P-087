@@ -455,6 +455,29 @@ AUD-17.S3b2 implementation progress — partial, sprint remains open:
   unverified. Next: implement evidenced world/floor confirmation and LiDAR ingest/
   alignment consumers before closing S3b2; preserve R5/R6 and held-out gates.
 
+- Follow-up S3b2 progress: the worker fuses its already verified cached scans with
+  the estimated poses and publishes a deterministic `EstimatedTrajectoryMapCloud`
+  in the local odometry frame. `EstimatedTrajectoryProductEvidence` binds that PLY
+  and its fusion profile/counts to the exact trajectory, accepted recipe, timestamps
+  and ordered scans. The registry streams checksum and finite-point validation for
+  the PLY before committing the composite stage receipt; it also reads legacy
+  `EstimatedTrajectoryConsumerEvidence` receipts. Stage inspection displays the
+  local map status and count while world, floor and RGB alignment remain pending.
+- Verification for this increment: `tests/test_reconstruction/test_lidar_odometry.py`
+  and `tests/test_api/test_studio_routes.py` — 45 passed, 1 skipped; full repository
+  Ruff check passed and format check reported 582 files formatted. Focused
+  `studio-inspection.test.tsx` — 19 passed; `npx tsc --noEmit` and changed-file ESLint
+  passed. Route regression confirms a tampered fused PLY is rejected before a second
+  manifest commit. `git diff --check` passed.
+- DevTools follow-up: authenticated Reviewer session returned HTTP 200 for the
+  odometry stage route and its progress request; console contained only React
+  DevTools/HMR informational messages. That job has no completed odometry artifact,
+  so the new product-evidence panel remains **UNVERIFIED** in the browser.
+- This follow-up does not confirm `world_from_map`, floor/up-axis evidence, create a
+  canonical `LidarPackageRecord`, or register the map against RGB. S3b2 remains open;
+  R5/R6 runtime qualification, real traversal quality and held-out acceptance remain
+  separate gates.
+
 S3c supplied-trajectory fallback UX regression:
 - `UnifiedInputFlow` already renders runtime status and resolver diagnostics for each
   candidate, and only renders Run for the recommended READY candidate. A READY R4
@@ -470,4 +493,31 @@ S3c supplied-trajectory fallback UX regression:
   browser UI change gate is not applicable.
 - Gate report: CodeGraph traced `UnifiedInputFlow`, its candidate submit gate and
   the focused regression; Graphify located the unified-input/R4–R6 relationship.
+
+R6 estimated-map consumer follow-up (AUD-17.S3b2, 2026-10-09):
+- Added a distinct `estimated_trajectory_map` registration input. Preparation
+  selects only a successful attempt-scoped R6 `EstimatedTrajectoryProductEvidence`
+  and its exact PLY map ref, then rechecks the accepted assembly, ordered raw-scan
+  binding/checksums, project recipe lineage, parsed map header, local map frame and
+  runtime status before sealing a registration request.
+- The registration request and copied `RegistrationSourceCloudManifest` preserve
+  the ordered scan IDs/checksums and both odometry refs. The evidence/map refs must
+  share the same attempt ID. Raw scan sequences remain blocked as direct ICP input;
+  a mismatched or wired-unqualified odometry runtime remains preflight-blocked.
+- This opens a provisional geometric-registration consumer for R6 without claiming
+  same-place truth from the user declaration. It does not confirm world-from-map,
+  floor/up axis, calibration/time quality, canonical `LidarPackageRecord`, or an
+  `AlignmentRecord`; it does not enable current R5/R6 runtime dispatch. AUD-17.S3b2
+  and real-sensor qualification therefore remain open.
+- Verification: focused registration, odometry and Studio API suites — 115 passed,
+  1 skipped; frontend registration API and stage-inspection tests — 26 passed;
+  `.venv/bin/ruff check src/ tests/`, `.venv/bin/ruff format --check src/ tests/`,
+  frontend typecheck and changed-file ESLint passed. The UI flow is **UNVERIFIED**
+  in DevTools because the current CUA session exposes no browser. Tests prove the
+  contract and local code path only, not production runtime qualification or
+  physical alignment accuracy.
+- Changed scope: registration source/request contracts, accepted R6 preparation
+  and verification, worker source-manifest publication, frontend registration
+  parsing, stage diagnostics, API/contract/worker/frontend regressions, and this
+  task evidence. Graph indexes are refreshed after the implementation checks.
   S3b2's lack of a production adapter remains the controlling product limitation.

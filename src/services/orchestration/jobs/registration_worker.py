@@ -205,6 +205,7 @@ class RegistrationOperationWorker:
             if operation.request.source.mode not in {
                 RegistrationInputMode.REGISTERED_MAP,
                 RegistrationInputMode.STATIC_CLOUD,
+                RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP,
             }:
                 self._finish(operation, RegistrationOperationState.FAILED, error="UNSUPPORTED_REGISTRATION_INPUT_MODE")
                 return True
@@ -428,12 +429,30 @@ class RegistrationOperationWorker:
             "input_assembly_id": source.input_assembly_id,
             "input_assembly_revision": source.input_assembly_revision,
             "input_assembly_checksum": source.input_assembly_checksum,
-            "source_file_id": source.file_id,
             "source_header_checksum": source.header_checksum,
         }
-        identity = hashlib.sha256(f"{source.input_assembly_checksum}:{source.source_checksum}".encode()).hexdigest()[
-            :24
-        ]
+        if source.estimated_map_cloud_ref is not None:
+            if source.estimated_trajectory_product_ref is None:
+                raise RegistrationSourceResolutionError("estimated map source has no trajectory product receipt")
+            lineage.update(
+                {
+                    "source_scan_file_ids": list(source.source_scan_file_ids),
+                    "source_scan_checksums": list(source.source_scan_checksums),
+                    "estimated_trajectory_product_ref": source.estimated_trajectory_product_ref.model_dump(mode="json"),
+                    "estimated_map_cloud_ref": source.estimated_map_cloud_ref.model_dump(mode="json"),
+                    "odometry_runtime_qualification_status": source.odometry_runtime_qualification_status,
+                }
+            )
+            identity_input = (
+                f"{source.input_assembly_checksum}:{source.source_checksum}:"
+                f"{source.estimated_trajectory_product_ref.artifact_checksum}"
+            )
+        else:
+            if source.file_id is None:
+                raise RegistrationSourceResolutionError("staged map source has no bound input file ID")
+            lineage["source_file_id"] = source.file_id
+            identity_input = f"{source.input_assembly_checksum}:{source.source_checksum}"
+        identity = hashlib.sha256(identity_input.encode()).hexdigest()[:24]
         extension = source.geometry_format
         cloud_ref = ProductArtifactRef(
             artifact_type="RegistrationSourcePointCloud",
@@ -456,19 +475,24 @@ class RegistrationOperationWorker:
                 "input_assembly_revision": source.input_assembly_revision,
                 "input_assembly_checksum": source.input_assembly_checksum,
                 "source_file_id": source.file_id,
+                "source_scan_file_ids": list(source.source_scan_file_ids),
+                "source_scan_checksums": list(source.source_scan_checksums),
+                "estimated_trajectory_product_ref": source.estimated_trajectory_product_ref,
+                "estimated_map_cloud_ref": source.estimated_map_cloud_ref,
                 "source_format": source.geometry_format,
                 "source_header_checksum": source.header_checksum,
                 "source_point_count": source.point_count,
                 "source_distance_unit": source.distance_unit,
                 "source_frame": source.source_frame,
                 "same_scene_lineage_verified": source.same_scene_lineage_verified,
+                "schema_version": "1.1" if source.estimated_map_cloud_ref is not None else "1.0",
                 "manifest_checksum": "sha256:" + "0" * 64,
             }
         )
         manifest_payload = manifest.model_dump_json(indent=2).encode("utf-8") + b"\n"
         manifest_ref = ProductArtifactRef(
             artifact_type=manifest.artifact_type,
-            schema_version="1.0",
+            schema_version=manifest.schema_version,
             artifact_uri=f"artifact://jobs/{request.target_job_id}/rec08/registration-source/{identity}.json",
             artifact_checksum=sha256_bytes(manifest_payload),
             data_class=ArtifactDataClass.DERIVED,

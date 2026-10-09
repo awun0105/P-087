@@ -361,6 +361,125 @@ class EstimatedTrajectoryConsumerEvidence(ContractModel):
         return self
 
 
+class EstimatedTrajectoryMapStats(ContractModel):
+    """Deterministic fusion summary for a map still expressed in its local odometry frame."""
+
+    scan_count: int = Field(gt=1)
+    input_points: int = Field(gt=0)
+    removed_points: int = Field(ge=0)
+    point_count: int = Field(gt=0)
+    bounds_min: tuple[FiniteFloat, FiniteFloat, FiniteFloat]
+    bounds_max: tuple[FiniteFloat, FiniteFloat, FiniteFloat]
+
+    @model_validator(mode="after")
+    def _validate_bounds(self) -> Self:
+        if any(low > high for low, high in zip(self.bounds_min, self.bounds_max, strict=True)):
+            raise ValueError("estimated LiDAR map bounds cannot be inverted")
+        if self.input_points < self.point_count + self.removed_points:
+            raise ValueError("estimated LiDAR map counts exceed their input point inventory")
+        return self
+
+
+class EstimatedTrajectoryMapEvidence(ContractModel):
+    """Source-bound fused cloud; pending world/floor/alignment states are deliberate."""
+
+    artifact_type: Literal["EstimatedTrajectoryMapEvidence"] = "EstimatedTrajectoryMapEvidence"
+    schema_version: Literal["1.0"] = "1.0"
+    job_id: Identifier
+    trajectory_ref: ArtifactRef
+    ingest_binding: EstimatedTrajectoryIngestBinding
+    map_cloud_ref: ArtifactRef | None = None
+    map_frame_id: Identifier
+    coordinate_unit: Literal["meter"] = "meter"
+    map_status: Literal["ready", "blocked"]
+    point_count: int | None = Field(default=None, gt=0)
+    fusion_profile_checksum: Checksum
+    fusion_stats: EstimatedTrajectoryMapStats | None = None
+    diagnostic_code: Literal["MAP_FUSION_FAILED"] | None = None
+    world_frame_status: Literal["pending_world_from_map_confirmation"] = "pending_world_from_map_confirmation"
+    floor_status: Literal["pending_floor_and_up_axis_evidence"] = "pending_floor_and_up_axis_evidence"
+    alignment_status: Literal["not_registered"] = "not_registered"
+
+    @model_validator(mode="after")
+    def _bind_estimated_map(self) -> Self:
+        binding = self.ingest_binding
+        if self.job_id != binding.trajectory_ref.job_id or self.trajectory_ref != binding.trajectory_ref:
+            raise ValueError("estimated map must bind the same job-scoped trajectory as its ingest binding")
+        if self.map_frame_id != binding.odometry_map_frame_id:
+            raise ValueError("estimated map frame must match the trajectory's local odometry map")
+        if self.world_frame_status != binding.world_frame_status:
+            raise ValueError("estimated map must preserve the pending world-frame state")
+        if self.map_status == "ready":
+            if self.map_cloud_ref is None or self.point_count is None or self.fusion_stats is None:
+                raise ValueError("ready estimated map requires its cloud ref, point count and fusion statistics")
+            reference = self.map_cloud_ref
+            trajectory_uri = self.trajectory_ref.artifact_uri
+            expected_cloud_uri = f"{trajectory_uri.rsplit('/', 1)[0]}/estimated-map.ply"
+            if (
+                reference.artifact_type != "EstimatedTrajectoryMapCloud"
+                or reference.producer_stage != StageId.LIDAR_ODOMETRY
+                or reference.data_class != ArtifactDataClass.DERIVED
+                or reference.job_id != self.job_id
+                or not trajectory_uri.endswith("/lidar-odometry/trajectory.json")
+                or reference.artifact_uri != expected_cloud_uri
+            ):
+                raise ValueError("estimated map cloud ref must be an attempt-scoped LiDAR odometry output")
+            provenance = reference.source_provenance or {}
+            if (
+                provenance.get("assembly_checksum") != binding.assembly_checksum
+                or provenance.get("recipe_checksum") != binding.recipe_checksum
+                or provenance.get("trajectory_checksum") != self.trajectory_ref.artifact_checksum
+                or provenance.get("timestamp_file_checksum") != binding.timestamp_file_ref.artifact_checksum
+                or provenance.get("map_frame_id") != self.map_frame_id
+                or provenance.get("fusion_profile_checksum") != self.fusion_profile_checksum
+                or provenance.get("source_scan_file_ids") != binding.source_scan_file_ids
+                or provenance.get("source_scan_checksums") != binding.source_scan_checksums
+            ):
+                raise ValueError("estimated map cloud provenance differs from its source trajectory binding")
+            if self.point_count != self.fusion_stats.point_count or self.fusion_stats.scan_count != len(
+                binding.source_scan_file_ids
+            ):
+                raise ValueError("estimated map counts differ from the fused source scan inventory")
+            if self.diagnostic_code is not None:
+                raise ValueError("ready estimated map cannot carry a fusion failure")
+        elif (
+            self.map_cloud_ref is not None
+            or self.point_count is not None
+            or self.fusion_stats is not None
+            or self.diagnostic_code != "MAP_FUSION_FAILED"
+        ):
+            raise ValueError("blocked estimated map must expose only its explicit fusion diagnostic")
+        if self.alignment_status != "not_registered" or self.floor_status != "pending_floor_and_up_axis_evidence":
+            raise ValueError("fused local map cannot claim floor confirmation or RGB alignment")
+        return self
+
+
+class EstimatedTrajectoryProductEvidence(ContractModel):
+    """One stage receipt tying local trajectory and fused-map products to accepted inputs."""
+
+    artifact_type: Literal["EstimatedTrajectoryProductEvidence"] = "EstimatedTrajectoryProductEvidence"
+    schema_version: Literal["1.0"] = "1.0"
+    job_id: Identifier
+    consumer_evidence: EstimatedTrajectoryConsumerEvidence
+    map_evidence: EstimatedTrajectoryMapEvidence
+
+    @model_validator(mode="after")
+    def _bind_products(self) -> Self:
+        consumer = self.consumer_evidence
+        map_evidence = self.map_evidence
+        if self.job_id != consumer.job_id or self.job_id != map_evidence.job_id:
+            raise ValueError("trajectory products must belong to the same job")
+        if (
+            map_evidence.trajectory_ref != consumer.trajectory_ref
+            or map_evidence.ingest_binding != consumer.ingest_binding
+            or map_evidence.world_frame_status != consumer.world_frame_status
+            or map_evidence.floor_status != consumer.floor_status
+            or map_evidence.alignment_status != consumer.alignment_status
+        ):
+            raise ValueError("fused map evidence differs from the trajectory consumer evidence")
+        return self
+
+
 class VoxelGridSummary(ContractModel):
     """Lưới voxel đã dùng, đủ để EX-SIM kiểm clearance mà không cần payload upstream.
 

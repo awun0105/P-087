@@ -7,6 +7,7 @@ import {
   parseRegistrationOperationInspection,
   parseRegistrationOperation,
   parseRegistrationPreparation,
+  parseRegistrationRequest,
   type RegistrationRequestPayload,
 } from "@/lib/api/registration";
 
@@ -22,6 +23,13 @@ const request: RegistrationRequestPayload = {
 
 describe("RGB-LiDAR registration API parsers", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("accepts a derived estimated-trajectory map source", () => {
+    expect(parseRegistrationRequest({
+      ...request,
+      source: { mode: "estimated_trajectory_map", target_job_id: "job-1" },
+    }).source.mode).toBe("estimated_trajectory_map");
+  });
 
   it("requires preflight to bind the exact sealed request checksum", () => {
     expect(() => parseRegistrationPreparation({

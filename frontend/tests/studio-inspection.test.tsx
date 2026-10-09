@@ -115,6 +115,54 @@ describe("Inspect theo giai đoạn", () => {
     expect(screen.getByText(/không dùng làm LiDAR canonical hoặc collision source/)).toBeInTheDocument();
   });
 
+  it("shows the source-bound fused map while keeping canonical consumers pending", async () => {
+    const reference: ProductArtifactRef = {
+      artifact_type: "EstimatedTrajectoryProductEvidence",
+      schema_version: "1.0",
+      artifact_uri: "artifact://jobs/job-a/attempts/attempt-a/lidar-odometry/product-evidence.json",
+      artifact_checksum: sha,
+      data_class: "derived",
+      producer_stage: LIDAR_ODOMETRY_STAGE.id,
+      job_id: "job-a",
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        artifact_type: "EstimatedTrajectoryProductEvidence",
+        schema_version: "1.0",
+        job_id: "job-a",
+        consumer_evidence: {
+          artifact_type: "EstimatedTrajectoryConsumerEvidence",
+          job_id: "job-a",
+          recipe_group: "R6",
+          ingest_binding: { source_scan_file_ids: ["scan-1", "scan-2"] },
+          odometry_runtime_id: "kiss-icp-python",
+          odometry_runtime_version: "1.3.0",
+          odometry_profile_checksum: sha,
+          runtime_qualification_status: "qualified",
+          world_frame_status: "pending_world_from_map_confirmation",
+          floor_status: "pending_floor_and_up_axis_evidence",
+          alignment_status: "not_registered",
+        },
+        map_evidence: {
+          artifact_type: "EstimatedTrajectoryMapEvidence",
+          job_id: "job-a",
+          map_frame_id: "odom-map-01",
+          map_status: "ready",
+          point_count: 1234,
+          diagnostic_code: null,
+        },
+      }),
+    }));
+    render(<LidarOdometryStage jobId="job-a" artifacts={[reference]} />);
+
+    expect(await screen.findByText("Map ready")).toBeInTheDocument();
+    expect(screen.getByText(/1\.234 points · odom-map-01/)).toBeInTheDocument();
+    expect(screen.getByText("pending_world_from_map_confirmation")).toBeInTheDocument();
+    expect(screen.getByText("pending_floor_and_up_axis_evidence")).toBeInTheDocument();
+    expect(screen.getByText("not_registered")).toBeInTheDocument();
+  });
+
   it("báo trạng thái chẩn đoán, hiển thị overlay nhưng không cấp collision eligibility", async () => {
     const reference = (artifact_type: string, name: string): ProductArtifactRef => ({
       artifact_type, schema_version: "1.0", artifact_uri: `artifact://jobs/job-a/lidar-calibration-qa/${name}`,

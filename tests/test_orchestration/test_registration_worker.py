@@ -18,11 +18,13 @@ from src.models.contracts.rgb_lidar_registration import (
     RegistrationInputMode,
     RegistrationProposalState,
     RegistrationQAStatus,
+    RegistrationSourceCloudManifest,
     seal_registration_proposal,
 )
 from src.services.orchestration.artifacts import ArtifactResolver, FilesystemArtifactStore, sha256_bytes, sha256_file
 from src.services.orchestration.jobs import registration_worker as worker_module
 from src.services.orchestration.jobs.admission import OperationResourceProfile
+from src.services.orchestration.jobs.registration_sources import VerifiedRegistrationSource
 from src.services.orchestration.jobs.registration_worker import RegistrationOperationWorker
 from src.services.reconstruction.alignment.bev_search import (
     CoarseRegistrationCandidate,
@@ -72,6 +74,70 @@ def test_registration_source_cloud_copy_is_exact_bounded_and_idempotent(tmp_path
     copied = resolver.require_uri(reference.artifact_uri, reference.artifact_checksum)
     assert copied.read_bytes() == source_path.read_bytes()
     assert sha256_bytes(copied.read_bytes()) == source_checksum
+
+
+def test_worker_publishes_estimated_map_manifest_with_ordered_scan_lineage(tmp_path: Path) -> None:
+    resolver = ArtifactResolver(tmp_path / "artifacts")
+    worker = _worker()
+    worker.resolver = resolver
+    worker.writer = FilesystemArtifactStore(resolver)
+    worker.max_source_bytes = 1024
+    source_path = tmp_path / "estimated-map.ply"
+    source_path.write_bytes(b"ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nend_header\n0\n")
+    source_checksum = sha256_file(source_path)
+    product_ref = ProductArtifactRef(
+        artifact_type="EstimatedTrajectoryProductEvidence",
+        schema_version="1.0",
+        artifact_uri="artifact://jobs/job-1/attempts/attempt-1/lidar-odometry/product-evidence.json",
+        artifact_checksum=_checksum(b"odometry-product"),
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.LIDAR_ODOMETRY,
+        job_id="job-1",
+    )
+    map_ref = ProductArtifactRef(
+        artifact_type="EstimatedTrajectoryMapCloud",
+        schema_version="1.0",
+        artifact_uri="artifact://jobs/job-1/attempts/attempt-1/lidar-odometry/estimated-map.ply",
+        artifact_checksum=source_checksum,
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.LIDAR_ODOMETRY,
+        job_id="job-1",
+        source_provenance={"map_frame_id": "odometry-map-frame"},
+    )
+    source = VerifiedRegistrationSource(
+        path=source_path,
+        file_id=None,
+        input_assembly_id="assembly-1",
+        input_assembly_revision=1,
+        input_assembly_checksum=_checksum(b"assembly"),
+        source_checksum=source_checksum,
+        header_checksum=_checksum(b"ply-header"),
+        point_count=1,
+        geometry_format="ply",
+        distance_unit="m",
+        source_frame="odometry-map-frame",
+        same_scene_lineage_verified=True,
+        source_scan_file_ids=("scan-2", "scan-1"),
+        source_scan_checksums=(_checksum(b"scan-2"), _checksum(b"scan-1")),
+        estimated_trajectory_product_ref=product_ref,
+        estimated_map_cloud_ref=map_ref,
+        odometry_runtime_qualification_status="wired_unqualified",
+    )
+    request = SimpleNamespace(
+        target_job_id="job-1",
+        source=SimpleNamespace(mode=RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP),
+    )
+
+    cloud_ref, manifest_ref = worker._publish_source_cloud(request, source, Event())  # type: ignore[arg-type]
+    manifest_path = resolver.require_uri(manifest_ref.artifact_uri, manifest_ref.artifact_checksum)
+    manifest = RegistrationSourceCloudManifest.model_validate_json(manifest_path.read_bytes())
+
+    assert manifest.schema_version == "1.1"
+    assert manifest.source_geometry_ref == cloud_ref
+    assert manifest.source_scan_file_ids == ["scan-2", "scan-1"]
+    assert manifest.source_scan_checksums == [_checksum(b"scan-2"), _checksum(b"scan-1")]
+    assert manifest.estimated_trajectory_product_ref == product_ref
+    assert manifest.estimated_map_cloud_ref == map_ref
 
 
 def test_registration_worker_publishes_model_using_exact_artifact_bytes_checksum(tmp_path: Path) -> None:

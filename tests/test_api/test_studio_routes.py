@@ -746,9 +746,11 @@ async def test_estimated_odometry_run_requires_qualified_runtime_and_verified_rg
     import numpy as np
 
     from src.models.contracts.manifests import StageId
-    from src.models.contracts.reconstruction import EstimatedTrajectoryConsumerEvidence
+    from src.models.contracts.reconstruction import EstimatedTrajectoryProductEvidence
+    from src.services.orchestration.artifacts import ArtifactChecksumError
     from src.services.orchestration.jobs.models import TransitionRequest
     from src.services.orchestration.jobs.runner import _Attempt, _execute_lidar_odometry
+    from src.services.reconstruction.lidar.cloud_payload import inspect_point_cloud
     from src.services.reconstruction.lidar.odometry import KissIcpProcess
 
     monkeypatch.setenv("REC17_LIDAR_ODOMETRY_WORK_ROOT", str(studio.root / "odometry-work"))
@@ -797,16 +799,33 @@ async def test_estimated_odometry_run_requires_qualified_runtime_and_verified_rg
     assert completed.status == JobStatus.RUNNING
     assert completed.current_stage == StageId.CAMERA_POSE
     stage = next(item for item in completed.stage_artifacts if item.stage_id == StageId.LIDAR_ODOMETRY)
-    evidence = studio.registry.runtime_resolver.load_model(
+    product_evidence = studio.registry.runtime_resolver.load_model(
         studio.registry._to_product_ref(completed.job_id, stage),
-        EstimatedTrajectoryConsumerEvidence,
+        EstimatedTrajectoryProductEvidence,
     )
+    evidence = product_evidence.consumer_evidence
     assert evidence.world_frame_status == "pending_world_from_map_confirmation"
     assert evidence.floor_status == "pending_floor_and_up_axis_evidence"
     assert evidence.alignment_status == "not_registered"
     assert evidence.assembly_ref.job_id == completed.job_id
     assert evidence.assembly_ref.artifact_checksum == project.input_assembly_ref.artifact_checksum
     assert len(evidence.ingest_binding.source_scan_file_ids) == 4
+    map_evidence = product_evidence.map_evidence
+    assert map_evidence.map_status == "ready"
+    assert map_evidence.map_cloud_ref is not None
+    assert map_evidence.point_count == map_evidence.fusion_stats.point_count
+    assert (
+        map_evidence.map_cloud_ref.source_provenance["source_scan_file_ids"]
+        == evidence.ingest_binding.source_scan_file_ids
+    )
+    map_path = studio.registry.runtime_resolver.require(map_evidence.map_cloud_ref)
+    map_stats = inspect_point_cloud(map_path, max_points=20_000_000)
+    assert map_stats.geometry_format == "ply"
+    assert map_stats.point_count == map_evidence.point_count
+
+    map_path.write_bytes(b"tampered map payload")
+    with pytest.raises(ArtifactChecksumError, match="checksum mismatch"):
+        studio.registry.record_lidar_odometry(started, stage)
 
 
 @pytest.mark.asyncio

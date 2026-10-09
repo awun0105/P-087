@@ -561,10 +561,11 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [x] AUD-17.S1–S2 typed timestamp roles/units, resolver prerequisites, immutable trajectory contract, and isolated synthetic provider path; R5 dispatch remains disabled.
 - [x] AUD-17.S3a evaluation-only ATE/RPE report with explicit frame, units, clock, bounded interpolation and input checksums; no real-sensor qualification claimed.
 - [x] AUD-17.S3b1 blocks consumer readiness for wired-unqualified odometry while preserving diagnostic poses; R5/product consumers remain disabled.
-- [x] AUD-17.S3c frontend regression covers visible pending-R6 diagnostics and dispatch through the READY supplied-R4 fallback; durable R6 integration and quality acceptance remain open.
-- [ ] AUD-17.S3 drift/consumer QA and real-sensor qualification; current code has a
-      diagnostic-only RGB-PTS to estimated-pose mapper, not wired into product
-      consumers or R5 dispatch; AUD-18.
+- [x] AUD-17.S3c frontend regression covers visible pending-R6 diagnostics and dispatch through the READY supplied-R4 fallback. The R6 derived-map consumer now seals a provisional AUD-19 registration input with exact attempt and scan lineage; runtime and quality acceptance remain open.
+- [ ] AUD-17.S3 drift/consumer QA and real-sensor qualification; the R6 map can enter
+      only provisional registration and remains blocked from execution while odometry
+      is wired-unqualified. World/floor confirmation, canonical LiDAR ingest/alignment,
+      real traversal quality and R5 dispatch remain open; AUD-18 is owner work.
 - [x] AUD-19.S1 contracts; local S2 BEV/S3 constrained-ICP algorithms; S4a–S4l
       durable envelope, exact source/target resolution, diagnostic source-plane
       hypotheses, cancellation/resource-wait persistence, shared admission, and a

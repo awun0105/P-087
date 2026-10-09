@@ -1,8 +1,8 @@
-"""Lease-fenced producer for metric LiDAR odometry trajectories.
+"""Lease-fenced producer for scan-native LiDAR odometry and a local fused map.
 
-This module deliberately produces only a scan-native, unqualified trajectory. It
-does not publish a JobManifest pointer or enable recipe R5; product integration
-must commit the returned reference under the operation lease in a later sprint.
+The local map stays in the estimated odometry frame. This module never confirms
+world/floor alignment or enables a canonical LiDAR consumer; the runner and
+registry publish the attempt evidence under the current worker lease.
 """
 
 import hashlib
@@ -18,13 +18,13 @@ import zipfile
 from collections.abc import Callable
 from pathlib import Path
 from threading import Event
-from typing import Self
+from typing import Literal, Self
 
 import numpy as np
 from pydantic import Field, FiniteFloat, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from src.models.contracts.artifacts import ArtifactDataClass, ArtifactRef, ContractModel, Identifier
+from src.models.contracts.artifacts import ArtifactDataClass, ArtifactRef, Checksum, ContractModel, Identifier
 from src.models.contracts.coordinates import Transform
 from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
 from src.models.contracts.input_assembly import (
@@ -45,6 +45,7 @@ from src.models.contracts.reconstruction import (
 from src.services.orchestration.artifacts.store import ArtifactResolver, FilesystemArtifactStore
 from src.services.reconstruction.inputs.timestamps import parse_timestamp_rows, timestamps_in_seconds
 from src.services.reconstruction.lidar.cloud_payload import load_xyz_points
+from src.services.reconstruction.lidar.fusion import FusionConfig, FusionStats, ScanPose, fuse_scans, ply_bytes
 
 _PINNED_PROVIDER_VERSION = "1.3.0"
 DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION = "rec17-default-v1"
@@ -218,11 +219,15 @@ class LidarOdometryProcessError(LidarOdometryError):
 
 
 class LidarOdometryResult(ContractModel):
-    """Verified local producer output; caller still owns durable manifest commit."""
+    """Verified local trajectory and map products; caller still owns the manifest commit."""
 
     trajectory: EstimatedTrajectoryArtifact
     artifact_ref: ArtifactRef
     ingest_binding: EstimatedTrajectoryIngestBinding
+    map_cloud_ref: ArtifactRef | None = None
+    map_fusion_stats: FusionStats | None = None
+    map_fusion_profile_checksum: Checksum
+    map_diagnostic_code: Literal["MAP_FUSION_FAILED"] | None = None
 
 
 class KissIcpProcess:
@@ -459,7 +464,79 @@ class LidarOdometryWorker:
                 )
             ):
                 raise LidarOdometryProcessError("Verified ingest binding differs from the published scan sequence")
-            return LidarOdometryResult(trajectory=stored, artifact_ref=reference, ingest_binding=binding)
+
+            map_config = FusionConfig(
+                voxel_size_m=0.05,
+                min_range_m=request.profile.min_range_m,
+                max_range_m=request.profile.max_range_m,
+                max_scan_points=min(request.profile.max_points_per_scan, 20_000_000),
+                max_merged_points=min(request.profile.max_total_points, 20_000_000),
+            )
+            profile_payload = json.dumps(
+                map_config.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), allow_nan=False
+            ).encode("utf-8")
+            map_profile_checksum = _sha256(profile_payload)
+            map_cloud_ref = None
+            map_fusion_stats = None
+            map_diagnostic_code = None
+            try:
+                fused_points, map_fusion_stats = fuse_scans(
+                    (
+                        (
+                            np.load(path, allow_pickle=False),
+                            ScanPose(
+                                timestamp=pose.timestamp_seconds,
+                                translation=pose.map_from_sensor.translation_xyz,
+                                rotation_xyzw=pose.map_from_sensor.rotation_quaternion_xyzw,
+                            ),
+                        )
+                        for path, pose in zip(scan_paths, stored.poses, strict=True)
+                    ),
+                    map_config,
+                )
+                map_payload = ply_bytes(fused_points)
+            except ValueError:
+                map_fusion_stats = None
+                map_diagnostic_code = "MAP_FUSION_FAILED"
+            else:
+                map_provenance = {
+                    "assembly_checksum": request.assembly_checksum,
+                    "recipe_checksum": request.recipe_checksum,
+                    "trajectory_checksum": reference.artifact_checksum,
+                    "timestamp_file_checksum": request.timestamp_file_ref.artifact_checksum,
+                    "map_frame_id": request.odometry_map_frame_id,
+                    "fusion_profile_checksum": map_profile_checksum,
+                    "source_scan_file_ids": binding.source_scan_file_ids,
+                    "source_scan_checksums": binding.source_scan_checksums,
+                }
+                map_cloud_ref = ArtifactRef(
+                    artifact_type="EstimatedTrajectoryMapCloud",
+                    schema_version="1.0",
+                    artifact_uri=(
+                        f"artifact://jobs/{request.job_id}/attempts/{request.attempt_id}/lidar-odometry/estimated-map.ply"
+                    ),
+                    artifact_checksum=_sha256(map_payload),
+                    data_class=ArtifactDataClass.DERIVED,
+                    producer_stage="ST-LIDAR-ODOMETRY",
+                    job_id=request.job_id,
+                    source_provenance=map_provenance,
+                )
+                self._require_running(cancel_event, lease_is_current)
+                if self.writer.publish(map_cloud_ref, map_payload) != map_cloud_ref:
+                    raise LidarOdometryProcessError("Artifact writer changed the estimated map identity")
+                stored_map = self.resolver.require(map_cloud_ref).read_bytes()
+                if _sha256(stored_map) != map_cloud_ref.artifact_checksum or stored_map != map_payload:
+                    raise LidarOdometryProcessError("Published estimated map changed during read-back verification")
+                self._require_running(cancel_event, lease_is_current)
+            return LidarOdometryResult(
+                trajectory=stored,
+                artifact_ref=reference,
+                ingest_binding=binding,
+                map_cloud_ref=map_cloud_ref,
+                map_fusion_stats=map_fusion_stats,
+                map_fusion_profile_checksum=map_profile_checksum,
+                map_diagnostic_code=map_diagnostic_code,
+            )
         except (LidarOdometryError, ValueError, OSError):
             # Keep attempt-local inputs and logs for explicit failure diagnosis/recovery.
             raise

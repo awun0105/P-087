@@ -18,11 +18,53 @@ interface LidarOdometryEvidence {
   world_frame_status: "pending_world_from_map_confirmation";
   floor_status: "pending_floor_and_up_axis_evidence";
   alignment_status: "not_registered";
+  map_evidence?: {
+    map_frame_id: string;
+    map_status: "ready" | "blocked";
+    point_count: number | null;
+    diagnostic_code: "MAP_FUSION_FAILED" | null;
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseEvidence(value: unknown, jobId: string): LidarOdometryEvidence {
-  if (!value || typeof value !== "object") throw new Error("Artifact odometry phải là JSON object.");
-  const record = value as Record<string, unknown>;
+  if (!isRecord(value)) throw new Error("Artifact odometry phải là JSON object.");
+  let record = value;
+  let mapEvidence: LidarOdometryEvidence["map_evidence"];
+  if (value.artifact_type === "EstimatedTrajectoryProductEvidence") {
+    const consumer = value.consumer_evidence;
+    const map = value.map_evidence;
+    if (
+      value.job_id !== jobId ||
+      !isRecord(consumer) ||
+      !isRecord(map) ||
+      map.artifact_type !== "EstimatedTrajectoryMapEvidence" ||
+      map.job_id !== jobId ||
+      typeof map.map_frame_id !== "string" ||
+      (map.map_status !== "ready" && map.map_status !== "blocked") ||
+      (map.point_count !== null &&
+        (typeof map.point_count !== "number" || !Number.isSafeInteger(map.point_count) || map.point_count < 1)) ||
+      (map.diagnostic_code !== null && map.diagnostic_code !== "MAP_FUSION_FAILED")
+    ) {
+      throw new Error("Artifact map odometry không khớp contract hoặc job hiện tại.");
+    }
+    record = consumer;
+    mapEvidence = {
+      map_frame_id: map.map_frame_id,
+      map_status: map.map_status as "ready" | "blocked",
+      point_count: map.point_count as number | null,
+      diagnostic_code: map.diagnostic_code as "MAP_FUSION_FAILED" | null,
+    };
+    if ((map.map_status === "ready") !== (map.point_count !== null) ||
+      (map.map_status === "blocked") !== (map.diagnostic_code === "MAP_FUSION_FAILED")) {
+      throw new Error("Trạng thái fused map thiếu point count hoặc diagnostic tương ứng.");
+    }
+  } else if (value.artifact_type !== "EstimatedTrajectoryConsumerEvidence") {
+    throw new Error("Artifact odometry không khớp contract hoặc job hiện tại.");
+  }
   const binding = record.ingest_binding as Record<string, unknown> | undefined;
   if (
     record.artifact_type !== "EstimatedTrajectoryConsumerEvidence" ||
@@ -41,11 +83,13 @@ function parseEvidence(value: unknown, jobId: string): LidarOdometryEvidence {
   ) {
     throw new Error("Artifact odometry không khớp contract hoặc job hiện tại.");
   }
-  return record as unknown as LidarOdometryEvidence;
+  return { ...record, map_evidence: mapEvidence } as unknown as LidarOdometryEvidence;
 }
 
 export function LidarOdometryStage({ jobId, artifacts }: { jobId: string; artifacts: ProductArtifactRef[] }) {
-  const evidenceRef = artifacts.find((ref) => ref.artifact_type === "EstimatedTrajectoryConsumerEvidence");
+  const evidenceRef = artifacts.find((ref) =>
+    ref.artifact_type === "EstimatedTrajectoryProductEvidence" || ref.artifact_type === "EstimatedTrajectoryConsumerEvidence",
+  );
   const evidenceContentUrl = evidenceRef ? jobArtifactContentUrl(jobId, evidenceRef) : null;
   const [evidence, setEvidence] = useState<LidarOdometryEvidence | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +123,11 @@ export function LidarOdometryStage({ jobId, artifacts }: { jobId: string; artifa
           <Badge tone="neutral">{evidence.recipe_group}</Badge>
           <Badge tone="sage">Runtime {evidence.runtime_qualification_status}</Badge>
           <Badge tone="neutral">{evidence.ingest_binding.source_scan_file_ids.length} scan</Badge>
+          {evidence.map_evidence && (
+            <Badge tone={evidence.map_evidence.map_status === "ready" ? "sage" : "ochre"}>
+              Map {evidence.map_evidence.map_status}
+            </Badge>
+          )}
         </div>
         <p className="mt-3">Quỹ đạo này là ước lượng trong local odometry map. Nó chưa được biến đổi vào world, chưa có bằng chứng mặt sàn/trục lên và chưa đăng ký với scene RGB; không dùng làm LiDAR canonical hoặc collision source.</p>
       </Notice>
@@ -88,6 +137,14 @@ export function LidarOdometryStage({ jobId, artifacts }: { jobId: string; artifa
         <dl className="mt-3 divide-y divide-line">
           <Row label="R5 runtime" value={`${evidence.odometry_runtime_id} · ${evidence.odometry_runtime_version}`} />
           <Row label="Profile checksum" value={evidence.odometry_profile_checksum} />
+          {evidence.map_evidence && (
+            <Row
+              label="Fused map (local frame)"
+              value={evidence.map_evidence.map_status === "ready"
+                ? `${evidence.map_evidence.point_count?.toLocaleString("vi-VN")} points · ${evidence.map_evidence.map_frame_id}`
+                : `${evidence.map_evidence.diagnostic_code} · ${evidence.map_evidence.map_frame_id}`}
+            />
+          )}
           <Row label="World frame" value={evidence.world_frame_status} />
           <Row label="Mặt sàn và trục lên" value={evidence.floor_status} />
           <Row label="RGB–LiDAR alignment" value={evidence.alignment_status} />

@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import numpy as np
 
+from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.identity import verify_content_checksum
 from src.models.contracts.input_assembly import (
     ArchiveMemberRef,
@@ -21,9 +22,12 @@ from src.models.contracts.input_assembly import (
     InputAssetFormat,
     InputRecipe,
     InputRole,
+    RecipeGroup,
     verify_input_assembly_checksum,
     verify_input_recipe_checksum,
 )
+from src.models.contracts.manifests import StageId
+from src.models.contracts.reconstruction import EstimatedTrajectoryProductEvidence
 from src.models.contracts.rgb_lidar_registration import RegistrationInputMode, RegistrationProfile, RegistrationRequest
 from src.services.orchestration.artifacts import ArtifactChecksumError
 from src.services.orchestration.inputs.assembly import InputAssemblyService, StoredInputAssembly
@@ -41,7 +45,7 @@ class VerifiedRegistrationSource:
     """Resolved source bytes and parsed header; the workspace owns any extracted member."""
 
     path: Path
-    file_id: str
+    file_id: str | None
     input_assembly_id: str
     input_assembly_revision: int
     input_assembly_checksum: str
@@ -52,6 +56,11 @@ class VerifiedRegistrationSource:
     distance_unit: Literal["m", "cm", "mm"]
     source_frame: str
     same_scene_lineage_verified: bool
+    source_scan_file_ids: tuple[str, ...] = ()
+    source_scan_checksums: tuple[str, ...] = ()
+    estimated_trajectory_product_ref: ProductArtifactRef | None = None
+    estimated_map_cloud_ref: ProductArtifactRef | None = None
+    odometry_runtime_qualification_status: Literal["qualified", "wired_unqualified"] | None = None
 
 
 @dataclass(frozen=True)
@@ -71,6 +80,27 @@ class InspectedRegistrationSource:
     distance_unit: DistanceUnit | None
     source_frame: str | None
     same_scene_attestation: bool | None
+    stored: StoredInputAssembly
+
+
+@dataclass(frozen=True)
+class InspectedEstimatedTrajectoryMap:
+    """Verified map bytes and the ordered raw-scan lineage that produced them."""
+
+    path: Path
+    input_assembly_id: str
+    input_assembly_revision: int
+    input_assembly_checksum: str
+    source_scan_file_ids: tuple[str, ...]
+    source_scan_checksums: tuple[str, ...]
+    source_checksum: str
+    header_checksum: str
+    point_count: int
+    source_frame: str
+    same_scene_attestation: bool | None
+    estimated_trajectory_product_ref: ProductArtifactRef
+    estimated_map_cloud_ref: ProductArtifactRef
+    odometry_runtime_qualification_status: Literal["qualified", "wired_unqualified"]
     stored: StoredInputAssembly
 
 
@@ -99,6 +129,46 @@ class RegistrationSourceResolver:
         """Verify request, immutable assembly, selected role, source bytes, and PCD/PLY header."""
         verify_content_checksum(request, "request_checksum")
         source = request.source
+        if source.mode == RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP:
+            inspected_estimated = self.inspect_estimated_trajectory_map(
+                job_id=request.target_job_id,
+                project_id=request.target_project_id,
+                assembly_id=source.input_assembly_id or "",
+                assembly_revision=source.input_assembly_revision or 0,
+                assembly_checksum=source.input_assembly_checksum or "",
+                source_scan_file_ids=source.source_file_ids,
+                source_distance_unit=source.source_distance_unit,
+                source_frame=source.source_frame,
+                same_scene_attestation=source.same_scene_attestation,
+                estimated_trajectory_product_ref=source.estimated_trajectory_product_ref,
+                estimated_map_cloud_ref=source.estimated_map_cloud_ref,
+                odometry_runtime_qualification_status=source.odometry_runtime_qualification_status,
+                workspace=workspace,
+                max_source_points=request.profile.max_source_points,
+                expected_source_checksum=source.source_input_checksum,
+                expected_header_checksum=source.source_header_checksum,
+                expected_point_count=source.source_point_count,
+            )
+            verified = self._same_scene_lineage_verified(request, inspected_estimated.stored)
+            return VerifiedRegistrationSource(
+                path=inspected_estimated.path,
+                file_id=None,
+                input_assembly_id=inspected_estimated.input_assembly_id,
+                input_assembly_revision=inspected_estimated.input_assembly_revision,
+                input_assembly_checksum=inspected_estimated.input_assembly_checksum,
+                source_checksum=inspected_estimated.source_checksum,
+                header_checksum=inspected_estimated.header_checksum,
+                point_count=inspected_estimated.point_count,
+                geometry_format="ply",
+                distance_unit="m",
+                source_frame=inspected_estimated.source_frame,
+                same_scene_lineage_verified=verified,
+                source_scan_file_ids=inspected_estimated.source_scan_file_ids,
+                source_scan_checksums=inspected_estimated.source_scan_checksums,
+                estimated_trajectory_product_ref=inspected_estimated.estimated_trajectory_product_ref,
+                estimated_map_cloud_ref=inspected_estimated.estimated_map_cloud_ref,
+                odometry_runtime_qualification_status=inspected_estimated.odometry_runtime_qualification_status,
+            )
         if source.mode not in {RegistrationInputMode.REGISTERED_MAP, RegistrationInputMode.STATIC_CLOUD}:
             raise RegistrationSourceResolutionError(
                 "only registered-map and static-cloud requests have one source file"
@@ -145,6 +215,212 @@ class RegistrationSourceResolver:
             distance_unit=source.source_distance_unit.value,
             source_frame=source.source_frame,
             same_scene_lineage_verified=verified,
+        )
+
+    def inspect_estimated_trajectory_map(
+        self,
+        *,
+        job_id: str,
+        project_id: str,
+        assembly_id: str,
+        assembly_revision: int,
+        assembly_checksum: str,
+        source_scan_file_ids: list[str],
+        source_distance_unit: DistanceUnit | None,
+        source_frame: str | None,
+        same_scene_attestation: bool | None,
+        estimated_trajectory_product_ref: ProductArtifactRef | None,
+        estimated_map_cloud_ref: ProductArtifactRef | None,
+        odometry_runtime_qualification_status: Literal["qualified", "wired_unqualified"] | None,
+        workspace: Path,
+        max_source_points: int,
+        expected_source_checksum: str | None = None,
+        expected_header_checksum: str | None = None,
+        expected_point_count: int | None = None,
+    ) -> InspectedEstimatedTrajectoryMap:
+        """Revalidate a product-evidence-bound R6 map before request preparation or execution."""
+        if (
+            len(source_scan_file_ids) < 2
+            or len(source_scan_file_ids) != len(set(source_scan_file_ids))
+            or source_distance_unit != DistanceUnit.METER
+            or not source_frame
+            or estimated_trajectory_product_ref is None
+            or estimated_map_cloud_ref is None
+            or odometry_runtime_qualification_status is None
+        ):
+            raise RegistrationSourceResolutionError("estimated map is missing its exact metric source bindings")
+
+        stored = self.assemblies.get_assembly(assembly_id, assembly_revision)
+        snapshot = stored.snapshot
+        try:
+            verify_input_assembly_checksum(snapshot)
+        except ValueError as error:
+            raise RegistrationSourceResolutionError("stored input assembly checksum is invalid") from error
+        if snapshot.assembly_checksum != assembly_checksum:
+            raise RegistrationSourceResolutionError("estimated map assembly checksum differs from its scan binding")
+        declarations = snapshot.declarations
+        declared_same_scene = declarations.same_scene.value if declarations.same_scene is not None else None
+        if (
+            declarations.cloud_state is None
+            or declarations.cloud_state.value != CloudObservationState.RAW_SCAN_SEQUENCE
+            or declarations.coordinate_unit is None
+            or declarations.coordinate_unit.value != DistanceUnit.METER
+            or declarations.lidar_frame_id is None
+            or declared_same_scene != same_scene_attestation
+        ):
+            raise RegistrationSourceResolutionError("estimated map declarations differ from its accepted R6 assembly")
+        scan_bindings = [item for item in snapshot.bindings if item.role == InputRole.LIDAR_SCAN]
+        if len(scan_bindings) != 1 or scan_bindings[0].file_ids != source_scan_file_ids:
+            raise RegistrationSourceResolutionError("estimated map scan order differs from its exact assembly binding")
+
+        staged_by_id = {item.file_id: item for item in snapshot.files}
+        if len(staged_by_id) != len(snapshot.files) or any(
+            file_id not in staged_by_id for file_id in source_scan_file_ids
+        ):
+            raise RegistrationSourceResolutionError("estimated map refers to a missing or duplicated source scan")
+        scans = [staged_by_id[file_id] for file_id in source_scan_file_ids]
+        self.assemblies.verify_upload_sources(stored, upload_ids={item.upload_id for item in scans})
+        scan_checksums = tuple(
+            item.archive_member.member_checksum if item.archive_member is not None else item.source_file.checksum
+            for item in scans
+        )
+
+        if (
+            estimated_trajectory_product_ref.artifact_type != "EstimatedTrajectoryProductEvidence"
+            or estimated_trajectory_product_ref.producer_stage != StageId.LIDAR_ODOMETRY
+            or estimated_trajectory_product_ref.job_id != job_id
+            or not estimated_trajectory_product_ref.artifact_uri.startswith(f"artifact://jobs/{job_id}/attempts/")
+            or estimated_map_cloud_ref.artifact_type != "EstimatedTrajectoryMapCloud"
+            or estimated_map_cloud_ref.producer_stage != StageId.LIDAR_ODOMETRY
+            or estimated_map_cloud_ref.job_id != job_id
+            or not estimated_map_cloud_ref.artifact_uri.startswith(f"artifact://jobs/{job_id}/attempts/")
+        ):
+            raise RegistrationSourceResolutionError("estimated map refs must belong to this job's odometry attempt")
+        product_evidence = self.resolver.load_model(
+            estimated_trajectory_product_ref, EstimatedTrajectoryProductEvidence
+        )
+        map_evidence = product_evidence.map_evidence
+        consumer_evidence = product_evidence.consumer_evidence
+        map_cloud_ref = map_evidence.map_cloud_ref
+        if map_cloud_ref is None:
+            raise RegistrationSourceResolutionError("odometry product evidence has no fused map cloud")
+        exact_map_ref = ProductArtifactRef.model_validate(map_cloud_ref.model_dump(mode="python"))
+        if (
+            product_evidence.job_id != job_id
+            or consumer_evidence.recipe_group != RecipeGroup.SENSOR_GUIDED.value
+            or map_evidence.map_status != "ready"
+            or exact_map_ref != estimated_map_cloud_ref
+            or map_evidence.map_frame_id != source_frame
+            or map_evidence.world_frame_status != "pending_world_from_map_confirmation"
+            or map_evidence.floor_status != "pending_floor_and_up_axis_evidence"
+            or map_evidence.alignment_status != "not_registered"
+        ):
+            raise RegistrationSourceResolutionError("odometry evidence does not describe this pending R6 map")
+        binding = map_evidence.ingest_binding
+        if (
+            binding.assembly_checksum != assembly_checksum
+            or declarations.lidar_frame_id.value != binding.sensor_frame_id
+            or binding.source_scan_file_ids != source_scan_file_ids
+            or binding.source_scan_checksums != list(scan_checksums)
+            or binding.odometry_map_frame_id != source_frame
+            or consumer_evidence.runtime_qualification_status != odometry_runtime_qualification_status
+        ):
+            raise RegistrationSourceResolutionError(
+                "odometry product evidence differs from the exact scan/runtime inputs"
+            )
+
+        run = self.projects.input_run_for_job(job_id)
+        if (
+            run is None
+            or run.project_id != project_id
+            or (
+                run.assembly_id != assembly_id
+                or run.assembly_revision != assembly_revision
+                or run.assembly_checksum != assembly_checksum
+                or run.recipe_checksum != binding.recipe_checksum
+            )
+        ):
+            raise RegistrationSourceResolutionError("estimated map does not belong to the accepted R6 input run")
+        project = self.projects.get_project(project_id)
+        if project.input_recipe_ref != run.recipe_ref:
+            raise ArtifactChecksumError("accepted job recipe reference differs from durable lineage")
+        recipe = self.resolver.load_model(run.recipe_ref, InputRecipe)
+        try:
+            verify_input_recipe_checksum(recipe)
+        except ValueError as error:
+            raise ArtifactChecksumError("accepted job recipe checksum is invalid") from error
+        if (
+            recipe.recipe_group != RecipeGroup.SENSOR_GUIDED
+            or recipe.recipe_checksum != binding.recipe_checksum
+            or recipe.assembly_id != assembly_id
+            or recipe.assembly_revision != assembly_revision
+            or recipe.assembly_checksum != assembly_checksum
+            or not any(
+                item.role == InputRole.LIDAR_SCAN and item.file_ids == source_scan_file_ids for item in recipe.bindings
+            )
+            or not any(item.role == InputRole.RGB_VIDEO and item.file_ids for item in recipe.bindings)
+        ):
+            raise RegistrationSourceResolutionError("estimated map source scans are not from the accepted R6 recipe")
+        accepted_refs = (
+            project.input_assembly_ref,
+            project.input_resolution_ref,
+            project.input_runtime_registry_ref,
+            project.input_recipe_ref,
+        )
+        evidence_refs = (
+            consumer_evidence.assembly_ref,
+            consumer_evidence.resolution_ref,
+            consumer_evidence.runtime_registry_ref,
+            consumer_evidence.recipe_ref,
+        )
+        if any(reference is None for reference in accepted_refs) or any(
+            evidence_ref.artifact_type != accepted_ref.artifact_type
+            or evidence_ref.artifact_checksum != accepted_ref.artifact_checksum
+            for evidence_ref, accepted_ref in zip(evidence_refs, accepted_refs, strict=True)
+            if accepted_ref is not None
+        ):
+            raise RegistrationSourceResolutionError("odometry receipt differs from the accepted input evidence chain")
+
+        map_path = self.resolver.require_uri(
+            estimated_map_cloud_ref.artifact_uri, estimated_map_cloud_ref.artifact_checksum
+        )
+        workspace.mkdir(parents=True, exist_ok=True)
+        try:
+            header, raw_header = self._read_header(map_path)
+        except RegistrationSourceResolutionError:
+            raise
+        if header.geometry_format != "ply":
+            raise RegistrationSourceResolutionError("estimated trajectory map must be a parsed PLY point cloud")
+        observed_header_checksum = _sha256(raw_header)
+        if (
+            header.point_count < 1
+            or header.point_count > max_source_points
+            or (
+                expected_source_checksum is not None
+                and expected_source_checksum != estimated_map_cloud_ref.artifact_checksum
+            )
+            or (expected_header_checksum is not None and expected_header_checksum != observed_header_checksum)
+            or (expected_point_count is not None and expected_point_count != header.point_count)
+        ):
+            raise RegistrationSourceResolutionError(
+                "estimated map bytes or parsed header differ from the sealed request"
+            )
+        return InspectedEstimatedTrajectoryMap(
+            path=map_path,
+            input_assembly_id=assembly_id,
+            input_assembly_revision=assembly_revision,
+            input_assembly_checksum=assembly_checksum,
+            source_scan_file_ids=tuple(source_scan_file_ids),
+            source_scan_checksums=scan_checksums,
+            source_checksum=estimated_map_cloud_ref.artifact_checksum,
+            header_checksum=observed_header_checksum,
+            point_count=header.point_count,
+            source_frame=source_frame,
+            same_scene_attestation=same_scene_attestation,
+            estimated_trajectory_product_ref=estimated_trajectory_product_ref,
+            estimated_map_cloud_ref=estimated_map_cloud_ref,
+            odometry_runtime_qualification_status=odometry_runtime_qualification_status,
+            stored=stored,
         )
 
     def inspect_staged_source(
@@ -338,9 +614,9 @@ class RegistrationSourceResolver:
         ):
             raise ArtifactChecksumError("accepted job recipe differs from the durable input run")
         source_role = request.source.source_role
-        source_file_ids = set(request.source.source_file_ids)
+        source_file_ids = request.source.source_file_ids
         source_is_in_recipe = any(
-            binding.role == source_role and set(binding.file_ids) == source_file_ids for binding in recipe.bindings
+            binding.role == source_role and binding.file_ids == source_file_ids for binding in recipe.bindings
         )
         rgb_video_is_in_recipe = any(
             binding.role == InputRole.RGB_VIDEO and binding.file_ids for binding in recipe.bindings

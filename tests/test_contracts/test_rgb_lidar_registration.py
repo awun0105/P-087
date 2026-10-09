@@ -106,26 +106,58 @@ def _source(
             RegistrationInputMode.REGISTERED_MAP: InputRole.REGISTERED_LIDAR_MAP,
             RegistrationInputMode.STATIC_CLOUD: InputRole.STATIC_LIDAR_CLOUD,
             RegistrationInputMode.RAW_SCAN_SEQUENCE: InputRole.LIDAR_SCAN,
+            RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP: InputRole.LIDAR_SCAN,
         }[mode]
+        source_checksum = _checksum("map-source")
         values = {
             "mode": mode,
             "target_job_id": JOB_ID,
             "authorized_project_id": PROJECT_ID,
-            "source_input_checksum": _checksum("map-source"),
+            "source_input_checksum": source_checksum,
             "source_frame": "lidar-map-frame",
             "source_distance_unit": DistanceUnit.METER,
             "source_point_count": 12_000,
-            "source_format": InputAssetFormat.POINT_CLOUD_PCD,
+            "source_format": (
+                InputAssetFormat.POINT_CLOUD_PLY
+                if mode == RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP
+                else InputAssetFormat.POINT_CLOUD_PCD
+            ),
             "source_header_checksum": _checksum("pcd-header"),
             "source_role": role,
             "input_assembly_id": "assembly-1",
             "input_assembly_revision": 2,
             "input_assembly_checksum": _checksum("assembly-2"),
             "source_file_ids": ["map-file-1"]
-            if mode != RegistrationInputMode.RAW_SCAN_SEQUENCE
+            if mode not in {RegistrationInputMode.RAW_SCAN_SEQUENCE, RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP}
             else ["scan-1", "scan-2"],
             "same_scene_attestation": True if mode != RegistrationInputMode.RAW_SCAN_SEQUENCE else None,
         }
+        if mode == RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP:
+            attempt = f"artifact://jobs/{JOB_ID}/attempts/attempt-1/lidar-odometry"
+            values.update(
+                {
+                    "estimated_trajectory_product_ref": ProductArtifactRef(
+                        artifact_type="EstimatedTrajectoryProductEvidence",
+                        schema_version="1.0",
+                        artifact_uri=f"{attempt}/product-evidence.json",
+                        artifact_checksum=_checksum("trajectory-product"),
+                        data_class=ArtifactDataClass.DERIVED,
+                        producer_stage=StageId.LIDAR_ODOMETRY,
+                        job_id=JOB_ID,
+                    ),
+                    "estimated_map_cloud_ref": ProductArtifactRef(
+                        artifact_type="EstimatedTrajectoryMapCloud",
+                        schema_version="1.0",
+                        artifact_uri=f"{attempt}/estimated-map.ply",
+                        artifact_checksum=source_checksum,
+                        data_class=ArtifactDataClass.DERIVED,
+                        producer_stage=StageId.LIDAR_ODOMETRY,
+                        job_id=JOB_ID,
+                        source_provenance={"map_frame_id": "lidar-map-frame"},
+                    ),
+                    "odometry_runtime_qualification_status": "wired_unqualified",
+                }
+            )
     values.update(overrides)
     return RegistrationSourceBinding(**values)
 
@@ -334,6 +366,17 @@ def test_raw_scan_sequence_is_routed_to_odometry_before_map_registration() -> No
     assert RegistrationFindingCode.RAW_SCANS_REQUIRE_TRAJECTORY in result.findings
 
 
+def test_estimated_trajectory_map_requires_qualified_odometry_without_reclassifying_raw_scans() -> None:
+    estimated = _request(source=_source(RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP))
+    estimated_result = registration_preflight(estimated)
+    raw_result = registration_preflight(_request(source=_source(RegistrationInputMode.RAW_SCAN_SEQUENCE)))
+
+    assert estimated_result.state == RegistrationPreflightState.INSUFFICIENT
+    assert RegistrationFindingCode.UNQUALIFIED_PROFILE in estimated_result.findings
+    assert RegistrationFindingCode.RAW_SCANS_REQUIRE_TRAJECTORY not in estimated_result.findings
+    assert RegistrationFindingCode.RAW_SCANS_REQUIRE_TRAJECTORY in raw_result.findings
+
+
 def test_false_same_scene_context_blocks_map_registration() -> None:
     request = _request(source=_source(same_scene_attestation=False))
 
@@ -502,6 +545,59 @@ def test_registration_source_cloud_manifest_binds_exact_target_job_bytes_and_lin
     assert manifest.source_geometry_ref == cloud_ref
     assert manifest.source_distance_unit == DistanceUnit.METER
     assert manifest.source_frame == request.source.source_frame
+
+
+def test_estimated_map_source_manifest_preserves_ordered_scan_and_receipt_lineage() -> None:
+    request = _request(source=_source(RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP))
+    cloud_ref = _ref(
+        "RegistrationSourcePointCloud",
+        StageId.LIDAR_INGEST,
+        checksum=request.source.source_input_checksum,
+    )
+    manifest = seal_registration_source_cloud_manifest(
+        {
+            "schema_version": "1.1",
+            "job_id": request.target_job_id,
+            "source_geometry_ref": cloud_ref,
+            "input_mode": RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP,
+            "source_input_checksum": request.source.source_input_checksum,
+            "input_assembly_id": request.source.input_assembly_id,
+            "input_assembly_revision": request.source.input_assembly_revision,
+            "input_assembly_checksum": request.source.input_assembly_checksum,
+            "source_file_id": None,
+            "source_scan_file_ids": request.source.source_file_ids,
+            "source_scan_checksums": [_checksum("scan-1"), _checksum("scan-2")],
+            "estimated_trajectory_product_ref": request.source.estimated_trajectory_product_ref,
+            "estimated_map_cloud_ref": request.source.estimated_map_cloud_ref,
+            "source_format": "ply",
+            "source_header_checksum": request.source.source_header_checksum,
+            "source_point_count": request.source.source_point_count,
+            "source_distance_unit": request.source.source_distance_unit,
+            "source_frame": request.source.source_frame,
+            "same_scene_lineage_verified": True,
+            "manifest_checksum": ZERO_CHECKSUM,
+        }
+    )
+
+    assert manifest.schema_version == "1.1"
+    assert manifest.source_scan_file_ids == ["scan-1", "scan-2"]
+    assert manifest.estimated_map_cloud_ref == request.source.estimated_map_cloud_ref
+    assert manifest.source_file_id is None
+
+
+def test_estimated_map_registration_refs_must_share_one_odometry_attempt() -> None:
+    source = _source(RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP)
+    assert source.estimated_map_cloud_ref is not None
+    mismatched_map_ref = source.estimated_map_cloud_ref.model_copy(
+        update={
+            "artifact_uri": source.estimated_map_cloud_ref.artifact_uri.replace(
+                "/attempts/attempt-1/", "/attempts/attempt-2/"
+            )
+        }
+    )
+
+    with pytest.raises(ValueError, match="must share one odometry attempt"):
+        _source(RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP, estimated_map_cloud_ref=mismatched_map_ref)
 
 
 def test_proposal_accepts_exact_copied_registration_source_cloud() -> None:

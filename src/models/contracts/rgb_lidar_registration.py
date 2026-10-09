@@ -28,11 +28,20 @@ _CHECKSUM_PLACEHOLDER = "sha256:" + "0" * 64
 ContractT = TypeVar("ContractT", bound=ContractModel)
 
 
+def _attempt_id(reference: ProductArtifactRef) -> str | None:
+    marker = "/attempts/"
+    if marker not in reference.artifact_uri:
+        return None
+    attempt_id = reference.artifact_uri.split(marker, 1)[1].split("/", 1)[0]
+    return attempt_id or None
+
+
 class RegistrationInputMode(StrEnum):
     SENSOR_PACKAGE = "sensor_package"
     REGISTERED_MAP = "registered_map"
     STATIC_CLOUD = "static_cloud"
     RAW_SCAN_SEQUENCE = "raw_scan_sequence"
+    ESTIMATED_TRAJECTORY_MAP = "estimated_trajectory_map"
 
 
 class RegistrationOperationState(StrEnum):
@@ -220,6 +229,13 @@ class RegistrationSourceBinding(ContractModel):
     source_file_ids: list[Identifier] = Field(default_factory=list)
     lidar_package_ref: ProductArtifactRef | None = None
     same_scene_attestation: bool | None = None
+    estimated_trajectory_product_ref: ProductArtifactRef | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    estimated_map_cloud_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    odometry_runtime_qualification_status: Literal["qualified", "wired_unqualified"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def _source_mode_fields(self) -> Self:
@@ -248,6 +264,9 @@ class RegistrationSourceBinding(ContractModel):
                 or self.source_file_ids
                 or self.source_format is not None
                 or self.source_header_checksum is not None
+                or self.estimated_trajectory_product_ref is not None
+                or self.estimated_map_cloud_ref is not None
+                or self.odometry_runtime_qualification_status is not None
             ):
                 raise ValueError("sensor-package mode cannot use staged-map bindings or non-metric units")
             if self.same_scene_attestation is not None:
@@ -262,6 +281,7 @@ class RegistrationSourceBinding(ContractModel):
             RegistrationInputMode.REGISTERED_MAP: InputRole.REGISTERED_LIDAR_MAP,
             RegistrationInputMode.STATIC_CLOUD: InputRole.STATIC_LIDAR_CLOUD,
             RegistrationInputMode.RAW_SCAN_SEQUENCE: InputRole.LIDAR_SCAN,
+            RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP: InputRole.LIDAR_SCAN,
         }[self.mode]
         if self.source_role != expected_role:
             raise ValueError("registration mode does not match the selected input assembly role")
@@ -275,25 +295,77 @@ class RegistrationSourceBinding(ContractModel):
             raise ValueError("map registration supports only parsed PCD/PLY point-cloud inputs")
         if self.source_header_checksum is not None and self.source_format is None:
             raise ValueError("parsed point-cloud header requires an observed PCD/PLY format")
-        if self.mode == RegistrationInputMode.RAW_SCAN_SEQUENCE and self.same_scene_attestation is not None:
-            raise ValueError("raw scan sequence is not a registered-map same-scene assertion")
+        estimated_refs = (self.estimated_trajectory_product_ref, self.estimated_map_cloud_ref)
+        if self.mode == RegistrationInputMode.RAW_SCAN_SEQUENCE:
+            if self.same_scene_attestation is not None:
+                raise ValueError("raw scan sequence is not a registered-map same-scene assertion")
+            if any(value is not None for value in (*estimated_refs, self.odometry_runtime_qualification_status)):
+                raise ValueError("raw scans require a derived map before binding odometry products")
+        elif self.mode == RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP:
+            if (estimated_refs[0] is None) != (estimated_refs[1] is None):
+                raise ValueError("estimated scan registration must bind both product evidence and map cloud")
+            if len(self.source_file_ids) < 2:
+                raise ValueError("estimated trajectory map must retain at least two source scan IDs")
+            product_ref, map_ref = estimated_refs
+            if product_ref is None or map_ref is None:
+                raise ValueError("estimated trajectory map requires product evidence and map cloud refs")
+            if (
+                product_ref.artifact_type != "EstimatedTrajectoryProductEvidence"
+                or product_ref.producer_stage != StageId.LIDAR_ODOMETRY
+                or product_ref.job_id != self.target_job_id
+                or not product_ref.artifact_uri.startswith(f"artifact://jobs/{self.target_job_id}/attempts/")
+            ):
+                raise ValueError("estimated registration must bind this job's attempt-scoped product evidence")
+            if (
+                map_ref.artifact_type != "EstimatedTrajectoryMapCloud"
+                or map_ref.producer_stage != StageId.LIDAR_ODOMETRY
+                or map_ref.job_id != self.target_job_id
+                or not map_ref.artifact_uri.startswith(f"artifact://jobs/{self.target_job_id}/attempts/")
+                or map_ref.artifact_checksum != self.source_input_checksum
+            ):
+                raise ValueError("estimated registration must bind the exact attempt-scoped map bytes")
+            if _attempt_id(product_ref) is None or _attempt_id(product_ref) != _attempt_id(map_ref):
+                raise ValueError("estimated registration product and map refs must share one odometry attempt")
+            map_provenance = map_ref.source_provenance or {}
+            if map_provenance.get("map_frame_id") != self.source_frame:
+                raise ValueError("estimated map frame differs from the declared registration source frame")
+            if (
+                self.source_format != InputAssetFormat.POINT_CLOUD_PLY
+                or self.source_distance_unit != DistanceUnit.METER
+                or self.source_header_checksum is None
+                or self.source_point_count is None
+                or self.odometry_runtime_qualification_status is None
+            ):
+                raise ValueError("estimated map registration requires observed PLY, metric, runtime and scene evidence")
+        elif any(value is not None for value in (*estimated_refs, self.odometry_runtime_qualification_status)):
+            raise ValueError("only estimated-map registration may bind odometry products")
         return self
 
 
 class RegistrationSourceCloudManifest(ContractModel):
-    """Exact staged point-cloud bytes copied into a job without claiming a world up axis."""
+    """Exact point-cloud bytes copied into a job without claiming a world up axis."""
 
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.0", "1.1"] = "1.0"
     artifact_type: Literal["RegistrationSourceCloudManifest"] = "RegistrationSourceCloudManifest"
     producer_stage: Literal[StageId.LIDAR_INGEST] = StageId.LIDAR_INGEST
     job_id: Identifier
     source_geometry_ref: ProductArtifactRef
-    input_mode: Literal[RegistrationInputMode.REGISTERED_MAP, RegistrationInputMode.STATIC_CLOUD]
+    input_mode: Literal[
+        RegistrationInputMode.REGISTERED_MAP,
+        RegistrationInputMode.STATIC_CLOUD,
+        RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP,
+    ]
     source_input_checksum: Checksum
     input_assembly_id: Identifier
     input_assembly_revision: PositiveInt
     input_assembly_checksum: Checksum
-    source_file_id: Identifier
+    source_file_id: Identifier | None = Field(default=None, exclude_if=lambda value: value is None)
+    source_scan_file_ids: list[Identifier] = Field(default_factory=list, exclude_if=lambda value: not value)
+    source_scan_checksums: list[Checksum] = Field(default_factory=list, exclude_if=lambda value: not value)
+    estimated_trajectory_product_ref: ProductArtifactRef | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    estimated_map_cloud_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
     source_format: Literal["pcd", "ply"]
     source_header_checksum: Checksum
     source_point_count: PositiveInt
@@ -315,6 +387,40 @@ class RegistrationSourceCloudManifest(ContractModel):
             raise ValueError("registration source manifest must bind exact copied bytes in its target job")
         if not self.source_frame.strip() or self.source_frame == "world":
             raise ValueError("registration source frame must be explicit and distinct from world")
+        if self.input_mode == RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP:
+            product_ref = self.estimated_trajectory_product_ref
+            map_ref = self.estimated_map_cloud_ref
+            if (
+                self.schema_version != "1.1"
+                or self.source_file_id is not None
+                or len(self.source_scan_file_ids) < 2
+                or len(self.source_scan_file_ids) != len(self.source_scan_checksums)
+                or len(self.source_scan_file_ids) != len(set(self.source_scan_file_ids))
+                or product_ref is None
+                or map_ref is None
+            ):
+                raise ValueError("estimated source manifest requires a schema-1.1 trajectory and scan binding")
+            if (
+                product_ref.artifact_type != "EstimatedTrajectoryProductEvidence"
+                or product_ref.producer_stage != StageId.LIDAR_ODOMETRY
+                or product_ref.job_id != self.job_id
+                or map_ref.artifact_type != "EstimatedTrajectoryMapCloud"
+                or map_ref.producer_stage != StageId.LIDAR_ODOMETRY
+                or map_ref.job_id != self.job_id
+                or map_ref.artifact_checksum != self.source_input_checksum
+            ):
+                raise ValueError("estimated source manifest refs differ from the copied map identity")
+            if _attempt_id(product_ref) is None or _attempt_id(product_ref) != _attempt_id(map_ref):
+                raise ValueError("estimated source manifest refs must share one odometry attempt")
+        elif (
+            self.schema_version != "1.0"
+            or self.source_file_id is None
+            or self.source_scan_file_ids
+            or self.source_scan_checksums
+            or self.estimated_trajectory_product_ref is not None
+            or self.estimated_map_cloud_ref is not None
+        ):
+            raise ValueError("staged-map source manifest must retain its schema-1.0 single-file contract")
         return self
 
 
@@ -418,6 +524,10 @@ def registration_preflight(request: RegistrationRequest) -> RegistrationPrefligh
     source = request.source
     if source.mode == RegistrationInputMode.RAW_SCAN_SEQUENCE:
         findings.append(RegistrationFindingCode.RAW_SCANS_REQUIRE_TRAJECTORY)
+    elif source.mode == RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP and (
+        source.odometry_runtime_qualification_status != "qualified"
+    ):
+        findings.append(RegistrationFindingCode.UNQUALIFIED_PROFILE)
     if source.mode != RegistrationInputMode.SENSOR_PACKAGE:
         if source.source_format is None:
             findings.append(RegistrationFindingCode.SOURCE_FORMAT_REQUIRED)
@@ -441,7 +551,11 @@ def registration_preflight(request: RegistrationRequest) -> RegistrationPrefligh
         findings.append(RegistrationFindingCode.POINT_BUDGET_EXCEEDED)
     if request.metric_state == "unknown" and request.profile.scale_policy == "confirmed_metric_only":
         findings.append(RegistrationFindingCode.METRIC_SCALE_UNKNOWN)
-    if request.source.mode in {RegistrationInputMode.REGISTERED_MAP, RegistrationInputMode.STATIC_CLOUD} and (
+    if request.source.mode in {
+        RegistrationInputMode.REGISTERED_MAP,
+        RegistrationInputMode.STATIC_CLOUD,
+        RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP,
+    } and (
         len(request.floor_evidence_refs) != 1
         or any(reference.artifact_type != "FloorFitEvidence" for reference in request.floor_evidence_refs)
     ):
