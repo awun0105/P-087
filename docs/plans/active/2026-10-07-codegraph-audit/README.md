@@ -573,7 +573,7 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [x] AUD-17.S1–S2 typed timestamp roles/units, resolver prerequisites, immutable trajectory contract, and isolated synthetic provider path; R5 dispatch remains disabled.
 - [x] AUD-17.S3a evaluation-only ATE/RPE report with explicit frame, units, clock, bounded interpolation and input checksums; no real-sensor qualification claimed.
 - [x] AUD-17.S3b1 blocks consumer readiness for wired-unqualified odometry while preserving diagnostic poses; R5/product consumers remain disabled.
-- [x] AUD-17.S3c frontend regression covers visible pending-R6 diagnostics and dispatch through the READY supplied-R4 fallback. The R6 derived-map consumer now seals a provisional AUD-19 registration input with exact attempt and scan lineage; runtime and quality acceptance remain open.
+- [x] AUD-17.S3c local stage UI displays checksum-bound pose coverage, timestamp gaps and explicit `not_measured` drift, with source-count validation; supplied-R4 fallback remains covered. R6 derived-map queue wiring is local; runtime and quality acceptance remain open.
 - [ ] AUD-17.S3 drift/consumer QA and real-sensor qualification; the local R6 queue
       gate now admits only preflight-qualified maps, while wired-unqualified odometry
       remains blocked. Deployed runtime qualification, real traversal quality, held-out

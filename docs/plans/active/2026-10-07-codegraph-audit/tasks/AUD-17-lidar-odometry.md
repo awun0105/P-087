@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- IN PROGRESS — S1/S2, S3a, S3b1 và local S3b2 wiring đã triển khai. Khi có runtime evidence qualified, R6 estimated maps có thể đi qua durable registration, explicit candidate confirmation, source-bound LiDAR ingest và `AlignmentRecord`; deployed qualification cùng real/held-out quality evidence còn mở. P2 extension theo yêu cầu owner; EX-REC + EX-PRODUCT.
+- IN PROGRESS — S1/S2, S3a, S3b1, S3b2 queue wiring và S3c local diagnostics UI đã triển khai. Qualified R6 maps có thể qua durable registration/preflight; deployed runtime qualification, real/held-out quality and browser acceptance remain open. P2 extension theo yêu cầu owner; EX-REC + EX-PRODUCT.
 - Canonical REC-08/06, PRODUCT-02/08/09; bổ sung task-local scope, không đổi crosswalk.
 - ADAPT qualified process-isolated KISS-ICP adapter; REUSE LiDAR ingest/metric/
   alignment contracts và durable admission. Technically feasible, không loại trừ
@@ -190,8 +190,8 @@ canonical ingest in this sprint.
 ### Sprint AUD-17.S3c — Product diagnostics and fallback UX
 
 **Input:** persisted odometry, mapping, calibration and ingest diagnostics.
-**Output:** actionable coverage/gap/qualification state and explicit supplied-trajectory fallback in the Studio assembly flow.
-**Contract:** never label unqualified odometry as PASS or ground truth; fallback creates a distinct recipe and reruns downstream evidence.
+**Output:** show pose coverage, timestamp gap count/threshold/maximum and absolute-drift status from the exact immutable trajectory ref; preserve explicit supplied-trajectory fallback in the Studio assembly flow.
+**Contract:** validate that the trajectory ref belongs to this job and odometry stage, and that diagnostic scan count matches the accepted ordered scan binding. Never label unqualified odometry as PASS or ground truth; fallback creates a distinct recipe and reruns downstream evidence.
 
 Held-out traversal measurement and supported-envelope acceptance remain external gates after S3b2/S3c; synthetic tests do not close them.
 
@@ -545,3 +545,24 @@ R6 registration queue gate follow-up (AUD-17.S3b2, 2026-10-09):
   Python files; `git diff --check` passed. This proves the local route/contract
   wiring only. No deployed qualified runtime, real traversal or held-out quality
   run was available; those acceptance gates remain open.
+
+S3c local trajectory diagnostics UI (2026-10-09):
+- Stage inspection now prefers the composite product receipt, reads its exact
+  `trajectory_ref` through the checksum-verified artifact endpoint, and displays
+  valid-pose coverage, timestamp gap count/threshold/maximum and
+  `absolute_drift_status=not_measured`. Gap warnings include a concrete timestamp
+  remediation; incomplete coverage warns about skipped scans. Diagnostics must
+  match the job, odometry runtime qualification and source scan count; a mismatch
+  is shown as an unavailable diagnostic, not a PASS.
+- The UI keeps world-frame, floor/up-axis and RGB alignment statuses pending. The
+  separate READY R4 supplied-trajectory fallback remains covered by its existing
+  unified-input regression.
+- Verification: `npm test -- tests/studio-inspection.test.tsx` — 20 passed;
+  focused ESLint, full `npm run lint`, `npm run typecheck`, and
+  `npm run build -- --webpack` passed; lint reported 2 warnings in the
+  unchanged `LidarCalibrationQAStage.tsx`; `git diff --check` passed. CodeGraph
+  synced the changed component; Graphify rebuilt 22,189 nodes, 68,366 edges and
+  713 communities.
+  Chrome DevTools is **UNVERIFIED** because its MCP browser profile is already in
+  use and could not attach. No deployed runtime or real-sensor/held-out traversal
+  evidence was available; those acceptance gates remain open.

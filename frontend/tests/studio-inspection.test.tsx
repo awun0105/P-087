@@ -21,6 +21,30 @@ vi.mock("@/features/studio/StageViewer", () => ({ StageViewer: ({ stageId }: { s
 vi.mock("@/features/studio/inspection/StageSceneWorkspace", () => ({ StageSceneWorkspace: ({ stageId }: { stageId: string }) => <div>Scene: {stageId}</div> }));
 
 const sha = `sha256:${"a".repeat(64)}`;
+const trajectoryReference: ProductArtifactRef = {
+  artifact_type: "EstimatedTrajectoryArtifact",
+  schema_version: "1.0",
+  artifact_uri: "artifact://jobs/job-a/attempts/attempt-a/rec17/trajectory.json",
+  artifact_checksum: sha,
+  data_class: "derived",
+  producer_stage: LIDAR_ODOMETRY_STAGE.id,
+  job_id: "job-a",
+};
+const trajectoryArtifact = {
+  artifact_type: "EstimatedTrajectoryArtifact",
+  job_id: "job-a",
+  trajectory_origin: "estimated",
+  runtime_qualification_status: "qualified",
+  diagnostics: {
+    scan_count: 2,
+    valid_pose_count: 2,
+    coverage_ratio: 1,
+    timestamp_gap_threshold_seconds: 0.5,
+    timestamp_gap_count: 0,
+    maximum_timestamp_gap_seconds: 0.25,
+    absolute_drift_status: "not_measured",
+  },
+};
 const progress: JobProgress = {
   job_id: "job-a", status: "SUCCEEDED", current_stage: "ST-OBJECT-EXTRACT", attempt: 1,
   started_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:10:00Z", completed_at: "2026-10-01T00:10:00Z",
@@ -90,28 +114,33 @@ describe("Inspect theo giai đoạn", () => {
       producer_stage: LIDAR_ODOMETRY_STAGE.id,
       job_id: "job-a",
     };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        artifact_type: "EstimatedTrajectoryConsumerEvidence",
-        job_id: "job-a",
-        recipe_group: "R6",
-        ingest_binding: { source_scan_file_ids: ["scan-1", "scan-2"] },
-        odometry_runtime_id: "kiss-icp-python",
-        odometry_runtime_version: "1.3.0",
-        odometry_profile_checksum: sha,
-        runtime_qualification_status: "qualified",
-        world_frame_status: "pending_world_from_map_confirmation",
-        floor_status: "pending_floor_and_up_axis_evidence",
-        alignment_status: "not_registered",
-      }),
-    }));
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          artifact_type: "EstimatedTrajectoryConsumerEvidence",
+          job_id: "job-a",
+          recipe_group: "R6",
+          ingest_binding: { source_scan_file_ids: ["scan-1", "scan-2"] },
+          trajectory_ref: trajectoryReference,
+          odometry_runtime_id: "kiss-icp-python",
+          odometry_runtime_version: "1.3.0",
+          odometry_profile_checksum: sha,
+          runtime_qualification_status: "qualified",
+          world_frame_status: "pending_world_from_map_confirmation",
+          floor_status: "pending_floor_and_up_axis_evidence",
+          alignment_status: "not_registered",
+        }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => trajectoryArtifact }));
     render(<LidarOdometryStage jobId="job-a" artifacts={[reference]} />);
 
     expect(await screen.findByText(/local odometry map/)).toBeInTheDocument();
     expect(screen.getByText("pending_world_from_map_confirmation")).toBeInTheDocument();
     expect(screen.getByText("pending_floor_and_up_axis_evidence")).toBeInTheDocument();
     expect(screen.getByText("not_registered")).toBeInTheDocument();
+    expect(screen.getByText(/2\/2/)).toBeInTheDocument();
+    expect(screen.getByText("not_measured")).toBeInTheDocument();
     expect(screen.getByText(/không dùng làm LiDAR canonical hoặc collision source/)).toBeInTheDocument();
   });
 
@@ -125,35 +154,51 @@ describe("Inspect theo giai đoạn", () => {
       producer_stage: LIDAR_ODOMETRY_STAGE.id,
       job_id: "job-a",
     };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        artifact_type: "EstimatedTrajectoryProductEvidence",
-        schema_version: "1.0",
-        job_id: "job-a",
-        consumer_evidence: {
-          artifact_type: "EstimatedTrajectoryConsumerEvidence",
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          artifact_type: "EstimatedTrajectoryProductEvidence",
+          schema_version: "1.0",
           job_id: "job-a",
-          recipe_group: "R6",
-          ingest_binding: { source_scan_file_ids: ["scan-1", "scan-2"] },
-          odometry_runtime_id: "kiss-icp-python",
-          odometry_runtime_version: "1.3.0",
-          odometry_profile_checksum: sha,
-          runtime_qualification_status: "qualified",
-          world_frame_status: "pending_world_from_map_confirmation",
-          floor_status: "pending_floor_and_up_axis_evidence",
-          alignment_status: "not_registered",
-        },
-        map_evidence: {
-          artifact_type: "EstimatedTrajectoryMapEvidence",
-          job_id: "job-a",
-          map_frame_id: "odom-map-01",
-          map_status: "ready",
-          point_count: 1234,
-          diagnostic_code: null,
-        },
-      }),
-    }));
+          consumer_evidence: {
+            artifact_type: "EstimatedTrajectoryConsumerEvidence",
+            job_id: "job-a",
+            recipe_group: "R6",
+            ingest_binding: { source_scan_file_ids: ["scan-1", "scan-2"] },
+            trajectory_ref: trajectoryReference,
+            odometry_runtime_id: "kiss-icp-python",
+            odometry_runtime_version: "1.3.0",
+            odometry_profile_checksum: sha,
+            runtime_qualification_status: "qualified",
+            world_frame_status: "pending_world_from_map_confirmation",
+            floor_status: "pending_floor_and_up_axis_evidence",
+            alignment_status: "not_registered",
+          },
+          map_evidence: {
+            artifact_type: "EstimatedTrajectoryMapEvidence",
+            job_id: "job-a",
+            map_frame_id: "odom-map-01",
+            map_status: "ready",
+            point_count: 1234,
+            diagnostic_code: null,
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ...trajectoryArtifact,
+          diagnostics: {
+            ...trajectoryArtifact.diagnostics,
+            scan_count: 2,
+            valid_pose_count: 1,
+            coverage_ratio: 0.5,
+            timestamp_gap_count: 1,
+            maximum_timestamp_gap_seconds: 1.25,
+          },
+        }),
+      }));
     render(<LidarOdometryStage jobId="job-a" artifacts={[reference]} />);
 
     expect(await screen.findByText("Map ready")).toBeInTheDocument();
@@ -161,6 +206,54 @@ describe("Inspect theo giai đoạn", () => {
     expect(screen.getByText("pending_world_from_map_confirmation")).toBeInTheDocument();
     expect(screen.getByText("pending_floor_and_up_axis_evidence")).toBeInTheDocument();
     expect(screen.getByText("not_registered")).toBeInTheDocument();
+    expect(screen.getByText(/1\/2/)).toBeInTheDocument();
+    expect(screen.getByText(/ngưỡng 0,5 s · lớn nhất 1,25 s/)).toBeInTheDocument();
+    expect(screen.getByText(/Có khoảng timestamp vượt ngưỡng/)).toBeInTheDocument();
+    expect(screen.getByText(/Một số scan chưa có pose được ước lượng/)).toBeInTheDocument();
+  });
+
+  it("does not show diagnostics whose scan count differs from the accepted source binding", async () => {
+    const reference: ProductArtifactRef = {
+      artifact_type: "EstimatedTrajectoryConsumerEvidence",
+      schema_version: "1.0",
+      artifact_uri: "artifact://jobs/job-a/attempts/attempt-a/lidar-odometry/consumer-evidence.json",
+      artifact_checksum: sha,
+      data_class: "derived",
+      producer_stage: LIDAR_ODOMETRY_STAGE.id,
+      job_id: "job-a",
+    };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          artifact_type: "EstimatedTrajectoryConsumerEvidence",
+          job_id: "job-a",
+          recipe_group: "R6",
+          ingest_binding: { source_scan_file_ids: ["scan-1", "scan-2"] },
+          trajectory_ref: trajectoryReference,
+          odometry_runtime_id: "kiss-icp-python",
+          odometry_runtime_version: "1.3.0",
+          odometry_profile_checksum: sha,
+          runtime_qualification_status: "qualified",
+          world_frame_status: "pending_world_from_map_confirmation",
+          floor_status: "pending_floor_and_up_axis_evidence",
+          alignment_status: "not_registered",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ...trajectoryArtifact,
+          diagnostics: {
+            ...trajectoryArtifact.diagnostics,
+            scan_count: 3,
+          },
+        }),
+      }));
+    render(<LidarOdometryStage jobId="job-a" artifacts={[reference]} />);
+
+    expect(await screen.findByText(/Không tải được diagnostics trajectory/)).toBeInTheDocument();
+    expect(screen.queryByText("Pose coverage")).not.toBeInTheDocument();
   });
 
   it("báo trạng thái chẩn đoán, hiển thị overlay nhưng không cấp collision eligibility", async () => {
