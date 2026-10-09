@@ -2,7 +2,7 @@
 
 import { errorMessage } from "@/lib/ui-error";
 
-import { ArrowLeft, Film, Loader2, Play, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Film, Loader2, Play } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useState } from "react";
 
@@ -83,14 +83,11 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
   }, [draftReady, processing.values, setDraft]);
   const blocked = processing.evaluation?.blocking ?? false;
   const vramItem = processing.evaluation?.resources.find((r) => r.resource === "vram");
-  const isVramDanger = vramItem?.status === "danger" || blocked;
-  const vramRequired = vramItem?.required_gb ? vramItem.required_gb.toFixed(1) : "7.2";
-  const vramAvailable = vramItem?.available_gb
-    ? vramItem.available_gb.toFixed(1)
-    : processing.options?.capability?.vram_total_gb
-    ? processing.options.capability.vram_total_gb.toFixed(1)
-    : "4.0";
-  const gpuName = processing.options?.capability?.gpu_name ?? "GPU hiện tại";
+  // Thẻ cảnh báo chỉ nói số đo thật từ máy chủ; thiếu số thì bỏ số, không điền giá trị giả.
+  const vramDanger = vramItem?.status === "danger";
+  const vramFacts = vramItem?.required_gb && vramItem.available_gb != null
+    ? `Cần khoảng ${vramItem.required_gb.toFixed(1)} GB VRAM, GPU ${processing.options?.capability?.gpu_name ?? "hiện tại"} đang trống ${vramItem.available_gb.toFixed(1)} GB.`
+    : null;
   const selectedUpload = uploads?.find((upload) => upload.upload_id === selected) ?? null;
   const supported = selectedUpload === null || canCreateScene(selectedUpload);
   // Lý do khoá nút, hiện ngay cạnh CTA (STUDIO_UX_SPEC.md §7.4) thay vì nút xám không giải thích.
@@ -295,18 +292,28 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
         <Button size="sm" variant="secondary" onClick={processing.retry}>Thử lại thông số</Button>
       </Notice>}
 
-      {isVramDanger && (
-        <Card className="border border-ember/40 bg-ember-soft/20 p-4 sm:p-5">
+      {blocked && (
+        <Card role="alert" className="border border-rust/40 bg-rust-soft/30 p-4 sm:p-5">
           <div className="flex items-start gap-3">
-            <Sparkles className="size-5 text-ember-strong shrink-0 mt-0.5" aria-hidden />
+            <AlertTriangle className="size-5 text-rust shrink-0 mt-0.5" aria-hidden />
             <div className="space-y-2 text-sm">
-              <p className="font-semibold text-ink">
-                ⚠️ Video này cần khoảng {vramRequired}GB VRAM. GPU {gpuName} của bạn chỉ có {vramAvailable}GB.
-              </p>
+              <p className="font-semibold text-ink">Thông số vượt cấu hình máy xử lý nên chưa bắt đầu được.</p>
+              {vramDanger && vramFacts && <p className="text-ink-muted leading-relaxed">{vramFacts}</p>}
               <p className="text-ink-muted leading-relaxed">
-                Tiến trình huấn luyện 3DGS có nguy cơ cao bị treo hoặc tràn VRAM. Giảm các ô tô đỏ hoặc chọn “Tối đa cho máy
-                này” để tiếp tục.
+                Tiến trình dựng 3D có nguy cơ cao bị treo hoặc tràn bộ nhớ. Giảm các ô tô đỏ hoặc chọn “Tối đa cho máy này” để tiếp tục.
               </p>
+            </div>
+          </div>
+        </Card>
+      )}
+      {!blocked && vramDanger && (
+        <Card role="status" className="border border-ochre/40 bg-ochre-soft/30 p-4 sm:p-5">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="size-5 text-ochre shrink-0 mt-0.5" aria-hidden />
+            <div className="space-y-2 text-sm">
+              <p className="font-semibold text-ink">GPU đang bận nên job có thể phải chờ.</p>
+              {vramFacts && <p className="text-ink-muted leading-relaxed">{vramFacts}</p>}
+              <p className="text-ink-muted leading-relaxed">Job vẫn tạo được và sẽ tự chạy khi GPU đủ trống.</p>
             </div>
           </div>
         </Card>

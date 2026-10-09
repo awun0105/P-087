@@ -281,15 +281,6 @@ Luồng tài khoản khi `AUTH_REQUIRED=true`:
 `AUTH_REQUIRED=false` chỉ dành cho máy dev/test: mọi người dùng ẩn danh có toàn quyền trừ duyệt/phát hành. Ma trận
 quyền của từng route được test cố định trong `tests/test_api/test_role_matrix.py`.
 
-Response mẫu:
-
-```json
-{
-  "response": "...",
-  "analysis": "..."
-}
-```
-
 ## Tài liệu chính
 
 - [Product Brief](./docs/BRIEF.md)

@@ -601,7 +601,7 @@ Research ở đây là **đọc source + phân tích ảnh được cung cấp**
 ### P3 — Setup ít bước, chi tiết mở khi cần
 
 **Finding — VERIFIED:** NewSceneFlow tách upload/chọn file; form có attestation và ProcessingSettings khá nhiều tham số. **Decision: ADAPT.** Hai chặng tương tác “Nguồn dữ liệu” và “Thiết lập & bắt đầu”; summary trước xử lý, advanced settings có thể mở thêm. **Lý do — INFERENCE:** giảm việc người mới phải hiểu mọi tham số trước job đầu tiên. **Evidence:** [NewSceneFlow][r-new], [ProcessingSettings][r-settings]. Đây là đề xuất của tài liệu, không được quy cho Mobbin.
-*Cập nhật 10/10/2026 (gỡ Smart Cloud Routing):* Lựa chọn “Xử lý trên Colab GPU” đã bị gỡ vì nó không chuyển job đi đâu mà chỉ bỏ chặn cảnh báo vượt cấu hình máy, nên job vẫn chạy cục bộ và có thể tràn VRAM. Khi VRAM ước tính vượt GPU cục bộ, giao diện chặn nút bắt đầu, hiện thẻ cảnh báo và hướng dẫn giảm các ô tô đỏ hoặc chọn “Tối đa cho máy này”.
+*Cập nhật 10/10/2026 (gỡ Smart Cloud Routing):* Lựa chọn “Xử lý trên Colab GPU” đã bị gỡ vì nó không chuyển job đi đâu mà chỉ bỏ chặn cảnh báo vượt cấu hình máy, nên job vẫn chạy cục bộ và có thể tràn VRAM. Khi thông số vượt năng lực của máy xử lý (không chỉ bận tạm thời), giao diện chặn nút bắt đầu, hiện thẻ cảnh báo kèm lý do cạnh nút và hướng dẫn giảm các ô tô đỏ hoặc chọn “Tối đa cho máy này”. Khi GPU chỉ đang bận, job vẫn tạo được và tự chờ GPU trống.
 
 ### P4 — Phân biệt đang chạy với chờ người dùng
 

@@ -17,7 +17,8 @@ const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 const authState = vi.hoisted(() => ({ me: { auth_required: false, user: null } as Me, refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => navigation, useSearchParams: () => new URLSearchParams() }));
 vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => authState }));
-vi.mock("@/features/studio/useProcessingForm", () => ({ useProcessingForm: () => ({ options: null, values: null, evaluation: null, error: null, activePreset: null }) }));
+const processingState = vi.hoisted(() => ({ evaluation: null as unknown }));
+vi.mock("@/features/studio/useProcessingForm", () => ({ useProcessingForm: () => ({ options: null, values: null, evaluation: processingState.evaluation, error: null, activePreset: null }) }));
 vi.mock("@/lib/api/studio", async (original) => ({
   ...(await original<typeof import("@/lib/api/studio")>()),
   listUploads: vi.fn(), listSamples: vi.fn(), createImport: vi.fn(), createSceneFromUpload: vi.fn(), uploadVideo: vi.fn(), uploadPreparedVideo: vi.fn(),
@@ -63,6 +64,7 @@ function preparedArtifact(bytes = "prepared-video-bytes"): VideoPreparedArtifact
 }
 
 beforeEach(() => {
+    processingState.evaluation = null;
   vi.clearAllMocks();
   Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:prepared-video") });
   Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
@@ -198,6 +200,38 @@ describe("ba cửa vào", () => {
     fireEvent.click(screen.getByRole("button", { name: "Bắt đầu xử lý" }));
     await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/scenes/job-1"));
     expect(authState.refresh).toHaveBeenCalledOnce();
+  });
+});
+
+describe("cảnh báo tài nguyên ở trang dựng từ video", () => {
+  const vram = (status: "ok" | "danger") => ({ resource: "vram", required_gb: 9, available_gb: 4, status, message: "" });
+  async function open(evaluation: unknown) {
+    processingState.evaluation = evaluation;
+    vi.mocked(listUploads).mockResolvedValue({ ok: true, data: { uploads: [video] } });
+    render(<VideoSetupStep preselect="video-1" onBack={vi.fn()} />);
+    await screen.findByLabelText("Tên scene");
+  }
+
+  it("vượt năng lực máy: báo lỗi, ghi lý do cạnh nút, khoá nút và không còn đường tắt sang Colab", async () => {
+    await open({ resources: [vram("danger")], parameters: [], blocking: true, note: "" });
+    expect(screen.getByRole("alert")).toHaveTextContent("Thông số vượt cấu hình máy xử lý nên chưa bắt đầu được");
+    expect(screen.getByRole("alert")).toHaveTextContent("Cần khoảng 9.0 GB VRAM");
+    expect(screen.getByText(/Thông số vượt cấu hình máy xử lý \(giảm các ô tô đỏ/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Bắt đầu xử lý" })).toBeDisabled();
+    expect(screen.queryByText(/Colab/)).toBeNull();
+  });
+
+  it("GPU chỉ đang bận: nhắc job sẽ chờ, không chặn và không đòi giảm thông số", async () => {
+    await open({ resources: [vram("danger")], parameters: [], blocking: false, note: "" });
+    expect(screen.getByText(/GPU đang bận nên job có thể phải chờ/)).toBeInTheDocument();
+    expect(screen.queryByText(/chưa bắt đầu được/)).toBeNull();
+    expect(screen.queryByText(/Thông số vượt cấu hình máy xử lý \(giảm/)).toBeNull();
+  });
+
+  it("bị chặn vì RAM/đĩa chứ không phải VRAM: không bịa số VRAM", async () => {
+    await open({ resources: [vram("ok"), { resource: "ram", required_gb: 40, available_gb: 16, status: "danger", message: "" }], parameters: [], blocking: true, note: "" });
+    expect(screen.getByRole("alert")).toHaveTextContent("chưa bắt đầu được");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("VRAM, GPU");
   });
 });
 
