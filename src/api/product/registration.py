@@ -257,10 +257,14 @@ def enqueue_registration(
         )
     if not idempotency_key.strip() or idempotency_key != idempotency_key.strip():
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Idempotency-Key is invalid")
-    if request.source.mode not in {RegistrationInputMode.REGISTERED_MAP, RegistrationInputMode.STATIC_CLOUD}:
+    if request.source.mode not in {
+        RegistrationInputMode.REGISTERED_MAP,
+        RegistrationInputMode.STATIC_CLOUD,
+        RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP,
+    }:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="This registration worker accepts registered maps or one static point cloud",
+            detail="This registration worker accepts registered maps, static clouds, or qualified estimated maps",
         )
 
     store = _operation_store(registry)

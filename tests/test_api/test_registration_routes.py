@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Literal
 
 import pytest
 from httpx import AsyncClient
@@ -618,6 +619,81 @@ async def test_enqueue_enforces_job_ownership_and_preserves_operator_interventio
     if role in {"editor", "reviewer"}:
         assert audit.events[0][0] == user.user_id
         assert audit.events[0][1] == "operator.intervention"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("runtime_status", "expected_status"),
+    [("qualified", 202), ("wired_unqualified", 422)],
+)
+async def test_enqueue_accepts_estimated_map_only_after_runtime_qualification(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    runtime_status: Literal["qualified", "wired_unqualified"],
+    expected_status: int,
+) -> None:
+    registry, database, revision, _ = _runtime(tmp_path, monkeypatch)
+    assert database is not None
+    user = _user("guest")
+    _seed_user(database, user.user_id)
+    request = _request(registry, revision, user.user_id)
+    trajectory_ref = ProductArtifactRef(
+        artifact_type="EstimatedTrajectoryProductEvidence",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{_JOB_ID}/attempts/attempt-registration/rec06/product.json",
+        artifact_checksum=_checksum("estimated-trajectory"),
+        data_class="derived",
+        producer_stage=StageId.LIDAR_ODOMETRY,
+        job_id=_JOB_ID,
+    )
+    map_ref = ProductArtifactRef(
+        artifact_type="EstimatedTrajectoryMapCloud",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{_JOB_ID}/attempts/attempt-registration/rec06/map.ply",
+        artifact_checksum=_checksum("estimated-map"),
+        data_class="derived",
+        producer_stage=StageId.LIDAR_ODOMETRY,
+        job_id=_JOB_ID,
+        source_provenance={"map_frame_id": "lidar-map-frame"},
+    )
+    source = RegistrationSourceBinding(
+        mode=RegistrationInputMode.ESTIMATED_TRAJECTORY_MAP,
+        target_job_id=_JOB_ID,
+        authorized_project_id=registry.get_job(_JOB_ID).project_id,
+        source_input_checksum=map_ref.artifact_checksum,
+        source_frame="lidar-map-frame",
+        source_distance_unit=DistanceUnit.METER,
+        source_point_count=1_000,
+        source_format=InputAssetFormat.POINT_CLOUD_PLY,
+        source_header_checksum=_checksum("estimated-map-header"),
+        source_role=InputRole.LIDAR_SCAN,
+        input_assembly_id="assembly-estimated-registration",
+        input_assembly_revision=1,
+        input_assembly_checksum=_checksum("estimated-assembly"),
+        source_file_ids=["scan-1", "scan-2"],
+        same_scene_attestation=True,
+        estimated_trajectory_product_ref=trajectory_ref,
+        estimated_map_cloud_ref=map_ref,
+        odometry_runtime_qualification_status=runtime_status,
+    )
+    request = seal_registration_request(
+        request.model_copy(update={"source": source, "request_checksum": _ZERO}).model_dump(mode="json")
+    )
+    expected_preflight = "READY" if runtime_status == "qualified" else "INSUFFICIENT"
+    assert registration_preflight(request).state.value == expected_preflight
+
+    with _session(user):
+        response = await client.post(
+            f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/operations",
+            json=request.model_dump(mode="json"),
+            headers={"Idempotency-Key": f"estimated-registration-{runtime_status}"},
+        )
+
+    assert response.status_code == expected_status, response.text
+    with database.transaction() as tx:
+        count = tx.execute("SELECT COUNT(*) FROM r2s_registration_operations").fetchone()[0]
+    assert count == (1 if expected_status == 202 else 0)
 
 
 @pytest.mark.asyncio

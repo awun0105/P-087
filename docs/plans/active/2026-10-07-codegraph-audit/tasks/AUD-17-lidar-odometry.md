@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- IN PROGRESS — S1/S2, S3a và S3b1 đã triển khai; S3b2 có local lease-guarded product stage và source evidence nhưng chưa có world/floor confirmation hoặc canonical LiDAR ingest/alignment. R5 runtime qualification và quality evidence còn mở. P2 extension theo yêu cầu owner; EX-REC + EX-PRODUCT.
+- IN PROGRESS — S1/S2, S3a, S3b1 và local S3b2 wiring đã triển khai. Khi có runtime evidence qualified, R6 estimated maps có thể đi qua durable registration, explicit candidate confirmation, source-bound LiDAR ingest và `AlignmentRecord`; deployed qualification cùng real/held-out quality evidence còn mở. P2 extension theo yêu cầu owner; EX-REC + EX-PRODUCT.
 - Canonical REC-08/06, PRODUCT-02/08/09; bổ sung task-local scope, không đổi crosswalk.
 - ADAPT qualified process-isolated KISS-ICP adapter; REUSE LiDAR ingest/metric/
   alignment contracts và durable admission. Technically feasible, không loại trừ
@@ -521,3 +521,27 @@ R6 estimated-map consumer follow-up (AUD-17.S3b2, 2026-10-09):
   parsing, stage diagnostics, API/contract/worker/frontend regressions, and this
   task evidence. Graph indexes are refreshed after the implementation checks.
   S3b2's lack of a production adapter remains the controlling product limitation.
+
+R6 registration queue gate follow-up (AUD-17.S3b2, 2026-10-09):
+- `RegistrationRequestPreparer` already sealed an `ESTIMATED_TRAJECTORY_MAP`
+  request from the accepted R6 recipe, and the worker/commit path retained its
+  attempt, scan and map lineage. The durable enqueue route still rejected this
+  mode before the qualification preflight.
+- The route now admits estimated maps through the existing preflight. A qualified
+  runtime can queue the operation; `wired_unqualified` and unsupported floor
+  evidence remain blocked. The existing confirmation/commit path publishes
+  source-bound LiDAR geometry and an `AlignmentRecord` only after registration QA
+  passes and an authorized user confirms the exact candidate.
+- The consumer uses the existing REC-08/09 products: the source manifest retains
+  the estimated-map lineage, then commit publishes `LiDARGeometryArtifact` and
+  `AlignmentRecord`. `LidarPackageRecord` remains the separate uploaded-package
+  contract for packaged trajectory/calibration inputs; R6 does not need a duplicate
+  package record.
+- Focused regression reproduced the old 422 for a qualified estimated map, then
+  verified the corrected 202 queue response and continued 422 rejection for an
+  unqualified map. The related registration, odometry, source, preparation and
+  contract suites passed: 111 passed.
+- `.venv/bin/ruff check` and `.venv/bin/ruff format --check` passed for the changed
+  Python files; `git diff --check` passed. This proves the local route/contract
+  wiring only. No deployed qualified runtime, real traversal or held-out quality
+  run was available; those acceptance gates remain open.
