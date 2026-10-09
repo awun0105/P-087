@@ -171,7 +171,7 @@ selection service still has no live API/worker route; diagnostic-only QA, held-o
 retention, browser selected-candidate behavior and Isaac proof remain open.
 Plan inventory: 26 listed packages/99 non-deferred sprint slices, including the
 AUD-19.S4e–S4o follow-ups. This implementation owns 24 packages/80 base sprints;
-AUD-18 and AUD-23 are owner-maintained, while AUD-16 and AUD-25 are deferred.
+AUD-23 is owner-maintained, AUD-18 is implemented by Claude Code, while AUD-16 and AUD-25 are deferred.
 The 11 AUD-19.S4 follow-ups are tracked separately from those 80 base sprints.
 AUD-16/ADR0017 (3 sprints) và AUD-25/ADR0025 (6 sprints) Deferred theo yêu cầu owner; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -285,7 +285,7 @@ BEV/ICP implementation hoặc independent-map/browser acceptance.
 
 Plan: **26 listed packages / 88 non-deferred base sprints + 11 AUD-19.S4 follow-up slices = 99 slices**.
 This implementation scope: **24 packages / 80 base sprints + 11 AUD-19.S4 follow-up slices**;
-AUD-18/AUD-23 remain owner-maintained and AUD-16/AUD-25 remain deferred.
+AUD-23 remains owner-maintained, AUD-18 is Claude Code work, and AUD-16/AUD-25 remain deferred.
 AUD-16 (3 sprints) và AUD-25 (6 sprints) Deferred giữ để tham khảo; tổng tài liệu có
 28 packages/97 base sprint definitions + 11 follow-up slices = 108 definitions/slices.
 Mỗi sprint có Input, Output, Contract, implementation steps, Tests và Exit; mỗi task có dependencies, verification/DoD
@@ -362,7 +362,7 @@ Phần đo trên pod RunPod của AUD-26.S1, S4 và S5 làm trong cùng một đ
 | 7 — Object và collider editor | AUD-08.S1–S4 → AUD-09.S1–S3 | Merge/reassign/collider edit dùng shared publication; candidate mới phải validate lại. |
 | 8 — Collision quality, floor và LiDAR | AUD-12.S1 → AUD-13.S1 → AUD-14.S1 → AUD-19.S1 → AUD-14.S2–S3 → AUD-12.S2 → AUD-13.S2–S3 → AUD-19.S2–S4 → AUD-12.S3–S4 | Freeze quality/QA; adaptive floor, calibration QA, RGB–LiDAR map registration và qualified collision source. |
 | 9 — Latency (AUD-15) | AUD-15.S2–S3 (AUD-16 Deferred) | Measured optimization giữ đúng preparation identity và quality gates; AUD-16 đã hoãn theo yêu cầu owner. |
-| 10 — Input qualification và extensions | AUD-17.S1–S3 → AUD-24.S5 → AUD-18.S1–S3 | Estimated trajectory/input matrix R1–R6 và PLY/SOG view import; anonymizer opt-in có provenance/QA. |
+| 10 — Input qualification và extensions | AUD-17.S1–S3 → AUD-24.S5 → AUD-18.S1–S3 | Estimated trajectory/input matrix R1–R6 và PLY/SOG view import; anonymizer opt-in có provenance/QA; S3 thay bằng uploader-acceptance (owner 2026-10-09). |
 
 Execution order bắt đầu ở **AUD-11.S1**; các sprint AUD-11.S1–S2, AUD-15.S1,
 AUD-01–04, AUD-10.S1–S3, AUD-07.S1–S2, AUD-20.S1–S2, AUD-21.S1–S2 và AUD-22.S1
@@ -575,7 +575,7 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [ ] AUD-17.S3 drift/consumer QA and real-sensor qualification; the R6 map can enter
       only provisional registration and remains blocked from execution while odometry
       is wired-unqualified. World/floor confirmation, canonical LiDAR ingest/alignment,
-      real traversal quality and R5 dispatch remain open; AUD-18 is owner work.
+      real traversal quality and R5 dispatch remain open; AUD-18 is Claude Code work (S3 replaced by uploader-acceptance).
 - [x] AUD-19.S1 contracts; local S2 BEV/S3 constrained-ICP algorithms; S4a–S4o
       durable envelope, exact source/target resolution, diagnostic source-plane
       hypotheses, cancellation/resource-wait persistence, shared admission, and a
