@@ -164,7 +164,7 @@ candidate-triangle ownership, SceneEditor CAS selection, artifact closure, objec
 invalidation, viewer-layer identity, and fail-closed simulation/USD consumers. The
 selection service still has no live API/worker route; diagnostic-only QA, held-out
 retention, browser selected-candidate behavior and Isaac proof remain open.
-Active scope: 26 packages/96 sprint slices, including the AUD-19.S4e–S4l follow-ups.
+Active scope: 26 packages/97 sprint slices, including the AUD-19.S4e–S4m follow-ups.
 AUD-16/ADR0017 (3 sprints) và AUD-25/ADR0025 (6 sprints) Deferred theo yêu cầu owner; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
 ## Outcome
@@ -264,7 +264,7 @@ BEV/ICP implementation hoặc independent-map/browser acceptance.
 | [AUD-16: Fast Preview](tasks/AUD-16-fast-preview.md) | Deferred — không implement; EX-PRODUCT + EX-REC nếu mở lại | REC-04/05, PRODUCT-02/08/09 | 3 |
 | [AUD-17: LiDAR odometry](tasks/AUD-17-lidar-odometry.md) | P2 — EX-REC + EX-PRODUCT; opt-in | REC-08/06, PRODUCT-02/08/09 | 3 |
 | [AUD-18: Privacy anonymizer](tasks/AUD-18-privacy-anonymizer.md) | P2 — EX-REC + EX-PRODUCT; opt-in | REC-02, PRODUCT-01/02/09 | 3 |
-| [AUD-19: Automatic RGB–LiDAR registration](tasks/AUD-19-automatic-rgb-lidar-registration.md) | P1 — EX-REC + EX-PRODUCT; SCENE/SIM consumers | REC-06/08/09, PRODUCT-04/08/09 | 4 + S4e–S4l follow-ups |
+| [AUD-19: Automatic RGB–LiDAR registration](tasks/AUD-19-automatic-rgb-lidar-registration.md) | P1 — EX-REC + EX-PRODUCT; SCENE/SIM consumers | REC-06/08/09, PRODUCT-04/08/09 | 4 + S4e–S4m follow-ups |
 | [AUD-20: Tên và creator attribution](tasks/AUD-20-user-display-name-and-creator.md) | P1 — EX-PRODUCT | PRODUCT-01/02/06/09 | 3 |
 | [AUD-21: Guest signup và ownership](tasks/AUD-21-guest-signup-and-ownership.md) | P1 — EX-PRODUCT | PRODUCT-01/02/06/09 | 4 |
 | [AUD-22: Guest quota 3/ngày](tasks/AUD-22-guest-daily-job-quota.md) | P1 — EX-PRODUCT | PRODUCT-01/02/06/09 | 3 |
@@ -275,9 +275,9 @@ BEV/ICP implementation hoặc independent-map/browser acceptance.
 | [AUD-27: Structured error diagnostics](tasks/AUD-27-structured-error-diagnostics-and-redacted-excerpts.md) | P1 — EX-REC + EX-PRODUCT; failure diagnostics | REC-02/03/04, PRODUCT-02/08/09 | 3 |
 | [AUD-28: Benchmark-derived verdicts](tasks/AUD-28-benchmark-derived-verdicts-and-rule-based-insights.md) | P2 — EX-PRODUCT + EX-REC; evaluation quality | REC-02/06, PRODUCT-02/08/09 | 3 |
 
-Active: **26 work packages / 88 base sprints + 8 AUD-19.S4 follow-up slices = 96 sprint slices**.
+Active: **26 work packages / 88 base sprints + 9 AUD-19.S4 follow-up slices = 97 sprint slices**.
 AUD-16 (3 sprints) và AUD-25 (6 sprints) Deferred giữ để tham khảo; tổng tài liệu có
-28 packages/97 base sprint definitions + 8 follow-up slices = 105 definitions/slices.
+28 packages/97 base sprint definitions + 9 follow-up slices = 106 definitions/slices.
 Mỗi sprint có Input, Output, Contract, implementation steps, Tests và Exit; mỗi task có dependencies, verification/DoD
 và Result/Evidence. P2 là extension triển khai sau nền tảng P0/P1, không là
 permanent exclusion do PRD cũ. Không mặc định enable odometry/anonymizer mọi job.
@@ -566,16 +566,16 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
       only provisional registration and remains blocked from execution while odometry
       is wired-unqualified. World/floor confirmation, canonical LiDAR ingest/alignment,
       real traversal quality and R5 dispatch remain open; AUD-18 is owner work.
-- [x] AUD-19.S1 contracts; local S2 BEV/S3 constrained-ICP algorithms; S4a–S4l
+- [x] AUD-19.S1 contracts; local S2 BEV/S3 constrained-ICP algorithms; S4a–S4m
       durable envelope, exact source/target resolution, diagnostic source-plane
       hypotheses, cancellation/resource-wait persistence, shared admission, and a
       bounded worker that publishes provisional proposal/QA artifacts, authorized
       operation/status/cancel APIs, server-sealed request preparation, and Studio
       preflight/start/status/cancel with idempotent recovery, and read-only proposal/QA
-      inspection bound to exact operation artifacts and scene revisions.
-- [ ] AUD-19 held-out map QA and source-floor qualification; proposal overlay,
-      confirmation route; scene/collision consumer integration
-      and browser acceptance.
+      inspection bound to exact operation artifacts and scene revisions; S4m adds
+      a checksum-bound, diagnostic-only BEV overlay for each candidate.
+- [ ] AUD-19 held-out map QA and source-floor qualification; confirmation CAS and
+      alignment/collision consumer integration; browser acceptance.
 
 - [x] Implementation AUD-20.S1 identity/seed migration contract and AUD-20.S2 producer/API actor attribution.
 - [x] AUD-21.S4 local Studio capability/API implementation and UI regression.

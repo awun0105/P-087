@@ -16,9 +16,11 @@ from src.models.contracts.rgb_lidar_registration import (
     RegistrationCandidate,
     RegistrationFindingCode,
     RegistrationInputMode,
+    RegistrationOverlayPreview,
     RegistrationProposalState,
     RegistrationQAStatus,
     RegistrationSourceCloudManifest,
+    seal_registration_overlay_preview,
     seal_registration_proposal,
 )
 from src.services.orchestration.artifacts import ArtifactResolver, FilesystemArtifactStore, sha256_bytes, sha256_file
@@ -197,6 +199,80 @@ def test_registration_worker_publishes_model_using_exact_artifact_bytes_checksum
     assert reference.artifact_checksum != proposal.proposal_checksum
     published = resolver.require_uri(reference.artifact_uri, reference.artifact_checksum)
     assert published.read_bytes() == payload
+
+
+def test_registration_worker_publishes_overlay_as_operation_bound_evidence(tmp_path: Path) -> None:
+    resolver = ArtifactResolver(tmp_path / "artifacts")
+    worker = _worker()
+    worker.resolver = resolver
+    worker.writer = FilesystemArtifactStore(resolver)
+    source_ref = ProductArtifactRef(
+        artifact_type="LiDARGeometryArtifact",
+        schema_version="1.0",
+        artifact_uri="artifact://jobs/job-1/lidar/geometry.json",
+        artifact_checksum=_checksum(b"source-geometry"),
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.LIDAR_INGEST,
+        job_id="job-1",
+    )
+    target_ref = ProductArtifactRef(
+        artifact_type="RgbGeometry",
+        schema_version="1.0",
+        artifact_uri="artifact://jobs/job-1/rgb/geometry.json",
+        artifact_checksum=_checksum(b"target-geometry"),
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.RGB_GEOMETRY,
+        job_id="job-1",
+    )
+    operation = SimpleNamespace(
+        operation_id="registration-1",
+        target_job_id="job-1",
+        request_checksum=_checksum(b"request"),
+        attempt=1,
+        fencing_token=1,
+    )
+    preview: RegistrationOverlayPreview = seal_registration_overlay_preview(
+        {
+            "job_id": "job-1",
+            "operation_id": operation.operation_id,
+            "input_mode": RegistrationInputMode.STATIC_CLOUD,
+            "request_checksum": operation.request_checksum,
+            "source_input_checksum": _checksum(b"source-input"),
+            "source_geometry_ref": source_ref,
+            "target_rgb_geometry_ref": target_ref,
+            "target_scene_revision": "scene-rev-1",
+            "request_target_roi_world": {"min_xyz_m": [-1, -1, -1], "max_xyz_m": [1, 1, 1]},
+            "target_floor_evidence_checksum": _checksum(b"floor"),
+            "profile_checksum": _checksum(b"profile"),
+            "candidate_id": "candidate-1",
+            "source_frame": "lidar-map-frame",
+            "transform_target_from_source": Transform(
+                parent_frame="world",
+                local_frame="lidar-map-frame",
+                translation_xyz=(0, 0, 0),
+                rotation_quaternion_xyzw=(0, 0, 0, 1),
+            ),
+            "rgb_scale_factor": None,
+            "bounds_min_xy_m": [-1, -1],
+            "bounds_max_xy_m": [1, 1],
+            "source_in_roi_point_count": 1,
+            "target_in_roi_point_count": 1,
+            "source_points_xy_world_m": [[0, 0]],
+            "target_points_xy_world_m": [[0.5, 0.5]],
+            "sample_cap_per_cloud": 512,
+            "diagnostic_only": True,
+            "preview_checksum": "sha256:" + "0" * 64,
+        }
+    )
+
+    reference = worker._publish_model_artifact(operation, preview, "overlay-candidate-1.json")
+
+    assert reference.artifact_type == "RegistrationOverlayPreview"
+    assert reference.source_provenance["operation_id"] == operation.operation_id
+    payload = preview.model_dump_json(indent=2).encode("utf-8") + b"\n"
+    assert reference.artifact_checksum == _checksum(payload)
+    published = resolver.require_uri(reference.artifact_uri, reference.artifact_checksum)
+    assert RegistrationOverlayPreview.model_validate_json(published.read_bytes()) == preview
 
 
 def test_registration_resource_profile_accounts_for_point_and_target_bounds() -> None:

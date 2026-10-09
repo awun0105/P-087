@@ -6,6 +6,7 @@ import { Badge, Button, Notice } from "@/components/studio/primitives";
 import { ApiError } from "@/lib/api/client";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { errorMessage } from "@/lib/ui-error";
+import { RegistrationOverlay } from "@/features/studio/scene/RegistrationOverlay";
 import {
   cancelRegistrationOperation,
   enqueueRegistration,
@@ -456,6 +457,9 @@ export function RegistrationPanel({
                     </ul>
                   )}
                 </div>
+              )}
+              {inspection.overlay_previews.length > 0 && (
+                <RegistrationOverlay previews={inspection.overlay_previews} />
               )}
               {inspection.qa_report && (
                 <div className="space-y-2 rounded-lg border border-line bg-paper-sunken p-3">

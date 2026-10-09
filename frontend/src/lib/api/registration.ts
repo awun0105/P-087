@@ -77,6 +77,30 @@ export interface RegistrationOperation {
   cancellation_requested: boolean;
 }
 
+export type RegistrationOverlayPoint = [number, number];
+
+export interface RegistrationOverlayPreview extends JsonObject {
+  operation_id: string;
+  job_id: string;
+  request_checksum: string;
+  source_input_checksum: string;
+  source_geometry_ref: JsonObject;
+  target_rgb_geometry_ref: JsonObject;
+  target_scene_revision: string;
+  candidate_id: string;
+  transform_target_from_source: JsonObject;
+  rgb_scale_factor: number | null;
+  bounds_min_xy_m: RegistrationOverlayPoint;
+  bounds_max_xy_m: RegistrationOverlayPoint;
+  source_in_roi_point_count: number;
+  target_in_roi_point_count: number;
+  source_points_xy_world_m: RegistrationOverlayPoint[];
+  target_points_xy_world_m: RegistrationOverlayPoint[];
+  sample_cap_per_cloud: number;
+  diagnostic_only: true;
+  preview_checksum: string;
+}
+
 export interface RegistrationOperationInspection extends JsonObject {
   operation_id: string;
   job_id: string;
@@ -84,6 +108,7 @@ export interface RegistrationOperationInspection extends JsonObject {
   current_scene_revision: string | null;
   proposal: JsonObject | null;
   qa_report: JsonObject | null;
+  overlay_previews: RegistrationOverlayPreview[];
 }
 
 const REGISTRATION_STATES = new Set<RegistrationOperationState>([
@@ -174,9 +199,9 @@ export function parseRegistrationOperation(value: unknown, jobId: string): Regis
 
 function isBoundRegistrationOutput(
   value: unknown,
-  artifactType: "RegistrationProposalArtifact" | "RegistrationQAReport",
+  artifactType: "RegistrationProposalArtifact" | "RegistrationQAReport" | "RegistrationOverlayPreview",
   jobId: string,
-  checksumField: "proposal_checksum" | "report_checksum",
+  checksumField: "proposal_checksum" | "report_checksum" | "preview_checksum",
 ): value is JsonObject {
   return isRecord(value)
     && value.schema_version === "1.0"
@@ -184,6 +209,104 @@ function isBoundRegistrationOutput(
     && value.job_id === jobId
     && typeof value[checksumField] === "string"
     && CHECKSUM.test(value[checksumField] as string);
+}
+
+function isPointList(value: unknown, cap: number): value is RegistrationOverlayPoint[] {
+  return Array.isArray(value) && value.length <= cap && value.every((point) => (
+    Array.isArray(point) && point.length === 2
+    && point.every((coordinate) => typeof coordinate === "number" && Number.isFinite(coordinate))
+  ));
+}
+
+function isOverlayBounds(value: unknown): value is RegistrationOverlayPoint {
+  return Array.isArray(value) && value.length === 2
+    && value.every((coordinate) => typeof coordinate === "number" && Number.isFinite(coordinate));
+}
+
+function sameReference(left: unknown, right: unknown): boolean {
+  return isRecord(left) && isRecord(right)
+    && left.artifact_type === right.artifact_type
+    && left.artifact_uri === right.artifact_uri
+    && left.artifact_checksum === right.artifact_checksum;
+}
+
+function validOverlayPreview(
+  value: unknown,
+  jobId: string,
+  operationId: string,
+  sceneRevision: string,
+  proposal: JsonObject | null,
+): value is RegistrationOverlayPreview {
+  if (!isBoundRegistrationOutput(value, "RegistrationOverlayPreview", jobId, "preview_checksum")) return false;
+  if (!proposal || !Array.isArray(proposal.candidates)) return false;
+  const candidate = proposal.candidates.find((item) => isRecord(item) && item.candidate_id === value.candidate_id);
+  if (!isRecord(candidate)) return false;
+  const transform = value.transform_target_from_source;
+  const candidateTransform = candidate.transform_target_from_source;
+  const cap = value.sample_cap_per_cloud;
+  const min = value.bounds_min_xy_m;
+  const max = value.bounds_max_xy_m;
+  const sourceCount = value.source_in_roi_point_count;
+  const targetCount = value.target_in_roi_point_count;
+  if (
+    !isRecord(transform)
+    || !isRecord(candidateTransform)
+    || typeof cap !== "number"
+    || !Number.isInteger(cap)
+    || cap < 1
+    || cap > 512
+    || typeof sourceCount !== "number"
+    || !Number.isInteger(sourceCount)
+    || sourceCount < 0
+    || typeof targetCount !== "number"
+    || !Number.isInteger(targetCount)
+    || targetCount < 0
+    || !isOverlayBounds(min)
+    || !isOverlayBounds(max)
+  ) return false;
+  if (min.some((item, index) => item >= max[index])) return false;
+  if (!isPointList(value.source_points_xy_world_m, cap) || !isPointList(value.target_points_xy_world_m, cap)) return false;
+  const pointLists = [value.source_points_xy_world_m, value.target_points_xy_world_m];
+  return value.operation_id === operationId
+    && value.producer_stage === "RGB_LIDAR_ALIGN"
+    && value.input_mode === proposal.input_mode
+    && value.request_checksum === proposal.request_checksum
+    && value.source_input_checksum === proposal.source_input_checksum
+    && value.target_scene_revision === sceneRevision
+    && value.profile_checksum === proposal.profile_checksum
+    && value.rgb_scale_factor === (candidate.rgb_scale_factor ?? null)
+    && value.diagnostic_only === true
+    && sameReference(value.source_geometry_ref, proposal.source_geometry_ref)
+    && sameReference(value.target_rgb_geometry_ref, proposal.target_rgb_geometry_ref)
+    && transform.parent_frame === candidateTransform.parent_frame
+    && transform.local_frame === candidateTransform.local_frame
+    && value.source_frame === candidateTransform.local_frame
+    && JSON.stringify(transform.translation_xyz) === JSON.stringify(candidateTransform.translation_xyz)
+    && JSON.stringify(transform.rotation_quaternion_xyzw) === JSON.stringify(candidateTransform.rotation_quaternion_xyzw)
+    && value.sampling_method === "uniform_order_indices_v1"
+    && sourceCount >= value.source_points_xy_world_m.length
+    && targetCount >= value.target_points_xy_world_m.length
+    && pointLists.every((points) => points.every((point) => point.every((coordinate, index) => (
+      coordinate >= (min[index] as number) - 1e-6 && coordinate <= (max[index] as number) + 1e-6
+    ))));
+}
+
+function overlaySetMatchesProposal(previews: unknown[], proposal: JsonObject | null): boolean {
+  if (previews.length === 0) return true;
+  if (!proposal || !Array.isArray(proposal.candidates)) return false;
+  const candidateIds = proposal.candidates.map((candidate) => (
+    isRecord(candidate) && typeof candidate.candidate_id === "string" ? candidate.candidate_id : null
+  ));
+  const previewIds = previews.map((preview) => (
+    isRecord(preview) && typeof preview.candidate_id === "string" ? preview.candidate_id : null
+  ));
+  return candidateIds.length > 0
+    && candidateIds.every((candidateId) => candidateId !== null)
+    && previewIds.every((candidateId) => candidateId !== null)
+    && new Set(candidateIds).size === candidateIds.length
+    && new Set(previewIds).size === previewIds.length
+    && candidateIds.length === previewIds.length
+    && candidateIds.every((candidateId) => previewIds.includes(candidateId));
 }
 
 export function parseRegistrationOperationInspection(
@@ -194,6 +317,7 @@ export function parseRegistrationOperationInspection(
   if (!isRecord(value) || !isJsonValue(value)) throw new Error("inspection response phải là JSON object");
   const proposal = value.proposal;
   const qaReport = value.qa_report;
+  const overlayPreviews = value.overlay_previews === undefined ? [] : value.overlay_previews;
   if (
     value.operation_id !== operationId
     || value.job_id !== jobId
@@ -205,10 +329,20 @@ export function parseRegistrationOperationInspection(
     || (qaReport !== null && (qaReport as JsonObject).target_scene_revision !== value.expected_scene_revision)
     || (qaReport !== null && proposal === null)
     || (qaReport !== null && (qaReport as JsonObject).proposal_checksum !== (proposal as JsonObject | null)?.proposal_checksum)
+    || !Array.isArray(overlayPreviews)
+    || (overlayPreviews.length > 0 && qaReport === null)
+    || !overlaySetMatchesProposal(overlayPreviews, isRecord(proposal) ? proposal : null)
+    || !overlayPreviews.every((preview) => validOverlayPreview(
+      preview,
+      jobId,
+      operationId,
+      value.expected_scene_revision as string,
+      isRecord(proposal) ? proposal : null,
+    ))
   ) {
     throw new Error("inspection response không khớp operation, job hoặc scene revision");
   }
-  return value as unknown as RegistrationOperationInspection;
+  return { ...value, overlay_previews: overlayPreviews } as unknown as RegistrationOperationInspection;
 }
 
 function badResponse(cause: unknown): ApiError {

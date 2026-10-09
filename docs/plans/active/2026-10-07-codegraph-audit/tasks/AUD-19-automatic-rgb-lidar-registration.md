@@ -1284,3 +1284,87 @@ Pre-flight (GUIDE.md Rule 13)
   repository-wide Ruff lint/format, CodeGraph/Graphify updates and diff check passed.
 - DevTools: **UNVERIFIED** — the authenticated local jobs have no committed scene
   available to render the ReviewTab panel.
+
+### AUD-19.S4m — Bounded BEV proposal overlay (diagnostic-only)
+
+**Input:** the exact immutable proposal/QA artifacts for one registration operation,
+the verified source and target point samples, and each listed candidate transform.
+**Output:** a bounded, checksum-bound top-down overlay for each candidate in the
+read-only ReviewTab inspection panel.
+**Data contract:** transform source samples with the listed `T_world_from_source`;
+project both layers onto world XY. For an explicit RGB scale hypothesis, scale target
+points and the request ROI in the verified target-floor frame, matching the solver's
+scale semantics. Derive the preview's world XY bounds from that scaled ROI. Each
+preview binds the operation ID, request checksum, candidate ID and transform,
+source/target geometry refs, source input checksum, target-floor evidence checksum,
+target scene revision, request ROI, and the candidate's scale hypothesis. The preview
+is `derived` evidence with an explicit diagnostic-only label; it is not QA, does not
+infer geometry outside observed samples, cannot turn an INCONCLUSIVE report into
+PASS, and does not select/apply a transform or mutate SceneIR/collision state.
+Samples are deterministic and capped at 512 points per cloud; the artifact records
+full in-ROI counts and the cap so visual density cannot be read as measured coverage.
+**Implement:** publish one immutable preview artifact per proposal candidate, bind
+its refs into the existing QA evidence list, resolve and validate previews through
+the existing operation-inspection route, and display an accessible XY overlay with
+candidate selection in the existing panel. Keep the existing registration request,
+operation, alignment and collision contracts unchanged.
+**Tests:** deterministic sampling and transform direction; ROI clipping, finite
+coordinates and size bounds; exact operation/request/candidate/geometry binding;
+tampered or cross-operation artifacts rejected by inspection; parser rejects
+malformed previews; panel renders both layers and changes candidate without offering
+an apply control. Browser rendering remains a separate acceptance gate.
+**Exit:** [x] each returned preview matches its exact candidate and geometry refs;
+[x] point counts/caps and diagnostic-only status are visible; [x] no scene or
+collision consumer changes; [ ] browser screen acceptance with a committed scene
+fixture; real held-out/Isaac registration acceptance remains pending.
+
+### Result / Evidence — AUD-19.S4m
+
+- Implementation: added a checksum-sealed `RegistrationOverlayPreview` bound to the
+  exact operation, request, candidate transform/scale, geometry refs, scene revision,
+  target-floor evidence and ROI. The worker transforms source and RGB samples through
+  the solver's target-floor frame, scales the RGB hypothesis and ROI consistently,
+  then publishes one diagnostic artifact per proposal candidate in the QA evidence
+  list. Projection runs in fixed-size chunks and retains at most 512 deterministic
+  in-ROI samples per layer while preserving exact point counts.
+- Inspection: the existing authenticated inspection route verifies the artifact
+  reference and logical checksum, enforces one preview per proposal candidate, and
+  rejects corrupt or cross-bound artifacts. The API parser also rejects malformed,
+  duplicate or incomplete overlay sets. The ReviewTab panel renders a BEV SVG with
+  candidate selection, layer legend, scale, counts and sample cap. The view is
+  explicitly diagnostic-only and does not change QA, SceneIR, collision geometry or
+  alignment state.
+- Changed files: `src/models/contracts/rgb_lidar_registration.py`,
+  `src/services/reconstruction/alignment/registration_overlay.py`,
+  `src/services/orchestration/jobs/registration_worker.py`,
+  `src/api/product/registration.py`, their focused backend tests,
+  `frontend/src/lib/api/registration.ts`,
+  `frontend/src/features/studio/scene/RegistrationOverlay.tsx`,
+  `frontend/src/features/studio/scene/RegistrationPanel.tsx`, focused frontend tests,
+  this task file and the audit README.
+- Checks: focused backend suites **81 passed**; focused Vitest **17 passed**;
+  repository-wide `ruff check src/ tests/`, `ruff format --check src/ tests/`,
+  `pnpm typecheck`, targeted ESLint, and `git diff --check` passed. CodeGraph sync
+  completed; Graphify rebuilt **21,934 nodes / 66,878 edges / 732 communities**.
+- DevTools: **UNVERIFIED**. The authenticated local Reviewer session opened completed
+  scenes with metric scale and collision, but their `/api/v1/jobs/{job_id}/scene`
+  requests returned 404 and ReviewTab displayed “Không tìm thấy dữ liệu”; the
+  registration panel did not mount. No fixture or scene state was created to bypass
+  the missing data. Held-out map quality and real Isaac acceptance remain open.
+
+Pre-flight (GUIDE.md Rule 13)
+- codegraph: traced the proposal/QA worker, inspection route, artifact resolver,
+  RegistrationPanel callers and the new contract/component before editing, then
+  synchronized CodeGraph after implementation.
+- impact: one immutable diagnostic artifact per candidate flows through the existing
+  QA evidence reference and inspection response; no alignment, scene or collision
+  consumer contract changed.
+- understand: RGB scale and ROI use the same target-floor frame as the registration
+  solver; source samples use the listed `T_world_from_source` transform. Preview
+  samples and their counts never serve as QA evidence of registration accuracy.
+- minimal-code: reuses existing artifact and inspection paths, caps samples at 512,
+  and bounds intermediate projection memory with fixed-size chunks.
+- checks: 81 backend tests, 17 frontend tests, repository Ruff lint/format,
+  TypeScript, targeted ESLint, Graphify update, CodeGraph sync and diff check passed.
+- DevTools: **UNVERIFIED** — no available completed-scene fixture could load the
+  ReviewTab scene payload; held-out and Isaac qualification were not claimed.

@@ -88,6 +88,109 @@ describe("RGB-LiDAR registration API parsers", () => {
     }, "job-1", request.request_id)).toThrow(/operation, job/);
   });
 
+  it("accepts only bounded overlays bound to the exact inspection candidate", () => {
+    const proposalChecksum = `sha256:${"c".repeat(64)}`;
+    const sourceGeometry = {
+      artifact_type: "LiDARGeometryArtifact",
+      artifact_uri: "artifact://jobs/job-1/lidar/geometry.json",
+      artifact_checksum: `sha256:${"e".repeat(64)}`,
+    };
+    const targetGeometry = {
+      artifact_type: "RgbGeometry",
+      artifact_uri: "artifact://jobs/job-1/rgb/geometry.json",
+      artifact_checksum: `sha256:${"f".repeat(64)}`,
+    };
+    const candidateTransform = {
+      parent_frame: "world",
+      local_frame: "lidar-map",
+      translation_xyz: [1, 2, 0],
+      rotation_quaternion_xyzw: [0, 0, 0, 1],
+    };
+    const proposal = {
+      schema_version: "1.0",
+      artifact_type: "RegistrationProposalArtifact",
+      job_id: "job-1",
+      input_mode: "static_cloud",
+      target_scene_revision: "rev-001",
+      proposal_checksum: proposalChecksum,
+      request_checksum: request.request_checksum,
+      source_input_checksum: `sha256:${"b".repeat(64)}`,
+      profile_checksum: `sha256:${"a".repeat(64)}`,
+      source_geometry_ref: sourceGeometry,
+      target_rgb_geometry_ref: targetGeometry,
+      candidates: [{
+        candidate_id: "candidate-1",
+        rgb_scale_factor: 1.25,
+        transform_target_from_source: candidateTransform,
+      }],
+    };
+    const preview = {
+      schema_version: "1.0",
+      artifact_type: "RegistrationOverlayPreview",
+      producer_stage: "RGB_LIDAR_ALIGN",
+      job_id: "job-1",
+      operation_id: request.request_id,
+      input_mode: "static_cloud",
+      request_checksum: request.request_checksum,
+      source_input_checksum: `sha256:${"b".repeat(64)}`,
+      source_geometry_ref: sourceGeometry,
+      target_rgb_geometry_ref: targetGeometry,
+      target_scene_revision: "rev-001",
+      request_target_roi_world: { min_xyz_m: [-20, -20, -2], max_xyz_m: [20, 20, 8] },
+      target_floor_evidence_checksum: `sha256:${"8".repeat(64)}`,
+      profile_checksum: `sha256:${"a".repeat(64)}`,
+      candidate_id: "candidate-1",
+      source_frame: "lidar-map",
+      transform_target_from_source: candidateTransform,
+      rgb_scale_factor: 1.25,
+      bounds_min_xy_m: [-20, -20],
+      bounds_max_xy_m: [20, 20],
+      source_in_roi_point_count: 1,
+      target_in_roi_point_count: 1,
+      source_points_xy_world_m: [[1, 2]],
+      target_points_xy_world_m: [[3, 4]],
+      sample_cap_per_cloud: 512,
+      sampling_method: "uniform_order_indices_v1",
+      diagnostic_only: true,
+      preview_checksum: `sha256:${"9".repeat(64)}`,
+    };
+    const inspection = {
+      operation_id: request.request_id,
+      job_id: "job-1",
+      expected_scene_revision: "rev-001",
+      current_scene_revision: "rev-001",
+      proposal,
+      qa_report: {
+        schema_version: "1.0",
+        artifact_type: "RegistrationQAReport",
+        job_id: "job-1",
+        target_scene_revision: "rev-001",
+        proposal_checksum: proposalChecksum,
+        report_checksum: `sha256:${"d".repeat(64)}`,
+      },
+      overlay_previews: [preview],
+    };
+
+    expect(parseRegistrationOperationInspection(inspection, "job-1", request.request_id).overlay_previews)
+      .toHaveLength(1);
+    expect(() => parseRegistrationOperationInspection({
+      ...inspection,
+      overlay_previews: [{ ...preview, operation_id: "another-operation" }],
+    }, "job-1", request.request_id)).toThrow(/operation, job/);
+    expect(() => parseRegistrationOperationInspection({
+      ...inspection,
+      overlay_previews: [{ ...preview, source_points_xy_world_m: [[21, 2]] }],
+    }, "job-1", request.request_id)).toThrow(/operation, job/);
+    expect(() => parseRegistrationOperationInspection({
+      ...inspection,
+      overlay_previews: [preview, preview],
+    }, "job-1", request.request_id)).toThrow(/operation, job/);
+    expect(() => parseRegistrationOperationInspection({
+      ...inspection,
+      qa_report: null,
+    }, "job-1", request.request_id)).toThrow(/operation, job/);
+  });
+
   it("keeps watching proposal and review states but stops at terminal states", () => {
     expect(isRegistrationOperationPollable("PROPOSED")).toBe(true);
     expect(isRegistrationOperationPollable("AMBIGUOUS")).toBe(true);

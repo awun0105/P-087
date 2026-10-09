@@ -22,6 +22,7 @@ from src.models.contracts.rgb_lidar_registration import (
     RegistrationFindingCode,
     RegistrationInputMode,
     RegistrationOperationState,
+    RegistrationOverlayPreview,
     RegistrationProposal,
     RegistrationProposalState,
     RegistrationQAReport,
@@ -71,6 +72,7 @@ from src.services.reconstruction.alignment.constrained_icp import (
     RefinedRegistrationCandidate,
     refine_registration_candidates,
 )
+from src.services.reconstruction.alignment.registration_overlay import build_registration_overlay_preview
 from src.services.reconstruction.alignment.registration_qa import build_registration_qa_report
 from src.services.reconstruction.alignment.similarity import rotation_matrix
 from src.services.reconstruction.alignment.source_planes import (
@@ -301,6 +303,25 @@ class RegistrationOperationWorker:
                     [item.refined.candidate for item in measured],
                 )
                 proposal_ref = self._publish_model_artifact(operation, proposal, "proposal.json")
+                overlay_refs: list[ProductArtifactRef] = []
+                for candidate in proposal.candidates:
+                    self._check_cancelled(heartbeat)
+                    overlay = build_registration_overlay_preview(
+                        operation.request,
+                        proposal,
+                        candidate,
+                        operation.operation_id,
+                        source_points,
+                        target.collision_surface_points_world_m,
+                        target.target_floor,
+                    )
+                    overlay_refs.append(
+                        self._publish_model_artifact(
+                            operation,
+                            overlay,
+                            f"overlay-{candidate.candidate_id}.json",
+                        )
+                    )
                 selected = None
                 floor_difference = None
                 if proposal_state == RegistrationProposalState.PROPOSED and proposal.selected_candidate_id is not None:
@@ -327,7 +348,7 @@ class RegistrationOperationWorker:
                     same_scene_verified=same_scene_verified,
                     # Qualification records are not yet loaded by this worker; fail closed.
                     server_qualification_verified=False,
-                    evidence_refs=[source_manifest_ref, source_planes_ref, worker_diagnostics_ref],
+                    evidence_refs=[source_manifest_ref, source_planes_ref, worker_diagnostics_ref, *overlay_refs],
                 )
                 qa_ref = self._publish_model_artifact(operation, qa_report, "qa-report.json")
                 self._check_cancelled(heartbeat)
@@ -559,7 +580,7 @@ class RegistrationOperationWorker:
     def _publish_model_artifact(
         self,
         operation: RegistrationOperationRecord,
-        value: RegistrationProposal | RegistrationQAReport,
+        value: RegistrationOverlayPreview | RegistrationProposal | RegistrationQAReport,
         filename: str,
     ) -> ProductArtifactRef:
         return self._publish_artifact_payload(

@@ -24,6 +24,7 @@ from src.models.contracts.input_assembly import DistanceUnit, InputAssetFormat, 
 from src.models.contracts.manifests import StageId
 
 Vector3 = tuple[FiniteFloat, FiniteFloat, FiniteFloat]
+Vector2 = tuple[FiniteFloat, FiniteFloat]
 _CHECKSUM_PLACEHOLDER = "sha256:" + "0" * 64
 ContractT = TypeVar("ContractT", bound=ContractModel)
 
@@ -584,6 +585,74 @@ class RegistrationCandidate(ContractModel):
         return self
 
 
+class RegistrationOverlayPreview(ContractModel):
+    """Bounded BEV point samples for human inspection; never an alignment or QA result."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    artifact_type: Literal["RegistrationOverlayPreview"] = "RegistrationOverlayPreview"
+    producer_stage: Literal[StageId.RGB_LIDAR_ALIGN] = StageId.RGB_LIDAR_ALIGN
+    job_id: Identifier
+    operation_id: Identifier
+    input_mode: RegistrationInputMode
+    request_checksum: Checksum
+    source_input_checksum: Checksum
+    source_geometry_ref: ProductArtifactRef
+    target_rgb_geometry_ref: ProductArtifactRef
+    target_scene_revision: Identifier
+    request_target_roi_world: RegistrationROI
+    target_floor_evidence_checksum: Checksum
+    profile_checksum: Checksum
+    candidate_id: Identifier
+    source_frame: Identifier
+    transform_target_from_source: Transform
+    rgb_scale_factor: FiniteFloat | None = Field(default=None, gt=0)
+    bounds_min_xy_m: Vector2
+    bounds_max_xy_m: Vector2
+    source_in_roi_point_count: int = Field(ge=0, strict=True)
+    target_in_roi_point_count: int = Field(ge=0, strict=True)
+    source_points_xy_world_m: list[Vector2] = Field(max_length=512)
+    target_points_xy_world_m: list[Vector2] = Field(max_length=512)
+    sample_cap_per_cloud: int = Field(ge=1, le=512, strict=True)
+    sampling_method: Literal["uniform_order_indices_v1"] = "uniform_order_indices_v1"
+    diagnostic_only: Literal[True] = True
+    preview_checksum: Checksum
+
+    @model_validator(mode="after")
+    def _preview_shape(self) -> Self:
+        if (
+            self.source_geometry_ref.artifact_type not in {"LiDARGeometryArtifact", "RegistrationSourcePointCloud"}
+            or self.source_geometry_ref.producer_stage != StageId.LIDAR_INGEST
+            or self.target_rgb_geometry_ref.artifact_type != "RgbGeometry"
+            or self.target_rgb_geometry_ref.producer_stage != StageId.RGB_GEOMETRY
+        ):
+            raise ValueError("registration overlay needs exact LiDAR and RGB geometry refs")
+        for reference in (self.source_geometry_ref, self.target_rgb_geometry_ref):
+            if reference.job_id != self.job_id or not reference.artifact_uri.startswith(
+                f"artifact://jobs/{self.job_id}/"
+            ):
+                raise ValueError("registration overlay geometry refs must belong to its job")
+        if (
+            self.transform_target_from_source.parent_frame != "world"
+            or self.transform_target_from_source.local_frame != self.source_frame
+        ):
+            raise ValueError("registration overlay transform must map its source frame into canonical world")
+        if any(high <= low for low, high in zip(self.bounds_min_xy_m, self.bounds_max_xy_m, strict=True)):
+            raise ValueError("registration overlay XY bounds must be ordered")
+        if (
+            self.source_in_roi_point_count < len(self.source_points_xy_world_m)
+            or self.target_in_roi_point_count < len(self.target_points_xy_world_m)
+            or len(self.source_points_xy_world_m) > self.sample_cap_per_cloud
+            or len(self.target_points_xy_world_m) > self.sample_cap_per_cloud
+        ):
+            raise ValueError("registration overlay sample counts exceed the observed ROI or declared cap")
+        for points in (self.source_points_xy_world_m, self.target_points_xy_world_m):
+            for point in points:
+                for coordinate, low, high in zip(point, self.bounds_min_xy_m, self.bounds_max_xy_m, strict=True):
+                    if coordinate < low - 1e-6 or coordinate > high + 1e-6:
+                        raise ValueError("registration overlay sample lies outside its declared XY bounds")
+        return self
+
+
 class RegistrationProposal(ContractModel):
     schema_version: Literal["1.0"] = "1.0"
     artifact_type: Literal["RegistrationProposalArtifact"] = "RegistrationProposalArtifact"
@@ -785,6 +854,12 @@ def seal_registration_proposal(value: RegistrationProposal | dict[str, object]) 
     return _seal_contract(value, RegistrationProposal, "proposal_checksum")
 
 
+def seal_registration_overlay_preview(
+    value: RegistrationOverlayPreview | dict[str, object],
+) -> RegistrationOverlayPreview:
+    return _seal_contract(value, RegistrationOverlayPreview, "preview_checksum")
+
+
 def seal_registration_source_cloud_manifest(
     value: RegistrationSourceCloudManifest | dict[str, object],
 ) -> RegistrationSourceCloudManifest:
@@ -875,6 +950,39 @@ def validate_registration_qa_binding(
         proposal.state != RegistrationProposalState.PROPOSED or report.candidate_id != proposal.selected_candidate_id
     ):
         raise ValueError("registration QA PASS must bind the selected, unambiguous proposal candidate")
+
+
+def validate_registration_overlay_binding(
+    request: RegistrationRequest,
+    proposal: RegistrationProposal,
+    preview: RegistrationOverlayPreview,
+    operation_id: str,
+) -> None:
+    """Require a preview to match one exact candidate and the request's world ROI."""
+    validate_registration_proposal_binding(request, proposal)
+    if seal_registration_overlay_preview(preview) != preview:
+        raise ValueError("registration overlay preview checksum mismatch")
+    candidate = next((item for item in proposal.candidates if item.candidate_id == preview.candidate_id), None)
+    roi = request.target_roi_world
+    if (
+        candidate is None
+        or roi is None
+        or preview.operation_id != operation_id
+        or preview.job_id != request.target_job_id
+        or preview.input_mode != request.source.mode
+        or preview.request_checksum != request.request_checksum
+        or preview.source_input_checksum != request.source.source_input_checksum
+        or preview.source_geometry_ref != proposal.source_geometry_ref
+        or preview.target_rgb_geometry_ref != request.target_rgb_geometry_ref
+        or preview.target_scene_revision != request.expected_scene_revision
+        or preview.request_target_roi_world != roi
+        or preview.target_floor_evidence_checksum not in {ref.artifact_checksum for ref in request.floor_evidence_refs}
+        or preview.profile_checksum != request.profile_checksum
+        or preview.source_frame != proposal.source_frame
+        or preview.transform_target_from_source != candidate.transform_target_from_source
+        or preview.rgb_scale_factor != candidate.rgb_scale_factor
+    ):
+        raise ValueError("registration overlay is stale or bound to another operation, candidate or geometry")
 
 
 _ALLOWED_TRANSITIONS: dict[RegistrationOperationState, frozenset[RegistrationOperationState]] = {

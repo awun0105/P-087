@@ -22,6 +22,7 @@ from src.models.contracts.rgb_lidar_registration import (
     RegistrationCandidate,
     RegistrationFindingCode,
     RegistrationInputMode,
+    RegistrationOverlayPreview,
     RegistrationProfile,
     RegistrationProposal,
     RegistrationProposalState,
@@ -31,6 +32,7 @@ from src.models.contracts.rgb_lidar_registration import (
     RegistrationROI,
     RegistrationSourceBinding,
     registration_preflight,
+    seal_registration_overlay_preview,
     seal_registration_profile,
     seal_registration_proposal,
     seal_registration_qa_report,
@@ -186,6 +188,7 @@ def _inspection_outputs(
     request: RegistrationRequest,
     *,
     include_proposal_ref: bool = True,
+    include_overlay: bool = False,
 ) -> tuple[SimpleNamespace, ProductArtifactRef]:
     source_ref = ProductArtifactRef(
         artifact_type="LiDARGeometryArtifact",
@@ -239,6 +242,48 @@ def _inspection_outputs(
         job_id=request.target_job_id,
         source_provenance=provenance,
     )
+    overlay_ref: ProductArtifactRef | None = None
+    overlay: RegistrationOverlayPreview | None = None
+    if include_overlay:
+        assert request.target_roi_world is not None
+        overlay = seal_registration_overlay_preview(
+            {
+                "job_id": request.target_job_id,
+                "operation_id": request.request_id,
+                "input_mode": request.source.mode,
+                "request_checksum": request.request_checksum,
+                "source_input_checksum": request.source.source_input_checksum,
+                "source_geometry_ref": source_ref,
+                "target_rgb_geometry_ref": request.target_rgb_geometry_ref,
+                "target_scene_revision": request.expected_scene_revision,
+                "request_target_roi_world": request.target_roi_world,
+                "target_floor_evidence_checksum": request.floor_evidence_refs[0].artifact_checksum,
+                "profile_checksum": request.profile_checksum,
+                "candidate_id": candidate.candidate_id,
+                "source_frame": proposal.source_frame,
+                "transform_target_from_source": candidate.transform_target_from_source,
+                "rgb_scale_factor": candidate.rgb_scale_factor,
+                "bounds_min_xy_m": [-20.0, -20.0],
+                "bounds_max_xy_m": [20.0, 20.0],
+                "source_in_roi_point_count": 1,
+                "target_in_roi_point_count": 1,
+                "source_points_xy_world_m": [[1.0, 2.0]],
+                "target_points_xy_world_m": [[3.0, 4.0]],
+                "sample_cap_per_cloud": 512,
+                "diagnostic_only": True,
+                "preview_checksum": _ZERO,
+            }
+        )
+        overlay_ref = ProductArtifactRef(
+            artifact_type="RegistrationOverlayPreview",
+            schema_version="1.0",
+            artifact_uri=f"artifact://jobs/{request.target_job_id}/rgb-lidar-align/inspection/overlay.json",
+            artifact_checksum=artifact_model_checksum(overlay),
+            data_class="derived",
+            producer_stage=StageId.RGB_LIDAR_ALIGN,
+            job_id=request.target_job_id,
+            source_provenance=provenance,
+        )
     report: RegistrationQAReport = seal_registration_qa_report(
         {
             "job_id": request.target_job_id,
@@ -256,6 +301,7 @@ def _inspection_outputs(
             "floor_state": request.floor_state,
             "same_scene_attestation": request.source.same_scene_attestation,
             "result": RegistrationQAStatus.INCONCLUSIVE,
+            "evidence_refs": [overlay_ref] if overlay_ref is not None else [],
             "findings": [RegistrationFindingCode.UNQUALIFIED_PROFILE],
             "report_checksum": _ZERO,
         }
@@ -270,7 +316,10 @@ def _inspection_outputs(
         job_id=request.target_job_id,
         source_provenance=provenance,
     )
-    for reference, model in ((proposal_ref, proposal), (report_ref, report)):
+    outputs = [(proposal_ref, proposal), (report_ref, report)]
+    if overlay_ref is not None and overlay is not None:
+        outputs.append((overlay_ref, overlay))
+    for reference, model in outputs:
         path = registry.runtime_resolver.resolve(reference.artifact_uri)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(artifact_model_payload(model))
@@ -623,6 +672,67 @@ async def test_inspection_loads_verified_outputs_and_marks_stale_scene_revision(
     assert payload["qa_report"]["proposal_ref"]["artifact_checksum"] == proposal_ref.artifact_checksum
     assert payload["qa_report"]["result"] == "INCONCLUSIVE"
     assert registry.scene.current(_JOB_ID).scene.scene_revision == current_revision
+
+
+@pytest.mark.asyncio
+async def test_inspection_returns_exact_candidate_overlay_from_qa_evidence(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    registry, _, revision, _ = _runtime(tmp_path, monkeypatch)
+    user = _user("reviewer")
+    request = _request(registry, revision, user.user_id)
+    record, _ = _inspection_outputs(registry, request, include_overlay=True)
+    monkeypatch.setattr(
+        registration_api,
+        "_operation_store",
+        lambda _registry: SimpleNamespace(get=lambda _operation_id: record),
+    )
+
+    with _session(user):
+        response = await client.get(
+            f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/operations/{request.request_id}/inspection"
+        )
+
+    assert response.status_code == 200, response.text
+    previews = response.json()["overlay_previews"]
+    assert len(previews) == 1
+    assert previews[0]["candidate_id"] == "candidate-inspection-1"
+    assert previews[0]["operation_id"] == request.request_id
+    assert previews[0]["diagnostic_only"] is True
+    assert previews[0]["source_points_xy_world_m"] == [[1.0, 2.0]]
+
+
+@pytest.mark.asyncio
+async def test_inspection_rejects_corrupt_overlay_bytes(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    registry, _, revision, _ = _runtime(tmp_path, monkeypatch)
+    user = _user("reviewer")
+    request = _request(registry, revision, user.user_id)
+    record, _ = _inspection_outputs(registry, request, include_overlay=True)
+    overlay_ref = next(
+        reference
+        for reference in registry.runtime_resolver.load_model(record.qa_report_ref, RegistrationQAReport).evidence_refs
+        if reference.artifact_type == "RegistrationOverlayPreview"
+    )
+    registry.runtime_resolver.resolve(overlay_ref.artifact_uri).write_bytes(b"tampered")
+    monkeypatch.setattr(
+        registration_api,
+        "_operation_store",
+        lambda _registry: SimpleNamespace(get=lambda _operation_id: record),
+    )
+
+    with _session(user):
+        response = await client.get(
+            f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/operations/{request.request_id}/inspection"
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Registration outputs are missing, corrupt, or bound to different evidence"
 
 
 @pytest.mark.asyncio

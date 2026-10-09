@@ -12,6 +12,7 @@ import {
   prepareRegistration,
   type RegistrationOperation,
   type RegistrationOperationInspection,
+  type RegistrationOverlayPreview,
   type RegistrationPreparation,
   type RegistrationRequestPayload,
 } from "@/lib/api/registration";
@@ -65,6 +66,52 @@ function operation(state: RegistrationOperation["state"], updates: Partial<Regis
 
 function inspection(): RegistrationOperationInspection {
   const proposalChecksum = `sha256:${"c".repeat(64)}`;
+  const sourceGeometry = {
+    artifact_type: "LiDARGeometryArtifact",
+    artifact_uri: "artifact://jobs/job-1/lidar/geometry.json",
+    artifact_checksum: `sha256:${"e".repeat(64)}`,
+  };
+  const targetGeometry = {
+    artifact_type: "RgbGeometry",
+    artifact_uri: "artifact://jobs/job-1/rgb/geometry.json",
+    artifact_checksum: `sha256:${"f".repeat(64)}`,
+  };
+  const firstTransform = {
+    parent_frame: "world",
+    local_frame: "lidar-map",
+    translation_xyz: [1, 2, 0],
+    rotation_quaternion_xyzw: [0, 0, 0, 1],
+  };
+  const secondTransform = {
+    ...firstTransform,
+    translation_xyz: [4, 5, 0],
+  };
+  const overlay = (
+    candidateId: string,
+    transform: typeof firstTransform,
+    x: number,
+    scale: number,
+  ): RegistrationOverlayPreview => ({
+    operation_id: request.request_id,
+    job_id: "job-1",
+    request_checksum: request.request_checksum,
+    source_input_checksum: `sha256:${"b".repeat(64)}`,
+    source_geometry_ref: sourceGeometry,
+    target_rgb_geometry_ref: targetGeometry,
+    target_scene_revision: "rev-001",
+    candidate_id: candidateId,
+    transform_target_from_source: transform,
+    rgb_scale_factor: scale,
+    bounds_min_xy_m: [-10, -10],
+    bounds_max_xy_m: [10, 10],
+    source_in_roi_point_count: 1,
+    target_in_roi_point_count: 1,
+    source_points_xy_world_m: [[x, 1]],
+    target_points_xy_world_m: [[x + 1, 2]],
+    sample_cap_per_cloud: 512,
+    diagnostic_only: true,
+    preview_checksum: `sha256:${"9".repeat(64)}`,
+  });
   return {
     operation_id: request.request_id,
     job_id: "job-1",
@@ -76,18 +123,26 @@ function inspection(): RegistrationOperationInspection {
       job_id: "job-1",
       target_scene_revision: "rev-001",
       proposal_checksum: proposalChecksum,
+      request_checksum: request.request_checksum,
+      source_input_checksum: `sha256:${"b".repeat(64)}`,
+      profile_checksum: `sha256:${"a".repeat(64)}`,
+      source_geometry_ref: sourceGeometry,
+      target_rgb_geometry_ref: targetGeometry,
       state: "PROPOSED",
-      candidates: [{
-        candidate_id: "candidate-1",
-        score: 0.95,
-        rgb_scale_factor: 1.25,
-        transform_target_from_source: {
-          parent_frame: "world",
-          local_frame: "lidar-map",
-          translation_xyz: [1, 2, 0],
-          rotation_quaternion_xyzw: [0, 0, 0, 1],
+      candidates: [
+        {
+          candidate_id: "candidate-1",
+          score: 0.95,
+          rgb_scale_factor: 1.25,
+          transform_target_from_source: firstTransform,
         },
-      }],
+        {
+          candidate_id: "candidate-2",
+          score: 0.82,
+          rgb_scale_factor: 1.1,
+          transform_target_from_source: secondTransform,
+        },
+      ],
     },
     qa_report: {
       schema_version: "1.0",
@@ -109,6 +164,10 @@ function inspection(): RegistrationOperationInspection {
       }],
       findings: ["UNQUALIFIED_PROFILE"],
     },
+    overlay_previews: [
+      overlay("candidate-1", firstTransform, 1, 1.25),
+      overlay("candidate-2", secondTransform, 4, 1.1),
+    ],
   };
 }
 
@@ -142,11 +201,16 @@ describe("registration panel", () => {
     expect(window.sessionStorage.getItem("real2sim:rgb-lidar-registration:v1:guest-1:job-1")).toContain(request.request_id);
     expect(await screen.findByText("INCONCLUSIVE")).toBeInTheDocument();
     expect(screen.getByText(/candidate-1.*điểm xếp hạng 0\.950/)).toBeInTheDocument();
-    expect(screen.getByText(/Transform: T_world_from_lidar-map/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Transform: T_world_from_lidar-map/)).toHaveLength(2);
     expect(screen.getByText(/Giả thuyết scale RGB: 1\.250×/)).toBeInTheDocument();
     expect(screen.getByText(/aisle-1: phủ nguồn 80\.0%, phủ đích 70\.0%,\s*28 correspondence, P95 0\.030 m/)).toBeInTheDocument();
     expect(screen.getByText(/Dịch chuyển xyz \(m\): 1\.000, 2\.000, 0\.000/)).toBeInTheDocument();
     expect(screen.getByText(/Proposal thuộc revision rev-001; scene hiện tại là rev-002/)).toBeInTheDocument();
+    const firstOverlay = await screen.findByRole("img", { name: /candidate-1/ });
+    expect(firstOverlay.querySelectorAll("circle")).toHaveLength(2);
+    expect(screen.getByText(/không thay thế QA hoặc kiểm chứng thực địa/)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Phương án chồng chiếu" }), { target: { value: "candidate-2" } });
+    expect(await screen.findByRole("img", { name: /candidate-2/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /xác nhận|áp dụng/i })).not.toBeInTheDocument();
     expect(getRegistrationOperationInspection).toHaveBeenCalledWith("job-1", request.request_id, expect.any(AbortSignal));
     await screen.findByText("Đã kiểm tra", {}, { timeout: 5000 });

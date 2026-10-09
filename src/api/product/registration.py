@@ -14,12 +14,14 @@ from src.models.contracts.manifests import JobManifest, StageId
 from src.models.contracts.rgb_lidar_registration import (
     RegistrationInputMode,
     RegistrationOperationState,
+    RegistrationOverlayPreview,
     RegistrationPreflight,
     RegistrationPreflightState,
     RegistrationProposal,
     RegistrationQAReport,
     RegistrationRequest,
     registration_preflight,
+    validate_registration_overlay_binding,
     validate_registration_proposal_binding,
     validate_registration_qa_binding,
 )
@@ -68,6 +70,7 @@ class RegistrationOperationInspectionResponse(ApiModel):
     current_scene_revision: str | None
     proposal: RegistrationProposal | None
     qa_report: RegistrationQAReport | None
+    overlay_previews: list[RegistrationOverlayPreview] = Field(default_factory=list)
 
 
 class RegistrationPreparationRequest(ApiModel):
@@ -312,6 +315,7 @@ def inspect_registration_operation(
 
     proposal: RegistrationProposal | None = None
     qa_report: RegistrationQAReport | None = None
+    overlay_previews: list[RegistrationOverlayPreview] = []
     try:
         resolver = registry.runtime_resolver
         if record.qa_report_ref is not None:
@@ -329,6 +333,24 @@ def inspect_registration_operation(
             if proposal is None:
                 raise ValueError("QA report has no resolvable proposal")
             validate_registration_qa_binding(record.request, proposal, qa_report)
+            overlay_refs = [
+                reference
+                for reference in qa_report.evidence_refs
+                if reference.artifact_type == "RegistrationOverlayPreview"
+            ]
+            if overlay_refs:
+                previews_by_candidate: dict[str, RegistrationOverlayPreview] = {}
+                for reference in overlay_refs:
+                    _validate_inspection_reference(record, reference, "RegistrationOverlayPreview")
+                    preview = resolver.load_model(reference, RegistrationOverlayPreview)
+                    validate_registration_overlay_binding(record.request, proposal, preview, record.operation_id)
+                    if preview.candidate_id in previews_by_candidate:
+                        raise ValueError("registration QA repeats an overlay candidate")
+                    previews_by_candidate[preview.candidate_id] = preview
+                candidate_ids = [candidate.candidate_id for candidate in proposal.candidates]
+                if set(previews_by_candidate) != set(candidate_ids):
+                    raise ValueError("registration overlay set differs from the proposal candidate set")
+                overlay_previews = [previews_by_candidate[candidate_id] for candidate_id in candidate_ids]
     except (ArtifactStoreError, ValueError) as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -346,6 +368,7 @@ def inspect_registration_operation(
         current_scene_revision=current_scene_revision,
         proposal=proposal,
         qa_report=qa_report,
+        overlay_previews=overlay_previews,
     )
 
 
