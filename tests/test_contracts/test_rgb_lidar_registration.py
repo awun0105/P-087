@@ -25,11 +25,13 @@ from src.models.contracts.rgb_lidar_registration import (
     RegistrationRequest,
     RegistrationROI,
     RegistrationSourceBinding,
+    RegistrationSourceCloudManifest,
     registration_preflight,
     seal_registration_profile,
     seal_registration_proposal,
     seal_registration_qa_report,
     seal_registration_request,
+    seal_registration_source_cloud_manifest,
     validate_registration_proposal_binding,
     validate_registration_qa_binding,
     validate_registration_transition,
@@ -42,6 +44,11 @@ PROJECT_ID = "project-1"
 
 def _checksum(value: str) -> str:
     return "sha256:" + sha256(value.encode()).hexdigest()
+
+
+def _artifact_checksum(value: RegistrationProposal) -> str:
+    payload = value.model_dump_json(indent=2).encode("utf-8") + b"\n"
+    return "sha256:" + sha256(payload).hexdigest()
 
 
 def _ref(
@@ -207,7 +214,7 @@ def _pass_report(request: RegistrationRequest, proposal: RegistrationProposal) -
     proposal_ref = _ref(
         "RegistrationProposalArtifact",
         StageId.RGB_LIDAR_ALIGN,
-        checksum=proposal.proposal_checksum,
+        checksum=_artifact_checksum(proposal),
     )
     qualification_ref = request.profile.qualification_record_ref
     evidence_refs = [proposal_ref, proposal.source_geometry_ref, proposal.target_rgb_geometry_ref]
@@ -464,6 +471,53 @@ def test_proposal_rejects_cross_job_geometry_refs() -> None:
         )
 
 
+def test_registration_source_cloud_manifest_binds_exact_target_job_bytes_and_lineage() -> None:
+    request = _request()
+    cloud_ref = _ref(
+        "RegistrationSourcePointCloud",
+        StageId.LIDAR_INGEST,
+        checksum=request.source.source_input_checksum,
+    )
+    manifest = seal_registration_source_cloud_manifest(
+        {
+            "job_id": request.target_job_id,
+            "source_geometry_ref": cloud_ref,
+            "input_mode": request.source.mode,
+            "source_input_checksum": request.source.source_input_checksum,
+            "input_assembly_id": request.source.input_assembly_id,
+            "input_assembly_revision": request.source.input_assembly_revision,
+            "input_assembly_checksum": request.source.input_assembly_checksum,
+            "source_file_id": request.source.source_file_ids[0],
+            "source_format": "pcd",
+            "source_header_checksum": request.source.source_header_checksum,
+            "source_point_count": request.source.source_point_count,
+            "source_distance_unit": request.source.source_distance_unit,
+            "source_frame": request.source.source_frame,
+            "same_scene_lineage_verified": True,
+            "manifest_checksum": ZERO_CHECKSUM,
+        }
+    )
+
+    assert isinstance(manifest, RegistrationSourceCloudManifest)
+    assert manifest.source_geometry_ref == cloud_ref
+    assert manifest.source_distance_unit == DistanceUnit.METER
+    assert manifest.source_frame == request.source.source_frame
+
+
+def test_proposal_accepts_exact_copied_registration_source_cloud() -> None:
+    request = _request()
+    proposal = _proposal(request).model_dump(mode="python")
+    proposal["source_geometry_ref"] = _ref(
+        "RegistrationSourcePointCloud",
+        StageId.LIDAR_INGEST,
+        checksum=request.source.source_input_checksum,
+    )
+
+    sealed = seal_registration_proposal(proposal)
+
+    assert sealed.source_geometry_ref.artifact_type == "RegistrationSourcePointCloud"
+
+
 def test_qa_pass_requires_qualified_profile_and_exact_bound_evidence() -> None:
     request = _request(profile=_profile(qualified=True))
     proposal = _proposal(request)
@@ -481,6 +535,23 @@ def test_qa_pass_requires_qualified_profile_and_exact_bound_evidence() -> None:
     missing_source = RegistrationQAReport.model_validate(payload)
     with pytest.raises(ValueError, match="exact proposal, geometry, metric, floor and profile refs"):
         validate_registration_qa_binding(request, proposal, missing_source)
+
+    wrong_proposal_ref = report.proposal_ref.model_copy(update={"artifact_checksum": proposal.proposal_checksum})
+    wrong_proposal_binding = report.model_copy(
+        update={
+            "proposal_ref": wrong_proposal_ref,
+            "evidence_refs": [
+                wrong_proposal_ref if reference == report.proposal_ref else reference
+                for reference in report.evidence_refs
+            ],
+            "report_checksum": ZERO_CHECKSUM,
+        }
+    )
+    wrong_payload = wrong_proposal_binding.model_dump(mode="json")
+    wrong_payload["report_checksum"] = canonical_content_checksum(wrong_payload, "report_checksum")
+    wrong_proposal_binding = RegistrationQAReport.model_validate(wrong_payload)
+    with pytest.raises(ValueError, match="proposal ref checksum mismatch"):
+        validate_registration_qa_binding(request, proposal, wrong_proposal_binding)
 
 
 def test_qa_failure_and_inconclusive_results_need_explicit_findings() -> None:

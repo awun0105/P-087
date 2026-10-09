@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import math
+from threading import Event
+from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from src.models.contracts.rgb_lidar_registration import (
     RegistrationFindingCode,
@@ -12,7 +15,9 @@ from src.models.contracts.rgb_lidar_registration import (
     RegistrationROI,
     seal_registration_profile,
 )
+from src.services.reconstruction.alignment import bev_search as bev_search_module
 from src.services.reconstruction.alignment.bev_search import (
+    RegistrationCancelledError,
     RegistrationFloorPlane,
     search_independent_map_registration,
 )
@@ -92,6 +97,8 @@ def _search(
     metric_state: str = "confirmed",
     source_frame: str = "lidar-map-frame",
     extent: float = 12.0,
+    runtime_budget_seconds: int | None = None,
+    cancel_event: Event | None = None,
 ):
     return search_independent_map_registration(
         source,
@@ -103,6 +110,8 @@ def _search(
         target_roi_world=_roi(extent),
         profile=profile or _profile(),
         metric_state=metric_state,  # type: ignore[arg-type]
+        runtime_budget_seconds=runtime_budget_seconds,
+        cancel_event=cancel_event,
     )
 
 
@@ -247,3 +256,30 @@ def test_source_distance_unit_is_converted_to_meters_before_search() -> None:
     np.testing.assert_allclose(
         result.candidates[0].transform_target_from_source.translation_xyz, (0.0, 0.0, 0.0), atol=0.3
     )
+
+
+def test_bev_search_stops_when_cancelled_before_search_work() -> None:
+    cancelled = Event()
+    cancelled.set()
+
+    with pytest.raises(RegistrationCancelledError, match="cancelled"):
+        _search(_warehouse_surface(), _warehouse_surface(), cancel_event=cancelled)
+
+
+def test_bev_search_honors_worker_runtime_budget_override(monkeypatch) -> None:
+    timestamps = iter((0.0, 2.0, 2.0))
+    monkeypatch.setattr(
+        bev_search_module,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(timestamps, 2.0)),
+    )
+
+    result = _search(
+        _warehouse_surface(),
+        _warehouse_surface(),
+        profile=_profile(runtime_budget_seconds=300),
+        runtime_budget_seconds=1,
+    )
+
+    assert result.diagnostics.budget_exhausted is True
+    assert result.diagnostics.yaw_hypotheses_evaluated == 0

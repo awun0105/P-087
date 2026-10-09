@@ -834,3 +834,132 @@ Pre-flight (GUIDE.md Rule 13)
   54,229 edges); Graphify update completed (21,295 nodes, 63,346 edges,
   734 communities).
 - DevTools: n/a — no rendered screen or exposed runtime path changed in S4g.
+
+### AUD-19.S4h — Bounded registration worker integration
+
+**Input:** a durable `QUEUED` or `WAITING_RESOURCES` registration operation, its
+checksum-sealed request and profile, the accepted RGB+LiDAR input assembly, and the
+exact canonical RGB collision geometry for the requested target revision.
+
+**Output:** an exact byte copy of the selected PCD/PLY in the target job, a manifest
+binding its source checksum, header, point count, unit, frame and assembly lineage,
+source-plane hypotheses, worker diagnostics, a bounded registration proposal and an
+INCONCLUSIVE QA report. The operation finishes with proposal and QA refs only after
+all artifacts are published and the lease/fencing token still owns the operation.
+
+**Contract:** the worker handles `REGISTERED_MAP` and `STATIC_CLOUD`; the existing
+sensor-package path remains in `FinalizeWorker`. It does not assert a canonical up
+axis for uploaded map bytes. For each bounded plane hypothesis it evaluates both
+normal signs, then runs floor-constrained BEV and ICP with per-hypothesis time and
+candidate caps. Plane discovery is bounded by the profile's refinement budget. Before
+search, the worker returns `INSUFFICIENT` if the two-sign count exceeds that cap or if
+the sealed runtime budget cannot allocate at least one second each to BEV and ICP for
+every sign. Shared CPU admission uses
+point-count and target-size estimates; unmeasured RAM/disk requirements wait instead
+of starting work. A resource wait relinquishes the claim and yields to the worker's
+poll delay. Claims order eligible work by last update so a repeatedly waiting
+operation does not monopolize the registration queue. Lease heartbeat loss,
+cancellation or reservation loss sets a cancellation event passed through BEV and
+ICP. Exact target revision is rechecked before operation completion. No scene
+geometry or alignment record is mutated.
+
+Same-scene lineage means the checksum-verified accepted recipe includes the selected
+LiDAR source and RGB video under the user's same-scene declaration. It does not prove
+that both recordings depict the same physical place. The worker therefore refuses to
+solve when accepted lineage is missing, but it never returns QA `PASS`: no held-out
+qualification record is loaded by this worker. Point-cloud decoding and one FFT call
+are not interruptible internally, so cancellation and deadlines are checked between
+library calls, bounded solver loops and pipeline phases.
+
+**Tests:** exact byte-copy checksum/idempotency; resource estimate and durable wait;
+both up signs per plane and ambiguity preservation; cancellation before BEV/ICP work;
+worker deadline forwarding and solver budget enforcement; ICP candidate cap;
+resource-wait polling and queue fairness; proposal/source-manifest contracts. Also
+run source/target resolver, registration operation, admission, QA, collision and
+geometry regressions.
+
+**Exit:** worker dispatches durable registration operations in the existing worker
+loop; source and target are checksum-resolved; admission wait persists and releases
+the claim; solver work is bounded/cancellable at loop boundaries; outputs remain
+provisional and cannot enable canonical geometry or collision consumption.
+
+**Open:** no API/UI operation producer or user confirmation route is wired; no
+held-out qualification, physical same-scene verification, browser acceptance or
+Isaac/collision proof exists. Source floor still has multiple geometric hypotheses
+without gravity/up evidence.
+
+#### AUD-19.S4h Result / Evidence
+
+- Commit base: `2b7632d`; this sprint's worktree changes are based on that revision.
+- Behavior: the worker now claims registration operations in the existing worker
+  loop, verifies and copies the exact point-cloud bytes, resolves the target
+  collision surface, runs bounded plane-sign/BEV/ICP hypotheses, and publishes a
+  provisional proposal with INCONCLUSIVE QA. Resource waits release the lease and
+  return control to the worker poll loop. Updated-at ordering prevents a requeued
+  wait from blocking other registration requests.
+- Compatibility: the sensor-package `FinalizeWorker` path is unchanged. The copied
+  cloud manifest records unit/frame/assembly lineage without asserting world up.
+  No job scene, canonical geometry or collision selection is modified.
+- Contract delta: `RegistrationSourceCloudManifest` binds the point-cloud byte hash,
+  header, unit, frame and accepted assembly lineage. A proposal's
+  `proposal_checksum` remains its canonical logical identity; each artifact
+  reference's `artifact_checksum` now hashes the exact pretty-printed JSON bytes.
+  The shared artifact serializer is used by model publication, and QA binding
+  verifies the byte checksum independently of the logical checksum.
+- Artifact/consumer proof: a worker publication regression test publishes a sealed
+  proposal through `FilesystemArtifactStore`, then reads it back and verifies the
+  reference hash against the file bytes. The durable operation worker is wired into
+  `worker_cli`; a full production registration/Studio confirmation flow is not yet
+  connected.
+- Changed files:
+  `docs/plans/active/2026-10-07-codegraph-audit/AGENT_GUIDE.md`,
+  `docs/plans/active/2026-10-07-codegraph-audit/INTEGRATION_MAP.md`,
+  `docs/plans/active/2026-10-07-codegraph-audit/README.md`,
+  `docs/plans/active/2026-10-07-codegraph-audit/tasks/AUD-19-automatic-rgb-lidar-registration.md`,
+  `src/models/contracts/__init__.py`, `src/models/contracts/identity.py`,
+  `src/models/contracts/rgb_lidar_registration.py`,
+  `src/services/orchestration/artifacts/store.py`,
+  `src/services/orchestration/jobs/registration_operations.py`,
+  `src/services/orchestration/jobs/registration_worker.py`,
+  `src/services/orchestration/jobs/worker_cli.py`,
+  `src/services/reconstruction/alignment/bev_search.py`,
+  `src/services/reconstruction/alignment/constrained_icp.py`,
+  `src/services/reconstruction/alignment/registration_qa.py`,
+  `tests/test_contracts/test_rgb_lidar_registration.py`,
+  `tests/test_orchestration/test_registration_operations.py`,
+  `tests/test_orchestration/test_registration_worker.py`,
+  `tests/test_reconstruction/test_bev_registration.py`,
+  `tests/test_reconstruction/test_constrained_icp.py`, and
+  `tests/test_reconstruction/test_registration_qa.py`.
+- Verification: 173 tests passed across registration operations, worker, source and
+  target resolvers, shared admission, BEV, ICP, QA, collision and registration
+  contracts. `.venv/bin/ruff check src/ tests/` passed; `.venv/bin/ruff format
+  --check src/ tests/` reported 570 files formatted; the contract mirror passed
+  (5 enums, 6 models); `git diff --check` passed. CodeGraph and Graphify are synced.
+- Limits: no API/UI producer or confirmation route invokes this worker yet; source
+  lineage does not prove physical same-scene capture; no held-out qualification is
+  loaded, so QA cannot return `PASS`; resource profiles without sufficient measured
+  RAM/disk wait safely. A running FFT or point-cloud decode cannot be interrupted
+  inside the library call.
+- Next: wire an authorized API producer and Studio proposal/status/overlay plus
+  confirmation CAS, then verify exact source/report/transform publication in the
+  alignment consumer. Keep manual fallback and held-out qualification as separate
+  gates; no confirmed transform may silently rewrite canonical geometry.
+
+Pre-flight (GUIDE.md Rule 13)
+- codegraph: explored `RegistrationOperationWorker`, worker CLI dispatch,
+  `RegistrationOperationStore.claim_next`, source/target resolvers, resource
+  admission, BEV/ICP solvers, contracts and their focused callers/tests before edits.
+- impact: worker dispatch is in `worker_cli.main`; registration solvers have the new
+  worker as caller; claim order affects registration operations only. Existing
+  sensor-package finalize and scene consumers are unchanged.
+- understand: accepted recipe lineage proves the user's declared RGB+LiDAR input
+  relationship, not that both capture the same physical place.
+- minimal-code: reused existing durable store, fencing, `ResourceAdmission`,
+  `ArtifactResolver`, streaming publication, checksum, source/target resolvers and
+  BEV/ICP functions; only worker integration, queue fairness and bounded controls
+  were added.
+- checks: focused pytest 173 passed; full repo Ruff check/format passed; contract
+  mirror and `git diff --check` passed; CodeGraph sync/status and Graphify update/query
+  completed.
+- DevTools: n/a — UI-free worker and solver changes; no rendered screen changed.

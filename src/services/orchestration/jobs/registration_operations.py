@@ -418,7 +418,7 @@ class RegistrationOperationStore:
                 self._write(tx, expired, failed)
             row = tx.execute(
                 f"SELECT {_COLUMNS} FROM r2s_registration_operations WHERE state IN (?,?) "
-                "ORDER BY created_at, operation_id LIMIT 1" + tx.lock_suffix(),
+                "ORDER BY updated_at, created_at, operation_id LIMIT 1" + tx.lock_suffix(),
                 (RegistrationOperationState.QUEUED.value, RegistrationOperationState.WAITING_RESOURCES.value),
             ).fetchone()
             if row is None:

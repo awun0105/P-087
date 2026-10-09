@@ -12,6 +12,7 @@ import math
 import re
 import time
 from dataclasses import dataclass
+from threading import Event
 from typing import Literal
 
 import numpy as np
@@ -29,6 +30,10 @@ DistanceUnit = Literal["m", "cm", "mm"]
 _UNIT_TO_M = {"m": 1.0, "cm": 0.01, "mm": 0.001}
 _CHECKSUM_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _POINT_CHUNK = 250_000
+
+
+class RegistrationCancelledError(RuntimeError):
+    """A registration cancellation or lost worker ownership stopped bounded solver work."""
 
 
 @dataclass(frozen=True)
@@ -388,6 +393,8 @@ def search_independent_map_registration(
     target_roi_world: RegistrationROI,
     profile: RegistrationProfile,
     metric_state: Literal["confirmed", "unknown"] = "confirmed",
+    runtime_budget_seconds: int | None = None,
+    cancel_event: Event | None = None,
 ) -> CoarseRegistrationSearchResult:
     """Search bounded floor-constrained yaw/translation candidates for independent maps.
 
@@ -399,6 +406,10 @@ def search_independent_map_registration(
     started = time.monotonic()
     if profile.checksum() != profile.profile_checksum:
         raise ValueError("registration search profile checksum mismatch")
+    if runtime_budget_seconds is not None and runtime_budget_seconds < 1:
+        raise ValueError("registration runtime budget override must be positive")
+    _raise_if_cancelled(cancel_event)
+    deadline = started + min(profile.runtime_budget_seconds, runtime_budget_seconds or profile.runtime_budget_seconds)
     if source_frame == "world" or source_floor.frame != source_frame:
         raise ValueError("source floor and map must share a non-world source frame")
     if target_floor.frame != "world":
@@ -467,6 +478,7 @@ def search_independent_map_registration(
     budget_exhausted = False
 
     for scale in scales:
+        _raise_if_cancelled(cancel_event)
         scale_roi = roi_local * scale
         min_xy, max_xy = scale_roi[:, :2].min(axis=0), scale_roi[:, :2].max(axis=0)
         width, height, resolution = _grid_shape(min_xy, max_xy, profile)
@@ -490,7 +502,8 @@ def search_independent_map_registration(
         pad_height, pad_width = _next_power_of_two(2 * height - 1), _next_power_of_two(2 * width - 1)
         target_spectrum = np.fft.rfftn(target_grid, s=(pad_height, pad_width), axes=(-2, -1))
         for yaw in yaws:
-            if time.monotonic() - started >= profile.runtime_budget_seconds:
+            _raise_if_cancelled(cancel_event)
+            if time.monotonic() >= deadline:
                 budget_exhausted = True
                 break
             yaw_evaluated += 1
@@ -519,6 +532,7 @@ def search_independent_map_registration(
             available = min(per_hypothesis_translation_budget, overlap_grid.size)
             scores = overlap_grid.copy()
             for _ in range(available):
+                _raise_if_cancelled(cancel_event)
                 flat_index = int(np.argmax(scores))
                 overlap = int(round(float(scores.flat[flat_index])))
                 if overlap <= 0:
@@ -599,6 +613,7 @@ def search_independent_map_registration(
         profile.search_seed ^ 0xC2B2AE35,
     )
     for seed in coarse_seeds:
+        _raise_if_cancelled(cancel_event)
         if budget_exhausted:
             break
         scale = seed.rgb_scale_factor if seed.rgb_scale_factor is not None else 1.0
@@ -622,13 +637,15 @@ def search_independent_map_registration(
         if target_count == 0:
             continue
         for yaw_offset in yaw_offsets:
+            _raise_if_cancelled(cancel_event)
             yaw = (seed.yaw_radians + yaw_offset) % (2.0 * math.pi)
             cosine, sine = math.cos(yaw), math.sin(yaw)
             source_x = cosine * refinement_source[:, 0] - sine * refinement_source[:, 1]
             source_y = sine * refinement_source[:, 0] + cosine * refinement_source[:, 1]
             for offset_x in translation_offsets:
                 for offset_y in translation_offsets:
-                    if time.monotonic() - started >= profile.runtime_budget_seconds:
+                    _raise_if_cancelled(cancel_event)
+                    if time.monotonic() >= deadline:
                         budget_exhausted = True
                         break
                     translation_xy = (
@@ -767,3 +784,8 @@ def search_independent_map_registration(
         findings=tuple(findings),
         diagnostics=diagnostics,
     )
+
+
+def _raise_if_cancelled(cancel_event: Event | None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise RegistrationCancelledError("registration solver cancelled")

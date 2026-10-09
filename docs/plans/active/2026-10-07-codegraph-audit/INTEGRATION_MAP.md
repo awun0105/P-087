@@ -17,7 +17,7 @@ speculative features vẫn ngoài scope. Không chạy song song edits chung con
 
 Risk dưới đây là khả năng regression khi implement một phần hoặc giữ assumptions
 cũ ở consumers; không là kết quả đo xác suất failure và không là bug do source
-implementation mới. Current plan tracks 26 active packages/91 sprint slices;
+implementation mới. Current plan tracks 26 active packages/92 sprint slices;
 AUD-25 Deferred theo yêu cầu owner, không là active dependency/scenario. Đã dùng
 CodeGraph/source/callers cho
 SceneEditor.publish_next, ResourceAdmission, enforce_gpu_quota và camera_priors:

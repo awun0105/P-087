@@ -21,6 +21,7 @@ from src.services.orchestration.jobs.log_context import configure_worker_logging
 from src.services.orchestration.jobs.models import TransitionRequest
 from src.services.orchestration.jobs.progress import awaiting_finalize
 from src.services.orchestration.jobs.queue import fair_order, waiting_jobs
+from src.services.orchestration.jobs.registration_worker import RegistrationOperationWorker
 from src.services.orchestration.jobs.runner import run_finalize_job, run_prepared_job, run_video_job
 from src.services.orchestration.jobs.workspace import attempt_in_use, job_attempts, job_root
 from src.services.orchestration.processing import is_presets_file, load_presets
@@ -326,6 +327,7 @@ def main(argv: list[str] | None = None) -> int:
         settings.product_worker_root.expanduser().resolve() / "imports",
         max_uncompressed_bytes=settings.product_upload_max_bytes * 2,
     )
+    registration_worker = RegistrationOperationWorker(registry, settings, admission)
     if admission.discard_leftover_reservation():
         logger.warning("Đã xoá giữ chỗ tài nguyên còn sót của lần chạy trước worker=%s", admission.worker_id)
     heartbeat = _start_capability_heartbeat(registry, settings.product_worker_root, admission)
@@ -345,6 +347,7 @@ def main(argv: list[str] | None = None) -> int:
             # Job trong hàng đợi đi trước; rảnh mới nhận yêu cầu chạy lại tách theo vật (cùng dùng GPU).
             handled = (
                 dispatch_next(registry, admission=admission)
+                or registration_worker.process_next()
                 or process_next(registry, settings)
                 or import_service.process_next(admission=admission)
             )

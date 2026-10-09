@@ -26,6 +26,16 @@ def canonical_content_checksum(value: BaseModel | dict[str, Any], checksum_field
     return f"sha256:{digest}"
 
 
+def artifact_model_payload(value: BaseModel) -> bytes:
+    """Serialize one contract using the deterministic JSON representation stored as an artifact."""
+    return value.model_dump_json(indent=2).encode("utf-8") + b"\n"
+
+
+def artifact_model_checksum(value: BaseModel) -> str:
+    """Hash the exact pretty-printed JSON bytes used by model artifact publication."""
+    return f"sha256:{hashlib.sha256(artifact_model_payload(value)).hexdigest()}"
+
+
 def verify_content_checksum(value: BaseModel, checksum_field: str) -> None:
     """Reject stale logical identities while leaving byte refs to the resolver."""
     expected = canonical_content_checksum(value, checksum_field)

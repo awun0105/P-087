@@ -246,6 +246,27 @@ def test_resource_wait_releases_lease_and_can_be_claimed_again(tmp_path: Path) -
     assert resumed.resource_wait_reason is None
 
 
+def test_requeued_resource_wait_does_not_starve_another_queued_operation(tmp_path: Path) -> None:
+    _, store = _store(tmp_path)
+    first = store.enqueue(_request("registration-request-first"), "request-key-first")
+    second = store.enqueue(_request("registration-request-second"), "request-key-second")
+    now = max(first.created_at, second.created_at) + timedelta(seconds=1)
+    claimed = store.claim_next("worker-a", lease_seconds=30, now=now)
+    assert claimed is not None and claimed.operation_id == first.operation_id
+
+    store.wait_for_resources(
+        claimed.operation_id,
+        lease_token=claimed.lease_token or "",
+        fencing_token=claimed.fencing_token,
+        reason="RAM: busy",
+        now=now + timedelta(seconds=1),
+    )
+
+    next_claim = store.claim_next("worker-b", lease_seconds=30, now=now + timedelta(seconds=2))
+
+    assert next_claim is not None and next_claim.operation_id == second.operation_id
+
+
 def test_resource_wait_reason_is_required_only_in_the_waiting_state(tmp_path: Path) -> None:
     _, store = _store(tmp_path)
     request = _request()

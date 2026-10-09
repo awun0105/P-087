@@ -15,7 +15,11 @@ from src.models.contracts.artifacts import (
     ProductArtifactRef,
 )
 from src.models.contracts.coordinates import Transform
-from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
+from src.models.contracts.identity import (
+    artifact_model_checksum,
+    canonical_content_checksum,
+    verify_content_checksum,
+)
 from src.models.contracts.input_assembly import DistanceUnit, InputAssetFormat, InputRole
 from src.models.contracts.manifests import StageId
 
@@ -276,6 +280,44 @@ class RegistrationSourceBinding(ContractModel):
         return self
 
 
+class RegistrationSourceCloudManifest(ContractModel):
+    """Exact staged point-cloud bytes copied into a job without claiming a world up axis."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    artifact_type: Literal["RegistrationSourceCloudManifest"] = "RegistrationSourceCloudManifest"
+    producer_stage: Literal[StageId.LIDAR_INGEST] = StageId.LIDAR_INGEST
+    job_id: Identifier
+    source_geometry_ref: ProductArtifactRef
+    input_mode: Literal[RegistrationInputMode.REGISTERED_MAP, RegistrationInputMode.STATIC_CLOUD]
+    source_input_checksum: Checksum
+    input_assembly_id: Identifier
+    input_assembly_revision: PositiveInt
+    input_assembly_checksum: Checksum
+    source_file_id: Identifier
+    source_format: Literal["pcd", "ply"]
+    source_header_checksum: Checksum
+    source_point_count: PositiveInt
+    source_distance_unit: DistanceUnit
+    source_frame: Identifier
+    same_scene_lineage_verified: bool
+    manifest_checksum: Checksum
+
+    @model_validator(mode="after")
+    def _bind_source_cloud(self) -> Self:
+        reference = self.source_geometry_ref
+        if (
+            reference.artifact_type != "RegistrationSourcePointCloud"
+            or reference.producer_stage != StageId.LIDAR_INGEST
+            or reference.job_id != self.job_id
+            or not reference.artifact_uri.startswith(f"artifact://jobs/{self.job_id}/")
+            or reference.artifact_checksum != self.source_input_checksum
+        ):
+            raise ValueError("registration source manifest must bind exact copied bytes in its target job")
+        if not self.source_frame.strip() or self.source_frame == "world":
+            raise ValueError("registration source frame must be explicit and distinct from world")
+        return self
+
+
 class RegistrationRequest(ContractModel):
     """Immutable request for a proposal against one exact RGB geometry revision."""
 
@@ -451,10 +493,10 @@ class RegistrationProposal(ContractModel):
     @model_validator(mode="after")
     def _proposal_shape(self) -> Self:
         if (
-            self.source_geometry_ref.artifact_type != "LiDARGeometryArtifact"
+            self.source_geometry_ref.artifact_type not in {"LiDARGeometryArtifact", "RegistrationSourcePointCloud"}
             or self.source_geometry_ref.producer_stage != StageId.LIDAR_INGEST
         ):
-            raise ValueError("proposal source must be ingested LiDAR geometry")
+            raise ValueError("proposal source must be ingested LiDAR geometry or a bound registration source cloud")
         if (
             self.target_rgb_geometry_ref.artifact_type != "RgbGeometry"
             or self.target_rgb_geometry_ref.producer_stage != StageId.RGB_GEOMETRY
@@ -629,6 +671,12 @@ def seal_registration_proposal(value: RegistrationProposal | dict[str, object]) 
     return _seal_contract(value, RegistrationProposal, "proposal_checksum")
 
 
+def seal_registration_source_cloud_manifest(
+    value: RegistrationSourceCloudManifest | dict[str, object],
+) -> RegistrationSourceCloudManifest:
+    return _seal_contract(value, RegistrationSourceCloudManifest, "manifest_checksum")
+
+
 def seal_registration_qa_report(value: RegistrationQAReport | dict[str, object]) -> RegistrationQAReport:
     return _seal_contract(value, RegistrationQAReport, "report_checksum")
 
@@ -696,7 +744,7 @@ def validate_registration_qa_binding(
         or report.same_scene_attestation != request.source.same_scene_attestation
     ):
         raise ValueError("registration QA report is stale or bound to different evidence")
-    if report.proposal_ref.artifact_checksum != proposal.proposal_checksum:
+    if report.proposal_ref.artifact_checksum != artifact_model_checksum(proposal):
         raise ValueError("registration QA proposal ref checksum mismatch")
     if report.result == RegistrationQAStatus.PASS:
         required_refs = [proposal.source_geometry_ref, proposal.target_rgb_geometry_ref]

@@ -36,6 +36,11 @@ def _checksum(value: str) -> str:
     return "sha256:" + sha256(value.encode()).hexdigest()
 
 
+def _artifact_checksum(value: RegistrationProposal) -> str:
+    payload = value.model_dump_json(indent=2).encode("utf-8") + b"\n"
+    return "sha256:" + sha256(payload).hexdigest()
+
+
 def _ref(artifact_type: str, stage: StageId, *, checksum: str | None = None) -> ProductArtifactRef:
     return ProductArtifactRef(
         artifact_type=artifact_type,
@@ -173,7 +178,7 @@ def _run(
     proposal_ref = _ref(
         "RegistrationProposalArtifact",
         StageId.RGB_LIDAR_ALIGN,
-        checksum=proposal.proposal_checksum,
+        checksum=_artifact_checksum(proposal),
     )
     report = build_registration_qa_report(
         request,
@@ -196,6 +201,27 @@ def test_provisional_profile_keeps_good_synthetic_fit_inconclusive() -> None:
     assert report.result == RegistrationQAStatus.INCONCLUSIVE
     assert RegistrationFindingCode.UNQUALIFIED_PROFILE in report.findings
     assert report.bidirectional_p95_residual_m == pytest.approx(0.02)
+
+
+def test_proposal_artifact_reference_uses_exact_serialized_bytes_checksum() -> None:
+    request = _request(qualified=False)
+    proposal = _proposal(request)
+    wrong_ref = _ref(
+        "RegistrationProposalArtifact",
+        StageId.RGB_LIDAR_ALIGN,
+        checksum=proposal.proposal_checksum,
+    )
+
+    with pytest.raises(ValueError, match="does not identify the exact proposal"):
+        build_registration_qa_report(
+            request,
+            proposal,
+            wrong_ref,
+            _refined(proposal),
+            candidate_margin=0.5,
+            floor_difference_m=0.01,
+            same_scene_verified=True,
+        )
 
 
 def test_same_scene_requires_server_resolved_context() -> None:
@@ -252,7 +278,7 @@ def test_measurements_cannot_be_reused_for_a_different_candidate() -> None:
             _ref(
                 "RegistrationProposalArtifact",
                 StageId.RGB_LIDAR_ALIGN,
-                checksum=proposal.proposal_checksum,
+                checksum=_artifact_checksum(proposal),
             ),
             wrong_candidate,
             candidate_margin=0.5,

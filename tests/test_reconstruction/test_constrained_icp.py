@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import math
 from dataclasses import replace
+from threading import Event
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -15,9 +17,11 @@ from src.models.contracts.rgb_lidar_registration import (
     RegistrationQAStatus,
     seal_registration_profile,
 )
+from src.services.reconstruction.alignment import constrained_icp as constrained_icp_module
 from src.services.reconstruction.alignment.bev_search import (
     CoarseRegistrationCandidate,
     CoarseRegistrationSearchResult,
+    RegistrationCancelledError,
     RegistrationFloorPlane,
     RegistrationSearchDiagnostics,
 )
@@ -153,6 +157,9 @@ def _refine(
     normals: np.ndarray,
     candidates: tuple[CoarseRegistrationCandidate, ...] | None = None,
     state: RegistrationProposalState = RegistrationProposalState.PROPOSED,
+    runtime_budget_seconds: int | None = None,
+    maximum_candidates: int | None = None,
+    cancel_event: Event | None = None,
 ) -> ConstrainedICPResult:
     return refine_registration_candidates(
         _coarse_result(profile, candidates or (_candidate(),), state),
@@ -162,6 +169,9 @@ def _refine(
         source_frame="lidar-map",
         target_floor=_floor("world"),
         profile=profile,
+        runtime_budget_seconds=runtime_budget_seconds,
+        maximum_candidates=maximum_candidates,
+        cancel_event=cancel_event,
     )
 
 
@@ -370,3 +380,33 @@ def test_sparse_surface_fails_closed_on_correspondence_budget() -> None:
 
     assert result.state == RegistrationProposalState.INSUFFICIENT
     assert RegistrationFindingCode.LOW_COVERAGE in {finding for _, finding in result.diagnostics.candidate_findings}
+
+
+def test_constrained_icp_stops_when_cancelled_before_refinement() -> None:
+    target, normals = _room_surface()
+    cancelled = Event()
+    cancelled.set()
+
+    with pytest.raises(RegistrationCancelledError, match="cancelled"):
+        _refine(_profile(), target, target, normals, cancel_event=cancelled)
+
+
+def test_constrained_icp_honors_worker_runtime_budget_override(monkeypatch) -> None:
+    timestamps = iter((0.0, 2.0, 2.0))
+    monkeypatch.setattr(
+        constrained_icp_module,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(timestamps, 2.0)),
+    )
+    target, normals = _room_surface()
+
+    result = _refine(
+        _profile(runtime_budget_seconds=300),
+        target,
+        target,
+        normals,
+        runtime_budget_seconds=1,
+    )
+
+    assert result.diagnostics.budget_exhausted is True
+    assert RegistrationFindingCode.SEARCH_BUDGET_EXCEEDED in result.findings

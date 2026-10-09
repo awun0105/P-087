@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass
+from threading import Event
 
 import numpy as np
 from scipy.spatial import cKDTree
@@ -25,6 +26,7 @@ from src.models.contracts.rgb_lidar_registration import (
 from src.services.reconstruction.alignment.bev_search import (
     CoarseRegistrationCandidate,
     CoarseRegistrationSearchResult,
+    RegistrationCancelledError,
     RegistrationFloorPlane,
 )
 from src.services.reconstruction.alignment.similarity import _quaternion, rotation_matrix
@@ -212,6 +214,7 @@ def _refine_one(
     target_floor_from_world: np.ndarray,
     profile: RegistrationProfile,
     deadline: float,
+    cancel_event: Event | None = None,
 ) -> RefinedRegistrationCandidate:
     scale = candidate.rgb_scale_factor if candidate.rgb_scale_factor is not None else 1.0
     if candidate.rgb_scale_factor is not None:
@@ -254,6 +257,8 @@ def _refine_one(
     for source_level, target_level, normal_level, tree in tree_cache:
         level_converged = False
         for _ in range(profile.icp_iterations):
+            if cancel_event is not None and cancel_event.is_set():
+                raise RegistrationCancelledError("registration solver cancelled")
             if time.monotonic() >= deadline:
                 raise _ICPFailureError(RegistrationFindingCode.SEARCH_BUDGET_EXCEEDED)
             transformed = _transform_points(source_level, rotation, translation)
@@ -429,6 +434,9 @@ def refine_registration_candidates(
     source_frame: str,
     target_floor: RegistrationFloorPlane,
     profile: RegistrationProfile,
+    runtime_budget_seconds: int | None = None,
+    maximum_candidates: int | None = None,
+    cancel_event: Event | None = None,
 ) -> ConstrainedICPResult:
     """Refine metric S2 points in floor-local yaw/x/y only; never unlocks other axes.
 
@@ -439,6 +447,12 @@ def refine_registration_candidates(
     started = time.monotonic()
     if profile.checksum() != profile.profile_checksum:
         raise ValueError("registration search profile checksum mismatch")
+    if runtime_budget_seconds is not None and runtime_budget_seconds < 1:
+        raise ValueError("registration runtime budget override must be positive")
+    if maximum_candidates is not None and maximum_candidates < 1:
+        raise ValueError("registration candidate limit must be positive")
+    if cancel_event is not None and cancel_event.is_set():
+        raise RegistrationCancelledError("registration solver cancelled")
     if target_floor.frame != "world":
         raise ValueError("target floor evidence must use canonical world coordinates")
     if not source_frame or source_frame == "world":
@@ -468,11 +482,14 @@ def refine_registration_candidates(
     refined: list[RefinedRegistrationCandidate] = []
     iterations = 0
     budget_exhausted = False
-    deadline = started + profile.runtime_budget_seconds
-    candidates_to_refine = coarse_result.candidates[: profile.top_k_candidates]
+    deadline = started + min(profile.runtime_budget_seconds, runtime_budget_seconds or profile.runtime_budget_seconds)
+    candidate_limit = min(profile.top_k_candidates, maximum_candidates or profile.top_k_candidates)
+    candidates_to_refine = coarse_result.candidates[:candidate_limit]
     if coarse_result.state in {RegistrationProposalState.FAILED, RegistrationProposalState.INSUFFICIENT}:
         candidates_to_refine = ()
     for candidate in candidates_to_refine:
+        if cancel_event is not None and cancel_event.is_set():
+            raise RegistrationCancelledError("registration solver cancelled")
         if time.monotonic() >= deadline:
             budget_exhausted = True
             candidate_findings.append((candidate.candidate_id, RegistrationFindingCode.SEARCH_BUDGET_EXCEEDED))
@@ -486,6 +503,7 @@ def refine_registration_candidates(
                 floor_from_world,
                 profile,
                 deadline,
+                cancel_event,
             )
             refined.append(item)
             iterations += item.iterations

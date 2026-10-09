@@ -15,6 +15,7 @@ from typing import TypeVar
 from pydantic import BaseModel, ValidationError
 
 from src.models.contracts.artifacts import ArtifactRef
+from src.models.contracts.identity import artifact_model_payload
 from src.services.orchestration.artifacts.checksum import sha256_bytes, verify_file_checksum
 from src.services.orchestration.artifacts.errors import (
     ArtifactAlreadyExistsError,
@@ -199,8 +200,7 @@ class FilesystemArtifactStore:
 
     def publish_model(self, reference: ArtifactRef, model: BaseModel) -> ArtifactRef:
         """Publish deterministic UTF-8 JSON produced from a validated model."""
-        payload = model.model_dump_json(indent=2).encode("utf-8") + b"\n"
-        return self.publish(reference, payload)
+        return self.publish(reference, artifact_model_payload(model))
 
     @staticmethod
     def _atomic_create(destination: Path, payload: bytes) -> None:

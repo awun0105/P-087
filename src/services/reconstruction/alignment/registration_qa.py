@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 
 from src.models.contracts.artifacts import ProductArtifactRef
+from src.models.contracts.identity import artifact_model_checksum
 from src.models.contracts.rgb_lidar_registration import (
     RegistrationFindingCode,
     RegistrationInputMode,
@@ -50,7 +51,7 @@ def build_registration_qa_report(
     """
     if (
         proposal_ref.artifact_type != "RegistrationProposalArtifact"
-        or proposal_ref.artifact_checksum != proposal.proposal_checksum
+        or proposal_ref.artifact_checksum != artifact_model_checksum(proposal)
         or proposal_ref.job_id != request.target_job_id
         or not proposal_ref.artifact_uri.startswith(f"artifact://jobs/{request.target_job_id}/")
     ):

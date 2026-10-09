@@ -15,7 +15,7 @@ baseline, không buộc feature mới giữ mọi assumptions cũ. ADR Proposed 
 được tự đánh dấu Accepted hoặc Implemented. Sửa invariant hiện có không cần
 phát minh policy mới; extension contract phải review cả producer và consumers.
 
-Plan hiện có 26 active packages/91 sprint slices; AUD-25 giữ 6 sprint Deferred làm tham khảo.
+Plan hiện có 26 active packages/92 sprint slices; AUD-25 giữ 6 sprint Deferred làm tham khảo.
 Không nhận hoặc implement sprint của AUD-25 nếu owner chưa yêu cầu mở lại.
 Đọc GEMINI_FINDINGS.md khi xử lý AUD-12–18:
 clearance/timing trong log có điều kiện cụ thể, không là general safety/speed
