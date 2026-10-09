@@ -132,6 +132,8 @@ export interface SceneSummary {
   project: StudioProject;
   latest_job: JobManifest | null;
   preview_ready: boolean;
+  /** Job mới nhất đang chờ người upload xem bản đã che mặt; API cũ không gửi trường này. */
+  awaiting_anonymization_review?: boolean;
   /** Caller-specific ownership decision; absent on older APIs is treated as denied. */
   capabilities?: { can_delete_project: boolean };
   /** Thời gian máy đã xử lý (tổng các bước đã chạy xong), không gồm lúc xếp hàng và lúc chờ người dùng; null = chưa đo. */

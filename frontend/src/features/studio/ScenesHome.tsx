@@ -95,7 +95,7 @@ export function ScenesHome() {
     const needle = query.trim().toLowerCase();
     return (scenes ?? []).filter(
       (scene) => {
-        const group = sceneStatus(scene.latest_job, scene.preview_ready).group;
+        const group = sceneStatus(scene.latest_job, scene.preview_ready, scene.awaiting_anonymization_review).group;
         return (!needle || scene.project.name.toLowerCase().includes(needle)) &&
                (filter === "all" || group === filter || (filter === "needs_action" && (group === "action" || group === "failed")));
       }
@@ -105,7 +105,7 @@ export function ScenesHome() {
   const pagination = pageSlice(shown, params.get("page"), 12);
   const filteredImports = imports.filter((item) => item.name.toLowerCase().includes(query.trim().toLowerCase())).sort((a, b) => sort === "name" ? a.name.localeCompare(b.name, "vi") : Date.parse(b.created_at) - Date.parse(a.created_at));
   const importPage = pageSlice(filteredImports, params.get("importsPage"), 12);
-  const anyActive = (scenes?.some((scene) => sceneStatus(scene.latest_job, scene.preview_ready).active) ?? true)
+  const anyActive = (scenes?.some((scene) => sceneStatus(scene.latest_job, scene.preview_ready, scene.awaiting_anonymization_review).active) ?? true)
     || imports.some((item) => item.status === "PACKAGING");
   usePolling(load, signedIn && anyActive ? 4000 : 20000, true);
 
@@ -300,7 +300,7 @@ export function ScenesHome() {
 
 function SceneCard({ scene }: { scene: SceneSummary }) {
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
-  const status = sceneStatus(scene.latest_job, scene.preview_ready);
+  const status = sceneStatus(scene.latest_job, scene.preview_ready, scene.awaiting_anonymization_review);
   const job = scene.latest_job;
   const created = scene.project.created_at ? DATE.format(new Date(scene.project.created_at)) : null;
   // Frame đầu chỉ có sau khi trích frame; trước đó (hoặc ảnh lỗi) giữ icon.
@@ -388,7 +388,7 @@ function SceneTable({ scenes, me, onChanged }: { scenes: SceneSummary[]; me: Me 
         </TableHeader>
         <TableBody>
           {scenes.map((scene) => {
-            const status = sceneStatus(scene.latest_job, scene.preview_ready);
+            const status = sceneStatus(scene.latest_job, scene.preview_ready, scene.awaiting_anonymization_review);
             const job = scene.latest_job;
             const targetHref = job
               ? scene.preview_ready

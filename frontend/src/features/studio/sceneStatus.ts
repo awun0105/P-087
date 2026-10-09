@@ -21,8 +21,9 @@ export interface SceneStatusView {
  * Không có nhãn "Sẵn sàng" chung: có preview không có nghĩa là sẵn sàng mô phỏng. Nhãn chỉ nói
  * điều danh sách biết chắc từ JobManifest; trạng thái vật thể/gói/duyệt nằm trong màn scene.
  */
-export function sceneStatus(job: JobManifest | null, previewReady: boolean): SceneStatusView {
+export function sceneStatus(job: JobManifest | null, previewReady: boolean, awaitingReview = false): SceneStatusView {
   if (job === null) return { label: "Chưa xử lý", tone: "neutral", active: false, group: "idle" };
+  if (awaitingReview) return { label: "Cần xem bản đã che", tone: "ochre", active: false, group: "action" };
   const confirmed = job.stage_artifacts.some((item) => item.stage_id === "ST-METRIC-CANONICALIZE");
   return deriveStatus(job.status, job.current_stage, job.current_stage === "ST-METRIC-CANONICALIZE" && previewReady && !confirmed);
 }
