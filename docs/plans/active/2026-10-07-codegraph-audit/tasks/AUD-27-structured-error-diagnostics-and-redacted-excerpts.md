@@ -362,3 +362,9 @@ DONE khi S1 và S2 tick đủ Exit. S3 có thể hoàn tất sau.
       ```
 
     - Chưa dispatch attempt pipeline thật; dòng trên kiểm tra formatter/filter bằng context tổng hợp, không phải runtime worker evidence. Không có LiDAR QA stage trong dữ liệu browser hiện tại để kiểm tra màn hình QA mới.
+
+### Sửa sau review (2026-10-09)
+
+- Đoạn log của lệnh lỗi được cắt theo byte (`_log_since`), khớp với vị trí lấy từ `st_size`; trước đó cắt theo
+  ký tự nên lệch khi log có ký tự ngoài ASCII.
+- `redacted_excerpt` giữ phần cuối của một dòng đơn dài hơn ngân sách byte thay vì trả danh sách rỗng.

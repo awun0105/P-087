@@ -550,3 +550,19 @@ def test_colmap_registration_low_details(tmp_path: Path) -> None:
     assert stage.error.details["registered_frames"] == 3
     assert stage.error.details["input_frames"] == 4
     assert stage.error.details["min_registered_ratio"] == 1.0
+
+
+def test_excerpt_keeps_tail_of_a_single_oversized_line_and_slices_log_by_bytes(tmp_path: Path) -> None:
+    from src.services.reconstruction.adapters.colmap_runtime import _log_since
+    from src.services.reconstruction.adapters.log_excerpt import redacted_excerpt
+
+    excerpt = redacted_excerpt("x" * 5000 + "END", tmp_path, max_bytes=100)
+    assert len(excerpt) == 1 and excerpt[0].endswith("END") and len(excerpt[0].encode()) <= 100
+
+    log = tmp_path / "process.log"
+    log.write_text("lệnh trước: đã xong\n", encoding="utf-8")
+    offset = log.stat().st_size
+    with log.open("a", encoding="utf-8") as handle:
+        handle.write("lệnh sau: lỗi\n")
+    assert _log_since(log, offset) == "lệnh sau: lỗi\n"
+    assert _log_since(tmp_path / "missing.log", 0) == ""

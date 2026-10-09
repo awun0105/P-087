@@ -41,7 +41,10 @@ def redacted_excerpt(
     def total_bytes(items: list[str]) -> int:
         return sum(len(line.encode("utf-8")) for line in items)
 
-    while lines and total_bytes(lines) > max_bytes:
+    while len(lines) > 1 and total_bytes(lines) > max_bytes:
         lines.pop(0)
+    if total_bytes(lines) > max_bytes:
+        # Một dòng đơn dài hơn ngân sách: giữ phần cuối của nó thay vì trả đoạn trích rỗng.
+        lines = [lines[0].encode("utf-8")[-max_bytes:].decode("utf-8", errors="ignore")]
 
     return lines

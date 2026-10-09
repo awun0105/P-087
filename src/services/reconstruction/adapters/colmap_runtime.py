@@ -55,6 +55,14 @@ class ColmapError(ValueError):
         )
 
 
+def _log_since(log_path: Path, offset: int) -> str:
+    """Phần log ghi sau `offset` (tính theo byte, như `st_size`); file không đọc được thì rỗng."""
+    try:
+        return log_path.read_bytes()[offset:].decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
 class ColmapProcess:
     """Mỗi invocation có output/exit record; không coi exit 0 là artifact success."""
 
@@ -83,9 +91,7 @@ class ColmapProcess:
                 )
             except subprocess.TimeoutExpired as error:
                 log.write("\nCOLMAP_TIMEOUT\n")
-                new_log = (
-                    log_path.read_text(encoding="utf-8", errors="replace")[log_offset:] if log_path.exists() else ""
-                )
+                new_log = _log_since(log_path, log_offset)
                 excerpt = redacted_excerpt(new_log, workspace)
                 raise ColmapError(
                     "COLMAP_TIMEOUT",
@@ -97,7 +103,7 @@ class ColmapProcess:
                 raise ColmapError("COLMAP_UNAVAILABLE", "Cannot start configured COLMAP runtime") from error
             log.write(json.dumps({"returncode": result.returncode, "elapsed_seconds": time.monotonic() - start}) + "\n")
         if result.returncode:
-            new_log = log_path.read_text(encoding="utf-8", errors="replace")[log_offset:] if log_path.exists() else ""
+            new_log = _log_since(log_path, log_offset)
             excerpt = redacted_excerpt(new_log, workspace)
             if result.returncode in {-9, 137} or "std::bad_alloc" in new_log:
                 raise ColmapError(
