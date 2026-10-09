@@ -4,8 +4,8 @@ Date: 2026-10-07
 
 ## Status
 
-Proposed — scope mở rộng theo yêu cầu owner; không tự đổi self_attested hay
-qa_verified authorization của implementation hiện có.
+Accepted (owner, 2026-10-09) với phạm vi ở mục 6–9: che tự động, người upload chấp nhận bản đã che,
+`qa_verified` = bắt buộc che. Các phần "manual correction" và reviewer riêng ở mục 2–3 không triển khai.
 
 ## Context
 
