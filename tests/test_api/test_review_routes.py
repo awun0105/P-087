@@ -43,11 +43,12 @@ def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
         get_user=lambda user_id: _user("reviewer") if user_id == "u-reviewer" else None,
     )
     monkeypatch.setattr(auth, "auth_service", lambda: service)
+    state = review_state(registry, job.job_id)
     body = {
         "decision": "APPROVE",
         "candidate_checksum": candidate,
         "validation_report_checksum": report.report_checksum,
-        "accepted_warning_ids": [],
+        "accepted_warning_ids": list(state.warning_ids),
     }
     return SimpleNamespace(
         client=TestClient(app),

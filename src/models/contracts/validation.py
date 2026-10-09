@@ -97,8 +97,8 @@ class CandidateManifest(ContractModel):
     collider_refs: list[ProductArtifactRef]
     artifact_checksums: list[Checksum]
     build_config_checksum: Checksum
-    collision_source_ref: ProductArtifactRef | None = None
-    collision_selection_ref: ProductArtifactRef | None = None
+    collision_source_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    collision_selection_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def _validate_collision_source_pair(self) -> Self:

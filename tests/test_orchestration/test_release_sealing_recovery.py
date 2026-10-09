@@ -33,6 +33,27 @@ from src.services.orchestration.scene.objects import add_box_object
 from tests.test_orchestration.test_review_workflow import _install_worker_run, _packaged, _report
 
 
+def _approve(
+    registry: ProjectRegistry,
+    job_id: str,
+    candidate: str,
+    report_checksum: str,
+    reviewer_id: str = "u-rev",
+    reason: str | None = None,
+):
+    warnings = review_state(registry, job_id).warning_ids
+    return decide(
+        registry,
+        job_id,
+        reviewer_id,
+        ApprovalDecision.APPROVE,
+        candidate,
+        report_checksum,
+        warnings,
+        reason,
+    )
+
+
 def test_retry_after_archive_publish_failure_reuses_frozen_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -60,16 +81,7 @@ def test_retry_after_archive_publish_failure_reuses_frozen_manifest(
         return publish(reference, payload)
 
     monkeypatch.setattr(store, "publish", publish_with_manifest_failure)
-    approved = decide(
-        registry,
-        job.job_id,
-        "u-rev",
-        ApprovalDecision.APPROVE,
-        candidate,
-        report.report_checksum,
-        [],
-        None,
-    )
+    approved = _approve(registry, job.job_id, candidate, report.report_checksum)
 
     assert approved.record.status == SceneRevisionStatus.APPROVED
     assert approved.approval is not None
@@ -160,16 +172,7 @@ def test_existing_release_without_seal_intent_remains_readable(tmp_path: Path) -
     report = _report(candidate)
     _install_worker_run(registry, job, review_state(registry, job.job_id).package, report)
 
-    released = decide(
-        registry,
-        job.job_id,
-        "u-rev",
-        ApprovalDecision.APPROVE,
-        candidate,
-        report.report_checksum,
-        [],
-        None,
-    )
+    released = _approve(registry, job.job_id, candidate, report.report_checksum)
     assert released.record.status == SceneRevisionStatus.RELEASED
     assert registry.persistence is not None
     with registry.persistence.database.transaction(write=True) as tx:
@@ -199,9 +202,7 @@ def test_archive_publish_failure_is_persisted_and_retry_completes(
         return publish(reference, payload)
 
     monkeypatch.setattr(store, "publish", fail_archive_once)
-    approved = decide(
-        registry, job.job_id, "u-rev", ApprovalDecision.APPROVE, candidate, report.report_checksum, [], None
-    )
+    approved = _approve(registry, job.job_id, candidate, report.report_checksum)
 
     assert approved.record.status == SceneRevisionStatus.APPROVED
     assert approved.release_seal_error is not None
@@ -234,9 +235,7 @@ def test_crash_after_manifest_before_seal_marker_reuses_all_bytes(
         return mark_sealed(repository, intent)
 
     monkeypatch.setattr(ReleaseSealRepository, "mark_sealed", fail_marker_once)
-    approved = decide(
-        registry, job.job_id, "u-rev", ApprovalDecision.APPROVE, candidate, report.report_checksum, [], None
-    )
+    approved = _approve(registry, job.job_id, candidate, report.report_checksum)
     manifest_path = registry.runtime_resolver.locate(release_uri(job.job_id, candidate))
     archive_uri = f"artifact://jobs/{job.job_id}/release/{candidate.removeprefix('sha256:')}/release.zip"
     archive_path = registry.runtime_resolver.locate(archive_uri)
@@ -259,9 +258,7 @@ def test_missing_archive_is_rebuilt_from_frozen_identity(tmp_path: Path) -> None
     registry, job, candidate = _packaged(tmp_path)
     report = _report(candidate)
     _install_worker_run(registry, job, review_state(registry, job.job_id).package, report)
-    released = decide(
-        registry, job.job_id, "u-rev", ApprovalDecision.APPROVE, candidate, report.report_checksum, [], None
-    )
+    released = _approve(registry, job.job_id, candidate, report.report_checksum)
     assert released.record.status == SceneRevisionStatus.RELEASED
     archive_uri = f"artifact://jobs/{job.job_id}/release/{candidate.removeprefix('sha256:')}/release.zip"
     archive_path = registry.runtime_resolver.locate(archive_uri)
@@ -282,9 +279,7 @@ def test_corrupt_existing_archive_fails_closed_and_is_never_overwritten(tmp_path
     registry, job, candidate = _packaged(tmp_path)
     report = _report(candidate)
     _install_worker_run(registry, job, review_state(registry, job.job_id).package, report)
-    released = decide(
-        registry, job.job_id, "u-rev", ApprovalDecision.APPROVE, candidate, report.report_checksum, [], None
-    )
+    released = _approve(registry, job.job_id, candidate, report.report_checksum)
     assert released.record.status == SceneRevisionStatus.RELEASED
     archive_uri = f"artifact://jobs/{job.job_id}/release/{candidate.removeprefix('sha256:')}/release.zip"
     archive_path = registry.runtime_resolver.locate(archive_uri)
@@ -306,9 +301,7 @@ def test_api_manifest_bytes_must_match_the_frozen_zip_payload(tmp_path: Path) ->
     registry, job, candidate = _packaged(tmp_path)
     report = _report(candidate)
     _install_worker_run(registry, job, review_state(registry, job.job_id).package, report)
-    released = decide(
-        registry, job.job_id, "u-rev", ApprovalDecision.APPROVE, candidate, report.report_checksum, [], None
-    )
+    released = _approve(registry, job.job_id, candidate, report.report_checksum)
     assert released.record.status == SceneRevisionStatus.RELEASED
     manifest_path = registry.runtime_resolver.locate(release_uri(job.job_id, candidate))
     assert manifest_path is not None
@@ -328,9 +321,7 @@ def test_release_archive_rejects_unexpected_zip_members(tmp_path: Path) -> None:
     registry, job, candidate = _packaged(tmp_path)
     report = _report(candidate)
     _install_worker_run(registry, job, review_state(registry, job.job_id).package, report)
-    released = decide(
-        registry, job.job_id, "u-rev", ApprovalDecision.APPROVE, candidate, report.report_checksum, [], None
-    )
+    released = _approve(registry, job.job_id, candidate, report.report_checksum)
     assert released.record.status == SceneRevisionStatus.RELEASED
     assert released.package is not None and released.package.package_ref is not None
     assert released.release is not None and released.release_archive is not None
@@ -360,9 +351,7 @@ def test_pre_intent_partial_archive_is_adopted_without_changing_manifest_bytes(t
     registry, job, candidate = _packaged(tmp_path)
     report = _report(candidate)
     _install_worker_run(registry, job, review_state(registry, job.job_id).package, report)
-    released = decide(
-        registry, job.job_id, "u-rev", ApprovalDecision.APPROVE, candidate, report.report_checksum, [], None
-    )
+    released = _approve(registry, job.job_id, candidate, report.report_checksum)
     assert released.record.status == SceneRevisionStatus.RELEASED
     manifest_path = registry.runtime_resolver.locate(release_uri(job.job_id, candidate))
     archive_uri = f"artifact://jobs/{job.job_id}/release/{candidate.removeprefix('sha256:')}/release.zip"
@@ -390,9 +379,7 @@ def test_two_registries_concurrently_seal_the_same_identity(tmp_path: Path, monk
     monkeypatch.setattr(
         workflow, "seal_release", lambda current_registry, _job_id: review_state(current_registry, _job_id)
     )
-    approved = decide(
-        registry, job.job_id, "u-rev", ApprovalDecision.APPROVE, candidate, report.report_checksum, [], None
-    )
+    approved = _approve(registry, job.job_id, candidate, report.report_checksum)
     assert approved.record.status == SceneRevisionStatus.APPROVED
     assert registry.execution_profile is not None
     second_registry = ProjectRegistry(
@@ -438,9 +425,7 @@ def test_stale_candidate_cannot_be_sealed_after_scene_revision_changes(
     monkeypatch.setattr(
         workflow, "seal_release", lambda current_registry, _job_id: review_state(current_registry, _job_id)
     )
-    approved = decide(
-        registry, job.job_id, "u-rev", ApprovalDecision.APPROVE, candidate, report.report_checksum, [], None
-    )
+    approved = _approve(registry, job.job_id, candidate, report.report_checksum)
     assert approved.record.status == SceneRevisionStatus.APPROVED
 
     scene = registry.scene.current(job.job_id).scene
@@ -467,9 +452,7 @@ def test_stale_candidate_change_during_publish_stays_uncommitted(
     monkeypatch.setattr(
         workflow, "seal_release", lambda current_registry, _job_id: review_state(current_registry, _job_id)
     )
-    approved = decide(
-        registry, job.job_id, "u-rev", ApprovalDecision.APPROVE, candidate, report.report_checksum, [], None
-    )
+    approved = _approve(registry, job.job_id, candidate, report.report_checksum)
     assert approved.record.status == SceneRevisionStatus.APPROVED
     assert approved.approval is not None
 
