@@ -177,6 +177,7 @@ def create_scene_from_upload(
         presets, presets_checksum = deps.presets()
         capability = deps.capability()
         params = request.processing or preset_values(presets, "minimum_quality")
+        anonymize = deps.require_anonymize(request.anonymize)
         try:
             observed = deps.observed_resource_budget(
                 registry,
@@ -191,6 +192,7 @@ def create_scene_from_upload(
                 params,
                 capability,
                 colmap_use_gpu=getattr(settings, "product_colmap_use_gpu", False),
+                anonymize=anonymize,
             )
         except ValueError as error:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error

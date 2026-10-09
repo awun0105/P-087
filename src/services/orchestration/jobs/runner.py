@@ -751,8 +751,8 @@ def _execute_prepare(attempt: _Attempt, profile: ResolvedProcessing) -> JobManif
         "privacy_mode": "self_attested",
         "sample_fps": profile.sample_fps,
         "max_frames": profile.max_frames,
-        # Settings giả trong test và profile cũ không có trường này: mặc định tắt.
-        "anonymize": getattr(attempt.settings, "product_anonymize_input", False),
+        # Job tự chọn, hoặc deployment bắt buộc cho mọi job. Settings giả trong test không có trường này.
+        "anonymize": profile.anonymize or getattr(attempt.settings, "product_anonymize_input", False),
     }
     request_path = attempt.workspace / "prepare.request.json"
     with request_path.open("x", encoding="utf-8") as stream:

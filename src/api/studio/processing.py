@@ -27,6 +27,10 @@ class ProcessingOptions(BaseModel):
     capability: MachineCapability | None
     default_evaluation: Evaluation
     resource_note: str
+    #: Deployment có bộ che khuôn mặt/biển số (AUD-18): UI mới hiện lựa chọn tự động che.
+    anonymize_available: bool = False
+    #: Deployment bắt buộc che cho mọi job; UI hiện lựa chọn ở trạng thái đã bật và không cho tắt.
+    anonymize_enforced: bool = False
 
 
 class EvaluateRequest(BaseModel):
@@ -62,6 +66,8 @@ def get_processing_options() -> ProcessingOptions:
         capability=capability,
         default_evaluation=evaluate(presets, minimum, capability, observed=observed),
         resource_note=presets.resource_model.note,
+        anonymize_available=deps.anonymizer_available(),
+        anonymize_enforced=deps.anonymizer_available() and getattr(settings, "product_anonymize_input", False),
     )
 
 

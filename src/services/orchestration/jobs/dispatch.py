@@ -75,6 +75,8 @@ class ResolvedProcessing:
     brush: dict
     sample_fps: float
     max_frames: int
+    #: Job chọn che khuôn mặt/biển số trước khi dựng 3D (AUD-18).
+    anonymize: bool = False
 
 
 def resolve_job_processing(
@@ -108,4 +110,5 @@ def resolve_job_processing(
         dict(config.brush),
         float(config.sampling["sample_fps"]),
         int(config.sampling["max_frames"]),
+        config.anonymize,
     )

@@ -136,6 +136,8 @@ class AssemblyRunRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     attestation: SourceRightsAttestation
     processing: dict[str, int | float | str] | None = None
+    #: Tự động che khuôn mặt/biển số trên frame trước khi dựng 3D (AUD-18).
+    anonymize: bool = False
 
 
 class AssemblyRunResponse(BaseModel):
@@ -436,6 +438,7 @@ def run_input_assembly(
                 params,
                 capability,
                 colmap_use_gpu=getattr(settings, "product_colmap_use_gpu", False),
+                anonymize=deps.require_anonymize(request.anonymize),
             )
         except ValueError as error:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
@@ -576,6 +579,7 @@ def run_input_assembly(
             name=request.name,
             attestation=request.attestation,
             processing=request.processing,
+            anonymize=request.anonymize,
             lidar=lidar_attachment,
         )
         project = registry.create_project_from_input_assembly(

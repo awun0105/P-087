@@ -131,6 +131,26 @@ def observed_resource_budget(
     )
 
 
+def anonymizer_available() -> bool:
+    """Deployment đã cấu hình bộ che khuôn mặt/biển số (AUD-18). API và worker phải đặt cùng giá trị."""
+    current = settings()
+    # Settings giả trong test có thể thiếu trường mới: coi như chưa cấu hình.
+    return (
+        getattr(current, "product_scene_runtime_python", None) is not None
+        and getattr(current, "product_egoblur_weights", None) is not None
+    )
+
+
+def require_anonymize(requested: bool) -> bool:
+    """Giá trị `anonymize` ghi vào cấu hình job; yêu cầu che trên deployment không có anonymizer bị từ chối."""
+    if requested and not anonymizer_available():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Máy xử lý chưa cấu hình bộ che khuôn mặt/biển số; bỏ chọn tự động che hoặc báo quản trị viên",
+        )
+    return requested or (anonymizer_available() and getattr(settings(), "product_anonymize_input", False))
+
+
 def preview_ready(project_registry: ProjectRegistry, job_id: str) -> bool:
     """Preview 3DGS đã commit và verify được (không dùng file lẻ trên đĩa)."""
     try:

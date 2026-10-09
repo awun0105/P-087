@@ -176,3 +176,6 @@ class JobProcessingConfig(BaseModel):
     sampling: dict[str, float | int]
     colmap: dict[str, ParamValue | bool]
     brush: dict[str, ParamValue | bool]
+    #: Che khuôn mặt/biển số trên frame trước khi dựng 3D (AUD-18). Chỉ ghi khi bật, để bytes cấu hình của job
+    #: không chọn che giữ nguyên như trước.
+    anonymize: bool = Field(default=False, exclude_if=lambda value: value is False)

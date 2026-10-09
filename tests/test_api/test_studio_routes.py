@@ -928,3 +928,45 @@ async def test_simulation_read_build_and_download_require_editor_when_auth_is_en
     ]
 
     assert [response.status_code for response in responses] == [401, 401, 401]
+
+
+@pytest.mark.asyncio
+async def test_anonymize_option_is_offered_and_recorded_only_with_a_configured_anonymizer(
+    client: AsyncClient, studio: SimpleNamespace, tmp_path: Path
+) -> None:
+    import json
+
+    from src.services.orchestration.processing import job_config_reference
+
+    async def create(name: str, **extra: object):  # noqa: ANN202
+        upload = await _upload(client)
+        return await client.post(
+            "/api/v1/scenes/from-upload",
+            json={"upload_id": upload["upload_id"], "name": name, "attestation": _ATTESTATION, **extra},
+        )
+
+    def stored(response) -> dict:  # noqa: ANN001
+        job = response.json()["job"]
+        reference = job_config_reference(job["job_id"], job["config_checksum"])
+        return json.loads(studio.registry.runtime_resolver.require(reference).read_text())
+
+    # Chưa cấu hình anonymizer: UI không được mời chọn, và yêu cầu che bị từ chối thay vì âm thầm bỏ qua.
+    options = (await client.get("/api/v1/processing/options")).json()
+    assert options["anonymize_available"] is False and options["anonymize_enforced"] is False
+    refused = await create("Che khi chưa có", anonymize=True)
+    assert refused.status_code == 409 and "che khuôn mặt" in refused.json()["detail"]
+    plain = await create("Không che")
+    assert plain.status_code == 201 and "anonymize" not in stored(plain)
+
+    studio.settings.product_scene_runtime_python = tmp_path / "python"
+    studio.settings.product_egoblur_weights = tmp_path / "weights"
+    options = (await client.get("/api/v1/processing/options")).json()
+    assert options["anonymize_available"] is True and options["anonymize_enforced"] is False
+    chosen = await create("Có che", anonymize=True)
+    assert chosen.status_code == 201 and stored(chosen)["anonymize"] is True
+    assert "anonymize" not in stored(await create("Vẫn không che"))
+
+    # Deployment bắt buộc: job không chọn vẫn được ghi là có che.
+    studio.settings.product_anonymize_input = True
+    assert (await client.get("/api/v1/processing/options")).json()["anonymize_enforced"] is True
+    assert stored(await create("Bắt buộc che"))["anonymize"] is True

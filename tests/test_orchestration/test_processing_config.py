@@ -517,3 +517,19 @@ def test_calibration_script_imports_and_parses_arguments() -> None:
     script = Path(__file__).resolve().parents[2] / "scripts/resources/calibrate_resource_model.py"
     done = subprocess.run([sys.executable, str(script), "--help"], capture_output=True, text=True, check=False)
     assert done.returncode == 0, done.stderr
+
+
+def test_anonymize_is_recorded_only_when_chosen() -> None:
+    """Job không chọn che giữ nguyên bytes cấu hình cũ; job chọn che có cấu hình (và checksum) khác."""
+    import json
+
+    presets, checksum = load_presets(PRESETS)
+    params = preset_values(presets, "minimum_quality")
+    plain = build_job_config(presets, checksum, params, _machine(cpu=8))
+    chosen = build_job_config(presets, checksum, params, _machine(cpu=8), anonymize=True)
+
+    assert "anonymize" not in json.loads(config_bytes(plain))
+    assert json.loads(config_bytes(chosen))["anonymize"] is True
+    assert config_bytes(plain) != config_bytes(chosen)
+    assert type(chosen).model_validate_json(config_bytes(plain)).anonymize is False
+    assert type(chosen).model_validate_json(config_bytes(chosen)).anonymize is True

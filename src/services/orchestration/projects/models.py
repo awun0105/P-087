@@ -95,6 +95,8 @@ class UploadProjectInput(BaseModel):
     attestation: SourceRightsAttestation
     #: Thông số xử lý theo file cấu hình chung; None → preset "tối thiểu cho chất lượng tốt".
     processing: dict[str, int | float | str] | None = None
+    #: Tự động che khuôn mặt/biển số trên frame trước khi dựng 3D (AUD-18); chỉ nhận khi deployment có anonymizer.
+    anonymize: bool = False
     #: Gói LiDAR đi kèm video (ADR 0009); None = job chỉ có video.
     lidar: "LidarAttachment | None" = None
 
