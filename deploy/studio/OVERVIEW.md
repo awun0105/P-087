@@ -73,7 +73,7 @@ ghi vào trong repo. Ba file `api.env.example`, `worker.env.example`, `web.env.e
 - **Runtime manifest gắn với từng máy.** File ghi model GPU và phiên bản driver. Job mang checksum của manifest
   trên API, và worker từ chối job có checksum khác manifest của nó. Đổi pod sang GPU hoặc driver khác thì phải
   chép manifest mới lên API và khởi động lại API. Hai pod khác loại GPU không dùng chung một API được.
-- **Chế độ privacy là quyết định của owner và không có mặc định trong file gốc.** `self_attested`: người upload
+- **Chế độ privacy mặc định là `self_attested`** (chạy được khi pod chưa có bộ che). `self_attested`: người upload
   tự cam kết, che là lựa chọn theo từng job. `qa_verified`: mọi video bị che tự động, và job có frame bị che
   dừng chờ người upload xác nhận rồi mới dựng 3D; chế độ này cần bộ che ở worker, thiếu thì `check` báo lỗi.
 - **`PRODUCT_COLMAP_USE_GPU` do API quyết định.** API ghi giá trị vào cấu hình job, worker chỉ thực thi. Nó nằm ở

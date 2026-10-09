@@ -312,13 +312,12 @@ autoscaling with live credentials until that boundary is reviewed.  A provider
 deployment and a browser/GPU end-to-end run remain external proof requirements;
 these templates do not claim them.
 
-The production source leaves `PRODUCT_PRIVACY_MODE` empty on purpose. The
-new-video routes in `src/api/studio/scenes.py` and `assemblies.py` accept only
-`self_attested`, so they stay closed under `qa_verified`. Imported, previously
-published data can still be restored; enabling new production video processing
-needs an approved QA upload flow or an explicit owner policy decision.
-`scripts.studio.deploy_env check` reports an empty value and `qa_verified` as
-errors so the choice is made knowingly; it does not pick a mode for the owner.
+The production source sets `PRODUCT_PRIVACY_MODE=self_attested` (owner decision
+2026-10-09): uploaders attest their video has no faces or plates and may opt in
+to automatic masking per job. `qa_verified` masks every Studio video upload and,
+when any frame was redacted, pauses the job until the uploader accepts the
+redacted frames (AUD-18, ADR 0019). It needs the EgoBlur weights on the worker;
+`scripts.studio.deploy_env check` reports an error when they are not declared.
 
 The current GPU entrypoint also has a non-secret local fallback for the selected
 LLM key when the environment value is empty.  The template intentionally leaves

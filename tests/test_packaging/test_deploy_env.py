@@ -13,7 +13,6 @@ FILLED = {
     "ARTIFACT_S3_ACCESS_KEY_ID=": "ARTIFACT_S3_ACCESS_KEY_ID=key",
     "ARTIFACT_S3_SECRET_ACCESS_KEY=": "ARTIFACT_S3_SECRET_ACCESS_KEY=secret",
     "REAL2SIM_API_URL=": "REAL2SIM_API_URL=https://api.example.com",
-    "PRODUCT_PRIVACY_MODE=": "PRODUCT_PRIVACY_MODE=self_attested",
     "OPENAI_API_KEY=": "OPENAI_API_KEY=operator-key",
 }
 
@@ -54,9 +53,9 @@ def test_shared_values_reach_api_and_worker_identically_and_never_the_web() -> N
 def test_filled_template_passes_and_unfilled_template_lists_what_is_missing() -> None:
     assert _messages(_filled(), "error") == []
     missing = _messages(EXAMPLE.read_text(encoding="utf-8"), "error")
-    # Mỗi giá trị để trống trong file mẫu đều bị báo; chế độ privacy và khóa LLM không có mặc định ngầm.
+    # Mỗi giá trị để trống trong file mẫu đều bị báo; khóa LLM không có mặc định ngầm.
     assert len(missing) == len(FILLED)
-    assert any("PRODUCT_PRIVACY_MODE chưa có giá trị" in message for message in missing)
+    assert not any("PRODUCT_PRIVACY_MODE" in message for message in missing), "file mẫu đã có chế độ mặc định"
     assert any("OPENAI_API_KEY trống" in message for message in missing)
 
 
