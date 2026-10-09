@@ -46,7 +46,7 @@ function audioPolicyLabel(disposition: VideoPreparedArtifact["manifest"]["audio_
   switch (disposition) {
     case "source_has_no_audio": return "video gốc không có âm thanh";
     case "preserved": return "đã giữ nguyên âm thanh";
-    case "omitted_with_user_consent": return "đã bỏ âm thanh theo lựa chọn của bạn";
+    case "omitted_with_user_consent": return "đã bỏ (bước dựng 3D không dùng âm thanh)";
   }
 }
 
@@ -69,8 +69,6 @@ export function UploadDropzone({
   const [preset, setPreset] = useState<VideoResolutionPreset>("720p");
   const [preparing, setPreparing] = useState(false);
   const [prepareProgress, setPrepareProgress] = useState<VideoPreparationProgress | null>(null);
-  const [omitAudioConsent, setOmitAudioConsent] = useState(false);
-  const [needsAudioConsent, setNeedsAudioConsent] = useState(false);
   const [originalFallback, setOriginalFallback] = useState(false);
   const [pendingUploadRecord, setPendingUploadRecord] = useState<UploadRecord | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
@@ -114,8 +112,6 @@ export function UploadDropzone({
     setPrepared(null);
     setPendingUploadRecord(null);
     setPrepareProgress(null);
-    setNeedsAudioConsent(false);
-    setOmitAudioConsent(false);
     setOriginalFallback(false);
     if (artifact) void artifact.dispose().catch(() => undefined);
   }
@@ -166,13 +162,12 @@ export function UploadDropzone({
     setPendingUploadRecord(null);
     if (kind === "video") {
       setPreset("720p");
-      setNeedsAudioConsent(false);
       return;
     }
     startUpload(uploadVideo(candidate, setProgress, () => setVerifying(true)), candidate.name, candidate.size, "Đã tải lên và kiểm tra file.");
   }
 
-  async function prepareVideo(omitAudioWithConsent = omitAudioConsent) {
+  async function prepareVideo() {
     if (!file || kind !== "video" || preparing || uploading) return;
     preparationAbort.current?.abort();
     const controller = new AbortController();
@@ -181,13 +176,10 @@ export function UploadDropzone({
     setPrepareProgress({ phase: "hashing", progress: 0 });
     setError(null);
     setOriginalFallback(false);
-    setNeedsAudioConsent(false);
-    setOmitAudioConsent(omitAudioWithConsent);
     try {
       const artifact = await prepareVideoForUpload({
         source: file,
         preset,
-        omitAudioWithConsent,
         signal: controller.signal,
         onProgress: setPrepareProgress,
       });
@@ -206,10 +198,6 @@ export function UploadDropzone({
       if (!mounted.current) return;
       if (cause instanceof VideoPreparationError && cause.code === "cancelled") {
         setError("Đã hủy chuẩn bị; video gốc chưa được tải lên.");
-      } else if (cause instanceof VideoPreparationError && cause.code === "audio_omission_required") {
-        setNeedsAudioConsent(true);
-        setOmitAudioConsent(false);
-        setError("Video có âm thanh không tương thích. Bạn có thể đồng ý bỏ âm thanh rồi chuẩn bị lại.");
       } else {
         setError(errorMessage(cause, "Không thể chuẩn bị video; video gốc chưa được tải lên."));
         setOriginalFallback(true);
@@ -317,21 +305,9 @@ export function UploadDropzone({
                   ))}
                 </div>
               </fieldset>
-              {needsAudioConsent && (
-                <label className="mt-3 flex items-start gap-2 text-sm text-ink">
-                  <input
-                    type="checkbox"
-                    checked={omitAudioConsent}
-                    onChange={(event) => setOmitAudioConsent(event.target.checked)}
-                  />
-                  <span>Tôi đồng ý bỏ toàn bộ âm thanh nếu không thể giữ nguyên trong video đã chuẩn bị.</span>
-                </label>
-              )}
               <div className="mt-4 flex flex-wrap gap-2">
-                <Button onClick={() => void prepareVideo()} disabled={preparing || (needsAudioConsent && !omitAudioConsent)}>
-                  {needsAudioConsent && omitAudioConsent ? "Chuẩn bị và bỏ âm thanh" : "Chuẩn bị để xem trước"}
-                </Button>
-                {(originalFallback || needsAudioConsent) && (
+                <Button onClick={() => void prepareVideo()} disabled={preparing}>Chuẩn bị để xem trước</Button>
+                {originalFallback && (
                   <Button variant="secondary" onClick={uploadOriginal} disabled={preparing}>
                     Tải video gốc không nén
                   </Button>

@@ -24,8 +24,6 @@ export interface VideoPreparationProgress {
 export interface VideoPreparationRequest {
   source: File;
   preset?: VideoResolutionPreset;
-  /** True only after the user has explicitly chosen to omit unsupported audio tracks. */
-  omitAudioWithConsent?: boolean;
   signal?: AbortSignal;
   onProgress?: (progress: VideoPreparationProgress) => void;
 }
@@ -196,7 +194,9 @@ export async function prepareVideoForUpload(
       request_id: requestId,
       source_file: request.source,
       preset,
-      omit_audio_with_consent: request.omitAudioWithConsent ?? false,
+      // Owner decision 2026-10-09: normalization always drops audio (reconstruction never reads it). The message
+      // field and the manifest value `omitted_with_user_consent` keep their v1 contract names.
+      omit_audio_with_consent: true,
       output_file_name: outputFileName,
       frame_map_file_name: frameMapFileName,
       selection_file_name: selectionFileName,

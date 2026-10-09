@@ -68,8 +68,7 @@ interface InputEntry {
   preparation: VideoPreparationProgress | null;
   error: string | null;
   /** Lối đi tiếp mà người dùng phải tự chọn khi không chuẩn bị được video; không bao giờ tự áp dụng. */
-  recovery: "omit_audio" | "upload_original" | null;
-  omitAudio: boolean;
+  recovery: "upload_original" | null;
   useOriginal: boolean;
   legacyUploadId: string | null;
   staged: AssemblyUploadResponse | null;
@@ -77,12 +76,6 @@ interface InputEntry {
 
 /** Lý do không chuẩn bị được video, bằng tiếng Việt, kèm lối đi tiếp phù hợp. */
 function preparationFailure(error: VideoPreparationError): { message: string; recovery: InputEntry["recovery"] } {
-  if (error.code === "audio_omission_required" || error.code === "unsupported_audio") {
-    return {
-      message: "Âm thanh của video không giữ nguyên được trong bản đã chuẩn bị. Bước dựng 3D không dùng âm thanh: bạn có thể bỏ âm thanh rồi chuẩn bị lại, hoặc tải video gốc không nén.",
-      recovery: "omit_audio",
-    };
-  }
   const reasons: Partial<Record<VideoPreparationError["code"], string>> = {
     unsupported_codec: "Trình duyệt này không giải mã được codec của video (thường gặp với HEVC/H.265 quay bằng điện thoại).",
     unsupported_media: "Trình duyệt này không đọc được định dạng của video.",
@@ -140,7 +133,6 @@ function newEntry(file: File, isVideo: boolean): InputEntry {
     preparation: null,
     error: null,
     recovery: null,
-    omitAudio: false,
     useOriginal: false,
     legacyUploadId: null,
     staged: null,
@@ -439,7 +431,6 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
             preparation: null,
             error: null,
             recovery: null,
-            omitAudio: false,
             useOriginal: false,
             legacyUploadId: null,
             staged: result.value,
@@ -544,7 +535,6 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         preparation: null,
         error: null,
         recovery: null,
-        omitAudio: false,
         useOriginal: false,
         legacyUploadId,
         staged,
@@ -593,12 +583,11 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     }
   }
 
-  async function uploadOne(entry: InputEntry, choice: { omitAudio?: boolean; useOriginal?: boolean } = {}): Promise<void> {
+  async function uploadOne(entry: InputEntry, choice: { useOriginal?: boolean } = {}): Promise<void> {
     setError(null);
     // Lựa chọn của người dùng đi kèm lời gọi (state chưa kịp cập nhật) và được lưu vào entry cho các lần thử lại.
-    const omitAudio = choice.omitAudio ?? entry.omitAudio;
     const useOriginal = choice.useOriginal ?? entry.useOriginal;
-    if (omitAudio !== entry.omitAudio || useOriginal !== entry.useOriginal) patchEntry(entry.id, { omitAudio, useOriginal });
+    if (useOriginal !== entry.useOriginal) patchEntry(entry.id, { useOriginal });
     if (entry.legacyUploadId && !entry.staged) {
       patchEntry(entry.id, { status: "uploading", progress: null, error: null });
       try {
@@ -621,7 +610,6 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         prepared = await prepareVideoForUpload({
           source: entry.file,
           preset: entry.preset,
-          omitAudioWithConsent: omitAudio,
           signal: controller.signal,
           onProgress: (progress) => patchEntry(entry.id, { preparation: progress }),
         });
@@ -1022,7 +1010,6 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
                         {entry.error && <p className="mt-2 text-sm text-rust" role="alert">{entry.error}</p>}
                         {entry.status === "failed" && entry.recovery && entry.file && (
                           <div className="mt-2 flex flex-wrap gap-2">
-                            {entry.recovery === "omit_audio" && <Button size="sm" onClick={() => void uploadOne(entry, { omitAudio: true })} disabled={busy}>Bỏ âm thanh và chuẩn bị lại</Button>}
                             <Button size="sm" variant="secondary" onClick={() => void uploadOne(entry, { useOriginal: true })} disabled={busy}>Tải video gốc không nén ({formatBytes(entry.file.size)})</Button>
                           </div>
                         )}

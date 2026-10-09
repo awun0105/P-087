@@ -282,25 +282,6 @@ describe("unified input flow", () => {
     expect(window.sessionStorage.getItem("r2s:input-assembly:v1:user-1")).toBeNull();
   });
 
-  it("asks before dropping incompatible audio, and never drops it on its own", async () => {
-    mocks.prepareVideo.mockRejectedValueOnce(new VideoPreparationError("audio_omission_required", "Audio tracks with negative starting timestamps cannot be preserved."));
-    const { container } = render(<UnifiedInputFlow />);
-    const phone = new File(["phone"], "IMG_3911.mp4", { type: "video/mp4" });
-    fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [phone] } });
-    fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(/Âm thanh của video không giữ nguyên được/);
-    expect(mocks.prepareVideo.mock.calls[0][0]).toMatchObject({ omitAudioWithConsent: false });
-    expect(mocks.uploadPrepared).not.toHaveBeenCalled();
-    expect(mocks.uploadAssembly).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole("button", { name: "Bỏ âm thanh và chuẩn bị lại" }));
-    expect(await screen.findByText("Đã xác minh")).toBeInTheDocument();
-    expect(mocks.prepareVideo.mock.calls[1][0]).toMatchObject({ omitAudioWithConsent: true, source: phone });
-    expect(mocks.uploadPrepared).toHaveBeenCalledTimes(1);
-    expect(mocks.uploadAssembly).not.toHaveBeenCalled();
-  });
-
   it("explains an undecodable codec in Vietnamese and uploads the original only on an explicit choice", async () => {
     mocks.prepareVideo.mockRejectedValueOnce(new VideoPreparationError("unsupported_codec", "This browser cannot decode the selected video's codec."));
     mocks.uploadAssembly.mockImplementation((file: File, _account: string, onProgress: (value: number) => void) => {
@@ -313,7 +294,6 @@ describe("unified input flow", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/không giải mã được codec/);
-    expect(screen.queryByRole("button", { name: "Bỏ âm thanh và chuẩn bị lại" })).toBeNull();
     expect(mocks.uploadAssembly).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /Tải video gốc không nén/ }));

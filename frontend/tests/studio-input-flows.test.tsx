@@ -268,7 +268,7 @@ describe("upload lifecycle", () => {
     const preview = await screen.findByLabelText("Xem trước video đã chuẩn bị");
     expect(preview).toHaveAttribute("src", "blob:prepared-video");
     expect(preview).toHaveClass("bg-media-preview-surface");
-    expect(prepareVideoForUpload).toHaveBeenCalledWith(expect.objectContaining({ source, preset: "720p", omitAudioWithConsent: false }));
+    expect(prepareVideoForUpload).toHaveBeenCalledWith(expect.objectContaining({ source, preset: "720p" }));
     expect(uploadPreparedVideo).not.toHaveBeenCalled();
     expect(screen.getByText(/Bản đã chuẩn bị lớn hơn video gốc/)).toBeInTheDocument();
     expect(screen.getByText(/Nguồn: 1080 × 1920 \(dọc\)/)).toBeInTheDocument();
@@ -297,25 +297,18 @@ describe("upload lifecycle", () => {
     expect(uploadPreparedVideo).not.toHaveBeenCalled();
   });
 
-  it("chỉ bỏ âm thanh sau khi có đồng ý rõ ràng", async () => {
+  it("không hỏi về âm thanh: bản đã chuẩn bị luôn bỏ âm thanh và nói rõ điều đó", async () => {
     const artifact = preparedArtifact();
     artifact.manifest.audio_disposition = "omitted_with_user_consent";
-    vi.mocked(prepareVideoForUpload)
-      .mockRejectedValueOnce(new VideoPreparationError("audio_omission_required", "Audio is unsupported."))
-      .mockResolvedValueOnce(artifact);
+    vi.mocked(prepareVideoForUpload).mockResolvedValueOnce(artifact);
     render(<UploadDropzone kind="video" onUploaded={vi.fn()} />);
     const source = new File(["source"], "source.mp4", { type: "video/mp4" });
     fireEvent.change(screen.getByLabelText(/Kéo video/), { target: { files: [source] } });
     fireEvent.click(screen.getByRole("button", { name: "Chuẩn bị để xem trước" }));
 
-    const consent = await screen.findByLabelText(/đồng ý bỏ toàn bộ âm thanh/);
-    expect(screen.getByRole("button", { name: "Chuẩn bị để xem trước" })).toBeDisabled();
-    expect(uploadVideo).not.toHaveBeenCalled();
-    fireEvent.click(consent);
-    fireEvent.click(screen.getByRole("button", { name: "Chuẩn bị và bỏ âm thanh" }));
     await screen.findByLabelText("Xem trước video đã chuẩn bị");
-    expect(prepareVideoForUpload).toHaveBeenLastCalledWith(expect.objectContaining({ source, omitAudioWithConsent: true }));
-    expect(screen.getByText("Âm thanh: đã bỏ âm thanh theo lựa chọn của bạn.")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/đồng ý bỏ toàn bộ âm thanh/)).toBeNull();
+    expect(screen.getByText("Âm thanh: đã bỏ (bước dựng 3D không dùng âm thanh).")).toBeInTheDocument();
     expect(uploadVideo).not.toHaveBeenCalled();
   });
 
