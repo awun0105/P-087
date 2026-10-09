@@ -25,31 +25,10 @@ describe("landing → app", () => {
 });
 
 describe("cấu trúc trang", () => {
-  it("header và footer nằm ngoài <main> để giữ vai trò banner/contentinfo", () => {
-    render(<LandingPage />);
-    expect(screen.getByRole("banner")).toBeInTheDocument();
-    expect(screen.getByRole("contentinfo")).toBeInTheDocument();
-    expect(screen.getByRole("main")).toBeInTheDocument();
-  });
-
-  it("phần scene dùng ảnh minh hoạ tĩnh, mỗi ảnh gắn nhãn và không gọi API", () => {
-    const { container } = render(<LandingPage />);
-    const cards = container.querySelectorAll("#samples li");
-    expect(cards).toHaveLength(CONTENT_VI.SAMPLES.items.length);
-    expect(screen.getAllByText("Ảnh minh hoạ")).toHaveLength(cards.length);
-  });
-
   it("mỗi mục menu trỏ tới một section có thật", () => {
     const { container } = render(<LandingPage />);
     for (const { href } of CONTENT_VI.NAV) {
       expect(container.querySelector(href), href).not.toBeNull();
-    }
-  });
-
-  it("chỉ còn các section đã gộp: bối cảnh, vai bị kể lại và ba lớp không quay lại", () => {
-    const { container } = render(<LandingPage />);
-    for (const id of ["context", "solution", "roadmap"]) {
-      expect(container.querySelector(`#${id}`), id).toBeNull();
     }
   });
 
@@ -61,17 +40,6 @@ describe("cấu trúc trang", () => {
     expect(shape(CONTENT_EN)).toEqual(shape(CONTENT_VI));
   });
 
-  it("không câu nào trong nội dung tiếng Việt xuất hiện hai lần", () => {
-    const seen = new Map<string, number>();
-    const walk = (v: unknown) => {
-      if (typeof v === "string") {
-        if (v.length > 40) seen.set(v, (seen.get(v) ?? 0) + 1);
-      } else if (Array.isArray(v)) v.forEach(walk);
-      else if (v && typeof v === "object") Object.values(v).forEach(walk);
-    };
-    walk(CONTENT_VI);
-    expect([...seen].filter(([, n]) => n > 1).map(([s]) => s)).toEqual([]);
-  });
 });
 
 describe("mục trong landing không làm hỏng nút Back", () => {

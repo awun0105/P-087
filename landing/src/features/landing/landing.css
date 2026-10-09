@@ -155,11 +155,22 @@
   color: var(--studio-on-dark);
   box-shadow: 0 24px 48px -24px color-mix(in srgb, var(--studio-ink) 45%, transparent);
 }
+.lp-viewport ol > li:last-child:nth-child(odd) { grid-column: span 2; }
+@media (min-width: 640px) {
+  .lp-viewport ol > li:last-child:nth-child(odd) { grid-column: auto; }
+}
+
 .lp-svg-label {
   font-family: var(--font-mono);
   font-size: 11px;
 }
 
+.lp-chain-label { color: var(--studio-on-dark); }
+[data-tone="geometry"] > .lp-chain-label { color: color-mix(in srgb, var(--studio-geometry) 55%, var(--studio-on-dark)); }
+[data-tone="ochre"] > .lp-chain-label { color: color-mix(in srgb, var(--studio-ochre) 70%, var(--studio-on-dark)); }
+[data-tone="sage"] > .lp-chain-label { color: color-mix(in srgb, var(--studio-sage) 60%, var(--studio-on-dark)); }
+
+/* Chuyển động duy nhất của trang: đường đi của robot chạy một lần khi tải. */
 .lp-route {
   stroke-dasharray: 520;
   stroke-dashoffset: 520;
@@ -167,6 +178,38 @@
 }
 @keyframes lp-route-draw {
   to { stroke-dashoffset: 0; }
+}
+
+/* ── Ba lớp biểu diễn, xếp lệch như các lớp chồng lên nhau ── */
+.lp-layers {
+  display: grid;
+  gap: 0.75rem;
+}
+.lp-layer {
+  padding: 1rem 1.25rem;
+  border-radius: 10px;
+  border: 1px solid var(--studio-line-dark);
+  border-left-width: 3px;
+  background: var(--studio-viewport-deep);
+}
+@media (min-width: 640px) {
+  .lp-layer:nth-child(2) { margin-left: 1.5rem; }
+  .lp-layer:nth-child(3) { margin-left: 3rem; }
+}
+.lp-layer[data-tone="geometry"] { border-left-color: var(--studio-geometry); }
+.lp-layer[data-tone="ink"] { border-left-color: var(--studio-on-dark); }
+.lp-layer[data-tone="ochre"] { border-left-color: var(--studio-ochre); }
+.lp-layer[data-tone="geometry"] > span:first-child { color: color-mix(in srgb, var(--studio-geometry) 55%, var(--studio-on-dark)); }
+.lp-layer[data-tone="ochre"] > span:first-child { color: color-mix(in srgb, var(--studio-ochre) 70%, var(--studio-on-dark)); }
+
+/* ── Chuyển giao giữa các vai trò ở phần Bài toán ── */
+.lp-handoff-arrow {
+  display: inline-block;
+  width: 1.5rem;
+  height: 1px;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+  background: currentColor;
 }
 
 /* ── Nhãn trạng thái ── */
@@ -242,6 +285,30 @@
   .lp-route { stroke-dashoffset: 0; }
 }
 
+/* ── Bối cảnh: ba bước nối nhau ── */
+.lp-flow {
+  display: grid;
+  gap: 1.5rem;
+}
+@media (min-width: 768px) {
+  .lp-flow { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
+  .lp-flow-step { padding-right: 2rem; border-top: 2px solid var(--studio-ink); padding-top: 1rem; position: relative; }
+  .lp-flow-step:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    top: -6px;
+    right: 1rem;
+    width: 10px;
+    height: 10px;
+    border-top: 2px solid var(--studio-ink);
+    border-right: 2px solid var(--studio-ink);
+    transform: rotate(45deg);
+  }
+}
+@media (max-width: 767px) {
+  .lp-flow-step { border-left: 2px solid var(--studio-ink); padding-left: 1rem; }
+}
+
 /* ── So sánh bản scan / bản soạn thảo ── */
 .lp-compare {
   overflow: hidden;
@@ -253,6 +320,17 @@
   display: block;
   padding: 1rem 1.25rem 1.25rem;
   background: var(--studio-paper-raised);
+}
+
+.lp-consequence {
+  max-width: 48rem;
+  padding: 1.25rem 1.5rem;
+  border-left: 3px solid var(--studio-rust);
+  background: var(--studio-rust-soft);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--studio-ink);
 }
 
 /* ── Bảng vấn đề → cách gỡ ── */
