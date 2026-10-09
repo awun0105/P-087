@@ -139,7 +139,9 @@ class VideoInputPreparer:
                         "Face/plate anonymization was requested but this worker has no anonymizer",
                         "Configure the scene runtime and EgoBlur weights, or disable anonymization",
                     )
-                frame_set_ref, _, _ = self.deps.sanitizer.sanitize(request.job_id, extracted.frame_set)
+                frame_set_ref, _, _ = self.deps.sanitizer.sanitize(
+                    request.job_id, extracted.frame_set, extracted.reference
+                )
             except FrameExtractionError as error:
                 stages.append(error.to_failed_stage().model_copy(update={"started_at": frame_started_at}))
                 return self._failed(request, manifest, stages, error.to_execution_error())
@@ -267,6 +269,8 @@ def _execute(args: argparse.Namespace) -> int:
                 writer,
                 resolver.require,
                 subprocess_anonymizer(settings.product_scene_runtime_python, settings.product_egoblur_weights),
+                # Kho ở đây là kho cục bộ của worker; file bị xóa trước khi runner đồng bộ lên kho từ xa.
+                discard=lambda reference: resolver.resolve(reference.artifact_uri).unlink(missing_ok=True),
             )
     deps = PrepareDependencies(
         writer=writer,

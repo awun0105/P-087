@@ -185,3 +185,17 @@ che chạy thẳng từ frame đã che sang dựng 3D.
 - Đã thấy một phát hiện nhầm trên frame thật: nhãn trắng trên thùng nhựa xanh bị coi là biển số (điểm 0,839).
   Phát hiện nhầm làm xuất hiện mảng đen trong ảnh train; chưa có dữ liệu để chỉnh ngưỡng.
 
+### Xóa bản gốc của frame đã bị che (2026-10-09)
+
+- Sau khi frame set đã che publish xong, `FrameSanitizer` xóa khỏi kho cục bộ của worker bản gốc của mọi frame
+  đã bị thay, cùng `rec02a/frame_set.json` gốc (inventory trỏ tới các file đó). Frame không bị che giữ nguyên vì
+  frame set đã che đang dùng chính artifact đó. Không frame nào bị che thì không xóa gì.
+- Việc xóa diễn ra trong tool `prepare`, trước `sync_up` của runner (`runner.py:770`), nên các file này không
+  bao giờ lên kho từ xa. Retry tách lại frame, che lại, cho ra đúng frame set cũ rồi xóa lại.
+- Lỗi khi xóa chỉ ghi log và không làm hỏng job: không còn ref nào của job trỏ tới các file đó.
+- **Không xóa video nguồn.** Video vẫn chứa khuôn mặt/biển số và vẫn nằm trong kho theo chính sách lưu giữ của
+  input; retry và chạy lại job cần nó. Xóa frame gốc vì vậy chỉ bỏ các bản sao chưa che, không làm dữ liệu
+  nhạy cảm biến mất khỏi hệ thống.
+- Tests: `test_originals_of_redacted_frames_are_deleted_and_retry_still_works`,
+  `test_nothing_is_deleted_when_no_frame_was_redacted_or_the_step_fails`.
+

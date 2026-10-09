@@ -78,13 +78,21 @@ class FrameSanitizer:
     writer: ArtifactWriter
     require: Callable[[ProductArtifactRef], Path]
     run: RunAnonymizer
+    #: Xóa một artifact khỏi kho của worker. Có thì bản gốc của mọi frame đã bị che, cùng frame set gốc trỏ tới
+    #: chúng, bị xóa ngay sau khi bản đã che publish xong; None thì giữ lại.
+    discard: Callable[[ProductArtifactRef], None] | None = None
 
     def sanitize(
-        self, job_id: str, frame_set: NormalizedRGBFrameSet
+        self, job_id: str, frame_set: NormalizedRGBFrameSet, frame_set_ref: ProductArtifactRef | None = None
     ) -> tuple[ProductArtifactRef, NormalizedRGBFrameSet, SanitizationManifest]:
-        """Trả (ref frame set đã che, frame set đã che, manifest). Thiếu một frame là lỗi cả bước."""
+        """Trả (ref frame set đã che, frame set đã che, manifest). Thiếu một frame là lỗi cả bước.
+
+        `frame_set_ref` là ref của frame set gốc; truyền vào để nó được xóa cùng các frame gốc đã bị che.
+        """
         try:
-            return self._sanitize(job_id, frame_set)
+            result = self._sanitize(job_id, frame_set)
+            self._discard_originals(frame_set, result[1], frame_set_ref)
+            return result
         except FrameExtractionError:
             raise
         except Exception as error:
@@ -145,6 +153,31 @@ class FrameSanitizer:
             job_id, "frame_set.json", "NormalizedRGBFrameSet", sanitized.model_dump_json(indent=2).encode() + b"\n"
         )
         return reference, sanitized, manifest
+
+    def _discard_originals(
+        self,
+        original: NormalizedRGBFrameSet,
+        sanitized: NormalizedRGBFrameSet,
+        frame_set_ref: ProductArtifactRef | None,
+    ) -> None:
+        """Xóa bản gốc của các frame đã bị thay. Chạy sau khi frame set đã che publish xong.
+
+        Lỗi xóa chỉ ghi log: job đã an toàn vì không còn ref nào trỏ tới các file này, và retry sẽ xóa lại.
+        Video nguồn không thuộc phạm vi ở đây; nó theo chính sách lưu giữ của input.
+        """
+        if self.discard is None:
+            return
+        replaced = [
+            before.image
+            for before, after in zip(original.frames, sanitized.frames, strict=True)
+            if after.image != before.image
+        ]
+        # Frame set gốc trỏ tới các file sắp xóa; giữ nó lại sẽ để một inventory hỏng trong kho.
+        for reference in [*replaced, *([frame_set_ref] if frame_set_ref is not None and replaced else [])]:
+            try:
+                self.discard(reference)
+            except OSError as error:
+                logger.error("Không xóa được frame gốc đã bị che cause=%s", type(error).__name__)
 
     def _publish(self, job_id: str, path: str, kind: str, payload: bytes) -> ProductArtifactRef:
         reference = ProductArtifactRef(

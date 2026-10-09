@@ -76,10 +76,11 @@ def _fake_anonymizer(*, fail: str | None = None, lie_about: str | None = None, c
     return run
 
 
-def _setup(tmp_path: Path, anonymizer=None):  # noqa: ANN001, ANN202
+def _setup(tmp_path: Path, anonymizer=None, *, discard: bool = False):  # noqa: ANN001, ANN202
     preparer, resolver, store = _preparer(tmp_path)
     if anonymizer is not None:
-        sanitizer = FrameSanitizer(preparer.deps.writer, resolver.require, anonymizer)
+        remove = (lambda ref: resolver.resolve(ref.artifact_uri).unlink(missing_ok=True)) if discard else None
+        sanitizer = FrameSanitizer(preparer.deps.writer, resolver.require, anonymizer, remove)
         preparer = VideoInputPreparer(dataclasses.replace(preparer.deps, sanitizer=sanitizer))
     manifest_ref = _publish_input(store, _video(tmp_path, "testsrc2=duration=2:size=32x24:rate=6"), _ATTESTED)
     request = PrepareInputRequest(
@@ -178,3 +179,47 @@ def test_default_request_does_not_touch_the_anonymizer(tmp_path: Path) -> None:
     assert result.error is None and result.frame_set_ref is not None and calls == []
     assert "/rec02a/frame_set.json" in result.frame_set_ref.artifact_uri
     assert PrepareInputRequest.model_fields["anonymize"].default is False
+
+
+def test_originals_of_redacted_frames_are_deleted_and_retry_still_works(tmp_path: Path) -> None:
+    preparer, resolver, request = _setup(tmp_path, _fake_anonymizer(), discard=True)
+    result = preparer.run(request)
+    assert result.error is None and result.frame_set_ref is not None
+
+    loader = FrameSetResolver(resolver.require, resolver.require)
+    sanitized = loader.load(result.frame_set_ref)
+    rec02a = resolver.artifact_root / "jobs" / JOB / "rec02a"
+    first = f"{sanitized.frames[0].frame_id:06d}.png"
+    # Bản gốc của frame bị che và frame set gốc trỏ tới nó đã bị xóa; frame không bị che còn nguyên.
+    assert not (rec02a / "frames" / first).exists() and not (rec02a / "frame_set.json").exists()
+    assert sorted(path.name for path in (rec02a / "frames").iterdir()) == [
+        f"{frame.frame_id:06d}.png" for frame in sanitized.frames[1:]
+    ]
+    assert (rec02a / "sanitized" / "frames" / first).read_bytes() == REDACTED
+    assert len(loader.materialize(sanitized)) == len(sanitized.frames)
+    # Retry cùng job: tách lại, che lại, ra đúng frame set cũ và bản gốc lại bị xóa.
+    again = preparer.run(request)
+    assert again.frame_set_ref == result.frame_set_ref and not (rec02a / "frames" / first).exists()
+
+
+def test_nothing_is_deleted_when_no_frame_was_redacted_or_the_step_fails(tmp_path: Path) -> None:
+    def no_regions(source: Path, target: Path, names: list[str]) -> dict:
+        result = _fake_anonymizer()(source, target, names)
+        for frame in result["frames"]:
+            frame["regions"], frame["sanitized_checksum"] = [], frame["source_checksum"]
+        return result
+
+    clean = tmp_path / "clean"
+    clean.mkdir()
+    preparer, resolver, request = _setup(clean, no_regions, discard=True)
+    result = preparer.run(request)
+    rec02a = resolver.artifact_root / "jobs" / JOB / "rec02a"
+    assert result.error is None and (rec02a / "frame_set.json").exists()
+    assert len(list((rec02a / "frames").iterdir())) == 4
+
+    failed = tmp_path / "failed"
+    failed.mkdir()
+    preparer, resolver, request = _setup(failed, lambda *_: {"frames": []}, discard=True)
+    assert preparer.run(request).error is not None
+    rec02a = resolver.artifact_root / "jobs" / JOB / "rec02a"
+    assert (rec02a / "frame_set.json").exists() and len(list((rec02a / "frames").iterdir())) == 4
