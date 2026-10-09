@@ -135,6 +135,9 @@ def anonymizer_available() -> bool:
     """Deployment đã cấu hình bộ che khuôn mặt/biển số (AUD-18). API và worker phải đặt cùng giá trị."""
     current = settings()
     # Settings giả trong test có thể thiếu trường mới: coi như chưa cấu hình.
+    if getattr(current, "product_anonymize_remote_worker", False):
+        # Production tách API và GPU worker: API không có scene runtime, người vận hành khai rằng worker có.
+        return True
     return (
         getattr(current, "product_scene_runtime_python", None) is not None
         and getattr(current, "product_egoblur_weights", None) is not None

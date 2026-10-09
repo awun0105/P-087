@@ -966,6 +966,13 @@ async def test_anonymize_option_is_offered_and_recorded_only_with_a_configured_a
     assert chosen.status_code == 201 and stored(chosen)["anonymize"] is True
     assert "anonymize" not in stored(await create("Vẫn không che"))
 
+    # API tách khỏi worker (production): không có đường dẫn runtime trên API, chỉ có cờ khai worker có bộ che.
+    studio.settings.product_scene_runtime_python = studio.settings.product_egoblur_weights = None
+    assert (await client.get("/api/v1/processing/options")).json()["anonymize_available"] is False
+    studio.settings.product_anonymize_remote_worker = True
+    assert (await client.get("/api/v1/processing/options")).json()["anonymize_available"] is True
+    assert stored(await create("Che qua worker từ xa", anonymize=True))["anonymize"] is True
+
     # Deployment bắt buộc: job không chọn vẫn được ghi là có che.
     studio.settings.product_anonymize_input = True
     assert (await client.get("/api/v1/processing/options")).json()["anonymize_enforced"] is True

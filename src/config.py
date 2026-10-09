@@ -76,6 +76,8 @@ class Settings(BaseSettings):
     product_anonymize_input: bool = False
     #: Thư mục chứa `ego_blur_face_gen2.jit` và `ego_blur_lp_gen2.jit`.
     product_egoblur_weights: Path | None = None
+    #: Đặt trên API khi bộ che chạy ở worker máy khác (API không có scene runtime hay trọng số để tự kiểm).
+    product_anonymize_remote_worker: bool = False
     product_sam2_checkpoint: Path | None = None
     product_scene_timeout_seconds: float = Field(default=1800, gt=0, allow_inf_nan=False)
     #: Pipeline v2 (ADR 0007): trọng số LaMa TorchScript cho vá nền; thiếu thì dùng cv2.inpaint.
