@@ -112,8 +112,6 @@ Trong lúc train 3DGS, Brush xuất checkpoint định kỳ vào `PRODUCT_WORKER
 thì bấm **Thử lại** (hoặc `POST /api/v1/jobs/<job_id>/retry`): attempt mới dùng lại kết quả COLMAP và train tiếp
 từ checkpoint mới nhất. Kho này chỉ nằm trên máy worker; đổi máy thì chạy lại từ đầu.
 
-Không có Docker (Kaggle, GPU thuê dạng container): xem `scripts/kaggle/README.md`.
-
 ## 5. Xử lý Aisle_CW và export demo
 
 ```bash
