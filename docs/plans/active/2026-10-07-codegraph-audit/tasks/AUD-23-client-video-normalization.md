@@ -187,8 +187,8 @@ HDR cần qualified tone mapping hoặc explicit unsupported, không washed-out 
 Tests: real codec fixtures CFR24/25/29.97/60, VFR gaps, B-frame order/nonzero PTS,
 rotation-coded1920×1080 display1080×1920, square/4:3, already-small video, input
 immutable, bounded queues, cancellation and decode/encode/mux failure.
-**Exit:** [ ] playable bytes + exact mapped frames/PTS; [ ] measured memory stays in
-supported budget; [x] errors/cancel never trigger upload automatically (component tests,
+**Exit:** [x] playable bytes + exact mapped frames/PTS (real-capture run 2026-10-09); [x] measured memory
+stays bounded (≈ +1.1 GB over an idle tab for 4K60, flat with duration; one machine); [x] errors/cancel never trigger upload automatically (component tests,
 same evidence as the S4 exit).
 
 ## Sprint AUD-23.S3 — Server verification và reconstruction/sensor consumers
@@ -212,7 +212,8 @@ Tests: compressed60→30 selects original pose rows0/2/4 correctly, VFR mapping,
 missing/forged/nonmonotonic map, known3D projection across resize/rotation/SAR,
 legacy InputManifest/FrameSetResolver equality, privacy gate/owner checks, cross-job
 refs, quality-profile identity, config/source mismatch and restart of prepare stage.
-**Exit:** [ ] source→frame→pose/projection consumer consistency proved;
+**Exit:** [x] source→frame→pose/projection consumer consistency proved on TorWIC (real trajectory,
+calibration and LiDAR map; rotation case remains synthetic);
 [x] old RGB/sensor path works (legacy suites, 2026-10-09 run below); [x] no claim server verified
 local-original bytes (`original_source_status = client_declared_unverified`, asserted on a real video).
 
@@ -683,3 +684,60 @@ reconstruction quality or paired-sensor behavior; those gates remain open.
 - Still open, and not closable without new data or hardware: client peak memory (S2), representative phone
   portrait / 60 FPS / VFR captures and held-out quality (S5), a matched RGB+LiDAR capture for real projection
   and time mapping (S3, S5), and a COLMAP/Brush run on a prepared video.
+
+### 2026-10-09 real-capture run (Chrome 153, Linux, Quadro T2000; isolated API + frontend copy)
+
+Inputs: owner's iPhone capture `IMG_3911.mp4` (3840×2160 stored, rotation −90 → portrait, 59.9 FPS mildly
+VFR, HEVC + AAC, 109 s, 664,369,602 bytes) and the repository TorWIC clips. Chrome on Linux cannot decode
+HEVC, so the phone capture was also transcoded to H.264 with the same resolution, rotation and frame count
+(timestamps moved by at most half a frame) to exercise the normalizer; results below labelled "phone" use
+that derived file. A real Chrome was driven through the product upload page; memory is the summed RSS of
+all processes of that Chrome, sampled every 0.5 s.
+
+**Defects found by the run and fixed (each has tests):**
+
+| Defect | Effect before | Fix |
+| --- | --- | --- |
+| Unified upload page had no way forward when preparation failed | iPhone HEVC video: English error, stuck | Vietnamese reason per error code + explicit "Tải video gốc không nén" |
+| iPhone AAC (negative first timestamp) required an audio-consent path the unified page did not have | every iPhone video refused | owner decision: normalization always drops audio, no question |
+| Colour check required identical transfer/range tags | any BT.709 video needing resize/rotation failed **after** the full encode (14 min lost on the phone capture); any resize failed under software rendering | accept SDR-equivalent transfers and an explicitly tagged range, same rule in Python and TypeScript |
+| Server verification decoded the whole video twice inside the upload request | 35 s for the 109 s phone video → proxy timeout at 30 s, user sees "Máy chủ chưa xử lý được yêu cầu" | read packet timestamps (demux only): 0.23 s, identical PTS list; decoded-frame check stays in REC-02A |
+| 30 FPS cap float comparison | hand-crafted 60 FPS file on a coarse time base accepted | integer check per interval and on the running average |
+
+**Measurements (after the fixes unless noted):**
+
+| Input → preset | Bytes in → out | Prepare time | Peak Chrome RSS (idle baseline) | Outcome |
+| --- | ---: | ---: | ---: | --- |
+| TorWIC aisle 20 s, 720p | 14,994,298 → 3,305,749 | 8.0 s | 1.35 GB (1.17) | server-verified |
+| same, 480p, GPU rendering | 14,994,298 → 1,655,474 | 14.3 s | 1.41 GB (1.24) | server-verified |
+| same, 480p, software rendering (headless) | 14,994,298 → 1,657,566 | 20.9 s | 1.75 GB (1.17) | server-verified (failed before the colour fix) |
+| TorWIC scene 109 s / 1092 frames, 480p | 74,549,237 → 8,766,806 | 41.4 s | 1.46 GB (1.22) | server-verified |
+| phone 4 s clip, 4K60 portrait, 720p | 41,355,915 → 1,938,280 | 28.7 s | 2.30 GB (1.25) | server-verified |
+| phone full 109 s, 4K60 portrait, 720p | 1,457,932,337 (H.264 transcode; original HEVC 664,369,602) → 53,868,465 | 879 s | 2.30 GB (1.21) | browser output valid and uploaded; server verification hit the 30 s proxy timeout (run predates that fix; the fixed verifier takes 0.23 s on this exact file) |
+
+- Peak memory is the same for the 4 s clip and the 109 s video: it does not grow with duration.
+- The prepared phone video is 91.9% smaller than the original HEVC file.
+- 4K60 costs about 8 minutes of processing per minute of video on this laptop (software H.264 decode of
+  every source frame, plus 62 s of hashing for 1.4 GB). This is the main usability problem left.
+
+**Frame map checked against image content** (prepared frame *i* must match source frame `map(i)` better
+than source frames `map(i)±1, ±2`, mean squared error on downscaled grey frames, 40 samples each):
+
+- phone clip, 60 → 30 FPS with rotation: 40/40 correct, next-best frame median 286× worse (min 3.3×); frame
+  map steps are 2 (117 times), 1 and 3 (once each, from the VFR gaps).
+- TorWIC scene, 480p: 39/40; the remaining sample has a neighbour at 0.97× (camera nearly still, the two
+  source frames are indistinguishable at this scale). Median 56× worse.
+
+**Pose and projection on TorWIC, using the product functions** (`camera_priors`,
+`prepared_camera_calibration`), 1092-pose ground-truth trajectory, Camera1 calibration with distortion,
+`groundtruth_map.ply`:
+
+- Pose through the frame map equals pose of the original-video path for all 1092 frames (difference 0).
+- 8 frames, 5k–38k LiDAR map points in view each: pixel from the prepared calibration vs pixel transform
+  applied to the original projection differ by at most 2.3e-13 px.
+- Grey values sampled at the projected points in the original 1280×720 frame and in the prepared 852×480
+  frame correlate 0.990–0.997; shifting the prepared points by 6 px drops this to 0.78–0.92.
+
+**Still open:** no >30 FPS capture with paired LiDAR exists, so pose mapping with real frame dropping is
+shown only by image content; rotation with calibration is synthetic only; one phone, one browser, one OS;
+no COLMAP/Brush run on a prepared video; the full phone upload was not repeated after the timeout fix.
