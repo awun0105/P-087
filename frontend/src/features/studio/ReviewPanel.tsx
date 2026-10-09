@@ -283,7 +283,7 @@ function ReviewSteps({ state }: { state: ReviewStateView }) {
     state.blockers.length === 0;
   const decided = status === "APPROVED" || status === "REJECTED" || status === "RELEASED";
   const steps: { label: string; state: StepState; note: string }[] = [
-    { label: "Gói mô phỏng + preflight", state: hasPackage ? "done" : "next", note: hasPackage ? "Có gói cho revision này" : "Tạo gói ở khung bên cạnh" },
+    { label: "Gói mô phỏng + preflight", state: hasPackage ? "done" : "next", note: hasPackage ? "Có gói cho revision này" : "Tạo gói ở mục Gói mô phỏng" },
     {
       label: "Validation Isaac Sim",
       state: validated ? "done" : state.blockers.length > 0 || state.validation ? "blocked" : hasPackage ? "unavailable" : "blocked",
@@ -292,7 +292,7 @@ function ReviewSteps({ state }: { state: ReviewStateView }) {
           ? `Kết quả ${state.validation.overall_result} từ run worker đã xác minh`
           : "Báo cáo chưa đủ điều kiện làm validation proof"
         : state.blockers.length > 0
-          ? "Có lý do chặn ở trên"
+          ? "Có lý do chặn, xem bên dưới"
           : "Chưa khả dụng: chưa có validation run được chọn",
     },
     {

@@ -9,7 +9,7 @@ import { evaluationReportUrl, getJobEvaluation, type EvaluationGroup, type Evalu
 import { errorMessage } from "@/lib/ui-error";
 
 const VERDICT = { ok: { label: "Đạt", tone: "sage" }, warn: { label: "Cần xem", tone: "ochre" }, fail: { label: "Không đạt", tone: "rust" } } as const;
-const GROUP_STATUS = { pending: "Chưa có kết quả", unavailable: "Không đọc được" } as const;
+const GROUP_STATUS = { pending: "Chưa có kết quả", unavailable: "Chưa đo được" } as const;
 
 /** Tải bảng đánh giá của job; `refreshKey` đổi (vd revision mới) thì tải lại. */
 function useEvaluation(jobId: string, refreshKey: string) {
