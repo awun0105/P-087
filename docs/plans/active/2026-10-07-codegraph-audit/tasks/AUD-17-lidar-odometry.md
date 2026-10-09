@@ -153,6 +153,30 @@ clock mismatch, tilted first-scan frame/up normalization, missing floor support,
 UI mode/failure/fallback, real odometry benchmark và held-out quality.
 **Exit:** [ ] supported envelope/drift measured; [ ] integrations and fallback verified.
 
+S3 execution is split into separately reviewable commits:
+
+### Sprint AUD-17.S3a — Independent-reference drift evaluator
+
+**Input:** immutable estimated trajectory plus evaluation-only reference trajectory, explicit frame, units, clock relation and offset.
+**Output:** JSON report bound to exact trajectory/reference checksums with reference coverage, first-pose rigid-aligned ATE and adjacent-scan RPE.
+**Contract:** reference data is consumed only by the evaluator; no scale fit, product artifact mutation, solver input or qualification verdict.
+
+Tests cover equivalent trajectories under a global map change, accumulated translation drift, declared clock offset, unit conversion, frame mismatch, interpolation limits, no extrapolation and insufficient adjacent matches. The report must keep real-sensor qualification pending.
+
+### Sprint AUD-17.S3b — Durable estimated-trajectory consumer integration
+
+**Input:** accepted R6 assembly, exact scan/time/calibration bindings and a verified derived trajectory.
+**Output:** lease-guarded odometry stage, explicit world/floor confirmation and source-bound LiDAR ingest/alignment evidence.
+**Contract:** no estimated poses enter canonical ingest until the world bridge, calibration and time evidence are confirmed; stale bindings invalidate dependent QA; supplied trajectory remains a separate new recipe identity.
+
+### Sprint AUD-17.S3c — Product diagnostics and fallback UX
+
+**Input:** persisted odometry, mapping, calibration and ingest diagnostics.
+**Output:** actionable coverage/gap/qualification state and explicit supplied-trajectory fallback in the Studio assembly flow.
+**Contract:** never label unqualified odometry as PASS or ground truth; fallback creates a distinct recipe and reruns downstream evidence.
+
+Held-out traversal measurement and supported-envelope acceptance remain external gates after S3b/S3c; synthetic tests do not close them.
+
 ## Verification và DoD
 
 Focused verification command is recorded below with the sprint result. S2 adds the
@@ -304,3 +328,27 @@ Focused S3 mapping verification:
 - Related-code impact: no shared consumer contract changed; legacy ingest, camera-prior
   callers, and R5 dispatch remain unchanged. Remaining S3 work must add and test the
   consumer path before this sprint can be marked complete.
+
+AUD-17.S3a implementation:
+- Added the evaluation-only `eval.pose.lidar_odometry_error` CLI and
+  `eval/protocols/lidar_odometry.md`. It validates the estimated artifact checksum,
+  explicit reference frame/units/clock, bounded reference interpolation, and exact
+  reference-file checksum.
+- ATE uses only a rigid alignment from the first matched pose; it never fits scale or
+  aligns the complete path. RPE uses adjacent estimated scan poses only. The report
+  includes matched coverage, unpaired scans, metrics, runtime qualification state, and
+  `product_solver_used_reference=false`.
+- The evaluator leaves the product trajectory unchanged and cannot qualify R5. No
+  real sensor reference was available in this run; supported-envelope and held-out
+  acceptance remain pending.
+- Verification: `.venv/bin/pytest tests/test_reconstruction/test_lidar_odometry_evaluation.py
+  tests/test_reconstruction/test_lidar_odometry.py tests/test_reconstruction/test_reference_evaluators.py -q` —
+  35 passed, 1 skipped. `.venv/bin/ruff check src/ tests/ eval/pose/lidar_odometry_error.py` —
+  passed. `.venv/bin/ruff format --check src/ tests/ eval/pose/lidar_odometry_error.py` —
+  576 files formatted. `git diff --check` — passed.
+- Gate report: CodeGraph read `trajectory_errors`, `EstimatedTrajectoryArtifact`,
+  `parse_trajectory`, `timestamps_in_seconds`, `verify_content_checksum`, and
+  `rotation_matrix`; impact is evaluation-only with no product callers. The evaluator
+  reuses existing parsers, unit conversion and checksum validation. `understand-anything`
+  CLI is unavailable; AUD-17 and ADR 0018 provided the business context. No UI changed,
+  so DevTools is not applicable. S3b/S3c and real-sensor acceptance remain open.
