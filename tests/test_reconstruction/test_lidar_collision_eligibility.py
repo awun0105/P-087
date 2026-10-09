@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
+import pytest
 from pydantic import BaseModel
 
-from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
+from src.models.contracts.artifacts import ArtifactDataClass, ArtifactRef, ProductArtifactRef
 from src.models.contracts.collision_quality import (
     CollisionInputMode,
     LidarAlignedPointCloudEvidence,
@@ -30,9 +32,20 @@ from src.models.contracts.lidar_projection_qa import (
 )
 from src.models.contracts.manifests import InputConfiguration, StageId
 from src.models.contracts.reconstruction import AlignmentRecord, ReconstructionBundle
-from src.services.reconstruction.adapters.lidar_collision import LidarCollisionProfile
+from src.services.orchestration.artifacts.store import ArtifactResolver, FilesystemArtifactStore
+from src.services.reconstruction.adapters.lidar_collision import (
+    LidarCollisionBuildReport,
+    LidarCollisionProfile,
+    lidar_self_mask_binding_checksum,
+)
+from src.services.reconstruction.lidar import collision_candidate_publisher as collision_candidate_publisher_module
+from src.services.reconstruction.lidar.collision_candidate_publisher import (
+    LidarCollisionCandidateManifest,
+    LidarCollisionCandidatePublisher,
+)
 from src.services.reconstruction.lidar.collision_eligibility import (
     CollisionEligibilityBlockerCode,
+    LidarCollisionEligibilityAssessment,
     LidarCollisionEligibilityInputs,
     evaluate_lidar_collision_eligibility,
 )
@@ -46,6 +59,20 @@ from src.services.scene.floor_model import fit_floor_model, point_cloud_checksum
 
 JOB_ID = "job-lidar-eligibility"
 IDENTITY = (0.0, 0.0, 0.0, 1.0)
+
+
+class _FixtureEvidenceResolver(ArtifactResolver):
+    """Use already-validated fixture records while keeping output writes real."""
+
+    def __init__(self, artifact_root: Path) -> None:
+        super().__init__(artifact_root)
+        self.fixture_path = self.artifact_root / "input-evidence-fixture.json"
+        self.fixture_path.write_text("resolved synthetic evidence", encoding="utf-8")
+
+    def require(self, reference: ArtifactRef) -> Path:
+        if "/collider/lidar-candidate/" in reference.artifact_uri:
+            return super().require(reference)
+        return self.fixture_path
 
 
 def _ref(
@@ -303,6 +330,8 @@ def _inputs(
     )
     floor_ref = _document_ref(floor_evidence, "FloorFitEvidence", StageId.OBJECT_EXTRACT, "floor/evidence.json")
     robot_profile_ref = _ref("profiles/robot.json", "RobotProfile", StageId.CANDIDATE_BUILD, "1")
+    self_mask_bits = np.zeros(len(points), dtype=np.bool_)
+    self_mask_bits[0] = True
     self_mask = LidarSelfMaskEvidence(
         job_id=JOB_ID,
         package_ref=package_ref,
@@ -313,7 +342,7 @@ def _inputs(
         robot_profile_ref=robot_profile_ref,
         source_point_checksum=point_checksum,
         point_count=len(points),
-        mask_binding_checksum="sha256:" + "2" * 64,
+        mask_binding_checksum=lidar_self_mask_binding_checksum(point_checksum, self_mask_bits),
         masked_point_count=1,
         covered_pose_count=package.pose_count,
         total_pose_count=package.pose_count,
@@ -438,3 +467,111 @@ def test_missing_collision_profile_is_a_blocker() -> None:
     assessment = evaluate_lidar_collision_eligibility(replace(_inputs(), profile=None))
 
     assert CollisionEligibilityBlockerCode.COLLISION_PROFILE_MISSING in {item.code for item in assessment.blockers}
+
+
+def _eligible_assessment_for_publication_test(
+    inputs: LidarCollisionEligibilityInputs,
+) -> LidarCollisionEligibilityAssessment:
+    """Exercise publication after qualification without claiming the current QA qualifies."""
+    blocked = evaluate_lidar_collision_eligibility(inputs)
+    assert CollisionEligibilityBlockerCode.PROJECTION_EVIDENCE_DIAGNOSTIC_ONLY in {
+        item.code for item in blocked.blockers
+    }
+    assert inputs.bundle is not None
+    assert inputs.profile is not None
+    return LidarCollisionEligibilityAssessment(
+        state="eligible",
+        input_mode=inputs.input_mode,
+        source_geometry_ref=inputs.bundle.lidar_geometry_ref,
+        profile_checksum=inputs.profile.checksum(),
+        evidence_refs=blocked.evidence_refs,
+    )
+
+
+def test_diagnostic_qa_blocks_publisher_before_any_artifact_write(tmp_path) -> None:  # noqa: ANN001
+    inputs = _inputs()
+    points = _source_points()
+    self_mask = np.zeros(len(points), dtype=np.bool_)
+    self_mask[0] = True
+    resolver = ArtifactResolver(tmp_path)
+
+    result = LidarCollisionCandidatePublisher(FilesystemArtifactStore(resolver)).publish(inputs, points, self_mask)
+
+    assert result.assessment.state == "blocked"
+    assert result.candidate_ref is None
+    assert result.build_report_ref is None
+    assert result.manifest_ref is None
+    assert not any(path.is_file() for path in tmp_path.rglob("*"))
+
+
+def test_publisher_commits_manifest_last_and_reuses_exact_candidate_on_retry(tmp_path, monkeypatch) -> None:  # noqa: ANN001
+    class FailBuildReportOnceStore(FilesystemArtifactStore):
+        failed = False
+
+        def publish(self, reference, payload):  # noqa: ANN001
+            if reference.artifact_type == "LidarCollisionBuildReport" and not self.failed:
+                self.failed = True
+                raise RuntimeError("simulated report publication interruption")
+            return super().publish(reference, payload)
+
+    inputs = _inputs()
+    points = _source_points()
+    self_mask = np.zeros(len(points), dtype=np.bool_)
+    self_mask[0] = True
+    eligible = _eligible_assessment_for_publication_test(inputs)
+    monkeypatch.setattr(
+        collision_candidate_publisher_module,
+        "evaluate_lidar_collision_eligibility",
+        lambda _: eligible,
+    )
+    resolver = _FixtureEvidenceResolver(tmp_path)
+    publisher = LidarCollisionCandidatePublisher(FailBuildReportOnceStore(resolver))
+
+    with pytest.raises(RuntimeError, match="simulated report publication interruption"):
+        publisher.publish(inputs, points, self_mask)
+
+    files_after_interruption = [path for path in (tmp_path / "jobs").rglob("*") if path.is_file()]
+    assert len(files_after_interruption) == 1
+    assert files_after_interruption[0].name == "collision.glb"
+
+    result = publisher.publish(inputs, points, self_mask)
+    assert result.assessment.state == "eligible"
+    assert result.candidate_ref is not None
+    assert result.build_report_ref is not None
+    assert result.manifest_ref is not None
+    assert len([path for path in tmp_path.rglob("collision.glb") if path.is_file()]) == 1
+
+    candidate_path = resolver.require(result.candidate_ref)
+    report_path = resolver.require(result.build_report_ref)
+    manifest_path = resolver.require(result.manifest_ref)
+    manifest = LidarCollisionCandidateManifest.model_validate_json(manifest_path.read_bytes())
+    report = LidarCollisionBuildReport.model_validate_json(report_path.read_bytes())
+    assert manifest.candidate_ref == result.candidate_ref
+    assert manifest.build_report_ref == result.build_report_ref
+    assert manifest.output_collision_checksum == result.candidate_ref.artifact_checksum
+    assert report.output_collision_checksum == result.candidate_ref.artifact_checksum
+    assert report.self_mask_binding_checksum == manifest.self_mask_binding_checksum
+    assert report_path.is_file()
+    assert candidate_path.read_bytes()[:4] == b"glTF"
+
+
+def test_publisher_rejects_points_or_mask_that_disagree_with_receipts(tmp_path, monkeypatch) -> None:  # noqa: ANN001
+    inputs = _inputs()
+    points = _source_points()
+    self_mask = np.zeros(len(points), dtype=np.bool_)
+    self_mask[0] = True
+    eligible = _eligible_assessment_for_publication_test(inputs)
+    monkeypatch.setattr(
+        collision_candidate_publisher_module,
+        "evaluate_lidar_collision_eligibility",
+        lambda _: eligible,
+    )
+    resolver = _FixtureEvidenceResolver(tmp_path)
+    publisher = LidarCollisionCandidatePublisher(FilesystemArtifactStore(resolver))
+
+    with pytest.raises(ValueError, match="aligned-cloud receipt"):
+        publisher.publish(inputs, points + np.asarray([0.0, 0.0, 0.01]), self_mask)
+    with pytest.raises(ValueError, match="self-mask bytes"):
+        publisher.publish(inputs, points, np.zeros(len(points), dtype=np.bool_))
+
+    assert not any(path.is_file() for path in (tmp_path / "jobs").rglob("*"))

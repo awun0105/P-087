@@ -113,6 +113,19 @@ def _exposed_voxels(occupied: np.ndarray, axis: int, side: int) -> np.ndarray:
     return occupied & ~neighbors
 
 
+def lidar_self_mask_binding_checksum(source_checksum: Checksum, self_mask: np.ndarray) -> Checksum:
+    """Bind packed mask bits to one exact ordered world-point cloud."""
+    mask = np.asarray(self_mask)
+    if mask.dtype != np.bool_ or mask.ndim != 1 or mask.size < 1:
+        raise ValueError("self-mask must be a non-empty boolean vector")
+    packed_mask = np.packbits(mask, bitorder="little").tobytes()
+    digest = hashlib.sha256()
+    digest.update(source_checksum.encode("ascii"))
+    digest.update(len(mask).to_bytes(8, "little", signed=False))
+    digest.update(packed_mask)
+    return "sha256:" + digest.hexdigest()
+
+
 def build_lidar_collision_candidate(
     points_world_m: np.ndarray,
     floor_model: FloorModel,
@@ -159,12 +172,7 @@ def build_lidar_collision_candidate(
             raise ValueError("self-mask must be a boolean vector aligned with the source point ordering")
         if self_mask_ref is None:
             raise ValueError("a supplied LiDAR self-mask requires an evidence reference artifact")
-        packed_mask = np.packbits(mask, bitorder="little").tobytes()
-        mask_digest = hashlib.sha256()
-        mask_digest.update(source_checksum.encode("ascii"))
-        mask_digest.update(len(mask).to_bytes(8, "little", signed=False))
-        mask_digest.update(packed_mask)
-        mask_checksum = "sha256:" + mask_digest.hexdigest()
+        mask_checksum = lidar_self_mask_binding_checksum(source_checksum, mask)
     retained = points[~mask]
     if len(retained) == 0:
         raise ValueError("self-mask removed every LiDAR point")

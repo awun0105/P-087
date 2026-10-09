@@ -145,6 +145,7 @@ def evaluate_lidar_collision_eligibility(
     package_ref = inputs.package_ref
     geometry_ref = bundle.lidar_geometry_ref if bundle is not None else None
     keep(bundle_ref(bundle))
+    keep(geometry_ref)
     keep(package_ref)
     keep(inputs.calibration_qa_ref)
     keep(inputs.projection_evidence_ref)

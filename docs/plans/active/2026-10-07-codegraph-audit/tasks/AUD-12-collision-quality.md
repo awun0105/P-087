@@ -220,18 +220,25 @@ publication remain pending AUD-13.S3 qualification and AUD-12.S3d.
 
 ### Remaining AUD-12.S3 slices
 
-**AUD-12.S3d — Publish and select an eligible candidate.** Only after S3c eligibility,
-transform points into the RGB canonical metric frame, generate/publish the bounded
-candidate and source report, then bind the immutable refs through SceneEditor CAS.
-Retry must reuse exact inputs/config or create a new attempt identity. No trajectory,
-RGB visual or canonical geometry is rewritten.
+**AUD-12.S3d — Publish an eligible candidate; do not select it yet.** Input is the
+resolved S3c evidence, the exact world-meter point array and its point-order-bound
+self-mask. The array is already aligned by the producer named in
+`LidarAlignedPointCloudEvidence`; applying that transform again here would misplace
+the candidate. Output is an immutable candidate mesh, build report and manifest.
+The publisher recomputes S3c eligibility first, resolves every assessment evidence
+ref, verifies point count/checksum, floor receipt and mask digest, then builds.
+Blocked inputs write nothing. Content-addressed retries reuse verified bytes; changed
+inputs/config produce a new identity. The manifest is published last as the bundle
+commit marker. S3d does not mutate SceneIR or call SceneEditor: selecting before
+source-aware object ownership could apply RGB triangle membership to a LiDAR mesh.
 
-**AUD-12.S3e — Source-aware scene/export consumers.** Map ownership to the selected
-collision source using source-bound LiDAR regions; never reuse RGB triangle indices.
-Update viewer, background carving, USD/candidate inventory and invalidation together.
-Missing region mapping blocks export and reports coverage; it cannot silently fall
-back to RGB. Registered-map mode stays blocked until AUD-19 registration QA is
-qualified.
+**AUD-12.S3e — Source-aware ownership, selection and export consumers.** Map
+ownership to the candidate source using source-bound LiDAR regions; never reuse RGB
+triangle indices. Only after that mapping is available may the source and selection
+refs be committed through `SceneEditor` CAS. Update viewer, background carving,
+USD/candidate inventory and invalidation together. Missing region mapping blocks
+selection/export and reports coverage; it cannot silently fall back to RGB.
+Registered-map mode stays blocked until AUD-19 registration QA is qualified.
 
 ## Sprint AUD-12.S4 — Held-out quality và Isaac consumer
 
@@ -463,7 +470,8 @@ Isaac contact handoff; CPU regression không đóng real acceptance.
   use that same aligned-point receipt.
 - **CodeGraph impact:** traced the bundle/align records, QA report and projection
   evidence, package record, floor evidence, collision adapter and eligibility helper.
-  The new gate has no worker/API/SceneIR caller yet; S3d owns publisher integration.
+  The gate records the exact source geometry alongside the QA/evidence refs. S3d owns
+  candidate publication; source selection remains deferred until S3e ownership exists.
 - **Changed files:** collision-quality contracts and exports, collision adapter
   self-mask ref check, calibration eligibility helper, new
   `src/services/reconstruction/lidar/collision_eligibility.py`, new focused tests,
@@ -472,7 +480,47 @@ Isaac contact handoff; CPU regression không đóng real acceptance.
   tests passed; full `ruff check src/ tests/` passed; full `ruff format --check src/
   tests/` reports 556 files formatted; contract mirror passed; `git diff --check`
   passed. CodeGraph and Graphify are refreshed after the final edits.
-- **Gate report:** no UI behavior changed, so browser DevTools was not applicable.
-  No aligned production point-cloud producer, production-qualified calibration
-  receipt, held-out collision acceptance, Isaac contact proof, candidate publisher
-  or source-selection caller was added. Those remain **UNVERIFIED** and open.
+- **Gate report:** no UI behavior changed. No aligned production point-cloud producer,
+  production-qualified calibration receipt, held-out collision acceptance or Isaac
+  contact proof was added. Candidate publication and source selection remain
+  **UNVERIFIED** and open.
+
+### AUD-12.S3d — fail-closed immutable candidate publication
+
+- **Base:** `9618890` (`AUD-12.S3c`).
+- **Logic before → after:** S3c produced an eligibility assessment but no publication
+  path. `LidarCollisionCandidatePublisher` now reruns that gate, checksum-resolves
+  each evidence ref, checks the supplied world-meter array against the exact aligned
+  point receipt and floor evidence, and binds the boolean self-mask to its source
+  checksum and ordering before it invokes the bounded builder. A blocked assessment
+  returns its blockers without building or writing artifacts.
+- **Output/contract:** an eligible internal call publishes a content-addressed GLB,
+  `LidarCollisionBuildReport` and `LidarCollisionCandidateManifest`. The manifest
+  binds source geometry, alignment, aligned points, floor/self-mask receipts, profile,
+  assessment and output checksums. Candidate and report are immutable members; the
+  manifest is the commit marker published last. A retry verifies and reuses exact
+  bytes. No source selection or SceneIR mutation occurs in S3d.
+- **Related-logic correction:** the aligned point receipt already binds points in
+  world meters to the confirmed `AlignmentRecord`; S3d verifies that result instead
+  of applying a second transform. Scene object ownership remains immutable and
+  RGB-bound, so selection waits for S3e to map ownership onto the LiDAR candidate.
+- **Changed files:** `src/services/reconstruction/adapters/lidar_collision.py`,
+  `src/services/reconstruction/lidar/collision_eligibility.py`, new
+  `src/services/reconstruction/lidar/collision_candidate_publisher.py`,
+  `tests/test_reconstruction/test_lidar_collision_eligibility.py`, this task and
+  ADR 0016.
+- **Verification:** focused LiDAR collision, eligibility and quality-contract suites —
+  54 passed; full-repo `ruff check src/ tests/` and `ruff format --check src/ tests/`
+  passed (557 files); contract mirror and `git diff --check` passed; CodeGraph sync
+  and targeted exploration passed; `graphify update .` completed.
+- **Gate report:** publisher success-path tests inject an eligible assessment only to
+  test artifact mechanics; the current projection contract is still fixed to
+  `diagnostic_only`, so production input remains blocked. The local authenticated
+  QA page for `job-a713242a38be`, run 2, had no completed QA stage; the correct
+  unavailable-stage notice rendered and DevTools reported no console warnings or
+  errors. No live metrics/overlay, production candidate, held-out collision result,
+  GPU/Isaac contact proof or source-selection consumer was verified.
+- **Pending:** no worker currently produces the point-order-bound self-mask array or
+  a production-qualified projection receipt. Candidate publication mechanics are
+  implemented, but production publication, S3e ownership/selection and S4 acceptance
+  remain unchecked.

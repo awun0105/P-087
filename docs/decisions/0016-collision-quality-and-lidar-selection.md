@@ -168,3 +168,21 @@ registered maps remain blocked pending AUD-19 QA. No candidate publisher, worker
 route or SceneIR selection caller was added. Production calibration qualification,
 collision-source publication, source-aware object ownership, held-out retention and
 Isaac acceptance remain open.
+
+## AUD-12.S3d implementation note — 2026-10-09
+
+The ADR remains **Proposed**; no LiDAR collision source is selectable. An internal
+publisher now reruns the exact eligibility gate, resolves the assessment evidence,
+checks world-point count/checksum plus floor and self-mask bindings, and publishes an
+immutable candidate mesh, build report and candidate manifest. The manifest is
+written last as the publication commit marker; retries verify/reuse exact bytes.
+The publisher consumes points already expressed in the world frame and bound to the
+confirmed alignment receipt; it does not apply that transform a second time.
+
+Candidate publication mechanics do not enable a product route. The projection
+contract is still `diagnostic_only`, no worker produces a production-qualified
+receipt or point-order-bound self-mask array, and registered maps still await
+AUD-19 QA. Source selection is deliberately deferred until AUD-12.S3e maps object
+ownership to the LiDAR candidate; the current ownership record is bound to RGB
+geometry, and reusing its triangle indices would corrupt carving/export. Held-out
+obstacle retention and exact-candidate Isaac contact remain unverified.
