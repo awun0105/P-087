@@ -4,7 +4,7 @@ Date: 2026-10-08
 
 ## Status
 
-Proposed — chờ owner duyệt. Kế hoạch triển khai: [AUD-28](../plans/active/2026-10-07-codegraph-audit/tasks/AUD-28-benchmark-derived-verdicts-and-rule-based-insights.md).
+Accepted — owner duyệt ngày 2026-10-09. Phần code của AUD-28 đã triển khai; kiểm bằng mắt trên Studio còn mở. Kế hoạch triển khai: [AUD-28](../plans/active/2026-10-07-codegraph-audit/tasks/AUD-28-benchmark-derived-verdicts-and-rule-based-insights.md).
 
 ## Context
 

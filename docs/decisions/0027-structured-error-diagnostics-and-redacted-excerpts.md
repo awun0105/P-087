@@ -4,7 +4,7 @@ Date: 2026-10-08
 
 ## Status
 
-Proposed — chờ owner duyệt. Kế hoạch triển khai: [AUD-27](../plans/active/2026-10-07-codegraph-audit/tasks/AUD-27-structured-error-diagnostics-and-redacted-excerpts.md).
+Accepted — owner duyệt ngày 2026-10-09. Phần code của AUD-27 đã triển khai; kiểm bằng mắt trên Studio và log từ một attempt worker thật còn mở. Kế hoạch triển khai: [AUD-27](../plans/active/2026-10-07-codegraph-audit/tasks/AUD-27-structured-error-diagnostics-and-redacted-excerpts.md).
 
 ## Context
 

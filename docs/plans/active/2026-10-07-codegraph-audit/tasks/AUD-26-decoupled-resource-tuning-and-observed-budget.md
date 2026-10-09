@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- PLANNED; P1; EX-PRODUCT processing/resources + orchestration admission.
+- IMPLEMENTED (code, 2026-10-09; các dòng Exit trên pod RunPod của S1, S4, S5 còn mở); P1; EX-PRODUCT processing/resources + orchestration admission.
 - Canonical PRODUCT-02/08/09, REC-03/04.
 - Goal: ước lượng RAM/VRAM không còn thấp hơn số đã đo và không còn cao gấp
   nhiều lần số đã đo; "tối đa cho máy này" không để RAM kéo tụt thông số GPU;

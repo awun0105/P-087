@@ -301,7 +301,7 @@ cho import và nút Xử lý tiếp không implement. Không tự mở lại t�
 - [ADR 0027: Chẩn đoán lỗi COLMAP và đoạn trích log đã che](../../../decisions/0027-structured-error-diagnostics-and-redacted-excerpts.md).
 - [ADR 0028: Khoảng tham chiếu chất lượng và khuyến nghị theo quy tắc](../../../decisions/0028-benchmark-derived-verdicts-and-rule-based-insights.md).
 
-15 active ADRs remain Proposed and ADR 0022 is Accepted; ADR0025 is Deferred and
+12 active ADRs remain Proposed; ADR 0022, 0026, 0027 and 0028 are Accepted; ADR0025 is Deferred and
 does not define active policy.
 Không giả lập owner acceptance. Bug fixes trên
 invariant hiện có có thể làm độc lập. Sprint thiết kế phải ghi rõ phần mới cần

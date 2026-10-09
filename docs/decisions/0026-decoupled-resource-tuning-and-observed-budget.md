@@ -4,7 +4,7 @@ Date: 2026-10-08
 
 ## Status
 
-Proposed — chờ owner duyệt. Kế hoạch triển khai: [AUD-26](../plans/active/2026-10-07-codegraph-audit/tasks/AUD-26-decoupled-resource-tuning-and-observed-budget.md).
+Accepted — owner duyệt ngày 2026-10-09. Phần code của AUD-26 đã triển khai; các phép đo trên pod RunPod (S1, S4, S5) còn mở. Kế hoạch triển khai: [AUD-26](../plans/active/2026-10-07-codegraph-audit/tasks/AUD-26-decoupled-resource-tuning-and-observed-budget.md).
 
 ## Context
 
