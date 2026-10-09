@@ -49,8 +49,8 @@ export function isGuestQuotaExceededError(error: unknown): error is ApiError {
 
 const API = "/api/v1/auth";
 
-export function getMe(): Promise<ApiResult<Me>> {
-  return fetchApi<Me>(`${API}/me`);
+export function getMe(signal?: AbortSignal): Promise<ApiResult<Me>> {
+  return fetchApi<Me>(`${API}/me`, { signal });
 }
 
 export function login(email: string, password: string): Promise<PublicUser> {

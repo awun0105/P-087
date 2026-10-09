@@ -7,6 +7,8 @@ import { clearStudioDrafts } from "@/features/studio/drafts";
 import { notifySuccess, ErrorFeedback } from "@/components/studio/feedback";
 import { errorMessage } from "@/lib/ui-error";
 
+const SESSION_CHECK_TIMEOUT_MS = 10_000;
+
 interface AuthState {
   /** `null` khi đang tải lần đầu. */
   me: Me | null;
@@ -25,7 +27,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const result = await getMe();
+    // Backend treo không được giữ màn "Đang kiểm tra phiên" mãi: quá hạn thì báo lỗi và để người dùng thử lại.
+    const result = await getMe(AbortSignal.timeout(SESSION_CHECK_TIMEOUT_MS));
     // Backend không trả được: coi như khách của deployment bắt đăng nhập (an toàn hơn).
     setMe(result.ok ? result.data : { auth_required: true, user: null });
     setError(result.ok ? null : errorMessage(result.error));

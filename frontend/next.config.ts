@@ -12,6 +12,9 @@ const BACKEND_ORIGIN = process.env.REAL2SIM_API_URL ?? "http://127.0.0.1:8000";
 const APP_HOME = "/overview";
 
 const nextConfig: NextConfig = {
+  // `localhost` đã được Next cho phép mặc định; `127.0.0.1` thì không, nên dev server trả 403 cho HMR và
+  // trang đăng nhập mở qua `127.0.0.1` treo ở "Đang kiểm tra phiên đăng nhập…" (chỉ ảnh hưởng `next dev`).
+  allowedDevOrigins: ["127.0.0.1"],
   // Không để `next dev` sinh AGENTS.md/CLAUDE.md trong frontend/: harness của repo
   // nằm ở AGENTS.md gốc, file sinh tự động sẽ mâu thuẫn với authority map.
   agentRules: false,
