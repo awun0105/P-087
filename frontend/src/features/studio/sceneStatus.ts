@@ -30,6 +30,8 @@ export function sceneStatus(job: JobManifest | null, previewReady: boolean): Sce
 /** Header scene đọc progress thật; cùng bảng nhãn với Scenes/Jobs, không suy DONE từ preview. */
 export function progressSceneStatus(progress: JobProgress): SceneStatusView {
   if (progress.waiting_for === "resources") return { label: "Đang chờ tài nguyên", tone: "ochre", active: true, group: "running" };
+  // Frame đã che xong, pipeline dừng chờ người upload xem — không phải worker đang chạy hay đang xếp hàng.
+  if (progress.waiting_for === "anonymization_review") return { label: "Cần xem bản đã che", tone: "ochre", active: false, group: "action" };
   return deriveStatus(progress.status, progress.current_stage, progress.waiting_for === "metric_confirmation");
 }
 

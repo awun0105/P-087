@@ -362,6 +362,8 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
             info={info}
             busy={busy}
             canCancel={canCancelJob}
+            canAccept={canMutateJob}
+            onChanged={() => setPollingKey((k) => k + 1)}
             onCancel={() => {
               if (window.confirm("Huỷ xử lý scene này? Tiến trình trên GPU sẽ dừng.")) void act(() => cancelJob(jobId), "Đã gửi yêu cầu huỷ. Trạng thái được cập nhật từ máy chủ.");
             }}

@@ -121,6 +121,10 @@ export function NextAction({
   } else if (progress.waiting_for === "resources") {
     title = "Đang chờ tài nguyên";
     description = "Giữ nguyên cấu hình đã chọn. Máy xử lý kiểm tra lại và tự chạy tiếp khi đủ tài nguyên; có thể rời trang hoặc huỷ job.";
+  } else if (progress.waiting_for === "anonymization_review") {
+    title = "Cần bạn xem bản đã che";
+    description = "Khuôn mặt và biển số phát hiện được đã bị che. Xem lại rồi xác nhận để pipeline dựng 3D, hoặc huỷ job.";
+    action = { label: "Xem bản đã che", tab: "progress" };
   } else if (progress.waiting_for === "metric_confirmation") {
     title = "Cần bạn xác nhận tỉ lệ mét";
     description = "Chọn điểm và nhập kích thước thật để pipeline tiếp tục.";

@@ -56,7 +56,7 @@ export function useNow(active: boolean): number {
 export function isJobStale(progress: JobProgress | null, now: number, thresholdMs: number = 180_000): boolean {
   if (!progress || progress.status !== "RUNNING") return false;
   // Nếu đang chờ tương tác của người dùng thì không phải stale
-  if (progress.waiting_for === "metric_confirmation") return false;
+  if (progress.waiting_for === "metric_confirmation" || progress.waiting_for === "anonymization_review") return false;
   const updated = Date.parse(progress.updated_at);
   if (Number.isNaN(updated)) return false;
   return now - updated > thresholdMs;

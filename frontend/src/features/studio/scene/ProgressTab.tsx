@@ -6,6 +6,7 @@ import { HelpDetails } from "@/components/studio/feedback";
 import { PipelineTimeline, type StageView } from "@/features/studio/PipelineTimeline";
 import { isJobStale, stageSeconds, useNow, type SceneInfo } from "@/features/studio/scene/state";
 import { stagesFor } from "@/features/studio/stages";
+import { AnonymizationReviewPanel } from "@/features/studio/scene/AnonymizationReviewPanel";
 import { AttemptHistory } from "@/features/studio/scene/AttemptHistory";
 import { QueueStatus } from "@/features/studio/scene/QueueStatus";
 import { ResourceWaitDetail } from "@/features/studio/scene/ResourceWaitDetail";
@@ -13,9 +14,10 @@ import type { JobProgress } from "@/lib/contracts/studio";
 import { formatBytes } from "@/lib/format";
 
 /** Tiến trình chỉ quản lý trạng thái; viewer mở qua route giai đoạn riêng. */
-export function ProgressTab({ jobId, progress, info, busy, canCancel, onCancel }: {
-  jobId: string; progress: JobProgress | null; info: SceneInfo | null; busy: boolean; canCancel: boolean; onCancel: () => void;
+export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept = canCancel, onCancel, onChanged }: {
+  jobId: string; progress: JobProgress | null; info: SceneInfo | null; busy: boolean; canCancel: boolean; canAccept?: boolean; onCancel: () => void; onChanged?: () => void;
 }) {
+  const reviewing = progress?.waiting_for === "anonymization_review";
   const now = useNow(progress?.status === "RUNNING" || progress?.status === "QUEUED");
   const stale = isJobStale(progress, now);
   const views: StageView[] = progress?.stages.map((stage) => ({
@@ -25,7 +27,8 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, onCancel }
   return <div className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6">
     <div><h2 className="text-xl font-bold tracking-tight">Tiến trình xử lý</h2><p className="mt-1 text-sm text-ink-muted">Chọn giai đoạn đã hoàn tất để mở view kết quả.</p></div>
     <Card className="p-5 sm:p-6">
-      {(progress?.status === "QUEUED" || progress?.waiting_for === "resources" || progress?.queue) && <div role="status" className="mb-5 space-y-2 text-sm text-ink-muted">
+      {reviewing && <AnonymizationReviewPanel key={jobId + ":" + progress.attempt} jobId={jobId} canAccept={canAccept} onAccepted={() => onChanged?.()} />}
+      {!reviewing && (progress?.status === "QUEUED" || progress?.waiting_for === "resources" || progress?.queue) && <div role="status" className="mb-5 space-y-2 text-sm text-ink-muted">
         <p>{progress.waiting_for === "resources" ? "Đang chờ đủ tài nguyên trên máy xử lý." : "Job đã vào hàng đợi, đang chờ máy xử lý."} Cấu hình đã chọn được giữ nguyên; job tự chạy tiếp khi đến lượt và đủ tài nguyên.</p>
         <ProgressBar value={null} label="Đang chờ trong hàng đợi" />
         {progress.queue && <QueueStatus queue={progress.queue} />}
