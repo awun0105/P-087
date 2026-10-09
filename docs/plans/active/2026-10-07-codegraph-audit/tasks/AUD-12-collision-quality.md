@@ -185,14 +185,40 @@ proving selected LiDAR sources do not fall back to RGB.
 in SceneEditor artifact closure; [x] simulator composer fails closed. QA-qualified
 source publication, viewer selection and LiDAR object-region ownership remain open.
 
-### Remaining AUD-12.S3 slices
+### Sprint AUD-12.S3c — Source-specific eligibility assessment
 
-**AUD-12.S3c — Resolve source-specific eligibility.** Bind the current bundle's exact
-LiDAR geometry, confirmed `AlignmentRecord`, `LidarPackageRecord`, calibration/timing
-QA, self-mask evidence, floor evidence and profile. Missing, wrong-mode or
-`diagnostic_only` QA must return a blocker; it cannot create a candidate or switch
-sources. The current AUD-13 projection artifact is permanently diagnostic-only, so
-real sensor activation remains blocked until a production-qualified QA receipt exists.
+**Input:** the exact mixed `ReconstructionBundle` and `LidarPackageRecord`; calibration/timing
+report and projection evidence; confirmed alignment; a world-meter point-cloud receipt;
+source-bound floor and self-mask evidence; and a bounded `LidarCollisionProfile`.
+**Output:** `LidarCollisionEligibilityAssessment` with `eligible` or `blocked`, stable
+blocker codes, exact source refs and profile checksum. The assessment has no publishing
+or mesh-building side effects.
+**Contract:** `LidarAlignedPointCloudEvidence` binds the package geometry, exact
+`AlignmentRecord`, world frame, point checksum and point count. Floor-fit and self-mask
+evidence must refer to that same aligned-point receipt. Sensor-package QA must bind the
+same package/calibration/trajectory/timing and a scored production-qualified projection
+receipt. Registered maps return a mode-specific blocker pending AUD-19 qualification.
+Missing, wrong-mode, stale or `diagnostic_only` evidence cannot authorize a candidate
+or source switch. The existing AUD-13 projection contract only emits
+`qualification_status="diagnostic_only"`; this sprint does not create a production PASS
+or infer qualified thresholds.
+
+Implement: compare bundle geometry and confirmed alignment checksums; revalidate the
+serialized identities for package, QA, projection, point-cloud, floor and self-mask
+receipts; compare metric frame, point ordering/count and full pose coverage; require an
+explicit profile. Tighten `is_sensor_package_collision_eligible()` so a report alone
+or an overlay artifact can never grant eligibility. The assessment is an internal gate
+for the later S3d publisher and is not yet connected to a worker/API/SceneIR source
+selection path.
+Tests: forged PASS report paired with diagnostic projection remains blocked; missing
+calibration QA and QA bound to another calibration are blocked; stale report checksum;
+stale alignment receipt cannot be reused by floor/mask evidence; missing floor, self-mask
+or collision profile; registered map cannot enter the sensor-package route.
+**Exit:** [x] deterministic, identity-bound blocker assessment; [x] diagnostic QA and
+registered-map mode fail closed; [ ] production-qualified sensor receipt and candidate
+publication remain pending AUD-13.S3 qualification and AUD-12.S3d.
+
+### Remaining AUD-12.S3 slices
 
 **AUD-12.S3d — Publish and select an eligible candidate.** Only after S3c eligibility,
 transform points into the RGB canonical metric frame, generate/publish the bounded
@@ -415,3 +441,38 @@ Isaac contact handoff; CPU regression không đóng real acceptance.
 - **Next:** AUD-12.S3c resolves exact QA/alignment/self-mask/floor eligibility;
   S3d publishes candidates only after eligibility; S3e closes source ownership and
   export/viewer consumers. Parent AUD-12.S3/S4 stays unchecked.
+
+### AUD-12.S3c — exact source eligibility assessment
+
+- **Base:** `346074b` (`AUD-12.S3b`).
+- **Logic before → after:** candidate inputs had only adapter-level point/floor
+  checks, while the source-selection contract was not connected to exact package,
+  alignment, calibration/timing, floor or self-mask identities. The new pure gate
+  validates the current bundle's confirmed RGB/LiDAR checksums, serialized record
+  refs, mode-specific QA, aligned world-point receipt, floor evidence, mask pose
+  coverage and bounded profile before any later publisher may proceed.
+- **Hard blocker:** current calibration worker always leaves
+  `projection_evidence_ref` empty and stores a separate `diagnostic_projection_ref`;
+  projection evidence itself is typed `diagnostic_only`. A synthetic or inconsistent
+  PASS report paired with that evidence remains blocked. Registered-map input also
+  remains blocked pending AUD-19 registration QA. No source selection is enabled.
+- **Data contract:** `LidarAlignedPointCloudEvidence` binds the exact package geometry
+  to the confirmed `AlignmentRecord` and the world-meter point checksum/count.
+  `LidarSelfMaskEvidence` binds the same alignment and point receipt plus package
+  trajectory, robot profile, mask digest and pose coverage. `FloorFitEvidence` must
+  use that same aligned-point receipt.
+- **CodeGraph impact:** traced the bundle/align records, QA report and projection
+  evidence, package record, floor evidence, collision adapter and eligibility helper.
+  The new gate has no worker/API/SceneIR caller yet; S3d owns publisher integration.
+- **Changed files:** collision-quality contracts and exports, collision adapter
+  self-mask ref check, calibration eligibility helper, new
+  `src/services/reconstruction/lidar/collision_eligibility.py`, new focused tests,
+  this task, ADR 0016 and the audit README.
+- **Verification:** 8 eligibility tests and 81 focused LiDAR/collision/calibration
+  tests passed; full `ruff check src/ tests/` passed; full `ruff format --check src/
+  tests/` reports 556 files formatted; contract mirror passed; `git diff --check`
+  passed. CodeGraph and Graphify are refreshed after the final edits.
+- **Gate report:** no UI behavior changed, so browser DevTools was not applicable.
+  No aligned production point-cloud producer, production-qualified calibration
+  receipt, held-out collision acceptance, Isaac contact proof, candidate publisher
+  or source-selection caller was added. Those remain **UNVERIFIED** and open.

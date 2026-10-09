@@ -154,3 +154,17 @@ triangle ownership and the current calibration projection evidence is
 `diagnostic_only`, package composition explicitly blocks a selected source instead
 of silently exporting RGB. Candidate publication, QA qualification, LiDAR ownership
 mapping, viewer selection, held-out retention and Isaac acceptance remain pending.
+
+## AUD-12.S3c implementation note — 2026-10-09
+
+The ADR remains **Proposed**; no LiDAR collision source is selectable. A pure
+eligibility assessment now requires the mixed bundle's exact RGB/LiDAR geometry and
+confirmed alignment, the matching scan-package calibration/timing report, and a
+scored production-qualified projection receipt. It also binds the world-meter point
+checksum/count to that alignment, then requires floor and sensor-frame self-mask
+evidence for the same point receipt and a bounded profile. A diagnostic projection,
+even when paired with a synthetic or inconsistent PASS report, returns blockers;
+registered maps remain blocked pending AUD-19 QA. No candidate publisher, worker/API
+route or SceneIR selection caller was added. Production calibration qualification,
+collision-source publication, source-aware object ownership, held-out retention and
+Isaac acceptance remain open.

@@ -18,6 +18,7 @@ from src.models.contracts.lidar_calibration_qa import (
     LidarCalibrationQAResult,
     seal_lidar_calibration_qa_report,
 )
+from src.models.contracts.lidar_projection_qa import LidarCalibrationProjectionEvidence
 from src.services.reconstruction.lidar.package import CAMERA_FRAME, SENSOR_FRAME, CameraCalibration, LidarPackageRecord
 
 
@@ -358,10 +359,23 @@ def evaluate_lidar_calibration_qa(
     )
 
 
-def is_sensor_package_collision_eligible(report: LidarCalibrationQAReport) -> bool:
-    """Consumer gate: only scored PASS reports can qualify a sensor-package source."""
+def is_sensor_package_collision_eligible(
+    report: LidarCalibrationQAReport,
+    projection_evidence_ref: ProductArtifactRef | None = None,
+    projection_evidence: LidarCalibrationProjectionEvidence | None = None,
+) -> bool:
+    """Require the exact production-qualified projection receipt, not an overlay diagnostic."""
     return (
         report.result == LidarCalibrationQAResult.PASS
         and report.observability == LidarCalibrationObservability.READY_FOR_SCORING
         and report.projection_evidence_ref is not None
+        and projection_evidence_ref == report.projection_evidence_ref
+        and projection_evidence is not None
+        and projection_evidence.scoring_status == "SCORED"
+        and projection_evidence.qualification_status == "production_qualified"
+        and projection_evidence.package_ref == report.package_ref
+        and projection_evidence.calibration_ref == report.calibration_ref
+        and projection_evidence.trajectory_ref == report.trajectory_ref
+        and projection_evidence.timing_ref == report.timing_ref
+        and projection_evidence.qa_profile.config_checksum == report.config_checksum
     )

@@ -40,12 +40,12 @@ def profile(**overrides: object) -> LidarCollisionProfile:
 
 def mask_evidence_ref() -> ProductArtifactRef:
     return ProductArtifactRef(
-        artifact_type="LidarSelfMask",
+        artifact_type="LidarSelfMaskEvidence",
         schema_version="1.0",
         artifact_uri="artifact://jobs/job-1/lidar/self-mask.bin",
         artifact_checksum="sha256:" + "b" * 64,
         data_class=ArtifactDataClass.DERIVED,
-        producer_stage="lidar.self-mask",
+        producer_stage="ST-COLLIDER",
         job_id="job-1",
     )
 

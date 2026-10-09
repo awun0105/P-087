@@ -14,6 +14,7 @@ from scipy import ndimage
 from src.models.contracts.artifacts import Checksum, ContractModel, ProductArtifactRef
 from src.models.contracts.floor_model import FloorModel
 from src.models.contracts.identity import canonical_json_bytes
+from src.models.contracts.manifests import StageId
 from src.services.reconstruction.adapters.collision_glb import CollisionMesh, encode_collision_glb
 from src.services.scene.floor_model import point_cloud_checksum
 
@@ -68,6 +69,11 @@ class LidarCollisionBuildReport(ContractModel):
         has_checksum = self.self_mask_binding_checksum is not None
         if has_ref != has_checksum or (self.self_masked_point_count > 0 and not has_ref):
             raise ValueError("self-masked LiDAR points require a bound mask evidence reference and checksum")
+        if has_ref and (
+            self.self_mask_evidence_ref.artifact_type != "LidarSelfMaskEvidence"
+            or self.self_mask_evidence_ref.producer_stage != StageId.COLLIDER
+        ):
+            raise ValueError("self-mask evidence reference must identify collider-stage LidarSelfMaskEvidence")
         return self
 
 

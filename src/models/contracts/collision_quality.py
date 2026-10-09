@@ -8,8 +8,9 @@ from typing import Annotated, Literal
 
 from pydantic import Field, FiniteFloat, PositiveInt, model_validator
 
-from src.models.contracts.artifacts import ArtifactRef, Checksum, ContractModel, ProductArtifactRef
+from src.models.contracts.artifacts import ArtifactRef, Checksum, ContractModel, Identifier, ProductArtifactRef
 from src.models.contracts.identity import canonical_json_bytes
+from src.models.contracts.manifests import StageId
 from src.models.contracts.scene import SceneEnvironment
 
 PositiveFinite = Annotated[FiniteFloat, Field(gt=0)]
@@ -130,6 +131,106 @@ class CollisionRegionEvidence(ContractModel):
         if self.state == CollisionObservationState.OBSERVED_STATIC:
             if not self.observation_ids or self.coverage_fraction <= 0:
                 raise ValueError("observed static region requires observations and measured coverage")
+        return self
+
+
+class LidarAlignedPointCloudEvidence(ContractModel):
+    """Exact metric-world point ordering after applying one confirmed bundle alignment."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    artifact_type: Literal["LidarAlignedPointCloudEvidence"] = "LidarAlignedPointCloudEvidence"
+    job_id: Identifier
+    source_geometry_ref: ProductArtifactRef
+    alignment_ref: ProductArtifactRef
+    frame: Literal["world"] = "world"
+    distance_unit: Literal["m"] = "m"
+    point_cloud_checksum: Checksum
+    point_count: PositiveInt
+
+    @model_validator(mode="after")
+    def _check_binding(self) -> LidarAlignedPointCloudEvidence:
+        references = (self.source_geometry_ref, self.alignment_ref)
+        if any(
+            reference.job_id != self.job_id or not reference.artifact_uri.startswith(f"artifact://jobs/{self.job_id}/")
+            for reference in references
+        ):
+            raise ValueError("aligned point-cloud evidence refs must belong to the same job")
+        if (
+            self.source_geometry_ref.artifact_type != "LiDARGeometryArtifact"
+            or self.source_geometry_ref.producer_stage != StageId.LIDAR_INGEST
+        ):
+            raise ValueError("aligned point-cloud source must be the job's LiDAR geometry")
+        if (
+            self.alignment_ref.artifact_type != "AlignmentRecord"
+            or self.alignment_ref.producer_stage != StageId.RGB_LIDAR_ALIGN
+        ):
+            raise ValueError("aligned point-cloud evidence must bind an AlignmentRecord")
+        return self
+
+
+class LidarSelfMaskEvidence(ContractModel):
+    """Point-order-bound robot self-mask receipt for one LiDAR package."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    artifact_type: Literal["LidarSelfMaskEvidence"] = "LidarSelfMaskEvidence"
+    job_id: Identifier
+    package_ref: ProductArtifactRef
+    source_geometry_ref: ProductArtifactRef
+    alignment_ref: ProductArtifactRef
+    aligned_point_cloud_ref: ProductArtifactRef
+    trajectory_ref: ProductArtifactRef
+    robot_profile_ref: ProductArtifactRef
+    source_point_checksum: Checksum
+    point_count: PositiveInt
+    mask_binding_checksum: Checksum
+    masked_point_count: int = Field(ge=0, strict=True)
+    covered_pose_count: int = Field(ge=0, strict=True)
+    total_pose_count: PositiveInt
+    algorithm: Literal["sensor_frame_robot_envelope_v1"]
+
+    @model_validator(mode="after")
+    def _check_binding(self) -> LidarSelfMaskEvidence:
+        references = (
+            self.package_ref,
+            self.source_geometry_ref,
+            self.alignment_ref,
+            self.aligned_point_cloud_ref,
+            self.trajectory_ref,
+            self.robot_profile_ref,
+        )
+        if any(
+            reference.job_id != self.job_id or not reference.artifact_uri.startswith(f"artifact://jobs/{self.job_id}/")
+            for reference in references
+        ):
+            raise ValueError("self-mask evidence refs must belong to the same job")
+        if self.package_ref.artifact_type != "LidarPackageRecord":
+            raise ValueError("self-mask package_ref must reference a LidarPackageRecord")
+        if self.package_ref.producer_stage != StageId.LIDAR_INGEST:
+            raise ValueError("self-mask package_ref must be produced by LiDAR ingest")
+        if self.source_geometry_ref.artifact_type != "LiDARGeometryArtifact":
+            raise ValueError("self-mask source_geometry_ref must reference LiDAR geometry")
+        if self.source_geometry_ref.producer_stage != StageId.LIDAR_INGEST:
+            raise ValueError("self-mask geometry must be produced by LiDAR ingest")
+        if (
+            self.alignment_ref.artifact_type != "AlignmentRecord"
+            or self.alignment_ref.producer_stage != StageId.RGB_LIDAR_ALIGN
+        ):
+            raise ValueError("self-mask evidence must bind the exact AlignmentRecord")
+        if (
+            self.aligned_point_cloud_ref.artifact_type != "LidarAlignedPointCloudEvidence"
+            or self.aligned_point_cloud_ref.producer_stage != StageId.COLLIDER
+        ):
+            raise ValueError("self-mask evidence must bind the aligned point-cloud receipt")
+        if self.trajectory_ref.artifact_type != "LidarTrajectory":
+            raise ValueError("self-mask trajectory_ref must reference a LiDAR trajectory")
+        if self.trajectory_ref.producer_stage != StageId.LIDAR_INGEST:
+            raise ValueError("self-mask trajectory must be produced by LiDAR ingest")
+        if self.robot_profile_ref.artifact_type != "RobotProfile":
+            raise ValueError("self-mask robot_profile_ref must reference a RobotProfile")
+        if self.masked_point_count >= self.point_count:
+            raise ValueError("self-mask evidence cannot remove every source point")
+        if self.covered_pose_count > self.total_pose_count:
+            raise ValueError("self-mask covered poses cannot exceed the trajectory inventory")
         return self
 
 
