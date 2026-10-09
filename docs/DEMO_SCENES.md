@@ -14,8 +14,9 @@ khi chưa đăng nhập). Bundle chỉ chứa output thật của một lần ch
 1. **Chạy pipeline thật** trên GPU (runbook `scripts/gpu/README.md`) cho video muốn làm mẫu. Video phải được khai
    đã có quyền sử dụng và đã ẩn danh khi tạo scene.
 2. **Xuất vào thư viện** bằng một trong hai cách:
-   - Reviewer mở scene, bấm **Đặt làm bản demo**, tick xác nhận công khai. Backend từ chối nếu project chưa khai
-     quyền sử dụng và ẩn danh, nếu thiếu bản xem 3DGS đã xác minh, hoặc nếu job này đã nằm trong thư viện.
+   - Reviewer **đã đăng nhập** mở scene, bấm **Đặt làm bản demo**, tick xác nhận công khai (khi tắt đăng nhập không có
+     nút này, backend trả 401). Backend từ chối nếu project chưa khai quyền sử dụng và ẩn danh, nếu thiếu bản xem
+     3DGS đã xác minh, hoặc nếu job này đã nằm trong thư viện hoặc đang được người khác xuất.
    - CLI trên máy có job: `python -m scripts.demo.export_demo_bundle --out <thư_viện>/<id> --demo-id <id> --title ... job --job-id <job_id>`.
 3. Bundle tự có: video gốc, ~12 frame đại diện, bản xem 3DGS (`scene.sog`), quỹ đạo camera, thời lượng thật từng bước,
    thông số xử lý và máy đã chạy. Không bao giờ ghi đè bundle cũ.
@@ -36,8 +37,10 @@ số đo", bước chưa chạy hiện "chưa ghi kết quả". Để thêm th�
 ```
 
 - `kind`: `image` | `video` (cần `path`, đường dẫn tính từ file JSON) | `facts` (danh sách nhãn/giá trị **đo thật**).
-- Mỗi stage tối đa 8 thẻ; file được copy vào `files/` với tên phẳng và có checksum.
-- Mẫu có bước LiDAR thì dòng thời gian tự có thêm các bước LiDAR như một job thật.
+- Mỗi stage tối đa 8 thẻ, `video` phải là .mp4/.mov và `image` là .png/.jpg; vượt giới hạn hoặc sai loại thì lệnh dừng
+  trước khi copy file. File được copy vào `files/` với tên phẳng và có checksum; bundle được đọc lại và kiểm trước khi
+  coi là xong, lỗi thì dọn sạch để chạy lại.
+- Job có bước LiDAR thì bundle giữ các bước đó, và dòng thời gian phát lại hiện chúng như một job thật.
 
 ## Thêm một loại thẻ mới
 1. Backend: thêm giá trị vào `DemoStageAsset.kind` (`src/services/orchestration/samples/models.py`) và quy tắc kiểm tra.
@@ -47,4 +50,4 @@ số đo", bước chưa chạy hiện "chưa ghi kết quả". Để thêm th�
 
 ## Lưu ý riêng tư
 Thư viện mẫu không cần đăng nhập, nên bundle chứa video gốc và frame của scene. Chỉ xuất scene có quyền công khai.
-Khi xuất từ giao diện, thao tác được ghi nhật ký (`demo.publish`).
+Xuất từ giao diện luôn cần một Reviewer đăng nhập và được ghi nhật ký (`demo.publish`).

@@ -434,7 +434,7 @@ lực. Tổng năng lực bị chặn gồm cả tổng dung lượng ổ của 
 - **States:** queued, running, waiting-for-user, succeeded, failed, cancelled; pending cancel/retry; mất kết nối; stage chưa có artifact/artifact không đọc được.
 - **Exit / transition:** S07/S08/S06; job mới hoặc retry vẫn giữ được lịch sử. Preview xuất hiện bằng thông báo/CTA, không thay toàn bộ màn hình bất ngờ.
 
-**Biến thể replay mẫu:** giữ nhãn `Kết quả đã xử lý sẵn — đang phát lại`; có trạng thái loading, replay đang chạy, đã tới cuối, thiếu dữ liệu/lỗi. CTA `Bỏ qua và mở scene` trong lúc replay, `Mở scene mẫu` khi xong. Không có cancel/retry GPU; thiếu scene mẫu thì khóa mở và giải thích. Thời gian trong replay được ghi là thời lượng đã ghi của mẫu.
+**Biến thể replay mẫu:** giữ dòng nhắc “Đây là bản phát lại, không phải job đang chạy”; có trạng thái loading, replay đang chạy, đã tới cuối, thiếu dữ liệu/lỗi. CTA `Bỏ qua` trong lúc replay, `Mở scene 3D` khi xong (dẫn thẳng sang scene mẫu). Không có cancel/retry GPU; thiếu scene mẫu thì khóa mở và giải thích. Thời gian trong replay được ghi là thời lượng đã ghi của mẫu.
 
 **DECISION (user, 02/10/2026):** khi thiếu tài nguyên lúc dispatch, job giữ nguyên
 cấu hình/checksum, chờ trong durable queue và tự chạy tiếp khi worker đo đủ tài

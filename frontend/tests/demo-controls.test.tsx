@@ -6,7 +6,9 @@ import { DemoControls } from "@/features/studio/scene/DemoControls";
 import { clearDemo, getDemoState, markDemo, publishDemo, resetDemo } from "@/lib/api/studio";
 import type { DemoState } from "@/lib/contracts/studio";
 
-const auth = { me: { auth_required: true, user: { user_id: "u1", display_name: "Editor", role: "editor" } } };
+const auth: { me: { auth_required: boolean; user: { user_id: string; display_name: string; role: string } | null } } = {
+  me: { auth_required: true, user: { user_id: "u1", display_name: "Editor", role: "editor" } },
+};
 vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => auth }));
 vi.mock("@/lib/api/studio", () => ({
   getDemoState: vi.fn(), markDemo: vi.fn(), clearDemo: vi.fn(), resetDemo: vi.fn(), publishDemo: vi.fn(),
@@ -19,7 +21,7 @@ function demo(current: string, atBaseline: boolean, marked = true, published: st
 
 beforeEach(() => {
   vi.clearAllMocks();
-  auth.me.user.role = "editor";
+  auth.me = { auth_required: true, user: { user_id: "u1", display_name: "Editor", role: "editor" } };
   vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 
@@ -44,7 +46,7 @@ describe("DemoControls: mốc gốc", () => {
   });
 
   it("Reviewer đặt và bỏ mốc gốc; Editor không có hai nút này", async () => {
-    auth.me.user.role = "reviewer";
+    auth.me = { auth_required: true, user: { user_id: "u1", display_name: "Reviewer", role: "reviewer" } };
     vi.mocked(getDemoState).mockResolvedValue(demo("rev-002", false, false));
     vi.mocked(markDemo).mockResolvedValue(demo("rev-002", true));
     vi.mocked(clearDemo).mockResolvedValue(demo("rev-002", false, false));
@@ -63,7 +65,7 @@ describe("DemoControls: mốc gốc", () => {
 
 describe("DemoControls: Đặt làm bản demo = xuất vào thư viện mẫu", () => {
   it("Reviewer phải xác nhận công khai mới xuất được, và gửi tên + mô tả", async () => {
-    auth.me.user.role = "reviewer";
+    auth.me = { auth_required: true, user: { user_id: "u1", display_name: "Reviewer", role: "reviewer" } };
     vi.mocked(getDemoState).mockResolvedValue(demo("rev-002", false, false));
     vi.mocked(publishDemo).mockResolvedValue({ sample_id: "kho-a-1234", title: "Kho A" });
     render(<DemoControls jobId="job-a" revision="rev-002" sceneReady defaultTitle="Kho A" onRestored={vi.fn()} />);
@@ -85,7 +87,7 @@ describe("DemoControls: Đặt làm bản demo = xuất vào thư viện mẫu",
   });
 
   it("lỗi từ máy chủ hiện ngay trong hộp thoại và không đánh dấu đã xuất", async () => {
-    auth.me.user.role = "reviewer";
+    auth.me = { auth_required: true, user: { user_id: "u1", display_name: "Reviewer", role: "reviewer" } };
     vi.mocked(getDemoState).mockResolvedValue(demo("rev-002", false, false));
     vi.mocked(publishDemo).mockRejectedValue(new Error("Chỉ công khai được scene đã xác nhận quyền sử dụng và đã ẩn danh khi tạo"));
     render(<DemoControls jobId="job-a" revision="rev-002" sceneReady defaultTitle="Kho A" onRestored={vi.fn()} />);
@@ -108,5 +110,26 @@ describe("DemoControls: Đặt làm bản demo = xuất vào thư viện mẫu",
     render(<DemoControls jobId="job-a" revision="rev-002" sceneReady onRestored={vi.fn()} />);
     expect(await screen.findByRole("link", { name: "Đã có trong thư viện mẫu" })).toHaveAttribute("href", "/new/try-demo?sample=kho-a-1234");
     expect(screen.queryByRole("button", { name: "Đặt làm bản demo" })).toBeNull();
+  });
+
+  it("tắt đăng nhập: không có nút xuất (cần Reviewer thật) dù vẫn đặt được mốc gốc", async () => {
+    auth.me = { auth_required: false, user: null };
+    vi.mocked(getDemoState).mockResolvedValue(demo("rev-002", false, false));
+    render(<DemoControls jobId="job-a" revision="rev-002" sceneReady onRestored={vi.fn()} />);
+    expect(await screen.findByRole("button", { name: "Đặt mốc gốc" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Đặt làm bản demo" })).toBeNull();
+  });
+
+  it("người khác vừa xuất cùng scene: báo lỗi rồi đọc lại và chuyển nút thành đường dẫn tới mẫu", async () => {
+    auth.me = { auth_required: true, user: { user_id: "u1", display_name: "Reviewer", role: "reviewer" } };
+    vi.mocked(getDemoState).mockResolvedValueOnce(demo("rev-002", false, false)).mockResolvedValue(demo("rev-002", false, false, "kho-a-1234"));
+    vi.mocked(publishDemo).mockRejectedValue(new Error("Job này đã có trong thư viện mẫu (kho-a-1234)"));
+    render(<DemoControls jobId="job-a" revision="rev-002" sceneReady defaultTitle="Kho A" onRestored={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Đặt làm bản demo" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("checkbox"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Xuất vào thư viện mẫu" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("đã có trong thư viện mẫu");
+    await waitFor(() => expect(getDemoState).toHaveBeenCalledTimes(2));
   });
 });

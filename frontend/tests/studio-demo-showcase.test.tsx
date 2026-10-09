@@ -68,7 +68,6 @@ describe("parseDemoManifest với asset", () => {
 
   it("từ chối kind lạ, facts rỗng và tên file không an toàn", () => {
     for (const bad of [
-      { kind: "hologram", file: file("x.png") },
       { kind: "facts", facts: [] },
       { kind: "image", file: file("../x.png") },
       { kind: "facts", facts: [{ label: "a", value: "b" }], file: file("x.png") },
@@ -77,5 +76,12 @@ describe("parseDemoManifest với asset", () => {
       value.stages[0].assets = [bad];
       expect(() => parseDemoManifest(value)).toThrow();
     }
+  });
+
+  it("backend mới hơn có loại thẻ lạ: bỏ riêng thẻ đó, không làm hỏng cả mẫu", () => {
+    const value = base();
+    value.stages[0].assets = [{ kind: "hologram", file: file("x.png") }, { kind: "facts", facts: [{ label: "a", value: "b" }] }];
+    const parsed = parseDemoManifest(value);
+    expect(parsed.stages[0].assets).toEqual([{ kind: "facts", facts: [{ label: "a", value: "b" }] }]);
   });
 });

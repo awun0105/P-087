@@ -124,7 +124,7 @@ function FrameGrid({ context, withCameras }: { context: ShowcaseContext; withCam
           <img src={fileUrl(frame.name)} alt="" className="size-full object-cover" loading="lazy" decoding="async" />
           {withCameras && index < revealed && (
             <span className="absolute top-1.5 left-1.5 rounded border border-line-dark bg-viewport-deep/85 px-1.5 py-0.5 font-mono text-[10px] text-on-dark">
-              cam {index + 1}
+              ảnh {index + 1}
             </span>
           )}
         </li>

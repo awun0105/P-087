@@ -512,7 +512,7 @@ export function parseJobProgress(value: unknown): JobProgress {
   return value as unknown as JobProgress;
 }
 
-/** Tên file demo phải phẳng (không path) vì được ghép vào URL. */
+/** Loại thẻ frontend biết vẽ; loại lạ (backend mới hơn) bị bỏ qua từng thẻ chứ không làm hỏng cả mẫu. */
 const ASSET_KINDS = ["image", "video", "facts"];
 
 function isDemoAsset(asset: unknown): boolean {
@@ -524,11 +524,17 @@ function isDemoAsset(asset: unknown): boolean {
   return isRecord(asset.file) && typeof asset.file.name === "string" && SAFE_NAME.test(asset.file.name);
 }
 
+/** Tên file demo phải phẳng (không path) vì được ghép vào URL. */
 export function parseDemoManifest(value: unknown): DemoManifest {
   if (!isRecord(value) || value.schema_version !== "1.0" || !isRecord(value.splat) ||
       !Array.isArray(value.frames) || !Array.isArray(value.stages) ||
       (value.origin !== "pipeline_job" && value.origin !== "smoke_run")) {
     throw new Error("Demo bundle không hợp lệ");
+  }
+  for (const stage of value.stages) {
+    if (isRecord(stage) && Array.isArray(stage.assets)) {
+      stage.assets = stage.assets.filter((asset) => isRecord(asset) && ASSET_KINDS.includes(String(asset.kind)));
+    }
   }
   const assetFiles = value.stages.flatMap((stage) =>
     isRecord(stage) && Array.isArray(stage.assets) ? stage.assets.flatMap((asset) => (isRecord(asset) && asset.file ? [asset.file] : [])) : []);

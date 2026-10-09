@@ -8,7 +8,7 @@ import { notifySuccess } from "@/components/studio/feedback";
 import { Badge, Button, buttonVariants } from "@/components/studio/primitives";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useAuth } from "@/features/studio/AuthProvider";
-import { isReviewer } from "@/lib/api/auth";
+import { canDecideReview, isReviewer } from "@/lib/api/auth";
 import { clearDemo, getDemoState, markDemo, publishDemo, resetDemo } from "@/lib/api/studio";
 import type { DemoState } from "@/lib/contracts/studio";
 import { errorMessage } from "@/lib/ui-error";
@@ -40,6 +40,8 @@ export function DemoControls({
 }) {
   const { me } = useAuth();
   const reviewer = isReviewer(me);
+  // Xuất vào thư viện công khai luôn cần phiên Reviewer thật (backend từ chối nếu tắt đăng nhập).
+  const canPublish = canDecideReview(me);
   const [state, setState] = useState<DemoState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -111,7 +113,7 @@ export function DemoControls({
           <Clapperboard aria-hidden />
           Đã có trong thư viện mẫu
         </Link>
-      ) : reviewer ? (
+      ) : canPublish ? (
         <Button size="sm" variant="ghost" disabled={busy} onClick={() => setPublishing(true)}
           title="Xuất scene này vào thư viện mẫu để mọi người xem ở Thử mẫu.">
           <Clapperboard aria-hidden />
@@ -119,7 +121,7 @@ export function DemoControls({
         </Button>
       ) : null}
       {error && <span role="alert" className="text-xs text-rust">{error}</span>}
-      {reviewer && (
+      {canPublish && (
         <PublishDialog
           open={publishing}
           onOpenChange={setPublishing}
@@ -129,18 +131,23 @@ export function DemoControls({
             setState((current) => (current ? { ...current, published_sample_id: sampleId } : current));
             notifySuccess("Đã xuất vào thư viện mẫu.");
           }}
+          // Lỗi "đã có trong thư viện" (người khác vừa xuất): đọc lại trạng thái để nút đổi sang đường dẫn tới mẫu.
+          onFailed={() => {
+            void getDemoState(jobId).then((next) => setState(next), () => undefined);
+          }}
         />
       )}
     </div>
   );
 }
 
-function PublishDialog({ open, onOpenChange, jobId, defaultTitle, onPublished }: {
+function PublishDialog({ open, onOpenChange, jobId, defaultTitle, onPublished, onFailed }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   jobId: string;
   defaultTitle: string;
   onPublished: (sampleId: string) => void;
+  onFailed: () => void;
 }) {
   const [submitting, setSubmitting] = useState(false);
   return (
@@ -160,18 +167,20 @@ function PublishDialog({ open, onOpenChange, jobId, defaultTitle, onPublished }:
           onSubmitting={setSubmitting}
           onCancel={() => onOpenChange(false)}
           onPublished={(sampleId) => { onPublished(sampleId); onOpenChange(false); }}
+          onFailed={onFailed}
         />
       </DialogContent>
     </Dialog>
   );
 }
 
-function PublishForm({ jobId, defaultTitle, onSubmitting, onCancel, onPublished }: {
+function PublishForm({ jobId, defaultTitle, onSubmitting, onCancel, onPublished, onFailed }: {
   jobId: string;
   defaultTitle: string;
   onSubmitting: (submitting: boolean) => void;
   onCancel: () => void;
   onPublished: (sampleId: string) => void;
+  onFailed: () => void;
 }) {
   const ids = { title: useId(), description: useId() };
   const [title, setTitle] = useState(defaultTitle);
@@ -189,6 +198,7 @@ function PublishForm({ jobId, defaultTitle, onSubmitting, onCancel, onPublished 
       onPublished(result.sample_id);
     } catch (cause) {
       setError(errorMessage(cause, "Không xuất được vào thư viện mẫu"));
+      onFailed();
     } finally {
       setSubmitting(false);
       onSubmitting(false);
