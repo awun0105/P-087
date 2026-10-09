@@ -71,6 +71,46 @@ function videoCandidate(candidateId: string, fileId: string, state: "ready" | "n
   };
 }
 
+function sensorRecipeCandidate(
+  candidateId: string,
+  recipeGroup: "R4" | "R6",
+  state: "ready" | "pending_verification",
+): InputResolutionCandidate {
+  const estimated = recipeGroup === "R6";
+  const runtimeStatus = estimated ? "wired_unqualified" : "qualified";
+  return {
+    candidate_kind: "video_recipe",
+    candidate_id: candidateId,
+    recipe_group: recipeGroup,
+    state,
+    bindings: [
+      { binding_id: `${candidateId}-rgb`, role: "rgb_video", file_ids: ["file-upload-video"] },
+      { binding_id: `${candidateId}-scan`, role: "lidar_scan", file_ids: ["file-scan"] },
+      ...(estimated ? [{ binding_id: `${candidateId}-scan-times`, role: "lidar_scan_times" as const, file_ids: ["file-scan-times"] }] : []),
+      ...(!estimated ? [{ binding_id: `${candidateId}-trajectory`, role: "sensor_trajectory" as const, file_ids: ["file-trajectory"] }] : []),
+      { binding_id: `${candidateId}-calibration`, role: "camera_lidar_calibration", file_ids: ["file-calibration"] },
+      { binding_id: `${candidateId}-rgb-times`, role: "rgb_frame_times", file_ids: ["file-rgb-times"] },
+    ],
+    excluded_file_ids: [],
+    trajectory_origin: estimated ? "estimated" : "supplied",
+    required_facts: [],
+    diagnostics: estimated ? [{
+      code: "ODOMETRY_RUNTIME_UNQUALIFIED",
+      severity: "warning",
+      description: "R6 depends on an odometry runtime that is wired but not qualified.",
+      related_file_ids: ["file-scan"],
+    }] : [],
+    runtime: {
+      capability_key: recipeGroup,
+      status: runtimeStatus,
+      runtime_id: estimated ? null : "qualified-r4-worker",
+      runtime_version: estimated ? null : "1",
+      qualification_evidence_checksum: estimated ? null : `sha256:${"2".repeat(64)}`,
+      reason_codes: [],
+    },
+  };
+}
+
 function report(state: InputResolutionReport["state"], candidates: InputResolutionCandidate[], recommended: string | null): InputResolutionReport {
   return {
     schema_version: "1.0",
@@ -239,6 +279,43 @@ describe("unified input flow", () => {
     })));
     expect(mocks.push).toHaveBeenCalledWith("/scenes/job-1");
     expect(window.sessionStorage.getItem("r2s:input-assembly:v1:user-1")).toBeNull();
+  });
+
+  it("shows unqualified R6 diagnostics while keeping the supplied R4 recipe as a usable fallback", async () => {
+    window.sessionStorage.setItem("r2s:input-assembly:v1:user-1", JSON.stringify({
+      schema_version: 1,
+      account_id: "user-1",
+      uploads: [{ upload_id: "upload-video", original_name: "warehouse.mp4", included: true, preset: "720p" }],
+      scan_order: [],
+      intent: "video_reconstruction",
+      scene_name: "Warehouse",
+    }));
+    mocks.getStaged.mockResolvedValue(staged("upload-video", "warehouse.mp4"));
+    const supplied = sensorRecipeCandidate("r4-supplied", "R4", "ready");
+    const estimated = sensorRecipeCandidate("r6-estimated", "R6", "pending_verification");
+    mocks.resolve.mockReset().mockResolvedValue({ report: report("ready", [supplied, estimated], supplied.candidate_id) });
+
+    render(<UnifiedInputFlow />);
+    expect(await screen.findByText("warehouse.mp4")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Phân tích input" }));
+
+    expect(await screen.findByText("R6 depends on an odometry runtime that is wired but not qualified.")).toBeInTheDocument();
+    expect(screen.getByText("Runtime: wired_unqualified")).toBeInTheDocument();
+    expect(screen.getByText("Recipe đã được resolver xác nhận là có thể dispatch")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Người/đơn vị sở hữu dữ liệu"), { target: { value: "Nhóm P-087" } });
+    fireEvent.change(screen.getByLabelText("Nguồn dữ liệu"), { target: { value: "self_collected_no_pii" } });
+    fireEvent.change(screen.getByLabelText("Mục đích sử dụng"), { target: { value: "Tái dựng scene" } });
+    fireEvent.click(screen.getByLabelText(/Tôi có quyền sử dụng dữ liệu/));
+    fireEvent.click(screen.getByLabelText(/Video không có khuôn mặt/));
+    fireEvent.click(screen.getByLabelText(/Tôi hiểu dữ liệu và kết quả/));
+    expect(screen.getByRole("button", { name: /Tạo job theo recipe này/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /Tạo job theo recipe này/ }));
+
+    await waitFor(() => expect(mocks.run).toHaveBeenCalledWith("assembly-1", expect.objectContaining({
+      candidate_id: supplied.candidate_id,
+      revision: 1,
+    })));
   });
 
   it("requires explicit timestamp sensor roles and preserves separate RGB and LiDAR units", async () => {

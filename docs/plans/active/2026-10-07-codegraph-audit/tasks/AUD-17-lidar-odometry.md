@@ -390,3 +390,33 @@ AUD-17.S3b1 implementation:
   edges with the index up to date; `codegraph sync .` could not acquire the database
   lock held by the live MCP server (PID 14310). `graphify update .` rebuilt 21,586
   nodes and 64,895 edges. `understand-anything` availability remains unverified.
+
+S3b2 integration remains open after inspecting the live dispatch path:
+- Graphify and CodeGraph show that R6 is `PENDING_VERIFICATION` while R5 is
+  `WIRED_UNQUALIFIED`; `InputAssemblyService` considers only R1/R4 implemented,
+  `/input-assemblies/{id}/run` rejects other recipe groups, and `ProjectRegistry`
+  has no R6 worker-stage adapter.
+- `LidarOdometryWorker` currently publishes an estimated artifact with runtime
+  qualification fixed to `wired_unqualified` and an ingest binding whose world
+  bridge is pending. No R6 dispatch or canonical LiDAR ingest can safely be enabled
+  from that artifact today.
+- This is an unimplemented product adapter plus missing runtime/world-frame evidence,
+  not a technology impossibility. Keep S3b2 and real-sensor acceptance open; do not
+  treat a synthetic provider fixture or a registry-only claim as qualification.
+
+S3c supplied-trajectory fallback UX regression:
+- `UnifiedInputFlow` already renders runtime status and resolver diagnostics for each
+  candidate, and only renders Run for the recommended READY candidate. A READY R4
+  supplied-trajectory candidate can therefore remain usable while estimated R6 is
+  pending; the UI does not silently dispatch or switch to R6.
+- Added a frontend regression that presents R6 as `wired_unqualified`, keeps its
+  diagnostic visible, and submits only the selected R4 candidate. This verifies the
+  existing fallback behavior; it does not provide persisted odometry QA or close
+  S3b2/S3c quality-report work.
+- Verification: `npm exec vitest run -- tests/unified-input-flow.test.tsx` — 5 passed;
+  `npm run typecheck` — passed; `npm exec eslint -- tests/unified-input-flow.test.tsx`
+  — passed; `git diff --check` — passed. No rendered component changed, so the
+  browser UI change gate is not applicable.
+- Gate report: CodeGraph traced `UnifiedInputFlow`, its candidate submit gate and
+  the focused regression; Graphify located the unified-input/R4–R6 relationship.
+  S3b2's lack of a production adapter remains the controlling product limitation.
