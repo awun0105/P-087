@@ -19,6 +19,8 @@ export interface InputAssemblyRunRequest {
   name: string;
   attestation: SourceRightsAttestation;
   processing?: Record<string, number | string>;
+  /** Tự động che khuôn mặt/biển số trước khi dựng 3D; chỉ gửi khi server báo `anonymize_available`. */
+  anonymize?: boolean;
 }
 
 export interface InputAssemblyRunResponse {

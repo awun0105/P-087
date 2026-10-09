@@ -149,7 +149,22 @@ and consumer proof; synthetic zero findings không chứng minh anonymity.
     từng thấy bắt đúng một biển số thật.
   - Privacy report của job không đổi: vẫn `self_attested` / `PRELIMINARY_SCREENED`. Bước này là lớp bảo vệ thêm,
     không cấp `VERIFIED_ANONYMIZED`. Luồng reviewer xem, sửa tay và duyệt (S3) chưa có.
-  - Cờ bật theo deployment, chưa có lựa chọn theo từng job trên UI.
-  - Bước che chạy trong tool `prepare`, chưa đi qua admission VRAM.
   - Frame gốc vẫn được publish ở `rec02a/frames/` (không nằm trong allow-list tải của job khi bật che); chưa có
     cơ chế hạn chế truy cập riêng hay xóa.
+
+### Lựa chọn theo từng job (2026-10-09)
+
+- `JobProcessingConfig.anonymize` (chỉ ghi vào bytes cấu hình khi bật, nên checksum của job không chọn che giữ
+  nguyên), `ResolvedProcessing.anonymize`, trường `anonymize` của `UploadProjectInput` và `AssemblyRunRequest`.
+  Worker che khi job chọn hoặc khi deployment đặt `PRODUCT_ANONYMIZE_INPUT=true`.
+- `GET /processing/options` trả `anonymize_available` (deployment đã cấu hình scene runtime và trọng số) và
+  `anonymize_enforced`. Yêu cầu che trên deployment chưa cấu hình bị từ chối 409, không âm thầm bỏ qua.
+- Form tạo scene (`UnifiedInputFlow.tsx`) hiện ô "Tự động che khuôn mặt và biển số trước khi dựng 3D" khi
+  server báo có; lời khai "video không có khuôn mặt/biển số" vẫn bắt buộc. Chưa có test frontend riêng cho ô này.
+- **Admission:** `run_video_job` chạy `prepare` rồi `preview` trong cùng một lần nhận job, sau khi admission đã
+  giữ chỗ cho pha preview. Bước che (peak khoảng 0,9 GB) chạy bên trong phần giữ chỗ đó, trước khi Brush bắt đầu,
+  nên không cần giữ chỗ riêng.
+- Tests: `test_anonymize_is_recorded_only_when_chosen`,
+  `test_anonymize_option_is_offered_and_recorded_only_with_a_configured_anonymizer`; `tests/test_api` và
+  `tests/test_orchestration` (978 test) pass.
+

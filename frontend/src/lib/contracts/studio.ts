@@ -380,6 +380,10 @@ export interface ProcessingOptions {
   capability: MachineCapability | null;
   default_evaluation: ProcessingEvaluation;
   resource_note: string;
+  /** Deployment có bộ che khuôn mặt/biển số: mới hiện lựa chọn tự động che. Server cũ không gửi trường này. */
+  anonymize_available?: boolean;
+  /** Deployment bắt buộc che cho mọi job: lựa chọn hiện ở trạng thái bật và không tắt được. */
+  anonymize_enforced?: boolean;
 }
 
 export interface SampleSummary {

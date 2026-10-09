@@ -295,6 +295,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   const [dataPurpose, setDataPurpose] = useState("");
   const [rights, setRights] = useState(false);
   const [anonymized, setAnonymized] = useState(false);
+  const [autoAnonymize, setAutoAnonymize] = useState(false);
   const [retention, setRetention] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const handles = useRef(new Map<string, (() => void)>());
@@ -836,6 +837,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         name: sceneName.trim(),
         attestation,
         ...(processing.values ? { processing: processing.values } : {}),
+        ...(processing.options?.anonymize_available && (autoAnonymize || processing.options.anonymize_enforced) ? { anonymize: true } : {}),
       });
       if (isGuest) void refresh();
       clearDraft();
@@ -1178,6 +1180,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
                     <div className="space-y-3 text-sm">
                       <label className="flex items-start gap-2"><input type="checkbox" checked={rights} onChange={(event) => setRights(event.target.checked)} className="mt-1 size-4 accent-ember-strong" />Tôi có quyền sử dụng dữ liệu cho mục đích đã khai báo.</label>
                       <label className="flex items-start gap-2"><input type="checkbox" checked={anonymized} onChange={(event) => setAnonymized(event.target.checked)} className="mt-1 size-4 accent-ember-strong" />Video không có khuôn mặt/biển số hoặc đã được làm mờ trước khi upload.</label>
+                      {processing.options?.anonymize_available && <label className="flex items-start gap-2"><input type="checkbox" checked={autoAnonymize || Boolean(processing.options.anonymize_enforced)} disabled={Boolean(processing.options.anonymize_enforced)} onChange={(event) => setAutoAnonymize(event.target.checked)} className="mt-1 size-4 accent-ember-strong" /><span>Tự động che khuôn mặt và biển số trước khi dựng 3D.<span className="mt-0.5 block text-xs text-ink-muted">Lớp bảo vệ thêm: bộ phát hiện có thể bỏ sót, nên vẫn cần xác nhận ở dòng trên. Vùng bị che sẽ hiện thành mảng đen trong scene.{processing.options.anonymize_enforced ? " Máy xử lý này luôn bật bước che." : ""}</span></span></label>}
                       <label className="flex items-start gap-2"><input type="checkbox" checked={retention} onChange={(event) => setRetention(event.target.checked)} className="mt-1 size-4 accent-ember-strong" />Tôi hiểu dữ liệu và kết quả được lưu để xử lý scene.</label>
                     </div>
                     {processing.options && processing.values && <ProcessingSettings parameters={processing.options.parameters} values={processing.values} editable evaluation={processing.evaluation} capability={processing.options.capability} activePreset={processing.activePreset} onPreset={processing.applyPreset} onChange={processing.setValue} note={processing.options.resource_note} />}
