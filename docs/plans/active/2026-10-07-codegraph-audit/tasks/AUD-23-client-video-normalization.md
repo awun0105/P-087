@@ -741,3 +741,29 @@ than source frames `map(i)±1, ±2`, mean squared error on downscaled grey frame
 **Still open:** no >30 FPS capture with paired LiDAR exists, so pose mapping with real frame dropping is
 shown only by image content; rotation with calibration is synthetic only; one phone, one browser, one OS;
 no COLMAP/Brush run on a prepared video; the full phone upload was not repeated after the timeout fix.
+
+### 2026-10-09 encode-loop speed-up (after the real-capture run)
+
+- **Cause.** MediaBunny's `Conversion` drew every decoded frame through its canvas transform (rotation, pixel
+  aspect, resize) *before* the `process` hook could drop it. A 60 FPS source reduced to 30 FPS therefore paid for
+  twice the resizes it needed.
+- **Change.** The worker now pulls frames from `VideoSampleSink`, applies the PTS selector first, and gives only
+  the kept frames to a `VideoSampleSource` that carries the transform. When the source already has the output
+  geometry (no rotation, flip, non-square pixels or resize) the transform is omitted and frames go to the encoder
+  untouched; the first version of this change always used the transform and made a same-size 720p video three
+  times slower, which the measurement below caught. Output is video-only, matching the audio decision.
+- **Measured in Chrome 153 (GPU rendering), same clips before and after, prepare time until upload starts:**
+
+  | Input → preset | Before | After |
+  | --- | ---: | ---: |
+  | phone 4 s clip, 4K60 portrait → 720p (drops half the frames) | 28.0 s | 18.3–19.4 s |
+  | TorWIC aisle 20 s → 480p (resize, no drop) | 14.3 s | 10.9 s |
+  | same → 480p, software rendering | 20.9 s | 13.2 s |
+  | TorWIC aisle 20 s → 720p (same size) | 8.3–9.4 s | 8.2 s |
+  | TorWIC scene 109 s → 720p (same size) | 41.9 s | 38.3 s |
+
+  Every run was server-verified; frame-map sizes are identical before and after; peak Chrome RSS is unchanged
+  (≈ 2.3 GB for 4K60, ≈ 1.4–1.5 GB for 720p sources). Single runs on one laptop under varying load.
+- **Not solved.** Software decoding of every 4K60 source frame still dominates: the full 109 s phone capture is
+  estimated at about 9 minutes instead of 14.7 (not re-run). Frames must be decoded in order, so dropping them
+  earlier is not possible; a real fix needs hardware decode on the user's device or uploading the original.
