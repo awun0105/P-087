@@ -14,7 +14,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.models.contracts.artifacts import ProductArtifactRef
-from src.models.contracts.scene import SceneIR
+from src.models.contracts.scene import SceneIR, SourceCollisionRegion
 from src.services.orchestration.artifacts import ArtifactResolver
 from src.services.orchestration.scene import (
     SceneEditCommand,
@@ -346,6 +346,38 @@ def test_artifact_references_include_collision_source_and_selection(editor: Scen
     assert scene.environment.collider_ref in references
     assert selection_ref in references
     assert len(references) == len({reference.artifact_uri for reference in references})
+
+
+def test_artifact_references_include_exact_object_collision_membership(editor: SceneEditor) -> None:
+    scene = editor.current(_JOB_ID).scene
+    item = scene.objects[0]
+    membership_ref = ProductArtifactRef.model_validate(
+        {
+            "artifact_type": "SourceCollisionMembership",
+            "schema_version": "1.0",
+            "artifact_uri": f"artifact://jobs/{_JOB_ID}/collider/membership.json",
+            "artifact_checksum": "sha256:" + "c" * 64,
+            "data_class": "derived",
+            "producer_stage": "ST-COLLIDER",
+            "job_id": _JOB_ID,
+        }
+    )
+    ownership = SourceCollisionRegion(
+        object_id=item.id,
+        source_geometry_ref=scene.environment.geometry_ref,
+        extraction_revision=scene.scene_revision,
+        source_transform=item.transform,
+        region_kind="triangle_indices",
+        region_ref=membership_ref,
+    )
+    selected_scene = scene.model_copy(
+        update={"objects": [item.model_copy(update={"source_collision": ownership}), *scene.objects[1:]]},
+        deep=True,
+    )
+
+    references = SceneEditor.artifact_references(selected_scene)
+
+    assert membership_ref in references
 
 
 def test_artifact_references_are_product_visible_only(editor: SceneEditor) -> None:

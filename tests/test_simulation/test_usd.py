@@ -8,9 +8,11 @@ from pathlib import Path
 
 import pytest
 
+from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.identity import verify_candidate_inventory, verify_content_checksum
 from src.models.contracts.scene import ColliderType, ObjectPhysics, SceneIR
 from src.models.contracts.validation import PreflightReport, RuleResult
+from src.services.scene.publisher import with_scene_checksum
 from src.services.simulation.enrichment.service import enrich_scene_physics
 from src.services.simulation.preflight.engine import run_preflight
 from src.services.simulation.usd.builder import CandidateBuildRequest, build_candidate_package
@@ -209,6 +211,59 @@ def test_build_candidate_package_success(
     # 3. Kiểm tra file vật lý được ghi đúng
     assert (tmp_path / "candidate" / "scene.usda").is_file()
     assert (tmp_path / "candidate" / "candidate_manifest.json").is_file()
+
+
+def test_candidate_inventory_binds_selected_collision_source_and_selection(physics_scene: SceneIR) -> None:
+    job_id = physics_scene.environment.geometry_ref.job_id
+    assert job_id is not None
+    source_ref = ProductArtifactRef.model_validate(
+        {
+            "artifact_type": "LidarCollisionCandidate",
+            "schema_version": "1.0",
+            "artifact_uri": f"artifact://jobs/{job_id}/collider/lidar.glb",
+            "artifact_checksum": "sha256:" + "a" * 64,
+            "data_class": "derived",
+            "producer_stage": "ST-COLLIDER",
+            "job_id": job_id,
+        }
+    )
+    selection_ref = ProductArtifactRef.model_validate(
+        {
+            "artifact_type": "CollisionSourceSelection",
+            "schema_version": "1.0",
+            "artifact_uri": f"artifact://jobs/{job_id}/collider/selection.json",
+            "artifact_checksum": "sha256:" + "b" * 64,
+            "data_class": "derived",
+            "producer_stage": "ST-COLLIDER",
+            "job_id": job_id,
+        }
+    )
+    environment = physics_scene.environment.model_copy(
+        update={
+            "collision_source_ref": source_ref,
+            "collision_selection_ref": selection_ref,
+            "collider_ref": source_ref,
+        }
+    )
+    selected_scene = physics_scene.model_copy(update={"environment": environment, "objects": []}, deep=True)
+    selected_scene = SceneIR.model_validate(with_scene_checksum(selected_scene).model_dump(mode="json"))
+    report = run_preflight(selected_scene)
+    assert report.blocking_result == RuleResult.PASS
+
+    package = build_candidate_package(
+        CandidateBuildRequest(
+            scene=selected_scene,
+            preflight_report=report,
+            job_manifest_checksum="sha256:" + "1" * 64,
+            job_id=job_id,
+        )
+    )
+
+    assert package.candidate_manifest.collision_source_ref == source_ref
+    assert package.candidate_manifest.collision_selection_ref == selection_ref
+    assert source_ref in package.colliders
+    assert selection_ref.artifact_checksum in package.candidate_manifest.artifact_checksums
+    verify_candidate_inventory(package)
 
 
 def test_build_candidate_package_rejects_non_pass_preflight(

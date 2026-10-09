@@ -506,6 +506,10 @@ def reobjectify(
         raise SceneRevisionConflictError(
             f"scene đã đổi: yêu cầu đang giữ {expected_revision}, revision hiện tại là {base_scene.scene_revision}"
         )
+    if base_scene.environment.collision_selection_ref is not None:
+        raise ObjectifyError(
+            "Không thể thay tập object khi collision source đang được chọn; khôi phục revision trước khi chọn nguồn mới"
+        )
     job = registry.get_job(job_id)
     bundle = job_bundle(registry, job)
     if bundle is None:

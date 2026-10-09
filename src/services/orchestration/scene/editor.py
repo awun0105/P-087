@@ -215,6 +215,9 @@ class SceneEditor:
                 references.append(item.visual_ref)
             if item.collider is not None and item.collider.geometry_ref is not None:
                 references.append(item.collider.geometry_ref)
+            if item.source_collision is not None and item.source_collision.region_ref is not None:
+                if item.source_collision.region_ref not in references:
+                    references.append(item.source_collision.region_ref)
         return references
 
     def apply(self, job_id: str, command: SceneEditCommand) -> SceneEditResult:

@@ -35,6 +35,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.config import get_settings
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
+from src.models.contracts.collision_quality import (
+    CollisionInputMode,
+    CollisionSourceMode,
+    CollisionSourceSelection,
+)
 from src.models.contracts.manifests import StageId
 from src.models.contracts.scene import (
     ColliderType,
@@ -47,6 +52,12 @@ from src.models.contracts.scene import (
 from src.models.contracts.validation import CandidatePackage, PreflightReport, RuleResult
 from src.services.orchestration.artifacts.errors import ArtifactStoreError
 from src.services.orchestration.projects.registry import ProjectRegistry
+from src.services.reconstruction.adapters.lidar_collision import LidarCollisionBuildReport
+from src.services.reconstruction.lidar.collision_candidate_publisher import (
+    LidarCollisionCandidateManifest,
+    load_lidar_collision_eligibility_inputs,
+)
+from src.services.reconstruction.lidar.collision_eligibility import evaluate_lidar_collision_eligibility
 from src.services.scene.collision_ownership import (
     SourceCollisionOwnershipError,
     bind_source_collision_ownership,
@@ -237,6 +248,25 @@ def _recover_legacy_source_ownership(
         and item.source_collision is None
         and item.provenance.get("duplicated_from") is None
     }
+    selected_source_ref = scene.environment.collision_source_ref
+    if selected_source_ref is not None:
+        incomplete = [
+            item.id
+            for item in scene.objects
+            if item.origin == SceneObjectOrigin.RECONSTRUCTED
+            and item.provenance.get("duplicated_from") is None
+            and (
+                item.source_collision is None
+                or item.source_collision.source_geometry_ref != selected_source_ref
+                or item.source_collision.region_kind != "triangle_indices"
+            )
+        ]
+        if incomplete:
+            raise SourceCollisionOwnershipError(
+                "selected collision source cannot recover ownership from RGB history; remap exact LiDAR regions for: "
+                + ", ".join(sorted(incomplete))
+            )
+        return scene, {}
     if not missing:
         return scene, {}
 
@@ -326,17 +356,78 @@ def _recover_legacy_source_ownership(
     return recovered_scene, recovery_sources
 
 
-def _carved_environment(registry: ProjectRegistry, scene: SceneIR) -> CarvedBackground:
-    """Resolve the source-owned background; edited object transforms never define carve regions."""
-    if scene.environment.collision_selection_ref is not None:
-        raise SourceCollisionOwnershipError(
-            "SceneIR binds a selected collision source, but simulation packaging has not yet validated its QA "
-            "and source ownership; refusing to fall back to canonical RGB geometry."
+def _selected_collision_source(registry: ProjectRegistry, scene: SceneIR) -> tuple[ProductArtifactRef, bytes]:
+    """Resolve and revalidate a selected sensor-package candidate before any export use."""
+    environment = scene.environment
+    source_ref = environment.collision_source_ref
+    selection_ref = environment.collision_selection_ref
+    if source_ref is None and selection_ref is None:
+        return environment.geometry_ref, registry.runtime_resolver.require(environment.geometry_ref).read_bytes()
+    if source_ref is None or selection_ref is None:
+        raise SourceCollisionOwnershipError("selected collision source refs are incomplete; refusing RGB fallback")
+
+    try:
+        selection = CollisionSourceSelection.model_validate_json(
+            registry.runtime_resolver.require(selection_ref).read_bytes()
         )
-    glb = registry.runtime_resolver.require(scene.environment.geometry_ref).read_bytes()
+        if (
+            selection.mode != CollisionSourceMode.LIDAR_DERIVED
+            or selection.input_mode != CollisionInputMode.LIDAR_SENSOR_PACKAGE
+            or selection.output_collision_ref != source_ref
+            or selection.source_qa_ref.artifact_type != "LidarCalibrationQAReport"
+            or selection.alignment_qa_ref is None
+            or selection.alignment_qa_ref.artifact_type != "LidarCalibrationProjectionEvidence"
+        ):
+            raise ValueError("selection mode, QA, or output does not match the selected LiDAR source")
+        raw_manifest_ref = selection_ref.source_provenance.get("candidate_manifest_ref")
+        if not isinstance(raw_manifest_ref, dict):
+            raise ValueError("selection ref does not bind a candidate manifest")
+        manifest_ref = ProductArtifactRef.model_validate(raw_manifest_ref)
+        if manifest_ref.artifact_type != "LidarCollisionCandidateManifest" or manifest_ref.job_id != source_ref.job_id:
+            raise ValueError("candidate manifest ref belongs to another artifact contract or job")
+        manifest = LidarCollisionCandidateManifest.model_validate_json(
+            registry.runtime_resolver.require(manifest_ref).read_bytes()
+        )
+        evidence_refs = {reference.artifact_type: reference for reference in manifest.eligibility_evidence_refs}
+        if (
+            manifest.candidate_ref != source_ref
+            or manifest.source_geometry_ref != selection.source_geometry_ref
+            or evidence_refs.get("LidarCalibrationQAReport") != selection.source_qa_ref
+            or evidence_refs.get("LidarCalibrationProjectionEvidence") != selection.alignment_qa_ref
+            or manifest.profile_checksum != selection.profile_checksum
+            or manifest.profile_checksum != selection.config_checksum
+        ):
+            raise ValueError("selection does not bind the manifest source, QA, profile, or output")
+        eligibility_inputs = load_lidar_collision_eligibility_inputs(manifest, registry.runtime_resolver)
+        eligibility = evaluate_lidar_collision_eligibility(eligibility_inputs)
+        if eligibility.state != "eligible" or eligibility != manifest.eligibility:
+            raise ValueError("candidate eligibility is no longer valid")
+        report = LidarCollisionBuildReport.model_validate_json(
+            registry.runtime_resolver.require(manifest.build_report_ref).read_bytes()
+        )
+        if (
+            report.output_collision_checksum != manifest.output_collision_checksum
+            or report.profile_checksum != manifest.profile_checksum
+            or report.profile_id != manifest.profile.profile_id
+            or report.voxel_m != manifest.profile.voxel_m
+            or report.source_point_checksum != manifest.source_point_checksum
+            or report.self_mask_evidence_ref != manifest.self_mask_evidence_ref
+            or report.self_mask_binding_checksum != manifest.self_mask_binding_checksum
+        ):
+            raise ValueError("candidate build report differs from its immutable manifest")
+        return source_ref, registry.runtime_resolver.require(source_ref).read_bytes()
+    except (ArtifactStoreError, TypeError, ValueError) as error:
+        raise SourceCollisionOwnershipError(
+            f"selected LiDAR source could not be revalidated; refusing to fall back to canonical RGB geometry: {error}"
+        ) from error
+
+
+def _carved_environment(registry: ProjectRegistry, scene: SceneIR) -> CarvedBackground:
+    """Resolve the selected collision source; edited object transforms never define carve regions."""
+    source_ref, glb = _selected_collision_source(registry, scene)
     source_checksum = f"sha256:{hashlib.sha256(glb).hexdigest()}"
-    if source_checksum != scene.environment.geometry_ref.artifact_checksum:
-        raise SourceCollisionOwnershipError("source collision bytes differ from SceneIR environment geometry checksum")
+    if source_checksum != source_ref.artifact_checksum:
+        raise SourceCollisionOwnershipError("source collision bytes differ from selected geometry checksum")
 
     mesh = trimesh.load(io.BytesIO(glb), file_type="glb", force="mesh", process=False)
     vertices = np.asarray(mesh.vertices, dtype=float)
@@ -346,12 +437,22 @@ def _carved_environment(registry: ProjectRegistry, scene: SceneIR) -> CarvedBack
 
     reconstructed = [item for item in scene.objects if item.origin == SceneObjectOrigin.RECONSTRUCTED]
     objects_by_id = {item.id: item for item in reconstructed}
+    selected_source = scene.environment.collision_source_ref is not None
     missing = [
         item.id
         for item in reconstructed
         if item.provenance.get("duplicated_from") is None
-        and _source_region_removed(item, objects_by_id)
-        and item.source_collision is None
+        and (
+            (
+                selected_source
+                and (
+                    item.source_collision is None
+                    or item.source_collision.source_geometry_ref != source_ref
+                    or item.source_collision.region_kind != "triangle_indices"
+                )
+            )
+            or (not selected_source and _source_region_removed(item, objects_by_id) and item.source_collision is None)
+        )
     ]
     if missing:
         ids = ", ".join(sorted(missing))
@@ -365,7 +466,7 @@ def _carved_environment(registry: ProjectRegistry, scene: SceneIR) -> CarvedBack
         raise SourceCollisionOwnershipError("source collision ownership is incomplete")
     owners = [owner for owner in source_owners if owner is not None]
     for item, owner in zip(owned, owners, strict=True):
-        if owner.object_id != item.id or owner.source_geometry_ref != scene.environment.geometry_ref:
+        if owner.object_id != item.id or owner.source_geometry_ref != source_ref:
             raise SourceCollisionOwnershipError(
                 f"{item.id}: source collision ownership is not bound to this environment"
             )

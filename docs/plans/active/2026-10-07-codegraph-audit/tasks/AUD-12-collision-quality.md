@@ -524,3 +524,59 @@ Isaac contact handoff; CPU regression không đóng real acceptance.
   a production-qualified projection receipt. Candidate publication mechanics are
   implemented, but production publication, S3e ownership/selection and S4 acceptance
   remain unchecked.
+
+### AUD-12.S3e — source-aware selection and downstream consumers
+
+- **Base:** `b914265` (current branch head); previous AUD-12 prerequisite:
+  `a8256b6` (`AUD-12.S3d`).
+- **Logic before → after:** S3d could publish an immutable candidate but could not
+  select it safely. `select_lidar_collision_candidate` now re-resolves the manifest,
+  reruns the eligibility gate, checks the build report and exact candidate bytes,
+  maps each reconstructed non-duplicate object's source OBB onto candidate triangles,
+  and commits the candidate plus selection record with `SceneEditor` revision CAS.
+  A missing region, zero coverage, or any ambiguous/unowned triangle blocks the
+  selection and returns per-object coverage diagnostics; RGB triangle indices are
+  never reused against the LiDAR mesh.
+- **Consumer behavior:** object reassign and merge operations read and publish
+  ownership against the selected collision mesh. Re-objectification and `use_boxes`
+  reject replacing the selected object set without restoring an earlier revision.
+  Scene editing artifact closure retains the membership sidecars; the candidate
+  package inventory includes both selected source and selection refs; the viewer
+  layer model distinguishes the selected collision source from a later carved
+  effective collider. Simulation packaging revalidates the selected candidate and
+  its QA and refuses RGB fallback. Scene membership refs and candidate-manifest
+  source/selection refs are bound to the same job using their logical artifact URIs,
+  even when optional `job_id` metadata is absent.
+- **Input/output contract:** input is an expected SceneIR revision plus an exact
+  `LidarCollisionCandidateManifest` ref. Success publishes immutable
+  `SourceCollisionMembership` sidecars and a sealed `CollisionSourceSelection`, then
+  advances SceneIR by CAS with `collision_source_ref`, `collision_selection_ref`,
+  effective `collider_ref`, and object regions all bound to the candidate. Existing
+  scenes omit these optional fields and retain their legacy serialization. Selection
+  remains limited to `LIDAR_SENSOR_PACKAGE`; registered-map input stays blocked until
+  AUD-19 qualifies it.
+- **Related files:** new
+  `src/services/orchestration/scene/collision_source_selection.py` and its focused
+  tests; scene/selection contracts and candidate inventory; SceneEditor artifact
+  closure; object extraction, correction and simulation-package consumers; USD
+  inventory; viewer collision-layer descriptions; and their contract, orchestration,
+  simulation, object-correction and frontend tests; this result log and the audit
+  README progress note.
+- **Verification:** 169 focused backend tests passed; `ruff check src/ tests/` and
+  `ruff format --check src/ tests/` passed (560 files); contract mirror passed (5
+  enums, 6 models); frontend Vitest passed (52 files, 402 tests); frontend typecheck
+  passed; `git diff --check` passed. CodeGraph blast-radius exploration and Graphify
+  query/update were run for the changed source graph.
+- **Browser gate:** the authenticated reviewer session opened the LiDAR calibration
+  QA stage for `job-a713242a38be`, run 2. The app rendered that QA is incomplete and
+  that metric scale still needs confirmation in Studio; the run has no eligible,
+  selected LiDAR candidate. Console showed no errors or warnings on that stage.
+  Therefore the selected-LiDAR viewer/export path is **UNVERIFIED in browser**; the
+  service/contract behavior is covered by focused tests only.
+- **Hard blocker / remaining acceptance:** the active calibration projection receipt
+  is still `diagnostic_only`, and no worker produces production-qualified evidence
+  plus the point-order-bound self-mask. The selection service has no live worker/API
+  producer path yet, so this sprint does not claim production selection, collision
+  safety, held-out retention, GPU performance or Isaac contact acceptance. Keep
+  AUD-12.S3/S4 and AUD-13 production QA open until those upstream inputs and real
+  acceptance evidence exist.

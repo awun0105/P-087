@@ -1,8 +1,9 @@
 """Preflight, candidate, validation and evaluation contracts."""
 
 from enum import StrEnum
+from typing import Self
 
-from pydantic import Field, JsonValue
+from pydantic import Field, JsonValue, model_validator
 
 from src.models.contracts.artifacts import (
     ArtifactRef,
@@ -13,6 +14,14 @@ from src.models.contracts.artifacts import (
     SchemaVersion,
 )
 from src.models.contracts.coordinates import CoordinateSystem, Transform
+
+
+def _artifact_job_id(reference: ProductArtifactRef) -> str:
+    """Read the job identity from a validated logical artifact URI and check optional metadata."""
+    job_id = reference.artifact_uri.removeprefix("artifact://jobs/").partition("/")[0]
+    if reference.job_id is not None and reference.job_id != job_id:
+        raise ValueError("candidate artifact job_id must match its logical URI")
+    return job_id
 
 
 class RuleResult(StrEnum):
@@ -78,6 +87,22 @@ class CandidateManifest(ContractModel):
     collider_refs: list[ProductArtifactRef]
     artifact_checksums: list[Checksum]
     build_config_checksum: Checksum
+    collision_source_ref: ProductArtifactRef | None = None
+    collision_selection_ref: ProductArtifactRef | None = None
+
+    @model_validator(mode="after")
+    def _validate_collision_source_pair(self) -> Self:
+        source_ref = self.collision_source_ref
+        selection_ref = self.collision_selection_ref
+        if source_ref is None and selection_ref is None:
+            return self
+        if source_ref is None or selection_ref is None:
+            raise ValueError("candidate collision source and selection refs must be set together")
+        if selection_ref.artifact_type != "CollisionSourceSelection":
+            raise ValueError("candidate collision_selection_ref must reference CollisionSourceSelection")
+        if _artifact_job_id(source_ref) != _artifact_job_id(selection_ref):
+            raise ValueError("candidate collision source and selection must belong to the same job")
+        return self
 
 
 class CandidatePackage(ContractModel):

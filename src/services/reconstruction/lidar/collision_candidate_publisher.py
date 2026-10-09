@@ -3,19 +3,28 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Self
+from typing import Literal, Self, TypeVar
 
 import numpy as np
 from pydantic import model_validator
 
 from src.models.contracts.artifacts import ArtifactDataClass, Checksum, ContractModel, Identifier, ProductArtifactRef
-from src.models.contracts.collision_quality import CollisionInputMode
+from src.models.contracts.collision_quality import (
+    CollisionInputMode,
+    LidarAlignedPointCloudEvidence,
+    LidarSelfMaskEvidence,
+)
+from src.models.contracts.floor_model import FloorFitEvidence
 from src.models.contracts.identity import canonical_json_bytes
+from src.models.contracts.lidar_calibration_qa import LidarCalibrationQAReport
+from src.models.contracts.lidar_projection_qa import LidarCalibrationProjectionEvidence
 from src.models.contracts.manifests import StageId
+from src.models.contracts.reconstruction import ReconstructionBundle
 from src.services.orchestration.artifacts.checksum import sha256_bytes
 from src.services.orchestration.artifacts.errors import ArtifactAlreadyExistsError
-from src.services.orchestration.artifacts.store import FilesystemArtifactStore
+from src.services.orchestration.artifacts.store import ArtifactResolver, FilesystemArtifactStore
 from src.services.reconstruction.adapters.lidar_collision import (
+    LidarCollisionProfile,
     build_lidar_collision_candidate,
     lidar_self_mask_binding_checksum,
 )
@@ -23,9 +32,13 @@ from src.services.reconstruction.lidar.collision_eligibility import (
     LidarCollisionEligibilityAssessment,
     LidarCollisionEligibilityInputs,
     alignment_reference,
+    bundle_ref,
     evaluate_lidar_collision_eligibility,
 )
+from src.services.reconstruction.lidar.package import LidarPackageRecord
 from src.services.scene.floor_model import point_cloud_checksum
+
+TContract = TypeVar("TContract", bound=ContractModel)
 
 
 class LidarCollisionCandidateManifest(ContractModel):
@@ -41,6 +54,7 @@ class LidarCollisionCandidateManifest(ContractModel):
     floor_evidence_ref: ProductArtifactRef
     self_mask_evidence_ref: ProductArtifactRef
     eligibility_evidence_refs: list[ProductArtifactRef]
+    profile: LidarCollisionProfile
     profile_checksum: Checksum
     source_point_checksum: Checksum
     self_mask_binding_checksum: Checksum
@@ -95,6 +109,7 @@ class LidarCollisionCandidateManifest(ContractModel):
             self.eligibility.input_mode != self.input_mode
             or self.eligibility.source_geometry_ref != self.source_geometry_ref
             or self.eligibility.profile_checksum != self.profile_checksum
+            or self.profile.checksum() != self.profile_checksum
         ):
             raise ValueError("collision candidate manifest differs from its eligibility assessment")
         required_evidence_refs = (
@@ -255,6 +270,7 @@ class LidarCollisionCandidatePublisher:
             floor_evidence_ref=inputs.floor_evidence_ref,
             self_mask_evidence_ref=inputs.self_mask_evidence_ref,
             eligibility_evidence_refs=assessment.evidence_refs,
+            profile=inputs.profile,
             profile_checksum=inputs.profile.checksum(),
             source_point_checksum=observed_point_checksum,
             self_mask_binding_checksum=mask_checksum,
@@ -303,12 +319,67 @@ class LidarCollisionCandidatePublisher:
             raise ValueError("artifact writer changed collision candidate identity")
 
 
+def load_lidar_collision_eligibility_inputs(
+    manifest: LidarCollisionCandidateManifest,
+    resolver: ArtifactResolver,
+) -> LidarCollisionEligibilityInputs:
+    """Reload the exact immutable receipts needed to re-run candidate eligibility.
+
+    Selection/export consumers must not trust the serialized ``eligible`` flag by
+    itself. This reconstructs the assessment inputs from the manifest's bound refs
+    and lets the same source-of-truth gate make the decision again.
+    """
+    for reference in manifest.eligibility_evidence_refs:
+        resolver.require(reference)
+
+    def required_ref(artifact_type: str) -> ProductArtifactRef:
+        matches = [ref for ref in manifest.eligibility_evidence_refs if ref.artifact_type == artifact_type]
+        if len(matches) != 1:
+            raise ValueError(f"candidate manifest requires exactly one {artifact_type} evidence reference")
+        return matches[0]
+
+    def load(model_type: type[TContract], artifact_type: str) -> tuple[ProductArtifactRef, TContract]:
+        reference = required_ref(artifact_type)
+        return reference, model_type.model_validate_json(resolver.require(reference).read_bytes())
+
+    bundle_reference, bundle = load(ReconstructionBundle, "ReconstructionBundle")
+    package_ref, package = load(LidarPackageRecord, "LidarPackageRecord")
+    calibration_qa_ref, calibration_qa = load(LidarCalibrationQAReport, "LidarCalibrationQAReport")
+    projection_evidence_ref, projection_evidence = load(
+        LidarCalibrationProjectionEvidence, "LidarCalibrationProjectionEvidence"
+    )
+    aligned_point_cloud_ref, aligned_point_cloud = load(
+        LidarAlignedPointCloudEvidence, "LidarAlignedPointCloudEvidence"
+    )
+    floor_evidence_ref, floor_evidence = load(FloorFitEvidence, "FloorFitEvidence")
+    self_mask_evidence_ref, self_mask_evidence = load(LidarSelfMaskEvidence, "LidarSelfMaskEvidence")
+    if bundle_ref(bundle) != bundle_reference:
+        raise ValueError("candidate manifest bundle evidence identity differs from its serialized bundle")
+    return LidarCollisionEligibilityInputs(
+        input_mode=manifest.input_mode,
+        bundle=bundle,
+        package_ref=package_ref,
+        package=package,
+        calibration_qa_ref=calibration_qa_ref,
+        calibration_qa=calibration_qa,
+        projection_evidence_ref=projection_evidence_ref,
+        projection_evidence=projection_evidence,
+        aligned_point_cloud_ref=aligned_point_cloud_ref,
+        aligned_point_cloud=aligned_point_cloud,
+        floor_evidence_ref=floor_evidence_ref,
+        floor_evidence=floor_evidence,
+        self_mask_evidence_ref=self_mask_evidence_ref,
+        self_mask_evidence=self_mask_evidence,
+        profile=manifest.profile,
+    )
+
+
 def _product_ref(
     artifact_type: str,
     artifact_uri: str,
     artifact_checksum: Checksum,
     job_id: str,
-    source_provenance: dict,
+    source_provenance: dict[str, object],
 ) -> ProductArtifactRef:
     return ProductArtifactRef(
         artifact_type=artifact_type,

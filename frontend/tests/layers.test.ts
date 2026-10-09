@@ -127,6 +127,30 @@ describe("buildSceneLayers", () => {
     expect(environmentCollider?.dimensions_xyz_m).toEqual(MISSING_DIMENSIONS);
   });
 
+  it("phân biệt LiDAR collision source và collider hiệu lực sau khi carve", () => {
+    const source = {
+      ...ref("artifact://jobs/job-1/collider/lidar.glb", sha("lidar")),
+      artifact_type: "LidarCollisionCandidate",
+    };
+    const selected = scene([]);
+    selected.environment = {
+      ...selected.environment,
+      collider_ref: ref("artifact://jobs/job-1/collider/carved.glb", sha("carved")),
+      collision_source_ref: source,
+      collision_selection_ref: {
+        ...ref("artifact://jobs/job-1/collider/selection.json", sha("selection")),
+        artifact_type: "CollisionSourceSelection",
+      },
+    };
+
+    const layers = buildSceneLayers(selected, sha("selected-scene"));
+
+    expect(layers.colliders.map((layer) => [layer.collider_id, layer.label, layer.checksum])).toEqual([
+      ["environment", "LiDAR-derived environment collider", sha("carved")],
+      ["environment-source", "LiDAR collision source", sha("lidar")],
+    ]);
+  });
+
   it("giữ canonical active của object tắt", () => {
     const layers = buildSceneLayers(scene([object({ active: false })]), sha("x"));
     const mesh = layers.geometry.find((layer) => layer.object_id === "object-a");

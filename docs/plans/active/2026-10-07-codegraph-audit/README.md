@@ -139,9 +139,15 @@ retention and Isaac proof remain open.
 AUD-12.S3c adds an identity-bound eligibility assessment across bundle/alignment,
 package, calibration/timing projection, aligned world-point receipt, floor, self-mask
 and collision profile. A report that claims PASS while its projection remains
-diagnostic-only is blocked, as is registered-map mode pending AUD-19 QA. The gate has
-no publisher/API caller yet; production source selection, held-out retention and Isaac
-proof remain open.
+diagnostic-only is blocked, as is registered-map mode pending AUD-19 QA.
+AUD-12.S3d adds an immutable, content-addressed candidate publisher that reruns this
+gate, validates the exact point/floor/self-mask receipts and publishes the manifest
+last. It is still an internal producer seam: no production-qualified projection
+receipt or worker-produced point-order mask exists. AUD-12.S3e adds source-OBB to
+candidate-triangle ownership, SceneEditor CAS selection, artifact closure, object-edit
+invalidation, viewer-layer identity, and fail-closed simulation/USD consumers. The
+selection service still has no live API/worker route; diagnostic-only QA, held-out
+retention, browser selected-candidate behavior and Isaac proof remain open.
 Active scope: 26 packages/89 sprint slices, including the AUD-19.S4e follow-up.
 AUD-16/ADR0017 (3 sprints) và AUD-25/ADR0025 (6 sprints) Deferred theo yêu cầu owner; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
@@ -378,6 +384,9 @@ AUD-03.S1–S3, AUD-04.S1–S3, AUD-10.S1–S3 và AUD-07.S1–S2 đã được 
 theo sprint. AUD-08.S4, AUD-09.S1, AUD-14.S1–S3 và AUD-19.S1 cũng đã được commit
 riêng. AUD-14.S3 software gates pass; production sloped/noisy sample and obstacle-
 retention benchmark remain pending and are not inferred from synthetic fixtures.
+AUD-12.S3d đã commit cơ chế publish candidate nội bộ; AUD-12.S3e bổ sung source-aware
+ownership/selection và các consumer viewer/export, nhưng không tự mở producer path
+khi QA đầu vào còn `diagnostic_only`.
 AUD-09.S2 đã nối Inspector/API và preview collider với publication revision CAS;
 AUD-09.S3 đã xác nhận legacy/hybrid USD local-pose fidelity, cập nhật preflight
 world bounds và kiểm tra candidate/report invalidation. Focused API/domain/frontend

@@ -100,6 +100,8 @@ class SourceCollisionRegion(ContractModel):
                 raise ValueError("triangle_indices region requires a SourceCollisionMembership region_ref")
             if self.source_obb_dimensions_xyz_m is not None:
                 raise ValueError("triangle_indices region cannot also declare OBB dimensions")
+            if _artifact_job_id(self.region_ref) != _artifact_job_id(self.source_geometry_ref):
+                raise ValueError("source collision membership and geometry must belong to the same job")
         elif self.region_ref is not None or self.source_obb_dimensions_xyz_m is None:
             raise ValueError("source_obb region requires dimensions and cannot declare a membership ref")
         return self
@@ -240,9 +242,28 @@ class SceneIR(ContractModel):
             if item.id in seen:
                 raise ValueError(f"duplicate SceneObject.id in SceneIR: {item.id}")
             seen.add(item.id)
-            if (
-                item.source_collision is not None
-                and item.source_collision.source_geometry_ref != self.environment.geometry_ref
+            if item.source_collision is not None:
+                owner_source = item.source_collision.source_geometry_ref
+                if (
+                    owner_source != self.environment.geometry_ref
+                    and owner_source != self.environment.collision_source_ref
+                ):
+                    raise ValueError(
+                        "source collision ownership must reference the SceneIR environment geometry or selected collision source"
+                    )
+                if (
+                    self.environment.collision_source_ref is not None
+                    and owner_source != self.environment.collision_source_ref
+                ):
+                    raise ValueError("selected collision source ownership cannot reuse another mesh's regions")
+            if self.environment.collision_source_ref is not None and (
+                item.origin == SceneObjectOrigin.RECONSTRUCTED
+                and item.provenance.get("duplicated_from") is None
+                and (
+                    item.source_collision is None
+                    or item.source_collision.source_geometry_ref != self.environment.collision_source_ref
+                    or item.source_collision.region_kind != "triangle_indices"
+                )
             ):
-                raise ValueError("source collision ownership must reference the SceneIR environment geometry")
+                raise ValueError("selected collision source requires exact source-bound ownership for every object")
         return self

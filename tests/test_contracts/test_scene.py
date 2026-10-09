@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.scene import ObjectPhysics, SceneIR, SourceCollisionRegion
 from src.services.scene.publisher import with_scene_checksum
@@ -37,6 +38,71 @@ def test_scene_object_ids_are_unique_within_revision() -> None:
     """A valid scene has one unambiguous identity per object."""
     scene = SceneIR.model_validate_json((FIXTURES / "scene_ir/scene.json").read_text(encoding="utf-8"))
     assert len({item.id for item in scene.objects}) == len(scene.objects)
+
+
+def test_selected_collision_source_requires_exact_membership_on_that_mesh() -> None:
+    scene = SceneIR.model_validate_json((FIXTURES / "scene_ir/scene.json").read_text(encoding="utf-8"))
+    source_ref = ProductArtifactRef.model_validate(
+        {
+            "artifact_type": "LidarCollisionCandidate",
+            "schema_version": "1.0",
+            "artifact_uri": "artifact://jobs/job-fixture-001/collider/lidar.glb",
+            "artifact_checksum": "sha256:" + "a" * 64,
+            "data_class": "derived",
+            "producer_stage": "ST-COLLIDER",
+            "job_id": "job-fixture-001",
+        }
+    )
+    selection_ref = ProductArtifactRef.model_validate(
+        {
+            "artifact_type": "CollisionSourceSelection",
+            "schema_version": "1.0",
+            "artifact_uri": "artifact://jobs/job-fixture-001/collider/selection.json",
+            "artifact_checksum": "sha256:" + "b" * 64,
+            "data_class": "derived",
+            "producer_stage": "ST-COLLIDER",
+            "job_id": "job-fixture-001",
+        }
+    )
+    owners = []
+    for item in scene.objects:
+        membership_ref = ProductArtifactRef.model_validate(
+            {
+                "artifact_type": "SourceCollisionMembership",
+                "schema_version": "1.0",
+                "artifact_uri": f"artifact://jobs/job-fixture-001/collider/{item.id}.json",
+                "artifact_checksum": "sha256:" + "c" * 64,
+                "data_class": "derived",
+                "producer_stage": "ST-COLLIDER",
+                "job_id": "job-fixture-001",
+            }
+        )
+        ownership = SourceCollisionRegion(
+            object_id=item.id,
+            source_geometry_ref=source_ref,
+            extraction_revision=scene.scene_revision,
+            source_transform=item.transform,
+            region_kind="triangle_indices",
+            region_ref=membership_ref,
+        )
+        owners.append(item.model_copy(update={"source_collision": ownership}, deep=True))
+    environment = scene.environment.model_copy(
+        update={
+            "collision_source_ref": source_ref,
+            "collision_selection_ref": selection_ref,
+            "collider_ref": source_ref,
+        }
+    )
+    selected = scene.model_copy(update={"environment": environment, "objects": owners}, deep=True)
+
+    assert SceneIR.model_validate(selected.model_dump(mode="json")) == selected
+
+    invalid = selected.model_dump(mode="json")
+    invalid["objects"][0]["source_collision"]["source_geometry_ref"] = scene.environment.geometry_ref.model_dump(
+        mode="json"
+    )
+    with pytest.raises(ValidationError, match="selected collision source ownership"):
+        SceneIR.model_validate(invalid)
 
 
 def test_duplicate_scene_object_id_is_rejected() -> None:
@@ -136,6 +202,24 @@ def test_source_collision_region_v1_round_trips_through_scene_ir() -> None:
     assert consumed.objects[0].source_collision == ownership
     assert consumed.objects[0].source_collision.source_transform == consumed.objects[0].transform
     assert canonical_content_checksum(consumed, "scene_ir_checksum") == consumed.scene_ir_checksum
+
+
+def test_source_collision_membership_ref_must_share_source_geometry_job() -> None:
+    payload = json.loads((FIXTURES / "scene_ir/source_collision_region_v1.json").read_text(encoding="utf-8"))
+    payload["region_kind"] = "triangle_indices"
+    payload.pop("source_obb_dimensions_xyz_m")
+    payload["region_ref"] = {
+        "artifact_type": "SourceCollisionMembership",
+        "schema_version": "1.0",
+        "artifact_uri": "artifact://jobs/job-other-001/collider/membership.json",
+        "artifact_checksum": "sha256:" + "b" * 64,
+        "data_class": "derived",
+        "producer_stage": "ST-COLLIDER",
+        "job_id": "job-other-001",
+    }
+
+    with pytest.raises(ValidationError, match="must belong to the same job"):
+        SourceCollisionRegion.model_validate(payload)
 
 
 @pytest.mark.parametrize("invalid_dimension", [0.0, -0.1, float("nan"), float("inf")])

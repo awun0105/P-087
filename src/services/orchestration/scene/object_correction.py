@@ -14,7 +14,13 @@ from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.coordinates import Transform
 from src.models.contracts.manifests import StageId
 from src.models.contracts.object_membership import ObjectMembershipMergeCommand, ObjectMembershipReassignCommand
-from src.models.contracts.scene import ColliderSpec, ColliderType, SceneObject, SourceCollisionMembership
+from src.models.contracts.scene import (
+    ColliderSpec,
+    ColliderType,
+    SceneObject,
+    SourceCollisionMembership,
+    SourceCollisionRegion,
+)
 from src.services.orchestration.artifacts.errors import ArtifactAlreadyExistsError
 from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.scene.editor import SceneEditor
@@ -70,6 +76,30 @@ def merge_object_candidates(
     labels = decode_gaussian_membership_labels(labels_payload, manifest)
     if len(labels) != len(source_rows):
         raise ObjectMembershipValidationError("membership rows do not match source PLY rows")
+
+    collision_geometry_ref = scene.environment.collision_source_ref or manifest.source_geometry_ref
+    collision_geometry_bytes = editor.resolver.require(collision_geometry_ref).read_bytes()
+    try:
+        collision_ownership = source_triangle_ownership(
+            scene.objects,
+            collision_geometry_ref,
+            collision_geometry_bytes,
+            lambda reference: editor.resolver.require(reference).read_bytes(),
+        )
+    except SourceCollisionOwnershipError as error:
+        raise ObjectMembershipValidationError(str(error)) from error
+    collision_labels_by_object = {
+        object_id: int(label) for label, object_id in collision_ownership.label_to_object_id.items()
+    }
+    missing_collision_regions = [object_id for object_id in selected_ids if object_id not in collision_labels_by_object]
+    if missing_collision_regions:
+        raise ObjectMembershipValidationError(
+            "merge candidates lack source collision ownership: " + ", ".join(sorted(missing_collision_regions))
+        )
+    selected_collision_labels = [collision_labels_by_object[object_id] for object_id in selected_ids]
+    merged_collision_indices = np.flatnonzero(
+        np.isin(collision_ownership.owner_labels, selected_collision_labels)
+    ).tolist()
 
     selected_id_set = set(selected_ids)
     selected_label_values = [
@@ -156,6 +186,41 @@ def merge_object_candidates(
     _publish_artifact(editor, visual_ref, visual_payload)
     _publish_artifact(editor, collider_ref, collider_geometry)
 
+    collision_memberships: dict[str, SourceCollisionRegion] = {}
+    for object_id in selected_ids:
+        original = objects_by_id[object_id].source_collision
+        if original is None:
+            raise ObjectMembershipValidationError(f"{object_id}: source collision ownership disappeared")
+        indices = merged_collision_indices if object_id == command.primary_object_id else []
+        membership_payload = (
+            SourceCollisionMembership(
+                object_id=object_id,
+                source_geometry_ref=collision_geometry_ref,
+                extraction_revision=original.extraction_revision,
+                triangle_indices=indices,
+            )
+            .model_dump_json(indent=2)
+            .encode("utf-8")
+            + b"\n"
+        )
+        membership_ref = _reference(
+            job_id,
+            "colliders/source-membership/{digest}.json",
+            "SourceCollisionMembership",
+            StageId.COLLIDER,
+            membership_payload,
+        )
+        _publish_artifact(editor, membership_ref, membership_payload)
+        collision_memberships[object_id] = original.model_copy(
+            update={
+                "source_geometry_ref": collision_geometry_ref,
+                "region_kind": "triangle_indices",
+                "region_ref": membership_ref,
+                "source_obb_dimensions_xyz_m": None,
+            },
+            deep=True,
+        )
+
     local_collider_center = tuple(float(part.center[index] - primary_origin[index]) for index in range(3))
     collider = ColliderSpec(
         collider_id=f"{primary.id}-collider",
@@ -183,8 +248,10 @@ def merge_object_candidates(
             "source_object_ids": selected_ids,
             "source_membership_checksum": manifest.labels_ref.artifact_checksum,
             "gaussian_count": gaussian_count,
+            "source_collision_triangle_count": len(merged_collision_indices),
+            "source_collision_ambiguous_triangle_count": collision_ownership.ambiguous_triangle_count,
             "semantic_class_source_object_id": semantic_source,
-            "source_collision_regions_preserved": True,
+            "source_collision_regions_rebound": True,
         },
     }
     merged_primary = primary.model_copy(
@@ -193,6 +260,7 @@ def merge_object_candidates(
             "geometry_ref": collider_ref,
             "primitive_dimensions_xyz_m": part.dimensions,
             "collider": collider,
+            "source_collision": collision_memberships[primary.id],
             "semantic_class": semantic_class,
             "physics": None,
             "provenance": primary_provenance,
@@ -214,7 +282,16 @@ def merge_object_candidates(
                     "merged_by": actor_id,
                 }
             )
-            updated_objects.append(item.model_copy(update={"active": False, "provenance": provenance}, deep=True))
+            updated_objects.append(
+                item.model_copy(
+                    update={
+                        "active": False,
+                        "provenance": provenance,
+                        "source_collision": collision_memberships[item.id],
+                    },
+                    deep=True,
+                )
+            )
         elif provenance.get("review") == "MERGED" and provenance.get("merged_into") in merged_into:
             provenance["merged_into"] = primary.id
             provenance["merged_from_revision"] = scene.scene_revision
@@ -316,11 +393,12 @@ def reassign_object_membership(
                 f"reassign requires unrotated source frames so Gaussian SH remains valid ({object_id})"
             )
 
-    geometry_bytes = editor.resolver.require(manifest.source_geometry_ref).read_bytes()
+    collision_geometry_ref = scene.environment.collision_source_ref or manifest.source_geometry_ref
+    geometry_bytes = editor.resolver.require(collision_geometry_ref).read_bytes()
     try:
         collision = source_triangle_ownership(
             scene.objects,
-            manifest.source_geometry_ref,
+            collision_geometry_ref,
             geometry_bytes,
             lambda reference: editor.resolver.require(reference).read_bytes(),
         )
@@ -507,7 +585,7 @@ def reassign_object_membership(
         membership_payload = (
             SourceCollisionMembership(
                 object_id=object_id,
-                source_geometry_ref=manifest.source_geometry_ref,
+                source_geometry_ref=collision_geometry_ref,
                 extraction_revision=original.extraction_revision,
                 triangle_indices=triangle_indices,
             )
@@ -524,6 +602,7 @@ def reassign_object_membership(
         _publish_artifact(editor, membership_ref, membership_payload)
         collision_regions[object_id] = original.model_copy(
             update={
+                "source_geometry_ref": collision_geometry_ref,
                 "region_kind": "triangle_indices",
                 "region_ref": membership_ref,
                 "source_obb_dimensions_xyz_m": None,

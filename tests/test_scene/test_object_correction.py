@@ -319,6 +319,18 @@ def test_merge_rebuilds_visual_collider_and_membership_without_loss_or_physics_c
         int(label) for label, object_id in fixture.membership.label_to_object_id.items() if object_id in selected_ids
     ]
     selected_rows = np.isin(fixture.source_labels, selected_labels)
+    collision_bytes = fixture.editor.resolver.require(fixture.scene.environment.geometry_ref).read_bytes()
+    collision_before = source_triangle_ownership(
+        fixture.scene.objects,
+        fixture.scene.environment.geometry_ref,
+        collision_bytes,
+        lambda reference: fixture.editor.resolver.require(reference).read_bytes(),
+    )
+    collision_labels_by_id = {object_id: int(label) for label, object_id in collision_before.label_to_object_id.items()}
+    collision_source_labels = [collision_labels_by_id[object_id] for object_id in selected_ids]
+    expected_collision_indices = np.flatnonzero(
+        np.isin(collision_before.owner_labels, collision_source_labels)
+    ).tolist()
 
     result = merge_object_candidates(
         fixture.editor,
@@ -337,7 +349,14 @@ def test_merge_rebuilds_visual_collider_and_membership_without_loss_or_physics_c
     assert primary.state == SceneObjectState.CANDIDATE and primary.semantic_class == "box"
     assert primary.physics is None
     assert primary.provenance["physics_reconfirmation_required"] is True
-    assert primary.source_collision == base_primary.source_collision
+    assert primary.source_collision is not None and base_primary.source_collision is not None
+    assert primary.source_collision.source_geometry_ref == fixture.scene.environment.geometry_ref
+    assert primary.source_collision.region_kind == "triangle_indices"
+    assert primary.source_collision.region_ref is not None
+    primary_collision_membership = SourceCollisionMembership.model_validate_json(
+        fixture.editor.resolver.require(primary.source_collision.region_ref).read_bytes()
+    )
+    assert primary_collision_membership.triangle_indices == expected_collision_indices
     assert primary.visual_ref is not None and primary.visual_ref.artifact_type == "ObjectGaussians"
     assert primary.geometry_ref == primary.collider.geometry_ref
     assert primary.collider is not None and primary.collider.collider_type == ColliderType.CONVEX_DECOMPOSITION
@@ -367,11 +386,15 @@ def test_merge_rebuilds_visual_collider_and_membership_without_loss_or_physics_c
 
     for object_id in secondary_ids:
         tombstone = objects[object_id]
-        original = next(item for item in fixture.scene.objects if item.id == object_id)
         assert tombstone.active is False
         assert tombstone.provenance["review"] == "MERGED"
         assert tombstone.provenance["merged_into"] == primary.id
-        assert tombstone.source_collision == original.source_collision
+        assert tombstone.source_collision is not None and tombstone.source_collision.region_ref is not None
+        tombstone_membership = SourceCollisionMembership.model_validate_json(
+            fixture.editor.resolver.require(tombstone.source_collision.region_ref).read_bytes()
+        )
+        assert tombstone.source_collision.source_geometry_ref == fixture.scene.environment.geometry_ref
+        assert tombstone_membership.triangle_indices == []
     assert all(scene.environment.membership.label_to_object_id[str(label)] == primary.id for label in selected_labels)
     assert scene.environment.membership.labels_ref == fixture.membership.labels_ref
     assert scene.provenance["membership_correction"]["actor_id"] == "reviewer-001"

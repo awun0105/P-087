@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -131,8 +132,12 @@ def source_triangle_ownership(
     source_geometry_ref: ProductArtifactRef,
     source_geometry_bytes: bytes,
     resolve_bytes: ResolveArtifactBytes,
+    *,
+    obb_margin_m: float = COLLISION_CARVE_MARGIN_M,
 ) -> SourceTriangleOwnership:
     """Materialize OBB/exact regions as exclusive labels; ambiguous OBB overlaps stay background."""
+    if not math.isfinite(obb_margin_m) or obb_margin_m < 0:
+        raise SourceCollisionOwnershipError("source collision ownership OBB margin must be finite and non-negative")
     if _sha256(source_geometry_bytes) != source_geometry_ref.artifact_checksum:
         raise SourceCollisionOwnershipError("source collision bytes differ from the ownership checksum")
     mesh = trimesh.load(io.BytesIO(source_geometry_bytes), file_type="glb", force="mesh", process=False)
@@ -191,7 +196,7 @@ def source_triangle_ownership(
             triangle_mask_in_box(
                 centroids,
                 CarveBox.from_transform(owner.source_transform, dimensions),
-                COLLISION_CARVE_MARGIN_M,
+                obb_margin_m,
             )
             & ~exact_claim
         )
