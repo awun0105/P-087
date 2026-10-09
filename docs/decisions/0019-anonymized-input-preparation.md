@@ -31,9 +31,15 @@ thêm detection/tracking/redaction nhưng zero detections không chứng minh an
    `anonymization_review`; worker không chạy COLMAP cho tới khi job có bản ghi `SanitizationAcceptance` gắn với
    đúng checksum của bộ frame đã xem. Không đồng ý thì người dùng hủy job. Không có vai trò reviewer riêng và
    không có sửa tay vùng che: phần "manual correction" ở mục 2 và 3 không được triển khai.
-7. Chấp nhận của người upload không cấp `VERIFIED_ANONYMIZED`. Đó là người có dữ liệu tự xác nhận, không phải
-   kiểm định độc lập; privacy report của job giữ trạng thái tự cam kết, và chế độ `qa_verified` vẫn chưa có
-   đường đi qua.
+7. (Owner chốt 2026-10-09) `PRODUCT_PRIVACY_MODE=qa_verified` nghĩa là: mọi video upload qua Studio bị che tự
+   động và, khi có frame bị che, phải được người upload chấp nhận trước khi dựng 3D. Worker tự áp việc che theo
+   chế độ của project, không dựa vào cấu hình job do API ghi. Cổng dispatch cho video upload ở chế độ này đi
+   qua với report `PRELIMINARY_SCREENED`; project không phải video upload vẫn cần `VERIFIED_ANONYMIZED`.
+8. Job không có frame nào bị che thì chạy tiếp ngay, không dừng chờ: worker ghi một `SanitizationAcceptance` tự
+   động (`accepted_by` rỗng, 0 frame bị che), phân biệt được với chấp nhận của người.
+9. Privacy report của input không bị sửa thành `VERIFIED_ANONYMIZED`: bằng chứng của bước kiểm là bản ghi
+   `SanitizationAcceptance` trên job. Bộ phát hiện có thể bỏ sót, nên lời khai của người upload vẫn bắt buộc ở
+   cả hai chế độ.
 
 ## Data contract
 

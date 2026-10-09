@@ -219,8 +219,13 @@ Thay cho mục "không có bước duyệt" ở trên. Owner chọn phương án
   giá trị ghi trong frame set của job trước khi hiển thị hay chấp nhận.
 - **UI.** Tab Tiến trình hiện `AnonymizationReviewPanel` khi `waiting_for = anonymization_review`; nhãn scene
   "Cần xem bản đã che"; job đang chờ không bị coi là mất kết nối.
-- **Giới hạn.** Chấp nhận không cấp `VERIFIED_ANONYMIZED` và không mở chế độ `qa_verified` (ADR 0019 mục 7).
-  Người dùng không sửa tay được vùng che: bỏ sót thì phải hủy job. Job không bị che frame nào vẫn dừng chờ, để
-  người dùng thấy rõ máy không phát hiện gì.
-- **Tests.** `tests/test_orchestration/test_anonymization_review.py` (9), `frontend/tests/anonymization-review.test.tsx` (5).
+- **Chế độ `qa_verified` (chốt cùng ngày).** Không còn trả 409: API bắt buộc `anonymize` cho mọi video
+  (`deps.anonymize_enforced`, form hiện ô chọn đã bật và khóa), worker tự áp theo `project.privacy_mode`, cổng
+  dispatch cho video upload đi qua (`projects/privacy.py`). Thiếu bộ che thì API trả 409 kèm lý do và
+  `deploy_env check` báo lỗi.
+- **Không frame nào bị che thì không dừng.** `accept_when_nothing_redacted` ghi chấp nhận tự động và chuyển
+  stage sang `ST-CAMERA-POSE` trong cùng một lần ghi, nên worker khác không nhận trùng job.
+- **Giới hạn.** Privacy report của input không đổi thành `VERIFIED_ANONYMIZED`; bằng chứng là bản ghi
+  `SanitizationAcceptance`. Người dùng không sửa tay được vùng che: bỏ sót thì phải hủy job.
+- **Tests.** `tests/test_orchestration/test_anonymization_review.py` (10), `test_privacy_gate.py`, `test_studio_routes.py`, `frontend/tests/anonymization-review.test.tsx` (5).
   Chưa chạy trên worker thật với GPU; chưa xem giao diện bằng mắt.

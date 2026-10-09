@@ -129,10 +129,11 @@ def check(source: Source) -> list[Finding]:
     if shared.get("APP_ENV") != "production":
         warning("[shared] APP_ENV không phải production")
     if shared.get("PRODUCT_PRIVACY_MODE") == "qa_verified":
-        error(
-            "[shared] PRODUCT_PRIVACY_MODE=qa_verified: API từ chối mọi yêu cầu tạo scene từ video (409) vì chưa có "
-            "luồng QA; dùng self_attested"
-        )
+        # Chế độ này che mọi video và chờ người upload chấp nhận: thiếu bộ che thì không tạo được scene nào.
+        if not source.values["worker"].get("PRODUCT_EGOBLUR_WEIGHTS"):
+            error("[worker] PRODUCT_PRIVACY_MODE=qa_verified cần PRODUCT_EGOBLUR_WEIGHTS (bộ che khuôn mặt/biển số)")
+        if source.values["api"].get("PRODUCT_ANONYMIZE_REMOTE_WORKER") != "true":
+            error("[api] PRODUCT_PRIVACY_MODE=qa_verified cần PRODUCT_ANONYMIZE_REMOTE_WORKER=true")
     elif shared.get("PRODUCT_PRIVACY_MODE") not in {None, "", "self_attested"}:
         error("[shared] PRODUCT_PRIVACY_MODE phải là self_attested hoặc qa_verified")
     if (shared.get("DATABASE_URL") or "").startswith("sqlite"):
