@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Check, Circle, CircleSlash, Hand, Loader2 } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Circle, CircleSlash, Hand, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 
@@ -138,7 +138,7 @@ export function PipelineTimeline({
                   <Icon className={cn("size-3.5", state === "running" && !isStale && "animate-spin motion-reduce:animate-none")} aria-hidden />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline justify-between gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
                     <p className={cn("text-sm font-medium", state === "pending" ? "text-ink-subtle" : "text-ink")}>
                       {(jobId && inspectable) || onSelectStage ? (
                         <button
@@ -156,6 +156,11 @@ export function PipelineTimeline({
                         >
                           {meta.title}
                           <span className="sr-only"> — xem chi tiết giai đoạn</span>
+                          {/* Ký hiệu cho biết bấm tên bước sẽ mở/đóng phần mô tả. */}
+                          <ChevronDown
+                            aria-hidden
+                            className={cn("ml-1 inline size-3.5 align-[-2px] text-ink-subtle transition-transform", selected === meta.id && "rotate-180")}
+                          />
                         </button>
                       ) : (
                         <>
@@ -164,6 +169,7 @@ export function PipelineTimeline({
                         </>
                       )}
                     </p>
+                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                     {stage?.seconds != null && state !== "pending" && (
                       <span className="shrink-0 text-xs value-tech text-ink-subtle">
                         {formatDuration(stage.seconds)}
@@ -175,6 +181,18 @@ export function PipelineTimeline({
                         )}
                       </span>
                     )}
+                    {/* Nút nằm cùng hàng với tên bước: thao tác người dùng cần làm, và đường vào view của bước đã xong. */}
+                    {state !== "succeeded" && stageActions?.filter((action) => action.stageId === meta.id).map((action) => (
+                      <button key={action.label} type="button" onClick={action.onClick} className={STAGE_BUTTON}>
+                        {action.label}
+                      </button>
+                    ))}
+                    {jobId && inspectable && inspectionStage(meta.id) && (
+                      <Link href={inspectHref(jobId, meta.id)} className={STAGE_BUTTON}>
+                        Xem giai đoạn<span className="sr-only">: {meta.title}</span>
+                      </Link>
+                    )}
+                    </div>
                   </div>
                   {isCurrentStale && (
                     <p className="mt-1 text-sm text-amber-500">
@@ -186,22 +204,6 @@ export function PipelineTimeline({
                   )}
                   {state === "waiting" && (
                     <p className="label-tech mt-2 text-ember-strong">Đang chờ bạn</p>
-                  )}
-                  {state !== "succeeded" && stageActions?.filter((action) => action.stageId === meta.id).map((action) => (
-                    <button
-                      key={action.label}
-                      type="button"
-                      onClick={action.onClick}
-                      className={STAGE_BUTTON + " mt-3"}
-                    >
-                      {action.label}
-                    </button>
-                  ))}
-                  {/* Bước đã xong: đường vào view kết quả hiện sẵn, không cần mở chi tiết trước. */}
-                  {jobId && inspectable && inspectionStage(meta.id) && (
-                    <Link href={inspectHref(jobId, meta.id)} className={STAGE_BUTTON + " mt-2"}>
-                      Xem giai đoạn<span className="sr-only">: {meta.title}</span>
-                    </Link>
                   )}
                   {state === "running" && !isStale && (
                     <ProgressBar value={stage?.fraction ?? null} label={`Tiến trình ${meta.title}`} className="mt-3" />
@@ -251,7 +253,7 @@ export function PipelineTimeline({
   );
 }
 
-const STAGE_BUTTON = "inline-flex rounded-lg bg-ember-soft px-3 py-2 text-sm font-medium text-ember-strong focus-visible:outline-2 focus-visible:outline-ember";
+const STAGE_BUTTON = "inline-flex shrink-0 items-center rounded-lg bg-ember-soft px-2.5 py-1 text-xs font-medium text-ember-strong focus-visible:outline-2 focus-visible:outline-ember";
 
 const STATE_LABEL: Record<StageState, string> = {
   pending: "chưa chạy",
