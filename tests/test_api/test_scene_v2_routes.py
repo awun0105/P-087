@@ -76,6 +76,34 @@ async def test_membership_correction_rejects_stale_revision_before_dispatch(clie
 
 
 @pytest.mark.asyncio
+async def test_lidar_collision_selection_rejects_candidate_not_published_for_job(client, monkeypatch) -> None:
+    from src.api.product import scene as scene_api
+
+    def selection_must_not_run(*_args, **_kwargs):
+        raise AssertionError("unlisted candidate must be rejected before domain selection")
+
+    monkeypatch.setattr(scene_api, "select_lidar_collision_candidate", selection_must_not_run)
+    response = await client.post(
+        f"{_JOB}/scene/collision-source/lidar",
+        json={
+            "expected_scene_revision": "rev-001",
+            "candidate_manifest_ref": {
+                "artifact_type": "LidarCollisionCandidateManifest",
+                "schema_version": "1.0",
+                "artifact_uri": f"artifact://jobs/job-fixture-001/collider/lidar-candidates/{'a' * 64}/manifest.json",
+                "artifact_checksum": "sha256:" + "a" * 64,
+                "data_class": "derived",
+                "producer_stage": "ST-COLLIDER",
+                "job_id": "job-fixture-001",
+            },
+        },
+    )
+
+    assert response.status_code == 404
+    assert "allow-list" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_merge_route_publishes_and_returns_canonical_scene_revision(
     client, isolated_registry, monkeypatch, tmp_path
 ) -> None:

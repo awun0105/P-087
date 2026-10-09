@@ -12,7 +12,7 @@ from src.api.ownership import authorize_job_mutation
 from src.api.product import deps
 from src.config import Settings
 from src.models.contracts.object_membership import ObjectMembershipMergeCommand, ObjectMembershipReassignCommand
-from src.services.orchestration.artifacts import ArtifactStoreError
+from src.services.orchestration.artifacts import ArtifactNotFoundError, ArtifactStoreError
 from src.services.orchestration.auth import UserRecord
 from src.services.orchestration.jobs.stage_views import job_bundle
 from src.services.orchestration.scene import (
@@ -23,6 +23,7 @@ from src.services.orchestration.scene import (
     objectify_queue,
 )
 from src.services.orchestration.scene.catalog import load_catalog, suggest_classes
+from src.services.orchestration.scene.collision_source_selection import select_lidar_collision_candidate
 from src.services.orchestration.scene.errors import SceneNotAvailableError
 from src.services.orchestration.scene.object_correction import merge_object_candidates, reassign_object_membership
 from src.services.orchestration.scene.objectify import ObjectifyError
@@ -118,6 +119,48 @@ def edit_job_collider(
     authorize_job_mutation(user, registry, job_id, operation="sửa collider của")
     deps.job_or_404(job_id)
     return deps.scene_mutation(lambda editor: edit_collider(editor, job_id, command))
+
+
+@router.post(
+    "/jobs/{job_id}/scene/collision-source/lidar",
+    response_model=schemas.SceneEditResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"model": schemas.ApiErrorResponse},
+        409: {"model": schemas.ApiErrorResponse},
+        422: {"model": schemas.ApiErrorResponse},
+    },
+)
+def select_job_lidar_collision_source(
+    job_id: str,
+    request: schemas.LidarCollisionSourceSelectionRequest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> schemas.SceneEditResponse:
+    """Select an exact published candidate; eligibility and ownership are rechecked by the domain service."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="sửa collision source của")
+    deps.job_or_404(job_id)
+    try:
+        canonical_ref = registry.authorized_artifact(job_id, request.candidate_manifest_ref)
+    except ArtifactNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except ArtifactStoreError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+    if canonical_ref.artifact_type != "LidarCollisionCandidateManifest":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Chỉ chọn được LidarCollisionCandidateManifest đã publish cho job này",
+        )
+    product_ref = schemas.ProductArtifactRef.model_validate(canonical_ref.model_dump(mode="python"))
+    return deps.scene_mutation(
+        lambda editor: select_lidar_collision_candidate(
+            editor,
+            job_id,
+            request.expected_scene_revision,
+            product_ref,
+        )
+    )
 
 
 # ── PRODUCT-07: object actions ───────────────────────────────────────────────

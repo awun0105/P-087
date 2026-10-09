@@ -413,11 +413,14 @@ theo sprint. AUD-08.S4, AUD-09.S1, AUD-14.S1–S3 và AUD-19.S1 cũng đã đư�
 riêng. AUD-14.S3 software gates pass; production sloped/noisy sample and obstacle-
 retention benchmark remain pending and are not inferred from synthetic fixtures.
 AUD-12.S3d đã commit cơ chế publish candidate nội bộ; AUD-12.S3e bổ sung source-aware
-ownership/selection và các consumer viewer/export, nhưng không tự mở producer path
-khi QA đầu vào còn `diagnostic_only`.
+ownership/selection và các consumer viewer/export; AUD-12.S3f nối consumer đó tới API
+và Studio qua exact ref trong allow-list của job. Không sprint nào tự tạo producer
+evidence khi QA đầu vào còn `diagnostic_only`.
 AUD-12.S4 local gate wiring kiểm checksum/ownership sidecars và buộc review gate
 đối chiếu diagnostic artifact của từng path với exact candidate, collider hiệu lực,
 quality report, job và coverage tĩnh.
+AUD-12.S3f local API/Studio consumer wiring đã được kiểm tra bằng focused route và
+component tests; Chrome DevTools browser gate chưa xác minh được do MCP profile lock.
 Held-out retention, production quality report, GPU và Isaac acceptance vẫn UNVERIFIED.
 AUD-09.S2 đã nối Inspector/API và preview collider với publication revision CAS;
 AUD-09.S3 đã xác nhận legacy/hybrid USD local-pose fidelity, cập nhật preflight
@@ -567,7 +570,11 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [x] Local implementation AUD-08.S1–S4; focused API/domain/frontend regressions.
 - [x] Local implementation AUD-09.S1–S3; focused API/domain/frontend/export regressions.
 - [ ] AUD-08 browser/Isaac acceptance; AUD-09 browser visual and real Isaac contact acceptance.
-- [ ] Implementation AUD-12–14 và held-out collision/LiDAR/floor acceptance.
+- [x] AUD-12.S3f local API/Studio explicit candidate selection over the job allow-list;
+      [ ] browser, eligible producer/QA and collision acceptance remain open.
+- [ ] AUD-12–14 held-out collision/LiDAR/floor acceptance; local AUD-12 source
+      selection API/Studio wiring is tracked in S3f and must not be read as qualified
+      candidate production or collision safety.
 - [x] AUD-15.S2 resume-cache integrity, cold/warm recovery, and software integration verification.
 - [ ] AUD-15.S3 paired latency/quality acceptance; AUD-16 remains Deferred.
 - [x] AUD-17.S1–S2 typed timestamp roles/units, resolver prerequisites, immutable trajectory contract, and isolated synthetic provider path; R5 dispatch remains disabled.

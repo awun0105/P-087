@@ -28,7 +28,7 @@ import { composeColliderTransform } from "@/features/viewer/layers";
 import type { GizmoMode, OverlayBox, OverlayObject } from "@/features/viewer/scene-overlay";
 import type { PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
 import { ApiError } from "@/lib/api/client";
-import { jobArtifactContentUrl } from "@/lib/api/endpoints";
+import { jobArtifactContentUrl, listJobArtifacts } from "@/lib/api/endpoints";
 import {
   addBoxObstacle,
   addCatalogObject,
@@ -41,12 +41,13 @@ import {
   mergeObjectCandidates,
   reassignObjectMembership,
   restoreSceneRevision,
+  selectLidarCollisionSource,
   setObjectTransform,
   type ObjectAction,
   type SceneCatalog,
 } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
-import type { ColliderEditCommand, SceneIR, SceneObject } from "@/lib/contracts/api";
+import type { ColliderEditCommand, ProductArtifactRef, SceneIR, SceneObject } from "@/lib/contracts/api";
 import type { StageView } from "@/lib/contracts/studio";
 
 // Chỉ dùng khi scene không có 3DGS: tải three.js theo nhu cầu, không kéo vào mọi lần mở Studio.
@@ -246,6 +247,12 @@ export function ObjectReviewView({
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [correctionPanelOpen, setCorrectionPanelOpen] = useState(false);
+  const [collisionSourcePanelOpen, setCollisionSourcePanelOpen] = useState(false);
+  const [collisionCandidates, setCollisionCandidates] = useState<ProductArtifactRef[]>([]);
+  const [collisionCandidatesLoadedFor, setCollisionCandidatesLoadedFor] = useState<string | null>(null);
+  const [collisionCandidatesLoading, setCollisionCandidatesLoading] = useState(false);
+  const [collisionCandidatesError, setCollisionCandidatesError] = useState<string | null>(null);
+  const collisionCandidateRequest = useRef<AbortController | null>(null);
   const [mergeCandidateIds, setMergeCandidateIds] = useState<string[]>([]);
   const [mergePrimaryId, setMergePrimaryId] = useState("");
   const [semanticSourceId, setSemanticSourceId] = useState("");
@@ -315,6 +322,8 @@ export function ObjectReviewView({
     return () => controller.abort();
   }, [jobId, reload, stale]); // eslint-disable-line react-hooks/exhaustive-deps -- onSaveState chỉ là kênh báo lên header
 
+  useEffect(() => () => collisionCandidateRequest.current?.abort(), []);
+
   useEffect(() => {
     const controller = new AbortController();
     // Camera quay hệ mét để mở scene tại góc camera đầu tiên; thiếu thì dùng camera mặc định.
@@ -378,6 +387,7 @@ export function ObjectReviewView({
     return scene?.objects.filter(match) ?? [];
   }, [scene, filter]);
   const theme = useSyncExternalStore(subscribeTheme, themeKey, () => "light:default");
+  const visibleCollisionCandidates = collisionCandidatesLoadedFor === jobId ? collisionCandidates : [];
   const currentColliderDraft = colliderDraft?.sceneRevision === scene?.scene_revision ? colliderDraft : null;
   const boxes = useMemo<OverlayBox[]>(
     () =>
@@ -435,6 +445,27 @@ export function ObjectReviewView({
     } finally {
       mutationInFlight.current = false;
       setBusy(false);
+    }
+  }
+
+  async function loadCollisionCandidates() {
+    collisionCandidateRequest.current?.abort();
+    const controller = new AbortController();
+    collisionCandidateRequest.current = controller;
+    setCollisionCandidatesLoading(true);
+    setCollisionCandidatesError(null);
+    try {
+      const result = await listJobArtifacts(jobId, controller.signal);
+      if (controller.signal.aborted) return;
+      setCollisionCandidatesLoadedFor(jobId);
+      if (!result.ok) {
+        setCollisionCandidatesError(result.error.message);
+        setCollisionCandidates([]);
+        return;
+      }
+      setCollisionCandidates(result.data.artifacts.filter((ref) => ref.artifact_type === "LidarCollisionCandidateManifest"));
+    } finally {
+      if (!controller.signal.aborted) setCollisionCandidatesLoading(false);
     }
   }
 
@@ -660,6 +691,70 @@ export function ObjectReviewView({
                   </button>
                 ))}
               </div>
+            </div>
+            <div className="border-b border-line-dark px-3 py-2">
+              <button
+                type="button"
+                aria-expanded={collisionSourcePanelOpen}
+                aria-controls="lidar-collision-source-panel"
+                disabled={busy}
+                onClick={() => {
+                  const open = !collisionSourcePanelOpen;
+                  setCollisionSourcePanelOpen(open);
+                  if (open && collisionCandidatesLoadedFor !== jobId) void loadCollisionCandidates();
+                }}
+                className="flex w-full items-center justify-between rounded px-1 py-1 text-left text-xs font-semibold text-on-dark hover:bg-on-dark/10 disabled:opacity-50"
+              >
+                <span>Nguồn collision LiDAR</span>
+                <span className="font-normal text-on-dark/60">
+                  {scene.environment.collision_source_ref ? "đã chọn" : "chưa chọn"}
+                </span>
+              </button>
+              {collisionSourcePanelOpen && (
+                <div id="lidar-collision-source-panel" className="mt-2 space-y-2 rounded-md border border-line-dark bg-viewport-deep/60 p-2 text-xs">
+                  <p className="text-on-dark/70">
+                    Chỉ manifest đã publish trong job mới xuất hiện. Server sẽ kiểm tra lại QA, mesh, ownership và revision trước khi đổi source.
+                  </p>
+                  {error && <p className="text-rust" role="alert">{error}</p>}
+                  {collisionCandidatesLoading && <p role="status" className="text-on-dark/70">Đang tải candidate đã publish…</p>}
+                  {collisionCandidatesError && (
+                    <div className="space-y-2" role="alert">
+                      <p className="text-rust">{collisionCandidatesError}</p>
+                      <button
+                        type="button"
+                        className="text-ember-strong underline"
+                        onClick={() => {
+                          setCollisionCandidatesLoadedFor(null);
+                          void loadCollisionCandidates();
+                        }}
+                      >
+                        Thử tải lại
+                      </button>
+                    </div>
+                  )}
+                  {!collisionCandidatesLoading && !collisionCandidatesError && collisionCandidatesLoadedFor === jobId && visibleCollisionCandidates.length === 0 && (
+                    <p role="status" className="text-on-dark/60">
+                      Job chưa publish candidate LiDAR. Candidate thiếu QA hoặc ownership vẫn sẽ bị backend chặn.
+                    </p>
+                  )}
+                  {visibleCollisionCandidates.map((candidate) => (
+                    <div key={`${candidate.artifact_uri}:${candidate.artifact_checksum}`} className="space-y-1 rounded border border-line-dark p-2">
+                      <p className="break-all text-[11px] text-on-dark/60">{candidate.artifact_uri}</p>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={busy}
+                        onClick={() => void run((expectedRevision) => selectLidarCollisionSource(jobId, {
+                          expected_scene_revision: expectedRevision,
+                          candidate_manifest_ref: candidate,
+                        }))}
+                      >
+                        Chọn làm collision source
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="border-b border-line-dark px-3 py-2">
               <button

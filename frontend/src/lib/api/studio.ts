@@ -11,6 +11,7 @@ import type {
   ColliderEditCommand,
   ObjectMembershipMergeCommand,
   ObjectMembershipReassignCommand,
+  ProductArtifactRef,
   SceneEditResponse,
   SceneResponse,
   ValidationOperationStatus,
@@ -509,6 +510,17 @@ export function importContentUrl(importId: string): string {
 /** SceneIR hiện tại của job; 404 khi bước tách vật thể chưa publish revision nào. */
 export function getJobScene(jobId: string, signal?: AbortSignal): Promise<ApiResult<SceneResponse>> {
   return fetchApi<SceneResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene`, { signal });
+}
+
+/** Choose one allow-listed LiDAR candidate; the server reruns eligibility and owns the revision CAS. */
+export function selectLidarCollisionSource(
+  jobId: string,
+  command: { expected_scene_revision: string; candidate_manifest_ref: ProductArtifactRef },
+): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/collision-source/lidar`, {
+    method: "POST",
+    body: JSON.stringify(command),
+  });
 }
 
 export type ObjectAction = "confirm" | "ignore" | "hide" | "delete" | "rename" | "restore" | "duplicate" | "label";

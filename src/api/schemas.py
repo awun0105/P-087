@@ -156,6 +156,13 @@ class SceneEditResponse(ApiModel):
     scene: SceneIR
 
 
+class LidarCollisionSourceSelectionRequest(ApiModel):
+    """Select one exact, job-published LiDAR candidate against the current scene revision."""
+
+    expected_scene_revision: Identifier
+    candidate_manifest_ref: ProductArtifactRef
+
+
 class ValidationStateResponse(ApiModel):
     """Trạng thái validation của job (PRODUCT-05 màn hình validation).
 

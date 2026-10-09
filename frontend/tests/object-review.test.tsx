@@ -293,6 +293,45 @@ describe("ObjectReviewView", () => {
     expect(JSON.parse((init as RequestInit).body as string).expected_scene_revision).toBe("rev-001");
   });
 
+  it("chỉ liệt kê candidate đã publish và gửi exact ref cùng revision khi được chọn", async () => {
+    const candidateManifest = {
+      ...ref,
+      artifact_type: "LidarCollisionCandidateManifest",
+      artifact_uri: "artifact://jobs/job-a/collider/lidar-candidates/candidate-1/manifest.json",
+    };
+    const onSaveState = vi.fn();
+    routeFetch({
+      "/jobs/job-a/artifacts": [reply({ job_id: "job-a", artifacts: [candidateManifest], excluded_artifact_count: 0 })],
+      "/scene/collision-source/lidar": [reply({ scene_revision: "rev-002", scene: scene("rev-002", "CONFIRMED", "CONFIRMED") })],
+      "/scene": [reply({ scene: scene("rev-001", "CANDIDATE") })],
+    });
+    render(<ObjectReviewView jobId="job-a" onSaveState={onSaveState} />);
+    await screen.findByText("1 vật thể · 1 chờ xác nhận");
+    fireEvent.click(screen.getByRole("button", { name: /Nguồn collision LiDAR/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn làm collision source" }));
+
+    await waitFor(() => expect(calls("/scene/collision-source/lidar")).toHaveLength(1));
+    const [, init] = calls("/scene/collision-source/lidar")[0];
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      expected_scene_revision: "rev-001",
+      candidate_manifest_ref: candidateManifest,
+    });
+    await waitFor(() => expect(onSaveState).toHaveBeenCalledWith({ status: "saved", revision: "rev-002" }));
+  });
+
+  it("nêu rõ khi job chưa publish candidate LiDAR", async () => {
+    routeFetch({
+      "/jobs/job-a/artifacts": [reply({ job_id: "job-a", artifacts: [], excluded_artifact_count: 0 })],
+      "/scene": [reply({ scene: scene("rev-001", "CANDIDATE") })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    await screen.findByText("1 vật thể · 1 chờ xác nhận");
+    fireEvent.click(screen.getByRole("button", { name: /Nguồn collision LiDAR/ }));
+
+    expect(await screen.findByText(/Job chưa publish candidate LiDAR/)).toBeInTheDocument();
+    expect(calls("/scene/collision-source/lidar")).toHaveLength(0);
+  });
+
   it("gộp nhiều ứng viên bằng membership checksum và semantic source đã chọn", async () => {
     routeFetch({
       "/scene/corrections/merge": [reply({ scene: membershipScene("rev-002") })],

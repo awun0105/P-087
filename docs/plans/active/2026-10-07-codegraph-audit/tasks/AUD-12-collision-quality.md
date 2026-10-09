@@ -240,6 +240,20 @@ USD/candidate inventory and invalidation together. Missing region mapping blocks
 selection/export and reports coverage; it cannot silently fall back to RGB.
 Registered-map mode stays blocked until AUD-19 registration QA is qualified.
 
+**AUD-12.S3f — Authenticated API and explicit Studio selection.** Input is an exact
+`LidarCollisionCandidateManifest` `ProductArtifactRef` already listed in the job's
+product-visible artifact allow-list and the current `expected_scene_revision`.
+Output is the `SceneEditResponse` from S3e after server-side manifest, QA, candidate
+bytes, ownership and revision checks all pass. The route must authorize job
+mutation, canonicalize the submitted ref through `ProjectRegistry.authorized_artifact`,
+and never accept filesystem paths or enumerate artifact directories. Studio lists
+only candidate manifests returned by `GET /jobs/{job_id}/artifacts`, makes selection
+an explicit user action and applies the returned SceneIR revision. Missing/unlisted
+refs return 404; stale revision returns 409; wrong artifact type or unqualified QA/
+ownership returns 422. No fallback to RGB is allowed. This slice wires the consumer
+boundary only; a missing producer or diagnostic-only QA must remain visible as an
+unavailable/blocked state, not be represented as a selectable qualified result.
+
 ## Sprint AUD-12.S4 — Held-out quality và Isaac consumer
 
 **Input:** frozen profile/source selection + held-out traversal/reference + candidate.
@@ -627,11 +641,43 @@ Isaac contact handoff; CPU regression không đóng real acceptance.
   service/contract behavior is covered by focused tests only.
 - **Hard blocker / remaining acceptance:** the active calibration projection receipt
   is still `diagnostic_only`, and no worker produces production-qualified evidence
-  plus the point-order-bound self-mask. The selection service has no live worker/API
-  producer path yet, so this sprint does not claim production selection, collision
-  safety, held-out retention, GPU performance or Isaac contact acceptance. Keep
-  AUD-12.S3/S4 and AUD-13 production QA open until those upstream inputs and real
-  acceptance evidence exist.
+  plus the point-order-bound self-mask. The S3f API/Studio consumer path is tracked
+  separately; it does not create that producer evidence or prove production
+  selection, collision safety, held-out retention, GPU performance or Isaac contact
+  acceptance. Keep AUD-12.S3/S4 and AUD-13 production QA open until those upstream
+  inputs and real acceptance evidence exist.
+
+### AUD-12.S3f — authenticated API and explicit Studio selection
+
+- **Base:** `cd81b7d4` before this sprint commit; AUD-12.S3e source-aware selection and consumers are already present.
+- **Logic before → after:** S3e exposed a domain selection service only. The product
+  API now accepts a revision-bound candidate manifest ref only after resolving it
+  against the job's product-visible allow-list; the Studio can list and explicitly
+  submit those refs. The route delegates to the same service, which re-resolves the
+  manifest and recomputes QA/ownership before its SceneEditor CAS. No directory scan,
+  client eligibility assertion or RGB fallback is introduced.
+- **Input/output contract:** request contains `expected_scene_revision` plus exact
+  `candidate_manifest_ref`; success returns the canonical `SceneEditResponse` and
+  next SceneIR revision. API rejects unlisted/wrong-job refs, wrong manifest type,
+  stale revision and incomplete QA/ownership. Studio shows only job-published
+  candidate manifests; it reports no-candidate state and displays server blockers.
+- **Related consumers:** `src/api/product/scene.py`, strict request DTO,
+  `ObjectReviewView`, `listJobArtifacts`, Studio API client, route tests and object
+  review tests. Existing export/viewer consumers remain bound to the returned
+  SceneIR selection and are not given any client-side fallback behavior.
+- **Verification:** `pytest tests/test_api/test_scene_v2_routes.py
+  tests/test_orchestration/test_collision_source_selection.py -q` passed (29 tests);
+  `ruff check` and `ruff format --check` passed on the touched Python files;
+  `npm test -- tests/object-review.test.tsx` passed (31 tests); frontend typecheck and
+  production webpack build passed; ESLint passed with 0 errors and 2 existing warnings
+  in untouched `LidarCalibrationQAStage.tsx`; `git diff --check` passed. CodeGraph
+  sync and Graphify update completed for this slice.
+- **Browser gate:** **UNVERIFIED**. Chrome DevTools MCP could not attach because its
+  configured profile is already in use; the tool returned the active-lock message.
+  No alternate browser/profile was used.
+- **Deployment/runtime gate:** pending user deployment. No production candidate
+  producer, qualified calibration receipt, held-out retention, GPU or Isaac contact
+  proof is claimed by this consumer-wiring sprint.
 
 ### AUD-12.S4 — local preflight and exact-candidate gate wiring (acceptance open)
 
