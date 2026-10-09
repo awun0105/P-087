@@ -47,7 +47,7 @@ export const CONTENT_VI = {
     benefits: [
       "Đúng kích thước thật, tính bằng mét",
       "Mỗi vật là một phần riêng, có vùng va chạm",
-      "Người xác nhận ở các bước then chốt, người duyệt kiểm lại trước khi dùng (đang làm)",
+      "Người xác nhận ở các bước then chốt; khâu duyệt đang làm",
     ],
     pillars: ["Hình ảnh", "Hình học", "Va chạm"],
     sceneLabel: "minh hoạ: lối đi trong kho, nhìn từ trên xuống",
@@ -113,8 +113,8 @@ export const CONTENT_VI = {
     badge: "Ảnh minh hoạ",
     items: [
       { image: "/samples/aisle.svg", title: "Lối đi giữa hai dãy kệ", body: "Bản dựng 3D và các vật đã tách riêng, mỗi vật có vùng va chạm." },
-      { image: "/samples/pallets.svg", title: "Khu để pallet", body: "Từng pallet là một vật riêng, dời hay ẩn được mà không dựng lại cả cảnh." },
-      { image: "/samples/route.svg", title: "Đường đi của robot", body: "Đường Start–Goal vòng qua vật cản (đang làm)." },
+      { image: "/samples/pallets.svg", title: "Khu để pallet", body: "Từng pallet là một vật riêng, ẩn được mà không dựng lại cả cảnh." },
+      { image: "/samples/route.svg", title: "Đường đi của robot", body: "Robot ảo đi vòng qua vật cản (đang làm)." },
     ],
   },
 
@@ -217,7 +217,7 @@ export const CONTENT_VI = {
           "Xem kết quả tự kiểm của từng bước xử lý (đang làm)",
           "Duyệt hoặc từ chối kèm lý do; sửa sau khi duyệt sẽ tạo phiên bản mới (đang làm)",
           "Bản phát hành được khoá, kèm mã kiểm tra (checksum) (đang làm)",
-          "Ghi rõ ai tải dữ liệu, ai chạy, ai duyệt",
+          "Ghi rõ ai tải dữ liệu, ai chạy, ai duyệt (đang làm)",
         ],
         outcome: "Truy vết được · Đúng bản đã kiểm",
       },
@@ -264,9 +264,9 @@ export const CONTENT_VI = {
 
   START: {
     titleLead: "Bắt đầu nhỏ.",
-    titleEmphasis: "Thử một scene mẫu trước.",
+    titleEmphasis: "Thử demo trước.",
     steps: [
-      { title: "Thử scene mẫu", body: "Mở scene đã xử lý sẵn. Không cần đăng nhập." },
+      { title: "Thử demo", body: "Xem các bước xử lý trong Studio trên dữ liệu mẫu." },
       { title: "Đăng nhập và tải video", body: "Tạo scene, theo dõi từng bước và xác nhận ở những điểm quan trọng." },
       { title: "Tải gói mô phỏng", body: "Nhận gói OpenUSD của scene. Khi khâu duyệt hoàn tất, gói gắn với đúng phiên bản đã duyệt, kèm bảng đánh giá." },
     ],
@@ -305,7 +305,7 @@ export const CONTENT_EN = {
     benefits: [
       "True metric scale",
       "Separate objects, each with a collider",
-      "People confirm key steps; a reviewer signs off before use (in progress)",
+      "People confirm key steps; the review stage is in progress",
     ],
     pillars: ["Visual", "Geometry", "Physics"],
     sceneLabel: "illustration: warehouse aisle, top-down view",
@@ -371,8 +371,8 @@ export const CONTENT_EN = {
     badge: "Illustration",
     items: [
       { image: "/samples/aisle.svg", title: "Aisle between two racks", body: "The 3D reconstruction and separated objects, each with a collider." },
-      { image: "/samples/pallets.svg", title: "Pallet area", body: "Each pallet is its own object. Move or hide it without rebuilding the scene." },
-      { image: "/samples/route.svg", title: "Robot path", body: "A Start–Goal path around an obstacle (in progress)." },
+      { image: "/samples/pallets.svg", title: "Pallet area", body: "Each pallet is its own object. Hide it without rebuilding the scene." },
+      { image: "/samples/route.svg", title: "Robot path", body: "A virtual robot driving around an obstacle (in progress)." },
     ],
   },
 
@@ -475,7 +475,7 @@ export const CONTENT_EN = {
           "See the self-check results of each processing step (in progress)",
           "Approve or reject with a reason; edits after approval create a new revision (in progress)",
           "Releases are locked and carry a checksum (in progress)",
-          "Records who uploaded, who ran and who approved",
+          "Records who uploaded, who ran and who approved (in progress)",
         ],
         outcome: "Traceable · Exactly the verified version",
       },
@@ -522,9 +522,9 @@ export const CONTENT_EN = {
 
   START: {
     titleLead: "Start small.",
-    titleEmphasis: "Try a sample scene first.",
+    titleEmphasis: "Try the demo first.",
     steps: [
-      { title: "Try a sample scene", body: "Open a processed scene. No sign-in needed." },
+      { title: "Try the demo", body: "See the processing steps in Studio on sample data." },
       { title: "Sign in and upload video", body: "Create a scene, follow each step and confirm at the key points." },
       { title: "Download the package", body: "Get the scene's OpenUSD package. Once review is complete, it is tied to the approved revision with its evaluation sheet." },
     ],
@@ -540,7 +540,7 @@ export const CONTENT_EN = {
 
 export const UI_LABELS = {
   vi: {
-    tryDemo: "Thử scene mẫu",
+    tryDemo: "Thử demo",
     openStudio: "Truy cập Studio",
     loginStudio: "Đăng nhập Studio",
     brandAria: "Real2Sim Studio, về đầu trang",
@@ -562,7 +562,7 @@ export const UI_LABELS = {
     result: "Kết quả",
   },
   en: {
-    tryDemo: "Try sample scene",
+    tryDemo: "Try the demo",
     openStudio: "Open Studio",
     loginStudio: "Sign in to Studio",
     brandAria: "Real2Sim Studio, top of page",
