@@ -84,6 +84,18 @@ describe("video normalization contract v1", () => {
     expect(preservesSdrColorMetadata(bt709, null)).toBe(false);
   });
 
+  it("accepts what Chrome really tags after a canvas resize, but not an untagged range or other primaries", () => {
+    const bt709 = { primaries: "bt709", transfer: "bt709", matrix: "bt709", range: "limited" };
+    // Quan sát thật 2026-10-09: nguồn bt709 → bản đã resize/xoay gắn sRGB; dựng hình phần mềm đổi range sang full.
+    expect(preservesSdrColorMetadata(bt709, { ...bt709, transfer: "iec61966-2-1" })).toBe(true);
+    expect(preservesSdrColorMetadata({ primaries: null, transfer: null, matrix: null, range: "limited" },
+      { ...bt709, transfer: "iec61966-2-1", range: "full" })).toBe(true);
+    expect(preservesSdrColorMetadata(bt709, { ...bt709, range: null })).toBe(false);
+    expect(preservesSdrColorMetadata(bt709, { ...bt709, transfer: null })).toBe(false);
+    expect(preservesSdrColorMetadata(bt709, { ...bt709, primaries: "bt2020" })).toBe(false);
+    expect(preservesSdrColorMetadata(bt709, { ...bt709, transfer: "linear" })).toBe(false);
+  });
+
   it("fits landscape, portrait, 4:3 and low-resolution media without upscaling", () => {
     expect(fitVideoDimensions(1920, 1080, "720p")).toEqual({ width: 1280, height: 720 });
     expect(fitVideoDimensions(1080, 1920, "720p")).toEqual({ width: 720, height: 1280 });

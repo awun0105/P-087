@@ -220,6 +220,34 @@ def test_preparation_manifest_allows_sdr_defaults_for_unreported_source_color() 
         ClientVideoPreparationManifest.model_validate(hdr_output)
 
 
+@pytest.mark.parametrize(
+    ("source", "prepared", "kept"),
+    [
+        # Quan sát thật trên Chrome 153 (2026-10-09): resize/xoay qua canvas gắn sRGB; dựng hình phần mềm đổi range.
+        (("bt709", "bt709", "bt709", "limited"), ("bt709", "iec61966-2-1", "bt709", "limited"), True),
+        ((None, None, None, "limited"), ("bt709", "iec61966-2-1", "bt709", "full"), True),
+        (("bt709", "bt709", "bt709", "limited"), ("bt709", "bt709", "bt709", None), False),
+        (("bt709", "bt709", "bt709", "limited"), ("bt709", None, "bt709", "limited"), False),
+        (("bt709", "bt709", "bt709", "limited"), ("bt2020", "bt709", "bt709", "limited"), False),
+        (("bt709", "bt709", "bt709", "limited"), ("bt709", "linear", "bt709", "limited"), False),
+        (("bt709", "bt709", "bt709", "limited"), ("bt709", "smpte2084", "bt709", "limited"), False),
+    ],
+)
+def test_sdr_color_rule_accepts_browser_retagging_but_not_lost_or_changed_colorimetry(
+    source: tuple, prepared: tuple, kept: bool
+) -> None:
+    from src.models.contracts.video_preparation import VideoColorMetadata, _preserves_sdr_color_metadata
+
+    fields = ("primaries", "transfer", "matrix", "range")
+    assert (
+        _preserves_sdr_color_metadata(
+            VideoColorMetadata(**dict(zip(fields, source, strict=True))),
+            VideoColorMetadata(**dict(zip(fields, prepared, strict=True))),
+        )
+        is kept
+    )
+
+
 def test_preparation_manifest_accepts_output_color_that_reports_only_some_fields() -> None:
     """A real encoder may write only matrix/range; a missing transfer must not crash validation (HTTP 500)."""
     payload = copy.deepcopy(_fixtures()["preparation_manifest"])

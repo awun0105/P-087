@@ -346,7 +346,14 @@ function isHdrTransfer(transfer: string | null): boolean {
   return normalized.includes("2084") || normalized.includes("arib-std-b67") || normalized === "pq" || normalized === "hlg";
 }
 
-/** Keep known source colorimetry and reject output that signals HDR. */
+/** SDR transfers browsers treat as equivalent: Chrome tags canvas-resized BT.709 frames as sRGB (`iec61966-2-1`). */
+const SDR_EQUIVALENT_TRANSFERS = new Set(["bt709", "iec61966-2-1", "smpte170m"]);
+
+/**
+ * Keep the source's known primaries and matrix; the transfer must stay in the same SDR family; the range only has to
+ * be tagged. Software redraws may switch `limited` to `full`: pixels are encoded to match the new tag, so decoders
+ * read the same picture. An untagged output range is refused. Mirrors `_preserves_sdr_color_metadata` in Python.
+ */
 export function preservesSdrColorMetadata(
   source: VideoColorMetadata | null,
   prepared: VideoColorMetadata | null,
@@ -354,10 +361,12 @@ export function preservesSdrColorMetadata(
   if (prepared && isHdrTransfer(prepared.transfer)) return false;
   if (source === null) return true;
   if (prepared === null) return Object.values(source).every((value) => value === null);
+  const transferKept = source.transfer === null || source.transfer === prepared.transfer ||
+    (prepared.transfer !== null && SDR_EQUIVALENT_TRANSFERS.has(source.transfer) && SDR_EQUIVALENT_TRANSFERS.has(prepared.transfer));
   return (source.primaries === null || source.primaries === prepared.primaries) &&
-    (source.transfer === null || source.transfer === prepared.transfer) &&
+    transferKept &&
     (source.matrix === null || source.matrix === prepared.matrix) &&
-    (source.range === null || source.range === prepared.range);
+    (source.range === null || prepared.range !== null);
 }
 
 export function parseVideoPreparationManifest(value: unknown): ClientVideoPreparationManifest {

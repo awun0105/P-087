@@ -381,22 +381,37 @@ def _is_hdr_transfer(value: str) -> bool:
     return "2084" in normalized or "arib-std-b67" in normalized or normalized in {"pq", "hlg"}
 
 
+#: Transfer SDR mà trình duyệt coi là tương đương khi vẽ lại frame: sau khi resize/xoay qua canvas, encoder của
+#: Chrome gắn `iec61966-2-1` (sRGB) cho nguồn `bt709`. Đây không phải HDR hay đổi dải động.
+_SDR_EQUIVALENT_TRANSFERS = frozenset({"bt709", "iec61966-2-1", "smpte170m"})
+
+
 def _preserves_sdr_color_metadata(
     source: VideoColorMetadata | None,
     prepared: VideoColorMetadata | None,
 ) -> bool:
-    """Preserve observed source colorimetry while allowing standard SDR defaults for unknown fields."""
+    """Giữ primaries và matrix đã biết của nguồn; transfer phải cùng họ SDR; range chỉ cần được gắn rõ.
+
+    Range có thể đổi (`limited` → `full`) khi trình duyệt vẽ lại frame bằng phần mềm: giá trị pixel được mã hóa
+    đúng theo tag mới nên bộ giải mã phía sau đọc ra cùng một ảnh. Bản đã chuẩn bị bỏ trống range thì không chấp
+    nhận, vì khi đó không biết phải giải mã theo dải nào.
+    """
     if prepared is not None and _is_hdr_transfer(prepared.transfer or ""):
         return False
     if source is None:
         return True
     if prepared is None:
         return all(value is None for value in source.model_dump().values())
+    transfer_kept = (
+        source.transfer is None
+        or source.transfer == prepared.transfer
+        or {source.transfer, prepared.transfer} <= _SDR_EQUIVALENT_TRANSFERS
+    )
     return (
         (source.primaries is None or source.primaries == prepared.primaries)
-        and (source.transfer is None or source.transfer == prepared.transfer)
+        and transfer_kept
         and (source.matrix is None or source.matrix == prepared.matrix)
-        and (source.range is None or source.range == prepared.range)
+        and (source.range is None or prepared.range is not None)
     )
 
 
