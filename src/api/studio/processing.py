@@ -49,7 +49,7 @@ def get_processing_options() -> ProcessingOptions:
         registry,
         minimum,
         capability.gpu_name if capability is not None else None,
-        colmap_use_gpu=settings.product_colmap_use_gpu,
+        colmap_use_gpu=getattr(settings, "product_colmap_use_gpu", False),
     )
     return ProcessingOptions(
         profile_id=presets.profile_id,
@@ -76,7 +76,7 @@ def evaluate_processing(request: EvaluateRequest) -> Evaluation:
         registry,
         request.params,
         capability.gpu_name if capability is not None else None,
-        colmap_use_gpu=settings.product_colmap_use_gpu,
+        colmap_use_gpu=getattr(settings, "product_colmap_use_gpu", False),
     )
     try:
         return evaluate(presets, request.params, capability, observed=observed)

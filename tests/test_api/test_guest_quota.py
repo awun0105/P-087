@@ -66,6 +66,7 @@ def _system(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, worker_profile: 
         product_upload_max_bytes=2_000_000,
         product_privacy_mode="self_attested",
         product_processing_config=PRESETS,
+        product_colmap_use_gpu=False,
         auth_required=True,
         auth_guest_signup_enabled=False,
         auth_session_days=7,
