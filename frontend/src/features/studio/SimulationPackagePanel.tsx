@@ -23,6 +23,7 @@ const RULE_LABEL: Record<string, string> = {
   TRANSFORM_INVALID: "Vị trí/hướng hợp lệ",
   OBJECT_OUT_OF_BOUNDS: "Vật nằm trong kho, trên sàn",
   OBJECT_CONFIRMATION_INCOMPLETE: "Không còn ứng viên đang bật chưa xác nhận",
+  COLLISION_SOURCE_COVERAGE: "Coverage ownership collider nguồn",
   REQUIRED_ARTIFACT_MISSING: "Đủ file hình học/collider",
 };
 

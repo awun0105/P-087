@@ -42,6 +42,11 @@ registration mode để dispatch đúng QA; không tráo sensor/map reports. Reu
 SceneEnvironment geometry/collider refs theo producer-consumer decision AUD-12.S1; không thêm
 competing ReconstructionBundle hoặc rewrite canonical RGB artifact.
 
+The collision quality report that verifies physics must be produced after the
+candidate export because it binds the exact candidate checksum and effective
+collider. Keep that post-export reference and path coverage in `ValidationReport`;
+putting it into `CandidateManifest` would create a checksum cycle.
+
 ## Alternatives Considered
 
 1. Luôn thay canonical RGB bằng LiDAR: không đúng mọi input và phá source contract.
@@ -186,3 +191,26 @@ AUD-19 QA. Source selection is deliberately deferred until AUD-12.S3e maps objec
 ownership to the LiDAR candidate; the current ownership record is bound to RGB
 geometry, and reusing its triangle indices would corrupt carving/export. Held-out
 obstacle retention and exact-candidate Isaac contact remain unverified.
+
+## AUD-12.S4 local gate-wiring note — 2026-10-09
+
+The ADR remains **Proposed**, and no production collision source is qualified.
+Preflight now verifies the selected mesh bytes, selection record and per-object
+triangle-membership sidecars, including bounded indices and unambiguous ownership.
+This is structural mapping evidence only; it cannot establish that the mesh kept
+real obstacles or makes a path safe.
+
+`ValidationReport` now carries an optional checksum-bound quality-report reference
+and per-path coverage state. Each pair summary refers to a typed
+`CollisionPathCoverageDiagnostic`, whose artifact binds the candidate, effective
+collider and exact quality-report ref. The review gate resolves that artifact and
+checks same-job identity, source-selection binding, PASS/VERIFIED quality and
+complete static observation coverage. Required support blocks missing, partial or
+motion-suspected evidence; advisory CLEAR paths require explicit Reviewer
+acknowledgment. The browser card links the diagnostic. Contract and gate tests
+cover stale candidates/diagnostics, cross-job refs, partial coverage and motion.
+
+Held-out traversal/reference data, independent obstacle-retention evidence, a
+production quality-report producer, GPU measurements and Isaac contact execution
+were unavailable in this workspace. S4 acceptance remains **UNVERIFIED**; local
+software checks do not qualify the source or claim production safety.

@@ -580,3 +580,49 @@ Isaac contact handoff; CPU regression không đóng real acceptance.
   safety, held-out retention, GPU performance or Isaac contact acceptance. Keep
   AUD-12.S3/S4 and AUD-13 production QA open until those upstream inputs and real
   acceptance evidence exist.
+
+### AUD-12.S4 — local preflight and exact-candidate gate wiring (acceptance open)
+
+- **Base:** `5ca4224` (`AUD-12.S3e`).
+- **Implemented software boundary:** Preflight now resolves the selected collision
+  mesh, sealed source selection and per-object triangle membership sidecars under
+  the artifact root; it verifies every byte checksum, the selection-to-output
+  binding, triangle bounds and unique ownership. Its PASS explicitly means only
+  that the mesh-to-object ownership mapping is structurally consistent. It is not
+  visibility, obstacle-retention, traversal or Isaac proof.
+- **Exact-candidate evidence contract:** `ValidationReport` may bind a
+  `CollisionQualityReport` plus per-path observed/static coverage. A report used
+  for verified physics is emitted after candidate export and identifies the exact
+  candidate and effective collider, avoiding a candidate-manifest checksum cycle.
+  Each path summary references a typed `CollisionPathCoverageDiagnostic` that
+  repeats the exact candidate, effective collider and quality-report identity.
+  Review resolves its bytes/checksum and verifies same-job identity, source
+  binding, PASS/VERIFIED quality and complete `observed_static` coverage for each
+  applicable path pair. Missing, partial, inferred, unobserved or motion-suspected
+  coverage blocks when support is required; advisory CLEAR paths carry an explicit
+  Reviewer-acknowledged warning. The Studio card links the diagnostic artifact and
+  distinguishes observed CLEAR from verified coverage.
+- **Regression coverage:** checksum-bound selected mesh/selection/membership
+  fixtures pass; an out-of-range triangle, stale candidate/diagnostic, cross-job
+  quality reference, motion-suspected state and partial coverage fail closed.
+  Required policy blocks a CLEAR path without qualified evidence; advisory policy
+  surfaces a warning that the reviewer must acknowledge.
+- **Verification (2026-10-09):** `.venv/bin/ruff check src/ tests/` passed;
+  `.venv/bin/ruff format --check src/ tests/` reports 561 files formatted; the
+  focused backend suite passed (135 tests); `pnpm --dir frontend test` passed
+  (52 files, 404 tests); frontend typecheck and focused ESLint passed; the API
+  contract mirror passed (5 enums, 6 models); `git diff --check` passed. CodeGraph
+  blast-radius exploration and Graphify query/update were run for this slice.
+- **Browser gate:** the authenticated Reviewer session can access the application.
+  The requested calibration-QA scene has not reached validation, so its Review
+  tab is disabled. A completed sample scene currently returns “Không tìm thấy dữ
+  liệu” on the Review page because `GET /api/v1/jobs/job-1bb733ae40ad/scene` returns
+  404 with `SceneIR artifacts have no committed head; run
+  scripts.studio.scene_head --apply before reading`; therefore the new
+  ValidationReportCard state is **UNVERIFIED in browser** even though the stage
+  page itself renders. Do not treat frontend unit tests as browser acceptance.
+- **Pending acceptance:** no frozen held-out traversal/reference, independent
+  obstacle-retention evidence, production CollisionQualityReport producer, GPU
+  benchmark or real Isaac contact run was available. All three S4 exit checkboxes
+  remain open. This software integration does not qualify a collision source or
+  claim production safety.

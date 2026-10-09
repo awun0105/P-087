@@ -167,11 +167,14 @@ from src.models.contracts.scene import (
 )
 from src.models.contracts.validation import (
     CandidatePackage,
+    CollisionPathCoverageDiagnostic,
+    CollisionPathSupportEvidence,
     EvaluationReport,
     PreflightReport,
     ValidationReport,
 )
 from src.models.contracts.validation_run import (
+    CollisionSupportPolicy,
     IsaacValidationRuntimeProfile,
     ValidationConfig,
     ValidationRunRecord,
@@ -204,6 +207,8 @@ __all__ = [
     "ArtifactRef",
     "ArtifactDataClass",
     "CandidatePackage",
+    "CollisionPathCoverageDiagnostic",
+    "CollisionPathSupportEvidence",
     "ClearanceProxyEvidence",
     "CollisionAlignmentQAKind",
     "CapsuleFootprint",
@@ -285,6 +290,7 @@ __all__ = [
     "Transform",
     "ValidationReport",
     "ValidationConfig",
+    "CollisionSupportPolicy",
     "IsaacValidationRuntimeProfile",
     "ValidationRunRecord",
     "ValidationRunSelection",

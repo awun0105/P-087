@@ -32,7 +32,7 @@ def _ref(
     *,
     data_class: str = "derived",
     artifact_type: str = "CollisionGeometry",
-) -> dict[str, str]:
+) -> dict[str, object]:
     return {
         "artifact_type": artifact_type,
         "schema_version": "1.0",
@@ -97,6 +97,8 @@ def _report(
         source_geometry_ref=selection.source_geometry_ref,
         config_checksum=selection.config_checksum,
         output_collision_ref=selection.output_collision_ref,
+        candidate_checksum="sha256:" + "e" * 64 if claim == "verified" else None,
+        effective_collision_ref=_ref("collision/effective.glb", "8") if claim == "verified" else None,
         hardware_profile_ref=_ref("runtime/hardware.json", "b", artifact_type="HardwareProfile"),
         robot_profile_ref=_ref("runtime/robot.json", "c", artifact_type="RobotProfile"),
         effective_resolution_m=selection.effective_resolution_m,
@@ -122,7 +124,13 @@ def _report(
                 "coverage_fraction": coverage_fraction,
             }
         ],
-        isaac_contact_ref=_ref("validation/contact.json", "7", artifact_type="IsaacValidationReport"),
+        isaac_contact_ref={
+            **_ref("validation/contact.json", "7", artifact_type="IsaacValidationReport"),
+            "source_provenance": {
+                "candidate_checksum": "sha256:" + "e" * 64,
+                "effective_collision_checksum": "sha256:" + "8" * 64,
+            },
+        },
         physics_claim=claim,
     )
 
@@ -146,6 +154,34 @@ def test_verified_claim_requires_a_frozen_passing_acceptance_profile() -> None:
     assert report.quality_result == CollisionQualityResult.PASS
     assert report.acceptance_profile_ref is not None
     assert report.physics_claim == CollisionPhysicsClaim.VERIFIED
+
+
+def test_evaluated_quality_requires_exact_candidate_and_effective_collider_identity() -> None:
+    selection = _selection()
+    payload: dict[str, object] = {
+        "schema_version": "1.0",
+        "source_selection_checksum": selection.selection_checksum,
+        "source_geometry_ref": selection.source_geometry_ref,
+        "config_checksum": selection.config_checksum,
+        "output_collision_ref": selection.output_collision_ref,
+        "hardware_profile_ref": _ref("runtime/hardware.json", "b", artifact_type="HardwareProfile"),
+        "robot_profile_ref": _ref("runtime/robot.json", "c", artifact_type="RobotProfile"),
+        "effective_resolution_m": selection.effective_resolution_m,
+        "robot_radius_m": 0.461,
+        "robot_height_m": 0.308,
+        "acceptance_profile_ref": _ref(
+            "quality/acceptance.json",
+            "d",
+            artifact_type="CollisionAcceptanceProfile",
+        ),
+        "quality_result": "pass",
+        "physics_claim": "unverified",
+    }
+    evaluated = seal_collision_quality_report(**payload)
+    assert evaluated.quality_result == CollisionQualityResult.PASS
+
+    with pytest.raises(ValidationError, match="must bind the exact candidate and effective collider"):
+        seal_collision_quality_report(**{**payload, "physics_claim": "verified"})
 
 
 def test_lidar_selection_requires_its_alignment_qa_reference() -> None:

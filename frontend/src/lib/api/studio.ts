@@ -906,6 +906,16 @@ export interface PathResultView {
   evidence_refs: EvidenceRefView[];
 }
 
+export type CollisionObservationStateView = "observed_static" | "unobserved" | "inferred" | "motion_suspected";
+
+export interface CollisionPathSupportView {
+  pair_id: string;
+  state: CollisionObservationStateView;
+  observation_ids: string[];
+  coverage_fraction: number;
+  diagnostic_ref: EvidenceRefView | null;
+}
+
 export interface ValidationReportView {
   overall_result: string;
   validator_version: string;
@@ -914,6 +924,8 @@ export interface ValidationReportView {
   environment_versions: Record<string, string>;
   checks: ValidationCheckView[];
   path_results: PathResultView[];
+  collision_quality_ref: EvidenceRefView | null;
+  collision_path_support: CollisionPathSupportView[];
 }
 
 /** Phần `ReviewState` backend mà UI dùng, đã chuẩn hoá ở biên API (thiếu trường phụ thì nhận giá trị rỗng). */
@@ -977,6 +989,12 @@ function evidenceRefs(value: unknown): EvidenceRefView[] {
 
 function validationReport(value: unknown): ValidationReportView | null {
   if (!isObject(value)) return null;
+  const collisionStates = new Set<CollisionObservationStateView>([
+    "observed_static",
+    "unobserved",
+    "inferred",
+    "motion_suspected",
+  ]);
   const rows = (items: unknown, key: "check_id" | "pair_id") =>
     (Array.isArray(items) ? items : []).flatMap((item) => {
       const id = isObject(item) ? text(item[key]) : null;
@@ -984,6 +1002,30 @@ function validationReport(value: unknown): ValidationReportView | null {
       return [{ id, result: text(item.result) ?? "?", message: text(item.message), evidence_refs: evidenceRefs(item.evidence_refs) }];
     });
   const versions = isObject(value.environment_versions) ? value.environment_versions : {};
+  const collisionSupport = (Array.isArray(value.collision_path_support) ? value.collision_path_support : []).flatMap((item) => {
+    if (!isObject(item)) return [];
+    const pairId = text(item.pair_id);
+    const state = text(item.state);
+    const coverage = item.coverage_fraction;
+    if (
+      !pairId ||
+      !state ||
+      !collisionStates.has(state as CollisionObservationStateView) ||
+      typeof coverage !== "number" ||
+      !Number.isFinite(coverage) ||
+      coverage < 0 ||
+      coverage > 1
+    ) {
+      return [];
+    }
+    return [{
+      pair_id: pairId,
+      state: state as CollisionObservationStateView,
+      observation_ids: strings(item.observation_ids),
+      coverage_fraction: coverage,
+      diagnostic_ref: evidenceRefs([item.diagnostic_ref])[0] ?? null,
+    }];
+  });
   return {
     overall_result: text(value.overall_result) ?? "?",
     validator_version: text(value.validator_version) ?? "?",
@@ -992,6 +1034,8 @@ function validationReport(value: unknown): ValidationReportView | null {
     environment_versions: Object.fromEntries(Object.entries(versions).flatMap(([key, version]) => (typeof version === "string" ? [[key, version]] : []))),
     checks: rows(value.checks, "check_id").map(({ id, ...rest }) => ({ check_id: id, ...rest })),
     path_results: rows(value.path_results, "pair_id").map(({ id, ...rest }) => ({ pair_id: id, ...rest })),
+    collision_quality_ref: evidenceRefs([value.collision_quality_ref])[0] ?? null,
+    collision_path_support: collisionSupport,
   };
 }
 

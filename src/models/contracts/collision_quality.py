@@ -12,6 +12,7 @@ from src.models.contracts.artifacts import ArtifactRef, Checksum, ContractModel,
 from src.models.contracts.identity import canonical_json_bytes
 from src.models.contracts.manifests import StageId
 from src.models.contracts.scene import SceneEnvironment
+from src.models.contracts.validation import CollisionObservationState
 
 PositiveFinite = Annotated[FiniteFloat, Field(gt=0)]
 
@@ -36,15 +37,6 @@ class CollisionAlignmentQAKind(StrEnum):
 
     SENSOR_CALIBRATION_TIMING = "sensor_calibration_timing"
     REGISTERED_MAP_REGISTRATION = "registered_map_registration"
-
-
-class CollisionObservationState(StrEnum):
-    """Evidence state for a region used by collision-quality claims."""
-
-    OBSERVED_STATIC = "observed_static"
-    UNOBSERVED = "unobserved"
-    INFERRED = "inferred"
-    MOTION_SUSPECTED = "motion_suspected"
 
 
 class CollisionReferenceKind(StrEnum):
@@ -291,6 +283,8 @@ class _CollisionQualityReportFields(ContractModel):
     source_geometry_ref: ProductArtifactRef
     config_checksum: Checksum
     output_collision_ref: ProductArtifactRef
+    candidate_checksum: Checksum | None = Field(default=None, exclude_if=lambda value: value is None)
+    effective_collision_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
     hardware_profile_ref: ProductArtifactRef
     robot_profile_ref: ProductArtifactRef
     effective_resolution_m: PositiveFinite
@@ -318,6 +312,8 @@ class _CollisionQualityReportFields(ContractModel):
     def _require_physics_evidence(self) -> None:
         if self.quality_result != CollisionQualityResult.PASS or self.acceptance_profile_ref is None:
             raise ValueError("verified physics requires a PASS under a bound acceptance profile")
+        if self.candidate_checksum is None or self.effective_collision_ref is None:
+            raise ValueError("verified physics must bind the exact candidate and effective collider")
         if not self.regions or any(
             region.state != CollisionObservationState.OBSERVED_STATIC or region.coverage_fraction != 1.0
             for region in self.regions
@@ -348,6 +344,12 @@ class _CollisionQualityReportFields(ContractModel):
             raise ValueError("support reference checksum must differ from the selected source")
         if self.isaac_contact_ref is None:
             raise ValueError("verified physics requires exact-candidate Isaac contact evidence")
+        contact_provenance = self.isaac_contact_ref.source_provenance or {}
+        if (
+            contact_provenance.get("candidate_checksum") != self.candidate_checksum
+            or contact_provenance.get("effective_collision_checksum") != self.effective_collision_ref.artifact_checksum
+        ):
+            raise ValueError("Isaac contact evidence must bind the exact candidate and effective collider")
 
 
 class CollisionQualityReport(_CollisionQualityReportFields):
@@ -423,3 +425,5 @@ def validate_collision_source_binding(
         raise ValueError("collision quality report config checksum differs from selection")
     if report.output_collision_ref != selection.output_collision_ref:
         raise ValueError("collision quality report output checksum differs from selection")
+    if report.effective_collision_ref is not None and report.effective_collision_ref != environment.collider_ref:
+        raise ValueError("collision quality report effective collider differs from SceneEnvironment")

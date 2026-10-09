@@ -107,6 +107,64 @@ describe("ValidationReportCard", () => {
     expect(within(row as HTMLElement).getByText("Cần Reviewer chấp nhận")).toBeInTheDocument();
   });
 
+  it("CLEAR without source-bound collision coverage is shown as an unverified claim", async () => {
+    const state = await parsed(PASSED, {
+      isaac_runtime_proof: true,
+      warning_ids: ["collision-support:fixture-pair-001"],
+    });
+    render(<ValidationReportCard state={state} />);
+
+    const row = screen.getByText("fixture-pair-001").closest("li");
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLElement).getByText(/CLEAR chỉ là kết quả quan sát của candidate/)).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByText("Cần Reviewer chấp nhận")).toBeInTheDocument();
+  });
+
+  it("shows motion-suspected path coverage in clear Vietnamese", async () => {
+    const report = {
+      ...PASSED,
+      collision_quality_ref: {
+        artifact_type: "CollisionQualityReport",
+        schema_version: "1.0",
+        artifact_uri: "artifact://jobs/job-fixture-001/collision/quality.json",
+        artifact_checksum: "sha256:" + "b".repeat(64),
+        data_class: "derived",
+        producer_stage: "ST-COLLIDER",
+        job_id: "job-fixture-001",
+      },
+      collision_path_support: [
+        {
+          pair_id: "fixture-pair-001",
+          state: "motion_suspected",
+          observation_ids: [],
+          coverage_fraction: 0,
+          diagnostic_ref: {
+            artifact_type: "CollisionPathCoverageDiagnostic",
+            schema_version: "1.0",
+            artifact_uri: "artifact://jobs/job-fixture-001/collision/path-pair-1.json",
+            artifact_checksum: "sha256:" + "c".repeat(64),
+            data_class: "derived",
+            producer_stage: "ST-ISAAC-VALIDATE",
+            job_id: "job-fixture-001",
+          },
+        },
+      ],
+    } as Report;
+    const state = await parsed(report, {
+      isaac_runtime_proof: true,
+      warning_ids: ["collision-support:fixture-pair-001"],
+    });
+    expect(state.validation?.collision_path_support).toMatchObject([
+      { pair_id: "fixture-pair-001", state: "motion_suspected", coverage_fraction: 0 },
+    ]);
+    render(<ValidationReportCard state={state} />);
+
+    const row = screen.getByText("fixture-pair-001").closest("li");
+    expect(row?.textContent).toContain("Coverage collider 0.0% · nghi có chuyển động");
+    fireEvent.click(within(row as HTMLElement).getByText("Bằng chứng (2)"));
+    expect(within(row as HTMLElement).getByText("artifact://jobs/job-fixture-001/collision/path-pair-1.json")).toBeInTheDocument();
+  });
+
   it("báo cáo của gói khác với gói hiện tại thì cảnh báo không khớp", async () => {
     const state = await parsed(PASSED);
     render(<ValidationReportCard state={{ ...state, record: { ...state.record, candidate_checksum: "sha256:" + "0".repeat(64) } }} />);

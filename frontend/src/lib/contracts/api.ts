@@ -453,6 +453,34 @@ export interface PathResult {
   evidence_refs: ArtifactRef[];
 }
 
+export type CollisionObservationState =
+  | "observed_static"
+  | "unobserved"
+  | "inferred"
+  | "motion_suspected";
+
+/** `src/models/contracts/validation.py` CollisionPathCoverageDiagnostic. */
+export interface CollisionPathCoverageDiagnostic {
+  artifact_type: "CollisionPathCoverageDiagnostic";
+  schema_version: "1.0";
+  job_id: string;
+  candidate_checksum: string;
+  effective_collision_ref: ProductArtifactRef;
+  collision_quality_ref: ProductArtifactRef;
+  pair_id: string;
+  state: CollisionObservationState;
+  observation_ids: string[];
+  coverage_fraction: number;
+}
+
+export interface CollisionPathSupportEvidence {
+  pair_id: string;
+  state: CollisionObservationState;
+  observation_ids: string[];
+  coverage_fraction: number;
+  diagnostic_ref: ArtifactRef | null;
+}
+
 /** `src/models/contracts/release.py` ApprovalRecord. */
 export interface ApprovalRecord {
   schema_version: string;
@@ -474,6 +502,8 @@ export interface ValidationReport {
   overall_result: RuleResult;
   checks: ValidationCheck[];
   path_results: PathResult[];
+  collision_quality_ref?: ArtifactRef | null;
+  collision_path_support?: CollisionPathSupportEvidence[];
   environment_versions: Record<string, string>;
   report_checksum: string;
 }

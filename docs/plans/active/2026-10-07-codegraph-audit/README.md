@@ -387,6 +387,10 @@ retention benchmark remain pending and are not inferred from synthetic fixtures.
 AUD-12.S3d đã commit cơ chế publish candidate nội bộ; AUD-12.S3e bổ sung source-aware
 ownership/selection và các consumer viewer/export, nhưng không tự mở producer path
 khi QA đầu vào còn `diagnostic_only`.
+AUD-12.S4 local gate wiring kiểm checksum/ownership sidecars và buộc review gate
+đối chiếu diagnostic artifact của từng path với exact candidate, collider hiệu lực,
+quality report, job và coverage tĩnh.
+Held-out retention, production quality report, GPU và Isaac acceptance vẫn UNVERIFIED.
 AUD-09.S2 đã nối Inspector/API và preview collider với publication revision CAS;
 AUD-09.S3 đã xác nhận legacy/hybrid USD local-pose fidelity, cập nhật preflight
 world bounds và kiểm tra candidate/report invalidation. Focused API/domain/frontend

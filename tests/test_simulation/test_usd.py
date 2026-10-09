@@ -11,7 +11,13 @@ import pytest
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.identity import verify_candidate_inventory, verify_content_checksum
 from src.models.contracts.scene import ColliderType, ObjectPhysics, SceneIR
-from src.models.contracts.validation import PreflightReport, RuleResult
+from src.models.contracts.validation import (
+    CandidateManifest,
+    CandidatePackage,
+    PreflightReport,
+    PreflightRuleId,
+    RuleResult,
+)
 from src.services.scene.publisher import with_scene_checksum
 from src.services.simulation.enrichment.service import enrich_scene_physics
 from src.services.simulation.preflight.engine import run_preflight
@@ -248,21 +254,46 @@ def test_candidate_inventory_binds_selected_collision_source_and_selection(physi
     selected_scene = physics_scene.model_copy(update={"environment": environment, "objects": []}, deep=True)
     selected_scene = SceneIR.model_validate(with_scene_checksum(selected_scene).model_dump(mode="json"))
     report = run_preflight(selected_scene)
-    assert report.blocking_result == RuleResult.PASS
+    coverage_rule = next(rule for rule in report.rules if rule.rule_id == PreflightRuleId.COLLISION_SOURCE_COVERAGE)
+    assert report.blocking_result == RuleResult.ERROR
+    assert coverage_rule.result == RuleResult.ERROR
 
-    package = build_candidate_package(
-        CandidateBuildRequest(
-            scene=selected_scene,
-            preflight_report=report,
-            job_manifest_checksum="sha256:" + "1" * 64,
-            job_id=job_id,
-        )
+    entrypoint_ref = ProductArtifactRef(
+        artifact_type="OpenUSDEntrypoint",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{job_id}/candidate/scene.usda",
+        artifact_checksum="sha256:" + "c" * 64,
+        data_class="derived",
+        producer_stage="ST-CANDIDATE-BUILD",
+        job_id=job_id,
     )
-
-    assert package.candidate_manifest.collision_source_ref == source_ref
-    assert package.candidate_manifest.collision_selection_ref == selection_ref
-    assert source_ref in package.colliders
-    assert selection_ref.artifact_checksum in package.candidate_manifest.artifact_checksums
+    manifest = CandidateManifest(
+        schema_version="1.0",
+        candidate_id="candidate-selected-source",
+        scene_revision=selected_scene.scene_revision,
+        scene_ir_checksum=selected_scene.scene_ir_checksum,
+        job_manifest_checksum="sha256:" + "1" * 64,
+        coordinate_system=selected_scene.coordinate_system,
+        object_transforms=[],
+        asset_refs=[],
+        collider_refs=[source_ref],
+        artifact_checksums=[
+            entrypoint_ref.artifact_checksum,
+            source_ref.artifact_checksum,
+            selection_ref.artifact_checksum,
+        ],
+        build_config_checksum="sha256:" + "2" * 64,
+        collision_source_ref=source_ref,
+        collision_selection_ref=selection_ref,
+    )
+    package = CandidatePackage(
+        candidate_manifest=manifest,
+        entrypoint_usd=entrypoint_ref,
+        assets=[],
+        geometry=[],
+        colliders=[source_ref],
+        candidate_checksum="sha256:" + "3" * 64,
+    )
     verify_candidate_inventory(package)
 
 

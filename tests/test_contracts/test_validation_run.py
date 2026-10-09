@@ -5,7 +5,7 @@ from pathlib import Path
 
 from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
 from src.models.contracts.validation import ValidationReport
-from src.models.contracts.validation_run import ValidationConfig
+from src.models.contracts.validation_run import CollisionSupportPolicy, ValidationConfig
 
 FIXTURES = Path(__file__).parents[2] / "fixtures"
 
@@ -33,4 +33,8 @@ def test_validation_config_round_trip_keeps_public_policy_identity() -> None:
 
     decoded = ValidationConfig.model_validate_json(sealed.model_dump_json())
     assert decoded == sealed
+    assert "collision_support_policy" not in decoded.model_dump(mode="json")
     assert decoded.config_checksum == canonical_content_checksum(decoded, "config_checksum")
+
+    required = sealed.model_copy(update={"collision_support_policy": CollisionSupportPolicy.REQUIRED})
+    assert required.model_dump(mode="json")["collision_support_policy"] == "required"

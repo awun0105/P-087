@@ -1,11 +1,26 @@
 """Cài đặt các rule audit tĩnh (deterministic preflight rules) cho EX-SIM."""
 
+import hashlib
 import math
+from collections.abc import Callable
 from pathlib import Path
 
 from src.models.contracts.artifacts import Identifier, ProductArtifactRef
-from src.models.contracts.scene import ColliderType, SceneIR, SceneObject, SceneObjectState
+from src.models.contracts.collision_quality import (
+    CollisionSourceSelection,
+)
+from src.models.contracts.identity import verify_content_checksum
+from src.models.contracts.scene import (
+    ColliderType,
+    SceneIR,
+    SceneObject,
+    SceneObjectOrigin,
+    SceneObjectState,
+    SourceCollisionMembership,
+)
 from src.models.contracts.validation import PreflightRule, PreflightRuleId, RuleResult
+from src.services.orchestration.artifacts import ArtifactStoreError
+from src.services.simulation.mesh_geometry import MeshValidationError, load_mesh_parts
 
 SEVERITY_BLOCKING: Identifier = "blocking"
 
@@ -292,6 +307,127 @@ def check_object_confirmation(scene: SceneIR) -> PreflightRule:
     )
 
 
+def check_collision_source_coverage(
+    scene: SceneIR,
+    artifact_store_root: Path | None = None,
+    artifact_resolver: Callable[[ProductArtifactRef], Path] | None = None,
+) -> PreflightRule:
+    """Verify exact triangle ownership sidecars without claiming visibility or physics coverage."""
+    environment = scene.environment
+    source_ref = environment.collision_source_ref
+    selection_ref = environment.collision_selection_ref
+    if source_ref is None and selection_ref is None:
+        raise ValueError("collision source coverage rule requires an explicit source selection")
+
+    def result(
+        result: RuleResult,
+        remediation: str,
+        evidence: list[ProductArtifactRef] | None = None,
+        affected: list[Identifier] | None = None,
+    ) -> PreflightRule:
+        return PreflightRule(
+            rule_id=PreflightRuleId.COLLISION_SOURCE_COVERAGE,
+            severity=SEVERITY_BLOCKING,
+            result=result,
+            affected_object_ids=affected or [],
+            evidence_refs=evidence or [],
+            remediation=remediation,
+        )
+
+    if source_ref is None or selection_ref is None:
+        return result(RuleResult.FAIL, "Nguồn collision được chọn phải có cả source và selection ref.")
+    if artifact_store_root is None and artifact_resolver is None:
+        return result(
+            RuleResult.ERROR,
+            "Không thể xác minh selection và triangle ownership sidecars khi chưa có artifact resolver.",
+            [source_ref, selection_ref],
+        )
+
+    root = artifact_store_root.resolve() if artifact_store_root is not None else None
+
+    def resolve_artifact(reference: ProductArtifactRef) -> Path:
+        if artifact_resolver is not None:
+            path = artifact_resolver(reference)
+        else:
+            assert root is not None
+            relative = reference.artifact_uri.removeprefix("artifact://")
+            path = (root / relative).resolve()
+            if not path.is_relative_to(root):
+                raise ValueError("collision ownership URI escapes artifact store")
+        payload = path.read_bytes()
+        digest = hashlib.sha256(payload).hexdigest()
+        if reference.artifact_checksum != f"sha256:{digest}":
+            raise ValueError(f"collision ownership checksum mismatch: {reference.artifact_uri}")
+        return path
+
+    try:
+        if selection_ref.artifact_type != "CollisionSourceSelection":
+            raise ValueError("collision selection ref has the wrong artifact type")
+        selection_path = resolve_artifact(selection_ref)
+        source_path = resolve_artifact(source_ref)
+        selection = CollisionSourceSelection.model_validate_json(selection_path.read_bytes())
+        verify_content_checksum(selection, "selection_checksum")
+        if selection.output_collision_ref != source_ref:
+            raise ValueError("selection output differs from SceneEnvironment collision source")
+        parts = load_mesh_parts(source_path)
+        if len(parts) != 1:
+            raise ValueError("selected collision source must contain one indexed triangle mesh")
+        triangle_count = len(parts[0][1])
+        memberships: dict[int, Identifier] = {}
+        owned_object_ids: list[Identifier] = []
+        evidence_refs = [source_ref, selection_ref]
+        for obj in scene.objects:
+            if (
+                not obj.active
+                or obj.origin != SceneObjectOrigin.RECONSTRUCTED
+                or obj.provenance.get("duplicated_from") is not None
+            ):
+                continue
+            region = obj.source_collision
+            if (
+                region is None
+                or region.source_geometry_ref != source_ref
+                or region.region_kind != "triangle_indices"
+                or region.region_ref is None
+            ):
+                raise ValueError(f"reconstructed object {obj.id} has no selected-source ownership region")
+            membership_path = resolve_artifact(region.region_ref)
+            membership = SourceCollisionMembership.model_validate_json(membership_path.read_bytes())
+            if (
+                membership.object_id != obj.id
+                or membership.source_geometry_ref != source_ref
+                or membership.extraction_revision != region.extraction_revision
+            ):
+                raise ValueError(f"ownership sidecar does not match object {obj.id} and selected source")
+            for triangle_index in membership.triangle_indices:
+                if triangle_index >= triangle_count:
+                    raise ValueError(f"object {obj.id} owns triangle outside selected collision mesh")
+                existing_owner = memberships.get(triangle_index)
+                if existing_owner is not None and existing_owner != obj.id:
+                    raise ValueError(f"collision triangle {triangle_index} has ambiguous object ownership")
+                memberships[triangle_index] = obj.id
+            evidence_refs.append(region.region_ref)
+            owned_object_ids.append(obj.id)
+    except (ArtifactStoreError, MeshValidationError, OSError, TypeError, ValueError) as error:
+        return result(
+            RuleResult.ERROR,
+            f"Không xác minh được collision source coverage: {error}",
+            [source_ref, selection_ref],
+        )
+
+    return PreflightRule(
+        rule_id=PreflightRuleId.COLLISION_SOURCE_COVERAGE,
+        severity=SEVERITY_BLOCKING,
+        result=RuleResult.PASS,
+        affected_object_ids=sorted(owned_object_ids),
+        evidence_refs=evidence_refs,
+        remediation=(
+            f"Ownership sidecar đã được xác minh cho {len(owned_object_ids)} object; đây chỉ là coverage ánh xạ mesh, "
+            "không chứng minh vùng đã được quan sát, vật cản được giữ lại hay đường đi an toàn trong Isaac."
+        ),
+    )
+
+
 def check_required_artifacts(
     scene: SceneIR,
     artifact_store_root: Path | None = None,
@@ -316,16 +452,31 @@ def check_required_artifacts(
             missing_objects.append(obj_id)
             missing_refs.append(ref)
 
-    _verify_ref(scene.environment.geometry_ref, "environment")
-    if scene.environment.collider_ref:
-        _verify_ref(scene.environment.collider_ref, "environment")
+    verified_uris: set[str] = set()
+
+    def verify_once(ref: ProductArtifactRef, obj_id: Identifier) -> None:
+        if ref.artifact_uri in verified_uris:
+            return
+        verified_uris.add(ref.artifact_uri)
+        _verify_ref(ref, obj_id)
+
+    verify_once(scene.environment.geometry_ref, "environment")
+    for ref in (
+        scene.environment.collider_ref,
+        scene.environment.collision_source_ref,
+        scene.environment.collision_selection_ref,
+    ):
+        if ref is not None:
+            verify_once(ref, "environment")
 
     for obj in scene.objects:
         if not obj.active:
             continue
-        _verify_ref(obj.geometry_ref, obj.id)
+        verify_once(obj.geometry_ref, obj.id)
         if obj.collider and obj.collider.geometry_ref:
-            _verify_ref(obj.collider.geometry_ref, obj.id)
+            verify_once(obj.collider.geometry_ref, obj.id)
+        if obj.source_collision is not None and obj.source_collision.region_ref is not None:
+            verify_once(obj.source_collision.region_ref, obj.id)
 
     if missing_objects:
         return PreflightRule(

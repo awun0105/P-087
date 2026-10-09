@@ -30,6 +30,13 @@ class ValidationRunOrigin(StrEnum):
     SYNTHETIC_FIXTURE = "SYNTHETIC_FIXTURE"
 
 
+class CollisionSupportPolicy(StrEnum):
+    """Whether path acceptance requires source-bound collision coverage for every pair."""
+
+    ADVISORY = "advisory"
+    REQUIRED = "required"
+
+
 class ValidationPathPair(ContractModel):
     """Public start/goal request consumed by the validator; coordinates are metres."""
 
@@ -49,6 +56,10 @@ class ValidationConfig(ContractModel):
     path_pairs: list[ValidationPathPair]
     #: Optional on legacy records; new worker requests bind the qualified runtime/robot profile here.
     runtime_profile_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    collision_support_policy: CollisionSupportPolicy = Field(
+        default=CollisionSupportPolicy.ADVISORY,
+        exclude_if=lambda value: value == CollisionSupportPolicy.ADVISORY,
+    )
     config_checksum: Checksum
 
     @model_validator(mode="after")

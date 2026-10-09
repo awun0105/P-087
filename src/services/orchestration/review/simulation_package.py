@@ -976,7 +976,11 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
             )
 
         published = registry.scene.publish_next(job_id, scene.scene_revision, enriched, "physics_enrich").revision.scene
-        report = run_preflight(published, artifact_store_root=root)
+        report = run_preflight(
+            published,
+            artifact_store_root=root,
+            artifact_resolver=registry.runtime_resolver.require,
+        )
         if report.blocking_result != RuleResult.PASS:
             raise ValueError("preflight đổi kết quả sau khi publish revision; không đóng gói")
         if export_capability.scene_revision != published.scene_revision or (

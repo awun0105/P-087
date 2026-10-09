@@ -24,6 +24,7 @@ from src.models.contracts.validation import (
     ValidationReport,
 )
 from src.models.contracts.validation_run import (
+    CollisionSupportPolicy,
     ValidationConfig,
     ValidationPathPair,
     ValidationRunOrigin,
@@ -111,6 +112,7 @@ def _install_worker_run(
     required_check_ids: list[str] | None = None,
     warning_check_ids: list[str] | None = None,
     path_pairs: list[ValidationPathPair] | None = None,
+    collision_support_policy: CollisionSupportPolicy = CollisionSupportPolicy.ADVISORY,
     runtime_status: RuntimeComponentStatus = RuntimeComponentStatus.VERIFIED,
 ) -> None:  # noqa: ANN001
     """Persist worker-shaped evidence; this fixture tests the gate, not live Isaac acceptance."""
@@ -134,6 +136,7 @@ def _install_worker_run(
                 required=True,
             )
         ],
+        collision_support_policy=collision_support_policy,
         config_checksum=ZERO,
     )
     config = _sealed(config_draft, "config_checksum")
@@ -317,11 +320,41 @@ def test_edit_after_release_starts_new_draft(tmp_path: Path) -> None:
     registry, job, candidate = _packaged(tmp_path)
     report = _report(candidate)
     _install_worker_run(registry, job, review_state(registry, job.job_id).package, report)
-    decide(registry, job.job_id, "u-rev", ApprovalDecision.APPROVE, candidate, report.report_checksum, [], None)
+    state = review_state(registry, job.job_id)
+    assert state.warning_ids == ["collision-support:pair-1"]
+    decide(
+        registry,
+        job.job_id,
+        "u-rev",
+        ApprovalDecision.APPROVE,
+        candidate,
+        report.report_checksum,
+        state.warning_ids,
+        None,
+    )
     scene = registry.scene.current(job.job_id).scene
     add_box_object(registry.scene, job.job_id, scene.scene_revision, "Thùng mới", (0.5, 0.5, 0.5), (2, 2, 0.25))
     state = review_state(registry, job.job_id)
     assert state.record.status == SceneRevisionStatus.DRAFT and state.release is None and state.approval is None
+
+
+def test_required_collision_support_blocks_clear_path_without_verified_evidence(tmp_path: Path) -> None:
+    registry, job, _ = _packaged(tmp_path)
+    package = review_state(registry, job.job_id).package
+    assert package is not None and package.candidate is not None
+    report = _report(package.candidate.candidate_checksum)
+    _install_worker_run(
+        registry,
+        job,
+        package,
+        report,
+        collision_support_policy=CollisionSupportPolicy.REQUIRED,
+    )
+
+    state = review_state(registry, job.job_id)
+
+    assert state.warning_ids == []
+    assert any("Collision support pair-1" in blocker for blocker in state.blockers)
 
 
 def test_collider_edit_builds_new_candidate_and_does_not_reuse_old_validation(tmp_path: Path) -> None:
