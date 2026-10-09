@@ -162,6 +162,8 @@ hoặc global header. Video mẫu vẫn là khu vực trong Scenes/Scene mới. 
 đăng xuất ở footer/sidebar account menu. Tổng quan không hiển thị số liệu giả,
 không tạo API/state backend mới và không biến preview thành kết quả validation.
 
+*Cập nhật 10/10/2026 (rút gọn Tổng quan):* Tổng quan chỉ còn tiêu đề, nút chính “Tạo scene mới” (khách chưa đăng nhập: “Thử với mẫu”) cùng “Tất cả scene”, rồi tổng hợp công việc (số liệu và danh sách “Cần bạn xử lý”). Khối giới thiệu hành trình và loại đầu vào đã bỏ vì trùng với `/new`, nơi chia “Dựng từ video” và “Không dựng mới” (3DGS có sẵn, Thử mẫu). Job đang chờ người xem bản đã che mặt được tính là “cần xử lý” trong danh sách Scenes và Tổng quan (trường `awaiting_anonymization_review` của `GET /scenes`), thay vì hiện là “Đang chạy”. Quyết định cũ “Tổng quan không có nút tạo scene” được thay bằng quyết định này.
+
 **Trong một scene:** breadcrumb `Scenes › <Tên scene>` và các vùng `Tiến trình` · `Studio` · `Validation & Review` · `Kết quả`. Chưa có dữ liệu cho vùng nào thì giải thích điều kiện mở vùng đó, không dẫn tới trang trắng. “Objects” là panel của Studio; “Simulation Replay” thuộc báo cáo; dữ liệu nguồn thuộc scene. Không tạo các trang toàn cục Scene Editor, Objects, Simulation, Datasets hoặc Releases chỉ vì chúng xuất hiện trong U2.
 
 **DECISION (user, 01/10/2026 — Inspect từng giai đoạn):** Tiến trình hiển thị
