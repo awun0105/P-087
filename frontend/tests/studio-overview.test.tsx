@@ -35,22 +35,33 @@ beforeEach(() => {
 });
 
 describe("Tổng quan và thư viện riêng", () => {
-  it("giới thiệu và số liệu từ API; không có nút tạo scene trên Tổng quan", async () => {
+  it("số liệu từ API; nút chính là Tạo scene mới; việc chờ bạn nằm trên cùng", async () => {
     render(<OverviewPage />);
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Từ dữ liệu thực");
-    expect(screen.getByRole("link", { name: "Mở Scenes" })).toHaveAttribute("href", "/scenes");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Tổng quan");
+    expect(screen.getByRole("link", { name: /Tạo scene mới/ })).toHaveAttribute("href", "/new");
+    expect(screen.getByRole("link", { name: "Tất cả scene" })).toHaveAttribute("href", "/scenes");
     await waitFor(() => expect(within(screen.getByText("Scene từ video").parentElement!).getByText("3")).toBeInTheDocument());
     expect(within(screen.getByText("Đang xử lý").parentElement!).getByText("1")).toBeInTheDocument();
-    expect(within(screen.getByText("Cần xác nhận tỉ lệ", { selector: "dt" }).parentElement!).getByText("1")).toBeInTheDocument();
+    expect(within(screen.getByText("Cần bạn xử lý", { selector: "dt" }).parentElement!).getByText("1")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Kho job-b/ })).toHaveAttribute("href", "/scenes/job-b");
-    expect(document.querySelector('a[href="/new"]')).toBeNull();
+    expect(screen.queryByText(/Một hành trình/)).toBeNull();
+  });
+
+  it("job chờ xem bản đã che được tính là cần xử lý, không phải đang chạy", async () => {
+    const reviewing = { ...scene("job-r", "RUNNING"), awaiting_anonymization_review: true };
+    vi.mocked(listScenes).mockResolvedValue({ ok: true, data: { scenes: [reviewing] } });
+    render(<OverviewPage />);
+    expect(await screen.findByRole("link", { name: /Kho job-r/ })).toHaveTextContent("Cần xem bản đã che");
+    expect(within(screen.getByText("Đang xử lý").parentElement!).getByText("0")).toBeInTheDocument();
+    expect(within(screen.getByText("Cần bạn xử lý", { selector: "dt" }).parentElement!).getByText("1")).toBeInTheDocument();
   });
 
   it("guest chỉ thấy giới thiệu và đường đăng nhập, không gọi API private", () => {
     auth.me = { auth_required: true, user: null };
     render(<OverviewPage />);
-    expect(screen.getByText("Khám phá Studio với mẫu đã xử lý sẵn")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Đăng nhập để xem tổng hợp" })).toHaveAttribute("href", "/login?next=%2Foverview");
+    expect(screen.getByText("Đăng nhập để xem công việc của nhóm")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Thử với mẫu/ })).toHaveAttribute("href", "/new/try-demo");
+    expect(screen.getByRole("link", { name: "Đăng nhập" })).toHaveAttribute("href", "/login?next=%2Foverview");
     expect(listScenes).not.toHaveBeenCalled();
     expect(listImports).not.toHaveBeenCalled();
   });
