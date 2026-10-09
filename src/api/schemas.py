@@ -7,9 +7,6 @@ thay vì dựng model song song.
 
 Request model nằm ở tầng service (`orchestration.projects.models`) vì đó là input
 của domain, không phải của HTTP — route import thẳng từ đó, không re-export ở đây.
-
-Khác `src/models/schemas.py`: file đó chỉ chứa schema của endpoint chat mẫu trong template
-ban tổ chức, không thuộc API của Real2Sim.
 """
 
 from datetime import datetime
