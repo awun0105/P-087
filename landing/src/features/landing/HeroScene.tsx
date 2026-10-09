@@ -1,10 +1,10 @@
-import { HERO, HERO_CHAIN } from "@/features/landing/content";
+import { HERO } from "@/features/landing/content";
 import type { Language } from "@/lib/i18n";
 
 /**
  * Sơ đồ mặt bằng một lối đi trong kho, nhìn từ trên xuống: chấm Gaussian (Visual),
  * lưới mét (Geometry), hộp collider (Physics) và đường Start–Goal của robot.
- * Là hình minh hoạ luồng xử lý, không phải ảnh chụp kết quả (UX spec D-05).
+ * Là hình minh hoạ, không phải ảnh chụp kết quả (UX spec D-05). Chuỗi xử lý chỉ kể một lần, ở phần Quy trình.
  */
 
 // Chấm Gaussian giả lập, sinh tất định để server và client render giống nhau.
@@ -41,11 +41,9 @@ const BAYS = [40, 160, 280, 400];
 
 export function HeroScene({
   hero = HERO,
-  heroChain = HERO_CHAIN,
   lang = "vi",
 }: {
   hero?: typeof HERO;
-  heroChain?: readonly { label: string; detail: string; tone: string }[];
   lang?: Language;
 }) {
   const svgTitle =
@@ -54,8 +52,8 @@ export function HeroScene({
       : "Sơ đồ mặt bằng lối đi trong kho: hai dãy kệ và một pallet có hộp va chạm, lưới một mét, và đường đi của robot từ Start tới Goal vòng qua pallet.";
   const caption =
     lang === "en"
-      ? "Pipeline schematic diagram, not rendered result."
-      : "Sơ đồ minh hoạ luồng xử lý, không phải ảnh chụp kết quả.";
+      ? "Illustration, not a rendered result."
+      : "Hình minh hoạ, không phải ảnh chụp kết quả.";
 
   return (
     <figure className="lp-viewport">
@@ -128,15 +126,6 @@ export function HeroScene({
         <text x="88" y="340" className="lp-svg-label" fill="var(--studio-on-dark)">1 m</text>
       </svg>
 
-      <ol className="grid grid-cols-2 gap-px border-t border-line-dark bg-line-dark sm:grid-cols-5">
-        {heroChain.map((c, i) => (
-          <li key={c.label} className="bg-viewport-deep px-3 py-3" data-tone={c.tone}>
-            <span className="font-mono text-[11px] text-on-dark/50">{String(i + 1).padStart(2, "0")}</span>
-            <span className="lp-chain-label mt-0.5 block text-[13px] font-semibold">{c.label}</span>
-            <span className="mt-0.5 block text-[12px] leading-snug text-on-dark/60">{c.detail}</span>
-          </li>
-        ))}
-      </ol>
       <figcaption className="px-4 py-2 text-[12px] text-on-dark/50">{caption}</figcaption>
     </figure>
   );

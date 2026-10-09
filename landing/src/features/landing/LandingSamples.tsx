@@ -37,10 +37,11 @@ export function LandingSamples({
   if (samples.length === 0) return null;
 
   return (
-    <div className="mt-14 border-t border-line pt-10">
+    <section id="samples" className="lp-section">
+      <div className="lp-wrap">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <h3 className="text-lg font-bold text-ink">{title}</h3>
-        <p className="text-[14px] text-ink-muted">{lead}</p>
+        <h2 className="lp-h2 text-ink">{title}</h2>
+        <p className="text-[15px] text-ink-muted">{lead}</p>
       </div>
       <ul className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {samples.map((s) => (
@@ -62,6 +63,7 @@ export function LandingSamples({
           </li>
         ))}
       </ul>
-    </div>
+      </div>
+    </section>
   );
 }

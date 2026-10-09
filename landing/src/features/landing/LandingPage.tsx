@@ -8,33 +8,18 @@ import { LandingSamples } from "@/features/landing/LandingSamples";
 import { CompareScene } from "@/features/landing/CompareScene";
 import { HeroScene } from "@/features/landing/HeroScene";
 import { StatusTag } from "@/features/landing/StatusTag";
-import {
-  getContent,
-  getUiLabels,
-  type TrackState,
-} from "@/features/landing/content";
+import { getContent, getUiLabels } from "@/features/landing/content";
 import { STUDIO_LOGIN_URL, STUDIO_URL } from "@/lib/api";
 import { currentLanguage, subscribeLanguage, type Language } from "@/lib/i18n";
 
 const LOGIN_HREF = STUDIO_LOGIN_URL;
 
-const TRACK_CARD: Record<TrackState, string> = {
-  current: "border-2 border-ember-strong bg-paper-raised",
-  partial: "border border-line-strong bg-paper-raised",
-  later: "border border-dashed border-line-strong",
-};
-const TRACK_TAG: Record<TrackState, string> = {
-  current: "text-ember-strong",
-  partial: "text-ink",
-  later: "text-ink-muted",
-};
 const TRY_DEMO_HREF = `${STUDIO_URL}/new/try-demo`;
 
 const serverLang = (): Language => "vi";
 
 /**
- * Landing Real2Sim Studio, theo mạch Homematch:
- * Bối cảnh → Bài toán → Giải pháp → Quy trình → Tiến độ (bằng chứng) → Dùng ở đâu → Bắt đầu.
+ * Landing Real2Sim Studio: Hero → Bài toán → Scene mẫu → Quy trình → Cho ai → Tiến độ → Bắt đầu.
  * Chữ nằm ở `content.ts`, hỗ trợ song ngữ Tiếng Việt và Tiếng Anh.
  */
 export function LandingPage() {
@@ -42,19 +27,7 @@ export function LandingPage() {
   const content = getContent(lang);
   const ui = getUiLabels(lang);
 
-  const {
-    CONTEXT,
-    FOOTER,
-    HERO,
-    HERO_CHAIN,
-    PROBLEM,
-    PROGRESS,
-    ROADMAP,
-    SOLUTION,
-    START,
-    WORKFLOW,
-    STATUS_LABEL,
-  } = content;
+  const { FOOTER, HERO, PROBLEM, PROGRESS, ROLES, SAMPLES, START, WORKFLOW, STATUS_LABEL } = content;
 
   return (
     <main id="landing-top" className="landing-page">
@@ -71,7 +44,6 @@ export function LandingPage() {
               <span className="block text-ember-strong">{HERO.titleEmphasis}</span>
             </h1>
             <p className="lp-lead mt-6">{HERO.lead}</p>
-            <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-ink-muted">{HERO.note}</p>
 
             <div className="mt-9 flex flex-wrap gap-3">
               <a href={TRY_DEMO_HREF} className="lp-btn lp-btn-primary">
@@ -81,6 +53,7 @@ export function LandingPage() {
                 {ui.loginStudio}
               </a>
             </div>
+            <p className="mt-3 text-[13px] text-ink-muted">{HERO.note}</p>
 
             <ul className="mt-10 grid gap-3 border-t border-line pt-6 sm:grid-cols-3">
               {HERO.benefits.map((b) => (
@@ -92,108 +65,37 @@ export function LandingPage() {
             </ul>
           </div>
 
-          <HeroScene hero={HERO} heroChain={HERO_CHAIN} lang={lang} />
+          <HeroScene hero={HERO} lang={lang} />
         </div>
       </section>
 
-      {/* ── 01 BỐI CẢNH ── */}
-      <section id="context" className="lp-section bg-paper-sunken">
-        <div className="lp-wrap">
-          <SectionHead index={CONTEXT.index} lead={CONTEXT.titleLead} emphasis={CONTEXT.titleEmphasis} body={CONTEXT.lead} />
-
-          <ol className="lp-flow mt-12">
-            {CONTEXT.steps.map((s, i) => (
-              <li key={s.title} className="lp-flow-step">
-                <span className="font-mono text-[12px] font-semibold text-ember-strong">{String(i + 1).padStart(2, "0")}</span>
-                <h3 className="mt-1 text-[17px] font-bold text-ink">{s.title}</h3>
-                <p className="mt-1.5 text-[15px] leading-relaxed text-ink-muted">{s.body}</p>
-              </li>
-            ))}
-          </ol>
-
-          <h3 className="mt-14 text-lg font-bold text-ink">{CONTEXT.waysTitle}</h3>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            {CONTEXT.ways.map((w, i) => (
-              <div key={w.name} className={`rounded-xl p-6 ${i === 1 ? "border-2 border-ember-strong bg-paper-raised" : "border border-line-strong bg-paper-raised"}`}>
-                <p className="text-[17px] font-bold text-ink">{w.name}</p>
-                <p className={`mt-1 text-[14px] font-semibold ${i === 1 ? "text-ember-strong" : "text-ink-muted"}`}>{w.verdict}</p>
-                <p className="mt-3 text-[15px] leading-relaxed text-ink-muted">{w.body}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── 02 BÀI TOÁN ── */}
-      <section id="problem" className="lp-section">
+      {/* ── 01 BÀI TOÁN → CÁCH GỠ ── */}
+      <section id="problem" className="lp-section bg-paper-sunken">
         <div className="lp-wrap">
           <SectionHead index={PROBLEM.index} lead={PROBLEM.titleLead} emphasis={PROBLEM.titleEmphasis} body={PROBLEM.lead} />
 
-          <h3 className="mt-14 text-lg font-bold text-ink">{PROBLEM.analogy.title}</h3>
+          <h3 className="mt-12 text-lg font-bold text-ink">{PROBLEM.analogy.title}</h3>
           <div className="mt-4">
             <CompareScene analogy={PROBLEM.analogy} lang={lang} />
           </div>
 
           <h3 className="mt-14 text-lg font-bold text-ink">{PROBLEM.issuesTitle}</h3>
-          <ol className="mt-5 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
-            {PROBLEM.issues.map((c, i) => (
-              <li key={c.title} className="border-l-2 border-rust pl-4">
-                <span className="font-mono text-[12px] font-semibold text-rust">{String(i + 1).padStart(2, "0")}</span>
-                <h4 className="mt-1 text-[16px] font-bold text-ink">{c.title}</h4>
-                <p className="mt-1.5 text-[14px] leading-relaxed text-ink-muted">{c.body}</p>
-                <p className="mt-3 text-[14px] leading-snug text-ink">
-                  <span className="text-ink-muted">{ui.consequence}</span>
-                  {c.effect}
-                </p>
-              </li>
-            ))}
-          </ol>
-
-          <p className="lp-consequence mt-12">{PROBLEM.consequence}</p>
-
-          <h3 className="mt-16 text-lg font-bold text-ink">{PROBLEM.personasTitle}</h3>
-          <ol className="mt-5 grid gap-px overflow-hidden rounded-xl border border-line bg-line lg:grid-cols-3">
-            {PROBLEM.personas.map((p) => (
-              <li key={p.role} className="relative flex flex-col bg-paper-raised p-7 sm:p-8">
-                <p className="lp-label">{p.tag}</p>
-                <h4 className="mt-1 text-xl font-bold tracking-tight text-ink">{p.role}</h4>
-                <p className="mt-6 text-[1.75rem] font-extrabold leading-none tracking-tight text-ember-strong">{p.highlight}</p>
-                <p className="mt-2 text-[14px] leading-snug text-ink-muted">{p.highlightNote}</p>
-                <ul className="mt-6 space-y-2.5 border-t border-line pt-5">
-                  {p.pains.map((pain) => (
-                    <li key={pain} className="flex gap-3 text-[15px] leading-snug text-ink">
-                      <span aria-hidden className="mt-2 h-px w-3 shrink-0 bg-ink-muted" />
-                      {pain}
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-auto pt-7 font-mono text-[12px] text-ink-muted">
-                  {p.handoff}
-                  <span aria-hidden className="lp-handoff-arrow" />
-                </p>
-              </li>
-            ))}
-          </ol>
-
-          <p className="mt-10 max-w-3xl text-[13px] leading-relaxed text-ink-muted">{PROBLEM.footnote}</p>
-        </div>
-      </section>
-
-      {/* ── 03 GIẢI PHÁP ── */}
-      <section id="solution" className="lp-section bg-paper-sunken">
-        <div className="lp-wrap">
-          <SectionHead index={SOLUTION.index} lead={SOLUTION.titleLead} emphasis={SOLUTION.titleEmphasis} body={SOLUTION.lead} />
-
-          <h3 className="mt-14 text-lg font-bold text-ink">{SOLUTION.mapTitle}</h3>
+          <p className="mt-1 text-[14px] text-ink-muted">{PROBLEM.issuesNote}</p>
           <ol className="lp-map mt-5">
-            {SOLUTION.map.map((m) => (
-              <li key={m.problem} className="lp-map-row">
-                <p className="text-[15px] font-semibold text-ink-muted">
-                  <span aria-hidden className="mr-2 inline-block h-2 w-2 rounded-full bg-rust align-middle" />
-                  {m.problem}
-                </p>
+            {PROBLEM.issues.map((m) => (
+              <li key={m.title} className="lp-map-row">
+                <div>
+                  <p className="text-[15px] font-semibold text-ink">
+                    <span aria-hidden className="mr-2 inline-block h-2 w-2 rounded-full bg-rust align-middle" />
+                    {m.title}
+                  </p>
+                  <p className="mt-1 pl-4 text-[14px] leading-snug text-ink-muted">
+                    {ui.consequence}
+                    {m.effect}
+                  </p>
+                </div>
                 <span aria-hidden className="lp-map-arrow" />
-                <p className="text-[15px] leading-snug text-ink">{m.answer}</p>
+                <p className="text-[15px] leading-snug text-ink">{m.fix}</p>
                 <div className="lp-map-status">
                   <StatusTag status={m.status} label={STATUS_LABEL[m.status]} />
                 </div>
@@ -201,69 +103,17 @@ export function LandingPage() {
             ))}
           </ol>
           <div className="mt-6 max-w-3xl rounded-xl border border-line-strong bg-paper-raised p-5">
-            <p className="text-[15px] font-bold text-ink">{SOLUTION.extra.title}</p>
-            <p className="mt-1.5 text-[15px] leading-relaxed text-ink-muted">{SOLUTION.extra.body}</p>
-          </div>
-
-          <div className="mt-14 grid gap-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-            <div className="rounded-xl border border-dashed border-line-strong p-6">
-              <p className="text-[13px] font-semibold text-ink-muted">{SOLUTION.contribution.notTitle}</p>
-              <p className="mt-2 text-[15px] leading-relaxed text-ink-muted">{SOLUTION.contribution.not}</p>
-            </div>
-            <div className="rounded-xl border-2 border-ember-strong bg-paper-raised p-6">
-              <p className="text-[13px] font-semibold text-ember-strong">{SOLUTION.contribution.isTitle}</p>
-              <p className="mt-2 text-[17px] font-semibold leading-snug text-ink">{SOLUTION.contribution.is}</p>
-            </div>
-          </div>
-
-          <h3 className="mt-16 text-lg font-bold text-ink">{SOLUTION.columnsTitle}</h3>
-          <div className="mt-5 grid gap-10 lg:grid-cols-3 lg:gap-8">
-            {SOLUTION.columns.map((c) => (
-              <article key={c.title} className="flex flex-col">
-                <p className="lp-label">{c.for}</p>
-                <h4 className="mt-1 text-xl font-bold tracking-tight text-ink">{c.title}</h4>
-                <ul className="mt-5 space-y-3">
-                  {c.points.map((pt) => (
-                    <li key={pt} className="flex gap-3 text-[15px] leading-snug text-ink">
-                      <CheckIcon />
-                      {pt}
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-auto pt-6 text-[14px] font-semibold text-sage">{c.outcome}</p>
-              </article>
-            ))}
-          </div>
-
-          {/* Ba lớp biểu diễn: xếp chồng như các lớp của một scene */}
-          <div className="mt-16 grid gap-10 rounded-2xl bg-viewport p-6 text-on-dark sm:p-10 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-center">
-            <div>
-              <h3 className="text-2xl font-extrabold tracking-tight">{ui.oneObjectThreeLayers}</h3>
-              <p className="mt-3 max-w-md text-[15px] leading-relaxed text-on-dark/70">{SOLUTION.layersNote}</p>
-              <p className="mt-8 text-[13px] text-on-dark/60">{ui.humanDecisions}</p>
-              <ul className="mt-3 flex flex-wrap gap-2">
-                {SOLUTION.checkpoints.map((c) => (
-                  <li key={c} className="rounded-md border border-line-dark px-3 py-1.5 text-[13px] font-medium">
-                    {c}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <ol className="lp-layers">
-              {SOLUTION.layers.map((l) => (
-                <li key={l.code} className="lp-layer" data-tone={l.tone}>
-                  <span className="font-mono text-[12px] font-semibold">{l.code}</span>
-                  <span className="mt-1 block text-[15px] font-bold">{l.question}</span>
-                  <span className="mt-1 block text-[14px] leading-snug text-on-dark/70">{l.answer}</span>
-                </li>
-              ))}
-            </ol>
+            <p className="text-[15px] font-bold text-ink">{PROBLEM.extra.title}</p>
+            <p className="mt-1.5 text-[15px] leading-relaxed text-ink-muted">{PROBLEM.extra.body}</p>
           </div>
         </div>
       </section>
 
-      {/* ── 04 QUY TRÌNH ── */}
-      <section id="workflow" className="lp-section">
+      {/* ── SCENE MẪU (tự ẩn khi API không trả dữ liệu) ── */}
+      <LandingSamples title={SAMPLES.title} lead={SAMPLES.lead} studioUrl={STUDIO_URL} openLabel={ui.openSample} />
+
+      {/* ── 02 QUY TRÌNH ── */}
+      <section id="workflow" className="lp-section bg-paper-sunken">
         <div className="lp-wrap">
           <SectionHead index={WORKFLOW.index} lead={WORKFLOW.titleLead} emphasis={WORKFLOW.titleEmphasis} body={WORKFLOW.lead} />
 
@@ -295,17 +145,41 @@ export function LandingPage() {
         </div>
       </section>
 
-      {/* ── 05 TIẾN ĐỘ ── */}
+      {/* ── 03 CHO AI ── */}
+      <section id="roles" className="lp-section">
+        <div className="lp-wrap">
+          <SectionHead index={ROLES.index} lead={ROLES.titleLead} emphasis={ROLES.titleEmphasis} body={ROLES.lead} />
+
+          <div className="mt-12 grid gap-10 lg:grid-cols-3 lg:gap-8">
+            {ROLES.columns.map((c) => (
+              <article key={c.title} className="flex flex-col">
+                <p className="lp-label">{c.for}</p>
+                <h3 className="mt-1 text-xl font-bold tracking-tight text-ink">{c.title}</h3>
+                <ul className="mt-5 space-y-3">
+                  {c.points.map((pt) => (
+                    <li key={pt} className="flex gap-3 text-[15px] leading-snug text-ink">
+                      <CheckIcon />
+                      {pt}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-auto pt-6 text-[14px] font-semibold text-sage">{c.outcome}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── 04 TIẾN ĐỘ ── */}
       <section id="progress" className="lp-section bg-paper-sunken">
         <div className="lp-wrap">
           <SectionHead index={PROGRESS.index} lead={PROGRESS.titleLead} emphasis={PROGRESS.titleEmphasis} body={PROGRESS.lead} />
 
-          <div className="mt-14 grid gap-px overflow-hidden rounded-xl border border-line bg-line lg:grid-cols-3">
+          <div className="mt-12 grid gap-px overflow-hidden rounded-xl border border-line bg-line lg:grid-cols-3">
             {PROGRESS.tiers.map((t) => (
-              <div key={t.title} className="bg-paper-raised p-7 sm:p-8">
+              <div key={t.status} className="bg-paper-raised p-7 sm:p-8">
                 <StatusTag status={t.status} label={STATUS_LABEL[t.status]} />
-                <h3 className="mt-4 text-xl font-bold tracking-tight text-ink">{t.title}</h3>
-                <ul className="mt-4 space-y-2.5">
+                <ul className="mt-5 space-y-2.5">
                   {t.items.map((it) => (
                     <li key={it} className="flex gap-3 text-[15px] leading-snug text-ink">
                       <span aria-hidden className="mt-2 h-px w-3 shrink-0 bg-ink-muted" />
@@ -317,55 +191,10 @@ export function LandingPage() {
             ))}
           </div>
 
-          <div className="mt-12">
-            <h3 className="text-lg font-bold text-ink">{PROGRESS.metricsTitle}</h3>
-            <dl className="mt-4 grid gap-x-8 gap-y-5 border-t border-line pt-5 sm:grid-cols-2 lg:grid-cols-4">
-              {PROGRESS.metrics.map((m) => (
-                <div key={m.group}>
-                  <dt className="text-[13px] text-ink-muted">{m.group}</dt>
-                  <dd className="mt-1 text-[15px] font-medium leading-snug text-ink">{m.items}</dd>
-                </div>
-              ))}
-            </dl>
-            <p className="mt-5 text-[13px] text-ink-muted">{PROGRESS.metricsNote}</p>
-          </div>
-
-          <LandingSamples
-            title={PROGRESS.samplesTitle}
-            lead={PROGRESS.samplesLead}
-            studioUrl={STUDIO_URL}
-            openLabel={ui.openSample}
-          />
-        </div>
-      </section>
-
-      {/* ── 06 DÙNG Ở ĐÂU ── */}
-      <section id="roadmap" className="lp-section">
-        <div className="lp-wrap">
-          <SectionHead index={ROADMAP.index} lead={ROADMAP.titleLead} emphasis={ROADMAP.titleEmphasis} body={ROADMAP.lead} />
-
-          <div className="mt-14 grid gap-6 lg:grid-cols-[16rem_minmax(0,1fr)] lg:items-stretch">
-            <div className="flex flex-col justify-center rounded-xl bg-viewport p-6 text-on-dark">
-              <p className="text-lg font-extrabold tracking-tight">{ROADMAP.core}</p>
-              <ul className="mt-4 space-y-2">
-                {ROADMAP.adapters.map((a) => (
-                  <li key={a} className="rounded-md border border-line-dark px-3 py-2 font-mono text-[12px] text-on-dark/80">
-                    {a}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-              {ROADMAP.tracks.map((t) => (
-                <div key={t.domain} className={`rounded-xl p-6 sm:p-7 ${TRACK_CARD[t.state]}`}>
-                  <p className={`text-[13px] font-semibold ${TRACK_TAG[t.state]}`}>{t.tag}</p>
-                  <p className="mt-3 text-xl font-bold tracking-tight text-ink">{t.domain}</p>
-                  <p className="mt-1 font-mono text-[13px] text-ink-muted">↳ {t.simulator}</p>
-                  <p className="mt-4 text-[15px] leading-relaxed text-ink-muted">{t.body}</p>
-                </div>
-              ))}
-            </div>
-          </div>
+          <p className="mt-8 max-w-4xl text-[13px] leading-relaxed text-ink-muted">
+            <span className="font-semibold text-ink">{PROGRESS.metricsTitle}: </span>
+            {PROGRESS.metrics}
+          </p>
         </div>
       </section>
 
