@@ -132,6 +132,18 @@ messages và evidence download. Chạy happy path và edit-during-run/failure re
 compare candidate loaded với release ZIP. Không fabricate progress percentage.
 Tests: API/consumer/Vitest + browser interactions + real GPU release journey;
 required BLOCKED, ERROR, insufficient resources, stale poll/worker, two attempts.
+
+**Local implementation:** typed Studio submit/poll/cancel/retry, CAS selection of
+the exact completed candidate/config run, refresh of review state after selection,
+and authenticated download of the named report/runtime manifest/log/observations
+artifacts. API resolves downloads from persisted refs and verifies artifact
+checksums; the UI does not accept artifact paths from payloads. Historical runs
+remain visible, while mutation actions are limited to the current candidate.
+
+**Deployment/browser gate:** UI browser interactions, live worker progress,
+failure/retry on Isaac, edit-during-run, release sealing and comparison with the
+released ZIP remain unverified until a logged-in Studio and qualified Isaac
+deployment are available. A fake child process only proves the local protocol.
 **Exit:** [ ] end-to-end evidence đủ; [ ] video/log/report/release cùng candidate;
 [ ] CPU, browser, GPU và provider coverage được ghi riêng.
 
@@ -294,3 +306,29 @@ Changed files: `src/config.py`,
 `tests/test_orchestration/test_isaac_validation_worker.py`,
 `deploy/studio/production.env.example`, regenerated deployment examples,
 `deploy/studio/README.md`, and this task record.
+
+### AUD-05.S4 — Studio queue controls and evidence access (local implementation)
+
+Added the exact-run selection API with candidate/config binding and compare-and-
+swap against the current selection. Added named artifact downloads for the
+persisted report, runtime manifest, execution log and observations; each download
+is owner-authorized and resolved through the checksum-verifying artifact store.
+The Studio review tab now submits and polls validation runs, shows persisted
+status/error/resource-wait states, allows cancel and retry when the server marks
+the run retryable, and selects completed reports. The UI refreshes ReviewState
+after selection and uses the current candidate-wide selection ID for CAS, so a
+completed run from the new policy can replace the prior policy's selection.
+
+Local verification on 2026-10-09:
+
+- `.venv/bin/pytest -q --tb=short` — 2,544 passed, 28 skipped, 15 warnings.
+- `cd frontend && npm test` — 440 passed across 56 files.
+- `cd frontend && npm run typecheck` — passed; changed-file ESLint — passed.
+- `.venv/bin/ruff check src/ tests/` and `.venv/bin/ruff format --check src/ tests/` — passed.
+- `python scripts/check_contract_mirror.py` and `git diff --check` — passed.
+- CodeGraph sync/status — 942 files, 19,498 nodes, 59,161 edges; current.
+- `graphify update .` and focused query — 22,163 nodes, 68,263 edges, 722 communities.
+- DevTools browser evidence is **UNVERIFIED**: no Studio process listened on
+  ports 3010/8010 and the browser tab showed a connection error.
+- Isaac runtime, browser interaction, release sealing and deployed end-to-end
+  acceptance remain **UNVERIFIED**. This is not a task DONE claim.

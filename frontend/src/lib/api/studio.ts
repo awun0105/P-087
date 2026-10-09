@@ -13,7 +13,11 @@ import type {
   ObjectMembershipReassignCommand,
   SceneEditResponse,
   SceneResponse,
+  ValidationOperationStatus,
+  ValidationRunStatus,
+  ValidationRunView,
 } from "@/lib/contracts/api";
+import { VALIDATION_OPERATION_STATUSES, VALIDATION_RUN_STATUSES } from "@/lib/contracts/api";
 import {
   parseDemoManifest,
   parseDemoState,
@@ -1037,6 +1041,109 @@ function validationReport(value: unknown): ValidationReportView | null {
     collision_quality_ref: evidenceRefs([value.collision_quality_ref])[0] ?? null,
     collision_path_support: collisionSupport,
   };
+}
+
+function parseValidationRun(value: unknown): ValidationRunView {
+  if (!isObject(value)) throw new ApiError(502, "Backend trả validation run sai contract");
+  const jobId = text(value.job_id);
+  const runId = text(value.run_id);
+  const sceneRevision = text(value.scene_revision);
+  const candidateChecksum = text(value.candidate_checksum);
+  const configChecksum = text(value.validation_config_checksum);
+  const requestedAt = text(value.requested_at);
+  const runStatus = VALIDATION_RUN_STATUSES.find((item) => item === value.run_status);
+  const status = VALIDATION_OPERATION_STATUSES.find((item) => item === value.status);
+  const attempt = value.attempt;
+  if (
+    value.schema_version !== "1.0" ||
+    !jobId ||
+    !runId ||
+    typeof attempt !== "number" ||
+    !Number.isSafeInteger(attempt) ||
+    attempt < 1 ||
+    !sceneRevision ||
+    !candidateChecksum ||
+    !configChecksum ||
+    !runStatus ||
+    !status ||
+    !requestedAt ||
+    (value.started_at !== null && typeof value.started_at !== "string") ||
+    (value.completed_at !== null && typeof value.completed_at !== "string") ||
+    (value.report_checksum !== null && typeof value.report_checksum !== "string") ||
+    typeof value.selected !== "boolean" ||
+    typeof value.retryable !== "boolean" ||
+    (value.error_code !== null && typeof value.error_code !== "string")
+  ) {
+    throw new ApiError(502, "Backend trả validation run sai contract");
+  }
+  return {
+    schema_version: "1.0",
+    job_id: jobId,
+    run_id: runId,
+    attempt,
+    scene_revision: sceneRevision,
+    candidate_checksum: candidateChecksum,
+    validation_config_checksum: configChecksum,
+    run_status: runStatus as ValidationRunStatus,
+    status: status as ValidationOperationStatus,
+    requested_at: requestedAt,
+    started_at: value.started_at as string | null,
+    completed_at: value.completed_at as string | null,
+    report_checksum: value.report_checksum as string | null,
+    selected: value.selected,
+    retryable: value.retryable,
+    error_code: value.error_code as string | null,
+  };
+}
+
+export async function listValidationRuns(jobId: string, signal?: AbortSignal): Promise<ValidationRunView[]> {
+  const value = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/validation-runs`, { signal });
+  if (!Array.isArray(value)) throw new ApiError(502, "Backend trả validation history sai contract");
+  return value.map(parseValidationRun);
+}
+
+export async function submitValidationRun(jobId: string, candidateChecksum: string): Promise<ValidationRunView> {
+  return parseValidationRun(await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/validation-runs`, {
+    method: "POST",
+    headers: { "Idempotency-Key": newRunIdempotencyKey() },
+    body: JSON.stringify({ candidate_checksum: candidateChecksum }),
+  }));
+}
+
+export async function cancelValidationRun(jobId: string, runId: string): Promise<ValidationRunView> {
+  return parseValidationRun(await apiFetch<unknown>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/validation-runs/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST" },
+  ));
+}
+
+export async function retryValidationRun(jobId: string, runId: string): Promise<ValidationRunView> {
+  return parseValidationRun(await apiFetch<unknown>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/validation-runs/${encodeURIComponent(runId)}/retry`,
+    { method: "POST", headers: { "Idempotency-Key": newRunIdempotencyKey() } },
+  ));
+}
+
+export async function selectValidationRun(
+  jobId: string,
+  runId: string,
+  candidateChecksum: string,
+  expectedSelectedRunId: string | null,
+): Promise<ValidationRunView> {
+  return parseValidationRun(await apiFetch<unknown>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/validation-runs/${encodeURIComponent(runId)}/select`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        candidate_checksum: candidateChecksum,
+        expected_selected_run_id: expectedSelectedRunId,
+      }),
+    },
+  ));
+}
+
+export function validationArtifactUrl(jobId: string, runId: string, artifactName: string): string {
+  return `${API}/jobs/${encodeURIComponent(jobId)}/validation-runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactName)}`;
 }
 
 function parseReviewState(value: unknown): ReviewStateView {

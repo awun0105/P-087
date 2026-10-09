@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { Badge, Button, Card, Notice } from "@/components/studio/primitives";
 import type { SaveState } from "@/features/studio/ObjectReviewView";
 import { ReviewPanel } from "@/features/studio/ReviewPanel";
+import { ValidationRunsPanel } from "@/features/studio/ValidationRunsPanel";
 import { SimulationPackagePanel } from "@/features/studio/SimulationPackagePanel";
 import { HelpDetails } from "@/components/studio/feedback";
 import { floorFitDiagnostic } from "@/features/studio/scene/floorFitDiagnostic";
@@ -20,6 +21,7 @@ export function ReviewTab({ jobId, canMutateJob, onSaveState }: { jobId: string;
   const [reload, setReload] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [floorFit, setFloorFit] = useState<ReturnType<typeof floorFitDiagnostic>>(null);
+  const [reviewRefresh, setReviewRefresh] = useState(0);
   // Trạng thái duyệt do ReviewPanel tải; ở đây chỉ dùng lại để vẽ báo cáo chi tiết của đúng revision.
   const [review, setReview] = useState<ReviewStateView | null>(null);
   useEffect(() => {
@@ -66,8 +68,19 @@ export function ReviewTab({ jobId, canMutateJob, onSaveState }: { jobId: string;
         <SimulationPackagePanel jobId={jobId} sceneRevision={revision} canCreate={canMutateJob} onSceneChanged={() => setReload((value) => value + 1)} />
       </Card>
       <Card className="overflow-hidden">
-        <ReviewPanel jobId={jobId} sceneRevision={revision} onState={setReview} />
+        <ReviewPanel jobId={jobId} sceneRevision={revision} refreshToken={reviewRefresh} onState={setReview} />
       </Card>
+      {review?.record.scene_revision === revision && (
+        <Card className="overflow-hidden lg:col-span-2">
+          <ValidationRunsPanel
+            jobId={jobId}
+            sceneRevision={revision}
+            candidateChecksum={review.record.candidate_checksum}
+            canMutateJob={canMutateJob}
+            onSelected={() => setReviewRefresh((value) => value + 1)}
+          />
+        </Card>
+      )}
       {review?.validation && review.record.scene_revision === revision && (
         <Card className="overflow-hidden lg:col-span-2">
           <ValidationReportCard state={review} />

@@ -509,6 +509,43 @@ export interface ValidationReport {
   report_checksum: string;
 }
 
+/** `src/models/contracts/validation_run.py` ValidationRunStatus. */
+export const VALIDATION_RUN_STATUSES = ["QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"] as const;
+export type ValidationRunStatus = (typeof VALIDATION_RUN_STATUSES)[number];
+
+/** `src/services/orchestration/review/validation_queue.py` ValidationOperationStatus. */
+export const VALIDATION_OPERATION_STATUSES = [
+  "QUEUED",
+  "WAITING_RESOURCES",
+  "CLAIMED",
+  "RUNNING",
+  "CANCEL_REQUESTED",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+] as const;
+export type ValidationOperationStatus = (typeof VALIDATION_OPERATION_STATUSES)[number];
+
+/** `src/services/orchestration/review/validation_queue.py` ValidationRunView safe API projection. */
+export interface ValidationRunView {
+  schema_version: "1.0";
+  job_id: string;
+  run_id: string;
+  attempt: number;
+  scene_revision: string;
+  candidate_checksum: string;
+  validation_config_checksum: string;
+  run_status: ValidationRunStatus;
+  status: ValidationOperationStatus;
+  requested_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  report_checksum: string | null;
+  selected: boolean;
+  retryable: boolean;
+  error_code: string | null;
+}
+
 /**
  * `src/api/schemas.py` ValidationStateResponse — lồng `report`, không phẳng. Bản cũ
  * phẳng `checks`/`path_results` lên top level nên mọi mức đọc phải đoán.

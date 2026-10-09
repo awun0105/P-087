@@ -37,9 +37,10 @@ const STATUS_LABEL: Record<RevisionStatus, { label: string; tone: "neutral" | "o
  * panel chỉ gửi quyết định kèm checksum gói/báo cáo đang hiển thị để backend phát hiện màn hình cũ.
  * Duyệt xong hệ thống tự phát hành (không có bước duyệt thứ hai).
  */
-export function ReviewPanel({ jobId, sceneRevision, onState }: {
+export function ReviewPanel({ jobId, sceneRevision, refreshToken = 0, onState }: {
   jobId: string;
   sceneRevision: string;
+  refreshToken?: number;
   /** Màn cha (tab Kiểm tra & duyệt) dùng lại trạng thái panel đã tải để vẽ báo cáo chi tiết, không gọi API lần hai. */
   onState?: (state: ReviewStateView | null) => void;
 }) {
@@ -69,7 +70,7 @@ export function ReviewPanel({ jobId, sceneRevision, onState }: {
       },
     );
     return () => controller.abort();
-  }, [jobId, sceneRevision, reload]);
+  }, [jobId, sceneRevision, reload, refreshToken]);
 
   // Chỉ đưa ra ngoài trạng thái của đúng revision đang xem; đang tải lại thì báo null để màn cha ẩn báo cáo cũ.
   const current = state && loadedRevision === sceneRevision ? state : null;

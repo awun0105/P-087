@@ -15,10 +15,11 @@ from src.api import auth
 from src.api.auth import require_contributor
 from src.api.ownership import authorize_job_mutation, owner_mutation_allowed
 from src.api.studio import deps
-from src.models.contracts.artifacts import Checksum
+from src.models.contracts.artifacts import Checksum, Identifier
 from src.models.contracts.identity import verify_candidate_inventory, verify_content_checksum
 from src.models.contracts.release import ApprovalDecision
-from src.models.contracts.validation_run import IsaacValidationRuntimeProfile, ValidationConfig
+from src.models.contracts.validation import ValidationReport
+from src.models.contracts.validation_run import IsaacValidationRuntimeProfile, ValidationConfig, ValidationRunStatus
 from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.auth import UserRecord
 from src.services.orchestration.auth.service import has_role
@@ -27,6 +28,7 @@ from src.services.orchestration.projects import JobNotFoundError, ProjectRegistr
 from src.services.orchestration.review.simulation_package import SimulationPackage, current_package
 from src.services.orchestration.review.validation_queue import (
     ValidationCandidateSnapshot,
+    ValidationOperationStatus,
     ValidationQueue,
     ValidationQueueError,
     ValidationQueueNotFoundError,
@@ -56,6 +58,15 @@ class ValidationRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     candidate_checksum: Checksum
+
+
+class ValidationRunSelectRequest(BaseModel):
+    """Select one completed attempt using the candidate and currently selected run shown by Studio."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_checksum: Checksum
+    expected_selected_run_id: Identifier | None = None
 
 
 def _reviewer(request: Request) -> UserRecord:
@@ -258,6 +269,97 @@ def get_validation_run(
     registry = _validation_job_access(job_id, user, mutation=False)
     try:
         return _validation_queue(registry).get(job_id, run_id)
+    except (ArtifactStoreError, RuntimeStateConflictError, ValidationQueueError, ValueError, OSError) as error:
+        raise _validation_error(error) from error
+
+
+@router.post(
+    "/jobs/{job_id}/validation-runs/{run_id}/select",
+    response_model=ValidationRunView,
+)
+def select_validation_run(
+    job_id: str,
+    run_id: str,
+    body: ValidationRunSelectRequest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> ValidationRunView:
+    """Select only a completed worker run for the exact current candidate and server policy."""
+    registry = _validation_job_access(job_id, user, mutation=True)
+    queue = _validation_queue(registry)
+    _, snapshot = _current_validation_candidate(job_id, registry)
+    if body.candidate_checksum != snapshot.candidate_checksum:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Candidate đã thay đổi; tải lại SimulationPackage trước khi chọn validation",
+        )
+    policy, profile = _validation_policy()
+    try:
+        bound_config = queue.bind_profile(job_id, policy, profile)
+        current = queue.get(job_id, run_id)
+        if current.candidate_checksum != snapshot.candidate_checksum:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Run thuộc candidate cũ")
+        if current.validation_config_checksum != bound_config.config_checksum:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Run thuộc policy validation cũ")
+        if current.run_status != ValidationRunStatus.COMPLETED or current.status != ValidationOperationStatus.COMPLETED:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Chỉ có thể chọn run đã hoàn tất")
+        queue.runs.select_run(
+            job_id,
+            snapshot.candidate_checksum,
+            bound_config.config_checksum,
+            run_id,
+            expected_selected_run_id=body.expected_selected_run_id,
+        )
+        return queue.get(job_id, run_id)
+    except HTTPException:
+        raise
+    except (ArtifactStoreError, RuntimeStateConflictError, ValidationQueueError, ValueError, OSError) as error:
+        raise _validation_error(error) from error
+
+
+@router.get(
+    "/jobs/{job_id}/validation-runs/{run_id}/artifacts/{artifact_name}",
+    response_class=FileResponse,
+)
+def download_validation_artifact(
+    job_id: str,
+    run_id: str,
+    artifact_name: Literal["report.json", "runtime_manifest.json", "execution.log", "observations.json"],
+    user: UserRecord | None = Depends(require_contributor),
+) -> FileResponse:
+    """Resolve one named artifact from the persisted run and verify its checksum before download."""
+    registry = _validation_job_access(job_id, user, mutation=False)
+    queue = _validation_queue(registry)
+    try:
+        queue.get(job_id, run_id)
+        record = queue.runs.get_run(run_id)
+        references = {
+            "report.json": record.report_ref,
+            "runtime_manifest.json": record.runtime_manifest_ref,
+            "execution.log": record.execution_log_ref,
+        }
+        if artifact_name == "observations.json":
+            if record.report_ref is None:
+                raise ValidationQueueError("Validation run chưa có report")
+            report = registry.runtime_resolver.load_model(record.report_ref, ValidationReport)
+            evidence_refs = [
+                reference
+                for item in (*report.checks, *report.path_results)
+                for reference in item.evidence_refs
+                if reference.artifact_type == "IsaacExecutionObservations"
+            ]
+            unique_refs = {
+                (reference.artifact_uri, reference.artifact_checksum): reference for reference in evidence_refs
+            }
+            if len(unique_refs) != 1:
+                raise ValidationQueueError("Report không tham chiếu đúng một artifact observations")
+            reference = next(iter(unique_refs.values()))
+        else:
+            reference = references[artifact_name]
+        if reference is None:
+            raise ValidationQueueError(f"Validation run không có artifact {artifact_name}")
+        path = registry.runtime_resolver.require(reference)
+        media_type = "text/plain; charset=utf-8" if artifact_name == "execution.log" else "application/json"
+        return FileResponse(path, media_type=media_type, filename=artifact_name, content_disposition_type="attachment")
     except (ArtifactStoreError, RuntimeStateConflictError, ValidationQueueError, ValueError, OSError) as error:
         raise _validation_error(error) from error
 

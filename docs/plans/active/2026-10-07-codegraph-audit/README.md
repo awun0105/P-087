@@ -35,12 +35,13 @@ Ruff check/format đều pass; PostgreSQL proof pass 100%. Reviewer-session DevT
 verification does not cover the three-role Guest flows. Guest rollout vẫn đợi browser
 acceptance, PostgreSQL concurrency qualification và AUD-20 stable-ID/migration evidence.
 AUD-06.S2 lease recovery/admission và AUD-06.S3 retry/cancel đã hoàn tất trong
-`b149974` và `2b0a1b6`. AUD-05.S1 local implementation đã thêm durable validation
-operation, idempotency, worker lease/fencing/recovery, candidate/profile binding,
-status APIs và owner checks. Focused local verification: 52 passed, 4 skipped;
-Ruff check/format pass. Isaac Sim/Isaac Lab và server validation config/profile
-không có trong môi trường hiện tại, nên runtime qualification và S2 real-simulator
-acceptance vẫn **UNVERIFIED**; không lấy test fixture làm bằng chứng runtime.
+`b149974` và `2b0a1b6`. AUD-05.S1–S4 local implementation now covers the durable
+validation queue, isolated worker dispatch, evidence publication, Studio
+submit/poll/cancel/retry, exact-run CAS selection and checksum-verified artifact
+downloads. Local code/API/UI verification is recorded in the task file. Isaac
+Sim/Isaac Lab and deployment acceptance are still **UNVERIFIED**; fake-process
+tests are not simulator evidence. Browser acceptance also remains **UNVERIFIED**
+because no Studio process was running for a logged-in DevTools session.
 AUD-07.S3 đã nối queued/running cancellation từ API tới process-group kill/reap,
 đảm bảo reservation chỉ nhả sau khi child chết và giữ quy tắc thắng/thua rõ ràng
 ở cancel-vs-commit race. Local focused tests và API/UI checks pass; GPU contention
@@ -560,8 +561,9 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [x] Implementation AUD-11 và AUD-15.S1 baseline.
 - [x] Implementation AUD-01–04.
 - [x] Implementation AUD-10 và AUD-07.S1–S2.
-- [ ] Implementation AUD-06 và AUD-07.S3.
-- [ ] Implementation AUD-05 và real Isaac acceptance.
+- [x] Local implementation AUD-06.S1–S3 and AUD-07.S1–S3; [ ] REC-05 runtime
+      and GPU-contention acceptance.
+- [x] Local implementation AUD-05.S1–S4; [ ] real Isaac/browser/release acceptance.
 - [x] Local implementation AUD-08.S1–S4; focused API/domain/frontend regressions.
 - [x] Local implementation AUD-09.S1–S3; focused API/domain/frontend/export regressions.
 - [ ] AUD-08 browser/Isaac acceptance; AUD-09 browser visual and real Isaac contact acceptance.
@@ -634,8 +636,14 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
       requires R4's `InputRole.SENSOR_TRAJECTORY` in the shared contract, alongside its ordered
       scan binding. AUD-06.S1 moves import packaging from the API to the standalone worker, so
       imports stay QUEUED when no `worker_cli` runs; AUD-06.S2 now recovers expired import leases
-      and AUD-06.S3 provides retry/cancel controls. Validation queue coverage is in AUD-05.S1;
-      Isaac runtime execution/report publication remains for S2/S3.
+      and AUD-06.S3 provides retry/cancel controls. AUD-05.S1–S4 add the local
+      queue, worker/report publication and Studio controls; real Isaac and browser
+      release acceptance remain open.
+
+- [x] AUD-05.S4 local validation controls, exact candidate/config selection CAS,
+      review refresh, and authenticated named artifact downloads.
+- [ ] AUD-05 browser interactions and deployed Isaac → review → release journey;
+      no deployment or logged-in local Studio session was available this run.
 
 - [x] AUD-23.S1 versioned media/capability/preparation contracts, Python/TypeScript
       agreement, frame-map rules, preset dimension fitting and legacy checksum preservation.
