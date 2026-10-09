@@ -26,10 +26,14 @@ thêm detection/tracking/redaction nhưng zero detections không chứng minh an
 5. License code/model weights/data và detector quality envelope phải qualified
    trước runtime adoption. Không xem “YOLOv8-Face” là default miễn điều kiện.
 
-6. (Owner chốt 2026-10-09) Không có bước duyệt của reviewer: job chọn che chạy thẳng từ frame đã che sang dựng
-   3D để giữ thời gian xử lý ngắn nhất. Vì không ai kiểm bản đã che, không có đường nào cấp
-   `VERIFIED_ANONYMIZED`; job giữ trạng thái tự cam kết. Phần "manual correction/QA" ở mục 2 và 3 không được
-   triển khai.
+6. (Owner chốt 2026-10-09, thay cho quyết định "không có bước duyệt" cùng ngày) Người upload tự xem và chấp
+   nhận bản đã che trước khi dựng 3D. Sau bước che, job dừng ở `ST-FRAME-EXTRACT` với lý do chờ
+   `anonymization_review`; worker không chạy COLMAP cho tới khi job có bản ghi `SanitizationAcceptance` gắn với
+   đúng checksum của bộ frame đã xem. Không đồng ý thì người dùng hủy job. Không có vai trò reviewer riêng và
+   không có sửa tay vùng che: phần "manual correction" ở mục 2 và 3 không được triển khai.
+7. Chấp nhận của người upload không cấp `VERIFIED_ANONYMIZED`. Đó là người có dữ liệu tự xác nhận, không phải
+   kiểm định độc lập; privacy report của job giữ trạng thái tự cam kết, và chế độ `qa_verified` vẫn chưa có
+   đường đi qua.
 
 ## Data contract
 

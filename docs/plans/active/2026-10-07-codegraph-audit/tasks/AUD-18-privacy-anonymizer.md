@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- IMPLEMENTED (code, phạm vi thu gọn theo owner 2026-10-09: không có bước duyệt; đánh giá trên dữ liệu thật và chạy trên pod còn mở); P2 extension theo yêu cầu owner; EX-REC + EX-PRODUCT.
+- IMPLEMENTED (code, phạm vi thu gọn theo owner 2026-10-09: người upload tự xem và chấp nhận bản đã che, không có reviewer riêng hay sửa tay; đánh giá trên dữ liệu thật và chạy trên pod còn mở); P2 extension theo yêu cầu owner; EX-REC + EX-PRODUCT.
 - Canonical REC-02, PRODUCT-01/02/09; bổ sung task-local scope, không đổi crosswalk.
 - ADAPT qualified detection/tracking/redaction; REUSE RGBPrivacyGate,
   PrivacyInspectionEvidence, PrivacyQAAcceptance và approved-copy lineage.
@@ -168,7 +168,7 @@ and consumer proof; synthetic zero findings không chứng minh anonymity.
   `test_anonymize_option_is_offered_and_recorded_only_with_a_configured_anonymizer`; `tests/test_api` và
   `tests/test_orchestration` (978 test) pass.
 
-### Quyết định cuối của owner (2026-10-09): không có bước duyệt, ưu tiên thời gian xử lý
+### Quyết định trước đó của owner (2026-10-09, ĐÃ THAY — xem mục cuối): không có bước duyệt
 
 Owner cân nhắc hai phương án (chờ reviewer / không chờ) rồi chốt: **không có bước duyệt của reviewer**. Job chọn
 che chạy thẳng từ frame đã che sang dựng 3D.
@@ -199,3 +199,28 @@ che chạy thẳng từ frame đã che sang dựng 3D.
 - Tests: `test_originals_of_redacted_frames_are_deleted_and_retry_still_works`,
   `test_nothing_is_deleted_when_no_frame_was_redacted_or_the_step_fails`.
 
+### Quyết định hiện hành (2026-10-09): người upload xem và chấp nhận bản đã che trước khi dựng 3D
+
+Thay cho mục "không có bước duyệt" ở trên. Owner chọn phương án "kiểm trước khi xử lý".
+
+- **Worker.** Sau bước che, `run_video_job` trả về ngay khi `awaiting_anonymization_review(job)`: job giữ
+  `RUNNING` ở `ST-FRAME-EXTRACT`, không giữ GPU. `_dispatch` bỏ qua job đang chờ; `recover_interrupted_jobs`
+  không coi nó là tiến trình chết. Khi đã có chấp nhận, `waiting_jobs` đưa job vào hàng đợi (phase `preview`)
+  và `run_reviewed_preview_job` chạy LiDAR ingest (nếu có) rồi preview; CAS chuyển stage sang `ST-CAMERA-POSE`
+  là claim nên hai worker không cùng chạy.
+- **Bản ghi.** `SanitizationAcceptance` (job, checksum bộ frame đã che, checksum manifest, số frame bị che,
+  người chấp nhận, thời điểm) publish ở `rec02a/sanitized/acceptance-<checksum>.json`, ghi vào job như stage
+  artifact `ST-PRIVACY-GATE` (`record_anonymization_acceptance`, CAS).
+- **API** (`src/api/studio/anonymization.py`): `GET /jobs/{id}/anonymization` (frame có vùng bị che),
+  `GET /jobs/{id}/anonymization/frames/{name}` (ảnh; chỉ frame thuộc bộ frame đã che của job),
+  `POST /jobs/{id}/anonymization/accept` (kèm checksum bộ frame đã xem; lệch thì 409). Quyền theo chủ job như
+  bước xác nhận tỉ lệ mét. Từ chối = hủy job bằng route hủy sẵn có.
+- **Toàn vẹn.** Manifest che không nằm trong stage artifact nên API tính lại checksum nội dung của nó và so với
+  giá trị ghi trong frame set của job trước khi hiển thị hay chấp nhận.
+- **UI.** Tab Tiến trình hiện `AnonymizationReviewPanel` khi `waiting_for = anonymization_review`; nhãn scene
+  "Cần xem bản đã che"; job đang chờ không bị coi là mất kết nối.
+- **Giới hạn.** Chấp nhận không cấp `VERIFIED_ANONYMIZED` và không mở chế độ `qa_verified` (ADR 0019 mục 7).
+  Người dùng không sửa tay được vùng che: bỏ sót thì phải hủy job. Job không bị che frame nào vẫn dừng chờ, để
+  người dùng thấy rõ máy không phát hiện gì.
+- **Tests.** `tests/test_orchestration/test_anonymization_review.py` (9), `frontend/tests/anonymization-review.test.tsx` (5).
+  Chưa chạy trên worker thật với GPU; chưa xem giao diện bằng mắt.

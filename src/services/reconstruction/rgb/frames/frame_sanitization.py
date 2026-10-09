@@ -3,7 +3,8 @@
 Chạy ngay sau REC-02A và trước mọi bước dùng frame (COLMAP, Brush, thumbnail, các view): stage
 `ST-FRAME-EXTRACT` của job trỏ tới frame set đã che. Frame có vùng bị che được thay bằng bản mới ở
 `rec02a/sanitized/`; frame không có vùng nào giữ nguyên artifact gốc, nên các bước sau không còn đường tới
-bản gốc của bất kỳ frame nào đã bị che. Job chạy tiếp ngay, không chờ người duyệt (owner chốt 2026-10-09).
+bản gốc của bất kỳ frame nào đã bị che. Sau bước này job dừng chờ người upload xem và chấp nhận bản đã che
+(`jobs/anonymization_review.py`) rồi mới dựng 3D.
 Bước này không cấp trạng thái "đã ẩn danh": privacy report của job giữ nguyên.
 """
 
