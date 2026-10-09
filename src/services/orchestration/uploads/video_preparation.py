@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 from typing import BinaryIO
@@ -139,11 +138,12 @@ class ServerVideoPreparationVerifier:
             self.ffprobe,
             "-v",
             "error",
-            "-count_frames",
+            # Đếm packet (chỉ demux), không giải mã: xem ghi chú ở `_presentation_pts`.
+            "-count_packets",
             "-show_streams",
             "-show_format",
             "-show_entries",
-            "stream=codec_type,codec_name,width,height,sample_aspect_ratio,time_base,start_pts,duration_ts,avg_frame_rate,nb_read_frames,color_primaries,color_transfer,color_space,color_range:stream_side_data=rotation:stream_tags=rotate",
+            "stream=codec_type,codec_name,width,height,sample_aspect_ratio,time_base,start_pts,duration_ts,avg_frame_rate,nb_read_packets,color_primaries,color_transfer,color_space,color_range:stream_side_data=rotation:stream_tags=rotate",
             "-of",
             "json",
             str(video),
@@ -184,7 +184,7 @@ class ServerVideoPreparationVerifier:
                 duration_ticks=int(video_stream["duration_ts"]),
                 time_base=self._rational(video_stream["time_base"], "/"),
                 frame_rate=rate,
-                frame_count=int(video_stream["nb_read_frames"]),
+                frame_count=int(video_stream["nb_read_packets"]),
                 color=color,
                 audio_track_count=sum(stream.get("codec_type") == "audio" for stream in streams),
             )
@@ -192,45 +192,38 @@ class ServerVideoPreparationVerifier:
             raise VideoPreparationVerificationError("Server ffprobe metadata is incomplete or invalid") from error
 
     def _presentation_pts(self, video: Path) -> Iterator[int]:
-        pts_file = tempfile.TemporaryFile(mode="w+b")
+        """PTS của mọi frame theo thứ tự trình chiếu, đọc từ packet (chỉ demux, không giải mã).
+
+        Bước này chạy trong request upload. Giải mã toàn bộ video ở đây mất 35 giây cho một video điện thoại 109
+        giây (đo 2026-10-09) và vượt giới hạn 30 giây của proxy, nên người dùng thấy lỗi dù file đúng. Mỗi packet
+        H.264 trong MP4 là một frame, nên PTS của packet sắp tăng dần chính là PTS trình chiếu. Kiểm tra trên frame
+        đã giải mã vẫn có, ở worker: REC-02A đối chiếu lại frame map với timestamp bộ giải mã trả về.
+        """
         command = [
             self.ffprobe,
             "-v",
             "error",
             "-select_streams",
             "v:0",
-            "-show_frames",
             "-show_entries",
-            "frame=best_effort_timestamp",
+            "packet=pts",
             "-of",
             "csv=p=0",
             str(video),
         ]
         try:
-            result = subprocess.run(command, stdout=pts_file, stderr=subprocess.PIPE, check=False, timeout=1800)
+            result = subprocess.run(command, capture_output=True, check=False, timeout=600)
         except (FileNotFoundError, subprocess.TimeoutExpired) as error:
-            pts_file.close()
             raise VideoPreparationVerificationError(
                 "Server could not read prepared video presentation timestamps"
             ) from error
         if result.returncode:
-            pts_file.close()
-            raise VideoPreparationVerificationError("Server could not decode prepared video presentation timestamps")
-        pts_file.seek(0)
-
-        def values() -> Iterator[int]:
-            try:
-                for line in pts_file:
-                    try:
-                        yield int(line.decode("ascii").strip().split(",", 1)[0])
-                    except (UnicodeDecodeError, ValueError) as error:
-                        raise VideoPreparationVerificationError(
-                            "Server video PTS inventory contains an invalid value"
-                        ) from error
-            finally:
-                pts_file.close()
-
-        return values()
+            raise VideoPreparationVerificationError("Server could not read prepared video presentation timestamps")
+        try:
+            values = sorted(int(line.split(b",", 1)[0]) for line in result.stdout.split())
+        except ValueError as error:
+            raise VideoPreparationVerificationError("Server video PTS inventory contains an invalid value") from error
+        return iter(values)
 
     @staticmethod
     def _faster_than_cap(span_ticks: int, intervals: int, time_base: PositiveRational) -> bool:
