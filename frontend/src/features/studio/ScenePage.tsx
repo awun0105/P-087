@@ -309,7 +309,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
             canRetryJob={canRetryJob}
             variant="popover"
           />
-          {canMutateJob && <DemoControls jobId={jobId} revision={save?.revision ?? null} sceneReady={sceneReady}
+          {canMutateJob && <DemoControls jobId={jobId} revision={save?.revision ?? null} sceneReady={sceneReady} defaultTitle={info?.name ?? ""}
             onRestored={(revision) => setSave({ status: "saved", revision })} />}
         </div>
       </div>

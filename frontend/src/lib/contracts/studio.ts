@@ -116,6 +116,13 @@ export interface DemoState {
   baseline: DemoBaseline | null;
   current_revision: string | null;
   at_baseline: boolean;
+  /** ID mẫu trong thư viện mẫu đã được xuất từ job này; null/vắng = chưa xuất (API cũ không gửi). */
+  published_sample_id?: string | null;
+}
+
+export interface DemoPublishResult {
+  sample_id: string;
+  title: string;
 }
 
 /** Kiểm trạng thái bản demo ở biên API: thiếu field là lỗi, không đoán. */
@@ -125,7 +132,15 @@ export function parseDemoState(value: unknown): DemoState {
   if (!(value.current_revision === null || typeof value.current_revision === "string")) throw invalid();
   const baseline = value.baseline;
   if (baseline !== null && !(isRecord(baseline) && typeof baseline.scene_revision === "string" && typeof baseline.job_id === "string")) throw invalid();
+  if (value.published_sample_id !== undefined && !(value.published_sample_id === null || typeof value.published_sample_id === "string")) throw invalid();
   return value as unknown as DemoState;
+}
+
+export function parseDemoPublishResult(value: unknown): DemoPublishResult {
+  if (!isRecord(value) || typeof value.sample_id !== "string" || typeof value.title !== "string") {
+    throw new Error("Kết quả xuất bản demo không hợp lệ");
+  }
+  return value as unknown as DemoPublishResult;
 }
 
 export interface SceneSummary {

@@ -21,6 +21,7 @@ import type {
 import { VALIDATION_OPERATION_STATUSES, VALIDATION_RUN_STATUSES } from "@/lib/contracts/api";
 import {
   parseDemoManifest,
+  parseDemoPublishResult,
   parseDemoState,
   parseDemoSelection,
   parseMetricProposal,
@@ -30,6 +31,7 @@ import {
   parseModeComparison,
   parseStageViews,
   type DemoManifest,
+  type DemoPublishResult,
   type DemoSelection,
   type DemoState,
   type MetricProposal,
@@ -60,6 +62,18 @@ export async function getDemoState(jobId: string, signal?: AbortSignal): Promise
 /** Reviewer lấy revision hiện tại làm bản demo gốc. */
 export async function markDemo(jobId: string): Promise<DemoState> {
   return parseDemoState(await apiFetch<unknown>(`/api/v1/jobs/${encodeURIComponent(jobId)}/demo/baseline`, { method: "POST" }));
+}
+
+/** Reviewer xuất scene vào thư viện mẫu (`/new/try-demo`); `confirm_public` là xác nhận được công khai video. */
+export async function publishDemo(
+  jobId: string,
+  body: { title?: string; description: string; confirm_public: boolean },
+): Promise<DemoPublishResult> {
+  return parseDemoPublishResult(await apiFetch<unknown>(`/api/v1/jobs/${encodeURIComponent(jobId)}/demo/publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }));
 }
 
 /** Reviewer bỏ đánh dấu bản demo; nội dung scene giữ nguyên. */
