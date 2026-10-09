@@ -77,6 +77,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
   const { navigate } = useNavigationGuard();
   const { me, refresh } = useAuth();
   const isGuest = me?.user?.role === "guest";
+  const guestQuotaExhausted = isGuest && me?.quota?.remaining === 0;
   const canMutateJob = resourceCapabilityAllowed(me, progress?.capabilities?.can_mutate);
   const canRetryJob = resourceCapabilityAllowed(me, progress?.capabilities?.can_retry);
   const canCancelJob = resourceCapabilityAllowed(me, progress?.capabilities?.can_cancel)
@@ -348,6 +349,9 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
             canCancel={canCancelJob}
             canAccept={canMutateJob}
             onConfirmMetric={canMutateJob && preview ? () => openTab("studio", "metric") : undefined}
+            onRetry={canRetryJob && !retryPending ? startRetry : undefined}
+            retryDisabled={busy || guestQuotaExhausted}
+            retryHint={guestQuotaExhausted ? "Đã hết lượt Guest hôm nay; lượt được đặt lại lúc 00:00." : undefined}
             onChanged={() => setPollingKey((k) => k + 1)}
             onCancel={() => {
               if (window.confirm("Huỷ xử lý scene này? Tiến trình trên GPU sẽ dừng.")) void act(() => cancelJob(jobId), "Đã gửi yêu cầu huỷ. Trạng thái được cập nhật từ máy chủ.");

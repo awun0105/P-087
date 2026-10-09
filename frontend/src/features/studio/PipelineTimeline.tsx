@@ -18,6 +18,9 @@ export interface StageAction {
   stageId: StageId;
   label: string;
   onClick: () => void;
+  /** Nút vẫn hiện nhưng khoá (vd. đang gửi, hết lượt Guest); `hint` nói lý do khi rê chuột. */
+  disabled?: boolean;
+  hint?: string;
 }
 
 export interface StageView {
@@ -183,7 +186,7 @@ export function PipelineTimeline({
                     )}
                     {/* Nút nằm cùng hàng với tên bước: thao tác người dùng cần làm, và đường vào view của bước đã xong. */}
                     {state !== "succeeded" && stageActions?.filter((action) => action.stageId === meta.id).map((action) => (
-                      <button key={action.label} type="button" onClick={action.onClick} className={STAGE_BUTTON}>
+                      <button key={action.label} type="button" onClick={action.onClick} disabled={action.disabled} title={action.hint} className={cn(STAGE_BUTTON, "disabled:cursor-not-allowed disabled:opacity-50")}>
                         {action.label}
                       </button>
                     ))}

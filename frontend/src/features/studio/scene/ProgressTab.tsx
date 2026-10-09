@@ -16,10 +16,14 @@ import { formatBytes } from "@/lib/format";
 const ANONYMIZATION_PANEL_ID = "anonymization-review-panel";
 
 /** Tiến trình chỉ quản lý trạng thái; viewer mở qua route giai đoạn riêng. */
-export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept = canCancel, onCancel, onChanged, onConfirmMetric }: {
+export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept = canCancel, onCancel, onChanged, onConfirmMetric, onRetry, retryDisabled = false, retryHint }: {
   jobId: string; progress: JobProgress | null; info: SceneInfo | null; busy: boolean; canCancel: boolean; canAccept?: boolean; onCancel: () => void; onChanged?: () => void;
   /** Mở công cụ xác nhận tỉ lệ mét; undefined khi người xem không có quyền thao tác trên job. */
   onConfirmMetric?: () => void;
+  /** Tạo lượt chạy mới cho bước lỗi; undefined khi backend chưa cho thử lại hoặc người xem không có quyền. */
+  onRetry?: () => void;
+  retryDisabled?: boolean;
+  retryHint?: string;
 }) {
   const reviewing = progress?.waiting_for === "anonymization_review";
   const now = useNow(progress?.status === "RUNNING" || progress?.status === "QUEUED");
@@ -32,6 +36,9 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
   const stageActions: StageAction[] = [];
   if (progress?.waiting_for === "metric_confirmation" && onConfirmMetric) {
     stageActions.push({ stageId: "ST-METRIC-CANONICALIZE", label: "Xác nhận tỉ lệ mét", onClick: onConfirmMetric });
+  }
+  if (onRetry && progress?.status === "FAILED" && progress.error?.retryable && progress.error.stage_id) {
+    stageActions.push({ stageId: progress.error.stage_id, label: "Thử lại", onClick: onRetry, disabled: retryDisabled, hint: retryHint });
   }
   if (reviewing && progress?.current_stage) {
     stageActions.push({
