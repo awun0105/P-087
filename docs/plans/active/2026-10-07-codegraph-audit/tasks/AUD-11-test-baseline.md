@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- PLANNED; P0; PRODUCT + REC test owners; canonical PRODUCT-02/09, REC-11.
+- DONE locally; P0; PRODUCT + REC test owners; canonical PRODUCT-02/09, REC-11.
 - SELF-CODE fixture correction; REUSE real subprocess trong bounded smoke.
 - Goal: hai audit failures được giải quyết bằng tests phản ánh behavior hiện tại,
   giữ quota/retry và process cleanup invariants.
@@ -134,3 +134,11 @@ DONE khi corrected regressions và related suites pass; broader failures ghi đ�
   `.venv/bin/ruff check src/ tests/` — passed; `.venv/bin/ruff format --check
   src/ tests/` — 452 files already formatted; `git diff --check` — passed.
 - No production polling or retry policy was weakened. Next: AUD-15.S1.
+
+### Current integrated backend suite — 2026-10-09
+
+- `.venv/bin/pytest tests -q` — **2,552 passed, 28 skipped, 15 warnings in
+  325.65s** on the current branch. The warnings are HTTPX per-request cookie
+  deprecations in `tests/test_api/test_error_view.py`.
+- This is local backend regression evidence. It does not close browser, deployed
+  database, real GPU, or Isaac runtime acceptance recorded by other tasks.
