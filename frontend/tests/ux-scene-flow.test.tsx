@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ScenePage } from "@/features/studio/ScenePage";
 import { PageTitleProvider } from "@/features/shell/Breadcrumbs";
 import { NextAction } from "@/features/studio/scene/NextAction";
+import { ProgressTab } from "@/features/studio/scene/ProgressTab";
 import { getJob, getPreview, listJobAttempts } from "@/lib/api/endpoints";
 import { getJobProgress, getJobScene, getSimulationPackage, getReviewState, retryJob } from "@/lib/api/studio";
 import { ApiError } from "@/lib/api/client";
@@ -69,6 +70,15 @@ const ref = (type: string, path: string, stage = "ST-VISUAL-RECON") => ({ artifa
   vi.mocked(getPreview).mockResolvedValue({ ok: true, data: parsePreview({ schema_version: "1.0", artifact_type: "ReconstructionPreview", job_id: "job-1", attempt_id: "a1", source_input_checksum: "sha256:" + "b".repeat(64), format: "gaussian_sog", producer: "brush", producer_version: "fixture", metric_status: "UNCONFIRMED", coordinate_frame: "sfm_world", unit: "arbitrary", delivery_ref: ref("GaussianSOG", "scene.sog"), source_visual_ref: ref("BrushVisualArtifact", "visual.json"), camera_pose_ref: ref("CameraPoseArtifact", "poses.json", "ST-CAMERA-POSE") }, "job-1") });
 });
 describe("workflow scene", () => {
+  it("Chỉnh Gaussian tạm ẩn: không có nút, và ?mode=gaussian rơi về Scene 3D thay vì mở editor", async () => {
+    history.replaceState({}, "", "/scenes/job-1?tab=studio&mode=gaussian");
+    vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: { ...progress, waiting_for: null } });
+    render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
+    const canvas = await screen.findByRole("region", { name: "Canvas stub" }, { timeout: 3000 });
+    expect(canvas).toHaveTextContent("scene");
+    expect(canvas).not.toHaveTextContent("gaussian");
+    expect(screen.queryByRole("button", { name: /Chỉnh Gaussian/ })).toBeNull();
+  });
   it("không có ?tab= thì luôn mở Tiến trình, kể cả khi preview đã sẵn sàng hoặc job lỗi", async () => {
     for (const data of [{ ...progress, preview_ready: true }, failedProgress(true, true)]) {
       history.replaceState({}, "", "/scenes/job-1");
@@ -122,8 +132,22 @@ describe("workflow scene", () => {
   });
   it("Guest vẫn sửa scene mình sở hữu khi quota tạo job đã hết", () => {
     authState.me = guestMe(0);
-    render(<NextAction jobId="job-1" progress={progress} current="progress" mode="scene" sceneReady={false} revision={null} busy={false} onOpen={vi.fn()} onRetry={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "Xác nhận tỉ lệ mét" })).toBeEnabled();
+    // Không còn khung thông báo riêng: nút nằm ngay ở bước tỉ lệ mét trong timeline Tiến trình.
+    const banner = render(<NextAction jobId="job-1" progress={progress} current="progress" mode="scene" sceneReady={false} revision={null} busy={false} onOpen={vi.fn()} onRetry={vi.fn()} />);
+    expect(banner.container).toBeEmptyDOMElement();
+    banner.unmount();
+    const confirm = vi.fn();
+    const waiting: JobProgress = { ...progress, stages: [{ stage_id: "ST-METRIC-CANONICALIZE", state: "waiting", started_at: null, completed_at: null, error: null }] };
+    const tab = render(<ProgressTab jobId="job-1" progress={waiting} info={null} busy={false} canCancel={false} onCancel={vi.fn()} onConfirmMetric={confirm} />);
+    const button = screen.getByRole("button", { name: "Xác nhận tỉ lệ mét" });
+    expect(button).toBeEnabled();
+    expect(button.closest("li")).toHaveTextContent("Đang chờ bạn");
+    fireEvent.click(button);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    tab.unmount();
+    // Không có quyền thao tác thì không có nút; bước đã xong thì chỉ còn đường "Xem giai đoạn".
+    render(<ProgressTab jobId="job-1" progress={waiting} info={null} busy={false} canCancel={false} onCancel={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Xác nhận tỉ lệ mét" })).toBeNull();
   });
   it("Guest không thấy retry hoặc mutation CTA trên job foreign theo capability server", () => {
     authState.me = guestMe(3);

@@ -45,6 +45,7 @@ export function PipelineTimeline({
   isStale = false,
   selectedStage,
   onSelectStage,
+  waitingAction,
 }: {
   stages: readonly StageView[];
   timeNote?: string;
@@ -56,6 +57,8 @@ export function PipelineTimeline({
   isStale?: boolean;
   selectedStage?: StageId | null;
   onSelectStage?: (stageId: StageId) => void;
+  /** Thao tác người dùng cần làm ở bước đang chờ (vd. xác nhận tỉ lệ mét); nút hiện ngay tại hàng của bước đó. */
+  waitingAction?: { stageId: StageId; label: string; onClick: () => void };
 }) {
   const [internalSelected, setInternalSelected] = useState<StageId | null>(null);
   const selected = selectedStage !== undefined ? selectedStage : internalSelected;
@@ -177,6 +180,15 @@ export function PipelineTimeline({
                   )}
                   {state === "waiting" && (
                     <p className="label-tech mt-2 text-ember-strong">Đang chờ bạn</p>
+                  )}
+                  {waitingAction?.stageId === meta.id && state !== "succeeded" && (
+                    <button
+                      type="button"
+                      onClick={waitingAction.onClick}
+                      className="mt-3 inline-flex rounded-lg bg-ember-soft px-3 py-2 text-sm font-medium text-ember-strong focus-visible:outline-2 focus-visible:outline-ember"
+                    >
+                      {waitingAction.label}
+                    </button>
                   )}
                   {state === "running" && !isStale && (
                     <ProgressBar value={stage?.fraction ?? null} label={`Tiến trình ${meta.title}`} className="mt-3" />

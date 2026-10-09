@@ -126,9 +126,7 @@ export function NextAction({
     description = "Khuôn mặt và biển số phát hiện được đã bị che. Xem lại rồi xác nhận để pipeline dựng 3D, hoặc huỷ job.";
     action = { label: "Xem bản đã che", tab: "progress" };
   } else if (progress.waiting_for === "metric_confirmation") {
-    title = "Cần bạn xác nhận tỉ lệ mét";
-    description = "Chọn điểm và nhập kích thước thật để pipeline tiếp tục.";
-    action = { label: "Xác nhận tỉ lệ mét", tab: "studio", mode: "metric" };
+    // Không có khung riêng: nút "Xác nhận tỉ lệ mét" nằm ngay ở bước đang chờ trong timeline Tiến trình.
   } else if (progress.status === "QUEUED") {
     title = "Đang chờ worker";
     description = "Job đã vào hàng đợi. Theo dõi các giai đoạn bên dưới.";

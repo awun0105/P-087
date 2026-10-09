@@ -14,8 +14,10 @@ import type { JobProgress } from "@/lib/contracts/studio";
 import { formatBytes } from "@/lib/format";
 
 /** Tiến trình chỉ quản lý trạng thái; viewer mở qua route giai đoạn riêng. */
-export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept = canCancel, onCancel, onChanged }: {
+export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept = canCancel, onCancel, onChanged, onConfirmMetric }: {
   jobId: string; progress: JobProgress | null; info: SceneInfo | null; busy: boolean; canCancel: boolean; canAccept?: boolean; onCancel: () => void; onChanged?: () => void;
+  /** Mở công cụ xác nhận tỉ lệ mét; undefined khi người xem không có quyền thao tác trên job. */
+  onConfirmMetric?: () => void;
 }) {
   const reviewing = progress?.waiting_for === "anonymization_review";
   const now = useNow(progress?.status === "RUNNING" || progress?.status === "QUEUED");
@@ -36,7 +38,7 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
       </div>}
       {progress ? (
         <>
-          <PipelineTimeline stages={views} stageList={stagesFor(progress.stages.map((stage) => stage.stage_id))} jobId={jobId} isStale={stale} timeNote={"Cập nhật lúc " + new Date(progress.updated_at).toLocaleTimeString("vi-VN") + (stale ? " · Tiến trình mất kết nối" : progress.status === "RUNNING" || progress.status === "QUEUED" ? " · Có thể đóng trang, job tiếp tục chạy trên máy chủ" : "")} />
+          <PipelineTimeline waitingAction={onConfirmMetric && progress.waiting_for === "metric_confirmation" ? { stageId: "ST-METRIC-CANONICALIZE", label: "Xác nhận tỉ lệ mét", onClick: onConfirmMetric } : undefined} stages={views} stageList={stagesFor(progress.stages.map((stage) => stage.stage_id))} jobId={jobId} isStale={stale} timeNote={"Cập nhật lúc " + new Date(progress.updated_at).toLocaleTimeString("vi-VN") + (stale ? " · Tiến trình mất kết nối" : progress.status === "RUNNING" || progress.status === "QUEUED" ? " · Có thể đóng trang, job tiếp tục chạy trên máy chủ" : "")} />
         </>
       ) : <p role="status" className="text-sm text-ink-muted">Đang tải tiến trình…</p>}
       {canCancel && <div className="mt-4 flex justify-end gap-3">
