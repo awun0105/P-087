@@ -34,6 +34,7 @@ REVIEWER = {
     ("GET", "/auth/users"),
     ("PATCH", "/auth/users/{user_id}"),
     ("DELETE", "/jobs/{job_id}/demo/baseline"),
+    ("POST", "/jobs/{job_id}/demo/publish"),
     ("POST", "/jobs/{job_id}/demo/baseline"),
     ("POST", "/jobs/{job_id}/release"),
     ("POST", "/jobs/{job_id}/review/{action}"),

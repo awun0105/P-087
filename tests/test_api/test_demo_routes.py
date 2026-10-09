@@ -96,3 +96,99 @@ def test_baseline_survives_a_database_backed_registry(tmp_path) -> None:
     assert demo_state(reopened, "job-fixture-001").baseline.scene_revision == "rev-001"
     clear_demo(reopened, "job-fixture-001")
     assert reopened.get_project("project-fixture-001").demo_baseline is None
+
+
+# --- Đặt làm bản demo = xuất vào thư viện mẫu -------------------------------------------------------------------
+
+
+@pytest.fixture
+def library(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from src.api.studio import deps as studio_deps
+
+    root = tmp_path / "library"
+    monkeypatch.setattr(studio_deps, "settings", lambda: SimpleNamespace(product_demo_dir=root))
+    return root
+
+
+def _attest(registry, monkeypatch, **flags) -> None:
+    project = registry.get_project(registry.get_job("job-fixture-001").project_id)
+    patched = project.model_copy(update={"source_rights_attestation": {"attested": True, **flags}})
+    monkeypatch.setattr(registry, "get_project", lambda project_id: patched)
+
+
+_CONFIRMED = {"rights_to_use_confirmed": True, "anonymization_confirmed": True}
+
+
+@pytest.mark.asyncio
+async def test_publish_needs_the_reviewer_to_confirm_public_release(client, library) -> None:
+    refused = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": False})
+    assert refused.status_code == 422 and "công khai" in refused.json()["detail"]
+    assert not library.exists()
+
+
+@pytest.mark.asyncio
+async def test_publish_refuses_scenes_without_rights_and_anonymization(
+    client, library, isolated_registry, monkeypatch
+) -> None:
+    refused = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": True})
+    assert refused.status_code == 409 and "ẩn danh" in refused.json()["detail"]
+    _attest(isolated_registry, monkeypatch, rights_to_use_confirmed=True, anonymization_confirmed=False)
+    still = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": True})
+    assert still.status_code == 409
+    assert not library.exists()
+
+
+@pytest.mark.asyncio
+async def test_publish_exports_through_the_shared_service_and_reports_it(
+    client, library, isolated_registry, monkeypatch
+) -> None:
+    from datetime import UTC, datetime
+
+    from src.api.studio import demo as demo_api
+    from src.services.orchestration.samples import DemoFile, DemoManifest, DemoSource
+
+    _attest(isolated_registry, monkeypatch, **_CONFIRMED)
+    calls = []
+
+    def fake_publish(registry, job_id, root, *, title, description, source, frames=12):
+        calls.append((job_id, root, title, description, source))
+        (root / "kho-1").mkdir(parents=True)
+        manifest = DemoManifest(
+            demo_id="kho-1",
+            title=title,
+            description=description,
+            origin="pipeline_job",
+            source=source,
+            produced_at=datetime(2026, 10, 10, tzinfo=UTC),
+            provenance={"job_id": job_id},
+            stages=[],
+            splat=DemoFile(
+                name="scene.sog", media_type="application/octet-stream", size_bytes=1, checksum="sha256:" + "0" * 64
+            ),
+        )
+        (root / "kho-1" / "manifest.json").write_text(manifest.model_dump_json())
+        return manifest
+
+    monkeypatch.setattr(demo_api, "publish_job_bundle", fake_publish)
+    done = await client.post(
+        f"{_JOB}/demo/publish", json={"confirm_public": True, "title": "Kho 1", "description": "Mô tả"}
+    )
+    assert done.status_code == 201 and done.json() == {"sample_id": "kho-1", "title": "Kho 1"}
+    (job_id, root, title, description, source) = calls[0]
+    assert (job_id, root, title, description) == ("job-fixture-001", library, "Kho 1", "Mô tả")
+    assert isinstance(source, DemoSource) and source.dataset == "Real2Sim Studio"
+    # Trạng thái demo của job báo mẫu đã có trong thư viện.
+    assert (await client.get(f"{_JOB}/demo")).json()["published_sample_id"] == "kho-1"
+
+
+@pytest.mark.asyncio
+async def test_publish_maps_export_failures_to_clear_conflicts(client, library, isolated_registry, monkeypatch) -> None:
+    _attest(isolated_registry, monkeypatch, **_CONFIRMED)
+    # Fixture không có preview đã xác minh: dịch vụ xuất từ chối thay vì tạo mẫu rỗng, và không để lại thư mục.
+    refused = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": True})
+    assert refused.status_code == 409 and "bản xem 3DGS" in refused.json()["detail"]
+    assert not any(library.iterdir()) if library.exists() else True
+    missing = await client.post("/api/v1/jobs/job-nope/demo/publish", json={"confirm_public": True})
+    assert missing.status_code == 404
