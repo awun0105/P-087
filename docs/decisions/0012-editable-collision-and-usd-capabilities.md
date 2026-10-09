@@ -71,8 +71,8 @@ AUD-02.S3 projects the typed capability report into Studio separately from
 static Preflight. When export is blocked, the user sees the blocker code, message,
 affected objects, builder/runtime identity, and a retry action for the same
 current scene requirements; the UI does not offer a package download. The
-Studio router's existing `require_editor` dependency covers package read, build,
-and download routes. API regression tests verify that each route rejects an
+Studio routes' `require_contributor` dependency (any signed-in account, plus the
+Guest ownership guards) covers package read, build, and download routes. API regression tests verify that each route rejects an
 unauthenticated request when auth is enabled. This closes local API/UI wiring,
 not browser acceptance: DevTools was unavailable because its Chrome profile was
 locked, so visual browser evidence remains unverified.

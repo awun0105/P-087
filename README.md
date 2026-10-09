@@ -133,7 +133,7 @@ Không commit `.env`. Các biến chính:
 | App | `APP_ENV`, `APP_HOST`, `APP_PORT`, `CORS_ORIGINS`, `LOG_LEVEL` |
 | Artifacts | `ARTIFACT_ROOT` (cache cục bộ; contract chỉ lưu logical URI) |
 | Kho file (ADR 0003) | `ARTIFACT_S3_BUCKET`, `ARTIFACT_S3_ENDPOINT`, `ARTIFACT_S3_REGION`, `ARTIFACT_S3_ACCESS_KEY_ID`, `ARTIFACT_S3_SECRET_ACCESS_KEY`, `ARTIFACT_S3_PREFIX`, `ARTIFACT_PRESIGN_SECONDS` — để trống bucket = chỉ filesystem |
-| Đăng nhập (ADR 0003) | `AUTH_REQUIRED` (mặc định `false`), `AUTH_SESSION_DAYS`, `AUTH_INVITE_DAYS`, `AUTH_COOKIE_SECURE` |
+| Đăng nhập (ADR 0003) | `AUTH_REQUIRED` (mặc định `false` cho máy dev/test; **bắt buộc `true` khi `APP_ENV` là `staging`/`production`**, nếu không app không khởi động), `AUTH_GUEST_SIGNUP_ENABLED` (mặc định `false`), `AUTH_SESSION_DAYS`, `AUTH_INVITE_DAYS`, `AUTH_COOKIE_SECURE` |
 | Benchmark | `BENCHMARK_GPU_HOURLY_USD`, `BENCHMARK_LABEL` |
 | Database | `DATABASE_URL` — SQLite local, PostgreSQL (Supabase) khi deploy; migration tự chạy khi khởi động |
 | Organizer scaffold | `CHROMA_PERSIST_DIR` (chưa phải vector-store decision) |
@@ -224,7 +224,7 @@ Bản đồ nhanh (kiểm theo checkout 2026-10-04). Placement/ownership chính 
 | `src/services/orchestration/` | EX-PRODUCT: `jobs/` (lifecycle, migration, `runner`, `worker_cli`), `projects/`, `uploads/` (+ upload thẳng), `processing/` (thông số xử lý), `samples/` (video mẫu), `artifacts/` (+ kho file S3), `auth/` (2 role), `scene/` (SceneIR revision, tách theo vật), `review/` (duyệt/phát hành, gói mô phỏng); gốc chỉ còn `storage.py`, `benchmark.py`, `environment.py` | Nhóm |
 | `src/services/scene/`, `src/services/simulation/` | EX-SCENE, EX-SIM (nhiều package còn là placeholder) | Nhóm |
 | `src/api/` | `routes.py` (điểm vào), `auth.py` (đăng nhập, quyền), `schemas.py`, `product/` (hợp đồng UI P0: project, job, artifact, scene, review), `studio/` (route của Studio) | Scaffold + nhóm |
-| `src/agents/`, `src/llm/`, `src/models/schemas.py` | Chat agent scaffold, chưa thuộc pipeline Real2Sim | Ban tổ chức |
+| `src/llm/` | LLM factory scaffold, chưa thuộc pipeline Real2Sim (agent chat mẫu và `/chat` đã gỡ) | Ban tổ chức |
 | `frontend/src/app/(studio)/`, `features/studio/` | Studio MVP (Scenes, Scene mới + video mẫu, trang scene/editor) | Nhóm |
 | `frontend/src/features/viewer/`, `features/shell/`, `components/{shadcn,studio}` | Engine 3D dùng chung (PlayCanvas, lớp phủ vật thể), khung app, bộ component nền và primitives của Studio | Nhóm + donor |
 | `frontend/vendor/supersplat/` | SuperSplat editor (MIT), build ra `public/editor` | Bên thứ ba |
@@ -251,15 +251,35 @@ Bản đồ nhanh (kiểm theo checkout 2026-10-04). Placement/ownership chính 
 | Studio | `GET /api/v1/processing/options`, `POST /api/v1/processing/evaluate` | Bảng thông số, ước lượng tài nguyên |
 | Studio | `GET /api/v1/samples[/{id}[/files/{name}]]` | Video mẫu đã xử lý sẵn |
 | Product | `/api/v1/projects…`, `/api/v1/jobs/{id}/…` | Project/job/artifact, preview, scene, validation, review |
-| Scaffold | `GET /api/v1/status`, `POST /api/v1/chat` | LangGraph agent scaffold |
+| Auth | `POST /api/v1/auth/{login,logout,register,register/guest}`, `GET /api/v1/auth/me` | Đăng nhập, đăng ký bằng mã mời hoặc Guest, phiên hiện tại |
+| Auth (Reviewer) | `/api/v1/auth/{invites,users,audit}` | Mời thành viên, đổi role/khoá tài khoản, nhật ký |
 
-Request mẫu cho `/api/v1/chat`:
+## Xác thực và phân quyền
 
-```json
-{
-  "message": "Xin chào"
-}
-```
+Ba role phân cấp **Guest < Editor < Reviewer**; quyền sửa còn phụ thuộc người sở hữu resource.
+
+| Quyền | Guest | Editor | Reviewer |
+|---|---|---|---|
+| Đọc project/scene/job (không gian chung) | ✅ | ✅ | ✅ |
+| Tạo scene, upload | ✅ (3 lượt/ngày) | ✅ (`daily_job_quota`) | ✅ (không giới hạn) |
+| Sửa, xoá, retry, xác nhận | chỉ resource **của mình** | mọi resource (ghi audit nếu của người khác) | như Editor |
+| Duyệt, phát hành, mốc demo, xoá hẳn thùng rác | ❌ | ❌ | ✅ |
+| Mời thành viên, đổi role, khoá tài khoản, xem audit | ❌ | ❌ | ✅ |
+
+Luồng tài khoản khi `AUTH_REQUIRED=true`:
+
+1. **Reviewer đầu tiên** tạo bằng CLI lúc deploy (không qua mã mời):
+   `python -m src.services.orchestration.auth.cli create-user --email lead@example.com --name "Trưởng nhóm" --role reviewer`
+   (mật khẩu nhập ẩn, hoặc biến `R2S_BOOTSTRAP_PASSWORD` khi chạy không tương tác).
+2. **Đăng nhập**: `POST /api/v1/auth/login` đặt cookie phiên httpOnly; phiên bị xoá khi tài khoản bị khoá.
+3. **Đăng ký**: Reviewer phát mã mời một lần (`POST /api/v1/auth/invites`, role Editor hoặc Reviewer) rồi người được mời
+   gọi `POST /api/v1/auth/register` kèm mã. Đăng ký Guest công khai (`/auth/register/guest`) chỉ mở khi đặt
+   `AUTH_GUEST_SIGNUP_ENABLED=true`.
+4. Quyết định duyệt/phát hành luôn cần phiên Reviewer, kể cả khi `AUTH_REQUIRED=false`; ở chế độ đó giao diện hiện
+   thông báo cần bật đăng nhập thay vì nút Duyệt.
+
+`AUTH_REQUIRED=false` chỉ dành cho máy dev/test: mọi người dùng ẩn danh có toàn quyền trừ duyệt/phát hành. Ma trận
+quyền của từng route được test cố định trong `tests/test_api/test_role_matrix.py`.
 
 Response mẫu:
 

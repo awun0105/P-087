@@ -65,7 +65,7 @@ Vấn đề UX chính là khoảng cách giữa Studio hiện tại và quy trì
 | `/login`, `/register`, `/team` | Đăng nhập; Guest signup bằng email/tên/mật khẩu sau feature flag; invite cấp Editor/Reviewer; Reviewer quản lý nhóm | Email verification deferred; không có form tự chọn role hoặc SSO; signup flag mặc định đóng |
 | `/projects/…`, `/jobs/…/{viewer,validation,review,release}` | UI legacy có project/job, viewer và báo cáo — **đã xoá 02/10/2026** (D-10) | URL cũ chuyển hướng về `/overview`; phần validation/duyệt/phát hành nằm ở tab `Kiểm tra & duyệt` và `Kết quả` của scene |
 
-Nguồn: [ScenesHome][r-home], [NewSceneFlow][r-new], [inputKinds][r-input], [ImportScenePage][r-import], [ScenePage][r-scene], [MetricConfirmView][r-metric], [SampleFlow][r-sample], [EditorFrame][r-editor], [StudioHeader][r-header], [route visibility][r-routes].
+Nguồn: [ScenesHome][r-home], [NewSceneFlow][r-new], [inputKinds][r-input], [ImportScenePage][r-import], [ScenePage][r-scene], [MetricConfirmView][r-metric], [SampleFlow][r-sample], [EditorFrame][r-editor], [route visibility][r-routes].
 
 Current-state flow:
 
@@ -601,7 +601,7 @@ Research ở đây là **đọc source + phân tích ảnh được cung cấp**
 ### P3 — Setup ít bước, chi tiết mở khi cần
 
 **Finding — VERIFIED:** NewSceneFlow tách upload/chọn file; form có attestation và ProcessingSettings khá nhiều tham số. **Decision: ADAPT.** Hai chặng tương tác “Nguồn dữ liệu” và “Thiết lập & bắt đầu”; summary trước xử lý, advanced settings có thể mở thêm. **Lý do — INFERENCE:** giảm việc người mới phải hiểu mọi tham số trước job đầu tiên. **Evidence:** [NewSceneFlow][r-new], [ProcessingSettings][r-settings]. Đây là đề xuất của tài liệu, không được quy cho Mobbin.
-*Cập nhật 03/10/2026 (Smart Cloud Routing):* Khi tài nguyên VRAM ước tính vượt quá khả năng của GPU cục bộ (nguy cơ crash 95%), thay vì khóa cứng nút bấm hoặc ép người dùng tự động hạ chất lượng mô hình, giao diện hiển thị thẻ đề xuất định tuyến thông minh: cho phép người dùng bấm chuyển quyền xử lý sang máy ảo Colab GPU (Tesla T4 15GB) đã kết nối sẵn để giữ nguyên chất lượng 3DGS cao nhất.
+*Cập nhật 10/10/2026 (gỡ Smart Cloud Routing):* Lựa chọn “Xử lý trên Colab GPU” đã bị gỡ vì nó không chuyển job đi đâu mà chỉ bỏ chặn cảnh báo vượt cấu hình máy, nên job vẫn chạy cục bộ và có thể tràn VRAM. Khi VRAM ước tính vượt GPU cục bộ, giao diện chặn nút bắt đầu, hiện thẻ cảnh báo và hướng dẫn giảm các ô tô đỏ hoặc chọn “Tối đa cho máy này”.
 
 ### P4 — Phân biệt đang chạy với chờ người dùng
 
@@ -833,7 +833,6 @@ không thay thế các cổng đó. Increment này không thay scope Studio v2 c
 [r-metric]: ../frontend/src/features/studio/MetricConfirmView.tsx
 [r-sample]: ../frontend/src/features/studio/SampleFlow.tsx
 [r-editor]: ../frontend/src/features/studio/EditorFrame.tsx
-[r-header]: ../frontend/src/features/studio/StudioHeader.tsx
 [r-workspace]: ../frontend/src/features/studio/SceneWorkspace.tsx
 [r-timeline]: ../frontend/src/features/studio/PipelineTimeline.tsx
 [r-status]: ../frontend/src/features/studio/sceneStatus.ts

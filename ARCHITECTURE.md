@@ -21,7 +21,7 @@ ADD minimal Real2Sim modules
 
 Không rename, move, delete hoặc archive source scaffold do ban tổ chức cung cấp.
 Module scaffold hiện có nhưng chưa được Real2Sim sử dụng vẫn được giữ nguyên.
-`src/api/`, `src/agents/`, `src/llm/`, `src/models/schemas.py`, top-level `eval/`
+`src/api/`, `src/llm/`, top-level `eval/`
 và `eval/results/report.md` là các path ổn định.
 
 **Cấu hình canonical:** `Dockerfile` là image API Studio, `frontend/Dockerfile`
@@ -40,7 +40,7 @@ src/
 ├── api/                              # Organizer scaffold; EX-PRODUCT
 │   ├── routes.py                     # Organizer scaffold; điểm vào duy nhất: include router product, studio, auth
 │   ├── auth.py                       # Đăng nhập 2 role, mã mời, guard quyền, hạn mức GPU (ADR 0003)
-│   ├── schemas.py                    # DTO của product API (khác models/schemas.py của chat mẫu)
+│   ├── schemas.py                    # DTO của product API
 │   ├── product/                      # Hợp đồng UI P0, mỗi module một nhóm route (+ deps):
 │   │                                 #   projects, jobs, artifacts, scene, review
 │   └── studio/                       # Studio: uploads (+ upload thẳng), scenes, metric, imports, simulation,
@@ -459,23 +459,25 @@ real Brush, browser hoặc Isaac acceptance.
   published artifacts được tham chiếu bằng logical URI/checksum, không bằng
   local filesystem path. Endpoint product cụ thể thuộc `PRODUCT-*` tasks, chưa
   được coi là đã implement chỉ vì API scaffold tồn tại.
-- **Authentication/authorization:** PRD/Contract yêu cầu tách quyền Editor và
-  Reviewer, audit review decision và chỉ release candidate đã validate/approve.
-  Cơ chế đăng nhập/token/session cụ thể chưa được khóa; không mặc định JWT hoặc
-  bỏ auth. `src/api/routes.py` giữ chat/status scaffold và include
-  `product/` + `studio/`.
+- **Authentication/authorization (ADR 0003):** phiên cookie httpOnly do
+  `src/api/auth.py` cấp; role phân cấp Guest < Editor < Reviewer. `require_contributor`
+  = đã đăng nhập, `require_reviewer` = quản trị/duyệt; Guest chỉ sửa resource của mình
+  (`src/api/ownership.py`), Editor/Reviewer sửa mọi resource và để lại audit khi sửa của
+  người khác. Quyết định duyệt/phát hành luôn cần phiên Reviewer. `AUTH_REQUIRED` bắt buộc
+  bật ở staging/production (`src/config.py` từ chối khởi động nếu thiếu). Ma trận quyền
+  từng route nằm trong `tests/test_api/test_role_matrix.py`. `src/api/routes.py` chỉ
+  include `product/`, `studio/` và `auth`.
 
 ### 3. AI Agent (LangGraph)
 
-`src/agents/` và `src/llm/` là organizer scaffold được giữ nguyên. Agent chat
-LangGraph hiện có không phải orchestration engine hay một handoff của Real2Sim
-P0. Không đưa LLM/agent vào đường bắt buộc
+`src/llm/` là organizer scaffold được giữ nguyên. Agent chat LangGraph mẫu
+(`src/agents/`, endpoint `/chat`, `/status`) đã được gỡ vì không thuộc Real2Sim P0.
+Không đưa LLM/agent vào đường bắt buộc
 `ReconstructionBundle → SceneIR → CandidatePackage → ValidationReport`.
 
 - **Agent Type:** chưa chọn agent type cho Real2Sim P0.
-- **State/Nodes/Tools:** `src/agents/state.py`, `graph.py` và example modules
-  thuộc scaffold chat hiện tại; không định nghĩa SceneIR, job lifecycle hay
-  review policy. Nếu có agent task sau này, scope và I/O phải được khóa riêng.
+- **State/Nodes/Tools:** chưa có. Nếu có agent task sau này, scope và I/O phải được
+  khóa riêng; không định nghĩa SceneIR, job lifecycle hay review policy.
 - **Flow:** product pipeline dùng typed stage/artifact contracts ở phần Data Flow
   dưới, không đi qua chat LLM.
 
