@@ -20,7 +20,6 @@ export type WorkflowStep = {
   body: string;
   output: string;
   status: Status;
-  image?: string;
 };
 
 export const CONTENT_VI = {
@@ -43,12 +42,12 @@ export const CONTENT_VI = {
     titleLead: "Từ video thật",
     titleEmphasis: "đến scene mô phỏng robot dùng được.",
     lead:
-      "Quay một đoạn video nhà kho, Real2Sim Studio dựng thành scene 3D đúng kích thước thật. Mỗi pallet, mỗi kệ là một vật riêng, có sẵn vùng va chạm để robot ảo chạy thử trong trình mô phỏng như NVIDIA Isaac Sim.",
-    note: "Hiện áp dụng cho nhà kho trong nhà.",
+      "Chỉ cần quay một đoạn video nhà kho, Real2Sim Studio sẽ dựng thành scene 3D đúng kích thước thật. Mỗi pallet, mỗi kệ là một vật riêng, có sẵn vùng va chạm để robot ảo chạy thử trong trình mô phỏng như NVIDIA Isaac Sim.",
+    note: "Bắt đầu với nhà kho trong nhà.",
     benefits: [
       "Đúng kích thước thật, tính bằng mét",
       "Mỗi vật là một phần riêng, có vùng va chạm",
-      "Có người xác nhận và duyệt trước khi dùng",
+      "Người xác nhận ở các bước then chốt, người duyệt kiểm lại trước khi dùng (đang làm)",
     ],
     pillars: ["Hình ảnh", "Hình học", "Va chạm"],
     sceneLabel: "minh hoạ: lối đi trong kho, nhìn từ trên xuống",
@@ -109,8 +108,14 @@ export const CONTENT_VI = {
   },
 
   SAMPLES: {
-    title: "Xem thử một scene đã xử lý",
-    lead: "Mở ngay, không cần đăng nhập, không chạy GPU mới.",
+    title: "Scene trông như thế nào",
+    lead: "Ảnh minh hoạ. Scene mẫu thật sẽ thay vào đây khi sẵn sàng.",
+    badge: "Ảnh minh hoạ",
+    items: [
+      { image: "/samples/aisle.svg", title: "Lối đi giữa hai dãy kệ", body: "Bản dựng 3D và các vật đã tách riêng, mỗi vật có vùng va chạm." },
+      { image: "/samples/pallets.svg", title: "Khu để pallet", body: "Từng pallet là một vật riêng, dời hay ẩn được mà không dựng lại cả cảnh." },
+      { image: "/samples/route.svg", title: "Đường đi của robot", body: "Đường Start–Goal vòng qua vật cản (đang làm)." },
+    ],
   },
 
   WORKFLOW: {
@@ -156,7 +161,7 @@ export const CONTENT_VI = {
         code: "05",
         title: "Đóng gói",
         actor: "Máy",
-        body: "Tách vật khỏi mặt sàn, tạo vùng va chạm, chạy 6 quy tắc kiểm tra rồi xuất gói OpenUSD (scene.usda).",
+        body: "Tách vật khỏi mặt sàn, tạo vùng va chạm, chạy các quy tắc kiểm tra đóng gói rồi xuất gói OpenUSD (scene.usda).",
         output: "Gói mô phỏng",
         status: "done",
       },
@@ -190,7 +195,6 @@ export const CONTENT_VI = {
         title: "Dựng scene ngay trên trình duyệt",
         points: [
           "Tải video lên, hệ thống tự dựng 3D",
-          "Căn tỉ lệ mét bằng một khoảng cách đã biết",
           "Xác nhận, đổi tên hoặc bỏ qua vật máy gợi ý",
           "Mỗi lần sửa được lưu thành một phiên bản",
         ],
@@ -202,8 +206,7 @@ export const CONTENT_VI = {
         points: [
           "Mỗi vật có vùng va chạm riêng, tách khỏi mặt sàn",
           "Bật/tắt từng lớp (hình ảnh, lưới va chạm, hộp vật thể) để soi lỗi",
-          "Xuất gói OpenUSD sau khi qua 6 quy tắc kiểm tra",
-          "Kiểm tra va chạm và đường đi Start–Goal trong Isaac Sim (đang làm)",
+          "Xuất gói OpenUSD đã qua kiểm tra đóng gói",
         ],
         outcome: "Đúng mét · Có vùng va chạm",
       },
@@ -211,9 +214,9 @@ export const CONTENT_VI = {
         for: "Người duyệt (Reviewer)",
         title: "Duyệt dựa trên bằng chứng",
         points: [
-          "Xem kết quả tự kiểm của từng bước xử lý",
-          "Duyệt hoặc từ chối kèm lý do; sửa sau khi duyệt sẽ tạo phiên bản mới",
-          "Bản phát hành được khoá, kèm mã kiểm tra (checksum)",
+          "Xem kết quả tự kiểm của từng bước xử lý (đang làm)",
+          "Duyệt hoặc từ chối kèm lý do; sửa sau khi duyệt sẽ tạo phiên bản mới (đang làm)",
+          "Bản phát hành được khoá, kèm mã kiểm tra (checksum) (đang làm)",
           "Ghi rõ ai tải dữ liệu, ai chạy, ai duyệt",
         ],
         outcome: "Truy vết được · Đúng bản đã kiểm",
@@ -226,12 +229,12 @@ export const CONTENT_VI = {
     titleLead: "Đã chạy thật.",
     titleEmphasis: "Phần chưa xong cũng nói rõ.",
     lead:
-      "Studio đã chạy luồng từ video đến bản dựng 3D trên GPU cục bộ (Quadro T2000). Dưới đây là phần đã xong, phần đang làm và phần để sau.",
+      "Mỗi mục dưới đây thuộc một trong ba nhóm: đã chạy thật, đang làm, hoặc để sau.",
     tiers: [
       {
         status: "done" as Status,
         items: [
-          "Từ video đến bản dựng 3D trên GPU cục bộ",
+          "Dựng 3D từ video trên GPU cục bộ (Quadro T2000)",
           "Căn tỉ lệ mét, gợi ý và xác nhận vật thể",
           "Gói mô phỏng đạt 6/6 quy tắc kiểm tra trên một job thật",
           "Tải về 3DGS (PLY/SOG) hoặc gói OpenUSD; chưa thử với từng phần mềm 3D khác",
@@ -265,7 +268,7 @@ export const CONTENT_VI = {
     steps: [
       { title: "Thử scene mẫu", body: "Mở scene đã xử lý sẵn. Không cần đăng nhập." },
       { title: "Đăng nhập và tải video", body: "Tạo scene, theo dõi từng bước và xác nhận ở những điểm quan trọng." },
-      { title: "Tải gói mô phỏng", body: "Nhận gói OpenUSD gắn với đúng phiên bản đã duyệt, kèm bảng đánh giá." },
+      { title: "Tải gói mô phỏng", body: "Nhận gói OpenUSD của scene. Khi khâu duyệt hoàn tất, gói gắn với đúng phiên bản đã duyệt, kèm bảng đánh giá." },
     ],
   },
 
@@ -297,12 +300,12 @@ export const CONTENT_EN = {
     titleLead: "From real-world video",
     titleEmphasis: "to simulation scenes robots can use.",
     lead:
-      "Film a warehouse and Real2Sim Studio builds a 3D scene at true scale. Every pallet and rack is its own object with a collider, ready for robots to test in simulators like NVIDIA Isaac Sim.",
-    note: "Currently focused on indoor warehouses.",
+      "Just film a warehouse and Real2Sim Studio builds a 3D scene at true scale. Every pallet and rack is its own object with a collider, ready for robots to test in simulators like NVIDIA Isaac Sim.",
+    note: "Starting with indoor warehouses.",
     benefits: [
       "True metric scale",
       "Separate objects, each with a collider",
-      "Human-confirmed and reviewed before use",
+      "People confirm key steps; a reviewer signs off before use (in progress)",
     ],
     pillars: ["Visual", "Geometry", "Physics"],
     sceneLabel: "illustration: warehouse aisle, top-down view",
@@ -363,8 +366,14 @@ export const CONTENT_EN = {
   },
 
   SAMPLES: {
-    title: "Try a processed scene",
-    lead: "Open it right away. No sign-in, no new GPU run.",
+    title: "What a scene looks like",
+    lead: "Illustrations. Real sample scenes will replace them when ready.",
+    badge: "Illustration",
+    items: [
+      { image: "/samples/aisle.svg", title: "Aisle between two racks", body: "The 3D reconstruction and separated objects, each with a collider." },
+      { image: "/samples/pallets.svg", title: "Pallet area", body: "Each pallet is its own object. Move or hide it without rebuilding the scene." },
+      { image: "/samples/route.svg", title: "Robot path", body: "A Start–Goal path around an obstacle (in progress)." },
+    ],
   },
 
   WORKFLOW: {
@@ -410,7 +419,7 @@ export const CONTENT_EN = {
         code: "05",
         title: "Package",
         actor: "Machine",
-        body: "Separates objects from the floor, builds colliders, runs 6 pre-flight rules, then exports an OpenUSD package (scene.usda).",
+        body: "Separates objects from the floor, builds colliders, runs packaging checks, then exports an OpenUSD package (scene.usda).",
         output: "Simulation package",
         status: "done",
       },
@@ -444,7 +453,6 @@ export const CONTENT_EN = {
         title: "Build scenes in the browser",
         points: [
           "Upload a video and the system builds the 3D",
-          "Set metric scale from one known distance",
           "Confirm, rename or skip the objects the machine suggests",
           "Every edit is saved as a revision",
         ],
@@ -456,8 +464,7 @@ export const CONTENT_EN = {
         points: [
           "Each object has its own collider, separated from the floor",
           "Toggle layers (visual, collision mesh, object boxes) to spot errors",
-          "Export an OpenUSD package after 6 pre-flight rules pass",
-          "Collision and Start–Goal path checks in Isaac Sim (in progress)",
+          "Export an OpenUSD package that passed packaging checks",
         ],
         outcome: "True scale · Colliders included",
       },
@@ -465,9 +472,9 @@ export const CONTENT_EN = {
         for: "Reviewer",
         title: "Sign off on evidence",
         points: [
-          "See the self-check results of each processing step",
-          "Approve or reject with a reason; edits after approval create a new revision",
-          "Releases are locked and carry a checksum",
+          "See the self-check results of each processing step (in progress)",
+          "Approve or reject with a reason; edits after approval create a new revision (in progress)",
+          "Releases are locked and carry a checksum (in progress)",
           "Records who uploaded, who ran and who approved",
         ],
         outcome: "Traceable · Exactly the verified version",
@@ -480,12 +487,12 @@ export const CONTENT_EN = {
     titleLead: "Already running.",
     titleEmphasis: "What isn't done is stated plainly.",
     lead:
-      "Studio already runs video to 3D reconstruction on a local GPU (Quadro T2000). Below: what is done, what is in progress, and what comes later.",
+      "Each item below is either already running, in progress, or planned for later.",
     tiers: [
       {
         status: "done" as Status,
         items: [
-          "Video to 3D reconstruction on a local GPU",
+          "Video to 3D reconstruction on a local GPU (Quadro T2000)",
           "Metric scale calibration, object suggestion and confirmation",
           "Simulation package passes 6/6 pre-flight rules on a real job",
           "Download 3DGS (PLY/SOG) or an OpenUSD package; not yet tested with other 3D tools",
@@ -519,7 +526,7 @@ export const CONTENT_EN = {
     steps: [
       { title: "Try a sample scene", body: "Open a processed scene. No sign-in needed." },
       { title: "Sign in and upload video", body: "Create a scene, follow each step and confirm at the key points." },
-      { title: "Download the package", body: "Get an OpenUSD package tied to the approved revision, with its evaluation sheet." },
+      { title: "Download the package", body: "Get the scene's OpenUSD package. Once review is complete, it is tied to the approved revision with its evaluation sheet." },
     ],
   },
 
@@ -536,7 +543,6 @@ export const UI_LABELS = {
     tryDemo: "Thử scene mẫu",
     openStudio: "Truy cập Studio",
     loginStudio: "Đăng nhập Studio",
-    openSample: "Mở scene mẫu",
     brandAria: "Real2Sim Studio, về đầu trang",
     navAria: "Các phần của trang",
     menuOpen: "Mở menu",
@@ -554,13 +560,11 @@ export const UI_LABELS = {
     sourceOnGithub: "Mã nguồn trên GitHub",
     consequence: "Hậu quả: ",
     result: "Kết quả",
-    step: "Bước",
   },
   en: {
     tryDemo: "Try sample scene",
     openStudio: "Open Studio",
     loginStudio: "Sign in to Studio",
-    openSample: "Open sample scene",
     brandAria: "Real2Sim Studio, top of page",
     navAria: "Page navigation",
     menuOpen: "Open menu",
@@ -578,7 +582,6 @@ export const UI_LABELS = {
     sourceOnGithub: "Source on GitHub",
     consequence: "Consequence: ",
     result: "Output",
-    step: "Step",
   },
 };
 

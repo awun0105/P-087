@@ -110,8 +110,15 @@ export function LandingPage() {
         </div>
       </section>
 
-      {/* ── SCENE MẪU (tự ẩn khi API không trả dữ liệu) ── */}
-      <LandingSamples title={SAMPLES.title} lead={SAMPLES.lead} studioUrl={STUDIO_URL} openLabel={ui.openSample} />
+      {/* ── ẢNH MINH HOẠ SCENE (tạm, đến khi có scene mẫu thật) ── */}
+      <LandingSamples
+        title={SAMPLES.title}
+        lead={SAMPLES.lead}
+        badge={SAMPLES.badge}
+        items={SAMPLES.items}
+        href={TRY_DEMO_HREF}
+        openLabel={ui.tryDemo}
+      />
 
       {/* ── 02 QUY TRÌNH ── */}
       <section id="workflow" className="lp-section bg-paper-sunken">
@@ -130,10 +137,6 @@ export function LandingPage() {
                       <StatusTag status={s.status} label={STATUS_LABEL[s.status]} />
                     </div>
                     <p className="mt-2 max-w-2xl text-[15px] leading-relaxed text-ink-muted">{s.body}</p>
-                    {s.image ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- ảnh tĩnh, trang có thể xuất static
-                      <img src={s.image} alt={`Studio, ${ui.step} ${s.title}`} loading="lazy" className="mt-4 w-full max-w-2xl rounded-lg border border-line" />
-                    ) : null}
                   </div>
                   <div className="md:border-l md:border-line md:pl-5">
                     <p className="text-[12px] text-ink-muted">{ui.result}</p>

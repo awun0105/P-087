@@ -32,9 +32,11 @@ describe("cấu trúc trang", () => {
     expect(screen.getByRole("main")).toBeInTheDocument();
   });
 
-  it("section Scene mẫu ẩn khi API không trả scene nào", () => {
+  it("phần scene dùng ảnh minh hoạ tĩnh, mỗi ảnh gắn nhãn và không gọi API", () => {
     const { container } = render(<LandingPage />);
-    expect(container.querySelector("#samples")).toBeNull();
+    const cards = container.querySelectorAll("#samples li");
+    expect(cards).toHaveLength(CONTENT_VI.SAMPLES.items.length);
+    expect(screen.getAllByText("Ảnh minh hoạ")).toHaveLength(cards.length);
   });
 
   it("mỗi mục menu trỏ tới một section có thật", () => {
