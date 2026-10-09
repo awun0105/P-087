@@ -68,6 +68,10 @@ class RegistrationOperationRecord(BaseModel):
     operation_checksum: Checksum
     proposal_ref: ProductArtifactRef | None = None
     qa_report_ref: ProductArtifactRef | None = None
+    confirmed_candidate_id: Identifier | None = None
+    confirmed_by_user_id: Identifier | None = None
+    confirmed_at: datetime | None = None
+    confirmed_from_checksum: Checksum | None = None
     error: str | None = None
     cancellation_requested: bool = False
     resource_wait_reason: str | None = Field(default=None, max_length=500)
@@ -81,7 +85,7 @@ class RegistrationOperationRecord(BaseModel):
             or self.request.request_checksum != self.request_checksum
         ):
             raise ValueError("registration operation identity differs from its sealed request")
-        timestamps = (self.created_at, self.updated_at, self.lease_expires_at, self.heartbeat_at)
+        timestamps = (self.created_at, self.updated_at, self.lease_expires_at, self.heartbeat_at, self.confirmed_at)
         if any(value is not None and (value.tzinfo is None or value.utcoffset() is None) for value in timestamps):
             raise ValueError("registration operation timestamps must include a timezone")
         if self.state == RegistrationOperationState.RUNNING:
@@ -109,6 +113,27 @@ class RegistrationOperationRecord(BaseModel):
             raise ValueError("proposal states require exact proposal and QA report references")
         if self.state == RegistrationOperationState.INSUFFICIENT and self.qa_report_ref is None:
             raise ValueError("insufficient registration state requires its QA report")
+        confirmation_values = (
+            self.confirmed_candidate_id,
+            self.confirmed_by_user_id,
+            self.confirmed_at,
+            self.confirmed_from_checksum,
+        )
+        has_confirmation = all(value is not None for value in confirmation_values)
+        if any(value is not None for value in confirmation_values) and not has_confirmation:
+            raise ValueError("registration confirmation fields must be stored together")
+        if (
+            self.state in {RegistrationOperationState.CONFIRMED, RegistrationOperationState.COMMITTED}
+            and not has_confirmation
+        ):
+            raise ValueError("confirmed registration state requires a complete user decision")
+        if has_confirmation and self.state not in {
+            RegistrationOperationState.CONFIRMED,
+            RegistrationOperationState.COMMITTED,
+            RegistrationOperationState.FAILED,
+            RegistrationOperationState.CANCELLED,
+        }:
+            raise ValueError("registration confirmation fields require a post-confirmation state")
         if self.state == RegistrationOperationState.WAITING_RESOURCES:
             if not self.resource_wait_reason or not self.resource_wait_reason.strip():
                 raise ValueError("resource-waiting registration operation requires a wait reason")
@@ -137,6 +162,14 @@ def _operation_checksum(record: RegistrationOperationRecord) -> str:
         payload.pop("cancellation_requested")
     if payload.get("resource_wait_reason") is None:
         payload.pop("resource_wait_reason")
+    for field_name in (
+        "confirmed_candidate_id",
+        "confirmed_by_user_id",
+        "confirmed_at",
+        "confirmed_from_checksum",
+    ):
+        if payload.get(field_name) is None:
+            payload.pop(field_name)
     return canonical_content_checksum(payload, "operation_checksum")
 
 
@@ -308,6 +341,50 @@ class RegistrationOperationStore:
         if record is None:
             raise RegistrationOperationNotFoundError(f"registration operation not found: {operation_id}")
         return record
+
+    def confirm(
+        self,
+        operation_id: str,
+        *,
+        expected_operation_checksum: str,
+        expected_scene_revision: str,
+        candidate_id: str,
+        user_id: str,
+        now: datetime | None = None,
+    ) -> RegistrationOperationRecord:
+        """Durably confirm one reviewed candidate with an operation-checksum CAS."""
+        current = _utc_now(now)
+        with self.database.transaction(write=True) as tx:
+            record = self._read_by_id(tx, operation_id, lock=True)
+            if record is None:
+                raise RegistrationOperationNotFoundError(f"registration operation not found: {operation_id}")
+            if record.state in {RegistrationOperationState.CONFIRMED, RegistrationOperationState.COMMITTED}:
+                if (
+                    record.confirmed_from_checksum == expected_operation_checksum
+                    and record.request.expected_scene_revision == expected_scene_revision
+                    and record.confirmed_candidate_id == candidate_id
+                    and record.confirmed_by_user_id == user_id
+                ):
+                    return record
+                raise RuntimeStateConflictError("registration operation already has a different confirmation")
+            if record.state != RegistrationOperationState.PROPOSED:
+                raise RuntimeStateConflictError("only a qualified proposed registration can be confirmed")
+            if record.operation_checksum != expected_operation_checksum:
+                raise RuntimeStateConflictError("registration operation changed before confirmation")
+            if record.request.expected_scene_revision != expected_scene_revision:
+                raise RuntimeStateConflictError("registration confirmation targets a different scene revision")
+            validate_registration_transition(record.state, RegistrationOperationState.CONFIRMED)
+            confirmed = _replace_record(
+                record,
+                state=RegistrationOperationState.CONFIRMED,
+                confirmed_candidate_id=candidate_id,
+                confirmed_by_user_id=user_id,
+                confirmed_at=current,
+                confirmed_from_checksum=expected_operation_checksum,
+                updated_at=current,
+            )
+            self._write(tx, record, confirmed)
+            return confirmed
 
     def cancel(self, operation_id: str, *, now: datetime | None = None) -> RegistrationOperationRecord:
         """Cancel queued work or persist a request for a running worker to acknowledge."""

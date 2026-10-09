@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  confirmRegistrationOperation,
   enqueueRegistration,
   isRegistrationOperationActive,
   isRegistrationOperationPollable,
@@ -52,6 +53,29 @@ describe("RGB-LiDAR registration API parsers", () => {
     };
     expect(() => parseRegistrationOperation(operation, "job-1")).toThrow(/contract/);
     expect(() => parseRegistrationOperation({ ...operation, job_id: "job-1", state: "MYSTERY" }, "job-1")).toThrow(/contract/);
+  });
+
+  it("requires durable confirmation identity on confirmed operation responses", () => {
+    const confirmed = {
+      operation_id: request.request_id,
+      job_id: "job-1",
+      state: "CONFIRMED",
+      operation_checksum: `sha256:${"b".repeat(64)}`,
+      attempt: 1,
+      created_at: "2026-10-09T00:00:00Z",
+      updated_at: "2026-10-09T00:01:00Z",
+      proposal_ref: null,
+      qa_report_ref: null,
+      cancellation_requested: false,
+      confirmed_candidate_id: "candidate-1",
+      confirmed_by_user_id: "user-1",
+      confirmed_at: "2026-10-09T00:01:00Z",
+    };
+    expect(parseRegistrationOperation(confirmed, "job-1").confirmed_candidate_id).toBe("candidate-1");
+    expect(() => parseRegistrationOperation({ ...confirmed, confirmed_by_user_id: null }, "job-1"))
+      .toThrow(/contract/);
+    expect(() => parseRegistrationOperation({ ...confirmed, operation_checksum: "broken" }, "job-1"))
+      .toThrow(/contract/);
   });
 
   it("accepts bound stale inspection evidence but rejects cross-job and mismatched QA payloads", () => {
@@ -229,6 +253,44 @@ describe("RGB-LiDAR registration API parsers", () => {
     expect(fetch).toHaveBeenCalledWith(
       "/api/v1/jobs/job-1/rgb-lidar-registration/operations",
       expect.objectContaining({ headers: expect.objectContaining({ "Idempotency-Key": request.request_id }) }),
+    );
+  });
+
+  it("sends confirmation with the optimistic operation and scene revisions", async () => {
+    const response = {
+      operation_id: request.request_id,
+      job_id: "job-1",
+      state: "CONFIRMED",
+      operation_checksum: `sha256:${"b".repeat(64)}`,
+      attempt: 1,
+      created_at: "2026-10-09T00:00:00Z",
+      updated_at: "2026-10-09T00:01:00Z",
+      proposal_ref: null,
+      qa_report_ref: null,
+      cancellation_requested: false,
+      confirmed_candidate_id: "candidate-1",
+      confirmed_by_user_id: "user-1",
+      confirmed_at: "2026-10-09T00:01:00Z",
+    };
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
+
+    const confirmed = await confirmRegistrationOperation("job-1", request.request_id, {
+      expected_operation_checksum: `sha256:${"a".repeat(64)}`,
+      expected_scene_revision: "rev-001",
+      candidate_id: "candidate-1",
+    });
+
+    expect(confirmed.state).toBe("CONFIRMED");
+    expect(fetch).toHaveBeenCalledWith(
+      `/api/v1/jobs/job-1/rgb-lidar-registration/operations/${request.request_id}/confirm`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          expected_operation_checksum: `sha256:${"a".repeat(64)}`,
+          expected_scene_revision: "rev-001",
+          candidate_id: "candidate-1",
+        }),
+      }),
     );
   });
 });

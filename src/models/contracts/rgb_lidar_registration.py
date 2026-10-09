@@ -1010,7 +1010,12 @@ _ALLOWED_TRANSITIONS: dict[RegistrationOperationState, frozenset[RegistrationOpe
         }
     ),
     RegistrationOperationState.PROPOSED: frozenset(
-        {RegistrationOperationState.REVIEWED, RegistrationOperationState.FAILED, RegistrationOperationState.CANCELLED}
+        {
+            RegistrationOperationState.REVIEWED,
+            RegistrationOperationState.CONFIRMED,
+            RegistrationOperationState.FAILED,
+            RegistrationOperationState.CANCELLED,
+        }
     ),
     RegistrationOperationState.AMBIGUOUS: frozenset(
         {RegistrationOperationState.REVIEWED, RegistrationOperationState.FAILED, RegistrationOperationState.CANCELLED}

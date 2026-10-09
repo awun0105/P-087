@@ -6,6 +6,7 @@ import { ApiError } from "@/lib/api/client";
 import type { Me } from "@/lib/api/auth";
 import {
   cancelRegistrationOperation,
+  confirmRegistrationOperation,
   enqueueRegistration,
   getRegistrationOperation,
   getRegistrationOperationInspection,
@@ -15,6 +16,7 @@ import {
   type RegistrationOverlayPreview,
   type RegistrationPreparation,
   type RegistrationRequestPayload,
+  type JsonObject,
 } from "@/lib/api/registration";
 
 const authState = vi.hoisted(() => ({
@@ -27,6 +29,7 @@ vi.mock("@/lib/api/registration", async (original) => {
   return {
     ...actual,
     cancelRegistrationOperation: vi.fn(),
+    confirmRegistrationOperation: vi.fn(),
     enqueueRegistration: vi.fn(),
     getRegistrationOperation: vi.fn(),
     getRegistrationOperationInspection: vi.fn(),
@@ -54,12 +57,16 @@ function operation(state: RegistrationOperation["state"], updates: Partial<Regis
     operation_id: request.request_id,
     job_id: "job-1",
     state,
+    operation_checksum: `sha256:${"7".repeat(64)}`,
     attempt: 1,
     created_at: "2026-10-09T00:00:00Z",
     updated_at: "2026-10-09T00:00:00Z",
     proposal_ref: null,
     qa_report_ref: null,
     cancellation_requested: false,
+    confirmed_candidate_id: null,
+    confirmed_by_user_id: null,
+    confirmed_at: null,
     ...updates,
   };
 }
@@ -171,6 +178,34 @@ function inspection(): RegistrationOperationInspection {
   };
 }
 
+function qualifiedInspection(): RegistrationOperationInspection {
+  const value = inspection();
+  const proposal = value.proposal as JsonObject;
+  const candidates = Array.isArray(proposal.candidates) ? proposal.candidates : [];
+  const qaReport = value.qa_report as JsonObject;
+  return {
+    ...value,
+    current_scene_revision: "rev-001",
+    proposal: {
+      ...proposal,
+      selected_candidate_id: "candidate-1",
+      candidates: candidates.map((candidate) => typeof candidate === "object"
+        && candidate !== null && !Array.isArray(candidate) && candidate.candidate_id === "candidate-1"
+        ? { ...candidate, rgb_scale_factor: null }
+        : candidate),
+    },
+    qa_report: {
+      ...qaReport,
+      result: "PASS",
+      candidate_id: "candidate-1",
+      findings: [],
+    },
+    overlay_previews: value.overlay_previews.map((preview) => preview.candidate_id === "candidate-1"
+      ? { ...preview, rgb_scale_factor: null }
+      : preview),
+  };
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
   window.sessionStorage.clear();
@@ -186,7 +221,7 @@ describe("registration panel", () => {
     vi.mocked(enqueueRegistration).mockResolvedValue(operation("QUEUED"));
     vi.mocked(getRegistrationOperation)
       .mockResolvedValueOnce({ ok: true, data: operation("PROPOSED", { proposal_ref: { artifact_type: "RegistrationProposalArtifact" }, qa_report_ref: { artifact_type: "RegistrationQAReport" } }) })
-      .mockResolvedValue({ ok: true, data: operation("REVIEWED", { proposal_ref: { artifact_type: "RegistrationProposalArtifact" }, qa_report_ref: { artifact_type: "RegistrationQAReport" } }) });
+      .mockResolvedValue({ ok: true, data: operation("PROPOSED", { proposal_ref: { artifact_type: "RegistrationProposalArtifact" }, qa_report_ref: { artifact_type: "RegistrationQAReport" } }) });
     vi.mocked(getRegistrationOperationInspection).mockResolvedValue({ ok: true, data: inspection() });
 
     render(<RegistrationPanel jobId="job-1" sceneRevision="rev-001" canMutateJob />);
@@ -211,10 +246,42 @@ describe("registration panel", () => {
     expect(screen.getByText(/không thay thế QA hoặc kiểm chứng thực địa/)).toBeInTheDocument();
     fireEvent.change(screen.getByRole("combobox", { name: "Phương án chồng chiếu" }), { target: { value: "candidate-2" } });
     expect(await screen.findByRole("img", { name: /candidate-2/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /xác nhận|áp dụng/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Xác nhận alignment candidate QA" })).toBeDisabled();
+    expect(confirmRegistrationOperation).not.toHaveBeenCalled();
     expect(getRegistrationOperationInspection).toHaveBeenCalledWith("job-1", request.request_id, expect.any(AbortSignal));
-    await screen.findByText("Đã kiểm tra", {}, { timeout: 5000 });
-    expect(getRegistrationOperation).toHaveBeenCalledTimes(2);
+  });
+
+  it("confirms only the selected QA-qualified candidate and stores the server decision", async () => {
+    const confirmed = operation("CONFIRMED", {
+      confirmed_candidate_id: "candidate-1",
+      confirmed_by_user_id: "guest-1",
+      confirmed_at: "2026-10-09T00:05:00Z",
+    });
+    vi.mocked(prepareRegistration).mockResolvedValue(ready);
+    vi.mocked(enqueueRegistration).mockResolvedValue(operation("QUEUED"));
+    vi.mocked(getRegistrationOperation).mockResolvedValue({
+      ok: true,
+      data: operation("PROPOSED", { proposal_ref: { artifact_type: "RegistrationProposalArtifact" }, qa_report_ref: { artifact_type: "RegistrationQAReport" } }),
+    });
+    vi.mocked(getRegistrationOperationInspection).mockResolvedValue({ ok: true, data: qualifiedInspection() });
+    vi.mocked(confirmRegistrationOperation).mockResolvedValue(confirmed);
+
+    render(<RegistrationPanel jobId="job-1" sceneRevision="rev-001" canMutateJob />);
+    fireEvent.click(screen.getByRole("button", { name: "Kiểm tra dữ liệu" }));
+    await screen.findByRole("button", { name: "Bắt đầu căn chỉnh" });
+    fireEvent.click(screen.getByRole("button", { name: "Bắt đầu căn chỉnh" }));
+
+    const confirmButton = await screen.findByRole("button", { name: "Xác nhận alignment candidate QA" });
+    await waitFor(() => expect(confirmButton).toBeEnabled());
+    fireEvent.click(confirmButton);
+
+    await screen.findByText(/Đã xác nhận candidate-1/);
+    expect(confirmRegistrationOperation).toHaveBeenCalledWith("job-1", request.request_id, {
+      expected_operation_checksum: `sha256:${"7".repeat(64)}`,
+      expected_scene_revision: "rev-001",
+      candidate_id: "candidate-1",
+    });
+    expect(screen.getByText(/chưa được ghi vào SceneIR hoặc collision mesh/)).toBeInTheDocument();
   });
 
   it("does not enqueue when the server reports insufficient preflight", async () => {

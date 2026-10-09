@@ -69,12 +69,22 @@ export interface RegistrationOperation {
   operation_id: string;
   job_id: string;
   state: RegistrationOperationState;
+  operation_checksum?: string | null;
   attempt: number;
   created_at: string;
   updated_at: string;
   proposal_ref: JsonObject | null;
   qa_report_ref: JsonObject | null;
   cancellation_requested: boolean;
+  confirmed_candidate_id?: string | null;
+  confirmed_by_user_id?: string | null;
+  confirmed_at?: string | null;
+}
+
+export interface RegistrationConfirmationPayload {
+  expected_operation_checksum: string;
+  expected_scene_revision: string;
+  candidate_id: string;
 }
 
 export type RegistrationOverlayPoint = [number, number];
@@ -189,6 +199,18 @@ export function parseRegistrationOperation(value: unknown, jobId: string): Regis
     || !Number.isInteger(value.attempt) || (value.attempt as number) < 0
     || typeof value.created_at !== "string" || typeof value.updated_at !== "string"
     || typeof value.cancellation_requested !== "boolean"
+    || (value.operation_checksum !== undefined && value.operation_checksum !== null
+      && (typeof value.operation_checksum !== "string" || !CHECKSUM.test(value.operation_checksum)))
+    || (value.confirmed_candidate_id !== undefined && value.confirmed_candidate_id !== null
+      && typeof value.confirmed_candidate_id !== "string")
+    || (value.confirmed_by_user_id !== undefined && value.confirmed_by_user_id !== null
+      && typeof value.confirmed_by_user_id !== "string")
+    || (value.confirmed_at !== undefined && value.confirmed_at !== null && typeof value.confirmed_at !== "string")
+    || ((value.state === "CONFIRMED" || value.state === "COMMITTED")
+      && (typeof value.operation_checksum !== "string" || !CHECKSUM.test(value.operation_checksum)
+        || typeof value.confirmed_candidate_id !== "string"
+        || typeof value.confirmed_by_user_id !== "string"
+        || typeof value.confirmed_at !== "string"))
     || (value.proposal_ref !== null && !isRecord(value.proposal_ref))
     || (value.qa_report_ref !== null && !isRecord(value.qa_report_ref))
   ) {
@@ -412,6 +434,22 @@ export async function getRegistrationOperationInspection(
     return { ok: true, data: parseRegistrationOperationInspection(result.data, jobId, operationId) };
   } catch (cause) {
     return { ok: false, error: badResponse(cause) };
+  }
+}
+
+export async function confirmRegistrationOperation(
+  jobId: string,
+  operationId: string,
+  confirmation: RegistrationConfirmationPayload,
+): Promise<RegistrationOperation> {
+  const value = await apiFetch<unknown>(
+    `${registrationPath(jobId)}/operations/${encodeURIComponent(operationId)}/confirm`,
+    { method: "POST", body: JSON.stringify(confirmation) },
+  );
+  try {
+    return parseRegistrationOperation(value, jobId);
+  } catch (cause) {
+    throw badResponse(cause);
   }
 }
 

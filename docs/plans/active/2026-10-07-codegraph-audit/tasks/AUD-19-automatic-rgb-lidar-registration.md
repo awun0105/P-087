@@ -1368,3 +1368,112 @@ Pre-flight (GUIDE.md Rule 13)
   TypeScript, targeted ESLint, Graphify update, CodeGraph sync and diff check passed.
 - DevTools: **UNVERIFIED** — no available completed-scene fixture could load the
   ReviewTab scene payload; held-out and Isaac qualification were not claimed.
+
+### AUD-19.S4n — Qualified candidate confirmation with durable CAS
+
+**Input:** the exact operation checksum, expected scene revision, selected
+candidate ID, and the server-verified proposal/QA/overlay artifacts for a
+registration operation.
+**Output:** a durable `CONFIRMED` operation record naming the exact candidate,
+confirming user, confirmation time, source operation checksum, and immutable
+target scene revision. This sprint does not publish an `AlignmentRecord`, change
+SceneIR, or enable collision consumers; those belong to the next consumer sprint.
+
+**Contract:** the command is available only to an authenticated authorized job
+mutator. It requires an unambiguous `PROPOSED` result, a `PASS` QA report bound to
+the same selected candidate and exact operation artifacts, and the overlay for
+that candidate. The command's expected checksum must equal the operation's
+current checksum; the command revision, request revision, and current SceneIR
+revision must agree. A scale-changing candidate cannot be confirmed because a
+rigid `AlignmentRecord` cannot encode RGB rescaling; it needs a separate explicit
+metric-correction/reconstruction run. The operation-row CAS commits the decision
+once. Replaying the same user/candidate/base-checksum decision returns the
+existing confirmation; a conflicting replay or stale state returns a conflict.
+Optional confirmation fields are omitted from the logical checksum while null so
+legacy schema-1.0 operation payloads retain their existing checksums.
+
+**Implement:** add checksum-bound confirmation fields to the durable operation
+record and validate their state/time invariants; expose the current operation
+checksum needed for optimistic concurrency; add an authorized `confirm` route
+that reuses the verified inspection path, checks current scene/QA/candidate/scale,
+and calls a transactional store CAS; add a Studio action tied to the selected
+overlay candidate, with explicit disabled/stale/confirmed states. Keep ambiguous,
+INCONCLUSIVE, FAIL, stale, tampered, and scale-changing candidates unconfirmable.
+
+**Tests:** legacy payload checksum compatibility; valid decision; response-loss
+retry/idempotency; same-candidate/actor/base-checksum binding; stale checksum and
+scene revision; concurrent conflicting confirmations; authorization including
+Guest ownership; malformed/tampered refs; QA not PASS; non-selected candidate;
+scale-changing candidate; frontend parser/action disabled and success states. The
+confirmation action must leave the current SceneIR revision and collision source
+unchanged. Browser rendering is a separate acceptance gate.
+
+**Exit:** [x] exact qualified candidate confirmation survives operation-store
+reload; [x] retries are idempotent and stale/conflicting decisions lose; [x] no
+unqualified or scale-changing candidate can confirm; [x] UI only confirms the
+candidate represented by its selection and QA; [x] SceneIR/collision remain
+unchanged; [ ] browser acceptance with a committed scene fixture. Held-out map
+qualification and Isaac/collision acceptance remain open.
+
+### AUD-19.S4o — Publish a confirmed registration into the reconstruction bundle
+
+**Status:** Planned; not implemented. This is the consumer sprint after S4n.
+
+**Input:** a `CONFIRMED` operation plus its exact source operation checksum,
+selected candidate, immutable scene revision, QA `PASS`, verified proposal/overlay,
+and the current job manifest and `ReconstructionBundle` identity.
+
+**Output:** a byte-verified immutable `AlignmentRecord`, a new
+`ReconstructionBundle` carrying its `lidar_geometry_ref` and `alignment_record`,
+and a durable operation transition to `COMMITTED` that names the published bundle
+and alignment artifact checksums. Preserve `canonical_geometry_ref` as the RGB
+geometry source.
+
+**Contract:** revalidate the complete S4n decision and exact artifact bytes at the
+consumer boundary. Adapt the registration source into the existing REC-09
+`AlignmentRequest` contract without weakening `RgbLidarAlignmentService` checks:
+world target frame, same-job RGB/LiDAR geometry, same-scene evidence, explicit
+confirmation, and a verifier that binds the current operation decision. `AlignmentRecord`
+must retain the exact proposal, QA, source, overlay and confirmation identities in
+its evidence/provenance. Publish a new immutable bundle and advance the job's
+manifest by compare-and-swap against the input manifest checksum/revision; an
+identical replay returns the same publication, while stale source, scene, QA or
+manifest state conflicts without changing the current manifest. Do not add a
+registration field to `SceneIR`: current `SceneIR` has no alignment slot, and the
+canonical RGB geometry must not be replaced. Do not publish or activate collision
+geometry from this sprint; that remains behind AUD-12's eligibility and selection
+contract. Existing sensor-package finalization continues through its current REC-09
+path.
+
+**Tests:** build and reload the exact `AlignmentRecord` and bundle; verify source
+and QA byte checksums, transform/candidate identity, confirmation actor and base
+checksum; reject missing/corrupt refs, non-`CONFIRMED` state, stale target or
+manifest CAS; exercise duplicate and concurrent publication; prove SceneIR's
+canonical RGB ref and collision selection are unchanged; retain existing
+sensor-package REC-09/REC-10 regressions.
+
+**Exit:** [ ] operation reaches `COMMITTED` only after exact alignment and bundle
+publication; [ ] retries resolve to identical artifact identities; [ ] stale or
+tampered inputs leave manifest and bundle head unchanged; [ ] canonical RGB and
+collision source are unchanged; [ ] bundle consumers reload the exact alignment
+evidence. Held-out map/browser and Isaac collision acceptance remain separate gates.
+
+### Result / Evidence — AUD-19.S4n
+
+- **State:** Local implementation complete; commit pending. S4o consumer
+  publication, registered-map quality qualification and production evidence remain
+  open.
+- **Base:** `c3c9b244` (AUD-23 real-capture audit record already on the branch).
+- **Implementation:** durable operation checksum CAS, checksum-compatible optional
+  confirmation fields, authorized confirm API, and selected-overlay UI. Confirmation
+  records the exact candidate, user, time, and pre-confirm operation checksum; it
+  leaves the current SceneIR and collision source unchanged.
+- **Verification:** backend registration operation/API tests: **67 passed**;
+  frontend registration API/panel tests: **20 passed**; Ruff check/format,
+  targeted ESLint, TypeScript typecheck and `git diff --check` passed. CodeGraph is
+  current (934 files, 19,181 nodes, 57,908 edges). Graphify refresh completed
+  (21,961 nodes, 67,046 edges, 753 communities).
+- **Chrome DevTools:** **UNVERIFIED**. Reviewer session reached a completed local
+  scene's Review tab, but its `/api/v1/jobs/job-6bc02e5de4ed/scene` request returned
+  HTTP 404, so no committed-scene confirmation rendering could be exercised.
+  Held-out registration quality and Isaac/collision acceptance were not claimed.

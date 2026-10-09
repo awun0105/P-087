@@ -22,6 +22,7 @@ from src.models.contracts.rgb_lidar_registration import (
     RegistrationCandidate,
     RegistrationFindingCode,
     RegistrationInputMode,
+    RegistrationOperationState,
     RegistrationOverlayPreview,
     RegistrationProfile,
     RegistrationProposal,
@@ -334,12 +335,230 @@ def _inspection_outputs(
     return record, proposal_ref
 
 
+def _persist_proposed_operation(
+    database: RuntimeDatabase,
+    request: RegistrationRequest,
+    proposal_ref: ProductArtifactRef,
+    report_ref: ProductArtifactRef,
+) -> tuple[RegistrationOperationStore, object]:
+    store = RegistrationOperationStore(database)
+    store.enqueue(request, f"confirm-{request.request_id}")
+    claimed = store.claim_next("registration-confirmation-test", lease_seconds=60)
+    assert claimed is not None and claimed.lease_token is not None
+    proposed = store.finish(
+        claimed.operation_id,
+        lease_token=claimed.lease_token,
+        fencing_token=claimed.fencing_token,
+        state=RegistrationOperationState.PROPOSED,
+        proposal_ref=proposal_ref,
+        qa_report_ref=report_ref,
+    )
+    return store, proposed
+
+
+def _confirmation_inspection(
+    scene_revision: str,
+    *,
+    qa_result: RegistrationQAStatus = RegistrationQAStatus.PASS,
+    selected_candidate_id: str = "candidate-inspection-1",
+    report_candidate_id: str = "candidate-inspection-1",
+    overlay_candidate_id: str | None = "candidate-inspection-1",
+    rgb_scale_factor: float | None = None,
+    current_scene_revision: str | None = None,
+) -> SimpleNamespace:
+    proposal = SimpleNamespace(
+        state=RegistrationProposalState.PROPOSED,
+        selected_candidate_id=selected_candidate_id,
+        candidates=[SimpleNamespace(candidate_id=selected_candidate_id, rgb_scale_factor=rgb_scale_factor)],
+    )
+    qa_report = SimpleNamespace(result=qa_result, candidate_id=report_candidate_id)
+    overlays = [] if overlay_candidate_id is None else [SimpleNamespace(candidate_id=overlay_candidate_id)]
+    return SimpleNamespace(
+        expected_scene_revision=scene_revision,
+        current_scene_revision=current_scene_revision or scene_revision,
+        proposal=proposal,
+        qa_report=qa_report,
+        overlay_previews=overlays,
+    )
+
+
 def _seed_user(database: RuntimeDatabase, user_id: str) -> None:
     with database.transaction(write=True) as tx:
         tx.execute(
             "INSERT INTO r2s_users(user_id,email,payload) VALUES (?,?,?)",
             (user_id, f"{user_id}@example.test", "{}"),
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["guest", "editor", "reviewer"])
+async def test_confirm_persists_only_the_exact_qa_candidate_without_mutating_scene(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    role: str,
+) -> None:
+    registry, database, revision, audit = _runtime(tmp_path, monkeypatch)
+    assert database is not None
+    user = _user(role)
+    if user.user_id != "user-guest":
+        _seed_user(database, "user-guest")
+    _seed_user(database, user.user_id)
+    request = _request(registry, revision, "user-guest")
+    outputs, _ = _inspection_outputs(registry, request, include_overlay=True)
+    store, proposed = _persist_proposed_operation(database, request, outputs.proposal_ref, outputs.qa_report_ref)
+    monkeypatch.setattr(
+        registration_api,
+        "_verified_registration_inspection",
+        lambda _registry, _record: _confirmation_inspection(revision),
+    )
+    before_scene = registry.scene.current(_JOB_ID).scene
+    payload = {
+        "expected_operation_checksum": proposed.operation_checksum,
+        "expected_scene_revision": revision,
+        "candidate_id": "candidate-inspection-1",
+    }
+
+    with _session(user):
+        response = await client.post(
+            f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/operations/{request.request_id}/confirm",
+            json=payload,
+        )
+
+    assert response.status_code == 200, response.text
+    response_payload = response.json()
+    assert response_payload["state"] == RegistrationOperationState.CONFIRMED.value
+    assert response_payload["confirmed_candidate_id"] == "candidate-inspection-1"
+    assert response_payload["confirmed_by_user_id"] == user.user_id
+    assert response_payload["operation_checksum"].startswith("sha256:")
+    confirmed = store.get(request.request_id)
+    assert confirmed.confirmed_from_checksum == proposed.operation_checksum
+    assert confirmed.confirmed_candidate_id == "candidate-inspection-1"
+    assert confirmed.confirmed_by_user_id == user.user_id
+    assert registry.scene.current(_JOB_ID).scene == before_scene
+    if role in {"editor", "reviewer"}:
+        assert audit.events and audit.events[-1][0] == user.user_id
+        assert audit.events[-1][1] == "operator.intervention"
+
+    with _session(user):
+        replay = await client.post(
+            f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/operations/{request.request_id}/confirm",
+            json=payload,
+        )
+    assert replay.status_code == 200, replay.text
+    assert replay.json() == response_payload
+    assert store.get(request.request_id) == confirmed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("inspection_kwargs", "candidate_id"),
+    [
+        ({"qa_result": RegistrationQAStatus.INCONCLUSIVE}, "candidate-inspection-1"),
+        ({"current_scene_revision": "scene-revision-stale"}, "candidate-inspection-1"),
+        ({"report_candidate_id": "candidate-other"}, "candidate-inspection-1"),
+        ({"overlay_candidate_id": None}, "candidate-inspection-1"),
+        ({"rgb_scale_factor": 1.1}, "candidate-inspection-1"),
+        ({}, "candidate-other"),
+    ],
+)
+async def test_confirm_rejects_unqualified_stale_or_changed_candidates(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    inspection_kwargs: dict[str, object],
+    candidate_id: str,
+) -> None:
+    registry, database, revision, _ = _runtime(tmp_path, monkeypatch)
+    assert database is not None
+    user = _user("guest")
+    _seed_user(database, user.user_id)
+    request = _request(registry, revision, user.user_id)
+    outputs, _ = _inspection_outputs(registry, request, include_overlay=True)
+    store, proposed = _persist_proposed_operation(database, request, outputs.proposal_ref, outputs.qa_report_ref)
+    monkeypatch.setattr(
+        registration_api,
+        "_verified_registration_inspection",
+        lambda _registry, _record: _confirmation_inspection(revision, **inspection_kwargs),
+    )
+
+    with _session(user):
+        response = await client.post(
+            f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/operations/{request.request_id}/confirm",
+            json={
+                "expected_operation_checksum": proposed.operation_checksum,
+                "expected_scene_revision": revision,
+                "candidate_id": candidate_id,
+            },
+        )
+
+    assert response.status_code == 409, response.text
+    persisted = store.get(request.request_id)
+    assert persisted.state == RegistrationOperationState.PROPOSED
+    assert persisted.operation_checksum == proposed.operation_checksum
+
+
+@pytest.mark.asyncio
+async def test_confirm_rejects_stale_operation_checksum_and_scene_revision(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    registry, database, revision, _ = _runtime(tmp_path, monkeypatch)
+    assert database is not None
+    user = _user("guest")
+    _seed_user(database, user.user_id)
+    request = _request(registry, revision, user.user_id)
+    outputs, _ = _inspection_outputs(registry, request, include_overlay=True)
+    store, proposed = _persist_proposed_operation(database, request, outputs.proposal_ref, outputs.qa_report_ref)
+    monkeypatch.setattr(
+        registration_api,
+        "_verified_registration_inspection",
+        lambda _registry, _record: _confirmation_inspection(revision),
+    )
+    endpoint = f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/operations/{request.request_id}/confirm"
+    requests = (
+        {
+            "expected_operation_checksum": _checksum("stale operation checksum"),
+            "expected_scene_revision": revision,
+            "candidate_id": "candidate-inspection-1",
+        },
+        {
+            "expected_operation_checksum": proposed.operation_checksum,
+            "expected_scene_revision": "scene-revision-other",
+            "candidate_id": "candidate-inspection-1",
+        },
+    )
+
+    with _session(user):
+        responses = [await client.post(endpoint, json=payload) for payload in requests]
+
+    assert [response.status_code for response in responses] == [409, 409]
+    persisted = store.get(request.request_id)
+    assert persisted.state == RegistrationOperationState.PROPOSED
+    assert persisted.operation_checksum == proposed.operation_checksum
+
+
+@pytest.mark.asyncio
+async def test_guest_cannot_confirm_another_users_registration_operation(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _, _, revision, _ = _runtime(tmp_path, monkeypatch, owner_user_id="user-another")
+    user = _user("guest")
+
+    with _session(user):
+        response = await client.post(
+            f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/operations/registration-request-1/confirm",
+            json={
+                "expected_operation_checksum": _checksum("no operation"),
+                "expected_scene_revision": revision,
+                "candidate_id": "candidate-inspection-1",
+            },
+        )
+
+    assert response.status_code == 403
 
 
 @pytest.mark.asyncio

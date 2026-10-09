@@ -192,6 +192,145 @@ def test_legacy_operation_payload_without_additive_fields_keeps_its_checksum(tmp
     assert restored.state == RegistrationOperationState.QUEUED
 
 
+def test_confirmation_persists_exact_decision_and_replays_after_reload(tmp_path: Path) -> None:
+    database, store = _store(tmp_path)
+    request = _request()
+    store.enqueue(request, "request-key-1")
+    now = datetime(2026, 10, 9, tzinfo=UTC)
+    claimed = store.claim_next("worker-a", lease_seconds=60, now=now)
+    assert claimed is not None and claimed.lease_token is not None
+    proposed = store.finish(
+        claimed.operation_id,
+        lease_token=claimed.lease_token,
+        fencing_token=claimed.fencing_token,
+        state=RegistrationOperationState.PROPOSED,
+        proposal_ref=_ref(claimed.target_job_id, "RegistrationProposalArtifact"),
+        qa_report_ref=_ref(claimed.target_job_id, "RegistrationQAReport"),
+        now=now + timedelta(seconds=1),
+    )
+
+    confirmed = store.confirm(
+        proposed.operation_id,
+        expected_operation_checksum=proposed.operation_checksum,
+        expected_scene_revision=request.expected_scene_revision,
+        candidate_id="candidate-qualified-1",
+        user_id="user-a",
+        now=now + timedelta(seconds=2),
+    )
+    replay = store.confirm(
+        proposed.operation_id,
+        expected_operation_checksum=proposed.operation_checksum,
+        expected_scene_revision=request.expected_scene_revision,
+        candidate_id="candidate-qualified-1",
+        user_id="user-a",
+        now=now + timedelta(seconds=30),
+    )
+
+    assert confirmed.state == RegistrationOperationState.CONFIRMED
+    assert confirmed.confirmed_candidate_id == "candidate-qualified-1"
+    assert confirmed.confirmed_by_user_id == "user-a"
+    assert confirmed.confirmed_at == now + timedelta(seconds=2)
+    assert confirmed.confirmed_from_checksum == proposed.operation_checksum
+    assert confirmed.operation_checksum != proposed.operation_checksum
+    assert replay == confirmed
+    assert store.get(proposed.operation_id) == confirmed
+    assert store.get(proposed.operation_id).request.expected_scene_revision == request.expected_scene_revision
+    assert database.schema_version() == LATEST_SCHEMA_VERSION
+
+
+def test_confirmation_rejects_stale_checksum_and_conflicting_replay(tmp_path: Path) -> None:
+    _, store = _store(tmp_path)
+    request = _request()
+    store.enqueue(request, "request-key-1")
+    now = datetime(2026, 10, 9, tzinfo=UTC)
+    claimed = store.claim_next("worker-a", lease_seconds=60, now=now)
+    assert claimed is not None and claimed.lease_token is not None
+    proposed = store.finish(
+        claimed.operation_id,
+        lease_token=claimed.lease_token,
+        fencing_token=claimed.fencing_token,
+        state=RegistrationOperationState.PROPOSED,
+        proposal_ref=_ref(claimed.target_job_id, "RegistrationProposalArtifact"),
+        qa_report_ref=_ref(claimed.target_job_id, "RegistrationQAReport"),
+        now=now + timedelta(seconds=1),
+    )
+
+    with pytest.raises(RuntimeStateConflictError, match="changed before confirmation"):
+        store.confirm(
+            proposed.operation_id,
+            expected_operation_checksum=_checksum("stale operation"),
+            expected_scene_revision=request.expected_scene_revision,
+            candidate_id="candidate-qualified-1",
+            user_id="user-a",
+        )
+
+    confirmed = store.confirm(
+        proposed.operation_id,
+        expected_operation_checksum=proposed.operation_checksum,
+        expected_scene_revision=request.expected_scene_revision,
+        candidate_id="candidate-qualified-1",
+        user_id="user-a",
+        now=now + timedelta(seconds=2),
+    )
+    assert store.get(proposed.operation_id) == confirmed
+
+    for candidate_id, user_id, scene_revision in (
+        ("candidate-other", "user-a", request.expected_scene_revision),
+        ("candidate-qualified-1", "user-b", request.expected_scene_revision),
+        ("candidate-qualified-1", "user-a", "scene-revision-other"),
+    ):
+        with pytest.raises(RuntimeStateConflictError, match="different confirmation"):
+            store.confirm(
+                proposed.operation_id,
+                expected_operation_checksum=proposed.operation_checksum,
+                expected_scene_revision=scene_revision,
+                candidate_id=candidate_id,
+                user_id=user_id,
+            )
+
+
+def test_concurrent_candidate_confirmations_have_one_compare_and_swap_winner(tmp_path: Path) -> None:
+    _, store = _store(tmp_path)
+    request = _request()
+    store.enqueue(request, "request-key-1")
+    now = datetime(2026, 10, 9, tzinfo=UTC)
+    claimed = store.claim_next("worker-a", lease_seconds=60, now=now)
+    assert claimed is not None and claimed.lease_token is not None
+    proposed = store.finish(
+        claimed.operation_id,
+        lease_token=claimed.lease_token,
+        fencing_token=claimed.fencing_token,
+        state=RegistrationOperationState.PROPOSED,
+        proposal_ref=_ref(claimed.target_job_id, "RegistrationProposalArtifact"),
+        qa_report_ref=_ref(claimed.target_job_id, "RegistrationQAReport"),
+        now=now + timedelta(seconds=1),
+    )
+    barrier = Barrier(2)
+
+    def confirm(candidate_id: str) -> str:
+        barrier.wait()
+        try:
+            result = store.confirm(
+                proposed.operation_id,
+                expected_operation_checksum=proposed.operation_checksum,
+                expected_scene_revision=request.expected_scene_revision,
+                candidate_id=candidate_id,
+                user_id="user-a",
+            )
+        except RuntimeStateConflictError:
+            return "conflict"
+        return result.confirmed_candidate_id or "missing"
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        outcomes = list(workers.map(confirm, ("candidate-a", "candidate-b")))
+
+    assert outcomes.count("conflict") == 1
+    assert sum(outcome.startswith("candidate-") for outcome in outcomes) == 1
+    persisted = store.get(proposed.operation_id)
+    assert persisted.state == RegistrationOperationState.CONFIRMED
+    assert persisted.confirmed_candidate_id in {"candidate-a", "candidate-b"}
+
+
 def test_queued_registration_cancellation_is_terminal_and_idempotent(tmp_path: Path) -> None:
     _, store = _store(tmp_path)
     request = _request()

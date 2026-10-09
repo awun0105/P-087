@@ -9,6 +9,7 @@ import { errorMessage } from "@/lib/ui-error";
 import { RegistrationOverlay } from "@/features/studio/scene/RegistrationOverlay";
 import {
   cancelRegistrationOperation,
+  confirmRegistrationOperation,
   enqueueRegistration,
   getRegistrationOperation,
   getRegistrationOperationInspection,
@@ -179,6 +180,10 @@ export function RegistrationPanel({
   const [session, setSession] = useState<RegistrationSession | null>(null);
   const [preflight, setPreflight] = useState<RegistrationPreflight | null>(null);
   const [inspectionState, setInspectionState] = useState<RegistrationInspectionState>({ key: "", loading: false });
+  const [overlaySelection, setOverlaySelection] = useState<{
+    operationId: string | null;
+    candidateId: string | null;
+  }>({ operationId: null, candidateId: null });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadedKey, setLoadedKey] = useState<string | null | undefined>(undefined);
@@ -254,6 +259,7 @@ export function RegistrationPanel({
 
   const operationId = session?.operation_id ?? null;
   const operation = session?.operation ?? null;
+  const overlayCandidateId = overlaySelection.operationId === operationId ? overlaySelection.candidateId : null;
   const poll = useCallback(async (signal: AbortSignal) => {
     if (!operationId) return;
     const result = await getRegistrationOperation(jobId, operationId, signal);
@@ -356,6 +362,51 @@ export function RegistrationPanel({
     }
   }
 
+  const selectedCandidateId = inspection?.proposal && typeof inspection.proposal.selected_candidate_id === "string"
+    ? inspection.proposal.selected_candidate_id
+    : null;
+  const displayedCandidateId = overlayCandidateId ?? selectedCandidateId ?? inspection?.overlay_previews[0]?.candidate_id ?? null;
+  const selectedCandidate = inspection?.proposal && Array.isArray(inspection.proposal.candidates)
+    ? inspection.proposal.candidates.map(jsonObject).find((candidate) => candidate?.candidate_id === selectedCandidateId) ?? null
+    : null;
+  const selectedCandidateScale = selectedCandidate?.rgb_scale_factor;
+  const candidateScaleUnchanged = selectedCandidateScale === undefined
+    || selectedCandidateScale === null
+    || selectedCandidateScale === 1;
+  const reportCandidateId = inspection?.qa_report && typeof inspection.qa_report.candidate_id === "string"
+    ? inspection.qa_report.candidate_id
+    : null;
+  const canConfirm = Boolean(
+    canMutateJob && userId && operation?.state === "PROPOSED" && operation.operation_checksum
+    && inspection?.current_scene_revision === sceneRevision
+    && inspection.expected_scene_revision === sceneRevision
+    && inspection.proposal?.state === "PROPOSED"
+    && inspection.qa_report?.result === "PASS"
+    && selectedCandidateId
+    && displayedCandidateId === selectedCandidateId
+    && reportCandidateId === selectedCandidateId
+    && candidateScaleUnchanged
+    && inspection.overlay_previews.some((preview) => preview.candidate_id === selectedCandidateId)
+  );
+
+  async function confirm() {
+    if (!canConfirm || !operationId || !operation?.operation_checksum || !selectedCandidateId || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const confirmed = await confirmRegistrationOperation(jobId, operationId, {
+        expected_operation_checksum: operation.operation_checksum,
+        expected_scene_revision: sceneRevision,
+        candidate_id: selectedCandidateId,
+      });
+      setSession((current) => current?.operation_id === operationId ? { ...current, operation: confirmed } : current);
+    } catch (cause) {
+      setError(errorMessage(cause, "Không xác nhận được phương án căn chỉnh."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const stale = session !== null && session.expected_scene_revision !== sceneRevision;
   const canStart = canMutateJob && Boolean(userId) && !busy && !operationId && !stale
     && preflight?.state === "READY" && session?.request !== undefined
@@ -408,6 +459,11 @@ export function RegistrationPanel({
             {operation.state === "PROPOSED" && (
               <p className="mt-2 text-sm">Đã có proposal{operation.qa_report_ref ? " và báo cáo QA" : ""}. Chưa có transform nào được áp dụng.</p>
             )}
+            {operation.state === "CONFIRMED" && (
+              <p className="mt-2 text-sm">
+                Đã xác nhận {operation.confirmed_candidate_id ?? "candidate"}; transform chưa được ghi vào SceneIR hoặc collision mesh.
+              </p>
+            )}
             {operation.state === "AMBIGUOUS" && <p className="mt-2 text-sm">Cần xem các phương án và bằng chứng trước khi chọn.</p>}
             {operation.cancellation_requested && operation.state !== "CANCELLED" && (
               <p className="mt-2 text-sm">Worker sẽ dừng an toàn rồi mới xác nhận hủy.</p>
@@ -459,7 +515,11 @@ export function RegistrationPanel({
                 </div>
               )}
               {inspection.overlay_previews.length > 0 && (
-                <RegistrationOverlay previews={inspection.overlay_previews} />
+                <RegistrationOverlay
+                  previews={inspection.overlay_previews}
+                  selectedCandidateId={displayedCandidateId}
+                  onCandidateChange={(candidateId) => setOverlaySelection({ operationId, candidateId })}
+                />
               )}
               {inspection.qa_report && (
                 <div className="space-y-2 rounded-lg border border-line bg-paper-sunken p-3">
@@ -508,7 +568,27 @@ export function RegistrationPanel({
                   )}
                 </div>
               )}
-              <p className="text-xs text-ink-muted">Thông tin này chỉ để kiểm tra. Chưa xác nhận hoặc áp dụng transform.</p>
+              {operation.state === "PROPOSED" && canMutateJob && userId && (
+                <div className="space-y-2">
+                  <Button
+                    disabled={busy || !canConfirm}
+                    onClick={() => void confirm()}
+                    aria-label="Xác nhận alignment candidate QA"
+                  >
+                    {busy ? "Đang xác nhận…" : `Xác nhận ${selectedCandidateId ?? "candidate QA"}`}
+                  </Button>
+                  {!canConfirm && (
+                    <p className="text-xs text-ink-muted">
+                      Chỉ xác nhận được candidate được QA chọn khi QA là PASS, scene còn đúng revision, không đổi scale và bạn đang xem đúng phương án đó.
+                    </p>
+                  )}
+                </div>
+              )}
+              <p className="text-xs text-ink-muted">
+                {operation.state === "CONFIRMED"
+                  ? "Xác nhận đã được lưu bền vững. Việc này chưa áp dụng transform vào SceneIR hoặc collision mesh."
+                  : "Thông tin này chỉ để kiểm tra. Chưa xác nhận hoặc áp dụng transform."}
+              </p>
             </div>
           )}
         </section>

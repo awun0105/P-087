@@ -9,7 +9,7 @@ from src.api.auth import require_contributor
 from src.api.ownership import authorize_job_mutation
 from src.api.product import deps
 from src.api.schemas import ApiModel
-from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
+from src.models.contracts.artifacts import ArtifactDataClass, Checksum, Identifier, ProductArtifactRef
 from src.models.contracts.manifests import JobManifest, StageId
 from src.models.contracts.rgb_lidar_registration import (
     RegistrationInputMode,
@@ -18,7 +18,9 @@ from src.models.contracts.rgb_lidar_registration import (
     RegistrationPreflight,
     RegistrationPreflightState,
     RegistrationProposal,
+    RegistrationProposalState,
     RegistrationQAReport,
+    RegistrationQAStatus,
     RegistrationRequest,
     registration_preflight,
     validate_registration_overlay_binding,
@@ -30,6 +32,7 @@ from src.services.orchestration.auth.models import UserRecord
 from src.services.orchestration.inputs.assembly import InputAssemblyService
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.registration_operations import (
+    RegistrationOperationLeaseLostError,
     RegistrationOperationNotFoundError,
     RegistrationOperationRecord,
     RegistrationOperationStore,
@@ -53,12 +56,16 @@ class RegistrationOperationResponse(ApiModel):
     operation_id: str
     job_id: str
     state: RegistrationOperationState
+    operation_checksum: Checksum
     attempt: int
     created_at: datetime
     updated_at: datetime
     proposal_ref: ProductArtifactRef | None = None
     qa_report_ref: ProductArtifactRef | None = None
     cancellation_requested: bool = False
+    confirmed_candidate_id: Identifier | None = None
+    confirmed_by_user_id: Identifier | None = None
+    confirmed_at: datetime | None = None
 
 
 class RegistrationOperationInspectionResponse(ApiModel):
@@ -75,6 +82,14 @@ class RegistrationOperationInspectionResponse(ApiModel):
 
 class RegistrationPreparationRequest(ApiModel):
     expected_scene_revision: str = Field(min_length=1, max_length=128)
+
+
+class RegistrationConfirmationRequest(ApiModel):
+    """Optimistic concurrency token and exact reviewed candidate for confirmation."""
+
+    expected_operation_checksum: Checksum
+    expected_scene_revision: str = Field(min_length=1, max_length=128)
+    candidate_id: Identifier
 
 
 class RegistrationPreparationResponse(ApiModel):
@@ -115,12 +130,16 @@ def _public_operation(record: RegistrationOperationRecord) -> RegistrationOperat
         operation_id=record.operation_id,
         job_id=record.target_job_id,
         state=record.state,
+        operation_checksum=record.operation_checksum,
         attempt=record.attempt,
         created_at=record.created_at,
         updated_at=record.updated_at,
         proposal_ref=record.proposal_ref,
         qa_report_ref=record.qa_report_ref,
         cancellation_requested=record.cancellation_requested,
+        confirmed_candidate_id=record.confirmed_candidate_id,
+        confirmed_by_user_id=record.confirmed_by_user_id,
+        confirmed_at=record.confirmed_at,
     )
 
 
@@ -313,6 +332,13 @@ def inspect_registration_operation(
     if record.target_job_id != job_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="registration operation not found")
 
+    return _verified_registration_inspection(registry, record)
+
+
+def _verified_registration_inspection(
+    registry: ProjectRegistry, record: RegistrationOperationRecord
+) -> RegistrationOperationInspectionResponse:
+    """Resolve and verify the exact persisted proposal, QA report and candidate overlays."""
     proposal: RegistrationProposal | None = None
     qa_report: RegistrationQAReport | None = None
     overlay_previews: list[RegistrationOverlayPreview] = []
@@ -358,18 +384,120 @@ def inspect_registration_operation(
         ) from error
 
     try:
-        current_scene_revision = registry.scene.current(job_id).scene.scene_revision
+        current_scene_revision = registry.scene.current(record.target_job_id).scene.scene_revision
     except SceneNotAvailableError:
         current_scene_revision = None
     return RegistrationOperationInspectionResponse(
         operation_id=record.operation_id,
-        job_id=job_id,
+        job_id=record.target_job_id,
         expected_scene_revision=record.request.expected_scene_revision,
         current_scene_revision=current_scene_revision,
         proposal=proposal,
         qa_report=qa_report,
         overlay_previews=overlay_previews,
     )
+
+
+@router.post(
+    "/jobs/{job_id}/rgb-lidar-registration/operations/{operation_id}/confirm",
+    response_model=RegistrationOperationResponse,
+    responses={
+        401: {"description": "An authenticated contributor is required"},
+        403: {"description": "The caller cannot mutate this job"},
+        404: {"description": "Job or operation not found"},
+        409: {"description": "The proposal, QA, operation or scene revision is stale or ineligible"},
+        503: {"description": "Durable runtime unavailable"},
+    },
+)
+def confirm_registration_operation(
+    job_id: str,
+    operation_id: str,
+    body: RegistrationConfirmationRequest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> RegistrationOperationResponse:
+    """Confirm the exact QA-qualified proposal without changing SceneIR or collision state."""
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="An authenticated account is required to confirm registration",
+        )
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="xác nhận RGB–LiDAR registration của")
+    _job_or_404(registry, job_id)
+    store = _operation_store(registry)
+    record = _operation_or_404(store, operation_id)
+    if record.target_job_id != job_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="registration operation not found")
+
+    if record.state in {RegistrationOperationState.CONFIRMED, RegistrationOperationState.COMMITTED}:
+        return _confirm_or_conflict(
+            store,
+            record,
+            body,
+            candidate_id=body.candidate_id,
+            user_id=user.user_id,
+        )
+    if record.state != RegistrationOperationState.PROPOSED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Only a proposed registration can be confirmed"
+        )
+    if record.operation_checksum != body.expected_operation_checksum:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Registration operation changed; refresh it")
+    if body.expected_scene_revision != record.request.expected_scene_revision:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Confirmation targets a different scene revision"
+        )
+
+    inspection = _verified_registration_inspection(registry, record)
+    proposal = inspection.proposal
+    report = inspection.qa_report
+    if inspection.current_scene_revision != body.expected_scene_revision:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Scene revision changed; prepare a new registration"
+        )
+    if (
+        proposal is None
+        or report is None
+        or proposal.state != RegistrationProposalState.PROPOSED
+        or report.result != RegistrationQAStatus.PASS
+        or proposal.selected_candidate_id != body.candidate_id
+        or report.candidate_id != body.candidate_id
+        or not any(preview.candidate_id == body.candidate_id for preview in inspection.overlay_previews)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only the exact, unambiguous candidate with a bound PASS QA report can be confirmed",
+        )
+    candidate = next((item for item in proposal.candidates if item.candidate_id == body.candidate_id), None)
+    if candidate is None or (candidate.rgb_scale_factor is not None and candidate.rgb_scale_factor != 1.0):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A scale-changing candidate requires a separate metric-correction reconstruction",
+        )
+    return _confirm_or_conflict(store, record, body, candidate_id=body.candidate_id, user_id=user.user_id)
+
+
+def _confirm_or_conflict(
+    store: RegistrationOperationStore,
+    record: RegistrationOperationRecord,
+    body: RegistrationConfirmationRequest,
+    *,
+    candidate_id: str,
+    user_id: str,
+) -> RegistrationOperationResponse:
+    try:
+        confirmed = store.confirm(
+            record.operation_id,
+            expected_operation_checksum=body.expected_operation_checksum,
+            expected_scene_revision=body.expected_scene_revision,
+            candidate_id=candidate_id,
+            user_id=user_id,
+        )
+    except RegistrationOperationNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="registration operation not found") from error
+    except (RuntimeStateConflictError, RegistrationOperationLeaseLostError) as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    return _public_operation(confirmed)
 
 
 def _validate_inspection_reference(

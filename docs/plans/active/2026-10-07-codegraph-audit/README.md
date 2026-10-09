@@ -142,10 +142,13 @@ searches both signs of every detected plane and publishes provisional proposal/Q
 artifacts. S4i adds the authorized durable producer/status/cancel API. S4j prepares a
 server-sealed request from the accepted R2/R3 recipe and current scene, with source
 bytes/header rechecked by the worker. S4k adds Studio preflight/start/status/cancel
-with idempotent recovery. Proposal/overlay and confirmation CAS remain open. The
-assembly contract still has no gravity/up declaration. Held-out qualification,
-source-floor qualification, scene confirmation and collision-consumer integration
-stay open.
+with idempotent recovery. S4l adds read-only proposal/QA inspection; S4m adds
+bounded diagnostic BEV overlays; S4n adds QA-qualified candidate confirmation with
+durable operation CAS and retry idempotency. Confirmation is not yet published to
+`AlignmentRecord`/SceneIR or collision consumers. The assembly contract still has no
+gravity/up declaration. Held-out registration qualification, source-floor
+qualification, consumer publication, browser acceptance and Isaac/collision
+evidence remain open.
 AUD-12.S3b adds compatibility-safe SceneIR refs for the selected collision candidate
 and selection record, includes them in artifact closure, and makes simulation
 packaging refuse an unconsumed selection instead of falling back to RGB. Sensor QA is
@@ -164,7 +167,10 @@ candidate-triangle ownership, SceneEditor CAS selection, artifact closure, objec
 invalidation, viewer-layer identity, and fail-closed simulation/USD consumers. The
 selection service still has no live API/worker route; diagnostic-only QA, held-out
 retention, browser selected-candidate behavior and Isaac proof remain open.
-Active scope: 26 packages/97 sprint slices, including the AUD-19.S4e–S4m follow-ups.
+Plan inventory: 26 listed packages/99 non-deferred sprint slices, including the
+AUD-19.S4e–S4o follow-ups. This implementation owns 24 packages/80 base sprints;
+AUD-18 and AUD-23 are owner-maintained, while AUD-16 and AUD-25 are deferred.
+The 11 AUD-19.S4 follow-ups are tracked separately from those 80 base sprints.
 AUD-16/ADR0017 (3 sprints) và AUD-25/ADR0025 (6 sprints) Deferred theo yêu cầu owner; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
 ## Outcome
@@ -264,7 +270,7 @@ BEV/ICP implementation hoặc independent-map/browser acceptance.
 | [AUD-16: Fast Preview](tasks/AUD-16-fast-preview.md) | Deferred — không implement; EX-PRODUCT + EX-REC nếu mở lại | REC-04/05, PRODUCT-02/08/09 | 3 |
 | [AUD-17: LiDAR odometry](tasks/AUD-17-lidar-odometry.md) | P2 — EX-REC + EX-PRODUCT; opt-in | REC-08/06, PRODUCT-02/08/09 | 3 |
 | [AUD-18: Privacy anonymizer](tasks/AUD-18-privacy-anonymizer.md) | P2 — EX-REC + EX-PRODUCT; opt-in | REC-02, PRODUCT-01/02/09 | 3 |
-| [AUD-19: Automatic RGB–LiDAR registration](tasks/AUD-19-automatic-rgb-lidar-registration.md) | P1 — EX-REC + EX-PRODUCT; SCENE/SIM consumers | REC-06/08/09, PRODUCT-04/08/09 | 4 + S4e–S4m follow-ups |
+| [AUD-19: Automatic RGB–LiDAR registration](tasks/AUD-19-automatic-rgb-lidar-registration.md) | P1 — EX-REC + EX-PRODUCT; SCENE/SIM consumers | REC-06/08/09, PRODUCT-04/08/09 | 4 + S4e–S4o follow-ups |
 | [AUD-20: Tên và creator attribution](tasks/AUD-20-user-display-name-and-creator.md) | P1 — EX-PRODUCT | PRODUCT-01/02/06/09 | 3 |
 | [AUD-21: Guest signup và ownership](tasks/AUD-21-guest-signup-and-ownership.md) | P1 — EX-PRODUCT | PRODUCT-01/02/06/09 | 4 |
 | [AUD-22: Guest quota 3/ngày](tasks/AUD-22-guest-daily-job-quota.md) | P1 — EX-PRODUCT | PRODUCT-01/02/06/09 | 3 |
@@ -275,9 +281,11 @@ BEV/ICP implementation hoặc independent-map/browser acceptance.
 | [AUD-27: Structured error diagnostics](tasks/AUD-27-structured-error-diagnostics-and-redacted-excerpts.md) | P1 — EX-REC + EX-PRODUCT; failure diagnostics | REC-02/03/04, PRODUCT-02/08/09 | 3 |
 | [AUD-28: Benchmark-derived verdicts](tasks/AUD-28-benchmark-derived-verdicts-and-rule-based-insights.md) | P2 — EX-PRODUCT + EX-REC; evaluation quality | REC-02/06, PRODUCT-02/08/09 | 3 |
 
-Active: **26 work packages / 88 base sprints + 9 AUD-19.S4 follow-up slices = 97 sprint slices**.
+Plan: **26 listed packages / 88 non-deferred base sprints + 11 AUD-19.S4 follow-up slices = 99 slices**.
+This implementation scope: **24 packages / 80 base sprints + 11 AUD-19.S4 follow-up slices**;
+AUD-18/AUD-23 remain owner-maintained and AUD-16/AUD-25 remain deferred.
 AUD-16 (3 sprints) và AUD-25 (6 sprints) Deferred giữ để tham khảo; tổng tài liệu có
-28 packages/97 base sprint definitions + 9 follow-up slices = 106 definitions/slices.
+28 packages/97 base sprint definitions + 11 follow-up slices = 108 definitions/slices.
 Mỗi sprint có Input, Output, Contract, implementation steps, Tests và Exit; mỗi task có dependencies, verification/DoD
 và Result/Evidence. P2 là extension triển khai sau nền tảng P0/P1, không là
 permanent exclusion do PRD cũ. Không mặc định enable odometry/anonymizer mọi job.
@@ -566,16 +574,18 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
       only provisional registration and remains blocked from execution while odometry
       is wired-unqualified. World/floor confirmation, canonical LiDAR ingest/alignment,
       real traversal quality and R5 dispatch remain open; AUD-18 is owner work.
-- [x] AUD-19.S1 contracts; local S2 BEV/S3 constrained-ICP algorithms; S4a–S4m
+- [x] AUD-19.S1 contracts; local S2 BEV/S3 constrained-ICP algorithms; S4a–S4n
       durable envelope, exact source/target resolution, diagnostic source-plane
       hypotheses, cancellation/resource-wait persistence, shared admission, and a
       bounded worker that publishes provisional proposal/QA artifacts, authorized
       operation/status/cancel APIs, server-sealed request preparation, and Studio
       preflight/start/status/cancel with idempotent recovery, and read-only proposal/QA
       inspection bound to exact operation artifacts and scene revisions; S4m adds
-      a checksum-bound, diagnostic-only BEV overlay for each candidate.
-- [ ] AUD-19 held-out map QA and source-floor qualification; confirmation CAS and
-      alignment/collision consumer integration; browser acceptance.
+      a checksum-bound, diagnostic-only BEV overlay for each candidate; S4n adds
+      qualified confirmation with durable CAS. S4o consumer publication is planned.
+- [ ] AUD-19.S4o alignment/bundle consumer integration, held-out map QA and
+      source-floor qualification, browser acceptance, and separate collision/Isaac
+      acceptance.
 
 - [x] Implementation AUD-20.S1 identity/seed migration contract and AUD-20.S2 producer/API actor attribution.
 - [x] AUD-21.S4 local Studio capability/API implementation and UI regression.
@@ -650,8 +660,8 @@ AUD-25 giữ Deferred, không đánh dấu Completed hoặc tự implement trong
 
 ## Result
 
-Plan hiện có 33 Markdown documents, 28 task files và 105 sprint definitions. Active
-scope có 26 work packages/96 sprint slices/12 ADR Proposed and ADR 0022 Accepted;
+Plan hiện có 33 Markdown documents, 28 task files và 108 sprint definitions. Active
+scope có 26 work packages/99 sprint slices/12 ADR Proposed and ADR 0022 Accepted;
 AUD-16 và AUD-25 giữ 9 sprint Deferred theo yêu cầu owner. AUD-06/24 vẫn nhận
 PLY/SOG cho view; AUD-19 không đợi hoặc implement imported-source adapter.
 Subsequent sprint work has changed source code:
@@ -663,14 +673,16 @@ provisional source/diagnostic/proposal/QA artifacts; S4i adds authenticated oper
 enqueue/status/cancel routes with job/project/revision binding and safe status views;
 S4j adds server-sealed request preparation from accepted R2/R3 recipes and the current
 scene; S4k adds Studio preflight/start/status/cancel with idempotent recovery; S4l adds
-read-only proposal/QA inspection bound to exact artifacts and scene revisions. Proposal
-overlay, scene confirmation/consumer paths, and runtime/held-out qualification remain
+read-only proposal/QA inspection bound to exact artifacts and scene revisions; S4m adds
+diagnostic overlays and S4n adds qualified confirmation with durable CAS. Bundle
+consumer publication in S4o, browser acceptance, and held-out/Isaac qualification remain
 open.
 Validation at initial plan creation exited 0: 25 integration sections gồm một
 Deferred, 231 local links, 121 existing pytest paths và 138 canonical bindings;
-80 active sprints đúng internal order, 37 cross-task prerequisite pairs và 6
-AUD-25 deferred sprints ngoài execution order/dependencies. Later owner-directed
-updates are reflected in the current 26/96 counts above. `git diff --check` exited
+88 non-deferred base sprints đúng internal order, 37 cross-task prerequisite pairs và 6
+AUD-25 deferred sprints ngoài execution order/dependencies. The 11 AUD-19 follow-ups
+are additional slices. Later owner-directed updates are reflected in the current
+26/99 counts above. `git diff --check` exited
 0. This validates plan documents, not runtime acceptance.
 Các số liệu cấu trúc tài liệu là snapshot của lần tạo plan; Result/Evidence ở từng
 task mới là nguồn hiện trạng sau từng sprint.

@@ -19,8 +19,17 @@ function metres(value: number): string {
   return `${value.toFixed(2)} m`;
 }
 
-export function RegistrationOverlay({ previews }: { previews: RegistrationOverlayPreview[] }) {
-  const [candidateId, setCandidateId] = useState<string | null>(null);
+export function RegistrationOverlay({
+  previews,
+  selectedCandidateId,
+  onCandidateChange,
+}: {
+  previews: RegistrationOverlayPreview[];
+  selectedCandidateId?: string | null;
+  onCandidateChange?: (candidateId: string) => void;
+}) {
+  const [localCandidateId, setLocalCandidateId] = useState<string | null>(null);
+  const candidateId = selectedCandidateId === undefined ? localCandidateId : selectedCandidateId;
   const preview = previews.find((item) => item.candidate_id === candidateId) ?? previews[0];
   if (!preview) return null;
 
@@ -47,7 +56,10 @@ export function RegistrationOverlay({ previews }: { previews: RegistrationOverla
               aria-label="Phương án chồng chiếu"
               className="rounded-md border border-line bg-paper px-2 py-1 text-ink"
               value={preview.candidate_id}
-              onChange={(event) => setCandidateId(event.target.value)}
+              onChange={(event) => {
+                setLocalCandidateId(event.target.value);
+                onCandidateChange?.(event.target.value);
+              }}
             >
               {previews.map((item) => <option key={item.candidate_id} value={item.candidate_id}>{item.candidate_id}</option>)}
             </select>
