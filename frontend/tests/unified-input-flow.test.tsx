@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UnifiedInputFlow } from "@/features/studio/UnifiedInputFlow";
+import { VideoPreparationError } from "@/lib/media/video-normalization-core";
 import type { AssemblyUploadResponse, InputResolutionReport, InputResolutionCandidate, RuntimeCapabilityRecord } from "@/lib/contracts/inputAssembly";
 
 const mocks = vi.hoisted(() => ({
@@ -279,6 +280,48 @@ describe("unified input flow", () => {
     })));
     expect(mocks.push).toHaveBeenCalledWith("/scenes/job-1");
     expect(window.sessionStorage.getItem("r2s:input-assembly:v1:user-1")).toBeNull();
+  });
+
+  it("asks before dropping incompatible audio, and never drops it on its own", async () => {
+    mocks.prepareVideo.mockRejectedValueOnce(new VideoPreparationError("audio_omission_required", "Audio tracks with negative starting timestamps cannot be preserved."));
+    const { container } = render(<UnifiedInputFlow />);
+    const phone = new File(["phone"], "IMG_3911.mp4", { type: "video/mp4" });
+    fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [phone] } });
+    fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Âm thanh của video không giữ nguyên được/);
+    expect(mocks.prepareVideo.mock.calls[0][0]).toMatchObject({ omitAudioWithConsent: false });
+    expect(mocks.uploadPrepared).not.toHaveBeenCalled();
+    expect(mocks.uploadAssembly).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Bỏ âm thanh và chuẩn bị lại" }));
+    expect(await screen.findByText("Đã xác minh")).toBeInTheDocument();
+    expect(mocks.prepareVideo.mock.calls[1][0]).toMatchObject({ omitAudioWithConsent: true, source: phone });
+    expect(mocks.uploadPrepared).toHaveBeenCalledTimes(1);
+    expect(mocks.uploadAssembly).not.toHaveBeenCalled();
+  });
+
+  it("explains an undecodable codec in Vietnamese and uploads the original only on an explicit choice", async () => {
+    mocks.prepareVideo.mockRejectedValueOnce(new VideoPreparationError("unsupported_codec", "This browser cannot decode the selected video's codec."));
+    mocks.uploadAssembly.mockImplementation((file: File, _account: string, onProgress: (value: number) => void) => {
+      onProgress(1);
+      return { abort: vi.fn(), promise: Promise.resolve(staged("upload-raw", file.name)) };
+    });
+    const { container } = render(<UnifiedInputFlow />);
+    const hevc = new File(["hevc"], "IMG_3911.mp4", { type: "video/mp4" });
+    fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [hevc] } });
+    fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/không giải mã được codec/);
+    expect(screen.queryByRole("button", { name: "Bỏ âm thanh và chuẩn bị lại" })).toBeNull();
+    expect(mocks.uploadAssembly).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Tải video gốc không nén/ }));
+    expect(await screen.findByText("Đã xác minh")).toBeInTheDocument();
+    expect(mocks.uploadAssembly).toHaveBeenCalledTimes(1);
+    expect(mocks.uploadAssembly.mock.calls[0][0]).toBe(hevc);
+    expect(mocks.prepareVideo).toHaveBeenCalledTimes(1);
+    expect(mocks.uploadPrepared).not.toHaveBeenCalled();
   });
 
   it("shows unqualified R6 diagnostics while keeping the supplied R4 recipe as a usable fallback", async () => {
