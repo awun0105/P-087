@@ -19,10 +19,19 @@ from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeSta
 from src.services.orchestration.jobs.dispatch import load_prepared_profile, prepared_frame_reference, require_profile
 from src.services.orchestration.jobs.log_context import configure_worker_logging, job_log_context
 from src.services.orchestration.jobs.models import TransitionRequest
-from src.services.orchestration.jobs.progress import awaiting_finalize
+from src.services.orchestration.jobs.progress import (
+    awaiting_anonymization_review,
+    awaiting_finalize,
+    awaiting_reviewed_preview,
+)
 from src.services.orchestration.jobs.queue import fair_order, waiting_jobs
 from src.services.orchestration.jobs.registration_worker import RegistrationOperationWorker
-from src.services.orchestration.jobs.runner import run_finalize_job, run_prepared_job, run_video_job
+from src.services.orchestration.jobs.runner import (
+    run_finalize_job,
+    run_prepared_job,
+    run_reviewed_preview_job,
+    run_video_job,
+)
 from src.services.orchestration.jobs.workspace import attempt_in_use, job_attempts, job_root
 from src.services.orchestration.processing import is_presets_file, load_presets
 from src.services.orchestration.processing.capability import probe as probe_capability
@@ -136,6 +145,9 @@ def recover_interrupted_jobs(registry: ProjectRegistry, settings: Settings) -> i
             continue
         if job.status != JobStatus.RUNNING:
             continue
+        if awaiting_anonymization_review(job) or awaiting_reviewed_preview(job):
+            # Job dừng có chủ ý sau bước che frame, chờ người dùng xem hoặc chờ worker nhận: không phải tiến trình chết.
+            continue
         if awaiting_finalize(job):
             # Nếu đang ở REC-06 chờ finalize, kiểm tra xem có workspace finalize đang chạy dở hay chưa
             # Nếu chỉ đang chờ người dùng xác nhận metric (chưa có confirmation_stage) thì không coi là chết
@@ -190,6 +202,7 @@ def dispatch_next(
     video_runner: VideoRunner = run_video_job,
     finalize_runner: VideoRunner = run_finalize_job,
     admission: ResourceAdmission | None = None,
+    reviewed_runner: VideoRunner = run_reviewed_preview_job,
 ) -> bool:
     """Xử lý tối đa một job mỗi lượt; skip input chưa chuẩn bị/profile khác.
 
@@ -203,7 +216,7 @@ def dispatch_next(
     if registry.persistence is None or registry.execution_profile is None:
         raise ValueError("Queue consumer cần durable registry và execution profile")
     try:
-        return _dispatch(registry, runner, video_runner, finalize_runner, admission)
+        return _dispatch(registry, runner, video_runner, finalize_runner, admission, reviewed_runner)
     finally:
         # Giữ chỗ chỉ sống trong lúc worker chạy job; kể cả khi runner ném lỗi hoặc worker bị ngắt.
         if admission is not None:
@@ -216,6 +229,7 @@ def _dispatch(
     video_runner: VideoRunner,
     finalize_runner: VideoRunner,
     admission: ResourceAdmission | None,
+    reviewed_runner: VideoRunner = run_reviewed_preview_job,
 ) -> bool:
     """Một lượt quét hàng đợi của `dispatch_next`."""
     if registry.persistence is None:
@@ -242,6 +256,15 @@ def _dispatch(
                     except Exception as error:
                         logger.error("Finalize dispatch failed job=%s cause=%s", job_id, type(error).__name__)
                         _record_finalize_failure(registry, candidate, error)
+                    return True
+                if awaiting_anonymization_review(candidate):
+                    continue  # Bản đã che chưa được người dùng chấp nhận: không dựng 3D từ nó.
+                if awaiting_reviewed_preview(candidate):
+                    # Người dùng đã chấp nhận bản đã che (job RUNNING ở bước tách frame): dựng preview trên cùng job.
+                    require_project_dispatch(registry.get_project(candidate.project_id))
+                    if admission is not None and not admission(candidate):
+                        continue
+                    reviewed_runner(job_id, expected_checksum=candidate.job_manifest_checksum)
                     return True
                 require_profile(candidate, registry.execution_profile)
                 project = registry.get_project(candidate.project_id)

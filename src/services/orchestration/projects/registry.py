@@ -945,6 +945,49 @@ class ProjectRegistry:
         self.persistence.save_job(updated, manifest_ref, event, expected=expected)
         return updated
 
+    def record_anonymization_acceptance(self, expected: JobManifest, reference: ProductArtifactRef) -> JobManifest:
+        """Ghi việc người dùng đã xem và chấp nhận bản frame đã che (AUD-18); CAS theo revision.
+
+        Job giữ nguyên trạng thái và stage: worker thấy bản ghi này mới dựng preview từ frame đã che.
+        """
+        from src.services.orchestration.jobs.progress import (
+            ANONYMIZATION_ACCEPTANCE_TYPE,
+            awaiting_anonymization_review,
+        )
+
+        if self.persistence is None:
+            raise RuntimeStateConflictError("Chấp nhận bản đã che cần durable registry")
+        if not awaiting_anonymization_review(expected):
+            raise RuntimeStateConflictError("Job không ở bước chờ xem bản đã che")
+        if reference.job_id != expected.job_id or reference.artifact_type != ANONYMIZATION_ACCEPTANCE_TYPE:
+            raise ValueError("Bản chấp nhận không thuộc job này")
+        self.runtime_resolver.require(reference)
+        stage = StageArtifact(
+            stage_id=StageId.PRIVACY_GATE,
+            status="SUCCEEDED",
+            completed_at=datetime.now(UTC),
+            artifact_type=reference.artifact_type,
+            artifact_uri=reference.artifact_uri,
+            artifact_checksum=reference.artifact_checksum,
+            data_class=reference.data_class,
+        )
+        updated = with_canonical_checksum(
+            expected.model_copy(update={"stage_artifacts": [*expected.stage_artifacts, stage]}),
+            "job_manifest_checksum",
+        )
+        manifest_ref = self.lifecycle.store.publish_manifest(updated)
+        history = self.persistence.list_attempts(expected.job_id)
+        event = JobAttemptRecord(
+            attempt=history[-1].attempt,
+            status=updated.status,
+            current_stage=updated.current_stage,
+            recorded_at=datetime.now(UTC),
+            job_manifest_uri=manifest_ref.artifact_uri,
+            job_manifest_checksum=manifest_ref.artifact_checksum,
+        )
+        self.persistence.save_job(updated, manifest_ref, event, expected=expected)
+        return updated
+
     def record_finalize(
         self,
         expected: JobManifest,

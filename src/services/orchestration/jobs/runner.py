@@ -71,7 +71,12 @@ from src.services.orchestration.jobs.dispatch import (
 )
 from src.services.orchestration.jobs.log_context import configure_worker_logging, job_log_context
 from src.services.orchestration.jobs.models import PreparedInputReceipt, TransitionRequest
-from src.services.orchestration.jobs.progress import awaiting_finalize, metric_confirmation_stage
+from src.services.orchestration.jobs.progress import (
+    awaiting_anonymization_review,
+    awaiting_finalize,
+    awaiting_reviewed_preview,
+    metric_confirmation_stage,
+)
 from src.services.orchestration.jobs.workspace import attempt_lease, cleanup_attempt_workspace, cleanup_finished_job
 from src.services.orchestration.processing import is_presets_file, load_presets
 from src.services.orchestration.processing.capability import latest as latest_capability
@@ -931,9 +936,60 @@ def run_video_job(job_id: str, *, expected_checksum: str | None = None) -> JobMa
                 frames = prepared_frame_reference(attempt.job)
                 if frames is None:
                     raise ValueError("Prepare thành công nhưng thiếu frame set")
+                if awaiting_anonymization_review(attempt.job):
+                    # Frame đã che: dừng ở đây, giữ RUNNING ở bước tách frame. Chỉ khi người dùng xem và chấp nhận
+                    # bản đã che thì `run_reviewed_preview_job` mới dựng 3D (owner chốt 2026-10-09).
+                    _record_benchmark(attempt)
+                    return attempt.job
                 attempt.job = _execute_lidar_ingest(attempt, frames)
                 if attempt.job.status != JobStatus.RUNNING:
                     _record_benchmark(attempt)  # LiDAR ingest hoặc structural QA lỗi: dừng trước COLMAP/Brush
+                    return attempt.job
+                job = _execute_preview(attempt, frames, profile)
+            return _requeue_if_exhausted(attempt) or job
+        except BaseException as error:
+            _record_runner_failure(attempt, error)
+            _requeue_if_exhausted(attempt)
+            raise
+
+
+def run_reviewed_preview_job(job_id: str, *, expected_checksum: str | None = None) -> JobManifest:
+    """Sau khi người dùng chấp nhận bản frame đã che: LiDAR ingest (nếu có) → preview, trên cùng job.
+
+    Claim bằng CAS chuyển stage FRAME_EXTRACT → CAMERA_POSE nên hai worker không cùng chạy.
+    """
+    settings = get_settings()
+    registry = get_project_registry()
+    job = registry.get_job(job_id)
+    if expected_checksum is not None and job.job_manifest_checksum != expected_checksum:
+        raise RuntimeStateConflictError("Queue candidate đã thay đổi trước dispatch")
+    if re.fullmatch(_JOB_ID_PATTERN, job_id) is None:
+        raise ValueError("Job ID không thể dùng làm worker namespace")
+    if not awaiting_reviewed_preview(job):
+        raise RuntimeStateConflictError("Job không chờ dựng preview sau khi chấp nhận bản đã che")
+    profile_path = settings.product_processing_config
+    execution = registry.execution_profile
+    if profile_path is None or execution is None:
+        raise ValueError("Worker cần execution profile đã cấu hình")
+    if job.runtime_manifest_checksum != execution.runtime_manifest_checksum or job.seed != execution.seed:
+        raise RuntimeStateConflictError("Job cần worker có execution profile tương ứng")
+    profile = resolve_job_processing(
+        job, execution, profile_path, registry.runtime_resolver, settings.product_target_frame_count
+    )
+    registry.runtime_resolver.sync_down(job_id)
+    frames = prepared_frame_reference(job)
+    if frames is None:
+        raise ValueError("Job đã chấp nhận bản đã che nhưng thiếu frame set")
+    job = registry.record_stage_progress(job, StageId.CAMERA_POSE)
+    workspace = settings.product_worker_root.expanduser().resolve() / job_id / f"attempt-{uuid4().hex}"
+    workspace.mkdir(parents=True, exist_ok=False)
+    attempt = _Attempt(registry, settings, job, workspace)
+    with job_log_context(job_id, _attempt_log_id(registry, job_id)):
+        try:
+            with attempt_lease(workspace):
+                attempt.job = _execute_lidar_ingest(attempt, frames)
+                if attempt.job.status != JobStatus.RUNNING:
+                    _record_benchmark(attempt)
                     return attempt.job
                 job = _execute_preview(attempt, frames, profile)
             return _requeue_if_exhausted(attempt) or job

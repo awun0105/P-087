@@ -132,7 +132,13 @@ def waiting_jobs(registry: ProjectRegistry) -> list[WaitingJob]:
     Ứng viên lấy từ event mới nhất của từng job trong journal (một truy vấn), rồi chỉ job RUNNING ở bước tỉ lệ
     mới phải mở manifest để phân biệt "chờ người xác nhận" với "đã xác nhận, chờ worker".
     """
-    from src.services.orchestration.jobs.progress import awaiting_finalize, metric_confirmation_stage
+    from src.services.orchestration.jobs.progress import (
+        anonymization_acceptance_stage,
+        awaiting_anonymization_review,
+        awaiting_finalize,
+        awaiting_reviewed_preview,
+        metric_confirmation_stage,
+    )
 
     if registry.persistence is None:
         return []
@@ -152,6 +158,17 @@ def waiting_jobs(registry: ProjectRegistry) -> list[WaitingJob]:
             served[job_id] = event.recorded_at
         if event.status == JobStatus.QUEUED:
             waiting.append(WaitingJob(job_id=job_id, phase="preview", queued_at=event.recorded_at))
+        elif event.status == JobStatus.RUNNING and event.current_stage == StageId.FRAME_EXTRACT:
+            # Job chọn che frame dừng ở đây: chỉ vào hàng đợi sau khi người dùng chấp nhận bản đã che.
+            try:
+                job = registry.get_job(job_id)
+            except Exception:  # noqa: BLE001, S112 - một manifest hỏng không được chặn hàng đợi của job khác
+                continue
+            if awaiting_anonymization_review(job) or not awaiting_reviewed_preview(job):
+                continue
+            accepted = anonymization_acceptance_stage(job)
+            accepted_at = accepted.completed_at if accepted is not None else None
+            waiting.append(WaitingJob(job_id=job_id, phase="preview", queued_at=accepted_at or event.recorded_at))
         elif event.status == JobStatus.RUNNING and event.current_stage == StageId.METRIC_CANONICALIZE:
             try:
                 job = registry.get_job(job_id)

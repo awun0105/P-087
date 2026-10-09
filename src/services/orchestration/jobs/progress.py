@@ -67,7 +67,7 @@ def studio_pipeline(job: JobManifest) -> tuple[StageId, ...]:
 
 StageState = Literal["pending", "running", "waiting", "succeeded", "failed", "cancelled"]
 #: Lý do pipeline chờ: người xác nhận hoặc worker chưa đủ tài nguyên.
-WaitingFor = Literal["metric_confirmation", "resources"]
+WaitingFor = Literal["metric_confirmation", "anonymization_review", "resources"]
 
 
 class StageProgress(BaseModel):
@@ -101,6 +101,62 @@ class JobProgress(BaseModel):
     #: Vị trí trong hàng đợi khi job đang chờ worker; None khi job đang chạy, đã xong hoặc chờ người dùng.
     queue: QueuePosition | None = None
     error: ExecutionError | None = None
+
+
+#: Loại artifact ghi nhận người dùng đã xem và chấp nhận bản frame đã che (AUD-18).
+ANONYMIZATION_ACCEPTANCE_TYPE = "SanitizationAcceptance"
+_SANITIZED_FRAME_SET_SUFFIX = "/rec02a/sanitized/frame_set.json"
+
+
+def sanitized_frame_stage(job: JobManifest) -> StageArtifact | None:
+    """Stage tách frame của job khi frame set là bản đã che khuôn mặt/biển số; None nếu job không chọn che."""
+    return next(
+        (
+            stage
+            for stage in reversed(job.stage_artifacts)
+            if stage.stage_id == StageId.FRAME_EXTRACT
+            and stage.status == StageStatus.SUCCEEDED
+            and stage.artifact_type == "NormalizedRGBFrameSet"
+            and (stage.artifact_uri or "").endswith(_SANITIZED_FRAME_SET_SUFFIX)
+        ),
+        None,
+    )
+
+
+def anonymization_acceptance_stage(job: JobManifest) -> StageArtifact | None:
+    """Bản ghi người dùng đã chấp nhận bản đã che, nếu có."""
+    return next(
+        (
+            stage
+            for stage in job.stage_artifacts
+            if stage.stage_id == StageId.PRIVACY_GATE
+            and stage.status == StageStatus.SUCCEEDED
+            and stage.artifact_type == ANONYMIZATION_ACCEPTANCE_TYPE
+        ),
+        None,
+    )
+
+
+def awaiting_anonymization_review(job: JobManifest) -> bool:
+    """Frame đã che xong, job dừng trước COLMAP chờ người dùng xem và chấp nhận bản đã che.
+
+    QUEUED cũng tính (job được retry trước khi có chấp nhận): worker không được dựng 3D từ bản chưa ai xem.
+    """
+    if sanitized_frame_stage(job) is None or anonymization_acceptance_stage(job) is not None:
+        return False
+    return job.status == JobStatus.QUEUED or (
+        job.status == JobStatus.RUNNING and job.current_stage == StageId.FRAME_EXTRACT
+    )
+
+
+def awaiting_reviewed_preview(job: JobManifest) -> bool:
+    """Người dùng đã chấp nhận bản đã che; job RUNNING đang chờ worker nhận để dựng preview."""
+    return (
+        job.status == JobStatus.RUNNING
+        and job.current_stage == StageId.FRAME_EXTRACT
+        and sanitized_frame_stage(job) is not None
+        and anonymization_acceptance_stage(job) is not None
+    )
 
 
 def awaiting_metric_confirmation(job: JobManifest, preview_ready: bool) -> bool:
@@ -176,11 +232,13 @@ def job_progress(
         if later in stage_starts
     }
     waiting = awaiting_metric_confirmation(job, preview_ready)
+    reviewing = awaiting_anonymization_review(job)
     resources = (
         resource_wait
         if resource_wait is not None
         and resource_wait.job_manifest_checksum == job.job_manifest_checksum
-        and (job.status == JobStatus.QUEUED or awaiting_finalize(job))
+        and not reviewing
+        and (job.status == JobStatus.QUEUED or awaiting_finalize(job) or awaiting_reviewed_preview(job))
         else None
     )
     stages: list[StageProgress] = []
@@ -207,6 +265,9 @@ def job_progress(
                 state = "waiting"
             elif resources is not None and state == "running":
                 state = "pending"
+        if reviewing and stage_id == StageId.FRAME_EXTRACT:
+            # Frame đã tách và che xong nhưng bước này chưa khép lại: đang chờ người dùng xem bản đã che.
+            state = "waiting"
         if stage_id == job.current_stage and state in {"failed", "cancelled"} and completed_at is None:
             completed_at = terminal_at
         stages.append(
@@ -234,9 +295,18 @@ def job_progress(
         completed_at=job.completed_at,
         stages=stages,
         preview_ready=preview_ready,
-        waiting_for="metric_confirmation" if waiting else ("resources" if resources else None),
+        waiting_for=(
+            "metric_confirmation"
+            if waiting
+            else ("anonymization_review" if reviewing else ("resources" if resources else None))
+        ),
         resource_wait=resources,
-        queue=queue if job.status == JobStatus.QUEUED or awaiting_finalize(job) else None,
+        queue=(
+            queue
+            if not reviewing
+            and (job.status == JobStatus.QUEUED or awaiting_finalize(job) or awaiting_reviewed_preview(job))
+            else None
+        ),
         error=failure if job.status == JobStatus.FAILED else None,
     )
 
