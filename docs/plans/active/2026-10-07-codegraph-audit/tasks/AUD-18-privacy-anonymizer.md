@@ -96,6 +96,13 @@ empty frames/codec failure, coverage gaps, artifact corruption, restart/cancel/l
 
 ## Sprint AUD-18.S3 — Manual correction, QA và dispatch integration
 
+**Trạng thái: THAY BẰNG uploader-acceptance (owner 2026-10-09).** Không làm reviewer riêng,
+sửa tay vùng che hay dispatch theo `approved_copy_checksum` như mô tả dưới. Thay vào đó,
+người upload xem bản đã che và chấp nhận đúng bộ frame đã xem; job dừng ở
+`ST-FRAME-EXTRACT` đến khi có chấp nhận (chi tiết ở Result, mục "Quyết định hiện hành").
+Phần còn lại của mục này giữ làm lịch sử thiết kế gốc, không còn là yêu cầu hoàn thành.
+Các exit dưới đây được đánh dấu N/A, không tick.
+
 **Input:** decoded sanitized output/evidence + authorized reviewer decisions.
 **Output:** review/correction UI, exact-copy acceptance và downstream dispatch binding.
 **Contract:** manual edits create new immutable copy/evidence; stale approval rejected;
@@ -109,7 +116,8 @@ impact of redacted texture separately from privacy detection/redaction quality.
 Tests: known missed detections/manual fixes, wrong/stale approved_copy_checksum,
 QA permission, mode-specific dispatch, browser review→correct→approve→train flow,
 consented real dataset privacy/coverage and reconstruction quality acceptance.
-**Exit:** [ ] reviewer/dispatch lineage verified; [ ] real detection/coverage limits recorded.
+**Exit (N/A — thay bằng uploader-acceptance):** ~~[ ] reviewer/dispatch lineage verified~~;
+[ ] real detection/coverage limits recorded — phần này vẫn mở, thuộc đánh giá trên dữ liệu thật.
 
 ## Verification và DoD
 
