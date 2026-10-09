@@ -70,6 +70,15 @@ def colmap_gpu() -> tuple[bool, str]:
             img_file = img_dir / f"img_{idx}.ppm"
             img_file.write_bytes(b"P6\n64 64\n255\n" + (b"\x80\x80\x80" * (64 * 64)))
         db_path = tmp_path / "database.db"
+        # COLMAP 4.x đổi tiền tố cờ thành FeatureExtraction; chọn theo help của chính binary này.
+        try:
+            help_text = subprocess.run(
+                [*command, "feature_extractor", "-h"], capture_output=True, text=True, timeout=120.0, check=False
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            return False, type(error).__name__
+        options = help_text.stdout + help_text.stderr
+        prefix = "FeatureExtraction" if "--FeatureExtraction.use_gpu" in options else "SiftExtraction"
         cmd = [
             *command,
             "feature_extractor",
@@ -77,7 +86,7 @@ def colmap_gpu() -> tuple[bool, str]:
             str(db_path),
             "--image_path",
             str(img_dir),
-            "--SiftExtraction.use_gpu",
+            f"--{prefix}.use_gpu",
             "1",
         ]
         ok, text = _run(cmd, timeout=120.0)
