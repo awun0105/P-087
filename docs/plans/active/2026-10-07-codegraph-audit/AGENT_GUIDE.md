@@ -16,7 +16,7 @@ baseline, không buộc feature mới giữ mọi assumptions cũ. ADR Proposed 
 phát minh policy mới; extension contract phải review cả producer và consumers.
 
 Plan inventory có 26 task packages; scope implement ở nhánh này là 24 packages/80
-base sprints. AUD-18/AUD-23 do owner thực hiện; AUD-16/AUD-25 Deferred. AUD-19.S4e–S4o
+base sprints. AUD-23 do owner thực hiện; AUD-18 do Claude Code thực hiện; AUD-16/AUD-25 Deferred. AUD-19.S4e–S4o
 là các follow-up slices ngoài 80 base sprints. AUD-25 giữ 6 sprint Deferred làm tham khảo.
 Không nhận hoặc implement sprint của AUD-25 nếu owner chưa yêu cầu mở lại.
 Đọc GEMINI_FINDINGS.md khi xử lý AUD-12–18:
