@@ -13,6 +13,7 @@ import { floorFitDiagnostic } from "@/features/studio/scene/floorFitDiagnostic";
 import { EvaluationCard } from "@/features/studio/evaluation/EvaluationCard";
 import { ValidationReportCard } from "@/features/studio/ValidationReportCard";
 import { getJobScene, type ReviewStateView } from "@/lib/api/studio";
+import { RegistrationPanel } from "@/features/studio/scene/RegistrationPanel";
 
 export function ReviewTab({ jobId, canMutateJob, onSaveState }: { jobId: string; canMutateJob: boolean; onSaveState: (state: SaveState) => void }) {
   const [revision, setRevision] = useState<string | null>(null);
@@ -58,6 +59,9 @@ export function ReviewTab({ jobId, canMutateJob, onSaveState }: { jobId: string;
           </div>
         </Notice>
       </div>}
+      <Card className="overflow-hidden lg:col-span-2">
+        <RegistrationPanel jobId={jobId} sceneRevision={revision} canMutateJob={canMutateJob} />
+      </Card>
       <Card className="overflow-hidden">
         <SimulationPackagePanel jobId={jobId} sceneRevision={revision} canCreate={canMutateJob} onSceneChanged={() => setReload((value) => value + 1)} />
       </Card>

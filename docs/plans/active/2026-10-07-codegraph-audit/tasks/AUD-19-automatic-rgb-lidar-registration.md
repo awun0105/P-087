@@ -1133,3 +1133,72 @@ Pre-flight (GUIDE.md Rule 13)
   contract mirror and diff checks passed. CodeGraph and Graphify were refreshed after
   the edits.
 - DevTools: n/a — backend-only route/service; no rendered screen changed.
+
+### AUD-19.S4k — Studio preflight, durable operation status and cancellation
+
+**Input:** the current committed SceneIR revision, an authenticated actor with the
+existing job-mutation capability, and the exact accepted R2 registered-map or R3
+static-cloud recipe. The browser does not assemble source, target, metric, floor or
+checksum claims.
+**Output:** an on-demand eligibility check, a durable registration operation, a
+recoverable operation status and a cancellation action in the scene's
+"Kiểm tra & duyệt" tab. The screen reports a candidate as a proposal only; it does not
+apply a transform, publish collision geometry or change the current scene.
+**Data contract:** call S4j `POST .../prepare` with `expected_scene_revision`; enable
+enqueue only when the returned sealed request matches the job/actor/revision and the
+preflight is `READY`. Call S4i `POST .../operations` with that unchanged request and
+`Idempotency-Key=request_id`. Save the pending sealed request in session storage before
+enqueue so an uncertain network result can replay the exact request/key after reload;
+scope storage by authenticated user and job, then discard the request after an
+operation ID is received. Poll the job-bound status endpoint with abortable,
+visibility-aware polling. Cancel only queued/running/resource-waiting operations and
+keep polling across proposal/review/confirmation transitions until the operation is
+terminal. A changed scene revision marks
+the operation stale; no UI action may bypass backend authorization or revision checks.
+**Implement:** add typed API parsing for preparation, preflight and the safe operation
+projection; add a focused panel to ReviewTab using existing Cards, Notices, Buttons and
+`usePolling`; translate finding codes into useful Vietnamese labels; show explicit
+read-only/unsupported/stale states. Keep the proposal and QA references as status-only
+in this slice; overlay, report inspection and confirmation belong to the next slice.
+No schema or worker changes.
+**Tests:** READY preparation enables enqueue; non-READY preflight never enqueues;
+request/job/actor/revision mismatches fail closed; same request retry reuses the same
+idempotency key; uncertain response recovery replays the cached request; status polling
+continues across proposal/review states, stops at terminal states and aborts on unmount;
+cancellation follows the server acknowledgement; stale revision and read-only roles
+cannot start or cancel; API parser rejects malformed status payloads.
+**Exit:** [x] READY preparation enables an accepted R2/R3 request;
+[x] uncertain-response recovery reuses the sealed request and idempotency key;
+[x] operation status and cancellation remain server-authoritative;
+[x] proposals cannot change SceneIR/collision consumers in this slice;
+[x] DevTools evidence limitation is recorded as UNVERIFIED.
+
+### Result / Evidence — AUD-19.S4k
+
+- Implementation: typed registration API parsing, sealed-request actor/job/revision
+  checks, idempotent pending-request recovery, and the ReviewTab preflight/status/
+  cancellation panel. Polling follows backend state transitions through proposal and
+  review while cancellation remains limited to worker-active states. The panel reports
+  proposals without applying transforms or changing SceneIR/collision state.
+- Changed files: `docs/plans/active/2026-10-07-codegraph-audit/AGENT_GUIDE.md`,
+  `docs/plans/active/2026-10-07-codegraph-audit/INTEGRATION_MAP.md`,
+  `docs/plans/active/2026-10-07-codegraph-audit/README.md`, this AUD-19 task file,
+  `frontend/src/lib/api/registration.ts`,
+  `frontend/src/features/studio/scene/RegistrationPanel.tsx`,
+  `frontend/src/features/studio/scene/ReviewTab.tsx`,
+  `frontend/tests/registration-api.test.ts`,
+  `frontend/tests/registration-panel.test.tsx`,
+  `frontend/tests/floor-fit-diagnostics.test.tsx`.
+- Gate report: CodeGraph traced the sealed request through the registration API,
+  RegistrationPanel, ReviewTab and ScenePage callers; Graphify was updated and its
+  post-change query found the S4k task and ReviewTab/panel path. Minimal-code scope
+  reuses the existing API routes and abortable `usePolling`; no backend schema,
+  worker, transform, viewer or collision-consumer changes were made.
+- Checks: `npx tsc --noEmit` passed; ESLint passed for changed frontend files;
+  focused Vitest passed (4 files / 32 tests); full frontend Vitest passed (54 files /
+  417 tests); `git diff --check` passed.
+- DevTools: **UNVERIFIED**. Chrome DevTools loaded the authenticated local scene
+  route, but `GET /api/v1/jobs/job-1bb733ae40ad/scene` returned 404 and ReviewTab
+  stopped at its existing missing-scene error before mounting this panel. Console
+  showed only the resulting 404 resource failures; no registration request was sent.
+  No job or scene data was created to bypass this missing fixture.
