@@ -118,7 +118,7 @@ def test_job_without_results_keeps_stages_pending_and_reports_missing_resource_d
     assert all(metric.value is None for metric in system.metrics)
     assert all(metric.display == "Chưa đo — job này không có bản ghi tài nguyên" for metric in system.metrics)
     assert evaluation.summary == [
-        "Không có chỉ số tự kiểm nào dưới ngưỡng. 0 trên 0 chỉ số có ngưỡng; các chỉ số còn lại chỉ để tham khảo."
+        "Không có chỉ số tự kiểm nào dưới ngưỡng. 0 trên 3 chỉ số có ngưỡng; các chỉ số còn lại chỉ để tham khảo."
     ]
 
 
@@ -528,7 +528,7 @@ def test_advice_summary_rules_and_ordering() -> None:
     )
     ok_summary = summarize([g_ok])
     assert ok_summary == [
-        "Không có chỉ số tự kiểm nào dưới ngưỡng. 1 trên 1 chỉ số có ngưỡng; các chỉ số còn lại chỉ để tham khảo."
+        "Không có chỉ số tự kiểm nào dưới ngưỡng. 1 trên 2 chỉ số có ngưỡng; các chỉ số còn lại chỉ để tham khảo."
     ]
 
     g_unknown_without_threshold = StageEvaluation(

@@ -40,7 +40,7 @@ def summarize(groups: list[StageEvaluation]) -> list[str]:
     trả về đúng một câu thông báo tỷ lệ chỉ số có ngưỡng.
     """
     measured_groups = [g for g in groups if g.status == "measured"]
-    total = sum(1 for g in measured_groups for m in g.metrics if m.threshold is not None)
+    total = sum(len(g.metrics) for g in measured_groups)
     n = sum(1 for g in measured_groups for m in g.metrics if m.verdict is not None)
 
     failed: list[str] = []

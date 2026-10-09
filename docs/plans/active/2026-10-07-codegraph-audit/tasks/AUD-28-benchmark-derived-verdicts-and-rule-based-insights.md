@@ -378,3 +378,9 @@ DONE khi cả ba sprint tick đủ Exit.
 
 S2 and S3 code and automated checks are complete. S2 live-data and S3 non-empty
 summary/reference visual exits remain open until the local Studio API serves this checkout.
+
+### Sửa sau review (2026-10-09)
+
+- `summarize` đếm `total` là tổng số chỉ số của các nhóm `measured` (trước đó chỉ đếm chỉ số
+  có `threshold`, nên câu luôn ra dạng "n trên n"). Test cập nhật: "0 trên 3", "1 trên 2".
+
