@@ -51,6 +51,7 @@ class EstimatedCameraPoseMapping:
     """A pose mapping diagnostic. This result is never a calibration or drift PASS."""
 
     status: Literal["diagnostic_only"]
+    #: True only when runtime qualification, world bridge, calibration/time, and all frame mappings are complete.
     complete_for_consumer: bool
     requested_frame_count: int
     poses: tuple[EstimatedCameraPose, ...]
@@ -80,15 +81,17 @@ def map_estimated_trajectory_to_rgb_frames(
         raise ValueError("maximum interpolation gap must be finite and positive")
     _validate_rgb_frames(rgb_frames)
 
-    global_blocker: str | None = None
+    mapping_blockers: list[str] = []
     if sensor_from_camera is None:
-        global_blocker = "CAMERA_LIDAR_CALIBRATION_REQUIRED"
-    elif clock_relation in (None, ClockRelation.UNKNOWN):
-        global_blocker = "CLOCK_RELATION_REQUIRED"
+        mapping_blockers.append("CAMERA_LIDAR_CALIBRATION_REQUIRED")
+    if clock_relation in (None, ClockRelation.UNKNOWN):
+        mapping_blockers.append("CLOCK_RELATION_REQUIRED")
     elif clock_relation == ClockRelation.KNOWN_OFFSET and clock_offset_seconds is None:
-        global_blocker = "CLOCK_OFFSET_REQUIRED"
-    if global_blocker is not None:
-        return _blocked_mapping(rgb_frames, global_blocker)
+        mapping_blockers.append("CLOCK_OFFSET_REQUIRED")
+    if mapping_blockers:
+        if trajectory.runtime_qualification_status != "qualified":
+            mapping_blockers.append("ODOMETRY_RUNTIME_NOT_QUALIFIED")
+        return _blocked_mapping(rgb_frames, tuple(mapping_blockers))
 
     assert sensor_from_camera is not None
     assert clock_relation is not None
@@ -112,6 +115,8 @@ def map_estimated_trajectory_to_rgb_frames(
     mapped: list[EstimatedCameraPose] = []
     unmapped: list[UnmappedRGBFrame] = []
     reason_codes: list[str] = []
+    if trajectory.runtime_qualification_status != "qualified":
+        reason_codes.append("ODOMETRY_RUNTIME_NOT_QUALIFIED")
     if trajectory.world_from_map is None:
         reason_codes.append("WORLD_FROM_MAP_CONFIRMATION_REQUIRED")
     maximum_used_gap: float | None = None
@@ -159,7 +164,11 @@ def map_estimated_trajectory_to_rgb_frames(
 
     return EstimatedCameraPoseMapping(
         status="diagnostic_only",
-        complete_for_consumer=trajectory.world_from_map is not None and not unmapped,
+        complete_for_consumer=(
+            trajectory.runtime_qualification_status == "qualified"
+            and trajectory.world_from_map is not None
+            and not unmapped
+        ),
         requested_frame_count=len(rgb_frames),
         poses=tuple(mapped),
         unmapped_frames=tuple(unmapped),
@@ -182,16 +191,19 @@ def _validate_rgb_frames(frames: tuple[RGBFrameTimestamp, ...]) -> None:
         raise ValueError("RGB frame IDs and source PTS must be unique, ordered, and finite")
 
 
-def _blocked_mapping(frames: tuple[RGBFrameTimestamp, ...], reason_code: str) -> EstimatedCameraPoseMapping:
+def _blocked_mapping(
+    frames: tuple[RGBFrameTimestamp, ...], reason_codes: tuple[str, ...]
+) -> EstimatedCameraPoseMapping:
+    unique_reason_codes = tuple(dict.fromkeys(reason_codes))
     return EstimatedCameraPoseMapping(
         status="diagnostic_only",
         complete_for_consumer=False,
         requested_frame_count=len(frames),
         poses=(),
         unmapped_frames=tuple(
-            UnmappedRGBFrame(frame.output_frame_id, frame.source_frame_id, reason_code) for frame in frames
+            UnmappedRGBFrame(frame.output_frame_id, frame.source_frame_id, unique_reason_codes[0]) for frame in frames
         ),
-        reason_codes=(reason_code,),
+        reason_codes=unique_reason_codes,
         max_source_gap_seconds=None,
     )
 

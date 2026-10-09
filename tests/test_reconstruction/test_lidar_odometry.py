@@ -284,8 +284,8 @@ def test_estimated_camera_mapping_interpolates_with_confirmed_frames_and_time_of
     )
 
     assert result.status == "diagnostic_only"
-    assert result.complete_for_consumer
-    assert result.reason_codes == ()
+    assert not result.complete_for_consumer
+    assert result.reason_codes == ("ODOMETRY_RUNTIME_NOT_QUALIFIED",)
     pose = result.poses[0]
     assert (pose.output_frame_id, pose.source_frame_id) == (4, 12)
     assert (pose.left_scan_index, pose.right_scan_index) == (1, 2)
@@ -322,7 +322,8 @@ def test_estimated_camera_mapping_slerps_orientation_between_scan_poses(
         maximum_interpolation_gap_seconds=0.15,
     )
 
-    assert result.complete_for_consumer
+    assert not result.complete_for_consumer
+    assert result.reason_codes == ("ODOMETRY_RUNTIME_NOT_QUALIFIED",)
     assert result.poses[0].world_from_camera.rotation_quaternion_xyzw == pytest.approx(
         (0.0, 0.0, 0.3826834323650898, 0.9238795325112867)
     )
@@ -349,7 +350,21 @@ def test_estimated_camera_mapping_blocks_unknown_clock_and_unconfirmed_world_fra
     )
     assert not unknown_clock.complete_for_consumer
     assert unknown_clock.poses == ()
-    assert unknown_clock.reason_codes == ("CLOCK_RELATION_REQUIRED",)
+    assert unknown_clock.reason_codes == ("CLOCK_RELATION_REQUIRED", "ODOMETRY_RUNTIME_NOT_QUALIFIED")
+
+    missing_calibration_and_clock = map_estimated_trajectory_to_rgb_frames(
+        trajectory,
+        frames,
+        None,
+        clock_relation=ClockRelation.UNKNOWN,
+        clock_offset_seconds=None,
+        maximum_interpolation_gap_seconds=0.2,
+    )
+    assert missing_calibration_and_clock.reason_codes == (
+        "CAMERA_LIDAR_CALIBRATION_REQUIRED",
+        "CLOCK_RELATION_REQUIRED",
+        "ODOMETRY_RUNTIME_NOT_QUALIFIED",
+    )
     with pytest.raises(ValueError, match="same-clock declaration"):
         map_estimated_trajectory_to_rgb_frames(
             trajectory,
@@ -370,7 +385,10 @@ def test_estimated_camera_mapping_blocks_unknown_clock_and_unconfirmed_world_fra
         maximum_interpolation_gap_seconds=0.2,
     )
     assert not unconfirmed_world.complete_for_consumer
-    assert unconfirmed_world.reason_codes == ("WORLD_FROM_MAP_CONFIRMATION_REQUIRED",)
+    assert unconfirmed_world.reason_codes == (
+        "ODOMETRY_RUNTIME_NOT_QUALIFIED",
+        "WORLD_FROM_MAP_CONFIRMATION_REQUIRED",
+    )
     assert len(unconfirmed_world.poses) == 1
     assert unconfirmed_world.poses[0].map_from_camera.local_frame == "camera"
     assert unconfirmed_world.poses[0].map_from_camera.translation_xyz == pytest.approx((0.05, 0.0, 0.0))

@@ -163,7 +163,25 @@ S3 execution is split into separately reviewable commits:
 
 Tests cover equivalent trajectories under a global map change, accumulated translation drift, declared clock offset, unit conversion, frame mismatch, interpolation limits, no extrapolation and insufficient adjacent matches. The report must keep real-sensor qualification pending.
 
-### Sprint AUD-17.S3b — Durable estimated-trajectory consumer integration
+### Sprint AUD-17.S3b1 — Consumer-readiness guard for diagnostic pose mapping
+
+**Input:** an estimated scan trajectory, selected RGB source timestamps, optional
+camera/LiDAR calibration, explicit clock evidence and an optional confirmed world
+bridge.
+**Output:** diagnostic RGB pose mappings plus complete blocker codes and an explicit
+consumer-readiness boolean.
+**Contract:** diagnostic poses may be calculated for inspection, but they are
+`complete_for_consumer` only when the runtime is qualified, the world bridge is
+confirmed, calibration/time evidence is valid and every selected frame maps within
+the configured interpolation bound. A wired-unqualified runtime must never appear
+consumer-ready, even when a fixture supplies a world bridge.
+
+Implement/test this guard before adding durable product consumers. Preserve usable
+diagnostic poses and their provenance; report runtime qualification alongside missing
+calibration, clock, world-frame and per-frame mapping blockers. Do not enable R5 or
+canonical ingest in this sprint.
+
+### Sprint AUD-17.S3b2 — Durable estimated-trajectory consumer integration
 
 **Input:** accepted R6 assembly, exact scan/time/calibration bindings and a verified derived trajectory.
 **Output:** lease-guarded odometry stage, explicit world/floor confirmation and source-bound LiDAR ingest/alignment evidence.
@@ -175,7 +193,7 @@ Tests cover equivalent trajectories under a global map change, accumulated trans
 **Output:** actionable coverage/gap/qualification state and explicit supplied-trajectory fallback in the Studio assembly flow.
 **Contract:** never label unqualified odometry as PASS or ground truth; fallback creates a distinct recipe and reruns downstream evidence.
 
-Held-out traversal measurement and supported-envelope acceptance remain external gates after S3b/S3c; synthetic tests do not close them.
+Held-out traversal measurement and supported-envelope acceptance remain external gates after S3b2/S3c; synthetic tests do not close them.
 
 ## Verification và DoD
 
@@ -351,4 +369,24 @@ AUD-17.S3a implementation:
   `rotation_matrix`; impact is evaluation-only with no product callers. The evaluator
   reuses existing parsers, unit conversion and checksum validation. `understand-anything`
   CLI is unavailable; AUD-17 and ADR 0018 provided the business context. No UI changed,
-  so DevTools is not applicable. S3b/S3c and real-sensor acceptance remain open.
+  so DevTools is not applicable. S3b1–S3b2/S3c and real-sensor acceptance remain open.
+
+AUD-17.S3b1 implementation:
+- A diagnostic mapper could previously report `complete_for_consumer=true` when a
+  test supplied `world_from_map`, despite the producer being `wired_unqualified`.
+  The readiness gate now also requires `runtime_qualification_status == "qualified"`.
+- Diagnostic poses remain available for inspection. Mapping reports
+  `ODOMETRY_RUNTIME_NOT_QUALIFIED` with any missing calibration, clock, world-bridge
+  or frame-coverage blockers; blocked global mappings retain all applicable reasons.
+- This sprint does not change product consumers, R5 dispatch or canonical ingest.
+  The live producer remains wired-unqualified, so no current trajectory is consumer-ready.
+- Verification: focused odometry/evaluator tests — 28 passed, 1 skipped;
+  `.venv/bin/ruff check src/ tests/` passed; `.venv/bin/ruff format --check src/ tests/`
+  passed (575 files); `git diff --check` passed.
+- Gate report: CodeGraph traced the mapper and its direct reconstruction tests;
+  Graphify located the AUD-17 mapping and consumer-readiness context. The change is
+  limited to the mapper contract/tests and AUD-17 plan/progress. No UI changed, so
+  DevTools is not applicable. CodeGraph reports 918 files, 18,692 nodes and 55,906
+  edges with the index up to date; `codegraph sync .` could not acquire the database
+  lock held by the live MCP server (PID 14310). `graphify update .` rebuilt 21,586
+  nodes and 64,895 edges. `understand-anything` availability remains unverified.
