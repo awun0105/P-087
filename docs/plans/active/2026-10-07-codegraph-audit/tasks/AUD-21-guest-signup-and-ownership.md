@@ -254,8 +254,8 @@ mock hoặc source review không chứng minh feature đã chạy.
   rollout field; no account was created.
 - **Pending:** Signup remains disabled by default. Do not enable
   `AUTH_GUEST_SIGNUP_ENABLED` before AUD-21.S3 ownership guards and AUD-22 quota
-  enforcement are qualified. Run the enabled-form browser/API gate and PostgreSQL
-  concurrency variants when the matching API/runtime is available. AUD-21.S3 adds
+  enforcement are qualified. Run the enabled-form browser/API gate; local PostgreSQL
+  signup-concurrency evidence is recorded in the follow-up below. AUD-21.S3 adds
   ownership checks; this sprint intentionally leaves existing Editor-only product
   gates intact.
 
@@ -294,7 +294,8 @@ mock hoặc source review không chứng minh feature đã chạy.
 - **Pending:** `AUTH_GUEST_SIGNUP_ENABLED` remains false. AUD-22.S2 now admits
   Guest job creation, scene-from-upload and manual Retry under the daily quota;
   objectify remains outside that counter. Guest rollout still awaits AUD-22.S3,
-  AUD-21.S4, browser acceptance and PostgreSQL-specific proof.
+  AUD-21.S4, browser/seed acceptance and deployed multi-replica qualification;
+  local PostgreSQL signup/quota checks are recorded in the follow-up below.
 
 ### AUD-21.S4 — Studio permissions và rollout acceptance
 
@@ -327,6 +328,16 @@ mock hoặc source review không chứng minh feature đã chạy.
   profile lock prevents attachment; local tests are not browser proof. PostgreSQL
   qualification was not run because `R2S_TEST_POSTGRES_URL` is unset. AUD-20
   live-seed acceptance remains a separate rollout gate.
-- **Pending:** Keep `AUTH_GUEST_SIGNUP_ENABLED=false`; do not claim public Guest
-  rollout until browser three-role acceptance, PostgreSQL qualification and seed
-  acceptance are recorded.
+- **Pending:** Keep `AUTH_GUEST_SIGNUP_ENABLED=false`; local PostgreSQL signup/quota
+  tests pass, but browser three-role acceptance, live seed acceptance and deployed
+  multi-replica qualification remain open.
+
+### Follow-up — local PostgreSQL checks (2026-10-09)
+
+- `.venv/bin/pytest tests/test_orchestration/test_auth_service.py -q` with the
+  local PostgreSQL 16 service configured through `R2S_TEST_POSTGRES_URL`: **23 passed**.
+  This includes the normalized duplicate-email concurrency path.
+- These checks supersede the earlier note that PostgreSQL was unavailable for the
+  signup-service test. They do not prove the deployed multi-replica configuration,
+  enabled public signup, the three-role browser flow or live seed-account display.
+  Keep `AUTH_GUEST_SIGNUP_ENABLED=false` until those rollout gates pass.

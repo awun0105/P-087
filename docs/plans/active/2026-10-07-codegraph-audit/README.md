@@ -607,12 +607,13 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [x] AUD-20.S3 authenticated browser rendering for scene grid/list and Team seed names/roles.
 - [x] AUD-20.S3a local API projection resolves current names for legacy import IDs, leaves historical roles unknown, and preserves stored snapshots/ownership.
 - [ ] AUD-20.S3 browser verification with a snapshot-bearing imported scene and stable-ID/migration evidence; AUD-21.S2/S4 browser gates; AUD-21.S3–S4
-      full browser/API acceptance before opening Guest signup.
+      browser/seed acceptance before opening Guest signup. Local PostgreSQL signup
+      duplicate-email concurrency passed; this does not enable public Guest signup.
 - [x] AUD-21.S2 browser verification of Guest signup's fail-closed state with the rollout field absent; enabled signup remains unverified.
 - [x] Implementation AUD-22.S2 durable Guest quota ledger/API enforcement and
       AUD-22.S3 local quota UX; SQLite/API/frontend checks.
-- [ ] AUD-22.S2 shared-PostgreSQL concurrency/restart qualification; AUD-22.S3
-      DevTools browser acceptance.
+- [x] AUD-22.S2 local PostgreSQL quota concurrency/restart and migration qualification.
+- [ ] AUD-22.S3 DevTools browser acceptance and deployed multi-replica rollout proof.
 - [x] Audit 2026-10-08 of rounds 1–3 (AUD-01/02/03/04/07/10/11/15), local evidence only.
       Fixed and committed: the background carve keeps and reports triangles shared between a
       carved and an unresolved source region (exact `triangle_indices` membership wins over an
@@ -668,7 +669,10 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [x] AUD-24.S1 typed staged-file/assembly/resolution/recipe contracts and seven-case
       binding matrix; legacy InputManifest/checksum preserved. This does not enable
       a new resolver or R1–R6 runtime.
-- [ ] Implementation AUD-24 và grouped upload/R1–R6 recipe/consumer/browser acceptance.
+- [x] Local implementation AUD-24.S1–S4: assembly contracts, deterministic resolver,
+      durable recipe/dispatch and grouped upload UI.
+- [ ] AUD-24.S5 R1–R6 runtime qualification and browser/consumer acceptance; no
+      recipe is treated as qualified from resolver fixtures alone.
 - [x] Hoãn AUD-25/ADR0025 theo yêu cầu owner; gỡ khỏi execution order và active dependencies.
 
 ## Validation và handoff

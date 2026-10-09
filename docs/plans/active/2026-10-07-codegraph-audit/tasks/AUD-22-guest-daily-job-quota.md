@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- IN PROGRESS — S1 contract, S2 enforcement and S3 local quota UX/regressions are implemented. Shared-PostgreSQL and browser acceptance remain pending. Owner confirmed objectify is excluded from Guest's 3/day quota on 2026-10-08. P1; EX-PRODUCT identity/API/Studio/runtime DB.
+- IN PROGRESS — S1 contract, S2 enforcement and S3 local quota UX/regressions are implemented. Local PostgreSQL concurrency/restart checks pass; browser and deployed multi-replica acceptance remain pending. Owner confirmed objectify is excluded from Guest's 3/day quota on 2026-10-08. P1; EX-PRODUCT identity/API/Studio/runtime DB.
 - Canonical PRODUCT-01/02/06/09; task-local extension, không đổi crosswalk.
 - Owner yêu cầu ngày 07/10/2026. S1 thêm pure calendar/DTO contract và tests; chưa bật quota route hoặc sửa tài khoản. Ngày 08/10/2026, owner xác nhận objectify không trừ quota 3 lượt/ngày của Guest.
 - [Agent guide](../AGENT_GUIDE.md), [ADR 0021](../../../../decisions/0021-guest-identity-and-ownership.md), [ADR 0022](../../../../decisions/0022-guest-daily-job-quota.md).
@@ -100,8 +100,9 @@ Logic mới được chọn dẫn dắt consumers/tests; không giữ assumption
 
 S1 dùng AUD-21.S1 identity/action matrix; S2 dùng AUD-21.S2/S3 guards và current
 RuntimeDatabase/job transitions. S3 builds on the S2 quota summary and errors; it
-does not need GPU proof. Shared-PostgreSQL concurrency qualification remains a
-deployment gate separate from worker runtime acceptance.
+does not need GPU proof. Local PostgreSQL exercises database-level races and
+restart/migration behavior; deployment configuration and cross-replica rollout
+remain separate from worker runtime acceptance.
 
 ## Sprint AUD-22.S1 — Quota policy và window contract
 
@@ -145,8 +146,8 @@ objectify; missing persistent runtime DB fails closed with 503. SQLite shared-fi
 concurrency is covered. PostgreSQL variants are present but require
 `R2S_TEST_POSTGRES_URL`; without it, multi-process/shared-database qualification is
 pending. Editor/Reviewer behavior is covered by API regression.
-**Exit:** [x] implementation and local SQLite/API acceptance complete; [ ]
-shared-PostgreSQL concurrency/restart proof and deployment qualification.
+**Exit:** [x] implementation, local SQLite/API acceptance and local PostgreSQL
+concurrency/restart checks complete; [ ] deployed shared-database qualification.
 
 ## Sprint AUD-22.S3 — Quota UX, operations và end-to-end
 
@@ -156,7 +157,7 @@ shared-PostgreSQL concurrency/restart proof and deployment qualification.
 
 Implement: Render `used/3`, remaining and Vietnam reset from `/auth/me` in Account, scene creation and manual Retry views. Refresh after accepted runs and after the stable `guest_daily_job_quota_exceeded` response so a stale tab updates from the server. Disable only new scene creation and manual Retry when the current summary is exhausted; edits, cancel and delete keep their existing ownership rules. Explain that a manual Retry uses one Guest run only when accepted. Do not use localStorage as quota authority. Keep usage diagnostics in the durable counter and `/auth/me`; do not add identity or request data to logs. Migration v14 was delivered in S2; S3 adds no schema because the UI uses the existing summary and error contract.
 Tests: S2 API/ledger tests cover the fourth accepted run, midnight, operator rerun, idempotent replay, promotion/demotion, persistent SQLite state and rollback. S3 adds frontend coverage for the exhausted create form, refresh after accepted create/Retry, stale-tab 429, exhausted Retry, timezone display and Guest role copy; API ownership coverage verifies the Guest can edit an owned scene at quota cap. Full browser acceptance and shared-PostgreSQL concurrency/restart remain separate gates.
-**Exit:** [x] local UI/API behavior and regression checks; [ ] browser DevTools acceptance and shared-PostgreSQL qualification.
+**Exit:** [x] local UI/API and PostgreSQL regressions; [ ] browser DevTools acceptance and deployed shared-database qualification.
 
 ## Verification và DoD
 
@@ -227,13 +228,30 @@ mock hoặc source review không chứng minh feature đã chạy.
   (request headers are covered by Vitest). PostgreSQL variants skipped because
   `R2S_TEST_POSTGRES_URL` is unset; no shared-database race/restart or deployment
   qualification is claimed.
-- **Pending:** shared PostgreSQL concurrency/restart qualification and S3 browser acceptance.
+- **Pending:** PostgreSQL was not available during the original S2 run; follow-up
+  local PostgreSQL checks are recorded below. S3 browser and deployed multi-replica
+  acceptance remain open.
 
 ### AUD-22.S3 — Guest quota UX and stale-tab recovery
 
 - **CodeGraph evidence:** read current `/auth/me` DTO/error consumers, `VideoSetupStep`, `NextAction`/`ScenePage`, `AppShell`/`AccountPage`, callers and related tests before edits. Refreshed index: 765 files, 13,970 nodes, 40,261 edges. `codegraph affected` identified 22 frontend test files for the changed source.
 - **Behavior:** one shared Guest quota status formats `resets_at_utc` with the contract's `Asia/Ho_Chi_Minh` timezone. Account, scene creation and Retry show usage/reset. Accepted create/Retry refreshes the summary. A stale-tab 429 is recognized by the stable code, then `/auth/me` refreshes and the Retry CTA follows the current remaining count. The Guest role is explicit in the shell and account page; quota exhaustion does not gate scene edits or other existing job controls. No localStorage authority or new usage logs were added.
 - **Migration decision:** no S3 migration; S2 migration v14 already stores the durable counter and accepted intent. S3 changes only consumers of the existing `/auth/me` and 429 contracts.
-- **Verification:** `cd frontend && npm test` — 284 passed in 42 files; `npm run typecheck` and changed-file ESLint passed. `.venv/bin/pytest tests/test_api/test_guest_ownership.py tests/test_api/test_guest_quota.py -q` — 14 passed, including edit-at-cap. `.venv/bin/ruff check src/ tests/` and `ruff format --check src/ tests/` passed. `git diff --check` passed. PostgreSQL remains unverified because `R2S_TEST_POSTGRES_URL` is unset.
+- **Verification:** `cd frontend && npm test` — 284 passed in 42 files; `npm run typecheck` and changed-file ESLint passed. `.venv/bin/pytest tests/test_api/test_guest_ownership.py tests/test_api/test_guest_quota.py -q` — 14 passed, including edit-at-cap. `.venv/bin/ruff check src/ tests/` and `ruff format --check src/ tests/` passed. `git diff --check` passed. The original S3 run had no PostgreSQL URL; the follow-up below records local PostgreSQL behavior.
 - **Gate report:** CodeGraph PASS; minimal scope PASS; frontend, API, Ruff and format checks PASS. DevTools is UNVERIFIED because the Chrome profile is locked. Mocked UI tests do not establish rendered browser acceptance.
-- **Pending:** live browser UX proof and shared-PostgreSQL multi-process/restart qualification.
+- **Pending:** live browser UX proof and deployed multi-replica qualification.
+
+### Follow-up — local PostgreSQL checks (2026-10-09)
+
+- The local PostgreSQL 16 service was reachable; the test fixture created and
+  dropped isolated databases for each parameterized test.
+- `R2S_TEST_POSTGRES_URL=postgresql://postgres@127.0.0.1:5432/postgres
+  .venv/bin/pytest tests/test_orchestration/test_guest_quota_ledger.py
+  tests/test_orchestration/test_runtime_migrations.py -q` — **24 passed**. This
+  includes concurrent quota writers accepting exactly three intents, idempotent
+  replay, rollback, Vietnam midnight, migration and fresh-instance restart checks.
+- `.venv/bin/pytest tests/test_orchestration/test_auth_service.py -q` with the same
+  local PostgreSQL test service — **23 passed**, including duplicate-email
+  concurrency.
+- This is local shared-database evidence. It does not prove the deployed
+  multi-replica topology or the browser quota flow; those gates remain open.
