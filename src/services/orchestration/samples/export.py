@@ -1,0 +1,352 @@
+"""Xuất một job đã chạy thật thành demo bundle trong thư viện mẫu.
+
+Dùng chung cho CLI (`scripts/demo/export_demo_bundle.py`) và nút "Đặt làm bản demo" của Reviewer. Bundle chỉ chứa output
+thật của job (video gốc, frame đại diện, SOG preview, thời lượng từ journal) và các asset hiển thị do người xuất cung
+cấp; không có số liệu nào do UI tự điền. Không bao giờ ghi đè bundle cũ.
+"""
+
+import json
+import re
+import shutil
+import unicodedata
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import TYPE_CHECKING
+from uuid import uuid4
+
+from src.models.contracts.manifests import InputManifest, JobManifest, JobStatus, StageId, StageStatus
+from src.services.orchestration.artifacts import ArtifactStoreError, sha256_file
+from src.services.orchestration.jobs.dispatch import prepared_frame_reference
+from src.services.orchestration.jobs.models import JobAttemptRecord
+from src.services.orchestration.jobs.progress import MVP_PIPELINE, STUDIO_PIPELINE
+from src.services.orchestration.samples.bundle import DemoLibrary, DemoUnavailableError
+from src.services.orchestration.samples.models import (
+    DemoFact,
+    DemoFile,
+    DemoManifest,
+    DemoSource,
+    DemoStage,
+    DemoStageAsset,
+)
+from src.services.reconstruction import camera_markers
+
+if TYPE_CHECKING:
+    from src.services.orchestration.projects.registry import ProjectRegistry
+
+_MEDIA = {".mp4": "video/mp4", ".mov": "video/quicktime", ".png": "image/png", ".jpg": "image/jpeg"}
+_MEDIA.update({".jpeg": "image/jpeg", ".sog": "application/octet-stream", ".ply": "application/octet-stream"})
+_ASSET_SUFFIXES = {".png", ".jpg", ".jpeg", ".mp4", ".mov"}
+
+
+class SampleExportError(ValueError):
+    """Job chưa xuất được thành bundle (thiếu preview, sai checksum, thư mục đích đã có dữ liệu…)."""
+
+
+class AlreadyPublishedError(SampleExportError):
+    """Job này đã nằm trong thư viện mẫu; `demo_id` là mẫu đang có."""
+
+    def __init__(self, demo_id: str) -> None:
+        super().__init__(f"Job này đã có trong thư viện mẫu ({demo_id})")
+        self.demo_id = demo_id
+
+
+@dataclass(frozen=True)
+class StageAssetSpec:
+    """Asset do người xuất khai báo; `path` là file nguồn (copy vào bundle) với kind `image`/`video`."""
+
+    kind: str
+    title: str = ""
+    caption: str = ""
+    path: Path | None = None
+    facts: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+
+
+def load_stage_assets(path: Path) -> dict[StageId, list[StageAssetSpec]]:
+    """Đọc `assets.json`: `{"ST-METRIC-CANONICALIZE": [{"kind": "image", "path": "metric.png", ...}, ...]}`.
+
+    `path` của asset tính từ thư mục chứa file JSON. Sai kind/thiếu file được báo ngay khi dựng bundle.
+    """
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    specs: dict[StageId, list[StageAssetSpec]] = {}
+    for stage_key, items in raw.items():
+        stage_id = StageId(stage_key)
+        specs[stage_id] = [
+            StageAssetSpec(
+                kind=item["kind"],
+                title=item.get("title", ""),
+                caption=item.get("caption", ""),
+                path=(path.parent / item["path"]) if item.get("path") else None,
+                facts=tuple((fact["label"], fact["value"]) for fact in item.get("facts", [])),
+            )
+            for item in items
+        ]
+    return specs
+
+
+def stage_durations(job: JobManifest, attempts: Sequence[JobAttemptRecord]) -> list[DemoStage]:
+    """Thời lượng thật từng stage: chuỗi completed_at, mốc đầu là lúc attempt RUNNING.
+
+    Stage không có mốc hoàn tất (hoặc mốc lệch) để null thay vì đoán.
+    """
+    latest = attempts[-1].attempt if attempts else 1
+    running = [event for event in attempts if event.attempt == latest and event.status == JobStatus.RUNNING]
+    cursor = running[0].recorded_at if running else None
+    records = {stage.stage_id: stage for stage in job.stage_artifacts}
+    stages = []
+    for stage_id in STUDIO_PIPELINE:
+        record = records.get(stage_id)
+        state = (
+            "succeeded"
+            if record and record.status == StageStatus.SUCCEEDED
+            else ("failed" if record and record.status == StageStatus.FAILED else "pending")
+        )
+        end = record.completed_at if record and state == "succeeded" else None
+        start = record.started_at if record else None
+        if start is None and stage_id in MVP_PIPELINE:
+            start = cursor  # Compatibility: preview cũ chỉ có chuỗi completed_at.
+        if stage_id not in MVP_PIPELINE and start is None:
+            start = next((event.recorded_at for event in running if event.current_stage == stage_id), None)
+        duration = (end - start).total_seconds() if end is not None and start is not None else None
+        stages.append(
+            DemoStage(
+                stage_id=stage_id,
+                state=state,
+                duration_seconds=duration if duration is not None and duration >= 0 else None,
+                summary="Mẫu này chưa ghi kết quả của bước này." if state == "pending" else "",
+            )
+        )
+        cursor = end  # Gap thiếu evidence không được gán thời gian của nhiều bước vào stage sau.
+    return stages
+
+
+def add_file(out: Path, source: Path, name: str) -> DemoFile:
+    """Copy một file vào `files/` của bundle và trả bản ghi allow-list (size + checksum)."""
+    target = out / "files" / name
+    shutil.copyfile(source, target)
+    return DemoFile(
+        name=name,
+        media_type=_MEDIA.get(target.suffix.lower(), "application/octet-stream"),
+        size_bytes=target.stat().st_size,
+        checksum=sha256_file(target),
+    )
+
+
+def evenly(items: Sequence[Path], count: int) -> list[Path]:
+    """`count` phần tử rải đều (gồm đầu và cuối)."""
+    if len(items) <= count:
+        return list(items)
+    step = (len(items) - 1) / (count - 1)
+    return [items[round(i * step)] for i in range(count)]
+
+
+def prepare_out(out: Path) -> None:
+    """Thư mục đích phải trống: không ghi đè bundle cũ."""
+    if out.exists() and any(out.iterdir()):
+        raise SampleExportError(f"{out} đã có dữ liệu; chọn thư mục mới (không ghi đè bundle cũ)")
+    (out / "files").mkdir(parents=True, exist_ok=True)
+
+
+def write_manifest(out: Path, manifest: DemoManifest) -> None:
+    (out / "manifest.json").write_text(manifest.model_dump_json(indent=2) + "\n", encoding="utf-8")
+
+
+def _job_processing(resolver: object, job: JobManifest) -> dict[str, int | float | str] | None:
+    """Thông số thật của job từ `config/processing.json`; job legacy không có → None."""
+    from src.services.orchestration.processing import JobProcessingConfig, job_config_reference
+
+    try:
+        path = resolver.require(job_config_reference(job.job_id, job.config_checksum))  # type: ignore[attr-defined]
+    except ArtifactStoreError:
+        return None
+    return JobProcessingConfig.model_validate_json(path.read_bytes()).params
+
+
+def _machine() -> dict[str, str]:
+    """GPU/driver đã xử lý, đọc từ RuntimeManifest của worker (không đo lại)."""
+    from src.config import get_settings
+    from src.models.contracts.manifests import RuntimeManifest
+
+    path = get_settings().product_runtime_manifest
+    if path is None or not path.is_file():
+        return {}
+    manifest = RuntimeManifest.model_validate_json(path.read_bytes())
+    keys = ("gpu_model", "vram", "nvidia_driver", "brush", "colmap")
+    return {
+        key: manifest.components[key].version or ""
+        for key in keys
+        if key in manifest.components and manifest.components[key].version
+    }
+
+
+def _attach_assets(out: Path, stages: list[DemoStage], specs: Mapping[StageId, Sequence[StageAssetSpec]]) -> None:
+    """Gắn asset do người xuất khai báo vào đúng bước; file được copy vào bundle với tên phẳng không trùng."""
+    by_id = {stage.stage_id: stage for stage in stages}
+    for stage_id, items in specs.items():
+        stage = by_id.get(stage_id)
+        if stage is None:
+            raise SampleExportError(f"Bundle không có bước {stage_id.value} để gắn asset")
+        for index, spec in enumerate(items, start=1):
+            if spec.kind == "facts":
+                facts = [DemoFact(label=label, value=value) for label, value in spec.facts]
+                stage.assets.append(DemoStageAsset(kind="facts", title=spec.title, caption=spec.caption, facts=facts))
+                continue
+            if spec.path is None or not spec.path.is_file() or spec.path.suffix.lower() not in _ASSET_SUFFIXES:
+                raise SampleExportError(f"Asset {spec.kind} của {stage_id.value} thiếu file ảnh/video hợp lệ")
+            name = f"{stage_id.value.lower().removeprefix('st-')}-{index}{spec.path.suffix.lower()}"
+            stage.assets.append(
+                DemoStageAsset(
+                    kind=spec.kind,  # type: ignore[arg-type]
+                    title=spec.title,
+                    caption=spec.caption,
+                    file=add_file(out, spec.path, name),
+                )
+            )
+
+
+def export_job_bundle(
+    registry: "ProjectRegistry",
+    job_id: str,
+    out: Path,
+    *,
+    demo_id: str,
+    title: str,
+    description: str,
+    source: DemoSource,
+    frames: int = 12,
+    stage_assets: Mapping[StageId, Sequence[StageAssetSpec]] | None = None,
+) -> DemoManifest:
+    """Bundle từ job thật: video gốc, frame đại diện, SOG preview, thời lượng từ journal.
+
+    `out` phải trống; hàm tự tạo `files/` và `manifest.json`. Lỗi trong lúc dựng để lại `out` dở dang, nên người gọi
+    cần dựng trong thư mục tạm (xem `publish_job_bundle`).
+    """
+    if frames < 2:
+        raise SampleExportError("Cần ít nhất 2 frame đại diện")
+    job = registry.get_job(job_id)
+    try:
+        preview = registry.get_preview(job_id)  # Verify toàn bộ graph preview.
+    except (ArtifactStoreError, ValueError) as error:
+        raise SampleExportError("Job chưa có bản xem 3DGS đã xác minh để làm mẫu") from error
+    resolver = registry.runtime_resolver
+    prepare_out(out)
+    splat = add_file(out, resolver.require(preview.delivery_ref), "scene.sog")
+    project = registry.get_project(job.project_id)
+    video = None
+    if project.input_manifest_ref is not None:
+        manifest = InputManifest.model_validate_json(resolver.require(project.input_manifest_ref).read_bytes())
+        first = manifest.files[0]
+        path = resolver.resolve(first.artifact_uri)
+        if sha256_file(path) != first.checksum:
+            raise SampleExportError("Video gốc sai checksum")
+        video = add_file(out, path, "input" + Path(first.original_name).suffix.lower())
+    frame_files: list[DemoFile] = []
+    frame_count = None
+    frame_ref = prepared_frame_reference(job)
+    if frame_ref is not None:
+        frame_set = json.loads(resolver.require(frame_ref).read_text())
+        rows = frame_set["frames"]
+        frame_count = len(rows)
+        for marker in evenly([Path(str(i)) for i in range(len(rows))], frames):
+            row = rows[int(marker.name)]
+            image = resolver.resolve(row["image"]["artifact_uri"])
+            frame_files.append(add_file(out, image, f"frame-{row['frame_id']:06d}.png"))
+    cameras = []
+    if preview.camera_pose_ref is not None:
+        try:
+            cameras = camera_markers(preview.camera_pose_ref, resolver.require)
+        except Exception:  # noqa: BLE001 - camera chỉ là lớp phụ; thiếu thì bundle vẫn dùng được
+            cameras = []
+    stages = stage_durations(job, registry.list_job_attempts(job.job_id))
+    if stage_assets:
+        _attach_assets(out, stages, stage_assets)
+    demo = DemoManifest(
+        processing=_job_processing(resolver, job),
+        machine=_machine(),
+        demo_id=demo_id,
+        title=title,
+        description=description,
+        origin="pipeline_job",
+        source=source,
+        produced_at=datetime.now(UTC),
+        provenance={
+            "job_id": job.job_id,
+            "input_manifest_checksum": job.input_manifest_checksum,
+            "config_checksum": job.config_checksum,
+            "runtime_manifest_checksum": job.runtime_manifest_checksum,
+            "preview_attempt_id": preview.attempt_id,
+            "visual_producer_version": preview.producer_version,
+        },
+        stages=stages,
+        video=video,
+        frames=frame_files,
+        frame_count=frame_count,
+        splat=splat,
+        cameras=cameras,
+    )
+    write_manifest(out, demo)
+    return demo
+
+
+def slugify(text: str) -> str:
+    """Chuỗi ASCII an toàn cho tên thư mục/ID: bỏ dấu, thường hoá, nối bằng '-'."""
+    folded = unicodedata.normalize("NFKD", text.replace("đ", "d").replace("Đ", "D"))
+    ascii_text = folded.encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "-", ascii_text.lower()).strip("-")
+
+
+def published_sample_id(library_root: Path, job_id: str) -> str | None:
+    """ID mẫu trong thư viện được xuất từ `job_id` (theo `provenance.job_id`), nếu có."""
+    library = DemoLibrary(library_root)
+    for sample_id, bundle in library.bundles().items():
+        try:
+            if bundle.manifest().provenance.get("job_id") == job_id:
+                return sample_id
+        except DemoUnavailableError:
+            continue
+    return None
+
+
+def publish_job_bundle(
+    registry: "ProjectRegistry",
+    job_id: str,
+    library_root: Path,
+    *,
+    title: str,
+    description: str,
+    source: DemoSource,
+    frames: int = 12,
+) -> DemoManifest:
+    """Xuất job vào thư viện mẫu: dựng trong thư mục tạm rồi đổi tên một lần, không bao giờ ghi đè.
+
+    Thư mục tạm bắt đầu bằng '.' nên `DemoLibrary` bỏ qua; lỗi giữa chừng thì thư mục tạm bị xoá.
+    """
+    existing = published_sample_id(library_root, job_id)
+    if existing is not None:
+        raise AlreadyPublishedError(existing)
+    slug = slugify(title) or "scene"
+    demo_id = f"{slug[:60]}-{job_id.removeprefix('job-')[:8]}"
+    target = library_root / demo_id
+    if target.exists():
+        raise SampleExportError(f"Thư viện đã có mẫu {demo_id}")
+    library_root.mkdir(parents=True, exist_ok=True)
+    temp = library_root / f".tmp-{demo_id}-{uuid4().hex[:8]}"
+    try:
+        manifest = export_job_bundle(
+            registry,
+            job_id,
+            temp,
+            demo_id=demo_id,
+            title=title,
+            description=description,
+            source=source,
+            frames=frames,
+        )
+        if target.exists():
+            raise SampleExportError(f"Thư viện đã có mẫu {demo_id}")
+        temp.rename(target)
+    finally:
+        if temp.exists():
+            shutil.rmtree(temp, ignore_errors=True)
+    return manifest
