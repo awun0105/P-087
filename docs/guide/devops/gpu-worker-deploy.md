@@ -14,7 +14,7 @@ khoản, nạp tiền, nhập secret). Không secret nào được ghi vào repo
 Kaggle và Colab không còn được hỗ trợ; dùng image GPU (`Dockerfile.gpu`) trên máy thuê.
 
 Image GPU mặc định `APP_ENV=production` và `AUTH_REQUIRED=true` (đổi được bằng `-e`; production không chạy được khi tắt đăng nhập).
-Chế độ `stack` cần tài khoản Reviewer đầu tiên: chạy `python -m src.services.orchestration.auth.cli create-user --email … --name … --role reviewer` trong container (xem README, mục Xác thực và phân quyền).
+Chế độ `stack` dùng hai tài khoản seed có sẵn trong dữ liệu Studio (`reviewer@real2sim.dev`, `editor@real2sim.dev`); nạp dữ liệu Studio rồi đăng nhập, không cần tạo tài khoản. Chỉ khi chạy với DB trống mới phải tạo Reviewer bằng CLI (xem README, mục Xác thực và phân quyền).
 
 ## 2. Đã có trong repo
 

@@ -268,7 +268,7 @@ Ba role phân cấp **Guest < Editor < Reviewer**; quyền sửa còn phụ thu�
 
 Luồng tài khoản khi `AUTH_REQUIRED=true`:
 
-1. **Reviewer đầu tiên** tạo bằng CLI lúc deploy (không qua mã mời):
+1. **Tài khoản có sẵn**: dữ liệu Studio đã có hai tài khoản seed, `reviewer@real2sim.dev` (Reviewer) và `editor@real2sim.dev` (Editor); dùng chúng để đăng nhập, không cần tạo. Chỉ khi chạy với DB trống mới tạo Reviewer đầu tiên bằng CLI (không qua mã mời):
    `python -m src.services.orchestration.auth.cli create-user --email lead@example.com --name "Trưởng nhóm" --role reviewer`
    (mật khẩu nhập ẩn, hoặc biến `R2S_BOOTSTRAP_PASSWORD` khi chạy không tương tác).
 2. **Đăng nhập**: `POST /api/v1/auth/login` đặt cookie phiên httpOnly; phiên bị xoá khi tài khoản bị khoá.
