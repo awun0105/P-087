@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 from pydantic import ValidationError
@@ -28,7 +29,9 @@ from src.services.orchestration.jobs.database import (
     RuntimeStateConflictError,
 )
 from src.services.orchestration.jobs.registration_operations import (
+    RegistrationOperationCancellationRequestedError,
     RegistrationOperationLeaseLostError,
+    RegistrationOperationRecord,
     RegistrationOperationStore,
 )
 
@@ -164,6 +167,212 @@ def test_enqueue_is_idempotent_and_rejects_key_reuse_for_other_request(tmp_path:
     assert accepted.state == RegistrationOperationState.QUEUED
     with pytest.raises(RuntimeStateConflictError, match="Idempotency-Key"):
         store.enqueue(_request("registration-request-2"), "request-key-1")
+
+
+def test_legacy_operation_payload_without_cancel_field_keeps_its_checksum(tmp_path: Path) -> None:
+    database, store = _store(tmp_path)
+    request = _request()
+    store.enqueue(request, "request-key-1")
+
+    with database.transaction(write=True) as tx:
+        row = tx.execute(
+            "SELECT payload FROM r2s_registration_operations WHERE operation_id=?", (request.request_id,)
+        ).fetchone()
+        assert row is not None
+        payload = json.loads(row[0])
+        assert payload.pop("cancellation_requested") is False
+        tx.execute(
+            "UPDATE r2s_registration_operations SET payload=? WHERE operation_id=?",
+            (json.dumps(payload), request.request_id),
+        )
+
+    restored = store.get(request.request_id)
+    assert restored.cancellation_requested is False
+    assert restored.state == RegistrationOperationState.QUEUED
+
+
+def test_queued_registration_cancellation_is_terminal_and_idempotent(tmp_path: Path) -> None:
+    _, store = _store(tmp_path)
+    request = _request()
+    store.enqueue(request, "request-key-1")
+    now = datetime(2026, 10, 9, tzinfo=UTC)
+
+    cancelled = store.cancel(request.request_id, now=now)
+    replay = store.cancel(request.request_id, now=now + timedelta(seconds=1))
+
+    assert cancelled.state == replay.state == RegistrationOperationState.CANCELLED
+    assert cancelled.operation_checksum == replay.operation_checksum
+    assert store.claim_next("worker-a", lease_seconds=60, now=now + timedelta(seconds=2)) is None
+
+
+def test_queued_cancel_racing_worker_claim_is_never_lost(tmp_path: Path) -> None:
+    _, store = _store(tmp_path)
+    request = _request()
+    store.enqueue(request, "request-key-1")
+    now = datetime(2026, 10, 9, tzinfo=UTC)
+    gate = Barrier(3)
+
+    def cancel() -> RegistrationOperationRecord:
+        gate.wait()
+        return store.cancel(request.request_id, now=now)
+
+    def claim() -> RegistrationOperationRecord | None:
+        gate.wait()
+        return store.claim_next("worker-a", lease_seconds=60, now=now)
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        cancelled_future = workers.submit(cancel)
+        claimed_future = workers.submit(claim)
+        gate.wait()
+        cancelled = cancelled_future.result()
+        claimed = claimed_future.result()
+
+    current = store.get(request.request_id)
+    if current.state == RegistrationOperationState.CANCELLED:
+        assert claimed is None
+        assert cancelled.state == RegistrationOperationState.CANCELLED
+    else:
+        assert current.state == RegistrationOperationState.RUNNING
+        assert current.cancellation_requested is True
+        assert claimed is not None and claimed.operation_id == request.request_id
+        assert cancelled.cancellation_requested is True
+
+
+def test_running_cancel_racing_proposal_is_linearized(tmp_path: Path) -> None:
+    _, store = _store(tmp_path)
+    request = _request()
+    store.enqueue(request, "request-key-1")
+    now = datetime(2026, 10, 9, tzinfo=UTC)
+    claimed = store.claim_next("worker-a", lease_seconds=60, now=now)
+    assert claimed is not None and claimed.lease_token is not None
+    gate = Barrier(3)
+
+    def cancel() -> RegistrationOperationRecord:
+        gate.wait()
+        return store.cancel(claimed.operation_id, now=now + timedelta(seconds=1))
+
+    def finish() -> RegistrationOperationRecord | Exception:
+        gate.wait()
+        try:
+            return store.finish(
+                claimed.operation_id,
+                lease_token=claimed.lease_token or "",
+                fencing_token=claimed.fencing_token,
+                state=RegistrationOperationState.PROPOSED,
+                proposal_ref=_ref(claimed.target_job_id, "RegistrationProposalArtifact"),
+                qa_report_ref=_ref(claimed.target_job_id, "RegistrationQAReport"),
+                now=now + timedelta(seconds=2),
+            )
+        except (RegistrationOperationCancellationRequestedError, RegistrationOperationLeaseLostError) as error:
+            return error
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        cancelled_future = workers.submit(cancel)
+        finished_future = workers.submit(finish)
+        gate.wait()
+        cancelled = cancelled_future.result()
+        finished = finished_future.result()
+
+    current = store.get(claimed.operation_id)
+    if current.state == RegistrationOperationState.PROPOSED:
+        assert isinstance(finished, RegistrationOperationRecord)
+        assert cancelled.state == RegistrationOperationState.PROPOSED
+    else:
+        assert current.state == RegistrationOperationState.RUNNING
+        assert current.cancellation_requested is True
+        assert isinstance(
+            finished,
+            (RegistrationOperationCancellationRequestedError, RegistrationOperationLeaseLostError),
+        )
+        assert cancelled.cancellation_requested is True
+
+
+def test_running_registration_cancellation_waits_for_worker_ack_and_fences_proposal(tmp_path: Path) -> None:
+    _, store = _store(tmp_path)
+    request = _request()
+    store.enqueue(request, "request-key-1")
+    now = datetime(2026, 10, 9, tzinfo=UTC)
+    claimed = store.claim_next("worker-a", lease_seconds=30, now=now)
+    assert claimed is not None and claimed.lease_token is not None
+
+    pending = store.cancel(claimed.operation_id, now=now + timedelta(seconds=1))
+    assert pending.state == RegistrationOperationState.RUNNING
+    assert pending.cancellation_requested is True
+    assert pending.lease_token == claimed.lease_token
+    assert pending.fencing_token == claimed.fencing_token
+    assert store.cancel(claimed.operation_id, now=now + timedelta(seconds=2)) == pending
+    observed = store.heartbeat(
+        claimed.operation_id,
+        lease_token=claimed.lease_token,
+        fencing_token=claimed.fencing_token,
+        lease_seconds=30,
+        now=now + timedelta(seconds=2),
+    )
+    assert observed.cancellation_requested is True
+
+    with pytest.raises(RegistrationOperationCancellationRequestedError, match="acknowledge cancellation"):
+        store.finish(
+            observed.operation_id,
+            lease_token=observed.lease_token or "",
+            fencing_token=observed.fencing_token,
+            state=RegistrationOperationState.PROPOSED,
+            proposal_ref=_ref(claimed.target_job_id, "RegistrationProposalArtifact"),
+            qa_report_ref=_ref(claimed.target_job_id, "RegistrationQAReport"),
+            now=now + timedelta(seconds=3),
+        )
+
+    cancelled = store.finish(
+        observed.operation_id,
+        lease_token=observed.lease_token or "",
+        fencing_token=observed.fencing_token,
+        state=RegistrationOperationState.CANCELLED,
+        now=now + timedelta(seconds=4),
+    )
+    assert cancelled.state == RegistrationOperationState.CANCELLED
+    assert cancelled.cancellation_requested is True
+    assert cancelled.lease_token is None
+
+
+def test_running_cancellation_flag_is_bound_by_operation_checksum(tmp_path: Path) -> None:
+    database, store = _store(tmp_path)
+    request = _request()
+    store.enqueue(request, "request-key-1")
+    now = datetime(2026, 10, 9, tzinfo=UTC)
+    claimed = store.claim_next("worker-a", lease_seconds=30, now=now)
+    assert claimed is not None
+    store.cancel(claimed.operation_id, now=now + timedelta(seconds=1))
+
+    with database.transaction(write=True) as tx:
+        row = tx.execute(
+            "SELECT payload FROM r2s_registration_operations WHERE operation_id=?", (request.request_id,)
+        ).fetchone()
+        assert row is not None
+        payload = json.loads(row[0])
+        payload["cancellation_requested"] = False
+        tx.execute(
+            "UPDATE r2s_registration_operations SET payload=? WHERE operation_id=?",
+            (json.dumps(payload), request.request_id),
+        )
+
+    with pytest.raises(RuntimeStateConflictError, match="checksum mismatch"):
+        store.get(request.request_id)
+
+
+def test_expired_running_cancellation_fails_instead_of_claiming_cancel_success(tmp_path: Path) -> None:
+    _, store = _store(tmp_path)
+    request = _request()
+    store.enqueue(request, "request-key-1")
+    now = datetime(2026, 10, 9, tzinfo=UTC)
+    claimed = store.claim_next("worker-a", lease_seconds=1, now=now)
+    assert claimed is not None
+    pending = store.cancel(claimed.operation_id, now=now + timedelta(seconds=2))
+    assert pending.state == RegistrationOperationState.RUNNING
+    assert pending.cancellation_requested is True
+
+    assert store.claim_next("worker-b", lease_seconds=10, now=now + timedelta(seconds=3)) is None
+    expired = store.get(claimed.operation_id)
+    assert expired.state == RegistrationOperationState.FAILED
+    assert expired.error == "Worker lease expired before cancellation was acknowledged; submit a new request to retry."
 
 
 def test_database_columns_cannot_diverge_from_the_sealed_operation_payload(tmp_path: Path) -> None:

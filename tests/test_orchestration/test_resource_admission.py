@@ -549,6 +549,7 @@ def test_job_reservation_and_touch_job_reservation(tmp_path: Path, monkeypatch: 
 
 def _operation_request(
     *,
+    operation_kind: admission.OperationKind = "reobjectify",
     operation_id: str = "operation-objectify-001",
     parent_id: str = "job-fixture-001",
     required_gb: dict[str, float | None] | None = None,
@@ -559,7 +560,7 @@ def _operation_request(
     config_checksum: str = "sha256:" + "b" * 64,
 ) -> admission.OperationAdmissionRequest:
     return admission.OperationAdmissionRequest(
-        operation_kind="reobjectify",
+        operation_kind=operation_kind,
         operation_id=operation_id,
         parent_kind="job",
         parent_id=parent_id,
@@ -678,6 +679,38 @@ def test_operation_kind_requires_matching_parent_identity() -> None:
     payload.update(operation_kind="import_package", parent_kind="job")
     with pytest.raises(ValidationError, match="must bind an import parent"):
         admission.OperationAdmissionRequest.model_validate(payload)
+
+    payload = _operation_request(operation_kind="rgb_lidar_register").model_dump()
+    payload.update(parent_kind="import")
+    with pytest.raises(ValidationError, match="must bind a job parent"):
+        admission.OperationAdmissionRequest.model_validate(payload)
+
+
+def test_rgb_lidar_registration_uses_shared_cpu_operation_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, job, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+    worker = _second_worker(gate, "same-host:registration-worker")
+    request = _operation_request(
+        operation_kind="rgb_lidar_register",
+        parent_id=job.job_id,
+        required_gb={"vram": 0.0, "ram": 1.0, "disk": 1.0},
+        gpu_required=False,
+        input_checksum="sha256:" + "d" * 64,
+        config_checksum="sha256:" + "e" * 64,
+    )
+
+    admitted = worker.admit_operation(request)
+
+    assert admitted.status == "admitted"
+    assert admitted.request == request
+    reservation = _reservations(gate)[worker.worker_id]
+    assert reservation.operation_id == request.operation_id
+    assert reservation.job_id is None
+    assert reservation.input_checksum == request.input_checksum
+    assert reservation.config_checksum == request.config_checksum
+    assert worker.release_operation(request)
 
 
 @pytest.mark.parametrize(

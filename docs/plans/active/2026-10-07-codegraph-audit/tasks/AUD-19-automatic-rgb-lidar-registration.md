@@ -674,3 +674,83 @@ Pre-flight (GUIDE.md Rule 13)
 - checks: 48 focused registration tests passed; full repository Ruff check/format
   passed; `git diff --check` passed. CodeGraph and Graphify indexes were refreshed.
 - DevTools: n/a — no UI/runtime behavior changed.
+
+### AUD-19.S4f — Cancellation persistence and shared admission identity
+
+**Input:** a sealed registration operation in `QUEUED` or `RUNNING` state and the
+existing shared `OperationAdmissionRequest` contract.
+**Output:** an idempotent queued cancellation or a durable running cancellation
+request that the future worker can observe without losing its lease.
+**Contract:** queued cancellation becomes terminal and cannot be claimed. Running
+cancellation only records intent; the lease remains owned until a worker acknowledges
+termination. Once intent is stored, the worker cannot finish with a proposal or QA
+output. A failed shutdown remains `FAILED` with an error, not a false successful
+cancellation. The `rgb_lidar_register` admission kind binds to a job and uses the
+existing shared reservation primitive. No SQL migration is needed.
+
+Implement: add the registration operation kind to `OperationKind`; add a locked,
+idempotent `cancel` transition to `RegistrationOperationStore`; expose the flag in
+the persisted record/checksum for later worker polling; retain schema-1.0 payload
+checksum compatibility by omitting only the false/default value from the checksum.
+Do not release a reservation or claim a child process has stopped in this store-only
+slice. API authorization, admission execution, process kill/reap, retry, status API,
+confirmation, SceneHead publication and UI stay in later dependent work.
+
+Tests: old payload without the new field; tampered cancellation identity; queued
+cancel/claim race; duplicate cancellation; running cancellation observed by heartbeat;
+proposal fencing until the worker acknowledges `CANCELLED`; expired unacknowledged
+cancellation ending `FAILED`; and CPU-only registration admission with a job parent.
+**Exit:** [x] queue state and cancellation intent are checksum-bound and race-safe;
+[x] shared admission accepts registration identity; [ ] registration API/worker and
+process lifecycle are connected.
+
+#### AUD-19.S4f Result / Evidence
+
+- Source baseline: `25d13ff` (`AUD-03/AUD-04/AUD-12`). The owner-authored
+  `AUD-18.S1` commit `58513c6` landed during this work and remains untouched; it is
+  the parent of the S4f commit. CodeGraph traced `RegistrationOperationStore`,
+  `RegistrationOperationRecord`, lease/finish paths, `OperationAdmissionRequest`,
+  `OperationKind`, and focused test helpers. The registration store has no production
+  API/worker caller yet.
+- Behavior before/after: queued operations had no cancellation API at the store
+  boundary, and a running record could not durably expose cancellation intent. The
+  store now atomically cancels queued work, preserves a running lease while marking
+  cancellation requested, returns that flag through reads/heartbeats, and rejects
+  proposal/QA completion after a cancellation request. Worker acknowledgement remains
+  the only path to `CANCELLED`; expired unacknowledged cancellation remains `FAILED`.
+- Compatibility/resource contract: additive payload field only; no SQL migration.
+  False/default is excluded from the logical checksum so schema-1.0 payloads retain
+  their existing identity; true cancellation is checksum-bound. The shared admission
+  model accepts `rgb_lidar_register` with a job parent and the existing CPU-only
+  resource profile. This sprint does not call admission from a worker, release a
+  reservation, kill/reap a process, or expose an API/UI.
+- Changed files: `registration_operations.py`, `admission.py`, their two focused test
+  files, and this task/plan record.
+- Verification: **60 passed** across registration-operation persistence and shared
+  resource-admission tests. `.venv/bin/ruff check src/ tests/` passed;
+  `.venv/bin/ruff format --check src/ tests/` reported 566 files formatted;
+  `git diff --check` passed. CodeGraph is current at 904 files, 18,204 nodes and
+  54,159 edges. Graphify rebuilt 21,282 nodes, 63,285 edges and 740 communities.
+- Limitations: SQLite exercised the durable queue; PostgreSQL locking, a real worker,
+  process cancellation, resource release, API authorization, browser behavior,
+  held-out map qualification and Isaac/collision safety remain **UNVERIFIED**.
+- Next: S4g must wire exact source/target resolution and the BEV/ICP/QA producer to
+  admitted worker execution, with bounded source-orientation hypotheses and
+  kill/reap-before-release semantics. It must not enable production `PASS` until
+  held-out S3 qualification exists.
+
+Pre-flight (GUIDE.md Rule 13)
+- codegraph: before-edit exploration read `RegistrationOperationStore`, its
+  lease/finish callers, `OperationAdmissionRequest`, `OperationKind`, and focused test
+  helpers; post-edit exploration confirmed the new cancellation method is test-covered
+  and not connected to a production worker/API.
+- impact: new store method has no production callers yet; registration kind adds one
+  accepted literal while existing admission consumers/tests retain their behavior.
+- understand: current registration operation persistence is not connected to an
+  API/worker. `understand-anything` is unavailable in this environment; source and
+  task flow were traced directly with CodeGraph.
+- minimal-code: reused existing transitions, row lock suffix, lease/fencing rules,
+  checksum utility and shared operation admission; no schema migration or scheduler.
+- checks: 60 focused tests passed; full-repository Ruff check and format passed;
+  `git diff --check` passed. CodeGraph sync and Graphify update passed.
+- DevTools: n/a — no rendered screen or exposed runtime path changed in S4f.

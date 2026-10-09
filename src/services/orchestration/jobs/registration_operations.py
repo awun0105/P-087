@@ -40,6 +40,10 @@ class RegistrationOperationLeaseLostError(RuntimeError):
     """The operation is no longer owned by the caller's lease and fencing token."""
 
 
+class RegistrationOperationCancellationRequestedError(RuntimeError):
+    """A cancellation request won before the worker tried to publish its result."""
+
+
 class RegistrationOperationRecord(BaseModel):
     """Immutable request plus mutable queue/lease state, persisted as one versioned payload."""
 
@@ -65,6 +69,7 @@ class RegistrationOperationRecord(BaseModel):
     proposal_ref: ProductArtifactRef | None = None
     qa_report_ref: ProductArtifactRef | None = None
     error: str | None = None
+    cancellation_requested: bool = False
 
     @model_validator(mode="after")
     def _bind_request_and_lease(self) -> "RegistrationOperationRecord":
@@ -103,6 +108,12 @@ class RegistrationOperationRecord(BaseModel):
             raise ValueError("proposal states require exact proposal and QA report references")
         if self.state == RegistrationOperationState.INSUFFICIENT and self.qa_report_ref is None:
             raise ValueError("insufficient registration state requires its QA report")
+        if self.cancellation_requested and self.state not in {
+            RegistrationOperationState.RUNNING,
+            RegistrationOperationState.CANCELLED,
+            RegistrationOperationState.FAILED,
+        }:
+            raise ValueError("cancellation request is only valid while running or after termination")
         return self
 
 
@@ -113,14 +124,20 @@ def _utc_now(value: datetime | None) -> datetime:
     return current.astimezone(UTC)
 
 
+def _operation_checksum(record: RegistrationOperationRecord) -> str:
+    """Keep schema-1.0 checksums stable while binding an asserted cancellation request."""
+    payload = record.model_dump(mode="json")
+    if payload.get("cancellation_requested") is False:
+        payload.pop("cancellation_requested")
+    return canonical_content_checksum(payload, "operation_checksum")
+
+
 def _replace_record(record: RegistrationOperationRecord, **updates: object) -> RegistrationOperationRecord:
     """Apply a state change and re-run payload invariants after model_copy."""
     candidate = RegistrationOperationRecord.model_validate(
         record.model_copy(update={**updates, "operation_checksum": _ZERO_CHECKSUM}).model_dump(mode="python")
     )
-    return candidate.model_copy(
-        update={"operation_checksum": canonical_content_checksum(candidate, "operation_checksum")}
-    )
+    return candidate.model_copy(update={"operation_checksum": _operation_checksum(candidate)})
 
 
 class RegistrationOperationStore:
@@ -134,10 +151,8 @@ class RegistrationOperationStore:
         if row is None:
             raise RegistrationOperationNotFoundError("registration operation not found")
         record = RegistrationOperationRecord.model_validate_json(str(row[14]))
-        try:
-            verify_content_checksum(record, "operation_checksum")
-        except ValueError as error:
-            raise RuntimeStateConflictError("registration operation checksum mismatch") from error
+        if record.operation_checksum != _operation_checksum(record):
+            raise RuntimeStateConflictError("registration operation checksum mismatch")
         expected = (
             record.operation_id,
             record.requester_id,
@@ -170,9 +185,12 @@ class RegistrationOperationStore:
         return RegistrationOperationStore._decode(row) if row is not None else None
 
     @staticmethod
-    def _read_by_id(tx: RuntimeTransaction, operation_id: str) -> RegistrationOperationRecord | None:
+    def _read_by_id(
+        tx: RuntimeTransaction, operation_id: str, *, lock: bool = False
+    ) -> RegistrationOperationRecord | None:
+        suffix = tx.lock_suffix() if lock else ""
         row = tx.execute(
-            f"SELECT {_COLUMNS} FROM r2s_registration_operations WHERE operation_id=?", (operation_id,)
+            f"SELECT {_COLUMNS} FROM r2s_registration_operations WHERE operation_id=?{suffix}", (operation_id,)
         ).fetchone()
         return RegistrationOperationStore._decode(row) if row is not None else None
 
@@ -283,6 +301,24 @@ class RegistrationOperationStore:
             raise RegistrationOperationNotFoundError(f"registration operation not found: {operation_id}")
         return record
 
+    def cancel(self, operation_id: str, *, now: datetime | None = None) -> RegistrationOperationRecord:
+        """Cancel queued work or persist a request for a running worker to acknowledge."""
+        current = _utc_now(now)
+        with self.database.transaction(write=True) as tx:
+            record = self._read_by_id(tx, operation_id, lock=True)
+            if record is None:
+                raise RegistrationOperationNotFoundError(f"registration operation not found: {operation_id}")
+            if record.state == RegistrationOperationState.QUEUED:
+                validate_registration_transition(record.state, RegistrationOperationState.CANCELLED)
+                cancelled = _replace_record(record, state=RegistrationOperationState.CANCELLED, updated_at=current)
+                self._write(tx, record, cancelled)
+                return cancelled
+            if record.state == RegistrationOperationState.RUNNING and not record.cancellation_requested:
+                requested = _replace_record(record, cancellation_requested=True, updated_at=current)
+                self._write(tx, record, requested)
+                return requested
+            return record
+
     def claim_next(
         self, worker_id: str, *, lease_seconds: int, now: datetime | None = None
     ) -> RegistrationOperationRecord | None:
@@ -307,7 +343,11 @@ class RegistrationOperationStore:
                     lease_expires_at=None,
                     heartbeat_at=None,
                     updated_at=current,
-                    error="Worker lease expired; submit a new request to retry.",
+                    error=(
+                        "Worker lease expired before cancellation was acknowledged; submit a new request to retry."
+                        if expired.cancellation_requested
+                        else "Worker lease expired; submit a new request to retry."
+                    ),
                 )
                 self._write(tx, expired, failed)
             row = tx.execute(
@@ -383,6 +423,17 @@ class RegistrationOperationStore:
             if record is None:
                 raise RegistrationOperationNotFoundError(f"registration operation not found: {operation_id}")
             self._require_lease(record, lease_token, fencing_token, current)
+            if record.cancellation_requested and state not in {
+                RegistrationOperationState.CANCELLED,
+                RegistrationOperationState.FAILED,
+            }:
+                raise RegistrationOperationCancellationRequestedError(
+                    "worker must acknowledge cancellation before committing a registration proposal"
+                )
+            if (record.cancellation_requested or state == RegistrationOperationState.CANCELLED) and (
+                proposal_ref is not None or qa_report_ref is not None
+            ):
+                raise ValueError("cancelled registration cannot publish proposal or QA references")
             validate_registration_transition(record.state, state)
             finished = _replace_record(
                 record,

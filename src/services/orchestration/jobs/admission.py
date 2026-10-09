@@ -62,7 +62,7 @@ Resource = Literal["vram", "ram", "disk"]
 #: - unmeasured: không đo được trên máy worker này.
 WaitReason = Literal["busy", "external", "exceeds_machine", "unmeasured"]
 RESOURCES: tuple[Resource, ...] = ("vram", "ram", "disk")
-OperationKind = Literal["reobjectify", "import_package", "isaac_validate"]
+OperationKind = Literal["reobjectify", "import_package", "isaac_validate", "rgb_lidar_register"]
 OperationParentKind = Literal["job", "import"]
 #: Observation/giữ chỗ không được làm mới quá mức này coi như worker đã dừng (bằng TTL số đo máy).
 STALE_AFTER = timedelta(minutes=15)
