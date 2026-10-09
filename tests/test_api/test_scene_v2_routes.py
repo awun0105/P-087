@@ -404,6 +404,7 @@ async def test_isaac_previews_are_off_in_production_unless_enabled(
     (tmp_path / "SM_PaletteA.glb").write_bytes(b"glTF-fake")
     settings = Settings(
         app_env=app_env,
+        auth_required=True,
         artifact_root=tmp_path / "artifacts",
         product_asset_preview_dir=tmp_path,
         product_catalog_preview_dir=tmp_path / "no-cc0",
@@ -476,7 +477,9 @@ async def test_cc0_previews_cover_every_placeable_family_even_in_production(clie
     from src.api.product import deps as product_deps
     from src.config import Settings
 
-    settings = Settings(app_env="production", artifact_root=tmp_path / "artifacts", product_asset_preview_dir=tmp_path)
+    settings = Settings(
+        app_env="production", auth_required=True, artifact_root=tmp_path / "artifacts", product_asset_preview_dir=tmp_path
+    )
     monkeypatch.setattr(product_deps, "get_settings", lambda: settings)
 
     entries = (await client.get("/api/v1/scene/catalog")).json()["entries"]
