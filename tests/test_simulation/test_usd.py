@@ -64,6 +64,7 @@ def test_generate_scene_usda_syntax(physics_scene: SceneIR) -> None:
     assert "metersPerUnit = 1.0" in usda_text
     assert 'upAxis = "Z"' in usda_text
     assert 'def Xform "World"' in usda_text
+    assert 'def PhysicsScene "PhysicsScene"' in usda_text
     assert 'def Xform "Environment"' in usda_text
     assert 'def Cube "GroundPlane"' in usda_text
     assert 'apiSchemas = ["PhysicsCollisionAPI"]' in usda_text
@@ -73,6 +74,31 @@ def test_generate_scene_usda_syntax(physics_scene: SceneIR) -> None:
     for obj in physics_scene.objects:
         assert f'def Xform "{obj.id.replace("-", "_")}"' in usda_text
         assert 'xformOpOrder = ["xformOp:translate", "xformOp:orient"]' in usda_text
+
+
+def test_legacy_usda_opens_with_physics_scene(physics_scene: SceneIR, tmp_path: Path) -> None:
+    runtime = Path(os.environ.get("R2S_SCENE_RUNTIME_PYTHON", "data/scene_runtime/bin/python"))
+    if not runtime.is_file():
+        pytest.skip("USD scene runtime is unavailable")
+    scene_file = tmp_path / "scene.usda"
+    scene_file.write_text(generate_scene_usda(physics_scene), encoding="utf-8")
+
+    inspected = subprocess.run(
+        [
+            str(runtime),
+            "-c",
+            "import json,sys; from pxr import Usd,UsdPhysics; "
+            "s=Usd.Stage.Open(sys.argv[1]); p=s.GetPrimAtPath('/World/PhysicsScene'); "
+            "print(json.dumps({'stage': s is not None, 'physics_scene': p.IsA(UsdPhysics.Scene)}))",
+            str(scene_file),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert json.loads(inspected.stdout) == {"stage": True, "physics_scene": True}
 
 
 def test_legacy_box_export_preserves_dimensions_and_collider_local_pose(physics_scene: SceneIR) -> None:

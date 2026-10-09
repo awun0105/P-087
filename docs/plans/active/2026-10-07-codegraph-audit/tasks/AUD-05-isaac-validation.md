@@ -185,3 +185,31 @@ prove that Isaac Sim starts, executes physics checks, publishes a real report, o
 passes browser/GPU/release acceptance. No real `run_id`, report checksum, runtime
 fingerprint or evidence artifact exists yet; capture these in S2/S3 rather than
 inventing values here.
+
+### AUD-05.S2 — Headless Isaac thin path and observed checks (local prerequisite)
+
+Base commit: `bccf27d` (`AUD-12.S4`). CodeGraph traced
+`generate_scene_usda` through candidate building and simulation-package caching;
+its 11 direct callers are the legacy builder/package service and USD tests. The
+legacy USD entrypoint previously omitted `/World/PhysicsScene`, while the hybrid
+builder already creates one. Added the PhysicsScene to legacy candidates, bumped
+the legacy simulation-package builder identity from v4 to v5 so cached packages
+are rebuilt, updated the generated README, and added an assertion to the USD
+syntax test.
+
+Verification:
+
+- `.venv/bin/pytest tests/test_simulation/test_usd.py tests/test_orchestration/test_simulation_package.py -q --tb=short` — 30 passed.
+- The configured USD scene runtime opened the generated legacy stage and verified `/World/PhysicsScene` is a `UsdPhysics.Scene`; this is OpenUSD evidence, not Isaac Sim execution.
+- `.venv/bin/ruff check src/ tests/` — passed.
+- `.venv/bin/ruff format --check src/ tests/` — passed; 561 files formatted.
+- `codegraph status` — 899 files, 18,117 nodes, 53,879 edges; index up to date.
+- `graphify update .` and a focused `graphify query` — completed; 21,200 nodes, 63,055 edges, 712 communities. Generated graph files remain untracked.
+- Environment probe — `isaacsim`, `isaaclab`, `isaac-sim`, and server validation config/profile are absent.
+
+This local change makes legacy USD structurally ready for physics evaluation but
+does not implement or prove the headless observation worker,
+collision/penetration checks, path checks, process cancellation, or real Isaac
+execution. AUD-05.S2 remains **IN PROGRESS**; runtime acceptance is
+**UNVERIFIED** and no fixture is used as simulator evidence. The USD test checks
+generated source text; it does not load the stage in Isaac Sim.

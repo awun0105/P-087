@@ -156,6 +156,10 @@ def generate_scene_usda(scene: SceneIR, environment_layer: str | None = None) ->
         "",
         'def Xform "World"',
         "{",
+        '    def PhysicsScene "PhysicsScene"',
+        "    {",
+        "    }",
+        "",
         '    def Xform "Environment"',
         "    {",
     ]

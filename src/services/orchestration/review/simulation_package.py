@@ -94,7 +94,7 @@ logger = logging.getLogger(__name__)
 
 ENVIRONMENT_LAYER = "environment_collision.usda"
 BUILD_CONFIG = {
-    "builder": "real2sim-studio-simulation-package-v4-capability-gated",
+    "builder": "real2sim-studio-simulation-package-v5-capability-gated",
     "capability_contract": "usd-export-capabilities-v2",
     "requested_mode": "auto",
     "effective_mode": "legacy_box",
@@ -1169,7 +1169,7 @@ def _readme(
             "Mở scene.usda trong Isaac Sim (metersPerUnit = 1, upAxis = Z).",
             f"{ENVIRONMENT_LAYER}: collision mesh REC-05 đã bỏ source region của vật được xác nhận/đã xoá;",
             "sàn là GroundPlane ở z = 0; mỗi vật đã xác nhận có collider hộp riêng.",
-            "Visual 3DGS không nằm trong gói; physics chưa được kiểm trong Isaac (SIM-06).",
+            "USD có /World/PhysicsScene; Visual 3DGS không nằm trong gói; physics chưa được kiểm trong Isaac (SIM-06).",
             *retention,
             json.dumps(config, ensure_ascii=False),
             "",
