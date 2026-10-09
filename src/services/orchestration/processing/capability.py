@@ -18,6 +18,7 @@ from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.processing.container_limits import (
     effective_cpu_count,
     memory_limit_gb,
+    memory_reclaimable_gb,
     memory_usage_gb,
 )
 from src.services.orchestration.processing.models import MachineCapability
@@ -121,7 +122,9 @@ def _live_ram_gb(cgroup_root: Path | None = None) -> float | None:
     limit = memory_limit_gb(cgroup_root)
     usage = memory_usage_gb(cgroup_root)
     if limit is not None and usage is not None:
-        cgroup_free = max(0.0, limit - usage)
+        # Page cache thu hồi được không phải bộ nhớ đang bị giữ (xem `memory_reclaimable_gb`).
+        working_set = max(0.0, usage - memory_reclaimable_gb(cgroup_root))
+        cgroup_free = max(0.0, limit - working_set)
         if host_available is not None:
             return round(min(host_available, cgroup_free), 2)
         return round(cgroup_free, 2)

@@ -734,4 +734,7 @@ phép để UNVERIFIED kèm ghi chú cho tới đợt thuê máy đầu tiên.
   test `test_calibration_script_imports_and_parses_arguments`.
 - **Preflight COLMAP GPU** chọn tiền tố cờ theo help của binary (`FeatureExtraction` ở COLMAP 4.x).
 - Bảng của script trong mục S1 ở trên là output trước khi sửa; cột ước lượng RAM nay cao hơn 0,15 GB.
-
+- **RAM trống trong container (S4).** `memory.current` tính cả page cache, nên `limit - usage` tụt về gần 0
+  khi job đọc nhiều ảnh dù bộ nhớ đó thu hồi được; admission sẽ chờ vô ích và lượt lỗi bị gắn nhầm là hết bộ nhớ.
+  Thêm `memory_reclaimable_gb` (đọc `inactive_file` trong `memory.stat`, cgroup v1 là `total_inactive_file`) và
+  `_live_ram_gb` trừ phần này trước khi so với giới hạn. Công thức `limit - usage` trong mục S4 của plan là sai.

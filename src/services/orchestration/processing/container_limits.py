@@ -61,6 +61,29 @@ def memory_usage_gb(cgroup_root: Path | None = None) -> float | None:
     return None
 
 
+def memory_reclaimable_gb(cgroup_root: Path | None = None) -> float:
+    """Page cache kernel thu hồi được ngay (`inactive_file`), GiB; 0 khi không đọc được.
+
+    `memory.current`/`usage_in_bytes` tính cả page cache: job đọc nhiều ảnh sẽ làm con số này chạm giới hạn dù
+    tiến trình không giữ bộ nhớ đó. Trừ `inactive_file` là cách kubelet tính working set.
+    """
+    root = cgroup_root or CGROUP_ROOT
+    for path, key in (
+        (root / "memory.stat", "inactive_file"),
+        (root / "memory" / "memory.stat", "total_inactive_file"),
+    ):
+        try:
+            if not path.is_file():
+                continue
+            for line in path.read_text().splitlines():
+                parts = line.split()
+                if len(parts) == 2 and parts[0] == key:
+                    return round(max(0, int(parts[1])) / (1024**3), 2)
+        except (OSError, ValueError):
+            continue
+    return 0.0
+
+
 def cpu_limit(cgroup_root: Path | None = None) -> float | None:
     """Giới hạn số nhân CPU theo quota CFS; None khi không giới hạn hoặc không đọc được.
 
