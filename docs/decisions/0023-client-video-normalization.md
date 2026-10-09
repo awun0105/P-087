@@ -50,9 +50,14 @@ mapping. Client encode sẽ mất backend access tới raw original nếu nó kh
    values. Server independently verifies actual received metadata/checksums; client-local
    source hash is declared provenance, cannot become server source-byte proof.
    Store received compressed file immutable; raw original stays user's device.
-6. Preserve all compatible audio tracks through mux. Unsupported audio needs remediation or
-   explicit user selection to omit; không strip/trim ngầm. v1 preserves SDR color
-   metadata and rejects HDR. Camera calibration/projection
+6. (Owner, 2026-10-09 — thay cho "preserve compatible audio / explicit omission") Bước
+   chuẩn hoá **luôn bỏ âm thanh**, không hỏi: reconstruction không đọc âm thanh, và AAC của
+   iPhone (timestamp đầu âm) làm bước này dừng lại với mọi video quay bằng điện thoại. Manifest
+   ghi `omitted_with_user_consent` (tên giá trị v1 giữ nguyên để không đổi contract) hoặc
+   `source_has_no_audio`. Video gốc giữ nguyên âm thanh nếu người dùng chọn tải bản gốc.
+   v1 giữ primaries/matrix SDR của nguồn, chấp nhận transfer cùng họ SDR
+   (`bt709`/`iec61966-2-1`/`smpte170m`: Chrome gắn sRGB sau khi resize qua canvas) và range
+   được gắn rõ; vẫn từ chối HDR. Camera calibration/projection
    uses updated image/camera frame
    conventions, not just scaled focal values after rotation. Sensor data insufficient
    blocks paired mode with remediation; original uncompressed path remains available.
@@ -136,3 +141,15 @@ all phones/browsers support every codec or bandwidth always falls by a fixed fac
   FPS filter can duplicate/drop, so exact timeline mapping needs separate evidence.
 - [ffmpeg.wasm performance](https://ffmpegwasm.netlify.app/docs/performance/) — historical
   comparison, not this project's browser/device benchmark.
+
+## Amendment 2026-10-09 (real-capture run)
+
+Chạy thật một video iPhone (4K dọc, 60 FPS, HEVC + AAC) và hai clip TorWIC trên Chrome 153 cho thấy ba chỗ
+quy tắc cũ chặn nhầm video hợp lệ; cả ba đã đổi trong code và contract:
+
+- Âm thanh: xem mục 6 ở trên.
+- Nhãn màu: so khớp tuyệt đối transfer/range từ chối mọi video BT.709 cần resize hoặc xoay, sau khi đã nén
+  xong toàn bộ. Quy tắc mới ở mục 6; `_preserves_sdr_color_metadata` (Python) và `preservesSdrColorMetadata`
+  (TypeScript) giữ cùng một định nghĩa.
+- Lối đi tiếp: luồng nhập hợp nhất (AUD-24) không có lựa chọn tải video gốc khi trình duyệt không giải mã
+  được codec (HEVC trên Chrome/Linux). Nay có nút tải video gốc không nén, chỉ chạy khi người dùng bấm.
