@@ -51,4 +51,14 @@ describe("kết quả đúng revision", () => {
     expect(screen.queryByRole("link", { name: "Tải gói" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Tải bản phát hành" })).toBeNull();
   });
+  it("scene có artifact nhưng chưa có head (409): hiện lý do của backend, không coi là chưa có SceneIR", async () => {
+    const notReady = new ApiError(409, "Scene này chưa được chuẩn bị để xem. Nhờ quản trị chuẩn bị scene.");
+    vi.mocked(getJobScene).mockResolvedValue({ ok: false, error: notReady });
+    vi.mocked(getSimulationPackage).mockRejectedValue(notReady);
+    vi.mocked(getReviewState).mockRejectedValue(notReady);
+    render(<ResultsTab jobId="job-a" preview={preview} revision={null} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Scene này chưa được chuẩn bị để xem. Nhờ quản trị chuẩn bị scene.");
+    expect(screen.queryByRole("link", { name: "Tải gói" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Tải bản phát hành" })).toBeNull();
+  });
 });

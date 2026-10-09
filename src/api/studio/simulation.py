@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 
 from src.api.auth import require_contributor
 from src.api.ownership import authorize_job_mutation
+from src.api.product.deps import scene_unavailable
 from src.api.studio import deps
 from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.auth import UserRecord
@@ -34,7 +35,7 @@ def get_simulation_package(job_id: str) -> SimulationPackage | None:
     try:
         return current_package(deps.registry(), job_id)
     except SceneNotAvailableError as error:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+        raise scene_unavailable(error) from error
 
 
 @router.post("/jobs/{job_id}/simulation-package", response_model=SimulationPackage)
@@ -45,7 +46,7 @@ def create_simulation_package(job_id: str, user: UserRecord | None = Depends(req
     try:
         return build_simulation_package(deps.registry(), job_id)
     except SceneNotAvailableError as error:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+        raise scene_unavailable(error) from error
     except (ArtifactStoreError, SceneError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except ValueError as error:

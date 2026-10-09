@@ -60,7 +60,7 @@ def get_job_scene(job_id: str) -> schemas.SceneResponse:
     try:
         return schemas.scene_response(editor.current(job_id), editor.visual_binding(job_id))
     except SceneNotAvailableError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
+        raise deps.scene_unavailable(error) from error
     except (ArtifactStoreError, SceneError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -257,7 +257,7 @@ def get_objectify_state(job_id: str) -> ObjectifyState:
     try:
         return objectify_queue.state(deps.registry(), deps.settings(), job_id)
     except SceneNotAvailableError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
+        raise deps.scene_unavailable(error) from error
 
 
 @router.post(
@@ -284,7 +284,7 @@ def request_objectify(
             registry, deps.settings(), job_id, request.expected_scene_revision, request.mode
         )
     except SceneNotAvailableError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
+        raise deps.scene_unavailable(error) from error
     except (ObjectifyRequestError, SceneRevisionConflictError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     record_gpu_run(user, job_id, {"kind": f"scene.{request.mode}"})
@@ -313,7 +313,7 @@ def _membership_correction(
     except ObjectMembershipValidationError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
     except SceneNotAvailableError as error:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+        raise deps.scene_unavailable(error) from error
     except (ArtifactStoreError, SceneError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 
@@ -386,7 +386,7 @@ def _membership_correction(
     except ArtifactStoreError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except SceneNotAvailableError as error:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+        raise deps.scene_unavailable(error) from error
     except ObjectifyError as error:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
     except (ObjectMembershipValidationError, SceneError) as error:
@@ -449,7 +449,9 @@ def cancel_objectify(job_id: str, user: UserRecord | None = Depends(require_cont
     deps.job_or_404(job_id)
     try:
         return objectify_queue.cancel(registry, deps.settings(), job_id)
-    except (ObjectifyRequestError, SceneNotAvailableError) as error:
+    except SceneNotAvailableError as error:
+        raise deps.scene_unavailable(error) from error
+    except ObjectifyRequestError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
@@ -464,7 +466,7 @@ def get_label_suggestions(job_id: str, object_id: str) -> schemas.LabelSuggestio
     try:
         scene = deps.registry().scene.current(job_id).scene
     except SceneNotAvailableError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
+        raise deps.scene_unavailable(error) from error
     target = next((item for item in scene.objects if item.id == object_id), None)
     dimensions = target and (
         target.primitive_dimensions_xyz_m or (target.collider.dimensions_xyz_m if target.collider else None)

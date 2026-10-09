@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict
 from src.api import auth
 from src.api.auth import require_contributor
 from src.api.ownership import authorize_job_mutation, owner_mutation_allowed
+from src.api.product.deps import scene_unavailable
 from src.api.studio import deps
 from src.models.contracts.artifacts import Checksum, Identifier
 from src.models.contracts.identity import verify_candidate_inventory, verify_content_checksum
@@ -35,7 +36,7 @@ from src.services.orchestration.review.validation_queue import (
     ValidationRunView,
 )
 from src.services.orchestration.review.workflow import ReviewError, ReviewState, decide, review_state, seal_release
-from src.services.orchestration.scene.errors import SceneNotAvailableError
+from src.services.orchestration.scene.errors import SceneHeadNotReadyError, SceneNotAvailableError
 
 router = APIRouter()
 
@@ -92,7 +93,7 @@ def _state(job_id: str) -> ReviewState:
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except SceneNotAvailableError as error:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+        raise scene_unavailable(error) from error
 
 
 def _review_error(error: ReviewError) -> HTTPException:
@@ -158,6 +159,8 @@ def _current_validation_candidate(
 ) -> tuple[SimulationPackage, ValidationCandidateSnapshot]:
     try:
         package = current_package(registry, job_id)
+    except SceneHeadNotReadyError as error:
+        raise scene_unavailable(error) from error
     except (ArtifactStoreError, SceneNotAvailableError, ValueError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     if package is None or package.candidate is None:

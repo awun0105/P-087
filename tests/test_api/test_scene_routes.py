@@ -391,3 +391,27 @@ async def test_walk_collision_respects_the_job_allow_list(client) -> None:
     name = reference["artifact_uri"].rsplit("/", 1)[-1]
     r = await client.get(f"{_JOB}/walk-collision/{name}", params=reference)
     assert r.status_code == 404
+
+
+# ── scene có artifact nhưng chưa có head (scene cũ trước AUD-10) ───────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["scene", "scene/objectify", "simulation-package", "review-state"])
+async def test_scene_without_committed_head_is_a_conflict_with_a_user_message(
+    client, isolated_registry, tmp_path, monkeypatch, path
+) -> None:
+    from src.api.studio import deps as studio_deps
+    from src.services.orchestration.jobs.database import RuntimeDatabase
+    from src.services.orchestration.scene.heads import SceneHeadRepository
+
+    monkeypatch.setattr(studio_deps, "get_project_registry", lambda: isolated_registry)
+    await _scene(client)  # publish rev-001 khi chưa có head repository, như một scene cũ
+    isolated_registry.scene.head_repository = SceneHeadRepository(RuntimeDatabase(f"sqlite:///{tmp_path / 'heads.db'}"))
+
+    response = await client.get(f"{_JOB}/{path}")
+
+    # Không phải 404 "không tìm thấy", và lệnh repair của người vận hành không được ra ngoài API.
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Scene này chưa được chuẩn bị để xem. Nhờ quản trị chuẩn bị scene."
+    assert "scene_head" not in response.text

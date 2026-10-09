@@ -6,6 +6,7 @@ Vì vậy editor không sửa `SceneIR` tại chỗ — nó dựng revision kế
 """
 
 import json
+import logging
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -27,6 +28,7 @@ from src.services.orchestration.artifacts import (
 from src.services.orchestration.jobs.database import RuntimeStateConflictError, RuntimeTransaction
 from src.services.orchestration.scene.errors import (
     SceneEditRejectedError,
+    SceneHeadNotReadyError,
     SceneNotAvailableError,
     SceneObjectNotFoundError,
     SceneRevisionConflictError,
@@ -49,6 +51,8 @@ _MAX_RECOVERY_STEPS = 1000
 _ROOT_REVISION = "rev-001"
 #: Số job tối đa giữ lineage đã chứng minh trong bộ nhớ một process.
 _LINEAGE_CACHE_JOBS = 8
+
+logger = logging.getLogger(__name__)
 
 
 class SceneEditor:
@@ -86,23 +90,23 @@ class SceneEditor:
                 return revision
             pending = self.head_repository.get_publication(job_id)
             if pending is not None:
-                raise SceneNotAvailableError("SceneIR publication is not committed; retry or repair the pending writer")
+                raise SceneHeadNotReadyError(
+                    "SceneIR publication is not committed; retry or repair the pending writer",
+                    "Scene đang được ghi nhận. Thử lại sau ít phút.",
+                )
             repair = self.head_repository.get_repair(job_id)
             if repair is not None:
-                raise SceneNotAvailableError(
-                    f"Scene head is missing while repair is {repair.status}; resume scripts.studio.scene_head first"
+                raise SceneHeadNotReadyError(
+                    f"Scene head is missing while repair is {repair.status}; resume scripts.studio.scene_head first",
+                    "Scene đang được chuẩn bị để xem. Thử lại sau.",
                 )
             fixture = self._fixture_scene()
             if fixture.environment.geometry_ref.job_id == job_id:
                 if self._scene_revision_uris(job_id):
-                    raise SceneNotAvailableError(
-                        "SceneIR artifacts have no committed head; run scripts.studio.scene_head --apply before reading"
-                    )
+                    raise _missing_head_error(job_id)
                 return self.publish_initial(job_id, fixture)
             if self._scene_revision_uris(job_id):
-                raise SceneNotAvailableError(
-                    "SceneIR artifacts have no committed head; run scripts.studio.scene_head --apply before reading"
-                )
+                raise _missing_head_error(job_id)
             raise SceneNotAvailableError("Job chưa publish SceneIR; reconstruction preview không yêu cầu SceneIR")
 
         if job_id not in self._revisions:
@@ -620,6 +624,13 @@ class SceneEditor:
             existing = self.resolver.locate(reference.artifact_uri)
             if existing is None or existing.read_bytes() != payload:
                 raise
+
+
+def _missing_head_error(job_id: str) -> SceneHeadNotReadyError:
+    """SceneIR đã có trên đĩa nhưng job chưa được repair. Lệnh repair chỉ vào log; UI nhận câu chung."""
+    operator = "SceneIR artifacts have no committed head; run scripts.studio.scene_head --apply before reading"
+    logger.warning("scene head missing job_id=%s; %s", job_id, operator)
+    return SceneHeadNotReadyError(operator, "Scene này chưa được chuẩn bị để xem. Nhờ quản trị chuẩn bị scene.")
 
 
 def _next_scene_revision(current: str) -> str:

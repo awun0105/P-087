@@ -25,7 +25,11 @@ from src.services.orchestration.artifacts import (
 )
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.scene.editor import SceneEditor, scene_artifact_uri
-from src.services.orchestration.scene.errors import SceneNotAvailableError, SceneRevisionConflictError
+from src.services.orchestration.scene.errors import (
+    SceneHeadNotReadyError,
+    SceneNotAvailableError,
+    SceneRevisionConflictError,
+)
 from src.services.orchestration.scene.heads import (
     SceneHeadBackfill,
     SceneHeadBackfillError,
@@ -580,3 +584,15 @@ def test_walking_every_ancestor_loads_each_revision_once_and_follows_a_moving_he
     assert editor.revision(_JOB_ID, "rev-001") is not None
     assert editor.revision(_JOB_ID, newest) is not None
     assert len(lineage_loads) == 14
+
+
+def test_legacy_scene_without_head_reports_a_user_safe_conflict(scene_state: SimpleNamespace) -> None:
+    SceneEditor(_FIXTURE_ROOT, scene_state.resolver).current(_JOB_ID)
+    database = RuntimeDatabase(f"sqlite:///{scene_state.resolver.artifact_root.parent / 'no-head.db'}")
+    editor = SceneEditor(_FIXTURE_ROOT, scene_state.resolver, SceneHeadRepository(database))
+
+    with pytest.raises(SceneHeadNotReadyError, match="no committed head") as info:
+        editor.current(_JOB_ID)
+    # Lệnh repair chỉ nằm trong log/exception; câu gửi cho UI không được chứa nó.
+    assert "scene_head" not in info.value.user_message
+    assert info.value.user_message.startswith("Scene này chưa được chuẩn bị")

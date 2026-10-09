@@ -262,6 +262,18 @@ describe("ObjectReviewView", () => {
     global.fetch = vi.fn();
   });
 
+  it("scene chưa có head (409) hiện lý do của backend; chỉ 404 mới là chưa tách vật thể", async () => {
+    routeFetch({ "/scene": [reply({ detail: "Scene này chưa được chuẩn bị để xem. Nhờ quản trị chuẩn bị scene." }, 409)] });
+    const view = render(<ObjectReviewView jobId="job-a" />);
+    expect(await screen.findByText("Scene này chưa được chuẩn bị để xem. Nhờ quản trị chuẩn bị scene.")).toBeInTheDocument();
+    expect(screen.queryByText(/Chưa có vật thể/)).toBeNull();
+    view.unmount();
+
+    routeFetch({ "/scene": [reply({ detail: "Job chưa publish SceneIR" }, 404)] });
+    render(<ObjectReviewView jobId="job-a" />);
+    expect(await screen.findByText(/Chưa có vật thể/)).toBeInTheDocument();
+  });
+
   it("xác nhận ứng viên với revision hiện tại và hiển thị revision mới", async () => {
     routeFetch({
       "/objects/candidate-001/confirm": [
