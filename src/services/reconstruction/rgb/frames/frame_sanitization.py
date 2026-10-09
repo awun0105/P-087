@@ -1,7 +1,9 @@
 """Thay frame set vừa tách bằng bản đã che khuôn mặt/biển số (AUD-18, ADR 0019).
 
 Chạy ngay sau REC-02A và trước mọi bước dùng frame (COLMAP, Brush, thumbnail, các view): stage
-`ST-FRAME-EXTRACT` của job trỏ tới frame set đã che, nên các bước sau không còn đường tới frame gốc.
+`ST-FRAME-EXTRACT` của job trỏ tới frame set đã che. Frame có vùng bị che được thay bằng bản mới ở
+`rec02a/sanitized/`; frame không có vùng nào giữ nguyên artifact gốc, nên các bước sau không còn đường tới
+bản gốc của bất kỳ frame nào đã bị che. Job chạy tiếp ngay, không chờ người duyệt (owner chốt 2026-10-09).
 Bước này không cấp trạng thái "đã ẩn danh": privacy report của job giữ nguyên.
 """
 
@@ -121,6 +123,11 @@ class FrameSanitizer:
                 record = by_name[name]
                 if record.source_checksum != frame.image.artifact_checksum:
                     raise ValueError(f"anonymizer read different source bytes: {frame.frame_id}")
+                if not record.regions:
+                    # Không có vùng nào bị che: manifest đã buộc byte giống hệt bản gốc, nên dùng luôn artifact gốc
+                    # thay vì đọc, băm và publish lại một bản sao (phần lớn frame rơi vào trường hợp này).
+                    frames.append(frame)
+                    continue
                 payload = (target / name).read_bytes()
                 reference = self._publish(job_id, f"frames/{name}", "RGBFrame", payload)
                 if reference.artifact_checksum != record.sanitized_checksum:

@@ -2,7 +2,6 @@
 
 import dataclasses
 import hashlib
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -48,9 +47,7 @@ def _fake_anonymizer(*, fail: str | None = None, lie_about: str | None = None, c
                         "origin": "detected",
                     }
                 ]
-            else:
-                shutil.copyfile(source / name, target / name)
-            recorded = (target / name).read_bytes()
+            recorded = (target / name).read_bytes() if regions else original
             frames.append(
                 {
                     "frame_name": name,
@@ -116,8 +113,12 @@ def test_anonymize_replaces_the_job_frame_set_with_the_redacted_copy(tmp_path: P
     assert [f.timestamp_sec for f in sanitized.frames] == [f.timestamp_sec for f in original.frames]
     assert original.sanitization_manifest_checksum is None and sanitized.sanitization_manifest_checksum is not None
     assert sanitized.frame_set_checksum != original.frame_set_checksum
-    # Mọi ảnh của frame set đã che nằm dưới rec02a/sanitized: không ref nào trỏ về frame gốc.
-    assert all("/rec02a/sanitized/frames/" in frame.image.artifact_uri for frame in sanitized.frames)
+    # Frame bị che được thay bằng bản mới; frame không bị che dùng lại đúng artifact gốc, không publish bản sao.
+    assert "/rec02a/sanitized/frames/" in sanitized.frames[0].image.artifact_uri
+    assert sanitized.frames[0].image != original.frames[0].image
+    assert [f.image for f in sanitized.frames[1:]] == [f.image for f in original.frames[1:]]
+    copies = resolver.artifact_root / "jobs" / JOB / "rec02a" / "sanitized" / "frames"
+    assert sorted(path.name for path in copies.iterdir()) == [f"{original.frames[0].frame_id:06d}.png"]
     paths = loader.materialize(sanitized)
     assert paths[0][1].read_bytes() == REDACTED
     assert paths[1][1].read_bytes() == resolver.require(original.frames[1].image).read_bytes()

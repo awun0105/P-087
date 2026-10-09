@@ -5,14 +5,14 @@ import code app (runtime không có pydantic). Đọc request JSON, ghi result J
 
     <scene_runtime>/bin/python src/services/reconstruction/adapters/anonymize_runner.py --request r.json --result out.json
 
-Nguyên tắc: frame nào không đọc, không suy luận hoặc không ghi được thì nằm trong `failures` và **không** có
-file ở thư mục đích; runner thoát mã 2. Không bao giờ chép frame gốc sang khi bước che lỗi.
+Nguyên tắc: frame nào không đọc, không suy luận hoặc không ghi được thì nằm trong `failures`; runner thoát mã 2.
+Thư mục đích chỉ chứa các frame **có vùng bị che**. Frame không có vùng nào giữ nguyên byte gốc nên không được
+ghi lại (`sanitized_checksum` bằng `source_checksum`); nơi gọi dùng tiếp file gốc cho những frame đó.
 """
 
 import argparse
 import hashlib
 import json
-import shutil
 import sys
 from pathlib import Path
 
@@ -100,6 +100,7 @@ def run(request: dict) -> dict:
 
     detected: list[list[dict]] = []
     readable: list[bool] = []
+    sizes: list[tuple[int, int]] = []
     with patch_instances(fields=PATCH_INSTANCES_FIELDS):
         detectors = _detectors(weights, config)
         for name in names:
@@ -109,29 +110,29 @@ def run(request: dict) -> dict:
                     raise ValueError("unreadable frame")
                 detected.append(_detect(detectors, image))
                 readable.append(True)
+                sizes.append((image.shape[1], image.shape[0]))
             except (ValueError, RuntimeError):
                 detected.append([])
                 readable.append(False)
+                sizes.append((0, 0))
 
     # Frame không đọc được không cho và không nhận vùng lan: nó sẽ không có file đích.
     planned = propagate_regions(detected, config["propagate_radius"], config["propagate_growth"])
     frames, failures = [], []
-    for name, regions, usable in zip(names, planned, readable, strict=True):
+    for name, regions, usable, (width, height) in zip(names, planned, readable, sizes, strict=True):
         source_path, target_path = source / name, target / name
         if not usable:
             failures.append(name)
             continue
         try:
+            source_checksum = sanitized_checksum = sha256_file(source_path)
             if regions:
                 image = cv2.imread(str(source_path), cv2.IMREAD_COLOR)
                 fill_regions(image, regions, config["expand_scale"], config["fill_bgr"])
                 if not cv2.imwrite(str(target_path), image):
                     raise OSError("frame write failed")
-                height, width = image.shape[:2]
-            else:
-                shutil.copyfile(source_path, target_path)
-                height, width = cv2.imread(str(source_path), cv2.IMREAD_COLOR).shape[:2]
-        except (OSError, ValueError):
+                sanitized_checksum = sha256_file(target_path)
+        except (OSError, ValueError, AttributeError):
             target_path.unlink(missing_ok=True)
             failures.append(name)
             continue
@@ -142,8 +143,8 @@ def run(request: dict) -> dict:
                 "frame_name": name,
                 "width": width,
                 "height": height,
-                "source_checksum": sha256_file(source_path),
-                "sanitized_checksum": sha256_file(target_path),
+                "source_checksum": source_checksum,
+                "sanitized_checksum": sanitized_checksum,
                 "regions": regions,
             }
         )

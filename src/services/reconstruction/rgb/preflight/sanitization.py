@@ -9,7 +9,12 @@ _PLACEHOLDER = "sha256:" + "0" * 64
 
 #: Cấu hình mặc định. Hai ngưỡng và kích thước resize là giá trị Meta công bố cho camera RGB trong gói
 #: `egoblur` 2.0.1 (`gen2/script/constants.py`); chưa được hiệu chỉnh trên video điện thoại hay biển số
-#: Việt Nam vì chưa có dữ liệu đánh giá. Nới hộp và lan theo thời gian bù cho các frame detector hụt.
+#: Việt Nam vì chưa có dữ liệu đánh giá.
+#:
+#: Lan theo thời gian mặc định tắt (`propagate_radius = 0`). Frame đưa vào đây đã được lấy mẫu thưa (vài frame
+#: mỗi giây) nên giữa hai frame liền nhau camera đã di chuyển: hộp chép từ frame bên cạnh không còn nằm trên đối
+#: tượng, không che được gì mà lại thêm mảng đen sai chỗ vào ảnh train. Một lượt chạy trên frame thật
+#: (2026-10-09) cho thấy một phát hiện nhầm (nhãn trắng trên thùng nhựa, điểm 0,839) bị nhân ra 5 frame.
 DEFAULT_CONFIG: dict[str, Any] = {
     "face_threshold": 0.67416,
     "license_plate_threshold": 0.74475,
@@ -17,7 +22,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "resize_short_edge": 1200,
     "resize_max": 1200,
     "expand_scale": 1.15,
-    "propagate_radius": 2,
+    "propagate_radius": 0,
     "propagate_growth": 0.15,
     "fill_bgr": [0, 0, 0],
 }
