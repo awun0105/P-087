@@ -7,6 +7,12 @@ topology is Vercel for the Next.js UI, Railway for the FastAPI control server,
 Supabase PostgreSQL for RuntimeDatabase, Cloudflare R2 for immutable artifact
 objects, and an ephemeral GPU worker on Vast.ai with RunPod as fallback.
 
+Start with [OVERVIEW.md](OVERVIEW.md) for the component map, the deploy order
+and the known pitfalls.  All three service templates are generated from one
+source, [`production.env.example`](production.env.example), by
+`python -m scripts.studio.deploy_env`; edit the source and regenerate rather
+than editing a template.
+
 ## Service split
 
 Use [`api.env.example`](api.env.example) for the Railway API service,
@@ -306,12 +312,13 @@ autoscaling with live credentials until that boundary is reviewed.  A provider
 deployment and a browser/GPU end-to-end run remain external proof requirements;
 these templates do not claim them.
 
-The production templates retain `PRODUCT_PRIVACY_MODE=qa_verified`. The current
-new-video route in `src/api/studio/scenes.py` accepts only `self_attested`, so
-that route remains closed under this production policy. Imported, previously
+The production source leaves `PRODUCT_PRIVACY_MODE` empty on purpose. The
+new-video routes in `src/api/studio/scenes.py` and `assemblies.py` accept only
+`self_attested`, so they stay closed under `qa_verified`. Imported, previously
 published data can still be restored; enabling new production video processing
-needs an approved QA upload flow or an explicit owner policy decision. The
-packaging tool does not weaken the production gate to match the local MVP.
+needs an approved QA upload flow or an explicit owner policy decision.
+`scripts.studio.deploy_env check` reports an empty value and `qa_verified` as
+errors so the choice is made knowingly; it does not pick a mode for the owner.
 
 The current GPU entrypoint also has a non-secret local fallback for the selected
 LLM key when the environment value is empty.  The template intentionally leaves
