@@ -52,6 +52,18 @@ export function guidanceFor(error: ExecutionError | null | undefined): ErrorGuid
       };
     }
 
+    case "FRAME_ANONYMIZATION_FAILED":
+      return {
+        cause: "Bước che khuôn mặt và biển số không hoàn tất, nên video chưa được đưa vào dựng 3D.",
+        fix: "Thử lại. Nếu lặp lại, báo quản trị viên kiểm tra GPU và bộ phát hiện của máy xử lý.",
+      };
+
+    case "FRAME_ANONYMIZER_UNAVAILABLE":
+      return {
+        cause: "Máy xử lý được yêu cầu che khuôn mặt và biển số nhưng chưa cài bộ phát hiện.",
+        fix: "Báo quản trị viên cấu hình bộ phát hiện trên máy xử lý.",
+      };
+
     case "COLMAP_OUT_OF_MEMORY":
       return {
         cause: "Máy xử lý hết RAM khi dựng vị trí camera.",

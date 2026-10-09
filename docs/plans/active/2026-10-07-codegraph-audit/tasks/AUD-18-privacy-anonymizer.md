@@ -123,5 +123,33 @@ and consumer proof; synthetic zero findings không chứng minh anonymity.
 
 ## Result / Evidence
 
-Pending — licensed qualified models, source/derived/evidence/checksums, frame/PTS
-coverage, misses/manual QA, dispatch lineage, resource lifecycle và quality limits.
+### Tiến độ 2026-10-09 (S1 và phần lõi của S2; S3 chưa bắt đầu)
+
+- **Model đã chọn:** EgoBlur Gen2 của Meta cho cả khuôn mặt và biển số. Code và trọng số Apache-2.0; Meta ghi
+  cho phép dùng thương mại. Trọng số chỉ tải được sau khi nhập email và đồng ý giấy phép trên trang của Meta.
+  Loại YuNet (train trên WIDER FACE với nhãn của SCRFD, cả hai phi thương mại), SCRFD/InsightFace (trọng số phi
+  thương mại), các bản YOLO của Ultralytics (AGPL), open-image-models (giấy phép trọng số chưa được trả lời).
+- **Runtime:** chạy trong `scene_runtime` hiện có (torch 2.7.1). Gói `egoblur` 2.0.1 ghim torch 2.9.1 nên cài
+  `--no-deps`. Đã so trên 13 frame: 41 lượt phát hiện giống hệt giữa torch 2.7.1 và 2.9.1 (lệch hộp và điểm
+  bằng 0). Trên Quadro T2000: khoảng 0,63 giây mỗi frame mỗi model, peak VRAM 0,89 GB.
+- **Đã có trong code:** `adapters/anonymize_runner.py` (phát hiện, lan theo thời gian ±2 frame, tô đặc vùng nới
+  15%), `adapters/sanitization_regions.py`, hợp đồng `contracts/sanitization.py` (`SanitizationManifest`),
+  `rgb/frames/frame_sanitization.py` (`FrameSanitizer`), cờ `anonymize` của `PrepareInputRequest`, setting
+  `PRODUCT_ANONYMIZE_INPUT` và `PRODUCT_EGOBLUR_WEIGHTS`. Khi bật, stage `ST-FRAME-EXTRACT` của job trỏ tới frame
+  set ở `rec02a/sanitized/`, nên COLMAP, Brush, thumbnail và các view chỉ dùng frame đã che. Lỗi ở bất kỳ frame
+  nào làm bước tách frame thất bại (`FRAME_ANONYMIZATION_FAILED`, `FRAME_ANONYMIZER_UNAVAILABLE`), không lùi về
+  frame gốc.
+- **Đã kiểm:** `tests/test_reconstruction/test_privacy_sanitization.py` (8 test) và
+  `tests/test_reconstruction/test_frame_sanitization.py` (4 test, FFmpeg thật, detector giả). Một lượt chạy
+  thật qua `VideoInputPreparer` với runner EgoBlur thật trên video dựng từ ảnh `astronaut` của scikit-image
+  (phạm vi công cộng): 12/12 frame có mặt được phát hiện với điểm 1,0 và bị tô đặc.
+- **Chưa làm / chưa kiểm:**
+  - Không có dữ liệu thật nên chưa đo recall trên video điện thoại và biển số Việt Nam. Ngưỡng đang là mặc định
+    của Meta cho camera RGB (mặt 0,67416; biển số 0,74475), chưa hiệu chỉnh. Nhánh biển số mới được chạy, chưa
+    từng thấy bắt đúng một biển số thật.
+  - Privacy report của job không đổi: vẫn `self_attested` / `PRELIMINARY_SCREENED`. Bước này là lớp bảo vệ thêm,
+    không cấp `VERIFIED_ANONYMIZED`. Luồng reviewer xem, sửa tay và duyệt (S3) chưa có.
+  - Cờ bật theo deployment, chưa có lựa chọn theo từng job trên UI.
+  - Bước che chạy trong tool `prepare`, chưa đi qua admission VRAM.
+  - Frame gốc vẫn được publish ở `rec02a/frames/` (không nằm trong allow-list tải của job khi bật che); chưa có
+    cơ chế hạn chế truy cập riêng hay xóa.
