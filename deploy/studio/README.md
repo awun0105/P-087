@@ -298,6 +298,17 @@ in `api.env.example` and redeploy the API. The API and worker must use the same
 preset contents and manifest checksum; this transfer publishes the worker's
 identity to its control API, rather than reusing a laptop manifest on a worker.
 
+Isaac candidate validation is a separate worker capability. Set
+`PRODUCT_ISAAC_VALIDATION_LAUNCHER` to the qualified Isaac Sim Python launcher
+(for example, that install's `python.sh`) and
+`PRODUCT_ISAAC_VALIDATION_RESOURCES` to a measured `OperationResourceProfile`
+JSON file only after that runtime has been qualified on the worker host. Both
+variables are optional and omitted from the generated environment by default.
+Without a launcher, queued validation attempts fail visibly as
+`ISAAC_RUNTIME_NOT_CONFIGURED`. Without a resource profile, admission waits
+instead of guessing capacity. A host launcher setting or protocol-test fake is
+not Isaac runtime qualification evidence.
+
 Operational acceptance from ADR 0003 also requires configured Sentry coverage,
 an external `/health` monitor, the agreed database keep-alive schedule, and a
 nightly `pg_dump` backup to R2 retaining seven snapshots. These provider jobs

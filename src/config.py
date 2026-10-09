@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     #: Server-owned policy/profile for durable Isaac validation; not accepted from request payloads.
     product_isaac_validation_config: Path | None = None
     product_isaac_validation_profile: Path | None = None
+    #: Worker-only Isaac launcher and resource profile used by AUD-07 admission.
+    product_isaac_validation_launcher: Path | None = None
+    product_isaac_validation_resources: Path | None = None
     product_seed: int | None = None
     product_worker_root: Path = Path("./data/product_workers")
     #: Giữ scratch để chẩn đoán; mặc định chỉ dọn attempt đã publish và commit thành công.

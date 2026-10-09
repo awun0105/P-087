@@ -368,6 +368,24 @@ class ValidationRunRepository:
         report = self._load_model(report_ref, ValidationReport, "report_checksum")
         if report.report_checksum != record.report_checksum or report.candidate_checksum != record.candidate_checksum:
             raise ValidationRunError("Validation report không khớp run candidate/checksum")
+        evidence_refs = [
+            *[reference for check in report.checks for reference in check.evidence_refs],
+            *[reference for path in report.path_results for reference in path.evidence_refs],
+        ]
+        if report.collision_quality_ref is not None:
+            evidence_refs.append(report.collision_quality_ref)
+        verified: set[tuple[str, str]] = set()
+        for reference in evidence_refs:
+            identity = (reference.artifact_uri, reference.artifact_checksum)
+            if identity in verified:
+                continue
+            if not reference.artifact_uri.startswith(f"artifact://jobs/{record.job_id}/") or reference.job_id not in (
+                None,
+                record.job_id,
+            ):
+                raise ValidationRunError("Validation report evidence belongs to a different job")
+            self.resolver.require(reference)
+            verified.add(identity)
         self._require_ref(
             runtime_ref,
             artifact_type="RuntimeManifest",

@@ -39,6 +39,7 @@ from src.services.orchestration.processing.capability import record as record_ca
 from src.services.orchestration.projects.errors import PrivacyGateBlockedError
 from src.services.orchestration.projects.privacy import require_project_dispatch
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
+from src.services.orchestration.review.validation_worker import IsaacValidationWorker
 from src.services.orchestration.scene.objectify_queue import process_next, recover_interrupted
 from src.services.orchestration.storage import runtime_resolver
 from src.services.orchestration.uploads.scene_imports import ImportService
@@ -351,6 +352,7 @@ def main(argv: list[str] | None = None) -> int:
         max_uncompressed_bytes=settings.product_upload_max_bytes * 2,
     )
     registration_worker = RegistrationOperationWorker(registry, settings, admission)
+    validation_worker = IsaacValidationWorker(registry, settings, admission)
     if admission.discard_leftover_reservation():
         logger.warning("Đã xoá giữ chỗ tài nguyên còn sót của lần chạy trước worker=%s", admission.worker_id)
     heartbeat = _start_capability_heartbeat(registry, settings.product_worker_root, admission)
@@ -371,6 +373,7 @@ def main(argv: list[str] | None = None) -> int:
             handled = (
                 dispatch_next(registry, admission=admission)
                 or registration_worker.process_next()
+                or validation_worker.process_next()
                 or process_next(registry, settings)
                 or import_service.process_next(admission=admission)
             )

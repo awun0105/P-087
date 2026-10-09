@@ -100,21 +100,25 @@ invalid USD, bad spawn, collision/contact, timeout và process cancellation.
 **Exit:** [ ] real logs/runtime/device; [ ] observed results có exact bindings;
 [ ] không dùng fixture để chứng minh simulator chạy.
 
-## Sprint AUD-05.S3 — Report và media/log publication
+## Sprint AUD-05.S3 — Report và execution-evidence publication
 
-**Input:** observations/logs S2 và capture output.
-**Output:** checksum-valid report + available evidence refs + completed trusted run.
+**Input:** observations/logs S2.
+**Output:** checksum-valid report + available execution-evidence refs + completed trusted run.
 **Contract:** required check/pair set đúng config; report checksum và byte refs
-đúng; no missing-file ref; capture issue không thay observed physics result.
+đúng; no missing-file ref; evidence publish xong mới complete run.
 
-Implement: report serializer theo normative schema; native capture trong locked
-runtime, fallback frame/FFmpeg chỉ khi native fail và ghi reason/version. Publish
-evidence trước report/selection; publish partial có recovery. Consumer resolve
-logs/screenshots/video và verify checksum/readability. Không nhúng machine paths.
-Tests: roundtrip, wrong candidate/config, duplicate/missing pairs, capture fail,
-corrupt media, remote publish fail/retry; real MP4 readability và report consumer.
-**Exit:** [ ] report refs verified; [ ] capture diagnostics tách kết quả vật lý;
-[ ] trusted run chỉ complete sau required execution evidence publication.
+Implement: report serializer theo normative schema. Publish runtime manifest,
+execution log và structured Isaac observations trước report; worker chỉ complete
+run sau khi repository resolve mọi ref cùng job và kiểm checksum/readability.
+Consumer hiện dùng checks/path results và evidence refs; không có UI media field,
+configured capture camera hay consumer cho viewport/FFmpeg artifact. Vì vậy S3
+không tạo thêm video/screenshot subsystem; có thể mở task riêng khi có use case,
+camera contract và UI consumer.
+Tests: roundtrip/checksum, wrong candidate/config, duplicate/missing checks hoặc
+pairs, tamper/missing refs, resource wait, stale candidate và publication failure.
+**Exit local:** [x] report refs verified; [x] no missing-file refs; [x] trusted run
+chỉ complete sau execution evidence publication. **Runtime gate:** [ ] real Isaac
+run/log/report; media capture không thuộc output S3 sau consumer audit.
 
 ## Sprint AUD-05.S4 — Studio → Isaac → review → release acceptance
 
@@ -237,9 +241,56 @@ Local verification on 2026-10-09:
 - Graphify — updated to 22,081 nodes, 67,816 edges and 710 communities; focused query completed.
 - Environment/deployment acceptance — **UNVERIFIED**: no Isaac Sim/Isaac Lab runtime or configured worker command is available in this checkout, and no deployed CLEAR/BLOCKED smoke was run.
 
-The adapter is not yet dispatched by the durable validation queue, and it does
-not publish trusted run/report artifacts; queue integration and publication are
-still required before Studio can use this result. AUD-05.S2 remains **IN
-PROGRESS**. Real Isaac runtime/device logs and CLEAR/BLOCKED smoke evidence are
-**UNVERIFIED** because no deployment was performed, and fake-child tests do not
-close that gate.
+The host adapter is now dispatched by the durable validation worker added in
+AUD-05.S3. That worker persists execution observations, a runtime manifest, a
+log, and a schema-valid report before completing the exact fenced run; the
+repository verifies reference ownership and artifact checksums on completion
+and read. Queue integration does not qualify the Isaac runtime: S2 remains **IN
+PROGRESS** until a deployed runtime produces real CLEAR/BLOCKED observations.
+The fake child and protocol worker tests are local contract evidence only.
+
+### AUD-05.S3 — Durable worker dispatch and report/evidence publication
+
+The validation queue is now a worker capability in `worker_cli`, sharing the
+existing `ResourceAdmission` reservation and heartbeat lifecycle. It loads only
+the checksummed config/profile/runtime and the current immutable candidate;
+stale or absent candidates are cancelled before admission. If no resource
+profile is configured, the attempt returns to `WAITING_RESOURCES`; if no
+launcher is configured, it fails visibly rather than reporting a simulated
+success. The process adapter receives cancellation, while the lease and
+reservation heartbeat stay active through evidence publication. A lost lease,
+cancel request, invalid child result, timeout, or publication failure cannot
+complete the run. Failed attempt scratch remains available for diagnosis.
+
+Successful local protocol runs publish a per-run runtime manifest, raw execution
+log, checksummed structured observations, and report. Report checks and paths
+reference the raw observations and log. Completion validates all referenced
+bytes and same-job ownership; later reads verify the referenced checksums too.
+Optional blocked paths remain observations without failing the whole report;
+required blocked paths fail, and missing penetration depth remains ERROR rather
+than being inferred from overlap. Report publication is idempotent only when an
+existing immutable URI contains identical bytes.
+
+The task draft requested viewport screenshots/video. Source and consumer review
+found the Studio review card consumes structured check/path results and evidence
+refs, with no configured capture camera or report-media consumer. This sprint
+therefore publishes execution evidence only. A media subsystem would need a
+defined camera, retention, report contract and UI consumer before implementation.
+
+Verification on 2026-10-09:
+
+- `.venv/bin/pytest tests/test_orchestration/test_isaac_validation_worker.py tests/test_orchestration/test_validation_queue.py tests/test_orchestration/test_validation_runs.py tests/test_orchestration/test_review_workflow.py tests/test_simulation/test_isaac_process.py tests/test_simulation/test_usd.py tests/test_orchestration/test_simulation_package.py tests/test_api/test_review_routes.py tests/test_api/test_validation_routes.py tests/test_packaging/test_deploy_env.py -q --tb=short` — 116 passed.
+- `.venv/bin/ruff check src/ tests/` — passed; `.venv/bin/ruff format --check src/ tests/` — passed (589 files formatted).
+- `.venv/bin/pytest -q --tb=short` — 2,541 passed, 28 skipped, 15 deprecation warnings. The first full run exposed an unrelated test isolation bug: `tests/conftest.py` loads `.env`, while the symlink guard test retained managed-path variables. Test isolation was fixed separately in commit `21adc736`; production entrypoint behavior was unchanged.
+- `git diff --check` — passed; CodeGraph current at 940 files, 19,436 nodes, 58,955 edges.
+- `graphify update .` and a focused `graphify query` — completed; 22,132 nodes, 68,135 edges and 760 communities.
+- Runtime boundary — **UNVERIFIED**: no Isaac runtime, measured resource profile, or deployment is configured; no real simulator/device log or CLEAR/BLOCKED smoke evidence exists.
+
+Changed files: `src/config.py`,
+`src/services/orchestration/jobs/worker_cli.py`,
+`src/services/orchestration/review/validation_queue.py`,
+`src/services/orchestration/review/validation_runs.py`,
+`src/services/orchestration/review/validation_worker.py`,
+`tests/test_orchestration/test_isaac_validation_worker.py`,
+`deploy/studio/production.env.example`, regenerated deployment examples,
+`deploy/studio/README.md`, and this task record.

@@ -428,12 +428,12 @@ class ValidationQueue:
             self._save_operation(tx, waiting, expected_checksum=operation.operation_checksum)
         return self._view(run, waiting)
 
-    def start(self, claim: ValidationClaim, *, current_candidate_checksum: str) -> ValidationRunRecord:
+    def start(self, claim: ValidationClaim, *, current_candidate_checksum: str | None) -> ValidationRunRecord:
         """Bind worker assignment only after current candidate is rechecked and admission succeeded."""
         now = datetime.now(UTC)
         with self.database.transaction(write=True) as tx:
             run, operation = self._leased_rows(tx, claim, expected={ValidationOperationStatus.CLAIMED})
-            if run.candidate_checksum != current_candidate_checksum:
+            if current_candidate_checksum is None or run.candidate_checksum != current_candidate_checksum:
                 cancelled = _seal_run(
                     run.model_copy(
                         update={
@@ -516,13 +516,32 @@ class ValidationQueue:
             run, operation = self._leased_rows(
                 tx,
                 claim,
-                expected={ValidationOperationStatus.RUNNING, ValidationOperationStatus.CANCEL_REQUESTED},
+                expected={
+                    ValidationOperationStatus.CLAIMED,
+                    ValidationOperationStatus.RUNNING,
+                    ValidationOperationStatus.CANCEL_REQUESTED,
+                },
             )
             if operation.status == ValidationOperationStatus.CANCEL_REQUESTED:
                 raise RuntimeStateConflictError("Đã yêu cầu hủy validation; worker phải kết thúc CANCELLED")
+            assignment = (
+                {
+                    "started_at": run.started_at or now,
+                    "worker_id": claim.worker_id,
+                    "lease_id": claim.lease_id,
+                    "fencing_token": claim.fencing_token,
+                }
+                if run.status == ValidationRunStatus.QUEUED
+                else {}
+            )
             failed = _seal_run(
                 run.model_copy(
-                    update={"status": ValidationRunStatus.FAILED, "completed_at": now, "run_checksum": _ZERO_CHECKSUM}
+                    update={
+                        "status": ValidationRunStatus.FAILED,
+                        "completed_at": now,
+                        "run_checksum": _ZERO_CHECKSUM,
+                        **assignment,
+                    }
                 )
             )
             failed_operation = _seal_operation(
@@ -541,6 +560,55 @@ class ValidationQueue:
             self.runs.save_run_in_transaction(tx, failed, expected_run_checksum=run.run_checksum)
             self._save_operation(tx, failed_operation, expected_checksum=operation.operation_checksum)
         return self._view(failed, failed_operation)
+
+    def complete(
+        self,
+        claim: ValidationClaim,
+        *,
+        runtime_manifest_ref: ProductArtifactRef,
+        report_ref: ProductArtifactRef,
+        report_checksum: str,
+        execution_log_ref: ProductArtifactRef,
+    ) -> ValidationRunView:
+        """Commit only fully published, checksum-verified artifacts under the live lease."""
+        now = datetime.now(UTC)
+        with self.database.transaction(write=True) as tx:
+            run, operation = self._leased_rows(
+                tx,
+                claim,
+                expected={ValidationOperationStatus.RUNNING, ValidationOperationStatus.CANCEL_REQUESTED},
+            )
+            if operation.status == ValidationOperationStatus.CANCEL_REQUESTED:
+                raise RuntimeStateConflictError("Đã yêu cầu hủy validation; không thể commit report")
+            completed = _seal_run(
+                run.model_copy(
+                    update={
+                        "status": ValidationRunStatus.COMPLETED,
+                        "completed_at": now,
+                        "runtime_manifest_ref": runtime_manifest_ref,
+                        "report_ref": report_ref,
+                        "report_checksum": report_checksum,
+                        "execution_log_ref": execution_log_ref,
+                        "run_checksum": _ZERO_CHECKSUM,
+                    }
+                )
+            )
+            operation_completed = _seal_operation(
+                operation.model_copy(
+                    update={
+                        "status": ValidationOperationStatus.COMPLETED,
+                        "lease_expires_at": None,
+                        "heartbeat_at": now,
+                        "updated_at": now,
+                        "retryable": False,
+                        "error_code": None,
+                        "operation_checksum": _ZERO_CHECKSUM,
+                    }
+                )
+            )
+            self.runs.save_run_in_transaction(tx, completed, expected_run_checksum=run.run_checksum)
+            self._save_operation(tx, operation_completed, expected_checksum=operation.operation_checksum)
+        return self._view(completed, operation_completed)
 
     def finish_cancelled(self, claim: ValidationClaim) -> ValidationRunView:
         now = datetime.now(UTC)
