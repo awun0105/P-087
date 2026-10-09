@@ -43,7 +43,7 @@ export function StudioTab({
       <div className="flex h-full flex-col">
         <Notice className="m-3">Bạn đang xem scene của người khác. Scene này ở chế độ chỉ xem.</Notice>
         <div className="min-h-0 flex-1">
-          <PreviewScene contentUrl={preview.url} filename={preview.filename} title={`Viewer 3DGS: ${title}`} />
+          <PreviewScene jobId={jobId} contentUrl={preview.url} filename={preview.filename} title={`Viewer 3DGS: ${title}`} />
         </div>
       </div>
     );
@@ -73,7 +73,7 @@ export function StudioTab({
             : "Bản xem 3DGS (chưa quy đổi mét). Studio vật thể mở sau khi xác nhận tỉ lệ và dựng collision."}
       </Notice>
       <div className="min-h-0 flex-1">
-        <PreviewScene contentUrl={preview.url} filename={preview.filename} title={`Viewer 3DGS: ${title}`} />
+        <PreviewScene jobId={jobId} contentUrl={preview.url} filename={preview.filename} title={`Viewer 3DGS: ${title}`} />
       </div>
     </div>
   );
