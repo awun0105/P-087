@@ -963,3 +963,80 @@ Pre-flight (GUIDE.md Rule 13)
   mirror and `git diff --check` passed; CodeGraph sync/status and Graphify update/query
   completed.
 - DevTools: n/a — UI-free worker and solver changes; no rendered screen changed.
+
+### AUD-19.S4i — Authorized operation API
+
+**Input:** authenticated contributor, exact checksum-sealed `RegistrationRequest`,
+job path, required `Idempotency-Key`, and a database-backed registry with a
+committed target scene revision.
+**Output:** HTTP 202 with a durable operation ID; job-bound status and cancellation
+routes for the shared registration worker.
+**Data contract:** the API binds the path job, request job/project, requester identity
+and current scene revision before enqueue. Only `REGISTERED_MAP` and `STATIC_CLOUD`
+are accepted by the currently integrated worker, and `registration_preflight` must
+be `READY`. The required key is 1–128 characters and replay returns the same exact
+operation; reusing it with another sealed request is 409. Guest mutation uses the
+existing own-job rule; Editor/Reviewer cross-owner mutation keeps the existing audit
+event. The public response contains state, attempt, timestamps and exact proposal/QA
+refs, but excludes the request body, idempotency key, lease identity and raw worker
+error. Missing durable persistence is 503; stale project/revision is 409; invalid
+mode or insufficient preflight is 422. Enqueue does not alter SceneIR, metric state
+or collision consumers. Creating an operation requires an authenticated actor so
+the durable requester foreign key cannot be spoofed or left unattributed.
+**Tests:** authenticated guest owner, guest cross-owner rejection, Editor/Reviewer
+intervention audit, unauthenticated rejection, request/requester/project/revision
+binding, insufficient preflight, rejection of `SENSOR_PACKAGE` from the independent-map
+worker, idempotent replay and key conflict, safe status projection, job-path binding,
+queued cancellation/idempotent cancel and no-database failure.
+**Exit:** [x] durable API producer/status/cancel and authorization slice implemented;
+[ ] Studio status/proposal/overlay and confirmation CAS; [ ] exact alignment consumer
+publication; [ ] held-out map qualification and real browser/registered-map acceptance.
+
+#### AUD-19.S4i Result / Evidence
+
+Commit base: `ef9b081` (current branch tip when S4i started). Added
+`src/api/product/registration.py` and registered it in the product router. Authenticated
+contributors can enqueue a sealed request with a required idempotency key, read a
+job-bound operation projection, or cancel queued/running work. The API checks guest
+ownership, preserves Editor/Reviewer intervention audit, binds requester/project/job/
+scene revision, rejects unsupported worker modes and insufficient preflight, and
+requires persistent operation storage. Status responses omit the request, idempotency
+key, lease, worker identity and raw error. The scene and alignment consumers remain
+unchanged.
+
+Changed files: `src/api/product/registration.py`,
+`src/api/product/__init__.py`, `tests/test_api/test_registration_routes.py`,
+`docs/plans/active/2026-10-07-codegraph-audit/tasks/AUD-19-automatic-rgb-lidar-registration.md`,
+`docs/plans/active/2026-10-07-codegraph-audit/README.md`,
+`docs/plans/active/2026-10-07-codegraph-audit/AGENT_GUIDE.md`, and
+`docs/plans/active/2026-10-07-codegraph-audit/INTEGRATION_MAP.md`.
+
+Verification: new route suite **13 passed**; full `tests/test_api` **206 passed,
+15 existing httpx cookie deprecation warnings**; registration operation/worker/source/
+target/QA suites **61 passed**. `.venv/bin/ruff check src/ tests/` passed;
+`.venv/bin/ruff format --check src/ tests/` reported 572 files already formatted;
+contract mirror passed (5 enums, 6 models); `git diff --check` passed. `codegraph sync`
+reported up to date (910 files, 18,471 nodes, 55,171 edges); `graphify update .`
+completed with 21,456 nodes, 64,259 edges and 715 communities. Graphify notes that
+saved community labels need refresh after reorganization; this does not affect the
+updated graph data. No browser gate applies because this sprint adds only backend routes.
+
+Limits: the Studio client does not yet create requests or display proposal/QA overlays;
+confirmation CAS and exact alignment-consumer publication remain for later S4 slices.
+Held-out registration qualification and real browser/registered-map acceptance remain
+open. API acceptance plus the worker's local tests do not establish end-to-end warehouse
+registration accuracy or collision safety.
+
+Pre-flight (GUIDE.md Rule 13)
+- codegraph: explored product-router inclusion, mutation authorization, worker-supported
+  input modes, durable operation store, scene revision access and API test patterns.
+- impact: `registration` is added to the product router; the route reuses
+  `authorize_job_mutation` and the existing `RegistrationOperationStore`; the worker
+  continues to consume its shared database queue. No AUD-18 files or behavior changed.
+- minimal-code: uses existing request checksum/preflight, job ownership guard, scene
+  head, operation store and worker dispatch; introduces only a bounded HTTP DTO and
+  route module. It does not change SceneIR or canonical alignment.
+- checks: focused API 13 passed; full API 206 passed; registration operation/worker/
+  source/target/QA tests 61 passed; full repository Ruff and format checks passed;
+  contract mirror and `git diff --check` passed.
+- DevTools: n/a — backend-only routes; no rendered screen changed.
