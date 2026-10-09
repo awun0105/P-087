@@ -110,6 +110,16 @@ source-bound floor/noise model, and available Aisle_CW artifacts do not contain 
 filtered PLY/inspection intermediates needed to reproduce cleanup. Ghost-block
 improvement and thin-obstacle retention remain pending; no new floor clipping or
 radius/SOR filter is enabled.
+AUD-12.S2 now also has a bounded, profile-versioned SOR implementation for explicit
+experiments. It preserves the source PLY and Gaussian fields, records exact filter
+criteria and checksums as `diagnostic_only`, and demonstrates that a sparse true
+obstacle can be removed. The shipped geometry profile leaves SOR disabled; field
+qualification and the S2 acceptance exits remain pending.
+The follow-up passed 22 direct SOR/adapter tests, the full `tests/test_reconstruction`
+suite (868 passed, 23 skipped), and the broader REC-05/`eval/path` selection (94
+passed, 15 skipped), plus repository Ruff/format and contract mirror. No browser
+change was made. Aisle_CW before/after and real obstacle-retention qualification
+remain UNVERIFIED.
 Focused verification passed: 48 reconstruction/contract tests, Ruff check and
 format, contract mirror, and `git diff --check`. CodeGraph is current. The
 `understand-anything` gate is unavailable in this session; no UI changed, so the

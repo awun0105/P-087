@@ -11,10 +11,24 @@ from src.models.contracts.identity import canonical_json_bytes
 Vector3 = tuple[FiniteFloat, FiniteFloat, FiniteFloat]
 
 
+class StatisticalOutlierRemovalConfig(ContractModel):
+    """Opt-in metric-space SOR with explicit neighbor and memory bounds."""
+
+    neighbors: int = Field(ge=2, le=64, strict=True)
+    standard_deviation_ratio: FiniteFloat = Field(gt=0)
+    max_gaussians: int = Field(ge=3, le=5_000_000, strict=True)
+
+    @model_validator(mode="after")
+    def _enough_rows_for_neighbors(self) -> Self:
+        if self.max_gaussians <= self.neighbors:
+            raise ValueError("SOR max_gaussians must exceed the neighbor count")
+        return self
+
+
 class VoxelConfig(ContractModel):
     """Seeds thuộc canonical Z-up; cluster seed và capsule seed có vai trò riêng."""
 
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.0", "1.1"] = "1.0"
     resolution_m: FiniteFloat = Field(default=0.05, gt=0)
     opacity: FiniteFloat = Field(gt=0, lt=1)
     cluster_resolution_m: FiniteFloat = Field(gt=0)
@@ -35,6 +49,8 @@ class VoxelConfig(ContractModel):
     #: dày). `floaters`: bỏ Gaussian không góp vào voxel đặc nào — hiệu chỉnh 2026-09-30 trên
     #: Aisle_CW: preview thưa (~98k Gaussian) vỡ thành hàng trăm cụm nên `cluster` xoá gần hết.
     cleanup: Literal["cluster", "floaters"] = "cluster"
+    #: Disabled unless a versioned product geometry profile explicitly opts in.
+    statistical_outlier_removal: StatisticalOutlierRemovalConfig | None = None
     #: Giới hạn log-scale tối đa của Gaussian để tránh floaters khổng lồ làm phình lưới voxel.
     max_gaussian_scale_log: FiniteFloat | None = None
 
@@ -44,6 +60,8 @@ class VoxelConfig(ContractModel):
             low, high = self.crop_box_world
             if any(a >= b for a, b in zip(low, high, strict=True)):
                 raise ValueError("crop box min phải nhỏ hơn max trên mọi trục")
+        if self.statistical_outlier_removal is not None and self.schema_version != "1.1":
+            raise ValueError("statistical outlier removal requires VoxelConfig schema 1.1")
         return self
 
     def checksum(self) -> str:
@@ -80,7 +98,7 @@ def _crop_arguments(config: VoxelConfig) -> tuple[str, ...]:
     return ("--filter-box", ",".join(str(value) for value in (*native_low, *native_high)))
 
 
-def cluster_command(config: VoxelConfig) -> tuple[str, ...]:
+def cluster_command(config: VoxelConfig, *, input_filename: str = "input.ply") -> tuple[str, ...]:
     """Input PLY raw xyz đã canonical; bỏ PLY flip rồi đổi sang native Y-up."""
     cluster = f"{config.cluster_resolution_m},{config.cluster_opacity},{config.cluster_min_contribution}"
     scale_filters = (
@@ -96,7 +114,7 @@ def cluster_command(config: VoxelConfig) -> tuple[str, ...]:
         else ()
     )
     return (
-        "input.ply",
+        input_filename,
         "--gpu",
         str(config.gpu_index),
         "--rotate",

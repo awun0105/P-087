@@ -381,6 +381,58 @@ Isaac contact handoff; CPU regression không đóng real acceptance.
   GPU cleanup qualification, pre-collision floor/noise input, independent obstacle
   retention and held-out path improvement remain **UNVERIFIED**.
 
+### AUD-12.S2 follow-up — bounded opt-in statistical outlier removal
+
+- **Logic before → after:** the committed S2 path persisted existing cluster/floater
+  cleanup but had no statistical prefilter. Geometry profiles at schema 1.1 can now
+  opt into metric-space SOR with explicit neighbors, standard-deviation ratio and a
+  five-million-row upper bound. The checked-in profile stays schema 1.0 and therefore
+  leaves SOR disabled. No floor band, robot-path mask or guessed obstacle geometry is
+  applied.
+- **Data preservation:** the source/metric `input.ply` remains unchanged. The prefilter
+  writes a separate binary little-endian PLY, changes only the vertex count and retained
+  rows, and preserves every supported scalar Gaussian field. Non-vertex payloads,
+  unsupported formats, non-finite positions, oversized inputs and malformed row sizes
+  fail closed. The downstream cluster/floater filter consumes this separate PLY only
+  when the profile explicitly enables SOR.
+- **Evidence:** `GeometryStatisticalFilterEvidence` binds input/output checksums,
+  counts, exact parameters, measured distance threshold and `diagnostic_only` status.
+  `GeometryCleanupEvidence` validates it against the effective profile and metric input.
+  This does not establish floor support, occupied surfaces, obstacle retention or
+  physics safety.
+- **Tests:** deterministic dense cloud plus isolated floater, sparse-obstacle deletion
+  negative, field preservation, source immutability, profile version/row limits,
+  malformed PLY rejection, upstream input routing and cleanup evidence binding.
+- **Changed files:**
+  `src/services/reconstruction/adapters/gaussian_outlier_filter.py`,
+  `src/services/reconstruction/adapters/voxel.py`,
+  `src/services/reconstruction/rgb/geometry/voxel.py`,
+  `src/services/reconstruction/rgb/geometry/geometry_artifact.py`,
+  `src/services/reconstruction/finalize.py`,
+  `src/models/contracts/reconstruction.py`, `src/models/contracts/__init__.py`,
+  `tests/test_reconstruction/test_gaussian_outlier_filter.py`,
+  `tests/test_reconstruction/test_rec05_adapter.py`, this task, ADR 0016 and the
+  plan README.
+- **Schema/config/migration:** `GeometryProfile` and `VoxelConfig` accept the
+  versioned opt-in in schema 1.1; existing schema 1.0 profiles still load with SOR
+  disabled. The checksum includes the selected SOR parameters. No DB migration,
+  SceneIR, API or frontend payload changed.
+- **Verification:** direct SOR/adapter tests — 22 passed; full
+  `tests/test_reconstruction` suite — 868 passed, 23 skipped; broader REC-05 and
+  `eval/path` selection — 94 passed, 15 skipped; repository Ruff check and format
+  pass; contract mirror and `git diff --check` pass. Skipped tests do not qualify
+  this filter for production.
+- **Gate report:** CodeGraph traced `FinalizeWorker → RgbGeometryService →
+  SplatTransformVoxelAdapter → GeometryCleanupEvidence/GeometryArtifactManifest`;
+  Graphify located the same profile-to-adapter relationships. No UI changed, so the
+  browser gate does not apply. SOR quality on Aisle_CW, production density/noise,
+  thin-obstacle/floor retention, held-out traversal and Isaac acceptance remain
+  **UNVERIFIED**.
+- **Acceptance status:** SOR remains opt-in and the shipped product profile does not
+  enable it. No measured Aisle_CW before/after run or scale/density/noise/held-out
+  obstacle-retention matrix was available, so both S2 exits remain unchecked and
+  output stays diagnostic-only.
+
 ### AUD-12.S3a — bounded candidate adapter
 
 - **Base:** current branch after `AUD-19.S4d`; committed as one implementation

@@ -149,6 +149,12 @@ def _cleanup_evidence(job_id: str, report: dict) -> GeometryCleanupEvidence:
     files = report["files"]
     input_count = counts["input"]
     retained_count = counts["cluster"]
+    statistical_filter_evidence = report.get("statistical_filter_evidence")
+    if statistical_filter_evidence is not None:
+        if statistical_filter_evidence["input_checksum"] != files["input.ply"]:
+            raise ValueError("statistical filter source checksum differs from metric input")
+        if statistical_filter_evidence["output_checksum"] != files["statistical-filtered-input.ply"]:
+            raise ValueError("statistical filter output checksum differs from its retained PLY")
     return GeometryCleanupEvidence(
         job_id=job_id,
         mode=config["cleanup"],
@@ -158,6 +164,7 @@ def _cleanup_evidence(job_id: str, report: dict) -> GeometryCleanupEvidence:
         collision_mesh_checksum=files["collision.glb"],
         effective_config=config,
         config_checksum=report["config_checksum"],
+        statistical_filter_evidence=statistical_filter_evidence,
         input_gaussian_count=input_count,
         retained_gaussian_count=retained_count,
         removed_gaussian_count=input_count - retained_count,

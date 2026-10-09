@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, FiniteFloat
+from pydantic import Field, FiniteFloat, model_validator
 
 from src.models.contracts.artifacts import ArtifactDataClass, Checksum, ContractModel, Identifier, ProductArtifactRef
 from src.models.contracts.coordinates import MetricScale
@@ -60,7 +60,7 @@ from src.services.reconstruction.rgb.geometry.geometry_publication import (
     GeometryPublisher,
     RgbGeometryService,
 )
-from src.services.reconstruction.rgb.geometry.voxel import VoxelConfig
+from src.services.reconstruction.rgb.geometry.voxel import StatisticalOutlierRemovalConfig, VoxelConfig
 from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
 from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
 from src.services.reconstruction.rgb.splat.visual_publication import VisualResolver
@@ -71,7 +71,7 @@ Vector3 = tuple[FiniteFloat, FiniteFloat, FiniteFloat]
 class GeometryProfile(ContractModel):
     """`configs/product/geometry_v1.json`: thông số REC-05 không kèm seed (seed tính theo scene)."""
 
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.0", "1.1"] = "1.0"
     profile: Identifier
     note: str = ""
     resolution_m: FiniteFloat = Field(gt=0)
@@ -91,8 +91,15 @@ class GeometryProfile(ContractModel):
     #: Seed lọc cụm đặt ngay trên mặt sàn dưới camera đầu (sàn là cụm lớn liên thông).
     cluster_seed_height_m: FiniteFloat = Field(ge=0)
     cleanup: Literal["cluster", "floaters"]
+    statistical_outlier_removal: StatisticalOutlierRemovalConfig | None = None
     gpu_index: int = Field(ge=0, strict=True)
     max_gaussian_scale_log: FiniteFloat | None = 1.0
+
+    @model_validator(mode="after")
+    def _sor_requires_versioned_opt_in(self) -> "GeometryProfile":
+        if self.statistical_outlier_removal is not None and self.schema_version != "1.1":
+            raise ValueError("statistical outlier removal requires GeometryProfile schema 1.1")
+        return self
 
 
 _MAX_VOXEL_CELLS = 1_500_000_000.0
@@ -116,6 +123,7 @@ def build_voxel_config(
 
     cluster_seed = (seed[0], seed[1], profile.cluster_seed_height_m)
     return VoxelConfig(
+        schema_version=profile.schema_version,
         resolution_m=profile.resolution_m,
         opacity=profile.opacity,
         cluster_resolution_m=profile.cluster_resolution_m,
@@ -129,6 +137,7 @@ def build_voxel_config(
         gpu_index=profile.gpu_index,
         crop_box_world=crop,
         cleanup=profile.cleanup,
+        statistical_outlier_removal=profile.statistical_outlier_removal,
         max_gaussian_scale_log=profile.max_gaussian_scale_log,
     )
 

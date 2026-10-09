@@ -120,6 +120,18 @@ the old collision log lacks a bound profile, so ghost-block reduction and
 thin-obstacle retention remain **Pending**. Held-out collision and Isaac proof
 remain required by AUD-12.S4.
 
+### AUD-12.S2 follow-up — 2026-10-09
+
+A bounded statistical outlier removal pass is now available only through an
+explicit GeometryProfile schema 1.1 configuration. It runs in metric coordinates
+before the existing cluster/floater filter, preserves the source PLY and retained
+Gaussian fields, and records input/output checksums, counts and criteria as
+`diagnostic_only` evidence. The checked-in schema 1.0 profile keeps the pass off.
+SOR can remove a legitimate sparse obstacle; the synthetic negative test documents
+that failure mode. No floor/path deletion or production quality claim follows from
+adding this option. The ADR remains **Proposed** pending field retention, held-out,
+and exact-candidate Isaac evidence.
+
 ## AUD-13.S2 implementation note — 2026-10-08
 
 The proposal remains **Proposed** and no collision-source selection is enabled.

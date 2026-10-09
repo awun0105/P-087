@@ -12,7 +12,9 @@ from typing import Literal
 
 from src.models.contracts.artifacts import Checksum, ContractModel
 from src.models.contracts.coordinates import CoordinateSystem
+from src.models.contracts.reconstruction import GeometryStatisticalFilterEvidence
 from src.services.reconstruction.adapters.collision_glb import canonicalize_collision, degenerate_removed, topology
+from src.services.reconstruction.adapters.gaussian_outlier_filter import filter_gaussian_ply
 from src.services.reconstruction.adapters.gaussian_scale import (
     GaussianTransformRequest,
     SplatTransformSimilarityAdapter,
@@ -157,7 +159,15 @@ class SplatTransformVoxelAdapter:
         script = Path(__file__).with_name("voxel_inspect.mjs").resolve()
         module = self.process.settings.module_path.resolve()
         self.process.run((str(script), str(module)), (workspace, "inspect"))
-        self.process.cli(cluster_command(config), (workspace, "cluster"))
+        cluster_input = "input.ply"
+        if config.statistical_outlier_removal is not None:
+            filtered_input = workspace / "statistical-filtered-input.ply"
+            filter_evidence = filter_gaussian_ply(
+                workspace / "input.ply", filtered_input, config.statistical_outlier_removal
+            )
+            write_evidence(workspace / "statistical-outlier.json", filter_evidence.model_dump(mode="json"))
+            cluster_input = filtered_input.name
+        self.process.cli(cluster_command(config, input_filename=cluster_input), (workspace, "cluster"))
         if not (workspace / "cluster.ply").is_file():
             raise GeometryError("Cluster output missing")
         self.process.run(
@@ -182,6 +192,16 @@ class SplatTransformVoxelAdapter:
         scale_applied = request.confirmation.preview.transform.scale_m_per_sfm_unit if is_prod else 1.0
         applied_checksum = request.confirmation.record_checksum if is_prod else None
         accepted_seed = json.loads((workspace / "seed-clearance.json").read_text())["accepted_seed_world"]
+        gaussian_counts = _gaussian_counts(workspace)
+        statistical_filter_evidence = None
+        if request.config.statistical_outlier_removal is not None:
+            statistical_filter_evidence = GeometryStatisticalFilterEvidence.model_validate(
+                json.loads((workspace / "statistical-outlier.json").read_text())
+            )
+            if statistical_filter_evidence.input_gaussian_count != gaussian_counts["input"]:
+                raise GeometryError("SOR input count differs from the upstream metric inspection")
+            if statistical_filter_evidence.retained_gaussian_count < gaussian_counts["cluster"]:
+                raise GeometryError("Cluster output contains more Gaussians than the SOR input")
         return dict(
             schema_version="1.0",
             evidence_kind=evidence_kind,
@@ -194,20 +214,23 @@ class SplatTransformVoxelAdapter:
             config_checksum=request.config.checksum(),
             accepted_navigation_seed=accepted_seed,
             native_accepted_navigation_seed=list(native_from_world(accepted_seed)),
-            gaussian_counts=_gaussian_counts(workspace),
+            gaussian_counts=gaussian_counts,
             **_coordinate_evidence(request.config, scale_applied),
             native_voxel_metadata=metadata.model_dump(mode="json", by_alias=True),
             topology=topology(mesh),
             degenerate_triangles_removed=degenerate_removed(workspace / "geometry.collision.glb"),
+            statistical_filter_evidence=(
+                statistical_filter_evidence.model_dump(mode="json") if statistical_filter_evidence is not None else None
+            ),
             canonical_bounds=dict(
                 min=[min(p[i] for p in mesh.positions) for i in range(3)],
                 max=[max(p[i] for p in mesh.positions) for i in range(3)],
             ),
-            files={name: file_checksum(workspace / name) for name in _evidence_files(is_prod)},
+            files={name: file_checksum(workspace / name) for name in _evidence_files(is_prod, request.config)},
         )
 
 
-def _evidence_files(is_product: bool) -> tuple[str, ...]:
+def _evidence_files(is_product: bool, config: VoxelConfig) -> tuple[str, ...]:
     metric_files = (
         "source.ply",
         "input.ply",
@@ -216,4 +239,7 @@ def _evidence_files(is_product: bool) -> tuple[str, ...]:
         "metric-derivative.json",
         "metric-transform.log",
     )
-    return EVIDENCE_FILES + tuple("metric/" + name for name in metric_files) if is_product else EVIDENCE_FILES
+    evidence = EVIDENCE_FILES
+    if config.statistical_outlier_removal is not None:
+        evidence += ("statistical-filtered-input.ply", "statistical-outlier.json")
+    return evidence + tuple("metric/" + name for name in metric_files) if is_product else evidence

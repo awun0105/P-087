@@ -333,6 +333,40 @@ class CapsuleFootprint(ContractModel):
         return self
 
 
+class GeometryStatisticalFilterEvidence(ContractModel):
+    """Exact diagnostic evidence for an opt-in pre-mesh Gaussian SOR pass."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    algorithm: Literal["statistical_outlier_v1"] = "statistical_outlier_v1"
+    input_checksum: Checksum
+    output_checksum: Checksum
+    input_gaussian_count: int = Field(gt=0)
+    retained_gaussian_count: int = Field(gt=0)
+    removed_gaussian_count: int = Field(ge=0)
+    neighbors: int = Field(ge=2, le=64, strict=True)
+    standard_deviation_ratio: FiniteFloat = Field(gt=0)
+    max_gaussians: int = Field(ge=3, le=5_000_000, strict=True)
+    mean_neighbor_distance_m: FiniteFloat = Field(ge=0)
+    standard_deviation_m: FiniteFloat = Field(ge=0)
+    threshold_m: FiniteFloat = Field(ge=0)
+    quality_status: Literal["diagnostic_only"] = "diagnostic_only"
+
+    @model_validator(mode="after")
+    def _conserve_gaussian_rows(self) -> Self:
+        if self.input_gaussian_count != self.retained_gaussian_count + self.removed_gaussian_count:
+            raise ValueError("statistical filter Gaussian counts must conserve input records")
+        if self.input_gaussian_count > self.max_gaussians or self.max_gaussians <= self.neighbors:
+            raise ValueError("statistical filter evidence exceeds its configured resource bound")
+        if not math.isclose(
+            self.threshold_m,
+            self.mean_neighbor_distance_m + self.standard_deviation_ratio * self.standard_deviation_m,
+            rel_tol=1e-6,
+            abs_tol=1e-9,
+        ):
+            raise ValueError("statistical filter threshold differs from its recorded criteria")
+        return self
+
+
 class GeometryCleanupEvidence(ContractModel):
     """Measured Gaussian removal and exact cleanup configuration for one RGB collision mesh."""
 
@@ -345,6 +379,7 @@ class GeometryCleanupEvidence(ContractModel):
     collision_mesh_checksum: Checksum
     effective_config: JsonObject
     config_checksum: Checksum
+    statistical_filter_evidence: GeometryStatisticalFilterEvidence | None = None
     input_gaussian_count: int = Field(gt=0)
     retained_gaussian_count: int = Field(gt=0)
     removed_gaussian_count: int = Field(ge=0)
@@ -356,6 +391,23 @@ class GeometryCleanupEvidence(ContractModel):
             raise ValueError("cleanup Gaussian counts must conserve input records")
         if self.effective_config.get("cleanup") != self.mode:
             raise ValueError("cleanup mode differs from effective configuration")
+        filter_config = self.effective_config.get("statistical_outlier_removal")
+        if (filter_config is None) != (self.statistical_filter_evidence is None):
+            raise ValueError("statistical filter evidence must match the effective cleanup configuration")
+        if self.statistical_filter_evidence is not None:
+            evidence = self.statistical_filter_evidence
+            if evidence.input_checksum != self.metric_input_checksum:
+                raise ValueError("statistical filter source differs from metric input")
+            if evidence.input_gaussian_count != self.input_gaussian_count:
+                raise ValueError("statistical filter count differs from the inspected metric input")
+            if evidence.retained_gaussian_count < self.retained_gaussian_count:
+                raise ValueError("cluster cleanup cannot retain more Gaussians than the SOR stage")
+            if filter_config != {
+                "neighbors": evidence.neighbors,
+                "standard_deviation_ratio": evidence.standard_deviation_ratio,
+                "max_gaussians": evidence.max_gaussians,
+            }:
+                raise ValueError("statistical filter evidence differs from the effective configuration")
         digest = hashlib.sha256(canonical_json_bytes(self.effective_config)).hexdigest()
         if self.config_checksum != f"sha256:{digest}":
             raise ValueError("cleanup configuration checksum mismatch")
