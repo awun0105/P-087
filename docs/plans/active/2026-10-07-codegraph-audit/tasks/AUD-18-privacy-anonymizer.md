@@ -168,3 +168,14 @@ and consumer proof; synthetic zero findings không chứng minh anonymity.
   `test_anonymize_option_is_offered_and_recorded_only_with_a_configured_anonymizer`; `tests/test_api` và
   `tests/test_orchestration` (978 test) pass.
 
+### Quyết định của owner (2026-10-09): job không dừng chờ reviewer
+
+- Job chọn che chạy thẳng từ frame đã che sang dựng 3D; không có trạng thái chờ duyệt giữa bước che và COLMAP.
+- Điều này thay thế câu trong contract của S3 "only chosen approved derived copy drives frame/pose/train":
+  bản dùng để train là bản che tự động, chưa qua người duyệt.
+- Hệ quả phải giữ: privacy report của job vẫn là `PRELIMINARY_SCREENED`; `VERIFIED_ANONYMIZED` chỉ có sau khi
+  reviewer xem bằng chứng che và chấp nhận. Nếu reviewer thấy vùng bị sót thì 3DGS đã train trên frame chứa
+  vùng đó, nên cách sửa là che thêm rồi dựng lại, không phải sửa trên scene đã có.
+- S3 vì vậy thu về: màn hình xem bằng chứng che trong bước duyệt scene hiện có, ghi nhận chấp nhận của
+  reviewer qua cổng privacy sẵn có, và hành động "che thêm rồi dựng lại" khi có sót.
+

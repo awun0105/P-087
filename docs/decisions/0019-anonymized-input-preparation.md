@@ -26,6 +26,10 @@ thêm detection/tracking/redaction nhưng zero detections không chứng minh an
 5. License code/model weights/data và detector quality envelope phải qualified
    trước runtime adoption. Không xem “YOLOv8-Face” là default miễn điều kiện.
 
+6. (Owner chốt 2026-10-09) Job không dừng chờ reviewer giữa bước che và dựng 3D: reconstruction chạy trên bản
+   che tự động. QA của reviewer diễn ra sau, ở bước duyệt scene; chỉ khi đó mới có thể có
+   `VERIFIED_ANONYMIZED`. Vùng sót được sửa bằng cách che thêm rồi dựng lại.
+
 ## Data contract
 
 AUD-18.S1 chốt SanitizationManifest refs/detections/redaction coverage/model
