@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.collision_quality import (
     CollisionAlignmentQAKind,
     CollisionInputMode,
@@ -239,6 +240,75 @@ def test_scene_environment_cannot_consume_a_different_collision_checksum() -> No
 
     with pytest.raises(ValueError, match="collider_ref differs"):
         validate_collision_source_binding(environment, selection, _report(selection))
+
+
+def test_scene_environment_binds_selected_source_even_after_effective_collider_is_carved() -> None:
+    selection = _selection()
+    selection_ref = ProductArtifactRef.model_validate(
+        _ref("collision/selection.json", "a", artifact_type="CollisionSourceSelection")
+    )
+    carved_collision = _ref("collision/carved.glb", "b")
+    environment = SceneEnvironment(
+        geometry_ref=selection.source_geometry_ref,
+        collider_ref=carved_collision,
+        collision_source_ref=selection.output_collision_ref,
+        collision_selection_ref=selection_ref,
+    )
+
+    validate_collision_source_binding(environment, selection, _report(selection), selection_ref=selection_ref)
+
+
+def test_scene_environment_rejects_missing_or_stale_selection_binding() -> None:
+    selection = _selection()
+    report = _report(selection)
+    selection_ref = ProductArtifactRef.model_validate(
+        _ref("collision/selection.json", "a", artifact_type="CollisionSourceSelection")
+    )
+    environment = SceneEnvironment(
+        geometry_ref=selection.source_geometry_ref,
+        collider_ref=selection.output_collision_ref,
+        collision_source_ref=selection.output_collision_ref,
+        collision_selection_ref=selection_ref,
+    )
+
+    with pytest.raises(ValueError, match="collision_selection_ref"):
+        validate_collision_source_binding(environment, selection, report)
+    with pytest.raises(ValueError, match="collision_selection_ref"):
+        validate_collision_source_binding(
+            environment,
+            selection,
+            report,
+            selection_ref=ProductArtifactRef.model_validate(
+                _ref("collision/other-selection.json", "c", artifact_type="CollisionSourceSelection")
+            ),
+        )
+
+
+def test_scene_environment_requires_source_and_selection_refs_together() -> None:
+    selection = _selection()
+
+    with pytest.raises(ValidationError, match="must be set together"):
+        SceneEnvironment(
+            geometry_ref=selection.source_geometry_ref,
+            collider_ref=selection.output_collision_ref,
+            collision_source_ref=selection.output_collision_ref,
+        )
+
+
+def test_scene_environment_rejects_collision_selection_from_another_job() -> None:
+    selection = _selection()
+    other_job_selection_ref = {
+        **_ref("collision/selection.json", "a", artifact_type="CollisionSourceSelection"),
+        "artifact_uri": "artifact://jobs/job-foreign/collision/selection.json",
+    }
+
+    with pytest.raises(ValidationError, match="belong to the SceneIR job"):
+        SceneEnvironment(
+            geometry_ref=selection.source_geometry_ref,
+            collider_ref=selection.output_collision_ref,
+            collision_source_ref=selection.output_collision_ref,
+            collision_selection_ref=other_job_selection_ref,
+        )
 
 
 def test_report_with_stale_source_checksum_is_rejected_by_consumer() -> None:

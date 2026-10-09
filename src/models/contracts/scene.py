@@ -185,10 +185,38 @@ class SceneEnvironment(ContractModel):
     visual_ref: ProductArtifactRef | None = None
     geometry_ref: ProductArtifactRef
     collider_ref: ProductArtifactRef | None = None
+    # Exact source collision and selection identities; collider_ref may later refer to a carved result.
+    collision_source_ref: ProductArtifactRef | None = Field(default=None, exclude_if=_absent)
+    collision_selection_ref: ProductArtifactRef | None = Field(default=None, exclude_if=_absent)
     # Bản 3DGS gốc (PLY) của nền cho bộ xuất USD; `visual_ref` là bản nén cho trình duyệt (SOG).
     visual_master_ref: ProductArtifactRef | None = Field(default=None, exclude_if=_absent)
     # Row ownership is optional for legacy scenes and embedded so each SceneIR revision binds its exact map.
     membership: ObjectMembershipArtifact | None = Field(default=None, exclude_if=_absent)
+
+    @model_validator(mode="after")
+    def _validate_collision_selection_binding(self) -> Self:
+        source_ref = self.collision_source_ref
+        selection_ref = self.collision_selection_ref
+        if source_ref is None and selection_ref is None:
+            return self
+        if source_ref is None or selection_ref is None:
+            raise ValueError("collision_source_ref and collision_selection_ref must be set together")
+        if self.collider_ref is None:
+            raise ValueError("a selected collision source requires an effective collider_ref")
+        if selection_ref.artifact_type != "CollisionSourceSelection":
+            raise ValueError("collision_selection_ref must reference a CollisionSourceSelection artifact")
+        scene_job_id = _artifact_job_id(self.geometry_ref)
+        if _artifact_job_id(source_ref) != scene_job_id or _artifact_job_id(selection_ref) != scene_job_id:
+            raise ValueError("collision source and selection must belong to the SceneIR job")
+        return self
+
+
+def _artifact_job_id(reference: ProductArtifactRef) -> str:
+    """Use the logical URI as the job scope and reject contradictory optional metadata."""
+    uri_job_id = reference.artifact_uri.removeprefix("artifact://jobs/").partition("/")[0]
+    if reference.job_id is not None and reference.job_id != uri_job_id:
+        raise ValueError("artifact job_id must match its logical URI")
+    return uri_job_id
 
 
 class SceneIR(ContractModel):

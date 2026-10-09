@@ -302,10 +302,18 @@ def validate_collision_source_binding(
     environment: SceneEnvironment,
     selection: CollisionSourceSelection,
     report: CollisionQualityReport,
+    *,
+    selection_ref: ProductArtifactRef | None = None,
 ) -> None:
-    """Consumer-side identity check for the SceneEnvironment collision selection."""
-    if environment.collider_ref != selection.output_collision_ref:
-        raise ValueError("SceneEnvironment collider_ref differs from selected collision output")
+    """Check selected-source identity without confusing it with a carved effective collider."""
+    if environment.collision_source_ref is None:
+        if environment.collider_ref != selection.output_collision_ref:
+            raise ValueError("SceneEnvironment collider_ref differs from selected collision output")
+    else:
+        if environment.collision_source_ref != selection.output_collision_ref:
+            raise ValueError("SceneEnvironment collision_source_ref differs from selected collision output")
+        if selection_ref is None or environment.collision_selection_ref != selection_ref:
+            raise ValueError("SceneEnvironment collision_selection_ref differs from selected source record")
     if report.source_selection_checksum != selection.selection_checksum:
         raise ValueError("collision quality report belongs to a different source selection")
     if report.source_geometry_ref != selection.source_geometry_ref:

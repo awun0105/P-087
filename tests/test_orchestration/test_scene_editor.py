@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.scene import SceneIR
 from src.services.orchestration.artifacts import ArtifactResolver
 from src.services.orchestration.scene import (
@@ -316,6 +317,35 @@ def test_artifact_references_cover_geometry_and_colliders(editor: SceneEditor) -
     assert scene.environment.geometry_ref.artifact_uri in uris
     assert scene.environment.collider_ref.artifact_uri in uris
     assert len(uris) == len(set(uris)), "ref không được lặp"
+
+
+def test_artifact_references_include_collision_source_and_selection(editor: SceneEditor) -> None:
+    scene = editor.current(_JOB_ID).scene
+    assert scene.environment.collider_ref is not None
+    selection_ref = ProductArtifactRef.model_validate(
+        {
+            "artifact_type": "CollisionSourceSelection",
+            "schema_version": "1.0",
+            "artifact_uri": f"artifact://jobs/{_JOB_ID}/collision/selection.json",
+            "artifact_checksum": "sha256:" + "a" * 64,
+            "data_class": "derived",
+            "producer_stage": "ST-CANDIDATE-BUILD",
+            "job_id": _JOB_ID,
+        }
+    )
+    environment = scene.environment.model_copy(
+        update={
+            "collision_source_ref": scene.environment.collider_ref,
+            "collision_selection_ref": selection_ref,
+        }
+    )
+    selected_scene = scene.model_copy(update={"environment": environment})
+
+    references = SceneEditor.artifact_references(selected_scene)
+
+    assert scene.environment.collider_ref in references
+    assert selection_ref in references
+    assert len(references) == len({reference.artifact_uri for reference in references})
 
 
 def test_artifact_references_are_product_visible_only(editor: SceneEditor) -> None:

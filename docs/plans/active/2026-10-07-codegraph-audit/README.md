@@ -130,6 +130,12 @@ bounded source-plane hypotheses. These modules have local test coverage but are 
 connected as a production registration flow. The assembly contract still has no
 gravity/up declaration, so even one source plane remains unclassified. Held-out map
 qualification and worker/API/scene/collision integration stay open.
+AUD-12.S3b adds compatibility-safe SceneIR refs for the selected collision candidate
+and selection record, includes them in artifact closure, and makes simulation
+packaging refuse an unconsumed selection instead of falling back to RGB. Sensor QA is
+still diagnostic-only and LiDAR object-region ownership is not mapped to the selected
+mesh; candidate publication, viewer selection, export integration, held-out obstacle
+retention and Isaac proof remain open.
 Active scope: 26 packages/89 sprint slices, including the AUD-19.S4e follow-up.
 AUD-16/ADR0017 (3 sprints) và AUD-25/ADR0025 (6 sprints) Deferred theo yêu cầu owner; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 

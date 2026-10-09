@@ -23,6 +23,7 @@ from src.services.orchestration.review import simulation_package as simulation_p
 from src.services.orchestration.review.simulation_package import BUILD_CONFIG, build_simulation_package, current_package
 from src.services.orchestration.scene.extraction import extract_scene
 from src.services.orchestration.scene.objects import add_box_object, add_catalog_object, apply_object_action
+from src.services.scene.collision_ownership import SourceCollisionOwnershipError
 from src.services.scene.editing.commands import move_object
 from src.services.simulation.enrichment.service import enrich_scene_physics
 from src.services.simulation.usd.capabilities import ExportCapabilityStatus
@@ -40,6 +41,39 @@ def _scene_job(tmp_path: Path):  # noqa: ANN202
     settings = Settings(product_scene_runtime_python=None, product_sam2_checkpoint=None)
     extract_scene(registry, job, bundle, settings, tmp_path / "work")
     return registry, job
+
+
+def test_simulation_package_does_not_fall_back_from_selected_collision_source(tmp_path: Path) -> None:
+    registry, job = _scene_job(tmp_path)
+    scene = registry.scene.current(job.job_id).scene
+    source_ref = ProductArtifactRef(
+        artifact_type="LidarCollisionCandidate",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{job.job_id}/collision/lidar-candidate.glb",
+        artifact_checksum="sha256:" + "a" * 64,
+        data_class="derived",
+        producer_stage="ST-CANDIDATE-BUILD",
+        job_id=job.job_id,
+    )
+    selection_ref = ProductArtifactRef(
+        artifact_type="CollisionSourceSelection",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{job.job_id}/collision/selection.json",
+        artifact_checksum="sha256:" + "b" * 64,
+        data_class="derived",
+        producer_stage="ST-CANDIDATE-BUILD",
+        job_id=job.job_id,
+    )
+    selected_scene = scene.model_copy(
+        update={
+            "environment": scene.environment.model_copy(
+                update={"collision_source_ref": source_ref, "collision_selection_ref": selection_ref}
+            )
+        }
+    )
+
+    with pytest.raises(SourceCollisionOwnershipError, match="refusing to fall back"):
+        simulation_package_service._carved_environment(registry, selected_scene)
 
 
 def test_confirmed_objects_become_a_sealed_package(tmp_path: Path) -> None:

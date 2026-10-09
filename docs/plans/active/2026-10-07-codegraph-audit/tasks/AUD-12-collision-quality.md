@@ -166,6 +166,47 @@ topology on edge/corner-touching fixture cells.
 QA-qualified mode selection, artifact-store resolution, production publication,
 held-out retention and Isaac acceptance remain S3/S4 work.
 
+### Sprint AUD-12.S3b — Immutable SceneIR collision-source binding
+
+**Input:** exact collision-candidate ref and immutable `CollisionSourceSelection` ref.
+**Output:** optional `SceneEnvironment` refs for the selected source and selection
+record, plus an artifact allow-list that keeps both refs reachable across publication.
+**Contract:** `collision_source_ref` identifies the selected candidate while
+`collider_ref` may identify a later carved/effective mesh. The refs are paired,
+same-job and the selection ref must have type `CollisionSourceSelection`. Absent
+fields are omitted from legacy SceneIR serialization/checksums. Simulation packaging
+must refuse these refs until its source-QA and object-ownership consumer is
+source-aware; it must not silently keep using canonical RGB geometry.
+
+Tests: legacy SceneIR serialization, missing or cross-job binding, exact selection
+identity after carving, artifact allow-list closure, and a package-composer negative
+proving selected LiDAR sources do not fall back to RGB.
+**Exit:** [x] typed binding and backward-compatible serialization; [x] refs included
+in SceneEditor artifact closure; [x] simulator composer fails closed. QA-qualified
+source publication, viewer selection and LiDAR object-region ownership remain open.
+
+### Remaining AUD-12.S3 slices
+
+**AUD-12.S3c — Resolve source-specific eligibility.** Bind the current bundle's exact
+LiDAR geometry, confirmed `AlignmentRecord`, `LidarPackageRecord`, calibration/timing
+QA, self-mask evidence, floor evidence and profile. Missing, wrong-mode or
+`diagnostic_only` QA must return a blocker; it cannot create a candidate or switch
+sources. The current AUD-13 projection artifact is permanently diagnostic-only, so
+real sensor activation remains blocked until a production-qualified QA receipt exists.
+
+**AUD-12.S3d — Publish and select an eligible candidate.** Only after S3c eligibility,
+transform points into the RGB canonical metric frame, generate/publish the bounded
+candidate and source report, then bind the immutable refs through SceneEditor CAS.
+Retry must reuse exact inputs/config or create a new attempt identity. No trajectory,
+RGB visual or canonical geometry is rewritten.
+
+**AUD-12.S3e — Source-aware scene/export consumers.** Map ownership to the selected
+collision source using source-bound LiDAR regions; never reuse RGB triangle indices.
+Update viewer, background carving, USD/candidate inventory and invalidation together.
+Missing region mapping blocks export and reports coverage; it cannot silently fall
+back to RGB. Registered-map mode stays blocked until AUD-19 registration QA is
+qualified.
+
 ## Sprint AUD-12.S4 — Held-out quality và Isaac consumer
 
 **Input:** frozen profile/source selection + held-out traversal/reference + candidate.
@@ -343,3 +384,34 @@ Isaac contact handoff; CPU regression không đóng real acceptance.
   calibration/map QA, artifact-store resolution, held-out obstacle-retention
   evidence, GPU run or Isaac contact proof was produced. AUD-12.S3 source selection
   and AUD-12.S4 acceptance remain **UNVERIFIED** and unchecked.
+
+### AUD-12.S3b — SceneIR source identity and fail-closed export binding
+
+- **Base:** `6566b73` (`AUD-19.S4e`).
+- **Logic before → after:** SceneIR exposed only `collider_ref`, which cannot say
+  whether it names the original selected source or a downstream carved result. New
+  optional `collision_source_ref` and `collision_selection_ref` keep those identities
+  separate. Both are paired, job-scoped and the selection ref is typed. Existing
+  scenes omit both fields from serialization, preserving legacy checksums.
+- **Consumer behavior:** `SceneEditor.artifact_references` includes both refs. The
+  simulation composer rejects a scene that binds a selected source until QA and
+  source ownership are consumed; it does not silently export canonical RGB geometry.
+  The existing RGB-only path is unchanged.
+- **CodeGraph impact:** explored `SceneEnvironment`, `SceneEditor.artifact_references`,
+  `validate_collision_source_binding`, `_carved_environment`, the simulation-package
+  caller and their contract/package tests. Source ownership is triangle-indexed against
+  the original RGB geometry, so no ownership indices were copied to a LiDAR candidate.
+- **Changed files:** `src/models/contracts/scene.py`,
+  `src/models/contracts/collision_quality.py`,
+  `src/services/orchestration/scene/editor.py`,
+  `src/services/orchestration/review/simulation_package.py`,
+  `frontend/src/lib/contracts/api.ts`, focused tests, the audit README and ADR 0016.
+- **Verification:** 95 focused contract/orchestration tests passed; Ruff check and
+  format pass; Pydantic/TypeScript contract mirror pass; `git diff --check` pass.
+- **Gate report:** no UI behavior changed, so browser DevTools was not applicable.
+  CodeGraph and Graphify were refreshed after edits. No production candidate/QA was
+  published. Sensor QA is diagnostic-only; source-aware object ownership, held-out
+  retention and Isaac proof remain **UNVERIFIED**.
+- **Next:** AUD-12.S3c resolves exact QA/alignment/self-mask/floor eligibility;
+  S3d publishes candidates only after eligibility; S3e closes source ownership and
+  export/viewer consumers. Parent AUD-12.S3/S4 stays unchecked.

@@ -142,3 +142,15 @@ finding/remediation with collision eligibility set to `no`.
 The exercised failure and browser fixture are synthetic/local. No held-out real
 calibration sequence or production threshold profile is qualified, and S3 does not
 establish universal 1°/5 cm detection accuracy or authorize collision-source use.
+
+## AUD-12.S3b implementation note — 2026-10-09
+
+The ADR remains **Proposed** and no collision-source path is enabled. `SceneEnvironment`
+now has optional, checksum-compatible refs for the selected collision candidate and
+its `CollisionSourceSelection` record. `collider_ref` remains the effective collider,
+so a carved result does not erase which source was selected. Scene artifact closure
+retains both refs. Because the simulation composer still uses RGB-bound source
+triangle ownership and the current calibration projection evidence is
+`diagnostic_only`, package composition explicitly blocks a selected source instead
+of silently exporting RGB. Candidate publication, QA qualification, LiDAR ownership
+mapping, viewer selection, held-out retention and Isaac acceptance remain pending.

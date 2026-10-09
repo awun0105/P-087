@@ -22,6 +22,9 @@ def test_scene_ir_fixture_is_valid() -> None:
     assert scene.objects[0].transform.translation_xyz == (1.0, 2.0, 0.0)
     assert {item.name for item in scene.objects} == {"Fixture Pallet", "Fixture Rack", "Fixture Floor"}
     assert scene.environment.collider_ref is not None
+    dumped_environment = scene.model_dump(mode="json")["environment"]
+    assert "collision_source_ref" not in dumped_environment
+    assert "collision_selection_ref" not in dumped_environment
     assert all(item.transform.parent_frame == "world" for item in scene.objects)
     assert all(item.collider is not None for item in scene.objects if item.name != "Fixture Floor")
     assert all(

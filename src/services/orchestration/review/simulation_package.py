@@ -328,6 +328,11 @@ def _recover_legacy_source_ownership(
 
 def _carved_environment(registry: ProjectRegistry, scene: SceneIR) -> CarvedBackground:
     """Resolve the source-owned background; edited object transforms never define carve regions."""
+    if scene.environment.collision_selection_ref is not None:
+        raise SourceCollisionOwnershipError(
+            "SceneIR binds a selected collision source, but simulation packaging has not yet validated its QA "
+            "and source ownership; refusing to fall back to canonical RGB geometry."
+        )
     glb = registry.runtime_resolver.require(scene.environment.geometry_ref).read_bytes()
     source_checksum = f"sha256:{hashlib.sha256(glb).hexdigest()}"
     if source_checksum != scene.environment.geometry_ref.artifact_checksum:

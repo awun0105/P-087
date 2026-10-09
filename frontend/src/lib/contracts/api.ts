@@ -360,6 +360,10 @@ export interface SceneEnvironment {
   visual_ref: ArtifactRef | null;
   geometry_ref: ArtifactRef;
   collider_ref: ArtifactRef | null;
+  /** Exact selected collision candidate, retained when collider_ref is a carved derivative. */
+  collision_source_ref?: ArtifactRef | null;
+  /** Immutable CollisionSourceSelection record for the current environment revision. */
+  collision_selection_ref?: ArtifactRef | null;
   /** Bản 3DGS gốc (PLY) cho bộ xuất USD; vắng mặt ở SceneIR cũ. */
   visual_master_ref?: ArtifactRef | null;
   /** Membership is absent in legacy scenes; present only when objectify persisted the row map. */
