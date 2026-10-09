@@ -139,6 +139,34 @@ def accept(registry: ProjectRegistry, job_id: str, frame_set_checksum: str, user
     frame_set, manifest = _load(registry, job)
     if frame_set_checksum != frame_set.frame_set_checksum:
         raise RuntimeStateConflictError("Bản đã che đã thay đổi sau khi bạn xem; tải lại rồi xác nhận")
+    reference, _ = _record(registry, job, frame_set, manifest, user_id)
+    return reference
+
+
+def accept_when_nothing_redacted(registry: ProjectRegistry, job_id: str) -> JobManifest | None:
+    """Worker gọi ngay sau bước che: không frame nào bị che thì ghi nhận tự động và trả job để chạy tiếp.
+
+    Có frame bị che thì trả None và job dừng chờ người upload. Job trả về đã ở `ST-CAMERA-POSE` (worker đang giữ
+    nó, không worker nào khác nhận). Bản ghi tự động có `accepted_by = None` và
+    `redacted_frame_count = 0`, nên luôn phân biệt được với chấp nhận của người.
+    """
+    job = registry.get_job(job_id)
+    frame_set, manifest = _load(registry, job)
+    if any(frame.regions for frame in manifest.frames):
+        return None
+    return _record(registry, job, frame_set, manifest, None, claim_stage=StageId.CAMERA_POSE)[1]
+
+
+def _record(
+    registry: ProjectRegistry,
+    job: JobManifest,
+    frame_set: NormalizedRGBFrameSet,
+    manifest: SanitizationManifest,
+    user_id: str | None,
+    *,
+    claim_stage: StageId | None = None,
+) -> tuple[ProductArtifactRef, JobManifest]:
+    job_id = job.job_id
     record = SanitizationAcceptance(
         job_id=job_id,
         frame_set_checksum=frame_set.frame_set_checksum,
@@ -151,8 +179,11 @@ def accept(registry: ProjectRegistry, job_id: str, frame_set_checksum: str, user
     reference = ProductArtifactRef(
         artifact_type=ANONYMIZATION_ACCEPTANCE_TYPE,
         schema_version="1.0",
-        # Một attempt chỉ có một frame set đã che; checksum trong tên để lần chạy lại không đụng bản ghi cũ.
-        artifact_uri=f"artifact://jobs/{job_id}/rec02a/sanitized/acceptance-{frame_set.frame_set_checksum[7:23]}.json",
+        # Tên theo job + bộ frame; mỗi attempt ghi một bản riêng nên thêm thời điểm để retry không đụng bản cũ.
+        artifact_uri=(
+            f"artifact://jobs/{job_id}/rec02a/sanitized/"
+            f"acceptance-{frame_set.frame_set_checksum[7:23]}-{record.accepted_at:%Y%m%dT%H%M%S%f}.json"
+        ),
         artifact_checksum=sha256_bytes(payload),
         data_class=ArtifactDataClass.DERIVED,
         producer_stage=StageId.PRIVACY_GATE,
@@ -161,5 +192,4 @@ def accept(registry: ProjectRegistry, job_id: str, frame_set_checksum: str, user
     published = ProductArtifactRef.model_validate(
         FilesystemArtifactStore(registry.runtime_resolver).publish(reference, payload).model_dump()
     )
-    registry.record_anonymization_acceptance(job, published)
-    return published
+    return published, registry.record_anonymization_acceptance(job, published, claim_stage=claim_stage)

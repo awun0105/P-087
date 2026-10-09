@@ -13,6 +13,7 @@ from src.services.orchestration.jobs.anonymization_review import (
     AnonymizationReviewError,
     SanitizationAcceptance,
     accept,
+    accept_when_nothing_redacted,
     redacted_frame,
     review,
 )
@@ -167,11 +168,24 @@ def test_paused_job_is_not_treated_as_an_interrupted_process(tmp_path: Path) -> 
     assert registry.get_job(job.job_id).job_manifest_checksum == accepted.job_manifest_checksum
 
 
-def _prepared(root: Path):  # noqa: ANN202
+def _clean_anonymizer():  # noqa: ANN202
+    """Bộ che không phát hiện gì: mọi frame là bản sao nguyên byte."""
+    inner = _fake_anonymizer()
+
+    def run(source: Path, target: Path, names: list[str]) -> dict:
+        result = inner(source, target, names)
+        for frame in result["frames"]:
+            frame["regions"], frame["sanitized_checksum"] = [], frame["source_checksum"]
+        return result
+
+    return run
+
+
+def _prepared(root: Path, anonymizer=None):  # noqa: ANN001, ANN202
     """Job chờ xem với bộ frame đã che thật (ffmpeg tách frame, bộ che giả che frame đầu)."""
 
     def prepare(job_id: str) -> ProductArtifactRef:
-        preparer, _, request = _setup(root, _fake_anonymizer())
+        preparer, _, request = _setup(root, anonymizer or _fake_anonymizer())
         result = preparer.run(request.model_copy(update={"job_id": job_id}))
         assert result.error is None and result.frame_set_ref is not None
         return result.frame_set_ref
@@ -250,3 +264,22 @@ async def test_routes_show_the_review_serve_the_frame_and_accept(tmp_path: Path,
         assert done.status_code == 200
         assert done.json()["acceptance"]["artifact_type"] == ANONYMIZATION_ACCEPTANCE_TYPE
         assert (await client.post(f"{base}/accept", json={"frame_set_checksum": "x"})).status_code == 409
+
+
+def test_worker_keeps_going_only_when_no_frame_was_redacted(tmp_path: Path) -> None:
+    registry, job = _prepared(tmp_path / "redacted")
+    assert accept_when_nothing_redacted(registry, job.job_id) is None
+    assert awaiting_anonymization_review(registry.get_job(job.job_id))
+
+    registry, job = _prepared(tmp_path / "clean", _clean_anonymizer())
+    assert review(registry, job.job_id).frames == []
+    claimed = accept_when_nothing_redacted(registry, job.job_id)
+    assert claimed is not None and claimed.current_stage == StageId.CAMERA_POSE
+    # Ghi nhận và nhận job trong một lần ghi: không worker nào khác thấy job để nhận lại.
+    assert not awaiting_anonymization_review(claimed) and not awaiting_reviewed_preview(claimed)
+    assert [item.job_id for item in waiting_jobs(registry)] == []
+    stage = next(stage for stage in claimed.stage_artifacts if stage.stage_id == StageId.PRIVACY_GATE)
+    record = SanitizationAcceptance.model_validate_json(
+        registry.runtime_resolver.require_uri(stage.artifact_uri, stage.artifact_checksum).read_bytes()
+    )
+    assert record.accepted_by is None and record.redacted_frame_count == 0

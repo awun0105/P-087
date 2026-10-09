@@ -62,6 +62,7 @@ from src.services.orchestration.artifacts import ArtifactResolver, ArtifactStore
 from src.services.orchestration.benchmark import build_benchmark, publish_benchmark
 from src.services.orchestration.inputs import InputAssemblyService
 from src.services.orchestration.jobs.admission import ResourceAdmission, job_drivers, touch_job_reservation
+from src.services.orchestration.jobs.anonymization_review import accept_when_nothing_redacted
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import (
     ResolvedProcessing,
@@ -756,8 +757,11 @@ def _execute_prepare(attempt: _Attempt, profile: ResolvedProcessing) -> JobManif
         "privacy_mode": "self_attested",
         "sample_fps": profile.sample_fps,
         "max_frames": profile.max_frames,
-        # Job tự chọn, hoặc deployment bắt buộc cho mọi job. Settings giả trong test không có trường này.
-        "anonymize": profile.anonymize or getattr(attempt.settings, "product_anonymize_input", False),
+        # Job tự chọn, deployment bắt buộc cho mọi job, hoặc project ở chế độ `qa_verified` (worker tự áp, không
+        # tin cấu hình job do API ghi). Settings giả trong test không có trường này.
+        "anonymize": profile.anonymize
+        or getattr(attempt.settings, "product_anonymize_input", False)
+        or project.privacy_mode == "qa_verified",
     }
     request_path = attempt.workspace / "prepare.request.json"
     with request_path.open("x", encoding="utf-8") as stream:
@@ -937,10 +941,14 @@ def run_video_job(job_id: str, *, expected_checksum: str | None = None) -> JobMa
                 if frames is None:
                     raise ValueError("Prepare thành công nhưng thiếu frame set")
                 if awaiting_anonymization_review(attempt.job):
-                    # Frame đã che: dừng ở đây, giữ RUNNING ở bước tách frame. Chỉ khi người dùng xem và chấp nhận
-                    # bản đã che thì `run_reviewed_preview_job` mới dựng 3D (owner chốt 2026-10-09).
-                    _record_benchmark(attempt)
-                    return attempt.job
+                    # Không frame nào bị che thì không có gì để người dùng xem: ghi nhận tự động và chạy tiếp.
+                    accepted = accept_when_nothing_redacted(attempt.registry, attempt.job.job_id)
+                    if accepted is None:
+                        # Có frame đã che: dừng ở đây, giữ RUNNING ở bước tách frame. Chỉ khi người dùng xem và
+                        # chấp nhận bản đã che thì `run_reviewed_preview_job` mới dựng 3D (owner chốt 2026-10-09).
+                        _record_benchmark(attempt)
+                        return attempt.job
+                    attempt.job = accepted
                 attempt.job = _execute_lidar_ingest(attempt, frames)
                 if attempt.job.status != JobStatus.RUNNING:
                     _record_benchmark(attempt)  # LiDAR ingest hoặc structural QA lỗi: dừng trước COLMAP/Brush

@@ -945,10 +945,14 @@ class ProjectRegistry:
         self.persistence.save_job(updated, manifest_ref, event, expected=expected)
         return updated
 
-    def record_anonymization_acceptance(self, expected: JobManifest, reference: ProductArtifactRef) -> JobManifest:
+    def record_anonymization_acceptance(
+        self, expected: JobManifest, reference: ProductArtifactRef, *, claim_stage: StageId | None = None
+    ) -> JobManifest:
         """Ghi việc người dùng đã xem và chấp nhận bản frame đã che (AUD-18); CAS theo revision.
 
         Job giữ nguyên trạng thái và stage: worker thấy bản ghi này mới dựng preview từ frame đã che.
+        `claim_stage` chỉ dành cho worker đang giữ job (không frame nào bị che): chuyển stage trong cùng một
+        lần ghi, nên không có khoảnh khắc nào worker khác thấy job "đã chấp nhận, chưa ai nhận".
         """
         from src.services.orchestration.jobs.progress import (
             ANONYMIZATION_ACCEPTANCE_TYPE,
@@ -971,10 +975,12 @@ class ProjectRegistry:
             artifact_checksum=reference.artifact_checksum,
             data_class=reference.data_class,
         )
-        updated = with_canonical_checksum(
-            expected.model_copy(update={"stage_artifacts": [*expected.stage_artifacts, stage]}),
-            "job_manifest_checksum",
-        )
+        changes: dict[str, object] = {"stage_artifacts": [*expected.stage_artifacts, stage]}
+        if claim_stage is not None:
+            if expected.status != JobStatus.RUNNING:
+                raise ValueError("Chỉ job RUNNING mới đổi stage đang chạy")
+            changes["current_stage"] = claim_stage
+        updated = with_canonical_checksum(expected.model_copy(update=changes), "job_manifest_checksum")
         manifest_ref = self.lifecycle.store.publish_manifest(updated)
         history = self.persistence.list_attempts(expected.job_id)
         event = JobAttemptRecord(
