@@ -180,7 +180,7 @@
     "vram_base_gb": 1.25,
     "vram_per_million_splats_gb": 1.1,
     "vram_per_train_megapixel_gb": 0.35,
-    "ram_base_gb": 0.9,
+    "ram_base_gb": 1.05,
     "ram_per_decode_megapixel_gb": 0,
     "ram_feature_bytes": 420,
     "disk_per_frame_megapixel_gb": 0.0016,

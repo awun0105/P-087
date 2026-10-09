@@ -19,7 +19,7 @@ from src.models.contracts.manifests import StageId  # noqa: E402
 from src.services.orchestration.jobs.database import RuntimeDatabase  # noqa: E402
 from src.services.orchestration.processing import load_presets  # noqa: E402
 from src.services.orchestration.processing.models import ParamValue  # noqa: E402
-from src.services.orchestration.processing.observed import _vram, load_usages  # noqa: E402
+from src.services.orchestration.processing.observed import load_usages, usage_vram  # noqa: E402
 from src.services.orchestration.processing.resources import estimate_gb  # noqa: E402
 from src.services.orchestration.projects import ProjectRegistry  # noqa: E402
 from src.services.orchestration.projects.errors import JobNotFoundError  # noqa: E402
@@ -152,19 +152,16 @@ def main() -> None:
             est_ram_str = "—"
             est_vram_str = "—"
 
-        peak_vram = _vram(u)
+        peak_vram = usage_vram(u)
         peak_vram_str = f"{peak_vram:.2f}" if peak_vram is not None else "—"
         peak_ram_str = f"{u.peak_ram_gb:.2f}" if u.peak_ram_gb is not None else "—"
 
         # Cột đạt chỉ tính cho lượt completed của tool preview
         dat_str = "—"
         if u.tool == "preview" and u.outcome == "completed":
-            # Dung sai 0.15 GB cho nhiễu bộ nhớ nền hệ thống khi chạy local
-            ram_ok = (
-                est_ram is not None
-                and u.peak_ram_gb is not None
-                and (est_ram >= u.peak_ram_gb or (u.peak_ram_gb - est_ram <= 0.15))
-            ) or (u.peak_ram_gb is None)
+            ram_ok = (est_ram is not None and u.peak_ram_gb is not None and est_ram >= u.peak_ram_gb) or (
+                u.peak_ram_gb is None
+            )
             vram_ok = (est_vram is not None and peak_vram is not None and est_vram >= peak_vram) or (peak_vram is None)
             dat_str = "đúng" if (ram_ok and vram_ok) else "KHÔNG"
 

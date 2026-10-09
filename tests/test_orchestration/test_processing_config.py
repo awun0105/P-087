@@ -257,7 +257,7 @@ def test_parameter_groups_partition_all_preset_parameters() -> None:
             24,
             8,
             {
-                "sampling.max_frames": 910,
+                "sampling.max_frames": 880,
                 "colmap.max_image_size": 2560,
                 "colmap.max_num_features": 13312,
                 "brush.max_resolution": 3840,
@@ -269,7 +269,7 @@ def test_parameter_groups_partition_all_preset_parameters() -> None:
             4,
             4,
             {
-                "sampling.max_frames": 520,
+                "sampling.max_frames": 500,
                 "colmap.max_image_size": 1920,
                 "colmap.max_num_features": 9216,
                 "brush.max_resolution": 1280,
@@ -338,6 +338,10 @@ def test_resource_model_calibrated_against_real_measurements() -> None:
     # job-6bc02e5d: 50 frame (tối thiểu) -> peak RAM đo 1.04 GB
     est_50 = estimate_gb(model, {**min_params, "sampling.max_frames": 50})
     assert est_50["ram"] >= 1.04
+
+    # job-a713242a: 149 frame (tối thiểu) -> peak RAM đo 1.53 GB
+    est_149 = estimate_gb(model, {**min_params, "sampling.max_frames": 149})
+    assert est_149["ram"] >= 1.53
 
     # job-9b9aa3da: 174 frame (tối thiểu) -> peak RAM đo 1.46 GB
     est_174 = estimate_gb(model, {**min_params, "sampling.max_frames": 174})
@@ -503,3 +507,13 @@ def test_build_job_config_colmap_use_gpu() -> None:
     assert config_bytes(cfg_default) != config_bytes(cfg_gpu)
     # num_threads không đổi giữa hai trường hợp
     assert cfg_default.colmap["num_threads"] == cfg_gpu.colmap["num_threads"]
+
+
+def test_calibration_script_imports_and_parses_arguments() -> None:
+    """Script đối chiếu phải nạp được: đổi tên hàm trong `observed.py` từng làm nó hỏng mà không test nào báo."""
+    import subprocess
+    import sys
+
+    script = Path(__file__).resolve().parents[2] / "scripts/resources/calibrate_resource_model.py"
+    done = subprocess.run([sys.executable, str(script), "--help"], capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr

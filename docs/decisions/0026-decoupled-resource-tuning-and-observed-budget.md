@@ -54,10 +54,10 @@ song song có ích.
 ## Quyết định đề xuất
 
 1. **Giữ nguyên dạng công thức của `estimate_gb`, chỉ đổi giá trị hệ số theo số đo.**
-   `ram_base_gb = 0.9`, `ram_feature_bytes = 420`, `ram_per_decode_megapixel_gb = 0`,
+   `ram_base_gb = 1.05`, `ram_feature_bytes = 420`, `ram_per_decode_megapixel_gb = 0`,
    `vram_base_gb = 1.25`. Quy tắc chọn: với mọi lượt chạy hoàn tất đã đo, ước lượng tính
    theo số frame thật phải lớn hơn hoặc bằng số đo. Với các hệ số này, ước lượng cho ba
-   điểm RAM ở bảng trên là 1,07 / 1,50 / 4,66 GB, và preset tối đa là 9,16 GB.
+   điểm RAM ở bảng trên là 1,22 / 1,56–1,65 / 4,81 GB, và preset tối đa là 9,31 GB.
 2. **Không đổi công thức RAM sang dạng "số ảnh giải mã đồng thời theo số luồng".** Đó là
    một giả thuyết về cách COLMAP dùng bộ nhớ; chưa có số đo nào chứng minh, và nó cho ra
    ước lượng không còn phụ thuộc số frame.

@@ -150,7 +150,7 @@ của người khác; nếu thấy cần sửa thì dừng và báo).
 
 | Chỗ | Trước | Sau |
 |---|---|---|
-| Hệ số RAM trong preset | `ram_base_gb 1.5`, `ram_feature_bytes 160`, `ram_per_decode_megapixel_gb 0.012` | `0.9`, `420`, `0` |
+| Hệ số RAM trong preset | `ram_base_gb 1.5`, `ram_feature_bytes 160`, `ram_per_decode_megapixel_gb 0.012` | `1.05`, `420`, `0` |
 | Hệ số VRAM trong preset | `vram_base_gb 0.8` | `1.25` (hai hệ số VRAM còn lại giữ nguyên) |
 | `maximum_for_machine` | một `t` cho mọi thông số | hai lần tìm kiếm nối tiếp: nhóm SFM rồi nhóm SPLAT |
 | `evaluate` | luôn dùng `estimate_gb` | dùng số đã đo cho RAM/VRAM khi nơi gọi truyền vào |
@@ -202,14 +202,14 @@ Implement:
      bằng frame thật.
    - In thêm cột `đạt` = ước lượng ≥ số đo, chỉ xét cho lượt `completed`.
 2. Sửa bốn giá trị trong `configs/product/processing_presets_v1.json`:
-   `ram_base_gb: 0.9`, `ram_feature_bytes: 420`, `ram_per_decode_megapixel_gb: 0`,
+   `ram_base_gb: 1.05`, `ram_feature_bytes: 420`, `ram_per_decode_megapixel_gb: 0`,
    `vram_base_gb: 1.25`. Không sửa các hệ số khác, không sửa `warn_ratio`/`danger_ratio`.
 3. Viết lại `resource_model.note` trong file preset thành câu mô tả đúng nguồn:
    hệ số RAM và nền VRAM khớp theo số đo `r2s_resource_usage` ngày 2026-10-04 và 2026-10-05
    (4 job, tối đa 546 frame thật); vùng trên 546 frame là ngoại suy.
 4. Thêm test vào `tests/test_orchestration/test_processing_config.py`, dùng các điểm đo
    ở bảng trên làm dữ liệu cố định:
-   - RAM: preset tối thiểu với 50 frame ≥ 1,04; với 174 frame ≥ 1,46; preset tối đa với
+   - RAM: preset tối thiểu với 50 frame ≥ 1,04; với 149 frame ≥ 1,53; với 174 frame ≥ 1,46; preset tối đa với
      546 frame ≥ 4,20 (lấy cả lượt lỗi vì đó là mức cao nhất quan sát được).
    - VRAM: preset tối thiểu ≥ 2,63.
    - Chặn trên để không quay lại lỗi cũ: RAM của preset tối đa nguyên bản (1.200 frame) < 12 GB.
@@ -222,7 +222,7 @@ Không làm trong sprint này:
 - Không dùng lượt `failed`, `interrupted`, `cancelled` để khớp VRAM.
 
 Giá trị kiểm tra nhanh sau khi sửa (tính bằng `estimate_gb` với hệ số mới):
-preset tối thiểu → RAM 1,93 GB, VRAM 2,67 GB; preset tối đa → RAM 9,16 GB, VRAM 10,75 GB.
+preset tối thiểu → RAM 2,08 GB, VRAM 2,67 GB; preset tối đa → RAM 9,31 GB, VRAM 10,75 GB.
 Nếu ra số khác thì đã sửa nhầm hệ số.
 
 Tests: `tests/test_orchestration/test_processing_config.py`, `tests/test_gpu/test_gpu_plan.py`,
@@ -301,8 +301,8 @@ cấu hình production. Các dòng 4–12 GB là test của thuật toán (và l
 | 8 / 16 GB | 1200 | 3200 | 16384 | 2400 | 3.200.000 | 43000 |
 | 12 / 32 GB | 1200 | 3200 | 16384 | 3360 | 5.000.000 | 54000 |
 | 24 / 16 GB | 1200 | 3200 | 16384 | 3840 | 6.000.000 | 60000 |
-| 24 / 8 GB | 910 | 2560 | 13312 | 3840 | 6.000.000 | 60000 |
-| 4 / 4 GB | 520 | 1920 | 9216 | 1280 | 1.200.000 | 31000 |
+| 24 / 8 GB | 880 | 2560 | 13312 | 3840 | 6.000.000 | 60000 |
+| 4 / 4 GB | 500 | 1920 | 9216 | 1280 | 1.200.000 | 31000 |
 
 Test bắt buộc:
 
@@ -654,8 +654,8 @@ phép để UNVERIFIED kèm ghi chú cho tới đợt thuê máy đầu tiên.
 | 8 / 16 GB | 1200 | 3200 | 16384 | 2400 | 3.200.000 | 43000 |
 | 12 / 32 GB | 1200 | 3200 | 16384 | 3360 | 5.000.000 | 54000 |
 | 24 / 16 GB | 1200 | 3200 | 16384 | 3840 | 6.000.000 | 60000 |
-| 24 / 8 GB | 910 | 2560 | 13312 | 3840 | 6.000.000 | 60000 |
-| 4 / 4 GB | 520 | 1920 | 9216 | 1280 | 1.200.000 | 31000 |
+| 24 / 8 GB | 880 | 2560 | 13312 | 3840 | 6.000.000 | 60000 |
+| 4 / 4 GB | 500 | 1920 | 9216 | 1280 | 1.200.000 | 31000 |
 ```
 
 - **Verification:**
@@ -723,4 +723,15 @@ phép để UNVERIFIED kèm ghi chú cho tới đợt thuê máy đầu tiên.
   - `ruff check`: pass
   - `ruff format --check`: pass
   - `pytest tests/test_orchestration/test_container_limits.py tests/test_gpu/test_gpu_plan.py tests/test_orchestration/test_resource_telemetry.py tests/test_orchestration/test_resource_admission.py -v`: 86 passed.
+
+### Sửa sau review (2026-10-09)
+
+- **`ram_base_gb` 0.9 → 1.05.** Hệ số 0.9 của plan cho 1,41 GB ở 149 frame, thấp hơn 1,53 GB
+  đã đo của `job-a713242a38be`, tức vi phạm contract của S1. Với 1.05, bốn điểm đo cho
+  1,22 / 1,56 / 1,65 / 4,81 GB; preset tối đa 9,31 GB. Script không còn dung sai 0,15 GB.
+- **Ma trận S2** đổi hai dòng theo hệ số mới: 24/8 GB → 880 frame, 4/4 GB → 500 frame.
+- **Script đối chiếu** nạp lại được (`_vram` đã đổi tên thành `usage_vram` ở AUD-28.S2); thêm
+  test `test_calibration_script_imports_and_parses_arguments`.
+- **Preflight COLMAP GPU** chọn tiền tố cờ theo help của binary (`FeatureExtraction` ở COLMAP 4.x).
+- Bảng của script trong mục S1 ở trên là output trước khi sửa; cột ước lượng RAM nay cao hơn 0,15 GB.
 
