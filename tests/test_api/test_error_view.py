@@ -338,3 +338,16 @@ async def test_route_progress_and_jobs_hide_log_excerpt_for_non_reviewers(app_cl
         response = await client.get(route)
         assert response.status_code == 200, response.text
         assert "log_excerpt" in get_details(response.json())
+
+    # File manifest thô chứa nguyên `log_excerpt`, và route attempts công khai URI + checksum của nó. Route tải
+    # artifact chỉ phục vụ URI trong allow-list của job nên không được trả file này cho bất kỳ vai trò nào.
+    app_client.settings.auth_required = True
+    assert b"line 1 of internal log" in registry.runtime_resolver.require(ref).read_bytes()
+    for session in (guest_session, editor_session, reviewer_session):
+        response = await client.get(
+            f"/api/v1/jobs/{job.job_id}/artifacts/content",
+            params={"artifact_uri": ref.artifact_uri, "artifact_checksum": ref.artifact_checksum},
+            cookies={"r2s_session": session},
+        )
+        assert response.status_code in {403, 404}, response.text
+        assert b"internal log" not in response.content
