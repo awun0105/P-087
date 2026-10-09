@@ -77,7 +77,6 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
   }, [load, draftReady]);
 
   const processing = useProcessingForm(true, draft.processing, draftReady);
-  const [routeToColab, setRouteToColab] = useState(false);
   useEffect(() => {
     if (!draftReady || !processing.values) return;
     setDraft((current) => JSON.stringify(current.processing) === JSON.stringify(processing.values) ? current : { ...current, processing: processing.values });
@@ -103,7 +102,7 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
     !purpose.trim() && "Chưa khai mục đích sử dụng",
     !(rights && anonymized && retention) && "Chưa tick đủ 3 xác nhận dữ liệu",
     lidarBlocker(lidar),
-    blocked && !routeToColab && "Thông số vượt cấu hình máy xử lý (Chọn xử lý trên Colab GPU để bỏ chặn)",
+    blocked && "Thông số vượt cấu hình máy xử lý (giảm các ô tô đỏ hoặc chọn “Tối đa cho máy này”)",
     processing.loading && "Đang tải cấu hình xử lý",
     processing.evaluating && "Đang kiểm tra thông số xử lý",
     processing.options && processing.error && "Chưa kiểm tra được thông số; thử lại hoặc đổi preset",
@@ -127,11 +126,7 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
       }, processing.values ?? undefined, lidarAttachment(lidar));
       if (isGuest) void refresh();
       clear();
-      notifySuccess(
-        routeToColab
-          ? "Đã tạo scene! Sẵn sàng cho Colab GPU (Tesla T4 15GB) tiếp nhận xử lý."
-          : "Đã tạo job. Bạn có thể theo dõi tại Tiến trình."
-      );
+      notifySuccess("Đã tạo job. Bạn có thể theo dõi tại Tiến trình.");
       router.push(`/scenes/${encodeURIComponent(created.job.job_id)}`);
     } catch (cause) {
       if (isGuest && isGuestQuotaExceededError(cause)) {
@@ -309,35 +304,12 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
                 ⚠️ Video này cần khoảng {vramRequired}GB VRAM. GPU {gpuName} của bạn chỉ có {vramAvailable}GB.
               </p>
               <p className="text-ink-muted leading-relaxed">
-                Tiến trình huấn luyện 3DGS có nguy cơ cao bị treo hoặc tràn VRAM trên GPU cục bộ. Bạn có muốn điều hướng tác vụ sang <strong>Colab GPU (Tesla T4 15GB)</strong> đã kết nối sẵn không?
+                Tiến trình huấn luyện 3DGS có nguy cơ cao bị treo hoặc tràn VRAM. Giảm các ô tô đỏ hoặc chọn “Tối đa cho máy
+                này” để tiếp tục.
               </p>
-              <div className="pt-1 flex flex-wrap items-center gap-3">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={routeToColab ? "primary" : "secondary"}
-                  onClick={() => setRouteToColab((curr) => !curr)}
-                >
-                  <Sparkles className="size-3.5 mr-1.5" aria-hidden />
-                  {routeToColab
-                    ? "✓ Đã chọn: Xử lý tự động trên Colab GPU 15GB"
-                    : "Xử lý tự động trên Colab GPU 15GB"}
-                </Button>
-                {routeToColab && (
-                  <span className="text-xs font-medium text-sage-strong">
-                    Đã bật định tuyến: Cho phép giữ nguyên chất lượng cao và chuyển job sang máy ảo Colab GPU.
-                  </span>
-                )}
-              </div>
             </div>
           </div>
         </Card>
-      )}
-      {blocked && !routeToColab && !isVramDanger && (
-        <Notice tone="rust">
-          Thông số hiện tại vượt cấu hình máy xử lý và có thể làm job bị crash. Giảm các ô tô đỏ hoặc chọn “Tối đa cho máy
-          này”.
-        </Notice>
       )}
       {error && <Notice tone="rust">{error}</Notice>}
       {isGuest && <GuestQuotaStatus quota={guestQuota} />}
@@ -355,15 +327,6 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
           <dd>{ORIGINS.find((item) => item.value === origin)?.label} · tự khai</dd>
           <dt className="text-ink-muted">Thông số</dt>
           <dd>{processing.activePreset ? "Theo preset đã chọn" : processing.values ? "Tuỳ chỉnh" : "Mặc định của máy chủ"}</dd>
-          {routeToColab && (
-            <>
-              <dt className="text-ink-muted">Đích thực thi</dt>
-              <dd className="font-semibold text-ember-strong flex items-center gap-1.5">
-                <Sparkles className="size-3.5" aria-hidden />
-                Colab GPU (Tesla T4 15GB) · Smart Cloud Routing
-              </dd>
-            </>
-          )}
         </dl>
         {missing.length > 0 && (
           <div className="mt-4 text-sm">
@@ -386,12 +349,10 @@ export function VideoSetupStep({ preselect, onBack }: { preselect: string | null
         <Button type="submit" size="lg" disabled={!ready || submitting || guestQuotaExhausted}>
           {submitting ? (
             <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden />
-          ) : routeToColab ? (
-            <Sparkles aria-hidden />
           ) : (
             <Play aria-hidden />
           )}
-          {routeToColab ? "Chuyển xử lý sang Colab GPU" : "Bắt đầu xử lý"}
+          Bắt đầu xử lý
         </Button>
       </div>
     </form>
