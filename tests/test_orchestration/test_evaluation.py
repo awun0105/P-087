@@ -117,9 +117,7 @@ def test_job_without_results_keeps_stages_pending_and_reports_missing_resource_d
     assert {metric.key for metric in system.metrics} == {"system.peak_ram", "system.peak_vram", "system.config"}
     assert all(metric.value is None for metric in system.metrics)
     assert all(metric.display == "Chưa đo — job này không có bản ghi tài nguyên" for metric in system.metrics)
-    assert evaluation.summary == [
-        "Không có chỉ số tự kiểm nào dưới ngưỡng. 0 trên 3 chỉ số có ngưỡng; các chỉ số còn lại chỉ để tham khảo."
-    ]
+    assert evaluation.summary == []
 
 
 def _evaluation() -> JobEvaluation:

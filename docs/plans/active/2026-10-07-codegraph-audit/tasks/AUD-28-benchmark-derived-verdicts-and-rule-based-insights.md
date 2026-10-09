@@ -383,4 +383,5 @@ summary/reference visual exits remain open until the local Studio API serves thi
 
 - `summarize` đếm `total` là tổng số chỉ số của các nhóm `measured` (trước đó chỉ đếm chỉ số
   có `threshold`, nên câu luôn ra dạng "n trên n"). Test cập nhật: "0 trên 3", "1 trên 2".
-
+- `summarize` trả danh sách rỗng khi chưa chỉ số nào có verdict (job chưa chạy xong bước nào); trước đó job
+  đang chờ vẫn nhận câu "Không có chỉ số tự kiểm nào dưới ngưỡng".

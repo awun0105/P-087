@@ -56,6 +56,9 @@ def summarize(groups: list[StageEvaluation]) -> list[str]:
     advice = [*failed, *warned]
     if advice:
         return advice
+    if n == 0:
+        # Chưa chỉ số nào được so với ngưỡng (job chưa chạy xong bước nào): không có gì để kết luận.
+        return []
 
     return [
         f"Không có chỉ số tự kiểm nào dưới ngưỡng. {n} trên {total} chỉ số có ngưỡng; các chỉ số còn lại chỉ để tham khảo."
