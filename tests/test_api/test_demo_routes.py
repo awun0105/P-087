@@ -112,6 +112,21 @@ def library(tmp_path, monkeypatch):
     return root
 
 
+@pytest.fixture
+def reviewer(monkeypatch):
+    """Reviewer đã đăng nhập (xuất vào thư viện công khai luôn cần phiên thật) và nơi ghi nhật ký."""
+    from types import SimpleNamespace
+
+    from src.api import auth
+    from src.main import app
+
+    user = SimpleNamespace(user_id="user-reviewer", role="reviewer", display_name="Reviewer")
+    audits: list[tuple] = []
+    monkeypatch.setitem(app.dependency_overrides, auth.require_reviewer, lambda: user)
+    monkeypatch.setattr(auth, "auth_service", lambda: SimpleNamespace(audit=lambda *args: audits.append(args)))
+    return SimpleNamespace(user=user, audits=audits)
+
+
 def _attest(registry, monkeypatch, **flags) -> None:
     project = registry.get_project(registry.get_job("job-fixture-001").project_id)
     patched = project.model_copy(update={"source_rights_attestation": {"attested": True, **flags}})
@@ -121,38 +136,12 @@ def _attest(registry, monkeypatch, **flags) -> None:
 _CONFIRMED = {"rights_to_use_confirmed": True, "anonymization_confirmed": True}
 
 
-@pytest.mark.asyncio
-async def test_publish_needs_the_reviewer_to_confirm_public_release(client, library) -> None:
-    refused = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": False})
-    assert refused.status_code == 422 and "công khai" in refused.json()["detail"]
-    assert not library.exists()
-
-
-@pytest.mark.asyncio
-async def test_publish_refuses_scenes_without_rights_and_anonymization(
-    client, library, isolated_registry, monkeypatch
-) -> None:
-    refused = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": True})
-    assert refused.status_code == 409 and "ẩn danh" in refused.json()["detail"]
-    _attest(isolated_registry, monkeypatch, rights_to_use_confirmed=True, anonymization_confirmed=False)
-    still = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": True})
-    assert still.status_code == 409
-    assert not library.exists()
-
-
-@pytest.mark.asyncio
-async def test_publish_exports_through_the_shared_service_and_reports_it(
-    client, library, isolated_registry, monkeypatch
-) -> None:
+def _fake_publish(calls):
     from datetime import UTC, datetime
 
-    from src.api.studio import demo as demo_api
-    from src.services.orchestration.samples import DemoFile, DemoManifest, DemoSource
+    from src.services.orchestration.samples import DemoFile, DemoManifest
 
-    _attest(isolated_registry, monkeypatch, **_CONFIRMED)
-    calls = []
-
-    def fake_publish(registry, job_id, root, *, title, description, source, frames=12):
+    def fake(registry, job_id, root, *, title, description, source, frames=12):
         calls.append((job_id, root, title, description, source))
         (root / "kho-1").mkdir(parents=True)
         manifest = DemoManifest(
@@ -171,7 +160,45 @@ async def test_publish_exports_through_the_shared_service_and_reports_it(
         (root / "kho-1" / "manifest.json").write_text(manifest.model_dump_json())
         return manifest
 
-    monkeypatch.setattr(demo_api, "publish_job_bundle", fake_publish)
+    return fake
+
+
+@pytest.mark.asyncio
+async def test_publish_needs_a_signed_in_reviewer_even_when_login_is_off(client, library) -> None:
+    refused = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": True})
+    assert refused.status_code == 401 and "Reviewer" in refused.json()["detail"]
+    assert not library.exists()
+
+
+@pytest.mark.asyncio
+async def test_publish_needs_the_reviewer_to_confirm_public_release(client, library, reviewer) -> None:
+    refused = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": False})
+    assert refused.status_code == 422 and "công khai" in refused.json()["detail"]
+    assert not library.exists()
+
+
+@pytest.mark.asyncio
+async def test_publish_refuses_scenes_without_rights_and_anonymization(
+    client, library, reviewer, isolated_registry, monkeypatch
+) -> None:
+    refused = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": True})
+    assert refused.status_code == 409 and "ẩn danh" in refused.json()["detail"]
+    _attest(isolated_registry, monkeypatch, rights_to_use_confirmed=True, anonymization_confirmed=False)
+    still = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": True})
+    assert still.status_code == 409
+    assert not library.exists()
+
+
+@pytest.mark.asyncio
+async def test_publish_exports_through_the_shared_service_and_audits_it(
+    client, library, reviewer, isolated_registry, monkeypatch
+) -> None:
+    from src.api.studio import demo as demo_api
+    from src.services.orchestration.samples import DemoSource
+
+    _attest(isolated_registry, monkeypatch, **_CONFIRMED)
+    calls: list[tuple] = []
+    monkeypatch.setattr(demo_api, "publish_job_bundle", _fake_publish(calls))
     done = await client.post(
         f"{_JOB}/demo/publish", json={"confirm_public": True, "title": "Kho 1", "description": "Mô tả"}
     )
@@ -179,16 +206,51 @@ async def test_publish_exports_through_the_shared_service_and_reports_it(
     (job_id, root, title, description, source) = calls[0]
     assert (job_id, root, title, description) == ("job-fixture-001", library, "Kho 1", "Mô tả")
     assert isinstance(source, DemoSource) and source.dataset == "Real2Sim Studio"
+    assert reviewer.audits == [("user-reviewer", "demo.publish", "job-fixture-001", {"sample_id": "kho-1"})]
     # Trạng thái demo của job báo mẫu đã có trong thư viện.
     assert (await client.get(f"{_JOB}/demo")).json()["published_sample_id"] == "kho-1"
 
 
 @pytest.mark.asyncio
-async def test_publish_maps_export_failures_to_clear_conflicts(client, library, isolated_registry, monkeypatch) -> None:
+async def test_a_blank_title_falls_back_to_the_scene_name_instead_of_failing(
+    client, library, reviewer, isolated_registry, monkeypatch
+) -> None:
+    from src.api.studio import demo as demo_api
+
+    _attest(isolated_registry, monkeypatch, **_CONFIRMED)
+    calls: list[tuple] = []
+    monkeypatch.setattr(demo_api, "publish_job_bundle", _fake_publish(calls))
+    done = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": True, "title": "    "})
+    assert done.status_code == 201
+    assert calls[0][2] == "Fixture warehouse project"
+
+
+@pytest.mark.asyncio
+async def test_publishing_a_job_twice_is_a_conflict_that_names_the_existing_sample(
+    client, library, reviewer, isolated_registry, monkeypatch
+) -> None:
+    from src.api.studio import demo as demo_api
+    from src.services.orchestration.samples.export import AlreadyPublishedError
+
+    _attest(isolated_registry, monkeypatch, **_CONFIRMED)
+
+    def already(*args, **kwargs):
+        raise AlreadyPublishedError("kho-1")
+
+    monkeypatch.setattr(demo_api, "publish_job_bundle", already)
+    refused = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": True})
+    assert refused.status_code == 409 and "kho-1" in refused.json()["detail"]
+    assert reviewer.audits == []
+
+
+@pytest.mark.asyncio
+async def test_publish_maps_export_failures_to_clear_conflicts(
+    client, library, reviewer, isolated_registry, monkeypatch
+) -> None:
     _attest(isolated_registry, monkeypatch, **_CONFIRMED)
     # Fixture không có preview đã xác minh: dịch vụ xuất từ chối thay vì tạo mẫu rỗng, và không để lại thư mục.
     refused = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": True})
     assert refused.status_code == 409 and "bản xem 3DGS" in refused.json()["detail"]
-    assert not any(library.iterdir()) if library.exists() else True
+    assert list(library.iterdir()) == []
     missing = await client.post("/api/v1/jobs/job-nope/demo/publish", json={"confirm_public": True})
     assert missing.status_code == 404

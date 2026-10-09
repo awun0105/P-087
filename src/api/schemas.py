@@ -92,7 +92,7 @@ class ProjectResponse(ApiModel):
     input_video: InputVideoSummary | None = None
     created_at: datetime | None = None
     created_by: Actor | None = None
-    #: Mốc bản demo nếu scene được đánh dấu là bản demo (nút Khôi phục bản demo đưa scene về mốc này).
+    #: Mốc bản demo nếu scene được đánh dấu là bản demo (nút Khôi phục về mốc gốc đưa scene về mốc này).
     demo_baseline: DemoBaseline | None = None
 
 

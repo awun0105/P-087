@@ -121,7 +121,7 @@ class InputVideoSummary(BaseModel):
 
 
 class DemoBaseline(BaseModel):
-    """Mốc "bản demo gốc" của một scene: revision SceneIR mà nút Khôi phục bản demo đưa scene trở về.
+    """Mốc gốc của một scene: revision SceneIR mà nút "Khôi phục về mốc gốc" đưa scene trở về (khác việc xuất vào thư viện mẫu).
 
     Scene demo vẫn chỉnh sửa và tương tác được như scene thường; khôi phục chỉ tạo revision mới mang nội dung của mốc
     này (lịch sử revision chỉ tiến, không xoá), không chạy lại bước xử lý nào.

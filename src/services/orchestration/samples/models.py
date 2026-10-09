@@ -6,6 +6,7 @@ gốc (null khi nguồn không ghi được), UI không được bịa số.
 """
 
 import re
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Literal, Self
 
@@ -19,14 +20,23 @@ from src.services.reconstruction.views import CameraMarker
 _FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
-#: Bước LiDAR (nếu bundle có) nằm sau tách frame, cùng quy tắc với `jobs/progress.py::studio_pipeline`.
-_LIDAR_STAGES = (StageId.LIDAR_INGEST, StageId.LIDAR_ODOMETRY, StageId.LIDAR_CALIBRATION_QA)
+def pipeline_for_stage_ids(present: Iterable[StageId]) -> tuple[StageId, ...]:
+    """Thứ tự bước của một job/bundle: pipeline Studio, thêm bước LiDAR mà job thật sự có.
 
-
-def _pipeline_for(records: dict[StageId, "DemoStage"]) -> tuple[StageId, ...]:
-    """Thứ tự bước của bundle: pipeline Studio, thêm bước LiDAR mà bundle thật sự có."""
+    Cùng quy tắc với `frontend/src/features/studio/stages.ts::stagesFor` để phát lại mẫu hiện đúng các bước như scene
+    thật: job odometry chỉ thêm bước odometry; job nộp gói LiDAR thêm bước nhận dữ liệu và, nếu có, QA calibration.
+    """
+    ids = set(present)
     index = STUDIO_PIPELINE.index(StageId.FRAME_EXTRACT) + 1
-    lidar = tuple(stage_id for stage_id in _LIDAR_STAGES if stage_id in records)
+    if StageId.LIDAR_ODOMETRY in ids:
+        lidar: tuple[StageId, ...] = (StageId.LIDAR_ODOMETRY,)
+    elif StageId.LIDAR_INGEST in ids:
+        lidar = (
+            StageId.LIDAR_INGEST,
+            *((StageId.LIDAR_CALIBRATION_QA,) if StageId.LIDAR_CALIBRATION_QA in ids else ()),
+        )
+    else:
+        lidar = ()
     return (*STUDIO_PIPELINE[:index], *lidar, *STUDIO_PIPELINE[index:])
 
 
@@ -145,7 +155,7 @@ class DemoManifest(BaseModel):
         self.stages = [
             records.get(stage_id)
             or DemoStage(stage_id=stage_id, state="pending", summary="Mẫu này chưa ghi kết quả của bước này.")
-            for stage_id in _pipeline_for(records)
+            for stage_id in pipeline_for_stage_ids(records)
         ]
         return self
 

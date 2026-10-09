@@ -10,7 +10,7 @@ Hai việc khác nhau:
 from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.api import auth, schemas
 from src.api.auth import require_contributor
@@ -56,9 +56,15 @@ class DemoPublishRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    title: str | None = Field(default=None, min_length=1, max_length=200)
+    title: str | None = Field(default=None, max_length=200)
     description: str = Field(default="", max_length=1000)
     confirm_public: bool
+
+    @field_validator("title")
+    @classmethod
+    def _blank_title_means_default(cls, value: str | None) -> str | None:
+        """Tên toàn dấu cách coi như không nhập: dùng tên scene thay vì làm bundle hỏng."""
+        return value.strip() or None if value is not None else None
 
 
 class DemoPublishResponse(BaseModel):
@@ -139,9 +145,15 @@ def post_demo_publish(
 ) -> DemoPublishResponse:
     """Xuất scene thành bản demo trong thư viện mẫu (chỉ Reviewer).
 
-    Thư viện mẫu công khai (không cần đăng nhập) và bundle chứa video gốc, nên từ chối khi project chưa khai đã có quyền
-    sử dụng và đã ẩn danh, bị chặn bởi kiểm tra riêng tư, hoặc Reviewer chưa xác nhận công khai.
+    Thư viện mẫu công khai (không cần đăng nhập) và bundle chứa video gốc, nên cần phiên Reviewer thật (kể cả khi tắt
+    đăng nhập) và từ chối khi project chưa khai đã có quyền sử dụng và đã ẩn danh, bị chặn bởi kiểm tra riêng tư, hoặc
+    Reviewer chưa xác nhận công khai.
     """
+    if user is None:
+        # Xuất vào thư viện công khai luôn cần Reviewer thật đăng nhập (và được ghi nhật ký), kể cả khi tắt đăng nhập.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Đăng nhập tài khoản Reviewer để đặt làm bản demo"
+        )
     if not request.confirm_public:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Cần xác nhận video được phép công khai"
@@ -164,7 +176,7 @@ def post_demo_publish(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Scene đang bị chặn bởi kiểm tra riêng tư: {privacy.block_reason or 'chưa đạt'}",
         )
-    title = (request.title or project.name).strip()
+    title = request.title or project.name.strip() or "Scene"
     try:
         manifest = publish_job_bundle(
             registry,
@@ -182,6 +194,5 @@ def post_demo_publish(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Không ghi được vào thư viện mẫu của máy chủ"
         ) from error
-    if user is not None:
-        auth.auth_service().audit(user.user_id, "demo.publish", job_id, {"sample_id": manifest.demo_id})
+    auth.auth_service().audit(user.user_id, "demo.publish", job_id, {"sample_id": manifest.demo_id})
     return DemoPublishResponse(sample_id=manifest.demo_id, title=manifest.title)

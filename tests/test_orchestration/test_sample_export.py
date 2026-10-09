@@ -169,3 +169,105 @@ def test_export_refuses_a_non_empty_target(tmp_path: Path) -> None:
     (out / "old.txt").write_text("cũ")
     with pytest.raises(SampleExportError, match="không ghi đè"):
         export_job_bundle(registry, JOB_ID, out, demo_id="x", title="x", description="", source=SOURCE)
+
+
+def test_more_than_eight_cards_on_a_stage_are_refused_before_any_file_is_written(tmp_path: Path) -> None:
+    registry, _ = _registry(tmp_path)
+    image = tmp_path / "x.png"
+    image.write_bytes(b"png")
+    specs = [StageAssetSpec(kind="image", path=image)] * 9
+    out = tmp_path / "bundle"
+    with pytest.raises(SampleExportError, match="tối đa 8"):
+        export_job_bundle(
+            registry,
+            JOB_ID,
+            out,
+            demo_id="x",
+            title="x",
+            description="",
+            source=SOURCE,
+            stage_assets={StageId.METRIC_CANONICALIZE: specs},
+        )
+    assert not (out / "files").exists() and not (out / "manifest.json").exists()
+
+
+def test_a_kind_that_does_not_match_the_file_type_is_refused(tmp_path: Path) -> None:
+    registry, _ = _registry(tmp_path)
+    image = tmp_path / "x.png"
+    image.write_bytes(b"png")
+    with pytest.raises(SampleExportError, match="thiếu file hợp lệ"):
+        export_job_bundle(
+            registry,
+            JOB_ID,
+            tmp_path / "b",
+            demo_id="x",
+            title="x",
+            description="",
+            source=SOURCE,
+            stage_assets={StageId.METRIC_CANONICALIZE: [StageAssetSpec(kind="video", path=image)]},
+        )
+
+
+def test_a_failure_after_files_were_copied_cleans_up_so_the_run_can_be_retried(tmp_path: Path) -> None:
+    registry, _ = _registry(tmp_path)
+    out = tmp_path / "bundle"
+    # Tiêu đề rỗng làm DemoManifest không hợp lệ sau khi splat đã được copy.
+    with pytest.raises(SampleExportError, match="không hợp lệ"):
+        export_job_bundle(registry, JOB_ID, out, demo_id="x", title="", description="", source=SOURCE)
+    assert not (out / "files").exists()
+    ok = export_job_bundle(registry, JOB_ID, out, demo_id="x", title="Tên", description="", source=SOURCE)
+    assert ok.title == "Tên"
+
+
+def test_frame_count_beyond_the_manifest_limit_is_refused(tmp_path: Path) -> None:
+    registry, _ = _registry(tmp_path)
+    with pytest.raises(SampleExportError, match="từ 2 đến 48"):
+        export_job_bundle(
+            registry, JOB_ID, tmp_path / "b", demo_id="x", title="x", description="", source=SOURCE, frames=49
+        )
+
+
+def test_invalid_assets_json_is_a_clear_error(tmp_path: Path) -> None:
+    path = tmp_path / "assets.json"
+    path.write_text('{"ST-NOT-A-STAGE": []}', encoding="utf-8")
+    with pytest.raises(SampleExportError, match="assets.json"):
+        load_stage_assets(path)
+    path.write_text('{"ST-RGB-GEOMETRY": [{"title": "thiếu kind"}]}', encoding="utf-8")
+    with pytest.raises(SampleExportError, match="assets.json"):
+        load_stage_assets(path)
+
+
+def test_a_lock_held_by_another_publisher_blocks_a_second_publish(tmp_path: Path) -> None:
+    registry, _ = _registry(tmp_path)
+    library = tmp_path / "library"
+    (library / f".publishing-{JOB_ID}").mkdir(parents=True)
+    with pytest.raises(SampleExportError, match="đang được xuất"):
+        publish_job_bundle(registry, JOB_ID, library, title="Kho", description="", source=SOURCE)
+    assert [child.name for child in library.iterdir()] == [f".publishing-{JOB_ID}"]
+
+
+def test_a_lidar_job_keeps_its_lidar_stages_when_exported(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from src.models.contracts.manifests import StageArtifact, StageStatus
+    from src.services.orchestration.samples.export import stage_durations
+
+    registry, _ = _registry(tmp_path)
+    job = registry.get_job(JOB_ID)
+    when = datetime(2026, 10, 10, tzinfo=UTC)
+    ingest = StageArtifact(
+        stage_id=StageId.LIDAR_INGEST,
+        status=StageStatus.SUCCEEDED,
+        artifact_type="LidarIngest",
+        artifact_uri="artifact://jobs/j/lidar",
+        artifact_checksum="sha256:" + "a" * 64,
+        data_class="derived",
+        started_at=when,
+        completed_at=when,
+    )
+    stages = stage_durations(job.model_copy(update={"stage_artifacts": [ingest]}), [])
+    ids = [stage.stage_id for stage in stages]
+    assert StageId.LIDAR_INGEST in ids and ids.index(StageId.LIDAR_INGEST) == ids.index(StageId.FRAME_EXTRACT) + 1
+    assert StageId.LIDAR_ODOMETRY not in ids
+    # Job không LiDAR thì pipeline giữ nguyên 8 bước.
+    assert len(stage_durations(job, [])) == 8
