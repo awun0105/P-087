@@ -303,6 +303,8 @@ def test_prepare_volume_rejects_path_outside_canonical_volume(tmp_path: Path, mo
 
 def test_prepare_volume_rejects_symlinked_managed_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A symlink must never be followed by the ownership preparation step."""
+    for variable in container_entrypoint.MANAGED_VOLUME_PATHS:
+        monkeypatch.delenv(variable, raising=False)
     data_root = tmp_path / "data"
     managed_root = data_root / "studio_local"
     managed_root.parent.mkdir(parents=True)
