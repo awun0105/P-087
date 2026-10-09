@@ -315,12 +315,28 @@ export interface DemoFile {
   checksum: string;
 }
 
+export interface DemoFact {
+  label: string;
+  value: string;
+}
+
+/** Một thẻ kết quả của bước; thêm kiểu mới ở đây và ở `showcase/registry.tsx`. */
+export interface DemoStageAsset {
+  kind: "image" | "video" | "facts";
+  title?: string;
+  caption?: string;
+  file?: DemoFile | null;
+  facts?: DemoFact[];
+}
+
 export interface DemoStage {
   stage_id: StageId;
   /** Bundle cũ chỉ liệt kê stage đã chạy; API mới thêm pending cho các bước thiếu. */
   state?: "succeeded" | "pending" | "failed";
   duration_seconds: number | null;
   summary: string;
+  /** Kết quả hiển thị của bước (ảnh, video, số đo thật); bundle cũ không có. */
+  assets?: DemoStageAsset[];
 }
 
 export type ParamValue = number | string;
@@ -482,13 +498,26 @@ export function parseJobProgress(value: unknown): JobProgress {
 }
 
 /** Tên file demo phải phẳng (không path) vì được ghép vào URL. */
+const ASSET_KINDS = ["image", "video", "facts"];
+
+function isDemoAsset(asset: unknown): boolean {
+  if (!isRecord(asset) || !ASSET_KINDS.includes(String(asset.kind))) return false;
+  if (asset.kind === "facts") {
+    return Array.isArray(asset.facts) && asset.facts.length > 0 && !asset.file &&
+      asset.facts.every((fact) => isRecord(fact) && typeof fact.label === "string" && typeof fact.value === "string");
+  }
+  return isRecord(asset.file) && typeof asset.file.name === "string" && SAFE_NAME.test(asset.file.name);
+}
+
 export function parseDemoManifest(value: unknown): DemoManifest {
   if (!isRecord(value) || value.schema_version !== "1.0" || !isRecord(value.splat) ||
       !Array.isArray(value.frames) || !Array.isArray(value.stages) ||
       (value.origin !== "pipeline_job" && value.origin !== "smoke_run")) {
     throw new Error("Demo bundle không hợp lệ");
   }
-  const files = [value.splat, ...(value.video ? [value.video] : []), ...value.frames];
+  const assetFiles = value.stages.flatMap((stage) =>
+    isRecord(stage) && Array.isArray(stage.assets) ? stage.assets.flatMap((asset) => (isRecord(asset) && asset.file ? [asset.file] : [])) : []);
+  const files = [value.splat, ...(value.video ? [value.video] : []), ...value.frames, ...assetFiles];
   if (!files.every((file) => isRecord(file) && typeof file.name === "string" && SAFE_NAME.test(file.name))) {
     throw new Error("Tên file demo không hợp lệ");
   }
@@ -500,6 +529,9 @@ export function parseDemoManifest(value: unknown): DemoManifest {
       throw new Error("Stage demo từ backend không hợp lệ");
     }
     ids.add(stage.stage_id);
+    if (stage.assets !== undefined && !(Array.isArray(stage.assets) && stage.assets.every(isDemoAsset))) {
+      throw new Error("Thẻ kết quả của bước demo không hợp lệ");
+    }
   }
   if (value.cameras !== undefined && value.cameras !== null) {
     if (!Array.isArray(value.cameras) || !value.cameras.every((camera) => isRecord(camera) && Array.isArray(camera.center) && camera.center.every(isFiniteNumber))) {
