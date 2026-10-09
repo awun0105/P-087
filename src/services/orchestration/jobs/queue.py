@@ -74,7 +74,7 @@ def job_requesters(database: RuntimeDatabase) -> dict[str, str]:
 
 
 def job_requester_actors(database: RuntimeDatabase, legacy_actors: dict[str, Actor]) -> dict[str, Actor]:
-    """Actor của lượt chạy gần nhất; job cũ dùng tên hiện tại nhưng role vẫn để unknown."""
+    """Actor của lượt chạy gần nhất; job cũ dùng tên và role hiện tại của tài khoản (không ghi ngược vào bản ghi)."""
     owners, snapshots = _job_requester_data(database)
     return {
         job_id: snapshots.get(job_id) or legacy_actors[user_id]

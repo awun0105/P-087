@@ -1,5 +1,6 @@
 """HTTP tests cho Studio upload → scene: fixture proof, không chạy worker/GPU."""
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1260,6 +1261,22 @@ async def test_uploads_and_scenes_show_who_did_what(
     }
     project_creator = historical_scene["project"]["created_by"]
     assert project_creator == {"user_id": creator.user_id, "display_name": "Bình", "role": "reviewer"}
+
+    # Bản ghi cũ chưa có snapshot role: phản hồi điền role hiện tại của đúng tài khoản; dữ liệu đã lưu không đổi.
+    with RuntimeDatabase(studio.settings.database_url).transaction(write=True) as tx:
+        row = tx.execute("SELECT project_id, payload FROM r2s_projects").fetchone()
+        stored = json.loads(row[1])
+        stored["created_by"].pop("role", None)
+        tx.execute("UPDATE r2s_projects SET payload=? WHERE project_id=?", (json.dumps(stored), row[0]))
+    legacy_scene = (await client.get("/api/v1/scenes")).json()["scenes"][0]
+    assert legacy_scene["project"]["created_by"] == {
+        "user_id": creator.user_id,
+        "display_name": "Bình",
+        "role": "editor",
+    }
+    with RuntimeDatabase(studio.settings.database_url).transaction() as tx:
+        unchanged = json.loads(tx.execute("SELECT payload FROM r2s_projects").fetchone()[0])
+    assert "role" not in unchanged["created_by"]
 
 
 @pytest.mark.asyncio

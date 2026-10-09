@@ -102,8 +102,14 @@ class AuthService:
         return UserRecord.model_validate_json(row[0]) if row else None
 
     def actors(self) -> dict[str, Actor]:
-        """Tên hiện tại cho ID legacy; không gán role hiện tại thành historical snapshot."""
-        return {user.user_id: Actor(user_id=user.user_id, display_name=user.display_name) for user in self.list_users()}
+        """Tên và role hiện tại theo ID, để điền vào bản ghi cũ không có snapshot.
+
+        Chỉ dùng khi dựng phản hồi (`with_current_role`); không bao giờ ghi vào bản ghi đã lưu.
+        """
+        return {
+            user.user_id: Actor(user_id=user.user_id, display_name=user.display_name, role=user.role)
+            for user in self.list_users()
+        }
 
     def list_users(self) -> list[UserRecord]:
         """Mọi tài khoản, cũ nhất trước."""

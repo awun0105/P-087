@@ -21,7 +21,7 @@ from src.api.studio import deps
 from src.api.studio.error_view import filter_job_progress_errors, filter_manifest_errors
 from src.models.contracts.manifests import JobManifest, JobStatus
 from src.services.orchestration.artifacts import ArtifactStoreError
-from src.services.orchestration.auth import Actor, UserRecord, actor_of
+from src.services.orchestration.auth import Actor, UserRecord, actor_of, with_current_role
 from src.services.orchestration.auth.quota_ledger import GuestQuotaExceededError, GuestQuotaIdempotencyConflictError
 from src.services.orchestration.jobs.admission import job_reservation, resource_wait
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
@@ -255,11 +255,16 @@ def list_scenes(user: UserRecord | None = Depends(require_contributor)) -> Scene
         processing_seconds(load_usages(registry.persistence.database)) if registry.persistence is not None else {}
     )
     requesters = job_requesters(registry.persistence.database) if registry.persistence is not None else {}
-    actors = auth_service().actors() if requesters else {}
+    projects = registry.list_projects()
+    # Tra tài khoản chỉ khi có bản ghi cần điền role hiện tại (snapshot cũ không có role) hoặc người yêu cầu cũ.
+    needs_directory = bool(requesters) or any(
+        project.created_by is not None and project.created_by.role is None for project in projects
+    )
+    actors = auth_service().actors() if needs_directory else {}
     requester_actors = (
         job_requester_actors(registry.persistence.database, actors) if requesters and registry.persistence else {}
     )
-    for project in registry.list_projects():
+    for project in projects:
         if project.input_manifest_ref is None:
             continue
         jobs = registry.list_jobs(project.project_id)
@@ -277,11 +282,13 @@ def list_scenes(user: UserRecord | None = Depends(require_contributor)) -> Scene
             )
         scenes.append(
             SceneSummary(
-                project=schemas.project_response(project),
+                project=schemas.project_response(project).model_copy(
+                    update={"created_by": with_current_role(project.created_by, actors)}
+                ),
                 latest_job=latest,
                 preview_ready=latest is not None and deps.preview_ready(registry, latest.job_id),
                 processing_seconds=None if latest is None else measured.get(latest.job_id),
-                requested_by=None if latest is None else requester_actors.get(latest.job_id),
+                requested_by=None if latest is None else with_current_role(requester_actors.get(latest.job_id), actors),
                 capabilities=SceneCapabilities(can_delete_project=can_delete_project),
             )
         )

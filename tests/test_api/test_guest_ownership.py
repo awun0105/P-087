@@ -452,7 +452,7 @@ async def test_import_list_returns_capability_for_guest_owner_and_higher_roles(
 
 
 @pytest.mark.asyncio
-async def test_import_list_resolves_legacy_creator_name_without_inventing_role(
+async def test_import_list_fills_legacy_creator_name_and_current_role_without_overriding_snapshots(
     client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     now = datetime.now(UTC)
@@ -515,11 +515,13 @@ async def test_import_list_resolves_legacy_creator_name_without_inventing_role(
     listed = {item["import_id"]: item for item in response.json()["imports"]}
     legacy = listed["import-legacy"]
     assert legacy["created_by_name"] == "Current name"
-    assert legacy.get("created_by_role") is None
+    # Bản ghi cũ không có snapshot: phản hồi điền role hiện tại của đúng tài khoản.
+    assert legacy["created_by_role"] == "reviewer"
     assert legacy["capabilities"]["can_delete"] is False
     assert listed["import-snapshot"]["created_by_name"] == "Name at import"
     assert listed["import-snapshot"]["created_by_role"] == "guest"
     assert listed["import-deleted-user"].get("created_by_name") is None
+    assert listed["import-deleted-user"].get("created_by_role") is None
     assert actor_calls == 1
 
 

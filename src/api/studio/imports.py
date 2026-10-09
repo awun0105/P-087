@@ -53,9 +53,11 @@ class ImportListResponse(BaseModel):
 
 
 def _legacy_creator_names(records: list[ImportedScene]) -> dict[str, Actor]:
-    """Batch-resolve current names for legacy rows without inventing a role snapshot."""
+    """Batch-resolve current name and role for rows whose stored snapshot lacks them (response only, never stored)."""
     user_ids = {
-        record.created_by for record in records if record.created_by is not None and record.created_by_name is None
+        record.created_by
+        for record in records
+        if record.created_by is not None and (record.created_by_name is None or record.created_by_role is None)
     }
     if not user_ids:
         return {}
@@ -64,13 +66,17 @@ def _legacy_creator_names(records: list[ImportedScene]) -> dict[str, Actor]:
 
 
 def _with_legacy_creator_name(record: ImportedScene, actors: dict[str, Actor]) -> ImportedScene:
-    if record.created_by_name is not None or record.created_by is None:
+    if record.created_by is None or (record.created_by_name is not None and record.created_by_role is not None):
         return record
     actor = actors.get(record.created_by)
     if actor is None:
         return record
     payload = record.model_dump(mode="python")
-    payload["created_by_name"] = actor.display_name
+    # Snapshot đã lưu thắng; chỉ điền phần còn thiếu từ tài khoản hiện tại.
+    if record.created_by_name is None:
+        payload["created_by_name"] = actor.display_name
+    if record.created_by_role is None and actor.role is not None:
+        payload["created_by_role"] = actor.role
     return ImportedScene.model_validate(payload)
 
 

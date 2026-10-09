@@ -33,7 +33,7 @@ Creator attribution: immutable owner/creator user_id và name/role snapshot tạ
 requested_by là actor của run, khác creator. Role hiện tại từ server dùng authorization.
 `Actor.role` và `ImportedScene.created_by_role` optional cho records cũ, bị loại khỏi
 serialization khi thiếu; không rewrite artifact/checksum bất biến.
-Legacy thiếu role hiển thị chưa xác định; không giả historical role từ current role.
+Legacy thiếu role: phản hồi API điền role hiện tại của đúng tài khoản (owner 2026-10-09, mục cuối Result); dữ liệu đã lưu không bao giờ bị ghi role suy ra.
 Hai seed: Reviewer tên “Minh An”, Editor tên “Hà Linh”. Apply qua migration/setup
 được định danh bằng stable ID/role, không rename mọi Reviewer/Editor. Nếu không tìm
 đúng hai seed thì báo blocker, không chọn account bất kỳ; giữ email, ID, password,
@@ -173,3 +173,10 @@ mock hoặc source review không chứng minh feature đã chạy.
 - Graphify: `graphify update .` completed; 20,964 nodes, 61,903 edges, 709 communities. The generated `graphify-out/` files remain uncommitted.
 - Browser gate: **UNVERIFIED**. Chrome DevTools returned no available browsers or tabs in this session, so the updated legacy-import badge was not inspected live.
 - Limitation: legacy imports still have no immutable creation-time name/role snapshot. The API uses the current name as a compatibility display fallback and leaves historical role unknown; exact seed IDs and migration receipt remain pending.
+
+### Quyết định owner 2026-10-09 — điền role hiện tại cho bản ghi cũ
+
+- **Thay đổi so với S1–S3a:** bản ghi cũ không có snapshot role (project, lượt chạy, import) không còn hiện "Vai trò chưa xác định" nếu tài khoản vẫn tồn tại. `AuthService.actors()` trả role hiện tại và `with_current_role` (`auth/models.py`) điền vào **phản hồi** `GET /scenes` (`project.created_by`, `requested_by`) và các phản hồi import (`created_by_role`).
+- **Giữ nguyên:** snapshot đã lưu luôn thắng (đổi role sau này không làm đổi bản ghi có snapshot); không ghi gì ngược vào project/job/import; tài khoản đã bị xoá vẫn unknown nên UI vẫn có nhãn "Vai trò chưa xác định" cho trường hợp đó.
+- **Hạn chế:** với bản ghi cũ, role hiển thị là role *hiện tại*, có thể khác role lúc tạo nếu tài khoản từng đổi role. Đây là hiển thị tiện lợi, không phải bằng chứng lịch sử.
+- **Tests:** `test_actor_role_is_snapshotted_and_legacy_actor_gets_the_current_role_only_in_responses`; `test_studio_routes.py` (bản ghi cũ được điền role hiện tại, bản lưu không đổi, snapshot thắng khi role đổi).

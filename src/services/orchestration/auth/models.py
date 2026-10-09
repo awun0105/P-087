@@ -63,13 +63,25 @@ class Actor(BaseModel):
 
     user_id: str
     display_name: DisplayName
-    #: Historical records without a role remain unknown; never infer it from today's account role.
+    #: Snapshot lúc thao tác. Bản ghi cũ không có thì để trống trong dữ liệu đã lưu; chỉ phản hồi API mới điền
+    #: role hiện tại của đúng tài khoản đó (`with_current_role`), không bao giờ ghi ngược vào bản ghi.
     role: Role | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 def actor_of(user: "UserRecord | None") -> Actor | None:
     """Actor của tài khoản đang đăng nhập; None khi deployment không bật đăng nhập (không biết ai thao tác)."""
     return None if user is None else Actor(user_id=user.user_id, display_name=user.display_name, role=user.role)
+
+
+def with_current_role(actor: Actor | None, directory: dict[str, Actor]) -> Actor | None:
+    """Actor kèm role hiện tại của tài khoản khi snapshot cũ không có role.
+
+    Snapshot đã lưu luôn thắng. Tài khoản không còn trong `directory` thì giữ nguyên (role vẫn unknown).
+    """
+    if actor is None or actor.role is not None:
+        return actor
+    current = directory.get(actor.user_id)
+    return actor if current is None or current.role is None else actor.model_copy(update={"role": current.role})
 
 
 class PublicUser(BaseModel):
