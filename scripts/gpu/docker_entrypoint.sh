@@ -30,6 +30,8 @@ fi
 
 # Chỉ đặt giá trị mặc định: mọi biến người vận hành đã cấp đều được giữ nguyên.
 export APP_ENV="${APP_ENV:-production}"
+# Production không được chạy mở: Settings từ chối khởi động nếu thiếu biến này (stack mode cần tài khoản Reviewer đầu tiên).
+export AUTH_REQUIRED="${AUTH_REQUIRED:-true}"
 export LLM_PROVIDER="${LLM_PROVIDER:-openai}"
 export OPENAI_API_KEY="${OPENAI_API_KEY:-not-used-by-studio}"
 export DATABASE_URL="${DATABASE_URL:-sqlite:///$STATE/runtime.db}"
