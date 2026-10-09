@@ -6,7 +6,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ReviewPanel } from "@/features/studio/ReviewPanel";
 import type { Me } from "@/lib/api/auth";
 
-const auth = vi.hoisted(() => ({ me: { auth_required: false, user: null } as Me }));
+const reviewer: NonNullable<Me["user"]> = {
+  user_id: "reviewer-1",
+  email: "reviewer@example.com",
+  display_name: "Reviewer",
+  role: "reviewer",
+  active: true,
+  daily_job_quota: 10,
+};
+const auth = vi.hoisted(() => ({ me: { auth_required: true, user: null } as Me }));
 vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => auth }));
 
 const CANDIDATE = "sha256:" + "c".repeat(64);
@@ -44,7 +52,7 @@ describe("ReviewPanel", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     global.fetch = vi.fn();
-    auth.me = { auth_required: false, user: null };
+    auth.me = { auth_required: true, user: reviewer };
   });
 
   it("hiển thị trạng thái tải trong khi API chưa trả review state", async () => {
@@ -115,6 +123,15 @@ describe("ReviewPanel", () => {
     render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" />);
     expect(await screen.findByText("Legacy report không được tin cậy")).toBeInTheDocument();
     expect(screen.getByText(/chỉ dùng để xem thông tin/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Phê duyệt để phát hành" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Yêu cầu sửa" })).toBeNull();
+  });
+
+  it("tắt đăng nhập: không hiện nút duyệt và giải thích cần bật đăng nhập Reviewer", async () => {
+    auth.me = { auth_required: false, user: null };
+    vi.mocked(global.fetch).mockResolvedValueOnce(reply(state("READY_FOR_REVIEW")));
+    render(<ReviewPanel jobId="job-1" sceneRevision="rev-004" />);
+    expect(await screen.findByText(/chưa bật đăng nhập nên không thể duyệt/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Phê duyệt để phát hành" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Yêu cầu sửa" })).toBeNull();
   });

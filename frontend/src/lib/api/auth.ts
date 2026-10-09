@@ -104,6 +104,14 @@ export function resourceCapabilityAllowed(me: Me | null, serverAllowed?: boolean
   return canEdit(me) && me?.user?.role !== "guest";
 }
 
+/**
+ * Quyết định duyệt/phát hành luôn cần phiên Reviewer, kể cả khi deployment tắt đăng nhập
+ * (backend `_reviewer()` trả 401 khi không có phiên); khác `isReviewer` dùng cho các route quản trị.
+ */
+export function canDecideReview(me: Me | null): boolean {
+  return me?.user?.role === "reviewer";
+}
+
 export function isReviewer(me: Me | null): boolean {
   return me !== null && (!me.auth_required || me.user?.role === "reviewer");
 }

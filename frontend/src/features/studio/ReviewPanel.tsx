@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import { Badge, Button, Notice, buttonVariants } from "@/components/studio/primitives";
 import { TraceList } from "@/features/studio/TraceList";
 import { useAuth } from "@/features/studio/AuthProvider";
-import { isReviewer } from "@/lib/api/auth";
+import { canDecideReview } from "@/lib/api/auth";
 import {
   getReviewState,
   releaseDownloadUrl,
@@ -100,7 +100,7 @@ export function ReviewPanel({ jobId, sceneRevision, refreshToken = 0, onState }:
   if (record.scene_revision !== sceneRevision) {
     return <Notice tone="ochre" className="m-4">Trạng thái duyệt đang thuộc {record.scene_revision}; scene hiện tại là {sceneRevision}. Tải lại scene trước khi quyết định.</Notice>;
   }
-  const reviewer = isReviewer(me);
+  const reviewer = canDecideReview(me);
   const status = STATUS_LABEL[record.status];
   const trustedValidation =
     state.isaac_runtime_proof === true &&
@@ -151,7 +151,13 @@ export function ReviewPanel({ jobId, sceneRevision, refreshToken = 0, onState }:
       {record.status === "READY_FOR_REVIEW" && !canReview && state.blockers.length === 0 && (
         <Notice tone="rust">Backend chưa cung cấp eligibility hợp lệ cho revision này. Tải lại trạng thái trước khi quyết định.</Notice>
       )}
-      {canReview && !reviewer && <Notice tone="ochre">Chỉ Reviewer có quyền phê duyệt hoặc yêu cầu sửa. Bạn có thể xem báo cáo và bằng chứng của revision này.</Notice>}
+      {canReview && !reviewer && (
+        <Notice tone="ochre">
+          {me?.auth_required === false
+            ? "Deployment chưa bật đăng nhập nên không thể duyệt. Đặt AUTH_REQUIRED=true và đăng nhập bằng tài khoản Reviewer để duyệt hoặc yêu cầu sửa."
+            : "Chỉ Reviewer có quyền phê duyệt hoặc yêu cầu sửa. Bạn có thể xem báo cáo và bằng chứng của revision này."}
+        </Notice>
+      )}
       {canReview && reviewer && (
         <div className="space-y-2">
           {state.warning_ids.length > 0 && (
