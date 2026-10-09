@@ -284,3 +284,19 @@ describe("Tổng quan và thư viện riêng", () => {
     expect(cancelled).not.toHaveTextContent("Đang nén");
   });
 });
+
+describe("trạng thái scene chờ xem bản đã che", () => {
+  it("được tính là cần xử lý, không active, và ưu tiên hơn trạng thái worker", async () => {
+    const { sceneStatus } = await import("@/features/studio/sceneStatus");
+    const job = scene("job-r", "RUNNING").latest_job!;
+    expect(sceneStatus(job, false, true)).toMatchObject({ label: "Cần xem bản đã che", group: "action", active: false });
+    expect(sceneStatus(job, false, false)).toMatchObject({ group: "running", active: true });
+  });
+
+  it("nút tạo scene không nháy ra lúc chưa biết người dùng là ai", () => {
+    auth.me = null;
+    render(<OverviewPage />);
+    expect(screen.queryByRole("link", { name: /Thử với mẫu/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Tạo scene mới/ })).toBeNull();
+  });
+});

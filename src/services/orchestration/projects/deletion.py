@@ -38,7 +38,7 @@ from src.models.contracts.manifests import JobManifest, JobStatus, StageId
 from src.services.orchestration.artifacts import ArtifactResolver, ArtifactStoreError
 from src.services.orchestration.auth.models import AuditEntry
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError, RuntimeTransaction
-from src.services.orchestration.jobs.progress import metric_confirmation_stage
+from src.services.orchestration.jobs.progress import awaiting_anonymization_review, metric_confirmation_stage
 from src.services.orchestration.scene.heads import PendingScenePublication
 from src.services.orchestration.storage import runtime_resolver
 from src.services.orchestration.uploads.models import UploadRecord
@@ -258,6 +258,8 @@ def _tree_size(paths: list[Path]) -> int:
 
 def _busy_reason(job: JobManifest) -> str | None:
     """Job còn có thể được worker đụng tới thì chưa gỡ được; job chờ người dùng xác nhận tỉ lệ thì đã dừng."""
+    if awaiting_anonymization_review(job):
+        return "job đang chờ bạn xem bản đã che; huỷ job trước khi gỡ"
     if job.status == JobStatus.QUEUED:
         return "job đang chờ worker (QUEUED); huỷ job trước khi gỡ"
     if job.status == JobStatus.RUNNING:

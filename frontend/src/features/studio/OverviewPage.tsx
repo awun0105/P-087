@@ -28,14 +28,16 @@ export function OverviewPage() {
             Xem việc đang làm và bắt đầu một scene mới. Bản xem 3D chưa phải scene sẵn sàng mô phỏng: còn phải xác nhận tỉ lệ, chọn vật thể và kiểm tra.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {signedIn ? (
-            <Link href="/new" className={buttonVariants({ size: "lg" })}>Tạo scene mới <ArrowRight aria-hidden /></Link>
-          ) : (
-            <Link href="/new/try-demo" className={buttonVariants({ size: "lg" })}>Thử với mẫu <ArrowRight aria-hidden /></Link>
-          )}
-          <Link href="/scenes" className={buttonVariants({ size: "lg", variant: "secondary" })}>Tất cả scene</Link>
-        </div>
+        {me !== null && (
+          <div className="flex flex-wrap gap-2">
+            {signedIn ? (
+              <Link href="/new" className={buttonVariants({ size: "lg" })}>Tạo scene mới <ArrowRight aria-hidden /></Link>
+            ) : (
+              <Link href="/new/try-demo" className={buttonVariants({ size: "lg" })}>Thử với mẫu <ArrowRight aria-hidden /></Link>
+            )}
+            <Link href="/scenes" className={buttonVariants({ size: "lg", variant: "secondary" })}>Tất cả scene</Link>
+          </div>
+        )}
       </header>
 
       <section aria-labelledby="summary-heading">
@@ -86,7 +88,7 @@ function WorkSummary() {
       {scenes && scenes.length === 0 && <p className="text-sm text-ink-muted">Chưa có scene nào. Chọn “Tạo scene mới” để dựng từ video hoặc mở file 3DGS.</p>}
       {waiting.length > 0 && <Card className="p-5">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="font-bold">Cần bạn xử lý</h3>
+          <h3 className="font-bold">Scene đang chờ bạn</h3>
           <Link href="/scenes?filter=needs_action" className="text-sm font-medium text-ember-strong hover:underline">Xem tất cả</Link>
         </div>
         <ul className="mt-3 divide-y divide-line">{waiting.slice(0, 5).map((scene) => {

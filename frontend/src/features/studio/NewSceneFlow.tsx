@@ -182,8 +182,8 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
         {!source && (
           <div className="space-y-4">
             <SourceCard primary icon={<Film aria-hidden />} title={SOURCE_TITLES.video.title} detail={SOURCE_TITLES.video.description} href={SOURCE_ROUTES.video} />
-            <p className="label-tech pt-2 text-ink-muted">Không dựng mới</p>
-            <div className="grid gap-4 md:grid-cols-2">
+            <p id="no-build-label" className="label-tech pt-2 text-ink-muted">Không dựng mới</p>
+            <div role="group" aria-labelledby="no-build-label" className="grid gap-4 md:grid-cols-2">
               <SourceCard icon={<Box aria-hidden />} title={SOURCE_TITLES.gaussian.title} detail={SOURCE_TITLES.gaussian.description} href={SOURCE_ROUTES.gaussian} />
               <SourceCard icon={<Clapperboard aria-hidden />} title={SOURCE_TITLES.sample.title} detail={SOURCE_TITLES.sample.description} href={SOURCE_ROUTES.sample} />
             </div>

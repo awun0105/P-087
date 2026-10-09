@@ -41,7 +41,7 @@ export function usePageTitle(title: string | null): void {
 /** Ba trang bắt đầu dưới `/new` (features/studio/NewSceneFlow.tsx `SOURCE_ROUTES`). */
 const NEW_SCENE_PAGES: Record<string, string> = {
   "/new/import-video": "Dựng từ video",
-  "/new/import-scene": "Mở scene 3DGS",
+  "/new/import-scene": "Mở 3DGS có sẵn",
   "/new/try-demo": "Thử mẫu",
 };
 
