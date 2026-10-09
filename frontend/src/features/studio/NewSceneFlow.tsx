@@ -1,6 +1,7 @@
 "use client";
 
 import { errorMessage } from "@/lib/ui-error";
+import { GAUSSIAN_EDIT_ENABLED } from "@/features/studio/scene/state";
 
 import { ArrowLeft, ArrowRight, Box, Clapperboard, Film, Loader2, LogIn } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
@@ -31,7 +32,7 @@ export const SOURCE_ROUTES: Record<Source, string> = {
 };
 const SOURCE_TITLES: Record<Source, { title: string; description: string }> = {
   video: { title: "Dựng từ video", description: "Tải video, khai báo dữ liệu rồi bắt đầu job tái dựng." },
-  gaussian: { title: "Mở scene 3DGS", description: "Tải file PLY/SOG/ZIP đã có để xem, chỉnh Gaussian và xuất file." },
+  gaussian: { title: "Mở scene 3DGS", description: GAUSSIAN_EDIT_ENABLED ? "Tải file PLY/SOG/ZIP đã có để xem, chỉnh Gaussian và xuất file." : "Tải file PLY/SOG/ZIP đã có để xem." },
   sample: { title: "Thử mẫu", description: "Xem kết quả đã xử lý sẵn; không chạy job mới." },
 };
 const VIDEO_STEPS = [{ key: "video", label: "Chọn video" }, { key: "settings", label: "Khai báo & tạo job" }];
@@ -181,7 +182,7 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
         {!source && (
           <div className="grid gap-4 md:grid-cols-3">
             <SourceCard icon={<Film aria-hidden />} title="Dựng từ video" detail="MP4/MOV → job tái dựng → scene hệ mét" href={SOURCE_ROUTES.video} />
-            <SourceCard icon={<Box aria-hidden />} title="Mở 3DGS" detail="PLY/SOG/ZIP → xem, chỉnh Gaussian và xuất file" href={SOURCE_ROUTES.gaussian} />
+            <SourceCard icon={<Box aria-hidden />} title="Mở 3DGS" detail={GAUSSIAN_EDIT_ENABLED ? "PLY/SOG/ZIP → xem, chỉnh Gaussian và xuất file" : "PLY/SOG/ZIP → xem scene"} href={SOURCE_ROUTES.gaussian} />
             <SourceCard icon={<Clapperboard aria-hidden />} title="Thử mẫu" detail="Xem kết quả đã xử lý sẵn, không chạy job mới" href={SOURCE_ROUTES.sample} />
           </div>
         )}

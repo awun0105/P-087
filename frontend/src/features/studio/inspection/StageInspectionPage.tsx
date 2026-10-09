@@ -1,6 +1,7 @@
 "use client";
 
 import { errorMessage } from "@/lib/ui-error";
+import { GAUSSIAN_EDIT_ENABLED } from "@/features/studio/scene/state";
 
 import { ArrowLeft, Download, Info, Loader2 } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -127,7 +128,7 @@ export function StageInspectionPage({ jobId, stageId }: { jobId: string; stageId
                   <StageMetrics jobId={jobId} groupId={meta.id} />
                   <h2 className="mt-6 font-bold">Đầu ra của giai đoạn</h2>
                   <p className="mt-2 text-sm leading-relaxed text-ink-muted">{meta.description}</p>
-                  <p className="mt-3 text-xs text-ink-muted">Artifact đã publish là bất biến. Chỉnh Gaussian xuất file riêng; chỉnh vật thể tạo SceneIR revision mới.</p>
+                  <p className="mt-3 text-xs text-ink-muted">Artifact đã publish là bất biến. {GAUSSIAN_EDIT_ENABLED ? "Chỉnh Gaussian xuất file riêng; chỉnh" : "Chỉnh"} vật thể tạo SceneIR revision mới.</p>
                   <p className="mt-3 text-xs text-ink-muted">Hoàn tất: {snapshot.progress.stages.find((stage) => stage.stage_id === meta.id)?.completed_at ? new Date(snapshot.progress.stages.find((stage) => stage.stage_id === meta.id)!.completed_at!).toLocaleString("vi-VN") : "Không có mốc thời gian"}</p>
                   <ul className="mt-4 space-y-4">{snapshot.artifacts.map((ref) => <li key={`${ref.artifact_uri}:${ref.artifact_checksum}`} className="space-y-1 border-t border-line pt-3"><p className="text-sm font-medium">{ref.artifact_type}</p><p className="break-all font-mono text-[10px] text-ink-subtle">{ref.artifact_checksum}</p><a href={jobArtifactContentUrl(jobId, ref)} download className="inline-flex items-center gap-1 text-sm text-ember-strong hover:underline"><Download className="size-4" aria-hidden /> Tải artifact</a></li>)}</ul>
                   {!snapshot.artifacts.length && <p className="mt-4 text-sm text-ink-muted">API chưa cung cấp artifact tải riêng cho bước này.</p>}

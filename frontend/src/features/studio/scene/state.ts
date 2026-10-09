@@ -6,6 +6,12 @@ import type { JobProgress } from "@/lib/contracts/studio";
 export type Tab = "progress" | "studio" | "review" | "results";
 export type StudioMode = "scene" | "metric" | "gaussian";
 
+/**
+ * Chỉnh Gaussian (editor SuperSplat nhúng) tạm ẩn ở mọi nơi theo owner 2026-10-09: vào không dùng được và làm trang
+ * rất lag. Đặt lại `true` để mở lại nút, đường dẫn `?mode=gaussian` và các câu mô tả liên quan.
+ */
+export const GAUSSIAN_EDIT_ENABLED = false;
+
 export interface SceneInfo {
   name: string;
   videoName: string | null;

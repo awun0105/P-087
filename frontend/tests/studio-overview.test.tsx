@@ -264,7 +264,9 @@ describe("Tổng quan và thư viện riêng", () => {
     const waiting = screen.getByRole("link", { name: /PLY waiting/ });
     const cancelled = screen.getByRole("link", { name: /PLY cancelled/ });
     expect(sog).toHaveTextContent("SOG");
-    expect(sog).toHaveTextContent("Mở xem/chỉnh");
+    // Chỉnh Gaussian đang tạm ẩn: scene import chỉ mời xem.
+    expect(sog).toHaveTextContent("Mở xem");
+    expect(sog).not.toHaveTextContent("chỉnh");
     expect(waiting).toHaveTextContent("PLY");
     expect(waiting).toHaveTextContent("Đang chờ tài nguyên");
     expect(cancelled).toHaveTextContent("Đã hủy");

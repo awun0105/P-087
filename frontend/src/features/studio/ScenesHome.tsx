@@ -1,6 +1,7 @@
 "use client";
 
 import { errorMessage } from "@/lib/ui-error";
+import { GAUSSIAN_EDIT_ENABLED } from "@/features/studio/scene/state";
 
 import { ArrowRight, Film, LayoutGrid, List, LogIn, RefreshCw, Search } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
@@ -245,7 +246,7 @@ export function ScenesHome() {
       {signedIn && imports.length > 0 && (
         <section aria-labelledby="imports-heading" className="mt-10">
           <h2 id="imports-heading" className="label-tech mb-4 text-ink-muted">
-            Scene import · chỉ xem/chỉnh Gaussian
+            {GAUSSIAN_EDIT_ENABLED ? "Scene import · chỉ xem/chỉnh Gaussian" : "Scene import · chỉ xem"}
           </h2>
           <ul className={view === "list" ? "space-y-2" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-3"}>
             {importPage.items.map((item) => {
@@ -253,7 +254,7 @@ export function ScenesHome() {
                 ? "SOG"
                 : item.input_kind === "gaussian_ply_colmap" ? "PLY + COLMAP" : "PLY";
               const statusLabel = item.status === "READY"
-                ? "Mở xem/chỉnh"
+                ? (GAUSSIAN_EDIT_ENABLED ? "Mở xem/chỉnh" : "Mở xem")
                 : item.status === "FAILED"
                   ? "Lỗi"
                   : item.status === "CANCELLED"

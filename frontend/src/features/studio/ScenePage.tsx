@@ -14,7 +14,7 @@ import type { SaveState } from "@/features/studio/ObjectReviewView";
 import { GeometryBadge, MetricBadge, ModeButton, SaveStatus } from "@/features/studio/scene/badges";
 import { DemoControls } from "@/features/studio/scene/DemoControls";
 import { SceneTabs, type SceneTabItem } from "@/features/studio/scene/SceneTabs";
-import { metricState, stageState, type Preview, type SceneInfo, type StudioMode, type Tab } from "@/features/studio/scene/state";
+import { GAUSSIAN_EDIT_ENABLED, metricState, stageState, type Preview, type SceneInfo, type StudioMode, type Tab } from "@/features/studio/scene/state";
 import { progressSceneStatus } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
 import { getJob, getPreview, getProject, jobArtifactContentUrl } from "@/lib/api/endpoints";
@@ -83,7 +83,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
     && (progress?.status === "RUNNING" || progress?.status === "QUEUED")
     && progress.waiting_for !== "metric_confirmation";
   const requestedMode = params.get("mode");
-  const mode: StudioMode = requestedMode === "metric" || requestedMode === "gaussian" ? requestedMode : "scene";
+  const mode: StudioMode = requestedMode === "metric" || (requestedMode === "gaussian" && GAUSSIAN_EDIT_ENABLED) ? requestedMode : "scene";
   const [save, setSave] = useState<SaveState | null>(null);
   const metricScope = jobId + ":" + progress?.attempt + ":" + preview?.url;
   const [measurement, setMeasurement] = useState<{ scope: string; draft: MetricDraft } | null>(null);
@@ -345,9 +345,11 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
                   Tỉ lệ mét
                 </ModeButton>
               )}
-              <ModeButton active={studioMode === "gaussian"} onClick={() => setMode("gaussian")}>
-                <Pencil aria-hidden /> Chỉnh Gaussian
-              </ModeButton>
+              {GAUSSIAN_EDIT_ENABLED && (
+                <ModeButton active={studioMode === "gaussian"} onClick={() => setMode("gaussian")}>
+                  <Pencil aria-hidden /> Chỉnh Gaussian
+                </ModeButton>
+              )}
             </div>
           ) : <p className="text-xs text-ink-muted">Quyền chỉ xem</p>}
         </div>
@@ -363,6 +365,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
             busy={busy}
             canCancel={canCancelJob}
             canAccept={canMutateJob}
+            onConfirmMetric={canMutateJob && preview ? () => openTab("studio", "metric") : undefined}
             onChanged={() => setPollingKey((k) => k + 1)}
             onCancel={() => {
               if (window.confirm("Huỷ xử lý scene này? Tiến trình trên GPU sẽ dừng.")) void act(() => cancelJob(jobId), "Đã gửi yêu cầu huỷ. Trạng thái được cập nhật từ máy chủ.");
@@ -397,7 +400,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
         )}
         {current === "review" && <ReviewTab jobId={jobId} canMutateJob={canMutateJob} onSaveState={setSave} />}
         {current === "results" && preview && <ResultsTab jobId={jobId} preview={preview} revision={save?.revision ?? null}
-          onOpenGaussian={canMutateJob ? () => openTab("studio", "gaussian") : undefined}
+          onOpenGaussian={GAUSSIAN_EDIT_ENABLED && canMutateJob ? () => openTab("studio", "gaussian") : undefined}
           onOpenReview={sceneReady ? () => openTab("review") : undefined}
         />}
       </div>

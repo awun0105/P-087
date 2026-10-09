@@ -1,6 +1,7 @@
 "use client";
 
 import { errorMessage } from "@/lib/ui-error";
+import { GAUSSIAN_EDIT_ENABLED } from "@/features/studio/scene/state";
 
 import { ArrowRight, Box, Clapperboard, Film, Layers3, ShieldCheck, Trash2, Workflow } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
@@ -67,7 +68,7 @@ export function OverviewPage() {
         <h2 id="sources-heading" className="text-xl font-bold tracking-tight">Chọn điểm bắt đầu phù hợp</h2>
         <div className="mt-5 grid gap-4 md:grid-cols-3">
           <SourceInfo icon={<Film aria-hidden />} title="Dựng từ video" kind="MP4 / MOV">Video RGB tạo job tái dựng. Xác nhận tỉ lệ và chuẩn bị vật thể trước khi tạo gói mô phỏng.</SourceInfo>
-          <SourceInfo icon={<Box aria-hidden />} title="Mở 3DGS có sẵn" kind="PLY / ZIP">Xem và chỉnh Gaussian, xuất PLY/SOG. Nhánh import không có pipeline hệ mét, collision hoặc review/release.</SourceInfo>
+          <SourceInfo icon={<Box aria-hidden />} title="Mở 3DGS có sẵn" kind="PLY / ZIP">{GAUSSIAN_EDIT_ENABLED ? "Xem và chỉnh Gaussian, xuất PLY/SOG." : "Xem scene 3DGS có sẵn."} Nhánh import không có pipeline hệ mét, collision hoặc review/release.</SourceInfo>
           <SourceInfo icon={<Clapperboard aria-hidden />} title="Khám phá bằng mẫu" kind="Đã xử lý sẵn">Xem replay và kết quả của mẫu có sẵn. Không tạo job reconstruction mới.</SourceInfo>
         </div>
       </section>
