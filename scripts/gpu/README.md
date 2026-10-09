@@ -142,6 +142,9 @@ set -a; source scripts/gpu/studio.env; set +a
 tar -C /opt/real2sim/state/demo/library -czf aisle_cw_demo.tgz aisle-cw
 ```
 
+Có thể bỏ qua bước nén: Reviewer mở scene trên Studio và bấm **Đặt làm bản demo** để xuất thẳng vào thư viện,
+và `--stage-assets assets.json` ghép thêm ảnh/số đo theo bước (xem `docs/DEMO_SCENES.md`).
+
 Mang `aisle_cw_demo.tgz` về máy demo, giải nén vào thư mục thư viện
 (`PRODUCT_DEMO_DIR`, mặc định `data/demo/library`). Mỗi thư mục con là một video
 mẫu (id = tên thư mục) hiện ở bước "Tải video lên" của Scene mới. Bundle tự kiểm

@@ -336,7 +336,7 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
       <div className="flex flex-1 flex-col p-5">
         <h3 className="flex items-center gap-2 truncate text-base font-bold text-ink">
           <span className="truncate">{scene.project.name}</span>
-          {scene.project.demo_baseline && <Badge tone="ember" className="shrink-0">Bản demo</Badge>}
+          {scene.project.demo_baseline && <Badge tone="neutral" className="shrink-0" title="Scene có mốc gốc để khôi phục">Có mốc gốc</Badge>}
         </h3>
         <p className="mt-1 truncate text-sm text-ink-muted">
           {scene.project.input_video
