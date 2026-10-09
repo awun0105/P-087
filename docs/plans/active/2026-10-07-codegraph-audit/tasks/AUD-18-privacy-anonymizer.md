@@ -168,14 +168,17 @@ and consumer proof; synthetic zero findings không chứng minh anonymity.
   `test_anonymize_option_is_offered_and_recorded_only_with_a_configured_anonymizer`; `tests/test_api` và
   `tests/test_orchestration` (978 test) pass.
 
-### Quyết định của owner (2026-10-09): job không dừng chờ reviewer
+### Quyết định của owner (2026-10-09): job chọn che dừng chờ reviewer duyệt trước khi dựng 3D
 
-- Job chọn che chạy thẳng từ frame đã che sang dựng 3D; không có trạng thái chờ duyệt giữa bước che và COLMAP.
-- Điều này thay thế câu trong contract của S3 "only chosen approved derived copy drives frame/pose/train":
-  bản dùng để train là bản che tự động, chưa qua người duyệt.
-- Hệ quả phải giữ: privacy report của job vẫn là `PRELIMINARY_SCREENED`; `VERIFIED_ANONYMIZED` chỉ có sau khi
-  reviewer xem bằng chứng che và chấp nhận. Nếu reviewer thấy vùng bị sót thì 3DGS đã train trên frame chứa
-  vùng đó, nên cách sửa là che thêm rồi dựng lại, không phải sửa trên scene đã có.
-- S3 vì vậy thu về: màn hình xem bằng chứng che trong bước duyệt scene hiện có, ghi nhận chấp nhận của
-  reviewer qua cổng privacy sẵn có, và hành động "che thêm rồi dựng lại" khi có sót.
+Owner ban đầu chọn "không chờ", rồi đổi lại trong cùng ngày sau khi thấy hệ quả (bản train chưa có người
+kiểm, sửa sót phải dựng lại). Quyết định có hiệu lực:
+
+- Job chọn che dừng sau bước che frame, ở trạng thái chờ duyệt. COLMAP và Brush chỉ chạy sau khi reviewer
+  chấp nhận đúng bản đã che (theo checksum). Đây là contract gốc của S3, giữ nguyên.
+- Reviewer thấy sót thì che thêm rồi duyệt lại trước khi dựng 3D, nên không phải dựng lại scene.
+- Sau khi reviewer chấp nhận, privacy report của job được nâng lên `VERIFIED_ANONYMIZED` qua cổng privacy sẵn
+  có (`PrivacyInspectionEvidence` với `approved_copy_checksum`).
+- Job không chọn che không đổi: vẫn chạy thẳng theo chế độ tự cam kết.
+- Code hiện tại (đến commit `ef9b081`) chưa có trạng thái chờ này: job chọn che đang chạy thẳng sang dựng 3D.
+  Đây là việc phải làm tiếp ở S3.
 
