@@ -233,13 +233,23 @@ class ServerVideoPreparationVerifier:
         return values()
 
     @staticmethod
+    def _faster_than_cap(span_ticks: int, intervals: int, time_base: PositiveRational) -> bool:
+        """True khi `intervals` khoảng liên tiếp trải trên `span_ticks` nhanh hơn 30 FPS.
+
+        Làm tròn timestamp về tick chỉ rút ngắn một quãng tối đa dưới một tick, nên quãng hợp lệ luôn dài hơn
+        `intervals/30 s − 1 tick`. So sánh bằng số nguyên: phép so số thực cũ cho qua đúng trường hợp biên, vd.
+        60 FPS trên time base 1/60.
+        """
+        return (span_ticks + 1) * time_base.numerator * 30 <= intervals * time_base.denominator
+
+    @classmethod
     def _checked_rows(
-        stream: BinaryIO, actual_pts: Iterator[int], manifest: ClientVideoPreparationManifest
+        cls, stream: BinaryIO, actual_pts: Iterator[int], manifest: ClientVideoPreparationManifest
     ) -> Iterator[VideoFrameBinding]:
+        first_pts: int | None = None
         previous_pts: int | None = None
+        intervals = 0
         time_base = manifest.prepared_video.time_base
-        min_interval = 1 / 30
-        tick_tolerance = time_base.numerator / time_base.denominator
         for line in stream:
             if len(line) > 2048 or not line.endswith(b"\n"):
                 raise VideoPreparationVerificationError("Video frame-map rows must be bounded newline-terminated JSON")
@@ -247,11 +257,16 @@ class ServerVideoPreparationVerifier:
             pts = next(actual_pts, None)
             if pts is None or row.output_pts != pts:
                 raise VideoPreparationVerificationError("Frame-map output PTS differs from the server-decoded video")
-            if (
-                previous_pts is not None
-                and (pts - previous_pts) * time_base.numerator / time_base.denominator < min_interval - tick_tolerance
-            ):
-                raise VideoPreparationVerificationError("Prepared video exceeds the 30 FPS profile limit")
+            if previous_pts is not None:
+                intervals += 1
+                # Từng quãng, rồi cả đoạn từ frame đầu: time base thô (vd. 1/45) cho từng quãng lọt qua dung sai
+                # một tick, nhưng tốc độ trung bình thì không.
+                if cls._faster_than_cap(pts - previous_pts, 1, time_base) or (
+                    first_pts is not None and cls._faster_than_cap(pts - first_pts, intervals, time_base)
+                ):
+                    raise VideoPreparationVerificationError("Prepared video exceeds the 30 FPS profile limit")
+            else:
+                first_pts = pts
             previous_pts = pts
             yield row
 
