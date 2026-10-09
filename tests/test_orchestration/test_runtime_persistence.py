@@ -35,6 +35,29 @@ def test_restart_retains_jobs_and_retry_history(tmp_path: Path) -> None:
     assert len(second.list_jobs(job.project_id)) == 2
 
 
+def test_journal_rows_beyond_the_committed_job_version_are_not_part_of_the_history(tmp_path: Path) -> None:
+    from src.services.orchestration.jobs.progress import job_progress
+
+    registry = registry_at(tmp_path)
+    registry.seed_from_fixtures()
+    job = registry.create_job(JobCreateInput(project_id="project-fixture-001"))
+    registry.transition_job(job.job_id, TransitionRequest(target_status=JobStatus.RUNNING))
+    failed = registry.transition_job(job.job_id, TransitionRequest(target_status=JobStatus.FAILED))
+    committed = registry.list_job_attempts(job.job_id)
+    # Một hàng QUEUED của "lượt 2" nằm trong journal nhưng hàng job vẫn ở lượt 1 FAILED (không transaction nào của
+    # sản phẩm tạo ra được trạng thái này; đã gặp ở DB local sau một lần chèn tay).
+    stray = committed[-1].model_copy(update={"attempt": 2, "status": JobStatus.QUEUED, "error": None})
+    with registry.persistence.database.transaction(write=True) as tx:
+        tx.execute(
+            "INSERT INTO r2s_job_events(job_id,version,payload) VALUES (?,?,?)",
+            (job.job_id, len(committed) + 1, stray.model_dump_json()),
+        )
+
+    assert registry.list_job_attempts(job.job_id) == committed
+    progress = job_progress(failed, registry.list_job_attempts(job.job_id), preview_ready=False)
+    assert progress.attempt == 1 and progress.status == JobStatus.FAILED
+
+
 def test_stale_writer_cannot_replace_committed_job(tmp_path: Path) -> None:
     registry = registry_at(tmp_path)
     registry.seed_from_fixtures()

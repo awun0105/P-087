@@ -678,10 +678,17 @@ class ProjectPersistence:
         return [row[0] for row in rows]
 
     def list_attempts(self, job_id: str) -> list[JobAttemptRecord]:
-        """Event journal nối thêm; restart không đánh số attempt lại từ một."""
+        """Event journal nối thêm; restart không đánh số attempt lại từ một.
+
+        Chỉ đọc event tới version đã commit của job. Event và hàng job luôn được ghi trong cùng một transaction, nên
+        event có version lớn hơn không phải trạng thái đã commit (vd. hàng chèn tay); tính nó vào sẽ làm tiến trình
+        hiện một lượt chạy không tồn tại.
+        """
         self.get_job(job_id)
         with self.database.transaction() as tx:
             rows = tx.execute(
-                "SELECT payload FROM r2s_job_events WHERE job_id=? ORDER BY version", (job_id,)
+                "SELECT e.payload FROM r2s_job_events e JOIN r2s_jobs j ON j.job_id=e.job_id "
+                "WHERE e.job_id=? AND e.version<=j.version ORDER BY e.version",
+                (job_id,),
             ).fetchall()
         return [JobAttemptRecord.model_validate_json(row[0]) for row in rows]
