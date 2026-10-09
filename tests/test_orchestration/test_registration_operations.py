@@ -169,7 +169,7 @@ def test_enqueue_is_idempotent_and_rejects_key_reuse_for_other_request(tmp_path:
         store.enqueue(_request("registration-request-2"), "request-key-1")
 
 
-def test_legacy_operation_payload_without_cancel_field_keeps_its_checksum(tmp_path: Path) -> None:
+def test_legacy_operation_payload_without_additive_fields_keeps_its_checksum(tmp_path: Path) -> None:
     database, store = _store(tmp_path)
     request = _request()
     store.enqueue(request, "request-key-1")
@@ -181,6 +181,7 @@ def test_legacy_operation_payload_without_cancel_field_keeps_its_checksum(tmp_pa
         assert row is not None
         payload = json.loads(row[0])
         assert payload.pop("cancellation_requested") is False
+        assert payload.pop("resource_wait_reason") is None
         tx.execute(
             "UPDATE r2s_registration_operations SET payload=? WHERE operation_id=?",
             (json.dumps(payload), request.request_id),
@@ -203,6 +204,208 @@ def test_queued_registration_cancellation_is_terminal_and_idempotent(tmp_path: P
     assert cancelled.state == replay.state == RegistrationOperationState.CANCELLED
     assert cancelled.operation_checksum == replay.operation_checksum
     assert store.claim_next("worker-a", lease_seconds=60, now=now + timedelta(seconds=2)) is None
+
+
+def test_resource_wait_releases_lease_and_can_be_claimed_again(tmp_path: Path) -> None:
+    _, store = _store(tmp_path)
+    request = _request()
+    store.enqueue(request, "request-key-1")
+    now = datetime(2026, 10, 9, tzinfo=UTC)
+    claimed = store.claim_next("worker-a", lease_seconds=30, now=now)
+    assert claimed is not None and claimed.lease_token is not None
+
+    waiting = store.wait_for_resources(
+        claimed.operation_id,
+        lease_token=claimed.lease_token,
+        fencing_token=claimed.fencing_token,
+        reason="RAM: busy",
+        now=now + timedelta(seconds=1),
+    )
+
+    assert waiting.state == RegistrationOperationState.WAITING_RESOURCES
+    assert waiting.resource_wait_reason == "RAM: busy"
+    assert waiting.worker_id is waiting.lease_token is waiting.lease_expires_at is waiting.heartbeat_at is None
+    assert waiting.attempt == claimed.attempt
+    with pytest.raises(RegistrationOperationLeaseLostError):
+        store.finish(
+            claimed.operation_id,
+            lease_token=claimed.lease_token,
+            fencing_token=claimed.fencing_token,
+            state=RegistrationOperationState.FAILED,
+            error="stale worker",
+            now=now + timedelta(seconds=2),
+        )
+
+    resumed = store.claim_next("worker-b", lease_seconds=30, now=now + timedelta(seconds=3))
+
+    assert resumed is not None and resumed.operation_id == claimed.operation_id
+    assert resumed.state == RegistrationOperationState.RUNNING
+    assert resumed.lease_token != claimed.lease_token
+    assert resumed.fencing_token == claimed.fencing_token + 1
+    assert resumed.attempt == claimed.attempt + 1
+    assert resumed.resource_wait_reason is None
+
+
+def test_resource_wait_reason_is_required_only_in_the_waiting_state(tmp_path: Path) -> None:
+    _, store = _store(tmp_path)
+    request = _request()
+    store.enqueue(request, "request-key-1")
+    claimed = store.claim_next("worker-a", lease_seconds=30)
+    assert claimed is not None
+
+    running_payload = claimed.model_dump(mode="python")
+    running_payload["resource_wait_reason"] = "RAM: busy"
+    with pytest.raises(ValidationError, match="only valid while waiting for resources"):
+        RegistrationOperationRecord.model_validate(running_payload)
+
+    waiting_payload = claimed.model_dump(mode="python")
+    waiting_payload.update(
+        state=RegistrationOperationState.WAITING_RESOURCES,
+        worker_id=None,
+        lease_token=None,
+        lease_expires_at=None,
+        heartbeat_at=None,
+    )
+    with pytest.raises(ValidationError, match="requires a wait reason"):
+        RegistrationOperationRecord.model_validate(waiting_payload)
+
+
+def test_resource_wait_reason_must_be_nonempty_and_bounded(tmp_path: Path) -> None:
+    _, store = _store(tmp_path)
+    request = _request()
+    store.enqueue(request, "request-key-1")
+    claimed = store.claim_next("worker-a", lease_seconds=30)
+    assert claimed is not None and claimed.lease_token is not None
+
+    for reason in ("  ", "x" * 501):
+        with pytest.raises(ValueError, match="resource wait reason"):
+            store.wait_for_resources(
+                claimed.operation_id,
+                lease_token=claimed.lease_token,
+                fencing_token=claimed.fencing_token,
+                reason=reason,
+            )
+
+    assert store.get(claimed.operation_id).state == RegistrationOperationState.RUNNING
+
+
+def test_resource_wait_reason_is_checksum_bound(tmp_path: Path) -> None:
+    database, store = _store(tmp_path)
+    request = _request()
+    store.enqueue(request, "request-key-1")
+    now = datetime(2026, 10, 9, tzinfo=UTC)
+    claimed = store.claim_next("worker-a", lease_seconds=30, now=now)
+    assert claimed is not None and claimed.lease_token is not None
+    store.wait_for_resources(
+        claimed.operation_id,
+        lease_token=claimed.lease_token,
+        fencing_token=claimed.fencing_token,
+        reason="RAM: busy",
+        now=now + timedelta(seconds=1),
+    )
+
+    with database.transaction(write=True) as tx:
+        row = tx.execute(
+            "SELECT payload FROM r2s_registration_operations WHERE operation_id=?", (request.request_id,)
+        ).fetchone()
+        assert row is not None
+        payload = json.loads(row[0])
+        payload["resource_wait_reason"] = "RAM: available"
+        tx.execute(
+            "UPDATE r2s_registration_operations SET payload=? WHERE operation_id=?",
+            (json.dumps(payload), request.request_id),
+        )
+
+    with pytest.raises(RuntimeStateConflictError, match="checksum mismatch"):
+        store.get(request.request_id)
+
+
+def test_waiting_resource_registration_can_be_cancelled_without_claim(tmp_path: Path) -> None:
+    _, store = _store(tmp_path)
+    request = _request()
+    store.enqueue(request, "request-key-1")
+    now = datetime(2026, 10, 9, tzinfo=UTC)
+    claimed = store.claim_next("worker-a", lease_seconds=30, now=now)
+    assert claimed is not None and claimed.lease_token is not None
+    waiting = store.wait_for_resources(
+        claimed.operation_id,
+        lease_token=claimed.lease_token,
+        fencing_token=claimed.fencing_token,
+        reason="disk: external",
+        now=now + timedelta(seconds=1),
+    )
+
+    cancelled = store.cancel(waiting.operation_id, now=now + timedelta(seconds=2))
+
+    assert cancelled.state == RegistrationOperationState.CANCELLED
+    assert cancelled.resource_wait_reason is None
+    assert store.cancel(waiting.operation_id, now=now + timedelta(seconds=3)) == cancelled
+    assert store.claim_next("worker-b", lease_seconds=30, now=now + timedelta(seconds=4)) is None
+
+
+def test_running_cancel_is_acknowledged_if_worker_requeues_for_resources(tmp_path: Path) -> None:
+    _, store = _store(tmp_path)
+    request = _request()
+    store.enqueue(request, "request-key-1")
+    now = datetime(2026, 10, 9, tzinfo=UTC)
+    claimed = store.claim_next("worker-a", lease_seconds=30, now=now)
+    assert claimed is not None and claimed.lease_token is not None
+    requested = store.cancel(claimed.operation_id, now=now + timedelta(seconds=1))
+    assert requested.cancellation_requested is True
+
+    cancelled = store.wait_for_resources(
+        claimed.operation_id,
+        lease_token=claimed.lease_token,
+        fencing_token=claimed.fencing_token,
+        reason="RAM: busy",
+        now=now + timedelta(seconds=2),
+    )
+
+    assert cancelled.state == RegistrationOperationState.CANCELLED
+    assert cancelled.cancellation_requested is True
+    assert cancelled.resource_wait_reason is None
+    assert cancelled.lease_token is None
+
+
+def test_running_cancel_racing_resource_requeue_always_ends_cancelled(tmp_path: Path) -> None:
+    _, store = _store(tmp_path)
+    request = _request()
+    store.enqueue(request, "request-key-1")
+    now = datetime(2026, 10, 9, tzinfo=UTC)
+    claimed = store.claim_next("worker-a", lease_seconds=30, now=now)
+    assert claimed is not None and claimed.lease_token is not None
+    gate = Barrier(3)
+
+    def cancel() -> RegistrationOperationRecord:
+        gate.wait()
+        return store.cancel(claimed.operation_id, now=now + timedelta(seconds=1))
+
+    def wait() -> RegistrationOperationRecord:
+        gate.wait()
+        return store.wait_for_resources(
+            claimed.operation_id,
+            lease_token=claimed.lease_token or "",
+            fencing_token=claimed.fencing_token,
+            reason="RAM: busy",
+            now=now + timedelta(seconds=2),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        cancelled_future = workers.submit(cancel)
+        waiting_future = workers.submit(wait)
+        gate.wait()
+        cancel_result = cancelled_future.result()
+        wait_result = waiting_future.result()
+
+    final = store.get(claimed.operation_id)
+    assert final.state == RegistrationOperationState.CANCELLED
+    assert final.resource_wait_reason is None
+    if cancel_result.state == RegistrationOperationState.RUNNING:
+        assert cancel_result.cancellation_requested is True
+        assert wait_result.state == RegistrationOperationState.CANCELLED
+    else:
+        assert cancel_result.state == RegistrationOperationState.CANCELLED
+        assert wait_result.state == RegistrationOperationState.WAITING_RESOURCES
 
 
 def test_queued_cancel_racing_worker_claim_is_never_lost(tmp_path: Path) -> None:

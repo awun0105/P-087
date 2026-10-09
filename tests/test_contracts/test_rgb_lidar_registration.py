@@ -544,12 +544,18 @@ def test_reference_error_is_only_valid_for_held_out_or_evaluation_data() -> None
 
 def test_registration_state_machine_blocks_terminal_and_skipped_transitions() -> None:
     validate_registration_transition(RegistrationOperationState.REQUESTED, RegistrationOperationState.QUEUED)
+    validate_registration_transition(RegistrationOperationState.RUNNING, RegistrationOperationState.WAITING_RESOURCES)
+    validate_registration_transition(RegistrationOperationState.WAITING_RESOURCES, RegistrationOperationState.RUNNING)
     validate_registration_transition(RegistrationOperationState.CONFIRMED, RegistrationOperationState.COMMITTED)
 
     with pytest.raises(ValueError, match="invalid registration state transition"):
         validate_registration_transition(RegistrationOperationState.COMMITTED, RegistrationOperationState.RUNNING)
     with pytest.raises(ValueError, match="invalid registration state transition"):
         validate_registration_transition(RegistrationOperationState.REQUESTED, RegistrationOperationState.CONFIRMED)
+    with pytest.raises(ValueError, match="invalid registration state transition"):
+        validate_registration_transition(
+            RegistrationOperationState.WAITING_RESOURCES, RegistrationOperationState.PROPOSED
+        )
 
 
 def test_mutating_a_sealed_request_is_detected_before_preflight() -> None:

@@ -70,6 +70,7 @@ class RegistrationOperationRecord(BaseModel):
     qa_report_ref: ProductArtifactRef | None = None
     error: str | None = None
     cancellation_requested: bool = False
+    resource_wait_reason: str | None = Field(default=None, max_length=500)
 
     @model_validator(mode="after")
     def _bind_request_and_lease(self) -> "RegistrationOperationRecord":
@@ -108,6 +109,11 @@ class RegistrationOperationRecord(BaseModel):
             raise ValueError("proposal states require exact proposal and QA report references")
         if self.state == RegistrationOperationState.INSUFFICIENT and self.qa_report_ref is None:
             raise ValueError("insufficient registration state requires its QA report")
+        if self.state == RegistrationOperationState.WAITING_RESOURCES:
+            if not self.resource_wait_reason or not self.resource_wait_reason.strip():
+                raise ValueError("resource-waiting registration operation requires a wait reason")
+        elif self.resource_wait_reason is not None:
+            raise ValueError("resource wait reason is only valid while waiting for resources")
         if self.cancellation_requested and self.state not in {
             RegistrationOperationState.RUNNING,
             RegistrationOperationState.CANCELLED,
@@ -125,10 +131,12 @@ def _utc_now(value: datetime | None) -> datetime:
 
 
 def _operation_checksum(record: RegistrationOperationRecord) -> str:
-    """Keep schema-1.0 checksums stable while binding an asserted cancellation request."""
+    """Keep schema-1.0 checksums stable while binding non-default queue metadata."""
     payload = record.model_dump(mode="json")
     if payload.get("cancellation_requested") is False:
         payload.pop("cancellation_requested")
+    if payload.get("resource_wait_reason") is None:
+        payload.pop("resource_wait_reason")
     return canonical_content_checksum(payload, "operation_checksum")
 
 
@@ -308,9 +316,17 @@ class RegistrationOperationStore:
             record = self._read_by_id(tx, operation_id, lock=True)
             if record is None:
                 raise RegistrationOperationNotFoundError(f"registration operation not found: {operation_id}")
-            if record.state == RegistrationOperationState.QUEUED:
+            if record.state in {
+                RegistrationOperationState.QUEUED,
+                RegistrationOperationState.WAITING_RESOURCES,
+            }:
                 validate_registration_transition(record.state, RegistrationOperationState.CANCELLED)
-                cancelled = _replace_record(record, state=RegistrationOperationState.CANCELLED, updated_at=current)
+                cancelled = _replace_record(
+                    record,
+                    state=RegistrationOperationState.CANCELLED,
+                    resource_wait_reason=None,
+                    updated_at=current,
+                )
                 self._write(tx, record, cancelled)
                 return cancelled
             if record.state == RegistrationOperationState.RUNNING and not record.cancellation_requested:
@@ -318,6 +334,56 @@ class RegistrationOperationStore:
                 self._write(tx, record, requested)
                 return requested
             return record
+
+    def wait_for_resources(
+        self,
+        operation_id: str,
+        *,
+        lease_token: str,
+        fencing_token: int,
+        reason: str,
+        now: datetime | None = None,
+    ) -> RegistrationOperationRecord:
+        """Release a live claim back to the durable queue, or acknowledge a concurrent cancel."""
+        wait_reason = reason.strip()
+        if not wait_reason:
+            raise ValueError("resource wait reason must not be empty")
+        if len(wait_reason) > 500:
+            raise ValueError("resource wait reason exceeds 500 characters")
+        current = _utc_now(now)
+        with self.database.transaction(write=True) as tx:
+            record = self._read_by_id(tx, operation_id, lock=True)
+            if record is None:
+                raise RegistrationOperationNotFoundError(f"registration operation not found: {operation_id}")
+            self._require_lease(record, lease_token, fencing_token, current)
+            if record.cancellation_requested:
+                following = RegistrationOperationState.CANCELLED
+                validate_registration_transition(record.state, following)
+                waiting = _replace_record(
+                    record,
+                    state=following,
+                    worker_id=None,
+                    lease_token=None,
+                    lease_expires_at=None,
+                    heartbeat_at=None,
+                    resource_wait_reason=None,
+                    updated_at=current,
+                )
+            else:
+                following = RegistrationOperationState.WAITING_RESOURCES
+                validate_registration_transition(record.state, following)
+                waiting = _replace_record(
+                    record,
+                    state=following,
+                    worker_id=None,
+                    lease_token=None,
+                    lease_expires_at=None,
+                    heartbeat_at=None,
+                    resource_wait_reason=wait_reason,
+                    updated_at=current,
+                )
+            self._write(tx, record, waiting)
+            return waiting
 
     def claim_next(
         self, worker_id: str, *, lease_seconds: int, now: datetime | None = None
@@ -351,9 +417,9 @@ class RegistrationOperationStore:
                 )
                 self._write(tx, expired, failed)
             row = tx.execute(
-                f"SELECT {_COLUMNS} FROM r2s_registration_operations WHERE state=? "
+                f"SELECT {_COLUMNS} FROM r2s_registration_operations WHERE state IN (?,?) "
                 "ORDER BY created_at, operation_id LIMIT 1" + tx.lock_suffix(),
-                (RegistrationOperationState.QUEUED.value,),
+                (RegistrationOperationState.QUEUED.value, RegistrationOperationState.WAITING_RESOURCES.value),
             ).fetchone()
             if row is None:
                 return None
@@ -369,6 +435,8 @@ class RegistrationOperationStore:
                 lease_expires_at=current + timedelta(seconds=lease_seconds),
                 heartbeat_at=current,
                 updated_at=current,
+                error=None,
+                resource_wait_reason=None,
             )
             self._write(tx, queued, claimed)
             return claimed

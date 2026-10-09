@@ -734,10 +734,11 @@ process lifecycle are connected.
 - Limitations: SQLite exercised the durable queue; PostgreSQL locking, a real worker,
   process cancellation, resource release, API authorization, browser behavior,
   held-out map qualification and Isaac/collision safety remain **UNVERIFIED**.
-- Next: S4g must wire exact source/target resolution and the BEV/ICP/QA producer to
-  admitted worker execution, with bounded source-orientation hypotheses and
-  kill/reap-before-release semantics. It must not enable production `PASS` until
-  held-out S3 qualification exists.
+- Next: a worker slice must wire exact source/target resolution and bounded
+  orientation hypotheses through BEV/ICP/QA, honor
+  cancellation before publishing, and release reservations only after in-process
+  work has stopped. It must not enable production `PASS` until held-out S3
+  qualification exists.
 
 Pre-flight (GUIDE.md Rule 13)
 - codegraph: before-edit exploration read `RegistrationOperationStore`, its
@@ -754,3 +755,82 @@ Pre-flight (GUIDE.md Rule 13)
 - checks: 60 focused tests passed; full-repository Ruff check and format passed;
   `git diff --check` passed. CodeGraph sync and Graphify update passed.
 - DevTools: n/a — no rendered screen or exposed runtime path changed in S4f.
+
+### AUD-19.S4g — Durable resource wait and claim resumption
+
+**Input:** a `RUNNING` registration operation with a current lease when shared
+resource admission cannot yet reserve the requested resources.
+**Output:** either a checksum-bound `WAITING_RESOURCES` record with a bounded reason
+and no worker lease, or `CANCELLED` when cancellation intent won before requeue.
+**Contract:** waiting work relinquishes its lease and reservation owner can return to
+the worker loop. `claim_next` may claim `QUEUED` or `WAITING_RESOURCES`, then issues a
+new lease token and fencing generation. Cancellation of queued/waiting work is
+terminal and immediate. A running cancel racing a resource wait is acknowledged
+atomically by the wait operation. `attempt` counts claimed leases, including claims
+that return to resource wait; it is not an execution count. Additive default payload
+fields are omitted from the logical checksum when absent/default, preserving v18 and
+schema-1.0 records; no SQL migration is required.
+
+Implement: add `WAITING_RESOURCES` to the registration state machine; persist a
+500-character maximum `resource_wait_reason`; add a lease/fencing checked
+`wait_for_resources` transition; clear lease, heartbeat, wait reason and error at the
+appropriate terminal/reclaim boundaries; allow fresh claims from resource wait.
+Do not add resource measurements, start solver work, release reservations, dispatch
+workers or alter API/UI in this slice.
+
+Tests: state transition validity; legacy payload checksum with both additive fields
+absent; wait reason required only in the waiting state and checksum-bound; stale
+worker cannot publish after requeue; a new worker receives a fresh token/generation;
+waiting work can be cancelled without claim; running cancellation observed during
+requeue ends `CANCELLED`; and terminal/cancelled rows are never reclaimed.
+**Exit:** [x] resource waits release the lease durably and can resume with new fencing;
+[x] cancellation remains fail-closed across the wait boundary; [ ] worker/admission
+execution and resource release are connected.
+
+#### AUD-19.S4g Result / Evidence
+
+- Behavior before/after: registration operations could be queued, claimed or
+  completed, but had no durable resource-wait state. They can now relinquish a live
+  lease when admission waits, retain a sealed wait reason, and resume with a new
+  lease/fencing pair. A cancellation that wins before requeue becomes terminal
+  `CANCELLED`; cancelled/waiting work cannot be claimed accidentally.
+- Compatibility/state contract: the existing SQLite/PostgreSQL schema remains v18;
+  only operation payload/state changes. `resource_wait_reason` and the existing
+  cancellation flag default are omitted from the canonical checksum when absent or
+  default, preserving the previous schema-1.0 payload checksum. The attempt field
+  remains a claim counter; this store does not count actual solver executions.
+- Changed files: `rgb_lidar_registration.py`, `registration_operations.py`, their
+  focused contract/store tests, the audit README, AGENT_GUIDE, INTEGRATION_MAP and
+  this task record.
+- Verification: **101 passed** across state-machine, registration-operation and shared
+  admission tests. `.venv/bin/ruff check src/ tests/` passed;
+  `.venv/bin/ruff format --check src/ tests/` reported 566 files formatted;
+  `scripts.check_contract_mirror` passed (5 enums, 6 models); `git diff --check`
+  passed. CodeGraph is current at 904 files, 18,214 nodes and 54,229 edges.
+  Graphify updated to 21,295 nodes, 63,346 edges and 734 communities.
+- Limitations: no production worker or admission caller exists yet. PostgreSQL
+  concurrency, process cancellation, reservation release, API/browser behavior,
+  held-out map qualification and Isaac/collision safety remain **UNVERIFIED**.
+- Next: a worker integration slice must claim, resolve exact source/target bytes,
+  construct a conservative resource profile, and invoke BEV/ICP/QA only with a
+  bounded cancellation contract. Unknown source orientation remains multi-hypothesis
+  and ambiguous; no production `PASS` without held-out qualification.
+
+Pre-flight (GUIDE.md Rule 13)
+- codegraph: traced `RegistrationOperationState`, transition validation, store claim/
+  cancel/heartbeat/finish, shared `ResourceAdmission` wait behavior, and operation
+  store tests before editing.
+- impact: no schema migration, API, worker or UI path; the state literal and store
+  methods are local until later dispatch wiring. Existing registration terminal
+  results remain unchanged.
+- understand: waiting releases its lease so workers do not hold ownership while
+  blocked on shared admission; a later claim is fenced with a new token/generation.
+- minimal-code: reused the existing transaction lock, lease verifier, checksum and
+  transition helper; no scheduler, retry policy or resource estimator was added.
+- checks: focused pytest PASS (101 tests); `.venv/bin/ruff check src/ tests/` PASS;
+  `.venv/bin/ruff format --check src/ tests/` PASS (566 files);
+  `.venv/bin/python -m scripts.check_contract_mirror` PASS (5 enums, 6 models);
+  `git diff --check` PASS. CodeGraph is current (904 files, 18,214 nodes,
+  54,229 edges); Graphify update completed (21,295 nodes, 63,346 edges,
+  734 communities).
+- DevTools: n/a — no rendered screen or exposed runtime path changed in S4g.

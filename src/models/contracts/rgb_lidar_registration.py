@@ -35,6 +35,7 @@ class RegistrationOperationState(StrEnum):
     REQUESTED = "REQUESTED"
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"
+    WAITING_RESOURCES = "WAITING_RESOURCES"
     PROPOSED = "PROPOSED"
     AMBIGUOUS = "AMBIGUOUS"
     INSUFFICIENT = "INSUFFICIENT"
@@ -723,9 +724,17 @@ _ALLOWED_TRANSITIONS: dict[RegistrationOperationState, frozenset[RegistrationOpe
     ),
     RegistrationOperationState.RUNNING: frozenset(
         {
+            RegistrationOperationState.WAITING_RESOURCES,
             RegistrationOperationState.PROPOSED,
             RegistrationOperationState.AMBIGUOUS,
             RegistrationOperationState.INSUFFICIENT,
+            RegistrationOperationState.FAILED,
+            RegistrationOperationState.CANCELLED,
+        }
+    ),
+    RegistrationOperationState.WAITING_RESOURCES: frozenset(
+        {
+            RegistrationOperationState.RUNNING,
             RegistrationOperationState.FAILED,
             RegistrationOperationState.CANCELLED,
         }
