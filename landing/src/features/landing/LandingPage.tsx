@@ -30,9 +30,10 @@ export function LandingPage() {
   const { FOOTER, HERO, PROBLEM, PROGRESS, ROLES, SAMPLES, START, WORKFLOW, STATUS_LABEL } = content;
 
   return (
-    <main id="landing-top" className="landing-page">
+    <div id="landing-top" className="landing-page">
       <LandingAnchors />
       <LandingHeader tryDemoHref={TRY_DEMO_HREF} studioHref={LOGIN_HREF} />
+      <main>
 
       {/* ── HERO ── */}
       <section className="lp-hero">
@@ -229,6 +230,8 @@ export function LandingPage() {
         </div>
       </section>
 
+      </main>
+
       {/* ── FOOTER ── */}
       <footer className="border-t border-line py-10">
         <div className="lp-wrap flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
@@ -245,7 +248,7 @@ export function LandingPage() {
           </div>
         </div>
       </footer>
-    </main>
+    </div>
   );
 }
 

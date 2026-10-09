@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 
 /**
- * Điều hướng tới mục trong landing (`#product`, `#workflow`…) mà không tạo history entry mới.
+ * Điều hướng tới mục trong landing (`#problem`, `#workflow`…) mà không tạo history entry mới.
  *
  * Link `#…` thuần của trình duyệt tạo entry có `history.state = null`. App Router của Next bỏ qua `popstate`
  * không mang state của nó, nên sau khi sang app rồi bấm Back, địa chỉ đổi thành `/#workflow` nhưng màn hình vẫn
@@ -18,7 +18,13 @@ export function LandingAnchors() {
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       const link = event.target instanceof Element ? event.target.closest('a[href^="#"]') : null;
       if (!(link instanceof HTMLAnchorElement) || !link.closest(".landing-page")) return;
-      const target = document.getElementById(decodeURIComponent(link.hash.slice(1)));
+      let id = link.hash.slice(1);
+      try {
+        id = decodeURIComponent(id);
+      } catch {
+        // hash hỏng: dùng nguyên văn
+      }
+      const target = document.getElementById(id);
       if (!target) return;
       event.preventDefault();
       const reduced = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;

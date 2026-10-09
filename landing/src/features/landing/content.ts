@@ -242,7 +242,7 @@ export const CONTENT_VI = {
         items: [
           "Chạy kiểm tra trong NVIDIA Isaac Sim: va chạm và đường đi Start–Goal",
           "Dời, xoay vật trong scene; màn căn tỉ lệ cho video kết hợp LiDAR",
-          "Tách scene theo từng vật, vá phần nền bị che, xuất USD kết hợp",
+          "Dựng lại phần nền bị vật che khi gỡ vật, xuất USD kết hợp",
         ],
       },
       {
@@ -279,7 +279,7 @@ export const CONTENT_VI = {
 
 export const CONTENT_EN = {
   STATUS_LABEL: {
-    done: "Verified",
+    done: "Working",
     building: "In progress",
     later: "Later",
   } as Record<Status, string>,
@@ -496,7 +496,7 @@ export const CONTENT_EN = {
         items: [
           "Checks in NVIDIA Isaac Sim: collisions and Start–Goal paths",
           "Moving and rotating objects; scale screen for video plus LiDAR",
-          "Per-object scenes, inpainted background, hybrid USD export",
+          "Rebuild the background behind removed objects, hybrid USD export",
         ],
       },
       {
@@ -590,13 +590,7 @@ export function getUiLabels(lang: Language = "vi") {
   return lang === "en" ? UI_LABELS.en : UI_LABELS.vi;
 }
 
-// Giữ các export mặc định (tiếng Việt) để tương thích ngược hoàn toàn
+// Mặc định tiếng Việt cho các component nhận prop tuỳ chọn (HeroScene, CompareScene, StatusTag).
 export const STATUS_LABEL = CONTENT_VI.STATUS_LABEL;
-export const NAV = CONTENT_VI.NAV;
 export const HERO = CONTENT_VI.HERO;
 export const PROBLEM = CONTENT_VI.PROBLEM;
-export const WORKFLOW = CONTENT_VI.WORKFLOW;
-export const ROLES = CONTENT_VI.ROLES;
-export const PROGRESS = CONTENT_VI.PROGRESS;
-export const START = CONTENT_VI.START;
-export const FOOTER = CONTENT_VI.FOOTER;

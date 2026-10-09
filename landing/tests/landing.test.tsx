@@ -1,6 +1,6 @@
 /** Landing là trang đầu `/`: CTA vào app phải qua đăng nhập, mục trong trang không làm hỏng nút Back. */
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 
 import { CONTENT_EN, CONTENT_VI } from "@/features/landing/content";
 import { LandingPage } from "@/features/landing/LandingPage";
@@ -25,6 +25,18 @@ describe("landing → app", () => {
 });
 
 describe("cấu trúc trang", () => {
+  it("header và footer nằm ngoài <main> để giữ vai trò banner/contentinfo", () => {
+    render(<LandingPage />);
+    expect(screen.getByRole("banner")).toBeInTheDocument();
+    expect(screen.getByRole("contentinfo")).toBeInTheDocument();
+    expect(screen.getByRole("main")).toBeInTheDocument();
+  });
+
+  it("section Scene mẫu ẩn khi API không trả scene nào", () => {
+    const { container } = render(<LandingPage />);
+    expect(container.querySelector("#samples")).toBeNull();
+  });
+
   it("mỗi mục menu trỏ tới một section có thật", () => {
     const { container } = render(<LandingPage />);
     for (const { href } of CONTENT_VI.NAV) {
@@ -41,7 +53,7 @@ describe("cấu trúc trang", () => {
 
   it("bản Việt và bản Anh có cùng cấu trúc, không bên nào thiếu mục", () => {
     const shape = (v: unknown): unknown =>
-      Array.isArray(v) ? [v.length, v[0] === undefined ? null : shape(v[0])]
+      Array.isArray(v) ? [v.length, v.map(shape)]
       : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, shape(x)]))
       : typeof v;
     expect(shape(CONTENT_EN)).toEqual(shape(CONTENT_VI));
@@ -65,7 +77,9 @@ describe("mục trong landing không làm hỏng nút Back", () => {
     history.replaceState({ __NA: true, tree: "landing" }, "", "/");
     const before = history.length;
     const scrolled: string[] = [];
+    const original = Element.prototype.scrollIntoView;
     Element.prototype.scrollIntoView = function scrollIntoView() { scrolled.push(this.id); };
+    onTestFinished(() => { Element.prototype.scrollIntoView = original; });
     render(<LandingPage />);
 
     fireEvent.click(screen.getAllByRole("link", { name: "Quy trình" })[0]);
