@@ -10,14 +10,18 @@ import {
   cancelRegistrationOperation,
   enqueueRegistration,
   getRegistrationOperation,
+  getRegistrationOperationInspection,
   isRegistrationOperationActive,
   isRegistrationOperationPollable,
   parseRegistrationRequest,
   prepareRegistration,
   type RegistrationFinding,
+  type RegistrationOperationInspection,
   type RegistrationOperation,
   type RegistrationPreflight,
   type RegistrationRequestPayload,
+  type JsonObject,
+  type JsonValue,
 } from "@/lib/api/registration";
 import { usePolling } from "@/features/studio/usePolling";
 
@@ -122,6 +126,43 @@ function clearRegistration(key: string): void {
   }
 }
 
+function jsonObject(value: JsonValue | undefined): JsonObject | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
+}
+
+function vectorText(value: JsonValue | undefined, length: number): string | null {
+  if (!Array.isArray(value) || value.length !== length) return null;
+  const numbers: number[] = [];
+  for (const part of value) {
+    if (typeof part !== "number" || !Number.isFinite(part)) return null;
+    numbers.push(part);
+  }
+  return numbers.map((part) => part.toFixed(3)).join(", ");
+}
+
+function ratioText(value: JsonValue | undefined): string | null {
+  return typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : null;
+}
+
+function metersText(value: JsonValue | undefined): string | null {
+  return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(3)} m` : null;
+}
+
+function numberText(value: JsonValue | undefined): string | null {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(3) : null;
+}
+
+function integerText(value: JsonValue | undefined): string | null {
+  return typeof value === "number" && Number.isInteger(value) ? String(value) : null;
+}
+
+interface RegistrationInspectionState {
+  key: string;
+  loading: boolean;
+  data?: RegistrationOperationInspection;
+  error?: string;
+}
+
 export function RegistrationPanel({
   jobId,
   sceneRevision,
@@ -136,6 +177,7 @@ export function RegistrationPanel({
   const key = userId ? storageKey(jobId, userId) : null;
   const [session, setSession] = useState<RegistrationSession | null>(null);
   const [preflight, setPreflight] = useState<RegistrationPreflight | null>(null);
+  const [inspectionState, setInspectionState] = useState<RegistrationInspectionState>({ key: "", loading: false });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadedKey, setLoadedKey] = useState<string | null | undefined>(undefined);
@@ -225,6 +267,50 @@ export function RegistrationPanel({
   const operationPollable = operation === null || isRegistrationOperationPollable(operation.state);
   const pendingOperation = Boolean(operationId && operationPollable);
   usePolling(poll, 3000, Boolean(operationId && operationPollable), operationId);
+
+  const inspectionOutputKey = operation
+    ? JSON.stringify([operation.proposal_ref, operation.qa_report_ref])
+    : "";
+  const hasInspectionOutput = Boolean(operation && (operation.proposal_ref || operation.qa_report_ref));
+  const inspectionRequestKey = operationId && hasInspectionOutput
+    ? `${jobId}:${operationId}:${inspectionOutputKey}`
+    : "";
+  useEffect(() => {
+    if (!operationId || !inspectionRequestKey) return;
+    const controller = new AbortController();
+    let active = true;
+    void Promise.resolve().then(async () => {
+      if (!active) return;
+      setInspectionState({ key: inspectionRequestKey, loading: true });
+      try {
+        const result = await getRegistrationOperationInspection(jobId, operationId, controller.signal);
+        if (!active || controller.signal.aborted) return;
+        if (!result.ok) {
+          setInspectionState({
+            key: inspectionRequestKey,
+            loading: false,
+            error: errorMessage(result.error, "Không đọc được proposal và báo cáo QA."),
+          });
+        } else {
+          setInspectionState({ key: inspectionRequestKey, loading: false, data: result.data });
+        }
+      } catch (cause) {
+        if (active && !controller.signal.aborted) {
+          setInspectionState({
+            key: inspectionRequestKey,
+            loading: false,
+            error: errorMessage(cause, "Không đọc được proposal và báo cáo QA."),
+          });
+        }
+      }
+    });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [inspectionRequestKey, jobId, operationId]);
+  const currentInspectionState = inspectionState.key === inspectionRequestKey ? inspectionState : null;
+  const inspection = currentInspectionState?.data ?? null;
 
   async function prepare() {
     if (!key || !userId || !canMutateJob || busy) return;
@@ -328,6 +414,100 @@ export function RegistrationPanel({
             {stale && <p className="mt-2 text-sm">Kết quả này gắn với revision cũ và không thể áp dụng cho revision hiện tại.</p>}
           </Notice>
         </div>
+      )}
+      {operation && hasInspectionOutput && (
+        <section className="space-y-3 border-t border-line pt-3" aria-label="Chi tiết proposal và QA">
+          <h4 className="text-sm font-semibold">Chi tiết proposal và QA</h4>
+          {currentInspectionState?.loading && <p className="text-sm text-ink-muted" role="status">Đang kiểm tra artifact và checksum…</p>}
+          {currentInspectionState?.error && <div role="alert"><Notice tone="rust">{currentInspectionState.error}</Notice></div>}
+          {inspection && (
+            <div className="space-y-3">
+              {inspection.current_scene_revision === null ? (
+                <Notice tone="ochre">Không xác minh được revision scene hiện tại; chỉ xem kết quả đã lưu.</Notice>
+              ) : inspection.current_scene_revision !== inspection.expected_scene_revision ? (
+                <Notice tone="ochre">
+                  Proposal thuộc revision {inspection.expected_scene_revision}; scene hiện tại là {inspection.current_scene_revision}.
+                </Notice>
+              ) : null}
+              {inspection.proposal && (
+                <div className="space-y-2 rounded-lg border border-line bg-paper-sunken p-3">
+                  <p className="text-sm font-medium">Proposal: {String(inspection.proposal.state ?? "unknown")}</p>
+                  {Array.isArray(inspection.proposal.candidates) && inspection.proposal.candidates.map((value, index) => {
+                    const candidate = jsonObject(value);
+                    if (!candidate) return null;
+                    const transform = jsonObject(candidate.transform_target_from_source);
+                    const candidateId = typeof candidate.candidate_id === "string" ? candidate.candidate_id : `candidate-${index + 1}`;
+                    const parent = typeof transform?.parent_frame === "string" ? transform.parent_frame : "world";
+                    const local = typeof transform?.local_frame === "string" ? transform.local_frame : "LiDAR map";
+                    const rgbScaleFactor = numberText(candidate.rgb_scale_factor);
+                    return (
+                      <div key={candidateId} className="border-t border-line pt-2 text-sm">
+                        <p className="font-medium">{candidateId} · điểm xếp hạng {numberText(candidate.score) ?? "không có"}</p>
+                        <p className="text-ink-muted">Transform: T_{parent}_from_{local}</p>
+                        {transform && <p className="text-ink-muted">Dịch chuyển xyz (m): {vectorText(transform.translation_xyz, 3) ?? "không có"}</p>}
+                        {transform && <p className="text-ink-muted">Quaternion xyzw: {vectorText(transform.rotation_quaternion_xyzw, 4) ?? "không có"}</p>}
+                        {rgbScaleFactor !== null && <p className="text-ink-muted">Giả thuyết scale RGB: {rgbScaleFactor}×</p>}
+                      </div>
+                    );
+                  })}
+                  {Array.isArray(inspection.proposal.findings) && inspection.proposal.findings.length > 0 && (
+                    <ul className="list-disc pl-5 text-sm text-ink-muted">
+                      {inspection.proposal.findings.map((finding, index) => <li key={`${String(finding)}-${index}`}>{String(finding)}</li>)}
+                    </ul>
+                  )}
+                </div>
+              )}
+              {inspection.qa_report && (
+                <div className="space-y-2 rounded-lg border border-line bg-paper-sunken p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium">QA:</span>
+                    <Badge tone={inspection.qa_report.result === "PASS" ? "sage" : inspection.qa_report.result === "FAIL" ? "rust" : "ochre"}>
+                      {String(inspection.qa_report.result ?? "unknown")}
+                    </Badge>
+                  </div>
+                  <dl className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
+                    {([
+                      ["Độ phủ nguồn", ratioText(inspection.qa_report.source_coverage_ratio)],
+                      ["Độ phủ RGB", ratioText(inspection.qa_report.target_coverage_ratio)],
+                      ["Overlap", ratioText(inspection.qa_report.overlap_ratio)],
+                      ["P95 residual hai chiều", metersText(inspection.qa_report.bidirectional_p95_residual_m)],
+                      ["Chênh lệch sàn", metersText(inspection.qa_report.floor_difference_m)],
+                      ["Observable DOF", integerText(inspection.qa_report.observable_dof)],
+                      ["Candidate margin", ratioText(inspection.qa_report.candidate_margin)],
+                    ] as const).filter(([, value]) => value !== null).map(([label, value]) => (
+                      <div key={label} className="flex justify-between gap-2"><dt className="text-ink-muted">{label}</dt><dd>{value}</dd></div>
+                    ))}
+                  </dl>
+                  {Array.isArray(inspection.qa_report.regions) && inspection.qa_report.regions.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">Metric theo vùng</p>
+                      {inspection.qa_report.regions.map((value, index) => {
+                        const region = jsonObject(value);
+                        if (!region) return null;
+                        const regionId = typeof region.region_id === "string" ? region.region_id : `region-${index + 1}`;
+                        return (
+                          <p key={`${regionId}-${index}`} className="text-sm text-ink-muted">
+                            {regionId}: phủ nguồn {ratioText(region.source_coverage_ratio) ?? "—"}, phủ đích {ratioText(region.target_coverage_ratio) ?? "—"},
+                            {" "}{integerText(region.correspondence_count) ?? "—"} correspondence, P95 {metersText(region.p95_residual_m) ?? "—"}
+                          </p>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {Array.isArray(inspection.qa_report.findings) && inspection.qa_report.findings.length > 0 && (
+                    <ul className="list-disc pl-5 text-sm text-ink-muted">
+                      {inspection.qa_report.findings.map((finding, index) => {
+                        const code = typeof finding === "string" ? finding as RegistrationFinding : null;
+                        return <li key={`${String(finding)}-${index}`}>{code && FINDING_LABELS[code] ? FINDING_LABELS[code] : String(finding)}</li>;
+                      })}
+                    </ul>
+                  )}
+                </div>
+              )}
+              <p className="text-xs text-ink-muted">Thông tin này chỉ để kiểm tra. Chưa xác nhận hoặc áp dụng transform.</p>
+            </div>
+          )}
+        </section>
       )}
       {canMutateJob && userId && (
         <div className="flex flex-wrap gap-2">

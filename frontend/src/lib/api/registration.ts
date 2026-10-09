@@ -77,10 +77,20 @@ export interface RegistrationOperation {
   cancellation_requested: boolean;
 }
 
+export interface RegistrationOperationInspection extends JsonObject {
+  operation_id: string;
+  job_id: string;
+  expected_scene_revision: string;
+  current_scene_revision: string | null;
+  proposal: JsonObject | null;
+  qa_report: JsonObject | null;
+}
+
 const REGISTRATION_STATES = new Set<RegistrationOperationState>([
   "REQUESTED", "QUEUED", "RUNNING", "WAITING_RESOURCES", "PROPOSED", "AMBIGUOUS",
   "INSUFFICIENT", "FAILED", "REVIEWED", "CONFIRMED", "COMMITTED", "CANCELLED",
 ]);
+const CHECKSUM = /^sha256:[a-f0-9]{64}$/;
 const REGISTRATION_FINDINGS = new Set<RegistrationFinding>([
   "SOURCE_FORMAT_REQUIRED", "SOURCE_HEADER_REQUIRED", "SOURCE_UNITS_REQUIRED", "SOURCE_FRAME_REQUIRED",
   "SAME_SCENE_CONTEXT_MISSING", "DIFFERENT_SCENE", "EMPTY_CLOUD", "POINT_COUNT_UNAVAILABLE",
@@ -162,6 +172,45 @@ export function parseRegistrationOperation(value: unknown, jobId: string): Regis
   return value as unknown as RegistrationOperation;
 }
 
+function isBoundRegistrationOutput(
+  value: unknown,
+  artifactType: "RegistrationProposalArtifact" | "RegistrationQAReport",
+  jobId: string,
+  checksumField: "proposal_checksum" | "report_checksum",
+): value is JsonObject {
+  return isRecord(value)
+    && value.schema_version === "1.0"
+    && value.artifact_type === artifactType
+    && value.job_id === jobId
+    && typeof value[checksumField] === "string"
+    && CHECKSUM.test(value[checksumField] as string);
+}
+
+export function parseRegistrationOperationInspection(
+  value: unknown,
+  jobId: string,
+  operationId: string,
+): RegistrationOperationInspection {
+  if (!isRecord(value) || !isJsonValue(value)) throw new Error("inspection response phải là JSON object");
+  const proposal = value.proposal;
+  const qaReport = value.qa_report;
+  if (
+    value.operation_id !== operationId
+    || value.job_id !== jobId
+    || typeof value.expected_scene_revision !== "string"
+    || (value.current_scene_revision !== null && typeof value.current_scene_revision !== "string")
+    || (proposal !== null && !isBoundRegistrationOutput(proposal, "RegistrationProposalArtifact", jobId, "proposal_checksum"))
+    || (qaReport !== null && !isBoundRegistrationOutput(qaReport, "RegistrationQAReport", jobId, "report_checksum"))
+    || (proposal !== null && (proposal as JsonObject).target_scene_revision !== value.expected_scene_revision)
+    || (qaReport !== null && (qaReport as JsonObject).target_scene_revision !== value.expected_scene_revision)
+    || (qaReport !== null && proposal === null)
+    || (qaReport !== null && (qaReport as JsonObject).proposal_checksum !== (proposal as JsonObject | null)?.proposal_checksum)
+  ) {
+    throw new Error("inspection response không khớp operation, job hoặc scene revision");
+  }
+  return value as unknown as RegistrationOperationInspection;
+}
+
 function badResponse(cause: unknown): ApiError {
   return new ApiError(502, cause instanceof Error ? cause.message : "Registration API trả dữ liệu sai contract");
 }
@@ -210,6 +259,23 @@ export async function getRegistrationOperation(
   if (!result.ok) return result;
   try {
     return { ok: true, data: parseRegistrationOperation(result.data, jobId) };
+  } catch (cause) {
+    return { ok: false, error: badResponse(cause) };
+  }
+}
+
+export async function getRegistrationOperationInspection(
+  jobId: string,
+  operationId: string,
+  signal?: AbortSignal,
+): Promise<ApiResult<RegistrationOperationInspection>> {
+  const result = await fetchApi<unknown>(
+    `${registrationPath(jobId)}/operations/${encodeURIComponent(operationId)}/inspection`,
+    { signal },
+  );
+  if (!result.ok) return result;
+  try {
+    return { ok: true, data: parseRegistrationOperationInspection(result.data, jobId, operationId) };
   } catch (cause) {
     return { ok: false, error: badResponse(cause) };
   }

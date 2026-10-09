@@ -4,6 +4,7 @@ import {
   enqueueRegistration,
   isRegistrationOperationActive,
   isRegistrationOperationPollable,
+  parseRegistrationOperationInspection,
   parseRegistrationOperation,
   parseRegistrationPreparation,
   type RegistrationRequestPayload,
@@ -43,6 +44,40 @@ describe("RGB-LiDAR registration API parsers", () => {
     };
     expect(() => parseRegistrationOperation(operation, "job-1")).toThrow(/contract/);
     expect(() => parseRegistrationOperation({ ...operation, job_id: "job-1", state: "MYSTERY" }, "job-1")).toThrow(/contract/);
+  });
+
+  it("accepts bound stale inspection evidence but rejects cross-job and mismatched QA payloads", () => {
+    const proposalChecksum = `sha256:${"c".repeat(64)}`;
+    const inspection = {
+      operation_id: request.request_id,
+      job_id: "job-1",
+      expected_scene_revision: "rev-001",
+      current_scene_revision: "rev-002",
+      proposal: {
+        schema_version: "1.0",
+        artifact_type: "RegistrationProposalArtifact",
+        job_id: "job-1",
+        target_scene_revision: "rev-001",
+        proposal_checksum: proposalChecksum,
+      },
+      qa_report: {
+        schema_version: "1.0",
+        artifact_type: "RegistrationQAReport",
+        job_id: "job-1",
+        target_scene_revision: "rev-001",
+        proposal_checksum: proposalChecksum,
+        report_checksum: `sha256:${"d".repeat(64)}`,
+      },
+    };
+
+    expect(parseRegistrationOperationInspection(inspection, "job-1", request.request_id).current_scene_revision)
+      .toBe("rev-002");
+    expect(() => parseRegistrationOperationInspection({ ...inspection, job_id: "other-job" }, "job-1", request.request_id))
+      .toThrow(/operation, job/);
+    expect(() => parseRegistrationOperationInspection({
+      ...inspection,
+      qa_report: { ...inspection.qa_report, proposal_checksum: `sha256:${"e".repeat(64)}` },
+    }, "job-1", request.request_id)).toThrow(/operation, job/);
   });
 
   it("keeps watching proposal and review states but stops at terminal states", () => {

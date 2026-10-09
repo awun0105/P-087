@@ -1159,8 +1159,8 @@ the operation stale; no UI action may bypass backend authorization or revision c
 projection; add a focused panel to ReviewTab using existing Cards, Notices, Buttons and
 `usePolling`; translate finding codes into useful Vietnamese labels; show explicit
 read-only/unsupported/stale states. Keep the proposal and QA references as status-only
-in this slice; overlay, report inspection and confirmation belong to the next slice.
-No schema or worker changes.
+in this slice; read-only report inspection, overlay and confirmation are follow-up
+slices. No schema or worker changes.
 **Tests:** READY preparation enables enqueue; non-READY preflight never enqueues;
 request/job/actor/revision mismatches fail closed; same request retry reuses the same
 idempotency key; uncertain response recovery replays the cached request; status polling
@@ -1202,3 +1202,85 @@ cannot start or cancel; API parser rejects malformed status payloads.
   stopped at its existing missing-scene error before mounting this panel. Console
   showed only the resulting 404 resource failures; no registration request was sent.
   No job or scene data was created to bypass this missing fixture.
+
+### AUD-19.S4l — Read-only proposal and QA inspection
+
+**Input:** an authenticated contributor, a job-bound durable registration operation,
+and the proposal/QA artifact references recorded by that operation.
+**Output:** an inspection response and ReviewTab details showing candidate transforms,
+solver scores, observed QA metrics/findings, and whether the target scene revision is
+still current.
+**Data contract:** `GET .../operations/{operation_id}/inspection` returns only outputs
+whose refs match the job URI and ID, operation ID, sealed request checksum,
+`producer_stage=RGB_LIDAR_ALIGN`, and `data_class=DERIVED`. Resolve bytes through
+`ArtifactResolver`; verify artifact-byte checksums, canonical proposal/report checksums,
+and the exact request/proposal/report binding before returning either payload. A QA
+report may supply its own proposal ref when the operation record omits a proposal ref,
+but that ref must pass the same operation provenance and checksum checks. Include the
+expected and current scene revisions so the client can label stale results. No sealed
+request, worker lease/error, filesystem path or idempotency key is returned. This sprint
+does not draw a 3D overlay, confirm a candidate, publish an `AlignmentRecord`, or modify
+SceneIR, collision geometry or consumers.
+**Implement:** add a contributor-authenticated, job-bound read route; reuse the artifact
+resolver and registration binding validators; parse the response at the TypeScript API
+boundary; display each candidate's explicit `T_world_from_source` convention,
+translation/quaternion, solver ranking and optional RGB scale hypothesis, plus global and
+per-region QA metrics/findings and stale-revision status in the existing registration
+panel. Keep the content visible in read-only mode and expose no confirmation or apply
+control.
+**Tests:** contributor/auth requirement, job/operation binding, missing/corrupt bytes,
+operation provenance, producer stage, derived data class, job-scoped URI and exact
+request/report binding; QA-derived proposal ref; stale-current revision projection;
+frontend rejects mismatched job/revision/checksum; panel renders candidate, scale and
+regional QA values without offering confirmation; inspection fetch aborts on unmount.
+**Exit:** [x] exact proposal/report bytes are verified against the stored operation;
+[x] stale scene identity is exposed to the panel; [x] read-only inspection cannot
+change alignment or scene state; [ ] DevTools screen acceptance with an available
+committed scene fixture.
+
+### Result / Evidence — AUD-19.S4l
+
+- Implementation: added an authenticated operation inspection route. It resolves
+  checksum-bound proposal and QA artifacts, checks the job-scoped URI, alignment producer
+  stage, derived data class, and artifact provenance against the operation and request,
+  validates logical checksums and registration bindings, and returns the current scene
+  revision. The panel displays the explicit transform convention, ranked candidates,
+  transform values, an optional RGB scale hypothesis, global and per-region QA metrics,
+  findings and stale state without confirmation or apply actions. The QA report's
+  proposal reference is supported when the operation record contains only the report ref.
+- Changed files: `src/api/product/registration.py`,
+  `tests/test_api/test_registration_routes.py`,
+  `frontend/src/lib/api/registration.ts`,
+  `frontend/src/features/studio/scene/RegistrationPanel.tsx`,
+  `frontend/tests/registration-api.test.ts`,
+  `frontend/tests/registration-panel.test.tsx`, this task file, and the audit README.
+- Gate report: CodeGraph traced the registration route/store/contracts/artifact
+  resolver and panel callers in `ReviewTab`; Graphify was queried before edits and
+  updated after the code change. The route reuses `ArtifactResolver.load_model` and
+  existing content/binding validators. No worker, schema, SceneIR or collision
+  consumer changed.
+- Checks: `.venv/bin/pytest tests/test_api/test_registration_routes.py -q` **28 passed**;
+  focused Vitest **15 passed**; `npx tsc --noEmit`, changed-file ESLint,
+  repository-wide `ruff check src/ tests/`, repository-wide
+  `ruff format --check src/ tests/`, CodeGraph sync, Graphify update and
+  `git diff --check` passed.
+- DevTools: **UNVERIFIED**. Chrome DevTools showed an authenticated Reviewer session,
+  but the available completed scenes returned 404 from `/api/v1/jobs/{job_id}/scene`,
+  so `ReviewTab` did not mount the registration panel. No test job or scene data was
+  created to bypass the missing fixture.
+
+Pre-flight (GUIDE.md Rule 13)
+- codegraph: explored the registration route, operation record/store, proposal/QA
+  contracts and binding validators, artifact resolver, existing artifact-content
+  allow-list, ReviewTab panel callers and focused API/frontend tests.
+- impact: the new API route is consumed only by `RegistrationPanel`; that component is
+  mounted by `ReviewTab`. Existing operation status/cancel routes, worker outputs and
+  scene/collision consumers remain unchanged.
+- understand: this is the product inspection path from a durable operation to its
+  immutable proposal/report artifacts; those artifacts do not authorize alignment.
+- minimal-code: reuses `ArtifactResolver.load_model`, exact artifact refs, checksums,
+  registration binding validators, existing API client parsing and Studio primitives.
+- checks: API 28 passed; focused Vitest 15 passed; TypeScript, changed-file ESLint,
+  repository-wide Ruff lint/format, CodeGraph/Graphify updates and diff check passed.
+- DevTools: **UNVERIFIED** — the authenticated local jobs have no committed scene
+  available to render the ReviewTab panel.

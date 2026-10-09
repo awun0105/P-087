@@ -8,8 +8,10 @@ import {
   cancelRegistrationOperation,
   enqueueRegistration,
   getRegistrationOperation,
+  getRegistrationOperationInspection,
   prepareRegistration,
   type RegistrationOperation,
+  type RegistrationOperationInspection,
   type RegistrationPreparation,
   type RegistrationRequestPayload,
 } from "@/lib/api/registration";
@@ -26,6 +28,7 @@ vi.mock("@/lib/api/registration", async (original) => {
     cancelRegistrationOperation: vi.fn(),
     enqueueRegistration: vi.fn(),
     getRegistrationOperation: vi.fn(),
+    getRegistrationOperationInspection: vi.fn(),
     prepareRegistration: vi.fn(),
   };
 });
@@ -60,6 +63,55 @@ function operation(state: RegistrationOperation["state"], updates: Partial<Regis
   };
 }
 
+function inspection(): RegistrationOperationInspection {
+  const proposalChecksum = `sha256:${"c".repeat(64)}`;
+  return {
+    operation_id: request.request_id,
+    job_id: "job-1",
+    expected_scene_revision: "rev-001",
+    current_scene_revision: "rev-002",
+    proposal: {
+      schema_version: "1.0",
+      artifact_type: "RegistrationProposalArtifact",
+      job_id: "job-1",
+      target_scene_revision: "rev-001",
+      proposal_checksum: proposalChecksum,
+      state: "PROPOSED",
+      candidates: [{
+        candidate_id: "candidate-1",
+        score: 0.95,
+        rgb_scale_factor: 1.25,
+        transform_target_from_source: {
+          parent_frame: "world",
+          local_frame: "lidar-map",
+          translation_xyz: [1, 2, 0],
+          rotation_quaternion_xyzw: [0, 0, 0, 1],
+        },
+      }],
+    },
+    qa_report: {
+      schema_version: "1.0",
+      artifact_type: "RegistrationQAReport",
+      job_id: "job-1",
+      target_scene_revision: "rev-001",
+      proposal_checksum: proposalChecksum,
+      report_checksum: `sha256:${"d".repeat(64)}`,
+      result: "INCONCLUSIVE",
+      source_coverage_ratio: 0.85,
+      target_coverage_ratio: 0.75,
+      bidirectional_p95_residual_m: 0.02,
+      regions: [{
+        region_id: "aisle-1",
+        source_coverage_ratio: 0.8,
+        target_coverage_ratio: 0.7,
+        correspondence_count: 28,
+        p95_residual_m: 0.03,
+      }],
+      findings: ["UNQUALIFIED_PROFILE"],
+    },
+  };
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
   window.sessionStorage.clear();
@@ -74,8 +126,9 @@ describe("registration panel", () => {
     vi.mocked(prepareRegistration).mockResolvedValue(ready);
     vi.mocked(enqueueRegistration).mockResolvedValue(operation("QUEUED"));
     vi.mocked(getRegistrationOperation)
-      .mockResolvedValueOnce({ ok: true, data: operation("PROPOSED", { proposal_ref: { artifact_type: "RegistrationProposal" }, qa_report_ref: { artifact_type: "RegistrationQAReport" } }) })
-      .mockResolvedValue({ ok: true, data: operation("REVIEWED") });
+      .mockResolvedValueOnce({ ok: true, data: operation("PROPOSED", { proposal_ref: { artifact_type: "RegistrationProposalArtifact" }, qa_report_ref: { artifact_type: "RegistrationQAReport" } }) })
+      .mockResolvedValue({ ok: true, data: operation("REVIEWED", { proposal_ref: { artifact_type: "RegistrationProposalArtifact" }, qa_report_ref: { artifact_type: "RegistrationQAReport" } }) });
+    vi.mocked(getRegistrationOperationInspection).mockResolvedValue({ ok: true, data: inspection() });
 
     render(<RegistrationPanel jobId="job-1" sceneRevision="rev-001" canMutateJob />);
     fireEvent.click(screen.getByRole("button", { name: "Kiểm tra dữ liệu" }));
@@ -87,6 +140,15 @@ describe("registration panel", () => {
     expect(enqueueRegistration).toHaveBeenCalledWith("job-1", request);
     expect(screen.getByText(/chưa có transform nào được áp dụng/i)).toBeInTheDocument();
     expect(window.sessionStorage.getItem("real2sim:rgb-lidar-registration:v1:guest-1:job-1")).toContain(request.request_id);
+    expect(await screen.findByText("INCONCLUSIVE")).toBeInTheDocument();
+    expect(screen.getByText(/candidate-1.*điểm xếp hạng 0\.950/)).toBeInTheDocument();
+    expect(screen.getByText(/Transform: T_world_from_lidar-map/)).toBeInTheDocument();
+    expect(screen.getByText(/Giả thuyết scale RGB: 1\.250×/)).toBeInTheDocument();
+    expect(screen.getByText(/aisle-1: phủ nguồn 80\.0%, phủ đích 70\.0%,\s*28 correspondence, P95 0\.030 m/)).toBeInTheDocument();
+    expect(screen.getByText(/Dịch chuyển xyz \(m\): 1\.000, 2\.000, 0\.000/)).toBeInTheDocument();
+    expect(screen.getByText(/Proposal thuộc revision rev-001; scene hiện tại là rev-002/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /xác nhận|áp dụng/i })).not.toBeInTheDocument();
+    expect(getRegistrationOperationInspection).toHaveBeenCalledWith("job-1", request.request_id, expect.any(AbortSignal));
     await screen.findByText("Đã kiểm tra", {}, { timeout: 5000 });
     expect(getRegistrationOperation).toHaveBeenCalledTimes(2);
   });
@@ -195,5 +257,31 @@ describe("registration panel", () => {
 
     view.unmount();
     expect(statusSignal?.aborted).toBe(true);
+  });
+
+  it("aborts an in-flight proposal inspection when the panel unmounts", async () => {
+    let inspectionSignal: AbortSignal | undefined;
+    window.sessionStorage.setItem(
+      "real2sim:rgb-lidar-registration:v1:guest-1:job-1",
+      JSON.stringify({ version: 1, expected_scene_revision: "rev-001", operation_id: request.request_id }),
+    );
+    vi.mocked(getRegistrationOperation).mockResolvedValue({
+      ok: true,
+      data: operation("PROPOSED", {
+        proposal_ref: { artifact_type: "RegistrationProposalArtifact" },
+        qa_report_ref: { artifact_type: "RegistrationQAReport" },
+      }),
+    });
+    vi.mocked(getRegistrationOperationInspection).mockImplementation((_jobId, _operationId, signal) => {
+      inspectionSignal = signal;
+      return new Promise(() => {});
+    });
+
+    const view = render(<RegistrationPanel jobId="job-1" sceneRevision="rev-001" canMutateJob={false} />);
+    await waitFor(() => expect(getRegistrationOperationInspection).toHaveBeenCalled());
+    expect(inspectionSignal?.aborted).toBe(false);
+
+    view.unmount();
+    expect(inspectionSignal?.aborted).toBe(true);
   });
 });

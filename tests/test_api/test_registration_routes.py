@@ -14,16 +14,26 @@ from src.api import auth as auth_api
 from src.api.product import registration as registration_api
 from src.main import app
 from src.models.contracts.artifacts import ProductArtifactRef
+from src.models.contracts.coordinates import Transform
+from src.models.contracts.identity import artifact_model_checksum, artifact_model_payload
 from src.models.contracts.input_assembly import DistanceUnit, InputAssetFormat, InputRole
 from src.models.contracts.manifests import StageId
 from src.models.contracts.rgb_lidar_registration import (
+    RegistrationCandidate,
+    RegistrationFindingCode,
     RegistrationInputMode,
     RegistrationProfile,
+    RegistrationProposal,
+    RegistrationProposalState,
+    RegistrationQAReport,
+    RegistrationQAStatus,
     RegistrationRequest,
     RegistrationROI,
     RegistrationSourceBinding,
     registration_preflight,
     seal_registration_profile,
+    seal_registration_proposal,
+    seal_registration_qa_report,
     seal_registration_request,
 )
 from src.services.orchestration.auth.models import UserRecord
@@ -169,6 +179,110 @@ def _request(
             "request_checksum": _ZERO,
         }
     )
+
+
+def _inspection_outputs(
+    registry: ProjectRegistry,
+    request: RegistrationRequest,
+    *,
+    include_proposal_ref: bool = True,
+) -> tuple[SimpleNamespace, ProductArtifactRef]:
+    source_ref = ProductArtifactRef(
+        artifact_type="LiDARGeometryArtifact",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{request.target_job_id}/lidar/geometry.json",
+        artifact_checksum=_checksum("lidar-geometry"),
+        data_class="derived",
+        producer_stage=StageId.LIDAR_INGEST,
+        job_id=request.target_job_id,
+    )
+    candidate = RegistrationCandidate(
+        candidate_id="candidate-inspection-1",
+        transform_target_from_source=Transform(
+            parent_frame="world",
+            local_frame=request.source.source_frame,
+            translation_xyz=(1.0, 2.0, 0.0),
+            rotation_quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
+        ),
+        score=0.95,
+    )
+    proposal: RegistrationProposal = seal_registration_proposal(
+        {
+            "job_id": request.target_job_id,
+            "input_mode": request.source.mode,
+            "request_checksum": request.request_checksum,
+            "source_input_checksum": request.source.source_input_checksum,
+            "source_geometry_ref": source_ref,
+            "target_rgb_geometry_ref": request.target_rgb_geometry_ref,
+            "target_scene_revision": request.expected_scene_revision,
+            "profile_checksum": request.profile_checksum,
+            "tool_checksum": _checksum("registration-tool"),
+            "source_frame": request.source.source_frame,
+            "state": RegistrationProposalState.PROPOSED,
+            "candidates": [candidate],
+            "selected_candidate_id": candidate.candidate_id,
+            "findings": [],
+            "proposal_checksum": _ZERO,
+        }
+    )
+    provenance = {
+        "operation_id": request.request_id,
+        "registration_request_checksum": request.request_checksum,
+    }
+    proposal_ref = ProductArtifactRef(
+        artifact_type="RegistrationProposalArtifact",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{request.target_job_id}/rgb-lidar-align/inspection/proposal.json",
+        artifact_checksum=artifact_model_checksum(proposal),
+        data_class="derived",
+        producer_stage=StageId.RGB_LIDAR_ALIGN,
+        job_id=request.target_job_id,
+        source_provenance=provenance,
+    )
+    report: RegistrationQAReport = seal_registration_qa_report(
+        {
+            "job_id": request.target_job_id,
+            "input_mode": request.source.mode,
+            "request_checksum": request.request_checksum,
+            "proposal_ref": proposal_ref,
+            "proposal_checksum": proposal.proposal_checksum,
+            "source_input_checksum": request.source.source_input_checksum,
+            "source_geometry_checksum": source_ref.artifact_checksum,
+            "target_geometry_checksum": request.target_rgb_geometry_ref.artifact_checksum,
+            "target_scene_revision": request.expected_scene_revision,
+            "profile": request.profile,
+            "profile_checksum": request.profile_checksum,
+            "metric_state": request.metric_state,
+            "floor_state": request.floor_state,
+            "same_scene_attestation": request.source.same_scene_attestation,
+            "result": RegistrationQAStatus.INCONCLUSIVE,
+            "findings": [RegistrationFindingCode.UNQUALIFIED_PROFILE],
+            "report_checksum": _ZERO,
+        }
+    )
+    report_ref = ProductArtifactRef(
+        artifact_type="RegistrationQAReport",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{request.target_job_id}/rgb-lidar-align/inspection/qa.json",
+        artifact_checksum=artifact_model_checksum(report),
+        data_class="derived",
+        producer_stage=StageId.RGB_LIDAR_ALIGN,
+        job_id=request.target_job_id,
+        source_provenance=provenance,
+    )
+    for reference, model in ((proposal_ref, proposal), (report_ref, report)):
+        path = registry.runtime_resolver.resolve(reference.artifact_uri)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(artifact_model_payload(model))
+    record = SimpleNamespace(
+        operation_id=request.request_id,
+        target_job_id=request.target_job_id,
+        request=request,
+        request_checksum=request.request_checksum,
+        proposal_ref=proposal_ref if include_proposal_ref else None,
+        qa_report_ref=report_ref,
+    )
+    return record, proposal_ref
 
 
 def _seed_user(database: RuntimeDatabase, user_id: str) -> None:
@@ -477,6 +591,173 @@ async def test_prepare_requires_persistent_runtime_database(
         )
 
     assert response.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_inspection_loads_verified_outputs_and_marks_stale_scene_revision(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    registry, _, current_revision, _ = _runtime(tmp_path, monkeypatch)
+    user = _user("guest")
+    request = _request(registry, "scene-revision-before-edit", user.user_id)
+    record, proposal_ref = _inspection_outputs(registry, request, include_proposal_ref=False)
+    monkeypatch.setattr(
+        registration_api,
+        "_operation_store",
+        lambda _registry: SimpleNamespace(get=lambda _operation_id: record),
+    )
+
+    with _session(user):
+        response = await client.get(
+            f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/operations/{request.request_id}/inspection"
+        )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["operation_id"] == request.request_id
+    assert payload["expected_scene_revision"] == "scene-revision-before-edit"
+    assert payload["current_scene_revision"] == current_revision
+    assert payload["proposal"]["proposal_checksum"] == payload["qa_report"]["proposal_checksum"]
+    assert payload["qa_report"]["proposal_ref"]["artifact_checksum"] == proposal_ref.artifact_checksum
+    assert payload["qa_report"]["result"] == "INCONCLUSIVE"
+    assert registry.scene.current(_JOB_ID).scene.scene_revision == current_revision
+
+
+@pytest.mark.asyncio
+async def test_inspection_rejects_corrupt_output_bytes(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    registry, _, revision, _ = _runtime(tmp_path, monkeypatch)
+    user = _user("guest")
+    request = _request(registry, revision, user.user_id)
+    record, _ = _inspection_outputs(registry, request)
+    proposal_path = registry.runtime_resolver.resolve(record.proposal_ref.artifact_uri)
+    proposal_path.write_bytes(b"tampered")
+    monkeypatch.setattr(
+        registration_api,
+        "_operation_store",
+        lambda _registry: SimpleNamespace(get=lambda _operation_id: record),
+    )
+
+    with _session(user):
+        response = await client.get(
+            f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/operations/{request.request_id}/inspection"
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Registration outputs are missing, corrupt, or bound to different evidence"
+
+
+@pytest.mark.asyncio
+async def test_inspection_rejects_output_reference_from_another_operation(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    registry, _, revision, _ = _runtime(tmp_path, monkeypatch)
+    user = _user("guest")
+    request = _request(registry, revision, user.user_id)
+    record, _ = _inspection_outputs(registry, request)
+    record.proposal_ref = record.proposal_ref.model_copy(
+        update={
+            "source_provenance": {
+                **record.proposal_ref.source_provenance,
+                "operation_id": "another-registration-operation",
+            }
+        }
+    )
+    monkeypatch.setattr(
+        registration_api,
+        "_operation_store",
+        lambda _registry: SimpleNamespace(get=lambda _operation_id: record),
+    )
+
+    with _session(user):
+        response = await client.get(
+            f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/operations/{request.request_id}/inspection"
+        )
+
+    assert response.status_code == 409
+
+
+@pytest.mark.parametrize(
+    ("reference_name", "updates"),
+    [
+        ("proposal_ref", {"producer_stage": "FRAME_EXTRACT"}),
+        ("qa_report_ref", {"data_class": "product_input"}),
+        ("proposal_ref", {"artifact_uri": "artifact://jobs/job-another/rgb-lidar-align/proposal.json"}),
+        ("proposal_ref", {"source_provenance": None}),
+    ],
+)
+@pytest.mark.asyncio
+async def test_inspection_rejects_output_reference_outside_verified_scope(
+    reference_name: str,
+    updates: dict[str, object],
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    registry, _, revision, _ = _runtime(tmp_path, monkeypatch)
+    user = _user("guest")
+    request = _request(registry, revision, user.user_id)
+    record, _ = _inspection_outputs(registry, request)
+    reference = getattr(record, reference_name)
+    setattr(record, reference_name, reference.model_copy(update=updates))
+    monkeypatch.setattr(
+        registration_api,
+        "_operation_store",
+        lambda _registry: SimpleNamespace(get=lambda _operation_id: record),
+    )
+
+    with _session(user):
+        response = await client.get(
+            f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/operations/{request.request_id}/inspection"
+        )
+
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_inspection_hides_operation_bound_to_another_job(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    registry, _, revision, _ = _runtime(tmp_path, monkeypatch)
+    user = _user("guest")
+    request = _request(registry, revision, user.user_id)
+    record, _ = _inspection_outputs(registry, request)
+    record.target_job_id = "job-another"
+    monkeypatch.setattr(
+        registration_api,
+        "_operation_store",
+        lambda _registry: SimpleNamespace(get=lambda _operation_id: record),
+    )
+
+    with _session(user):
+        response = await client.get(
+            f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/operations/{request.request_id}/inspection"
+        )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_inspection_requires_an_authenticated_contributor(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _runtime(tmp_path, monkeypatch)
+
+    with _session(None):
+        response = await client.get(f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/operations/unknown/inspection")
+
+    assert response.status_code == 401
 
 
 @pytest.mark.asyncio
