@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
+from pydantic import Field
 
 from src.api.auth import require_contributor
 from src.api.ownership import authorize_job_mutation
@@ -13,17 +14,27 @@ from src.models.contracts.manifests import JobManifest
 from src.models.contracts.rgb_lidar_registration import (
     RegistrationInputMode,
     RegistrationOperationState,
+    RegistrationPreflight,
     RegistrationPreflightState,
     RegistrationRequest,
     registration_preflight,
 )
+from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.auth.models import UserRecord
+from src.services.orchestration.inputs.assembly import InputAssemblyService
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.registration_operations import (
     RegistrationOperationNotFoundError,
     RegistrationOperationRecord,
     RegistrationOperationStore,
 )
+from src.services.orchestration.jobs.registration_preparation import (
+    RegistrationRequestPreparationError,
+    RegistrationRequestPreparer,
+    RegistrationSceneRevisionConflictError,
+)
+from src.services.orchestration.jobs.registration_sources import RegistrationSourceResolutionError
+from src.services.orchestration.jobs.registration_targets import RegistrationTargetResolutionError
 from src.services.orchestration.projects import JobNotFoundError, ProjectRegistry
 from src.services.orchestration.scene.errors import SceneNotAvailableError
 
@@ -44,6 +55,15 @@ class RegistrationOperationResponse(ApiModel):
     cancellation_requested: bool = False
 
 
+class RegistrationPreparationRequest(ApiModel):
+    expected_scene_revision: str = Field(min_length=1, max_length=128)
+
+
+class RegistrationPreparationResponse(ApiModel):
+    request: RegistrationRequest
+    preflight: RegistrationPreflight
+
+
 def _operation_store(registry: ProjectRegistry) -> RegistrationOperationStore:
     if registry.persistence is None:
         raise HTTPException(
@@ -51,6 +71,25 @@ def _operation_store(registry: ProjectRegistry) -> RegistrationOperationStore:
             detail="RGB–LiDAR registration requires the shared persistent runtime database",
         )
     return RegistrationOperationStore(registry.persistence.database)
+
+
+def _request_preparer(registry: ProjectRegistry) -> RegistrationRequestPreparer:
+    if registry.persistence is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="RGB–LiDAR registration preparation requires the shared persistent runtime database",
+        )
+    settings = deps.settings()
+    assemblies = InputAssemblyService(
+        registry.persistence.database,
+        str(settings.product_input_runtime_registry) if settings.product_input_runtime_registry is not None else None,
+        registry.runtime_resolver,
+    )
+    return RegistrationRequestPreparer(
+        registry,
+        assemblies,
+        max_collision_glb_bytes=min((1 << 32) - 1, settings.product_upload_max_bytes * 2),
+    )
 
 
 def _public_operation(record: RegistrationOperationRecord) -> RegistrationOperationResponse:
@@ -81,6 +120,57 @@ def _operation_or_404(store: RegistrationOperationStore, operation_id: str) -> R
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="registration operation not found") from error
     except RuntimeStateConflictError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+@router.post(
+    "/jobs/{job_id}/rgb-lidar-registration/prepare",
+    response_model=RegistrationPreparationResponse,
+    responses={
+        401: {"description": "An authenticated requester is required"},
+        403: {"description": "The caller cannot mutate this job"},
+        404: {"description": "Job not found"},
+        409: {"description": "The target scene or accepted input lineage is stale"},
+        422: {"description": "The accepted recipe or geometry evidence is unsupported"},
+        503: {"description": "Durable runtime persistence is unavailable"},
+    },
+)
+def prepare_registration_request(
+    job_id: str,
+    body: RegistrationPreparationRequest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> RegistrationPreparationResponse:
+    """Derive a sealed map request from the job's accepted recipe and current scene."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="chuẩn bị RGB–LiDAR registration cho")
+    job = _job_or_404(registry, job_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="An authenticated account is required to prepare a durable registration request",
+        )
+    try:
+        prepared = _request_preparer(registry).prepare(
+            job,
+            requested_by=user.user_id,
+            expected_scene_revision=body.expected_scene_revision,
+        )
+    except RegistrationSceneRevisionConflictError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    except SceneNotAvailableError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="The target job has no current scene"
+        ) from error
+    except (RegistrationSourceResolutionError, RegistrationTargetResolutionError) as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+    except RegistrationRequestPreparationError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+    except ArtifactStoreError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Registration evidence is stale or unavailable"
+        ) from error
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+    return RegistrationPreparationResponse(request=prepared.request, preflight=prepared.preflight)
 
 
 @router.post(

@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from httpx import AsyncClient
@@ -21,6 +22,7 @@ from src.models.contracts.rgb_lidar_registration import (
     RegistrationRequest,
     RegistrationROI,
     RegistrationSourceBinding,
+    registration_preflight,
     seal_registration_profile,
     seal_registration_request,
 )
@@ -374,6 +376,107 @@ async def test_enqueue_requires_authenticated_requester_identity(
     assert response.status_code == 401
     with database.transaction() as tx:
         assert tx.execute("SELECT COUNT(*) FROM r2s_registration_operations").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("role", "owner_user_id", "expected_status"),
+    [
+        ("guest", "user-guest", 200),
+        ("guest", "user-another", 403),
+        ("editor", "user-guest", 200),
+        ("reviewer", "user-guest", 200),
+    ],
+)
+async def test_prepare_uses_job_mutation_policy_and_does_not_enqueue(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    role: str,
+    owner_user_id: str,
+    expected_status: int,
+) -> None:
+    registry, database, revision, audit = _runtime(tmp_path, monkeypatch, owner_user_id=owner_user_id)
+    assert database is not None
+    user = _user(role)
+    _seed_user(database, user.user_id)
+    request = _request(registry, revision, user.user_id)
+    prepared = SimpleNamespace(request=request, preflight=registration_preflight(request))
+
+    class _Preparer:
+        def prepare(self, job, *, requested_by: str, expected_scene_revision: str):
+            assert job.job_id == _JOB_ID
+            assert requested_by == user.user_id
+            assert expected_scene_revision == revision
+            return prepared
+
+    monkeypatch.setattr(registration_api, "_request_preparer", lambda _registry: _Preparer())
+    with _session(user):
+        response = await client.post(
+            f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/prepare",
+            json={"expected_scene_revision": revision},
+        )
+
+    assert response.status_code == expected_status, response.text
+    with database.transaction() as tx:
+        assert tx.execute("SELECT COUNT(*) FROM r2s_registration_operations").fetchone()[0] == 0
+    if expected_status == 200:
+        assert response.json()["request"]["request_checksum"] == request.request_checksum
+        assert response.json()["preflight"]["state"] == "READY"
+        if role in {"editor", "reviewer"}:
+            assert audit.events[0][0] == user.user_id
+            assert audit.events[0][1] == "operator.intervention"
+
+
+@pytest.mark.asyncio
+async def test_prepare_requires_auth_current_revision_and_accepted_input_run(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _, database, revision, _ = _runtime(tmp_path, monkeypatch)
+    user = _user("guest")
+    assert database is not None
+    _seed_user(database, user.user_id)
+
+    with _session(None):
+        anonymous = await client.post(
+            f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/prepare",
+            json={"expected_scene_revision": revision},
+        )
+    with _session(user):
+        stale = await client.post(
+            f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/prepare",
+            json={"expected_scene_revision": "stale-revision"},
+        )
+        missing_run = await client.post(
+            f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/prepare",
+            json={"expected_scene_revision": revision},
+        )
+
+    assert anonymous.status_code == 401
+    assert stale.status_code == 409
+    assert missing_run.status_code == 422
+    with database.transaction() as tx:
+        assert tx.execute("SELECT COUNT(*) FROM r2s_registration_operations").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_prepare_requires_persistent_runtime_database(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _, database, revision, _ = _runtime(tmp_path, monkeypatch, persistent=False)
+    assert database is None
+
+    with _session(_user("guest")):
+        response = await client.post(
+            f"/api/v1/jobs/{_JOB_ID}/rgb-lidar-registration/prepare",
+            json={"expected_scene_revision": revision},
+        )
+
+    assert response.status_code == 503
 
 
 @pytest.mark.asyncio

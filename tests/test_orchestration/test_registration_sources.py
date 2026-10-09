@@ -456,3 +456,56 @@ def test_input_run_for_job_returns_record_and_rejects_row_payload_drift(tmp_path
         )
     with pytest.raises(ArtifactChecksumError, match="columns differ"):
         persistence.input_run_for_job(run.job_id)
+
+
+@pytest.mark.parametrize("archived", [False, True])
+def test_inspect_staged_source_derives_exact_direct_or_archive_identity(tmp_path: Path, archived: bool) -> None:
+    stored, artifacts, request = _fixture(tmp_path, archived=archived)
+    assemblies = _Assemblies(stored)
+    resolver = RegistrationSourceResolver(assemblies, _Projects(_Resolver(artifacts)))
+
+    inspected = resolver.inspect_staged_source(
+        mode=RegistrationInputMode.STATIC_CLOUD,
+        assembly_id=stored.snapshot.assembly_id,
+        assembly_revision=stored.snapshot.revision,
+        source_role=InputRole.STATIC_LIDAR_CLOUD,
+        source_file_id="map-file-1",
+        distance_unit=DistanceUnit.METER,
+        source_frame="lidar-map-frame",
+        same_scene_attestation=True,
+        workspace=tmp_path / "inspect",
+        max_source_points=10,
+        expected_assembly_checksum=stored.snapshot.assembly_checksum,
+    )
+
+    assert inspected.source_checksum == request.source.source_input_checksum
+    assert inspected.header_checksum == request.source.source_header_checksum
+    assert inspected.point_count == request.source.source_point_count == 1
+    assert inspected.geometry_format == "ply"
+    assert inspected.distance_unit == DistanceUnit.METER
+    assert inspected.source_frame == "lidar-map-frame"
+    assert inspected.same_scene_attestation is True
+    assert inspected.path.read_bytes() == _PLY_BYTES
+    assert assemblies.verified_upload_ids == {"map-upload-1"}
+
+
+def test_inspect_staged_source_rejects_role_or_header_checksum_mismatch(tmp_path: Path) -> None:
+    stored, artifacts, _ = _fixture(tmp_path)
+    resolver = RegistrationSourceResolver(_Assemblies(stored), _Projects(_Resolver(artifacts)))
+    parameters = {
+        "mode": RegistrationInputMode.STATIC_CLOUD,
+        "assembly_id": stored.snapshot.assembly_id,
+        "assembly_revision": stored.snapshot.revision,
+        "source_role": InputRole.STATIC_LIDAR_CLOUD,
+        "source_file_id": "map-file-1",
+        "distance_unit": DistanceUnit.METER,
+        "source_frame": "lidar-map-frame",
+        "same_scene_attestation": True,
+        "workspace": tmp_path / "inspect",
+        "max_source_points": 10,
+    }
+
+    with pytest.raises(RegistrationSourceResolutionError, match="source role does not match"):
+        resolver.inspect_staged_source(**{**parameters, "source_role": InputRole.REGISTERED_LIDAR_MAP})
+    with pytest.raises(RegistrationSourceResolutionError, match="header checksum"):
+        resolver.inspect_staged_source(**{**parameters, "expected_header_checksum": _checksum("forged")})

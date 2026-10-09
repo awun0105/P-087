@@ -129,9 +129,11 @@ refinement; S4a–S4g add durable operation/source/target preparation, source-pl
 hypotheses, cancellation and resource-wait persistence. S4h connects a CPU worker
 that verifies and copies exact source bytes, resolves the target collision surface,
 searches both signs of every detected plane and publishes provisional proposal/QA
-artifacts. S4i adds the authorized durable producer/status/cancel API; Studio proposal/
-overlay and confirmation CAS remain open. The assembly contract still has no gravity/
-up declaration. Held-out qualification, source-floor qualification, scene confirmation
+artifacts. S4i adds the authorized durable producer/status/cancel API. S4j prepares a
+server-sealed request from the accepted R2/R3 recipe and current scene, with source
+bytes/header rechecked by the worker. Studio request flow, proposal/overlay and
+confirmation CAS remain open. The assembly contract still has no gravity/up
+declaration. Held-out qualification, source-floor qualification, scene confirmation
 and collision-consumer integration stay open.
 AUD-12.S3b adds compatibility-safe SceneIR refs for the selected collision candidate
 and selection record, includes them in artifact closure, and makes simulation
@@ -151,7 +153,7 @@ candidate-triangle ownership, SceneEditor CAS selection, artifact closure, objec
 invalidation, viewer-layer identity, and fail-closed simulation/USD consumers. The
 selection service still has no live API/worker route; diagnostic-only QA, held-out
 retention, browser selected-candidate behavior and Isaac proof remain open.
-Active scope: 26 packages/93 sprint slices, including the AUD-19.S4e–S4i follow-ups.
+Active scope: 26 packages/94 sprint slices, including the AUD-19.S4e–S4j follow-ups.
 AUD-16/ADR0017 (3 sprints) và AUD-25/ADR0025 (6 sprints) Deferred theo yêu cầu owner; không là dependency hoặc implementation work trong kế hoạch hiện tại.
 
 ## Outcome
@@ -251,7 +253,7 @@ BEV/ICP implementation hoặc independent-map/browser acceptance.
 | [AUD-16: Fast Preview](tasks/AUD-16-fast-preview.md) | Deferred — không implement; EX-PRODUCT + EX-REC nếu mở lại | REC-04/05, PRODUCT-02/08/09 | 3 |
 | [AUD-17: LiDAR odometry](tasks/AUD-17-lidar-odometry.md) | P2 — EX-REC + EX-PRODUCT; opt-in | REC-08/06, PRODUCT-02/08/09 | 3 |
 | [AUD-18: Privacy anonymizer](tasks/AUD-18-privacy-anonymizer.md) | P2 — EX-REC + EX-PRODUCT; opt-in | REC-02, PRODUCT-01/02/09 | 3 |
-| [AUD-19: Automatic RGB–LiDAR registration](tasks/AUD-19-automatic-rgb-lidar-registration.md) | P1 — EX-REC + EX-PRODUCT; SCENE/SIM consumers | REC-06/08/09, PRODUCT-04/08/09 | 4 + S4e–S4i follow-ups |
+| [AUD-19: Automatic RGB–LiDAR registration](tasks/AUD-19-automatic-rgb-lidar-registration.md) | P1 — EX-REC + EX-PRODUCT; SCENE/SIM consumers | REC-06/08/09, PRODUCT-04/08/09 | 4 + S4e–S4j follow-ups |
 | [AUD-20: Tên và creator attribution](tasks/AUD-20-user-display-name-and-creator.md) | P1 — EX-PRODUCT | PRODUCT-01/02/06/09 | 3 |
 | [AUD-21: Guest signup và ownership](tasks/AUD-21-guest-signup-and-ownership.md) | P1 — EX-PRODUCT | PRODUCT-01/02/06/09 | 4 |
 | [AUD-22: Guest quota 3/ngày](tasks/AUD-22-guest-daily-job-quota.md) | P1 — EX-PRODUCT | PRODUCT-01/02/06/09 | 3 |
@@ -262,9 +264,9 @@ BEV/ICP implementation hoặc independent-map/browser acceptance.
 | [AUD-27: Structured error diagnostics](tasks/AUD-27-structured-error-diagnostics-and-redacted-excerpts.md) | P1 — EX-REC + EX-PRODUCT; failure diagnostics | REC-02/03/04, PRODUCT-02/08/09 | 3 |
 | [AUD-28: Benchmark-derived verdicts](tasks/AUD-28-benchmark-derived-verdicts-and-rule-based-insights.md) | P2 — EX-PRODUCT + EX-REC; evaluation quality | REC-02/06, PRODUCT-02/08/09 | 3 |
 
-Active: **26 work packages / 88 base sprints + 5 AUD-19.S4 follow-up slices = 93 sprint slices**.
+Active: **26 work packages / 88 base sprints + 6 AUD-19.S4 follow-up slices = 94 sprint slices**.
 AUD-16 (3 sprints) và AUD-25 (6 sprints) Deferred giữ để tham khảo; tổng tài liệu có
-28 packages/97 base sprint definitions + 4 follow-up slices = 101 definitions/slices.
+28 packages/97 base sprint definitions + 6 follow-up slices = 103 definitions/slices.
 Mỗi sprint có Input, Output, Contract, implementation steps, Tests và Exit; mỗi task có dependencies, verification/DoD
 và Result/Evidence. P2 là extension triển khai sau nền tảng P0/P1, không là
 permanent exclusion do PRD cũ. Không mặc định enable odometry/anonymizer mọi job.
@@ -549,11 +551,12 @@ immutable assembly/recipe, one quota intent; probing/upload không charge thêm.
 - [ ] AUD-17.S3 drift/consumer QA and real-sensor qualification; current code has a
       diagnostic-only RGB-PTS to estimated-pose mapper, not wired into product
       consumers or R5 dispatch; AUD-18.
-- [x] AUD-19.S1 contracts; local S2 BEV/S3 constrained-ICP algorithms; S4a–S4i
+- [x] AUD-19.S1 contracts; local S2 BEV/S3 constrained-ICP algorithms; S4a–S4j
       durable envelope, exact source/target resolution, diagnostic source-plane
       hypotheses, cancellation/resource-wait persistence, shared admission, and a
-      bounded worker that publishes provisional proposal/QA artifacts plus the
-      authorized durable operation/status/cancel API.
+      bounded worker that publishes provisional proposal/QA artifacts, authorized
+      operation/status/cancel APIs, and server-sealed request preparation from
+      accepted map recipes.
 - [ ] AUD-19 held-out map QA and source-floor qualification; operation API/UI and
       Studio proposal/overlay, confirmation route; scene/collision consumer integration
       and browser acceptance.
@@ -631,8 +634,8 @@ AUD-25 giữ Deferred, không đánh dấu Completed hoặc tự implement trong
 
 ## Result
 
-Plan hiện có 33 Markdown documents, 28 task files và 102 sprint definitions. Active
-scope có 26 work packages/93 sprint slices/12 ADR Proposed and ADR 0022 Accepted;
+Plan hiện có 33 Markdown documents, 28 task files và 103 sprint definitions. Active
+scope có 26 work packages/94 sprint slices/12 ADR Proposed and ADR 0022 Accepted;
 AUD-16 và AUD-25 giữ 9 sprint Deferred theo yêu cầu owner. AUD-06/24 vẫn nhận
 PLY/SOG cho view; AUD-19 không đợi hoặc implement imported-source adapter.
 Subsequent sprint work has changed source code:
@@ -641,14 +644,15 @@ S4a–S4g add durable operation/source/target preparation, diagnostic plane
 hypotheses, cancellation persistence/shared admission identity, and durable
 resource-wait requeue; S4h connects the worker to shared admission and publishes
 provisional source/diagnostic/proposal/QA artifacts; S4i adds authenticated operation
-enqueue/status/cancel routes with job/project/revision binding and safe status views.
-Studio proposal/overlay, scene confirmation/consumer paths, and runtime/held-out
+enqueue/status/cancel routes with job/project/revision binding and safe status views;
+S4j adds server-sealed request preparation from accepted R2/R3 recipes and the current
+scene. Studio proposal/overlay, scene confirmation/consumer paths, and runtime/held-out
 qualification remain open.
 Validation at initial plan creation exited 0: 25 integration sections gồm một
 Deferred, 231 local links, 121 existing pytest paths và 138 canonical bindings;
 80 active sprints đúng internal order, 37 cross-task prerequisite pairs và 6
 AUD-25 deferred sprints ngoài execution order/dependencies. Later owner-directed
-updates are reflected in the current 26/93 counts above. `git diff --check` exited
+updates are reflected in the current 26/94 counts above. `git diff --check` exited
 0. This validates plan documents, not runtime acceptance.
 Các số liệu cấu trúc tài liệu là snapshot của lần tạo plan; Result/Evidence ở từng
 task mới là nguồn hiện trạng sau từng sprint.

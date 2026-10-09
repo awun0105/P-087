@@ -1040,3 +1040,96 @@ Pre-flight (GUIDE.md Rule 13)
   source/target/QA tests 61 passed; full repository Ruff and format checks passed;
   contract mirror and `git diff --check` passed.
 - DevTools: n/a — backend-only routes; no rendered screen changed.
+
+### AUD-19.S4j — Server-owned request preparation from accepted map recipes
+
+**Input:** an authenticated actor, target job and expected current scene revision;
+the durable accepted `InputRunRecord`/`InputRecipe`, exact immutable assembly
+revision and source bytes; current `SceneIR` and its product-visible artifacts.
+The client does not submit checksum, header, same-scene, target-ref, or metric/floor
+claims as preparation facts.
+**Output:** a checksum-sealed `RegistrationRequest` and `RegistrationPreflight`
+projection for the existing S4i enqueue endpoint. Preparation queues no work and
+publishes or mutates no artifact.
+**Data contract:** only an accepted R2 registered-map or R3 single-static-cloud
+recipe with one exact supported PCD/PLY binding is eligible. The service derives
+mode, source role, unit, source frame, assembly identity and same-scene declaration
+from that immutable recipe/assembly; it re-verifies upload bytes and parses the actual
+header/count. The target is the current scene's canonical RGB geometry, its exact
+metric provenance and the current `floor_fit.artifact_ref`. A deterministic world
+ROI is derived from the checksum-verified collision GLB bounds, subject to the
+server-owned provisional profile's byte and extent limits. The request binds the
+expected scene revision. Sensor-package work remains on FinalizeWorker; raw sequences
+remain AUD-17; a separate new upload and cross-scene physical identity remain outside
+this slice and do not become verified by the input's same-scene declaration.
+**Implement:** add a shared source-inspection seam used by both request preparation
+and worker resolution, so preparation cannot compute different source identity from
+the worker. Add a server-owned provisional profile/default; expose an authenticated,
+guest-own-job guarded preparation route with safe status/error projection. Missing,
+stale, ambiguous, unsupported or oversized evidence must return a precise 4xx and no
+request; preflight INSUFFICIENT may be returned as an explicit finding set, never as
+READY. The request is checked again by the existing worker at execution time. No
+quota, persistence schema or scene-consumer change.
+**Tests:** accepted R2/R3 recipe builds the exact binding; changed upload/header,
+assembly/recipe checksum drift, wrong source role, missing units/frame, false/missing
+same-scene declaration, raw/sensor mode, wrong/stale scene revision, wrong geometry
+or floor lineage, absent/ambiguous floor, invalid bounds, byte/ROI limits, and guest
+cross-owner denial all fail closed. Assert preparation has no operation/quota/artifact
+side effect and that returned requests pass the existing contract checksum verifier.
+**Exit:** [x] prepared requests are built from one accepted R2/R3 lineage and are
+worker-revalidated; [x] negative/authorization tests pass; [ ] frontend flow and
+proposal confirmation remain later S4 slices; [ ] held-out qualification remains
+pending.
+
+#### AUD-19.S4j Result / Evidence
+
+Added `RegistrationRequestPreparer` and the authenticated
+`POST /jobs/{job_id}/rgb-lidar-registration/prepare` route. It binds the current
+scene revision, accepted recipe and exact input assembly, derives map mode/role/unit/
+frame/same-scene declaration from immutable evidence, reads the PCD/PLY header and
+point count from verified source bytes, and seals a server-owned provisional profile
+and request. The target uses the current SceneIR's canonical RGB geometry, metric
+provenance, floor-fit evidence and a padded world AABB ROI from the checksum-verified
+collision GLB. The response contains the sealed request and preflight but does not
+queue work, charge quota or mutate scene/artifact state. The worker uses the same
+source-inspection seam and independently revalidates source bytes when it claims work.
+Unsupported accepted recipe groups, stale scene revisions, invalid source/target
+lineage and oversized targets fail closed. No AUD-18 file or behavior was changed.
+
+Changed files: `src/services/orchestration/jobs/registration_preparation.py`,
+`src/services/orchestration/jobs/registration_sources.py`,
+`src/api/product/registration.py`, `tests/test_orchestration/test_registration_preparation.py`,
+`tests/test_orchestration/test_registration_sources.py`,
+`tests/test_api/test_registration_routes.py`, this task record, the audit README,
+`AGENT_GUIDE.md` and `INTEGRATION_MAP.md`.
+
+Verification: focused source/preparation/API tests **32 passed**; full API suite
+**212 passed, 15 existing httpx cookie deprecation warnings**; registration contract,
+operation, source, preparation, target, worker, QA, BEV and constrained-ICP tests
+**126 passed**. Full `.venv/bin/ruff check src/ tests/` passed; full
+`.venv/bin/ruff format --check src/ tests/` reported 574 files formatted; contract
+mirror passed (5 enums, 6 models). The route tests verify authorization and no queue
+side effect; the service test verifies the sealed R2/R3 request fields with isolated
+source/target resolver stubs, while source resolver tests parse actual direct and ZIP
+member PLY bytes.
+
+Limits: the frontend does not yet call preparation or show proposals/QA/overlays;
+confirmation CAS and alignment consumer publication remain open. The server profile
+is provisional, so this API does not claim a qualified or production-accurate result.
+Separate new-upload binding, physical same-place proof, held-out warehouse QA, browser
+flow and collision/Isaac safety remain **UNVERIFIED**.
+
+Pre-flight (GUIDE.md Rule 13)
+- codegraph: traced the accepted `InputRunRecord`/`InputRecipe`, assembly bindings and
+  probes, current SceneIR geometry/floor provenance, request resolver, worker source
+  loader, target verifier and API mutation ownership before editing.
+- impact: S4i enqueue remains compatible; preparation uses its exact sealed request
+  contract, and worker source identity now shares the inspector with preparation.
+  SceneIR, registration operation storage, quota, collision selection, frontend and
+  AUD-18 are unchanged.
+- minimal-code: one preparation service and route use current assembly/scene/artifact
+  resolvers; no new persistence, schema, profile configuration or registration bypass.
+- checks: API 212 passed; registration boundary suite 126 passed; Ruff check/format,
+  contract mirror and diff checks passed. CodeGraph and Graphify were refreshed after
+  the edits.
+- DevTools: n/a — backend-only route/service; no rendered screen changed.

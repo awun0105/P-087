@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- PLANNED; P2 extension theo yêu cầu owner; EX-REC + EX-PRODUCT.
+- IMPLEMENTED (code, phạm vi thu gọn theo owner 2026-10-09: không có bước duyệt; đánh giá trên dữ liệu thật và chạy trên pod còn mở); P2 extension theo yêu cầu owner; EX-REC + EX-PRODUCT.
 - Canonical REC-02, PRODUCT-01/02/09; bổ sung task-local scope, không đổi crosswalk.
 - ADAPT qualified detection/tracking/redaction; REUSE RGBPrivacyGate,
   PrivacyInspectionEvidence, PrivacyQAAcceptance và approved-copy lineage.

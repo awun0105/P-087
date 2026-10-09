@@ -17,6 +17,7 @@ from src.models.contracts.identity import verify_content_checksum
 from src.models.contracts.input_assembly import (
     ArchiveMemberRef,
     CloudObservationState,
+    DistanceUnit,
     InputAssetFormat,
     InputRecipe,
     InputRole,
@@ -51,6 +52,26 @@ class VerifiedRegistrationSource:
     distance_unit: Literal["m", "cm", "mm"]
     source_frame: str
     same_scene_lineage_verified: bool
+
+
+@dataclass(frozen=True)
+class InspectedRegistrationSource:
+    """Observed identity for one source file, shared by preparation and worker checks."""
+
+    path: Path
+    file_id: str
+    input_assembly_id: str
+    input_assembly_revision: int
+    input_assembly_checksum: str
+    source_checksum: str
+    header_checksum: str
+    point_count: int
+    input_format: InputAssetFormat
+    geometry_format: Literal["pcd", "ply"]
+    distance_unit: DistanceUnit | None
+    source_frame: str | None
+    same_scene_attestation: bool | None
+    stored: StoredInputAssembly
 
 
 def load_registration_source_points(source: VerifiedRegistrationSource, profile: RegistrationProfile) -> np.ndarray:
@@ -93,19 +114,63 @@ class RegistrationSourceResolver:
         if source.source_distance_unit is None or source.source_frame is None:
             raise RegistrationSourceResolutionError("source distance unit and coordinate frame are required")
 
-        stored = self.assemblies.get_assembly(source.input_assembly_id, source.input_assembly_revision)
-        snapshot = stored.snapshot
-        try:
-            verify_input_assembly_checksum(snapshot)
-        except ValueError as error:
-            raise RegistrationSourceResolutionError("stored input assembly checksum is invalid") from error
-        if (
-            snapshot.assembly_id != source.input_assembly_id
-            or snapshot.revision != source.input_assembly_revision
-            or snapshot.assembly_checksum != source.input_assembly_checksum
-        ):
-            raise RegistrationSourceResolutionError("request does not name the exact stored assembly revision")
+        inspected = self.inspect_staged_source(
+            mode=source.mode,
+            assembly_id=source.input_assembly_id,
+            assembly_revision=source.input_assembly_revision,
+            source_role=source.source_role,
+            source_file_id=source.source_file_ids[0],
+            distance_unit=source.source_distance_unit,
+            source_frame=source.source_frame,
+            workspace=workspace,
+            max_source_points=request.profile.max_source_points,
+            expected_assembly_checksum=source.input_assembly_checksum,
+            expected_source_checksum=source.source_input_checksum,
+            expected_header_checksum=source.source_header_checksum,
+            expected_point_count=source.source_point_count,
+            expected_format=source.source_format,
+            same_scene_attestation=source.same_scene_attestation,
+        )
+        verified = self._same_scene_lineage_verified(request, inspected.stored)
+        return VerifiedRegistrationSource(
+            path=inspected.path,
+            file_id=inspected.file_id,
+            input_assembly_id=inspected.input_assembly_id,
+            input_assembly_revision=inspected.input_assembly_revision,
+            input_assembly_checksum=inspected.input_assembly_checksum,
+            source_checksum=inspected.source_checksum,
+            header_checksum=inspected.header_checksum,
+            point_count=inspected.point_count,
+            geometry_format=inspected.geometry_format,
+            distance_unit=source.source_distance_unit.value,
+            source_frame=source.source_frame,
+            same_scene_lineage_verified=verified,
+        )
 
+    def inspect_staged_source(
+        self,
+        *,
+        mode: RegistrationInputMode,
+        assembly_id: str,
+        assembly_revision: int,
+        source_role: InputRole,
+        source_file_id: str,
+        distance_unit: DistanceUnit | None,
+        source_frame: str | None,
+        workspace: Path,
+        max_source_points: int,
+        expected_assembly_checksum: str | None = None,
+        expected_source_checksum: str | None = None,
+        expected_header_checksum: str | None = None,
+        expected_point_count: int | None = None,
+        expected_format: InputAssetFormat | None = None,
+        same_scene_attestation: bool | None = None,
+    ) -> InspectedRegistrationSource:
+        """Read the exact staged source identity without trusting client-reported header fields."""
+        if mode not in {RegistrationInputMode.REGISTERED_MAP, RegistrationInputMode.STATIC_CLOUD}:
+            raise RegistrationSourceResolutionError(
+                "only registered-map and static-cloud requests have one source file"
+            )
         expected_role, expected_cloud_state = {
             RegistrationInputMode.REGISTERED_MAP: (
                 InputRole.REGISTERED_LIDAR_MAP,
@@ -115,18 +180,31 @@ class RegistrationSourceResolver:
                 InputRole.STATIC_LIDAR_CLOUD,
                 CloudObservationState.SINGLE_STATIC_CLOUD,
             ),
-        }[source.mode]
-        if source.source_role != expected_role:
+        }[mode]
+        if source_role != expected_role:
             raise RegistrationSourceResolutionError("source role does not match registration mode")
+
+        stored = self.assemblies.get_assembly(assembly_id, assembly_revision)
+        snapshot = stored.snapshot
+        try:
+            verify_input_assembly_checksum(snapshot)
+        except ValueError as error:
+            raise RegistrationSourceResolutionError("stored input assembly checksum is invalid") from error
+        if (
+            snapshot.assembly_id != assembly_id
+            or snapshot.revision != assembly_revision
+            or (expected_assembly_checksum is not None and snapshot.assembly_checksum != expected_assembly_checksum)
+        ):
+            raise RegistrationSourceResolutionError("request does not name the exact stored assembly revision")
         matching_bindings = [
             binding
             for binding in snapshot.bindings
-            if binding.role == expected_role and binding.file_ids == source.source_file_ids
+            if binding.role == expected_role and binding.file_ids == [source_file_id]
         ]
         if len(matching_bindings) != 1:
             raise RegistrationSourceResolutionError("selected source file is not bound to the exact assembly role")
 
-        staged_matches = [item for item in snapshot.files if item.file_id == source.source_file_ids[0]]
+        staged_matches = [item for item in snapshot.files if item.file_id == source_file_id]
         if len(staged_matches) != 1:
             raise RegistrationSourceResolutionError("selected source file is absent or duplicated in the assembly")
         staged = staged_matches[0]
@@ -134,42 +212,47 @@ class RegistrationSourceResolver:
         if len(probes) != 1:
             raise RegistrationSourceResolutionError("selected source file has no unique server-side upload probe")
         probe = probes[0]
-        if probe.observed_format != staged.observed_format or staged.observed_format != source.source_format:
+        if probe.observed_format != staged.observed_format or (
+            expected_format is not None and staged.observed_format != expected_format
+        ):
             raise RegistrationSourceResolutionError("request format differs from the server-observed staged file")
         if probe.source_checksum != staged.source_file.checksum:
             raise RegistrationSourceResolutionError("upload probe does not match the immutable source checksum")
 
         if staged.archive_member is None:
-            expected_source_checksum = staged.source_file.checksum
+            observed_source_checksum = staged.source_file.checksum
             if probe.member_checksum is not None:
                 raise RegistrationSourceResolutionError("direct source unexpectedly carries an archive-member checksum")
         else:
-            expected_source_checksum = staged.archive_member.member_checksum
+            observed_source_checksum = staged.archive_member.member_checksum
             if (
                 staged.archive_member.container_checksum != staged.source_file.checksum
                 or probe.member_checksum != staged.archive_member.member_checksum
             ):
                 raise RegistrationSourceResolutionError("archive member is not bound to the verified upload bytes")
-        if source.source_input_checksum != expected_source_checksum:
+        if expected_source_checksum is not None and expected_source_checksum != observed_source_checksum:
             raise RegistrationSourceResolutionError("request source checksum differs from the selected staged bytes")
 
         declarations = snapshot.declarations
         if declarations.cloud_state is None or declarations.cloud_state.value != expected_cloud_state:
             raise RegistrationSourceResolutionError("assembly cloud-state declaration does not match registration mode")
-        if declarations.coordinate_unit is None or declarations.coordinate_unit.value != source.source_distance_unit:
+        declared_unit = declarations.coordinate_unit.value if declarations.coordinate_unit is not None else None
+        declared_frame = declarations.lidar_frame_id.value if declarations.lidar_frame_id is not None else None
+        declared_same_scene = declarations.same_scene.value if declarations.same_scene is not None else None
+        if distance_unit is not None and declared_unit != distance_unit:
             raise RegistrationSourceResolutionError("request distance unit differs from the assembly declaration")
-        if declarations.lidar_frame_id is None or declarations.lidar_frame_id.value != source.source_frame:
+        if source_frame is not None and declared_frame != source_frame:
             raise RegistrationSourceResolutionError("request source frame differs from the assembly declaration")
-        if source.same_scene_attestation is not None and (
-            declarations.same_scene is None or declarations.same_scene.value != source.same_scene_attestation
-        ):
+        if same_scene_attestation is not None and declared_same_scene != same_scene_attestation:
             raise RegistrationSourceResolutionError("same-scene attestation differs from the immutable assembly")
 
+        if staged.observed_format not in {InputAssetFormat.POINT_CLOUD_PCD, InputAssetFormat.POINT_CLOUD_PLY}:
+            raise RegistrationSourceResolutionError("source format must be an observed PCD or PLY point cloud")
         self.assemblies.verify_upload_sources(stored, upload_ids={staged.upload_id})
         container_path = self.resolver.require_uri(staged.source_file.artifact_uri, staged.source_file.checksum)
         workspace.mkdir(parents=True, exist_ok=True)
         cloud_path = (
-            self._extract_member(container_path, staged.archive_member, workspace, source.source_format)
+            self._extract_member(container_path, staged.archive_member, workspace, staged.observed_format)
             if staged.archive_member is not None
             else container_path
         )
@@ -180,33 +263,38 @@ class RegistrationSourceResolver:
             raise
         header_checksum = _sha256(header[1])
         parsed_header = header[0]
-        expected_geometry_format = "pcd" if source.source_format == InputAssetFormat.POINT_CLOUD_PCD else "ply"
+        expected_geometry_format = "pcd" if staged.observed_format == InputAssetFormat.POINT_CLOUD_PCD else "ply"
         if parsed_header.geometry_format != expected_geometry_format:
             self._remove_extracted_member(cloud_path, container_path)
             raise RegistrationSourceResolutionError("parsed point-cloud header format differs from the request")
-        if parsed_header.point_count != source.source_point_count:
+        if expected_point_count is not None and parsed_header.point_count != expected_point_count:
             self._remove_extracted_member(cloud_path, container_path)
             raise RegistrationSourceResolutionError("parsed point count differs from the request")
-        if parsed_header.point_count > request.profile.max_source_points:
+        if parsed_header.point_count > max_source_points:
             self._remove_extracted_member(cloud_path, container_path)
-            raise RegistrationSourceResolutionError("source point count exceeds the sealed registration profile")
-        if header_checksum != source.source_header_checksum:
+            raise RegistrationSourceResolutionError("source point count exceeds the registration profile limit")
+        if expected_header_checksum is not None and header_checksum != expected_header_checksum:
             self._remove_extracted_member(cloud_path, container_path)
             raise RegistrationSourceResolutionError("parsed point-cloud header checksum differs from the request")
+        if expected_source_checksum is not None and observed_source_checksum != expected_source_checksum:
+            self._remove_extracted_member(cloud_path, container_path)
+            raise RegistrationSourceResolutionError("request source checksum differs from the selected staged bytes")
 
-        return VerifiedRegistrationSource(
+        return InspectedRegistrationSource(
             path=cloud_path,
             file_id=staged.file_id,
             input_assembly_id=snapshot.assembly_id,
             input_assembly_revision=snapshot.revision,
             input_assembly_checksum=snapshot.assembly_checksum,
-            source_checksum=expected_source_checksum,
+            source_checksum=observed_source_checksum,
             header_checksum=header_checksum,
             point_count=parsed_header.point_count,
+            input_format=staged.observed_format,
             geometry_format=parsed_header.geometry_format,
-            distance_unit=source.source_distance_unit.value,
-            source_frame=source.source_frame,
-            same_scene_lineage_verified=self._same_scene_lineage_verified(request, stored),
+            distance_unit=declared_unit,
+            source_frame=declared_frame,
+            same_scene_attestation=declared_same_scene,
+            stored=stored,
         )
 
     def _same_scene_lineage_verified(self, request: RegistrationRequest, stored: StoredInputAssembly) -> bool:
