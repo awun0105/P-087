@@ -178,6 +178,8 @@ class Settings(BaseSettings):
             )
         if self.artifact_s3_bucket and not (self.artifact_s3_access_key_id and self.artifact_s3_secret_access_key):
             raise ValueError("ARTIFACT_S3_BUCKET cần ARTIFACT_S3_ACCESS_KEY_ID và ARTIFACT_S3_SECRET_ACCESS_KEY")
+        if self.app_env in {"staging", "production"} and not self.auth_required:
+            raise ValueError("AUTH_REQUIRED phải bật ở staging/production")
         if self.product_fixture_mode and self.app_env in {"staging", "production"}:
             raise ValueError("PRODUCT_FIXTURE_MODE chỉ dùng cho development/test")
         return self

@@ -39,3 +39,28 @@ def test_guest_signup_stays_disabled_by_default_and_can_be_explicitly_enabled() 
 
     assert defaults.auth_guest_signup_enabled is False
     assert enabled.auth_guest_signup_enabled is True
+
+
+@pytest.mark.parametrize("app_env", ["staging", "production"])
+def test_auth_must_be_required_outside_development(app_env: str) -> None:
+    with pytest.raises(ValidationError, match="AUTH_REQUIRED"):
+        Settings(
+            _env_file=None,
+            openai_api_key="test-key",
+            app_env=app_env,
+            artifact_root="/data/artifacts",
+            auth_required=False,
+        )
+    ok = Settings(
+        _env_file=None,
+        openai_api_key="test-key",
+        app_env=app_env,
+        artifact_root="/data/artifacts",
+        auth_required=True,
+    )
+    assert ok.auth_required is True
+
+
+def test_auth_can_stay_off_in_development_and_test() -> None:
+    for app_env in ("development", "test"):
+        assert Settings(_env_file=None, openai_api_key="test-key", app_env=app_env).auth_required is False
