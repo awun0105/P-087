@@ -15,7 +15,12 @@ import { isJobStale, useNow, type Tab, type StudioMode } from "@/features/studio
 import { cn } from "@/lib/cn";
 
 interface Detail { scene: SceneIR; pkg: SimulationPackageView | null; review: ReviewStateView | null }
-/** Bước tiếp theo đọc published state; không tạo lifecycle cạnh tranh với backend. */
+/**
+ * Bước tiếp theo đọc published state; không tạo lifecycle cạnh tranh với backend.
+ *
+ * Trang job dùng dạng `popover` (chuông ở header, chung cho mọi tab). Dạng `banner` chỉ còn để test đọc trực tiếp
+ * tiêu đề/nút mà không phải mở chuông.
+ */
 export function NextAction({
   jobId,
   progress,
@@ -98,6 +103,8 @@ export function NextAction({
   let description: string | null = null;
   let action: { label: string; tab: Tab; mode?: StudioMode } | null = null;
   let pendingCount: number | null = null;
+  // Đang đọc trạng thái chưa phải là thông báo cần người dùng chú ý: chuông không bật chấm cho nó.
+  let reading = false;
   if (retryState) {
     title = retryState === "submitting" ? "Đang gửi yêu cầu thử lại" : retryState === "rejected" ? "Đang kiểm tra phản hồi thử lại" : "Đang đồng bộ lần chạy mới";
     description = retryState === "uncertain"
@@ -126,14 +133,19 @@ export function NextAction({
     description = "Khuôn mặt và biển số phát hiện được đã bị che. Xem lại rồi xác nhận để pipeline dựng 3D, hoặc huỷ job.";
     action = { label: "Xem bản đã che", tab: "progress" };
   } else if (progress.waiting_for === "metric_confirmation") {
-    // Không có khung riêng: nút "Xác nhận tỉ lệ mét" nằm ngay ở bước đang chờ trong timeline Tiến trình.
+    // Hiện trong chuông; nút tương ứng cũng nằm ngay ở bước đang chờ trong timeline Tiến trình.
+    title = "Cần bạn xác nhận tỉ lệ mét";
+    description = "Chọn điểm và nhập kích thước thật để pipeline tiếp tục.";
+    action = { label: "Xác nhận tỉ lệ mét", tab: "studio", mode: "metric" };
   } else if (progress.status === "QUEUED") {
     title = "Đang chờ worker";
     description = "Job đã vào hàng đợi. Theo dõi các giai đoạn bên dưới.";
   } else if (sceneReady) {
     title = "Đang đọc bước tiếp theo";
     description = "Đối chiếu vật thể, gói và trạng thái duyệt của revision hiện tại.";
+    reading = true;
     if (detail && (revision === null || detail.scene.scene_revision === revision)) {
+      reading = false;
       // Ứng viên do pipeline tạo có `active=false` cho tới khi được xác nhận, nên đếm theo trạng thái (cùng quy tắc
       // với bộ lọc "Chờ xác nhận" của Studio), không theo cờ `active`.
       const review_of = (object: SceneIR["objects"][number]) => object.provenance.review;
@@ -166,15 +178,17 @@ export function NextAction({
   if (action?.tab === "studio" && !canMutateJob) action = null;
   const atTarget = action && current === action.tab && (!action.mode || mode === action.mode);
   const showRetry = Boolean(!retryState && canRetryJob && progress.status === "FAILED" && progress.error?.retryable);
-  if (!title && !showRetry && !(sceneReady && error)) return null;
+  const empty = !title && !showRetry && !(sceneReady && error);
+  // Chuông là nơi duy nhất hiện thông báo của trang job nên luôn có mặt; không có gì thì nói rõ là không có.
+  if (empty && variant !== "popover") return null;
 
   if (variant === "popover") {
-    const hasAlert = Boolean(title || showRetry || (sceneReady && error));
+    const hasAlert = Boolean((title && !reading) || showRetry || (sceneReady && error));
     return (
       <div className="relative" ref={popoverRef}>
         <button
           type="button"
-          aria-label="Thông báo bước tiếp theo"
+          aria-label="Thông báo của scene"
           aria-expanded={isOpen}
           onClick={() => setIsOpen((prev) => !prev)}
           className={cn(
@@ -195,13 +209,13 @@ export function NextAction({
         {isOpen && (
           <div
             role="dialog"
-            aria-label="Thông báo bước tiếp theo"
+            aria-label="Thông báo của scene"
             className="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border border-line-strong bg-paper p-4 shadow-xl sm:w-96"
           >
             <div className="mb-3 flex items-center justify-between border-b border-line pb-2">
               <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ink-muted">
                 <Bell className="h-3.5 w-3.5" aria-hidden />
-                <span>Bước tiếp theo</span>
+                <span>Thông báo</span>
               </div>
               <button
                 type="button"
@@ -213,6 +227,7 @@ export function NextAction({
               </button>
             </div>
 
+            {empty && <p className="text-sm text-ink-muted">Không có thông báo nào.</p>}
             {title && (
               <div className="space-y-1">
                 <p className="text-sm font-bold text-ink">{title}</p>
@@ -230,7 +245,7 @@ export function NextAction({
                         <GuestQuotaStatus quota={guestQuota} />
                       </>
                     )}
-                    <Button size="sm" disabled={busy || guestQuotaExhausted} onClick={() => { setIsOpen(false); onRetry(); }}>
+                    <Button size="sm" disabled={busy || guestQuotaExhausted} onClick={onRetry}>
                       Thử lại
                     </Button>
                   </div>

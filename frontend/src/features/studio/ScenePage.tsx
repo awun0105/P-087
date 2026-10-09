@@ -292,23 +292,22 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
         <GeometryBadge state={geometry} />
         {save && <SaveStatus state={save} />}
         <div className="ml-auto flex items-center gap-2">
-          {current === "studio" && (
-            <NextAction
-              jobId={jobId}
-              progress={progress}
-              current={current}
-              mode={studioMode}
-              sceneReady={sceneReady}
-              revision={save?.revision ?? null}
-              busy={busy}
-              onOpen={openTab}
-              onRetry={startRetry}
-              retryState={retryPending ? retrySync?.status ?? null : null}
-              canMutateJob={canMutateJob}
-              canRetryJob={canRetryJob}
-              variant="popover"
-            />
-          )}
+          {/* Chuông thông báo dùng chung cho mọi tab của trang job; không còn khung thông báo riêng dưới thanh tab. */}
+          <NextAction
+            jobId={jobId}
+            progress={progress}
+            current={current}
+            mode={studioMode}
+            sceneReady={sceneReady}
+            revision={save?.revision ?? null}
+            busy={busy}
+            onOpen={openTab}
+            onRetry={startRetry}
+            retryState={retryPending ? retrySync?.status ?? null : null}
+            canMutateJob={canMutateJob}
+            canRetryJob={canRetryJob}
+            variant="popover"
+          />
           {canMutateJob && <DemoControls jobId={jobId} revision={save?.revision ?? null} sceneReady={sceneReady}
             onRestored={(revision) => setSave({ status: "saved", revision })} />}
         </div>
@@ -316,23 +315,6 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
       <SceneTabs tabs={tabs} current={current} onChange={(next) => openTab(next)} />
       {locked && <p role="status" className="px-4 py-2 text-sm text-ink-muted">{locked}. Đang hiển thị Tiến trình.</p>}
       {requestedTab && !["progress", "studio", "review", "results"].includes(requestedTab) && <p role="status" className="px-4 py-2 text-sm text-ink-muted">Tab không hợp lệ; đã mở vùng mặc định.</p>}
-      {current !== "studio" && (
-        <NextAction
-          jobId={jobId}
-          progress={progress}
-          current={current}
-          mode={studioMode}
-          sceneReady={sceneReady}
-          revision={save?.revision ?? null}
-          busy={busy}
-          onOpen={openTab}
-          onRetry={startRetry}
-          retryState={retryPending ? retrySync?.status ?? null : null}
-          canMutateJob={canMutateJob}
-          canRetryJob={canRetryJob}
-          variant="banner"
-        />
-      )}
       {current === "studio" && preview && (
         <div className="flex items-center justify-end gap-2 border-b border-line bg-paper-raised px-4 py-1.5 sm:px-6">
           {canMutateJob ? (

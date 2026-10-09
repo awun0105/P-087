@@ -33,6 +33,10 @@ vi.mock("@/features/studio/scene/StudioTab", () => ({ StudioTab: ({ mode, canMut
 vi.mock("@/lib/api/endpoints", async (original) => ({ ...(await original<typeof import("@/lib/api/endpoints")>()), getJob: vi.fn(), getPreview: vi.fn(), listJobAttempts: vi.fn() }));
 vi.mock("@/lib/api/studio", async (original) => ({ ...(await original<typeof import("@/lib/api/studio")>()), getJobProgress: vi.fn(), getJobScene: vi.fn(), getSimulationPackage: vi.fn(), getReviewState: vi.fn(), retryJob: vi.fn() }));
 const progress: JobProgress = { job_id: "job-1", status: "RUNNING", current_stage: "ST-METRIC-CANONICALIZE", attempt: 1, started_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z", completed_at: null, stages: [], preview_ready: true, waiting_for: "metric_confirmation", error: null, capabilities: { can_mutate: true, can_cancel: false, can_retry: false } };
+/** Thông báo của trang job nằm trong chuông ở header; mở một lần, chuông giữ mở qua các lần cập nhật. */
+async function openBell() {
+  fireEvent.click(await screen.findByRole("button", { name: "Thông báo của scene" }));
+}
 function failedProgress(retryable: boolean, previewReady = false): JobProgress {
   return {
     ...progress,
@@ -70,6 +74,22 @@ const ref = (type: string, path: string, stage = "ST-VISUAL-RECON") => ({ artifa
   vi.mocked(getPreview).mockResolvedValue({ ok: true, data: parsePreview({ schema_version: "1.0", artifact_type: "ReconstructionPreview", job_id: "job-1", attempt_id: "a1", source_input_checksum: "sha256:" + "b".repeat(64), format: "gaussian_sog", producer: "brush", producer_version: "fixture", metric_status: "UNCONFIRMED", coordinate_frame: "sfm_world", unit: "arbitrary", delivery_ref: ref("GaussianSOG", "scene.sog"), source_visual_ref: ref("BrushVisualArtifact", "visual.json"), camera_pose_ref: ref("CameraPoseArtifact", "poses.json", "ST-CAMERA-POSE") }, "job-1") });
 });
 describe("workflow scene", () => {
+  it("chuông là nơi duy nhất hiện thông báo trên mọi tab; không còn khung dưới thanh tab, trống thì nói rõ", async () => {
+    vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: failedProgress(true) });
+    const view = render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
+    await screen.findByRole("heading", { name: "Tiến trình xử lý" }, { timeout: 3000 });
+    expect(screen.queryByRole("region", { name: "Bước tiếp theo" })).toBeNull();
+    expect(screen.queryByText("Xử lý chưa hoàn tất")).toBeNull();
+    await openBell();
+    expect(screen.getByRole("dialog", { name: "Thông báo của scene" })).toHaveTextContent("Xử lý chưa hoàn tất");
+    view.unmount();
+
+    vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: { ...progress, status: "RUNNING", waiting_for: null, updated_at: new Date().toISOString() } });
+    render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
+    await screen.findByRole("heading", { name: "Tiến trình xử lý" }, { timeout: 3000 });
+    await openBell();
+    expect(screen.getByRole("dialog", { name: "Thông báo của scene" })).toHaveTextContent("Không có thông báo nào.");
+  });
   it("Chỉnh Gaussian tạm ẩn: không có nút, và ?mode=gaussian rơi về Scene 3D thay vì mở editor", async () => {
     history.replaceState({}, "", "/scenes/job-1?tab=studio&mode=gaussian");
     vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: { ...progress, waiting_for: null } });
@@ -132,10 +152,10 @@ describe("workflow scene", () => {
   });
   it("Guest vẫn sửa scene mình sở hữu khi quota tạo job đã hết", () => {
     authState.me = guestMe(0);
-    // Không còn khung thông báo riêng: nút nằm ngay ở bước tỉ lệ mét trong timeline Tiến trình.
-    const banner = render(<NextAction jobId="job-1" progress={progress} current="progress" mode="scene" sceneReady={false} revision={null} busy={false} onOpen={vi.fn()} onRetry={vi.fn()} />);
-    expect(banner.container).toBeEmptyDOMElement();
-    banner.unmount();
+    // Thông báo nằm trong chuông; nút cũng có ngay ở bước tỉ lệ mét trong timeline Tiến trình.
+    const notice = render(<NextAction jobId="job-1" progress={progress} current="progress" mode="scene" sceneReady={false} revision={null} busy={false} onOpen={vi.fn()} onRetry={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Xác nhận tỉ lệ mét" })).toBeEnabled();
+    notice.unmount();
     const confirm = vi.fn();
     const waiting: JobProgress = { ...progress, stages: [{ stage_id: "ST-METRIC-CANONICALIZE", state: "waiting", started_at: null, completed_at: null, error: null }] };
     const tab = render(<ProgressTab jobId="job-1" progress={waiting} info={null} busy={false} canCancel={false} onCancel={vi.fn()} onConfirmMetric={confirm} />);
@@ -188,6 +208,7 @@ describe("workflow scene", () => {
     vi.mocked(getJobProgress).mockResolvedValueOnce({ ok: true, data: failed }).mockResolvedValue({ ok: true, data: queued });
     vi.mocked(retryJob).mockRejectedValue(new ApiError(500, "Internal Server Error"));
     render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
+    await openBell();
     const button = await screen.findByRole("button", { name: "Thử lại" });
     fireEvent.click(button);
     await waitFor(() => expect(vi.mocked(retryJob)).toHaveBeenCalledOnce());
@@ -206,6 +227,7 @@ describe("workflow scene", () => {
       .mockResolvedValueOnce({ ok: true, data: queued });
     vi.mocked(retryJob).mockReturnValue(retryReceipt.promise);
     render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
+    await openBell();
     fireEvent.click(await screen.findByRole("button", { name: "Thử lại" }));
     await waitFor(() => expect(vi.mocked(getJobProgress)).toHaveBeenCalledTimes(2));
     retryReceipt.resolve({ job_id: "job-1", status: "QUEUED", job_manifest_checksum: "sha256:" + "c".repeat(64) });
@@ -219,6 +241,7 @@ describe("workflow scene", () => {
     const failed = failedProgress(true);
     vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: failed });
     render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
+    await openBell();
     fireEvent.click(await screen.findByRole("button", { name: "Thử lại" }));
     await waitFor(() => expect(vi.mocked(retryJob)).toHaveBeenCalledOnce());
     expect(await screen.findByText("Đang đồng bộ lần chạy mới")).toBeInTheDocument();
@@ -229,6 +252,7 @@ describe("workflow scene", () => {
     vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: failed });
     vi.mocked(retryJob).mockRejectedValue(new ApiError(409, "Job đã đổi trạng thái; tải lại tiến trình"));
     render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
+    await openBell();
     fireEvent.click(await screen.findByRole("button", { name: "Thử lại" }));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Job đã đổi trạng thái"));
     expect(screen.getByRole("button", { name: "Thử lại" })).toBeInTheDocument();
@@ -240,6 +264,7 @@ describe("workflow scene", () => {
     vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: failed });
     vi.mocked(retryJob).mockRejectedValue(new ApiError(429, JSON.stringify({ code: "guest_daily_job_quota_exceeded" })));
     render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
+    await openBell();
     fireEvent.click(await screen.findByRole("button", { name: "Thử lại" }));
     await waitFor(() => expect(authState.refresh).toHaveBeenCalledOnce());
     expect(await screen.findByRole("alert")).toHaveTextContent("hết lượt Guest");
@@ -252,6 +277,7 @@ describe("workflow scene", () => {
     const queued: JobProgress = { ...failed, status: "QUEUED", attempt: 2, updated_at: "2026-10-05T00:00:00Z", error: null };
     vi.mocked(getJobProgress).mockResolvedValueOnce({ ok: true, data: failed }).mockResolvedValue({ ok: true, data: queued });
     render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
+    await openBell();
     fireEvent.click(await screen.findByRole("button", { name: "Thử lại" }));
     await waitFor(() => expect(authState.refresh).toHaveBeenCalledOnce());
     expect(vi.mocked(retryJob)).toHaveBeenCalledOnce();
@@ -261,6 +287,7 @@ describe("workflow scene", () => {
     vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: failed });
     vi.mocked(retryJob).mockRejectedValue(new ApiError(500, "gateway failed"));
     render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
+    await openBell();
     fireEvent.click(await screen.findByRole("button", { name: "Thử lại" }));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("trạng thái mới nhất vẫn là FAILED"));
     expect(screen.getByRole("button", { name: "Thử lại" })).toBeInTheDocument();
