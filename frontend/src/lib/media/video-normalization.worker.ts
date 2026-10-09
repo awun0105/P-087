@@ -2,13 +2,14 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import {
   ALL_FORMATS,
   BlobSource,
-  Conversion,
   Input,
   Mp4OutputFormat,
   Output,
   Quality,
   StreamTarget,
   VideoSampleSink,
+  VideoSampleSource,
+  canEncodeVideo,
   type InputAudioTrack,
   type InputVideoTrack,
   type StreamTargetChunk,
@@ -65,7 +66,6 @@ const workerScope = globalThis as unknown as {
   addEventListener(type: "message", listener: (event: MessageEvent<WorkerRequest>) => void): void;
 };
 let activeRequestId: string | null = null;
-let activeConversion: Conversion | null = null;
 let cancelled = false;
 
 function postProgress(requestId: string, phase: VideoPreparationPhase, progress: number): void {
@@ -444,7 +444,6 @@ async function runPreparation(message: VideoPreparationStart): Promise<VideoPrep
   let input: Input | null = null;
   let outputInput: Input | null = null;
   let selectionWriter: FileSystemWritableFileStream | null = null;
-  let conversion: Conversion | null = null;
   let output: Output | null = null;
   let completed = false;
 
@@ -541,28 +540,38 @@ async function runPreparation(message: VideoPreparationStart): Promise<VideoPrep
     let sourceFrameCount = 0;
     let selectedFrameCount = 0;
     let lastSourcePts: number | null = null;
-    const audioOmitted = message.omit_audio_with_consent && audioTracks.length > 0;
+    // The encode loop below writes a video-only MP4, so any source audio is omitted (owner decision 2026-10-09).
+    const audioOmitted = audioTracks.length > 0;
 
-    conversion = await Conversion.init({
-      input,
-      output,
-      tracks: "all",
-      trim: { start: 0 },
-      // The video callback always transcodes; keep copying preferred so compatible audio can pass through.
-      copy: { mode: "preferred", shiftTolerance: 0 },
-      showWarnings: false,
-      video: (track) => track.id === videoTrack.id ? {
-        width: dimensions.width,
-        height: dimensions.height,
-        fit: "fill",
-        allowTransformationMetadata: false,
-        codec: "avc",
-        quality: new Quality({ bitrate: presetBitrate(preset), bitrateMode: "variable" }),
-        forceTranscode: true,
-        // Do not pass frameRate: MediaBunny's CFR helper duplicates frames to fill VFR gaps.
-        // This callback applies the explicit PTS cap and returns null for dropped frames.
-        process: async (sample) => {
+    const quality = new Quality({ bitrate: presetBitrate(preset), bitrateMode: "variable" });
+    if (!await canEncodeVideo("avc", { width: dimensions.width, height: dimensions.height, quality })) {
+      throw new VideoPreparationError("unsupported_codec", "The browser cannot encode this video into the required AVC profile.");
+    }
+    // Frames are pulled straight from the decoder and only the selected ones reach the encoder source, which
+    // bakes rotation, pixel aspect ratio and the resize into them. MediaBunny's Conversion runs that canvas
+    // transform on every decoded frame before its `process` hook can drop one, so a 60 FPS source paid for
+    // twice the resizes it needed (measured 2026-10-09 on a 4K60 phone capture). Audio is never carried over.
+    // A source that already has the output geometry goes to the encoder untouched: the transform draws every
+    // frame through a canvas, which made a same-size 720p video three times slower (measured 2026-10-09).
+    const alreadyOutputGeometry = rotation === 0 && !flip && pixelAspect.num === pixelAspect.den &&
+      codedWidth === dimensions.width && codedHeight === dimensions.height;
+    const videoSource = new VideoSampleSource({
+      codec: "avc",
+      quality,
+      alpha: "discard",
+      sizeChangeBehavior: "fill",
+      ...(alreadyOutputGeometry ? {} : { transform: { width: dimensions.width, height: dimensions.height, fit: "fill" as const } }),
+    });
+    output.addVideoTrack(videoSource);
+    await output.start();
+
+    postProgress(requestId, "encoding", 0.08);
+    try {
+      // Do not use the encoder's frameRate option: its CFR helper duplicates frames to fill VFR gaps.
+      for await (const sample of new VideoSampleSink(videoTrack).samples()) {
+        try {
           failIfCancelled();
+          if (sample.timestamp + sample.duration <= 0) continue;
           const sourceIndex = sourceFrameCount;
           const sourcePts = timestampToTicks(sample.timestamp, sourceTimeResolution);
           if (lastSourcePts !== null && sourcePts <= lastSourcePts) {
@@ -571,38 +580,23 @@ async function runPreparation(message: VideoPreparationStart): Promise<VideoPrep
           sourceFrameRate.add(sourcePts);
           sourceFrameCount += 1;
           lastSourcePts = sourcePts;
-          if (!selector.shouldKeep(sourcePts)) return null;
+          if (!selector.shouldKeep(sourcePts)) continue;
           await selectionRows.write(sourceIndex, sourcePts);
           selectedFrameCount += 1;
-          const progress = Math.min(0.82, 0.08 + Math.max(0, sample.timestamp - sourceFirstTimestamp) / durationSeconds * 0.74);
-          postProgress(requestId, "encoding", progress);
-          return sample;
-        },
-      } : { discard: true },
-      audio: () => audioOmitted ? { discard: true } : {},
-    });
-    activeConversion = conversion;
-
-    const unwantedDiscard = conversion.discardedTracks.find((item) =>
-      item.reason !== "discarded_by_user" && !(audioOmitted && item.track.isAudioTrack()),
-    );
-    if (unwantedDiscard?.track.isAudioTrack() && !audioOmitted) {
-      throw new VideoPreparationError("unsupported_audio", "An audio track could not be preserved. Choose explicitly to omit audio or use a compatible source.");
-    }
-    if (unwantedDiscard) {
-      throw new VideoPreparationError("unsupported_codec", "The browser cannot encode this video into the required AVC profile.");
-    }
-    if (!conversion.isValid) throw new VideoPreparationError("unsupported_codec", "The browser could not prepare the required AVC/MP4 output.");
-
-    postProgress(requestId, "encoding", 0.08);
-    conversion.onProgress = (progress) => postProgress(requestId, "encoding", 0.08 + Math.max(0, Math.min(1, progress)) * 0.74);
-    try {
-      await conversion.execute();
+          await videoSource.add(sample);
+          postProgress(requestId, "encoding",
+            Math.min(0.82, 0.08 + Math.max(0, sample.timestamp - sourceFirstTimestamp) / durationSeconds * 0.74));
+        } finally {
+          sample.close();
+        }
+      }
+      failIfCancelled();
+      videoSource.close();
+      await output.finalize();
     } catch (error) {
       if (cancelled) throw new VideoPreparationError("cancelled", "Video preparation was cancelled; no upload was started.");
+      if (error instanceof VideoPreparationError) throw error;
       throw new VideoPreparationError("media_processing_failed", `Local decode, encode, or MP4 mux failed: ${String(error).slice(0, 240)}`);
-    } finally {
-      activeConversion = null;
     }
     failIfCancelled();
     await selectionRows.flush();
@@ -666,7 +660,6 @@ async function runPreparation(message: VideoPreparationStart): Promise<VideoPrep
     postProgress(requestId, "verifying", 1);
     return result;
   } finally {
-    activeConversion = null;
     input?.dispose();
     outputInput?.dispose();
     if (selectionWriter) await selectionWriter.abort("video preparation ended before frame mapping completed").catch(() => undefined);
@@ -684,7 +677,6 @@ workerScope.addEventListener("message", (event: MessageEvent<WorkerRequest>) => 
   if (message.type === "cancel") {
     if (activeRequestId === message.request_id) {
       cancelled = true;
-      void activeConversion?.cancel();
     }
     return;
   }
@@ -707,7 +699,6 @@ workerScope.addEventListener("message", (event: MessageEvent<WorkerRequest>) => 
     workerScope.postMessage(response);
   }).finally(() => {
     activeRequestId = null;
-    activeConversion = null;
     cancelled = false;
   });
 });
