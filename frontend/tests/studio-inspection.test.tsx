@@ -5,9 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PageTitleProvider, crumbsFor } from "@/features/shell/Breadcrumbs";
 import { canInspect, inspectionStage } from "@/features/studio/inspection";
 import { LidarCalibrationQAStage } from "@/features/studio/inspection/LidarCalibrationQAStage";
+import { LidarOdometryStage } from "@/features/studio/inspection/LidarOdometryStage";
 import { StageInspectionPage } from "@/features/studio/inspection/StageInspectionPage";
 import { PipelineTimeline } from "@/features/studio/PipelineTimeline";
-import { LIDAR_CALIBRATION_QA_STAGE, STUDIO_STAGES, stagesFor } from "@/features/studio/stages";
+import { LIDAR_CALIBRATION_QA_STAGE, LIDAR_ODOMETRY_STAGE, STUDIO_STAGES, stagesFor } from "@/features/studio/stages";
 import { ApiError } from "@/lib/api/client";
 import { getJob, getProject, listJobArtifacts } from "@/lib/api/endpoints";
 import { getJobProgress } from "@/lib/api/studio";
@@ -69,10 +70,49 @@ describe("Inspect theo giai đoạn", () => {
     expect(canInspect(waiting, "ST-METRIC-CANONICALIZE")).toBe(false);
     expect(canInspect(waiting, "ST-VISUAL-RECON")).toBe(true);
     expect(inspectionStage("ST-LIDAR-CALIBRATION-QA")?.title).toBe("QA calibration LiDAR");
+    expect(inspectionStage(LIDAR_ODOMETRY_STAGE.id)).toBe(LIDAR_ODOMETRY_STAGE);
+    expect(stagesFor([LIDAR_ODOMETRY_STAGE.id]).map((stage) => stage.id).slice(3, 4)).toEqual([
+      LIDAR_ODOMETRY_STAGE.id,
+    ]);
     const lidarStages = stagesFor(["ST-LIDAR-INGEST", "ST-LIDAR-CALIBRATION-QA"]);
     expect(lidarStages.map((stage) => stage.id).slice(3, 5)).toEqual([
       "ST-LIDAR-INGEST", "ST-LIDAR-CALIBRATION-QA",
     ]);
+  });
+
+  it("shows estimated poses as local diagnostics while world, floor and alignment remain pending", async () => {
+    const reference: ProductArtifactRef = {
+      artifact_type: "EstimatedTrajectoryConsumerEvidence",
+      schema_version: "1.0",
+      artifact_uri: "artifact://jobs/job-a/attempts/attempt-a/lidar-odometry/consumer-evidence.json",
+      artifact_checksum: sha,
+      data_class: "derived",
+      producer_stage: LIDAR_ODOMETRY_STAGE.id,
+      job_id: "job-a",
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        artifact_type: "EstimatedTrajectoryConsumerEvidence",
+        job_id: "job-a",
+        recipe_group: "R6",
+        ingest_binding: { source_scan_file_ids: ["scan-1", "scan-2"] },
+        odometry_runtime_id: "kiss-icp-python",
+        odometry_runtime_version: "1.3.0",
+        odometry_profile_checksum: sha,
+        runtime_qualification_status: "qualified",
+        world_frame_status: "pending_world_from_map_confirmation",
+        floor_status: "pending_floor_and_up_axis_evidence",
+        alignment_status: "not_registered",
+      }),
+    }));
+    render(<LidarOdometryStage jobId="job-a" artifacts={[reference]} />);
+
+    expect(await screen.findByText(/local odometry map/)).toBeInTheDocument();
+    expect(screen.getByText("pending_world_from_map_confirmation")).toBeInTheDocument();
+    expect(screen.getByText("pending_floor_and_up_axis_evidence")).toBeInTheDocument();
+    expect(screen.getByText("not_registered")).toBeInTheDocument();
+    expect(screen.getByText(/không dùng làm LiDAR canonical hoặc collision source/)).toBeInTheDocument();
   });
 
   it("báo trạng thái chẩn đoán, hiển thị overlay nhưng không cấp collision eligibility", async () => {

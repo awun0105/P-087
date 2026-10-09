@@ -21,14 +21,17 @@ from src.models.contracts.artifacts import (
     JsonObject,
     ProductArtifactRef,
 )
-from src.models.contracts.identity import canonical_content_checksum
+from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
 from src.models.contracts.input_assembly import (
     CandidateState,
+    DistanceUnit,
     InputAssemblySnapshot,
+    InputAssetFormat,
     InputRecipe,
     InputRole,
     RecipeGroup,
     RuntimeQualificationStatus,
+    TrajectoryOrigin,
     VideoRecipeCandidate,
     verify_input_assembly_checksum,
     verify_input_recipe_checksum,
@@ -437,7 +440,12 @@ class ProjectRegistry:
             raise ValueError("Only an exact ready video recipe candidate may create a reconstruction job")
         if candidate.runtime.status != RuntimeQualificationStatus.QUALIFIED:
             raise ValueError("The selected worker runtime is not qualified")
-        if candidate.recipe_group not in {RecipeGroup.RGB_ONLY, RecipeGroup.SUPPLIED_TRAJECTORY}:
+        if candidate.recipe_group not in {
+            RecipeGroup.RGB_ONLY,
+            RecipeGroup.SUPPLIED_TRAJECTORY,
+            RecipeGroup.ESTIMATED_TRAJECTORY,
+            RecipeGroup.SENSOR_GUIDED,
+        }:
             raise ValueError("No worker stage adapter exists for this input recipe")
         if (
             report.state.value != "ready"
@@ -472,7 +480,7 @@ class ProjectRegistry:
         if candidate.recipe_group == RecipeGroup.RGB_ONLY:
             if lidar is not None or request.lidar is not None:
                 raise ValueError("R1 cannot attach a LiDAR upload")
-        else:
+        elif candidate.recipe_group == RecipeGroup.SUPPLIED_TRAJECTORY:
             if (
                 lidar is None
                 or request.lidar is None
@@ -515,6 +523,47 @@ class ProjectRegistry:
                 or len(scan_ids) != evidence.scan_count
             ):
                 raise ValueError("R4 recipe members do not match the verified LiDAR package inventory")
+        else:
+            declarations = assembly.declarations
+            scan_ids = role_bindings.get(InputRole.LIDAR_SCAN, [])
+            scan_time_ids = role_bindings.get(InputRole.LIDAR_SCAN_TIMES, [])
+            if (
+                lidar is not None
+                or request.lidar is not None
+                or candidate.trajectory_origin != TrajectoryOrigin.ESTIMATED
+                or len(scan_ids) < 2
+                or len(scan_time_ids) != 1
+                or role_bindings.get(InputRole.SENSOR_TRAJECTORY)
+                or declarations.coordinate_unit is None
+                or declarations.coordinate_unit.value != DistanceUnit.METER
+                or declarations.lidar_frame_id is None
+                or (declarations.lidar_timestamp_unit is None and declarations.timestamp_unit is None)
+            ):
+                raise ValueError("R5/R6 require metric ordered scans, a declared sensor frame and exact scan times")
+            if candidate.recipe_group == RecipeGroup.SENSOR_GUIDED and (
+                len(role_bindings.get(InputRole.CAMERA_LIDAR_CALIBRATION, [])) != 1
+                or len(role_bindings.get(InputRole.RGB_FRAME_TIMES, [])) != 1
+                or (declarations.rgb_timestamp_unit is None and declarations.timestamp_unit is None)
+            ):
+                raise ValueError("Estimated R6 requires exact calibration and RGB timestamp bindings")
+            if candidate.recipe_group == RecipeGroup.ESTIMATED_TRAJECTORY and (
+                role_bindings.get(InputRole.CAMERA_LIDAR_CALIBRATION) or role_bindings.get(InputRole.RGB_FRAME_TIMES)
+            ):
+                raise ValueError("R5 scan-only recipes cannot carry R6 sensor-guided inputs")
+            selected_ids = [
+                *scan_ids,
+                *scan_time_ids,
+                *role_bindings.get(InputRole.CAMERA_LIDAR_CALIBRATION, []),
+                *role_bindings.get(InputRole.RGB_FRAME_TIMES, []),
+            ]
+            selected = [by_file_id[file_id] for file_id in selected_ids]
+            if any(item.observed_format != InputAssetFormat.POINT_CLOUD_PCD for item in selected[: len(scan_ids)]):
+                raise ValueError("R5/R6 currently support checked PCD scans only")
+            if any(
+                item.archive_member is not None and item.archive_member.container_checksum != item.source_file.checksum
+                for item in selected
+            ):
+                raise ValueError("R5/R6 archive members must bind their exact uploaded container checksum")
         record = self.create_project_from_upload(
             upload,
             request,
@@ -1135,6 +1184,282 @@ class ProjectRegistry:
             job_manifest_checksum=reference.artifact_checksum,
         )
         self.persistence.save_job(updated, reference, event, expected=expected)
+        return updated
+
+    def record_lidar_odometry(self, expected: JobManifest, stage: StageArtifact) -> JobManifest:
+        """CAS-commit one source-bound estimated trajectory without canonicalizing its local map."""
+        from src.models.contracts.input_assembly import (
+            InputAssemblySnapshot,
+            InputRecipe,
+            InputResolutionReport,
+            RecipeGroup,
+            RuntimeCapabilityKey,
+            RuntimeQualificationRegistry,
+            RuntimeQualificationStatus,
+            StagedInputFile,
+            VideoRecipeCandidate,
+            verify_input_assembly_checksum,
+            verify_input_recipe_checksum,
+            verify_input_resolution_checksum,
+            verify_runtime_registry_checksum,
+        )
+        from src.models.contracts.reconstruction import EstimatedTrajectoryArtifact, EstimatedTrajectoryConsumerEvidence
+        from src.services.reconstruction.lidar.odometry import (
+            DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION,
+            lidar_odometry_profile_checksum,
+        )
+
+        if self.persistence is None:
+            raise RuntimeStateConflictError("Real worker cần durable registry")
+        if (
+            expected.status != JobStatus.RUNNING
+            or expected.current_stage != StageId.LIDAR_ODOMETRY
+            or stage.stage_id != StageId.LIDAR_ODOMETRY
+            or stage.status != StageStatus.SUCCEEDED
+            or stage.error is not None
+            or stage.artifact_type != "EstimatedTrajectoryConsumerEvidence"
+            or stage.artifact_uri is None
+            or stage.artifact_checksum is None
+            or stage.data_class != ArtifactDataClass.DERIVED
+        ):
+            raise ValueError("LiDAR odometry receipt differs from the claimed running stage")
+        if any(
+            item.stage_id == StageId.LIDAR_ODOMETRY and item.status == StageStatus.SUCCEEDED
+            for item in expected.stage_artifacts
+        ):
+            raise ValueError("A successful odometry stage is immutable within the accepted recipe")
+        if not stage.artifact_uri.startswith(f"artifact://jobs/{expected.job_id}/attempts/"):
+            raise ValueError("LiDAR odometry evidence must be attempt-scoped inside the job namespace")
+
+        evidence_ref = self._to_product_ref(expected.job_id, stage)
+        evidence = EstimatedTrajectoryConsumerEvidence.model_validate_json(
+            self.runtime_resolver.require(evidence_ref).read_bytes()
+        )
+        project = self.get_project(expected.project_id)
+        accepted_refs = (
+            project.input_assembly_ref,
+            project.input_resolution_ref,
+            project.input_runtime_registry_ref,
+            project.input_recipe_ref,
+        )
+        if any(reference is None for reference in accepted_refs):
+            raise ValueError("Estimated odometry requires the complete accepted input-evidence chain")
+        if evidence.job_id != expected.job_id:
+            raise ValueError("Odometry consumer evidence differs from the accepted job input chain")
+        source_refs = tuple(reference for reference in accepted_refs if reference is not None)
+        evidence_refs = (
+            evidence.assembly_ref,
+            evidence.resolution_ref,
+            evidence.runtime_registry_ref,
+            evidence.recipe_ref,
+        )
+        evidence_names = (
+            "input_assembly.json",
+            "input_resolution.json",
+            "input_runtime_registry.json",
+            "input_recipe.json",
+        )
+        evidence_root = stage.artifact_uri.removesuffix("/consumer-evidence.json")
+        if evidence_root == stage.artifact_uri:
+            raise ValueError("Odometry consumer evidence URI is missing its attempt-scoped filename")
+        for evidence_input, source_input, filename in zip(evidence_refs, source_refs, evidence_names, strict=True):
+            provenance = evidence_input.source_provenance or {}
+            if (
+                evidence_input.artifact_type != source_input.artifact_type
+                or evidence_input.schema_version != source_input.schema_version
+                or evidence_input.artifact_checksum != source_input.artifact_checksum
+                or evidence_input.data_class != source_input.data_class
+                or evidence_input.producer_stage != source_input.producer_stage
+                or evidence_input.job_id != expected.job_id
+                or evidence_input.artifact_uri != f"{evidence_root}/input/{filename}"
+                or provenance.get("accepted_project_ref_uri") != source_input.artifact_uri
+                or provenance.get("accepted_project_ref_checksum") != source_input.artifact_checksum
+            ):
+                raise ValueError("Odometry consumer evidence must copy the exact accepted input refs into this job")
+            if (
+                self.runtime_resolver.require(evidence_input).read_bytes()
+                != self.runtime_resolver.require(source_input).read_bytes()
+            ):
+                raise ValueError("Job-scoped accepted input evidence differs from the immutable project source")
+
+        assembly = InputAssemblySnapshot.model_validate_json(
+            self.runtime_resolver.require(evidence.assembly_ref).read_bytes()
+        )
+        report = InputResolutionReport.model_validate_json(
+            self.runtime_resolver.require(evidence.resolution_ref).read_bytes()
+        )
+        runtime_registry = RuntimeQualificationRegistry.model_validate_json(
+            self.runtime_resolver.require(evidence.runtime_registry_ref).read_bytes()
+        )
+        recipe = InputRecipe.model_validate_json(self.runtime_resolver.require(evidence.recipe_ref).read_bytes())
+        verify_input_assembly_checksum(assembly)
+        verify_input_resolution_checksum(report)
+        verify_runtime_registry_checksum(runtime_registry)
+        verify_input_recipe_checksum(recipe)
+        candidate = next((item for item in report.candidates if item.candidate_id == recipe.candidate_id), None)
+        expected_group = (
+            RecipeGroup.ESTIMATED_TRAJECTORY if evidence.recipe_group == "R5" else RecipeGroup.SENSOR_GUIDED
+        )
+        if (
+            report.state.value != "ready"
+            or report.recommended_candidate_id != recipe.candidate_id
+            or not isinstance(candidate, VideoRecipeCandidate)
+            or candidate.state != CandidateState.READY
+            or candidate.recipe_group != expected_group
+            or recipe.recipe_group != expected_group
+            or recipe.trajectory_origin.value != "estimated"
+            or evidence.ingest_binding.assembly_checksum != assembly.assembly_checksum
+            or evidence.ingest_binding.recipe_checksum != recipe.recipe_checksum
+        ):
+            raise ValueError("Odometry evidence does not bind the unique accepted estimated-trajectory recipe")
+
+        role_bindings = {binding.role: binding.file_ids for binding in recipe.bindings}
+        scan_file_ids = role_bindings.get(InputRole.LIDAR_SCAN, [])
+        scan_time_file_ids = role_bindings.get(InputRole.LIDAR_SCAN_TIMES, [])
+        staged_by_id = {item.file_id: item for item in assembly.files}
+        if len(scan_file_ids) < 2 or len(scan_time_file_ids) != 1:
+            raise ValueError("Accepted odometry recipe must bind its scan sequence and one scan-time source")
+        scan_files = [staged_by_id[file_id] for file_id in scan_file_ids]
+        expected_scan_checksums = [
+            item.archive_member.member_checksum if item.archive_member is not None else item.source_file.checksum
+            for item in scan_files
+        ]
+        if (
+            evidence.ingest_binding.source_scan_file_ids != scan_file_ids
+            or evidence.ingest_binding.source_scan_checksums != expected_scan_checksums
+        ):
+            raise ValueError("Estimated trajectory scan order or checksums differ from the accepted recipe")
+
+        def require_bound_member(reference: ArtifactRef, staged: StagedInputFile, role: InputRole) -> None:
+            """Verify a copied worker input against its exact immutable assembly member."""
+            source_provenance: dict[str, object] = {
+                "assembly_checksum": assembly.assembly_checksum,
+                "file_id": staged.file_id,
+                "upload_id": staged.upload_id,
+                "role": role.value,
+                "source_file_checksum": staged.source_file.checksum,
+            }
+            source_checksum = staged.source_file.checksum
+            if staged.archive_member is not None:
+                source_provenance["source_member_checksum"] = staged.archive_member.member_checksum
+                source_provenance["source_member_path"] = staged.archive_member.member_path
+                source_checksum = staged.archive_member.member_checksum
+            if (
+                reference.artifact_type != "InputAssemblyMember"
+                or reference.data_class != ArtifactDataClass.PRODUCT_INPUT
+                or reference.producer_stage != StageId.INPUT_VALIDATE
+                or reference.job_id != expected.job_id
+                or not reference.artifact_uri.startswith(f"artifact://jobs/{expected.job_id}/attempts/")
+                or "/lidar-odometry/input/" not in reference.artifact_uri
+                or reference.artifact_checksum != source_checksum
+                or reference.source_provenance != source_provenance
+            ):
+                raise ValueError("Odometry consumer input ref differs from its exact accepted assembly member")
+
+        scan_times = staged_by_id[scan_time_file_ids[0]]
+        require_bound_member(evidence.lidar_scan_times_ref, scan_times, InputRole.LIDAR_SCAN_TIMES)
+        if evidence.ingest_binding.timestamp_file_ref != evidence.lidar_scan_times_ref:
+            raise ValueError("Odometry ingest binding must reference its accepted LiDAR scan-time member")
+        if expected_group == RecipeGroup.SENSOR_GUIDED:
+            calibration_file_ids = role_bindings.get(InputRole.CAMERA_LIDAR_CALIBRATION, [])
+            rgb_frame_time_file_ids = role_bindings.get(InputRole.RGB_FRAME_TIMES, [])
+            if len(calibration_file_ids) != 1 or len(rgb_frame_time_file_ids) != 1:
+                raise ValueError("Accepted R6 recipe must bind one calibration and one RGB frame-time source")
+            require_bound_member(
+                evidence.camera_lidar_calibration_ref,
+                staged_by_id[calibration_file_ids[0]],
+                InputRole.CAMERA_LIDAR_CALIBRATION,
+            )
+            require_bound_member(
+                evidence.rgb_frame_times_ref,
+                staged_by_id[rgb_frame_time_file_ids[0]],
+                InputRole.RGB_FRAME_TIMES,
+            )
+
+        odometry_runtime = next(
+            (item for item in runtime_registry.capabilities if item.capability_key == RuntimeCapabilityKey.R5), None
+        )
+        if (
+            odometry_runtime is None
+            or odometry_runtime.status != RuntimeQualificationStatus.QUALIFIED
+            or evidence.odometry_runtime_id != odometry_runtime.runtime_id
+            or evidence.odometry_runtime_version != odometry_runtime.runtime_version
+            or evidence.runtime_qualification_status != RuntimeQualificationStatus.QUALIFIED.value
+            or evidence.runtime_qualification_evidence_checksum != odometry_runtime.qualification_evidence_checksum
+        ):
+            raise ValueError("Persisted odometry must bind the exact qualified R5 runtime record")
+        if expected_group == RecipeGroup.SENSOR_GUIDED:
+            sensor_runtime = next(
+                (item for item in runtime_registry.capabilities if item.capability_key == RuntimeCapabilityKey.R6), None
+            )
+            if (
+                sensor_runtime is None
+                or sensor_runtime.status != RuntimeQualificationStatus.QUALIFIED
+                or evidence.sensor_guided_runtime_id != sensor_runtime.runtime_id
+                or evidence.sensor_guided_runtime_version != sensor_runtime.runtime_version
+                or evidence.sensor_guided_runtime_evidence_checksum != sensor_runtime.qualification_evidence_checksum
+            ):
+                raise ValueError("Persisted R6 evidence must bind the exact qualified sensor-guided runtime")
+        profile_component = next(
+            (item for item in recipe.component_versions if item.component_id == "odometry-profile"), None
+        )
+        if (
+            profile_component is None
+            or profile_component.version != DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION
+            or profile_component.config_checksum != lidar_odometry_profile_checksum()
+        ):
+            raise ValueError("Persisted odometry recipe does not bind the exact qualified profile")
+
+        trajectory = EstimatedTrajectoryArtifact.model_validate_json(
+            self.runtime_resolver.require(evidence.trajectory_ref).read_bytes()
+        )
+        verify_content_checksum(trajectory, "artifact_checksum")
+        declared_sensor_frame = assembly.declarations.lidar_frame_id
+        if declared_sensor_frame is None:
+            raise ValueError("Accepted odometry recipe is missing its declared LiDAR sensor frame")
+        if (
+            trajectory.job_id != expected.job_id
+            or trajectory.assembly_id != assembly.assembly_id
+            or trajectory.assembly_revision != assembly.revision
+            or trajectory.assembly_checksum != assembly.assembly_checksum
+            or trajectory.recipe_checksum != recipe.recipe_checksum
+            or trajectory.world_from_map is not None
+            or trajectory.runtime_qualification_status != RuntimeQualificationStatus.QUALIFIED.value
+            or trajectory.runtime_qualification_evidence_checksum != odometry_runtime.qualification_evidence_checksum
+            or trajectory.config_checksum != evidence.odometry_profile_checksum
+            or trajectory.timestamp_file_checksum != evidence.lidar_scan_times_ref.artifact_checksum
+            or trajectory.sensor_frame_id != declared_sensor_frame.value
+            or evidence.ingest_binding.sensor_frame_id != trajectory.sensor_frame_id
+            or evidence.ingest_binding.odometry_map_frame_id != trajectory.odometry_map_frame_id
+            or evidence.ingest_binding.timestamp_file_ref != evidence.lidar_scan_times_ref
+            or [pose.source_scan_file_id for pose in trajectory.poses] != evidence.ingest_binding.source_scan_file_ids
+            or [pose.source_scan_checksum for pose in trajectory.poses] != evidence.ingest_binding.source_scan_checksums
+        ):
+            raise ValueError("Estimated trajectory artifact differs from its durable source binding")
+        completed_at = stage.completed_at or datetime.now(UTC)
+        updated = with_canonical_checksum(
+            expected.model_copy(
+                update={
+                    "stage_artifacts": [*expected.stage_artifacts, stage],
+                    "status": JobStatus.RUNNING,
+                    "current_stage": StageId.CAMERA_POSE,
+                    "completed_at": None,
+                }
+            ),
+            "job_manifest_checksum",
+        )
+        manifest_ref = self.lifecycle.store.publish_manifest(updated)
+        history = self.persistence.list_attempts(expected.job_id)
+        event = JobAttemptRecord(
+            attempt=history[-1].attempt,
+            status=updated.status,
+            current_stage=updated.current_stage,
+            recorded_at=completed_at,
+            job_manifest_uri=manifest_ref.artifact_uri,
+            job_manifest_checksum=manifest_ref.artifact_checksum,
+            stage_started_at=stage.started_at,
+        )
+        self.persistence.save_job(updated, manifest_ref, event, expected=expected)
         return updated
 
     def record_lidar_calibration_qa(self, expected: JobManifest, stage: StageArtifact) -> JobManifest:

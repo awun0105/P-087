@@ -155,6 +155,8 @@ class ProjectPersistence:
             raise ValueError("A project with an accepted input recipe requires its atomic run record")
         expected_upload_sources: dict[str, InputFile] = {}
         if input_assembly_run is not None and verified_input_chain is not None:
+            from src.models.contracts.input_assembly import InputRole, RecipeGroup
+
             assembly, report, _ = verified_input_chain
             candidate = next(
                 item
@@ -162,7 +164,10 @@ class ProjectPersistence:
                 if isinstance(item, VideoRecipeCandidate) and item.candidate_id == input_assembly_run.candidate_id
             )
             by_file_id = {item.file_id: item for item in assembly.files}
-            selected_file_ids = {file_id for binding in candidate.bindings for file_id in binding.file_ids}
+            role_bindings = {binding.role: binding.file_ids for binding in candidate.bindings}
+            selected_file_ids = set(role_bindings.get(InputRole.RGB_VIDEO, []))
+            if candidate.recipe_group == RecipeGroup.SUPPLIED_TRAJECTORY:
+                selected_file_ids.update(role_bindings.get(InputRole.LIDAR_SCAN, []))
             for file_id in selected_file_ids:
                 staged = by_file_id[file_id]
                 existing = expected_upload_sources.setdefault(staged.upload_id, staged.source_file)
@@ -322,6 +327,8 @@ class ProjectPersistence:
         commit: InputAssemblyRunCommit,
     ) -> tuple[InputAssemblySnapshot, InputResolutionReport, RuntimeQualificationRegistry]:
         """Validate every published artifact link before opening the atomic state transaction."""
+        from src.models.contracts.input_assembly import RecipeGroup, RuntimeCapabilityKey, RuntimeQualificationStatus
+
         references = (
             project.input_assembly_ref,
             project.input_resolution_ref,
@@ -359,7 +366,16 @@ class ProjectPersistence:
         selected = next((item for item in report.candidates if item.candidate_id == commit.candidate_id), None)
         if not isinstance(selected, VideoRecipeCandidate) or selected.state != CandidateState.READY:
             raise ValueError("Input run requires one exact ready video recipe candidate")
-        if selected.recipe_group.value not in {"R1", "R4"} or selected.runtime.status.value != "qualified":
+        if (
+            selected.recipe_group
+            not in {
+                RecipeGroup.RGB_ONLY,
+                RecipeGroup.SUPPLIED_TRAJECTORY,
+                RecipeGroup.ESTIMATED_TRAJECTORY,
+                RecipeGroup.SENSOR_GUIDED,
+            }
+            or selected.runtime.status != RuntimeQualificationStatus.QUALIFIED
+        ):
             raise ValueError("Input recipe has no qualified worker adapter")
         if (
             recipe.assembly_id != assembly.assembly_id
@@ -375,6 +391,40 @@ class ProjectPersistence:
             or recipe.config_checksum != manifest.config_checksum
         ):
             raise ValueError("Accepted recipe does not match the ready candidate and queued job")
+        if selected.recipe_group in {RecipeGroup.ESTIMATED_TRAJECTORY, RecipeGroup.SENSOR_GUIDED}:
+            from src.services.reconstruction.lidar.odometry import (
+                DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION,
+                lidar_odometry_profile_checksum,
+            )
+
+            capabilities = {item.capability_key: item for item in runtime_registry.capabilities}
+            odometry_runtime = capabilities.get(RuntimeCapabilityKey.R5)
+            profile = next(
+                (item for item in recipe.component_versions if item.component_id == "odometry-profile"), None
+            )
+            if (
+                odometry_runtime is None
+                or odometry_runtime.status != RuntimeQualificationStatus.QUALIFIED
+                or profile is None
+                or profile.version != DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION
+                or profile.config_checksum != lidar_odometry_profile_checksum()
+            ):
+                raise ValueError("Estimated input recipe requires the exact qualified R5 runtime and odometry profile")
+            if selected.recipe_group == RecipeGroup.SENSOR_GUIDED:
+                odometry_component = next(
+                    (
+                        item
+                        for item in recipe.component_versions
+                        if item.component_id == f"runtime-R5-{odometry_runtime.runtime_id}"
+                    ),
+                    None,
+                )
+                if (
+                    odometry_component is None
+                    or odometry_component.version != odometry_runtime.runtime_version
+                    or odometry_component.config_checksum != odometry_runtime.qualification_evidence_checksum
+                ):
+                    raise ValueError("R6 input recipe must bind its exact R5 odometry runtime")
         return assembly, report, runtime_registry
 
     @staticmethod

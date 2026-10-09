@@ -1,10 +1,12 @@
 """Producer-boundary tests for bounded, lease-fenced LiDAR odometry."""
 
 import hashlib
+import io
 import json
 import os
 import struct
 import time
+import zipfile
 from pathlib import Path
 from threading import Event, Timer
 
@@ -15,7 +17,14 @@ from pydantic import ValidationError
 from src.models.contracts.artifacts import ArtifactDataClass, ArtifactRef
 from src.models.contracts.coordinates import Transform
 from src.models.contracts.identity import verify_content_checksum
-from src.models.contracts.input_assembly import ClockRelation, TimestampUnit
+from src.models.contracts.input_assembly import (
+    ArchiveMemberRef,
+    ClockRelation,
+    RuntimeCapabilityKey,
+    RuntimeCapabilityRecord,
+    RuntimeQualificationStatus,
+    TimestampUnit,
+)
 from src.models.contracts.reconstruction import EstimatedTrajectoryArtifact
 from src.models.contracts.retryability import classify_retryability
 from src.services.orchestration.artifacts.store import ArtifactResolver, FilesystemArtifactStore
@@ -33,6 +42,7 @@ from src.services.reconstruction.lidar.odometry import (
     LidarOdometryProcessError,
     LidarOdometryProfile,
     LidarOdometryRuntimeSettings,
+    LidarOdometryScanInput,
     LidarOdometryTimeoutError,
     LidarOdometryWorker,
     LidarOdometryWorkerRequest,
@@ -226,6 +236,69 @@ def test_worker_publishes_byte_verified_scan_native_unqualified_trajectory(
     assert result.artifact_ref.artifact_checksum != result.trajectory.artifact_checksum
     with pytest.raises(FileExistsError):
         worker.run(request)
+
+
+def test_worker_binds_zip_scan_member_checksum_and_exact_qualified_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    resolver = ArtifactResolver(tmp_path / "artifacts")
+    store = FilesystemArtifactStore(resolver)
+    request = _worker_request(store, np.random.default_rng(8).uniform(1, 4, size=(40, 3)))
+    first_scan = request.scans[0]
+    source_bytes = resolver.require(first_scan.reference).read_bytes()
+    archive_stream = io.BytesIO()
+    with zipfile.ZipFile(archive_stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("scans/000000.pcd", source_bytes)
+    archive_bytes = archive_stream.getvalue()
+    container_ref = _publish_input(
+        store,
+        "artifact://jobs/job-odometry/input/lidar.zip",
+        archive_bytes,
+        "LidarScanArchive",
+    )
+    archived_scan = LidarOdometryScanInput(
+        file_id=first_scan.file_id,
+        reference=container_ref,
+        archive_member=ArchiveMemberRef(
+            container_checksum=container_ref.artifact_checksum,
+            member_path="scans/000000.pcd",
+            member_checksum=_sha(source_bytes),
+            uncompressed_size_bytes=len(source_bytes),
+        ),
+    )
+    runtime = RuntimeCapabilityRecord(
+        capability_key=RuntimeCapabilityKey.R5,
+        status=RuntimeQualificationStatus.QUALIFIED,
+        runtime_id="kiss-icp-python",
+        runtime_version="1.3.0",
+        qualification_evidence_checksum=_sha(b"qualified held-out runtime envelope"),
+    )
+    request = request.model_copy(
+        update={"scans": [archived_scan, *request.scans[1:]], "runtime_qualification": runtime}
+    )
+    worker = LidarOdometryWorker(
+        resolver,
+        store,
+        LidarOdometryRuntimeSettings(
+            python=Path("/tmp/r2s-lidar-runtime/bin/python"),
+            work_root=tmp_path / "attempts",
+        ),
+    )
+
+    def fake_run(
+        manifest: Path, output: Path, log: Path, profile: LidarOdometryProfile, **_: object
+    ) -> dict[str, object]:
+        del manifest, log
+        return _fake_process_output(output, profile)
+
+    monkeypatch.setattr(worker.process, "run", fake_run)
+    result = worker.run(request)
+
+    assert result.trajectory.runtime_qualification_status == "qualified"
+    assert result.trajectory.schema_version == "1.1"
+    assert result.trajectory.runtime_qualification_evidence_checksum == runtime.qualification_evidence_checksum
+    assert result.trajectory.poses[0].source_scan_checksum == _sha(source_bytes)
+    assert result.ingest_binding.source_scan_checksums[0] == _sha(source_bytes)
 
 
 def _diagnostic_trajectory(

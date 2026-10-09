@@ -539,6 +539,277 @@ async def test_input_assembly_dispatches_supplied_trajectory_only_from_exact_lid
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("recipe_group", ["R5", "R6"])
+async def test_estimated_odometry_run_requires_qualified_runtime_and_verified_rgb_bindings(
+    recipe_group: str, client: AsyncClient, studio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from src.models.contracts.input_assembly import (
+        RuntimeCapabilityKey,
+        RuntimeCapabilityRecord,
+        RuntimeQualificationRegistry,
+        RuntimeQualificationStatus,
+        seal_runtime_registry,
+    )
+    from src.services.orchestration.jobs.runner import _validate_project_input_recipe
+    from tests.test_reconstruction.test_lidar_package import _companions, _pcd, _scan, _zip
+
+    studio.settings.product_upload_max_bytes = 16 * 1024 * 1024
+    runtime_path = studio.root / f"input-runtime-{recipe_group.lower()}.json"
+    capabilities = [
+        RuntimeCapabilityRecord(
+            capability_key=RuntimeCapabilityKey.R5,
+            status=RuntimeQualificationStatus.QUALIFIED,
+            runtime_id="kiss-icp-python",
+            runtime_version="1.3.0",
+            qualification_evidence_checksum="sha256:" + "5" * 64,
+        )
+    ]
+    if recipe_group == "R6":
+        capabilities.append(
+            RuntimeCapabilityRecord(
+                capability_key=RuntimeCapabilityKey.R6,
+                status=RuntimeQualificationStatus.QUALIFIED,
+                runtime_id="qualified-r6-sensor-guided",
+                runtime_version="6.0.0",
+                qualification_evidence_checksum="sha256:" + "6" * 64,
+            )
+        )
+    runtime_path.write_text(
+        seal_runtime_registry(
+            RuntimeQualificationRegistry(
+                schema_version="1.0",
+                registry_version=f"test-{recipe_group.lower()}-v1",
+                capabilities=capabilities,
+                registry_checksum="sha256:" + "0" * 64,
+            )
+        ).model_dump_json()
+    )
+    studio.settings.product_input_runtime_registry = runtime_path
+
+    video = await client.post(
+        "/api/v1/input-assemblies/uploads",
+        params={"filename": "walk.mp4"},
+        content=b"\x00\x00\x00\x14ftypqt  fake-mp4",
+    )
+    scans = {f"lidar/{index:06d}.pcd": _pcd(_scan()) for index in range(4)}
+    scans["lidar/times.txt"] = b"0.0\n0.1\n0.2\n0.3\n"
+    if recipe_group == "R6":
+        companions = _companions()
+        scans["lidar/calibrations.txt"] = companions["calibrations.txt"]
+        scans["lidar/frame_times.txt"] = companions["frame_times.txt"]
+    scan_upload = await client.post(
+        "/api/v1/input-assemblies/uploads",
+        params={"filename": "raw-scans.zip"},
+        content=_zip(studio.root / f"{recipe_group.lower()}-scans.zip", scans).read_bytes(),
+    )
+    assert video.status_code == scan_upload.status_code == 201, (video.text, scan_upload.text)
+    member_ids = {
+        item["archive_member"]["member_path"]: item["file_id"]
+        for item in scan_upload.json()["staged_files"]
+        if item["archive_member"] is not None
+    }
+    declarations = {
+        "same_scene": {"value": True, "provenance": "declared"},
+        "cloud_state": {"value": "raw_scan_sequence", "provenance": "declared"},
+        "coordinate_unit": {"value": "m", "provenance": "declared"},
+        "lidar_frame_id": {"value": "lidar_sensor", "provenance": "declared"},
+        "lidar_timestamp_unit": {"value": "seconds", "provenance": "declared"},
+    }
+    bindings = [
+        {"binding_id": "scans", "role": "lidar_scan", "file_ids": [member_ids[f"lidar/{i:06d}.pcd"] for i in range(4)]},
+        {"binding_id": "scan-times", "role": "lidar_scan_times", "file_ids": [member_ids["lidar/times.txt"]]},
+    ]
+    if recipe_group == "R6":
+        declarations.update(
+            {
+                "clock_relation": {"value": "same_clock", "provenance": "declared"},
+                "rgb_timestamp_unit": {"value": "seconds", "provenance": "declared"},
+            }
+        )
+        bindings.extend(
+            [
+                {
+                    "binding_id": "calibration",
+                    "role": "camera_lidar_calibration",
+                    "file_ids": [member_ids["lidar/calibrations.txt"]],
+                },
+                {
+                    "binding_id": "rgb-frame-times",
+                    "role": "rgb_frame_times",
+                    "file_ids": [member_ids["lidar/frame_times.txt"]],
+                },
+            ]
+        )
+    created = await client.post(
+        "/api/v1/input-assemblies",
+        json={
+            "upload_ids": [video.json()["upload_id"], scan_upload.json()["upload_id"]],
+            "requested_intent": "video_reconstruction",
+            "declarations": declarations,
+            "bindings": [
+                {
+                    "binding_id": "rgb",
+                    "role": "rgb_video",
+                    "file_ids": [video.json()["staged_files"][0]["file_id"]],
+                },
+                *bindings,
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    assembly = created.json()
+    resolved = await client.post(
+        f"/api/v1/input-assemblies/{assembly['assembly_id']}/resolve", json={"revision": assembly["revision"]}
+    )
+    assert resolved.status_code == 200, resolved.text
+    report = resolved.json()["report"]
+    candidate = next(item for item in report["candidates"] if item.get("recipe_group") == recipe_group)
+    if recipe_group == "R6":
+        assert report["state"] == "needs_input"
+        assert "VERIFIED_RGB_FRAME_MAP_REQUIRED" in {fact["code"] for fact in report["missing_facts"]}
+        blocked = await client.post(
+            f"/api/v1/input-assemblies/{assembly['assembly_id']}/run",
+            json={
+                "revision": assembly["revision"],
+                "resolution_checksum": report["report_checksum"],
+                "candidate_id": candidate["candidate_id"],
+                "name": "R6 missing verified frame map",
+                "attestation": _ATTESTATION,
+            },
+            headers={"Idempotency-Key": "assembly-r6-unverified-frame-map"},
+        )
+        assert blocked.status_code == 409
+        return
+    assert report["state"] == "ready", {
+        "report": report["state"],
+        "recommended": report["recommended_candidate_id"],
+        "selected": candidate["candidate_id"],
+        "candidates": [
+            (item.get("recipe_group"), item["state"], [fact["code"] for fact in item["required_facts"]])
+            for item in report["candidates"]
+        ],
+        "missing": [fact["code"] for fact in report["missing_facts"]],
+    }
+    assert candidate["state"] == "ready"
+    assert report["recommended_candidate_id"] == candidate["candidate_id"]
+
+    accepted = await client.post(
+        f"/api/v1/input-assemblies/{assembly['assembly_id']}/run",
+        json={
+            "revision": assembly["revision"],
+            "resolution_checksum": report["report_checksum"],
+            "candidate_id": candidate["candidate_id"],
+            "name": f"Estimated trajectory {recipe_group}",
+            "attestation": _ATTESTATION,
+        },
+        headers={"Idempotency-Key": f"assembly-{recipe_group.lower()}-run-1"},
+    )
+    assert accepted.status_code == 201, accepted.text
+    job = studio.registry.get_job(accepted.json()["job"]["job_id"])
+    project = studio.registry.get_project(job.project_id)
+    from src.services.orchestration.inputs.assembly import InputAssemblyService
+    from src.services.orchestration.uploads import VideoUploadService
+
+    input_uploads = InputAssemblyService(
+        RuntimeDatabase(studio.settings.database_url), str(runtime_path), studio.registry.runtime_resolver
+    )
+    product_uploads = VideoUploadService(
+        RuntimeDatabase(studio.settings.database_url),
+        studio.registry.runtime_resolver,
+        studio.settings.product_upload_max_bytes,
+    )
+    assert project.project_id in product_uploads.get(video.json()["upload_id"]).project_ids
+    assert project.project_id in input_uploads.get_upload(scan_upload.json()["upload_id"]).project_ids
+    manifest = InputManifest.model_validate_json(
+        studio.registry.runtime_resolver.require(project.input_manifest_ref).read_bytes()
+    )
+    attempt = SimpleNamespace(
+        registry=studio.registry,
+        settings=SimpleNamespace(
+            database_url=studio.settings.database_url,
+            product_input_runtime_registry=runtime_path,
+        ),
+        job=job,
+    )
+    accepted_evidence = _validate_project_input_recipe(attempt, project, manifest)
+    assert accepted_evidence is not None
+    assert accepted_evidence.recipe.recipe_group.value == recipe_group
+    assert any(item.component_id == "odometry-profile" for item in accepted_evidence.recipe.component_versions)
+    assert job.status == JobStatus.QUEUED
+    if recipe_group != "R5":
+        return
+
+    import json
+
+    import numpy as np
+
+    from src.models.contracts.manifests import StageId
+    from src.models.contracts.reconstruction import EstimatedTrajectoryConsumerEvidence
+    from src.services.orchestration.jobs.models import TransitionRequest
+    from src.services.orchestration.jobs.runner import _Attempt, _execute_lidar_odometry
+    from src.services.reconstruction.lidar.odometry import KissIcpProcess
+
+    monkeypatch.setenv("REC17_LIDAR_ODOMETRY_WORK_ROOT", str(studio.root / "odometry-work"))
+    started = studio.registry.transition_job(job.job_id, TransitionRequest(target_status=JobStatus.RUNNING))
+    started = studio.registry.record_stage_progress(started, StageId.LIDAR_ODOMETRY)
+    workspace = studio.root / "worker" / job.job_id / "attempt-r5"
+    workspace.mkdir(parents=True)
+    attempt = _Attempt(registry=studio.registry, settings=studio.settings, job=started, workspace=workspace)
+
+    def fake_provider_run(
+        self: object,
+        manifest_path: Path,
+        output_path: Path,
+        log_path: Path,
+        profile: object,
+        *,
+        cancel_event: object,
+        lease_is_current: object,
+    ) -> dict[str, object]:
+        del self, log_path, profile, cancel_event
+        assert callable(lease_is_current) and lease_is_current()
+        manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        scan_specs = manifest_payload["scans"]
+        poses = []
+        for index in range(len(scan_specs)):
+            matrix = np.eye(4)
+            matrix[0, 3] = index * 0.1
+            poses.append(matrix.tolist())
+        result = {
+            "schema_version": "1.0",
+            "provider_id": "kiss-icp-python",
+            "provider_version": "1.3.0",
+            "poses": poses,
+            "point_counts": [int(np.load(item["path"], allow_pickle=False).shape[0]) for item in scan_specs],
+            "provider_elapsed_seconds": 0.2,
+            "provider_cpu_seconds": 0.1,
+            "provider_peak_rss_bytes": 32_000_000,
+            "process_elapsed_seconds": 0.3,
+        }
+        output_path.write_text(json.dumps(result), encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(KissIcpProcess, "run", fake_provider_run)
+    completed = _execute_lidar_odometry(attempt)
+
+    assert completed.status == JobStatus.RUNNING
+    assert completed.current_stage == StageId.CAMERA_POSE
+    stage = next(item for item in completed.stage_artifacts if item.stage_id == StageId.LIDAR_ODOMETRY)
+    evidence = studio.registry.runtime_resolver.load_model(
+        studio.registry._to_product_ref(completed.job_id, stage),
+        EstimatedTrajectoryConsumerEvidence,
+    )
+    assert evidence.world_frame_status == "pending_world_from_map_confirmation"
+    assert evidence.floor_status == "pending_floor_and_up_axis_evidence"
+    assert evidence.alignment_status == "not_registered"
+    assert evidence.assembly_ref.job_id == completed.job_id
+    assert evidence.assembly_ref.artifact_checksum == project.input_assembly_ref.artifact_checksum
+    assert len(evidence.ingest_binding.source_scan_file_ids) == 4
+
+
+@pytest.mark.asyncio
 async def test_scene_from_upload_requires_mvp_privacy_mode_and_known_upload(
     client: AsyncClient, studio: SimpleNamespace
 ) -> None:

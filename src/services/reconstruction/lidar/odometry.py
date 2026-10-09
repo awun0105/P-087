@@ -11,8 +11,10 @@ import math
 import os
 import re
 import signal
+import stat
 import subprocess
 import time
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 from threading import Event
@@ -25,7 +27,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from src.models.contracts.artifacts import ArtifactDataClass, ArtifactRef, ContractModel, Identifier
 from src.models.contracts.coordinates import Transform
 from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
-from src.models.contracts.input_assembly import DistanceUnit, TimestampUnit
+from src.models.contracts.input_assembly import (
+    ArchiveMemberRef,
+    DistanceUnit,
+    RuntimeCapabilityKey,
+    RuntimeCapabilityRecord,
+    RuntimeQualificationStatus,
+    TimestampUnit,
+)
 from src.models.contracts.reconstruction import (
     EstimatedTrajectoryArtifact,
     EstimatedTrajectoryDiagnostics,
@@ -38,7 +47,9 @@ from src.services.reconstruction.inputs.timestamps import parse_timestamp_rows, 
 from src.services.reconstruction.lidar.cloud_payload import load_xyz_points
 
 _PINNED_PROVIDER_VERSION = "1.3.0"
+DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION = "rec17-default-v1"
 _MAX_TIMESTAMP_FILE_BYTES = 16 * 1024 * 1024
+_MAX_SCAN_FILE_BYTES = 512 * 1024 * 1024
 _MAX_RESULT_BYTES = 128 * 1024 * 1024
 _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
@@ -66,17 +77,39 @@ class LidarOdometryProfile(ContractModel):
         return self
 
 
+def default_lidar_odometry_profile() -> LidarOdometryProfile:
+    """Versioned starter profile; deployment qualification must cover these exact bounds."""
+    return LidarOdometryProfile(min_range_m=0.0, max_range_m=80.0, voxel_size_m=0.25)
+
+
+def lidar_odometry_profile_checksum(profile: LidarOdometryProfile | None = None) -> str:
+    """Stable checksum bound into accepted recipes and the resulting trajectory artifact."""
+    return _canonical_checksum((profile or default_lidar_odometry_profile()).model_dump(mode="json"))
+
+
 class LidarOdometryScanInput(ContractModel):
     """One exact uploaded scan identity; no filesystem path crosses this contract."""
 
     file_id: Identifier
     reference: ArtifactRef
+    archive_member: ArchiveMemberRef | None = None
 
     @model_validator(mode="after")
     def _require_product_input(self) -> Self:
         if self.reference.data_class != ArtifactDataClass.PRODUCT_INPUT:
             raise ValueError("odometry scan refs must be product inputs")
+        if (
+            self.archive_member is not None
+            and self.archive_member.container_checksum != self.reference.artifact_checksum
+        ):
+            raise ValueError("scan archive member must bind the uploaded container checksum")
         return self
+
+    @property
+    def source_checksum(self) -> str:
+        return (
+            self.archive_member.member_checksum if self.archive_member is not None else self.reference.artifact_checksum
+        )
 
 
 class LidarOdometryWorkerRequest(ContractModel):
@@ -95,6 +128,7 @@ class LidarOdometryWorkerRequest(ContractModel):
     sensor_frame_id: Identifier
     odometry_map_frame_id: Identifier
     profile: LidarOdometryProfile
+    runtime_qualification: RuntimeCapabilityRecord | None = None
 
     @model_validator(mode="after")
     def _bind_request_identities(self) -> Self:
@@ -106,6 +140,12 @@ class LidarOdometryWorkerRequest(ContractModel):
             raise ValueError("LiDAR odometry requires scan coordinates declared in metres")
         if self.timestamp_file_ref.data_class != ArtifactDataClass.PRODUCT_INPUT:
             raise ValueError("timestamp file must be a product input")
+        if self.runtime_qualification is not None and (
+            self.runtime_qualification.capability_key != RuntimeCapabilityKey.R5
+            or self.runtime_qualification.status
+            not in {RuntimeQualificationStatus.QUALIFIED, RuntimeQualificationStatus.WIRED_UNQUALIFIED}
+        ):
+            raise ValueError("odometry request must bind a wired or qualified R5 runtime")
         refs = [self.timestamp_file_ref, *(scan.reference for scan in self.scans)]
         if any(reference.job_id is not None and reference.job_id != self.job_id for reference in refs):
             raise ValueError("odometry input references must belong to the requested job")
@@ -316,7 +356,13 @@ class LidarOdometryWorker:
             for index, scan in enumerate(request.scans):
                 self._require_running(cancel_event, lease_is_current)
                 source = self.resolver.require(scan.reference)
-                points = load_xyz_points(source, request.profile.max_points_per_scan)
+                scan_path = source
+                if scan.archive_member is not None:
+                    scan_path = attempt_dir / f"scan-source-{index:06d}.pcd"
+                    _extract_archive_member(source, scan.archive_member, scan_path, _MAX_SCAN_FILE_BYTES)
+                elif source.stat().st_size > _MAX_SCAN_FILE_BYTES:
+                    raise ValueError("LiDAR scan exceeds the configured source-file size limit")
+                points = load_xyz_points(scan_path, request.profile.max_points_per_scan)
                 ranges = np.linalg.norm(points, axis=1)
                 points = points[(ranges >= request.profile.min_range_m) & (ranges <= request.profile.max_range_m)]
                 if len(points) < request.profile.min_points_per_scan:
@@ -361,9 +407,20 @@ class LidarOdometryWorker:
             self._require_running(cancel_event, lease_is_current)
             trajectory = self._build_trajectory(request, timestamps, scan_point_counts, raw_result)
             artifact_bytes = trajectory.model_dump_json(indent=2).encode("utf-8") + b"\n"
+            source_provenance = {
+                "assembly_checksum": request.assembly_checksum,
+                "recipe_checksum": request.recipe_checksum,
+                "timestamp_file_checksum": request.timestamp_file_ref.artifact_checksum,
+                "trajectory_origin": "estimated",
+                "runtime_qualification_status": trajectory.runtime_qualification_status,
+            }
+            if trajectory.runtime_qualification_evidence_checksum is not None:
+                source_provenance["runtime_qualification_evidence_checksum"] = (
+                    trajectory.runtime_qualification_evidence_checksum
+                )
             reference = ArtifactRef(
                 artifact_type="EstimatedTrajectoryArtifact",
-                schema_version="1.0",
+                schema_version=trajectory.schema_version,
                 artifact_uri=(
                     f"artifact://jobs/{request.job_id}/attempts/{request.attempt_id}/lidar-odometry/trajectory.json"
                 ),
@@ -371,13 +428,7 @@ class LidarOdometryWorker:
                 data_class=ArtifactDataClass.DERIVED,
                 producer_stage="ST-LIDAR-ODOMETRY",
                 job_id=request.job_id,
-                source_provenance={
-                    "assembly_checksum": request.assembly_checksum,
-                    "recipe_checksum": request.recipe_checksum,
-                    "timestamp_file_checksum": request.timestamp_file_ref.artifact_checksum,
-                    "trajectory_origin": "estimated",
-                    "runtime_qualification_status": "wired_unqualified",
-                },
+                source_provenance=source_provenance,
             )
             self._require_running(cancel_event, lease_is_current)
             if self.writer.publish(reference, artifact_bytes) != reference:
@@ -394,7 +445,7 @@ class LidarOdometryWorker:
                 assembly_checksum=request.assembly_checksum,
                 recipe_checksum=request.recipe_checksum,
                 source_scan_file_ids=[scan.file_id for scan in request.scans],
-                source_scan_checksums=[scan.reference.artifact_checksum for scan in request.scans],
+                source_scan_checksums=[scan.source_checksum for scan in request.scans],
                 sensor_frame_id=request.sensor_frame_id,
                 odometry_map_frame_id=request.odometry_map_frame_id,
             )
@@ -450,6 +501,11 @@ class LidarOdometryWorker:
             raise LidarOdometryProcessError("KISS-ICP result protocol or provider identity mismatch")
         if output["provider_version"] != self.settings.provider_version:
             raise LidarOdometryRuntimeIncompatibleError("KISS-ICP provider version differs from the pinned runtime")
+        if request.runtime_qualification is not None and (
+            request.runtime_qualification.runtime_id != output["provider_id"]
+            or request.runtime_qualification.runtime_version != output["provider_version"]
+        ):
+            raise LidarOdometryRuntimeIncompatibleError("Observed KISS-ICP identity differs from R5 qualification")
         if output["point_counts"] != scan_point_counts:
             raise LidarOdometryProcessError("KISS-ICP point inventory differs from the validated scan inputs")
         matrices = output["poses"]
@@ -459,7 +515,7 @@ class LidarOdometryWorker:
             EstimatedTrajectoryPose(
                 scan_index=index,
                 source_scan_file_id=scan.file_id,
-                source_scan_checksum=scan.reference.artifact_checksum,
+                source_scan_checksum=scan.source_checksum,
                 timestamp_seconds=timestamps[index],
                 map_from_sensor=Transform(
                     parent_frame=request.odometry_map_frame_id,
@@ -492,9 +548,20 @@ class LidarOdometryWorker:
         lockfile = Path(__file__).resolve().parents[4] / "requirements-lidar-odometry.lock.txt"
         if not lockfile.is_file():
             raise LidarOdometryRuntimeUnavailableError("Pinned LiDAR odometry lockfile is missing")
+        qualification_status = (
+            request.runtime_qualification.status
+            if request.runtime_qualification is not None
+            else RuntimeQualificationStatus.WIRED_UNQUALIFIED
+        )
+        qualification_evidence_checksum = (
+            request.runtime_qualification.qualification_evidence_checksum
+            if request.runtime_qualification is not None
+            and qualification_status == RuntimeQualificationStatus.QUALIFIED
+            else None
+        )
         payload = {
             "artifact_type": "EstimatedTrajectoryArtifact",
-            "schema_version": "1.0",
+            "schema_version": "1.1" if qualification_status == RuntimeQualificationStatus.QUALIFIED else "1.0",
             "artifact_uri": (
                 f"artifact://jobs/{request.job_id}/attempts/{request.attempt_id}/lidar-odometry/trajectory.json"
             ),
@@ -516,7 +583,8 @@ class LidarOdometryWorker:
             "odometry_map_frame_id": request.odometry_map_frame_id,
             "world_from_map": None,
             "trajectory_origin": "estimated",
-            "runtime_qualification_status": "wired_unqualified",
+            "runtime_qualification_status": qualification_status.value,
+            "runtime_qualification_evidence_checksum": qualification_evidence_checksum,
             "poses": [pose.model_dump(mode="json") for pose in poses],
             "diagnostics": diagnostics.model_dump(mode="json"),
         }
@@ -596,6 +664,41 @@ def _rotation_matrix_to_quaternion(rotation: np.ndarray) -> tuple[float, float, 
     if norm <= 0 or not math.isfinite(norm):
         raise LidarOdometryProcessError("KISS-ICP rotation could not be converted to a quaternion")
     return tuple(value / norm for value in values)
+
+
+def _extract_archive_member(
+    archive_path: Path,
+    member: ArchiveMemberRef,
+    output_path: Path,
+    max_bytes: int,
+) -> None:
+    """Stream one checksum-bound regular ZIP member into this attempt's scratch space."""
+    if member.uncompressed_size_bytes > max_bytes:
+        raise ValueError("LiDAR scan archive member exceeds the configured source-file size limit")
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            matches = [info for info in archive.infolist() if info.filename == member.member_path]
+            if len(matches) != 1:
+                raise ValueError("LiDAR scan archive member is missing or duplicated")
+            info = matches[0]
+            mode = info.external_attr >> 16
+            if info.is_dir() or info.flag_bits & 0x1 or stat.S_ISLNK(mode):
+                raise ValueError("LiDAR scan archive member must be an unencrypted regular file")
+            if info.file_size != member.uncompressed_size_bytes:
+                raise ValueError("LiDAR scan archive member size differs from the staged input identity")
+            digest = hashlib.sha256()
+            written = 0
+            with archive.open(info) as source, output_path.open("xb") as destination:
+                while chunk := source.read(1024 * 1024):
+                    written += len(chunk)
+                    if written > max_bytes or written > member.uncompressed_size_bytes:
+                        raise ValueError("LiDAR scan archive member exceeds its declared size")
+                    digest.update(chunk)
+                    destination.write(chunk)
+    except (zipfile.BadZipFile, KeyError, RuntimeError, OSError) as error:
+        raise ValueError("LiDAR scan archive is unreadable") from error
+    if written != member.uncompressed_size_bytes or "sha256:" + digest.hexdigest() != member.member_checksum:
+        raise ValueError("LiDAR scan archive member checksum differs from the staged input identity")
 
 
 def _finite_nonnegative(value: object, label: str) -> float:

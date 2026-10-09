@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- IN PROGRESS — S1 input contract/resolver và S2 isolated producer đã triển khai; R5 integration, runtime qualification và quality evidence còn mở. P2 extension theo yêu cầu owner; EX-REC + EX-PRODUCT.
+- IN PROGRESS — S1/S2, S3a và S3b1 đã triển khai; S3b2 có local lease-guarded product stage và source evidence nhưng chưa có world/floor confirmation hoặc canonical LiDAR ingest/alignment. R5 runtime qualification và quality evidence còn mở. P2 extension theo yêu cầu owner; EX-REC + EX-PRODUCT.
 - Canonical REC-08/06, PRODUCT-02/08/09; bổ sung task-local scope, không đổi crosswalk.
 - ADAPT qualified process-isolated KISS-ICP adapter; REUSE LiDAR ingest/metric/
   alignment contracts và durable admission. Technically feasible, không loại trừ
@@ -391,18 +391,69 @@ AUD-17.S3b1 implementation:
   lock held by the live MCP server (PID 14310). `graphify update .` rebuilt 21,586
   nodes and 64,895 edges. `understand-anything` availability remains unverified.
 
-S3b2 integration remains open after inspecting the live dispatch path:
-- Graphify and CodeGraph show that R6 is `PENDING_VERIFICATION` while R5 is
-  `WIRED_UNQUALIFIED`; `InputAssemblyService` considers only R1/R4 implemented,
-  `/input-assemblies/{id}/run` rejects other recipe groups, and `ProjectRegistry`
-  has no R6 worker-stage adapter.
-- `LidarOdometryWorker` currently publishes an estimated artifact with runtime
-  qualification fixed to `wired_unqualified` and an ingest binding whose world
-  bridge is pending. No R6 dispatch or canonical LiDAR ingest can safely be enabled
-  from that artifact today.
-- This is an unimplemented product adapter plus missing runtime/world-frame evidence,
-  not a technology impossibility. Keep S3b2 and real-sensor acceptance open; do not
-  treat a synthetic provider fixture or a registry-only claim as qualification.
+Before the S3b2 integration patch, dispatch stopped at the resolver and there was no
+durable product stage. The remaining S3b2 and qualification gates are recorded below.
+
+AUD-17.S3b2 implementation progress — partial, sprint remains open:
+- Added an opt-in worker path for accepted R5 estimated-trajectory and R6
+  sensor-guided recipes. It enters `ST-LIDAR-ODOMETRY`, uses the existing isolated
+  KISS-ICP worker, checks the current job/stage/manifest lease before publication,
+  and resumes only from evidence bound to the exact accepted recipe.
+- The worker copies the accepted assembly, resolution, runtime registry and recipe
+  from project scope into the current job attempt. The reducer checks artifact type,
+  schema, checksum, exact copied bytes, project-source provenance, attempt URI,
+  recipe identity, ordered scan IDs/checksums, archive-member checksums, timestamp,
+  calibration and RGB-frame-time bindings before its compare-and-swap commit.
+- Fixed R5/R6 upload persistence: raw scan ZIPs remain staged-assembly sources and
+  are linked through the input-assembly store. They are no longer incorrectly
+  expected in the legacy product-upload table. RGB video and R4 supplied-trajectory
+  linkage remain covered by existing route regressions.
+- The v1.0 `EstimatedTrajectoryConsumerEvidence` and `ST-LIDAR-ODOMETRY` stage report
+  runtime qualification plus explicit pending world-frame, floor/up-axis and
+  RGB-alignment states. Estimated poses do not enter canonical geometry or collision
+  selection. This patch does not implement a world/floor confirmation command or
+  source-bound `LidarPackageRecord`/alignment consumer, so S3b2 is not complete.
+- R6 without server-verified prepared-to-source frame mapping remains rejected with
+  `VERIFIED_RGB_FRAME_MAP_REQUIRED`. The R5 product runtime remains
+  `WIRED_UNQUALIFIED`; qualified records in the route test are synthetic and do not
+  qualify a deployed runtime. Real traversal drift/coverage and held-out quality are
+  still external acceptance gates. These are missing implementation/evidence, not
+  technology impossibilities.
+- Consumer proof: the API test invokes `_execute_lidar_odometry` with a fake provider
+  process, persists the stage through `ProjectRegistry.record_lidar_odometry`, checks
+  the job-scoped evidence and confirms the world/floor/alignment blockers. The R4
+  supplied-trajectory regression passes. This does not execute the pinned provider
+  or prove sensor accuracy.
+- Browser check: authenticated Reviewer DevTools opened
+  `/scenes/job-6bc02e5de4ed/stages/ST-LIDAR-ODOMETRY`; HTML and progress API returned
+  200, the current job had no odometry stage, and the page correctly showed its
+  incomplete-stage state. Console had no runtime error. No completed odometry artifact
+  was available, so the artifact panel was not verified in the browser.
+- Schema delta: add `StageId.LIDAR_ODOMETRY` and `EstimatedTrajectoryConsumerEvidence`
+  v1.0; no database migration and no legacy artifact rewrite. No production artifact
+  was created; test artifacts were isolated to pytest temporary directories.
+- Base: `08768020`. Changed implementation files: `frontend/src/features/studio/inspection/StageInspectionPage.tsx`, `frontend/src/features/studio/inspection/LidarOdometryStage.tsx`, `frontend/src/features/studio/stages.ts`, `frontend/src/lib/contracts/api.ts`, `frontend/tests/studio-inspection.test.tsx`, `src/api/studio/assemblies.py`, `src/models/contracts/manifests.py`, `src/models/contracts/reconstruction.py`, `src/services/orchestration/inputs/assembly.py`, `src/services/orchestration/jobs/runner.py`, `src/services/orchestration/projects/persistence.py`, `src/services/orchestration/projects/registry.py`, `src/services/reconstruction/lidar/odometry.py`, `tests/test_api/test_studio_routes.py` and `tests/test_reconstruction/test_lidar_odometry.py`.
+- Verification: affected backend suites — 99 passed, 1 skipped; `.venv/bin/ruff check
+  src/ tests/` and `.venv/bin/ruff format --check src/ tests/` — passed, 582 files
+  already formatted. `npm test -- tests/studio-inspection.test.tsx
+  tests/unified-input-flow.test.tsx` — 23 passed; `npm run typecheck` — passed;
+  changed-file ESLint — passed; full `npm run lint` — 0 errors and 2 warnings in
+  unchanged `LidarCalibrationQAStage.tsx`. `npm run build -- --webpack` in an isolated
+  frontend mirror with repository fixtures — compiled, typechecked and generated all
+  17 static pages and dynamic routes. The first isolated copy omitted the repository
+  fixture directory; the corrected mirror passed. `git diff --check` — passed.
+  `codegraph status` — 931 files, 19,038 nodes, 57,185 edges, up to date;
+  `graphify update .` rebuilt 21,855 nodes and 66,383 edges. `understand-anything` is
+  unavailable in this environment; task guide, integration map and caller paths were
+  read directly.
+- Pre-flight gate: CodeGraph traced `_execute_lidar_odometry`, the worker, the reducer,
+  assembly routing and stage inspection. The static caller command did not resolve
+  the registry method dispatch, but the on-disk worker call and reducer integration
+  test verify that path. Minimal change reuses `ArtifactResolver`,
+  `FilesystemArtifactStore`, the existing admission/lease lifecycle and R4 route.
+  DevTools verified only the incomplete state; completed artifact rendering remains
+  unverified. Next: implement evidenced world/floor confirmation and LiDAR ingest/
+  alignment consumers before closing S3b2; preserve R5/R6 and held-out gates.
 
 S3c supplied-trajectory fallback UX regression:
 - `UnifiedInputFlow` already renders runtime status and resolver diagnostics for each

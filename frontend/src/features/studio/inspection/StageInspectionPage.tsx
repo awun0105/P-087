@@ -10,7 +10,13 @@ import { useEffect, useState } from "react";
 import { Badge, Button, Card, Notice } from "@/components/studio/primitives";
 import { usePageTitle } from "@/features/shell/Breadcrumbs";
 import { canInspect, inspectHref, inspectionStage, progressHref } from "@/features/studio/inspection";
-import { LIDAR_CALIBRATION_QA_STAGE, LIDAR_STAGE, STUDIO_STAGES, stagesFor } from "@/features/studio/stages";
+import {
+  LIDAR_CALIBRATION_QA_STAGE,
+  LIDAR_ODOMETRY_STAGE,
+  LIDAR_STAGE,
+  STUDIO_STAGES,
+  stagesFor,
+} from "@/features/studio/stages";
 import { getJob, getProject, jobArtifactContentUrl, listJobArtifacts } from "@/lib/api/endpoints";
 import { StageMetrics } from "@/features/studio/evaluation/EvaluationCard";
 import { getJobProgress } from "@/lib/api/studio";
@@ -18,6 +24,7 @@ import type { JobManifest, ProductArtifactRef, Project, StageId } from "@/lib/co
 import type { JobProgress } from "@/lib/contracts/studio";
 import { formatBytes } from "@/lib/format";
 import { LidarCalibrationQAStage } from "@/features/studio/inspection/LidarCalibrationQAStage";
+import { LidarOdometryStage } from "@/features/studio/inspection/LidarOdometryStage";
 
 const SceneWorkspace = dynamic(() => import("@/features/studio/inspection/StageSceneWorkspace").then((m) => m.StageSceneWorkspace), { ssr: false, loading: () => <Loading /> });
 const StageViewer = dynamic(() => import("@/features/studio/StageViewer").then((m) => m.StageViewer), { ssr: false, loading: () => <Loading /> });
@@ -108,6 +115,8 @@ export function StageInspectionPage({ jobId, stageId }: { jobId: string; stageId
                 <section aria-label={`Nội dung ${meta.title}`} className="relative min-h-0 min-w-0 flex-1 overflow-auto">
                   {meta.id === LIDAR_CALIBRATION_QA_STAGE.id
                     ? <LidarCalibrationQAStage jobId={jobId} artifacts={snapshot.artifacts} />
+                    : meta.id === LIDAR_ODOMETRY_STAGE.id
+                      ? <LidarOdometryStage jobId={jobId} artifacts={snapshot.artifacts} />
                     : meta.id === "ST-INPUT-VALIDATE" || meta.id === "ST-PRIVACY-GATE"
                       ? <InputStage stageId={meta.id} snapshot={snapshot} />
                       : meta.id === LIDAR_STAGE.id || meta.id === "ST-FRAME-EXTRACT" || meta.id === "ST-CAMERA-POSE"

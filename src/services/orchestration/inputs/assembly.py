@@ -65,6 +65,8 @@ class InputAssemblyService:
         {
             RuntimeCapabilityKey.R1,
             RuntimeCapabilityKey.R4,
+            RuntimeCapabilityKey.R5,
+            RuntimeCapabilityKey.R6,
             RuntimeCapabilityKey.GAUSSIAN_PLY_VIEW,
             RuntimeCapabilityKey.GAUSSIAN_SOG_VIEW,
         }

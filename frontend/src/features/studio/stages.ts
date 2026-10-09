@@ -85,6 +85,14 @@ export const LIDAR_STAGE: StageMeta = {
     "Giải gói LiDAR, ghép các scan theo quỹ đạo thành một đám mây đã đăng ký (nếu nộp scan thô), kiểm quỹ đạo, calibration và tìm mặt sàn.",
 };
 
+export const LIDAR_ODOMETRY_STAGE: StageMeta = {
+  id: "ST-LIDAR-ODOMETRY",
+  title: "Ước lượng quỹ đạo LiDAR",
+  short: "Odometry",
+  description:
+    "Ước lượng quỹ đạo cục bộ từ chuỗi scan đã chọn và lưu liên kết nguồn; hệ world, mặt sàn và alignment vẫn chờ xác nhận riêng.",
+};
+
 export const LIDAR_CALIBRATION_QA_STAGE: StageMeta = {
   id: "ST-LIDAR-CALIBRATION-QA",
   title: "QA calibration LiDAR",
@@ -95,6 +103,10 @@ export const LIDAR_CALIBRATION_QA_STAGE: StageMeta = {
 
 /** Danh sách stage của một job theo các stage API trả: job có gói LiDAR có thêm bước LiDAR sau bước tách frame. */
 export function stagesFor(stageIds: readonly StageId[]): readonly StageMeta[] {
+  if (stageIds.includes(LIDAR_ODOMETRY_STAGE.id)) {
+    const index = STUDIO_STAGES.findIndex((stage) => stage.id === "ST-FRAME-EXTRACT") + 1;
+    return [...STUDIO_STAGES.slice(0, index), LIDAR_ODOMETRY_STAGE, ...STUDIO_STAGES.slice(index)];
+  }
   if (!stageIds.includes(LIDAR_STAGE.id)) return STUDIO_STAGES;
   const index = STUDIO_STAGES.findIndex((stage) => stage.id === "ST-FRAME-EXTRACT") + 1;
   const lidarStages = stageIds.includes(LIDAR_CALIBRATION_QA_STAGE.id)
@@ -105,6 +117,7 @@ export function stagesFor(stageIds: readonly StageId[]): readonly StageMeta[] {
 
 export function stageMeta(id: StageId): StageMeta | undefined {
   if (id === LIDAR_STAGE.id) return LIDAR_STAGE;
+  if (id === LIDAR_ODOMETRY_STAGE.id) return LIDAR_ODOMETRY_STAGE;
   if (id === LIDAR_CALIBRATION_QA_STAGE.id) return LIDAR_CALIBRATION_QA_STAGE;
   return STUDIO_STAGES.find((stage) => stage.id === id);
 }

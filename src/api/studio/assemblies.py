@@ -40,6 +40,7 @@ from src.models.contracts.input_assembly import (
     InputWorkflowIntent,
     RecipeComponentVersion,
     RecipeGroup,
+    RuntimeCapabilityKey,
     RuntimeQualificationStatus,
     StagedInputFile,
     TrajectoryConvention,
@@ -470,7 +471,12 @@ def run_input_assembly(
             raise InputAssemblyConflictError("Selected candidate is not a ready video reconstruction recipe")
         if candidate.runtime.status != RuntimeQualificationStatus.QUALIFIED:
             raise InputAssemblyConflictError("Selected worker capability is not qualified")
-        if candidate.recipe_group not in {RecipeGroup.RGB_ONLY, RecipeGroup.SUPPLIED_TRAJECTORY}:
+        if candidate.recipe_group not in {
+            RecipeGroup.RGB_ONLY,
+            RecipeGroup.SUPPLIED_TRAJECTORY,
+            RecipeGroup.ESTIMATED_TRAJECTORY,
+            RecipeGroup.SENSOR_GUIDED,
+        }:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Recipe {candidate.recipe_group.value} has no compatible dispatch adapter yet",
@@ -538,6 +544,38 @@ def run_input_assembly(
                 same_scene_confirmed=True,
             )
             selected_upload_ids.add(lidar_upload.upload_id)
+        elif candidate.recipe_group in {RecipeGroup.ESTIMATED_TRAJECTORY, RecipeGroup.SENSOR_GUIDED}:
+            lidar_roles = [InputRole.LIDAR_SCAN, InputRole.LIDAR_SCAN_TIMES]
+            if candidate.recipe_group == RecipeGroup.SENSOR_GUIDED:
+                lidar_roles.extend([InputRole.CAMERA_LIDAR_CALIBRATION, InputRole.RGB_FRAME_TIMES])
+            lidar_file_ids = [file_id for role in lidar_roles for file_id in bindings.get(role, [])]
+            if len(bindings.get(InputRole.LIDAR_SCAN, [])) < 2 or not bindings.get(InputRole.LIDAR_SCAN_TIMES):
+                raise InputAssemblyConflictError(
+                    "Estimated odometry requires at least two scans and one timestamp file"
+                )
+            if candidate.recipe_group == RecipeGroup.SENSOR_GUIDED and any(
+                len(bindings.get(role, [])) != 1
+                for role in (InputRole.CAMERA_LIDAR_CALIBRATION, InputRole.RGB_FRAME_TIMES)
+            ):
+                raise InputAssemblyConflictError("Estimated R6 requires one calibration and one RGB frame-time file")
+            source_upload_ids = {staged_by_id[file_id].upload_id for file_id in lidar_file_ids}
+            for upload_id in sorted(source_upload_ids):
+                authorize_staged_input_upload_mutation(
+                    user,
+                    service.get_upload(upload_id),
+                    operation="chạy LiDAR odometry từ input assembly",
+                )
+            service.verify_upload_sources(stored, upload_ids=source_upload_ids)
+            odometry_runtime = next(
+                (
+                    item
+                    for item in resolution.runtime_registry.capabilities
+                    if item.capability_key == RuntimeCapabilityKey.R5
+                ),
+                None,
+            )
+            if odometry_runtime is None or odometry_runtime.status != RuntimeQualificationStatus.QUALIFIED:
+                raise InputAssemblyConflictError("R5 odometry runtime must be qualified before this recipe can run")
 
         component_versions = [
             RecipeComponentVersion(
@@ -551,6 +589,32 @@ def run_input_assembly(
                 config_checksum=resolution.runtime_registry.registry_checksum,
             ),
         ]
+        if candidate.recipe_group in {RecipeGroup.ESTIMATED_TRAJECTORY, RecipeGroup.SENSOR_GUIDED}:
+            from src.services.reconstruction.lidar.odometry import (
+                DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION,
+                lidar_odometry_profile_checksum,
+            )
+
+            component_versions.append(
+                RecipeComponentVersion(
+                    component_id="odometry-profile",
+                    version=DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION,
+                    config_checksum=lidar_odometry_profile_checksum(),
+                )
+            )
+        if candidate.recipe_group == RecipeGroup.SENSOR_GUIDED:
+            odometry_runtime = next(
+                item
+                for item in resolution.runtime_registry.capabilities
+                if item.capability_key == RuntimeCapabilityKey.R5
+            )
+            component_versions.append(
+                RecipeComponentVersion(
+                    component_id=f"runtime-R5-{odometry_runtime.runtime_id}",
+                    version=odometry_runtime.runtime_version,
+                    config_checksum=odometry_runtime.qualification_evidence_checksum,
+                )
+            )
         recipe = seal_input_recipe(
             {
                 "schema_version": "1.0",

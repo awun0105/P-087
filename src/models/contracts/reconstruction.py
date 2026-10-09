@@ -168,7 +168,7 @@ class EstimatedTrajectoryArtifact(ContractModel):
     """Immutable local LiDAR odometry result, never equivalent to supplied or GT poses."""
 
     artifact_type: Literal["EstimatedTrajectoryArtifact"]
-    schema_version: Literal["1.0"]
+    schema_version: Literal["1.0", "1.1"]
     artifact_uri: ArtifactUri
     artifact_checksum: Checksum
     job_id: Identifier
@@ -187,7 +187,10 @@ class EstimatedTrajectoryArtifact(ContractModel):
     odometry_map_frame_id: Identifier
     world_from_map: Transform | None = None
     trajectory_origin: Literal["estimated"] = "estimated"
-    runtime_qualification_status: Literal["wired_unqualified"] = "wired_unqualified"
+    runtime_qualification_status: Literal["wired_unqualified", "qualified"] = "wired_unqualified"
+    runtime_qualification_evidence_checksum: Checksum | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     poses: list[EstimatedTrajectoryPose] = Field(min_length=2)
     diagnostics: EstimatedTrajectoryDiagnostics
 
@@ -222,6 +225,11 @@ class EstimatedTrajectoryArtifact(ContractModel):
             math.isfinite(component) for component in self.world_from_map.translation_xyz
         ):
             raise ValueError("world_from_map translation must be finite")
+        if self.runtime_qualification_status == "qualified":
+            if self.schema_version != "1.1" or self.runtime_qualification_evidence_checksum is None:
+                raise ValueError("qualified odometry requires schema 1.1 and exact runtime qualification evidence")
+        elif self.schema_version == "1.0" and self.runtime_qualification_evidence_checksum is not None:
+            raise ValueError("schema 1.0 odometry cannot carry a runtime qualification extension")
         return self
 
 
@@ -260,6 +268,96 @@ class EstimatedTrajectoryIngestBinding(ContractModel):
             raise ValueError("ingest binding scan file IDs must be unique")
         if self.sensor_frame_id == self.odometry_map_frame_id:
             raise ValueError("sensor and odometry map frame IDs must differ")
+        return self
+
+
+class EstimatedTrajectoryConsumerEvidence(ContractModel):
+    """Durable R5/R6 source binding; local poses remain outside canonical world/floor geometry."""
+
+    artifact_type: Literal["EstimatedTrajectoryConsumerEvidence"] = "EstimatedTrajectoryConsumerEvidence"
+    schema_version: Literal["1.0"] = "1.0"
+    job_id: Identifier
+    recipe_group: Literal["R5", "R6"]
+    assembly_ref: ArtifactRef
+    resolution_ref: ArtifactRef
+    runtime_registry_ref: ArtifactRef
+    recipe_ref: ArtifactRef
+    trajectory_ref: ArtifactRef
+    ingest_binding: EstimatedTrajectoryIngestBinding
+    lidar_scan_times_ref: ArtifactRef
+    camera_lidar_calibration_ref: ArtifactRef | None = None
+    rgb_frame_times_ref: ArtifactRef | None = None
+    odometry_runtime_id: Identifier
+    odometry_runtime_version: Identifier
+    odometry_profile_checksum: Checksum
+    runtime_qualification_status: Literal["wired_unqualified", "qualified"]
+    runtime_qualification_evidence_checksum: Checksum | None = None
+    sensor_guided_runtime_id: Identifier | None = None
+    sensor_guided_runtime_version: Identifier | None = None
+    sensor_guided_runtime_evidence_checksum: Checksum | None = None
+    world_frame_status: Literal["pending_world_from_map_confirmation"] = "pending_world_from_map_confirmation"
+    floor_status: Literal["pending_floor_and_up_axis_evidence"] = "pending_floor_and_up_axis_evidence"
+    alignment_status: Literal["not_registered"] = "not_registered"
+
+    @model_validator(mode="after")
+    def _bind_consumer_evidence(self) -> Self:
+        if self.trajectory_ref.artifact_type != "EstimatedTrajectoryArtifact":
+            raise ValueError("consumer evidence must bind an estimated trajectory")
+        if self.trajectory_ref.job_id != self.job_id or self.trajectory_ref.data_class != ArtifactDataClass.DERIVED:
+            raise ValueError("estimated trajectory must be a derived artifact in the same job")
+        if self.ingest_binding.trajectory_ref != self.trajectory_ref:
+            raise ValueError("consumer evidence and ingest binding must reference the same trajectory")
+        for reference, artifact_type in (
+            (self.assembly_ref, "InputAssemblySnapshot"),
+            (self.resolution_ref, "InputResolutionReport"),
+            (self.runtime_registry_ref, "RuntimeQualificationRegistry"),
+            (self.recipe_ref, "InputRecipe"),
+        ):
+            if reference.artifact_type != artifact_type or reference.job_id != self.job_id:
+                raise ValueError("accepted input evidence must be job-scoped and use its declared artifact type")
+        if (
+            self.lidar_scan_times_ref.artifact_type != "InputAssemblyMember"
+            or self.lidar_scan_times_ref.data_class != ArtifactDataClass.PRODUCT_INPUT
+        ):
+            raise ValueError("LiDAR scan timestamps must remain a bound product input")
+        if self.lidar_scan_times_ref.job_id != self.job_id:
+            raise ValueError("LiDAR scan timestamp member must be copied into this job's immutable input namespace")
+        if self.recipe_group == "R6":
+            if self.camera_lidar_calibration_ref is None or self.rgb_frame_times_ref is None:
+                raise ValueError("R6 consumer evidence requires calibration and RGB frame timestamps")
+            if (
+                self.camera_lidar_calibration_ref.artifact_type != "InputAssemblyMember"
+                or self.rgb_frame_times_ref.artifact_type != "InputAssemblyMember"
+                or self.camera_lidar_calibration_ref.data_class != ArtifactDataClass.PRODUCT_INPUT
+                or self.rgb_frame_times_ref.data_class != ArtifactDataClass.PRODUCT_INPUT
+                or self.camera_lidar_calibration_ref.job_id != self.job_id
+                or self.rgb_frame_times_ref.job_id != self.job_id
+            ):
+                raise ValueError("R6 calibration and RGB frame timestamps must be job-scoped product inputs")
+            if (
+                self.sensor_guided_runtime_id is None
+                or self.sensor_guided_runtime_version is None
+                or self.sensor_guided_runtime_evidence_checksum is None
+            ):
+                raise ValueError("R6 consumer evidence requires exact sensor-guided runtime qualification")
+        elif any(
+            value is not None
+            for value in (
+                self.camera_lidar_calibration_ref,
+                self.rgb_frame_times_ref,
+                self.sensor_guided_runtime_id,
+                self.sensor_guided_runtime_version,
+                self.sensor_guided_runtime_evidence_checksum,
+            )
+        ):
+            raise ValueError("R5 scan-only evidence cannot carry R6 calibration or runtime fields")
+        if self.runtime_qualification_status == "qualified" and self.runtime_qualification_evidence_checksum is None:
+            raise ValueError("qualified consumer evidence requires exact runtime qualification evidence")
+        if (
+            self.runtime_qualification_status == "wired_unqualified"
+            and self.runtime_qualification_evidence_checksum is not None
+        ):
+            raise ValueError("unqualified consumer evidence cannot claim qualification evidence")
         return self
 
 
