@@ -159,7 +159,6 @@ async def test_project_and_job_routes_snapshot_authenticated_actor(client, tmp_p
     user = service.create_user("reviewer@example.com", "Minh An", "mat-khau-du-dai", "reviewer")
     monkeypatch.setattr(auth, "auth_service", lambda: service)
     monkeypatch.setitem(app.dependency_overrides, auth.require_contributor, lambda: user)
-    monkeypatch.setitem(app.dependency_overrides, auth.require_editor, lambda: user)
     monkeypatch.setattr(project_routes, "record_gpu_run", lambda *_: None)
 
     forged = await client.post("/api/v1/projects", json={**_CREATE_PROJECT_BODY, "created_by": {"user_id": "attacker"}})

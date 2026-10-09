@@ -70,9 +70,10 @@ def _require(role: Role):  # noqa: ANN202 - trả dependency FastAPI
     return dependency
 
 
-#: Dependency cho routes có quyền Editor features; resource mutation cần thêm ownership guard.
+#: Mô hình quyền: `require_contributor` = đã đăng nhập (Guest trở lên), `require_reviewer` = quản trị/duyệt.
+#: Editor không có route riêng: khác Guest ở phạm vi sở hữu (xem `src/api/ownership.py`) và hạn mức, nên
+#: resource mutation luôn cần thêm ownership guard bên cạnh dependency này.
 require_contributor = _require("guest")
-require_editor = _require("editor")
 require_reviewer = _require("reviewer")
 
 #: Hành động nhật ký cho mỗi lần xử lý GPU (scene mới hoặc thử lại) — đơn vị hạn mức.

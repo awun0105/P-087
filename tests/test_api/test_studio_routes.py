@@ -1223,7 +1223,6 @@ async def test_uploads_and_scenes_show_who_did_what(
     uploader = service.create_user("an@example.com", "An", "mat-khau-du-dai-1", "editor")
     creator = service.create_user("binh@example.com", "Bình", "mat-khau-du-dai-2", "reviewer")
     current = {"user": uploader}
-    monkeypatch.setitem(app.dependency_overrides, auth.require_editor, lambda: current["user"])
     monkeypatch.setitem(app.dependency_overrides, auth.require_contributor, lambda: current["user"])
 
     upload = await _upload(client)
@@ -1345,7 +1344,7 @@ async def test_simulation_api_projects_export_block_separately_from_preflight(
 
 
 @pytest.mark.asyncio
-async def test_simulation_read_build_and_download_require_editor_when_auth_is_enabled(
+async def test_simulation_read_build_and_download_require_login_when_auth_is_enabled(
     client: AsyncClient, studio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Studio router auth phải phủ đủ cả read, build và artifact download của gói mô phỏng."""
