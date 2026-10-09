@@ -48,7 +48,7 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
     });
   }
   return <div className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6">
-    <div><h2 className="text-xl font-bold tracking-tight">Tiến trình xử lý</h2><p className="mt-1 text-sm text-ink-muted">Bước đã xong có nút Xem giai đoạn; bước cần bạn thao tác có nút ngay tại bước đó.</p></div>
+    <div><h2 className="text-xl font-bold tracking-tight">Tiến trình xử lý</h2><p className="mt-1 text-sm text-ink-muted">Bấm tên bước đã xong để mở Xem giai đoạn; bước lỗi hoặc cần bạn thao tác có nút ngay tại bước đó.</p></div>
     <Card className="p-5 sm:p-6">
       {reviewing && <div id={ANONYMIZATION_PANEL_ID} className="scroll-mt-4"><AnonymizationReviewPanel key={jobId + ":" + progress.attempt} jobId={jobId} canAccept={canAccept} onAccepted={() => onChanged?.()} /></div>}
       {!reviewing && (progress?.status === "QUEUED" || progress?.waiting_for === "resources" || progress?.queue) && <div role="status" className="mb-5 space-y-2 text-sm text-ink-muted">

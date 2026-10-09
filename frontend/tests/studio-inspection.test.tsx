@@ -67,16 +67,16 @@ describe("Inspect theo giai đoạn", () => {
   it("timeline chỉ chọn được bước xong; selection mở link đúng stage, mẫu không tạo link job", () => {
     const stages = STUDIO_STAGES.map((stage, n) => ({ stage_id: stage.id, state: n === 0 ? "succeeded" as const : "pending" as const, seconds: null, fraction: null }));
     const view = render(<PipelineTimeline stages={stages} stageList={STUDIO_STAGES} jobId="job-a" />);
-    // Nút hiện sẵn trên đúng bước đã xong, không cần mở chi tiết trước; bước chưa chạy không có nút.
-    const links = screen.getAllByRole("link", { name: /^Xem giai đoạn/ });
-    expect(links).toHaveLength(1);
-    expect(links[0]).toHaveAttribute("href", "/scenes/job-a/stages/ST-INPUT-VALIDATE");
+    // "Xem giai đoạn" nằm trong phần mở của bước đã xong; bước chưa chạy không mở được.
+    expect(screen.queryByRole("link", { name: /^Xem giai đoạn/ })).toBeNull();
     expect(screen.getAllByRole("button")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: /Kiểm tra video/ }));
+    expect(screen.getByRole("link", { name: /^Xem giai đoạn/ })).toHaveAttribute("href", "/scenes/job-a/stages/ST-INPUT-VALIDATE");
     view.rerender(<PipelineTimeline stages={stages} stageList={STUDIO_STAGES} />);
     expect(screen.queryByRole("link", { name: /^Xem giai đoạn/ })).toBeNull();
   });
 
-  it("bước cần người dùng thao tác có nút hiện sẵn tại hàng của nó; bước đã xong thì chỉ còn Xem giai đoạn", () => {
+  it("bước cần người dùng thao tác có nút hiện sẵn tại hàng của nó; bước đã xong thì Xem giai đoạn nằm trong phần mở", () => {
     const confirm = vi.fn();
     const review = vi.fn();
     const stages = STUDIO_STAGES.map((stage) => ({ stage_id: stage.id, state: stage.id === "ST-METRIC-CANONICALIZE" ? "waiting" as const : stage.id === "ST-FRAME-EXTRACT" ? "running" as const : "pending" as const, seconds: null, fraction: null }));
@@ -95,6 +95,7 @@ describe("Inspect theo giai đoạn", () => {
     view.rerender(<PipelineTimeline stages={done} stageList={STUDIO_STAGES} jobId="job-a" stageActions={actions} />);
     expect(screen.queryByRole("button", { name: "Xác nhận tỉ lệ mét" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Xem bản đã che" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Xác nhận tỉ lệ mét/ }));
     expect(screen.getByRole("link", { name: /^Xem giai đoạn: Xác nhận tỉ lệ mét/ })).toHaveAttribute("href", "/scenes/job-a/stages/ST-METRIC-CANONICALIZE");
   });
 
@@ -103,6 +104,7 @@ describe("Inspect theo giai đoạn", () => {
     const stages = [{ stage_id: stage.id, state: "failed" as const, seconds: null, fraction: null }];
     render(<PipelineTimeline stages={stages} stageList={[stage]} jobId="job-a" />);
 
+    fireEvent.click(screen.getByRole("button", { name: /QA calibration LiDAR/ }));
     expect(screen.getByRole("link", { name: /^Xem giai đoạn/ })).toHaveAttribute(
       "href",
       "/scenes/job-a/stages/ST-LIDAR-CALIBRATION-QA",

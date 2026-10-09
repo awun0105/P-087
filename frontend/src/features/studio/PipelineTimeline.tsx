@@ -184,17 +184,12 @@ export function PipelineTimeline({
                         )}
                       </span>
                     )}
-                    {/* Nút nằm cùng hàng với tên bước: thao tác người dùng cần làm, và đường vào view của bước đã xong. */}
+                    {/* Chỉ thao tác người dùng cần làm (thử lại, xác nhận…) mới hiện sẵn cùng hàng tên bước. */}
                     {state !== "succeeded" && stageActions?.filter((action) => action.stageId === meta.id).map((action) => (
                       <button key={action.label} type="button" onClick={action.onClick} disabled={action.disabled} title={action.hint} className={cn(STAGE_BUTTON, "disabled:cursor-not-allowed disabled:opacity-50")}>
                         {action.label}
                       </button>
                     ))}
-                    {jobId && inspectable && inspectionStage(meta.id) && (
-                      <Link href={inspectHref(jobId, meta.id)} className={STAGE_BUTTON}>
-                        Xem giai đoạn<span className="sr-only">: {meta.title}</span>
-                      </Link>
-                    )}
                     </div>
                   </div>
                   {isCurrentStale && (
@@ -244,6 +239,12 @@ export function PipelineTimeline({
                   {jobId && inspectable && selected === meta.id && (
                     <div id={`stage-detail-${meta.id}`} className="mt-3 space-y-2 border-t border-line pt-3">
                       <p className="text-sm leading-relaxed text-ink-muted">{meta.description}</p>
+                      {/* Đường vào view kết quả nằm trong phần mở của bước; mũi tên cạnh tên bước báo có phần này. */}
+                      {inspectionStage(meta.id) && (
+                        <Link href={inspectHref(jobId, meta.id)} className={STAGE_BUTTON}>
+                          Xem giai đoạn<span className="sr-only">: {meta.title}</span>
+                        </Link>
+                      )}
                     </div>
                   )}
                 </div>
