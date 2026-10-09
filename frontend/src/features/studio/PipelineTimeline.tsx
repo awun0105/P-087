@@ -14,6 +14,12 @@ import type { StageState } from "@/lib/contracts/studio";
 import { formatDuration } from "@/lib/format";
 import { estimateRemainingTime, formatEtaDuration } from "@/features/studio/scene/estimation";
 
+export interface StageAction {
+  stageId: StageId;
+  label: string;
+  onClick: () => void;
+}
+
 export interface StageView {
   stage_id: StageId;
   state: StageState;
@@ -45,7 +51,7 @@ export function PipelineTimeline({
   isStale = false,
   selectedStage,
   onSelectStage,
-  waitingAction,
+  stageActions,
 }: {
   stages: readonly StageView[];
   timeNote?: string;
@@ -57,8 +63,8 @@ export function PipelineTimeline({
   isStale?: boolean;
   selectedStage?: StageId | null;
   onSelectStage?: (stageId: StageId) => void;
-  /** Thao tác người dùng cần làm ở bước đang chờ (vd. xác nhận tỉ lệ mét); nút hiện ngay tại hàng của bước đó. */
-  waitingAction?: { stageId: StageId; label: string; onClick: () => void };
+  /** Thao tác người dùng cần làm ở một bước (xác nhận tỉ lệ mét, xem bản đã che…); nút hiện sẵn tại hàng của bước đó. */
+  stageActions?: readonly StageAction[];
 }) {
   const [internalSelected, setInternalSelected] = useState<StageId | null>(null);
   const selected = selectedStage !== undefined ? selectedStage : internalSelected;
@@ -181,14 +187,21 @@ export function PipelineTimeline({
                   {state === "waiting" && (
                     <p className="label-tech mt-2 text-ember-strong">Đang chờ bạn</p>
                   )}
-                  {waitingAction?.stageId === meta.id && state !== "succeeded" && (
+                  {state !== "succeeded" && stageActions?.filter((action) => action.stageId === meta.id).map((action) => (
                     <button
+                      key={action.label}
                       type="button"
-                      onClick={waitingAction.onClick}
-                      className="mt-3 inline-flex rounded-lg bg-ember-soft px-3 py-2 text-sm font-medium text-ember-strong focus-visible:outline-2 focus-visible:outline-ember"
+                      onClick={action.onClick}
+                      className={STAGE_BUTTON + " mt-3"}
                     >
-                      {waitingAction.label}
+                      {action.label}
                     </button>
+                  ))}
+                  {/* Bước đã xong: đường vào view kết quả hiện sẵn, không cần mở chi tiết trước. */}
+                  {jobId && inspectable && inspectionStage(meta.id) && (
+                    <Link href={inspectHref(jobId, meta.id)} className={STAGE_BUTTON + " mt-2"}>
+                      Xem giai đoạn<span className="sr-only">: {meta.title}</span>
+                    </Link>
                   )}
                   {state === "running" && !isStale && (
                     <ProgressBar value={stage?.fraction ?? null} label={`Tiến trình ${meta.title}`} className="mt-3" />
@@ -226,7 +239,6 @@ export function PipelineTimeline({
                   {jobId && inspectable && selected === meta.id && (
                     <div id={`stage-detail-${meta.id}`} className="mt-3 space-y-2 border-t border-line pt-3">
                       <p className="text-sm leading-relaxed text-ink-muted">{meta.description}</p>
-                      {inspectionStage(meta.id) && <Link href={inspectHref(jobId, meta.id)} className="inline-flex rounded-lg bg-ember-soft px-3 py-2 text-sm font-medium text-ember-strong focus-visible:outline-2 focus-visible:outline-ember">Xem giai đoạn</Link>}
                     </div>
                   )}
                 </div>
@@ -238,6 +250,8 @@ export function PipelineTimeline({
     </div>
   );
 }
+
+const STAGE_BUTTON = "inline-flex rounded-lg bg-ember-soft px-3 py-2 text-sm font-medium text-ember-strong focus-visible:outline-2 focus-visible:outline-ember";
 
 const STATE_LABEL: Record<StageState, string> = {
   pending: "chưa chạy",
