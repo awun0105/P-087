@@ -262,3 +262,10 @@ call-count/packaging matrix pass; PG/remote-provider proof được phân loại
   paths; made no production abstraction or source-code change because S2 already
   implemented the required head lookup; focused matrix and static checks are
   listed above; DevTools: n/a — no UI change.
+
+### Quyết định owner 2026-10-10 — scene cũ tự nhận head khi được đọc lần đầu
+
+- **Thay đổi so với S1:** scene có revision trên kho nhưng chưa có head trong DB không còn trả lỗi "chưa được chuẩn bị" chờ người vận hành chạy `scripts.studio.scene_head --apply`. `SceneEditor.current()` gọi `_adopt_legacy_head`, chạy đúng `SceneHeadBackfill.backfill_page` của script (kiểm từng revision, kiểm lại, commit head bằng CAS) rồi trả revision. Lượt nhận head đang dở (`IN_PROGRESS`) cũng được chạy tiếp.
+- **Giữ nguyên:** không bỏ bước kiểm nào. Artifact hỏng hoặc lineage sai vẫn bị chặn (`BLOCKED` + mã chẩn đoán trong bản ghi repair) và API trả 409 kèm câu cho người dùng; lần đọc sau không thử lại. Publication đang ghi dở vẫn trả 409. Script vẫn dùng được để kiểm (dry-run) hoặc chạy theo trang cho scene rất dài.
+- **Giới hạn:** một lần đọc chạy tối đa 64 trang × 250 revision; scene dài hơn trả "đang chuẩn bị" và lần đọc sau chạy tiếp. Hai tiến trình cùng nhận head một job: bên thua CAS đọc lại head của bên thắng.
+- **Bằng chứng:** `test_legacy_scene_without_head_is_adopted_on_first_read_with_the_same_checks_as_the_script`, `test_legacy_scene_with_invalid_artifacts_stays_blocked_with_a_user_safe_message`, hai nhóm test route trong `tests/test_api/test_scene_routes.py`; `tests/test_api` + `tests/test_orchestration` 1071 passed. Dữ liệu local: `job-6bc02e5de4ed` (1 revision) và `job-ed9cf7739a70` (2 revision) nhận head dưới 0,1 giây; thử trước trên bản sao DB rồi mới chạy thật qua API.

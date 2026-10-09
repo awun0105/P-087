@@ -33,7 +33,12 @@ from src.services.orchestration.scene.errors import (
     SceneObjectNotFoundError,
     SceneRevisionConflictError,
 )
-from src.services.orchestration.scene.heads import SceneHeadRecord, SceneHeadRepository
+from src.services.orchestration.scene.heads import (
+    SceneHeadBackfill,
+    SceneHeadBackfillError,
+    SceneHeadRecord,
+    SceneHeadRepository,
+)
 from src.services.orchestration.scene.identifiers import scene_artifact_uri
 from src.services.orchestration.scene.models import (
     SceneEditCommand,
@@ -47,6 +52,8 @@ _REVISION_PATTERN = re.compile(r"^(?P<prefix>.*?)(?P<number>\d+)$")
 _SCHEMA_VERSION = "1.0"
 #: Ceiling for artifact-only recovery; durable scenes use the committed DB head.
 _MAX_RECOVERY_STEPS = 1000
+#: Số trang kiểm tối đa trong một lần tự nhận head cho scene cũ (mỗi trang 250 revision, hai lượt kiểm).
+_ADOPT_HEAD_PAGES = 64
 #: Revision gốc của mọi job (fixture và scene dựng từ bundle đều bắt đầu từ đây).
 _ROOT_REVISION = "rev-001"
 #: Số job tối đa giữ lineage đã chứng minh trong bộ nhớ một process.
@@ -64,6 +71,7 @@ class SceneEditor:
         resolver: ArtifactResolver,
         head_repository: SceneHeadRepository | None = None,
     ) -> None:
+        self._fixture_root = fixture_root
         self.fixture_scene_path = fixture_root / "scene_ir" / "scene.json"
         self.fixture_visual_path = fixture_root / "reconstruction_bundle" / "visual_artifact.json"
         self.resolver = resolver
@@ -95,18 +103,18 @@ class SceneEditor:
                     "Scene đang được ghi nhận. Thử lại sau ít phút.",
                 )
             repair = self.head_repository.get_repair(job_id)
-            if repair is not None:
+            if repair is not None and repair.status != "IN_PROGRESS":
                 raise SceneHeadNotReadyError(
-                    f"Scene head is missing while repair is {repair.status}; resume scripts.studio.scene_head first",
-                    "Scene đang được chuẩn bị để xem. Thử lại sau.",
+                    f"Scene head is missing while repair is {repair.status} ({repair.diagnostic_code}); "
+                    "inspect with scripts.studio.scene_head",
+                    "Dữ liệu scene này không qua được bước kiểm tra. Nhờ quản trị kiểm tra scene.",
                 )
+            if repair is not None or self._scene_revision_uris(job_id):
+                # Scene dựng trước khi có head trong DB (hoặc lượt nhận head đang dở): tự kiểm và nhận head.
+                return self._adopt_legacy_head(job_id)
             fixture = self._fixture_scene()
             if fixture.environment.geometry_ref.job_id == job_id:
-                if self._scene_revision_uris(job_id):
-                    raise _missing_head_error(job_id)
                 return self.publish_initial(job_id, fixture)
-            if self._scene_revision_uris(job_id):
-                raise _missing_head_error(job_id)
             raise SceneNotAvailableError("Job chưa publish SceneIR; reconstruction preview không yêu cầu SceneIR")
 
         if job_id not in self._revisions:
@@ -130,6 +138,41 @@ class SceneEditor:
                 break
             self._revisions[job_id] = newer
         return self._revisions[job_id]
+
+    def _adopt_legacy_head(self, job_id: str) -> SceneRevision:
+        """Nhận head cho scene đã có revision trên kho nhưng chưa có head trong DB.
+
+        Chạy đúng phép kiểm của `scripts.studio.scene_head --apply` (kiểm từng revision, kiểm lại, rồi commit head
+        bằng CAS), nên scene cũ mở được ngay lần đọc đầu mà không cần người vận hành chạy tay. Không bỏ qua bước
+        kiểm nào: dữ liệu không hợp lệ vẫn bị chặn với lý do ghi trong bản ghi repair.
+        """
+        assert self.head_repository is not None
+        # Như script: editor không gắn head để đọc revision thẳng từ artifact trong lúc chưa có head.
+        backfill = SceneHeadBackfill(
+            self.resolver, SceneEditor(self._fixture_root, self.resolver), self.head_repository
+        )
+        try:
+            for _ in range(_ADOPT_HEAD_PAGES):
+                if backfill.backfill_page(job_id).status != "IN_PROGRESS":
+                    break
+        except SceneHeadBackfillError as error:
+            logger.warning("scene head adoption blocked job_id=%s code=%s", job_id, error.diagnostic_code)
+            raise SceneHeadNotReadyError(
+                f"Scene head adoption blocked: {error.diagnostic_code}; inspect with scripts.studio.scene_head",
+                "Dữ liệu scene này không qua được bước kiểm tra. Nhờ quản trị kiểm tra scene.",
+            ) from error
+        except RuntimeStateConflictError:
+            # Tiến trình khác đang nhận head cho cùng job; đọc lại kết quả của nó bên dưới.
+            logger.info("scene head adoption raced job_id=%s", job_id)
+        head = self.head_repository.get(job_id)
+        if head is None:
+            raise SceneHeadNotReadyError(
+                "Scene head adoption is still in progress", "Scene đang được chuẩn bị để xem. Thử lại sau."
+            )
+        logger.info("scene head adopted job_id=%s revision=%s", job_id, head.scene_revision)
+        revision = self._load_head_revision(head)
+        self._revisions[job_id] = revision
+        return revision
 
     def visual_binding(self, job_id: str | None = None) -> VisualBinding:
         """Visual của scene, kèm cờ nói rõ đây chưa phải bằng chứng Brush.
@@ -624,13 +667,6 @@ class SceneEditor:
             existing = self.resolver.locate(reference.artifact_uri)
             if existing is None or existing.read_bytes() != payload:
                 raise
-
-
-def _missing_head_error(job_id: str) -> SceneHeadNotReadyError:
-    """SceneIR đã có trên đĩa nhưng job chưa được repair. Lệnh repair chỉ vào log; UI nhận câu chung."""
-    operator = "SceneIR artifacts have no committed head; run scripts.studio.scene_head --apply before reading"
-    logger.warning("scene head missing job_id=%s; %s", job_id, operator)
-    return SceneHeadNotReadyError(operator, "Scene này chưa được chuẩn bị để xem. Nhờ quản trị chuẩn bị scene.")
 
 
 def _next_scene_revision(current: str) -> str:

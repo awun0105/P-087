@@ -369,7 +369,7 @@ def test_two_independent_editors_cannot_commit_the_same_expected_head(scene_stat
     assert len(scene_state.resolver.list_uris(f"artifact://jobs/{_JOB_ID}/scene/")) == 2
 
 
-def test_pending_initial_artifact_is_not_visible_and_legacy_writes_require_backfill(
+def test_pending_initial_artifact_is_not_visible_and_legacy_writes_adopt_the_head_first(
     scene_state: SimpleNamespace,
 ) -> None:
     legacy_editor = SceneEditor(_FIXTURE_ROOT, scene_state.resolver)
@@ -382,19 +382,20 @@ def test_pending_initial_artifact_is_not_visible_and_legacy_writes_require_backf
         editor.current(_JOB_ID)
     assert editor.artifact_references_for_job(_JOB_ID) == []
 
-    # Legacy artifacts stay hidden until the explicit, verified backfill establishes a DB head.
+    # A legacy scene (artifacts, no DB head) adopts its verified head on first use, then the edit proceeds.
     database = RuntimeDatabase(f"sqlite:///{scene_state.resolver.artifact_root.parent / 'legacy.db'}")
     legacy_repo = SceneHeadRepository(database)
     legacy_runtime_editor = SceneEditor(_FIXTURE_ROOT, scene_state.resolver, legacy_repo)
-    with pytest.raises(SceneNotAvailableError, match="no committed head"):
-        legacy_runtime_editor.apply(
-            _JOB_ID,
-            SceneEditCommand(
-                expected_scene_revision="rev-001",
-                edits=[TransformEdit(object_id="object-rack-001", translation_xyz=(3.0, 2.0, 0.0))],
-            ),
-        )
-    assert legacy_repo.get(_JOB_ID) is None
+    result = legacy_runtime_editor.apply(
+        _JOB_ID,
+        SceneEditCommand(
+            expected_scene_revision="rev-001",
+            edits=[TransformEdit(object_id="object-rack-001", translation_xyz=(3.0, 2.0, 0.0))],
+        ),
+    )
+    assert result.revision.scene.scene_revision == "rev-002"
+    adopted = legacy_repo.get(_JOB_ID)
+    assert adopted is not None and adopted.scene_revision == "rev-002"
 
 
 def test_failed_after_artifact_publish_keeps_orphan_and_never_reuses_its_uri(
@@ -586,13 +587,41 @@ def test_walking_every_ancestor_loads_each_revision_once_and_follows_a_moving_he
     assert len(lineage_loads) == 14
 
 
-def test_legacy_scene_without_head_reports_a_user_safe_conflict(scene_state: SimpleNamespace) -> None:
-    SceneEditor(_FIXTURE_ROOT, scene_state.resolver).current(_JOB_ID)
+def test_legacy_scene_without_head_is_adopted_on_first_read_with_the_same_checks_as_the_script(
+    scene_state: SimpleNamespace,
+) -> None:
+    legacy = SceneEditor(_FIXTURE_ROOT, scene_state.resolver)
+    legacy.current(_JOB_ID)
+    newest = _edit(legacy, "rev-001", 1.0)
     database = RuntimeDatabase(f"sqlite:///{scene_state.resolver.artifact_root.parent / 'no-head.db'}")
-    editor = SceneEditor(_FIXTURE_ROOT, scene_state.resolver, SceneHeadRepository(database))
+    repository = SceneHeadRepository(database)
+    editor = SceneEditor(_FIXTURE_ROOT, scene_state.resolver, repository)
 
-    with pytest.raises(SceneHeadNotReadyError, match="no committed head") as info:
-        editor.current(_JOB_ID)
-    # Lệnh repair chỉ nằm trong log/exception; câu gửi cho UI không được chứa nó.
-    assert "scene_head" not in info.value.user_message
-    assert info.value.user_message.startswith("Scene này chưa được chuẩn bị")
+    assert editor.current(_JOB_ID).scene.scene_revision == newest
+    head = repository.get(_JOB_ID)
+    repair = repository.get_repair(_JOB_ID)
+    assert head is not None and head.scene_revision == newest
+    # Đi qua đúng hai lượt kiểm của repair, không phải ghi tắt một head.
+    assert repair is not None and repair.status == "COMPLETE" and repair.rechecked_count == 2
+    # Lần đọc sau dùng head đã commit, không chạy lại.
+    assert editor.current(_JOB_ID).scene.scene_revision == newest
+
+
+def test_legacy_scene_with_invalid_artifacts_stays_blocked_with_a_user_safe_message(
+    scene_state: SimpleNamespace,
+) -> None:
+    SceneEditor(_FIXTURE_ROOT, scene_state.resolver).current(_JOB_ID)
+    path = scene_state.resolver.resolve(scene_artifact_uri(_JOB_ID, "rev-001"))
+    path.write_bytes(path.read_bytes().replace(b"object-rack-001", b"object-rack-999"))
+    database = RuntimeDatabase(f"sqlite:///{scene_state.resolver.artifact_root.parent / 'blocked.db'}")
+    repository = SceneHeadRepository(database)
+    editor = SceneEditor(_FIXTURE_ROOT, scene_state.resolver, repository)
+
+    for _ in range(2):  # lần hai đọc bản ghi repair BLOCKED, không thử nhận lại
+        with pytest.raises(SceneHeadNotReadyError) as info:
+            editor.current(_JOB_ID)
+        # Chi tiết vận hành chỉ nằm trong log/exception; câu gửi cho UI không chứa tên script.
+        assert "scene_head" not in info.value.user_message
+        assert info.value.user_message.startswith("Dữ liệu scene này không qua được bước kiểm tra")
+    assert repository.get(_JOB_ID) is None
+    assert repository.get_repair(_JOB_ID).status == "BLOCKED"
