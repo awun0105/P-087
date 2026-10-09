@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- PLANNED; P2; EX-PRODUCT evaluation + Studio UI.
+- IMPLEMENTED (code, 2026-10-09; kiểm bằng mắt và lệnh gọi API thật còn mở); P2; EX-PRODUCT evaluation + Studio UI.
 - Canonical PRODUCT-02/08/09, REC-04/06.
 - Goal: bảng đánh giá cho người dùng biết điểm PSNR/SSIM/LPIPS của scene nằm ở đâu so
   với các scene đã chạy, nêu việc cần làm khi có chỉ số dưới ngưỡng, và hiện RAM/VRAM

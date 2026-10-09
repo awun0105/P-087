@@ -2,7 +2,7 @@
 
 ## Metadata và goal
 
-- IN PROGRESS; P1; EX-REC adapters + EX-PRODUCT Studio API/UI.
+- IMPLEMENTED (code, 2026-10-09; kiểm bằng mắt và log worker thật còn mở); P1; EX-REC adapters + EX-PRODUCT Studio API/UI.
 - S1 and S2 implementation are committed; S2 owner visual signoff and S3 live worker-log evidence remain open.
 - Canonical PRODUCT-02/08/09, REC-03/04.
 - Goal: khi một stage lỗi, người dùng đọc được nguyên nhân và việc cần làm bằng tiếng
