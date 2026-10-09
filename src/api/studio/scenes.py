@@ -26,7 +26,12 @@ from src.services.orchestration.auth.quota_ledger import GuestQuotaExceededError
 from src.services.orchestration.jobs.admission import job_reservation, resource_wait
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.lidar_overlay import lidar_overlay_file
-from src.services.orchestration.jobs.progress import JobProgress, awaiting_finalize, job_progress
+from src.services.orchestration.jobs.progress import (
+    JobProgress,
+    awaiting_anonymization_review,
+    awaiting_finalize,
+    job_progress,
+)
 from src.services.orchestration.jobs.queue import job_requester_actors, job_requesters, queue_position
 from src.services.orchestration.jobs.stage_views import StageViewList, stage_views
 from src.services.orchestration.jobs.thumbnails import scene_thumbnail
@@ -70,6 +75,9 @@ class SceneSummary(BaseModel):
     project: schemas.ProjectResponse
     latest_job: JobManifest | None = None
     preview_ready: bool = False
+    #: Job mới nhất đã che xong frame và đang chờ người upload xem bản đã che; danh sách cần biết để không gọi nó là
+    #: "đang chạy" (cùng điều kiện với `waiting_for="anonymization_review"` của progress).
+    awaiting_anonymization_review: bool = False
     #: Thời gian máy đã xử lý của job mới nhất (tổng các bước đã chạy xong); không gồm lúc xếp hàng và lúc chờ người
     #: dùng. None = job chưa có bước nào được đo.
     processing_seconds: float | None = None
@@ -287,6 +295,7 @@ def list_scenes(user: UserRecord | None = Depends(require_contributor)) -> Scene
                 ),
                 latest_job=latest,
                 preview_ready=latest is not None and deps.preview_ready(registry, latest.job_id),
+                awaiting_anonymization_review=latest is not None and awaiting_anonymization_review(latest),
                 processing_seconds=None if latest is None else measured.get(latest.job_id),
                 requested_by=None if latest is None else with_current_role(requester_actors.get(latest.job_id), actors),
                 capabilities=SceneCapabilities(can_delete_project=can_delete_project),

@@ -1025,6 +1025,24 @@ async def test_scenes_lists_uploaded_scenes_only(client: AsyncClient, studio: Si
     assert body[0]["preview_ready"] is False
 
 
+@pytest.mark.asyncio
+async def test_scene_list_flags_a_job_waiting_for_the_anonymization_review(
+    client: AsyncClient, studio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Danh sách phải nói job đang chờ người xem bản đã che, thay vì để nó trông như đang chạy."""
+    from src.api.studio import scenes
+
+    studio.registry.seed_from_fixtures()
+    upload = await _upload(client)
+    await client.post(
+        "/api/v1/scenes/from-upload",
+        json={"upload_id": upload["upload_id"], "name": "Kho A", "attestation": _ATTESTATION},
+    )
+    assert (await client.get("/api/v1/scenes")).json()["scenes"][0]["awaiting_anonymization_review"] is False
+    monkeypatch.setattr(scenes, "awaiting_anonymization_review", lambda job: True)
+    assert (await client.get("/api/v1/scenes")).json()["scenes"][0]["awaiting_anonymization_review"] is True
+
+
 def _record_machine(studio: SimpleNamespace, vram: float) -> None:
     from datetime import UTC, datetime
 
