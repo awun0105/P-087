@@ -93,6 +93,10 @@ describe("ba cửa vào", () => {
   });
   it("trang chọn dẫn tới ba trang riêng; mỗi trang chỉ có form của nhánh đó", async () => {
     const chooser = render(<NewSceneFlow />);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Tạo scene mới");
+    // Mẫu và file 3DGS có sẵn không tạo job: tách khỏi lối dựng từ video và nói rõ điều đó.
+    expect(screen.getByText("Không dựng mới")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Thử mẫu/ })).toHaveTextContent("không tạo scene mới");
     expect(screen.getByRole("link", { name: /Dựng từ video/ })).toHaveAttribute("href", "/new/import-video");
     expect(screen.getByRole("link", { name: /Mở 3DGS/ })).toHaveAttribute("href", "/new/import-scene");
     expect(screen.getByRole("link", { name: /Thử mẫu/ })).toHaveAttribute("href", "/new/try-demo");

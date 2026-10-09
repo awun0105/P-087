@@ -31,16 +31,16 @@ export const SOURCE_ROUTES: Record<Source, string> = {
   sample: "/new/try-demo",
 };
 const SOURCE_TITLES: Record<Source, { title: string; description: string }> = {
-  video: { title: "Dựng từ video", description: "Tải video, khai báo dữ liệu rồi bắt đầu job tái dựng." },
-  gaussian: { title: "Mở scene 3DGS", description: GAUSSIAN_EDIT_ENABLED ? "Tải file PLY/SOG/ZIP đã có để xem, chỉnh Gaussian và xuất file." : "Tải file PLY/SOG/ZIP đã có để xem." },
-  sample: { title: "Thử mẫu", description: "Xem kết quả đã xử lý sẵn; không chạy job mới." },
+  video: { title: "Dựng từ video", description: "Tải video MP4/MOV, khai báo dữ liệu rồi bắt đầu dựng scene 3D." },
+  gaussian: { title: "Mở 3DGS có sẵn", description: (GAUSSIAN_EDIT_ENABLED ? "Tải file PLY/SOG/ZIP đã dựng để xem, chỉnh Gaussian và xuất file." : "Tải file PLY/SOG/ZIP đã dựng để xem.") + " Không có tỉ lệ mét, collision hay duyệt." },
+  sample: { title: "Thử mẫu", description: "Xem tiến trình và kết quả đã xử lý sẵn; không tạo scene mới." },
 };
 const VIDEO_STEPS = [{ key: "video", label: "Chọn video" }, { key: "settings", label: "Khai báo & tạo job" }];
 const IMPORT_STEPS = [{ key: "gaussian", label: "Chọn file 3DGS" }, { key: "import", label: "Mở scene import" }];
 const SAMPLE_STEPS = [
   { key: "sample", label: "Chọn mẫu" },
   { key: "inspect", label: "Xem mẫu" },
-  { key: "replay", label: "Phát lại có sẵn" },
+  { key: "replay", label: "Tiến trình đã ghi" },
   { key: "open", label: "Mở scene mẫu" },
 ];
 
@@ -159,7 +159,7 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
 
   const steps = source === "sample" ? SAMPLE_STEPS : source === "gaussian" ? IMPORT_STEPS : VIDEO_STEPS;
   const loginHref = "/login?next=" + encodeURIComponent((source ? SOURCE_ROUTES[source] : "/new") + (routeKey ? "?" + routeKey : ""));
-  const heading = source ? SOURCE_TITLES[source] : { title: "Scene mới", description: "Chọn cách bắt đầu: dựng từ video, mở file 3DGS đã có, hoặc xem mẫu đã xử lý sẵn." };
+  const heading = source ? SOURCE_TITLES[source] : { title: "Tạo scene mới", description: "Chọn nguồn dữ liệu cho scene." };
 
   return (
     <main className={cn("mx-auto px-4 pt-10 pb-20 sm:px-6", sampleId && step >= 2 ? "max-w-6xl" : "max-w-4xl")}>
@@ -180,10 +180,13 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
       ) : null}
       <div className="mt-8">
         {!source && (
-          <div className="grid gap-4 md:grid-cols-3">
-            <SourceCard icon={<Film aria-hidden />} title="Dựng từ video" detail="MP4/MOV → job tái dựng → scene hệ mét" href={SOURCE_ROUTES.video} />
-            <SourceCard icon={<Box aria-hidden />} title="Mở 3DGS" detail={GAUSSIAN_EDIT_ENABLED ? "PLY/SOG/ZIP → xem, chỉnh Gaussian và xuất file" : "PLY/SOG/ZIP → xem scene"} href={SOURCE_ROUTES.gaussian} />
-            <SourceCard icon={<Clapperboard aria-hidden />} title="Thử mẫu" detail="Xem kết quả đã xử lý sẵn, không chạy job mới" href={SOURCE_ROUTES.sample} />
+          <div className="space-y-4">
+            <SourceCard primary icon={<Film aria-hidden />} title={SOURCE_TITLES.video.title} detail={SOURCE_TITLES.video.description} href={SOURCE_ROUTES.video} />
+            <p className="label-tech pt-2 text-ink-muted">Không dựng mới</p>
+            <div className="grid gap-4 md:grid-cols-2">
+              <SourceCard icon={<Box aria-hidden />} title={SOURCE_TITLES.gaussian.title} detail={SOURCE_TITLES.gaussian.description} href={SOURCE_ROUTES.gaussian} />
+              <SourceCard icon={<Clapperboard aria-hidden />} title={SOURCE_TITLES.sample.title} detail={SOURCE_TITLES.sample.description} href={SOURCE_ROUTES.sample} />
+            </div>
           </div>
         )}
         {source && step === 0 && (
@@ -243,13 +246,15 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
   );
 }
 
-function SourceCard({ icon, title, detail, href }: { icon: React.ReactNode; title: string; detail: string; href: string }) {
+function SourceCard({ icon, title, detail, href, primary = false }: { icon: React.ReactNode; title: string; detail: string; href: string; primary?: boolean }) {
   return (
-    <Link href={href} className="group flex min-h-48 flex-col items-start rounded-2xl border border-line bg-paper-raised p-5 text-left transition-[border-color,box-shadow] hover:border-ember hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ember">
-      <span className="grid size-10 place-items-center rounded-xl bg-ember-soft text-ember-strong [&_svg]:size-5">{icon}</span>
-      <span className="mt-5 text-lg font-bold tracking-tight text-ink">{title}</span>
-      <span className="mt-1 text-sm leading-relaxed text-ink-muted">{detail}</span>
-      <span className="mt-auto flex items-center gap-1 pt-5 text-sm font-medium text-ember-strong">Tiếp tục <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" aria-hidden /></span>
+    <Link href={href} className={cn("group flex rounded-2xl border bg-paper-raised p-5 text-left transition-[border-color,box-shadow] hover:border-ember hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ember", primary ? "items-center gap-5 border-ember/50 sm:p-6" : "min-h-40 flex-col items-start border-line")}>
+      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-ember-soft text-ember-strong [&_svg]:size-5">{icon}</span>
+      <span className={cn("flex min-w-0 flex-1 flex-col", primary ? "" : "mt-4")}>
+        <span className="text-lg font-bold tracking-tight text-ink">{title}</span>
+        <span className="mt-1 text-sm leading-relaxed text-ink-muted">{detail}</span>
+      </span>
+      <span className={cn("flex items-center gap-1 text-sm font-medium text-ember-strong", primary ? "" : "mt-auto pt-4")}>Tiếp tục <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" aria-hidden /></span>
     </Link>
   );
 }
