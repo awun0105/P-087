@@ -70,6 +70,12 @@ fi
 export PRODUCT_SCENE_TIMEOUT_SECONDS="${PRODUCT_SCENE_TIMEOUT_SECONDS:-3600}"
 
 PY=.venv/bin/python
+# Bộ che khuôn mặt/biển số (AUD-18): người vận hành khai thư mục trọng số thì pod tự tải hai file từ kho file của
+# deployment và kiểm sha256 (đã có đủ thì không tải lại). Không lấy được thì dừng ngay, vì worker thiếu trọng số
+# sẽ làm hỏng mọi job có che.
+if [ -n "${PRODUCT_EGOBLUR_WEIGHTS:-}" ]; then
+  "$PY" -m scripts.gpu.egoblur_weights fetch --to "$PRODUCT_EGOBLUR_WEIGHTS"
+fi
 [ -f "$PRODUCT_RUNTIME_MANIFEST" ] || "$PY" -m scripts.gpu.make_runtime_manifest --out "$PRODUCT_RUNTIME_MANIFEST"
 
 mode="${1:-worker}"

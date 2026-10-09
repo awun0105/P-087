@@ -80,15 +80,15 @@ ghi vào trong repo. Ba file `api.env.example`, `worker.env.example`, `web.env.e
   `[shared]` vì đặt ở mỗi worker thì COLMAP vẫn chạy CPU.
 - **API thiếu `PRODUCT_PROCESSING_CONFIG` hoặc `PRODUCT_RUNTIME_MANIFEST`** thì từ chối tạo scene với thông báo
   "Chưa cấu hình worker".
-- **Bộ che khuôn mặt/biển số cần hai nơi.** Worker cần `PRODUCT_EGOBLUR_WEIGHTS` trỏ tới hai file `.jit`; API cần
-  `PRODUCT_ANONYMIZE_REMOTE_WORKER=true` thì form mới hiện ô chọn. Image GPU không có sẵn trọng số (Meta yêu cầu
-  đồng ý giấy phép khi tải), và entrypoint chưa tự tải chúng.
+- **Bộ che khuôn mặt/biển số cần hai nơi.** Worker cần `PRODUCT_EGOBLUR_WEIGHTS`; API cần
+  `PRODUCT_ANONYMIZE_REMOTE_WORKER=true` thì form mới hiện ô chọn. Image GPU không chứa trọng số (Meta yêu cầu
+  đồng ý giấy phép khi tải): chạy `python -m scripts.gpu.egoblur_weights upload --from <thư mục>` một lần để đưa
+  hai file lên R2, sau đó pod nào có biến trên cũng tự tải và kiểm sha256 lúc khởi động. Đổi pod không cần
+  chép tay.
 - **Worker đo RAM và CPU theo giới hạn của container** (AUD-26.S4). Chưa kiểm trên pod thật.
 - **Image GPU chưa từng được build trọn vẹn** (ghi chú trong `Dockerfile.gpu`). Lần build đầu chạy `preflight`.
 
 ## Chưa có trong đóng gói
 
-- Entrypoint của image GPU chưa tự tải và kiểm checksum trọng số EgoBlur.
-- Preflight chưa kiểm sự có mặt của trọng số EgoBlur (đã kiểm COLMAP chạy GPU khi bật).
 - Không có bước tự động chép runtime manifest từ pod lên API; đang là thao tác tay ở bước 4.
 - `docker-compose.gpu.yml` là cấu hình chạy cục bộ (`APP_ENV: development`, SQLite), không phải production.
