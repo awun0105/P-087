@@ -207,9 +207,39 @@ Verification:
 - `graphify update .` and a focused `graphify query` — completed; 21,200 nodes, 63,055 edges, 712 communities. Generated graph files remain untracked.
 - Environment probe — `isaacsim`, `isaaclab`, `isaac-sim`, and server validation config/profile are absent.
 
-This local change makes legacy USD structurally ready for physics evaluation but
-does not implement or prove the headless observation worker,
-collision/penetration checks, path checks, process cancellation, or real Isaac
-execution. AUD-05.S2 remains **IN PROGRESS**; runtime acceptance is
-**UNVERIFIED** and no fixture is used as simulator evidence. The USD test checks
-generated source text; it does not load the stage in Isaac Sim.
+The S2 local implementation now adds an injectable host process adapter and a
+std-library-only `scripts/isaac/validate_candidate.py` entrypoint. The host
+verifies the queued run/config/profile/runtime identities and exact candidate
+inventory, extracts the immutable simulation-package archive under member-count
+and byte limits, rejects traversal/symlinks, checks packaged USD/dependency
+bytes against the candidate refs, and validates child output identity/check and
+path sets. The child creates a separate headless `SimulationApp`, opens the
+candidate, checks stage composition/default prim/PhysicsScene/metric units/up
+axis, resolves the configured robot and measures its bounds, then observes
+spawn and straight-line fixed-orientation footprint overlaps through PhysX scene
+queries. Timeout and cancellation use the existing process-group terminator.
+Only protocol tests use a fake executable; those tests are not simulator proof.
+
+Contract check IDs are mapped to their observed semantics, including
+`ISAAC_LOAD_ERROR`, `ROBOT_SPAWN_INVALID`, `PATH_VALIDATION_ERROR`, and
+`REQUIRED_ROUTE_BLOCKED`. Required-route aggregation considers required pairs
+only. `PENETRATION_DEPTH` is deliberately `ERROR` with no measured value:
+PhysX overlap queries report intersections but not penetration depth. Contact
+reports are an available API path ([Omni Physics contact reports](https://docs.omniverse.nvidia.com/kit/docs/omni_physics/latest/extensions/runtime/source/omni.physx/docs/dev_guide/contact_reports.html)); implementing and qualifying a stable depth observation remains engineering work, not a technology impossibility. Until then the worker must not infer zero penetration.
+
+Local verification on 2026-10-09:
+
+- `.venv/bin/pytest tests/test_simulation/test_isaac_process.py tests/test_simulation/test_usd.py tests/test_orchestration/test_simulation_package.py -q --tb=short` — 52 passed. The Isaac process tests exercise a fake child and validate host-side identity, archive, timeout and cancellation behavior; they do not prove Isaac Sim executed.
+- `.venv/bin/ruff check src/ tests/` — passed.
+- `.venv/bin/ruff format --check src/ tests/` — passed; 587 files already formatted.
+- `git diff --check` — passed.
+- CodeGraph — 938 files, 19,357 nodes, 58,687 edges; index current.
+- Graphify — updated to 22,081 nodes, 67,816 edges and 710 communities; focused query completed.
+- Environment/deployment acceptance — **UNVERIFIED**: no Isaac Sim/Isaac Lab runtime or configured worker command is available in this checkout, and no deployed CLEAR/BLOCKED smoke was run.
+
+The adapter is not yet dispatched by the durable validation queue, and it does
+not publish trusted run/report artifacts; queue integration and publication are
+still required before Studio can use this result. AUD-05.S2 remains **IN
+PROGRESS**. Real Isaac runtime/device logs and CLEAR/BLOCKED smoke evidence are
+**UNVERIFIED** because no deployment was performed, and fake-child tests do not
+close that gate.
