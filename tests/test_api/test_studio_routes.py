@@ -831,6 +831,13 @@ async def test_input_assembly_runs_supplied_trajectory_from_loose_files_without_
     )
     _validate_project_input_recipe(attempt, project, manifest)
 
+    # Mất gói thì runner phải thất bại rõ ràng, không lặng lẽ bỏ qua bước đối chiếu thành viên.
+    from src.services.orchestration.artifacts import ArtifactNotFoundError
+
+    package_path.unlink()
+    with pytest.raises(ArtifactNotFoundError):
+        _validate_project_input_recipe(attempt, project, manifest)
+
 
 async def _r4_registry(studio: SimpleNamespace, name: str) -> object:
     """Đăng ký runtime R4 đã qualified cho test chạy file rời; trả về đường dẫn file registry."""

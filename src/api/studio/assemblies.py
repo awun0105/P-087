@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -53,6 +54,7 @@ from src.models.contracts.manifests import InputFile, JobManifest
 from src.services.orchestration.artifacts import (
     ArtifactAlreadyExistsError,
     ArtifactChecksumError,
+    ArtifactNotFoundError,
     ArtifactTooLargeError,
     sha256_bytes,
 )
@@ -95,6 +97,8 @@ from src.services.orchestration.uploads.assembly_models import StagedInputUpload
 from src.services.orchestration.uploads.models import UploadRecord
 from src.services.orchestration.uploads.scene_imports import ImportedScene, SceneImportError
 from src.services.reconstruction.inputs.input_probe import InputProbe
+
+_LOGGER = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -744,13 +748,19 @@ def run_input_assembly(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except ArtifactTooLargeError as error:
         raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(error)) from error
+    except (ArtifactChecksumError, ArtifactNotFoundError) as error:
+        # Nguồn đã đổi hoặc không còn: người dùng phải tải lại, không phải lỗi máy chủ.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except ValueError as error:
         raise _handle_assembly_error(error) from error
     finally:
         # Gói do server đóng mà job không được nhận (lỗi, hoặc replay trả job cũ) thì gỡ ngay: nếu để lại sẽ là
         # một bản sao dữ liệu LiDAR của người dùng không thuộc project nào.
         if built_package is not None and not run_committed:
-            deps.uploads().discard_unlinked(built_package.upload_id, expected_checksum=built_package.checksum)
+            try:
+                deps.uploads().discard_unlinked(built_package.upload_id, expected_checksum=built_package.checksum)
+            except Exception:  # noqa: BLE001 - dọn dẹp không được che lỗi gốc của request
+                _LOGGER.exception("không gỡ được gói LiDAR chưa gắn project %s", built_package.upload_id)
 
 
 @router.post(

@@ -154,7 +154,11 @@ def _write_member(archive: zipfile.ZipFile, name: str, item: StagedInputFile, re
             copy(stream.read, target)
         expected = item.source_file.checksum
     else:
-        with zipfile.ZipFile(source) as container:
+        try:
+            container = zipfile.ZipFile(source)
+        except zipfile.BadZipFile as error:
+            raise LoosePackageError("ZIP đã tải lên không còn đọc được; tải lại file đó") from error
+        with container:
             try:
                 member = container.open(item.archive_member.member_path)
             except KeyError as error:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from src.models.contracts.input_assembly import (
@@ -152,3 +154,69 @@ def test_a_zip_the_user_supplied_is_recognized_so_the_old_path_is_kept() -> None
     assert not is_user_supplied_package(staged, ["a", "c"])  # nhiều ZIP: phải đóng lại
     loose = {"x": _staged("x", InputAssetFormat.POINT_CLOUD_PCD, "4")}
     assert not is_user_supplied_package(loose, ["x"])
+
+
+# ---------------------------------------------------------------------------
+# discard_unlinked: gỡ gói do server đóng mà không đụng dữ liệu đang dùng
+# ---------------------------------------------------------------------------
+
+
+def _upload_service(tmp_path: Path):
+    from src.services.orchestration.artifacts import ArtifactRemote, ArtifactResolver
+    from src.services.orchestration.jobs.database import RuntimeDatabase
+    from src.services.orchestration.uploads import VideoUploadService
+    from tests.test_orchestration.memory_object_store import MemoryObjectStore
+
+    store = MemoryObjectStore()
+    resolver = ArtifactResolver(tmp_path / "cache", ArtifactRemote(store))
+    database = RuntimeDatabase(f"sqlite:///{tmp_path / 'runtime.db'}")
+    return VideoUploadService(database, resolver, 8 * 1024 * 1024), resolver, store
+
+
+def _store_video(service):
+    pending = service.begin("walk.mp4")
+    pending.publication.write(b"\x00\x00\x00\x14ftypqt  fake-mp4")
+    return service.finish(pending)
+
+
+def _remote_keys(store) -> list[str]:
+    return [item.key for item in store.list_objects("")]
+
+
+def test_discard_removes_the_local_file_the_remote_copy_and_the_record(tmp_path: Path) -> None:
+    from src.services.orchestration.uploads import UploadNotFoundError
+
+    service, resolver, store = _upload_service(tmp_path)
+    record = _store_video(service)
+    local = resolver.resolve(record.artifact_uri)
+    assert local.is_file() and _remote_keys(store)
+
+    assert service.discard_unlinked(record.upload_id, expected_checksum=record.checksum) is True
+
+    assert not local.exists()
+    assert _remote_keys(store) == []  # bản sao trên kho từ xa không được để mồ côi
+    with pytest.raises(UploadNotFoundError):
+        service.get(record.upload_id)
+
+
+def test_discard_never_touches_an_upload_already_linked_to_a_project(tmp_path: Path) -> None:
+    service, resolver, store = _upload_service(tmp_path)
+    record = _store_video(service)
+    service.link_project(record.upload_id, "project-1")
+
+    assert service.discard_unlinked(record.upload_id, expected_checksum=record.checksum) is False
+
+    assert resolver.resolve(record.artifact_uri).is_file()
+    assert _remote_keys(store)
+    assert service.get(record.upload_id).project_ids == ["project-1"]
+
+
+def test_discard_refuses_when_the_checksum_is_not_the_one_the_run_built(tmp_path: Path) -> None:
+    service, resolver, store = _upload_service(tmp_path)
+    record = _store_video(service)
+
+    assert service.discard_unlinked(record.upload_id, expected_checksum="sha256:" + "f" * 64) is False
+    assert service.discard_unlinked("upload-does-not-exist", expected_checksum=record.checksum) is False
+
+    assert resolver.resolve(record.artifact_uri).is_file()
+    assert _remote_keys(store)

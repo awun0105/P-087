@@ -60,11 +60,13 @@ khả thi khi có qualified adapters và updated producer/consumer contracts.
    đường ingest/worker/QA của R4 giữ nguyên. Gói không biến đổi byte nào; mỗi thành viên ghi
    `file_id` và checksum nguồn vào provenance của InputManifest (`package_members`); registry và
    runner kiểm danh sách đó khớp assembly đã niêm phong (checksum nguồn, vai trò, thứ tự scan, tên
-   thành viên khớp bộ nhận diện) và runner đối chiếu thêm tên thành viên thật của gói trên đĩa.
-   Byte của gói do worker kiểm checksum khi đọc. Gói được gắn vào project cùng lúc job được nhận
-   (xoá project xoá luôn gói); nếu lần chạy không thành hoặc là replay thì gói bị gỡ ngay
-   (`discard_unlinked`), không để bản sao dữ liệu mồ côi. Điều kiện chặn đặt TRƯỚC khi đóng gói:
-   lời khai, tổng dung lượng so với giới hạn một gói, kích thước giải nén so với giá trị đã niêm phong.
+   thành viên khớp bộ nhận diện) và runner đối chiếu thêm tên thành viên thật của gói (tải từ kho từ
+   xa nếu cần và kiểm checksum; không tìm thấy gói thì lỗi, không bỏ qua). Byte của gói do worker kiểm
+   checksum khi đọc. Gói được gắn vào project cùng lúc job được nhận (xoá project xoá luôn gói); nếu
+   lần chạy không thành hoặc là replay thì gói bị gỡ ngay cả bản cục bộ lẫn bản trên kho từ xa
+   (`discard_unlinked`). Lỗi dọn dẹp chỉ được ghi log, không che lỗi gốc; nếu dọn thất bại thì gói còn
+   lại chưa gắn project. Trước khi ghi: kiểm lời khai và tổng dung lượng so với giới hạn một gói. Trong
+   lúc ghi: chặn thành viên giải nén vượt kích thước đã niêm phong.
    ZIP người dùng nộp mà bộ nhận diện gói cũ từ chối (bố cục khác, thừa file) nhưng các thành viên
    đã bind đủ thì được đóng lại như file rời thay vì bị từ chối. Điều kiện sớm ở resolver: scan phải là `.pcd` (`SCAN_FORMAT_PCD_REQUIRED`)
    và thời điểm frame phải một dòng mỗi pose (`RGB_FRAME_TIMES_COUNT_MISMATCH`).

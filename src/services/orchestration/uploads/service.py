@@ -262,8 +262,7 @@ class VideoUploadService:
         """Gỡ một upload do server vừa tạo mà chưa gắn project (dọn khi lần chạy không thành).
 
         Chỉ gỡ khi bản ghi còn đúng checksum đã khai và chưa gắn project nào, nên không thể xoá nhầm dữ liệu
-        đang dùng. Chỉ xoá file cục bộ; bản trên kho từ xa (nếu có) do chính sách lưu trữ xử lý. Trả về
-        True khi đã gỡ.
+        đang dùng. Gỡ cả file cục bộ lẫn bản trên kho từ xa (nếu có). Trả về True khi đã gỡ.
         """
         with self.database.transaction(write=True) as tx:
             row = tx.execute(
@@ -275,9 +274,12 @@ class VideoUploadService:
             if record.project_ids or record.checksum != expected_checksum:
                 return False
             tx.execute("DELETE FROM r2s_uploads WHERE upload_id=?", (upload_id,))
-        path = self.resolver.locate(record.artifact_uri)
-        if path is not None:
-            path.unlink(missing_ok=True)
+        path = self.resolver.resolve(record.artifact_uri)
+        path.unlink(missing_ok=True)
+        remote = self.resolver.remote
+        if remote is not None:
+            # Bản đã đẩy lên kho từ xa lúc commit: không gỡ thì còn một bản sao dữ liệu người dùng không ai quản.
+            remote.delete(self.resolver.relative_key(record.artifact_uri))
         return True
 
     def save_video_preparation_manifest(self, upload_id: str, manifest: ClientVideoPreparationManifest) -> UploadRecord:

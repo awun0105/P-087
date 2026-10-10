@@ -792,14 +792,17 @@ def _validate_project_input_recipe(
             except (LoosePackageError, ValueError, KeyError, TypeError) as error:
                 raise ValueError("R4 synthesized package does not match the accepted recipe") from error
             # Đối chiếu độc lập với danh sách thành viên trong manifest: tên thành viên thật của gói trên đĩa.
-            package_path = resolver.locate(lidar_files[0].artifact_uri)
-            if package_path is not None:
-                import zipfile
+            # require_uri tải từ kho từ xa khi cần và kiểm checksum; không tìm thấy gói thì lỗi, không bỏ qua.
+            import zipfile
 
+            package_path = resolver.require_uri(lidar_files[0].artifact_uri, lidar_files[0].checksum)
+            try:
                 with zipfile.ZipFile(package_path) as package:
                     actual_members = set(package.namelist())
-                if actual_members != {str(item["member_path"]) for item in synthesized}:
-                    raise ValueError("R4 synthesized package contents differ from its recorded member list")
+            except zipfile.BadZipFile as error:
+                raise ValueError("R4 synthesized package is not a readable archive") from error
+            if actual_members != {str(item["member_path"]) for item in synthesized}:
+                raise ValueError("R4 synthesized package contents differ from its recorded member list")
             selected_upload_ids = {video.upload_id, *(by_id[file_id].upload_id for file_id in role_ids)}
         else:
             if (
