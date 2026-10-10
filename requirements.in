@@ -11,6 +11,10 @@ numpy>=1.26.0
 scipy>=1.11.0
 trimesh>=4.0.0
 
+# Đọc calibration camera-LiDAR dạng ROS tf / Kalibr YAML (src/services/reconstruction/inputs/calibration_formats.py).
+# PyYAML MIT; chỉ dùng safe_load. Trước đây chỉ có gián tiếp qua uvicorn[standard].
+pyyaml>=6.0,<7
+
 # AI / LangChain
 langchain>=0.3.0
 langchain-anthropic>=1.0.0
