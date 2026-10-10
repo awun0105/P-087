@@ -2,7 +2,10 @@ import { GAUSSIAN_EDIT_ENABLED } from "@/features/studio/scene/state";
 
 export type Source = "video" | "gaussian" | "sample";
 
-/** Mỗi cách bắt đầu là một trang riêng dưới `/new`; `/new` chỉ là trang chọn. */
+/**
+ * Mỗi cách bắt đầu là một trang riêng dưới `/new`. `/new` và `/new/import-video` cùng là khung tải
+ * input chung (`UnifiedInputFlow`): mọi scene dựng mới đi qua đó, kể cả khi có thêm LiDAR/metadata.
+ */
 export const SOURCE_ROUTES: Record<Source, string> = {
   video: "/new/import-video",
   gaussian: "/new/import-scene",

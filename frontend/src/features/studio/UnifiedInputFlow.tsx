@@ -552,13 +552,15 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
 
   useEffect(() => {
     const legacySource = params.get("source");
-    if (!legacySource) return;
+    // `/new?sample=<id>` là link cũ của trình hướng dẫn mẫu; không có `source` thì `sample` quyết định đích.
+    const target = legacySource ?? (params.get("sample") ? "sample" : null);
+    if (target === null) return;
     const query = new URLSearchParams(params.toString());
     query.delete("source");
     const suffix = query.size ? `?${query.toString()}` : "";
-    if (legacySource === "sample") router.replace(`/new/try-demo${suffix}`);
-    else if (legacySource === "gaussian") router.replace(`/new/import-scene${suffix}`);
-    else if (legacySource === "video") router.replace(`/new${suffix}`);
+    if (target === "sample") router.replace(`/new/try-demo${suffix}`);
+    else if (target === "gaussian") router.replace(`/new/import-scene${suffix}`);
+    else if (target === "video") router.replace(`/new${suffix}`);
   }, [params, router]);
 
   async function addFiles(files: FileList | File[]) {

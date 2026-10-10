@@ -3,7 +3,7 @@
 import { errorMessage } from "@/lib/ui-error";
 import { SOURCE_ROUTES, SOURCE_TITLES, type Source } from "@/features/studio/newSceneSources";
 
-import { ArrowLeft, ArrowRight, Box, Clapperboard, Film, Loader2, LogIn } from "lucide-react";
+import { ArrowLeft, ArrowRight, Clapperboard, Loader2, LogIn } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -15,7 +15,6 @@ import { canCreateScene, describeDetection, isLidar } from "@/features/studio/in
 import { ImportSetupStep } from "@/features/studio/ImportSetupStep";
 import { SamplePicker, SampleProcessStep, SampleSelectStep } from "@/features/studio/SampleFlow";
 import { UploadDropzone } from "@/features/studio/UploadDropzone";
-import { VideoSetupStep } from "@/features/studio/VideoSetupStep";
 import { canEdit } from "@/lib/api/auth";
 import { getSample, listSamples } from "@/lib/api/studio";
 import { useUrlState } from "@/features/studio/useUrlState";
@@ -23,7 +22,6 @@ import { PageHeader } from "@/components/studio/feedback";
 import { cn } from "@/lib/cn";
 import type { DemoManifest, SampleSummary, UploadRecord } from "@/lib/contracts/studio";
 
-const VIDEO_STEPS = [{ key: "video", label: "Chọn video" }, { key: "settings", label: "Khai báo & tạo job" }];
 const IMPORT_STEPS = [{ key: "gaussian", label: "Chọn file 3DGS" }, { key: "import", label: "Mở scene import" }];
 const SAMPLE_STEPS = [
   { key: "sample", label: "Chọn mẫu" },
@@ -31,16 +29,19 @@ const SAMPLE_STEPS = [
   { key: "replay", label: "Xem tiến trình" },
 ];
 
+/** Hai cửa vào dùng kết quả đã dựng sẵn: 3DGS tạo import, mẫu chỉ phát lại artifact đã có. */
+export type ReadyMadeSource = Exclude<Source, "video">;
+
 /**
- * Ba cửa vào dùng chung nguồn upload thật: video tạo job, 3DGS tạo import, mẫu chỉ phát lại artifact đã có. Mỗi nhánh
- * là một trang (`SOURCE_ROUTES`) có setup và từ vựng riêng; `source` do trang truyền vào, không đọc từ query.
- * `source = null` là trang chọn `/new`; link cũ dạng `/new?source=…` hoặc `/new?sample=…` được chuyển sang trang mới.
+ * Hai cửa vào cho dữ liệu đã dựng sẵn. Dựng scene từ đầu đi qua khung tải input chung ở `/new`
+ * (`UnifiedInputFlow`), nên trang này không có nhánh video riêng. Mỗi nhánh là một trang
+ * (`SOURCE_ROUTES`) có setup và từ vựng riêng; `source` do trang truyền vào, không đọc từ query.
  */
-export function NewSceneFlow({ source = null }: { source?: Source | null }) {
+export function NewSceneFlow({ source }: { source: ReadyMadeSource }) {
   const { me } = useAuth();
   return <NewSceneFlowBody source={source} key={me?.user?.user_id ?? (me?.auth_required ? "guest" : "local")} />;
 }
-function NewSceneFlowBody({ source }: { source: Source | null }) {
+function NewSceneFlowBody({ source }: { source: ReadyMadeSource }) {
   const { params, update } = useUrlState();
   const { me } = useAuth();
   const router = useRouter();
@@ -51,14 +52,7 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
   useEffect(() => {
     const timer = setTimeout(() => {
       const route = new URLSearchParams(routeKey);
-      if (source === null) {
-        const legacy = route.get("source");
-        const target = legacy === "video" || legacy === "gaussian" || legacy === "sample" ? legacy : route.get("sample") ? "sample" : null;
-        if (target) {
-          route.delete("source");
-          router.replace(SOURCE_ROUTES[target] + (route.size ? "?" + route.toString() : ""));
-        }
-      } else if (source === "sample") {
+      if (source === "sample") {
         // `step=ready` là URL cũ của bước mở scene đã bỏ: quay về bước xem tiến trình.
         setStep(route.get("sample") ? route.get("step") === "replay" || route.get("step") === "ready" ? 2 : 1 : 0);
       } else {
@@ -67,11 +61,7 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
       }
     }, 0);
     return () => clearTimeout(timer);
-  }, [routeKey, source, router]);
-  // Máy chủ nhận diện theo nội dung; file thuộc nhánh khác thì `uploaded` chuyển trang kèm `switched=1`.
-  const detectedMessage = source && source !== "sample" && params.get("switched")
-    ? `Máy chủ nhận diện file theo nội dung, không theo đuôi file; đã chuyển sang luồng ${source === "video" ? "dựng từ video" : "mở 3DGS"}.`
-    : null;
+  }, [routeKey, source]);
   const [samples, setSamples] = useState<SampleSummary[]>([]);
   const [samplesReady, setSamplesReady] = useState(false);
   const [samplesError, setSamplesError] = useState<string | null>(null);
@@ -128,56 +118,44 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
   };
 
   const uploaded = (record: UploadRecord) => {
-    // Máy chủ nhận diện theo nội dung, kể cả khi người dùng chọn sai nhánh từ đuôi file.
+    // Máy chủ nhận diện theo nội dung, kể cả khi người dùng vào nhánh này với file khác.
     if (isLidar(record)) {
       // LiDAR không phải video hay scene 3DGS (ADR 0009): nói rõ đã nhận diện gì, không đẩy sang nhánh import 3DGS.
-      setLidarNotice(`Máy chủ nhận diện file là ${describeDetection(record)}. Đây là dữ liệu LiDAR, không phải ${source === "video" ? "video" : "scene 3DGS"}; file đã được lưu nhưng trang này không dùng nó.`);
+      setLidarNotice(`Máy chủ nhận diện file là ${describeDetection(record)}. Đây là dữ liệu LiDAR, không phải scene 3DGS; file đã được lưu nhưng trang này không dùng nó.`);
       return;
     }
     setLidarNotice(null);
-    const detected: Source = canCreateScene(record) ? "video" : "gaussian";
-    if (detected !== source) {
-      router.push(`${SOURCE_ROUTES[detected]}?step=setup&upload=${encodeURIComponent(record.upload_id)}&switched=1`);
+    if (canCreateScene(record)) {
+      // Video thuộc khung tải input chung; nối upload đã xác minh sang đó thay vì bắt tải lại.
+      router.push(`${SOURCE_ROUTES.video}?upload=${encodeURIComponent(record.upload_id)}`);
       return;
     }
-    update({ step: "setup", upload: record.upload_id, sample: null, switched: null });
+    update({ step: "setup", upload: record.upload_id, sample: null });
     setPreselect(record.upload_id);
     setStep(1);
   };
 
-  const steps = source === "sample" ? SAMPLE_STEPS : source === "gaussian" ? IMPORT_STEPS : VIDEO_STEPS;
-  const loginHref = "/login?next=" + encodeURIComponent((source ? SOURCE_ROUTES[source] : "/new") + (routeKey ? "?" + routeKey : ""));
-  const heading = source ? SOURCE_TITLES[source] : { title: "Tạo scene mới", description: "Chọn nguồn dữ liệu cho scene." };
+  const steps = source === "sample" ? SAMPLE_STEPS : IMPORT_STEPS;
+  const loginHref = "/login?next=" + encodeURIComponent(SOURCE_ROUTES[source] + (routeKey ? "?" + routeKey : ""));
+  const heading = SOURCE_TITLES[source];
 
   return (
     <main className={cn("mx-auto px-4 pt-10 pb-20 sm:px-6", sampleId && step >= 2 ? "max-w-6xl" : "max-w-4xl")}>
       <PageHeader title={heading.title} description={heading.description} />
-      {source ? (
-        <div className="mt-8 space-y-4">
-          {canEdit(me) ? (
-            <Link href="/new" className="text-sm font-medium text-ember-strong hover:underline">
-              ← Đổi cách bắt đầu
-            </Link>
-          ) : (
-            <Link href="/login" className="text-sm font-medium text-ember-strong hover:underline">
-              ← Quay lại đăng nhập
-            </Link>
-          )}
-          <FlowStepper steps={steps} current={step} />
-        </div>
-      ) : null}
-      <div className="mt-8">
-        {!source && (
-          <div className="space-y-4">
-            <SourceCard primary icon={<Film aria-hidden />} title={SOURCE_TITLES.video.title} detail={SOURCE_TITLES.video.description} href={SOURCE_ROUTES.video} />
-            <p id="no-build-label" className="label-tech pt-2 text-ink-muted">Dùng kết quả đã dựng sẵn</p>
-            <div role="group" aria-labelledby="no-build-label" className="grid gap-4 md:grid-cols-2">
-              <SourceCard icon={<Box aria-hidden />} title={SOURCE_TITLES.gaussian.title} detail={SOURCE_TITLES.gaussian.description} href={SOURCE_ROUTES.gaussian} />
-              <SourceCard icon={<Clapperboard aria-hidden />} title={SOURCE_TITLES.sample.title} detail={SOURCE_TITLES.sample.description} href={SOURCE_ROUTES.sample} />
-            </div>
-          </div>
+      <div className="mt-8 space-y-4">
+        {canEdit(me) ? (
+          <Link href={SOURCE_ROUTES.video} className="text-sm font-medium text-ember-strong hover:underline">
+            ← Về khung tải input
+          </Link>
+        ) : (
+          <Link href="/login" className="text-sm font-medium text-ember-strong hover:underline">
+            ← Quay lại đăng nhập
+          </Link>
         )}
-        {source && step === 0 && (
+        <FlowStepper steps={steps} current={step} />
+      </div>
+      <div className="mt-8">
+        {step === 0 && (
           source === "sample" ? (
             !samplesReady ? <p role="status" className="text-sm text-ink-muted">Đang tải video mẫu…</p>
               : samplesError ? <Notice tone="rust">Không tải được video mẫu: {samplesError} <Button variant="secondary" size="sm" onClick={() => { setSamplesReady(false); setSamplesError(null); setSamplesReload((value) => value + 1); }}>Thử lại</Button></Notice>
@@ -185,11 +163,11 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
                   : <SamplePicker samples={samples} selected={sampleId} onPick={pickSample} />
           ) : canEdit(me) ? (
             <div className="space-y-4">
-              <UploadDropzone kind={source} onUploaded={uploaded} />
+              <UploadDropzone onUploaded={uploaded} />
               {lidarNotice && <Notice tone="ochre">{lidarNotice}</Notice>}
               <div className="flex justify-end">
                 <Button variant="ghost" onClick={() => { setStep(1); update({ step: "setup" }); }}>
-                  Chọn {source === "video" ? "video" : "file 3DGS"} đã tải trước đó
+                  Chọn file 3DGS đã tải trước đó
                   <ArrowRight aria-hidden />
                 </Button>
               </div>
@@ -200,7 +178,6 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
             </EmptyState>
           ) : <p role="status" className="text-sm text-ink-muted">Đang kiểm tra quyền truy cập…</p>
         )}
-        {detectedMessage && step === 1 && <Notice tone="ochre" className="mb-5">{detectedMessage}</Notice>}
         {source === "sample" && step >= 1 && sampleId ? (
           sampleError ? (
             <div className="space-y-4">
@@ -221,26 +198,12 @@ function NewSceneFlowBody({ source }: { source: Source | null }) {
             <SampleProcessStep sampleId={sampleId} sample={sample} onDone={() => router.push(`/samples/${encodeURIComponent(sampleId)}/scene`)} />
           )
         ) : null}
-        {source !== "sample" && source && step === 1 && (
-          canEdit(me) ? source === "video"
-            ? <VideoSetupStep preselect={preselect} onBack={() => { setStep(0); update({ step: "input" }); }} />
-            : <ImportSetupStep preselect={preselect} onBack={() => { setStep(0); update({ step: "input" }); }} />
+        {source === "gaussian" && step === 1 && (
+          canEdit(me)
+            ? <ImportSetupStep preselect={preselect} onBack={() => { setStep(0); update({ step: "input" }); }} />
             : <EmptyState icon={<LogIn aria-hidden />} title="Đăng nhập để tiếp tục" action={<Link href={loginHref} className={buttonVariants({})}>Đăng nhập</Link>}>Phiên đăng nhập đã kết thúc. File đã tải vẫn được lưu trên máy chủ.</EmptyState>
         )}
       </div>
     </main>
-  );
-}
-
-function SourceCard({ icon, title, detail, href, primary = false }: { icon: React.ReactNode; title: string; detail: string; href: string; primary?: boolean }) {
-  return (
-    <Link href={href} className={cn("group flex rounded-2xl border bg-paper-raised p-5 text-left transition-[border-color,box-shadow] hover:border-ember hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ember", primary ? "items-center gap-5 border-ember/50 sm:p-6" : "min-h-40 flex-col items-start border-line")}>
-      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-ember-soft text-ember-strong [&_svg]:size-5">{icon}</span>
-      <span className={cn("flex min-w-0 flex-1 flex-col", primary ? "" : "mt-4")}>
-        <span className="text-lg font-bold tracking-tight text-ink">{title}</span>
-        <span className="mt-1 text-sm leading-relaxed text-ink-muted">{detail}</span>
-      </span>
-      <span className={cn("flex items-center gap-1 text-sm font-medium text-ember-strong", primary ? "" : "mt-auto pt-4")}>Tiếp tục <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" aria-hidden /></span>
-    </Link>
   );
 }

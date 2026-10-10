@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { canCreateScene, describeDetection, inputKind, isGaussian, rejectFileName, rejectFileNameFor } from "@/features/studio/inputKinds";
+import { canCreateScene, describeDetection, inputKind, isGaussian, rejectGaussianFileName } from "@/features/studio/inputKinds";
 import type { UploadRecord } from "@/lib/contracts/studio";
 
 const BASE: UploadRecord = {
@@ -15,9 +15,9 @@ const BASE: UploadRecord = {
 };
 
 describe("input kinds", () => {
-  it("filters names early but leaves real detection to the server", () => {
-    for (const ok of ["a.MP4", "b.mov", "c.ply", "d.sog", "e.zip"]) expect(rejectFileName(ok)).toBeNull();
-    for (const bad of ["e.splat", "f.txt", "g"]) expect(rejectFileName(bad)).toMatch(/Chỉ nhận/);
+  it("filters the 3DGS branch early but leaves real detection to the server", () => {
+    for (const ok of ["a.PLY", "b.sog", "c.zip"]) expect(rejectGaussianFileName(ok)).toBeNull();
+    for (const bad of ["d.mp4", "e.splat", "f.txt", "g"]) expect(rejectGaussianFileName(bad)).toMatch(/Mở 3DGS chỉ nhận/);
   });
 
   it("treats records without input_kind as legacy video", () => {
@@ -66,8 +66,7 @@ describe("input kinds", () => {
     };
     expect(isGaussian(sog)).toBe(true);
     expect(canCreateScene(sog)).toBe(false);
-    expect(rejectFileNameFor("external.sog", "gaussian")).toBeNull();
-    expect(rejectFileNameFor("external.sog", "video")).toMatch(/\.ply\/\.sog\/\.zip/);
+    expect(rejectGaussianFileName("external.sog")).toBeNull();
     expect(describeDetection(sog)).toMatch(/Scene 3DGS \(\.sog\) · 120 Gaussian · SH bậc 1/);
   });
 });
