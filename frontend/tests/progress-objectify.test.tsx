@@ -1,8 +1,10 @@
 /** Bước "Tách vật thể" lỗi (tách theo vật hết số lần thử) phải báo lỗi và cho chọn tiếp ngay tại hàng bước ở tab Tiến trình. */
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ProgressTab } from "@/features/studio/scene/ProgressTab";
+import { useObjectify } from "@/features/studio/scene/useObjectify";
+import { ApiError } from "@/lib/api/client";
 import { STUDIO_STAGES } from "@/features/studio/stages";
 import { cancelObjectify, getObjectifyState, requestObjectify, type ObjectifyState } from "@/lib/api/studio";
 import type { JobProgress } from "@/lib/contracts/studio";
@@ -90,5 +92,58 @@ describe("tab Tiến trình: bước Tách vật thể lỗi", () => {
     const running: JobProgress = { ...done, status: "RUNNING", stages: done.stages.map((stage) => stage.stage_id === "ST-OBJECT-EXTRACT" ? { ...stage, state: "running" } : stage) };
     render(<ProgressTab jobId="job-1" progress={running} info={null} busy={false} canCancel={false} onCancel={vi.fn()} />);
     expect(getObjectifyState).not.toHaveBeenCalled();
+  });
+});
+
+describe("các trường hợp còn lại của hàng bước", () => {
+  it("máy không có runtime tách theo vật: chỉ còn nút dùng hộp ứng viên", async () => {
+    vi.mocked(getObjectifyState).mockResolvedValue({ ...failed, available: false });
+    renderTab();
+    expect(await within(row()).findByRole("button", { name: "Dùng hộp ứng viên" })).toBeInTheDocument();
+    expect(within(row()).queryByRole("button", { name: "Chạy lại tách theo vật" })).toBeNull();
+  });
+
+  it("scene đang dùng hộp ứng viên mà lần dựng lại lỗi: scene vẫn có vật nên bước vẫn là đã xong", async () => {
+    vi.mocked(getObjectifyState).mockResolvedValue(objectify({ status: "failed", mode: "objectify", error: "hết VRAM", object_centric: false, awaiting_choice: false }));
+    renderTab();
+    await waitFor(() => expect(getObjectifyState).toHaveBeenCalled());
+    expect(screen.getByText(`${STUDIO_STAGES.length}/${STUDIO_STAGES.length} bước hoàn tất`)).toBeInTheDocument();
+    expect(within(row()).queryByRole("alert")).toBeNull();
+  });
+
+  it("gặp 409 (scene đã đổi hoặc đã có yêu cầu khác) thì đọc lại trạng thái từ máy chủ", async () => {
+    vi.mocked(getObjectifyState).mockResolvedValue(failed);
+    vi.mocked(requestObjectify).mockRejectedValue(new ApiError(409, "scene đã ở rev-002, không phải rev-001; tải lại rồi thử lại"));
+    renderTab();
+    fireEvent.click(await within(row()).findByRole("button", { name: "Dùng hộp ứng viên" }));
+    expect(await screen.findByText(/tải lại rồi thử lại/)).toBeInTheDocument();
+    await waitFor(() => expect(getObjectifyState).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("useObjectify: báo revision mới khi yêu cầu do chính nó theo dõi chạy xong", () => {
+  it("gọi onRevision đúng một lần với revision kết quả và dừng poll", async () => {
+    vi.useFakeTimers();
+    try {
+      const onRevision = vi.fn();
+      vi.mocked(getObjectifyState)
+        .mockResolvedValueOnce(failed)
+        .mockResolvedValue(objectify({ status: "done", mode: "boxes", scene_revision: "rev-002", result_revision: "rev-002", object_centric: false }));
+      vi.mocked(requestObjectify).mockResolvedValue(objectify({ status: "queued", mode: "boxes", object_centric: false, awaiting_choice: true }));
+      const { result } = renderHook(() => useObjectify({ jobId: "job-1", onRevision }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(result.current.state?.awaiting_choice).toBe(true);
+      await act(async () => { await result.current.send("boxes"); });
+      expect(result.current.pending).toBe(true);
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(onRevision).toHaveBeenCalledTimes(1);
+      expect(onRevision).toHaveBeenCalledWith("rev-002");
+      const calls = vi.mocked(getObjectifyState).mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+      expect(vi.mocked(getObjectifyState).mock.calls.length).toBe(calls);
+      expect(onRevision).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -18,8 +18,10 @@ import { formatBytes } from "@/lib/format";
 const ANONYMIZATION_PANEL_ID = "anonymization-review-panel";
 
 /** Tiến trình chỉ quản lý trạng thái; viewer mở qua route giai đoạn riêng. */
-export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept = canCancel, onCancel, onChanged, onConfirmMetric, onRetry, retryDisabled = false, retryHint }: {
+export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept = canCancel, onCancel, onChanged, onSceneRevision, onConfirmMetric, onRetry, retryDisabled = false, retryHint }: {
   jobId: string; progress: JobProgress | null; info: SceneInfo | null; busy: boolean; canCancel: boolean; canAccept?: boolean; onCancel: () => void; onChanged?: () => void;
+  /** Yêu cầu dựng lại tập vật vừa tạo revision mới; màn scene dùng để tải lại Studio và thông báo. */
+  onSceneRevision?: (revision: string) => void;
   /** Mở công cụ xác nhận tỉ lệ mét; undefined khi người xem không có quyền thao tác trên job. */
   onConfirmMetric?: () => void;
   /** Tạo lượt chạy mới cho bước lỗi; undefined khi backend chưa cho thử lại hoặc người xem không có quyền. */
@@ -33,7 +35,7 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
   // Bước "Tách vật thể" luôn ghi thành công vì scene đã được tạo; nếu tách theo vật lỗi hết số lần thử thì hàng bước đó
   // phải báo lỗi và có nút chọn tiếp tại chỗ, không chỉ trong màn chi tiết vật thể.
   const objectStageDone = progress?.stages.some((stage) => stage.stage_id === "ST-OBJECT-EXTRACT" && stage.state === "succeeded") ?? false;
-  const objectify = useObjectify({ jobId, enabled: objectStageDone, onRevision: () => onChanged?.() });
+  const objectify = useObjectify({ jobId, enabled: objectStageDone, onRevision: (revision) => { onSceneRevision?.(revision); onChanged?.(); } });
   const objectOverride = objectStageDone ? objectifyStageOverride(objectify.state) : null;
   const views: StageView[] = progress?.stages.map((stage) => stage.stage_id === "ST-OBJECT-EXTRACT" && objectOverride
     ? { stage_id: stage.stage_id, state: objectOverride.state, error: objectOverride.error, fraction: null, seconds: null }

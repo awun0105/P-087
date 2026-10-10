@@ -25,8 +25,8 @@ export function useObjectify({
   /** Revision đang hiển thị; bỏ trống thì dùng revision hiện tại mà máy chủ báo trong trạng thái. */
   revision?: string | null;
   enabled?: boolean;
-  /** Có revision mới do yêu cầu dựng lại tạo ra. */
-  onRevision?: () => void;
+  /** Có revision mới do yêu cầu dựng lại tạo ra (kể cả khi chính hook này vừa theo dõi yêu cầu chạy xong). */
+  onRevision?: (revision: string) => void;
 }) {
   const [state, setState] = useState<ObjectifyState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +34,9 @@ export function useObjectify({
   const [tick, setTick] = useState(0);
   // Chỉ báo lên một lần cho mỗi revision kết quả, kể cả khi poll trả "done" nhiều lần.
   const announced = useRef<string | null>(null);
+  // Đã thấy yêu cầu xếp hàng/đang chạy: khi nó xong thì revision hiện tại chính là kết quả nên không so với "revision đang
+  // hiển thị" được nữa, phải báo theo việc chuyển trạng thái.
+  const sawPending = useRef(false);
 
   useEffect(() => {
     if (!enabled) return;
@@ -42,9 +45,12 @@ export function useObjectify({
       (next) => {
         setState(next);
         const shown = revision ?? next.scene_revision;
-        if (next.status === "done" && next.result_revision && next.result_revision !== shown && announced.current !== next.result_revision) {
+        if (next.status === "queued" || next.status === "running") sawPending.current = true;
+        const fresh = next.result_revision !== shown || sawPending.current;
+        if (next.status === "done" && next.result_revision && fresh && announced.current !== next.result_revision) {
           announced.current = next.result_revision;
-          onRevision?.();
+          sawPending.current = false;
+          onRevision?.(next.result_revision);
         }
       },
       () => undefined, // route chưa có (API cũ) hoặc scene chưa sẵn sàng: không hiện gì
@@ -53,6 +59,10 @@ export function useObjectify({
   }, [jobId, revision, enabled, tick]); // eslint-disable-line react-hooks/exhaustive-deps -- onRevision chỉ là kênh báo lên
 
   const pending = state?.status === "queued" || state?.status === "running";
+  // Trạng thái chờ có thể đến từ phản hồi của chính lệnh gửi (không qua lần đọc), nên ghi nhận ở đây.
+  useEffect(() => {
+    if (pending) sawPending.current = true;
+  }, [pending]);
   useEffect(() => {
     if (!enabled || !pending) return;
     const timer = window.setInterval(() => setTick((value) => value + 1), POLL_MS);
@@ -71,6 +81,8 @@ export function useObjectify({
       setState(await requestObjectify(jobId, expected, mode));
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.detail : "Không gửi được yêu cầu.");
+      // 409: scene đã đổi (revision cũ) hoặc đã có yêu cầu khác; đọc lại trạng thái để màn hình khớp máy chủ.
+      if (cause instanceof ApiError && cause.status === 409) setTick((value) => value + 1);
     } finally {
       setSending(false);
     }
@@ -99,8 +111,9 @@ export function useObjectify({
 export function objectifyStageOverride(state: ObjectifyState | null): { state: StageState; error?: ExecutionError } | null {
   if (!state) return null;
   if (state.status === "queued" || state.status === "running") return { state: "running" };
-  // Dựng lại lỗi nhưng scene hiện tại vẫn là scene theo vật tốt thì không có gì để báo ở bước này.
-  if (state.awaiting_choice || (state.status === "failed" && !state.object_centric)) {
+  // Chỉ báo lỗi bước khi scene thật sự không có vật nào (tách lỗi hết số lần thử). Dựng lại lỗi mà scene vẫn có vật
+  // (tách theo vật hay hộp ứng viên) thì bước vẫn đã xong; chi tiết lỗi lần dựng lại nằm ở thông báo trong Studio.
+  if (state.awaiting_choice) {
     const detail = state.error ?? state.note;
     return {
       state: "failed",

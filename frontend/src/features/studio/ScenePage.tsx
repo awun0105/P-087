@@ -353,6 +353,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
             retryDisabled={busy || guestQuotaExhausted}
             retryHint={guestQuotaExhausted ? "Đã hết lượt Guest hôm nay; lượt được đặt lại lúc 00:00." : undefined}
             onChanged={() => setPollingKey((k) => k + 1)}
+            onSceneRevision={(revision) => setSave({ status: "saved", revision })}
             onCancel={() => {
               if (window.confirm("Huỷ xử lý scene này? Tiến trình trên GPU sẽ dừng.")) void act(() => cancelJob(jobId), "Đã gửi yêu cầu huỷ. Trạng thái được cập nhật từ máy chủ.");
             }}
