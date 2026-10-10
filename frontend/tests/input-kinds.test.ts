@@ -21,7 +21,7 @@ describe("input kinds", () => {
   });
 
   it("accepts every extension the pipeline consumes and rejects the rest", () => {
-    const usable = ["kho.MP4", "kho.mov", "map.ply", "scan.pcd", "scene.sog", "goi.zip", "calib.json", "times.txt", "traj.tum", "rows.csv"];
+    const usable = ["kho.MP4", "kho.mov", "map.ply", "scan.pcd", "scene.sog", "goi.zip", "calib.json", "tf.yaml", "tf.YML", "times.txt", "traj.tum", "rows.csv"];
     for (const name of usable) expect(rejectAssemblyFileName(name)).toBeNull();
     for (const name of ["capture.mkv", "notes.docx", "sheet.xlsx", "model.splat", "khong-duoi"]) {
       expect(rejectAssemblyFileName(name)).toMatch(/Pipeline không đọc được/);

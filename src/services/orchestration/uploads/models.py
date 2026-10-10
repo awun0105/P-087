@@ -43,6 +43,9 @@ ASSEMBLY_UPLOAD_EXTENSIONS: dict[str, UploadMediaType] = {
     ".txt": "text/plain",
     ".tum": "text/plain",
     ".csv": "text/csv",
+    # Calibration ROS tf / Kalibr: YAML là văn bản; vai trò do bộ nhận diện theo nội dung quyết định.
+    ".yaml": "text/plain",
+    ".yml": "text/plain",
 }
 KIND_MEDIA_TYPES: dict[str, frozenset[str]] = {
     "rgb_video": frozenset({"video/mp4", "video/quicktime"}),

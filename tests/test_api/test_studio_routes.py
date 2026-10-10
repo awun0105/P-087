@@ -930,13 +930,16 @@ async def _r4_run(client: AsyncClient, assembly: dict, report: dict, candidate: 
     )
 
 
-async def _r4_inputs(client: AsyncClient, *, scans_in_zip: bool = False):
+async def _r4_inputs(
+    client: AsyncClient, *, scans_in_zip: bool = False, calibration_file: tuple[str, bytes] | None = None
+):
     from tests.test_reconstruction.test_lidar_package import POSES, _companions, _pcd, _scan, _zip
 
     video = await _r4_upload(client, "walk.mp4", b"\x00\x00\x00\x14ftypqt  fake-mp4")
     companions = _companions()
     trajectory = await _r4_upload(client, "poses.txt", companions["traj.txt"])
-    calibration = await _r4_upload(client, "rig.txt", companions["calibrations.txt"])
+    calibration_name, calibration_bytes = calibration_file or ("rig.txt", companions["calibrations.txt"])
+    calibration = await _r4_upload(client, calibration_name, calibration_bytes)
     frame_times = await _r4_upload(client, "times.txt", companions["frame_times.txt"])
     if scans_in_zip:
         import tempfile
@@ -1106,6 +1109,100 @@ async def test_r4_zip_the_legacy_detector_rejects_is_repackaged_instead_of_refus
 
     assert response.status_code == 201, response.text
     assert len(_r4_packages()) == 1
+
+
+_ROS_CALIBRATION = (
+    "header:\n  frame_id: lidar_sensor\nchild_frame_id: camera_left\n"
+    "transform:\n  translation: {x: 0.1, y: 0.0, z: -0.1}\n  rotation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}\n"
+)
+# Cùng biến đổi với calibration TorWIC của _companions (px 0.1, pz -0.1, quaternion đơn vị), nhưng ngược chiều.
+_INVERSE_JSON_CALIBRATION = '{"camera_from_lidar": {"matrix": [[1,0,0,-0.1],[0,1,0,0.0],[0,0,1,0.1],[0,0,0,1]]}}'
+
+
+async def _r4_package_calibration(studio: SimpleNamespace, job_id: str) -> tuple[str, dict]:
+    """(nội dung calibration trong gói do server đóng, provenance của gói) của một job R4 file rời."""
+    import zipfile
+
+    job = studio.registry.get_job(job_id)
+    project = studio.registry.get_project(job.project_id)
+    manifest = InputManifest.model_validate_json(
+        studio.registry.runtime_resolver.require(project.input_manifest_ref).read_bytes()
+    )
+    archive_file = next(item for item in manifest.files if item.media_type == "application/zip")
+    path = studio.registry.runtime_resolver.require_uri(archive_file.artifact_uri, archive_file.checksum)
+    provenance = manifest.preparation_provenance["lidar"]
+    name = provenance["evidence"]["calibration_member"]
+    with zipfile.ZipFile(path) as archive:
+        return archive.read(name).decode("utf-8"), provenance
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("file_name", "payload"),
+    [("tf.yaml", _ROS_CALIBRATION), ("inverse.json", _INVERSE_JSON_CALIBRATION)],
+    ids=["ros_tf_yaml", "json_camera_from_lidar_matrix"],
+)
+async def test_r4_loose_files_accept_other_calibration_formats_and_normalize_them_for_the_package(
+    file_name: str, payload: str, client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    from src.services.reconstruction.lidar.package import parse_calibration
+    from tests.test_reconstruction.test_lidar_package import CALIBRATION
+
+    await _r4_registry(studio, f"input-runtime-r4-{file_name}.json")
+    upload_ids, bindings = await _r4_inputs(client, calibration_file=(file_name, payload.encode()))
+    assembly, report, candidate = await _r4_resolve(client, upload_ids, bindings, _R4_DECLARATIONS)
+    assert candidate["state"] == "ready", [fact["code"] for fact in candidate["required_facts"]]
+
+    response = await _r4_run(client, assembly, report, candidate, f"calibration-{file_name}")
+
+    assert response.status_code == 201, response.text
+    text, provenance = await _r4_package_calibration(studio, response.json()["job"]["job_id"])
+    calibration_member = next(
+        item for item in provenance["package_members"] if item["role"] == "camera_lidar_calibration"
+    )
+    assert calibration_member["normalized"] is True
+    # Gói ghi JSON chuẩn và bộ đọc gói cho ra đúng biến đổi của calibration TorWIC tương đương.
+    expected = parse_calibration(CALIBRATION, "torwic_txt")
+    actual = parse_calibration(text, "json")
+    assert actual.translation_xyz == pytest.approx(expected.translation_xyz, abs=1e-9)
+    assert actual.rotation_quaternion_xyzw == pytest.approx(expected.rotation_quaternion_xyzw, abs=1e-9)
+
+
+@pytest.mark.asyncio
+async def test_r4_ros_calibration_naming_a_different_lidar_frame_is_refused_without_a_package(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    await _r4_registry(studio, "input-runtime-r4-ros-frame.json")
+    upload_ids, bindings = await _r4_inputs(client, calibration_file=("tf.yaml", _ROS_CALIBRATION.encode()))
+    declarations = {**_R4_DECLARATIONS, "lidar_frame_id": {"value": "velodyne", "provenance": "declared"}}
+    assembly, report, candidate = await _r4_resolve(client, upload_ids, bindings, declarations)
+    assert candidate["state"] == "ready"  # resolver chưa đọc nội dung YAML; kiểm tên frame xảy ra lúc đóng gói
+
+    response = await _r4_run(client, assembly, report, candidate, "ros-wrong-frame")
+
+    assert response.status_code == 409, response.text
+    assert "không khớp" in response.text
+    assert _r4_packages() == []
+
+
+@pytest.mark.asyncio
+async def test_r4_kalibr_file_is_recognized_but_never_used_as_a_camera_lidar_calibration(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    kalibr = (
+        "cam0:\n  camera_model: pinhole\n  intrinsics: [461.6, 460.1, 362.7, 246.0]\n"
+        "  distortion_model: radtan\n  distortion_coeffs: [0.0, 0.0, 0.0, 0.0]\n  resolution: [752, 480]\n"
+        "  T_cam_imu:\n  - [1, 0, 0, 0]\n  - [0, 1, 0, 0]\n  - [0, 0, 1, 0]\n  - [0, 0, 0, 1]\n"
+    )
+    await _r4_registry(studio, "input-runtime-r4-kalibr.json")
+    upload_ids, bindings = await _r4_inputs(client, calibration_file=("camchain.yaml", kalibr.encode()))
+    # Không bind vai trò calibration: file Kalibr không có vai trò nào, nên R4 phải thiếu calibration.
+    bindings = [item for item in bindings if item["role"] != "camera_lidar_calibration"]
+    assembly, report, candidate = await _r4_resolve(client, upload_ids, bindings, _R4_DECLARATIONS)
+
+    assert candidate["state"] == "needs_input"
+    assert "CAMERA_LIDAR_CALIBRATION_REQUIRED" in {fact["code"] for fact in candidate["required_facts"]}
+    assert any(item["code"] == "kalibr_camera_imu_only" for item in report["diagnostics"]), report["diagnostics"]
 
 
 @pytest.mark.asyncio

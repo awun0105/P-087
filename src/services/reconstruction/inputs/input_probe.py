@@ -26,7 +26,7 @@ from src.models.contracts.input_assembly import (
     StagedInputFile,
 )
 from src.models.contracts.manifests import InputFile
-from src.services.reconstruction.inputs import detect
+from src.services.reconstruction.inputs import calibration_formats, detect
 from src.services.reconstruction.inputs.timestamps import (
     TimestampRowFormatError,
     TimestampRowValueError,
@@ -462,13 +462,14 @@ def _probe_text(data: bytes) -> _ContentResult:
                 "ambiguous_calibration_direction",
                 "Calibration declares both lidar_from_camera and camera_from_lidar; select one explicit transform convention.",
             )
-        if "lidar_from_camera" in value:
-            role = InputRole.CAMERA_LIDAR_CALIBRATION
-            return _ContentResult(
-                InputAssetFormat.CALIBRATION_JSON,
-                (role,),
-                ((role, "lidar_from_camera_json_key"),),
-            )
+        for key in ("lidar_from_camera", "camera_from_lidar"):
+            if key in value:
+                role = InputRole.CAMERA_LIDAR_CALIBRATION
+                return _ContentResult(
+                    InputAssetFormat.CALIBRATION_JSON,
+                    (role,),
+                    ((role, f"{key}_json_key"),),
+                )
         return _ContentResult(InputAssetFormat.UNKNOWN)
 
     calibration_format = detect._calibration_format(text)
@@ -488,6 +489,26 @@ def _probe_text(data: bytes) -> _ContentResult:
             InputAssetFormat.CALIBRATION_TORWIC_TEXT,
             (role,),
             ((role, "torwic_extrinsic_keys"),),
+        )
+
+    yaml_format = calibration_formats.detect_format(text)
+    if yaml_format == "ros_transform_yaml":
+        role = InputRole.CAMERA_LIDAR_CALIBRATION
+        return _ContentResult(
+            InputAssetFormat.CALIBRATION_ROS_YAML,
+            (role,),
+            ((role, "transform_stamped_yaml_keys"),),
+        )
+    if yaml_format == "kalibr_camchain":
+        # Nhận ra để giải thích, không gán vai trò: Kalibr chỉ có camera ↔ IMU, không có LiDAR.
+        return _ContentResult(
+            InputAssetFormat.CALIBRATION_KALIBR_CAMCHAIN,
+            diagnostic=(
+                "kalibr_camera_imu_only",
+                "warning",
+                "File Kalibr chỉ có camera ↔ IMU và nội tham số camera, không có extrinsic LiDAR nên chưa dùng được "
+                "làm calibration camera ↔ LiDAR.",
+            ),
         )
 
     tum = _parse_tum_rows(text)

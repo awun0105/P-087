@@ -11,7 +11,9 @@ import pytest
 from src.services.reconstruction.inputs.calibration_formats import (
     CalibrationParseError,
     Extrinsic,
+    canonical_lidar_camera_json,
     compose_lidar_from_camera,
+    detect_format,
     extrinsic_from_matrix,
     looks_like_torwic_text,
     parse_kalibr_camchain,
@@ -277,3 +279,61 @@ def test_composition_refuses_extrinsics_that_do_not_share_the_imu_frame() -> Non
     other = Extrinsic("lidar", "gyro", (0, 0, 0), (0, 0, 0, 1), "kalibr_camchain")
     with pytest.raises(CalibrationParseError, match="không chung frame IMU"):
         compose_lidar_from_camera(camera.camera_from_imu, other)
+
+
+# ---------------------------------------------------------------------------
+# Nhận diện định dạng và chuẩn hoá cho gói
+# ---------------------------------------------------------------------------
+
+
+def test_detect_format_recognizes_every_supported_calibration_by_content() -> None:
+    assert detect_format(_torwic_text()) == "torwic_text"
+    assert detect_format(_json_quaternion()) == "lidar_camera_json"
+    assert detect_format(_json_inverse()) == "lidar_camera_json"  # chỉ có camera_from_lidar
+    assert detect_format(_ros_yaml(parent="velodyne", child="cam")) == "ros_transform_yaml"
+    assert detect_format(KALIBR) == "kalibr_camchain"
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["", "hello world", "key: value\n", '{"other": 1}', "{broken", "- a\n- b\n", "child_frame_id: only-this\n"],
+)
+def test_detect_format_returns_none_for_everything_else(text: str) -> None:
+    assert detect_format(text) is None
+
+
+def test_canonical_json_is_none_when_the_package_reader_already_understands_the_file() -> None:
+    assert canonical_lidar_camera_json(_torwic_text(), lidar_frame_id=None) is None
+    assert canonical_lidar_camera_json(_json_quaternion(), lidar_frame_id=None) is None
+
+
+def test_canonical_json_normalizes_matrix_inverse_and_ros_to_the_same_transform() -> None:
+    import json as _json
+
+    for text, frame in (
+        (_json_matrix(), None),
+        (_json_inverse(), None),
+        (_ros_yaml(parent="velodyne", child="cam"), "velodyne"),
+        (_ros_yaml(parent="cam", child="velodyne", invert=True), "velodyne"),
+    ):
+        canonical = canonical_lidar_camera_json(text, lidar_frame_id=frame)
+        assert canonical is not None
+        block = _json.loads(canonical)["lidar_from_camera"]
+        assert block["translation_xyz"] == pytest.approx(TRANSLATION, abs=1e-9)
+        assert _rotation(tuple(block["rotation_xyzw"])) == pytest.approx(_rotation(QUATERNION), abs=1e-9)
+
+
+def test_canonical_json_keeps_the_camera_intrinsics_block_of_a_json_source() -> None:
+    import json as _json
+
+    document = _json.loads(_json_matrix())
+    document["camera"] = {"width": 1280, "height": 720, "fx": 600.0, "fy": 600.0, "cx": 640.0, "cy": 360.0}
+    canonical = canonical_lidar_camera_json(_json.dumps(document), lidar_frame_id=None)
+    assert canonical is not None and _json.loads(canonical)["camera"]["width"] == 1280
+
+
+def test_canonical_json_refuses_a_file_that_is_not_a_camera_lidar_calibration() -> None:
+    with pytest.raises(CalibrationParseError, match="không phải calibration camera"):
+        canonical_lidar_camera_json(KALIBR, lidar_frame_id="velodyne")
+    with pytest.raises(CalibrationParseError, match="chưa biết frame nào là LiDAR"):
+        canonical_lidar_camera_json(_ros_yaml(parent="a", child="b"), lidar_frame_id=None)

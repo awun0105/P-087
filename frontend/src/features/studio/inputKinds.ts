@@ -12,7 +12,7 @@ export const GAUSSIAN_ACCEPT = ".ply,.sog,.zip,application/zip,application/x-sog
  * (calibration JSON/text, quỹ đạo TUM, timestamp). Đuôi chỉ lọc sớm để khỏi tải lên thứ
  * không ai đọc; vai trò thật do probe nội dung của máy chủ quyết định.
  */
-const ASSEMBLY_EXTENSIONS = ["mp4", "mov", "ply", "pcd", "sog", "zip", "json", "txt", "tum", "csv"] as const;
+const ASSEMBLY_EXTENSIONS = ["mp4", "mov", "ply", "pcd", "sog", "zip", "json", "txt", "tum", "csv", "yaml", "yml"] as const;
 export const ASSEMBLY_ACCEPT = [
   ...ASSEMBLY_EXTENSIONS.map((item) => `.${item}`),
   "video/mp4",
@@ -22,6 +22,8 @@ export const ASSEMBLY_ACCEPT = [
   "application/json",
   "text/plain",
   "text/csv",
+  "application/yaml",
+  "text/yaml",
 ].join(",");
 const ASSEMBLY_NAME = new RegExp(`\\.(${ASSEMBLY_EXTENSIONS.join("|")})$`, "i");
 
@@ -29,7 +31,7 @@ const ASSEMBLY_NAME = new RegExp(`\\.(${ASSEMBLY_EXTENSIONS.join("|")})$`, "i");
 export function rejectAssemblyFileName(name: string): string | null {
   return ASSEMBLY_NAME.test(name)
     ? null
-    : "Pipeline không đọc được loại file này. Nhận video .mp4/.mov, point cloud .ply/.pcd, scene 3DGS .ply/.sog, .zip, và metadata .json/.txt/.tum/.csv.";
+    : "Pipeline không đọc được loại file này. Nhận video .mp4/.mov, point cloud .ply/.pcd, scene 3DGS .ply/.sog, .zip, và metadata .json/.yaml/.yml/.txt/.tum/.csv.";
 }
 
 const INPUT_KIND_LABELS: Record<InputKind, string> = {

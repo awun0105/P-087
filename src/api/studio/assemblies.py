@@ -575,6 +575,11 @@ def run_input_assembly(
                         staged=staged_by_id,
                         role_bindings=bindings,
                         uploaded_by=actor_of(user),
+                        lidar_frame_id=(
+                            stored.snapshot.declarations.lidar_frame_id.value
+                            if stored.snapshot.declarations.lidar_frame_id is not None
+                            else None
+                        ),
                     )
                 except (LoosePackageError, UploadError, ArtifactChecksumError) as error:
                     raise InputAssemblyConflictError(str(error)) from error

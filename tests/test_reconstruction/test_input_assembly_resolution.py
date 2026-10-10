@@ -309,6 +309,38 @@ def test_text_probes_detect_trajectory_times_and_ambiguous_calibration(tmp_path:
     assert ambiguous_json.probes[0].diagnostics[0][0] == "ambiguous_calibration_direction"
 
 
+def test_probe_recognizes_ros_tf_calibration_and_reverse_json_and_explains_kalibr(tmp_path: Path) -> None:
+    ros = _upload(
+        _write(
+            tmp_path,
+            "tf.yaml",
+            b"header:\n  frame_id: lidar\nchild_frame_id: cam\n"
+            b"transform:\n  translation: {x: 0, y: 0, z: 0}\n  rotation: {x: 0, y: 0, z: 0, w: 1}\n",
+        )
+    )
+    assert ros.files[0].observed_format.value == "calibration_ros_yaml"
+    assert [item.role for item in ros.files[0].role_evidence] == [InputRole.CAMERA_LIDAR_CALIBRATION]
+
+    reverse = _upload(_write(tmp_path, "calibration.json", b'{"camera_from_lidar":{"matrix":[]}}'))
+    assert reverse.files[0].observed_format.value == "calibration_json"
+    assert [item.role for item in reverse.files[0].role_evidence] == [InputRole.CAMERA_LIDAR_CALIBRATION]
+
+    kalibr = _upload(
+        _write(
+            tmp_path,
+            "camchain.yaml",
+            b"cam0:\n  camera_model: pinhole\n  intrinsics: [1, 1, 0, 0]\n  T_cam_imu:\n  - [1, 0, 0, 0]\n",
+        )
+    )
+    assert kalibr.files[0].observed_format.value == "calibration_kalibr_camchain"
+    assert kalibr.files[0].role_evidence == []
+    assert kalibr.probes[0].candidate_roles == ()
+    assert kalibr.probes[0].diagnostics[0][:2] == ("kalibr_camera_imu_only", "warning")
+
+    unknown = _upload(_write(tmp_path, "notes.yaml", b"title: not a calibration\nitems: [1, 2]\n"))
+    assert unknown.files[0].observed_format.value == "unknown"
+
+
 def test_video_only_qualified_runtime_resolves_ready_and_seals_report(tmp_path: Path) -> None:
     classified = _upload(_write(tmp_path, "renamed.bin", _video()))
     assembly, probes = _assembly([classified])

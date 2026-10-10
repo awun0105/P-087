@@ -47,6 +47,9 @@ class InputAssetFormat(StrEnum):
     ZIP_UNKNOWN = "zip_unknown"
     CALIBRATION_JSON = "calibration_json"
     CALIBRATION_TORWIC_TEXT = "calibration_torwic_text"
+    CALIBRATION_ROS_YAML = "calibration_ros_yaml"
+    #: Kalibr camchain chỉ có camera ↔ IMU và nội tham số: nhận ra và giải thích, không phải calibration camera ↔ LiDAR.
+    CALIBRATION_KALIBR_CAMCHAIN = "calibration_kalibr_camchain"
     TUM_TRAJECTORY = "tum_trajectory"
     RGB_FRAME_TIMES = "rgb_frame_times"
     TIMESTAMP_ROWS = "timestamp_rows"

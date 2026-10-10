@@ -18,6 +18,7 @@ from typing import IO, TYPE_CHECKING
 
 from src.models.contracts.input_assembly import InputAssetFormat, InputRole, StagedInputFile
 from src.services.orchestration.projects.models import LidarPackageMember
+from src.services.reconstruction.inputs.calibration_formats import CalibrationParseError, canonical_lidar_camera_json
 
 if TYPE_CHECKING:  # Chỉ để chú thích: registry import module này nên không được kéo theo uploads/artifacts.
     from src.services.orchestration.artifacts.store import ArtifactResolver
@@ -132,6 +133,55 @@ def _source_bytes_path(item: StagedInputFile, resolver: ArtifactResolver) -> Pat
     return resolver.require_uri(item.source_file.artifact_uri, item.source_file.checksum)
 
 
+_CALIBRATION_MAX_BYTES = 1024 * 1024
+
+
+def _read_small(item: StagedInputFile, resolver: ArtifactResolver, limit: int) -> bytes:
+    """Đọc cả file nhỏ (calibration) và kiểm checksum nguồn; lớn hơn `limit` thì từ chối."""
+    source = _source_bytes_path(item, resolver)
+    if item.archive_member is None:
+        payload = source.read_bytes() if source.stat().st_size <= limit else b""
+        expected = item.source_file.checksum
+    else:
+        if item.archive_member.uncompressed_size_bytes > limit:
+            payload = b""
+        else:
+            try:
+                with zipfile.ZipFile(source) as container:
+                    payload = container.read(item.archive_member.member_path)
+            except (zipfile.BadZipFile, KeyError) as error:
+                raise LoosePackageError("Calibration trong ZIP đã tải lên không còn đọc được") from error
+        expected = item.archive_member.member_checksum
+    if not payload:
+        raise LoosePackageError("File calibration rỗng hoặc lớn bất thường")
+    if f"sha256:{hashlib.sha256(payload).hexdigest()}" != expected:
+        raise LoosePackageError("File nguồn đã đổi so với lúc được xác minh; tải lại file đó")
+    return payload
+
+
+def _write_calibration(
+    archive: zipfile.ZipFile,
+    name: str,
+    item: StagedInputFile,
+    resolver: ArtifactResolver,
+    lidar_frame_id: str | None,
+) -> tuple[str, bool]:
+    """Ghi calibration vào gói, chuẩn hoá về JSON `lidar_from_camera` khi bộ đọc gói chưa đọc được nguyên văn.
+
+    Trả `(checksum nguồn, đã chuẩn hoá)`.
+    """
+    payload = _read_small(item, resolver, _CALIBRATION_MAX_BYTES)
+    checksum = f"sha256:{hashlib.sha256(payload).hexdigest()}"
+    try:
+        text = payload.decode("utf-8")
+        canonical = canonical_lidar_camera_json(text, lidar_frame_id=lidar_frame_id)
+    except (UnicodeDecodeError, CalibrationParseError) as error:
+        raise LoosePackageError(f"Calibration không đọc được: {error}") from error
+    body = payload if canonical is None else canonical.encode("utf-8")
+    archive.writestr(name, body)
+    return checksum, canonical is not None
+
+
 def _write_member(archive: zipfile.ZipFile, name: str, item: StagedInputFile, resolver: ArtifactResolver) -> str:
     """Ghi một thành viên và trả checksum bytes đã ghi; sai lệch với checksum đã xác minh thì từ chối."""
     digest = hashlib.sha256()
@@ -178,6 +228,7 @@ def synthesize_lidar_package(
     staged: Mapping[str, StagedInputFile],
     role_bindings: Mapping[InputRole, list[str]],
     uploaded_by: Actor | None,
+    lidar_frame_id: str | None = None,
 ) -> tuple[UploadRecord, list[LidarPackageMember]]:
     """Đóng các file đã bind thành một gói LiDAR và nhận diện nó như gói người dùng nộp.
 
@@ -199,9 +250,19 @@ def synthesize_lidar_package(
             with zipfile.ZipFile(scratch, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
                 for name, file_id, role in plan:
                     item = staged[file_id]
-                    checksum = _write_member(archive, name, item, service.resolver)
+                    normalized = False
+                    if role == "camera_lidar_calibration":
+                        checksum, normalized = _write_calibration(archive, name, item, service.resolver, lidar_frame_id)
+                    else:
+                        checksum = _write_member(archive, name, item, service.resolver)
                     members.append(
-                        LidarPackageMember(member_path=name, file_id=file_id, source_checksum=checksum, role=role)  # type: ignore[arg-type]
+                        LidarPackageMember(
+                            member_path=name,
+                            file_id=file_id,
+                            source_checksum=checksum,
+                            role=role,  # type: ignore[arg-type]
+                            normalized=normalized,
+                        )
                     )
             scratch.seek(0)
             shutil.copyfileobj(scratch, _PublicationWriter(pending.publication), _CHUNK_BYTES)

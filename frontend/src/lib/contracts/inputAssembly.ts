@@ -26,6 +26,8 @@ export type InputAssetFormat =
   | "zip_unknown"
   | "calibration_json"
   | "calibration_torwic_text"
+  | "calibration_ros_yaml"
+  | "calibration_kalibr_camchain"
   | "tum_trajectory"
   | "rgb_frame_times"
   | "timestamp_rows"

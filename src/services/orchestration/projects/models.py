@@ -78,6 +78,9 @@ class LidarPackageMember(BaseModel):
     #: Checksum bytes của file nguồn (checksum thành viên nếu file nằm trong ZIP của người dùng).
     source_checksum: Checksum
     role: Literal["lidar_scan", "sensor_trajectory", "camera_lidar_calibration", "rgb_frame_times"]
+    #: True khi byte trong gói KHÁC file nguồn: calibration (ROS YAML, JSON ngược chiều hoặc ma trận) được chuẩn
+    #: hoá về JSON `lidar_from_camera`. `source_checksum` vẫn là checksum của file nguồn.
+    normalized: bool = False
 
 
 class LidarAttachment(BaseModel):

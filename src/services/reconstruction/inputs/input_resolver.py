@@ -219,7 +219,11 @@ def resolve_input_assembly(
     )
     calibration_ids = explicit.get(InputRole.CAMERA_LIDAR_CALIBRATION) or sorted(
         file_id
-        for fmt in (InputAssetFormat.CALIBRATION_JSON, InputAssetFormat.CALIBRATION_TORWIC_TEXT)
+        for fmt in (
+            InputAssetFormat.CALIBRATION_JSON,
+            InputAssetFormat.CALIBRATION_TORWIC_TEXT,
+            InputAssetFormat.CALIBRATION_ROS_YAML,
+        )
         for file_id in by_format.get(fmt, [])
     )
     frame_time_ids = explicit.get(InputRole.RGB_FRAME_TIMES) or by_format.get(InputAssetFormat.RGB_FRAME_TIMES, [])
@@ -677,6 +681,7 @@ def _validate_explicit_bindings(
         InputRole.CAMERA_LIDAR_CALIBRATION: {
             InputAssetFormat.CALIBRATION_JSON,
             InputAssetFormat.CALIBRATION_TORWIC_TEXT,
+            InputAssetFormat.CALIBRATION_ROS_YAML,
         },
         InputRole.SENSOR_TRAJECTORY: {InputAssetFormat.TUM_TRAJECTORY},
         InputRole.CAMERA_TRAJECTORY: {InputAssetFormat.TUM_TRAJECTORY},

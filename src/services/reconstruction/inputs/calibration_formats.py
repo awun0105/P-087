@@ -277,6 +277,80 @@ def _number_tuple(value: object, keys: tuple[str, ...], where: str) -> tuple[flo
         raise CalibrationParseError(f"{where}: giá trị không phải số") from error
 
 
+def detect_format(text: str) -> CalibrationFormat | None:
+    """Nhận diện định dạng calibration theo nội dung; None nếu không phải calibration đã biết.
+
+    Rẻ trước, đắt sau: TorWIC (tìm khoá), JSON (chỉ khi bắt đầu bằng `{`), YAML (chỉ parse khi có khoá đặc
+    trưng và dưới giới hạn kích thước). Không đoán chiều: định dạng nào nhận ra được là định dạng tự nói rõ chiều
+    hoặc cần người dùng khai tên frame LiDAR ở bước đọc.
+    """
+    if looks_like_torwic_text(text):
+        return "torwic_text"
+    if text.lstrip().startswith("{"):
+        try:
+            document = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(document, dict) and ("lidar_from_camera" in document or "camera_from_lidar" in document):
+            return "lidar_camera_json"
+        return None
+    if "child_frame_id" not in text and "camera_model" not in text:
+        return None
+    try:
+        document = _load_yaml(text)
+    except CalibrationParseError:
+        return None
+    if ("child_frame_id" in document and "transform" in document) or isinstance(document.get("transforms"), list):
+        return "ros_transform_yaml"
+    for key, value in document.items():
+        if (
+            isinstance(key, str)
+            and re.fullmatch(r"cam\d+", key)
+            and isinstance(value, dict)
+            and "camera_model" in value
+        ):
+            return "kalibr_camchain"
+    return None
+
+
+def canonical_lidar_camera_json(text: str, *, lidar_frame_id: str | None) -> str | None:
+    """JSON `lidar_from_camera` chuẩn để gói R4 đọc được, hoặc None khi bộ đọc gói đã đọc nguyên văn được.
+
+    Bộ nhận diện và bộ đọc gói chỉ hiểu TorWIC text và JSON `lidar_from_camera` dạng translation+quaternion. Mọi
+    định dạng khác (JSON ngược chiều hoặc ma trận 4x4, ROS tf YAML) được chuẩn hoá về đó ở ranh giới đóng gói
+    thay vì sửa cả bộ nhận diện lẫn worker. Khối `camera` (nội tham số) của JSON nguồn được giữ nguyên.
+    """
+    kind = detect_format(text)
+    camera: object = None
+    if kind == "torwic_text":
+        return None
+    if kind == "lidar_camera_json":
+        document = json.loads(text)
+        block = document.get("lidar_from_camera")
+        if (
+            isinstance(block, dict)
+            and "translation_xyz" in block
+            and "rotation_xyzw" in block
+            and "camera_from_lidar" not in document
+        ):
+            return None
+        extrinsic = parse_lidar_camera_json(text)
+        camera = document.get("camera")
+    elif kind == "ros_transform_yaml":
+        extrinsic = parse_ros_transform_yaml(text, lidar_frame_id=lidar_frame_id)
+    else:
+        raise CalibrationParseError("file không phải calibration camera ↔ LiDAR đọc được")
+    result: dict[str, object] = {
+        "lidar_from_camera": {
+            "translation_xyz": list(extrinsic.translation_xyz),
+            "rotation_xyzw": list(extrinsic.rotation_xyzw),
+        }
+    }
+    if isinstance(camera, dict):
+        result["camera"] = camera
+    return json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
 def parse_ros_transform_yaml(text: str, *, lidar_frame_id: str | None, camera_frame_id: str | None = None) -> Extrinsic:
     """`TransformStamped` → `lidar_from_camera`.
 

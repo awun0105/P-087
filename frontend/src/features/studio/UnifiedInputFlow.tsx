@@ -249,6 +249,8 @@ function formatLabel(format: string): string {
     gaussian_sog: "Gaussian SOG",
     calibration_json: "Calibration JSON",
     calibration_torwic_text: "Calibration text",
+    calibration_ros_yaml: "Calibration ROS (tf YAML)",
+    calibration_kalibr_camchain: "Camera ↔ IMU (Kalibr, chưa dùng được làm calibration LiDAR)",
     tum_trajectory: "Trajectory TUM",
     rgb_frame_times: "RGB frame times (legacy)",
     timestamp_rows: "Timestamp rows (chưa gán vai trò)",
