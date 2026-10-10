@@ -451,8 +451,8 @@ class InputResolutionReport(ContractModel):
                 raise ValueError("ready resolution requires one recommended ready candidate")
             if selected.runtime.status != RuntimeQualificationStatus.QUALIFIED:
                 raise ValueError("ready resolution requires a qualified runtime")
-            if sum(item.state == CandidateState.READY for item in self.candidates) != 1:
-                raise ValueError("ready resolution must have exactly one runnable candidate")
+            # Nhiều luồng cùng chạy được là bình thường: resolver chọn một theo bảng ưu tiên đã công bố
+            # và ghi lý do vào diagnostics. Ràng buộc còn lại: chỉ đúng ứng viên được đề xuất mới chạy.
         elif selected is not None:
             raise ValueError("non-ready resolution cannot recommend a runnable candidate")
         if self.state == InputResolutionState.NEEDS_INPUT and not self.missing_facts:

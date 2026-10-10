@@ -35,6 +35,19 @@ khả thi khi có qualified adapters và updated producer/consumer contracts.
 4. Recommend compatible route dựa dữ liệu/capability; ambiguity/missing facts hỏi
    ngay trong cùng UI. Invalid metadata không bị bỏ ngầm để chọn RGB-only/map route.
    Alternatives chỉ chạy sau user thấy và chọn các exclusions/changed assumptions.
+   *(Sửa 2026-10-10 — chọn luồng tự động.)* Người dùng chỉ upload rồi bấm xử lý; resolver tự
+   chọn luồng, không bắt chọn thẻ. Quy tắc:
+   - Chỉ xếp hạng giữa ứng viên đã `ready`, theo bảng ưu tiên công bố (`_ROUTE_PRECEDENCE`):
+     R6 quỹ đạo cấp > R6 ước lượng > R4 > R5 > R2 > R3 > R1. Hạng theo **nguồn gốc ràng buộc
+     hình học người dùng đã cấp**, không bao giờ theo khối lượng metadata.
+   - Bảng là **chính sách, không phải số đo**: repo chưa có phép đo so sánh các luồng
+     (`eval/protocols/lidar_odometry.md` chưa định ngưỡng). Sửa bảng khi có số đo held-out.
+   - Không hạ ngầm: luồng hạng cao hơn còn `needs_input` thì không chạy luồng thấp hơn (hỏi dữ
+     kiện còn thiếu). Luồng hạng cao hơn `pending_verification`/`unsupported` thì cho phép hạ,
+     kèm cảnh báo `HIGHER_ROUTE_UNAVAILABLE`. Hai luồng ready cùng hạng thì vẫn hỏi.
+   - File mà luồng được chọn không dùng thì tự loại và liệt kê (`UNUSED_INPUTS_EXCLUDED`), không
+     còn là điều kiện chặn. Lý do chọn ghi vào `diagnostics` (`ROUTE_AUTO_SELECTED`).
+   - Cloud đi kèm LiDAR mà chưa có ý định `video_reconstruction` vẫn không bao giờ rơi về R1.
 5. Allow loose/raw files trong assembly staging có validation phù hợp; complete
    legacy input detectors vẫn validate như cũ. Không fake calibration/frame_times
    hoặc identity poses để thỏa schema. Single PCD không tự chứng minh registered map.

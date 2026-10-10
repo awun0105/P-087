@@ -36,8 +36,109 @@ from src.models.contracts.input_assembly import (
 )
 from src.services.reconstruction.inputs.input_probe import InputProbe
 
-_RESOLVER_VERSION = "assembly-input-resolver-v2"
+_RESOLVER_VERSION = "assembly-input-resolver-v3"
 _MAX_MASTER_CHOICES = 12
+
+#: Thứ tự ưu tiên giữa các luồng video đã `ready` (số nhỏ = ưu tiên hơn). Xếp theo *nguồn gốc ràng buộc
+#: hình học* người dùng đã cấp, không theo khối lượng metadata, và không phải số đo chất lượng: repo chưa
+#: có phép đo so sánh các luồng (xem docs/decisions/0024). Chỉ dùng giữa các ứng viên đã đủ dữ kiện.
+_ROUTE_PRECEDENCE: dict[tuple[RecipeGroup, TrajectoryOrigin | None], int] = {
+    (RecipeGroup.SENSOR_GUIDED, TrajectoryOrigin.SUPPLIED): 0,
+    (RecipeGroup.SENSOR_GUIDED, TrajectoryOrigin.ESTIMATED): 1,
+    (RecipeGroup.SUPPLIED_TRAJECTORY, None): 2,
+    (RecipeGroup.ESTIMATED_TRAJECTORY, None): 3,
+    (RecipeGroup.REGISTERED_MAP, None): 4,
+    (RecipeGroup.SINGLE_STATIC_CLOUD, None): 5,
+    (RecipeGroup.RGB_ONLY, None): 6,
+}
+
+
+def _route_rank(candidate: InputResolutionCandidate) -> int:
+    """Hạng của một ứng viên video; ứng viên không xếp hạng được thì xếp cuối."""
+    if not isinstance(candidate, VideoRecipeCandidate):
+        return len(_ROUTE_PRECEDENCE)
+    exact = _ROUTE_PRECEDENCE.get((candidate.recipe_group, candidate.trajectory_origin))
+    if exact is not None:
+        return exact
+    return _ROUTE_PRECEDENCE.get((candidate.recipe_group, None), len(_ROUTE_PRECEDENCE))
+
+
+def _candidate_file_ids(candidate: InputResolutionCandidate) -> set[str]:
+    if not isinstance(candidate, VideoRecipeCandidate):
+        return set()
+    return {file_id for binding in candidate.bindings for file_id in binding.file_ids}
+
+
+def _select_route(
+    candidates: list[InputResolutionCandidate],
+) -> tuple[InputResolutionCandidate, list[ResolutionDiagnostic]] | None:
+    """Chọn luồng tốt nhất trong các ứng viên đã `ready`, hoặc None khi chưa được tự chọn.
+
+    Không tự chọn khi: có ứng viên không phải video cũng ready (phải chọn ý định), hai luồng hạng tốt nhất
+    bằng nhau, hoặc luồng hạng cao hơn còn thiếu dữ kiện mà luồng được chọn sẽ **loại bỏ file** luồng đó
+    định dùng. Trường hợp cuối là hạ ngầm và bỏ bằng chứng người dùng đã cấp, nên phải hỏi thay vì chạy.
+
+    Luồng hạng cao hơn chỉ thiếu dữ kiện nhưng luồng được chọn đã dùng đủ file của nó (ví dụ R4 so với R6
+    chỉ còn thiếu quan hệ đồng hồ) thì vẫn chạy; ghi `HIGHER_ROUTE_NEEDS_MORE_FACTS` để người dùng biết
+    bổ sung gì sẽ nâng cấp được luồng.
+    """
+    ready = [item for item in candidates if item.state == CandidateState.READY]
+    if not ready or any(not isinstance(item, VideoRecipeCandidate) for item in ready):
+        return None
+    best_rank = min(_route_rank(item) for item in ready)
+    best = [item for item in ready if _route_rank(item) == best_rank]
+    if len(best) != 1:
+        return None
+    chosen = best[0]
+    video = [item for item in candidates if isinstance(item, VideoRecipeCandidate)]
+    chosen_files = _candidate_file_ids(chosen)
+    notes: list[ResolutionDiagnostic] = []
+    for item in video:
+        if item.candidate_id == chosen.candidate_id:
+            continue
+        label = f"{item.recipe_group.value}/{item.trajectory_origin.value}"
+        if item.state == CandidateState.NEEDS_INPUT and _route_rank(item) < best_rank:
+            if not _candidate_file_ids(item) <= chosen_files:
+                return None
+            notes.append(
+                _diagnostic(
+                    "HIGHER_ROUTE_NEEDS_MORE_FACTS",
+                    "info",
+                    f"Luồng {label} có ràng buộc mạnh hơn nhưng còn thiếu: "
+                    f"{', '.join(sorted({fact.code for fact in item.required_facts}))}. "
+                    f"Đang chạy {chosen.recipe_group.value}, đã dùng đủ các file của luồng đó.",
+                    sorted(_candidate_file_ids(item)),
+                )
+            )
+        elif _route_rank(item) < best_rank:
+            notes.append(
+                _diagnostic(
+                    "HIGHER_ROUTE_UNAVAILABLE",
+                    "warning",
+                    f"Luồng {label} đáng ra được ưu tiên hơn nhưng ở trạng thái {item.state.value} "
+                    f"(runtime: {item.runtime.status.value}); đang dùng {chosen.recipe_group.value}.",
+                    sorted({file_id for binding in item.bindings for file_id in binding.file_ids}),
+                )
+            )
+        elif item.state == CandidateState.READY:
+            notes.append(
+                _diagnostic(
+                    "ALTERNATIVE_ROUTE_NOT_USED",
+                    "info",
+                    f"Luồng {label} cũng chạy được nhưng {chosen.recipe_group.value} được ưu tiên hơn.",
+                )
+            )
+    notes.insert(
+        0,
+        _diagnostic(
+            "ROUTE_AUTO_SELECTED",
+            "info",
+            f"Tự chọn luồng {chosen.recipe_group.value} ({chosen.trajectory_origin.value}) vì đủ dữ kiện "
+            "và có ràng buộc hình học mạnh nhất trong các luồng chạy được.",
+            sorted({file_id for binding in chosen.bindings for file_id in binding.file_ids}),
+        ),
+    )
+    return chosen, notes
 
 
 @dataclass
@@ -362,8 +463,7 @@ def resolve_input_assembly(
                         )
                     )
                 excluded = sorted(set(by_id) - {gaussian_id})
-                if excluded:
-                    required.append(_file_disposition_fact(excluded))
+                gaussian_diagnostics = [_excluded_inputs_diagnostic(excluded)] if excluded else []
                 runtime_key = (
                     RuntimeCapabilityKey.GAUSSIAN_SOG_VIEW
                     if source_format == GaussianViewFormat.SOG
@@ -380,7 +480,7 @@ def resolve_input_assembly(
                         None,
                         runtime,
                         required,
-                        [],
+                        gaussian_diagnostics,
                         gaussian_id,
                         source_format,
                         state == CandidateState.PENDING_VERIFICATION,
@@ -415,10 +515,11 @@ def resolve_input_assembly(
     # their own missing facts. Equal complete routes remain explicit choices; the
     # resolver never ranks metadata volume as accuracy.
     preliminary = [_materialize(draft, assembly) for draft in drafts]
+    auto_selected = _select_route(preliminary) if not facts else None
     ready_indices = [
         index for index, candidate in enumerate(preliminary) if _candidate_state(candidate) == CandidateState.READY
     ]
-    if len(ready_indices) > 1:
+    if len(ready_indices) > 1 and auto_selected is None:
         for index in ready_indices:
             drafts[index].required_facts.append(
                 _fact("ROUTE_SELECTION_REQUIRED", "Choose which compatible processing route to run.")
@@ -428,6 +529,8 @@ def resolve_input_assembly(
     candidate_facts = [fact for candidate in candidates for fact in candidate.required_facts]
     all_facts = _unique_facts([*facts, *candidate_facts])
     diagnostics.extend(item for candidate in candidates for item in candidate.diagnostics)
+    if auto_selected is not None:
+        diagnostics.extend(auto_selected[1])
     diagnostics = _unique_diagnostics([*diagnostics, *_probe_warnings(probe_map)])
 
     if not candidates:
@@ -439,7 +542,22 @@ def resolve_input_assembly(
         return _report(assembly, runtime_registry, state, [], all_facts, diagnostics)
 
     ready = [candidate for candidate in candidates if _candidate_state(candidate) == CandidateState.READY]
-    if len(ready) == 1 and not facts:
+    if auto_selected is not None:
+        # Candidate được chọn trên bản `preliminary`; id ổn định theo binding nên tra lại trong danh sách cuối.
+        chosen_id = auto_selected[0].candidate_id
+        if any(item.candidate_id == chosen_id and item.state == CandidateState.READY for item in candidates):
+            return _report(
+                assembly,
+                runtime_registry,
+                InputResolutionState.READY,
+                candidates,
+                [],
+                diagnostics,
+                recommended_candidate_id=chosen_id,
+            )
+    # Import 3DGS duy nhất đã sẵn sàng thì chạy dù luồng video khác còn thiếu dữ kiện. Luồng video thì đã
+    # qua `_select_route`: ở đây nghĩa là có luồng hạng cao hơn đang chờ dữ kiện, không được hạ ngầm.
+    if len(ready) == 1 and not facts and not isinstance(ready[0], VideoRecipeCandidate):
         return _report(
             assembly,
             runtime_registry,
@@ -1241,65 +1359,23 @@ def _add_candidate(
 ) -> None:
     used = {file_id for binding in bindings for file_id in binding.file_ids}
     excluded = sorted({item.file_id for item in assembly.files} - used)
-    if excluded:
-        required = [*required, _file_disposition_fact(excluded)]
     runtime = runtime_override or _runtime(registry, RuntimeCapabilityKey(group.value))
-    candidate = VideoRecipeCandidate(
-        candidate_kind="video_recipe",
-        candidate_id=_candidate_id(
-            {
-                "kind": "video_recipe",
-                "route": group.value,
-                "bindings": [_binding_identity(binding) for binding in bindings],
-                "origin": origin.value,
-            }
-        ),
-        recipe_group=group,
-        state=_candidate_status(required, runtime, force_pending=force_pending)[0],
-        bindings=bindings,
-        excluded_file_ids=excluded,
-        trajectory_origin=origin,
-        required_facts=_unique_facts(required),
-        runtime=runtime,
-        diagnostics=[],
-    )
+    diagnostics = list(extra_diagnostics or [])
     if excluded:
-        drafts.append(
-            _CandidateDraft(
-                "video_recipe",
-                group,
-                bindings,
-                excluded,
-                origin,
-                runtime,
-                _unique_facts(required),
-                [
-                    _diagnostic(
-                        "UNUSED_INPUTS_RETAINED",
-                        "warning",
-                        "These files remain outside this candidate until explicitly disposed.",
-                        excluded,
-                    ),
-                    *(extra_diagnostics or []),
-                ],
-                force_pending=force_pending,
-            )
+        diagnostics.insert(0, _excluded_inputs_diagnostic(excluded))
+    drafts.append(
+        _CandidateDraft(
+            "video_recipe",
+            group,
+            bindings,
+            excluded,
+            origin,
+            runtime,
+            _unique_facts(required),
+            diagnostics,
+            force_pending=force_pending,
         )
-    else:
-        drafts.append(
-            _CandidateDraft(
-                "video_recipe",
-                group,
-                bindings,
-                [],
-                origin,
-                runtime,
-                _unique_facts(required),
-                extra_diagnostics or [],
-                force_pending=force_pending,
-            )
-        )
-    del candidate
+    )
 
 
 def _materialize(draft: _CandidateDraft, assembly: InputAssemblySnapshot) -> InputResolutionCandidate:
@@ -1404,10 +1480,12 @@ def _gaussian_view_format(fmt: InputAssetFormat) -> GaussianViewFormat:
     return GaussianViewFormat.PLY
 
 
-def _file_disposition_fact(file_ids: list[str]) -> MissingInputFact:
-    return _fact(
-        "UNUSED_INPUT_DISPOSITION_REQUIRED",
-        "Choose whether to retain these uploaded files for another route or explicitly exclude them from this candidate.",
+def _excluded_inputs_diagnostic(file_ids: list[str]) -> ResolutionDiagnostic:
+    return _diagnostic(
+        "UNUSED_INPUTS_EXCLUDED",
+        "warning",
+        "Luồng này không có chỗ dùng các file sau nên tự loại chúng khỏi recipe; bỏ chọn chúng ở danh sách "
+        "file nếu không muốn giữ.",
         file_ids,
     )
 

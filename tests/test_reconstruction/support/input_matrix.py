@@ -60,6 +60,7 @@ class Capture:
 class Outcome:
     state: str
     recommended: bool
+    chosen: str | None
     candidates: tuple[tuple[str, str, frozenset[str]], ...]  # (nhóm, trạng thái, mã fact)
 
     def groups(self) -> set[str]:
@@ -80,7 +81,9 @@ def resolve(capture: Capture) -> InputResolutionReport:
     with tempfile.TemporaryDirectory() as raw:
         tmp = Path(raw)
         uploads = [
-            _upload(_write(tmp, f"video_{index}.mp4", _video()), upload_id=f"video-up-{index}", file_id=f"video-{index}")
+            _upload(
+                _write(tmp, f"video_{index}.mp4", _video()), upload_id=f"video-up-{index}", file_id=f"video-{index}"
+            )
             for index in range(capture.videos)
         ]
         for index in range(capture.clouds):
@@ -88,7 +91,9 @@ def resolve(capture: Capture) -> InputResolutionReport:
                 _upload(_write(tmp, f"scan_{index}.pcd", PCD), upload_id=f"cloud-up-{index}", file_id=f"cloud-{index}")
             )
         if capture.calibration:
-            uploads.append(_upload(_write(tmp, "calibration.json", CALIBRATION), upload_id="cal-up", file_id="calibration"))
+            uploads.append(
+                _upload(_write(tmp, "calibration.json", CALIBRATION), upload_id="cal-up", file_id="calibration")
+            )
         if capture.rgb_times:
             rows = "".join(f"{0.1 * index}\n" for index in range(30)).encode()
             uploads.append(_upload(_write(tmp, "rgb_times.txt", rows), upload_id="rgbt-up", file_id="rgb-times"))
@@ -115,7 +120,9 @@ def resolve(capture: Capture) -> InputResolutionReport:
 
         bindings: list[InputBinding] = []
         if capture.rgb_times:
-            bindings.append(InputBinding(binding_id="b-rgb-times", role=InputRole.RGB_FRAME_TIMES, file_ids=["rgb-times"]))
+            bindings.append(
+                InputBinding(binding_id="b-rgb-times", role=InputRole.RGB_FRAME_TIMES, file_ids=["rgb-times"])
+            )
         if capture.lidar_times:
             bindings.append(
                 InputBinding(binding_id="b-lidar-times", role=InputRole.LIDAR_SCAN_TIMES, file_ids=["lidar-times"])
@@ -139,7 +146,15 @@ def outcome(capture: Capture) -> Outcome:
         if item.candidate_kind == "video_recipe"
     ]
     rows.sort(key=lambda row: (row[0], row[1], sorted(row[2])))
-    return Outcome(report.state.value, report.recommended_candidate_id is not None, tuple(rows))
+    chosen = next(
+        (
+            item.recipe_group.value
+            for item in report.candidates
+            if item.candidate_kind == "video_recipe" and item.candidate_id == report.recommended_candidate_id
+        ),
+        None,
+    )
+    return Outcome(report.state.value, report.recommended_candidate_id is not None, chosen, tuple(rows))
 
 
 __all__ = ["Capture", "Outcome", "outcome", "resolve", "RuntimeQualificationStatus"]

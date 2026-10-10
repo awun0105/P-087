@@ -57,9 +57,7 @@ def test_registered_map_with_calibration_and_times_has_no_sensor_guided_route_wi
 
 
 def test_registered_map_with_full_sensor_set_offers_r6_blocked_only_by_frame_map() -> None:
-    result = outcome(
-        Capture(clouds=1, cloud_state="registered_map", calibration=True, rgb_times=True, trajectory=True)
-    )
+    result = outcome(Capture(clouds=1, cloud_state="registered_map", calibration=True, rgb_times=True, trajectory=True))
     assert "R6" in result.groups()
     assert result.facts("R6") == {"VERIFIED_RGB_FRAME_MAP_REQUIRED"}
 
@@ -110,15 +108,10 @@ def test_scene_mismatch_blocks_the_whole_assembly() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Lỗ hổng đã biết: đáng ra phải đúng, hiện chưa
+# Chính sách chọn luồng tự động và loại file không dùng
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Một file thừa (calibration/quỹ đạo/timestamp) chặn luồng đã đủ dữ kiện bằng UNUSED_INPUT_DISPOSITION_REQUIRED; "
-    "đáng ra phải tự loại file không dùng và vẫn ready. Sửa ở pha chọn luồng tự động.",
-)
 @pytest.mark.parametrize(
     "capture",
     [
@@ -127,9 +120,99 @@ def test_scene_mismatch_blocks_the_whole_assembly() -> None:
         Capture(clouds=1, cloud_state="single_static_cloud", calibration=True, rgb_times=True),
     ],
 )
-def test_unused_sidecars_must_not_block_an_otherwise_complete_route(capture: Capture) -> None:
-    result = outcome(capture)
-    assert result.state == "ready"
+def test_unused_sidecars_are_excluded_with_a_warning_not_a_blocker(capture: Capture) -> None:
+    report = resolve(capture)
+    assert report.state.value == "ready"
+    codes = {item.code for item in report.diagnostics}
+    assert "UNUSED_INPUTS_EXCLUDED" in codes
+    chosen = next(item for item in report.candidates if item.candidate_id == report.recommended_candidate_id)
+    assert chosen.excluded_file_ids  # file bị loại được nêu tên, không biến mất
+
+
+def test_better_route_wins_among_ready_candidates_and_the_reason_is_recorded() -> None:
+    """Có LiDAR + ý định dựng video: R1 (bỏ cloud) và R2 cùng chạy được, R2 giữ cloud nên được ưu tiên."""
+    report = resolve(Capture(clouds=1, cloud_state="registered_map", intent="video_reconstruction"))
+    assert report.state.value == "ready"
+    chosen = next(item for item in report.candidates if item.candidate_id == report.recommended_candidate_id)
+    assert chosen.recipe_group.value == "R2"
+    codes = {item.code for item in report.diagnostics}
+    assert {"ROUTE_AUTO_SELECTED", "ALTERNATIVE_ROUTE_NOT_USED"} <= codes
+
+
+def test_a_better_route_still_waiting_on_facts_is_never_silently_downgraded() -> None:
+    """Đủ bộ cảm biến nhưng R6 còn thiếu bản đồ khung hình: không được lặng lẽ chạy R2 và bỏ calibration/quỹ đạo."""
+    report = resolve(Capture(clouds=1, cloud_state="registered_map", calibration=True, rgb_times=True, trajectory=True))
+    assert report.state.value == "needs_input"
+    assert report.recommended_candidate_id is None
+    assert "VERIFIED_RGB_FRAME_MAP_REQUIRED" in {fact.code for fact in report.missing_facts}
+
+
+def test_a_wired_unqualified_better_route_is_reported_when_a_lower_route_runs() -> None:
+    from src.models.contracts.input_assembly import (
+        CandidateState,
+        InputBinding,
+        InputRole,
+        MissingInputFact,
+        RecipeGroup,
+        RuntimeCapabilityKey,
+        TrajectoryOrigin,
+        VideoRecipeCandidate,
+    )
+    from src.services.reconstruction.inputs.input_resolver import _select_route
+    from tests.test_reconstruction.test_input_assembly_resolution import _qualified, _wired
+
+    def candidate(group: RecipeGroup, state: CandidateState, key: str, *, wired: bool = False) -> VideoRecipeCandidate:
+        bindings = [InputBinding(binding_id=f"video-{key}", role=InputRole.RGB_VIDEO, file_ids=["video"])]
+        if group == RecipeGroup.REGISTERED_MAP:
+            bindings.append(
+                InputBinding(binding_id=f"map-{key}", role=InputRole.REGISTERED_LIDAR_MAP, file_ids=["map"])
+            )
+        record = (_wired if wired else _qualified)(RuntimeCapabilityKey(group.value))
+        return VideoRecipeCandidate(
+            candidate_kind="video_recipe",
+            candidate_id=f"cand-{key}",
+            recipe_group=group,
+            state=state,
+            bindings=bindings,
+            excluded_file_ids=[],
+            trajectory_origin=TrajectoryOrigin.NOT_REQUIRED,
+            required_facts=(
+                [MissingInputFact(code="CLOCK_RELATION_REQUIRED", description="cần khai quan hệ đồng hồ")]
+                if state == CandidateState.NEEDS_INPUT
+                else []
+            ),
+            diagnostics=[],
+            runtime=record,
+        )
+
+    pending_map = candidate(RecipeGroup.REGISTERED_MAP, CandidateState.PENDING_VERIFICATION, "r2", wired=True)
+    ready_rgb = candidate(RecipeGroup.RGB_ONLY, CandidateState.READY, "r1")
+    selection = _select_route([pending_map, ready_rgb])
+    assert selection is not None
+    chosen, notes = selection
+    assert chosen.candidate_id == "cand-r1"
+    assert "HIGHER_ROUTE_UNAVAILABLE" in {note.code for note in notes}
+
+    # Luồng hạng cao hơn chỉ thiếu dữ kiện nhưng luồng được chọn đã dùng đủ file của nó: vẫn chạy, kèm ghi chú.
+    needs_more = candidate(RecipeGroup.REGISTERED_MAP, CandidateState.NEEDS_INPUT, "r2-needs")
+    same_files_lower = candidate(RecipeGroup.RGB_ONLY, CandidateState.READY, "r1-same")
+    same_files_lower = same_files_lower.model_copy(update={"bindings": needs_more.bindings})
+    upgraded = _select_route([needs_more, same_files_lower])
+    assert upgraded is not None
+    assert "HIGHER_ROUTE_NEEDS_MORE_FACTS" in {note.code for note in upgraded[1]}
+
+    # Luồng thấp hơn bỏ file mà luồng cao hơn sẽ dùng thì không được lặng lẽ chạy.
+    assert _select_route([needs_more, ready_rgb]) is None
+
+    # Hai luồng ready cùng hạng thì không tự chọn.
+    first = candidate(RecipeGroup.RGB_ONLY, CandidateState.READY, "a")
+    second = candidate(RecipeGroup.RGB_ONLY, CandidateState.READY, "b")
+    assert _select_route([first, second]) is None
+
+
+# ---------------------------------------------------------------------------
+# Lỗ hổng đã biết: đáng ra phải đúng, hiện chưa
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.xfail(
