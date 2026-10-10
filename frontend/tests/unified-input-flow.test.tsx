@@ -248,6 +248,8 @@ describe("unified input flow", () => {
     mocks.getStaged.mockImplementation(async (uploadId: string) => staged(uploadId, `${uploadId}.mp4`));
     mocks.create.mockResolvedValue(snapshot(1));
     mocks.revise.mockImplementation(async (_assemblyId: string, revision: number) => snapshot(revision + 1));
+    // clearAllMocks không bỏ các giá trị `Once` chưa dùng; test không tiêu hết hàng đợi sẽ làm lệch test sau.
+    mocks.resolve.mockReset();
     mocks.resolve
       .mockResolvedValueOnce({ report: report("needs_input", [videoCandidate("r1-a", "file-upload-1", "needs_input", "VIDEO_SELECTION_REQUIRED"), videoCandidate("r1-b", "file-upload-2", "needs_input", "VIDEO_SELECTION_REQUIRED")], null) })
       .mockResolvedValueOnce({ report: report("needs_input", [videoCandidate("r1-a", "file-upload-1", "needs_input", "UNUSED_INPUT_DISPOSITION_REQUIRED")], null) })
@@ -289,6 +291,22 @@ describe("unified input flow", () => {
     expect(await screen.findByText("Không dùng được")).toBeInTheDocument();
     expect(screen.queryByText("Đã xác minh")).toBeNull();
     expect(screen.getByText(/không nhận ra vai trò nào trong file này/)).toBeInTheDocument();
+  });
+
+  it("analyzes by itself once every file is verified, without pressing Analyze", async () => {
+    const { container } = render(<UnifiedInputFlow />);
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(fileInput!, {
+      target: { files: [new File(["a"], "video-a.mp4", { type: "video/mp4" }), new File(["b"], "video-b.mov", { type: "video/quicktime" })] },
+    });
+    // Chưa upload xong thì không tự phân tích và không báo lỗi thay người dùng.
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(mocks.resolve).not.toHaveBeenCalled();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
+    expect(await screen.findByText("Kết quả nhận diện và hướng xử lý", {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(mocks.create).toHaveBeenCalledTimes(1);
+    expect(mocks.resolve).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the skip notice out of the way of unrelated notices and names every rejected file", async () => {

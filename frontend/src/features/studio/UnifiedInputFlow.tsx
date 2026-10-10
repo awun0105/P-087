@@ -54,6 +54,8 @@ const VIDEO_PRESETS: { value: VideoResolutionPreset; detail: string }[] = [
   { value: "480p", detail: "tối đa 854 × 480 ngang / 480 × 854 dọc" },
 ];
 const INPUT_DRAFT_PREFIX = "r2s:input-assembly:v1";
+/** Chờ người dùng gõ xong ô khai báo trước khi tự phân tích, để không tạo một revision cho mỗi phím. */
+const AUTO_ANALYZE_DELAY_MS = 700;
 
 type UploadStatus = "selected" | "preparing" | "uploading" | "ready" | "failed" | "cancelled";
 
@@ -338,6 +340,9 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   const preparedArtifacts = useRef(new Map<string, VideoPreparedArtifact>());
   const mounted = useRef(true);
   const processedLegacyId = useRef<string | null>(null);
+  // Phân tích tự chạy sau mỗi thay đổi input (debounce); `analyzeRef` luôn trỏ bản `analyze` của render mới nhất.
+  const autoAnalyzeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const analyzeRef = useRef<(auto: boolean) => Promise<void>>(async () => undefined);
   const processing = useProcessingForm(intent === "video_reconstruction");
 
   const includedEntries = useMemo(() => entries.filter((item) => item.included), [entries]);
@@ -362,10 +367,13 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     !processing.values || processing.loading || processing.evaluating || processing.error || processing.evaluation?.blocking
   ));
 
+  /** Kết quả cũ không còn đúng: xoá và tự phân tích lại sau một nhịp để gộp nhiều thay đổi liên tiếp. */
   function invalidateResolution() {
     setReport(null);
     setSelectedCandidateId(null);
     setError(null);
+    if (autoAnalyzeTimer.current) clearTimeout(autoAnalyzeTimer.current);
+    autoAnalyzeTimer.current = setTimeout(() => void analyzeRef.current(true), AUTO_ANALYZE_DELAY_MS);
   }
 
   function clearDraft() {
@@ -393,6 +401,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     const artifacts = preparedArtifacts.current;
     return () => {
       mounted.current = false;
+      if (autoAnalyzeTimer.current) clearTimeout(autoAnalyzeTimer.current);
       for (const cancel of uploadHandles.values()) cancel();
       for (const controller of controllers.values()) controller.abort();
       for (const prepared of artifacts.values()) void prepared.dispose().catch(() => undefined);
@@ -789,9 +798,17 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     nextBindings: InputBinding[] = bindings,
     cloudOverride?: CloudObservationState | null,
     includeTimeSelections = true,
+    auto = false,
   ) {
+    if (autoAnalyzeTimer.current) {
+      clearTimeout(autoAnalyzeTimer.current);
+      autoAnalyzeTimer.current = null;
+    }
     if (busy || adding) return;
-    if (includedEntries.some((item) => item.status !== "ready" || !item.staged)) {
+    // Tự phân tích chỉ chạy khi đã đủ điều kiện; chưa đủ thì im lặng chờ, không báo lỗi thay người dùng.
+    const notReady = includedEntries.some((item) => item.status !== "ready" || !item.staged);
+    if (auto && (notReady || !stagedEntries.length || (hasMixedSceneKinds && !nextIntent))) return;
+    if (notReady) {
       setError("Hãy hoàn tất, thử lại hoặc bỏ khỏi assembly mọi file đang chờ upload.");
       return;
     }
@@ -826,6 +843,11 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       setBusy(false);
     }
   }
+
+  // Gán trong effect (không gán lúc render) để ref luôn là closure đã commit của render gần nhất.
+  useEffect(() => {
+    analyzeRef.current = (auto: boolean) => analyze(intent, bindings, undefined, true, auto);
+  });
 
   async function chooseCandidate(candidate: InputResolutionCandidate) {
     if (candidate.state === "unsupported" || candidate.state === "invalid" || candidate.state === "pending_verification") return;
