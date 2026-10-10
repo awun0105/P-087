@@ -189,7 +189,7 @@ def _calibration_format(text: str) -> Literal["torwic_txt", "json"] | None:
     """Calibration camera ↔ LiDAR: `calibrations.txt` kiểu TorWIC, hoặc JSON có khoá `lidar_from_camera`."""
     if all(key in text for key in _TORWIC_EXTRINSIC_KEYS):
         return "torwic_txt"
-    stripped = text.lstrip()
+    stripped = calibration_formats.strip_bom(text).lstrip()
     if stripped.startswith("{") and '"lidar_from_camera"' in stripped:
         return "json"
     return None

@@ -220,3 +220,51 @@ def test_discard_refuses_when_the_checksum_is_not_the_one_the_run_built(tmp_path
 
     assert resolver.resolve(record.artifact_uri).is_file()
     assert _remote_keys(store)
+
+
+# ---------------------------------------------------------------------------
+# Calibration chép nguyên văn: bộ đọc gói không bỏ BOM nên server phải bỏ khi đóng gói
+# ---------------------------------------------------------------------------
+
+_FORWARD_JSON = b'{"lidar_from_camera": {"translation_xyz": [0.1, 0.2, 0.3], "rotation_xyzw": [0, 0, 0, 1]}}'
+
+
+def _write_calibration_from(tmp_path: Path, payload: bytes):
+    import hashlib
+    import io
+    import zipfile
+
+    from src.services.orchestration.inputs.loose_package import _write_calibration
+
+    path = tmp_path / "calibration.json"
+    path.write_bytes(payload)
+    checksum = f"sha256:{hashlib.sha256(payload).hexdigest()}"
+    source = _source("calibration.json", "a").model_copy(update={"checksum": checksum, "size_bytes": len(payload)})
+    item = StagedInputFile(
+        file_id="cal", upload_id="up-cal", source_file=source, observed_format=InputAssetFormat.CALIBRATION_JSON
+    )
+
+    class _Resolver:
+        def require_uri(self, uri: str, expected: str) -> Path:
+            return path
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        result = _write_calibration(archive, "calibration.json", item, _Resolver(), None)  # type: ignore[arg-type]
+    with zipfile.ZipFile(buffer) as archive:
+        return result, archive.read("calibration.json"), checksum
+
+
+def test_a_forward_json_without_bom_is_copied_byte_for_byte(tmp_path: Path) -> None:
+    (checksum, normalized), body, source_checksum = _write_calibration_from(tmp_path, _FORWARD_JSON)
+    assert body == _FORWARD_JSON and normalized is False and checksum == source_checksum
+
+
+def test_a_bom_is_stripped_from_a_verbatim_copy_and_flagged_as_normalized(tmp_path: Path) -> None:
+    from src.services.reconstruction.inputs.detect import _calibration_format
+
+    (checksum, normalized), body, source_checksum = _write_calibration_from(tmp_path, b"\xef\xbb\xbf" + _FORWARD_JSON)
+    assert body == _FORWARD_JSON  # bộ đọc gói thấy JSON thuần
+    assert normalized is True
+    assert checksum == source_checksum  # checksum nguồn vẫn là của bytes người dùng nộp
+    assert _calibration_format("﻿" + _FORWARD_JSON.decode()) == "json"

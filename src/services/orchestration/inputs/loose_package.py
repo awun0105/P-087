@@ -8,6 +8,7 @@ qua đúng bộ nhận diện của gói do người dùng nộp. Mọi thành v
 
 from __future__ import annotations
 
+import codecs
 import hashlib
 import shutil
 import tempfile
@@ -178,9 +179,14 @@ def _write_calibration(
         canonical = canonical_lidar_camera_json(text, lidar_frame_id=lidar_frame_id, camera_frame_id=camera_frame_id)
     except (UnicodeDecodeError, CalibrationParseError) as error:
         raise LoosePackageError(f"Calibration không đọc được: {error}") from error
-    body = payload if canonical is None else canonical.encode("utf-8")
+    body, normalized = payload, False
+    if canonical is not None:
+        body, normalized = canonical.encode("utf-8"), True
+    elif payload.startswith(codecs.BOM_UTF8):
+        # Bộ đọc gói không bỏ BOM; bytes khác nguồn nên đánh dấu đã chuẩn hoá để checksum nguồn vẫn truy vết được.
+        body, normalized = payload[len(codecs.BOM_UTF8) :], True
     archive.writestr(name, body)
-    return checksum, canonical is not None
+    return checksum, normalized
 
 
 def _write_member(archive: zipfile.ZipFile, name: str, item: StagedInputFile, resolver: ArtifactResolver) -> str:
