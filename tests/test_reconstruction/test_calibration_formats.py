@@ -337,3 +337,40 @@ def test_canonical_json_refuses_a_file_that_is_not_a_camera_lidar_calibration() 
         canonical_lidar_camera_json(KALIBR, lidar_frame_id="velodyne")
     with pytest.raises(CalibrationParseError, match="chưa biết frame nào là LiDAR"):
         canonical_lidar_camera_json(_ros_yaml(parent="a", child="b"), lidar_frame_id=None)
+
+
+# ---------------------------------------------------------------------------
+# Số nguyên khổng lồ: lỗi dữ liệu của người dùng, không được thành OverflowError (500 ở route upload)
+# ---------------------------------------------------------------------------
+
+_HUGE = "1" + "0" * 400
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"camera_from_lidar": {"translation_xyz": [' + _HUGE + ', 0, 0], "rotation_xyzw": [0, 0, 0, 1]}}',
+        '{"lidar_from_camera": {"matrix": [[1, 0, 0, ' + _HUGE + "], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]}}",
+    ],
+    ids=["translation", "matrix"],
+)
+def test_a_huge_integer_in_json_is_a_parse_error_not_an_overflow(text: str) -> None:
+    with pytest.raises(CalibrationParseError):
+        parse_lidar_camera_json(text)
+    with pytest.raises(CalibrationParseError):
+        canonical_lidar_camera_json(text, lidar_frame_id=None)
+
+
+def test_a_huge_integer_in_ros_yaml_is_a_parse_error_not_an_overflow() -> None:
+    text = (
+        "header: {frame_id: os_sensor}\nchild_frame_id: camera\n"
+        f"transform:\n  translation: {{x: {_HUGE}, y: 0, z: 0}}\n  rotation: {{x: 0, y: 0, z: 0, w: 1}}\n"
+    )
+    with pytest.raises(CalibrationParseError):
+        parse_ros_transform_yaml(text, lidar_frame_id="os_sensor", camera_frame_id="camera")
+
+
+def test_an_infinite_kalibr_resolution_is_a_parse_error_not_an_overflow() -> None:
+    text = "cam0:\n  camera_model: pinhole\n  intrinsics: [1, 1, 1, 1]\n  resolution: [.inf, 480]\n"
+    with pytest.raises(CalibrationParseError):
+        parse_kalibr_camchain(text)

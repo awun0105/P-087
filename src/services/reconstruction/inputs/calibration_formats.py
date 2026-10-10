@@ -155,7 +155,7 @@ def extrinsic_from_matrix(matrix: np.ndarray, *, parent: str, local: str, source
 def _matrix_from_rows(value: object, where: str) -> np.ndarray:
     try:
         array = np.asarray(value, dtype=float)
-    except (TypeError, ValueError) as error:
+    except (TypeError, ValueError, OverflowError) as error:
         raise CalibrationParseError(f"{where}: ma trận chứa giá trị không phải số") from error
     if array.shape == (16,):
         array = array.reshape(4, 4)
@@ -209,7 +209,7 @@ def parse_torwic_text(text: str, *, lidar_frame: str = "lidar", camera_frame: st
 def parse_lidar_camera_json(text: str, *, lidar_frame: str = "lidar", camera_frame: str = "camera") -> Extrinsic:
     """`lidar_from_camera` hoặc `camera_from_lidar`; kết quả luôn là `lidar_from_camera`."""
     try:
-        document = json.loads(_strip_bom(text))
+        document = json.loads(strip_bom(text))
     except json.JSONDecodeError as error:
         raise CalibrationParseError(f"JSON không hợp lệ: {error.msg}") from error
     if not isinstance(document, dict):
@@ -232,7 +232,7 @@ def parse_lidar_camera_json(text: str, *, lidar_frame: str = "lidar", camera_fra
         try:
             translation = tuple(float(item) for item in block["translation_xyz"])
             rotation = tuple(float(item) for item in block["rotation_xyzw"])
-        except (KeyError, TypeError, ValueError) as error:
+        except (KeyError, TypeError, ValueError, OverflowError) as error:
             raise CalibrationParseError(f"{key}: cần translation_xyz + rotation_xyzw hoặc matrix") from error
         result = Extrinsic(
             parent_frame=parent,
@@ -273,11 +273,11 @@ def _number_tuple(value: object, keys: tuple[str, ...], where: str) -> tuple[flo
         raise CalibrationParseError(f"{where}: giá trị không phải số")
     try:
         return tuple(float(value[key]) for key in keys)
-    except (TypeError, ValueError) as error:
+    except (TypeError, ValueError, OverflowError) as error:
         raise CalibrationParseError(f"{where}: giá trị không phải số") from error
 
 
-def _strip_bom(text: str) -> str:
+def strip_bom(text: str) -> str:
     """Bỏ BOM UTF-8 đầu file: nhiều trình soạn thảo trên Windows thêm vào, và `str.lstrip()` không bỏ U+FEFF."""
     return text.lstrip("\ufeff")
 
@@ -289,7 +289,7 @@ def detect_format(text: str) -> CalibrationFormat | None:
     trưng và dưới giới hạn kích thước). Không đoán chiều: định dạng nào nhận ra được là định dạng tự nói rõ chiều
     hoặc cần người dùng khai tên frame LiDAR ở bước đọc.
     """
-    text = _strip_bom(text)
+    text = strip_bom(text)
     if looks_like_torwic_text(text):
         return "torwic_text"
     if text.lstrip().startswith("{"):
@@ -328,7 +328,7 @@ def canonical_lidar_camera_json(
     định dạng khác (JSON ngược chiều hoặc ma trận 4x4, ROS tf YAML) được chuẩn hoá về đó ở ranh giới đóng gói
     thay vì sửa cả bộ nhận diện lẫn worker. Khối `camera` (nội tham số) của JSON nguồn được giữ nguyên.
     """
-    text = _strip_bom(text)
+    text = strip_bom(text)
     kind = detect_format(text)
     camera: object = None
     if kind == "torwic_text":
@@ -424,7 +424,7 @@ def validate_calibration_structure(text: str) -> None:
     if kind == "ros_transform_yaml":
         _ros_stamped_extrinsic(text)
     elif kind == "lidar_camera_json":
-        document = json.loads(_strip_bom(text))
+        document = json.loads(strip_bom(text))
         block = document.get("lidar_from_camera")
         if "camera_from_lidar" in document or (isinstance(block, dict) and "matrix" in block):
             parse_lidar_camera_json(text)
@@ -438,7 +438,7 @@ def _resolution(value: object, where: str) -> tuple[int, int] | None:
             width, height = int(value[0]), int(value[1])
             if width > 0 and height > 0:
                 return (width, height)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         pass
     raise CalibrationParseError(f"{where}: resolution phải là [rộng, cao] số nguyên dương")
 
@@ -458,7 +458,7 @@ def parse_kalibr_camchain(text: str, *, imu_frame: str = "imu") -> list[KalibrCa
         try:
             numbers = tuple(float(item) for item in intrinsics)
             coefficients = tuple(float(item) for item in block.get("distortion_coeffs") or ())
-        except (TypeError, ValueError) as error:
+        except (TypeError, ValueError, OverflowError) as error:
             raise CalibrationParseError(f"{name}: intrinsics/distortion_coeffs không phải số") from error
         resolution = _resolution(block.get("resolution"), name)
         camera_from_imu = None
