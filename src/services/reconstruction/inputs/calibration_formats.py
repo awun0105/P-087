@@ -29,9 +29,8 @@ import yaml
 
 CalibrationFormat = Literal["torwic_text", "lidar_camera_json", "ros_transform_yaml", "kalibr_camchain"]
 
-#: YAML chỉ là metadata nhỏ; chặn kích thước và alias/anchor để không có bom mở rộng alias.
+#: YAML chỉ là metadata nhỏ; chặn kích thước và anchor/alias để không có bom mở rộng alias.
 _MAX_YAML_BYTES = 256 * 1024
-_YAML_ANCHOR_OR_ALIAS = re.compile(r"(^|[\s\[{,:-])[&*][A-Za-z_][\w-]*")
 _QUATERNION_TOLERANCE = 1e-5
 _ROTATION_TOLERANCE = 1e-6
 
@@ -253,9 +252,12 @@ def parse_lidar_camera_json(text: str, *, lidar_frame: str = "lidar", camera_fra
 def _load_yaml(text: str) -> dict[str, object]:
     if len(text.encode("utf-8")) > _MAX_YAML_BYTES:
         raise CalibrationParseError("YAML calibration vượt giới hạn 256 KiB")
-    if _YAML_ANCHOR_OR_ALIAS.search(text):
-        raise CalibrationParseError("YAML calibration không được dùng anchor/alias")
     try:
+        # Duyệt event của chính parser: chắc chắn hơn regex vì anchor có thể là `&1` hay chứa ký tự không ASCII,
+        # còn `&`/`*` trong comment hay chuỗi không phải anchor.
+        for event in yaml.parse(text, Loader=yaml.SafeLoader):
+            if isinstance(event, yaml.AliasEvent) or getattr(event, "anchor", None) is not None:
+                raise CalibrationParseError("YAML calibration không được dùng anchor/alias")
         document = yaml.safe_load(text)
     except yaml.YAMLError as error:
         raise CalibrationParseError("YAML không hợp lệ") from error
@@ -273,12 +275,14 @@ def _number_tuple(value: object, keys: tuple[str, ...], where: str) -> tuple[flo
         raise CalibrationParseError(f"{where}: giá trị không phải số") from error
 
 
-def parse_ros_transform_yaml(text: str, *, lidar_frame_id: str | None) -> Extrinsic:
+def parse_ros_transform_yaml(text: str, *, lidar_frame_id: str | None, camera_frame_id: str | None = None) -> Extrinsic:
     """`TransformStamped` → `lidar_from_camera`.
 
     `header.frame_id` là frame cha, `child_frame_id` là frame con, và `transform` là pose của con
     trong cha, tức `p_parent = T · p_child`. Cần `lidar_frame_id` để biết đầu nào là LiDAR; không có
-    hoặc không khớp đầu nào thì từ chối thay vì đoán.
+    hoặc không khớp đầu nào thì từ chối thay vì đoán. Biết cả `camera_frame_id` thì đầu còn lại phải
+    đúng là camera, tránh nhận nhầm một transform LiDAR ↔ IMU; không biết thì tên frame còn lại được
+    trả nguyên trong `local_frame` để người gọi tự đối chiếu.
     """
     document = _load_yaml(text)
     stamped = document
@@ -308,14 +312,28 @@ def parse_ros_transform_yaml(text: str, *, lidar_frame_id: str | None) -> Extrin
         raise CalibrationParseError(
             f"file nối {parent} và {child} nhưng chưa biết frame nào là LiDAR; hãy khai tên frame LiDAR"
         )
-    if parent == lidar_frame_id:
-        return extrinsic  # lidar_from_camera
-    if child == lidar_frame_id:
-        return extrinsic.inverse()
-    raise CalibrationParseError(f"frame LiDAR đã khai ({lidar_frame_id}) không khớp {parent} hay {child}")
+    if parent != lidar_frame_id and child != lidar_frame_id:
+        raise CalibrationParseError(f"frame LiDAR đã khai ({lidar_frame_id}) không khớp {parent} hay {child}")
+    other = child if parent == lidar_frame_id else parent
+    if camera_frame_id is not None and other != camera_frame_id:
+        raise CalibrationParseError(f"đầu còn lại của file là {other}, không phải camera đã khai ({camera_frame_id})")
+    return extrinsic if parent == lidar_frame_id else extrinsic.inverse()
 
 
-def parse_kalibr_camchain(text: str) -> list[KalibrCamera]:
+def _resolution(value: object, where: str) -> tuple[int, int] | None:
+    if value is None:
+        return None
+    try:
+        if isinstance(value, list) and len(value) == 2:
+            width, height = int(value[0]), int(value[1])
+            if width > 0 and height > 0:
+                return (width, height)
+    except (TypeError, ValueError):
+        pass
+    raise CalibrationParseError(f"{where}: resolution phải là [rộng, cao] số nguyên dương")
+
+
+def parse_kalibr_camchain(text: str, *, imu_frame: str = "imu") -> list[KalibrCamera]:
     """Mọi khối `camN` của Kalibr. `T_cam_imu` là IMU → camera, tức `camera_from_imu`."""
     document = _load_yaml(text)
     cameras: list[KalibrCamera] = []
@@ -332,13 +350,13 @@ def parse_kalibr_camchain(text: str) -> list[KalibrCamera]:
             coefficients = tuple(float(item) for item in block.get("distortion_coeffs") or ())
         except (TypeError, ValueError) as error:
             raise CalibrationParseError(f"{name}: intrinsics/distortion_coeffs không phải số") from error
-        resolution = block.get("resolution")
+        resolution = _resolution(block.get("resolution"), name)
         camera_from_imu = None
         if block.get("T_cam_imu") is not None:
             camera_from_imu = extrinsic_from_matrix(
                 _matrix_from_rows(block["T_cam_imu"], f"{name}.T_cam_imu"),
                 parent=name,
-                local="imu",
+                local=imu_frame,
                 source="kalibr_camchain",
             )
         shift = block.get("timeshift_cam_imu")
@@ -351,9 +369,7 @@ def parse_kalibr_camchain(text: str) -> list[KalibrCamera]:
                 if isinstance(block.get("distortion_model"), str)
                 else None,
                 distortion_coeffs=coefficients,
-                resolution=(int(resolution[0]), int(resolution[1]))
-                if isinstance(resolution, list) and len(resolution) == 2
-                else None,
+                resolution=resolution,
                 camera_from_imu=camera_from_imu,
                 timeshift_cam_imu_seconds=float(shift) if isinstance(shift, (int, float)) else None,
             )

@@ -129,6 +129,16 @@ def test_unused_sidecars_are_excluded_with_a_warning_not_a_blocker(capture: Capt
     assert chosen.excluded_file_ids  # file bị loại được nêu tên, không biến mất
 
 
+def test_report_level_exclusion_warning_names_only_files_the_chosen_route_drops() -> None:
+    """R1 (bỏ cloud) và R2 cùng ready; R2 được chọn nên báo cáo không được nêu cloud như file bị loại."""
+    report = resolve(Capture(clouds=1, cloud_state="registered_map", intent="video_reconstruction"))
+    chosen = next(item for item in report.candidates if item.candidate_id == report.recommended_candidate_id)
+    assert chosen.recipe_group.value == "R2" and not chosen.excluded_file_ids
+    assert not [item for item in report.diagnostics if item.code == "UNUSED_INPUTS_EXCLUDED"]
+    rgb_only = next(item for item in report.candidates if item.recipe_group.value == "R1")
+    assert rgb_only.excluded_file_ids and any(item.code == "UNUSED_INPUTS_EXCLUDED" for item in rgb_only.diagnostics)
+
+
 def test_better_route_wins_among_ready_candidates_and_the_reason_is_recorded() -> None:
     """Có LiDAR + ý định dựng video: R1 (bỏ cloud) và R2 cùng chạy được, R2 giữ cloud nên được ưu tiên."""
     report = resolve(Capture(clouds=1, cloud_state="registered_map", intent="video_reconstruction"))

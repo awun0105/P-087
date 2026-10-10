@@ -164,10 +164,50 @@ def test_unnormalized_quaternion_is_refused_not_repaired() -> None:
         parse_lidar_camera_json(bad)
 
 
-def test_yaml_aliases_are_refused() -> None:
-    bomb = "a: &x [1, 2]\nb: *x\n"
+@pytest.mark.parametrize(
+    "bomb",
+    [
+        "a: &x [1, 2]\nb: *x\n",
+        "a: &1 [x, x]\nb: *1\n",  # tên anchor bắt đầu bằng số: regex cũ bỏ sót
+    ],
+)
+def test_yaml_anchors_and_aliases_are_refused(bomb: str) -> None:
     with pytest.raises(CalibrationParseError, match="anchor/alias"):
         parse_ros_transform_yaml(bomb, lidar_frame_id="velodyne")
+
+
+def test_non_ascii_anchor_is_refused_by_the_scanner_itself() -> None:
+    with pytest.raises(CalibrationParseError):
+        parse_ros_transform_yaml("a: &tên [x, x]\nb: *tên\n", lidar_frame_id="velodyne")
+
+
+def test_ampersand_and_star_in_comments_and_strings_are_not_anchors() -> None:
+    text = _ros_yaml(parent="velodyne", child="cam *front") + "# see &imu and *notes\n"
+    parsed = parse_ros_transform_yaml(text, lidar_frame_id="velodyne")
+    assert parsed.local_frame == "cam *front"
+
+
+def test_ros_yaml_other_end_must_be_the_declared_camera() -> None:
+    text = _ros_yaml(parent="velodyne", child="imu_link")
+    with pytest.raises(CalibrationParseError, match="không phải camera đã khai"):
+        parse_ros_transform_yaml(text, lidar_frame_id="velodyne", camera_frame_id="cam")
+    assert (
+        parse_ros_transform_yaml(text, lidar_frame_id="velodyne", camera_frame_id="imu_link").local_frame == "imu_link"
+    )
+
+
+@pytest.mark.parametrize("resolution", ["[null, null]", '["a", "b"]', "[0, 480]", "[752]"])
+def test_kalibr_bad_resolution_is_a_parse_error_not_a_type_error(resolution: str) -> None:
+    broken = KALIBR.replace("resolution: [752, 480]", f"resolution: {resolution}")
+    with pytest.raises(CalibrationParseError, match="resolution"):
+        parse_kalibr_camchain(broken)
+
+
+def test_kalibr_imu_frame_name_follows_the_ros_file() -> None:
+    (camera,) = parse_kalibr_camchain(KALIBR, imu_frame="imu_link")
+    assert camera.camera_from_imu is not None and camera.camera_from_imu.local_frame == "imu_link"
+    lidar_from_imu = Extrinsic("lidar", "imu_link", (0, 0, 0), (0, 0, 0, 1), "kalibr_camchain")
+    assert compose_lidar_from_camera(camera.camera_from_imu, lidar_from_imu).parent_frame == "lidar"
 
 
 def test_torwic_text_with_a_duplicate_key_is_refused() -> None:

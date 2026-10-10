@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UnifiedInputFlow } from "@/features/studio/UnifiedInputFlow";
@@ -493,6 +493,42 @@ describe("unified input flow", () => {
         lidar_timestamp_unit: null,
       }),
     })));
+  });
+
+  it("drops a stale analysis when inputs change mid-flight and analyzes again with the new values", async () => {
+    let release: (value: { report: InputResolutionReport }) => void = () => undefined;
+    mocks.resolve.mockReset();
+    mocks.resolve
+      .mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }))
+      .mockResolvedValue({ report: report("needs_input", [], null) });
+    mocks.uploadAssembly.mockReturnValue({
+      promise: Promise.resolve(stagedTimestamp("upload-times", "sensor-times.txt")),
+      abort: vi.fn(),
+    });
+
+    const { container } = render(<UnifiedInputFlow />);
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(fileInput!, { target: { files: [
+      new File(["video"], "warehouse.mp4", { type: "video/mp4" }),
+      new File(["0\n0.1\n"], "sensor-times.txt", { type: "text/plain" }),
+    ] } });
+    fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
+    await waitFor(() => expect(mocks.resolve).toHaveBeenCalledTimes(1), { timeout: 4000 });
+
+    // Đổi ô khai báo khi lần phân tích đầu còn treo (ô này không bị khoá lúc bận).
+    fireEvent.change(screen.getByLabelText("File timestamp của frame RGB"), { target: { value: "file-upload-times" } });
+    release({ report: report("ready", [videoCandidate("stale", "file-upload-1", "ready")], "stale") });
+
+    // Kết quả cũ không được hiện, kiểm ngay trước khi lần phân tích mới (đợi 700ms) kịp chạy.
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(mocks.resolve).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Kết quả nhận diện và hướng xử lý")).toBeNull();
+
+    // Thay đổi mới được tự phân tích lại.
+    await waitFor(() => expect(mocks.resolve).toHaveBeenCalledTimes(2), { timeout: 4000 });
+    expect(mocks.revise).toHaveBeenLastCalledWith("assembly-1", 1, expect.objectContaining({
+      bindings: [expect.objectContaining({ role: "rgb_frame_times", file_ids: ["file-upload-times"] })],
+    }));
   });
 
   it("restores and revalidates upload refs only for the authenticated account", async () => {

@@ -342,6 +342,8 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   const processedLegacyId = useRef<string | null>(null);
   // Phân tích tự chạy sau mỗi thay đổi input (debounce); `analyzeRef` luôn trỏ bản `analyze` của render mới nhất.
   const autoAnalyzeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tăng mỗi khi input đổi: kết quả của lần phân tích bắt đầu trước đó không còn đúng và phải bị bỏ.
+  const inputGeneration = useRef(0);
   const analyzeRef = useRef<(auto: boolean) => Promise<void>>(async () => undefined);
   const processing = useProcessingForm(intent === "video_reconstruction");
 
@@ -368,12 +370,17 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   ));
 
   /** Kết quả cũ không còn đúng: xoá và tự phân tích lại sau một nhịp để gộp nhiều thay đổi liên tiếp. */
+  function scheduleAutoAnalyze() {
+    if (autoAnalyzeTimer.current) clearTimeout(autoAnalyzeTimer.current);
+    autoAnalyzeTimer.current = setTimeout(() => void analyzeRef.current(true), AUTO_ANALYZE_DELAY_MS);
+  }
+
   function invalidateResolution() {
+    inputGeneration.current += 1;
     setReport(null);
     setSelectedCandidateId(null);
     setError(null);
-    if (autoAnalyzeTimer.current) clearTimeout(autoAnalyzeTimer.current);
-    autoAnalyzeTimer.current = setTimeout(() => void analyzeRef.current(true), AUTO_ANALYZE_DELAY_MS);
+    scheduleAutoAnalyze();
   }
 
   function clearDraft() {
@@ -629,6 +636,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         const staged = await stageExistingInputUpload(entry.legacyUploadId);
         appendScanFiles(staged);
         patchEntry(entry.id, { status: "ready", progress: 1, staged, error: null });
+        invalidateResolution();
         return;
       } catch (cause: unknown) {
         patchEntry(entry.id, { status: "failed", progress: null, error: errorMessage(cause, "Không thể nối upload hiện có.") });
@@ -804,7 +812,11 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       clearTimeout(autoAnalyzeTimer.current);
       autoAnalyzeTimer.current = null;
     }
-    if (busy || adding) return;
+    if (busy || adding) {
+      // Thay đổi xảy ra giữa chừng một lần phân tích hay thêm file: chạy lại sau khi xong thay vì mất lịch.
+      if (auto) scheduleAutoAnalyze();
+      return;
+    }
     // Tự phân tích chỉ chạy khi đã đủ điều kiện; chưa đủ thì im lặng chờ, không báo lỗi thay người dùng.
     const notReady = includedEntries.some((item) => item.status !== "ready" || !item.staged);
     if (auto && (notReady || !stagedEntries.length || (hasMixedSceneKinds && !nextIntent))) return;
@@ -825,6 +837,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     setNotice(null);
     setReport(null);
     setSnapshot(null);
+    const generation = inputGeneration.current;
     try {
       const request = writeRequest(nextIntent, nextBindings, cloudOverride, includeTimeSelections);
       const next = snapshot
@@ -832,6 +845,8 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         : await createInputAssembly(request);
       setSnapshot(next);
       const resolved = await resolveInputAssembly(next.assembly_id, next.revision);
+      // Người dùng đã đổi input trong lúc chờ: bỏ kết quả này (lịch phân tích mới đã được xếp bởi lần đổi đó).
+      if (generation !== inputGeneration.current) return;
       setReport(resolved.report);
       setSelectedCandidateId(resolved.report.recommended_candidate_id);
       setIntent(nextIntent);

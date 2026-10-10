@@ -81,6 +81,10 @@ def _select_route(
     Luồng hạng cao hơn chỉ thiếu dữ kiện nhưng luồng được chọn đã dùng đủ file của nó (ví dụ R4 so với R6
     chỉ còn thiếu quan hệ đồng hồ) thì vẫn chạy; ghi `HIGHER_ROUTE_NEEDS_MORE_FACTS` để người dùng biết
     bổ sung gì sẽ nâng cấp được luồng.
+
+    Phân biệt với luồng hạng cao hơn mà *runtime* không chạy được (`pending_verification`/`unsupported`):
+    người dùng không bổ sung gì để mở khoá nó được, nên luồng thấp hơn vẫn chạy kể cả khi loại bớt file,
+    kèm cảnh báo `HIGHER_ROUTE_UNAVAILABLE` nêu tên các file đó.
     """
     ready = [item for item in candidates if item.state == CandidateState.READY]
     if not ready or any(not isinstance(item, VideoRecipeCandidate) for item in ready):
@@ -528,9 +532,16 @@ def resolve_input_assembly(
     candidates.sort(key=lambda item: item.candidate_id)
     candidate_facts = [fact for candidate in candidates for fact in candidate.required_facts]
     all_facts = _unique_facts([*facts, *candidate_facts])
-    diagnostics.extend(item for candidate in candidates for item in candidate.diagnostics)
     if auto_selected is not None:
+        # Đã có luồng được chọn: cảnh báo ở cấp report chỉ nói về luồng đó. Cảnh báo của các luồng không chọn
+        # (ví dụ file nào bị loại) vẫn nằm trong chính candidate của chúng và không gây nhầm ở đây.
+        chosen_diagnostics = next(
+            (item.diagnostics for item in candidates if item.candidate_id == auto_selected[0].candidate_id), []
+        )
+        diagnostics.extend(chosen_diagnostics)
         diagnostics.extend(auto_selected[1])
+    else:
+        diagnostics.extend(item for candidate in candidates for item in candidate.diagnostics)
     diagnostics = _unique_diagnostics([*diagnostics, *_probe_warnings(probe_map)])
 
     if not candidates:
