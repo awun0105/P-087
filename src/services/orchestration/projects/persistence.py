@@ -168,14 +168,23 @@ class ProjectPersistence:
             by_file_id = {item.file_id: item for item in assembly.files}
             role_bindings = {binding.role: binding.file_ids for binding in candidate.bindings}
             selected_file_ids = set(role_bindings.get(InputRole.RGB_VIDEO, []))
-            if candidate.recipe_group == RecipeGroup.SUPPLIED_TRAJECTORY:
-                selected_file_ids.update(role_bindings.get(InputRole.LIDAR_SCAN, []))
+            scan_ids = role_bindings.get(InputRole.LIDAR_SCAN, [])
+            # R4 từ ZIP người dùng nộp: ZIP là upload gắn vào project. R4 từ file rời: các scan chỉ là nguồn để
+            # đóng gói, thứ được gắn vào project là gói do server đóng (khai trong `synthesized_uploads`).
+            package_is_user_zip = bool(scan_ids) and all(
+                by_file_id[item].archive_member is not None for item in scan_ids
+            )
+            if candidate.recipe_group == RecipeGroup.SUPPLIED_TRAJECTORY and package_is_user_zip:
+                selected_file_ids.update(scan_ids)
             for file_id in selected_file_ids:
                 staged = by_file_id[file_id]
                 existing = expected_upload_sources.setdefault(staged.upload_id, staged.source_file)
                 if existing != staged.source_file:
                     raise ArtifactChecksumError("Assembly members disagree on their source upload identity")
-            if set(expected_upload_sources) != set(upload_ids_to_link):
+            synthesized = dict(input_assembly_run.synthesized_uploads)
+            if synthesized and (candidate.recipe_group != RecipeGroup.SUPPLIED_TRAJECTORY or package_is_user_zip):
+                raise ValueError("Only a loose-file R4 run may link a server-built LiDAR package")
+            if set(expected_upload_sources) | set(synthesized) != set(upload_ids_to_link):
                 raise ValueError("Linked product uploads must match the exact accepted recipe bindings")
         quota_result: GuestQuotaIntentResult | None = None
         try:
@@ -230,7 +239,14 @@ class ProjectPersistence:
                                 raise ProjectNotFoundError(f"Không tìm thấy upload cần gắn project: {upload_id}")
                             upload = UploadRecord.model_validate_json(upload_row[0])
                             expected_source = expected_upload_sources.get(upload_id)
-                            if input_assembly_run is not None and (
+                            if input_assembly_run is not None and upload_id in dict(
+                                input_assembly_run.synthesized_uploads
+                            ):
+                                if upload.checksum != dict(input_assembly_run.synthesized_uploads)[upload_id]:
+                                    raise ArtifactChecksumError(
+                                        "Server-built LiDAR package changed after the run was accepted"
+                                    )
+                            elif input_assembly_run is not None and (
                                 expected_source is None
                                 or upload.original_name != expected_source.original_name
                                 or upload.media_type != expected_source.media_type

@@ -1114,25 +1114,23 @@ def _add_supplied_scan_candidate(
                 frame_time_ids,
             )
         )
-    if calibration_id is not None and frame_time_id is not None:
-        selected = [*scan_ids, trajectory_id, calibration_id, frame_time_id]
-        by_id = {item.file_id: item for item in assembly.files}
-        package_uploads = {by_id[item].upload_id for item in selected}
-        archive_checksums = {
-            by_id[item].archive_member.container_checksum for item in selected if by_id[item].archive_member is not None
-        }
-        if (
-            len(package_uploads) != 1
-            or any(by_id[item].archive_member is None for item in selected)
-            or len(archive_checksums) != 1
-        ):
-            required.append(
-                _fact(
-                    "LIDAR_PACKAGE_REQUIRED",
-                    "The current R4 worker adapter accepts these bound LiDAR members only inside one verified ZIP package.",
-                    selected,
-                )
+    by_id = {item.file_id: item for item in assembly.files}
+    if any(by_id[file_id].observed_format != InputAssetFormat.POINT_CLOUD_PCD for file_id in scan_ids):
+        required.append(
+            _fact(
+                "SCAN_FORMAT_PCD_REQUIRED",
+                "Luồng quỹ đạo có sẵn chỉ nhận scan thô dạng .pcd, mỗi scan một file.",
+                scan_ids,
             )
+        )
+    if frame_time_id is not None and probes[frame_time_id].record_count != trajectory_probe.record_count:
+        required.append(
+            _fact(
+                "RGB_FRAME_TIMES_COUNT_MISMATCH",
+                "File thời điểm frame cần đúng một dòng cho mỗi pose của quỹ đạo.",
+                [trajectory_id, frame_time_id],
+            )
+        )
     if trajectory_probe.record_count != len(scan_ids):
         required.append(
             _fact(

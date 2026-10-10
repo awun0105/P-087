@@ -32,6 +32,10 @@ from tests.test_reconstruction.test_input_assembly_resolution import (
 PCD = (
     b"# .PCD v0.7\nVERSION 0.7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nWIDTH 1\nHEIGHT 1\nPOINTS 1\nDATA ascii\n0 0 0\n"
 )
+PLY = (
+    b"ply\nformat ascii 1.0\nelement vertex 1\n"
+    b"property float x\nproperty float y\nproperty float z\nend_header\n0 0 0\n"
+)
 CALIBRATION = b'{"lidar_from_camera":{"translation_xyz":[0,0,0],"rotation_xyzw":[0,0,0,1]}}'
 
 
@@ -54,6 +58,9 @@ class Capture:
     declare_sidecars: bool = True
     runtime: str = "qualified"  # qualified | wired | none
     same_scene: bool = True
+    #: Số dòng file thời điểm frame; None = khớp số pose (hoặc 30 khi không có quỹ đạo).
+    frame_time_rows: int | None = None
+    scan_format: str = "pcd"  # pcd | ply
 
 
 @dataclass(frozen=True)
@@ -86,16 +93,23 @@ def resolve(capture: Capture) -> InputResolutionReport:
             )
             for index in range(capture.videos)
         ]
+        scan_payload = PCD if capture.scan_format == "pcd" else PLY
         for index in range(capture.clouds):
             uploads.append(
-                _upload(_write(tmp, f"scan_{index}.pcd", PCD), upload_id=f"cloud-up-{index}", file_id=f"cloud-{index}")
+                _upload(
+                    _write(tmp, f"scan_{index}.{capture.scan_format}", scan_payload),
+                    upload_id=f"cloud-up-{index}",
+                    file_id=f"cloud-{index}",
+                )
             )
         if capture.calibration:
             uploads.append(
                 _upload(_write(tmp, "calibration.json", CALIBRATION), upload_id="cal-up", file_id="calibration")
             )
         if capture.rgb_times:
-            rows = "".join(f"{0.1 * index}\n" for index in range(30)).encode()
+            # Có quỹ đạo thì mỗi pose một dòng thời điểm frame (đúng điều kiện của gói R4).
+            frame_rows = capture.frame_time_rows or (max(capture.clouds, 2) if capture.trajectory else 30)
+            rows = "".join(f"{0.1 * index}\n" for index in range(frame_rows)).encode()
             uploads.append(_upload(_write(tmp, "rgb_times.txt", rows), upload_id="rgbt-up", file_id="rgb-times"))
         if capture.trajectory:
             rows = "".join(f"{0.1 * index} {index} 0 0 0 0 0 1\n" for index in range(max(capture.clouds, 2))).encode()

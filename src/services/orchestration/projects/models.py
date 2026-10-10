@@ -67,12 +67,27 @@ class ProjectCreateInput(BaseModel):
     attestation: SourceRightsAttestation
 
 
+class LidarPackageMember(BaseModel):
+    """Một file người dùng nộp rời được server đóng vào gói LiDAR chuẩn, kèm checksum nguồn để truy vết."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    member_path: str = Field(min_length=1, max_length=256)
+    #: File trong input assembly mà thành viên này là bản sao nguyên vẹn.
+    file_id: Identifier
+    #: Checksum bytes của file nguồn (checksum thành viên nếu file nằm trong ZIP của người dùng).
+    source_checksum: Checksum
+    role: Literal["lidar_scan", "sensor_trajectory", "camera_lidar_calibration", "rgb_frame_times"]
+
+
 class LidarAttachment(BaseModel):
     """Gói LiDAR người dùng gắn vào scene và hai lời khai contract bắt buộc cho đầu vào RGB + LiDAR."""
 
     model_config = ConfigDict(extra="forbid")
 
     upload_id: Identifier
+    #: Có khi gói được server đóng từ các file rời; None nghĩa là người dùng tự nộp một gói ZIP.
+    package_members: list[LidarPackageMember] | None = None
     #: Nguồn pose có thể là đoán, chuẩn dataset hoặc TUM được người dùng cung cấp.
     trajectory_origin: Literal["estimated", "ground_truth", "supplied"]
     #: Video và LiDAR cùng một không gian, cùng lượt quay; đơn vị mét, trục Z hướng lên.

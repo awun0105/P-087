@@ -671,6 +671,168 @@ async def test_input_assembly_dispatches_supplied_trajectory_only_from_exact_lid
 
 
 @pytest.mark.asyncio
+async def test_input_assembly_runs_supplied_trajectory_from_loose_files_without_a_zip(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    """Scan, quỹ đạo, calibration và thời điểm frame nộp rời: server tự đóng gói chuẩn rồi chạy R4."""
+    import zipfile
+    from types import SimpleNamespace
+
+    from src.models.contracts.input_assembly import (
+        RuntimeCapabilityKey,
+        RuntimeCapabilityRecord,
+        RuntimeQualificationRegistry,
+        RuntimeQualificationStatus,
+        seal_runtime_registry,
+    )
+    from src.services.orchestration.jobs.runner import _validate_project_input_recipe
+    from tests.test_reconstruction.test_lidar_package import POSES, _companions, _pcd, _scan
+
+    studio.settings.product_upload_max_bytes = 16 * 1024 * 1024
+    runtime_path = studio.root / "input-runtime-r4-loose.json"
+    runtime_path.write_text(
+        seal_runtime_registry(
+            RuntimeQualificationRegistry(
+                schema_version="1.0",
+                registry_version="test-r4-loose-v1",
+                capabilities=[
+                    RuntimeCapabilityRecord(
+                        capability_key=RuntimeCapabilityKey.R4,
+                        status=RuntimeQualificationStatus.QUALIFIED,
+                        runtime_id="qualified-r4-worker",
+                        runtime_version="4.0.0",
+                        qualification_evidence_checksum="sha256:" + "4" * 64,
+                    )
+                ],
+                registry_checksum="sha256:" + "0" * 64,
+            )
+        ).model_dump_json()
+    )
+    studio.settings.product_input_runtime_registry = runtime_path
+
+    async def upload(name: str, payload: bytes) -> dict:
+        response = await client.post("/api/v1/input-assemblies/uploads", params={"filename": name}, content=payload)
+        assert response.status_code == 201, (name, response.text)
+        return response.json()
+
+    video = await upload("walk.mp4", b"\x00\x00\x00\x14ftypqt  fake-mp4")
+    companions = _companions()
+    trajectory = await upload("poses.txt", companions["traj.txt"])
+    calibration = await upload("rig.txt", companions["calibrations.txt"])
+    frame_times = await upload("times.txt", companions["frame_times.txt"])
+    scans = [await upload(f"scan_{index}.pcd", _pcd(_scan())) for index in range(POSES)]
+    scan_ids = [item["staged_files"][0]["file_id"] for item in scans]
+    assert all(item["staged_files"][0]["archive_member"] is None for item in scans)
+
+    created = await client.post(
+        "/api/v1/input-assemblies",
+        json={
+            "upload_ids": [
+                video["upload_id"],
+                trajectory["upload_id"],
+                calibration["upload_id"],
+                frame_times["upload_id"],
+                *[item["upload_id"] for item in scans],
+            ],
+            "requested_intent": "video_reconstruction",
+            "declarations": {
+                "same_scene": {"value": True, "provenance": "declared"},
+                "cloud_state": {"value": "raw_scan_sequence", "provenance": "declared"},
+                "coordinate_unit": {"value": "m", "provenance": "declared"},
+                "lidar_frame_id": {"value": "lidar_sensor", "provenance": "declared"},
+                "trajectory_convention": {"value": "world_from_sensor", "provenance": "declared"},
+            },
+            "bindings": [
+                {"binding_id": "rgb", "role": "rgb_video", "file_ids": [video["staged_files"][0]["file_id"]]},
+                {"binding_id": "scans", "role": "lidar_scan", "file_ids": scan_ids},
+                {
+                    "binding_id": "trajectory",
+                    "role": "sensor_trajectory",
+                    "file_ids": [trajectory["staged_files"][0]["file_id"]],
+                },
+                {
+                    "binding_id": "calibration",
+                    "role": "camera_lidar_calibration",
+                    "file_ids": [calibration["staged_files"][0]["file_id"]],
+                },
+                {
+                    "binding_id": "frame-times",
+                    "role": "rgb_frame_times",
+                    "file_ids": [frame_times["staged_files"][0]["file_id"]],
+                },
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    assembly = created.json()
+    resolved = await client.post(
+        f"/api/v1/input-assemblies/{assembly['assembly_id']}/resolve", json={"revision": assembly["revision"]}
+    )
+    assert resolved.status_code == 200, resolved.text
+    report = resolved.json()["report"]
+    candidate = next(
+        item
+        for item in report["candidates"]
+        if item["candidate_kind"] == "video_recipe" and item["recipe_group"] == "R4"
+    )
+    assert candidate["state"] == "ready", [fact["code"] for fact in candidate["required_facts"]]
+    assert report["recommended_candidate_id"] == candidate["candidate_id"]
+
+    accepted = await client.post(
+        f"/api/v1/input-assemblies/{assembly['assembly_id']}/run",
+        json={
+            "revision": assembly["revision"],
+            "resolution_checksum": report["report_checksum"],
+            "candidate_id": candidate["candidate_id"],
+            "name": "Supplied trajectory from loose files",
+            "attestation": _ATTESTATION,
+        },
+        headers={"Idempotency-Key": "assembly-r4-loose-run-1"},
+    )
+    assert accepted.status_code == 201, accepted.text
+    job = studio.registry.get_job(accepted.json()["job"]["job_id"])
+    project = studio.registry.get_project(job.project_id)
+    manifest = InputManifest.model_validate_json(
+        studio.registry.runtime_resolver.require(project.input_manifest_ref).read_bytes()
+    )
+
+    # Manifest chỉ có video + một gói ZIP do server đóng; provenance nêu từng file nguồn.
+    zips = [item for item in manifest.files if item.media_type == "application/zip"]
+    assert len(zips) == 1
+    provenance = manifest.preparation_provenance["lidar"]
+    assert provenance["trajectory_origin"] == "supplied"
+    assert provenance["evidence"]["scan_count"] == POSES
+    members = {item["member_path"]: item for item in provenance["package_members"]}
+    assert sorted(members) == sorted(
+        [f"{index:06d}.pcd" for index in range(POSES)] + ["trajectory.txt", "calibrations.txt", "frame_times.txt"]
+    )
+    assert [members[f"{index:06d}.pcd"]["file_id"] for index in range(POSES)] == scan_ids
+    assert members["trajectory.txt"]["file_id"] == trajectory["staged_files"][0]["file_id"]
+
+    # Gói do server đóng được gắn vào project, nên xoá project xoá luôn gói (không để dữ liệu LiDAR mồ côi).
+    from src.api.studio import deps
+
+    packages = [item for item in deps.uploads().list() if item.input_kind == "lidar_scan_sequence"]
+    assert len(packages) == 1 and project.project_id in packages[0].project_ids
+
+    # Gói đã đóng đọc lại được bằng ZIP chuẩn và chứa đúng byte nguồn.
+    package_path = studio.registry.runtime_resolver.require_uri(zips[0].artifact_uri, zips[0].checksum)
+    with zipfile.ZipFile(package_path) as archive:
+        assert archive.read("trajectory.txt") == companions["traj.txt"]
+        assert archive.read("000003.pcd") == _pcd(_scan())
+
+    attempt = SimpleNamespace(
+        registry=studio.registry,
+        settings=SimpleNamespace(
+            database_url=studio.settings.database_url,
+            product_input_runtime_registry=runtime_path,
+        ),
+        job=job,
+    )
+    _validate_project_input_recipe(attempt, project, manifest)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("recipe_group", ["R5", "R6"])
 async def test_estimated_odometry_run_requires_qualified_runtime_and_verified_rgb_bindings(
     recipe_group: str, client: AsyncClient, studio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch

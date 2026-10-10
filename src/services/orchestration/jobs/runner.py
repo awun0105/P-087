@@ -78,6 +78,7 @@ from src.services.orchestration.artifacts import (
 from src.services.orchestration.benchmark import build_benchmark, publish_benchmark
 from src.services.orchestration.inputs import InputAssemblyService
 from src.services.orchestration.inputs.compatibility import INPUT_ASSEMBLY_RUNNABLE_RECIPE_GROUPS
+from src.services.orchestration.inputs.loose_package import LoosePackageError, verify_package_members
 from src.services.orchestration.jobs.admission import ResourceAdmission, job_drivers, touch_job_reservation
 from src.services.orchestration.jobs.anonymization_review import accept_when_nothing_redacted
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
@@ -107,7 +108,7 @@ from src.services.orchestration.processing.telemetry import (
     ResourceUsage,
     sampled_section,
 )
-from src.services.orchestration.projects.models import ProjectRecord
+from src.services.orchestration.projects.models import LidarPackageMember, ProjectRecord
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
 from src.services.reconstruction import (
     MogeSettings,
@@ -766,18 +767,44 @@ def _validate_project_input_recipe(
         }
         lidar_files = [item for item in manifest.files if item.media_type == "application/zip"]
         lidar_provenance = (manifest.preparation_provenance or {}).get("lidar")
-        if (
-            len(package_upload_ids) != 1
-            or any(by_id[file_id].archive_member is None for file_id in role_ids)
-            or len(package_checksums) != 1
-            or len(lidar_files) != 1
-            or next(iter(package_checksums)) != lidar_files[0].checksum
-            or not isinstance(lidar_provenance, dict)
-            or lidar_provenance.get("trajectory_origin") != "supplied"
-            or candidate.trajectory_origin != TrajectoryOrigin.SUPPLIED
-        ):
-            raise ValueError("R4 recipe does not match the supplied-trajectory LiDAR package in InputManifest")
-        selected_upload_ids = {video.upload_id, *package_upload_ids}
+        synthesized = lidar_provenance.get("package_members") if isinstance(lidar_provenance, dict) else None
+        if synthesized is not None:
+            # Gói do server đóng từ file rời: kiểm theo danh sách thành viên + checksum nguồn đã niêm phong.
+            evidence = lidar_provenance.get("evidence") if isinstance(lidar_provenance, dict) else None
+            if (
+                len(lidar_files) != 1
+                or not isinstance(evidence, dict)
+                or not isinstance(synthesized, list)
+                or lidar_provenance.get("trajectory_origin") != "supplied"
+                or candidate.trajectory_origin != TrajectoryOrigin.SUPPLIED
+            ):
+                raise ValueError("R4 recipe does not match the synthesized LiDAR package in InputManifest")
+            try:
+                verify_package_members(
+                    [LidarPackageMember.model_validate(item) for item in synthesized],
+                    staged=by_id,
+                    role_bindings=bindings,
+                    trajectory_member=str(evidence["trajectory_member"]),
+                    calibration_member=str(evidence["calibration_member"]),
+                    frame_times_member=str(evidence["frame_times_member"]),
+                    scan_count=int(evidence["scan_count"]),
+                )
+            except (LoosePackageError, ValueError, KeyError, TypeError) as error:
+                raise ValueError("R4 synthesized package does not match the accepted recipe") from error
+            selected_upload_ids = {video.upload_id, *(by_id[file_id].upload_id for file_id in role_ids)}
+        else:
+            if (
+                len(package_upload_ids) != 1
+                or any(by_id[file_id].archive_member is None for file_id in role_ids)
+                or len(package_checksums) != 1
+                or len(lidar_files) != 1
+                or next(iter(package_checksums)) != lidar_files[0].checksum
+                or not isinstance(lidar_provenance, dict)
+                or lidar_provenance.get("trajectory_origin") != "supplied"
+                or candidate.trajectory_origin != TrajectoryOrigin.SUPPLIED
+            ):
+                raise ValueError("R4 recipe does not match the supplied-trajectory LiDAR package in InputManifest")
+            selected_upload_ids = {video.upload_id, *package_upload_ids}
     else:
         if (
             manifest.input_configuration.registered_lidar_present

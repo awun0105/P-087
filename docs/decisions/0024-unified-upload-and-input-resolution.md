@@ -48,6 +48,17 @@ khả thi khi có qualified adapters và updated producer/consumer contracts.
    - File mà luồng được chọn không dùng thì tự loại và liệt kê (`UNUSED_INPUTS_EXCLUDED`), không
      còn là điều kiện chặn. Lý do chọn ghi vào `diagnostics` (`ROUTE_AUTO_SELECTED`).
    - Cloud đi kèm LiDAR mà chưa có ý định `video_reconstruction` vẫn không bao giờ rơi về R1.
+
+   *(Sửa 2026-10-10 — R4 nhận file rời.)* R4 không còn đòi người dùng đóng ZIP. Khi các file đã
+   bind không cùng nằm trong một ZIP do người dùng nộp, server **tự đóng một gói chuẩn** từ chính
+   các byte đó (scan đánh số `000000.pcd…` theo thứ tự người dùng đã xác nhận, cộng quỹ đạo,
+   calibration, thời điểm frame) rồi cho nó đi qua đúng bộ nhận diện của gói tự nộp, nên toàn bộ
+   đường ingest/worker/QA của R4 giữ nguyên. Gói không biến đổi byte nào; mỗi thành viên ghi
+   `file_id` và checksum nguồn vào provenance của InputManifest (`package_members`), runner và
+   registry kiểm theo danh sách đó thay vì theo thành viên ZIP. Gói được gắn vào project để xoá
+   project xoá luôn gói. Điều kiện sớm ở resolver: scan phải là `.pcd` (`SCAN_FORMAT_PCD_REQUIRED`)
+   và thời điểm frame phải một dòng mỗi pose (`RGB_FRAME_TIMES_COUNT_MISMATCH`).
+   Chưa làm: R5/R6 vẫn đọc scan từ nguồn đã stage (chưa kiểm xem chúng có buộc ZIP hay không).
 5. Allow loose/raw files trong assembly staging có validation phù hợp; complete
    legacy input detectors vẫn validate như cũ. Không fake calibration/frame_times
    hoặc identity poses để thỏa schema. Single PCD không tự chứng minh registered map.

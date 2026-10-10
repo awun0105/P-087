@@ -71,6 +71,11 @@ from src.services.orchestration.inputs import (
 )
 from src.services.orchestration.inputs.assembly import InputAssemblyRuntimeConfigError
 from src.services.orchestration.inputs.compatibility import INPUT_ASSEMBLY_RUNNABLE_RECIPE_GROUPS
+from src.services.orchestration.inputs.loose_package import (
+    LoosePackageError,
+    is_user_supplied_package,
+    synthesize_lidar_package,
+)
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.processing.config import build_job_config, config_bytes, is_presets_file, preset_values
 from src.services.orchestration.processing.resources import evaluate
@@ -79,7 +84,12 @@ from src.services.orchestration.projects import (
     PrivacyGateBlockedError,
     ProjectNotFoundError,
 )
-from src.services.orchestration.projects.models import LidarAttachment, SourceRightsAttestation, UploadProjectInput
+from src.services.orchestration.projects.models import (
+    LidarAttachment,
+    LidarPackageMember,
+    SourceRightsAttestation,
+    UploadProjectInput,
+)
 from src.services.orchestration.uploads import UploadError, UploadNotFoundError
 from src.services.orchestration.uploads.assembly_models import StagedInputUploadRecord
 from src.services.orchestration.uploads.scene_imports import ImportedScene, SceneImportError
@@ -501,6 +511,7 @@ def run_input_assembly(
 
         lidar_upload = None
         lidar_attachment = None
+        synthesized_uploads: tuple[tuple[str, str], ...] = ()
         selected_upload_ids = {video_upload.upload_id}
         if candidate.recipe_group == RecipeGroup.SUPPLIED_TRAJECTORY:
             lidar_roles = (
@@ -512,14 +523,33 @@ def run_input_assembly(
             lidar_file_ids = [file_id for role in lidar_roles for file_id in bindings.get(role, [])]
             if not lidar_file_ids:
                 raise InputAssemblyConflictError("R4 has no bound LiDAR source files")
-            package_upload_ids = {staged_by_id[file_id].upload_id for file_id in lidar_file_ids}
-            if len(package_upload_ids) != 1:
-                raise InputAssemblyConflictError("R4 files must come from one verified LiDAR ZIP package")
-            lidar_upload_id = next(iter(package_upload_ids))
-            lidar_upload = uploads.get(lidar_upload_id)
-            authorize_upload_mutation(user, lidar_upload, operation="chạy LiDAR trong assembly")
-            if lidar_upload.input_kind != "lidar_scan_sequence":
-                raise InputAssemblyConflictError("The R4 adapter requires a legacy-verified raw scan sequence ZIP")
+            package_members: list[LidarPackageMember] | None = None
+            if is_user_supplied_package(staged_by_id, lidar_file_ids):
+                package_upload_ids = {staged_by_id[file_id].upload_id for file_id in lidar_file_ids}
+                lidar_upload_id = next(iter(package_upload_ids))
+                lidar_upload = uploads.get(lidar_upload_id)
+                authorize_upload_mutation(user, lidar_upload, operation="chạy LiDAR trong assembly")
+                if lidar_upload.input_kind != "lidar_scan_sequence":
+                    raise InputAssemblyConflictError("The R4 adapter requires a legacy-verified raw scan sequence ZIP")
+            else:
+                # File nộp rời (hoặc rải ở nhiều ZIP): server đóng thành một gói chuẩn rồi nhận diện như gói tự nộp.
+                source_upload_ids = {staged_by_id[file_id].upload_id for file_id in lidar_file_ids}
+                for source_upload_id in sorted(source_upload_ids):
+                    authorize_staged_input_upload_mutation(
+                        user,
+                        service.get_upload(source_upload_id),
+                        operation="đóng gói LiDAR từ input assembly",
+                    )
+                service.verify_upload_sources(stored, upload_ids=source_upload_ids)
+                try:
+                    lidar_upload, package_members = synthesize_lidar_package(
+                        service=uploads,
+                        staged=staged_by_id,
+                        role_bindings=bindings,
+                        uploaded_by=actor_of(user),
+                    )
+                except (LoosePackageError, UploadError) as error:
+                    raise InputAssemblyConflictError(str(error)) from error
             declarations = stored.snapshot.declarations
             if (
                 declarations.same_scene is None
@@ -538,8 +568,11 @@ def run_input_assembly(
                 upload_id=lidar_upload.upload_id,
                 trajectory_origin="supplied",
                 same_scene_confirmed=True,
+                package_members=package_members,
             )
             selected_upload_ids.add(lidar_upload.upload_id)
+            if package_members is not None:
+                synthesized_uploads = ((lidar_upload.upload_id, lidar_upload.checksum),)
         elif candidate.recipe_group in {RecipeGroup.ESTIMATED_TRAJECTORY, RecipeGroup.SENSOR_GUIDED}:
             lidar_roles = [InputRole.LIDAR_SCAN, InputRole.LIDAR_SCAN_TIMES]
             if candidate.recipe_group == RecipeGroup.SENSOR_GUIDED:
@@ -666,6 +699,7 @@ def run_input_assembly(
             recipe_checksum=recipe.recipe_checksum,
             recipe_ref=recipe_ref,
             staged_upload_ids=tuple(sorted({item.upload_id for item in stored.snapshot.files})),
+            synthesized_uploads=synthesized_uploads,
         )
         job = registry.create_job(
             JobCreateInput(project_id=project.project_id),

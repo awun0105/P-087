@@ -221,17 +221,44 @@ def test_a_wired_unqualified_better_route_is_reported_when_a_lower_route_runs() 
 
 
 # ---------------------------------------------------------------------------
-# Lỗ hổng đã biết: đáng ra phải đúng, hiện chưa
+# File rời cho luồng quỹ đạo có sẵn (R4): không cần đóng ZIP
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="R4 đòi mọi thành viên nằm trong một ZIP đã xác minh (LIDAR_PACKAGE_REQUIRED) dù file đã nộp rời; "
-    "đáng ra nhận file rời. Sửa ở pha nhận file rời.",
-)
-def test_loose_files_must_satisfy_the_supplied_trajectory_route() -> None:
+def test_loose_files_satisfy_the_supplied_trajectory_route_without_a_zip() -> None:
     result = outcome(
         Capture(clouds=2, cloud_state="raw_scan_sequence", trajectory=True, calibration=True, rgb_times=True)
     )
     assert "LIDAR_PACKAGE_REQUIRED" not in result.facts("R4")
+    # Chỉ còn việc người dùng phải xác nhận: thứ tự scan.
+    assert result.facts("R4") == {"SCAN_SEQUENCE_ORDER_REQUIRED"}
+
+
+def test_frame_times_must_have_one_row_per_pose() -> None:
+    """30 dòng thời điểm frame cho 2 pose: báo ngay thay vì để gói bị bộ nhận diện từ chối ở bước sau."""
+    result = outcome(
+        Capture(
+            clouds=2,
+            cloud_state="raw_scan_sequence",
+            trajectory=True,
+            calibration=True,
+            rgb_times=True,
+            frame_time_rows=30,
+        )
+    )
+    assert "RGB_FRAME_TIMES_COUNT_MISMATCH" in result.facts("R4")
+
+
+def test_non_pcd_scans_are_flagged_for_the_supplied_trajectory_route() -> None:
+    """Gói R4 chỉ nhận scan .pcd; scan .ply phải bị báo sớm thay vì thất bại ở bộ nhận diện gói."""
+    result = outcome(
+        Capture(
+            clouds=2,
+            cloud_state="raw_scan_sequence",
+            trajectory=True,
+            calibration=True,
+            rgb_times=True,
+            scan_format="ply",
+        )
+    )
+    assert "SCAN_FORMAT_PCD_REQUIRED" in result.facts("R4")

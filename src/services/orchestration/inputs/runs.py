@@ -23,6 +23,9 @@ class InputAssemblyRunCommit(BaseModel):
     recipe_checksum: Checksum
     recipe_ref: ProductArtifactRef
     staged_upload_ids: tuple[Identifier, ...] = Field(min_length=1)
+    #: Gói LiDAR do server đóng từ file rời: (upload_id, checksum). Không có trong assembly nên không thể đối chiếu
+    #: với nguồn assembly; được gắn vào project cùng video để xoá project xoá luôn gói.
+    synthesized_uploads: tuple[tuple[Identifier, Checksum], ...] = ()
 
     @model_validator(mode="after")
     def _unique_uploads(self) -> "InputAssemblyRunCommit":

@@ -72,6 +72,7 @@ from src.services.orchestration.auth.models import Actor
 from src.services.orchestration.auth.quota_ledger import GuestQuotaIntent, GuestQuotaIntentResult
 from src.services.orchestration.inputs.assembly import InputResolutionRecord
 from src.services.orchestration.inputs.compatibility import INPUT_ASSEMBLY_RUNNABLE_RECIPE_GROUPS
+from src.services.orchestration.inputs.loose_package import LoosePackageError, verify_package_members
 from src.services.orchestration.inputs.runs import InputAssemblyRunCommit, InputAssemblyRunResult
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.models import JobAttemptRecord, PreparedInputReceipt, TransitionRequest
@@ -373,6 +374,17 @@ class ProjectRegistry:
                             "input_kind": lidar.input_kind,
                             "trajectory_origin": request.lidar.trajectory_origin,  # type: ignore[union-attr]
                             "evidence": lidar.detection.lidar.model_dump(mode="json"),  # type: ignore[union-attr]
+                            # Có khi gói do server đóng từ file rời: worker/runner kiểm theo danh sách này.
+                            **(
+                                {
+                                    "package_members": [
+                                        item.model_dump(mode="json")
+                                        for item in request.lidar.package_members  # type: ignore[union-attr]
+                                    ]
+                                }
+                                if request.lidar.package_members is not None  # type: ignore[union-attr]
+                                else {}
+                            ),
                         }
                     }
                     if lidar is not None
@@ -522,28 +534,51 @@ class ProjectRegistry:
             frame_time_ids = role_bindings[InputRole.RGB_FRAME_TIMES]
             selected_ids = [*scan_ids, *trajectory_ids, *calibration_ids, *frame_time_ids]
             members = [by_file_id[file_id] for file_id in selected_ids]
-            pcd_paths = sorted(
-                item.archive_member.member_path
-                for item in assembly.files
-                if item.upload_id == lidar.upload_id
-                and item.archive_member is not None
-                and item.archive_member.member_path.lower().endswith(".pcd")
-            )
-            if (
-                lidar.input_kind != "lidar_scan_sequence"
-                or evidence is None
-                or any(item.upload_id != lidar.upload_id or item.archive_member is None for item in members)
-                or any(item.archive_member.container_checksum != lidar.checksum for item in members)
-                or len(trajectory_ids) != 1
-                or len(calibration_ids) != 1
-                or len(frame_time_ids) != 1
-                or sorted(by_file_id[file_id].archive_member.member_path for file_id in scan_ids) != pcd_paths
-                or by_file_id[trajectory_ids[0]].archive_member.member_path != evidence.trajectory_member
-                or by_file_id[calibration_ids[0]].archive_member.member_path != evidence.calibration_member
-                or by_file_id[frame_time_ids[0]].archive_member.member_path != evidence.frame_times_member
-                or len(scan_ids) != evidence.scan_count
-            ):
-                raise ValueError("R4 recipe members do not match the verified LiDAR package inventory")
+            if request.lidar.package_members is not None:
+                # Gói do server đóng từ file rời: kiểm theo checksum nguồn đã niêm phong, không theo thành viên ZIP.
+                if (
+                    lidar.input_kind != "lidar_scan_sequence"
+                    or evidence is None
+                    or len(trajectory_ids) != 1
+                    or len(calibration_ids) != 1
+                    or len(frame_time_ids) != 1
+                ):
+                    raise ValueError("R4 recipe members do not match the synthesized LiDAR package")
+                try:
+                    verify_package_members(
+                        request.lidar.package_members,
+                        staged=by_file_id,
+                        role_bindings=role_bindings,
+                        trajectory_member=evidence.trajectory_member,
+                        calibration_member=evidence.calibration_member,
+                        frame_times_member=evidence.frame_times_member,
+                        scan_count=evidence.scan_count or 0,
+                    )
+                except LoosePackageError as error:
+                    raise ValueError(f"R4 synthesized package rejected: {error}") from error
+            else:
+                pcd_paths = sorted(
+                    item.archive_member.member_path
+                    for item in assembly.files
+                    if item.upload_id == lidar.upload_id
+                    and item.archive_member is not None
+                    and item.archive_member.member_path.lower().endswith(".pcd")
+                )
+                if (
+                    lidar.input_kind != "lidar_scan_sequence"
+                    or evidence is None
+                    or any(item.upload_id != lidar.upload_id or item.archive_member is None for item in members)
+                    or any(item.archive_member.container_checksum != lidar.checksum for item in members)
+                    or len(trajectory_ids) != 1
+                    or len(calibration_ids) != 1
+                    or len(frame_time_ids) != 1
+                    or sorted(by_file_id[file_id].archive_member.member_path for file_id in scan_ids) != pcd_paths
+                    or by_file_id[trajectory_ids[0]].archive_member.member_path != evidence.trajectory_member
+                    or by_file_id[calibration_ids[0]].archive_member.member_path != evidence.calibration_member
+                    or by_file_id[frame_time_ids[0]].archive_member.member_path != evidence.frame_times_member
+                    or len(scan_ids) != evidence.scan_count
+                ):
+                    raise ValueError("R4 recipe members do not match the verified LiDAR package inventory")
         else:
             declarations = assembly.declarations
             scan_ids = role_bindings.get(InputRole.LIDAR_SCAN, [])
