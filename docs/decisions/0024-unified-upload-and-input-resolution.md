@@ -80,7 +80,7 @@ khả thi khi có qualified adapters và updated producer/consumer contracts.
      YAML (`TransformStamped` hoặc `TFMessage` một phần tử). Chiều biến đổi luôn tường minh: ROS tf cần
      người dùng khai tên frame LiDAR và tên frame camera để kiểm cả hai đầu của file. Kalibr camchain được
      nhận ra và giải thích (`kalibr_camera_imu_only`) nhưng không có vai trò, vì chỉ có camera ↔ IMU.
-     File hỏng cấu trúc hoặc số liệu bị báo ngay lúc phân tích. Frame sai tên vẫn chỉ bị bắt lúc chạy
+     Lúc phân tích chỉ kiểm cấu trúc và số liệu của ROS YAML, JSON `camera_from_lidar` và JSON ma trận (những dạng cần chuẩn hoá); quaternion không hợp lệ trong JSON `lidar_from_camera` hoặc TorWIC chỉ hỏng ở bộ đọc gói lúc chạy. Frame sai tên vẫn chỉ bị bắt lúc chạy
      (409, không để lại gói) vì resolver không đọc nội dung YAML.
    - Suy khai báo chỉ khi bằng chứng cho đúng một đáp án, ghi `provenance=estimated` kèm tên phương pháp,
      mơ hồ thì hỏi. **Đơn vị timestamp** theo tần số lấy mẫu trung bình trong dải một mẫu mỗi giờ đến
