@@ -10,16 +10,52 @@
 
 **Câu hỏi:** khi người dùng nộp video + scan `.pcd` thô chưa registered (hướng R5/R6), phần LiDAR ước lượng đường đi và dựng bản đồ chính xác tới đâu?
 
-| Thành phần | Là gì | Nguồn |
+**Hình dung đời thường:** giống vẽ sơ đồ nhà bằng cách đi dọc nhà và đếm bước chân. Có ba thứ cần phân biệt: *đường bạn đã đi*, *sơ đồ bạn vẽ ra*, và *bản vẽ kiến trúc chính thức*. Benchmark kiểm hai việc: đếm bước có đúng không, và sơ đồ cuối có khớp bản vẽ chính thức không.
+
+### 1.1 Bảng đặt tên
+
+| Tên | Là gì | Nguồn |
 |---|---|---|
-| **A. Quỹ đạo thực** | đường robot thật sự đi | `traj_gt.txt` |
-| **B. Quỹ đạo KISS-ICP** | đường phần mềm *đoán* từ các scan | KISS-ICP chạy trên `lidar_scans/*.pcd` |
+| **A. Quỹ đạo thực** | đường robot thật sự đi | `traj_gt.txt` (có sẵn trong dataset) |
+| **B. Quỹ đạo KISS-ICP** | đường phần mềm *đoán* ra từ các scan | KISS-ICP chạy trên `lidar_scans/*.pcd` |
 | **C. Bản đồ thực** | bản đồ chuẩn của dataset | `groundtruth_map.ply` |
+| **D. Bản đồ ghép bằng A** | các scan đặt đúng chỗ theo đường thực; là **trần** tốt nhất đạt được | tự ghép từ `.pcd` + A |
+| **E. Bản đồ ghép bằng B** | các scan đặt theo đường KISS-ICP đoán; là thứ sản phẩm thực sự dựng ra | tự ghép từ `.pcd` + B |
 
-Hai nhóm phép đo:
+### 1.2 Bảng cái gì so với cái gì
 
-1. **Quỹ đạo (B so với A):** căn rigid *chỉ ở pose đầu* (không fit tỉ lệ, không căn cả đường) nên trôi vẫn lộ ra. ATE = lệch vị trí; RPE = sai lệch giữa các bước liền kề.
-2. **Bản đồ:** ghép scan thành bản đồ bằng quỹ đạo A (**trần**) và bằng quỹ đạo B, rồi đo khoảng cách từng điểm tới C. Chỉ xét điểm trong 8 m quanh đường đi; lấy 1/5 scan, voxel 10 cm, cắt tầm 40 m.
+| # | So sánh | Câu hỏi nó trả lời | Chỉ số | Bảng kết quả |
+|---|---|---|---|---|
+| 1 | **B so với A** | KISS-ICP đoán đường đi có đúng không? | ATE (lệch vị trí), trôi %, RPE (sai mỗi bước) | 2.1 |
+| 2 | **D so với C** | Mức tốt nhất có thể đạt được khi đường đi đúng tuyệt đối là bao nhiêu? | khoảng cách điểm → bề mặt chuẩn | 2.2 (cột "trần") |
+| 3 | **E so với C** | Bản đồ mà KISS-ICP dựng ra đúng đến đâu? | như trên | 2.2 (cột "KISS-ICP") |
+| 4 | **E so với D** | Phần lỗi *do KISS-ICP gây thêm* là bao nhiêu? | hiệu hai cột trên | 2.2 (cột "gây thêm") |
+
+Phép so 1 chỉ dùng A và B, **không đụng `.ply`**. `.ply` chỉ xuất hiện ở các phép so 2 và 3.
+
+### 1.3 Sơ đồ luồng
+
+```
+scan .pcd ──► KISS-ICP ──► B (quỹ đạo đoán) ──┐
+                                              ├─► ghép scan thành bản đồ ──► E ──┐
+scan .pcd ──► A (quỹ đạo thực) ───────────────┤                                 ├─► so với C (.ply)
+                                              └─► ghép scan thành bản đồ ──► D ──┘
+                                  A ◄── so sánh với B ──► ATE, trôi, RPE
+```
+
+### 1.4 Phương pháp thực nghiệm (từng bước)
+
+1. **Chuẩn bị scan.** Đọc từng `.pcd`, bỏ điểm không hợp lệ và điểm sát tâm cảm biến (< 0,5 m). Lấy tối đa 600 scan đầu, tự giảm khi tổng điểm vượt 90% giới hạn sản phẩm (100 triệu).
+2. **Chạy KISS-ICP** trong interpreter cô lập (`kiss-icp 1.3.0`, hồ sơ mặc định, CPU) → được B.
+3. **Đo quỹ đạo (1).** Căn B vào A bằng một phép xoay + tịnh tiến **chỉ ở pose đầu tiên**; không fit tỉ lệ, không căn cả đường, để sai số cộng dồn vẫn lộ ra. Tính ATE, trôi (% quãng đường) và RPE trên 1 và 10 bước.
+4. **Dựng hai bản đồ.** Đặt từng scan (lấy 1/5, cắt tầm 40 m, giảm mẫu voxel 10 cm) theo A để có D và theo B để có E.
+5. **Đo bản đồ (2, 3).** Chỉ xét điểm trong 8 m quanh đường đi. Với mỗi điểm, đo khoảng cách tới điểm gần nhất của C; báo trung bình, trung vị, phân vị 95 và % điểm trong 10/20 cm.
+6. **Lặp lại trên 5 chuỗi** với cùng tham số (không chỉnh gì), để xem kết quả có ổn định giữa kho/hành lang, thuận/ngược chiều, hai ngày quay.
+
+**Vì sao thiết kế như vậy:**
+- Cột D (trần) cần thiết vì bản đồ chuẩn C không hoàn hảo; nếu không có D thì không biết phần lệch là do KISS-ICP hay do chính phép so.
+- Căn chỉ ở pose đầu để đánh giá trung thực: căn cả đường sẽ "giấu" sai số trôi.
+- Không chỉnh tham số, vì chỉnh trên chính tập đo sẽ cho con số đẹp giả.
 
 ## 2. Kết quả
 
