@@ -34,6 +34,7 @@ from src.models.contracts.input_assembly import (
     verify_input_assembly_checksum,
     verify_runtime_registry_checksum,
 )
+from src.services.reconstruction.inputs.inference import timestamp_files_by_role
 from src.services.reconstruction.inputs.input_probe import InputProbe
 
 _RESOLVER_VERSION = "assembly-input-resolver-v3"
@@ -228,6 +229,15 @@ def resolve_input_assembly(
     )
     frame_time_ids = explicit.get(InputRole.RGB_FRAME_TIMES) or by_format.get(InputAssetFormat.RGB_FRAME_TIMES, [])
     lidar_scan_time_ids = explicit.get(InputRole.LIDAR_SCAN_TIMES) or []
+    # File timestamp chưa bind: gán vai trò theo số dòng khớp số pose/scan khi chỉ có đúng một đáp án.
+    inferred_roles = timestamp_files_by_role(assembly.files, probe_map, assembly.bindings)
+    inferred_ids: list[str] = []
+    if not frame_time_ids and InputRole.RGB_FRAME_TIMES in inferred_roles:
+        frame_time_ids = [inferred_roles[InputRole.RGB_FRAME_TIMES]]
+        inferred_ids.append(frame_time_ids[0])
+    if not lidar_scan_time_ids and InputRole.LIDAR_SCAN_TIMES in inferred_roles:
+        lidar_scan_time_ids = [inferred_roles[InputRole.LIDAR_SCAN_TIMES]]
+        inferred_ids.append(lidar_scan_time_ids[0])
     timestamp_row_ids = by_format.get(InputAssetFormat.TIMESTAMP_ROWS, [])
     camera_trajectory_ids = explicit.get(InputRole.CAMERA_TRAJECTORY) or []
     trajectory_ids = explicit.get(InputRole.SENSOR_TRAJECTORY) or sorted(
@@ -239,6 +249,15 @@ def resolve_input_assembly(
     facts: list[MissingInputFact] = []
     diagnostics: list[ResolutionDiagnostic] = []
     drafts: list[_CandidateDraft] = []
+    if inferred_ids:
+        diagnostics.append(
+            _diagnostic(
+                "TIMESTAMP_ROLE_INFERRED",
+                "info",
+                "Vai trò file timestamp được suy theo số dòng khớp số pose/scan vì chỉ có một file phù hợp.",
+                inferred_ids,
+            )
+        )
 
     both_workflows = bool(videos and gaussian_ids) and assembly.requested_intent is None
     if assembly.requested_intent != "gaussian_view_import":

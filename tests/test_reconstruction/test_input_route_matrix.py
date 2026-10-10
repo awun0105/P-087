@@ -221,6 +221,57 @@ def test_a_wired_unqualified_better_route_is_reported_when_a_lower_route_runs() 
 
 
 # ---------------------------------------------------------------------------
+# Suy vai trò file timestamp theo số dòng
+# ---------------------------------------------------------------------------
+
+
+def test_unbound_scan_times_file_is_assigned_by_matching_the_scan_count() -> None:
+    explicit = outcome(Capture(clouds=2, cloud_state="raw_scan_sequence", lidar_times=True))
+    inferred = outcome(Capture(clouds=2, cloud_state="raw_scan_sequence", lidar_times=True, bind_times=False))
+    # Không bind vai trò mà vẫn không đòi file thời điểm scan: chỉ còn việc xác nhận thứ tự scan.
+    assert inferred.facts("R5") == {"SCAN_SEQUENCE_ORDER_REQUIRED"}
+    assert inferred == explicit
+
+
+def test_unbound_frame_times_file_is_assigned_by_matching_the_pose_count() -> None:
+    result = outcome(
+        Capture(
+            clouds=2,
+            cloud_state="raw_scan_sequence",
+            trajectory=True,
+            calibration=True,
+            rgb_times=True,
+            bind_times=False,
+        )
+    )
+    assert "RGB_FRAME_TIMES_REQUIRED" not in result.facts("R4")
+    assert result.facts("R4") == {"SCAN_SEQUENCE_ORDER_REQUIRED"}
+
+
+def test_a_timestamp_file_with_the_wrong_row_count_is_not_assigned_a_role() -> None:
+    result = outcome(
+        Capture(
+            clouds=2,
+            cloud_state="raw_scan_sequence",
+            trajectory=True,
+            calibration=True,
+            rgb_times=True,
+            frame_time_rows=30,
+            bind_times=False,
+        )
+    )
+    assert "RGB_FRAME_TIMES_REQUIRED" in result.facts("R4")
+
+
+def test_inference_is_reported_as_a_diagnostic_not_applied_silently() -> None:
+    report = resolve(Capture(clouds=2, cloud_state="raw_scan_sequence", lidar_times=True, bind_times=False))
+    codes = {item.code for item in report.diagnostics}
+    assert "TIMESTAMP_ROLE_INFERRED" in codes
+    explicit = resolve(Capture(clouds=2, cloud_state="raw_scan_sequence", lidar_times=True))
+    assert "TIMESTAMP_ROLE_INFERRED" not in {item.code for item in explicit.diagnostics}
+
+
+# ---------------------------------------------------------------------------
 # File rời cho luồng quỹ đạo có sẵn (R4): không cần đóng ZIP
 # ---------------------------------------------------------------------------
 

@@ -24,6 +24,7 @@ from src.models.contracts.input_assembly import (
 from src.services.orchestration.artifacts import ArtifactResolver
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.uploads.assembly_models import StagedInputUploadRecord
+from src.services.reconstruction.inputs.inference import enrich_timestamp_units
 from src.services.reconstruction.inputs.input_probe import InputProbe
 from src.services.reconstruction.inputs.input_resolver import resolve_input_assembly
 
@@ -56,6 +57,15 @@ class InputResolutionRecord(BaseModel):
 
     report: InputResolutionReport
     runtime_registry: RuntimeQualificationRegistry
+
+
+def _video_duration_seconds(video_preparation: object | None) -> float | None:
+    """Độ dài video đã được máy chủ xác minh (giây); None khi video chưa qua bước chuẩn bị."""
+    observed = getattr(video_preparation, "observed_video", None)
+    if observed is None:
+        return None
+    base = observed.time_base
+    return float(observed.duration_ticks) * base.numerator / base.denominator
 
 
 class InputAssemblyService:
@@ -215,6 +225,13 @@ class InputAssemblyService:
         )
         probes = tuple(sorted((item for upload in uploads for item in upload.probes), key=lambda item: item.file_id))
         video_preparation = self._video_preparation_for(uploads)
+        declarations = enrich_timestamp_units(
+            declarations,
+            staged_files,
+            {item.file_id: item for item in probes},
+            bindings,
+            video_duration_seconds=_video_duration_seconds(video_preparation),
+        )
         now = datetime.now(UTC)
         snapshot = seal_input_assembly(
             {

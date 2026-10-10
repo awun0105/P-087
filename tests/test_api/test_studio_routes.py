@@ -1205,6 +1205,70 @@ async def test_r4_kalibr_file_is_recognized_but_never_used_as_a_camera_lidar_cal
     assert any(item["code"] == "kalibr_camera_imu_only" for item in report["diagnostics"]), report["diagnostics"]
 
 
+async def _scan_times_assembly(
+    client: AsyncClient, studio: SimpleNamespace, declarations: dict, times_payload: bytes
+) -> dict:
+    """Tạo assembly với 2 scan rời + một file thời điểm không bind vai trò; trả snapshot assembly."""
+    studio.settings.product_upload_max_bytes = 16 * 1024 * 1024
+    from tests.test_reconstruction.test_lidar_package import _pcd, _scan
+
+    video = await _r4_upload(client, "walk.mp4", b"\x00\x00\x00\x14ftypqt  fake-mp4")
+    scans = [await _r4_upload(client, f"scan_{index}.pcd", _pcd(_scan())) for index in range(2)]
+    times = await _r4_upload(client, "scan_times.txt", times_payload)
+    created = await client.post(
+        "/api/v1/input-assemblies",
+        json={
+            "upload_ids": [video["upload_id"], *[item["upload_id"] for item in scans], times["upload_id"]],
+            "requested_intent": "video_reconstruction",
+            "declarations": declarations,
+            "bindings": [],
+        },
+    )
+    assert created.status_code == 201, created.text
+    return created.json()
+
+
+@pytest.mark.asyncio
+async def test_assembly_estimates_a_missing_scan_time_unit_from_the_sampling_rate(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    snapshot = await _scan_times_assembly(
+        client, studio, {"cloud_state": _R4_DECLARATIONS["cloud_state"]}, b"0.0\n0.1\n"
+    )
+
+    unit = snapshot["declarations"]["lidar_timestamp_unit"]
+    assert unit["value"] == "seconds"
+    assert unit["provenance"] == "estimated"
+    assert unit["method"] == "timestamp_rate_window_v1"
+    # Không có file thời điểm frame RGB nên không có gì để suy ở phía RGB.
+    assert snapshot["declarations"].get("rgb_timestamp_unit") is None
+
+
+@pytest.mark.asyncio
+async def test_assembly_does_not_override_a_unit_the_user_declared(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    declarations = {
+        "cloud_state": _R4_DECLARATIONS["cloud_state"],
+        "lidar_timestamp_unit": {"value": "milliseconds", "provenance": "declared"},
+    }
+    snapshot = await _scan_times_assembly(client, studio, declarations, b"0.0\n0.1\n")
+
+    unit = snapshot["declarations"]["lidar_timestamp_unit"]
+    assert unit["value"] == "milliseconds" and unit["provenance"] == "declared"
+
+
+@pytest.mark.asyncio
+async def test_assembly_leaves_an_unguessable_unit_empty_for_the_user_to_declare(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    # 300 Hz theo giây và 300 kHz theo mili giây: ngoài dải ở mọi đơn vị, nên không được đoán.
+    payload = "".join(f"{index / 300}\n" for index in range(301)).encode()
+    snapshot = await _scan_times_assembly(client, studio, {"cloud_state": _R4_DECLARATIONS["cloud_state"]}, payload)
+
+    assert snapshot["declarations"].get("lidar_timestamp_unit") is None
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("layout", ["zip", "loose"])
 @pytest.mark.parametrize("recipe_group", ["R5", "R6"])

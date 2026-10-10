@@ -61,6 +61,9 @@ class Capture:
     #: Số dòng file thời điểm frame; None = khớp số pose (hoặc 30 khi không có quỹ đạo).
     frame_time_rows: int | None = None
     scan_format: str = "pcd"  # pcd | ply
+    #: False = để file thời điểm scan/frame không bind vai trò, nhờ resolver suy theo số dòng.
+    bind_times: bool = True
+    declare_lidar_unit: bool = True
 
 
 @dataclass(frozen=True)
@@ -133,11 +136,11 @@ def resolve(capture: Capture) -> InputResolutionReport:
             declarations["cloud_state"] = _declared(capture.cloud_state)
 
         bindings: list[InputBinding] = []
-        if capture.rgb_times:
+        if capture.rgb_times and capture.bind_times:
             bindings.append(
                 InputBinding(binding_id="b-rgb-times", role=InputRole.RGB_FRAME_TIMES, file_ids=["rgb-times"])
             )
-        if capture.lidar_times:
+        if capture.lidar_times and capture.bind_times:
             bindings.append(
                 InputBinding(binding_id="b-lidar-times", role=InputRole.LIDAR_SCAN_TIMES, file_ids=["lidar-times"])
             )
