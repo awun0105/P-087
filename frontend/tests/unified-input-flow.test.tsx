@@ -293,6 +293,47 @@ describe("unified input flow", () => {
     expect(screen.getByText(/không nhận ra vai trò nào trong file này/)).toBeInTheDocument();
   });
 
+  it("does not call a Kalibr camera-IMU file verified, because no route can use it", async () => {
+    mocks.stage.mockImplementation(async (uploadId: string) => {
+      const result = staged(uploadId, "camchain.yaml");
+      return {
+        ...result,
+        staged_files: result.staged_files.map((item) => ({ ...item, observed_format: "calibration_kalibr_camchain" as const })),
+      };
+    });
+    const { container } = render(<UnifiedInputFlow />);
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(fileInput!, { target: { files: [new File(["x"], "video-a.mp4", { type: "video/mp4" })] } });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
+    expect(await screen.findByText("Không dùng được")).toBeInTheDocument();
+    expect(screen.queryByText("Đã xác minh")).toBeNull();
+  });
+
+  it("shows report-level diagnostics (e.g. a broken calibration) with the file they refer to", async () => {
+    window.sessionStorage.setItem("r2s:input-assembly:v1:user-1", JSON.stringify({
+      schema_version: 1, account_id: "user-1",
+      uploads: [{ upload_id: "upload-1", original_name: "warehouse.mp4", included: true, preset: "720p" }],
+      scan_order: [], intent: "video_reconstruction", cloud_state: "", same_scene: "", coordinate_unit: "",
+      lidar_frame_id: "", trajectory_convention: "", clock_relation: "", clock_offset: "",
+      scene_name: "", data_origin: "", data_owner: "", data_purpose: "",
+    }));
+    mocks.getStaged.mockImplementation(async (uploadId: string) => staged(uploadId, "warehouse.mp4"));
+    mocks.create.mockResolvedValue(snapshot(1));
+    const invalid = report("invalid", [], null);
+    invalid.diagnostics = [
+      { code: "invalid_calibration_yaml", severity: "error", description: "Invalid calibration YAML.", related_file_ids: ["file-upload-1"] },
+    ];
+    mocks.resolve.mockReset().mockResolvedValue({ report: invalid });
+
+    render(<UnifiedInputFlow />);
+    fireEvent.click(await screen.findByRole("button", { name: "Phân tích lại" }));
+
+    expect(await screen.findByText("Ghi chú về file")).toBeInTheDocument();
+    expect(screen.getByText(/File calibration YAML có cấu trúc hoặc số liệu không hợp lệ\./)).toBeInTheDocument();
+    expect(screen.getByText(/\(warehouse\.mp4\)/)).toBeInTheDocument();
+  });
+
   it("analyzes by itself once every file is verified, without pressing Analyze", async () => {
     const { container } = render(<UnifiedInputFlow />);
     const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');

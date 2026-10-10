@@ -224,7 +224,7 @@ function candidateStateLabel(state: CandidateState): string {
 }
 
 /** Máy chủ không nhận ra vai trò nào trong file: mọi cách xử lý sẽ loại nó, nên đừng báo "đã xác minh". */
-const UNUSABLE_FORMATS = new Set(["unknown"]);
+const UNUSABLE_FORMATS = new Set(["unknown", "calibration_kalibr_camchain"]);
 
 /** ZIP được stage theo từng thành viên, nên một upload có thể vừa có phần dùng được vừa không. */
 function unusableStaged(staged: AssemblyUploadResponse | null): { unusable: number; total: number } {
@@ -1279,6 +1279,22 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
               <h3 className="text-sm font-semibold">Thông tin còn thiếu</h3>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink-muted">
                 {report.missing_facts.map((fact) => <li key={`${fact.code}:${fact.related_file_ids.join(",")}`}>{describeFact(fact)}</li>)}
+              </ul>
+            </Card>
+          )}
+          {report.diagnostics.length > 0 && (
+            <Card className="p-5">
+              <h3 className="text-sm font-semibold">Ghi chú về file</h3>
+              <ul className="mt-2 space-y-1 text-sm">
+                {report.diagnostics.map((item) => {
+                  const names = item.related_file_ids.map((id) => fileNamesById.get(id)).filter((name): name is string => Boolean(name));
+                  return (
+                    <li key={`${item.code}:${item.related_file_ids.join(",")}`} className={item.severity === "error" ? "text-rust" : "text-ink-muted"}>
+                      {describeDiagnostic(item)}
+                      {names.length > 0 && <span className="break-all"> ({names.join(", ")})</span>}
+                    </li>
+                  );
+                })}
               </ul>
             </Card>
           )}
