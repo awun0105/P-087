@@ -264,7 +264,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
     enabled: sceneReady,
     onRevision: (revision) => { setSave({ status: "saved", revision }); setPollingKey((k) => k + 1); },
   });
-  const status = progress ? progressSceneStatus(progress, objectify.state?.awaiting_choice === true) : null;
+  const status = progress ? progressSceneStatus(progress, objectify.state?.awaiting_choice === true && !objectify.pending) : null;
   const studioMode: StudioMode = mode === "metric" && !waitingMetric ? "scene" : mode;
 
   const tabs: SceneTabItem[] = [

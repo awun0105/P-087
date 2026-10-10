@@ -45,6 +45,7 @@ from src.services.orchestration.projects import (
 )
 from src.services.orchestration.projects.models import UploadProjectInput
 from src.services.orchestration.projects.registry import ProjectRegistry
+from src.services.orchestration.scene import objectify_queue
 from src.services.orchestration.scene.errors import SceneError
 from src.services.orchestration.scene.objectify import AWAITING_CHOICE
 from src.services.orchestration.uploads import UploadNotFoundError
@@ -277,15 +278,22 @@ def _awaiting_object_choice(registry: ProjectRegistry, job: JobManifest) -> bool
         head = registry.scene.head_repository.get(job.job_id) if registry.scene.head_repository is not None else None
         key = (job.job_id, head.scene_revision) if head is not None else None
         if key is not None and key in _OBJECT_CHOICE_CACHE:
-            return _OBJECT_CHOICE_CACHE[key]
-        waiting = registry.scene.current(job.job_id).scene.provenance.get("object_extraction") == AWAITING_CHOICE
-    except (SceneError, ArtifactStoreError, ValueError):
+            waiting = _OBJECT_CHOICE_CACHE[key]
+        else:
+            waiting = registry.scene.current(job.job_id).scene.provenance.get("object_extraction") == AWAITING_CHOICE
+            if key is not None:
+                if len(_OBJECT_CHOICE_CACHE) >= _OBJECT_CHOICE_CACHE_MAX:
+                    _OBJECT_CHOICE_CACHE.clear()
+                _OBJECT_CHOICE_CACHE[key] = waiting
+        # Đang chạy lại thì người dùng đã chọn rồi: không báo "chờ chọn" cho tới khi yêu cầu xong (kết quả không cache vì đổi nhanh).
+        return waiting and not _objectify_request_pending(registry, job.job_id)
+    except (SceneError, ArtifactStoreError, ValueError, OSError):
         return False  # scene chưa đọc được: danh sách không đoán, màn scene sẽ nói rõ
-    if key is not None:
-        if len(_OBJECT_CHOICE_CACHE) >= _OBJECT_CHOICE_CACHE_MAX:
-            _OBJECT_CHOICE_CACHE.clear()
-        _OBJECT_CHOICE_CACHE[key] = waiting
-    return waiting
+
+
+def _objectify_request_pending(registry: ProjectRegistry, job_id: str) -> bool:
+    """Có yêu cầu dựng lại tập vật đang xếp hàng hoặc chạy của job không (chỉ gọi cho scene đang chờ chọn)."""
+    return objectify_queue.state(registry, deps.settings(), job_id).status in {"queued", "running"}
 
 
 @router.get("/scenes", response_model=SceneListResponse)

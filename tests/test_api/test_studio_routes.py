@@ -1078,9 +1078,13 @@ def _registry_with_scene(provenance: dict, revision: str = "rev-001", *, error: 
     return SimpleNamespace(scene=scene), reads, holder
 
 
-def test_scene_list_flags_a_finished_job_whose_object_extraction_awaits_the_user(studio: SimpleNamespace) -> None:
+def test_scene_list_flags_a_finished_job_whose_object_extraction_awaits_the_user(
+    studio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Job xong nhưng tách theo vật lỗi hết số lần thử: danh sách không được ghi 'Đã dựng scene' như thể xong hẳn."""
     from src.api.studio import scenes
+
+    monkeypatch.setattr(scenes, "_objectify_request_pending", lambda *_: False)
 
     scenes._OBJECT_CHOICE_CACHE.clear()
     studio.registry.seed_from_fixtures()
@@ -1102,8 +1106,53 @@ def test_scene_list_flags_a_finished_job_whose_object_extraction_awaits_the_user
     assert reads == []
 
 
-def test_object_choice_is_cached_per_scene_revision_and_never_guessed(studio: SimpleNamespace) -> None:
+def test_object_choice_is_not_reported_while_a_rerun_is_pending(
+    studio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from src.api.studio import scenes
+
+    scenes._OBJECT_CHOICE_CACHE.clear()
+    studio.registry.seed_from_fixtures()
+    registry, _, _ = _registry_with_scene({"object_extraction": "objectify_failed_awaiting_choice"})
+    job = _finished_job(studio)
+    monkeypatch.setattr(scenes, "_objectify_request_pending", lambda *_: True)
+    assert scenes._awaiting_object_choice(registry, job) is False
+    monkeypatch.setattr(scenes, "_objectify_request_pending", lambda *_: False)
+    assert scenes._awaiting_object_choice(registry, job) is True
+
+
+def test_a_vanished_scene_file_never_breaks_the_list(studio: SimpleNamespace) -> None:
+    from src.api.studio import scenes
+
+    scenes._OBJECT_CHOICE_CACHE.clear()
+    studio.registry.seed_from_fixtures()
+    broken, _, _ = _registry_with_scene({}, error=FileNotFoundError("scene.json"))
+    assert scenes._awaiting_object_choice(broken, _finished_job(studio)) is False
+
+
+@pytest.mark.asyncio
+async def test_scene_list_response_carries_the_object_choice_flag(
+    client: AsyncClient, studio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.api.studio import scenes
+
+    studio.registry.seed_from_fixtures()
+    upload = await _upload(client)
+    await client.post(
+        "/api/v1/scenes/from-upload",
+        json={"upload_id": upload["upload_id"], "name": "Kho A", "attestation": _ATTESTATION},
+    )
+    assert (await client.get("/api/v1/scenes")).json()["scenes"][0]["awaiting_object_choice"] is False
+    monkeypatch.setattr(scenes, "_awaiting_object_choice", lambda registry, job: True)
+    assert (await client.get("/api/v1/scenes")).json()["scenes"][0]["awaiting_object_choice"] is True
+
+
+def test_object_choice_is_cached_per_scene_revision_and_never_guessed(
+    studio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.api.studio import scenes
+
+    monkeypatch.setattr(scenes, "_objectify_request_pending", lambda *_: False)
     from src.services.orchestration.scene.errors import SceneNotAvailableError
 
     scenes._OBJECT_CHOICE_CACHE.clear()

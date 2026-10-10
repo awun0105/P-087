@@ -179,3 +179,13 @@ describe("một trạng thái dùng chung trong trang scene", () => {
     expect(getObjectifyState).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("nhãn đầu trang scene khi đang chạy lại", () => {
+  it("hiện 'Cần chọn cách tách vật thể' khi chờ chọn, và quay về trạng thái job khi đã gửi yêu cầu chạy lại", async () => {
+    const { progressSceneStatus } = await import("@/features/studio/sceneStatus");
+    expect(progressSceneStatus(done, true)).toMatchObject({ label: "Cần chọn cách tách vật thể", group: "action" });
+    expect(progressSceneStatus(done, false)).toMatchObject({ label: "Đã dựng scene", group: "done" });
+    // Job chưa xong thì giữ nhãn pipeline dù scene đang chờ chọn.
+    expect(progressSceneStatus({ ...done, status: "RUNNING" }, true).group).toBe("running");
+  });
+});
