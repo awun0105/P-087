@@ -1147,6 +1147,19 @@ def _add_supplied_scan_candidate(
                 scan_ids,
             )
         )
+    if (
+        calibration_id is not None
+        and by_id[calibration_id].observed_format == InputAssetFormat.CALIBRATION_ROS_YAML
+        and assembly.declarations.camera_frame_id is None
+    ):
+        # File ROS tf nối hai frame: cần biết tên frame camera để chắc đầu còn lại không phải IMU hay base_link.
+        required.append(
+            _fact(
+                "CAMERA_FRAME_REQUIRED",
+                "Declare the camera frame name used in the ROS transform file.",
+                [calibration_id],
+            )
+        )
     if frame_time_id is not None and probes[frame_time_id].record_count != trajectory_probe.record_count:
         required.append(
             _fact(

@@ -464,6 +464,10 @@ def _probe_text(data: bytes) -> _ContentResult:
             )
         for key in ("lidar_from_camera", "camera_from_lidar"):
             if key in value:
+                try:
+                    calibration_formats.validate_calibration_structure(text)
+                except calibration_formats.CalibrationParseError as error:
+                    return _invalid_content(InputAssetFormat.UNKNOWN, "invalid_calibration_json", str(error))
                 role = InputRole.CAMERA_LIDAR_CALIBRATION
                 return _ContentResult(
                     InputAssetFormat.CALIBRATION_JSON,
@@ -493,6 +497,10 @@ def _probe_text(data: bytes) -> _ContentResult:
 
     yaml_format = calibration_formats.detect_format(text)
     if yaml_format == "ros_transform_yaml":
+        try:
+            calibration_formats.validate_calibration_structure(text)
+        except calibration_formats.CalibrationParseError as error:
+            return _invalid_content(InputAssetFormat.UNKNOWN, "invalid_calibration_yaml", str(error))
         role = InputRole.CAMERA_LIDAR_CALIBRATION
         return _ContentResult(
             InputAssetFormat.CALIBRATION_ROS_YAML,

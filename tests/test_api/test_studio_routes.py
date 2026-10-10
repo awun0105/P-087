@@ -882,6 +882,12 @@ _R4_DECLARATIONS = {
 }
 
 
+_R4_WITH_CAMERA_FRAME = {
+    **_R4_DECLARATIONS,
+    "camera_frame_id": {"value": "camera_left", "provenance": "declared"},
+}
+
+
 async def _r4_upload(client: AsyncClient, name: str, payload: bytes) -> dict:
     response = await client.post("/api/v1/input-assemblies/uploads", params={"filename": name}, content=payload)
     assert response.status_code == 201, (name, response.text)
@@ -1150,7 +1156,7 @@ async def test_r4_loose_files_accept_other_calibration_formats_and_normalize_the
 
     await _r4_registry(studio, f"input-runtime-r4-{file_name}.json")
     upload_ids, bindings = await _r4_inputs(client, calibration_file=(file_name, payload.encode()))
-    assembly, report, candidate = await _r4_resolve(client, upload_ids, bindings, _R4_DECLARATIONS)
+    assembly, report, candidate = await _r4_resolve(client, upload_ids, bindings, _R4_WITH_CAMERA_FRAME)
     assert candidate["state"] == "ready", [fact["code"] for fact in candidate["required_facts"]]
 
     response = await _r4_run(client, assembly, report, candidate, f"calibration-{file_name}")
@@ -1174,7 +1180,7 @@ async def test_r4_ros_calibration_naming_a_different_lidar_frame_is_refused_with
 ) -> None:
     await _r4_registry(studio, "input-runtime-r4-ros-frame.json")
     upload_ids, bindings = await _r4_inputs(client, calibration_file=("tf.yaml", _ROS_CALIBRATION.encode()))
-    declarations = {**_R4_DECLARATIONS, "lidar_frame_id": {"value": "velodyne", "provenance": "declared"}}
+    declarations = {**_R4_WITH_CAMERA_FRAME, "lidar_frame_id": {"value": "velodyne", "provenance": "declared"}}
     assembly, report, candidate = await _r4_resolve(client, upload_ids, bindings, declarations)
     assert candidate["state"] == "ready"  # resolver chưa đọc nội dung YAML; kiểm tên frame xảy ra lúc đóng gói
 
@@ -1183,6 +1189,139 @@ async def test_r4_ros_calibration_naming_a_different_lidar_frame_is_refused_with
     assert response.status_code == 409, response.text
     assert "không khớp" in response.text
     assert _r4_packages() == []
+
+
+@pytest.mark.asyncio
+async def test_r4_ros_calibration_needs_the_camera_frame_and_checks_both_ends_of_the_file(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    await _r4_registry(studio, "input-runtime-r4-ros-camera.json")
+    upload_ids, bindings = await _r4_inputs(client, calibration_file=("tf.yaml", _ROS_CALIBRATION.encode()))
+
+    # Chưa khai frame camera: hỏi, không đoán đầu còn lại của file là camera.
+    assembly, report, candidate = await _r4_resolve(client, upload_ids, bindings, _R4_DECLARATIONS)
+    assert candidate["state"] == "needs_input"
+    assert "CAMERA_FRAME_REQUIRED" in {fact["code"] for fact in candidate["required_facts"]}
+
+    # Khai sai tên camera (đầu kia của file là LiDAR ↔ base_link chẳng hạn): từ chối lúc đóng gói, không để lại gói.
+    wrong = {**_R4_DECLARATIONS, "camera_frame_id": {"value": "base_link", "provenance": "declared"}}
+    assembly, report, candidate = await _r4_resolve(client, upload_ids, bindings, wrong)
+    assert candidate["state"] == "ready"
+    response = await _r4_run(client, assembly, report, candidate, "ros-wrong-camera")
+    assert response.status_code == 409, response.text
+    assert "không phải camera đã khai" in response.text
+    assert _r4_packages() == []
+
+
+@pytest.mark.asyncio
+async def test_r4_user_zip_with_a_matrix_calibration_is_repackaged_not_left_to_fail_in_the_worker(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    """Bộ nhận diện gói cũ khớp chuỗi `lidar_from_camera` rồi bộ đọc mới đòi translation+quaternion → hỏng muộn."""
+    import tempfile
+    from pathlib import Path
+
+    from src.services.reconstruction.lidar.package import parse_calibration
+    from tests.test_reconstruction.test_lidar_package import CALIBRATION, POSES, _companions, _pcd, _scan, _zip
+
+    await _r4_registry(studio, "input-runtime-r4-matrix-zip.json")
+    video = await _r4_upload(client, "walk.mp4", b"\x00\x00\x00\x14ftypqt  fake-mp4")
+    companions = _companions()
+    matrix = '{"lidar_from_camera": {"matrix": [[1,0,0,0.1],[0,1,0,0.0],[0,0,1,-0.1],[0,0,0,1]]}}'
+    members = {
+        "traj.txt": companions["traj.txt"],
+        "frame_times.txt": companions["frame_times.txt"],
+        "calibration.json": matrix.encode(),
+        **{f"{i:06d}.pcd": _pcd(_scan()) for i in range(POSES)},
+    }
+    with tempfile.TemporaryDirectory() as raw:
+        bundle = await _r4_upload(client, "package.zip", _zip(Path(raw) / "p.zip", members).read_bytes())
+    ids = {item["archive_member"]["member_path"]: item["file_id"] for item in bundle["staged_files"]}
+    bindings = [
+        {"binding_id": "rgb", "role": "rgb_video", "file_ids": [video["staged_files"][0]["file_id"]]},
+        {"binding_id": "scans", "role": "lidar_scan", "file_ids": [ids[f"{i:06d}.pcd"] for i in range(POSES)]},
+        {"binding_id": "trajectory", "role": "sensor_trajectory", "file_ids": [ids["traj.txt"]]},
+        {"binding_id": "calibration", "role": "camera_lidar_calibration", "file_ids": [ids["calibration.json"]]},
+        {"binding_id": "frame-times", "role": "rgb_frame_times", "file_ids": [ids["frame_times.txt"]]},
+    ]
+    assembly, report, candidate = await _r4_resolve(
+        client, [video["upload_id"], bundle["upload_id"]], bindings, _R4_DECLARATIONS
+    )
+    assert candidate is not None and candidate["state"] == "ready"
+
+    response = await _r4_run(client, assembly, report, candidate, "matrix-zip-1")
+
+    assert response.status_code == 201, response.text
+    text, provenance = await _r4_package_calibration(studio, response.json()["job"]["job_id"])
+    assert any(item["normalized"] for item in provenance["package_members"])
+    expected = parse_calibration(CALIBRATION, "torwic_txt")
+    assert parse_calibration(text, "json").translation_xyz == pytest.approx(expected.translation_xyz, abs=1e-9)
+
+
+@pytest.mark.asyncio
+async def test_r4_calibration_json_with_a_utf8_bom_is_packaged(client: AsyncClient, studio: SimpleNamespace) -> None:
+    """Trình soạn thảo trên Windows hay thêm BOM: probe nhận file rồi thì đóng gói cũng phải đọc được."""
+    from src.services.reconstruction.lidar.package import parse_calibration
+    from tests.test_reconstruction.test_lidar_package import CALIBRATION
+
+    await _r4_registry(studio, "input-runtime-r4-bom.json")
+    payload = ("\ufeff" + _INVERSE_JSON_CALIBRATION).encode("utf-8")
+    upload_ids, bindings = await _r4_inputs(client, calibration_file=("inverse.json", payload))
+    assembly, report, candidate = await _r4_resolve(client, upload_ids, bindings, _R4_WITH_CAMERA_FRAME)
+    assert candidate["state"] == "ready", [fact["code"] for fact in candidate["required_facts"]]
+
+    response = await _r4_run(client, assembly, report, candidate, "bom-1")
+
+    assert response.status_code == 201, response.text
+    text, _ = await _r4_package_calibration(studio, response.json()["job"]["job_id"])
+    expected = parse_calibration(CALIBRATION, "torwic_txt")
+    assert parse_calibration(text, "json").translation_xyz == pytest.approx(expected.translation_xyz, abs=1e-9)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("file_name", "payload"),
+    [
+        (
+            "bad_quaternion.yaml",
+            "header:\n  frame_id: lidar_sensor\nchild_frame_id: camera_left\n"
+            "transform:\n  translation: {x: 0, y: 0, z: 0}\n  rotation: {x: 0, y: 0, z: 0, w: 3}\n",
+        ),
+        (
+            "two_transforms.yaml",
+            "transforms:\n"
+            "  - {header: {frame_id: a}, child_frame_id: b, transform: {translation: {x: 0, y: 0, z: 0},"
+            " rotation: {x: 0, y: 0, z: 0, w: 1}}}\n"
+            "  - {header: {frame_id: a}, child_frame_id: c, transform: {translation: {x: 0, y: 0, z: 0},"
+            " rotation: {x: 0, y: 0, z: 0, w: 1}}}\n",
+        ),
+        ("not_a_rotation.json", '{"camera_from_lidar": {"matrix": [[2,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}}'),
+    ],
+)
+async def test_r4_broken_calibration_is_reported_when_analysing_not_when_packaging(
+    file_name: str, payload: str, client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    await _r4_registry(studio, f"input-runtime-r4-bad-{file_name}.json")
+    upload_ids, bindings = await _r4_inputs(client, calibration_file=(file_name, payload.encode()))
+    created = await client.post(
+        "/api/v1/input-assemblies",
+        json={
+            "upload_ids": upload_ids,
+            "requested_intent": "video_reconstruction",
+            "declarations": _R4_WITH_CAMERA_FRAME,
+            "bindings": [],
+        },
+    )
+    assert created.status_code == 201, created.text
+    resolved = await client.post(
+        f"/api/v1/input-assemblies/{created.json()['assembly_id']}/resolve",
+        json={"revision": created.json()["revision"]},
+    )
+    report = resolved.json()["report"]
+
+    # File hỏng làm cả bộ file không hợp lệ ngay lúc phân tích, kèm mã chẩn đoán người dùng đọc được.
+    assert report["state"] == "invalid"
+    assert {item["code"] for item in report["diagnostics"]} & {"invalid_calibration_yaml", "invalid_calibration_json"}
 
 
 @pytest.mark.asyncio
@@ -1208,12 +1347,12 @@ async def test_r4_kalibr_file_is_recognized_but_never_used_as_a_camera_lidar_cal
 async def _scan_times_assembly(
     client: AsyncClient, studio: SimpleNamespace, declarations: dict, times_payload: bytes
 ) -> dict:
-    """Tạo assembly với 2 scan rời + một file thời điểm không bind vai trò; trả snapshot assembly."""
+    """Tạo assembly với 3 scan rời + một file thời điểm không bind vai trò; trả snapshot assembly."""
     studio.settings.product_upload_max_bytes = 16 * 1024 * 1024
     from tests.test_reconstruction.test_lidar_package import _pcd, _scan
 
     video = await _r4_upload(client, "walk.mp4", b"\x00\x00\x00\x14ftypqt  fake-mp4")
-    scans = [await _r4_upload(client, f"scan_{index}.pcd", _pcd(_scan())) for index in range(2)]
+    scans = [await _r4_upload(client, f"scan_{index}.pcd", _pcd(_scan())) for index in range(3)]
     times = await _r4_upload(client, "scan_times.txt", times_payload)
     created = await client.post(
         "/api/v1/input-assemblies",
@@ -1233,7 +1372,7 @@ async def test_assembly_estimates_a_missing_scan_time_unit_from_the_sampling_rat
     client: AsyncClient, studio: SimpleNamespace
 ) -> None:
     snapshot = await _scan_times_assembly(
-        client, studio, {"cloud_state": _R4_DECLARATIONS["cloud_state"]}, b"0.0\n0.1\n"
+        client, studio, {"cloud_state": _R4_DECLARATIONS["cloud_state"]}, b"0.0\n0.1\n0.2\n"
     )
 
     unit = snapshot["declarations"]["lidar_timestamp_unit"]
@@ -1252,7 +1391,7 @@ async def test_assembly_does_not_override_a_unit_the_user_declared(
         "cloud_state": _R4_DECLARATIONS["cloud_state"],
         "lidar_timestamp_unit": {"value": "milliseconds", "provenance": "declared"},
     }
-    snapshot = await _scan_times_assembly(client, studio, declarations, b"0.0\n0.1\n")
+    snapshot = await _scan_times_assembly(client, studio, declarations, b"0.0\n0.1\n0.2\n")
 
     unit = snapshot["declarations"]["lidar_timestamp_unit"]
     assert unit["value"] == "milliseconds" and unit["provenance"] == "declared"
@@ -1262,8 +1401,8 @@ async def test_assembly_does_not_override_a_unit_the_user_declared(
 async def test_assembly_leaves_an_unguessable_unit_empty_for_the_user_to_declare(
     client: AsyncClient, studio: SimpleNamespace
 ) -> None:
-    # 300 Hz theo giây và 300 kHz theo mili giây: ngoài dải ở mọi đơn vị, nên không được đoán.
-    payload = "".join(f"{index / 300}\n" for index in range(301)).encode()
+    # Khoảng cách 5 đơn vị: 0,2 Hz theo giây hoặc 200 Hz theo mili giây, cả hai khả dĩ nên không được đoán.
+    payload = b"0\n5\n10\n"
     snapshot = await _scan_times_assembly(client, studio, {"cloud_state": _R4_DECLARATIONS["cloud_state"]}, payload)
 
     assert snapshot["declarations"].get("lidar_timestamp_unit") is None

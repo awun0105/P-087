@@ -3,8 +3,8 @@
 Nguyên tắc: chỉ suy khi bằng chứng cho đúng một đáp án; mơ hồ thì trả None để hệ thống hỏi người dùng.
 Mọi giá trị suy ra được ghi `provenance="estimated"` kèm tên phương pháp, nên luôn truy vết và sửa được.
 
-Không suy (không có bằng chứng trong file): cùng một cảnh, quan hệ đồng hồ camera ↔ LiDAR, chiều quỹ đạo.
-Đơn vị toạ độ cũng không tự chốt vì thang đo của một đám mây không phân biệt được m với cm.
+Không suy (không có bằng chứng trong file): cùng một cảnh, quan hệ đồng hồ camera ↔ LiDAR, chiều quỹ đạo,
+đơn vị toạ độ (thang đo của một đám mây không phân biệt được m với cm) và tên frame LiDAR/camera.
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal
 
 from src.models.contracts.input_assembly import (
     EvidenceProvenance,
@@ -29,9 +28,14 @@ from src.services.reconstruction.inputs.input_probe import InputProbe
 #: Tên phương pháp ghi vào `EvidenceValue.method` của giá trị suy ra.
 UNIT_METHOD = "timestamp_rate_window_v1"
 
-#: Dải tần số lấy mẫu hợp lý (Hz). Hai đơn vị liền kề cách nhau 1000 lần nên mọi dải rộng dưới 1000 lần
-#: chỉ có thể khớp tối đa một đơn vị: đây là điều kiện để phép suy là duy nhất.
-_RATE_WINDOW_HZ: dict[str, tuple[float, float]] = {"lidar": (0.5, 200.0), "rgb": (1.0, 240.0)}
+#: Dải tần số lấy mẫu *khả dĩ* (Hz), áp cho cả camera và LiDAR: từ một mẫu mỗi giờ đến 1 kHz. Dải này rộng hơn
+#: 1000 lần nên đơn vị liền kề thường cùng cho tần số khả dĩ; khi đó dữ liệu mơ hồ thật sự (5 đơn vị mỗi mẫu là 0,2 Hz
+#: theo giây hay 200 Hz theo mili giây) và hệ thống phải hỏi, không được chọn cái "đẹp hơn". Hệ quả có chủ ý: chỉ suy
+#: được khi đơn vị thô hơn cho tần số vô lý, tức thực tế là giây ở tần số trên 1 Hz (LiDAR 5-20 Hz, camera
+#: 15-60 Hz, dữ liệu như TorWIC). Dữ liệu mili/micro/nano giây gần như luôn được hỏi lại; đó là cái giá của việc không đoán sai.
+_RATE_WINDOW_HZ: tuple[float, float] = (1.0 / 3600.0, 1000.0)
+#: Cần ít nhất hai khoảng cách để coi tần số là đo được; một khoảng duy nhất không chứng minh tần số đều.
+_MIN_SAMPLES = 3
 _SECONDS_PER_UNIT: dict[TimestampUnit, float] = {
     TimestampUnit.SECONDS: 1.0,
     TimestampUnit.MILLISECONDS: 1e-3,
@@ -55,19 +59,19 @@ def infer_timestamp_unit(
     count: int | None,
     first: float | None,
     last: float | None,
-    sensor: Literal["lidar", "rgb"],
     video_duration_seconds: float | None = None,
 ) -> UnitInference | None:
     """Đơn vị của một file timestamp từ tần số lấy mẫu trung bình, hoặc None khi không suy được duy nhất.
 
     Dữ liệu thực tế (ví dụ TorWIC) dùng thời gian tương đối bắt đầu từ 0, nên độ lớn của số không nói lên đơn vị;
-    tần số lấy mẫu thì có. `video_duration_seconds` (nếu biết) loại đáp án khiến file dài hơn video.
+    tần số thì có. Chỉ trả đơn vị khi đúng MỘT đơn vị cho tần số khả dĩ (xem `_RATE_WINDOW_HZ`). `video_duration_seconds`
+    (nếu biết) loại thêm đáp án khiến file dài hơn video.
     """
-    if count is None or first is None or last is None or count < 2:
+    if count is None or first is None or last is None or count < _MIN_SAMPLES:
         return None
     if not (math.isfinite(first) and math.isfinite(last)) or last <= first:
         return None
-    low, high = _RATE_WINDOW_HZ[sensor]
+    low, high = _RATE_WINDOW_HZ
     step = (last - first) / (count - 1)
     matches: list[UnitInference] = []
     for unit, scale in _SECONDS_PER_UNIT.items():
@@ -134,7 +138,12 @@ def timestamp_files_by_role(
         if len(explicit.get(role, [])) == 1:
             result[role] = explicit[role][0]
     if InputRole.RGB_FRAME_TIMES not in result:
-        legacy = [item.file_id for item in files if item.observed_format == InputAssetFormat.RGB_FRAME_TIMES]
+        bound_elsewhere = {file_id for ids in explicit.values() for file_id in ids}
+        legacy = [
+            item.file_id
+            for item in files
+            if item.observed_format == InputAssetFormat.RGB_FRAME_TIMES and item.file_id not in bound_elsewhere
+        ]
         if len(legacy) == 1:
             result[InputRole.RGB_FRAME_TIMES] = legacy[0]
 
@@ -145,6 +154,14 @@ def timestamp_files_by_role(
         and item.file_id not in explicit.get(InputRole.CAMERA_TRAJECTORY, [])
     ]
     pose_count = probes[trajectories[0]].record_count if len(trajectories) == 1 and trajectories[0] in probes else None
+    # Mọi file quỹ đạo TUM (kể cả quỹ đạo camera): số dòng của chúng cũng là số dòng đáng ngờ khi suy vai trò scan.
+    trajectory_row_counts = {
+        probes[item.file_id].record_count
+        for item in files
+        if item.observed_format == InputAssetFormat.TUM_TRAJECTORY
+        and item.file_id in probes
+        and probes[item.file_id].record_count
+    }
     scans = explicit.get(InputRole.LIDAR_SCAN) or [
         item.file_id
         for item in files
@@ -156,7 +173,14 @@ def timestamp_files_by_role(
         probes,
         bound_file_ids=bound,
         pose_count=pose_count if InputRole.RGB_FRAME_TIMES not in result else None,
-        scan_count=len(scans) if InputRole.LIDAR_SCAN_TIMES not in result and pose_count is None else None,
+        # Có file quỹ đạo cùng số dòng với số scan thì file timestamp cùng số dòng có thể là của frame RGB: hỏi.
+        scan_count=(
+            len(scans)
+            if InputRole.LIDAR_SCAN_TIMES not in result
+            and pose_count is None
+            and len(scans) not in trajectory_row_counts
+            else None
+        ),
     )
     for role, file_id in inferred.items():
         result.setdefault(role, file_id)
@@ -171,28 +195,36 @@ def enrich_timestamp_units(
     *,
     video_duration_seconds: float | None,
 ) -> InputAssemblyDeclarations:
-    """Điền đơn vị timestamp còn thiếu bằng giá trị suy ra (`estimated`); không đè giá trị người dùng đã khai."""
+    """Điền đơn vị timestamp còn thiếu bằng giá trị suy ra (`estimated`).
+
+    Không đè giá trị người dùng đã khai hoặc đã xác minh. Giá trị `estimated` cũ được tính lại theo dữ liệu hiện
+    tại và bị bỏ nếu không còn suy được, để một ước lượng đã lỗi thời không tồn tại mãi qua các lần sửa assembly.
+    """
     if declarations.timestamp_unit is not None:
         return declarations  # lời khai dùng chung kiểu cũ đã phủ cả hai cảm biến
     roles = timestamp_files_by_role(files, probes, bindings)
-    updates: dict[str, EvidenceValue[TimestampUnit]] = {}
-    for role, field, sensor in (
-        (InputRole.RGB_FRAME_TIMES, "rgb_timestamp_unit", "rgb"),
-        (InputRole.LIDAR_SCAN_TIMES, "lidar_timestamp_unit", "lidar"),
+    updates: dict[str, EvidenceValue[TimestampUnit] | None] = {}
+    for role, field in (
+        (InputRole.RGB_FRAME_TIMES, "rgb_timestamp_unit"),
+        (InputRole.LIDAR_SCAN_TIMES, "lidar_timestamp_unit"),
     ):
-        file_id = roles.get(role)
-        if getattr(declarations, field) is not None or file_id is None or file_id not in probes:
+        current = getattr(declarations, field)
+        if current is not None and current.provenance != EvidenceProvenance.ESTIMATED:
             continue
-        probe = probes[file_id]
-        found = infer_timestamp_unit(
-            count=probe.record_count,
-            first=probe.first_timestamp,
-            last=probe.last_timestamp,
-            sensor=sensor,  # type: ignore[arg-type]
-            video_duration_seconds=video_duration_seconds if role == InputRole.RGB_FRAME_TIMES else None,
-        )
+        file_id = roles.get(role)
+        found = None
+        if file_id is not None and file_id in probes:
+            probe = probes[file_id]
+            found = infer_timestamp_unit(
+                count=probe.record_count,
+                first=probe.first_timestamp,
+                last=probe.last_timestamp,
+                video_duration_seconds=video_duration_seconds if role == InputRole.RGB_FRAME_TIMES else None,
+            )
         if found is not None:
             updates[field] = EvidenceValue(
                 value=found.unit, provenance=EvidenceProvenance.ESTIMATED, method=UNIT_METHOD
             )
+        elif current is not None:
+            updates[field] = None
     return declarations.model_copy(update=updates) if updates else declarations

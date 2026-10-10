@@ -580,6 +580,11 @@ def run_input_assembly(
                             if stored.snapshot.declarations.lidar_frame_id is not None
                             else None
                         ),
+                        camera_frame_id=(
+                            stored.snapshot.declarations.camera_frame_id.value
+                            if stored.snapshot.declarations.camera_frame_id is not None
+                            else None
+                        ),
                     )
                 except (LoosePackageError, UploadError, ArtifactChecksumError) as error:
                     raise InputAssemblyConflictError(str(error)) from error

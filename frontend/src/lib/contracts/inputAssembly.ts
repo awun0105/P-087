@@ -113,6 +113,8 @@ export interface InputAssemblyDeclarations {
   cloud_state: EvidenceValue<CloudObservationState> | null;
   coordinate_unit: EvidenceValue<DistanceUnit> | null;
   lidar_frame_id: EvidenceValue<string> | null;
+  /** Tên frame camera trong file calibration ROS tf, để kiểm cả hai đầu của file. */
+  camera_frame_id?: EvidenceValue<string> | null;
   world_frame_id: EvidenceValue<string> | null;
   trajectory_convention: EvidenceValue<TrajectoryConvention> | null;
   clock_relation: EvidenceValue<ClockRelation> | null;

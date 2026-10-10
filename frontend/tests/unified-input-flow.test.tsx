@@ -349,6 +349,58 @@ describe("unified input flow", () => {
     expect(screen.queryByText(/recipe|resolver|assembly/i)).toBeNull();
   });
 
+  it("tells the user which timestamp units were estimated and how to correct them", async () => {
+    window.sessionStorage.setItem("r2s:input-assembly:v1:user-1", JSON.stringify({
+      schema_version: 1, account_id: "user-1",
+      uploads: [{ upload_id: "upload-1", original_name: "warehouse.mp4", included: true, preset: "720p" }],
+      scan_order: [], intent: "video_reconstruction", cloud_state: "", same_scene: "", coordinate_unit: "",
+      lidar_frame_id: "", trajectory_convention: "", clock_relation: "", clock_offset: "",
+      scene_name: "", data_origin: "", data_owner: "", data_purpose: "",
+    }));
+    mocks.getStaged.mockImplementation(async (uploadId: string) => staged(uploadId, "warehouse.mp4"));
+    const estimated = { value: "seconds", provenance: "estimated", method: "timestamp_rate_window_v1", evidence_checksum: null };
+    mocks.create.mockResolvedValue({
+      ...snapshot(1),
+      declarations: { ...snapshot(1).declarations, lidar_timestamp_unit: estimated },
+    });
+    mocks.resolve.mockReset().mockResolvedValue({
+      report: report("ready", [videoCandidate("only", "file-upload-1", "ready")], "only"),
+    });
+
+    render(<UnifiedInputFlow />);
+    fireEvent.click(await screen.findByRole("button", { name: "Phân tích lại" }));
+
+    expect(await screen.findByText(/Đã tự suy đơn vị thời gian theo tần số lấy mẫu: thời điểm scan LiDAR = giây/)).toBeInTheDocument();
+  });
+
+  it("asks for the camera frame name only when a ROS transform file is present", async () => {
+    const rosFile = {
+      ...staged("upload-ros", "tf.yaml").staged_files[0],
+      file_id: "file-ros",
+      observed_format: "calibration_ros_yaml" as const,
+    };
+    const cloudFile = {
+      ...staged("upload-pcd", "scan.pcd").staged_files[0],
+      file_id: "file-pcd",
+      observed_format: "point_cloud_pcd" as const,
+    };
+    window.sessionStorage.setItem("r2s:input-assembly:v1:user-1", JSON.stringify({
+      schema_version: 1, account_id: "user-1",
+      uploads: [{ upload_id: "upload-ros", original_name: "tf.yaml", included: true, preset: "720p" }],
+      scan_order: [], intent: null, cloud_state: "", same_scene: "", coordinate_unit: "", lidar_frame_id: "",
+      trajectory_convention: "", clock_relation: "", clock_offset: "", scene_name: "", data_origin: "",
+      data_owner: "", data_purpose: "",
+    }));
+    mocks.getStaged.mockImplementation(async () => ({
+      ...staged("upload-ros", "tf.yaml"),
+      staged_files: [rosFile, cloudFile],
+    }));
+
+    render(<UnifiedInputFlow />);
+
+    expect(await screen.findByLabelText("Tên frame của camera trong file ROS")).toBeInTheDocument();
+  });
+
   it("keeps the skip notice out of the way of unrelated notices and names every rejected file", async () => {
     const { container } = render(<UnifiedInputFlow />);
     const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');

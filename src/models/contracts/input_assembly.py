@@ -241,6 +241,8 @@ class InputAssemblyDeclarations(ContractModel):
     cloud_state: EvidenceValue[CloudObservationState] | None = None
     coordinate_unit: EvidenceValue[DistanceUnit] | None = None
     lidar_frame_id: EvidenceValue[Identifier] | None = None
+    #: Tên frame camera trong file calibration ROS tf: để kiểm cả hai đầu của file, không nhận nhầm LiDAR ↔ IMU.
+    camera_frame_id: EvidenceValue[Identifier] | None = Field(default=None, exclude_if=lambda value: value is None)
     world_frame_id: EvidenceValue[Identifier] | None = None
     trajectory_convention: EvidenceValue[TrajectoryConvention] | None = None
     clock_relation: EvidenceValue[ClockRelation] | None = None

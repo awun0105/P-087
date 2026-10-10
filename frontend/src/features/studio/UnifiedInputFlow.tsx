@@ -55,6 +55,12 @@ const VIDEO_PRESETS: { value: VideoResolutionPreset; detail: string }[] = [
   { value: "480p", detail: "tối đa 854 × 480 ngang / 480 × 854 dọc" },
 ];
 const INPUT_DRAFT_PREFIX = "r2s:input-assembly:v1";
+const TIMESTAMP_UNIT_LABELS: Record<string, string> = {
+  seconds: "giây",
+  milliseconds: "mili giây",
+  microseconds: "micro giây",
+  nanoseconds: "nano giây",
+};
 /** Chờ người dùng gõ xong ô khai báo trước khi tự phân tích, để không tạo một revision cho mỗi phím. */
 const AUTO_ANALYZE_DELAY_MS = 700;
 
@@ -110,6 +116,7 @@ interface StoredInputDraft {
   same_scene: "" | "yes" | "no";
   coordinate_unit: DeclarationChoice<DistanceUnit>;
   lidar_frame_id: string;
+  camera_frame_id?: string;
   trajectory_convention: DeclarationChoice<TrajectoryConvention>;
   clock_relation: DeclarationChoice<"same_clock" | "known_offset" | "unknown">;
   clock_offset: string;
@@ -170,6 +177,7 @@ function parseInputDraft(raw: string, accountId: string): StoredInputDraft | nul
       same_scene: choiceValue(draft.same_scene, ["yes", "no"]),
       coordinate_unit: choiceValue(draft.coordinate_unit, ["m", "cm", "mm"]),
       lidar_frame_id: typeof draft.lidar_frame_id === "string" ? draft.lidar_frame_id.slice(0, 128) : "",
+      camera_frame_id: typeof draft.camera_frame_id === "string" ? draft.camera_frame_id.slice(0, 128) : "",
       trajectory_convention: choiceValue(draft.trajectory_convention, ["world_from_sensor", "world_from_camera", "unknown"]),
       clock_relation: choiceValue(draft.clock_relation, ["same_clock", "known_offset", "unknown"]),
       clock_offset: typeof draft.clock_offset === "string" ? draft.clock_offset.slice(0, 64) : "",
@@ -309,6 +317,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   const [sameScene, setSameScene] = useState<"" | "yes" | "no">("");
   const [coordinateUnit, setCoordinateUnit] = useState<DeclarationChoice<DistanceUnit>>("");
   const [lidarFrameId, setLidarFrameId] = useState("");
+  const [cameraFrameId, setCameraFrameId] = useState("");
   const [trajectoryConvention, setTrajectoryConvention] = useState<DeclarationChoice<TrajectoryConvention>>("");
   const [clockRelation, setClockRelation] = useState<DeclarationChoice<"same_clock" | "known_offset" | "unknown">>("");
   const [clockOffset, setClockOffset] = useState("");
@@ -467,6 +476,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       setSameScene(draft.same_scene);
       setCoordinateUnit(draft.coordinate_unit);
       setLidarFrameId(draft.lidar_frame_id);
+      setCameraFrameId(draft.camera_frame_id ?? "");
       setTrajectoryConvention(draft.trajectory_convention);
       setClockRelation(draft.clock_relation);
       setClockOffset(draft.clock_offset);
@@ -514,6 +524,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         same_scene: sameScene,
         coordinate_unit: coordinateUnit,
         lidar_frame_id: lidarFrameId,
+        camera_frame_id: cameraFrameId,
         trajectory_convention: trajectoryConvention,
         clock_relation: clockRelation,
         clock_offset: clockOffset,
@@ -528,7 +539,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     } catch {
       // Tab-scoped recovery is best-effort when the browser disables session storage.
     }
-  }, [accountId, cloudState, clockOffset, clockRelation, coordinateUnit, dataOrigin, dataOwner, dataPurpose, draftKey, draftLoaded, entries, intent, lidarFrameId, lidarScanTimesFileId, rgbFrameTimesFileId, lidarTimestampUnit, rgbTimestampUnit, sameScene, scanOrder, sceneName, trajectoryConvention]);
+  }, [accountId, cloudState, clockOffset, clockRelation, coordinateUnit, dataOrigin, dataOwner, dataPurpose, draftKey, draftLoaded, entries, intent, lidarFrameId, cameraFrameId, lidarScanTimesFileId, rgbFrameTimesFileId, lidarTimestampUnit, rgbTimestampUnit, sameScene, scanOrder, sceneName, trajectoryConvention]);
 
   useEffect(() => {
     const legacyUploadId = params.get("upload");
@@ -758,6 +769,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       cloud_state: evidence(cloudOverride ?? (cloudState || null)),
       coordinate_unit: evidence(coordinateUnit || null),
       lidar_frame_id: evidence(lidarFrameId.trim() || null),
+      camera_frame_id: evidence(cameraFrameId.trim() || null),
       world_frame_id: null,
       trajectory_convention: evidence(trajectoryConvention || null),
       clock_relation: evidence(clockRelation || null),
@@ -953,9 +965,16 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     return { fileId, name: file?.archive_member?.member_path ?? file?.source_file.original_name ?? fileId };
   });
   const loginHref = `${pathname}${typeof window === "undefined" ? "" : window.location.search}`;
+  const estimatedUnits: string[] = [];
+  for (const [label, field] of [["thời điểm frame video", snapshot?.declarations.rgb_timestamp_unit], ["thời điểm scan LiDAR", snapshot?.declarations.lidar_timestamp_unit]] as const) {
+    if (field && field.provenance === "estimated") estimatedUnits.push(`${label} = ${TIMESTAMP_UNIT_LABELS[field.value] ?? field.value}`);
+  }
   // Mọi lý do khiến nút tạo scene đang tắt, để người dùng không phải đoán ô nào còn thiếu.
   const createBlockers: string[] = [];
   if (activeCandidate && report?.state === "ready") {
+    if (activeCandidate.candidate_id !== report.recommended_candidate_id) {
+      createBlockers.push("Cách xử lý đang chọn chưa phải cách hệ thống đề xuất; bấm \"Phân tích lại\" hoặc chọn lại.");
+    }
     if (!sceneName.trim()) createBlockers.push("Nhập tên scene.");
     if (activeCandidate.candidate_kind === "video_recipe") {
       if (!dataOwner.trim()) createBlockers.push("Nhập người hoặc đơn vị sở hữu dữ liệu.");
@@ -1124,7 +1143,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       {timestampFiles.length > 0 && (
         <Card className="mt-5 p-5 sm:p-6">
           <h2 className="text-base font-bold">Gán vai trò cho file timestamp</h2>
-          <p className="mt-1 text-sm text-ink-muted">Các dòng số không tự cho biết là thời gian camera hay LiDAR. Chọn đúng file cho từng cảm biến; hệ thống sẽ kiểm tra thứ tự và số dòng.</p>
+          <p className="mt-1 text-sm text-ink-muted">Hệ thống tự gán khi chỉ có một file có số dòng khớp số scan hoặc số pose; còn không thì các dòng số không tự cho biết là thời gian camera hay LiDAR, hãy chọn đúng file cho từng cảm biến. Hệ thống sẽ kiểm tra thứ tự và số dòng.</p>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <label htmlFor={ids.rgbTimes} className="text-sm">File timestamp của frame RGB
               <select id={ids.rgbTimes} value={rgbFrameTimesFileId} onChange={(event) => { const fileId = event.target.value; setRgbFrameTimesFileId(fileId); if (fileId !== rgbFrameTimesFileId) setRgbTimestampUnit(""); if (fileId && fileId === lidarScanTimesFileId) { setLidarScanTimesFileId(""); setLidarTimestampUnit(""); } setBindings((current) => current.filter((item) => item.role !== "rgb_frame_times" && !(fileId && fileId === lidarScanTimesFileId && item.role === "lidar_scan_times"))); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
@@ -1190,6 +1209,11 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
             <label className="text-sm">Tên frame của LiDAR
               <input value={lidarFrameId} onChange={(event) => { setLidarFrameId(event.target.value); invalidateResolution(); }} maxLength={128} placeholder="Ví dụ: lidar" className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3" />
             </label>
+            {stagedFiles.some((item) => item.observed_format === "calibration_ros_yaml") && (
+              <label className="text-sm">Tên frame của camera trong file ROS
+                <input value={cameraFrameId} onChange={(event) => { setCameraFrameId(event.target.value); invalidateResolution(); }} maxLength={128} placeholder="Ví dụ: camera_left" className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3" />
+              </label>
+            )}
             <label className="text-sm">Video và LiDAR có mô tả cùng một scene không?
               <select value={sameScene} onChange={(event) => { setSameScene(event.target.value as "" | "yes" | "no"); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
                 <option value="">Chưa xác nhận</option><option value="yes">Có, cùng scene quay</option><option value="no">Không, khác scene</option>
@@ -1243,6 +1267,12 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
             <h2 id="resolution-heading" className="text-lg font-bold">Kết quả nhận diện và hướng xử lý</h2>
             <p className="mt-1 text-sm text-ink-muted">Kết quả ứng với bộ file hiện tại (lần {report.assembly_revision}); đổi file hoặc khai báo thì hệ thống tự phân tích lại.</p>
           </div>
+          {estimatedUnits.length > 0 && (
+            <Notice tone="ochre">
+              Đã tự suy đơn vị thời gian theo tần số lấy mẫu: {estimatedUnits.join("; ")}. Nếu sai, chọn file ở mục
+              &quot;Gán vai trò cho file timestamp&quot; và khai đúng đơn vị.
+            </Notice>
+          )}
           {report.state !== "ready" && <Notice tone={report.state === "invalid" ? "rust" : "ochre"}>{report.state === "needs_input" ? "Cần bổ sung lựa chọn hoặc khai báo trước khi tiếp tục." : report.state === "pending_verification" ? "Một hoặc nhiều file vẫn đang chờ xác minh." : report.state === "unsupported" ? "Chưa có runtime đủ điều kiện cho các hướng này." : "Có dữ liệu mâu thuẫn hoặc không hợp lệ; sửa input rồi phân tích lại."}</Notice>}
           {report.missing_facts.length > 0 && (
             <Card className="p-5">

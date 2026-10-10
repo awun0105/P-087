@@ -209,7 +209,7 @@ def parse_torwic_text(text: str, *, lidar_frame: str = "lidar", camera_frame: st
 def parse_lidar_camera_json(text: str, *, lidar_frame: str = "lidar", camera_frame: str = "camera") -> Extrinsic:
     """`lidar_from_camera` hoặc `camera_from_lidar`; kết quả luôn là `lidar_from_camera`."""
     try:
-        document = json.loads(text)
+        document = json.loads(_strip_bom(text))
     except json.JSONDecodeError as error:
         raise CalibrationParseError(f"JSON không hợp lệ: {error.msg}") from error
     if not isinstance(document, dict):
@@ -277,6 +277,11 @@ def _number_tuple(value: object, keys: tuple[str, ...], where: str) -> tuple[flo
         raise CalibrationParseError(f"{where}: giá trị không phải số") from error
 
 
+def _strip_bom(text: str) -> str:
+    """Bỏ BOM UTF-8 đầu file: nhiều trình soạn thảo trên Windows thêm vào, và `str.lstrip()` không bỏ U+FEFF."""
+    return text.lstrip("\ufeff")
+
+
 def detect_format(text: str) -> CalibrationFormat | None:
     """Nhận diện định dạng calibration theo nội dung; None nếu không phải calibration đã biết.
 
@@ -284,6 +289,7 @@ def detect_format(text: str) -> CalibrationFormat | None:
     trưng và dưới giới hạn kích thước). Không đoán chiều: định dạng nào nhận ra được là định dạng tự nói rõ chiều
     hoặc cần người dùng khai tên frame LiDAR ở bước đọc.
     """
+    text = _strip_bom(text)
     if looks_like_torwic_text(text):
         return "torwic_text"
     if text.lstrip().startswith("{"):
@@ -313,13 +319,16 @@ def detect_format(text: str) -> CalibrationFormat | None:
     return None
 
 
-def canonical_lidar_camera_json(text: str, *, lidar_frame_id: str | None) -> str | None:
+def canonical_lidar_camera_json(
+    text: str, *, lidar_frame_id: str | None, camera_frame_id: str | None = None
+) -> str | None:
     """JSON `lidar_from_camera` chuẩn để gói R4 đọc được, hoặc None khi bộ đọc gói đã đọc nguyên văn được.
 
     Bộ nhận diện và bộ đọc gói chỉ hiểu TorWIC text và JSON `lidar_from_camera` dạng translation+quaternion. Mọi
     định dạng khác (JSON ngược chiều hoặc ma trận 4x4, ROS tf YAML) được chuẩn hoá về đó ở ranh giới đóng gói
     thay vì sửa cả bộ nhận diện lẫn worker. Khối `camera` (nội tham số) của JSON nguồn được giữ nguyên.
     """
+    text = _strip_bom(text)
     kind = detect_format(text)
     camera: object = None
     if kind == "torwic_text":
@@ -337,7 +346,7 @@ def canonical_lidar_camera_json(text: str, *, lidar_frame_id: str | None) -> str
         extrinsic = parse_lidar_camera_json(text)
         camera = document.get("camera")
     elif kind == "ros_transform_yaml":
-        extrinsic = parse_ros_transform_yaml(text, lidar_frame_id=lidar_frame_id)
+        extrinsic = parse_ros_transform_yaml(text, lidar_frame_id=lidar_frame_id, camera_frame_id=camera_frame_id)
     else:
         raise CalibrationParseError("file không phải calibration camera ↔ LiDAR đọc được")
     result: dict[str, object] = {
@@ -351,14 +360,10 @@ def canonical_lidar_camera_json(text: str, *, lidar_frame_id: str | None) -> str
     return json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 
-def parse_ros_transform_yaml(text: str, *, lidar_frame_id: str | None, camera_frame_id: str | None = None) -> Extrinsic:
-    """`TransformStamped` → `lidar_from_camera`.
+def _ros_stamped_extrinsic(text: str) -> Extrinsic:
+    """Đọc `TransformStamped` (hoặc `TFMessage` đúng một phần tử) đúng như file ghi: cha, con, pose của con trong cha.
 
-    `header.frame_id` là frame cha, `child_frame_id` là frame con, và `transform` là pose của con
-    trong cha, tức `p_parent = T · p_child`. Cần `lidar_frame_id` để biết đầu nào là LiDAR; không có
-    hoặc không khớp đầu nào thì từ chối thay vì đoán. Biết cả `camera_frame_id` thì đầu còn lại phải
-    đúng là camera, tránh nhận nhầm một transform LiDAR ↔ IMU; không biết thì tên frame còn lại được
-    trả nguyên trong `local_frame` để người gọi tự đối chiếu.
+    Chỉ kiểm cấu trúc và số liệu, chưa biết frame nào là LiDAR nên chưa xoay chiều.
     """
     document = _load_yaml(text)
     stamped = document
@@ -377,13 +382,26 @@ def parse_ros_transform_yaml(text: str, *, lidar_frame_id: str | None, camera_fr
         raise CalibrationParseError("thiếu khối transform")
     translation = _number_tuple(transform.get("translation"), ("x", "y", "z"), "transform.translation")
     rotation = _number_tuple(transform.get("rotation"), ("x", "y", "z", "w"), "transform.rotation")
-    extrinsic = Extrinsic(
+    return Extrinsic(
         parent_frame=parent,
         local_frame=child,
         translation_xyz=_checked_translation(translation, "transform.translation"),
         rotation_xyzw=_checked_quaternion(rotation, "transform.rotation"),
         source_format="ros_transform_yaml",
     )
+
+
+def parse_ros_transform_yaml(text: str, *, lidar_frame_id: str | None, camera_frame_id: str | None = None) -> Extrinsic:
+    """`TransformStamped` → `lidar_from_camera`.
+
+    `header.frame_id` là frame cha, `child_frame_id` là frame con, và `transform` là pose của con
+    trong cha, tức `p_parent = T · p_child`. Cần `lidar_frame_id` để biết đầu nào là LiDAR; không có
+    hoặc không khớp đầu nào thì từ chối thay vì đoán. Biết cả `camera_frame_id` thì đầu còn lại phải
+    đúng là camera, tránh nhận nhầm một transform LiDAR ↔ IMU; không biết thì tên frame còn lại được
+    trả nguyên trong `local_frame` để người gọi tự đối chiếu.
+    """
+    extrinsic = _ros_stamped_extrinsic(text)
+    parent, child = extrinsic.parent_frame, extrinsic.local_frame
     if lidar_frame_id is None:
         raise CalibrationParseError(
             f"file nối {parent} và {child} nhưng chưa biết frame nào là LiDAR; hãy khai tên frame LiDAR"
@@ -394,6 +412,22 @@ def parse_ros_transform_yaml(text: str, *, lidar_frame_id: str | None, camera_fr
     if camera_frame_id is not None and other != camera_frame_id:
         raise CalibrationParseError(f"đầu còn lại của file là {other}, không phải camera đã khai ({camera_frame_id})")
     return extrinsic if parent == lidar_frame_id else extrinsic.inverse()
+
+
+def validate_calibration_structure(text: str) -> None:
+    """Kiểm sớm cấu trúc và số liệu của calibration dạng mới mà không cần tên frame.
+
+    Chỉ áp dụng cho dạng bộ đọc gói cũ không tự đọc được (ROS tf YAML, JSON ngược chiều hoặc ma trận), để một file
+    hỏng bị báo ngay lúc phân tích thay vì lúc đóng gói sau khi cách xử lý đã báo sẵn sàng. Ném CalibrationParseError.
+    """
+    kind = detect_format(text)
+    if kind == "ros_transform_yaml":
+        _ros_stamped_extrinsic(text)
+    elif kind == "lidar_camera_json":
+        document = json.loads(_strip_bom(text))
+        block = document.get("lidar_from_camera")
+        if "camera_from_lidar" in document or (isinstance(block, dict) and "matrix" in block):
+            parse_lidar_camera_json(text)
 
 
 def _resolution(value: object, where: str) -> tuple[int, int] | None:

@@ -321,9 +321,15 @@ def test_probe_recognizes_ros_tf_calibration_and_reverse_json_and_explains_kalib
     assert ros.files[0].observed_format.value == "calibration_ros_yaml"
     assert [item.role for item in ros.files[0].role_evidence] == [InputRole.CAMERA_LIDAR_CALIBRATION]
 
-    reverse = _upload(_write(tmp_path, "calibration.json", b'{"camera_from_lidar":{"matrix":[]}}'))
+    identity = b'{"camera_from_lidar":{"matrix":[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}}'
+    reverse = _upload(_write(tmp_path, "calibration.json", identity))
     assert reverse.files[0].observed_format.value == "calibration_json"
     assert [item.role for item in reverse.files[0].role_evidence] == [InputRole.CAMERA_LIDAR_CALIBRATION]
+
+    # Ma trận hỏng bị báo ngay lúc phân tích (không đợi đến lúc đóng gói) kèm mã người dùng đọc được.
+    broken = _upload(_write(tmp_path, "broken.json", b'{"camera_from_lidar":{"matrix":[]}}'))
+    assert broken.files[0].observed_format.value == "unknown"
+    assert broken.probes[0].diagnostics[0][:2] == ("invalid_calibration_json", "error")
 
     kalibr = _upload(
         _write(

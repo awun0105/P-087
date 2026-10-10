@@ -15,6 +15,7 @@ from typing import BinaryIO, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.models.contracts.input_assembly import InputAssetFormat
+from src.services.reconstruction.inputs import calibration_formats
 from src.services.reconstruction.lidar.cloud_header import read_header
 
 InputKind = Literal[
@@ -194,6 +195,13 @@ def _calibration_format(text: str) -> Literal["torwic_txt", "json"] | None:
     return None
 
 
+def _json_needs_normalization(text: str) -> bool:
+    try:
+        return calibration_formats.canonical_lidar_camera_json(text, lidar_frame_id=None) is not None
+    except calibration_formats.CalibrationParseError:
+        return False  # file hỏng: giữ hành vi cũ, lỗi hiện ra ở bộ đọc gói như trước
+
+
 def _exactly_one(found: list[str], what: str, missing: str) -> str:
     if not found:
         raise InputRejectedError(missing)
@@ -218,6 +226,10 @@ def _detect_lidar_package(archive: zipfile.ZipFile, names: list[str], clouds: li
         except UnicodeDecodeError:
             continue
         calibration = _calibration_format(text)
+        if calibration == "json" and _json_needs_normalization(text):
+            # JSON hợp lệ nhưng bộ đọc gói cũ không đọc được nguyên văn (ma trận, hoặc ngược chiều): để gói bị
+            # từ chối ở đây rồi được server đóng lại, thay vì báo sẵn sàng rồi hỏng khi worker đọc.
+            continue
         if calibration is not None:
             calibrations[name] = calibration
         elif (poses := _pose_count(text)) is not None:

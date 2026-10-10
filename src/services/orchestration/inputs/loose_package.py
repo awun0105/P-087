@@ -165,6 +165,7 @@ def _write_calibration(
     item: StagedInputFile,
     resolver: ArtifactResolver,
     lidar_frame_id: str | None,
+    camera_frame_id: str | None = None,
 ) -> tuple[str, bool]:
     """Ghi calibration vào gói, chuẩn hoá về JSON `lidar_from_camera` khi bộ đọc gói chưa đọc được nguyên văn.
 
@@ -173,8 +174,8 @@ def _write_calibration(
     payload = _read_small(item, resolver, _CALIBRATION_MAX_BYTES)
     checksum = f"sha256:{hashlib.sha256(payload).hexdigest()}"
     try:
-        text = payload.decode("utf-8")
-        canonical = canonical_lidar_camera_json(text, lidar_frame_id=lidar_frame_id)
+        text = payload.decode("utf-8-sig")
+        canonical = canonical_lidar_camera_json(text, lidar_frame_id=lidar_frame_id, camera_frame_id=camera_frame_id)
     except (UnicodeDecodeError, CalibrationParseError) as error:
         raise LoosePackageError(f"Calibration không đọc được: {error}") from error
     body = payload if canonical is None else canonical.encode("utf-8")
@@ -229,6 +230,7 @@ def synthesize_lidar_package(
     role_bindings: Mapping[InputRole, list[str]],
     uploaded_by: Actor | None,
     lidar_frame_id: str | None = None,
+    camera_frame_id: str | None = None,
 ) -> tuple[UploadRecord, list[LidarPackageMember]]:
     """Đóng các file đã bind thành một gói LiDAR và nhận diện nó như gói người dùng nộp.
 
@@ -252,7 +254,9 @@ def synthesize_lidar_package(
                     item = staged[file_id]
                     normalized = False
                     if role == "camera_lidar_calibration":
-                        checksum, normalized = _write_calibration(archive, name, item, service.resolver, lidar_frame_id)
+                        checksum, normalized = _write_calibration(
+                            archive, name, item, service.resolver, lidar_frame_id, camera_frame_id
+                        )
                     else:
                         checksum = _write_member(archive, name, item, service.resolver)
                     members.append(
