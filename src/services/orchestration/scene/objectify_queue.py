@@ -91,6 +91,8 @@ class ObjectifyState(BaseModel):
 
     status: ObjectifyStatus = "idle"
     mode: ObjectifyMode | None = None
+    #: Revision SceneIR hiện tại, để client gửi yêu cầu dựng lại đúng revision mà không phải tải cả scene.
+    scene_revision: str | None = None
     awaiting_choice: bool = False
     object_centric: bool = False
     available: bool = False
@@ -205,12 +207,14 @@ def _public_record(record: _Record) -> dict[str, object]:
 
 def state(registry: ProjectRegistry, settings: Settings, job_id: str) -> ObjectifyState:
     """Project current-scene facts and the latest durable request for Studio/API."""
-    provenance = registry.scene.current(job_id).scene.provenance
+    scene = registry.scene.current(job_id).scene
+    provenance = scene.provenance
     with _database(settings).transaction() as tx:
         record = _read(tx, job_id)
     note = provenance.get("note")
     return ObjectifyState(
         **(_public_record(record) if record is not None else {}),
+        scene_revision=scene.scene_revision,
         object_centric=provenance.get("object_extraction") == METHOD,
         awaiting_choice=provenance.get("object_extraction") == AWAITING_CHOICE,
         available=runtime_available(settings) or settings.product_objectify_remote_worker,

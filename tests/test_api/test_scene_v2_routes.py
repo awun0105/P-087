@@ -325,6 +325,8 @@ async def test_objectify_state_and_request_without_reconstruction_bundle(client,
     state = await client.get(f"{_JOB}/scene/objectify")
     assert state.status_code == 200
     assert state.json()["status"] == "idle" and state.json()["object_centric"] is False
+    # Client dùng revision này làm `expected_scene_revision` mà không phải tải cả scene.
+    assert state.json()["scene_revision"] == "rev-001"
 
     # Job fixture không có ReconstructionBundle hệ mét → không xếp hàng, trả 409 có lý do.
     refused = await client.post(f"{_JOB}/scene/objectify", json={"expected_scene_revision": "rev-001", "mode": "boxes"})
