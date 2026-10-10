@@ -200,3 +200,32 @@ Mã: `eval/pose/colmap_fusion_benchmark.py` · số liệu: `eval/results/colmap
 
 ### 9.4 Giới hạn
 Một chuỗi, một lần chạy COLMAP (200 frame, CPU, mặc định), chưa lặp. Lever-arm dùng `T_cam1_os` đọc là `os_from_cam` theo metadata dự án; hướng quay của camera chưa được kiểm độc lập.
+
+## 10. Chấm lại bằng căn toàn đường, hướng "lên" và hệ quả (2026-10-11)
+
+Số liệu thô: `eval/results/lidar_odometry_torwic_v2_voxel0.5.json`, `..._voxel0.25.json` (có thêm các cột `fullpath_*`).
+
+### 10.1 Căn toàn đường (không phụ thuộc hướng ban đầu)
+
+| Tập | Voxel 0,25: cuối đường / rigid-toàn-đường TB / Sim3 scale | Voxel 0,5: cuối đường / rigid-toàn-đường TB / Sim3 scale |
+|---|---|---|
+| 01 | 0,77 m / 7,1 cm / 1,0022 | 0,41 m / 7,9 cm / 1,0042 |
+| 02 | 0,47 m / 11,5 cm / 1,0072 | 0,44 m / 10,8 cm / 1,0071 |
+| 03 | 0,97 m / 8,2 cm / 0,9967 | 0,47 m / 7,2 cm / 0,9974 |
+| 04 | 0,92 m / 9,1 cm / 1,0010 | 0,63 m / 8,6 cm / 1,0026 |
+| 05 | 0,34 m / 3,0 cm / 0,9995 | 0,30 m / 3,2 cm / 0,9992 |
+| **Trung bình** | 0,69 m / **7,8 cm** | 0,45 m / **7,5 cm** |
+
+**Đính chính quan trọng:** khi căn toàn đường, **hình dạng quỹ đạo của hai voxel gần như bằng nhau (7,8 so với 7,5 cm)**. Phần giảm "trôi cuối đường" khi tăng voxel (0,69 → 0,45 m) là phần *phụ thuộc hướng ban đầu*, không phải hình dạng tốt hơn. Lợi ích chắc chắn của voxel 0,5 là **tốc độ (3–9 lần)**; lợi ích về độ chính xác nhỏ hơn con số đã báo ở mục 7–8.
+Tỉ lệ mét của KISS-ICP đúng trong ±0,7% ở cả 5 tập và cả hai voxel.
+
+### 10.2 Cảm biến nghiêng so với phương thẳng đứng, và hướng "lên"
+
+| Phép đo | Kết quả |
+|---|---|
+| Mặt sàn trong bản đồ chuẩn `.ply` | nghiêng **0,03°** so với z thế giới (phẳng) |
+| Mặt sàn từng scan, đưa vào hệ thế giới bằng hướng của `traj_gt` | nghiêng 0,2–0,5° (min 0,06°, max 1,7°) trên 5 tập: ước lượng sàn **từng scan** chính xác và `traj_gt` nhất quán |
+| Mặt sàn trong khung cảm biến | nghiêng **~1,1°** (0,98–1,31°) ở cả 5 tập: cảm biến lắp nghiêng cố định |
+| Nguyên mẫu mount-agnostic (RANSAC nhiều mặt phẳng + mặt phẳng đường đi, không giả định trục z), 4 kiểu lắp (nguyên bản, nằm 90°, lộn ngược, xoay bất kỳ) | sai lệch hướng lên **như nhau ở mọi kiểu lắp** (±0,2°), tức phương pháp không phụ thuộc cách lắp; nhưng độ lệch tuyệt đối còn **1,5–3,5°** do (a) chuyển phiếu vào khung bản đồ bằng quay của KISS-ICP vốn đã trôi 1–3°, (b) cách chọn "mặt phẳng sàn gần nhất" có lúc chọn nhầm |
+
+**Kết luận:** (1) góc nghiêng ~1,1° là thật, đo được độc lập với dataset; (2) ước lượng sàn *theo từng scan* đủ chính xác (≤0,5°) để dùng làm ràng buộc roll/pitch; (3) hướng "lên" lấy từ bản đồ gộp qua pose KISS-ICP **chưa đủ** chính xác, nên cần dùng ràng buộc theo từng scan hoặc chỉ dùng cửa sổ đầu; (4) bước chọn đâu là sàn (so với trần và tường) là phần cần làm cứng thêm trước khi đưa vào sản phẩm.

@@ -25,6 +25,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
 
+from eval.pose.colmap_fusion_benchmark import umeyama
 from src.services.reconstruction.lidar.odometry import default_lidar_odometry_profile
 
 REPO = Path(__file__).resolve().parents[2]
@@ -113,6 +114,12 @@ def trajectory_metrics(estimate: np.ndarray, truth: np.ndarray) -> dict:
             rotation.append(np.degrees(np.linalg.norm(Rotation.from_matrix(error[:3, :3]).as_rotvec())))
         return float(np.mean(translation)), float(np.mean(rotation))
 
+    # Căn toàn đường (không phụ thuộc hướng ban đầu): tách "sai hướng đặt" khỏi "sai hình dạng thật".
+    fits = {}
+    for label, with_scale in (("rigid", False), ("sim3", True)):
+        scale, rotation, shift = umeyama(estimate[:, :3, 3], truth[:, :3, 3], with_scale=with_scale)
+        residual = np.linalg.norm(scale * estimate[:, :3, 3] @ rotation.T + shift - truth[:, :3, 3], axis=1)
+        fits[label] = (scale, float(residual.mean()), float(residual.max()))
     step_t, step_r = rpe(1)
     ten_t, ten_r = rpe(10)
     return {
@@ -121,6 +128,10 @@ def trajectory_metrics(estimate: np.ndarray, truth: np.ndarray) -> dict:
         "ate_max_m": round(float(ate.max()), 3),
         "ate_end_m": round(float(ate[-1]), 3),
         "drift_percent": round(100 * float(ate[-1]) / path_length, 2),
+        "fullpath_rigid_ate_mean_m": round(fits["rigid"][1], 3),
+        "fullpath_rigid_ate_max_m": round(fits["rigid"][2], 3),
+        "fullpath_sim3_ate_mean_m": round(fits["sim3"][1], 3),
+        "fullpath_sim3_scale": round(fits["sim3"][0], 4),
         "rpe1_translation_m": round(step_t, 4),
         "rpe1_rotation_deg": round(step_r, 3),
         "rpe10_translation_m": round(ten_t, 4),
@@ -153,6 +164,15 @@ def map_metrics(points: np.ndarray, truth_tree: cKDTree, path_tree: cKDTree) -> 
     }
 
 
+def grid_downsample(points: np.ndarray, cell: float) -> np.ndarray:
+    """Giữ một điểm mỗi ô lưới `cell` mét (điểm đầu tiên); thứ tự ổn định."""
+    _, first = np.unique(np.floor(points / cell).astype(np.int64), axis=0, return_index=True)
+    return points[np.sort(first)]
+
+
+PREFILTER_CELL: float | None = None
+
+
 def evaluate_scene(directory: Path, python: Path, truth_map: np.ndarray, truth_tree: cKDTree, max_scans: int) -> dict:
     truth_rows = np.loadtxt(directory / "traj_gt.txt")
     scan_paths = sorted((directory / "lidar_scans").glob("*.pcd"))[: len(truth_rows)]
@@ -165,6 +185,8 @@ def evaluate_scene(directory: Path, python: Path, truth_map: np.ndarray, truth_t
         for index, path in enumerate(scan_paths[:count]):
             points = read_pcd_xyz(path)
             points = points[np.linalg.norm(points, axis=1) > 0.5]
+            if PREFILTER_CELL is not None:
+                points = grid_downsample(points, PREFILTER_CELL)
             target = work / f"{index:06d}.npy"
             np.save(target, points)
             arrays.append(target)
@@ -196,6 +218,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--map", type=Path, required=True, help="groundtruth_map.ply")
     parser.add_argument("--odometry-python", type=Path, required=True, help="interpreter cô lập có kiss-icp")
     parser.add_argument("--max-scans", type=int, default=600)
+    parser.add_argument(
+        "--prefilter-cell", type=float, help="giảm mẫu lưới (m) từng scan trước KISS-ICP và trước khi đếm điểm"
+    )
     parser.add_argument("--voxel", type=float, help="voxel_size_m (mét); bỏ trống = mặc định của sản phẩm")
     parser.add_argument(
         "--max-total-points",
@@ -209,6 +234,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.voxel is not None:
         PROFILE["voxel_size_m"] = args.voxel
     PROFILE["max_total_points"] = args.max_total_points
+    global PREFILTER_CELL
+    PREFILTER_CELL = args.prefilter_cell
     truth_map = read_ply_xyz(args.map)
     truth_tree = cKDTree(truth_map)
     results = []
