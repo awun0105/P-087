@@ -228,11 +228,12 @@ function candidateStateLabel(state: CandidateState): string {
 }
 
 /** Probe không ra vai trò nào: resolver sẽ loại file khỏi mọi recipe, nên đừng báo "đã xác minh". */
-const UNUSABLE_FORMATS = new Set(["unknown", "zip_unknown"]);
+const UNUSABLE_FORMATS = new Set(["unknown"]);
 
-function unusableStaged(staged: AssemblyUploadResponse | null): boolean {
+/** ZIP được stage theo từng thành viên, nên một upload có thể vừa có phần dùng được vừa không. */
+function unusableStaged(staged: AssemblyUploadResponse | null): { unusable: number; total: number } {
   const files = staged?.staged_files ?? [];
-  return files.length > 0 && files.every((item) => UNUSABLE_FORMATS.has(item.observed_format));
+  return { unusable: files.filter((item) => UNUSABLE_FORMATS.has(item.observed_format)).length, total: files.length };
 }
 
 function formatLabel(format: string): string {
@@ -579,12 +580,17 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     // Lọc sớm theo đuôi để không tải lên thứ pipeline không có chỗ dùng; nội dung vẫn do server probe.
     const unusable = dropped.filter((file) => rejectAssemblyFileName(file.name) !== null);
     const candidates = dropped.filter((file) => rejectAssemblyFileName(file.name) === null);
+    // Chỉ ghi đè notice khi thật sự có file bị bỏ qua: notice đang hiện có thể là lời nhắc khác.
+    const skipped = unusable.length
+      ? `Đã bỏ qua ${unusable.length} file pipeline không đọc được: ${unusable.map((file) => file.name).join(", ")}.`
+      : null;
     if (!candidates.length) {
-      setError(rejectAssemblyFileName(dropped[0].name));
+      setError(`${rejectAssemblyFileName(dropped[0].name)} Đã bỏ qua: ${dropped.map((file) => file.name).join(", ")}.`);
       return;
     }
     if (entries.length + candidates.length > 100) {
       setError("Một assembly nhận tối đa 100 file upload. Hãy chia dữ liệu thành các nhóm nhỏ hơn.");
+      if (skipped) setNotice(skipped);
       return;
     }
     setAdding(true);
@@ -592,13 +598,13 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     try {
       const newItems = await Promise.all(candidates.map(async (file) => newEntry(file, await looksLikeVideo(file))));
       setEntries((current) => [...current, ...newItems]);
-      // `invalidateResolution` xoá lỗi cũ, nên lời nhắc về file bị bỏ qua phải đặt sau nó.
       invalidateResolution();
-      setNotice(unusable.length ? `Đã bỏ qua ${unusable.length} file pipeline không đọc được: ${unusable.map((file) => file.name).join(", ")}.` : null);
       setScanOrderConfirmed(false);
     } catch (cause: unknown) {
       setError(errorMessage(cause, "Không đọc được danh sách file đã chọn."));
     } finally {
+      // Sau `invalidateResolution` (hàm đó xoá error, không xoá notice) và đúng cho cả nhánh lỗi.
+      if (skipped) setNotice(skipped);
       setAdding(false);
     }
   }
@@ -986,7 +992,8 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
               {entries.map((entry) => {
                 const formats = [...new Set(entry.staged?.staged_files.map((item) => formatLabel(item.observed_format)) ?? [])];
                 const active = entry.status === "preparing" || entry.status === "uploading";
-                const unusable = unusableStaged(entry.staged);
+                const { unusable, total } = unusableStaged(entry.staged);
+                const allUnusable = total > 0 && unusable === total;
                 return (
                   <li key={entry.id} className="py-4 first:pt-0 last:pb-0">
                     <div className="flex flex-wrap items-start gap-3">
@@ -1004,9 +1011,11 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
                           {entry.staged ? formats.join(" · ") || "ZIP chưa phân loại" : entry.isVideo ? `Video · ${formatBytes(entry.file?.size ?? 0)}` : `Đang chờ server phân loại · ${formatBytes(entry.file?.size ?? 0)}`}
                           {entry.staged && ` · ${formatBytes(entry.staged.source_file.size_bytes)}`}
                         </p>
-                        {unusable && (
+                        {unusable > 0 && (
                           <p className="mt-1 text-sm text-ochre-strong">
-                            Máy chủ không nhận ra vai trò nào trong file này, nên mọi hướng xử lý đều loại nó. Bỏ chọn hoặc xoá file để phân tích tiếp.
+                            {allUnusable
+                              ? "Máy chủ không nhận ra vai trò nào trong file này, nên mọi hướng xử lý đều loại nó. Bỏ chọn hoặc xoá file để phân tích tiếp."
+                              : `${unusable}/${total} thành phần trong file này không nhận ra vai trò; mọi hướng xử lý sẽ loại riêng những thành phần đó.`}
                           </p>
                         )}
                         {entry.isVideo && entry.status !== "ready" && (
@@ -1043,7 +1052,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
                       </div>
                       <div className="flex items-center gap-2">
                         {entry.status === "ready"
-                          ? unusable
+                          ? allUnusable
                             ? <Badge tone="ochre">Không dùng được</Badge>
                             : <Badge tone="sage"><FileCheck2 aria-hidden /> Đã xác minh</Badge>
                           : null}

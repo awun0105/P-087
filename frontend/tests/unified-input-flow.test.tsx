@@ -19,12 +19,13 @@ const mocks = vi.hoisted(() => ({
   uploadAssembly: vi.fn(),
   prepareVideo: vi.fn(),
   uploadPrepared: vi.fn(),
+  search: new URLSearchParams(),
 }));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mocks.push, replace: mocks.replace }),
   usePathname: () => "/new",
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => mocks.search,
 }));
 vi.mock("@/features/studio/AuthProvider", () => ({
   useAuth: () => ({
@@ -193,6 +194,19 @@ function stagedUnknown(uploadId: string, name: string): AssemblyUploadResponse {
   };
 }
 
+function stagedMixed(uploadId: string, name: string): AssemblyUploadResponse {
+  const result = staged(uploadId, name);
+  const [member] = result.staged_files;
+  return {
+    ...result,
+    source_file: { ...result.source_file, media_type: "application/zip" },
+    staged_files: [
+      { ...member, file_id: `${member.file_id}-a`, observed_format: "point_cloud_pcd" },
+      { ...member, file_id: `${member.file_id}-b`, observed_format: "unknown" },
+    ],
+  };
+}
+
 function snapshot(revision: number) {
   return {
     schema_version: "1.0" as const,
@@ -221,6 +235,7 @@ function snapshot(revision: number) {
 describe("unified input flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.search = new URLSearchParams();
     window.sessionStorage.clear();
     mocks.prepareVideo.mockResolvedValue({ dispose: vi.fn(), file: new File(["prepared"], "normalized.mp4", { type: "video/mp4" }), frameMapFile: new File(["map"], "frame-map.jsonl"), manifest: {} });
     let nextUpload = 0;
@@ -274,6 +289,46 @@ describe("unified input flow", () => {
     expect(await screen.findByText("Không dùng được")).toBeInTheDocument();
     expect(screen.queryByText("Đã xác minh")).toBeNull();
     expect(screen.getByText(/không nhận ra vai trò nào trong file này/)).toBeInTheDocument();
+  });
+
+  it("keeps the skip notice out of the way of unrelated notices and names every rejected file", async () => {
+    const { container } = render(<UnifiedInputFlow />);
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(fileInput!, {
+      target: { files: [new File(["x"], "a.mkv", { type: "video/x-matroska" }), new File(["y"], "b.docx")] },
+    });
+    const rejected = await screen.findByText(/Pipeline không đọc được loại file này/);
+    expect(rejected).toHaveTextContent("a.mkv");
+    expect(rejected).toHaveTextContent("b.docx");
+
+    // Lô toàn file dùng được không được xoá lời nhắc đang hiện của việc khác.
+    fireEvent.change(fileInput!, { target: { files: [new File(["z"], "video-a.mp4", { type: "video/mp4" })] } });
+    expect(await screen.findByText("video-a.mp4")).toBeInTheDocument();
+    expect(screen.queryByText(/Đã bỏ qua/)).toBeNull();
+  });
+
+  it("flags only the unclassified members of a mixed archive", async () => {
+    mocks.stage.mockImplementation(async (uploadId: string) => stagedMixed(uploadId, "goi.zip"));
+    const { container } = render(<UnifiedInputFlow />);
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(fileInput!, { target: { files: [new File(["x"], "video-a.mp4", { type: "video/mp4" })] } });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
+    expect(await screen.findByText("Đã xác minh")).toBeInTheDocument();
+    expect(screen.queryByText("Không dùng được")).toBeNull();
+    expect(screen.getByText(/1\/2 thành phần trong file này không nhận ra vai trò/)).toBeInTheDocument();
+  });
+
+  it("đổi hướng link cũ của /new sang trang riêng và giữ tham số còn lại", async () => {
+    mocks.search = new URLSearchParams("source=gaussian&upload=upload-9");
+    const first = render(<UnifiedInputFlow />);
+    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/new/import-scene?upload=upload-9"));
+    first.unmount();
+
+    mocks.replace.mockClear();
+    mocks.search = new URLSearchParams("sample=aisle-cw");
+    render(<UnifiedInputFlow />);
+    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/new/try-demo?sample=aisle-cw"));
   });
 
   it("prepares each dropped video before upload and requires an explicit choice for ambiguous videos", async () => {
