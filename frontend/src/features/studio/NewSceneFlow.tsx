@@ -145,7 +145,7 @@ function NewSceneFlowBody({ source }: { source: ReadyMadeSource }) {
       <div className="mt-8 space-y-4">
         {canEdit(me) ? (
           <Link href={SOURCE_ROUTES.video} className="text-sm font-medium text-ember-strong hover:underline">
-            ← Về khung tải input
+            ← Về trang tạo scene
           </Link>
         ) : (
           <Link href="/login" className="text-sm font-medium text-ember-strong hover:underline">

@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/studio/feedback";
 import { Badge, Button, Card, EmptyState, Notice, ProgressBar, buttonVariants } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { ASSEMBLY_ACCEPT, rejectAssemblyFileName } from "@/features/studio/inputKinds";
+import { describeDiagnostic, describeFact, routeName } from "@/features/studio/inputMessages";
 import { canEdit } from "@/lib/api/auth";
 import {
   createInputAssembly,
@@ -204,32 +205,17 @@ function evidence<T>(value: T | null): EvidenceValue<T> | null {
   };
 }
 
-function candidateLabel(candidate: InputResolutionCandidate): string {
-  if (candidate.candidate_kind === "gaussian_view_import") {
-    return `Xem scene 3DGS · ${candidate.source_format.replaceAll("_", " ")}`;
-  }
-  const labels: Record<string, string> = {
-    R1: "RGB only",
-    R2: "RGB + LiDAR map đã đăng ký",
-    R3: "RGB + một cloud tĩnh",
-    R4: "RGB + chuỗi scan và trajectory",
-    R5: "RGB + scan, cần ước lượng trajectory",
-    R6: "RGB + LiDAR và metadata cảm biến",
-  };
-  return `${candidate.recipe_group} · ${labels[candidate.recipe_group]}`;
-}
-
 function candidateStateLabel(state: CandidateState): string {
   return {
     ready: "Sẵn sàng",
-    needs_input: "Cần lựa chọn",
+    needs_input: "Cần bổ sung",
     pending_verification: "Đang chờ xác minh",
     unsupported: "Chưa hỗ trợ",
     invalid: "Không hợp lệ",
   }[state];
 }
 
-/** Probe không ra vai trò nào: resolver sẽ loại file khỏi mọi recipe, nên đừng báo "đã xác minh". */
+/** Máy chủ không nhận ra vai trò nào trong file: mọi cách xử lý sẽ loại nó, nên đừng báo "đã xác minh". */
 const UNUSABLE_FORMATS = new Set(["unknown"]);
 
 /** ZIP được stage theo từng thành viên, nên một upload có thể vừa có phần dùng được vừa không. */
@@ -607,7 +593,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       return;
     }
     if (entries.length + candidates.length > 100) {
-      setError("Một assembly nhận tối đa 100 file upload. Hãy chia dữ liệu thành các nhóm nhỏ hơn.");
+      setError("Một lần xử lý nhận tối đa 100 file. Hãy chia dữ liệu thành các nhóm nhỏ hơn.");
       if (skipped) setNotice(skipped);
       return;
     }
@@ -823,7 +809,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     const notReady = includedEntries.some((item) => item.status !== "ready" || !item.staged);
     if (auto && (notReady || !stagedEntries.length || (hasMixedSceneKinds && !nextIntent))) return;
     if (notReady) {
-      setError("Hãy hoàn tất, thử lại hoặc bỏ khỏi assembly mọi file đang chờ upload.");
+      setError("Hãy hoàn tất, thử lại hoặc bỏ mọi file đang chờ tải lên.");
       return;
     }
     if (!stagedEntries.length) {
@@ -967,16 +953,31 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     return { fileId, name: file?.archive_member?.member_path ?? file?.source_file.original_name ?? fileId };
   });
   const loginHref = `${pathname}${typeof window === "undefined" ? "" : window.location.search}`;
+  // Mọi lý do khiến nút tạo scene đang tắt, để người dùng không phải đoán ô nào còn thiếu.
+  const createBlockers: string[] = [];
+  if (activeCandidate && report?.state === "ready") {
+    if (!sceneName.trim()) createBlockers.push("Nhập tên scene.");
+    if (activeCandidate.candidate_kind === "video_recipe") {
+      if (!dataOwner.trim()) createBlockers.push("Nhập người hoặc đơn vị sở hữu dữ liệu.");
+      if (!dataOrigin) createBlockers.push("Chọn nguồn dữ liệu.");
+      if (!dataPurpose.trim()) createBlockers.push("Nhập mục đích sử dụng.");
+      if (!rights) createBlockers.push("Xác nhận bạn có quyền sử dụng dữ liệu.");
+      if (!anonymized) createBlockers.push("Xác nhận video không có khuôn mặt/biển số hoặc đã được làm mờ.");
+      if (!retention) createBlockers.push("Xác nhận việc lưu dữ liệu và kết quả.");
+      if (processingBlocked) createBlockers.push("Cấu hình xử lý chưa được xác nhận hoặc vượt tài nguyên máy.");
+      if (guestQuotaEmpty) createBlockers.push("Đã dùng hết lượt chạy Guest hôm nay.");
+    }
+  }
 
   if (me === null) {
-    return <main className="mx-auto max-w-4xl px-4 pt-10 pb-20 sm:px-6"><PageHeader title="Nhận diện input" description="Một khung upload cho video, LiDAR, metadata và scene 3DGS." /><p className="mt-8 text-sm text-ink-muted" role="status">Đang kiểm tra quyền truy cập…</p></main>;
+    return <main className="mx-auto max-w-4xl px-4 pt-10 pb-20 sm:px-6"><PageHeader title="Tạo scene mới" description="Một khung tải lên cho video, LiDAR, metadata và scene 3DGS." /><p className="mt-8 text-sm text-ink-muted" role="status">Đang kiểm tra quyền truy cập…</p></main>;
   }
 
   if (!canEdit(me)) {
     return (
       <main className="mx-auto max-w-4xl px-4 pt-10 pb-20 sm:px-6">
-        <PageHeader title="Nhận diện input" description="Một khung upload cho video, LiDAR, metadata và scene 3DGS." />
-        <EmptyState icon={<FileUp aria-hidden />} title="Đăng nhập để tải input lên" className="mt-8" action={<a href={`/login?next=${encodeURIComponent(loginHref)}`} className={buttonVariants({})}>Đăng nhập</a>}>
+        <PageHeader title="Tạo scene mới" description="Một khung tải lên cho video, LiDAR, metadata và scene 3DGS." />
+        <EmptyState icon={<FileUp aria-hidden />} title="Đăng nhập để tải dữ liệu lên" className="mt-8" action={<a href={`/login?next=${encodeURIComponent(loginHref)}`} className={buttonVariants({})}>Đăng nhập</a>}>
           Video được chuẩn bị ở 720p mặc định trước khi gửi; file khác được phân loại theo nội dung sau upload.
         </EmptyState>
       </main>
@@ -985,7 +986,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
 
   return (
     <main className="mx-auto max-w-5xl px-4 pt-10 pb-20 sm:px-6">
-      <PageHeader title="Tải input và chọn hướng xử lý" description="Thả video, LiDAR, calibration, trajectory, frame times, PLY/SOG hoặc ZIP vào cùng một khung. Máy chủ kiểm tra nội dung rồi đề xuất các luồng thực sự có thể chạy." />
+      <PageHeader title="Tạo scene từ video" description="Thả video, LiDAR, calibration, quỹ đạo, thời điểm frame, PLY/SOG hoặc ZIP vào cùng một khung. Hệ thống đọc nội dung rồi tự chọn cách xử lý phù hợp." />
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-ink-muted">Tải lên và phân tích chưa tạo job hay trừ quota.</p>
         <a className="text-sm font-medium text-ember-strong hover:underline" href="/new/try-demo">Xem scene mẫu đã xử lý</a>
@@ -1020,8 +1021,8 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
           <Card className="p-5 sm:p-6">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h2 className="text-base font-bold">Inventory</h2>
-                <p className="mt-1 text-sm text-ink-muted">File upload đã xác minh mới được đưa vào assembly. Bỏ chọn file sẽ loại file đó khỏi lần phân tích tiếp theo.</p>
+                <h2 className="text-base font-bold">Danh sách file</h2>
+                <p className="mt-1 text-sm text-ink-muted">Chỉ file đã tải lên và được xác minh mới được dùng. Bỏ chọn một file sẽ loại nó khỏi lần phân tích kế tiếp.</p>
               </div>
               <Button variant="secondary" onClick={() => void uploadPending()} disabled={busy || adding || !entries.some((item) => item.included && item.status !== "ready" && item.file)}>
                 {busy ? <><Loader2 className="size-4 animate-spin" aria-hidden /> Đang xử lý</> : <>Tải file đã chọn lên</>}
@@ -1038,7 +1039,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
                     <div className="flex flex-wrap items-start gap-3">
                       <input
                         type="checkbox"
-                        aria-label={`Đưa ${entry.originalName} vào assembly`}
+                        aria-label={`Đưa ${entry.originalName} vào bộ file`}
                         checked={entry.included}
                         disabled={busy || active}
                         onChange={(event) => setIncluded(entry.id, event.target.checked)}
@@ -1123,7 +1124,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       {timestampFiles.length > 0 && (
         <Card className="mt-5 p-5 sm:p-6">
           <h2 className="text-base font-bold">Gán vai trò cho file timestamp</h2>
-          <p className="mt-1 text-sm text-ink-muted">Các dòng số không tự cho biết là thời gian camera hay LiDAR. Chọn đúng file cho từng cảm biến; resolver sẽ kiểm tra thứ tự và số dòng.</p>
+          <p className="mt-1 text-sm text-ink-muted">Các dòng số không tự cho biết là thời gian camera hay LiDAR. Chọn đúng file cho từng cảm biến; hệ thống sẽ kiểm tra thứ tự và số dòng.</p>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <label htmlFor={ids.rgbTimes} className="text-sm">File timestamp của frame RGB
               <select id={ids.rgbTimes} value={rgbFrameTimesFileId} onChange={(event) => { const fileId = event.target.value; setRgbFrameTimesFileId(fileId); if (fileId !== rgbFrameTimesFileId) setRgbTimestampUnit(""); if (fileId && fileId === lidarScanTimesFileId) { setLidarScanTimesFileId(""); setLidarTimestampUnit(""); } setBindings((current) => current.filter((item) => item.role !== "rgb_frame_times" && !(fileId && fileId === lidarScanTimesFileId && item.role === "lidar_scan_times"))); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
@@ -1226,9 +1227,9 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
 
       {entries.length > 0 && (
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-          <p className="max-w-2xl text-sm text-ink-muted">Resolver chỉ đề xuất input recipe. Trạng thái sẵn sàng không đồng nghĩa calibration, alignment hoặc collision QA đã đạt.</p>
+          <p className="max-w-2xl text-sm text-ink-muted">Hệ thống tự chọn cách xử lý phù hợp từ các file bạn thêm. Sẵn sàng chỉ nghĩa là dữ liệu chạy được, chưa phải kết quả kiểm tra hình học hay va chạm đã đạt.</p>
           <Button onClick={() => void analyze()} disabled={busy || adding || !stagedEntries.length || includedEntries.some((item) => item.status !== "ready") || (hasMixedSceneKinds && !intent)}>
-            {busy ? <><Loader2 className="size-4 animate-spin" aria-hidden /> Đang phân tích</> : "Phân tích input"}
+            {busy ? <><Loader2 className="size-4 animate-spin" aria-hidden /> Đang phân tích</> : "Phân tích lại"}
           </Button>
         </div>
       )}
@@ -1240,18 +1241,18 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         <section className="mt-6 space-y-4" aria-labelledby="resolution-heading">
           <div>
             <h2 id="resolution-heading" className="text-lg font-bold">Kết quả nhận diện và hướng xử lý</h2>
-            <p className="mt-1 text-sm text-ink-muted">Kết quả được gắn với assembly revision {report.assembly_revision}; thay đổi file hoặc khai báo sẽ yêu cầu phân tích lại.</p>
+            <p className="mt-1 text-sm text-ink-muted">Kết quả ứng với bộ file hiện tại (lần {report.assembly_revision}); đổi file hoặc khai báo thì hệ thống tự phân tích lại.</p>
           </div>
           {report.state !== "ready" && <Notice tone={report.state === "invalid" ? "rust" : "ochre"}>{report.state === "needs_input" ? "Cần bổ sung lựa chọn hoặc khai báo trước khi tiếp tục." : report.state === "pending_verification" ? "Một hoặc nhiều file vẫn đang chờ xác minh." : report.state === "unsupported" ? "Chưa có runtime đủ điều kiện cho các hướng này." : "Có dữ liệu mâu thuẫn hoặc không hợp lệ; sửa input rồi phân tích lại."}</Notice>}
           {report.missing_facts.length > 0 && (
             <Card className="p-5">
               <h3 className="text-sm font-semibold">Thông tin còn thiếu</h3>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink-muted">
-                {report.missing_facts.map((fact) => <li key={`${fact.code}:${fact.related_file_ids.join(",")}`}>{fact.description}</li>)}
+                {report.missing_facts.map((fact) => <li key={`${fact.code}:${fact.related_file_ids.join(",")}`}>{describeFact(fact)}</li>)}
               </ul>
             </Card>
           )}
-          {report.candidates.length === 0 ? <EmptyState icon={<FileUp aria-hidden />} title="Chưa có recipe phù hợp">Thêm video RGB hoặc sửa file theo các lý do ở trên.</EmptyState> : (
+          {report.candidates.length === 0 ? <EmptyState icon={<FileUp aria-hidden />} title="Chưa có cách xử lý phù hợp">Thêm video RGB hoặc sửa file theo các lý do ở trên.</EmptyState> : (
             <div className="grid gap-3">
               {report.candidates.map((candidate) => {
                 const recommended = report.recommended_candidate_id === candidate.candidate_id;
@@ -1266,15 +1267,21 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
                   <Card key={candidate.candidate_id} className={`p-5 ${recommended ? "border-ember" : ""}`}>
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
-                        <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{candidateLabel(candidate)}</h3><Badge tone={candidate.state === "ready" ? "sage" : candidate.state === "unsupported" || candidate.state === "invalid" ? "rust" : "ochre"}>{candidateStateLabel(candidate.state)}</Badge>{candidate.runtime.status !== "qualified" && <Badge tone="neutral">Runtime: {candidate.runtime.status}</Badge>}</div>
-                        <p className="mt-1 text-xs text-ink-muted">{candidate.runtime.reason_codes.join(" · ") || candidate.runtime.runtime_id || "Runtime qualification chưa được xác nhận."}</p>
+                        <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{routeName(candidate)}</h3><Badge tone={candidate.state === "ready" ? "sage" : candidate.state === "unsupported" || candidate.state === "invalid" ? "rust" : "ochre"}>{candidateStateLabel(candidate.state)}</Badge></div>
+                        {candidate.runtime.status !== "qualified" && (
+                          <p className="mt-1 text-xs text-ink-muted">Máy xử lý chưa sẵn sàng cho cách này.</p>
+                        )}
                         {candidateNames.length > 0 && <p className="mt-2 text-xs text-ink-muted">Input: {candidateNames.join(" · ")}</p>}
-                        {excludedNames.length > 0 && <p className="mt-1 text-xs text-ink-muted">Đang loại khỏi recipe: {excludedNames.join(" · ")}</p>}
+                        {excludedNames.length > 0 && <p className="mt-1 text-xs text-ink-muted">Bỏ qua (không có chỗ dùng): {excludedNames.join(" · ")}</p>}
                       </div>
-                      {candidate.state === "needs_input" && <Button size="sm" variant="secondary" onClick={() => void chooseCandidate(candidate)} disabled={busy || cannotUse}>Chọn hướng này</Button>}
+                      {candidate.state === "needs_input" && <Button size="sm" variant="secondary" onClick={() => void chooseCandidate(candidate)} disabled={busy || cannotUse}>Dùng cách này</Button>}
                     </div>
-                    {candidate.required_facts.length > 0 && <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-ink-muted">{candidate.required_facts.map((fact) => <li key={`${fact.code}:${fact.related_file_ids.join(",")}`}>{fact.description}</li>)}</ul>}
-                    {candidate.diagnostics.length > 0 && <ul className="mt-3 space-y-1 text-sm">{candidate.diagnostics.map((item) => <li key={item.code} className={item.severity === "error" ? "text-rust" : "text-ink-muted"}>{item.description}</li>)}</ul>}
+                    {candidate.required_facts.length > 0 && <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-ink-muted">{candidate.required_facts.map((fact) => <li key={`${fact.code}:${fact.related_file_ids.join(",")}`}>{describeFact(fact)}</li>)}</ul>}
+                    {candidate.diagnostics.length > 0 && <ul className="mt-3 space-y-1 text-sm">{candidate.diagnostics.map((item) => <li key={item.code} className={item.severity === "error" ? "text-rust" : "text-ink-muted"}>{describeDiagnostic(item)}</li>)}</ul>}
+                    <details className="mt-3 text-xs text-ink-muted">
+                      <summary className="cursor-pointer">Chi tiết kỹ thuật</summary>
+                      <p className="mt-1">Nhóm xử lý: {candidate.candidate_kind === "video_recipe" ? candidate.recipe_group : candidate.source_format} · Runtime: {candidate.runtime.status}{candidate.runtime.reason_codes.length > 0 ? ` (${candidate.runtime.reason_codes.join(" · ")})` : ""}</p>
+                    </details>
                   </Card>
                 );
               })}
@@ -1284,8 +1291,8 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
           {report.state === "ready" && activeCandidate && activeCandidate.state === "ready" && (
             <form onSubmit={submitReadyRoute} className="space-y-4">
               <Card className="space-y-4 p-5 sm:p-6">
-                <div className="flex items-center gap-2"><Check className="size-4 text-sage" aria-hidden /><h3 className="font-semibold">Recipe đã được resolver xác nhận là có thể dispatch</h3></div>
-                <p className="text-sm text-ink-muted">{candidateLabel(activeCandidate)} · runtime qualified. Đây là kiểm tra tính khả thi của input, chưa phải kết quả QA hình học hoặc an toàn vật lý.</p>
+                <div className="flex items-center gap-2"><Check className="size-4 text-sage" aria-hidden /><h3 className="font-semibold">Đã sẵn sàng tạo scene</h3></div>
+                <p className="text-sm text-ink-muted">{routeName(activeCandidate)}. Đây mới là kiểm tra dữ liệu có chạy được, chưa phải kết quả kiểm tra hình học hay an toàn vật lý.</p>
                 <label htmlFor={ids.name} className="block text-sm font-medium">Tên scene</label>
                 <input id={ids.name} value={sceneName} onChange={(event) => setSceneName(event.target.value)} maxLength={200} required className="h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3 text-sm" />
                 {activeCandidate.candidate_kind === "video_recipe" && (
@@ -1307,8 +1314,14 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
                   </>
                 )}
                 {activeCandidate.candidate_kind === "gaussian_view_import" && <p className="text-sm text-ink-muted">Import chỉ đưa scene 3DGS vào viewer hiện tại. Chưa có luồng xử lý tiếp scene đã import.</p>}
-                <Button type="submit" disabled={submitting || !sceneName.trim() || (activeCandidate.candidate_kind === "video_recipe" && (!dataOrigin || !dataOwner.trim() || !dataPurpose.trim() || !rights || !anonymized || !retention || processingBlocked || guestQuotaEmpty))}>
-                  {submitting ? <><Loader2 className="size-4 animate-spin" aria-hidden /> Đang gửi</> : activeCandidate.candidate_kind === "gaussian_view_import" ? "Mở scene 3DGS" : <><Play className="size-4" aria-hidden /> Tạo job theo recipe này</>}
+                {createBlockers.length > 0 && (
+                  <div className="rounded-lg border border-line p-3 text-sm text-ink-muted" role="status">
+                    <p className="font-medium text-ink">Còn thiếu để tạo scene:</p>
+                    <ul className="mt-1 list-disc space-y-0.5 pl-5">{createBlockers.map((item) => <li key={item}>{item}</li>)}</ul>
+                  </div>
+                )}
+                <Button type="submit" disabled={submitting || createBlockers.length > 0}>
+                  {submitting ? <><Loader2 className="size-4 animate-spin" aria-hidden /> Đang gửi</> : activeCandidate.candidate_kind === "gaussian_view_import" ? "Mở scene 3DGS" : <><Play className="size-4" aria-hidden /> Tạo scene</>}
                 </Button>
               </Card>
             </form>

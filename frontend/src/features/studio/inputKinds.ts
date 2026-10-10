@@ -47,7 +47,7 @@ const INPUT_KIND_LABELS: Record<InputKind, string> = {
 export function rejectGaussianFileName(name: string): string | null {
   return /\.(ply|sog|zip)$/i.test(name)
     ? null
-    : "Mở 3DGS chỉ nhận .ply, .sog hoặc .zip có PLY. Dùng khung tải input chung cho video và metadata.";
+    : "Mở 3DGS chỉ nhận .ply, .sog hoặc .zip có PLY. Dùng trang Tạo scene cho video và metadata.";
 }
 
 /** Record cũ (trước ADR 0004) không có `input_kind` là video. */

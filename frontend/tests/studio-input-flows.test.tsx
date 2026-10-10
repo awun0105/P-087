@@ -36,7 +36,7 @@ describe("hai cửa vào dữ liệu đã dựng sẵn", () => {
     const demo = render(<NewSceneFlow source="sample" />);
     expect(await screen.findByText("Chưa có video mẫu")).toBeInTheDocument();
     expect(screen.queryByLabelText(/Kéo file 3DGS/)).toBeNull();
-    expect(screen.getByRole("link", { name: /Về khung tải input/ })).toHaveAttribute("href", "/new/import-video");
+    expect(screen.getByRole("link", { name: /Về trang tạo scene/ })).toHaveAttribute("href", "/new/import-video");
     expect(createImport).not.toHaveBeenCalled();
     demo.unmount();
 
@@ -46,7 +46,7 @@ describe("hai cửa vào dữ liệu đã dựng sẵn", () => {
       ".ply,.sog,.zip,application/zip,application/x-sog",
     );
     expect(screen.getByText(/PLY\/SOG hoặc ZIP gồm PLY \+ COLMAP/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Về khung tải input/ })).toHaveAttribute("href", "/new/import-video");
+    expect(screen.getByRole("link", { name: /Về trang tạo scene/ })).toHaveAttribute("href", "/new/import-video");
   });
 
   it("video tải ở nhánh 3DGS được nối sang khung tải input chung thay vì bắt tải lại", async () => {
