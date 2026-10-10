@@ -15,6 +15,8 @@ import { GeometryBadge, MetricBadge, ModeButton, SaveStatus } from "@/features/s
 import { DemoControls } from "@/features/studio/scene/DemoControls";
 import { SceneTabs, type SceneTabItem } from "@/features/studio/scene/SceneTabs";
 import { GAUSSIAN_EDIT_ENABLED, metricState, stageState, type Preview, type SceneInfo, type StudioMode, type Tab } from "@/features/studio/scene/state";
+import { ObjectifyContext } from "@/features/studio/scene/objectifyContext";
+import { useObjectifyState } from "@/features/studio/scene/useObjectify";
 import { progressSceneStatus } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
 import { getJob, getPreview, getProject, jobArtifactContentUrl } from "@/lib/api/endpoints";
@@ -256,7 +258,13 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
   // Tab mặc định theo tình huống; người dùng đổi tab thì giữ lựa chọn đó (stage mới không cưỡng ép đổi màn).
   const requestedTab = params.get("tab");
   const selected: Tab = requestedTab === "progress" || requestedTab === "studio" || requestedTab === "review" || requestedTab === "results" ? requestedTab : tab ?? "progress";
-  const status = progress ? progressSceneStatus(progress) : null;
+  // Một trạng thái tách vật thể cho cả trang: hàng bước ở Tiến trình, thông báo trong Studio, chuông và huy hiệu đầu trang.
+  const objectify = useObjectifyState({
+    jobId,
+    enabled: sceneReady,
+    onRevision: (revision) => { setSave({ status: "saved", revision }); setPollingKey((k) => k + 1); },
+  });
+  const status = progress ? progressSceneStatus(progress, objectify.state?.awaiting_choice === true) : null;
   const studioMode: StudioMode = mode === "metric" && !waitingMetric ? "scene" : mode;
 
   const tabs: SceneTabItem[] = [
@@ -282,6 +290,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
   }, [current]);
 
   return (
+    <ObjectifyContext.Provider value={objectify}>
     <main className="flex h-[calc(100dvh-3rem)] flex-col">
       <div className="relative z-20 flex flex-wrap items-center gap-2 border-b border-line bg-paper-raised px-4 py-3 sm:px-6">
         <div className="mr-2 min-w-0">
@@ -353,7 +362,6 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
             retryDisabled={busy || guestQuotaExhausted}
             retryHint={guestQuotaExhausted ? "Đã hết lượt Guest hôm nay; lượt được đặt lại lúc 00:00." : undefined}
             onChanged={() => setPollingKey((k) => k + 1)}
-            onSceneRevision={(revision) => setSave({ status: "saved", revision })}
             onCancel={() => {
               if (window.confirm("Huỷ xử lý scene này? Tiến trình trên GPU sẽ dừng.")) void act(() => cancelJob(jobId), "Đã gửi yêu cầu huỷ. Trạng thái được cập nhật từ máy chủ.");
             }}
@@ -392,5 +400,6 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
         />}
       </div>
     </main>
+    </ObjectifyContext.Provider>
   );
 }

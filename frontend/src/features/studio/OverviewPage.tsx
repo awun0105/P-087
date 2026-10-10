@@ -8,7 +8,7 @@ import { useCallback, useState } from "react";
 
 import { Badge, Button, Card, Notice, buttonVariants } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
-import { sceneStatus } from "@/features/studio/sceneStatus";
+import { sceneSummaryStatus } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
 import { canEdit } from "@/lib/api/auth";
 import { listImports, listScenes } from "@/lib/api/studio";
@@ -70,8 +70,8 @@ function WorkSummary() {
   }, []);
   usePolling(load, 20000, true);
   const scenes = snapshot?.scenes;
-  const running = scenes?.filter((scene) => sceneStatus(scene.latest_job, scene.preview_ready, scene.awaiting_anonymization_review).group === "running").length;
-  const waiting = scenes?.filter((scene) => ["action", "failed"].includes(sceneStatus(scene.latest_job, scene.preview_ready, scene.awaiting_anonymization_review).group)) ?? [];
+  const running = scenes?.filter((scene) => sceneSummaryStatus(scene).group === "running").length;
+  const waiting = scenes?.filter((scene) => ["action", "failed"].includes(sceneSummaryStatus(scene).group)) ?? [];
   const stats = [
     { label: "Scene từ video", value: scenes?.length },
     { label: "Đang xử lý", value: running },
@@ -92,7 +92,7 @@ function WorkSummary() {
           <Link href="/scenes?filter=needs_action" className="text-sm font-medium text-ember-strong hover:underline">Xem tất cả</Link>
         </div>
         <ul className="mt-3 divide-y divide-line">{waiting.slice(0, 5).map((scene) => {
-          const status = sceneStatus(scene.latest_job, scene.preview_ready, scene.awaiting_anonymization_review);
+          const status = sceneSummaryStatus(scene);
           return <li key={scene.project.project_id}><Link href={`/scenes/${encodeURIComponent(scene.latest_job!.job_id)}`} className="flex flex-wrap items-center justify-between gap-2 rounded py-3 focus-visible:outline-2 focus-visible:outline-ember"><span className="min-w-0 flex-1 truncate text-sm font-medium">{scene.project.name}</span><Badge tone={status.tone}>{status.label}</Badge><ArrowRight className="size-4 text-ember-strong" aria-hidden /></Link></li>;
         })}</ul>
       </Card>}

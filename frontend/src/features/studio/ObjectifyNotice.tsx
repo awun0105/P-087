@@ -3,7 +3,7 @@
 import { Boxes, Loader2, RefreshCw } from "lucide-react";
 
 import { Button, Notice } from "@/components/studio/primitives";
-import { useObjectify } from "@/features/studio/scene/useObjectify";
+import { useObjectify } from "@/features/studio/scene/objectifyContext";
 import type { ObjectifyMode } from "@/lib/api/studio";
 
 /**
@@ -16,7 +16,7 @@ export function ObjectifyNotice({ jobId, revision, onRevision }: { jobId: string
   if (!state) return null;
   const send = async (mode: ObjectifyMode) => {
     if (mode === "objectify" && !state.awaiting_choice && !window.confirm("Chạy lại tách theo vật sẽ thay toàn bộ vật hiện có bằng tập ứng viên mới (hoàn tác được). Tiếp tục?")) return;
-    await sendRequest(mode);
+    await sendRequest(mode, revision);
   };
 
   const pending = state.status === "queued" || state.status === "running";

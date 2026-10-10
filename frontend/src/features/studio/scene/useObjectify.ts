@@ -13,9 +13,10 @@ const POLL_MS = 5000;
  * Trạng thái "tách scene theo vật" của một scene và các thao tác chạy lại / dùng hộp ứng viên / hủy.
  *
  * Việc nặng do worker làm; hook chỉ gửi yêu cầu, hỏi trạng thái định kỳ khi còn xếp hàng hay đang chạy, và báo khi có
- * revision mới. Dùng chung cho thông báo trong Studio (`ObjectifyNotice`) và hàng bước "Tách vật thể" ở tab Tiến trình.
+ * revision mới. Trang scene gọi hook này một lần và chia sẻ qua `ObjectifyContext` (xem `objectifyContext.tsx`) để thông
+ * báo trong Studio, hàng bước "Tách vật thể" ở tab Tiến trình, chuông và trạng thái đầu trang luôn cùng một trạng thái.
  */
-export function useObjectify({
+export function useObjectifyState({
   jobId,
   revision,
   enabled = true,
@@ -69,8 +70,8 @@ export function useObjectify({
     return () => window.clearInterval(timer);
   }, [enabled, pending]);
 
-  const send = useCallback(async (mode: ObjectifyMode) => {
-    const expected = revision ?? state?.scene_revision;
+  const send = useCallback(async (mode: ObjectifyMode, expectedRevision?: string) => {
+    const expected = expectedRevision ?? revision ?? state?.scene_revision;
     if (!expected) {
       setError("Chưa biết revision hiện tại của scene. Tải lại trang rồi thử lại.");
       return;

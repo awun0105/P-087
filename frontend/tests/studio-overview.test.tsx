@@ -285,6 +285,25 @@ describe("Tổng quan và thư viện riêng", () => {
   });
 });
 
+describe("job xong nhưng tách vật thể chờ người dùng chọn", () => {
+  it("trạng thái là cần xử lý, không phải 'Đã dựng scene', và chỉ khi job đã SUCCEEDED", async () => {
+    const { sceneStatus, sceneSummaryStatus } = await import("@/features/studio/sceneStatus");
+    const finished = scene("job-o", "SUCCEEDED");
+    expect(sceneSummaryStatus({ ...finished, awaiting_object_choice: true })).toMatchObject({ label: "Cần chọn cách tách vật thể", group: "action", active: false });
+    expect(sceneSummaryStatus(finished)).toMatchObject({ label: "Đã dựng scene", group: "done" });
+    // Job còn đang chạy thì trạng thái pipeline mới là điều đúng.
+    expect(sceneStatus(scene("job-r", "RUNNING").latest_job, false, false, true).group).toBe("running");
+  });
+
+  it("Tổng quan đưa scene đó vào 'Scene đang chờ bạn'", async () => {
+    const waiting = { ...scene("job-o", "SUCCEEDED"), awaiting_object_choice: true };
+    vi.mocked(listScenes).mockResolvedValue({ ok: true, data: { scenes: [waiting] } });
+    render(<OverviewPage />);
+    expect(await screen.findByRole("link", { name: /Kho job-o/ })).toHaveTextContent("Cần chọn cách tách vật thể");
+    expect(within(screen.getByText("Cần bạn xử lý", { selector: "dt" }).parentElement!).getByText("1")).toBeInTheDocument();
+  });
+});
+
 describe("trạng thái scene chờ xem bản đã che", () => {
   it("được tính là cần xử lý, không active, và ưu tiên hơn trạng thái worker", async () => {
     const { sceneStatus } = await import("@/features/studio/sceneStatus");

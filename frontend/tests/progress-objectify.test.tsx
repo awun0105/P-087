@@ -3,7 +3,9 @@ import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@te
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ProgressTab } from "@/features/studio/scene/ProgressTab";
-import { useObjectify } from "@/features/studio/scene/useObjectify";
+import { ObjectifyContext } from "@/features/studio/scene/objectifyContext";
+import { useObjectifyState } from "@/features/studio/scene/useObjectify";
+import { ObjectifyNotice } from "@/features/studio/ObjectifyNotice";
 import { ApiError } from "@/lib/api/client";
 import { STUDIO_STAGES } from "@/features/studio/stages";
 import { cancelObjectify, getObjectifyState, requestObjectify, type ObjectifyState } from "@/lib/api/studio";
@@ -130,7 +132,7 @@ describe("useObjectify: báo revision mới khi yêu cầu do chính nó theo d�
         .mockResolvedValueOnce(failed)
         .mockResolvedValue(objectify({ status: "done", mode: "boxes", scene_revision: "rev-002", result_revision: "rev-002", object_centric: false }));
       vi.mocked(requestObjectify).mockResolvedValue(objectify({ status: "queued", mode: "boxes", object_centric: false, awaiting_choice: true }));
-      const { result } = renderHook(() => useObjectify({ jobId: "job-1", onRevision }));
+      const { result } = renderHook(() => useObjectifyState({ jobId: "job-1", onRevision }));
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
       expect(result.current.state?.awaiting_choice).toBe(true);
       await act(async () => { await result.current.send("boxes"); });
@@ -145,5 +147,35 @@ describe("useObjectify: báo revision mới khi yêu cầu do chính nó theo d�
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+function SharedPage({ onRevision }: { onRevision?: (revision: string) => void }) {
+  // Giống ScenePage: giữ một trạng thái duy nhất và chia sẻ cho tab Tiến trình lẫn thông báo trong Studio.
+  const objectify = useObjectifyState({ jobId: "job-1", onRevision });
+  return (
+    <ObjectifyContext.Provider value={objectify}>
+      <ProgressTab jobId="job-1" progress={done} info={null} busy={false} canCancel={false} canAccept onCancel={vi.fn()} />
+      <ObjectifyNotice jobId="job-1" revision="rev-001" onRevision={vi.fn()} />
+    </ObjectifyContext.Provider>
+  );
+}
+
+describe("một trạng thái dùng chung trong trang scene", () => {
+  it("thao tác ở hàng bước làm thông báo trong Studio đổi theo ngay, không gọi API đọc thêm", async () => {
+    vi.mocked(getObjectifyState).mockResolvedValue(failed);
+    vi.mocked(requestObjectify).mockResolvedValue(objectify({ status: "queued", mode: "boxes", object_centric: false, awaiting_choice: true }));
+    render(<SharedPage />);
+    // Cả hai nơi cùng báo lỗi từ một lần đọc.
+    expect(await within(row()).findByRole("alert")).toBeInTheDocument();
+    expect(screen.getAllByText(/Tách theo vật không thành công/).length).toBeGreaterThanOrEqual(2);
+    expect(getObjectifyState).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(row()).getByRole("button", { name: "Dùng hộp ứng viên" }));
+    // Thông báo trong Studio đổi sang "đang dựng" cùng lúc, không còn nút cũ gây 409.
+    expect(await screen.findByText(/Đang dựng hộp ứng viên/)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Hủy yêu cầu" }).length).toBe(2);
+    expect(screen.queryAllByRole("button", { name: "Dùng hộp ứng viên" })).toHaveLength(0);
+    expect(getObjectifyState).toHaveBeenCalledTimes(1);
   });
 });
