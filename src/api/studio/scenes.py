@@ -19,7 +19,7 @@ from src.api.auth import (
 from src.api.ownership import authorize_upload_mutation, owner_mutation_allowed
 from src.api.studio import deps
 from src.api.studio.error_view import filter_job_progress_errors, filter_manifest_errors
-from src.models.contracts.manifests import JobManifest, JobStatus
+from src.models.contracts.manifests import JobManifest, JobStatus, StageId, StageStatus
 from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.auth import Actor, UserRecord, actor_of, with_current_role
 from src.services.orchestration.auth.quota_ledger import GuestQuotaExceededError, GuestQuotaIdempotencyConflictError
@@ -44,6 +44,9 @@ from src.services.orchestration.projects import (
     ProjectNotFoundError,
 )
 from src.services.orchestration.projects.models import UploadProjectInput
+from src.services.orchestration.projects.registry import ProjectRegistry
+from src.services.orchestration.scene.errors import SceneError
+from src.services.orchestration.scene.objectify import AWAITING_CHOICE
 from src.services.orchestration.uploads import UploadNotFoundError
 
 router = APIRouter()
@@ -78,6 +81,9 @@ class SceneSummary(BaseModel):
     #: Job mới nhất đã che xong frame và đang chờ người upload xem bản đã che; danh sách cần biết để không gọi nó là
     #: "đang chạy" (cùng điều kiện với `waiting_for="anonymization_review"` của progress).
     awaiting_anonymization_review: bool = False
+    #: Job đã xong nhưng tách theo vật lỗi hết số lần thử: scene chỉ có môi trường, chờ người dùng chọn chạy lại hoặc dùng
+    #: hộp ứng viên (cùng điều kiện với `awaiting_choice` của `GET /jobs/{id}/scene/objectify`).
+    awaiting_object_choice: bool = False
     #: Thời gian máy đã xử lý của job mới nhất (tổng các bước đã chạy xong); không gồm lúc xếp hàng và lúc chờ người
     #: dùng. None = job chưa có bước nào được đo.
     processing_seconds: float | None = None
@@ -254,6 +260,34 @@ def create_scene_from_upload(
     return SceneFromUploadResponse(project=schemas.project_response(project), job=filter_manifest_errors(job, user))
 
 
+#: Kết quả theo (job, revision scene hiện tại): đọc SceneIR chỉ khi revision đổi, không mỗi lần danh sách được poll.
+_OBJECT_CHOICE_CACHE: dict[tuple[str, str], bool] = {}
+_OBJECT_CHOICE_CACHE_MAX = 512
+
+
+def _awaiting_object_choice(registry: ProjectRegistry, job: JobManifest) -> bool:
+    """Scene của job có đang chờ người dùng chọn cách dựng tập vật (tách theo vật lỗi hết số lần thử) không."""
+    done = any(
+        stage.stage_id == StageId.OBJECT_EXTRACT and stage.status == StageStatus.SUCCEEDED
+        for stage in job.stage_artifacts
+    )
+    if job.status != JobStatus.SUCCEEDED or not done:
+        return False
+    try:
+        head = registry.scene.head_repository.get(job.job_id) if registry.scene.head_repository is not None else None
+        key = (job.job_id, head.scene_revision) if head is not None else None
+        if key is not None and key in _OBJECT_CHOICE_CACHE:
+            return _OBJECT_CHOICE_CACHE[key]
+        waiting = registry.scene.current(job.job_id).scene.provenance.get("object_extraction") == AWAITING_CHOICE
+    except (SceneError, ArtifactStoreError, ValueError):
+        return False  # scene chưa đọc được: danh sách không đoán, màn scene sẽ nói rõ
+    if key is not None:
+        if len(_OBJECT_CHOICE_CACHE) >= _OBJECT_CHOICE_CACHE_MAX:
+            _OBJECT_CHOICE_CACHE.clear()
+        _OBJECT_CHOICE_CACHE[key] = waiting
+    return waiting
+
+
 @router.get("/scenes", response_model=SceneListResponse)
 def list_scenes(user: UserRecord | None = Depends(require_contributor)) -> SceneListResponse:
     """Scene của Studio (project tạo từ upload); project fixture/dataset không hiện ở đây."""
@@ -296,6 +330,7 @@ def list_scenes(user: UserRecord | None = Depends(require_contributor)) -> Scene
                 latest_job=latest,
                 preview_ready=latest is not None and deps.preview_ready(registry, latest.job_id),
                 awaiting_anonymization_review=latest is not None and awaiting_anonymization_review(latest),
+                awaiting_object_choice=latest is not None and _awaiting_object_choice(registry, latest),
                 processing_seconds=None if latest is None else measured.get(latest.job_id),
                 requested_by=None if latest is None else with_current_role(requester_actors.get(latest.job_id), actors),
                 capabilities=SceneCapabilities(can_delete_project=can_delete_project),

@@ -1043,6 +1043,85 @@ async def test_scene_list_flags_a_job_waiting_for_the_anonymization_review(
     assert (await client.get("/api/v1/scenes")).json()["scenes"][0]["awaiting_anonymization_review"] is True
 
 
+def _finished_job(studio: SimpleNamespace, *, object_stage: bool = True, status: str = "SUCCEEDED"):  # noqa: ANN202
+    from datetime import UTC, datetime
+
+    from src.models.contracts.manifests import JobStatus, StageArtifact, StageId, StageStatus
+
+    when = datetime(2026, 10, 10, tzinfo=UTC)
+    stage = StageArtifact(
+        stage_id=StageId.OBJECT_EXTRACT,
+        status=StageStatus.SUCCEEDED,
+        artifact_type="SceneIR",
+        artifact_uri="artifact://jobs/j/scene",
+        artifact_checksum="sha256:" + "a" * 64,
+        data_class="derived",
+        started_at=when,
+        completed_at=when,
+    )
+    job = studio.registry.get_job("job-fixture-001")
+    return job.model_copy(update={"status": JobStatus(status), "stage_artifacts": [stage] if object_stage else []})
+
+
+def _registry_with_scene(provenance: dict, revision: str = "rev-001", *, error: Exception | None = None):  # noqa: ANN202
+    reads: list[str] = []
+
+    def current(job_id: str):  # noqa: ANN202
+        reads.append(job_id)
+        if error is not None:
+            raise error
+        return SimpleNamespace(scene=SimpleNamespace(provenance=provenance))
+
+    head = SimpleNamespace(scene_revision=revision)
+    holder = SimpleNamespace(head=head)
+    scene = SimpleNamespace(current=current, head_repository=SimpleNamespace(get=lambda job_id: holder.head))
+    return SimpleNamespace(scene=scene), reads, holder
+
+
+def test_scene_list_flags_a_finished_job_whose_object_extraction_awaits_the_user(studio: SimpleNamespace) -> None:
+    """Job xong nhưng tách theo vật lỗi hết số lần thử: danh sách không được ghi 'Đã dựng scene' như thể xong hẳn."""
+    from src.api.studio import scenes
+
+    scenes._OBJECT_CHOICE_CACHE.clear()
+    studio.registry.seed_from_fixtures()
+    waiting = {"object_extraction": "objectify_failed_awaiting_choice"}
+    registry, reads, _ = _registry_with_scene(waiting)
+    assert scenes._awaiting_object_choice(registry, _finished_job(studio)) is True
+
+    scenes._OBJECT_CHOICE_CACHE.clear()
+    healthy, _, _ = _registry_with_scene(
+        {"object_extraction": "objectify_v1(sampro3d_sam2+render_lift+coacd+seed_inpaint)"}
+    )
+    assert scenes._awaiting_object_choice(healthy, _finished_job(studio)) is False
+
+    # Chưa xong hoặc chưa có bước tách vật thể thành công thì không đọc scene.
+    scenes._OBJECT_CHOICE_CACHE.clear()
+    registry, reads, _ = _registry_with_scene(waiting)
+    assert scenes._awaiting_object_choice(registry, _finished_job(studio, status="RUNNING")) is False
+    assert scenes._awaiting_object_choice(registry, _finished_job(studio, object_stage=False)) is False
+    assert reads == []
+
+
+def test_object_choice_is_cached_per_scene_revision_and_never_guessed(studio: SimpleNamespace) -> None:
+    from src.api.studio import scenes
+    from src.services.orchestration.scene.errors import SceneNotAvailableError
+
+    scenes._OBJECT_CHOICE_CACHE.clear()
+    studio.registry.seed_from_fixtures()
+    job = _finished_job(studio)
+    registry, reads, holder = _registry_with_scene({"object_extraction": "objectify_failed_awaiting_choice"})
+    assert scenes._awaiting_object_choice(registry, job) is True
+    assert scenes._awaiting_object_choice(registry, job) is True
+    assert reads == [job.job_id]  # lần hai lấy từ bộ nhớ đệm theo revision
+    holder.head = SimpleNamespace(scene_revision="rev-002")  # scene đổi revision (vd. người dùng đã chọn hộp ứng viên)
+    scenes._awaiting_object_choice(registry, job)
+    assert len(reads) == 2
+
+    scenes._OBJECT_CHOICE_CACHE.clear()
+    broken, _, _ = _registry_with_scene({}, error=SceneNotAvailableError("chưa có"))
+    assert scenes._awaiting_object_choice(broken, job) is False  # scene chưa đọc được: không đoán
+
+
 def _record_machine(studio: SimpleNamespace, vram: float) -> None:
     from datetime import UTC, datetime
 
