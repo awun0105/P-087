@@ -128,3 +128,35 @@ scan .pcd ──► A (quỹ đạo thực) ────────────
 2. Thí nghiệm tách mật độ scan và độ dài chuỗi (insight 5).
 3. Ghép với quỹ đạo COLMAP (R6) và đo lại bằng đúng script này trên 5 tập.
 4. Chạy chuỗi dài hơn (toàn bộ chuỗi, chia đoạn) để xem trôi có tuyến tính theo quãng đường không.
+
+## 7. Chỉnh voxel và phân rã sai số (thí nghiệm bổ sung, 2026-10-10)
+
+**Chỉnh một tham số trên tập 01 (600 scan), kiểm trên 02–05 chưa dùng để chỉnh.** Chỉ `voxel_size_m` có tác dụng; tầm tối thiểu/tối đa (1–2 m, 20–40 m) gần như không đổi kết quả.
+
+| Tập | Trôi 0,25 → 0,5 → 1,0 (%) | Bản đồ trong 20 cm 0,25 → 0,5 → 1,0 (%) | Thời gian (s) |
+|---|---|---|---|
+| 01 (tập chỉnh) | 1,76 → 0,93 → 0,89 | 44,6 → 52,2 → 54,8 | 25 → 9 → 6 |
+| 02 | 1,00 → 0,94 → 0,85 | 40,6 → 42,3 → 46,7 | 24 → 7 → 4 |
+| 03 | 2,12 → 1,03 → 0,69 | 45,7 → 52,4 → 59,0 | 30 → 9 → 6 |
+| 04 | 2,01 → 1,38 → 1,23 | 43,3 → 50,0 → 55,5 | 29 → 8 → 6 |
+| 05 | 0,99 → 0,89 → 0,67 | 68,1 → 69,1 → 71,0 | 74 → 17 → 8 |
+
+Giá phải trả: sai/10 bước tăng (trung bình ~3,6 → ~4,7 cm ở voxel 1,0).
+
+**Phân rã sai số cuối đường (01 và 03, mét):**
+
+| Tập | Voxel | Dọc đường | Ngang | **Chiều cao (z)** | Tỉ lệ bước ước/thực | Xoay có dấu / bước |
+|---|---:|---:|---:|---:|---:|---:|
+| 01 | 0,25 | -0,04 | 0,25 | **+0,73** | 1,002 ± 0,043 | +0,027° |
+| 01 | 0,50 | -0,07 | 0,12 | **+0,38** | 0,995 ± 0,051 | +0,021° |
+| 01 | 1,00 | -0,03 | 0,11 | **+0,37** | 0,996 ± 0,099 | +0,011° |
+| 03 | 0,25 | +0,01 | 0,33 | **+0,92** | 1,07 ± 0,55 | +0,013° |
+| 03 | 0,50 | +0,04 | 0,18 | **+0,43** | 1,07 ± 0,55 | +0,007° |
+| 03 | 1,00 | +0,17 | 0,09 | **+0,25** | 1,08 ± 0,57 | -0,016° |
+
+**Insight:**
+1. **Trôi chủ yếu là trôi theo chiều cao (z)**, không phải đi ngắn/dài hay xoay. Ở voxel mặc định, 0,7–0,9 m của sai số cuối đường nằm ở z; dọc đường chỉ vài cm.
+2. **Voxel lớn giảm gần một nửa trôi z** ở cả hai tập, đây là nguồn của phần "trôi giảm".
+3. **Giả thuyết "lỗi bước có hệ thống bị bù trừ" không được ủng hộ:** tỉ lệ bước ≈ 1 và thiên lệch xoay có dấu rất nhỏ ở mọi voxel. Còn lại là hai hiệu ứng: z trôi ít hơn và sai số dọc đường từng đoạn nhiễu hơn (độ lệch chuẩn tỉ lệ bước tăng gấp đôi ở voxel 1,0), nên cột "sai/10 bước" xấu đi.
+4. **Robot di chuyển trên sàn phẳng nên trôi z cỡ 0,4–0,9 m là không hợp lý về vật lý**; ràng buộc phẳng/mặt sàn (sản phẩm đã có bước tìm sàn) là hướng cải thiện có lợi hơn chỉnh voxel. Chưa thử.
+5. Cơ chế vì sao voxel lớn làm giảm trôi z **chưa được kiểm chứng**.
