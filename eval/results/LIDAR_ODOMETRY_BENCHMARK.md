@@ -160,3 +160,8 @@ Giá phải trả: sai/10 bước tăng (trung bình ~3,6 → ~4,7 cm ở voxel 
 3. **Giả thuyết "lỗi bước có hệ thống bị bù trừ" không được ủng hộ:** tỉ lệ bước ≈ 1 và thiên lệch xoay có dấu rất nhỏ ở mọi voxel. Còn lại là hai hiệu ứng: z trôi ít hơn và sai số dọc đường từng đoạn nhiễu hơn (độ lệch chuẩn tỉ lệ bước tăng gấp đôi ở voxel 1,0), nên cột "sai/10 bước" xấu đi.
 4. **Robot di chuyển trên sàn phẳng nên trôi z cỡ 0,4–0,9 m là không hợp lý về vật lý**; ràng buộc phẳng/mặt sàn (sản phẩm đã có bước tìm sàn) là hướng cải thiện có lợi hơn chỉnh voxel. Chưa thử.
 5. Cơ chế vì sao voxel lớn làm giảm trôi z **chưa được kiểm chứng**.
+
+## 8. Quyết định (2026-10-10)
+
+Mặc định sản phẩm đổi `voxel_size_m` **0,25 → 0,5**, version hồ sơ `rec17-default-v1` → `rec17-default-v2` (`src/services/reconstruction/lidar/odometry.py`). Các bảng ở mục 2–6 là số đo **trước** thay đổi này (voxel 0,25); số ở mục 7 là số đo của voxel 0,5.
+Recipe đã chấp nhận với hồ sơ v1 sẽ không còn khớp checksum (đúng thiết kế bất biến của recipe); cần chạy lại.

@@ -48,7 +48,9 @@ from src.services.reconstruction.lidar.cloud_payload import load_xyz_points
 from src.services.reconstruction.lidar.fusion import FusionConfig, FusionStats, ScanPose, fuse_scans, ply_bytes
 
 _PINNED_PROVIDER_VERSION = "1.3.0"
-DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION = "rec17-default-v1"
+#: v2: `voxel_size_m` 0,25 → 0,5. Đo trên 5 chuỗi TorWIC (eval/results/LIDAR_ODOMETRY_BENCHMARK.md): trôi giảm
+#: 5/5 chuỗi, bản đồ khớp hơn, nhanh 3-9 lần; đổi lại sai số 10 bước ngắn tăng. Đổi giá trị này phải đổi version.
+DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION = "rec17-default-v2"
 _MAX_TIMESTAMP_FILE_BYTES = 16 * 1024 * 1024
 _MAX_SCAN_FILE_BYTES = 512 * 1024 * 1024
 _MAX_RESULT_BYTES = 128 * 1024 * 1024
@@ -80,7 +82,7 @@ class LidarOdometryProfile(ContractModel):
 
 def default_lidar_odometry_profile() -> LidarOdometryProfile:
     """Versioned starter profile; deployment qualification must cover these exact bounds."""
-    return LidarOdometryProfile(min_range_m=0.0, max_range_m=80.0, voxel_size_m=0.25)
+    return LidarOdometryProfile(min_range_m=0.0, max_range_m=80.0, voxel_size_m=0.5)
 
 
 def lidar_odometry_profile_checksum(profile: LidarOdometryProfile | None = None) -> str:

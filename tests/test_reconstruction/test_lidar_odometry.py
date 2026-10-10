@@ -798,3 +798,17 @@ def test_isolated_kiss_icp_recovers_known_scan_translation_and_publishes(tmp_pat
     assert static_result.trajectory.diagnostics.converged_scan_count is None
     assert static_result.trajectory.diagnostics.degenerate_scan_count is None
     assert static_result.trajectory.world_from_map is None
+
+
+def test_default_profile_pins_the_benchmarked_voxel_and_its_version() -> None:
+    """Đổi voxel mặc định phải đổi version hồ sơ, vì recipe đã chấp nhận mang checksum của hồ sơ."""
+    from src.services.reconstruction.lidar.odometry import (
+        DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION,
+        default_lidar_odometry_profile,
+        lidar_odometry_profile_checksum,
+    )
+
+    profile = default_lidar_odometry_profile()
+    assert profile.voxel_size_m == 0.5
+    assert DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION == "rec17-default-v2"
+    assert lidar_odometry_profile_checksum().startswith("sha256:")
