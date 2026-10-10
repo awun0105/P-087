@@ -93,10 +93,16 @@ scan .pcd ──► A (quỹ đạo thực) ────────────
 1. **Trôi ổn định ~1–2% quãng đường trên cả 5 tập** (kho/hành lang, thuận/ngược, hai ngày). Kết quả ở một tập đại diện được cho các tập còn lại; hiện tượng này là đặc tính của phương pháp chứ không phải may rủi của một chuỗi.
 2. **Từng bước rất chính xác (1–2 cm, dưới 0,7°), lỗi nằm ở cộng dồn.** Đi càng xa càng lệch; không có cơ chế kéo về (loop closure, IMU, tham chiếu ngoài). Cải thiện hợp lý nhất là thêm thông tin ngoài (COLMAP, R4) chứ không phải chỉnh từng bước.
 3. **Lệch cuối đường 0,3–1,0 m không biến thành bản đồ hỏng tương ứng.** Bản đồ chỉ lệch thêm ~10–16 cm so với trần. Khi đường đi đúng tuyệt đối thì lỗi cuối đường là một điểm, còn phần lớn bản đồ nằm ở đoạn lệch ít hơn.
-4. **Có một "trần" ~20–23 cm ở mọi tập, ngay cả khi dùng quỹ đạo thực.** Vì nó xuất hiện đều ở cả kho và hành lang, nguyên nhân mang tính hệ thống (ứng viên: khác khung giữa `traj_gt.txt` và LiDAR, độ lấy mẫu của `.ply`, độ chính xác của chính bản đồ chuẩn). **Chưa xác định.** Hệ quả: dư địa cải thiện thật chỉ là phần *vượt trần* (10–16 cm), và các con số bản đồ chỉ nên dùng để so hai hàng với nhau.
+4. **"Trần" ~20 cm là số trung bình bị kéo lên bởi một cái đuôi, không phải sai số đồng đều.** Điều tra trên tập 01 (D so với C, 3,4 triệu điểm):
+   - **Không phải lệch khung toàn cục:** ICP cứng 6 bậc tự do chỉ cải thiện 17,3 → 16,9 cm (dịch 2,8 cm, xoay 0,24°).
+   - **Không phải độ thưa của `.ply`:** khoảng cách lân cận của chính `.ply` có trung vị 3,8 cm (sàn đo ~2–4 cm).
+   - **Là đuôi dài:** trung vị chỉ **9,1 cm**, nhưng 90% = 42 cm, 99% = 106 cm; **7,9% điểm lệch > 50 cm**, bỏ chúng thì trung bình còn 12,1 cm.
+   - **Tập trung ở độ cao 0–1,5 m** (41% số điểm, trung bình 21–32 cm, trung vị 14–17 cm), trong khi sàn (< 0 m) chỉ 10 cm, trần/tường cao (> 1,5 m) 9–11 cm. Gần cảm biến (1–5 m) cũng tệ hơn xa (5–10 m): 17,9 so với 11,6 cm.
+   - **Giả thuyết (chưa kiểm):** vùng 0–1,5 m là hàng hoá, pallet, kệ thấp và vật di động, có thể đã khác so với lúc dựng `.ply`; ngoài ra có thể là tạp âm ở cận cảnh. Chưa tách được hai nguyên nhân.
+   - **Hệ quả cho cách báo cáo:** nên dùng **trung vị và % trong 10/20 cm** làm chỉ số chính, không dùng trung bình.
 5. **Scan dày hơn cho kết quả tốt hơn rõ** (tập 05: 191 k điểm, +1,7 cm so với +10–16 cm). Nhưng tập 05 cũng ngắn hơn (34 m) nên **chưa tách được** ảnh hưởng của mật độ và độ dài; cần thí nghiệm riêng.
 6. **Hành lang thẳng có sai số mỗi bước cao nhất (2,3 cm, 0,67°)** và bản đồ tệ nhất (+15,6 cm), dù trôi cuối đường thấp. Phù hợp với giả thuyết hành lang thẳng ít đặc trưng dọc trục (chưa kiểm).
-7. **Giới hạn của sản phẩm xuất hiện thật:** với scan 191 k điểm, giới hạn tổng điểm 100 triệu chỉ cho ~470 scan một lần. Người dùng nộp scan dày sẽ bị chặn sớm hơn người nộp scan thưa.
+7. **Giới hạn của sản phẩm chặt hơn con số trong bảng này.** Script benchmark nâng trần tổng điểm lên 100 triệu (mức tối đa hợp đồng cho phép) để chạy được 600 scan, nhưng hồ sơ mặc định của sản phẩm (`default_lidar_odometry_profile`) dùng **25 triệu**. Với scan 84 nghìn điểm sản phẩm nhận ~**300 scan**, với scan 191 nghìn điểm chỉ ~**130 scan**; vượt thì job bị từ chối. Bộ nhớ đỉnh của KISS-ICP chỉ 0,13–0,18 GB nên giới hạn này là ngưỡng thận trọng, không phải ràng buộc bộ nhớ thực tế.
 
 ## 4. Ý nghĩa và ảnh hưởng
 
@@ -111,13 +117,14 @@ scan .pcd ──► A (quỹ đạo thực) ────────────
 
 - **Chưa held-out:** chưa chỉnh tham số nên không có rủi ro học thuộc, nhưng cũng chưa có ngưỡng đạt/trượt định trước.
 - **Chỉ một thiết bị** (Ouster OS1 của TorWIC) và 600 scan đầu mỗi chuỗi (30–60 giây, ~45 m).
-- **Trần ~20 cm chưa giải thích được** (insight 4).
+- **Nguyên nhân đuôi của phép đo bản đồ chưa tách được** (insight 4); chỉ loại trừ được lệch khung và độ thưa.
+- **Tổng điểm 100 triệu trong script khác 25 triệu của sản phẩm** (insight 7): kết quả quỹ đạo vẫn đúng cho dữ liệu đó, nhưng sản phẩm hiện không nhận chừng ấy scan.
 - **Phép đo bản đồ là bản của riêng bước này** (lấy mẫu 1/5 scan, voxel 10 cm), không phải `eval/geometry/surface_error.py` (công cụ đó chấm bản 3DGS của một job).
 - Không kiểm hiệu quả của deskew (TorWIC `.pcd` không có timestamp từng điểm) hay IMU.
 
 ## 6. Việc tiếp theo (đề xuất)
 
-1. Tìm nguyên nhân trần ~20 cm (kiểm khung/offset của `traj_gt.txt`, thử căn tối ưu toàn cục để bóc phần hệ thống).
+1. Tách nguyên nhân đuôi ở độ cao 0–1,5 m (vật đã đổi chỗ so với `.ply` hay tạp âm cận cảnh), ví dụ so hai lần quay cùng kho (01 và 05) với nhau.
 2. Thí nghiệm tách mật độ scan và độ dài chuỗi (insight 5).
 3. Ghép với quỹ đạo COLMAP (R6) và đo lại bằng đúng script này trên 5 tập.
 4. Chạy chuỗi dài hơn (toàn bộ chuỗi, chia đoạn) để xem trôi có tuyến tính theo quãng đường không.
