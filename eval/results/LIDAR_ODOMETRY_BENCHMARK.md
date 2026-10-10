@@ -167,3 +167,36 @@ Mặc định sản phẩm đổi `voxel_size_m` **0,25 → 0,5**, version hồ 
 Recipe đã chấp nhận với hồ sơ v1 sẽ không còn khớp checksum (đúng thiết kế bất biến của recipe); cần chạy lại.
 
 Chạy lại: `python -m eval.pose.lidar_odometry_benchmark ... ` dùng **mặc định của sản phẩm** (voxel 0,5). Muốn tái lập mốc cũ thêm `--voxel 0.25`. Script đặt trần tổng điểm 100 triệu (`--max-total-points`) để chạy đủ 600 scan; mặc định sản phẩm là 25 triệu.
+
+## 9. Benchmark COLMAP + LiDAR: kết quả từng bước
+
+Mã: `eval/pose/colmap_fusion_benchmark.py` · số liệu: `eval/results/colmap_fusion_e0_e1_aisle_cw.json` · Chuỗi: 01 Aisle_CW, **200 frame** (mỗi 3 scan, 0–597), COLMAP 4.3 CPU, `SIMPLE_RADIAL`, `single_camera`, ghép tuần tự `overlap 10`, tối đa 8192 đặc trưng.
+
+### 9.1 Đã làm (tập 01)
+
+| Bước | Là gì | Kết quả |
+|---|---|---|
+| **E1** COLMAP đơn | tâm camera COLMAP so với quỹ đạo thực sau một phép đồng dạng toàn đường | đăng ký **200/200** frame; ATE trung bình **12,7 cm** (trung vị 10,6, p90 21,8, tối đa 41,5 cm) trên 43,2 m |
+| Tỉ lệ COLMAP | 1 đơn vị COLMAP = ? mét | **3,12** (tuỳ ý, đúng như dự kiến, COLMAP không có mét) |
+| **So công bằng với KISS-ICP** (voxel 0,5, cùng 200 chỉ số, căn toàn đường) | quỹ đạo KISS-ICP đo cùng cách | ATE trung bình **7,9 cm** (căn rigid) / **6,3 cm** (Sim3, tỉ lệ 1,004) |
+| **E2** ghép hiện tại (mốc) | phép đồng dạng COLMAP → KISS-ICP của sản phẩm | tỉ lệ 3,107; độ lệch median **7,1 cm**, p90 18,0 cm, max 40,8 cm |
+| **E0** kiểm khung `traj_gt.txt` | khớp COLMAP vào GT *nguyên trạng* so với GT *cộng lever-arm 17,8 cm* (giả thuyết là khung `os_sensor`) | nguyên trạng **12,7 cm** tốt hơn lever-arm **18,3 cm**; ở E2 cũng vậy (7,1 so với 11,3 cm) |
+
+### 9.2 Insight
+
+1. **Bức tranh "KISS-ICP trôi 0,8 m" đã đổi.** Khi căn rigid *toàn đường* thay vì chỉ pose đầu, KISS-ICP chỉ lệch **6–8 cm** trên 43 m (~0,15–0,2%), tốt hơn COLMAP (12,7 cm). Phần "trôi" ở các mục trên chủ yếu là **một phép xoay 1–2° của cả đường** (đã thấy ở mục 7), tức độ nhạy với hướng ban đầu, không phải sai số tích luỹ theo quãng đường.
+2. **Tỉ lệ mét của KISS-ICP rất chuẩn** (1,004, sai 0,4%). Vì vậy việc lấy tỉ lệ mét từ LiDAR cho COLMAP là hợp lý và hiện đang đúng.
+3. **COLMAP trên TorWIC rất tốt về hình dạng** (100% đăng ký, 12,7 cm trên 43 m), nhưng **không tốt hơn KISS-ICP** ở quy mô này. Nên không có cơ sở để dùng COLMAP "sửa trôi" cho KISS-ICP trên các chuỗi ngắn kiểu này; giá trị thật của COLMAP là cho dựng 3D và (tuỳ chọn) kiểm tra chéo.
+4. **Hướng đặt toàn cục mới là vấn đề thật**, không phải hình dạng. Sai 1–2° về hướng ban đầu biến thành lệch ~0,7 m ở 44 m. Trong sản phẩm hướng thế giới lấy từ mặt sàn/gravity và người dùng, nên điều cần đo là **độ chính xác của bước đặt hướng thế giới**, không phải trôi.
+5. **Khung của `traj_gt.txt` nhiều khả năng đã là vị trí camera/giá đỡ**, không phải `os_sensor` cộng lever-arm: khớp nguyên trạng tốt hơn rõ (12,7 so với 18,3 cm). Bằng chứng vừa phải (chênh 5,6 cm), nên cần kiểm thêm ở các tập khác.
+
+### 9.3 Hệ quả cho kế hoạch
+
+| Mục kế hoạch | Cập nhật |
+|---|---|
+| E3 "COLMAP sửa trôi KISS-ICP" | **Hạ ưu tiên.** Dư địa còn lại chỉ ~6–8 cm shape error; nên đổi thành đo **độ chính xác đặt hướng thế giới** và bù lever-arm |
+| Chuỗi 02–05 | vẫn cần chạy E1/E2 để xem kết luận 1–3 có giữ được; E0 để xác nhận khung `traj_gt` |
+| Benchmark KISS-ICP ở mục 2 | cần chấm thêm bằng căn **toàn đường** song song với căn pose đầu, để không phóng đại trôi |
+
+### 9.4 Giới hạn
+Một chuỗi, một lần chạy COLMAP (200 frame, CPU, mặc định), chưa lặp. Lever-arm dùng `T_cam1_os` đọc là `os_from_cam` theo metadata dự án; hướng quay của camera chưa được kiểm độc lập.
