@@ -52,10 +52,7 @@ def _by_key(registry: dict) -> dict[str, dict]:
 
 def test_the_committed_record_only_qualifies_what_has_evidence_and_nothing_else(record: dict) -> None:
     qualified = {name for name, entry in record["capabilities"].items() if entry["status"] == "qualified"}
-    assert qualified == set(record["capabilities"])  # hạ hướng nào về wired_unqualified là quyết định có chủ ý
-    kinds = {name: entry["evidence"]["kind"] for name, entry in record["capabilities"].items()}
-    assert kinds["R1"] == "baseline_job"
-    assert {k for n, k in kinds.items() if n != "R1"} == {"owner_decision"}  # không giả làm số đo
+    assert qualified == {"R1"}  # đổi tập này là một quyết định kiểm định, phải sửa test cùng bằng chứng
     evidence = record["capabilities"]["R1"]["evidence"]
     assert evidence["kind"] and evidence["reference"]
     assert set(record["capabilities"]) == {key.value for key in RuntimeCapabilityKey}
@@ -66,15 +63,11 @@ def test_a_machine_that_matches_the_record_gets_exactly_the_recorded_statuses(tm
     items = _by_key(built)
     assert items["R1"]["status"] == "qualified"
     assert items["R1"]["qualification_evidence_checksum"].startswith("sha256:")
-    assert {item["status"] for item in items.values()} == {"qualified"}
+    assert {key: item["status"] for key, item in items.items() if key != "R1"} == {
+        key: "wired_unqualified" for key in items if key != "R1"
+    }
     sealed = seal_runtime_registry(built)
     verify_runtime_registry_checksum(RuntimeQualificationRegistry.model_validate_json(sealed.model_dump_json()))
-
-
-def test_wired_unqualified_in_the_record_stays_wired_unqualified(tmp_path: Path, record: dict) -> None:
-    held = copy.deepcopy(record)
-    held["capabilities"]["R5"] = {"status": "wired_unqualified", "reason_codes": ["pending"]}
-    assert _by_key(qualify.build_registry(held, _env(tmp_path, record)))["R5"]["status"] == "wired_unqualified"
 
 
 def test_the_machine_can_only_demote_never_promote(tmp_path: Path, record: dict) -> None:

@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "record_id": "input-runtime-qualification-v1",
-  "description": "Ma trận hỗ trợ có phiên bản cho luồng nhập (AUD-24.S5). Một hướng chỉ là `qualified` khi có `evidence` thật; hướng nào chỉ là quyết định của chủ dự án thì `evidence.kind` ghi đúng `owner_decision`. Registry của production được sinh từ file này cộng với phép đo identity runtime ngay trên máy worker (scripts/gpu/qualify_input_runtimes.py); đổi trạng thái là quyết định của chủ dự án và phải kèm bằng chứng.",
+  "description": "Ma trận hỗ trợ có phiên bản cho luồng nhập (AUD-24.S5). Một hướng chỉ là `qualified` khi có `evidence` thật; mọi hướng còn lại giữ `wired_unqualified` và UI nói rõ đang chờ xác minh. Registry của production được sinh từ file này cộng với phép đo identity runtime ngay trên máy worker (scripts/gpu/qualify_input_runtimes.py); đổi trạng thái là quyết định của chủ dự án và phải kèm bằng chứng.",
   "capabilities": {
     "R1": {
       "status": "qualified",
@@ -16,96 +16,12 @@
         "note": "Job dựng từ video RGB TorWIC Aisle_CW bằng đúng COLMAP/Brush ở `requires`; là baseline mà thư viện mẫu aisle-cw trích provenance. Chưa phải held-out qualification của AUD-24.S5."
       }
     },
-    "R2": {
-      "status": "qualified",
-      "requires": {
-        "REC03_COLMAP_RUNTIME_IDENTITY": "colmap-image-sha256:b8498ebecab11c3f9b9a25370e3fcfb6de9b6bcd4f3c85d5dc39a40229f40954",
-        "REC04_BRUSH_RUNTIME_IDENTITY": "brush-v0.3.0-linux-archive-sha256:4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20",
-        "REC04_BRUSH_EXPECTED_VERSION": "0.3.0"
-      },
-      "evidence": {
-        "kind": "owner_decision",
-        "reference": "2026-10-10 chủ dự án",
-        "note": "Chủ dự án mở hướng này cho dùng, KHÔNG phải held-out qualification của AUD-24.S5; chất lượng trên dữ liệu thật chưa đo. Hạ về wired_unqualified nếu cần chặn lại."
-      }
-    },
-    "R3": {
-      "status": "qualified",
-      "requires": {
-        "REC03_COLMAP_RUNTIME_IDENTITY": "colmap-image-sha256:b8498ebecab11c3f9b9a25370e3fcfb6de9b6bcd4f3c85d5dc39a40229f40954",
-        "REC04_BRUSH_RUNTIME_IDENTITY": "brush-v0.3.0-linux-archive-sha256:4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20",
-        "REC04_BRUSH_EXPECTED_VERSION": "0.3.0"
-      },
-      "evidence": {
-        "kind": "owner_decision",
-        "reference": "2026-10-10 chủ dự án",
-        "note": "Chủ dự án mở hướng này cho dùng, KHÔNG phải held-out qualification của AUD-24.S5; chất lượng trên dữ liệu thật chưa đo. Hạ về wired_unqualified nếu cần chặn lại."
-      }
-    },
-    "R4": {
-      "status": "qualified",
-      "requires": {
-        "REC03_COLMAP_RUNTIME_IDENTITY": "colmap-image-sha256:b8498ebecab11c3f9b9a25370e3fcfb6de9b6bcd4f3c85d5dc39a40229f40954",
-        "REC04_BRUSH_RUNTIME_IDENTITY": "brush-v0.3.0-linux-archive-sha256:4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20",
-        "REC04_BRUSH_EXPECTED_VERSION": "0.3.0"
-      },
-      "evidence": {
-        "kind": "owner_decision",
-        "reference": "2026-10-10 chủ dự án",
-        "note": "Chủ dự án mở hướng này cho dùng, KHÔNG phải held-out qualification của AUD-24.S5; chất lượng trên dữ liệu thật chưa đo. Hạ về wired_unqualified nếu cần chặn lại."
-      }
-    },
-    "R5": {
-      "status": "qualified",
-      "requires": {
-        "REC03_COLMAP_RUNTIME_IDENTITY": "colmap-image-sha256:b8498ebecab11c3f9b9a25370e3fcfb6de9b6bcd4f3c85d5dc39a40229f40954",
-        "REC04_BRUSH_RUNTIME_IDENTITY": "brush-v0.3.0-linux-archive-sha256:4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20",
-        "REC04_BRUSH_EXPECTED_VERSION": "0.3.0"
-      },
-      "evidence": {
-        "kind": "owner_decision",
-        "reference": "2026-10-10 chủ dự án",
-        "note": "Chủ dự án mở hướng này cho dùng, KHÔNG phải held-out qualification của AUD-24.S5; chất lượng trên dữ liệu thật chưa đo. Hạ về wired_unqualified nếu cần chặn lại."
-      }
-    },
-    "R6": {
-      "status": "qualified",
-      "requires": {
-        "REC03_COLMAP_RUNTIME_IDENTITY": "colmap-image-sha256:b8498ebecab11c3f9b9a25370e3fcfb6de9b6bcd4f3c85d5dc39a40229f40954",
-        "REC04_BRUSH_RUNTIME_IDENTITY": "brush-v0.3.0-linux-archive-sha256:4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20",
-        "REC04_BRUSH_EXPECTED_VERSION": "0.3.0"
-      },
-      "evidence": {
-        "kind": "owner_decision",
-        "reference": "2026-10-10 chủ dự án",
-        "note": "Chủ dự án mở hướng này cho dùng, KHÔNG phải held-out qualification của AUD-24.S5; chất lượng trên dữ liệu thật chưa đo. Hạ về wired_unqualified nếu cần chặn lại."
-      }
-    },
-    "gaussian_ply_view": {
-      "status": "qualified",
-      "requires": {
-        "REC03_COLMAP_RUNTIME_IDENTITY": "colmap-image-sha256:b8498ebecab11c3f9b9a25370e3fcfb6de9b6bcd4f3c85d5dc39a40229f40954",
-        "REC04_BRUSH_RUNTIME_IDENTITY": "brush-v0.3.0-linux-archive-sha256:4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20",
-        "REC04_BRUSH_EXPECTED_VERSION": "0.3.0"
-      },
-      "evidence": {
-        "kind": "owner_decision",
-        "reference": "2026-10-10 chủ dự án",
-        "note": "Chủ dự án mở hướng này cho dùng, KHÔNG phải held-out qualification của AUD-24.S5; chất lượng trên dữ liệu thật chưa đo. Hạ về wired_unqualified nếu cần chặn lại."
-      }
-    },
-    "gaussian_sog_view": {
-      "status": "qualified",
-      "requires": {
-        "REC03_COLMAP_RUNTIME_IDENTITY": "colmap-image-sha256:b8498ebecab11c3f9b9a25370e3fcfb6de9b6bcd4f3c85d5dc39a40229f40954",
-        "REC04_BRUSH_RUNTIME_IDENTITY": "brush-v0.3.0-linux-archive-sha256:4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20",
-        "REC04_BRUSH_EXPECTED_VERSION": "0.3.0"
-      },
-      "evidence": {
-        "kind": "owner_decision",
-        "reference": "2026-10-10 chủ dự án",
-        "note": "Chủ dự án mở hướng này cho dùng, KHÔNG phải held-out qualification của AUD-24.S5; chất lượng trên dữ liệu thật chưa đo. Hạ về wired_unqualified nếu cần chặn lại."
-      }
-    }
+    "R2": {"status": "wired_unqualified", "reason_codes": ["real_capture_qualification_pending"]},
+    "R3": {"status": "wired_unqualified", "reason_codes": ["real_capture_qualification_pending"]},
+    "R4": {"status": "wired_unqualified", "reason_codes": ["real_capture_qualification_pending"]},
+    "R5": {"status": "wired_unqualified", "reason_codes": ["real_sensor_qualification_pending"]},
+    "R6": {"status": "wired_unqualified", "reason_codes": ["real_sensor_qualification_pending"]},
+    "gaussian_ply_view": {"status": "wired_unqualified", "reason_codes": ["import_acceptance_pending"]},
+    "gaussian_sog_view": {"status": "wired_unqualified", "reason_codes": ["import_acceptance_pending"]}
   }
 }

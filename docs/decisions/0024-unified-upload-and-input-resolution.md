@@ -116,8 +116,8 @@ khả thi khi có qualified adapters và updated producer/consumer contracts.
    và `gpu-runtime-init`. Máy chỉ có thể hạ trạng thái (`incompatible` khi identity runtime lệch bản đã kiểm
    định, `unavailable` khi thiếu runtime), không bao giờ nâng. Kết quả không có mốc thời gian nên API và
    worker dùng chung một file mà không lệch checksum. Máy dev dùng `make_input_runtime_registry` (lời khai
-   `dev-local`, từ chối `APP_ENV=production`). R1 `qualified` theo baseline `job-ac2bfd924cc6`; R2–R6 và xem 3DGS `qualified` theo
-   `owner_decision` (chủ dự án mở để không chặn UX), chưa phải held-out evidence của AUD-24.S5.
+   `dev-local`, từ chối `APP_ENV=production`). Hiện chỉ R1 `qualified` (baseline `job-ac2bfd924cc6`); R2–R6 và
+   xem 3DGS giữ `wired_unqualified` cho tới khi AUD-24.S5 có held-out evidence thật.
 10. Gaussian PLY/SOG view import reuse AUD-06 qua same upload UI hoặc existing
     separate import flow. AUD-25 Deferred; không thêm continuation/source adapter.
     SOG content detection distinguishes bundled meta/textures from generic ZIP;
