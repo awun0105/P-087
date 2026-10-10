@@ -25,17 +25,12 @@ import numpy as np
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
 
+from src.services.reconstruction.lidar.odometry import default_lidar_odometry_profile
+
 REPO = Path(__file__).resolve().parents[2]
-PROFILE = {
-    "min_range_m": 0.0,
-    "max_range_m": 80.0,
-    "voxel_size_m": 0.25,
-    "min_points_per_scan": 100,
-    "max_points_per_scan": 5_000_000,
-    "max_total_points": 100_000_000,
-    "max_num_threads": 4,
-    "timestamp_gap_threshold_seconds": 0.5,
-}
+# Hồ sơ đo = hồ sơ mặc định CỦA SẢN PHẨM (không sao chép số), trừ trần tổng điểm: benchmark nâng lên mức tối đa của
+# hợp đồng để chạy đủ 600 scan, còn mặc định sản phẩm chặt hơn (xem `--max-total-points`). `--voxel` để đo giá trị khác.
+PROFILE = default_lidar_odometry_profile().model_dump(mode="json")
 MAP_STEP, MAP_VOXEL, MAP_RADIUS, MAP_WINDOW = 5, 0.10, 40.0, 8.0
 
 
@@ -201,9 +196,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--map", type=Path, required=True, help="groundtruth_map.ply")
     parser.add_argument("--odometry-python", type=Path, required=True, help="interpreter cô lập có kiss-icp")
     parser.add_argument("--max-scans", type=int, default=600)
+    parser.add_argument("--voxel", type=float, help="voxel_size_m (mét); bỏ trống = mặc định của sản phẩm")
+    parser.add_argument(
+        "--max-total-points",
+        type=int,
+        default=100_000_000,
+        help="trần tổng điểm; mặc định benchmark 100 triệu, sản phẩm dùng default_lidar_odometry_profile()",
+    )
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
 
+    if args.voxel is not None:
+        PROFILE["voxel_size_m"] = args.voxel
+    PROFILE["max_total_points"] = args.max_total_points
     truth_map = read_ply_xyz(args.map)
     truth_tree = cKDTree(truth_map)
     results = []

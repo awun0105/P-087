@@ -165,3 +165,5 @@ Giá phải trả: sai/10 bước tăng (trung bình ~3,6 → ~4,7 cm ở voxel 
 
 Mặc định sản phẩm đổi `voxel_size_m` **0,25 → 0,5**, version hồ sơ `rec17-default-v1` → `rec17-default-v2` (`src/services/reconstruction/lidar/odometry.py`). Các bảng ở mục 2–6 là số đo **trước** thay đổi này (voxel 0,25); số ở mục 7 là số đo của voxel 0,5.
 Recipe đã chấp nhận với hồ sơ v1 sẽ không còn khớp checksum (đúng thiết kế bất biến của recipe); cần chạy lại.
+
+Chạy lại: `python -m eval.pose.lidar_odometry_benchmark ... ` dùng **mặc định của sản phẩm** (voxel 0,5). Muốn tái lập mốc cũ thêm `--voxel 0.25`. Script đặt trần tổng điểm 100 triệu (`--max-total-points`) để chạy đủ 600 scan; mặc định sản phẩm là 25 triệu.
