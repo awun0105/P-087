@@ -80,6 +80,17 @@ if [ -n "${PRODUCT_EGOBLUR_WEIGHTS:-}" ]; then
 fi
 [ -f "$PRODUCT_RUNTIME_MANIFEST" ] || "$PY" -m scripts.gpu.make_runtime_manifest --out "$PRODUCT_RUNTIME_MANIFEST"
 
+# Registry năng lực của luồng nhập mới (AUD-24): sinh từ bản ghi kiểm định đã commit + identity runtime đo ngay trên
+# máy này (scripts.gpu.qualify_input_runtimes). Kết quả xác định, không mốc thời gian, nên API và worker dùng chung
+# một file mà không lệch chuỗi checksum. Sinh lỗi thì bỏ biến: luồng nhập báo "chưa có bộ xử lý phù hợp" thay vì
+# chạy với một registry hỏng. Không bao giờ dùng make_input_runtime_registry (lời khai dev-local) ở đây.
+export REC17_LIDAR_ODOMETRY_PYTHON="${REC17_LIDAR_ODOMETRY_PYTHON:-${R2S_LIDAR_RUNTIME:-/opt/real2sim/lidar_runtime}/bin/python}"
+export PRODUCT_INPUT_RUNTIME_REGISTRY="${PRODUCT_INPUT_RUNTIME_REGISTRY:-$STATE/input_runtime_registry.json}"
+if ! "$PY" -m scripts.gpu.qualify_input_runtimes --out "$PRODUCT_INPUT_RUNTIME_REGISTRY"; then
+  echo "[!] Không sinh được registry năng lực input; luồng nhập mới sẽ báo chưa có bộ xử lý phù hợp." >&2
+  unset PRODUCT_INPUT_RUNTIME_REGISTRY
+fi
+
 mode="${1:-worker}"
 [ "$#" -gt 0 ] && shift
 case "$mode" in

@@ -10,6 +10,8 @@ services:
       PRODUCT_OBJECTIFY_REMOTE_WORKER: "true"
       PRODUCT_PROCESSING_CONFIG: /app/configs/product/processing_presets_v1.json
       PRODUCT_RUNTIME_MANIFEST: /app/data/studio_local/runtime_manifest.json
+      # Do gpu-runtime-init sinh trên volume dùng chung; API chỉ đọc.
+      PRODUCT_INPUT_RUNTIME_REGISTRY: /app/data/studio_local/input_runtime_registry.json
     depends_on:
       data-restore:
         condition: service_completed_successfully
@@ -41,6 +43,8 @@ services:
         fi;
         .venv/bin/python -m scripts.gpu.make_runtime_manifest
         --out "$$PRODUCT_RUNTIME_MANIFEST";
+        .venv/bin/python -m scripts.gpu.qualify_input_runtimes
+        --out "$$PRODUCT_INPUT_RUNTIME_REGISTRY";
         .venv/bin/python -m scripts.kaggle.preflight
     environment:
       APP_ENV: development
@@ -51,6 +55,8 @@ services:
       PRODUCT_WORKER_ROOT: /data/studio_local/workers
       PRODUCT_PROCESSING_CONFIG: /opt/real2sim/app/configs/product/processing_presets_v1.json
       PRODUCT_RUNTIME_MANIFEST: /data/studio_local/runtime_manifest.json
+      PRODUCT_INPUT_RUNTIME_REGISTRY: /data/studio_local/input_runtime_registry.json
+      REC17_LIDAR_ODOMETRY_PYTHON: /opt/real2sim/lidar_runtime/bin/python
       R2S_STATE: /data
       # Replace any host-local values inherited from `.env.studio`; all heavy
       # tools live at these paths inside Dockerfile.gpu.
@@ -96,6 +102,7 @@ services:
       PRODUCT_WORKER_ROOT: /data/studio_local/workers
       PRODUCT_PROCESSING_CONFIG: /opt/real2sim/app/configs/product/processing_presets_v1.json
       PRODUCT_RUNTIME_MANIFEST: /data/studio_local/runtime_manifest.json
+      PRODUCT_INPUT_RUNTIME_REGISTRY: /data/studio_local/input_runtime_registry.json
       PRODUCT_DEMO_DIR: /data/demo/library
       PRODUCT_ASSET_PREVIEW_DIR: /data/asset_previews
       PRODUCT_RERUN_RECORDING_DIR: /data/rerun_recordings
