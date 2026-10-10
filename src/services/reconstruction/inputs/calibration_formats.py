@@ -269,6 +269,8 @@ def _load_yaml(text: str) -> dict[str, object]:
 def _number_tuple(value: object, keys: tuple[str, ...], where: str) -> tuple[float, ...]:
     if not isinstance(value, dict) or any(key not in value for key in keys):
         raise CalibrationParseError(f"{where}: cần các khoá {', '.join(keys)}")
+    if any(isinstance(value[key], bool) for key in keys):
+        raise CalibrationParseError(f"{where}: giá trị không phải số")
     try:
         return tuple(float(value[key]) for key in keys)
     except (TypeError, ValueError) as error:
@@ -371,7 +373,9 @@ def parse_kalibr_camchain(text: str, *, imu_frame: str = "imu") -> list[KalibrCa
                 distortion_coeffs=coefficients,
                 resolution=resolution,
                 camera_from_imu=camera_from_imu,
-                timeshift_cam_imu_seconds=float(shift) if isinstance(shift, (int, float)) else None,
+                timeshift_cam_imu_seconds=float(shift)
+                if isinstance(shift, (int, float)) and not isinstance(shift, bool)
+                else None,
             )
         )
     if not cameras:

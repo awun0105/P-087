@@ -258,6 +258,28 @@ class VideoUploadService:
             raise UploadNotFoundError(f"không tìm thấy upload: {upload_id}")
         return UploadRecord.model_validate_json(row[0])
 
+    def discard_unlinked(self, upload_id: str, *, expected_checksum: str) -> bool:
+        """Gỡ một upload do server vừa tạo mà chưa gắn project (dọn khi lần chạy không thành).
+
+        Chỉ gỡ khi bản ghi còn đúng checksum đã khai và chưa gắn project nào, nên không thể xoá nhầm dữ liệu
+        đang dùng. Chỉ xoá file cục bộ; bản trên kho từ xa (nếu có) do chính sách lưu trữ xử lý. Trả về
+        True khi đã gỡ.
+        """
+        with self.database.transaction(write=True) as tx:
+            row = tx.execute(
+                "SELECT payload FROM r2s_uploads WHERE upload_id=?" + tx.lock_suffix(), (upload_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            record = UploadRecord.model_validate_json(row[0])
+            if record.project_ids or record.checksum != expected_checksum:
+                return False
+            tx.execute("DELETE FROM r2s_uploads WHERE upload_id=?", (upload_id,))
+        path = self.resolver.locate(record.artifact_uri)
+        if path is not None:
+            path.unlink(missing_ok=True)
+        return True
+
     def save_video_preparation_manifest(self, upload_id: str, manifest: ClientVideoPreparationManifest) -> UploadRecord:
         """Store a client declaration as pending only; it is not server evidence."""
         with self.database.transaction(write=True) as tx:

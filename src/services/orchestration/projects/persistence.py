@@ -30,6 +30,7 @@ from src.services.orchestration.auth.quota_ledger import (
 )
 from src.services.orchestration.inputs.assembly import InputResolutionRecord, StoredInputAssembly
 from src.services.orchestration.inputs.compatibility import INPUT_ASSEMBLY_RUNNABLE_RECIPE_GROUPS
+from src.services.orchestration.inputs.loose_package import is_user_supplied_package
 from src.services.orchestration.inputs.runs import (
     InputAssemblyRunCommit,
     InputAssemblyRunRecord,
@@ -169,10 +170,22 @@ class ProjectPersistence:
             role_bindings = {binding.role: binding.file_ids for binding in candidate.bindings}
             selected_file_ids = set(role_bindings.get(InputRole.RGB_VIDEO, []))
             scan_ids = role_bindings.get(InputRole.LIDAR_SCAN, [])
-            # R4 từ ZIP người dùng nộp: ZIP là upload gắn vào project. R4 từ file rời: các scan chỉ là nguồn để
-            # đóng gói, thứ được gắn vào project là gói do server đóng (khai trong `synthesized_uploads`).
-            package_is_user_zip = bool(scan_ids) and all(
-                by_file_id[item].archive_member is not None for item in scan_ids
+            lidar_file_ids = [
+                file_id
+                for role in (
+                    InputRole.LIDAR_SCAN,
+                    InputRole.SENSOR_TRAJECTORY,
+                    InputRole.CAMERA_LIDAR_CALIBRATION,
+                    InputRole.RGB_FRAME_TIMES,
+                )
+                for file_id in role_bindings.get(role, [])
+            ]
+            # R4 từ ZIP người dùng nộp: ZIP là upload gắn vào project. R4 từ file rời (hoặc rải nhiều ZIP): các file
+            # chỉ là nguồn để đóng gói, thứ được gắn vào project là gói do server đóng (`synthesized_uploads`).
+            # Điều kiện tính trên MỌI vai trò LiDAR, cùng quy tắc với endpoint chạy, không chỉ riêng scan.
+            synthesized = dict(input_assembly_run.synthesized_uploads)
+            package_is_user_zip = (
+                not synthesized and bool(scan_ids) and is_user_supplied_package(by_file_id, lidar_file_ids)
             )
             if candidate.recipe_group == RecipeGroup.SUPPLIED_TRAJECTORY and package_is_user_zip:
                 selected_file_ids.update(scan_ids)
@@ -181,8 +194,7 @@ class ProjectPersistence:
                 existing = expected_upload_sources.setdefault(staged.upload_id, staged.source_file)
                 if existing != staged.source_file:
                     raise ArtifactChecksumError("Assembly members disagree on their source upload identity")
-            synthesized = dict(input_assembly_run.synthesized_uploads)
-            if synthesized and (candidate.recipe_group != RecipeGroup.SUPPLIED_TRAJECTORY or package_is_user_zip):
+            if synthesized and candidate.recipe_group != RecipeGroup.SUPPLIED_TRAJECTORY:
                 raise ValueError("Only a loose-file R4 run may link a server-built LiDAR package")
             if set(expected_upload_sources) | set(synthesized) != set(upload_ids_to_link):
                 raise ValueError("Linked product uploads must match the exact accepted recipe bindings")

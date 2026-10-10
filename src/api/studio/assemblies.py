@@ -92,6 +92,7 @@ from src.services.orchestration.projects.models import (
 )
 from src.services.orchestration.uploads import UploadError, UploadNotFoundError
 from src.services.orchestration.uploads.assembly_models import StagedInputUploadRecord
+from src.services.orchestration.uploads.models import UploadRecord
 from src.services.orchestration.uploads.scene_imports import ImportedScene, SceneImportError
 from src.services.reconstruction.inputs.input_probe import InputProbe
 
@@ -405,6 +406,8 @@ def run_input_assembly(
             detail="Grouped input Run requires the shared persistent runtime database",
         )
     payload: dict[str, object] = {"assembly_id": assembly_id, "request": request.model_dump(mode="json")}
+    built_package: UploadRecord | None = None  # gói do server vừa đóng; dọn nếu lần chạy không thành
+    run_committed = False
     fingerprint = _request_fingerprint("scene.create", payload)
     try:
         quota_intent = guest_run_intent(user, "scene.create", idempotency_key, payload)
@@ -523,14 +526,35 @@ def run_input_assembly(
             lidar_file_ids = [file_id for role in lidar_roles for file_id in bindings.get(role, [])]
             if not lidar_file_ids:
                 raise InputAssemblyConflictError("R4 has no bound LiDAR source files")
+            # Kiểm lời khai TRƯỚC khi đóng gói để lời khai thiếu không để lại một bản sao dữ liệu mồ côi.
+            declarations = stored.snapshot.declarations
+            if (
+                declarations.same_scene is None
+                or declarations.same_scene.value is not True
+                or declarations.same_scene.provenance not in {EvidenceProvenance.DECLARED, EvidenceProvenance.VERIFIED}
+                or declarations.coordinate_unit is None
+                or declarations.coordinate_unit.value != DistanceUnit.METER
+                or declarations.trajectory_convention is None
+                or declarations.trajectory_convention.value != TrajectoryConvention.WORLD_FROM_SENSOR
+                or candidate.trajectory_origin != TrajectoryOrigin.SUPPLIED
+            ):
+                raise InputAssemblyConflictError(
+                    "R4 requires declared same-scene, meter units, and world_from_sensor poses"
+                )
             package_members: list[LidarPackageMember] | None = None
+            user_package: UploadRecord | None = None
             if is_user_supplied_package(staged_by_id, lidar_file_ids):
-                package_upload_ids = {staged_by_id[file_id].upload_id for file_id in lidar_file_ids}
-                lidar_upload_id = next(iter(package_upload_ids))
-                lidar_upload = uploads.get(lidar_upload_id)
+                # ZIP người dùng nộp mà bộ nhận diện gói cũ chấp nhận thì dùng nguyên. Không qua được bộ nhận diện đó
+                # (ví dụ thừa một file quỹ đạo, bố cục khác) nhưng các thành viên đã bind đủ thì đóng lại như file rời.
+                try:
+                    candidate_package = uploads.get(next(iter({staged_by_id[i].upload_id for i in lidar_file_ids})))
+                except UploadNotFoundError:
+                    candidate_package = None
+                if candidate_package is not None and candidate_package.input_kind == "lidar_scan_sequence":
+                    user_package = candidate_package
+            if user_package is not None:
+                lidar_upload = user_package
                 authorize_upload_mutation(user, lidar_upload, operation="chạy LiDAR trong assembly")
-                if lidar_upload.input_kind != "lidar_scan_sequence":
-                    raise InputAssemblyConflictError("The R4 adapter requires a legacy-verified raw scan sequence ZIP")
             else:
                 # File nộp rời (hoặc rải ở nhiều ZIP): server đóng thành một gói chuẩn rồi nhận diện như gói tự nộp.
                 source_upload_ids = {staged_by_id[file_id].upload_id for file_id in lidar_file_ids}
@@ -548,22 +572,15 @@ def run_input_assembly(
                         role_bindings=bindings,
                         uploaded_by=actor_of(user),
                     )
-                except (LoosePackageError, UploadError) as error:
+                except (LoosePackageError, UploadError, ArtifactChecksumError) as error:
                     raise InputAssemblyConflictError(str(error)) from error
-            declarations = stored.snapshot.declarations
-            if (
-                declarations.same_scene is None
-                or declarations.same_scene.value is not True
-                or declarations.same_scene.provenance not in {EvidenceProvenance.DECLARED, EvidenceProvenance.VERIFIED}
-                or declarations.coordinate_unit is None
-                or declarations.coordinate_unit.value != DistanceUnit.METER
-                or declarations.trajectory_convention is None
-                or declarations.trajectory_convention.value != TrajectoryConvention.WORLD_FROM_SENSOR
-                or candidate.trajectory_origin != TrajectoryOrigin.SUPPLIED
-            ):
-                raise InputAssemblyConflictError(
-                    "R4 requires declared same-scene, meter units, and world_from_sensor poses"
-                )
+                except ArtifactTooLargeError as error:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=f"Gói LiDAR quá lớn: {error}"
+                    ) from error
+                built_package = lidar_upload
+                if lidar_upload.input_kind != "lidar_scan_sequence":
+                    raise InputAssemblyConflictError("Gói LiDAR đã đóng không được nhận diện là chuỗi scan thô")
             lidar_attachment = LidarAttachment(
                 upload_id=lidar_upload.upload_id,
                 trajectory_origin="supplied",
@@ -712,6 +729,7 @@ def run_input_assembly(
             input_assembly_run=commit,
         )
         if job.project_id == project.project_id:
+            run_committed = True
             record_gpu_run(user, job.job_id, {"kind": "scene.create", "project_id": project.project_id})
         return _accepted_job_response(job, user)
     except HTTPException:
@@ -724,8 +742,15 @@ def run_input_assembly(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except (InputAssemblyNotFoundError, ProjectNotFoundError, UploadNotFoundError) as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except ArtifactTooLargeError as error:
+        raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(error)) from error
     except ValueError as error:
         raise _handle_assembly_error(error) from error
+    finally:
+        # Gói do server đóng mà job không được nhận (lỗi, hoặc replay trả job cũ) thì gỡ ngay: nếu để lại sẽ là
+        # một bản sao dữ liệu LiDAR của người dùng không thuộc project nào.
+        if built_package is not None and not run_committed:
+            deps.uploads().discard_unlinked(built_package.upload_id, expected_checksum=built_package.checksum)
 
 
 @router.post(

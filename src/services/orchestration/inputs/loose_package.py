@@ -12,9 +12,9 @@ import hashlib
 import shutil
 import tempfile
 import zipfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import IO, TYPE_CHECKING
 
 from src.models.contracts.input_assembly import InputAssetFormat, InputRole, StagedInputFile
 from src.services.orchestration.projects.models import LidarPackageMember
@@ -123,6 +123,11 @@ def _member_names(
     return names
 
 
+def _expected_size(item: StagedInputFile) -> int:
+    """Số byte thành viên sẽ có trong gói: kích thước giải nén đã niêm phong, hoặc kích thước file rời."""
+    return item.archive_member.uncompressed_size_bytes if item.archive_member else item.source_file.size_bytes
+
+
 def _source_bytes_path(item: StagedInputFile, resolver: ArtifactResolver) -> Path:
     return resolver.require_uri(item.source_file.artifact_uri, item.source_file.checksum)
 
@@ -131,11 +136,22 @@ def _write_member(archive: zipfile.ZipFile, name: str, item: StagedInputFile, re
     """Ghi một thành viên và trả checksum bytes đã ghi; sai lệch với checksum đã xác minh thì từ chối."""
     digest = hashlib.sha256()
     source = _source_bytes_path(item, resolver)
+    limit = _expected_size(item)
+    written = 0
+
+    def copy(read: Callable[[int], bytes], target: IO[bytes]) -> None:
+        nonlocal written
+        for chunk in iter(lambda: read(_CHUNK_BYTES), b""):
+            written += len(chunk)
+            if written > limit:
+                # ZIP của người dùng có thể khai kích thước nhỏ nhưng giải nén lớn: chặn ngay khi vượt khai báo.
+                raise LoosePackageError("File nguồn lớn hơn kích thước đã xác minh; tải lại file đó")
+            digest.update(chunk)
+            target.write(chunk)
+
     if item.archive_member is None:
         with source.open("rb") as stream, archive.open(name, "w", force_zip64=True) as target:
-            for chunk in iter(lambda: stream.read(_CHUNK_BYTES), b""):
-                digest.update(chunk)
-                target.write(chunk)
+            copy(stream.read, target)
         expected = item.source_file.checksum
     else:
         with zipfile.ZipFile(source) as container:
@@ -144,9 +160,7 @@ def _write_member(archive: zipfile.ZipFile, name: str, item: StagedInputFile, re
             except KeyError as error:
                 raise LoosePackageError("Thành viên đã bind không còn trong ZIP đã tải lên") from error
             with member, archive.open(name, "w", force_zip64=True) as target:
-                for chunk in iter(lambda: member.read(_CHUNK_BYTES), b""):
-                    digest.update(chunk)
-                    target.write(chunk)
+                copy(member.read, target)
         expected = item.archive_member.member_checksum
     actual = f"sha256:{digest.hexdigest()}"
     if actual != expected:
@@ -168,6 +182,12 @@ def synthesize_lidar_package(
     kèm thông điệp của bộ nhận diện.
     """
     plan = _member_names(role_bindings, staged)
+    # Kiểm tổng dung lượng TRƯỚC khi đụng vào đĩa: gói lớn hơn giới hạn upload thì từ chối ngay, không đệm rồi mới hỏng.
+    total = sum(_expected_size(staged[file_id]) for _, file_id, _ in plan)
+    if total > service.max_bytes:
+        raise LoosePackageError(
+            f"Các file LiDAR cộng lại {total / 1e6:.0f} MB, vượt giới hạn {service.max_bytes / 1e6:.0f} MB của một gói"
+        )
     pending = service.begin_assembly(PACKAGE_FILENAME)
     members: list[LidarPackageMember] = []
     try:

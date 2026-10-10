@@ -42,9 +42,13 @@ khả thi khi có qualified adapters và updated producer/consumer contracts.
      hình học người dùng đã cấp**, không bao giờ theo khối lượng metadata.
    - Bảng là **chính sách, không phải số đo**: repo chưa có phép đo so sánh các luồng
      (`eval/protocols/lidar_odometry.md` chưa định ngưỡng). Sửa bảng khi có số đo held-out.
-   - Không hạ ngầm: luồng hạng cao hơn còn `needs_input` thì không chạy luồng thấp hơn (hỏi dữ
-     kiện còn thiếu). Luồng hạng cao hơn `pending_verification`/`unsupported` thì cho phép hạ,
-     kèm cảnh báo `HIGHER_ROUTE_UNAVAILABLE`. Hai luồng ready cùng hạng thì vẫn hỏi.
+   - Không hạ ngầm bỏ bằng chứng: luồng hạng cao hơn còn `needs_input` mà luồng được chọn sẽ
+     **loại file** của nó thì không chạy luồng thấp hơn (hỏi dữ kiện còn thiếu). Ngoại lệ: luồng
+     được chọn đã dùng đủ file của luồng cao hơn (ví dụ R4 so với R6 chỉ còn thiếu quan hệ đồng
+     hồ) thì vẫn chạy kèm `HIGHER_ROUTE_NEEDS_MORE_FACTS`, nói rõ bổ sung gì sẽ nâng cấp được.
+     Luồng hạng cao hơn `pending_verification`/`unsupported` (runtime không chạy được, người dùng
+     không mở khoá được) thì cho phép hạ, kèm cảnh báo `HIGHER_ROUTE_UNAVAILABLE`. Hai luồng
+     ready cùng hạng thì vẫn hỏi.
    - File mà luồng được chọn không dùng thì tự loại và liệt kê (`UNUSED_INPUTS_EXCLUDED`), không
      còn là điều kiện chặn. Lý do chọn ghi vào `diagnostics` (`ROUTE_AUTO_SELECTED`).
    - Cloud đi kèm LiDAR mà chưa có ý định `video_reconstruction` vẫn không bao giờ rơi về R1.
@@ -54,9 +58,15 @@ khả thi khi có qualified adapters và updated producer/consumer contracts.
    các byte đó (scan đánh số `000000.pcd…` theo thứ tự người dùng đã xác nhận, cộng quỹ đạo,
    calibration, thời điểm frame) rồi cho nó đi qua đúng bộ nhận diện của gói tự nộp, nên toàn bộ
    đường ingest/worker/QA của R4 giữ nguyên. Gói không biến đổi byte nào; mỗi thành viên ghi
-   `file_id` và checksum nguồn vào provenance của InputManifest (`package_members`), runner và
-   registry kiểm theo danh sách đó thay vì theo thành viên ZIP. Gói được gắn vào project để xoá
-   project xoá luôn gói. Điều kiện sớm ở resolver: scan phải là `.pcd` (`SCAN_FORMAT_PCD_REQUIRED`)
+   `file_id` và checksum nguồn vào provenance của InputManifest (`package_members`); registry và
+   runner kiểm danh sách đó khớp assembly đã niêm phong (checksum nguồn, vai trò, thứ tự scan, tên
+   thành viên khớp bộ nhận diện) và runner đối chiếu thêm tên thành viên thật của gói trên đĩa.
+   Byte của gói do worker kiểm checksum khi đọc. Gói được gắn vào project cùng lúc job được nhận
+   (xoá project xoá luôn gói); nếu lần chạy không thành hoặc là replay thì gói bị gỡ ngay
+   (`discard_unlinked`), không để bản sao dữ liệu mồ côi. Điều kiện chặn đặt TRƯỚC khi đóng gói:
+   lời khai, tổng dung lượng so với giới hạn một gói, kích thước giải nén so với giá trị đã niêm phong.
+   ZIP người dùng nộp mà bộ nhận diện gói cũ từ chối (bố cục khác, thừa file) nhưng các thành viên
+   đã bind đủ thì được đóng lại như file rời thay vì bị từ chối. Điều kiện sớm ở resolver: scan phải là `.pcd` (`SCAN_FORMAT_PCD_REQUIRED`)
    và thời điểm frame phải một dòng mỗi pose (`RGB_FRAME_TIMES_COUNT_MISMATCH`).
    Chưa làm: R5/R6 vẫn đọc scan từ nguồn đã stage (chưa kiểm xem chúng có buộc ZIP hay không).
 5. Allow loose/raw files trong assembly staging có validation phù hợp; complete

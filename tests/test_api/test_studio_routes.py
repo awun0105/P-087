@@ -832,6 +832,275 @@ async def test_input_assembly_runs_supplied_trajectory_from_loose_files_without_
     _validate_project_input_recipe(attempt, project, manifest)
 
 
+async def _r4_registry(studio: SimpleNamespace, name: str) -> object:
+    """Đăng ký runtime R4 đã qualified cho test chạy file rời; trả về đường dẫn file registry."""
+    from src.models.contracts.input_assembly import (
+        RuntimeCapabilityKey,
+        RuntimeCapabilityRecord,
+        RuntimeQualificationRegistry,
+        RuntimeQualificationStatus,
+        seal_runtime_registry,
+    )
+
+    studio.settings.product_upload_max_bytes = 16 * 1024 * 1024
+    path = studio.root / name
+    path.write_text(
+        seal_runtime_registry(
+            RuntimeQualificationRegistry(
+                schema_version="1.0",
+                registry_version="test-r4-v1",
+                capabilities=[
+                    RuntimeCapabilityRecord(
+                        capability_key=RuntimeCapabilityKey.R4,
+                        status=RuntimeQualificationStatus.QUALIFIED,
+                        runtime_id="qualified-r4-worker",
+                        runtime_version="4.0.0",
+                        qualification_evidence_checksum="sha256:" + "4" * 64,
+                    )
+                ],
+                registry_checksum="sha256:" + "0" * 64,
+            )
+        ).model_dump_json()
+    )
+    studio.settings.product_input_runtime_registry = path
+    return path
+
+
+_R4_DECLARATIONS = {
+    "same_scene": {"value": True, "provenance": "declared"},
+    "cloud_state": {"value": "raw_scan_sequence", "provenance": "declared"},
+    "coordinate_unit": {"value": "m", "provenance": "declared"},
+    "lidar_frame_id": {"value": "lidar_sensor", "provenance": "declared"},
+    "trajectory_convention": {"value": "world_from_sensor", "provenance": "declared"},
+}
+
+
+async def _r4_upload(client: AsyncClient, name: str, payload: bytes) -> dict:
+    response = await client.post("/api/v1/input-assemblies/uploads", params={"filename": name}, content=payload)
+    assert response.status_code == 201, (name, response.text)
+    return response.json()
+
+
+async def _r4_resolve(client: AsyncClient, upload_ids: list[str], bindings: list[dict], declarations: dict) -> tuple:
+    created = await client.post(
+        "/api/v1/input-assemblies",
+        json={
+            "upload_ids": upload_ids,
+            "requested_intent": "video_reconstruction",
+            "declarations": declarations,
+            "bindings": bindings,
+        },
+    )
+    assert created.status_code == 201, created.text
+    assembly = created.json()
+    resolved = await client.post(
+        f"/api/v1/input-assemblies/{assembly['assembly_id']}/resolve", json={"revision": assembly["revision"]}
+    )
+    assert resolved.status_code == 200, resolved.text
+    report = resolved.json()["report"]
+    candidate = next(
+        (
+            item
+            for item in report["candidates"]
+            if item["candidate_kind"] == "video_recipe" and item["recipe_group"] == "R4"
+        ),
+        None,
+    )
+    return assembly, report, candidate
+
+
+async def _r4_run(client: AsyncClient, assembly: dict, report: dict, candidate: dict, key: str):
+    return await client.post(
+        f"/api/v1/input-assemblies/{assembly['assembly_id']}/run",
+        json={
+            "revision": assembly["revision"],
+            "resolution_checksum": report["report_checksum"],
+            "candidate_id": candidate["candidate_id"],
+            "name": "R4 loose",
+            "attestation": _ATTESTATION,
+        },
+        headers={"Idempotency-Key": key},
+    )
+
+
+async def _r4_inputs(client: AsyncClient, *, scans_in_zip: bool = False):
+    from tests.test_reconstruction.test_lidar_package import POSES, _companions, _pcd, _scan, _zip
+
+    video = await _r4_upload(client, "walk.mp4", b"\x00\x00\x00\x14ftypqt  fake-mp4")
+    companions = _companions()
+    trajectory = await _r4_upload(client, "poses.txt", companions["traj.txt"])
+    calibration = await _r4_upload(client, "rig.txt", companions["calibrations.txt"])
+    frame_times = await _r4_upload(client, "times.txt", companions["frame_times.txt"])
+    if scans_in_zip:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as raw:
+            archive = _zip(Path(raw) / "scans.zip", {f"{i:06d}.pcd": _pcd(_scan()) for i in range(POSES)})
+            bundle = await _r4_upload(client, "scans.zip", archive.read_bytes())
+        scans = [bundle]
+        scan_ids = [
+            item["file_id"] for item in sorted(bundle["staged_files"], key=lambda f: f["archive_member"]["member_path"])
+        ]
+    else:
+        scans = [await _r4_upload(client, f"scan_{index}.pcd", _pcd(_scan())) for index in range(POSES)]
+        scan_ids = [item["staged_files"][0]["file_id"] for item in scans]
+    uploads = [video, trajectory, calibration, frame_times, *scans]
+    bindings = [
+        {"binding_id": "rgb", "role": "rgb_video", "file_ids": [video["staged_files"][0]["file_id"]]},
+        {"binding_id": "scans", "role": "lidar_scan", "file_ids": scan_ids},
+        {
+            "binding_id": "trajectory",
+            "role": "sensor_trajectory",
+            "file_ids": [trajectory["staged_files"][0]["file_id"]],
+        },
+        {
+            "binding_id": "calibration",
+            "role": "camera_lidar_calibration",
+            "file_ids": [calibration["staged_files"][0]["file_id"]],
+        },
+        {
+            "binding_id": "frame-times",
+            "role": "rgb_frame_times",
+            "file_ids": [frame_times["staged_files"][0]["file_id"]],
+        },
+    ]
+    return [item["upload_id"] for item in uploads], bindings
+
+
+def _r4_packages() -> list:
+    from src.api.studio import deps
+
+    return [item for item in deps.uploads().list() if item.input_kind == "lidar_scan_sequence"]
+
+
+@pytest.mark.asyncio
+async def test_loose_r4_with_missing_declarations_leaves_no_orphan_package(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    await _r4_registry(studio, "input-runtime-r4-orphan.json")
+    upload_ids, bindings = await _r4_inputs(client)
+    declarations = {key: value for key, value in _R4_DECLARATIONS.items() if key != "trajectory_convention"}
+    assembly, report, candidate = await _r4_resolve(client, upload_ids, bindings, declarations)
+    # Thiếu khai báo thì resolver không cho ready; ép chạy bằng candidate bất kỳ phải bị chặn và không để lại gói.
+    assert candidate is not None
+    response = await _r4_run(client, assembly, report, candidate, "orphan-1")
+    assert response.status_code in {409, 422}, response.text
+    assert _r4_packages() == []
+
+
+@pytest.mark.asyncio
+async def test_loose_r4_failure_after_packaging_removes_the_server_built_package(
+    client: AsyncClient, studio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Lỗi xảy ra SAU khi gói đã được đóng và ghi: gói không thuộc project nào phải bị gỡ, không để bản sao mồ côi."""
+    await _r4_registry(studio, "input-runtime-r4-afterfail.json")
+    upload_ids, bindings = await _r4_inputs(client)
+    assembly, report, candidate = await _r4_resolve(client, upload_ids, bindings, _R4_DECLARATIONS)
+    assert candidate["state"] == "ready"
+
+    def explode(*_args: object, **_kwargs: object) -> None:
+        raise ValueError("lỗi giả lập sau khi đóng gói")
+
+    monkeypatch.setattr(studio.registry, "create_project_from_input_assembly", explode)
+
+    response = await _r4_run(client, assembly, report, candidate, "afterfail-1")
+
+    assert response.status_code == 422, response.text
+    assert _r4_packages() == []
+
+
+@pytest.mark.asyncio
+async def test_loose_r4_replay_with_the_same_key_does_not_create_a_second_package(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    await _r4_registry(studio, "input-runtime-r4-replay.json")
+    upload_ids, bindings = await _r4_inputs(client)
+    assembly, report, candidate = await _r4_resolve(client, upload_ids, bindings, _R4_DECLARATIONS)
+    assert candidate["state"] == "ready"
+
+    first = await _r4_run(client, assembly, report, candidate, "replay-key")
+    second = await _r4_run(client, assembly, report, candidate, "replay-key")
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    assert first.json()["job"]["job_id"] == second.json()["job"]["job_id"]
+    assert len(_r4_packages()) == 1
+
+
+@pytest.mark.asyncio
+async def test_loose_r4_whose_total_size_exceeds_the_package_limit_is_a_conflict_not_a_500(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    await _r4_registry(studio, "input-runtime-r4-size.json")
+    upload_ids, bindings = await _r4_inputs(client)
+    assembly, report, candidate = await _r4_resolve(client, upload_ids, bindings, _R4_DECLARATIONS)
+    assert candidate["state"] == "ready"
+    studio.settings.product_upload_max_bytes = 64 * 1024  # từng file nhỏ hơn giới hạn nhưng tổng thì không
+
+    response = await _r4_run(client, assembly, report, candidate, "size-1")
+
+    assert response.status_code in {409, 413}, response.text
+    assert "vượt giới hạn" in response.text or "quá lớn" in response.text
+    assert _r4_packages() == []
+
+
+@pytest.mark.asyncio
+async def test_r4_with_scans_in_a_zip_and_other_roles_loose_runs_through_a_server_built_package(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    await _r4_registry(studio, "input-runtime-r4-mixed.json")
+    upload_ids, bindings = await _r4_inputs(client, scans_in_zip=True)
+    assembly, report, candidate = await _r4_resolve(client, upload_ids, bindings, _R4_DECLARATIONS)
+    assert candidate["state"] == "ready", [fact["code"] for fact in candidate["required_facts"]]
+
+    response = await _r4_run(client, assembly, report, candidate, "mixed-1")
+
+    assert response.status_code == 201, response.text
+    assert len(_r4_packages()) == 1
+
+
+@pytest.mark.asyncio
+async def test_r4_zip_the_legacy_detector_rejects_is_repackaged_instead_of_refused(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    """ZIP có đủ file nhưng thừa một quỹ đạo nên bộ nhận diện gói cũ từ chối: vẫn chạy được sau khi đóng lại."""
+    from tests.test_reconstruction.test_lidar_package import POSES, _companions, _pcd, _scan, _zip
+
+    await _r4_registry(studio, "input-runtime-r4-repackage.json")
+    import tempfile
+    from pathlib import Path
+
+    video = await _r4_upload(client, "walk.mp4", b"\x00\x00\x00\x14ftypqt  fake-mp4")
+    companions = _companions()
+    members = {
+        **companions,
+        "traj_other.txt": companions["traj.txt"],  # hai quỹ đạo: gói cũ đòi đúng một
+        **{f"{i:06d}.pcd": _pcd(_scan()) for i in range(POSES)},
+    }
+    with tempfile.TemporaryDirectory() as raw:
+        bundle = await _r4_upload(client, "everything.zip", _zip(Path(raw) / "all.zip", members).read_bytes())
+    ids = {item["archive_member"]["member_path"]: item["file_id"] for item in bundle["staged_files"]}
+    bindings = [
+        {"binding_id": "rgb", "role": "rgb_video", "file_ids": [video["staged_files"][0]["file_id"]]},
+        {"binding_id": "scans", "role": "lidar_scan", "file_ids": [ids[f"{i:06d}.pcd"] for i in range(POSES)]},
+        {"binding_id": "trajectory", "role": "sensor_trajectory", "file_ids": [ids["traj.txt"]]},
+        {"binding_id": "calibration", "role": "camera_lidar_calibration", "file_ids": [ids["calibrations.txt"]]},
+        {"binding_id": "frame-times", "role": "rgb_frame_times", "file_ids": [ids["frame_times.txt"]]},
+    ]
+    assembly, report, candidate = await _r4_resolve(
+        client, [video["upload_id"], bundle["upload_id"]], bindings, _R4_DECLARATIONS
+    )
+    assert candidate is not None and candidate["state"] == "ready", [
+        fact["code"] for fact in (candidate or {}).get("required_facts", [])
+    ]
+
+    response = await _r4_run(client, assembly, report, candidate, "repackage-1")
+
+    assert response.status_code == 201, response.text
+    assert len(_r4_packages()) == 1
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("recipe_group", ["R5", "R6"])
 async def test_estimated_odometry_run_requires_qualified_runtime_and_verified_rgb_bindings(
