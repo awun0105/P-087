@@ -1,74 +1,25 @@
 "use client";
 
 import { Boxes, Loader2, RefreshCw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
 
 import { Button, Notice } from "@/components/studio/primitives";
-import { ApiError } from "@/lib/api/client";
-import { cancelObjectify, getObjectifyState, requestObjectify, type ObjectifyMode, type ObjectifyState } from "@/lib/api/studio";
-
-const POLL_MS = 5000;
+import { useObjectify } from "@/features/studio/scene/useObjectify";
+import type { ObjectifyMode } from "@/lib/api/studio";
 
 /**
  * Báo scene chưa phải scene theo vật và cho người dùng chọn: chạy lại tách theo vật, hoặc dùng hộp ứng viên.
- * Việc nặng do worker làm; component chỉ gửi yêu cầu, hỏi trạng thái định kỳ và báo khi có revision mới.
+ * Cùng trạng thái và thao tác với hàng bước "Tách vật thể" ở tab Tiến trình (xem `useObjectify`).
  */
 export function ObjectifyNotice({ jobId, revision, onRevision }: { jobId: string; revision: string; onRevision: () => void }) {
-  const [state, setState] = useState<ObjectifyState | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-  const [tick, setTick] = useState(0);
-  // Chỉ báo lên một lần cho mỗi revision kết quả, kể cả khi poll trả "done" nhiều lần.
-  const announced = useRef<string | null>(null);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    getObjectifyState(jobId, controller.signal).then(
-      (next) => {
-        setState(next);
-        if (next.status === "done" && next.result_revision && next.result_revision !== revision && announced.current !== next.result_revision) {
-          announced.current = next.result_revision;
-          onRevision();
-        }
-      },
-      () => undefined, // route chưa có (API cũ) hoặc scene chưa sẵn sàng: không hiện gì
-    );
-    return () => controller.abort();
-  }, [jobId, revision, tick]); // eslint-disable-line react-hooks/exhaustive-deps -- onRevision chỉ là kênh báo lên
-
-  const pending = state?.status === "queued" || state?.status === "running";
-  useEffect(() => {
-    if (!pending) return;
-    const timer = window.setInterval(() => setTick((value) => value + 1), POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [pending]);
+  const { state, error, sending, send: sendRequest, cancel } = useObjectify({ jobId, revision, onRevision });
 
   if (!state) return null;
   const send = async (mode: ObjectifyMode) => {
     if (mode === "objectify" && !state.awaiting_choice && !window.confirm("Chạy lại tách theo vật sẽ thay toàn bộ vật hiện có bằng tập ứng viên mới (hoàn tác được). Tiếp tục?")) return;
-    setSending(true);
-    setError(null);
-    try {
-      setState(await requestObjectify(jobId, revision, mode));
-    } catch (cause) {
-      setError(cause instanceof ApiError ? cause.detail : "Không gửi được yêu cầu.");
-    } finally {
-      setSending(false);
-    }
+    await sendRequest(mode);
   };
 
-  const cancel = async () => {
-    setSending(true);
-    setError(null);
-    try {
-      setState(await cancelObjectify(jobId));
-    } catch (cause) {
-      setError(cause instanceof ApiError ? cause.detail : "Không hủy được yêu cầu.");
-    } finally {
-      setSending(false);
-    }
-  };
-
+  const pending = state.status === "queued" || state.status === "running";
   if (pending) {
     return (
       <Notice tone="ember" className="m-3" icon={<Loader2 className="size-4 animate-spin" aria-hidden />}>

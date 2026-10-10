@@ -157,8 +157,8 @@ export function NextAction({
       if (awaitingChoice) {
         // Pipeline v2: tách theo vật lỗi hết số lần thử; scene chỉ có môi trường cho tới khi người dùng chọn.
         title = "Tách theo vật chưa thành công";
-        description = "Chọn chạy lại tách theo vật hoặc dùng hộp ứng viên trong Studio.";
-        action = { label: "Mở Studio để chọn", tab: "studio", mode: "scene" };
+        description = "Chạy lại tách theo vật hoặc dùng hộp ứng viên ngay tại bước “Tách vật thể”.";
+        action = { label: "Xem bước tách vật thể", tab: "progress" };
       } else if (pending) {
         title = "Cần xác nhận vật thể";
         description = String(pending) + " ứng viên chưa được xác nhận.";

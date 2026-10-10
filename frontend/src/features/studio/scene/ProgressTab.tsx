@@ -1,7 +1,7 @@
 "use client";
 
 import { Square } from "lucide-react";
-import { Button, ProgressBar } from "@/components/studio/primitives";
+import { Button, Notice, ProgressBar } from "@/components/studio/primitives";
 import { HelpDetails } from "@/components/studio/feedback";
 import { PipelineTimeline, type StageAction, type StageView } from "@/features/studio/PipelineTimeline";
 import { isJobStale, stageSeconds, useNow, type SceneInfo } from "@/features/studio/scene/state";
@@ -9,6 +9,7 @@ import { stagesFor } from "@/features/studio/stages";
 import { AnonymizationReviewPanel } from "@/features/studio/scene/AnonymizationReviewPanel";
 import { AttemptHistory } from "@/features/studio/scene/AttemptHistory";
 import { ProgressFrame } from "@/features/studio/scene/ProgressFrame";
+import { objectifyStageOverride, useObjectify } from "@/features/studio/scene/useObjectify";
 import { QueueStatus } from "@/features/studio/scene/QueueStatus";
 import { ResourceWaitDetail } from "@/features/studio/scene/ResourceWaitDetail";
 import type { JobProgress } from "@/lib/contracts/studio";
@@ -29,10 +30,17 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
   const reviewing = progress?.waiting_for === "anonymization_review";
   const now = useNow(progress?.status === "RUNNING" || progress?.status === "QUEUED");
   const stale = isJobStale(progress, now);
-  const views: StageView[] = progress?.stages.map((stage) => ({
-    stage_id: stage.stage_id, state: stage.state, error: stage.error, fraction: null,
-    seconds: stage.stage_id === "ST-METRIC-CANONICALIZE" ? null : stageSeconds(stage.started_at, stage.completed_at, stage.state === "running" ? now : null),
-  })) ?? [];
+  // Bước "Tách vật thể" luôn ghi thành công vì scene đã được tạo; nếu tách theo vật lỗi hết số lần thử thì hàng bước đó
+  // phải báo lỗi và có nút chọn tiếp tại chỗ, không chỉ trong màn chi tiết vật thể.
+  const objectStageDone = progress?.stages.some((stage) => stage.stage_id === "ST-OBJECT-EXTRACT" && stage.state === "succeeded") ?? false;
+  const objectify = useObjectify({ jobId, enabled: objectStageDone, onRevision: () => onChanged?.() });
+  const objectOverride = objectStageDone ? objectifyStageOverride(objectify.state) : null;
+  const views: StageView[] = progress?.stages.map((stage) => stage.stage_id === "ST-OBJECT-EXTRACT" && objectOverride
+    ? { stage_id: stage.stage_id, state: objectOverride.state, error: objectOverride.error, fraction: null, seconds: null }
+    : {
+      stage_id: stage.stage_id, state: stage.state, error: stage.error, fraction: null,
+      seconds: stage.stage_id === "ST-METRIC-CANONICALIZE" ? null : stageSeconds(stage.started_at, stage.completed_at, stage.state === "running" ? now : null),
+    }) ?? [];
   // Mọi thao tác người dùng cần làm đều có nút ngay ở hàng của bước đang chờ, không dùng khung thông báo riêng.
   const stageActions: StageAction[] = [];
   if (progress?.waiting_for === "metric_confirmation" && onConfirmMetric) {
@@ -40,6 +48,18 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
   }
   if (onRetry && progress?.status === "FAILED" && progress.error?.retryable && progress.error.stage_id) {
     stageActions.push({ stageId: progress.error.stage_id, label: "Thử lại", onClick: onRetry, disabled: retryDisabled, hint: retryHint });
+  }
+  if (objectOverride && canAccept) {
+    if (objectOverride.state === "running") {
+      if (!objectify.state?.cancellation_requested) {
+        stageActions.push({ stageId: "ST-OBJECT-EXTRACT", label: "Hủy yêu cầu", onClick: () => void objectify.cancel(), disabled: objectify.sending });
+      }
+    } else {
+      if (objectify.state?.available) {
+        stageActions.push({ stageId: "ST-OBJECT-EXTRACT", label: "Chạy lại tách theo vật", onClick: () => void objectify.send("objectify"), disabled: objectify.sending });
+      }
+      stageActions.push({ stageId: "ST-OBJECT-EXTRACT", label: "Dùng hộp ứng viên", onClick: () => void objectify.send("boxes"), disabled: objectify.sending });
+    }
   }
   if (reviewing && progress?.current_stage) {
     stageActions.push({
@@ -57,6 +77,7 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
         {progress.queue && <QueueStatus queue={progress.queue} />}
         {progress.waiting_for === "resources" && progress.resource_wait && <ResourceWaitDetail wait={progress.resource_wait} />}
       </div>}
+      {objectify.error && objectOverride && <Notice tone="rust" className="mb-4">{objectify.error}</Notice>}
       {progress ? (
         <>
           <PipelineTimeline stageActions={stageActions} stages={views} stageList={stagesFor(progress.stages.map((stage) => stage.stage_id))} jobId={jobId} isStale={stale} timeNote={"Cập nhật lúc " + new Date(progress.updated_at).toLocaleTimeString("vi-VN") + (stale ? " · Tiến trình mất kết nối" : progress.status === "RUNNING" || progress.status === "QUEUED" ? " · Có thể đóng trang, job tiếp tục chạy trên máy chủ" : "")} />

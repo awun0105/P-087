@@ -698,6 +698,8 @@ export interface ObjectifyResourceWait {
 export interface ObjectifyState {
   status: "idle" | "queued" | "running" | "done" | "failed" | "cancelled";
   mode: ObjectifyMode | null;
+  /** Revision SceneIR hiện tại; API cũ không gửi. */
+  scene_revision?: string | null;
   /** Tách theo vật lỗi hết số lần thử; scene chỉ có môi trường, chờ người dùng chọn. */
   awaiting_choice: boolean;
   object_centric: boolean;

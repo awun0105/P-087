@@ -319,9 +319,11 @@ describe("workflow scene", () => {
 
     const failed = { ...scene, objects: [], provenance: { ...scene.provenance, object_extraction: "objectify_failed_awaiting_choice" } };
     vi.mocked(getJobScene).mockResolvedValue({ ok: true, data: { ...response, scene: failed } });
-    render(<NextAction jobId="job-1" progress={done} current="progress" mode="scene" sceneReady revision={scene.scene_revision} busy={false} onOpen={vi.fn()} onRetry={vi.fn()} />);
+    render(<NextAction jobId="job-1" progress={done} current="studio" mode="scene" sceneReady revision={scene.scene_revision} busy={false} onOpen={vi.fn()} onRetry={vi.fn()} />);
     expect(await screen.findByText("Tách theo vật chưa thành công")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Mở Studio để chọn" })).toBeInTheDocument();
+    // Việc chọn tiếp nằm ngay ở hàng bước "Tách vật thể" của tab Tiến trình, không phải trong Studio.
+    expect(screen.getByRole("button", { name: "Xem bước tách vật thể" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Mở Studio để chọn" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Mở tạo gói mô phỏng" })).toBeNull();
   });
 });
