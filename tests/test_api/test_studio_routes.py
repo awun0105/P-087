@@ -1109,9 +1109,10 @@ async def test_r4_zip_the_legacy_detector_rejects_is_repackaged_instead_of_refus
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("layout", ["zip", "loose"])
 @pytest.mark.parametrize("recipe_group", ["R5", "R6"])
 async def test_estimated_odometry_run_requires_qualified_runtime_and_verified_rgb_bindings(
-    recipe_group: str, client: AsyncClient, studio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    recipe_group: str, layout: str, client: AsyncClient, studio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from types import SimpleNamespace
 
@@ -1169,17 +1170,35 @@ async def test_estimated_odometry_run_requires_qualified_runtime_and_verified_rg
         companions = _companions()
         scans["lidar/calibrations.txt"] = companions["calibrations.txt"]
         scans["lidar/frame_times.txt"] = companions["frame_times.txt"]
-    scan_upload = await client.post(
-        "/api/v1/input-assemblies/uploads",
-        params={"filename": "raw-scans.zip"},
-        content=_zip(studio.root / f"{recipe_group.lower()}-scans.zip", scans).read_bytes(),
-    )
-    assert video.status_code == scan_upload.status_code == 201, (video.text, scan_upload.text)
-    member_ids = {
-        item["archive_member"]["member_path"]: item["file_id"]
-        for item in scan_upload.json()["staged_files"]
-        if item["archive_member"] is not None
-    }
+    assert video.status_code == 201, video.text
+    if layout == "zip":
+        scan_upload = await client.post(
+            "/api/v1/input-assemblies/uploads",
+            params={"filename": "raw-scans.zip"},
+            content=_zip(studio.root / f"{recipe_group.lower()}-scans.zip", scans).read_bytes(),
+        )
+        assert scan_upload.status_code == 201, scan_upload.text
+        scan_upload_ids = [scan_upload.json()["upload_id"]]
+        member_ids = {
+            item["archive_member"]["member_path"]: item["file_id"]
+            for item in scan_upload.json()["staged_files"]
+            if item["archive_member"] is not None
+        }
+    else:
+        # Mỗi file nộp riêng, không có ZIP nào: scan, thời điểm scan, calibration, thời điểm frame.
+        scan_upload_ids = []
+        member_ids = {}
+        for name, payload in scans.items():
+            response = await client.post(
+                "/api/v1/input-assemblies/uploads",
+                params={"filename": name.rsplit("/", 1)[-1]},
+                content=payload,
+            )
+            assert response.status_code == 201, (name, response.text)
+            staged = response.json()["staged_files"]
+            assert len(staged) == 1 and staged[0]["archive_member"] is None
+            scan_upload_ids.append(response.json()["upload_id"])
+            member_ids[name] = staged[0]["file_id"]
     declarations = {
         "same_scene": {"value": True, "provenance": "declared"},
         "cloud_state": {"value": "raw_scan_sequence", "provenance": "declared"},
@@ -1215,7 +1234,7 @@ async def test_estimated_odometry_run_requires_qualified_runtime_and_verified_rg
     created = await client.post(
         "/api/v1/input-assemblies",
         json={
-            "upload_ids": [video.json()["upload_id"], scan_upload.json()["upload_id"]],
+            "upload_ids": [video.json()["upload_id"], *scan_upload_ids],
             "requested_intent": "video_reconstruction",
             "declarations": declarations,
             "bindings": [
@@ -1291,7 +1310,8 @@ async def test_estimated_odometry_run_requires_qualified_runtime_and_verified_rg
         studio.settings.product_upload_max_bytes,
     )
     assert project.project_id in product_uploads.get(video.json()["upload_id"]).project_ids
-    assert project.project_id in input_uploads.get_upload(scan_upload.json()["upload_id"]).project_ids
+    for scan_upload_id in scan_upload_ids:
+        assert project.project_id in input_uploads.get_upload(scan_upload_id).project_ids
     manifest = InputManifest.model_validate_json(
         studio.registry.runtime_resolver.require(project.input_manifest_ref).read_bytes()
     )
