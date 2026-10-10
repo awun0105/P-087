@@ -6,6 +6,32 @@ import type { InputKind, UploadRecord } from "@/lib/contracts/studio";
 
 export const GAUSSIAN_ACCEPT = ".ply,.sog,.zip,application/zip,application/x-sog";
 
+/**
+ * Đuôi file mà pipeline có chỗ dùng thật, mirror `ASSEMBLY_UPLOAD_EXTENSIONS` ở backend:
+ * video MP4/MOV, point cloud PLY/PCD, Gaussian PLY/SOG, ZIP, và metadata dạng văn bản
+ * (calibration JSON/text, quỹ đạo TUM, timestamp). Đuôi chỉ lọc sớm để khỏi tải lên thứ
+ * không ai đọc; vai trò thật do probe nội dung của máy chủ quyết định.
+ */
+const ASSEMBLY_EXTENSIONS = ["mp4", "mov", "ply", "pcd", "sog", "zip", "json", "txt", "tum", "csv"] as const;
+export const ASSEMBLY_ACCEPT = [
+  ...ASSEMBLY_EXTENSIONS.map((item) => `.${item}`),
+  "video/mp4",
+  "video/quicktime",
+  "application/zip",
+  "application/x-sog",
+  "application/json",
+  "text/plain",
+  "text/csv",
+].join(",");
+const ASSEMBLY_NAME = new RegExp(`\\.(${ASSEMBLY_EXTENSIONS.join("|")})$`, "i");
+
+/** Lọc sớm ở khung tải input chung; null khi đuôi file có consumer trong pipeline. */
+export function rejectAssemblyFileName(name: string): string | null {
+  return ASSEMBLY_NAME.test(name)
+    ? null
+    : "Pipeline không đọc được loại file này. Nhận video .mp4/.mov, point cloud .ply/.pcd, scene 3DGS .ply/.sog, .zip, và metadata .json/.txt/.tum/.csv.";
+}
+
 const INPUT_KIND_LABELS: Record<InputKind, string> = {
   rgb_video: "Video",
   gaussian_ply: "Scene 3DGS (.ply)",

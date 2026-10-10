@@ -7,6 +7,7 @@ import { ArrowDown, ArrowUp, Check, FileCheck2, FileUp, Loader2, Play, Trash2, X
 import { PageHeader } from "@/components/studio/feedback";
 import { Badge, Button, Card, EmptyState, Notice, ProgressBar, buttonVariants } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
+import { ASSEMBLY_ACCEPT, rejectAssemblyFileName } from "@/features/studio/inputKinds";
 import { canEdit } from "@/lib/api/auth";
 import {
   createInputAssembly,
@@ -224,6 +225,14 @@ function candidateStateLabel(state: CandidateState): string {
     unsupported: "Chưa hỗ trợ",
     invalid: "Không hợp lệ",
   }[state];
+}
+
+/** Probe không ra vai trò nào: resolver sẽ loại file khỏi mọi recipe, nên đừng báo "đã xác minh". */
+const UNUSABLE_FORMATS = new Set(["unknown", "zip_unknown"]);
+
+function unusableStaged(staged: AssemblyUploadResponse | null): boolean {
+  const files = staged?.staged_files ?? [];
+  return files.length > 0 && files.every((item) => UNUSABLE_FORMATS.has(item.observed_format));
 }
 
 function formatLabel(format: string): string {
@@ -565,8 +574,15 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
 
   async function addFiles(files: FileList | File[]) {
     if (!draftLoaded) return;
-    const candidates = Array.from(files);
-    if (!candidates.length) return;
+    const dropped = Array.from(files);
+    if (!dropped.length) return;
+    // Lọc sớm theo đuôi để không tải lên thứ pipeline không có chỗ dùng; nội dung vẫn do server probe.
+    const unusable = dropped.filter((file) => rejectAssemblyFileName(file.name) !== null);
+    const candidates = dropped.filter((file) => rejectAssemblyFileName(file.name) === null);
+    if (!candidates.length) {
+      setError(rejectAssemblyFileName(dropped[0].name));
+      return;
+    }
     if (entries.length + candidates.length > 100) {
       setError("Một assembly nhận tối đa 100 file upload. Hãy chia dữ liệu thành các nhóm nhỏ hơn.");
       return;
@@ -576,7 +592,9 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     try {
       const newItems = await Promise.all(candidates.map(async (file) => newEntry(file, await looksLikeVideo(file))));
       setEntries((current) => [...current, ...newItems]);
+      // `invalidateResolution` xoá lỗi cũ, nên lời nhắc về file bị bỏ qua phải đặt sau nó.
       invalidateResolution();
+      setNotice(unusable.length ? `Đã bỏ qua ${unusable.length} file pipeline không đọc được: ${unusable.map((file) => file.name).join(", ")}.` : null);
       setScanOrderConfirmed(false);
     } catch (cause: unknown) {
       setError(errorMessage(cause, "Không đọc được danh sách file đã chọn."));
@@ -940,6 +958,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
             id={ids.upload}
             type="file"
             multiple
+            accept={ASSEMBLY_ACCEPT}
             className="sr-only"
             disabled={busy || adding || !draftLoaded}
             onChange={(event) => { void addFiles(event.currentTarget.files ?? []); event.currentTarget.value = ""; }}
@@ -967,6 +986,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
               {entries.map((entry) => {
                 const formats = [...new Set(entry.staged?.staged_files.map((item) => formatLabel(item.observed_format)) ?? [])];
                 const active = entry.status === "preparing" || entry.status === "uploading";
+                const unusable = unusableStaged(entry.staged);
                 return (
                   <li key={entry.id} className="py-4 first:pt-0 last:pb-0">
                     <div className="flex flex-wrap items-start gap-3">
@@ -984,6 +1004,11 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
                           {entry.staged ? formats.join(" · ") || "ZIP chưa phân loại" : entry.isVideo ? `Video · ${formatBytes(entry.file?.size ?? 0)}` : `Đang chờ server phân loại · ${formatBytes(entry.file?.size ?? 0)}`}
                           {entry.staged && ` · ${formatBytes(entry.staged.source_file.size_bytes)}`}
                         </p>
+                        {unusable && (
+                          <p className="mt-1 text-sm text-ochre-strong">
+                            Máy chủ không nhận ra vai trò nào trong file này, nên mọi hướng xử lý đều loại nó. Bỏ chọn hoặc xoá file để phân tích tiếp.
+                          </p>
+                        )}
                         {entry.isVideo && entry.status !== "ready" && (
                           <fieldset className="mt-3">
                             <legend className="text-xs font-semibold text-ink-muted">Độ phân giải tối đa · đầu ra giữ nguyên tỉ lệ và giới hạn 30 FPS</legend>
@@ -1017,7 +1042,11 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
                         )}
                       </div>
                       <div className="flex items-center gap-2">
-                        {entry.status === "ready" ? <Badge tone="sage"><FileCheck2 aria-hidden /> Đã xác minh</Badge> : null}
+                        {entry.status === "ready"
+                          ? unusable
+                            ? <Badge tone="ochre">Không dùng được</Badge>
+                            : <Badge tone="sage"><FileCheck2 aria-hidden /> Đã xác minh</Badge>
+                          : null}
                         {(entry.status === "failed" || entry.status === "cancelled") && <Button size="sm" variant="secondary" onClick={() => void uploadOne(entry)} disabled={busy || (!entry.file && !entry.legacyUploadId)}>Tiếp tục</Button>}
                         {active && <Button size="icon" variant="ghost" aria-label={`Hủy ${entry.originalName}`} onClick={() => cancelEntry(entry.id)}><X aria-hidden /></Button>}
                         {!active && <Button size="icon" variant="ghost" aria-label={`Bỏ ${entry.originalName}`} onClick={() => removeEntry(entry.id)} disabled={busy}><Trash2 aria-hidden /></Button>}

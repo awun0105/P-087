@@ -184,6 +184,15 @@ function stagedGaussian(uploadId: string, name: string): AssemblyUploadResponse 
   };
 }
 
+function stagedUnknown(uploadId: string, name: string): AssemblyUploadResponse {
+  const result = staged(uploadId, name);
+  return {
+    ...result,
+    source_file: { ...result.source_file, media_type: "application/octet-stream" },
+    staged_files: result.staged_files.map((item) => ({ ...item, observed_format: "unknown" })),
+  };
+}
+
 function snapshot(revision: number) {
   return {
     schema_version: "1.0" as const,
@@ -230,6 +239,41 @@ describe("unified input flow", () => {
       .mockResolvedValueOnce({ report: report("ready", [videoCandidate("r1-a", "file-upload-1", "ready")], "r1-a") });
     mocks.run.mockResolvedValue({ project: { project_id: "project-1" }, job: { job_id: "job-1" } });
     mocks.importGaussian.mockResolvedValue({ imported_scene: { import_id: "import-1" }, intent_checksum: `sha256:${"6".repeat(64)}` });
+  });
+
+  it("rejects file types the pipeline has no consumer for and keeps the usable ones", async () => {
+    const { container } = render(<UnifiedInputFlow />);
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(fileInput!.accept).toContain(".pcd");
+    expect(fileInput!.accept).not.toContain(".mkv");
+
+    fireEvent.change(fileInput!, { target: { files: [new File(["x"], "capture.mkv", { type: "video/x-matroska" })] } });
+    expect(await screen.findByText(/Pipeline không đọc được loại file này/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Tải file đã chọn lên" })).toBeNull();
+
+    fireEvent.change(fileInput!, {
+      target: {
+        files: [
+          new File(["x"], "notes.docx", { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }),
+          new File(["y"], "video-a.mp4", { type: "video/mp4" }),
+        ],
+      },
+    });
+    expect(await screen.findByText(/Đã bỏ qua 1 file pipeline không đọc được: notes\.docx/)).toBeInTheDocument();
+    expect(screen.getByText("video-a.mp4")).toBeInTheDocument();
+    expect(screen.queryByText("notes.docx")).toBeNull();
+  });
+
+  it("flags a staged file the server could not classify instead of calling it verified", async () => {
+    mocks.stage.mockImplementation(async (uploadId: string) => stagedUnknown(uploadId, "sidecar.txt"));
+    const { container } = render(<UnifiedInputFlow />);
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(fileInput!, { target: { files: [new File(["x"], "video-a.mp4", { type: "video/mp4" })] } });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
+    expect(await screen.findByText("Không dùng được")).toBeInTheDocument();
+    expect(screen.queryByText("Đã xác minh")).toBeNull();
+    expect(screen.getByText(/không nhận ra vai trò nào trong file này/)).toBeInTheDocument();
   });
 
   it("prepares each dropped video before upload and requires an explicit choice for ambiguous videos", async () => {

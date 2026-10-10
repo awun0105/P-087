@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { canCreateScene, describeDetection, inputKind, isGaussian, rejectGaussianFileName } from "@/features/studio/inputKinds";
+import { canCreateScene, describeDetection, inputKind, isGaussian, rejectAssemblyFileName, rejectGaussianFileName } from "@/features/studio/inputKinds";
 import type { UploadRecord } from "@/lib/contracts/studio";
 
 const BASE: UploadRecord = {
@@ -18,6 +18,14 @@ describe("input kinds", () => {
   it("filters the 3DGS branch early but leaves real detection to the server", () => {
     for (const ok of ["a.PLY", "b.sog", "c.zip"]) expect(rejectGaussianFileName(ok)).toBeNull();
     for (const bad of ["d.mp4", "e.splat", "f.txt", "g"]) expect(rejectGaussianFileName(bad)).toMatch(/Mở 3DGS chỉ nhận/);
+  });
+
+  it("accepts every extension the pipeline consumes and rejects the rest", () => {
+    const usable = ["kho.MP4", "kho.mov", "map.ply", "scan.pcd", "scene.sog", "goi.zip", "calib.json", "times.txt", "traj.tum", "rows.csv"];
+    for (const name of usable) expect(rejectAssemblyFileName(name)).toBeNull();
+    for (const name of ["capture.mkv", "notes.docx", "sheet.xlsx", "model.splat", "khong-duoi"]) {
+      expect(rejectAssemblyFileName(name)).toMatch(/Pipeline không đọc được/);
+    }
   });
 
   it("treats records without input_kind as legacy video", () => {
