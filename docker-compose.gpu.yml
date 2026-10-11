@@ -68,7 +68,7 @@ services:
       REC04_SPLAT_MODULE_PATH: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
       REC05_VOXEL_CLI: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/bin/cli.mjs
       REC05_VOXEL_MODULE_PATH: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
-      PRODUCT_GEOMETRY_CONFIG: /opt/real2sim/app/configs/product/geometry_v1.json
+      PRODUCT_GEOMETRY_CONFIG: ${PRODUCT_GEOMETRY_CONFIG:-/opt/real2sim/app/configs/product/geometry_indoor_v1.json}
       PRODUCT_SCENE_RUNTIME_PYTHON: /opt/real2sim/scene_runtime/bin/python
       PRODUCT_SAM2_CHECKPOINT: /opt/real2sim/scene_runtime/checkpoints/sam2.1_hiera_tiny.pt
       PRODUCT_LAMA_CHECKPOINT: /opt/real2sim/scene_runtime/weights/big-lama.pt
@@ -119,7 +119,7 @@ services:
       REC04_SPLAT_MODULE_PATH: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
       REC05_VOXEL_CLI: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/bin/cli.mjs
       REC05_VOXEL_MODULE_PATH: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
-      PRODUCT_GEOMETRY_CONFIG: /opt/real2sim/app/configs/product/geometry_v1.json
+      PRODUCT_GEOMETRY_CONFIG: ${PRODUCT_GEOMETRY_CONFIG:-/opt/real2sim/app/configs/product/geometry_indoor_v1.json}
       PRODUCT_SCENE_RUNTIME_PYTHON: /opt/real2sim/scene_runtime/bin/python
       PRODUCT_SAM2_CHECKPOINT: /opt/real2sim/scene_runtime/checkpoints/sam2.1_hiera_tiny.pt
       PRODUCT_LAMA_CHECKPOINT: /opt/real2sim/scene_runtime/weights/big-lama.pt
