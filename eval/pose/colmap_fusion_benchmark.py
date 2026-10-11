@@ -27,8 +27,11 @@ TORWIC_T_OS_CAM = {  # coordinate_metadata.json: T_cam1_os, nghĩa thật là os
 
 def read_colmap_centers(images_txt: Path) -> dict[int, np.ndarray]:
     centers: dict[int, np.ndarray] = {}
-    lines = [line for line in images_txt.read_text().splitlines() if line and not line.startswith("#")]
-    for line in lines[::2]:  # mỗi ảnh hai dòng: pose rồi điểm 2D
+    # Mỗi ảnh hai dòng: pose rồi điểm 2D. Dòng điểm 2D có thể RỖNG (ảnh không có quan sát) nên chỉ bỏ dòng chú thích.
+    lines = [line for line in images_txt.read_text().splitlines() if not line.startswith("#")]
+    for line in lines[::2]:
+        if not line.strip():
+            continue
         parts = line.split()
         qw, qx, qy, qz = map(float, parts[1:5])
         t = np.array(list(map(float, parts[5:8])))

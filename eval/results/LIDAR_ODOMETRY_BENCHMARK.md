@@ -1,8 +1,8 @@
 # Benchmark: KISS-ICP trên TorWIC (độ trôi quỹ đạo và độ khớp bản đồ)
 
-- **Ngày đo:** 2026-10-10 · **Máy:** laptop Quadro T2000, KISS-ICP chạy bằng **CPU** · **Phiên bản:** `kiss-icp 1.3.0`, hồ sơ mặc định `rec17-default-v1` (`voxel 0.25 m`, tầm 0–80 m)
+- **Ngày đo:** 2026-10-10 · **Máy:** laptop Quadro T2000, KISS-ICP chạy bằng **CPU** · **Phiên bản:** `kiss-icp 1.3.0`, hồ sơ sản phẩm lúc đo các mục 1–6: `rec17-default-v1` (`voxel 0.25 m`, tầm 0–80 m, không giảm mẫu); hồ sơ hiện tại là `rec17-default-v3` (xem mục 8 và 11)
 - **Mã đo:** `eval/pose/lidar_odometry_benchmark.py` · **Số liệu thô:** `eval/results/lidar_odometry_torwic.json`
-- **Dữ liệu:** 5 kịch bản TorWIC (`TorWIC_Raw_Scenes`), mỗi chuỗi lấy tối đa 600 scan đầu (giới hạn tổng điểm của sản phẩm là 100 triệu)
+- **Dữ liệu:** 5 kịch bản TorWIC (`TorWIC_Raw_Scenes`), mỗi chuỗi lấy tối đa 600 scan đầu (script nâng trần tổng điểm lên 100 triệu, mức tối đa hợp đồng cho phép; trần mặc định của sản phẩm là 25 triệu ở v1/v2 và 50 triệu ở v3)
 
 > Đây là bản đo **hiện trạng** (baseline). Không có tham số nào được chỉnh, không có bước ghép COLMAP. Chưa phải held-out qualification của AUD-24.S5.
 
@@ -84,9 +84,9 @@ scan .pcd ──► A (quỹ đạo thực) ────────────
 
 | | Giá trị |
 |---|---|
-| Thời gian KISS-ICP (600 scan, 84 k điểm) | 22–24 giây (CPU) |
-| Thời gian (470 scan, 191 k điểm) | 61 giây |
-| Bộ nhớ đỉnh | 0,13–0,18 GB |
+| Thời gian KISS-ICP (600 scan, 84 k điểm, voxel 0,25) | 22,6–28,8 giây (CPU; `lidar_odometry_torwic_v2_voxel0.25.json`) |
+| Thời gian (470 scan, 191 k điểm, voxel 0,25) | 84,1 giây |
+| Bộ nhớ đỉnh (không giảm mẫu) | 0,17 GB (tập 01) đến 0,63 GB (tập 02–05) |
 
 ## 3. Insight
 
@@ -102,7 +102,7 @@ scan .pcd ──► A (quỹ đạo thực) ────────────
    - **Hệ quả cho cách báo cáo:** nên dùng **trung vị và % trong 10/20 cm** làm chỉ số chính, không dùng trung bình.
 5. **Scan dày hơn cho kết quả tốt hơn rõ** (tập 05: 191 k điểm, +1,7 cm so với +10–16 cm). Nhưng tập 05 cũng ngắn hơn (34 m) nên **chưa tách được** ảnh hưởng của mật độ và độ dài; cần thí nghiệm riêng.
 6. **Hành lang thẳng có sai số mỗi bước cao nhất (2,3 cm, 0,67°)** và bản đồ tệ nhất (+15,6 cm), dù trôi cuối đường thấp. Phù hợp với giả thuyết hành lang thẳng ít đặc trưng dọc trục (chưa kiểm).
-7. **Giới hạn của sản phẩm chặt hơn con số trong bảng này.** Script benchmark nâng trần tổng điểm lên 100 triệu (mức tối đa hợp đồng cho phép) để chạy được 600 scan, nhưng hồ sơ mặc định của sản phẩm (`default_lidar_odometry_profile`) dùng **25 triệu**. Với scan 84 nghìn điểm sản phẩm nhận ~**300 scan**, với scan 191 nghìn điểm chỉ ~**130 scan**; vượt thì job bị từ chối. Bộ nhớ đỉnh của KISS-ICP chỉ 0,13–0,18 GB nên giới hạn này là ngưỡng thận trọng, không phải ràng buộc bộ nhớ thực tế.
+7. **Giới hạn của sản phẩm chặt hơn con số trong bảng này.** Script benchmark nâng trần tổng điểm lên 100 triệu (mức tối đa hợp đồng cho phép) để chạy được 600 scan, nhưng hồ sơ mặc định của sản phẩm (`default_lidar_odometry_profile`) dùng **25 triệu**. Với scan 84 nghìn điểm sản phẩm nhận ~**300 scan**, với scan 191 nghìn điểm chỉ ~**130 scan**; vượt thì job bị từ chối. Bộ nhớ đỉnh của KISS-ICP chỉ 0,17–0,63 GB (0,21 GB khi có giảm mẫu) nên giới hạn này là ngưỡng thận trọng, không phải ràng buộc bộ nhớ thực tế. *(Đã xử lý ở hồ sơ v3: trần 50 triệu và giảm mẫu 0,1 m, xem mục 11.)*
 
 ## 4. Ý nghĩa và ảnh hưởng
 
@@ -118,7 +118,7 @@ scan .pcd ──► A (quỹ đạo thực) ────────────
 - **Chưa held-out:** chưa chỉnh tham số nên không có rủi ro học thuộc, nhưng cũng chưa có ngưỡng đạt/trượt định trước.
 - **Chỉ một thiết bị** (Ouster OS1 của TorWIC) và 600 scan đầu mỗi chuỗi (30–60 giây, ~45 m).
 - **Nguyên nhân đuôi của phép đo bản đồ chưa tách được** (insight 4); chỉ loại trừ được lệch khung và độ thưa.
-- **Tổng điểm 100 triệu trong script khác 25 triệu của sản phẩm** (insight 7): kết quả quỹ đạo vẫn đúng cho dữ liệu đó, nhưng sản phẩm hiện không nhận chừng ấy scan.
+- **Tổng điểm 100 triệu trong script khác trần mặc định của sản phẩm** (25 triệu ở v1/v2, 50 triệu ở v3; insight 7): kết quả quỹ đạo vẫn đúng cho dữ liệu đó, nhưng sản phẩm không nhận chừng ấy scan.
 - **Phép đo bản đồ là bản của riêng bước này** (lấy mẫu 1/5 scan, voxel 10 cm), không phải `eval/geometry/surface_error.py` (công cụ đó chấm bản 3DGS của một job).
 - Không kiểm hiệu quả của deskew (TorWIC `.pcd` không có timestamp từng điểm) hay IMU.
 
@@ -143,6 +143,8 @@ scan .pcd ──► A (quỹ đạo thực) ────────────
 
 Giá phải trả: sai/10 bước tăng (trung bình ~3,6 → ~4,7 cm ở voxel 1,0).
 
+*Cột thời gian lấy từ đầu ra console của lần quét tham số trên tập 01 và các lần kiểm chứng riêng; các file JSON v2 ghi thời gian của lần chạy toàn bộ (ví dụ 02: 22,6 → 8,5 s; 05: 84,1 → 16,0 s) nên chênh nhẹ do tải máy. Số quỹ đạo và bản đồ khớp JSON; voxel 1,0 không có file JSON (chỉ có trong quét tham số).*
+
 **Phân rã sai số cuối đường (01 và 03, mét):**
 
 | Tập | Voxel | Dọc đường | Ngang | **Chiều cao (z)** | Tỉ lệ bước ước/thực | Xoay có dấu / bước |
@@ -166,7 +168,7 @@ Giá phải trả: sai/10 bước tăng (trung bình ~3,6 → ~4,7 cm ở voxel 
 Mặc định sản phẩm đổi `voxel_size_m` **0,25 → 0,5**, version hồ sơ `rec17-default-v1` → `rec17-default-v2` (`src/services/reconstruction/lidar/odometry.py`). Các bảng ở mục 2–6 là số đo **trước** thay đổi này (voxel 0,25); số ở mục 7 là số đo của voxel 0,5.
 Recipe đã chấp nhận với hồ sơ v1 sẽ không còn khớp checksum (đúng thiết kế bất biến của recipe); cần chạy lại.
 
-Chạy lại: `python -m eval.pose.lidar_odometry_benchmark ... ` dùng **mặc định của sản phẩm** (voxel 0,5). Muốn tái lập mốc cũ thêm `--voxel 0.25`. Script đặt trần tổng điểm 100 triệu (`--max-total-points`) để chạy đủ 600 scan; mặc định sản phẩm là 25 triệu.
+Chạy lại: `python -m eval.pose.lidar_odometry_benchmark ... ` dùng **mặc định của sản phẩm** (voxel 0,5, giảm mẫu 0,1 m). Muốn tái lập mốc cũ thêm `--voxel 0.25 --no-prefilter`. Script đặt trần tổng điểm 100 triệu (`--max-total-points`) để chạy đủ 600 scan; mặc định sản phẩm là 25 triệu.
 
 ## 9. Benchmark COLMAP + LiDAR: kết quả từng bước
 
@@ -179,7 +181,7 @@ Mã: `eval/pose/colmap_fusion_benchmark.py` · số liệu: `eval/results/colmap
 | **E1** COLMAP đơn | tâm camera COLMAP so với quỹ đạo thực sau một phép đồng dạng toàn đường | đăng ký **200/200** frame; ATE trung bình **12,7 cm** (trung vị 10,6, p90 21,8, tối đa 41,5 cm) trên 43,2 m |
 | Tỉ lệ COLMAP | 1 đơn vị COLMAP = ? mét | **3,12** (tuỳ ý, đúng như dự kiến, COLMAP không có mét) |
 | **So công bằng với KISS-ICP** (voxel 0,5, cùng 200 chỉ số, căn toàn đường) | quỹ đạo KISS-ICP đo cùng cách | ATE trung bình **7,9 cm** (căn rigid) / **6,3 cm** (Sim3, tỉ lệ 1,004) |
-| **E2** ghép hiện tại (mốc) | phép đồng dạng COLMAP → KISS-ICP của sản phẩm | tỉ lệ 3,107; độ lệch median **7,1 cm**, p90 18,0 cm, max 40,8 cm |
+| **E2** ghép hiện tại (mốc) | phép đồng dạng COLMAP → KISS-ICP của sản phẩm | tỉ lệ 3,107; độ lệch median **7,1 cm**, p90 18,0 cm, max 40,8 cm *(số E2 và so công bằng: `eval/results/colmap_fusion_e2_aisle_cw.json`, ghi lại thủ công từ console, chưa tái lập bằng script chính thức)* |
 | **E0** kiểm khung `traj_gt.txt` | khớp COLMAP vào GT *nguyên trạng* so với GT *cộng lever-arm 17,8 cm* (giả thuyết là khung `os_sensor`) | nguyên trạng **12,7 cm** tốt hơn lever-arm **18,3 cm**; ở E2 cũng vậy (7,1 so với 11,3 cm) |
 
 ### 9.2 Insight
@@ -232,7 +234,7 @@ Tỉ lệ mét của KISS-ICP đúng trong ±0,7% ở cả 5 tập và cả hai 
 
 ## 11. Giảm mẫu từng scan và hạn mức điểm (2026-10-11)
 
-Số liệu: `eval/results/lidar_odometry_torwic_v2_prefilter0.1.json` (so với `..._voxel0.5.json`, cùng voxel 0,5).
+Số liệu: `eval/results/lidar_odometry_torwic_v2_prefilter0.1.json` và `..._prefilter0.2.json` (so với `..._voxel0.5.json`, cùng voxel 0,5). Lưu ý: hai file prefilter được chạy bằng bản script cũ chưa ghi khoá `prefilter_voxel_m` vào `profile`; trường `prefilter_cell_m` và `run_note` đã được bổ sung sau theo tham số dòng lệnh đã dùng.
 
 | Chỉ số (trung bình 5 chuỗi) | Không giảm mẫu | Giảm mẫu ô 0,1 m |
 |---|---:|---:|
@@ -240,6 +242,14 @@ Số liệu: `eval/results/lidar_odometry_torwic_v2_prefilter0.1.json` (so với
 | Lệch cuối đường (căn pose đầu) | 0,45 m | **0,41 m** |
 | Bản đồ trong 20 cm của bản đồ chuẩn | 53,2% | **59,8%** |
 
-Giảm mẫu **không làm tệ đi** mà còn nhỉnh hơn ở cả 3 chỉ số (giả thuyết: bỏ bớt điểm dày đặc ở gần cảm biến nên khớp ít bị chi phối bởi vùng cận cảnh). Ô 0,2 m chưa được đo xong, nên chưa kết luận.
+Giảm mẫu **không làm tệ đi** mà còn nhỉnh hơn ở cả 3 chỉ số (giả thuyết: bỏ bớt điểm dày đặc ở gần cảm biến nên khớp ít bị chi phối bởi vùng cận cảnh). 
+
+| Giảm mẫu (voxel 0,5) | Rigid toàn đường | Lệch cuối đường | Trong 20 cm | Thời gian TB | RSS đỉnh |
+|---|---:|---:|---:|---:|---:|
+| không | 7,5 cm | 0,45 m | 53,2% | 11,0 s | 0,17–0,63 GB |
+| ô 0,1 m | **7,0 cm** | 0,41 m | 59,8% | 10,3 s | 0,17–0,21 GB |
+| ô 0,2 m | 7,3 cm | 0,40 m | **60,9%** | **6,3 s** | 0,17–0,18 GB |
+
+**Ô 0,2 m gần như ngang ô 0,1 m** (hình dạng kém nhẹ 0,3 cm, bản đồ nhỉnh 1,1 điểm phần trăm, nhanh gần gấp đôi); dữ liệu không phân biệt được hai ô. Chọn 0,1 m vì đổi ít nhất so với mốc (thận trọng), không phải vì có bằng chứng 0,1 m tốt hơn 0,2 m. Số điểm sau giảm mẫu chưa được ghi ở các lần chạy này (script đã sửa để ghi từ nay: `points_per_scan_after_prefilter`).
 
 **Thay đổi sản phẩm (hồ sơ `rec17-default-v3`):** `prefilter_voxel_m = 0,1` (giảm mẫu trước khi đếm điểm và trước KISS-ICP), `max_total_points` 25 → **50 triệu**. Trường `prefilter_voxel_m` chỉ dùng ở worker, không gửi sang runner cô lập (runner kiểm chặt tập khoá). Với giảm mẫu, scan 84 nghìn điểm còn khoảng một phần ba, nên cùng trần sản phẩm nhận số scan nhiều hơn rõ rệt; chưa đo số điểm sau giảm mẫu cụ thể cho từng chuỗi.

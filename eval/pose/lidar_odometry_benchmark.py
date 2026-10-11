@@ -167,6 +167,8 @@ def map_metrics(points: np.ndarray, truth_tree: cKDTree, path_tree: cKDTree) -> 
 
 def grid_downsample(points: np.ndarray, cell: float) -> np.ndarray:
     """Giữ một điểm mỗi ô lưới `cell` mét (điểm đầu tiên); thứ tự ổn định."""
+    if not cell > 0:
+        raise ValueError("ô giảm mẫu phải là số mét dương")
     _, first = np.unique(np.floor(points / cell).astype(np.int64), axis=0, return_index=True)
     return points[np.sort(first)]
 
@@ -183,11 +185,13 @@ def evaluate_scene(directory: Path, python: Path, truth_map: np.ndarray, truth_t
         probe = probe[np.linalg.norm(probe, axis=1) > 0.5]
         count = min(max_scans, int(PROFILE["max_total_points"] * 0.9 // max(len(probe), 1)), len(scan_paths))
         arrays = []
+        kept_counts = []
         for index, path in enumerate(scan_paths[:count]):
             points = read_pcd_xyz(path)
             points = points[np.linalg.norm(points, axis=1) > 0.5]
             if PREFILTER_CELL is not None:
                 points = grid_downsample(points, PREFILTER_CELL)
+            kept_counts.append(len(points))
             target = work / f"{index:06d}.npy"
             np.save(target, points)
             arrays.append(target)
@@ -201,6 +205,8 @@ def evaluate_scene(directory: Path, python: Path, truth_map: np.ndarray, truth_t
             "scene": directory.name,
             "scans_used": count,
             "points_per_scan": int(len(probe)),
+            "points_per_scan_after_prefilter": int(np.mean(kept_counts)),
+            "prefilter_cell_m": PREFILTER_CELL,
             "duration_s": round(float(rows[-1, 0] - rows[0, 0]), 1),
             "trajectory": trajectory_metrics(estimate, truth),
             "map_with_truth_trajectory": map_metrics(build_map(arrays, truth), truth_tree, path_tree),
@@ -220,8 +226,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--odometry-python", type=Path, required=True, help="interpreter cô lập có kiss-icp")
     parser.add_argument("--max-scans", type=int, default=600)
     parser.add_argument(
-        "--prefilter-cell", type=float, help="giảm mẫu lưới (m) từng scan trước KISS-ICP và trước khi đếm điểm"
+        "--prefilter-cell",
+        type=float,
+        help="giảm mẫu lưới (m) từng scan trước KISS-ICP và trước khi đếm điểm; mặc định theo hồ sơ sản phẩm",
     )
+    parser.add_argument("--no-prefilter", action="store_true", help="tắt giảm mẫu (tái lập mốc hồ sơ v1/v2)")
     parser.add_argument("--voxel", type=float, help="voxel_size_m (mét); bỏ trống = mặc định của sản phẩm")
     parser.add_argument(
         "--max-total-points",
@@ -236,9 +245,15 @@ def main(argv: list[str] | None = None) -> int:
         PROFILE["voxel_size_m"] = args.voxel
     PROFILE["max_total_points"] = args.max_total_points
     global PREFILTER_CELL
-    if args.prefilter_cell is not None:
-        PREFILTER_CELL = args.prefilter_cell
+    if args.no_prefilter and args.prefilter_cell is not None:
+        parser.error("--no-prefilter và --prefilter-cell loại trừ nhau")
+    if args.prefilter_cell is not None and not args.prefilter_cell > 0:
+        parser.error("--prefilter-cell phải là số mét dương")
+    if args.no_prefilter:
+        PROFILE["prefilter_voxel_m"] = None
+    elif args.prefilter_cell is not None:
         PROFILE["prefilter_voxel_m"] = args.prefilter_cell
+    PREFILTER_CELL = PROFILE["prefilter_voxel_m"]
     truth_map = read_ply_xyz(args.map)
     truth_tree = cKDTree(truth_map)
     results = []

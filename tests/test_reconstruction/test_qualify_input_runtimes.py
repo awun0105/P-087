@@ -136,3 +136,34 @@ def test_main_writes_atomically_is_idempotent_and_runs_in_production(
     bad.write_text("{}")
     assert qualify.main(["--out", str(out), "--record", str(bad)]) == 2
     assert out.read_text() == first  # bản ghi hỏng không làm mất registry đang chạy
+
+
+def test_view_capabilities_do_not_depend_on_the_video_runtime_but_pin_the_splat_version(
+    tmp_path: Path, record: dict
+) -> None:
+    broken_colmap = _env(tmp_path, record, REC03_COLMAP_RUNTIME_IDENTITY="colmap-image-sha256:" + "f" * 64)
+    items = _by_key(qualify.build_registry(record, broken_colmap))
+    assert items["R1"]["status"] == "incompatible"
+    assert items["gaussian_ply_view"]["status"] == items["gaussian_sog_view"]["status"] == "qualified"
+
+    env = _env(tmp_path, record)
+    (tmp_path / "package.json").write_text(json.dumps({"version": "9.9.9"}))  # sau _env, vì helper ghi 3.6.6
+    drifted = _by_key(qualify.build_registry(record, env))
+    assert drifted["gaussian_ply_view"]["status"] == "incompatible"
+    assert "drift_version_splat_transform" in drifted["gaussian_ply_view"]["reason_codes"]
+
+
+def test_r5_and_r6_are_bound_to_the_kiss_icp_version_and_the_delivered_odometry_profile(
+    tmp_path: Path, record: dict
+) -> None:
+    from src.services.reconstruction.lidar.odometry import DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION
+
+    assert (
+        record["capabilities"]["R5"]["requires_versions"]["odometry_profile"] == DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION
+    )
+    stale = copy.deepcopy(record)
+    for key in ("R5", "R6"):
+        stale["capabilities"][key]["requires_versions"]["odometry_profile"] = "rec17-default-v0"
+    items = _by_key(qualify.build_registry(stale, _env(tmp_path, record)))
+    assert items["R5"]["status"] == items["R6"]["status"] == "incompatible"
+    assert items["R1"]["status"] == "qualified"  # chỉ hướng bị ảnh hưởng mới bị hạ

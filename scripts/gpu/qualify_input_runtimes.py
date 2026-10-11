@@ -30,6 +30,7 @@ from src.models.contracts.input_assembly import (
     RuntimeQualificationStatus,
     seal_runtime_registry,
 )
+from src.services.reconstruction.lidar.odometry import DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION
 
 DEFAULT_RECORD = Path(__file__).resolve().parents[2] / "configs/product/input_runtime_qualification_v1.json"
 _DEFAULT_ODOMETRY_PYTHON = "/opt/real2sim/lidar_runtime/bin/python"
@@ -37,6 +38,8 @@ _PINNED_ODOMETRY_VERSION = "1.3.0"
 _VIDEO_KEYS = {RuntimeCapabilityKey.R1, RuntimeCapabilityKey.R2, RuntimeCapabilityKey.R3, RuntimeCapabilityKey.R4}
 _ODOMETRY_KEYS = {RuntimeCapabilityKey.R5, RuntimeCapabilityKey.R6}
 _VIEW_KEYS = {RuntimeCapabilityKey.GAUSSIAN_PLY_VIEW, RuntimeCapabilityKey.GAUSSIAN_SOG_VIEW}
+#: Tên phiên bản mà bản ghi được phép ghim (đo trực tiếp trên máy, không phải biến môi trường).
+_VERSION_PINS = ("splat_transform", "kiss_icp", "odometry_profile")
 _RECORDABLE = {RuntimeQualificationStatus.QUALIFIED.value, RuntimeQualificationStatus.WIRED_UNQUALIFIED.value}
 
 
@@ -65,8 +68,18 @@ def load_record(path: Path) -> dict[str, Any]:
             evidence = entry.get("evidence")
             if not isinstance(evidence, dict) or not evidence.get("kind") or not evidence.get("reference"):
                 raise QualificationRecordError(f"{name}: `qualified` bắt buộc có evidence.kind và evidence.reference")
-            if not isinstance(entry.get("requires"), dict) or not entry["requires"]:
-                raise QualificationRecordError(f"{name}: `qualified` bắt buộc khai `requires` (identity đã kiểm định)")
+            pins = {**(entry.get("requires") or {}), **(entry.get("requires_versions") or {})}
+            if (
+                not pins
+                or not isinstance(entry.get("requires", {}), dict)
+                or not isinstance(entry.get("requires_versions", {}), dict)
+            ):
+                raise QualificationRecordError(
+                    f"{name}: `qualified` bắt buộc khai `requires` (biến môi trường) hoặc `requires_versions` (phiên bản)"
+                )
+            unknown = set(entry.get("requires_versions") or {}) - set(_VERSION_PINS)
+            if unknown:
+                raise QualificationRecordError(f"{name}: requires_versions không biết: {sorted(unknown)}")
         elif not entry.get("reason_codes"):
             raise QualificationRecordError(f"{name}: `wired_unqualified` bắt buộc có reason_codes")
     return record
@@ -132,6 +145,11 @@ def build_registry(record: Mapping[str, Any], env: Mapping[str, str]) -> dict[st
     splat = _splat_version(env)
     view_missing = [] if splat else ["splat_transform_missing"]
 
+    live_versions = {
+        "splat_transform": splat or "",
+        "kiss_icp": kiss or "",
+        "odometry_profile": DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION,
+    }
     records: list[dict[str, object]] = []
     for key in RuntimeCapabilityKey:
         entry = record["capabilities"].get(key.value)
@@ -163,7 +181,16 @@ def build_registry(record: Mapping[str, Any], env: Mapping[str, str]) -> dict[st
             continue
         if entry["status"] == RuntimeQualificationStatus.QUALIFIED.value:
             drift = sorted(
-                name for name, expected in entry["requires"].items() if env.get(name, "").strip() != expected
+                [
+                    name
+                    for name, expected in (entry.get("requires") or {}).items()
+                    if env.get(name, "").strip() != expected
+                ]
+                + [
+                    f"version_{name}"
+                    for name, expected in (entry.get("requires_versions") or {}).items()
+                    if live_versions[name] != expected
+                ]
             )
             if drift:
                 records.append(
@@ -181,7 +208,13 @@ def build_registry(record: Mapping[str, Any], env: Mapping[str, str]) -> dict[st
                     "runtime_id": runtime_id,
                     "runtime_version": version,
                     "qualification_evidence_checksum": _checksum(
-                        {"record": record["record_id"], "capability": key.value, "entry": entry, "live": live}
+                        {
+                            "record": record["record_id"],
+                            "capability": key.value,
+                            "entry": entry,
+                            "live": live,
+                            "live_versions": live_versions,
+                        }
                     ),
                     "reason_codes": [],
                 }
