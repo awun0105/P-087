@@ -380,6 +380,7 @@ def fit_canonical_floor_model(
     values.update(
         schema_version="1.1",
         status="confirmed_prior_fallback",
+        robust_noise_sigma_m=None,
         floor_band_m=profile.max_floor_band_m,
         plane_normal_world=prior.up_direction_world,
         plane_offset_m=0.0,

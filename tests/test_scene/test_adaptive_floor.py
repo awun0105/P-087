@@ -102,6 +102,44 @@ def test_vertical_wall_does_not_override_confirmed_floor_prior() -> None:
     assert model.plane_normal_world == pytest.approx((0.0, 0.0, 1.0), abs=1e-6)
 
 
+@pytest.mark.parametrize("reason", ["low_inlier_ratio", "insufficient_coverage"])
+def test_measured_failed_fit_can_use_confirmed_prior_without_claiming_noise(reason: str) -> None:
+    rng = np.random.default_rng(23)
+    if reason == "low_inlier_ratio":
+        points = np.vstack((_grid(size=20, noise_m=0.002), rng.uniform([-5, -5, 1], [5, 5, 4], (1000, 3))))
+        profile = FloorFitProfile(min_inlier_ratio=0.9)
+    else:
+        x = np.linspace(-2, 2, 300)
+        points = np.column_stack((x, rng.uniform(-0.01, 0.01, len(x)), rng.normal(0, 0.002, len(x))))
+        profile = FloorFitProfile()
+    checksum = point_cloud_checksum(points)
+    fitted = fit_floor_model(points, checksum, _prior(), profile)
+    assert fitted.fallback_reason == reason
+    assert fitted.robust_noise_sigma_m is not None
+
+    fallback = fit_canonical_floor_model(points, checksum, profile)
+
+    assert fallback.status == "confirmed_prior_fallback"
+    assert fallback.fallback_reason == reason
+    assert fallback.robust_noise_sigma_m is None
+    assert fallback.source_checksum == checksum
+    assert fallback.profile_checksum == fitted.profile_checksum
+    assert fallback.plane_normal_world == (0.0, 0.0, 1.0)
+    assert fallback.plane_offset_m == 0.0
+    assert FloorModel.model_validate_json(fallback.model_dump_json()) == fallback
+    assert above_floor_mask(np.array([[0, 0, 0.05], [0, 0, 0.12]]), fallback).tolist() == [False, True]
+
+
+def test_canonical_fit_keeps_excessive_noise_uncertain() -> None:
+    points = _grid(size=30, noise_m=0.05)
+    model = fit_canonical_floor_model(points, point_cloud_checksum(points))
+
+    assert model.status == "uncertain"
+    assert model.fallback_reason == "excessive_noise"
+    assert model.robust_noise_sigma_m is not None
+    assert not above_floor_mask(points, model).any()
+
+
 def test_missing_floor_near_prior_is_uncertain_not_wall_plane() -> None:
     wall_y, wall_z = np.meshgrid(np.linspace(-4, 4, 30), np.linspace(1.0, 4.0, 20), indexing="xy")
     wall = np.column_stack((np.full(wall_y.size, 2.0), wall_y.ravel(), wall_z.ravel()))
