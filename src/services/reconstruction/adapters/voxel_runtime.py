@@ -152,3 +152,10 @@ def require_carve(log: str) -> None:
     rejected = ("skipping carve", "skipping nav carving", "no navigable cells remain")
     if any(message in log.lower() for message in rejected):
         raise GeometryError("Capsule carve was skipped; correct navigation seed or capsule config")
+
+
+def require_external_fill(log: str) -> None:
+    """Exit zero can return the original grid when the seed is not enclosed."""
+    text = log.lower()
+    if "fill exterior" not in text or "skipping exterior fill" in text or "no navigable cells remain" in text:
+        raise GeometryError("External fill was not applied; inspect seed, crop and room enclosure")

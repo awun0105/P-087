@@ -6,6 +6,7 @@ confirmation, không tự publish shared artifact hay nghiệm thu capsule an to
 
 import hashlib
 import json
+import math
 import shutil
 from pathlib import Path
 from typing import Literal
@@ -21,7 +22,12 @@ from src.services.reconstruction.adapters.gaussian_scale import (
 )
 from src.services.reconstruction.adapters.voxel_clearance import validate_seed_clearance
 from src.services.reconstruction.adapters.voxel_output import validate_voxel_output, write_evidence
-from src.services.reconstruction.adapters.voxel_runtime import GeometryError, VoxelProcess, require_carve
+from src.services.reconstruction.adapters.voxel_runtime import (
+    GeometryError,
+    VoxelProcess,
+    require_carve,
+    require_external_fill,
+)
 from src.services.reconstruction.rgb.canonical.metric_models import MetricConfirmation
 from src.services.reconstruction.rgb.geometry.voxel import (
     VoxelConfig,
@@ -29,6 +35,7 @@ from src.services.reconstruction.rgb.geometry.voxel import (
     collision_command,
     native_from_world,
     occupancy_command,
+    require_voxel_capacity,
 )
 
 EVIDENCE_FILES = (
@@ -156,6 +163,9 @@ class SplatTransformVoxelAdapter:
 
     def _pipeline(self, config: VoxelConfig, workspace: Path) -> None:
         self.process.qualify(workspace)
+        if config.external_fill_size_m is not None:
+            if "--voxel-external-fill" not in (workspace / "help.log").read_text():
+                raise GeometryError("Geometry CLI lacks --voxel-external-fill")
         script = Path(__file__).with_name("voxel_inspect.mjs").resolve()
         module = self.process.settings.module_path.resolve()
         self.process.run((str(script), str(module)), (workspace, "inspect"))
@@ -174,12 +184,18 @@ class SplatTransformVoxelAdapter:
             (str(script), str(module), "cluster.ply", "cluster-inspection.json"), (workspace, "inspect-cluster")
         )
         cluster_checksum = file_checksum(workspace / "cluster.ply")
-        self.process.cli(occupancy_command(config), (workspace, "occupancy"))
+        if config.external_fill_size_m is not None:
+            _require_cluster_capacity(workspace, config)
+        occupancy_log = self.process.cli(occupancy_command(config), (workspace, "occupancy"))
+        if config.external_fill_size_m is not None:
+            require_external_fill(occupancy_log)
         clearance = validate_seed_clearance(workspace, config)
         carve_config = VoxelConfig.model_validate(
             config.model_dump() | {"navigation_seed_world": clearance["accepted_seed_world"]}
         )
         output = self.process.cli(collision_command(carve_config), (workspace, "collision"))
+        if config.external_fill_size_m is not None:
+            require_external_fill(output)
         require_carve(output)
         if file_checksum(workspace / "cluster.ply") != cluster_checksum:
             raise GeometryError("Cluster changed during occupancy/carve attempt")
@@ -212,6 +228,12 @@ class SplatTransformVoxelAdapter:
             source_checksum=request.source_checksum,
             config=request.config.model_dump(mode="json"),
             config_checksum=request.config.checksum(),
+            external_fill={
+                "status": "applied" if request.config.external_fill_size_m is not None else "disabled",
+                "size_m": request.config.external_fill_size_m,
+                "occupancy_log_checksum": file_checksum(workspace / "occupancy.log"),
+                "collision_log_checksum": file_checksum(workspace / "collision.log"),
+            },
             accepted_navigation_seed=accepted_seed,
             native_accepted_navigation_seed=list(native_from_world(accepted_seed)),
             gaussian_counts=gaussian_counts,
@@ -228,6 +250,32 @@ class SplatTransformVoxelAdapter:
             ),
             files={name: file_checksum(workspace / name) for name in _evidence_files(is_prod, request.config)},
         )
+
+
+def _require_cluster_capacity(workspace: Path, config: VoxelConfig) -> None:
+    """Conservative bounds from upstream stats; rotations cannot exceed the scale-vector norm."""
+    fill_size = config.external_fill_size_m
+    if fill_size is None:
+        return
+    try:
+        lod = json.loads((workspace / "cluster-inspection.json").read_text())["stats"]["lods"][0]
+        columns, data = lod["columns"], lod["data"]
+        scale_logs = [data["max"][columns.index(f"scale_{axis}")] for axis in range(3)]
+        position_bounds = [
+            (data["min"][columns.index(axis)], data["max"][columns.index(axis)]) for axis in ("x", "y", "z")
+        ]
+    except (KeyError, IndexError, TypeError, ValueError) as error:
+        raise GeometryError("Missing Gaussian statistics for padded voxel capacity") from error
+    if not all(isinstance(value, int | float) and math.isfinite(value) for value in scale_logs):
+        raise GeometryError("Missing finite Gaussian scales for voxel capacity")
+    # SIGMA_CUTOFF=3 in the qualified 3.6.6 writer; cap exponent before overflow.
+    if max(scale_logs) > 100:
+        raise GeometryError("Gaussian extents exceed voxel capacity")
+    halo = 3 * math.sqrt(sum(math.exp(value) ** 2 for value in scale_logs))
+    if not all(isinstance(value, int | float) and math.isfinite(value) for pair in position_bounds for value in pair):
+        raise GeometryError("Missing finite Gaussian positions for voxel capacity")
+    lengths = tuple(high - low + 2 * halo for low, high in position_bounds)
+    require_voxel_capacity(lengths, config.resolution_m, fill_size)
 
 
 def _evidence_files(is_product: bool, config: VoxelConfig) -> tuple[str, ...]:

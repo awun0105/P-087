@@ -60,7 +60,11 @@ from src.services.reconstruction.rgb.geometry.geometry_publication import (
     GeometryPublisher,
     RgbGeometryService,
 )
-from src.services.reconstruction.rgb.geometry.voxel import StatisticalOutlierRemovalConfig, VoxelConfig
+from src.services.reconstruction.rgb.geometry.voxel import (
+    StatisticalOutlierRemovalConfig,
+    VoxelConfig,
+    require_voxel_capacity,
+)
 from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
 from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
 from src.services.reconstruction.rgb.splat.visual_publication import VisualResolver
@@ -123,6 +127,12 @@ def build_voxel_config(
 ) -> VoxelConfig:
     """Keep the requested cleanup profile intact; reject crops that require coarser voxels."""
     low, high = crop
+    if profile.external_fill_size_m is not None:
+        require_voxel_capacity(
+            tuple(upper - lower for lower, upper in zip(low, high, strict=True)),
+            profile.resolution_m,
+            profile.external_fill_size_m,
+        )
     volume_m3 = math.prod(upper - lower for lower, upper in zip(low, high, strict=True))
     minimum_resolution_m = (volume_m3 / _MAX_VOXEL_CELLS) ** (1 / 3) if volume_m3 > 0 else 0.0
     if minimum_resolution_m > profile.resolution_m:

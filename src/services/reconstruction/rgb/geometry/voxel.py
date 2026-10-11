@@ -1,6 +1,7 @@
 """Config REC-05; không suy mét, footprint hoặc opacity từ defaults upstream."""
 
 import hashlib
+import math
 from typing import Literal, Self
 
 from pydantic import Field, FiniteFloat, SerializerFunctionWrapHandler, model_serializer, model_validator
@@ -9,6 +10,7 @@ from src.models.contracts.artifacts import ContractModel
 from src.models.contracts.identity import canonical_json_bytes
 
 Vector3 = tuple[FiniteFloat, FiniteFloat, FiniteFloat]
+MAX_VOXEL_CELLS = 1_500_000_000
 
 
 class StatisticalOutlierRemovalConfig(ContractModel):
@@ -153,6 +155,7 @@ def collision_command(config: VoxelConfig) -> tuple[str, ...]:
         str(config.resolution_m),
         "--voxel-opacity",
         str(config.opacity),
+        *_fill_arguments(config),
         "--seed-pos",
         _vector(native_from_world(config.navigation_seed_world)),
         "--voxel-carve",
@@ -164,7 +167,7 @@ def collision_command(config: VoxelConfig) -> tuple[str, ...]:
 
 
 def occupancy_command(config: VoxelConfig) -> tuple[str, ...]:
-    """Cùng filtered occupancy của carve, không floor/exterior fill hoặc relocation."""
+    """Occupancy after the configured fill, before capsule carve or seed relocation."""
     return (
         "cluster.ply",
         "--gpu",
@@ -173,5 +176,26 @@ def occupancy_command(config: VoxelConfig) -> tuple[str, ...]:
         str(config.resolution_m),
         "--voxel-opacity",
         str(config.opacity),
+        *_fill_arguments(config),
+        *(
+            ("--seed-pos", _vector(native_from_world(config.navigation_seed_world)))
+            if config.external_fill_size_m
+            else ()
+        ),
         "occupancy.voxel.json",
     )
+
+
+def _fill_arguments(config: VoxelConfig) -> tuple[str, ...]:
+    return ("--voxel-external-fill", str(config.external_fill_size_m)) if config.external_fill_size_m else ()
+
+
+def require_voxel_capacity(lengths: Vector3, resolution_m: float, fill_size_m: float) -> None:
+    """Bound padded grid cells, including the pinned runtime's four-voxel alignment."""
+    if not all(math.isfinite(value) and value >= 0 for value in lengths):
+        raise ValueError("invalid Gaussian extent for voxel capacity")
+    padding = (math.ceil(fill_size_m / resolution_m) + 1) * resolution_m
+    block = 4 * resolution_m
+    cells = math.prod((math.ceil((length + 2 * padding) / block) + 1) * 4 for length in lengths)
+    if cells > MAX_VOXEL_CELLS:
+        raise ValueError("external fill exceeds voxel capacity; reduce crop or explicitly choose a coarser profile")

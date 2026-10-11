@@ -51,8 +51,8 @@ def _receipt(
     payload: bytes,
 ) -> dict:
     """Evidence phải đủ để consumer tự dựng lại kernel và tự kiểm lại quyết định."""
-    return dict(
-        schema_version="1.1",
+    receipt = dict(
+        schema_version="1.2" if config.schema_version == "1.2" else "1.1",
         status="VALID",
         method="splat_3.6.6_separable_box_dilation",
         search_method="raw_free_air_bfs6_euclidean",
@@ -72,6 +72,10 @@ def _receipt(
         occupancy_metadata_checksum="sha256:" + hashlib.sha256(metadata_bytes).hexdigest(),
         occupancy_binary_checksum="sha256:" + hashlib.sha256(payload).hexdigest(),
     )
+    if config.schema_version == "1.2":
+        receipt["occupancy_stage"] = "post_external_fill" if config.external_fill_size_m else "raw"
+        receipt["search_method"] = "pre_carve_free_air_bfs6_euclidean"
+    return receipt
 
 
 def _accepted_seed(config: VoxelConfig, plan: SeedSearchPlan, result: SeedSearchResult) -> list:
