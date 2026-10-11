@@ -678,7 +678,7 @@ def test_the_point_budget_counts_points_after_the_per_scan_prefilter(tmp_path: P
     """900 điểm/scan cách nhau 3 cm: chỉ còn ~100 sau ô 0,1 m, nên ba scan lọt trần 700 điểm; không lọc thì vượt."""
     grid = np.array([[0.015 + x * 0.03, 0.015 + y * 0.03, 1.0] for x in range(30) for y in range(30)])
 
-    class _Reached(Exception):
+    class _ReachedProviderError(Exception):
         pass
 
     def attempt(prefilter: float | None, name: str) -> None:
@@ -701,14 +701,14 @@ def test_the_point_budget_counts_points_after_the_per_scan_prefilter(tmp_path: P
         )
 
         def reached(*_: object, **__: object) -> dict[str, object]:
-            raise _Reached
+            raise _ReachedProviderError
 
         worker.process.run = reached  # type: ignore[method-assign]
         worker.run(request.model_copy(update={"profile": profile}))
 
     with pytest.raises(ValueError, match="total point budget"):
         attempt(None, "unfiltered")
-    with pytest.raises(_Reached):
+    with pytest.raises(_ReachedProviderError):
         attempt(0.1, "filtered")  # qua được bước đếm điểm và tới được provider
 
 
