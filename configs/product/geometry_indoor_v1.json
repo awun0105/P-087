@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.2",
+  "profile": "geometry_indoor_v1",
+  "note": "Indoor external fill before capsule carve. Fill size 1.6 m follows the pinned upstream default; not calibrated on real scenes. Other values retain the geometry_v1 baseline.",
+  "cleanup": "floaters",
+  "resolution_m": 0.05,
+  "opacity": 0.1,
+  "cluster_resolution_m": 0.05,
+  "cluster_opacity": 0.1,
+  "cluster_min_contribution": 0.004,
+  "capsule_radius_m": 0.461,
+  "capsule_height_m": 0.308,
+  "max_seed_relocation_m": 1.0,
+  "seed_floor_clearance_m": 0.05,
+  "crop_margin_m": 6.0,
+  "crop_below_floor_m": 0.5,
+  "crop_height_m": 4.0,
+  "cluster_seed_height_m": 0.02,
+  "gpu_index": 0,
+  "max_gaussian_scale_log": 1.0,
+  "external_fill_size_m": 1.6
+}

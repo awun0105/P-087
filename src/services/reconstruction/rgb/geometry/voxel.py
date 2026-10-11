@@ -3,7 +3,7 @@
 import hashlib
 from typing import Literal, Self
 
-from pydantic import Field, FiniteFloat, model_validator
+from pydantic import Field, FiniteFloat, SerializerFunctionWrapHandler, model_serializer, model_validator
 
 from src.models.contracts.artifacts import ContractModel
 from src.models.contracts.identity import canonical_json_bytes
@@ -28,7 +28,7 @@ class StatisticalOutlierRemovalConfig(ContractModel):
 class VoxelConfig(ContractModel):
     """Seeds thuộc canonical Z-up; cluster seed và capsule seed có vai trò riêng."""
 
-    schema_version: Literal["1.0", "1.1"] = "1.0"
+    schema_version: Literal["1.0", "1.1", "1.2"] = "1.0"
     resolution_m: FiniteFloat = Field(default=0.05, gt=0)
     opacity: FiniteFloat = Field(gt=0, lt=1)
     cluster_resolution_m: FiniteFloat = Field(gt=0)
@@ -53,6 +53,15 @@ class VoxelConfig(ContractModel):
     statistical_outlier_removal: StatisticalOutlierRemovalConfig | None = None
     #: Giới hạn log-scale tối đa của Gaussian để tránh floaters khổng lồ làm phình lưới voxel.
     max_gaussian_scale_log: FiniteFloat | None = None
+    external_fill_size_m: FiniteFloat | None = Field(default=None, gt=0)
+
+    @model_serializer(mode="wrap")
+    def _versioned_payload(self, handler: SerializerFunctionWrapHandler) -> dict:
+        """Preserve legacy receipt bytes and hashes when reading schema 1.0/1.1."""
+        payload = handler(self)
+        if self.schema_version != "1.2":
+            payload.pop("external_fill_size_m", None)
+        return payload
 
     @model_validator(mode="after")
     def _crop_order(self) -> Self:
@@ -60,8 +69,10 @@ class VoxelConfig(ContractModel):
             low, high = self.crop_box_world
             if any(a >= b for a, b in zip(low, high, strict=True)):
                 raise ValueError("crop box min phải nhỏ hơn max trên mọi trục")
-        if self.statistical_outlier_removal is not None and self.schema_version != "1.1":
-            raise ValueError("statistical outlier removal requires VoxelConfig schema 1.1")
+        if self.statistical_outlier_removal is not None and self.schema_version not in ("1.1", "1.2"):
+            raise ValueError("statistical outlier removal requires VoxelConfig schema 1.1 or 1.2")
+        if self.external_fill_size_m is not None and self.schema_version != "1.2":
+            raise ValueError("external fill requires VoxelConfig schema 1.2")
         return self
 
     def checksum(self) -> str:
