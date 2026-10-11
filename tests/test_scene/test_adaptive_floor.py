@@ -109,9 +109,8 @@ def test_measured_failed_fit_can_use_confirmed_prior_without_claiming_noise(reas
         points = np.vstack((_grid(size=20, noise_m=0.002), rng.uniform([-5, -5, 1], [5, 5, 4], (1000, 3))))
         profile = FloorFitProfile(min_inlier_ratio=0.9)
     else:
-        x = np.linspace(-2, 2, 300)
-        points = np.column_stack((x, rng.uniform(-0.01, 0.01, len(x)), rng.normal(0, 0.002, len(x))))
-        profile = FloorFitProfile()
+        points = _grid(size=20, noise_m=0.002)
+        profile = FloorFitProfile(min_coverage_area_m2=100)
     checksum = point_cloud_checksum(points)
     fitted = fit_floor_model(points, checksum, _prior(), profile)
     assert fitted.fallback_reason == reason
@@ -137,6 +136,30 @@ def test_canonical_fit_keeps_excessive_noise_uncertain() -> None:
     assert model.status == "uncertain"
     assert model.fallback_reason == "excessive_noise"
     assert model.robust_noise_sigma_m is not None
+    assert not above_floor_mask(points, model).any()
+
+
+def test_low_support_does_not_hide_excessive_noise_in_canonical_fallback() -> None:
+    points = _grid(size=30, noise_m=0.05)
+    profile = FloorFitProfile(min_inlier_ratio=0.99)
+    model = fit_canonical_floor_model(points, point_cloud_checksum(points), profile)
+
+    assert model.status == "uncertain"
+    assert model.fallback_reason == "excessive_noise"
+    assert model.robust_noise_sigma_m > profile.max_noise_sigma_m
+    assert not above_floor_mask(points, model).any()
+
+
+def test_low_coverage_does_not_hide_competing_planes_in_canonical_fallback() -> None:
+    lower = _grid(size=24)
+    upper = lower.copy()
+    upper[:, 2] += 0.3
+    points = np.vstack((lower, upper))
+    profile = FloorFitProfile(prior_band_m=0.4, min_coverage_area_m2=100)
+    model = fit_canonical_floor_model(points, point_cloud_checksum(points), profile)
+
+    assert model.status == "uncertain"
+    assert model.fallback_reason == "ambiguous_multiple_planes"
     assert not above_floor_mask(points, model).any()
 
 

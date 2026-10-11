@@ -253,6 +253,13 @@ def use_boxes(
     )
     if cancel_event is not None and cancel_event.is_set():
         raise ProcessCancelledError("Objectify operation was cancelled")
+    if floor_fit is not None and floor_fit.get("status") == "uncertain":
+        raise ObjectifyError(
+            f"Mặt sàn chưa đủ tin cậy ({floor_fit.get('fallback_reason')}); chưa thể dựng hộp ứng viên. "
+            "Cần kiểm tra dữ liệu, tỉ lệ và mốc sàn.",
+            retryable=False,
+            floor_fit=floor_fit,
+        )
     fresh = scene_from_bundle(bundle, objects, {})
     objects = bind_source_collision_ownership(objects, fresh.environment.geometry_ref, expected_revision)
     updated = base_scene.model_copy(

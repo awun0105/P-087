@@ -213,6 +213,31 @@ def test_user_chooses_boxes_and_worker_publishes_next_revision(world, monkeypatc
     assert scene.provenance["edited_from"] == "rev-001"
 
 
+def test_uncertain_box_floor_does_not_publish_an_empty_success_revision(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "work")
+    monkeypatch.setattr("src.services.orchestration.jobs.stage_views.job_bundle", lambda *_: bundle)
+    monkeypatch.setattr(
+        scene_extraction,
+        "box_candidates",
+        lambda *args, **kwargs: (
+            [],
+            "geometric_voxel_components_v1",
+            "floor fit uncertain",
+            {"status": "uncertain", "fallback_reason": "excessive_noise"},
+        ),
+    )
+    scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "boxes")
+
+    assert scene_objectify_queue.process_next(registry, settings) is True
+
+    state = scene_objectify_queue.state(registry, settings, job.job_id)
+    assert state.status == "failed" and state.result_revision is None
+    assert state.floor_fit["fallback_reason"] == "excessive_noise"
+    assert registry.scene.current(job.job_id).scene.scene_revision == "rev-001"
+
+
 def test_rerun_failure_is_recorded_and_can_be_requested_again(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
     registry, job, bundle, settings = world
     monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)

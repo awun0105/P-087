@@ -318,13 +318,8 @@ def fit_floor_model(
     median_residual = float(np.median(residuals[final_inliers])) if inlier_count else None
 
     reason: str | None = None
-    if inlier_count < profile.min_inliers:
-        reason = "insufficient_inliers"
-    elif inlier_ratio < profile.min_inlier_ratio:
-        reason = "low_inlier_ratio"
-    elif coverage < profile.min_coverage_area_m2:
-        reason = "insufficient_coverage"
-    elif robust_sigma > profile.max_noise_sigma_m:
+    # These failures forbid prior fallback even when support is also weak.
+    if robust_sigma > profile.max_noise_sigma_m:
         reason = "excessive_noise"
     elif len(hypotheses) > 1:
         alternative = hypotheses[1]
@@ -333,6 +328,14 @@ def fit_floor_model(
         )
         if distinct and alternative.support >= profile.ambiguity_support_ratio * best.support:
             reason = "ambiguous_multiple_planes"
+
+    if reason is None:
+        if inlier_count < profile.min_inliers:
+            reason = "insufficient_inliers"
+        elif inlier_ratio < profile.min_inlier_ratio:
+            reason = "low_inlier_ratio"
+        elif coverage < profile.min_coverage_area_m2:
+            reason = "insufficient_coverage"
 
     return _result(
         source_checksum=source_checksum,
