@@ -1,0 +1,4 @@
+# Isolated API-side USD export runtime.
+usd-core==26.8
+numpy==2.5.3
+trimesh==5.1.0

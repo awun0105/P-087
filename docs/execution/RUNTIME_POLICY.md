@@ -27,6 +27,16 @@ Dependencies are grouped into logical, isolated environments. We do NOT use one 
   `scripts/torwic/requirements-lidar.txt` đã được owner yêu cầu thay thế bằng
   các profile canonical ngày 03/10/2026.
 
+### API-side USD Runtime
+- Source/lock: `requirements-usd.in` và `requirements-usd.lock.txt`.
+- Docker API cài profile này vào `/opt/usd_runtime`, tách khỏi core Python.
+- `make lock` sinh lock có hash cùng các profile còn lại.
+
+### LiDAR Odometry Runtime
+- Source/lock: `requirements-lidar-odometry.in` và `requirements-lidar-odometry.lock.txt`.
+- Runtime riêng được cấp qua `Makefile.studio` và `Dockerfile.gpu`; không đưa KISS-ICP vào core.
+- `make lock` sinh lại lock từ source profile.
+
 ### External Provider Dependencies (e.g. 3DGS, Isaac, SAM2)
 - Must be isolated from the Core.
 - Permitted mechanisms: dedicated virtualenv, vendor containers, or separate processes.
