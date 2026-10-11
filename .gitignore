@@ -86,3 +86,5 @@ scripts/gpu/studio.env
 .codegraph/
 .ua/
 .wrangler/
+graphify-out/
+.mcp.json
