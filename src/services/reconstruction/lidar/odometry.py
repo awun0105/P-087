@@ -48,9 +48,12 @@ from src.services.reconstruction.lidar.cloud_payload import load_xyz_points
 from src.services.reconstruction.lidar.fusion import FusionConfig, FusionStats, ScanPose, fuse_scans, ply_bytes
 
 _PINNED_PROVIDER_VERSION = "1.3.0"
-#: v2: `voxel_size_m` 0,25 → 0,5 (nhanh 3-9 lần; hình dạng quỹ đạo gần như không đổi, xem mục 10 của benchmark).
-#: v3: giảm mẫu từng scan theo ô 0,1 m trước khi đếm điểm và nâng trần tổng điểm 25 → 50 triệu: sản phẩm nhận
-#: được chuỗi dài/dày hơn gấp nhiều lần mà độ chính xác không tệ đi (5/5 chuỗi TorWIC, cùng mục benchmark).
+#: v2: `voxel_size_m` 0,25 → 0,5 (nhanh 2,5-5 lần trên 5 chuỗi; hình dạng quỹ đạo gần như không đổi, mục 10 benchmark).
+#: v3: giảm mẫu từng scan theo ô 0,1 m SAU lọc tầm và TRƯỚC khi đếm điểm, trần tổng điểm 25 → 50 triệu. Scan TorWIC
+#: nạp ra 262.144 điểm gồm nhiều điểm (0,0,0) không hợp lệ nên trần cũ chỉ nhận ~95 scan; giảm mẫu gom các điểm đó
+#: và bỏ điểm trùng. Trung bình 5 chuỗi: hình dạng 7,5 → 7,0 cm, phần lệch do KISS-ICP của bản đồ 16,0 → 14,7 điểm
+#: phần trăm; KHÔNG đồng đều: chuỗi 03 tệ hơn nhẹ (7,2 → 7,8 cm). Hệ quả đã biết: bản đồ gộp xuất bản
+#: (`EstimatedTrajectoryMapCloud`) dựng từ scan đã giảm mẫu nên thưa hơn trước (ô gộp 0,05 m vẫn giữ).
 #: Đổi bất kỳ giá trị nào của hồ sơ phải đổi version.
 DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION = "rec17-default-v3"
 #: Trường chỉ dùng ở phía worker (tiền xử lý), không thuộc giao thức của runner cô lập.

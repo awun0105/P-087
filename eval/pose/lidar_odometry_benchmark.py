@@ -29,8 +29,10 @@ from eval.pose.colmap_fusion_benchmark import umeyama
 from src.services.reconstruction.lidar.odometry import default_lidar_odometry_profile
 
 REPO = Path(__file__).resolve().parents[2]
-# Hồ sơ đo = hồ sơ mặc định CỦA SẢN PHẨM (không sao chép số), trừ trần tổng điểm: benchmark nâng lên mức tối đa của
-# hợp đồng để chạy đủ 600 scan, còn mặc định sản phẩm chặt hơn (xem `--max-total-points`). `--voxel` để đo giá trị khác.
+# Hồ sơ đo lấy các số từ hồ sơ mặc định CỦA SẢN PHẨM, trừ trần tổng điểm (benchmark nâng lên mức tối đa của hợp đồng để
+# chạy đủ 600 scan; xem `--max-total-points`). Tiền xử lý KHÔNG giống hệt sản phẩm: ở đây bỏ điểm < 0,5 m trước giảm
+# mẫu (sản phẩm giữ `min_range_m = 0`, nhưng điểm (0,0,0) không hợp lệ bị KISS-ICP loại sẵn nên khác biệt thực tế
+# nhỏ). Cả bản đồ trần (quỹ đạo thực) lẫn bản đồ KISS-ICP đều dựng từ scan đã giảm mẫu, nên chỉ so được HIỆU của hai cột.
 PROFILE = default_lidar_odometry_profile().model_dump(mode="json")
 _WORKER_ONLY = ("prefilter_voxel_m",)  # worker xử lý trước, runner cô lập không nhận trường này
 MAP_STEP, MAP_VOXEL, MAP_RADIUS, MAP_WINDOW = 5, 0.10, 40.0, 8.0

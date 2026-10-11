@@ -68,7 +68,7 @@ scan .pcd ──► A (quỹ đạo thực) ────────────
 | 05 Aisle_CW lần 2 | kho, ngày khác | 470 | 191 k | 34,1 m | 0,34 m | **0,99%** | 0,7 cm | 1,6 cm | 0,20° |
 | 02 Hallway thẳng | văn phòng | 600 | 84 k | 46,7 m | 0,47 m | **1,00%** | 2,3 cm | 4,4 cm | 0,67° |
 | 04 Hallway toàn khu | văn phòng | 600 | 94 k | 45,6 m | 0,92 m | **2,01%** | 1,2 cm | 2,5 cm | 0,28° |
-| **Trung bình** | | | | | 0,69 m | **1,58%** | 1,4 cm | 3,6 cm | 0,34° |
+| **Trung bình** | | | | | 0,69 m | **1,58%** | 1,4 cm | 3,2 cm | 0,34° |
 
 ### 2.2 Bản đồ ghép so với `groundtruth_map.ply` (lệch trung bình, cm)
 
@@ -102,7 +102,7 @@ scan .pcd ──► A (quỹ đạo thực) ────────────
    - **Hệ quả cho cách báo cáo:** nên dùng **trung vị và % trong 10/20 cm** làm chỉ số chính, không dùng trung bình.
 5. **Scan dày hơn cho kết quả tốt hơn rõ** (tập 05: 191 k điểm, +1,7 cm so với +10–16 cm). Nhưng tập 05 cũng ngắn hơn (34 m) nên **chưa tách được** ảnh hưởng của mật độ và độ dài; cần thí nghiệm riêng.
 6. **Hành lang thẳng có sai số mỗi bước cao nhất (2,3 cm, 0,67°)** và bản đồ tệ nhất (+15,6 cm), dù trôi cuối đường thấp. Phù hợp với giả thuyết hành lang thẳng ít đặc trưng dọc trục (chưa kiểm).
-7. **Giới hạn của sản phẩm chặt hơn con số trong bảng này.** Script benchmark nâng trần tổng điểm lên 100 triệu (mức tối đa hợp đồng cho phép) để chạy được 600 scan, nhưng hồ sơ mặc định của sản phẩm (`default_lidar_odometry_profile`) dùng **25 triệu**. Với scan 84 nghìn điểm sản phẩm nhận ~**300 scan**, với scan 191 nghìn điểm chỉ ~**130 scan**; vượt thì job bị từ chối. Bộ nhớ đỉnh của KISS-ICP chỉ 0,17–0,63 GB (0,21 GB khi có giảm mẫu) nên giới hạn này là ngưỡng thận trọng, không phải ràng buộc bộ nhớ thực tế. *(Đã xử lý ở hồ sơ v3: trần 50 triệu và giảm mẫu 0,1 m, xem mục 11.)*
+7. **Giới hạn của sản phẩm chặt hơn con số trong bảng này (đã đính chính theo kiểm toán).** Script benchmark nâng trần tổng điểm lên 100 triệu để chạy đủ 600 scan, còn hồ sơ v1/v2 của sản phẩm dùng **25 triệu**. Nhưng sản phẩm đếm **toàn bộ 262.144 điểm mỗi scan** (gồm rất nhiều điểm (0,0,0) không hợp lệ; ví dụ 177.183 điểm ở scan 100 của tập 01), nên trần cũ chỉ nhận khoảng **95 scan** cho cả hai loại scan 84 nghìn và 191 nghìn điểm hữu hiệu, chứ không phải ~300 hay ~130 như đã ghi trước. Bộ nhớ đỉnh của KISS-ICP chỉ 0,17–0,63 GB nên đó là ngưỡng thận trọng, không phải ràng buộc bộ nhớ. *(Xử lý ở hồ sơ v3: giảm mẫu trước khi đếm và trần 50 triệu, xem mục 11.)*
 
 ## 4. Ý nghĩa và ảnh hưởng
 
@@ -118,7 +118,7 @@ scan .pcd ──► A (quỹ đạo thực) ────────────
 - **Chưa held-out:** chưa chỉnh tham số nên không có rủi ro học thuộc, nhưng cũng chưa có ngưỡng đạt/trượt định trước.
 - **Chỉ một thiết bị** (Ouster OS1 của TorWIC) và 600 scan đầu mỗi chuỗi (30–60 giây, ~45 m).
 - **Nguyên nhân đuôi của phép đo bản đồ chưa tách được** (insight 4); chỉ loại trừ được lệch khung và độ thưa.
-- **Tổng điểm 100 triệu trong script khác trần mặc định của sản phẩm** (25 triệu ở v1/v2, 50 triệu ở v3; insight 7): kết quả quỹ đạo vẫn đúng cho dữ liệu đó, nhưng sản phẩm không nhận chừng ấy scan.
+- **Trần điểm của script (100 triệu) khác sản phẩm** (25 triệu ở v1/v2, 50 triệu ở v3; insight 7), và sản phẩm đếm cả điểm (0,0,0) không hợp lệ ở v1/v2: kết quả quỹ đạo vẫn đúng cho dữ liệu đó, nhưng sản phẩm v1/v2 không nhận chừng ấy scan.
 - **Phép đo bản đồ là bản của riêng bước này** (lấy mẫu 1/5 scan, voxel 10 cm), không phải `eval/geometry/surface_error.py` (công cụ đó chấm bản 3DGS của một job).
 - Không kiểm hiệu quả của deskew (TorWIC `.pcd` không có timestamp từng điểm) hay IMU.
 
@@ -141,7 +141,7 @@ scan .pcd ──► A (quỹ đạo thực) ────────────
 | 04 | 2,01 → 1,38 → 1,23 | 43,3 → 50,0 → 55,5 | 29 → 8 → 6 |
 | 05 | 0,99 → 0,89 → 0,67 | 68,1 → 69,1 → 71,0 | 74 → 17 → 8 |
 
-Giá phải trả: sai/10 bước tăng (trung bình ~3,6 → ~4,7 cm ở voxel 1,0).
+Giá phải trả: sai/10 bước tăng (trung bình ~3,2 → ~4,7 cm ở voxel 1,0).
 
 *Cột thời gian lấy từ đầu ra console của lần quét tham số trên tập 01 và các lần kiểm chứng riêng; các file JSON v2 ghi thời gian của lần chạy toàn bộ (ví dụ 02: 22,6 → 8,5 s; 05: 84,1 → 16,0 s) nên chênh nhẹ do tải máy. Số quỹ đạo và bản đồ khớp JSON; voxel 1,0 không có file JSON (chỉ có trong quét tham số).*
 
@@ -218,7 +218,7 @@ Số liệu thô: `eval/results/lidar_odometry_torwic_v2_voxel0.5.json`, `..._vo
 | 05 | 0,34 m / 3,0 cm / 0,9995 | 0,30 m / 3,2 cm / 0,9992 |
 | **Trung bình** | 0,69 m / **7,8 cm** | 0,45 m / **7,5 cm** |
 
-**Đính chính quan trọng:** khi căn toàn đường, **hình dạng quỹ đạo của hai voxel gần như bằng nhau (7,8 so với 7,5 cm)**. Phần giảm "trôi cuối đường" khi tăng voxel (0,69 → 0,45 m) là phần *phụ thuộc hướng ban đầu*, không phải hình dạng tốt hơn. Lợi ích chắc chắn của voxel 0,5 là **tốc độ (3–9 lần)**; lợi ích về độ chính xác nhỏ hơn con số đã báo ở mục 7–8.
+**Đính chính quan trọng:** khi căn toàn đường, **hình dạng quỹ đạo của hai voxel gần như bằng nhau (7,8 so với 7,5 cm)**. Phần giảm "trôi cuối đường" khi tăng voxel (0,69 → 0,45 m) là phần *phụ thuộc hướng ban đầu*, không phải hình dạng tốt hơn. Lợi ích chắc chắn của voxel 0,5 là **tốc độ (~2,5–5 lần ở voxel 0,5)**; lợi ích về độ chính xác nhỏ hơn con số đã báo ở mục 7–8.
 Tỉ lệ mét của KISS-ICP đúng trong ±0,7% ở cả 5 tập và cả hai voxel.
 
 ### 10.2 Cảm biến nghiêng so với phương thẳng đứng, và hướng "lên"
@@ -252,4 +252,47 @@ Giảm mẫu **không làm tệ đi** mà còn nhỉnh hơn ở cả 3 chỉ s�
 
 **Ô 0,2 m gần như ngang ô 0,1 m** (hình dạng kém nhẹ 0,3 cm, bản đồ nhỉnh 1,1 điểm phần trăm, nhanh gần gấp đôi); dữ liệu không phân biệt được hai ô. Chọn 0,1 m vì đổi ít nhất so với mốc (thận trọng), không phải vì có bằng chứng 0,1 m tốt hơn 0,2 m. Số điểm sau giảm mẫu chưa được ghi ở các lần chạy này (script đã sửa để ghi từ nay: `points_per_scan_after_prefilter`).
 
-**Thay đổi sản phẩm (hồ sơ `rec17-default-v3`):** `prefilter_voxel_m = 0,1` (giảm mẫu trước khi đếm điểm và trước KISS-ICP), `max_total_points` 25 → **50 triệu**. Trường `prefilter_voxel_m` chỉ dùng ở worker, không gửi sang runner cô lập (runner kiểm chặt tập khoá). Với giảm mẫu, scan 84 nghìn điểm còn khoảng một phần ba, nên cùng trần sản phẩm nhận số scan nhiều hơn rõ rệt; chưa đo số điểm sau giảm mẫu cụ thể cho từng chuỗi.
+### 11.1 So sánh công bằng cho bản đồ
+
+Cả bản đồ "trần" (ghép bằng quỹ đạo thực) lẫn bản đồ KISS-ICP đều dựng từ scan **đã giảm mẫu**, nên trần cũng dịch chuyển. Cột "53,2 → 59,8%" ở bảng trên **không** là so sánh trước/sau hợp lệ cho riêng KISS-ICP. Phần do KISS-ICP gây ra là hiệu của hai cột:
+
+| Giảm mẫu | Trần (quỹ đạo thực) trong 20 cm | KISS-ICP trong 20 cm | **Hiệu (do KISS-ICP)** | Trung vị: trần / KISS-ICP / hiệu |
+|---|---:|---:|---:|---|
+| không | 69,2% | 53,2% | **16,0 điểm** | 11,5 / 18,8 / 7,3 cm |
+| ô 0,1 m | 74,5% | 59,8% | **14,7 điểm** | 10,1 / 16,1 / 6,0 cm |
+| ô 0,2 m | 76,7% | 60,9% | **15,8 điểm** | 9,4 / 15,8 / 6,4 cm |
+
+Phần cải thiện thật cho KISS-ICP chỉ ~1,3 điểm phần trăm (0,1 m); phần lớn "tăng" là do trần cũng tăng.
+
+### 11.2 Không đồng đều giữa các chuỗi
+
+Chuỗi 03 **tệ hơn** với giảm mẫu 0,1 m: hình dạng toàn đường 7,2 → 7,8 cm, cuối đường 0,47 → 0,50 m, trôi 1,03 → 1,08%. Các chuỗi 01, 02, 04 tốt hơn và 05 như cũ. Kết luận "không tệ đi" chỉ đúng cho **trung bình**, không đúng cho từng chuỗi.
+
+### 11.3 Số điểm thực của sản phẩm (đo bằng mã sản phẩm, scan 100)
+
+| | Điểm/scan |
+|---|---:|
+| Nạp bằng `load_xyz_points` (tất cả) | 262.144 (tập 01: 177.183 là (0,0,0) không hợp lệ) |
+| Sau lọc tầm 0–80 m, giảm mẫu 0,1 m (v3) | ~10.900 (~4% số nạp) |
+
+Hệ quả: v1/v2 chỉ nhận ~95 scan với trần 25 triệu; v3 với trần 50 triệu nhận hàng nghìn scan.
+
+### 11.4 Ảnh hưởng chưa đo
+
+Bản đồ gộp xuất bản (`EstimatedTrajectoryMapCloud`, được `registration_sources.py` dùng) nay dựng từ scan đã giảm mẫu 0,1 m nên **thưa hơn** (ô gộp 0,05 m không còn phát huy). Chưa đo ảnh hưởng tới các bước dùng bản đồ này.
+
+**Thay đổi sản phẩm (hồ sơ `rec17-default-v3`):** `prefilter_voxel_m = 0,1` (giảm mẫu sau lọc tầm, trước khi đếm điểm và trước KISS-ICP), `max_total_points` 25 → **50 triệu**. Trường `prefilter_voxel_m` chỉ dùng ở worker, không gửi sang runner cô lập (runner kiểm chặt tập khoá).
+
+## 12. Dữ liệu cho mục 10.2 (độ nghiêng sàn)
+
+Mã: `eval/pose/floor_tilt_probe.py` · số liệu: `eval/results/floor_tilt_torwic.json` (6 scan mỗi chuỗi). Công cụ này **giả định cảm biến gần thẳng đứng** (chọn nửa thấp của scan làm ứng viên sàn), nên chỉ là công cụ đo cho TorWIC, không phải bộ ước lượng mount-agnostic.
+
+| Chuỗi | Sàn nghiêng trong khung cảm biến (trung vị, độ) | Sàn nghiêng trong hệ thế giới của `traj_gt` (trung vị, độ) |
+|---|---:|---:|
+| 01_LoiDi_Kho_Thuan_Aisle_CW | 1.08 | 0.16 (max 0.41) |
+| 02_HanhLang_Thang_Hallway_Straight | 0.98 | 0.36 (max 0.54) |
+| 03_LoiDi_Kho_Nguoc_Aisle_CCW | 1.2 | 0.18 (max 0.41) |
+| 04_HanhLang_ToanKhu_Hallway_Full_C | 1.31 | 0.16 (max 0.44) |
+| 05_LoiDi_Kho_Dot2_Aisle_CW_Run1 | 1.15 | 0.11 (max 0.35) |
+
+Sàn của bản đồ chuẩn `.ply`: nghiêng **0.03°** so với z thế giới. Lưu ý: các con số mount-agnostic ở mục 10.2 (hàng "Nguyên mẫu mount-agnostic") do một script tạm cho ra và **chưa có file dữ liệu trong repo**; chúng chỉ nên được xem là kết quả sơ bộ.

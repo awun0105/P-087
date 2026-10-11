@@ -43,6 +43,7 @@ services:
         fi;
         .venv/bin/python -m scripts.gpu.make_runtime_manifest
         --out "$$PRODUCT_RUNTIME_MANIFEST";
+        : "$${PRODUCT_INPUT_RUNTIME_REGISTRY:?cần đặt PRODUCT_INPUT_RUNTIME_REGISTRY cho gpu-runtime-init}";
         .venv/bin/python -m scripts.gpu.qualify_input_runtimes
         --out "$$PRODUCT_INPUT_RUNTIME_REGISTRY";
         .venv/bin/python -m scripts.kaggle.preflight

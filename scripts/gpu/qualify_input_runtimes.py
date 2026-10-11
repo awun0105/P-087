@@ -68,6 +68,9 @@ def load_record(path: Path) -> dict[str, Any]:
             evidence = entry.get("evidence")
             if not isinstance(evidence, dict) or not evidence.get("kind") or not evidence.get("reference"):
                 raise QualificationRecordError(f"{name}: `qualified` bắt buộc có evidence.kind và evidence.reference")
+            for field in ("requires", "requires_versions"):
+                if not isinstance(entry.get(field, {}), dict):
+                    raise QualificationRecordError(f"{name}: `{field}` phải là một object")
             pins = {**(entry.get("requires") or {}), **(entry.get("requires_versions") or {})}
             if (
                 not pins
