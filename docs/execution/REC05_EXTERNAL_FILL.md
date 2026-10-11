@@ -63,6 +63,11 @@ snapshot profile giữ checksum khi đọc lại, receipt 1.2 replay được qu
 và cả hai lệnh cùng truyền fill/seed. Audit receipt dùng occupancy fixture sẵn có,
 không mô phỏng hay chứng minh external fill.
 
+Compose được kiểm tra bằng `.env.studio.example` sau khi lần gọi không có env mẫu
+dừng vì thiếu `.env.studio`. API và worker nhận cùng profile indoor. Audit cuối bổ
+sung xử lý overflow trong phép tính dung lượng/extent để cấu hình cực lớn trả lỗi
+có kiểm soát trước voxelization.
+
 Theo phạm vi người dùng yêu cầu, chưa chạy pytest, GPU, dữ liệu thật, benchmark,
 build/deploy container hoặc đánh giá chất lượng collider. Audit code/contract không
 chứng minh mọi scene chạy thành công; lỗi runtime và chất lượng cần thực nghiệm sau.

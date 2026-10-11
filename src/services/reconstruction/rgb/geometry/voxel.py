@@ -194,8 +194,11 @@ def require_voxel_capacity(lengths: Vector3, resolution_m: float, fill_size_m: f
     """Bound padded grid cells, including the pinned runtime's four-voxel alignment."""
     if not all(math.isfinite(value) and value >= 0 for value in lengths):
         raise ValueError("invalid Gaussian extent for voxel capacity")
-    padding = (math.ceil(fill_size_m / resolution_m) + 1) * resolution_m
-    block = 4 * resolution_m
-    cells = math.prod((math.ceil((length + 2 * padding) / block) + 1) * 4 for length in lengths)
+    try:
+        padding = (math.ceil(fill_size_m / resolution_m) + 1) * resolution_m
+        block = 4 * resolution_m
+        cells = math.prod((math.ceil((length + 2 * padding) / block) + 1) * 4 for length in lengths)
+    except OverflowError as error:
+        raise ValueError("external fill exceeds finite voxel capacity") from error
     if cells > MAX_VOXEL_CELLS:
         raise ValueError("external fill exceeds voxel capacity; reduce crop or explicitly choose a coarser profile")

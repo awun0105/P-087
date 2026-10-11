@@ -268,10 +268,11 @@ def _require_cluster_capacity(workspace: Path, config: VoxelConfig) -> None:
         raise GeometryError("Missing Gaussian statistics for padded voxel capacity") from error
     if not all(isinstance(value, int | float) and math.isfinite(value) for value in scale_logs):
         raise GeometryError("Missing finite Gaussian scales for voxel capacity")
-    # SIGMA_CUTOFF=3 in the qualified 3.6.6 writer; cap exponent before overflow.
-    if max(scale_logs) > 100:
-        raise GeometryError("Gaussian extents exceed voxel capacity")
-    halo = 3 * math.sqrt(sum(math.exp(value) ** 2 for value in scale_logs))
+    # SIGMA_CUTOFF=3 in the qualified 3.6.6 writer; hypot avoids squaring overflow.
+    try:
+        halo = 3 * math.hypot(*(math.exp(value) for value in scale_logs))
+    except OverflowError as error:
+        raise GeometryError("Gaussian extents exceed voxel capacity") from error
     if not all(isinstance(value, int | float) and math.isfinite(value) for pair in position_bounds for value in pair):
         raise GeometryError("Missing finite Gaussian positions for voxel capacity")
     lengths = tuple(high - low + 2 * halo for low, high in position_bounds)
