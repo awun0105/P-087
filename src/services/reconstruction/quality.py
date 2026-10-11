@@ -196,32 +196,48 @@ class GeometryProfileMismatchError(ValueError):
 
 
 def geometry_quality(
-    collision_mesh: ProductArtifactRef, metric_poses: ProductArtifactRef, profile: tuple[Path, str], resolve: Resolve
+    collision_mesh: ProductArtifactRef,
+    metric_poses: ProductArtifactRef,
+    profile: tuple[Path | dict, str],
+    resolve: Resolve,
 ) -> GeometryQuality:
     """Đếm vị trí camera (hệ mét) mà collision mesh chiếm chỗ trong khối robot đặt tại đó.
 
     Camera đã đi qua các vị trí này nên mesh chiếm chỗ ở đó là vật cản giả. Cùng phép kiểm với benchmark
     `collision_path_clearance` (eval/path), nhưng trên chính mesh đã publish của job, không dựng lại mesh.
 
-    `profile` = (file thông số REC-05 của deployment, checksum bundle đã ghi). Kích thước robot phải đúng bản đã dùng
-    khi dựng mesh; file đã đổi từ lúc đó thì từ chối thay vì đo bằng kích thước khác.
+    `profile` = (snapshot của job hoặc file REC-05 của deployment, checksum bundle đã ghi). Kích thước robot phải đúng
+    bản đã dùng khi dựng mesh. Job cũ được đối chiếu profile legacy đóng gói khi deployment chuyển sang indoor.
     """
-    import hashlib
-
     import numpy as np
 
     from src.services.reconstruction.adapters.collision_glb import read_collision_glb, topology
-    from src.services.reconstruction.finalize import load_geometry_profile
+    from src.services.reconstruction.finalize import GeometryProfile, load_geometry_profile
 
-    path, expected_checksum = profile
-    geometry = load_geometry_profile(path)
+    source, expected_checksum = profile
+    geometry = GeometryProfile.model_validate(source) if isinstance(source, dict) else load_geometry_profile(source)
+    if isinstance(source, dict):
+        if geometry.checksum() != expected_checksum:
+            raise GeometryProfileMismatchError("snapshot profile checksum differs from the job")
+    elif source.name == "geometry_indoor_v1.json":
+        # Pre-snapshot jobs retain their packaged geometry_v1 profile across indoor deployment upgrades.
+        legacy_path = Path(__file__).resolve().parents[3] / "configs/product/geometry_v1.json"
+        candidates = [geometry, load_geometry_profile(legacy_path)]
+        geometry = next(
+            (
+                candidate
+                for candidate in candidates
+                if any(
+                    candidate.model_copy(update={"gpu_index": index}).checksum() == expected_checksum
+                    for index in range(_MAX_GPU_INDEX + 1)
+                )
+            ),
+            geometry,
+        )
     # `gpu_index` do từng máy worker ghi đè và không ảnh hưởng hình học, nhưng nằm trong checksum của bundle: thử các
     # chỉ số GPU để vẫn kiểm được đúng từng thông số hình học còn lại.
     candidates = (geometry.model_copy(update={"gpu_index": index}) for index in range(_MAX_GPU_INDEX + 1))
-    if not any(
-        "sha256:" + hashlib.sha256(candidate.model_dump_json().encode()).hexdigest() == expected_checksum
-        for candidate in candidates
-    ):
+    if not any(candidate.checksum() == expected_checksum for candidate in candidates):
         raise GeometryProfileMismatchError("thông số hình học của deployment khác bản đã dùng để dựng mesh của job")
     radius, height = geometry.capsule_radius_m, geometry.capsule_height_m
     mesh = read_collision_glb(resolve(collision_mesh))

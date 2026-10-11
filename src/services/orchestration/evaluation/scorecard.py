@@ -603,6 +603,15 @@ def _geometry_metrics(registry: ProjectRegistry, job: JobManifest, geometry_conf
     if bundle is None or not bundle.camera_pose_refs:
         return None
     profile_checksum = str(bundle.provenance.get("geometry_profile_checksum"))
+    profile_source = bundle.provenance.get("geometry_profile_snapshot", geometry_config)
+    if "geometry_profile_snapshot" in bundle.provenance:
+        from src.services.reconstruction.finalize import GeometryProfile
+        from src.services.reconstruction.quality import GeometryProfileMismatchError
+
+        if not isinstance(profile_source, dict):
+            raise GeometryProfileMismatchError("job profile snapshot must be an object")
+        if GeometryProfile.model_validate(profile_source).checksum() != profile_checksum:
+            raise GeometryProfileMismatchError("snapshot profile checksum differs from the job")
     key = (
         bundle.canonical_geometry_ref.artifact_checksum,
         bundle.camera_pose_refs[0].artifact_checksum,
@@ -613,7 +622,7 @@ def _geometry_metrics(registry: ProjectRegistry, job: JobManifest, geometry_conf
         quality = geometry_quality(
             bundle.canonical_geometry_ref,
             bundle.camera_pose_refs[0],
-            (geometry_config, profile_checksum),
+            (profile_source, profile_checksum),
             registry.runtime_resolver.require,
         )
         _GEOMETRY_CACHE[key] = quality

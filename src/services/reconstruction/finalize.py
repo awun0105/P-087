@@ -116,6 +116,10 @@ class GeometryProfile(ContractModel):
             raise ValueError("external fill requires GeometryProfile schema 1.2")
         return self
 
+    def checksum(self) -> str:
+        """Profile identity uses the historical compact JSON encoding."""
+        return "sha256:" + hashlib.sha256(self.model_dump_json().encode()).hexdigest()
+
 
 _MAX_VOXEL_CELLS = 1_500_000_000.0
 
@@ -546,8 +550,8 @@ class FinalizeWorker:
                 "evidence_kind": "real_measurement",
                 "distance_source": data.distance_source,
                 "geometry_profile": request.geometry.profile,
-                "geometry_profile_checksum": "sha256:"
-                + hashlib.sha256(request.geometry.model_dump_json().encode()).hexdigest(),
+                "geometry_profile_checksum": request.geometry.checksum(),
+                "geometry_profile_snapshot": request.geometry.model_dump(mode="json"),
                 **(lidar.provenance if lidar else {}),
             },
         )
@@ -619,7 +623,11 @@ class FinalizeWorker:
 
 def _human_message(error: Exception) -> str:
     """Thông báo cho người dùng; không kèm đường dẫn hay stderr của tool."""
-    text = str(error)
+    text = " ".join(str(item) for item in (error, error.__cause__) if item is not None).lower()
+    if "external fill" in text or "--voxel-external-fill" in text:
+        if "voxel capacity" in text:
+            return "Vùng dựng và khoảng đệm fill vượt giới hạn voxel; thu hẹp vùng hoặc chọn profile khác"
+        return "Không thực hiện được external fill; kiểm tra vùng cắt, độ kín của phòng và vị trí robot bắt đầu"
     if "tolerance" in text or "independent" in text:
         return "Đoạn kiểm C–D đo lại trên scene đã quy đổi mét vượt ngưỡng; xác nhận lại tỉ lệ"
     if "seed" in text or "clearance" in text:

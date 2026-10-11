@@ -289,6 +289,15 @@ class RgbGeometryService:
     ) -> GeometryExecutionResult:
 
         # Validate toàn bộ graph trước lần ghi đầu; manifest là commit marker cuối.
+        if request.config.external_fill_size_m is not None:
+            expected_fill = {
+                "status": "applied",
+                "size_m": request.config.external_fill_size_m,
+                "occupancy_log_checksum": _sha256(workspace / "occupancy.log"),
+                "collision_log_checksum": _sha256(workspace / "collision.log"),
+            }
+            if report.get("external_fill") != expected_fill:
+                raise ValueError("external fill report differs from the requested configuration or process logs")
         batch = _PublicationBatch()
         pub = GeometryPublisher(batch, request.job_id)
         provenance = _provenance(request, report)
@@ -354,7 +363,7 @@ def _provenance(request: GeometryExecutionRequest, report: dict) -> dict:
                 {"request": request.model_dump(mode="json"), "files": report["files"], "attempt_id": attempt_id}
             )
         ).hexdigest(),
-        producer_version="rec05-v1",
+        producer_version="rec05-v2" if request.config.schema_version == "1.2" else "rec05-v1",
         applied_confirmation_checksum=report["applied_confirmation_checksum"],
         scale_applied=report["scale_applied"],
         applied_transform=report["applied_transform"],
@@ -366,6 +375,7 @@ def _provenance(request: GeometryExecutionRequest, report: dict) -> dict:
         voxel_config_checksum=request.config.checksum(),
         coordinate_system=CoordinateSystem().model_dump(mode="json"),
         preprocessing_provenance=report["preprocessing_provenance"],
+        **({"external_fill": report["external_fill"]} if request.config.schema_version == "1.2" else {}),
     )
 
 
