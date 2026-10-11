@@ -105,7 +105,7 @@ def test_the_registry_is_deterministic_so_api_and_worker_share_one_checksum(tmp_
 
 def test_a_qualified_entry_without_evidence_or_pins_is_rejected(tmp_path: Path, record: dict) -> None:
     for mutate in (
-        lambda r: r["capabilities"]["R2"].update({"status": "qualified"}),
+        lambda r: r["capabilities"]["R2"].pop("evidence"),
         lambda r: r["capabilities"]["R1"].pop("evidence"),
         lambda r: r["capabilities"]["R1"].pop("requires"),
         lambda r: r["capabilities"].update({"R9": {"status": "qualified"}}),
