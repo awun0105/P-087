@@ -1,0 +1,622 @@
+"use client";
+
+/**
+ * Visual 3DGS của viewer, render bằng `@playcanvas/supersplat-viewer`.
+ *
+ * Căn cứ: `INTEGRATION_PLAYBOOK:745` và `PRODUCT-06.md` §13.1. Ba điều phải nói
+ * rõ vì chúng quyết định hành vi thật:
+ *
+ * 1. **Ưu tiên WebGPU, fallback WebGL2 theo API upstream.** Có tùy chọn ép WebGL
+ *    khi cần chẩn đoán. Backend thật đọc từ graphicsDevice, không đoán từ cấu hình.
+ * 2. **Collider đi qua `collisionUrl` của chính viewer**, nên collider GLB nằm trong
+ *    cùng `pc.AppBase` với SOG — đây là phần Single Scene Graph mà
+ *    `TRACK.md:39` yêu cầu, và là lý do không tự dựng mesh trong engine thứ hai.
+ *    Lớp kỹ thuật còn lại vẫn do `SceneCanvas` lo; xem `PRODUCT-06.md` §13.1.
+ * 3. **Trạng thái load/camera đọc từ `viewer.state`**, không tự bịa thanh tiến trình:
+ *    `state.progress` là 0..100 và `state.loaded` chỉ true sau frame đầu.
+ *
+ * Canonical SceneIR transforms thuộc `layers.ts`. Raw preview giữ đơn vị SfM;
+ * inspection chỉ inverse transform hiển thị để trả điểm về hệ nguồn, không
+ * xác nhận metric hoặc sửa canonical state qua PlayCanvas.
+ */
+
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+
+import type { ViewMode } from "@/features/viewer/layers";
+import {
+  DISPLAY_EULER,
+  buildTrajectoryAnimTrack,
+  type CameraMarkerLike,
+  type DisplayCameraPose,
+  type SourceFrame,
+} from "@/features/viewer/source-frame";
+import type { SplatInspection } from "./splat-inspection";
+import { EMPTY_INSPECTION, type InspectionState } from "./inspection-history";
+
+import "@playcanvas/supersplat-viewer/viewer.css";
+
+/** Runtime capability của browser, đo trước khi gọi createViewer để tránh throw. */
+export type PlayCanvasCapability = "unknown" | "ready" | "unavailable" | "failed";
+
+/** Trạng thái runtime lấy từ `ViewerHandle.state` của thư viện, không phải tự đếm. */
+export interface PlayCanvasRuntime {
+  loaded: boolean;
+  progress: number;
+  hasCollision: boolean;
+  walkAllowed: boolean;
+  /** Bộ điều khiển camera đang chạy trong viewer (đọc từ `state.cameraMode`). */
+  cameraMode: CameraMode;
+  /** Có animation track camera (quỹ đạo video gốc) hay không. */
+  hasAnimation: boolean;
+  /** Trạng thái animation đang tạm dừng hay đang phát. */
+  animationPaused: boolean;
+  /** Thời lượng animation (giây). */
+  animationDuration: number;
+  /** Vị trí đầu đọc animation hiện tại (giây). */
+  animationTime: number;
+  graphicsBackend?: string;
+}
+
+/** Chế độ camera của supersplat-viewer; `anim` là hoạt ảnh camera dựng sẵn hoặc quỹ đạo video gốc. */
+export type CameraMode = "orbit" | "fly" | "walk" | "anim";
+
+export const INITIAL_RUNTIME: PlayCanvasRuntime = {
+  loaded: false,
+  progress: 0,
+  hasCollision: false,
+  walkAllowed: false,
+  cameraMode: "orbit",
+  hasAnimation: false,
+  animationPaused: true,
+  animationDuration: 0,
+  animationTime: 0,
+};
+
+/**
+ * Sự kiện con lăn với bước cuộn nhân hệ số. Tốc độ zoom của viewer là hằng số nội bộ
+ * (`wheelSpeed`), không có trong settings, nên host nhân bước cuộn trước khi viewer nhận.
+ */
+export function scaledWheelInit(event: WheelEvent, factor: number): WheelEventInit {
+  return {
+    deltaX: event.deltaX * factor,
+    deltaY: event.deltaY * factor,
+    deltaZ: event.deltaZ * factor,
+    deltaMode: event.deltaMode,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    screenX: event.screenX,
+    screenY: event.screenY,
+    ctrlKey: event.ctrlKey,
+    shiftKey: event.shiftKey,
+    altKey: event.altKey,
+    metaKey: event.metaKey,
+    buttons: event.buttons,
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+  };
+}
+
+export function detectPlayCanvasCapability(): PlayCanvasCapability {
+  if (typeof document === "undefined") {
+    return "unknown";
+  }
+  const canvas = document.createElement("canvas");
+  const hasWebGpu = typeof navigator !== "undefined" && "gpu" in navigator;
+  try {
+    const gl = canvas.getContext("webgl2");
+    gl?.getExtension?.("WEBGL_lose_context")?.loseContext();
+    return gl || hasWebGpu ? "ready" : "unavailable";
+  } catch {
+    return hasWebGpu ? "ready" : "unavailable";
+  }
+}
+
+const subscribeCapability = () => () => undefined;
+const serverCapability = (): PlayCanvasCapability => "unknown";
+
+export function playCanvasErrorMessage(capability: PlayCanvasCapability): string | null {
+  if (capability === "unavailable") {
+    return "Trình duyệt không render được 3DGS (cần WebGL2/WebGPU).";
+  }
+  if (capability === "failed") {
+    return "Không thể tải hoặc hiển thị mô hình 3DGS (lỗi tải file hoặc dữ liệu không hợp lệ).";
+  }
+  return null;
+}
+
+/** SSR/hydration cùng snapshot unknown; chỉ probe GPU ở client, một lần mỗi host. */
+export function usePlayCanvasCapability() {
+  const cache = useRef<PlayCanvasCapability | null>(null);
+  const read = useCallback(() => {
+    cache.current ??= detectPlayCanvasCapability();
+    return cache.current;
+  }, []);
+  const detected = useSyncExternalStore(subscribeCapability, read, serverCapability);
+  const [override, setOverride] = useState<PlayCanvasCapability | null>(null);
+  return [override ?? detected, setOverride] as const;
+}
+
+export interface PlayCanvasSceneProps {
+  /** URL của SOG đã resolve qua artifact endpoint; null nghĩa là chưa có Visual. */
+  contentUrl: string | null;
+  renderer?: "webgpu" | "webgl";
+  /** File preview cục bộ; object URL có cùng lifecycle với engine. */
+  contentFile?: File;
+  /** Bắt buộc với blob URL: parser chọn format theo tên gốc, không theo UUID. */
+  contentFilename?: string;
+  /** Preview file độc lập dùng controls upstream; job viewer dùng toolbar riêng. */
+  showControls?: boolean;
+  /** Collider GLB của cùng scene, để viewer nạp trong cùng app. */
+  collisionUrl?: string | null;
+  mode: ViewMode;
+  /** Đo một lần ở host, để degraded state của cả viewer chỉ có một nguồn sự thật. */
+  capability: PlayCanvasCapability;
+  onFailed: () => void;
+  onRuntime?: (runtime: PlayCanvasRuntime) => void;
+  enableInspection?: boolean;
+  /** Số điểm tối đa của một bộ chọn (2 = đo A/B, 5 = xác nhận tỉ lệ mét). */
+  inspectionMaxPoints?: number;
+  onInspectionReady?: (controller: SplatInspection | null) => void;
+  onInspectionState?: (state: InspectionState) => void;
+  /** Hệ trục của nội dung; mặc định `colmap` (output Brush). Artifact hệ mét REC-06 là `z_up`. */
+  sourceFrame?: SourceFrame;
+  /** Chuỗi camera quay của scene để sinh quỹ đạo replay mượt mà khớp video gốc. */
+  cameras?: readonly CameraMarkerLike[];
+  /** Camera khởi đầu trong không gian hiển thị (vd camera quay đầu tiên); caller memo hoá. */
+  initialCamera?: DisplayCameraPose;
+  /** Chế độ camera ban đầu khi viewer nạp xong; mặc định `fly` khi có `initialCamera`, hoặc `orbit`. */
+  initialCameraMode?: Exclude<CameraMode, "anim">;
+  /**
+   * Điểm đến của camera (không gian hiển thị), khai lúc tạo viewer; `ViewerControls.select(i)` bay
+   * tới điểm thứ i bằng transition của viewer. Hotspot mặc định bị ẩn: host tự vẽ danh sách.
+   * Caller memo hoá theo nội dung, vì đổi mảng này sẽ tạo lại viewer.
+   */
+  annotations?: readonly ViewerAnnotation[];
+  /**
+   * App PlayCanvas và điều khiển camera của viewer khi sẵn sàng (null khi huỷ), để host gắn lớp
+   * phủ cùng scene graph và cho camera bay tới vật.
+   */
+  onApp?: (app: ViewerAppLike | null, controls?: ViewerControls) => void;
+  /** Hệ số nhân bước cuộn chuột (1 = mặc định của viewer). Đổi không tạo lại viewer. */
+  wheelFactor?: number;
+  /** Nút điều khiển bổ sung muốn nhúng vào thanh công cụ đáy của viewer (nếu showControls = true). */
+  extraControls?: ReactNode;
+}
+
+export interface ViewerAnnotation {
+  position: [number, number, number];
+  title: string;
+  camera: DisplayCameraPose;
+}
+
+/** Điều khiển camera qua API công khai của supersplat-viewer (`selectAnnotation`). */
+export interface ViewerControls {
+  /** Bay tới annotation thứ `index`; false nếu viewer chưa nạp xong (API yêu cầu `state.loaded`). */
+  select(index: number): boolean;
+  /** Bật/tắt điều khiển camera của viewer (tắt trong lúc kéo gizmo để hai bên không tranh con trỏ). */
+  setInputEnabled(enabled: boolean): void;
+  /**
+   * Chuyển chế độ camera. `walk` chỉ được khi viewer báo `walkAllowed` (có dữ liệu va chạm và scene
+   * đủ lớn). Trả false khi viewer chưa nạp xong hoặc chế độ không dùng được.
+   */
+  setCameraMode(mode: Exclude<CameraMode, "anim">): boolean;
+  /** Đưa cả scene vào khung hình (chuyển về xoay quanh tâm); false nếu viewer chưa nạp xong. */
+  frameScene(): boolean;
+  /** Về vị trí ban đầu của chế độ hiện tại; false nếu viewer chưa nạp xong. */
+  resetCamera(): boolean;
+  /** Bắt đầu hoặc tiếp tục phát lại camera theo quỹ đạo video gốc; tua lại đầu nếu đã hết. */
+  playTrajectory(): boolean;
+  /** Tạm dừng phát lại quỹ đạo camera. */
+  pauseTrajectory(): boolean;
+  /** Nhảy tới thời điểm time (giây) trong quỹ đạo video. */
+  seekTrajectory(time: number): boolean;
+}
+
+export function PlayCanvasScene({
+  contentUrl,
+  renderer = "webgpu",
+  contentFile,
+  contentFilename,
+  showControls = false,
+  collisionUrl,
+  mode,
+  capability,
+  onFailed,
+  onRuntime,
+  enableInspection = false,
+  inspectionMaxPoints = 2,
+  onInspectionReady,
+  onInspectionState,
+  sourceFrame = "colmap",
+  cameras,
+  initialCamera,
+  initialCameraMode,
+  annotations,
+  onApp,
+  wheelFactor = 1,
+  extraControls,
+}: PlayCanvasSceneProps) {
+  const container = useRef<HTMLDivElement | null>(null);
+  const [controlsContainer, setControlsContainer] = useState<Element | null>(null);
+  const wheel = useRef(wheelFactor);
+  useEffect(() => {
+    wheel.current = wheelFactor;
+  }, [wheelFactor]);
+  useEffect(() => {
+    const host = container.current;
+    if (!host) return;
+    // Bắt ở pha capture trên host (trước canvas của viewer), thay bằng sự kiện đã nhân hệ số.
+    // Sự kiện tự tạo có `isTrusted = false` nên đi thẳng tới viewer, không lặp vô hạn.
+    const rescale = (event: WheelEvent) => {
+      if (!event.isTrusted || wheel.current === 1 || !(event.target instanceof Element)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      event.target.dispatchEvent(new WheelEvent("wheel", scaledWheelInit(event, wheel.current)));
+    };
+    host.addEventListener("wheel", rescale, { capture: true, passive: false });
+    return () => host.removeEventListener("wheel", rescale, { capture: true });
+  }, []);
+  const [runtime, setRuntime] = useState<PlayCanvasRuntime>(INITIAL_RUNTIME);
+  const onAppRef = useRef(onApp);
+  useEffect(() => {
+    onAppRef.current = onApp;
+  }, [onApp]);
+  const annotationsRef = useRef(annotations);
+  const liveAnnotations = useRef<ViewerAnnotationSetting[] | null>(null);
+  useEffect(() => {
+    annotationsRef.current = annotations;
+    if (liveAnnotations.current) replaceAnnotations(liveAnnotations.current, annotations);
+  }, [annotations]);
+
+  /** Đẩy trạng thái lên host; giữ identity ổn định vì nằm trong deps của effect khác. */
+  const publish = useCallback(
+    (next: PlayCanvasRuntime) => {
+      setRuntime(next);
+      onRuntime?.(next);
+    },
+    [onRuntime],
+  );
+
+  useEffect(() => {
+    if (capability !== "ready" || (!contentUrl && !contentFile) || mode !== "VISUAL" || !container.current) {
+      return;
+    }
+    let disposed = false;
+    let handle: ViewerHandleLike | null = null;
+    let inspection: SplatInspection | null = null;
+    const subscriptions: { off(): void }[] = [];
+    const host = container.current;
+    const objectUrl = contentFile ? URL.createObjectURL(contentFile) : null;
+    const resolvedUrl = objectUrl ?? contentUrl!;
+
+    let orient: (() => void) | null = null;
+    let hostModeRequest = false;
+
+    void Promise.all([import("@playcanvas/supersplat-viewer/viewer"), import("@playcanvas/supersplat-viewer/settings")])
+      .then(async ([module, settingsModule]) => {
+        if (disposed) return;
+        const trajectoryTrack =
+          cameras && cameras.length >= 2 ? buildTrajectoryAnimTrack(sourceFrame, cameras) : undefined;
+        const settings = settingsModule.defaultSettings("environment");
+        settings.cameras = initialCamera ? [{ initial: initialCamera }] : [];
+        settings.annotations = toViewerAnnotations(annotationsRef.current);
+        if (trajectoryTrack) {
+          settings.animTracks = [trajectoryTrack];
+          settings.startMode = "animTrack";
+        } else {
+          settings.animTracks = [];
+          settings.startMode = "default";
+        }
+        if (settings.background) {
+          settings.background.color = [0, 0, 0];
+        }
+        const viewer = await module.createViewer({
+          container: host,
+          contentUrl: resolvedUrl,
+          contentFilename: contentFile?.name ?? contentFilename ?? new URL(resolvedUrl, window.location.href).pathname.split("/").pop(),
+          collisionUrl: collisionUrl ?? undefined,
+          // `{}` làm viewer 1.35.2 crash ("reading 'color'") khi chạy browser thật
+          // (2026-09-29); dùng default chính thức của thư viện, camera khung môi trường.
+          settings,
+          renderer,
+          ui: showControls,
+          noanim: true,
+        });
+        if (disposed) {
+          viewer.destroy();
+          return;
+        }
+        handle = viewer;
+        if (showControls) {
+          const buttonsEl = host.querySelector(".sse-buttonsContainer");
+          if (buttonsEl) setControlsContainer(buttonsEl);
+        }
+        // Upstream tạo entity `gsplat` khi asset nạp xong, với phép xoay COLMAP cố định. Đặt lại
+        // phép xoay theo hệ nguồn ở frame đầu tiên có entity (trước khi render), rồi bỏ listener.
+        const app = viewer.app as unknown as ViewerAppLike | undefined;
+        if (app && sourceFrame !== "colmap") {
+          const [ex, ey, ez] = DISPLAY_EULER[sourceFrame];
+          orient = () => {
+            const entity = app.root?.findByName("gsplat");
+            if (!entity) return;
+            entity.setLocalEulerAngles(ex, ey, ez);
+            app.off("update", orient!);
+            orient = null;
+          };
+          app.on("update", orient);
+        }
+        // Hotspot mặc định của viewer luôn ẩn: host tự vẽ danh sách vật.
+        viewer.state.showAnnotations = false;
+        // `selectAnnotation(i)` đọc mảng này theo chỉ số mỗi lần gọi, nên host cập nhật tại chỗ thay vì
+        // tạo lại viewer (tạo lại = tải lại cả 3DGS) mỗi khi danh sách vật đổi.
+        liveAnnotations.current = viewer.annotations as unknown as ViewerAnnotationSetting[];
+        replaceAnnotations(liveAnnotations.current, annotationsRef.current);
+        // Sau khi phát lại animation camera (hết track hoặc người dùng ngắt), mặc định về Orbit thay vì
+        // fly/walk của upstream. Ghi trễ một microtask để không đổi state ngay trong handler `changed`.
+        subscriptions.push(
+          viewer.events.on("cameraMode:changed", (value: CameraMode, prev: CameraMode) => {
+            if (disposed) return;
+            if (value === "anim") {
+              const state = viewer.state as unknown as { animationTime: number; animationDuration: number };
+              if (state.animationDuration > 0 && state.animationTime >= state.animationDuration - 1e-3) {
+                viewer.seek(0);
+              }
+            }
+            if (prev !== "anim" || value === "orbit" || hostModeRequest) return;
+            queueMicrotask(() => {
+              if (!disposed && viewer.state.cameraMode === value) viewer.state.cameraMode = "orbit";
+            });
+          }),
+          viewer.events.on("animationPaused:changed", (paused: boolean) => {
+            const state = viewer.state as unknown as { animationTime: number; animationDuration: number };
+            if (disposed) return;
+            if (!paused && viewer.state.cameraMode === "anim") {
+              if (state.animationDuration > 0 && state.animationTime >= state.animationDuration - 1e-3) {
+                viewer.seek(0);
+              }
+            }
+            if (!paused || viewer.state.cameraMode !== "anim") return;
+            if (state.animationDuration > 0 && state.animationTime >= state.animationDuration - 1e-3) {
+              queueMicrotask(() => {
+                if (!disposed && viewer.state.cameraMode === "anim") viewer.state.cameraMode = "orbit";
+              });
+            }
+          }),
+        );
+        if (app) {
+          onAppRef.current?.(app, {
+            select: (index) => {
+              if (disposed || !viewer.state.loaded) return false;
+              viewer.selectAnnotation(index);
+              return true;
+            },
+            setInputEnabled: (enabled) => {
+              if (!disposed) viewer.state.inputEnabled = enabled;
+            },
+            setCameraMode: (next) => {
+              if (disposed || !viewer.state.loaded) return false;
+              if (next === "walk" && !viewer.state.walkAllowed) return false;
+              hostModeRequest = true;
+              try {
+                viewer.state.cameraMode = next;
+              } finally {
+                hostModeRequest = false;
+              }
+              return true;
+            },
+            frameScene: () => {
+              if (disposed || !viewer.state.loaded) return false;
+              try {
+                viewer.frameScene();
+                return true;
+              } catch {
+                return false;
+              }
+            },
+            resetCamera: () => {
+              if (disposed || !viewer.state.loaded) return false;
+              try {
+                viewer.resetCamera();
+                return true;
+              } catch {
+                return false;
+              }
+            },
+            playTrajectory: () => {
+              if (disposed || !viewer.state.loaded || !viewer.state.hasAnimation) return false;
+              hostModeRequest = true;
+              try {
+                const state = viewer.state as unknown as { animationTime: number; animationDuration: number };
+                if (state.animationDuration > 0 && state.animationTime >= state.animationDuration - 1e-3) {
+                  viewer.seek(0);
+                }
+                viewer.state.cameraMode = "anim";
+                viewer.state.animationPaused = false;
+              } finally {
+                hostModeRequest = false;
+              }
+              return true;
+            },
+            pauseTrajectory: () => {
+              if (disposed || !viewer.state.loaded) return false;
+              viewer.state.animationPaused = true;
+              return true;
+            },
+            seekTrajectory: (time: number) => {
+              if (disposed || !viewer.state.loaded || !viewer.state.hasAnimation) return false;
+              try {
+                viewer.seek(time);
+                return true;
+              } catch {
+                return false;
+              }
+            },
+          });
+        }
+        // EventHandler của PlayCanvas bắn `<key>:changed`; `on` trả EventHandle
+        // để huỷ. Không tự poll `state` vì đó là nguồn thật của thư viện.
+        let activatedInitialMode = false;
+        const activateInitialMode = () => {
+          if (activatedInitialMode || disposed || !viewer.state.loaded) return;
+          const requested = initialCameraMode ?? (initialCamera ? "fly" : undefined);
+          if (!requested) return;
+          activatedInitialMode = true;
+          queueMicrotask(() => {
+            if (disposed || !viewer.state.loaded) return;
+            const targetMode = requested === "walk" && !viewer.state.walkAllowed ? "fly" : requested;
+            hostModeRequest = true;
+            try {
+              viewer.state.cameraMode = targetMode;
+            } finally {
+              hostModeRequest = false;
+            }
+          });
+        };
+        for (const event of [
+          "progress:changed",
+          "loaded:changed",
+          "hasCollision:changed",
+          "walkAllowed:changed",
+          "cameraMode:changed",
+          "hasAnimation:changed",
+          "animationPaused:changed",
+          "animationTime:changed",
+        ]) {
+          subscriptions.push(viewer.events.on(event, () => {
+            if (!disposed) {
+              if (event === "loaded:changed" && viewer.state.loaded) activateInitialMode();
+              publish(readRuntime(viewer));
+            }
+          }));
+        }
+        if (viewer.state.loaded) activateInitialMode();
+        if (viewer.app?.assets) {
+          subscriptions.push(viewer.app.assets.on("error", () => { if (!disposed) onFailed(); }));
+        }
+        publish(readRuntime(viewer));
+        if (enableInspection && onInspectionState) {
+          try {
+            const { SplatInspection } = await import("./splat-inspection");
+            if (disposed) return;
+            inspection = new SplatInspection(viewer, onInspectionState, inspectionMaxPoints);
+            onInspectionReady?.(inspection);
+          } catch (error: unknown) {
+            if (!disposed) onInspectionState({ ...EMPTY_INSPECTION, error: "Không khởi tạo được công cụ inspection; viewer vẫn dùng được." });
+            console.error("Inspection initialization failed", error);
+          }
+        }
+      })
+      .catch((error: unknown) => {
+        if (!disposed) {
+          onFailed();
+          console.error("supersplat-viewer init failed", error);
+        }
+      });
+
+    return () => {
+      disposed = true;
+      subscriptions.forEach((subscription) => subscription.off());
+      if (orient && handle?.app) (handle.app as unknown as ViewerAppLike).off("update", orient);
+      onAppRef.current?.(null);
+      onInspectionReady?.(null);
+      const activeHandle = handle;
+      const release = () => {
+        setControlsContainer(null);
+        activeHandle?.destroy();
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+      };
+      // GPU readback phải kết thúc trước khi hủy device mà nó còn đang dùng.
+      if (inspection) void inspection.destroy().then(release, (error: unknown) => {
+        console.error("Inspection cleanup failed", error);
+        release();
+      });
+      else release();
+      handle = null;
+      liveAnnotations.current = null;
+    };
+  }, [capability, collisionUrl, contentUrl, contentFile, contentFilename, showControls, mode, onFailed, publish,
+    enableInspection, inspectionMaxPoints, onInspectionReady, onInspectionState, renderer, sourceFrame, cameras, initialCamera, initialCameraMode]);
+
+  return (
+    <div
+      ref={container}
+      data-testid="playcanvas-scene"
+      data-mode={mode}
+      data-capability={capability}
+      data-loaded={runtime.loaded}
+      data-progress={Math.round(runtime.progress)}
+      data-renderer={runtime.graphicsBackend}
+      className="h-full w-full"
+      data-engine={capability === "ready" ? "playcanvas" : undefined}
+    >
+      {controlsContainer && extraControls
+        ? createPortal(extraControls, controlsContainer)
+        : null}
+    </div>
+  );
+}
+
+/** Phần của `pc.AppBase` mà host dùng (tìm entity, sự kiện frame, gắn lớp phủ). */
+export interface ViewerAppLike {
+  readonly root: {
+    findByName(name: string): { setLocalEulerAngles(x: number, y: number, z: number): void; enabled: boolean } | null;
+  };
+  on(event: "update", handler: () => void): unknown;
+  off(event: "update", handler: () => void): unknown;
+}
+
+/** Dạng annotation trong settings của supersplat-viewer (chỉ các field host ghi). */
+interface ViewerAnnotationSetting {
+  position: [number, number, number];
+  title: string;
+  text: string;
+  camera: { initial: DisplayCameraPose };
+}
+
+function toViewerAnnotations(items: readonly ViewerAnnotation[] | undefined): ViewerAnnotationSetting[] {
+  return (items ?? []).map((item) => ({ position: item.position, title: item.title, text: "", camera: { initial: item.camera } }));
+}
+
+/** Thay nội dung mảng annotation mà viewer đang giữ, giữ nguyên identity của mảng. */
+function replaceAnnotations(target: ViewerAnnotationSetting[], items: readonly ViewerAnnotation[] | undefined): void {
+  target.splice(0, target.length, ...toViewerAnnotations(items));
+}
+
+/** Chỉ những field host thật sự dùng, để không phụ thuộc shape đầy đủ của thư viện. */
+interface ViewerHandleLike {
+  readonly app?: { readonly graphicsDevice: { readonly deviceType: string } };
+  readonly state: {
+    loaded: boolean;
+    progress: number;
+    hasCollision: boolean;
+    walkAllowed: boolean;
+    cameraMode: CameraMode;
+    hasAnimation: boolean;
+    animationPaused: boolean;
+    animationDuration: number;
+    animationTime: number;
+  };
+  readonly events: { on(key: string, handler: () => void): { off(): void } };
+  frameScene(): void;
+  resetCamera(): void;
+  toggleWalk(): void;
+  seek(time: number): void;
+  destroy(): void;
+}
+
+function readRuntime(viewer: ViewerHandleLike): PlayCanvasRuntime {
+  return {
+    loaded: viewer.state.loaded,
+    progress: Number.isFinite(viewer.state.progress) ? Math.max(0, Math.min(100, viewer.state.progress)) : 0,
+    hasCollision: viewer.state.hasCollision,
+    walkAllowed: viewer.state.walkAllowed,
+    cameraMode: viewer.state.cameraMode,
+    hasAnimation: Boolean(viewer.state.hasAnimation),
+    animationPaused: Boolean(viewer.state.animationPaused),
+    animationDuration: Number.isFinite(viewer.state.animationDuration) ? viewer.state.animationDuration : 0,
+    animationTime: Number.isFinite(viewer.state.animationTime) ? viewer.state.animationTime : 0,
+    graphicsBackend: viewer.app?.graphicsDevice.deviceType,
+  };
+}

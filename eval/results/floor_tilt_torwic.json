@@ -1,0 +1,100 @@
+{
+  "scenes": [
+    {
+      "scene": "01_LoiDi_Kho_Thuan_Aisle_CW",
+      "scans_sampled": 6,
+      "floor_tilt_in_sensor_frame_deg": {
+        "median": 1.08,
+        "all": [
+          1.0,
+          1.05,
+          1.12,
+          0.89,
+          1.35,
+          1.2
+        ]
+      },
+      "floor_tilt_in_gt_world_deg": {
+        "median": 0.16,
+        "max": 0.41
+      }
+    },
+    {
+      "scene": "02_HanhLang_Thang_Hallway_Straight_CW",
+      "scans_sampled": 6,
+      "floor_tilt_in_sensor_frame_deg": {
+        "median": 0.98,
+        "all": [
+          0.93,
+          0.56,
+          0.9,
+          1.41,
+          1.22,
+          1.03
+        ]
+      },
+      "floor_tilt_in_gt_world_deg": {
+        "median": 0.36,
+        "max": 0.54
+      }
+    },
+    {
+      "scene": "03_LoiDi_Kho_Nguoc_Aisle_CCW",
+      "scans_sampled": 6,
+      "floor_tilt_in_sensor_frame_deg": {
+        "median": 1.2,
+        "all": [
+          1.04,
+          0.97,
+          1.32,
+          1.36,
+          1.32,
+          1.08
+        ]
+      },
+      "floor_tilt_in_gt_world_deg": {
+        "median": 0.18,
+        "max": 0.41
+      }
+    },
+    {
+      "scene": "04_HanhLang_ToanKhu_Hallway_Full_CW",
+      "scans_sampled": 6,
+      "floor_tilt_in_sensor_frame_deg": {
+        "median": 1.31,
+        "all": [
+          1.17,
+          1.53,
+          1.31,
+          0.56,
+          1.5,
+          1.3
+        ]
+      },
+      "floor_tilt_in_gt_world_deg": {
+        "median": 0.16,
+        "max": 0.44
+      }
+    },
+    {
+      "scene": "05_LoiDi_Kho_Dot2_Aisle_CW_Run1",
+      "scans_sampled": 6,
+      "floor_tilt_in_sensor_frame_deg": {
+        "median": 1.15,
+        "all": [
+          0.97,
+          1.14,
+          1.18,
+          1.26,
+          1.16,
+          0.52
+        ]
+      },
+      "floor_tilt_in_gt_world_deg": {
+        "median": 0.11,
+        "max": 0.35
+      }
+    }
+  ],
+  "ground_truth_map_floor_tilt_deg": 0.03
+}

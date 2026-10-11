@@ -1,0 +1,157 @@
+{
+  "format_version": 1,
+  "verified_at": "2026-10-03T01:40:49.465053+00:00",
+  "data": {
+    "file": "r2s-studio-data.zip",
+    "zip_bytes": 2969912392,
+    "sha256": "49ce10d6731e88339267d1047303ab941fc4ceb65f05ee93b6d09efded69aa89",
+    "payload_files": 1421,
+    "payload_bytes": 2969063274,
+    "projects": 5,
+    "artifact_references": 1233,
+    "schema_version": 8,
+    "account_policy": "keep-seed-accounts",
+    "kept_user_count": 2,
+    "seed_password_hash_and_active_match_source": true,
+    "sessions": 0,
+    "invites": 0,
+    "crc_inventory_reference_verification": "passed by canonical data-verify and real restore"
+  },
+  "source": {
+    "file": "real2sim-studio-source.zip",
+    "zip_bytes": 12522316,
+    "sha256": "1d9aea33b027e97a9350b1e9870058d666594a01480d9cdc68f2b24d8c3c78db",
+    "git_commit": "fa6d5aa2f42bbaa586d7c7bd3cb1005801dea117",
+    "file_count": 1385,
+    "inventory_hashes_and_crc": "passed",
+    "extracted_cpu_compose_config_exit": 0,
+    "extracted_gpu_compose_config_exit": 0,
+    "extracted_module_help_exit_without_pythonpath": {
+      "scripts.studio.data_package": 0,
+      "scripts.studio.container_entrypoint": 0,
+      "scripts.cloud.package_publish": 0
+    },
+    "packaging_overlay": [
+      ".dockerignore",
+      ".env.studio.example",
+      ".gitignore",
+      "Dockerfile.studio",
+      "Makefile.studio",
+      "README.md",
+      "deploy/studio/README.md",
+      "deploy/studio/api.env.example",
+      "deploy/studio/railway-api.json",
+      "deploy/studio/web.env.example",
+      "deploy/studio/worker.env.example",
+      "docker-compose.studio.gpu.yml",
+      "docker-compose.studio.yml",
+      "docs/guide/studio-distribution.md",
+      "docs/plans/completed/2026-10-03-studio-packaging.md",
+      "frontend/.dockerignore",
+      "frontend/Dockerfile",
+      "frontend/package-lock.json",
+      "frontend/vercel.json",
+      "scripts/cloud/package_publish.py",
+      "scripts/gpu/README.md",
+      "scripts/studio/container_entrypoint.py",
+      "scripts/studio/data_package.py",
+      "tests/test_packaging/test_compose_config.py",
+      "tests/test_packaging/test_data_package.py",
+      "tests/test_packaging/test_package_publish.py"
+    ]
+  },
+  "checks": {
+    "pytest_command": ".venv/bin/python -m pytest tests/test_packaging tests/test_orchestration/test_runtime_migrations.py -q",
+    "pytest_passed": 56,
+    "pytest_skipped": 4,
+    "ruff_check": "passed",
+    "ruff_format_check": "passed",
+    "git_diff_check": "passed",
+    "final_scene_catalog_route_tests_passed": 19,
+    "api_build": "passed",
+    "frontend_editor_next_typescript_build": "passed",
+    "real_zip_compose_restore": "passed",
+    "last_restart_api_web_healthy": true,
+    "image_audit": {
+      "uid": 1000,
+      "no_source_env": true,
+      "script_hashes": {
+        "scripts/studio/container_entrypoint.py": "f6ae43a53edba39e3f461e889c48e85f539225b7c653b9a7271dc6055403d146",
+        "scripts/studio/data_package.py": "59e35e1a99daf88fd1142013cab5d5654cd0caae93b04ee48ab04be1d6db3a07",
+        "scripts/cloud/package_publish.py": "566c9cf01eb0d3e8ff9f861fe43dfbd92aeba95159cb71f1eca3d377e58ee75f",
+        "src/config.py": "88f91ffcc8aa413541096fce9fbed18b3cc5ee21fe27e403b8a73042ac158090",
+        "src/api/product/scene.py": "5319737cb34a3608dd2210b5b0584432ef0db2dcfb66d5e59c453dd2ab72a5c1"
+      },
+      "source_catalog_previews": 34
+    },
+    "api_image": "sha256:afceaa7dff6d44a20a4fe11e1485096d56833aaeb97154576a2a8faf38fea5d6",
+    "web_image": "sha256:e25254a26f02a158fc29f94df70e412d2f3e6f5e75b2b84718b49ee01ca9d2b0",
+    "http_proof": {
+      "snapshot_matches_current_source_metadata": true,
+      "unauthenticated_management": 401,
+      "fixture_login_via_web_proxy": 200,
+      "cookie_session_via_web_proxy": true,
+      "scene_count": 5,
+      "sample_count": 2,
+      "asset_preview_count": 34,
+      "asset_preview_bytes": {
+        "status": 206,
+        "bytes_observed": 64
+      },
+      "artifact_lists_ok": 5,
+      "stage_views_ok": 5,
+      "thumbnail_ok": 5,
+      "rerun_recordings_available": 1,
+      "rerun_bytes": {
+        "status": 206,
+        "bytes_observed": 64
+      },
+      "sog_artifact_bytes": {
+        "status": 206,
+        "bytes_observed": 64
+      }
+    },
+    "http_auth_account": "temporary fixture in isolated restored copy only",
+    "both_demo_manifest_and_splat_range_reads": "passed",
+    "production_default_dry_run": {
+      "account_policy": {
+        "kept_user_count": 2,
+        "mode": "keep-seed-accounts"
+      },
+      "auxiliary_data": "local-only; demo, asset_previews, and rerun_recordings are not uploaded",
+      "dry_run": true,
+      "metadata": {
+        "git_commit": "74ffc59f098d4d7a5102a7d07ee8a1474054a73e",
+        "scenes": null
+      },
+      "schema_version": 8,
+      "target_rows": {
+        "r2s_audit_log": 48,
+        "r2s_imports": 1,
+        "r2s_job_events": 49,
+        "r2s_jobs": 5,
+        "r2s_projects": 5,
+        "r2s_resource_usage": 0,
+        "r2s_scene_requests": 1,
+        "r2s_uploads": 9,
+        "r2s_users": 2
+      }
+    },
+    "production_dry_run_target_created": false
+  },
+  "not_verified": [
+    "browser visual QA",
+    "Windows/WSL2 runtime",
+    "macOS/ARM runtime",
+    "real NVIDIA/CUDA/Vulkan job",
+    "cloud deployment",
+    "actual Supabase PostgreSQL and R2 apply",
+    "provider monitoring and backup"
+  ],
+  "production_limits": [
+    "worker currently shares PG/R2 credentials; least-privilege token boundary pending",
+    "qa_verified new-video flow pending; privacy gate retained",
+    "auxiliary data requires one Railway volume, not shared multi-region state",
+    "converted Isaac fallback default disabled on staging/production; source includes34 CC0/procedural previews"
+  ]
+}

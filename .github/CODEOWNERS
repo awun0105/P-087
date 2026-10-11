@@ -32,3 +32,19 @@
 /SECURITY.md                @AI20K-Build-Phase/book-maintainers
 /CONTRIBUTING.md            @AI20K-Build-Phase/book-maintainers
 /CODE_OF_CONDUCT.md         @AI20K-Build-Phase/book-maintainers
+
+# ---------------------------------------------------------------------------
+# Real2Sim execution ownership
+# ---------------------------------------------------------------------------
+# Known GitHub handle: EX-REC + Technical Lead / Integration Owner.
+/src/services/reconstruction/                 @awun0105
+/scripts/torwic/                              @awun0105
+/tests/test_reconstruction/                   @awun0105
+/docs/execution/tracks/ex_rec/                @awun0105
+/src/models/contracts/                        @awun0105
+/fixtures/                                    @awun0105
+/tests/integration/                           @awun0105
+
+# TODO(ownership): add GitHub handles for Đức (EX-SCENE/Release Approver),
+# Đạt (EX-SIM/QA Lead), and Cường (EX-PRODUCT/Product Owner) before encoding
+# their path-specific CODEOWNERS rules. Human names are intentionally not guessed.

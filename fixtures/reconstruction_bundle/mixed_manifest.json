@@ -1,0 +1,88 @@
+{
+  "artifact_type": "ReconstructionBundle",
+  "schema_version": "1.0",
+  "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/mixed_bundle.json",
+  "artifact_checksum": "sha256:ad34de360ce120e3c422af74620ba53e5fd0aa7ec5dd51b58e617339ece02a3f",
+  "producer_stage": "ST-METRIC-CANONICALIZE",
+  "job_id": "job-fixture-001",
+  "source_input_checksum": "sha256:afe1bbad09183a1e732c4deb9b4f22b37753852c9275acbfb683f78c5ad65622",
+  "input_configuration": {
+    "rgb_present": true,
+    "registered_lidar_present": true,
+    "declared_same_scene": true
+  },
+  "coordinate_system": {"unit": "meter", "up_axis": "Z", "handedness": "right", "world_frame": "world"},
+  "metric_scale": {"status": "CONFIRMED", "meters_per_unit": 1.0},
+  "rgb_frame_refs": [{
+    "artifact_type": "RgbFrameSet", "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/rgb_frames.json",
+    "artifact_checksum": "sha256:53b96e85899d7104af39d934eab6b90a0949db5663e6317ba4377f287e991bf8",
+    "data_class": "derived",
+    "producer_stage": "ST-FRAME-EXTRACT", "job_id": "job-fixture-001"
+  }],
+  "camera_pose_refs": [{
+    "artifact_type": "CameraPoseSet", "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/camera_poses.json",
+    "artifact_checksum": "sha256:8e8c2b8cf6678869fbf2621bd0359338222eb582cb45d8ba96e8fc056deb1aa3",
+    "data_class": "derived",
+    "producer_stage": "ST-CAMERA-POSE", "job_id": "job-fixture-001"
+  }],
+  "visual_artifact_ref": {
+    "artifact_type": "VisualArtifact", "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/mock_visual.json",
+    "artifact_checksum": "sha256:2aa87e90bbc2d516c244428ed931e357a1e56edf0c1c8b1f10e38ebc27dedaa0",
+    "data_class": "derived",
+    "producer_stage": "ST-VISUAL-RECON", "job_id": "job-fixture-001"
+  },
+  "rgb_geometry_ref": {
+    "artifact_type": "RgbGeometry", "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/rgb_geometry.ply",
+    "artifact_checksum": "sha256:489c4aec9889f735fa0ae8b0c58d5844f281bc209b2b356d4a46947d281044dc",
+    "data_class": "derived",
+    "producer_stage": "ST-RGB-GEOMETRY", "job_id": "job-fixture-001"
+  },
+  "lidar_geometry_ref": {
+    "artifact_type": "LiDARGeometryArtifact", "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/lidar_geometry.ply",
+    "artifact_checksum": "sha256:714a1768b7d03dbd94f7fb4266c23237452886221b740b37f4bb8f2e4d6e27ae",
+    "data_class": "derived",
+    "producer_stage": "ST-LIDAR-INGEST", "job_id": "job-fixture-001",
+    "source_provenance": {
+      "dependencies": [],
+      "ground_truth_assisted": false,
+      "details": {"fixture": true, "source_profile": "pre_registered_input"}
+    }
+  },
+  "alignment_record": {
+    "artifact_type": "AlignmentRecord",
+    "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/alignment_evidence.json",
+    "artifact_checksum": "sha256:50575c619c0983a9bd3cb87334f83e35cb00b4a5bedaa7a1c3a6f91eecd57df1",
+    "producer_stage": "ST-RGB-LIDAR-ALIGN",
+    "job_id": "job-fixture-001",
+    "source_lidar_checksum": "sha256:714a1768b7d03dbd94f7fb4266c23237452886221b740b37f4bb8f2e4d6e27ae",
+    "target_rgb_geometry_checksum": "sha256:489c4aec9889f735fa0ae8b0c58d5844f281bc209b2b356d4a46947d281044dc",
+    "transform_target_from_source": {
+      "parent_frame": "world", "local_frame": "registered_lidar",
+      "translation_xyz": [0.0, 0.0, 0.0],
+      "rotation_quaternion_xyzw": [0.0, 0.0, 0.0, 1.0]
+    },
+    "status": "CONFIRMED",
+    "method": "synthetic_identity",
+    "evidence_refs": [{
+      "artifact_type": "CameraPoseSet", "schema_version": "1.0",
+      "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/camera_poses.json",
+      "artifact_checksum": "sha256:8e8c2b8cf6678869fbf2621bd0359338222eb582cb45d8ba96e8fc056deb1aa3",
+      "data_class": "derived", "producer_stage": "ST-CAMERA-POSE", "job_id": "job-fixture-001"
+    }],
+    "provenance": {"fixture": true}
+  },
+  "canonical_geometry_ref": {
+    "artifact_type": "CanonicalGeometry", "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-fixture-001/reconstruction/canonical_geometry.ply",
+    "artifact_checksum": "sha256:109ee1d8e84367fae728c26c3b1353fc9507d93071f9a3db05194ef63d7415de",
+    "data_class": "derived",
+    "producer_stage": "ST-METRIC-CANONICALIZE", "job_id": "job-fixture-001"
+  },
+  "provenance": {"fixture": true, "proof_level": "synthetic_contract_integration"}
+}

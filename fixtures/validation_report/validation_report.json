@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "candidate_checksum": "sha256:4d3a1a0aefcd3261fa98de4f4231c02501d64113980060d8232296784068dbae",
+  "validator_version": "fixture-validator-1.0",
+  "environment_versions": {"isaac_sim": "UNVERIFIED", "gpu": "UNVERIFIED"},
+  "checks": [{
+    "check_id": "ISAAC_LOAD",
+    "result": "PASS",
+    "evidence_refs": [{
+      "artifact_type": "ValidationEvidence", "schema_version": "1.0",
+      "artifact_uri": "artifact://jobs/job-fixture-001/simulation/validation_evidence.json",
+      "artifact_checksum": "sha256:683e787b9d71f0b44afd9f22dc484b07b29d62bbeb40f7deb27b118ab4cd047e",
+      "data_class": "derived",
+      "producer_stage": "ST-ISAAC-VALIDATE", "job_id": "job-fixture-001",
+      "source_provenance": {"fixture": true, "isaac_runtime_proof": false}
+    }],
+    "message": "Synthetic fixture result; Isaac was not executed."
+  }],
+  "path_results": [{
+    "pair_id": "fixture-pair-001",
+    "result": "CLEAR",
+    "evidence_refs": [{
+      "artifact_type": "ValidationEvidence", "schema_version": "1.0",
+      "artifact_uri": "artifact://jobs/job-fixture-001/simulation/validation_evidence.json",
+      "artifact_checksum": "sha256:683e787b9d71f0b44afd9f22dc484b07b29d62bbeb40f7deb27b118ab4cd047e",
+      "data_class": "derived", "producer_stage": "ST-ISAAC-VALIDATE", "job_id": "job-fixture-001"
+    }],
+    "message": "Observed fixture label only; no hidden benchmark expectation was read."
+  }],
+  "overall_result": "PASS",
+  "report_checksum": "sha256:fadf97c29411f5fabb8294437e562d6e886a23bfd4a46083b613d3c704f3b807"
+}

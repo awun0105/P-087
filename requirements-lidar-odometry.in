@@ -1,0 +1,2 @@
+# Isolated local LiDAR odometry candidate; do not add to the API/scene runtime.
+kiss-icp==1.3.0

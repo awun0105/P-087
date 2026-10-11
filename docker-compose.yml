@@ -1,19 +1,145 @@
-version: "3.8"
+name: real2sim-studio
 
+# Portable teammate stack.  Run after the source checkout has a prepared
+# `.env.studio` and the verified package is named `r2s-studio-data.zip` at the
+# repository root:
+#
+#   docker compose up --build
+#
+# The archive is mounted only into the short-lived restore service, never into
+# the running API.  Restore is a fail-closed operation owned by
+# scripts.studio.data_package; the no-op guard prevents a restart from
+# overwriting an existing SQLite database.
 services:
-  backend:
+  # Prepare only the mounted data volume.  The entrypoint validates both
+  # canonical directories with lstat before chown; it never follows a
+  # studio_local symlink or touches the source checkout/archive.
+  data-init:
+    platform: linux/amd64
+    image: real2sim-studio-api
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
+      network: ${STUDIO_BUILD_NETWORK:-default}
+    user: "0:0"
+    entrypoint: ["python", "-m", "scripts.studio.container_entrypoint"]
+    command: ["prepare-data"]
     volumes:
-      - ./data:/app/data
-    restart: unless-stopped
+      - type: bind
+        source: ${STUDIO_DATA_DIR:-./data}
+        target: /app/data
+    restart: "no"
+
+  # Restore is explicit and deterministic.  If the database is already there,
+  # the operation is a no-op; the underlying `unpack` command still refuses to
+  # overwrite an existing database when it is invoked directly.
+  data-restore:
+    platform: linux/amd64
+    image: real2sim-studio-api
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: ${STUDIO_BUILD_NETWORK:-default}
+    entrypoint: ["python", "-m", "scripts.studio.container_entrypoint"]
+    command: ["restore-if-needed", "/package/r2s-studio-data.zip"]
+    volumes:
+      - type: bind
+        source: ${STUDIO_DATA_DIR:-./data}
+        target: /app/data
+      - type: bind
+        source: ${STUDIO_DATA_ARCHIVE:-./r2s-studio-data.zip}
+        target: /package/r2s-studio-data.zip
+        read_only: true
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
+    restart: "no"
+
+  api:
+    platform: linux/amd64
+    image: real2sim-studio-api
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: ${STUDIO_BUILD_NETWORK:-default}
+    env_file:
+      - ${STUDIO_ENV_FILE:-.env.studio}
+    environment:
+      # A teammate deployment must remain authenticated.  The initial
+      # Reviewer is created only when the bootstrap variables are supplied.
+      AUTH_REQUIRED: "true"
+      AUTH_GUEST_SIGNUP_ENABLED: "${AUTH_GUEST_SIGNUP_ENABLED:-false}"
+      AUTH_COOKIE_SECURE: "false"
+      APP_ENV: development
+      PRODUCT_PRIVACY_MODE: self_attested
+      PRODUCT_UPLOAD_MAX_BYTES: "4294967296"
+      DATABASE_URL: sqlite:////app/data/studio_local/runtime.db
+      ARTIFACT_ROOT: /app/data/studio_local/artifacts
+      PRODUCT_WORKER_ROOT: /app/data/studio_local/workers
+      PRODUCT_DEMO_DIR: /app/data/demo/library
+      PRODUCT_ASSET_PREVIEW_DIR: /app/data/asset_previews
+      PRODUCT_RERUN_RECORDING_DIR: /app/data/rerun_recordings
+      PRODUCT_TRASH_ROOT: /app/data/studio_local/trash
+      CHROMA_PERSIST_DIR: /app/data/studio_local/chroma
+      # Do not manufacture a runtime manifest in the API container.  The GPU
+      # override creates and records one from real capability probing.
+      PRODUCT_PROCESSING_CONFIG:
+      PRODUCT_RUNTIME_MANIFEST:
+      R2S_APP_ROOT: /app
+      R2S_REQUIRE_DATA: "true"
+      REC04_SPLAT_MODULE_PATH: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
+      REC04_SPLAT_DEVICE: cpu
+      REC05_VOXEL_CLI: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/bin/cli.mjs
+      REC05_VOXEL_MODULE_PATH: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
+    volumes:
+      - type: bind
+        source: ${STUDIO_DATA_DIR:-./data}
+        target: /app/data
+    depends_on:
+      data-restore:
+        condition: service_completed_successfully
+    ports:
+      - "${STUDIO_API_PORT:-8010}:8000"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/health')
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  web:
+    image: real2sim-studio-web
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      network: ${STUDIO_BUILD_NETWORK:-default}
+      args:
+        # Next rewrites `/api/v1/*` server-side, so the browser never needs to
+        # resolve the internal Compose hostname.
+        REAL2SIM_API_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3000/').then((response) => {
+          if (response.status >= 400) process.exit(1);
+          }).catch(() => process.exit(1));
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    ports:
+      - "${STUDIO_WEB_PORT:-3010}:3000"
+    restart: unless-stopped

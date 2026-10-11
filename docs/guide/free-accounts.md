@@ -20,7 +20,7 @@ Trước khi đăng ký tài khoản, hãy hiểu bạn sẽ cần gì:
 
 | Thành phần | Công nghệ | Nền tảng | Mục đích |
 |------------|-----------|----------|----------|
-| Backend | FastAPI + Python 3.11 | Render / Railway | API server cho AI Agent |
+| Backend | FastAPI + Python 3.12 | Render / Railway | API server cho AI Agent |
 | AI Agent | LangGraph + LangChain | — | Xử lý logic & workflow của agent |
 | LLM | GPT-4o-mini / Gemini / Mistral | OpenAI / Google / Mistral API | Bộ não AI — xử lý ngôn ngữ |
 | Database | PostgreSQL + pgvector | Supabase | Lưu trữ dữ liệu & vector |
@@ -340,7 +340,7 @@ A: GitHub: Mỗi người 1 tài khoản → collaborate trên repo. Vercel/Rend
 
 **Q: Template dùng OpenAI, nhưng tôi muốn dùng Mistral/Gemini — được không?**
 
-A: ĐƯỢC! Template dùng LangChain — hỗ trợ nhiều provider. Chỉ cần thay đổi `get_llm()` trong `src/services/llm.py`. Ví dụ: `ChatMistralAI` thay vì `ChatOpenAI`. Xem hướng dẫn trong `docs/guide/chapter-04.md` của template.
+A: ĐƯỢC! Đặt `LLM_PROVIDER=mistral` hoặc `LLM_PROVIDER=google` trong `.env`, rồi điền API key tương ứng. Factory tại `src/llm/factory.py` sẽ khởi tạo integration LangChain phù hợp; không cần sửa code để đổi provider.
 
 **Q: Tôi có thể dùng ChatGPT Plus / Claude Pro subscription thay vì API không?**
 

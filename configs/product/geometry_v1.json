@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "profile": "geometry_v1",
+  "note": "Owner chốt 2026-09-29 (REC-05): capsule OTTO 100D ngoại tiếp 0,461/0,308 m; seed = camera đầu hạ xuống sàn đã xác nhận. Hiệu chỉnh 2026-09-30 trên Aisle_CW (job-ac2bfd924cc6): vùng làm việc = khung camera ± 6 m ngang, −0,5…4 m theo cao; dọn rác bằng --filter-floaters 0,05/0,1/0,004 (mặc định upstream) vì 3DGS preview thưa làm --filter-cluster xoá gần hết. cluster_* dùng làm tham số floaters khi cleanup=floaters.",
+  "cleanup": "floaters",
+  "resolution_m": 0.05,
+  "opacity": 0.1,
+  "cluster_resolution_m": 0.05,
+  "cluster_opacity": 0.1,
+  "cluster_min_contribution": 0.004,
+  "capsule_radius_m": 0.461,
+  "capsule_height_m": 0.308,
+  "max_seed_relocation_m": 1.0,
+  "seed_floor_clearance_m": 0.05,
+  "crop_margin_m": 6.0,
+  "crop_below_floor_m": 0.5,
+  "crop_height_m": 4.0,
+  "cluster_seed_height_m": 0.02,
+  "gpu_index": 0,
+  "max_gaussian_scale_log": 1.0
+}

@@ -16,6 +16,16 @@ env/
 .env
 .env.local
 .env.production
+.env.studio
+deploy/studio/*.env
+r2s-studio-data*.zip
+r2s-studio-data*.zip.sha256
+real2sim-studio-source*.zip
+real2sim-studio-source*.zip.sha256
+r2s-*.zip
+*.zip
+r2s-studio-data*.tar.gz
+*.partial
 
 # IDE
 .vscode/
@@ -32,6 +42,12 @@ Thumbs.db
 data/
 *.db
 *.sqlite3
+
+# Cache autotune của Brush (burn/wgpu) sinh ở thư mục chạy
+target/
+
+# File cấu hình/credential AWS cục bộ (file hoặc thư mục .aws) — không bao giờ commit
+.aws
 
 # Logs
 logs/
@@ -58,3 +74,15 @@ out/
 # AI logs — tracked structure, ignored content
 .ai-log/*.jsonl
 .ai-log/archive/
+
+# Harness core maintenance binary
+scripts/bin/harness
+scripts/bin/harness.exe
+
+# Studio runtime env (chứa đường dẫn máy, có thể chứa key)
+scripts/gpu/studio.env
+
+# Agent and CodeGraph tools
+.codegraph/
+.ua/
+.wrangler/

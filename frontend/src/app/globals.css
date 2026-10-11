@@ -1,0 +1,618 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "../styles/shadcn-variants.css";
+
+/* Component donor (shadcn) dùng `dark:`; class `dark` trên <html> bật theme tối của Studio (D-14). */
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  /* Bộ chữ của landing cho toàn app (STUDIO_UX_SPEC.md D-13); biến font do next/font đặt trên <html> ở app/layout.tsx. */
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/*
+ * Studio — Minimalism/Swiss, beige + cam (quyết định owner 2026-09-29; owner chọn lại bộ này
+ * thay palette tối ngày 30/09/2026, STUDIO_UX_SPEC.md D-04). Chrome sáng; viewport 3D nâu than ấm vì
+ * Gaussian khó đọc trên nền sáng. Tương phản: ink/paper ~13:1, ink-muted/paper ~5.4:1,
+ * trắng/ember-strong ~4.6:1.
+ *
+ * Cùng một palette với landing (features/landing/landing.css). Từ 01/10/2026 app dùng luôn cách kẻ viền của
+ * landing: viền là mực ấm (ink-muted) pha loãng thay cho màu be đặc, nên trên mọi nền (paper, raised, sunken)
+ * đường kẻ đều mảnh và cùng tông. `line` = --border-subtle của landing (0.16); `line-strong` 0.36 giữ độ rõ của
+ * viền ô nhập/nút phụ ngang mức cũ (#cbbba3 trên paper, tương phản ~1.65:1). `line-dark` cho viền trên nền tối.
+ */
+@theme inline {
+  --font-studio: var(--font-sans);
+
+  /* Giá trị nằm ở `:root` (sáng) và `.dark` (tối) bên dưới để đổi theme không phải build lại utility (D-14). */
+  --color-paper: var(--studio-paper);
+  --color-paper-raised: var(--studio-paper-raised);
+  --color-paper-sunken: var(--studio-paper-sunken);
+  --color-line: var(--studio-line);
+  --color-line-strong: var(--studio-line-strong);
+  --color-line-dark: var(--studio-line-dark);
+  --color-on-dark: var(--studio-on-dark); /* chữ trên nền luôn tối (viewport 3D, ô nền mực) — theo bảng màu, không theo sáng/tối */
+  --color-on-accent: var(--studio-on-accent); /* chữ trên nền màu nhấn đậm (ember-strong, destructive-fill) */
+  --color-scrim: var(--studio-scrim); /* lớp phủ mờ sau dialog/sheet */
+
+  --color-ink: var(--studio-ink);
+  --color-ink-muted: var(--studio-ink-muted);
+  --color-ink-subtle: var(--studio-ink-subtle);
+
+  --color-ember: var(--studio-ember);
+  --color-ember-strong: var(--studio-ember-strong);
+  --color-ember-soft: var(--studio-ember-soft);
+
+  --color-geometry: var(--studio-geometry); /* geometry/data */
+  --color-collider: var(--studio-ochre); /* physics/collider */
+
+  --color-viewport: var(--studio-viewport);
+  --color-viewport-deep: var(--studio-viewport-deep); /* thanh tiêu đề/đáy của khung tối, như khung viewport trên landing */
+  --color-viewport-raised: var(--studio-viewport-raised); /* viền/ô nổi bên trong khung tối */
+  --color-media-preview-surface: var(--studio-media-preview-surface);
+
+  --color-sage: var(--studio-sage);
+  --color-sage-soft: var(--studio-sage-soft);
+  --color-ochre: var(--studio-ochre);
+  --color-ochre-soft: var(--studio-ochre-soft);
+  --color-rust: var(--studio-rust);
+  --color-rust-soft: var(--studio-rust-soft);
+  --color-destructive-fill: var(--studio-destructive-fill); /* nền đặc của nút nguy hiểm khi hover; chữ on-accent ≥ 4,5:1 */
+}
+
+/* Token ngữ nghĩa cho component donor (shadcn) — cùng palette với token Studio ở trên. */
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Auth & Hero presentation tokens (Lovable + Stitch) */
+  --color-hero: #101216;
+  --color-hero-foreground: #ffffff;
+  --color-hero-muted: rgba(255, 255, 255, 0.72);
+  --color-placeholder: var(--muted-foreground);
+  --color-primary-hover: color-mix(in srgb, var(--primary) 85%, black);
+  --font-display: var(--font-jakarta), var(--font-sans);
+  --font-ui: var(--font-jakarta), var(--font-sans);
+}
+
+.bg-hero-scrim {
+  background: linear-gradient(180deg, rgba(16, 18, 22, 0) 0%, rgba(16, 18, 22, 0.25) 40%, rgba(16, 18, 22, 0.88) 100%);
+}
+
+.h-13 {
+  height: 3.25rem;
+}
+
+/*
+ * Bảng màu (STUDIO_UX_SPEC.md D-17): mỗi bảng có bản sáng và bản tối, chọn bằng class trên <html>.
+ *   mặc định (be + cam)  : `:root` sáng, `.dark` tối
+ *   Gruvbox              : `.theme-gruvbox` sáng, `.theme-gruvbox.dark` tối
+ * Landing luôn dùng bản SÁNG của bảng màu đang chọn (không theo `.dark`), nên `.landing-page` nhận lại đúng các
+ * giá trị sáng. Mọi màu của UI đi qua các biến này; không viết mã màu trực tiếp trong component.
+ */
+:root,
+.landing-page {
+  /* Giá trị shadcn lấy từ cùng palette beige/cam ở trên (một nguồn màu cho cả hai bộ component). */
+  --radius: 0.625rem;
+  --background: #f5efe6;
+  --foreground: #2b2520;
+  --card: #fbf8f3;
+  --card-foreground: #2b2520;
+  --popover: #fbf8f3;
+  --popover-foreground: #2b2520;
+  --primary: #c2551f;
+  --primary-foreground: #ffffff;
+  --secondary: #ede4d6;
+  --secondary-foreground: #2b2520;
+  --muted: #ede4d6;
+  --muted-foreground: #6b5f52;
+  --accent: #fbe3d3;
+  --accent-foreground: #2b2520;
+  --destructive: #b8452f;
+  --border: rgb(107 95 82 / 0.16);
+  --input: rgb(107 95 82 / 0.36);
+  --ring: #e8743b;
+  --sidebar: #fbf8f3;
+  --sidebar-foreground: #2b2520;
+  --sidebar-primary: #c2551f;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ede4d6;
+  --sidebar-accent-foreground: #2b2520;
+  --sidebar-border: rgb(107 95 82 / 0.16);
+  --sidebar-ring: #e8743b;
+
+  /* Token Studio — theme sáng (mặc định), cùng palette với landing. */
+  --studio-paper: #f5efe6;
+  --studio-paper-raised: #fbf8f3;
+  --studio-paper-sunken: #ede4d6;
+  --studio-line: rgb(107 95 82 / 0.16);
+  --studio-line-strong: rgb(107 95 82 / 0.36);
+  --studio-ink: #2b2520;
+  --studio-ink-muted: #6b5f52;
+  --studio-ink-subtle: #8a7e70;
+  --studio-ember-strong: #c2551f;
+  --studio-ember-soft: #fbe3d3;
+  --studio-geometry: #2f7ea8;
+  --studio-viewport: #1f1b17;
+  --studio-viewport-deep: #171412;
+  --studio-media-preview-surface: #000000; /* letterbox preview video luôn đen ở mọi bảng màu */
+  --studio-sage: #5e8c61;
+  --studio-sage-soft: #e3ede0;
+  --studio-ochre: #b7862a;
+  --studio-ochre-soft: #f6ead0;
+  --studio-rust: #b8452f;
+  --studio-rust-soft: #f6dcd5;
+  --studio-scrollbar: #d9cebf;
+  --studio-scrollbar-hover: #c2b6a5;
+  --studio-ember: #e8743b;
+  --studio-line-dark: rgb(245 239 230 / 0.12);
+  --studio-on-dark: #f5efe6;
+  --studio-on-accent: #ffffff;
+  --studio-destructive-fill: #b8452f;
+  --studio-viewport-raised: #38312b;
+  --studio-scrim: rgb(0 0 0 / 0.1);
+  --studio-shadow: rgb(43 37 32 / 0.04);
+  /* Điểm đo trong khung 3D (A, B, đoạn kiểm tra, mặt sàn): màu sáng để nổi trên Gaussian, không đổi theo sáng/tối. */
+  --studio-marker-a: #33ccff;
+  --studio-marker-b: #ffb333;
+  --studio-marker-check: #e666e6;
+  --studio-marker-floor: #66e666;
+}
+
+/*
+ * Theme tối (STUDIO_UX_SPEC.md D-14): giữ tông nâu than ấm của khung viewport trên landing (#1F1B17 / #171412) thay vì xám
+ * xanh, để hai theme vẫn là một bộ nhận diện. Nền là nâu than, thẻ sáng hơn nền một bậc, chữ là màu paper của theme
+ * sáng; màu nhấn/trạng thái dùng bản sáng hơn để đủ tương phản trên nền tối (chữ nhỏ ≥ 5:1, đo bằng công thức WCAG).
+ * `--primary` (nền nút chính) giữ cam đậm vì chữ trắng trên đó đạt 4,6:1 ở cả hai theme. Viewport 3D tối hơn nền
+ * trang một bậc để vẫn tách khỏi chrome. Class `dark` gắn trên <html> (script trong app/layout.tsx); landing và UI cũ
+ * dùng màu riêng nên không đổi.
+ */
+.dark {
+  --studio-paper: #1b1714;
+  --studio-paper-raised: #25201c;
+  --studio-paper-sunken: #141110;
+  --studio-line: rgb(245 239 230 / 0.12);
+  --studio-line-strong: rgb(245 239 230 / 0.26);
+  --studio-ink: #f5efe6;
+  --studio-ink-muted: #b8ab9b;
+  --studio-ink-subtle: #9a8d7e;
+  --studio-ember-strong: #f0935f;
+  --studio-ember-soft: #3d2518;
+  --studio-geometry: #5aa9d1;
+  --studio-viewport: #110f0d;
+  --studio-viewport-deep: #0b0a09;
+  --studio-media-preview-surface: #000000;
+  --studio-sage: #8fb891;
+  --studio-sage-soft: #1f2b20;
+  --studio-ochre: #d9a94a;
+  --studio-ochre-soft: #33290f;
+  --studio-rust: #e88771;
+  --studio-rust-soft: #3a1d16;
+  --studio-scrollbar: #4a4038;
+  --studio-shadow: rgb(0 0 0 / 0.3);
+
+  --background: #1b1714;
+  --foreground: #f5efe6;
+  --card: #25201c;
+  --card-foreground: #f5efe6;
+  --popover: #25201c;
+  --popover-foreground: #f5efe6;
+  --secondary: #322b25;
+  --secondary-foreground: #f5efe6;
+  --muted: #322b25;
+  --muted-foreground: #b8ab9b;
+  --accent: #3d2518;
+  --accent-foreground: #f5efe6;
+  --destructive: #e88771;
+  --border: rgb(245 239 230 / 0.12);
+  --input: rgb(245 239 230 / 0.26);
+  --sidebar: #25201c;
+  --sidebar-foreground: #f5efe6;
+  --sidebar-accent: #322b25;
+  --sidebar-accent-foreground: #f5efe6;
+  --sidebar-border: rgb(245 239 230 / 0.12);
+}
+
+.dark .landing-page {
+  --studio-paper: #1b1714;
+  --studio-paper-raised: #25201c;
+  --studio-paper-sunken: #141110;
+  --studio-line: rgb(245 239 230 / 0.12);
+  --studio-line-strong: rgb(245 239 230 / 0.26);
+  --studio-ink: #f5efe6;
+  --studio-ink-muted: #b8ab9b;
+  --studio-ink-subtle: #9a8d7e;
+  --studio-ember-strong: #f0935f;
+  --studio-ember-soft: #3d2518;
+  --studio-geometry: #5aa9d1;
+  --studio-viewport: #110f0d;
+  --studio-viewport-deep: #0b0a09;
+  --studio-sage: #8fb891;
+  --studio-sage-soft: #1f2b20;
+  --studio-ochre: #d9a94a;
+  --studio-ochre-soft: #33290f;
+  --studio-rust: #e88771;
+  --studio-rust-soft: #3a1d16;
+  --studio-scrollbar: #4a4038;
+}
+
+/*
+ * Gruvbox — lấy đúng giá trị từ hai repo tham chiếu (không tự pha màu):
+ *   - nền, viền và nền nhạt của trạng thái: gruvbox-material (sainnhe), `autoload/gruvbox_material.vim`, nền "medium";
+ *   - chữ và màu nhấn: gruvbox gốc (morhetz), `colors/gruvbox.vim` — chính là lựa chọn `foreground = original` của
+ *     gruvbox-material: bản sáng dùng nhóm "faded", bản tối dùng nhóm "bright".
+ * Vai trò theo cách gruvbox-material tô giao diện của trình soạn thảo:
+ *   trang            bg0            (Normal)
+ *   sidebar          bg_dim         (thanh bên / cây thư mục)
+ *   thẻ              bg1            (CursorLine, statusline1)
+ *   vùng lõm, chip   bg4 sáng / bg3 tối
+ *   menu, popover    bg3            (Pmenu, NormalFloat); mục đang trỏ bg5
+ *   viền             bg5 sáng / statusline3 tối (VertSplit); viền ô nhập đậm hơn một bậc
+ *   chữ              fg1; chữ phụ fg2; chữ mờ fg3 (sáng) / grey2 (tối)
+ *   nhấn             orange (Title); hình học blue (Info); đạt green; cảnh báo yellow (Warning); lỗi red (Error)
+ *   nền trạng thái   bg_visual_green / yellow / red (VirtualText*); nền cam nhạt là orange pha 16–20% vào bg0 vì
+ *                    bảng tham chiếu không có sẵn bg_visual_orange
+ *   khung 3D         bg0_hard của bản tối ở cả hai chế độ
+ * Giữ nguyên màu gốc nên vài cặp chữ màu trên nền nhạt chỉ đạt 3–4:1 (vd. yellow faded trên bg_visual_yellow);
+ * chữ thường và chữ trên nút vẫn ≥ 4,5:1 (tests/palette.test.tsx).
+ */
+.theme-gruvbox,
+.theme-gruvbox .landing-page {
+  --studio-paper: #fbf1c7;
+  --studio-paper-raised: #f4e8be;
+  --studio-paper-sunken: #e5d5ad;
+  --studio-line: #ddccab;
+  --studio-line-strong: #bdae93;
+  --studio-line-dark: #504945;
+  --studio-ink: #3c3836;
+  --studio-ink-muted: #504945;
+  --studio-ink-subtle: #665c54;
+  --studio-ember: #d65d0e;
+  --studio-ember-strong: #af3a03;
+  --studio-ember-soft: #f5d9a9;
+  --studio-geometry: #076678;
+  --studio-viewport: #1d2021;
+  --studio-viewport-deep: #141617;
+  --studio-media-preview-surface: #000000;
+  --studio-viewport-raised: #3c3836;
+  --studio-sage: #79740e;
+  --studio-sage-soft: #dee2b6;
+  --studio-ochre: #b57614;
+  --studio-ochre-soft: #fae7b3;
+  --studio-rust: #9d0006;
+  --studio-rust-soft: #f1d9b5;
+  --studio-scrollbar: #bdae93;
+  --studio-scrollbar-hover: #a89984;
+  --studio-on-dark: #ebdbb2;
+  --studio-on-accent: #fbf1c7;
+  --studio-destructive-fill: #9d0006;
+  --studio-scrim: rgb(40 40 40 / 0.35);
+  --studio-shadow: rgb(40 40 40 / 0.08);
+  --studio-marker-a: #83a598;
+  --studio-marker-b: #fabd2f;
+  --studio-marker-check: #d3869b;
+  --studio-marker-floor: #b8bb26;
+
+  --background: #fbf1c7;
+  --foreground: #3c3836;
+  --card: #f4e8be;
+  --card-foreground: #3c3836;
+  --popover: #eee0b7;
+  --popover-foreground: #3c3836;
+  --primary: #af3a03;
+  --primary-foreground: #fbf1c7;
+  --secondary: #e5d5ad;
+  --secondary-foreground: #3c3836;
+  --muted: #e5d5ad;
+  --muted-foreground: #504945;
+  --accent: #ddccab;
+  --accent-foreground: #3c3836;
+  --destructive: #9d0006;
+  --border: #ddccab;
+  --input: #bdae93;
+  --ring: #d65d0e;
+  --sidebar: #f2e5bc;
+  --sidebar-foreground: #3c3836;
+  --sidebar-primary: #af3a03;
+  --sidebar-primary-foreground: #fbf1c7;
+  --sidebar-accent: #e5d5ad;
+  --sidebar-accent-foreground: #3c3836;
+  --sidebar-border: #ddccab;
+  --sidebar-ring: #d65d0e;
+}
+
+.theme-gruvbox.dark {
+  --studio-paper: #282828;
+  --studio-paper-raised: #32302f;
+  --studio-paper-sunken: #45403d;
+  --studio-line: #504945;
+  --studio-line-strong: #665c54;
+  --studio-line-dark: #504945;
+  --studio-ink: #ebdbb2;
+  --studio-ink-muted: #d5c4a1;
+  --studio-ink-subtle: #a89984;
+  --studio-ember: #fe8019;
+  --studio-ember-strong: #fe8019;
+  --studio-ember-soft: #533a25;
+  --studio-geometry: #83a598;
+  --studio-viewport: #1d2021;
+  --studio-viewport-deep: #141617;
+  --studio-media-preview-surface: #000000;
+  --studio-viewport-raised: #3c3836;
+  --studio-sage: #b8bb26;
+  --studio-sage-soft: #3b4439;
+  --studio-ochre: #fabd2f;
+  --studio-ochre-soft: #4f422e;
+  --studio-rust: #fb4934;
+  --studio-rust-soft: #4c3432;
+  --studio-scrollbar: #5a524c;
+  --studio-scrollbar-hover: #7c6f64;
+  --studio-on-dark: #ebdbb2;
+  --studio-on-accent: #fbf1c7;
+  --studio-destructive-fill: #cc241d;
+  --studio-scrim: rgb(0 0 0 / 0.5);
+  --studio-shadow: rgb(0 0 0 / 0.3);
+
+  --background: #282828;
+  --foreground: #ebdbb2;
+  --card: #32302f;
+  --card-foreground: #ebdbb2;
+  --popover: #45403d;
+  --popover-foreground: #ebdbb2;
+  --primary: #fe8019;
+  --primary-foreground: #1d2021;
+  --secondary: #45403d;
+  --secondary-foreground: #ebdbb2;
+  --muted: #45403d;
+  --muted-foreground: #d5c4a1;
+  --accent: #5a524c;
+  --accent-foreground: #ebdbb2;
+  --destructive: #fb4934;
+  --border: #504945;
+  --input: #665c54;
+  --ring: #fe8019;
+  --sidebar: #1b1b1b;
+  --sidebar-foreground: #ebdbb2;
+  --sidebar-primary: #fe8019;
+  --sidebar-primary-foreground: #1d2021;
+  --sidebar-accent: #3c3836;
+  --sidebar-accent-foreground: #ebdbb2;
+  --sidebar-border: #504945;
+  --sidebar-ring: #fe8019;
+}
+
+.theme-gruvbox.dark .landing-page {
+  --studio-paper: #282828;
+  --studio-paper-raised: #32302f;
+  --studio-paper-sunken: #45403d;
+  --studio-line: #504945;
+  --studio-line-strong: #665c54;
+  --studio-line-dark: #504945;
+  --studio-ink: #ebdbb2;
+  --studio-ink-muted: #d5c4a1;
+  --studio-ink-subtle: #a89984;
+  --studio-ember: #fe8019;
+  --studio-ember-strong: #fe8019;
+  --studio-ember-soft: #533a25;
+  --studio-geometry: #83a598;
+  --studio-viewport: #1d2021;
+  --studio-viewport-deep: #141617;
+  --studio-sage: #b8bb26;
+  --studio-sage-soft: #3b4439;
+  --studio-ochre: #fabd2f;
+  --studio-ochre-soft: #4f422e;
+  --studio-rust: #fb4934;
+  --studio-rust-soft: #4c3432;
+  --studio-scrollbar: #5a524c;
+  --studio-scrollbar-hover: #7c6f64;
+  --studio-on-dark: #ebdbb2;
+  --studio-on-accent: #282828;
+  --studio-destructive-fill: #fb4934;
+}
+
+.dark .studio-root {
+  color-scheme: dark;
+}
+
+/* Lớp phủ sau dialog tối hơn ở theme tối của bảng mặc định (bản sáng giữ mức cũ). */
+.dark {
+  --studio-scrim: rgb(0 0 0 / 0.45);
+}
+
+/*
+ * Một bộ chữ cho mọi thứ (D-13): nội dung portal của Radix (dialog, menu, tooltip) nằm ngoài `.studio-root` nên font
+ * đặt ở <body>. Giao diện của trình xem 3D nhúng (supersplat-viewer) tự đặt Arial và bảng màu riêng qua biến `--sse-*`:
+ * ghi đè để nó dùng chung font và màu của bảng đang chọn.
+ */
+body {
+  font-family: var(--font-sans);
+}
+
+html .sse-viewer {
+  font-family: var(--font-sans);
+  --sse-text: var(--studio-on-dark);
+  --sse-text-light: var(--studio-on-dark);
+  --sse-text-dark: color-mix(in srgb, var(--studio-on-dark) 65%, transparent);
+  --sse-text-darkest: color-mix(in srgb, var(--studio-on-dark) 40%, transparent);
+  --sse-accent: var(--studio-ember);
+  --sse-grip: var(--studio-ember);
+  --sse-bkg: var(--studio-viewport-deep);
+  --sse-bkg-dark: var(--studio-viewport);
+  --sse-bkg-darkest: var(--studio-viewport-deep);
+  --sse-bkg-light: var(--studio-viewport-raised);
+}
+
+/*
+ * Màu viền mặc định của Studio = viền mảnh của theme. Component donor (shadcn) viết `border`/`border-b` trần và
+ * trông chờ màu viền của theme; Tailwind v4 mặc định là currentColor nên các đường đó ra màu mực đậm (đường kẻ
+ * hàng của bảng Jobs, mép sidebar) — khác hẳn đường kẻ mảnh của landing. Đặt trong `@layer base` nên mọi utility
+ * `border-*` có màu vẫn thắng; chỉ áp cho trang có `.studio-root`, landing giữ nguyên.
+ */
+@layer base {
+  html:has(.studio-root) *,
+  html:has(.studio-root) ::before,
+  html:has(.studio-root) ::after {
+    border-color: var(--border);
+  }
+}
+
+/*
+ * Nhãn kỹ thuật theo overline của landing (`text-xs font-mono-tech uppercase tracking-wider font-semibold`): mono,
+ * 12px, chữ hoa, giãn chữ. Dùng cho overline và tiêu đề cột/nhóm thông tin. Màu do nơi dùng quyết định, như landing:
+ * `text-ember-strong` cho overline của trang, `text-ink-muted` cho nhãn trung tính (ink-subtle không đủ tương phản
+ * ở cỡ chữ này).
+ */
+@utility label-tech {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/*
+ * Giá trị kỹ thuật (ID, checksum, thời lượng, dung lượng, toạ độ, số đếm): mono với chữ số đều cột, như các ô số
+ * liệu của landing. Cỡ và màu do nơi dùng quyết định.
+ */
+@utility value-tech {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Kiểu chữ của landing áp cho cả app (D-13): chữ thường và tiêu đề là Plus Jakarta Sans; mọi thứ thuộc lớp "kỹ thuật"
+ * là IBM Plex Mono — nhãn trường (dt) và giá trị của nó (dd), tiêu đề cột (th), mã và thời điểm. Đặt ở `@layer base` nên utility ở nơi dùng
+ * vẫn thắng. Chỉ áp cho trang có `.studio-root` (kể cả portal của dialog/menu); landing tự đặt class của nó.
+ */
+@layer base {
+  html:has(.studio-root) :is(th, dt) {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  html:has(.studio-root) :is(code, kbd, samp, time, dd) {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  html:has(.studio-root) :is(h1, h2, h3) {
+    letter-spacing: -0.025em;
+  }
+}
+
+/* ── Studio MVP ─────────────────────────────────────────────────────────── */
+.studio-root {
+  color-scheme: light;
+  font-family: var(--font-studio);
+}
+
+/*
+ * Bôi chọn chữ và thanh cuộn như landing. Gắn theo <html> thay vì `.studio-root` để nội dung portal (dialog, menu,
+ * sheet — Radix đặt ngoài `.studio-root`) cũng theo; landing không bị đổi.
+ * Bôi chọn: nền cam nhạt, chữ cam đậm (cùng giá trị với ember-soft / ember-strong).
+ */
+html:has(.studio-root) ::selection {
+  background: var(--studio-ember-soft);
+  color: var(--studio-ember-strong);
+}
+
+/* Thanh cuộn mảnh, màu ấm — theo chuẩn CSS (Chrome ≥ 121, Firefox); trình duyệt cũ giữ thanh cuộn mặc định. */
+html:has(.studio-root),
+html:has(.studio-root) * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--studio-scrollbar) transparent;
+}
+
+/*
+ * Animation chỉ dùng transform/opacity: trình duyệt chạy trên compositor (GPU), không tính lại
+ * layout/vẽ lại mỗi khung hình như khi animate `left` hay `box-shadow`.
+ */
+
+/* Dải chạy cho stage không đo được phần trăm (không bịa số). Dải rộng 1/3 → 300% = hết thanh. */
+@keyframes studio-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+.studio-indeterminate {
+  left: 0;
+  will-change: transform;
+  animation: studio-indeterminate 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Chấm "đang chạy": vòng lan ra là lớp giả phóng to + mờ dần. */
+@keyframes studio-pulse-ring {
+  from {
+    transform: scale(1);
+    opacity: 0.45;
+  }
+  to {
+    transform: scale(3.5);
+    opacity: 0;
+  }
+}
+
+.studio-pulse {
+  position: relative;
+}
+
+.studio-pulse::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  animation: studio-pulse-ring 1.6s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-indeterminate {
+    animation: none;
+    transform: none;
+    width: 100%;
+    opacity: 0.5;
+  }
+
+  .studio-pulse::after {
+    animation: none;
+    opacity: 0;
+  }
+}

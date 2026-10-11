@@ -3,6 +3,13 @@ title: "Khởi tạo dự án từ Template"
 weight: 2
 ---
 
+> **Lưu ý phạm vi:** Chương này là tài liệu hướng dẫn từ AI20K template; các
+> tree và lệnh `requirements.txt` là ví dụ teaching/organizer và được giữ để
+> minh họa template. Repo Real2Sim Studio P-087 hiện dùng
+> `requirements.in`/`requirements.lock.txt`, `requirements-dev.lock.txt` và
+> `make setup`; phần Docker hiện dùng Compose Studio ở root. Xem `README.md`
+> và `docs/guide/studio-distribution.md` khi setup checkout P-087.
+
 ## Nhận repo của đội — Bắt đầu từ nền tảng đúng
 
 Một trong những sai lầm phổ biến nhất của sinh viên khi bắt đầu dự án mới là tạo mọi thứ từ con số không — tự setup cấu trúc thư mục, tự cấu hình linting, tự viết CI/CD file, tự tạo Dockerfile. Kết quả là mỗi đội có một cấu trúc khác nhau, thiếu những file quan trọng, và mất hàng ngày chỉ để setup thay vì viết logic chính. Template dự án giải quyết vấn đề này bằng cách cung cấp một nền tảng đã được chuẩn hóa, bao gồm tất cả best practices mà bạn cần.
@@ -110,7 +117,7 @@ Một câu nói kinh điển trong ngành phần mềm là "It works on my machi
 
 Trước khi bắt đầu, hãy xác nhận máy bạn đáp ứng các yêu cầu sau:
 
-- **Python 3.11 hoặc mới hơn.** Python 3.11 mang đến cải thiện tốc độ đáng kể (nhanh hơn 3.11 khoảng 10-25% so với 3.10) và hỗ trợ better error messages. Python 3.12+ cũng hoạt động tốt, nhưng một số thư viện có thể chưa tương thích hoàn toàn. Khuyến nghị: dùng Python 3.11.x.
+- **Python 3.12 hoặc mới hơn.** Python 3.12 mang đến cải thiện tốc độ đáng kể (nhanh hơn 3.12 khoảng 10-25% so với 3.10) và hỗ trợ better error messages. Python 3.12+ cũng hoạt động tốt, nhưng một số thư viện có thể chưa tương thích hoàn toàn. Khuyến nghị: dùng Python 3.12.x.
 
 - **pip phiên bản mới nhất.** Chạy `pip install --upgrade pip` để cập nhật.
 
@@ -122,10 +129,10 @@ Kiểm tra phiên bản Python:
 
 ```bash
 $ python3 --version
-# Output mong đợi: Python 3.11.x hoặc cao hơn
+# Output mong đợi: Python 3.12.x hoặc cao hơn
 
 # Nếu bạn có nhiều phiên bản Python, kiểm tra chính xác:
-$ python3.11 --version
+$ python3.12 --version
 ```
 
 ### Tạo virtual environment
@@ -134,7 +141,7 @@ Virtual environment (venv) là một môi trường Python cô lập, tách bi�
 
 ```bash
 # Từ thư mục gốc của dự án
-$ python3.11 -m venv .venv
+$ python3.12 -m venv .venv
 
 # Kích hoạt venv trên macOS/Linux
 $ source .venv/bin/activate
@@ -484,7 +491,7 @@ Bây giờ bạn đã có template chạy được trên máy. Nhưng template c
 
 ### Những gì cần thay đổi ngay
 
-**1. Rà lại `requirements.txt`:** bỏ dấu `#` ở những dependency đội thật sự dùng, và thêm thư viện mới vào đây thay vì cài lẻ trên máy — CI dựng môi trường từ đầu bằng đúng file này, thư viện không được khai báo thì chạy trên máy bạn được nhưng hỏng trên CI.
+**1. Rà lại `requirements.txt` trong repo template:** bỏ dấu `#` ở những dependency đội thật sự dùng, và thêm thư viện mới vào đây thay vì cài lẻ trên máy — CI dựng môi trường từ đầu bằng đúng file này, thư viện không được khai báo thì chạy trên máy bạn được nhưng hỏng trên CI. Với P-087, cập nhật `requirements.in` rồi sinh lại lockfile bằng `make lock`; không tạo lại `requirements.txt` đã bỏ khỏi checkout.
 
 ```
 # Database — bỏ comment nếu đội dùng
@@ -512,7 +519,7 @@ Agent tự động phân tích sentiment của bài đăng mạng xã hội và 
 
 ## Quick Start
 ```bash
-python3.11 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env  # Điền API key
@@ -638,7 +645,7 @@ Copy từ `.env.example` sang `.env` và điền `AI_LOG_API_KEY` do instructor 
 
 ## Tóm tắt
 
-Chương này hướng dẫn bạn khởi tạo dự án từ template — bước đầu tiên và quan trọng nhất. Chúng ta đã đi qua việc clone repository, hiểu cấu trúc thư mục (src/, tests/, docs/, eval/, presentation/), thiết lập môi trường ảo với Python 3.11+, cài đặt dependencies, và chạy server lần đầu tiên.
+Chương này hướng dẫn bạn khởi tạo dự án từ template — bước đầu tiên và quan trọng nhất. Chúng ta đã đi qua việc clone repository, hiểu cấu trúc thư mục (src/, tests/, docs/, eval/, presentation/), thiết lập môi trường ảo với Python 3.12+, cài đặt dependencies, và chạy server lần đầu tiên.
 
 Bạn cũng đã học cách quản lý biến môi trường với pydantic-settings, thiết lập Git workflow với branching strategy và commit message convention, và hiểu được những gì cần tùy chỉnh so với những gì cần giữ nguyên từ template.
 
