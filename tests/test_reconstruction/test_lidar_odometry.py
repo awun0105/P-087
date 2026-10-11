@@ -134,6 +134,7 @@ def _worker_request(
                 "min_points_per_scan": 10,
                 "max_points_per_scan": 20_000,
                 "max_total_points": 50_000,
+                "prefilter_voxel_m": None,
                 "max_num_threads": 2,
                 "timestamp_gap_threshold_seconds": 0.15,
             },
@@ -673,6 +674,44 @@ def test_worker_rejects_sparse_scan_before_starting_provider(tmp_path: Path) -> 
         worker.run(request)
 
 
+def test_the_point_budget_counts_points_after_the_per_scan_prefilter(tmp_path: Path) -> None:
+    """900 điểm/scan cách nhau 3 cm: chỉ còn ~100 sau ô 0,1 m, nên ba scan lọt trần 700 điểm; không lọc thì vượt."""
+    grid = np.array([[0.015 + x * 0.03, 0.015 + y * 0.03, 1.0] for x in range(30) for y in range(30)])
+
+    class _Reached(Exception):
+        pass
+
+    def attempt(prefilter: float | None, name: str) -> None:
+        resolver = ArtifactResolver(tmp_path / name / "artifacts")
+        store = FilesystemArtifactStore(resolver)
+        request = _worker_request(store, grid)
+        profile = LidarOdometryProfile(
+            min_range_m=0,
+            max_range_m=80,
+            voxel_size_m=0.25,
+            min_points_per_scan=10,
+            max_points_per_scan=2_000,
+            max_total_points=700,
+            prefilter_voxel_m=prefilter,
+        )
+        worker = LidarOdometryWorker(
+            resolver,
+            store,
+            LidarOdometryRuntimeSettings(python=Path("/tmp/none/bin/python"), work_root=tmp_path / name / "attempts"),
+        )
+
+        def reached(*_: object, **__: object) -> dict[str, object]:
+            raise _Reached
+
+        worker.process.run = reached  # type: ignore[method-assign]
+        worker.run(request.model_copy(update={"profile": profile}))
+
+    with pytest.raises(ValueError, match="total point budget"):
+        attempt(None, "unfiltered")
+    with pytest.raises(_Reached):
+        attempt(0.1, "filtered")  # qua được bước đếm điểm và tới được provider
+
+
 def test_worker_enforces_total_point_budget_before_starting_provider(tmp_path: Path) -> None:
     resolver = ArtifactResolver(tmp_path / "artifacts")
     store = FilesystemArtifactStore(resolver)
@@ -684,6 +723,7 @@ def test_worker_enforces_total_point_budget_before_starting_provider(tmp_path: P
         min_points_per_scan=10,
         max_points_per_scan=100,
         max_total_points=100,
+        prefilter_voxel_m=None,
     )
     request = request.model_copy(update={"attempt_id": "attempt-budget", "profile": profile})
     worker = LidarOdometryWorker(
@@ -800,8 +840,8 @@ def test_isolated_kiss_icp_recovers_known_scan_translation_and_publishes(tmp_pat
     assert static_result.trajectory.world_from_map is None
 
 
-def test_default_profile_pins_the_benchmarked_voxel_and_its_version() -> None:
-    """Đổi voxel mặc định phải đổi version hồ sơ, vì recipe đã chấp nhận mang checksum của hồ sơ."""
+def test_default_profile_pins_the_benchmarked_values_and_its_version() -> None:
+    """Đổi giá trị mặc định phải đổi version hồ sơ, vì recipe đã chấp nhận mang checksum của hồ sơ."""
     from src.services.reconstruction.lidar.odometry import (
         DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION,
         default_lidar_odometry_profile,
@@ -809,6 +849,36 @@ def test_default_profile_pins_the_benchmarked_voxel_and_its_version() -> None:
     )
 
     profile = default_lidar_odometry_profile()
-    assert profile.voxel_size_m == 0.5
-    assert DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION == "rec17-default-v2"
+    assert (profile.voxel_size_m, profile.prefilter_voxel_m, profile.max_total_points) == (0.5, 0.1, 50_000_000)
+    assert DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION == "rec17-default-v3"
     assert lidar_odometry_profile_checksum().startswith("sha256:")
+
+
+def test_grid_downsample_keeps_one_stable_point_per_cell() -> None:
+    from src.services.reconstruction.lidar.odometry import _grid_downsample
+
+    points = np.array([[0.01, 0.01, 0.0], [0.02, 0.03, 0.0], [0.51, 0.0, 0.0], [0.52, 0.01, 0.0], [5.0, 5.0, 5.0]])
+    kept = _grid_downsample(points, 0.1)
+    assert len(kept) == 3
+    assert np.array_equal(kept, points[[0, 2, 4]])  # điểm đầu mỗi ô, giữ thứ tự gốc
+    assert np.array_equal(_grid_downsample(points, 0.1), kept)  # xác định
+    assert _grid_downsample(np.empty((0, 3)), 0.1).shape == (0, 3)
+
+
+def test_prefilter_is_a_worker_only_field_and_never_reaches_the_isolated_runner() -> None:
+    from src.services.reconstruction.lidar import odometry
+
+    payload = odometry.default_lidar_odometry_profile().model_dump(
+        mode="json", exclude=odometry._WORKER_ONLY_PROFILE_FIELDS
+    )
+    assert "prefilter_voxel_m" not in payload
+    assert set(payload) == {
+        "min_range_m",
+        "max_range_m",
+        "voxel_size_m",
+        "min_points_per_scan",
+        "max_points_per_scan",
+        "max_total_points",
+        "max_num_threads",
+        "timestamp_gap_threshold_seconds",
+    }  # đúng tập khoá mà scripts/gpu/lidar_odometry_runner.py kiểm chặt

@@ -229,3 +229,17 @@ Tỉ lệ mét của KISS-ICP đúng trong ±0,7% ở cả 5 tập và cả hai 
 | Nguyên mẫu mount-agnostic (RANSAC nhiều mặt phẳng + mặt phẳng đường đi, không giả định trục z), 4 kiểu lắp (nguyên bản, nằm 90°, lộn ngược, xoay bất kỳ) | sai lệch hướng lên **như nhau ở mọi kiểu lắp** (±0,2°), tức phương pháp không phụ thuộc cách lắp; nhưng độ lệch tuyệt đối còn **1,5–3,5°** do (a) chuyển phiếu vào khung bản đồ bằng quay của KISS-ICP vốn đã trôi 1–3°, (b) cách chọn "mặt phẳng sàn gần nhất" có lúc chọn nhầm |
 
 **Kết luận:** (1) góc nghiêng ~1,1° là thật, đo được độc lập với dataset; (2) ước lượng sàn *theo từng scan* đủ chính xác (≤0,5°) để dùng làm ràng buộc roll/pitch; (3) hướng "lên" lấy từ bản đồ gộp qua pose KISS-ICP **chưa đủ** chính xác, nên cần dùng ràng buộc theo từng scan hoặc chỉ dùng cửa sổ đầu; (4) bước chọn đâu là sàn (so với trần và tường) là phần cần làm cứng thêm trước khi đưa vào sản phẩm.
+
+## 11. Giảm mẫu từng scan và hạn mức điểm (2026-10-11)
+
+Số liệu: `eval/results/lidar_odometry_torwic_v2_prefilter0.1.json` (so với `..._voxel0.5.json`, cùng voxel 0,5).
+
+| Chỉ số (trung bình 5 chuỗi) | Không giảm mẫu | Giảm mẫu ô 0,1 m |
+|---|---:|---:|
+| Hình dạng quỹ đạo, rigid toàn đường | 7,5 cm | **7,0 cm** |
+| Lệch cuối đường (căn pose đầu) | 0,45 m | **0,41 m** |
+| Bản đồ trong 20 cm của bản đồ chuẩn | 53,2% | **59,8%** |
+
+Giảm mẫu **không làm tệ đi** mà còn nhỉnh hơn ở cả 3 chỉ số (giả thuyết: bỏ bớt điểm dày đặc ở gần cảm biến nên khớp ít bị chi phối bởi vùng cận cảnh). Ô 0,2 m chưa được đo xong, nên chưa kết luận.
+
+**Thay đổi sản phẩm (hồ sơ `rec17-default-v3`):** `prefilter_voxel_m = 0,1` (giảm mẫu trước khi đếm điểm và trước KISS-ICP), `max_total_points` 25 → **50 triệu**. Trường `prefilter_voxel_m` chỉ dùng ở worker, không gửi sang runner cô lập (runner kiểm chặt tập khoá). Với giảm mẫu, scan 84 nghìn điểm còn khoảng một phần ba, nên cùng trần sản phẩm nhận số scan nhiều hơn rõ rệt; chưa đo số điểm sau giảm mẫu cụ thể cho từng chuỗi.

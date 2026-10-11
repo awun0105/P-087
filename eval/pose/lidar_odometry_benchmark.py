@@ -32,6 +32,7 @@ REPO = Path(__file__).resolve().parents[2]
 # Hồ sơ đo = hồ sơ mặc định CỦA SẢN PHẨM (không sao chép số), trừ trần tổng điểm: benchmark nâng lên mức tối đa của
 # hợp đồng để chạy đủ 600 scan, còn mặc định sản phẩm chặt hơn (xem `--max-total-points`). `--voxel` để đo giá trị khác.
 PROFILE = default_lidar_odometry_profile().model_dump(mode="json")
+_WORKER_ONLY = ("prefilter_voxel_m",)  # worker xử lý trước, runner cô lập không nhận trường này
 MAP_STEP, MAP_VOXEL, MAP_RADIUS, MAP_WINDOW = 5, 0.10, 40.0, 8.0
 
 
@@ -80,7 +81,7 @@ def run_kiss_icp(python: Path, scans: list[Path], times: np.ndarray, work: Path)
     manifest = {
         "schema_version": "1.0",
         "expected_provider_version": "1.3.0",
-        "profile": PROFILE,
+        "profile": {k: v for k, v in PROFILE.items() if k not in _WORKER_ONLY},
         "scans": [{"path": str(path), "timestamp_seconds": float(t)} for path, t in zip(scans, times, strict=True)],
     }
     (work / "manifest.json").write_text(json.dumps(manifest))
@@ -170,7 +171,7 @@ def grid_downsample(points: np.ndarray, cell: float) -> np.ndarray:
     return points[np.sort(first)]
 
 
-PREFILTER_CELL: float | None = None
+PREFILTER_CELL: float | None = PROFILE.get("prefilter_voxel_m")
 
 
 def evaluate_scene(directory: Path, python: Path, truth_map: np.ndarray, truth_tree: cKDTree, max_scans: int) -> dict:
@@ -235,7 +236,9 @@ def main(argv: list[str] | None = None) -> int:
         PROFILE["voxel_size_m"] = args.voxel
     PROFILE["max_total_points"] = args.max_total_points
     global PREFILTER_CELL
-    PREFILTER_CELL = args.prefilter_cell
+    if args.prefilter_cell is not None:
+        PREFILTER_CELL = args.prefilter_cell
+        PROFILE["prefilter_voxel_m"] = args.prefilter_cell
     truth_map = read_ply_xyz(args.map)
     truth_tree = cKDTree(truth_map)
     results = []

@@ -48,9 +48,13 @@ from src.services.reconstruction.lidar.cloud_payload import load_xyz_points
 from src.services.reconstruction.lidar.fusion import FusionConfig, FusionStats, ScanPose, fuse_scans, ply_bytes
 
 _PINNED_PROVIDER_VERSION = "1.3.0"
-#: v2: `voxel_size_m` 0,25 → 0,5. Đo trên 5 chuỗi TorWIC (eval/results/LIDAR_ODOMETRY_BENCHMARK.md): trôi giảm
-#: 5/5 chuỗi, bản đồ khớp hơn, nhanh 3-9 lần; đổi lại sai số 10 bước ngắn tăng. Đổi giá trị này phải đổi version.
-DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION = "rec17-default-v2"
+#: v2: `voxel_size_m` 0,25 → 0,5 (nhanh 3-9 lần; hình dạng quỹ đạo gần như không đổi, xem mục 10 của benchmark).
+#: v3: giảm mẫu từng scan theo ô 0,1 m trước khi đếm điểm và nâng trần tổng điểm 25 → 50 triệu: sản phẩm nhận
+#: được chuỗi dài/dày hơn gấp nhiều lần mà độ chính xác không tệ đi (5/5 chuỗi TorWIC, cùng mục benchmark).
+#: Đổi bất kỳ giá trị nào của hồ sơ phải đổi version.
+DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION = "rec17-default-v3"
+#: Trường chỉ dùng ở phía worker (tiền xử lý), không thuộc giao thức của runner cô lập.
+_WORKER_ONLY_PROFILE_FIELDS = frozenset({"prefilter_voxel_m"})
 _MAX_TIMESTAMP_FILE_BYTES = 16 * 1024 * 1024
 _MAX_SCAN_FILE_BYTES = 512 * 1024 * 1024
 _MAX_RESULT_BYTES = 128 * 1024 * 1024
@@ -65,7 +69,9 @@ class LidarOdometryProfile(ContractModel):
     voxel_size_m: FiniteFloat = Field(gt=0)
     min_points_per_scan: int = Field(default=100, ge=3)
     max_points_per_scan: int = Field(default=5_000_000, ge=3, le=20_000_000)
-    max_total_points: int = Field(default=25_000_000, ge=3, le=100_000_000)
+    max_total_points: int = Field(default=50_000_000, ge=3, le=100_000_000)
+    #: Giảm mẫu mỗi scan theo ô lưới (mét) TRƯỚC khi đếm điểm và đưa vào KISS-ICP; None = giữ nguyên scan.
+    prefilter_voxel_m: FiniteFloat | None = Field(default=0.1, gt=0)
     max_num_threads: int = Field(default=4, ge=1, le=64)
     timestamp_gap_threshold_seconds: FiniteFloat = Field(default=0.5, gt=0)
 
@@ -372,6 +378,8 @@ class LidarOdometryWorker:
                 points = load_xyz_points(scan_path, request.profile.max_points_per_scan)
                 ranges = np.linalg.norm(points, axis=1)
                 points = points[(ranges >= request.profile.min_range_m) & (ranges <= request.profile.max_range_m)]
+                if request.profile.prefilter_voxel_m is not None:
+                    points = _grid_downsample(points, request.profile.prefilter_voxel_m)
                 if len(points) < request.profile.min_points_per_scan:
                     raise ValueError(f"scan {scan.file_id} has too few points within the configured metric range")
                 total_points += len(points)
@@ -382,7 +390,7 @@ class LidarOdometryWorker:
                 scan_paths.append(staged_scan)
                 scan_point_counts.append(len(points))
 
-            profile_payload = request.profile.model_dump(mode="json")
+            profile_payload = request.profile.model_dump(mode="json", exclude=_WORKER_ONLY_PROFILE_FIELDS)
             manifest_path = attempt_dir / "provider-input.json"
             manifest_path.write_text(
                 json.dumps(
@@ -790,6 +798,14 @@ def _positive_integer(value: object, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise LidarOdometryProcessError(f"KISS-ICP {label} must be a positive integer")
     return value
+
+
+def _grid_downsample(points: np.ndarray, cell_m: float) -> np.ndarray:
+    """Giữ điểm đầu tiên của mỗi ô lưới `cell_m` mét; thứ tự điểm ổn định nên kết quả tái lập được."""
+    if len(points) == 0:
+        return points
+    _, first = np.unique(np.floor(points / cell_m).astype(np.int64), axis=0, return_index=True)
+    return points[np.sort(first)]
 
 
 def _canonical_checksum(value: object) -> str:
