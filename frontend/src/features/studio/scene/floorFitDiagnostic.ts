@@ -50,7 +50,9 @@ export function floorFitDiagnostic(provenance: unknown): FloorFitDiagnostic | nu
     status: fit.status,
     tone: "rust",
     title: "Chưa xác nhận được mặt sàn",
-    message: `Bộ fit ${reason}; lọc theo mặt sàn đã fail-closed. Hãy kiểm tra geometry và scale trước khi dùng scene cho mô phỏng.`,
+    message: `Bộ fit ${reason}.${typeof fit.robust_noise_sigma_m === "number" && Number.isFinite(fit.robust_noise_sigma_m)
+      && typeof fit.max_noise_sigma_m === "number" && Number.isFinite(fit.max_noise_sigma_m)
+      ? ` Độ nhiễu ${(fit.robust_noise_sigma_m * 100).toFixed(2)} cm; ngưỡng ${(fit.max_noise_sigma_m * 100).toFixed(2)} cm.` : ""} Cần kiểm tra dữ liệu hình học, tỉ lệ và mốc sàn trước khi tách vật hoặc dùng scene cho mô phỏng.`,
     evidenceArtifactUri,
   };
 }

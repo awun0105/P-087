@@ -3,7 +3,10 @@
 Proposal được dựng tay (như kết quả SAM2) để kiểm logic gộp mà không cần GPU/torch.
 """
 
+from pathlib import Path
+
 import numpy as np
+import pytest
 
 from src.models.contracts.floor_model import FloorModel
 from src.services.scene.floor_model import above_floor_mask, fit_canonical_floor_model, point_cloud_checksum
@@ -15,7 +18,7 @@ from src.services.scene.sampro3d.consolidate import (
     segment,
     select_prompts,
 )
-from src.services.scene.sampro3d.pipeline import candidates_from_instances
+from src.services.scene.sampro3d.pipeline import Sam2Runtime, Sampro3dInputError, candidates_from_instances, run_sam2
 from src.services.scene.sampro3d.sam2_runner import project, visible_points
 
 
@@ -87,6 +90,38 @@ def test_prompts_skip_floor_and_follow_voxel_count() -> None:
     capped = select_prompts(points, floor_model, Sampro3dConfig(max_prompts=3))
     assert len(capped) == 3
     assert len(np.unique(farthest_point_sampling(points, 20))) == 20
+
+
+@pytest.mark.parametrize("case", ["uncertain_floor", "empty_crop", "floor_only"])
+def test_invalid_prompt_input_stops_before_sam2(case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    points, _, _ = _scene()
+    model = _floor_model(points)
+    if case == "uncertain_floor":
+        model = FloorModel.model_validate(
+            {
+                **model.model_dump(),
+                "status": "uncertain",
+                "fallback_reason": "excessive_noise",
+                "robust_noise_sigma_m": 0.0653,
+            }
+        )
+        expected = "6.53 cm.*3.00 cm"
+    elif case == "empty_crop":
+        points = points[:0]
+        expected = "vùng tách vật không có điểm"
+    else:
+        points = points[points[:, 2] == 0]
+        expected = "phía trên dải bảo vệ sàn"
+
+    def unexpected_runtime(*args: object, **kwargs: object) -> None:
+        pytest.fail("SAM2 must not start for invalid scene input")
+
+    monkeypatch.setattr("src.services.scene.sampro3d.pipeline.run_cancellable_process", unexpected_runtime)
+    with pytest.raises(Sampro3dInputError, match=expected):
+        run_sam2(
+            points, [], Sam2Runtime(tmp_path / "python", tmp_path / "sam2.pt"), tmp_path / "work", floor_model=model
+        )
+    assert not (tmp_path / "work/request.json").exists()
 
 
 def test_prompts_follow_tilted_floor_and_keep_low_object() -> None:

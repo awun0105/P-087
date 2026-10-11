@@ -24,7 +24,7 @@ import numpy as np
 import trimesh
 
 from src.config import Settings
-from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
+from src.models.contracts.artifacts import ArtifactDataClass, JsonObject, ProductArtifactRef
 from src.models.contracts.coordinates import CoordinateSystem, Transform
 from src.models.contracts.floor_model import FloorModel
 from src.models.contracts.manifests import JobManifest, StageId
@@ -53,7 +53,7 @@ from src.services.scene.editing.membership import (
 from src.services.scene.floor_model import fit_canonical_floor_model, point_cloud_checksum
 from src.services.scene.geometric import GeometricConfig, box_from_points
 from src.services.scene.sampro3d.consolidate import Sampro3dConfig, segment
-from src.services.scene.sampro3d.pipeline import CameraFrame, Sam2Runtime, run_sam2
+from src.services.scene.sampro3d.pipeline import CameraFrame, Sam2Runtime, Sampro3dInputError, run_sam2
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +76,11 @@ Publish = Callable[[ProductArtifactRef, bytes], ProductArtifactRef]
 
 class ObjectifyError(RuntimeError):
     """Một bước tách scene theo vật không chạy được; nơi gọi lùi về đường hộp."""
+
+    def __init__(self, message: str, *, retryable: bool = True, floor_fit: JsonObject | None = None) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.floor_fit = floor_fit
 
 
 @dataclass(frozen=True)
@@ -164,6 +169,8 @@ def _seeds(
             floor_model,
             Sampro3dConfig(),
         )
+    except Sampro3dInputError as error:
+        raise ObjectifyError(f"SAMPro3D lỗi: {error}", retryable=False) from error
     except ValueError as error:
         raise ObjectifyError(f"SAMPro3D lỗi: {error}") from error
     limits = GeometricConfig()
@@ -206,6 +213,8 @@ def objectify(
     rows = gaussian_split.read_gaussian_ply(master.read_bytes())
     source_points = gaussian_split.positions(rows)
     floor_model = fit_canonical_floor_model(source_points, point_cloud_checksum(source_points))
+    floor_evidence_ref, floor_evidence = publish_floor_fit_evidence(job.job_id, source_visual_ref, floor_model, publish)
+    floor_fit = scene_floor_fit_summary(floor_evidence_ref, floor_evidence)
     views = camera_views(bundle.camera_pose_refs[0], bundle.rgb_frame_refs, resolve)
     frames = [
         CameraFrame(view=view.model_dump(mode="json", exclude={"image"}), image_path=resolve(view.image))
@@ -213,17 +222,21 @@ def objectify(
     ]
     view_requests = [{**frame.view, "image_path": str(frame.image_path)} for frame in frames]
     _ensure_not_cancelled(cancel_event)
-    seeds = _seeds(
-        rows,
-        frames,
-        np.array([view.center for view in views]),
-        runtime,
-        workspace,
-        floor_model,
-        cancel_event,
-    )
+    try:
+        seeds = _seeds(
+            rows,
+            frames,
+            np.array([view.center for view in views]),
+            runtime,
+            workspace,
+            floor_model,
+            cancel_event,
+        )
+    except ObjectifyError as error:
+        error.floor_fit = floor_fit
+        raise
     if not seeds:
-        raise ObjectifyError("không tìm thấy vật nào để tách")
+        raise ObjectifyError("không tìm thấy vật nào để tách", retryable=False, floor_fit=floor_fit)
 
     np.savez(
         workspace / "seeds.npz",
@@ -420,6 +433,7 @@ def objectify(
         )
     provenance = {
         "object_extraction": METHOD,
+        "objectify_retryable": True,
         "object_gaussians": int(kept.sum()),
         "background_gaussians": int(inpaint["original_gaussians"]),
         "inpainted_gaussians": int(inpaint["inpainted_gaussians"]),
@@ -430,8 +444,7 @@ def objectify(
         "floor_fallback_reason": floor_model.fallback_reason,
         "floor_profile_checksum": floor_model.profile_checksum,
     }
-    floor_evidence_ref, floor_evidence = publish_floor_fit_evidence(job.job_id, source_visual_ref, floor_model, publish)
-    provenance["floor_fit"] = scene_floor_fit_summary(floor_evidence_ref, floor_evidence)
+    provenance["floor_fit"] = floor_fit
     environment = SceneEnvironment(
         visual_ref=visual_ref,
         geometry_ref=bundle.canonical_geometry_ref,
@@ -476,8 +489,13 @@ def objectify_with_retry(
             raise
         except (ObjectifyError, ValueError, OSError) as error:
             logger.warning("Tách theo vật lỗi job=%s lần %d/%d: %s", job.job_id, number, attempts, error)
+            if isinstance(error, ObjectifyError) and not error.retryable:
+                raise
             last = error
-    raise ObjectifyError(f"tách theo vật lỗi sau {attempts} lần: {last}") from last
+    raise ObjectifyError(
+        f"tách theo vật lỗi sau {attempts} lần: {last}",
+        floor_fit=last.floor_fit if isinstance(last, ObjectifyError) else None,
+    ) from last
 
 
 def reobjectify(

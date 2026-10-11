@@ -20,6 +20,10 @@ RUNNER = Path(__file__).with_name("sam2_runner.py")
 METHOD = "sampro3d_sam2_v1"
 
 
+class Sampro3dInputError(ValueError):
+    """Invalid scene input cannot recover by repeating the same SAM2 request."""
+
+
 @dataclass(frozen=True)
 class Sam2Runtime:
     """Đường dẫn runtime do deployment cấu hình (Settings), không default ngầm."""
@@ -53,9 +57,20 @@ def run_sam2(
 ) -> Proposal:
     """Gọi runtime SAM2 trên toàn bộ frame; lỗi/timeout → ValueError có ngữ cảnh."""
     workspace.mkdir(parents=True, exist_ok=True)
+    if floor_model.status == "uncertain":
+        reason = floor_model.fallback_reason
+        detail = f"mặt sàn chưa đủ tin cậy ({reason})"
+        if reason == "excessive_noise" and floor_model.robust_noise_sigma_m is not None:
+            detail += (
+                f": độ nhiễu {floor_model.robust_noise_sigma_m * 100:.2f} cm"
+                f" vượt ngưỡng {floor_model.profile.max_noise_sigma_m * 100:.2f} cm"
+            )
+        raise Sampro3dInputError(f"{detail}; cần kiểm tra dữ liệu, tỉ lệ và mốc sàn trước khi chạy lại")
+    if not len(points):
+        raise Sampro3dInputError("vùng tách vật không có điểm đủ điều kiện; cần kiểm tra vùng quan sát và độ đục")
     prompts = select_prompts(points, floor_model)
     if not len(prompts):
-        raise ValueError("không có điểm nào trên sàn để đặt prompt")
+        raise Sampro3dInputError("không có điểm phía trên dải bảo vệ sàn để đặt prompt")
     np.savez(workspace / "points.npz", points=points.astype(np.float32), prompts=prompts)
     request = {
         "points_npz": str(workspace / "points.npz"),

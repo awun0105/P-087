@@ -12,15 +12,20 @@ from pathlib import Path
 from threading import Event, Thread
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from src.config import Settings
+from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
+from src.models.contracts.manifests import StageId
 from src.models.contracts.reconstruction import ReconstructionBundle
+from src.services.orchestration.artifacts import FilesystemArtifactStore, sha256_bytes
 from src.services.orchestration.scene import extraction as scene_extraction
 from src.services.orchestration.scene import objectify as scene_objectify
 from src.services.orchestration.scene import objectify_queue as scene_objectify_queue
 from src.services.orchestration.scene.errors import SceneRevisionConflictError
 from src.services.orchestration.scene.extraction import extract_scene
+from src.services.orchestration.scene.floor_evidence import load_floor_fit_evidence
 from src.services.orchestration.scene.objectify import AWAITING_CHOICE, ObjectifyError, objectify_with_retry
 from src.services.orchestration.scene.objectify_queue import ObjectifyRequestError
 from src.services.process_control import run_cancellable_process
@@ -123,6 +128,67 @@ def test_failed_objectify_publishes_environment_only_scene_awaiting_choice(world
     assert boxes_called == []
     state = scene_objectify_queue.state(registry, settings, job.job_id)
     assert state.awaiting_choice and not state.object_centric and state.available and state.status == "idle"
+
+
+def test_floor_failure_keeps_evidence_and_stops_retries(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, bundle, settings = world
+    x, y = np.meshgrid(np.linspace(-2, 2, 30), np.linspace(-2, 2, 30))
+    rows = np.zeros(x.size, dtype=[(name, "<f4") for name in ("x", "y", "z", "opacity", "scale_0", "rot_0", "f_dc_0")])
+    rows["x"], rows["y"] = x.ravel(), y.ravel()
+    rows["z"] = np.random.default_rng(19).normal(0, 0.05, x.size)
+    payload = scene_objectify.gaussian_split.write_gaussian_ply(rows)
+    ref = ProductArtifactRef(
+        artifact_type="GaussianPLY",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{job.job_id}/rec06/test/visual.ply",
+        artifact_checksum=sha256_bytes(payload),
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.VISUAL_RECON,
+        job_id=job.job_id,
+    )
+    FilesystemArtifactStore(registry.runtime_resolver).publish(ref, payload)
+    monkeypatch.setattr(scene_objectify, "metric_visual_master", lambda *_: ref)
+    view = SimpleNamespace(center=(0, 0, 1), image=ref, model_dump=lambda **_: {})
+    monkeypatch.setattr(scene_objectify, "camera_views", lambda *_: [view])
+    workspace = tmp_path / "work"
+
+    extract_scene(registry, job, bundle, settings, workspace)
+
+    scene = registry.scene.current(job.job_id).scene
+    fit = scene.provenance["floor_fit"]
+    evidence = load_floor_fit_evidence(
+        ProductArtifactRef.model_validate(fit["artifact_ref"]),
+        registry.runtime_resolver.require,
+        expected_source_artifact_ref=ref,
+    )
+    assert evidence.floor_model.fallback_reason == "excessive_noise"
+    assert scene.objects == []
+    assert "vượt ngưỡng" in scene.provenance["note"]
+    assert not (workspace / "objectify/attempt-2").exists()
+    state = scene_objectify_queue.state(registry, settings, job.job_id)
+    assert state.retryable is False and state.floor_fit == fit
+    with pytest.raises(ObjectifyRequestError, match="Dữ liệu"):
+        scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "objectify")
+    assert scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "boxes").status == "queued"
+
+
+def test_rerun_records_non_retryable_floor_failure_without_changing_scene(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "work")
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise ObjectifyError("mặt sàn chưa đủ tin cậy", retryable=False, floor_fit={"status": "uncertain"})
+
+    monkeypatch.setattr(scene_objectify_queue, "reobjectify", fail)
+    scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "objectify")
+    scene_objectify_queue.process_next(registry, settings)
+    state = scene_objectify_queue.state(registry, settings, job.job_id)
+    assert state.status == "failed" and state.retryable is False
+    assert state.floor_fit == {"status": "uncertain"}
+    assert registry.scene.current(job.job_id).scene.scene_revision == "rev-001"
+    with pytest.raises(ObjectifyRequestError, match="Dữ liệu"):
+        scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "objectify")
 
 
 def test_user_chooses_boxes_and_worker_publishes_next_revision(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001

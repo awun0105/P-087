@@ -709,6 +709,9 @@ export interface ObjectifyState {
   base_revision: string | null;
   result_revision: string | null;
   error: string | null;
+  /** False means the same input cannot recover by repeating objectify. Older APIs omit this. */
+  retryable?: boolean | null;
+  floor_fit?: Record<string, unknown> | null;
   /** Snapshot tài nguyên khiến request vẫn queued; không chứa worker identity/lease token. */
   resource_wait: ObjectifyResourceWait | null;
   /** Running operation has received a cancel request and is stopping/reaping its child. */

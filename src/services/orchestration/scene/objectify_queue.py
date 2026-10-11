@@ -20,7 +20,8 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict
 
 from src.config import Settings
-from src.models.contracts.artifacts import Checksum
+from src.models.contracts.artifacts import Checksum, JsonObject
+from src.models.contracts.floor_model import FloorFitProfile
 from src.models.contracts.manifests import JobManifest
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.services.orchestration.artifacts import ArtifactStoreError, sha256_bytes
@@ -100,6 +101,8 @@ class ObjectifyState(BaseModel):
     base_revision: str | None = None
     result_revision: str | None = None
     error: str | None = None
+    retryable: bool | None = None
+    floor_fit: JsonObject | None = None
     requested_at: datetime | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -117,6 +120,8 @@ class _Record(BaseModel):
     base_revision: str
     result_revision: str | None = None
     error: str | None = None
+    retryable: bool | None = None
+    floor_fit: JsonObject | None = None
     requested_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -179,6 +184,7 @@ def _config_checksum(job: JobManifest, settings: Settings, mode: ObjectifyMode) 
             "runtime_manifest_checksum": job.runtime_manifest_checksum,
             "objectify_attempts": settings.product_objectify_attempts,
             "scene_timeout_seconds": settings.product_scene_timeout_seconds,
+            "floor_profile_checksum": FloorFitProfile().checksum(),
         }
     )
 
@@ -196,6 +202,8 @@ def _public_record(record: _Record) -> dict[str, object]:
         "base_revision",
         "result_revision",
         "error",
+        "retryable",
+        "floor_fit",
         "requested_at",
         "started_at",
         "finished_at",
@@ -212,8 +220,20 @@ def state(registry: ProjectRegistry, settings: Settings, job_id: str) -> Objecti
     with _database(settings).transaction() as tx:
         record = _read(tx, job_id)
     note = provenance.get("note")
+    public = _public_record(record) if record is not None else {}
+    fit = provenance.get("floor_fit")
+    public["floor_fit"] = fit if isinstance(fit, dict) else None
+    public["retryable"] = provenance.get("objectify_retryable")
+    if isinstance(fit, dict) and fit.get("profile_checksum") != FloorFitProfile().checksum():
+        public["retryable"] = None
+    if record is not None and record.status == "failed" and record.base_revision == scene.scene_revision:
+        public["floor_fit"] = record.floor_fit or public["floor_fit"]
+        if record.mode == "objectify" and record.config_checksum == _config_checksum(
+            registry.get_job(job_id), settings, record.mode
+        ):
+            public["retryable"] = record.retryable
     return ObjectifyState(
-        **(_public_record(record) if record is not None else {}),
+        **public,
         scene_revision=scene.scene_revision,
         object_centric=provenance.get("object_extraction") == METHOD,
         awaiting_choice=provenance.get("object_extraction") == AWAITING_CHOICE,
@@ -234,6 +254,8 @@ def request(
         )
     if mode == "objectify" and not (runtime_available(settings) or settings.product_objectify_remote_worker):
         raise ObjectifyRequestError("Máy xử lý chưa cài runtime tách theo vật (xem scripts/gpu/README.md)")
+    if mode == "objectify" and state(registry, settings, job_id).retryable is False:
+        raise ObjectifyRequestError("Dữ liệu tách vật chưa đạt điều kiện; cần sửa dữ liệu hoặc dùng hộp ứng viên")
     bundle = job_bundle(registry, job)
     if bundle is None:
         raise ObjectifyRequestError("Job chưa có kết quả dựng hình hệ mét nên chưa dựng được tập vật")
@@ -649,7 +671,14 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
             commit_guard=_commit_guard(job_id, running, admission, request),
             cancel_event=cancel_event,
         )
-        outcome = {"status": "done", "result_revision": revision, "error": None, "resource_wait": None}
+        outcome = {
+            "status": "done",
+            "result_revision": revision,
+            "error": None,
+            "resource_wait": None,
+            "retryable": None,
+            "floor_fit": None,
+        }
     except ProcessCancelledError:
         if abort_reason[0] == "lease_lost":
             logger.warning("Objectify cancellation after lease loss job=%s", job_id)
@@ -665,6 +694,8 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
     except (ObjectifyError, ArtifactStoreError, SceneError, ValueError, OSError) as error:
         logger.warning("Dựng lại tập vật (%s) lỗi job=%s cause=%s", running.mode, job_id, error)
         outcome = {"status": "failed", "error": str(error)[:500], "result_revision": None}
+        if isinstance(error, ObjectifyError):
+            outcome.update(retryable=error.retryable, floor_fit=error.floor_fit)
     except Exception as error:  # noqa: BLE001 - durable operation boundary must record unexpected failure
         logger.exception("Dựng lại tập vật (%s) lỗi ngoài dự kiến job=%s", running.mode, job_id)
         outcome = {"status": "failed", "error": str(error)[:500], "result_revision": None}

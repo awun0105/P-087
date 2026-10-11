@@ -56,7 +56,7 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
         stageActions.push({ stageId: "ST-OBJECT-EXTRACT", label: "Hủy yêu cầu", onClick: () => void objectify.cancel(), disabled: objectify.sending });
       }
     } else {
-      if (objectify.state?.available) {
+      if (objectify.state?.available && objectify.state.retryable !== false) {
         stageActions.push({ stageId: "ST-OBJECT-EXTRACT", label: "Chạy lại tách theo vật", onClick: () => void objectify.send("objectify"), disabled: objectify.sending });
       }
       stageActions.push({ stageId: "ST-OBJECT-EXTRACT", label: "Dùng hộp ứng viên", onClick: () => void objectify.send("boxes"), disabled: objectify.sending });

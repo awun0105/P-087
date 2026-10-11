@@ -45,7 +45,7 @@ describe("tab Tiến trình: bước Tách vật thể lỗi", () => {
   it("không còn hiện 'đã xong': báo lỗi, lý do và nút chọn tiếp ngay tại hàng bước", async () => {
     vi.mocked(getObjectifyState).mockResolvedValue(failed);
     renderTab();
-    expect(await within(row()).findByRole("alert")).toHaveTextContent("Tách theo vật không thành công sau 3 lần thử");
+    expect(await within(row()).findByRole("alert")).toHaveTextContent("Tách theo vật không thành công");
     expect(within(row()).getByText("Có thể thử lại")).toBeInTheDocument();
     expect(within(row()).getByRole("button", { name: "Chạy lại tách theo vật" })).toBeInTheDocument();
     expect(within(row()).getByRole("button", { name: "Dùng hộp ứng viên" })).toBeInTheDocument();
@@ -98,6 +98,15 @@ describe("tab Tiến trình: bước Tách vật thể lỗi", () => {
 });
 
 describe("các trường hợp còn lại của hàng bước", () => {
+  it("lỗi dữ liệu không báo có thể thử lại và vẫn cho chọn đường hộp", async () => {
+    vi.mocked(getObjectifyState).mockResolvedValue({ ...failed, retryable: false, note: "độ nhiễu 6.53 cm vượt ngưỡng 3.00 cm" });
+    render(<SharedPage />);
+    expect(await within(row()).findByRole("alert")).toHaveTextContent("dữ liệu chưa đạt điều kiện");
+    expect(screen.queryByText("Có thể thử lại")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Chạy lại tách theo vật" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Dùng hộp ứng viên" })).toHaveLength(2);
+    expect(screen.queryByText(/không thành công sau 3 lần thử/)).toBeNull();
+  });
   it("máy không có runtime tách theo vật: chỉ còn nút dùng hộp ứng viên", async () => {
     vi.mocked(getObjectifyState).mockResolvedValue({ ...failed, available: false });
     renderTab();

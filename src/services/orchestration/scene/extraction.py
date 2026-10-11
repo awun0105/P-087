@@ -121,6 +121,8 @@ def box_candidates(
             if cancel_event is not None and cancel_event.is_set():
                 raise ProcessCancelledError("Objectify operation was cancelled")
             points, frames, floor_model, source_ref = _points_and_frames(registry, job, bundle)
+            evidence_ref, evidence = publish_floor_fit_evidence(job.job_id, source_ref, floor_model, publish)
+            floor_fit = scene_floor_fit_summary(evidence_ref, evidence)
             candidates = extract(
                 points,
                 frames,
@@ -136,8 +138,6 @@ def box_candidates(
                 {"method": SAMPRO3D_METHOD, "floor_profile_checksum": floor_model.profile_checksum},
             )
             method = SAMPRO3D_METHOD
-            evidence_ref, evidence = publish_floor_fit_evidence(job.job_id, source_ref, floor_model, publish)
-            floor_fit = scene_floor_fit_summary(evidence_ref, evidence)
             if floor_model.status != "supported":
                 note = f"SAMPro3D dùng trạng thái sàn {floor_model.status} ({floor_model.fallback_reason})"
         except ProcessCancelledError:
@@ -146,7 +146,7 @@ def box_candidates(
             logger.warning(
                 "SAMPro3D thất bại job=%s cause=%s; dùng fallback hình học", job.job_id, type(error).__name__
             )
-            note = f"SAMPro3D lỗi ({type(error).__name__}); dùng tách hình học"
+            note = f"SAMPro3D lỗi: {error}; dùng tách hình học"
     else:
         note = "chưa cấu hình runtime SAM2; dùng tách hình học"
     if method == "none":
@@ -187,6 +187,9 @@ def extract_scene(
         except ObjectifyError as error:
             # Không tự lùi về hộp (owner quyết 2026-10-01): scene chỉ có môi trường, chờ người dùng chọn.
             method, note = AWAITING_CHOICE, f"{error}; chọn chạy lại hoặc dùng hộp ứng viên"
+            extra["objectify_retryable"] = error.retryable
+            if error.floor_fit is not None:
+                extra["floor_fit"] = error.floor_fit
     else:
         objects, method, note, floor_fit = box_candidates(registry, job, bundle, settings, workspace, publish)
         if floor_fit is not None:

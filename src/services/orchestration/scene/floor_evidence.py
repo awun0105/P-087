@@ -64,6 +64,8 @@ def scene_floor_fit_summary(reference: ProductArtifactRef, evidence: FloorFitEvi
         "status": model.status,
         "fallback_reason": model.fallback_reason,
         "floor_band_m": model.floor_band_m,
+        "robust_noise_sigma_m": model.robust_noise_sigma_m,
+        "max_noise_sigma_m": model.profile.max_noise_sigma_m,
         "profile_checksum": model.profile_checksum,
         "point_cloud_checksum": model.source_checksum,
     }

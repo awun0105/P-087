@@ -21,6 +21,14 @@ vi.mock("@/lib/api/studio", async (loadOriginal) => ({
 const getJobSceneMock = vi.mocked(getJobScene);
 
 describe("floor fit diagnostics", () => {
+  it("shows measured floor noise and its frozen limit for an uncertain fit", () => {
+    const result = floorFitDiagnostic({ floor_fit: {
+      status: "uncertain", fallback_reason: "excessive_noise", robust_noise_sigma_m: 0.0653, max_noise_sigma_m: 0.03,
+    } });
+    expect(result?.tone).toBe("rust");
+    expect(result?.message).toContain("6.53 cm");
+    expect(result?.message).toContain("3.00 cm");
+  });
   beforeEach(() => vi.clearAllMocks());
 
   it("keeps legacy and supported scenes quiet", () => {

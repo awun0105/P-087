@@ -121,8 +121,10 @@ export function objectifyStageOverride(state: ObjectifyState | null): { state: S
       error: {
         stage_id: "ST-OBJECT-EXTRACT",
         error_code: "OBJECTIFY_FAILED",
-        human_message: "Tách theo vật không thành công sau 3 lần thử. Scene hiện chỉ có môi trường, chưa có vật nào; chạy lại hoặc dùng hộp ứng viên.",
-        retryable: true,
+        human_message: state.retryable === false
+          ? "Tách theo vật bị dừng vì dữ liệu chưa đạt điều kiện. Scene hiện chỉ có môi trường; kiểm tra dữ liệu sàn hoặc dùng hộp ứng viên."
+          : "Tách theo vật không thành công. Scene hiện chỉ có môi trường, chưa có vật nào; chạy lại hoặc dùng hộp ứng viên.",
+        retryable: state.retryable !== false,
         details: detail ? { log_excerpt: [detail] } : null,
       },
     };

@@ -45,7 +45,7 @@ export function ObjectifyNotice({ jobId, revision, onRevision }: { jobId: string
   const failed = state.status === "failed";
   const actions = (
     <span className="mt-2 flex flex-wrap gap-2">
-      {state.available && (
+      {state.available && state.retryable !== false && (
         <Button size="sm" variant="secondary" disabled={sending} onClick={() => void send("objectify")}>
           <RefreshCw aria-hidden /> Chạy lại tách theo vật
         </Button>
@@ -64,8 +64,11 @@ export function ObjectifyNotice({ jobId, revision, onRevision }: { jobId: string
         <>Yêu cầu đã hủy. Scene vẫn giữ revision hiện tại.</>
       ) : state.awaiting_choice || failed ? (
         <>
-          <strong className="font-medium">Tách theo vật không thành công sau 3 lần thử.</strong> Scene hiện chỉ có môi trường. Bạn có thể chạy lại, hoặc
-          dùng hộp ứng viên (mỗi vật là một hộp đánh dấu vị trí, hình 3DGS không tách rời theo vật).
+          <strong className="font-medium">Tách theo vật không thành công.</strong>{" "}
+          {state.retryable === false
+            ? "Dữ liệu chưa đạt điều kiện; cần kiểm tra dữ liệu sàn hoặc dùng hộp ứng viên."
+            : "Bạn có thể chạy lại hoặc dùng hộp ứng viên."}{" "}
+          Hộp ứng viên đánh dấu vị trí vật; hình 3DGS chưa tách rời theo vật.
         </>
       ) : (
         <>Scene này đang dùng hộp ứng viên: hình 3DGS chưa tách theo từng vật nên kéo vật đi hình không đi theo.</>
