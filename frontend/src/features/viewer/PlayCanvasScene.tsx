@@ -212,6 +212,8 @@ export interface ViewerControls {
   pauseTrajectory(): boolean;
   /** Nhảy tới thời điểm time (giây) trong quỹ đạo video. */
   seekTrajectory(time: number): boolean;
+  /** Lấy toạ độ mắt và điểm nhìn hiện tại của camera viewer. */
+  getCameraPose(): DisplayCameraPose | null;
 }
 
 export function PlayCanvasScene({
@@ -452,6 +454,100 @@ export function PlayCanvasScene({
               } catch {
                 return false;
               }
+            },
+            getCameraPose: () => {
+              if (disposed) return null;
+              try {
+                type Vec3Like = {
+                  x: number;
+                  y: number;
+                  z: number;
+                  clone?(): Vec3Like;
+                };
+                const v = viewer as unknown as {
+                  cameraManager?: {
+                    camera?: {
+                      position: Vec3Like;
+                      angles?: Vec3Like;
+                      distance?: number;
+                      fov?: number;
+                      calcFocusPoint?(out: unknown): void;
+                    };
+                  };
+                  global?: {
+                    camera?: {
+                      getPosition(): Vec3Like;
+                      forward: Vec3Like;
+                      camera?: { fov: number };
+                    };
+                  };
+                  app?: {
+                    root?: {
+                      findByName(name: string): {
+                        getPosition(): Vec3Like;
+                        forward: Vec3Like;
+                        camera?: { fov: number };
+                      } | null;
+                    };
+                  };
+                };
+
+                const cam = v.cameraManager?.camera;
+                if (cam?.position) {
+                  let targetVec: Vec3Like | null = null;
+                  if (typeof cam.calcFocusPoint === "function" && typeof cam.position.clone === "function") {
+                    try {
+                      const cloned = cam.position.clone();
+                      cam.calcFocusPoint(cloned);
+                      targetVec = cloned;
+                    } catch {
+                      // fallback to entity below
+                    }
+                  }
+                  if (targetVec) {
+                    return {
+                      position: [
+                        Number(cam.position.x.toFixed(4)),
+                        Number(cam.position.y.toFixed(4)),
+                        Number(cam.position.z.toFixed(4)),
+                      ],
+                      target: [
+                        Number(targetVec.x.toFixed(4)),
+                        Number(targetVec.y.toFixed(4)),
+                        Number(targetVec.z.toFixed(4)),
+                      ],
+                      fov: Number((cam.fov ?? 60).toFixed(1)),
+                    };
+                  }
+                }
+
+                const entity =
+                  v.global?.camera ??
+                  v.app?.root?.findByName("camera") ??
+                  v.app?.root?.findByName("Camera");
+                if (entity) {
+                  const pos = entity.getPosition();
+                  const fwd = entity.forward;
+                  const fov = entity.camera?.fov ?? cam?.fov ?? 60;
+                  const dist = cam?.distance ?? 2.0;
+                  return {
+                    position: [
+                      Number(pos.x.toFixed(4)),
+                      Number(pos.y.toFixed(4)),
+                      Number(pos.z.toFixed(4)),
+                    ],
+                    target: [
+                      Number((pos.x + fwd.x * dist).toFixed(4)),
+                      Number((pos.y + fwd.y * dist).toFixed(4)),
+                      Number((pos.z + fwd.z * dist).toFixed(4)),
+                    ],
+                    fov: Number(fov.toFixed(1)),
+                  };
+                }
+              } catch (err) {
+                console.error("getCameraPose error:", err);
+              }
+              return null;
             },
           });
         }

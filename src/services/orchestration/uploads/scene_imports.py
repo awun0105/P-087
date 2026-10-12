@@ -145,6 +145,135 @@ class ImportOperationProjection(BaseModel):
     updated_at: datetime
 
 
+class CameraPoseRecord(BaseModel):
+    """Góc nhìn camera (không gian hiển thị của viewer)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    position: list[float] = Field(min_length=3, max_length=3)
+    target: list[float] = Field(min_length=3, max_length=3)
+    fov: float = Field(default=60.0, ge=10.0, le=120.0)
+
+
+def compute_robust_camera_from_sog(sog_path: Path, fov: float = 60.0) -> CameraPoseRecord | None:
+    """Tính góc nhìn bao quát tự nhiên từ mẫu hạt của SOG, loại bỏ 5% hạt ngoại lai."""
+    try:
+        import io
+        import json
+        import zipfile
+
+        import numpy as np
+        from PIL import Image
+
+        with zipfile.ZipFile(sog_path) as bundle:
+            meta = json.loads(bundle.read("meta.json"))
+            count = int(meta.get("count", 0))
+            if count < 1:
+                return None
+            mins = np.array(meta["means"]["mins"], dtype=np.float32)
+            maxs = np.array(meta["means"]["maxs"], dtype=np.float32)
+            with Image.open(io.BytesIO(bundle.read("means_l.webp"))) as im_l:
+                arr_l = np.array(im_l, dtype=np.float32).reshape(-1, 4)[:, :3]
+            with Image.open(io.BytesIO(bundle.read("means_u.webp"))) as im_u:
+                arr_u = np.array(im_u, dtype=np.float32).reshape(-1, 4)[:, :3]
+
+        sample_size = min(count, 5000)
+        idx = np.linspace(0, count - 1, sample_size, dtype=int)
+        arr_l = arr_l[idx]
+        arr_u = arr_u[idx]
+
+        n = (arr_l / 255.0 + (arr_u / 255.0) * 256.0) / 257.0
+        v = mins + (maxs - mins) * n
+        centers = np.sign(v) * (np.exp(np.abs(v)) - 1.0)
+
+        # PlayCanvas world space: entity xoay Z 180 độ -> (-x, -y, z)
+        disp = centers.copy()
+        disp[:, 0] = -disp[:, 0]
+        disp[:, 1] = -disp[:, 1]
+
+        med = np.median(disp, axis=0)
+        dists = np.linalg.norm(disp - med, axis=1)
+        r95 = float(np.percentile(dists, 95))
+        r95 = max(r95, 0.5)
+
+        dist = float(r95 / np.sin(np.radians(fov / 2.0)))
+        dir_vec = np.array([2.0, 1.0, 2.0], dtype=np.float32) / 3.0
+        pos = med + dir_vec * dist
+
+        return CameraPoseRecord(
+            position=[round(float(x), 4) for x in pos],
+            target=[round(float(x), 4) for x in med],
+            fov=fov,
+        )
+    except Exception as error:  # noqa: BLE001
+        logger.warning("Không thể tính robust camera từ SOG: %s", error)
+        return None
+
+
+def compute_robust_camera_from_ply(ply_path: Path, fov: float = 60.0) -> CameraPoseRecord | None:
+    """Tính góc nhìn bao quát tự nhiên từ file PLY (sampling 5000 điểm, loại bỏ 5% ngoại lai)."""
+    try:
+        import numpy as np
+
+        with ply_path.open("rb") as f:
+            total = 0
+            stride_bytes = 0
+            format_le = True
+            while True:
+                line = f.readline().decode("ascii", errors="ignore").strip()
+                if line.startswith("format binary_big_endian"):
+                    format_le = False
+                elif line.startswith("element vertex"):
+                    total = int(line.split()[-1])
+                elif line.startswith("property"):
+                    parts = line.split()
+                    prop_type = parts[1] if len(parts) > 1 else "float"
+                    stride_bytes += 8 if prop_type == "double" else (1 if "char" in prop_type else 4)
+                elif line == "end_header":
+                    break
+
+            if total < 1 or stride_bytes < 12:
+                return None
+
+            header_pos = f.tell()
+            sample_size = min(total, 5000)
+            step = max(1, total // sample_size)
+            samples: list[np.ndarray] = []
+            for i in range(sample_size):
+                f.seek(header_pos + i * step * stride_bytes)
+                raw = f.read(12)
+                if len(raw) < 12:
+                    break
+                dtype = "<f4" if format_le else ">f4"
+                samples.append(np.frombuffer(raw, dtype=dtype))
+
+        if len(samples) < 10:
+            return None
+
+        arr = np.array(samples, dtype=np.float32)
+        disp = arr.copy()
+        disp[:, 0] = -disp[:, 0]
+        disp[:, 1] = -disp[:, 1]
+
+        med = np.median(disp, axis=0)
+        dists = np.linalg.norm(disp - med, axis=1)
+        r95 = float(np.percentile(dists, 95))
+        r95 = max(r95, 0.5)
+
+        dist = float(r95 / np.sin(np.radians(fov / 2.0)))
+        dir_vec = np.array([2.0, 1.0, 2.0], dtype=np.float32) / 3.0
+        pos = med + dir_vec * dist
+
+        return CameraPoseRecord(
+            position=[round(float(x), 4) for x in pos],
+            target=[round(float(x), 4) for x in med],
+            fov=fov,
+        )
+    except Exception as error:  # noqa: BLE001
+        logger.warning("Không thể tính robust camera từ PLY: %s", error)
+        return None
+
+
 class ImportedScene(BaseModel):
     """Một scene import; `delivery_ref` là SOG để trình duyệt nạp."""
 
@@ -157,6 +286,7 @@ class ImportedScene(BaseModel):
     status: ImportStatus
     operation: ImportOperationProjection | None = Field(default=None, exclude_if=lambda value: value is None)
     delivery_ref: ProductArtifactRef | None = None
+    default_camera: CameraPoseRecord | None = Field(default=None, exclude_if=lambda value: value is None)
     error: str | None = None
     created_at: datetime
     created_by: str | None = None
@@ -364,7 +494,44 @@ class ImportService:
             ).fetchone()
         if row is None:
             raise ImportNotFoundError(f"không tìm thấy scene import: {import_id}")
-        return self._with_operation(ImportedScene.model_validate_json(row[0]), row[1])
+        record = ImportedScene.model_validate_json(row[0])
+        if record.status == "READY" and record.default_camera is None:
+            computed: CameraPoseRecord | None = None
+            if record.delivery_ref is not None:
+                sog_path = self.resolver.locate(record.delivery_ref.artifact_uri)
+                if sog_path is not None and sog_path.is_file():
+                    computed = compute_robust_camera_from_sog(sog_path)
+            if computed is None and record.upload_id:
+                upload_uri = f"artifact://jobs/{record.upload_id}/input/source.ply"
+                source_ply = self.resolver.locate(upload_uri)
+                if source_ply is not None and source_ply.is_file():
+                    computed = compute_robust_camera_from_ply(source_ply)
+            if computed is not None:
+                record = record.model_copy(update={"default_camera": computed})
+                with self.database.transaction() as tx:
+                    tx.execute(
+                        "UPDATE r2s_imports SET payload=? WHERE import_id=?",
+                        (record.model_dump_json(), import_id),
+                    )
+        return self._with_operation(record, row[1])
+
+    def update_default_camera(self, import_id: str, camera: CameraPoseRecord) -> ImportedScene:
+        """Lưu góc nhìn camera mặc định do người dùng chỉ định."""
+        with self.database.transaction() as tx:
+            row = tx.execute(
+                "SELECT i.payload, o.payload FROM r2s_imports i LEFT JOIN r2s_import_operations o "
+                "ON o.import_id=i.import_id WHERE i.import_id=?" + tx.lock_suffix(),
+                (import_id,),
+            ).fetchone()
+            if row is None:
+                raise ImportNotFoundError(f"không tìm thấy scene import: {import_id}")
+            record = ImportedScene.model_validate_json(row[0])
+            updated = record.model_copy(update={"default_camera": camera})
+            tx.execute(
+                "UPDATE r2s_imports SET payload=? WHERE import_id=?",
+                (updated.model_dump_json(), import_id),
+            )
+            return self._with_operation(updated, row[1])
 
     def list(self) -> list[ImportedScene]:
         """Mới nhất trước."""
@@ -539,6 +706,7 @@ class ImportService:
         *,
         status: Literal["READY", "FAILED", "CANCELLED"],
         delivery_ref: ProductArtifactRef | None = None,
+        default_camera: CameraPoseRecord | None = None,
         error: str | None = None,
         failure_code: ImportFailureCode | None = None,
         retryable: bool | None = None,
@@ -608,14 +776,15 @@ class ImportService:
                     "retryable": retryable,
                 }
             )
-            updated = stored_import.model_copy(
-                update={
-                    "status": status,
-                    "delivery_ref": delivery_ref,
-                    "error": error,
-                    "operation": updated_operation.projection(),
-                }
-            )
+            update_fields: dict[str, object] = {
+                "status": status,
+                "delivery_ref": delivery_ref,
+                "error": error,
+                "operation": updated_operation.projection(),
+            }
+            if default_camera is not None and stored_import.default_camera is None:
+                update_fields["default_camera"] = default_camera
+            updated = stored_import.model_copy(update=update_fields)
             tx.execute(
                 "UPDATE r2s_imports SET payload=? WHERE import_id=?", (updated.model_dump_json(), record.import_id)
             )
@@ -1390,7 +1559,15 @@ class ImportService:
             )
         if lease_lost.is_set():
             raise RuntimeStateConflictError("scene import lease or resource reservation expired before READY")
-        return self._finish(record, operation, status="READY", delivery_ref=reference, error=None)
+        default_camera = compute_robust_camera_from_sog(sog)
+        return self._finish(
+            record,
+            operation,
+            status="READY",
+            delivery_ref=reference,
+            default_camera=default_camera,
+            error=None,
+        )
 
     def _publish_or_reuse(
         self,

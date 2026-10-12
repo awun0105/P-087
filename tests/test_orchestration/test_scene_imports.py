@@ -181,3 +181,18 @@ def test_sog_runtime_validation_rejects_non_object_report(tmp_path: Path, monkey
             expected_count=4,
             expected_sh_bands=3,
         )
+
+
+def test_import_default_camera_update(world, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    uploads, service = world
+    _fake_runtime(monkeypatch)
+    upload = _upload(uploads, "scene.ply", _gaussian(count=4))
+    record = service.create(upload, "Scene thử camera", "user-1")
+    assert service.process_next(admission=_Admission(), worker_id="test-worker") is True
+
+    from src.services.orchestration.uploads.scene_imports import CameraPoseRecord
+
+    camera = CameraPoseRecord(position=[1.0, 2.0, 3.0], target=[0.0, 0.0, 0.0], fov=60.0)
+    updated = service.update_default_camera(record.import_id, camera)
+    assert updated.default_camera == camera
+    assert service.get(record.import_id).default_camera == camera

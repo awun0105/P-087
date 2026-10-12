@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ImportScenePage } from "@/features/studio/ImportScenePage";
-import { cancelImport, getImport, retryImport } from "@/lib/api/studio";
+import { cancelImport, getImport, retryImport, updateImportCamera } from "@/lib/api/studio";
 import type { ImportedScene } from "@/lib/contracts/studio";
 
 const pollingHarness = vi.hoisted(() => ({
@@ -40,13 +40,45 @@ vi.mock("@/features/shell/NavigationGuard", () => ({
   GuardedLink: ({ href, ...props }: React.ComponentProps<"a">) => <a href={href} {...props} />,
 }));
 vi.mock("@/features/studio/SceneWorkspace", () => ({
-  SceneWorkspace: ({ badges }: { badges?: import("react").ReactNode }) => <div data-testid="scene-workspace">{badges}</div>,
+  SceneWorkspace: ({
+    badges,
+    initialCamera,
+    onControlsReady,
+    onSaveDefaultCamera,
+    saveDefaultCameraStatus,
+  }: {
+    badges?: import("react").ReactNode;
+    initialCamera?: { position: number[]; target: number[]; fov?: number };
+    onControlsReady?: (controls: unknown) => void;
+    onSaveDefaultCamera?: () => void;
+    saveDefaultCameraStatus?: string;
+  }) => (
+    <div data-testid="scene-workspace">
+      {badges}
+      {initialCamera && <div data-testid="initial-camera">{JSON.stringify(initialCamera)}</div>}
+      {onSaveDefaultCamera && (
+        <button
+          type="button"
+          onClick={() => {
+            onControlsReady?.({
+              getCameraPose: () => ({ position: [1.2, 3.4, 5.6], target: [0, 0, 0], fov: 60 }),
+            });
+            onSaveDefaultCamera();
+          }}
+        >
+          Lưu góc nhìn
+        </button>
+      )}
+      <div data-testid="save-status">{saveDefaultCameraStatus}</div>
+    </div>
+  ),
 }));
 vi.mock("@/lib/api/studio", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/studio")>()),
   cancelImport: vi.fn(),
   getImport: vi.fn(),
   retryImport: vi.fn(),
+  updateImportCamera: vi.fn(),
 }));
 
 function importedScene(
@@ -190,5 +222,28 @@ describe("ImportScenePage durable lifecycle", () => {
 
     expect(await screen.findByTestId("scene-workspace")).toBeInTheDocument();
     expect(screen.getByText("Scene import · SOG tải lên · giữ nguyên bytes")).toBeInTheDocument();
+  });
+
+  it("passes default camera and allows saving current camera pose", async () => {
+    const ready = importedScene("READY", "SUCCEEDED");
+    ready.default_camera = { position: [1, 2, 3], target: [0, 0, 0], fov: 60 };
+    vi.mocked(getImport).mockResolvedValue(ok(ready));
+    vi.mocked(updateImportCamera).mockResolvedValue({
+      ...ready,
+      default_camera: { position: [1.2, 3.4, 5.6], target: [0, 0, 0], fov: 60 },
+    });
+
+    render(<ImportScenePage importId="import-1" />);
+
+    expect(await screen.findByTestId("initial-camera")).toHaveTextContent('{"position":[1,2,3],"target":[0,0,0],"fov":60}');
+    fireEvent.click(screen.getByRole("button", { name: "Lưu góc nhìn" }));
+
+    await waitFor(() => {
+      expect(updateImportCamera).toHaveBeenCalledWith("import-1", {
+        position: [1.2, 3.4, 5.6],
+        target: [0, 0, 0],
+        fov: 60,
+      });
+    });
   });
 });

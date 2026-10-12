@@ -10,7 +10,9 @@ import { Badge, Button, Card, Notice, buttonVariants } from "@/components/studio
 import { usePageTitle } from "@/features/shell/Breadcrumbs";
 import { SceneWorkspace } from "@/features/studio/SceneWorkspace";
 import { usePolling } from "@/features/studio/usePolling";
-import { cancelImport, getImport, importContentUrl, retryImport } from "@/lib/api/studio";
+import { cancelImport, getImport, importContentUrl, retryImport, updateImportCamera } from "@/lib/api/studio";
+import type { ViewerControls } from "@/features/viewer/PlayCanvasScene";
+import type { DisplayCameraPose } from "@/features/viewer/source-frame";
 import type { ImportedScene } from "@/lib/contracts/studio";
 
 function lifecycleStatus(scene: ImportedScene): string {
@@ -54,6 +56,9 @@ function ImportScenePageContent({ importId }: { importId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"retry" | "cancel" | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const viewerControlsRef = useRef<ViewerControls | null>(null);
+  const initialCameraRef = useRef<DisplayCameraPose | undefined>(undefined);
   const pollSequence = useRef(0);
   const latestApplied = useRef<{
     importId: string;
@@ -63,6 +68,43 @@ function ImportScenePageContent({ importId }: { importId: string }) {
     parentStatus: ImportedScene["status"];
   } | null>(null);
   usePageTitle(scene?.name ?? null);
+
+  // Giữ cố định camera khởi đầu để viewer không bị re-mount khi lưu camera mới
+  if (!initialCameraRef.current && scene?.default_camera) {
+    initialCameraRef.current = {
+      position: scene.default_camera.position,
+      target: scene.default_camera.target,
+      fov: scene.default_camera.fov ?? 60,
+    };
+  }
+
+  const handleSaveDefaultCamera = useCallback(async (controls?: ViewerControls | null) => {
+    const activeControls = controls ?? viewerControlsRef.current;
+    const pose = activeControls?.getCameraPose();
+    if (!pose) {
+      console.warn("handleSaveDefaultCamera: Không lấy được pose camera từ viewer controls", activeControls);
+      setSaveStatus("error");
+      setTimeout(() => {
+        setSaveStatus((current) => (current === "error" ? "idle" : current));
+      }, 3000);
+      return;
+    }
+    setSaveStatus("saving");
+    try {
+      const updated = await updateImportCamera(importId, pose);
+      setScene(updated);
+      setSaveStatus("saved");
+      setTimeout(() => {
+        setSaveStatus((current) => (current === "saved" ? "idle" : current));
+      }, 3000);
+    } catch (err) {
+      console.error("updateImportCamera error:", err);
+      setSaveStatus("error");
+      setTimeout(() => {
+        setSaveStatus((current) => (current === "error" ? "idle" : current));
+      }, 3000);
+    }
+  }, [importId]);
 
   const apply = useCallback((next: ImportedScene, sequence: number) => {
     latestApplied.current = {
@@ -117,7 +159,7 @@ function ImportScenePageContent({ importId }: { importId: string }) {
 
   if (error) return <main className="mx-auto max-w-3xl space-y-4 px-4 py-10">
     <Notice tone="rust">{error}</Notice>
-    <div className="flex gap-2"><Button size="sm" onClick={() => void poll(new AbortController().signal)}>Thử tải lại</Button><Link href="/scenes" className={buttonVariants({ variant: "secondary", size: "sm" })}>Về Scenes</Link></div>
+    <div className="flex gap-2"><Button size="sm" onClick={() => void poll(new AbortController().signal)}>Thử tải lại</Button><Link href="/imports" className={buttonVariants({ variant: "secondary", size: "sm" })}>Về Scenes đã import</Link></div>
   </main>;
   if (scene?.status === "READY") {
     const sourceLabel = scene.input_kind === "gaussian_sog"
@@ -130,6 +172,12 @@ function ImportScenePageContent({ importId }: { importId: string }) {
         title={scene.name}
         contentUrl={importContentUrl(importId)}
         filename="scene.sog"
+        initialCamera={initialCameraRef.current}
+        onControlsReady={(ctrl) => {
+          viewerControlsRef.current = ctrl;
+        }}
+        onSaveDefaultCamera={handleSaveDefaultCamera}
+        saveDefaultCameraStatus={saveStatus}
         badges={
           <Badge tone="neutral" title="File 3DGS tải lên không có camera: không xác nhận tỉ lệ mét hay dựng collision">
             Scene import · {sourceLabel}
@@ -167,7 +215,7 @@ function ImportScenePageContent({ importId }: { importId: string }) {
             </Button>
           )}
           <Link href="/new" className={buttonVariants({ variant: "secondary" })}>Chọn file khác</Link>
-          <Link href="/scenes" className={buttonVariants({ variant: "secondary" })}>Về Scenes</Link>
+          <Link href="/imports" className={buttonVariants({ variant: "secondary" })}>Về Scenes đã import</Link>
         </div>
       </main>
     );
@@ -180,7 +228,7 @@ function ImportScenePageContent({ importId }: { importId: string }) {
           <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
           {progressLabel(scene)}
         </p>
-        <p className="text-sm text-ink-muted">PLY được chuyển sang SOG; SOG đã tải lên được giữ nguyên bytes. Cả hai chỉ vào scene viewer, không chạy reconstruction. Có thể rời trang và mở lại từ Scenes khi xong.</p>
+        <p className="text-sm text-ink-muted">PLY được chuyển sang SOG; SOG đã tải lên được giữ nguyên bytes. Cả hai chỉ vào scene viewer, không chạy reconstruction. Có thể rời trang và mở lại từ Scenes đã import khi xong.</p>
         {actionError && <Notice tone="rust">{actionError}</Notice>}
         {scene?.capabilities?.can_cancel && (
           <Button variant="secondary" disabled={busy !== null} onClick={() => void runAction("cancel")}>
@@ -188,7 +236,7 @@ function ImportScenePageContent({ importId }: { importId: string }) {
           </Button>
         )}
       </Card>
-      <Link href="/scenes" className={buttonVariants({ variant: "secondary" })}>Về Scenes</Link>
+      <Link href="/imports" className={buttonVariants({ variant: "secondary" })}>Về Scenes đã import</Link>
     </main>
   );
 }

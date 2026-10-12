@@ -519,6 +519,17 @@ export function importContentUrl(importId: string): string {
   return `${API}/imports/${encodeURIComponent(importId)}/content/scene.sog`;
 }
 
+/** Lưu góc nhìn camera mặc định của scene import. */
+export function updateImportCamera(
+  importId: string,
+  camera: { position: [number, number, number]; target: [number, number, number]; fov?: number },
+): Promise<ImportedScene> {
+  return apiFetch<ImportedScene>(`${API}/imports/${encodeURIComponent(importId)}/camera`, {
+    method: "PATCH",
+    body: JSON.stringify(camera),
+  });
+}
+
 // ── vật thể trong SceneIR (PRODUCT-07/07A, ADR 0006) ─────────────────────────
 
 /** SceneIR hiện tại của job; 404 khi bước tách vật thể chưa publish revision nào. */

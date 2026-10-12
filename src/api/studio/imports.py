@@ -10,6 +10,7 @@ from src.api.studio import deps
 from src.services.orchestration.auth import Actor, UserRecord
 from src.services.orchestration.uploads import UploadNotFoundError
 from src.services.orchestration.uploads.scene_imports import (
+    CameraPoseRecord,
     ImportedScene,
     ImportNotFoundError,
     ImportService,
@@ -17,6 +18,16 @@ from src.services.orchestration.uploads.scene_imports import (
 )
 
 router = APIRouter()
+
+
+class UpdateCameraRequest(BaseModel):
+    """Cập nhật góc nhìn mở đầu mặc định của scene import."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    position: list[float] = Field(min_length=3, max_length=3)
+    target: list[float] = Field(min_length=3, max_length=3)
+    fov: float | None = Field(default=None, ge=10.0, le=120.0)
 
 
 class ImportRequest(BaseModel):
@@ -185,6 +196,34 @@ def cancel_import(import_id: str, user: UserRecord | None = Depends(require_cont
         if not owner_mutation_allowed(user, record.created_by):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Không có quyền hủy scene import này")
         updated = service.cancel(import_id)
+        return _view(updated, user, _legacy_creator_names([updated]))
+    except ImportNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except SceneImportError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+@router.patch("/imports/{import_id}/camera", response_model=ImportedSceneResponse)
+def update_import_camera(
+    import_id: str,
+    request: UpdateCameraRequest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> ImportedSceneResponse:
+    """Lưu góc nhìn mở đầu mặc định của scene import."""
+    service = _service()
+    try:
+        record = service.get(import_id)
+        if not owner_mutation_allowed(user, record.created_by):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Không có quyền cập nhật góc nhìn cho scene import này",
+            )
+        camera = CameraPoseRecord(
+            position=request.position,
+            target=request.target,
+            fov=request.fov if request.fov is not None else 60.0,
+        )
+        updated = service.update_default_camera(import_id, camera)
         return _view(updated, user, _legacy_creator_names([updated]))
     except ImportNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error

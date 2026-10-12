@@ -1,8 +1,6 @@
 "use client";
 
 import { errorMessage } from "@/lib/ui-error";
-import { GAUSSIAN_EDIT_ENABLED } from "@/features/studio/scene/state";
-
 import { ArrowRight, Film, LayoutGrid, List, LogIn, RefreshCw, Search } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useCallback, useMemo, useState } from "react";
@@ -15,10 +13,10 @@ import { useAuth } from "@/features/studio/AuthProvider";
 import { STATUS_FILTERS, sceneSummaryStatus, type SceneStatusGroup } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
 import { canEdit, resourceCapabilityAllowed, type Me } from "@/lib/api/auth";
-import { listImports, listScenes, moveImportToTrash, moveSceneToTrash } from "@/lib/api/studio";
+import { listScenes, moveSceneToTrash } from "@/lib/api/studio";
 import { MoveToTrashButton } from "@/features/studio/trash/MoveToTrashButton";
 import { cn } from "@/lib/cn";
-import type { Actor, ImportedScene, SceneSummary } from "@/lib/contracts/studio";
+import type { Actor, SceneSummary } from "@/lib/contracts/studio";
 import { useListState, pageSlice, ListPagination, SortControl } from "@/features/studio/ListControls";
 import { formatBytes, formatDuration } from "@/lib/format";
 import { stageMeta } from "@/features/studio/stages";
@@ -67,21 +65,14 @@ function processingTime(scene: SceneSummary): string {
 /** Màn hình Scenes: danh sách scene của người dùng (dữ liệu từ backend). Video mẫu nằm ở `/new/try-demo`. */
 export function ScenesHome() {
   const [scenes, setScenes] = useState<SceneSummary[] | null>(null);
-  const [imports, setImports] = useState<ImportedScene[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
 
   const { me } = useAuth();
   const signedIn = canEdit(me);
 
   const load = useCallback(async () => {
     // Khách không có quyền xem scene của nhóm: không gọi API, không poll lỗi 401.
-    const [sceneResult, importResult] = await Promise.all([
-      signedIn ? listScenes() : Promise.resolve(null),
-      signedIn ? listImports() : Promise.resolve(null),
-    ]);
-    if (importResult?.ok) { setImports(importResult.data.imports); setImportError(null); }
-    else if (importResult) setImportError(errorMessage(importResult.error));
+    const sceneResult = signedIn ? await listScenes() : null;
     if (sceneResult?.ok) {
       setScenes(sceneResult.data.scenes);
       setError(null);
@@ -103,19 +94,17 @@ export function ScenesHome() {
   }, [scenes, query, filter, sort]);
 
   const pagination = pageSlice(shown, params.get("page"), 12);
-  const filteredImports = imports.filter((item) => item.name.toLowerCase().includes(query.trim().toLowerCase())).sort((a, b) => sort === "name" ? a.name.localeCompare(b.name, "vi") : Date.parse(b.created_at) - Date.parse(a.created_at));
-  const importPage = pageSlice(filteredImports, params.get("importsPage"), 12);
-  const anyActive = (scenes?.some((scene) => sceneSummaryStatus(scene).active) ?? true)
-    || imports.some((item) => item.status === "PACKAGING");
+  const anyActive = scenes?.some((scene) => sceneSummaryStatus(scene).active) ?? true;
   usePolling(load, signedIn && anyActive ? 4000 : 20000, true);
 
   return (
     <main className="mx-auto max-w-6xl px-4 pt-10 pb-20 sm:px-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-ink">Scenes</h1>
+          <h1 className="text-3xl font-extrabold tracking-tight text-ink">Scenes từ video</h1>
           <p className="mt-1.5 max-w-xl text-[15px] leading-relaxed text-ink-muted">
-            Tiếp tục scene đang làm, dựng từ video hoặc mở một file 3DGS đã có.
+            Tiếp tục scene đang làm, dựng từ video hoặc xem lại lịch sử reconstruction. Để mở file 3DGS trực tiếp, xem mục{" "}
+            <Link href="/imports" className="font-medium text-ember-strong hover:underline">Scenes đã import</Link>.
           </p>
         </div>
       </div>
@@ -241,59 +230,6 @@ export function ScenesHome() {
         {signedIn && shown.length > 0 && view === "list" && <SceneTable scenes={pagination.items} me={me} onChanged={() => void load()} />}
         {signedIn && <ListPagination {...pagination} total={shown.length} onChange={(page) => update({ page: String(page) })} />}
       </section>
-
-      {signedIn && importError && <Notice tone="rust" className="mt-6">Không tải được scene import: {importError}. Trang sẽ thử lại.</Notice>}
-      {signedIn && imports.length > 0 && (
-        <section aria-labelledby="imports-heading" className="mt-10">
-          <h2 id="imports-heading" className="label-tech mb-4 text-ink-muted">
-            {GAUSSIAN_EDIT_ENABLED ? "Scene import · chỉ xem/chỉnh Gaussian" : "Scene import · chỉ xem"}
-          </h2>
-          <ul className={view === "list" ? "space-y-2" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-3"}>
-            {importPage.items.map((item) => {
-              const sourceLabel = item.input_kind === "gaussian_sog"
-                ? "SOG"
-                : item.input_kind === "gaussian_ply_colmap" ? "PLY + COLMAP" : "PLY";
-              const statusLabel = item.status === "READY"
-                ? (GAUSSIAN_EDIT_ENABLED ? "Mở xem/chỉnh" : "Mở xem")
-                : item.status === "FAILED"
-                  ? "Lỗi"
-                  : item.status === "CANCELLED"
-                    ? "Đã hủy"
-                    : item.operation?.status === "WAITING"
-                      ? "Đang chờ tài nguyên"
-                      : item.operation?.status === "QUEUED"
-                        ? "Đang chờ worker"
-                        : "Đang nén…";
-              return (
-                <li key={item.import_id} className="flex items-center gap-2">
-                  <Link
-                    href={`/imports/${item.import_id}`}
-                    className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-xl border border-line bg-paper-raised p-4 text-sm transition-colors hover:border-line-strong"
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate font-medium text-ink">{item.name}</span>
-                      <span className="mt-1 flex flex-wrap items-center gap-2">
-                        <Badge tone="neutral">{sourceLabel}</Badge>
-                        {item.created_by_name && (
-                          <ActorAttribution label="Tạo bởi" name={item.created_by_name} role={item.created_by_role} />
-                        )}
-                      </span>
-                    </span>
-                    <span className="shrink-0 text-xs text-ink-subtle" title={item.operation?.error ?? undefined}>
-                      {statusLabel}
-                    </span>
-                  </Link>
-                  {resourceCapabilityAllowed(me, item.capabilities?.can_delete) && (
-                    <MoveToTrashButton name={item.name} move={() => moveImportToTrash(item.import_id)} onMoved={() => void load()} />
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-          <ListPagination {...importPage} total={filteredImports.length} onChange={(page) => update({ importsPage: String(page) })} />
-          {filteredImports.length === 0 && <p className="text-sm text-ink-muted">Không có scene import khớp tên tìm kiếm.</p>}
-        </section>
-      )}
     </main>
   );
 }

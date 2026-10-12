@@ -1,6 +1,6 @@
 "use client";
 
-import { Maximize, RotateCcw, PersonStanding } from "lucide-react";
+import { Bookmark, Maximize, RotateCcw, PersonStanding } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import {
   PlayCanvasScene,
@@ -26,9 +26,12 @@ export function PreviewScene({
   title,
   jobId,
   initialCamera,
-  initialCameraMode = "fly",
+  initialCameraMode,
   cameras,
   sourceFrame = "colmap",
+  onControlsReady,
+  onSaveDefaultCamera,
+  saveDefaultCameraStatus = "idle",
 }: {
   contentUrl: string;
   filename: string;
@@ -39,6 +42,9 @@ export function PreviewScene({
   initialCameraMode?: Exclude<CameraMode, "anim">;
   cameras?: readonly CameraMarkerLike[];
   sourceFrame?: SourceFrame;
+  onControlsReady?: (controls: ViewerControls | null) => void;
+  onSaveDefaultCamera?: (controls?: ViewerControls | null) => Promise<void> | void;
+  saveDefaultCameraStatus?: "idle" | "saving" | "saved" | "error";
 }) {
   const [capability, setCapability] = usePlayCanvasCapability();
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
@@ -46,8 +52,10 @@ export function PreviewScene({
   const [wheelFactor, setWheelFactor] = useState(2);
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
   const handleApp = useCallback((_app: unknown, controls?: ViewerControls) => {
-    setViewerControls(controls ?? null);
-  }, []);
+    const ctrl = controls ?? null;
+    setViewerControls(ctrl);
+    onControlsReady?.(ctrl);
+  }, [onControlsReady]);
 
   const supplied = initialCamera !== undefined || (cameras?.length ?? 0) > 0;
   const fetched = useJobCameras(supplied ? undefined : jobId);
@@ -88,7 +96,7 @@ export function PreviewScene({
               cameras={effectiveCameras}
               wheelFactor={wheelFactor}
               initialCamera={resolvedCamera}
-              initialCameraMode={initialCameraMode}
+              initialCameraMode={initialCameraMode ?? (jobId ? "fly" : "orbit")}
               onApp={handleApp}
               extraControls={
                 <div
@@ -115,6 +123,35 @@ export function PreviewScene({
                   >
                     <RotateCcw className="size-4" aria-hidden />
                   </button>
+                  {onSaveDefaultCamera && (
+                    <button
+                      type="button"
+                      className={cn(
+                        "sse-controlButton flex items-center justify-center transition-colors disabled:opacity-40",
+                        saveDefaultCameraStatus === "saved"
+                          ? "text-emerald-400 bg-emerald-500/10"
+                          : saveDefaultCameraStatus === "saving"
+                            ? "text-amber-400 animate-pulse"
+                            : saveDefaultCameraStatus === "error"
+                              ? "text-rose-400 bg-rose-500/10"
+                              : "text-on-dark/80 hover:text-on-dark",
+                      )}
+                      onClick={() => void onSaveDefaultCamera(viewerControls)}
+                      disabled={!runtime.loaded || saveDefaultCameraStatus === "saving"}
+                      title={
+                        saveDefaultCameraStatus === "saved"
+                          ? "Đã lưu góc nhìn mặc định"
+                          : saveDefaultCameraStatus === "saving"
+                            ? "Đang lưu góc nhìn…"
+                            : saveDefaultCameraStatus === "error"
+                              ? "Lỗi lưu góc nhìn (bấm để thử lại)"
+                              : "Đặt làm góc nhìn mặc định"
+                      }
+                      aria-label="Đặt làm góc nhìn mặc định"
+                    >
+                      <Bookmark className="size-4" aria-hidden />
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="sse-controlButton flex items-center justify-center text-on-dark/80 hover:text-on-dark transition-colors opacity-40 cursor-not-allowed"

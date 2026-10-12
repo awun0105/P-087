@@ -15,6 +15,7 @@ function controls(): ViewerControls {
     playTrajectory: vi.fn(() => true),
     pauseTrajectory: vi.fn(() => true),
     seekTrajectory: vi.fn(() => true),
+    getCameraPose: vi.fn(() => null),
   };
 }
 const loaded: PlayCanvasRuntime = { ...INITIAL_RUNTIME, loaded: true, progress: 100 };

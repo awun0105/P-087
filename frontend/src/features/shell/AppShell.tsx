@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Box, ChevronsUpDown, Clapperboard, LayoutDashboard, Loader2, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, PlusCircle, Trash2, Users, UserRound } from "lucide-react";
+import { ArrowLeft, Box, ChevronsUpDown, Clapperboard, FolderDown, LayoutDashboard, Loader2, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, PlusCircle, Trash2, Users, UserRound } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -50,7 +50,8 @@ const NAV = [
   ] },
   { heading: "Công việc", items: [
     { href: "/new", label: "Tạo scene mới", icon: PlusCircle, reviewerOnly: false },
-    { href: "/scenes", label: "Scenes", icon: Clapperboard, reviewerOnly: false },
+    { href: "/scenes", label: "Scenes từ video", icon: Clapperboard, reviewerOnly: false },
+    { href: "/imports", label: "Scenes đã import", icon: FolderDown, reviewerOnly: false },
     { href: "/trash", label: "Thùng rác", icon: Trash2, reviewerOnly: false },
   ] },
   { heading: "Quản lý", items: [
@@ -70,7 +71,8 @@ export function isGuestAllowedRoute(pathname: string): boolean {
 
 export function isActive(pathname: string, href: string): boolean {
   if (href === "/new") return pathname === "/new" || pathname.startsWith("/new/");
-  if (href === "/scenes") return pathname === "/scenes" || ["/scenes/", "/imports/", "/samples/"].some((route) => pathname.startsWith(route));
+  if (href === "/scenes") return pathname === "/scenes" || ["/scenes/", "/samples/"].some((route) => pathname.startsWith(route));
+  if (href === "/imports") return pathname === "/imports" || pathname.startsWith("/imports/");
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 

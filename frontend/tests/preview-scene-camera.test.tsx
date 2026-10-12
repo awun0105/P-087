@@ -1,19 +1,41 @@
-/** Bản xem 3DGS mở đầu bên trong scene: camera lấy từ quỹ đạo COLMAP của job, viewer dựng sau khi có camera. */
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PreviewScene } from "@/features/studio/scene/PreviewScene";
 import { getStageViews } from "@/lib/api/studio";
 import type { StageView } from "@/lib/contracts/studio";
 
-const viewer = vi.hoisted(() => ({ props: [] as { initialCamera?: { position: number[]; target: number[] }; cameras?: unknown[] }[] }));
+const viewer = vi.hoisted(() => ({
+  props: [] as {
+    initialCamera?: { position: number[]; target: number[] };
+    cameras?: unknown[];
+    extraControls?: import("react").ReactNode;
+  }[],
+}));
 vi.mock("@/lib/api/studio", () => ({ getStageViews: vi.fn() }));
 vi.mock("@/features/viewer/PlayCanvasScene", async (original) => ({
   ...(await original<typeof import("@/features/viewer/PlayCanvasScene")>()),
   usePlayCanvasCapability: () => ["ready", vi.fn()],
-  PlayCanvasScene: (props: { initialCamera?: { position: number[]; target: number[] }; cameras?: unknown[] }) => {
+  PlayCanvasScene: (props: {
+    initialCamera?: { position: number[]; target: number[] };
+    cameras?: unknown[];
+    extraControls?: import("react").ReactNode;
+    onRuntime?: (runtime: { loaded: boolean; progress: number; graphicsBackend: string }) => void;
+  }) => {
     viewer.props.push(props);
-    return <div data-testid="viewer" />;
+    return (
+      <div data-testid="viewer">
+        <button
+          type="button"
+          data-testid="simulate-loaded"
+          onClick={() => props.onRuntime?.({ loaded: true, progress: 100, graphicsBackend: "webgl" })}
+        >
+          Loaded
+        </button>
+        {props.extraControls}
+      </div>
+    );
   },
 }));
 
@@ -59,5 +81,21 @@ describe("PreviewScene mở đầu bên trong scene", () => {
     render(<PreviewScene jobId="job-a" cameras={sfmCameras} contentUrl="/scene.sog" filename="scene.sog" />);
     expect(screen.getAllByTestId("viewer")).toHaveLength(2);
     expect(getStageViews).not.toHaveBeenCalled();
+  });
+
+  it("hiển thị nút lưu góc nhìn mặc định khi có onSaveDefaultCamera", async () => {
+    const handleSave = vi.fn();
+    render(
+      <PreviewScene
+        contentUrl="/scene.sog"
+        filename="scene.sog"
+        onSaveDefaultCamera={handleSave}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("simulate-loaded"));
+    const saveBtn = await screen.findByRole("button", { name: "Đặt làm góc nhìn mặc định" });
+    expect(saveBtn).not.toBeDisabled();
+    fireEvent.click(saveBtn);
+    expect(handleSave).toHaveBeenCalledTimes(1);
   });
 });

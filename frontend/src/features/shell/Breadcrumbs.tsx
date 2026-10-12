@@ -59,9 +59,11 @@ export function crumbsFor(pathname: string, detailTitle?: string | null, signedI
     }
   }
 
-  const scenes: Crumb = { label: "Scenes", href: "/scenes" };
+  const scenes: Crumb = { label: "Scenes từ video", href: "/scenes" };
+  const imports: Crumb = { label: "Scenes đã import", href: "/imports" };
   if (pathname === APP_HOME) return [{ label: "Tổng quan" }];
-  if (pathname === "/scenes") return [{ label: "Scenes" }];
+  if (pathname === "/scenes") return [{ label: "Scenes từ video" }];
+  if (pathname === "/imports") return [{ label: "Scenes đã import" }];
   const start = NEW_SCENE_PAGES[pathname];
   if (start) return [{ label: "Tạo scene mới", href: "/new" }, { label: start }];
   if (pathname === "/new" || pathname.startsWith("/new")) return [{ label: "Tạo scene mới" }];
@@ -69,11 +71,11 @@ export function crumbsFor(pathname: string, detailTitle?: string | null, signedI
   if (pathname.startsWith("/trash")) return [{ label: "Thùng rác" }];
   if (pathname.startsWith("/team")) return [{ label: "Nhóm" }];
   if (pathname === "/account") return [{ label: "Tài khoản" }];
-  if (pathname.startsWith("/imports/")) return [scenes, { label: "Scene import", href: "/scenes" }, { label: detailTitle ?? "Đang tải scene…" }];
+  if (pathname.startsWith("/imports/")) return [imports, { label: detailTitle ?? "Đang tải scene…" }];
   if (pathname.startsWith("/samples/")) return [scenes, { label: detailTitle ?? "Video mẫu" }];
   const inspection = /^\/scenes\/([^/]+)\/stages\/([^/]+)$/.exec(pathname);
   if (inspection) return [scenes, { label: detailTitle ?? "Scene", href: progressHref(decodeURIComponent(inspection[1])) }, { label: inspectionStage(inspection[2])?.title ?? "Giai đoạn" }];
-  if (pathname.startsWith("/scenes/")) return [scenes, { label: "Scene dựng từ video", href: "/scenes" }, { label: detailTitle ?? "Đang tải scene…" }];
+  if (pathname.startsWith("/scenes/")) return [scenes, { label: detailTitle ?? "Đang tải scene…" }];
   return [{ label: "Tổng quan", href: APP_HOME }];
 }
 

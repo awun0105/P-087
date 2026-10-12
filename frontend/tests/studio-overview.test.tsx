@@ -152,8 +152,6 @@ describe("Tổng quan và thư viện riêng", () => {
     expect(screen.getByText(role === "guest" ? "Guest" : role === "editor" ? "Editor" : "Reviewer")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Chuyển Scene của tôi vào thùng rác" }) !== null).toBe(own);
     expect(screen.queryByRole("button", { name: "Chuyển Scene của nhóm vào thùng rác" }) !== null).toBe(foreign);
-    expect(screen.queryByRole("button", { name: "Chuyển PLY của tôi vào thùng rác" }) !== null).toBe(own);
-    expect(screen.queryByRole("button", { name: "Chuyển PLY của nhóm vào thùng rác" }) !== null).toBe(foreign);
 
     fireEvent.click(screen.getByRole("radio", { name: "Danh sách" }));
     const ownRow = await screen.findByRole("row", { name: /Scene của tôi/ });
@@ -162,126 +160,16 @@ describe("Tổng quan và thư viện riêng", () => {
     expect(within(foreignRow).queryByRole("button", { name: "Chuyển Scene của nhóm vào thùng rác" }) !== null).toBe(foreign);
   });
 
-  it.each(["guest", "editor", "reviewer"] as const)("legacy Scenes/import response fails closed for Guest and preserves %s access", async (role) => {
+  it.each(["guest", "editor", "reviewer"] as const)("legacy Scenes response fails closed for Guest and preserves %s access", async (role) => {
     auth.me = { auth_required: true, user: { user_id: "user-guest", email: "guest@example.test", display_name: "Guest Test", role, active: true, daily_job_quota: 10 } };
     const legacyScene = scene("legacy", "SUCCEEDED");
     Reflect.deleteProperty(legacyScene, "capabilities");
     vi.mocked(listScenes).mockResolvedValue({ ok: true, data: { scenes: [legacyScene] } });
-    vi.mocked(listImports).mockResolvedValue({
-      ok: true,
-      data: {
-        imports: [{ import_id: "legacy-import", upload_id: "upload-1", name: "PLY cũ", input_kind: "gaussian_ply", status: "READY", delivery_ref: null, error: null, created_at: "2026-10-01T00:00:00Z" }],
-      },
-    });
     render(<ScenesHome />);
 
     await screen.findByText("Kho legacy");
     const allowed = role !== "guest";
     expect(screen.queryByRole("button", { name: "Chuyển Kho legacy vào thùng rác" }) !== null).toBe(allowed);
-    expect(screen.queryByRole("button", { name: "Chuyển PLY cũ vào thùng rác" }) !== null).toBe(allowed);
-  });
-
-  it("scene import hiển thị creator và role dưới dạng text thuần", async () => {
-    const hostileName = '<img src="x" onerror="alert(1)">';
-    vi.mocked(listImports).mockResolvedValue({
-      ok: true,
-      data: {
-        imports: [{
-          import_id: "import-1",
-          upload_id: "upload-1",
-          name: "PLY nhập",
-          input_kind: "gaussian_ply",
-          status: "READY",
-          delivery_ref: null,
-          error: null,
-          created_at: "2026-10-01T00:00:00Z",
-          created_by_name: hostileName,
-          created_by_role: "reviewer",
-          capabilities: { can_delete: true },
-        }],
-      },
-    });
-
-    render(<ScenesHome />);
-
-    const imported = await screen.findByRole("link", { name: /PLY nhập/ });
-    expect(imported).toHaveTextContent(hostileName);
-    expect(imported).toHaveTextContent("Reviewer");
-    expect(imported.querySelector('img[src="x"]')).toBeNull();
-  });
-
-  it("scene import hiển thị đúng nguồn và trạng thái persisted, kể cả cancellation", async () => {
-    auth.me = {
-      auth_required: true,
-      user: {
-        user_id: "user-editor",
-        email: "editor@example.test",
-        display_name: "Editor Test",
-        role: "editor",
-        active: true,
-        daily_job_quota: 10,
-      },
-    };
-    const imported = (overrides: Partial<ImportedScene>): ImportedScene => ({
-      import_id: "import-default",
-      upload_id: "upload-1",
-      name: "Default import",
-      input_kind: "gaussian_ply",
-      status: "PACKAGING",
-      operation: {
-        operation_id: "operation-default",
-        status: "QUEUED",
-        attempt: 0,
-        attempt_history: [],
-        error: null,
-        created_at: "2026-10-08T00:00:00Z",
-        updated_at: "2026-10-08T00:00:00Z",
-      },
-      delivery_ref: null,
-      error: null,
-      created_at: "2026-10-08T00:00:00Z",
-      ...overrides,
-    });
-    vi.mocked(listImports).mockResolvedValue({
-      ok: true,
-      data: {
-        imports: [
-          imported({ import_id: "sog-ready", name: "SOG import", input_kind: "gaussian_sog", status: "READY" }),
-          imported({ import_id: "ply-waiting", name: "PLY waiting", operation: {
-            operation_id: "operation-waiting",
-            status: "WAITING",
-            attempt: 0,
-            attempt_history: [],
-            error: "Worker đang chờ RAM",
-            created_at: "2026-10-08T00:00:00Z",
-            updated_at: "2026-10-08T00:00:00Z",
-          } }),
-          imported({ import_id: "ply-cancelled", name: "PLY cancelled", status: "CANCELLED", operation: {
-            operation_id: "operation-cancelled",
-            status: "CANCELLED",
-            attempt: 0,
-            attempt_history: [],
-            error: "Đã hủy theo yêu cầu.",
-            created_at: "2026-10-08T00:00:00Z",
-            updated_at: "2026-10-08T00:00:00Z",
-          } }),
-        ],
-      },
-    });
-
-    render(<ScenesHome />);
-
-    const sog = await screen.findByRole("link", { name: /SOG import/ });
-    const waiting = screen.getByRole("link", { name: /PLY waiting/ });
-    const cancelled = screen.getByRole("link", { name: /PLY cancelled/ });
-    expect(sog).toHaveTextContent("SOG");
-    // Chỉnh Gaussian đang tạm ẩn: scene import chỉ mời xem.
-    expect(sog).toHaveTextContent("Mở xem");
-    expect(sog).not.toHaveTextContent("chỉnh");
-    expect(waiting).toHaveTextContent("PLY");
-    expect(waiting).toHaveTextContent("Đang chờ tài nguyên");
-    expect(cancelled).toHaveTextContent("Đã hủy");
-    expect(cancelled).not.toHaveTextContent("Đang nén");
   });
 });
 
