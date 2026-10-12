@@ -1,5 +1,28 @@
 TASK: CFG-05-SCENE-OBJECTIFY-CONFIG
 
+STATUS: COMPLETED — core dictionary override boundary verified. Job artifact wiring is handled by CFG-09.
+
+## Implementation and verification (2026-10-13)
+
+- Current `JobManifest` has no `config` attribute. Implemented the task's alternative explicit `scene_config` dictionary, grouped as `scene`, `coacd`, and `inpaint`; no shared manifest changes.
+- Added strict group models. Invalid counts, non-finite dimensions, out-of-range scores and unknown controls fail before runtime access. Omitted overrides retain the existing provider defaults.
+- `_seeds(max_objects=60)` replaces the fixed slice limit. This limits retained instances; it does not reduce the initial SAMPro3D prompt-generation workload.
+- Lift receives score, area, box margin and SAM batch overrides; convex receives CoACD controls; inpaint receives Gaussian budget and depth offset. Each existing runner already reads `request.config`, so no runner modification was needed.
+- `objectify_with_retry` preserves the explicit dictionary for every attempt. Existing call signatures remain usable without overrides.
+- `tests/test_scene/test_objectify_config_override.py` verifies provider requests through the orchestration path, defaults, invalid input, real seed truncation with fixture instances, and retry propagation.
+- Required suites: 42 passed (14 new override cases and 28 queue/rush regressions). Evidence: `tasks/reports/CFG-05-VERIFICATION.log`.
+- Ruff check and format check passed for the entire scene orchestration directory and new test. `git diff --check` passed.
+- GPU providers are mocked in orchestration tests. This proves payload construction and control propagation, not real SAM2, CoACD or LaMa scene quality.
+- CFG-04 remains open for its separate floor-fill capacity scope decision. This task changes independent objectify paths and does not bypass the CFG-07 audit gate.
+
+Pre-flight (GUIDE.md Rule 13)
+- codegraph: objectify, _seeds, objectify_with_retry, all three runner config consumers, JobManifest and processing artifact reference read.
+- impact: extraction and reobjectify invoke retry; existing queue/rush tests pass. Provider runner consumers retain their defaults.
+- understand: UNVERIFIED — understand-anything unavailable; seed → lift → split → convex/inpaint → publication flow traced from code.
+- minimal-code: rung 2 — existing provider config dictionaries and ContractModel validation reused.
+- checks: ruff clean, 42 pytest passed; TypeScript checks not applicable.
+- DevTools: n/a — no UI change.
+
 ## Ý TƯỞNG & ĐỘNG LỰC THỰC HIỆN (WHY & WHAT)
 - **Tại sao cần task này (Why):** Trong `src/services/orchestration/scene/objectify.py`, số lượng vật thể tối đa bị gán chết `_MAX_OBJECTS = 60`. Khi quay video chỉ nhằm quét 1 vật thể duy nhất (như 1 chiếc ghế, 1 thùng hàng robot gắp), hệ thống vẫn cố gắng tìm và bóc tách tới 60 vật gây lãng phí lớn tài nguyên GPU và thời gian. Hơn thế nữa, khi gọi sang các runner độc lập:
   - `convex_runner.py` (CoACD) nhận một request json nhưng `objectify.py` không hề gửi kèm dict `"config"`, khiến các tham số CoACD quan trọng như `threshold` (độ lõm, chi tiết chân ghế), `max_convex_hull` (số khối lồi PhysX) luôn rơi về giá trị mặc định.

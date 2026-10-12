@@ -22,9 +22,10 @@ from threading import Event
 
 import numpy as np
 import trimesh
+from pydantic import Field, FiniteFloat
 
 from src.config import Settings
-from src.models.contracts.artifacts import ArtifactDataClass, JsonObject, ProductArtifactRef
+from src.models.contracts.artifacts import ArtifactDataClass, ContractModel, JsonObject, ProductArtifactRef
 from src.models.contracts.coordinates import CoordinateSystem, Transform
 from src.models.contracts.floor_model import FloorModel
 from src.models.contracts.manifests import JobManifest, StageId
@@ -68,10 +69,43 @@ INPAINT_RUNNER = _REPO / "src/services/reconstruction/rgb/inpaint/inpaint_runner
 #: Vùng làm việc quanh quỹ đạo camera, cùng quy tắc với REC-05 (geometry_v1).
 _CROP_MARGIN_M = 6.0
 _CROP_Z = (-0.5, 4.0)
-_MAX_OBJECTS = 60
 _IDENTITY = (0.0, 0.0, 0.0, 1.0)
 
 Publish = Callable[[ProductArtifactRef, bytes], ProductArtifactRef]
+
+
+class SceneObjectifyConfig(ContractModel):
+    """Validated seed count and render-lift controls; defaults match the runners."""
+
+    max_objects: int = Field(default=60, ge=1, strict=True)
+    min_score: FiniteFloat = Field(default=0.6, ge=0, le=1)
+    max_area: FiniteFloat = Field(default=0.35, gt=0, le=1)
+    box_margin_m: FiniteFloat = Field(default=0.15, ge=0)
+    sam_batch: int = Field(default=32, ge=1, strict=True)
+
+
+class CoacdObjectifyConfig(ContractModel):
+    """Validated collider controls before invoking the standalone runner."""
+
+    threshold: FiniteFloat = Field(default=0.08, gt=0, le=1)
+    max_convex_hull: int = Field(default=8, ge=1, strict=True)
+    preprocess_resolution: int = Field(default=30, ge=1, strict=True)
+    voxel_m: FiniteFloat = Field(default=0.04, gt=0)
+
+
+class InpaintObjectifyConfig(ContractModel):
+    """Validated background fill budget and depth offset."""
+
+    max_new_gaussians: int = Field(default=400_000, ge=0, strict=True)
+    behind_object_m: FiniteFloat = Field(default=0.05, ge=0)
+
+
+class ObjectifyConfig(ContractModel):
+    """Optional overrides for each provider; absent groups retain runner defaults."""
+
+    scene: SceneObjectifyConfig = Field(default_factory=SceneObjectifyConfig)
+    coacd: CoacdObjectifyConfig = Field(default_factory=CoacdObjectifyConfig)
+    inpaint: InpaintObjectifyConfig = Field(default_factory=InpaintObjectifyConfig)
 
 
 class ObjectifyError(RuntimeError):
@@ -150,6 +184,8 @@ def _seeds(
     workspace: Path,
     floor_model: FloorModel,
     cancel_event: Event | None = None,
+    *,
+    max_objects: int = 60,
 ) -> list[np.ndarray]:
     """Hạt giống từng vật (chỉ số vào `rows`) từ SAMPro3D; bỏ khối không phải vật (kệ dài, mảnh vụn)."""
     low, high = centers.min(axis=0)[:2] - _CROP_MARGIN_M, centers.max(axis=0)[:2] + _CROP_MARGIN_M
@@ -183,7 +219,7 @@ def _seeds(
             and box.dimensions[2] <= limits.max_object_height_m
         ):
             kept.append(work[members])
-    return kept[:_MAX_OBJECTS]
+    return kept[:max_objects]
 
 
 def objectify(
@@ -196,8 +232,10 @@ def objectify(
     *,
     extraction_revision: str = "rev-001",
     cancel_event: Event | None = None,
+    scene_config: dict[str, object] | None = None,
 ) -> ObjectifyResult:
     """Chạy toàn bộ chặng 4–7 cho một bundle hệ mét; publish artifact và trả phần SceneIR."""
+    config = ObjectifyConfig.model_validate({} if scene_config is None else scene_config)
     python, checkpoint = settings.product_scene_runtime_python, settings.product_sam2_checkpoint
     if python is None or checkpoint is None:
         raise ObjectifyError("chưa cấu hình runtime scene (PRODUCT_SCENE_RUNTIME_PYTHON / PRODUCT_SAM2_CHECKPOINT)")
@@ -231,6 +269,7 @@ def objectify(
             workspace,
             floor_model,
             cancel_event,
+            **({"max_objects": config.scene.max_objects} if scene_config is not None else {}),
         )
     except ObjectifyError as error:
         error.floor_fit = floor_fit
@@ -253,6 +292,7 @@ def objectify(
             "sam2_checkpoint": str(checkpoint.resolve()),
             "output_npz": str(workspace / "labels.npz"),
             "views": view_requests,
+            "config": config.scene.model_dump(exclude={"max_objects"}, exclude_unset=True),
         },
         workspace,
         "lift",
@@ -281,7 +321,8 @@ def objectify(
                 "output_glb": str(workspace / f"object_{part.index:03d}.glb"),
             }
             for part in parts
-        ]
+        ],
+        "config": config.coacd.model_dump(exclude_unset=True),
     }
     inpaint_request = {
         "background_ply": str(workspace / "background.ply"),
@@ -289,6 +330,7 @@ def objectify(
         "output_ply": str(workspace / "background_inpainted.ply"),
         "lama_checkpoint": str(settings.product_lama_checkpoint) if settings.product_lama_checkpoint else None,
         "views": view_requests,
+        "config": config.inpaint.model_dump(exclude_unset=True),
     }
     with ThreadPoolExecutor(max_workers=2) as pool:
         convex_job = pool.submit(
@@ -464,6 +506,7 @@ def objectify_with_retry(
     *,
     extraction_revision: str = "rev-001",
     cancel_event: Event | None = None,
+    scene_config: dict[str, object] | None = None,
 ) -> ObjectifyResult:
     """Thử `objectify` tối đa `product_objectify_attempts` lần, mỗi lần một workspace riêng (giữ log từng lần).
 
@@ -475,6 +518,8 @@ def objectify_with_retry(
     for number in range(1, attempts + 1):
         try:
             arguments = {"cancel_event": cancel_event} if cancel_event is not None else {}
+            if scene_config is not None:
+                arguments["scene_config"] = scene_config
             return objectify(
                 registry,
                 job,
