@@ -1,7 +1,7 @@
 "use client";
 
 import { Bookmark, Maximize, RotateCcw, PersonStanding } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   PlayCanvasScene,
   playCanvasErrorMessage,
@@ -32,6 +32,10 @@ export function PreviewScene({
   onControlsReady,
   onSaveDefaultCamera,
   saveDefaultCameraStatus = "idle",
+  currentBookmark,
+  fallbackInitialCamera,
+  onToggleBookmark,
+  bookmarkStatus,
 }: {
   contentUrl: string;
   filename: string;
@@ -45,6 +49,10 @@ export function PreviewScene({
   onControlsReady?: (controls: ViewerControls | null) => void;
   onSaveDefaultCamera?: (controls?: ViewerControls | null) => Promise<void> | void;
   saveDefaultCameraStatus?: "idle" | "saving" | "saved" | "error";
+  currentBookmark?: DisplayCameraPose | null;
+  fallbackInitialCamera?: DisplayCameraPose;
+  onToggleBookmark?: (active: boolean, controls?: ViewerControls | null) => Promise<void> | void;
+  bookmarkStatus?: "idle" | "saving" | "saved" | "error";
 }) {
   const [capability, setCapability] = usePlayCanvasCapability();
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
@@ -56,6 +64,30 @@ export function PreviewScene({
     setViewerControls(ctrl);
     onControlsReady?.(ctrl);
   }, [onControlsReady]);
+
+  const handleResetCamera = useCallback(() => {
+    if (!viewerControls) return;
+    const targetPose = currentBookmark ?? fallbackInitialCamera;
+    if (targetPose) {
+      viewerControls.gotoPose(targetPose);
+    } else {
+      viewerControls.resetCamera();
+    }
+  }, [viewerControls, currentBookmark, fallbackInitialCamera]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "r" || e.key === "R") {
+        const target = e.target as HTMLElement | null;
+        if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+          return;
+        }
+        handleResetCamera();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleResetCamera]);
 
   const supplied = initialCamera !== undefined || (cameras?.length ?? 0) > 0;
   const fetched = useJobCameras(supplied ? undefined : jobId);
@@ -116,40 +148,49 @@ export function PreviewScene({
                   <button
                     type="button"
                     className="sse-controlButton flex items-center justify-center text-on-dark/80 hover:text-on-dark transition-colors disabled:opacity-40"
-                    onClick={() => viewerControls?.resetCamera()}
+                    onClick={handleResetCamera}
                     disabled={!runtime.loaded}
-                    title="Về vị trí ban đầu (R)"
-                    aria-label="Về vị trí ban đầu"
+                    title={currentBookmark ? "Về góc nhìn đã lưu (R)" : "Về vị trí ban đầu (R)"}
+                    aria-label={currentBookmark ? "Về góc nhìn đã lưu" : "Về vị trí ban đầu"}
                   >
                     <RotateCcw className="size-4" aria-hidden />
                   </button>
-                  {onSaveDefaultCamera && (
+                  {(onToggleBookmark || onSaveDefaultCamera) && (
                     <button
                       type="button"
                       className={cn(
                         "sse-controlButton flex items-center justify-center transition-colors disabled:opacity-40",
-                        saveDefaultCameraStatus === "saved"
-                          ? "text-emerald-400 bg-emerald-500/10"
-                          : saveDefaultCameraStatus === "saving"
-                            ? "text-amber-400 animate-pulse"
-                            : saveDefaultCameraStatus === "error"
-                              ? "text-rose-400 bg-rose-500/10"
+                        (bookmarkStatus === "saving" || saveDefaultCameraStatus === "saving")
+                          ? "text-amber-400 animate-pulse"
+                          : (bookmarkStatus === "error" || saveDefaultCameraStatus === "error")
+                            ? "text-rose-400 bg-rose-500/10"
+                            : currentBookmark
+                              ? "text-amber-400 bg-amber-400/20 hover:bg-amber-400/30"
                               : "text-on-dark/80 hover:text-on-dark",
                       )}
-                      onClick={() => void onSaveDefaultCamera(viewerControls)}
-                      disabled={!runtime.loaded || saveDefaultCameraStatus === "saving"}
+                      onClick={() => {
+                        if (onToggleBookmark) {
+                          void onToggleBookmark(!currentBookmark, viewerControls);
+                        } else if (onSaveDefaultCamera) {
+                          void onSaveDefaultCamera(viewerControls);
+                        }
+                      }}
+                      disabled={!runtime.loaded || bookmarkStatus === "saving" || saveDefaultCameraStatus === "saving"}
                       title={
-                        saveDefaultCameraStatus === "saved"
-                          ? "Đã lưu góc nhìn mặc định"
-                          : saveDefaultCameraStatus === "saving"
-                            ? "Đang lưu góc nhìn…"
-                            : saveDefaultCameraStatus === "error"
-                              ? "Lỗi lưu góc nhìn (bấm để thử lại)"
+                        (bookmarkStatus === "saving" || saveDefaultCameraStatus === "saving")
+                          ? "Đang lưu góc nhìn…"
+                          : (bookmarkStatus === "error" || saveDefaultCameraStatus === "error")
+                            ? "Lỗi lưu góc nhìn (bấm để thử lại)"
+                            : currentBookmark
+                              ? "Gỡ góc nhìn mặc định (quay lại góc nhìn mặc định ban đầu)"
                               : "Đặt làm góc nhìn mặc định"
                       }
-                      aria-label="Đặt làm góc nhìn mặc định"
+                      aria-label={currentBookmark ? "Gỡ góc nhìn mặc định" : "Đặt làm góc nhìn mặc định"}
                     >
-                      <Bookmark className="size-4" aria-hidden />
+                      <Bookmark
+                        className={cn("size-4", currentBookmark && "fill-current")}
+                        aria-hidden
+                      />
                     </button>
                   )}
                   <button

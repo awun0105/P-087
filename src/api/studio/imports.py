@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.api.auth import auth_service, require_contributor
 from src.api.ownership import authorize_upload_mutation, owner_mutation_allowed
@@ -21,13 +21,23 @@ router = APIRouter()
 
 
 class UpdateCameraRequest(BaseModel):
-    """Cập nhật góc nhìn mở đầu mặc định của scene import."""
+    """Cập nhật góc nhìn mở đầu mặc định của scene import (hoặc gỡ nếu None)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    position: list[float] = Field(min_length=3, max_length=3)
-    target: list[float] = Field(min_length=3, max_length=3)
+    position: list[float] | None = None
+    target: list[float] | None = None
     fov: float | None = Field(default=None, ge=10.0, le=120.0)
+
+    @model_validator(mode="after")
+    def validate_pose(self) -> "UpdateCameraRequest":
+        if (self.position is None) ^ (self.target is None):
+            raise ValueError("position và target phải cùng được cung cấp hoặc cùng là None")
+        if self.position is not None and len(self.position) != 3:
+            raise ValueError("position phải có đúng 3 tọa độ [x, y, z]")
+        if self.target is not None and len(self.target) != 3:
+            raise ValueError("target phải có đúng 3 tọa độ [x, y, z]")
+        return self
 
 
 class ImportRequest(BaseModel):
@@ -209,7 +219,7 @@ def update_import_camera(
     request: UpdateCameraRequest,
     user: UserRecord | None = Depends(require_contributor),
 ) -> ImportedSceneResponse:
-    """Lưu góc nhìn mở đầu mặc định của scene import."""
+    """Lưu hoặc gỡ góc nhìn bookmark mở đầu mặc định của scene import."""
     service = _service()
     try:
         record = service.get(import_id)
@@ -218,12 +228,36 @@ def update_import_camera(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Không có quyền cập nhật góc nhìn cho scene import này",
             )
-        camera = CameraPoseRecord(
-            position=request.position,
-            target=request.target,
-            fov=request.fov if request.fov is not None else 60.0,
-        )
+        camera: CameraPoseRecord | None = None
+        if request.position is not None and request.target is not None:
+            camera = CameraPoseRecord(
+                position=request.position,
+                target=request.target,
+                fov=request.fov if request.fov is not None else 60.0,
+            )
         updated = service.update_default_camera(import_id, camera)
+        return _view(updated, user, _legacy_creator_names([updated]))
+    except ImportNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except SceneImportError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+@router.delete("/imports/{import_id}/camera", response_model=ImportedSceneResponse)
+def delete_import_camera(
+    import_id: str,
+    user: UserRecord | None = Depends(require_contributor),
+) -> ImportedSceneResponse:
+    """Gỡ bookmark góc nhìn mặc định của scene import, quay lại góc nhìn ban đầu tính toán tự động."""
+    service = _service()
+    try:
+        record = service.get(import_id)
+        if not owner_mutation_allowed(user, record.created_by):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Không có quyền gỡ góc nhìn cho scene import này",
+            )
+        updated = service.update_default_camera(import_id, None)
         return _view(updated, user, _legacy_creator_names([updated]))
     except ImportNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error

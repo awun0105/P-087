@@ -22,6 +22,7 @@ vi.mock("@/features/viewer/PlayCanvasScene", async (original) => ({
     cameras?: unknown[];
     extraControls?: import("react").ReactNode;
     onRuntime?: (runtime: { loaded: boolean; progress: number; graphicsBackend: string }) => void;
+    onApp?: (app: unknown, controls?: unknown) => void;
   }) => {
     viewer.props.push(props);
     return (
@@ -29,7 +30,14 @@ vi.mock("@/features/viewer/PlayCanvasScene", async (original) => ({
         <button
           type="button"
           data-testid="simulate-loaded"
-          onClick={() => props.onRuntime?.({ loaded: true, progress: 100, graphicsBackend: "webgl" })}
+          onClick={() => {
+            props.onApp?.(null, {
+              resetCamera: vi.fn(),
+              gotoPose: vi.fn(),
+              getCameraPose: () => ({ position: [1, 2, 3], target: [0, 0, 0], fov: 60 }),
+            });
+            props.onRuntime?.({ loaded: true, progress: 100, graphicsBackend: "webgl" });
+          }}
         >
           Loaded
         </button>
@@ -97,5 +105,77 @@ describe("PreviewScene mở đầu bên trong scene", () => {
     expect(saveBtn).not.toBeDisabled();
     fireEvent.click(saveBtn);
     expect(handleSave).toHaveBeenCalledTimes(1);
+  });
+
+  it("chuyển đổi trạng thái bookmark: gỡ bookmark khi đang có bookmark và đặt bookmark khi chưa có", async () => {
+    const handleToggle = vi.fn();
+    const bookmarkPose = { position: [2, 3, 4] as [number, number, number], target: [0, 0, 0] as [number, number, number], fov: 60 };
+
+    // Đang có bookmark -> nút hiện 'Gỡ góc nhìn mặc định', bấm sẽ gọi handleToggle(false)
+    const { rerender } = render(
+      <PreviewScene
+        contentUrl="/scene.sog"
+        filename="scene.sog"
+        currentBookmark={bookmarkPose}
+        onToggleBookmark={handleToggle}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("simulate-loaded"));
+    const unbookmarkBtn = await screen.findByRole("button", { name: "Gỡ góc nhìn mặc định" });
+    expect(unbookmarkBtn).toBeInTheDocument();
+    fireEvent.click(unbookmarkBtn);
+    expect(handleToggle).toHaveBeenCalledWith(false, expect.anything());
+
+    // Đã gỡ bookmark (currentBookmark = null) -> nút chuyển thành 'Đặt làm góc nhìn mặc định', bấm gọi handleToggle(true)
+    handleToggle.mockClear();
+    rerender(
+      <PreviewScene
+        contentUrl="/scene.sog"
+        filename="scene.sog"
+        currentBookmark={null}
+        onToggleBookmark={handleToggle}
+      />,
+    );
+    const bookmarkBtn = screen.getByRole("button", { name: "Đặt làm góc nhìn mặc định" });
+    expect(bookmarkBtn).toBeInTheDocument();
+    fireEvent.click(bookmarkBtn);
+    expect(handleToggle).toHaveBeenCalledWith(true, expect.anything());
+  });
+
+  it("quay về vị trí ban đầu: nhảy về currentBookmark nếu có, hoặc fallbackInitialCamera nếu đã gỡ bookmark", async () => {
+    let capturedControls: { resetCamera: ReturnType<typeof vi.fn>; gotoPose: ReturnType<typeof vi.fn> } | null = null;
+    const bookmarkPose = { position: [5, 5, 5] as [number, number, number], target: [1, 1, 1] as [number, number, number], fov: 60 };
+    const initialPose = { position: [10, 10, 10] as [number, number, number], target: [0, 0, 0] as [number, number, number], fov: 60 };
+
+    const { rerender } = render(
+      <PreviewScene
+        contentUrl="/scene.sog"
+        filename="scene.sog"
+        currentBookmark={bookmarkPose}
+        fallbackInitialCamera={initialPose}
+        onControlsReady={(ctrl) => { capturedControls = ctrl as typeof capturedControls; }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("simulate-loaded"));
+
+    // Có bookmark: nút có tên "Về góc nhìn đã lưu", bấm sẽ gọi gotoPose(bookmarkPose)
+    const resetSavedBtn = await screen.findByRole("button", { name: "Về góc nhìn đã lưu" });
+    fireEvent.click(resetSavedBtn);
+    expect(capturedControls!.gotoPose).toHaveBeenCalledWith(bookmarkPose);
+
+    // Gỡ bookmark: currentBookmark = null, nút chuyển thành "Về vị trí ban đầu", bấm sẽ gọi gotoPose(fallbackInitialCamera)
+    capturedControls!.gotoPose.mockClear();
+    rerender(
+      <PreviewScene
+        contentUrl="/scene.sog"
+        filename="scene.sog"
+        currentBookmark={null}
+        fallbackInitialCamera={initialPose}
+        onControlsReady={(ctrl) => { capturedControls = ctrl as typeof capturedControls; }}
+      />,
+    );
+    const resetInitialBtn = screen.getByRole("button", { name: "Về vị trí ban đầu" });
+    fireEvent.click(resetInitialBtn);
+    expect(capturedControls!.gotoPose).toHaveBeenCalledWith(initialPose);
   });
 });

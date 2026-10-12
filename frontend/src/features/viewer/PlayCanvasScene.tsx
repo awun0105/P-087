@@ -206,6 +206,8 @@ export interface ViewerControls {
   frameScene(): boolean;
   /** Về vị trí ban đầu của chế độ hiện tại; false nếu viewer chưa nạp xong. */
   resetCamera(): boolean;
+  /** Di chuyển mượt mà tới toạ độ camera chỉ định. */
+  gotoPose(pose: DisplayCameraPose): boolean;
   /** Bắt đầu hoặc tiếp tục phát lại camera theo quỹ đạo video gốc; tua lại đầu nếu đã hết. */
   playTrajectory(): boolean;
   /** Tạm dừng phát lại quỹ đạo camera. */
@@ -425,6 +427,32 @@ export function PlayCanvasScene({
               } catch {
                 return false;
               }
+            },
+            gotoPose: (pose: DisplayCameraPose) => {
+              if (disposed || !viewer.state.loaded) return false;
+              try {
+                const v = viewer as unknown as {
+                  cameraManager?: {
+                    selectAnnotation?(ann: unknown): void;
+                  };
+                };
+                if (v.cameraManager && typeof v.cameraManager.selectAnnotation === "function") {
+                  v.cameraManager.selectAnnotation({
+                    position: pose.target,
+                    camera: {
+                      initial: {
+                        position: pose.position,
+                        target: pose.target,
+                        fov: pose.fov ?? 60,
+                      },
+                    },
+                  });
+                  return true;
+                }
+              } catch (e) {
+                console.error("gotoPose failed", e);
+              }
+              return false;
             },
             playTrajectory: () => {
               if (disposed || !viewer.state.loaded || !viewer.state.hasAnimation) return false;

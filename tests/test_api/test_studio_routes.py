@@ -2330,3 +2330,40 @@ async def test_anonymize_option_is_offered_and_recorded_only_with_a_configured_a
     studio.settings.product_anonymize_input = True
     assert (await client.get("/api/v1/processing/options")).json()["anonymize_enforced"] is True
     assert stored(await create("Bắt buộc che"))["anonymize"] is True
+
+
+@pytest.mark.asyncio
+async def test_import_camera_bookmark_and_clear_routes(client: AsyncClient, studio: SimpleNamespace) -> None:
+    from src.services.orchestration.uploads import VideoUploadService
+
+    uploads = VideoUploadService(
+        studio.registry.persistence.database,
+        studio.registry.runtime_resolver,
+        8 * 1024 * 1024,
+    )
+    pending = uploads.begin("room.sog")
+    pending.publication.write(sog_archive(model="2dgs"))
+    uploaded = uploads.finish(pending)
+
+    request = {"upload_id": uploaded.upload_id, "name": "Room SOG"}
+    create_resp = await client.post("/api/v1/imports", json=request)
+    assert create_resp.status_code == 201
+    import_id = create_resp.json()["import_id"]
+
+    # Bookmark camera qua PATCH
+    pose = {"position": [1.5, 2.5, 3.5], "target": [0.0, 0.0, 0.0], "fov": 65.0}
+    patch_resp = await client.patch(f"/api/v1/imports/{import_id}/camera", json=pose)
+    assert patch_resp.status_code == 200
+    assert patch_resp.json()["default_camera"]["position"] == [1.5, 2.5, 3.5]
+    assert patch_resp.json()["default_camera"]["fov"] == 65.0
+
+    # Gỡ bookmark qua DELETE
+    del_resp = await client.delete(f"/api/v1/imports/{import_id}/camera")
+    assert del_resp.status_code == 200
+    assert del_resp.json().get("default_camera") is None
+
+    # Bookmark lại rồi gỡ qua PATCH với null
+    await client.patch(f"/api/v1/imports/{import_id}/camera", json=pose)
+    clear_patch_resp = await client.patch(f"/api/v1/imports/{import_id}/camera", json={})
+    assert clear_patch_resp.status_code == 200
+    assert clear_patch_resp.json().get("default_camera") is None

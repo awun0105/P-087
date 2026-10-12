@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ImportScenePage } from "@/features/studio/ImportScenePage";
-import { cancelImport, getImport, retryImport, updateImportCamera } from "@/lib/api/studio";
+import { cancelImport, clearImportCamera, getImport, retryImport, updateImportCamera } from "@/lib/api/studio";
 import type { ImportedScene } from "@/lib/contracts/studio";
 
 const pollingHarness = vi.hoisted(() => ({
@@ -45,12 +45,14 @@ vi.mock("@/features/studio/SceneWorkspace", () => ({
     initialCamera,
     onControlsReady,
     onSaveDefaultCamera,
+    onToggleBookmark,
     saveDefaultCameraStatus,
   }: {
     badges?: import("react").ReactNode;
     initialCamera?: { position: number[]; target: number[]; fov?: number };
     onControlsReady?: (controls: unknown) => void;
     onSaveDefaultCamera?: () => void;
+    onToggleBookmark?: (active: boolean, controls?: unknown) => void;
     saveDefaultCameraStatus?: string;
   }) => (
     <div data-testid="scene-workspace">
@@ -60,13 +62,28 @@ vi.mock("@/features/studio/SceneWorkspace", () => ({
         <button
           type="button"
           onClick={() => {
-            onControlsReady?.({
+            const mockControls = {
               getCameraPose: () => ({ position: [1.2, 3.4, 5.6], target: [0, 0, 0], fov: 60 }),
-            });
+            };
+            onControlsReady?.(mockControls);
             onSaveDefaultCamera();
           }}
         >
           Lưu góc nhìn
+        </button>
+      )}
+      {onToggleBookmark && (
+        <button
+          type="button"
+          onClick={() => {
+            const mockControls = {
+              getCameraPose: () => ({ position: [1.2, 3.4, 5.6], target: [0, 0, 0], fov: 60 }),
+            };
+            onControlsReady?.(mockControls);
+            onToggleBookmark(false, mockControls);
+          }}
+        >
+          Gỡ bookmark
         </button>
       )}
       <div data-testid="save-status">{saveDefaultCameraStatus}</div>
@@ -76,6 +93,7 @@ vi.mock("@/features/studio/SceneWorkspace", () => ({
 vi.mock("@/lib/api/studio", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/studio")>()),
   cancelImport: vi.fn(),
+  clearImportCamera: vi.fn(),
   getImport: vi.fn(),
   retryImport: vi.fn(),
   updateImportCamera: vi.fn(),
@@ -244,6 +262,26 @@ describe("ImportScenePage durable lifecycle", () => {
         target: [0, 0, 0],
         fov: 60,
       });
+    });
+  });
+
+  it("allows unbookmarking to clear default camera and return to initial camera", async () => {
+    const ready = importedScene("READY", "SUCCEEDED");
+    ready.initial_camera = { position: [10, 20, 30], target: [0, 0, 0], fov: 60 };
+    ready.default_camera = { position: [1, 2, 3], target: [0, 0, 0], fov: 60 };
+    vi.mocked(getImport).mockResolvedValue(ok(ready));
+    vi.mocked(clearImportCamera).mockResolvedValue({
+      ...ready,
+      default_camera: null,
+    });
+
+    render(<ImportScenePage importId="import-1" />);
+
+    expect(await screen.findByTestId("initial-camera")).toHaveTextContent('{"position":[1,2,3],"target":[0,0,0],"fov":60}');
+    fireEvent.click(screen.getByRole("button", { name: "Gỡ bookmark" }));
+
+    await waitFor(() => {
+      expect(clearImportCamera).toHaveBeenCalledWith("import-1");
     });
   });
 });

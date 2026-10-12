@@ -22,6 +22,10 @@ export function SceneWorkspace({
   onControlsReady,
   onSaveDefaultCamera,
   saveDefaultCameraStatus,
+  currentBookmark,
+  fallbackInitialCamera,
+  onToggleBookmark,
+  bookmarkStatus,
 }: {
   title: string;
   contentUrl: string;
@@ -33,6 +37,10 @@ export function SceneWorkspace({
   onControlsReady?: (controls: ViewerControls | null) => void;
   onSaveDefaultCamera?: (controls?: ViewerControls | null) => Promise<void> | void;
   saveDefaultCameraStatus?: "idle" | "saving" | "saved" | "error";
+  currentBookmark?: DisplayCameraPose | null;
+  fallbackInitialCamera?: DisplayCameraPose;
+  onToggleBookmark?: (active: boolean, controls?: ViewerControls | null) => Promise<void> | void;
+  bookmarkStatus?: "idle" | "saving" | "saved" | "error";
 }) {
   return (
     <main className="relative flex h-[calc(100dvh-3rem)] flex-col">
@@ -48,6 +56,10 @@ export function SceneWorkspace({
           onControlsReady={onControlsReady}
           onSaveDefaultCamera={onSaveDefaultCamera}
           saveDefaultCameraStatus={saveDefaultCameraStatus}
+          currentBookmark={currentBookmark}
+          fallbackInitialCamera={fallbackInitialCamera}
+          onToggleBookmark={onToggleBookmark}
+          bookmarkStatus={bookmarkStatus}
         />
       </div>
     </main>

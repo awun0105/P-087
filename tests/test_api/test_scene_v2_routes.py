@@ -480,7 +480,10 @@ async def test_cc0_previews_cover_every_placeable_family_even_in_production(clie
     from src.config import Settings
 
     settings = Settings(
-        app_env="production", auth_required=True, artifact_root=tmp_path / "artifacts", product_asset_preview_dir=tmp_path
+        app_env="production",
+        auth_required=True,
+        artifact_root=tmp_path / "artifacts",
+        product_asset_preview_dir=tmp_path,
     )
     monkeypatch.setattr(product_deps, "get_settings", lambda: settings)
 

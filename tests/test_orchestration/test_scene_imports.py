@@ -192,7 +192,18 @@ def test_import_default_camera_update(world, monkeypatch: pytest.MonkeyPatch) ->
 
     from src.services.orchestration.uploads.scene_imports import CameraPoseRecord
 
+    ready = service.get(record.import_id)
+    assert ready.initial_camera is not None
+    assert ready.default_camera is None
+
     camera = CameraPoseRecord(position=[1.0, 2.0, 3.0], target=[0.0, 0.0, 0.0], fov=60.0)
     updated = service.update_default_camera(record.import_id, camera)
     assert updated.default_camera == camera
+    assert updated.initial_camera == ready.initial_camera
     assert service.get(record.import_id).default_camera == camera
+
+    # Gỡ bookmark (unbookmark) quay lại initial_camera
+    cleared = service.update_default_camera(record.import_id, None)
+    assert cleared.default_camera is None
+    assert cleared.initial_camera == ready.initial_camera
+    assert service.get(record.import_id).default_camera is None

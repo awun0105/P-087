@@ -163,46 +163,72 @@ def compute_robust_camera_from_sog(sog_path: Path, fov: float = 60.0) -> CameraP
         import zipfile
 
         import numpy as np
-        from PIL import Image
 
         with zipfile.ZipFile(sog_path) as bundle:
             meta = json.loads(bundle.read("meta.json"))
             count = int(meta.get("count", 0))
             if count < 1:
                 return None
-            mins = np.array(meta["means"]["mins"], dtype=np.float32)
-            maxs = np.array(meta["means"]["maxs"], dtype=np.float32)
-            with Image.open(io.BytesIO(bundle.read("means_l.webp"))) as im_l:
-                arr_l = np.array(im_l, dtype=np.float32).reshape(-1, 4)[:, :3]
-            with Image.open(io.BytesIO(bundle.read("means_u.webp"))) as im_u:
-                arr_u = np.array(im_u, dtype=np.float32).reshape(-1, 4)[:, :3]
+            mins = np.array(meta.get("means", {}).get("mins", [-1.0, -1.0, -1.0]), dtype=np.float32)
+            maxs = np.array(meta.get("means", {}).get("maxs", [1.0, 1.0, 1.0]), dtype=np.float32)
 
-        sample_size = min(count, 5000)
-        idx = np.linspace(0, count - 1, sample_size, dtype=int)
-        arr_l = arr_l[idx]
-        arr_u = arr_u[idx]
+            centers: np.ndarray | None = None
+            try:
+                from PIL import Image
 
-        n = (arr_l / 255.0 + (arr_u / 255.0) * 256.0) / 257.0
-        v = mins + (maxs - mins) * n
-        centers = np.sign(v) * (np.exp(np.abs(v)) - 1.0)
+                with Image.open(io.BytesIO(bundle.read("means_l.webp"))) as im_l:
+                    arr_l = np.array(im_l, dtype=np.float32).reshape(-1, 4)[:, :3]
+                with Image.open(io.BytesIO(bundle.read("means_u.webp"))) as im_u:
+                    arr_u = np.array(im_u, dtype=np.float32).reshape(-1, 4)[:, :3]
 
-        # PlayCanvas world space: entity xoay Z 180 độ -> (-x, -y, z)
-        disp = centers.copy()
-        disp[:, 0] = -disp[:, 0]
-        disp[:, 1] = -disp[:, 1]
+                sample_size = min(count, 5000)
+                idx = np.linspace(0, count - 1, sample_size, dtype=int)
+                arr_l = arr_l[idx]
+                arr_u = arr_u[idx]
 
-        med = np.median(disp, axis=0)
-        dists = np.linalg.norm(disp - med, axis=1)
-        r95 = float(np.percentile(dists, 95))
-        r95 = max(r95, 0.5)
+                n = (arr_l / 255.0 + (arr_u / 255.0) * 256.0) / 257.0
+                v = mins + (maxs - mins) * n
+                centers = np.sign(v) * (np.exp(np.abs(v)) - 1.0)
+            except Exception:
+                # Nếu không có PIL hoặc không giải mã được webp trong môi trường test/headless,
+                # dùng trực tiếp bounding box từ metadata.
+                centers = None
 
-        dist = float(r95 / np.sin(np.radians(fov / 2.0)))
+        if centers is not None and len(centers) > 0:
+            # PlayCanvas world space: entity xoay Z 180 độ -> (-x, -y, z)
+            disp = centers.copy()
+            disp[:, 0] = -disp[:, 0]
+            disp[:, 1] = -disp[:, 1]
+
+            med = np.median(disp, axis=0)
+            dists = np.linalg.norm(disp - med, axis=1)
+            r95 = float(np.percentile(dists, 95))
+            r95 = max(r95, 0.5)
+
+            dist = float(r95 / np.sin(np.radians(fov / 2.0)))
+            dir_vec = np.array([2.0, 1.0, 2.0], dtype=np.float32) / 3.0
+            pos = med + dir_vec * dist
+
+            return CameraPoseRecord(
+                position=[round(float(x), 4) for x in pos],
+                target=[round(float(x), 4) for x in med],
+                fov=fov,
+            )
+
+        # Fallback từ metadata mins/maxs
+        real_min = np.sign(mins) * (np.exp(np.abs(mins)) - 1.0)
+        real_max = np.sign(maxs) * (np.exp(np.abs(maxs)) - 1.0)
+        center = (real_min + real_max) / 2.0
+        center_disp = np.array([-center[0], -center[1], center[2]], dtype=np.float32)
+        extent = np.maximum(np.abs(real_max - real_min), 0.5)
+        radius = max(float(np.linalg.norm(extent) / 2.0), 0.5)
+        dist = float(radius / np.sin(np.radians(fov / 2.0)))
         dir_vec = np.array([2.0, 1.0, 2.0], dtype=np.float32) / 3.0
-        pos = med + dir_vec * dist
+        pos = center_disp + dir_vec * dist
 
         return CameraPoseRecord(
             position=[round(float(x), 4) for x in pos],
-            target=[round(float(x), 4) for x in med],
+            target=[round(float(x), 4) for x in center_disp],
             fov=fov,
         )
     except Exception as error:  # noqa: BLE001
@@ -286,6 +312,7 @@ class ImportedScene(BaseModel):
     status: ImportStatus
     operation: ImportOperationProjection | None = Field(default=None, exclude_if=lambda value: value is None)
     delivery_ref: ProductArtifactRef | None = None
+    initial_camera: CameraPoseRecord | None = Field(default=None, exclude_if=lambda value: value is None)
     default_camera: CameraPoseRecord | None = Field(default=None, exclude_if=lambda value: value is None)
     error: str | None = None
     created_at: datetime
@@ -495,7 +522,7 @@ class ImportService:
         if row is None:
             raise ImportNotFoundError(f"không tìm thấy scene import: {import_id}")
         record = ImportedScene.model_validate_json(row[0])
-        if record.status == "READY" and record.default_camera is None:
+        if record.status == "READY" and record.initial_camera is None:
             computed: CameraPoseRecord | None = None
             if record.delivery_ref is not None:
                 sog_path = self.resolver.locate(record.delivery_ref.artifact_uri)
@@ -506,8 +533,10 @@ class ImportService:
                 source_ply = self.resolver.locate(upload_uri)
                 if source_ply is not None and source_ply.is_file():
                     computed = compute_robust_camera_from_ply(source_ply)
+            if computed is None and record.default_camera is not None:
+                computed = record.default_camera
             if computed is not None:
-                record = record.model_copy(update={"default_camera": computed})
+                record = record.model_copy(update={"initial_camera": computed})
                 with self.database.transaction() as tx:
                     tx.execute(
                         "UPDATE r2s_imports SET payload=? WHERE import_id=?",
@@ -515,8 +544,8 @@ class ImportService:
                     )
         return self._with_operation(record, row[1])
 
-    def update_default_camera(self, import_id: str, camera: CameraPoseRecord) -> ImportedScene:
-        """Lưu góc nhìn camera mặc định do người dùng chỉ định."""
+    def update_default_camera(self, import_id: str, camera: CameraPoseRecord | None) -> ImportedScene:
+        """Lưu hoặc gỡ (camera=None) góc nhìn bookmark do người dùng chỉ định."""
         with self.database.transaction() as tx:
             row = tx.execute(
                 "SELECT i.payload, o.payload FROM r2s_imports i LEFT JOIN r2s_import_operations o "
@@ -706,6 +735,7 @@ class ImportService:
         *,
         status: Literal["READY", "FAILED", "CANCELLED"],
         delivery_ref: ProductArtifactRef | None = None,
+        initial_camera: CameraPoseRecord | None = None,
         default_camera: CameraPoseRecord | None = None,
         error: str | None = None,
         failure_code: ImportFailureCode | None = None,
@@ -782,6 +812,8 @@ class ImportService:
                 "error": error,
                 "operation": updated_operation.projection(),
             }
+            if initial_camera is not None and stored_import.initial_camera is None:
+                update_fields["initial_camera"] = initial_camera
             if default_camera is not None and stored_import.default_camera is None:
                 update_fields["default_camera"] = default_camera
             updated = stored_import.model_copy(update=update_fields)
@@ -1559,13 +1591,14 @@ class ImportService:
             )
         if lease_lost.is_set():
             raise RuntimeStateConflictError("scene import lease or resource reservation expired before READY")
-        default_camera = compute_robust_camera_from_sog(sog)
+        computed_camera = compute_robust_camera_from_sog(sog)
         return self._finish(
             record,
             operation,
             status="READY",
             delivery_ref=reference,
-            default_camera=default_camera,
+            initial_camera=computed_camera,
+            default_camera=None,
             error=None,
         )
 

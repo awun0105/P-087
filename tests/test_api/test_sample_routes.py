@@ -204,16 +204,20 @@ def _manifest(stages: list[DemoStage]) -> DemoManifest:
         source=DemoSource(dataset="TorWIC-SLAM", sequence="Aisle_CW"),
         produced_at=datetime(2026, 10, 10, tzinfo=UTC),
         stages=stages,
-        splat=DemoFile(name="scene.sog", media_type="application/octet-stream", size_bytes=100, checksum="sha256:" + "0" * 64),
+        splat=DemoFile(
+            name="scene.sog", media_type="application/octet-stream", size_bytes=100, checksum="sha256:" + "0" * 64
+        ),
     )
 
 
 def test_lidar_stages_are_kept_after_frame_extract_in_pipeline_order() -> None:
-    manifest = _manifest([
-        DemoStage(stage_id=StageId.LIDAR_CALIBRATION_QA),
-        DemoStage(stage_id=StageId.LIDAR_INGEST),
-        DemoStage(stage_id=StageId.FRAME_EXTRACT),
-    ])
+    manifest = _manifest(
+        [
+            DemoStage(stage_id=StageId.LIDAR_CALIBRATION_QA),
+            DemoStage(stage_id=StageId.LIDAR_INGEST),
+            DemoStage(stage_id=StageId.FRAME_EXTRACT),
+        ]
+    )
     order = [stage.stage_id for stage in manifest.stages]
     assert order[:5] == [
         StageId.INPUT_VALIDATE,
@@ -230,15 +234,17 @@ def test_lidar_stages_are_kept_after_frame_extract_in_pipeline_order() -> None:
 
 def test_stage_assets_are_served_through_the_allow_list_and_validated() -> None:
     image = DemoFile(name="metric.png", media_type="image/png", size_bytes=10, checksum="sha256:" + "1" * 64)
-    manifest = _manifest([
-        DemoStage(
-            stage_id=StageId.METRIC_CANONICALIZE,
-            assets=[
-                DemoStageAsset(kind="image", title="Điểm đo", file=image),
-                DemoStageAsset(kind="facts", facts=[DemoFact(label="Khoảng cách A–B", value="1.20 m")]),
-            ],
-        )
-    ])
+    manifest = _manifest(
+        [
+            DemoStage(
+                stage_id=StageId.METRIC_CANONICALIZE,
+                assets=[
+                    DemoStageAsset(kind="image", title="Điểm đo", file=image),
+                    DemoStageAsset(kind="facts", facts=[DemoFact(label="Khoảng cách A–B", value="1.20 m")]),
+                ],
+            )
+        ]
+    )
     assert image in manifest.files()
     reloaded = DemoManifest.model_validate_json(manifest.model_dump_json())
     metric = next(s for s in reloaded.stages if s.stage_id == StageId.METRIC_CANONICALIZE)
@@ -250,5 +256,9 @@ def test_stage_assets_are_served_through_the_allow_list_and_validated() -> None:
     with pytest.raises(ValueError):
         DemoStageAsset(kind="facts", facts=[DemoFact(label="a", value="b")], file=image)
     with pytest.raises(ValueError):
-        _manifest([DemoStage(stage_id=StageId.METRIC_CANONICALIZE, assets=[DemoStageAsset(kind="image", file=image)]),
-                   DemoStage(stage_id=StageId.RGB_GEOMETRY, assets=[DemoStageAsset(kind="image", file=image)])])  # trùng tên file
+        _manifest(
+            [
+                DemoStage(stage_id=StageId.METRIC_CANONICALIZE, assets=[DemoStageAsset(kind="image", file=image)]),
+                DemoStage(stage_id=StageId.RGB_GEOMETRY, assets=[DemoStageAsset(kind="image", file=image)]),
+            ]
+        )  # trùng tên file

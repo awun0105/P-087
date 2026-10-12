@@ -519,14 +519,24 @@ export function importContentUrl(importId: string): string {
   return `${API}/imports/${encodeURIComponent(importId)}/content/scene.sog`;
 }
 
-/** Lưu góc nhìn camera mặc định của scene import. */
+/** Lưu góc nhìn camera mặc định của scene import (hoặc gỡ nếu null). */
 export function updateImportCamera(
   importId: string,
-  camera: { position: [number, number, number]; target: [number, number, number]; fov?: number },
+  camera: { position: [number, number, number]; target: [number, number, number]; fov?: number } | null,
 ): Promise<ImportedScene> {
+  if (camera === null) {
+    return clearImportCamera(importId);
+  }
   return apiFetch<ImportedScene>(`${API}/imports/${encodeURIComponent(importId)}/camera`, {
     method: "PATCH",
     body: JSON.stringify(camera),
+  });
+}
+
+/** Gỡ bookmark góc nhìn mặc định của scene import, quay lại góc nhìn tự động ban đầu. */
+export function clearImportCamera(importId: string): Promise<ImportedScene> {
+  return apiFetch<ImportedScene>(`${API}/imports/${encodeURIComponent(importId)}/camera`, {
+    method: "DELETE",
   });
 }
 

@@ -748,6 +748,11 @@ export interface ImportedScene {
     updated_at: string;
   } | null;
   delivery_ref: { artifact_uri: string; artifact_checksum: string } | null;
+  initial_camera?: {
+    position: [number, number, number];
+    target: [number, number, number];
+    fov?: number;
+  } | null;
   default_camera?: {
     position: [number, number, number];
     target: [number, number, number];
