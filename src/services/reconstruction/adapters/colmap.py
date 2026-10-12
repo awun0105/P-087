@@ -2,7 +2,9 @@
 
 import json
 import logging
+import re
 import shutil
+import struct
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -20,6 +22,7 @@ from src.services.reconstruction.adapters.colmap_priors import (
 )
 from src.services.reconstruction.adapters.colmap_runtime import ColmapError, ColmapProcess, reconstruction_commands
 from src.services.reconstruction.adapters.log_excerpt import redacted_excerpt
+from src.services.reconstruction.adapters.vocab_tree import get_vocab_tree_path
 from src.services.reconstruction.resume import ResumeCache, content_key
 from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver, _sha256
 from src.services.reconstruction.rgb.pose.camera_pose import CameraPoseArtifact, ColmapConfig
@@ -96,14 +99,18 @@ class ColmapAdapter:
 
     def _execute(self, request: ColmapRequest) -> ColmapResult:
         images = ColmapInputAdapter(self.deps.frames).prepare(request.frame_set, request.workspace)
-        self._vocabulary(request)
-        version, feature, match = self.deps.process.capabilities(request.workspace)
+        if request.config.matching_mode == "sequential":
+            version, feature, match = self.deps.process.capabilities(request.workspace)
+        else:
+            version, feature, match = self.deps.process.capabilities(request.workspace, request.config.matching_mode)
+        vocabulary_checksum = self._vocabulary(request, version)
         resume = self.deps.resume
         key = content_key(
             request.frame_set.artifact_checksum,
             request.config.checksum(),
             self.deps.process.settings.runtime_identity,
             version,
+            *([request.config.matching_mode, vocabulary_checksum] if vocabulary_checksum is not None else []),
             *([request.guidance.checksum()] if request.guidance is not None else []),
         )
         reused = False
@@ -205,14 +212,45 @@ class ColmapAdapter:
         publisher = PosePublisher(self.deps.writer, request.job_id, request.attempt_id)
         return publisher.publish("pose_guidance.json", json.dumps(record, indent=2).encode() + b"\n")
 
-    def _vocabulary(self, request: ColmapRequest) -> None:
+    def _vocabulary(self, request: ColmapRequest, version: str) -> str | None:
         reference = request.config.vocab_tree
-        if reference is None:
-            return
-        path = self.deps.resolve(reference)
-        if not path.is_file() or _sha256(path) != reference.artifact_checksum:
-            raise ValueError("COLMAP vocabulary missing or checksum mismatch")
-        shutil.copyfile(path, request.workspace / "vocab_tree.bin")
+        if reference is None and request.config.matching_mode != "sequential_vocab_tree":
+            return None
+        release = re.search(r"COLMAP (\d+)\.(\d+)", version)
+        if request.config.matching_mode == "sequential_vocab_tree" and release is None:
+            raise ColmapError("COLMAP_VERSION_UNKNOWN", "Cannot select vocabulary format without a COLMAP version")
+        faiss = release is not None and (int(release[1]), int(release[2])) >= (3, 12)
+        if reference is not None:
+            path = self.deps.resolve(reference)
+            if not path.is_file() or _sha256(path) != reference.artifact_checksum:
+                raise ValueError("COLMAP vocabulary missing or checksum mismatch")
+            checksum = reference.artifact_checksum
+        else:
+            path = get_vocab_tree_path(format="faiss" if faiss else "flann")
+            if path is None:
+                raise ColmapError(
+                    "VOCAB_TREE_MISSING",
+                    "Loop matching requires a verified COLMAP vocabulary",
+                    details={
+                        "action": f"Run scripts/assets/download_vocab_tree.py --format {'faiss' if faiss else 'flann'} on the worker, or configure PRODUCT_COLMAP_VOCAB_TREE"
+                    },
+                )
+            checksum = _sha256(path)
+        if request.config.matching_mode == "sequential_vocab_tree":
+            with path.open("rb") as handle:
+                header = handle.read(4)
+            is_faiss = len(header) == 4 and struct.unpack("<i", header)[0] in (1, 2)
+            if is_faiss != faiss:
+                raise ColmapError(
+                    "VOCAB_TREE_INCOMPATIBLE",
+                    "Vocabulary format does not match the COLMAP runtime",
+                    details={"action": f"Use a {'FAISS' if faiss else 'FLANN'} vocabulary for this worker"},
+                )
+        target = request.workspace / "vocab_tree.bin"
+        shutil.copyfile(path, target)
+        if _sha256(target) != checksum:
+            raise ValueError("COLMAP vocabulary changed during staging")
+        return checksum
 
     def _models(self, workspace: Path, frame_ids: tuple[int, ...]) -> list[ParsedSparseModel]:
         models = []

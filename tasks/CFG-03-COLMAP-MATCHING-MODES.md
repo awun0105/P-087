@@ -1,4 +1,5 @@
 TASK: CFG-03-COLMAP-MATCHING-MODES
+STATUS: COMPLETED (2026-10-13)
 
 ## Ý TƯỞNG & ĐỘNG LỰC THỰC HIỆN (WHY & WHAT)
 - **Tại sao cần task này (Why):** Hiện tại `colmap_runtime.py` đang bị ép cứng (hardcode) chỉ chạy lệnh `sequential_matcher` với cờ `--SequentialMatching.loop_detection 0`. Điều này khiến pipeline chỉ chạy được duy nhất một trường hợp video đi thẳng. Khi gặp video quay vòng 360° thì bị đứt gãy mô hình (vì thiếu vocab tree loop detection), còn khi người dùng tải lên một tập ảnh tĩnh rời rạc (như chụp từ máy ảnh DSLR) thì `sequential_matcher` hoàn toàn thất bại vì ảnh không có thứ tự thời gian.
@@ -75,3 +76,24 @@ EVIDENCE:
 - File `src/services/reconstruction/rgb/pose/camera_pose.py`
 - File `src/services/reconstruction/adapters/colmap_runtime.py`
 - Test log `.venv/bin/pytest tests/test_reconstruction/test_colmap_matching_modes.py`
+
+## Implementation and verification — 2026-10-13
+
+- Inspected current ColmapConfig, adapter staging/resume/publisher/consumer, CLI probes and original fixtures before editing. Existing code enables loop detection implicitly from an optional vocabulary ref; the new command branch makes the selected matching mode explicit.
+- Added the three requested modes and validated positive period/image count, nonnegative minimum index distance. Nondefault knobs affect config checksum; default fields are omitted from serialized schema 1.0 so existing artifacts remain readable.
+- Sequential disables loop detection; loop mode stages a verified tree and emits all requested loop knobs; exhaustive uses its own matcher with CPU/GPU/thread controls and no sequential flags. Actual selected matcher help is probed, including loop controls.
+- Runtime-version-aware dictionary staging: FLANN for older COLMAP, FAISS for >=3.12. Explicit checksummed artifact refs still verified. Missing/incompatible asset and unknown version fail before matching with remediation; no implicit download. Staged bytes are rechecked. Vocabulary checksum/mode enter resume identity when present, preventing cache reuse across different trees/implicit legacy loop behavior.
+- Readonly validation of all **5 existing CameraPoseArtifact** records in live storage succeeded, including their old config/content checksums.
+- Original suite baseline: **36 passed**. Final focused suite: **55 passed** (19 new matching-mode cases + all 36 original cases). Broader COLMAP/guidance/preview regression: **82 passed, 1 skipped**; skip is the existing opt-in native preview test, not counted as passing.
+- Full reconstruction Ruff lint/format passed (126 files). Graphify AST update run.
+- Native launcher reports **COLMAP 4.3.0.dev0**, FeatureExtraction/FeatureMatching namespaces; all 3 capability probes succeeded. CPU smoke with 3 existing frames copied into isolated scratch ran feature_extractor and sequential_vocab_tree matching with the FAISS asset: both exit 0. No product job or source artifact was modified. This proves CLI/asset compatibility, not 360-scene quality or a complete GPU reconstruction.
+- First exploratory empty-database smoke exited 139 in upstream VocabTreePairGenerator::IndexImages. Empty input is outside the preparation contract; reran with extracted frames above. Retained negative smoke log rather than calling it successful.
+- Actual logs: [CFG-03-VERIFICATION.log](reports/CFG-03-VERIFICATION.log), [CFG-03-NATIVE.log](reports/CFG-03-NATIVE.log), [CFG-03-EMPTY-DB-NATIVE.log](reports/CFG-03-EMPTY-DB-NATIVE.log).
+
+Pre-flight (GUIDE.md Rule 13):
+- codegraph: config, reconstruction_commands/_matching_command, adapter input/staging/resume/publication/consumer and shared callers read.
+- impact: preview, guided COLMAP, Brush input, smoke/evaluation callers; no frontend/shared manifest edits. Native/fixture boundaries checked separately.
+- understand: UNVERIFIED — understand-anything unavailable; executable source, old artifact validation and native help used instead.
+- minimal-code: reuse existing command/probe/staging pipeline and CFG-02 helper; no new service or dependency.
+- checks: 55 focused pass; 82 broader pass / 1 existing optional skip; full reconstruction Ruff clean.
+- DevTools: n/a — no rendered UI change.

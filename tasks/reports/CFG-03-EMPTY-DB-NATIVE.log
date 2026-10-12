@@ -1,0 +1,61 @@
+{"command": ["colmap", "database_creator", "--database_path", "database.db"]}
+
+==========
+== CUDA ==
+==========
+
+CUDA Version 12.9.1
+
+Container image Copyright (c) 2016-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+This container image and its contents are governed by the NVIDIA Deep Learning Container License.
+By pulling and using the container, you accept the terms and conditions of this license:
+https://developer.nvidia.com/ngc/nvidia-deep-learning-container-license
+
+A copy of this license is made available in this container at /NGC-DL-CONTAINER-LICENSE for your convenience.
+
+WARNING: The NVIDIA Driver was not detected.  GPU functionality will not be available.
+   Use the NVIDIA Container Toolkit to start this container with GPU support; see
+   https://docs.nvidia.com/datacenter/cloud-native/ .
+
+{"returncode": 0, "elapsed_seconds": 0.615647895996517}
+{"command": ["colmap", "sequential_matcher", "--database_path", "database.db", "--FeatureMatching.use_gpu", "0", "--FeatureMatching.num_threads", "2", "--SequentialMatching.overlap", "5", "--SequentialMatching.loop_detection", "1", "--SequentialMatching.vocab_tree_path", "vocab_tree.bin", "--SequentialMatching.loop_detection_period", "10", "--SequentialMatching.loop_detection_num_images", "50", "--SequentialMatching.loop_detection_min_index_distance", "50"]}
+
+==========
+== CUDA ==
+==========
+
+CUDA Version 12.9.1
+
+Container image Copyright (c) 2016-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+This container image and its contents are governed by the NVIDIA Deep Learning Container License.
+By pulling and using the container, you accept the terms and conditions of this license:
+https://developer.nvidia.com/ngc/nvidia-deep-learning-container-license
+
+A copy of this license is made available in this container at /NGC-DL-CONTAINER-LICENSE for your convenience.
+
+WARNING: The NVIDIA Driver was not detected.  GPU functionality will not be available.
+   Use the NVIDIA Container Toolkit to start this container with GPU support; see
+   https://docs.nvidia.com/datacenter/cloud-native/ .
+
+I20261012 21:34:54.999884    40 feature_matching.cc:196] === Feature matching & geometric verification ===
+I20261012 21:34:55.000295    41 sift.cc:1686] Creating SIFT CPU feature matcher
+I20261012 21:34:55.000402    42 sift.cc:1686] Creating SIFT CPU feature matcher
+I20261012 21:34:55.000903    40 pairing.cc:436] Generating sequential image pairs...
+I20261012 21:34:55.001961    40 pairing.cc:247] Generating image pairs with vocabulary tree...
+*** Aborted at 1791840895 (unix time) try "date -d @1791840895" if you are using GNU date ***
+PC: @                0x0 (unknown)
+*** SIGSEGV (@0x0) received by PID 1 (TID 0x7bbc4affd000) from PID 0; stack trace: ***
+    @     0x7bbc8a740206 (unknown)
+    @     0x7bbc7ca24330 (unknown)
+    @     0x5d06901a12af colmap::VocabTreePairGenerator::IndexImages()
+    @     0x5d06901a9d19 colmap::VocabTreePairGenerator::VocabTreePairGenerator()
+    @     0x5d06901ac478 colmap::SequentialPairGenerator::SequentialPairGenerator()
+    @     0x5d069016fc8b _ZNSt17_Function_handlerIFSt10unique_ptrIN6colmap13PairGeneratorESt14default_deleteIS2_EEvEZNS1_12_GLOBAL__N_120FeatureMatcherThread6CreateINS1_23SequentialPairGeneratorEEES0_INS1_6ThreadES3_ISB_EERKNT_14PairingOptionsERKNS1_22FeatureMatchingOptionsERKNS1_22TwoViewGeometryOptionsERKNSt10filesystem7__cxx114pathEEUlvE_E9_M_invokeERKSt9_Any_data
+    @     0x5d0690177147 colmap::(anonymous namespace)::FeatureMatcherThread::Run()
+    @     0x5d06903623e4 colmap::Thread::RunFunc()
+    @     0x7bbc7cd0bdb4 (unknown)
+    @     0x7bbc7ca7bb84 (unknown)
+    @     0x7bbc7cb08b64 __clone
+{"returncode": 139, "elapsed_seconds": 0.5657461939990753}

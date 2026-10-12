@@ -118,18 +118,29 @@ class ColmapProcess:
             )
         return log_path.read_text()
 
-    def capabilities(self, workspace: Path) -> tuple[str, str, str]:
+    def capabilities(self, workspace: Path, matching_mode: str = "sequential") -> tuple[str, str, str]:
         """Probe actual CLI flags để không áp flag của checkout lên binary version khác."""
         output = self.run(["-h"], workspace)
         version = next((line.strip() for line in output.splitlines() if line.startswith("COLMAP ")), "")
         if not version:
             raise ColmapError("COLMAP_VERSION_UNKNOWN", "COLMAP help did not report a version")
         extraction = self.run(["feature_extractor", "-h"], workspace)
-        matching = self.run(["sequential_matcher", "-h"], workspace)
+        matcher = "exhaustive_matcher" if matching_mode == "exhaustive" else "sequential_matcher"
+        matching = self.run([matcher, "-h"], workspace)
         feature = "FeatureExtraction" if "--FeatureExtraction.use_gpu" in extraction else "SiftExtraction"
         match = "FeatureMatching" if "--FeatureMatching.use_gpu" in matching else "SiftMatching"
         if f"--{feature}.use_gpu" not in extraction or f"--{match}.use_gpu" not in matching:
             raise ColmapError("COLMAP_CLI_UNSUPPORTED", "COLMAP runtime lacks supported CPU/GPU controls")
+        if matching_mode == "sequential_vocab_tree":
+            required = (
+                "loop_detection",
+                "vocab_tree_path",
+                "loop_detection_period",
+                "loop_detection_num_images",
+                "loop_detection_min_index_distance",
+            )
+            if any(f"--SequentialMatching.{flag}" not in matching for flag in required):
+                raise ColmapError("COLMAP_CLI_UNSUPPORTED", "COLMAP runtime lacks vocabulary loop controls")
         return version, feature, match
 
 
@@ -166,18 +177,31 @@ def _extraction_command(config: ColmapConfig, feature: str) -> list[str]:
 
 def _matching_command(config: ColmapConfig, match: str) -> list[str]:
     matching = [
-        "sequential_matcher",
+        "exhaustive_matcher" if config.matching_mode == "exhaustive" else "sequential_matcher",
         "--database_path",
         "database.db",
         f"--{match}.use_gpu",
         str(int(config.use_gpu)),
         f"--{match}.num_threads",
         str(config.num_threads),
+    ]
+    if config.matching_mode == "exhaustive":
+        return matching
+    matching += [
         "--SequentialMatching.overlap",
         str(config.sequential_overlap),
         "--SequentialMatching.loop_detection",
-        str(int(config.vocab_tree is not None)),
+        str(int(config.matching_mode == "sequential_vocab_tree")),
     ]
-    if config.vocab_tree is not None:
-        matching += ["--SequentialMatching.vocab_tree_path", "vocab_tree.bin"]
+    if config.matching_mode == "sequential_vocab_tree":
+        matching += [
+            "--SequentialMatching.vocab_tree_path",
+            "vocab_tree.bin",
+            "--SequentialMatching.loop_detection_period",
+            str(config.loop_detection_period),
+            "--SequentialMatching.loop_detection_num_images",
+            str(config.loop_detection_num_images),
+            "--SequentialMatching.loop_detection_min_index_distance",
+            str(config.loop_detection_min_index_distance),
+        ]
     return matching
