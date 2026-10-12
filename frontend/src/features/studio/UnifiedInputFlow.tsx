@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowDown, ArrowUp, Check, FileCheck2, FileUp, Loader2, Play, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, FileCheck2, FileUp, Loader2, Play, Trash2, X } from "lucide-react";
 
 import { PageHeader } from "@/components/studio/feedback";
 import { Badge, Button, Card, EmptyState, Notice, ProgressBar, buttonVariants } from "@/components/studio/primitives";
@@ -46,6 +46,13 @@ import { errorMessage } from "@/lib/ui-error";
 import { formatBytes } from "@/lib/format";
 import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
 import { useProcessingForm } from "@/features/studio/useProcessingForm";
+import { FlowStepper } from "@/features/studio/FlowStepper";
+
+const INPUT_STEPS = [
+  { key: "input", label: "Chọn dữ liệu" },
+  { key: "processing", label: "Cấu hình xử lý" },
+  { key: "confirm", label: "Xác nhận và tạo scene" },
+] as const;
 
 const VIDEO_FORMATS = new Set(["video_mp4", "video_mov"]);
 const CLOUD_FORMATS = new Set(["point_cloud_ply", "point_cloud_pcd"]);
@@ -305,6 +312,9 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   const { me, refresh } = useAuth();
   const ids = { upload: useId(), intent: useId(), name: useId(), owner: useId(), origin: useId(), purpose: useId(), rgbTimes: useId(), lidarTimes: useId() };
   const draftKey = inputDraftKey(accountId);
+  const [step, setStep] = useState<0 | 1 | 2>(0);
+  const stepHeading = useRef<HTMLHeadingElement>(null);
+  const previousStep = useRef(step);
   const [entries, setEntries] = useState<InputEntry[]>([]);
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [scanOrder, setScanOrder] = useState<string[]>([]);
@@ -384,6 +394,18 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   const processingBlocked = Boolean(videoProcessing && (
     !processing.options || !processing.values || !processing.evaluation || processing.loading || processing.evaluating || processing.error || processing.evaluation.blocking
   ));
+  const inputReady = Boolean(draftLoaded && !busy && !adding && includedEntries.length &&
+    includedEntries.every((entry) => entry.status === "ready" && entry.staged) && snapshot &&
+    report?.state === "ready" && activeCandidate?.state === "ready" &&
+    activeCandidate.candidate_id === report.recommended_candidate_id);
+  const canContinue = inputReady && (step === 0 || !processingBlocked);
+
+  useEffect(() => {
+    if (previousStep.current === step) return;
+    previousStep.current = step;
+    stepHeading.current?.focus({ preventScroll: true });
+    stepHeading.current?.scrollIntoView?.({ block: "start" });
+  }, [step]);
 
   /** Kết quả cũ không còn đúng: xoá và tự phân tích lại sau một nhịp để gộp nhiều thay đổi liên tiếp. */
   const scheduleAutoAnalyze = useCallback(() => {
@@ -392,13 +414,14 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   }, []);
 
   const invalidateResolution = useCallback(() => {
+    setStep(0);
     inputGeneration.current += 1;
     setReport(null);
     setAnalysisFailed(false);
     setSelectedCandidateId(null);
     setError(null);
     scheduleAutoAnalyze();
-  }, [scheduleAutoAnalyze]);
+  }, [scheduleAutoAnalyze, setStep]);
 
   function clearDraft() {
     try {
@@ -447,6 +470,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       if (!event.persisted) return;
       leaving.current = false;
       uploads.clear();
+      setStep(0);
       entryUploads.current.clear();
       setEntries([]);
       setReport(null);
@@ -986,7 +1010,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   async function submitReadyRoute(event: React.FormEvent) {
     event.preventDefault();
     const candidate = activeCandidate;
-    if (!snapshot || !report || report.state !== "ready" || !candidate || candidate.state !== "ready" ||
+    if (step !== 2 || !inputReady || !snapshot || !report || report.state !== "ready" || !candidate || candidate.state !== "ready" ||
         candidate.candidate_id !== report.recommended_candidate_id || submitting || !sceneName.trim()) return;
     setSubmitting(true);
     setError(null);
@@ -1072,7 +1096,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   const createBlockers: string[] = [];
   if (activeCandidate && report?.state === "ready") {
     if (activeCandidate.candidate_id !== report.recommended_candidate_id) {
-      createBlockers.push("Cách xử lý đang chọn chưa phải cách hệ thống đề xuất; bấm \"Phân tích lại\" hoặc chọn lại.");
+      createBlockers.push("Quay lại bước chọn dữ liệu để cập nhật cách xử lý.");
     }
     if (!sceneName.trim()) createBlockers.push("Nhập tên scene.");
     if (activeCandidate.candidate_kind === "video_recipe") {
@@ -1110,6 +1134,12 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         <a className="text-sm font-medium text-ember-strong hover:underline" href="/new/try-demo">Xem scene mẫu đã xử lý</a>
       </div>
 
+      <div className="mt-6"><FlowStepper steps={INPUT_STEPS} current={step} /></div>
+      <h2 ref={stepHeading} tabIndex={-1} className="mt-6 scroll-mt-20 text-xl font-bold outline-none">
+        {INPUT_STEPS[step].label}
+      </h2>
+
+      {step === 0 && <>
       <section className="mt-5 space-y-4" aria-label="Tập input">
         {!draftLoaded && <p className="text-sm text-ink-muted" role="status">Đang khôi phục upload của tài khoản…</p>}
         <Card
@@ -1214,7 +1244,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
                             ? <Badge tone="ochre">Không dùng được</Badge>
                             : <Badge tone="sage"><FileCheck2 aria-hidden /> Đã xác minh</Badge>
                           : null}
-                        {(entry.status === "failed" || entry.status === "cancelled") && <Button size="sm" variant="secondary" onClick={() => void uploadOne(entry)} disabled={busy || (!entry.file && !entry.legacyUploadId)}>Tiếp tục</Button>}
+                        {(entry.status === "failed" || entry.status === "cancelled") && <Button size="sm" variant="secondary" onClick={() => void uploadOne(entry)} disabled={busy || (!entry.file && !entry.legacyUploadId)}>Tiếp tục tải</Button>}
                         {active && <Button size="icon" variant="ghost" aria-label={`Hủy ${entry.originalName}`} onClick={() => cancelEntry(entry.id)}><X aria-hidden /></Button>}
                         {!active && <Button size="icon" variant="ghost" aria-label={`Bỏ ${entry.originalName}`} onClick={() => removeEntry(entry.id)} disabled={busy}><Trash2 aria-hidden /></Button>}
                       </div>
@@ -1348,19 +1378,6 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         </Card>
       )}
 
-      {notice && <Notice tone="ochre" className="mt-4">{notice}</Notice>}
-      {error && <div role="alert" className="mt-4"><Notice tone="rust">{error}</Notice></div>}
-      {analysisFailed && <Button variant="secondary" onClick={() => void analyze()} disabled={busy || adding}>Thử lại</Button>}
-      {busy && stagedEntries.length > 0 && <p className="mt-4 text-sm text-ink-muted" role="status">Đang đọc dữ liệu đầu vào…</p>}
-
-      {videoProcessing && (
-        <div className="mt-6 space-y-3">
-          {processing.options && processing.values && <ProcessingSettings parameters={processing.options.parameters} values={processing.values} editable evaluation={processing.evaluation} capability={processing.options.capability} activePreset={processing.activePreset} onPreset={processing.applyPreset} onChange={processing.setValue} note={processing.options.resource_note} />}
-          {!processing.error && (processing.loading || !processing.values) && <Card className="p-5" role="status">Đang tải cấu hình xử lý…</Card>}
-          {processing.error && <Notice tone="rust">{processing.options ? "Không kiểm tra được cấu hình xử lý." : "Không tải được cấu hình xử lý."} {processing.error}<Button type="button" size="sm" variant="secondary" onClick={processing.retry}>Thử lại</Button></Notice>}
-        </div>
-      )}
-
       {report && (
         <section className="mt-6 space-y-4" aria-label="Thiết lập scene">
           {estimatedUnits.length > 0 && (
@@ -1369,7 +1386,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
               &quot;Gán vai trò cho file timestamp&quot; và khai đúng đơn vị.
             </Notice>
           )}
-          {report.state !== "ready" && <Notice tone={report.state === "invalid" ? "rust" : "ochre"}>{report.state === "needs_input" ? "Cần bổ sung lựa chọn hoặc khai báo trước khi tiếp tục." : report.state === "pending_verification" ? "Một hoặc nhiều file vẫn đang chờ xác minh." : report.state === "unsupported" ? "Chưa có runtime đủ điều kiện cho các hướng này." : "Có dữ liệu mâu thuẫn hoặc không hợp lệ; sửa input rồi phân tích lại."}</Notice>}
+          {report.state !== "ready" && <Notice tone={report.state === "invalid" ? "rust" : "ochre"}>{report.state === "needs_input" ? "Cần bổ sung lựa chọn hoặc khai báo trước khi tiếp tục." : report.state === "pending_verification" ? "Một hoặc nhiều file vẫn đang chờ xác minh." : report.state === "unsupported" ? "Chưa có runtime đủ điều kiện cho các hướng này." : "Có dữ liệu mâu thuẫn hoặc không hợp lệ; sửa đầu vào để hệ thống kiểm tra lại."}</Notice>}
           {report.missing_facts.length > 0 && (
             <Card className="p-5">
               <h3 className="text-sm font-semibold">Thông tin còn thiếu</h3>
@@ -1430,44 +1447,104 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
             </div>
           )}
 
-          {report.state === "ready" && activeCandidate && activeCandidate.state === "ready" && (
-            <form onSubmit={submitReadyRoute} className="space-y-4">
-              <Card className="space-y-4 p-5 sm:p-6">
-                <div className="flex items-center gap-2"><Check className="size-4 text-sage" aria-hidden /><h3 className="font-semibold">Đã sẵn sàng tạo scene</h3></div>
-                <p className="text-sm text-ink-muted">{routeName(activeCandidate)}. Đây mới là kiểm tra dữ liệu có chạy được, chưa phải kết quả kiểm tra hình học hay an toàn vật lý.</p>
-                <label htmlFor={ids.name} className="block text-sm font-medium">Tên scene</label>
-                <input id={ids.name} value={sceneName} onChange={(event) => setSceneName(event.target.value)} maxLength={200} required className="h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3 text-sm" />
-                {activeCandidate.candidate_kind === "video_recipe" && (
-                  <>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <label htmlFor={ids.owner} className="text-sm">Người/đơn vị sở hữu dữ liệu<input id={ids.owner} value={dataOwner} onChange={(event) => setDataOwner(event.target.value)} maxLength={200} required className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3" /></label>
-                      <label htmlFor={ids.origin} className="text-sm">Nguồn dữ liệu<select id={ids.origin} value={dataOrigin} onChange={(event) => setDataOrigin(event.target.value as DataOrigin | "")} required className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3"><option value="">Chọn nguồn</option><option value="self_collected_no_pii">Tự thu thập, không có dữ liệu cá nhân</option><option value="anonymized">Đã ẩn danh</option><option value="public_or_synthetic">Công khai hoặc tổng hợp</option></select></label>
-                      <label htmlFor={ids.purpose} className="text-sm sm:col-span-2">Mục đích sử dụng<input id={ids.purpose} value={dataPurpose} onChange={(event) => setDataPurpose(event.target.value)} maxLength={500} required className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3" /></label>
-                    </div>
-                    <div className="space-y-3 text-sm">
-                      <label className="flex items-start gap-2"><input type="checkbox" checked={rights} onChange={(event) => setRights(event.target.checked)} className="mt-1 size-4 accent-ember-strong" />Tôi có quyền sử dụng dữ liệu cho mục đích đã khai báo.</label>
-                      <label className="flex items-start gap-2"><input type="checkbox" checked={anonymized} onChange={(event) => setAnonymized(event.target.checked)} className="mt-1 size-4 accent-ember-strong" />Video không có khuôn mặt/biển số hoặc đã được làm mờ trước khi upload.</label>
-                      {processing.options?.anonymize_available && <label className="flex items-start gap-2"><input type="checkbox" checked={autoAnonymize || Boolean(processing.options.anonymize_enforced)} disabled={Boolean(processing.options.anonymize_enforced)} onChange={(event) => setAutoAnonymize(event.target.checked)} className="mt-1 size-4 accent-ember-strong" /><span>Tự động che khuôn mặt và biển số trước khi dựng 3D.<span className="mt-0.5 block text-xs text-ink-muted">Lớp bảo vệ thêm: bộ phát hiện có thể bỏ sót, nên vẫn cần xác nhận ở dòng trên. Vùng bị che sẽ hiện thành mảng đen trong scene.{processing.options.anonymize_enforced ? " Máy xử lý này luôn bật bước che." : ""}</span></span></label>}
-                      <label className="flex items-start gap-2"><input type="checkbox" checked={retention} onChange={(event) => setRetention(event.target.checked)} className="mt-1 size-4 accent-ember-strong" />Tôi hiểu dữ liệu và kết quả được lưu để xử lý scene.</label>
-                    </div>
-                    {guestQuotaEmpty && <Notice tone="ochre">Đã dùng hết 3 lượt Guest hôm nay; quota reset lúc 00:00 giờ Việt Nam.</Notice>}
-                  </>
-                )}
-                {activeCandidate.candidate_kind === "gaussian_view_import" && <p className="text-sm text-ink-muted">Import chỉ đưa scene 3DGS vào viewer hiện tại. Chưa có luồng xử lý tiếp scene đã import.</p>}
-                {createBlockers.length > 0 && (
-                  <div className="rounded-lg border border-line p-3 text-sm text-ink-muted" role="status">
-                    <p className="font-medium text-ink">Còn thiếu để tạo scene:</p>
-                    <ul className="mt-1 list-disc space-y-0.5 pl-5">{createBlockers.map((item) => <li key={item}>{item}</li>)}</ul>
-                  </div>
-                )}
-                <Button type="submit" disabled={submitting || createBlockers.length > 0}>
-                  {submitting ? <><Loader2 className="size-4 animate-spin" aria-hidden /> Đang gửi</> : activeCandidate.candidate_kind === "gaussian_view_import" ? "Mở scene 3DGS" : <><Play className="size-4" aria-hidden /> Tạo scene</>}
-                </Button>
-              </Card>
-            </form>
-          )}
         </section>
       )}
+      </>}
+
+      {notice && <Notice tone="ochre" className="mt-4">{notice}</Notice>}
+      {error && <div role="alert" className="mt-4"><Notice tone="rust">{error}</Notice></div>}
+      {analysisFailed && <Button variant="secondary" onClick={() => void analyze()} disabled={busy || adding}>Thử lại</Button>}
+      {busy && stagedEntries.length > 0 && <p className="mt-4 text-sm text-ink-muted" role="status">Đang đọc dữ liệu đầu vào…</p>}
+
+      {step > 0 && activeCandidate && (
+        <Card className="mt-5 p-5 sm:p-6" aria-label="Tóm tắt lựa chọn">
+          <h3 className="font-semibold">{routeName(activeCandidate)}</h3>
+          <p className="mt-2 text-sm text-ink-muted">File sử dụng:</p>
+          <ul className="mt-1 space-y-1 text-sm">
+            {[...new Set(activeCandidate.candidate_kind === "gaussian_view_import"
+              ? [activeCandidate.source_file_id]
+              : activeCandidate.bindings.flatMap((binding) => binding.file_ids))].map((fileId) =>
+              <li key={fileId} className="break-all">{fileNamesById.get(fileId) ?? fileId}</li>
+            )}
+          </ul>
+          {step === 2 && videoProcessing && (
+            <>
+              <p className="mt-3 text-sm text-ink-muted">Cấu hình: {processing.activePreset === "minimum_quality" ? "Tối thiểu · chất lượng tốt" : processing.activePreset === "machine_maximum" ? "Tối đa cho máy này" : "Tùy chỉnh"}.</p>
+              <details className="mt-2 text-sm">
+                <summary className="cursor-pointer text-ink-muted">Xem thông số đã chọn</summary>
+                <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {processing.options?.parameters.map((parameter) => (
+                    <div key={parameter.key}>
+                      <dt className="text-ink-muted">{parameter.label}</dt>
+                      <dd>{String(processing.values?.[parameter.key] ?? "")} {parameter.unit}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </details>
+            </>
+          )}
+          {activeCandidate.candidate_kind === "gaussian_view_import" && <p className="mt-3 text-sm text-ink-muted">Scene 3DGS đã dựng sẵn; không cần cấu hình xử lý video.</p>}
+        </Card>
+      )}
+
+      {step === 1 && videoProcessing && (
+        <div className="mt-6 space-y-3">
+          {processing.options && processing.values && <ProcessingSettings parameters={processing.options.parameters} values={processing.values} editable evaluation={processing.evaluation} capability={processing.options.capability} activePreset={processing.activePreset} onPreset={processing.applyPreset} onChange={processing.setValue} note={processing.options.resource_note} />}
+          {!processing.error && (processing.loading || !processing.values) && <Card className="p-5" role="status">Đang tải cấu hình xử lý…</Card>}
+          {processing.error && <Notice tone="rust">{processing.options ? "Không kiểm tra được cấu hình xử lý." : "Không tải được cấu hình xử lý."} {processing.error}<Button type="button" size="sm" variant="secondary" onClick={processing.retry}>Thử lại</Button></Notice>}
+        </div>
+      )}
+
+      {step === 2 && report?.state === "ready" && activeCandidate && activeCandidate.state === "ready" && (
+        <form id={`${ids.name}-confirm`} onSubmit={submitReadyRoute} className="mt-6 space-y-4">
+          <Card className="space-y-4 p-5 sm:p-6">
+            <div className="flex items-center gap-2"><Check className="size-4 text-sage" aria-hidden /><h3 className="font-semibold">Đã sẵn sàng tạo scene</h3></div>
+            <p className="text-sm text-ink-muted">{routeName(activeCandidate)}. Đây mới là kiểm tra dữ liệu có chạy được, chưa phải kết quả kiểm tra hình học hay an toàn vật lý.</p>
+            <label htmlFor={ids.name} className="block text-sm font-medium">Tên scene</label>
+            <input id={ids.name} value={sceneName} onChange={(event) => setSceneName(event.target.value)} maxLength={200} required className="h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3 text-sm" />
+            {activeCandidate.candidate_kind === "video_recipe" && (
+              <>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label htmlFor={ids.owner} className="text-sm">Người/đơn vị sở hữu dữ liệu<input id={ids.owner} value={dataOwner} onChange={(event) => setDataOwner(event.target.value)} maxLength={200} required className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3" /></label>
+                  <label htmlFor={ids.origin} className="text-sm">Nguồn dữ liệu<select id={ids.origin} value={dataOrigin} onChange={(event) => setDataOrigin(event.target.value as DataOrigin | "")} required className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3"><option value="">Chọn nguồn</option><option value="self_collected_no_pii">Tự thu thập, không có dữ liệu cá nhân</option><option value="anonymized">Đã ẩn danh</option><option value="public_or_synthetic">Công khai hoặc tổng hợp</option></select></label>
+                  <label htmlFor={ids.purpose} className="text-sm sm:col-span-2">Mục đích sử dụng<input id={ids.purpose} value={dataPurpose} onChange={(event) => setDataPurpose(event.target.value)} maxLength={500} required className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3" /></label>
+                </div>
+                <div className="space-y-3 text-sm">
+                  <label className="flex items-start gap-2"><input type="checkbox" checked={rights} onChange={(event) => setRights(event.target.checked)} className="mt-1 size-4 accent-ember-strong" />Tôi có quyền sử dụng dữ liệu cho mục đích đã khai báo.</label>
+                  <label className="flex items-start gap-2"><input type="checkbox" checked={anonymized} onChange={(event) => setAnonymized(event.target.checked)} className="mt-1 size-4 accent-ember-strong" />Video không có khuôn mặt/biển số hoặc đã được làm mờ trước khi upload.</label>
+                  {processing.options?.anonymize_available && <label className="flex items-start gap-2"><input type="checkbox" checked={autoAnonymize || Boolean(processing.options.anonymize_enforced)} disabled={Boolean(processing.options.anonymize_enforced)} onChange={(event) => setAutoAnonymize(event.target.checked)} className="mt-1 size-4 accent-ember-strong" /><span>Tự động che khuôn mặt và biển số trước khi dựng 3D.<span className="mt-0.5 block text-xs text-ink-muted">Lớp bảo vệ thêm: bộ phát hiện có thể bỏ sót, nên vẫn cần xác nhận ở dòng trên. Vùng bị che sẽ hiện thành mảng đen trong scene.{processing.options.anonymize_enforced ? " Máy xử lý này luôn bật bước che." : ""}</span></span></label>}
+                  <label className="flex items-start gap-2"><input type="checkbox" checked={retention} onChange={(event) => setRetention(event.target.checked)} className="mt-1 size-4 accent-ember-strong" />Tôi hiểu dữ liệu và kết quả được lưu để xử lý scene.</label>
+                </div>
+                {guestQuotaEmpty && <Notice tone="ochre">Đã dùng hết 3 lượt Guest hôm nay; quota reset lúc 00:00 giờ Việt Nam.</Notice>}
+              </>
+            )}
+            {activeCandidate.candidate_kind === "gaussian_view_import" && <p className="text-sm text-ink-muted">Import chỉ đưa scene 3DGS vào viewer hiện tại. Chưa có luồng xử lý tiếp scene đã import.</p>}
+            {createBlockers.length > 0 && (
+              <div className="rounded-lg border border-line p-3 text-sm text-ink-muted" role="status">
+                <p className="font-medium text-ink">Còn thiếu để tạo scene:</p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5">{createBlockers.map((item) => <li key={item}>{item}</li>)}</ul>
+              </div>
+            )}
+          </Card>
+        </form>
+      )}
+
+      <div className="sticky bottom-0 z-10 mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-line bg-paper py-4" role="group" aria-label="Điều hướng bước">
+        <p id={`${ids.name}-step-status`} className="text-sm text-ink-muted" role="status">
+          {step === 0
+            ? inputReady ? "Dữ liệu đã sẵn sàng. Tiếp tục để chọn cấu hình." : busy ? "Đang đọc dữ liệu đầu vào…" : "Tải file lên và hoàn tất các lựa chọn đầu vào để tiếp tục."
+            : step === 1 ? processingBlocked ? "Cấu hình cần được kiểm tra trước khi tiếp tục." : "Kiểm tra cấu hình rồi tiếp tục để xác nhận."
+            : "Kiểm tra thông tin trước khi tạo scene."}
+        </p>
+        <div className="flex items-center gap-2">
+          {step > 0 && <Button variant="secondary" onClick={() => setStep(step === 2 ? 1 : 0)} disabled={submitting}><ArrowLeft aria-hidden /> Quay lại</Button>}
+          {step < 2
+            ? <Button onClick={() => setStep(step === 0 ? 1 : 2)} disabled={!canContinue} aria-describedby={`${ids.name}-step-status`}>Tiếp tục <ArrowRight aria-hidden /></Button>
+            : <Button type="submit" form={`${ids.name}-confirm`} disabled={submitting || !inputReady || createBlockers.length > 0}>
+                {submitting ? <><Loader2 className="size-4 animate-spin" aria-hidden /> Đang gửi</> : activeCandidate?.candidate_kind === "gaussian_view_import" ? "Mở scene 3DGS" : <><Play className="size-4" aria-hidden /> Tạo scene</>}
+              </Button>}
+        </div>
+      </div>
     </main>
   );
 }

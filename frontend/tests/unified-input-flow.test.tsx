@@ -74,6 +74,12 @@ const processingOptions: ProcessingOptions = {
   resource_note: "",
 };
 
+async function nextStep() {
+  const next = await screen.findByRole("button", { name: "Tiếp tục" });
+  await waitFor(() => expect(next).toBeEnabled(), { timeout: 4000 });
+  fireEvent.click(next);
+}
+
 function completeVideoAttestation() {
   fireEvent.change(screen.getByLabelText("Người/đơn vị sở hữu dữ liệu"), { target: { value: "Nhóm P-087" } });
   fireEvent.change(screen.getByLabelText("Nguồn dữ liệu"), { target: { value: "self_collected_no_pii" } });
@@ -291,13 +297,14 @@ describe("unified input flow", () => {
     const { container } = render(<UnifiedInputFlow />);
     fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(["video"], "warehouse.mp4", { type: "video/mp4" })] } });
     fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
-    const settings = await screen.findByRole("heading", { name: "Thông số xử lý" });
-    await screen.findByText("Đã sẵn sàng tạo scene", {}, { timeout: 4000 });
+    await nextStep();
+    await screen.findByRole("heading", { name: "Thông số xử lý" });
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ requested_intent: null }));
-    expect(settings.compareDocumentPosition(screen.getByRole("button", { name: /Tạo scene/ })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Tạo scene/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: /Tối đa cho máy này/ }));
-    completeVideoAttestation();
     await waitFor(() => expect(mocks.evaluateProcessing).toHaveBeenCalledWith({ "sampling.max_frames": 100 }, expect.any(AbortSignal)));
+    await nextStep();
+    completeVideoAttestation();
     await waitFor(() => expect(screen.getByRole("button", { name: /Tạo scene/ })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /Tạo scene/ }));
     await waitFor(() => expect(mocks.run).toHaveBeenCalledWith("assembly-1", expect.objectContaining({ processing: { "sampling.max_frames": 100 } })));
@@ -309,7 +316,7 @@ describe("unified input flow", () => {
     ready.diagnostics = [{ code: "ROUTE_AUTO_SELECTED", severity: "info", description: "automatic", related_file_ids: [] }];
     mocks.resolve.mockReset().mockResolvedValue({ report: ready });
     render(<UnifiedInputFlow />);
-    await screen.findByText("Đã sẵn sàng tạo scene", {}, { timeout: 4000 });
+    await screen.findByRole("heading", { name: "Chỉ video" }, { timeout: 4000 });
     expect(mocks.stage).toHaveBeenCalledWith("upload-existing");
     expect(screen.queryByRole("button", { name: "Phân tích lại" })).not.toBeInTheDocument();
     expect(screen.queryByText("Kết quả nhận diện và hướng xử lý")).not.toBeInTheDocument();
@@ -323,7 +330,7 @@ describe("unified input flow", () => {
       .mockResolvedValue({ report: report("ready", [videoCandidate("only", "file-upload-existing", "ready")], "only") });
     render(<UnifiedInputFlow />);
     fireEvent.click(await screen.findByRole("button", { name: "Thử lại" }, { timeout: 4000 }));
-    await screen.findByText("Đã sẵn sàng tạo scene");
+    await screen.findByRole("heading", { name: "Chỉ video" });
     expect(mocks.resolve).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole("button", { name: "Thử lại" })).not.toBeInTheDocument();
   });
@@ -333,13 +340,88 @@ describe("unified input flow", () => {
     const view = render(<UnifiedInputFlow />);
     fireEvent.change(view.container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(["video"], "warehouse.mp4", { type: "video/mp4" })] } });
     fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
-    await screen.findByText("Đã sẵn sàng tạo scene", {}, { timeout: 4000 });
+    await screen.findByRole("heading", { name: "Chỉ video" }, { timeout: 4000 });
     expect(mocks.uploadPrepared).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ temporary: true }));
     fireEvent(window, new Event("pagehide"));
     expect(mocks.temporaryUploads).toHaveBeenCalledWith("discard", ["upload-1"], true);
     fireEvent.click(screen.getByRole("button", { name: "Bỏ warehouse.mp4" }));
     expect(mocks.temporaryUploads).toHaveBeenCalledWith("discard", ["upload-1"], false);
     view.unmount();
+  });
+
+  it("keeps uploads, processing and confirmation fields when moving back, without repeating requests", async () => {
+    mocks.resolve.mockReset().mockResolvedValue({ report: report("ready", [videoCandidate("only", "file-upload-1", "ready")], "only") });
+    const view = render(<UnifiedInputFlow />);
+    fireEvent.change(view.container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(["video"], "warehouse.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
+    await nextStep();
+    expect(screen.getByRole("heading", { name: "Cấu hình xử lý" })).toHaveFocus();
+    expect(screen.queryByRole("region", { name: "Tập input" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: /Tối đa cho máy này/ }));
+    await nextStep();
+    expect(screen.queryByRole("heading", { name: "Thông số xử lý" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Tóm tắt lựa chọn" })).toHaveTextContent("Tối đa cho máy này");
+    fireEvent.change(screen.getByLabelText("Tên scene"), { target: { value: "Kho đã chọn" } });
+    completeVideoAttestation();
+    const evaluations = mocks.evaluateProcessing.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Quay lại" }));
+    expect(screen.getByRole("radio", { name: /Tối đa cho máy này/ })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Quay lại" }));
+    expect(screen.getByRole("button", { name: "Bỏ warehouse.mp4" })).toBeInTheDocument();
+    await nextStep();
+    await nextStep();
+    expect(screen.getByLabelText("Tên scene")).toHaveValue("Kho đã chọn");
+    expect(screen.getByLabelText("Người/đơn vị sở hữu dữ liệu")).toHaveValue("Nhóm P-087");
+    expect(screen.getByLabelText(/Tôi có quyền sử dụng dữ liệu/)).toBeChecked();
+    expect(screen.getByRole("button", { name: /Tạo scene/ })).toBeEnabled();
+    expect(mocks.uploadPrepared).toHaveBeenCalledTimes(1);
+    expect(mocks.resolve).toHaveBeenCalledTimes(1);
+    expect(mocks.processingOptions).toHaveBeenCalledTimes(1);
+    expect(mocks.evaluateProcessing).toHaveBeenCalledTimes(evaluations);
+    expect(mocks.temporaryUploads.mock.calls.some(([action]) => action === "discard")).toBe(false);
+    expect(mocks.run).not.toHaveBeenCalled();
+    view.unmount();
+    expect(mocks.temporaryUploads).toHaveBeenCalledWith("discard", ["upload-1"], true);
+  });
+
+  it("cannot leave input selection while uploads or resolution are incomplete", async () => {
+    let finishResolve!: (value: { report: InputResolutionReport }) => void;
+    mocks.resolve.mockReset().mockReturnValue(new Promise((resolve) => { finishResolve = resolve; }));
+    const { container } = render(<UnifiedInputFlow />);
+    expect(screen.getByRole("button", { name: "Tiếp tục" })).toBeDisabled();
+    fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(["video"], "warehouse.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(await screen.findByRole("button", { name: "Tiếp tục" }));
+    expect(mocks.uploadPrepared).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Tải file đã chọn lên" }));
+    await waitFor(() => expect(mocks.resolve).toHaveBeenCalledTimes(1), { timeout: 4000 });
+    expect(screen.getByRole("button", { name: "Tiếp tục" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /Tạo scene/ })).not.toBeInTheDocument();
+    await act(async () => finishResolve({ report: report("ready", [videoCandidate("only", "file-upload-1", "ready")], "only") }));
+    await nextStep();
+    expect(screen.getByRole("heading", { name: "Thông số xử lý" })).toBeInTheDocument();
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
+
+  it("revalidates changed input before advancing again and still allows abandoned files to be removed", async () => {
+    mocks.resolve.mockReset().mockResolvedValue({ report: report("ready", [videoCandidate("only", "file-upload-1", "ready")], "only") });
+    const { container } = render(<UnifiedInputFlow />);
+    fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(["video"], "warehouse.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
+    await nextStep();
+    await nextStep();
+    fireEvent.click(screen.getByRole("button", { name: "Quay lại" }));
+    fireEvent.click(screen.getByRole("button", { name: "Quay lại" }));
+    fireEvent.click(screen.getByLabelText("Đưa warehouse.mp4 vào bộ file"));
+    expect(screen.getByRole("button", { name: "Tiếp tục" })).toBeDisabled();
+    fireEvent.click(screen.getByLabelText("Đưa warehouse.mp4 vào bộ file"));
+    expect(screen.getByRole("button", { name: "Tiếp tục" })).toBeDisabled();
+    await waitFor(() => expect(mocks.resolve).toHaveBeenCalledTimes(2), { timeout: 4000 });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Tiếp tục" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Bỏ warehouse.mp4" }));
+    expect(mocks.temporaryUploads).toHaveBeenCalledWith("discard", ["upload-1"], false);
+    expect(screen.getByRole("button", { name: "Tiếp tục" })).toBeDisabled();
+    expect(mocks.run).not.toHaveBeenCalled();
   });
 
   it("waits for processing options before allowing a video job to start", async () => {
@@ -349,13 +431,15 @@ describe("unified input flow", () => {
     const { container } = render(<UnifiedInputFlow />);
     fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(["video"], "warehouse.mp4", { type: "video/mp4" })] } });
     fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
-    await screen.findByText("Đã sẵn sàng tạo scene", {}, { timeout: 4000 });
-    completeVideoAttestation();
+    await nextStep();
     expect(screen.getByText("Đang tải cấu hình xử lý…")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Tạo scene/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Tiếp tục" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /Tạo scene/ })).not.toBeInTheDocument();
     expect(mocks.run).not.toHaveBeenCalled();
     await act(async () => finishOptions({ ok: true, data: processingOptions }));
     await screen.findByRole("heading", { name: "Thông số xử lý" });
+    await nextStep();
+    completeVideoAttestation();
     await waitFor(() => expect(screen.getByRole("button", { name: /Tạo scene/ })).toBeEnabled());
   });
 
@@ -365,14 +449,14 @@ describe("unified input flow", () => {
     const { container } = render(<UnifiedInputFlow />);
     fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(["video"], "warehouse.mp4", { type: "video/mp4" })] } });
     fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
-    await screen.findByText("Đã sẵn sàng tạo scene", {}, { timeout: 4000 });
-    completeVideoAttestation();
+    await nextStep();
     expect(screen.getByText(/Không tải được cấu hình xử lý/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Tạo scene/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Tiếp tục" })).toBeDisabled();
     expect(mocks.run).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Thử lại" }));
     await screen.findByRole("heading", { name: "Thông số xử lý" });
-    expect(screen.getByLabelText("Người/đơn vị sở hữu dữ liệu")).toHaveValue("Nhóm P-087");
+    await nextStep();
+    completeVideoAttestation();
     await waitFor(() => expect(screen.getByRole("button", { name: /Tạo scene/ })).toBeEnabled());
   });
 
@@ -493,6 +577,8 @@ describe("unified input flow", () => {
 
     render(<UnifiedInputFlow />);
 
+    await nextStep();
+    await nextStep();
     const create = await screen.findByRole("button", { name: /Tạo scene/ });
     expect(create).toBeDisabled();
     const reasons = screen.getByText("Còn thiếu để tạo scene:").parentElement!;
@@ -502,6 +588,8 @@ describe("unified input flow", () => {
     expect(screen.getByRole("heading", { name: "Chỉ video" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /\bR1\b/ })).toBeNull();
     // Mã nhóm chỉ nằm trong mục "Chi tiết kỹ thuật" đóng sẵn.
+    fireEvent.click(screen.getByRole("button", { name: "Quay lại" }));
+    fireEvent.click(screen.getByRole("button", { name: "Quay lại" }));
     expect(screen.getByText("Chi tiết kỹ thuật").closest("details")).toHaveTextContent("R1");
     expect(screen.queryByText(/recipe|resolver|assembly/i)).toBeNull();
   });
@@ -623,7 +711,8 @@ describe("unified input flow", () => {
     expect(await screen.findAllByText(/Exclude unused input/)).toHaveLength(2);
 
     fireEvent.click(screen.getByLabelText("Đưa video-b.mov vào bộ file"));
-    expect(await screen.findByText("Đã sẵn sàng tạo scene")).toBeInTheDocument();
+    await nextStep();
+    await nextStep();
     expect(mocks.run).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText("Người/đơn vị sở hữu dữ liệu"), { target: { value: "Nhóm P-087" } });
@@ -688,7 +777,8 @@ describe("unified input flow", () => {
     // Chi tiết runtime nằm trong mục "Chi tiết kỹ thuật" đóng sẵn, không còn là huy hiệu ngoài thẻ.
     expect(screen.getAllByText(/Runtime: wired_unqualified/).length).toBeGreaterThan(0);
     expect(screen.queryByText("Runtime: wired_unqualified")).toBeNull();
-    expect(screen.getByText("Đã sẵn sàng tạo scene")).toBeInTheDocument();
+    await nextStep();
+    await nextStep();
 
     fireEvent.change(screen.getByLabelText("Người/đơn vị sở hữu dữ liệu"), { target: { value: "Nhóm P-087" } });
     fireEvent.change(screen.getByLabelText("Nguồn dữ liệu"), { target: { value: "self_collected_no_pii" } });
@@ -828,7 +918,9 @@ describe("unified input flow", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
     await waitFor(() => expect(mocks.uploadAssembly).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("Đã xác minh")).toBeInTheDocument();
-    expect(await screen.findByText("Đã sẵn sàng tạo scene")).toBeInTheDocument();
+    await nextStep();
+    await nextStep();
+    expect(screen.getByText("Đã sẵn sàng tạo scene")).toBeInTheDocument();
     expect(screen.getByText("Import chỉ đưa scene 3DGS vào viewer hiện tại. Chưa có luồng xử lý tiếp scene đã import.")).toBeInTheDocument();
     expect(screen.queryByText(/Xử lý tiếp/)).not.toBeInTheDocument();
     expect(mocks.processingOptions).not.toHaveBeenCalled();
