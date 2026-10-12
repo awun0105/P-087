@@ -88,6 +88,22 @@ def test_rejects_short_files_and_directories(tmp_path: Path, payload: bytes) -> 
     assert not asset.verify_vocab_tree(tmp_path)
 
 
+def test_faiss_asset_has_a_separate_pin_and_explicit_format(
+    tmp_path: Path, payload: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "faiss.bin"
+    faiss = b"faiss" + payload
+    path.write_bytes(faiss)
+    for module in (asset, download_asset):
+        monkeypatch.setattr(module, "FAISS_VOCAB_TREE_SHA256", hashlib.sha256(faiss).hexdigest())
+        monkeypatch.setattr(module, "FAISS_VOCAB_TREE_SIZE", len(faiss))
+    settings = Settings(_env_file=None, openai_api_key="test-key", product_colmap_vocab_tree=path)
+    assert asset.get_vocab_tree_path(settings, format="faiss") == path
+    assert asset.get_vocab_tree_path(settings, format="flann") is None
+    assert main(["--output", str(path), "--format", "faiss", "--check-only"]) == 0
+    assert main(["--output", str(path), "--format", "flann", "--check-only"]) == 1
+
+
 def test_download_publish_skip_and_check_only(tmp_path: Path, payload: bytes, server: Server) -> None:
     requests, _ = server
     path = tmp_path / "tree.bin"

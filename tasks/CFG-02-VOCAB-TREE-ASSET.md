@@ -86,3 +86,10 @@ Pre-flight (GUIDE.md Rule 13):
 - DevTools: n/a — no rendered UI change.
 
 Scope limit: asset-management proof only; no live COLMAP loop-matching or 360-scene quality claim. Matching modes belong to CFG-03.
+
+### Compatibility follow-up discovered during CFG-03
+
+- Actual deployed launcher reports `COLMAP 4.3.0.dev0`. Upstream [VisualIndex::Read](https://github.com/colmap/colmap/blob/main/src/colmap/retrieval/visual_index.cc) rejects FLANN files for >=3.12. Kept the required legacy asset and added explicit `--format faiss` support with a separate URL/size/hash/default path; helpers accept a format argument so runtime probing can choose correctly.
+- Official FAISS asset: [release download](https://github.com/colmap/colmap/releases/download/3.11.1/vocab_tree_faiss_flickr100K_words256K.bin), **72,412,636 bytes**, SHA-256 `96ca8ec8ea60b1f73465aaf2c401fd3b3ca75cdba2d3c50d6a2f6f760f275ddc`. Its smaller size is valid for FAISS; the original >100 MB constraint applies to the legacy FLANN asset.
+- Real-source partial FAISS download + `--format faiss --check-only` returned 0. Binary header is `(version=1, descriptor_dim=128, embedding_dim=64)`, matching supported SIFT FAISS format.
+- Added distinct-format pin rejection test. Asset/settings suite now **20 passed**. Both binaries remain ignored; neither replaces the other. Detailed follow-up log: [CFG-02-FAISS-VERIFICATION.log](reports/CFG-02-FAISS-VERIFICATION.log).
