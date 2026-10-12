@@ -44,21 +44,23 @@ vi.mock("@/features/studio/SceneWorkspace", () => ({
     badges,
     initialCamera,
     onControlsReady,
-    onSaveDefaultCamera,
     onToggleBookmark,
-    saveDefaultCameraStatus,
+    bookmarkStatus,
+    currentBookmark,
+    fallbackInitialCamera,
   }: {
     badges?: import("react").ReactNode;
     initialCamera?: { position: number[]; target: number[]; fov?: number };
     onControlsReady?: (controls: unknown) => void;
-    onSaveDefaultCamera?: () => void;
     onToggleBookmark?: (active: boolean, controls?: unknown) => void;
-    saveDefaultCameraStatus?: string;
+    bookmarkStatus?: string;
+    currentBookmark?: unknown;
+    fallbackInitialCamera?: unknown;
   }) => (
     <div data-testid="scene-workspace">
       {badges}
       {initialCamera && <div data-testid="initial-camera">{JSON.stringify(initialCamera)}</div>}
-      {onSaveDefaultCamera && (
+      {onToggleBookmark && (
         <button
           type="button"
           onClick={() => {
@@ -66,7 +68,7 @@ vi.mock("@/features/studio/SceneWorkspace", () => ({
               getCameraPose: () => ({ position: [1.2, 3.4, 5.6], target: [0, 0, 0], fov: 60 }),
             };
             onControlsReady?.(mockControls);
-            onSaveDefaultCamera();
+            onToggleBookmark(true, mockControls);
           }}
         >
           Lưu góc nhìn
@@ -86,7 +88,9 @@ vi.mock("@/features/studio/SceneWorkspace", () => ({
           Gỡ bookmark
         </button>
       )}
-      <div data-testid="save-status">{saveDefaultCameraStatus}</div>
+      <div data-testid="bookmark">{JSON.stringify(currentBookmark)}</div>
+      <div data-testid="fallback-camera">{JSON.stringify(fallbackInitialCamera)}</div>
+      <div data-testid="save-status">{bookmarkStatus}</div>
     </div>
   ),
 }));
@@ -282,6 +286,34 @@ describe("ImportScenePage durable lifecycle", () => {
 
     await waitFor(() => {
       expect(clearImportCamera).toHaveBeenCalledWith("import-1");
+      expect(screen.getByTestId("bookmark")).toHaveTextContent("null");
     });
+    expect(screen.getByTestId("initial-camera")).toHaveTextContent('{"position":[1,2,3],"target":[0,0,0],"fov":60}');
+    expect(screen.getByTestId("fallback-camera")).toHaveTextContent('{"position":[10,20,30],"target":[0,0,0],"fov":60}');
   });
+  it("saving the first bookmark does not replace an absent bootstrap camera", async () => {
+    const ready = importedScene("READY", "SUCCEEDED");
+    vi.mocked(getImport).mockResolvedValue(ok(ready));
+    vi.mocked(updateImportCamera).mockResolvedValue({ ...ready, default_camera: { position: [1.2, 3.4, 5.6], target: [0, 0, 0], fov: 60 } });
+    render(<ImportScenePage importId="import-1" />);
+    await screen.findByTestId("scene-workspace");
+    expect(screen.queryByTestId("initial-camera")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Lưu góc nhìn" }));
+    await waitFor(() => expect(screen.getByTestId("save-status")).toHaveTextContent("saved"));
+    expect(screen.queryByTestId("initial-camera")).toBeNull();
+    expect(screen.getByTestId("fallback-camera")).toHaveTextContent('"fov":85');
+  });
+
+  it("keeps the bookmark and shows an error if unbookmarking fails", async () => {
+    const ready = importedScene("READY", "SUCCEEDED");
+    ready.default_camera = { position: [1, 2, 3], target: [0, 0, 0], fov: 85 };
+    vi.mocked(getImport).mockResolvedValue(ok(ready));
+    vi.mocked(clearImportCamera).mockRejectedValue(new Error("offline"));
+    render(<ImportScenePage importId="import-1" />);
+    await screen.findByTestId("scene-workspace");
+    fireEvent.click(screen.getByRole("button", { name: "Gỡ bookmark" }));
+    await waitFor(() => expect(screen.getByTestId("save-status")).toHaveTextContent("error"));
+    expect(screen.getByTestId("bookmark")).toHaveTextContent('"position":[1,2,3]');
+  });
+
 });

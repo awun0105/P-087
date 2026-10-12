@@ -121,8 +121,8 @@ describe("PreviewScene mở đầu bên trong scene", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("simulate-loaded"));
-    const unbookmarkBtn = await screen.findByRole("button", { name: "Gỡ góc nhìn mặc định" });
-    expect(unbookmarkBtn).toBeInTheDocument();
+    const unbookmarkBtn = await screen.findByRole("button", { name: "Gỡ bookmark" });
+    expect(unbookmarkBtn).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(unbookmarkBtn);
     expect(handleToggle).toHaveBeenCalledWith(false, expect.anything());
 
@@ -136,8 +136,8 @@ describe("PreviewScene mở đầu bên trong scene", () => {
         onToggleBookmark={handleToggle}
       />,
     );
-    const bookmarkBtn = screen.getByRole("button", { name: "Đặt làm góc nhìn mặc định" });
-    expect(bookmarkBtn).toBeInTheDocument();
+    const bookmarkBtn = screen.getByRole("button", { name: "Bookmark góc nhìn hiện tại" });
+    expect(bookmarkBtn).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(bookmarkBtn);
     expect(handleToggle).toHaveBeenCalledWith(true, expect.anything());
   });
@@ -178,4 +178,29 @@ describe("PreviewScene mở đầu bên trong scene", () => {
     fireEvent.click(resetInitialBtn);
     expect(capturedControls!.gotoPose).toHaveBeenCalledWith(initialPose);
   });
+  it("R resets once inside this viewport and ignores typing, modifiers and outside focus", async () => {
+    let controls: { gotoPose: ReturnType<typeof vi.fn> } | null = null;
+    const bookmark = { position: [1, 2, 3] as [number, number, number], target: [0, 0, 0] as [number, number, number], fov: 85 };
+    const { container } = render(<PreviewScene contentUrl="/scene.sog" filename="scene.sog" currentBookmark={bookmark} onControlsReady={(next) => { controls = next as typeof controls; }} />);
+    fireEvent.click(screen.getByTestId("simulate-loaded"));
+    const upstreamReset = vi.fn();
+    window.addEventListener("keydown", upstreamReset);
+    try {
+      const viewport = container.firstElementChild as HTMLElement;
+      viewport.focus();
+      fireEvent.keyDown(viewport, { key: "r" });
+      expect(controls!.gotoPose).toHaveBeenCalledTimes(1);
+      expect(controls!.gotoPose).toHaveBeenCalledWith(bookmark);
+      expect(upstreamReset).not.toHaveBeenCalled();
+      fireEvent.keyDown(viewport, { key: "r", ctrlKey: true });
+      fireEvent.keyDown(document.body, { key: "r" });
+      const input = document.createElement("input");
+      viewport.append(input);
+      fireEvent.keyDown(input, { key: "r" });
+      expect(controls!.gotoPose).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener("keydown", upstreamReset);
+    }
+  });
+
 });

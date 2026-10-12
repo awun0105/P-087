@@ -1,5 +1,6 @@
 """Gói 5 (ADR 0004 §3): scene import từ PLY 3DGS — chỉ xem/chỉnh sửa, không phải job."""
 
+import struct
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -206,4 +207,59 @@ def test_import_default_camera_update(world, monkeypatch: pytest.MonkeyPatch) ->
     cleared = service.update_default_camera(record.import_id, None)
     assert cleared.default_camera is None
     assert cleared.initial_camera == ready.initial_camera
+    assert service.get(record.import_id).default_camera is None
+
+
+def test_generated_camera_starts_inside_the_scene_with_viewer_fov(tmp_path: Path) -> None:
+    sog = tmp_path / "scene.sog"
+    sog.write_bytes(sog_archive())
+    camera = imports_module.compute_robust_camera_from_sog(sog)
+    assert camera is not None
+    assert camera.position == [0.0, 0.0, 0.0]
+    assert camera.target == [2.0, 0.0, 0.0]
+    assert camera.fov == 85.0
+
+    # A translated cloud with an outlier must keep the eye in its central region.
+    ply = tmp_path / "scene.ply"
+    points = [(10.0, -2.0, 4.0)] * 12 + [(10000.0, 10000.0, 10000.0)]
+    header = "ply\nformat binary_little_endian 1.0\nelement vertex 13\nproperty float x\nproperty float y\nproperty float z\nend_header\n"
+    ply.write_bytes(header.encode("ascii") + b"".join(struct.pack("<fff", *point) for point in points))
+    camera = imports_module.compute_robust_camera_from_ply(ply)
+    assert camera is not None
+    assert camera.position == [-10.0, 2.0, 4.0]
+    assert camera.target == [-8.0, 2.0, 4.0]
+    assert camera.fov == 85.0
+
+
+def test_legacy_initial_view_migrates_once_without_overwriting_bookmark(world, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    uploads, service = world
+    _fake_runtime(monkeypatch)
+    record = service.create(_upload(uploads, "scene.ply", _gaussian(count=4)), "Legacy", None)
+    assert service.process_next(admission=_Admission(), worker_id="test-worker") is True
+    ready = service.get(record.import_id)
+    old_view = imports_module.CameraPoseRecord(position=[10, 5, 10], target=[0, 0, 0], fov=60)
+    bookmark = imports_module.CameraPoseRecord(position=[1, 2, 3], target=[4, 2, 3], fov=72)
+    legacy = ready.model_copy(update={"initial_camera": old_view, "initial_camera_version": None})
+    with service.database.transaction(write=True) as tx:
+        tx.execute("UPDATE r2s_imports SET payload=? WHERE import_id=?", (legacy.model_dump_json(), record.import_id))
+
+    compute = imports_module.compute_robust_camera_from_sog
+    calls = 0
+
+    def compute_while_bookmark_changes(path: Path) -> imports_module.CameraPoseRecord | None:
+        nonlocal calls
+        calls += 1
+        service.update_default_camera(record.import_id, bookmark)
+        return compute(path)
+
+    monkeypatch.setattr(imports_module, "compute_robust_camera_from_sog", compute_while_bookmark_changes)
+    migrated = service.get(record.import_id)
+    assert migrated.initial_camera_version == 2
+    assert migrated.initial_camera is not None and migrated.initial_camera.position == [0, 0, 0]
+    assert migrated.initial_camera.fov == 85
+    assert migrated.default_camera == bookmark
+    assert service.get(record.import_id).default_camera == bookmark
+    assert calls == 1
+    service.update_default_camera(record.import_id, None)
+    assert service.get(record.import_id).initial_camera == migrated.initial_camera
     assert service.get(record.import_id).default_camera is None

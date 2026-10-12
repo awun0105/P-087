@@ -1,7 +1,7 @@
 "use client";
 
 import { Bookmark, Maximize, RotateCcw, PersonStanding } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PlayCanvasScene,
   playCanvasErrorMessage,
@@ -54,10 +54,11 @@ export function PreviewScene({
   onToggleBookmark?: (active: boolean, controls?: ViewerControls | null) => Promise<void> | void;
   bookmarkStatus?: "idle" | "saving" | "saved" | "error";
 }) {
+  const host = useRef<HTMLDivElement>(null);
   const [capability, setCapability] = usePlayCanvasCapability();
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
   const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
-  const [wheelFactor, setWheelFactor] = useState(2);
+  const [wheelFactor, setWheelFactor] = useState(1);
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
   const handleApp = useCallback((_app: unknown, controls?: ViewerControls) => {
     const ctrl = controls ?? null;
@@ -77,16 +78,17 @@ export function PreviewScene({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "r" || e.key === "R") {
-        const target = e.target as HTMLElement | null;
-        if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
-          return;
-        }
-        handleResetCamera();
-      }
+      if (e.key.toLowerCase() !== "r" || e.ctrlKey || e.altKey || e.metaKey || e.repeat) return;
+      const target = e.target;
+      if (!(target instanceof HTMLElement) || !host.current?.contains(target)) return;
+      if (target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])")) return;
+      // Upstream also handles R on window; only one reset may own this keystroke.
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      handleResetCamera();
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [handleResetCamera]);
 
   const supplied = initialCamera !== undefined || (cameras?.length ?? 0) > 0;
@@ -99,7 +101,15 @@ export function PreviewScene({
   }, [initialCamera, effectiveCameras, sourceFrame]);
 
   return (
-    <div className="relative size-full bg-viewport" aria-label={title}>
+    <div
+      ref={host}
+      tabIndex={-1}
+      className="relative size-full bg-viewport"
+      aria-label={title}
+      onPointerDownCapture={(event) => {
+        if ((event.target as HTMLElement).tagName === "CANVAS") host.current?.focus({ preventScroll: true });
+      }}
+    >
       {capability === "failed" || capability === "unavailable" ? (
         <p role="alert" className="grid size-full place-items-center p-6 text-sm text-on-dark">
           {playCanvasErrorMessage(capability)}
@@ -128,11 +138,11 @@ export function PreviewScene({
               cameras={effectiveCameras}
               wheelFactor={wheelFactor}
               initialCamera={resolvedCamera}
-              initialCameraMode={initialCameraMode ?? (jobId ? "fly" : "orbit")}
+              initialCameraMode={initialCameraMode ?? "fly"}
               onApp={handleApp}
               extraControls={
                 <div
-                  className="sse-buttonGroup flex items-center shrink-0 border border-line-dark"
+                  className="sse-buttonGroup pointer-events-auto flex items-center shrink-0 border border-line-dark"
                   onPointerDown={(e) => e.stopPropagation()}
                 >
                   <button
@@ -150,7 +160,7 @@ export function PreviewScene({
                     className="sse-controlButton flex items-center justify-center text-on-dark/80 hover:text-on-dark transition-colors disabled:opacity-40"
                     onClick={handleResetCamera}
                     disabled={!runtime.loaded}
-                    title={currentBookmark ? "Về góc nhìn đã lưu (R)" : "Về vị trí ban đầu (R)"}
+                    title={currentBookmark ? "Về bookmark mới nhất (R)" : "Về vị trí ban đầu (R)"}
                     aria-label={currentBookmark ? "Về góc nhìn đã lưu" : "Về vị trí ban đầu"}
                   >
                     <RotateCcw className="size-4" aria-hidden />
@@ -182,10 +192,11 @@ export function PreviewScene({
                           : (bookmarkStatus === "error" || saveDefaultCameraStatus === "error")
                             ? "Lỗi lưu góc nhìn (bấm để thử lại)"
                             : currentBookmark
-                              ? "Gỡ góc nhìn mặc định (quay lại góc nhìn mặc định ban đầu)"
-                              : "Đặt làm góc nhìn mặc định"
+                              ? "Gỡ bookmark; nút quay về sẽ dùng góc nhìn ban đầu của scene"
+                              : "Bookmark góc nhìn hiện tại"
                       }
-                      aria-label={currentBookmark ? "Gỡ góc nhìn mặc định" : "Đặt làm góc nhìn mặc định"}
+                      aria-label={onToggleBookmark ? (currentBookmark ? "Gỡ bookmark" : "Bookmark góc nhìn hiện tại") : "Đặt làm góc nhìn mặc định"}
+                      aria-pressed={onToggleBookmark ? Boolean(currentBookmark) : undefined}
                     >
                       <Bookmark
                         className={cn("size-4", currentBookmark && "fill-current")}

@@ -2,6 +2,8 @@
 
 import { errorMessage } from "@/lib/ui-error";
 
+import { defaultSettings } from "@playcanvas/supersplat-viewer/settings";
+
 import { Loader2 } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -58,7 +60,8 @@ function ImportScenePageContent({ importId }: { importId: string }) {
   const [busy, setBusy] = useState<"retry" | "cancel" | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const viewerControlsRef = useRef<ViewerControls | null>(null);
-  const initialCameraRef = useRef<DisplayCameraPose | undefined>(undefined);
+  const [viewerInitialScene, setViewerInitialScene] = useState<ImportedScene | null>(null);
+  const bookmarkBusy = useRef(false);
   const pollSequence = useRef(0);
   const latestApplied = useRef<{
     importId: string;
@@ -69,86 +72,24 @@ function ImportScenePageContent({ importId }: { importId: string }) {
   } | null>(null);
   usePageTitle(scene?.name ?? null);
 
-  // Giữ cố định camera khởi đầu để viewer không bị re-mount khi lưu hoặc gỡ bookmark
-  if (!initialCameraRef.current) {
-    const cam = scene?.default_camera ?? scene?.initial_camera;
-    if (cam) {
-      initialCameraRef.current = {
-        position: cam.position,
-        target: cam.target,
-        fov: cam.fov ?? 60,
-      };
-    }
-  }
-
-  const fallbackInitialCamera = useMemo<DisplayCameraPose | undefined>(() => {
-    if (!scene?.initial_camera) return undefined;
-    return {
-      position: scene.initial_camera.position,
-      target: scene.initial_camera.target,
-      fov: scene.initial_camera.fov ?? 60,
-    };
-  }, [scene?.initial_camera]);
+  // Bootstrap once, including an absent camera; bookmarking must never reload the splats.
+  const initialCamera = useMemo<DisplayCameraPose | undefined>(() => {
+    const camera = viewerInitialScene?.default_camera ?? viewerInitialScene?.initial_camera;
+    return camera ? { ...camera, fov: camera.fov ?? 85 } : undefined;
+  }, [viewerInitialScene]);
+  const fallbackInitialCamera = useMemo<DisplayCameraPose>(() => {
+    const camera = viewerInitialScene?.initial_camera;
+    return camera ? { ...camera, fov: camera.fov ?? 85 } : defaultSettings("environment").cameras[0].initial;
+  }, [viewerInitialScene]);
 
   const currentBookmark = useMemo<DisplayCameraPose | null>(() => {
     if (!scene?.default_camera) return null;
     return {
       position: scene.default_camera.position,
       target: scene.default_camera.target,
-      fov: scene.default_camera.fov ?? 60,
+      fov: scene.default_camera.fov ?? 85,
     };
-  }, [scene?.default_camera]);
-
-  const handleToggleBookmark = useCallback(
-    async (active: boolean, controls?: ViewerControls | null) => {
-      const activeControls = controls ?? viewerControlsRef.current;
-      if (active) {
-        // Lưu góc nhìn hiện tại làm bookmark
-        const pose = activeControls?.getCameraPose();
-        if (!pose) {
-          console.warn("handleToggleBookmark: Không lấy được pose camera từ viewer controls", activeControls);
-          setSaveStatus("error");
-          setTimeout(() => {
-            setSaveStatus((current) => (current === "error" ? "idle" : current));
-          }, 3000);
-          return;
-        }
-        setSaveStatus("saving");
-        try {
-          const updated = await updateImportCamera(importId, pose);
-          setScene(updated);
-          setSaveStatus("saved");
-          setTimeout(() => {
-            setSaveStatus((current) => (current === "saved" ? "idle" : current));
-          }, 3000);
-        } catch (err) {
-          console.error("updateImportCamera error:", err);
-          setSaveStatus("error");
-          setTimeout(() => {
-            setSaveStatus((current) => (current === "error" ? "idle" : current));
-          }, 3000);
-        }
-      } else {
-        // Gỡ bookmark -> quay lại vị trí mặc định ban đầu
-        setSaveStatus("saving");
-        try {
-          const updated = await clearImportCamera(importId);
-          setScene(updated);
-          setSaveStatus("saved");
-          setTimeout(() => {
-            setSaveStatus((current) => (current === "saved" ? "idle" : current));
-          }, 3000);
-        } catch (err) {
-          console.error("clearImportCamera error:", err);
-          setSaveStatus("error");
-          setTimeout(() => {
-            setSaveStatus((current) => (current === "error" ? "idle" : current));
-          }, 3000);
-        }
-      }
-    },
-    [importId],
-  );
+  }, [scene]);
 
   const apply = useCallback((next: ImportedScene, sequence: number) => {
     latestApplied.current = {
@@ -158,9 +99,35 @@ function ImportScenePageContent({ importId }: { importId: string }) {
       status: lifecycleStatus(next),
       parentStatus: next.status,
     };
+    if (next.status === "READY") setViewerInitialScene((current) => current ?? next);
     setError(null);
     setScene(next);
   }, [importId]);
+
+  const handleToggleBookmark = useCallback(
+    async (active: boolean, controls?: ViewerControls | null) => {
+      if (bookmarkBusy.current) return;
+      const pose = active ? (controls ?? viewerControlsRef.current)?.getCameraPose() : null;
+      if (active && !pose) {
+        setSaveStatus("error");
+        return;
+      }
+      bookmarkBusy.current = true;
+      setSaveStatus("saving");
+      try {
+        const updated = pose
+          ? await updateImportCamera(importId, pose)
+          : await clearImportCamera(importId);
+        apply(updated, ++pollSequence.current);
+        setSaveStatus("saved");
+      } catch {
+        setSaveStatus("error");
+      } finally {
+        bookmarkBusy.current = false;
+      }
+    },
+    [apply, importId],
+  );
 
   const poll = useCallback(
     async (signal: AbortSignal) => {
@@ -216,16 +183,14 @@ function ImportScenePageContent({ importId }: { importId: string }) {
         title={scene.name}
         contentUrl={importContentUrl(importId)}
         filename="scene.sog"
-        initialCamera={initialCameraRef.current}
+        initialCamera={initialCamera}
         onControlsReady={(ctrl) => {
           viewerControlsRef.current = ctrl;
         }}
         currentBookmark={currentBookmark}
         fallbackInitialCamera={fallbackInitialCamera}
         onToggleBookmark={handleToggleBookmark}
-        onSaveDefaultCamera={(controls) => handleToggleBookmark(true, controls)}
         bookmarkStatus={saveStatus}
-        saveDefaultCameraStatus={saveStatus}
         badges={
           <Badge tone="neutral" title="File 3DGS tải lên không có camera: không xác nhận tỉ lệ mét hay dựng collision">
             Scene import · {sourceLabel}

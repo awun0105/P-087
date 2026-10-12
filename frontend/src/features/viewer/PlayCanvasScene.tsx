@@ -204,7 +204,7 @@ export interface ViewerControls {
   setCameraMode(mode: Exclude<CameraMode, "anim">): boolean;
   /** Đưa cả scene vào khung hình (chuyển về xoay quanh tâm); false nếu viewer chưa nạp xong. */
   frameScene(): boolean;
-  /** Về vị trí ban đầu của chế độ hiện tại; false nếu viewer chưa nạp xong. */
+  /** Về góc nhìn khởi đầu đã cấp cho viewer, không dùng spawn thay đổi theo chế độ. */
   resetCamera(): boolean;
   /** Di chuyển mượt mà tới toạ độ camera chỉ định. */
   gotoPose(pose: DisplayCameraPose): boolean;
@@ -296,7 +296,6 @@ export function PlayCanvasScene({
     const resolvedUrl = objectUrl ?? contentUrl!;
 
     let orient: (() => void) | null = null;
-    let hostModeRequest = false;
 
     void Promise.all([import("@playcanvas/supersplat-viewer/viewer"), import("@playcanvas/supersplat-viewer/settings")])
       .then(async ([module, settingsModule]) => {
@@ -304,7 +303,7 @@ export function PlayCanvasScene({
         const trajectoryTrack =
           cameras && cameras.length >= 2 ? buildTrajectoryAnimTrack(sourceFrame, cameras) : undefined;
         const settings = settingsModule.defaultSettings("environment");
-        settings.cameras = initialCamera ? [{ initial: initialCamera }] : [];
+        if (initialCamera) settings.cameras = [{ initial: initialCamera }];
         settings.annotations = toViewerAnnotations(annotationsRef.current);
         if (trajectoryTrack) {
           settings.animTracks = [trajectoryTrack];
@@ -357,10 +356,8 @@ export function PlayCanvasScene({
         // tạo lại viewer (tạo lại = tải lại cả 3DGS) mỗi khi danh sách vật đổi.
         liveAnnotations.current = viewer.annotations as unknown as ViewerAnnotationSetting[];
         replaceAnnotations(liveAnnotations.current, annotationsRef.current);
-        // Sau khi phát lại animation camera (hết track hoặc người dùng ngắt), mặc định về Orbit thay vì
-        // fly/walk của upstream. Ghi trễ một microtask để không đổi state ngay trong handler `changed`.
         subscriptions.push(
-          viewer.events.on("cameraMode:changed", (value: CameraMode, prev: CameraMode) => {
+          viewer.events.on("cameraMode:changed", (value: CameraMode) => {
             if (disposed) return;
             if (value === "anim") {
               const state = viewer.state as unknown as { animationTime: number; animationDuration: number };
@@ -368,10 +365,6 @@ export function PlayCanvasScene({
                 viewer.seek(0);
               }
             }
-            if (prev !== "anim" || value === "orbit" || hostModeRequest) return;
-            queueMicrotask(() => {
-              if (!disposed && viewer.state.cameraMode === value) viewer.state.cameraMode = "orbit";
-            });
           }),
           viewer.events.on("animationPaused:changed", (paused: boolean) => {
             const state = viewer.state as unknown as { animationTime: number; animationDuration: number };
@@ -389,6 +382,16 @@ export function PlayCanvasScene({
             }
           }),
         );
+        const gotoPose = (pose: DisplayCameraPose): boolean => {
+          if (disposed || !viewer.state.loaded) return false;
+          const items = liveAnnotations.current;
+          if (!items) return false;
+          // Reserve one hidden navigation slot after the scene's object annotations.
+          const index = annotationsRef.current?.length ?? 0;
+          items[index] = { position: pose.target, title: "", text: "", camera: { initial: pose } };
+          viewer.selectAnnotation(index);
+          return true;
+        };
         if (app) {
           onAppRef.current?.(app, {
             select: (index) => {
@@ -402,12 +405,7 @@ export function PlayCanvasScene({
             setCameraMode: (next) => {
               if (disposed || !viewer.state.loaded) return false;
               if (next === "walk" && !viewer.state.walkAllowed) return false;
-              hostModeRequest = true;
-              try {
-                viewer.state.cameraMode = next;
-              } finally {
-                hostModeRequest = false;
-              }
+              viewer.state.cameraMode = next;
               return true;
             },
             frameScene: () => {
@@ -421,52 +419,17 @@ export function PlayCanvasScene({
             },
             resetCamera: () => {
               if (disposed || !viewer.state.loaded) return false;
-              try {
-                viewer.resetCamera();
-                return true;
-              } catch {
-                return false;
-              }
+              return gotoPose(settings.cameras[0].initial);
             },
-            gotoPose: (pose: DisplayCameraPose) => {
-              if (disposed || !viewer.state.loaded) return false;
-              try {
-                const v = viewer as unknown as {
-                  cameraManager?: {
-                    selectAnnotation?(ann: unknown): void;
-                  };
-                };
-                if (v.cameraManager && typeof v.cameraManager.selectAnnotation === "function") {
-                  v.cameraManager.selectAnnotation({
-                    position: pose.target,
-                    camera: {
-                      initial: {
-                        position: pose.position,
-                        target: pose.target,
-                        fov: pose.fov ?? 60,
-                      },
-                    },
-                  });
-                  return true;
-                }
-              } catch (e) {
-                console.error("gotoPose failed", e);
-              }
-              return false;
-            },
+            gotoPose,
             playTrajectory: () => {
               if (disposed || !viewer.state.loaded || !viewer.state.hasAnimation) return false;
-              hostModeRequest = true;
-              try {
-                const state = viewer.state as unknown as { animationTime: number; animationDuration: number };
-                if (state.animationDuration > 0 && state.animationTime >= state.animationDuration - 1e-3) {
-                  viewer.seek(0);
-                }
-                viewer.state.cameraMode = "anim";
-                viewer.state.animationPaused = false;
-              } finally {
-                hostModeRequest = false;
+              const state = viewer.state;
+              if (state.animationDuration > 0 && state.animationTime >= state.animationDuration - 1e-3) {
+                viewer.seek(0);
               }
+              viewer.state.cameraMode = "anim";
+              viewer.state.animationPaused = false;
               return true;
             },
             pauseTrajectory: () => {
@@ -484,98 +447,16 @@ export function PlayCanvasScene({
               }
             },
             getCameraPose: () => {
-              if (disposed) return null;
-              try {
-                type Vec3Like = {
-                  x: number;
-                  y: number;
-                  z: number;
-                  clone?(): Vec3Like;
-                };
-                const v = viewer as unknown as {
-                  cameraManager?: {
-                    camera?: {
-                      position: Vec3Like;
-                      angles?: Vec3Like;
-                      distance?: number;
-                      fov?: number;
-                      calcFocusPoint?(out: unknown): void;
-                    };
-                  };
-                  global?: {
-                    camera?: {
-                      getPosition(): Vec3Like;
-                      forward: Vec3Like;
-                      camera?: { fov: number };
-                    };
-                  };
-                  app?: {
-                    root?: {
-                      findByName(name: string): {
-                        getPosition(): Vec3Like;
-                        forward: Vec3Like;
-                        camera?: { fov: number };
-                      } | null;
-                    };
-                  };
-                };
-
-                const cam = v.cameraManager?.camera;
-                if (cam?.position) {
-                  let targetVec: Vec3Like | null = null;
-                  if (typeof cam.calcFocusPoint === "function" && typeof cam.position.clone === "function") {
-                    try {
-                      const cloned = cam.position.clone();
-                      cam.calcFocusPoint(cloned);
-                      targetVec = cloned;
-                    } catch {
-                      // fallback to entity below
-                    }
-                  }
-                  if (targetVec) {
-                    return {
-                      position: [
-                        Number(cam.position.x.toFixed(4)),
-                        Number(cam.position.y.toFixed(4)),
-                        Number(cam.position.z.toFixed(4)),
-                      ],
-                      target: [
-                        Number(targetVec.x.toFixed(4)),
-                        Number(targetVec.y.toFixed(4)),
-                        Number(targetVec.z.toFixed(4)),
-                      ],
-                      fov: Number((cam.fov ?? 60).toFixed(1)),
-                    };
-                  }
-                }
-
-                const entity =
-                  v.global?.camera ??
-                  v.app?.root?.findByName("camera") ??
-                  v.app?.root?.findByName("Camera");
-                if (entity) {
-                  const pos = entity.getPosition();
-                  const fwd = entity.forward;
-                  const fov = entity.camera?.fov ?? cam?.fov ?? 60;
-                  const dist = cam?.distance ?? 2.0;
-                  return {
-                    position: [
-                      Number(pos.x.toFixed(4)),
-                      Number(pos.y.toFixed(4)),
-                      Number(pos.z.toFixed(4)),
-                    ],
-                    target: [
-                      Number((pos.x + fwd.x * dist).toFixed(4)),
-                      Number((pos.y + fwd.y * dist).toFixed(4)),
-                      Number((pos.z + fwd.z * dist).toFixed(4)),
-                    ],
-                    fov: Number(fov.toFixed(1)),
-                  };
-                }
-              } catch (err) {
-                console.error("getCameraPose error:", err);
-              }
-              return null;
+              if (disposed || !viewer.state.loaded) return null;
+              const camera = viewer.app.root.findComponent("camera") as import("playcanvas").CameraComponent | null;
+              if (!camera) return null;
+              const position = camera.entity.getPosition();
+              const forward = camera.entity.forward;
+              return {
+                position: [position.x, position.y, position.z],
+                target: [position.x + forward.x * 2, position.y + forward.y * 2, position.z + forward.z * 2],
+                fov: camera.fov,
+              };
             },
           });
         }
@@ -590,12 +471,7 @@ export function PlayCanvasScene({
           queueMicrotask(() => {
             if (disposed || !viewer.state.loaded) return;
             const targetMode = requested === "walk" && !viewer.state.walkAllowed ? "fly" : requested;
-            hostModeRequest = true;
-            try {
-              viewer.state.cameraMode = targetMode;
-            } finally {
-              hostModeRequest = false;
-            }
+            viewer.state.cameraMode = targetMode;
           });
         };
         for (const event of [

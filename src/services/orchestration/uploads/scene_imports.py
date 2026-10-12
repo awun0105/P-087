@@ -155,8 +155,8 @@ class CameraPoseRecord(BaseModel):
     fov: float = Field(default=60.0, ge=10.0, le=120.0)
 
 
-def compute_robust_camera_from_sog(sog_path: Path, fov: float = 60.0) -> CameraPoseRecord | None:
-    """Tính góc nhìn bao quát tự nhiên từ mẫu hạt của SOG, loại bỏ 5% hạt ngoại lai."""
+def compute_robust_camera_from_sog(sog_path: Path, fov: float = 85.0) -> CameraPoseRecord | None:
+    """Đặt mắt tại trung vị hạt của SOG, nhìn ngang bên trong scene."""
     try:
         import io
         import json
@@ -201,17 +201,9 @@ def compute_robust_camera_from_sog(sog_path: Path, fov: float = 60.0) -> CameraP
             disp[:, 1] = -disp[:, 1]
 
             med = np.median(disp, axis=0)
-            dists = np.linalg.norm(disp - med, axis=1)
-            r95 = float(np.percentile(dists, 95))
-            r95 = max(r95, 0.5)
-
-            dist = float(r95 / np.sin(np.radians(fov / 2.0)))
-            dir_vec = np.array([2.0, 1.0, 2.0], dtype=np.float32) / 3.0
-            pos = med + dir_vec * dist
-
             return CameraPoseRecord(
-                position=[round(float(x), 4) for x in pos],
-                target=[round(float(x), 4) for x in med],
+                position=[round(float(x), 4) for x in med],
+                target=[round(float(x), 4) for x in med + np.array([2.0, 0.0, 0.0])],
                 fov=fov,
             )
 
@@ -220,15 +212,9 @@ def compute_robust_camera_from_sog(sog_path: Path, fov: float = 60.0) -> CameraP
         real_max = np.sign(maxs) * (np.exp(np.abs(maxs)) - 1.0)
         center = (real_min + real_max) / 2.0
         center_disp = np.array([-center[0], -center[1], center[2]], dtype=np.float32)
-        extent = np.maximum(np.abs(real_max - real_min), 0.5)
-        radius = max(float(np.linalg.norm(extent) / 2.0), 0.5)
-        dist = float(radius / np.sin(np.radians(fov / 2.0)))
-        dir_vec = np.array([2.0, 1.0, 2.0], dtype=np.float32) / 3.0
-        pos = center_disp + dir_vec * dist
-
         return CameraPoseRecord(
-            position=[round(float(x), 4) for x in pos],
-            target=[round(float(x), 4) for x in center_disp],
+            position=[round(float(x), 4) for x in center_disp],
+            target=[round(float(x), 4) for x in center_disp + np.array([2.0, 0.0, 0.0])],
             fov=fov,
         )
     except Exception as error:  # noqa: BLE001
@@ -236,8 +222,8 @@ def compute_robust_camera_from_sog(sog_path: Path, fov: float = 60.0) -> CameraP
         return None
 
 
-def compute_robust_camera_from_ply(ply_path: Path, fov: float = 60.0) -> CameraPoseRecord | None:
-    """Tính góc nhìn bao quát tự nhiên từ file PLY (sampling 5000 điểm, loại bỏ 5% ngoại lai)."""
+def compute_robust_camera_from_ply(ply_path: Path, fov: float = 85.0) -> CameraPoseRecord | None:
+    """Đặt mắt tại trung vị tối đa 5000 điểm PLY, nhìn ngang bên trong scene."""
     try:
         import numpy as np
 
@@ -282,17 +268,9 @@ def compute_robust_camera_from_ply(ply_path: Path, fov: float = 60.0) -> CameraP
         disp[:, 1] = -disp[:, 1]
 
         med = np.median(disp, axis=0)
-        dists = np.linalg.norm(disp - med, axis=1)
-        r95 = float(np.percentile(dists, 95))
-        r95 = max(r95, 0.5)
-
-        dist = float(r95 / np.sin(np.radians(fov / 2.0)))
-        dir_vec = np.array([2.0, 1.0, 2.0], dtype=np.float32) / 3.0
-        pos = med + dir_vec * dist
-
         return CameraPoseRecord(
-            position=[round(float(x), 4) for x in pos],
-            target=[round(float(x), 4) for x in med],
+            position=[round(float(x), 4) for x in med],
+            target=[round(float(x), 4) for x in med + np.array([2.0, 0.0, 0.0])],
             fov=fov,
         )
     except Exception as error:  # noqa: BLE001
@@ -314,6 +292,8 @@ class ImportedScene(BaseModel):
     delivery_ref: ProductArtifactRef | None = None
     initial_camera: CameraPoseRecord | None = Field(default=None, exclude_if=lambda value: value is None)
     default_camera: CameraPoseRecord | None = Field(default=None, exclude_if=lambda value: value is None)
+    # Version the generated view so legacy outside framing is replaced without changing bookmarks.
+    initial_camera_version: Literal[2] | None = Field(default=None, exclude_if=lambda value: value is None)
     error: str | None = None
     created_at: datetime
     created_by: str | None = None
@@ -522,7 +502,7 @@ class ImportService:
         if row is None:
             raise ImportNotFoundError(f"không tìm thấy scene import: {import_id}")
         record = ImportedScene.model_validate_json(row[0])
-        if record.status == "READY" and record.initial_camera is None:
+        if record.status == "READY" and record.initial_camera_version is None:
             computed: CameraPoseRecord | None = None
             if record.delivery_ref is not None:
                 sog_path = self.resolver.locate(record.delivery_ref.artifact_uri)
@@ -533,15 +513,19 @@ class ImportService:
                 source_ply = self.resolver.locate(upload_uri)
                 if source_ply is not None and source_ply.is_file():
                     computed = compute_robust_camera_from_ply(source_ply)
-            if computed is None and record.default_camera is not None:
-                computed = record.default_camera
             if computed is not None:
-                record = record.model_copy(update={"initial_camera": computed})
-                with self.database.transaction() as tx:
-                    tx.execute(
-                        "UPDATE r2s_imports SET payload=? WHERE import_id=?",
-                        (record.model_dump_json(), import_id),
-                    )
+                with self.database.transaction(write=True) as tx:
+                    current = tx.execute(
+                        "SELECT payload FROM r2s_imports WHERE import_id=?" + tx.lock_suffix(), (import_id,)
+                    ).fetchone()
+                    if current is not None:
+                        record = ImportedScene.model_validate_json(current[0])
+                        if record.status == "READY" and record.initial_camera_version is None:
+                            record = record.model_copy(update={"initial_camera": computed, "initial_camera_version": 2})
+                            tx.execute(
+                                "UPDATE r2s_imports SET payload=? WHERE import_id=?",
+                                (record.model_dump_json(), import_id),
+                            )
         return self._with_operation(record, row[1])
 
     def update_default_camera(self, import_id: str, camera: CameraPoseRecord | None) -> ImportedScene:
@@ -812,8 +796,9 @@ class ImportService:
                 "error": error,
                 "operation": updated_operation.projection(),
             }
-            if initial_camera is not None and stored_import.initial_camera is None:
+            if initial_camera is not None and stored_import.initial_camera_version is None:
                 update_fields["initial_camera"] = initial_camera
+                update_fields["initial_camera_version"] = 2
             if default_camera is not None and stored_import.default_camera is None:
                 update_fields["default_camera"] = default_camera
             updated = stored_import.model_copy(update=update_fields)
